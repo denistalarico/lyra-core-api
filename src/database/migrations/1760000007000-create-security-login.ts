@@ -13,6 +13,7 @@ export class CreateSecurityLogin1760000007000 implements MigrationInterface {
         "password_hash" text,
         "password_updated_at" timestamptz,
         "two_factor_enabled" boolean NOT NULL DEFAULT false,
+        "two_factor_method" varchar(20) NOT NULL DEFAULT 'authenticator',
         "two_factor_secret_encrypted" text,
         "two_factor_pending_secret_encrypted" text,
         "login_alerts_enabled" boolean NOT NULL DEFAULT true,

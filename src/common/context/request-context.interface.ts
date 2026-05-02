@@ -3,4 +3,6 @@ export interface RequestContext {
   tenantId: string;
   workspaceId?: string;
   userId?: string;
+  sessionId?: string;
+  role?: string;
 }

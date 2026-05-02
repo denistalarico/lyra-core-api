@@ -1,0 +1,149 @@
+import { Injectable } from '@nestjs/common';
+import * as nodemailer from 'nodemailer';
+import { ConfigService } from '@nestjs/config';
+import { renderTransactionalEmail } from './templates/transactional-email.template';
+
+type NewLoginAlertOptions = {
+  to: string;
+  userName: string;
+  deviceName: string;
+  ipAddress: string;
+  location: string | null;
+  loginAt: Date;
+};
+
+type WorkspaceInvitationEmailOptions = {
+  to: string;
+  workspaceName: string;
+  role: string;
+  inviteUrl: string;
+  expiresInDays: number;
+};
+
+@Injectable()
+export class EmailService {
+  private transporter: nodemailer.Transporter;
+
+  constructor(private configService: ConfigService) {
+    this.transporter = nodemailer.createTransport({
+      host: this.configService.get('SMTP_HOST'),
+      port: Number(this.configService.get('SMTP_PORT')),
+      secure: this.configService.get('SMTP_SECURE') === 'true',
+      auth: {
+        user: this.configService.get('SMTP_USER'),
+        pass: this.configService.get('SMTP_PASS'),
+      },
+    });
+  }
+
+  async sendEmail(options: {
+    to: string;
+    subject: string;
+    html: string;
+    text?: string;
+  }): Promise<void> {
+    await this.transporter.sendMail({
+      from: `"${this.configService.get('SMTP_FROM_NAME')}" <${this.configService.get('SMTP_FROM_EMAIL')}>`,
+      to: options.to,
+      subject: options.subject,
+      html: options.html,
+      text: options.text,
+    });
+  }
+
+  async sendNewLoginAlert(options: NewLoginAlertOptions): Promise<void> {
+    if (!options.to) return;
+
+    const loginAt = this.formatLoginDate(options.loginAt);
+    const details = [
+      ['Dispositivo', options.deviceName],
+      ['IP', options.ipAddress],
+      ...(options.location ? [['Localizacao', options.location]] : []),
+      ['Data e hora', loginAt],
+    ];
+    const intro = `Olá ${options.userName || 'usuário'}, detectamos um novo login na sua conta Lyra Suite.`;
+    const secondaryText = details
+      .map(
+        ([label, value]) =>
+          `<strong>${this.escapeHtml(label)}:</strong> ${this.escapeHtml(value)}`,
+      )
+      .join('<br />');
+    const footerText =
+      'Se foi você, nenhuma ação é necessária. Se você não reconhece este login, recomendamos redefinir sua senha imediatamente.';
+
+    const { html } = renderTransactionalEmail({
+      title: 'Novo login detectado',
+      intro: this.escapeHtml(intro),
+      secondaryText,
+      footerText,
+    });
+
+    const text = [
+      'Novo login detectado',
+      '',
+      intro,
+      '',
+      ...details.map(([label, value]) => `${label}: ${value}`),
+      '',
+      footerText,
+    ].join('\n');
+
+    await this.sendEmail({
+      to: options.to,
+      subject: 'Novo login detectado - Lyra Suite',
+      html,
+      text,
+    });
+  }
+
+  async sendWorkspaceInvitationEmail(
+    options: WorkspaceInvitationEmailOptions,
+  ): Promise<void> {
+    if (!options.to) return;
+
+    const roleLabel = this.formatInvitationRole(options.role);
+    const workspaceName = this.escapeHtml(options.workspaceName);
+    const intro = `Você foi convidado(a) para acessar ${workspaceName} no Lyra Suite com permissão de ${this.escapeHtml(roleLabel)}.`;
+    const secondaryText = `Este convite expira em ${options.expiresInDays} dias. Se você não esperava este convite, ignore este e-mail.`;
+
+    const { html, text } = renderTransactionalEmail({
+      title: 'Convite para o Lyra Suite',
+      intro,
+      buttonLabel: 'Aceitar convite',
+      buttonUrl: options.inviteUrl,
+      secondaryText,
+      footerText:
+        'Este é um e-mail automático de convite da Lyra Suite. O link é pessoal e expira automaticamente.',
+    });
+
+    await this.sendEmail({
+      to: options.to,
+      subject: `Convite para acessar ${options.workspaceName} - Lyra Suite`,
+      html,
+      text,
+    });
+  }
+
+  private formatLoginDate(date: Date): string {
+    return new Intl.DateTimeFormat('pt-BR', {
+      dateStyle: 'short',
+      timeStyle: 'short',
+      timeZone: 'America/Sao_Paulo',
+    }).format(date);
+  }
+
+  private escapeHtml(value: string): string {
+    return value
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  private formatInvitationRole(role: string): string {
+    if (role === 'administrator') return 'administrador';
+    if (role === 'manager') return 'gestor';
+    return 'membro';
+  }
+}

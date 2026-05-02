@@ -1,0 +1,253 @@
+import {
+  BadRequestException,
+  Injectable,
+  InternalServerErrorException,
+  NotFoundException,
+} from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import {
+  CreateBucketCommand,
+  GetObjectCommand,
+  HeadBucketCommand,
+  PutBucketPolicyCommand,
+  PutObjectCommand,
+  S3Client,
+} from '@aws-sdk/client-s3';
+import { Readable } from 'stream';
+import sharp from 'sharp';
+
+export const MAX_IMAGE_UPLOAD_BYTES = 5 * 1024 * 1024;
+
+const ALLOWED_IMAGE_MIME_TYPES = new Set([
+  'image/jpeg',
+  'image/jpg',
+  'image/png',
+  'image/webp',
+]);
+
+type UploadImageAssetInput = {
+  file: Express.Multer.File;
+  path: string;
+  maxDimension: number;
+};
+
+type StoredFile = {
+  url: string;
+  path: string;
+};
+
+type AssetFile = {
+  body: Readable;
+  contentType: string;
+  cacheControl: string;
+};
+
+@Injectable()
+export class FilesService {
+  private readonly client: S3Client;
+  private readonly endpoint: string;
+  private readonly bucket: string;
+  private readonly shouldCreateBucket: boolean;
+  private readonly shouldSetPublicReadPolicy: boolean;
+  private bucketReady?: Promise<void>;
+
+  constructor(private readonly configService: ConfigService) {
+    this.endpoint =
+      this.configService.get<string>('files.s3.endpoint') ??
+      'http://localhost:9200';
+    this.bucket =
+      this.configService.get<string>('files.s3.bucket') ?? 'lyra-assets';
+    this.shouldCreateBucket =
+      this.configService.get<boolean>('files.s3.createBucket') ?? true;
+    this.shouldSetPublicReadPolicy =
+      this.configService.get<boolean>('files.s3.setPublicReadPolicy') ?? true;
+
+    this.client = new S3Client({
+      region: this.configService.get<string>('files.s3.region') ?? 'us-east-1',
+      endpoint: this.endpoint,
+      forcePathStyle:
+        this.configService.get<boolean>('files.s3.forcePathStyle') ?? true,
+      credentials: {
+        accessKeyId:
+          this.configService.get<string>('files.s3.accessKeyId') ?? 'lyraadmin',
+        secretAccessKey:
+          this.configService.get<string>('files.s3.secretAccessKey') ??
+          'lyra_minio_dev_password',
+      },
+    });
+  }
+
+  async uploadImageAsset({
+    file,
+    path,
+    maxDimension,
+  }: UploadImageAssetInput): Promise<StoredFile> {
+    this.assertValidImage(file);
+
+    const optimized = await this.optimizeImage(file.buffer, maxDimension);
+
+    await this.ensureBucket();
+
+    await this.client.send(
+      new PutObjectCommand({
+        Bucket: this.bucket,
+        Key: path,
+        Body: optimized,
+        ContentType: 'image/webp',
+        CacheControl: 'public, max-age=31536000, immutable',
+      }),
+    );
+
+    return {
+      path,
+      url: this.buildProxiedUrl(path),
+    };
+  }
+
+  async getAsset(path: string): Promise<AssetFile> {
+    const normalizedPath = this.normalizeAssetPath(path);
+
+    try {
+      await this.ensureBucket();
+
+      const object = await this.client.send(
+        new GetObjectCommand({
+          Bucket: this.bucket,
+          Key: normalizedPath,
+        }),
+      );
+
+      if (!(object.Body instanceof Readable)) {
+        throw new InternalServerErrorException('Asset stream is unavailable.');
+      }
+
+      return {
+        body: object.Body,
+        contentType: object.ContentType ?? 'application/octet-stream',
+        cacheControl:
+          object.CacheControl ?? 'public, max-age=31536000, immutable',
+      };
+    } catch (error) {
+      const statusCode = (error as { $metadata?: { httpStatusCode?: number } })
+        .$metadata?.httpStatusCode;
+      const errorName = (error as { name?: string }).name;
+
+      if (statusCode === 404 || errorName === 'NoSuchKey') {
+        throw new NotFoundException('Asset not found.');
+      }
+
+      throw error;
+    }
+  }
+
+  private assertValidImage(file?: Express.Multer.File) {
+    if (!file) {
+      throw new BadRequestException('Image file is required.');
+    }
+
+    if (!ALLOWED_IMAGE_MIME_TYPES.has(file.mimetype)) {
+      throw new BadRequestException('Unsupported image format.');
+    }
+
+    if (!file.buffer?.length) {
+      throw new BadRequestException('Image file is empty.');
+    }
+
+    if (file.size > MAX_IMAGE_UPLOAD_BYTES) {
+      throw new BadRequestException('Image file exceeds the 5MB limit.');
+    }
+  }
+
+  private async optimizeImage(buffer: Buffer, maxDimension: number) {
+    try {
+      return await sharp(buffer, { failOn: 'error' })
+        .rotate()
+        .resize({
+          width: maxDimension,
+          height: maxDimension,
+          fit: 'inside',
+          withoutEnlargement: true,
+        })
+        .webp({ quality: 82 })
+        .toBuffer();
+    } catch {
+      throw new BadRequestException('Invalid or corrupted image file.');
+    }
+  }
+
+  private ensureBucket() {
+    if (!this.bucketReady) {
+      this.bucketReady = this.resolveBucket();
+    }
+
+    return this.bucketReady;
+  }
+
+  private async resolveBucket() {
+    try {
+      await this.client.send(new HeadBucketCommand({ Bucket: this.bucket }));
+      await this.ensurePublicReadPolicy();
+      return;
+    } catch (error) {
+      if (!this.shouldCreateBucket) {
+        throw new InternalServerErrorException(
+          'Assets bucket is not available.',
+        );
+      }
+    }
+
+    try {
+      await this.client.send(new CreateBucketCommand({ Bucket: this.bucket }));
+      await this.ensurePublicReadPolicy();
+    } catch {
+      throw new InternalServerErrorException('Could not create assets bucket.');
+    }
+  }
+
+  private async ensurePublicReadPolicy() {
+    if (!this.shouldSetPublicReadPolicy) {
+      return;
+    }
+
+    await this.client.send(
+      new PutBucketPolicyCommand({
+        Bucket: this.bucket,
+        Policy: JSON.stringify({
+          Version: '2012-10-17',
+          Statement: [
+            {
+              Effect: 'Allow',
+              Principal: '*',
+              Action: ['s3:GetObject'],
+              Resource: [`arn:aws:s3:::${this.bucket}/*`],
+            },
+          ],
+        }),
+      }),
+    );
+  }
+
+  private buildProxiedUrl(path: string) {
+    const encodedPath = path
+      .split('/')
+      .map((part) => encodeURIComponent(part))
+      .join('/');
+
+    return `/api/assets/${encodedPath}`;
+  }
+
+  private normalizeAssetPath(path: string) {
+    const normalizedPath = path.trim();
+
+    if (
+      !normalizedPath ||
+      normalizedPath.startsWith('/') ||
+      normalizedPath.includes('..') ||
+      normalizedPath.includes('\\')
+    ) {
+      throw new BadRequestException('Invalid asset path.');
+    }
+
+    return normalizedPath;
+  }
+}

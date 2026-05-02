@@ -37,4 +37,4 @@ async function bootstrap() {
     '0.0.0.0',
   );
 }
-bootstrap();
+void bootstrap();

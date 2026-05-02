@@ -43,6 +43,9 @@ export class UserProfileEntity {
   @Column({ name: 'avatar_url', type: 'text', nullable: true })
   avatarUrl!: string | null;
 
+  @Column({ name: 'avatar_path', type: 'varchar', length: 255, nullable: true })
+  avatarPath!: string | null;
+
   @Column({
     name: 'avatar_asset_key',
     type: 'varchar',

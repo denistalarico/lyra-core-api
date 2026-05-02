@@ -153,6 +153,12 @@ export class WorkspaceSettingsCompanyEntity {
   @Column({ name: 'brand_logo_url', type: 'text', nullable: true })
   brandLogoUrl!: string | null;
 
+  @Column({ name: 'logo_url', type: 'text', nullable: true })
+  logoUrl!: string | null;
+
+  @Column({ name: 'logo_path', type: 'varchar', length: 255, nullable: true })
+  logoPath!: string | null;
+
   @Column({
     name: 'brand_logo_asset_key',
     type: 'varchar',

@@ -15,9 +15,18 @@ import { UserSecuritySettingsEntity } from './entities/user-security-settings.en
 import { UserSessionEntity } from './entities/user-session.entity';
 import { UserTrustedDeviceEntity } from './entities/user-trusted-device.entity';
 import { UserNotificationEntity } from './entities/user-notification.entity';
+import { WorkspaceUserInvitationEntity } from './entities/workspace-user-invitation.entity';
+import { AuthModule } from '../auth/auth.module';
+import { EmailModule } from '../email/email.module';
+import { FilesModule } from '../../common/files/files.module';
+import { AccessControlModule } from '../../common/access-control/access-control.module';
 
 @Module({
   imports: [
+    AuthModule,
+    EmailModule,
+    FilesModule,
+    AccessControlModule,
     TypeOrmModule.forFeature([
       UserPreferencesEntity,
       WorkspaceSettingsAiEntity,
@@ -31,6 +40,7 @@ import { UserNotificationEntity } from './entities/user-notification.entity';
       UserSessionEntity,
       UserTrustedDeviceEntity,
       UserNotificationEntity,
+      WorkspaceUserInvitationEntity,
     ]),
   ],
   controllers: [SettingsController],

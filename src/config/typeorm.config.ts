@@ -11,6 +11,23 @@ import { UserSecuritySettingsEntity } from '../modules/settings/entities/user-se
 import { UserSessionEntity } from '../modules/settings/entities/user-session.entity';
 import { UserTrustedDeviceEntity } from '../modules/settings/entities/user-trusted-device.entity';
 import { UserNotificationEntity } from '../modules/settings/entities/user-notification.entity';
+import { WorkspaceUserInvitationEntity } from '../modules/settings/entities/workspace-user-invitation.entity';
+import { PasswordResetEntity } from '../modules/auth/entities/password-reset.entity';
+import { EmailTwoFactorCodeEntity } from '../modules/auth/entities/email-2fa-code.entity';
+import { ContactEntity } from '../modules/contacts/entities/contact.entity';
+import { ContactMethodEntity } from '../modules/contacts/entities/contact-method.entity';
+import { ContactAddressEntity } from '../modules/contacts/entities/contact-address.entity';
+import { ContactListEntity } from '../modules/contacts/entities/contact-list.entity';
+import { ContactListMemberEntity } from '../modules/contacts/entities/contact-list-member.entity';
+import { ContactTagEntity } from '../modules/contacts/entities/contact-tag.entity';
+import { ContactTagAssignmentEntity } from '../modules/contacts/entities/contact-tag-assignment.entity';
+import { ContactCustomFieldEntity } from '../modules/contacts/entities/contact-custom-field.entity';
+import { ContactCustomFieldValueEntity } from '../modules/contacts/entities/contact-custom-field-value.entity';
+import { ContactSegmentEntity } from '../modules/contacts/entities/contact-segment.entity';
+import { ContactBusinessModeEntity } from '../modules/contacts/entities/contact-business-mode.entity';
+import { ContactViewPreferenceEntity } from '../modules/contacts/entities/contact-view-preference.entity';
+
+
 
 export function getTypeOrmConfig(): TypeOrmModuleOptions {
   return {
@@ -36,6 +53,21 @@ export function getTypeOrmConfig(): TypeOrmModuleOptions {
       UserSessionEntity,
       UserTrustedDeviceEntity,
       UserNotificationEntity,
+      WorkspaceUserInvitationEntity,
+      PasswordResetEntity,
+      EmailTwoFactorCodeEntity,
+      ContactEntity,
+      ContactMethodEntity,
+      ContactAddressEntity,
+      ContactListEntity,
+      ContactListMemberEntity,
+      ContactTagEntity,
+      ContactTagAssignmentEntity,
+      ContactCustomFieldEntity,
+      ContactCustomFieldValueEntity,
+      ContactSegmentEntity,
+      ContactBusinessModeEntity,
+      ContactViewPreferenceEntity,
     ],
   };
 }

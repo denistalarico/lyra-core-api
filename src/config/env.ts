@@ -8,4 +8,27 @@ export default () => ({
     password: process.env.DB_PASSWORD ?? 'lyra_dev_password',
     database: process.env.DB_NAME ?? 'lyra_core',
   },
+  files: {
+    s3: {
+      endpoint: process.env.S3_ENDPOINT ?? 'http://localhost:9200',
+      bucket: process.env.S3_BUCKET ?? 'lyra-assets',
+      region: process.env.S3_REGION ?? 'us-east-1',
+      accessKeyId:
+        process.env.S3_ACCESS_KEY_ID ??
+        process.env.MINIO_ROOT_USER ??
+        'lyraadmin',
+      secretAccessKey:
+        process.env.S3_SECRET_ACCESS_KEY ??
+        process.env.MINIO_ROOT_PASSWORD ??
+        'lyra_minio_dev_password',
+      publicBaseUrl:
+        process.env.S3_PUBLIC_BASE_URL ??
+        `${process.env.S3_ENDPOINT ?? 'http://localhost:9200'}/${
+          process.env.S3_BUCKET ?? 'lyra-assets'
+        }`,
+      forcePathStyle: process.env.S3_FORCE_PATH_STYLE !== 'false',
+      createBucket: process.env.S3_CREATE_BUCKET !== 'false',
+      setPublicReadPolicy: process.env.S3_SET_PUBLIC_READ_POLICY !== 'false',
+    },
+  },
 });

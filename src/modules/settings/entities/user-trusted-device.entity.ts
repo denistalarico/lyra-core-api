@@ -9,6 +9,11 @@ import {
 
 @Entity('user_trusted_devices')
 @Index('idx_user_trusted_devices_tenant_user', ['tenantId', 'userId'])
+@Index('idx_user_trusted_devices_tenant_user_device', [
+  'tenantId',
+  'userId',
+  'deviceFingerprint',
+])
 export class UserTrustedDeviceEntity {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
@@ -19,26 +24,39 @@ export class UserTrustedDeviceEntity {
   @Column({ name: 'user_id', type: 'uuid' })
   userId!: string;
 
-  @Column({ type: 'varchar', length: 120 })
-  name!: string;
+  @Column({
+    name: 'device_fingerprint',
+    type: 'varchar',
+    length: 64,
+    nullable: true,
+  })
+  deviceFingerprint!: string | null;
 
-  @Column({ type: 'varchar', length: 120 })
-  browser!: string;
+  @Column({
+    name: 'device_name',
+    type: 'varchar',
+    length: 120,
+    nullable: true,
+  })
+  deviceName!: string | null;
 
-  @Column({ type: 'varchar', length: 120 })
-  location!: string;
+  @Column({ name: 'user_agent', type: 'text', nullable: true })
+  userAgent!: string | null;
 
-  @Column({ name: 'last_seen', type: 'varchar', length: 120 })
-  lastSeen!: string;
+  @Column({ name: 'ip_address', type: 'varchar', length: 120, nullable: true })
+  ipAddress!: string | null;
 
-  @Column({ type: 'varchar', length: 20 })
-  status!: 'trusted' | 'recent' | 'inactive';
+  @Column({ type: 'varchar', length: 120, nullable: true })
+  location!: string | null;
 
   @Column({ name: 'trusted_at', type: 'timestamptz', nullable: true })
   trustedAt!: Date | null;
 
-  @Column({ name: 'removed_at', type: 'timestamptz', nullable: true })
-  removedAt!: Date | null;
+  @Column({ name: 'last_used_at', type: 'timestamptz', nullable: true })
+  lastUsedAt!: Date | null;
+
+  @Column({ name: 'revoked_at', type: 'timestamptz', nullable: true })
+  revokedAt!: Date | null;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;

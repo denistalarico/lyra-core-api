@@ -33,6 +33,14 @@ export class UserSecuritySettingsEntity {
   @Column({ name: 'two_factor_enabled', type: 'boolean', default: false })
   twoFactorEnabled!: boolean;
 
+  @Column({
+    name: 'two_factor_method',
+    type: 'varchar',
+    length: 20,
+    default: 'authenticator',
+  })
+  twoFactorMethod!: 'authenticator' | 'email';
+
   @Column({ name: 'two_factor_secret_encrypted', type: 'text', nullable: true })
   twoFactorSecretEncrypted!: string | null;
 

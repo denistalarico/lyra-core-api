@@ -27,7 +27,7 @@ export class PatchWorkspaceCompanySettingsDto {
   @IsIn(['cnpj', 'ein', 'other'])
   taxIdType!: 'cnpj' | 'ein' | 'other';
 
-  @ValidateIf((o) => o.taxIdType === 'other')
+  @ValidateIf((o: PatchWorkspaceCompanySettingsDto) => o.taxIdType === 'other')
   @IsString()
   @Length(2, 60)
   taxIdCustomLabel?: string;

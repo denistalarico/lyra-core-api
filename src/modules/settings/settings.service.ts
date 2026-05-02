@@ -1,6 +1,14 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { IsNull, Not, Repository } from 'typeorm';
+import { createHash, randomBytes } from 'crypto';
 import { PatchUserPreferencesDto } from './dto/patch-user-preferences.dto';
 import { PatchWorkspaceAiSettingsDto } from './dto/patch-workspace-ai-settings.dto';
 import { PatchWorkspaceCompanySettingsDto } from './dto/patch-workspace-company-settings.dto';
@@ -15,6 +23,7 @@ import { InviteWorkspaceUserDto } from './dto/invite-workspace-user.dto';
 import { PatchWorkspaceUserAccessDto } from './dto/patch-workspace-user-access.dto';
 import { WorkspaceUserEntity } from './entities/workspace-user.entity';
 import { WorkspaceUserModuleAccessEntity } from './entities/workspace-user-module-access.entity';
+import { WorkspaceUserInvitationEntity } from './entities/workspace-user-invitation.entity';
 import { WorkspaceSettingsEmailEntity } from './entities/workspace-settings-email.entity';
 import { PatchWorkspaceEmailSettingsDto } from './dto/patch-workspace-email-settings.dto';
 import { SettingsCryptoService } from '../../common/crypto/settings-crypto.service';
@@ -28,8 +37,15 @@ import { UserSessionEntity } from './entities/user-session.entity';
 import { UserTrustedDeviceEntity } from './entities/user-trusted-device.entity';
 import { PatchSecurityEmailDto } from './dto/patch-security-email.dto';
 import { PatchSecurityPasswordDto } from './dto/patch-security-password.dto';
-import { ConfirmTwoFactorDto } from './dto/confirm-two-factor.dto';
+import { PatchSecuritySettingsDto } from './dto/patch-security-settings.dto';
+import {
+  ConfirmTwoFactorDto,
+  SetupTwoFactorDto,
+} from './dto/confirm-two-factor.dto';
 import { UserNotificationEntity } from './entities/user-notification.entity';
+import { AuthService } from '../auth/auth.service';
+import { FilesService } from '../../common/files/files.service';
+import { EmailService } from '../email/email.service';
 
 const MODULE_KEYS = [
   'inbox',
@@ -43,6 +59,14 @@ const MODULE_KEYS = [
 
 type WorkspaceRole = 'owner' | 'admin' | 'manager' | 'member';
 type ModulePermission = 'admin' | 'manager' | 'member';
+type LegacyTrustedDevice = {
+  id: string;
+  name: string;
+  browser: string;
+  location: string;
+  lastSeen: string;
+  status: 'trusted';
+};
 
 function createModulesFromRole(role: WorkspaceRole) {
   if (role === 'owner') {
@@ -107,6 +131,8 @@ export class SettingsService {
     private readonly workspaceUserRepo: Repository<WorkspaceUserEntity>,
     @InjectRepository(WorkspaceUserModuleAccessEntity)
     private readonly workspaceUserModuleAccessRepo: Repository<WorkspaceUserModuleAccessEntity>,
+    @InjectRepository(WorkspaceUserInvitationEntity)
+    private readonly workspaceUserInvitationRepo: Repository<WorkspaceUserInvitationEntity>,
     @InjectRepository(WorkspaceSettingsEmailEntity)
     private readonly emailRepo: Repository<WorkspaceSettingsEmailEntity>,
     private readonly cryptoService: SettingsCryptoService,
@@ -120,6 +146,10 @@ export class SettingsService {
     private readonly trustedDevicesRepo: Repository<UserTrustedDeviceEntity>,
     @InjectRepository(UserNotificationEntity)
     private readonly notificationsRepo: Repository<UserNotificationEntity>,
+    private readonly authService: AuthService,
+    private readonly filesService: FilesService,
+    private readonly configService: ConfigService,
+    private readonly transactionalEmailService: EmailService,
   ) {}
 
   async getPreferences(tenantId: string, userId: string) {
@@ -219,6 +249,8 @@ export class SettingsService {
         companySize: null,
         timezone: 'America/Sao_Paulo',
         brandLogoUrl: null,
+        logoUrl: null,
+        logoPath: null,
         brandLogoAssetKey: null,
       })
     );
@@ -311,24 +343,44 @@ export class SettingsService {
 
   async getProfile(tenantId: string, userId: string) {
     const found = await this.userProfileRepo.findOne({
+      select: {
+        id: true,
+        tenantId: true,
+        userId: true,
+        firstName: true,
+        lastName: true,
+        displayName: true,
+        email: true,
+        jobTitle: true,
+        bio: true,
+        avatarUrl: true,
+        avatarAssetKey: true,
+        createdAt: true,
+        updatedAt: true,
+      },
       where: { tenantId, userId },
     });
 
-    return (
-      found ??
-      this.userProfileRepo.create({
-        tenantId,
-        userId,
-        firstName: '',
-        lastName: '',
-        displayName: '',
-        email: '',
-        jobTitle: null,
-        bio: null,
-        avatarUrl: null,
-        avatarAssetKey: null,
-      })
-    );
+    if (found) {
+      return {
+        ...found,
+        avatarPath: found.avatarAssetKey ?? null,
+      };
+    }
+
+    return this.userProfileRepo.create({
+      tenantId,
+      userId,
+      firstName: '',
+      lastName: '',
+      displayName: '',
+      email: '',
+      jobTitle: null,
+      bio: null,
+      avatarUrl: null,
+      avatarPath: null,
+      avatarAssetKey: null,
+    });
   }
 
   async patchProfile(
@@ -383,6 +435,174 @@ export class SettingsService {
     }
 
     return this.getProfile(tenantId, userId);
+  }
+
+  async uploadProfileAvatar(
+    tenantId: string,
+    userId: string,
+    file: Express.Multer.File,
+  ) {
+    const stored = await this.filesService.uploadImageAsset({
+      file,
+      path: `tenants/${tenantId}/users/${userId}/avatar-${Date.now()}.webp`,
+      maxDimension: 512,
+    });
+
+    const existing = await this.userProfileRepo.findOne({
+      where: { tenantId, userId },
+    });
+
+    if (!existing) {
+      await this.userProfileRepo.insert({
+        tenantId,
+        userId,
+        firstName: '',
+        lastName: '',
+        displayName: '',
+        email: '',
+        jobTitle: null,
+        bio: null,
+        avatarUrl: stored.url,
+        avatarAssetKey: stored.path,
+      });
+    } else {
+      await this.userProfileRepo.update(
+        { tenantId, userId },
+        {
+          avatarUrl: stored.url,
+          avatarAssetKey: stored.path,
+        },
+      );
+    }
+
+    return {
+      avatarUrl: stored.url,
+      avatarPath: stored.path,
+    };
+  }
+
+  async uploadCompanyLogo(
+    tenantId: string,
+    workspaceId: string,
+    file: Express.Multer.File,
+  ) {
+    const stored = await this.filesService.uploadImageAsset({
+      file,
+      path: `tenants/${tenantId}/company/logo-${Date.now()}.webp`,
+      maxDimension: 1024,
+    });
+
+    const existing = await this.companyRepo.findOne({
+      where: { tenantId, workspaceId },
+    });
+
+    if (!existing) {
+      await this.companyRepo.insert({
+        tenantId,
+        workspaceId,
+        legalName: '',
+        publicName: '',
+        workspaceName: '',
+        taxIdType: 'cnpj',
+        taxIdCustomLabel: null,
+        taxId: '',
+        description: null,
+        primaryColor: '#2563EB',
+        secondaryColor: '#0F172A',
+        supportEmail: null,
+        phone: null,
+        website: null,
+        instagramHandle: null,
+        facebookUrl: null,
+        linkedinUrl: null,
+        country: 'Brazil',
+        stateRegion: null,
+        city: null,
+        addressLine1: null,
+        addressLine2: null,
+        postalCode: null,
+        industry: null,
+        companySize: null,
+        timezone: 'America/Sao_Paulo',
+        logoUrl: stored.url,
+        logoPath: stored.path,
+      });
+    } else {
+      await this.companyRepo.update(
+        { tenantId, workspaceId },
+        {
+          logoUrl: stored.url,
+          logoPath: stored.path,
+        },
+      );
+    }
+
+    return {
+      logoUrl: stored.url,
+      logoPath: stored.path,
+    };
+  }
+
+  async uploadCompanyAvatar(
+    tenantId: string,
+    workspaceId: string,
+    file: Express.Multer.File,
+  ) {
+    const stored = await this.filesService.uploadImageAsset({
+      file,
+      path: `tenants/${tenantId}/company/avatar-${Date.now()}.webp`,
+      maxDimension: 512,
+    });
+
+    const existing = await this.companyRepo.findOne({
+      where: { tenantId, workspaceId },
+    });
+
+    if (!existing) {
+      await this.companyRepo.insert({
+        tenantId,
+        workspaceId,
+        legalName: '',
+        publicName: '',
+        workspaceName: '',
+        taxIdType: 'cnpj',
+        taxIdCustomLabel: null,
+        taxId: '',
+        description: null,
+        primaryColor: '#2563EB',
+        secondaryColor: '#0F172A',
+        supportEmail: null,
+        phone: null,
+        website: null,
+        instagramHandle: null,
+        facebookUrl: null,
+        linkedinUrl: null,
+        country: 'Brazil',
+        stateRegion: null,
+        city: null,
+        addressLine1: null,
+        addressLine2: null,
+        postalCode: null,
+        industry: null,
+        companySize: null,
+        timezone: 'America/Sao_Paulo',
+        brandLogoUrl: stored.url,
+        brandLogoAssetKey: stored.path,
+      });
+    } else {
+      await this.companyRepo.update(
+        { tenantId, workspaceId },
+        {
+          brandLogoUrl: stored.url,
+          brandLogoAssetKey: stored.path,
+        },
+      );
+    }
+
+    return {
+      avatarUrl: stored.url,
+      avatarPath: stored.path,
+    };
   }
 
   async getWorkspaceUsers(
@@ -487,40 +707,164 @@ export class SettingsService {
   async inviteWorkspaceUser(
     tenantId: string,
     workspaceId: string,
+    invitedByUserId: string,
+    actorRole: string | undefined,
     dto: InviteWorkspaceUserDto,
   ) {
-    const inserted = await this.workspaceUserRepo.save(
-      this.workspaceUserRepo.create({
-        tenantId,
-        workspaceId,
-        userId: null,
-        name: dto.name,
-        email: dto.email,
-        role: dto.role,
-        status: 'invited',
-        lastAccess: 'Convite pendente',
-        invitedAt: new Date(),
-        activatedAt: null,
-        deactivatedAt: null,
-      }),
-    );
-
-    const modules = createModulesFromRole(dto.role);
-
-    await this.workspaceUserModuleAccessRepo.save(
-      MODULE_KEYS.map((moduleKey) =>
-        this.workspaceUserModuleAccessRepo.create({
-          tenantId,
-          workspaceId,
-          workspaceUserId: inserted.id,
-          moduleKey,
-          enabled: modules[moduleKey].enabled,
-          permission: modules[moduleKey].permission,
-        }),
-      ),
+    await this.createWorkspaceUserInvitation(
+      tenantId,
+      workspaceId,
+      invitedByUserId,
+      actorRole,
+      dto,
     );
 
     return this.getWorkspaceUsers(tenantId, workspaceId);
+  }
+
+  async createWorkspaceUserInvitation(
+    tenantId: string,
+    workspaceId: string,
+    invitedByUserId: string,
+    actorRole: string | undefined,
+    dto: InviteWorkspaceUserDto,
+  ) {
+    await this.assertCanManageWorkspaceUsers(
+      tenantId,
+      workspaceId,
+      invitedByUserId,
+      actorRole,
+    );
+
+    const normalizedEmail = dto.email.trim().toLowerCase();
+
+    const existingWorkspaceUser = await this.workspaceUserRepo
+      .createQueryBuilder('workspaceUser')
+      .where('workspaceUser.tenantId = :tenantId', { tenantId })
+      .andWhere('workspaceUser.workspaceId = :workspaceId', { workspaceId })
+      .andWhere('lower(workspaceUser.email) = :email', {
+        email: normalizedEmail,
+      })
+      .getOne();
+
+    if (existingWorkspaceUser) {
+      throw new ConflictException(
+        'This email already belongs to this workspace.',
+      );
+    }
+
+    const existingPendingInvitation = await this.workspaceUserInvitationRepo
+      .createQueryBuilder('invitation')
+      .where('invitation.tenantId = :tenantId', { tenantId })
+      .andWhere('invitation.workspaceId = :workspaceId', { workspaceId })
+      .andWhere('lower(invitation.email) = :email', { email: normalizedEmail })
+      .andWhere('invitation.status = :status', { status: 'pending' })
+      .andWhere('invitation.revokedAt IS NULL')
+      .andWhere('invitation.acceptedAt IS NULL')
+      .getOne();
+
+    if (existingPendingInvitation) {
+      throw new ConflictException(
+        'There is already a pending invitation for this email.',
+      );
+    }
+
+    const token = randomBytes(32).toString('hex');
+    const tokenHash = this.hashToken(token);
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+
+    const invitation = await this.workspaceUserInvitationRepo.save(
+      this.workspaceUserInvitationRepo.create({
+        tenantId,
+        workspaceId,
+        email: normalizedEmail,
+        role: dto.role,
+        status: 'pending',
+        tokenHash,
+        expiresAt,
+        acceptedAt: null,
+        revokedAt: null,
+        invitedByUserId,
+      }),
+    );
+
+    const company = await this.getCompany(tenantId, workspaceId);
+    const workspaceName =
+      company.publicName || company.workspaceName || company.legalName || 'Lyra Suite';
+    const frontendUrl =
+      this.configService.get<string>('FRONTEND_APP_URL') ??
+      this.configService.get<string>('APP_FRONTEND_URL') ??
+      'http://82.29.61.35:3001';
+    const inviteUrl = `${frontendUrl.replace(/\/$/, '')}/invite/${token}`;
+
+    await this.transactionalEmailService.sendWorkspaceInvitationEmail({
+      to: normalizedEmail,
+      workspaceName,
+      role: dto.role,
+      inviteUrl,
+      expiresInDays: 7,
+    });
+
+    return this.serializeInvitation(invitation);
+  }
+
+  async listWorkspaceUserInvitations(
+    tenantId: string,
+    workspaceId: string,
+    actorUserId: string,
+    actorRole: string | undefined,
+  ) {
+    await this.assertCanManageWorkspaceUsers(
+      tenantId,
+      workspaceId,
+      actorUserId,
+      actorRole,
+    );
+
+    const invitations = await this.workspaceUserInvitationRepo.find({
+      where: { tenantId, workspaceId },
+      order: { createdAt: 'DESC' },
+    });
+
+    return invitations.map((invitation) => this.serializeInvitation(invitation));
+  }
+
+  async revokeWorkspaceUserInvitation(
+    tenantId: string,
+    workspaceId: string,
+    actorUserId: string,
+    actorRole: string | undefined,
+    invitationId: string,
+  ) {
+    await this.assertCanManageWorkspaceUsers(
+      tenantId,
+      workspaceId,
+      actorUserId,
+      actorRole,
+    );
+
+    const invitation = await this.workspaceUserInvitationRepo.findOne({
+      where: {
+        tenantId,
+        workspaceId,
+        id: invitationId,
+      },
+    });
+
+    if (!invitation) {
+      throw new NotFoundException('Invitation not found.');
+    }
+
+    if (invitation.status !== 'pending' || invitation.revokedAt) {
+      return this.serializeInvitation(invitation);
+    }
+
+    invitation.status = 'revoked';
+    invitation.revokedAt = new Date();
+
+    return this.serializeInvitation(
+      await this.workspaceUserInvitationRepo.save(invitation),
+    );
   }
 
   async patchWorkspaceUserAccess(
@@ -762,6 +1106,7 @@ export class SettingsService {
         passwordHash: null,
         passwordUpdatedAt: null,
         twoFactorEnabled: false,
+        twoFactorMethod: 'authenticator',
         twoFactorSecretEncrypted: null,
         twoFactorPendingSecretEncrypted: null,
         loginAlertsEnabled: true,
@@ -775,10 +1120,43 @@ export class SettingsService {
       newPassword: '',
       confirmNewPassword: '',
       twoFactorEnabled: entity.twoFactorEnabled,
+      twoFactorMethod: entity.twoFactorMethod ?? 'authenticator',
       passwordUpdatedAt: entity.passwordUpdatedAt,
       loginAlertsEnabled: entity.loginAlertsEnabled,
       trustedDevicesEnabled: entity.trustedDevicesEnabled,
     };
+  }
+
+  async patchSecurity(
+    tenantId: string,
+    userId: string,
+    dto: PatchSecuritySettingsDto,
+  ) {
+    const existing = await this.securityRepo.findOne({
+      where: { tenantId, userId },
+    });
+
+    await this.securityRepo.upsert(
+      {
+        tenantId,
+        userId,
+        currentEmail: existing?.currentEmail ?? '',
+        passwordHash: existing?.passwordHash ?? null,
+        passwordUpdatedAt: existing?.passwordUpdatedAt ?? null,
+        twoFactorEnabled: existing?.twoFactorEnabled ?? false,
+        twoFactorMethod: existing?.twoFactorMethod ?? 'authenticator',
+        twoFactorSecretEncrypted: existing?.twoFactorSecretEncrypted ?? null,
+        twoFactorPendingSecretEncrypted:
+          existing?.twoFactorPendingSecretEncrypted ?? null,
+        loginAlertsEnabled:
+          dto.loginAlertsEnabled ?? existing?.loginAlertsEnabled ?? true,
+        trustedDevicesEnabled:
+          dto.trustedDevicesEnabled ?? existing?.trustedDevicesEnabled ?? true,
+      },
+      ['tenantId', 'userId'],
+    );
+
+    return this.getSecurity(tenantId, userId);
   }
 
   async patchSecurityEmail(
@@ -786,6 +1164,10 @@ export class SettingsService {
     userId: string,
     dto: PatchSecurityEmailDto,
   ) {
+    const existing = await this.securityRepo.findOne({
+      where: { tenantId, userId },
+    });
+
     await this.securityRepo.upsert(
       {
         tenantId,
@@ -793,6 +1175,18 @@ export class SettingsService {
         currentEmail: dto.newEmail,
       },
       ['tenantId', 'userId'],
+    );
+
+    const notificationEmails = [existing?.currentEmail, dto.newEmail].filter(
+      (email, index, emails): email is string => {
+        return Boolean(email) && emails.indexOf(email) === index;
+      },
+    );
+
+    await Promise.all(
+      notificationEmails.map((email) =>
+        this.authService.sendEmailChangedEmail(email),
+      ),
     );
 
     return this.getSecurity(tenantId, userId);
@@ -828,6 +1222,7 @@ export class SettingsService {
         passwordUpdatedAt: new Date(),
         currentEmail: existing?.currentEmail ?? '',
         twoFactorEnabled: existing?.twoFactorEnabled ?? false,
+        twoFactorMethod: existing?.twoFactorMethod ?? 'authenticator',
         twoFactorSecretEncrypted: existing?.twoFactorSecretEncrypted ?? null,
         twoFactorPendingSecretEncrypted:
           existing?.twoFactorPendingSecretEncrypted ?? null,
@@ -837,10 +1232,41 @@ export class SettingsService {
       ['tenantId', 'userId'],
     );
 
+    await this.authService.sendPasswordChangedEmail(
+      existing?.currentEmail ?? '',
+    );
+
     return this.getSecurity(tenantId, userId);
   }
 
-  async setupTwoFactor(tenantId: string, userId: string) {
+  async requestSecurityPasswordReset(tenantId: string, userId: string) {
+    return this.authService.forgotPasswordForUser(tenantId, userId);
+  }
+
+  async setupTwoFactor(
+    tenantId: string,
+    userId: string,
+    dto: SetupTwoFactorDto,
+  ) {
+    const existing = await this.securityRepo.findOne({
+      where: { tenantId, userId },
+    });
+
+    if (dto.method === 'email') {
+      const email = existing?.currentEmail;
+
+      if (!email) {
+        throw new Error('No email configured for two-factor setup.');
+      }
+
+      await this.authService.sendTwoFactorSetupEmail(tenantId, userId, email);
+
+      return {
+        method: 'email' as const,
+        email,
+      };
+    }
+
     const secret = generateSecret();
     const encrypted = this.cryptoService.encrypt(secret);
 
@@ -852,10 +1278,6 @@ export class SettingsService {
 
     const qrCodeDataUrl = await QRCode.toDataURL(otpauth);
 
-    const existing = await this.securityRepo.findOne({
-      where: { tenantId, userId },
-    });
-
     await this.securityRepo.upsert(
       {
         tenantId,
@@ -864,6 +1286,7 @@ export class SettingsService {
         passwordHash: existing?.passwordHash ?? null,
         passwordUpdatedAt: existing?.passwordUpdatedAt ?? null,
         twoFactorEnabled: existing?.twoFactorEnabled ?? false,
+        twoFactorMethod: existing?.twoFactorMethod ?? 'authenticator',
         twoFactorSecretEncrypted: existing?.twoFactorSecretEncrypted ?? null,
         twoFactorPendingSecretEncrypted: encrypted,
         loginAlertsEnabled: existing?.loginAlertsEnabled ?? true,
@@ -873,6 +1296,7 @@ export class SettingsService {
     );
 
     return {
+      method: 'authenticator' as const,
       qrCodeDataUrl,
       otpauth,
     };
@@ -883,9 +1307,35 @@ export class SettingsService {
     userId: string,
     dto: ConfirmTwoFactorDto,
   ) {
+    const method = dto.method ?? 'authenticator';
     const existing = await this.securityRepo.findOne({
       where: { tenantId, userId },
     });
+
+    if (method === 'email') {
+      await this.authService.verifyEmailTwoFactorCode(
+        tenantId,
+        userId,
+        dto.code,
+        'setup',
+      );
+
+      await this.securityRepo.update(
+        { tenantId, userId },
+        {
+          twoFactorEnabled: true,
+          twoFactorMethod: 'email',
+          twoFactorSecretEncrypted: null,
+          twoFactorPendingSecretEncrypted: null,
+        },
+      );
+
+      await this.authService.sendTwoFactorEnabledEmail(
+        existing?.currentEmail ?? '',
+      );
+
+      return this.getSecurity(tenantId, userId);
+    }
 
     const pendingSecret = this.cryptoService.decrypt(
       existing?.twoFactorPendingSecretEncrypted,
@@ -909,23 +1359,37 @@ export class SettingsService {
       { tenantId, userId },
       {
         twoFactorEnabled: true,
+        twoFactorMethod: 'authenticator',
         twoFactorSecretEncrypted:
           existing?.twoFactorPendingSecretEncrypted ?? null,
         twoFactorPendingSecretEncrypted: null,
       },
     );
 
+    await this.authService.sendTwoFactorEnabledEmail(
+      existing?.currentEmail ?? '',
+    );
+
     return this.getSecurity(tenantId, userId);
   }
 
   async disableTwoFactor(tenantId: string, userId: string) {
+    const existing = await this.securityRepo.findOne({
+      where: { tenantId, userId },
+    });
+
     await this.securityRepo.update(
       { tenantId, userId },
       {
         twoFactorEnabled: false,
+        twoFactorMethod: 'authenticator',
         twoFactorSecretEncrypted: null,
         twoFactorPendingSecretEncrypted: null,
       },
+    );
+
+    await this.authService.sendTwoFactorDisabledEmail(
+      existing?.currentEmail ?? '',
     );
 
     return this.getSecurity(tenantId, userId);
@@ -955,7 +1419,11 @@ export class SettingsService {
     }
 
     return this.sessionsRepo.find({
-      where: { tenantId, userId },
+      where: {
+        tenantId,
+        userId,
+        status: Not('expired'),
+      },
       order: { createdAt: 'ASC' },
     });
   }
@@ -982,7 +1450,7 @@ export class SettingsService {
     });
 
     for (const session of sessions) {
-      if (session.status !== 'current') {
+      if (session.status === 'active') {
         await this.sessionsRepo.update(
           { id: session.id },
           {
@@ -997,60 +1465,149 @@ export class SettingsService {
   }
 
   async getTrustedDevices(tenantId: string, userId: string) {
-    const existing = await this.trustedDevicesRepo.find({
-      where: { tenantId, userId },
-      order: { createdAt: 'ASC' },
-    });
-
-    if (existing.length === 0) {
-      await this.trustedDevicesRepo.save([
-        this.trustedDevicesRepo.create({
-          tenantId,
-          userId,
-          name: 'Dell Inspiron',
-          browser: 'Chrome',
-          location: 'Franca, SP',
-          lastSeen: 'Agora mesmo',
-          status: 'trusted',
-          trustedAt: new Date(),
-          removedAt: null,
-        }),
-      ]);
-    }
-
     return this.trustedDevicesRepo.find({
-      where: { tenantId, userId },
-      order: { createdAt: 'ASC' },
+      where: {
+        tenantId,
+        userId,
+        deviceFingerprint: Not(IsNull()),
+        revokedAt: IsNull(),
+      },
+      order: { lastUsedAt: 'DESC', trustedAt: 'DESC', createdAt: 'DESC' },
     });
   }
 
-  async trustDevice(tenantId: string, userId: string, deviceId: string) {
-    await this.trustedDevicesRepo.update(
-      { tenantId, userId, id: deviceId },
-      {
-        status: 'trusted',
-        trustedAt: new Date(),
-        removedAt: null,
+  async getLegacyTrustedDevices(tenantId: string, userId: string) {
+    const devices = await this.getTrustedDevices(tenantId, userId);
+
+    return devices.map((device) => this.serializeLegacyTrustedDevice(device));
+  }
+
+  async findActiveTrustedDevice(
+    tenantId: string,
+    userId: string,
+    deviceFingerprint: string,
+  ) {
+    return this.trustedDevicesRepo.findOne({
+      where: {
+        tenantId,
+        userId,
+        deviceFingerprint,
+        revokedAt: IsNull(),
       },
+    });
+  }
+
+  async trustCurrentDevice(
+    tenantId: string,
+    userId: string,
+    sessionId: string,
+  ) {
+    const session = await this.sessionsRepo.findOne({
+      where: {
+        tenantId,
+        userId,
+        id: sessionId,
+        revokedAt: IsNull(),
+      },
+    });
+
+    if (!session || session.status === 'expired') {
+      throw new NotFoundException('Current session not found.');
+    }
+
+    if (!session.deviceFingerprint) {
+      throw new BadRequestException(
+        'Current session has no device fingerprint.',
+      );
+    }
+
+    const now = new Date();
+    const existing = await this.findActiveTrustedDevice(
+      tenantId,
+      userId,
+      session.deviceFingerprint,
     );
+
+    const device = existing ?? this.trustedDevicesRepo.create();
+
+    device.tenantId = tenantId;
+    device.userId = userId;
+    device.deviceFingerprint = session.deviceFingerprint;
+    device.deviceName = session.deviceName;
+    device.userAgent = session.userAgent;
+    device.ipAddress = session.ipAddress;
+    device.location = session.location;
+    device.trustedAt = existing?.trustedAt ?? now;
+    device.lastUsedAt = now;
+    device.revokedAt = null;
+
+    await this.trustedDevicesRepo.save(device);
 
     return this.getTrustedDevices(tenantId, userId);
   }
 
-  async removeTrustedDevice(
+  async trustLegacyDevice(tenantId: string, userId: string, deviceId: string) {
+    const device = await this.trustedDevicesRepo.findOne({
+      where: {
+        tenantId,
+        userId,
+        id: deviceId,
+        deviceFingerprint: Not(IsNull()),
+      },
+    });
+
+    if (!device) {
+      throw new NotFoundException('Trusted device not found.');
+    }
+
+    const now = new Date();
+    device.trustedAt = device.trustedAt ?? now;
+    device.lastUsedAt = now;
+    device.revokedAt = null;
+
+    await this.trustedDevicesRepo.save(device);
+
+    return this.getLegacyTrustedDevices(tenantId, userId);
+  }
+
+  async revokeTrustedDevice(
     tenantId: string,
     userId: string,
     deviceId: string,
   ) {
-    await this.trustedDevicesRepo.update(
-      { tenantId, userId, id: deviceId },
-      {
-        status: 'inactive',
-        removedAt: new Date(),
+    const device = await this.trustedDevicesRepo.findOne({
+      where: {
+        tenantId,
+        userId,
+        id: deviceId,
+        revokedAt: IsNull(),
       },
-    );
+    });
 
-    return this.getTrustedDevices(tenantId, userId);
+    if (!device) {
+      throw new NotFoundException('Trusted device not found.');
+    }
+
+    device.revokedAt = new Date();
+    await this.trustedDevicesRepo.save(device);
+
+    return { success: true };
+  }
+
+  private serializeLegacyTrustedDevice(
+    device: UserTrustedDeviceEntity,
+  ): LegacyTrustedDevice {
+    const lastSeen = device.lastUsedAt ?? device.trustedAt ?? device.createdAt;
+    const deviceName = device.deviceName ?? 'Dispositivo desconhecido';
+
+    return {
+      id: device.id,
+      name: deviceName,
+      browser: deviceName,
+      location: device.location ?? '',
+      lastSeen: lastSeen.toISOString(),
+      status: 'trusted',
+    };
   }
 
   async getNotifications(tenantId: string, userId: string) {
@@ -1087,5 +1644,51 @@ export class SettingsService {
     );
 
     return this.getNotifications(tenantId, userId);
+  }
+
+  private async assertCanManageWorkspaceUsers(
+    tenantId: string,
+    workspaceId: string,
+    actorUserId: string,
+    _actorRole: string | undefined,
+  ) {
+    const actorMembership = await this.workspaceUserRepo.findOne({
+      where: {
+        tenantId,
+        workspaceId,
+        userId: actorUserId,
+        status: 'active',
+      },
+    });
+
+    if (
+      !actorMembership ||
+      !['owner', 'admin', 'administrator'].includes(actorMembership.role)
+    ) {
+      throw new ForbiddenException(
+        'Only workspace administrators can manage invitations.',
+      );
+    }
+  }
+
+  private serializeInvitation(invitation: WorkspaceUserInvitationEntity) {
+    return {
+      id: invitation.id,
+      tenantId: invitation.tenantId,
+      workspaceId: invitation.workspaceId,
+      email: invitation.email,
+      role: invitation.role,
+      status: invitation.status,
+      expiresAt: invitation.expiresAt,
+      acceptedAt: invitation.acceptedAt,
+      revokedAt: invitation.revokedAt,
+      invitedByUserId: invitation.invitedByUserId,
+      createdAt: invitation.createdAt,
+      updatedAt: invitation.updatedAt,
+    };
+  }
+
+  private hashToken(token: string): string {
+    return createHash('sha256').update(token).digest('hex');
   }
 }
