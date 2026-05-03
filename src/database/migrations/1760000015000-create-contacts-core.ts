@@ -133,18 +133,25 @@ export class CreateContactsCore1760000015000 implements MigrationInterface {
         "name" varchar(120) NOT NULL,
         "description" varchar(500),
         "color" varchar(7) NOT NULL DEFAULT '#2563EB',
+        "parent_list_id" uuid,
         "visibility" varchar(20) NOT NULL DEFAULT 'workspace',
         "created_by_user_id" uuid,
         "created_at" timestamptz NOT NULL DEFAULT now(),
         "updated_at" timestamptz NOT NULL DEFAULT now(),
         CONSTRAINT "pk_contact_lists_id" PRIMARY KEY ("id"),
-        CONSTRAINT "uq_contact_lists_workspace_name" UNIQUE ("workspace_id", "name")
+        CONSTRAINT "uq_contact_lists_workspace_name" UNIQUE ("workspace_id", "name"),
+        CONSTRAINT "fk_contact_lists_parent" FOREIGN KEY ("parent_list_id") REFERENCES "contact_lists"("id") ON DELETE SET NULL
       );
     `);
 
     await queryRunner.query(`
       CREATE INDEX IF NOT EXISTS "idx_contact_lists_tenant_workspace"
       ON "contact_lists" ("tenant_id", "workspace_id");
+    `);
+
+    await queryRunner.query(`
+      CREATE INDEX IF NOT EXISTS "idx_contact_lists_parent"
+      ON "contact_lists" ("parent_list_id");
     `);
 
     await queryRunner.query(`
@@ -255,6 +262,7 @@ export class CreateContactsCore1760000015000 implements MigrationInterface {
     await queryRunner.query(
       `DROP INDEX IF EXISTS "idx_contact_lists_tenant_workspace";`,
     );
+    await queryRunner.query(`DROP INDEX IF EXISTS "idx_contact_lists_parent";`);
     await queryRunner.query(`DROP TABLE IF EXISTS "contact_lists";`);
 
     await queryRunner.query(

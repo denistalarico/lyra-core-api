@@ -3,6 +3,7 @@ import {
   IsIn,
   IsOptional,
   IsString,
+  IsUUID,
   Length,
   MaxLength,
 } from 'class-validator';
@@ -21,6 +22,10 @@ export class CreateContactListDto {
   @IsOptional()
   @IsHexColor()
   color?: string;
+
+  @IsOptional()
+  @IsUUID()
+  parentListId?: string | null;
 
   @IsOptional()
   @IsIn(['private', 'workspace'])

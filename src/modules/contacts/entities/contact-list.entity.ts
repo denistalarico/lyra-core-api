@@ -32,6 +32,9 @@ export class ContactListEntity {
   @Column({ type: 'varchar', length: 7, default: '#2563EB' })
   color!: string;
 
+  @Column({ name: 'parent_list_id', type: 'uuid', nullable: true })
+  parentListId!: string | null;
+
   @Column({ type: 'varchar', length: 20, default: 'workspace' })
   visibility!: ContactListVisibility;
 

@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import type { RequestContext } from '../../common/context/request-context.interface';
 import { AddContactListMemberDto } from './dto/add-contact-list-member.dto';
 import { CreateContactBusinessModeDto } from './dto/create-contact-business-mode.dto';
@@ -148,9 +148,47 @@ export class ContactsService {
     }
 
     const [items, total] = await query.getManyAndCount();
+    const contactIds = items.map((contact) => contact.id);
+    const tagAssignments =
+      contactIds.length > 0
+        ? await this.contactTagAssignmentsRepository.find({
+            where: {
+              tenantId: ctx.tenantId,
+              workspaceId,
+              contactId: In(contactIds),
+            },
+            order: { createdAt: 'ASC' },
+          })
+        : [];
+    const tagIds = [...new Set(tagAssignments.map((assignment) => assignment.tagId))];
+    const contactTags =
+      tagIds.length > 0
+        ? await this.contactTagsRepository.find({
+            where: {
+              tenantId: ctx.tenantId,
+              workspaceId,
+              id: In(tagIds),
+            },
+          })
+        : [];
+    const tagsById = new Map(contactTags.map((tag) => [tag.id, tag]));
+    const tagsByContactId = new Map<string, ContactTagEntity[]>();
+
+    for (const assignment of tagAssignments) {
+      const tag = tagsById.get(assignment.tagId);
+
+      if (!tag) continue;
+
+      const current = tagsByContactId.get(assignment.contactId) ?? [];
+      current.push(tag);
+      tagsByContactId.set(assignment.contactId, current);
+    }
 
     return {
-      items,
+      items: items.map((contact) => ({
+        ...contact,
+        tags: tagsByContactId.get(contact.id) ?? [],
+      })),
       total,
       limit,
       offset,
@@ -466,6 +504,7 @@ export class ContactsService {
 
   async createList(ctx: RequestContext, dto: CreateContactListDto) {
     const workspaceId = this.requireWorkspaceId(ctx);
+    const parentListId = await this.resolveParentListId(ctx, null, dto.parentListId);
 
     const list = this.contactListsRepository.create({
       tenantId: ctx.tenantId,
@@ -473,6 +512,7 @@ export class ContactsService {
       name: dto.name.trim(),
       description: this.optionalString(dto.description),
       color: dto.color ?? '#2563EB',
+      parentListId,
       visibility: dto.visibility ?? 'workspace',
       createdByUserId: ctx.userId ?? null,
     });
@@ -493,6 +533,9 @@ export class ContactsService {
       list.description = this.nullableString(dto.description);
     }
     if (dto.color !== undefined) list.color = dto.color;
+    if (dto.parentListId !== undefined) {
+      list.parentListId = await this.resolveParentListId(ctx, list.id, dto.parentListId);
+    }
     if (dto.visibility !== undefined) list.visibility = dto.visibility;
 
     try {
@@ -1593,6 +1636,34 @@ export class ContactsService {
     }
 
     return list;
+  }
+
+  private async resolveParentListId(
+    ctx: RequestContext,
+    listId: string | null,
+    parentListId?: string | null,
+  ) {
+    if (!parentListId) {
+      return null;
+    }
+
+    if (listId && parentListId === listId) {
+      throw new BadRequestException('A contact list cannot be its own parent.');
+    }
+
+    const parent = await this.findListOrFail(ctx, parentListId);
+    let currentParentId = parent.parentListId;
+
+    while (currentParentId) {
+      if (listId && currentParentId === listId) {
+        throw new BadRequestException('A contact list cannot be moved under its descendant.');
+      }
+
+      const currentParent = await this.findListOrFail(ctx, currentParentId);
+      currentParentId = currentParent.parentListId;
+    }
+
+    return parent.id;
   }
 
   private async findTagOrFail(ctx: RequestContext, tagId: string) {

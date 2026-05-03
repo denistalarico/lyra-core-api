@@ -43,6 +43,7 @@ import { ContactSegmentEntity } from '../modules/contacts/entities/contact-segme
 import { ContactBusinessModeEntity } from '../modules/contacts/entities/contact-business-mode.entity';
 import { ContactViewPreferenceEntity } from '../modules/contacts/entities/contact-view-preference.entity';
 import { CreateContactsSettings1760000016000 } from './migrations/1760000016000-create-contacts-settings';
+import { AddContactListParent1760000017000 } from './migrations/1760000017000-add-contact-list-parent';
 
 
 
@@ -101,5 +102,6 @@ export const AppDataSource = new DataSource({
     CreateWorkspaceUserInvitations1760000014000,
     CreateContactsCore1760000015000,
     CreateContactsSettings1760000016000,
+    AddContactListParent1760000017000,
   ],
 });

@@ -3,6 +3,7 @@ import {
   IsIn,
   IsOptional,
   IsString,
+  IsUUID,
   Length,
   MaxLength,
 } from 'class-validator';
@@ -22,6 +23,10 @@ export class PatchContactListDto {
   @IsOptional()
   @IsHexColor()
   color?: string;
+
+  @IsOptional()
+  @IsUUID()
+  parentListId?: string | null;
 
   @IsOptional()
   @IsIn(['private', 'workspace'])
