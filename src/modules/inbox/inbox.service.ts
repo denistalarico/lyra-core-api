@@ -349,4 +349,284 @@ export class InboxService {
       take: 200,
     });
   }
+  async upsertConversationFromWebchat(input: {
+    tenantId: string;
+    workspaceId: string;
+    widgetId: string;
+    visitorId: string;
+    conversationId: string;
+    contactId?: string | null;
+    status?: string;
+    source?: string;
+    pageUrl?: string | null;
+    pageTitle?: string | null;
+    referrer?: string | null;
+    utmSource?: string | null;
+    utmMedium?: string | null;
+    utmCampaign?: string | null;
+    assignedUserId?: string | null;
+    assignedAgentId?: string | null;
+    aiEnabled?: boolean;
+    lastMessageAt?: Date | string | null;
+    metadata?: Record<string, unknown>;
+  }) {
+    const channel = await this.ensureWebchatChannel(input);
+
+    const existing = await this.conversationsRepository.findOne({
+      where: {
+        tenantId: input.tenantId,
+        workspaceId: input.workspaceId,
+        externalThreadId: input.conversationId,
+        source: 'webchat',
+      },
+    });
+
+    const mappedStatus = this.mapWebchatStatus(input.status);
+    const title =
+      input.pageTitle?.trim() ||
+      input.metadata?.visitorName?.toString() ||
+      input.metadata?.visitorEmail?.toString() ||
+      'Conversa do Webchat';
+
+    const metadata = {
+      ...(existing?.metadata ?? {}),
+      ...(input.metadata ?? {}),
+      sourceModule: 'webchat',
+      webchatConversationId: input.conversationId,
+      webchatWidgetId: input.widgetId,
+      webchatVisitorId: input.visitorId,
+      pageUrl: input.pageUrl ?? null,
+      pageTitle: input.pageTitle ?? null,
+      referrer: input.referrer ?? null,
+      utmSource: input.utmSource ?? null,
+      utmMedium: input.utmMedium ?? null,
+      utmCampaign: input.utmCampaign ?? null,
+    };
+
+    if (existing) {
+      existing.channelId = channel.id;
+      existing.contactId = input.contactId ?? existing.contactId;
+      existing.title = existing.title || title;
+      existing.status = mappedStatus;
+      existing.assignedUserId = input.assignedUserId ?? existing.assignedUserId;
+      existing.assignedAgentId = input.assignedAgentId ?? existing.assignedAgentId;
+      existing.aiEnabled = input.aiEnabled ?? existing.aiEnabled;
+      existing.lastMessageAt = input.lastMessageAt
+        ? new Date(input.lastMessageAt)
+        : existing.lastMessageAt;
+      existing.metadata = metadata;
+
+      return this.conversationsRepository.save(existing);
+    }
+
+    const conversation = await this.conversationsRepository.save(
+      this.conversationsRepository.create({
+        tenantId: input.tenantId,
+        workspaceId: input.workspaceId,
+        channelId: channel.id,
+        contactId: input.contactId ?? null,
+        externalThreadId: input.conversationId,
+        title,
+        status: mappedStatus,
+        priority: 'normal',
+        assignedUserId: input.assignedUserId ?? null,
+        assignedAgentId: input.assignedAgentId ?? null,
+        source: 'webchat',
+        businessMode: 'general',
+        aiEnabled: input.aiEnabled ?? false,
+        lastMessageAt: input.lastMessageAt ? new Date(input.lastMessageAt) : null,
+        metadata,
+      }),
+    );
+
+    await this.eventsRepository.save(
+      this.eventsRepository.create({
+        tenantId: input.tenantId,
+        workspaceId: input.workspaceId,
+        conversationId: conversation.id,
+        eventType: 'conversation_synced_from_webchat',
+        actorType: 'system',
+        actorUserId: null,
+        payload: {
+          sourceModule: 'webchat',
+          webchatConversationId: input.conversationId,
+          webchatWidgetId: input.widgetId,
+          webchatVisitorId: input.visitorId,
+        },
+      }),
+    );
+
+    return conversation;
+  }
+
+  async createMessageFromWebchat(input: {
+    tenantId: string;
+    workspaceId: string;
+    widgetId: string;
+    visitorId?: string | null;
+    conversationId: string;
+    messageId: string;
+    senderType: 'visitor' | 'agent' | 'ai' | 'system';
+    senderUserId?: string | null;
+    senderAgentId?: string | null;
+    direction: 'inbound' | 'outbound';
+    messageType?: string;
+    content: string;
+    metadata?: Record<string, unknown>;
+    createdAt?: Date | string | null;
+  }) {
+    const existingMessage = await this.messagesRepository.findOne({
+      where: {
+        tenantId: input.tenantId,
+        workspaceId: input.workspaceId,
+        externalMessageId: input.messageId,
+      },
+    });
+
+    if (existingMessage) {
+      return existingMessage;
+    }
+
+    const conversation = await this.upsertConversationFromWebchat({
+      tenantId: input.tenantId,
+      workspaceId: input.workspaceId,
+      widgetId: input.widgetId,
+      visitorId: input.visitorId ?? '',
+      conversationId: input.conversationId,
+      lastMessageAt: input.createdAt ?? new Date(),
+    });
+
+    const direction =
+      input.senderType === 'system' ? 'system' : input.direction;
+
+    const inboxSenderType =
+      input.senderType === 'visitor'
+        ? 'contact'
+        : input.senderType === 'ai'
+          ? 'agent'
+          : input.senderType === 'agent'
+            ? 'user'
+            : 'system';
+
+    const message = await this.messagesRepository.save(
+      this.messagesRepository.create({
+        tenantId: input.tenantId,
+        workspaceId: input.workspaceId,
+        conversationId: conversation.id,
+        channelId: conversation.channelId,
+        contactId: conversation.contactId,
+        direction,
+        senderType: inboxSenderType,
+        senderUserId: input.senderUserId ?? null,
+        senderAgentId: input.senderAgentId ?? null,
+        externalMessageId: input.messageId,
+        messageType: input.messageType === 'system' ? 'event' : 'text',
+        content: input.content.trim(),
+        status: input.direction === 'inbound' ? 'delivered' : 'sent',
+        attachments: [],
+        metadata: {
+          ...(input.metadata ?? {}),
+          sourceModule: 'webchat',
+          webchatMessageId: input.messageId,
+          webchatConversationId: input.conversationId,
+          webchatWidgetId: input.widgetId,
+          webchatVisitorId: input.visitorId ?? null,
+        },
+        sentAt: input.direction === 'outbound' ? new Date() : null,
+        deliveredAt: input.direction === 'inbound' ? new Date() : null,
+      }),
+    );
+
+    conversation.lastMessagePreview = message.content.slice(0, 260);
+    conversation.lastMessageAt = message.createdAt ?? new Date();
+
+    if (input.direction === 'inbound') {
+      conversation.unreadCount = (conversation.unreadCount ?? 0) + 1;
+      conversation.status = conversation.status === 'new' ? 'open' : conversation.status;
+    }
+
+    await this.conversationsRepository.save(conversation);
+
+    await this.eventsRepository.save(
+      this.eventsRepository.create({
+        tenantId: input.tenantId,
+        workspaceId: input.workspaceId,
+        conversationId: conversation.id,
+        eventType: 'message_synced_from_webchat',
+        actorType: 'system',
+        actorUserId: null,
+        payload: {
+          sourceModule: 'webchat',
+          webchatMessageId: input.messageId,
+          webchatConversationId: input.conversationId,
+          direction: input.direction,
+          senderType: input.senderType,
+        },
+      }),
+    );
+
+    return message;
+  }
+
+  private async ensureWebchatChannel(input: {
+    tenantId: string;
+    workspaceId: string;
+    widgetId: string;
+  }) {
+    const existing = await this.channelsRepository.findOne({
+      where: {
+        tenantId: input.tenantId,
+        workspaceId: input.workspaceId,
+        type: 'webchat',
+        provider: 'lyra_webchat',
+        externalId: input.widgetId,
+        deletedAt: IsNull(),
+      },
+    });
+
+    if (existing) {
+      return existing;
+    }
+
+    return this.channelsRepository.save(
+      this.channelsRepository.create({
+        tenantId: input.tenantId,
+        workspaceId: input.workspaceId,
+        name: 'Webchat',
+        type: 'webchat',
+        status: 'active',
+        provider: 'lyra_webchat',
+        externalId: input.widgetId,
+        defaultAssignedUserId: null,
+        defaultAgentId: null,
+        aiEnabled: false,
+        settings: {},
+        metadata: {
+          sourceModule: 'webchat',
+          webchatWidgetId: input.widgetId,
+        },
+      }),
+    );
+  }
+
+  private mapWebchatStatus(status?: string) {
+    switch (status) {
+      case 'active':
+        return 'open';
+      case 'waiting':
+        return 'waiting';
+      case 'handoff_requested':
+        return 'handoff_requested';
+      case 'resolved':
+        return 'resolved';
+      case 'closed':
+        return 'closed';
+      case 'archived':
+        return 'archived';
+      case 'new':
+      default:
+        return 'new';
+    }
+  }
+
 }

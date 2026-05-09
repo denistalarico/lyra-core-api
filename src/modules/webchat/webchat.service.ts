@@ -7,6 +7,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { FilesService } from '../../common/files/files.service';
+import { InboxService } from '../inbox/inbox.service';
 import type { RequestContext } from '../../common/context/request-context.interface';
 import { CreatePublicWebchatConversationDto } from './dto/create-public-webchat-conversation.dto';
 import { CreatePublicWebchatMessageDto } from './dto/create-public-webchat-message.dto';
@@ -39,6 +40,7 @@ export class WebchatService {
 
     @InjectRepository(WebchatMessageEntity)
     private readonly messagesRepository: Repository<WebchatMessageEntity>,
+    private readonly inboxService: InboxService,
 
     private readonly filesService: FilesService,
   ) {}
@@ -282,7 +284,26 @@ export class WebchatService {
     conversation.lastMessageAt = new Date();
 
     await this.conversationsRepository.save(conversation);
-    return this.messagesRepository.save(message);
+    const savedMessage = await this.messagesRepository.save(message);
+
+    await this.inboxService.createMessageFromWebchat({
+      tenantId: savedMessage.tenantId,
+      workspaceId: savedMessage.workspaceId,
+      widgetId: savedMessage.widgetId,
+      visitorId: savedMessage.visitorId,
+      conversationId: savedMessage.conversationId,
+      messageId: savedMessage.id,
+      senderType: savedMessage.senderType,
+      senderUserId: savedMessage.senderUserId,
+      senderAgentId: savedMessage.senderAgentId,
+      direction: savedMessage.direction,
+      messageType: savedMessage.messageType,
+      content: savedMessage.content,
+      metadata: savedMessage.metadata,
+      createdAt: savedMessage.createdAt,
+    });
+
+    return savedMessage;
   }
 
   async closeConversation(ctx: RequestContext, conversationId: string) {
@@ -378,6 +399,28 @@ export class WebchatService {
 
     const savedConversation = await this.conversationsRepository.save(conversation);
 
+    await this.inboxService.upsertConversationFromWebchat({
+      tenantId: savedConversation.tenantId,
+      workspaceId: savedConversation.workspaceId,
+      widgetId: savedConversation.widgetId,
+      visitorId: savedConversation.visitorId,
+      conversationId: savedConversation.id,
+      contactId: savedConversation.contactId,
+      status: savedConversation.status,
+      source: savedConversation.source,
+      pageUrl: savedConversation.pageUrl,
+      pageTitle: savedConversation.pageTitle,
+      referrer: savedConversation.referrer,
+      utmSource: savedConversation.utmSource,
+      utmMedium: savedConversation.utmMedium,
+      utmCampaign: savedConversation.utmCampaign,
+      assignedUserId: savedConversation.assignedUserId,
+      assignedAgentId: savedConversation.assignedAgentId,
+      aiEnabled: savedConversation.aiEnabled,
+      lastMessageAt: savedConversation.lastMessageAt,
+      metadata: savedConversation.metadata,
+    });
+
     if (widget.initialMessage) {
       const systemMessage = this.messagesRepository.create({
         tenantId: widget.tenantId,
@@ -398,7 +441,24 @@ export class WebchatService {
       });
 
       savedConversation.lastMessageAt = new Date();
-      await this.messagesRepository.save(systemMessage);
+      const savedSystemMessage = await this.messagesRepository.save(systemMessage);
+
+      await this.inboxService.createMessageFromWebchat({
+        tenantId: savedSystemMessage.tenantId,
+        workspaceId: savedSystemMessage.workspaceId,
+        widgetId: savedSystemMessage.widgetId,
+        visitorId: savedSystemMessage.visitorId,
+        conversationId: savedSystemMessage.conversationId,
+        messageId: savedSystemMessage.id,
+        senderType: savedSystemMessage.senderType,
+        senderUserId: savedSystemMessage.senderUserId,
+        senderAgentId: savedSystemMessage.senderAgentId,
+        direction: savedSystemMessage.direction,
+        messageType: savedSystemMessage.messageType,
+        content: savedSystemMessage.content,
+        metadata: savedSystemMessage.metadata,
+        createdAt: savedSystemMessage.createdAt,
+      });
       await this.conversationsRepository.save(savedConversation);
     }
 
@@ -467,6 +527,23 @@ export class WebchatService {
 
     await this.conversationsRepository.save(conversation);
     const savedMessage = await this.messagesRepository.save(message);
+
+    await this.inboxService.createMessageFromWebchat({
+      tenantId: savedMessage.tenantId,
+      workspaceId: savedMessage.workspaceId,
+      widgetId: savedMessage.widgetId,
+      visitorId: savedMessage.visitorId,
+      conversationId: savedMessage.conversationId,
+      messageId: savedMessage.id,
+      senderType: savedMessage.senderType,
+      senderUserId: savedMessage.senderUserId,
+      senderAgentId: savedMessage.senderAgentId,
+      direction: savedMessage.direction,
+      messageType: savedMessage.messageType,
+      content: savedMessage.content,
+      metadata: savedMessage.metadata,
+      createdAt: savedMessage.createdAt,
+    });
 
     return this.toPublicMessage(savedMessage);
   }
