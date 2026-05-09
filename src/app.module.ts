@@ -9,6 +9,8 @@ import { AuthModule } from './modules/auth/auth.module';
 import { EmailModule } from './modules/email/email.module';
 import { FilesModule } from './common/files/files.module';
 import { ContactsModule } from './modules/contacts/contacts.module';
+import { WebchatModule } from './modules/webchat/webchat.module';
+import { AppointmentsModule } from './modules/appointments/appointments.module';
 
 @Module({
   imports: [
@@ -22,6 +24,8 @@ import { ContactsModule } from './modules/contacts/contacts.module';
     EmailModule,
     FilesModule,
     ContactsModule,
+    WebchatModule,
+    AppointmentsModule,
   ],
 })
 export class AppModule {}

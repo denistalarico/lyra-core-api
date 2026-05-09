@@ -44,8 +44,15 @@ import { ContactBusinessModeEntity } from '../modules/contacts/entities/contact-
 import { ContactViewPreferenceEntity } from '../modules/contacts/entities/contact-view-preference.entity';
 import { CreateContactsSettings1760000016000 } from './migrations/1760000016000-create-contacts-settings';
 import { AddContactListParent1760000017000 } from './migrations/1760000017000-add-contact-list-parent';
-
-
+import { WebchatWidgetEntity } from '../modules/webchat/entities/webchat-widget.entity';
+import { WebchatVisitorEntity } from '../modules/webchat/entities/webchat-visitor.entity';
+import { WebchatConversationEntity } from '../modules/webchat/entities/webchat-conversation.entity';
+import { WebchatMessageEntity } from '../modules/webchat/entities/webchat-message.entity';
+import { ScheduledItemEntity } from '../modules/appointments/entities/scheduled-item.entity';
+import { ScheduledItemParticipantEntity } from '../modules/appointments/entities/scheduled-item-participant.entity';
+import { ScheduledItemReminderEntity } from '../modules/appointments/entities/scheduled-item-reminder.entity';
+import { CreateWebchatCore1760000018000 } from './migrations/1760000018000-create-webchat-core';
+import { CreateAppointmentsCore1760000019000 } from './migrations/1760000019000-create-appointments-core';
 
 export const AppDataSource = new DataSource({
   type: 'postgres',
@@ -83,6 +90,10 @@ export const AppDataSource = new DataSource({
     ContactSegmentEntity,
     ContactBusinessModeEntity,
     ContactViewPreferenceEntity,
+    WebchatWidgetEntity,
+    WebchatVisitorEntity,
+    WebchatConversationEntity,
+    WebchatMessageEntity,
   ],
   migrations: [
     CreateSettingsTables1760000000000,
@@ -103,5 +114,7 @@ export const AppDataSource = new DataSource({
     CreateContactsCore1760000015000,
     CreateContactsSettings1760000016000,
     AddContactListParent1760000017000,
+    CreateWebchatCore1760000018000,
+    CreateAppointmentsCore1760000019000,
   ],
 });

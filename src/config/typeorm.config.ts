@@ -26,8 +26,13 @@ import { ContactCustomFieldValueEntity } from '../modules/contacts/entities/cont
 import { ContactSegmentEntity } from '../modules/contacts/entities/contact-segment.entity';
 import { ContactBusinessModeEntity } from '../modules/contacts/entities/contact-business-mode.entity';
 import { ContactViewPreferenceEntity } from '../modules/contacts/entities/contact-view-preference.entity';
-
-
+import { WebchatWidgetEntity } from '../modules/webchat/entities/webchat-widget.entity';
+import { WebchatVisitorEntity } from '../modules/webchat/entities/webchat-visitor.entity';
+import { WebchatConversationEntity } from '../modules/webchat/entities/webchat-conversation.entity';
+import { WebchatMessageEntity } from '../modules/webchat/entities/webchat-message.entity';
+import { ScheduledItemEntity } from '../modules/appointments/entities/scheduled-item.entity';
+import { ScheduledItemParticipantEntity } from '../modules/appointments/entities/scheduled-item-participant.entity';
+import { ScheduledItemReminderEntity } from '../modules/appointments/entities/scheduled-item-reminder.entity';
 
 export function getTypeOrmConfig(): TypeOrmModuleOptions {
   return {
@@ -68,6 +73,13 @@ export function getTypeOrmConfig(): TypeOrmModuleOptions {
       ContactSegmentEntity,
       ContactBusinessModeEntity,
       ContactViewPreferenceEntity,
+      WebchatWidgetEntity,
+      WebchatVisitorEntity,
+      WebchatConversationEntity,
+      WebchatMessageEntity,
+      ScheduledItemEntity,
+      ScheduledItemParticipantEntity,
+      ScheduledItemReminderEntity,
     ],
   };
 }
