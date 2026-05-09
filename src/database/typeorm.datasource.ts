@@ -51,8 +51,14 @@ import { WebchatMessageEntity } from '../modules/webchat/entities/webchat-messag
 import { ScheduledItemEntity } from '../modules/appointments/entities/scheduled-item.entity';
 import { ScheduledItemParticipantEntity } from '../modules/appointments/entities/scheduled-item-participant.entity';
 import { ScheduledItemReminderEntity } from '../modules/appointments/entities/scheduled-item-reminder.entity';
+import { InboxChannelEntity } from '../modules/inbox/entities/inbox-channel.entity';
+import { InboxConversationEntity } from '../modules/inbox/entities/inbox-conversation.entity';
+import { InboxMessageEntity } from '../modules/inbox/entities/inbox-message.entity';
+import { InboxConversationParticipantEntity } from '../modules/inbox/entities/inbox-conversation-participant.entity';
+import { InboxConversationEventEntity } from '../modules/inbox/entities/inbox-conversation-event.entity';
 import { CreateWebchatCore1760000018000 } from './migrations/1760000018000-create-webchat-core';
 import { CreateAppointmentsCore1760000019000 } from './migrations/1760000019000-create-appointments-core';
+import { CreateInboxCore1760000020000 } from './migrations/1760000020000-create-inbox-core';
 
 export const AppDataSource = new DataSource({
   type: 'postgres',
@@ -116,5 +122,6 @@ export const AppDataSource = new DataSource({
     AddContactListParent1760000017000,
     CreateWebchatCore1760000018000,
     CreateAppointmentsCore1760000019000,
+    CreateInboxCore1760000020000,
   ],
 });

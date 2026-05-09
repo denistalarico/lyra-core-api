@@ -11,6 +11,7 @@ import { FilesModule } from './common/files/files.module';
 import { ContactsModule } from './modules/contacts/contacts.module';
 import { WebchatModule } from './modules/webchat/webchat.module';
 import { AppointmentsModule } from './modules/appointments/appointments.module';
+import { InboxModule } from './modules/inbox/inbox.module';
 
 @Module({
   imports: [
@@ -26,6 +27,7 @@ import { AppointmentsModule } from './modules/appointments/appointments.module';
     ContactsModule,
     WebchatModule,
     AppointmentsModule,
+    InboxModule,
   ],
 })
 export class AppModule {}

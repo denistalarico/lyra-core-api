@@ -33,6 +33,11 @@ import { WebchatMessageEntity } from '../modules/webchat/entities/webchat-messag
 import { ScheduledItemEntity } from '../modules/appointments/entities/scheduled-item.entity';
 import { ScheduledItemParticipantEntity } from '../modules/appointments/entities/scheduled-item-participant.entity';
 import { ScheduledItemReminderEntity } from '../modules/appointments/entities/scheduled-item-reminder.entity';
+import { InboxChannelEntity } from '../modules/inbox/entities/inbox-channel.entity';
+import { InboxConversationEntity } from '../modules/inbox/entities/inbox-conversation.entity';
+import { InboxMessageEntity } from '../modules/inbox/entities/inbox-message.entity';
+import { InboxConversationParticipantEntity } from '../modules/inbox/entities/inbox-conversation-participant.entity';
+import { InboxConversationEventEntity } from '../modules/inbox/entities/inbox-conversation-event.entity';
 
 export function getTypeOrmConfig(): TypeOrmModuleOptions {
   return {
@@ -80,6 +85,11 @@ export function getTypeOrmConfig(): TypeOrmModuleOptions {
       ScheduledItemEntity,
       ScheduledItemParticipantEntity,
       ScheduledItemReminderEntity,
+      InboxChannelEntity,
+      InboxConversationEntity,
+      InboxMessageEntity,
+      InboxConversationParticipantEntity,
+      InboxConversationEventEntity,
     ],
   };
 }

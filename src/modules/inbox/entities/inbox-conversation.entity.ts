@@ -1,0 +1,95 @@
+import {
+  Column,
+  CreateDateColumn,
+  Entity,
+  Index,
+  PrimaryGeneratedColumn,
+  UpdateDateColumn,
+} from 'typeorm';
+
+export type InboxConversationStatus =
+  | 'new'
+  | 'open'
+  | 'pending'
+  | 'waiting'
+  | 'handoff_requested'
+  | 'resolved'
+  | 'closed'
+  | 'archived';
+
+export type InboxConversationPriority = 'low' | 'normal' | 'high' | 'urgent';
+
+@Entity('inbox_conversations')
+@Index('idx_inbox_conversations_tenant_workspace', ['tenantId', 'workspaceId'])
+@Index('idx_inbox_conversations_channel', ['channelId'])
+@Index('idx_inbox_conversations_contact', ['contactId'])
+@Index('idx_inbox_conversations_status', ['tenantId', 'workspaceId', 'status'])
+@Index('idx_inbox_conversations_assigned_user', ['tenantId', 'workspaceId', 'assignedUserId'])
+@Index('idx_inbox_conversations_last_message', ['tenantId', 'workspaceId', 'lastMessageAt'])
+export class InboxConversationEntity {
+  @PrimaryGeneratedColumn('uuid')
+  id!: string;
+
+  @Column({ name: 'tenant_id', type: 'uuid' })
+  tenantId!: string;
+
+  @Column({ name: 'workspace_id', type: 'uuid' })
+  workspaceId!: string;
+
+  @Column({ name: 'channel_id', type: 'uuid', nullable: true })
+  channelId!: string | null;
+
+  @Column({ name: 'contact_id', type: 'uuid', nullable: true })
+  contactId!: string | null;
+
+  @Column({ name: 'external_thread_id', type: 'varchar', length: 220, nullable: true })
+  externalThreadId!: string | null;
+
+  @Column({ type: 'varchar', length: 180, nullable: true })
+  title!: string | null;
+
+  @Column({ type: 'varchar', length: 32, default: 'new' })
+  status!: InboxConversationStatus;
+
+  @Column({ type: 'varchar', length: 24, default: 'normal' })
+  priority!: InboxConversationPriority;
+
+  @Column({ name: 'assigned_user_id', type: 'uuid', nullable: true })
+  assignedUserId!: string | null;
+
+  @Column({ name: 'assigned_agent_id', type: 'uuid', nullable: true })
+  assignedAgentId!: string | null;
+
+  @Column({ type: 'varchar', length: 40, default: 'manual' })
+  source!: string;
+
+  @Column({ name: 'business_mode', type: 'varchar', length: 80, default: 'general' })
+  businessMode!: string;
+
+  @Column({ name: 'last_message_preview', type: 'varchar', length: 260, nullable: true })
+  lastMessagePreview!: string | null;
+
+  @Column({ name: 'last_message_at', type: 'timestamptz', nullable: true })
+  lastMessageAt!: Date | null;
+
+  @Column({ name: 'unread_count', type: 'int', default: 0 })
+  unreadCount!: number;
+
+  @Column({ name: 'ai_enabled', type: 'boolean', default: false })
+  aiEnabled!: boolean;
+
+  @Column({ name: 'closed_at', type: 'timestamptz', nullable: true })
+  closedAt!: Date | null;
+
+  @Column({ name: 'archived_at', type: 'timestamptz', nullable: true })
+  archivedAt!: Date | null;
+
+  @Column({ type: 'jsonb', default: () => "'{}'::jsonb" })
+  metadata!: Record<string, unknown>;
+
+  @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
+  createdAt!: Date;
+
+  @UpdateDateColumn({ name: 'updated_at', type: 'timestamptz' })
+  updatedAt!: Date;
+}
