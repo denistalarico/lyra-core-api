@@ -473,6 +473,7 @@ export class InboxService {
     messageType?: string;
     content: string;
     metadata?: Record<string, unknown>;
+    conversationMetadata?: Record<string, unknown>;
     createdAt?: Date | string | null;
   }) {
     const existingMessage = await this.messagesRepository.findOne({
@@ -494,6 +495,7 @@ export class InboxService {
       visitorId: input.visitorId ?? '',
       conversationId: input.conversationId,
       lastMessageAt: input.createdAt ?? new Date(),
+      metadata: input.conversationMetadata ?? {},
     });
 
     const direction =

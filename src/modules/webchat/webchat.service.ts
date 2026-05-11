@@ -8,6 +8,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { FilesService } from '../../common/files/files.service';
 import { InboxService } from '../inbox/inbox.service';
+import { InboxSettingsService } from '../inbox/inbox-settings.service';
 import type { RequestContext } from '../../common/context/request-context.interface';
 import { CreatePublicWebchatConversationDto } from './dto/create-public-webchat-conversation.dto';
 import { CreatePublicWebchatMessageDto } from './dto/create-public-webchat-message.dto';
@@ -43,6 +44,7 @@ export class WebchatService {
     private readonly inboxService: InboxService,
 
     private readonly filesService: FilesService,
+    private readonly inboxSettingsService: InboxSettingsService,
   ) {}
 
   async listWidgets(ctx: RequestContext) {
@@ -109,15 +111,18 @@ export class WebchatService {
     if (dto.title !== undefined) {
       widget.title = dto.title.trim() || 'Olá! Como podemos ajudar?';
     }
-    if (dto.subtitle !== undefined) widget.subtitle = this.nullableString(dto.subtitle);
+    if (dto.subtitle !== undefined)
+      widget.subtitle = this.nullableString(dto.subtitle);
     if (dto.initialMessage !== undefined) {
       widget.initialMessage = this.nullableString(dto.initialMessage);
     }
     if (dto.primaryColor !== undefined) widget.primaryColor = dto.primaryColor;
     if (dto.position !== undefined) widget.position = dto.position;
-    if (dto.defaultLocale !== undefined) widget.defaultLocale = dto.defaultLocale;
+    if (dto.defaultLocale !== undefined)
+      widget.defaultLocale = dto.defaultLocale;
     if (dto.aiEnabled !== undefined) widget.aiEnabled = dto.aiEnabled;
-    if (dto.defaultAgentId !== undefined) widget.defaultAgentId = dto.defaultAgentId;
+    if (dto.defaultAgentId !== undefined)
+      widget.defaultAgentId = dto.defaultAgentId;
     if (dto.agentDisplayName !== undefined) {
       widget.agentDisplayName = this.nullableString(dto.agentDisplayName);
     }
@@ -212,8 +217,9 @@ export class WebchatService {
         throw new BadRequestException('Invalid conversation status.');
       }
 
-      (where as unknown as { status: WebchatConversationEntity['status'] }).status =
-        query.status as WebchatConversationEntity['status'];
+      (
+        where as unknown as { status: WebchatConversationEntity['status'] }
+      ).status = query.status as WebchatConversationEntity['status'];
     }
 
     const [items, total] = await this.conversationsRepository.findAndCount({
@@ -280,7 +286,8 @@ export class WebchatService {
       throw new BadRequestException('Message content is required.');
     }
 
-    conversation.status = conversation.status === 'new' ? 'active' : conversation.status;
+    conversation.status =
+      conversation.status === 'new' ? 'active' : conversation.status;
     conversation.lastMessageAt = new Date();
 
     await this.conversationsRepository.save(conversation);
@@ -397,7 +404,8 @@ export class WebchatService {
       metadata: dto.metadata ?? {},
     });
 
-    const savedConversation = await this.conversationsRepository.save(conversation);
+    const savedConversation =
+      await this.conversationsRepository.save(conversation);
 
     await this.inboxService.upsertConversationFromWebchat({
       tenantId: savedConversation.tenantId,
@@ -418,7 +426,12 @@ export class WebchatService {
       assignedAgentId: savedConversation.assignedAgentId,
       aiEnabled: savedConversation.aiEnabled,
       lastMessageAt: savedConversation.lastMessageAt,
-      metadata: savedConversation.metadata,
+      metadata: {
+        ...(savedConversation.metadata ?? {}),
+        visitorName: visitor.name,
+        visitorEmail: visitor.email,
+        visitorPhone: visitor.phone,
+      },
     });
 
     if (widget.initialMessage) {
@@ -441,7 +454,8 @@ export class WebchatService {
       });
 
       savedConversation.lastMessageAt = new Date();
-      const savedSystemMessage = await this.messagesRepository.save(systemMessage);
+      const savedSystemMessage =
+        await this.messagesRepository.save(systemMessage);
 
       await this.inboxService.createMessageFromWebchat({
         tenantId: savedSystemMessage.tenantId,
@@ -494,7 +508,9 @@ export class WebchatService {
     this.ensureOriginAllowed(widget, origin);
 
     if (conversation.visitorId !== dto.visitorId) {
-      throw new ForbiddenException('Visitor does not belong to this conversation.');
+      throw new ForbiddenException(
+        'Visitor does not belong to this conversation.',
+      );
     }
 
     if (['closed', 'archived'].includes(conversation.status)) {
@@ -522,11 +538,53 @@ export class WebchatService {
       metadata: dto.metadata ?? {},
     });
 
-    conversation.status = conversation.status === 'new' ? 'active' : conversation.status;
+    conversation.status =
+      conversation.status === 'new' ? 'active' : conversation.status;
     conversation.lastMessageAt = new Date();
 
     await this.conversationsRepository.save(conversation);
     const savedMessage = await this.messagesRepository.save(message);
+
+    const visitor = await this.visitorsRepository.findOne({
+      where: {
+        id: conversation.visitorId,
+        widgetId: conversation.widgetId,
+      },
+    });
+
+    const leadEvaluation = await this.inboxSettingsService.evaluateLeadRules(
+      {
+        tenantId: conversation.tenantId,
+        workspaceId: conversation.workspaceId,
+      },
+      {
+        channelType: 'webchat',
+        text: savedMessage.content,
+        visitor: {
+          name: visitor?.name,
+          email: visitor?.email,
+          phone: visitor?.phone,
+        },
+      },
+    );
+
+    const conversationMetadata: Record<string, unknown> = {
+      visitorName: visitor?.name ?? null,
+      visitorEmail: visitor?.email ?? null,
+      visitorPhone: visitor?.phone ?? null,
+      leadEvaluationCheckedAt: new Date().toISOString(),
+    };
+
+    if (leadEvaluation.isLead) {
+      Object.assign(conversationMetadata, {
+        isLead: true,
+        leadMarkedAutomatically: true,
+        leadMarkedAt: new Date().toISOString(),
+        leadRuleId: leadEvaluation.matchedRuleId,
+        leadRuleName: leadEvaluation.matchedRuleName,
+        leadReason: leadEvaluation.reason,
+      });
+    }
 
     await this.inboxService.createMessageFromWebchat({
       tenantId: savedMessage.tenantId,
@@ -542,6 +600,7 @@ export class WebchatService {
       messageType: savedMessage.messageType,
       content: savedMessage.content,
       metadata: savedMessage.metadata,
+      conversationMetadata,
       createdAt: savedMessage.createdAt,
     });
 
@@ -581,7 +640,9 @@ export class WebchatService {
     this.ensureOriginAllowed(widget, origin);
 
     if (conversation.visitorId !== visitorId) {
-      throw new ForbiddenException('Visitor does not belong to this conversation.');
+      throw new ForbiddenException(
+        'Visitor does not belong to this conversation.',
+      );
     }
 
     const messages = await this.messagesRepository.find({
@@ -615,7 +676,10 @@ export class WebchatService {
     return widget;
   }
 
-  private async findConversationOrFail(ctx: RequestContext, conversationId: string) {
+  private async findConversationOrFail(
+    ctx: RequestContext,
+    conversationId: string,
+  ) {
     const workspaceId = this.requireWorkspaceId(ctx);
 
     const conversation = await this.conversationsRepository.findOne({
@@ -749,7 +813,9 @@ export class WebchatService {
     const isAllowed = allowedDomains.some((domain) => {
       const allowedHost = this.extractHost(domain) ?? domain.toLowerCase();
 
-      return originHost === allowedHost || originHost.endsWith(`.${allowedHost}`);
+      return (
+        originHost === allowedHost || originHost.endsWith(`.${allowedHost}`)
+      );
     });
 
     if (!isAllowed) {
