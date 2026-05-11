@@ -279,7 +279,9 @@ const defaultInboxSettings = {
     },
   ],
 
-  metadata: {},
+  metadata: {
+    composerSendMode: 'ctrl_enter',
+  },
 };
 
 @Injectable()
@@ -329,6 +331,15 @@ export class InboxSettingsService {
     });
 
     if (settings) {
+      if (!settings.metadata?.composerSendMode) {
+        settings.metadata = {
+          ...(settings.metadata ?? {}),
+          composerSendMode: 'ctrl_enter',
+        };
+
+        return this.settingsRepository.save(settings);
+      }
+
       return settings;
     }
 

@@ -433,6 +433,7 @@ export class WebchatService {
         visitorName: visitor.name,
         visitorEmail: visitor.email,
         visitorPhone: visitor.phone,
+        visitorIpHash: visitor.ipHash,
       },
     });
 
@@ -574,27 +575,29 @@ export class WebchatService {
       visitorName: visitor?.name ?? null,
       visitorEmail: visitor?.email ?? null,
       visitorPhone: visitor?.phone ?? null,
+      visitorIpHash: visitor?.ipHash ?? null,
       leadEvaluationCheckedAt: new Date().toISOString(),
     };
 
     let linkedContactId: string | null = null;
 
     if (leadEvaluation.isLead && visitor) {
-      const linkedContact = await this.contactsService.findOrCreateLeadFromWebchat(
-        {
-          tenantId: conversation.tenantId,
-          workspaceId: conversation.workspaceId,
-        },
-        {
-          name: visitor.name,
-          email: visitor.email,
-          phone: visitor.phone,
-          webchatVisitorId: visitor.id,
-          webchatConversationId: conversation.id,
-          pageUrl: conversation.pageUrl,
-          pageTitle: conversation.pageTitle,
-        },
-      );
+      const linkedContact =
+        await this.contactsService.findOrCreateLeadFromWebchat(
+          {
+            tenantId: conversation.tenantId,
+            workspaceId: conversation.workspaceId,
+          },
+          {
+            name: visitor.name,
+            email: visitor.email,
+            phone: visitor.phone,
+            webchatVisitorId: visitor.id,
+            webchatConversationId: conversation.id,
+            pageUrl: conversation.pageUrl,
+            pageTitle: conversation.pageTitle,
+          },
+        );
 
       linkedContactId = linkedContact?.id ?? null;
 

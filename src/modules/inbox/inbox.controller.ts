@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   Patch,
@@ -18,6 +19,10 @@ import { PatchInboxChannelDto } from './dto/patch-inbox-channel.dto';
 import { PatchInboxConversationDto } from './dto/patch-inbox-conversation.dto';
 import { InboxService, InboxConversationFilters } from './inbox.service';
 
+type MessageReactionBody = {
+  emoji?: string;
+};
+
 @Controller('inbox')
 @UseGuards(JwtAuthGuard)
 export class InboxController {
@@ -26,6 +31,11 @@ export class InboxController {
   @Get('channels')
   listChannels(@RequestContextData() ctx: RequestContext) {
     return this.inboxService.listChannels(ctx);
+  }
+
+  @Get('forward-targets')
+  listForwardTargets(@RequestContextData() ctx: RequestContext) {
+    return this.inboxService.listForwardTargets(ctx);
   }
 
   @Post('channels')
@@ -100,6 +110,78 @@ export class InboxController {
     return this.inboxService.markConversationRead(ctx, id);
   }
 
+  @Post('conversations/:id/mark-unread')
+  markConversationUnread(
+    @RequestContextData() ctx: RequestContext,
+    @Param('id') id: string,
+  ) {
+    return this.inboxService.markConversationUnread(ctx, id);
+  }
+
+  @Post('conversations/:id/archive')
+  archiveConversation(
+    @RequestContextData() ctx: RequestContext,
+    @Param('id') id: string,
+  ) {
+    return this.inboxService.archiveConversation(ctx, id);
+  }
+
+  @Post('conversations/:id/pin')
+  toggleConversationPin(
+    @RequestContextData() ctx: RequestContext,
+    @Param('id') id: string,
+  ) {
+    return this.inboxService.toggleConversationFlag(ctx, id, 'pinned');
+  }
+
+  @Post('conversations/:id/favorite')
+  toggleConversationFavorite(
+    @RequestContextData() ctx: RequestContext,
+    @Param('id') id: string,
+  ) {
+    return this.inboxService.toggleConversationFlag(ctx, id, 'favorite');
+  }
+
+  @Post('conversations/:id/mute')
+  toggleConversationMute(
+    @RequestContextData() ctx: RequestContext,
+    @Param('id') id: string,
+  ) {
+    return this.inboxService.toggleConversationFlag(ctx, id, 'muted');
+  }
+
+  @Post('conversations/:id/block')
+  toggleConversationBlock(
+    @RequestContextData() ctx: RequestContext,
+    @Param('id') id: string,
+  ) {
+    return this.inboxService.toggleConversationFlag(ctx, id, 'blocked');
+  }
+
+  @Post('conversations/:id/assume')
+  assumeConversation(
+    @RequestContextData() ctx: RequestContext,
+    @Param('id') id: string,
+  ) {
+    return this.inboxService.assumeConversation(ctx, id);
+  }
+
+  @Post('conversations/:id/clear')
+  clearConversation(
+    @RequestContextData() ctx: RequestContext,
+    @Param('id') id: string,
+  ) {
+    return this.inboxService.clearConversation(ctx, id);
+  }
+
+  @Delete('conversations/:id')
+  deleteConversation(
+    @RequestContextData() ctx: RequestContext,
+    @Param('id') id: string,
+  ) {
+    return this.inboxService.deleteConversation(ctx, id);
+  }
+
   @Get('conversations/:id/messages')
   listMessages(
     @RequestContextData() ctx: RequestContext,
@@ -115,6 +197,43 @@ export class InboxController {
     @Body() dto: CreateInboxMessageDto,
   ) {
     return this.inboxService.createMessage(ctx, id, dto);
+  }
+
+  @Post('conversations/:id/messages/:messageId/reaction')
+  reactToMessage(
+    @RequestContextData() ctx: RequestContext,
+    @Param('id') id: string,
+    @Param('messageId') messageId: string,
+    @Body() body: MessageReactionBody,
+  ) {
+    return this.inboxService.reactToMessage(ctx, id, messageId, body.emoji);
+  }
+
+  @Post('conversations/:id/messages/:messageId/pin')
+  toggleMessagePin(
+    @RequestContextData() ctx: RequestContext,
+    @Param('id') id: string,
+    @Param('messageId') messageId: string,
+  ) {
+    return this.inboxService.toggleMessageFlag(ctx, id, messageId, 'pinned');
+  }
+
+  @Post('conversations/:id/messages/:messageId/favorite')
+  toggleMessageFavorite(
+    @RequestContextData() ctx: RequestContext,
+    @Param('id') id: string,
+    @Param('messageId') messageId: string,
+  ) {
+    return this.inboxService.toggleMessageFlag(ctx, id, messageId, 'favorite');
+  }
+
+  @Delete('conversations/:id/messages/:messageId')
+  deleteMessage(
+    @RequestContextData() ctx: RequestContext,
+    @Param('id') id: string,
+    @Param('messageId') messageId: string,
+  ) {
+    return this.inboxService.deleteMessage(ctx, id, messageId);
   }
 
   @Get('conversations/:id/events')

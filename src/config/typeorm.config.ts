@@ -36,6 +36,7 @@ import { ScheduledItemReminderEntity } from '../modules/appointments/entities/sc
 import { InboxChannelEntity } from '../modules/inbox/entities/inbox-channel.entity';
 import { InboxConversationEntity } from '../modules/inbox/entities/inbox-conversation.entity';
 import { InboxMessageEntity } from '../modules/inbox/entities/inbox-message.entity';
+import { InboxSettingsEntity } from '../modules/inbox/entities/inbox-settings.entity';
 import { InboxConversationParticipantEntity } from '../modules/inbox/entities/inbox-conversation-participant.entity';
 import { InboxConversationEventEntity } from '../modules/inbox/entities/inbox-conversation-event.entity';
 
@@ -88,6 +89,7 @@ export function getTypeOrmConfig(): TypeOrmModuleOptions {
       InboxChannelEntity,
       InboxConversationEntity,
       InboxMessageEntity,
+      InboxSettingsEntity,
       InboxConversationParticipantEntity,
       InboxConversationEventEntity,
     ],

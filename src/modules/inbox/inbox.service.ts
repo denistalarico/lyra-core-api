@@ -1,12 +1,14 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { FindOptionsWhere, ILike, IsNull, Repository } from 'typeorm';
+import { FindOptionsWhere, ILike, In, IsNull, Repository } from 'typeorm';
 import type { RequestContext } from '../../common/context/request-context.interface';
 import { CreateInboxChannelDto } from './dto/create-inbox-channel.dto';
 import { CreateInboxConversationDto } from './dto/create-inbox-conversation.dto';
 import { CreateInboxMessageDto } from './dto/create-inbox-message.dto';
 import { PatchInboxChannelDto } from './dto/patch-inbox-channel.dto';
 import { PatchInboxConversationDto } from './dto/patch-inbox-conversation.dto';
+import { WorkspaceUserEntity } from '../settings/entities/workspace-user.entity';
+import { UserProfileEntity } from '../settings/entities/user-profile.entity';
 import { InboxChannelEntity } from './entities/inbox-channel.entity';
 import { InboxConversationEntity } from './entities/inbox-conversation.entity';
 import { InboxConversationEventEntity } from './entities/inbox-conversation-event.entity';
@@ -22,6 +24,9 @@ export type InboxConversationFilters = {
   q?: string;
 };
 
+type ConversationFlag = 'pinned' | 'favorite' | 'muted' | 'blocked';
+type MessageFlag = 'pinned' | 'favorite';
+
 @Injectable()
 export class InboxService {
   constructor(
@@ -35,6 +40,10 @@ export class InboxService {
     private readonly participantsRepository: Repository<InboxConversationParticipantEntity>,
     @InjectRepository(InboxConversationEventEntity)
     private readonly eventsRepository: Repository<InboxConversationEventEntity>,
+    @InjectRepository(WorkspaceUserEntity)
+    private readonly workspaceUsersRepository: Repository<WorkspaceUserEntity>,
+    @InjectRepository(UserProfileEntity)
+    private readonly userProfilesRepository: Repository<UserProfileEntity>,
   ) {}
 
   private getWorkspaceId(ctx: RequestContext) {
@@ -52,6 +61,24 @@ export class InboxService {
     };
   }
 
+  private async createEvent(
+    ctx: RequestContext,
+    conversationId: string,
+    eventType: string,
+    payload: Record<string, unknown> = {},
+  ) {
+    await this.eventsRepository.save(
+      this.eventsRepository.create({
+        ...this.scope(ctx),
+        conversationId,
+        eventType,
+        actorType: ctx.userId ? 'user' : 'system',
+        actorUserId: ctx.userId ?? null,
+        payload,
+      }),
+    );
+  }
+
   async listChannels(ctx: RequestContext) {
     return this.channelsRepository.find({
       where: {
@@ -62,6 +89,45 @@ export class InboxService {
         createdAt: 'ASC',
       },
     });
+  }
+
+  async listForwardTargets(ctx: RequestContext) {
+    const users = await this.workspaceUsersRepository.find({
+      where: {
+        ...this.scope(ctx),
+        status: 'active',
+      },
+      order: {
+        name: 'ASC',
+      },
+    });
+    const userIds = users
+      .map((user) => user.userId)
+      .filter((userId): userId is string => Boolean(userId));
+    const profiles =
+      userIds.length > 0
+        ? await this.userProfilesRepository.find({
+            where: {
+              tenantId: ctx.tenantId,
+              userId: In(userIds),
+            },
+          })
+        : [];
+
+    return users
+      .filter((user) => user.userId !== ctx.userId)
+      .map((user) => {
+        const profile = profiles.find((item) => item.userId === user.userId);
+
+        return {
+          id: user.id,
+          userId: user.userId,
+          name: user.name,
+          email: user.email,
+          status: user.status,
+          avatarUrl: profile?.avatarUrl ?? null,
+        };
+      });
   }
 
   async createChannel(ctx: RequestContext, dto: CreateInboxChannelDto) {
@@ -261,6 +327,138 @@ export class InboxService {
     return saved;
   }
 
+  async markConversationUnread(ctx: RequestContext, id: string) {
+    const conversation = await this.getConversation(ctx, id);
+    conversation.unreadCount = Math.max(conversation.unreadCount ?? 0, 1);
+    conversation.metadata = {
+      ...(conversation.metadata ?? {}),
+      manuallyMarkedUnread: true,
+      manuallyMarkedUnreadAt: new Date().toISOString(),
+      manuallyMarkedUnreadBy: ctx.userId ?? null,
+    };
+
+    const saved = await this.conversationsRepository.save(conversation);
+
+    await this.createEvent(ctx, saved.id, 'conversation_marked_unread');
+
+    return saved;
+  }
+
+  async archiveConversation(ctx: RequestContext, id: string) {
+    const conversation = await this.getConversation(ctx, id);
+    conversation.status = 'archived';
+    conversation.archivedAt = new Date();
+    conversation.metadata = {
+      ...(conversation.metadata ?? {}),
+      archivedBy: ctx.userId ?? null,
+    };
+
+    const saved = await this.conversationsRepository.save(conversation);
+
+    await this.createEvent(ctx, saved.id, 'conversation_archived');
+
+    return saved;
+  }
+
+  async toggleConversationFlag(
+    ctx: RequestContext,
+    id: string,
+    flag: ConversationFlag,
+  ) {
+    const conversation = await this.getConversation(ctx, id);
+    const metadata = conversation.metadata ?? {};
+    const currentValue = metadata[flag] === true;
+    const nextValue = !currentValue;
+    const eventAtKey = `${flag}At`;
+    const eventByKey = `${flag}By`;
+
+    conversation.metadata = {
+      ...metadata,
+      [flag]: nextValue,
+      [eventAtKey]: nextValue ? new Date().toISOString() : null,
+      [eventByKey]: nextValue ? ctx.userId ?? null : null,
+    };
+
+    const saved = await this.conversationsRepository.save(conversation);
+
+    await this.createEvent(ctx, saved.id, `conversation_${flag}_${nextValue ? 'enabled' : 'disabled'}`);
+
+    return saved;
+  }
+
+  async assumeConversation(ctx: RequestContext, id: string) {
+    if (!ctx.userId) {
+      throw new BadRequestException('User context is required to assume a conversation.');
+    }
+
+    const conversation = await this.getConversation(ctx, id);
+
+    conversation.assignedUserId = ctx.userId;
+    conversation.assignedAgentId = null;
+    conversation.aiEnabled = false;
+    conversation.status = conversation.status === 'new' ? 'open' : conversation.status;
+    conversation.metadata = {
+      ...(conversation.metadata ?? {}),
+      assumedAt: new Date().toISOString(),
+      assumedBy: ctx.userId,
+    };
+
+    const saved = await this.conversationsRepository.save(conversation);
+
+    await this.createEvent(ctx, saved.id, 'conversation_assumed', {
+      assignedUserId: ctx.userId,
+    });
+
+    return saved;
+  }
+
+  async clearConversation(ctx: RequestContext, id: string) {
+    const conversation = await this.getConversation(ctx, id);
+
+    await this.messagesRepository.delete({
+      ...this.scope(ctx),
+      conversationId: id,
+    });
+
+    conversation.lastMessagePreview = null;
+    conversation.lastMessageAt = null;
+    conversation.unreadCount = 0;
+    conversation.metadata = {
+      ...(conversation.metadata ?? {}),
+      clearedAt: new Date().toISOString(),
+      clearedBy: ctx.userId ?? null,
+    };
+
+    const saved = await this.conversationsRepository.save(conversation);
+
+    await this.createEvent(ctx, saved.id, 'conversation_cleared');
+
+    return saved;
+  }
+
+  async deleteConversation(ctx: RequestContext, id: string) {
+    await this.getConversation(ctx, id);
+
+    await this.messagesRepository.delete({
+      ...this.scope(ctx),
+      conversationId: id,
+    });
+    await this.participantsRepository.delete({
+      ...this.scope(ctx),
+      conversationId: id,
+    });
+    await this.eventsRepository.delete({
+      ...this.scope(ctx),
+      conversationId: id,
+    });
+    await this.conversationsRepository.delete({
+      ...this.scope(ctx),
+      id,
+    });
+
+    return { deleted: true, id };
+  }
+
   async listMessages(ctx: RequestContext, conversationId: string) {
     await this.getConversation(ctx, conversationId);
 
@@ -335,6 +533,141 @@ export class InboxService {
     return message;
   }
 
+  private async getMessage(
+    ctx: RequestContext,
+    conversationId: string,
+    messageId: string,
+  ) {
+    await this.getConversation(ctx, conversationId);
+
+    const message = await this.messagesRepository.findOne({
+      where: {
+        ...this.scope(ctx),
+        conversationId,
+        id: messageId,
+      },
+    });
+
+    if (!message) {
+      throw new NotFoundException('Inbox message not found.');
+    }
+
+    return message;
+  }
+
+  async reactToMessage(
+    ctx: RequestContext,
+    conversationId: string,
+    messageId: string,
+    emoji?: string,
+  ) {
+    const normalizedEmoji = emoji?.trim();
+
+    if (!normalizedEmoji) {
+      throw new BadRequestException('Emoji is required.');
+    }
+
+    const message = await this.getMessage(ctx, conversationId, messageId);
+    const metadata = message.metadata ?? {};
+    const existingReactions = Array.isArray(metadata.reactions)
+      ? metadata.reactions.filter(
+          (reaction): reaction is Record<string, unknown> =>
+            Boolean(reaction && typeof reaction === 'object'),
+        )
+      : [];
+    const actorKey = ctx.userId ? `user:${ctx.userId}` : 'system';
+    const currentReaction = existingReactions.find(
+      (reaction) => reaction.actorKey === actorKey,
+    );
+    const shouldRemoveReaction = currentReaction?.emoji === normalizedEmoji.slice(0, 16);
+    const nextReactions = shouldRemoveReaction
+      ? existingReactions.filter((reaction) => reaction.actorKey !== actorKey)
+      : [
+          ...existingReactions.filter((reaction) => reaction.actorKey !== actorKey),
+          {
+            actorKey,
+            actorType: ctx.userId ? 'user' : 'system',
+            byUserId: ctx.userId ?? null,
+            emoji: normalizedEmoji.slice(0, 16),
+            reactedAt: new Date().toISOString(),
+          },
+        ];
+
+    message.metadata = {
+      ...metadata,
+      reaction: nextReactions.at(-1) ?? null,
+      reactions: nextReactions,
+    };
+
+    const saved = await this.messagesRepository.save(message);
+
+    await this.createEvent(ctx, conversationId, shouldRemoveReaction ? 'message_reaction_removed' : 'message_reacted', {
+      messageId,
+      emoji: normalizedEmoji.slice(0, 16),
+    });
+
+    return saved;
+  }
+
+  async toggleMessageFlag(
+    ctx: RequestContext,
+    conversationId: string,
+    messageId: string,
+    flag: MessageFlag,
+  ) {
+    const message = await this.getMessage(ctx, conversationId, messageId);
+    const metadata = message.metadata ?? {};
+    const currentValue = metadata[flag] === true;
+    const nextValue = !currentValue;
+
+    message.metadata = {
+      ...metadata,
+      [flag]: nextValue,
+      [`${flag}At`]: nextValue ? new Date().toISOString() : null,
+      [`${flag}By`]: nextValue ? ctx.userId ?? null : null,
+    };
+
+    const saved = await this.messagesRepository.save(message);
+
+    await this.createEvent(ctx, conversationId, `message_${flag}_${nextValue ? 'enabled' : 'disabled'}`, {
+      messageId,
+    });
+
+    return saved;
+  }
+
+  async deleteMessage(ctx: RequestContext, conversationId: string, messageId: string) {
+    const message = await this.getMessage(ctx, conversationId, messageId);
+
+    await this.messagesRepository.delete({
+      ...this.scope(ctx),
+      conversationId,
+      id: messageId,
+    });
+
+    const latestMessage = await this.messagesRepository.findOne({
+      where: {
+        ...this.scope(ctx),
+        conversationId,
+      },
+      order: {
+        createdAt: 'DESC',
+      },
+    });
+
+    const conversation = await this.getConversation(ctx, conversationId);
+    conversation.lastMessagePreview = latestMessage?.content.slice(0, 260) ?? null;
+    conversation.lastMessageAt = latestMessage?.createdAt ?? null;
+
+    await this.conversationsRepository.save(conversation);
+
+    await this.createEvent(ctx, conversationId, 'message_deleted', {
+      messageId: message.id,
+    });
+
+    return { deleted: true, id: messageId };
+  }
+
   async listEvents(ctx: RequestContext, conversationId: string) {
     await this.getConversation(ctx, conversationId);
 
@@ -382,11 +715,11 @@ export class InboxService {
     });
 
     const mappedStatus = this.mapWebchatStatus(input.status);
-    const title =
-      input.pageTitle?.trim() ||
-      input.metadata?.visitorName?.toString() ||
-      input.metadata?.visitorEmail?.toString() ||
-      'Conversa do Webchat';
+    const title = this.resolveConversationTitle({
+      source: 'webchat',
+      metadata: input.metadata ?? {},
+      fallback: input.pageTitle,
+    });
 
     const metadata = {
       ...(existing?.metadata ?? {}),
@@ -406,7 +739,7 @@ export class InboxService {
     if (existing) {
       existing.channelId = channel.id;
       existing.contactId = input.contactId ?? existing.contactId;
-      existing.title = existing.title || title;
+      existing.title = title;
       existing.status = mappedStatus;
       existing.assignedUserId = input.assignedUserId ?? existing.assignedUserId;
       existing.assignedAgentId = input.assignedAgentId ?? existing.assignedAgentId;
@@ -629,6 +962,78 @@ export class InboxService {
       default:
         return 'new';
     }
+  }
+
+  private resolveConversationTitle(input: {
+    source?: string | null;
+    metadata: Record<string, unknown>;
+    fallback?: string | null;
+  }) {
+    const name = this.firstMetadataString(input.metadata, [
+      'contactName',
+      'displayName',
+      'visitorName',
+      'name',
+      'fullName',
+    ]);
+
+    if (name) return name;
+
+    const phone = this.firstMetadataString(input.metadata, [
+      'contactPhone',
+      'visitorPhone',
+      'phone',
+      'whatsapp',
+      'waPhone',
+    ]);
+    const email = this.firstMetadataString(input.metadata, [
+      'contactEmail',
+      'visitorEmail',
+      'email',
+    ]);
+
+    if (input.source === 'whatsapp' && phone) return phone;
+    if (email) return email;
+    if (phone) return phone;
+
+    const ip = this.firstMetadataString(input.metadata, [
+      'ip',
+      'ipAddress',
+      'visitorIp',
+      'visitorIpAddress',
+      'ipHash',
+      'visitorIpHash',
+    ]);
+
+    if (ip) return ip;
+
+    const socialHandle = this.firstMetadataString(input.metadata, [
+      'handle',
+      'username',
+      'socialHandle',
+      'instagramHandle',
+      'facebookHandle',
+      'messengerHandle',
+      'profileUsername',
+    ]);
+
+    if (socialHandle) {
+      return socialHandle.startsWith('@') ? socialHandle : `@${socialHandle}`;
+    }
+
+    return input.fallback?.trim() || 'Contato desconhecido';
+  }
+
+  private firstMetadataString(metadata: Record<string, unknown>, keys: string[]) {
+    for (const key of keys) {
+      const value = metadata[key];
+
+      if (typeof value === 'string' && value.trim()) {
+        return value.trim();
+      }
+    }
+
+    return null;
   }
 
 }

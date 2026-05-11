@@ -54,11 +54,13 @@ import { ScheduledItemReminderEntity } from '../modules/appointments/entities/sc
 import { InboxChannelEntity } from '../modules/inbox/entities/inbox-channel.entity';
 import { InboxConversationEntity } from '../modules/inbox/entities/inbox-conversation.entity';
 import { InboxMessageEntity } from '../modules/inbox/entities/inbox-message.entity';
+import { InboxSettingsEntity } from '../modules/inbox/entities/inbox-settings.entity';
 import { InboxConversationParticipantEntity } from '../modules/inbox/entities/inbox-conversation-participant.entity';
 import { InboxConversationEventEntity } from '../modules/inbox/entities/inbox-conversation-event.entity';
 import { CreateWebchatCore1760000018000 } from './migrations/1760000018000-create-webchat-core';
 import { CreateAppointmentsCore1760000019000 } from './migrations/1760000019000-create-appointments-core';
 import { CreateInboxCore1760000020000 } from './migrations/1760000020000-create-inbox-core';
+import { CreateInboxSettings1760000021000 } from './migrations/1760000021000-create-inbox-settings';
 
 export const AppDataSource = new DataSource({
   type: 'postgres',
@@ -123,5 +125,6 @@ export const AppDataSource = new DataSource({
     CreateWebchatCore1760000018000,
     CreateAppointmentsCore1760000019000,
     CreateInboxCore1760000020000,
+    CreateInboxSettings1760000021000,
   ],
 });
