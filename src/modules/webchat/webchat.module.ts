@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { FilesModule } from '../../common/files/files.module';
+import { ContactsModule } from '../contacts/contacts.module';
 import { InboxModule } from '../inbox/inbox.module';
 import { PublicWebchatController } from './public-webchat.controller';
 import { WebchatConversationEntity } from './entities/webchat-conversation.entity';
@@ -13,6 +14,7 @@ import { WebchatService } from './webchat.service';
 @Module({
   imports: [
     FilesModule,
+    ContactsModule,
     InboxModule,
     TypeOrmModule.forFeature([
       WebchatWidgetEntity,

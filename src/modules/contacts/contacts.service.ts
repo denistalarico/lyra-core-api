@@ -51,6 +51,16 @@ type ListContactsFilters = {
   offset?: string;
 };
 
+export type FindOrCreateLeadFromWebchatInput = {
+  name?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  webchatVisitorId?: string | null;
+  webchatConversationId?: string | null;
+  pageUrl?: string | null;
+  pageTitle?: string | null;
+};
+
 @Injectable()
 export class ContactsService {
   constructor(
@@ -193,6 +203,111 @@ export class ContactsService {
       limit,
       offset,
     };
+  }
+
+  async findOrCreateLeadFromWebchat(
+    ctx: RequestContext,
+    input: FindOrCreateLeadFromWebchatInput,
+  ) {
+    const workspaceId = this.requireWorkspaceId(ctx);
+
+    const name = input.name?.trim() || null;
+    const email = input.email?.trim().toLowerCase() || null;
+    const phone = input.phone?.trim() || null;
+    const normalizedPhone = phone ? phone.replace(/\\D/g, '') : null;
+
+    if (!name && !email && !phone) {
+      return null;
+    }
+
+    if (email) {
+      const existingByEmailMethod = await this.contactMethodsRepository
+        .createQueryBuilder('method')
+        .where('method.tenantId = :tenantId', { tenantId: ctx.tenantId })
+        .andWhere('method.workspaceId = :workspaceId', { workspaceId })
+        .andWhere('method.type = :type', { type: 'email' })
+        .andWhere('LOWER(method.value) = :email', { email })
+        .getOne();
+
+      if (existingByEmailMethod) {
+        const existingContact = await this.contactsRepository.findOne({
+          where: {
+            id: existingByEmailMethod.contactId,
+            tenantId: ctx.tenantId,
+            workspaceId,
+          },
+        });
+
+        if (existingContact) {
+          return existingContact;
+        }
+      }
+    }
+
+    if (phone) {
+      const existingByPhoneMethod = await this.contactMethodsRepository
+        .createQueryBuilder('method')
+        .where('method.tenantId = :tenantId', { tenantId: ctx.tenantId })
+        .andWhere('method.workspaceId = :workspaceId', { workspaceId })
+        .andWhere('method.type IN (:...types)', { types: ['phone', 'whatsapp'] })
+        .andWhere(
+          normalizedPhone
+            ? "regexp_replace(method.value, '\\D', '', 'g') = :normalizedPhone"
+            : 'method.value = :phone',
+          normalizedPhone ? { normalizedPhone } : { phone },
+        )
+        .getOne();
+
+      if (existingByPhoneMethod) {
+        const existingContact = await this.contactsRepository.findOne({
+          where: {
+            id: existingByPhoneMethod.contactId,
+            tenantId: ctx.tenantId,
+            workspaceId,
+          },
+        });
+
+        if (existingContact) {
+          return existingContact;
+        }
+      }
+    }
+
+    const displayName = name || email || phone || 'Lead Webchat';
+    const [firstName, ...lastNameParts] = displayName.split(' ').filter(Boolean);
+
+    const contact = this.contactsRepository.create({
+      tenantId: ctx.tenantId,
+      workspaceId,
+      type: 'person',
+      displayName,
+      firstName: firstName || null,
+      lastName: lastNameParts.length ? lastNameParts.join(' ') : null,
+      source: 'webchat',
+      businessMode: 'general',
+      lifecycleStage: 'lead',
+      status: 'active',
+      ownerUserId: null,
+      createdByUserId: ctx.userId ?? null,
+      notes: [
+        'Contato criado automaticamente a partir de lead do Webchat.',
+        input.pageTitle ? `Página: ${input.pageTitle}` : null,
+        input.pageUrl ? `URL: ${input.pageUrl}` : null,
+        input.webchatVisitorId ? `Webchat visitor: ${input.webchatVisitorId}` : null,
+        input.webchatConversationId
+          ? `Webchat conversation: ${input.webchatConversationId}`
+          : null,
+      ]
+        .filter(Boolean)
+        .join('\n'),
+    });
+
+    const savedContact = await this.contactsRepository.save(contact);
+
+    await this.createImportedMethodIfPresent(ctx, savedContact, 'email', email ?? undefined);
+    await this.createImportedMethodIfPresent(ctx, savedContact, 'phone', phone ?? undefined);
+
+    return savedContact;
   }
 
   async createContact(ctx: RequestContext, dto: CreateContactDto) {

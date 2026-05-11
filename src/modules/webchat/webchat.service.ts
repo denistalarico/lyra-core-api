@@ -9,6 +9,7 @@ import { Repository } from 'typeorm';
 import { FilesService } from '../../common/files/files.service';
 import { InboxService } from '../inbox/inbox.service';
 import { InboxSettingsService } from '../inbox/inbox-settings.service';
+import { ContactsService } from '../contacts/contacts.service';
 import type { RequestContext } from '../../common/context/request-context.interface';
 import { CreatePublicWebchatConversationDto } from './dto/create-public-webchat-conversation.dto';
 import { CreatePublicWebchatMessageDto } from './dto/create-public-webchat-message.dto';
@@ -45,6 +46,7 @@ export class WebchatService {
 
     private readonly filesService: FilesService,
     private readonly inboxSettingsService: InboxSettingsService,
+    private readonly contactsService: ContactsService,
   ) {}
 
   async listWidgets(ctx: RequestContext) {
@@ -574,6 +576,36 @@ export class WebchatService {
       visitorPhone: visitor?.phone ?? null,
       leadEvaluationCheckedAt: new Date().toISOString(),
     };
+
+    let linkedContactId: string | null = null;
+
+    if (leadEvaluation.isLead && visitor) {
+      const linkedContact = await this.contactsService.findOrCreateLeadFromWebchat(
+        {
+          tenantId: conversation.tenantId,
+          workspaceId: conversation.workspaceId,
+        },
+        {
+          name: visitor.name,
+          email: visitor.email,
+          phone: visitor.phone,
+          webchatVisitorId: visitor.id,
+          webchatConversationId: conversation.id,
+          pageUrl: conversation.pageUrl,
+          pageTitle: conversation.pageTitle,
+        },
+      );
+
+      linkedContactId = linkedContact?.id ?? null;
+
+      if (linkedContactId) {
+        Object.assign(conversationMetadata, {
+          contactId: linkedContactId,
+          contactLinkedFromWebchat: true,
+          contactLinkedAt: new Date().toISOString(),
+        });
+      }
+    }
 
     if (leadEvaluation.isLead) {
       Object.assign(conversationMetadata, {
