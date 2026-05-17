@@ -12,6 +12,7 @@ import { ContactsModule } from './modules/contacts/contacts.module';
 import { WebchatModule } from './modules/webchat/webchat.module';
 import { AppointmentsModule } from './modules/appointments/appointments.module';
 import { InboxModule } from './modules/inbox/inbox.module';
+import { CrmModule } from './modules/crm/crm.module';
 
 @Module({
   imports: [
@@ -28,6 +29,7 @@ import { InboxModule } from './modules/inbox/inbox.module';
     WebchatModule,
     AppointmentsModule,
     InboxModule,
+    CrmModule,
   ],
 })
 export class AppModule {}

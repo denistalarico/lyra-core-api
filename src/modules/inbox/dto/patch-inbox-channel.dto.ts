@@ -22,10 +22,12 @@ export class PatchInboxChannelDto {
 
   @IsOptional()
   @IsIn([
+    'internal',
     'manual',
     'webchat',
     'whatsapp',
     'instagram',
+    'facebook_messenger',
     'facebook',
     'email',
     'phone',
@@ -46,6 +48,35 @@ export class PatchInboxChannelDto {
   @IsString()
   @MaxLength(180)
   externalId?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(180)
+  externalAccountId?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(180)
+  externalPhoneNumberId?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(180)
+  externalPageId?: string;
+
+  @IsOptional()
+  @IsString()
+  accessToken?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(220)
+  verifyToken?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(220)
+  webhookSecret?: string;
 
   @IsOptional()
   @IsUUID()

@@ -1,4 +1,8 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { FindOptionsWhere, ILike, In, IsNull, Repository } from 'typeorm';
 import type { RequestContext } from '../../common/context/request-context.interface';
@@ -14,6 +18,7 @@ import { InboxConversationEntity } from './entities/inbox-conversation.entity';
 import { InboxConversationEventEntity } from './entities/inbox-conversation-event.entity';
 import { InboxConversationParticipantEntity } from './entities/inbox-conversation-participant.entity';
 import { InboxMessageEntity } from './entities/inbox-message.entity';
+import { SettingsCryptoService } from '../../common/crypto/settings-crypto.service';
 
 export type InboxConversationFilters = {
   status?: string;
@@ -44,6 +49,7 @@ export class InboxService {
     private readonly workspaceUsersRepository: Repository<WorkspaceUserEntity>,
     @InjectRepository(UserProfileEntity)
     private readonly userProfilesRepository: Repository<UserProfileEntity>,
+    private readonly cryptoService: SettingsCryptoService,
   ) {}
 
   private getWorkspaceId(ctx: RequestContext) {
@@ -134,10 +140,16 @@ export class InboxService {
     const channel = this.channelsRepository.create({
       ...this.scope(ctx),
       name: dto.name.trim(),
-      type: dto.type ?? 'manual',
+      type: dto.type ?? 'internal',
       status: dto.status ?? 'active',
       provider: dto.provider?.trim() || null,
       externalId: dto.externalId?.trim() || null,
+      externalAccountId: dto.externalAccountId?.trim() || null,
+      externalPhoneNumberId: dto.externalPhoneNumberId?.trim() || null,
+      externalPageId: dto.externalPageId?.trim() || null,
+      accessTokenEncrypted: this.cryptoService.encrypt(dto.accessToken),
+      verifyToken: dto.verifyToken?.trim() || null,
+      webhookSecret: dto.webhookSecret?.trim() || null,
       defaultAssignedUserId: dto.defaultAssignedUserId ?? null,
       defaultAgentId: dto.defaultAgentId ?? null,
       aiEnabled: dto.aiEnabled ?? false,
@@ -148,7 +160,11 @@ export class InboxService {
     return this.channelsRepository.save(channel);
   }
 
-  async patchChannel(ctx: RequestContext, id: string, dto: PatchInboxChannelDto) {
+  async patchChannel(
+    ctx: RequestContext,
+    id: string,
+    dto: PatchInboxChannelDto,
+  ) {
     const channel = await this.channelsRepository.findOne({
       where: {
         ...this.scope(ctx),
@@ -165,10 +181,46 @@ export class InboxService {
       name: dto.name?.trim() ?? channel.name,
       type: dto.type ?? channel.type,
       status: dto.status ?? channel.status,
-      provider: dto.provider !== undefined ? dto.provider?.trim() || null : channel.provider,
-      externalId: dto.externalId !== undefined ? dto.externalId?.trim() || null : channel.externalId,
-      defaultAssignedUserId: dto.defaultAssignedUserId !== undefined ? dto.defaultAssignedUserId : channel.defaultAssignedUserId,
-      defaultAgentId: dto.defaultAgentId !== undefined ? dto.defaultAgentId : channel.defaultAgentId,
+      provider:
+        dto.provider !== undefined
+          ? dto.provider?.trim() || null
+          : channel.provider,
+      externalId:
+        dto.externalId !== undefined
+          ? dto.externalId?.trim() || null
+          : channel.externalId,
+      externalAccountId:
+        dto.externalAccountId !== undefined
+          ? dto.externalAccountId?.trim() || null
+          : channel.externalAccountId,
+      externalPhoneNumberId:
+        dto.externalPhoneNumberId !== undefined
+          ? dto.externalPhoneNumberId?.trim() || null
+          : channel.externalPhoneNumberId,
+      externalPageId:
+        dto.externalPageId !== undefined
+          ? dto.externalPageId?.trim() || null
+          : channel.externalPageId,
+      accessTokenEncrypted:
+        dto.accessToken !== undefined
+          ? this.cryptoService.encrypt(dto.accessToken)
+          : channel.accessTokenEncrypted,
+      verifyToken:
+        dto.verifyToken !== undefined
+          ? dto.verifyToken?.trim() || null
+          : channel.verifyToken,
+      webhookSecret:
+        dto.webhookSecret !== undefined
+          ? dto.webhookSecret?.trim() || null
+          : channel.webhookSecret,
+      defaultAssignedUserId:
+        dto.defaultAssignedUserId !== undefined
+          ? dto.defaultAssignedUserId
+          : channel.defaultAssignedUserId,
+      defaultAgentId:
+        dto.defaultAgentId !== undefined
+          ? dto.defaultAgentId
+          : channel.defaultAgentId,
       aiEnabled: dto.aiEnabled ?? channel.aiEnabled,
       settings: dto.settings ?? channel.settings,
       metadata: dto.metadata ?? channel.metadata,
@@ -177,13 +229,18 @@ export class InboxService {
     return this.channelsRepository.save(channel);
   }
 
-  async listConversations(ctx: RequestContext, filters: InboxConversationFilters) {
+  async listConversations(
+    ctx: RequestContext,
+    filters: InboxConversationFilters,
+  ) {
     const where: FindOptionsWhere<InboxConversationEntity> = {
       ...this.scope(ctx),
     };
 
-    if (filters.status) where.status = filters.status as InboxConversationEntity['status'];
-    if (filters.priority) where.priority = filters.priority as InboxConversationEntity['priority'];
+    if (filters.status)
+      where.status = filters.status as InboxConversationEntity['status'];
+    if (filters.priority)
+      where.priority = filters.priority as InboxConversationEntity['priority'];
     if (filters.channelId) where.channelId = filters.channelId;
     if (filters.contactId) where.contactId = filters.contactId;
     if (filters.assignedUserId) where.assignedUserId = filters.assignedUserId;
@@ -201,7 +258,10 @@ export class InboxService {
     return { items, total };
   }
 
-  async createConversation(ctx: RequestContext, dto: CreateInboxConversationDto) {
+  async createConversation(
+    ctx: RequestContext,
+    dto: CreateInboxConversationDto,
+  ) {
     const now = new Date();
 
     const conversation = await this.conversationsRepository.save(
@@ -268,20 +328,38 @@ export class InboxService {
     };
 
     Object.assign(conversation, {
-      channelId: dto.channelId !== undefined ? dto.channelId : conversation.channelId,
-      contactId: dto.contactId !== undefined ? dto.contactId : conversation.contactId,
-      externalThreadId: dto.externalThreadId !== undefined ? dto.externalThreadId?.trim() || null : conversation.externalThreadId,
-      title: dto.title !== undefined ? dto.title?.trim() || null : conversation.title,
+      channelId:
+        dto.channelId !== undefined ? dto.channelId : conversation.channelId,
+      contactId:
+        dto.contactId !== undefined ? dto.contactId : conversation.contactId,
+      externalThreadId:
+        dto.externalThreadId !== undefined
+          ? dto.externalThreadId?.trim() || null
+          : conversation.externalThreadId,
+      title:
+        dto.title !== undefined
+          ? dto.title?.trim() || null
+          : conversation.title,
       status: dto.status ?? conversation.status,
       priority: dto.priority ?? conversation.priority,
-      assignedUserId: dto.assignedUserId !== undefined ? dto.assignedUserId : conversation.assignedUserId,
-      assignedAgentId: dto.assignedAgentId !== undefined ? dto.assignedAgentId : conversation.assignedAgentId,
+      assignedUserId:
+        dto.assignedUserId !== undefined
+          ? dto.assignedUserId
+          : conversation.assignedUserId,
+      assignedAgentId:
+        dto.assignedAgentId !== undefined
+          ? dto.assignedAgentId
+          : conversation.assignedAgentId,
       source: dto.source?.trim() || conversation.source,
       businessMode: dto.businessMode?.trim() || conversation.businessMode,
       aiEnabled: dto.aiEnabled ?? conversation.aiEnabled,
       metadata: dto.metadata ?? conversation.metadata,
-      closedAt: dto.status === 'closed' || dto.status === 'resolved' ? new Date() : conversation.closedAt,
-      archivedAt: dto.status === 'archived' ? new Date() : conversation.archivedAt,
+      closedAt:
+        dto.status === 'closed' || dto.status === 'resolved'
+          ? new Date()
+          : conversation.closedAt,
+      archivedAt:
+        dto.status === 'archived' ? new Date() : conversation.archivedAt,
     });
 
     const saved = await this.conversationsRepository.save(conversation);
@@ -376,19 +454,25 @@ export class InboxService {
       ...metadata,
       [flag]: nextValue,
       [eventAtKey]: nextValue ? new Date().toISOString() : null,
-      [eventByKey]: nextValue ? ctx.userId ?? null : null,
+      [eventByKey]: nextValue ? (ctx.userId ?? null) : null,
     };
 
     const saved = await this.conversationsRepository.save(conversation);
 
-    await this.createEvent(ctx, saved.id, `conversation_${flag}_${nextValue ? 'enabled' : 'disabled'}`);
+    await this.createEvent(
+      ctx,
+      saved.id,
+      `conversation_${flag}_${nextValue ? 'enabled' : 'disabled'}`,
+    );
 
     return saved;
   }
 
   async assumeConversation(ctx: RequestContext, id: string) {
     if (!ctx.userId) {
-      throw new BadRequestException('User context is required to assume a conversation.');
+      throw new BadRequestException(
+        'User context is required to assume a conversation.',
+      );
     }
 
     const conversation = await this.getConversation(ctx, id);
@@ -396,7 +480,8 @@ export class InboxService {
     conversation.assignedUserId = ctx.userId;
     conversation.assignedAgentId = null;
     conversation.aiEnabled = false;
-    conversation.status = conversation.status === 'new' ? 'open' : conversation.status;
+    conversation.status =
+      conversation.status === 'new' ? 'open' : conversation.status;
     conversation.metadata = {
       ...(conversation.metadata ?? {}),
       assumedAt: new Date().toISOString(),
@@ -483,7 +568,8 @@ export class InboxService {
     const now = new Date();
 
     const direction = dto.direction ?? 'outbound';
-    const senderType = dto.senderType ?? (direction === 'internal' ? 'user' : 'user');
+    const senderType =
+      dto.senderType ?? (direction === 'internal' ? 'user' : 'user');
 
     const message = await this.messagesRepository.save(
       this.messagesRepository.create({
@@ -507,7 +593,8 @@ export class InboxService {
 
     conversation.lastMessagePreview = message.content.slice(0, 260);
     conversation.lastMessageAt = message.createdAt ?? now;
-    conversation.status = conversation.status === 'new' ? 'open' : conversation.status;
+    conversation.status =
+      conversation.status === 'new' ? 'open' : conversation.status;
 
     if (direction === 'inbound') {
       conversation.unreadCount = (conversation.unreadCount ?? 0) + 1;
@@ -579,11 +666,14 @@ export class InboxService {
     const currentReaction = existingReactions.find(
       (reaction) => reaction.actorKey === actorKey,
     );
-    const shouldRemoveReaction = currentReaction?.emoji === normalizedEmoji.slice(0, 16);
+    const shouldRemoveReaction =
+      currentReaction?.emoji === normalizedEmoji.slice(0, 16);
     const nextReactions = shouldRemoveReaction
       ? existingReactions.filter((reaction) => reaction.actorKey !== actorKey)
       : [
-          ...existingReactions.filter((reaction) => reaction.actorKey !== actorKey),
+          ...existingReactions.filter(
+            (reaction) => reaction.actorKey !== actorKey,
+          ),
           {
             actorKey,
             actorType: ctx.userId ? 'user' : 'system',
@@ -601,10 +691,15 @@ export class InboxService {
 
     const saved = await this.messagesRepository.save(message);
 
-    await this.createEvent(ctx, conversationId, shouldRemoveReaction ? 'message_reaction_removed' : 'message_reacted', {
-      messageId,
-      emoji: normalizedEmoji.slice(0, 16),
-    });
+    await this.createEvent(
+      ctx,
+      conversationId,
+      shouldRemoveReaction ? 'message_reaction_removed' : 'message_reacted',
+      {
+        messageId,
+        emoji: normalizedEmoji.slice(0, 16),
+      },
+    );
 
     return saved;
   }
@@ -624,19 +719,28 @@ export class InboxService {
       ...metadata,
       [flag]: nextValue,
       [`${flag}At`]: nextValue ? new Date().toISOString() : null,
-      [`${flag}By`]: nextValue ? ctx.userId ?? null : null,
+      [`${flag}By`]: nextValue ? (ctx.userId ?? null) : null,
     };
 
     const saved = await this.messagesRepository.save(message);
 
-    await this.createEvent(ctx, conversationId, `message_${flag}_${nextValue ? 'enabled' : 'disabled'}`, {
-      messageId,
-    });
+    await this.createEvent(
+      ctx,
+      conversationId,
+      `message_${flag}_${nextValue ? 'enabled' : 'disabled'}`,
+      {
+        messageId,
+      },
+    );
 
     return saved;
   }
 
-  async deleteMessage(ctx: RequestContext, conversationId: string, messageId: string) {
+  async deleteMessage(
+    ctx: RequestContext,
+    conversationId: string,
+    messageId: string,
+  ) {
     const message = await this.getMessage(ctx, conversationId, messageId);
 
     await this.messagesRepository.delete({
@@ -656,7 +760,8 @@ export class InboxService {
     });
 
     const conversation = await this.getConversation(ctx, conversationId);
-    conversation.lastMessagePreview = latestMessage?.content.slice(0, 260) ?? null;
+    conversation.lastMessagePreview =
+      latestMessage?.content.slice(0, 260) ?? null;
     conversation.lastMessageAt = latestMessage?.createdAt ?? null;
 
     await this.conversationsRepository.save(conversation);
@@ -742,7 +847,8 @@ export class InboxService {
       existing.title = title;
       existing.status = mappedStatus;
       existing.assignedUserId = input.assignedUserId ?? existing.assignedUserId;
-      existing.assignedAgentId = input.assignedAgentId ?? existing.assignedAgentId;
+      existing.assignedAgentId =
+        input.assignedAgentId ?? existing.assignedAgentId;
       existing.aiEnabled = input.aiEnabled ?? existing.aiEnabled;
       existing.lastMessageAt = input.lastMessageAt
         ? new Date(input.lastMessageAt)
@@ -767,7 +873,9 @@ export class InboxService {
         source: 'webchat',
         businessMode: 'general',
         aiEnabled: input.aiEnabled ?? false,
-        lastMessageAt: input.lastMessageAt ? new Date(input.lastMessageAt) : null,
+        lastMessageAt: input.lastMessageAt
+          ? new Date(input.lastMessageAt)
+          : null,
         metadata,
       }),
     );
@@ -877,7 +985,8 @@ export class InboxService {
 
     if (input.direction === 'inbound') {
       conversation.unreadCount = (conversation.unreadCount ?? 0) + 1;
-      conversation.status = conversation.status === 'new' ? 'open' : conversation.status;
+      conversation.status =
+        conversation.status === 'new' ? 'open' : conversation.status;
     }
 
     await this.conversationsRepository.save(conversation);
@@ -1024,7 +1133,10 @@ export class InboxService {
     return input.fallback?.trim() || 'Contato desconhecido';
   }
 
-  private firstMetadataString(metadata: Record<string, unknown>, keys: string[]) {
+  private firstMetadataString(
+    metadata: Record<string, unknown>,
+    keys: string[],
+  ) {
     for (const key of keys) {
       const value = metadata[key];
 
@@ -1035,5 +1147,4 @@ export class InboxService {
 
     return null;
   }
-
 }

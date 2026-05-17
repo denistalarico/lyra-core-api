@@ -61,6 +61,20 @@ import { CreateWebchatCore1760000018000 } from './migrations/1760000018000-creat
 import { CreateAppointmentsCore1760000019000 } from './migrations/1760000019000-create-appointments-core';
 import { CreateInboxCore1760000020000 } from './migrations/1760000020000-create-inbox-core';
 import { CreateInboxSettings1760000021000 } from './migrations/1760000021000-create-inbox-settings';
+import { CrmPipelineEntity } from '../modules/crm/entities/crm-pipeline.entity';
+import { CrmStageEntity } from '../modules/crm/entities/crm-stage.entity';
+import { CrmOpportunityEntity } from '../modules/crm/entities/crm-opportunity.entity';
+import { CrmActivityEntity } from '../modules/crm/entities/crm-activity.entity';
+import { CrmTagEntity } from '../modules/crm/entities/crm-tag.entity';
+import { CrmOpportunityTagEntity } from '../modules/crm/entities/crm-opportunity-tag.entity';
+import { CrmOpportunityEventEntity } from '../modules/crm/entities/crm-opportunity-event.entity';
+import { CreateCrmCore1760000022000 } from './migrations/1760000022000-create-crm-core';
+import { ExpandCrmKanbanSettings1760000023000 } from './migrations/1760000023000-expand-crm-kanban-settings';
+import { ExpandInboxChannelsFoundation1760000024000 } from './migrations/1760000024000-expand-inbox-channels-foundation';
+import { InboxWebhookLogEntity } from '../modules/inbox/entities/inbox-webhook-log.entity';
+import { CreateInboxWebhookLogs1760000025000 } from './migrations/1760000025000-create-inbox-webhook-logs';
+import { InboxChannelConnectionSessionEntity } from '../modules/inbox/entities/inbox-channel-connection-session.entity';
+import { CreateInboxChannelConnectionSessions1760000026000 } from './migrations/1760000026000-create-inbox-channel-connection-sessions';
 
 export const AppDataSource = new DataSource({
   type: 'postgres',
@@ -102,6 +116,24 @@ export const AppDataSource = new DataSource({
     WebchatVisitorEntity,
     WebchatConversationEntity,
     WebchatMessageEntity,
+    ScheduledItemEntity,
+    ScheduledItemParticipantEntity,
+    ScheduledItemReminderEntity,
+    InboxChannelEntity,
+    InboxConversationEntity,
+    InboxMessageEntity,
+    InboxSettingsEntity,
+    InboxConversationParticipantEntity,
+    InboxConversationEventEntity,
+    CrmPipelineEntity,
+    CrmStageEntity,
+    CrmOpportunityEntity,
+    CrmActivityEntity,
+    CrmTagEntity,
+    CrmOpportunityTagEntity,
+    CrmOpportunityEventEntity,
+    InboxWebhookLogEntity,
+    InboxChannelConnectionSessionEntity,
   ],
   migrations: [
     CreateSettingsTables1760000000000,
@@ -126,5 +158,10 @@ export const AppDataSource = new DataSource({
     CreateAppointmentsCore1760000019000,
     CreateInboxCore1760000020000,
     CreateInboxSettings1760000021000,
+    CreateCrmCore1760000022000,
+    ExpandCrmKanbanSettings1760000023000,
+    ExpandInboxChannelsFoundation1760000024000,
+    CreateInboxWebhookLogs1760000025000,
+    CreateInboxChannelConnectionSessions1760000026000,
   ],
 });

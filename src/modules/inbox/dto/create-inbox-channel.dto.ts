@@ -1,5 +1,17 @@
-import { IsBoolean, IsIn, IsObject, IsOptional, IsString, IsUUID, MaxLength, MinLength } from 'class-validator';
-import type { InboxChannelType, InboxChannelStatus } from '../entities/inbox-channel.entity';
+import {
+  IsBoolean,
+  IsIn,
+  IsObject,
+  IsOptional,
+  IsString,
+  IsUUID,
+  MaxLength,
+  MinLength,
+} from 'class-validator';
+import type {
+  InboxChannelType,
+  InboxChannelStatus,
+} from '../entities/inbox-channel.entity';
 
 export class CreateInboxChannelDto {
   @IsString()
@@ -8,7 +20,18 @@ export class CreateInboxChannelDto {
   name!: string;
 
   @IsOptional()
-  @IsIn(['manual', 'webchat', 'whatsapp', 'instagram', 'facebook', 'email', 'phone', 'other'])
+  @IsIn([
+    'internal',
+    'manual',
+    'webchat',
+    'whatsapp',
+    'instagram',
+    'facebook_messenger',
+    'facebook',
+    'email',
+    'phone',
+    'other',
+  ])
   type?: InboxChannelType;
 
   @IsOptional()
@@ -24,6 +47,35 @@ export class CreateInboxChannelDto {
   @IsString()
   @MaxLength(180)
   externalId?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(180)
+  externalAccountId?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(180)
+  externalPhoneNumberId?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(180)
+  externalPageId?: string;
+
+  @IsOptional()
+  @IsString()
+  accessToken?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(220)
+  verifyToken?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(220)
+  webhookSecret?: string;
 
   @IsOptional()
   @IsUUID()

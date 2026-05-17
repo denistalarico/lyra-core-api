@@ -9,10 +9,12 @@ import {
 } from 'typeorm';
 
 export type InboxChannelType =
+  | 'internal'
   | 'manual'
   | 'webchat'
   | 'whatsapp'
   | 'instagram'
+  | 'facebook_messenger'
   | 'facebook'
   | 'email'
   | 'phone'
@@ -48,6 +50,49 @@ export class InboxChannelEntity {
 
   @Column({ name: 'external_id', type: 'varchar', length: 180, nullable: true })
   externalId!: string | null;
+
+  @Column({
+    name: 'external_account_id',
+    type: 'varchar',
+    length: 180,
+    nullable: true,
+  })
+  externalAccountId!: string | null;
+
+  @Column({
+    name: 'external_phone_number_id',
+    type: 'varchar',
+    length: 180,
+    nullable: true,
+  })
+  externalPhoneNumberId!: string | null;
+
+  @Column({
+    name: 'external_page_id',
+    type: 'varchar',
+    length: 180,
+    nullable: true,
+  })
+  externalPageId!: string | null;
+
+  @Column({ name: 'access_token_encrypted', type: 'text', nullable: true })
+  accessTokenEncrypted!: string | null;
+
+  @Column({
+    name: 'verify_token',
+    type: 'varchar',
+    length: 220,
+    nullable: true,
+  })
+  verifyToken!: string | null;
+
+  @Column({
+    name: 'webhook_secret',
+    type: 'varchar',
+    length: 220,
+    nullable: true,
+  })
+  webhookSecret!: string | null;
 
   @Column({ name: 'default_assigned_user_id', type: 'uuid', nullable: true })
   defaultAssignedUserId!: string | null;

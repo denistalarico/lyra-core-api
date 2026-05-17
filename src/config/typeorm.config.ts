@@ -39,6 +39,15 @@ import { InboxMessageEntity } from '../modules/inbox/entities/inbox-message.enti
 import { InboxSettingsEntity } from '../modules/inbox/entities/inbox-settings.entity';
 import { InboxConversationParticipantEntity } from '../modules/inbox/entities/inbox-conversation-participant.entity';
 import { InboxConversationEventEntity } from '../modules/inbox/entities/inbox-conversation-event.entity';
+import { CrmPipelineEntity } from '../modules/crm/entities/crm-pipeline.entity';
+import { CrmStageEntity } from '../modules/crm/entities/crm-stage.entity';
+import { CrmOpportunityEntity } from '../modules/crm/entities/crm-opportunity.entity';
+import { CrmActivityEntity } from '../modules/crm/entities/crm-activity.entity';
+import { CrmTagEntity } from '../modules/crm/entities/crm-tag.entity';
+import { CrmOpportunityTagEntity } from '../modules/crm/entities/crm-opportunity-tag.entity';
+import { CrmOpportunityEventEntity } from '../modules/crm/entities/crm-opportunity-event.entity';
+import { InboxWebhookLogEntity } from '../modules/inbox/entities/inbox-webhook-log.entity';
+import { InboxChannelConnectionSessionEntity } from '../modules/inbox/entities/inbox-channel-connection-session.entity';
 
 export function getTypeOrmConfig(): TypeOrmModuleOptions {
   return {
@@ -52,6 +61,13 @@ export function getTypeOrmConfig(): TypeOrmModuleOptions {
     autoLoadEntities: false,
     logging: false,
     entities: [
+      CrmPipelineEntity,
+      CrmStageEntity,
+      CrmOpportunityEntity,
+      CrmActivityEntity,
+      CrmTagEntity,
+      CrmOpportunityTagEntity,
+      CrmOpportunityEventEntity,
       UserPreferencesEntity,
       WorkspaceSettingsAiEntity,
       WorkspaceSettingsCompanyEntity,
@@ -92,6 +108,8 @@ export function getTypeOrmConfig(): TypeOrmModuleOptions {
       InboxSettingsEntity,
       InboxConversationParticipantEntity,
       InboxConversationEventEntity,
+      InboxWebhookLogEntity,
+      InboxChannelConnectionSessionEntity,
     ],
   };
 }
