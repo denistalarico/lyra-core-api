@@ -48,6 +48,64 @@ import { CrmOpportunityTagEntity } from '../modules/crm/entities/crm-opportunity
 import { CrmOpportunityEventEntity } from '../modules/crm/entities/crm-opportunity-event.entity';
 import { InboxWebhookLogEntity } from '../modules/inbox/entities/inbox-webhook-log.entity';
 import { InboxChannelConnectionSessionEntity } from '../modules/inbox/entities/inbox-channel-connection-session.entity';
+import {
+  AgencyEmailTwoFactorCodeEntity,
+  AgencyPasswordResetEntity,
+  AgencyUserSecuritySettingsEntity,
+  AgencyUserSessionEntity,
+  AgencyUserTrustedDeviceEntity,
+} from '../modules/agency/entities/agency-auth.entities';
+import {
+  AgencyUserNotificationPreferencesEntity,
+  AgencyUserPreferencesEntity,
+  AgencyUserProfileEntity,
+  AgencyWorkspaceAdvancedSettingsEntity,
+  AgencyWorkspaceAppsSettingsEntity,
+  AgencyWorkspaceCompanySettingsEntity,
+  AgencyWorkspaceEmailSettingsEntity,
+  AgencyWorkspaceFinanceSettingsEntity,
+  AgencyWorkspaceIntegrationEntity,
+  AgencyWorkspaceNotificationSettingsEntity,
+  AgencyWorkspaceSecuritySettingsEntity,
+  AgencyWorkspaceSubscriptionSettingsEntity,
+  AgencyWorkspaceUserEntity,
+  AgencyWorkspaceUserPermissionEntity,
+} from '../modules/agency/entities/agency-settings.entities';
+import {
+  AgencySalesActivityEntity,
+  AgencySalesItemEntity,
+  AgencySalesOpportunityEntity,
+  AgencySalesOpportunityItemEntity,
+  AgencySalesPipelineEntity,
+  AgencySalesStageEntity,
+} from '../modules/agency/entities/agency-sales.entities';
+
+export const agencyEntities = [
+  AgencyUserPreferencesEntity,
+  AgencyUserProfileEntity,
+  AgencyWorkspaceCompanySettingsEntity,
+  AgencyWorkspaceNotificationSettingsEntity,
+  AgencyUserNotificationPreferencesEntity,
+  AgencyWorkspaceSecuritySettingsEntity,
+  AgencyWorkspaceEmailSettingsEntity,
+  AgencyWorkspaceAppsSettingsEntity,
+  AgencyWorkspaceFinanceSettingsEntity,
+  AgencyWorkspaceSubscriptionSettingsEntity,
+  AgencyWorkspaceAdvancedSettingsEntity,
+  AgencyWorkspaceIntegrationEntity,
+  AgencyWorkspaceUserEntity,
+  AgencyWorkspaceUserPermissionEntity,
+  AgencyUserSecuritySettingsEntity,
+  AgencyUserSessionEntity,
+  AgencyUserTrustedDeviceEntity,
+  AgencyPasswordResetEntity,
+  AgencyEmailTwoFactorCodeEntity,
+  AgencySalesItemEntity,
+  AgencySalesPipelineEntity,
+  AgencySalesStageEntity,
+  AgencySalesOpportunityEntity,
+  AgencySalesOpportunityItemEntity,
+];
 
 export function getTypeOrmConfig(): TypeOrmModuleOptions {
   return {
@@ -111,5 +169,25 @@ export function getTypeOrmConfig(): TypeOrmModuleOptions {
       InboxWebhookLogEntity,
       InboxChannelConnectionSessionEntity,
     ],
+  };
+}
+
+export function getAgencyTypeOrmConfig(): TypeOrmModuleOptions {
+  return {
+    name: 'agency',
+    type: 'postgres',
+    host: process.env.AGENCY_DB_HOST ?? process.env.DB_HOST ?? 'localhost',
+    port: Number(process.env.AGENCY_DB_PORT ?? process.env.DB_PORT ?? 5433),
+    username:
+      process.env.AGENCY_DB_USERNAME ?? process.env.DB_USERNAME ?? 'lyra',
+    password:
+      process.env.AGENCY_DB_PASSWORD ??
+      process.env.DB_PASSWORD ??
+      'lyra_dev_password',
+    database: process.env.AGENCY_DB_NAME ?? 'lyra_agency',
+    synchronize: false,
+    autoLoadEntities: false,
+    logging: false,
+    entities: agencyEntities,
   };
 }

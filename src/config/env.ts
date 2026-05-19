@@ -8,6 +8,17 @@ export default () => ({
     password: process.env.DB_PASSWORD ?? 'lyra_dev_password',
     database: process.env.DB_NAME ?? 'lyra_core',
   },
+  agencyDatabase: {
+    host: process.env.AGENCY_DB_HOST ?? process.env.DB_HOST ?? 'localhost',
+    port: Number(process.env.AGENCY_DB_PORT ?? process.env.DB_PORT ?? 5433),
+    username:
+      process.env.AGENCY_DB_USERNAME ?? process.env.DB_USERNAME ?? 'lyra',
+    password:
+      process.env.AGENCY_DB_PASSWORD ??
+      process.env.DB_PASSWORD ??
+      'lyra_dev_password',
+    database: process.env.AGENCY_DB_NAME ?? 'lyra_agency',
+  },
   files: {
     s3: {
       endpoint: process.env.S3_ENDPOINT ?? 'http://localhost:9200',

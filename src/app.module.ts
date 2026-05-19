@@ -3,7 +3,10 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import env from './config/env';
-import { getTypeOrmConfig } from './config/typeorm.config';
+import {
+  getAgencyTypeOrmConfig,
+  getTypeOrmConfig,
+} from './config/typeorm.config';
 import { SettingsModule } from './modules/settings/settings.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { EmailModule } from './modules/email/email.module';
@@ -13,6 +16,9 @@ import { WebchatModule } from './modules/webchat/webchat.module';
 import { AppointmentsModule } from './modules/appointments/appointments.module';
 import { InboxModule } from './modules/inbox/inbox.module';
 import { CrmModule } from './modules/crm/crm.module';
+import { AgencyAuthModule } from './modules/agency/agency-auth.module';
+import { AgencySettingsModule } from './modules/agency/agency-settings.module';
+import { AgencySalesModule } from './modules/agency/agency-sales.module';
 
 @Module({
   imports: [
@@ -21,6 +27,7 @@ import { CrmModule } from './modules/crm/crm.module';
       load: [env],
     }),
     TypeOrmModule.forRoot(getTypeOrmConfig()),
+    TypeOrmModule.forRoot(getAgencyTypeOrmConfig()),
     SettingsModule,
     AuthModule,
     EmailModule,
@@ -30,6 +37,9 @@ import { CrmModule } from './modules/crm/crm.module';
     AppointmentsModule,
     InboxModule,
     CrmModule,
+    AgencyAuthModule,
+    AgencySettingsModule,
+    AgencySalesModule,
   ],
 })
 export class AppModule {}
