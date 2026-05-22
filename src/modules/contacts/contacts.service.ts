@@ -170,7 +170,9 @@ export class ContactsService {
             order: { createdAt: 'ASC' },
           })
         : [];
-    const tagIds = [...new Set(tagAssignments.map((assignment) => assignment.tagId))];
+    const tagIds = [
+      ...new Set(tagAssignments.map((assignment) => assignment.tagId)),
+    ];
     const contactTags =
       tagIds.length > 0
         ? await this.contactTagsRepository.find({
@@ -249,7 +251,9 @@ export class ContactsService {
         .createQueryBuilder('method')
         .where('method.tenantId = :tenantId', { tenantId: ctx.tenantId })
         .andWhere('method.workspaceId = :workspaceId', { workspaceId })
-        .andWhere('method.type IN (:...types)', { types: ['phone', 'whatsapp'] })
+        .andWhere('method.type IN (:...types)', {
+          types: ['phone', 'whatsapp'],
+        })
         .andWhere(
           normalizedPhone
             ? "regexp_replace(method.value, '\\D', '', 'g') = :normalizedPhone"
@@ -274,7 +278,9 @@ export class ContactsService {
     }
 
     const displayName = name || email || phone || 'Lead Webchat';
-    const [firstName, ...lastNameParts] = displayName.split(' ').filter(Boolean);
+    const [firstName, ...lastNameParts] = displayName
+      .split(' ')
+      .filter(Boolean);
 
     const contact = this.contactsRepository.create({
       tenantId: ctx.tenantId,
@@ -293,7 +299,9 @@ export class ContactsService {
         'Contato criado automaticamente a partir de lead do Webchat.',
         input.pageTitle ? `Página: ${input.pageTitle}` : null,
         input.pageUrl ? `URL: ${input.pageUrl}` : null,
-        input.webchatVisitorId ? `Webchat visitor: ${input.webchatVisitorId}` : null,
+        input.webchatVisitorId
+          ? `Webchat visitor: ${input.webchatVisitorId}`
+          : null,
         input.webchatConversationId
           ? `Webchat conversation: ${input.webchatConversationId}`
           : null,
@@ -304,8 +312,18 @@ export class ContactsService {
 
     const savedContact = await this.contactsRepository.save(contact);
 
-    await this.createImportedMethodIfPresent(ctx, savedContact, 'email', email ?? undefined);
-    await this.createImportedMethodIfPresent(ctx, savedContact, 'phone', phone ?? undefined);
+    await this.createImportedMethodIfPresent(
+      ctx,
+      savedContact,
+      'email',
+      email ?? undefined,
+    );
+    await this.createImportedMethodIfPresent(
+      ctx,
+      savedContact,
+      'phone',
+      phone ?? undefined,
+    );
 
     return savedContact;
   }
@@ -403,7 +421,11 @@ export class ContactsService {
     };
   }
 
-  async patchContact(ctx: RequestContext, contactId: string, dto: PatchContactDto) {
+  async patchContact(
+    ctx: RequestContext,
+    contactId: string,
+    dto: PatchContactDto,
+  ) {
     const contact = await this.findContactOrFail(ctx, contactId);
 
     if (dto.companyContactId !== undefined && dto.companyContactId !== null) {
@@ -420,20 +442,26 @@ export class ContactsService {
     }
 
     if (dto.type !== undefined) contact.type = dto.type;
-    if (dto.displayName !== undefined) contact.displayName = dto.displayName.trim();
-    if (dto.firstName !== undefined) contact.firstName = this.nullableString(dto.firstName);
-    if (dto.lastName !== undefined) contact.lastName = this.nullableString(dto.lastName);
-    if (dto.legalName !== undefined) contact.legalName = this.nullableString(dto.legalName);
+    if (dto.displayName !== undefined)
+      contact.displayName = dto.displayName.trim();
+    if (dto.firstName !== undefined)
+      contact.firstName = this.nullableString(dto.firstName);
+    if (dto.lastName !== undefined)
+      contact.lastName = this.nullableString(dto.lastName);
+    if (dto.legalName !== undefined)
+      contact.legalName = this.nullableString(dto.legalName);
     if (dto.documentType !== undefined) {
       contact.documentType = this.nullableString(dto.documentType);
     }
     if (dto.documentNumber !== undefined) {
       contact.documentNumber = this.nullableString(dto.documentNumber);
     }
-    if (dto.jobTitle !== undefined) contact.jobTitle = this.nullableString(dto.jobTitle);
+    if (dto.jobTitle !== undefined)
+      contact.jobTitle = this.nullableString(dto.jobTitle);
     if (dto.source !== undefined) contact.source = dto.source;
     if (dto.businessMode !== undefined) contact.businessMode = dto.businessMode;
-    if (dto.lifecycleStage !== undefined) contact.lifecycleStage = dto.lifecycleStage;
+    if (dto.lifecycleStage !== undefined)
+      contact.lifecycleStage = dto.lifecycleStage;
     if (dto.status !== undefined) contact.status = dto.status;
     if (dto.ownerUserId !== undefined) contact.ownerUserId = dto.ownerUserId;
     if (dto.notes !== undefined) contact.notes = this.nullableString(dto.notes);
@@ -569,8 +597,10 @@ export class ContactsService {
     }
 
     if (dto.type !== undefined) address.type = dto.type;
-    if (dto.street !== undefined) address.street = this.nullableString(dto.street);
-    if (dto.number !== undefined) address.number = this.nullableString(dto.number);
+    if (dto.street !== undefined)
+      address.street = this.nullableString(dto.street);
+    if (dto.number !== undefined)
+      address.number = this.nullableString(dto.number);
     if (dto.complement !== undefined) {
       address.complement = this.nullableString(dto.complement);
     }
@@ -589,7 +619,11 @@ export class ContactsService {
     return this.contactAddressesRepository.save(address);
   }
 
-  async deleteAddress(ctx: RequestContext, contactId: string, addressId: string) {
+  async deleteAddress(
+    ctx: RequestContext,
+    contactId: string,
+    addressId: string,
+  ) {
     await this.findContactOrFail(ctx, contactId);
 
     const result = await this.contactAddressesRepository.delete({
@@ -605,8 +639,76 @@ export class ContactsService {
     return { deleted: true };
   }
 
+  private async ensureLeadFlowSystemList(ctx: RequestContext) {
+    const workspaceId = this.requireWorkspaceId(ctx);
+
+    const existing = await this.contactListsRepository.findOne({
+      where: {
+        tenantId: ctx.tenantId,
+        workspaceId,
+        name: 'LeadFlow',
+      },
+    });
+
+    if (existing) {
+      let changed = false;
+
+      if (!existing.isSystem) {
+        existing.isSystem = true;
+        changed = true;
+      }
+
+      if (!existing.isProtected) {
+        existing.isProtected = true;
+        changed = true;
+      }
+
+      if (existing.sourceProduct !== 'leadflow') {
+        existing.sourceProduct = 'leadflow';
+        changed = true;
+      }
+
+      if (existing.sourceContext !== 'shared_contacts') {
+        existing.sourceContext = 'shared_contacts';
+        changed = true;
+      }
+
+      if (existing.visibility !== 'workspace') {
+        existing.visibility = 'workspace';
+        changed = true;
+      }
+
+      if (existing.parentListId !== null) {
+        existing.parentListId = null;
+        changed = true;
+      }
+
+      return changed ? this.contactListsRepository.save(existing) : existing;
+    }
+
+    const leadFlowList = this.contactListsRepository.create({
+      tenantId: ctx.tenantId,
+      workspaceId,
+      name: 'LeadFlow',
+      description:
+        'Lista protegida para contatos compartilhados ou espelhados do Lyra LeadFlow.',
+      color: '#2563EB',
+      parentListId: null,
+      visibility: 'workspace',
+      isSystem: true,
+      isProtected: true,
+      sourceProduct: 'leadflow',
+      sourceContext: 'shared_contacts',
+      createdByUserId: ctx.userId ?? null,
+    });
+
+    return this.contactListsRepository.save(leadFlowList);
+  }
+
   async listLists(ctx: RequestContext) {
     const workspaceId = this.requireWorkspaceId(ctx);
+
+    await this.ensureLeadFlowSystemList(ctx);
 
     return this.contactListsRepository.find({
       where: {
@@ -619,7 +721,11 @@ export class ContactsService {
 
   async createList(ctx: RequestContext, dto: CreateContactListDto) {
     const workspaceId = this.requireWorkspaceId(ctx);
-    const parentListId = await this.resolveParentListId(ctx, null, dto.parentListId);
+    const parentListId = await this.resolveParentListId(
+      ctx,
+      null,
+      dto.parentListId,
+    );
 
     const list = this.contactListsRepository.create({
       tenantId: ctx.tenantId,
@@ -629,19 +735,43 @@ export class ContactsService {
       color: dto.color ?? '#2563EB',
       parentListId,
       visibility: dto.visibility ?? 'workspace',
+      isSystem: false,
+      isProtected: false,
+      sourceProduct: null,
+      sourceContext: null,
       createdByUserId: ctx.userId ?? null,
     });
 
     try {
       return await this.contactListsRepository.save(list);
     } catch (error) {
-      this.throwConflictIfUniqueViolation(error, 'A contact list with this name already exists.');
+      this.throwConflictIfUniqueViolation(
+        error,
+        'A contact list with this name already exists.',
+      );
       throw error;
     }
   }
 
-  async patchList(ctx: RequestContext, listId: string, dto: PatchContactListDto) {
+  async patchList(
+    ctx: RequestContext,
+    listId: string,
+    dto: PatchContactListDto,
+  ) {
     const list = await this.findListOrFail(ctx, listId);
+
+    if (list.isProtected) {
+      const attemptsToChangeProtectedFields =
+        dto.name !== undefined ||
+        dto.parentListId !== undefined ||
+        dto.visibility !== undefined;
+
+      if (attemptsToChangeProtectedFields) {
+        throw new BadRequestException(
+          'This contact list is protected and cannot be renamed, moved or have its visibility changed.',
+        );
+      }
+    }
 
     if (dto.name !== undefined) list.name = dto.name.trim();
     if (dto.description !== undefined) {
@@ -649,20 +779,33 @@ export class ContactsService {
     }
     if (dto.color !== undefined) list.color = dto.color;
     if (dto.parentListId !== undefined) {
-      list.parentListId = await this.resolveParentListId(ctx, list.id, dto.parentListId);
+      list.parentListId = await this.resolveParentListId(
+        ctx,
+        list.id,
+        dto.parentListId,
+      );
     }
     if (dto.visibility !== undefined) list.visibility = dto.visibility;
 
     try {
       return await this.contactListsRepository.save(list);
     } catch (error) {
-      this.throwConflictIfUniqueViolation(error, 'A contact list with this name already exists.');
+      this.throwConflictIfUniqueViolation(
+        error,
+        'A contact list with this name already exists.',
+      );
       throw error;
     }
   }
 
   async deleteList(ctx: RequestContext, listId: string) {
     const list = await this.findListOrFail(ctx, listId);
+
+    if (list.isProtected) {
+      throw new BadRequestException(
+        'This contact list is protected and cannot be deleted.',
+      );
+    }
 
     await this.contactListsRepository.delete({
       id: list.id,
@@ -692,12 +835,19 @@ export class ContactsService {
     try {
       return await this.contactListMembersRepository.save(member);
     } catch (error) {
-      this.throwConflictIfUniqueViolation(error, 'This contact is already in this list.');
+      this.throwConflictIfUniqueViolation(
+        error,
+        'This contact is already in this list.',
+      );
       throw error;
     }
   }
 
-  async removeListMember(ctx: RequestContext, listId: string, contactId: string) {
+  async removeListMember(
+    ctx: RequestContext,
+    listId: string,
+    contactId: string,
+  ) {
     await this.findListOrFail(ctx, listId);
 
     const result = await this.contactListMembersRepository.delete({
@@ -738,7 +888,10 @@ export class ContactsService {
     try {
       return await this.contactTagsRepository.save(tag);
     } catch (error) {
-      this.throwConflictIfUniqueViolation(error, 'A contact tag with this name already exists.');
+      this.throwConflictIfUniqueViolation(
+        error,
+        'A contact tag with this name already exists.',
+      );
       throw error;
     }
   }
@@ -752,7 +905,10 @@ export class ContactsService {
     try {
       return await this.contactTagsRepository.save(tag);
     } catch (error) {
-      this.throwConflictIfUniqueViolation(error, 'A contact tag with this name already exists.');
+      this.throwConflictIfUniqueViolation(
+        error,
+        'A contact tag with this name already exists.',
+      );
       throw error;
     }
   }
@@ -783,7 +939,10 @@ export class ContactsService {
     try {
       return await this.contactTagAssignmentsRepository.save(assignment);
     } catch (error) {
-      this.throwConflictIfUniqueViolation(error, 'This tag is already assigned to this contact.');
+      this.throwConflictIfUniqueViolation(
+        error,
+        'This tag is already assigned to this contact.',
+      );
       throw error;
     }
   }
@@ -803,8 +962,6 @@ export class ContactsService {
 
     return { deleted: true };
   }
-
-
 
   getImportTemplateCsv() {
     return this.buildCsv([
@@ -958,7 +1115,12 @@ export class ContactsService {
 
   async importContactsCsv(
     ctx: RequestContext,
-    file: { originalname: string; mimetype?: string; buffer: Buffer; size: number },
+    file: {
+      originalname: string;
+      mimetype?: string;
+      buffer: Buffer;
+      size: number;
+    },
   ) {
     const workspaceId = this.requireWorkspaceId(ctx);
 
@@ -978,13 +1140,15 @@ export class ContactsService {
     const rows = this.parseCsv(content);
 
     if (rows.length < 2) {
-      throw new BadRequestException('CSV must have a header and at least one row.');
+      throw new BadRequestException(
+        'CSV must have a header and at least one row.',
+      );
     }
 
     const headers = rows[0].map((header) => header.trim());
-    const dataRows = rows.slice(1).filter((row) =>
-      row.some((value) => value.trim().length > 0),
-    );
+    const dataRows = rows
+      .slice(1)
+      .filter((row) => row.some((value) => value.trim().length > 0));
 
     const created: ContactEntity[] = [];
     const errors: Array<{ row: number; message: string }> = [];
@@ -1080,7 +1244,10 @@ export class ContactsService {
     });
   }
 
-  async createCustomField(ctx: RequestContext, dto: CreateContactCustomFieldDto) {
+  async createCustomField(
+    ctx: RequestContext,
+    dto: CreateContactCustomFieldDto,
+  ) {
     const workspaceId = this.requireWorkspaceId(ctx);
 
     const field = this.contactCustomFieldsRepository.create({
@@ -1148,7 +1315,9 @@ export class ContactsService {
     const field = await this.findCustomFieldOrFail(ctx, dto.fieldId);
 
     if (field.workspaceId !== contact.workspaceId) {
-      throw new BadRequestException('Custom field does not belong to this workspace.');
+      throw new BadRequestException(
+        'Custom field does not belong to this workspace.',
+      );
     }
 
     let value = await this.contactCustomFieldValuesRepository.findOne({
@@ -1177,7 +1346,8 @@ export class ContactsService {
 
     if (dto.valueText !== undefined) value.valueText = dto.valueText;
     if (dto.valueNumber !== undefined) {
-      value.valueNumber = dto.valueNumber === null ? null : String(dto.valueNumber);
+      value.valueNumber =
+        dto.valueNumber === null ? null : String(dto.valueNumber);
     }
     if (dto.valueBoolean !== undefined) value.valueBoolean = dto.valueBoolean;
     if (dto.valueDate !== undefined) value.valueDate = dto.valueDate;
@@ -1186,7 +1356,11 @@ export class ContactsService {
     return this.contactCustomFieldValuesRepository.save(value);
   }
 
-  async deleteCustomFieldValue(ctx: RequestContext, contactId: string, fieldId: string) {
+  async deleteCustomFieldValue(
+    ctx: RequestContext,
+    contactId: string,
+    fieldId: string,
+  ) {
     await this.findContactOrFail(ctx, contactId);
     await this.findCustomFieldOrFail(ctx, fieldId);
 
@@ -1238,7 +1412,11 @@ export class ContactsService {
     }
   }
 
-  async patchSegment(ctx: RequestContext, segmentId: string, dto: PatchContactSegmentDto) {
+  async patchSegment(
+    ctx: RequestContext,
+    segmentId: string,
+    dto: PatchContactSegmentDto,
+  ) {
     const segment = await this.findSegmentOrFail(ctx, segmentId);
 
     if (dto.name !== undefined) segment.name = dto.name.trim();
@@ -1421,9 +1599,21 @@ export class ContactsService {
 
     const defaults = [
       { key: 'general', name: 'Geral', color: '#2563EB' },
-      { key: 'service_quote', name: 'Prestadores / Orçamentos', color: '#0EA5E9' },
-      { key: 'clinic_booking', name: 'Clínicas / Agendamentos', color: '#16A34A' },
-      { key: 'restaurant_order', name: 'Restaurantes / Pedidos', color: '#F59E0B' },
+      {
+        key: 'service_quote',
+        name: 'Prestadores / Orçamentos',
+        color: '#0EA5E9',
+      },
+      {
+        key: 'clinic_booking',
+        name: 'Clínicas / Agendamentos',
+        color: '#16A34A',
+      },
+      {
+        key: 'restaurant_order',
+        name: 'Restaurantes / Pedidos',
+        color: '#F59E0B',
+      },
       { key: 'agency_service', name: 'Agências / Serviços', color: '#7C3AED' },
       { key: 'ecommerce', name: 'E-commerce', color: '#DC2626' },
       { key: 'education', name: 'Educação', color: '#64748B' },
@@ -1458,10 +1648,12 @@ export class ContactsService {
     }
   }
 
-
-
-  private buildCsv(rows: Array<Array<string | number | boolean | null | undefined>>) {
-    return rows.map((row) => row.map((value) => this.escapeCsvValue(value)).join(',')).join('\n');
+  private buildCsv(
+    rows: Array<Array<string | number | boolean | null | undefined>>,
+  ) {
+    return rows
+      .map((row) => row.map((value) => this.escapeCsvValue(value)).join(','))
+      .join('\n');
   }
 
   private escapeCsvValue(value: string | number | boolean | null | undefined) {
@@ -1541,7 +1733,10 @@ export class ContactsService {
     return record;
   }
 
-  private normalizeRequiredImportedString(value: string | undefined, field: string) {
+  private normalizeRequiredImportedString(
+    value: string | undefined,
+    field: string,
+  ) {
     const normalized = value?.trim() ?? '';
 
     if (!normalized) {
@@ -1606,7 +1801,14 @@ export class ContactsService {
 
   private normalizeImportedLifecycleStage(value?: string) {
     const normalized = value?.trim() || 'lead';
-    const allowed = ['lead', 'prospect', 'customer', 'partner', 'supplier', 'other'];
+    const allowed = [
+      'lead',
+      'prospect',
+      'customer',
+      'partner',
+      'supplier',
+      'other',
+    ];
 
     if (!allowed.includes(normalized)) {
       return 'lead';
@@ -1644,7 +1846,12 @@ export class ContactsService {
       contactId: contact.id,
       type,
       value: normalized,
-      label: type === 'email' ? 'E-mail' : type === 'phone' ? 'Telefone' : 'WhatsApp',
+      label:
+        type === 'email'
+          ? 'E-mail'
+          : type === 'phone'
+            ? 'Telefone'
+            : 'WhatsApp',
       isPrimary: true,
     });
 
@@ -1771,7 +1978,9 @@ export class ContactsService {
 
     while (currentParentId) {
       if (listId && currentParentId === listId) {
-        throw new BadRequestException('A contact list cannot be moved under its descendant.');
+        throw new BadRequestException(
+          'A contact list cannot be moved under its descendant.',
+        );
       }
 
       const currentParent = await this.findListOrFail(ctx, currentParentId);

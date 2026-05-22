@@ -6,6 +6,10 @@ import { CreateAgencyEmailSettings1760001001000 } from './migrations/17600010010
 import { CreateAgencySalesCore1760001002000 } from './migrations/1760001002000-create-agency-sales-core';
 import { CreateAgencySalesOpportunityItems1760001003000 } from './migrations/1760001003000-create-agency-sales-opportunity-items';
 import { CreateAgencySalesActivities1760001004000 } from './migrations/1760001004000-create-agency-sales-activities';
+import { CreateContactsCore1760000015000 } from './migrations/1760000015000-create-contacts-core';
+import { CreateContactsSettings1760000016000 } from './migrations/1760000016000-create-contacts-settings';
+import { AddContactListParent1760000017000 } from './migrations/1760000017000-add-contact-list-parent';
+import { AddAgencyContactListSystemFlags1760001005000 } from './migrations/1760001005000-add-agency-contact-list-system-flags';
 
 export const AgencyDataSource = new DataSource({
   type: 'postgres',
@@ -26,5 +30,9 @@ export const AgencyDataSource = new DataSource({
     CreateAgencySalesCore1760001002000,
     CreateAgencySalesOpportunityItems1760001003000,
     CreateAgencySalesActivities1760001004000,
+    CreateContactsCore1760000015000,
+    CreateContactsSettings1760000016000,
+    AddContactListParent1760000017000,
+    AddAgencyContactListSystemFlags1760001005000,
   ],
 });
