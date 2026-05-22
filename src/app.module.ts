@@ -19,6 +19,7 @@ import { CrmModule } from './modules/crm/crm.module';
 import { AgencyAuthModule } from './modules/agency/agency-auth.module';
 import { AgencySettingsModule } from './modules/agency/agency-settings.module';
 import { AgencySalesModule } from './modules/agency/agency-sales.module';
+import { AgencyContactsModule } from './modules/agency/agency-contacts.module';
 
 @Module({
   imports: [
@@ -40,6 +41,7 @@ import { AgencySalesModule } from './modules/agency/agency-sales.module';
     AgencyAuthModule,
     AgencySettingsModule,
     AgencySalesModule,
+    AgencyContactsModule,
   ],
 })
 export class AppModule {}
