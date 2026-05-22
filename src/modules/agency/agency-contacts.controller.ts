@@ -15,6 +15,8 @@ import type { RequestContext } from '../../common/context/request-context.interf
 import { AgencyContactsService } from './agency-contacts.service';
 import { CreateContactListDto } from '../contacts/dto/create-contact-list.dto';
 import { PatchContactListDto } from '../contacts/dto/patch-contact-list.dto';
+import { CreateContactDto } from '../contacts/dto/create-contact.dto';
+import { PatchContactDto } from '../contacts/dto/patch-contact.dto';
 
 type ListAgencyContactsQuery = {
   q?: string;
@@ -31,14 +33,6 @@ type ListAgencyContactsQuery = {
 @UseGuards(JwtAuthGuard)
 export class AgencyContactsController {
   constructor(private readonly agencyContactsService: AgencyContactsService) {}
-
-  @Get()
-  listContacts(
-    @RequestContextData() ctx: RequestContext,
-    @Query() query: ListAgencyContactsQuery,
-  ) {
-    return this.agencyContactsService.listContacts(ctx, query);
-  }
 
   @Get('lists')
   listLists(@RequestContextData() ctx: RequestContext) {
@@ -68,5 +62,46 @@ export class AgencyContactsController {
     @Param('listId') listId: string,
   ) {
     return this.agencyContactsService.deleteList(ctx, listId);
+  }
+
+  @Get()
+  listContacts(
+    @RequestContextData() ctx: RequestContext,
+    @Query() query: ListAgencyContactsQuery,
+  ) {
+    return this.agencyContactsService.listContacts(ctx, query);
+  }
+
+  @Post()
+  createContact(
+    @RequestContextData() ctx: RequestContext,
+    @Body() dto: CreateContactDto,
+  ) {
+    return this.agencyContactsService.createContact(ctx, dto);
+  }
+
+  @Get(':contactId')
+  getContact(
+    @RequestContextData() ctx: RequestContext,
+    @Param('contactId') contactId: string,
+  ) {
+    return this.agencyContactsService.getContact(ctx, contactId);
+  }
+
+  @Patch(':contactId')
+  patchContact(
+    @RequestContextData() ctx: RequestContext,
+    @Param('contactId') contactId: string,
+    @Body() dto: PatchContactDto,
+  ) {
+    return this.agencyContactsService.patchContact(ctx, contactId, dto);
+  }
+
+  @Delete(':contactId')
+  deleteContact(
+    @RequestContextData() ctx: RequestContext,
+    @Param('contactId') contactId: string,
+  ) {
+    return this.agencyContactsService.deleteContact(ctx, contactId);
   }
 }
