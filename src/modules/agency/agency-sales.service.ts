@@ -14,8 +14,11 @@ import type {
   CreateAgencySalesStageDto,
   LoseAgencySalesOpportunityDto,
   MoveAgencySalesOpportunityDto,
+  ReorderAgencySalesStagesDto,
   ReopenAgencySalesOpportunityDto,
   UpdateAgencySalesItemDto,
+  UpdateAgencySalesProductSettingsDto,
+  UpdateAgencySalesStageDto,
   WinAgencySalesOpportunityDto,
   UpdateAgencySalesOpportunityDto,
 } from './dto/agency-sales.dto';
@@ -34,6 +37,31 @@ type AgencyContext = {
   tenantId: string;
   workspaceId: string;
   userId?: string;
+};
+
+const defaultProductSettings = {
+  categories: [],
+  markers: [],
+  opportunitySources: [
+    'Meta Ads',
+    'Google Ads',
+    'Indicação',
+    'Formulário',
+    'Outbound',
+    'Facebook',
+    'Instagram',
+    'LinkedIn',
+  ],
+  lossReasons: [
+    { id: 'price', name: 'Preço' },
+    { id: 'timing', name: 'Timing' },
+    { id: 'competitor', name: 'Concorrente' },
+  ],
+  units: [
+    { id: 'unit-quantity', name: 'Quantidade', abbreviation: 'qtde' },
+    { id: 'unit-unit', name: 'Unidade', abbreviation: 'un' },
+    { id: 'unit-hours', name: 'Horas', abbreviation: 'hrs' },
+  ],
 };
 
 @Injectable()
@@ -151,6 +179,7 @@ export class AgencySalesService {
       status: 'open',
       expectedCloseDate: dto.expectedCloseDate,
       lostReason: dto.lostReason,
+      metadata: dto.metadata,
     });
   }
 
@@ -206,7 +235,7 @@ export class AgencySalesService {
       recurringPriceCents: dto.recurringPriceCents ?? 0,
       recurrenceInterval: dto.recurrenceInterval ?? null,
       status: dto.status ?? 'active',
-      metadata: {},
+      metadata: dto.metadata ?? {},
     });
 
     return this.itemsRepo.save(item);
@@ -228,19 +257,86 @@ export class AgencySalesService {
     id: string,
     dto: UpdateAgencySalesItemDto,
   ) {
-    await this.itemsRepo.update(
-      { id, tenantId: context.tenantId, workspaceId: context.workspaceId },
-      {
-        ...dto,
-        description: dto.description ?? undefined,
-        category: dto.category ?? undefined,
-        recurrenceInterval: dto.recurrenceInterval ?? undefined,
-      },
-    );
-
-    return this.itemsRepo.findOne({
+    const item = await this.itemsRepo.findOne({
       where: { id, tenantId: context.tenantId, workspaceId: context.workspaceId },
     });
+
+    if (!item) {
+      throw new BadRequestException('Sales item not found.');
+    }
+
+    Object.assign(item, {
+      ...dto,
+      description: dto.description ?? item.description,
+      category: dto.category ?? item.category,
+      recurrenceInterval: dto.recurrenceInterval ?? item.recurrenceInterval,
+      metadata: dto.metadata
+        ? { ...(item.metadata ?? {}), ...dto.metadata }
+        : item.metadata,
+    });
+
+    return this.itemsRepo.save(item);
+  }
+
+  async getProductSettings(context: AgencyContext) {
+    const pipeline = await this.ensureSettingsPipeline(context);
+    const productSettings = pipeline.metadata?.productSettings;
+
+    if (
+      productSettings &&
+      typeof productSettings === 'object' &&
+      !Array.isArray(productSettings)
+    ) {
+      return {
+        ...defaultProductSettings,
+        ...(productSettings as Record<string, unknown>),
+      };
+    }
+
+    return defaultProductSettings;
+  }
+
+  async updateProductSettings(
+    context: AgencyContext,
+    dto: UpdateAgencySalesProductSettingsDto,
+  ) {
+    const pipeline = await this.ensureSettingsPipeline(context);
+
+    pipeline.metadata = {
+      ...(pipeline.metadata ?? {}),
+      productSettings: {
+        categories: dto.categories,
+        markers: dto.markers,
+        units: dto.units ?? defaultProductSettings.units,
+        opportunitySources:
+          dto.opportunitySources ?? defaultProductSettings.opportunitySources,
+        lossReasons: dto.lossReasons ?? defaultProductSettings.lossReasons,
+      },
+    };
+
+    await this.pipelinesRepo.save(pipeline);
+
+    return this.getProductSettings(context);
+  }
+
+  private async ensureSettingsPipeline(context: AgencyContext) {
+    const pipeline = await this.getDefaultPipeline(context);
+
+    if (pipeline) {
+      return pipeline;
+    }
+
+    return this.pipelinesRepo.save(
+      this.pipelinesRepo.create({
+        tenantId: context.tenantId,
+        workspaceId: context.workspaceId,
+        name: 'Pipeline Comercial',
+        status: 'active',
+        isDefault: true,
+        position: 0,
+        metadata: {},
+      }),
+    );
   }
 
   async createPipeline(context: AgencyContext, dto: CreateAgencySalesPipelineDto) {
@@ -288,9 +384,95 @@ export class AgencySalesService {
         probability: dto.probability ?? 0,
         isClosed: dto.isClosed ?? false,
         isWon: dto.isWon ?? false,
-        metadata: {},
+        metadata: dto.metadata ?? {},
       }),
     );
+  }
+
+  async updateStage(
+    context: AgencyContext,
+    stageId: string,
+    dto: UpdateAgencySalesStageDto,
+  ) {
+    const stage = await this.stagesRepo.findOne({
+      where: {
+        id: stageId,
+        tenantId: context.tenantId,
+        workspaceId: context.workspaceId,
+      },
+    });
+
+    if (!stage) {
+      throw new BadRequestException('Stage not found.');
+    }
+
+    const metadata = dto.metadata
+      ? { ...(stage.metadata ?? {}), ...dto.metadata }
+      : stage.metadata;
+
+    await this.stagesRepo.update(stage.id, {
+      name: dto.name ?? stage.name,
+      type: dto.type ?? stage.type,
+      position: dto.position ?? stage.position,
+      probability: dto.probability ?? stage.probability,
+      isClosed: dto.isClosed ?? stage.isClosed,
+      isWon: dto.isWon ?? stage.isWon,
+      metadata: metadata as never,
+    });
+
+    return this.stagesRepo.findOne({
+      where: {
+        id: stage.id,
+        tenantId: context.tenantId,
+        workspaceId: context.workspaceId,
+      },
+    });
+  }
+
+  async reorderStages(
+    context: AgencyContext,
+    dto: ReorderAgencySalesStagesDto,
+  ) {
+    const stages = await this.stagesRepo.find({
+      where: {
+        tenantId: context.tenantId,
+        workspaceId: context.workspaceId,
+      },
+    });
+    const stagesById = new Map(stages.map((stage) => [stage.id, stage]));
+    const orderedStages = dto.stageIds.map((stageId) => stagesById.get(stageId));
+
+    if (orderedStages.some((stage) => !stage)) {
+      throw new BadRequestException('Invalid stage order.');
+    }
+
+    const pipelineIds = new Set(orderedStages.map((stage) => stage?.pipelineId));
+
+    if (pipelineIds.size !== 1) {
+      throw new BadRequestException('Stage order must belong to one pipeline.');
+    }
+
+    await Promise.all(
+      dto.stageIds.map((stageId, index) =>
+        this.stagesRepo.update(
+          {
+            id: stageId,
+            tenantId: context.tenantId,
+            workspaceId: context.workspaceId,
+          },
+          { position: index },
+        ),
+      ),
+    );
+
+    return this.stagesRepo.find({
+      where: {
+        tenantId: context.tenantId,
+        workspaceId: context.workspaceId,
+        pipelineId: orderedStages[0]?.pipelineId,
+      },
+      order: { position: 'ASC', createdAt: 'ASC' },
+    });
   }
 
   async createOpportunity(
@@ -314,7 +496,7 @@ export class AgencySalesService {
         status: dto.status ?? 'open',
         expectedCloseDate: dto.expectedCloseDate ?? null,
         lostReason: dto.lostReason ?? null,
-        metadata: {},
+        metadata: dto.metadata ?? {},
       }),
     );
   }
@@ -1089,16 +1271,20 @@ export class AgencySalesService {
     id: string,
     dto: UpdateAgencySalesOpportunityDto,
   ) {
+    const { metadata, ...opportunityPatch } = dto;
+
     await this.opportunitiesRepo.update(
       { id, tenantId: context.tenantId, workspaceId: context.workspaceId },
       {
-        ...dto,
+        ...opportunityPatch,
         description: dto.description ?? undefined,
         contactId: dto.contactId ?? undefined,
         companyContactId: dto.companyContactId ?? undefined,
-        ownerUserId: dto.ownerUserId ?? undefined,
+        ownerUserId:
+          dto.ownerUserId === undefined ? undefined : dto.ownerUserId,
         expectedCloseDate: dto.expectedCloseDate ?? undefined,
         lostReason: dto.lostReason ?? undefined,
+        metadata: metadata as never,
       },
     );
 

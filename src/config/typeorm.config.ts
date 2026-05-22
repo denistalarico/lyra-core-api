@@ -1,4 +1,5 @@
 import { TypeOrmModuleOptions } from '@nestjs/typeorm';
+
 import { UserPreferencesEntity } from '../modules/settings/entities/user-preferences.entity';
 import { WorkspaceSettingsAiEntity } from '../modules/settings/entities/workspace-settings-ai.entity';
 import { WorkspaceSettingsCompanyEntity } from '../modules/settings/entities/workspace-settings-company.entity';
@@ -12,8 +13,10 @@ import { UserSessionEntity } from '../modules/settings/entities/user-session.ent
 import { UserTrustedDeviceEntity } from '../modules/settings/entities/user-trusted-device.entity';
 import { UserNotificationEntity } from '../modules/settings/entities/user-notification.entity';
 import { WorkspaceUserInvitationEntity } from '../modules/settings/entities/workspace-user-invitation.entity';
+
 import { PasswordResetEntity } from '../modules/auth/entities/password-reset.entity';
 import { EmailTwoFactorCodeEntity } from '../modules/auth/entities/email-2fa-code.entity';
+
 import { ContactEntity } from '../modules/contacts/entities/contact.entity';
 import { ContactMethodEntity } from '../modules/contacts/entities/contact-method.entity';
 import { ContactAddressEntity } from '../modules/contacts/entities/contact-address.entity';
@@ -26,19 +29,25 @@ import { ContactCustomFieldValueEntity } from '../modules/contacts/entities/cont
 import { ContactSegmentEntity } from '../modules/contacts/entities/contact-segment.entity';
 import { ContactBusinessModeEntity } from '../modules/contacts/entities/contact-business-mode.entity';
 import { ContactViewPreferenceEntity } from '../modules/contacts/entities/contact-view-preference.entity';
+
 import { WebchatWidgetEntity } from '../modules/webchat/entities/webchat-widget.entity';
 import { WebchatVisitorEntity } from '../modules/webchat/entities/webchat-visitor.entity';
 import { WebchatConversationEntity } from '../modules/webchat/entities/webchat-conversation.entity';
 import { WebchatMessageEntity } from '../modules/webchat/entities/webchat-message.entity';
+
 import { ScheduledItemEntity } from '../modules/appointments/entities/scheduled-item.entity';
 import { ScheduledItemParticipantEntity } from '../modules/appointments/entities/scheduled-item-participant.entity';
 import { ScheduledItemReminderEntity } from '../modules/appointments/entities/scheduled-item-reminder.entity';
+
 import { InboxChannelEntity } from '../modules/inbox/entities/inbox-channel.entity';
 import { InboxConversationEntity } from '../modules/inbox/entities/inbox-conversation.entity';
 import { InboxMessageEntity } from '../modules/inbox/entities/inbox-message.entity';
 import { InboxSettingsEntity } from '../modules/inbox/entities/inbox-settings.entity';
 import { InboxConversationParticipantEntity } from '../modules/inbox/entities/inbox-conversation-participant.entity';
 import { InboxConversationEventEntity } from '../modules/inbox/entities/inbox-conversation-event.entity';
+import { InboxWebhookLogEntity } from '../modules/inbox/entities/inbox-webhook-log.entity';
+import { InboxChannelConnectionSessionEntity } from '../modules/inbox/entities/inbox-channel-connection-session.entity';
+
 import { CrmPipelineEntity } from '../modules/crm/entities/crm-pipeline.entity';
 import { CrmStageEntity } from '../modules/crm/entities/crm-stage.entity';
 import { CrmOpportunityEntity } from '../modules/crm/entities/crm-opportunity.entity';
@@ -46,15 +55,14 @@ import { CrmActivityEntity } from '../modules/crm/entities/crm-activity.entity';
 import { CrmTagEntity } from '../modules/crm/entities/crm-tag.entity';
 import { CrmOpportunityTagEntity } from '../modules/crm/entities/crm-opportunity-tag.entity';
 import { CrmOpportunityEventEntity } from '../modules/crm/entities/crm-opportunity-event.entity';
-import { InboxWebhookLogEntity } from '../modules/inbox/entities/inbox-webhook-log.entity';
-import { InboxChannelConnectionSessionEntity } from '../modules/inbox/entities/inbox-channel-connection-session.entity';
+
 import {
   AgencyEmailTwoFactorCodeEntity,
   AgencyPasswordResetEntity,
   AgencyUserSecuritySettingsEntity,
   AgencyUserSessionEntity,
-  AgencyUserTrustedDeviceEntity,
 } from '../modules/agency/entities/agency-auth.entities';
+
 import {
   AgencyUserNotificationPreferencesEntity,
   AgencyUserPreferencesEntity,
@@ -71,6 +79,7 @@ import {
   AgencyWorkspaceUserEntity,
   AgencyWorkspaceUserPermissionEntity,
 } from '../modules/agency/entities/agency-settings.entities';
+
 import {
   AgencySalesActivityEntity,
   AgencySalesItemEntity,
@@ -97,7 +106,6 @@ export const agencyEntities = [
   AgencyWorkspaceUserPermissionEntity,
   AgencyUserSecuritySettingsEntity,
   AgencyUserSessionEntity,
-  AgencyUserTrustedDeviceEntity,
   AgencyPasswordResetEntity,
   AgencyEmailTwoFactorCodeEntity,
   AgencySalesItemEntity,
@@ -105,6 +113,7 @@ export const agencyEntities = [
   AgencySalesStageEntity,
   AgencySalesOpportunityEntity,
   AgencySalesOpportunityItemEntity,
+  AgencySalesActivityEntity,
 ];
 
 export function getTypeOrmConfig(): TypeOrmModuleOptions {

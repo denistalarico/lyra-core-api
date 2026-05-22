@@ -1,6 +1,8 @@
 import {
+  IsArray,
   IsIn,
   IsInt,
+  IsObject,
   IsOptional,
   IsString,
   IsUUID,
@@ -68,9 +70,33 @@ export class CreateAgencySalesItemDto {
   @IsOptional()
   @IsIn(['active', 'inactive', 'archived'])
   status?: AgencySalesItemStatus;
+
+  @IsOptional()
+  @IsObject()
+  metadata?: Record<string, unknown>;
 }
 
 export class UpdateAgencySalesItemDto extends CreateAgencySalesItemDto {}
+
+export class UpdateAgencySalesProductSettingsDto {
+  @IsArray()
+  categories!: Array<Record<string, unknown>>;
+
+  @IsArray()
+  markers!: Array<Record<string, unknown>>;
+
+  @IsOptional()
+  @IsArray()
+  units?: Array<Record<string, unknown>>;
+
+  @IsOptional()
+  @IsArray()
+  opportunitySources?: string[];
+
+  @IsOptional()
+  @IsArray()
+  lossReasons?: Array<Record<string, unknown>>;
+}
 
 export class CreateAgencySalesPipelineDto {
   @IsString()
@@ -115,6 +141,46 @@ export class CreateAgencySalesStageDto {
 
   @IsOptional()
   isWon?: boolean;
+
+  @IsOptional()
+  @IsObject()
+  metadata?: Record<string, unknown>;
+}
+
+export class UpdateAgencySalesStageDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  name?: string;
+
+  @IsOptional()
+  @IsIn(['new', 'qualified', 'proposal', 'negotiation', 'won', 'lost', 'archived'])
+  type?: AgencySalesStageType;
+
+  @IsOptional()
+  @IsInt()
+  position?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  probability?: number;
+
+  @IsOptional()
+  isClosed?: boolean;
+
+  @IsOptional()
+  isWon?: boolean;
+
+  @IsOptional()
+  @IsObject()
+  metadata?: Record<string, unknown>;
+}
+
+export class ReorderAgencySalesStagesDto {
+  @IsArray()
+  @IsUUID('4', { each: true })
+  stageIds!: string[];
 }
 
 export class CreateAgencySalesOpportunityDto {
@@ -142,7 +208,7 @@ export class CreateAgencySalesOpportunityDto {
 
   @IsOptional()
   @IsUUID()
-  ownerUserId?: string;
+  ownerUserId?: string | null;
 
   @IsOptional()
   @IsInt()
@@ -171,6 +237,10 @@ export class CreateAgencySalesOpportunityDto {
   @IsString()
   @MaxLength(160)
   lostReason?: string;
+
+  @IsOptional()
+  @IsObject()
+  metadata?: Record<string, unknown>;
 }
 
 export class UpdateAgencySalesOpportunityDto extends CreateAgencySalesOpportunityDto {}
@@ -227,6 +297,10 @@ export class CreateAgencySalesQuickOpportunityDto {
   @IsString()
   @MaxLength(160)
   lostReason?: string;
+
+  @IsOptional()
+  @IsObject()
+  metadata?: Record<string, unknown>;
 }
 
 

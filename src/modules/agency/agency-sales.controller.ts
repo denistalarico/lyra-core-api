@@ -24,10 +24,13 @@ import {
   CreateAgencySalesQuickOpportunityDto,
   CreateAgencySalesStageDto,
   MoveAgencySalesOpportunityDto,
+  ReorderAgencySalesStagesDto,
   UpdateAgencySalesItemDto,
   UpdateAgencySalesActivityDto,
   UpdateAgencySalesOpportunityDto,
   UpdateAgencySalesOpportunityItemDto,
+  UpdateAgencySalesProductSettingsDto,
+  UpdateAgencySalesStageDto,
 } from './dto/agency-sales.dto';
 import { AgencySalesService } from './agency-sales.service';
 
@@ -90,6 +93,28 @@ export class AgencySalesController {
     );
   }
 
+  @Get('product-settings')
+  getProductSettings(
+    @AuthenticatedUser() user: AuthTokenPayload,
+    @Headers('x-workspace-id') workspaceId?: string,
+  ) {
+    return this.salesService.getProductSettings(
+      this.getContext(user, workspaceId),
+    );
+  }
+
+  @Patch('product-settings')
+  updateProductSettings(
+    @AuthenticatedUser() user: AuthTokenPayload,
+    @Headers('x-workspace-id') workspaceId: string | undefined,
+    @Body() dto: UpdateAgencySalesProductSettingsDto,
+  ) {
+    return this.salesService.updateProductSettings(
+      this.getContext(user, workspaceId),
+      dto,
+    );
+  }
+
   @Post('pipelines')
   createPipeline(
     @AuthenticatedUser() user: AuthTokenPayload,
@@ -119,6 +144,31 @@ export class AgencySalesController {
     return this.salesService.createStage(this.getContext(user, workspaceId), dto);
   }
 
+  @Patch('stages/reorder')
+  reorderStages(
+    @AuthenticatedUser() user: AuthTokenPayload,
+    @Headers('x-workspace-id') workspaceId: string | undefined,
+    @Body() dto: ReorderAgencySalesStagesDto,
+  ) {
+    return this.salesService.reorderStages(
+      this.getContext(user, workspaceId),
+      dto,
+    );
+  }
+
+  @Patch('stages/:id')
+  updateStage(
+    @AuthenticatedUser() user: AuthTokenPayload,
+    @Headers('x-workspace-id') workspaceId: string | undefined,
+    @Param('id') id: string,
+    @Body() dto: UpdateAgencySalesStageDto,
+  ) {
+    return this.salesService.updateStage(
+      this.getContext(user, workspaceId),
+      id,
+      dto,
+    );
+  }
 
   @Get('defaults')
   defaults(
@@ -159,22 +209,6 @@ export class AgencySalesController {
   ) {
     return this.salesService.listOpportunities(
       this.getContext(user, workspaceId),
-    );
-  }
-
-
-
-
-
-  @Get('opportunities/:id')
-  getOpportunityDetail(
-    @AuthenticatedUser() user: AuthTokenPayload,
-    @Headers('x-workspace-id') workspaceId: string | undefined,
-    @Param('id') id: string,
-  ) {
-    return this.salesService.getOpportunityDetail(
-      this.getContext(user, workspaceId),
-      id,
     );
   }
 
@@ -343,6 +377,18 @@ export class AgencySalesController {
       this.getContext(user, workspaceId),
       id,
       dto,
+    );
+  }
+
+  @Get('opportunities/:id')
+  getOpportunityDetail(
+    @AuthenticatedUser() user: AuthTokenPayload,
+    @Headers('x-workspace-id') workspaceId: string | undefined,
+    @Param('id') id: string,
+  ) {
+    return this.salesService.getOpportunityDetail(
+      this.getContext(user, workspaceId),
+      id,
     );
   }
 

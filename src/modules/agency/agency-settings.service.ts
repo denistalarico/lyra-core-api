@@ -7,7 +7,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { createHash, randomInt } from 'crypto';
 import { generateSecret, generateURI, verify } from 'otplib';
 import * as QRCode from 'qrcode';
-import { IsNull, Repository } from 'typeorm';
+import { In, IsNull, Repository } from 'typeorm';
 import { SettingsCryptoService } from '../../common/crypto/settings-crypto.service';
 import { FilesService } from '../../common/files/files.service';
 import { EmailService } from '../email/email.service';
@@ -872,9 +872,31 @@ export class AgencySettingsService {
       });
     }
 
+    const userIds = users
+      .map((user) => user.userId)
+      .filter((id): id is string => Boolean(id));
+    const profiles =
+      userIds.length > 0
+        ? await this.profileRepo.find({
+            where: {
+              tenantId,
+              userId: In(userIds),
+            },
+          })
+        : [];
+    const profileByUserId = new Map(
+      profiles.map((profile) => [profile.userId, profile]),
+    );
+
     return Promise.all(
       users.map(async (user) => ({
         ...user,
+        avatarUrl: user.userId
+          ? (profileByUserId.get(user.userId)?.avatarUrl ?? null)
+          : null,
+        avatarPath: user.userId
+          ? (profileByUserId.get(user.userId)?.avatarPath ?? null)
+          : null,
         permissions: await this.permissionsRepo.find({
           where: { tenantId, workspaceId, workspaceUserId: user.id },
           order: { appKey: 'ASC' },
