@@ -1807,6 +1807,7 @@ export class ContactsService {
       'customer',
       'partner',
       'supplier',
+      'internal',
       'other',
     ];
 

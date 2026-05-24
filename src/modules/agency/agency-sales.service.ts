@@ -21,6 +21,7 @@ import type {
   UpdateAgencySalesStageDto,
   WinAgencySalesOpportunityDto,
   UpdateAgencySalesOpportunityDto,
+  UpdateAgencySalesPipelineDto,
 } from './dto/agency-sales.dto';
 import {
   AgencySalesActivityEntity,
@@ -108,7 +109,6 @@ export class AgencySalesService {
       opportunities,
     };
   }
-
 
   async getDefaults(context: AgencyContext) {
     const pipeline = await this.getDefaultPipeline(context);
@@ -258,7 +258,11 @@ export class AgencySalesService {
     dto: UpdateAgencySalesItemDto,
   ) {
     const item = await this.itemsRepo.findOne({
-      where: { id, tenantId: context.tenantId, workspaceId: context.workspaceId },
+      where: {
+        id,
+        tenantId: context.tenantId,
+        workspaceId: context.workspaceId,
+      },
     });
 
     if (!item) {
@@ -339,7 +343,10 @@ export class AgencySalesService {
     );
   }
 
-  async createPipeline(context: AgencyContext, dto: CreateAgencySalesPipelineDto) {
+  async createPipeline(
+    context: AgencyContext,
+    dto: CreateAgencySalesPipelineDto,
+  ) {
     const pipeline = await this.pipelinesRepo.save(
       this.pipelinesRepo.create({
         tenantId: context.tenantId,
@@ -348,11 +355,76 @@ export class AgencySalesService {
         status: dto.status ?? 'active',
         isDefault: dto.isDefault ?? false,
         position: dto.position ?? 0,
-        metadata: {},
+        metadata: dto.metadata ?? {},
       }),
     );
 
     return pipeline;
+  }
+
+  async updatePipeline(
+    context: AgencyContext,
+    pipelineId: string,
+    dto: UpdateAgencySalesPipelineDto,
+  ) {
+    const pipeline = await this.pipelinesRepo.findOne({
+      where: {
+        id: pipelineId,
+        tenantId: context.tenantId,
+        workspaceId: context.workspaceId,
+      },
+    });
+
+    if (!pipeline) {
+      throw new BadRequestException('Pipeline not found.');
+    }
+
+    await this.pipelinesRepo.update(pipeline.id, {
+      name: dto.name ?? pipeline.name,
+      status: dto.status ?? pipeline.status,
+      isDefault: dto.isDefault ?? pipeline.isDefault,
+      position: dto.position ?? pipeline.position,
+      metadata: dto.metadata
+        ? ({ ...(pipeline.metadata ?? {}), ...dto.metadata } as any)
+        : pipeline.metadata,
+    });
+
+    return this.pipelinesRepo.findOne({
+      where: {
+        id: pipeline.id,
+        tenantId: context.tenantId,
+        workspaceId: context.workspaceId,
+      },
+    });
+  }
+
+  async deletePipeline(context: AgencyContext, pipelineId: string) {
+    const opportunityCount = await this.opportunitiesRepo.count({
+      where: {
+        tenantId: context.tenantId,
+        workspaceId: context.workspaceId,
+        pipelineId,
+      },
+    });
+
+    if (opportunityCount > 0) {
+      throw new BadRequestException(
+        'Cannot delete a pipeline with opportunities. Archive it instead.',
+      );
+    }
+
+    await this.stagesRepo.delete({
+      tenantId: context.tenantId,
+      workspaceId: context.workspaceId,
+      pipelineId,
+    });
+    await this.pipelinesRepo.delete({
+      id: pipelineId,
+      tenantId: context.tenantId,
+      workspaceId: context.workspaceId,
+    });
+
+    return { deleted: true };
   }
 
   async listPipelines(context: AgencyContext) {
@@ -440,13 +512,17 @@ export class AgencySalesService {
       },
     });
     const stagesById = new Map(stages.map((stage) => [stage.id, stage]));
-    const orderedStages = dto.stageIds.map((stageId) => stagesById.get(stageId));
+    const orderedStages = dto.stageIds.map((stageId) =>
+      stagesById.get(stageId),
+    );
 
     if (orderedStages.some((stage) => !stage)) {
       throw new BadRequestException('Invalid stage order.');
     }
 
-    const pipelineIds = new Set(orderedStages.map((stage) => stage?.pipelineId));
+    const pipelineIds = new Set(
+      orderedStages.map((stage) => stage?.pipelineId),
+    );
 
     if (pipelineIds.size !== 1) {
       throw new BadRequestException('Stage order must belong to one pipeline.');
@@ -500,8 +576,6 @@ export class AgencySalesService {
       }),
     );
   }
-
-
 
   async winOpportunity(
     context: AgencyContext,
@@ -765,10 +839,10 @@ export class AgencySalesService {
     });
   }
 
-
-
-
-  async listOpportunityActivities(context: AgencyContext, opportunityId: string) {
+  async listOpportunityActivities(
+    context: AgencyContext,
+    opportunityId: string,
+  ) {
     await this.ensureOpportunity(context, opportunityId);
 
     return this.activitiesRepo.find({
@@ -794,7 +868,10 @@ export class AgencySalesService {
         workspaceId: context.workspaceId,
         opportunityId,
         contactId: dto.contactId ?? opportunity.contactId ?? null,
-        assignedUserId: dto.assignedUserId ?? context.userId ?? null,
+        assignedUserId:
+          dto.assignedUserId === undefined
+            ? (context.userId ?? null)
+            : dto.assignedUserId,
         type: dto.type ?? 'follow_up',
         status: 'pending',
         title: dto.title,
@@ -842,13 +919,13 @@ export class AgencySalesService {
       dueAt: dto.dueAt ? new Date(dto.dueAt) : activity.dueAt,
       completedAt:
         nextStatus === 'done'
-          ? activity.completedAt ?? new Date()
+          ? (activity.completedAt ?? new Date())
           : nextStatus === 'pending'
             ? null
             : activity.completedAt,
       completedByUserId:
         nextStatus === 'done'
-          ? activity.completedByUserId ?? context.userId ?? null
+          ? (activity.completedByUserId ?? context.userId ?? null)
           : nextStatus === 'pending'
             ? null
             : activity.completedByUserId,
@@ -1216,7 +1293,10 @@ export class AgencySalesService {
     return { success: true };
   }
 
-  private async ensureOpportunity(context: AgencyContext, opportunityId: string) {
+  private async ensureOpportunity(
+    context: AgencyContext,
+    opportunityId: string,
+  ) {
     const opportunity = await this.opportunitiesRepo.findOne({
       where: {
         id: opportunityId,
@@ -1289,7 +1369,31 @@ export class AgencySalesService {
     );
 
     return this.opportunitiesRepo.findOne({
-      where: { id, tenantId: context.tenantId, workspaceId: context.workspaceId },
+      where: {
+        id,
+        tenantId: context.tenantId,
+        workspaceId: context.workspaceId,
+      },
     });
+  }
+
+  async deleteOpportunity(context: AgencyContext, id: string) {
+    await this.activitiesRepo.delete({
+      tenantId: context.tenantId,
+      workspaceId: context.workspaceId,
+      opportunityId: id,
+    });
+    await this.opportunityItemsRepo.delete({
+      tenantId: context.tenantId,
+      workspaceId: context.workspaceId,
+      opportunityId: id,
+    });
+    await this.opportunitiesRepo.delete({
+      id,
+      tenantId: context.tenantId,
+      workspaceId: context.workspaceId,
+    });
+
+    return { deleted: true };
   }
 }

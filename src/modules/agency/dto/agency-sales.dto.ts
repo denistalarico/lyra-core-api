@@ -113,7 +113,13 @@ export class CreateAgencySalesPipelineDto {
   @IsOptional()
   @IsInt()
   position?: number;
+
+  @IsOptional()
+  @IsObject()
+  metadata?: Record<string, unknown>;
 }
+
+export class UpdateAgencySalesPipelineDto extends CreateAgencySalesPipelineDto {}
 
 export class CreateAgencySalesStageDto {
   @IsUUID()
@@ -397,7 +403,7 @@ export class CreateAgencySalesActivityDto {
 
   @IsOptional()
   @IsUUID()
-  assignedUserId?: string;
+  assignedUserId?: string | null;
 
   @IsOptional()
   @IsIn(['follow_up', 'meeting', 'call', 'task', 'email', 'whatsapp', 'note'])

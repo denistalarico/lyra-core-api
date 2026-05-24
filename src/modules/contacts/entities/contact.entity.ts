@@ -17,6 +17,7 @@ export type ContactLifecycleStage =
   | 'customer'
   | 'partner'
   | 'supplier'
+  | 'internal'
   | 'other';
 
 export type ContactSource =

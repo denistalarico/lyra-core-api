@@ -89,6 +89,13 @@ import {
   AgencySalesStageEntity,
 } from '../modules/agency/entities/agency-sales.entities';
 
+import {
+  AgencyBankEntity,
+  AgencyContactBankAccountEntity,
+  AgencyContactIdentificationTypeEntity,
+  AgencyContactProfileEntity,
+} from '../modules/agency/entities/agency-contact-details.entities';
+
 export const agencyEntities = [
   AgencyUserPreferencesEntity,
   AgencyUserProfileEntity,
@@ -108,12 +115,28 @@ export const agencyEntities = [
   AgencyUserSessionEntity,
   AgencyPasswordResetEntity,
   AgencyEmailTwoFactorCodeEntity,
+  ContactEntity,
+  ContactMethodEntity,
+  ContactAddressEntity,
+  ContactListEntity,
+  ContactListMemberEntity,
+  ContactTagEntity,
+  ContactTagAssignmentEntity,
+  ContactCustomFieldEntity,
+  ContactCustomFieldValueEntity,
+  ContactSegmentEntity,
+  ContactBusinessModeEntity,
+  ContactViewPreferenceEntity,
   AgencySalesItemEntity,
   AgencySalesPipelineEntity,
   AgencySalesStageEntity,
   AgencySalesOpportunityEntity,
   AgencySalesOpportunityItemEntity,
   AgencySalesActivityEntity,
+  AgencyContactProfileEntity,
+  AgencyContactIdentificationTypeEntity,
+  AgencyBankEntity,
+  AgencyContactBankAccountEntity,
 ];
 
 export function getTypeOrmConfig(): TypeOrmModuleOptions {

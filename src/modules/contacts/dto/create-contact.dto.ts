@@ -86,7 +86,15 @@ export class CreateContactDto {
   businessMode?: ContactBusinessMode;
 
   @IsOptional()
-  @IsIn(['lead', 'prospect', 'customer', 'partner', 'supplier', 'other'])
+  @IsIn([
+    'lead',
+    'prospect',
+    'customer',
+    'partner',
+    'supplier',
+    'internal',
+    'other',
+  ])
   lifecycleStage?: ContactLifecycleStage;
 
   @IsOptional()

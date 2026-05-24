@@ -29,6 +29,7 @@ import {
   UpdateAgencySalesActivityDto,
   UpdateAgencySalesOpportunityDto,
   UpdateAgencySalesOpportunityItemDto,
+  UpdateAgencySalesPipelineDto,
   UpdateAgencySalesProductSettingsDto,
   UpdateAgencySalesStageDto,
 } from './dto/agency-sales.dto';
@@ -133,6 +134,29 @@ export class AgencySalesController {
     @Headers('x-workspace-id') workspaceId?: string,
   ) {
     return this.salesService.listPipelines(this.getContext(user, workspaceId));
+  }
+
+  @Patch('pipelines/:id')
+  updatePipeline(
+    @AuthenticatedUser() user: AuthTokenPayload,
+    @Headers('x-workspace-id') workspaceId: string | undefined,
+    @Param('id') id: string,
+    @Body() dto: UpdateAgencySalesPipelineDto,
+  ) {
+    return this.salesService.updatePipeline(
+      this.getContext(user, workspaceId),
+      id,
+      dto,
+    );
+  }
+
+  @Delete('pipelines/:id')
+  deletePipeline(
+    @AuthenticatedUser() user: AuthTokenPayload,
+    @Headers('x-workspace-id') workspaceId: string | undefined,
+    @Param('id') id: string,
+  ) {
+    return this.salesService.deletePipeline(this.getContext(user, workspaceId), id);
   }
 
   @Post('stages')
@@ -378,6 +402,15 @@ export class AgencySalesController {
       id,
       dto,
     );
+  }
+
+  @Delete('opportunities/:id')
+  deleteOpportunity(
+    @AuthenticatedUser() user: AuthTokenPayload,
+    @Headers('x-workspace-id') workspaceId: string | undefined,
+    @Param('id') id: string,
+  ) {
+    return this.salesService.deleteOpportunity(this.getContext(user, workspaceId), id);
   }
 
   @Get('opportunities/:id')

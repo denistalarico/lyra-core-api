@@ -1,4 +1,10 @@
-import { IsHexColor, IsOptional, IsString, Length } from 'class-validator';
+import {
+  IsHexColor,
+  IsOptional,
+  IsString,
+  Length,
+  ValidateIf,
+} from 'class-validator';
 
 export class PatchContactTagDto {
   @IsOptional()
@@ -7,6 +13,7 @@ export class PatchContactTagDto {
   name?: string;
 
   @IsOptional()
+  @ValidateIf((_, value) => value !== '')
   @IsHexColor()
   color?: string;
 }

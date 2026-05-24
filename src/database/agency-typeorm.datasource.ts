@@ -10,6 +10,7 @@ import { CreateContactsCore1760000015000 } from './migrations/1760000015000-crea
 import { CreateContactsSettings1760000016000 } from './migrations/1760000016000-create-contacts-settings';
 import { AddContactListParent1760000017000 } from './migrations/1760000017000-add-contact-list-parent';
 import { AddAgencyContactListSystemFlags1760001005000 } from './migrations/1760001005000-add-agency-contact-list-system-flags';
+import { CreateAgencyContactDetails1760001006000 } from './migrations/1760001006000-create-agency-contact-details';
 
 export const AgencyDataSource = new DataSource({
   type: 'postgres',
@@ -34,5 +35,6 @@ export const AgencyDataSource = new DataSource({
     CreateContactsSettings1760000016000,
     AddContactListParent1760000017000,
     AddAgencyContactListSystemFlags1760001005000,
+    CreateAgencyContactDetails1760001006000,
   ],
 });
