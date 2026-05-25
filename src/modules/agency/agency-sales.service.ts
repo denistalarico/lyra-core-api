@@ -31,6 +31,7 @@ import {
   AgencySalesPipelineEntity,
   AgencySalesStageEntity,
 } from './entities/agency-sales.entities';
+import { QuoteEntity } from '../quotes/entities/quote.entities';
 
 const AGENCY_CONNECTION = 'agency';
 
@@ -43,6 +44,7 @@ type AgencyContext = {
 const defaultProductSettings = {
   categories: [],
   markers: [],
+  opportunityMarkers: [],
   opportunitySources: [
     'Meta Ads',
     'Google Ads',
@@ -80,6 +82,8 @@ export class AgencySalesService {
     private readonly opportunitiesRepo: Repository<AgencySalesOpportunityEntity>,
     @InjectRepository(AgencySalesOpportunityItemEntity, AGENCY_CONNECTION)
     private readonly opportunityItemsRepo: Repository<AgencySalesOpportunityItemEntity>,
+    @InjectRepository(QuoteEntity, AGENCY_CONNECTION)
+    private readonly quotesRepo: Repository<QuoteEntity>,
   ) {}
 
   health() {
@@ -91,7 +95,7 @@ export class AgencySalesService {
   }
 
   async getOverview(context: AgencyContext) {
-    const [items, pipelines, opportunities] = await Promise.all([
+    const [items, pipelines, opportunities, quotes] = await Promise.all([
       this.itemsRepo.count({
         where: { tenantId: context.tenantId, workspaceId: context.workspaceId },
       }),
@@ -101,12 +105,16 @@ export class AgencySalesService {
       this.opportunitiesRepo.count({
         where: { tenantId: context.tenantId, workspaceId: context.workspaceId },
       }),
+      this.quotesRepo.count({
+        where: { tenantId: context.tenantId, workspaceId: context.workspaceId },
+      }),
     ]);
 
     return {
       items,
       pipelines,
       opportunities,
+      quotes,
     };
   }
 
@@ -311,6 +319,8 @@ export class AgencySalesService {
       productSettings: {
         categories: dto.categories,
         markers: dto.markers,
+        opportunityMarkers:
+          dto.opportunityMarkers ?? defaultProductSettings.opportunityMarkers,
         units: dto.units ?? defaultProductSettings.units,
         opportunitySources:
           dto.opportunitySources ?? defaultProductSettings.opportunitySources,

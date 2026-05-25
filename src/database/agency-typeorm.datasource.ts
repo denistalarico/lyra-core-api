@@ -11,6 +11,12 @@ import { CreateContactsSettings1760000016000 } from './migrations/1760000016000-
 import { AddContactListParent1760000017000 } from './migrations/1760000017000-add-contact-list-parent';
 import { AddAgencyContactListSystemFlags1760001005000 } from './migrations/1760001005000-add-agency-contact-list-system-flags';
 import { CreateAgencyContactDetails1760001006000 } from './migrations/1760001006000-create-agency-contact-details';
+import { CreateDocumentLayouts1760001008000 } from './migrations/1760001008000-create-document-layouts';
+import { EnhanceDocumentLayoutTemplates1760001009000 } from './migrations/1760001009000-enhance-document-layout-templates';
+import { RefineDocumentLayoutTemplatesV31760001010000 } from './migrations/1760001010000-refine-document-layout-templates-v3';
+import { CreateQuotesCore1760001007000 } from './migrations/1760001007000-create-quotes-core';
+import { CreateAgencyCalendarCore1760001011000 } from './migrations/1760001011000-create-agency-calendar-core';
+import { CreateAgencyCalendarSettings1760001012000 } from './migrations/1760001012000-create-agency-calendar-settings';
 
 export const AgencyDataSource = new DataSource({
   type: 'postgres',
@@ -36,5 +42,11 @@ export const AgencyDataSource = new DataSource({
     AddContactListParent1760000017000,
     AddAgencyContactListSystemFlags1760001005000,
     CreateAgencyContactDetails1760001006000,
+    CreateDocumentLayouts1760001008000,
+    EnhanceDocumentLayoutTemplates1760001009000,
+    RefineDocumentLayoutTemplatesV31760001010000,
+    CreateQuotesCore1760001007000,
+    CreateAgencyCalendarCore1760001011000,
+    CreateAgencyCalendarSettings1760001012000,
   ],
 });

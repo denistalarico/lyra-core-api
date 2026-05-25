@@ -87,6 +87,10 @@ export class UpdateAgencySalesProductSettingsDto {
 
   @IsOptional()
   @IsArray()
+  opportunityMarkers?: Array<Record<string, unknown>>;
+
+  @IsOptional()
+  @IsArray()
   units?: Array<Record<string, unknown>>;
 
   @IsOptional()
@@ -130,7 +134,15 @@ export class CreateAgencySalesStageDto {
   name!: string;
 
   @IsOptional()
-  @IsIn(['new', 'qualified', 'proposal', 'negotiation', 'won', 'lost', 'archived'])
+  @IsIn([
+    'new',
+    'qualified',
+    'proposal',
+    'negotiation',
+    'won',
+    'lost',
+    'archived',
+  ])
   type?: AgencySalesStageType;
 
   @IsOptional()
@@ -160,7 +172,15 @@ export class UpdateAgencySalesStageDto {
   name?: string;
 
   @IsOptional()
-  @IsIn(['new', 'qualified', 'proposal', 'negotiation', 'won', 'lost', 'archived'])
+  @IsIn([
+    'new',
+    'qualified',
+    'proposal',
+    'negotiation',
+    'won',
+    'lost',
+    'archived',
+  ])
   type?: AgencySalesStageType;
 
   @IsOptional()
@@ -309,7 +329,6 @@ export class CreateAgencySalesQuickOpportunityDto {
   metadata?: Record<string, unknown>;
 }
 
-
 export class AgencySalesListQueryDto {
   @IsOptional()
   @IsString()
@@ -319,7 +338,6 @@ export class AgencySalesListQueryDto {
   @IsString()
   status?: string;
 }
-
 
 export class CreateAgencySalesOpportunityItemDto {
   @IsOptional()
@@ -385,7 +403,6 @@ export class CreateAgencySalesOpportunityItemDto {
 
 export class UpdateAgencySalesOpportunityItemDto extends CreateAgencySalesOpportunityItemDto {}
 
-
 export class MoveAgencySalesOpportunityDto {
   @IsUUID()
   stageId!: string;
@@ -394,7 +411,6 @@ export class MoveAgencySalesOpportunityDto {
   @IsUUID()
   pipelineId?: string;
 }
-
 
 export class CreateAgencySalesActivityDto {
   @IsOptional()
@@ -443,7 +459,6 @@ export class CompleteAgencySalesActivityDto {
   @MaxLength(160)
   outcome?: string;
 }
-
 
 export class WinAgencySalesOpportunityDto {
   @IsOptional()

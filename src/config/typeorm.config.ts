@@ -90,13 +90,32 @@ import {
 } from '../modules/agency/entities/agency-sales.entities';
 
 import {
+  QuoteEntity,
+  QuoteItemEntity,
+  QuoteStatusHistoryEntity,
+  QuoteTemplateEntity,
+  QuoteTemplateSectionEntity,
+} from '../modules/quotes/entities/quote.entities';
+
+import {
   AgencyBankEntity,
   AgencyContactBankAccountEntity,
   AgencyContactIdentificationTypeEntity,
   AgencyContactProfileEntity,
 } from '../modules/agency/entities/agency-contact-details.entities';
 
+import {
+  DocumentLayoutEntity,
+  DocumentLayoutTemplateEntity,
+} from '../modules/document-layouts/entities/document-layout.entities';
+
+import { CalendarEvent } from '../modules/calendar/entities/calendar-event.entity';
+import { CalendarRoutineBlock } from '../modules/calendar/entities/calendar-routine-block.entity';
+import { CalendarSettings } from '../modules/calendar/entities/calendar-settings.entity';
+
 export const agencyEntities = [
+  DocumentLayoutEntity,
+  DocumentLayoutTemplateEntity,
   AgencyUserPreferencesEntity,
   AgencyUserProfileEntity,
   AgencyWorkspaceCompanySettingsEntity,
@@ -136,7 +155,15 @@ export const agencyEntities = [
   AgencyContactProfileEntity,
   AgencyContactIdentificationTypeEntity,
   AgencyBankEntity,
+  QuoteEntity,
+  QuoteItemEntity,
+  QuoteStatusHistoryEntity,
+  QuoteTemplateEntity,
+  QuoteTemplateSectionEntity,
   AgencyContactBankAccountEntity,
+  CalendarEvent,
+  CalendarRoutineBlock,
+  CalendarSettings,
 ];
 
 export function getTypeOrmConfig(): TypeOrmModuleOptions {

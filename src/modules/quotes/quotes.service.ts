@@ -1,0 +1,709 @@
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { ILike, Repository } from 'typeorm';
+import {
+  ChangeQuoteStatusDto,
+  CreateQuoteDto,
+  CreateQuoteItemDto,
+  QuoteListQueryDto,
+  UpdateQuoteDto,
+  UpdateQuoteItemDto,
+} from './dto/quote.dto';
+import {
+  QuoteEntity,
+  QuoteItemEntity,
+  QuoteStatus,
+  QuoteStatusHistoryEntity,
+  QuoteTemplateEntity,
+  QuoteTemplateSectionEntity,
+} from './entities/quote.entities';
+
+const AGENCY_CONNECTION = 'agency';
+
+type AgencyContext = {
+  tenantId: string;
+  workspaceId: string;
+  userId?: string;
+};
+
+@Injectable()
+export class QuotesService {
+  constructor(
+    @InjectRepository(QuoteEntity, AGENCY_CONNECTION)
+    private readonly quotesRepo: Repository<QuoteEntity>,
+    @InjectRepository(QuoteItemEntity, AGENCY_CONNECTION)
+    private readonly itemsRepo: Repository<QuoteItemEntity>,
+    @InjectRepository(QuoteStatusHistoryEntity, AGENCY_CONNECTION)
+    private readonly statusHistoryRepo: Repository<QuoteStatusHistoryEntity>,
+    @InjectRepository(QuoteTemplateEntity, AGENCY_CONNECTION)
+    private readonly templatesRepo: Repository<QuoteTemplateEntity>,
+    @InjectRepository(QuoteTemplateSectionEntity, AGENCY_CONNECTION)
+    private readonly templateSectionsRepo: Repository<QuoteTemplateSectionEntity>,
+  ) {}
+
+  health() {
+    return {
+      app: 'quotes',
+      status: 'ok',
+      strategy: 'shared-domain-agency-facade',
+    };
+  }
+
+  async listTemplates(context: AgencyContext) {
+    const templates = await this.templatesRepo.find({
+      where: [
+        { isSystem: true, status: 'active' },
+        {
+          tenantId: context.tenantId,
+          workspaceId: context.workspaceId,
+          status: 'active',
+        },
+      ],
+      order: { isDefault: 'DESC', createdAt: 'ASC' },
+    });
+
+    const sections = await this.templateSectionsRepo.find({
+      where: templates.map((template) => ({ templateId: template.id })),
+      order: { position: 'ASC', createdAt: 'ASC' },
+    });
+
+    return templates.map((template) => ({
+      ...template,
+      sections: sections.filter((section) => section.templateId === template.id),
+    }));
+  }
+
+  async listQuotes(context: AgencyContext, query: QuoteListQueryDto = {}) {
+    const where: Record<string, unknown> = {
+      tenantId: context.tenantId,
+      workspaceId: context.workspaceId,
+    };
+
+    if (query.status) where.status = query.status;
+    if (query.contactId) where.contactId = query.contactId;
+    if (query.opportunityId) where.opportunityId = query.opportunityId;
+    if (query.search) where.title = ILike(`%${query.search}%`);
+
+    return this.quotesRepo.find({
+      where,
+      order: { createdAt: 'DESC' },
+    });
+  }
+
+  async getQuote(context: AgencyContext, id: string) {
+    const quote = await this.findQuoteOrFail(context, id);
+    const items = await this.itemsRepo.find({
+      where: {
+        tenantId: context.tenantId,
+        workspaceId: context.workspaceId,
+        quoteId: quote.id,
+      },
+      order: { position: 'ASC', createdAt: 'ASC' },
+    });
+
+    const history = await this.statusHistoryRepo.find({
+      where: {
+        tenantId: context.tenantId,
+        workspaceId: context.workspaceId,
+        quoteId: quote.id,
+      },
+      order: { changedAt: 'DESC' },
+    });
+
+    return {
+      ...quote,
+      items,
+      statusHistory: history,
+    };
+  }
+
+  async getQuotePreview(context: AgencyContext, id: string) {
+    const quote = await this.getQuote(context, id);
+
+    const template = quote.templateId
+      ? await this.templatesRepo.findOne({
+          where: [
+            { id: quote.templateId, isSystem: true },
+            {
+              id: quote.templateId,
+              tenantId: context.tenantId,
+              workspaceId: context.workspaceId,
+            },
+          ],
+        })
+      : null;
+
+    const sections = template
+      ? await this.templateSectionsRepo.find({
+          where: { templateId: template.id },
+          order: { position: 'ASC', createdAt: 'ASC' },
+        })
+      : [];
+
+    return {
+      quote,
+      template: template
+        ? {
+            ...template,
+            sections,
+          }
+        : null,
+      preview: {
+        version: 'quote-preview-v1',
+        title: quote.title,
+        quoteNumber: quote.quoteNumber,
+        status: quote.status,
+        currency: quote.currency,
+        validUntil: quote.validUntil,
+        totals: {
+          subtotalCents: quote.subtotalCents,
+          discountCents: quote.discountCents,
+          taxCents: quote.taxCents,
+          totalCents: quote.totalCents,
+          recurringTotalCents: quote.recurringTotalCents,
+        },
+        customer: {
+          contactId: quote.contactId,
+          companyContactId: quote.companyContactId,
+        },
+        crm: {
+          opportunityId: quote.opportunityId,
+        },
+        content: {
+          termsAndConditions: quote.termsAndConditions,
+          internalNotes: quote.internalNotes,
+        },
+        pdf: {
+          available: false,
+          message:
+            'PDF generation is not implemented yet. This payload is ready for the future PDF renderer.',
+        },
+      },
+    };
+  }
+
+  async convertQuote(context: AgencyContext, id: string, reason?: string) {
+    const quote = await this.findQuoteOrFail(context, id);
+
+    if (quote.status !== 'accepted') {
+      throw new BadRequestException(
+        'Only accepted quotes can be converted.',
+      );
+    }
+
+    const convertedQuote = await this.changeStatus(
+      context,
+      id,
+      'converted',
+      reason ?? 'Quote converted into order/contract placeholder.',
+    );
+
+    return {
+      status: 'placeholder',
+      quote: convertedQuote,
+      conversion: {
+        quoteId: quote.id,
+        quoteNumber: quote.quoteNumber,
+        target: 'order_contract_invoice_subscription',
+        created: false,
+        message:
+          'Conversion placeholder created. Orders, contracts, invoices and subscriptions will be implemented in a future sprint.',
+        nextSteps: [
+          'Create Orders shared domain.',
+          'Create Contracts shared domain or Agency-only contract facade.',
+          'Create Finance integration for invoices and payment collection.',
+          'Create subscription/recurrence binding for accepted recurring quote items.',
+        ],
+      },
+    };
+  }
+
+  async expireQuote(context: AgencyContext, id: string, reason?: string) {
+    return this.changeStatus(
+      context,
+      id,
+      'expired',
+      reason ?? 'Quote manually marked as expired.',
+    );
+  }
+
+  async createPdfPlaceholder(context: AgencyContext, id: string) {
+    const preview = await this.getQuotePreview(context, id);
+
+    return {
+      status: 'placeholder',
+      quoteId: preview.quote.id,
+      quoteNumber: preview.quote.quoteNumber,
+      file: null,
+      message:
+        'PDF generation placeholder created. Real PDF rendering will be implemented in the next sprint.',
+      nextSteps: [
+        'Create PDF renderer service.',
+        'Map quote template sections to printable layout.',
+        'Store generated PDF in MinIO/S3.',
+        'Attach PDF URL/path to quote metadata or quote_documents table.',
+      ],
+      preview,
+    };
+  }
+
+  async createQuote(context: AgencyContext, dto: CreateQuoteDto) {
+    const quoteNumber = await this.generateQuoteNumber(context);
+    const quote = this.quotesRepo.create({
+      tenantId: context.tenantId,
+      workspaceId: context.workspaceId,
+      quoteNumber,
+      title: dto.title?.trim() || quoteNumber,
+      templateId: dto.templateId ?? null,
+      contactId: dto.contactId ?? null,
+      companyContactId: dto.companyContactId ?? null,
+      opportunityId: dto.opportunityId ?? null,
+      currency: dto.currency ?? 'BRL',
+      validUntil: dto.validUntil ?? null,
+      internalNotes: dto.internalNotes ?? null,
+      termsAndConditions: dto.termsAndConditions ?? null,
+      createdByUserId: context.userId ?? null,
+      updatedByUserId: context.userId ?? null,
+      metadata: dto.metadata ?? {},
+      status: 'draft',
+    });
+
+    const saved = await this.quotesRepo.save(quote);
+
+    await this.recordStatusChange(context, saved.id, null, 'draft', 'Quote created.');
+
+    return this.getQuote(context, saved.id);
+  }
+
+  async duplicateQuote(context: AgencyContext, id: string) {
+    const original = await this.findQuoteOrFail(context, id);
+
+    const originalItems = await this.itemsRepo.find({
+      where: {
+        tenantId: context.tenantId,
+        workspaceId: context.workspaceId,
+        quoteId: original.id,
+      },
+      order: { position: 'ASC', createdAt: 'ASC' },
+    });
+
+    const duplicated = this.quotesRepo.create({
+      tenantId: context.tenantId,
+      workspaceId: context.workspaceId,
+      quoteNumber: await this.generateQuoteNumber(context),
+      title: `${original.quoteNumber} (cópia)`,
+      templateId: original.templateId,
+      contactId: original.contactId,
+      companyContactId: original.companyContactId,
+      opportunityId: original.opportunityId,
+      currency: original.currency,
+      validUntil: original.validUntil,
+      internalNotes: original.internalNotes,
+      termsAndConditions: original.termsAndConditions,
+      createdByUserId: context.userId ?? null,
+      updatedByUserId: context.userId ?? null,
+      metadata: {
+        ...(original.metadata ?? {}),
+        duplicatedFromQuoteId: original.id,
+        duplicatedFromQuoteNumber: original.quoteNumber,
+      },
+      status: 'draft',
+    });
+
+    const savedQuote = await this.quotesRepo.save(duplicated);
+
+    if (originalItems.length > 0) {
+      const duplicatedItems = originalItems.map((item) =>
+        this.itemsRepo.create({
+          tenantId: context.tenantId,
+          workspaceId: context.workspaceId,
+          quoteId: savedQuote.id,
+          salesItemId: item.salesItemId,
+          name: item.name,
+          description: item.description,
+          type: item.type,
+          currency: item.currency,
+          quantity: item.quantity,
+          unitPriceCents: item.unitPriceCents,
+          setupPriceCents: item.setupPriceCents,
+          recurringPriceCents: item.recurringPriceCents,
+          discountType: item.discountType,
+          discountValue: item.discountValue,
+          taxRateBps: item.taxRateBps,
+          subtotalCents: item.subtotalCents,
+          discountCents: item.discountCents,
+          taxCents: item.taxCents,
+          totalCents: item.totalCents,
+          recurringTotalCents: item.recurringTotalCents,
+          recurrenceInterval: item.recurrenceInterval,
+          position: item.position,
+          metadata: {
+            ...(item.metadata ?? {}),
+            duplicatedFromQuoteItemId: item.id,
+          },
+        }),
+      );
+
+      await this.itemsRepo.save(duplicatedItems);
+    }
+
+    await this.recalculateQuoteTotals(context, savedQuote.id);
+    await this.recordStatusChange(
+      context,
+      savedQuote.id,
+      null,
+      'draft',
+      `Quote duplicated from ${original.quoteNumber}.`,
+    );
+
+    return this.getQuote(context, savedQuote.id);
+  }
+
+  async updateQuote(context: AgencyContext, id: string, dto: UpdateQuoteDto) {
+    const quote = await this.findQuoteOrFail(context, id);
+    const previousStatus = quote.status;
+
+    Object.assign(quote, {
+      ...dto,
+      templateId: dto.templateId === undefined ? quote.templateId : dto.templateId,
+      contactId: dto.contactId === undefined ? quote.contactId : dto.contactId,
+      companyContactId:
+        dto.companyContactId === undefined ? quote.companyContactId : dto.companyContactId,
+      opportunityId: dto.opportunityId === undefined ? quote.opportunityId : dto.opportunityId,
+      validUntil: dto.validUntil === undefined ? quote.validUntil : dto.validUntil,
+      internalNotes: dto.internalNotes === undefined ? quote.internalNotes : dto.internalNotes,
+      termsAndConditions:
+        dto.termsAndConditions === undefined
+          ? quote.termsAndConditions
+          : dto.termsAndConditions,
+      updatedByUserId: context.userId ?? quote.updatedByUserId,
+      metadata: dto.metadata ? { ...(quote.metadata ?? {}), ...dto.metadata } : quote.metadata,
+    });
+
+    const saved = await this.quotesRepo.save(quote);
+
+    if (dto.status && dto.status !== previousStatus) {
+      await this.recordStatusChange(
+        context,
+        saved.id,
+        previousStatus,
+        dto.status,
+        'Status changed manually.',
+      );
+    }
+
+    return this.getQuote(context, saved.id);
+  }
+
+  async deleteQuote(context: AgencyContext, id: string) {
+    const quote = await this.findQuoteOrFail(context, id);
+
+    if (quote.status === 'accepted' || quote.status === 'converted') {
+      throw new BadRequestException('Accepted or converted quotes cannot be deleted.');
+    }
+
+    await this.quotesRepo.remove(quote);
+
+    return { deleted: true };
+  }
+
+  async addItem(context: AgencyContext, quoteId: string, dto: CreateQuoteItemDto) {
+    const quote = await this.findQuoteOrFail(context, quoteId);
+
+    const calculated = this.calculateItem({
+      quantity: dto.quantity ?? 1,
+      unitPriceCents: dto.unitPriceCents ?? 0,
+      setupPriceCents: dto.setupPriceCents ?? 0,
+      recurringPriceCents: dto.recurringPriceCents ?? 0,
+      discountType: dto.discountType ?? 'none',
+      discountValue: dto.discountValue ?? 0,
+      taxRateBps: dto.taxRateBps ?? 0,
+    });
+
+    const item = this.itemsRepo.create({
+      tenantId: context.tenantId,
+      workspaceId: context.workspaceId,
+      quoteId: quote.id,
+      salesItemId: dto.salesItemId ?? null,
+      name: dto.name,
+      description: dto.description ?? null,
+      type: dto.type ?? 'service',
+      currency: dto.currency ?? quote.currency,
+      quantity: dto.quantity ?? 1,
+      unitPriceCents: dto.unitPriceCents ?? 0,
+      setupPriceCents: dto.setupPriceCents ?? 0,
+      recurringPriceCents: dto.recurringPriceCents ?? 0,
+      discountType: dto.discountType ?? 'none',
+      discountValue: dto.discountValue ?? 0,
+      taxRateBps: dto.taxRateBps ?? 0,
+      subtotalCents: calculated.subtotalCents,
+      discountCents: calculated.discountCents,
+      taxCents: calculated.taxCents,
+      totalCents: calculated.totalCents,
+      recurringTotalCents: calculated.recurringTotalCents,
+      recurrenceInterval: dto.recurrenceInterval ?? null,
+      position: dto.position ?? 0,
+      metadata: dto.metadata ?? {},
+    });
+
+    await this.itemsRepo.save(item);
+    await this.recalculateQuoteTotals(context, quote.id);
+
+    return this.getQuote(context, quote.id);
+  }
+
+  async updateItem(
+    context: AgencyContext,
+    quoteId: string,
+    itemId: string,
+    dto: UpdateQuoteItemDto,
+  ) {
+    await this.findQuoteOrFail(context, quoteId);
+
+    const item = await this.itemsRepo.findOne({
+      where: {
+        id: itemId,
+        quoteId,
+        tenantId: context.tenantId,
+        workspaceId: context.workspaceId,
+      },
+    });
+
+    if (!item) {
+      throw new NotFoundException('Quote item not found.');
+    }
+
+    Object.assign(item, {
+      ...dto,
+      salesItemId: dto.salesItemId === undefined ? item.salesItemId : dto.salesItemId,
+      description: dto.description === undefined ? item.description : dto.description,
+      recurrenceInterval:
+        dto.recurrenceInterval === undefined ? item.recurrenceInterval : dto.recurrenceInterval,
+      metadata: dto.metadata ? { ...(item.metadata ?? {}), ...dto.metadata } : item.metadata,
+    });
+
+    const calculated = this.calculateItem({
+      quantity: item.quantity,
+      unitPriceCents: item.unitPriceCents,
+      setupPriceCents: item.setupPriceCents,
+      recurringPriceCents: item.recurringPriceCents,
+      discountType: item.discountType,
+      discountValue: item.discountValue,
+      taxRateBps: item.taxRateBps,
+    });
+
+    Object.assign(item, calculated);
+
+    await this.itemsRepo.save(item);
+    await this.recalculateQuoteTotals(context, quoteId);
+
+    return this.getQuote(context, quoteId);
+  }
+
+  async deleteItem(context: AgencyContext, quoteId: string, itemId: string) {
+    await this.findQuoteOrFail(context, quoteId);
+
+    const item = await this.itemsRepo.findOne({
+      where: {
+        id: itemId,
+        quoteId,
+        tenantId: context.tenantId,
+        workspaceId: context.workspaceId,
+      },
+    });
+
+    if (!item) {
+      throw new NotFoundException('Quote item not found.');
+    }
+
+    await this.itemsRepo.remove(item);
+    await this.recalculateQuoteTotals(context, quoteId);
+
+    return this.getQuote(context, quoteId);
+  }
+
+  async sendQuote(context: AgencyContext, id: string, dto: ChangeQuoteStatusDto) {
+    return this.changeStatus(context, id, 'sent', dto.reason ?? 'Quote sent.');
+  }
+
+  async acceptQuote(context: AgencyContext, id: string, dto: ChangeQuoteStatusDto) {
+    const quote = await this.findQuoteOrFail(context, id);
+    const previousStatus = quote.status;
+
+    quote.status = 'accepted';
+    quote.acceptedAt = new Date();
+    quote.acceptedByName = dto.acceptedByName ?? null;
+    quote.acceptedByEmail = dto.acceptedByEmail ?? null;
+    quote.rejectedAt = null;
+    quote.rejectionReason = null;
+    quote.updatedByUserId = context.userId ?? quote.updatedByUserId;
+
+    const saved = await this.quotesRepo.save(quote);
+    await this.recordStatusChange(
+      context,
+      saved.id,
+      previousStatus,
+      'accepted',
+      dto.reason ?? 'Quote accepted.',
+    );
+
+    return this.getQuote(context, saved.id);
+  }
+
+  async rejectQuote(context: AgencyContext, id: string, dto: ChangeQuoteStatusDto) {
+    const quote = await this.findQuoteOrFail(context, id);
+    const previousStatus = quote.status;
+
+    quote.status = 'rejected';
+    quote.rejectedAt = new Date();
+    quote.rejectionReason = dto.reason ?? null;
+    quote.updatedByUserId = context.userId ?? quote.updatedByUserId;
+
+    const saved = await this.quotesRepo.save(quote);
+    await this.recordStatusChange(
+      context,
+      saved.id,
+      previousStatus,
+      'rejected',
+      dto.reason ?? 'Quote rejected.',
+    );
+
+    return this.getQuote(context, saved.id);
+  }
+
+  async archiveQuote(context: AgencyContext, id: string, dto: ChangeQuoteStatusDto) {
+    return this.changeStatus(context, id, 'archived', dto.reason ?? 'Quote archived.');
+  }
+
+  private async changeStatus(
+    context: AgencyContext,
+    id: string,
+    status: QuoteStatus,
+    reason: string,
+  ) {
+    const quote = await this.findQuoteOrFail(context, id);
+    const previousStatus = quote.status;
+
+    quote.status = status;
+    quote.updatedByUserId = context.userId ?? quote.updatedByUserId;
+
+    const saved = await this.quotesRepo.save(quote);
+
+    if (previousStatus !== status) {
+      await this.recordStatusChange(context, saved.id, previousStatus, status, reason);
+    }
+
+    return this.getQuote(context, saved.id);
+  }
+
+  private async findQuoteOrFail(context: AgencyContext, id: string) {
+    const quote = await this.quotesRepo.findOne({
+      where: {
+        id,
+        tenantId: context.tenantId,
+        workspaceId: context.workspaceId,
+      },
+    });
+
+    if (!quote) {
+      throw new NotFoundException('Quote not found.');
+    }
+
+    return quote;
+  }
+
+  private async generateQuoteNumber(context: AgencyContext) {
+    const year = new Date().getFullYear();
+    const prefix = `Q-${year}-`;
+
+    const count = await this.quotesRepo.count({
+      where: {
+        tenantId: context.tenantId,
+        workspaceId: context.workspaceId,
+      },
+    });
+
+    return `${prefix}${String(count + 1).padStart(5, '0')}`;
+  }
+
+  private calculateItem(input: {
+    quantity: number;
+    unitPriceCents: number;
+    setupPriceCents: number;
+    recurringPriceCents: number;
+    discountType: 'none' | 'fixed' | 'percentage';
+    discountValue: number;
+    taxRateBps: number;
+  }) {
+    const quantity = Math.max(1, input.quantity);
+    const baseSubtotal = quantity * input.unitPriceCents + input.setupPriceCents;
+    const recurringTotalCents = quantity * input.recurringPriceCents;
+
+    let discountCents = 0;
+
+    if (input.discountType === 'fixed') {
+      discountCents = Math.min(input.discountValue, baseSubtotal);
+    }
+
+    if (input.discountType === 'percentage') {
+      discountCents = Math.floor((baseSubtotal * input.discountValue) / 10000);
+    }
+
+    const subtotalAfterDiscount = Math.max(0, baseSubtotal - discountCents);
+    const taxCents = Math.floor((subtotalAfterDiscount * input.taxRateBps) / 10000);
+    const totalCents = subtotalAfterDiscount + taxCents;
+
+    return {
+      subtotalCents: baseSubtotal,
+      discountCents,
+      taxCents,
+      totalCents,
+      recurringTotalCents,
+    };
+  }
+
+  private async recalculateQuoteTotals(context: AgencyContext, quoteId: string) {
+    const quote = await this.findQuoteOrFail(context, quoteId);
+
+    const items = await this.itemsRepo.find({
+      where: {
+        tenantId: context.tenantId,
+        workspaceId: context.workspaceId,
+        quoteId,
+      },
+    });
+
+    quote.subtotalCents = items.reduce((sum, item) => sum + item.subtotalCents, 0);
+    quote.discountCents = items.reduce((sum, item) => sum + item.discountCents, 0);
+    quote.taxCents = items.reduce((sum, item) => sum + item.taxCents, 0);
+    quote.totalCents = items.reduce((sum, item) => sum + item.totalCents, 0);
+    quote.recurringTotalCents = items.reduce(
+      (sum, item) => sum + item.recurringTotalCents,
+      0,
+    );
+    quote.updatedByUserId = context.userId ?? quote.updatedByUserId;
+
+    await this.quotesRepo.save(quote);
+  }
+
+  private async recordStatusChange(
+    context: AgencyContext,
+    quoteId: string,
+    fromStatus: QuoteStatus | null,
+    toStatus: QuoteStatus,
+    reason: string,
+  ) {
+    const entry = this.statusHistoryRepo.create({
+      tenantId: context.tenantId,
+      workspaceId: context.workspaceId,
+      quoteId,
+      fromStatus,
+      toStatus,
+      reason,
+      changedByUserId: context.userId ?? null,
+      metadata: {},
+    });
+
+    await this.statusHistoryRepo.save(entry);
+  }
+}

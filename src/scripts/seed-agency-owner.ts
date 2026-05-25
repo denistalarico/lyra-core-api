@@ -96,7 +96,7 @@ async function run() {
   const ownerEmail = requireEnv('AGENCY_OWNER_EMAIL').toLowerCase();
   const ownerPassword = requireEnv('AGENCY_OWNER_PASSWORD');
   const workspaceName =
-    process.env.AGENCY_OWNER_WORKSPACE_NAME?.trim() || 'Talarico Labs';
+    process.env.AGENCY_OWNER_WORKSPACE_NAME?.trim() || 'Agency Workspace';
 
   const agencyDataSource = new DataSource({
     type: 'postgres',

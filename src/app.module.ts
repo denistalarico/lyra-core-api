@@ -20,9 +20,14 @@ import { AgencyAuthModule } from './modules/agency/agency-auth.module';
 import { AgencySettingsModule } from './modules/agency/agency-settings.module';
 import { AgencySalesModule } from './modules/agency/agency-sales.module';
 import { AgencyContactsModule } from './modules/agency/agency-contacts.module';
+import { QuotesModule } from './modules/quotes/quotes.module';
+import { DocumentLayoutsModule } from './modules/document-layouts/document-layouts.module';
+import { CalendarModule } from './modules/calendar/calendar.module';
 
 @Module({
   imports: [
+    QuotesModule,
+    DocumentLayoutsModule,
     ConfigModule.forRoot({
       isGlobal: true,
       load: [env],
@@ -42,6 +47,7 @@ import { AgencyContactsModule } from './modules/agency/agency-contacts.module';
     AgencySettingsModule,
     AgencySalesModule,
     AgencyContactsModule,
+    CalendarModule,
   ],
 })
 export class AppModule {}
