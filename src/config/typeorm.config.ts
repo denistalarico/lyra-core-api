@@ -112,6 +112,19 @@ import {
 import { CalendarEvent } from '../modules/calendar/entities/calendar-event.entity';
 import { CalendarRoutineBlock } from '../modules/calendar/entities/calendar-routine-block.entity';
 import { CalendarSettings } from '../modules/calendar/entities/calendar-settings.entity';
+import {
+  FinanceAccount,
+  FinanceBankAccount,
+  FinanceCategory,
+  FinanceCostCenter,
+  FinanceJournal,
+  FinanceMetricSnapshot,
+  FinancePeriod,
+  FinanceProfitabilityRule,
+  FinanceReportSnapshot,
+  FinanceSetting,
+  FinanceTag,
+} from '../modules/finance/entities';
 
 import {
   AgencyActivity,
@@ -196,6 +209,17 @@ export const agencyEntities = [
   AgencyTaskTimeEntry,
   AgencyActivity,
   AgencyActivityLink,
+  FinanceAccount,
+  FinanceBankAccount,
+  FinanceCategory,
+  FinanceCostCenter,
+  FinanceJournal,
+  FinanceMetricSnapshot,
+  FinancePeriod,
+  FinanceProfitabilityRule,
+  FinanceReportSnapshot,
+  FinanceSetting,
+  FinanceTag,
 ];
 
 export function getTypeOrmConfig(): TypeOrmModuleOptions {

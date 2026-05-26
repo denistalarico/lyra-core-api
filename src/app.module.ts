@@ -25,6 +25,7 @@ import { DocumentLayoutsModule } from './modules/document-layouts/document-layou
 import { CalendarModule } from './modules/calendar/calendar.module';
 import { ProjectsModule } from './modules/projects';
 import { ActivitiesModule } from './modules/activities';
+import { FinanceModule } from './modules/finance';
 
 @Module({
   imports: [
@@ -52,6 +53,7 @@ import { ActivitiesModule } from './modules/activities';
     CalendarModule,
     ProjectsModule,
     ActivitiesModule,
+    FinanceModule,
   ],
 })
 export class AppModule {}
