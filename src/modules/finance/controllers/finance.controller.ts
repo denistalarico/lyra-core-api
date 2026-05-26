@@ -20,15 +20,24 @@ import {
   UpdateFinanceSettingsDto,
 } from '../dto';
 import { FinanceService } from '../services/finance.service';
+import { FinanceDefaultsService } from '../services/finance-defaults.service';
 import { getFinanceContext } from '../services/finance-context';
 
 @Controller('agency/finance')
 export class FinanceController {
-  constructor(private readonly financeService: FinanceService) {}
+  constructor(
+    private readonly financeService: FinanceService,
+    private readonly financeDefaultsService: FinanceDefaultsService,
+  ) {}
 
   @Get('health')
   getHealth() {
     return this.financeService.getHealth();
+  }
+
+  @Post('setup/defaults')
+  setupDefaults(@Req() req: Request) {
+    return this.financeDefaultsService.setupDefaults(getFinanceContext(req));
   }
 
   @Get('settings')

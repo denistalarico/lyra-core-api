@@ -15,6 +15,7 @@ import {
   FinanceTag,
 } from './entities';
 import { FinanceService } from './services/finance.service';
+import { FinanceDefaultsService } from './services/finance-defaults.service';
 
 @Module({
   imports: [
@@ -33,7 +34,7 @@ import { FinanceService } from './services/finance.service';
     ], 'agency'),
   ],
   controllers: [FinanceController],
-  providers: [FinanceService],
-  exports: [FinanceService],
+  providers: [FinanceService, FinanceDefaultsService],
+  exports: [FinanceService, FinanceDefaultsService],
 })
 export class FinanceModule {}
