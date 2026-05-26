@@ -1,5 +1,6 @@
 import {
   IsBoolean,
+  IsDateString,
   IsEnum,
   IsInt,
   IsNumberString,
@@ -247,4 +248,22 @@ export class UpdateFinanceProfitabilityRulesDto {
   @IsOptional()
   @IsBoolean()
   includeTeamTimeCosts?: boolean;
+}
+
+export class FinanceMetricsHistoryQueryDto {
+  @IsOptional()
+  @IsString()
+  metricKey?: string;
+
+  @IsOptional()
+  @IsString()
+  periodType?: string;
+
+  @IsOptional()
+  @IsDateString()
+  startDate?: string;
+
+  @IsOptional()
+  @IsDateString()
+  endDate?: string;
 }

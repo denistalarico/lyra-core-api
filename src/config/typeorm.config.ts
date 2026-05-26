@@ -124,6 +124,13 @@ import {
   FinanceReportSnapshot,
   FinanceSetting,
   FinanceTag,
+  FinanceInvoice,
+  FinanceInvoiceLine,
+  FinanceBill,
+  FinanceBillLine,
+  FinancePayment,
+  FinancePaymentAllocation,
+  FinanceRecurringProfile,
 } from '../modules/finance/entities';
 
 import {
@@ -215,6 +222,13 @@ export const agencyEntities = [
   FinanceCostCenter,
   FinanceJournal,
   FinanceMetricSnapshot,
+  FinanceInvoice,
+  FinanceInvoiceLine,
+  FinanceBill,
+  FinanceBillLine,
+  FinancePayment,
+  FinancePaymentAllocation,
+  FinanceRecurringProfile,
   FinancePeriod,
   FinanceProfitabilityRule,
   FinanceReportSnapshot,

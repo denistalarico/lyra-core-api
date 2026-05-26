@@ -22,6 +22,7 @@ import { AddAgencyProjectSettings1760001014000 } from './migrations/176000101400
 import { CreateAgencyProjectEvents1760001015000 } from './migrations/1760001015000-create-agency-project-events';
 import { CreateAgencyActivitiesCore1760001016000 } from './migrations/1760001016000-create-agency-activities-core';
 import { CreateAgencyFinanceCore1760002016000 } from './migrations/1760002016000-create-agency-finance-core';
+import { CreateAgencyFinanceBillingCore1760002017000 } from './migrations/1760002017000-create-agency-finance-billing-core';
 
 export const AgencyDataSource = new DataSource({
   type: 'postgres',
@@ -58,5 +59,6 @@ export const AgencyDataSource = new DataSource({
     CreateAgencyProjectEvents1760001015000,
     CreateAgencyActivitiesCore1760001016000,
     CreateAgencyFinanceCore1760002016000,
+    CreateAgencyFinanceBillingCore1760002017000,
   ],
 });

@@ -104,3 +104,72 @@ export enum FinanceProfitabilityHealth {
   Risk = 'risk',
   Deficit = 'deficit',
 }
+
+export enum FinanceInvoiceStatus {
+  Draft = 'draft',
+  Issued = 'issued',
+  PartiallyPaid = 'partially_paid',
+  Paid = 'paid',
+  Overdue = 'overdue',
+  Cancelled = 'cancelled',
+  Void = 'void',
+}
+
+export enum FinanceBillStatus {
+  Draft = 'draft',
+  Open = 'open',
+  PartiallyPaid = 'partially_paid',
+  Paid = 'paid',
+  Overdue = 'overdue',
+  Cancelled = 'cancelled',
+}
+
+export enum FinancePaymentDirection {
+  Customer = 'customer',
+  Vendor = 'vendor',
+}
+
+export enum FinancePaymentStatus {
+  Draft = 'draft',
+  Pending = 'pending',
+  Completed = 'completed',
+  Failed = 'failed',
+  Cancelled = 'cancelled',
+  Refunded = 'refunded',
+}
+
+export enum FinancePaymentMethod {
+  Manual = 'manual',
+  BankTransfer = 'bank_transfer',
+  Pix = 'pix',
+  Cash = 'cash',
+  CreditCard = 'credit_card',
+  DebitCard = 'debit_card',
+  Stripe = 'stripe',
+  MercadoPago = 'mercado_pago',
+  Asaas = 'asaas',
+  CobreFacil = 'cobre_facil',
+  Other = 'other',
+}
+
+export enum FinanceAllocationTargetType {
+  Invoice = 'invoice',
+  Bill = 'bill',
+}
+
+export enum FinanceRecurringProfileStatus {
+  Draft = 'draft',
+  Active = 'active',
+  Paused = 'paused',
+  Cancelled = 'cancelled',
+  Completed = 'completed',
+}
+
+export enum FinanceRecurringInterval {
+  Weekly = 'weekly',
+  Monthly = 'monthly',
+  Quarterly = 'quarterly',
+  Semiannual = 'semiannual',
+  Yearly = 'yearly',
+}
+
