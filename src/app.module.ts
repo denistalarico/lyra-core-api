@@ -23,6 +23,7 @@ import { AgencyContactsModule } from './modules/agency/agency-contacts.module';
 import { QuotesModule } from './modules/quotes/quotes.module';
 import { DocumentLayoutsModule } from './modules/document-layouts/document-layouts.module';
 import { CalendarModule } from './modules/calendar/calendar.module';
+import { ProjectsModule } from './modules/projects';
 
 @Module({
   imports: [
@@ -48,6 +49,7 @@ import { CalendarModule } from './modules/calendar/calendar.module';
     AgencySalesModule,
     AgencyContactsModule,
     CalendarModule,
+    ProjectsModule,
   ],
 })
 export class AppModule {}

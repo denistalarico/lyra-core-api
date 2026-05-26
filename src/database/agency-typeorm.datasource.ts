@@ -17,6 +17,9 @@ import { RefineDocumentLayoutTemplatesV31760001010000 } from './migrations/17600
 import { CreateQuotesCore1760001007000 } from './migrations/1760001007000-create-quotes-core';
 import { CreateAgencyCalendarCore1760001011000 } from './migrations/1760001011000-create-agency-calendar-core';
 import { CreateAgencyCalendarSettings1760001012000 } from './migrations/1760001012000-create-agency-calendar-settings';
+import { CreateAgencyProjectsTasksCore1760001013000 } from './migrations/1760001013000-create-agency-projects-tasks-core';
+import { AddAgencyProjectSettings1760001014000 } from './migrations/1760001014000-add-agency-project-settings';
+import { CreateAgencyProjectEvents1760001015000 } from './migrations/1760001015000-create-agency-project-events';
 
 export const AgencyDataSource = new DataSource({
   type: 'postgres',
@@ -48,5 +51,8 @@ export const AgencyDataSource = new DataSource({
     CreateQuotesCore1760001007000,
     CreateAgencyCalendarCore1760001011000,
     CreateAgencyCalendarSettings1760001012000,
+    CreateAgencyProjectsTasksCore1760001013000,
+    AddAgencyProjectSettings1760001014000,
+    CreateAgencyProjectEvents1760001015000,
   ],
 });

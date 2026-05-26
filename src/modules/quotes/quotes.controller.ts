@@ -8,8 +8,10 @@ import {
   Patch,
   Post,
   Query,
+  Res,
   UseGuards,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { AuthenticatedUser } from '../auth/decorators/authenticated-user.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import type { AuthTokenPayload } from '../auth/types/auth-token-payload.type';
@@ -53,7 +55,10 @@ export class QuotesController {
     @Headers('x-workspace-id') workspaceId: string | undefined,
     @Query() query: QuoteListQueryDto,
   ) {
-    return this.quotesService.listQuotes(this.getContext(user, workspaceId), query);
+    return this.quotesService.listQuotes(
+      this.getContext(user, workspaceId),
+      query,
+    );
   }
 
   @Post()
@@ -62,7 +67,10 @@ export class QuotesController {
     @Headers('x-workspace-id') workspaceId: string | undefined,
     @Body() dto: CreateQuoteDto,
   ) {
-    return this.quotesService.createQuote(this.getContext(user, workspaceId), dto);
+    return this.quotesService.createQuote(
+      this.getContext(user, workspaceId),
+      dto,
+    );
   }
 
   @Post(':id/duplicate')
@@ -71,7 +79,10 @@ export class QuotesController {
     @Headers('x-workspace-id') workspaceId: string | undefined,
     @Param('id') id: string,
   ) {
-    return this.quotesService.duplicateQuote(this.getContext(user, workspaceId), id);
+    return this.quotesService.duplicateQuote(
+      this.getContext(user, workspaceId),
+      id,
+    );
   }
 
   @Get(':id/preview')
@@ -80,7 +91,10 @@ export class QuotesController {
     @Headers('x-workspace-id') workspaceId: string | undefined,
     @Param('id') id: string,
   ) {
-    return this.quotesService.getQuotePreview(this.getContext(user, workspaceId), id);
+    return this.quotesService.getQuotePreview(
+      this.getContext(user, workspaceId),
+      id,
+    );
   }
 
   @Post(':id/convert')
@@ -112,15 +126,24 @@ export class QuotesController {
   }
 
   @Post(':id/pdf')
-  createQuotePdfPlaceholder(
+  async createQuotePdf(
     @AuthenticatedUser() user: AuthTokenPayload,
     @Headers('x-workspace-id') workspaceId: string | undefined,
     @Param('id') id: string,
+    @Res({ passthrough: false }) response: Response,
   ) {
-    return this.quotesService.createPdfPlaceholder(
+    const pdf = await this.quotesService.createPdf(
       this.getContext(user, workspaceId),
       id,
     );
+
+    response.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `attachment; filename="${pdf.filename}"`,
+      'Cache-Control': 'no-store',
+    });
+
+    return response.send(pdf.buffer);
   }
 
   @Get(':id')
@@ -139,7 +162,11 @@ export class QuotesController {
     @Param('id') id: string,
     @Body() dto: UpdateQuoteDto,
   ) {
-    return this.quotesService.updateQuote(this.getContext(user, workspaceId), id, dto);
+    return this.quotesService.updateQuote(
+      this.getContext(user, workspaceId),
+      id,
+      dto,
+    );
   }
 
   @Delete(':id')
@@ -148,7 +175,10 @@ export class QuotesController {
     @Headers('x-workspace-id') workspaceId: string | undefined,
     @Param('id') id: string,
   ) {
-    return this.quotesService.deleteQuote(this.getContext(user, workspaceId), id);
+    return this.quotesService.deleteQuote(
+      this.getContext(user, workspaceId),
+      id,
+    );
   }
 
   @Post(':id/items')
@@ -158,7 +188,11 @@ export class QuotesController {
     @Param('id') id: string,
     @Body() dto: CreateQuoteItemDto,
   ) {
-    return this.quotesService.addItem(this.getContext(user, workspaceId), id, dto);
+    return this.quotesService.addItem(
+      this.getContext(user, workspaceId),
+      id,
+      dto,
+    );
   }
 
   @Patch(':id/items/:itemId')
@@ -184,7 +218,11 @@ export class QuotesController {
     @Param('id') id: string,
     @Param('itemId') itemId: string,
   ) {
-    return this.quotesService.deleteItem(this.getContext(user, workspaceId), id, itemId);
+    return this.quotesService.deleteItem(
+      this.getContext(user, workspaceId),
+      id,
+      itemId,
+    );
   }
 
   @Post(':id/send')
@@ -194,7 +232,11 @@ export class QuotesController {
     @Param('id') id: string,
     @Body() dto: ChangeQuoteStatusDto,
   ) {
-    return this.quotesService.sendQuote(this.getContext(user, workspaceId), id, dto);
+    return this.quotesService.sendQuote(
+      this.getContext(user, workspaceId),
+      id,
+      dto,
+    );
   }
 
   @Post(':id/accept')
@@ -204,7 +246,11 @@ export class QuotesController {
     @Param('id') id: string,
     @Body() dto: ChangeQuoteStatusDto,
   ) {
-    return this.quotesService.acceptQuote(this.getContext(user, workspaceId), id, dto);
+    return this.quotesService.acceptQuote(
+      this.getContext(user, workspaceId),
+      id,
+      dto,
+    );
   }
 
   @Post(':id/reject')
@@ -214,7 +260,11 @@ export class QuotesController {
     @Param('id') id: string,
     @Body() dto: ChangeQuoteStatusDto,
   ) {
-    return this.quotesService.rejectQuote(this.getContext(user, workspaceId), id, dto);
+    return this.quotesService.rejectQuote(
+      this.getContext(user, workspaceId),
+      id,
+      dto,
+    );
   }
 
   @Post(':id/archive')
@@ -224,10 +274,17 @@ export class QuotesController {
     @Param('id') id: string,
     @Body() dto: ChangeQuoteStatusDto,
   ) {
-    return this.quotesService.archiveQuote(this.getContext(user, workspaceId), id, dto);
+    return this.quotesService.archiveQuote(
+      this.getContext(user, workspaceId),
+      id,
+      dto,
+    );
   }
 
-  private getContext(user: AuthTokenPayload, workspaceId?: string): AgencyContext {
+  private getContext(
+    user: AuthTokenPayload,
+    workspaceId?: string,
+  ): AgencyContext {
     return {
       tenantId: user.tenantId,
       workspaceId: workspaceId ?? user.workspaceId,

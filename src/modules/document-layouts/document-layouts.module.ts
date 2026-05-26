@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { DocumentPdfRendererService } from './document-pdf-renderer.service';
 import { DocumentLayoutsController } from './document-layouts.controller';
 import { DocumentLayoutsService } from './document-layouts.service';
 import {
@@ -17,7 +18,7 @@ const AGENCY_CONNECTION = 'agency';
     ),
   ],
   controllers: [DocumentLayoutsController],
-  providers: [DocumentLayoutsService],
-  exports: [DocumentLayoutsService],
+  providers: [DocumentLayoutsService, DocumentPdfRendererService],
+  exports: [DocumentLayoutsService, DocumentPdfRendererService],
 })
 export class DocumentLayoutsModule {}

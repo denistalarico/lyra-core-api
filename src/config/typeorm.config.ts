@@ -113,6 +113,20 @@ import { CalendarEvent } from '../modules/calendar/entities/calendar-event.entit
 import { CalendarRoutineBlock } from '../modules/calendar/entities/calendar-routine-block.entity';
 import { CalendarSettings } from '../modules/calendar/entities/calendar-settings.entity';
 
+import {
+  AgencyPersonalTaskStage,
+  AgencyProject,
+  AgencyProjectEvent,
+  AgencyProjectSettings,
+  AgencyProjectStage,
+  AgencyProjectUserPreferences,
+  AgencyTask,
+  AgencyTaskChecklistItem,
+  AgencyTaskComment,
+  AgencyTaskStage,
+  AgencyTaskTimeEntry,
+} from '../modules/projects/entities';
+
 export const agencyEntities = [
   DocumentLayoutEntity,
   DocumentLayoutTemplateEntity,
@@ -164,6 +178,17 @@ export const agencyEntities = [
   CalendarEvent,
   CalendarRoutineBlock,
   CalendarSettings,
+  AgencyProject,
+  AgencyProjectEvent,
+  AgencyProjectSettings,
+  AgencyProjectUserPreferences,
+  AgencyProjectStage,
+  AgencyTask,
+  AgencyTaskStage,
+  AgencyPersonalTaskStage,
+  AgencyTaskChecklistItem,
+  AgencyTaskComment,
+  AgencyTaskTimeEntry,
 ];
 
 export function getTypeOrmConfig(): TypeOrmModuleOptions {

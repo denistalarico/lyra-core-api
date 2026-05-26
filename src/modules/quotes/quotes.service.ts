@@ -1,6 +1,12 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { ILike, Repository } from 'typeorm';
+import { DocumentPdfRendererService } from '../document-layouts/document-pdf-renderer.service';
+import { DocumentLayoutsService } from '../document-layouts/document-layouts.service';
 import {
   ChangeQuoteStatusDto,
   CreateQuoteDto,
@@ -39,6 +45,8 @@ export class QuotesService {
     private readonly templatesRepo: Repository<QuoteTemplateEntity>,
     @InjectRepository(QuoteTemplateSectionEntity, AGENCY_CONNECTION)
     private readonly templateSectionsRepo: Repository<QuoteTemplateSectionEntity>,
+    private readonly documentLayoutsService: DocumentLayoutsService,
+    private readonly documentPdfRenderer: DocumentPdfRendererService,
   ) {}
 
   health() {
@@ -69,7 +77,9 @@ export class QuotesService {
 
     return templates.map((template) => ({
       ...template,
-      sections: sections.filter((section) => section.templateId === template.id),
+      sections: sections.filter(
+        (section) => section.templateId === template.id,
+      ),
     }));
   }
 
@@ -186,9 +196,7 @@ export class QuotesService {
     const quote = await this.findQuoteOrFail(context, id);
 
     if (quote.status !== 'accepted') {
-      throw new BadRequestException(
-        'Only accepted quotes can be converted.',
-      );
+      throw new BadRequestException('Only accepted quotes can be converted.');
     }
 
     const convertedQuote = await this.changeStatus(
@@ -227,23 +235,37 @@ export class QuotesService {
     );
   }
 
-  async createPdfPlaceholder(context: AgencyContext, id: string) {
-    const preview = await this.getQuotePreview(context, id);
+  async createPdf(context: AgencyContext, id: string) {
+    const quote = await this.findQuoteOrFail(context, id);
+    const items = await this.itemsRepo.find({
+      where: {
+        tenantId: context.tenantId,
+        workspaceId: context.workspaceId,
+        quoteId: quote.id,
+      },
+      order: { position: 'ASC', createdAt: 'ASC' },
+    });
+
+    const layout = await this.documentLayoutsService.getDefaultLayout(context);
+    const template = await this.documentLayoutsService.getSystemTemplateForType(
+      layout.layoutType,
+      'quote',
+    );
+
+    if (!template) {
+      throw new NotFoundException('Document layout template not found.');
+    }
+
+    const buffer = await this.documentPdfRenderer.renderQuotePdf({
+      quote,
+      items,
+      layout,
+      template,
+    });
 
     return {
-      status: 'placeholder',
-      quoteId: preview.quote.id,
-      quoteNumber: preview.quote.quoteNumber,
-      file: null,
-      message:
-        'PDF generation placeholder created. Real PDF rendering will be implemented in the next sprint.',
-      nextSteps: [
-        'Create PDF renderer service.',
-        'Map quote template sections to printable layout.',
-        'Store generated PDF in MinIO/S3.',
-        'Attach PDF URL/path to quote metadata or quote_documents table.',
-      ],
-      preview,
+      buffer,
+      filename: this.buildQuotePdfFilename(quote.quoteNumber),
     };
   }
 
@@ -270,7 +292,13 @@ export class QuotesService {
 
     const saved = await this.quotesRepo.save(quote);
 
-    await this.recordStatusChange(context, saved.id, null, 'draft', 'Quote created.');
+    await this.recordStatusChange(
+      context,
+      saved.id,
+      null,
+      'draft',
+      'Quote created.',
+    );
 
     return this.getQuote(context, saved.id);
   }
@@ -365,19 +393,31 @@ export class QuotesService {
 
     Object.assign(quote, {
       ...dto,
-      templateId: dto.templateId === undefined ? quote.templateId : dto.templateId,
+      templateId:
+        dto.templateId === undefined ? quote.templateId : dto.templateId,
       contactId: dto.contactId === undefined ? quote.contactId : dto.contactId,
       companyContactId:
-        dto.companyContactId === undefined ? quote.companyContactId : dto.companyContactId,
-      opportunityId: dto.opportunityId === undefined ? quote.opportunityId : dto.opportunityId,
-      validUntil: dto.validUntil === undefined ? quote.validUntil : dto.validUntil,
-      internalNotes: dto.internalNotes === undefined ? quote.internalNotes : dto.internalNotes,
+        dto.companyContactId === undefined
+          ? quote.companyContactId
+          : dto.companyContactId,
+      opportunityId:
+        dto.opportunityId === undefined
+          ? quote.opportunityId
+          : dto.opportunityId,
+      validUntil:
+        dto.validUntil === undefined ? quote.validUntil : dto.validUntil,
+      internalNotes:
+        dto.internalNotes === undefined
+          ? quote.internalNotes
+          : dto.internalNotes,
       termsAndConditions:
         dto.termsAndConditions === undefined
           ? quote.termsAndConditions
           : dto.termsAndConditions,
       updatedByUserId: context.userId ?? quote.updatedByUserId,
-      metadata: dto.metadata ? { ...(quote.metadata ?? {}), ...dto.metadata } : quote.metadata,
+      metadata: dto.metadata
+        ? { ...(quote.metadata ?? {}), ...dto.metadata }
+        : quote.metadata,
     });
 
     const saved = await this.quotesRepo.save(quote);
@@ -399,7 +439,9 @@ export class QuotesService {
     const quote = await this.findQuoteOrFail(context, id);
 
     if (quote.status === 'accepted' || quote.status === 'converted') {
-      throw new BadRequestException('Accepted or converted quotes cannot be deleted.');
+      throw new BadRequestException(
+        'Accepted or converted quotes cannot be deleted.',
+      );
     }
 
     await this.quotesRepo.remove(quote);
@@ -407,7 +449,11 @@ export class QuotesService {
     return { deleted: true };
   }
 
-  async addItem(context: AgencyContext, quoteId: string, dto: CreateQuoteItemDto) {
+  async addItem(
+    context: AgencyContext,
+    quoteId: string,
+    dto: CreateQuoteItemDto,
+  ) {
     const quote = await this.findQuoteOrFail(context, quoteId);
 
     const calculated = this.calculateItem({
@@ -475,11 +521,17 @@ export class QuotesService {
 
     Object.assign(item, {
       ...dto,
-      salesItemId: dto.salesItemId === undefined ? item.salesItemId : dto.salesItemId,
-      description: dto.description === undefined ? item.description : dto.description,
+      salesItemId:
+        dto.salesItemId === undefined ? item.salesItemId : dto.salesItemId,
+      description:
+        dto.description === undefined ? item.description : dto.description,
       recurrenceInterval:
-        dto.recurrenceInterval === undefined ? item.recurrenceInterval : dto.recurrenceInterval,
-      metadata: dto.metadata ? { ...(item.metadata ?? {}), ...dto.metadata } : item.metadata,
+        dto.recurrenceInterval === undefined
+          ? item.recurrenceInterval
+          : dto.recurrenceInterval,
+      metadata: dto.metadata
+        ? { ...(item.metadata ?? {}), ...dto.metadata }
+        : item.metadata,
     });
 
     const calculated = this.calculateItem({
@@ -522,11 +574,19 @@ export class QuotesService {
     return this.getQuote(context, quoteId);
   }
 
-  async sendQuote(context: AgencyContext, id: string, dto: ChangeQuoteStatusDto) {
+  async sendQuote(
+    context: AgencyContext,
+    id: string,
+    dto: ChangeQuoteStatusDto,
+  ) {
     return this.changeStatus(context, id, 'sent', dto.reason ?? 'Quote sent.');
   }
 
-  async acceptQuote(context: AgencyContext, id: string, dto: ChangeQuoteStatusDto) {
+  async acceptQuote(
+    context: AgencyContext,
+    id: string,
+    dto: ChangeQuoteStatusDto,
+  ) {
     const quote = await this.findQuoteOrFail(context, id);
     const previousStatus = quote.status;
 
@@ -550,7 +610,11 @@ export class QuotesService {
     return this.getQuote(context, saved.id);
   }
 
-  async rejectQuote(context: AgencyContext, id: string, dto: ChangeQuoteStatusDto) {
+  async rejectQuote(
+    context: AgencyContext,
+    id: string,
+    dto: ChangeQuoteStatusDto,
+  ) {
     const quote = await this.findQuoteOrFail(context, id);
     const previousStatus = quote.status;
 
@@ -571,8 +635,17 @@ export class QuotesService {
     return this.getQuote(context, saved.id);
   }
 
-  async archiveQuote(context: AgencyContext, id: string, dto: ChangeQuoteStatusDto) {
-    return this.changeStatus(context, id, 'archived', dto.reason ?? 'Quote archived.');
+  async archiveQuote(
+    context: AgencyContext,
+    id: string,
+    dto: ChangeQuoteStatusDto,
+  ) {
+    return this.changeStatus(
+      context,
+      id,
+      'archived',
+      dto.reason ?? 'Quote archived.',
+    );
   }
 
   private async changeStatus(
@@ -590,7 +663,13 @@ export class QuotesService {
     const saved = await this.quotesRepo.save(quote);
 
     if (previousStatus !== status) {
-      await this.recordStatusChange(context, saved.id, previousStatus, status, reason);
+      await this.recordStatusChange(
+        context,
+        saved.id,
+        previousStatus,
+        status,
+        reason,
+      );
     }
 
     return this.getQuote(context, saved.id);
@@ -626,6 +705,15 @@ export class QuotesService {
     return `${prefix}${String(count + 1).padStart(5, '0')}`;
   }
 
+  private buildQuotePdfFilename(quoteNumber: string) {
+    const safeQuoteNumber = quoteNumber
+      .trim()
+      .replace(/[^a-zA-Z0-9._-]+/g, '-')
+      .replace(/^-+|-+$/g, '');
+
+    return `quote-${safeQuoteNumber || 'document'}.pdf`;
+  }
+
   private calculateItem(input: {
     quantity: number;
     unitPriceCents: number;
@@ -636,7 +724,8 @@ export class QuotesService {
     taxRateBps: number;
   }) {
     const quantity = Math.max(1, input.quantity);
-    const baseSubtotal = quantity * input.unitPriceCents + input.setupPriceCents;
+    const baseSubtotal =
+      quantity * input.unitPriceCents + input.setupPriceCents;
     const recurringTotalCents = quantity * input.recurringPriceCents;
 
     let discountCents = 0;
@@ -650,7 +739,9 @@ export class QuotesService {
     }
 
     const subtotalAfterDiscount = Math.max(0, baseSubtotal - discountCents);
-    const taxCents = Math.floor((subtotalAfterDiscount * input.taxRateBps) / 10000);
+    const taxCents = Math.floor(
+      (subtotalAfterDiscount * input.taxRateBps) / 10000,
+    );
     const totalCents = subtotalAfterDiscount + taxCents;
 
     return {
@@ -662,7 +753,10 @@ export class QuotesService {
     };
   }
 
-  private async recalculateQuoteTotals(context: AgencyContext, quoteId: string) {
+  private async recalculateQuoteTotals(
+    context: AgencyContext,
+    quoteId: string,
+  ) {
     const quote = await this.findQuoteOrFail(context, quoteId);
 
     const items = await this.itemsRepo.find({
@@ -673,8 +767,14 @@ export class QuotesService {
       },
     });
 
-    quote.subtotalCents = items.reduce((sum, item) => sum + item.subtotalCents, 0);
-    quote.discountCents = items.reduce((sum, item) => sum + item.discountCents, 0);
+    quote.subtotalCents = items.reduce(
+      (sum, item) => sum + item.subtotalCents,
+      0,
+    );
+    quote.discountCents = items.reduce(
+      (sum, item) => sum + item.discountCents,
+      0,
+    );
     quote.taxCents = items.reduce((sum, item) => sum + item.taxCents, 0);
     quote.totalCents = items.reduce((sum, item) => sum + item.totalCents, 0);
     quote.recurringTotalCents = items.reduce(

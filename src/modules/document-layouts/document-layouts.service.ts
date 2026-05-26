@@ -6,6 +6,7 @@ import { UpdateDocumentLayoutDto } from './dto/document-layouts.dto';
 import {
   DocumentLayoutEntity,
   DocumentLayoutTemplateEntity,
+  DocumentTemplateDocumentType,
   DocumentLayoutType,
 } from './entities/document-layout.entities';
 
@@ -104,7 +105,7 @@ export class DocumentLayoutsService {
   async listTemplates(documentType = 'quote') {
     return this.templatesRepo.find({
       where: {
-        documentType: documentType as 'quote',
+        documentType: documentType as DocumentTemplateDocumentType,
         isSystem: true,
         status: 'active',
       },
@@ -131,5 +132,30 @@ export class DocumentLayoutsService {
       css: template?.cssTemplate ?? '',
       previewData: template?.previewData ?? {},
     };
+  }
+
+  async getSystemTemplateForType(
+    type: DocumentLayoutType,
+    documentType: DocumentTemplateDocumentType = 'quote',
+  ) {
+    const template = await this.templatesRepo.findOne({
+      where: {
+        type,
+        documentType,
+        isSystem: true,
+        status: 'active',
+      },
+    });
+
+    if (template) return template;
+
+    return this.templatesRepo.findOne({
+      where: {
+        type: 'essence',
+        documentType,
+        isSystem: true,
+        status: 'active',
+      },
+    });
   }
 }
