@@ -24,6 +24,7 @@ import { QuotesModule } from './modules/quotes/quotes.module';
 import { DocumentLayoutsModule } from './modules/document-layouts/document-layouts.module';
 import { CalendarModule } from './modules/calendar/calendar.module';
 import { ProjectsModule } from './modules/projects';
+import { ActivitiesModule } from './modules/activities';
 
 @Module({
   imports: [
@@ -50,6 +51,7 @@ import { ProjectsModule } from './modules/projects';
     AgencyContactsModule,
     CalendarModule,
     ProjectsModule,
+    ActivitiesModule,
   ],
 })
 export class AppModule {}

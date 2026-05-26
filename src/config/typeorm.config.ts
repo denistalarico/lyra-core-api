@@ -114,6 +114,11 @@ import { CalendarRoutineBlock } from '../modules/calendar/entities/calendar-rout
 import { CalendarSettings } from '../modules/calendar/entities/calendar-settings.entity';
 
 import {
+  AgencyActivity,
+  AgencyActivityLink,
+} from '../modules/activities/entities';
+
+import {
   AgencyPersonalTaskStage,
   AgencyProject,
   AgencyProjectEvent,
@@ -189,6 +194,8 @@ export const agencyEntities = [
   AgencyTaskChecklistItem,
   AgencyTaskComment,
   AgencyTaskTimeEntry,
+  AgencyActivity,
+  AgencyActivityLink,
 ];
 
 export function getTypeOrmConfig(): TypeOrmModuleOptions {
