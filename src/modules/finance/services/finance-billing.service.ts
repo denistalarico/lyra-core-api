@@ -269,7 +269,7 @@ export class FinanceBillingService {
       dto.billNumber ?? (await this.generateDocumentNumber(ctx, 'BILL'));
     const totals = this.calculateBillTotals(dto.lines);
 
-    return this.dataSource.transaction(async (manager) => {
+    const billId = await this.dataSource.transaction(async (manager) => {
       const bill = await manager.getRepository(FinanceBill).save(
         manager.getRepository(FinanceBill).create({
           tenantId: ctx.tenantId,
@@ -315,8 +315,10 @@ export class FinanceBillingService {
 
       await manager.getRepository(FinanceBillLine).save(lines);
 
-      return this.getBill(ctx, bill.id);
+      return bill.id;
     });
+
+    return this.getBill(ctx, billId);
   }
 
   async updateBill(
