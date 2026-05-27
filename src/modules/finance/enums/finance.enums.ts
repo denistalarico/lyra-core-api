@@ -173,3 +173,75 @@ export enum FinanceRecurringInterval {
   Yearly = 'yearly',
 }
 
+export enum FinanceDocumentType {
+  Invoice = 'invoice',
+  Bill = 'bill',
+  Payment = 'payment',
+  Receipt = 'receipt',
+  JournalEntry = 'journal_entry',
+  FiscalDocument = 'fiscal_document',
+}
+
+export enum FinanceFiscalDocumentModel {
+  Nfe = 'nfe',
+  Nfce = 'nfce',
+  Nfse = 'nfse',
+  Invoice = 'invoice',
+  Receipt = 'receipt',
+}
+
+export enum FinanceBrazilTaxRegime {
+  None = 'none',
+  SimplesNacional = 'simples_nacional',
+  SimplesNacionalExcess = 'simples_nacional_excess',
+  NormalLucroPresumido = 'normal_lucro_presumido',
+  NormalLucroReal = 'normal_lucro_real',
+}
+
+export enum FinanceServiceCityOrigin {
+  Provider = 'provider',
+  Customer = 'customer',
+}
+
+export enum FinanceIbsCbsOperationType {
+  NotApplicable = '0',
+  SupplyWithLaterPayment = '1',
+  ReceiptAfterSupply = '2',
+  SupplyAlreadyPaid = '3',
+  ReceiptBeforeSupply = '4',
+  SupplyAndReceiptSimultaneous = '5',
+}
+
+export enum FinancePaymentProviderType {
+  Stripe = 'stripe',
+  MercadoPago = 'mercado_pago',
+  Asaas = 'asaas',
+  CobreFacil = 'cobre_facil',
+  Manual = 'manual',
+  Pix = 'pix',
+  Other = 'other',
+}
+
+export enum FinancePaymentProviderStatus {
+  Draft = 'draft',
+  Connected = 'connected',
+  Disconnected = 'disconnected',
+  Error = 'error',
+}
+
+export enum FinancePaymentProviderEnvironment {
+  Sandbox = 'sandbox',
+  Production = 'production',
+}
+
+export enum FinanceJournalEntryStatus {
+  Draft = 'draft',
+  Posted = 'posted',
+  Cancelled = 'cancelled',
+}
+
+export enum FinanceJournalEntryLineType {
+  Debit = 'debit',
+  Credit = 'credit',
+}
+

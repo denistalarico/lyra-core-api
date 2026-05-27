@@ -16,3 +16,8 @@ export * from './finance-invoice-line.entity';
 export * from './finance-payment.entity';
 export * from './finance-payment-allocation.entity';
 export * from './finance-recurring-profile.entity';
+export * from './finance-document-sequence.entity';
+export * from './finance-fiscal-profile.entity';
+export * from './finance-payment-provider.entity';
+export * from './finance-journal-entry.entity';
+export * from './finance-journal-entry-line.entity';

@@ -23,6 +23,10 @@ import { CreateAgencyProjectEvents1760001015000 } from './migrations/17600010150
 import { CreateAgencyActivitiesCore1760001016000 } from './migrations/1760001016000-create-agency-activities-core';
 import { CreateAgencyFinanceCore1760002016000 } from './migrations/1760002016000-create-agency-finance-core';
 import { CreateAgencyFinanceBillingCore1760002017000 } from './migrations/1760002017000-create-agency-finance-billing-core';
+import { CreateAgencyFinanceDocumentSequences1760002018000 } from './migrations/1760002018000-create-agency-finance-document-sequences';
+import { CreateAgencyFinanceFiscalProfile1760002019000 } from './migrations/1760002019000-create-agency-finance-fiscal-profile';
+import { CreateAgencyFinancePaymentProviders1760002020000 } from './migrations/1760002020000-create-agency-finance-payment-providers';
+import { CreateAgencyFinanceJournalEntries1760002021000 } from './migrations/1760002021000-create-agency-finance-journal-entries';
 
 export const AgencyDataSource = new DataSource({
   type: 'postgres',
@@ -60,5 +64,9 @@ export const AgencyDataSource = new DataSource({
     CreateAgencyActivitiesCore1760001016000,
     CreateAgencyFinanceCore1760002016000,
     CreateAgencyFinanceBillingCore1760002017000,
+    CreateAgencyFinanceDocumentSequences1760002018000,
+    CreateAgencyFinanceFiscalProfile1760002019000,
+    CreateAgencyFinancePaymentProviders1760002020000,
+    CreateAgencyFinanceJournalEntries1760002021000,
   ],
 });

@@ -20,6 +20,10 @@ import {
   UpdateFinanceProfitabilityRulesDto,
   UpdateFinanceSettingsDto,
   FinanceMetricsHistoryQueryDto,
+  UpdateFinanceFiscalProfileDto,
+  CreateFinancePaymentProviderDto,
+  UpdateFinancePaymentProviderDto,
+  CreateFinanceJournalEntryDto,
   CreateFinanceInvoiceDto,
   UpdateFinanceInvoiceDto,
   CreateFinanceBillDto,
@@ -33,6 +37,10 @@ import { FinanceService } from '../services/finance.service';
 import { FinanceDefaultsService } from '../services/finance-defaults.service';
 import { FinanceBillingService } from '../services/finance-billing.service';
 import { FinanceProfitabilityService } from '../services/finance-profitability.service';
+import { FinanceDocumentNumberingService } from '../services/finance-document-numbering.service';
+import { FinanceFiscalService } from '../services/finance-fiscal.service';
+import { FinancePaymentProviderService } from '../services/finance-payment-provider.service';
+import { FinanceJournalEntryService } from '../services/finance-journal-entry.service';
 import { getFinanceContext } from '../services/finance-context';
 
 @Controller('agency/finance')
@@ -42,6 +50,10 @@ export class FinanceController {
     private readonly financeDefaultsService: FinanceDefaultsService,
     private readonly financeBillingService: FinanceBillingService,
     private readonly financeProfitabilityService: FinanceProfitabilityService,
+    private readonly financeDocumentNumberingService: FinanceDocumentNumberingService,
+    private readonly financeFiscalService: FinanceFiscalService,
+    private readonly financePaymentProviderService: FinancePaymentProviderService,
+    private readonly financeJournalEntryService: FinanceJournalEntryService,
   ) {}
 
   @Get('health')
@@ -52,6 +64,102 @@ export class FinanceController {
   @Post('setup/defaults')
   setupDefaults(@Req() req: Request) {
     return this.financeDefaultsService.setupDefaults(getFinanceContext(req));
+  }
+
+
+
+
+
+  @Get('entries')
+  listJournalEntries(@Req() req: Request) {
+    return this.financeJournalEntryService.list(getFinanceContext(req));
+  }
+
+  @Post('entries')
+  createJournalEntry(
+    @Req() req: Request,
+    @Body() dto: CreateFinanceJournalEntryDto,
+  ) {
+    return this.financeJournalEntryService.create(getFinanceContext(req), dto);
+  }
+
+  @Get('entries/:id')
+  getJournalEntry(@Req() req: Request, @Param('id') id: string) {
+    return this.financeJournalEntryService.get(getFinanceContext(req), id);
+  }
+
+  @Post('entries/:id/post')
+  postJournalEntry(@Req() req: Request, @Param('id') id: string) {
+    return this.financeJournalEntryService.post(getFinanceContext(req), id);
+  }
+
+  @Post('entries/:id/cancel')
+  cancelJournalEntry(@Req() req: Request, @Param('id') id: string) {
+    return this.financeJournalEntryService.cancel(getFinanceContext(req), id);
+  }
+
+  @Get('payment-providers')
+  listPaymentProviders(@Req() req: Request) {
+    return this.financePaymentProviderService.list(getFinanceContext(req));
+  }
+
+  @Post('payment-providers')
+  createPaymentProvider(
+    @Req() req: Request,
+    @Body() dto: CreateFinancePaymentProviderDto,
+  ) {
+    return this.financePaymentProviderService.create(getFinanceContext(req), dto);
+  }
+
+  @Get('payment-providers/:id')
+  getPaymentProvider(@Req() req: Request, @Param('id') id: string) {
+    return this.financePaymentProviderService.get(getFinanceContext(req), id);
+  }
+
+  @Patch('payment-providers/:id')
+  updatePaymentProvider(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Body() dto: UpdateFinancePaymentProviderDto,
+  ) {
+    return this.financePaymentProviderService.update(
+      getFinanceContext(req),
+      id,
+      dto,
+    );
+  }
+
+  @Post('payment-providers/:id/connect')
+  connectPaymentProvider(@Req() req: Request, @Param('id') id: string) {
+    return this.financePaymentProviderService.connect(getFinanceContext(req), id);
+  }
+
+  @Post('payment-providers/:id/disconnect')
+  disconnectPaymentProvider(@Req() req: Request, @Param('id') id: string) {
+    return this.financePaymentProviderService.disconnect(
+      getFinanceContext(req),
+      id,
+    );
+  }
+
+  @Get('fiscal-profile')
+  getFiscalProfile(@Req() req: Request) {
+    return this.financeFiscalService.getProfile(getFinanceContext(req));
+  }
+
+  @Patch('fiscal-profile')
+  updateFiscalProfile(
+    @Req() req: Request,
+    @Body() dto: UpdateFinanceFiscalProfileDto,
+  ) {
+    return this.financeFiscalService.updateProfile(getFinanceContext(req), dto);
+  }
+
+  @Get('document-sequences')
+  listDocumentSequences(@Req() req: Request) {
+    return this.financeDocumentNumberingService.listSequences(
+      getFinanceContext(req),
+    );
   }
 
   @Get('settings')
@@ -287,6 +395,25 @@ export class FinanceController {
       getFinanceContext(req),
       id,
       dto,
+    );
+  }
+
+
+  @Post('recurring-profiles/:id/generate-invoice')
+  generateInvoiceFromRecurringProfile(
+    @Req() req: Request,
+    @Param('id') id: string,
+  ) {
+    return this.financeBillingService.generateInvoiceFromRecurringProfile(
+      getFinanceContext(req),
+      id,
+    );
+  }
+
+  @Post('recurring-profiles/generate-due-invoices')
+  generateDueRecurringInvoices(@Req() req: Request) {
+    return this.financeBillingService.generateDueRecurringInvoices(
+      getFinanceContext(req),
     );
   }
 
