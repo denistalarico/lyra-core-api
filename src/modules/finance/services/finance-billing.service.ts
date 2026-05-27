@@ -126,7 +126,7 @@ export class FinanceBillingService {
       dto.invoiceNumber ?? (await this.generateDocumentNumber(ctx, 'INV'));
     const totals = this.calculateInvoiceTotals(dto.lines);
 
-    return this.dataSource.transaction(async (manager) => {
+    const invoiceId = await this.dataSource.transaction(async (manager) => {
       const invoice = await manager.getRepository(FinanceInvoice).save(
         manager.getRepository(FinanceInvoice).create({
           tenantId: ctx.tenantId,
@@ -179,8 +179,10 @@ export class FinanceBillingService {
 
       await manager.getRepository(FinanceInvoiceLine).save(lines);
 
-      return this.getInvoice(ctx, invoice.id);
+      return invoice.id;
     });
+
+    return this.getInvoice(ctx, invoiceId);
   }
 
   async updateInvoice(
