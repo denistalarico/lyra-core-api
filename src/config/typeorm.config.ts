@@ -144,6 +144,16 @@ import {
 } from '../modules/activities/entities';
 
 import {
+  ContractDocument,
+  ContractEvent,
+  ContractParty,
+  ContractRecord,
+  ContractTemplate,
+  ContractTemplateVersion,
+  ContractSignatureProviderSetting,
+} from '../modules/contracts/entities';
+
+import {
   AgencyPersonalTaskStage,
   AgencyProject,
   AgencyProjectEvent,
@@ -244,6 +254,13 @@ export const agencyEntities = [
   FinanceReportSnapshot,
   FinanceSetting,
   FinanceTag,
+  ContractDocument,
+  ContractEvent,
+  ContractParty,
+  ContractRecord,
+  ContractTemplate,
+  ContractTemplateVersion,
+  ContractSignatureProviderSetting,
 ];
 
 export function getTypeOrmConfig(): TypeOrmModuleOptions {
