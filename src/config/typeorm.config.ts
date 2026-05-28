@@ -154,6 +154,15 @@ import {
 } from '../modules/contracts/entities';
 
 import {
+  TeamDepartment,
+  TeamSkill,
+  TeamMember,
+  TeamMemberSkill,
+  TeamMemberPresence,
+  TeamAttendanceEntry,
+} from '../modules/team/entities';
+
+import {
   AgencyPersonalTaskStage,
   AgencyProject,
   AgencyProjectEvent,
@@ -261,6 +270,12 @@ export const agencyEntities = [
   ContractTemplate,
   ContractTemplateVersion,
   ContractSignatureProviderSetting,
+  TeamDepartment,
+  TeamSkill,
+  TeamMember,
+  TeamMemberSkill,
+  TeamMemberPresence,
+  TeamAttendanceEntry,
 ];
 
 export function getTypeOrmConfig(): TypeOrmModuleOptions {

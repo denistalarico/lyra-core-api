@@ -30,6 +30,8 @@ import { CreateAgencyFinanceJournalEntries1760002021000 } from './migrations/176
 import { CreateAgencyContractsLayer1760002022000 } from './migrations/1760002022000-create-agency-contracts-layer';
 import { AddContractTemplateI18nFields1760002023000 } from './migrations/1760002023000-add-contract-template-i18n-fields';
 import { CreateContractSignatureProviderSettings1760002024000 } from './migrations/1760002024000-create-contract-signature-provider-settings';
+import { CreateAgencyTeamCore1760002025000 } from './migrations/1760002025000-create-agency-team-core';
+import { CreateAgencyTeamAttendance1760002026000 } from './migrations/1760002026000-create-agency-team-attendance';
 
 export const AgencyDataSource = new DataSource({
   type: 'postgres',
@@ -74,5 +76,7 @@ export const AgencyDataSource = new DataSource({
     CreateAgencyContractsLayer1760002022000,
     AddContractTemplateI18nFields1760002023000,
     CreateContractSignatureProviderSettings1760002024000,
+    CreateAgencyTeamCore1760002025000,
+    CreateAgencyTeamAttendance1760002026000,
   ],
 });
