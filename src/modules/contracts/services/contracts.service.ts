@@ -61,6 +61,7 @@ import {
   PreviewContractTemplateDto,
   UpdateContractPartyDto,
   UpdateSignatureProviderSettingsDto,
+  UploadManuallySignedContractDto,
   UpdateContractRecordDto,
   UpdateContractTemplateDto,
 } from '../dto';
@@ -1101,6 +1102,131 @@ export class ContractsService {
     };
   }
 
+  async uploadManuallySignedContract(
+    context: RequestContext,
+    id: string,
+    dto: UploadManuallySignedContractDto,
+  ) {
+    const contract = await this.getContractOrFail(context, id);
+
+    if (
+      [
+        ContractStatus.Completed,
+        ContractStatus.Cancelled,
+        ContractStatus.Archived,
+      ].includes(contract.status)
+    ) {
+      throw new BadRequestException(
+        'Contract cannot receive a manually signed upload in current status',
+      );
+    }
+
+    const mimeType = dto.mimeType ?? 'application/pdf';
+
+    if (mimeType !== 'application/pdf') {
+      throw new BadRequestException('Only PDF uploads are supported for now');
+    }
+
+    const normalizedBase64 = dto.fileBase64.includes(',')
+      ? dto.fileBase64.split(',').pop() ?? ''
+      : dto.fileBase64;
+
+    const buffer = Buffer.from(normalizedBase64, 'base64');
+
+    if (!buffer.length) {
+      throw new BadRequestException('Invalid fileBase64 payload');
+    }
+
+    const pdfHeader = buffer.subarray(0, 4).toString('utf8');
+
+    if (pdfHeader !== '%PDF') {
+      throw new BadRequestException('Uploaded file is not a valid PDF');
+    }
+
+    const fileName =
+      dto.fileName ??
+      `${this.slugifyFileName(contract.title || 'contract')}-signed.pdf`;
+
+    const fileKey = this.buildContractPdfFileKey({
+      tenantId: context.tenantId,
+      workspaceId: context.workspaceId,
+      contractId: contract.id,
+      fileName: fileName.replace(/\.pdf$/i, '-signed.pdf'),
+    });
+
+    const storage = await this.uploadPdfToObjectStorage({
+      buffer,
+      fileKey,
+      contentType: mimeType,
+    });
+
+    const document = await this.documentsRepository.save(
+      this.documentsRepository.create({
+        tenantId: context.tenantId,
+        workspaceId: context.workspaceId,
+        contractId: contract.id,
+        type: ContractDocumentType.SignedPdf,
+        fileName,
+        fileKey: storage.fileKey,
+        mimeType,
+        sizeBytes: String(buffer.length),
+        externalUrl: null,
+        uploadedById: context.userId,
+        metadata: {
+          uploadedAs: 'manually_signed_contract',
+          uploadedAt: new Date().toISOString(),
+          storageBucket: storage.bucket,
+          storageProvider: 'minio',
+        },
+      }),
+    );
+
+    const now = new Date();
+
+    contract.status = ContractStatus.Completed;
+    contract.signatureMode = ContractSignatureMode.Manual;
+    contract.signatureProvider = ContractSignatureProvider.None;
+    contract.signedAt = now;
+    contract.completedAt = now;
+    contract.updatedById = context.userId;
+    contract.metadata = {
+      ...(contract.metadata ?? {}),
+      manuallySignedPdfDocumentId: document.id,
+      manuallySignedPdfUploadedAt: now.toISOString(),
+    };
+
+    const saved = await this.contractsRepository.save(contract);
+
+    await this.createEvent(
+      context,
+      saved.id,
+      ContractEventType.ManualSignedPdfUploaded,
+      dto.note ?? 'PDF assinado manualmente enviado e contrato concluído.',
+      {
+        documentId: document.id,
+        fileName: document.fileName,
+        fileKey: document.fileKey,
+        sizeBytes: document.sizeBytes,
+      },
+    );
+
+    await this.createEvent(
+      context,
+      saved.id,
+      ContractEventType.SignatureCompleted,
+      'Contrato concluído por assinatura manual.',
+      {
+        signatureMode: ContractSignatureMode.Manual,
+        signedDocumentId: document.id,
+      },
+    );
+
+    return {
+      contract: saved,
+      document,
+    };
+  }
+
   async markManuallySigned(
     context: RequestContext,
     id: string,
@@ -1108,54 +1234,58 @@ export class ContractsService {
   ) {
     const contract = await this.getContractOrFail(context, id);
 
-    if (contract.signatureMode !== ContractSignatureMode.Manual) {
+    if (
+      [
+        ContractStatus.Completed,
+        ContractStatus.Cancelled,
+        ContractStatus.Archived,
+      ].includes(contract.status)
+    ) {
       throw new BadRequestException(
-        'Only manual signature contracts can be marked manually signed',
+        'Contract cannot be marked as manually signed in current status',
       );
     }
 
-    contract.status = ContractStatus.ManuallySigned;
-    contract.signedAt = new Date();
+    const signedAt = dto.signedAt ? new Date(dto.signedAt) : new Date();
+
+    contract.status = ContractStatus.Completed;
+    contract.signatureMode = ContractSignatureMode.Manual;
+    contract.signatureProvider = ContractSignatureProvider.None;
+    contract.signedAt = signedAt;
+    contract.completedAt = signedAt;
     contract.updatedById = context.userId;
+    contract.metadata = {
+      ...(contract.metadata ?? {}),
+      manuallySignedWithoutUpload: true,
+      manuallySignedAt: signedAt.toISOString(),
+      manuallySignedByName: dto.signedByName ?? null,
+    };
 
     const saved = await this.contractsRepository.save(contract);
 
-    if (dto.fileName || dto.fileKey) {
-      await this.documentsRepository.save(
-        this.documentsRepository.create({
-          tenantId: context.tenantId,
-          workspaceId: context.workspaceId,
-          contractId: saved.id,
-          type: ContractDocumentType.ManuallySignedPdf,
-          fileName: dto.fileName ?? null,
-          fileKey: dto.fileKey ?? null,
-          mimeType: dto.mimeType ?? null,
-          sizeBytes: dto.sizeBytes ?? null,
-          externalUrl: null,
-          uploadedById: context.userId,
-          metadata: dto.metadata ?? {},
-        }),
-      );
-    }
-
-    await this.partiesRepository.update(
+    await this.createEvent(
+      context,
+      saved.id,
+      ContractEventType.ManuallySigned,
+      dto.note ?? 'Contrato marcado como assinado manualmente sem upload de PDF.',
       {
-        tenantId: context.tenantId,
-        workspaceId: context.workspaceId,
-        contractId: saved.id,
-      },
-      {
-        signatureStatus: ContractPartySignatureStatus.Signed,
-        signedAt: new Date(),
+        signatureMode: ContractSignatureMode.Manual,
+        signedAt: signedAt.toISOString(),
+        signedByName: dto.signedByName ?? null,
+        hasSignedPdfUpload: false,
       },
     );
 
     await this.createEvent(
       context,
       saved.id,
-      ContractEventType.ManuallySigned,
-      dto.note ?? 'Contrato marcado como assinado manualmente.',
-      dto.metadata ?? {},
+      ContractEventType.SignatureCompleted,
+      'Contrato concluído por confirmação manual de assinatura.',
+      {
+        signatureMode: ContractSignatureMode.Manual,
+        signedAt: signedAt.toISOString(),
+        hasSignedPdfUpload: false,
+      },
     );
 
     return this.findContract(context, saved.id);

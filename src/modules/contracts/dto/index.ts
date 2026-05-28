@@ -18,3 +18,4 @@ export * from './prepare-contract-signature.dto';
 export * from './update-signature-provider-settings.dto';
 export * from './send-contract-to-signature-provider.dto';
 export * from './mock-signature-provider-callback.dto';
+export * from './upload-manually-signed-contract.dto';

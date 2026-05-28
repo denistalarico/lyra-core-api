@@ -72,6 +72,7 @@ export enum ContractPartySignatureStatus {
 export enum ContractDocumentType {
   DraftHtml = 'draft_html',
   GeneratedPdf = 'generated_pdf',
+  SignedPdf = 'signed_pdf',
   ManuallySignedPdf = 'manually_signed_pdf',
   DigitalSignatureCertificate = 'digital_signature_certificate',
   Attachment = 'attachment',
@@ -97,6 +98,7 @@ export enum ContractEventType {
   SignatureSent = 'contract.signature_sent',
   SignatureStatusUpdated = 'contract.signature_status_updated',
   SignatureCompleted = 'contract.signature_completed',
+  ManualSignedPdfUploaded = 'contract.manual_signed_pdf_uploaded',
   SignatureProviderSynced = 'contract.signature_provider_synced',
 }
 

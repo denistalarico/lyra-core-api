@@ -21,6 +21,7 @@ MarkContractManuallySignedDto,
   MockSignatureProviderCallbackDto,
 UpdateContractPartyDto,
   UpdateSignatureProviderSettingsDto,
+  UploadManuallySignedContractDto,
 UpdateContractRecordDto,
 UpdateContractTemplateDto,
 } from '../dto';
@@ -222,6 +223,7 @@ updateParty(
 @Param('partyId') partyId: string,
 @Body() dto: UpdateContractPartyDto,
   UpdateSignatureProviderSettingsDto,
+  UploadManuallySignedContractDto,
 ) {
 return this.contractsService.updateParty(
 getContextFromHeaders(headers),
