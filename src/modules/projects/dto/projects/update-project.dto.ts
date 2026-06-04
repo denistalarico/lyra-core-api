@@ -69,4 +69,9 @@ export class UpdateProjectDto {
   @IsString()
   @MaxLength(120)
   publicPagePassword?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(32)
+  color?: string | null;
 }

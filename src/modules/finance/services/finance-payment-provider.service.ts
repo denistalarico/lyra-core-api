@@ -110,6 +110,12 @@ export class FinancePaymentProviderService {
     return this.providersRepo.save(provider);
   }
 
+  async delete(ctx: FinanceRequestContext, id: string) {
+    const provider = await this.get(ctx, id);
+    await this.providersRepo.delete({ id: provider.id, tenantId: ctx.tenantId, workspaceId: ctx.workspaceId });
+    return { deleted: true };
+  }
+
   async disconnect(ctx: FinanceRequestContext, id: string) {
     const provider = await this.get(ctx, id);
 

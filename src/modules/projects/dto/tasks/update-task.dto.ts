@@ -3,6 +3,7 @@ import {
   IsDateString,
   IsEnum,
   IsInt,
+  IsArray,
   IsOptional,
   IsString,
   IsUUID,
@@ -50,6 +51,11 @@ export class UpdateTaskDto {
   priority?: TaskPriority;
 
   @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  taskTypeId?: string | null;
+
+  @IsOptional()
   @IsEnum(TaskVisibility)
   visibility?: TaskVisibility;
 
@@ -78,4 +84,18 @@ export class UpdateTaskDto {
   @IsOptional()
   @IsString()
   blockedReason?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(32)
+  color?: string | null;
+
+  @IsOptional()
+  @IsString()
+  coverImageUrl?: string | null;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  markerIds?: string[];
 }

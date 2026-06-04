@@ -1,4 +1,5 @@
 import {
+  IsArray,
   IsDateString,
   IsEnum,
   IsInt,
@@ -53,4 +54,9 @@ export class CreateProjectDto {
   @Min(0)
   @Max(100)
   progress?: number;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  markerIds?: string[];
 }

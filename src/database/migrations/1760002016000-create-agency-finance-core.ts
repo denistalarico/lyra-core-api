@@ -255,6 +255,7 @@ export class CreateAgencyFinanceCore1760002016000 implements MigrationInterface 
         "currency" varchar(3) NOT NULL DEFAULT 'BRL',
         "bank_name" varchar(160),
         "external_reference" varchar(180),
+        "account_id" uuid,
         "opening_balance" numeric(14,2) NOT NULL DEFAULT 0,
         "active" boolean NOT NULL DEFAULT true,
         "metadata" jsonb NOT NULL DEFAULT '{}'::jsonb,
@@ -336,22 +337,52 @@ export class CreateAgencyFinanceCore1760002016000 implements MigrationInterface 
       )
     `);
 
-    await queryRunner.query(`CREATE UNIQUE INDEX "UQ_finance_settings_tenant_workspace" ON "finance_settings" ("tenant_id", "workspace_id")`);
-    await queryRunner.query(`CREATE UNIQUE INDEX "UQ_finance_accounts_code_tenant_workspace" ON "finance_accounts" ("tenant_id", "workspace_id", "code")`);
-    await queryRunner.query(`CREATE UNIQUE INDEX "UQ_finance_journals_code_tenant_workspace" ON "finance_journals" ("tenant_id", "workspace_id", "code")`);
-    await queryRunner.query(`CREATE UNIQUE INDEX "UQ_finance_categories_name_tenant_workspace" ON "finance_categories" ("tenant_id", "workspace_id", "name", "type")`);
-    await queryRunner.query(`CREATE UNIQUE INDEX "UQ_finance_tags_name_tenant_workspace" ON "finance_tags" ("tenant_id", "workspace_id", "name")`);
-    await queryRunner.query(`CREATE UNIQUE INDEX "UQ_finance_cost_centers_name_tenant_workspace" ON "finance_cost_centers" ("tenant_id", "workspace_id", "name", "type")`);
-    await queryRunner.query(`CREATE UNIQUE INDEX "UQ_finance_periods_tenant_workspace_dates" ON "finance_periods" ("tenant_id", "workspace_id", "period_start", "period_end")`);
-    await queryRunner.query(`CREATE UNIQUE INDEX "UQ_finance_profitability_rules_tenant_workspace" ON "finance_profitability_rules" ("tenant_id", "workspace_id")`);
+    await queryRunner.query(
+      `CREATE UNIQUE INDEX "UQ_finance_settings_tenant_workspace" ON "finance_settings" ("tenant_id", "workspace_id")`,
+    );
+    await queryRunner.query(
+      `CREATE UNIQUE INDEX "UQ_finance_accounts_code_tenant_workspace" ON "finance_accounts" ("tenant_id", "workspace_id", "code")`,
+    );
+    await queryRunner.query(
+      `CREATE UNIQUE INDEX "UQ_finance_journals_code_tenant_workspace" ON "finance_journals" ("tenant_id", "workspace_id", "code")`,
+    );
+    await queryRunner.query(
+      `CREATE UNIQUE INDEX "UQ_finance_categories_name_tenant_workspace" ON "finance_categories" ("tenant_id", "workspace_id", "name", "type")`,
+    );
+    await queryRunner.query(
+      `CREATE UNIQUE INDEX "UQ_finance_tags_name_tenant_workspace" ON "finance_tags" ("tenant_id", "workspace_id", "name")`,
+    );
+    await queryRunner.query(
+      `CREATE UNIQUE INDEX "UQ_finance_cost_centers_name_tenant_workspace" ON "finance_cost_centers" ("tenant_id", "workspace_id", "name", "type")`,
+    );
+    await queryRunner.query(
+      `CREATE UNIQUE INDEX "UQ_finance_periods_tenant_workspace_dates" ON "finance_periods" ("tenant_id", "workspace_id", "period_start", "period_end")`,
+    );
+    await queryRunner.query(
+      `CREATE UNIQUE INDEX "UQ_finance_profitability_rules_tenant_workspace" ON "finance_profitability_rules" ("tenant_id", "workspace_id")`,
+    );
 
-    await queryRunner.query(`CREATE INDEX "IDX_finance_accounts_tenant_workspace" ON "finance_accounts" ("tenant_id", "workspace_id")`);
-    await queryRunner.query(`CREATE INDEX "IDX_finance_journals_tenant_workspace" ON "finance_journals" ("tenant_id", "workspace_id")`);
-    await queryRunner.query(`CREATE INDEX "IDX_finance_categories_tenant_workspace" ON "finance_categories" ("tenant_id", "workspace_id")`);
-    await queryRunner.query(`CREATE INDEX "IDX_finance_tags_tenant_workspace" ON "finance_tags" ("tenant_id", "workspace_id")`);
-    await queryRunner.query(`CREATE INDEX "IDX_finance_cost_centers_tenant_workspace" ON "finance_cost_centers" ("tenant_id", "workspace_id")`);
-    await queryRunner.query(`CREATE INDEX "IDX_finance_metric_snapshots_lookup" ON "finance_metric_snapshots" ("tenant_id", "workspace_id", "metric_key", "period_start", "period_end")`);
-    await queryRunner.query(`CREATE INDEX "IDX_finance_report_snapshots_lookup" ON "finance_report_snapshots" ("tenant_id", "workspace_id", "report_type", "period_start", "period_end")`);
+    await queryRunner.query(
+      `CREATE INDEX "IDX_finance_accounts_tenant_workspace" ON "finance_accounts" ("tenant_id", "workspace_id")`,
+    );
+    await queryRunner.query(
+      `CREATE INDEX "IDX_finance_journals_tenant_workspace" ON "finance_journals" ("tenant_id", "workspace_id")`,
+    );
+    await queryRunner.query(
+      `CREATE INDEX "IDX_finance_categories_tenant_workspace" ON "finance_categories" ("tenant_id", "workspace_id")`,
+    );
+    await queryRunner.query(
+      `CREATE INDEX "IDX_finance_tags_tenant_workspace" ON "finance_tags" ("tenant_id", "workspace_id")`,
+    );
+    await queryRunner.query(
+      `CREATE INDEX "IDX_finance_cost_centers_tenant_workspace" ON "finance_cost_centers" ("tenant_id", "workspace_id")`,
+    );
+    await queryRunner.query(
+      `CREATE INDEX "IDX_finance_metric_snapshots_lookup" ON "finance_metric_snapshots" ("tenant_id", "workspace_id", "metric_key", "period_start", "period_end")`,
+    );
+    await queryRunner.query(
+      `CREATE INDEX "IDX_finance_report_snapshots_lookup" ON "finance_report_snapshots" ("tenant_id", "workspace_id", "report_type", "period_start", "period_end")`,
+    );
 
     await queryRunner.query(`
       ALTER TABLE "finance_accounts"
@@ -383,27 +414,59 @@ export class CreateAgencyFinanceCore1760002016000 implements MigrationInterface 
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
-    await queryRunner.query(`ALTER TABLE "finance_categories" DROP CONSTRAINT "FK_finance_categories_account"`);
-    await queryRunner.query(`ALTER TABLE "finance_journals" DROP CONSTRAINT "FK_finance_journals_default_credit_account"`);
-    await queryRunner.query(`ALTER TABLE "finance_journals" DROP CONSTRAINT "FK_finance_journals_default_debit_account"`);
-    await queryRunner.query(`ALTER TABLE "finance_accounts" DROP CONSTRAINT "FK_finance_accounts_parent"`);
+    await queryRunner.query(
+      `ALTER TABLE "finance_categories" DROP CONSTRAINT "FK_finance_categories_account"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "finance_journals" DROP CONSTRAINT "FK_finance_journals_default_credit_account"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "finance_journals" DROP CONSTRAINT "FK_finance_journals_default_debit_account"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "finance_accounts" DROP CONSTRAINT "FK_finance_accounts_parent"`,
+    );
 
     await queryRunner.query(`DROP INDEX "IDX_finance_report_snapshots_lookup"`);
     await queryRunner.query(`DROP INDEX "IDX_finance_metric_snapshots_lookup"`);
-    await queryRunner.query(`DROP INDEX "IDX_finance_cost_centers_tenant_workspace"`);
+    await queryRunner.query(
+      `DROP INDEX "IDX_finance_cost_centers_tenant_workspace"`,
+    );
     await queryRunner.query(`DROP INDEX "IDX_finance_tags_tenant_workspace"`);
-    await queryRunner.query(`DROP INDEX "IDX_finance_categories_tenant_workspace"`);
-    await queryRunner.query(`DROP INDEX "IDX_finance_journals_tenant_workspace"`);
-    await queryRunner.query(`DROP INDEX "IDX_finance_accounts_tenant_workspace"`);
+    await queryRunner.query(
+      `DROP INDEX "IDX_finance_categories_tenant_workspace"`,
+    );
+    await queryRunner.query(
+      `DROP INDEX "IDX_finance_journals_tenant_workspace"`,
+    );
+    await queryRunner.query(
+      `DROP INDEX "IDX_finance_accounts_tenant_workspace"`,
+    );
 
-    await queryRunner.query(`DROP INDEX "UQ_finance_profitability_rules_tenant_workspace"`);
-    await queryRunner.query(`DROP INDEX "UQ_finance_periods_tenant_workspace_dates"`);
-    await queryRunner.query(`DROP INDEX "UQ_finance_cost_centers_name_tenant_workspace"`);
-    await queryRunner.query(`DROP INDEX "UQ_finance_tags_name_tenant_workspace"`);
-    await queryRunner.query(`DROP INDEX "UQ_finance_categories_name_tenant_workspace"`);
-    await queryRunner.query(`DROP INDEX "UQ_finance_journals_code_tenant_workspace"`);
-    await queryRunner.query(`DROP INDEX "UQ_finance_accounts_code_tenant_workspace"`);
-    await queryRunner.query(`DROP INDEX "UQ_finance_settings_tenant_workspace"`);
+    await queryRunner.query(
+      `DROP INDEX "UQ_finance_profitability_rules_tenant_workspace"`,
+    );
+    await queryRunner.query(
+      `DROP INDEX "UQ_finance_periods_tenant_workspace_dates"`,
+    );
+    await queryRunner.query(
+      `DROP INDEX "UQ_finance_cost_centers_name_tenant_workspace"`,
+    );
+    await queryRunner.query(
+      `DROP INDEX "UQ_finance_tags_name_tenant_workspace"`,
+    );
+    await queryRunner.query(
+      `DROP INDEX "UQ_finance_categories_name_tenant_workspace"`,
+    );
+    await queryRunner.query(
+      `DROP INDEX "UQ_finance_journals_code_tenant_workspace"`,
+    );
+    await queryRunner.query(
+      `DROP INDEX "UQ_finance_accounts_code_tenant_workspace"`,
+    );
+    await queryRunner.query(
+      `DROP INDEX "UQ_finance_settings_tenant_workspace"`,
+    );
 
     await queryRunner.query(`DROP TABLE "finance_profitability_rules"`);
     await queryRunner.query(`DROP TABLE "finance_report_snapshots"`);
@@ -417,14 +480,24 @@ export class CreateAgencyFinanceCore1760002016000 implements MigrationInterface 
     await queryRunner.query(`DROP TABLE "finance_accounts"`);
     await queryRunner.query(`DROP TABLE "finance_settings"`);
 
-    await queryRunner.query(`DROP TYPE "finance_report_snapshots_period_type_enum"`);
-    await queryRunner.query(`DROP TYPE "finance_report_snapshots_report_type_enum"`);
-    await queryRunner.query(`DROP TYPE "finance_metric_snapshots_period_type_enum"`);
-    await queryRunner.query(`DROP TYPE "finance_metric_snapshots_metric_key_enum"`);
+    await queryRunner.query(
+      `DROP TYPE "finance_report_snapshots_period_type_enum"`,
+    );
+    await queryRunner.query(
+      `DROP TYPE "finance_report_snapshots_report_type_enum"`,
+    );
+    await queryRunner.query(
+      `DROP TYPE "finance_metric_snapshots_period_type_enum"`,
+    );
+    await queryRunner.query(
+      `DROP TYPE "finance_metric_snapshots_metric_key_enum"`,
+    );
     await queryRunner.query(`DROP TYPE "finance_periods_status_enum"`);
     await queryRunner.query(`DROP TYPE "finance_bank_accounts_type_enum"`);
     await queryRunner.query(`DROP TYPE "finance_cost_centers_type_enum"`);
-    await queryRunner.query(`DROP TYPE "finance_categories_cost_behavior_enum"`);
+    await queryRunner.query(
+      `DROP TYPE "finance_categories_cost_behavior_enum"`,
+    );
     await queryRunner.query(`DROP TYPE "finance_categories_type_enum"`);
     await queryRunner.query(`DROP TYPE "finance_journals_type_enum"`);
     await queryRunner.query(`DROP TYPE "finance_accounts_status_enum"`);

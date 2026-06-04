@@ -8,6 +8,10 @@ import type {
   DocumentLayoutEntity,
   DocumentLayoutTemplateEntity,
 } from './entities/document-layout.entities';
+import type { FinanceInvoice } from '../finance/entities/finance-invoice.entity';
+import type { FinanceInvoiceLine } from '../finance/entities/finance-invoice-line.entity';
+import type { FinanceBill } from '../finance/entities/finance-bill.entity';
+import type { FinanceBillLine } from '../finance/entities/finance-bill-line.entity';
 
 type RenderQuotePdfInput = {
   quote: QuoteEntity;
@@ -16,8 +20,55 @@ type RenderQuotePdfInput = {
   template: DocumentLayoutTemplateEntity;
 };
 
+type RenderInvoicePdfInput = {
+  invoice: FinanceInvoice;
+  lines: FinanceInvoiceLine[];
+  layout: DocumentLayoutEntity;
+  template: DocumentLayoutTemplateEntity;
+};
+
+type RenderBillPdfInput = {
+  bill: FinanceBill;
+  lines: FinanceBillLine[];
+  layout: DocumentLayoutEntity;
+  template: DocumentLayoutTemplateEntity;
+};
+
+type RenderHtmlPdfOptions = {
+  format?: 'A4' | 'Letter';
+  margin?: { top?: string; right?: string; bottom?: string; left?: string };
+};
+
 @Injectable()
 export class DocumentPdfRendererService {
+  async renderHtmlToPdf(
+    html: string,
+    options: RenderHtmlPdfOptions = {},
+  ): Promise<Buffer> {
+    const browser = await chromium.launch({ headless: true });
+    let page: Awaited<ReturnType<typeof browser.newPage>> | null = null;
+
+    try {
+      page = await browser.newPage();
+      await page.setContent(html, { waitUntil: 'networkidle' });
+      await page.emulateMedia({ media: 'print' });
+
+      return await page.pdf({
+        format: options.format ?? 'A4',
+        printBackground: true,
+        margin: options.margin ?? {
+          top: '12mm',
+          right: '12mm',
+          bottom: '12mm',
+          left: '12mm',
+        },
+      });
+    } finally {
+      await page?.close().catch(() => undefined);
+      await browser.close().catch(() => undefined);
+    }
+  }
+
   async renderQuotePdf(input: RenderQuotePdfInput): Promise<Buffer> {
     const html = this.buildQuoteHtml(input);
     const browser = await chromium.launch({ headless: true });
@@ -47,6 +98,7 @@ export class DocumentPdfRendererService {
   private buildQuoteHtml(input: RenderQuotePdfInput) {
     const { quote, items, layout, template } = input;
     const companyBrandBlock = this.buildCompanyBrandBlock(layout);
+    const termsBlock = this.buildTermsBlock(quote.termsAndConditions);
     const html = this.replaceTokens(template.htmlTemplate, {
       layoutType: this.escapeHtml(layout.layoutType),
       companyBrandBlock,
@@ -65,12 +117,19 @@ export class DocumentPdfRendererService {
       documentTypeLabel: 'Cotação',
       documentTitle: this.escapeHtml(quote.title || quote.quoteNumber),
       documentSubtitle: this.escapeHtml(this.getDocumentSubtitle(quote)),
+      clientLabel: 'Cliente',
+      documentNumberLabel: 'Número',
       customerName: this.escapeHtml(this.getCustomerName(quote)),
       documentNumber: this.escapeHtml(quote.quoteNumber),
+      // new tokens (post-migration templates)
+      dateGridCells: `<div><small>Validade</small><strong>${this.escapeHtml(this.formatDate(quote.validUntil))}</strong></div>`,
+      termsBlock,
+      closingModifier: termsBlock ? '' : ' doc-closing--no-terms',
+      // legacy tokens (pre-migration templates)
       validUntil: this.escapeHtml(this.formatDate(quote.validUntil)),
+      termsAndConditions: this.escapeHtml(quote.termsAndConditions ?? ''),
       itemsTable: this.buildItemsTable(items, quote.currency),
       totalsTable: this.buildTotalsTable(quote),
-      termsAndConditions: this.escapeHtml(quote.termsAndConditions ?? ''),
       footerText: this.escapeHtml(layout.footerText ?? ''),
     });
 
@@ -212,6 +271,282 @@ export class DocumentPdfRendererService {
         <strong class="doc-total-value">${this.escapeHtml(this.formatMoney(quote.totalCents, currency))}</strong>
       </div>
     </div>`;
+  }
+
+  async renderInvoicePdf(input: RenderInvoicePdfInput): Promise<Buffer> {
+    const html = this.buildInvoiceHtml(input);
+    const browser = await chromium.launch({ headless: true });
+    let page: Awaited<ReturnType<typeof browser.newPage>> | null = null;
+    try {
+      page = await browser.newPage();
+      await page.setContent(html, { waitUntil: 'networkidle' });
+      await page.emulateMedia({ media: 'print' });
+      return await page.pdf({
+        format: input.layout.paperFormat === 'letter' ? 'Letter' : 'A4',
+        printBackground: true,
+        margin: { top: '0', right: '0', bottom: '0', left: '0' },
+      });
+    } finally {
+      await page?.close().catch(() => undefined);
+      await browser.close().catch(() => undefined);
+    }
+  }
+
+  async renderBillPdf(input: RenderBillPdfInput): Promise<Buffer> {
+    const html = this.buildBillHtml(input);
+    const browser = await chromium.launch({ headless: true });
+    let page: Awaited<ReturnType<typeof browser.newPage>> | null = null;
+    try {
+      page = await browser.newPage();
+      await page.setContent(html, { waitUntil: 'networkidle' });
+      await page.emulateMedia({ media: 'print' });
+      return await page.pdf({
+        format: input.layout.paperFormat === 'letter' ? 'Letter' : 'A4',
+        printBackground: true,
+        margin: { top: '0', right: '0', bottom: '0', left: '0' },
+      });
+    } finally {
+      await page?.close().catch(() => undefined);
+      await browser.close().catch(() => undefined);
+    }
+  }
+
+  private buildInvoiceHtml(input: RenderInvoicePdfInput) {
+    const { invoice, lines, layout, template } = input;
+    const companyBrandBlock = this.buildCompanyBrandBlock(layout);
+    const metadata = invoice.metadata ?? {};
+    const customerName =
+      typeof metadata['customerName'] === 'string' && metadata['customerName'].trim()
+        ? metadata['customerName'].trim()
+        : 'Cliente não informado';
+    const subtitle =
+      typeof metadata['documentSubtitle'] === 'string' && metadata['documentSubtitle'].trim()
+        ? metadata['documentSubtitle'].trim()
+        : 'Fatura de serviços prestados';
+    const termsBlock = this.buildTermsBlock(invoice.terms);
+    const html = this.replaceTokens(template.htmlTemplate, {
+      layoutType: this.escapeHtml(layout.layoutType),
+      companyBrandBlock,
+      companyLogoBlock: companyBrandBlock,
+      companyLogo: '',
+      companyName: this.escapeHtml(layout.companyName ?? ''),
+      slogan: this.escapeHtml(layout.slogan ?? ''),
+      companyAddress: this.escapeHtml(layout.companyAddress ?? ''),
+      companyCity: this.escapeHtml(layout.companyCity ?? ''),
+      companyRegion: this.escapeHtml(layout.companyRegion ?? ''),
+      companyPostalCode: this.escapeHtml(layout.companyPostalCode ?? ''),
+      companyEmail: this.escapeHtml(layout.companyEmail ?? ''),
+      companyPhone: this.escapeHtml(layout.companyPhone ?? ''),
+      companyDocumentLabel: this.escapeHtml(layout.companyDocumentLabel ?? ''),
+      companyDocumentValue: this.escapeHtml(layout.companyDocumentValue ?? ''),
+      documentTypeLabel: 'Fatura',
+      documentTitle: this.escapeHtml(invoice.invoiceNumber),
+      documentSubtitle: this.escapeHtml(subtitle),
+      clientLabel: 'Cliente',
+      documentNumberLabel: 'Número',
+      customerName: this.escapeHtml(customerName),
+      documentNumber: this.escapeHtml(invoice.invoiceNumber),
+      // new tokens (post-migration templates)
+      dateGridCells: [
+        `<div><small>Data de emissão</small><strong>${this.escapeHtml(this.formatDate(invoice.issueDate))}</strong></div>`,
+        `<div><small>Vencimento</small><strong>${this.escapeHtml(this.formatDate(invoice.dueDate))}</strong></div>`,
+      ].join(''),
+      termsBlock,
+      closingModifier: termsBlock ? '' : ' doc-closing--no-terms',
+      // legacy tokens (pre-migration templates)
+      validUntil: this.escapeHtml(
+        invoice.dueDate
+          ? `${this.formatDate(invoice.issueDate)} · Venc. ${this.formatDate(invoice.dueDate)}`
+          : this.formatDate(invoice.issueDate),
+      ),
+      termsAndConditions: this.escapeHtml(invoice.terms ?? ''),
+      itemsTable: this.buildFinanceItemsTable(
+        lines.map((l) => ({
+          description: l.description,
+          quantity: l.quantity,
+          unitPrice: l.unitPrice,
+          totalAmount: l.totalAmount,
+        })),
+        invoice.currency,
+      ),
+      totalsTable: this.buildFinanceTotalsTable({
+        subtotalAmount: invoice.subtotalAmount,
+        discountAmount: invoice.discountAmount,
+        taxAmount: invoice.taxAmount,
+        totalAmount: invoice.totalAmount,
+        currency: invoice.currency,
+        grandLabel: 'Total da fatura',
+      }),
+      footerText: this.escapeHtml(layout.footerText ?? ''),
+    });
+    const css = this.replaceTokens(template.cssTemplate, {
+      primaryColor: this.escapeCssValue(layout.primaryColor || '#2563EB'),
+      secondaryColor: this.escapeCssValue(layout.secondaryColor || '#0F172A'),
+      textColor: this.escapeCssValue(layout.textColor || '#0F172A'),
+      backgroundColor: this.escapeCssValue(layout.backgroundColor || '#FFFFFF'),
+      fontFamily: this.escapeCssValue(layout.fontFamily || 'Inter'),
+      headingFontFamily: this.escapeCssValue(layout.headingFontFamily || 'Sora'),
+    });
+    return `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <style>
+    @page { margin: 0; size: ${layout.paperFormat === 'letter' ? 'Letter' : 'A4'}; }
+    ${css}
+  </style>
+</head>
+<body>${html}</body>
+</html>`;
+  }
+
+  private buildBillHtml(input: RenderBillPdfInput) {
+    const { bill, lines, layout, template } = input;
+    const companyBrandBlock = this.buildCompanyBrandBlock(layout);
+    const metadata = bill.metadata ?? {};
+    const vendorName =
+      typeof metadata['vendorName'] === 'string' && metadata['vendorName'].trim()
+        ? metadata['vendorName'].trim()
+        : 'Fornecedor não informado';
+    const subtitle =
+      typeof metadata['documentSubtitle'] === 'string' && metadata['documentSubtitle'].trim()
+        ? metadata['documentSubtitle'].trim()
+        : 'Documento de obrigação financeira';
+    const html = this.replaceTokens(template.htmlTemplate, {
+      layoutType: this.escapeHtml(layout.layoutType),
+      companyBrandBlock,
+      companyLogoBlock: companyBrandBlock,
+      companyLogo: '',
+      companyName: this.escapeHtml(layout.companyName ?? ''),
+      slogan: this.escapeHtml(layout.slogan ?? ''),
+      companyAddress: this.escapeHtml(layout.companyAddress ?? ''),
+      companyCity: this.escapeHtml(layout.companyCity ?? ''),
+      companyRegion: this.escapeHtml(layout.companyRegion ?? ''),
+      companyPostalCode: this.escapeHtml(layout.companyPostalCode ?? ''),
+      companyEmail: this.escapeHtml(layout.companyEmail ?? ''),
+      companyPhone: this.escapeHtml(layout.companyPhone ?? ''),
+      companyDocumentLabel: this.escapeHtml(layout.companyDocumentLabel ?? ''),
+      companyDocumentValue: this.escapeHtml(layout.companyDocumentValue ?? ''),
+      documentTypeLabel: 'Conta a Pagar',
+      documentTitle: this.escapeHtml(bill.billNumber),
+      documentSubtitle: this.escapeHtml(subtitle),
+      clientLabel: 'Fornecedor',
+      documentNumberLabel: 'Número',
+      customerName: this.escapeHtml(vendorName),
+      documentNumber: this.escapeHtml(bill.billNumber),
+      // new tokens (post-migration templates)
+      dateGridCells: `<div><small>Vencimento</small><strong>${this.escapeHtml(this.formatDate(bill.dueDate))}</strong></div>`,
+      termsBlock: '',
+      closingModifier: ' doc-closing--no-terms',
+      // legacy tokens (pre-migration templates)
+      validUntil: this.escapeHtml(this.formatDate(bill.dueDate)),
+      termsAndConditions: '',
+      itemsTable: this.buildFinanceItemsTable(
+        lines.map((l) => ({
+          description: l.description,
+          quantity: l.quantity,
+          unitPrice: l.unitPrice,
+          totalAmount: l.totalAmount,
+        })),
+        bill.currency,
+      ),
+      totalsTable: this.buildFinanceTotalsTable({
+        subtotalAmount: bill.subtotalAmount,
+        discountAmount: '0',
+        taxAmount: bill.taxAmount,
+        totalAmount: bill.totalAmount,
+        currency: bill.currency,
+        grandLabel: 'Total a pagar',
+      }),
+      footerText: this.escapeHtml(layout.footerText ?? ''),
+    });
+    const css = this.replaceTokens(template.cssTemplate, {
+      primaryColor: this.escapeCssValue(layout.primaryColor || '#2563EB'),
+      secondaryColor: this.escapeCssValue(layout.secondaryColor || '#0F172A'),
+      textColor: this.escapeCssValue(layout.textColor || '#0F172A'),
+      backgroundColor: this.escapeCssValue(layout.backgroundColor || '#FFFFFF'),
+      fontFamily: this.escapeCssValue(layout.fontFamily || 'Inter'),
+      headingFontFamily: this.escapeCssValue(layout.headingFontFamily || 'Sora'),
+    });
+    return `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <style>
+    @page { margin: 0; size: ${layout.paperFormat === 'letter' ? 'Letter' : 'A4'}; }
+    ${css}
+  </style>
+</head>
+<body>${html}</body>
+</html>`;
+  }
+
+  private buildFinanceItemsTable(
+    lines: { description: string; quantity: string; unitPrice: string; totalAmount: string }[],
+    fallbackCurrency: string,
+  ) {
+    const rows =
+      lines.length > 0
+        ? lines
+            .map(
+              (l) => `
+        <tr>
+          <td><strong>${this.escapeHtml(l.description)}</strong></td>
+          <td style="text-align:center;">${this.escapeHtml(l.quantity)}</td>
+          <td style="text-align:right;">${this.escapeHtml(this.formatMoney(Math.round(Number(l.unitPrice) * 100), fallbackCurrency))}</td>
+          <td style="text-align:right;"><strong>${this.escapeHtml(this.formatMoney(Math.round(Number(l.totalAmount) * 100), fallbackCurrency))}</strong></td>
+        </tr>`,
+            )
+            .join('')
+        : `<tr><td colspan="4" style="text-align:center;color:#64748b;">Nenhum item informado.</td></tr>`;
+    return `
+    <table class="doc-items-table">
+      <thead>
+        <tr>
+          <th style="text-align:left;">Item</th>
+          <th style="text-align:center;">Qtd.</th>
+          <th style="text-align:right;">Unitário</th>
+          <th style="text-align:right;">Total</th>
+        </tr>
+      </thead>
+      <tbody>${rows}
+      </tbody>
+    </table>`;
+  }
+
+  private buildFinanceTotalsTable(params: {
+    subtotalAmount: string;
+    discountAmount: string;
+    taxAmount: string;
+    totalAmount: string;
+    currency: string;
+    grandLabel: string;
+  }) {
+    const { subtotalAmount, discountAmount, taxAmount, totalAmount, currency, grandLabel } = params;
+    const discount = Number(discountAmount);
+    const tax = Number(taxAmount);
+    const optionalRows = [
+      discount > 0
+        ? this.buildTotalRow('Desconto', `-${this.formatMoney(Math.round(discount * 100), currency)}`)
+        : '',
+      tax > 0
+        ? this.buildTotalRow('Impostos', this.formatMoney(Math.round(tax * 100), currency))
+        : '',
+    ].join('');
+    return `
+    <div class="doc-total-list">
+      ${this.buildTotalRow('Subtotal', this.formatMoney(Math.round(Number(subtotalAmount) * 100), currency))}
+      ${optionalRows}
+      <div class="doc-total-row doc-total-row--grand">
+        <span>${this.escapeHtml(grandLabel)}</span>
+        <strong class="doc-total-value">${this.escapeHtml(this.formatMoney(Math.round(Number(totalAmount) * 100), currency))}</strong>
+      </div>
+    </div>`;
+  }
+
+  private buildTermsBlock(terms: string | null | undefined) {
+    if (!terms?.trim()) return '';
+    return `<div class="doc-terms-panel"><h3>Termos e condições</h3><p>${this.escapeHtml(terms)}</p></div>`;
   }
 
   private buildCompanyBrandBlock(layout: DocumentLayoutEntity) {

@@ -98,6 +98,179 @@ export class ContractsService {
     return CONTRACT_TEMPLATE_PRESETS;
   }
 
+  async createTemplateFromPreset(
+    context: RequestContext,
+    dto: CreateContractTemplateFromPresetDto,
+  ) {
+    const preset = CONTRACT_TEMPLATE_PRESETS.find((p) => p.key === dto.presetKey);
+    if (!preset) {
+      throw new NotFoundException(`Preset '${dto.presetKey}' not found`);
+    }
+
+    const content = getContractTemplateContentByPresetKey(dto.presetKey);
+
+    const template = this.templatesRepository.create({
+      tenantId: context.tenantId,
+      workspaceId: context.workspaceId,
+      name: dto.name ?? preset.label,
+      description: dto.description ?? preset.description,
+      category: preset.category,
+      targetType: preset.targetType,
+      status: ContractTemplateStatus.Draft,
+      defaultSignatureMode: dto.defaultSignatureMode ?? preset.defaultSignatureMode,
+      headerHtml: content?.headerHtml ?? null,
+      bodyHtml: content?.bodyHtml ?? `<p>Modelo ${preset.label}</p>`,
+      footerHtml: content?.footerHtml ?? null,
+      variablesSchema: {
+        groups: preset.variableGroups,
+        required: preset.requiredVariables,
+        recommended: preset.recommendedVariables,
+      },
+      locale: 'pt-BR',
+      countryCode: 'BR',
+      jurisdictionRegion: null,
+      templateSource: ContractTemplateSource.Preset,
+      editorMode: ContractTemplateEditorMode.Html,
+      legalDisclaimer:
+        'Este modelo é fornecido como estrutura operacional e deve ser revisado por um profissional jurídico antes do uso.',
+      metadata: { ...(dto.metadata ?? {}), presetKey: preset.key },
+      createdById: context.userId,
+      updatedById: context.userId,
+    });
+
+    const saved = await this.templatesRepository.save(template);
+    await this.createTemplateVersionFromTemplate(
+      context,
+      saved,
+      ContractTemplateStatus.Draft,
+    );
+    return saved;
+  }
+
+  async createCustomTemplate(
+    context: RequestContext,
+    dto: CreateCustomContractTemplateDto,
+  ) {
+    const template = this.templatesRepository.create({
+      tenantId: context.tenantId,
+      workspaceId: context.workspaceId,
+      name: dto.name,
+      description: dto.description ?? null,
+      category: dto.category,
+      targetType: dto.targetType,
+      status: ContractTemplateStatus.Draft,
+      defaultSignatureMode: dto.defaultSignatureMode ?? ContractSignatureMode.Manual,
+      headerHtml: dto.headerHtml ?? null,
+      bodyHtml: dto.bodyHtml,
+      footerHtml: dto.footerHtml ?? null,
+      variablesSchema: dto.variablesSchema ?? {},
+      locale: dto.locale ?? 'pt-BR',
+      countryCode: dto.countryCode ?? 'BR',
+      jurisdictionRegion: dto.jurisdictionRegion ?? null,
+      templateSource: ContractTemplateSource.Custom,
+      editorMode: dto.editorMode ?? ContractTemplateEditorMode.Html,
+      legalDisclaimer:
+        dto.legalDisclaimer ??
+        'Este modelo é fornecido como estrutura operacional e deve ser revisado por um profissional jurídico antes do uso.',
+      metadata: dto.metadata ?? {},
+      createdById: context.userId,
+      updatedById: context.userId,
+    });
+
+    const saved = await this.templatesRepository.save(template);
+    await this.createTemplateVersionFromTemplate(
+      context,
+      saved,
+      ContractTemplateStatus.Draft,
+    );
+    return saved;
+  }
+
+  previewTemplate(
+    _context: RequestContext,
+    dto: PreviewContractTemplateDto,
+  ) {
+    const variablesData = dto.variablesData ?? {};
+    const headerHtml = this.renderTemplateString(dto.headerHtml ?? '', variablesData);
+    const bodyHtml = this.renderTemplateString(dto.bodyHtml, variablesData);
+    const footerHtml = this.renderTemplateString(dto.footerHtml ?? '', variablesData);
+
+    return {
+      html: this.wrapContractHtml({
+        title: dto.title ?? 'Preview do modelo',
+        locale: dto.locale ?? 'pt-BR',
+        headerHtml,
+        bodyHtml,
+        footerHtml,
+      }),
+    };
+  }
+
+  async getSignatureProviderSettings(
+    context: RequestContext,
+    provider: ContractSignatureProvider,
+  ) {
+    const settings = await this.getOrCreateSignatureProviderSettings(context, provider);
+    return this.serializeSignatureProviderSettings(settings);
+  }
+
+  async updateSignatureProviderSettings(
+    context: RequestContext,
+    provider: ContractSignatureProvider,
+    dto: UpdateSignatureProviderSettingsDto,
+  ) {
+    const settings = await this.getOrCreateSignatureProviderSettings(context, provider);
+
+    if (dto.status !== undefined) settings.status = dto.status as 'active' | 'inactive';
+    if (dto.apiBaseUrl !== undefined) settings.apiBaseUrl = dto.apiBaseUrl ?? null;
+    if (dto.apiToken !== undefined) {
+      settings.apiTokenEncrypted =
+        dto.apiToken ? this.encryptSecret(dto.apiToken) : null;
+    }
+    if (dto.webhookSecret !== undefined) {
+      settings.webhookSecretEncrypted =
+        dto.webhookSecret ? this.encryptSecret(dto.webhookSecret) : null;
+    }
+    if (dto.defaultSignatureMode !== undefined) {
+      settings.defaultSignatureMode = dto.defaultSignatureMode;
+    }
+    if (dto.sandboxEnabled !== undefined) settings.sandboxEnabled = dto.sandboxEnabled;
+    if (dto.metadata !== undefined) settings.metadata = dto.metadata;
+    settings.updatedById = context.userId;
+
+    const saved = await this.signatureProviderSettingsRepository.save(settings);
+    return this.serializeSignatureProviderSettings(saved);
+  }
+
+  async testSignatureProviderSettings(
+    context: RequestContext,
+    provider: ContractSignatureProvider,
+  ) {
+    const settings = await this.getOrCreateSignatureProviderSettings(context, provider);
+
+    const hasApiBaseUrl = Boolean(settings.apiBaseUrl);
+    const hasApiToken = Boolean(settings.apiTokenEncrypted);
+
+    return {
+      provider,
+      ok: hasApiBaseUrl && hasApiToken && settings.status === 'active',
+      status: settings.status,
+      checks: {
+        hasApiBaseUrl,
+        hasApiToken,
+        sandboxEnabled: settings.sandboxEnabled,
+      },
+      message:
+        settings.status === 'active' && hasApiBaseUrl && hasApiToken
+          ? 'Integração configurada e ativa.'
+          : !hasApiBaseUrl
+            ? 'URL da API não configurada.'
+            : !hasApiToken
+              ? 'Token de API não configurado.'
+              : 'Provedor inativo. Configure e ative para habilitar.',
+    };
+  }
+
   listTemplates(context: RequestContext, query: ListContractTemplatesQueryDto) {
     const qb = this.templatesRepository
       .createQueryBuilder('template')
@@ -802,7 +975,6 @@ export class ContractsService {
     context: RequestContext,
     id: string,
     dto: PrepareContractSignatureDto,
-  SendContractToSignatureProviderDto,
   ) {
     const contract = await this.getContractOrFail(context, id);
 

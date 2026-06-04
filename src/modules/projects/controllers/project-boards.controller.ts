@@ -1,4 +1,4 @@
-import { Controller, Get, Headers } from '@nestjs/common';
+import { Controller, Get, Headers, Param } from '@nestjs/common';
 import { ProjectBoardsService } from '../services/project-boards.service';
 
 type RequestContext = {
@@ -27,6 +27,14 @@ export class ProjectBoardsController {
   @Get('tasks/board')
   getWorkspaceTasksBoard(@Headers() headers: Record<string, string | string[] | undefined>) {
     return this.projectBoardsService.getWorkspaceTasksBoard(getContextFromHeaders(headers));
+  }
+
+  @Get(':projectId/tasks/board')
+  getProjectTasksBoard(
+    @Headers() headers: Record<string, string | string[] | undefined>,
+    @Param('projectId') projectId: string,
+  ) {
+    return this.projectBoardsService.getProjectTasksBoard(getContextFromHeaders(headers), projectId);
   }
 
   @Get('tasks/my/board')

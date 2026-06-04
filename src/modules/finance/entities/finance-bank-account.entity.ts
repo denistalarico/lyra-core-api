@@ -38,6 +38,10 @@ export class FinanceBankAccount {
   @Column({ name: 'external_reference', type: 'varchar', length: 180, nullable: true })
   externalReference!: string | null;
 
+  // Links this bank account to a chart-of-accounts entry for automatic journal entries
+  @Column({ name: 'account_id', type: 'uuid', nullable: true })
+  accountId!: string | null;
+
   @Column({ name: 'opening_balance', type: 'numeric', precision: 14, scale: 2, default: 0 })
   openingBalance!: string;
 

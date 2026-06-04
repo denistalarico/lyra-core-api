@@ -21,21 +21,32 @@ export default () => ({
   },
   files: {
     s3: {
-      endpoint: process.env.S3_ENDPOINT ?? 'http://localhost:9200',
-      bucket: process.env.S3_BUCKET ?? 'lyra-assets',
-      region: process.env.S3_REGION ?? 'us-east-1',
+      endpoint:
+        process.env.S3_ENDPOINT ??
+        process.env.OBJECT_STORAGE_ENDPOINT ??
+        'http://localhost:9200',
+      bucket:
+        process.env.S3_BUCKET ??
+        process.env.OBJECT_STORAGE_BUCKET ??
+        'lyra-assets',
+      region:
+        process.env.S3_REGION ??
+        process.env.OBJECT_STORAGE_REGION ??
+        'us-east-1',
       accessKeyId:
         process.env.S3_ACCESS_KEY_ID ??
+        process.env.OBJECT_STORAGE_ACCESS_KEY ??
         process.env.MINIO_ROOT_USER ??
         'lyraadmin',
       secretAccessKey:
         process.env.S3_SECRET_ACCESS_KEY ??
+        process.env.OBJECT_STORAGE_SECRET_KEY ??
         process.env.MINIO_ROOT_PASSWORD ??
         'lyra_minio_dev_password',
       publicBaseUrl:
         process.env.S3_PUBLIC_BASE_URL ??
-        `${process.env.S3_ENDPOINT ?? 'http://localhost:9200'}/${
-          process.env.S3_BUCKET ?? 'lyra-assets'
+        `${process.env.S3_ENDPOINT ?? process.env.OBJECT_STORAGE_ENDPOINT ?? 'http://localhost:9200'}/${
+          process.env.S3_BUCKET ?? process.env.OBJECT_STORAGE_BUCKET ?? 'lyra-assets'
         }`,
       forcePathStyle: process.env.S3_FORCE_PATH_STYLE !== 'false',
       createBucket: process.env.S3_CREATE_BUCKET !== 'false',

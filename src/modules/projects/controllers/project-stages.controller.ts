@@ -7,6 +7,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
 } from '@nestjs/common';
 import { ProjectStagesService } from '../services/project-stages.service';
 import {
@@ -71,8 +72,14 @@ export class ProjectStagesController {
   }
 
   @Get('task-stages')
-  listTaskStages(@Headers() headers: Record<string, string | string[] | undefined>) {
-    return this.projectStagesService.listTaskStages(getContextFromHeaders(headers));
+  listTaskStages(
+    @Headers() headers: Record<string, string | string[] | undefined>,
+    @Query('projectId') projectId?: string,
+  ) {
+    return this.projectStagesService.listTaskStages(
+      getContextFromHeaders(headers),
+      projectId === 'null' ? null : projectId,
+    );
   }
 
   @Post('task-stages')

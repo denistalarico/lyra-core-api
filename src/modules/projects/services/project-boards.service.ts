@@ -104,6 +104,7 @@ export class ProjectBoardsService {
           tenantId: context.tenantId,
           workspaceId: context.workspaceId,
           isArchived: false,
+          projectId: IsNull(),
         },
         order: {
           position: 'ASC',
@@ -121,6 +122,31 @@ export class ProjectBoardsService {
           updatedAt: 'DESC',
           createdAt: 'DESC',
         },
+      }),
+    ]);
+
+    return this.buildBoard(stages, await this.withChecklistCounts(context, tasks), 'Sem estágio');
+  }
+
+  async getProjectTasksBoard(context: RequestContext, projectId: string): Promise<BoardResponse<TaskBoardCard>> {
+    const [stages, tasks] = await Promise.all([
+      this.taskStagesRepository.find({
+        where: {
+          tenantId: context.tenantId,
+          workspaceId: context.workspaceId,
+          isArchived: false,
+          projectId,
+        },
+        order: { position: 'ASC', createdAt: 'ASC' },
+      }),
+      this.tasksRepository.find({
+        where: {
+          tenantId: context.tenantId,
+          workspaceId: context.workspaceId,
+          projectId,
+          archivedAt: IsNull(),
+        },
+        order: { updatedAt: 'DESC', createdAt: 'DESC' },
       }),
     ]);
 
@@ -147,7 +173,6 @@ export class ProjectBoardsService {
             workspaceId: context.workspaceId,
             archivedAt: IsNull(),
             assigneeId: context.userId,
-            visibility: TaskVisibility.Workspace,
           },
           {
             tenantId: context.tenantId,

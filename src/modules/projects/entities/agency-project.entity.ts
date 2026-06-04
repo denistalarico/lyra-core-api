@@ -68,6 +68,9 @@ export class AgencyProject {
   @Column({ name: 'public_page_password', type: 'varchar', length: 120, nullable: true })
   publicPagePassword!: string | null;
 
+  @Column({ name: 'card_color', type: 'varchar', length: 32, nullable: true })
+  color!: string | null;
+
   @Column({ name: 'archived_at', type: 'timestamptz', nullable: true })
   archivedAt!: Date | null;
 

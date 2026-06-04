@@ -1,9 +1,11 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { IsNull, Repository } from 'typeorm';
 import {
   AgencyPersonalTaskStage,
+  AgencyProject,
   AgencyProjectStage,
+  AgencyTask,
   AgencyTaskStage,
 } from '../entities';
 import {
@@ -32,6 +34,12 @@ export class ProjectStagesService {
 
     @InjectRepository(AgencyPersonalTaskStage, 'agency')
     private readonly personalTaskStagesRepository: Repository<AgencyPersonalTaskStage>,
+
+    @InjectRepository(AgencyProject, 'agency')
+    private readonly projectsRepository: Repository<AgencyProject>,
+
+    @InjectRepository(AgencyTask, 'agency')
+    private readonly tasksRepository: Repository<AgencyTask>,
   ) {}
 
   listProjectStages(context: RequestContext) {
@@ -85,15 +93,38 @@ export class ProjectStagesService {
   }
 
   async archiveProjectStage(context: RequestContext, id: string) {
-    return this.updateProjectStage(context, id, { isArchived: true });
+    const stage = await this.projectStagesRepository.findOne({
+      where: {
+        id,
+        tenantId: context.tenantId,
+        workspaceId: context.workspaceId,
+      },
+    });
+
+    if (!stage) {
+      throw new NotFoundException('Project stage not found');
+    }
+
+    await this.projectsRepository.update(
+      {
+        tenantId: context.tenantId,
+        workspaceId: context.workspaceId,
+        stageId: stage.id,
+      },
+      { stageId: null },
+    );
+    await this.projectStagesRepository.delete(stage.id);
+
+    return { deleted: true };
   }
 
-  listTaskStages(context: RequestContext) {
+  listTaskStages(context: RequestContext, projectId?: string | null) {
     return this.taskStagesRepository.find({
       where: {
         tenantId: context.tenantId,
         workspaceId: context.workspaceId,
         isArchived: false,
+        projectId: projectId !== undefined ? (projectId ?? IsNull()) : IsNull(),
       },
       order: {
         position: 'ASC',
@@ -106,6 +137,7 @@ export class ProjectStagesService {
     const stage = this.taskStagesRepository.create({
       tenantId: context.tenantId,
       workspaceId: context.workspaceId,
+      projectId: (dto as { projectId?: string | null }).projectId ?? null,
       name: dto.name,
       color: dto.color ?? null,
       position: dto.position ?? 0,
@@ -139,7 +171,29 @@ export class ProjectStagesService {
   }
 
   async archiveTaskStage(context: RequestContext, id: string) {
-    return this.updateTaskStage(context, id, { isArchived: true });
+    const stage = await this.taskStagesRepository.findOne({
+      where: {
+        id,
+        tenantId: context.tenantId,
+        workspaceId: context.workspaceId,
+      },
+    });
+
+    if (!stage) {
+      throw new NotFoundException('Task stage not found');
+    }
+
+    await this.tasksRepository.update(
+      {
+        tenantId: context.tenantId,
+        workspaceId: context.workspaceId,
+        stageId: stage.id,
+      },
+      { stageId: null },
+    );
+    await this.taskStagesRepository.delete(stage.id);
+
+    return { deleted: true };
   }
 
   listPersonalTaskStages(context: RequestContext) {

@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { DocumentLayoutsModule } from '../document-layouts/document-layouts.module';
 import {
   AgencyProject,
   AgencyTask,
@@ -42,6 +43,7 @@ import { FinanceJournalEntryService } from './services/finance-journal-entry.ser
 
 @Module({
   imports: [
+    DocumentLayoutsModule,
     TypeOrmModule.forFeature(
       [
         FinanceAccount,

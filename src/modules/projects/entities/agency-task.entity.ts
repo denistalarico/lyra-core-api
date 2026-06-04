@@ -56,6 +56,9 @@ export class AgencyTask {
   })
   priority!: TaskPriority;
 
+  @Column({ name: 'task_type_id', type: 'varchar', length: 120, nullable: true })
+  taskTypeId!: string | null;
+
   @Column({
     type: 'enum',
     enum: TaskVisibility,
@@ -83,6 +86,18 @@ export class AgencyTask {
 
   @Column({ name: 'blocked_reason', type: 'text', nullable: true })
   blockedReason!: string | null;
+
+  @Column({ name: 'card_color', type: 'varchar', length: 32, nullable: true })
+  color!: string | null;
+
+  @Column({ name: 'cover_image_url', type: 'text', nullable: true })
+  coverImageUrl!: string | null;
+
+  @Column({ name: 'cover_image_asset_key', type: 'varchar', length: 255, nullable: true })
+  coverImageAssetKey!: string | null;
+
+  @Column({ name: 'marker_ids', type: 'jsonb', default: () => "'[]'" })
+  markerIds!: string[];
 
   @Column({ name: 'archived_at', type: 'timestamptz', nullable: true })
   archivedAt!: Date | null;

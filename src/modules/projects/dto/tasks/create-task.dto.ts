@@ -3,6 +3,7 @@ import {
   IsDateString,
   IsEnum,
   IsInt,
+  IsArray,
   IsOptional,
   IsString,
   IsUUID,
@@ -49,6 +50,11 @@ export class CreateTaskDto {
   priority?: TaskPriority;
 
   @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  taskTypeId?: string | null;
+
+  @IsOptional()
   @IsEnum(TaskVisibility)
   visibility?: TaskVisibility;
 
@@ -72,4 +78,9 @@ export class CreateTaskDto {
   @IsOptional()
   @IsString()
   blockedReason?: string | null;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  markerIds?: string[];
 }

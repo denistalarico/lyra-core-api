@@ -6,7 +6,7 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 
-export type AgencyProjectEventKind = 'activity' | 'note';
+export type AgencyProjectEventKind = 'activity' | 'note' | 'system';
 
 @Entity('agency_project_events')
 export class AgencyProjectEvent {
@@ -25,7 +25,7 @@ export class AgencyProjectEvent {
   @Column({ name: 'author_id', type: 'uuid' })
   authorId!: string;
 
-  @Column({ type: 'varchar', length: 24 })
+  @Column({ type: 'varchar', length: 32 })
   kind!: AgencyProjectEventKind;
 
   @Column({ type: 'text' })
@@ -33,6 +33,9 @@ export class AgencyProjectEvent {
 
   @Column({ name: 'due_at', type: 'timestamptz', nullable: true })
   dueAt!: Date | null;
+
+  @Column({ type: 'jsonb', nullable: true })
+  meta!: Record<string, unknown> | null;
 
   @CreateDateColumn({ name: 'created_at' })
   createdAt!: Date;

@@ -9,3 +9,6 @@ export * from './agency-task-time-entry.entity';
 export * from './agency-project-settings.entity';
 export * from './agency-project-user-preferences.entity';
 export * from './agency-project-event.entity';
+export * from './agency-project-follower.entity';
+export * from './agency-project-attachment.entity';
+export * from './agency-task-attachment.entity';

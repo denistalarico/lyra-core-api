@@ -61,6 +61,7 @@ import {
   AgencyPasswordResetEntity,
   AgencyUserSecuritySettingsEntity,
   AgencyUserSessionEntity,
+  AgencyUserTrustedDeviceEntity,
 } from '../modules/agency/entities/agency-auth.entities';
 
 import {
@@ -156,20 +157,28 @@ import {
 import {
   TeamDepartment,
   TeamSkill,
+  TeamConfigOption,
   TeamMember,
   TeamMemberSkill,
   TeamMemberPresence,
   TeamAttendanceEntry,
+  TeamPayment,
+  TeamPaymentBatch,
+  TeamPaymentItem,
+  TeamPaymentDocument,
 } from '../modules/team/entities';
 
 import {
   AgencyPersonalTaskStage,
   AgencyProject,
+  AgencyProjectAttachment,
   AgencyProjectEvent,
+  AgencyProjectFollower,
   AgencyProjectSettings,
   AgencyProjectStage,
   AgencyProjectUserPreferences,
   AgencyTask,
+  AgencyTaskAttachment,
   AgencyTaskChecklistItem,
   AgencyTaskComment,
   AgencyTaskStage,
@@ -195,6 +204,7 @@ export const agencyEntities = [
   AgencyWorkspaceUserPermissionEntity,
   AgencyUserSecuritySettingsEntity,
   AgencyUserSessionEntity,
+  AgencyUserTrustedDeviceEntity,
   AgencyPasswordResetEntity,
   AgencyEmailTwoFactorCodeEntity,
   ContactEntity,
@@ -229,10 +239,13 @@ export const agencyEntities = [
   CalendarSettings,
   AgencyProject,
   AgencyProjectEvent,
+  AgencyProjectFollower,
+  AgencyProjectAttachment,
   AgencyProjectSettings,
   AgencyProjectUserPreferences,
   AgencyProjectStage,
   AgencyTask,
+  AgencyTaskAttachment,
   AgencyTaskStage,
   AgencyPersonalTaskStage,
   AgencyTaskChecklistItem,
@@ -272,10 +285,16 @@ export const agencyEntities = [
   ContractSignatureProviderSetting,
   TeamDepartment,
   TeamSkill,
+  TeamConfigOption,
+  TeamConfigOption,
   TeamMember,
   TeamMemberSkill,
   TeamMemberPresence,
   TeamAttendanceEntry,
+  TeamPaymentBatch,
+  TeamPayment,
+  TeamPaymentItem,
+  TeamPaymentDocument,
 ];
 
 export function getTypeOrmConfig(): TypeOrmModuleOptions {

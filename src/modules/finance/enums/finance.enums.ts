@@ -9,6 +9,7 @@ export enum FinanceAccountType {
 
 export enum FinanceAccountStatus {
   Active = 'active',
+  Inactive = 'inactive',
   Archived = 'archived',
 }
 

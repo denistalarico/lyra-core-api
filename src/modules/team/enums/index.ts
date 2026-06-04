@@ -24,6 +24,27 @@ export enum TeamWorkMode {
   Flexible = 'flexible',
 }
 
+export enum TeamConfigOptionType {
+  JobTitle = 'job_title',
+  RoleName = 'role_name',
+  Seniority = 'seniority',
+  WorkMode = 'work_mode',
+  WorkerType = 'worker_type',
+  OffboardingReason = 'offboarding_reason',
+  ContractCategory = 'contract_category',
+  SignatureProvider = 'signature_provider',
+  OnboardingTask = 'onboarding_task',
+  OffboardingTask = 'offboarding_task',
+  SkillCategory = 'skill_category',
+  SkillLevel = 'skill_level',
+  OnboardingTemplate = 'onboarding_template',
+  OffboardingTemplate = 'offboarding_template',
+  PaymentBenefitTemplate = 'payment_benefit_template',
+  PaymentDiscountTemplate = 'payment_discount_template',
+  PaymentDocumentTemplate = 'payment_document_template',
+  PaymentFinanceSetting = 'payment_finance_setting',
+}
+
 export enum TeamSkillLevel {
   Basic = 'basic',
   Intermediate = 'intermediate',
@@ -69,4 +90,47 @@ export enum TeamAttendanceSource {
   KioskBarcode = 'kiosk_barcode',
   AdminManual = 'admin_manual',
   System = 'system',
+}
+
+export enum TeamPaymentBatchStatus {
+  Draft = 'draft',
+  Generated = 'generated',
+  Cancelled = 'cancelled',
+  Archived = 'archived',
+}
+
+export enum TeamPaymentStatus {
+  Draft = 'draft',
+  Scheduled = 'scheduled',
+  Confirmed = 'confirmed',
+  InvoiceCreated = 'invoice_created',
+  PaymentPending = 'payment_pending',
+  Paid = 'paid',
+  Cancelled = 'cancelled',
+  Archived = 'archived',
+}
+
+export enum TeamPaymentCalculationMode {
+  Monthly = 'monthly',
+  Hourly = 'hourly',
+  Daily = 'daily',
+  PerProject = 'per_project',
+  Manual = 'manual',
+}
+
+export enum TeamPaymentItemType {
+  Base = 'base',
+  Benefit = 'benefit',
+  Discount = 'discount',
+  Overtime = 'overtime',
+  Adjustment = 'adjustment',
+}
+
+export enum TeamPaymentDocumentType {
+  Statement = 'statement',
+  Payslip = 'payslip',
+  BenefitsDeclaration = 'benefits_declaration',
+  AdvanceVoucher = 'advance_voucher',
+  AttendanceReport = 'attendance_report',
+  Receipt = 'receipt',
 }

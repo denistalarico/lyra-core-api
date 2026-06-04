@@ -39,6 +39,14 @@ export class ProjectEventsController {
     return this.projectEventsService.create(getContextFromHeaders(headers), projectId, dto);
   }
 
+  @Delete()
+  clearAll(
+    @Headers() headers: Record<string, string | string[] | undefined>,
+    @Param('projectId') projectId: string,
+  ) {
+    return this.projectEventsService.clearAll(getContextFromHeaders(headers), projectId);
+  }
+
   @Delete(':eventId')
   delete(
     @Headers() headers: Record<string, string | string[] | undefined>,

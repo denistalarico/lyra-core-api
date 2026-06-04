@@ -16,6 +16,7 @@ import {
   UpdateFinanceRecurringProfileDto,
 } from '../dto';
 import {
+  FinanceBankAccount,
   FinanceBill,
   FinanceBillLine,
   FinanceInvoice,
@@ -29,6 +30,7 @@ import {
   FinanceAllocationTargetType,
   FinanceBillStatus,
   FinanceInvoiceStatus,
+  FinanceJournalEntryLineType,
   FinancePaymentDirection,
   FinancePaymentStatus,
   FinanceRecurringInterval,
@@ -36,6 +38,7 @@ import {
 } from '../enums';
 import { FinanceRequestContext } from './finance-context';
 import { FinanceDocumentNumberingService } from './finance-document-numbering.service';
+import { FinanceJournalEntryService } from './finance-journal-entry.service';
 
 function toMoney(value: string | number | null | undefined): number {
   if (value === null || value === undefined || value === '') return 0;
@@ -75,6 +78,9 @@ export class FinanceBillingService {
     @InjectRepository(FinancePaymentAllocation, 'agency')
     private readonly paymentAllocationsRepo: Repository<FinancePaymentAllocation>,
 
+    @InjectRepository(FinanceBankAccount, 'agency')
+    private readonly bankAccountsRepo: Repository<FinanceBankAccount>,
+
     @InjectRepository(FinanceRecurringProfile, 'agency')
     private readonly recurringProfilesRepo: Repository<FinanceRecurringProfile>,
 
@@ -85,6 +91,7 @@ export class FinanceBillingService {
     private readonly dataSource: DataSource,
 
     private readonly documentNumberingService: FinanceDocumentNumberingService,
+    private readonly journalEntryService: FinanceJournalEntryService,
   ) {}
 
   listInvoices(ctx: FinanceRequestContext) {
@@ -197,8 +204,149 @@ export class FinanceBillingService {
 
     if (!invoice) throw new NotFoundException('Finance invoice not found');
 
-    Object.assign(invoice, dto);
-    return this.invoicesRepo.save(invoice);
+    // Merge metadata deeply instead of overwriting
+    if (dto.metadata !== undefined) {
+      invoice.metadata = { ...invoice.metadata, ...dto.metadata };
+    }
+    const { metadata: _meta, ...rest } = dto;
+    Object.assign(invoice, rest);
+    await this.invoicesRepo.save(invoice);
+    return this.getInvoice(ctx, id);
+  }
+
+  private async recalcInvoiceTotals(ctx: FinanceRequestContext, invoiceId: string) {
+    const lines = await this.invoiceLinesRepo.find({
+      where: { invoiceId, tenantId: ctx.tenantId, workspaceId: ctx.workspaceId },
+    });
+    let subtotal = 0, tax = 0, discount = 0;
+    for (const l of lines) {
+      const qty = toMoney(l.quantity);
+      const price = toMoney(l.unitPrice);
+      subtotal += qty * price;
+      discount += toMoney(l.discountAmount);
+      tax += toMoney(l.taxAmount);
+    }
+    const total = subtotal - discount + tax;
+    await this.invoicesRepo.update(
+      { id: invoiceId, tenantId: ctx.tenantId, workspaceId: ctx.workspaceId },
+      {
+        subtotalAmount: money(subtotal),
+        taxAmount: money(tax),
+        discountAmount: money(discount),
+        totalAmount: money(total),
+        balanceDue: money(total),
+      },
+    );
+  }
+
+  async addInvoiceLine(
+    ctx: FinanceRequestContext,
+    invoiceId: string,
+    dto: import('../dto').AddFinanceInvoiceLineDto,
+  ) {
+    validateId(invoiceId, 'invoice id');
+    const invoice = await this.invoicesRepo.findOne({
+      where: { id: invoiceId, tenantId: ctx.tenantId, workspaceId: ctx.workspaceId },
+    });
+    if (!invoice) throw new NotFoundException('Finance invoice not found');
+
+    const qty = toMoney(dto.quantity ?? '1');
+    const price = toMoney(dto.unitPrice ?? '0');
+    const discount = toMoney(dto.discountAmount ?? '0');
+    const tax = toMoney(dto.taxAmount ?? '0');
+    const total = qty * price - discount + tax;
+
+    const line = await this.invoiceLinesRepo.save(
+      this.invoiceLinesRepo.create({
+        tenantId: ctx.tenantId,
+        workspaceId: ctx.workspaceId,
+        invoiceId,
+        description: dto.description,
+        quantity: qty.toFixed(4),
+        unitPrice: money(price),
+        discountAmount: money(discount),
+        taxAmount: money(tax),
+        totalAmount: money(total),
+        categoryId: dto.categoryId ?? null,
+        costCenterId: dto.costCenterId ?? null,
+        metadata: dto.metadata ?? {},
+      }),
+    );
+
+    await this.recalcInvoiceTotals(ctx, invoiceId);
+    return this.getInvoice(ctx, invoiceId);
+  }
+
+  async updateInvoiceLine(
+    ctx: FinanceRequestContext,
+    invoiceId: string,
+    lineId: string,
+    dto: import('../dto').UpdateFinanceInvoiceLineDto,
+  ) {
+    validateId(invoiceId, 'invoice id');
+    validateId(lineId, 'line id');
+    const line = await this.invoiceLinesRepo.findOne({
+      where: { id: lineId, invoiceId, tenantId: ctx.tenantId, workspaceId: ctx.workspaceId },
+    });
+    if (!line) throw new NotFoundException('Invoice line not found');
+
+    if (dto.description !== undefined) line.description = dto.description;
+    if (dto.quantity !== undefined) line.quantity = toMoney(dto.quantity).toFixed(4);
+    if (dto.unitPrice !== undefined) line.unitPrice = money(toMoney(dto.unitPrice));
+    if (dto.discountAmount !== undefined) line.discountAmount = money(toMoney(dto.discountAmount));
+    if (dto.taxAmount !== undefined) line.taxAmount = money(toMoney(dto.taxAmount));
+    if (dto.categoryId !== undefined) line.categoryId = dto.categoryId ?? null;
+    if (dto.costCenterId !== undefined) line.costCenterId = dto.costCenterId ?? null;
+    if (dto.metadata !== undefined) line.metadata = { ...line.metadata, ...dto.metadata };
+
+    const qty = toMoney(line.quantity);
+    const price = toMoney(line.unitPrice);
+    const discount = toMoney(line.discountAmount);
+    const tax = toMoney(line.taxAmount);
+    line.totalAmount = money(qty * price - discount + tax);
+
+    await this.invoiceLinesRepo.save(line);
+    await this.recalcInvoiceTotals(ctx, invoiceId);
+    return this.getInvoice(ctx, invoiceId);
+  }
+
+  async removeInvoiceLine(
+    ctx: FinanceRequestContext,
+    invoiceId: string,
+    lineId: string,
+  ) {
+    validateId(invoiceId, 'invoice id');
+    validateId(lineId, 'line id');
+    const line = await this.invoiceLinesRepo.findOne({
+      where: { id: lineId, invoiceId, tenantId: ctx.tenantId, workspaceId: ctx.workspaceId },
+    });
+    if (!line) throw new NotFoundException('Invoice line not found');
+
+    await this.invoiceLinesRepo.remove(line);
+    await this.recalcInvoiceTotals(ctx, invoiceId);
+    return this.getInvoice(ctx, invoiceId);
+  }
+
+  async deleteInvoice(ctx: FinanceRequestContext, id: string) {
+    validateId(id, 'invoice id');
+    const invoice = await this.invoicesRepo.findOne({
+      where: { id, tenantId: ctx.tenantId, workspaceId: ctx.workspaceId },
+    });
+    if (!invoice) throw new NotFoundException('Finance invoice not found');
+    await this.invoiceLinesRepo.delete({ invoiceId: id, tenantId: ctx.tenantId, workspaceId: ctx.workspaceId });
+    await this.invoicesRepo.remove(invoice);
+    return { success: true, id };
+  }
+
+  async revertInvoiceToDraft(ctx: FinanceRequestContext, id: string) {
+    validateId(id, 'invoice id');
+    const invoice = await this.invoicesRepo.findOne({
+      where: { id, tenantId: ctx.tenantId, workspaceId: ctx.workspaceId },
+    });
+    if (!invoice) throw new NotFoundException('Finance invoice not found');
+    invoice.status = FinanceInvoiceStatus.Draft;
+    await this.invoicesRepo.save(invoice);
+    return this.getInvoice(ctx, id);
   }
 
   async issueInvoice(ctx: FinanceRequestContext, id: string) {
@@ -216,7 +364,8 @@ export class FinanceBillingService {
       invoice.issueDate = new Date().toISOString().slice(0, 10);
     }
 
-    return this.invoicesRepo.save(invoice);
+    await this.invoicesRepo.save(invoice);
+    return this.getInvoice(ctx, id);
   }
 
   async cancelInvoice(ctx: FinanceRequestContext, id: string) {
@@ -230,7 +379,8 @@ export class FinanceBillingService {
     invoice.status = FinanceInvoiceStatus.Cancelled;
     invoice.cancelledAt = new Date();
 
-    return this.invoicesRepo.save(invoice);
+    await this.invoicesRepo.save(invoice);
+    return this.getInvoice(ctx, id);
   }
 
   listBills(ctx: FinanceRequestContext) {
@@ -356,6 +506,107 @@ export class FinanceBillingService {
     return this.billsRepo.save(bill);
   }
 
+  async deleteBill(ctx: FinanceRequestContext, id: string) {
+    validateId(id, 'bill id');
+    const bill = await this.billsRepo.findOne({
+      where: { id, tenantId: ctx.tenantId, workspaceId: ctx.workspaceId },
+    });
+    if (!bill) throw new NotFoundException('Finance bill not found');
+    await this.billLinesRepo.delete({ billId: id, tenantId: ctx.tenantId, workspaceId: ctx.workspaceId });
+    await this.billsRepo.remove(bill);
+    return { success: true, id };
+  }
+
+  private async recalcBillTotals(ctx: FinanceRequestContext, billId: string) {
+    const lines = await this.billLinesRepo.find({
+      where: { billId, tenantId: ctx.tenantId, workspaceId: ctx.workspaceId },
+    });
+    let subtotal = 0, tax = 0;
+    for (const l of lines) {
+      subtotal += toMoney(l.quantity) * toMoney(l.unitPrice);
+      tax += toMoney(l.taxAmount);
+    }
+    const total = subtotal + tax;
+    await this.billsRepo.update(
+      { id: billId, tenantId: ctx.tenantId, workspaceId: ctx.workspaceId },
+      { subtotalAmount: money(subtotal), taxAmount: money(tax), totalAmount: money(total), balanceDue: money(total) },
+    );
+  }
+
+  async addBillLine(
+    ctx: FinanceRequestContext,
+    billId: string,
+    dto: import('../dto').AddFinanceBillLineDto,
+  ) {
+    validateId(billId, 'bill id');
+    const bill = await this.billsRepo.findOne({
+      where: { id: billId, tenantId: ctx.tenantId, workspaceId: ctx.workspaceId },
+    });
+    if (!bill) throw new NotFoundException('Finance bill not found');
+
+    const qty = toMoney(dto.quantity ?? '1');
+    const price = toMoney(dto.unitPrice ?? '0');
+    const tax = toMoney(dto.taxAmount ?? '0');
+    const total = qty * price + tax;
+
+    await this.billLinesRepo.save(
+      this.billLinesRepo.create({
+        tenantId: ctx.tenantId,
+        workspaceId: ctx.workspaceId,
+        billId,
+        description: dto.description,
+        quantity: qty.toFixed(4),
+        unitPrice: money(price),
+        taxAmount: money(tax),
+        totalAmount: money(total),
+        categoryId: dto.categoryId ?? null,
+        costCenterId: dto.costCenterId ?? null,
+      }),
+    );
+
+    await this.recalcBillTotals(ctx, billId);
+    return this.getBill(ctx, billId);
+  }
+
+  async updateBillLine(
+    ctx: FinanceRequestContext,
+    billId: string,
+    lineId: string,
+    dto: import('../dto').UpdateFinanceBillLineDto,
+  ) {
+    validateId(billId, 'bill id');
+    validateId(lineId, 'line id');
+    const line = await this.billLinesRepo.findOne({
+      where: { id: lineId, billId, tenantId: ctx.tenantId, workspaceId: ctx.workspaceId },
+    });
+    if (!line) throw new NotFoundException('Bill line not found');
+
+    if (dto.description !== undefined) line.description = dto.description;
+    if (dto.quantity !== undefined) line.quantity = toMoney(dto.quantity).toFixed(4);
+    if (dto.unitPrice !== undefined) line.unitPrice = money(toMoney(dto.unitPrice));
+    if (dto.taxAmount !== undefined) line.taxAmount = money(toMoney(dto.taxAmount));
+    if (dto.categoryId !== undefined) line.categoryId = dto.categoryId ?? null;
+    if (dto.costCenterId !== undefined) line.costCenterId = dto.costCenterId ?? null;
+    if (dto.metadata !== undefined) line.metadata = { ...line.metadata, ...dto.metadata };
+
+    line.totalAmount = money(toMoney(line.quantity) * toMoney(line.unitPrice) + toMoney(line.taxAmount));
+    await this.billLinesRepo.save(line);
+    await this.recalcBillTotals(ctx, billId);
+    return this.getBill(ctx, billId);
+  }
+
+  async removeBillLine(ctx: FinanceRequestContext, billId: string, lineId: string) {
+    validateId(billId, 'bill id');
+    validateId(lineId, 'line id');
+    const line = await this.billLinesRepo.findOne({
+      where: { id: lineId, billId, tenantId: ctx.tenantId, workspaceId: ctx.workspaceId },
+    });
+    if (!line) throw new NotFoundException('Bill line not found');
+    await this.billLinesRepo.remove(line);
+    await this.recalcBillTotals(ctx, billId);
+    return this.getBill(ctx, billId);
+  }
+
   listPayments(ctx: FinanceRequestContext) {
     return this.paymentsRepo.find({
       where: { tenantId: ctx.tenantId, workspaceId: ctx.workspaceId },
@@ -363,25 +614,110 @@ export class FinanceBillingService {
     });
   }
 
-  createPayment(ctx: FinanceRequestContext, dto: CreateFinancePaymentDto) {
-    const payment = this.paymentsRepo.create({
-      tenantId: ctx.tenantId,
-      workspaceId: ctx.workspaceId,
-      direction: dto.direction,
-      status: dto.status ?? FinancePaymentStatus.Completed,
-      method: dto.method,
-      contactId: dto.contactId ?? null,
-      bankAccountId: dto.bankAccountId ?? null,
-      paymentDate: dto.paymentDate,
-      amount: dto.amount,
-      allocatedAmount: '0.00',
-      currency: dto.currency ?? 'BRL',
-      externalProvider: dto.externalProvider ?? null,
-      externalReference: dto.externalReference ?? null,
-      description: dto.description ?? null,
+  async updatePayment(
+    ctx: FinanceRequestContext,
+    id: string,
+    dto: import('../dto').UpdateFinancePaymentDto,
+  ) {
+    validateId(id, 'payment id');
+    const payment = await this.paymentsRepo.findOne({
+      where: { id, tenantId: ctx.tenantId, workspaceId: ctx.workspaceId },
+    });
+    if (!payment) throw new NotFoundException('Finance payment not found');
+    if (dto.metadata !== undefined) {
+      payment.metadata = { ...payment.metadata, ...dto.metadata };
+    }
+    const { metadata: _meta, ...rest } = dto;
+    Object.assign(payment, rest);
+    return this.paymentsRepo.save(payment);
+  }
+
+  async deletePayment(ctx: FinanceRequestContext, id: string) {
+    validateId(id, 'payment id');
+    const payment = await this.paymentsRepo.findOne({
+      where: { id, tenantId: ctx.tenantId, workspaceId: ctx.workspaceId },
+    });
+    if (!payment) throw new NotFoundException('Finance payment not found');
+    await this.paymentsRepo.remove(payment);
+    return { success: true, id };
+  }
+
+  async createPayment(ctx: FinanceRequestContext, dto: CreateFinancePaymentDto) {
+    const payment = await this.paymentsRepo.save(
+      this.paymentsRepo.create({
+        tenantId: ctx.tenantId,
+        workspaceId: ctx.workspaceId,
+        direction: dto.direction,
+        status: dto.status ?? FinancePaymentStatus.Completed,
+        method: dto.method,
+        contactId: dto.contactId ?? null,
+        bankAccountId: dto.bankAccountId ?? null,
+        paymentDate: dto.paymentDate,
+        amount: dto.amount,
+        allocatedAmount: '0.00',
+        currency: dto.currency ?? 'BRL',
+        externalProvider: dto.externalProvider ?? null,
+        externalReference: dto.externalReference ?? null,
+        description: dto.description ?? null,
+        metadata: dto.metadata ?? {},
+      }),
+    );
+
+    // Auto-create journal entry if accounts are configured
+    void this.autoCreatePaymentJournalEntry(ctx, payment, dto).catch(() => {
+      // Non-fatal: log and continue silently
     });
 
-    return this.paymentsRepo.save(payment);
+    return payment;
+  }
+
+  private async autoCreatePaymentJournalEntry(
+    ctx: FinanceRequestContext,
+    payment: FinancePayment,
+    dto: CreateFinancePaymentDto,
+  ): Promise<void> {
+    const meta = (dto.metadata ?? {}) as Record<string, unknown>;
+    const journalId = (meta.journalId as string | null) ?? null;
+    const plAccountId = (meta.accountId as string | null) ?? null;
+
+    // Resolve bank/cash account from bank account's chart link
+    let bankChartAccountId: string | null = null;
+    if (payment.bankAccountId) {
+      const bankAccount = await this.bankAccountsRepo.findOne({
+        where: { id: payment.bankAccountId, tenantId: ctx.tenantId, workspaceId: ctx.workspaceId },
+      });
+      bankChartAccountId = bankAccount?.accountId ?? null;
+    }
+
+    // Both sides must be known for a balanced auto-entry
+    if (!plAccountId || !bankChartAccountId) return;
+
+    const amount = money(toMoney(payment.amount));
+    const isCustomer = payment.direction === FinancePaymentDirection.Customer;
+
+    // customer (receiving): DEBIT bank/cash, CREDIT revenue/receivable
+    // vendor   (paying):    DEBIT expense/payable, CREDIT bank/cash
+    const debitAccountId  = isCustomer ? bankChartAccountId : plAccountId;
+    const creditAccountId = isCustomer ? plAccountId : bankChartAccountId;
+
+    const sharedLineFields = {
+      categoryId:   null as string | null,
+      costCenterId: null as string | null,
+      contactId:    payment.contactId ?? null,
+      description:  payment.description ?? null,
+    };
+
+    await this.journalEntryService.create(ctx, {
+      entryDate:    payment.paymentDate,
+      description:  payment.description ?? `Pagamento ${payment.id.slice(0, 8)}`,
+      journalId,
+      sourceModule: 'payment',
+      sourceId:     payment.id,
+      lines: [
+        { ...sharedLineFields, lineType: FinanceJournalEntryLineType.Debit,  accountId: debitAccountId,  amount },
+        { ...sharedLineFields, lineType: FinanceJournalEntryLineType.Credit, accountId: creditAccountId, amount },
+      ],
+    });
   }
 
   async allocatePayment(

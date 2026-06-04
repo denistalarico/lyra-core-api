@@ -31,17 +31,14 @@ export const documentLayoutHtmlTemplate = `
 
     <section class="doc-grid">
       <div>
-        <small>Cliente</small>
+        <small>{{clientLabel}}</small>
         <strong>{{customerName}}</strong>
       </div>
       <div>
-        <small>Número</small>
+        <small>{{documentNumberLabel}}</small>
         <strong>{{documentNumber}}</strong>
       </div>
-      <div>
-        <small>Validade</small>
-        <strong>{{validUntil}}</strong>
-      </div>
+      {{dateGridCells}}
     </section>
 
     <section class="doc-section doc-items">
@@ -49,11 +46,8 @@ export const documentLayoutHtmlTemplate = `
       {{itemsTable}}
     </section>
 
-    <section class="doc-closing">
-      <div class="doc-terms-panel">
-        <h3>Termos e condições</h3>
-        <p>{{termsAndConditions}}</p>
-      </div>
+    <section class="doc-closing{{closingModifier}}">
+      {{termsBlock}}
 
       <div class="doc-totals-panel doc-totals">
         <h3>Resumo financeiro</h3>
@@ -313,6 +307,10 @@ body {
   gap: 18px;
   align-items: stretch;
   margin-top: 18px;
+}
+
+.doc-closing--no-terms {
+  grid-template-columns: 1fr;
 }
 
 .doc-terms-panel,

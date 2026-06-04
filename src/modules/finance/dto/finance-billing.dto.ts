@@ -59,6 +59,10 @@ export class FinanceInvoiceLineInputDto {
   @IsOptional()
   @IsUUID()
   costCenterId?: string | null;
+
+  @IsOptional()
+  @IsObject()
+  metadata?: Record<string, unknown>;
 }
 
 export class CreateFinanceInvoiceDto {
@@ -151,6 +155,47 @@ export class UpdateFinanceInvoiceDto {
   @IsOptional()
   @IsString()
   notes?: string | null;
+
+  @IsOptional()
+  @IsObject()
+  metadata?: Record<string, unknown>;
+}
+
+export class AddFinanceInvoiceLineDto extends FinanceInvoiceLineInputDto {}
+
+export class UpdateFinanceInvoiceLineDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  description?: string;
+
+  @IsOptional()
+  @IsNumberString()
+  quantity?: string;
+
+  @IsOptional()
+  @IsNumberString()
+  unitPrice?: string;
+
+  @IsOptional()
+  @IsNumberString()
+  discountAmount?: string;
+
+  @IsOptional()
+  @IsNumberString()
+  taxAmount?: string;
+
+  @IsOptional()
+  @IsUUID()
+  categoryId?: string | null;
+
+  @IsOptional()
+  @IsUUID()
+  costCenterId?: string | null;
+
+  @IsOptional()
+  @IsObject()
+  metadata?: Record<string, unknown>;
 }
 
 export class FinanceBillLineInputDto {
@@ -258,6 +303,39 @@ export class UpdateFinanceBillDto {
   metadata?: Record<string, unknown>;
 }
 
+export class AddFinanceBillLineDto extends FinanceBillLineInputDto {}
+
+export class UpdateFinanceBillLineDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  description?: string;
+
+  @IsOptional()
+  @IsNumberString()
+  quantity?: string;
+
+  @IsOptional()
+  @IsNumberString()
+  unitPrice?: string;
+
+  @IsOptional()
+  @IsNumberString()
+  taxAmount?: string;
+
+  @IsOptional()
+  @IsUUID()
+  categoryId?: string | null;
+
+  @IsOptional()
+  @IsUUID()
+  costCenterId?: string | null;
+
+  @IsOptional()
+  @IsObject()
+  metadata?: Record<string, unknown>;
+}
+
 export class CreateFinancePaymentDto {
   @IsEnum(FinancePaymentDirection)
   direction!: FinancePaymentDirection;
@@ -303,6 +381,50 @@ export class CreateFinancePaymentDto {
   @IsString()
   @MaxLength(255)
   description?: string | null;
+
+  @IsOptional()
+  @IsObject()
+  metadata?: Record<string, unknown>;
+}
+
+export class UpdateFinancePaymentDto {
+  @IsOptional()
+  @IsEnum(FinancePaymentStatus)
+  status?: FinancePaymentStatus;
+
+  @IsOptional()
+  @IsEnum(FinancePaymentMethod)
+  method?: FinancePaymentMethod;
+
+  @IsOptional()
+  @IsUUID()
+  contactId?: string | null;
+
+  @IsOptional()
+  @IsUUID()
+  bankAccountId?: string | null;
+
+  @IsOptional()
+  @IsDateString()
+  paymentDate?: string;
+
+  @IsOptional()
+  @IsNumberString()
+  amount?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(3)
+  currency?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  description?: string | null;
+
+  @IsOptional()
+  @IsObject()
+  metadata?: Record<string, unknown>;
 }
 
 export class CreateFinanceRecurringProfileDto {

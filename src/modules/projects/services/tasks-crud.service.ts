@@ -1,13 +1,14 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Brackets, Repository } from 'typeorm';
-import { AgencyTask } from '../entities';
+import { AgencyTask, AgencyProjectEvent } from '../entities';
 import { TaskStatus, TaskVisibility } from '../enums';
 import {
   CreateTaskDto,
   ListTasksQueryDto,
   UpdateTaskDto,
 } from '../dto';
+import { FilesService } from '../../../common/files/files.service';
 
 type RequestContext = {
   tenantId: string;
@@ -20,7 +21,26 @@ export class TasksCrudService {
   constructor(
     @InjectRepository(AgencyTask, 'agency')
     private readonly tasksRepository: Repository<AgencyTask>,
+
+    @InjectRepository(AgencyProjectEvent, 'agency')
+    private readonly eventsRepository: Repository<AgencyProjectEvent>,
+
+    private readonly filesService: FilesService,
   ) {}
+
+  private recordProjectEvent(context: RequestContext, projectId: string, body: string) {
+    const event = this.eventsRepository.create({
+      tenantId: context.tenantId,
+      workspaceId: context.workspaceId,
+      projectId,
+      authorId: context.userId,
+      kind: 'system',
+      body,
+      dueAt: null,
+      meta: null,
+    });
+    return this.eventsRepository.save(event);
+  }
 
   listWorkspaceTasks(context: RequestContext, query: ListTasksQueryDto) {
     const qb = this.tasksRepository
@@ -47,10 +67,7 @@ export class TasksCrudService {
       .andWhere(
         new Brackets((subQb) => {
           subQb
-            .where('task.assignee_id = :userId AND task.visibility = :workspaceVisibility', {
-              userId: context.userId,
-              workspaceVisibility: TaskVisibility.Workspace,
-            })
+            .where('task.assignee_id = :userId', { userId: context.userId })
             .orWhere('task.created_by_id = :userId AND task.visibility = :privateVisibility', {
               userId: context.userId,
               privateVisibility: TaskVisibility.Private,
@@ -86,7 +103,7 @@ export class TasksCrudService {
     return task;
   }
 
-  createWorkspaceTask(context: RequestContext, dto: CreateTaskDto) {
+  async createWorkspaceTask(context: RequestContext, dto: CreateTaskDto) {
     const task = this.tasksRepository.create({
       tenantId: context.tenantId,
       workspaceId: context.workspaceId,
@@ -98,8 +115,9 @@ export class TasksCrudService {
       createdById: context.userId,
       title: dto.title,
       description: dto.description ?? null,
-      status: dto.status ?? TaskStatus.Todo,
+      status: dto.status ?? TaskStatus.InProgress,
       priority: dto.priority,
+      taskTypeId: dto.taskTypeId ?? null,
       visibility: TaskVisibility.Workspace,
       startDate: dto.startDate ? new Date(dto.startDate) : null,
       dueDate: dto.dueDate ? new Date(dto.dueDate) : null,
@@ -108,10 +126,15 @@ export class TasksCrudService {
       trackedMinutes: 0,
       isBlocked: dto.isBlocked ?? false,
       blockedReason: dto.blockedReason ?? null,
+      markerIds: dto.markerIds ?? [],
       archivedAt: null,
     });
 
-    return this.tasksRepository.save(task);
+    const saved = await this.tasksRepository.save(task);
+    if (dto.projectId) {
+      void this.recordProjectEvent(context, dto.projectId, `Tarefa criada: "${dto.title}"`);
+    }
+    return saved;
   }
 
   createMyTask(context: RequestContext, dto: CreateTaskDto) {
@@ -126,8 +149,9 @@ export class TasksCrudService {
       createdById: context.userId,
       title: dto.title,
       description: dto.description ?? null,
-      status: dto.status ?? TaskStatus.Todo,
+      status: dto.status ?? TaskStatus.InProgress,
       priority: dto.priority,
+      taskTypeId: dto.taskTypeId ?? null,
       visibility: TaskVisibility.Private,
       startDate: dto.startDate ? new Date(dto.startDate) : null,
       dueDate: dto.dueDate ? new Date(dto.dueDate) : null,
@@ -136,6 +160,7 @@ export class TasksCrudService {
       trackedMinutes: 0,
       isBlocked: dto.isBlocked ?? false,
       blockedReason: dto.blockedReason ?? null,
+      markerIds: dto.markerIds ?? [],
       archivedAt: null,
     });
 
@@ -153,11 +178,15 @@ export class TasksCrudService {
     if (dto.personalStageId !== undefined) task.personalStageId = dto.personalStageId;
     if (dto.assigneeId !== undefined) task.assigneeId = dto.assigneeId;
     if (dto.priority !== undefined) task.priority = dto.priority;
+    if (dto.taskTypeId !== undefined) task.taskTypeId = dto.taskTypeId;
     if (dto.visibility !== undefined) task.visibility = dto.visibility;
     if (dto.estimatedMinutes !== undefined) task.estimatedMinutes = dto.estimatedMinutes;
     if (dto.trackedMinutes !== undefined) task.trackedMinutes = dto.trackedMinutes;
     if (dto.isBlocked !== undefined) task.isBlocked = dto.isBlocked;
     if (dto.blockedReason !== undefined) task.blockedReason = dto.blockedReason;
+    if (dto.color !== undefined) task.color = dto.color;
+    if (dto.coverImageUrl !== undefined) task.coverImageUrl = dto.coverImageUrl;
+    if (dto.markerIds !== undefined) task.markerIds = dto.markerIds;
 
     if (dto.startDate !== undefined) {
       task.startDate = dto.startDate ? new Date(dto.startDate) : null;
@@ -166,6 +195,8 @@ export class TasksCrudService {
     if (dto.dueDate !== undefined) {
       task.dueDate = dto.dueDate ? new Date(dto.dueDate) : null;
     }
+
+    const prevStatus = task.status;
 
     if (dto.status !== undefined) {
       task.status = dto.status;
@@ -179,6 +210,30 @@ export class TasksCrudService {
       }
     }
 
+    const saved = await this.tasksRepository.save(task);
+
+    if (task.projectId && dto.status !== undefined && dto.status !== prevStatus) {
+      void this.recordProjectEvent(
+        context,
+        task.projectId,
+        `Tarefa "${task.title}": status alterado para "${dto.status}"`,
+      );
+    }
+
+    return saved;
+  }
+
+  async uploadCover(context: RequestContext, id: string, file: Express.Multer.File) {
+    const task = await this.findOne(context, id);
+    const stored = await this.filesService.uploadImageAsset({
+      file,
+      path: `tenants/${context.tenantId}/workspaces/${context.workspaceId}/tasks/${id}/cover-${Date.now()}.webp`,
+      maxDimension: 1200,
+    });
+
+    task.coverImageUrl = stored.url;
+    task.coverImageAssetKey = stored.path;
+
     return this.tasksRepository.save(task);
   }
 
@@ -188,7 +243,13 @@ export class TasksCrudService {
     task.status = TaskStatus.Archived;
     task.archivedAt = new Date();
 
-    return this.tasksRepository.save(task);
+    const saved = await this.tasksRepository.save(task);
+
+    if (task.projectId) {
+      void this.recordProjectEvent(context, task.projectId, `Tarefa arquivada: "${task.title}"`);
+    }
+
+    return saved;
   }
 
   private applyFilters(qb: ReturnType<Repository<AgencyTask>['createQueryBuilder']>, query: ListTasksQueryDto) {

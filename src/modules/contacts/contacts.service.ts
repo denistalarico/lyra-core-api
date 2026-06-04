@@ -705,10 +705,68 @@ export class ContactsService {
     return this.contactListsRepository.save(leadFlowList);
   }
 
+  private async ensureFinanceSystemLists(ctx: RequestContext) {
+    const workspaceId = this.requireWorkspaceId(ctx);
+
+    const financeListDefs = [
+      {
+        name: 'Customers',
+        description: 'Clientes associados ao módulo Financeiro da agência.',
+        color: '#16a34a',
+        sourceContext: 'customers',
+      },
+      {
+        name: 'Vendors',
+        description: 'Fornecedores associados ao módulo Financeiro da agência.',
+        color: '#f59e0b',
+        sourceContext: 'vendors',
+      },
+    ] as const;
+
+    for (const def of financeListDefs) {
+      const existing = await this.contactListsRepository.findOne({
+        where: {
+          tenantId: ctx.tenantId,
+          workspaceId,
+          name: def.name,
+        },
+      });
+
+      if (existing) {
+        let changed = false;
+
+        if (!existing.isSystem) { existing.isSystem = true; changed = true; }
+        if (!existing.isProtected) { existing.isProtected = true; changed = true; }
+        if (existing.sourceProduct !== 'finance') { existing.sourceProduct = 'finance'; changed = true; }
+        if (existing.sourceContext !== def.sourceContext) { existing.sourceContext = def.sourceContext; changed = true; }
+        if (existing.visibility !== 'workspace') { existing.visibility = 'workspace'; changed = true; }
+
+        if (changed) await this.contactListsRepository.save(existing);
+      } else {
+        const list = this.contactListsRepository.create({
+          tenantId: ctx.tenantId,
+          workspaceId,
+          name: def.name,
+          description: def.description,
+          color: def.color,
+          parentListId: null,
+          visibility: 'workspace',
+          isSystem: true,
+          isProtected: true,
+          sourceProduct: 'finance',
+          sourceContext: def.sourceContext,
+          createdByUserId: ctx.userId ?? null,
+        });
+        await this.contactListsRepository.save(list);
+      }
+    }
+  }
+
   async listLists(ctx: RequestContext) {
     const workspaceId = this.requireWorkspaceId(ctx);
 
     await this.ensureLeadFlowSystemList(ctx);
+    await this.ensureFinanceSystemLists(ctx);
 
     return this.contactListsRepository.find({
       where: {

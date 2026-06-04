@@ -1,9 +1,21 @@
-import { IsBoolean, IsInt, IsOptional, IsString, MaxLength, Min } from 'class-validator';
+import {
+  IsBoolean,
+  IsInt,
+  IsOptional,
+  IsString,
+  IsUUID,
+  MaxLength,
+  Min,
+} from 'class-validator';
 
 export class CreateTaskStageDto {
   @IsString()
   @MaxLength(120)
   name!: string;
+
+  @IsOptional()
+  @IsUUID()
+  projectId?: string | null;
 
   @IsOptional()
   @IsString()

@@ -40,7 +40,7 @@ export class TaskWorkspaceController {
   createChecklistItem(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('taskId') taskId: string,
-    @Body() body: { title?: string; isDone?: boolean; position?: number },
+    @Body() body: { title?: string; isDone?: boolean; status?: string; position?: number; taskTypeId?: string | null; dueDate?: string | null },
   ) {
     return this.taskWorkspaceService.createChecklistItem(
       getContextFromHeaders(headers),
@@ -54,7 +54,7 @@ export class TaskWorkspaceController {
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('taskId') taskId: string,
     @Param('itemId') itemId: string,
-    @Body() body: { title?: string; isDone?: boolean; position?: number },
+    @Body() body: { title?: string; isDone?: boolean; status?: string; position?: number; taskTypeId?: string | null; dueDate?: string | null },
   ) {
     return this.taskWorkspaceService.updateChecklistItem(
       getContextFromHeaders(headers),
@@ -85,6 +85,15 @@ export class TaskWorkspaceController {
     return this.taskWorkspaceService.listComments(getContextFromHeaders(headers), taskId);
   }
 
+  @Delete('comments/:commentId')
+  deleteComment(
+    @Headers() headers: Record<string, string | string[] | undefined>,
+    @Param('taskId') taskId: string,
+    @Param('commentId') commentId: string,
+  ) {
+    return this.taskWorkspaceService.deleteComment(getContextFromHeaders(headers), taskId, commentId);
+  }
+
   @Post('comments')
   createComment(
     @Headers() headers: Record<string, string | string[] | undefined>,
@@ -112,6 +121,14 @@ export class TaskWorkspaceController {
     @Param('taskId') taskId: string,
   ) {
     return this.taskWorkspaceService.startTimer(getContextFromHeaders(headers), taskId);
+  }
+
+  @Patch('time-entries/stop-active')
+  stopActiveTimer(
+    @Headers() headers: Record<string, string | string[] | undefined>,
+    @Param('taskId') taskId: string,
+  ) {
+    return this.taskWorkspaceService.stopActiveTimer(getContextFromHeaders(headers), taskId);
   }
 
   @Patch('time-entries/:entryId/stop')

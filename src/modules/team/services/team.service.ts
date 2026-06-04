@@ -1,12 +1,19 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { createHash } from 'crypto';
 import { InjectRepository } from '@nestjs/typeorm';
-import { ILike, Repository } from 'typeorm';
+import { ILike, In, Repository } from 'typeorm';
+import { AgencyUserProfileEntity } from '../../agency/entities/agency-settings.entities';
+import { FilesService } from '../../../common/files/files.service';
 import {
   TeamDepartment,
   TeamMember,
   TeamMemberSkill,
   TeamSkill,
+  TeamConfigOption,
 } from '../entities';
 import {
   CreateTeamDepartmentDto,
@@ -16,17 +23,19 @@ import {
   UpdateTeamDepartmentDto,
   UpdateTeamMemberDto,
   UpdateTeamSkillDto,
+  CreateTeamConfigOptionDto,
+  UpdateTeamConfigOptionDto,
   UpsertTeamMemberSkillDto,
 } from '../dto';
 import {
-      TeamAttendanceSource,
-      TeamAttendanceType,
-      TeamMemberStatus,
-      TeamPresenceSource,
-      TeamPresenceStatus,
-      TeamRecordStatus,
-      TeamSkillLevel,
-    } from '../enums';
+  TeamAttendanceSource,
+  TeamAttendanceType,
+  TeamMemberStatus,
+  TeamPresenceSource,
+  TeamPresenceStatus,
+  TeamRecordStatus,
+  TeamSkillLevel,
+} from '../enums';
 import { TEAM_DEFAULT_DEPARTMENTS, TEAM_DEFAULT_SKILLS } from './team-defaults';
 
 type RequestContext = {
@@ -36,12 +45,12 @@ type RequestContext = {
 };
 
 function hashPinCode(tenantId: string, workspaceId: string, pinCode: string) {
-      return createHash('sha256')
-        .update(`${tenantId}:${workspaceId}:${pinCode}`)
-        .digest('hex');
-    }
+  return createHash('sha256')
+    .update(`${tenantId}:${workspaceId}:${pinCode}`)
+    .digest('hex');
+}
 
-    function slugify(value: string) {
+function slugify(value: string) {
   return value
     .toLowerCase()
     .normalize('NFD')
@@ -58,10 +67,15 @@ export class TeamService {
     private readonly departmentRepository: Repository<TeamDepartment>,
     @InjectRepository(TeamSkill, 'agency')
     private readonly skillRepository: Repository<TeamSkill>,
+    @InjectRepository(TeamConfigOption, 'agency')
+    private readonly configOptionRepository: Repository<TeamConfigOption>,
     @InjectRepository(TeamMember, 'agency')
     private readonly memberRepository: Repository<TeamMember>,
     @InjectRepository(TeamMemberSkill, 'agency')
     private readonly memberSkillRepository: Repository<TeamMemberSkill>,
+    @InjectRepository(AgencyUserProfileEntity, 'agency')
+    private readonly userProfileRepository: Repository<AgencyUserProfileEntity>,
+    private readonly filesService: FilesService,
   ) {}
 
   health() {
@@ -142,6 +156,7 @@ export class TeamService {
       slug: slugify(dto.name),
       description: dto.description ?? null,
       color: dto.color ?? null,
+      metadata: dto.metadata ?? {},
       icon: dto.icon ?? null,
       managerMemberId: dto.managerMemberId ?? null,
       parentDepartmentId: dto.parentDepartmentId ?? null,
@@ -152,7 +167,11 @@ export class TeamService {
     return this.departmentRepository.save(entity);
   }
 
-  async updateDepartment(ctx: RequestContext, id: string, dto: UpdateTeamDepartmentDto) {
+  async updateDepartment(
+    ctx: RequestContext,
+    id: string,
+    dto: UpdateTeamDepartmentDto,
+  ) {
     const entity = await this.findDepartment(ctx, id);
 
     if (dto.name !== undefined) {
@@ -163,8 +182,10 @@ export class TeamService {
     if (dto.description !== undefined) entity.description = dto.description;
     if (dto.color !== undefined) entity.color = dto.color;
     if (dto.icon !== undefined) entity.icon = dto.icon;
-    if (dto.managerMemberId !== undefined) entity.managerMemberId = dto.managerMemberId;
-    if (dto.parentDepartmentId !== undefined) entity.parentDepartmentId = dto.parentDepartmentId;
+    if (dto.managerMemberId !== undefined)
+      entity.managerMemberId = dto.managerMemberId;
+    if (dto.parentDepartmentId !== undefined)
+      entity.parentDepartmentId = dto.parentDepartmentId;
     if (dto.status !== undefined) entity.status = dto.status;
 
     return this.departmentRepository.save(entity);
@@ -176,9 +197,15 @@ export class TeamService {
     return this.departmentRepository.save(entity);
   }
 
+  async deleteDepartment(ctx: RequestContext, id: string) {
+    const entity = await this.findDepartment(ctx, id);
+    await this.departmentRepository.remove(entity);
+    return { deleted: true, id };
+  }
+
   listSkills(ctx: RequestContext) {
     return this.skillRepository.find({
-      where: { tenantId: ctx.tenantId, workspaceId: ctx.workspaceId },
+      where: { tenantId: ctx.tenantId, workspaceId: ctx.workspaceId, status: TeamRecordStatus.Active },
       order: { category: 'ASC', position: 'ASC', name: 'ASC' },
     });
   }
@@ -188,7 +215,7 @@ export class TeamService {
       tenantId: ctx.tenantId,
       workspaceId: ctx.workspaceId,
       name: dto.name,
-      slug: slugify(dto.name),
+      slug: slugify(`${dto.category}-${dto.name}`),
       category: dto.category,
       description: dto.description ?? null,
       color: dto.color ?? null,
@@ -221,8 +248,8 @@ export class TeamService {
     return this.skillRepository.save(entity);
   }
 
-  listMembers(ctx: RequestContext, query: ListTeamMembersQueryDto) {
-    return this.memberRepository.find({
+  async listMembers(ctx: RequestContext, query: ListTeamMembersQueryDto) {
+    const members = await this.memberRepository.find({
       where: {
         tenantId: ctx.tenantId,
         workspaceId: ctx.workspaceId,
@@ -233,18 +260,208 @@ export class TeamService {
       },
       order: { displayName: 'ASC' },
     });
+
+    return this.withUserProfileAvatars(ctx, members);
   }
 
   async getMember(ctx: RequestContext, id: string) {
     const member = await this.findMember(ctx, id);
+    const [memberWithAvatar] = await this.withUserProfileAvatars(ctx, [member]);
     const skills = await this.memberSkillRepository.find({
-      where: { tenantId: ctx.tenantId, workspaceId: ctx.workspaceId, memberId: id },
+      where: {
+        tenantId: ctx.tenantId,
+        workspaceId: ctx.workspaceId,
+        memberId: id,
+      },
       order: { createdAt: 'ASC' },
     });
 
     return {
-      ...member,
+      ...memberWithAvatar,
       skills,
+    };
+  }
+
+  private async withUserProfileAvatars(
+    ctx: RequestContext,
+    members: TeamMember[],
+  ) {
+    const userIds = members
+      .map((member) => member.userId)
+      .filter((userId): userId is string => Boolean(userId));
+
+    if (userIds.length === 0) {
+      return members;
+    }
+
+    const profiles = await this.userProfileRepository.find({
+      where: {
+        tenantId: ctx.tenantId,
+        userId: In(userIds),
+      },
+    });
+
+    const profileByUserId = new Map(
+      profiles.map((profile) => [profile.userId, profile]),
+    );
+
+    return members.map((member) => {
+      const profile = member.userId
+        ? profileByUserId.get(member.userId)
+        : undefined;
+      const profileAvatarUrl = profile?.avatarUrl ?? null;
+      const memberAvatarUrl = member.avatarUrl ?? null;
+      const shouldUseProfileAvatar =
+        Boolean(profileAvatarUrl) &&
+        (!memberAvatarUrl ||
+          memberAvatarUrl.includes('/users/') ||
+          memberAvatarUrl.includes(`/users/${member.userId}/`));
+
+      if (!shouldUseProfileAvatar) {
+        return member;
+      }
+
+      return {
+        ...member,
+        avatarUrl: profileAvatarUrl,
+        avatarPath: profile?.avatarPath ?? null,
+      };
+    });
+  }
+
+  listConfigOptions(
+    ctx: RequestContext,
+    type?: string,
+  ) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const where: any = {
+      tenantId: ctx.tenantId,
+      workspaceId: ctx.workspaceId,
+      status: 'active',
+    };
+
+    if (type) where.type = type;
+
+    return this.configOptionRepository.find({ where, order: { name: 'ASC' } });
+  }
+
+  async createConfigOption(
+    ctx: RequestContext,
+    dto: CreateTeamConfigOptionDto,
+  ) {
+    const name = dto.name.trim();
+    const metadata = dto.metadata ?? {};
+
+    // For seniority, uniqueness is scoped by skillCategory — find only within the same category
+    const skillCategory =
+      dto.type === 'seniority' &&
+      metadata &&
+      typeof (metadata as Record<string, unknown>).skillCategory === 'string'
+        ? (metadata as Record<string, unknown>).skillCategory
+        : undefined;
+
+    const allByName = await this.configOptionRepository.find({
+      where: {
+        tenantId: ctx.tenantId,
+        workspaceId: ctx.workspaceId,
+        type: dto.type,
+        name,
+      },
+    });
+
+    const existing = skillCategory
+      ? allByName.find(
+          (o) =>
+            o.metadata &&
+            (o.metadata as Record<string, unknown>).skillCategory === skillCategory,
+        )
+      : allByName[0];
+
+    if (existing) {
+      existing.status = 'active';
+      existing.updatedById = ctx.userId || null;
+      existing.metadata = metadata;
+      return this.configOptionRepository.save(existing);
+    }
+
+    return this.configOptionRepository.save(
+      this.configOptionRepository.create({
+        tenantId: ctx.tenantId,
+        workspaceId: ctx.workspaceId,
+        type: dto.type,
+        name,
+        status: 'active',
+        metadata,
+        createdById: ctx.userId || null,
+        updatedById: ctx.userId || null,
+      }),
+    );
+  }
+
+  async updateConfigOption(
+    ctx: RequestContext,
+    id: string,
+    dto: UpdateTeamConfigOptionDto,
+  ) {
+    const entity = await this.configOptionRepository.findOne({
+      where: {
+        id,
+        tenantId: ctx.tenantId,
+        workspaceId: ctx.workspaceId,
+      },
+    });
+
+    if (!entity) {
+      throw new NotFoundException('Config option not found');
+    }
+
+    if (dto.type !== undefined) {
+      entity.type = dto.type;
+    }
+
+    if (dto.name !== undefined) {
+      entity.name = dto.name;
+    }
+
+    if (dto.description !== undefined) {
+      entity.description = dto.description ?? null;
+    }
+
+    if (dto.color !== undefined) {
+      entity.color = dto.color ?? null;
+    }
+
+    if (dto.metadata !== undefined) {
+      entity.metadata = dto.metadata ?? {};
+    }
+
+    if (dto.status !== undefined) {
+      entity.status = dto.status;
+    }
+
+    entity.updatedById = ctx.userId || null;
+
+    return this.configOptionRepository.save(entity);
+  }
+
+  async deleteConfigOption(ctx: RequestContext, id: string) {
+    const option = await this.configOptionRepository.findOne({
+      where: {
+        id,
+        tenantId: ctx.tenantId,
+        workspaceId: ctx.workspaceId,
+      },
+    });
+
+    if (!option) {
+      throw new NotFoundException('Team config option not found');
+    }
+
+    await this.configOptionRepository.remove(option);
+
+    return {
+      deleted: true,
+      id,
     };
   }
 
@@ -256,6 +473,7 @@ export class TeamService {
       legalName: dto.legalName ?? null,
       email: dto.email ?? null,
       phone: dto.phone ?? null,
+      avatarUrl: dto.avatarUrl ?? null,
       userId: dto.userId ?? null,
       contactId: dto.contactId ?? null,
       contractId: dto.contractId ?? null,
@@ -277,14 +495,18 @@ export class TeamService {
       monthlyCost: dto.monthlyCost ?? null,
       currency: dto.currency ?? 'USD',
       notes: dto.notes ?? null,
-      status: TeamMemberStatus.Active,
+      status: dto.status ?? TeamMemberStatus.Active,
       createdById: ctx.userId || null,
     });
 
     return this.memberRepository.save(entity);
   }
 
-  async updateMember(ctx: RequestContext, id: string, dto: UpdateTeamMemberDto) {
+  async updateMember(
+    ctx: RequestContext,
+    id: string,
+    dto: UpdateTeamMemberDto,
+  ) {
     const entity = await this.findMember(ctx, id);
 
     Object.assign(entity, {
@@ -295,6 +517,29 @@ export class TeamService {
     return this.memberRepository.save(entity);
   }
 
+  async uploadMemberAvatar(
+    ctx: RequestContext,
+    memberId: string,
+    file: Express.Multer.File,
+  ) {
+    const member = await this.findMember(ctx, memberId);
+    const stored = await this.filesService.uploadImageAsset({
+      file,
+      path: `agency/tenants/${ctx.tenantId}/workspaces/${ctx.workspaceId}/team/members/${memberId}/avatar-${Date.now()}.webp`,
+      maxDimension: 512,
+    });
+
+    member.avatarUrl = stored.url;
+    member.updatedById = ctx.userId || null;
+
+    await this.memberRepository.save(member);
+
+    return {
+      avatarUrl: stored.url,
+      avatarPath: stored.path,
+    };
+  }
+
   async archiveMember(ctx: RequestContext, id: string) {
     const entity = await this.findMember(ctx, id);
     entity.status = TeamMemberStatus.Archived;
@@ -303,7 +548,22 @@ export class TeamService {
     return this.memberRepository.save(entity);
   }
 
-  async upsertMemberSkill(ctx: RequestContext, memberId: string, dto: UpsertTeamMemberSkillDto) {
+  async deleteMember(ctx: RequestContext, id: string) {
+    const entity = await this.findMember(ctx, id);
+
+    await this.memberRepository.remove(entity);
+
+    return {
+      deleted: true,
+      id,
+    };
+  }
+
+  async upsertMemberSkill(
+    ctx: RequestContext,
+    memberId: string,
+    dto: UpsertTeamMemberSkillDto,
+  ) {
     await this.findMember(ctx, memberId);
     await this.findSkill(ctx, dto.skillId);
 
@@ -319,6 +579,10 @@ export class TeamService {
     if (existing) {
       existing.level = dto.level ?? existing.level;
       existing.notes = dto.notes ?? existing.notes;
+      existing.metadata = {
+        ...(existing.metadata ?? {}),
+        ...(dto.metadata ?? {}),
+      };
       return this.memberSkillRepository.save(existing);
     }
 
@@ -330,11 +594,16 @@ export class TeamService {
         skillId: dto.skillId,
         level: dto.level ?? TeamSkillLevel.Intermediate,
         notes: dto.notes ?? null,
+        metadata: dto.metadata ?? {},
       }),
     );
   }
 
-  async removeMemberSkill(ctx: RequestContext, memberId: string, skillId: string) {
+  async removeMemberSkill(
+    ctx: RequestContext,
+    memberId: string,
+    skillId: string,
+  ) {
     const existing = await this.memberSkillRepository.findOne({
       where: {
         tenantId: ctx.tenantId,

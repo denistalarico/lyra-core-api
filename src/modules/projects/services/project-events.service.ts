@@ -57,6 +57,38 @@ export class ProjectEventsService {
     return this.eventsRepository.save(event);
   }
 
+  async createSystemEvent(
+    context: RequestContext,
+    projectId: string,
+    body: string,
+    meta?: Record<string, unknown>,
+  ) {
+    const event = this.eventsRepository.create({
+      tenantId: context.tenantId,
+      workspaceId: context.workspaceId,
+      projectId,
+      authorId: context.userId,
+      kind: 'system',
+      body,
+      dueAt: null,
+      meta: meta ?? null,
+    });
+
+    return this.eventsRepository.save(event);
+  }
+
+  async clearAll(context: RequestContext, projectId: string) {
+    await this.projectsCrudService.findOne(context, projectId);
+
+    await this.eventsRepository.delete({
+      tenantId: context.tenantId,
+      workspaceId: context.workspaceId,
+      projectId,
+    });
+
+    return { cleared: true };
+  }
+
   async delete(context: RequestContext, projectId: string, eventId: string) {
     await this.projectsCrudService.findOne(context, projectId);
 

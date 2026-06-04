@@ -14,12 +14,19 @@ import { CreateAgencyContactDetails1760001006000 } from './migrations/1760001006
 import { CreateDocumentLayouts1760001008000 } from './migrations/1760001008000-create-document-layouts';
 import { EnhanceDocumentLayoutTemplates1760001009000 } from './migrations/1760001009000-enhance-document-layout-templates';
 import { RefineDocumentLayoutTemplatesV31760001010000 } from './migrations/1760001010000-refine-document-layout-templates-v3';
+import { UpdateDocumentLayoutTemplatesMultiDoc1760002038000 } from './migrations/1760002038000-update-document-layout-templates-multi-doc';
 import { CreateQuotesCore1760001007000 } from './migrations/1760001007000-create-quotes-core';
 import { CreateAgencyCalendarCore1760001011000 } from './migrations/1760001011000-create-agency-calendar-core';
 import { CreateAgencyCalendarSettings1760001012000 } from './migrations/1760001012000-create-agency-calendar-settings';
 import { CreateAgencyProjectsTasksCore1760001013000 } from './migrations/1760001013000-create-agency-projects-tasks-core';
 import { AddAgencyProjectSettings1760001014000 } from './migrations/1760001014000-add-agency-project-settings';
 import { CreateAgencyProjectEvents1760001015000 } from './migrations/1760001015000-create-agency-project-events';
+import { AddProjectCardColors1760002033000 } from './migrations/1760002033000-add-project-card-colors';
+import { AddTaskCoverAndMarkers1760002034000 } from './migrations/1760002034000-add-task-cover-and-markers';
+import { AddTaskReviewApprovedStatuses1760002035000 } from './migrations/1760002035000-add-task-review-approved-statuses';
+import { AddProjectIdToTaskStages1760002036000 } from './migrations/1760002036000-add-project-id-to-task-stages';
+import { AddProjectFollowersAndAttachments1760002037000 } from './migrations/1760002037000-add-project-followers-and-attachments';
+import { AddTaskTypeFields1760002040000 } from './migrations/1760002040000-add-task-type-fields';
 import { CreateAgencyActivitiesCore1760001016000 } from './migrations/1760001016000-create-agency-activities-core';
 import { CreateAgencyFinanceCore1760002016000 } from './migrations/1760002016000-create-agency-finance-core';
 import { CreateAgencyFinanceBillingCore1760002017000 } from './migrations/1760002017000-create-agency-finance-billing-core';
@@ -32,6 +39,10 @@ import { AddContractTemplateI18nFields1760002023000 } from './migrations/1760002
 import { CreateContractSignatureProviderSettings1760002024000 } from './migrations/1760002024000-create-contract-signature-provider-settings';
 import { CreateAgencyTeamCore1760002025000 } from './migrations/1760002025000-create-agency-team-core';
 import { CreateAgencyTeamAttendance1760002026000 } from './migrations/1760002026000-create-agency-team-attendance';
+import { CreateAgencyTeamConfigOptions1760002031000 } from './migrations/1760002031000-create-agency-team-config-options';
+import { FixTeamConfigOptionsSeniorityUniqueIndex1760002032000 } from './migrations/1760002032000-fix-team-config-options-seniority-unique-index';
+import { CreateAgencyTeamPayments1760002030000 } from './migrations/1760002030000-create-agency-team-payments';
+import { AddBankAccountChartAccount1760002039000 } from './migrations/1760002039000-add-bank-account-chart-account';
 
 export const AgencyDataSource = new DataSource({
   type: 'postgres',
@@ -47,6 +58,7 @@ export const AgencyDataSource = new DataSource({
   logging: false,
   entities: agencyEntities,
   migrations: [
+    CreateAgencyTeamPayments1760002030000,
     CreateAgencySettingsCore1760001000000,
     CreateAgencyEmailSettings1760001001000,
     CreateAgencySalesCore1760001002000,
@@ -60,12 +72,16 @@ export const AgencyDataSource = new DataSource({
     CreateDocumentLayouts1760001008000,
     EnhanceDocumentLayoutTemplates1760001009000,
     RefineDocumentLayoutTemplatesV31760001010000,
+    UpdateDocumentLayoutTemplatesMultiDoc1760002038000,
     CreateQuotesCore1760001007000,
     CreateAgencyCalendarCore1760001011000,
     CreateAgencyCalendarSettings1760001012000,
     CreateAgencyProjectsTasksCore1760001013000,
     AddAgencyProjectSettings1760001014000,
     CreateAgencyProjectEvents1760001015000,
+    AddProjectCardColors1760002033000,
+    AddTaskCoverAndMarkers1760002034000,
+    AddTaskReviewApprovedStatuses1760002035000,
     CreateAgencyActivitiesCore1760001016000,
     CreateAgencyFinanceCore1760002016000,
     CreateAgencyFinanceBillingCore1760002017000,
@@ -77,6 +93,12 @@ export const AgencyDataSource = new DataSource({
     AddContractTemplateI18nFields1760002023000,
     CreateContractSignatureProviderSettings1760002024000,
     CreateAgencyTeamCore1760002025000,
+    CreateAgencyTeamConfigOptions1760002031000,
     CreateAgencyTeamAttendance1760002026000,
+    FixTeamConfigOptionsSeniorityUniqueIndex1760002032000,
+    AddProjectIdToTaskStages1760002036000,
+    AddProjectFollowersAndAttachments1760002037000,
+    AddTaskTypeFields1760002040000,
+    AddBankAccountChartAccount1760002039000,
   ],
 });

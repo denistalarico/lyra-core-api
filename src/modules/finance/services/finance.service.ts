@@ -9,6 +9,9 @@ import {
   CreateFinanceJournalDto,
   CreateFinanceTagDto,
   UpdateFinanceAccountDto,
+  UpdateFinanceCategoryDto,
+  UpdateFinanceCostCenterDto,
+  UpdateFinanceJournalDto,
   UpdateFinanceProfitabilityRulesDto,
   UpdateFinanceSettingsDto,
   FinanceMetricsHistoryQueryDto,
@@ -156,6 +159,15 @@ export class FinanceService {
     return this.accountsRepo.save(account);
   }
 
+  async deleteAccount(ctx: FinanceRequestContext, id: string) {
+    const account = await this.accountsRepo.findOne({
+      where: { id, tenantId: ctx.tenantId, workspaceId: ctx.workspaceId },
+    });
+    if (!account) throw new NotFoundException('Finance account not found');
+    await this.accountsRepo.remove(account);
+    return { success: true, id };
+  }
+
   listJournals(ctx: FinanceRequestContext) {
     return this.journalsRepo.find({
       where: {
@@ -176,6 +188,28 @@ export class FinanceService {
     });
 
     return this.journalsRepo.save(journal);
+  }
+
+  async updateJournal(
+    ctx: FinanceRequestContext,
+    id: string,
+    dto: UpdateFinanceJournalDto,
+  ) {
+    const journal = await this.journalsRepo.findOne({
+      where: { id, tenantId: ctx.tenantId, workspaceId: ctx.workspaceId },
+    });
+    if (!journal) throw new NotFoundException('Finance journal not found');
+    Object.assign(journal, dto);
+    return this.journalsRepo.save(journal);
+  }
+
+  async deleteJournal(ctx: FinanceRequestContext, id: string) {
+    const journal = await this.journalsRepo.findOne({
+      where: { id, tenantId: ctx.tenantId, workspaceId: ctx.workspaceId },
+    });
+    if (!journal) throw new NotFoundException('Finance journal not found');
+    await this.journalsRepo.remove(journal);
+    return { success: true, id };
   }
 
   listCategories(ctx: FinanceRequestContext) {
@@ -199,6 +233,28 @@ export class FinanceService {
     });
 
     return this.categoriesRepo.save(category);
+  }
+
+  async updateCategory(
+    ctx: FinanceRequestContext,
+    id: string,
+    dto: UpdateFinanceCategoryDto,
+  ) {
+    const category = await this.categoriesRepo.findOne({
+      where: { id, tenantId: ctx.tenantId, workspaceId: ctx.workspaceId },
+    });
+    if (!category) throw new NotFoundException('Finance category not found');
+    Object.assign(category, dto);
+    return this.categoriesRepo.save(category);
+  }
+
+  async deleteCategory(ctx: FinanceRequestContext, id: string) {
+    const category = await this.categoriesRepo.findOne({
+      where: { id, tenantId: ctx.tenantId, workspaceId: ctx.workspaceId },
+    });
+    if (!category) throw new NotFoundException('Finance category not found');
+    await this.categoriesRepo.remove(category);
+    return { success: true, id };
   }
 
   listTags(ctx: FinanceRequestContext) {
@@ -249,6 +305,28 @@ export class FinanceService {
     return this.costCentersRepo.save(costCenter);
   }
 
+  async updateCostCenter(
+    ctx: FinanceRequestContext,
+    id: string,
+    dto: UpdateFinanceCostCenterDto,
+  ) {
+    const costCenter = await this.costCentersRepo.findOne({
+      where: { id, tenantId: ctx.tenantId, workspaceId: ctx.workspaceId },
+    });
+    if (!costCenter) throw new NotFoundException('Finance cost center not found');
+    Object.assign(costCenter, dto);
+    return this.costCentersRepo.save(costCenter);
+  }
+
+  async deleteCostCenter(ctx: FinanceRequestContext, id: string) {
+    const costCenter = await this.costCentersRepo.findOne({
+      where: { id, tenantId: ctx.tenantId, workspaceId: ctx.workspaceId },
+    });
+    if (!costCenter) throw new NotFoundException('Finance cost center not found');
+    await this.costCentersRepo.remove(costCenter);
+    return { success: true, id };
+  }
+
   listBankAccounts(ctx: FinanceRequestContext) {
     return this.bankAccountsRepo.find({
       where: {
@@ -271,6 +349,19 @@ export class FinanceService {
       workspaceId: ctx.workspaceId,
     });
 
+    return this.bankAccountsRepo.save(bankAccount);
+  }
+
+  async updateBankAccount(
+    ctx: FinanceRequestContext,
+    id: string,
+    dto: import('../dto').UpdateFinanceBankAccountDto,
+  ) {
+    const bankAccount = await this.bankAccountsRepo.findOne({
+      where: { id, tenantId: ctx.tenantId, workspaceId: ctx.workspaceId },
+    });
+    if (!bankAccount) throw new NotFoundException('Bank account not found');
+    Object.assign(bankAccount, dto);
     return this.bankAccountsRepo.save(bankAccount);
   }
 

@@ -17,6 +17,9 @@ export class AgencyTaskStage {
   @Column({ name: 'workspace_id', type: 'uuid' })
   workspaceId!: string;
 
+  @Column({ name: 'project_id', type: 'uuid', nullable: true })
+  projectId!: string | null;
+
   @Column({ type: 'varchar', length: 120 })
   name!: string;
 

@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Headers,
   Param,
@@ -77,6 +78,19 @@ export class TeamAttendanceController {
       getContextFromHeaders(headers),
       id,
       dto,
+    );
+  }
+
+  @Delete('members/:id/attendance/:entryId')
+  deleteAttendanceEntry(
+    @Headers() headers: Record<string, string | string[] | undefined>,
+    @Param('id') id: string,
+    @Param('entryId') entryId: string,
+  ) {
+    return this.teamAttendanceService.deleteAttendanceEntry(
+      getContextFromHeaders(headers),
+      id,
+      entryId,
     );
   }
 

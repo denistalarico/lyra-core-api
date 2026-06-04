@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -8,7 +9,12 @@ import {
   Patch,
   Post,
   Query,
+  UploadedFile,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
+import { MAX_IMAGE_UPLOAD_BYTES } from '../../../common/files/files.service';
 import { TeamService } from '../services/team.service';
 import {
   CreateTeamDepartmentDto,
@@ -18,6 +24,8 @@ import {
   UpdateTeamDepartmentDto,
   UpdateTeamMemberDto,
   UpdateTeamSkillDto,
+  CreateTeamConfigOptionDto,
+  UpdateTeamConfigOptionDto,
   UpsertTeamMemberSkillDto,
 } from '../dto';
 
@@ -25,6 +33,32 @@ type RequestContext = {
   tenantId: string;
   workspaceId: string;
   userId: string;
+};
+
+const IMAGE_UPLOAD_OPTIONS = {
+  storage: memoryStorage(),
+  limits: {
+    fileSize: MAX_IMAGE_UPLOAD_BYTES,
+  },
+  fileFilter: (
+    _request: unknown,
+    file: Express.Multer.File,
+    callback: (error: Error | null, acceptFile: boolean) => void,
+  ) => {
+    const allowedMimeTypes = new Set([
+      'image/jpeg',
+      'image/jpg',
+      'image/png',
+      'image/webp',
+    ]);
+
+    if (!allowedMimeTypes.has(file.mimetype)) {
+      callback(new BadRequestException('Unsupported image format.'), false);
+      return;
+    }
+
+    callback(null, true);
+  },
 };
 
 function getContextFromHeaders(
@@ -73,6 +107,14 @@ export class TeamController {
     return this.teamService.updateDepartment(getContextFromHeaders(headers), id, dto);
   }
 
+  @Delete('departments/:id/permanent')
+  deleteDepartment(
+    @Headers() headers: Record<string, string | string[] | undefined>,
+    @Param('id') id: string,
+  ) {
+    return this.teamService.deleteDepartment(getContextFromHeaders(headers), id);
+  }
+
   @Delete('departments/:id')
   archiveDepartment(
     @Headers() headers: Record<string, string | string[] | undefined>,
@@ -111,6 +153,52 @@ export class TeamController {
     return this.teamService.archiveSkill(getContextFromHeaders(headers), id);
   }
 
+  @Get('config-options')
+  listConfigOptions(
+    @Headers() headers: Record<string, string | string[] | undefined>,
+    @Query('type')
+    type?:
+      | 'job_title'
+      | 'role_name'
+      | 'seniority'
+      | 'work_mode'
+      | 'worker_type'
+      | 'offboarding_reason'
+      | 'contract_category'
+      | 'signature_provider'
+      | 'onboarding_task'
+      | 'offboarding_task'
+      | 'skill_category'
+      | 'skill_level',
+  ) {
+    return this.teamService.listConfigOptions(getContextFromHeaders(headers), type);
+  }
+
+  @Post('config-options')
+  createConfigOption(
+    @Headers() headers: Record<string, string | string[] | undefined>,
+    @Body() dto: CreateTeamConfigOptionDto,
+  ) {
+    return this.teamService.createConfigOption(getContextFromHeaders(headers), dto);
+  }
+
+  @Patch('config-options/:id')
+  updateConfigOption(
+    @Headers() headers: Record<string, string | string[] | undefined>,
+    @Param('id') id: string,
+    @Body() dto: UpdateTeamConfigOptionDto,
+  ) {
+    return this.teamService.updateConfigOption(getContextFromHeaders(headers), id, dto);
+  }
+
+  @Delete('config-options/:id')
+  deleteConfigOption(
+    @Headers() headers: Record<string, string | string[] | undefined>,
+    @Param('id') id: string,
+  ) {
+    return this.teamService.deleteConfigOption(getContextFromHeaders(headers), id);
+  }
+
   @Get('members')
   listMembers(
     @Headers() headers: Record<string, string | string[] | undefined>,
@@ -144,12 +232,26 @@ export class TeamController {
     return this.teamService.updateMember(getContextFromHeaders(headers), id, dto);
   }
 
+  @Post('members/:id/avatar')
+  @UseInterceptors(FileInterceptor('file', IMAGE_UPLOAD_OPTIONS))
+  uploadMemberAvatar(
+    @Headers() headers: Record<string, string | string[] | undefined>,
+    @Param('id') id: string,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    if (!file) {
+      throw new BadRequestException('Image file is required.');
+    }
+
+    return this.teamService.uploadMemberAvatar(getContextFromHeaders(headers), id, file);
+  }
+
   @Delete('members/:id')
-  archiveMember(
+  deleteMember(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('id') id: string,
   ) {
-    return this.teamService.archiveMember(getContextFromHeaders(headers), id);
+    return this.teamService.deleteMember(getContextFromHeaders(headers), id);
   }
 
   @Post('members/:id/skills')

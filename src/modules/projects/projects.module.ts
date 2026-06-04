@@ -3,11 +3,14 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import {
   AgencyPersonalTaskStage,
   AgencyProject,
+  AgencyProjectAttachment,
   AgencyProjectEvent,
+  AgencyProjectFollower,
   AgencyProjectSettings,
   AgencyProjectStage,
   AgencyProjectUserPreferences,
   AgencyTask,
+  AgencyTaskAttachment,
   AgencyTaskChecklistItem,
   AgencyTaskComment,
   AgencyTaskStage,
@@ -22,15 +25,19 @@ import { ProjectBoardsController } from './controllers/project-boards.controller
 import { ProjectSeedsController } from './controllers/project-seeds.controller';
 import { ProjectSettingsController } from './controllers/project-settings.controller';
 import { ProjectEventsController } from './controllers/project-events.controller';
+import { ProjectFollowersAttachmentsController } from './controllers/project-followers-attachments.controller';
+import { ProjectFollowersAttachmentsService } from './services/project-followers-attachments.service';
 import { ProjectsService } from './services/projects.service';
 import { ProjectsCrudService } from './services/projects-crud.service';
 import { ProjectStagesService } from './services/project-stages.service';
 import { TasksCrudService } from './services/tasks-crud.service';
+import { TaskAttachmentsService } from './services/task-attachments.service';
 import { TaskWorkspaceService } from './services/task-workspace.service';
 import { ProjectBoardsService } from './services/project-boards.service';
 import { ProjectSeedsService } from './services/project-seeds.service';
 import { ProjectSettingsService } from './services/project-settings.service';
 import { ProjectEventsService } from './services/project-events.service';
+import { FilesModule } from '../../common/files/files.module';
 
 const AGENCY_CONNECTION = 'agency';
 
@@ -40,10 +47,13 @@ const AGENCY_CONNECTION = 'agency';
       [
         AgencyProject,
         AgencyProjectEvent,
+        AgencyProjectFollower,
+        AgencyProjectAttachment,
         AgencyProjectSettings,
         AgencyProjectUserPreferences,
         AgencyProjectStage,
         AgencyTask,
+        AgencyTaskAttachment,
         AgencyTaskStage,
         AgencyPersonalTaskStage,
         AgencyTaskChecklistItem,
@@ -52,6 +62,7 @@ const AGENCY_CONNECTION = 'agency';
       ],
       AGENCY_CONNECTION,
     ),
+    FilesModule,
   ],
   controllers: [
     ProjectsController,
@@ -62,6 +73,7 @@ const AGENCY_CONNECTION = 'agency';
     ProjectSeedsController,
     ProjectSettingsController,
     ProjectEventsController,
+    ProjectFollowersAttachmentsController,
     ProjectsCrudController,
   ],
   providers: [
@@ -69,22 +81,26 @@ const AGENCY_CONNECTION = 'agency';
     ProjectsCrudService,
     ProjectStagesService,
     TasksCrudService,
+    TaskAttachmentsService,
     TaskWorkspaceService,
     ProjectBoardsService,
     ProjectSeedsService,
     ProjectSettingsService,
     ProjectEventsService,
+    ProjectFollowersAttachmentsService,
   ],
   exports: [
     ProjectsService,
     ProjectsCrudService,
     ProjectStagesService,
     TasksCrudService,
+    TaskAttachmentsService,
     TaskWorkspaceService,
     ProjectBoardsService,
     ProjectSeedsService,
     ProjectSettingsService,
     ProjectEventsService,
+    ProjectFollowersAttachmentsService,
   ],
 })
 export class ProjectsModule {}

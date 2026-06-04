@@ -104,6 +104,35 @@ export class FilesService {
     };
   }
 
+  async uploadRawFile({
+    file,
+    path,
+  }: {
+    file: Express.Multer.File;
+    path: string;
+  }): Promise<StoredFile> {
+    if (file.size > 10 * 1024 * 1024) {
+      throw new BadRequestException('File exceeds 10 MB limit');
+    }
+
+    await this.ensureBucket();
+
+    await this.client.send(
+      new PutObjectCommand({
+        Bucket: this.bucket,
+        Key: path,
+        Body: file.buffer,
+        ContentType: file.mimetype,
+        ContentDisposition: `attachment; filename="${encodeURIComponent(file.originalname)}"`,
+      }),
+    );
+
+    return {
+      path,
+      url: this.buildProxiedUrl(path),
+    };
+  }
+
   async getAsset(path: string): Promise<AssetFile> {
     const normalizedPath = this.normalizeAssetPath(path);
 
@@ -184,23 +213,37 @@ export class FilesService {
   }
 
   private async resolveBucket() {
+    let bucketExists = false;
     try {
       await this.client.send(new HeadBucketCommand({ Bucket: this.bucket }));
-      await this.ensurePublicReadPolicy();
-      return;
-    } catch (error) {
+      bucketExists = true;
+    } catch {
+      // Bucket not found
+    }
+
+    if (!bucketExists) {
       if (!this.shouldCreateBucket) {
         throw new InternalServerErrorException(
           'Assets bucket is not available.',
         );
       }
+      try {
+        await this.client.send(
+          new CreateBucketCommand({ Bucket: this.bucket }),
+        );
+      } catch {
+        throw new InternalServerErrorException(
+          'Could not create assets bucket.',
+        );
+      }
     }
 
-    try {
-      await this.client.send(new CreateBucketCommand({ Bucket: this.bucket }));
-      await this.ensurePublicReadPolicy();
-    } catch {
-      throw new InternalServerErrorException('Could not create assets bucket.');
+    if (this.shouldSetPublicReadPolicy) {
+      try {
+        await this.ensurePublicReadPolicy();
+      } catch {
+        // Policy setting failed — bucket is still usable
+      }
     }
   }
 

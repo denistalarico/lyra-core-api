@@ -42,8 +42,8 @@ export class ProjectSeedsService {
   private async ensureProjectStages(context: RequestContext) {
     const defaults = [
       { name: 'Novo', color: '#2563EB', position: 1, isDefault: true },
-      { name: 'Em andamento', color: '#0EA5E9', position: 2, isDefault: false },
-      { name: 'Em revisão', color: '#F59E0B', position: 3, isDefault: false },
+      { name: 'Em desenvolvimento', color: '#0EA5E9', position: 2, isDefault: false },
+      { name: 'Para aprovação', color: '#F59E0B', position: 3, isDefault: false },
       { name: 'Concluído', color: '#16A34A', position: 4, isDefault: false },
     ];
 

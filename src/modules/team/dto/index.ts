@@ -1,9 +1,17 @@
+import { Type } from 'class-transformer';
 import {
   IsBoolean,
   IsEnum,
+  IsObject,
   IsOptional,
   IsString,
   IsUUID,
+  ValidateNested,
+  Min,
+  IsNumber,
+  IsIn,
+  IsDateString,
+  IsArray,
   MaxLength,
 } from 'class-validator';
 import {
@@ -12,8 +20,14 @@ import {
   TeamSkillLevel,
   TeamWorkerType,
   TeamWorkMode,
+  TeamConfigOptionType,
   TeamPresenceStatus,
   TeamAttendanceType,
+  TeamPaymentBatchStatus,
+  TeamPaymentStatus,
+  TeamPaymentCalculationMode,
+  TeamPaymentItemType,
+  TeamPaymentDocumentType,
 } from '../enums';
 
 export class CreateTeamDepartmentDto {
@@ -34,6 +48,10 @@ export class CreateTeamDepartmentDto {
   @IsString()
   @MaxLength(80)
   icon?: string;
+
+  @IsOptional()
+  @IsObject()
+  metadata?: Record<string, unknown>;
 
   @IsOptional()
   @IsUUID()
@@ -63,6 +81,10 @@ export class UpdateTeamDepartmentDto {
   @IsString()
   @MaxLength(80)
   icon?: string | null;
+
+  @IsOptional()
+  @IsObject()
+  metadata?: Record<string, unknown> | null;
 
   @IsOptional()
   @IsUUID()
@@ -140,6 +162,14 @@ export class CreateTeamMemberDto {
   @IsString()
   @MaxLength(80)
   phone?: string;
+
+  @IsOptional()
+  @IsEnum(TeamMemberStatus)
+  status?: TeamMemberStatus;
+
+  @IsOptional()
+  @IsString()
+  avatarUrl?: string;
 
   @IsOptional()
   @IsUUID()
@@ -231,6 +261,10 @@ export class CreateTeamMemberDto {
   @IsOptional()
   @IsString()
   notes?: string;
+
+  @IsOptional()
+  @IsObject()
+  metadata?: Record<string, unknown>;
 }
 
 export class UpdateTeamMemberDto {
@@ -391,6 +425,10 @@ export class UpsertTeamMemberSkillDto {
   @IsOptional()
   @IsString()
   notes?: string;
+
+  @IsOptional()
+  @IsObject()
+  metadata?: Record<string, unknown>;
 }
 
 export class UpdateTeamPresenceDto {
@@ -406,6 +444,10 @@ export class UpdateTeamPresenceDto {
 export class CreateTeamAttendanceEntryDto {
   @IsEnum(TeamAttendanceType)
   type!: TeamAttendanceType;
+
+  @IsOptional()
+  @IsString()
+  occurredAt?: string;
 
   @IsOptional()
   @IsString()
@@ -451,4 +493,342 @@ export class UpdateTeamMemberAccessCodeDto {
   @IsString()
   @MaxLength(180)
   barcodeValue?: string | null;
+}
+
+export class CreateTeamConfigOptionDto {
+  @IsEnum(TeamConfigOptionType)
+  type!: TeamConfigOptionType;
+
+  @IsString()
+  @MaxLength(160)
+  name!: string;
+
+  @IsOptional()
+  @IsString()
+  description?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(24)
+  color?: string | null;
+
+  @IsOptional()
+  @IsObject()
+  metadata?: Record<string, unknown> | null;
+}
+
+export class UpdateTeamConfigOptionDto {
+  @IsOptional()
+  @IsEnum(TeamConfigOptionType)
+  type?: TeamConfigOptionType;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(160)
+  name?: string;
+
+  @IsOptional()
+  @IsString()
+  description?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(24)
+  color?: string | null;
+
+  @IsOptional()
+  @IsObject()
+  metadata?: Record<string, unknown> | null;
+
+  @IsOptional()
+  @IsEnum(TeamRecordStatus)
+  status?: TeamRecordStatus;
+}
+
+
+export class ListTeamPaymentsQueryDto {
+  @IsOptional()
+  @IsUUID()
+  batchId?: string;
+
+  @IsOptional()
+  @IsUUID()
+  memberId?: string;
+
+  @IsOptional()
+  @IsUUID()
+  departmentId?: string;
+
+  @IsOptional()
+  @IsEnum(TeamPaymentStatus)
+  status?: TeamPaymentStatus;
+
+  @IsOptional()
+  @IsDateString()
+  competenceStart?: string;
+
+  @IsOptional()
+  @IsDateString()
+  competenceEnd?: string;
+
+  @IsOptional()
+  @IsString()
+  activeOnly?: string;
+}
+
+export class GenerateTeamPaymentsDto {
+  @IsDateString()
+  competenceStart!: string;
+
+  @IsDateString()
+  competenceEnd!: string;
+
+  @IsOptional()
+  @IsDateString()
+  dueDate?: string;
+
+  @IsOptional()
+  @IsArray()
+  @IsUUID('4', { each: true })
+  memberIds?: string[];
+
+  @IsOptional()
+  @IsUUID()
+  departmentId?: string;
+
+  @IsOptional()
+  @IsEnum(TeamPaymentCalculationMode)
+  calculationMode?: TeamPaymentCalculationMode;
+
+  @IsOptional()
+  @IsString()
+  notes?: string;
+
+  @IsOptional()
+  @IsObject()
+  metadata?: Record<string, unknown>;
+}
+
+export class CreateTeamPaymentDto {
+  @IsOptional()
+  @IsUUID()
+  batchId?: string | null;
+
+  @IsUUID()
+  memberId!: string;
+
+  @IsOptional()
+  @IsUUID()
+  contractId?: string | null;
+
+  @IsDateString()
+  competenceStart!: string;
+
+  @IsDateString()
+  competenceEnd!: string;
+
+  @IsOptional()
+  @IsDateString()
+  dueDate?: string | null;
+
+  @IsOptional()
+  @IsEnum(TeamPaymentStatus)
+  status?: TeamPaymentStatus;
+
+  @IsOptional()
+  @IsEnum(TeamPaymentCalculationMode)
+  calculationMode?: TeamPaymentCalculationMode;
+
+  @IsOptional()
+  @IsString()
+  baseAmount?: string;
+
+  @IsOptional()
+  @IsString()
+  workedHours?: string;
+
+  @IsOptional()
+  @IsString()
+  overtimeHours?: string;
+
+  @IsOptional()
+  @IsString()
+  workedDays?: string;
+
+  @IsOptional()
+  @IsString()
+  grossAmount?: string;
+
+  @IsOptional()
+  @IsString()
+  benefitsTotal?: string;
+
+  @IsOptional()
+  @IsString()
+  discountsTotal?: string;
+
+  @IsOptional()
+  @IsString()
+  netAmount?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(3)
+  currency?: string;
+
+  @IsOptional()
+  @IsString()
+  notes?: string | null;
+
+  @IsOptional()
+  @IsObject()
+  metadata?: Record<string, unknown>;
+}
+
+export class UpdateTeamPaymentDto {
+  @IsOptional()
+  @IsUUID()
+  contractId?: string | null;
+
+  @IsOptional()
+  @IsDateString()
+  dueDate?: string | null;
+
+  @IsOptional()
+  @IsEnum(TeamPaymentStatus)
+  status?: TeamPaymentStatus;
+
+  @IsOptional()
+  @IsEnum(TeamPaymentCalculationMode)
+  calculationMode?: TeamPaymentCalculationMode;
+
+  @IsOptional()
+  @IsString()
+  baseAmount?: string;
+
+  @IsOptional()
+  @IsString()
+  workedHours?: string;
+
+  @IsOptional()
+  @IsString()
+  overtimeHours?: string;
+
+  @IsOptional()
+  @IsString()
+  workedDays?: string;
+
+  @IsOptional()
+  @IsString()
+  grossAmount?: string;
+
+  @IsOptional()
+  @IsString()
+  benefitsTotal?: string;
+
+  @IsOptional()
+  @IsString()
+  discountsTotal?: string;
+
+  @IsOptional()
+  @IsString()
+  netAmount?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(3)
+  currency?: string;
+
+  @IsOptional()
+  @IsString()
+  notes?: string | null;
+
+  @IsOptional()
+  @IsObject()
+  metadata?: Record<string, unknown>;
+}
+
+export class CreateTeamPaymentItemDto {
+  @IsEnum(TeamPaymentItemType)
+  type!: TeamPaymentItemType;
+
+  @IsString()
+  @MaxLength(180)
+  name!: string;
+
+  @IsOptional()
+  @IsString()
+  description?: string | null;
+
+  @IsOptional()
+  @IsString()
+  amount?: string;
+
+  @IsOptional()
+  @IsString()
+  quantity?: string;
+
+  @IsOptional()
+  @IsString()
+  unitValue?: string;
+
+  @IsOptional()
+  @IsObject()
+  metadata?: Record<string, unknown>;
+}
+
+export class UpdateTeamPaymentItemDto {
+  @IsOptional()
+  @IsEnum(TeamPaymentItemType)
+  type?: TeamPaymentItemType;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(180)
+  name?: string;
+
+  @IsOptional()
+  @IsString()
+  description?: string | null;
+
+  @IsOptional()
+  @IsString()
+  amount?: string;
+
+  @IsOptional()
+  @IsString()
+  quantity?: string;
+
+  @IsOptional()
+  @IsString()
+  unitValue?: string;
+
+  @IsOptional()
+  @IsObject()
+  metadata?: Record<string, unknown>;
+}
+
+export class CreateTeamPaymentDocumentDto {
+  @IsEnum(TeamPaymentDocumentType)
+  type!: TeamPaymentDocumentType;
+
+  @IsString()
+  @MaxLength(180)
+  title!: string;
+
+  @IsOptional()
+  @IsString()
+  htmlContent?: string | null;
+
+  @IsOptional()
+  @IsString()
+  pdfFileKey?: string | null;
+
+  @IsOptional()
+  @IsString()
+  status?: string;
+
+  @IsOptional()
+  @IsObject()
+  metadata?: Record<string, unknown>;
 }

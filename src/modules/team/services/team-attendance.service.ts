@@ -91,7 +91,7 @@ export class TeamAttendanceService {
         memberId,
         type: dto.type,
         source: TeamAttendanceSource.Web,
-        occurredAt: new Date(),
+        occurredAt: dto.occurredAt ? new Date(dto.occurredAt) : new Date(),
         timezone: dto.timezone ?? member.timezone ?? null,
         note: dto.note ?? null,
         createdById: ctx.userId || null,
@@ -198,6 +198,29 @@ export class TeamAttendanceService {
       entry,
       message: this.attendanceMessage(dto.type),
     };
+  }
+
+  async deleteAttendanceEntry(ctx: RequestContext, memberId: string, entryId: string) {
+    await this.findMember(ctx, memberId);
+
+    const entry = await this.attendanceRepository.findOne({
+      where: {
+        id: entryId,
+        tenantId: ctx.tenantId,
+        workspaceId: ctx.workspaceId,
+        memberId,
+      },
+    });
+
+    if (!entry) throw new NotFoundException('Attendance entry not found');
+
+    await this.attendanceRepository.delete({
+      id: entryId,
+      tenantId: ctx.tenantId,
+      workspaceId: ctx.workspaceId,
+    });
+
+    return { deleted: true, id: entryId };
   }
 
   private ensureAttendanceAllowed(member: TeamMember) {

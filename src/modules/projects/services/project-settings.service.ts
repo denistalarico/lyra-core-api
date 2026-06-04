@@ -43,7 +43,9 @@ function normalizeBoardPreference(
 ): ProjectBoardPreference {
   return {
     foldedStageIds: Array.isArray(value?.foldedStageIds)
-      ? value.foldedStageIds.filter((id): id is string => typeof id === 'string')
+      ? value.foldedStageIds.filter(
+          (id): id is string => typeof id === 'string',
+        )
       : [],
     pinnedCardsByStage:
       value?.pinnedCardsByStage && typeof value.pinnedCardsByStage === 'object'
@@ -53,7 +55,9 @@ function normalizeBoardPreference(
               .map(([stageId, cardIds]) => [
                 stageId,
                 Array.isArray(cardIds)
-                  ? cardIds.filter((cardId): cardId is string => typeof cardId === 'string')
+                  ? cardIds.filter(
+                      (cardId): cardId is string => typeof cardId === 'string',
+                    )
                   : [],
               ]),
           )
@@ -105,7 +109,10 @@ export class ProjectSettingsService {
     return this.serializePreferences(preferences);
   }
 
-  async updatePreferences(context: RequestContext, dto: UpdateProjectPreferencesDto) {
+  async updatePreferences(
+    context: RequestContext,
+    dto: UpdateProjectPreferencesDto,
+  ) {
     const preferences = await this.findOrCreatePreferences(context);
 
     if (dto.overviewColumnOrder !== undefined) {
@@ -119,14 +126,20 @@ export class ProjectSettingsService {
     }
 
     if (dto.workspaceTaskBoard !== undefined) {
-      preferences.workspaceTaskBoard = normalizeBoardPreference(dto.workspaceTaskBoard);
+      preferences.workspaceTaskBoard = normalizeBoardPreference(
+        dto.workspaceTaskBoard,
+      );
     }
 
     if (dto.personalTaskBoard !== undefined) {
-      preferences.personalTaskBoard = normalizeBoardPreference(dto.personalTaskBoard);
+      preferences.personalTaskBoard = normalizeBoardPreference(
+        dto.personalTaskBoard,
+      );
     }
 
-    return this.serializePreferences(await this.preferencesRepository.save(preferences));
+    return this.serializePreferences(
+      await this.preferencesRepository.save(preferences),
+    );
   }
 
   private async findOrCreateSettings(context: RequestContext) {
@@ -139,16 +152,26 @@ export class ProjectSettingsService {
 
     if (existing) return existing;
 
-    return this.settingsRepository.save(
-      this.settingsRepository.create({
+    // Use upsert to handle race conditions
+    await this.settingsRepository.upsert(
+      {
         tenantId: context.tenantId,
         workspaceId: context.workspaceId,
         projectMarkers: defaultProjectMarkers,
         taskMarkers: defaultTaskMarkers,
         taskTypes: defaultTaskTypes,
         taskExecutionMode: 'hybrid',
-      }),
+      },
+      ['tenantId', 'workspaceId'],
     );
+
+    // Return the created/updated record
+    return this.settingsRepository.findOneOrFail({
+      where: {
+        tenantId: context.tenantId,
+        workspaceId: context.workspaceId,
+      },
+    });
   }
 
   private async findOrCreatePreferences(context: RequestContext) {
@@ -162,8 +185,9 @@ export class ProjectSettingsService {
 
     if (existing) return existing;
 
-    return this.preferencesRepository.save(
-      this.preferencesRepository.create({
+    // Use upsert to handle race conditions
+    await this.preferencesRepository.upsert(
+      {
         tenantId: context.tenantId,
         workspaceId: context.workspaceId,
         userId: context.userId,
@@ -171,8 +195,18 @@ export class ProjectSettingsService {
         projectBoard: emptyBoardPreference,
         workspaceTaskBoard: emptyBoardPreference,
         personalTaskBoard: emptyBoardPreference,
-      }),
+      },
+      ['tenantId', 'workspaceId', 'userId'],
     );
+
+    // Return the created/updated record
+    return this.preferencesRepository.findOneOrFail({
+      where: {
+        tenantId: context.tenantId,
+        workspaceId: context.workspaceId,
+        userId: context.userId,
+      },
+    });
   }
 
   private normalizeMarkers(markers: ProjectMarkerSetting[]) {
@@ -199,10 +233,15 @@ export class ProjectSettingsService {
       projectMarkers: settings.projectMarkers?.length
         ? settings.projectMarkers
         : defaultProjectMarkers,
-      taskMarkers: settings.taskMarkers?.length ? settings.taskMarkers : defaultTaskMarkers,
-      taskTypes: settings.taskTypes?.length ? settings.taskTypes : defaultTaskTypes,
+      taskMarkers: settings.taskMarkers?.length
+        ? settings.taskMarkers
+        : defaultTaskMarkers,
+      taskTypes: settings.taskTypes?.length
+        ? settings.taskTypes
+        : defaultTaskTypes,
       taskExecutionMode:
-        (settings.taskExecutionMode as ProjectTaskExecutionMode | undefined) ?? 'hybrid',
+        (settings.taskExecutionMode as ProjectTaskExecutionMode | undefined) ??
+        'hybrid',
     };
   }
 
@@ -212,8 +251,12 @@ export class ProjectSettingsService {
         ? preferences.overviewColumnOrder
         : [],
       projectBoard: normalizeBoardPreference(preferences.projectBoard),
-      workspaceTaskBoard: normalizeBoardPreference(preferences.workspaceTaskBoard),
-      personalTaskBoard: normalizeBoardPreference(preferences.personalTaskBoard),
+      workspaceTaskBoard: normalizeBoardPreference(
+        preferences.workspaceTaskBoard,
+      ),
+      personalTaskBoard: normalizeBoardPreference(
+        preferences.personalTaskBoard,
+      ),
     };
   }
 }

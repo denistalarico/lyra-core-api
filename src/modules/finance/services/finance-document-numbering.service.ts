@@ -81,4 +81,56 @@ export class FinanceDocumentNumberingService {
       },
     });
   }
+
+  async updateSequence(
+    ctx: FinanceRequestContext,
+    id: string,
+    dto: { prefix?: string; padding?: number; nextNumber?: number },
+  ) {
+    const sequence = await this.sequencesRepo.findOne({
+      where: { id, tenantId: ctx.tenantId, workspaceId: ctx.workspaceId },
+    });
+    if (!sequence) {
+      throw new Error('Sequence not found');
+    }
+    if (dto.prefix !== undefined)
+      sequence.prefix = dto.prefix.trim() || sequence.prefix;
+    if (dto.padding !== undefined && dto.padding > 0)
+      sequence.padding = dto.padding;
+    if (dto.nextNumber !== undefined && dto.nextNumber > 0)
+      sequence.nextNumber = dto.nextNumber;
+    return this.sequencesRepo.save(sequence);
+  }
+
+  async upsertDefaults(ctx: FinanceRequestContext) {
+    const year = new Date().getUTCFullYear();
+    const results: FinanceDocumentSequence[] = [];
+    for (const [docType, prefix] of Object.entries(
+      DEFAULT_PREFIX_BY_DOCUMENT_TYPE,
+    )) {
+      let seq = await this.sequencesRepo.findOne({
+        where: {
+          tenantId: ctx.tenantId,
+          workspaceId: ctx.workspaceId,
+          documentType: docType as FinanceDocumentType,
+          periodYear: year,
+        },
+      });
+      if (!seq) {
+        seq = await this.sequencesRepo.save(
+          this.sequencesRepo.create({
+            tenantId: ctx.tenantId,
+            workspaceId: ctx.workspaceId,
+            documentType: docType as FinanceDocumentType,
+            periodYear: year,
+            prefix,
+            nextNumber: 1,
+            padding: 6,
+          }),
+        );
+      }
+      results.push(seq);
+    }
+    return results;
+  }
 }

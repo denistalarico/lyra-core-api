@@ -26,8 +26,17 @@ export class AgencyTaskChecklistItem {
   @Column({ name: 'is_done', type: 'boolean', default: false })
   isDone!: boolean;
 
+  @Column({ type: 'varchar', length: 32, default: 'in_progress' })
+  status!: string;
+
   @Column({ type: 'int', default: 0 })
   position!: number;
+
+  @Column({ name: 'task_type_id', type: 'varchar', length: 120, nullable: true })
+  taskTypeId!: string | null;
+
+  @Column({ name: 'due_date', type: 'timestamptz', nullable: true, default: null })
+  dueDate!: Date | null;
 
   @CreateDateColumn({ name: 'created_at' })
   createdAt!: Date;
