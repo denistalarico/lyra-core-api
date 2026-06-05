@@ -186,6 +186,17 @@ import {
 } from '../modules/projects/entities';
 import { AgencyClient } from '../modules/clients/entities';
 
+import {
+  AgencyKnowledgeArticle,
+  AgencyKnowledgeArticleVersion,
+  AgencyKnowledgeCategory,
+  AgencyKnowledgeComment,
+  AgencyKnowledgeReaction,
+  AgencyKnowledgeVaultAccessLog,
+  AgencyKnowledgeVaultItem,
+  AgencyKnowledgeVaultPermission,
+} from '../modules/knowledge/entities';
+
 export const agencyEntities = [
   DocumentLayoutEntity,
   DocumentLayoutTemplateEntity,
@@ -297,6 +308,14 @@ export const agencyEntities = [
   TeamPayment,
   TeamPaymentItem,
   TeamPaymentDocument,
+  AgencyKnowledgeArticle,
+  AgencyKnowledgeArticleVersion,
+  AgencyKnowledgeCategory,
+  AgencyKnowledgeComment,
+  AgencyKnowledgeReaction,
+  AgencyKnowledgeVaultAccessLog,
+  AgencyKnowledgeVaultItem,
+  AgencyKnowledgeVaultPermission,
 ];
 
 export function getTypeOrmConfig(): TypeOrmModuleOptions {

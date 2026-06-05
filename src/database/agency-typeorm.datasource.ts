@@ -44,6 +44,9 @@ import { CreateAgencyTeamConfigOptions1760002031000 } from './migrations/1760002
 import { FixTeamConfigOptionsSeniorityUniqueIndex1760002032000 } from './migrations/1760002032000-fix-team-config-options-seniority-unique-index';
 import { CreateAgencyTeamPayments1760002030000 } from './migrations/1760002030000-create-agency-team-payments';
 import { AddBankAccountChartAccount1760002039000 } from './migrations/1760002039000-add-bank-account-chart-account';
+import { CreateAgencyKnowledgeCore1760002042000 } from './migrations/1760002042000-create-agency-knowledge-core';
+
+import { AddKnowledgeVaultNotesEncryptionFields1760002043000 } from './migrations/1760002043000-add-knowledge-vault-notes-encryption-fields';
 
 export const AgencyDataSource = new DataSource({
   type: 'postgres',
@@ -101,6 +104,8 @@ export const AgencyDataSource = new DataSource({
     AddProjectFollowersAndAttachments1760002037000,
     AddTaskTypeFields1760002040000,
     CreateAgencyClientsCore1760002041000,
+    CreateAgencyKnowledgeCore1760002042000,
+    AddKnowledgeVaultNotesEncryptionFields1760002043000,
     AddBankAccountChartAccount1760002039000,
   ],
 });
