@@ -184,6 +184,7 @@ import {
   AgencyTaskStage,
   AgencyTaskTimeEntry,
 } from '../modules/projects/entities';
+import { AgencyClient } from '../modules/clients/entities';
 
 export const agencyEntities = [
   DocumentLayoutEntity,
@@ -251,6 +252,7 @@ export const agencyEntities = [
   AgencyTaskChecklistItem,
   AgencyTaskComment,
   AgencyTaskTimeEntry,
+  AgencyClient,
   AgencyActivity,
   AgencyActivityLink,
   FinanceAccount,

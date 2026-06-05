@@ -27,6 +27,7 @@ import { AddTaskReviewApprovedStatuses1760002035000 } from './migrations/1760002
 import { AddProjectIdToTaskStages1760002036000 } from './migrations/1760002036000-add-project-id-to-task-stages';
 import { AddProjectFollowersAndAttachments1760002037000 } from './migrations/1760002037000-add-project-followers-and-attachments';
 import { AddTaskTypeFields1760002040000 } from './migrations/1760002040000-add-task-type-fields';
+import { CreateAgencyClientsCore1760002041000 } from './migrations/1760002041000-create-agency-clients-core';
 import { CreateAgencyActivitiesCore1760001016000 } from './migrations/1760001016000-create-agency-activities-core';
 import { CreateAgencyFinanceCore1760002016000 } from './migrations/1760002016000-create-agency-finance-core';
 import { CreateAgencyFinanceBillingCore1760002017000 } from './migrations/1760002017000-create-agency-finance-billing-core';
@@ -99,6 +100,7 @@ export const AgencyDataSource = new DataSource({
     AddProjectIdToTaskStages1760002036000,
     AddProjectFollowersAndAttachments1760002037000,
     AddTaskTypeFields1760002040000,
+    CreateAgencyClientsCore1760002041000,
     AddBankAccountChartAccount1760002039000,
   ],
 });

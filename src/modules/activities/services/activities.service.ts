@@ -380,10 +380,9 @@ export class ActivitiesService {
       throw new NotFoundException('Activity not found');
     }
 
-    activity.status = ActivityStatus.Archived;
-    activity.archivedAt = new Date();
+    await this.activitiesRepository.remove(activity);
 
-    return this.activitiesRepository.save(activity);
+    return { deleted: true };
   }
 
   async complete(context: RequestContext, id: string, dto: CompleteActivityDto) {

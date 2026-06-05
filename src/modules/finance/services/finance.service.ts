@@ -612,9 +612,9 @@ export class FinanceService {
       });
 
     if (query.metricKey) {
-      qb.andWhere('metric.metric_key = :metricKey', {
-        metricKey: query.metricKey,
-      });
+      // Accept both camelCase (frontend) and snake_case (DB enum) — always normalise to snake_case
+      const snakeKey = query.metricKey.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`);
+      qb.andWhere('metric.metric_key = :metricKey', { metricKey: snakeKey });
     }
 
     if (query.periodType) {

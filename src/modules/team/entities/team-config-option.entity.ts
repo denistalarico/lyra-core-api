@@ -42,7 +42,10 @@ export class TeamConfigOption {
     | 'payment_benefit_template'
     | 'payment_discount_template'
     | 'payment_document_template'
-    | 'payment_finance_setting';
+    | 'payment_finance_setting'
+    | 'client_loss_reason'
+    | 'client_onboarding_template'
+    | 'client_offboarding_template';
 
   @Column({ type: 'varchar', length: 160 })
   name!: string;

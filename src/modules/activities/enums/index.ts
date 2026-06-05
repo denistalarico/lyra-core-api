@@ -34,6 +34,7 @@ export enum ActivityEntityType {
   SalesOpportunity = 'sales_opportunity',
   SalesQuote = 'sales_quote',
   Contact = 'contact',
+  Client = 'client',
   Project = 'project',
   Task = 'task',
   CalendarEvent = 'calendar_event',
