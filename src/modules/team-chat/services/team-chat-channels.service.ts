@@ -2,7 +2,11 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { ILike, Repository } from 'typeorm';
 
-import { AgencyChatChannel, AgencyChatChannelMember } from '../entities';
+import {
+  AgencyChatChannel,
+  AgencyChatChannelMember,
+  AgencyChatMessage,
+} from '../entities';
 import {
   TeamChatChannelKind,
   TeamChatChannelStatus,
@@ -26,6 +30,8 @@ export class TeamChatChannelsService {
     private readonly channelsRepository: Repository<AgencyChatChannel>,
     @InjectRepository(AgencyChatChannelMember, AGENCY_CONNECTION)
     private readonly membersRepository: Repository<AgencyChatChannelMember>,
+    @InjectRepository(AgencyChatMessage, AGENCY_CONNECTION)
+    private readonly messagesRepository: Repository<AgencyChatMessage>,
   ) {}
 
   async getSummary(context: TeamChatContext) {
@@ -77,6 +83,79 @@ export class TeamChatChannelsService {
       },
       take: 100,
     });
+  }
+
+  async listEnriched(context: TeamChatContext, query: ListTeamChatChannelsQueryDto) {
+    const channels = await this.list(context, query);
+
+    return Promise.all(
+      channels.map(async (channel) => {
+        const [lastMessage, membersCount, unreadCount] = await Promise.all([
+          this.messagesRepository.findOne({
+            where: {
+              tenantId: context.tenantId,
+              workspaceId: context.workspaceId,
+              channelId: channel.id,
+            },
+            order: {
+              createdAt: 'DESC',
+            },
+          }),
+          this.membersRepository.count({
+            where: {
+              tenantId: context.tenantId,
+              workspaceId: context.workspaceId,
+              channelId: channel.id,
+            },
+          }),
+          this.countUnreadMessages(context, channel.id),
+        ]);
+
+        return {
+          ...channel,
+          lastMessage,
+          membersCount,
+          unreadCount,
+        };
+      }),
+    );
+  }
+
+  private async countUnreadMessages(context: TeamChatContext, channelId: string) {
+    if (!context.userId) {
+      return 0;
+    }
+
+    const membership = await this.membersRepository.findOne({
+      where: {
+        tenantId: context.tenantId,
+        workspaceId: context.workspaceId,
+        channelId,
+        userId: context.userId,
+      },
+    });
+
+    if (!membership?.lastReadAt) {
+      return this.messagesRepository.count({
+        where: {
+          tenantId: context.tenantId,
+          workspaceId: context.workspaceId,
+          channelId,
+        },
+      });
+    }
+
+    return this.messagesRepository
+      .createQueryBuilder('message')
+      .where('message.tenant_id = :tenantId', { tenantId: context.tenantId })
+      .andWhere('message.workspace_id = :workspaceId', {
+        workspaceId: context.workspaceId,
+      })
+      .andWhere('message.channel_id = :channelId', { channelId })
+      .andWhere('message.created_at > :lastReadAt', {
+        lastReadAt: membership.lastReadAt,
+      })
+      .getCount();
   }
 
   async create(context: TeamChatContext, dto: CreateTeamChatChannelDto) {

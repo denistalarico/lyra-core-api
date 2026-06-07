@@ -215,3 +215,17 @@ export class RequestTeamChatMeetingAiSummaryDto {
   @IsString()
   transcriptRef?: string;
 }
+
+export class SearchTeamChatMessagesQueryDto {
+  @IsString()
+  @IsNotEmpty()
+  q!: string;
+
+  @IsOptional()
+  @IsUUID()
+  channelId?: string;
+
+  @IsOptional()
+  @IsString()
+  limit?: string;
+}

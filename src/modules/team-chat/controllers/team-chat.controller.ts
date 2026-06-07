@@ -14,6 +14,7 @@ import {
   CreateTeamChatMessageDto,
   ListTeamChatChannelsQueryDto,
   ListTeamChatMessagesQueryDto,
+  SearchTeamChatMessagesQueryDto,
 } from '../dto';
 import { TeamChatChannelsService } from '../services/team-chat-channels.service';
 import { TeamChatMessagesService } from '../services/team-chat-messages.service';
@@ -41,6 +42,19 @@ export class TeamChatController {
   ) {
     return this.channelsService.getSummary(
       this.getContext(tenantId, workspaceId, userId),
+    );
+  }
+
+  @Get('channels/enriched')
+  listEnrichedChannels(
+    @Headers('x-tenant-id') tenantId: string,
+    @Headers('x-workspace-id') workspaceId: string,
+    @Headers('x-user-id') userId: string | undefined,
+    @Query() query: ListTeamChatChannelsQueryDto,
+  ) {
+    return this.channelsService.listEnriched(
+      this.getContext(tenantId, workspaceId, userId),
+      query,
     );
   }
 
@@ -110,6 +124,19 @@ export class TeamChatController {
     return this.messagesService.markAsRead(
       this.getContext(tenantId, workspaceId, userId),
       channelId,
+    );
+  }
+
+  @Get('search/messages')
+  searchMessages(
+    @Headers('x-tenant-id') tenantId: string,
+    @Headers('x-workspace-id') workspaceId: string,
+    @Headers('x-user-id') userId: string | undefined,
+    @Query() query: SearchTeamChatMessagesQueryDto,
+  ) {
+    return this.messagesService.search(
+      this.getContext(tenantId, workspaceId, userId),
+      query,
     );
   }
 
