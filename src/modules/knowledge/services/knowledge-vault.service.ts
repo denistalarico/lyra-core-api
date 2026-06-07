@@ -332,6 +332,14 @@ export class KnowledgeVaultService {
     }
   }
 
+  async delete(context: KnowledgeContext, id: string) {
+    const item = await this.getRaw(context, id);
+    await this.assertCanEdit(context, item.id);
+    await this.log(context, item.id, AgencyKnowledgeVaultAccessAction.UPDATED);
+    await this.vaultItemsRepository.remove(item);
+    return { deleted: true, id };
+  }
+
   private async log(
     context: KnowledgeContext,
     vaultItemId: string,

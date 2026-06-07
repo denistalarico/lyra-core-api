@@ -9,12 +9,14 @@ import {
 import { AgencyKnowledgeArticle } from '../entities';
 import { AgencyKnowledgeArticleStatus } from '../enums';
 import { parseOptionalDate, KnowledgeContext } from './knowledge-context';
+import { FilesService } from '../../../common/files/files.service';
 
 @Injectable()
 export class KnowledgeArticlesService {
   constructor(
     @InjectRepository(AgencyKnowledgeArticle, 'agency')
     private readonly articlesRepository: Repository<AgencyKnowledgeArticle>,
+    private readonly filesService: FilesService,
   ) {}
 
   list(context: KnowledgeContext, query: ListKnowledgeArticlesQueryDto) {
@@ -133,6 +135,23 @@ export class KnowledgeArticlesService {
       article.publishedAt = new Date();
     }
 
+    return this.articlesRepository.save(article);
+  }
+
+  async remove(context: KnowledgeContext, id: string) {
+    const article = await this.get(context, id);
+    await this.articlesRepository.remove(article);
+    return { deleted: true, id };
+  }
+
+  async uploadCover(context: KnowledgeContext, id: string, file: Express.Multer.File) {
+    const article = await this.get(context, id);
+    const stored = await this.filesService.uploadImageAsset({
+      file,
+      path: `tenants/${context.tenantId}/workspaces/${context.workspaceId}/knowledge/${id}/cover-${Date.now()}.webp`,
+      maxDimension: 1600,
+    });
+    article.headerJson = { ...article.headerJson, coverUrl: stored.url };
     return this.articlesRepository.save(article);
   }
 }

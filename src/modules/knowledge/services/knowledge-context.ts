@@ -3,6 +3,7 @@ export type KnowledgeContext = {
   workspaceId: string;
   userId: string;
   role?: string;
+  userName?: string;
 };
 
 export function parseOptionalDate(value?: string | null): Date | null {

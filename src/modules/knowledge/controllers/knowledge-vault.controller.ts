@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Headers,
   Param,
@@ -64,6 +65,14 @@ export class KnowledgeVaultController {
     @Body() dto: GrantKnowledgeVaultPermissionDto,
   ) {
     return this.vaultService.grantPermission(buildKnowledgeContext(headers), id, dto);
+  }
+
+  @Delete(":id")
+  delete(
+    @Headers() headers: Record<string, string | string[] | undefined>,
+    @Param("id") id: string,
+  ) {
+    return this.vaultService.delete(buildKnowledgeContext(headers), id);
   }
 
   @Post(":id/reveal")

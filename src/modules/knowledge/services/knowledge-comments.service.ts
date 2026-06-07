@@ -35,6 +35,7 @@ export class KnowledgeCommentsService {
       workspaceId: context.workspaceId,
       articleId,
       authorId: context.userId,
+      authorName: context.userName ?? null,
       body: dto.body,
     });
 

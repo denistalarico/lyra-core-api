@@ -15,6 +15,8 @@ async function bootstrap() {
       'x-tenant-id',
       'x-workspace-id',
       'x-user-id',
+      'x-user-role',
+      'x-user-name',
     ],
     credentials: false,
   });

@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { CreateKnowledgeCategoryDto, UpdateKnowledgeCategoryDto } from '../dto';
@@ -72,5 +72,37 @@ export class KnowledgeCategoriesService {
     });
 
     return this.categoriesRepository.save(category);
+  }
+
+  async delete(context: KnowledgeContext, id: string) {
+    const category = await this.categoriesRepository.findOne({
+      where: {
+        id,
+        tenantId: context.tenantId,
+        workspaceId: context.workspaceId,
+      },
+    });
+
+    if (!category) {
+      throw new NotFoundException('Knowledge category not found');
+    }
+
+    const childCount = await this.categoriesRepository.count({
+      where: {
+        parentId: id,
+        tenantId: context.tenantId,
+        workspaceId: context.workspaceId,
+      },
+    });
+
+    if (childCount > 0) {
+      throw new BadRequestException(
+        'Cannot delete a category that has subcategories. Delete or reassign them first.',
+      );
+    }
+
+    await this.categoriesRepository.remove(category);
+
+    return { deleted: true, id };
   }
 }

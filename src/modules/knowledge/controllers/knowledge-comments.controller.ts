@@ -20,6 +20,7 @@ function buildKnowledgeContext(headers: Record<string, string | string[] | undef
     workspaceId: String(headers["x-workspace-id"] ?? ""),
     userId: String(headers["x-user-id"] ?? ""),
     role: String(headers["x-user-role"] ?? ""),
+    userName: headers["x-user-name"] ? String(headers["x-user-name"]) : undefined,
   };
 }
 

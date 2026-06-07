@@ -1,10 +1,12 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { FilesModule } from '../../common/files/files.module';
 import { AgencyUserSecuritySettingsEntity } from '../agency/entities/agency-auth.entities';
 import {
   KnowledgeArticlesController,
   KnowledgeCategoriesController,
   KnowledgeCommentsController,
+  KnowledgeQuickNotesController,
   KnowledgeReactionsController,
   KnowledgeVaultController,
 } from './controllers';
@@ -14,6 +16,7 @@ import {
   AgencyKnowledgeArticleVersion,
   AgencyKnowledgeCategory,
   AgencyKnowledgeComment,
+  AgencyKnowledgeQuickNote,
   AgencyKnowledgeReaction,
   AgencyKnowledgeVaultAccessLog,
   AgencyKnowledgeVaultItem,
@@ -23,6 +26,7 @@ import {
   KnowledgeArticlesService,
   KnowledgeCategoriesService,
   KnowledgeCommentsService,
+  KnowledgeQuickNotesService,
   KnowledgeReactionsService,
   KnowledgeVaultReauthService,
   KnowledgeVaultService,
@@ -30,6 +34,7 @@ import {
 
 @Module({
   imports: [
+    FilesModule,
     TypeOrmModule.forFeature(
       [
         AgencyUserSecuritySettingsEntity,
@@ -37,6 +42,7 @@ import {
         AgencyKnowledgeArticleVersion,
         AgencyKnowledgeCategory,
         AgencyKnowledgeComment,
+        AgencyKnowledgeQuickNote,
         AgencyKnowledgeReaction,
         AgencyKnowledgeVaultAccessLog,
         AgencyKnowledgeVaultItem,
@@ -49,6 +55,7 @@ import {
     KnowledgeArticlesController,
     KnowledgeCategoriesController,
     KnowledgeCommentsController,
+    KnowledgeQuickNotesController,
     KnowledgeReactionsController,
     KnowledgeVaultController,
   ],
@@ -56,6 +63,7 @@ import {
     KnowledgeArticlesService,
     KnowledgeCategoriesService,
     KnowledgeCommentsService,
+    KnowledgeQuickNotesService,
     KnowledgeReactionsService,
     KnowledgeVaultCryptoService,
     KnowledgeVaultReauthService,
@@ -65,6 +73,7 @@ import {
     KnowledgeArticlesService,
     KnowledgeCategoriesService,
     KnowledgeCommentsService,
+    KnowledgeQuickNotesService,
     KnowledgeReactionsService,
     KnowledgeVaultService,
   ],

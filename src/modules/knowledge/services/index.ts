@@ -5,3 +5,4 @@ export * from "./knowledge-vault.service";
 export * from "./knowledge-vault-reauth.service";
 export * from "./knowledge-comments.service";
 export * from "./knowledge-reactions.service";
+export * from "./knowledge-quick-notes.service";

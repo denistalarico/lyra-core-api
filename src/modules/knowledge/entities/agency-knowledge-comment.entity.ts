@@ -26,6 +26,9 @@ export class AgencyKnowledgeComment {
   @Column({ name: "author_id", type: "uuid" })
   authorId!: string;
 
+  @Column({ name: "author_name", type: "varchar", length: 180, nullable: true })
+  authorName!: string | null;
+
   @Column({ type: "text" })
   body!: string;
 

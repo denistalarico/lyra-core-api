@@ -3,3 +3,4 @@ export * from "./knowledge-articles.controller";
 export * from "./knowledge-vault.controller";
 export * from "./knowledge-comments.controller";
 export * from "./knowledge-reactions.controller";
+export * from "./knowledge-quick-notes.controller";

@@ -6,3 +6,4 @@ export * from "./agency-knowledge-article-version.entity";
 export * from "./agency-knowledge-vault-item.entity";
 export * from "./agency-knowledge-vault-permission.entity";
 export * from "./agency-knowledge-vault-access-log.entity";
+export * from "./agency-knowledge-quick-note.entity";

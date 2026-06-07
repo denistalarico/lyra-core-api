@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Headers,
   Param,
@@ -49,5 +50,13 @@ export class KnowledgeCategoriesController {
     @Body() dto: UpdateKnowledgeCategoryDto,
   ) {
     return this.categoriesService.update(buildKnowledgeContext(headers), id, dto);
+  }
+
+  @Delete(":id")
+  delete(
+    @Headers() headers: Record<string, string | string[] | undefined>,
+    @Param("id") id: string,
+  ) {
+    return this.categoriesService.delete(buildKnowledgeContext(headers), id);
   }
 }
