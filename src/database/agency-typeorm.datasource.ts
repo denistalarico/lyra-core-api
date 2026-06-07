@@ -47,6 +47,7 @@ import { AddBankAccountChartAccount1760002039000 } from './migrations/1760002039
 import { CreateAgencyKnowledgeCore1760002042000 } from './migrations/1760002042000-create-agency-knowledge-core';
 
 import { AddKnowledgeVaultNotesEncryptionFields1760002043000 } from './migrations/1760002043000-add-knowledge-vault-notes-encryption-fields';
+import { CreateAgencyTeamChatCore1760002044000 } from './migrations/1760002044000-create-agency-team-chat-core';
 
 export const AgencyDataSource = new DataSource({
   type: 'postgres',
@@ -106,6 +107,7 @@ export const AgencyDataSource = new DataSource({
     CreateAgencyClientsCore1760002041000,
     CreateAgencyKnowledgeCore1760002042000,
     AddKnowledgeVaultNotesEncryptionFields1760002043000,
+    CreateAgencyTeamChatCore1760002044000,
     AddBankAccountChartAccount1760002039000,
   ],
 });

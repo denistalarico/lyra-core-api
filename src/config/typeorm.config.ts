@@ -198,6 +198,18 @@ import {
   AgencyKnowledgeVaultPermission,
 } from '../modules/knowledge/entities';
 
+import {
+  AgencyChatChannel,
+  AgencyChatChannelMember,
+  AgencyChatMessage,
+  AgencyChatMessageRead,
+  AgencyChatAttachment,
+  AgencyMeetingRoom,
+  AgencyMeetingParticipant,
+  AgencyMeetingEvent,
+  AgencyMeetingAiSummary,
+} from '../modules/team-chat/entities';
+
 export const agencyEntities = [
   DocumentLayoutEntity,
   DocumentLayoutTemplateEntity,
@@ -318,6 +330,15 @@ export const agencyEntities = [
   AgencyKnowledgeVaultAccessLog,
   AgencyKnowledgeVaultItem,
   AgencyKnowledgeVaultPermission,
+  AgencyChatChannel,
+  AgencyChatChannelMember,
+  AgencyChatMessage,
+  AgencyChatMessageRead,
+  AgencyChatAttachment,
+  AgencyMeetingRoom,
+  AgencyMeetingParticipant,
+  AgencyMeetingEvent,
+  AgencyMeetingAiSummary,
 ];
 
 export function getTypeOrmConfig(): TypeOrmModuleOptions {

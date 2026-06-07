@@ -30,9 +30,11 @@ import { ContractsModule } from './modules/contracts';
 import { TeamModule } from './modules/team';
 import { ClientsModule } from './modules/clients';
 import { KnowledgeModule } from './modules/knowledge';
+import { TeamChatModule } from './modules/team-chat/team-chat.module';
 
 @Module({
   imports: [
+    TeamChatModule,
     QuotesModule,
     DocumentLayoutsModule,
     ConfigModule.forRoot({
