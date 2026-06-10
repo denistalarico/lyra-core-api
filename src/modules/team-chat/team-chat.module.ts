@@ -7,6 +7,7 @@ import {
   AgencyChatChannelMember,
   AgencyChatMessage,
   AgencyChatMessageRead,
+  AgencyChatUserSettings,
   AgencyMeetingAiSummary,
   AgencyMeetingEvent,
   AgencyMeetingParticipant,
@@ -19,13 +20,16 @@ import { TeamChatMeetingsService } from './services/team-chat-meetings.service';
 import { TeamChatGateway } from './gateways/team-chat.gateway';
 import { TeamChatAttachmentsService } from './services/team-chat-attachments.service';
 import { TeamChatLiveKitProviderService } from './services/team-chat-livekit-provider.service';
+import { TeamChatUserSettingsService } from './services/team-chat-user-settings.service';
 import { TeamChatAttachmentsController } from './controllers/team-chat-attachments.controller';
 import { TeamChatMeetingsController } from './controllers/team-chat-meetings.controller';
+import { FilesModule } from '../../common/files/files.module';
 
 const AGENCY_CONNECTION = 'agency';
 
 @Module({
   imports: [
+    FilesModule,
     TypeOrmModule.forFeature(
       [
         AgencyChatChannel,
@@ -33,6 +37,7 @@ const AGENCY_CONNECTION = 'agency';
         AgencyChatMessage,
         AgencyChatMessageRead,
         AgencyChatAttachment,
+        AgencyChatUserSettings,
         AgencyMeetingRoom,
         AgencyMeetingParticipant,
         AgencyMeetingEvent,
@@ -48,6 +53,7 @@ const AGENCY_CONNECTION = 'agency';
     TeamChatMeetingsService,
     TeamChatAttachmentsService,
     TeamChatLiveKitProviderService,
+    TeamChatUserSettingsService,
     TeamChatGateway,
   ],
   exports: [
@@ -56,6 +62,7 @@ const AGENCY_CONNECTION = 'agency';
     TeamChatMeetingsService,
     TeamChatAttachmentsService,
     TeamChatLiveKitProviderService,
+    TeamChatUserSettingsService,
   ],
 })
 export class TeamChatModule {}

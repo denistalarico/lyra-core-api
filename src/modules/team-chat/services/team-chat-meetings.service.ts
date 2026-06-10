@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto';
 
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 
@@ -23,6 +23,7 @@ import {
   CreateTeamChatMeetingEventDto,
   JoinPublicTeamChatMeetingDto,
   JoinTeamChatMeetingDto,
+  PatchTeamChatMeetingDto,
   RequestTeamChatMeetingAiSummaryDto,
 } from '../dto';
 import { TeamChatLiveKitProviderService } from './team-chat-livekit-provider.service';
@@ -173,6 +174,91 @@ export class TeamChatMeetingsService {
     });
 
     return savedMeeting;
+  }
+
+  async patchMeeting(
+    context: TeamChatContext,
+    meetingId: string,
+    dto: PatchTeamChatMeetingDto,
+  ) {
+    const meeting = await this.findMeeting(context, meetingId);
+
+    if (dto.title !== undefined) {
+      const title = dto.title.trim();
+      if (!title) {
+        throw new BadRequestException('Título da reunião é obrigatório.');
+      }
+      meeting.title = title;
+    }
+
+    if (dto.description !== undefined) {
+      meeting.description = dto.description?.trim() || null;
+    }
+
+    if (dto.startsAt !== undefined) {
+      meeting.startsAt = dto.startsAt ? new Date(dto.startsAt) : null;
+      if (meeting.status === TeamChatMeetingStatus.CANCELED) {
+        meeting.status = TeamChatMeetingStatus.SCHEDULED;
+        meeting.endedAt = null;
+      }
+    }
+
+    const savedMeeting = await this.meetingsRepository.save(meeting);
+
+    await this.createEvent(context, meeting.id, {
+      type: 'meeting_updated',
+      payload: {
+        updatedById: context.userId ?? null,
+        fields: Object.keys(dto),
+      },
+    });
+
+    return savedMeeting;
+  }
+
+  async cancelMeeting(context: TeamChatContext, meetingId: string) {
+    const meeting = await this.findMeeting(context, meetingId);
+
+    meeting.status = TeamChatMeetingStatus.CANCELED;
+    meeting.endedAt = meeting.endedAt ?? new Date();
+
+    const savedMeeting = await this.meetingsRepository.save(meeting);
+
+    await this.createEvent(context, meeting.id, {
+      type: 'meeting_canceled',
+      payload: {
+        canceledById: context.userId ?? null,
+      },
+    });
+
+    return savedMeeting;
+  }
+
+  async deleteMeeting(context: TeamChatContext, meetingId: string) {
+    await this.findMeeting(context, meetingId);
+
+    await this.summariesRepository.delete({
+      tenantId: context.tenantId,
+      workspaceId: context.workspaceId,
+      meetingRoomId: meetingId,
+    });
+    await this.eventsRepository.delete({
+      tenantId: context.tenantId,
+      workspaceId: context.workspaceId,
+      meetingRoomId: meetingId,
+    });
+    await this.participantsRepository.delete({
+      tenantId: context.tenantId,
+      workspaceId: context.workspaceId,
+      meetingRoomId: meetingId,
+    });
+    await this.meetingsRepository.delete({
+      id: meetingId,
+      tenantId: context.tenantId,
+      workspaceId: context.workspaceId,
+    });
+
+    return { ok: true };
   }
 
   async listEvents(context: TeamChatContext, meetingId: string) {

@@ -1,9 +1,11 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Headers,
   Param,
+  Patch,
   Post,
 } from '@nestjs/common';
 
@@ -11,6 +13,7 @@ import {
   CreateTeamChatMeetingEventDto,
   JoinPublicTeamChatMeetingDto,
   JoinTeamChatMeetingDto,
+  PatchTeamChatMeetingDto,
   RequestTeamChatMeetingAiSummaryDto,
 } from '../dto';
 import { TeamChatMeetingsService } from '../services/team-chat-meetings.service';
@@ -46,6 +49,47 @@ export class TeamChatMeetingsController {
     @Param('meetingId') meetingId: string,
   ) {
     return this.meetingsService.endMeeting(
+      this.getContext(tenantId, workspaceId, userId),
+      meetingId,
+    );
+  }
+
+  @Patch('agency/team-chat/meetings/:meetingId')
+  patchMeeting(
+    @Headers('x-tenant-id') tenantId: string,
+    @Headers('x-workspace-id') workspaceId: string,
+    @Headers('x-user-id') userId: string | undefined,
+    @Param('meetingId') meetingId: string,
+    @Body() dto: PatchTeamChatMeetingDto,
+  ) {
+    return this.meetingsService.patchMeeting(
+      this.getContext(tenantId, workspaceId, userId),
+      meetingId,
+      dto,
+    );
+  }
+
+  @Post('agency/team-chat/meetings/:meetingId/cancel')
+  cancelMeeting(
+    @Headers('x-tenant-id') tenantId: string,
+    @Headers('x-workspace-id') workspaceId: string,
+    @Headers('x-user-id') userId: string | undefined,
+    @Param('meetingId') meetingId: string,
+  ) {
+    return this.meetingsService.cancelMeeting(
+      this.getContext(tenantId, workspaceId, userId),
+      meetingId,
+    );
+  }
+
+  @Delete('agency/team-chat/meetings/:meetingId')
+  deleteMeeting(
+    @Headers('x-tenant-id') tenantId: string,
+    @Headers('x-workspace-id') workspaceId: string,
+    @Headers('x-user-id') userId: string | undefined,
+    @Param('meetingId') meetingId: string,
+  ) {
+    return this.meetingsService.deleteMeeting(
       this.getContext(tenantId, workspaceId, userId),
       meetingId,
     );

@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { LessThan, Repository } from 'typeorm';
 
@@ -11,6 +11,8 @@ import { TeamChatMessageKind, TeamChatMessageStatus } from '../enums';
 import {
   CreateTeamChatMessageDto,
   ListTeamChatMessagesQueryDto,
+  PatchTeamChatMessageDto,
+  ReactToTeamChatMessageDto,
   SearchTeamChatMessagesQueryDto,
 } from '../dto';
 import { TeamChatChannelsService } from './team-chat-channels.service';
@@ -81,15 +83,124 @@ export class TeamChatMessagesService {
       senderUserId: context.userId ?? null,
       senderTeamMemberId: null,
       externalGuestId: null,
-      senderDisplayName: null,
+      senderDisplayName: dto.senderDisplayName ?? null,
       kind: dto.kind ?? TeamChatMessageKind.TEXT,
       status: TeamChatMessageStatus.SENT,
       body: dto.body ?? null,
-      metadata: null,
+      metadata: dto.metadata ?? null,
       deliveredAt: new Date(),
     });
 
     return this.messagesRepository.save(message);
+  }
+
+  async patch(
+    context: TeamChatContext,
+    channelId: string,
+    messageId: string,
+    dto: PatchTeamChatMessageDto,
+  ) {
+    const message = await this.getMessage(context, channelId, messageId);
+    this.assertOwnMessage(context, message);
+
+    if (dto.body !== undefined) {
+      message.body = dto.body?.trim() || null;
+      message.status = TeamChatMessageStatus.EDITED;
+      message.editedAt = new Date();
+    }
+
+    if (dto.metadata !== undefined) {
+      message.metadata = {
+        ...(message.metadata ?? {}),
+        ...dto.metadata,
+      };
+    }
+
+    return this.messagesRepository.save(message);
+  }
+
+  async remove(context: TeamChatContext, channelId: string, messageId: string) {
+    const message = await this.getMessage(context, channelId, messageId);
+    this.assertOwnMessage(context, message);
+    message.body = null;
+    message.status = TeamChatMessageStatus.DELETED;
+    message.deletedAt = new Date();
+    return this.messagesRepository.save(message);
+  }
+
+  async react(
+    context: TeamChatContext,
+    channelId: string,
+    messageId: string,
+    dto: ReactToTeamChatMessageDto,
+  ) {
+    const message = await this.getMessage(context, channelId, messageId);
+    const metadata = message.metadata ?? {};
+    const actorId = context.userId ?? 'anonymous';
+    const existingReactionUsers =
+      (metadata.reactionUsers as Record<string, string> | undefined) ?? {};
+    const reactionUsers = { ...existingReactionUsers };
+    const previousEmoji = reactionUsers[actorId];
+
+    if (previousEmoji === dto.emoji) {
+      delete reactionUsers[actorId];
+    } else {
+      reactionUsers[actorId] = dto.emoji;
+    }
+
+    const legacyReactions =
+      (metadata.reactions as Record<string, number> | undefined) ?? {};
+    const reactions = Object.values(reactionUsers).reduce<Record<string, number>>(
+      (summary, emoji) => {
+        summary[emoji] = (summary[emoji] ?? 0) + 1;
+        return summary;
+      },
+      {},
+    );
+
+    if (Object.keys(existingReactionUsers).length === 0) {
+      for (const [emoji, count] of Object.entries(legacyReactions)) {
+        if (count > 0 && reactions[emoji] === undefined) reactions[emoji] = count;
+      }
+    }
+
+    message.metadata = { ...metadata, reactions, reactionUsers };
+    return this.messagesRepository.save(message);
+  }
+
+  async pin(
+    context: TeamChatContext,
+    channelId: string,
+    messageId: string,
+    pinned: boolean,
+  ) {
+    const message = await this.getMessage(context, channelId, messageId);
+    message.metadata = { ...(message.metadata ?? {}), pinned };
+    return this.messagesRepository.save(message);
+  }
+
+  private async getMessage(
+    context: TeamChatContext,
+    channelId: string,
+    messageId: string,
+  ) {
+    await this.channelsService.assertChannel(context, channelId);
+    const message = await this.messagesRepository.findOne({
+      where: {
+        id: messageId,
+        tenantId: context.tenantId,
+        workspaceId: context.workspaceId,
+        channelId,
+      },
+    });
+    if (!message) throw new NotFoundException('Mensagem não encontrada.');
+    return message;
+  }
+
+  private assertOwnMessage(context: TeamChatContext, message: AgencyChatMessage) {
+    if (!context.userId || message.senderUserId !== context.userId) {
+      throw new ForbiddenException('Você só pode alterar suas próprias mensagens.');
+    }
   }
 
   async search(

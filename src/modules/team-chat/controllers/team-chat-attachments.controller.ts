@@ -1,14 +1,25 @@
 import {
+  BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
   Headers,
   Param,
   Post,
+  UploadedFile,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
 
 import { CreateTeamChatAttachmentDto } from '../dto';
 import { TeamChatAttachmentsService } from '../services/team-chat-attachments.service';
+
+const TEAM_CHAT_ATTACHMENT_UPLOAD_OPTIONS = {
+  storage: memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 },
+};
 
 type TeamChatContext = {
   tenantId: string;
@@ -43,6 +54,38 @@ export class TeamChatAttachmentsController {
     return this.attachmentsService.listByMessage(
       this.getContext(tenantId, workspaceId, userId),
       messageId,
+    );
+  }
+
+  @Post('messages/:messageId/attachments')
+  @UseInterceptors(FileInterceptor('file', TEAM_CHAT_ATTACHMENT_UPLOAD_OPTIONS))
+  uploadMessageAttachment(
+    @Headers('x-tenant-id') tenantId: string,
+    @Headers('x-workspace-id') workspaceId: string,
+    @Headers('x-user-id') userId: string | undefined,
+    @Param('messageId') messageId: string,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    if (!file) throw new BadRequestException('Arquivo não enviado.');
+    return this.attachmentsService.uploadForMessage(
+      this.getContext(tenantId, workspaceId, userId),
+      messageId,
+      file,
+    );
+  }
+
+  @Delete('messages/:messageId/attachments/:attachmentId')
+  deleteMessageAttachment(
+    @Headers('x-tenant-id') tenantId: string,
+    @Headers('x-workspace-id') workspaceId: string,
+    @Headers('x-user-id') userId: string | undefined,
+    @Param('messageId') messageId: string,
+    @Param('attachmentId') attachmentId: string,
+  ) {
+    return this.attachmentsService.deleteFromMessage(
+      this.getContext(tenantId, workspaceId, userId),
+      messageId,
+      attachmentId,
     );
   }
 

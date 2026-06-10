@@ -1,4 +1,5 @@
 import {
+  IsArray,
   IsBoolean,
   IsDateString,
   IsEnum,
@@ -11,6 +12,7 @@ import {
 
 import {
   TeamChatChannelKind,
+  TeamChatChannelStatus,
   TeamChatChannelVisibility,
   TeamChatMessageKind,
   TeamChatMeetingAccessMode,
@@ -46,6 +48,33 @@ export class CreateTeamChatChannelDto {
   @IsOptional()
   @IsUUID()
   relatedTaskId?: string;
+
+  @IsOptional()
+  metadata?: Record<string, unknown>;
+}
+
+export class PatchTeamChatChannelDto {
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(160)
+  name?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  description?: string | null;
+
+  @IsOptional()
+  @IsEnum(TeamChatChannelVisibility)
+  visibility?: TeamChatChannelVisibility;
+
+  @IsOptional()
+  @IsEnum(TeamChatChannelStatus)
+  status?: TeamChatChannelStatus;
+
+  @IsOptional()
+  metadata?: Record<string, unknown>;
 }
 
 export class ListTeamChatChannelsQueryDto {
@@ -70,6 +99,30 @@ export class CreateTeamChatMessageDto {
   @IsOptional()
   @IsUUID()
   parentMessageId?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(180)
+  senderDisplayName?: string;
+
+  @IsOptional()
+  metadata?: Record<string, unknown>;
+}
+
+export class PatchTeamChatMessageDto {
+  @IsOptional()
+  @IsString()
+  body?: string | null;
+
+  @IsOptional()
+  metadata?: Record<string, unknown>;
+}
+
+export class ReactToTeamChatMessageDto {
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(16)
+  emoji!: string;
 }
 
 export class ListTeamChatMessagesQueryDto {
@@ -128,6 +181,23 @@ export class CreateTeamChatMeetingDto {
   @IsOptional()
   @IsBoolean()
   aiSummaryEnabled?: boolean;
+}
+
+export class PatchTeamChatMeetingDto {
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(180)
+  title?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  description?: string | null;
+
+  @IsOptional()
+  @IsDateString()
+  startsAt?: string | null;
 }
 
 export class CreateTeamChatAttachmentDto {
@@ -228,4 +298,30 @@ export class SearchTeamChatMessagesQueryDto {
   @IsOptional()
   @IsString()
   limit?: string;
+}
+
+export class AddTeamChatChannelMembersDto {
+  @IsArray()
+  @IsUUID(undefined, { each: true })
+  userIds!: string[];
+}
+
+export class FindOrCreateDirectChannelDto {
+  @IsUUID()
+  targetUserId!: string;
+}
+
+export class SaveTeamChatUserSettingsDto {
+  data!: Record<string, unknown>;
+}
+
+export class UpdateChannelMembershipDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  notificationLevel?: string;
+
+  @IsOptional()
+  @IsDateString()
+  mutedUntil?: string | null;
 }

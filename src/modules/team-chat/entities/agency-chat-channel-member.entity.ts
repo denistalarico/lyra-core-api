@@ -53,6 +53,9 @@ export class AgencyChatChannelMember {
   })
   notificationLevel!: TeamChatNotificationLevel;
 
+  @Column({ name: 'muted_until', type: 'timestamptz', nullable: true })
+  mutedUntil!: Date | null;
+
   @Column({ name: 'last_read_message_id', type: 'uuid', nullable: true })
   lastReadMessageId!: string | null;
 

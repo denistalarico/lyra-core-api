@@ -38,6 +38,7 @@ type SendMessagePayload = {
   kind?: 'text' | 'audio' | 'attachment' | 'system' | 'meeting_event';
   body?: string;
   parentMessageId?: string;
+  senderDisplayName?: string;
 };
 
 type TypingPayload = {
@@ -130,19 +131,16 @@ export class TeamChatGateway implements OnGatewayDisconnect {
       kind: payload.kind as never,
       body: payload.body,
       parentMessageId: payload.parentMessageId,
+      senderDisplayName: payload.senderDisplayName,
     });
 
     const room = this.getChannelRoom(payload.tenantId, payload.workspaceId, payload.channelId);
 
-    this.server.to(room).emit('team-chat:message-created', {
-      channelId: payload.channelId,
-      message,
-    });
+    // Broadcast to all OTHER clients in the room (sender gets message via ACK callback)
+    client.to(room).emit('team-chat:message-created', message);
 
-    return {
-      ok: true,
-      message,
-    };
+    // Return message directly so the sender's ACK callback gets the persisted message
+    return message;
   }
 
   @SubscribeMessage('team-chat:typing-start')

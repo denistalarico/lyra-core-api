@@ -7,3 +7,4 @@ export * from './agency-meeting-room.entity';
 export * from './agency-meeting-participant.entity';
 export * from './agency-meeting-event.entity';
 export * from './agency-meeting-ai-summary.entity';
+export * from './agency-chat-user-settings.entity';
