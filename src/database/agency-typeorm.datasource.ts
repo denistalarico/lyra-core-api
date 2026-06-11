@@ -50,6 +50,7 @@ import { AddKnowledgeVaultNotesEncryptionFields1760002043000 } from './migration
 import { CreateAgencyTeamChatCore1760002044000 } from './migrations/1760002044000-create-agency-team-chat-core';
 import { CreateAgencyChatUserSettings1760002045000 } from './migrations/1760002045000-create-agency-chat-user-settings';
 import { AddTeamChatMessageActionsSupport1760002046000 } from './migrations/1760002046000-add-team-chat-message-actions-support';
+import { CreateTenantProductEntitlements1760002047000 } from './migrations/1760002047000-create-tenant-product-entitlements';
 
 export const AgencyDataSource = new DataSource({
   type: 'postgres',
@@ -112,6 +113,7 @@ export const AgencyDataSource = new DataSource({
     CreateAgencyTeamChatCore1760002044000,
     CreateAgencyChatUserSettings1760002045000,
     AddTeamChatMessageActionsSupport1760002046000,
+    CreateTenantProductEntitlements1760002047000,
     AddBankAccountChartAccount1760002039000,
   ],
 });

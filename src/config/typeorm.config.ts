@@ -209,6 +209,7 @@ import {
   AgencyMeetingEvent,
   AgencyMeetingAiSummary,
 } from '../modules/team-chat/entities';
+import { TenantProductEntitlementEntity } from '../modules/platform';
 
 export const agencyEntities = [
   DocumentLayoutEntity,
@@ -339,6 +340,7 @@ export const agencyEntities = [
   AgencyMeetingParticipant,
   AgencyMeetingEvent,
   AgencyMeetingAiSummary,
+  TenantProductEntitlementEntity,
 ];
 
 export function getTypeOrmConfig(): TypeOrmModuleOptions {
