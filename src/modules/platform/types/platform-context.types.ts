@@ -1,4 +1,9 @@
 import {
+  PlatformAccountStatus,
+  PlatformAccountType,
+  PlatformOnboardingMode,
+} from '../enums/platform-account.enums';
+import {
   PlatformProductKey,
   ProductEntitlementSource,
 } from '../enums/platform-product.enums';
@@ -27,7 +32,10 @@ export type PlatformContextResponse = {
   account: {
     tenantId: string;
     workspaceId: string;
-    type: 'unknown';
+    type: PlatformAccountType | 'unknown';
+    status: PlatformAccountStatus | 'unknown';
+    displayName: string | null;
+    onboardingMode: PlatformOnboardingMode | null;
   };
   user: {
     id: string;

@@ -6,6 +6,7 @@ import {
   isPlatformProductKey,
   PLATFORM_PRODUCT_KEYS,
 } from './catalog/platform-products.catalog';
+import { PlatformAccountEntity } from './entities/platform-account.entity';
 import { TenantProductEntitlementEntity } from './entities/tenant-product-entitlement.entity';
 import {
   PlatformProductKey,
@@ -32,16 +33,23 @@ export class PlatformContextService {
   constructor(
     @InjectRepository(TenantProductEntitlementEntity, AGENCY_CONNECTION)
     private readonly entitlementsRepository: Repository<TenantProductEntitlementEntity>,
+    @InjectRepository(PlatformAccountEntity, AGENCY_CONNECTION)
+    private readonly platformAccountsRepository: Repository<PlatformAccountEntity>,
     private readonly configService: ConfigService,
   ) {}
 
   async getContext(
     input: PlatformContextInput,
   ): Promise<PlatformContextResponse> {
-    const entitlements = await this.entitlementsRepository.find({
-      where: { tenantId: input.tenantId },
-      order: { productKey: 'ASC' },
-    });
+    const [entitlements, account] = await Promise.all([
+      this.entitlementsRepository.find({
+        where: { tenantId: input.tenantId },
+        order: { productKey: 'ASC' },
+      }),
+      this.platformAccountsRepository.findOne({
+        where: { tenantId: input.tenantId },
+      }),
+    ]);
 
     const products =
       entitlements.length === 0
@@ -52,7 +60,10 @@ export class PlatformContextService {
       account: {
         tenantId: input.tenantId,
         workspaceId: input.workspaceId,
-        type: 'unknown',
+        type: account?.accountType ?? 'unknown',
+        status: account?.status ?? 'unknown',
+        displayName: account?.displayName ?? null,
+        onboardingMode: account?.onboardingMode ?? null,
       },
       user: {
         id: input.userId,

@@ -51,6 +51,7 @@ import { CreateAgencyTeamChatCore1760002044000 } from './migrations/176000204400
 import { CreateAgencyChatUserSettings1760002045000 } from './migrations/1760002045000-create-agency-chat-user-settings';
 import { AddTeamChatMessageActionsSupport1760002046000 } from './migrations/1760002046000-add-team-chat-message-actions-support';
 import { CreateTenantProductEntitlements1760002047000 } from './migrations/1760002047000-create-tenant-product-entitlements';
+import { CreatePlatformAccounts1760002048000 } from './migrations/1760002048000-create-platform-accounts';
 
 export const AgencyDataSource = new DataSource({
   type: 'postgres',
@@ -114,6 +115,7 @@ export const AgencyDataSource = new DataSource({
     CreateAgencyChatUserSettings1760002045000,
     AddTeamChatMessageActionsSupport1760002046000,
     CreateTenantProductEntitlements1760002047000,
+    CreatePlatformAccounts1760002048000,
     AddBankAccountChartAccount1760002039000,
   ],
 });

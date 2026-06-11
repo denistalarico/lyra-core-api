@@ -1,7 +1,13 @@
 import { ConfigService } from '@nestjs/config';
-import { PlatformProductKey } from './enums/platform-product.enums';
 import { PlatformContextService } from './platform-context.service';
+import type { PlatformAccountEntity } from './entities/platform-account.entity';
 import type { TenantProductEntitlementEntity } from './entities/tenant-product-entitlement.entity';
+import {
+  PlatformAccountStatus,
+  PlatformAccountType,
+  PlatformOnboardingMode,
+} from './enums/platform-account.enums';
+import { PlatformProductKey } from './enums/platform-product.enums';
 import {
   ProductEntitlementSource,
   ProductEntitlementStatus,
@@ -11,12 +17,20 @@ type EntitlementRepositoryMock = {
   find: jest.Mock<Promise<TenantProductEntitlementEntity[]>, [unknown]>;
 };
 
+type PlatformAccountRepositoryMock = {
+  findOne: jest.Mock<Promise<PlatformAccountEntity | null>, [unknown]>;
+};
+
 function createService(options?: {
+  account?: PlatformAccountEntity | null;
   fallbackProduct?: string;
   entitlements?: TenantProductEntitlementEntity[];
 }) {
-  const repository: EntitlementRepositoryMock = {
+  const entitlementsRepository: EntitlementRepositoryMock = {
     find: jest.fn().mockResolvedValue(options?.entitlements ?? []),
+  };
+  const platformAccountsRepository: PlatformAccountRepositoryMock = {
+    findOne: jest.fn().mockResolvedValue(options?.account ?? null),
   };
   const configService = {
     get: jest.fn((key: string) =>
@@ -27,8 +41,13 @@ function createService(options?: {
   } as Pick<ConfigService, 'get'> as ConfigService;
 
   return {
-    service: new PlatformContextService(repository as never, configService),
-    repository,
+    service: new PlatformContextService(
+      entitlementsRepository as never,
+      platformAccountsRepository as never,
+      configService,
+    ),
+    entitlementsRepository,
+    platformAccountsRepository,
   };
 }
 
@@ -47,6 +66,24 @@ function makeEntitlement(
     startsAt: null,
     endsAt: null,
     trialEndsAt: null,
+    settings: {},
+    createdAt: new Date('2026-01-01T00:00:00.000Z'),
+    updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+    ...overrides,
+  };
+}
+
+function makeAccount(
+  accountType: PlatformAccountType,
+  overrides: Partial<PlatformAccountEntity> = {},
+): PlatformAccountEntity {
+  return {
+    id: `${accountType}-account`,
+    tenantId: 'tenant-1',
+    accountType,
+    status: PlatformAccountStatus.Active,
+    displayName: null,
+    onboardingMode: null,
     settings: {},
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
     updatedAt: new Date('2026-01-01T00:00:00.000Z'),
@@ -77,6 +114,78 @@ function findProduct(
 }
 
 describe('PlatformContextService', () => {
+  it('returns Agency account when a persisted account exists', async () => {
+    const { service } = createService({
+      account: makeAccount(PlatformAccountType.Agency, {
+        displayName: 'Lyra Agency Demo',
+        onboardingMode: PlatformOnboardingMode.Agency,
+      }),
+    });
+
+    const response = await service.getContext(contextInput);
+
+    expect(response.account).toEqual({
+      tenantId: 'tenant-1',
+      workspaceId: 'workspace-1',
+      type: 'agency',
+      status: 'active',
+      displayName: 'Lyra Agency Demo',
+      onboardingMode: 'agency',
+    });
+  });
+
+  it('returns Business account when a persisted account exists', async () => {
+    const { service } = createService({
+      account: makeAccount(PlatformAccountType.Business, {
+        status: PlatformAccountStatus.Suspended,
+        onboardingMode: PlatformOnboardingMode.OwnBusiness,
+      }),
+    });
+
+    const response = await service.getContext(contextInput);
+
+    expect(response.account).toMatchObject({
+      type: 'business',
+      status: 'suspended',
+      displayName: null,
+      onboardingMode: 'own_business',
+    });
+  });
+
+  it('returns unknown account fields when no persisted account exists', async () => {
+    const { service } = createService();
+
+    const response = await service.getContext(contextInput);
+
+    expect(response.account).toEqual({
+      tenantId: 'tenant-1',
+      workspaceId: 'workspace-1',
+      type: 'unknown',
+      status: 'unknown',
+      displayName: null,
+      onboardingMode: null,
+    });
+  });
+
+  it('does not infer account type from an Agency entitlement', async () => {
+    const { service } = createService({
+      entitlements: [
+        makeEntitlement(
+          PlatformProductKey.Agency,
+          ProductEntitlementStatus.Active,
+        ),
+      ],
+    });
+
+    const response = await service.getContext(contextInput);
+
+    expect(response.account.type).toBe('unknown');
+    expect(response.account.status).toBe('unknown');
+    expect(
+      findProduct(response.products, PlatformProductKey.Agency).access,
+    ).toBe('available');
+  });
+
   it('returns Agency available when tenant has no rows and fallback is agency', async () => {
     const { service } = createService({ fallbackProduct: 'agency' });
 
