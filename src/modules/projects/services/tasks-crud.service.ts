@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Brackets, Repository } from 'typeorm';
-import { AgencyTask, AgencyProjectEvent } from '../entities';
+import { AgencyProject, AgencyTask, AgencyProjectEvent } from '../entities';
 import { TaskStatus, TaskVisibility } from '../enums';
 import {
   CreateTaskDto,
@@ -9,6 +9,7 @@ import {
   UpdateTaskDto,
 } from '../dto';
 import { FilesService } from '../../../common/files/files.service';
+import { TaskNotificationPublisher } from './task-notification.publisher';
 
 type RequestContext = {
   tenantId: string;
@@ -25,7 +26,11 @@ export class TasksCrudService {
     @InjectRepository(AgencyProjectEvent, 'agency')
     private readonly eventsRepository: Repository<AgencyProjectEvent>,
 
+    @InjectRepository(AgencyProject, 'agency')
+    private readonly projectsRepository: Repository<AgencyProject>,
+
     private readonly filesService: FilesService,
+    private readonly taskNotificationPublisher: TaskNotificationPublisher,
   ) {}
 
   private recordProjectEvent(context: RequestContext, projectId: string, body: string) {
@@ -134,6 +139,14 @@ export class TasksCrudService {
     if (dto.projectId) {
       void this.recordProjectEvent(context, dto.projectId, `Tarefa criada: "${dto.title}"`);
     }
+
+    if (saved.assigneeId) {
+      await this.taskNotificationPublisher.publishAssigned({
+        task: saved,
+        actorUserId: context.userId,
+      });
+    }
+
     return saved;
   }
 
@@ -169,6 +182,9 @@ export class TasksCrudService {
 
   async update(context: RequestContext, id: string, dto: UpdateTaskDto) {
     const task = await this.findOne(context, id);
+    const previousAssigneeId = task.assigneeId;
+    const previousStatus = task.status;
+    const previousBlocked = this.isTaskBlocked(task);
 
     if (dto.title !== undefined) task.title = dto.title;
     if (dto.description !== undefined) task.description = dto.description;
@@ -196,8 +212,6 @@ export class TasksCrudService {
       task.dueDate = dto.dueDate ? new Date(dto.dueDate) : null;
     }
 
-    const prevStatus = task.status;
-
     if (dto.status !== undefined) {
       task.status = dto.status;
 
@@ -212,13 +226,19 @@ export class TasksCrudService {
 
     const saved = await this.tasksRepository.save(task);
 
-    if (task.projectId && dto.status !== undefined && dto.status !== prevStatus) {
+    if (task.projectId && dto.status !== undefined && dto.status !== previousStatus) {
       void this.recordProjectEvent(
         context,
         task.projectId,
         `Tarefa "${task.title}": status alterado para "${dto.status}"`,
       );
     }
+
+    await this.publishUpdateNotifications(context, saved, {
+      previousAssigneeId,
+      previousBlocked,
+      previousStatus,
+    });
 
     return saved;
   }
@@ -290,5 +310,93 @@ export class TasksCrudService {
     if (query.visibility) {
       qb.andWhere('task.visibility = :visibility', { visibility: query.visibility });
     }
+  }
+
+  private async publishUpdateNotifications(
+    context: RequestContext,
+    task: AgencyTask,
+    previous: {
+      previousAssigneeId: string | null;
+      previousBlocked: boolean;
+      previousStatus: TaskStatus;
+    },
+  ) {
+    if (previous.previousAssigneeId !== task.assigneeId && task.assigneeId) {
+      if (previous.previousAssigneeId) {
+        await this.taskNotificationPublisher.publishReassigned({
+          task,
+          actorUserId: context.userId,
+          previousAssigneeId: previous.previousAssigneeId,
+        });
+      } else {
+        await this.taskNotificationPublisher.publishAssigned({
+          task,
+          actorUserId: context.userId,
+        });
+      }
+    }
+
+    if (
+      previous.previousStatus !== TaskStatus.Done &&
+      task.status === TaskStatus.Done
+    ) {
+      await this.taskNotificationPublisher.publishCompleted({
+        task,
+        actorUserId: context.userId,
+      });
+    }
+
+    if (
+      previous.previousStatus === TaskStatus.Done &&
+      task.status !== TaskStatus.Done &&
+      task.status !== TaskStatus.Archived &&
+      task.status !== TaskStatus.Cancelled
+    ) {
+      await this.taskNotificationPublisher.publishReopened({
+        task,
+        actorUserId: context.userId,
+      });
+    }
+
+    const currentBlocked = this.isTaskBlocked(task);
+
+    if (previous.previousBlocked !== currentBlocked) {
+      const projectOwnerId = await this.findProjectOwnerId(task);
+
+      if (currentBlocked) {
+        await this.taskNotificationPublisher.publishBlocked({
+          task,
+          actorUserId: context.userId,
+          projectOwnerId,
+        });
+      } else {
+        await this.taskNotificationPublisher.publishUnblocked({
+          task,
+          actorUserId: context.userId,
+          projectOwnerId,
+        });
+      }
+    }
+  }
+
+  private isTaskBlocked(task: AgencyTask) {
+    return task.isBlocked || task.status === TaskStatus.Blocked;
+  }
+
+  private async findProjectOwnerId(task: AgencyTask) {
+    if (!task.projectId) {
+      return null;
+    }
+
+    const project = await this.projectsRepository.findOne({
+      where: {
+        id: task.projectId,
+        tenantId: task.tenantId,
+        workspaceId: task.workspaceId,
+      },
+      select: ['id', 'ownerId'],
+    });
+
+    return project?.ownerId ?? null;
   }
 }

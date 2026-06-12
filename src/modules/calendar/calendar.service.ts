@@ -13,6 +13,7 @@ import { CreateCalendarRoutineBlockDto } from './dto/create-calendar-routine-blo
 import { UpdateCalendarRoutineBlockDto } from './dto/update-calendar-routine-block.dto';
 import { CalendarSettings } from './entities/calendar-settings.entity';
 import { UpdateCalendarSettingsDto } from './dto/update-calendar-settings.dto';
+import { CalendarNotificationPublisher } from './calendar-notification.publisher';
 
 type CalendarContext = {
   tenantId: string;
@@ -31,6 +32,7 @@ export class CalendarService {
     private readonly routineBlocksRepository: Repository<CalendarRoutineBlock>,
     @InjectRepository(CalendarSettings, AGENCY_CONNECTION)
     private readonly settingsRepository: Repository<CalendarSettings>,
+    private readonly calendarNotificationPublisher: CalendarNotificationPublisher,
   ) {}
 
   async listEvents(
@@ -89,6 +91,7 @@ export class CalendarService {
     dto: UpdateCalendarEventDto,
   ) {
     const event = await this.findEventOrFail(context, eventId);
+    const previous = this.snapshotEvent(event);
 
     const startsAt = dto.startsAt ? new Date(dto.startsAt) : event.startsAt;
     const endsAt = dto.endsAt ? new Date(dto.endsAt) : event.endsAt;
@@ -113,12 +116,25 @@ export class CalendarService {
       dto.salesOpportunityId ?? event.salesOpportunityId;
     event.metadata = dto.metadata ?? event.metadata;
 
-    return this.eventsRepository.save(event);
+    const saved = await this.eventsRepository.save(event);
+
+    await this.publishCalendarUpdateNotifications(context, saved, previous);
+
+    return saved;
   }
 
   async removeEvent(context: CalendarContext, eventId: string) {
     const event = await this.findEventOrFail(context, eventId);
+    const previous = this.snapshotEvent(event);
     await this.eventsRepository.softRemove(event);
+
+    // Soft removal is surfaced as a calendar cancellation notification.
+    await this.publishCalendarCanceledNotification(
+      context,
+      event,
+      previous.ownerUserId,
+    );
+
     return { success: true };
   }
 
@@ -387,4 +403,134 @@ export class CalendarService {
   private normalizeTime(value: string) {
     return value.length === 5 ? `${value}:00` : value;
   }
+
+  private async publishCalendarUpdateNotifications(
+    context: CalendarContext,
+    event: CalendarEvent,
+    previous: CalendarEventSnapshot,
+  ) {
+    /*
+     * invitation_received must wait for persisted attendees with userId.
+     * ownerUserId is the responsible organizer, not an invited participant.
+     */
+
+    if (
+      previous.status !== 'canceled' &&
+      event.status === 'canceled'
+    ) {
+      await this.publishCalendarCanceledNotification(
+        context,
+        event,
+        previous.ownerUserId,
+      );
+      return;
+    }
+
+    if (this.wasEventRescheduled(event, previous)) {
+      if (!event.ownerUserId) {
+        return;
+      }
+
+      await this.calendarNotificationPublisher.publishEventRescheduled({
+        event,
+        actorUserId: context.userId,
+        recipientUserIds: [event.ownerUserId],
+      });
+      return;
+    }
+
+    if (this.wasEventUpdated(event, previous)) {
+      if (!event.ownerUserId) {
+        return;
+      }
+
+      await this.calendarNotificationPublisher.publishEventUpdated({
+        event,
+        actorUserId: context.userId,
+        recipientUserIds: [event.ownerUserId],
+      });
+    }
+  }
+
+  private async publishCalendarCanceledNotification(
+    context: CalendarContext,
+    event: CalendarEvent,
+    ownerUserId?: string | null,
+  ) {
+    if (!ownerUserId) {
+      return;
+    }
+
+    await this.calendarNotificationPublisher.publishEventCanceled({
+      event,
+      actorUserId: context.userId,
+      recipientUserIds: [ownerUserId],
+    });
+  }
+
+  private snapshotEvent(event: CalendarEvent): CalendarEventSnapshot {
+    return {
+      title: event.title,
+      description: event.description,
+      eventType: event.eventType,
+      status: event.status,
+      visibility: event.visibility,
+      startsAt: event.startsAt,
+      endsAt: event.endsAt,
+      allDay: event.allDay,
+      ownerUserId: event.ownerUserId,
+      clientId: event.clientId,
+      projectId: event.projectId,
+      taskId: event.taskId,
+      salesOpportunityId: event.salesOpportunityId,
+      metadata: event.metadata,
+    };
+  }
+
+  private wasEventRescheduled(
+    event: CalendarEvent,
+    previous: CalendarEventSnapshot,
+  ) {
+    return (
+      previous.startsAt.getTime() !== event.startsAt.getTime() ||
+      previous.endsAt.getTime() !== event.endsAt.getTime()
+    );
+  }
+
+  private wasEventUpdated(
+    event: CalendarEvent,
+    previous: CalendarEventSnapshot,
+  ) {
+    return (
+      previous.title !== event.title ||
+      previous.description !== event.description ||
+      previous.eventType !== event.eventType ||
+      previous.visibility !== event.visibility ||
+      previous.allDay !== event.allDay ||
+      previous.clientId !== event.clientId ||
+      previous.projectId !== event.projectId ||
+      previous.taskId !== event.taskId ||
+      previous.salesOpportunityId !== event.salesOpportunityId ||
+      JSON.stringify(previous.metadata ?? {}) !==
+        JSON.stringify(event.metadata ?? {})
+    );
+  }
 }
+
+type CalendarEventSnapshot = Pick<
+  CalendarEvent,
+  | 'title'
+  | 'description'
+  | 'eventType'
+  | 'status'
+  | 'visibility'
+  | 'startsAt'
+  | 'endsAt'
+  | 'allDay'
+  | 'ownerUserId'
+  | 'clientId'
+  | 'projectId'
+  | 'taskId'
+  | 'salesOpportunityId'
+  | 'metadata'
+>;

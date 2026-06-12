@@ -1,0 +1,307 @@
+import { Repository } from 'typeorm';
+import { FilesService } from '../../../common/files/files.service';
+import { NotificationEventProcessorService } from '../../notifications/services';
+import { AgencyProject, AgencyProjectEvent, AgencyTask } from '../entities';
+import { TaskPriority, TaskStatus, TaskVisibility } from '../enums';
+import { TaskNotificationPublisher } from './task-notification.publisher';
+import { TasksCrudService } from './tasks-crud.service';
+
+describe('TasksCrudService notification triggers', () => {
+  it('publishes assigned once when creating with an assignee different from the actor', async () => {
+    const { service, publisher } = makeService();
+
+    await service.createWorkspaceTask(makeContext(), {
+      title: 'Preparar proposta',
+      priority: TaskPriority.Medium,
+      assigneeId: 'user-assignee',
+    });
+
+    expect(publisher.publishAssigned).toHaveBeenCalledTimes(1);
+    expect(publisher.publishAssigned).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actorUserId: 'user-actor',
+        task: expect.objectContaining({ assigneeId: 'user-assignee' }),
+      }),
+    );
+  });
+
+  it('does not publish assigned when creating without an assignee', async () => {
+    const { service, publisher } = makeService();
+
+    await service.createWorkspaceTask(makeContext(), {
+      title: 'Preparar proposta',
+      priority: TaskPriority.Medium,
+    });
+
+    expect(publisher.publishAssigned).not.toHaveBeenCalled();
+    expect(publisher.publishReassigned).not.toHaveBeenCalled();
+  });
+
+  it('publishes assigned when assignee changes from null to user', async () => {
+    const task = makeTask({ assigneeId: null });
+    const { service, publisher } = makeService({ task });
+
+    await service.update(makeContext(), task.id, {
+      assigneeId: 'user-assignee',
+    });
+
+    expect(publisher.publishAssigned).toHaveBeenCalledTimes(1);
+    expect(publisher.publishAssigned).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({ assigneeId: 'user-assignee' }),
+      }),
+    );
+    expect(publisher.publishReassigned).not.toHaveBeenCalled();
+  });
+
+  it('publishes reassigned when assignee changes from one user to another', async () => {
+    const task = makeTask({ assigneeId: 'user-old' });
+    const { service, publisher } = makeService({ task });
+
+    await service.update(makeContext(), task.id, {
+      assigneeId: 'user-new',
+    });
+
+    expect(publisher.publishAssigned).not.toHaveBeenCalled();
+    expect(publisher.publishReassigned).toHaveBeenCalledTimes(1);
+    expect(publisher.publishReassigned).toHaveBeenCalledWith(
+      expect.objectContaining({
+        previousAssigneeId: 'user-old',
+        task: expect.objectContaining({ assigneeId: 'user-new' }),
+      }),
+    );
+  });
+
+  it('does not publish assignment notifications when assignee changes to null', async () => {
+    const task = makeTask({ assigneeId: 'user-old' });
+    const { service, publisher } = makeService({ task });
+
+    await service.update(makeContext(), task.id, {
+      assigneeId: null,
+    });
+
+    expect(publisher.publishAssigned).not.toHaveBeenCalled();
+    expect(publisher.publishReassigned).not.toHaveBeenCalled();
+  });
+
+  it('does not publish assignment notifications when assignee did not change', async () => {
+    const task = makeTask({ assigneeId: 'user-assignee' });
+    const { service, publisher } = makeService({ task });
+
+    await service.update(makeContext(), task.id, {
+      title: 'Preparar proposta revisada',
+    });
+
+    expect(publisher.publishAssigned).not.toHaveBeenCalled();
+    expect(publisher.publishReassigned).not.toHaveBeenCalled();
+  });
+
+  it('publishes completed when transitioning to done', async () => {
+    const task = makeTask({ status: TaskStatus.InProgress });
+    const { service, publisher } = makeService({ task });
+
+    await service.update(makeContext(), task.id, {
+      status: TaskStatus.Done,
+    });
+
+    expect(publisher.publishCompleted).toHaveBeenCalledTimes(1);
+    expect(publisher.publishCompleted).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({ status: TaskStatus.Done }),
+      }),
+    );
+  });
+
+  it('does not republish completed when an already done task is saved again', async () => {
+    const task = makeTask({
+      status: TaskStatus.Done,
+      completedAt: new Date('2026-06-12T11:00:00.000Z'),
+    });
+    const { service, publisher } = makeService({ task });
+
+    await service.update(makeContext(), task.id, {
+      title: 'Preparar proposta final',
+    });
+
+    expect(publisher.publishCompleted).not.toHaveBeenCalled();
+  });
+
+  it('publishes reopened when transitioning from done to an open status', async () => {
+    const task = makeTask({
+      status: TaskStatus.Done,
+      completedAt: new Date('2026-06-12T11:00:00.000Z'),
+      assigneeId: 'user-assignee',
+    });
+    const { service, publisher } = makeService({ task });
+
+    await service.update(makeContext(), task.id, {
+      status: TaskStatus.InProgress,
+    });
+
+    expect(publisher.publishReopened).toHaveBeenCalledTimes(1);
+    expect(publisher.publishReopened).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({ status: TaskStatus.InProgress }),
+      }),
+    );
+  });
+
+  it('publishes blocked when moving from unblocked to blocked', async () => {
+    const task = makeTask({ isBlocked: false });
+    const { service, publisher } = makeService({ task });
+
+    await service.update(makeContext(), task.id, {
+      isBlocked: true,
+    });
+
+    expect(publisher.publishBlocked).toHaveBeenCalledTimes(1);
+    expect(publisher.publishBlocked).toHaveBeenCalledWith(
+      expect.objectContaining({
+        projectOwnerId: 'user-project-owner',
+        task: expect.objectContaining({ isBlocked: true }),
+      }),
+    );
+  });
+
+  it('publishes unblocked when moving from blocked to unblocked', async () => {
+    const task = makeTask({ isBlocked: true });
+    const { service, publisher } = makeService({ task });
+
+    await service.update(makeContext(), task.id, {
+      isBlocked: false,
+    });
+
+    expect(publisher.publishUnblocked).toHaveBeenCalledTimes(1);
+    expect(publisher.publishUnblocked).toHaveBeenCalledWith(
+      expect.objectContaining({
+        projectOwnerId: 'user-project-owner',
+        task: expect.objectContaining({ isBlocked: false }),
+      }),
+    );
+  });
+
+  it('keeps the create operation successful when the real publisher catches processor failures', async () => {
+    const processor = {
+      process: jest.fn().mockRejectedValue(new Error('processor failed')),
+    } as unknown as jest.Mocked<NotificationEventProcessorService>;
+    const realPublisher = new TaskNotificationPublisher(processor);
+    const loggerSpy = jest
+      .spyOn((realPublisher as any).logger, 'error')
+      .mockImplementation(() => undefined);
+    const { service, tasksRepository } = makeService({
+      publisher: realPublisher as jest.Mocked<TaskNotificationPublisher>,
+    });
+
+    const result = await service.createWorkspaceTask(makeContext(), {
+      title: 'Preparar proposta',
+      priority: TaskPriority.Medium,
+      assigneeId: 'user-assignee',
+    });
+
+    expect(result).toEqual(expect.objectContaining({ id: 'task-1' }));
+    expect(tasksRepository.save).toHaveBeenCalledTimes(1);
+    expect(processor.process).toHaveBeenCalledTimes(1);
+    loggerSpy.mockRestore();
+  });
+});
+
+function makeService(options: {
+  task?: AgencyTask;
+  publisher?: jest.Mocked<TaskNotificationPublisher>;
+} = {}) {
+  const savedTask = options.task ?? makeTask();
+  const tasksRepository = {
+    create: jest.fn((value: Partial<AgencyTask>) =>
+      makeTask({
+        ...value,
+        assigneeId: value.assigneeId ?? null,
+        projectId: value.projectId ?? null,
+        status: value.status ?? TaskStatus.InProgress,
+        isBlocked: value.isBlocked ?? false,
+        updatedAt: new Date('2026-06-12T12:00:00.000Z'),
+      }),
+    ),
+    findOne: jest.fn().mockResolvedValue(savedTask),
+    save: jest.fn(async (item: AgencyTask) => item),
+  };
+  const eventsRepository = {
+    create: jest.fn((value: Partial<AgencyProjectEvent>) => value),
+    save: jest.fn(async (item: AgencyProjectEvent) => item),
+  };
+  const projectsRepository = {
+    findOne: jest.fn().mockResolvedValue({
+      id: 'project-1',
+      ownerId: 'user-project-owner',
+    }),
+  };
+  const publisher = options.publisher ?? makeTaskPublisher();
+  const service = new TasksCrudService(
+    tasksRepository as unknown as Repository<AgencyTask>,
+    eventsRepository as unknown as Repository<AgencyProjectEvent>,
+    projectsRepository as unknown as Repository<AgencyProject>,
+    {} as FilesService,
+    publisher,
+  );
+
+  return {
+    service,
+    tasksRepository,
+    publisher,
+  };
+}
+
+function makeTaskPublisher() {
+  return {
+    publishAssigned: jest.fn(),
+    publishReassigned: jest.fn(),
+    publishCompleted: jest.fn(),
+    publishReopened: jest.fn(),
+    publishBlocked: jest.fn(),
+    publishUnblocked: jest.fn(),
+  } as unknown as jest.Mocked<TaskNotificationPublisher>;
+}
+
+function makeContext() {
+  return {
+    tenantId: 'tenant-1',
+    workspaceId: 'workspace-1',
+    userId: 'user-actor',
+  };
+}
+
+function makeTask(overrides: Partial<AgencyTask> = {}): AgencyTask {
+  const now = new Date('2026-06-12T12:00:00.000Z');
+
+  return {
+    id: 'task-1',
+    tenantId: 'tenant-1',
+    workspaceId: 'workspace-1',
+    projectId: 'project-1',
+    clientId: null,
+    stageId: null,
+    personalStageId: null,
+    assigneeId: null,
+    createdById: 'user-owner',
+    title: 'Preparar proposta',
+    description: null,
+    status: TaskStatus.InProgress,
+    priority: TaskPriority.Medium,
+    taskTypeId: null,
+    visibility: TaskVisibility.Workspace,
+    startDate: null,
+    dueDate: null,
+    completedAt: null,
+    estimatedMinutes: null,
+    trackedMinutes: 0,
+    isBlocked: false,
+    blockedReason: null,
+    color: null,
+    coverImageUrl: null,
+    coverImageAssetKey: null,
+    markerIds: [],
+    archivedAt: null,
+    createdAt: now,
+    updatedAt: now,
+    ...overrides,
+  };
+}

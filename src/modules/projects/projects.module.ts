@@ -39,6 +39,8 @@ import { ProjectSeedsService } from './services/project-seeds.service';
 import { ProjectSettingsService } from './services/project-settings.service';
 import { ProjectEventsService } from './services/project-events.service';
 import { FilesModule } from '../../common/files/files.module';
+import { NotificationsModule } from '../notifications';
+import { TaskNotificationPublisher } from './services/task-notification.publisher';
 
 const AGENCY_CONNECTION = 'agency';
 
@@ -64,6 +66,7 @@ const AGENCY_CONNECTION = 'agency';
       AGENCY_CONNECTION,
     ),
     FilesModule,
+    NotificationsModule,
   ],
   controllers: [
     ProjectsController,
@@ -90,6 +93,7 @@ const AGENCY_CONNECTION = 'agency';
     ProjectEventsService,
     ProjectFollowersAttachmentsService,
     ProjectsDashboardQueryService,
+    TaskNotificationPublisher,
   ],
   exports: [
     ProjectsService,

@@ -6,6 +6,8 @@ import { CalendarDashboardQueryService } from './calendar-dashboard-query.servic
 import { CalendarEvent } from './entities/calendar-event.entity';
 import { CalendarRoutineBlock } from './entities/calendar-routine-block.entity';
 import { CalendarSettings } from './entities/calendar-settings.entity';
+import { NotificationsModule } from '../notifications';
+import { CalendarNotificationPublisher } from './calendar-notification.publisher';
 
 const AGENCY_CONNECTION = 'agency';
 
@@ -15,9 +17,14 @@ const AGENCY_CONNECTION = 'agency';
       [CalendarEvent, CalendarRoutineBlock, CalendarSettings],
       AGENCY_CONNECTION,
     ),
+    NotificationsModule,
   ],
   controllers: [CalendarController],
-  providers: [CalendarService, CalendarDashboardQueryService],
+  providers: [
+    CalendarService,
+    CalendarDashboardQueryService,
+    CalendarNotificationPublisher,
+  ],
   exports: [CalendarService, CalendarDashboardQueryService],
 })
 export class CalendarModule {}
