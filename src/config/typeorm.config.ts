@@ -214,7 +214,17 @@ import {
   TenantProductEntitlementEntity,
 } from '../modules/platform';
 
+import {
+  NotificationDeliveryEntity,
+  NotificationEntity,
+  NotificationRecipientEntity,
+} from '../modules/notifications/entities';
+
 export const agencyEntities = [
+  NotificationEntity,
+  NotificationRecipientEntity,
+  NotificationDeliveryEntity,
+
   DocumentLayoutEntity,
   DocumentLayoutTemplateEntity,
   AgencyUserPreferencesEntity,
