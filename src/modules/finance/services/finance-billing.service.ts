@@ -39,6 +39,7 @@ import {
 import { FinanceRequestContext } from './finance-context';
 import { FinanceDocumentNumberingService } from './finance-document-numbering.service';
 import { FinanceJournalEntryService } from './finance-journal-entry.service';
+import { FinanceNotificationPublisher } from './finance-notification.publisher';
 
 function toMoney(value: string | number | null | undefined): number {
   if (value === null || value === undefined || value === '') return 0;
@@ -92,6 +93,7 @@ export class FinanceBillingService {
 
     private readonly documentNumberingService: FinanceDocumentNumberingService,
     private readonly journalEntryService: FinanceJournalEntryService,
+    private readonly financeNotificationPublisher: FinanceNotificationPublisher,
   ) {}
 
   listInvoices(ctx: FinanceRequestContext) {
@@ -204,13 +206,42 @@ export class FinanceBillingService {
 
     if (!invoice) throw new NotFoundException('Finance invoice not found');
 
+    const previousStatus = invoice.status;
+
     // Merge metadata deeply instead of overwriting
     if (dto.metadata !== undefined) {
       invoice.metadata = { ...invoice.metadata, ...dto.metadata };
     }
     const { metadata: _meta, ...rest } = dto;
     Object.assign(invoice, rest);
-    await this.invoicesRepo.save(invoice);
+    const saved = await this.invoicesRepo.save(invoice);
+
+    // No tenant-validated recipient source exists yet (only the actor, who
+    // is self-suppressed), so these calls currently resolve to zero
+    // recipients and the publisher is a no-op. Kept wired for when a real
+    // recipient source (e.g. invoice owner membership) is available.
+    if (
+      previousStatus !== FinanceInvoiceStatus.Issued &&
+      saved.status === FinanceInvoiceStatus.Issued
+    ) {
+      await this.financeNotificationPublisher.publishInvoiceIssued({
+        resource: saved,
+        actorUserId: ctx.userId,
+        recipients: [],
+      });
+    }
+
+    if (
+      previousStatus !== FinanceInvoiceStatus.Paid &&
+      saved.status === FinanceInvoiceStatus.Paid
+    ) {
+      await this.financeNotificationPublisher.publishInvoicePaid({
+        resource: saved,
+        actorUserId: ctx.userId,
+        recipients: [],
+      });
+    }
+
     return this.getInvoice(ctx, id);
   }
 
@@ -357,6 +388,8 @@ export class FinanceBillingService {
 
     if (!invoice) throw new NotFoundException('Finance invoice not found');
 
+    const previousStatus = invoice.status;
+
     invoice.status = FinanceInvoiceStatus.Issued;
     invoice.issuedAt = new Date();
 
@@ -364,7 +397,17 @@ export class FinanceBillingService {
       invoice.issueDate = new Date().toISOString().slice(0, 10);
     }
 
-    await this.invoicesRepo.save(invoice);
+    const saved = await this.invoicesRepo.save(invoice);
+
+    if (previousStatus !== FinanceInvoiceStatus.Issued) {
+      // See updateInvoice: no validated recipient source yet, resolves to no-op.
+      await this.financeNotificationPublisher.publishInvoiceIssued({
+        resource: saved,
+        actorUserId: ctx.userId,
+        recipients: [],
+      });
+    }
+
     return this.getInvoice(ctx, id);
   }
 
@@ -624,12 +667,41 @@ export class FinanceBillingService {
       where: { id, tenantId: ctx.tenantId, workspaceId: ctx.workspaceId },
     });
     if (!payment) throw new NotFoundException('Finance payment not found');
+    const previousStatus = payment.status;
     if (dto.metadata !== undefined) {
       payment.metadata = { ...payment.metadata, ...dto.metadata };
     }
     const { metadata: _meta, ...rest } = dto;
     Object.assign(payment, rest);
-    return this.paymentsRepo.save(payment);
+    const saved = await this.paymentsRepo.save(payment);
+
+    // No tenant-validated recipient source exists yet (only the actor, who
+    // is self-suppressed), so these calls currently resolve to zero
+    // recipients and the publisher is a no-op.
+    if (
+      previousStatus !== FinancePaymentStatus.Completed &&
+      saved.status === FinancePaymentStatus.Completed &&
+      saved.direction === FinancePaymentDirection.Customer
+    ) {
+      await this.financeNotificationPublisher.publishPaymentReceived({
+        resource: saved,
+        actorUserId: ctx.userId,
+        recipients: [],
+      });
+    }
+
+    if (
+      previousStatus !== FinancePaymentStatus.Failed &&
+      saved.status === FinancePaymentStatus.Failed
+    ) {
+      await this.financeNotificationPublisher.publishPaymentFailed({
+        resource: saved,
+        actorUserId: ctx.userId,
+        recipients: [],
+      });
+    }
+
+    return saved;
   }
 
   async deletePayment(ctx: FinanceRequestContext, id: string) {
@@ -667,6 +739,26 @@ export class FinanceBillingService {
     void this.autoCreatePaymentJournalEntry(ctx, payment, dto).catch(() => {
       // Non-fatal: log and continue silently
     });
+
+    // See updatePayment: no validated recipient source yet, resolves to no-op.
+    if (
+      payment.status === FinancePaymentStatus.Completed &&
+      payment.direction === FinancePaymentDirection.Customer
+    ) {
+      await this.financeNotificationPublisher.publishPaymentReceived({
+        resource: payment,
+        actorUserId: ctx.userId,
+        recipients: [],
+      });
+    }
+
+    if (payment.status === FinancePaymentStatus.Failed) {
+      await this.financeNotificationPublisher.publishPaymentFailed({
+        resource: payment,
+        actorUserId: ctx.userId,
+        recipients: [],
+      });
+    }
 
     return payment;
   }
@@ -759,7 +851,10 @@ export class FinanceBillingService {
       );
     }
 
-    return this.dataSource.transaction(async (manager) => {
+    let paidInvoice: FinanceInvoice | null = null;
+    let paidBill: FinanceBill | null = null;
+
+    const result = await this.dataSource.transaction(async (manager) => {
       if (dto.targetType === FinanceAllocationTargetType.Invoice) {
         if (payment.direction !== FinancePaymentDirection.Customer) {
           throw new BadRequestException(
@@ -794,6 +889,7 @@ export class FinanceBillingService {
           invoice.status = FinanceInvoiceStatus.Paid;
           invoice.paidAt = new Date();
           invoice.balanceDue = '0.00';
+          paidInvoice = invoice;
         } else {
           invoice.status = FinanceInvoiceStatus.PartiallyPaid;
         }
@@ -835,6 +931,7 @@ export class FinanceBillingService {
           bill.status = FinanceBillStatus.Paid;
           bill.paidAt = new Date();
           bill.balanceDue = '0.00';
+          paidBill = bill;
         } else {
           bill.status = FinanceBillStatus.PartiallyPaid;
         }
@@ -871,6 +968,28 @@ export class FinanceBillingService {
         },
       };
     });
+
+    const invoiceToNotify = paidInvoice as FinanceInvoice | null;
+    const billToNotify = paidBill as FinanceBill | null;
+
+    // See updateInvoice: no validated recipient source yet, resolves to no-op.
+    if (invoiceToNotify) {
+      await this.financeNotificationPublisher.publishInvoicePaid({
+        resource: invoiceToNotify,
+        actorUserId: ctx.userId,
+        recipients: [],
+      });
+    }
+
+    if (billToNotify) {
+      await this.financeNotificationPublisher.publishBillPaid({
+        resource: billToNotify,
+        actorUserId: ctx.userId,
+        recipients: [],
+      });
+    }
+
+    return result;
   }
 
   listRecurringProfiles(ctx: FinanceRequestContext) {
@@ -1055,7 +1174,7 @@ export class FinanceBillingService {
     );
     const invoiceNumber = await this.generateDocumentNumber(ctx, 'INV');
 
-    return this.dataSource.transaction(async (manager) => {
+    const result = await this.dataSource.transaction(async (manager) => {
       const invoice = await manager.getRepository(FinanceInvoice).save(
         manager.getRepository(FinanceInvoice).create({
           tenantId: ctx.tenantId,
@@ -1126,6 +1245,17 @@ export class FinanceBillingService {
         recurringProfile: profile,
       };
     });
+
+    // finance.recurring_charge_created is informational with
+    // defaultDelivery=DISABLED in the catalog, and the processor does not
+    // yet enforce that policy. Auto-firing on every cycle would create
+    // per-period noise, and the previous recipient source (profile.metadata)
+    // was client-supplied and untrusted. Disabled until the processor
+    // respects defaultDelivery/preferences and a validated recipient source
+    // exists. publishRecurringChargeCreated remains available on the
+    // publisher for that future wiring.
+
+    return result;
   }
 
   private async getFinanceSettings(ctx: FinanceRequestContext) {
@@ -1254,4 +1384,5 @@ export class FinanceBillingService {
     const next = count + 1;
     return `${prefix}-${String(next).padStart(5, '0')}`;
   }
+
 }

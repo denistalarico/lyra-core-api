@@ -14,6 +14,7 @@ import {
 } from '../enums';
 import { FinanceRequestContext } from './finance-context';
 import { FinanceDocumentNumberingService } from './finance-document-numbering.service';
+import { FinanceNotificationPublisher } from './finance-notification.publisher';
 
 function toMoney(value: string | number | null | undefined): number {
   if (value === null || value === undefined || value === '') return 0;
@@ -48,6 +49,7 @@ export class FinanceJournalEntryService {
     private readonly dataSource: DataSource,
 
     private readonly documentNumberingService: FinanceDocumentNumberingService,
+    private readonly financeNotificationPublisher: FinanceNotificationPublisher,
   ) {}
 
   list(ctx: FinanceRequestContext) {
@@ -178,6 +180,13 @@ export class FinanceJournalEntryService {
     entry.postedById = ctx.userId;
 
     await this.entriesRepo.save(entry);
+
+    // finance.entry_approved has no validated requester/creator distinct
+    // from the actor who posts the entry (postedById === ctx.userId, which
+    // is self-suppressed). The previous recipient source (entry.metadata)
+    // was client-supplied and untrusted. Auto-fire disabled until a real
+    // requester field is persisted internally. publishEntryApproved remains
+    // available on the publisher for that future wiring.
 
     return this.get(ctx, entry.id);
   }

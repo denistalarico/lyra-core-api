@@ -2,6 +2,8 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ContractsController } from './controllers/contracts.controller';
 import { ContractsService } from './services/contracts.service';
+import { NotificationsModule } from '../notifications';
+import { ContractNotificationPublisher } from './services/contract-notification.publisher';
 import {
 ContractDocument,
 ContractEvent,
@@ -16,6 +18,7 @@ const AGENCY_CONNECTION = 'agency';
 
 @Module({
 imports: [
+NotificationsModule,
 TypeOrmModule.forFeature(
 [
 ContractTemplate,
@@ -30,7 +33,7 @@ AGENCY_CONNECTION,
 ),
 ],
 controllers: [ContractsController],
-providers: [ContractsService],
+providers: [ContractsService, ContractNotificationPublisher],
 exports: [ContractsService],
 })
 export class ContractsModule {}

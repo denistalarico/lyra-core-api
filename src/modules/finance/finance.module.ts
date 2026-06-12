@@ -40,10 +40,13 @@ import { FinanceDocumentNumberingService } from './services/finance-document-num
 import { FinanceFiscalService } from './services/finance-fiscal.service';
 import { FinancePaymentProviderService } from './services/finance-payment-provider.service';
 import { FinanceJournalEntryService } from './services/finance-journal-entry.service';
+import { NotificationsModule } from '../notifications';
+import { FinanceNotificationPublisher } from './services/finance-notification.publisher';
 
 @Module({
   imports: [
     DocumentLayoutsModule,
+    NotificationsModule,
     TypeOrmModule.forFeature(
       [
         FinanceAccount,
@@ -86,6 +89,7 @@ import { FinanceJournalEntryService } from './services/finance-journal-entry.ser
     FinanceFiscalService,
     FinancePaymentProviderService,
     FinanceJournalEntryService,
+    FinanceNotificationPublisher,
   ],
   exports: [
     FinanceService,

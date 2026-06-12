@@ -65,6 +65,11 @@ import {
   UpdateContractRecordDto,
   UpdateContractTemplateDto,
 } from '../dto';
+import {
+  NotificationActorType,
+  NotificationInterestReason,
+} from '../../notifications/enums';
+import { ContractNotificationPublisher } from './contract-notification.publisher';
 
 type RequestContext = {
   tenantId: string;
@@ -92,6 +97,7 @@ export class ContractsService {
     private readonly documentsRepository: Repository<ContractDocument>,
     @InjectRepository(ContractEvent, AGENCY_CONNECTION)
     private readonly eventsRepository: Repository<ContractEvent>,
+    private readonly contractNotificationPublisher: ContractNotificationPublisher,
   ) {}
 
   getTemplatePresets() {
@@ -766,12 +772,23 @@ export class ContractsService {
 
     const saved = await this.contractsRepository.save(contract);
 
-    await this.createEvent(
+    const event = await this.createEvent(
       context,
       saved.id,
       ContractEventType.Cancelled,
       'Contrato cancelado.',
     );
+
+    await this.contractNotificationPublisher.publishCanceled({
+      contract: saved,
+      actorUserId: context.userId,
+      sourceEventId: event.id,
+      occurredAt: event.createdAt,
+      recipients: await this.resolveContractNotificationRecipients(
+        context,
+        saved,
+      ),
+    });
 
     return saved;
   }
@@ -1047,7 +1064,7 @@ export class ContractsService {
 
     const saved = await this.contractsRepository.save(contract);
 
-    await this.createEvent(
+    const event = await this.createEvent(
       context,
       saved.id,
       ContractEventType.SignaturePrepared,
@@ -1066,6 +1083,26 @@ export class ContractsService {
         })),
       },
     );
+
+    const manualSignatureRecipients = parties
+      .filter((party) => Boolean(party.userId?.trim()))
+      .map((party) => ({
+        userId: party.userId,
+        interestReason: NotificationInterestReason.RESPONSIBLE_ROLE,
+      }));
+
+    if (
+      saved.signatureMode === ContractSignatureMode.Manual &&
+      manualSignatureRecipients.length > 0
+    ) {
+      await this.contractNotificationPublisher.publishManualSignaturePending({
+        contract: saved,
+        actorUserId: context.userId,
+        sourceEventId: event.id,
+        occurredAt: event.createdAt,
+        recipients: manualSignatureRecipients,
+      });
+    }
 
     return {
       contract: saved,
@@ -1264,6 +1301,10 @@ export class ContractsService {
       },
     );
 
+    // contract.sent_for_signature represents a real send confirmed by the
+    // provider. Mock mode persists local state for development but must not
+    // produce that notification — no external send actually happened.
+
     return {
       dryRun: false,
       mockProvider: true,
@@ -1382,7 +1423,7 @@ export class ContractsService {
       },
     );
 
-    await this.createEvent(
+    const signatureEvent = await this.createEvent(
       context,
       saved.id,
       ContractEventType.SignatureCompleted,
@@ -1392,6 +1433,18 @@ export class ContractsService {
         signedDocumentId: document.id,
       },
     );
+
+    await this.contractNotificationPublisher.publishSigned({
+      contract: saved,
+      actorType: NotificationActorType.USER,
+      actorUserId: context.userId,
+      sourceEventId: signatureEvent.id,
+      occurredAt: signatureEvent.createdAt,
+      recipients: await this.resolveContractNotificationRecipients(
+        context,
+        saved,
+      ),
+    });
 
     return {
       contract: saved,
@@ -1448,7 +1501,7 @@ export class ContractsService {
       },
     );
 
-    await this.createEvent(
+    const signatureEvent = await this.createEvent(
       context,
       saved.id,
       ContractEventType.SignatureCompleted,
@@ -1459,6 +1512,18 @@ export class ContractsService {
         hasSignedPdfUpload: false,
       },
     );
+
+    await this.contractNotificationPublisher.publishSigned({
+      contract: saved,
+      actorType: NotificationActorType.USER,
+      actorUserId: context.userId,
+      sourceEventId: signatureEvent.id,
+      occurredAt: signatureEvent.createdAt,
+      recipients: await this.resolveContractNotificationRecipients(
+        context,
+        saved,
+      ),
+    });
 
     return this.findContract(context, saved.id);
   }
@@ -2313,5 +2378,37 @@ export class ContractsService {
     });
 
     return this.eventsRepository.save(event);
+  }
+
+  private async resolveContractNotificationRecipients(
+    context: RequestContext,
+    contract: ContractRecord,
+  ) {
+    const parties = await this.partiesRepository.find({
+      where: {
+        tenantId: context.tenantId,
+        workspaceId: context.workspaceId,
+        contractId: contract.id,
+      },
+      order: { signatureOrder: 'ASC', createdAt: 'ASC' },
+    });
+
+    return this.contractRecipientsFrom(contract, parties);
+  }
+
+  private contractRecipientsFrom(
+    contract: ContractRecord,
+    parties: ContractParty[],
+  ) {
+    return [
+      {
+        userId: contract.createdById,
+        interestReason: NotificationInterestReason.REQUESTER,
+      },
+      ...parties.map((party) => ({
+        userId: party.userId,
+        interestReason: NotificationInterestReason.PARTICIPANT,
+      })),
+    ];
   }
 }
