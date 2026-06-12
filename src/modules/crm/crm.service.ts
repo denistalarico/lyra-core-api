@@ -1,8 +1,12 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { FindOptionsWhere, ILike, IsNull, Repository } from 'typeorm';
 import { RequestContext } from '../../common/context/request-context.interface';
-import { CreateCrmActivityDto } from './dto/create-crm-activity.dto';
+import { ContactEntity } from '../contacts/entities/contact.entity';
 import { CreateCrmOpportunityDto } from './dto/create-crm-opportunity.dto';
 import { CreateCrmPipelineDto } from './dto/create-crm-pipeline.dto';
 import { CreateCrmStageDto } from './dto/create-crm-stage.dto';
@@ -15,13 +19,11 @@ import { PatchCrmOpportunityVisibilityDto } from './dto/patch-crm-opportunity-vi
 import { PatchCrmStageFoldDto } from './dto/patch-crm-stage-fold.dto';
 import { PatchCrmTagDto } from './dto/patch-crm-tag.dto';
 import { ReorderCrmStagesDto } from './dto/reorder-crm-stages.dto';
-import { PatchCrmActivityDto } from './dto/patch-crm-activity.dto';
 import { PatchCrmOpportunityDto } from './dto/patch-crm-opportunity.dto';
 import { PatchCrmOpportunityStageDto } from './dto/patch-crm-opportunity-stage.dto';
 import { PatchCrmOpportunityStatusDto } from './dto/patch-crm-opportunity-status.dto';
 import { PatchCrmPipelineDto } from './dto/patch-crm-pipeline.dto';
 import { PatchCrmStageDto } from './dto/patch-crm-stage.dto';
-import { CrmActivityEntity } from './entities/crm-activity.entity';
 import { CrmOpportunityEntity } from './entities/crm-opportunity.entity';
 import { CrmPipelineEntity } from './entities/crm-pipeline.entity';
 import { CrmStageEntity } from './entities/crm-stage.entity';
@@ -42,37 +44,29 @@ export type CrmOpportunityFilters = {
   search?: string;
 };
 
-export type CrmActivityFilters = {
-  opportunityId?: string;
-  status?: string;
-  type?: string;
-  assignedUserId?: string;
-  contactId?: string;
-};
-
 @Injectable()
 export class CrmService {
   constructor(
-    @InjectRepository(CrmPipelineEntity)
+    @InjectRepository(CrmPipelineEntity, 'agency')
     private readonly pipelinesRepository: Repository<CrmPipelineEntity>,
 
-    @InjectRepository(CrmStageEntity)
+    @InjectRepository(CrmStageEntity, 'agency')
     private readonly stagesRepository: Repository<CrmStageEntity>,
 
-    @InjectRepository(CrmOpportunityEntity)
+    @InjectRepository(CrmOpportunityEntity, 'agency')
     private readonly opportunitiesRepository: Repository<CrmOpportunityEntity>,
 
-    @InjectRepository(CrmActivityEntity)
-    private readonly activitiesRepository: Repository<CrmActivityEntity>,
-
-    @InjectRepository(CrmTagEntity)
+    @InjectRepository(CrmTagEntity, 'agency')
     private readonly tagsRepository: Repository<CrmTagEntity>,
 
-    @InjectRepository(CrmOpportunityTagEntity)
+    @InjectRepository(CrmOpportunityTagEntity, 'agency')
     private readonly opportunityTagsRepository: Repository<CrmOpportunityTagEntity>,
 
-    @InjectRepository(CrmOpportunityEventEntity)
+    @InjectRepository(CrmOpportunityEventEntity, 'agency')
     private readonly opportunityEventsRepository: Repository<CrmOpportunityEventEntity>,
+
+    @InjectRepository(ContactEntity, 'agency')
+    private readonly contactsRepository: Repository<ContactEntity>,
   ) {}
 
   async listPipelines(ctx: RequestContext): Promise<CrmPipelineEntity[]> {
@@ -87,7 +81,10 @@ export class CrmService {
     });
   }
 
-  async createPipeline(ctx: RequestContext, dto: CreateCrmPipelineDto): Promise<CrmPipelineEntity> {
+  async createPipeline(
+    ctx: RequestContext,
+    dto: CreateCrmPipelineDto,
+  ): Promise<CrmPipelineEntity> {
     const tenantId = this.requireTenantId(ctx);
     const workspaceId = this.requireWorkspaceId(ctx);
 
@@ -111,7 +108,10 @@ export class CrmService {
     return this.pipelinesRepository.save(pipeline);
   }
 
-  async getPipeline(ctx: RequestContext, id: string): Promise<CrmPipelineEntity> {
+  async getPipeline(
+    ctx: RequestContext,
+    id: string,
+  ): Promise<CrmPipelineEntity> {
     const tenantId = this.requireTenantId(ctx);
     const workspaceId = this.requireWorkspaceId(ctx);
 
@@ -124,12 +124,17 @@ export class CrmService {
     return pipeline;
   }
 
-  async patchPipeline(ctx: RequestContext, id: string, dto: PatchCrmPipelineDto): Promise<CrmPipelineEntity> {
+  async patchPipeline(
+    ctx: RequestContext,
+    id: string,
+    dto: PatchCrmPipelineDto,
+  ): Promise<CrmPipelineEntity> {
     const pipeline = await this.getPipeline(ctx, id);
 
     if (dto.name !== undefined) pipeline.name = dto.name;
     if (dto.description !== undefined) pipeline.description = dto.description;
-    if (dto.businessMode !== undefined) pipeline.businessMode = dto.businessMode;
+    if (dto.businessMode !== undefined)
+      pipeline.businessMode = dto.businessMode;
     if (dto.isDefault !== undefined) pipeline.isDefault = dto.isDefault;
     if (dto.status !== undefined) pipeline.status = dto.status;
     if (dto.sortOrder !== undefined) pipeline.sortOrder = dto.sortOrder;
@@ -137,20 +142,27 @@ export class CrmService {
     if (dto.ownerUserId !== undefined) pipeline.ownerUserId = dto.ownerUserId;
     if (dto.settings !== undefined) pipeline.settings = dto.settings;
     if (dto.channels !== undefined) pipeline.channels = dto.channels;
-    if (dto.allowedUserIds !== undefined) pipeline.allowedUserIds = dto.allowedUserIds;
+    if (dto.allowedUserIds !== undefined)
+      pipeline.allowedUserIds = dto.allowedUserIds;
     if (dto.metadata !== undefined) pipeline.metadata = dto.metadata;
 
     return this.pipelinesRepository.save(pipeline);
   }
 
-  async deletePipeline(ctx: RequestContext, id: string): Promise<{ deleted: true }> {
+  async deletePipeline(
+    ctx: RequestContext,
+    id: string,
+  ): Promise<{ deleted: true }> {
     const pipeline = await this.getPipeline(ctx, id);
     pipeline.deletedAt = new Date();
     await this.pipelinesRepository.save(pipeline);
     return { deleted: true };
   }
 
-  async listStages(ctx: RequestContext, pipelineId?: string): Promise<CrmStageEntity[]> {
+  async listStages(
+    ctx: RequestContext,
+    pipelineId?: string,
+  ): Promise<CrmStageEntity[]> {
     const tenantId = this.requireTenantId(ctx);
     const workspaceId = this.requireWorkspaceId(ctx);
 
@@ -168,7 +180,10 @@ export class CrmService {
     });
   }
 
-  async createStage(ctx: RequestContext, dto: CreateCrmStageDto): Promise<CrmStageEntity> {
+  async createStage(
+    ctx: RequestContext,
+    dto: CreateCrmStageDto,
+  ): Promise<CrmStageEntity> {
     const tenantId = this.requireTenantId(ctx);
     const workspaceId = this.requireWorkspaceId(ctx);
 
@@ -206,7 +221,11 @@ export class CrmService {
     return stage;
   }
 
-  async patchStage(ctx: RequestContext, id: string, dto: PatchCrmStageDto): Promise<CrmStageEntity> {
+  async patchStage(
+    ctx: RequestContext,
+    id: string,
+    dto: PatchCrmStageDto,
+  ): Promise<CrmStageEntity> {
     const stage = await this.getStage(ctx, id);
 
     if (dto.name !== undefined) stage.name = dto.name;
@@ -223,7 +242,10 @@ export class CrmService {
     return this.stagesRepository.save(stage);
   }
 
-  async deleteStage(ctx: RequestContext, id: string): Promise<{ deleted: true }> {
+  async deleteStage(
+    ctx: RequestContext,
+    id: string,
+  ): Promise<{ deleted: true }> {
     const stage = await this.getStage(ctx, id);
     stage.deletedAt = new Date();
     await this.stagesRepository.save(stage);
@@ -253,7 +275,8 @@ export class CrmService {
     if (filters.businessMode) where.businessMode = filters.businessMode;
     if (filters.assignedUserId) where.assignedUserId = filters.assignedUserId;
     if (filters.contactId) where.contactId = filters.contactId;
-    if (filters.inboxConversationId) where.inboxConversationId = filters.inboxConversationId;
+    if (filters.inboxConversationId)
+      where.inboxConversationId = filters.inboxConversationId;
     if (filters.search) where.title = ILike(`%${filters.search}%`);
 
     return this.opportunitiesRepository.find({
@@ -281,8 +304,12 @@ export class CrmService {
       : await this.getFirstOpenStage(ctx, pipeline.id);
 
     if (stage.pipelineId !== pipeline.id) {
-      throw new BadRequestException('Stage does not belong to the selected pipeline.');
+      throw new BadRequestException(
+        'Stage does not belong to the selected pipeline.',
+      );
     }
+
+    await this.validateContactForOpportunity(ctx, dto.contactId);
 
     const opportunity = this.opportunitiesRepository.create({
       tenantId,
@@ -329,7 +356,10 @@ export class CrmService {
     return saved;
   }
 
-  async getOpportunity(ctx: RequestContext, id: string): Promise<CrmOpportunityEntity> {
+  async getOpportunity(
+    ctx: RequestContext,
+    id: string,
+  ): Promise<CrmOpportunityEntity> {
     const tenantId = this.requireTenantId(ctx);
     const workspaceId = this.requireWorkspaceId(ctx);
 
@@ -349,35 +379,56 @@ export class CrmService {
   ): Promise<CrmOpportunityEntity> {
     const opportunity = await this.getOpportunity(ctx, id);
 
-    if (dto.pipelineId !== undefined) await this.getPipeline(ctx, dto.pipelineId);
-    if (dto.stageId !== undefined) await this.getStage(ctx, dto.stageId);
+    const pipelineId = dto.pipelineId ?? opportunity.pipelineId;
+    const stageId = dto.stageId ?? opportunity.stageId;
+
+    if (dto.pipelineId !== undefined || dto.stageId !== undefined) {
+      await this.validatePipelineStage(ctx, pipelineId, stageId);
+    }
+
+    await this.validateContactForOpportunity(ctx, dto.contactId);
 
     if (dto.pipelineId !== undefined) opportunity.pipelineId = dto.pipelineId;
     if (dto.stageId !== undefined) opportunity.stageId = dto.stageId;
     if (dto.contactId !== undefined) opportunity.contactId = dto.contactId;
-    if (dto.contactName !== undefined) opportunity.contactName = dto.contactName;
-    if (dto.contactEmail !== undefined) opportunity.contactEmail = dto.contactEmail;
-    if (dto.contactPhone !== undefined) opportunity.contactPhone = dto.contactPhone;
-    if (dto.inboxConversationId !== undefined) opportunity.inboxConversationId = dto.inboxConversationId;
+    if (dto.contactName !== undefined)
+      opportunity.contactName = dto.contactName;
+    if (dto.contactEmail !== undefined)
+      opportunity.contactEmail = dto.contactEmail;
+    if (dto.contactPhone !== undefined)
+      opportunity.contactPhone = dto.contactPhone;
+    if (dto.inboxConversationId !== undefined)
+      opportunity.inboxConversationId = dto.inboxConversationId;
     if (dto.title !== undefined) opportunity.title = dto.title;
-    if (dto.description !== undefined) opportunity.description = dto.description;
-    if (dto.valueAmount !== undefined) opportunity.valueAmount = dto.valueAmount;
+    if (dto.description !== undefined)
+      opportunity.description = dto.description;
+    if (dto.valueAmount !== undefined)
+      opportunity.valueAmount = dto.valueAmount;
     if (dto.currency !== undefined) opportunity.currency = dto.currency;
-    if (dto.status !== undefined) this.applyOpportunityStatus(opportunity, dto.status, dto.lostReason);
+    if (dto.status !== undefined)
+      this.applyOpportunityStatus(opportunity, dto.status, dto.lostReason);
     if (dto.priority !== undefined) opportunity.priority = dto.priority;
     if (dto.source !== undefined) opportunity.source = dto.source;
-    if (dto.businessMode !== undefined) opportunity.businessMode = dto.businessMode;
-    if (dto.operationalStatus !== undefined) opportunity.operationalStatus = dto.operationalStatus;
-    if (dto.businessContext !== undefined) opportunity.businessContext = dto.businessContext;
-    if (dto.assignedUserId !== undefined) opportunity.assignedUserId = dto.assignedUserId;
-    if (dto.expectedCloseDate !== undefined) opportunity.expectedCloseDate = dto.expectedCloseDate;
-    if (dto.nextFollowUpAt !== undefined) opportunity.nextFollowUpAt = this.toDateOrNull(dto.nextFollowUpAt);
+    if (dto.businessMode !== undefined)
+      opportunity.businessMode = dto.businessMode;
+    if (dto.operationalStatus !== undefined)
+      opportunity.operationalStatus = dto.operationalStatus;
+    if (dto.businessContext !== undefined)
+      opportunity.businessContext = dto.businessContext;
+    if (dto.assignedUserId !== undefined)
+      opportunity.assignedUserId = dto.assignedUserId;
+    if (dto.expectedCloseDate !== undefined)
+      opportunity.expectedCloseDate = dto.expectedCloseDate;
+    if (dto.nextFollowUpAt !== undefined)
+      opportunity.nextFollowUpAt = this.toDateOrNull(dto.nextFollowUpAt);
     if (dto.lostReason !== undefined) opportunity.lostReason = dto.lostReason;
     if (dto.cardColor !== undefined) opportunity.cardColor = dto.cardColor;
     if (dto.visibility !== undefined) opportunity.visibility = dto.visibility;
     if (dto.followMode !== undefined) opportunity.followMode = dto.followMode;
-    if (dto.followMessage !== undefined) opportunity.followMessage = dto.followMessage;
-    if (dto.followSendAutomatically !== undefined) opportunity.followSendAutomatically = dto.followSendAutomatically;
+    if (dto.followMessage !== undefined)
+      opportunity.followMessage = dto.followMessage;
+    if (dto.followSendAutomatically !== undefined)
+      opportunity.followSendAutomatically = dto.followSendAutomatically;
     if (dto.metadata !== undefined) opportunity.metadata = dto.metadata;
 
     const saved = await this.opportunitiesRepository.save(opportunity);
@@ -401,7 +452,9 @@ export class CrmService {
     const stage = await this.getStage(ctx, dto.stageId);
 
     if (stage.pipelineId !== opportunity.pipelineId) {
-      throw new BadRequestException('Stage does not belong to this opportunity pipeline.');
+      throw new BadRequestException(
+        'Stage does not belong to this opportunity pipeline.',
+      );
     }
 
     opportunity.stageId = stage.id;
@@ -436,113 +489,15 @@ export class CrmService {
     return this.opportunitiesRepository.save(opportunity);
   }
 
-  async deleteOpportunity(ctx: RequestContext, id: string): Promise<{ deleted: true }> {
+  async deleteOpportunity(
+    ctx: RequestContext,
+    id: string,
+  ): Promise<{ deleted: true }> {
     const opportunity = await this.getOpportunity(ctx, id);
     opportunity.deletedAt = new Date();
     await this.opportunitiesRepository.save(opportunity);
     return { deleted: true };
   }
-
-  async listActivities(
-    ctx: RequestContext,
-    filters: CrmActivityFilters = {},
-  ): Promise<CrmActivityEntity[]> {
-    const tenantId = this.requireTenantId(ctx);
-    const workspaceId = this.requireWorkspaceId(ctx);
-
-    const where: FindOptionsWhere<CrmActivityEntity> = {
-      tenantId,
-      workspaceId,
-      deletedAt: IsNull(),
-    };
-
-    if (filters.opportunityId) where.opportunityId = filters.opportunityId;
-    if (filters.status) where.status = filters.status;
-    if (filters.type) where.type = filters.type;
-    if (filters.assignedUserId) where.assignedUserId = filters.assignedUserId;
-    if (filters.contactId) where.contactId = filters.contactId;
-
-    return this.activitiesRepository.find({
-      where,
-      order: { dueAt: 'ASC', createdAt: 'DESC' },
-    });
-  }
-
-  async createActivity(ctx: RequestContext, dto: CreateCrmActivityDto): Promise<CrmActivityEntity> {
-    const tenantId = this.requireTenantId(ctx);
-    const workspaceId = this.requireWorkspaceId(ctx);
-
-    const opportunity = await this.getOpportunity(ctx, dto.opportunityId);
-
-    const activity = this.activitiesRepository.create({
-      tenantId,
-      workspaceId,
-      opportunityId: opportunity.id,
-      contactId: dto.contactId ?? opportunity.contactId ?? null,
-      inboxConversationId: dto.inboxConversationId ?? opportunity.inboxConversationId ?? null,
-      type: dto.type ?? 'note',
-      title: dto.title,
-      description: dto.description ?? null,
-      status: dto.status ?? 'open',
-      dueAt: this.toDateOrNull(dto.dueAt),
-      completedAt: dto.status === 'done' ? new Date() : null,
-      assignedUserId: dto.assignedUserId ?? opportunity.assignedUserId ?? null,
-      createdByUserId: this.getUserId(ctx),
-      metadata: dto.metadata ?? {},
-    });
-
-    opportunity.lastActivityAt = new Date();
-    await this.opportunitiesRepository.save(opportunity);
-
-    return this.activitiesRepository.save(activity);
-  }
-
-  async getActivity(ctx: RequestContext, id: string): Promise<CrmActivityEntity> {
-    const tenantId = this.requireTenantId(ctx);
-    const workspaceId = this.requireWorkspaceId(ctx);
-
-    const activity = await this.activitiesRepository.findOne({
-      where: { id, tenantId, workspaceId, deletedAt: IsNull() },
-    });
-
-    if (!activity) throw new NotFoundException('CRM activity not found.');
-
-    return activity;
-  }
-
-  async patchActivity(ctx: RequestContext, id: string, dto: PatchCrmActivityDto): Promise<CrmActivityEntity> {
-    const activity = await this.getActivity(ctx, id);
-
-    if (dto.contactId !== undefined) activity.contactId = dto.contactId;
-    if (dto.inboxConversationId !== undefined) activity.inboxConversationId = dto.inboxConversationId;
-    if (dto.type !== undefined) activity.type = dto.type;
-    if (dto.title !== undefined) activity.title = dto.title;
-    if (dto.description !== undefined) activity.description = dto.description;
-    if (dto.status !== undefined) {
-      activity.status = dto.status;
-      activity.completedAt = dto.status === 'done' ? new Date() : null;
-    }
-    if (dto.dueAt !== undefined) activity.dueAt = this.toDateOrNull(dto.dueAt);
-    if (dto.assignedUserId !== undefined) activity.assignedUserId = dto.assignedUserId;
-    if (dto.metadata !== undefined) activity.metadata = dto.metadata;
-
-    return this.activitiesRepository.save(activity);
-  }
-
-  async completeActivity(ctx: RequestContext, id: string): Promise<CrmActivityEntity> {
-    const activity = await this.getActivity(ctx, id);
-    activity.status = 'done';
-    activity.completedAt = new Date();
-    return this.activitiesRepository.save(activity);
-  }
-
-  async deleteActivity(ctx: RequestContext, id: string): Promise<{ deleted: true }> {
-    const activity = await this.getActivity(ctx, id);
-    activity.deletedAt = new Date();
-    await this.activitiesRepository.save(activity);
-    return { deleted: true };
-  }
-
 
   async listTags(ctx: RequestContext): Promise<CrmTagEntity[]> {
     const tenantId = this.requireTenantId(ctx);
@@ -554,7 +509,10 @@ export class CrmService {
     });
   }
 
-  async createTag(ctx: RequestContext, dto: CreateCrmTagDto): Promise<CrmTagEntity> {
+  async createTag(
+    ctx: RequestContext,
+    dto: CreateCrmTagDto,
+  ): Promise<CrmTagEntity> {
     const tenantId = this.requireTenantId(ctx);
     const workspaceId = this.requireWorkspaceId(ctx);
 
@@ -568,7 +526,8 @@ export class CrmService {
       icon: dto.icon ?? null,
       kind,
       scope: dto.scope ?? 'workspace',
-      ownerUserId: dto.ownerUserId ?? (dto.scope === 'user' ? this.getUserId(ctx) : null),
+      ownerUserId:
+        dto.ownerUserId ?? (dto.scope === 'user' ? this.getUserId(ctx) : null),
       description: dto.description ?? null,
       isEditable: kind === 'system' ? false : true,
       metadata: dto.metadata ?? {},
@@ -590,7 +549,11 @@ export class CrmService {
     return tag;
   }
 
-  async patchTag(ctx: RequestContext, id: string, dto: PatchCrmTagDto): Promise<CrmTagEntity> {
+  async patchTag(
+    ctx: RequestContext,
+    id: string,
+    dto: PatchCrmTagDto,
+  ): Promise<CrmTagEntity> {
     const tag = await this.getTag(ctx, id);
 
     if (!tag.isEditable || tag.kind === 'system') {
@@ -623,7 +586,10 @@ export class CrmService {
     return { deleted: true };
   }
 
-  async listOpportunityTags(ctx: RequestContext, opportunityId: string): Promise<CrmOpportunityTagEntity[]> {
+  async listOpportunityTags(
+    ctx: RequestContext,
+    opportunityId: string,
+  ): Promise<CrmOpportunityTagEntity[]> {
     const tenantId = this.requireTenantId(ctx);
     const workspaceId = this.requireWorkspaceId(ctx);
 
@@ -674,7 +640,11 @@ export class CrmService {
     return saved;
   }
 
-  async removeOpportunityTag(ctx: RequestContext, opportunityId: string, tagId: string): Promise<{ deleted: true }> {
+  async removeOpportunityTag(
+    ctx: RequestContext,
+    opportunityId: string,
+    tagId: string,
+  ): Promise<{ deleted: true }> {
     const tenantId = this.requireTenantId(ctx);
     const workspaceId = this.requireWorkspaceId(ctx);
 
@@ -685,7 +655,12 @@ export class CrmService {
       throw new BadRequestException('System tags cannot be removed manually.');
     }
 
-    await this.opportunityTagsRepository.delete({ tenantId, workspaceId, opportunityId, tagId });
+    await this.opportunityTagsRepository.delete({
+      tenantId,
+      workspaceId,
+      opportunityId,
+      tagId,
+    });
 
     await this.createOpportunityEvent(ctx, opportunityId, {
       actorType: 'user',
@@ -724,8 +699,10 @@ export class CrmService {
     const opportunity = await this.getOpportunity(ctx, id);
 
     if (dto.followMode !== undefined) opportunity.followMode = dto.followMode;
-    if (dto.nextFollowUpAt !== undefined) opportunity.nextFollowUpAt = this.toDateOrNull(dto.nextFollowUpAt);
-    if (dto.followMessage !== undefined) opportunity.followMessage = dto.followMessage;
+    if (dto.nextFollowUpAt !== undefined)
+      opportunity.nextFollowUpAt = this.toDateOrNull(dto.nextFollowUpAt);
+    if (dto.followMessage !== undefined)
+      opportunity.followMessage = dto.followMessage;
     if (dto.followSendAutomatically !== undefined) {
       opportunity.followSendAutomatically = dto.followSendAutomatically;
     }
@@ -756,13 +733,20 @@ export class CrmService {
     return this.opportunitiesRepository.save(opportunity);
   }
 
-  async patchStageFold(ctx: RequestContext, id: string, dto: PatchCrmStageFoldDto): Promise<CrmStageEntity> {
+  async patchStageFold(
+    ctx: RequestContext,
+    id: string,
+    dto: PatchCrmStageFoldDto,
+  ): Promise<CrmStageEntity> {
     const stage = await this.getStage(ctx, id);
     stage.isFolded = dto.isFolded;
     return this.stagesRepository.save(stage);
   }
 
-  async reorderStages(ctx: RequestContext, dto: ReorderCrmStagesDto): Promise<CrmStageEntity[]> {
+  async reorderStages(
+    ctx: RequestContext,
+    dto: ReorderCrmStagesDto,
+  ): Promise<CrmStageEntity[]> {
     const updated: CrmStageEntity[] = [];
 
     for (const item of dto.stages) {
@@ -774,7 +758,10 @@ export class CrmService {
     return updated.sort((a, b) => a.sortOrder - b.sortOrder);
   }
 
-  async listOpportunityEvents(ctx: RequestContext, opportunityId: string): Promise<CrmOpportunityEventEntity[]> {
+  async listOpportunityEvents(
+    ctx: RequestContext,
+    opportunityId: string,
+  ): Promise<CrmOpportunityEventEntity[]> {
     const tenantId = this.requireTenantId(ctx);
     const workspaceId = this.requireWorkspaceId(ctx);
 
@@ -823,8 +810,9 @@ export class CrmService {
       .replace(/^-+|-+$/g, '');
   }
 
-
-  private async ensureDefaultPipeline(ctx: RequestContext): Promise<CrmPipelineEntity> {
+  private async ensureDefaultPipeline(
+    ctx: RequestContext,
+  ): Promise<CrmPipelineEntity> {
     const tenantId = this.requireTenantId(ctx);
     const workspaceId = this.requireWorkspaceId(ctx);
 
@@ -857,11 +845,33 @@ export class CrmService {
     const stages = [
       { name: 'Novo Lead', sortOrder: 10, probability: 10, type: 'open' },
       { name: 'Qualificado', sortOrder: 20, probability: 25, type: 'open' },
-      { name: 'Contato / Reunião', sortOrder: 30, probability: 40, type: 'open' },
-      { name: 'Proposta / Orçamento', sortOrder: 40, probability: 60, type: 'open' },
+      {
+        name: 'Contato / Reunião',
+        sortOrder: 30,
+        probability: 40,
+        type: 'open',
+      },
+      {
+        name: 'Proposta / Orçamento',
+        sortOrder: 40,
+        probability: 60,
+        type: 'open',
+      },
       { name: 'Negociação', sortOrder: 50, probability: 75, type: 'open' },
-      { name: 'Ganho', sortOrder: 60, probability: 100, type: 'won', isWonStage: true },
-      { name: 'Perdido', sortOrder: 70, probability: 0, type: 'lost', isLostStage: true },
+      {
+        name: 'Ganho',
+        sortOrder: 60,
+        probability: 100,
+        type: 'won',
+        isWonStage: true,
+      },
+      {
+        name: 'Perdido',
+        sortOrder: 70,
+        probability: 0,
+        type: 'lost',
+        isLostStage: true,
+      },
     ];
 
     await this.stagesRepository.save(
@@ -886,7 +896,10 @@ export class CrmService {
     return pipeline;
   }
 
-  private async getFirstOpenStage(ctx: RequestContext, pipelineId: string): Promise<CrmStageEntity> {
+  private async getFirstOpenStage(
+    ctx: RequestContext,
+    pipelineId: string,
+  ): Promise<CrmStageEntity> {
     const tenantId = this.requireTenantId(ctx);
     const workspaceId = this.requireWorkspaceId(ctx);
 
@@ -906,6 +919,49 @@ export class CrmService {
     }
 
     return stage;
+  }
+
+  private async validatePipelineStage(
+    ctx: RequestContext,
+    pipelineId: string,
+    stageId: string,
+  ): Promise<{ pipeline: CrmPipelineEntity; stage: CrmStageEntity }> {
+    const [pipeline, stage] = await Promise.all([
+      this.getPipeline(ctx, pipelineId),
+      this.getStage(ctx, stageId),
+    ]);
+
+    if (stage.pipelineId !== pipeline.id) {
+      throw new BadRequestException(
+        'Stage does not belong to the selected pipeline.',
+      );
+    }
+
+    return { pipeline, stage };
+  }
+
+  private async validateContactForOpportunity(
+    ctx: RequestContext,
+    contactId: string | null | undefined,
+  ): Promise<void> {
+    if (contactId === undefined || contactId === null) return;
+
+    const tenantId = this.requireTenantId(ctx);
+    const workspaceId = this.requireWorkspaceId(ctx);
+
+    const contact = await this.contactsRepository.findOne({
+      where: { id: contactId, tenantId, workspaceId },
+    });
+
+    if (!contact) {
+      throw new NotFoundException('Contact not found.');
+    }
+
+    if (contact.status === 'archived') {
+      throw new BadRequestException(
+        'Archived contacts cannot be linked to CRM opportunities.',
+      );
+    }
   }
 
   private applyOpportunityStatus(
@@ -952,7 +1008,8 @@ export class CrmService {
   }
 
   private requireWorkspaceId(ctx: RequestContext): string {
-    if (!ctx.workspaceId) throw new BadRequestException('Missing workspace context.');
+    if (!ctx.workspaceId)
+      throw new BadRequestException('Missing workspace context.');
     return ctx.workspaceId;
   }
 

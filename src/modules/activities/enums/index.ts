@@ -31,6 +31,7 @@ export enum ActivityVisibility {
 }
 
 export enum ActivityEntityType {
+  CrmOpportunity = 'crm_opportunity',
   SalesOpportunity = 'sales_opportunity',
   SalesQuote = 'sales_quote',
   Contact = 'contact',

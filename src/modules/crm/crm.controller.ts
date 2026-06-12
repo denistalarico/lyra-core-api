@@ -12,11 +12,9 @@ import {
 import { RequestContextData } from '../../common/context/request-context.decorator';
 import type { RequestContext } from '../../common/context/request-context.interface';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { CreateCrmActivityDto } from './dto/create-crm-activity.dto';
 import { CreateCrmOpportunityDto } from './dto/create-crm-opportunity.dto';
 import { CreateCrmPipelineDto } from './dto/create-crm-pipeline.dto';
 import { CreateCrmStageDto } from './dto/create-crm-stage.dto';
-import { PatchCrmActivityDto } from './dto/patch-crm-activity.dto';
 import { PatchCrmOpportunityDto } from './dto/patch-crm-opportunity.dto';
 import { PatchCrmOpportunityStageDto } from './dto/patch-crm-opportunity-stage.dto';
 import { PatchCrmOpportunityStatusDto } from './dto/patch-crm-opportunity-status.dto';
@@ -31,13 +29,12 @@ import { PatchCrmOpportunityVisibilityDto } from './dto/patch-crm-opportunity-vi
 import { PatchCrmStageFoldDto } from './dto/patch-crm-stage-fold.dto';
 import { PatchCrmTagDto } from './dto/patch-crm-tag.dto';
 import { ReorderCrmStagesDto } from './dto/reorder-crm-stages.dto';
-import { CrmActivityFilters, CrmOpportunityFilters, CrmService } from './crm.service';
+import { CrmOpportunityFilters, CrmService } from './crm.service';
 
 @Controller('crm')
 @UseGuards(JwtAuthGuard)
 export class CrmController {
   constructor(private readonly crmService: CrmService) {}
-
 
   @Get('tags')
   listTags(@RequestContextData() ctx: RequestContext) {
@@ -53,10 +50,7 @@ export class CrmController {
   }
 
   @Get('tags/:id')
-  getTag(
-    @RequestContextData() ctx: RequestContext,
-    @Param('id') id: string,
-  ) {
+  getTag(@RequestContextData() ctx: RequestContext, @Param('id') id: string) {
     return this.crmService.getTag(ctx, id);
   }
 
@@ -76,7 +70,6 @@ export class CrmController {
   ) {
     return this.crmService.deleteTag(ctx, id);
   }
-
 
   @Get('pipelines')
   listPipelines(@RequestContextData() ctx: RequestContext) {
@@ -132,7 +125,6 @@ export class CrmController {
     return this.crmService.createStage(ctx, dto);
   }
 
-
   @Patch('stages/reorder')
   reorderStages(
     @RequestContextData() ctx: RequestContext,
@@ -142,10 +134,7 @@ export class CrmController {
   }
 
   @Get('stages/:id')
-  getStage(
-    @RequestContextData() ctx: RequestContext,
-    @Param('id') id: string,
-  ) {
+  getStage(@RequestContextData() ctx: RequestContext, @Param('id') id: string) {
     return this.crmService.getStage(ctx, id);
   }
 
@@ -157,7 +146,6 @@ export class CrmController {
   ) {
     return this.crmService.patchStage(ctx, id, dto);
   }
-
 
   @Patch('stages/:id/fold')
   patchStageFold(
@@ -249,7 +237,6 @@ export class CrmController {
     return this.crmService.patchOpportunityStatus(ctx, id, dto);
   }
 
-
   @Patch('opportunities/:id/card-color')
   patchOpportunityCardColor(
     @RequestContextData() ctx: RequestContext,
@@ -326,66 +313,5 @@ export class CrmController {
     @Param('id') id: string,
   ) {
     return this.crmService.deleteOpportunity(ctx, id);
-  }
-
-  @Get('activities')
-  listActivities(
-    @RequestContextData() ctx: RequestContext,
-    @Query('opportunityId') opportunityId?: string,
-    @Query('status') status?: string,
-    @Query('type') type?: string,
-    @Query('assignedUserId') assignedUserId?: string,
-    @Query('contactId') contactId?: string,
-  ) {
-    const filters: CrmActivityFilters = {
-      opportunityId,
-      status,
-      type,
-      assignedUserId,
-      contactId,
-    };
-
-    return this.crmService.listActivities(ctx, filters);
-  }
-
-  @Post('activities')
-  createActivity(
-    @RequestContextData() ctx: RequestContext,
-    @Body() dto: CreateCrmActivityDto,
-  ) {
-    return this.crmService.createActivity(ctx, dto);
-  }
-
-  @Get('activities/:id')
-  getActivity(
-    @RequestContextData() ctx: RequestContext,
-    @Param('id') id: string,
-  ) {
-    return this.crmService.getActivity(ctx, id);
-  }
-
-  @Patch('activities/:id')
-  patchActivity(
-    @RequestContextData() ctx: RequestContext,
-    @Param('id') id: string,
-    @Body() dto: PatchCrmActivityDto,
-  ) {
-    return this.crmService.patchActivity(ctx, id, dto);
-  }
-
-  @Patch('activities/:id/complete')
-  completeActivity(
-    @RequestContextData() ctx: RequestContext,
-    @Param('id') id: string,
-  ) {
-    return this.crmService.completeActivity(ctx, id);
-  }
-
-  @Delete('activities/:id')
-  deleteActivity(
-    @RequestContextData() ctx: RequestContext,
-    @Param('id') id: string,
-  ) {
-    return this.crmService.deleteActivity(ctx, id);
   }
 }

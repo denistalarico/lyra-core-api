@@ -239,11 +239,50 @@ export class ActivitiesService {
       return acc;
     }, {});
 
+    const now = new Date();
+
+    const openActivities = await this.activitiesRepository
+      .createQueryBuilder('activity')
+      .where('activity.tenant_id = :tenantId', { tenantId: context.tenantId })
+      .andWhere('activity.workspace_id = :workspaceId', { workspaceId: context.workspaceId })
+      .andWhere('activity.archived_at IS NULL')
+      .andWhere('activity.status NOT IN (:...closedStatuses)', {
+        closedStatuses: [
+          ActivityStatus.Done,
+          ActivityStatus.Cancelled,
+          ActivityStatus.Archived,
+        ],
+      })
+      .orderBy('activity.due_at', 'ASC', 'NULLS LAST')
+      .addOrderBy('activity.updated_at', 'DESC')
+      .take(30)
+      .getMany();
+
+    const items = openActivities
+      .map((activity) => ({
+        id: activity.id,
+        type: activity.type,
+        summary: activity.summary,
+        assignedToId: activity.assignedToId,
+        assignedToName: null as string | null,
+        dueAt: activity.dueAt ? activity.dueAt.toISOString() : null,
+        overdue: activity.dueAt !== null && activity.dueAt.getTime() < now.getTime(),
+        href: '/projects/activities',
+      }))
+      .sort((a, b) => {
+        if (a.overdue !== b.overdue) return a.overdue ? -1 : 1;
+        if (a.dueAt === null && b.dueAt === null) return 0;
+        if (a.dueAt === null) return 1;
+        if (b.dueAt === null) return -1;
+        return new Date(a.dueAt).getTime() - new Date(b.dueAt).getTime();
+      });
+
     return {
       total: Object.values(byStatus).reduce((sum, count) => sum + count, 0),
       byStatus,
       overdue: overdueCount,
       myOpen: myOpenCount,
+      items,
     };
   }
 

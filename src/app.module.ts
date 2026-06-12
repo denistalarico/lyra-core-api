@@ -32,6 +32,7 @@ import { ClientsModule } from './modules/clients';
 import { KnowledgeModule } from './modules/knowledge';
 import { TeamChatModule } from './modules/team-chat/team-chat.module';
 import { PlatformModule } from './modules/platform';
+import { DashboardsModule } from './modules/dashboards';
 
 @Module({
   imports: [
@@ -66,6 +67,7 @@ import { PlatformModule } from './modules/platform';
     ClientsModule,
     KnowledgeModule,
     PlatformModule,
+    DashboardsModule,
   ],
 })
 export class AppModule {}

@@ -27,6 +27,7 @@ import { ProjectSettingsController } from './controllers/project-settings.contro
 import { ProjectEventsController } from './controllers/project-events.controller';
 import { ProjectFollowersAttachmentsController } from './controllers/project-followers-attachments.controller';
 import { ProjectFollowersAttachmentsService } from './services/project-followers-attachments.service';
+import { ProjectsDashboardQueryService } from './services/projects-dashboard-query.service';
 import { ProjectsService } from './services/projects.service';
 import { ProjectsCrudService } from './services/projects-crud.service';
 import { ProjectStagesService } from './services/project-stages.service';
@@ -88,6 +89,7 @@ const AGENCY_CONNECTION = 'agency';
     ProjectSettingsService,
     ProjectEventsService,
     ProjectFollowersAttachmentsService,
+    ProjectsDashboardQueryService,
   ],
   exports: [
     ProjectsService,
@@ -101,6 +103,7 @@ const AGENCY_CONNECTION = 'agency';
     ProjectSettingsService,
     ProjectEventsService,
     ProjectFollowersAttachmentsService,
+    ProjectsDashboardQueryService,
   ],
 })
 export class ProjectsModule {}

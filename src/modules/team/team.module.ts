@@ -21,6 +21,7 @@ import { TeamAttendanceController } from './controllers/team-attendance.controll
 import { TeamPaymentsController } from './controllers/team-payments.controller';
 import { TeamService } from './services/team.service';
 import { TeamAttendanceService } from './services/team-attendance.service';
+import { TeamDashboardQueryService } from './services/team-dashboard-query.service';
 import { TeamPaymentsService } from './services/team-payments.service';
 import { FinanceModule } from '../finance/finance.module';
 import { DocumentLayoutsModule } from '../document-layouts/document-layouts.module';
@@ -52,7 +53,17 @@ const AGENCY_CONNECTION = 'agency';
     ),
   ],
   controllers: [TeamController, TeamAttendanceController, TeamPaymentsController],
-  providers: [TeamService, TeamAttendanceService, TeamPaymentsService],
-  exports: [TeamService, TeamAttendanceService, TeamPaymentsService],
+  providers: [
+    TeamService,
+    TeamAttendanceService,
+    TeamPaymentsService,
+    TeamDashboardQueryService,
+  ],
+  exports: [
+    TeamService,
+    TeamAttendanceService,
+    TeamPaymentsService,
+    TeamDashboardQueryService,
+  ],
 })
 export class TeamModule {}
