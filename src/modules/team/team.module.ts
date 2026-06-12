@@ -26,6 +26,8 @@ import { TeamPaymentsService } from './services/team-payments.service';
 import { FinanceModule } from '../finance/finance.module';
 import { DocumentLayoutsModule } from '../document-layouts/document-layouts.module';
 import { FilesModule } from '../../common/files/files.module';
+import { NotificationsModule } from '../notifications';
+import { TeamNotificationPublisher } from './services/team-notification.publisher';
 
 const AGENCY_CONNECTION = 'agency';
 
@@ -34,6 +36,7 @@ const AGENCY_CONNECTION = 'agency';
     FinanceModule,
     DocumentLayoutsModule,
     FilesModule,
+    NotificationsModule,
     TypeOrmModule.forFeature(
       [
         TeamDepartment,
@@ -58,6 +61,7 @@ const AGENCY_CONNECTION = 'agency';
     TeamAttendanceService,
     TeamPaymentsService,
     TeamDashboardQueryService,
+    TeamNotificationPublisher,
   ],
   exports: [
     TeamService,

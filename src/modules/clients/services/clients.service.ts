@@ -10,7 +10,8 @@ import { AgencyProject, AgencyTask } from '../../projects/entities';
 import { ProjectStatus, TaskStatus } from '../../projects/enums';
 import { CreateClientDto, ListClientsQueryDto, UpdateClientDto } from '../dto';
 import { AgencyClient } from '../entities';
-import { AgencyClientStatus } from '../enums';
+import { AgencyClientLifecycleStage, AgencyClientStatus } from '../enums';
+import { ClientNotificationPublisher } from './client-notification.publisher';
 import { ClientsProfitabilityService } from './clients-profitability.service';
 
 type RequestContext = {
@@ -35,6 +36,7 @@ export class ClientsService {
     @InjectRepository(AgencyActivity, AGENCY_CONNECTION)
     private readonly activitiesRepository: Repository<AgencyActivity>,
     private readonly clientsProfitabilityService: ClientsProfitabilityService,
+    private readonly clientNotificationPublisher: ClientNotificationPublisher,
   ) {}
 
   async list(context: RequestContext, query: ListClientsQueryDto) {
@@ -157,7 +159,16 @@ export class ClientsService {
       archivedAt: null,
     });
 
-    return this.clientsRepository.save(client);
+    const saved = await this.clientsRepository.save(client);
+
+    if (saved.accountOwnerId) {
+      await this.clientNotificationPublisher.publishAssigned({
+        client: saved,
+        actorUserId: context.userId,
+      });
+    }
+
+    return saved;
   }
 
   async findOne(context: RequestContext, clientId: string) {
@@ -178,6 +189,9 @@ export class ClientsService {
 
   async update(context: RequestContext, clientId: string, dto: UpdateClientDto) {
     const client = await this.findOne(context, clientId);
+    const previousOwnerId = client.accountOwnerId;
+    const previousManagedTenantId = client.managedTenantId;
+    const previousLifecycleStage = client.lifecycleStage;
 
     if (dto.contactId !== undefined) client.contactId = dto.contactId;
     if (dto.displayName !== undefined) client.displayName = dto.displayName;
@@ -197,7 +211,54 @@ export class ClientsService {
       client.archivedAt = new Date();
     }
 
-    return this.clientsRepository.save(client);
+    const saved = await this.clientsRepository.save(client);
+    const actorUserId = context.userId;
+
+    if (saved.accountOwnerId && saved.accountOwnerId !== previousOwnerId) {
+      if (!previousOwnerId) {
+        await this.clientNotificationPublisher.publishAssigned({
+          client: saved,
+          actorUserId,
+        });
+      } else {
+        await this.clientNotificationPublisher.publishOwnerChanged({
+          client: saved,
+          actorUserId,
+          previousOwnerId,
+        });
+      }
+    }
+
+    if (saved.managedTenantId !== previousManagedTenantId) {
+      if (!previousManagedTenantId && saved.managedTenantId) {
+        await this.clientNotificationPublisher.publishManagedTenantConnected({
+          client: saved,
+          actorUserId,
+        });
+      } else if (previousManagedTenantId && !saved.managedTenantId) {
+        await this.clientNotificationPublisher.publishManagedTenantDisconnected({
+          client: saved,
+          actorUserId,
+          previousManagedTenantId,
+        });
+      }
+    }
+
+    if (saved.lifecycleStage !== previousLifecycleStage) {
+      if (saved.lifecycleStage === AgencyClientLifecycleStage.Onboarding) {
+        await this.clientNotificationPublisher.publishOnboardingStarted({
+          client: saved,
+          actorUserId,
+        });
+      } else if (previousLifecycleStage === AgencyClientLifecycleStage.Onboarding) {
+        await this.clientNotificationPublisher.publishOnboardingCompleted({
+          client: saved,
+          actorUserId,
+        });
+      }
+    }
+
+    return saved;
   }
 
   async archive(context: RequestContext, clientId: string) {

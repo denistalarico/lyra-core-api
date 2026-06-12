@@ -18,6 +18,7 @@ import {
   ListActivitiesQueryDto,
   UpdateActivityDto,
 } from '../dto';
+import { ActivityNotificationPublisher } from './activity-notification.publisher';
 
 type RequestContext = {
   tenantId: string;
@@ -34,6 +35,7 @@ export class ActivitiesService {
     private readonly activitiesRepository: Repository<AgencyActivity>,
     @InjectRepository(AgencyActivityLink, AGENCY_CONNECTION)
     private readonly linksRepository: Repository<AgencyActivityLink>,
+    private readonly activityNotificationPublisher: ActivityNotificationPublisher,
   ) {}
 
   getTypesConfig() {
@@ -319,7 +321,11 @@ export class ActivitiesService {
     return { ...activity, links };
   }
 
-  async create(context: RequestContext, dto: CreateActivityDto) {
+  async create(
+    context: RequestContext,
+    dto: CreateActivityDto,
+    options: { skipAssignedNotification?: boolean } = {},
+  ) {
     this.validateBusinessRules(dto.type, dto.entityType);
 
     const activity = this.activitiesRepository.create({
@@ -357,6 +363,22 @@ export class ActivitiesService {
       });
     }
 
+    if (saved.assignedToId && !options.skipAssignedNotification) {
+      const links = await this.linksRepository.find({
+        where: {
+          tenantId: context.tenantId,
+          workspaceId: context.workspaceId,
+          activityId: saved.id,
+        },
+      });
+
+      await this.activityNotificationPublisher.publishAssigned({
+        activity: saved,
+        links,
+        actorUserId: context.userId,
+      });
+    }
+
     return this.findOne(context, saved.id);
   }
 
@@ -372,6 +394,10 @@ export class ActivitiesService {
     if (!activity || activity.archivedAt) {
       throw new NotFoundException('Activity not found');
     }
+
+    const previousAssignedToId = activity.assignedToId;
+    const wasCompleted = activity.status === ActivityStatus.Done;
+    const wasCancelled = activity.status === ActivityStatus.Cancelled;
 
     if (dto.type !== undefined) activity.type = dto.type;
     if (dto.subtype !== undefined) activity.subtype = dto.subtype;
@@ -403,7 +429,56 @@ export class ActivitiesService {
       activity.cancelledById = context.userId;
     }
 
-    return this.activitiesRepository.save(activity);
+    const saved = await this.activitiesRepository.save(activity);
+
+    if (
+      (saved.assignedToId && saved.assignedToId !== previousAssignedToId) ||
+      (saved.status === ActivityStatus.Done && !wasCompleted) ||
+      (saved.status === ActivityStatus.Cancelled && !wasCancelled)
+    ) {
+      const links = await this.linksRepository.find({
+        where: {
+          tenantId: context.tenantId,
+          workspaceId: context.workspaceId,
+          activityId: saved.id,
+        },
+      });
+
+      if (saved.assignedToId && saved.assignedToId !== previousAssignedToId) {
+        if (!previousAssignedToId) {
+          await this.activityNotificationPublisher.publishAssigned({
+            activity: saved,
+            links,
+            actorUserId: context.userId,
+          });
+        } else {
+          await this.activityNotificationPublisher.publishReassigned({
+            activity: saved,
+            links,
+            actorUserId: context.userId,
+            previousAssignedToId,
+          });
+        }
+      }
+
+      if (saved.status === ActivityStatus.Done && !wasCompleted) {
+        await this.activityNotificationPublisher.publishCompleted({
+          activity: saved,
+          links,
+          actorUserId: context.userId,
+        });
+      }
+
+      if (saved.status === ActivityStatus.Cancelled && !wasCancelled) {
+        await this.activityNotificationPublisher.publishCanceled({
+          activity: saved,
+          links,
+          actorUserId: context.userId,
+        });
+      }
+    }
+
+    return saved;
   }
 
   async archive(context: RequestContext, id: string) {
@@ -437,12 +512,32 @@ export class ActivitiesService {
       throw new NotFoundException('Activity not found');
     }
 
+    const wasCompleted = activity.status === ActivityStatus.Done;
+
     activity.status = ActivityStatus.Done;
     activity.completedAt = new Date();
     activity.completedById = context.userId;
     activity.completionFeedback = dto.feedback ?? null;
 
-    return this.activitiesRepository.save(activity);
+    const saved = await this.activitiesRepository.save(activity);
+
+    if (!wasCompleted) {
+      const links = await this.linksRepository.find({
+        where: {
+          tenantId: context.tenantId,
+          workspaceId: context.workspaceId,
+          activityId: saved.id,
+        },
+      });
+
+      await this.activityNotificationPublisher.publishCompleted({
+        activity: saved,
+        links,
+        actorUserId: context.userId,
+      });
+    }
+
+    return saved;
   }
 
   async completeAndScheduleNext(
@@ -460,7 +555,9 @@ export class ActivitiesService {
     });
 
     const completed = await this.complete(context, id, dto.completion);
-    const next = await this.create(context, dto.nextActivity);
+    const next = await this.create(context, dto.nextActivity, {
+      skipAssignedNotification: true,
+    });
 
     const shouldInheritLinks =
       !dto.nextActivity.entityType &&
@@ -478,6 +575,23 @@ export class ActivitiesService {
     }
 
     const nextWithLinks = await this.findOne(context, next.id);
+
+    if (nextWithLinks.assignedToId) {
+      const nextLinks = await this.linksRepository.find({
+        where: {
+          tenantId: context.tenantId,
+          workspaceId: context.workspaceId,
+          activityId: next.id,
+        },
+      });
+
+      await this.activityNotificationPublisher.publishFollowUpCreated({
+        activity: nextWithLinks,
+        links: nextLinks,
+        actorUserId: context.userId,
+        parentActivityId: id,
+      });
+    }
 
     return {
       completed,
@@ -498,6 +612,8 @@ export class ActivitiesService {
       throw new NotFoundException('Activity not found');
     }
 
+    const wasCancelled = activity.status === ActivityStatus.Cancelled;
+
     activity.status = ActivityStatus.Cancelled;
     activity.cancelledAt = new Date();
     activity.cancelledById = context.userId;
@@ -506,7 +622,25 @@ export class ActivitiesService {
       cancellationReason: dto.reason ?? null,
     };
 
-    return this.activitiesRepository.save(activity);
+    const saved = await this.activitiesRepository.save(activity);
+
+    if (!wasCancelled) {
+      const links = await this.linksRepository.find({
+        where: {
+          tenantId: context.tenantId,
+          workspaceId: context.workspaceId,
+          activityId: saved.id,
+        },
+      });
+
+      await this.activityNotificationPublisher.publishCanceled({
+        activity: saved,
+        links,
+        actorUserId: context.userId,
+      });
+    }
+
+    return saved;
   }
 
   async createLink(context: RequestContext, activityId: string, dto: CreateActivityLinkDto) {

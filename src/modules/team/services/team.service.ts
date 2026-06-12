@@ -36,7 +36,9 @@ import {
   TeamRecordStatus,
   TeamSkillLevel,
 } from '../enums';
+import { NotificationInterestReason } from '../../notifications/enums';
 import { TEAM_DEFAULT_DEPARTMENTS, TEAM_DEFAULT_SKILLS } from './team-defaults';
+import { TeamNotificationPublisher } from './team-notification.publisher';
 
 type RequestContext = {
   tenantId: string;
@@ -76,6 +78,7 @@ export class TeamService {
     @InjectRepository(AgencyUserProfileEntity, 'agency')
     private readonly userProfileRepository: Repository<AgencyUserProfileEntity>,
     private readonly filesService: FilesService,
+    private readonly teamNotificationPublisher: TeamNotificationPublisher,
   ) {}
 
   health() {
@@ -465,7 +468,7 @@ export class TeamService {
     };
   }
 
-  createMember(ctx: RequestContext, dto: CreateTeamMemberDto) {
+  async createMember(ctx: RequestContext, dto: CreateTeamMemberDto) {
     const entity = this.memberRepository.create({
       tenantId: ctx.tenantId,
       workspaceId: ctx.workspaceId,
@@ -499,7 +502,16 @@ export class TeamService {
       createdById: ctx.userId || null,
     });
 
-    return this.memberRepository.save(entity);
+    const saved = await this.memberRepository.save(entity);
+
+    if (saved.userId) {
+      await this.teamNotificationPublisher.publishMemberInvited({
+        member: saved,
+        actorUserId: ctx.userId || null,
+      });
+    }
+
+    return saved;
   }
 
   async updateMember(
@@ -508,13 +520,63 @@ export class TeamService {
     dto: UpdateTeamMemberDto,
   ) {
     const entity = await this.findMember(ctx, id);
+    const previousStatus = entity.status;
+    const previousDepartmentId = entity.departmentId;
+    const previousRoleName = entity.roleName;
 
     Object.assign(entity, {
       ...dto,
       updatedById: ctx.userId || null,
     });
 
-    return this.memberRepository.save(entity);
+    const saved = await this.memberRepository.save(entity);
+    const actorUserId = ctx.userId || null;
+
+    if (saved.userId) {
+      if (
+        dto.status !== undefined &&
+        dto.status !== previousStatus &&
+        dto.status === TeamMemberStatus.Active
+      ) {
+        await this.teamNotificationPublisher.publishMemberActivated({
+          member: saved,
+          actorUserId,
+        });
+      }
+
+      if (
+        dto.status !== undefined &&
+        dto.status !== previousStatus &&
+        (dto.status === TeamMemberStatus.Inactive ||
+          dto.status === TeamMemberStatus.Archived)
+      ) {
+        await this.teamNotificationPublisher.publishMemberDeactivated({
+          member: saved,
+          actorUserId,
+        });
+      }
+
+      if (
+        dto.departmentId !== undefined &&
+        dto.departmentId !== previousDepartmentId
+      ) {
+        await this.teamNotificationPublisher.publishDepartmentChanged({
+          member: saved,
+          actorUserId,
+          previousDepartmentId,
+        });
+      }
+
+      if (dto.roleName !== undefined && dto.roleName !== previousRoleName) {
+        await this.teamNotificationPublisher.publishRoleChanged({
+          member: saved,
+          actorUserId,
+          previousRoleName,
+        });
+      }
+    }
+
+    return saved;
   }
 
   async uploadMemberAvatar(
@@ -542,10 +604,21 @@ export class TeamService {
 
   async archiveMember(ctx: RequestContext, id: string) {
     const entity = await this.findMember(ctx, id);
+    const previousStatus = entity.status;
     entity.status = TeamMemberStatus.Archived;
     entity.archivedAt = new Date();
     entity.updatedById = ctx.userId || null;
-    return this.memberRepository.save(entity);
+
+    const saved = await this.memberRepository.save(entity);
+
+    if (saved.userId && previousStatus !== TeamMemberStatus.Archived) {
+      await this.teamNotificationPublisher.publishMemberDeactivated({
+        member: saved,
+        actorUserId: ctx.userId || null,
+      });
+    }
+
+    return saved;
   }
 
   async deleteMember(ctx: RequestContext, id: string) {
@@ -586,7 +659,7 @@ export class TeamService {
       return this.memberSkillRepository.save(existing);
     }
 
-    return this.memberSkillRepository.save(
+    const created = await this.memberSkillRepository.save(
       this.memberSkillRepository.create({
         tenantId: ctx.tenantId,
         workspaceId: ctx.workspaceId,
@@ -597,6 +670,25 @@ export class TeamService {
         metadata: dto.metadata ?? {},
       }),
     );
+
+    const member = await this.findMember(ctx, memberId);
+
+    if (member.userId) {
+      await this.teamNotificationPublisher.publishSkillAssigned({
+        member,
+        actorUserId: ctx.userId || null,
+        skillId: dto.skillId,
+        occurredAt: created.createdAt,
+        recipients: [
+          {
+            userId: member.userId,
+            interestReason: NotificationInterestReason.ASSIGNED,
+          },
+        ],
+      });
+    }
+
+    return created;
   }
 
   async removeMemberSkill(
