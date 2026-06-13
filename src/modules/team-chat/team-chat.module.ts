@@ -24,12 +24,15 @@ import { TeamChatUserSettingsService } from './services/team-chat-user-settings.
 import { TeamChatAttachmentsController } from './controllers/team-chat-attachments.controller';
 import { TeamChatMeetingsController } from './controllers/team-chat-meetings.controller';
 import { FilesModule } from '../../common/files/files.module';
+import { NotificationsModule } from '../notifications';
+import { TeamChatNotificationPublisher } from './services/team-chat-notification.publisher';
 
 const AGENCY_CONNECTION = 'agency';
 
 @Module({
   imports: [
     FilesModule,
+    NotificationsModule,
     TypeOrmModule.forFeature(
       [
         AgencyChatChannel,
@@ -53,6 +56,7 @@ const AGENCY_CONNECTION = 'agency';
     TeamChatMeetingsService,
     TeamChatAttachmentsService,
     TeamChatLiveKitProviderService,
+    TeamChatNotificationPublisher,
     TeamChatUserSettingsService,
     TeamChatGateway,
   ],
@@ -62,6 +66,7 @@ const AGENCY_CONNECTION = 'agency';
     TeamChatMeetingsService,
     TeamChatAttachmentsService,
     TeamChatLiveKitProviderService,
+    TeamChatNotificationPublisher,
     TeamChatUserSettingsService,
   ],
 })

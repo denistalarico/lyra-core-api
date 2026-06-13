@@ -2,14 +2,18 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { CreateKnowledgeCommentDto, UpdateKnowledgeCommentDto } from '../dto';
-import { AgencyKnowledgeComment } from '../entities';
+import { AgencyKnowledgeArticle, AgencyKnowledgeComment } from '../entities';
 import { KnowledgeContext } from './knowledge-context';
+import { KnowledgeNotificationPublisher } from './knowledge-notification.publisher';
 
 @Injectable()
 export class KnowledgeCommentsService {
   constructor(
     @InjectRepository(AgencyKnowledgeComment, 'agency')
     private readonly commentsRepository: Repository<AgencyKnowledgeComment>,
+    @InjectRepository(AgencyKnowledgeArticle, 'agency')
+    private readonly articlesRepository: Repository<AgencyKnowledgeArticle>,
+    private readonly knowledgeNotificationPublisher: KnowledgeNotificationPublisher,
   ) {}
 
   listByArticle(context: KnowledgeContext, articleId: string) {
@@ -25,11 +29,23 @@ export class KnowledgeCommentsService {
     });
   }
 
-  create(
+  async create(
     context: KnowledgeContext,
     articleId: string,
     dto: CreateKnowledgeCommentDto,
   ) {
+    const article = await this.articlesRepository.findOne({
+      where: {
+        id: articleId,
+        tenantId: context.tenantId,
+        workspaceId: context.workspaceId,
+      },
+    });
+
+    if (!article) {
+      throw new NotFoundException('Knowledge article not found');
+    }
+
     const comment = this.commentsRepository.create({
       tenantId: context.tenantId,
       workspaceId: context.workspaceId,
@@ -39,7 +55,16 @@ export class KnowledgeCommentsService {
       body: dto.body,
     });
 
-    return this.commentsRepository.save(comment);
+    const saved = await this.commentsRepository.save(comment);
+
+    await this.knowledgeNotificationPublisher.publishCommentAdded({
+      article,
+      comment: saved,
+      actorUserId: context.userId,
+      occurredAt: saved.createdAt,
+    });
+
+    return saved;
   }
 
   async update(

@@ -39,6 +39,10 @@ function createService() {
   const opportunityTagsRepository = createRepositoryMock();
   const opportunityEventsRepository = createRepositoryMock();
   const contactsRepository = createRepositoryMock();
+  const salesNotificationPublisher = {
+    publishOpportunityAssigned: jest.fn(),
+    publishOpportunityStageChanged: jest.fn(),
+  };
 
   const service = new CrmService(
     pipelinesRepository as never,
@@ -48,6 +52,7 @@ function createService() {
     opportunityTagsRepository as never,
     opportunityEventsRepository as never,
     contactsRepository as never,
+    salesNotificationPublisher as never,
   );
 
   return {
@@ -59,6 +64,7 @@ function createService() {
     opportunityTagsRepository,
     opportunityEventsRepository,
     contactsRepository,
+    salesNotificationPublisher,
   };
 }
 
@@ -219,6 +225,62 @@ describe('CrmService agency validation', () => {
         stageId: 'stage-b',
       }),
     ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('publishes opportunity assignment after creating an assigned opportunity', async () => {
+    const {
+      service,
+      pipelinesRepository,
+      stagesRepository,
+      contactsRepository,
+      salesNotificationPublisher,
+    } = createService();
+    pipelinesRepository.findOne.mockResolvedValue(mockPipeline());
+    stagesRepository.findOne.mockResolvedValue(mockStage());
+    contactsRepository.findOne.mockResolvedValue(null);
+
+    const saved = await service.createOpportunity(ctx, {
+      pipelineId: 'pipeline-a',
+      stageId: 'stage-a',
+      title: 'Lead técnico',
+      assignedUserId: 'user-b',
+    });
+
+    expect(saved.assignedUserId).toBe('user-b');
+    expect(
+      salesNotificationPublisher.publishOpportunityAssigned,
+    ).toHaveBeenCalledWith(
+      expect.objectContaining({
+        resource: expect.objectContaining({
+          assignedUserId: 'user-b',
+        }),
+        actorUserId: ctx.userId,
+        assignedUserId: 'user-b',
+      }),
+    );
+  });
+
+  it('does not publish opportunity assignment when assignee is unchanged', async () => {
+    const {
+      service,
+      pipelinesRepository,
+      stagesRepository,
+      opportunitiesRepository,
+      salesNotificationPublisher,
+    } = createService();
+    opportunitiesRepository.findOne.mockResolvedValue(
+      mockOpportunity({ assignedUserId: 'user-b' }),
+    );
+    pipelinesRepository.findOne.mockResolvedValue(mockPipeline('pipeline-a'));
+    stagesRepository.findOne.mockResolvedValue(mockStage('stage-a'));
+
+    await service.patchOpportunity(ctx, 'opportunity-a', {
+      assignedUserId: 'user-b',
+    });
+
+    expect(
+      salesNotificationPublisher.publishOpportunityAssigned,
+    ).not.toHaveBeenCalled();
   });
 });
 

@@ -30,6 +30,7 @@ import { CrmStageEntity } from './entities/crm-stage.entity';
 import { CrmOpportunityEventEntity } from './entities/crm-opportunity-event.entity';
 import { CrmOpportunityTagEntity } from './entities/crm-opportunity-tag.entity';
 import { CrmTagEntity } from './entities/crm-tag.entity';
+import { SalesNotificationPublisher } from './sales-notification.publisher';
 
 export type CrmOpportunityFilters = {
   pipelineId?: string;
@@ -67,6 +68,7 @@ export class CrmService {
 
     @InjectRepository(ContactEntity, 'agency')
     private readonly contactsRepository: Repository<ContactEntity>,
+    private readonly salesNotificationPublisher: SalesNotificationPublisher,
   ) {}
 
   async listPipelines(ctx: RequestContext): Promise<CrmPipelineEntity[]> {
@@ -353,6 +355,15 @@ export class CrmService {
       afterData: { opportunityId: saved.id, title: saved.title },
     });
 
+    if (saved.assignedUserId) {
+      await this.salesNotificationPublisher.publishOpportunityAssigned({
+        resource: saved,
+        actorUserId: this.getUserId(ctx),
+        occurredAt: saved.createdAt,
+        assignedUserId: saved.assignedUserId,
+      });
+    }
+
     return saved;
   }
 
@@ -378,6 +389,7 @@ export class CrmService {
     dto: PatchCrmOpportunityDto,
   ): Promise<CrmOpportunityEntity> {
     const opportunity = await this.getOpportunity(ctx, id);
+    const previousAssignedUserId = opportunity.assignedUserId;
 
     const pipelineId = dto.pipelineId ?? opportunity.pipelineId;
     const stageId = dto.stageId ?? opportunity.stageId;
@@ -440,6 +452,19 @@ export class CrmService {
       afterData: { opportunityId: saved.id },
     });
 
+    if (
+      dto.assignedUserId !== undefined &&
+      saved.assignedUserId &&
+      saved.assignedUserId !== previousAssignedUserId
+    ) {
+      await this.salesNotificationPublisher.publishOpportunityAssigned({
+        resource: saved,
+        actorUserId: this.getUserId(ctx),
+        occurredAt: saved.updatedAt,
+        assignedUserId: saved.assignedUserId,
+      });
+    }
+
     return saved;
   }
 
@@ -449,12 +474,17 @@ export class CrmService {
     dto: PatchCrmOpportunityStageDto,
   ): Promise<CrmOpportunityEntity> {
     const opportunity = await this.getOpportunity(ctx, id);
+    const previousStageId = opportunity.stageId;
     const stage = await this.getStage(ctx, dto.stageId);
 
     if (stage.pipelineId !== opportunity.pipelineId) {
       throw new BadRequestException(
         'Stage does not belong to this opportunity pipeline.',
       );
+    }
+
+    if (previousStageId === stage.id) {
+      return opportunity;
     }
 
     opportunity.stageId = stage.id;
@@ -469,12 +499,24 @@ export class CrmService {
 
     const saved = await this.opportunitiesRepository.save(opportunity);
 
-    await this.createOpportunityEvent(ctx, saved.id, {
+    const event = await this.createOpportunityEvent(ctx, saved.id, {
       actorType: 'user',
       eventType: 'stage_changed',
       title: 'Etapa alterada',
+      beforeData: { stageId: previousStageId },
       afterData: { stageId: saved.stageId, status: saved.status },
     });
+
+    if (stage.isWonStage || stage.isLostStage || stage.type === 'won' || stage.type === 'lost') {
+      await this.salesNotificationPublisher.publishOpportunityStageChanged({
+        resource: saved,
+        event,
+        actorUserId: this.getUserId(ctx),
+        occurredAt: event.createdAt,
+        previousStageId,
+        stageId: saved.stageId,
+      });
+    }
 
     return saved;
   }

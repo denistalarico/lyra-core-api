@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { FilesModule } from '../../common/files/files.module';
 import { AgencyUserSecuritySettingsEntity } from '../agency/entities/agency-auth.entities';
+import { NotificationsModule } from '../notifications';
 import {
   KnowledgeArticlesController,
   KnowledgeCategoriesController,
@@ -26,6 +27,7 @@ import {
   KnowledgeArticlesService,
   KnowledgeCategoriesService,
   KnowledgeCommentsService,
+  KnowledgeNotificationPublisher,
   KnowledgeQuickNotesService,
   KnowledgeReactionsService,
   KnowledgeVaultReauthService,
@@ -35,6 +37,7 @@ import {
 @Module({
   imports: [
     FilesModule,
+    NotificationsModule,
     TypeOrmModule.forFeature(
       [
         AgencyUserSecuritySettingsEntity,
@@ -63,6 +66,7 @@ import {
     KnowledgeArticlesService,
     KnowledgeCategoriesService,
     KnowledgeCommentsService,
+    KnowledgeNotificationPublisher,
     KnowledgeQuickNotesService,
     KnowledgeReactionsService,
     KnowledgeVaultCryptoService,
@@ -73,6 +77,7 @@ import {
     KnowledgeArticlesService,
     KnowledgeCategoriesService,
     KnowledgeCommentsService,
+    KnowledgeNotificationPublisher,
     KnowledgeQuickNotesService,
     KnowledgeReactionsService,
     KnowledgeVaultService,

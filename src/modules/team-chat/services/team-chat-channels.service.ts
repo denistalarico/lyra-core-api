@@ -22,6 +22,7 @@ import {
   PatchTeamChatChannelDto,
   UpdateChannelMembershipDto,
 } from '../dto';
+import { TeamChatNotificationPublisher } from './team-chat-notification.publisher';
 
 type TeamChatContext = {
   tenantId: string;
@@ -42,6 +43,7 @@ export class TeamChatChannelsService {
     private readonly messagesRepository: Repository<AgencyChatMessage>,
     @InjectRepository(AgencyChatAttachment, AGENCY_CONNECTION)
     private readonly attachmentsRepository: Repository<AgencyChatAttachment>,
+    private readonly teamChatNotificationPublisher: TeamChatNotificationPublisher,
   ) {}
 
   async getSummary(context: TeamChatContext) {
@@ -313,6 +315,7 @@ export class TeamChatChannelsService {
     dto: AddTeamChatChannelMembersDto,
   ) {
     const channel = await this.assertChannel(context, channelId);
+    const createdMembers: AgencyChatChannelMember[] = [];
 
     const results = await Promise.all(
       dto.userIds.map(async (userId) => {
@@ -327,7 +330,7 @@ export class TeamChatChannelsService {
 
         if (existing) return existing;
 
-        return this.membersRepository.save(
+        const savedMember = await this.membersRepository.save(
           this.membersRepository.create({
             tenantId: context.tenantId,
             workspaceId: context.workspaceId,
@@ -339,7 +342,23 @@ export class TeamChatChannelsService {
             joinedAt: new Date(),
           }),
         );
+        createdMembers.push(savedMember);
+        return savedMember;
       }),
+    );
+
+    await Promise.all(
+      createdMembers.map((member) =>
+          this.teamChatNotificationPublisher.publishChannelInvited({
+            tenantId: context.tenantId,
+            workspaceId: context.workspaceId,
+            channel,
+            actorUserId: context.userId ?? null,
+            occurredAt: member.createdAt,
+            invitedUserId: member.userId,
+            memberId: member.id,
+          }),
+      ),
     );
 
     return results;

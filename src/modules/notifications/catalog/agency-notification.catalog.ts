@@ -149,6 +149,33 @@ export const AGENCY_NOTIFICATION_CATALOG: readonly NotificationDefinition[] = [
     NotificationRecipientStrategy.EXPLICIT_USERS,
   ),
   standard(
+    'chat.message_failed',
+    'team-chat',
+    NotificationCategory.RISK,
+    NotificationRecipientStrategy.REQUESTER,
+    {
+      defaultPriority: NotificationPriority.HIGH,
+    },
+  ),
+  standard(
+    'chat.integration_failed',
+    'team-chat',
+    NotificationCategory.INTEGRATION,
+    NotificationRecipientStrategy.REQUESTER,
+    {
+      defaultPriority: NotificationPriority.HIGH,
+    },
+  ),
+  standard(
+    'chat.ai_summary_failed',
+    'team-chat',
+    NotificationCategory.PROCESSING,
+    NotificationRecipientStrategy.REQUESTER,
+    {
+      defaultPriority: NotificationPriority.HIGH,
+    },
+  ),
+  standard(
     'chat.recording_ready',
     'team-chat',
     NotificationCategory.PROCESSING,
@@ -637,6 +664,41 @@ export const AGENCY_NOTIFICATION_CATALOG: readonly NotificationDefinition[] = [
       selfNotificationPolicy: NotificationSelfPolicy.ALLOW_ACTOR,
     },
   ),
+  standard(
+    'sales.quote_expired',
+    'sales',
+    NotificationCategory.DEADLINE,
+    NotificationRecipientStrategy.RESOURCE_OWNER,
+    {
+      defaultPriority: NotificationPriority.HIGH,
+      selfNotificationPolicy: NotificationSelfPolicy.ALLOW_ACTOR,
+    },
+  ),
+  standard(
+    'sales.opportunity_stale',
+    'sales',
+    NotificationCategory.DEADLINE,
+    NotificationRecipientStrategy.ASSIGNED_USER,
+    {
+      selfNotificationPolicy: NotificationSelfPolicy.ALLOW_ACTOR,
+    },
+  ),
+  informational(
+    'sales.forecast_changed',
+    'sales',
+    NotificationCategory.STATUS,
+    NotificationRecipientStrategy.PARTICIPANTS,
+  ),
+  standard(
+    'sales.revenue_target_at_risk',
+    'sales',
+    NotificationCategory.RISK,
+    NotificationRecipientStrategy.RESPONSIBLE_ROLE,
+    {
+      defaultPriority: NotificationPriority.HIGH,
+      selfNotificationPolicy: NotificationSelfPolicy.ALLOW_ACTOR,
+    },
+  ),
   informational(
     'sales.recurrence_started',
     'sales',
@@ -1112,6 +1174,30 @@ export const AGENCY_NOTIFICATION_CATALOG: readonly NotificationDefinition[] = [
     NotificationRecipientStrategy.RESOURCE_OWNER,
     {
       selfNotificationPolicy: NotificationSelfPolicy.ALLOW_ACTOR,
+    },
+  ),
+  standard(
+    'knowledge.article_expiring',
+    'knowledge',
+    NotificationCategory.DEADLINE,
+    NotificationRecipientStrategy.RESOURCE_OWNER,
+    {
+      selfNotificationPolicy: NotificationSelfPolicy.ALLOW_ACTOR,
+    },
+  ),
+  standard(
+    'knowledge.review_approved',
+    'knowledge',
+    NotificationCategory.APPROVAL,
+    NotificationRecipientStrategy.RESOURCE_OWNER,
+  ),
+  standard(
+    'knowledge.review_rejected',
+    'knowledge',
+    NotificationCategory.APPROVAL,
+    NotificationRecipientStrategy.RESOURCE_OWNER,
+    {
+      defaultPriority: NotificationPriority.HIGH,
     },
   ),
   standard(

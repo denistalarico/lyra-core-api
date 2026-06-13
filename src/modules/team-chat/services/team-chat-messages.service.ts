@@ -16,6 +16,8 @@ import {
   SearchTeamChatMessagesQueryDto,
 } from '../dto';
 import { TeamChatChannelsService } from './team-chat-channels.service';
+import { TeamChatNotificationPublisher } from './team-chat-notification.publisher';
+import { TeamChatChannelKind } from '../enums';
 
 type TeamChatContext = {
   tenantId: string;
@@ -35,6 +37,7 @@ export class TeamChatMessagesService {
     @InjectRepository(AgencyChatChannelMember, AGENCY_CONNECTION)
     private readonly membersRepository: Repository<AgencyChatChannelMember>,
     private readonly channelsService: TeamChatChannelsService,
+    private readonly teamChatNotificationPublisher: TeamChatNotificationPublisher,
   ) {}
 
   async list(
@@ -72,7 +75,7 @@ export class TeamChatMessagesService {
     channelId: string,
     dto: CreateTeamChatMessageDto,
   ) {
-    await this.channelsService.assertChannel(context, channelId);
+    const channel = await this.channelsService.assertChannel(context, channelId);
 
     const message = this.messagesRepository.create({
       tenantId: context.tenantId,
@@ -91,7 +94,54 @@ export class TeamChatMessagesService {
       deliveredAt: new Date(),
     });
 
-    return this.messagesRepository.save(message);
+    const saved = await this.messagesRepository.save(message);
+    const mentionedUserIds = this.extractMentionedUserIds(saved.metadata);
+
+    if (mentionedUserIds.length > 0) {
+      await this.teamChatNotificationPublisher.publishUserMentioned({
+        tenantId: context.tenantId,
+        workspaceId: context.workspaceId,
+        channel,
+        message: saved,
+        actorUserId: context.userId ?? null,
+        occurredAt: saved.createdAt,
+        mentionedUserIds,
+      });
+    }
+
+    if (channel.kind === TeamChatChannelKind.DIRECT) {
+      const members = await this.membersRepository.find({
+        where: {
+          tenantId: context.tenantId,
+          workspaceId: context.workspaceId,
+          channelId,
+        },
+      });
+      const mentionedUserIdSet = new Set(mentionedUserIds);
+      const recipientUserId =
+        members
+          .map((member) => member.userId)
+          .find(
+            (userId) =>
+              Boolean(userId) &&
+              userId !== context.userId &&
+              !mentionedUserIdSet.has(userId as string),
+          ) ?? null;
+
+      if (recipientUserId) {
+        await this.teamChatNotificationPublisher.publishDirectMessageReceived({
+          tenantId: context.tenantId,
+          workspaceId: context.workspaceId,
+          channel,
+          message: saved,
+          actorUserId: context.userId ?? null,
+          occurredAt: saved.createdAt,
+          recipientUserId,
+        });
+      }
+    }
+
+    return saved;
   }
 
   async patch(
@@ -201,6 +251,43 @@ export class TeamChatMessagesService {
     if (!context.userId || message.senderUserId !== context.userId) {
       throw new ForbiddenException('Você só pode alterar suas próprias mensagens.');
     }
+  }
+
+  private extractMentionedUserIds(
+    metadata?: Record<string, unknown> | null,
+  ): string[] {
+    if (!metadata) {
+      return [];
+    }
+
+    const candidates = [
+      metadata.mentionedUserIds,
+      metadata.mentionUserIds,
+      metadata.mentions,
+    ];
+    const userIds = new Set<string>();
+
+    for (const candidate of candidates) {
+      if (!Array.isArray(candidate)) {
+        continue;
+      }
+
+      for (const item of candidate) {
+        if (typeof item === 'string' && item.trim()) {
+          userIds.add(item.trim());
+        } else if (
+          item &&
+          typeof item === 'object' &&
+          'userId' in item &&
+          typeof item.userId === 'string' &&
+          item.userId.trim()
+        ) {
+          userIds.add(item.userId.trim());
+        }
+      }
+    }
+
+    return Array.from(userIds);
   }
 
   async search(

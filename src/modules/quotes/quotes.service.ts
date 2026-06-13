@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { ILike, Repository } from 'typeorm';
+import { SalesNotificationPublisher } from '../crm/sales-notification.publisher';
 import { DocumentPdfRendererService } from '../document-layouts/document-pdf-renderer.service';
 import { DocumentLayoutsService } from '../document-layouts/document-layouts.service';
 import {
@@ -47,6 +48,7 @@ export class QuotesService {
     private readonly templateSectionsRepo: Repository<QuoteTemplateSectionEntity>,
     private readonly documentLayoutsService: DocumentLayoutsService,
     private readonly documentPdfRenderer: DocumentPdfRendererService,
+    private readonly salesNotificationPublisher: SalesNotificationPublisher,
   ) {}
 
   health() {
@@ -599,13 +601,22 @@ export class QuotesService {
     quote.updatedByUserId = context.userId ?? quote.updatedByUserId;
 
     const saved = await this.quotesRepo.save(quote);
-    await this.recordStatusChange(
+    const statusHistory = await this.recordStatusChange(
       context,
       saved.id,
       previousStatus,
       'accepted',
       dto.reason ?? 'Quote accepted.',
     );
+
+    if (previousStatus !== 'accepted') {
+      await this.salesNotificationPublisher.publishQuoteAccepted({
+        resource: saved,
+        actorUserId: context.userId ?? null,
+        occurredAt: saved.acceptedAt ?? saved.updatedAt,
+        statusHistory,
+      });
+    }
 
     return this.getQuote(context, saved.id);
   }
@@ -624,13 +635,22 @@ export class QuotesService {
     quote.updatedByUserId = context.userId ?? quote.updatedByUserId;
 
     const saved = await this.quotesRepo.save(quote);
-    await this.recordStatusChange(
+    const statusHistory = await this.recordStatusChange(
       context,
       saved.id,
       previousStatus,
       'rejected',
       dto.reason ?? 'Quote rejected.',
     );
+
+    if (previousStatus !== 'rejected') {
+      await this.salesNotificationPublisher.publishQuoteRejected({
+        resource: saved,
+        actorUserId: context.userId ?? null,
+        occurredAt: saved.rejectedAt ?? saved.updatedAt,
+        statusHistory,
+      });
+    }
 
     return this.getQuote(context, saved.id);
   }
@@ -663,13 +683,31 @@ export class QuotesService {
     const saved = await this.quotesRepo.save(quote);
 
     if (previousStatus !== status) {
-      await this.recordStatusChange(
+      const statusHistory = await this.recordStatusChange(
         context,
         saved.id,
         previousStatus,
         status,
         reason,
       );
+
+      if (status === 'sent') {
+        await this.salesNotificationPublisher.publishQuoteSent({
+          resource: saved,
+          actorUserId: context.userId ?? null,
+          occurredAt: saved.updatedAt,
+          statusHistory,
+        });
+      }
+
+      if (status === 'expired') {
+        await this.salesNotificationPublisher.publishQuoteExpired({
+          resource: saved,
+          actorUserId: context.userId ?? null,
+          occurredAt: saved.updatedAt,
+          statusHistory,
+        });
+      }
     }
 
     return this.getQuote(context, saved.id);
@@ -792,7 +830,7 @@ export class QuotesService {
     fromStatus: QuoteStatus | null,
     toStatus: QuoteStatus,
     reason: string,
-  ) {
+  ): Promise<QuoteStatusHistoryEntity> {
     const entry = this.statusHistoryRepo.create({
       tenantId: context.tenantId,
       workspaceId: context.workspaceId,
@@ -804,6 +842,6 @@ export class QuotesService {
       metadata: {},
     });
 
-    await this.statusHistoryRepo.save(entry);
+    return this.statusHistoryRepo.save(entry);
   }
 }

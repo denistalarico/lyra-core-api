@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { SalesNotificationPublisher } from '../crm/sales-notification.publisher';
 import { DocumentLayoutsModule } from '../document-layouts/document-layouts.module';
+import { NotificationsModule } from '../notifications';
 import { QuotesController } from './quotes.controller';
 import { QuotesService } from './quotes.service';
 import {
@@ -16,6 +18,7 @@ const AGENCY_CONNECTION = 'agency';
 @Module({
   imports: [
     DocumentLayoutsModule,
+    NotificationsModule,
     TypeOrmModule.forFeature(
       [
         QuoteEntity,
@@ -28,7 +31,7 @@ const AGENCY_CONNECTION = 'agency';
     ),
   ],
   controllers: [QuotesController],
-  providers: [QuotesService],
+  providers: [QuotesService, SalesNotificationPublisher],
   exports: [QuotesService],
 })
 export class QuotesModule {}

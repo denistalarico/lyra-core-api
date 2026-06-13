@@ -10,6 +10,7 @@ import { AgencyKnowledgeArticle } from '../entities';
 import { AgencyKnowledgeArticleStatus } from '../enums';
 import { parseOptionalDate, KnowledgeContext } from './knowledge-context';
 import { FilesService } from '../../../common/files/files.service';
+import { KnowledgeNotificationPublisher } from './knowledge-notification.publisher';
 
 @Injectable()
 export class KnowledgeArticlesService {
@@ -17,6 +18,7 @@ export class KnowledgeArticlesService {
     @InjectRepository(AgencyKnowledgeArticle, 'agency')
     private readonly articlesRepository: Repository<AgencyKnowledgeArticle>,
     private readonly filesService: FilesService,
+    private readonly knowledgeNotificationPublisher: KnowledgeNotificationPublisher,
   ) {}
 
   list(context: KnowledgeContext, query: ListKnowledgeArticlesQueryDto) {
@@ -54,7 +56,7 @@ export class KnowledgeArticlesService {
     return article;
   }
 
-  create(context: KnowledgeContext, dto: CreateKnowledgeArticleDto) {
+  async create(context: KnowledgeContext, dto: CreateKnowledgeArticleDto) {
     const status = dto.status ?? AgencyKnowledgeArticleStatus.DRAFT;
     const article = this.articlesRepository.create({
       tenantId: context.tenantId,
@@ -85,7 +87,25 @@ export class KnowledgeArticlesService {
         status === AgencyKnowledgeArticleStatus.PUBLISHED ? new Date() : null,
     });
 
-    return this.articlesRepository.save(article);
+    const saved = await this.articlesRepository.save(article);
+
+    if (saved.ownerId) {
+      await this.knowledgeNotificationPublisher.publishArticleAssigned({
+        article: saved,
+        actorUserId: context.userId,
+        occurredAt: saved.createdAt,
+      });
+    }
+
+    if (saved.status === AgencyKnowledgeArticleStatus.PUBLISHED) {
+      await this.knowledgeNotificationPublisher.publishArticlePublished({
+        article: saved,
+        actorUserId: context.userId,
+        occurredAt: saved.publishedAt ?? saved.createdAt,
+      });
+    }
+
+    return saved;
   }
 
   async update(
@@ -95,6 +115,7 @@ export class KnowledgeArticlesService {
   ) {
     const article = await this.get(context, id);
     const previousStatus = article.status;
+    const previousOwnerId = article.ownerId;
 
     Object.assign(article, {
       categoryId:
@@ -135,7 +156,46 @@ export class KnowledgeArticlesService {
       article.publishedAt = new Date();
     }
 
-    return this.articlesRepository.save(article);
+    if (
+      previousStatus !== AgencyKnowledgeArticleStatus.ARCHIVED &&
+      article.status === AgencyKnowledgeArticleStatus.ARCHIVED
+    ) {
+      article.archivedAt = new Date();
+    }
+
+    const saved = await this.articlesRepository.save(article);
+
+    if (saved.ownerId && saved.ownerId !== previousOwnerId) {
+      await this.knowledgeNotificationPublisher.publishArticleAssigned({
+        article: saved,
+        actorUserId: context.userId,
+        occurredAt: saved.updatedAt,
+      });
+    }
+
+    if (
+      previousStatus !== AgencyKnowledgeArticleStatus.PUBLISHED &&
+      saved.status === AgencyKnowledgeArticleStatus.PUBLISHED
+    ) {
+      await this.knowledgeNotificationPublisher.publishArticlePublished({
+        article: saved,
+        actorUserId: context.userId,
+        occurredAt: saved.publishedAt ?? saved.updatedAt,
+      });
+    }
+
+    if (
+      previousStatus !== AgencyKnowledgeArticleStatus.ARCHIVED &&
+      saved.status === AgencyKnowledgeArticleStatus.ARCHIVED
+    ) {
+      await this.knowledgeNotificationPublisher.publishArticleArchived({
+        article: saved,
+        actorUserId: context.userId,
+        occurredAt: saved.archivedAt ?? saved.updatedAt,
+      });
+    }
+
+    return saved;
   }
 
   async remove(context: KnowledgeContext, id: string) {

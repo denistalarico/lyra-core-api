@@ -27,6 +27,8 @@ import {
   RequestTeamChatMeetingAiSummaryDto,
 } from '../dto';
 import { TeamChatLiveKitProviderService } from './team-chat-livekit-provider.service';
+import { TeamChatNotificationPublisher } from './team-chat-notification.publisher';
+import { NotificationInterestReason } from '../../notifications/enums';
 
 type TeamChatContext = {
   tenantId: string;
@@ -48,6 +50,7 @@ export class TeamChatMeetingsService {
     @InjectRepository(AgencyMeetingEvent, AGENCY_CONNECTION)
     private readonly eventsRepository: Repository<AgencyMeetingEvent>,
     private readonly livekitProvider: TeamChatLiveKitProviderService,
+    private readonly teamChatNotificationPublisher: TeamChatNotificationPublisher,
   ) {}
 
   async list(context: TeamChatContext) {
@@ -147,11 +150,32 @@ export class TeamChatMeetingsService {
 
     const savedMeeting = await this.meetingsRepository.save(meeting);
 
-    await this.createEvent(context, meeting.id, {
+    const event = await this.createEvent(context, meeting.id, {
       type: 'meeting_started',
       payload: {
         startedById: context.userId ?? null,
       },
+    });
+
+    const participants = await this.participantsRepository.find({
+      where: {
+        tenantId: context.tenantId,
+        workspaceId: context.workspaceId,
+        meetingRoomId: meeting.id,
+      },
+    });
+
+    await this.teamChatNotificationPublisher.publishMeetingStarted({
+      tenantId: context.tenantId,
+      workspaceId: context.workspaceId,
+      meeting: savedMeeting,
+      eventId: event.id,
+      actorUserId: context.userId ?? null,
+      occurredAt: event.occurredAt,
+      recipients: participants.map((participant) => ({
+        userId: participant.userId,
+        interestReason: NotificationInterestReason.PARTICIPANT,
+      })),
     });
 
     return savedMeeting;
