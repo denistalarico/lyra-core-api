@@ -16,7 +16,15 @@ import {
   NotificationProcessingResult,
   NotificationSourceEvent,
 } from '../types';
+import { NotificationRealtimeService } from './notification-realtime.service';
 import { NotificationRecipientResolverService } from './notification-recipient-resolver.service';
+
+type NotificationPersistenceResult =
+  | (Extract<NotificationProcessingResult, { status: 'created' }> & {
+      realtimeRecipientIds: string[];
+    })
+  | Extract<NotificationProcessingResult, { status: 'duplicate' }>
+  | Extract<NotificationProcessingResult, { status: 'skipped' }>;
 
 @Injectable()
 export class NotificationEventProcessorService {
@@ -26,6 +34,7 @@ export class NotificationEventProcessorService {
     private readonly catalog: NotificationCatalogService,
     private readonly recipientResolver: NotificationRecipientResolverService,
     private readonly selfNotificationPolicy: SelfNotificationPolicy,
+    private readonly realtimeService: NotificationRealtimeService,
   ) {}
 
   async process(
@@ -62,7 +71,8 @@ export class NotificationEventProcessorService {
       };
     }
 
-    return this.dataSource.transaction(async (manager) => {
+    const result: NotificationPersistenceResult =
+      await this.dataSource.transaction(async (manager) => {
       const notificationRepo =
         manager.getRepository(NotificationEntity);
 
@@ -176,14 +186,35 @@ export class NotificationEventProcessorService {
         }),
       );
 
-      await deliveryRepo.save(deliveries);
+      const savedDeliveries = await deliveryRepo.save(deliveries);
 
       return {
         status: 'created',
         notificationId: savedNotification.id,
         recipientCount: savedRecipients.length,
+        realtimeRecipientIds: savedDeliveries
+          .filter(
+            (delivery) =>
+              delivery.channel === NotificationDeliveryChannel.IN_APP &&
+              delivery.status === NotificationDeliveryStatus.SENT,
+          )
+          .map((delivery) => delivery.notificationRecipientId),
       };
     });
+
+    if (result.status === 'created') {
+      await Promise.allSettled(
+        result.realtimeRecipientIds.map((recipientId) =>
+          this.realtimeService.emitCreatedForRecipient(recipientId),
+        ),
+      );
+    }
+
+    return {
+      status: result.status,
+      notificationId: result.notificationId,
+      recipientCount: result.recipientCount,
+    };
   }
 
   private resolveTitle(

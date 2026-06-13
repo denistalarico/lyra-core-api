@@ -23,6 +23,7 @@ import {
   NotificationListResponse,
   NotificationUnreadCountResponse,
 } from '../types';
+import { mapNotificationRecipientToListItem } from './notification-list-item.mapper';
 
 type NotificationsContext = {
   tenantId: string;
@@ -92,7 +93,7 @@ export class NotificationsService {
 
     return {
       items: pageRows.map((recipient) =>
-        this.toListItem(recipient),
+        mapNotificationRecipientToListItem(recipient),
       ),
       nextCursor:
         hasMore && last
@@ -152,7 +153,7 @@ export class NotificationsService {
       notificationId,
     );
 
-    return this.toListItem(recipient);
+    return mapNotificationRecipientToListItem(recipient);
   }
 
   async markSeen(
@@ -169,7 +170,7 @@ export class NotificationsService {
       await this.recipientRepo.save(recipient);
     }
 
-    return this.toListItem(recipient);
+    return mapNotificationRecipientToListItem(recipient);
   }
 
   async markRead(
@@ -188,7 +189,7 @@ export class NotificationsService {
 
     await this.recipientRepo.save(recipient);
 
-    return this.toListItem(recipient);
+    return mapNotificationRecipientToListItem(recipient);
   }
 
   async markAllRead(
@@ -278,7 +279,7 @@ export class NotificationsService {
 
     await this.recipientRepo.save(recipient);
 
-    return this.toListItem(recipient);
+    return mapNotificationRecipientToListItem(recipient);
   }
 
   private createUserQuery(
@@ -398,54 +399,6 @@ export class NotificationsService {
     }
 
     return recipient;
-  }
-
-  private toListItem(
-    recipient: NotificationRecipientEntity,
-  ): NotificationListItem {
-    const notification = recipient.notification;
-    const now = Date.now();
-
-    return {
-      id: notification.id,
-      recipientId: recipient.id,
-
-      productKey: notification.productKey,
-      moduleKey: notification.moduleKey,
-      eventType: notification.eventType,
-      category: notification.category,
-      priority: notification.priority,
-
-      title: notification.title,
-      body: notification.body,
-
-      actionType: notification.actionType,
-      actionUrl: notification.actionUrl,
-
-      resourceType: notification.resourceType,
-      resourceId: notification.resourceId,
-
-      actorType: notification.actorType,
-      actorUserId: notification.actorUserId,
-
-      interestReason: recipient.interestReason,
-
-      occurredAt: notification.occurredAt.toISOString(),
-      expiresAt: notification.expiresAt?.toISOString() ?? null,
-      createdAt: notification.createdAt.toISOString(),
-
-      seenAt: recipient.seenAt?.toISOString() ?? null,
-      readAt: recipient.readAt?.toISOString() ?? null,
-      archivedAt: recipient.archivedAt?.toISOString() ?? null,
-
-      isSeen: Boolean(recipient.seenAt),
-      isRead: Boolean(recipient.readAt),
-      isArchived: Boolean(recipient.archivedAt),
-      isExpired: Boolean(
-        notification.expiresAt &&
-          notification.expiresAt.getTime() <= now,
-      ),
-    };
   }
 
   private validateContext(
