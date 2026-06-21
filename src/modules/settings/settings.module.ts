@@ -20,6 +20,7 @@ import { AuthModule } from '../auth/auth.module';
 import { EmailModule } from '../email/email.module';
 import { FilesModule } from '../../common/files/files.module';
 import { AccessControlModule } from '../../common/access-control/access-control.module';
+import { PermissionsModule } from '../permissions';
 
 @Module({
   imports: [
@@ -27,6 +28,7 @@ import { AccessControlModule } from '../../common/access-control/access-control.
     EmailModule,
     FilesModule,
     AccessControlModule,
+    PermissionsModule,
     TypeOrmModule.forFeature([
       UserPreferencesEntity,
       WorkspaceSettingsAiEntity,

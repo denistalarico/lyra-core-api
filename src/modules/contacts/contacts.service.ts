@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository } from 'typeorm';
+import { Brackets, In, Repository } from 'typeorm';
 import type { RequestContext } from '../../common/context/request-context.interface';
 import { AddContactListMemberDto } from './dto/add-contact-list-member.dto';
 import { CreateContactBusinessModeDto } from './dto/create-contact-business-mode.dto';
@@ -50,6 +50,17 @@ type ListContactsFilters = {
   limit?: string;
   offset?: string;
 };
+
+function normalizeRole(role?: string): string {
+  if (role === 'owner') return 'owner';
+  if (role === 'admin' || role === 'administrator') return 'admin';
+  if (role === 'manager') return 'manager';
+  return 'member';
+}
+
+function isElevatedRole(role?: string): boolean {
+  return ['owner', 'admin'].includes(normalizeRole(role));
+}
 
 export type FindOrCreateLeadFromWebchatInput = {
   name?: string | null;
@@ -114,6 +125,8 @@ export class ContactsService {
       .orderBy('contact.updatedAt', 'DESC')
       .take(limit)
       .skip(offset);
+
+    this.applyContactCollectionScope(query, ctx);
 
     if (filters.q) {
       query.andWhere('contact.displayName ILIKE :q', {
@@ -205,6 +218,34 @@ export class ContactsService {
       limit,
       offset,
     };
+  }
+
+  private applyContactCollectionScope(
+    query: ReturnType<Repository<ContactEntity>['createQueryBuilder']>,
+    ctx: RequestContext,
+  ) {
+    if (isElevatedRole(ctx.role)) {
+      return;
+    }
+
+    if (!ctx.userId) {
+      query.andWhere('1 = 0');
+      return;
+    }
+
+    // TODO(permissions-sprint-9): expand manager client/department contact
+    // scope once contacts carry explicit client/department assignment metadata.
+    query.andWhere(
+      new Brackets((scopeQb) => {
+        scopeQb
+          .where('contact.ownerUserId = :scopeUserId', {
+            scopeUserId: ctx.userId,
+          })
+          .orWhere('contact.createdByUserId = :scopeUserId', {
+            scopeUserId: ctx.userId,
+          });
+      }),
+    );
   }
 
   async findOrCreateLeadFromWebchat(

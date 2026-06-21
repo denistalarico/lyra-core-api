@@ -18,6 +18,13 @@ import { MAX_IMAGE_UPLOAD_BYTES } from '../../common/files/files.service';
 import { RequestContextData } from '../../common/context/request-context.decorator';
 import type { RequestContext } from '../../common/context/request-context.interface';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import {
+  DangerousAction,
+  PermissionsGuard,
+  RequireAnyPermission,
+  RequirePermission,
+  RequireProductEntitlement,
+} from '../permissions';
 import { CreateWebchatAdminMessageDto } from './dto/create-webchat-admin-message.dto';
 import { CreateWebchatWidgetDto } from './dto/create-webchat-widget.dto';
 import { PatchWebchatWidgetDto } from './dto/patch-webchat-widget.dto';
@@ -56,16 +63,19 @@ const IMAGE_UPLOAD_OPTIONS = {
 };
 
 @Controller('webchat')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, PermissionsGuard)
+@RequireProductEntitlement('leadflow')
 export class WebchatController {
   constructor(private readonly webchatService: WebchatService) {}
 
   @Get('widgets')
+  @RequirePermission('leadflow.channels.channel.view.client')
   listWidgets(@RequestContextData() ctx: RequestContext) {
     return this.webchatService.listWidgets(ctx);
   }
 
   @Post('widgets')
+  @RequirePermission('leadflow.channels.channel.create.admin')
   createWidget(
     @RequestContextData() ctx: RequestContext,
     @Body() dto: CreateWebchatWidgetDto,
@@ -74,6 +84,7 @@ export class WebchatController {
   }
 
   @Get('widgets/:widgetId')
+  @RequirePermission('leadflow.channels.channel.view.client')
   getWidget(
     @RequestContextData() ctx: RequestContext,
     @Param('widgetId') widgetId: string,
@@ -82,6 +93,7 @@ export class WebchatController {
   }
 
   @Patch('widgets/:widgetId')
+  @RequirePermission('leadflow.channels.channel.update.admin')
   patchWidget(
     @RequestContextData() ctx: RequestContext,
     @Param('widgetId') widgetId: string,
@@ -91,6 +103,7 @@ export class WebchatController {
   }
 
   @Post('widgets/:widgetId/activate')
+  @RequirePermission('leadflow.channels.channel.update.admin')
   activateWidget(
     @RequestContextData() ctx: RequestContext,
     @Param('widgetId') widgetId: string,
@@ -99,6 +112,7 @@ export class WebchatController {
   }
 
   @Post('widgets/:widgetId/deactivate')
+  @RequirePermission('leadflow.channels.channel.update.admin')
   deactivateWidget(
     @RequestContextData() ctx: RequestContext,
     @Param('widgetId') widgetId: string,
@@ -107,6 +121,8 @@ export class WebchatController {
   }
 
   @Delete('widgets/:widgetId')
+  @RequirePermission('leadflow.channels.channel.delete.owner_only')
+  @DangerousAction()
   deleteWidget(
     @RequestContextData() ctx: RequestContext,
     @Param('widgetId') widgetId: string,
@@ -115,6 +131,7 @@ export class WebchatController {
   }
 
   @Post('widgets/:widgetId/avatar')
+  @RequirePermission('leadflow.channels.channel.update.admin')
   @UseInterceptors(FileInterceptor('file', IMAGE_UPLOAD_OPTIONS))
   uploadWidgetAvatar(
     @RequestContextData() ctx: RequestContext,
@@ -129,6 +146,10 @@ export class WebchatController {
   }
 
   @Get('widgets/:widgetId/conversations')
+  @RequireAnyPermission(
+    'leadflow.inbox.conversation.view.client',
+    'leadflow.inbox.conversation.view.all',
+  )
   listWidgetConversations(
     @RequestContextData() ctx: RequestContext,
     @Param('widgetId') widgetId: string,
@@ -138,6 +159,11 @@ export class WebchatController {
   }
 
   @Get('conversations/:conversationId')
+  @RequireAnyPermission(
+    'leadflow.inbox.conversation.view.assigned',
+    'leadflow.inbox.conversation.view.client',
+    'leadflow.inbox.conversation.view.all',
+  )
   getConversation(
     @RequestContextData() ctx: RequestContext,
     @Param('conversationId') conversationId: string,
@@ -146,6 +172,11 @@ export class WebchatController {
   }
 
   @Get('conversations/:conversationId/messages')
+  @RequireAnyPermission(
+    'leadflow.inbox.conversation.view.assigned',
+    'leadflow.inbox.conversation.view.client',
+    'leadflow.inbox.conversation.view.all',
+  )
   listConversationMessages(
     @RequestContextData() ctx: RequestContext,
     @Param('conversationId') conversationId: string,
@@ -154,6 +185,10 @@ export class WebchatController {
   }
 
   @Post('conversations/:conversationId/messages')
+  @RequireAnyPermission(
+    'leadflow.inbox.conversation.reply.assigned',
+    'leadflow.inbox.conversation.reply.client',
+  )
   createAdminMessage(
     @RequestContextData() ctx: RequestContext,
     @Param('conversationId') conversationId: string,
@@ -163,6 +198,10 @@ export class WebchatController {
   }
 
   @Post('conversations/:conversationId/close')
+  @RequireAnyPermission(
+    'leadflow.inbox.conversation.close.assigned',
+    'leadflow.inbox.conversation.close.client',
+  )
   closeConversation(
     @RequestContextData() ctx: RequestContext,
     @Param('conversationId') conversationId: string,

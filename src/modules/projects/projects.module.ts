@@ -40,6 +40,7 @@ import { ProjectSettingsService } from './services/project-settings.service';
 import { ProjectEventsService } from './services/project-events.service';
 import { FilesModule } from '../../common/files/files.module';
 import { NotificationsModule } from '../notifications';
+import { PermissionsModule } from '../permissions';
 import { TaskNotificationPublisher } from './services/task-notification.publisher';
 
 const AGENCY_CONNECTION = 'agency';
@@ -67,6 +68,7 @@ const AGENCY_CONNECTION = 'agency';
     ),
     FilesModule,
     NotificationsModule,
+    PermissionsModule,
   ],
   controllers: [
     ProjectsController,

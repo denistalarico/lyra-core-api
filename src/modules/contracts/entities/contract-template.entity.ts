@@ -6,7 +6,8 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 import {
-  ContractCategory,
+  ContractFooterPreset,
+  ContractHeaderPreset,
   ContractSignatureMode,
   ContractTemplateEditorMode,
   ContractTemplateSource,
@@ -32,7 +33,7 @@ export class ContractTemplate {
   description!: string | null;
 
   @Column({ type: 'varchar', length: 60 })
-  category!: ContractCategory;
+  category!: string;
 
   @Column({ name: 'target_type', type: 'varchar', length: 60 })
   targetType!: ContractTargetType;
@@ -60,6 +61,34 @@ export class ContractTemplate {
 
   @Column({ name: 'footer_html', type: 'text', nullable: true })
   footerHtml!: string | null;
+
+  @Column({
+    name: 'header_preset',
+    type: 'varchar',
+    length: 40,
+    nullable: true,
+  })
+  headerPreset!: ContractHeaderPreset | null;
+
+  @Column({
+    name: 'footer_preset',
+    type: 'varchar',
+    length: 40,
+    nullable: true,
+  })
+  footerPreset!: ContractFooterPreset | null;
+
+  @Column({ name: 'show_logo', type: 'boolean', default: true })
+  showLogo!: boolean;
+
+  @Column({ name: 'show_company_data', type: 'boolean', default: true })
+  showCompanyData!: boolean;
+
+  @Column({ name: 'show_contract_number', type: 'boolean', default: true })
+  showContractNumber!: boolean;
+
+  @Column({ name: 'show_powered_by_lyra', type: 'boolean', default: true })
+  showPoweredByLyra!: boolean;
 
   @Column({ name: 'locale', type: 'varchar', length: 20, default: 'pt-BR' })
   locale!: string;

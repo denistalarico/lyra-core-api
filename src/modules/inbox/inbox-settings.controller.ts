@@ -2,20 +2,28 @@ import { Body, Controller, Get, Patch, UseGuards } from '@nestjs/common';
 import { RequestContextData } from '../../common/context/request-context.decorator';
 import type { RequestContext } from '../../common/context/request-context.interface';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import {
+  PermissionsGuard,
+  RequirePermission,
+  RequireProductEntitlement,
+} from '../permissions';
 import { PatchInboxSettingsDto } from './dto/patch-inbox-settings.dto';
 import { InboxSettingsService } from './inbox-settings.service';
 
 @Controller('inbox/settings')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, PermissionsGuard)
+@RequireProductEntitlement('leadflow')
 export class InboxSettingsController {
   constructor(private readonly inboxSettingsService: InboxSettingsService) {}
 
   @Get()
+  @RequirePermission('leadflow.settings.general.view.admin')
   getSettings(@RequestContextData() ctx: RequestContext) {
     return this.inboxSettingsService.getSettings(ctx);
   }
 
   @Patch()
+  @RequirePermission('leadflow.settings.general.update.admin')
   patchSettings(
     @RequestContextData() ctx: RequestContext,
     @Body() dto: PatchInboxSettingsDto,

@@ -29,9 +29,11 @@ import { WhatsAppEmbeddedSignupService } from './channels/whatsapp/embedded-sign
 import { MetaGraphService } from './channels/meta/services/meta-graph.service';
 import { WhatsAppChannelHealthController } from './channels/whatsapp/whatsapp-channel-health.controller';
 import { WhatsAppChannelHealthService } from './channels/whatsapp/services/whatsapp-channel-health.service';
+import { PermissionsModule } from '../permissions';
 
 @Module({
   imports: [
+    PermissionsModule,
     TypeOrmModule.forFeature([
       InboxChannelEntity,
       InboxConversationEntity,

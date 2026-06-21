@@ -166,6 +166,8 @@ import {
   TeamPaymentBatch,
   TeamPaymentItem,
   TeamPaymentDocument,
+  TeamMemberLifecycleProcess,
+  TeamMemberLifecycleStep,
 } from '../modules/team/entities';
 
 import {
@@ -219,6 +221,16 @@ import {
   NotificationEntity,
   NotificationRecipientEntity,
 } from '../modules/notifications/entities';
+
+import {
+  AgencyClientAccessEntity,
+  AgencyClientProductAccessEntity,
+  PlatformPermissionAuditEventEntity,
+  PlatformPermissionEntity,
+  PlatformRoleEntity,
+  PlatformRolePermissionEntity,
+  PlatformUserPermissionEntity,
+} from '../modules/permissions/entities';
 
 export const agencyEntities = [
   NotificationEntity,
@@ -340,6 +352,8 @@ export const agencyEntities = [
   TeamPayment,
   TeamPaymentItem,
   TeamPaymentDocument,
+  TeamMemberLifecycleProcess,
+  TeamMemberLifecycleStep,
   AgencyKnowledgeArticle,
   AgencyKnowledgeArticleVersion,
   AgencyKnowledgeCategory,
@@ -360,6 +374,13 @@ export const agencyEntities = [
   AgencyMeetingAiSummary,
   TenantProductEntitlementEntity,
   PlatformAccountEntity,
+  PlatformRoleEntity,
+  PlatformPermissionEntity,
+  PlatformRolePermissionEntity,
+  PlatformUserPermissionEntity,
+  AgencyClientAccessEntity,
+  AgencyClientProductAccessEntity,
+  PlatformPermissionAuditEventEntity,
 ];
 
 export function getTypeOrmConfig(): TypeOrmModuleOptions {

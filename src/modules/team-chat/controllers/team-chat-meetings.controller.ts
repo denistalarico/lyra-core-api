@@ -17,6 +17,11 @@ import {
   RequestTeamChatMeetingAiSummaryDto,
 } from '../dto';
 import { TeamChatMeetingsService } from '../services/team-chat-meetings.service';
+import {
+  DangerousAction,
+  RequireAnyPermission,
+  RequirePermission,
+} from '../../permissions';
 
 type TeamChatContext = {
   tenantId: string;
@@ -29,6 +34,7 @@ export class TeamChatMeetingsController {
   constructor(private readonly meetingsService: TeamChatMeetingsService) {}
 
   @Post('agency/team-chat/meetings/:meetingId/start')
+  @RequirePermission('agency.chat.channels.manage_members.assigned')
   startMeeting(
     @Headers('x-tenant-id') tenantId: string,
     @Headers('x-workspace-id') workspaceId: string,
@@ -42,6 +48,7 @@ export class TeamChatMeetingsController {
   }
 
   @Post('agency/team-chat/meetings/:meetingId/end')
+  @RequirePermission('agency.chat.channels.manage_members.assigned')
   endMeeting(
     @Headers('x-tenant-id') tenantId: string,
     @Headers('x-workspace-id') workspaceId: string,
@@ -55,6 +62,7 @@ export class TeamChatMeetingsController {
   }
 
   @Patch('agency/team-chat/meetings/:meetingId')
+  @RequirePermission('agency.chat.channels.manage_members.assigned')
   patchMeeting(
     @Headers('x-tenant-id') tenantId: string,
     @Headers('x-workspace-id') workspaceId: string,
@@ -70,6 +78,8 @@ export class TeamChatMeetingsController {
   }
 
   @Post('agency/team-chat/meetings/:meetingId/cancel')
+  @RequirePermission('agency.chat.channels.manage_members.assigned')
+  @DangerousAction()
   cancelMeeting(
     @Headers('x-tenant-id') tenantId: string,
     @Headers('x-workspace-id') workspaceId: string,
@@ -83,6 +93,8 @@ export class TeamChatMeetingsController {
   }
 
   @Delete('agency/team-chat/meetings/:meetingId')
+  @RequirePermission('agency.chat.channels.delete.owner_only')
+  @DangerousAction()
   deleteMeeting(
     @Headers('x-tenant-id') tenantId: string,
     @Headers('x-workspace-id') workspaceId: string,
@@ -96,6 +108,7 @@ export class TeamChatMeetingsController {
   }
 
   @Get('agency/team-chat/meetings/:meetingId/events')
+  @RequirePermission('agency.chat.channels.view.assigned')
   listMeetingEvents(
     @Headers('x-tenant-id') tenantId: string,
     @Headers('x-workspace-id') workspaceId: string,
@@ -109,6 +122,7 @@ export class TeamChatMeetingsController {
   }
 
   @Post('agency/team-chat/meetings/:meetingId/events')
+  @RequirePermission('agency.chat.messages.send.assigned')
   createMeetingEvent(
     @Headers('x-tenant-id') tenantId: string,
     @Headers('x-workspace-id') workspaceId: string,
@@ -124,6 +138,7 @@ export class TeamChatMeetingsController {
   }
 
   @Post('agency/team-chat/meetings/:meetingId/ai-summary/request')
+  @RequirePermission('agency.chat.channels.manage_members.assigned')
   requestAiSummary(
     @Headers('x-tenant-id') tenantId: string,
     @Headers('x-workspace-id') workspaceId: string,
@@ -139,6 +154,10 @@ export class TeamChatMeetingsController {
   }
 
   @Post('agency/team-chat/meetings/:meetingId/join')
+  @RequireAnyPermission(
+    'agency.chat.channels.view.assigned',
+    'agency.chat.messages.send.assigned',
+  )
   joinInternalMeeting(
     @Headers('x-tenant-id') tenantId: string,
     @Headers('x-workspace-id') workspaceId: string,

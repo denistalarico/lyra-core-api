@@ -15,11 +15,17 @@ import {
   ListProjectsQueryDto,
   UpdateProjectDto,
 } from '../dto';
+import {
+  DangerousAction,
+  RequireAnyPermission,
+  RequirePermission,
+} from '../../permissions';
 
 type RequestContext = {
   tenantId: string;
   workspaceId: string;
   userId: string;
+  role?: string;
 };
 
 function getContextFromHeaders(
@@ -29,6 +35,7 @@ function getContextFromHeaders(
     tenantId: String(headers['x-tenant-id'] ?? ''),
     workspaceId: String(headers['x-workspace-id'] ?? ''),
     userId: String(headers['x-user-id'] ?? ''),
+    role: String(headers['x-user-role'] ?? headers['x-role'] ?? 'member'),
   };
 }
 
@@ -37,6 +44,7 @@ export class ProjectsCrudController {
   constructor(private readonly projectsCrudService: ProjectsCrudService) {}
 
   @Get()
+  @RequirePermission('agency.projects.project.view.assigned')
   list(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Query() query: ListProjectsQueryDto,
@@ -45,6 +53,7 @@ export class ProjectsCrudController {
   }
 
   @Get(':id')
+  @RequirePermission('agency.projects.project.view.assigned')
   findOne(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('id') id: string,
@@ -53,6 +62,7 @@ export class ProjectsCrudController {
   }
 
   @Post()
+  @RequirePermission('agency.projects.project.create.department')
   create(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Body() dto: CreateProjectDto,
@@ -61,6 +71,7 @@ export class ProjectsCrudController {
   }
 
   @Patch(':id')
+  @RequirePermission('agency.projects.project.update.department')
   update(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('id') id: string,
@@ -74,6 +85,11 @@ export class ProjectsCrudController {
   }
 
   @Delete(':id')
+  @RequireAnyPermission(
+    'agency.projects.project.archive.department',
+    'agency.projects.project.archive.own',
+  )
+  @DangerousAction()
   archive(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('id') id: string,

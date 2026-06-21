@@ -1,6 +1,19 @@
-import { Body, Controller, Delete, Get, Headers, Param, Post } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Headers,
+  Param,
+  Post,
+} from '@nestjs/common';
 import { CreateProjectEventDto } from '../dto';
 import { ProjectEventsService } from '../services/project-events.service';
+import {
+  DangerousAction,
+  RequireAnyPermission,
+  RequirePermission,
+} from '../../permissions';
 
 type RequestContext = {
   tenantId: string;
@@ -23,36 +36,62 @@ export class ProjectEventsController {
   constructor(private readonly projectEventsService: ProjectEventsService) {}
 
   @Get()
+  @RequirePermission('agency.projects.project.view.assigned')
   list(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('projectId') projectId: string,
   ) {
-    return this.projectEventsService.list(getContextFromHeaders(headers), projectId);
+    return this.projectEventsService.list(
+      getContextFromHeaders(headers),
+      projectId,
+    );
   }
 
   @Post()
+  @RequirePermission('agency.projects.project.update.department')
   create(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('projectId') projectId: string,
     @Body() dto: CreateProjectEventDto,
   ) {
-    return this.projectEventsService.create(getContextFromHeaders(headers), projectId, dto);
+    return this.projectEventsService.create(
+      getContextFromHeaders(headers),
+      projectId,
+      dto,
+    );
   }
 
   @Delete()
+  @RequireAnyPermission(
+    'agency.projects.project.archive.department',
+    'agency.projects.project.archive.own',
+  )
+  @DangerousAction()
   clearAll(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('projectId') projectId: string,
   ) {
-    return this.projectEventsService.clearAll(getContextFromHeaders(headers), projectId);
+    return this.projectEventsService.clearAll(
+      getContextFromHeaders(headers),
+      projectId,
+    );
   }
 
   @Delete(':eventId')
+  @RequireAnyPermission(
+    'agency.projects.project.archive.department',
+    'agency.projects.project.archive.own',
+  )
+  @DangerousAction()
   delete(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('projectId') projectId: string,
     @Param('eventId') eventId: string,
   ) {
-    return this.projectEventsService.delete(getContextFromHeaders(headers), projectId, eventId);
+    return this.projectEventsService.delete(
+      getContextFromHeaders(headers),
+      projectId,
+      eventId,
+    );
   }
 }

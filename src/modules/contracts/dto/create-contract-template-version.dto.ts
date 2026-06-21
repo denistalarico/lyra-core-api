@@ -4,7 +4,11 @@ IsObject,
 IsOptional,
 IsString,
 } from 'class-validator';
-import { ContractSignatureMode } from '../enums';
+import {
+ContractFooterPreset,
+ContractHeaderPreset,
+ContractSignatureMode,
+} from '../enums';
 
 export class CreateContractTemplateVersionDto {
 @IsOptional()
@@ -22,6 +26,26 @@ bodyHtml?: string;
 @IsOptional()
 @IsString()
 footerHtml?: string | null;
+
+@IsOptional()
+@IsEnum(ContractHeaderPreset)
+headerPreset?: ContractHeaderPreset | null;
+
+@IsOptional()
+@IsEnum(ContractFooterPreset)
+footerPreset?: ContractFooterPreset | null;
+
+@IsOptional()
+showLogo?: boolean;
+
+@IsOptional()
+showCompanyData?: boolean;
+
+@IsOptional()
+showContractNumber?: boolean;
+
+@IsOptional()
+showPoweredByLyra?: boolean;
 
 @IsOptional()
 @IsObject()

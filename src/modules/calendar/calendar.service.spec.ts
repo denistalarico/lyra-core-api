@@ -7,13 +7,32 @@ import { CalendarRoutineBlock } from './entities/calendar-routine-block.entity';
 import { CalendarSettings } from './entities/calendar-settings.entity';
 
 describe('CalendarService notification triggers', () => {
+  it('scopes member calendar lists to owned or created events', async () => {
+    const { service, queryBuilder } = makeService();
+
+    await service.listEvents(
+      { ...makeContext(), role: 'member' },
+      {
+        startsAt: '2030-06-13T00:00:00.000Z',
+        endsAt: '2030-06-14T00:00:00.000Z',
+      },
+    );
+
+    expect(queryBuilder.scopeClauses.join('\n')).toContain(
+      'event.owner_user_id = :scopeUserId',
+    );
+    expect(queryBuilder.scopeClauses.join('\n')).toContain(
+      'event.created_by_user_id = :scopeUserId',
+    );
+  });
+
   it('does not publish invitation when creating an event with ownerUserId', async () => {
     const { service, publisher } = makeService();
 
     await service.createEvent(makeContext(), {
       title: 'Reunião de kickoff',
-      startsAt: '2026-06-13T12:00:00.000Z',
-      endsAt: '2026-06-13T13:00:00.000Z',
+      startsAt: '2030-06-13T12:00:00.000Z',
+      endsAt: '2030-06-13T13:00:00.000Z',
       ownerUserId: 'user-owner',
     });
 
@@ -55,8 +74,8 @@ describe('CalendarService notification triggers', () => {
     const { service, publisher } = makeService({ event });
 
     await service.updateEvent(makeContext(), event.id, {
-      startsAt: '2026-06-13T14:00:00.000Z',
-      endsAt: '2026-06-13T15:00:00.000Z',
+      startsAt: '2030-06-13T14:00:00.000Z',
+      endsAt: '2030-06-13T15:00:00.000Z',
     });
 
     expect(publisher.publishEventRescheduled).toHaveBeenCalledTimes(1);
@@ -69,8 +88,8 @@ describe('CalendarService notification triggers', () => {
 
     await service.updateEvent(makeContext(), event.id, {
       title: 'Reunião de kickoff atualizada',
-      startsAt: '2026-06-13T14:00:00.000Z',
-      endsAt: '2026-06-13T15:00:00.000Z',
+      startsAt: '2030-06-13T14:00:00.000Z',
+      endsAt: '2030-06-13T15:00:00.000Z',
     });
 
     expect(publisher.publishEventRescheduled).toHaveBeenCalledTimes(1);
@@ -119,8 +138,8 @@ describe('CalendarService notification triggers', () => {
     const reschedule = makeService({ event: rescheduleEvent });
 
     await reschedule.service.updateEvent(makeContext(), rescheduleEvent.id, {
-      startsAt: '2026-06-13T14:00:00.000Z',
-      endsAt: '2026-06-13T15:00:00.000Z',
+      startsAt: '2030-06-13T14:00:00.000Z',
+      endsAt: '2030-06-13T15:00:00.000Z',
     });
 
     expect(reschedule.publisher.publishEventRescheduled).not.toHaveBeenCalled();
@@ -189,21 +208,27 @@ describe('CalendarService notification triggers', () => {
       publisher: realPublisher as jest.Mocked<CalendarNotificationPublisher>,
     });
 
-    await expect(service.removeEvent(makeContext(), event.id)).resolves.toEqual({
-      success: true,
-    });
+    await expect(service.removeEvent(makeContext(), event.id)).resolves.toEqual(
+      {
+        success: true,
+      },
+    );
     expect(eventsRepository.softRemove).toHaveBeenCalledTimes(1);
     expect(processor.process).toHaveBeenCalledTimes(1);
     loggerSpy.mockRestore();
   });
 });
 
-function makeService(options: {
-  event?: CalendarEvent;
-  publisher?: jest.Mocked<CalendarNotificationPublisher>;
-} = {}) {
+function makeService(
+  options: {
+    event?: CalendarEvent;
+    publisher?: jest.Mocked<CalendarNotificationPublisher>;
+  } = {},
+) {
   const event = options.event ?? makeEvent();
+  const queryBuilder = createQueryBuilderMock<CalendarEvent>();
   const eventsRepository = {
+    createQueryBuilder: jest.fn(() => queryBuilder),
     create: jest.fn((value: Partial<CalendarEvent>) =>
       makeEvent({
         ...value,
@@ -218,18 +243,61 @@ function makeService(options: {
     softRemove: jest.fn().mockResolvedValue(event),
   };
   const publisher = options.publisher ?? makeCalendarPublisher();
+  const emailService = {
+    sendCalendarReminderEmail: jest.fn().mockResolvedValue(undefined),
+  };
   const service = new CalendarService(
     eventsRepository as unknown as Repository<CalendarEvent>,
     {} as Repository<CalendarRoutineBlock>,
     {} as Repository<CalendarSettings>,
     publisher,
+    emailService as any,
   );
 
   return {
     service,
     publisher,
     eventsRepository,
+    queryBuilder,
   };
+}
+
+function createQueryBuilderMock<T>() {
+  const scopeClauses: string[] = [];
+  const bracketQb = {
+    where: jest.fn((condition: string) => {
+      scopeClauses.push(condition);
+      return bracketQb;
+    }),
+    orWhere: jest.fn((condition: string) => {
+      scopeClauses.push(condition);
+      return bracketQb;
+    }),
+  };
+  const qb = {
+    scopeClauses,
+    where: jest.fn(() => qb),
+    andWhere: jest.fn((condition: unknown) => {
+      if (
+        condition &&
+        typeof condition === 'object' &&
+        'whereFactory' in condition &&
+        typeof (condition as { whereFactory?: unknown }).whereFactory ===
+          'function'
+      ) {
+        (
+          condition as { whereFactory: (qb: typeof bracketQb) => void }
+        ).whereFactory(bracketQb);
+      } else if (typeof condition === 'string') {
+        scopeClauses.push(condition);
+      }
+      return qb;
+    }),
+    orderBy: jest.fn(() => qb),
+    getMany: jest.fn().mockResolvedValue([] as T[]),
+  };
+
+  return qb;
 }
 
 function makeCalendarPublisher() {
@@ -238,6 +306,7 @@ function makeCalendarPublisher() {
     publishEventUpdated: jest.fn(),
     publishEventCanceled: jest.fn(),
     publishEventRescheduled: jest.fn(),
+    publishEventReminder: jest.fn(),
     publishAttendeeResponseReceived: jest.fn(),
   } as unknown as jest.Mocked<CalendarNotificationPublisher>;
 }
@@ -249,6 +318,7 @@ function expectNoCalendarNotifications(
   expect(publisher.publishEventUpdated).not.toHaveBeenCalled();
   expect(publisher.publishEventCanceled).not.toHaveBeenCalled();
   expect(publisher.publishEventRescheduled).not.toHaveBeenCalled();
+  expect(publisher.publishEventReminder).not.toHaveBeenCalled();
   expect(publisher.publishAttendeeResponseReceived).not.toHaveBeenCalled();
 }
 
@@ -261,7 +331,7 @@ function makeContext() {
 }
 
 function makeEvent(overrides: Partial<CalendarEvent> = {}): CalendarEvent {
-  const now = new Date('2026-06-12T12:00:00.000Z');
+  const now = new Date('2030-06-12T12:00:00.000Z');
 
   return {
     id: 'event-1',
@@ -272,8 +342,8 @@ function makeEvent(overrides: Partial<CalendarEvent> = {}): CalendarEvent {
     eventType: 'internal_meeting',
     status: 'scheduled',
     visibility: 'workspace',
-    startsAt: new Date('2026-06-13T12:00:00.000Z'),
-    endsAt: new Date('2026-06-13T13:00:00.000Z'),
+    startsAt: new Date('2030-06-13T12:00:00.000Z'),
+    endsAt: new Date('2030-06-13T13:00:00.000Z'),
     allDay: false,
     ownerUserId: 'user-owner',
     createdByUserId: 'user-owner',

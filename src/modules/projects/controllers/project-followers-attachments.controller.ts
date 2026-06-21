@@ -12,6 +12,11 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
+import {
+  DangerousAction,
+  RequireAnyPermission,
+  RequirePermission,
+} from '../../permissions';
 
 const ATTACHMENT_UPLOAD_OPTIONS = {
   storage: memoryStorage(),
@@ -21,7 +26,9 @@ import { ProjectFollowersAttachmentsService } from '../services/project-follower
 
 type RequestContext = { tenantId: string; workspaceId: string; userId: string };
 
-function ctx(headers: Record<string, string | string[] | undefined>): RequestContext {
+function ctx(
+  headers: Record<string, string | string[] | undefined>,
+): RequestContext {
   return {
     tenantId: String(headers['x-tenant-id'] ?? ''),
     workspaceId: String(headers['x-workspace-id'] ?? ''),
@@ -36,6 +43,7 @@ export class ProjectFollowersAttachmentsController {
   // ── Followers ──────────────────────────────────────────────────────────────
 
   @Get('followers')
+  @RequirePermission('agency.projects.project.view.assigned')
   listFollowers(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('projectId') projectId: string,
@@ -44,15 +52,26 @@ export class ProjectFollowersAttachmentsController {
   }
 
   @Post('followers')
+  @RequirePermission('agency.projects.project.update.department')
   addFollower(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('projectId') projectId: string,
     @Body() body: { userId: string; userName: string },
   ) {
-    return this.svc.addFollower(ctx(headers), projectId, body.userId, body.userName ?? '');
+    return this.svc.addFollower(
+      ctx(headers),
+      projectId,
+      body.userId,
+      body.userName ?? '',
+    );
   }
 
   @Delete('followers/:followerId')
+  @RequireAnyPermission(
+    'agency.projects.project.archive.department',
+    'agency.projects.project.archive.own',
+  )
+  @DangerousAction()
   removeFollower(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('projectId') projectId: string,
@@ -64,6 +83,7 @@ export class ProjectFollowersAttachmentsController {
   // ── Attachments ────────────────────────────────────────────────────────────
 
   @Get('attachments')
+  @RequirePermission('agency.projects.project.view.assigned')
   listAttachments(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('projectId') projectId: string,
@@ -72,6 +92,7 @@ export class ProjectFollowersAttachmentsController {
   }
 
   @Post('attachments')
+  @RequirePermission('agency.projects.project.update.department')
   @UseInterceptors(FileInterceptor('file', ATTACHMENT_UPLOAD_OPTIONS))
   uploadAttachment(
     @Headers() headers: Record<string, string | string[] | undefined>,
@@ -83,6 +104,11 @@ export class ProjectFollowersAttachmentsController {
   }
 
   @Delete('attachments/:attachmentId')
+  @RequireAnyPermission(
+    'agency.projects.project.archive.department',
+    'agency.projects.project.archive.own',
+  )
+  @DangerousAction()
   deleteAttachment(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('projectId') projectId: string,

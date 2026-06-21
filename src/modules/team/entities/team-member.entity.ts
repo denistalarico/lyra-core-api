@@ -60,8 +60,8 @@ export class TeamMember {
   @Column({ name: 'worker_type', type: 'varchar', length: 60, default: TeamWorkerType.Contractor })
   workerType!: TeamWorkerType;
 
-  @Column({ name: 'work_mode', type: 'varchar', length: 40, default: TeamWorkMode.Flexible })
-  workMode!: TeamWorkMode;
+  @Column({ name: 'work_mode', type: 'varchar', length: 120, default: TeamWorkMode.Flexible })
+  workMode!: string;
 
   @Column({ name: 'status', type: 'varchar', length: 40, default: TeamMemberStatus.Active })
   status!: TeamMemberStatus;

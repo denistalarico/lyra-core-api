@@ -34,6 +34,7 @@ import { TeamChatModule } from './modules/team-chat/team-chat.module';
 import { PlatformModule } from './modules/platform';
 import { DashboardsModule } from './modules/dashboards';
 import { NotificationsModule } from './modules/notifications';
+import { PermissionsModule } from './modules/permissions';
 
 @Module({
   imports: [
@@ -70,6 +71,7 @@ import { NotificationsModule } from './modules/notifications';
     PlatformModule,
     DashboardsModule,
     NotificationsModule,
+    PermissionsModule,
   ],
 })
 export class AppModule {}

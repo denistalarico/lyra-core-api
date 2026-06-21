@@ -219,7 +219,10 @@ function makeService(
     memberSkillRepository as unknown as Repository<TeamMemberSkill>,
     userProfileRepository as unknown as Repository<AgencyUserProfileEntity>,
     {} as any,
+    {} as any,
     publisher,
+    {} as any,
+    {} as any,
   );
 
   return { service, publisher, memberRepository };

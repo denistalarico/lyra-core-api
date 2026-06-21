@@ -42,6 +42,14 @@ type TaskBoardCard = AgencyTask & {
   checklistDone: number;
 };
 
+export type ChecklistItemSummary = {
+  id: string;
+  taskId: string;
+  isDone: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
 @Injectable()
 export class ProjectBoardsService {
   constructor(
@@ -60,6 +68,22 @@ export class ProjectBoardsService {
     @InjectRepository(AgencyPersonalTaskStage, 'agency')
     private readonly personalTaskStagesRepository: Repository<AgencyPersonalTaskStage>,
   ) {}
+
+  async listAllChecklistItems(context: RequestContext): Promise<ChecklistItemSummary[]> {
+    const rows = await this.tasksRepository.manager
+      .createQueryBuilder()
+      .select('item.id', 'id')
+      .addSelect('item.task_id', 'taskId')
+      .addSelect('item.is_done', 'isDone')
+      .addSelect('item.created_at', 'createdAt')
+      .addSelect('item.updated_at', 'updatedAt')
+      .from('agency_task_checklist_items', 'item')
+      .where('item.tenant_id = :tenantId', { tenantId: context.tenantId })
+      .andWhere('item.workspace_id = :workspaceId', { workspaceId: context.workspaceId })
+      .getRawMany<ChecklistItemSummary>();
+
+    return rows;
+  }
 
   async getProjectsBoard(context: RequestContext): Promise<BoardResponse<ProjectBoardCard>> {
     const [stages, projects] = await Promise.all([

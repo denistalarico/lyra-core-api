@@ -39,6 +39,11 @@ import {
 } from './dto/confirm-two-factor.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { MAX_IMAGE_UPLOAD_BYTES } from '../../common/files/files.service';
+import {
+  DangerousAction,
+  PermissionsGuard,
+  RequirePermission,
+} from '../permissions';
 
 const IMAGE_UPLOAD_OPTIONS = {
   storage: memoryStorage(),
@@ -66,7 +71,7 @@ const IMAGE_UPLOAD_OPTIONS = {
   },
 };
 
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, PermissionsGuard)
 @Controller('settings')
 export class SettingsController {
   constructor(
@@ -75,6 +80,7 @@ export class SettingsController {
   ) {}
 
   @Get('preferences')
+  @RequirePermission('agency.settings.account.view.self')
   async getPreferences(@RequestContextData() ctx: RequestContext) {
     if (!ctx.tenantId || !ctx.userId) {
       throw new BadRequestException(
@@ -88,6 +94,7 @@ export class SettingsController {
   }
 
   @Patch('preferences')
+  @RequirePermission('agency.settings.account.update.self')
   async patchPreferences(
     @RequestContextData() ctx: RequestContext,
     @Body() dto: PatchUserPreferencesDto,
@@ -104,6 +111,7 @@ export class SettingsController {
   }
 
   @Get('ai')
+  @RequirePermission('agency.settings.apps.manage.admin')
   async getAi(@RequestContextData() ctx: RequestContext) {
     if (!ctx.tenantId || !ctx.workspaceId) {
       throw new BadRequestException(
@@ -117,6 +125,7 @@ export class SettingsController {
   }
 
   @Patch('ai')
+  @RequirePermission('agency.settings.apps.manage.admin')
   async patchAi(
     @RequestContextData() ctx: RequestContext,
     @Body() dto: PatchWorkspaceAiSettingsDto,
@@ -133,6 +142,7 @@ export class SettingsController {
   }
 
   @Get('company')
+  @RequirePermission('agency.settings.company.view.admin')
   async getCompany(@RequestContextData() ctx: RequestContext) {
     if (!ctx.tenantId || !ctx.workspaceId) {
       throw new BadRequestException(
@@ -146,6 +156,7 @@ export class SettingsController {
   }
 
   @Patch('company')
+  @RequirePermission('agency.settings.company.update.admin')
   async patchCompany(
     @RequestContextData() ctx: RequestContext,
     @Body() dto: PatchWorkspaceCompanySettingsDto,
@@ -166,6 +177,7 @@ export class SettingsController {
   }
 
   @Patch('company/brand-assets')
+  @RequirePermission('agency.settings.company.update.admin')
   async patchCompanyBrandAssets(
     @RequestContextData() ctx: RequestContext,
     @Body() dto: PatchWorkspaceCompanyBrandAssetsDto,
@@ -186,6 +198,7 @@ export class SettingsController {
   }
 
   @Post('company/logo')
+  @RequirePermission('agency.settings.company.update.admin')
   @UseInterceptors(FileInterceptor('file', IMAGE_UPLOAD_OPTIONS))
   async uploadCompanyLogo(
     @RequestContextData() ctx: RequestContext,
@@ -211,6 +224,7 @@ export class SettingsController {
   }
 
   @Post('company/avatar')
+  @RequirePermission('agency.settings.company.update.admin')
   @UseInterceptors(FileInterceptor('file', IMAGE_UPLOAD_OPTIONS))
   async uploadCompanyAvatar(
     @RequestContextData() ctx: RequestContext,
@@ -236,6 +250,7 @@ export class SettingsController {
   }
 
   @Get('profile')
+  @RequirePermission('agency.settings.account.view.self')
   async getProfile(@RequestContextData() ctx: RequestContext) {
     if (!ctx.tenantId || !ctx.userId) {
       throw new BadRequestException(
@@ -249,6 +264,7 @@ export class SettingsController {
   }
 
   @Patch('profile')
+  @RequirePermission('agency.settings.account.update.self')
   async patchProfile(
     @RequestContextData() ctx: RequestContext,
     @Body() dto: PatchUserProfileDto,
@@ -265,6 +281,7 @@ export class SettingsController {
   }
 
   @Patch('profile/avatar')
+  @RequirePermission('agency.settings.account.update.self')
   async patchProfileAvatar(
     @RequestContextData() ctx: RequestContext,
     @Body() dto: PatchUserProfileAvatarDto,
@@ -285,6 +302,7 @@ export class SettingsController {
   }
 
   @Post('profile/avatar')
+  @RequirePermission('agency.settings.account.update.self')
   @UseInterceptors(FileInterceptor('file', IMAGE_UPLOAD_OPTIONS))
   async uploadProfileAvatar(
     @RequestContextData() ctx: RequestContext,
@@ -310,6 +328,7 @@ export class SettingsController {
   }
 
   @Get('users')
+  @RequirePermission('agency.settings.users.manage.admin')
   async getWorkspaceUsers(@RequestContextData() ctx: RequestContext) {
     if (!ctx.tenantId || !ctx.workspaceId || !ctx.userId) {
       throw new BadRequestException(
@@ -331,6 +350,7 @@ export class SettingsController {
   }
 
   @Post('users/invite')
+  @RequirePermission('agency.settings.users.manage.admin')
   async inviteWorkspaceUser(
     @RequestContextData() ctx: RequestContext,
     @Body() dto: InviteWorkspaceUserDto,
@@ -357,6 +377,7 @@ export class SettingsController {
   }
 
   @Post('users/invitations')
+  @RequirePermission('agency.settings.users.manage.admin')
   async createWorkspaceUserInvitation(
     @RequestContextData() ctx: RequestContext,
     @Body() dto: InviteWorkspaceUserDto,
@@ -383,6 +404,7 @@ export class SettingsController {
   }
 
   @Get('users/invitations')
+  @RequirePermission('agency.settings.users.manage.admin')
   async listWorkspaceUserInvitations(@RequestContextData() ctx: RequestContext) {
     if (!ctx.tenantId || !ctx.workspaceId || !ctx.userId) {
       throw new BadRequestException(
@@ -405,6 +427,7 @@ export class SettingsController {
   }
 
   @Delete('users/invitations/:invitationId')
+  @RequirePermission('agency.settings.users.manage.admin')
   async revokeWorkspaceUserInvitation(
     @RequestContextData() ctx: RequestContext,
     @Param('invitationId') invitationId: string,
@@ -431,6 +454,7 @@ export class SettingsController {
   }
 
   @Patch('users/:workspaceUserId/access')
+  @RequirePermission('agency.settings.permissions.manage.admin')
   async patchWorkspaceUserAccess(
     @RequestContextData() ctx: RequestContext,
     @Param('workspaceUserId') workspaceUserId: string,
@@ -457,6 +481,7 @@ export class SettingsController {
   }
 
   @Post('users/:workspaceUserId/activate')
+  @RequirePermission('agency.settings.users.manage.admin')
   async activateWorkspaceUser(
     @RequestContextData() ctx: RequestContext,
     @Param('workspaceUserId') workspaceUserId: string,
@@ -481,6 +506,7 @@ export class SettingsController {
   }
 
   @Post('users/:workspaceUserId/deactivate')
+  @RequirePermission('agency.settings.users.manage.admin')
   async deactivateWorkspaceUser(
     @RequestContextData() ctx: RequestContext,
     @Param('workspaceUserId') workspaceUserId: string,
@@ -505,6 +531,7 @@ export class SettingsController {
   }
 
   @Post('users/:workspaceUserId/reset-password')
+  @RequirePermission('agency.settings.users.manage.admin')
   async resetWorkspaceUserPassword(
     @RequestContextData() ctx: RequestContext,
     @Param('workspaceUserId') workspaceUserId: string,
@@ -529,6 +556,8 @@ export class SettingsController {
   }
 
   @Delete('users/:workspaceUserId')
+  @DangerousAction()
+  @RequirePermission('agency.team.users.delete.owner_only')
   async removeWorkspaceUser(
     @RequestContextData() ctx: RequestContext,
     @Param('workspaceUserId') workspaceUserId: string,
@@ -553,6 +582,7 @@ export class SettingsController {
   }
 
   @Get('email')
+  @RequirePermission('agency.settings.email.manage.admin')
   async getEmail(@RequestContextData() ctx: RequestContext) {
     if (!ctx.tenantId || !ctx.workspaceId) {
       throw new BadRequestException(
@@ -566,6 +596,7 @@ export class SettingsController {
   }
 
   @Patch('email')
+  @RequirePermission('agency.settings.email.manage.admin')
   async patchEmail(
     @RequestContextData() ctx: RequestContext,
     @Body() dto: PatchWorkspaceEmailSettingsDto,
@@ -582,6 +613,7 @@ export class SettingsController {
   }
 
   @Get('integrations')
+  @RequirePermission('agency.settings.integrations.manage.admin')
   async getIntegrations(@RequestContextData() ctx: RequestContext) {
     if (!ctx.tenantId || !ctx.workspaceId) {
       throw new BadRequestException(
@@ -595,6 +627,7 @@ export class SettingsController {
   }
 
   @Patch('integrations')
+  @RequirePermission('agency.settings.integrations.manage.admin')
   async patchIntegrations(
     @RequestContextData() ctx: RequestContext,
     @Body() dto: PatchWorkspaceIntegrationsDto,
@@ -615,6 +648,7 @@ export class SettingsController {
   }
 
   @Get('security')
+  @RequirePermission('agency.settings.account.view.self')
   async getSecurity(@RequestContextData() ctx: RequestContext) {
     if (!ctx.tenantId || !ctx.userId) {
       throw new BadRequestException(
@@ -628,6 +662,7 @@ export class SettingsController {
   }
 
   @Patch('security')
+  @RequirePermission('agency.settings.account.update.self')
   async patchSecurity(
     @RequestContextData() ctx: RequestContext,
     @Body() dto: PatchSecuritySettingsDto,
@@ -644,6 +679,7 @@ export class SettingsController {
   }
 
   @Patch('security/email')
+  @RequirePermission('agency.settings.account.update.self')
   async patchSecurityEmail(
     @RequestContextData() ctx: RequestContext,
     @Body() dto: PatchSecurityEmailDto,
@@ -664,6 +700,7 @@ export class SettingsController {
   }
 
   @Patch('security/password')
+  @RequirePermission('agency.settings.account.update.self')
   async patchSecurityPassword(
     @RequestContextData() ctx: RequestContext,
     @Body() dto: PatchSecurityPasswordDto,
@@ -684,6 +721,7 @@ export class SettingsController {
   }
 
   @Post('security/password/reset-email')
+  @RequirePermission('agency.settings.account.update.self')
   async requestSecurityPasswordReset(
     @RequestContextData() ctx: RequestContext,
   ) {
@@ -702,6 +740,7 @@ export class SettingsController {
   }
 
   @Post('security/2fa/setup')
+  @RequirePermission('agency.settings.account.update.self')
   async setupTwoFactor(
     @RequestContextData() ctx: RequestContext,
     @Body() dto: SetupTwoFactorDto,
@@ -718,6 +757,7 @@ export class SettingsController {
   }
 
   @Post('security/2fa/confirm')
+  @RequirePermission('agency.settings.account.update.self')
   async confirmTwoFactor(
     @RequestContextData() ctx: RequestContext,
     @Body() dto: ConfirmTwoFactorDto,
@@ -734,6 +774,7 @@ export class SettingsController {
   }
 
   @Post('security/2fa/disable')
+  @RequirePermission('agency.settings.account.update.self')
   async disableTwoFactor(@RequestContextData() ctx: RequestContext) {
     if (!ctx.tenantId || !ctx.userId) {
       throw new BadRequestException(
@@ -747,6 +788,7 @@ export class SettingsController {
   }
 
   @Get('security/sessions')
+  @RequirePermission('agency.settings.account.view.self')
   async getSecuritySessions(@RequestContextData() ctx: RequestContext) {
     if (!ctx.tenantId || !ctx.userId) {
       throw new BadRequestException(
@@ -760,6 +802,7 @@ export class SettingsController {
   }
 
   @Post('security/sessions/:sessionId/revoke')
+  @RequirePermission('agency.settings.account.update.self')
   async revokeSecuritySession(
     @RequestContextData() ctx: RequestContext,
     @Param('sessionId') sessionId: string,
@@ -780,6 +823,7 @@ export class SettingsController {
   }
 
   @Post('security/sessions/revoke-others')
+  @RequirePermission('agency.settings.account.update.self')
   async revokeOtherSecuritySessions(@RequestContextData() ctx: RequestContext) {
     if (!ctx.tenantId || !ctx.userId) {
       throw new BadRequestException(
@@ -796,6 +840,7 @@ export class SettingsController {
   }
 
   @Get('security/trusted-devices')
+  @RequirePermission('agency.settings.account.view.self')
   async getTrustedDevices(@RequestContextData() ctx: RequestContext) {
     if (!ctx.tenantId || !ctx.userId) {
       throw new BadRequestException(
@@ -809,6 +854,7 @@ export class SettingsController {
   }
 
   @Get('security/devices')
+  @RequirePermission('agency.settings.account.view.self')
   async getLegacyTrustedDevices(@RequestContextData() ctx: RequestContext) {
     if (!ctx.tenantId || !ctx.userId) {
       throw new BadRequestException(
@@ -825,6 +871,7 @@ export class SettingsController {
   }
 
   @Post('security/trusted-devices/trust-current')
+  @RequirePermission('agency.settings.account.update.self')
   async trustCurrentDevice(@RequestContextData() ctx: RequestContext) {
     if (!ctx.tenantId || !ctx.userId || !ctx.sessionId) {
       throw new BadRequestException(
@@ -842,6 +889,7 @@ export class SettingsController {
   }
 
   @Post('security/devices/:deviceId/trust')
+  @RequirePermission('agency.settings.account.update.self')
   async trustLegacyDevice(
     @RequestContextData() ctx: RequestContext,
     @Param('deviceId') deviceId: string,
@@ -862,6 +910,7 @@ export class SettingsController {
   }
 
   @Delete('security/trusted-devices/:deviceId')
+  @RequirePermission('agency.settings.account.update.self')
   async revokeTrustedDevice(
     @RequestContextData() ctx: RequestContext,
     @Param('deviceId') deviceId: string,
@@ -882,6 +931,7 @@ export class SettingsController {
   }
 
   @Post('security/devices/:deviceId/remove')
+  @RequirePermission('agency.settings.account.update.self')
   async removeLegacyTrustedDevice(
     @RequestContextData() ctx: RequestContext,
     @Param('deviceId') deviceId: string,
@@ -907,6 +957,7 @@ export class SettingsController {
   }
 
   @Get('notifications')
+  @RequirePermission('agency.settings.account.view.self')
   async getNotifications(@RequestContextData() ctx: RequestContext) {
     if (!ctx.tenantId || !ctx.userId) {
       throw new BadRequestException(
@@ -920,6 +971,7 @@ export class SettingsController {
   }
 
   @Post('notifications/:notificationId/read')
+  @RequirePermission('agency.settings.account.update.self')
   async markNotificationAsRead(
     @RequestContextData() ctx: RequestContext,
     @Param('notificationId') notificationId: string,
@@ -940,6 +992,7 @@ export class SettingsController {
   }
 
   @Post('notifications/read-all')
+  @RequirePermission('agency.settings.account.update.self')
   async markAllNotificationsAsRead(@RequestContextData() ctx: RequestContext) {
     if (!ctx.tenantId || !ctx.userId) {
       throw new BadRequestException(

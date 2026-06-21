@@ -15,6 +15,12 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import {
+  DangerousAction,
+  PermissionsGuard,
+  RequireAnyPermission,
+  RequirePermission,
+} from '../permissions';
 import { RequestContextData } from '../../common/context/request-context.decorator';
 import type { RequestContext } from '../../common/context/request-context.interface';
 import { MAX_IMAGE_UPLOAD_BYTES } from '../../common/files/files.service';
@@ -83,17 +89,31 @@ const IMAGE_UPLOAD_OPTIONS = {
   },
 };
 
+const CONTACT_VIEW_PERMISSIONS = [
+  'shared.contacts.view.assigned',
+  'shared.contacts.view.client',
+  'shared.contacts.view.department',
+  'shared.contacts.view.all',
+];
+
+const CONTACT_UPDATE_PERMISSIONS = [
+  'shared.contacts.update.assigned',
+  'shared.contacts.update.client',
+];
+
 @Controller('agency/contacts')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, PermissionsGuard)
 export class AgencyContactsController {
   constructor(private readonly agencyContactsService: AgencyContactsService) {}
 
   @Get('lists')
+  @RequireAnyPermission(...CONTACT_VIEW_PERMISSIONS)
   listLists(@RequestContextData() ctx: RequestContext) {
     return this.agencyContactsService.listLists(ctx);
   }
 
   @Post('lists')
+  @RequirePermission('shared.contacts.update.client')
   createList(
     @RequestContextData() ctx: RequestContext,
     @Body() dto: CreateContactListDto,
@@ -102,6 +122,7 @@ export class AgencyContactsController {
   }
 
   @Patch('lists/:listId')
+  @RequirePermission('shared.contacts.update.client')
   patchList(
     @RequestContextData() ctx: RequestContext,
     @Param('listId') listId: string,
@@ -111,6 +132,8 @@ export class AgencyContactsController {
   }
 
   @Delete('lists/:listId')
+  @RequirePermission('shared.contacts.delete.owner_only')
+  @DangerousAction()
   deleteList(
     @RequestContextData() ctx: RequestContext,
     @Param('listId') listId: string,
@@ -120,6 +143,7 @@ export class AgencyContactsController {
   }
 
   @Get()
+  @RequireAnyPermission(...CONTACT_VIEW_PERMISSIONS)
   listContacts(
     @RequestContextData() ctx: RequestContext,
     @Query() query: ListAgencyContactsQuery,
@@ -128,6 +152,7 @@ export class AgencyContactsController {
   }
 
   @Post()
+  @RequirePermission('shared.contacts.create')
   createContact(
     @RequestContextData() ctx: RequestContext,
     @Body() dto: CreateContactDto,
@@ -136,16 +161,19 @@ export class AgencyContactsController {
   }
 
   @Get('defaults')
+  @RequireAnyPermission(...CONTACT_VIEW_PERMISSIONS)
   getDefaults(@RequestContextData() ctx: RequestContext) {
     return this.agencyContactsService.getDefaults(ctx);
   }
 
   @Get('identification-types')
+  @RequireAnyPermission(...CONTACT_VIEW_PERMISSIONS)
   listIdentificationTypes(@RequestContextData() ctx: RequestContext) {
     return this.agencyContactsService.listIdentificationTypes(ctx);
   }
 
   @Post('identification-types')
+  @RequirePermission('shared.contacts.update.client')
   createIdentificationType(
     @RequestContextData() ctx: RequestContext,
     @Body() dto: CreateAgencyContactIdentificationTypeDto,
@@ -154,6 +182,7 @@ export class AgencyContactsController {
   }
 
   @Patch('identification-types/:id')
+  @RequirePermission('shared.contacts.update.client')
   updateIdentificationType(
     @RequestContextData() ctx: RequestContext,
     @Param('id') id: string,
@@ -163,6 +192,8 @@ export class AgencyContactsController {
   }
 
   @Delete('identification-types/:id')
+  @RequirePermission('shared.contacts.delete.owner_only')
+  @DangerousAction()
   deleteIdentificationType(
     @RequestContextData() ctx: RequestContext,
     @Param('id') id: string,
@@ -171,11 +202,13 @@ export class AgencyContactsController {
   }
 
   @Get('banks')
+  @RequireAnyPermission(...CONTACT_VIEW_PERMISSIONS)
   listBanks(@RequestContextData() ctx: RequestContext) {
     return this.agencyContactsService.listBanks(ctx);
   }
 
   @Post('banks')
+  @RequirePermission('shared.contacts.update.client')
   createBank(
     @RequestContextData() ctx: RequestContext,
     @Body() dto: CreateAgencyBankDto,
@@ -184,6 +217,7 @@ export class AgencyContactsController {
   }
 
   @Patch('banks/:id')
+  @RequirePermission('shared.contacts.update.client')
   updateBank(
     @RequestContextData() ctx: RequestContext,
     @Param('id') id: string,
@@ -193,6 +227,8 @@ export class AgencyContactsController {
   }
 
   @Delete('banks/:id')
+  @RequirePermission('shared.contacts.delete.owner_only')
+  @DangerousAction()
   deleteBank(
     @RequestContextData() ctx: RequestContext,
     @Param('id') id: string,
@@ -201,6 +237,7 @@ export class AgencyContactsController {
   }
 
   @Get('bank-accounts')
+  @RequireAnyPermission(...CONTACT_VIEW_PERMISSIONS)
   listBankAccounts(
     @RequestContextData() ctx: RequestContext,
     @Query('contactId') contactId?: string,
@@ -209,6 +246,7 @@ export class AgencyContactsController {
   }
 
   @Post('bank-accounts')
+  @RequireAnyPermission(...CONTACT_UPDATE_PERMISSIONS)
   createBankAccount(
     @RequestContextData() ctx: RequestContext,
     @Body() dto: CreateAgencyContactBankAccountDto,
@@ -217,6 +255,7 @@ export class AgencyContactsController {
   }
 
   @Patch('bank-accounts/:id')
+  @RequireAnyPermission(...CONTACT_UPDATE_PERMISSIONS)
   updateBankAccount(
     @RequestContextData() ctx: RequestContext,
     @Param('id') id: string,
@@ -226,6 +265,8 @@ export class AgencyContactsController {
   }
 
   @Delete('bank-accounts/:id')
+  @RequirePermission('shared.contacts.delete.owner_only')
+  @DangerousAction()
   deleteBankAccount(
     @RequestContextData() ctx: RequestContext,
     @Param('id') id: string,
@@ -234,11 +275,13 @@ export class AgencyContactsController {
   }
 
   @Get('tags')
+  @RequireAnyPermission(...CONTACT_VIEW_PERMISSIONS)
   listTags(@RequestContextData() ctx: RequestContext) {
     return this.agencyContactsService.listTags(ctx);
   }
 
   @Post('tags')
+  @RequirePermission('shared.contacts.update.client')
   createTag(
     @RequestContextData() ctx: RequestContext,
     @Body() dto: CreateContactTagDto,
@@ -247,6 +290,7 @@ export class AgencyContactsController {
   }
 
   @Patch('tags/:tagId')
+  @RequirePermission('shared.contacts.update.client')
   patchTag(
     @RequestContextData() ctx: RequestContext,
     @Param('tagId') tagId: string,
@@ -256,6 +300,8 @@ export class AgencyContactsController {
   }
 
   @Delete('tags/:tagId')
+  @RequirePermission('shared.contacts.delete.owner_only')
+  @DangerousAction()
   deleteTag(
     @RequestContextData() ctx: RequestContext,
     @Param('tagId') tagId: string,
@@ -264,11 +310,13 @@ export class AgencyContactsController {
   }
 
   @Get('segments')
+  @RequireAnyPermission(...CONTACT_VIEW_PERMISSIONS)
   listSegments(@RequestContextData() ctx: RequestContext) {
     return this.agencyContactsService.listSegments(ctx);
   }
 
   @Post('segments')
+  @RequirePermission('shared.contacts.update.client')
   createSegment(
     @RequestContextData() ctx: RequestContext,
     @Body() dto: CreateContactSegmentDto,
@@ -277,6 +325,7 @@ export class AgencyContactsController {
   }
 
   @Patch('segments/:segmentId')
+  @RequirePermission('shared.contacts.update.client')
   patchSegment(
     @RequestContextData() ctx: RequestContext,
     @Param('segmentId') segmentId: string,
@@ -286,6 +335,8 @@ export class AgencyContactsController {
   }
 
   @Delete('segments/:segmentId')
+  @RequirePermission('shared.contacts.delete.owner_only')
+  @DangerousAction()
   deleteSegment(
     @RequestContextData() ctx: RequestContext,
     @Param('segmentId') segmentId: string,
@@ -294,6 +345,7 @@ export class AgencyContactsController {
   }
 
   @Get(':contactId/methods')
+  @RequireAnyPermission(...CONTACT_VIEW_PERMISSIONS)
   listMethods(
     @RequestContextData() ctx: RequestContext,
     @Param('contactId') contactId: string,
@@ -302,6 +354,7 @@ export class AgencyContactsController {
   }
 
   @Post(':contactId/methods')
+  @RequireAnyPermission(...CONTACT_UPDATE_PERMISSIONS)
   createMethod(
     @RequestContextData() ctx: RequestContext,
     @Param('contactId') contactId: string,
@@ -311,6 +364,7 @@ export class AgencyContactsController {
   }
 
   @Patch(':contactId/methods/:methodId')
+  @RequireAnyPermission(...CONTACT_UPDATE_PERMISSIONS)
   patchMethod(
     @RequestContextData() ctx: RequestContext,
     @Param('contactId') contactId: string,
@@ -326,6 +380,7 @@ export class AgencyContactsController {
   }
 
   @Delete(':contactId/methods/:methodId')
+  @RequireAnyPermission(...CONTACT_UPDATE_PERMISSIONS)
   deleteMethod(
     @RequestContextData() ctx: RequestContext,
     @Param('contactId') contactId: string,
@@ -335,6 +390,7 @@ export class AgencyContactsController {
   }
 
   @Get(':contactId/addresses')
+  @RequireAnyPermission(...CONTACT_VIEW_PERMISSIONS)
   listAddresses(
     @RequestContextData() ctx: RequestContext,
     @Param('contactId') contactId: string,
@@ -343,6 +399,7 @@ export class AgencyContactsController {
   }
 
   @Post(':contactId/addresses')
+  @RequireAnyPermission(...CONTACT_UPDATE_PERMISSIONS)
   createAddress(
     @RequestContextData() ctx: RequestContext,
     @Param('contactId') contactId: string,
@@ -352,6 +409,7 @@ export class AgencyContactsController {
   }
 
   @Patch(':contactId/addresses/:addressId')
+  @RequireAnyPermission(...CONTACT_UPDATE_PERMISSIONS)
   patchAddress(
     @RequestContextData() ctx: RequestContext,
     @Param('contactId') contactId: string,
@@ -367,6 +425,7 @@ export class AgencyContactsController {
   }
 
   @Delete(':contactId/addresses/:addressId')
+  @RequireAnyPermission(...CONTACT_UPDATE_PERMISSIONS)
   deleteAddress(
     @RequestContextData() ctx: RequestContext,
     @Param('contactId') contactId: string,
@@ -376,6 +435,7 @@ export class AgencyContactsController {
   }
 
   @Post(':contactId/tags/:tagId')
+  @RequireAnyPermission(...CONTACT_UPDATE_PERMISSIONS)
   addTagToContact(
     @RequestContextData() ctx: RequestContext,
     @Param('contactId') contactId: string,
@@ -385,6 +445,7 @@ export class AgencyContactsController {
   }
 
   @Delete(':contactId/tags/:tagId')
+  @RequireAnyPermission(...CONTACT_UPDATE_PERMISSIONS)
   removeTagFromContact(
     @RequestContextData() ctx: RequestContext,
     @Param('contactId') contactId: string,
@@ -398,6 +459,7 @@ export class AgencyContactsController {
   }
 
   @Get(':contactId/detail')
+  @RequireAnyPermission(...CONTACT_VIEW_PERMISSIONS)
   getContactDetail(
     @RequestContextData() ctx: RequestContext,
     @Param('contactId') contactId: string,
@@ -406,6 +468,7 @@ export class AgencyContactsController {
   }
 
   @Patch(':contactId/profile')
+  @RequireAnyPermission(...CONTACT_UPDATE_PERMISSIONS)
   updateContactProfile(
     @RequestContextData() ctx: RequestContext,
     @Param('contactId') contactId: string,
@@ -415,6 +478,7 @@ export class AgencyContactsController {
   }
 
   @Post(':contactId/profile/avatar')
+  @RequireAnyPermission(...CONTACT_UPDATE_PERMISSIONS)
   @UseInterceptors(FileInterceptor('file', IMAGE_UPLOAD_OPTIONS))
   uploadContactAvatar(
     @RequestContextData() ctx: RequestContext,
@@ -429,6 +493,7 @@ export class AgencyContactsController {
   }
 
   @Get(':contactId')
+  @RequireAnyPermission(...CONTACT_VIEW_PERMISSIONS)
   getContact(
     @RequestContextData() ctx: RequestContext,
     @Param('contactId') contactId: string,
@@ -437,6 +502,7 @@ export class AgencyContactsController {
   }
 
   @Patch(':contactId')
+  @RequireAnyPermission(...CONTACT_UPDATE_PERMISSIONS)
   patchContact(
     @RequestContextData() ctx: RequestContext,
     @Param('contactId') contactId: string,
@@ -446,6 +512,8 @@ export class AgencyContactsController {
   }
 
   @Delete(':contactId/permanent')
+  @RequirePermission('shared.contacts.delete.owner_only')
+  @DangerousAction()
   permanentlyDeleteContact(
     @RequestContextData() ctx: RequestContext,
     @Param('contactId') contactId: string,
@@ -454,6 +522,8 @@ export class AgencyContactsController {
   }
 
   @Delete(':contactId')
+  @RequirePermission('shared.contacts.delete.owner_only')
+  @DangerousAction()
   deleteContact(
     @RequestContextData() ctx: RequestContext,
     @Param('contactId') contactId: string,

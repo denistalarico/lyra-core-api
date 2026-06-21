@@ -113,4 +113,19 @@ export enum ContractTemplateEditorMode {
   Html = 'html',
   PlainText = 'plain_text',
   Markdown = 'markdown',
+  RichText = 'rich_text',
+}
+
+export enum ContractHeaderPreset {
+  Classic = 'classic',
+  Minimal = 'minimal',
+  Corporate = 'corporate',
+  None = 'none',
+}
+
+export enum ContractFooterPreset {
+  Lyra = 'lyra',
+  Company = 'company',
+  Legal = 'legal',
+  None = 'none',
 }

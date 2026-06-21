@@ -15,7 +15,10 @@ describe('ActivitiesService notification triggers', () => {
   it('publishes activity.assigned on create when assignedToId is set', async () => {
     const { service, publisher } = makeService();
 
-    await service.create(makeContext(), makeCreateDto({ assignedToId: 'user-assignee' }));
+    await service.create(
+      makeContext(),
+      makeCreateDto({ assignedToId: 'user-assignee' }),
+    );
 
     expect(publisher.publishAssigned).toHaveBeenCalledTimes(1);
     expect(publisher.publishAssigned).toHaveBeenCalledWith(
@@ -28,7 +31,10 @@ describe('ActivitiesService notification triggers', () => {
   it('does not publish activity.assigned on create without an assignee', async () => {
     const { service, publisher } = makeService();
 
-    await service.create(makeContext(), makeCreateDto({ assignedToId: undefined }));
+    await service.create(
+      makeContext(),
+      makeCreateDto({ assignedToId: undefined }),
+    );
 
     expect(publisher.publishAssigned).not.toHaveBeenCalled();
   });
@@ -49,7 +55,9 @@ describe('ActivitiesService notification triggers', () => {
     const activity = makeActivity({ assignedToId: null });
     const { service, publisher } = makeService({ activity });
 
-    await service.update(makeContext(), activity.id, { assignedToId: 'user-assignee' });
+    await service.update(makeContext(), activity.id, {
+      assignedToId: 'user-assignee',
+    });
 
     expect(publisher.publishAssigned).toHaveBeenCalledTimes(1);
     expect(publisher.publishReassigned).not.toHaveBeenCalled();
@@ -59,7 +67,9 @@ describe('ActivitiesService notification triggers', () => {
     const activity = makeActivity({ assignedToId: 'user-old' });
     const { service, publisher } = makeService({ activity });
 
-    await service.update(makeContext(), activity.id, { assignedToId: 'user-new' });
+    await service.update(makeContext(), activity.id, {
+      assignedToId: 'user-new',
+    });
 
     expect(publisher.publishReassigned).toHaveBeenCalledWith(
       expect.objectContaining({ previousAssignedToId: 'user-old' }),
@@ -68,10 +78,15 @@ describe('ActivitiesService notification triggers', () => {
   });
 
   it('publishes activity.completed on update when status transitions to done', async () => {
-    const activity = makeActivity({ status: ActivityStatus.Todo, createdById: 'user-creator' });
+    const activity = makeActivity({
+      status: ActivityStatus.Todo,
+      createdById: 'user-creator',
+    });
     const { service, publisher } = makeService({ activity });
 
-    await service.update(makeContext(), activity.id, { status: ActivityStatus.Done });
+    await service.update(makeContext(), activity.id, {
+      status: ActivityStatus.Done,
+    });
 
     expect(publisher.publishCompleted).toHaveBeenCalledTimes(1);
   });
@@ -84,7 +99,9 @@ describe('ActivitiesService notification triggers', () => {
     });
     const { service, publisher } = makeService({ activity });
 
-    await service.update(makeContext(), activity.id, { status: ActivityStatus.Cancelled });
+    await service.update(makeContext(), activity.id, {
+      status: ActivityStatus.Cancelled,
+    });
 
     expect(publisher.publishCanceled).toHaveBeenCalledTimes(1);
   });
@@ -97,14 +114,19 @@ describe('ActivitiesService notification triggers', () => {
     });
     const { service, publisher } = makeService({ activity });
 
-    await service.update(makeContext(), activity.id, { priority: ActivityPriority.High });
+    await service.update(makeContext(), activity.id, {
+      priority: ActivityPriority.High,
+    });
 
     expect(publisher.publishCompleted).not.toHaveBeenCalled();
     expect(publisher.publishCanceled).not.toHaveBeenCalled();
   });
 
   it('publishes activity.completed via complete()', async () => {
-    const activity = makeActivity({ status: ActivityStatus.Todo, createdById: 'user-creator' });
+    const activity = makeActivity({
+      status: ActivityStatus.Todo,
+      createdById: 'user-creator',
+    });
     const { service, publisher } = makeService({ activity });
 
     await service.complete(makeContext(), activity.id, {});
@@ -175,7 +197,9 @@ function makeService(options: { activity?: AgencyActivity } = {}) {
   let savedActivity: AgencyActivity | undefined = options.activity;
 
   const activitiesRepository = {
-    create: jest.fn((value: Partial<AgencyActivity>) => ({ ...value })) as unknown as Repository<AgencyActivity>['create'],
+    create: jest.fn((value: Partial<AgencyActivity>) => ({
+      ...value,
+    })) as unknown as Repository<AgencyActivity>['create'],
     save: jest.fn(async (value: AgencyActivity) => {
       savedActivity = {
         ...value,
@@ -191,7 +215,9 @@ function makeService(options: { activity?: AgencyActivity } = {}) {
 
   const linksRepository = {
     find: jest.fn().mockResolvedValue([] as AgencyActivityLink[]),
-    create: jest.fn((value: Partial<AgencyActivityLink>) => value as AgencyActivityLink),
+    create: jest.fn(
+      (value: Partial<AgencyActivityLink>) => value as AgencyActivityLink,
+    ),
     save: jest.fn(async (value: Partial<AgencyActivityLink>) => ({
       id: 'link-new',
       createdAt: NOW,
@@ -205,12 +231,17 @@ function makeService(options: { activity?: AgencyActivity } = {}) {
     publishCompleted: jest.fn(),
     publishCanceled: jest.fn(),
     publishFollowUpCreated: jest.fn(),
+    publishReminder: jest.fn(),
   } as unknown as jest.Mocked<ActivityNotificationPublisher>;
+  const emailService = {
+    sendCalendarReminderEmail: jest.fn().mockResolvedValue(undefined),
+  };
 
   const service = new ActivitiesService(
     activitiesRepository as unknown as Repository<AgencyActivity>,
     linksRepository as unknown as Repository<AgencyActivityLink>,
     publisher,
+    emailService as any,
   );
 
   return { service, publisher, activitiesRepository, linksRepository };

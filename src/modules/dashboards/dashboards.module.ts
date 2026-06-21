@@ -4,6 +4,7 @@ import { CalendarModule } from '../calendar/calendar.module';
 import { AgencySalesModule } from '../agency/agency-sales.module';
 import { ClientsModule } from '../clients/clients.module';
 import { FinanceModule } from '../finance/finance.module';
+import { PermissionsModule } from '../permissions';
 import { PlatformModule } from '../platform/platform.module';
 import { ProjectsModule } from '../projects/projects.module';
 import { TeamModule } from '../team/team.module';
@@ -15,6 +16,7 @@ import { AgencyDashboardsService } from './services/agency-dashboards.service';
 @Module({
   imports: [
     PlatformModule,
+    PermissionsModule,
     ProjectsModule,
     FinanceModule,
     ClientsModule,

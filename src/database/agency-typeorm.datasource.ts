@@ -54,6 +54,13 @@ import { CreateTenantProductEntitlements1760002047000 } from './migrations/17600
 import { CreatePlatformAccounts1760002048000 } from './migrations/1760002048000-create-platform-accounts';
 import { CreateAgencyCrmCore1760002049000 } from './migrations/1760002049000-create-agency-crm-core';
 import { CreatePlatformNotificationsLayer1760002050000 } from './migrations/1760002050000-create-platform-notifications-layer';
+import { CreatePlatformPermissionsCore1760002051000 } from './migrations/1760002051000-create-platform-permissions-core';
+import { EnableAdminFinanceReadPermissions1760002052000 } from './migrations/1760002052000-enable-admin-finance-read-permissions';
+import { AddSprint3PermissionMatrixUpdates1760002053000 } from './migrations/1760002053000-add-sprint3-permission-matrix-updates';
+import { AddSprint7ContactsPermissions1760002054000 } from './migrations/1760002054000-add-sprint7-contacts-permissions';
+import { AddSprint8LeadflowAppointmentsPermissions1760002055000 } from './migrations/1760002055000-add-sprint8-leadflow-appointments-permissions';
+import { AddContractTemplateLetterheadPresets1760002056000 } from './migrations/1760002056000-add-contract-template-letterhead-presets';
+import { CreateTeamMemberLifecycle1760002057000 } from './migrations/1760002057000-create-team-member-lifecycle';
 
 export const AgencyDataSource = new DataSource({
   type: 'postgres',
@@ -121,5 +128,12 @@ export const AgencyDataSource = new DataSource({
     CreateAgencyCrmCore1760002049000,
     CreatePlatformNotificationsLayer1760002050000,
     AddBankAccountChartAccount1760002039000,
+    CreatePlatformPermissionsCore1760002051000,
+    EnableAdminFinanceReadPermissions1760002052000,
+    AddSprint3PermissionMatrixUpdates1760002053000,
+    AddSprint7ContactsPermissions1760002054000,
+    AddSprint8LeadflowAppointmentsPermissions1760002055000,
+    AddContractTemplateLetterheadPresets1760002056000,
+    CreateTeamMemberLifecycle1760002057000,
   ],
 });

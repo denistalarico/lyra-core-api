@@ -6,6 +6,7 @@ import {
 import { createHash } from 'crypto';
 import { InjectRepository } from '@nestjs/typeorm';
 import { ILike, In, Repository } from 'typeorm';
+import type { QueryDeepPartialEntity } from 'typeorm/query-builder/QueryPartialEntity';
 import { AgencyUserProfileEntity } from '../../agency/entities/agency-settings.entities';
 import { FilesService } from '../../../common/files/files.service';
 import {
@@ -14,6 +15,7 @@ import {
   TeamMemberSkill,
   TeamSkill,
   TeamConfigOption,
+  TeamMemberLifecycleStep,
 } from '../entities';
 import {
   CreateTeamDepartmentDto,
@@ -30,6 +32,7 @@ import {
 import {
   TeamAttendanceSource,
   TeamAttendanceType,
+  TeamConfigOptionType,
   TeamMemberStatus,
   TeamPresenceSource,
   TeamPresenceStatus,
@@ -38,7 +41,23 @@ import {
 } from '../enums';
 import { NotificationInterestReason } from '../../notifications/enums';
 import { TEAM_DEFAULT_DEPARTMENTS, TEAM_DEFAULT_SKILLS } from './team-defaults';
+import { TEAM_PAYMENT_TEMPLATE_PRESETS } from './team-payment-presets';
+import {
+  LIFECYCLE_STEP_TYPE_DEFAULT_ICON,
+  TEAM_LIFECYCLE_STEP_TYPE_PRESETS,
+} from './team-lifecycle-step-type-presets';
 import { TeamNotificationPublisher } from './team-notification.publisher';
+import { DocumentPdfRendererService } from '../../document-layouts/document-pdf-renderer.service';
+import { ContractsService } from '../../contracts/services/contracts.service';
+import { PreviewContractTemplateDto } from '../../contracts/dto/preview-contract-template.dto';
+import { ContractFooterPreset, ContractHeaderPreset } from '../../contracts/enums';
+import sanitizeHtml from 'sanitize-html';
+import {
+  buildFlatSampleTokenMap,
+  buildMockPaymentDocumentContext,
+} from './team-payment-document-context';
+
+const PAYMENT_CONFIG_OPTION_TYPES = Object.keys(TEAM_PAYMENT_TEMPLATE_PRESETS);
 
 type RequestContext = {
   tenantId: string;
@@ -77,8 +96,12 @@ export class TeamService {
     private readonly memberSkillRepository: Repository<TeamMemberSkill>,
     @InjectRepository(AgencyUserProfileEntity, 'agency')
     private readonly userProfileRepository: Repository<AgencyUserProfileEntity>,
+    @InjectRepository(TeamMemberLifecycleStep, 'agency')
+    private readonly lifecycleStepRepository: Repository<TeamMemberLifecycleStep>,
     private readonly filesService: FilesService,
     private readonly teamNotificationPublisher: TeamNotificationPublisher,
+    private readonly pdfRendererService: DocumentPdfRendererService,
+    private readonly contractsService: ContractsService,
   ) {}
 
   health() {
@@ -332,10 +355,18 @@ export class TeamService {
     });
   }
 
-  listConfigOptions(
+  async listConfigOptions(
     ctx: RequestContext,
     type?: string,
   ) {
+    if (type && PAYMENT_CONFIG_OPTION_TYPES.includes(type)) {
+      await this.ensurePaymentTemplateDefaults(ctx, type);
+    }
+
+    if (type === TeamConfigOptionType.LifecycleStepType) {
+      await this.ensureLifecycleStepTypeDefaults(ctx);
+    }
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const where: any = {
       tenantId: ctx.tenantId,
@@ -348,12 +379,315 @@ export class TeamService {
     return this.configOptionRepository.find({ where, order: { name: 'ASC' } });
   }
 
+  private async ensurePaymentTemplateDefaults(ctx: RequestContext, type: string) {
+    const presets = TEAM_PAYMENT_TEMPLATE_PRESETS[type];
+    if (!presets?.length) return;
+
+    const optionType = type as TeamConfigOption['type'];
+
+    const existing = await this.configOptionRepository.find({
+      where: { tenantId: ctx.tenantId, workspaceId: ctx.workspaceId, type: optionType },
+    });
+
+    const requiredSystemPresets = presets.filter((preset) =>
+      Boolean((preset.metadata as Record<string, unknown>).systemKey),
+    );
+    for (const preset of requiredSystemPresets) {
+      const metadata = preset.metadata as Record<string, unknown>;
+      const legacyMatch = existing.find((option) => {
+        const current = (option.metadata ?? {}) as Record<string, unknown>;
+        return !current.systemKey &&
+          current.isSystemTemplate === true &&
+          current.templateRenderer === metadata.templateRenderer &&
+          current.countryScope === metadata.countryScope;
+      });
+      if (legacyMatch) {
+        legacyMatch.metadata = { ...legacyMatch.metadata, ...metadata };
+        legacyMatch.updatedById = ctx.userId || null;
+        await this.configOptionRepository.save(legacyMatch);
+      }
+    }
+    const presetsToCreate = existing.length === 0
+      ? presets
+      : requiredSystemPresets.filter((preset) => {
+          const metadata = preset.metadata as Record<string, unknown>;
+          const systemKey = String(metadata.systemKey);
+          return !existing.some((option) => {
+            const current = (option.metadata ?? {}) as Record<string, unknown>;
+            return current.systemKey === systemKey || (
+              current.isSystemTemplate === true &&
+              current.templateRenderer === metadata.templateRenderer &&
+              current.countryScope === metadata.countryScope
+            );
+          });
+        });
+
+    if (presetsToCreate.length === 0) return;
+
+    // This method can run concurrently when the payments page loads multiple
+    // configuration resources. Let the unique index arbitrate that race and
+    // keep any template that another request (or the user) created first.
+    await this.configOptionRepository
+      .createQueryBuilder()
+      .insert()
+      .into(TeamConfigOption)
+      .values(
+        presetsToCreate.map((preset) => ({
+          tenantId: ctx.tenantId,
+          workspaceId: ctx.workspaceId,
+          type: optionType,
+          name: preset.name,
+          description: preset.description,
+          color: preset.color,
+          status: 'active' as const,
+          metadata: preset.metadata,
+          createdById: ctx.userId || null,
+          updatedById: ctx.userId || null,
+        })) as QueryDeepPartialEntity<TeamConfigOption>[],
+      )
+      .orIgnore()
+      .execute();
+  }
+
+  private async ensureLifecycleStepTypeDefaults(ctx: RequestContext) {
+    const existing = await this.configOptionRepository.find({
+      where: {
+        tenantId: ctx.tenantId,
+        workspaceId: ctx.workspaceId,
+        type: TeamConfigOptionType.LifecycleStepType,
+      },
+    });
+
+    const existingSystemKeys = new Set(
+      existing
+        .map((option) => (option.metadata as Record<string, unknown> | null)?.systemKey)
+        .filter((key): key is string => typeof key === 'string'),
+    );
+
+    const presetsToCreate = TEAM_LIFECYCLE_STEP_TYPE_PRESETS.filter(
+      (preset) => !existingSystemKeys.has(preset.metadata.systemKey),
+    );
+
+    if (presetsToCreate.length === 0) return;
+
+    // Garantia individual por systemKey: o índice único (tenant, workspace, type, name)
+    // arbitra corridas concorrentes sem duplicar presets já criados por outra request.
+    await this.configOptionRepository
+      .createQueryBuilder()
+      .insert()
+      .into(TeamConfigOption)
+      .values(
+        presetsToCreate.map((preset) => ({
+          tenantId: ctx.tenantId,
+          workspaceId: ctx.workspaceId,
+          type: TeamConfigOptionType.LifecycleStepType,
+          name: preset.name,
+          description: preset.description,
+          color: preset.color,
+          status: 'active' as const,
+          metadata: preset.metadata,
+          createdById: ctx.userId || null,
+          updatedById: ctx.userId || null,
+        })) as QueryDeepPartialEntity<TeamConfigOption>[],
+      )
+      .orIgnore()
+      .execute();
+  }
+
+  async renderDocumentTemplatePdf(ctx: RequestContext, optionId: string): Promise<Buffer> {
+    const option = await this.loadDocumentTemplateOption(ctx, optionId);
+    const metadata = (option.metadata ?? {}) as Record<string, unknown>;
+    const html = this.buildDocumentHtml(ctx, option);
+
+    return this.pdfRendererService.renderHtmlToPdf(html, {
+      format: metadata.defaultPageSize === 'LETTER' ? 'Letter' : 'A4',
+    });
+  }
+
+  async renderDocumentTemplateHtml(ctx: RequestContext, optionId: string): Promise<string> {
+    const option = await this.loadDocumentTemplateOption(ctx, optionId);
+    return this.buildDocumentHtml(ctx, option);
+  }
+
+  async renderAttendanceReportPdf(html: string): Promise<Buffer> {
+    if (!html.includes('<title>Relatório de Presença</title>')) {
+      throw new BadRequestException('Conteúdo inválido para o relatório de presença.');
+    }
+    if (/url\s*\(|@import/i.test(html)) {
+      throw new BadRequestException('URLs em estilos não são permitidas no relatório.');
+    }
+
+    const safeHtml = sanitizeHtml(html, {
+      allowedTags: [
+        'html', 'head', 'meta', 'title', 'style', 'body', 'header', 'section',
+        'div', 'span', 'p', 'small', 'strong', 'b', 'h1', 'h2', 'table',
+        'thead', 'tbody', 'tr', 'th', 'td', 'img', 'br',
+      ],
+      allowedAttributes: {
+        html: ['lang'],
+        meta: ['charset'],
+        '*': ['class'],
+        img: ['src', 'alt'],
+      },
+      allowedSchemes: ['http', 'https', 'data'],
+      allowedSchemesByTag: { img: ['http', 'https', 'data'] },
+      allowProtocolRelative: false,
+      disallowedTagsMode: 'discard',
+    });
+
+    return this.pdfRendererService.renderHtmlToPdf(safeHtml, {
+      format: 'A4',
+      margin: { top: '0', right: '0', bottom: '0', left: '0' },
+    });
+  }
+
+  private async loadDocumentTemplateOption(ctx: RequestContext, optionId: string) {
+    const option = await this.configOptionRepository.findOne({
+      where: {
+        id: optionId,
+        tenantId: ctx.tenantId,
+        workspaceId: ctx.workspaceId,
+        type: 'payment_document_template',
+      },
+    });
+
+    if (!option) {
+      throw new NotFoundException('Modelo de documento não encontrado');
+    }
+
+    return option;
+  }
+
+  /**
+   * Despacha a renderização por `templateRenderer`: os 3 modelos protegidos
+   * usam builders dedicados (HTML confiável, gerado pelo backend); `custom_html`
+   * (default) sanitiza+interpola o bodyHtml do usuário via ContractsService,
+   * que já resolve header/footer preset — reaproveitado aqui para fechar o gap
+   * de PDF sem header/footer que existia antes desta mudança.
+   */
+  private buildDocumentHtml(ctx: RequestContext, option: TeamConfigOption): string {
+    const metadata = (option.metadata ?? {}) as Record<string, unknown>;
+    const templateRenderer = String(metadata.templateRenderer ?? 'custom_html');
+    const context = buildMockPaymentDocumentContext(option);
+    const presentation = {
+      headerPreset: String(metadata.headerPreset ?? 'classic'),
+      footerPreset: String(metadata.footerPreset ?? 'lyra'),
+      showLogo: metadata.showLogo !== false,
+      showCompanyData: metadata.showCompanyData !== false,
+      showDocumentNumber: metadata.showDocumentNumber === true,
+      documentNumber: context.document.number,
+      showPoweredByLyra: metadata.showPoweredByLyra !== false,
+    };
+
+    if (templateRenderer === 'attendance_report') {
+      return this.pdfRendererService.buildTeamAttendanceReportHtml({
+        agency: context.agency,
+        member: context.member,
+        period: context.period,
+        attendance: context.attendance,
+        signature: context.signature,
+        document: context.document,
+        presentation,
+      });
+    }
+
+    if (templateRenderer === 'payslip') {
+      return this.pdfRendererService.buildTeamPayslipHtml({
+        agency: context.agency,
+        member: context.member,
+        period: context.period,
+        payment: context.payment,
+        benefits: context.benefits,
+        deductions: context.deductions,
+        signature: context.signature,
+        document: context.document,
+        pageSize: context.document.pageSize,
+        presentation,
+      });
+    }
+
+    if (templateRenderer === 'payment_statement') {
+      return this.pdfRendererService.buildTeamPaymentStatementHtml({
+        agency: context.agency,
+        member: context.member,
+        contract: context.contract,
+        period: context.period,
+        payment: context.payment,
+        benefits: context.benefits,
+        deductions: context.deductions,
+        signature: context.signature,
+        document: context.document,
+        presentation,
+      });
+    }
+
+    if (templateRenderer === 'benefit_acknowledgment') {
+      return this.pdfRendererService.buildTeamBenefitAcknowledgmentHtml({
+        agency: context.agency,
+        member: context.member,
+        period: context.period,
+        payment: context.payment,
+        benefits: context.benefits,
+        signature: context.signature,
+        document: context.document,
+        presentation,
+      });
+    }
+
+    const bodyHtml = typeof metadata.bodyHtml === 'string' ? metadata.bodyHtml : '';
+
+    if (!bodyHtml.trim()) {
+      throw new BadRequestException('Modelo de documento não possui conteúdo HTML.');
+    }
+
+    const signatureRequired = metadata.signatureRequired !== false;
+    const bodyWithSignature = signatureRequired
+      ? `${bodyHtml}${this.pdfRendererService.buildSignatureBlockHtml({
+          memberLabel: context.signature.memberName,
+          memberRole: context.signature.memberRole,
+          agencyLabel: context.signature.agencySignerName,
+          agencyRole: context.signature.agencySignerRole,
+          city: context.signature.city,
+          date: context.signature.date,
+        })}`
+      : bodyHtml;
+
+    const dto: PreviewContractTemplateDto = {
+      bodyHtml: bodyWithSignature,
+      headerPreset: (metadata.headerPreset as ContractHeaderPreset) ?? ContractHeaderPreset.Classic,
+      footerPreset: (metadata.footerPreset as ContractFooterPreset) ?? ContractFooterPreset.Lyra,
+      showLogo: metadata.showLogo !== false,
+      showCompanyData: metadata.showCompanyData !== false,
+      showContractNumber: Boolean(metadata.showDocumentNumber),
+      showPoweredByLyra: metadata.showPoweredByLyra !== false,
+      locale: context.document.locale,
+      title: option.name,
+      variablesData: buildFlatSampleTokenMap(option),
+    };
+
+    return this.contractsService.previewTemplate(ctx, dto).html;
+  }
+
   async createConfigOption(
     ctx: RequestContext,
     dto: CreateTeamConfigOptionDto,
   ) {
     const name = dto.name.trim();
-    const metadata = dto.metadata ?? {};
+    let metadata = dto.metadata ?? {};
+
+    if (dto.type === TeamConfigOptionType.LifecycleStepType) {
+      const rawMetadata = metadata as Record<string, unknown>;
+      metadata = {
+        ...rawMetadata,
+        isSystemDefault: false,
+        icon: typeof rawMetadata.icon === 'string' && rawMetadata.icon
+          ? rawMetadata.icon
+          : LIFECYCLE_STEP_TYPE_DEFAULT_ICON,
+        scope: rawMetadata.scope === 'onboarding' || rawMetadata.scope === 'offboarding'
+          ? rawMetadata.scope
+          : 'both',
+      };
+    }
 
     // For seniority, uniqueness is scoped by skillCategory — find only within the same category
     const skillCategory =
@@ -418,6 +752,22 @@ export class TeamService {
       throw new NotFoundException('Config option not found');
     }
 
+    const protectedMetadata = (entity.metadata ?? {}) as Record<string, unknown>;
+    const isProtectedTemplate =
+      entity.type === 'payment_document_template' && protectedMetadata.isSystemTemplate === true;
+    const isSystemLifecycleStepType =
+      entity.type === TeamConfigOptionType.LifecycleStepType && protectedMetadata.isSystemDefault === true;
+
+    if (isSystemLifecycleStepType) {
+      // Tipos padrão só podem ter o status (ativo/arquivado) alterado — estrutura
+      // (nome, descrição, cor, ícone, escopo) é fixa para manter consistência visual.
+      if (dto.status !== undefined) {
+        entity.status = dto.status;
+      }
+      entity.updatedById = ctx.userId || null;
+      return this.configOptionRepository.save(entity);
+    }
+
     if (dto.type !== undefined) {
       entity.type = dto.type;
     }
@@ -435,7 +785,33 @@ export class TeamService {
     }
 
     if (dto.metadata !== undefined) {
-      entity.metadata = dto.metadata ?? {};
+      const nextMetadata = (dto.metadata ?? {}) as Record<string, unknown>;
+      entity.metadata = isProtectedTemplate
+        ? {
+            ...nextMetadata,
+            systemKey: protectedMetadata.systemKey,
+            documentType: protectedMetadata.documentType,
+            bodyHtml: protectedMetadata.bodyHtml,
+            isSystemTemplate: true,
+            lockedBody: true,
+            templateRenderer: protectedMetadata.templateRenderer,
+            signatureRequired: true,
+            signatureBlocks: protectedMetadata.signatureBlocks,
+          }
+        : entity.type === TeamConfigOptionType.LifecycleStepType
+          ? {
+              ...nextMetadata,
+              isSystemDefault: false,
+              icon:
+                typeof nextMetadata.icon === 'string' && nextMetadata.icon
+                  ? nextMetadata.icon
+                  : LIFECYCLE_STEP_TYPE_DEFAULT_ICON,
+              scope:
+                nextMetadata.scope === 'onboarding' || nextMetadata.scope === 'offboarding'
+                  ? nextMetadata.scope
+                  : 'both',
+            }
+          : nextMetadata;
     }
 
     if (dto.status !== undefined) {
@@ -458,6 +834,38 @@ export class TeamService {
 
     if (!option) {
       throw new NotFoundException('Team config option not found');
+    }
+
+    if (option.type === 'payment_document_template' && option.metadata?.isSystemTemplate === true) {
+      throw new BadRequestException('Modelos padrão do sistema não podem ser excluídos.');
+    }
+
+    if (option.type === TeamConfigOptionType.LifecycleStepType) {
+      if (option.metadata?.isSystemDefault === true) {
+        throw new BadRequestException('Tipos padrão do sistema não podem ser excluídos.');
+      }
+
+      const stepConfigs = await this.configOptionRepository.find({
+        where: [
+          { tenantId: ctx.tenantId, workspaceId: ctx.workspaceId, type: 'onboarding_task' },
+          { tenantId: ctx.tenantId, workspaceId: ctx.workspaceId, type: 'offboarding_task' },
+        ],
+      });
+      const inUseByConfig = stepConfigs.some(
+        (candidate) => (candidate.metadata as Record<string, unknown> | null)?.stepTypeId === id,
+      );
+      const inUseByStep = inUseByConfig
+        ? true
+        : (await this.lifecycleStepRepository.count({
+            where: { tenantId: ctx.tenantId, workspaceId: ctx.workspaceId, stepTypeId: id },
+          })) > 0;
+      const inUse = inUseByConfig || inUseByStep;
+
+      if (inUse) {
+        throw new BadRequestException(
+          'Este tipo de etapa está em uso e não pode ser excluído. Desative-o em vez de excluí-lo.',
+        );
+      }
     }
 
     await this.configOptionRepository.remove(option);

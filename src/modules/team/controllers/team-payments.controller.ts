@@ -9,6 +9,7 @@ import {
   Post,
   Query,
   Res,
+  UseGuards,
 } from '@nestjs/common';
 import type { Response } from 'express';
 import {
@@ -17,10 +18,17 @@ import {
   CreateTeamPaymentItemDto,
   GenerateTeamPaymentsDto,
   ListTeamPaymentsQueryDto,
+  MarkTeamPaymentPaidDto,
   UpdateTeamPaymentDto,
   UpdateTeamPaymentItemDto,
 } from '../dto';
 import { TeamPaymentsService } from '../services/team-payments.service';
+import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
+import {
+  DangerousAction,
+  PermissionsGuard,
+  RequirePermission,
+} from '../../permissions';
 
 type RequestContext = {
   tenantId: string;
@@ -38,16 +46,19 @@ function getContextFromHeaders(
   };
 }
 
+@UseGuards(JwtAuthGuard, PermissionsGuard)
 @Controller('agency/team/payments')
 export class TeamPaymentsController {
   constructor(private readonly teamPaymentsService: TeamPaymentsService) {}
 
   @Get('batches')
+  @RequirePermission('agency.team.compensation.view.owner_or_hr')
   listBatches(@Headers() headers: Record<string, string | string[] | undefined>) {
     return this.teamPaymentsService.listBatches(getContextFromHeaders(headers));
   }
 
   @Post('generate')
+  @RequirePermission('agency.team.compensation.view.owner_or_hr')
   generatePayments(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Body() dto: GenerateTeamPaymentsDto,
@@ -56,6 +67,7 @@ export class TeamPaymentsController {
   }
 
   @Get()
+  @RequirePermission('agency.team.compensation.view.owner_or_hr')
   listPayments(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Query() query: ListTeamPaymentsQueryDto,
@@ -64,6 +76,7 @@ export class TeamPaymentsController {
   }
 
   @Post()
+  @RequirePermission('agency.team.compensation.view.owner_or_hr')
   createPayment(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Body() dto: CreateTeamPaymentDto,
@@ -72,6 +85,7 @@ export class TeamPaymentsController {
   }
 
   @Get(':id')
+  @RequirePermission('agency.team.compensation.view.owner_or_hr')
   getPayment(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('id') id: string,
@@ -80,6 +94,7 @@ export class TeamPaymentsController {
   }
 
   @Patch(':id')
+  @RequirePermission('agency.team.compensation.view.owner_or_hr')
   updatePayment(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('id') id: string,
@@ -89,6 +104,8 @@ export class TeamPaymentsController {
   }
 
   @Delete(':id')
+  @DangerousAction()
+  @RequirePermission('agency.team.compensation.view.owner_or_hr')
   deletePayment(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('id') id: string,
@@ -97,6 +114,8 @@ export class TeamPaymentsController {
   }
 
   @Post(':id/archive')
+  @DangerousAction()
+  @RequirePermission('agency.team.compensation.view.owner_or_hr')
   archivePayment(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('id') id: string,
@@ -105,6 +124,7 @@ export class TeamPaymentsController {
   }
 
   @Post(':id/confirm')
+  @RequirePermission('agency.team.compensation.view.owner_or_hr')
   confirmPayment(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('id') id: string,
@@ -113,14 +133,27 @@ export class TeamPaymentsController {
   }
 
   @Post(':id/mark-paid')
+  @RequirePermission('agency.team.compensation.view.owner_or_hr')
   markPaid(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('id') id: string,
+    @Body() dto: MarkTeamPaymentPaidDto,
   ) {
-    return this.teamPaymentsService.markPaid(getContextFromHeaders(headers), id);
+    return this.teamPaymentsService.markPaid(getContextFromHeaders(headers), id, dto);
+  }
+
+  @Post(':id/revert-payment')
+  @RequirePermission('agency.team.compensation.view.owner_or_hr')
+  revertPayment(
+    @Headers() headers: Record<string, string | string[] | undefined>,
+    @Param('id') id: string,
+  ) {
+    return this.teamPaymentsService.revertPayment(getContextFromHeaders(headers), id);
   }
 
   @Post(':id/cancel')
+  @DangerousAction()
+  @RequirePermission('agency.team.compensation.view.owner_or_hr')
   cancelPayment(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('id') id: string,
@@ -129,6 +162,7 @@ export class TeamPaymentsController {
   }
 
   @Post(':id/back-to-draft')
+  @RequirePermission('agency.team.compensation.view.owner_or_hr')
   backToDraft(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('id') id: string,
@@ -137,6 +171,7 @@ export class TeamPaymentsController {
   }
 
   @Post(':id/items')
+  @RequirePermission('agency.team.compensation.view.owner_or_hr')
   createItem(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('id') id: string,
@@ -146,6 +181,7 @@ export class TeamPaymentsController {
   }
 
   @Patch(':id/items/:itemId')
+  @RequirePermission('agency.team.compensation.view.owner_or_hr')
   updateItem(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('id') id: string,
@@ -161,6 +197,8 @@ export class TeamPaymentsController {
   }
 
   @Delete(':id/items/:itemId')
+  @DangerousAction()
+  @RequirePermission('agency.team.compensation.view.owner_or_hr')
   deleteItem(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('id') id: string,
@@ -170,6 +208,7 @@ export class TeamPaymentsController {
   }
 
   @Get(':id/finance')
+  @RequirePermission('agency.team.compensation.view.owner_or_hr')
   getPaymentFinanceStatus(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('id') id: string,
@@ -178,6 +217,7 @@ export class TeamPaymentsController {
   }
 
   @Post(':id/documents')
+  @RequirePermission('agency.team.compensation.view.owner_or_hr')
   createDocument(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('id') id: string,
@@ -187,6 +227,8 @@ export class TeamPaymentsController {
   }
 
   @Delete(':id/documents/:documentId')
+  @DangerousAction()
+  @RequirePermission('agency.team.compensation.view.owner_or_hr')
   deleteDocument(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('id') id: string,
@@ -200,6 +242,7 @@ export class TeamPaymentsController {
   }
 
   @Get(':id/documents/:documentId/pdf')
+  @RequirePermission('agency.team.compensation.view.owner_or_hr')
   async getDocumentPdf(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('id') id: string,

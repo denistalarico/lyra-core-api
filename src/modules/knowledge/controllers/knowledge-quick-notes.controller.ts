@@ -7,29 +7,41 @@ import {
   Param,
   Patch,
   Post,
-} from "@nestjs/common";
-import { KnowledgeQuickNotesService } from "../services";
-import type { KnowledgeContext } from "../services/knowledge-context";
+  UseGuards,
+} from '@nestjs/common';
+import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
+import {
+  DangerousAction,
+  PermissionsGuard,
+  RequirePermission,
+} from '../../permissions';
+import { KnowledgeQuickNotesService } from '../services';
+import type { KnowledgeContext } from '../services/knowledge-context';
 
-function buildKnowledgeContext(headers: Record<string, string | string[] | undefined>): KnowledgeContext {
+function buildKnowledgeContext(
+  headers: Record<string, string | string[] | undefined>,
+): KnowledgeContext {
   return {
-    tenantId: String(headers["x-tenant-id"] ?? ""),
-    workspaceId: String(headers["x-workspace-id"] ?? ""),
-    userId: String(headers["x-user-id"] ?? ""),
-    role: String(headers["x-user-role"] ?? ""),
+    tenantId: String(headers['x-tenant-id'] ?? ''),
+    workspaceId: String(headers['x-workspace-id'] ?? ''),
+    userId: String(headers['x-user-id'] ?? ''),
+    role: String(headers['x-user-role'] ?? ''),
   };
 }
 
-@Controller("agency/knowledge/notes")
+@Controller('agency/knowledge/notes')
+@UseGuards(JwtAuthGuard, PermissionsGuard)
 export class KnowledgeQuickNotesController {
   constructor(private readonly notesService: KnowledgeQuickNotesService) {}
 
   @Get()
+  @RequirePermission('agency.knowledge.wall.post')
   list(@Headers() headers: Record<string, string | string[] | undefined>) {
     return this.notesService.list(buildKnowledgeContext(headers));
   }
 
   @Post()
+  @RequirePermission('agency.knowledge.wall.post')
   create(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Body()
@@ -46,10 +58,11 @@ export class KnowledgeQuickNotesController {
     return this.notesService.create(buildKnowledgeContext(headers), body);
   }
 
-  @Patch(":id")
+  @Patch(':id')
+  @RequirePermission('agency.knowledge.categories.manage.admin')
   update(
     @Headers() headers: Record<string, string | string[] | undefined>,
-    @Param("id") id: string,
+    @Param('id') id: string,
     @Body()
     body: {
       title?: string;
@@ -63,10 +76,12 @@ export class KnowledgeQuickNotesController {
     return this.notesService.update(buildKnowledgeContext(headers), id, body);
   }
 
-  @Delete(":id")
+  @Delete(':id')
+  @RequirePermission('agency.knowledge.categories.manage.admin')
+  @DangerousAction()
   delete(
     @Headers() headers: Record<string, string | string[] | undefined>,
-    @Param("id") id: string,
+    @Param('id') id: string,
   ) {
     return this.notesService.delete(buildKnowledgeContext(headers), id);
   }

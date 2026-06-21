@@ -2,7 +2,11 @@ import type { ProjectsDashboardOverview } from '../../projects/types';
 import type { CalendarDashboardSummary } from '../../calendar/types';
 import type { TeamDashboardSummary } from '../../team/types';
 
-export type AgencyDashboardPreset = 'executive' | 'management' | 'member';
+export type AgencyDashboardPreset =
+  | 'executive'
+  | 'agency'
+  | 'management'
+  | 'member';
 
 export type AgencyDashboardAccess = {
   canViewDashboard: boolean;

@@ -17,12 +17,13 @@ import { memoryStorage } from 'multer';
 import { TasksCrudService } from '../services/tasks-crud.service';
 import { TaskAttachmentsService } from '../services/task-attachments.service';
 import { TaskWorkspaceService } from '../services/task-workspace.service';
-import {
-  CreateTaskDto,
-  ListTasksQueryDto,
-  UpdateTaskDto,
-} from '../dto';
+import { CreateTaskDto, ListTasksQueryDto, UpdateTaskDto } from '../dto';
 import { MAX_IMAGE_UPLOAD_BYTES } from '../../../common/files/files.service';
+import {
+  DangerousAction,
+  RequireAnyPermission,
+  RequirePermission,
+} from '../../permissions';
 
 const TASK_ATTACHMENT_UPLOAD_OPTIONS = {
   storage: memoryStorage(),
@@ -58,13 +59,17 @@ type RequestContext = {
   tenantId: string;
   workspaceId: string;
   userId: string;
+  role?: string;
 };
 
-function getContextFromHeaders(headers: Record<string, string | string[] | undefined>): RequestContext {
+function getContextFromHeaders(
+  headers: Record<string, string | string[] | undefined>,
+): RequestContext {
   return {
     tenantId: String(headers['x-tenant-id'] ?? ''),
     workspaceId: String(headers['x-workspace-id'] ?? ''),
     userId: String(headers['x-user-id'] ?? ''),
+    role: String(headers['x-user-role'] ?? headers['x-role'] ?? 'member'),
   };
 }
 
@@ -77,45 +82,68 @@ export class TasksCrudController {
   ) {}
 
   @Get()
+  @RequirePermission('agency.tasks.task.manage.department')
   listWorkspaceTasks(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Query() query: ListTasksQueryDto,
   ) {
-    return this.tasksCrudService.listWorkspaceTasks(getContextFromHeaders(headers), query);
+    return this.tasksCrudService.listWorkspaceTasks(
+      getContextFromHeaders(headers),
+      query,
+    );
   }
 
   @Get('active-timers')
+  @RequirePermission('agency.tasks.time.track.self')
   listActiveTimers(
     @Headers() headers: Record<string, string | string[] | undefined>,
   ) {
-    return this.taskWorkspaceService.listActiveTimers(getContextFromHeaders(headers));
+    return this.taskWorkspaceService.listActiveTimers(
+      getContextFromHeaders(headers),
+    );
   }
 
   @Get('my')
+  @RequirePermission('agency.tasks.task.update.assigned')
   listMyTasks(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Query() query: ListTasksQueryDto,
   ) {
-    return this.tasksCrudService.listMyTasks(getContextFromHeaders(headers), query);
+    return this.tasksCrudService.listMyTasks(
+      getContextFromHeaders(headers),
+      query,
+    );
   }
 
   @Post()
+  @RequirePermission('agency.tasks.task.create.assigned')
   createWorkspaceTask(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Body() dto: CreateTaskDto,
   ) {
-    return this.tasksCrudService.createWorkspaceTask(getContextFromHeaders(headers), dto);
+    return this.tasksCrudService.createWorkspaceTask(
+      getContextFromHeaders(headers),
+      dto,
+    );
   }
 
   @Post('my')
+  @RequirePermission('agency.tasks.task.create.assigned')
   createMyTask(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Body() dto: CreateTaskDto,
   ) {
-    return this.tasksCrudService.createMyTask(getContextFromHeaders(headers), dto);
+    return this.tasksCrudService.createMyTask(
+      getContextFromHeaders(headers),
+      dto,
+    );
   }
 
   @Get(':id')
+  @RequireAnyPermission(
+    'agency.tasks.task.update.assigned',
+    'agency.tasks.task.manage.department',
+  )
   findOne(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('id') id: string,
@@ -124,15 +152,27 @@ export class TasksCrudController {
   }
 
   @Patch(':id')
+  @RequireAnyPermission(
+    'agency.tasks.task.update.assigned',
+    'agency.tasks.task.manage.department',
+  )
   update(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('id') id: string,
     @Body() dto: UpdateTaskDto,
   ) {
-    return this.tasksCrudService.update(getContextFromHeaders(headers), id, dto);
+    return this.tasksCrudService.update(
+      getContextFromHeaders(headers),
+      id,
+      dto,
+    );
   }
 
   @Post(':id/cover')
+  @RequireAnyPermission(
+    'agency.tasks.task.update.assigned',
+    'agency.tasks.task.manage.department',
+  )
   @UseInterceptors(FileInterceptor('file', TASK_COVER_UPLOAD_OPTIONS))
   uploadCover(
     @Headers() headers: Record<string, string | string[] | undefined>,
@@ -143,10 +183,19 @@ export class TasksCrudController {
       throw new BadRequestException('Missing multipart field "file".');
     }
 
-    return this.tasksCrudService.uploadCover(getContextFromHeaders(headers), id, file);
+    return this.tasksCrudService.uploadCover(
+      getContextFromHeaders(headers),
+      id,
+      file,
+    );
   }
 
   @Delete(':id')
+  @RequireAnyPermission(
+    'agency.tasks.task.update.assigned',
+    'agency.tasks.task.manage.department',
+  )
+  @DangerousAction()
   archive(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('id') id: string,
@@ -157,14 +206,25 @@ export class TasksCrudController {
   // ── Task Attachments ───────────────────────────────────────────────────────
 
   @Get(':id/attachments')
+  @RequireAnyPermission(
+    'agency.tasks.task.update.assigned',
+    'agency.tasks.task.manage.department',
+  )
   listAttachments(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('id') id: string,
   ) {
-    return this.taskAttachmentsService.listAttachments(getContextFromHeaders(headers), id);
+    return this.taskAttachmentsService.listAttachments(
+      getContextFromHeaders(headers),
+      id,
+    );
   }
 
   @Post(':id/attachments')
+  @RequireAnyPermission(
+    'agency.tasks.task.update.assigned',
+    'agency.tasks.task.manage.department',
+  )
   @UseInterceptors(FileInterceptor('file', TASK_ATTACHMENT_UPLOAD_OPTIONS))
   uploadAttachment(
     @Headers() headers: Record<string, string | string[] | undefined>,
@@ -172,15 +232,28 @@ export class TasksCrudController {
     @UploadedFile() file: Express.Multer.File,
   ) {
     if (!file) throw new BadRequestException('No file provided');
-    return this.taskAttachmentsService.uploadAttachment(getContextFromHeaders(headers), id, file);
+    return this.taskAttachmentsService.uploadAttachment(
+      getContextFromHeaders(headers),
+      id,
+      file,
+    );
   }
 
   @Delete(':id/attachments/:attachmentId')
+  @RequireAnyPermission(
+    'agency.tasks.task.update.assigned',
+    'agency.tasks.task.manage.department',
+  )
+  @DangerousAction()
   deleteAttachment(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('id') id: string,
     @Param('attachmentId') attachmentId: string,
   ) {
-    return this.taskAttachmentsService.deleteAttachment(getContextFromHeaders(headers), id, attachmentId);
+    return this.taskAttachmentsService.deleteAttachment(
+      getContextFromHeaders(headers),
+      id,
+      attachmentId,
+    );
   }
 }

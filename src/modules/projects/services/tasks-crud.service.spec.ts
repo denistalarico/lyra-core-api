@@ -7,6 +7,25 @@ import { TaskNotificationPublisher } from './task-notification.publisher';
 import { TasksCrudService } from './tasks-crud.service';
 
 describe('TasksCrudService notification triggers', () => {
+  it('scopes workspace task lists to assigned, created, or permitted project tasks for members', async () => {
+    const { service, queryBuilder } = makeService();
+
+    await service.listWorkspaceTasks(
+      { ...makeContext(), role: 'member' },
+      {},
+    );
+
+    expect(queryBuilder.scopeClauses.join('\n')).toContain(
+      'task.assignee_id = :scopeUserId',
+    );
+    expect(queryBuilder.scopeClauses.join('\n')).toContain(
+      'task.created_by_id = :scopeUserId',
+    );
+    expect(queryBuilder.scopeClauses.join('\n')).toContain(
+      'agency_project_followers',
+    );
+  });
+
   it('publishes assigned once when creating with an assignee different from the actor', async () => {
     const { service, publisher } = makeService();
 
@@ -210,7 +229,9 @@ function makeService(options: {
   publisher?: jest.Mocked<TaskNotificationPublisher>;
 } = {}) {
   const savedTask = options.task ?? makeTask();
+  const queryBuilder = createQueryBuilderMock<AgencyTask>();
   const tasksRepository = {
+    createQueryBuilder: jest.fn(() => queryBuilder),
     create: jest.fn((value: Partial<AgencyTask>) =>
       makeTask({
         ...value,
@@ -247,7 +268,46 @@ function makeService(options: {
     service,
     tasksRepository,
     publisher,
+    queryBuilder,
   };
+}
+
+function createQueryBuilderMock<T>() {
+  const scopeClauses: string[] = [];
+  const bracketQb = {
+    where: jest.fn((condition: string) => {
+      scopeClauses.push(condition);
+      return bracketQb;
+    }),
+    orWhere: jest.fn((condition: string) => {
+      scopeClauses.push(condition);
+      return bracketQb;
+    }),
+  };
+  const qb = {
+    scopeClauses,
+    where: jest.fn(() => qb),
+    andWhere: jest.fn((condition: unknown) => {
+      if (
+        condition &&
+        typeof condition === 'object' &&
+        'whereFactory' in condition &&
+        typeof (condition as { whereFactory?: unknown }).whereFactory ===
+          'function'
+      ) {
+        (condition as { whereFactory: (qb: typeof bracketQb) => void })
+          .whereFactory(bracketQb);
+      } else if (typeof condition === 'string') {
+        scopeClauses.push(condition);
+      }
+      return qb;
+    }),
+    orderBy: jest.fn(() => qb),
+    addOrderBy: jest.fn(() => qb),
+    getMany: jest.fn().mockResolvedValue([] as T[]),
+  };
+
+  return qb;
 }
 
 function makeTaskPublisher() {

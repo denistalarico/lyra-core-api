@@ -12,6 +12,13 @@ import {
 import { RequestContextData } from '../../common/context/request-context.decorator';
 import type { RequestContext } from '../../common/context/request-context.interface';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import {
+  DangerousAction,
+  PermissionsGuard,
+  RequireAnyPermission,
+  RequirePermission,
+  RequireProductEntitlement,
+} from '../permissions';
 import { AppointmentsService, ScheduledItemsFilters } from './appointments.service';
 import { CreateScheduledItemDto } from './dto/create-scheduled-item.dto';
 import { CreateScheduledItemParticipantDto } from './dto/create-scheduled-item-participant.dto';
@@ -21,11 +28,16 @@ import { PatchScheduledItemParticipantResponseDto } from './dto/patch-scheduled-
 import { PatchScheduledItemStatusDto } from './dto/patch-scheduled-item-status.dto';
 
 @Controller('appointments')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, PermissionsGuard)
+@RequireProductEntitlement('leadflow')
 export class AppointmentsController {
   constructor(private readonly appointmentsService: AppointmentsService) {}
 
   @Get()
+  @RequireAnyPermission(
+    'leadflow.appointments.item.view.assigned',
+    'leadflow.appointments.item.view.client',
+  )
   listScheduledItems(
     @RequestContextData() ctx: RequestContext,
     @Query('type') type?: string,
@@ -48,6 +60,7 @@ export class AppointmentsController {
   }
 
   @Post()
+  @RequirePermission('leadflow.appointments.item.create.client')
   createScheduledItem(
     @RequestContextData() ctx: RequestContext,
     @Body() dto: CreateScheduledItemDto,
@@ -56,6 +69,10 @@ export class AppointmentsController {
   }
 
   @Get(':id')
+  @RequireAnyPermission(
+    'leadflow.appointments.item.view.assigned',
+    'leadflow.appointments.item.view.client',
+  )
   getScheduledItem(
     @RequestContextData() ctx: RequestContext,
     @Param('id') id: string,
@@ -64,6 +81,10 @@ export class AppointmentsController {
   }
 
   @Patch(':id')
+  @RequireAnyPermission(
+    'leadflow.appointments.item.update.assigned',
+    'leadflow.appointments.item.update.client',
+  )
   patchScheduledItem(
     @RequestContextData() ctx: RequestContext,
     @Param('id') id: string,
@@ -73,6 +94,10 @@ export class AppointmentsController {
   }
 
   @Patch(':id/status')
+  @RequireAnyPermission(
+    'leadflow.appointments.item.update.assigned',
+    'leadflow.appointments.item.update.client',
+  )
   patchScheduledItemStatus(
     @RequestContextData() ctx: RequestContext,
     @Param('id') id: string,
@@ -82,6 +107,8 @@ export class AppointmentsController {
   }
 
   @Delete(':id')
+  @RequirePermission('leadflow.appointments.item.delete.owner_only')
+  @DangerousAction()
   deleteScheduledItem(
     @RequestContextData() ctx: RequestContext,
     @Param('id') id: string,
@@ -90,6 +117,10 @@ export class AppointmentsController {
   }
 
   @Get(':id/participants')
+  @RequireAnyPermission(
+    'leadflow.appointments.item.view.assigned',
+    'leadflow.appointments.item.view.client',
+  )
   listParticipants(
     @RequestContextData() ctx: RequestContext,
     @Param('id') id: string,
@@ -98,6 +129,10 @@ export class AppointmentsController {
   }
 
   @Post(':id/participants')
+  @RequireAnyPermission(
+    'leadflow.appointments.item.update.assigned',
+    'leadflow.appointments.item.update.client',
+  )
   addParticipant(
     @RequestContextData() ctx: RequestContext,
     @Param('id') id: string,
@@ -107,6 +142,10 @@ export class AppointmentsController {
   }
 
   @Patch(':id/participants/:participantId/response')
+  @RequireAnyPermission(
+    'leadflow.appointments.item.update.assigned',
+    'leadflow.appointments.item.update.client',
+  )
   patchParticipantResponse(
     @RequestContextData() ctx: RequestContext,
     @Param('id') id: string,
@@ -122,6 +161,10 @@ export class AppointmentsController {
   }
 
   @Get(':id/reminders')
+  @RequireAnyPermission(
+    'leadflow.appointments.item.view.assigned',
+    'leadflow.appointments.item.view.client',
+  )
   listReminders(
     @RequestContextData() ctx: RequestContext,
     @Param('id') id: string,
@@ -130,6 +173,10 @@ export class AppointmentsController {
   }
 
   @Post(':id/reminders')
+  @RequireAnyPermission(
+    'leadflow.appointments.item.update.assigned',
+    'leadflow.appointments.item.update.client',
+  )
   addReminder(
     @RequestContextData() ctx: RequestContext,
     @Param('id') id: string,
@@ -139,6 +186,10 @@ export class AppointmentsController {
   }
 
   @Post(':id/reminders/:reminderId/cancel')
+  @RequireAnyPermission(
+    'leadflow.appointments.item.update.assigned',
+    'leadflow.appointments.item.update.client',
+  )
   cancelReminder(
     @RequestContextData() ctx: RequestContext,
     @Param('id') id: string,

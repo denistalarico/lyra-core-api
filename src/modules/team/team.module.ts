@@ -15,18 +15,26 @@ import {
   TeamPayment,
   TeamPaymentItem,
   TeamPaymentDocument,
+  TeamMemberLifecycleProcess,
+  TeamMemberLifecycleStep,
 } from './entities';
+import { AgencyActivityLink } from '../activities/entities';
 import { TeamController } from './controllers/team.controller';
 import { TeamAttendanceController } from './controllers/team-attendance.controller';
 import { TeamPaymentsController } from './controllers/team-payments.controller';
+import { TeamLifecycleController } from './controllers/team-lifecycle.controller';
 import { TeamService } from './services/team.service';
 import { TeamAttendanceService } from './services/team-attendance.service';
 import { TeamDashboardQueryService } from './services/team-dashboard-query.service';
 import { TeamPaymentsService } from './services/team-payments.service';
+import { TeamLifecycleService } from './services/team-lifecycle.service';
 import { FinanceModule } from '../finance/finance.module';
 import { DocumentLayoutsModule } from '../document-layouts/document-layouts.module';
 import { FilesModule } from '../../common/files/files.module';
 import { NotificationsModule } from '../notifications';
+import { PermissionsModule } from '../permissions';
+import { ContractsModule } from '../contracts/contracts.module';
+import { AgencyContactsModule } from '../agency/agency-contacts.module';
 import { TeamNotificationPublisher } from './services/team-notification.publisher';
 
 const AGENCY_CONNECTION = 'agency';
@@ -37,6 +45,9 @@ const AGENCY_CONNECTION = 'agency';
     DocumentLayoutsModule,
     FilesModule,
     NotificationsModule,
+    PermissionsModule,
+    ContractsModule,
+    AgencyContactsModule,
     TypeOrmModule.forFeature(
       [
         TeamDepartment,
@@ -50,16 +61,25 @@ const AGENCY_CONNECTION = 'agency';
         TeamPayment,
         TeamPaymentItem,
         TeamPaymentDocument,
+        TeamMemberLifecycleProcess,
+        TeamMemberLifecycleStep,
         AgencyUserProfileEntity,
+        AgencyActivityLink,
       ],
       AGENCY_CONNECTION,
     ),
   ],
-  controllers: [TeamController, TeamAttendanceController, TeamPaymentsController],
+  controllers: [
+    TeamController,
+    TeamAttendanceController,
+    TeamPaymentsController,
+    TeamLifecycleController,
+  ],
   providers: [
     TeamService,
     TeamAttendanceService,
     TeamPaymentsService,
+    TeamLifecycleService,
     TeamDashboardQueryService,
     TeamNotificationPublisher,
   ],
@@ -67,6 +87,7 @@ const AGENCY_CONNECTION = 'agency';
     TeamService,
     TeamAttendanceService,
     TeamPaymentsService,
+    TeamLifecycleService,
     TeamDashboardQueryService,
   ],
 })

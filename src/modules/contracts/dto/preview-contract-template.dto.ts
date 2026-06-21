@@ -1,4 +1,5 @@
-import { IsObject, IsOptional, IsString } from 'class-validator';
+import { IsEnum, IsObject, IsOptional, IsString } from 'class-validator';
+import { ContractFooterPreset, ContractHeaderPreset } from '../enums';
 
 export class PreviewContractTemplateDto {
   @IsOptional()
@@ -15,6 +16,26 @@ export class PreviewContractTemplateDto {
   @IsOptional()
   @IsString()
   footerHtml?: string | null;
+
+  @IsOptional()
+  @IsEnum(ContractHeaderPreset)
+  headerPreset?: ContractHeaderPreset | null;
+
+  @IsOptional()
+  @IsEnum(ContractFooterPreset)
+  footerPreset?: ContractFooterPreset | null;
+
+  @IsOptional()
+  showLogo?: boolean;
+
+  @IsOptional()
+  showCompanyData?: boolean;
+
+  @IsOptional()
+  showContractNumber?: boolean;
+
+  @IsOptional()
+  showPoweredByLyra?: boolean;
 
   @IsOptional()
   @IsObject()

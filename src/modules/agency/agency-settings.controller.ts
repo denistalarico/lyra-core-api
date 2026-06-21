@@ -28,6 +28,7 @@ import {
   PatchAgencyNotificationsDto,
   PatchAgencyPermissionMatrixDto,
   PatchAgencySubscriptionsDto,
+  PatchAgencyUserPermissionOverrideDto,
   PatchAgencyUserPreferencesDto,
   PatchAgencyUserProfileDto,
   PatchAgencyUserSecurityDto,
@@ -36,6 +37,11 @@ import {
   SetupAgencyTwoFactorDto,
 } from './dto/agency-settings.dto';
 import { AgencySettingsService } from './agency-settings.service';
+import {
+  DangerousAction,
+  PermissionsGuard,
+  RequirePermission,
+} from '../permissions';
 
 const IMAGE_UPLOAD_OPTIONS = {
   storage: memoryStorage(),
@@ -63,18 +69,20 @@ const IMAGE_UPLOAD_OPTIONS = {
   },
 };
 
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, PermissionsGuard)
 @Controller('agency/settings')
 export class AgencySettingsController {
   constructor(private readonly agencySettingsService: AgencySettingsService) {}
 
   @Get('preferences')
+  @RequirePermission('agency.settings.account.view.self')
   getPreferences(@RequestContextData() ctx: RequestContext) {
     this.assertUserContext(ctx);
     return this.agencySettingsService.getPreferences(ctx.tenantId, ctx.userId);
   }
 
   @Patch('preferences')
+  @RequirePermission('agency.settings.account.update.self')
   patchPreferences(
     @RequestContextData() ctx: RequestContext,
     @Body() dto: PatchAgencyUserPreferencesDto,
@@ -88,12 +96,14 @@ export class AgencySettingsController {
   }
 
   @Get('profile')
+  @RequirePermission('agency.settings.account.view.self')
   getProfile(@RequestContextData() ctx: RequestContext) {
     this.assertUserContext(ctx);
     return this.agencySettingsService.getProfile(ctx.tenantId, ctx.userId);
   }
 
   @Patch('profile')
+  @RequirePermission('agency.settings.account.update.self')
   patchProfile(
     @RequestContextData() ctx: RequestContext,
     @Body() dto: PatchAgencyUserProfileDto,
@@ -107,6 +117,7 @@ export class AgencySettingsController {
   }
 
   @Post('profile/avatar')
+  @RequirePermission('agency.settings.account.update.self')
   @UseInterceptors(FileInterceptor('file', IMAGE_UPLOAD_OPTIONS))
   uploadProfileAvatar(
     @RequestContextData() ctx: RequestContext,
@@ -122,12 +133,14 @@ export class AgencySettingsController {
   }
 
   @Get('company')
+  @RequirePermission('agency.settings.company.view.admin')
   getCompany(@RequestContextData() ctx: RequestContext) {
     this.assertWorkspaceContext(ctx);
     return this.agencySettingsService.getCompany(ctx.tenantId, ctx.workspaceId);
   }
 
   @Patch('company')
+  @RequirePermission('agency.settings.company.update.admin')
   patchCompany(
     @RequestContextData() ctx: RequestContext,
     @Body() dto: PatchAgencyWorkspaceCompanyDto,
@@ -141,6 +154,7 @@ export class AgencySettingsController {
   }
 
   @Post('company/logo')
+  @RequirePermission('agency.settings.company.update.admin')
   @UseInterceptors(FileInterceptor('file', IMAGE_UPLOAD_OPTIONS))
   uploadCompanyLogo(
     @RequestContextData() ctx: RequestContext,
@@ -156,6 +170,7 @@ export class AgencySettingsController {
   }
 
   @Post('company/avatar')
+  @RequirePermission('agency.settings.company.update.admin')
   @UseInterceptors(FileInterceptor('file', IMAGE_UPLOAD_OPTIONS))
   uploadCompanyAvatar(
     @RequestContextData() ctx: RequestContext,
@@ -171,6 +186,7 @@ export class AgencySettingsController {
   }
 
   @Get('notifications')
+  @RequirePermission('agency.settings.account.view.self')
   getNotifications(@RequestContextData() ctx: RequestContext) {
     this.assertFullContext(ctx);
     return this.agencySettingsService.getNotifications(
@@ -181,6 +197,7 @@ export class AgencySettingsController {
   }
 
   @Patch('notifications')
+  @RequirePermission('agency.settings.account.update.self')
   patchNotifications(
     @RequestContextData() ctx: RequestContext,
     @Body() dto: PatchAgencyNotificationsDto,
@@ -195,6 +212,7 @@ export class AgencySettingsController {
   }
 
   @Get('security')
+  @RequirePermission('agency.settings.account.view.self')
   getSecurity(@RequestContextData() ctx: RequestContext) {
     this.assertUserContext(ctx);
     return this.agencySettingsService.getSecurity(
@@ -205,6 +223,7 @@ export class AgencySettingsController {
   }
 
   @Patch('security')
+  @RequirePermission('agency.settings.account.update.self')
   patchSecurity(
     @RequestContextData() ctx: RequestContext,
     @Body() dto: PatchAgencyUserSecurityDto,
@@ -219,6 +238,7 @@ export class AgencySettingsController {
   }
 
   @Post('security/2fa/setup')
+  @RequirePermission('agency.settings.account.update.self')
   setupTwoFactor(
     @RequestContextData() ctx: RequestContext,
     @Body() dto: SetupAgencyTwoFactorDto,
@@ -232,6 +252,7 @@ export class AgencySettingsController {
   }
 
   @Post('security/2fa/confirm')
+  @RequirePermission('agency.settings.account.update.self')
   confirmTwoFactor(
     @RequestContextData() ctx: RequestContext,
     @Body() dto: ConfirmAgencyTwoFactorDto,
@@ -246,6 +267,7 @@ export class AgencySettingsController {
   }
 
   @Post('security/2fa/disable')
+  @RequirePermission('agency.settings.account.update.self')
   disableTwoFactor(@RequestContextData() ctx: RequestContext) {
     this.assertUserContext(ctx);
     return this.agencySettingsService.disableTwoFactor(
@@ -256,6 +278,7 @@ export class AgencySettingsController {
   }
 
   @Delete('security/sessions/:sessionId')
+  @RequirePermission('agency.settings.account.update.self')
   revokeSecuritySession(
     @RequestContextData() ctx: RequestContext,
     @Param('sessionId') sessionId: string,
@@ -270,6 +293,7 @@ export class AgencySettingsController {
   }
 
   @Delete('security/trusted-devices/:deviceId')
+  @RequirePermission('agency.settings.account.update.self')
   revokeTrustedDevice(
     @RequestContextData() ctx: RequestContext,
     @Param('deviceId') deviceId: string,
@@ -284,6 +308,7 @@ export class AgencySettingsController {
   }
 
   @Get('apps-integrations')
+  @RequirePermission('agency.settings.apps.manage.admin')
   async getAppsIntegrations(@RequestContextData() ctx: RequestContext) {
     this.assertWorkspaceContext(ctx);
     const [apps, integrations] = await Promise.all([
@@ -295,6 +320,7 @@ export class AgencySettingsController {
   }
 
   @Patch('apps-integrations')
+  @RequirePermission('agency.settings.apps.manage.admin')
   patchApps(
     @RequestContextData() ctx: RequestContext,
     @Body() dto: PatchAgencyAppsDto,
@@ -308,6 +334,7 @@ export class AgencySettingsController {
   }
 
   @Patch('apps-integrations/integrations')
+  @RequirePermission('agency.settings.integrations.manage.admin')
   patchIntegrations(
     @RequestContextData() ctx: RequestContext,
     @Body() dto: PatchAgencyIntegrationsDto,
@@ -321,12 +348,14 @@ export class AgencySettingsController {
   }
 
   @Get('email')
+  @RequirePermission('agency.settings.email.manage.admin')
   getEmail(@RequestContextData() ctx: RequestContext) {
     this.assertWorkspaceContext(ctx);
     return this.agencySettingsService.getEmail(ctx.tenantId, ctx.workspaceId);
   }
 
   @Patch('email')
+  @RequirePermission('agency.settings.email.manage.admin')
   patchEmail(
     @RequestContextData() ctx: RequestContext,
     @Body() dto: PatchAgencyEmailDto,
@@ -340,12 +369,15 @@ export class AgencySettingsController {
   }
 
   @Get('finance')
+  @RequirePermission('agency.settings.billing.view.owner_only')
   getFinance(@RequestContextData() ctx: RequestContext) {
     this.assertWorkspaceContext(ctx);
     return this.agencySettingsService.getFinance(ctx.tenantId, ctx.workspaceId);
   }
 
   @Patch('finance')
+  @DangerousAction()
+  @RequirePermission('agency.settings.billing.manage.owner_only')
   patchFinance(
     @RequestContextData() ctx: RequestContext,
     @Body() dto: PatchAgencyFinanceDto,
@@ -359,6 +391,7 @@ export class AgencySettingsController {
   }
 
   @Get('subscriptions')
+  @RequirePermission('agency.settings.billing.view.owner_only')
   getSubscriptions(@RequestContextData() ctx: RequestContext) {
     this.assertWorkspaceContext(ctx);
     return this.agencySettingsService.getSubscriptions(
@@ -368,6 +401,8 @@ export class AgencySettingsController {
   }
 
   @Patch('subscriptions')
+  @DangerousAction()
+  @RequirePermission('agency.settings.billing.manage.owner_only')
   patchSubscriptions(
     @RequestContextData() ctx: RequestContext,
     @Body() dto: PatchAgencySubscriptionsDto,
@@ -381,6 +416,7 @@ export class AgencySettingsController {
   }
 
   @Get('advanced')
+  @RequirePermission('agency.settings.domains.manage.owner_only')
   getAdvanced(@RequestContextData() ctx: RequestContext) {
     this.assertWorkspaceContext(ctx);
     return this.agencySettingsService.getAdvanced(
@@ -390,6 +426,8 @@ export class AgencySettingsController {
   }
 
   @Patch('advanced')
+  @DangerousAction()
+  @RequirePermission('agency.settings.danger_zone.manage.owner_only')
   patchAdvanced(
     @RequestContextData() ctx: RequestContext,
     @Body() dto: PatchAgencyAdvancedDto,
@@ -403,6 +441,7 @@ export class AgencySettingsController {
   }
 
   @Get('users')
+  @RequirePermission('agency.settings.users.manage.admin')
   getWorkspaceUsers(@RequestContextData() ctx: RequestContext) {
     this.assertFullContext(ctx);
     return this.agencySettingsService.getWorkspaceUsers(
@@ -413,6 +452,7 @@ export class AgencySettingsController {
   }
 
   @Post('users/invite')
+  @RequirePermission('agency.settings.users.manage.admin')
   inviteWorkspaceUser(
     @RequestContextData() ctx: RequestContext,
     @Body() dto: InviteAgencyWorkspaceUserDto,
@@ -426,6 +466,7 @@ export class AgencySettingsController {
   }
 
   @Patch('users/:workspaceUserId/access')
+  @RequirePermission('agency.settings.permissions.manage.admin')
   patchWorkspaceUserAccess(
     @RequestContextData() ctx: RequestContext,
     @Param('workspaceUserId') workspaceUserId: string,
@@ -441,6 +482,7 @@ export class AgencySettingsController {
   }
 
   @Get('users/permission-matrix')
+  @RequirePermission('agency.settings.permissions.manage.admin')
   getPermissionMatrix(@RequestContextData() ctx: RequestContext) {
     this.assertWorkspaceContext(ctx);
     return this.agencySettingsService.getPermissionMatrix(
@@ -450,6 +492,7 @@ export class AgencySettingsController {
   }
 
   @Patch('users/permission-matrix')
+  @RequirePermission('agency.settings.permissions.manage.admin')
   patchPermissionMatrix(
     @RequestContextData() ctx: RequestContext,
     @Body() dto: PatchAgencyPermissionMatrixDto,
@@ -463,6 +506,7 @@ export class AgencySettingsController {
   }
 
   @Post('users/:workspaceUserId/deactivate')
+  @RequirePermission('agency.settings.users.manage.admin')
   deactivateWorkspaceUser(
     @RequestContextData() ctx: RequestContext,
     @Param('workspaceUserId') workspaceUserId: string,
@@ -472,6 +516,60 @@ export class AgencySettingsController {
       ctx.tenantId,
       ctx.workspaceId,
       workspaceUserId,
+    );
+  }
+
+  @Get('permissions/groups')
+  @RequirePermission('agency.settings.permissions.manage.admin')
+  getPermissionFunctionalGroups() {
+    return this.agencySettingsService.getPermissionFunctionalGroups();
+  }
+
+  @Get('users/:workspaceUserId/permissions')
+  @RequirePermission('agency.settings.permissions.manage.admin')
+  getWorkspaceUserPermissions(
+    @RequestContextData() ctx: RequestContext,
+    @Param('workspaceUserId') workspaceUserId: string,
+  ) {
+    this.assertWorkspaceContext(ctx);
+    return this.agencySettingsService.getWorkspaceUserPermissions(
+      ctx.tenantId,
+      ctx.workspaceId,
+      workspaceUserId,
+    );
+  }
+
+  @Post('users/:workspaceUserId/permissions/overrides')
+  @RequirePermission('agency.settings.permissions.manage.admin')
+  addWorkspaceUserPermissionOverride(
+    @RequestContextData() ctx: RequestContext,
+    @Param('workspaceUserId') workspaceUserId: string,
+    @Body() dto: PatchAgencyUserPermissionOverrideDto,
+  ) {
+    this.assertFullContext(ctx);
+    return this.agencySettingsService.addWorkspaceUserPermissionOverride(
+      ctx.tenantId,
+      ctx.workspaceId,
+      workspaceUserId,
+      ctx.userId,
+      dto,
+    );
+  }
+
+  @Delete('users/:workspaceUserId/permissions/overrides/:permissionKey')
+  @RequirePermission('agency.settings.permissions.manage.admin')
+  removeWorkspaceUserPermissionOverride(
+    @RequestContextData() ctx: RequestContext,
+    @Param('workspaceUserId') workspaceUserId: string,
+    @Param('permissionKey') permissionKey: string,
+  ) {
+    this.assertFullContext(ctx);
+    return this.agencySettingsService.removeWorkspaceUserPermissionOverride(
+      ctx.tenantId,
+      ctx.workspaceId,
+      workspaceUserId,
+      permissionKey,
+      ctx.userId,
     );
   }
 

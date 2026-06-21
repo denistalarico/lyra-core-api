@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { FilesModule } from '../../common/files/files.module';
 import { AgencyUserSecuritySettingsEntity } from '../agency/entities/agency-auth.entities';
 import { NotificationsModule } from '../notifications';
+import { PermissionsModule } from '../permissions';
 import {
   KnowledgeArticlesController,
   KnowledgeCategoriesController,
@@ -38,6 +39,7 @@ import {
   imports: [
     FilesModule,
     NotificationsModule,
+    PermissionsModule,
     TypeOrmModule.forFeature(
       [
         AgencyUserSecuritySettingsEntity,

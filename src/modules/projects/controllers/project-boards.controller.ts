@@ -1,5 +1,6 @@
 import { Controller, Get, Headers, Param } from '@nestjs/common';
 import { ProjectBoardsService } from '../services/project-boards.service';
+import { RequireAnyPermission, RequirePermission } from '../../permissions';
 
 type RequestContext = {
   tenantId: string;
@@ -7,7 +8,9 @@ type RequestContext = {
   userId: string;
 };
 
-function getContextFromHeaders(headers: Record<string, string | string[] | undefined>): RequestContext {
+function getContextFromHeaders(
+  headers: Record<string, string | string[] | undefined>,
+): RequestContext {
   return {
     tenantId: String(headers['x-tenant-id'] ?? ''),
     workspaceId: String(headers['x-workspace-id'] ?? ''),
@@ -20,25 +23,57 @@ export class ProjectBoardsController {
   constructor(private readonly projectBoardsService: ProjectBoardsService) {}
 
   @Get('board')
-  getProjectsBoard(@Headers() headers: Record<string, string | string[] | undefined>) {
-    return this.projectBoardsService.getProjectsBoard(getContextFromHeaders(headers));
+  @RequirePermission('agency.projects.project.view.assigned')
+  getProjectsBoard(
+    @Headers() headers: Record<string, string | string[] | undefined>,
+  ) {
+    return this.projectBoardsService.getProjectsBoard(
+      getContextFromHeaders(headers),
+    );
+  }
+
+  @Get('reports/checklist-items')
+  @RequirePermission('agency.tasks.task.manage.department')
+  listAllChecklistItems(
+    @Headers() headers: Record<string, string | string[] | undefined>,
+  ) {
+    return this.projectBoardsService.listAllChecklistItems(
+      getContextFromHeaders(headers),
+    );
   }
 
   @Get('tasks/board')
-  getWorkspaceTasksBoard(@Headers() headers: Record<string, string | string[] | undefined>) {
-    return this.projectBoardsService.getWorkspaceTasksBoard(getContextFromHeaders(headers));
+  @RequirePermission('agency.tasks.task.manage.department')
+  getWorkspaceTasksBoard(
+    @Headers() headers: Record<string, string | string[] | undefined>,
+  ) {
+    return this.projectBoardsService.getWorkspaceTasksBoard(
+      getContextFromHeaders(headers),
+    );
   }
 
   @Get(':projectId/tasks/board')
+  @RequireAnyPermission(
+    'agency.projects.project.view.assigned',
+    'agency.tasks.task.manage.department',
+  )
   getProjectTasksBoard(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('projectId') projectId: string,
   ) {
-    return this.projectBoardsService.getProjectTasksBoard(getContextFromHeaders(headers), projectId);
+    return this.projectBoardsService.getProjectTasksBoard(
+      getContextFromHeaders(headers),
+      projectId,
+    );
   }
 
   @Get('tasks/my/board')
-  getMyTasksBoard(@Headers() headers: Record<string, string | string[] | undefined>) {
-    return this.projectBoardsService.getMyTasksBoard(getContextFromHeaders(headers));
+  @RequirePermission('agency.tasks.task.update.assigned')
+  getMyTasksBoard(
+    @Headers() headers: Record<string, string | string[] | undefined>,
+  ) {
+    return this.projectBoardsService.getMyTasksBoard(
+      getContextFromHeaders(headers),
+    );
   }
 }

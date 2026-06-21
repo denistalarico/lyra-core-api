@@ -25,6 +25,7 @@ import { TeamChatAttachmentsController } from './controllers/team-chat-attachmen
 import { TeamChatMeetingsController } from './controllers/team-chat-meetings.controller';
 import { FilesModule } from '../../common/files/files.module';
 import { NotificationsModule } from '../notifications';
+import { PermissionsModule } from '../permissions';
 import { TeamChatNotificationPublisher } from './services/team-chat-notification.publisher';
 
 const AGENCY_CONNECTION = 'agency';
@@ -33,6 +34,7 @@ const AGENCY_CONNECTION = 'agency';
   imports: [
     FilesModule,
     NotificationsModule,
+    PermissionsModule,
     TypeOrmModule.forFeature(
       [
         AgencyChatChannel,
@@ -49,7 +51,11 @@ const AGENCY_CONNECTION = 'agency';
       AGENCY_CONNECTION,
     ),
   ],
-  controllers: [TeamChatController, TeamChatAttachmentsController, TeamChatMeetingsController],
+  controllers: [
+    TeamChatController,
+    TeamChatAttachmentsController,
+    TeamChatMeetingsController,
+  ],
   providers: [
     TeamChatChannelsService,
     TeamChatMessagesService,

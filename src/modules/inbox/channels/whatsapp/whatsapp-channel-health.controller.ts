@@ -2,23 +2,35 @@ import {
   BadRequestException,
   Controller,
   Get,
-  Headers,
   Param,
   Post,
+  UseGuards,
 } from '@nestjs/common';
+import { RequestContextData } from '../../../../common/context/request-context.decorator';
+import type { RequestContext } from '../../../../common/context/request-context.interface';
+import { JwtAuthGuard } from '../../../auth/guards/jwt-auth.guard';
+import {
+  PermissionsGuard,
+  RequirePermission,
+  RequireProductEntitlement,
+} from '../../../permissions';
 import { WhatsAppChannelHealthService } from './services/whatsapp-channel-health.service';
 
 @Controller('inbox/channels/whatsapp')
+@UseGuards(JwtAuthGuard, PermissionsGuard)
+@RequireProductEntitlement('leadflow')
 export class WhatsAppChannelHealthController {
   constructor(
     private readonly whatsappChannelHealthService: WhatsAppChannelHealthService,
   ) {}
 
   @Get('status')
+  @RequirePermission('leadflow.channels.channel.view.client')
   async status(
-    @Headers('x-tenant-id') tenantId: string | undefined,
-    @Headers('x-workspace-id') workspaceId: string | undefined,
+    @RequestContextData() ctx: RequestContext,
   ) {
+    const { tenantId, workspaceId } = ctx;
+
     if (!tenantId || !workspaceId) {
       throw new BadRequestException(
         'Tenant and workspace context are required.',
@@ -32,11 +44,13 @@ export class WhatsAppChannelHealthController {
   }
 
   @Get(':channelId/health')
+  @RequirePermission('leadflow.channels.channel.view.client')
   async health(
-    @Headers('x-tenant-id') tenantId: string | undefined,
-    @Headers('x-workspace-id') workspaceId: string | undefined,
+    @RequestContextData() ctx: RequestContext,
     @Param('channelId') channelId: string,
   ) {
+    const { tenantId, workspaceId } = ctx;
+
     if (!tenantId || !workspaceId) {
       throw new BadRequestException(
         'Tenant and workspace context are required.',
@@ -51,11 +65,13 @@ export class WhatsAppChannelHealthController {
   }
 
   @Post(':channelId/health-check')
+  @RequirePermission('leadflow.channels.channel.update.admin')
   async healthCheck(
-    @Headers('x-tenant-id') tenantId: string | undefined,
-    @Headers('x-workspace-id') workspaceId: string | undefined,
+    @RequestContextData() ctx: RequestContext,
     @Param('channelId') channelId: string,
   ) {
+    const { tenantId, workspaceId } = ctx;
+
     if (!tenantId || !workspaceId) {
       throw new BadRequestException(
         'Tenant and workspace context are required.',

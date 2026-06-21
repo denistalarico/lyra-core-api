@@ -6,8 +6,10 @@ IsString,
 MaxLength,
 } from 'class-validator';
 import {
-ContractCategory,
+ContractFooterPreset,
+ContractHeaderPreset,
 ContractSignatureMode,
+ContractTemplateEditorMode,
 ContractTargetType,
 } from '../enums';
 
@@ -20,8 +22,9 @@ name!: string;
 @IsString()
 description?: string | null;
 
-@IsEnum(ContractCategory)
-category!: ContractCategory;
+@IsString()
+@MaxLength(60)
+category!: string;
 
 @IsEnum(ContractTargetType)
 targetType!: ContractTargetType;
@@ -40,6 +43,30 @@ bodyHtml!: string;
 @IsOptional()
 @IsString()
 footerHtml?: string | null;
+
+@IsOptional()
+@IsEnum(ContractHeaderPreset)
+headerPreset?: ContractHeaderPreset | null;
+
+@IsOptional()
+@IsEnum(ContractFooterPreset)
+footerPreset?: ContractFooterPreset | null;
+
+@IsOptional()
+showLogo?: boolean;
+
+@IsOptional()
+showCompanyData?: boolean;
+
+@IsOptional()
+showContractNumber?: boolean;
+
+@IsOptional()
+showPoweredByLyra?: boolean;
+
+@IsOptional()
+@IsEnum(ContractTemplateEditorMode)
+editorMode?: ContractTemplateEditorMode;
 
 @IsOptional()
 @IsObject()

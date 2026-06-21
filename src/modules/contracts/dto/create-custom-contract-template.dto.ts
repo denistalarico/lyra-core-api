@@ -6,7 +6,8 @@ import {
   MaxLength,
 } from 'class-validator';
 import {
-  ContractCategory,
+  ContractFooterPreset,
+  ContractHeaderPreset,
   ContractSignatureMode,
   ContractTargetType,
   ContractTemplateEditorMode,
@@ -21,8 +22,9 @@ export class CreateCustomContractTemplateDto {
   @IsString()
   description?: string | null;
 
-  @IsEnum(ContractCategory)
-  category!: ContractCategory;
+  @IsString()
+  @MaxLength(60)
+  category!: string;
 
   @IsEnum(ContractTargetType)
   targetType!: ContractTargetType;
@@ -63,6 +65,26 @@ export class CreateCustomContractTemplateDto {
   @IsOptional()
   @IsString()
   footerHtml?: string | null;
+
+  @IsOptional()
+  @IsEnum(ContractHeaderPreset)
+  headerPreset?: ContractHeaderPreset | null;
+
+  @IsOptional()
+  @IsEnum(ContractFooterPreset)
+  footerPreset?: ContractFooterPreset | null;
+
+  @IsOptional()
+  showLogo?: boolean;
+
+  @IsOptional()
+  showCompanyData?: boolean;
+
+  @IsOptional()
+  showContractNumber?: boolean;
+
+  @IsOptional()
+  showPoweredByLyra?: boolean;
 
   @IsOptional()
   @IsObject()

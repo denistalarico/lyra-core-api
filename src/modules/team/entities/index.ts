@@ -9,3 +9,5 @@ export * from './team-payment-batch.entity';
 export * from './team-payment.entity';
 export * from './team-payment-item.entity';
 export * from './team-payment-document.entity';
+export * from './team-member-lifecycle-process.entity';
+export * from './team-member-lifecycle-step.entity';

@@ -20,6 +20,15 @@ type WorkspaceInvitationEmailOptions = {
   expiresInDays: number;
 };
 
+type CalendarReminderEmailOptions = {
+  to: string;
+  eventTitle: string;
+  startsAt: Date;
+  endsAt: Date;
+  description?: string | null;
+  meetingUrl?: string | null;
+};
+
 @Injectable()
 export class EmailService {
   private transporter: nodemailer.Transporter;
@@ -124,9 +133,61 @@ export class EmailService {
     });
   }
 
+  async sendCalendarReminderEmail(
+    options: CalendarReminderEmailOptions,
+  ): Promise<void> {
+    if (!options.to) return;
+
+    const eventTitle = options.eventTitle || 'Evento sem titulo';
+    const startsAt = this.formatCalendarDate(options.startsAt);
+    const endsAt = this.formatCalendarDate(options.endsAt);
+    const description = options.description?.trim();
+    const details = [
+      `<strong>Inicio:</strong> ${this.escapeHtml(startsAt)}`,
+      `<strong>Fim:</strong> ${this.escapeHtml(endsAt)}`,
+      ...(description
+        ? [`<strong>Descricao:</strong> ${this.escapeHtml(description)}`]
+        : []),
+      ...(options.meetingUrl
+        ? [
+            `<strong>Link da reuniao:</strong> <a href="${this.escapeHtml(
+              options.meetingUrl,
+            )}" style="color:#2563EB;">${this.escapeHtml(options.meetingUrl)}</a>`,
+          ]
+        : []),
+    ];
+    const intro = `Lembrete: "${this.escapeHtml(eventTitle)}" esta agendado na sua agenda Lyra.`;
+    const secondaryText = details.join('<br />');
+
+    const { html, text } = renderTransactionalEmail({
+      title: 'Lembrete de calendario',
+      intro,
+      buttonLabel: options.meetingUrl ? 'Entrar na reuniao' : undefined,
+      buttonUrl: options.meetingUrl ?? undefined,
+      secondaryText,
+      footerText:
+        'Este e um e-mail automatico de lembrete da Lyra Suite. Confira sua agenda para mais detalhes.',
+    });
+
+    await this.sendEmail({
+      to: options.to,
+      subject: `Lembrete: ${eventTitle} - Lyra Suite`,
+      html,
+      text,
+    });
+  }
+
   private formatLoginDate(date: Date): string {
     return new Intl.DateTimeFormat('pt-BR', {
       dateStyle: 'short',
+      timeStyle: 'short',
+      timeZone: 'America/Sao_Paulo',
+    }).format(date);
+  }
+
+  private formatCalendarDate(date: Date): string {
+    return new Intl.DateTimeFormat('pt-BR', {
+      dateStyle: 'full',
       timeStyle: 'short',
       timeZone: 'America/Sao_Paulo',
     }).format(date);

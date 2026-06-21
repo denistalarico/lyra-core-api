@@ -16,6 +16,12 @@ import { RequestContextData } from '../../common/context/request-context.decorat
 import { FileInterceptor } from '@nestjs/platform-express';
 import type { Response } from 'express';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import {
+  DangerousAction,
+  PermissionsGuard,
+  RequireAnyPermission,
+  RequirePermission,
+} from '../permissions';
 import type { RequestContext } from '../../common/context/request-context.interface';
 import { ContactsService } from './contacts.service';
 import { CreateContactBusinessModeDto } from './dto/create-contact-business-mode.dto';
@@ -50,12 +56,25 @@ type ListContactsQuery = {
   offset?: string;
 };
 
+const CONTACT_VIEW_PERMISSIONS = [
+  'shared.contacts.view.assigned',
+  'shared.contacts.view.client',
+  'shared.contacts.view.department',
+  'shared.contacts.view.all',
+];
+
+const CONTACT_UPDATE_PERMISSIONS = [
+  'shared.contacts.update.assigned',
+  'shared.contacts.update.client',
+];
+
 @Controller('contacts')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, PermissionsGuard)
 export class ContactsController {
   constructor(private readonly contactsService: ContactsService) {}
 
   @Get()
+  @RequireAnyPermission(...CONTACT_VIEW_PERMISSIONS)
   listContacts(
     @RequestContextData() ctx: RequestContext,
     @Query() query: ListContactsQuery,
@@ -64,6 +83,7 @@ export class ContactsController {
   }
 
   @Post()
+  @RequirePermission('shared.contacts.create')
   createContact(
     @RequestContextData() ctx: RequestContext,
     @Body() dto: CreateContactDto,
@@ -73,6 +93,7 @@ export class ContactsController {
 
 
   @Get('import-template')
+  @RequirePermission('shared.contacts.import.admin')
   getImportTemplate(@Res({ passthrough: true }) response: Response) {
     const csv = this.contactsService.getImportTemplateCsv();
 
@@ -86,6 +107,8 @@ export class ContactsController {
   }
 
   @Get('export')
+  @RequirePermission('shared.contacts.export.admin')
+  @DangerousAction()
   async exportContacts(
     @RequestContextData() ctx: RequestContext,
     @Res({ passthrough: true }) response: Response,
@@ -102,6 +125,8 @@ export class ContactsController {
   }
 
   @Post('import')
+  @RequirePermission('shared.contacts.import.admin')
+  @DangerousAction()
   @UseInterceptors(FileInterceptor('file'))
   importContacts(
     @RequestContextData() ctx: RequestContext,
@@ -117,11 +142,13 @@ export class ContactsController {
   }
 
   @Get('lists')
+  @RequireAnyPermission(...CONTACT_VIEW_PERMISSIONS)
   listLists(@RequestContextData() ctx: RequestContext) {
     return this.contactsService.listLists(ctx);
   }
 
   @Post('lists')
+  @RequirePermission('shared.contacts.update.client')
   createList(
     @RequestContextData() ctx: RequestContext,
     @Body() dto: CreateContactListDto,
@@ -130,6 +157,7 @@ export class ContactsController {
   }
 
   @Patch('lists/:listId')
+  @RequirePermission('shared.contacts.update.client')
   patchList(
     @RequestContextData() ctx: RequestContext,
     @Param('listId') listId: string,
@@ -139,6 +167,8 @@ export class ContactsController {
   }
 
   @Delete('lists/:listId')
+  @RequirePermission('shared.contacts.delete.owner_only')
+  @DangerousAction()
   deleteList(
     @RequestContextData() ctx: RequestContext,
     @Param('listId') listId: string,
@@ -147,6 +177,7 @@ export class ContactsController {
   }
 
   @Post('lists/:listId/members')
+  @RequireAnyPermission(...CONTACT_UPDATE_PERMISSIONS)
   addListMember(
     @RequestContextData() ctx: RequestContext,
     @Param('listId') listId: string,
@@ -156,6 +187,7 @@ export class ContactsController {
   }
 
   @Delete('lists/:listId/members/:contactId')
+  @RequireAnyPermission(...CONTACT_UPDATE_PERMISSIONS)
   removeListMember(
     @RequestContextData() ctx: RequestContext,
     @Param('listId') listId: string,
@@ -165,11 +197,13 @@ export class ContactsController {
   }
 
   @Get('tags')
+  @RequireAnyPermission(...CONTACT_VIEW_PERMISSIONS)
   listTags(@RequestContextData() ctx: RequestContext) {
     return this.contactsService.listTags(ctx);
   }
 
   @Post('tags')
+  @RequirePermission('shared.contacts.update.client')
   createTag(
     @RequestContextData() ctx: RequestContext,
     @Body() dto: CreateContactTagDto,
@@ -178,6 +212,7 @@ export class ContactsController {
   }
 
   @Patch('tags/:tagId')
+  @RequirePermission('shared.contacts.update.client')
   patchTag(
     @RequestContextData() ctx: RequestContext,
     @Param('tagId') tagId: string,
@@ -187,6 +222,8 @@ export class ContactsController {
   }
 
   @Delete('tags/:tagId')
+  @RequirePermission('shared.contacts.delete.owner_only')
+  @DangerousAction()
   deleteTag(
     @RequestContextData() ctx: RequestContext,
     @Param('tagId') tagId: string,
@@ -196,11 +233,13 @@ export class ContactsController {
 
 
   @Get('custom-fields')
+  @RequireAnyPermission(...CONTACT_VIEW_PERMISSIONS)
   listCustomFields(@RequestContextData() ctx: RequestContext) {
     return this.contactsService.listCustomFields(ctx);
   }
 
   @Post('custom-fields')
+  @RequirePermission('shared.contacts.update.client')
   createCustomField(
     @RequestContextData() ctx: RequestContext,
     @Body() dto: CreateContactCustomFieldDto,
@@ -209,6 +248,7 @@ export class ContactsController {
   }
 
   @Patch('custom-fields/:fieldId')
+  @RequirePermission('shared.contacts.update.client')
   patchCustomField(
     @RequestContextData() ctx: RequestContext,
     @Param('fieldId') fieldId: string,
@@ -218,6 +258,8 @@ export class ContactsController {
   }
 
   @Delete('custom-fields/:fieldId')
+  @RequirePermission('shared.contacts.delete.owner_only')
+  @DangerousAction()
   deleteCustomField(
     @RequestContextData() ctx: RequestContext,
     @Param('fieldId') fieldId: string,
@@ -226,11 +268,13 @@ export class ContactsController {
   }
 
   @Get('segments')
+  @RequireAnyPermission(...CONTACT_VIEW_PERMISSIONS)
   listSegments(@RequestContextData() ctx: RequestContext) {
     return this.contactsService.listSegments(ctx);
   }
 
   @Post('segments')
+  @RequirePermission('shared.contacts.update.client')
   createSegment(
     @RequestContextData() ctx: RequestContext,
     @Body() dto: CreateContactSegmentDto,
@@ -239,6 +283,7 @@ export class ContactsController {
   }
 
   @Patch('segments/:segmentId')
+  @RequirePermission('shared.contacts.update.client')
   patchSegment(
     @RequestContextData() ctx: RequestContext,
     @Param('segmentId') segmentId: string,
@@ -248,6 +293,8 @@ export class ContactsController {
   }
 
   @Delete('segments/:segmentId')
+  @RequirePermission('shared.contacts.delete.owner_only')
+  @DangerousAction()
   deleteSegment(
     @RequestContextData() ctx: RequestContext,
     @Param('segmentId') segmentId: string,
@@ -256,11 +303,13 @@ export class ContactsController {
   }
 
   @Get('business-modes')
+  @RequireAnyPermission(...CONTACT_VIEW_PERMISSIONS)
   listBusinessModes(@RequestContextData() ctx: RequestContext) {
     return this.contactsService.listBusinessModes(ctx);
   }
 
   @Post('business-modes')
+  @RequirePermission('shared.contacts.update.client')
   createBusinessMode(
     @RequestContextData() ctx: RequestContext,
     @Body() dto: CreateContactBusinessModeDto,
@@ -269,6 +318,7 @@ export class ContactsController {
   }
 
   @Patch('business-modes/:modeId')
+  @RequirePermission('shared.contacts.update.client')
   patchBusinessMode(
     @RequestContextData() ctx: RequestContext,
     @Param('modeId') modeId: string,
@@ -278,6 +328,8 @@ export class ContactsController {
   }
 
   @Delete('business-modes/:modeId')
+  @RequirePermission('shared.contacts.delete.owner_only')
+  @DangerousAction()
   deleteBusinessMode(
     @RequestContextData() ctx: RequestContext,
     @Param('modeId') modeId: string,
@@ -286,6 +338,7 @@ export class ContactsController {
   }
 
   @Get('view-preferences/:viewKey')
+  @RequireAnyPermission(...CONTACT_VIEW_PERMISSIONS)
   getViewPreference(
     @RequestContextData() ctx: RequestContext,
     @Param('viewKey') viewKey: string,
@@ -294,6 +347,7 @@ export class ContactsController {
   }
 
   @Post('view-preferences')
+  @RequireAnyPermission(...CONTACT_VIEW_PERMISSIONS)
   upsertViewPreference(
     @RequestContextData() ctx: RequestContext,
     @Body() dto: UpsertContactViewPreferenceDto,
@@ -302,6 +356,7 @@ export class ContactsController {
   }
 
   @Get(':contactId')
+  @RequireAnyPermission(...CONTACT_VIEW_PERMISSIONS)
   getContact(
     @RequestContextData() ctx: RequestContext,
     @Param('contactId') contactId: string,
@@ -310,6 +365,7 @@ export class ContactsController {
   }
 
   @Patch(':contactId')
+  @RequireAnyPermission(...CONTACT_UPDATE_PERMISSIONS)
   patchContact(
     @RequestContextData() ctx: RequestContext,
     @Param('contactId') contactId: string,
@@ -319,6 +375,8 @@ export class ContactsController {
   }
 
   @Delete(':contactId')
+  @RequirePermission('shared.contacts.delete.owner_only')
+  @DangerousAction()
   deleteContact(
     @RequestContextData() ctx: RequestContext,
     @Param('contactId') contactId: string,
@@ -328,6 +386,7 @@ export class ContactsController {
 
 
   @Post(':contactId/custom-field-values')
+  @RequireAnyPermission(...CONTACT_UPDATE_PERMISSIONS)
   upsertCustomFieldValue(
     @RequestContextData() ctx: RequestContext,
     @Param('contactId') contactId: string,
@@ -337,6 +396,7 @@ export class ContactsController {
   }
 
   @Delete(':contactId/custom-field-values/:fieldId')
+  @RequireAnyPermission(...CONTACT_UPDATE_PERMISSIONS)
   deleteCustomFieldValue(
     @RequestContextData() ctx: RequestContext,
     @Param('contactId') contactId: string,
@@ -346,6 +406,7 @@ export class ContactsController {
   }
 
   @Post(':contactId/methods')
+  @RequireAnyPermission(...CONTACT_UPDATE_PERMISSIONS)
   createMethod(
     @RequestContextData() ctx: RequestContext,
     @Param('contactId') contactId: string,
@@ -355,6 +416,7 @@ export class ContactsController {
   }
 
   @Patch(':contactId/methods/:methodId')
+  @RequireAnyPermission(...CONTACT_UPDATE_PERMISSIONS)
   patchMethod(
     @RequestContextData() ctx: RequestContext,
     @Param('contactId') contactId: string,
@@ -365,6 +427,7 @@ export class ContactsController {
   }
 
   @Delete(':contactId/methods/:methodId')
+  @RequireAnyPermission(...CONTACT_UPDATE_PERMISSIONS)
   deleteMethod(
     @RequestContextData() ctx: RequestContext,
     @Param('contactId') contactId: string,
@@ -374,6 +437,7 @@ export class ContactsController {
   }
 
   @Post(':contactId/addresses')
+  @RequireAnyPermission(...CONTACT_UPDATE_PERMISSIONS)
   createAddress(
     @RequestContextData() ctx: RequestContext,
     @Param('contactId') contactId: string,
@@ -383,6 +447,7 @@ export class ContactsController {
   }
 
   @Patch(':contactId/addresses/:addressId')
+  @RequireAnyPermission(...CONTACT_UPDATE_PERMISSIONS)
   patchAddress(
     @RequestContextData() ctx: RequestContext,
     @Param('contactId') contactId: string,
@@ -393,6 +458,7 @@ export class ContactsController {
   }
 
   @Delete(':contactId/addresses/:addressId')
+  @RequireAnyPermission(...CONTACT_UPDATE_PERMISSIONS)
   deleteAddress(
     @RequestContextData() ctx: RequestContext,
     @Param('contactId') contactId: string,
@@ -402,6 +468,7 @@ export class ContactsController {
   }
 
   @Post(':contactId/tags/:tagId')
+  @RequireAnyPermission(...CONTACT_UPDATE_PERMISSIONS)
   assignTag(
     @RequestContextData() ctx: RequestContext,
     @Param('contactId') contactId: string,
@@ -411,6 +478,7 @@ export class ContactsController {
   }
 
   @Delete(':contactId/tags/:tagId')
+  @RequireAnyPermission(...CONTACT_UPDATE_PERMISSIONS)
   removeTag(
     @RequestContextData() ctx: RequestContext,
     @Param('contactId') contactId: string,

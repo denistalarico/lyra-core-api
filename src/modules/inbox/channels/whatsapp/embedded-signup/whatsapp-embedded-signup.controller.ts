@@ -3,27 +3,38 @@ import {
   Body,
   Controller,
   Get,
-  Headers,
   Param,
   Post,
+  UseGuards,
 } from '@nestjs/common';
+import { RequestContextData } from '../../../../../common/context/request-context.decorator';
+import type { RequestContext } from '../../../../../common/context/request-context.interface';
+import { JwtAuthGuard } from '../../../../auth/guards/jwt-auth.guard';
+import {
+  PermissionsGuard,
+  RequirePermission,
+  RequireProductEntitlement,
+} from '../../../../permissions';
 import { CompleteWhatsAppEmbeddedSignupDto } from './dto/complete-whatsapp-embedded-signup.dto';
 import { StartWhatsAppEmbeddedSignupDto } from './dto/start-whatsapp-embedded-signup.dto';
 import { WhatsAppEmbeddedSignupService } from './whatsapp-embedded-signup.service';
 
 @Controller('inbox/channels/whatsapp/embedded-signup')
+@UseGuards(JwtAuthGuard, PermissionsGuard)
+@RequireProductEntitlement('leadflow')
 export class WhatsAppEmbeddedSignupController {
   constructor(
     private readonly whatsappEmbeddedSignupService: WhatsAppEmbeddedSignupService,
   ) {}
 
   @Post('start')
+  @RequirePermission('leadflow.channels.channel.create.admin')
   async start(
-    @Headers('x-tenant-id') tenantId: string | undefined,
-    @Headers('x-workspace-id') workspaceId: string | undefined,
-    @Headers('x-user-id') userId: string | undefined,
+    @RequestContextData() ctx: RequestContext,
     @Body() dto: StartWhatsAppEmbeddedSignupDto,
   ) {
+    const { tenantId, workspaceId, userId } = ctx;
+
     if (!tenantId || !workspaceId) {
       throw new BadRequestException(
         'Tenant and workspace context are required.',
@@ -39,11 +50,13 @@ export class WhatsAppEmbeddedSignupController {
   }
 
   @Get(':sessionId/status')
+  @RequirePermission('leadflow.channels.channel.create.admin')
   async status(@Param('sessionId') sessionId: string) {
     return this.whatsappEmbeddedSignupService.getStatus(sessionId);
   }
 
   @Post('complete')
+  @RequirePermission('leadflow.channels.channel.create.admin')
   async complete(@Body() dto: CompleteWhatsAppEmbeddedSignupDto) {
     return this.whatsappEmbeddedSignupService.complete({
       sessionId: dto.sessionId,

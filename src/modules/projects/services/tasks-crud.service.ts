@@ -15,7 +15,19 @@ type RequestContext = {
   tenantId: string;
   workspaceId: string;
   userId: string;
+  role?: string;
 };
+
+function normalizeRole(role?: string): string {
+  if (role === 'owner') return 'owner';
+  if (role === 'admin' || role === 'administrator') return 'admin';
+  if (role === 'manager') return 'manager';
+  return 'member';
+}
+
+function isElevatedRole(role?: string): boolean {
+  return ['owner', 'admin'].includes(normalizeRole(role));
+}
 
 @Injectable()
 export class TasksCrudService {
@@ -55,6 +67,7 @@ export class TasksCrudService {
       .andWhere('task.archived_at IS NULL')
       .andWhere('task.visibility = :visibility', { visibility: TaskVisibility.Workspace });
 
+    this.applyCollectionScope(qb, context);
     this.applyFilters(qb, query);
 
     return qb
@@ -73,10 +86,32 @@ export class TasksCrudService {
         new Brackets((subQb) => {
           subQb
             .where('task.assignee_id = :userId', { userId: context.userId })
-            .orWhere('task.created_by_id = :userId AND task.visibility = :privateVisibility', {
+            .orWhere('task.created_by_id = :userId', {
               userId: context.userId,
-              privateVisibility: TaskVisibility.Private,
-            });
+            })
+            .orWhere(
+              `EXISTS (
+                SELECT 1
+                FROM agency_projects project_scope
+                WHERE project_scope.tenant_id = task.tenant_id
+                  AND project_scope.workspace_id = task.workspace_id
+                  AND project_scope.id = task.project_id
+                  AND project_scope.archived_at IS NULL
+                  AND project_scope.owner_id = :userId
+              )`,
+              { userId: context.userId },
+            )
+            .orWhere(
+              `EXISTS (
+                SELECT 1
+                FROM agency_project_followers follower_scope
+                WHERE follower_scope.tenant_id = task.tenant_id
+                  AND follower_scope.workspace_id = task.workspace_id
+                  AND follower_scope.project_id = task.project_id
+                  AND follower_scope.user_id = :userId
+              )`,
+              { userId: context.userId },
+            );
         }),
       );
 
@@ -310,6 +345,55 @@ export class TasksCrudService {
     if (query.visibility) {
       qb.andWhere('task.visibility = :visibility', { visibility: query.visibility });
     }
+  }
+
+  private applyCollectionScope(
+    qb: ReturnType<Repository<AgencyTask>['createQueryBuilder']>,
+    context: RequestContext,
+  ) {
+    if (isElevatedRole(context.role)) {
+      return;
+    }
+
+    if (!context.userId) {
+      qb.andWhere('1 = 0');
+      return;
+    }
+
+    // TODO(permissions-sprint-9): expand manager department scope once tasks
+    // or projects expose explicit department ownership metadata.
+    qb.andWhere(
+      new Brackets((scopeQb) => {
+        scopeQb
+          .where('task.assignee_id = :scopeUserId', {
+            scopeUserId: context.userId,
+          })
+          .orWhere('task.created_by_id = :scopeUserId', {
+            scopeUserId: context.userId,
+          })
+          .orWhere(
+            `EXISTS (
+              SELECT 1
+              FROM agency_projects project_scope
+              WHERE project_scope.tenant_id = task.tenant_id
+                AND project_scope.workspace_id = task.workspace_id
+                AND project_scope.id = task.project_id
+                AND project_scope.archived_at IS NULL
+                AND project_scope.owner_id = :scopeUserId
+            )`,
+          )
+          .orWhere(
+            `EXISTS (
+              SELECT 1
+              FROM agency_project_followers follower_scope
+              WHERE follower_scope.tenant_id = task.tenant_id
+                AND follower_scope.workspace_id = task.workspace_id
+                AND follower_scope.project_id = task.project_id
+                AND follower_scope.user_id = :scopeUserId
+            )`,
+          );
+      }),
+    );
   }
 
   private async publishUpdateNotifications(

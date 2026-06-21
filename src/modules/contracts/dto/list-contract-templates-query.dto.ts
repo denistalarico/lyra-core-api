@@ -1,6 +1,5 @@
-import { IsEnum, IsOptional, IsString } from 'class-validator';
+import { IsEnum, IsOptional, IsString, MaxLength } from 'class-validator';
 import {
-ContractCategory,
 ContractTemplateStatus,
 ContractTargetType,
 } from '../enums';
@@ -19,6 +18,7 @@ status?: ContractTemplateStatus;
 targetType?: ContractTargetType;
 
 @IsOptional()
-@IsEnum(ContractCategory)
-category?: ContractCategory;
+@IsString()
+@MaxLength(60)
+category?: string;
 }

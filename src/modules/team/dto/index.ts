@@ -19,7 +19,6 @@ import {
   TeamRecordStatus,
   TeamSkillLevel,
   TeamWorkerType,
-  TeamWorkMode,
   TeamConfigOptionType,
   TeamPresenceStatus,
   TeamAttendanceType,
@@ -28,6 +27,8 @@ import {
   TeamPaymentCalculationMode,
   TeamPaymentItemType,
   TeamPaymentDocumentType,
+  TeamLifecycleStepStatus,
+  TeamLifecycleIntervalUnit,
 } from '../enums';
 
 export class CreateTeamDepartmentDto {
@@ -211,8 +212,9 @@ export class CreateTeamMemberDto {
   workerType?: TeamWorkerType;
 
   @IsOptional()
-  @IsEnum(TeamWorkMode)
-  workMode?: TeamWorkMode;
+  @IsString()
+  @MaxLength(120)
+  workMode?: string;
 
   @IsOptional()
   @IsString()
@@ -328,8 +330,9 @@ export class UpdateTeamMemberDto {
   workerType?: TeamWorkerType;
 
   @IsOptional()
-  @IsEnum(TeamWorkMode)
-  workMode?: TeamWorkMode;
+  @IsString()
+  @MaxLength(120)
+  workMode?: string;
 
   @IsOptional()
   @IsEnum(TeamMemberStatus)
@@ -394,6 +397,10 @@ export class UpdateTeamMemberDto {
   @IsOptional()
   @IsString()
   notes?: string | null;
+
+  @IsOptional()
+  @IsObject()
+  metadata?: Record<string, unknown> | null;
 }
 
 export class ListTeamMembersQueryDto {
@@ -457,6 +464,12 @@ export class CreateTeamAttendanceEntryDto {
   @IsOptional()
   @IsString()
   note?: string;
+}
+
+export class GenerateTeamAttendanceReportPdfDto {
+  @IsString()
+  @MaxLength(500000)
+  html!: string;
 }
 
 export class TeamKioskPunchDto {
@@ -831,4 +844,114 @@ export class CreateTeamPaymentDocumentDto {
   @IsOptional()
   @IsObject()
   metadata?: Record<string, unknown>;
+}
+
+export class StartTeamMemberLifecycleDto {
+  @IsOptional()
+  @IsUUID()
+  departmentId?: string;
+}
+
+export class CreateTeamMemberLifecycleStepDto {
+  @IsString()
+  @MaxLength(180)
+  title!: string;
+
+  @IsOptional()
+  @IsString()
+  description?: string | null;
+
+  @IsOptional()
+  @IsUUID()
+  stepTypeId?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(180)
+  assigneeLabel?: string | null;
+
+  @IsOptional()
+  @IsString()
+  assignment?: string | null;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  intervalValue?: number | null;
+
+  @IsOptional()
+  @IsEnum(TeamLifecycleIntervalUnit)
+  intervalUnit?: TeamLifecycleIntervalUnit | null;
+
+  @IsOptional()
+  @IsString()
+  notes?: string | null;
+}
+
+export class UpdateTeamMemberLifecycleStepDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(180)
+  title?: string;
+
+  @IsOptional()
+  @IsString()
+  description?: string | null;
+
+  @IsOptional()
+  @IsUUID()
+  stepTypeId?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(180)
+  assigneeLabel?: string | null;
+
+  @IsOptional()
+  @IsUUID()
+  assigneeMemberId?: string | null;
+
+  @IsOptional()
+  @IsString()
+  assignment?: string | null;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  intervalValue?: number | null;
+
+  @IsOptional()
+  @IsEnum(TeamLifecycleIntervalUnit)
+  intervalUnit?: TeamLifecycleIntervalUnit | null;
+
+  @IsOptional()
+  @IsEnum(TeamLifecycleStepStatus)
+  status?: TeamLifecycleStepStatus;
+
+  @IsOptional()
+  @IsString()
+  notes?: string | null;
+
+  @IsOptional()
+  @IsNumber()
+  sortOrder?: number;
+}
+
+export class MarkTeamPaymentPaidDto {
+  @IsOptional()
+  @IsDateString()
+  paymentDate?: string;
+
+  @IsOptional()
+  @IsString()
+  amount?: string;
+
+  @IsOptional()
+  @IsUUID()
+  bankAccountId?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  description?: string | null;
 }

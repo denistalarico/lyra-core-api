@@ -7,6 +7,7 @@ import {
   Param,
   Patch,
   Post,
+  UseGuards,
 } from '@nestjs/common';
 import {
   CreateTeamAttendanceEntryDto,
@@ -15,6 +16,12 @@ import {
   UpdateTeamPresenceDto,
 } from '../dto';
 import { TeamAttendanceService } from '../services/team-attendance.service';
+import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
+import {
+  DangerousAction,
+  PermissionsGuard,
+  RequirePermission,
+} from '../../permissions';
 
 type RequestContext = {
   tenantId: string;
@@ -32,11 +39,15 @@ function getContextFromHeaders(
   };
 }
 
+@UseGuards(JwtAuthGuard, PermissionsGuard)
 @Controller('agency/team')
 export class TeamAttendanceController {
   constructor(private readonly teamAttendanceService: TeamAttendanceService) {}
 
+  // TODO(permissions): split self vs department attendance checks once member
+  // identity-to-team-member scope evaluation exists.
   @Get('members/:id/presence')
+  @RequirePermission('agency.team.attendance.view.department')
   getPresence(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('id') id: string,
@@ -45,6 +56,7 @@ export class TeamAttendanceController {
   }
 
   @Patch('members/:id/presence')
+  @RequirePermission('agency.team.member.update.department')
   updatePresence(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('id') id: string,
@@ -58,6 +70,7 @@ export class TeamAttendanceController {
   }
 
   @Get('members/:id/attendance')
+  @RequirePermission('agency.team.attendance.view.department')
   listAttendanceEntries(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('id') id: string,
@@ -69,6 +82,7 @@ export class TeamAttendanceController {
   }
 
   @Post('members/:id/attendance')
+  @RequirePermission('agency.team.attendance.approve.department')
   createAttendanceEntry(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('id') id: string,
@@ -82,6 +96,8 @@ export class TeamAttendanceController {
   }
 
   @Delete('members/:id/attendance/:entryId')
+  @DangerousAction()
+  @RequirePermission('agency.team.attendance.approve.department')
   deleteAttendanceEntry(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('id') id: string,
@@ -95,6 +111,7 @@ export class TeamAttendanceController {
   }
 
   @Patch('members/:id/access-code')
+  @RequirePermission('agency.team.member.update.department')
   updateMemberAccessCode(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('id') id: string,
@@ -108,6 +125,7 @@ export class TeamAttendanceController {
   }
 
   @Post('kiosk/punch')
+  @RequirePermission('agency.team.attendance.approve.department')
   kioskPunch(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Body() dto: TeamKioskPunchDto,

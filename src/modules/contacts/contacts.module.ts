@@ -14,10 +14,12 @@ import { ContactCustomFieldValueEntity } from './entities/contact-custom-field-v
 import { ContactSegmentEntity } from './entities/contact-segment.entity';
 import { ContactBusinessModeEntity } from './entities/contact-business-mode.entity';
 import { ContactViewPreferenceEntity } from './entities/contact-view-preference.entity';
+import { PermissionsModule } from '../permissions';
 
 
 @Module({
   imports: [
+    PermissionsModule,
     TypeOrmModule.forFeature([
       ContactEntity,
       ContactMethodEntity,

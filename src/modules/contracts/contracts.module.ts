@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { ContractsController } from './controllers/contracts.controller';
 import { ContractsService } from './services/contracts.service';
 import { NotificationsModule } from '../notifications';
+import { PermissionsModule } from '../permissions';
 import { ContractNotificationPublisher } from './services/contract-notification.publisher';
 import {
 ContractDocument,
@@ -19,6 +20,7 @@ const AGENCY_CONNECTION = 'agency';
 @Module({
 imports: [
 NotificationsModule,
+PermissionsModule,
 TypeOrmModule.forFeature(
 [
 ContractTemplate,

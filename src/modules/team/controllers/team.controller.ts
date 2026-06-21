@@ -1,4 +1,5 @@
 import {
+  applyDecorators,
   BadRequestException,
   Body,
   Controller,
@@ -9,9 +10,12 @@ import {
   Patch,
   Post,
   Query,
+  Res,
   UploadedFile,
+  UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import { MAX_IMAGE_UPLOAD_BYTES } from '../../../common/files/files.service';
@@ -27,7 +31,20 @@ import {
   CreateTeamConfigOptionDto,
   UpdateTeamConfigOptionDto,
   UpsertTeamMemberSkillDto,
+  GenerateTeamAttendanceReportPdfDto,
 } from '../dto';
+import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
+import {
+  DangerousAction,
+  PermissionsGuard,
+  RequirePermission,
+} from '../../permissions';
+
+const RequireTeamPermission = (permissionKey: string) =>
+  applyDecorators(
+    UseGuards(JwtAuthGuard, PermissionsGuard),
+    RequirePermission(permissionKey),
+  );
 
 type RequestContext = {
   tenantId: string;
@@ -80,17 +97,22 @@ export class TeamController {
     return this.teamService.health();
   }
 
+  // TODO(permissions): enforce department/self member scopes when scoped
+  // evaluators are available for team member routes.
   @Post('seed-defaults')
+  @RequireTeamPermission('agency.team.structure.manage.admin')
   seedDefaults(@Headers() headers: Record<string, string | string[] | undefined>) {
     return this.teamService.seedDefaults(getContextFromHeaders(headers));
   }
 
   @Get('departments')
+  @RequireTeamPermission('agency.team.directory.view.all_members')
   listDepartments(@Headers() headers: Record<string, string | string[] | undefined>) {
     return this.teamService.listDepartments(getContextFromHeaders(headers));
   }
 
   @Post('departments')
+  @RequireTeamPermission('agency.team.structure.manage.admin')
   createDepartment(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Body() dto: CreateTeamDepartmentDto,
@@ -99,6 +121,7 @@ export class TeamController {
   }
 
   @Patch('departments/:id')
+  @RequireTeamPermission('agency.team.structure.manage.admin')
   updateDepartment(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('id') id: string,
@@ -108,6 +131,8 @@ export class TeamController {
   }
 
   @Delete('departments/:id/permanent')
+  @DangerousAction()
+  @RequireTeamPermission('agency.team.structure.delete.owner_only')
   deleteDepartment(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('id') id: string,
@@ -116,6 +141,8 @@ export class TeamController {
   }
 
   @Delete('departments/:id')
+  @DangerousAction()
+  @RequireTeamPermission('agency.team.structure.manage.admin')
   archiveDepartment(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('id') id: string,
@@ -124,11 +151,13 @@ export class TeamController {
   }
 
   @Get('skills')
+  @RequireTeamPermission('agency.team.directory.view.all_members')
   listSkills(@Headers() headers: Record<string, string | string[] | undefined>) {
     return this.teamService.listSkills(getContextFromHeaders(headers));
   }
 
   @Post('skills')
+  @RequireTeamPermission('agency.team.structure.manage.admin')
   createSkill(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Body() dto: CreateTeamSkillDto,
@@ -137,6 +166,7 @@ export class TeamController {
   }
 
   @Patch('skills/:id')
+  @RequireTeamPermission('agency.team.structure.manage.admin')
   updateSkill(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('id') id: string,
@@ -146,6 +176,8 @@ export class TeamController {
   }
 
   @Delete('skills/:id')
+  @DangerousAction()
+  @RequireTeamPermission('agency.team.structure.manage.admin')
   archiveSkill(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('id') id: string,
@@ -154,6 +186,7 @@ export class TeamController {
   }
 
   @Get('config-options')
+  @RequireTeamPermission('agency.team.directory.view.all_members')
   listConfigOptions(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Query('type')
@@ -169,12 +202,23 @@ export class TeamController {
       | 'onboarding_task'
       | 'offboarding_task'
       | 'skill_category'
-      | 'skill_level',
+      | 'skill_level'
+      | 'onboarding_template'
+      | 'offboarding_template'
+      | 'payment_benefit_template'
+      | 'payment_discount_template'
+      | 'payment_document_template'
+      | 'payment_finance_setting'
+      | 'client_loss_reason'
+      | 'client_onboarding_template'
+      | 'client_offboarding_template'
+      | 'lifecycle_step_type',
   ) {
     return this.teamService.listConfigOptions(getContextFromHeaders(headers), type);
   }
 
   @Post('config-options')
+  @RequireTeamPermission('agency.team.structure.manage.admin')
   createConfigOption(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Body() dto: CreateTeamConfigOptionDto,
@@ -183,6 +227,7 @@ export class TeamController {
   }
 
   @Patch('config-options/:id')
+  @RequireTeamPermission('agency.team.structure.manage.admin')
   updateConfigOption(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('id') id: string,
@@ -192,6 +237,8 @@ export class TeamController {
   }
 
   @Delete('config-options/:id')
+  @DangerousAction()
+  @RequireTeamPermission('agency.team.structure.delete.owner_only')
   deleteConfigOption(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('id') id: string,
@@ -199,7 +246,52 @@ export class TeamController {
     return this.teamService.deleteConfigOption(getContextFromHeaders(headers), id);
   }
 
+  @Get('config-options/:id/document-pdf')
+  @RequireTeamPermission('agency.team.directory.view.all_members')
+  async getConfigOptionDocumentPdf(
+    @Headers() headers: Record<string, string | string[] | undefined>,
+    @Param('id') id: string,
+    @Res() res: Response,
+  ) {
+    const buffer = await this.teamService.renderDocumentTemplatePdf(
+      getContextFromHeaders(headers),
+      id,
+    );
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="modelo-${id}.pdf"`);
+    res.send(buffer);
+  }
+
+  @Get('config-options/:id/document-preview-html')
+  @RequireTeamPermission('agency.team.directory.view.all_members')
+  async getConfigOptionDocumentPreviewHtml(
+    @Headers() headers: Record<string, string | string[] | undefined>,
+    @Param('id') id: string,
+  ) {
+    const html = await this.teamService.renderDocumentTemplateHtml(
+      getContextFromHeaders(headers),
+      id,
+    );
+    return { html };
+  }
+
+  @Post('attendance-report/pdf')
+  @RequireTeamPermission('agency.team.directory.view.all_members')
+  async generateAttendanceReportPdf(
+    @Body() dto: GenerateTeamAttendanceReportPdfDto,
+    @Res() res: Response,
+  ) {
+    const buffer = await this.teamService.renderAttendanceReportPdf(dto.html);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="relatorio-presenca-${new Date().toISOString().slice(0, 10)}.pdf"`,
+    );
+    res.send(buffer);
+  }
+
   @Get('members')
+  @RequireTeamPermission('agency.team.member.view.department')
   listMembers(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Query() query: ListTeamMembersQueryDto,
@@ -208,6 +300,7 @@ export class TeamController {
   }
 
   @Get('members/:id')
+  @RequireTeamPermission('agency.team.member.view.department')
   getMember(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('id') id: string,
@@ -216,6 +309,7 @@ export class TeamController {
   }
 
   @Post('members')
+  @RequireTeamPermission('agency.team.users.invite.admin')
   createMember(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Body() dto: CreateTeamMemberDto,
@@ -224,6 +318,7 @@ export class TeamController {
   }
 
   @Patch('members/:id')
+  @RequireTeamPermission('agency.team.member.update.department')
   updateMember(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('id') id: string,
@@ -233,6 +328,7 @@ export class TeamController {
   }
 
   @Post('members/:id/avatar')
+  @RequireTeamPermission('agency.team.member.update.department')
   @UseInterceptors(FileInterceptor('file', IMAGE_UPLOAD_OPTIONS))
   uploadMemberAvatar(
     @Headers() headers: Record<string, string | string[] | undefined>,
@@ -247,6 +343,8 @@ export class TeamController {
   }
 
   @Delete('members/:id')
+  @DangerousAction()
+  @RequireTeamPermission('agency.team.users.delete.owner_only')
   deleteMember(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('id') id: string,
@@ -255,6 +353,7 @@ export class TeamController {
   }
 
   @Post('members/:id/skills')
+  @RequireTeamPermission('agency.team.member.update.department')
   upsertMemberSkill(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('id') id: string,
@@ -264,6 +363,8 @@ export class TeamController {
   }
 
   @Delete('members/:id/skills/:skillId')
+  @DangerousAction()
+  @RequireTeamPermission('agency.team.member.update.department')
   removeMemberSkill(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('id') id: string,

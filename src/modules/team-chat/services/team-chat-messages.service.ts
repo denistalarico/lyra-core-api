@@ -23,9 +23,21 @@ type TeamChatContext = {
   tenantId: string;
   workspaceId: string;
   userId?: string | null;
+  role?: string | null;
 };
 
 const AGENCY_CONNECTION = 'agency';
+
+function normalizeRole(role?: string | null): string {
+  if (role === 'owner') return 'owner';
+  if (role === 'admin' || role === 'administrator') return 'admin';
+  if (role === 'manager') return 'manager';
+  return 'member';
+}
+
+function isElevatedRole(role?: string | null): boolean {
+  return ['owner', 'admin'].includes(normalizeRole(role));
+}
 
 @Injectable()
 export class TeamChatMessagesService {
@@ -311,7 +323,38 @@ export class TeamChatMessagesService {
       });
     }
 
+    this.applySearchScope(builder, context);
+
     return builder.orderBy('message.created_at', 'DESC').take(limit).getMany();
+  }
+
+  private applySearchScope(
+    qb: ReturnType<Repository<AgencyChatMessage>['createQueryBuilder']>,
+    context: TeamChatContext,
+  ) {
+    if (isElevatedRole(context.role)) {
+      return;
+    }
+
+    if (!context.userId) {
+      qb.andWhere('1 = 0');
+      return;
+    }
+
+    // TODO(permissions-sprint-9): expand manager department/client message
+    // search when channel metadata is tied to department ownership.
+    qb.andWhere(
+      `EXISTS (
+        SELECT 1
+        FROM agency_chat_channel_members member_scope
+        WHERE member_scope.tenant_id = message.tenant_id
+          AND member_scope.workspace_id = message.workspace_id
+          AND member_scope.channel_id = message.channel_id
+          AND member_scope.user_id = :scopeUserId
+          AND member_scope.left_at IS NULL
+      )`,
+      { scopeUserId: context.userId },
+    );
   }
 
   async markAsRead(context: TeamChatContext, channelId: string) {

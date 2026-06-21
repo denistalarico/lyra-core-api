@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { ILike, Repository } from 'typeorm';
+import { Repository } from 'typeorm';
 
 import {
   AgencyChatAttachment,
@@ -28,9 +28,21 @@ type TeamChatContext = {
   tenantId: string;
   workspaceId: string;
   userId?: string | null;
+  role?: string | null;
 };
 
 const AGENCY_CONNECTION = 'agency';
+
+function normalizeRole(role?: string | null): string {
+  if (role === 'owner') return 'owner';
+  if (role === 'admin' || role === 'administrator') return 'admin';
+  if (role === 'manager') return 'manager';
+  return 'member';
+}
+
+function isElevatedRole(role?: string | null): boolean {
+  return ['owner', 'admin'].includes(normalizeRole(role));
+}
 
 @Injectable()
 export class TeamChatChannelsService {
@@ -47,14 +59,20 @@ export class TeamChatChannelsService {
   ) {}
 
   async getSummary(context: TeamChatContext) {
+    const channelsQuery = this.channelsRepository
+      .createQueryBuilder('channel')
+      .where('channel.tenant_id = :tenantId', { tenantId: context.tenantId })
+      .andWhere('channel.workspace_id = :workspaceId', {
+        workspaceId: context.workspaceId,
+      })
+      .andWhere('channel.status = :status', {
+        status: TeamChatChannelStatus.ACTIVE,
+      });
+
+    this.applyCollectionScope(channelsQuery, context);
+
     const [channels, unreadMemberships] = await Promise.all([
-      this.channelsRepository.count({
-        where: {
-          tenantId: context.tenantId,
-          workspaceId: context.workspaceId,
-          status: TeamChatChannelStatus.ACTIVE,
-        },
-      }),
+      channelsQuery.getCount(),
       this.membersRepository.count({
         where: {
           tenantId: context.tenantId,
@@ -73,28 +91,62 @@ export class TeamChatChannelsService {
   }
 
   async list(context: TeamChatContext, query: ListTeamChatChannelsQueryDto) {
-    const where: Record<string, unknown> = {
-      tenantId: context.tenantId,
-      workspaceId: context.workspaceId,
-      status: TeamChatChannelStatus.ACTIVE,
-    };
+    const qb = this.channelsRepository
+      .createQueryBuilder('channel')
+      .where('channel.tenant_id = :tenantId', { tenantId: context.tenantId })
+      .andWhere('channel.workspace_id = :workspaceId', {
+        workspaceId: context.workspaceId,
+      })
+      .andWhere('channel.status = :status', {
+        status: TeamChatChannelStatus.ACTIVE,
+      });
 
     if (query.kind) {
-      where.kind = query.kind;
+      qb.andWhere('channel.kind = :kind', { kind: query.kind });
     }
 
     if (query.search) {
-      where.name = ILike(`%${query.search}%`);
+      qb.andWhere('channel.name ILIKE :search', {
+        search: `%${query.search}%`,
+      });
     }
 
-    return this.channelsRepository.find({
-      where,
-      order: {
-        updatedAt: 'DESC',
-        createdAt: 'DESC',
-      },
-      take: 100,
-    });
+    this.applyCollectionScope(qb, context);
+
+    return qb
+      .orderBy('channel.updated_at', 'DESC')
+      .addOrderBy('channel.created_at', 'DESC')
+      .take(100)
+      .getMany();
+  }
+
+  private applyCollectionScope(
+    qb: ReturnType<Repository<AgencyChatChannel>['createQueryBuilder']>,
+    context: TeamChatContext,
+  ) {
+    if (isElevatedRole(context.role)) {
+      return;
+    }
+
+    if (!context.userId) {
+      qb.andWhere('1 = 0');
+      return;
+    }
+
+    // TODO(permissions-sprint-9): expand manager department/client channel
+    // visibility when channel ownership metadata can be tied to departments.
+    qb.andWhere(
+      `EXISTS (
+        SELECT 1
+        FROM agency_chat_channel_members member_scope
+        WHERE member_scope.tenant_id = channel.tenant_id
+          AND member_scope.workspace_id = channel.workspace_id
+          AND member_scope.channel_id = channel.id
+          AND member_scope.user_id = :scopeUserId
+          AND member_scope.left_at IS NULL
+      )`,
+      { scopeUserId: context.userId },
+    );
   }
 
   async listEnriched(context: TeamChatContext, query: ListTeamChatChannelsQueryDto) {

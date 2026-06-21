@@ -438,3 +438,16 @@ export class InviteAgencyWorkspaceUserDto {
   @IsIn(['admin', 'manager', 'member'])
   role!: Exclude<AgencyWorkspaceRole, 'owner'>;
 }
+
+export class PatchAgencyUserPermissionOverrideDto {
+  @IsString()
+  permissionKey!: string;
+
+  @IsBoolean()
+  enabled!: boolean;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  reason?: string;
+}

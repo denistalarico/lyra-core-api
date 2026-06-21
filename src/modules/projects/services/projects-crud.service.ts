@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { FindOptionsWhere, ILike, IsNull, Repository } from 'typeorm';
+import { Brackets, Repository } from 'typeorm';
 import { AgencyProject, AgencyProjectEvent } from '../entities';
 import { ProjectStatus } from '../enums';
 import {
@@ -13,7 +13,19 @@ type RequestContext = {
   tenantId: string;
   workspaceId: string;
   userId: string;
+  role?: string;
 };
+
+function normalizeRole(role?: string): string {
+  if (role === 'owner') return 'owner';
+  if (role === 'admin' || role === 'administrator') return 'admin';
+  if (role === 'manager') return 'manager';
+  return 'member';
+}
+
+function isElevatedRole(role?: string): boolean {
+  return ['owner', 'admin'].includes(normalizeRole(role));
+}
 
 @Injectable()
 export class ProjectsCrudService {
@@ -45,26 +57,90 @@ export class ProjectsCrudService {
   }
 
   list(context: RequestContext, query: ListProjectsQueryDto) {
-    const where: FindOptionsWhere<AgencyProject> = {
-      tenantId: context.tenantId,
-      workspaceId: context.workspaceId,
-      archivedAt: IsNull(),
-    };
+    const qb = this.projectsRepository
+      .createQueryBuilder('project')
+      .where('project.tenant_id = :tenantId', { tenantId: context.tenantId })
+      .andWhere('project.workspace_id = :workspaceId', {
+        workspaceId: context.workspaceId,
+      })
+      .andWhere('project.archived_at IS NULL');
 
-    if (query.clientId) where.clientId = query.clientId;
-    if (query.stageId) where.stageId = query.stageId;
-    if (query.ownerId) where.ownerId = query.ownerId;
-    if (query.status) where.status = query.status;
-    if (query.priority) where.priority = query.priority;
-    if (query.search) where.name = ILike(`%${query.search}%`);
+    this.applyCollectionScope(qb, context);
 
-    return this.projectsRepository.find({
-      where,
-      order: {
-        updatedAt: 'DESC',
-        createdAt: 'DESC',
-      },
-    });
+    if (query.clientId) {
+      qb.andWhere('project.client_id = :clientId', { clientId: query.clientId });
+    }
+    if (query.stageId) {
+      qb.andWhere('project.stage_id = :stageId', { stageId: query.stageId });
+    }
+    if (query.ownerId) {
+      qb.andWhere('project.owner_id = :ownerId', { ownerId: query.ownerId });
+    }
+    if (query.status) {
+      qb.andWhere('project.status = :status', { status: query.status });
+    }
+    if (query.priority) {
+      qb.andWhere('project.priority = :priority', { priority: query.priority });
+    }
+    if (query.search) {
+      qb.andWhere('project.name ILIKE :search', {
+        search: `%${query.search}%`,
+      });
+    }
+
+    return qb
+      .orderBy('project.updated_at', 'DESC')
+      .addOrderBy('project.created_at', 'DESC')
+      .getMany();
+  }
+
+  private applyCollectionScope(
+    qb: ReturnType<Repository<AgencyProject>['createQueryBuilder']>,
+    context: RequestContext,
+  ) {
+    if (isElevatedRole(context.role)) {
+      return;
+    }
+
+    if (!context.userId) {
+      qb.andWhere('1 = 0');
+      return;
+    }
+
+    // TODO(permissions-sprint-9): expand manager department/portfolio scope
+    // once projects carry explicit department or portfolio ownership metadata.
+    qb.andWhere(
+      new Brackets((scopeQb) => {
+        scopeQb
+          .where('project.owner_id = :scopeUserId', {
+            scopeUserId: context.userId,
+          })
+          .orWhere(
+            `EXISTS (
+              SELECT 1
+              FROM agency_project_followers follower_scope
+              WHERE follower_scope.tenant_id = project.tenant_id
+                AND follower_scope.workspace_id = project.workspace_id
+                AND follower_scope.project_id = project.id
+                AND follower_scope.user_id = :scopeUserId
+            )`,
+          )
+          .orWhere(
+            `EXISTS (
+              SELECT 1
+              FROM agency_tasks task_scope
+              WHERE task_scope.tenant_id = project.tenant_id
+                AND task_scope.workspace_id = project.workspace_id
+                AND task_scope.project_id = project.id
+                AND task_scope.archived_at IS NULL
+                AND (
+                  task_scope.assignee_id = :scopeUserId
+                  OR task_scope.created_by_id = :scopeUserId
+                )
+            )`,
+          );
+      }),
+    );
   }
 
   async findOne(context: RequestContext, id: string) {

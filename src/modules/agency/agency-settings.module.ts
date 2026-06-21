@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { SettingsCryptoService } from '../../common/crypto/settings-crypto.service';
 import { FilesModule } from '../../common/files/files.module';
 import { EmailModule } from '../email/email.module';
+import { PermissionsModule } from '../permissions';
 import { AgencySettingsController } from './agency-settings.controller';
 import { AgencySettingsService } from './agency-settings.service';
 import {
@@ -34,6 +35,7 @@ const AGENCY_CONNECTION = 'agency';
   imports: [
     FilesModule,
     EmailModule,
+    PermissionsModule,
     TypeOrmModule.forFeature(
       [
         AgencyUserPreferencesEntity,

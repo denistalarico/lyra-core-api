@@ -1,6 +1,7 @@
 import { Body, Controller, Get, Headers, Patch } from '@nestjs/common';
 import { UpdateProjectPreferencesDto, UpdateProjectSettingsDto } from '../dto';
 import { ProjectSettingsService } from '../services/project-settings.service';
+import { RequirePermission } from '../../permissions';
 
 type RequestContext = {
   tenantId: string;
@@ -20,31 +21,51 @@ function getContextFromHeaders(
 
 @Controller('agency/projects')
 export class ProjectSettingsController {
-  constructor(private readonly projectSettingsService: ProjectSettingsService) {}
+  constructor(
+    private readonly projectSettingsService: ProjectSettingsService,
+  ) {}
 
   @Get('settings')
-  getSettings(@Headers() headers: Record<string, string | string[] | undefined>) {
-    return this.projectSettingsService.getSettings(getContextFromHeaders(headers));
+  @RequirePermission('agency.projects.stages.manage.admin')
+  getSettings(
+    @Headers() headers: Record<string, string | string[] | undefined>,
+  ) {
+    return this.projectSettingsService.getSettings(
+      getContextFromHeaders(headers),
+    );
   }
 
   @Patch('settings')
+  @RequirePermission('agency.projects.stages.manage.admin')
   updateSettings(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Body() dto: UpdateProjectSettingsDto,
   ) {
-    return this.projectSettingsService.updateSettings(getContextFromHeaders(headers), dto);
+    return this.projectSettingsService.updateSettings(
+      getContextFromHeaders(headers),
+      dto,
+    );
   }
 
   @Get('preferences')
-  getPreferences(@Headers() headers: Record<string, string | string[] | undefined>) {
-    return this.projectSettingsService.getPreferences(getContextFromHeaders(headers));
+  @RequirePermission('agency.projects.project.view.assigned')
+  getPreferences(
+    @Headers() headers: Record<string, string | string[] | undefined>,
+  ) {
+    return this.projectSettingsService.getPreferences(
+      getContextFromHeaders(headers),
+    );
   }
 
   @Patch('preferences')
+  @RequirePermission('agency.projects.project.view.assigned')
   updatePreferences(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Body() dto: UpdateProjectPreferencesDto,
   ) {
-    return this.projectSettingsService.updatePreferences(getContextFromHeaders(headers), dto);
+    return this.projectSettingsService.updatePreferences(
+      getContextFromHeaders(headers),
+      dto,
+    );
   }
 }

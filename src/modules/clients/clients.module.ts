@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { AgencyActivity } from '../activities/entities';
 import { FinanceModule } from '../finance';
 import { NotificationsModule } from '../notifications';
+import { PermissionsModule } from '../permissions';
 import { AgencyProject, AgencyTask } from '../projects/entities';
 import { ClientsController } from './controllers/clients.controller';
 import { AgencyClient } from './entities';
@@ -16,6 +17,7 @@ const AGENCY_CONNECTION = 'agency';
   imports: [
     FinanceModule,
     NotificationsModule,
+    PermissionsModule,
     TypeOrmModule.forFeature(
       [AgencyClient, AgencyProject, AgencyTask, AgencyActivity],
       AGENCY_CONNECTION,

@@ -8,10 +8,17 @@ import {
   Patch,
   Post,
   Query,
+  UseGuards,
 } from '@nestjs/common';
 import { CreateClientDto, ListClientsQueryDto, UpdateClientDto } from '../dto';
 import { ClientsProfitabilityService } from '../services/clients-profitability.service';
 import { ClientsService } from '../services/clients.service';
+import {
+  DangerousAction,
+  PermissionsGuard,
+  RequirePermission,
+} from '../../permissions';
+import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 
 type RequestContext = {
   tenantId: string;
@@ -29,6 +36,7 @@ function getContextFromHeaders(
   };
 }
 
+@UseGuards(JwtAuthGuard, PermissionsGuard)
 @Controller('agency/clients')
 export class ClientsController {
   constructor(
@@ -36,7 +44,10 @@ export class ClientsController {
     private readonly clientsProfitabilityService: ClientsProfitabilityService,
   ) {}
 
+  // TODO(permissions): enforce assigned/portfolio client scope once client access
+  // evaluators are wired into these collection/detail routes.
   @Get()
+  @RequirePermission('agency.clients.profile.view.basic.assigned')
   list(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Query() query: ListClientsQueryDto,
@@ -45,11 +56,13 @@ export class ClientsController {
   }
 
   @Get('summary')
+  @RequirePermission('agency.clients.profile.view.basic.assigned')
   summary(@Headers() headers: Record<string, string | string[] | undefined>) {
     return this.clientsService.summary(getContextFromHeaders(headers));
   }
 
   @Post()
+  @RequirePermission('agency.clients.profile.create.admin')
   create(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Body() dto: CreateClientDto,
@@ -58,6 +71,7 @@ export class ClientsController {
   }
 
   @Get('profitability/portfolio')
+  @RequirePermission('agency.clients.profitability.view.owner_or_finance')
   getPortfolioProfitability(
     @Headers() headers: Record<string, string | string[] | undefined>,
   ) {
@@ -67,6 +81,7 @@ export class ClientsController {
   }
 
   @Get(':clientId')
+  @RequirePermission('agency.clients.profile.view.basic.assigned')
   findOne(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('clientId') clientId: string,
@@ -78,6 +93,7 @@ export class ClientsController {
   }
 
   @Get(':clientId/overview')
+  @RequirePermission('agency.clients.profitability.view.owner_or_finance')
   getOverview(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('clientId') clientId: string,
@@ -89,6 +105,7 @@ export class ClientsController {
   }
 
   @Get(':clientId/profitability')
+  @RequirePermission('agency.clients.profitability.view.owner_or_finance')
   getClientProfitability(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('clientId') clientId: string,
@@ -100,6 +117,7 @@ export class ClientsController {
   }
 
   @Patch(':clientId')
+  @RequirePermission('agency.clients.profile.update.assigned')
   update(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('clientId') clientId: string,
@@ -113,6 +131,8 @@ export class ClientsController {
   }
 
   @Delete(':clientId')
+  @DangerousAction()
+  @RequirePermission('agency.clients.profile.archive.admin')
   archive(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('clientId') clientId: string,

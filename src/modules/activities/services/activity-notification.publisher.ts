@@ -54,14 +54,12 @@ export class ActivityNotificationPublisher {
         assigneeId,
         this.timestampFor(input.occurredAt ?? input.activity.updatedAt),
       ],
-      recipients:
-        input.recipients ??
-        [
-          {
-            userId: assigneeId,
-            interestReason: NotificationInterestReason.ASSIGNED,
-          },
-        ],
+      recipients: input.recipients ?? [
+        {
+          userId: assigneeId,
+          interestReason: NotificationInterestReason.ASSIGNED,
+        },
+      ],
       title: 'Nova atividade atribuída',
       body: `A atividade "${input.activity.summary}" foi atribuída a você.`,
     });
@@ -82,14 +80,12 @@ export class ActivityNotificationPublisher {
         assigneeId,
         this.timestampFor(input.occurredAt ?? input.activity.updatedAt),
       ],
-      recipients:
-        input.recipients ??
-        [
-          {
-            userId: assigneeId,
-            interestReason: NotificationInterestReason.ASSIGNED,
-          },
-        ],
+      recipients: input.recipients ?? [
+        {
+          userId: assigneeId,
+          interestReason: NotificationInterestReason.ASSIGNED,
+        },
+      ],
       title: 'Atividade reatribuída',
       body: `A atividade "${input.activity.summary}" foi reatribuída a você.`,
     });
@@ -104,14 +100,12 @@ export class ActivityNotificationPublisher {
         input.activity.id,
         this.timestampFor(input.occurredAt ?? input.activity.completedAt),
       ],
-      recipients:
-        input.recipients ??
-        [
-          {
-            userId: input.activity.createdById,
-            interestReason: NotificationInterestReason.OWNER,
-          },
-        ],
+      recipients: input.recipients ?? [
+        {
+          userId: input.activity.createdById,
+          interestReason: NotificationInterestReason.OWNER,
+        },
+      ],
       title: 'Atividade concluída',
       body: `A atividade "${input.activity.summary}" foi concluída.`,
     });
@@ -126,18 +120,16 @@ export class ActivityNotificationPublisher {
         input.activity.id,
         this.timestampFor(input.occurredAt ?? input.activity.cancelledAt),
       ],
-      recipients:
-        input.recipients ??
-        [
-          {
-            userId: input.activity.createdById,
-            interestReason: NotificationInterestReason.OWNER,
-          },
-          {
-            userId: input.activity.assignedToId,
-            interestReason: NotificationInterestReason.ASSIGNED,
-          },
-        ],
+      recipients: input.recipients ?? [
+        {
+          userId: input.activity.createdById,
+          interestReason: NotificationInterestReason.OWNER,
+        },
+        {
+          userId: input.activity.assignedToId,
+          interestReason: NotificationInterestReason.ASSIGNED,
+        },
+      ],
       title: 'Atividade cancelada',
       body: `A atividade "${input.activity.summary}" foi cancelada.`,
     });
@@ -157,14 +149,12 @@ export class ActivityNotificationPublisher {
         input.activity.id,
         this.timestampFor(input.occurredAt ?? input.activity.createdAt),
       ],
-      recipients:
-        input.recipients ??
-        [
-          {
-            userId: assigneeId,
-            interestReason: NotificationInterestReason.ASSIGNED,
-          },
-        ],
+      recipients: input.recipients ?? [
+        {
+          userId: assigneeId,
+          interestReason: NotificationInterestReason.ASSIGNED,
+        },
+      ],
       title: 'Atividade de follow-up criada',
       body: `Uma atividade de follow-up "${input.activity.summary}" foi criada para você.`,
       payload: {
@@ -211,16 +201,49 @@ export class ActivityNotificationPublisher {
         input.activity.id,
         this.timestampFor(input.activity.dueAt),
       ],
-      recipients:
-        input.recipients ??
-        [
-          {
-            userId: input.activity.assignedToId,
-            interestReason: NotificationInterestReason.ASSIGNED,
-          },
-        ],
+      recipients: input.recipients ?? [
+        {
+          userId: input.activity.assignedToId,
+          interestReason: NotificationInterestReason.ASSIGNED,
+        },
+      ],
       title: 'Atividade próxima do vencimento',
       body: `A atividade "${input.activity.summary}" está próxima do vencimento.`,
+    });
+  }
+
+  publishReminder(
+    input: ActivityNotificationInput & {
+      offsetMinutes: number;
+      reminderAt: Date;
+    },
+  ) {
+    return this.publishActivityEvent({
+      ...input,
+      actorUserId: input.actorUserId ?? null,
+      eventType: 'activity.reminder',
+      eventIdParts: [
+        'activity.reminder',
+        input.activity.id,
+        String(input.offsetMinutes),
+        input.reminderAt.toISOString(),
+      ],
+      recipients: input.recipients ?? [
+        {
+          userId: input.activity.assignedToId,
+          interestReason: NotificationInterestReason.ASSIGNED,
+        },
+        {
+          userId: input.activity.createdById,
+          interestReason: NotificationInterestReason.OWNER,
+        },
+      ],
+      title: 'Lembrete de atividade',
+      body: `A atividade "${input.activity.summary}" começa em breve.`,
+      payload: {
+        offsetMinutes: input.offsetMinutes,
+        reminderAt: input.reminderAt.toISOString(),
+      },
     });
   }
 
@@ -233,27 +256,27 @@ export class ActivityNotificationPublisher {
         input.activity.id,
         this.timestampFor(input.activity.dueAt),
       ],
-      recipients:
-        input.recipients ??
-        [
-          {
-            userId: input.activity.assignedToId,
-            interestReason: NotificationInterestReason.ASSIGNED,
-          },
-        ],
+      recipients: input.recipients ?? [
+        {
+          userId: input.activity.assignedToId,
+          interestReason: NotificationInterestReason.ASSIGNED,
+        },
+      ],
       title: 'Atividade atrasada',
       body: `A atividade "${input.activity.summary}" está atrasada.`,
     });
   }
 
-  private async publishActivityEvent(input: ActivityNotificationInput & {
-    eventType: string;
-    eventIdParts: Array<string | null | undefined>;
-    recipients: ActivityRecipientInput[];
-    title: string;
-    body: string;
-    payload?: Record<string, unknown>;
-  }) {
+  private async publishActivityEvent(
+    input: ActivityNotificationInput & {
+      eventType: string;
+      eventIdParts: Array<string | null | undefined>;
+      recipients: ActivityRecipientInput[];
+      title: string;
+      body: string;
+      payload?: Record<string, unknown>;
+    },
+  ) {
     const recipients = this.normalizeRecipients(
       input.recipients,
       input.actorUserId,
@@ -315,12 +338,10 @@ export class ActivityNotificationPublisher {
       }
     }
 
-    return Array.from(normalized.entries()).map(
-      ([userId, interestReason]) => ({
-        userId,
-        interestReason,
-      }),
-    );
+    return Array.from(normalized.entries()).map(([userId, interestReason]) => ({
+      userId,
+      interestReason,
+    }));
   }
 
   private resolveActionUrl(links: AgencyActivityLink[]): string | null {

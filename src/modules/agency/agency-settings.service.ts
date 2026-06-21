@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -48,11 +49,18 @@ import {
   PatchAgencySubscriptionsDto,
   PatchAgencyUserPreferencesDto,
   PatchAgencyUserProfileDto,
+  PatchAgencyUserPermissionOverrideDto,
   PatchAgencyUserSecurityDto,
   PatchAgencyWorkspaceCompanyDto,
   PatchAgencyWorkspaceUserAccessDto,
   SetupAgencyTwoFactorDto,
 } from './dto/agency-settings.dto';
+import {
+  getDangerousPermissionKeys,
+  getPermissionDefinition,
+  getPermissionFunctionalGroups,
+  PlatformPermissionService,
+} from '../permissions';
 
 const AGENCY_CONNECTION = 'agency';
 const AGENCY_APP_KEYS = [
@@ -131,6 +139,7 @@ export class AgencySettingsService {
     private readonly filesService: FilesService,
     private readonly cryptoService: SettingsCryptoService,
     private readonly emailService: EmailService,
+    private readonly platformPermissionService: PlatformPermissionService,
   ) {}
 
   async getPreferences(tenantId: string, userId: string) {
@@ -889,19 +898,30 @@ export class AgencySettingsService {
     );
 
     return Promise.all(
-      users.map(async (user) => ({
-        ...user,
-        avatarUrl: user.userId
-          ? (profileByUserId.get(user.userId)?.avatarUrl ?? null)
-          : null,
-        avatarPath: user.userId
-          ? (profileByUserId.get(user.userId)?.avatarPath ?? null)
-          : null,
-        permissions: await this.permissionsRepo.find({
-          where: { tenantId, workspaceId, workspaceUserId: user.id },
-          order: { appKey: 'ASC' },
-        }),
-      })),
+      users.map(async (user) => {
+        const overrides = user.userId
+          ? await this.platformPermissionService.listUserPermissionOverrides(
+              tenantId,
+              user.userId,
+              workspaceId,
+            )
+          : [];
+
+        return {
+          ...user,
+          avatarUrl: user.userId
+            ? (profileByUserId.get(user.userId)?.avatarUrl ?? null)
+            : null,
+          avatarPath: user.userId
+            ? (profileByUserId.get(user.userId)?.avatarPath ?? null)
+            : null,
+          permissions: await this.permissionsRepo.find({
+            where: { tenantId, workspaceId, workspaceUserId: user.id },
+            order: { appKey: 'ASC' },
+          }),
+          hasCustomPermissions: overrides.length > 0,
+        };
+      }),
     );
   }
 
@@ -1061,11 +1081,19 @@ export class AgencySettingsService {
       throw new NotFoundException('Agency workspace user not found.');
     }
 
-    const nextRole = user.role === 'owner' ? 'owner' : dto.role;
+    if (user.role === 'owner') {
+      throw new ForbiddenException(
+        'Owner access cannot be changed through this endpoint.',
+      );
+    }
+
+    if (dto.role === 'owner') {
+      throw new ForbiddenException('Ownership cannot be transferred.');
+    }
 
     await this.workspaceUsersRepo.update(
       { tenantId, workspaceId, id: workspaceUserId },
-      { role: nextRole },
+      { role: dto.role },
     );
 
     for (const permission of dto.permissions) {
@@ -1075,13 +1103,163 @@ export class AgencySettingsService {
           workspaceId,
           workspaceUserId,
           appKey: permission.appKey,
-          access: nextRole === 'owner' ? 'full' : permission.access,
+          access: permission.access,
         },
         ['workspaceUserId', 'appKey'],
       );
     }
 
     return this.getWorkspaceUsers(tenantId, workspaceId);
+  }
+
+  getPermissionFunctionalGroups() {
+    return getPermissionFunctionalGroups().map((group) => ({
+      key: group.key,
+      label: group.label,
+      description: group.description,
+      permissions: group.permissionKeys.map((permissionKey) => {
+        const definition = getPermissionDefinition(permissionKey);
+
+        return {
+          key: permissionKey,
+          roles: definition?.roles ?? [],
+          isDangerous: definition?.isDangerous ?? false,
+          riskLevel: definition?.riskLevel ?? null,
+        };
+      }),
+    }));
+  }
+
+  async getWorkspaceUserPermissions(
+    tenantId: string,
+    workspaceId: string,
+    workspaceUserId: string,
+  ) {
+    const user = await this.workspaceUsersRepo.findOne({
+      where: { tenantId, workspaceId, id: workspaceUserId },
+    });
+
+    if (!user) {
+      throw new NotFoundException('Agency workspace user not found.');
+    }
+
+    if (!user.userId) {
+      return {
+        workspaceUserId: user.id,
+        role: user.role,
+        pendingAcceptance: true,
+        effectivePermissions: [] as string[],
+        dangerousPermissions: [] as string[],
+        overrides: [] as Array<{
+          permissionKey: string;
+          enabled: boolean;
+          reason: string | null;
+          expiresAt: Date | null;
+          createdAt: Date;
+        }>,
+      };
+    }
+
+    const effective = await this.platformPermissionService.getEffectivePermissions({
+      tenantId,
+      workspaceId,
+      userId: user.userId,
+      role: user.role,
+    });
+
+    const dangerousKeys = new Set(getDangerousPermissionKeys());
+    const overrides = await this.platformPermissionService.listUserPermissionOverrides(
+      tenantId,
+      user.userId,
+      workspaceId,
+    );
+
+    return {
+      workspaceUserId: user.id,
+      role: user.role,
+      pendingAcceptance: false,
+      effectivePermissions: [...effective].sort(),
+      dangerousPermissions: [...effective].filter((key) => dangerousKeys.has(key)).sort(),
+      overrides: overrides.map((override) => ({
+        permissionKey: override.permissionKey,
+        enabled: override.enabled,
+        reason: override.reason,
+        expiresAt: override.expiresAt,
+        createdAt: override.createdAt,
+      })),
+    };
+  }
+
+  async addWorkspaceUserPermissionOverride(
+    tenantId: string,
+    workspaceId: string,
+    workspaceUserId: string,
+    actorUserId: string,
+    dto: PatchAgencyUserPermissionOverrideDto,
+  ) {
+    const user = await this.workspaceUsersRepo.findOne({
+      where: { tenantId, workspaceId, id: workspaceUserId },
+    });
+
+    if (!user) {
+      throw new NotFoundException('Agency workspace user not found.');
+    }
+
+    if (!user.userId) {
+      throw new BadRequestException(
+        'This user has not accepted the invitation yet.',
+      );
+    }
+
+    if (user.role === 'owner') {
+      throw new ForbiddenException(
+        'The Owner already holds every permission; overrides do not apply.',
+      );
+    }
+
+    await this.platformPermissionService.addUserPermissionOverride({
+      tenantId,
+      workspaceId,
+      userId: user.userId,
+      permissionKey: dto.permissionKey,
+      enabled: dto.enabled,
+      reason: dto.reason,
+      actorUserId,
+    });
+
+    return this.getWorkspaceUserPermissions(tenantId, workspaceId, workspaceUserId);
+  }
+
+  async removeWorkspaceUserPermissionOverride(
+    tenantId: string,
+    workspaceId: string,
+    workspaceUserId: string,
+    permissionKey: string,
+    actorUserId: string,
+  ) {
+    const user = await this.workspaceUsersRepo.findOne({
+      where: { tenantId, workspaceId, id: workspaceUserId },
+    });
+
+    if (!user) {
+      throw new NotFoundException('Agency workspace user not found.');
+    }
+
+    if (!user.userId) {
+      throw new BadRequestException(
+        'This user has not accepted the invitation yet.',
+      );
+    }
+
+    await this.platformPermissionService.removeUserPermissionOverride({
+      tenantId,
+      workspaceId,
+      userId: user.userId,
+      permissionKey,
+      actorUserId,
+    });
+
+    return this.getWorkspaceUserPermissions(tenantId, workspaceId, workspaceUserId);
   }
 
   async deactivateWorkspaceUser(

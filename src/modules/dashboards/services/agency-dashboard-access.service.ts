@@ -8,8 +8,12 @@ import type {
 @Injectable()
 export class AgencyDashboardAccessService {
   resolvePreset(role: string): AgencyDashboardPreset {
-    if (role === 'owner' || role === 'admin') {
+    if (role === 'owner') {
       return 'executive';
+    }
+
+    if (role === 'admin' || role === 'administrator') {
+      return 'agency';
     }
 
     if (role === 'manager') {

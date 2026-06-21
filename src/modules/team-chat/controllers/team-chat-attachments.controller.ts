@@ -15,6 +15,11 @@ import { memoryStorage } from 'multer';
 
 import { CreateTeamChatAttachmentDto } from '../dto';
 import { TeamChatAttachmentsService } from '../services/team-chat-attachments.service';
+import {
+  DangerousAction,
+  RequireAnyPermission,
+  RequirePermission,
+} from '../../permissions';
 
 const TEAM_CHAT_ATTACHMENT_UPLOAD_OPTIONS = {
   storage: memoryStorage(),
@@ -29,9 +34,12 @@ type TeamChatContext = {
 
 @Controller('agency/team-chat')
 export class TeamChatAttachmentsController {
-  constructor(private readonly attachmentsService: TeamChatAttachmentsService) {}
+  constructor(
+    private readonly attachmentsService: TeamChatAttachmentsService,
+  ) {}
 
   @Post('attachments')
+  @RequirePermission('agency.chat.messages.send.assigned')
   createAttachment(
     @Headers('x-tenant-id') tenantId: string,
     @Headers('x-workspace-id') workspaceId: string,
@@ -45,6 +53,7 @@ export class TeamChatAttachmentsController {
   }
 
   @Get('messages/:messageId/attachments')
+  @RequirePermission('agency.chat.channels.view.assigned')
   listMessageAttachments(
     @Headers('x-tenant-id') tenantId: string,
     @Headers('x-workspace-id') workspaceId: string,
@@ -58,6 +67,7 @@ export class TeamChatAttachmentsController {
   }
 
   @Post('messages/:messageId/attachments')
+  @RequirePermission('agency.chat.messages.send.assigned')
   @UseInterceptors(FileInterceptor('file', TEAM_CHAT_ATTACHMENT_UPLOAD_OPTIONS))
   uploadMessageAttachment(
     @Headers('x-tenant-id') tenantId: string,
@@ -75,6 +85,8 @@ export class TeamChatAttachmentsController {
   }
 
   @Delete('messages/:messageId/attachments/:attachmentId')
+  @RequirePermission('agency.chat.messages.send.assigned')
+  @DangerousAction()
   deleteMessageAttachment(
     @Headers('x-tenant-id') tenantId: string,
     @Headers('x-workspace-id') workspaceId: string,
@@ -90,6 +102,10 @@ export class TeamChatAttachmentsController {
   }
 
   @Get('meetings/:meetingId/attachments')
+  @RequireAnyPermission(
+    'agency.chat.channels.view.assigned',
+    'agency.chat.channels.manage_members.assigned',
+  )
   listMeetingAttachments(
     @Headers('x-tenant-id') tenantId: string,
     @Headers('x-workspace-id') workspaceId: string,

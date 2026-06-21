@@ -14,6 +14,12 @@ import { AuthenticatedUser } from '../auth/decorators/authenticated-user.decorat
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import type { AuthTokenPayload } from '../auth/types/auth-token-payload.type';
 import {
+  DangerousAction,
+  PermissionsGuard,
+  RequireAnyPermission,
+  RequirePermission,
+} from '../permissions';
+import {
   AgencySalesListQueryDto,
   CompleteAgencySalesActivityDto,
   CreateAgencySalesActivityDto,
@@ -42,7 +48,7 @@ type AgencyContext = {
 };
 
 @Controller('agency/sales')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, PermissionsGuard)
 export class AgencySalesController {
   constructor(private readonly salesService: AgencySalesService) {}
 
@@ -52,6 +58,7 @@ export class AgencySalesController {
   }
 
   @Get('overview')
+  @RequirePermission('agency.sales.crm.view.department')
   overview(
     @AuthenticatedUser() user: AuthTokenPayload,
     @Headers('x-workspace-id') workspaceId?: string,
@@ -60,15 +67,20 @@ export class AgencySalesController {
   }
 
   @Post('items')
+  @RequirePermission('agency.sales.products.manage.admin')
   createItem(
     @AuthenticatedUser() user: AuthTokenPayload,
     @Headers('x-workspace-id') workspaceId: string | undefined,
     @Body() dto: CreateAgencySalesItemDto,
   ) {
-    return this.salesService.createItem(this.getContext(user, workspaceId), dto);
+    return this.salesService.createItem(
+      this.getContext(user, workspaceId),
+      dto,
+    );
   }
 
   @Get('items')
+  @RequirePermission('agency.sales.products.manage.admin')
   listItems(
     @AuthenticatedUser() user: AuthTokenPayload,
     @Headers('x-workspace-id') workspaceId: string | undefined,
@@ -81,6 +93,7 @@ export class AgencySalesController {
   }
 
   @Patch('items/:id')
+  @RequirePermission('agency.sales.products.manage.admin')
   updateItem(
     @AuthenticatedUser() user: AuthTokenPayload,
     @Headers('x-workspace-id') workspaceId: string | undefined,
@@ -95,6 +108,7 @@ export class AgencySalesController {
   }
 
   @Get('product-settings')
+  @RequirePermission('agency.sales.products.manage.admin')
   getProductSettings(
     @AuthenticatedUser() user: AuthTokenPayload,
     @Headers('x-workspace-id') workspaceId?: string,
@@ -105,6 +119,7 @@ export class AgencySalesController {
   }
 
   @Patch('product-settings')
+  @RequirePermission('agency.sales.products.manage.admin')
   updateProductSettings(
     @AuthenticatedUser() user: AuthTokenPayload,
     @Headers('x-workspace-id') workspaceId: string | undefined,
@@ -117,6 +132,7 @@ export class AgencySalesController {
   }
 
   @Post('pipelines')
+  @RequirePermission('agency.sales.pipeline.manage.admin')
   createPipeline(
     @AuthenticatedUser() user: AuthTokenPayload,
     @Headers('x-workspace-id') workspaceId: string | undefined,
@@ -129,6 +145,7 @@ export class AgencySalesController {
   }
 
   @Get('pipelines')
+  @RequirePermission('agency.sales.pipeline.manage.admin')
   listPipelines(
     @AuthenticatedUser() user: AuthTokenPayload,
     @Headers('x-workspace-id') workspaceId?: string,
@@ -137,6 +154,7 @@ export class AgencySalesController {
   }
 
   @Patch('pipelines/:id')
+  @RequirePermission('agency.sales.pipeline.manage.admin')
   updatePipeline(
     @AuthenticatedUser() user: AuthTokenPayload,
     @Headers('x-workspace-id') workspaceId: string | undefined,
@@ -151,24 +169,34 @@ export class AgencySalesController {
   }
 
   @Delete('pipelines/:id')
+  @RequirePermission('agency.sales.pipeline.manage.admin')
+  @DangerousAction()
   deletePipeline(
     @AuthenticatedUser() user: AuthTokenPayload,
     @Headers('x-workspace-id') workspaceId: string | undefined,
     @Param('id') id: string,
   ) {
-    return this.salesService.deletePipeline(this.getContext(user, workspaceId), id);
+    return this.salesService.deletePipeline(
+      this.getContext(user, workspaceId),
+      id,
+    );
   }
 
   @Post('stages')
+  @RequirePermission('agency.sales.stages.manage.manager_or_admin')
   createStage(
     @AuthenticatedUser() user: AuthTokenPayload,
     @Headers('x-workspace-id') workspaceId: string | undefined,
     @Body() dto: CreateAgencySalesStageDto,
   ) {
-    return this.salesService.createStage(this.getContext(user, workspaceId), dto);
+    return this.salesService.createStage(
+      this.getContext(user, workspaceId),
+      dto,
+    );
   }
 
   @Patch('stages/reorder')
+  @RequirePermission('agency.sales.stages.manage.manager_or_admin')
   reorderStages(
     @AuthenticatedUser() user: AuthTokenPayload,
     @Headers('x-workspace-id') workspaceId: string | undefined,
@@ -181,6 +209,7 @@ export class AgencySalesController {
   }
 
   @Patch('stages/:id')
+  @RequirePermission('agency.sales.stages.manage.manager_or_admin')
   updateStage(
     @AuthenticatedUser() user: AuthTokenPayload,
     @Headers('x-workspace-id') workspaceId: string | undefined,
@@ -195,6 +224,10 @@ export class AgencySalesController {
   }
 
   @Get('defaults')
+  @RequireAnyPermission(
+    'agency.sales.crm.view.assigned',
+    'agency.sales.crm.view.department',
+  )
   defaults(
     @AuthenticatedUser() user: AuthTokenPayload,
     @Headers('x-workspace-id') workspaceId?: string,
@@ -203,6 +236,7 @@ export class AgencySalesController {
   }
 
   @Post('opportunities/quick')
+  @RequirePermission('agency.sales.crm.manage.department')
   createQuickOpportunity(
     @AuthenticatedUser() user: AuthTokenPayload,
     @Headers('x-workspace-id') workspaceId: string | undefined,
@@ -215,6 +249,7 @@ export class AgencySalesController {
   }
 
   @Post('opportunities')
+  @RequirePermission('agency.sales.crm.manage.department')
   createOpportunity(
     @AuthenticatedUser() user: AuthTokenPayload,
     @Headers('x-workspace-id') workspaceId: string | undefined,
@@ -227,6 +262,7 @@ export class AgencySalesController {
   }
 
   @Get('opportunities')
+  @RequirePermission('agency.sales.crm.view.department')
   listOpportunities(
     @AuthenticatedUser() user: AuthTokenPayload,
     @Headers('x-workspace-id') workspaceId?: string,
@@ -237,6 +273,10 @@ export class AgencySalesController {
   }
 
   @Get('opportunities/:id/activities')
+  @RequireAnyPermission(
+    'agency.sales.crm.view.assigned',
+    'agency.sales.crm.view.department',
+  )
   listOpportunityActivities(
     @AuthenticatedUser() user: AuthTokenPayload,
     @Headers('x-workspace-id') workspaceId: string | undefined,
@@ -249,6 +289,7 @@ export class AgencySalesController {
   }
 
   @Post('opportunities/:id/activities')
+  @RequirePermission('agency.sales.crm.manage.department')
   createOpportunityActivity(
     @AuthenticatedUser() user: AuthTokenPayload,
     @Headers('x-workspace-id') workspaceId: string | undefined,
@@ -263,6 +304,10 @@ export class AgencySalesController {
   }
 
   @Patch('opportunities/:id/activities/:activityId')
+  @RequireAnyPermission(
+    'agency.sales.contacts.update.assigned',
+    'agency.sales.crm.manage.department',
+  )
   updateOpportunityActivity(
     @AuthenticatedUser() user: AuthTokenPayload,
     @Headers('x-workspace-id') workspaceId: string | undefined,
@@ -279,6 +324,10 @@ export class AgencySalesController {
   }
 
   @Patch('opportunities/:id/activities/:activityId/complete')
+  @RequireAnyPermission(
+    'agency.sales.contacts.update.assigned',
+    'agency.sales.crm.manage.department',
+  )
   completeOpportunityActivity(
     @AuthenticatedUser() user: AuthTokenPayload,
     @Headers('x-workspace-id') workspaceId: string | undefined,
@@ -295,6 +344,8 @@ export class AgencySalesController {
   }
 
   @Delete('opportunities/:id/activities/:activityId')
+  @RequirePermission('agency.sales.crm.manage.department')
+  @DangerousAction()
   deleteOpportunityActivity(
     @AuthenticatedUser() user: AuthTokenPayload,
     @Headers('x-workspace-id') workspaceId: string | undefined,
@@ -309,6 +360,7 @@ export class AgencySalesController {
   }
 
   @Get('opportunities/kanban')
+  @RequirePermission('agency.sales.crm.view.department')
   getOpportunitiesKanban(
     @AuthenticatedUser() user: AuthTokenPayload,
     @Headers('x-workspace-id') workspaceId: string | undefined,
@@ -321,6 +373,7 @@ export class AgencySalesController {
   }
 
   @Patch('opportunities/:id/move')
+  @RequirePermission('agency.sales.crm.manage.department')
   moveOpportunity(
     @AuthenticatedUser() user: AuthTokenPayload,
     @Headers('x-workspace-id') workspaceId: string | undefined,
@@ -335,6 +388,10 @@ export class AgencySalesController {
   }
 
   @Get('opportunities/:id/items')
+  @RequireAnyPermission(
+    'agency.sales.crm.view.assigned',
+    'agency.sales.crm.view.department',
+  )
   listOpportunityItems(
     @AuthenticatedUser() user: AuthTokenPayload,
     @Headers('x-workspace-id') workspaceId: string | undefined,
@@ -347,6 +404,7 @@ export class AgencySalesController {
   }
 
   @Post('opportunities/:id/items')
+  @RequirePermission('agency.sales.crm.manage.department')
   createOpportunityItem(
     @AuthenticatedUser() user: AuthTokenPayload,
     @Headers('x-workspace-id') workspaceId: string | undefined,
@@ -361,6 +419,7 @@ export class AgencySalesController {
   }
 
   @Patch('opportunities/:id/items/:itemId')
+  @RequirePermission('agency.sales.crm.manage.department')
   updateOpportunityItem(
     @AuthenticatedUser() user: AuthTokenPayload,
     @Headers('x-workspace-id') workspaceId: string | undefined,
@@ -377,6 +436,8 @@ export class AgencySalesController {
   }
 
   @Delete('opportunities/:id/items/:itemId')
+  @RequirePermission('agency.sales.crm.manage.department')
+  @DangerousAction()
   deleteOpportunityItem(
     @AuthenticatedUser() user: AuthTokenPayload,
     @Headers('x-workspace-id') workspaceId: string | undefined,
@@ -391,6 +452,7 @@ export class AgencySalesController {
   }
 
   @Patch('opportunities/:id')
+  @RequirePermission('agency.sales.crm.manage.department')
   updateOpportunity(
     @AuthenticatedUser() user: AuthTokenPayload,
     @Headers('x-workspace-id') workspaceId: string | undefined,
@@ -405,15 +467,24 @@ export class AgencySalesController {
   }
 
   @Delete('opportunities/:id')
+  @RequirePermission('agency.sales.crm.manage.department')
+  @DangerousAction()
   deleteOpportunity(
     @AuthenticatedUser() user: AuthTokenPayload,
     @Headers('x-workspace-id') workspaceId: string | undefined,
     @Param('id') id: string,
   ) {
-    return this.salesService.deleteOpportunity(this.getContext(user, workspaceId), id);
+    return this.salesService.deleteOpportunity(
+      this.getContext(user, workspaceId),
+      id,
+    );
   }
 
   @Get('opportunities/:id')
+  @RequireAnyPermission(
+    'agency.sales.crm.view.assigned',
+    'agency.sales.crm.view.department',
+  )
   getOpportunityDetail(
     @AuthenticatedUser() user: AuthTokenPayload,
     @Headers('x-workspace-id') workspaceId: string | undefined,

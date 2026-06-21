@@ -15,12 +15,18 @@ import { UpdateCalendarEventDto } from './dto/update-calendar-event.dto';
 import { CreateCalendarRoutineBlockDto } from './dto/create-calendar-routine-block.dto';
 import { UpdateCalendarRoutineBlockDto } from './dto/update-calendar-routine-block.dto';
 import { UpdateCalendarSettingsDto } from './dto/update-calendar-settings.dto';
+import {
+  DangerousAction,
+  RequireAnyPermission,
+  RequirePermission,
+} from '../permissions';
 
 @Controller('calendar')
 export class CalendarController {
   constructor(private readonly calendarService: CalendarService) {}
 
   @Get('settings')
+  @RequirePermission('agency.calendar.settings.manage.admin')
   getSettings(
     @Headers('x-tenant-id') tenantId: string,
     @Headers('x-workspace-id') workspaceId: string | undefined,
@@ -34,6 +40,7 @@ export class CalendarController {
   }
 
   @Patch('settings')
+  @RequirePermission('agency.calendar.settings.manage.admin')
   updateSettings(
     @Headers('x-tenant-id') tenantId: string,
     @Headers('x-workspace-id') workspaceId: string | undefined,
@@ -51,6 +58,7 @@ export class CalendarController {
   }
 
   @Post('settings/reset')
+  @RequirePermission('agency.calendar.settings.manage.admin')
   resetSettings(
     @Headers('x-tenant-id') tenantId: string,
     @Headers('x-workspace-id') workspaceId: string | undefined,
@@ -64,20 +72,37 @@ export class CalendarController {
   }
 
   @Get('events')
+  @RequireAnyPermission(
+    'agency.calendar.events.view.self',
+    'agency.calendar.events.view.department',
+    'agency.calendar.events.view.all',
+  )
   listEvents(
     @Headers('x-tenant-id') tenantId: string,
     @Headers('x-workspace-id') workspaceId: string | undefined,
     @Headers('x-user-id') userId: string | undefined,
+    @Headers('x-user-role') userRole: string | undefined,
+    @Headers('x-role') role: string | undefined,
     @Query('startsAt') startsAt?: string,
     @Query('endsAt') endsAt?: string,
   ) {
     return this.calendarService.listEvents(
-      { tenantId, workspaceId: workspaceId ?? null, userId: userId ?? null },
+      {
+        tenantId,
+        workspaceId: workspaceId ?? null,
+        userId: userId ?? null,
+        role: userRole ?? role ?? 'member',
+      },
       { startsAt, endsAt },
     );
   }
 
   @Post('events')
+  @RequireAnyPermission(
+    'agency.calendar.events.manage.self',
+    'agency.calendar.events.manage.department',
+    'agency.calendar.events.view.all',
+  )
   createEvent(
     @Headers('x-tenant-id') tenantId: string,
     @Headers('x-workspace-id') workspaceId: string | undefined,
@@ -91,6 +116,11 @@ export class CalendarController {
   }
 
   @Patch('events/:eventId')
+  @RequireAnyPermission(
+    'agency.calendar.events.manage.self',
+    'agency.calendar.events.manage.department',
+    'agency.calendar.events.view.all',
+  )
   updateEvent(
     @Headers('x-tenant-id') tenantId: string,
     @Headers('x-workspace-id') workspaceId: string | undefined,
@@ -106,6 +136,12 @@ export class CalendarController {
   }
 
   @Delete('events/:eventId')
+  @RequireAnyPermission(
+    'agency.calendar.events.manage.self',
+    'agency.calendar.events.manage.department',
+    'agency.calendar.events.view.all',
+  )
+  @DangerousAction()
   removeEvent(
     @Headers('x-tenant-id') tenantId: string,
     @Headers('x-workspace-id') workspaceId: string | undefined,
@@ -119,6 +155,7 @@ export class CalendarController {
   }
 
   @Get('routine-blocks')
+  @RequirePermission('agency.calendar.events.view.self')
   listRoutineBlocks(
     @Headers('x-tenant-id') tenantId: string,
     @Headers('x-workspace-id') workspaceId: string | undefined,
@@ -132,6 +169,7 @@ export class CalendarController {
   }
 
   @Post('routine-blocks')
+  @RequirePermission('agency.calendar.events.manage.self')
   createRoutineBlock(
     @Headers('x-tenant-id') tenantId: string,
     @Headers('x-workspace-id') workspaceId: string | undefined,
@@ -145,6 +183,7 @@ export class CalendarController {
   }
 
   @Patch('routine-blocks/:blockId')
+  @RequirePermission('agency.calendar.events.manage.self')
   updateRoutineBlock(
     @Headers('x-tenant-id') tenantId: string,
     @Headers('x-workspace-id') workspaceId: string | undefined,
@@ -160,6 +199,8 @@ export class CalendarController {
   }
 
   @Delete('routine-blocks/:blockId')
+  @RequirePermission('agency.calendar.events.manage.self')
+  @DangerousAction()
   removeRoutineBlock(
     @Headers('x-tenant-id') tenantId: string,
     @Headers('x-workspace-id') workspaceId: string | undefined,

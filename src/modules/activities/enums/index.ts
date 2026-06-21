@@ -41,6 +41,7 @@ export enum ActivityEntityType {
   CalendarEvent = 'calendar_event',
   Invoice = 'invoice',
   InboxConversation = 'inbox_conversation',
+  TeamLifecycleStep = 'team_lifecycle_step',
 }
 
 export enum ActivityRelationType {

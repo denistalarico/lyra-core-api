@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ContactEntity } from '../contacts/entities/contact.entity';
 import { NotificationsModule } from '../notifications';
+import { PermissionsModule } from '../permissions';
 import { CrmController } from './crm.controller';
 import { CrmService } from './crm.service';
 import { SalesNotificationPublisher } from './sales-notification.publisher';
@@ -15,6 +16,7 @@ import { CrmOpportunityEventEntity } from './entities/crm-opportunity-event.enti
 @Module({
   imports: [
     NotificationsModule,
+    PermissionsModule,
     TypeOrmModule.forFeature(
       [
         CrmPipelineEntity,

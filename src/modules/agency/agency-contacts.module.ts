@@ -17,12 +17,14 @@ import { ContactAddressEntity } from '../contacts/entities/contact-address.entit
 import { ContactTagEntity } from '../contacts/entities/contact-tag.entity';
 import { ContactSegmentEntity } from '../contacts/entities/contact-segment.entity';
 import { ContactTagAssignmentEntity } from '../contacts/entities/contact-tag-assignment.entity';
+import { PermissionsModule } from '../permissions';
 
 const AGENCY_CONNECTION = 'agency';
 
 @Module({
   imports: [
     FilesModule,
+    PermissionsModule,
     TypeOrmModule.forFeature(
       [
         ContactEntity,

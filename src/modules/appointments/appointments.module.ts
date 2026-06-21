@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { PermissionsModule } from '../permissions';
 import { AppointmentsController } from './appointments.controller';
 import { AppointmentsService } from './appointments.service';
 import { ScheduledItemEntity } from './entities/scheduled-item.entity';
@@ -8,6 +9,7 @@ import { ScheduledItemReminderEntity } from './entities/scheduled-item-reminder.
 
 @Module({
   imports: [
+    PermissionsModule,
     TypeOrmModule.forFeature([
       ScheduledItemEntity,
       ScheduledItemParticipantEntity,

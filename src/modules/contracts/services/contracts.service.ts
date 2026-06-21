@@ -20,6 +20,7 @@ import {
   randomBytes,
 } from 'crypto';
 import { CONTRACT_TEMPLATE_PRESETS } from '../contracts-presets';
+import { sanitizeContractHtml } from '../contracts-sanitize';
 import { getContractTemplateContentByPresetKey } from '../contracts-template-content';
 import { sendAutentiqueSignatureRequestMock } from '../autentique-signature-adapter';
 import {
@@ -34,6 +35,8 @@ import {
 import {
   ContractDocumentType,
   ContractEventType,
+  ContractFooterPreset,
+  ContractHeaderPreset,
   ContractPartySignatureStatus,
   ContractSignatureMode,
   ContractSignatureProvider,
@@ -75,6 +78,15 @@ type RequestContext = {
   tenantId: string;
   workspaceId: string;
   userId: string;
+};
+
+type LetterheadSettings = {
+  headerPreset?: ContractHeaderPreset | null;
+  footerPreset?: ContractFooterPreset | null;
+  showLogo?: boolean;
+  showCompanyData?: boolean;
+  showContractNumber?: boolean;
+  showPoweredByLyra?: boolean;
 };
 
 const AGENCY_CONNECTION = 'agency';
@@ -125,8 +137,14 @@ export class ContractsService {
       status: ContractTemplateStatus.Draft,
       defaultSignatureMode: dto.defaultSignatureMode ?? preset.defaultSignatureMode,
       headerHtml: content?.headerHtml ?? null,
-      bodyHtml: content?.bodyHtml ?? `<p>Modelo ${preset.label}</p>`,
+      bodyHtml: content?.bodyHtml ?? '<p>Texto do contrato aqui.</p>',
       footerHtml: content?.footerHtml ?? null,
+      headerPreset: ContractHeaderPreset.Classic,
+      footerPreset: ContractFooterPreset.Lyra,
+      showLogo: true,
+      showCompanyData: true,
+      showContractNumber: true,
+      showPoweredByLyra: true,
       variablesSchema: {
         groups: preset.variableGroups,
         required: preset.requiredVariables,
@@ -137,8 +155,7 @@ export class ContractsService {
       jurisdictionRegion: null,
       templateSource: ContractTemplateSource.Preset,
       editorMode: ContractTemplateEditorMode.Html,
-      legalDisclaimer:
-        'Este modelo é fornecido como estrutura operacional e deve ser revisado por um profissional jurídico antes do uso.',
+      legalDisclaimer: null,
       metadata: { ...(dto.metadata ?? {}), presetKey: preset.key },
       createdById: context.userId,
       updatedById: context.userId,
@@ -169,15 +186,19 @@ export class ContractsService {
       headerHtml: dto.headerHtml ?? null,
       bodyHtml: dto.bodyHtml,
       footerHtml: dto.footerHtml ?? null,
+      headerPreset: dto.headerPreset ?? ContractHeaderPreset.Classic,
+      footerPreset: dto.footerPreset ?? ContractFooterPreset.Lyra,
+      showLogo: dto.showLogo ?? true,
+      showCompanyData: dto.showCompanyData ?? true,
+      showContractNumber: dto.showContractNumber ?? true,
+      showPoweredByLyra: dto.showPoweredByLyra ?? true,
       variablesSchema: dto.variablesSchema ?? {},
       locale: dto.locale ?? 'pt-BR',
       countryCode: dto.countryCode ?? 'BR',
       jurisdictionRegion: dto.jurisdictionRegion ?? null,
       templateSource: ContractTemplateSource.Custom,
       editorMode: dto.editorMode ?? ContractTemplateEditorMode.Html,
-      legalDisclaimer:
-        dto.legalDisclaimer ??
-        'Este modelo é fornecido como estrutura operacional e deve ser revisado por um profissional jurídico antes do uso.',
+      legalDisclaimer: dto.legalDisclaimer ?? null,
       metadata: dto.metadata ?? {},
       createdById: context.userId,
       updatedById: context.userId,
@@ -197,9 +218,26 @@ export class ContractsService {
     dto: PreviewContractTemplateDto,
   ) {
     const variablesData = dto.variablesData ?? {};
-    const headerHtml = this.renderTemplateString(dto.headerHtml ?? '', variablesData);
-    const bodyHtml = this.renderTemplateString(dto.bodyHtml, variablesData);
-    const footerHtml = this.renderTemplateString(dto.footerHtml ?? '', variablesData);
+    const headerHtml = this.renderTemplateString(
+      this.resolveHeaderHtml({
+        fallbackHtml: dto.headerHtml ?? '',
+        variablesData,
+        settings: dto,
+      }),
+      variablesData,
+    );
+    const bodyHtml = this.renderTemplateString(
+      sanitizeContractHtml(dto.bodyHtml),
+      variablesData,
+    );
+    const footerHtml = this.renderTemplateString(
+      this.resolveFooterHtml({
+        fallbackHtml: dto.footerHtml ?? '',
+        variablesData,
+        settings: dto,
+      }),
+      variablesData,
+    );
 
     return {
       html: this.wrapContractHtml({
@@ -335,14 +373,19 @@ export class ContractsService {
       headerHtml: dto.headerHtml ?? null,
       bodyHtml: dto.bodyHtml,
       footerHtml: dto.footerHtml ?? null,
+      headerPreset: dto.headerPreset ?? ContractHeaderPreset.Classic,
+      footerPreset: dto.footerPreset ?? ContractFooterPreset.Lyra,
+      showLogo: dto.showLogo ?? true,
+      showCompanyData: dto.showCompanyData ?? true,
+      showContractNumber: dto.showContractNumber ?? true,
+      showPoweredByLyra: dto.showPoweredByLyra ?? true,
       variablesSchema: dto.variablesSchema ?? {},
       locale: 'pt-BR',
       countryCode: 'BR',
       jurisdictionRegion: null,
       templateSource: ContractTemplateSource.Custom,
       editorMode: ContractTemplateEditorMode.Html,
-      legalDisclaimer:
-        'Este modelo é fornecido como estrutura operacional e deve ser revisado por um profissional jurídico antes do uso.',
+      legalDisclaimer: null,
       metadata: dto.metadata ?? {},
       createdById: context.userId,
       updatedById: context.userId,
@@ -421,6 +464,23 @@ export class ContractsService {
     return this.templatesRepository.save(template);
   }
 
+  async deleteTemplate(context: RequestContext, id: string) {
+    const template = await this.getTemplateOrFail(context, id);
+
+    await this.templateVersionsRepository.delete({
+      tenantId: context.tenantId,
+      workspaceId: context.workspaceId,
+      templateId: template.id,
+    });
+    await this.templatesRepository.delete({
+      tenantId: context.tenantId,
+      workspaceId: context.workspaceId,
+      id: template.id,
+    });
+
+    return { deleted: true, id: template.id };
+  }
+
   async listTemplateVersions(context: RequestContext, templateId: string) {
     await this.getTemplateOrFail(context, templateId);
 
@@ -453,6 +513,12 @@ export class ContractsService {
       headerHtml: dto.headerHtml ?? template.headerHtml,
       bodyHtml: dto.bodyHtml ?? template.bodyHtml,
       footerHtml: dto.footerHtml ?? template.footerHtml,
+      headerPreset: dto.headerPreset ?? template.headerPreset,
+      footerPreset: dto.footerPreset ?? template.footerPreset,
+      showLogo: dto.showLogo ?? template.showLogo,
+      showCompanyData: dto.showCompanyData ?? template.showCompanyData,
+      showContractNumber: dto.showContractNumber ?? template.showContractNumber,
+      showPoweredByLyra: dto.showPoweredByLyra ?? template.showPoweredByLyra,
       variablesSchema: dto.variablesSchema ?? template.variablesSchema ?? {},
       metadata: dto.metadata ?? {},
       createdById: context.userId,
@@ -541,6 +607,12 @@ export class ContractsService {
       templateSource: template.templateSource,
       editorMode: template.editorMode,
       legalDisclaimer: template.legalDisclaimer,
+      headerPreset: template.headerPreset,
+      footerPreset: template.footerPreset,
+      showLogo: template.showLogo,
+      showCompanyData: template.showCompanyData,
+      showContractNumber: template.showContractNumber,
+      showPoweredByLyra: template.showPoweredByLyra,
       variablesSchema:
         latestVersion?.variablesSchema ?? template.variablesSchema ?? {},
     };
@@ -832,15 +904,23 @@ export class ContractsService {
     }
 
     const headerHtml = this.renderTemplateString(
-      templateParts.headerHtml ?? '',
+      this.resolveHeaderHtml({
+        fallbackHtml: templateParts.headerHtml ?? '',
+        variablesData,
+        settings: templateParts,
+      }),
       variablesData,
     );
     const bodyHtml = this.renderTemplateString(
-      templateParts.bodyHtml,
+      sanitizeContractHtml(templateParts.bodyHtml),
       variablesData,
     );
     const footerHtml = this.renderTemplateString(
-      templateParts.footerHtml ?? '',
+      this.resolveFooterHtml({
+        fallbackHtml: templateParts.footerHtml ?? '',
+        variablesData,
+        settings: templateParts,
+      }),
       variablesData,
     );
 
@@ -908,7 +988,7 @@ export class ContractsService {
     });
 
     try {
-      const page = await browser.newPage();
+      const page = await browser.newPage({ javaScriptEnabled: false });
 
       await page.setContent(contract.generatedHtml, {
         waitUntil: 'networkidle',
@@ -1718,6 +1798,12 @@ export class ContractsService {
     headerHtml: string | null;
     bodyHtml: string;
     footerHtml: string | null;
+    headerPreset: ContractHeaderPreset | null;
+    footerPreset: ContractFooterPreset | null;
+    showLogo: boolean;
+    showCompanyData: boolean;
+    showContractNumber: boolean;
+    showPoweredByLyra: boolean;
     variablesSchema: Record<string, unknown>;
     locale: string;
   }> {
@@ -1740,6 +1826,12 @@ export class ContractsService {
         headerHtml: version.headerHtml,
         bodyHtml: version.bodyHtml,
         footerHtml: version.footerHtml,
+        headerPreset: version.headerPreset,
+        footerPreset: version.footerPreset,
+        showLogo: version.showLogo,
+        showCompanyData: version.showCompanyData,
+        showContractNumber: version.showContractNumber,
+        showPoweredByLyra: version.showPoweredByLyra,
         variablesSchema: version.variablesSchema ?? {},
         locale: version.locale ?? 'pt-BR',
       };
@@ -1760,6 +1852,12 @@ export class ContractsService {
         headerHtml: latestVersion.headerHtml,
         bodyHtml: latestVersion.bodyHtml,
         footerHtml: latestVersion.footerHtml,
+        headerPreset: latestVersion.headerPreset,
+        footerPreset: latestVersion.footerPreset,
+        showLogo: latestVersion.showLogo,
+        showCompanyData: latestVersion.showCompanyData,
+        showContractNumber: latestVersion.showContractNumber,
+        showPoweredByLyra: latestVersion.showPoweredByLyra,
         variablesSchema: latestVersion.variablesSchema ?? {},
         locale: latestVersion.locale ?? 'pt-BR',
       };
@@ -1772,6 +1870,12 @@ export class ContractsService {
       headerHtml: template.headerHtml,
       bodyHtml: template.bodyHtml,
       footerHtml: template.footerHtml,
+      headerPreset: template.headerPreset,
+      footerPreset: template.footerPreset,
+      showLogo: template.showLogo,
+      showCompanyData: template.showCompanyData,
+      showContractNumber: template.showContractNumber,
+      showPoweredByLyra: template.showPoweredByLyra,
       variablesSchema: template.variablesSchema ?? {},
       locale: template.locale ?? 'pt-BR',
     };
@@ -1784,6 +1888,12 @@ export class ContractsService {
     headerHtml: string | null;
     bodyHtml: string;
     footerHtml: string | null;
+    headerPreset: ContractHeaderPreset | null;
+    footerPreset: ContractFooterPreset | null;
+    showLogo: boolean;
+    showCompanyData: boolean;
+    showContractNumber: boolean;
+    showPoweredByLyra: boolean;
     variablesSchema: Record<string, unknown>;
     locale: string;
   }> {
@@ -1804,6 +1914,12 @@ export class ContractsService {
         headerHtml: version.headerHtml,
         bodyHtml: version.bodyHtml,
         footerHtml: version.footerHtml,
+        headerPreset: version.headerPreset,
+        footerPreset: version.footerPreset,
+        showLogo: version.showLogo,
+        showCompanyData: version.showCompanyData,
+        showContractNumber: version.showContractNumber,
+        showPoweredByLyra: version.showPoweredByLyra,
         variablesSchema: version.variablesSchema ?? {},
         locale: version.locale ?? 'pt-BR',
       };
@@ -1826,6 +1942,12 @@ export class ContractsService {
           headerHtml: latestVersion.headerHtml,
           bodyHtml: latestVersion.bodyHtml,
           footerHtml: latestVersion.footerHtml,
+          headerPreset: latestVersion.headerPreset,
+          footerPreset: latestVersion.footerPreset,
+          showLogo: latestVersion.showLogo,
+          showCompanyData: latestVersion.showCompanyData,
+          showContractNumber: latestVersion.showContractNumber,
+          showPoweredByLyra: latestVersion.showPoweredByLyra,
           variablesSchema: latestVersion.variablesSchema ?? {},
           locale: latestVersion.locale ?? 'pt-BR',
         };
@@ -1840,6 +1962,12 @@ export class ContractsService {
         headerHtml: template.headerHtml,
         bodyHtml: template.bodyHtml,
         footerHtml: template.footerHtml,
+        headerPreset: template.headerPreset,
+        footerPreset: template.footerPreset,
+        showLogo: template.showLogo,
+        showCompanyData: template.showCompanyData,
+        showContractNumber: template.showContractNumber,
+        showPoweredByLyra: template.showPoweredByLyra,
         variablesSchema: template.variablesSchema ?? {},
         locale: template.locale ?? 'pt-BR',
       };
@@ -1892,7 +2020,54 @@ export class ContractsService {
   }
 
   private getValueByPath(source: Record<string, unknown>, path: string) {
-    return path.split('.').reduce<unknown>((acc, part) => {
+    if (Object.prototype.hasOwnProperty.call(source, path)) {
+      const flatValue = source[path];
+      if (flatValue !== undefined && flatValue !== null) {
+        return flatValue;
+      }
+    }
+
+    const value = path.split('.').reduce<unknown>((acc, part) => {
+      if (acc === undefined || acc === null || typeof acc !== 'object') {
+        return undefined;
+      }
+
+      return (acc as Record<string, unknown>)[part];
+    }, source);
+
+    if (value !== undefined && value !== null) {
+      return value;
+    }
+
+    const aliasMap: Record<string, string> = {
+      'agency.cnpj': 'agency.taxId',
+      'agency.taxId': 'agency.cnpj',
+      'client.cnpj': 'client.taxId',
+      'client.taxId': 'client.cnpj',
+      'agency.name': 'agency.legalName',
+      'agency.legalName': 'agency.name',
+      'agency.representative': 'agency.signerName',
+      'agency.signerName': 'agency.representative',
+      'company.legalName': 'agency.legalName',
+      'company.taxId': 'agency.taxId',
+      'contract.signatureDate': 'contract.date',
+      'contract.date': 'contract.signatureDate',
+      'contract.monthlyValue': 'payment.monthlyAmount',
+      'payment.monthlyAmount': 'contract.monthlyValue',
+      'contract.hourlyValue': 'payment.hourlyAmount',
+      'payment.hourlyAmount': 'contract.hourlyValue',
+      'contract.paymentTerms': 'payment.paymentTerms',
+      'payment.paymentTerms': 'contract.paymentTerms',
+      'contractor.fullName': 'member.displayName',
+      'member.displayName': 'contractor.fullName',
+    };
+
+    const aliasPath = aliasMap[path];
+    if (!aliasPath) {
+      return undefined;
+    }
+
+    return aliasPath.split('.').reduce<unknown>((acc, part) => {
       if (acc === undefined || acc === null || typeof acc !== 'object') {
         return undefined;
       }
@@ -2173,6 +2348,199 @@ export class ContractsService {
     );
   }
 
+  private resolveHeaderHtml({
+    fallbackHtml,
+    variablesData,
+    settings,
+  }: {
+    fallbackHtml: string;
+    variablesData: Record<string, unknown>;
+    settings: LetterheadSettings;
+  }) {
+    if (!settings.headerPreset) {
+      return sanitizeContractHtml(fallbackHtml);
+    }
+
+    if (settings.headerPreset === ContractHeaderPreset.None) {
+      return '';
+    }
+
+    return this.renderHeaderPreset({
+      preset: settings.headerPreset,
+      variablesData,
+      settings,
+    });
+  }
+
+  private resolveFooterHtml({
+    fallbackHtml,
+    variablesData,
+    settings,
+  }: {
+    fallbackHtml: string;
+    variablesData: Record<string, unknown>;
+    settings: LetterheadSettings;
+  }) {
+    if (!settings.footerPreset) {
+      return sanitizeContractHtml(fallbackHtml);
+    }
+
+    return this.renderFooterPreset({
+      preset: settings.footerPreset,
+      variablesData,
+      settings,
+    });
+  }
+
+  private renderHeaderPreset({
+    preset,
+    variablesData,
+    settings,
+  }: {
+    preset: ContractHeaderPreset;
+    variablesData: Record<string, unknown>;
+    settings: LetterheadSettings;
+  }) {
+    const agencyName =
+      this.resolvePlainVariable(variablesData, 'agency.name') ||
+      this.resolvePlainVariable(variablesData, 'agency.legalName') ||
+      'Sua agência';
+    const taxId = this.resolvePlainVariable(variablesData, 'agency.taxId');
+    const address = this.resolvePlainVariable(variablesData, 'agency.address');
+    const email = this.resolvePlainVariable(variablesData, 'agency.email');
+    const logoUrl =
+      this.resolvePlainVariable(variablesData, 'agency.logoUrl') ||
+      this.resolvePlainVariable(variablesData, 'company.logoUrl');
+    const slogan =
+      this.resolvePlainVariable(variablesData, 'agency.slogan') ||
+      this.resolvePlainVariable(variablesData, 'company.slogan') ||
+      this.resolvePlainVariable(variablesData, 'agency.website') ||
+      this.resolvePlainVariable(variablesData, 'company.website') ||
+      'Excelência em gestão de contratos';
+    const contractNumber = this.resolvePlainVariable(variablesData, 'contract.number');
+    const numberHtml = settings.showContractNumber !== false && contractNumber
+      ? `<span class="contract-letterhead-number">Contrato nº ${contractNumber}</span>`
+      : '';
+    const companyData = [
+      agencyName ? `<strong>${agencyName}</strong>` : '',
+      taxId ? `<span>Tax ID/CNPJ: ${taxId}</span>` : '',
+      address ? `<span>${address}</span>` : '',
+      email ? `<span>${email}</span>` : '',
+      numberHtml,
+    ].filter(Boolean).join('');
+    const logo = settings.showLogo !== false
+      ? logoUrl
+        ? `<div class="contract-letterhead-logo is-image"><img src="${logoUrl}" alt="${agencyName}" /></div>`
+        : `<div class="contract-letterhead-logo">${this.escapeHtml(agencyName).slice(0, 2).toUpperCase()}</div>`
+      : '';
+
+    if (preset === ContractHeaderPreset.Minimal) {
+      return `
+        <div class="contract-letterhead contract-letterhead-minimal">
+          ${logo}
+        </div>
+      `;
+    }
+
+    if (preset === ContractHeaderPreset.Corporate) {
+      return `
+        <div class="contract-letterhead contract-letterhead-corporate">
+          <div class="contract-letterhead-corporate-body">
+            <div class="contract-letterhead-brand contract-letterhead-brand-logo-only">
+              ${logo}
+            </div>
+            <div class="contract-letterhead-slogan">${slogan}</div>
+          </div>
+        </div>
+      `;
+    }
+
+    return `
+      <div class="contract-letterhead contract-letterhead-classic">
+        <div class="contract-letterhead-top">
+          <div class="contract-letterhead-brand contract-letterhead-brand-logo-only">
+            ${logo}
+          </div>
+          ${settings.showCompanyData !== false ? `<div class="contract-letterhead-data">${companyData}</div>` : ''}
+        </div>
+      </div>
+    `;
+  }
+
+  private renderFooterPreset({
+    preset,
+    variablesData,
+    settings,
+  }: {
+    preset: ContractFooterPreset;
+    variablesData: Record<string, unknown>;
+    settings: LetterheadSettings;
+  }) {
+    const agencyName =
+      this.resolvePlainVariable(variablesData, 'agency.legalName') ||
+      this.resolvePlainVariable(variablesData, 'agency.name') ||
+      'Sua agência';
+    const taxId = this.resolvePlainVariable(variablesData, 'agency.taxId');
+    const email = this.resolvePlainVariable(variablesData, 'agency.email');
+    const contractNumber = this.resolvePlainVariable(variablesData, 'contract.number');
+    const city = this.resolvePlainVariable(variablesData, 'contract.city');
+    const jurisdiction = this.resolvePlainVariable(variablesData, 'contract.jurisdiction');
+    const powered = settings.showPoweredByLyra !== false
+      ? '<span class="contract-letterhead-powered">Documento gerado por Lyra Suite</span>'
+      : '';
+
+    if (preset === ContractFooterPreset.None) {
+      return powered
+        ? `<div class="contract-letterhead-footer contract-letterhead-footer-none">${powered}</div>`
+        : '';
+    }
+
+    if (preset === ContractFooterPreset.Company) {
+      return `
+        <div class="contract-letterhead-footer contract-letterhead-footer-company">
+          <span>${agencyName}</span>
+          ${taxId ? `<span>Tax ID/CNPJ: ${taxId}</span>` : ''}
+          ${email ? `<span>${email}</span>` : ''}
+          ${powered}
+        </div>
+      `;
+    }
+
+    if (preset === ContractFooterPreset.Legal) {
+      return `
+        <div class="contract-letterhead-footer contract-letterhead-footer-legal">
+          ${contractNumber ? `<span>Contrato nº ${contractNumber}</span>` : ''}
+          ${jurisdiction || city ? `<span>Foro: ${jurisdiction || city}</span>` : ''}
+          ${powered}
+        </div>
+      `;
+    }
+
+    return `
+      <div class="contract-letterhead-footer contract-letterhead-footer-lyra">
+        ${powered}
+        <span>${agencyName}</span>
+      </div>
+    `;
+  }
+
+  private resolvePlainVariable(
+    variablesData: Record<string, unknown>,
+    key: string,
+  ) {
+    const value = this.getValueByPath(variablesData, key);
+    if (value === undefined || value === null) {
+      return '';
+    }
+    if (Array.isArray(value)) {
+      return this.escapeHtml(value.join(', '));
+    }
+    if (typeof value === 'object') {
+      return this.escapeHtml(JSON.stringify(value));
+    }
+    return this.escapeHtml(String(value));
+  }
+
   private wrapContractHtml({
     title,
     locale,
@@ -2216,8 +2584,7 @@ export class ContractsService {
 
     .contract-header {
       margin-bottom: 24px;
-      padding-bottom: 16px;
-      border-bottom: 1px solid #e5e7eb;
+      padding-bottom: 12px;
     }
 
     .contract-body {
@@ -2227,8 +2594,216 @@ export class ContractsService {
     .contract-footer {
       margin-top: 32px;
       padding-top: 16px;
-      border-top: 1px solid #e5e7eb;
       color: #374151;
+    }
+
+    .contract-letterhead {
+      color: #0f172a;
+    }
+
+    .contract-letterhead-classic {
+      position: relative;
+      padding: 0 0 18px;
+      border-bottom: 1px solid #d8dee9;
+    }
+
+    .contract-letterhead-classic::after,
+    .contract-letterhead-minimal::after {
+      content: "";
+      position: absolute;
+      left: 0;
+      bottom: -1px;
+      width: 112px;
+      height: 2px;
+      border-radius: 999px;
+      background: linear-gradient(90deg, #0f172a, #64748b);
+    }
+
+    .contract-letterhead-top,
+    .contract-letterhead-corporate-body {
+      display: flex;
+      justify-content: space-between;
+      gap: 24px;
+      align-items: flex-start;
+    }
+
+    .contract-letterhead-brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      color: #0f172a;
+      font-size: 15px;
+      letter-spacing: 0.01em;
+    }
+
+    .contract-letterhead-logo {
+      display: inline-grid;
+      width: 42px;
+      height: 42px;
+      place-items: center;
+      border-radius: 12px;
+      background: linear-gradient(135deg, #0f172a, #334155);
+      color: #ffffff;
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      box-shadow: 0 10px 22px rgba(15, 23, 42, 0.16);
+    }
+
+    .contract-letterhead-logo.is-image {
+      width: auto;
+      min-width: 52px;
+      max-width: 156px;
+      height: 48px;
+      padding: 0;
+      border-radius: 0;
+      background: transparent;
+      box-shadow: none;
+    }
+
+    .contract-letterhead-logo img {
+      display: block;
+      width: auto;
+      max-width: 156px;
+      height: 48px;
+      object-fit: contain;
+    }
+
+    .contract-letterhead-data {
+      display: grid;
+      gap: 4px;
+      max-width: 320px;
+      color: #475569;
+      font-size: 10.5px;
+      text-align: right;
+    }
+
+    .contract-letterhead-data strong {
+      color: #0f172a;
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    .contract-letterhead-title {
+      margin-top: 16px;
+    }
+
+    .contract-letterhead-title h1,
+    .contract-letterhead-minimal h1,
+    .contract-letterhead-corporate h1 {
+      margin: 0 0 6px;
+      color: #0f172a;
+      font-size: 18px;
+      font-weight: 800;
+      letter-spacing: 0.02em;
+    }
+
+    .contract-letterhead-number {
+      display: inline-flex;
+      width: fit-content;
+      border: 1px solid #cbd5e1;
+      border-radius: 999px;
+      padding: 3px 9px;
+      background: #f8fafc;
+      color: #475569;
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .contract-letterhead-minimal {
+      position: relative;
+      display: flex;
+      justify-content: center;
+      text-align: center;
+      border-bottom: 1px solid #d8dee9;
+      padding: 0 0 18px;
+    }
+
+    .contract-letterhead-minimal strong {
+      display: block;
+      margin-bottom: 8px;
+      color: #0f172a;
+      font-size: 11px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.16em;
+    }
+
+    .contract-letterhead-band {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin: -32px -32px 20px;
+      padding: 18px 32px;
+      background:
+        linear-gradient(135deg, rgba(15, 23, 42, 0.98), rgba(30, 41, 59, 0.96)),
+        radial-gradient(circle at top left, rgba(148, 163, 184, 0.24), transparent 42%);
+      color: #ffffff;
+    }
+
+    .contract-letterhead-band strong {
+      font-size: 14px;
+      letter-spacing: 0.04em;
+    }
+
+    .contract-letterhead-band .contract-letterhead-logo {
+      background: rgba(255, 255, 255, 0.18);
+      box-shadow: none;
+    }
+
+    .contract-letterhead-corporate-body {
+      align-items: center;
+      padding: 18px 0;
+      border-bottom: 1px solid #d8dee9;
+    }
+
+    .contract-letterhead-slogan {
+      max-width: 340px;
+      color: #334155;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      line-height: 1.4;
+      text-align: right;
+      text-transform: uppercase;
+    }
+
+    .contract-letterhead-footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 16px;
+      border-top: 1px solid #d8dee9;
+      padding-top: 14px;
+      color: #64748b;
+      font-size: 10px;
+      letter-spacing: 0.02em;
+    }
+
+    .contract-letterhead-footer-company,
+    .contract-letterhead-footer-legal,
+    .contract-letterhead-footer-none {
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+
+    .contract-letterhead-footer span {
+      display: inline-flex;
+      align-items: center;
+      min-height: 20px;
+    }
+
+    .contract-letterhead-powered {
+      border: 1px solid #d8dee9;
+      border-radius: 999px;
+      padding: 3px 9px;
+      background: #f8fafc;
+      color: #334155;
+      font-weight: 700;
     }
 
     h1, h2, h3 {
@@ -2257,6 +2832,12 @@ export class ContractsService {
       vertical-align: top;
     }
 
+    table.is-borderless,
+    table.is-borderless th,
+    table.is-borderless td {
+      border: none;
+    }
+
     .signature-grid {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -2268,6 +2849,17 @@ export class ContractsService {
       border-top: 1px solid #111827;
       padding-top: 8px;
       text-align: center;
+    }
+
+    table.team-doc-signature {
+      width: 100%;
+      margin-top: 64px;
+      border: none;
+    }
+
+    table.team-doc-signature td {
+      border: none;
+      padding-top: 40px;
     }
   </style>
 </head>
@@ -2346,6 +2938,12 @@ export class ContractsService {
       headerHtml: template.headerHtml,
       bodyHtml: template.bodyHtml,
       footerHtml: template.footerHtml,
+      headerPreset: template.headerPreset,
+      footerPreset: template.footerPreset,
+      showLogo: template.showLogo,
+      showCompanyData: template.showCompanyData,
+      showContractNumber: template.showContractNumber,
+      showPoweredByLyra: template.showPoweredByLyra,
       variablesSchema: template.variablesSchema ?? {},
       locale: template.locale,
       countryCode: template.countryCode,

@@ -12,6 +12,13 @@ import {
 import { RequestContextData } from '../../common/context/request-context.decorator';
 import type { RequestContext } from '../../common/context/request-context.interface';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import {
+  DangerousAction,
+  PermissionsGuard,
+  RequireAnyPermission,
+  RequirePermission,
+  RequireProductEntitlement,
+} from '../permissions';
 import { CreateInboxChannelDto } from './dto/create-inbox-channel.dto';
 import { CreateInboxConversationDto } from './dto/create-inbox-conversation.dto';
 import { CreateInboxMessageDto } from './dto/create-inbox-message.dto';
@@ -24,21 +31,25 @@ type MessageReactionBody = {
 };
 
 @Controller('inbox')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, PermissionsGuard)
+@RequireProductEntitlement('leadflow')
 export class InboxController {
   constructor(private readonly inboxService: InboxService) {}
 
   @Get('channels')
+  @RequirePermission('leadflow.channels.channel.view.client')
   listChannels(@RequestContextData() ctx: RequestContext) {
     return this.inboxService.listChannels(ctx);
   }
 
   @Get('forward-targets')
+  @RequirePermission('leadflow.inbox.conversation.assign.client')
   listForwardTargets(@RequestContextData() ctx: RequestContext) {
     return this.inboxService.listForwardTargets(ctx);
   }
 
   @Post('channels')
+  @RequirePermission('leadflow.channels.channel.create.admin')
   createChannel(
     @RequestContextData() ctx: RequestContext,
     @Body() dto: CreateInboxChannelDto,
@@ -47,6 +58,7 @@ export class InboxController {
   }
 
   @Patch('channels/:id')
+  @RequirePermission('leadflow.channels.channel.update.admin')
   patchChannel(
     @RequestContextData() ctx: RequestContext,
     @Param('id') id: string,
@@ -56,6 +68,11 @@ export class InboxController {
   }
 
   @Get('conversations')
+  @RequireAnyPermission(
+    'leadflow.inbox.conversation.view.assigned',
+    'leadflow.inbox.conversation.view.client',
+    'leadflow.inbox.conversation.view.all',
+  )
   listConversations(
     @RequestContextData() ctx: RequestContext,
     @Query('status') status?: string,
@@ -78,6 +95,7 @@ export class InboxController {
   }
 
   @Post('conversations')
+  @RequirePermission('leadflow.inbox.conversation.reply.client')
   createConversation(
     @RequestContextData() ctx: RequestContext,
     @Body() dto: CreateInboxConversationDto,
@@ -86,6 +104,11 @@ export class InboxController {
   }
 
   @Get('conversations/:id')
+  @RequireAnyPermission(
+    'leadflow.inbox.conversation.view.assigned',
+    'leadflow.inbox.conversation.view.client',
+    'leadflow.inbox.conversation.view.all',
+  )
   getConversation(
     @RequestContextData() ctx: RequestContext,
     @Param('id') id: string,
@@ -94,6 +117,7 @@ export class InboxController {
   }
 
   @Patch('conversations/:id')
+  @RequirePermission('leadflow.inbox.conversation.assign.client')
   patchConversation(
     @RequestContextData() ctx: RequestContext,
     @Param('id') id: string,
@@ -103,6 +127,10 @@ export class InboxController {
   }
 
   @Post('conversations/:id/mark-read')
+  @RequireAnyPermission(
+    'leadflow.inbox.conversation.view.assigned',
+    'leadflow.inbox.conversation.view.client',
+  )
   markConversationRead(
     @RequestContextData() ctx: RequestContext,
     @Param('id') id: string,
@@ -111,6 +139,10 @@ export class InboxController {
   }
 
   @Post('conversations/:id/mark-unread')
+  @RequireAnyPermission(
+    'leadflow.inbox.conversation.view.assigned',
+    'leadflow.inbox.conversation.view.client',
+  )
   markConversationUnread(
     @RequestContextData() ctx: RequestContext,
     @Param('id') id: string,
@@ -119,6 +151,10 @@ export class InboxController {
   }
 
   @Post('conversations/:id/archive')
+  @RequireAnyPermission(
+    'leadflow.inbox.conversation.close.assigned',
+    'leadflow.inbox.conversation.close.client',
+  )
   archiveConversation(
     @RequestContextData() ctx: RequestContext,
     @Param('id') id: string,
@@ -127,6 +163,7 @@ export class InboxController {
   }
 
   @Post('conversations/:id/pin')
+  @RequirePermission('leadflow.inbox.conversation.assign.client')
   toggleConversationPin(
     @RequestContextData() ctx: RequestContext,
     @Param('id') id: string,
@@ -135,6 +172,10 @@ export class InboxController {
   }
 
   @Post('conversations/:id/favorite')
+  @RequireAnyPermission(
+    'leadflow.inbox.conversation.view.assigned',
+    'leadflow.inbox.conversation.view.client',
+  )
   toggleConversationFavorite(
     @RequestContextData() ctx: RequestContext,
     @Param('id') id: string,
@@ -143,6 +184,7 @@ export class InboxController {
   }
 
   @Post('conversations/:id/mute')
+  @RequirePermission('leadflow.inbox.conversation.assign.client')
   toggleConversationMute(
     @RequestContextData() ctx: RequestContext,
     @Param('id') id: string,
@@ -151,6 +193,7 @@ export class InboxController {
   }
 
   @Post('conversations/:id/block')
+  @RequirePermission('leadflow.inbox.conversation.assign.client')
   toggleConversationBlock(
     @RequestContextData() ctx: RequestContext,
     @Param('id') id: string,
@@ -159,6 +202,7 @@ export class InboxController {
   }
 
   @Post('conversations/:id/assume')
+  @RequirePermission('leadflow.inbox.conversation.assign.client')
   assumeConversation(
     @RequestContextData() ctx: RequestContext,
     @Param('id') id: string,
@@ -167,6 +211,8 @@ export class InboxController {
   }
 
   @Post('conversations/:id/clear')
+  @RequirePermission('leadflow.inbox.conversation.delete.owner_only')
+  @DangerousAction()
   clearConversation(
     @RequestContextData() ctx: RequestContext,
     @Param('id') id: string,
@@ -175,6 +221,8 @@ export class InboxController {
   }
 
   @Delete('conversations/:id')
+  @RequirePermission('leadflow.inbox.conversation.delete.owner_only')
+  @DangerousAction()
   deleteConversation(
     @RequestContextData() ctx: RequestContext,
     @Param('id') id: string,
@@ -183,6 +231,11 @@ export class InboxController {
   }
 
   @Get('conversations/:id/messages')
+  @RequireAnyPermission(
+    'leadflow.inbox.conversation.view.assigned',
+    'leadflow.inbox.conversation.view.client',
+    'leadflow.inbox.conversation.view.all',
+  )
   listMessages(
     @RequestContextData() ctx: RequestContext,
     @Param('id') id: string,
@@ -191,6 +244,10 @@ export class InboxController {
   }
 
   @Post('conversations/:id/messages')
+  @RequireAnyPermission(
+    'leadflow.inbox.conversation.reply.assigned',
+    'leadflow.inbox.conversation.reply.client',
+  )
   createMessage(
     @RequestContextData() ctx: RequestContext,
     @Param('id') id: string,
@@ -200,6 +257,10 @@ export class InboxController {
   }
 
   @Post('conversations/:id/messages/:messageId/reaction')
+  @RequireAnyPermission(
+    'leadflow.inbox.conversation.reply.assigned',
+    'leadflow.inbox.conversation.reply.client',
+  )
   reactToMessage(
     @RequestContextData() ctx: RequestContext,
     @Param('id') id: string,
@@ -210,6 +271,7 @@ export class InboxController {
   }
 
   @Post('conversations/:id/messages/:messageId/pin')
+  @RequirePermission('leadflow.inbox.conversation.assign.client')
   toggleMessagePin(
     @RequestContextData() ctx: RequestContext,
     @Param('id') id: string,
@@ -219,6 +281,10 @@ export class InboxController {
   }
 
   @Post('conversations/:id/messages/:messageId/favorite')
+  @RequireAnyPermission(
+    'leadflow.inbox.conversation.view.assigned',
+    'leadflow.inbox.conversation.view.client',
+  )
   toggleMessageFavorite(
     @RequestContextData() ctx: RequestContext,
     @Param('id') id: string,
@@ -228,6 +294,8 @@ export class InboxController {
   }
 
   @Delete('conversations/:id/messages/:messageId')
+  @RequirePermission('leadflow.inbox.conversation.delete.owner_only')
+  @DangerousAction()
   deleteMessage(
     @RequestContextData() ctx: RequestContext,
     @Param('id') id: string,
@@ -237,6 +305,11 @@ export class InboxController {
   }
 
   @Get('conversations/:id/events')
+  @RequireAnyPermission(
+    'leadflow.inbox.conversation.view.assigned',
+    'leadflow.inbox.conversation.view.client',
+    'leadflow.inbox.conversation.view.all',
+  )
   listEvents(
     @RequestContextData() ctx: RequestContext,
     @Param('id') id: string,

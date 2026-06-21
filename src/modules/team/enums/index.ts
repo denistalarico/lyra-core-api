@@ -43,6 +43,7 @@ export enum TeamConfigOptionType {
   PaymentDiscountTemplate = 'payment_discount_template',
   PaymentDocumentTemplate = 'payment_document_template',
   PaymentFinanceSetting = 'payment_finance_setting',
+  LifecycleStepType = 'lifecycle_step_type',
 }
 
 export enum TeamSkillLevel {
@@ -133,4 +134,28 @@ export enum TeamPaymentDocumentType {
   AdvanceVoucher = 'advance_voucher',
   AttendanceReport = 'attendance_report',
   Receipt = 'receipt',
+}
+
+export enum TeamLifecycleProcessType {
+  Onboarding = 'onboarding',
+  Offboarding = 'offboarding',
+}
+
+export enum TeamLifecycleProcessStatus {
+  InProgress = 'in_progress',
+  Completed = 'completed',
+  Cancelled = 'cancelled',
+}
+
+export enum TeamLifecycleStepStatus {
+  NotStarted = 'not_started',
+  InProgress = 'in_progress',
+  Done = 'done',
+  Skipped = 'skipped',
+}
+
+export enum TeamLifecycleIntervalUnit {
+  Hours = 'hours',
+  Days = 'days',
+  Weeks = 'weeks',
 }

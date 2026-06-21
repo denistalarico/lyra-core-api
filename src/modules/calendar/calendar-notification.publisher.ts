@@ -117,6 +117,36 @@ export class CalendarNotificationPublisher {
     });
   }
 
+  publishEventReminder(
+    input: CalendarNotificationInput & {
+      recipientUserIds: Array<string | null | undefined>;
+      offsetMinutes: number;
+      reminderAt: Date;
+    },
+  ) {
+    return this.publishCalendarEvent({
+      ...input,
+      actorUserId: input.actorUserId ?? null,
+      eventType: 'calendar.event_reminder',
+      eventIdParts: [
+        'calendar.event_reminder',
+        input.event.id,
+        String(input.offsetMinutes),
+        input.reminderAt.toISOString(),
+      ],
+      recipients: input.recipientUserIds.map((userId) => ({
+        userId,
+        interestReason: NotificationInterestReason.OWNER,
+      })),
+      title: 'Lembrete de evento',
+      body: `O evento "${input.event.title}" começa em breve.`,
+      payload: {
+        offsetMinutes: input.offsetMinutes,
+        reminderAt: input.reminderAt.toISOString(),
+      },
+    });
+  }
+
   publishAttendeeResponseReceived(
     input: CalendarNotificationInput & {
       attendeeUserId?: string | null;
@@ -152,14 +182,16 @@ export class CalendarNotificationPublisher {
     });
   }
 
-  private async publishCalendarEvent(input: CalendarNotificationInput & {
-    eventType: string;
-    eventIdParts: Array<string | null | undefined>;
-    recipients: CalendarRecipientInput[];
-    title: string;
-    body: string;
-    payload?: Record<string, unknown>;
-  }) {
+  private async publishCalendarEvent(
+    input: CalendarNotificationInput & {
+      eventType: string;
+      eventIdParts: Array<string | null | undefined>;
+      recipients: CalendarRecipientInput[];
+      title: string;
+      body: string;
+      payload?: Record<string, unknown>;
+    },
+  ) {
     const recipients = this.normalizeRecipients(
       input.recipients,
       input.actorUserId,
@@ -221,12 +253,10 @@ export class CalendarNotificationPublisher {
       }
     }
 
-    return Array.from(normalized.entries()).map(
-      ([userId, interestReason]) => ({
-        userId,
-        interestReason,
-      }),
-    );
+    return Array.from(normalized.entries()).map(([userId, interestReason]) => ({
+      userId,
+      interestReason,
+    }));
   }
 
   private buildEventId(parts: Array<string | null | undefined>) {

@@ -16,6 +16,12 @@ import { AuthenticatedUser } from '../auth/decorators/authenticated-user.decorat
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import type { AuthTokenPayload } from '../auth/types/auth-token-payload.type';
 import {
+  DangerousAction,
+  PermissionsGuard,
+  RequireAnyPermission,
+  RequirePermission,
+} from '../permissions';
+import {
   ChangeQuoteStatusDto,
   CreateQuoteDto,
   CreateQuoteItemDto,
@@ -32,7 +38,7 @@ type AgencyContext = {
 };
 
 @Controller('agency/sales/quotes')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, PermissionsGuard)
 export class QuotesController {
   constructor(private readonly quotesService: QuotesService) {}
 
@@ -42,6 +48,7 @@ export class QuotesController {
   }
 
   @Get('templates')
+  @RequirePermission('agency.sales.quotes.create')
   listTemplates(
     @AuthenticatedUser() user: AuthTokenPayload,
     @Headers('x-workspace-id') workspaceId?: string,
@@ -50,6 +57,10 @@ export class QuotesController {
   }
 
   @Get()
+  @RequireAnyPermission(
+    'agency.sales.crm.view.assigned',
+    'agency.sales.crm.view.department',
+  )
   listQuotes(
     @AuthenticatedUser() user: AuthTokenPayload,
     @Headers('x-workspace-id') workspaceId: string | undefined,
@@ -62,6 +73,7 @@ export class QuotesController {
   }
 
   @Post()
+  @RequirePermission('agency.sales.quotes.create')
   createQuote(
     @AuthenticatedUser() user: AuthTokenPayload,
     @Headers('x-workspace-id') workspaceId: string | undefined,
@@ -74,6 +86,7 @@ export class QuotesController {
   }
 
   @Post(':id/duplicate')
+  @RequirePermission('agency.sales.quotes.create')
   duplicateQuote(
     @AuthenticatedUser() user: AuthTokenPayload,
     @Headers('x-workspace-id') workspaceId: string | undefined,
@@ -86,6 +99,10 @@ export class QuotesController {
   }
 
   @Get(':id/preview')
+  @RequireAnyPermission(
+    'agency.sales.crm.view.assigned',
+    'agency.sales.crm.view.department',
+  )
   getQuotePreview(
     @AuthenticatedUser() user: AuthTokenPayload,
     @Headers('x-workspace-id') workspaceId: string | undefined,
@@ -98,6 +115,7 @@ export class QuotesController {
   }
 
   @Post(':id/convert')
+  @RequirePermission('agency.sales.quotes.approve.department')
   convertQuote(
     @AuthenticatedUser() user: AuthTokenPayload,
     @Headers('x-workspace-id') workspaceId: string | undefined,
@@ -112,6 +130,7 @@ export class QuotesController {
   }
 
   @Post(':id/expire')
+  @RequirePermission('agency.sales.quotes.approve.department')
   expireQuote(
     @AuthenticatedUser() user: AuthTokenPayload,
     @Headers('x-workspace-id') workspaceId: string | undefined,
@@ -126,6 +145,10 @@ export class QuotesController {
   }
 
   @Post(':id/pdf')
+  @RequireAnyPermission(
+    'agency.sales.crm.view.assigned',
+    'agency.sales.crm.view.department',
+  )
   async createQuotePdf(
     @AuthenticatedUser() user: AuthTokenPayload,
     @Headers('x-workspace-id') workspaceId: string | undefined,
@@ -147,6 +170,10 @@ export class QuotesController {
   }
 
   @Get(':id')
+  @RequireAnyPermission(
+    'agency.sales.crm.view.assigned',
+    'agency.sales.crm.view.department',
+  )
   getQuote(
     @AuthenticatedUser() user: AuthTokenPayload,
     @Headers('x-workspace-id') workspaceId: string | undefined,
@@ -156,6 +183,7 @@ export class QuotesController {
   }
 
   @Patch(':id')
+  @RequirePermission('agency.sales.crm.manage.department')
   updateQuote(
     @AuthenticatedUser() user: AuthTokenPayload,
     @Headers('x-workspace-id') workspaceId: string | undefined,
@@ -170,6 +198,8 @@ export class QuotesController {
   }
 
   @Delete(':id')
+  @RequirePermission('agency.sales.crm.manage.department')
+  @DangerousAction()
   deleteQuote(
     @AuthenticatedUser() user: AuthTokenPayload,
     @Headers('x-workspace-id') workspaceId: string | undefined,
@@ -182,6 +212,7 @@ export class QuotesController {
   }
 
   @Post(':id/items')
+  @RequirePermission('agency.sales.crm.manage.department')
   addItem(
     @AuthenticatedUser() user: AuthTokenPayload,
     @Headers('x-workspace-id') workspaceId: string | undefined,
@@ -196,6 +227,7 @@ export class QuotesController {
   }
 
   @Patch(':id/items/:itemId')
+  @RequirePermission('agency.sales.crm.manage.department')
   updateItem(
     @AuthenticatedUser() user: AuthTokenPayload,
     @Headers('x-workspace-id') workspaceId: string | undefined,
@@ -212,6 +244,8 @@ export class QuotesController {
   }
 
   @Delete(':id/items/:itemId')
+  @RequirePermission('agency.sales.crm.manage.department')
+  @DangerousAction()
   deleteItem(
     @AuthenticatedUser() user: AuthTokenPayload,
     @Headers('x-workspace-id') workspaceId: string | undefined,
@@ -226,6 +260,7 @@ export class QuotesController {
   }
 
   @Post(':id/send')
+  @RequirePermission('agency.sales.quotes.approve.department')
   sendQuote(
     @AuthenticatedUser() user: AuthTokenPayload,
     @Headers('x-workspace-id') workspaceId: string | undefined,
@@ -240,6 +275,7 @@ export class QuotesController {
   }
 
   @Post(':id/accept')
+  @RequirePermission('agency.sales.quotes.approve.department')
   acceptQuote(
     @AuthenticatedUser() user: AuthTokenPayload,
     @Headers('x-workspace-id') workspaceId: string | undefined,
@@ -254,6 +290,7 @@ export class QuotesController {
   }
 
   @Post(':id/reject')
+  @RequirePermission('agency.sales.quotes.approve.department')
   rejectQuote(
     @AuthenticatedUser() user: AuthTokenPayload,
     @Headers('x-workspace-id') workspaceId: string | undefined,
@@ -268,6 +305,8 @@ export class QuotesController {
   }
 
   @Post(':id/archive')
+  @RequirePermission('agency.sales.quotes.approve.department')
+  @DangerousAction()
   archiveQuote(
     @AuthenticatedUser() user: AuthTokenPayload,
     @Headers('x-workspace-id') workspaceId: string | undefined,

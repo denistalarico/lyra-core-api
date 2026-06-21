@@ -42,11 +42,13 @@ import { FinancePaymentProviderService } from './services/finance-payment-provid
 import { FinanceJournalEntryService } from './services/finance-journal-entry.service';
 import { NotificationsModule } from '../notifications';
 import { FinanceNotificationPublisher } from './services/finance-notification.publisher';
+import { PermissionsModule } from '../permissions';
 
 @Module({
   imports: [
     DocumentLayoutsModule,
     NotificationsModule,
+    PermissionsModule,
     TypeOrmModule.forFeature(
       [
         FinanceAccount,

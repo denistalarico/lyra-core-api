@@ -45,7 +45,8 @@ export class TeamConfigOption {
     | 'payment_finance_setting'
     | 'client_loss_reason'
     | 'client_onboarding_template'
-    | 'client_offboarding_template';
+    | 'client_offboarding_template'
+    | 'lifecycle_step_type';
 
   @Column({ type: 'varchar', length: 160 })
   name!: string;

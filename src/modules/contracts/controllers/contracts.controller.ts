@@ -9,6 +9,7 @@ import {
   Post,
   Put,
   Query,
+  UseGuards,
 } from '@nestjs/common';
 import { ContractsService } from '../services/contracts.service';
 import {
@@ -27,12 +28,19 @@ import {
   PrepareContractSignatureDto,
   PreviewContractTemplateDto,
   SendContractToSignatureProviderDto,
+  UploadManuallySignedContractDto,
   UpdateContractPartyDto,
   UpdateSignatureProviderSettingsDto,
   UpdateContractRecordDto,
   UpdateContractTemplateDto,
 } from '../dto';
 import { ContractSignatureProvider } from '../enums';
+import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
+import {
+  DangerousAction,
+  PermissionsGuard,
+  RequirePermission,
+} from '../../permissions';
 
 type RequestContext = {
   tenantId: string;
@@ -50,18 +58,23 @@ function getContextFromHeaders(
   };
 }
 
+@UseGuards(JwtAuthGuard, PermissionsGuard)
 @Controller('agency/contracts')
 export class ContractsController {
   constructor(private readonly contractsService: ContractsService) {}
 
+  // TODO(permissions): enforce assigned/client/department contract scope when
+  // scoped evaluators are available for contract records.
   // ─── Template presets (must come before /:id routes) ────────────────────────
 
   @Get('templates/presets')
+  @RequirePermission('agency.contracts.create.from_template')
   getTemplatePresets() {
     return this.contractsService.getTemplatePresets();
   }
 
   @Post('templates/from-preset')
+  @RequirePermission('agency.contracts.templates.manage.admin')
   createTemplateFromPreset(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Body() dto: CreateContractTemplateFromPresetDto,
@@ -73,6 +86,7 @@ export class ContractsController {
   }
 
   @Post('templates/custom')
+  @RequirePermission('agency.contracts.templates.manage.admin')
   createCustomTemplate(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Body() dto: CreateCustomContractTemplateDto,
@@ -84,6 +98,7 @@ export class ContractsController {
   }
 
   @Post('templates/preview')
+  @RequirePermission('agency.contracts.templates.manage.admin')
   previewTemplate(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Body() dto: PreviewContractTemplateDto,
@@ -97,6 +112,7 @@ export class ContractsController {
   // ─── Template CRUD ───────────────────────────────────────────────────────────
 
   @Get('templates')
+  @RequirePermission('agency.contracts.templates.manage.admin')
   listTemplates(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Query() query: ListContractTemplatesQueryDto,
@@ -108,6 +124,7 @@ export class ContractsController {
   }
 
   @Post('templates')
+  @RequirePermission('agency.contracts.templates.manage.admin')
   createTemplate(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Body() dto: CreateContractTemplateDto,
@@ -119,6 +136,7 @@ export class ContractsController {
   }
 
   @Get('templates/:id/schema')
+  @RequirePermission('agency.contracts.templates.manage.admin')
   getTemplateSchema(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('id') id: string,
@@ -130,6 +148,7 @@ export class ContractsController {
   }
 
   @Post('templates/:id/validate-variables')
+  @RequirePermission('agency.contracts.templates.manage.admin')
   validateTemplateVariables(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('id') id: string,
@@ -144,6 +163,7 @@ export class ContractsController {
   }
 
   @Get('templates/:id/versions')
+  @RequirePermission('agency.contracts.templates.manage.admin')
   listTemplateVersions(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('id') id: string,
@@ -155,6 +175,7 @@ export class ContractsController {
   }
 
   @Post('templates/:id/versions')
+  @RequirePermission('agency.contracts.templates.manage.admin')
   createTemplateVersion(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('id') id: string,
@@ -168,6 +189,7 @@ export class ContractsController {
   }
 
   @Post('templates/:id/activate')
+  @RequirePermission('agency.contracts.templates.manage.admin')
   activateTemplate(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('id') id: string,
@@ -179,6 +201,8 @@ export class ContractsController {
   }
 
   @Post('templates/:id/archive')
+  @DangerousAction()
+  @RequirePermission('agency.contracts.archive.admin')
   archiveTemplate(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('id') id: string,
@@ -189,7 +213,21 @@ export class ContractsController {
     );
   }
 
+  @Delete('templates/:id')
+  @DangerousAction()
+  @RequirePermission('agency.contracts.templates.manage.admin')
+  deleteTemplate(
+    @Headers() headers: Record<string, string | string[] | undefined>,
+    @Param('id') id: string,
+  ) {
+    return this.contractsService.deleteTemplate(
+      getContextFromHeaders(headers),
+      id,
+    );
+  }
+
   @Get('templates/:id')
+  @RequirePermission('agency.contracts.templates.manage.admin')
   findTemplate(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('id') id: string,
@@ -198,6 +236,7 @@ export class ContractsController {
   }
 
   @Patch('templates/:id')
+  @RequirePermission('agency.contracts.templates.manage.admin')
   updateTemplate(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('id') id: string,
@@ -213,11 +252,13 @@ export class ContractsController {
   // ─── Signature providers (must come before /:id routes) ─────────────────────
 
   @Get('signature-providers')
+  @RequirePermission('agency.contracts.integrations.manage.owner_only')
   listSignatureProviders() {
     return [{ provider: 'autentique', label: 'Autentique' }];
   }
 
   @Get('signature-providers/autentique')
+  @RequirePermission('agency.contracts.integrations.manage.owner_only')
   getAutentiqueSettings(
     @Headers() headers: Record<string, string | string[] | undefined>,
   ) {
@@ -228,6 +269,7 @@ export class ContractsController {
   }
 
   @Put('signature-providers/autentique')
+  @RequirePermission('agency.contracts.integrations.manage.owner_only')
   updateAutentiqueSettings(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Body() dto: UpdateSignatureProviderSettingsDto,
@@ -240,6 +282,7 @@ export class ContractsController {
   }
 
   @Post('signature-providers/autentique/test')
+  @RequirePermission('agency.contracts.integrations.manage.owner_only')
   testAutentiqueSettings(
     @Headers() headers: Record<string, string | string[] | undefined>,
   ) {
@@ -252,6 +295,7 @@ export class ContractsController {
   // ─── Contract records ────────────────────────────────────────────────────────
 
   @Post('from-template')
+  @RequirePermission('agency.contracts.create.from_template')
   createContractFromTemplate(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Body() dto: CreateContractFromTemplateDto,
@@ -263,6 +307,7 @@ export class ContractsController {
   }
 
   @Get()
+  @RequirePermission('agency.contracts.view.assigned')
   listContracts(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Query() query: ListContractsQueryDto,
@@ -274,6 +319,7 @@ export class ContractsController {
   }
 
   @Post()
+  @RequirePermission('agency.contracts.create.from_template')
   createContract(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Body() dto: CreateContractRecordDto,
@@ -285,6 +331,7 @@ export class ContractsController {
   }
 
   @Get(':id/events')
+  @RequirePermission('agency.contracts.view.assigned')
   listEvents(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('id') id: string,
@@ -293,6 +340,7 @@ export class ContractsController {
   }
 
   @Post(':id/generate-html')
+  @RequirePermission('agency.contracts.view.assigned')
   generateContractHtml(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('id') id: string,
@@ -306,6 +354,7 @@ export class ContractsController {
   }
 
   @Post(':id/generate-pdf')
+  @RequirePermission('agency.contracts.view.assigned')
   generateContractPdf(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('id') id: string,
@@ -319,6 +368,7 @@ export class ContractsController {
   }
 
   @Post(':id/prepare-signature')
+  @RequirePermission('agency.contracts.send_signature.manager_or_admin')
   prepareContractSignature(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('id') id: string,
@@ -332,6 +382,7 @@ export class ContractsController {
   }
 
   @Post(':id/send-signature')
+  @RequirePermission('agency.contracts.send_signature.manager_or_admin')
   sendContractToSignatureProvider(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('id') id: string,
@@ -345,6 +396,7 @@ export class ContractsController {
   }
 
   @Post(':id/mark-manually-signed')
+  @RequirePermission('agency.contracts.send_signature.manager_or_admin')
   markManuallySigned(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('id') id: string,
@@ -357,7 +409,22 @@ export class ContractsController {
     );
   }
 
+  @Post(':id/upload-manually-signed')
+  @RequirePermission('agency.contracts.send_signature.manager_or_admin')
+  uploadManuallySignedContract(
+    @Headers() headers: Record<string, string | string[] | undefined>,
+    @Param('id') id: string,
+    @Body() dto: UploadManuallySignedContractDto,
+  ) {
+    return this.contractsService.uploadManuallySignedContract(
+      getContextFromHeaders(headers),
+      id,
+      dto,
+    );
+  }
+
   @Post(':id/parties')
+  @RequirePermission('agency.contracts.create.from_template')
   addParty(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('id') id: string,
@@ -371,6 +438,7 @@ export class ContractsController {
   }
 
   @Patch(':id/parties/:partyId')
+  @RequirePermission('agency.contracts.create.from_template')
   updateParty(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('id') id: string,
@@ -386,6 +454,8 @@ export class ContractsController {
   }
 
   @Delete(':id/parties/:partyId')
+  @DangerousAction()
+  @RequirePermission('agency.contracts.archive.admin')
   removeParty(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('id') id: string,
@@ -399,6 +469,7 @@ export class ContractsController {
   }
 
   @Get(':id')
+  @RequirePermission('agency.contracts.view.assigned')
   findContract(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('id') id: string,
@@ -407,6 +478,7 @@ export class ContractsController {
   }
 
   @Patch(':id')
+  @RequirePermission('agency.contracts.create.from_template')
   updateContract(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('id') id: string,
@@ -420,6 +492,8 @@ export class ContractsController {
   }
 
   @Post(':id/cancel')
+  @DangerousAction()
+  @RequirePermission('agency.contracts.delete.owner_only')
   cancelContract(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('id') id: string,

@@ -1,10 +1,12 @@
 import {
   BadRequestException,
   Injectable,
+  Logger,
   NotFoundException,
+  OnModuleInit,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { IsNull, LessThanOrEqual, MoreThanOrEqual, Repository } from 'typeorm';
+import { Brackets, IsNull, MoreThan, Repository } from 'typeorm';
 import { CalendarEvent } from './entities/calendar-event.entity';
 import { CalendarRoutineBlock } from './entities/calendar-routine-block.entity';
 import { CreateCalendarEventDto } from './dto/create-calendar-event.dto';
@@ -14,17 +16,45 @@ import { UpdateCalendarRoutineBlockDto } from './dto/update-calendar-routine-blo
 import { CalendarSettings } from './entities/calendar-settings.entity';
 import { UpdateCalendarSettingsDto } from './dto/update-calendar-settings.dto';
 import { CalendarNotificationPublisher } from './calendar-notification.publisher';
+import { EmailService } from '../email/email.service';
 
 type CalendarContext = {
   tenantId: string;
   workspaceId?: string | null;
   userId?: string | null;
+  role?: string | null;
 };
 
 const AGENCY_CONNECTION = 'agency';
+const MAX_TIMER_DELAY_MS = 2_147_483_647;
+
+type CalendarReminderChannel = 'in_app' | 'email' | 'whatsapp';
+
+type CalendarReminderConfig = {
+  enabled: boolean;
+  offsetMinutes: number;
+  channels: CalendarReminderChannel[];
+};
+
+function normalizeRole(role?: string | null): string {
+  if (role === 'owner') return 'owner';
+  if (role === 'admin' || role === 'administrator') return 'admin';
+  if (role === 'manager') return 'manager';
+  return 'member';
+}
+
+function isElevatedRole(role?: string | null): boolean {
+  return ['owner', 'admin'].includes(normalizeRole(role));
+}
 
 @Injectable()
-export class CalendarService {
+export class CalendarService implements OnModuleInit {
+  private readonly logger = new Logger(CalendarService.name);
+  private readonly reminderTimers = new Map<
+    string,
+    ReturnType<typeof setTimeout>[]
+  >();
+
   constructor(
     @InjectRepository(CalendarEvent, AGENCY_CONNECTION)
     private readonly eventsRepository: Repository<CalendarEvent>,
@@ -33,31 +63,79 @@ export class CalendarService {
     @InjectRepository(CalendarSettings, AGENCY_CONNECTION)
     private readonly settingsRepository: Repository<CalendarSettings>,
     private readonly calendarNotificationPublisher: CalendarNotificationPublisher,
+    private readonly emailService: EmailService,
   ) {}
+
+  onModuleInit() {
+    void this.schedulePersistedCalendarReminders();
+  }
 
   async listEvents(
     context: CalendarContext,
     filters: { startsAt?: string; endsAt?: string },
   ) {
-    const where: any = {
-      tenantId: context.tenantId,
-      workspaceId: this.workspaceWhere(context.workspaceId),
-    };
+    const qb = this.eventsRepository
+      .createQueryBuilder('event')
+      .where('event.tenant_id = :tenantId', { tenantId: context.tenantId });
 
-    if (filters.startsAt && filters.endsAt) {
-      where.startsAt = LessThanOrEqual(new Date(filters.endsAt));
-      where.endsAt = MoreThanOrEqual(new Date(filters.startsAt));
+    if (context.workspaceId) {
+      qb.andWhere('event.workspace_id = :workspaceId', {
+        workspaceId: context.workspaceId,
+      });
+    } else {
+      qb.andWhere('event.workspace_id IS NULL');
     }
 
-    return this.eventsRepository.find({
-      where,
-      order: { startsAt: 'ASC' },
-    });
+    if (filters.startsAt && filters.endsAt) {
+      qb.andWhere('event.starts_at <= :endsAt', {
+        endsAt: new Date(filters.endsAt),
+      }).andWhere('event.ends_at >= :startsAt', {
+        startsAt: new Date(filters.startsAt),
+      });
+    }
+
+    this.applyEventCollectionScope(qb, context);
+
+    return qb.orderBy('event.starts_at', 'ASC').getMany();
+  }
+
+  private applyEventCollectionScope(
+    qb: ReturnType<Repository<CalendarEvent>['createQueryBuilder']>,
+    context: CalendarContext,
+  ) {
+    if (isElevatedRole(context.role)) {
+      return;
+    }
+
+    if (!context.userId) {
+      qb.andWhere('1 = 0');
+      return;
+    }
+
+    // TODO(permissions-sprint-9): include event participants when the calendar
+    // module gets a persisted attendee/participant table.
+    // TODO(permissions-sprint-9): expand manager department scope once calendar
+    // events expose explicit department ownership metadata.
+    qb.andWhere(
+      new Brackets((scopeQb) => {
+        scopeQb
+          .where('event.owner_user_id = :scopeUserId', {
+            scopeUserId: context.userId,
+          })
+          .orWhere('event.created_by_user_id = :scopeUserId', {
+            scopeUserId: context.userId,
+          });
+      }),
+    );
   }
 
   async createEvent(context: CalendarContext, dto: CreateCalendarEventDto) {
     const startsAt = new Date(dto.startsAt);
     const endsAt = new Date(dto.endsAt);
+
+    if (startsAt.getTime() < Date.now()) {
+      throw new BadRequestException('startsAt must not be in the past');
+    }
 
     if (endsAt <= startsAt) {
       throw new BadRequestException('endsAt must be after startsAt');
@@ -82,7 +160,12 @@ export class CalendarService {
       metadata: dto.metadata ?? {},
     });
 
-    return this.eventsRepository.save(event);
+    const saved = await this.eventsRepository.save(event);
+
+    await this.createWeeklyOccurrences(saved);
+    this.scheduleCalendarReminder(saved);
+
+    return saved;
   }
 
   async updateEvent(
@@ -95,6 +178,10 @@ export class CalendarService {
 
     const startsAt = dto.startsAt ? new Date(dto.startsAt) : event.startsAt;
     const endsAt = dto.endsAt ? new Date(dto.endsAt) : event.endsAt;
+
+    if (dto.startsAt && startsAt.getTime() < Date.now()) {
+      throw new BadRequestException('startsAt must not be in the past');
+    }
 
     if (endsAt <= startsAt) {
       throw new BadRequestException('endsAt must be after startsAt');
@@ -119,6 +206,8 @@ export class CalendarService {
     const saved = await this.eventsRepository.save(event);
 
     await this.publishCalendarUpdateNotifications(context, saved, previous);
+    await this.createWeeklyOccurrences(saved);
+    this.scheduleCalendarReminder(saved, previous);
 
     return saved;
   }
@@ -127,6 +216,7 @@ export class CalendarService {
     const event = await this.findEventOrFail(context, eventId);
     const previous = this.snapshotEvent(event);
     await this.eventsRepository.softRemove(event);
+    this.clearReminderTimers(event.id);
 
     // Soft removal is surfaced as a calendar cancellation notification.
     await this.publishCalendarCanceledNotification(
@@ -414,10 +504,7 @@ export class CalendarService {
      * ownerUserId is the responsible organizer, not an invited participant.
      */
 
-    if (
-      previous.status !== 'canceled' &&
-      event.status === 'canceled'
-    ) {
+    if (previous.status !== 'canceled' && event.status === 'canceled') {
       await this.publishCalendarCanceledNotification(
         context,
         event,
@@ -514,6 +601,349 @@ export class CalendarService {
       JSON.stringify(previous.metadata ?? {}) !==
         JSON.stringify(event.metadata ?? {})
     );
+  }
+
+  private async createWeeklyOccurrences(event: CalendarEvent) {
+    const metadata = event.metadata ?? {};
+    const recurrence = this.metadataRecord(metadata, 'recurrence');
+
+    if (
+      recurrence.frequency !== 'weekly' ||
+      metadata.recurringSeriesId ||
+      metadata.recurrenceGeneratedAt
+    ) {
+      return;
+    }
+
+    const occurrenceCount = this.normalizeOccurrenceCount(
+      recurrence.generatedOccurrences,
+    );
+    const durationMs = event.endsAt.getTime() - event.startsAt.getTime();
+    const occurrenceSaves: Promise<CalendarEvent>[] = [];
+
+    for (let index = 1; index <= occurrenceCount; index += 1) {
+      const startsAt = new Date(event.startsAt);
+      startsAt.setDate(startsAt.getDate() + 7 * index);
+      const endsAt = new Date(startsAt.getTime() + durationMs);
+
+      const occurrence = this.eventsRepository.create({
+        tenantId: event.tenantId,
+        workspaceId: event.workspaceId ?? null,
+        title: event.title,
+        description: event.description,
+        eventType: event.eventType,
+        visibility: event.visibility,
+        startsAt,
+        endsAt,
+        allDay: event.allDay,
+        ownerUserId: event.ownerUserId,
+        createdByUserId: event.createdByUserId,
+        clientId: event.clientId,
+        projectId: event.projectId,
+        taskId: event.taskId,
+        salesOpportunityId: event.salesOpportunityId,
+        metadata: {
+          ...metadata,
+          recurringSeriesId: event.id,
+          recurrence: {
+            ...recurrence,
+            sourceEventId: event.id,
+            occurrenceIndex: index,
+          },
+        },
+      });
+
+      occurrenceSaves.push(this.eventsRepository.save(occurrence));
+    }
+
+    const occurrences = await Promise.all(occurrenceSaves);
+    for (const occurrence of occurrences) {
+      this.scheduleCalendarReminder(occurrence);
+    }
+
+    event.metadata = {
+      ...metadata,
+      recurrenceGeneratedAt: new Date().toISOString(),
+      recurrenceGeneratedOccurrences: occurrenceCount,
+    };
+    await this.eventsRepository.save(event);
+  }
+
+  private normalizeOccurrenceCount(value: unknown) {
+    if (typeof value !== 'number' || !Number.isFinite(value)) {
+      return 52;
+    }
+
+    return Math.min(Math.max(Math.round(value), 1), 52);
+  }
+
+  private scheduleCalendarReminder(
+    event: CalendarEvent,
+    previous?: CalendarEventSnapshot,
+  ) {
+    if (previous && !this.shouldRescheduleReminder(event, previous)) {
+      return;
+    }
+
+    this.clearReminderTimers(event.id);
+
+    const config = this.getCalendarReminderConfig(event);
+    if (!config?.enabled || config.channels.length === 0) {
+      return;
+    }
+
+    const reminderAt = new Date(
+      event.startsAt.getTime() - config.offsetMinutes * 60_000,
+    );
+
+    if (event.startsAt.getTime() < Date.now()) {
+      return;
+    }
+
+    const run = () => {
+      void this.dispatchCalendarReminder(event, config, reminderAt).catch(
+        (error) => {
+          this.logger.warn(
+            `Failed to dispatch calendar reminder for event ${event.id}: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+        },
+      );
+    };
+
+    if (reminderAt.getTime() <= Date.now()) {
+      run();
+      return;
+    }
+
+    this.registerReminderTimer(event.id, reminderAt, run);
+  }
+
+  private async schedulePersistedCalendarReminders() {
+    try {
+      const events = await this.eventsRepository.find({
+        where: {
+          startsAt: MoreThan(new Date()),
+        } as any,
+        order: {
+          startsAt: 'ASC',
+        },
+      });
+
+      for (const event of events) {
+        this.scheduleCalendarReminder(event);
+      }
+    } catch (error) {
+      this.logger.warn(
+        `Failed to schedule persisted calendar reminders: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+  }
+
+  private registerReminderTimer(
+    eventId: string,
+    targetAt: Date,
+    callback: () => void,
+  ) {
+    const delay = targetAt.getTime() - Date.now();
+
+    const timer = setTimeout(
+      () => {
+        const remaining = targetAt.getTime() - Date.now();
+        if (remaining > 0) {
+          this.registerReminderTimer(eventId, targetAt, callback);
+          return;
+        }
+
+        callback();
+      },
+      Math.min(Math.max(delay, 0), MAX_TIMER_DELAY_MS),
+    );
+
+    const timers = this.reminderTimers.get(eventId) ?? [];
+    timers.push(timer);
+    this.reminderTimers.set(eventId, timers);
+  }
+
+  private clearReminderTimers(eventId: string) {
+    const timers = this.reminderTimers.get(eventId) ?? [];
+    for (const timer of timers) {
+      clearTimeout(timer);
+    }
+    this.reminderTimers.delete(eventId);
+  }
+
+  private async dispatchCalendarReminder(
+    event: CalendarEvent,
+    config: CalendarReminderConfig,
+    reminderAt: Date,
+  ) {
+    this.clearReminderTimers(event.id);
+
+    if (config.channels.includes('in_app')) {
+      await this.calendarNotificationPublisher.publishEventReminder({
+        event,
+        actorUserId: null,
+        recipientUserIds: [event.ownerUserId, event.createdByUserId],
+        offsetMinutes: config.offsetMinutes,
+        reminderAt,
+      });
+    }
+
+    if (config.channels.includes('email')) {
+      await this.sendCalendarReminderEmails(event);
+    }
+  }
+
+  private async sendCalendarReminderEmails(event: CalendarEvent) {
+    const metadata = event.metadata ?? {};
+    const participantEmails = this.metadataStringList(
+      metadata,
+      'participantEmails',
+    );
+
+    if (participantEmails.length === 0) {
+      return;
+    }
+
+    const meetingUrl = this.metadataString(metadata, 'meetingUrl');
+
+    const results = await Promise.allSettled(
+      participantEmails.map((email) =>
+        this.emailService.sendCalendarReminderEmail({
+          to: email,
+          eventTitle: event.title,
+          startsAt: event.startsAt,
+          endsAt: event.endsAt,
+          description: event.description,
+          meetingUrl: meetingUrl || null,
+        }),
+      ),
+    );
+
+    const failed = results.filter((result) => result.status === 'rejected');
+    if (failed.length > 0) {
+      this.logger.warn(
+        `Failed to send ${failed.length} calendar reminder email(s) for event ${event.id}`,
+      );
+    }
+  }
+
+  private shouldRescheduleReminder(
+    event: CalendarEvent,
+    previous: CalendarEventSnapshot,
+  ) {
+    const metadata = event.metadata ?? {};
+    const previousMetadata = previous.metadata ?? {};
+
+    return (
+      JSON.stringify(previousMetadata.calendarReminder ?? {}) !==
+        JSON.stringify(metadata.calendarReminder ?? {}) ||
+      this.metadataString(previousMetadata, 'meetingReminder') !==
+        this.metadataString(metadata, 'meetingReminder') ||
+      this.metadataString(previousMetadata, 'meetingUrl') !==
+        this.metadataString(metadata, 'meetingUrl') ||
+      this.metadataStringList(previousMetadata, 'participantEmails').join(
+        ',',
+      ) !== this.metadataStringList(metadata, 'participantEmails').join(',') ||
+      previous.title !== event.title ||
+      previous.description !== event.description ||
+      previous.startsAt.getTime() !== event.startsAt.getTime() ||
+      previous.endsAt.getTime() !== event.endsAt.getTime()
+    );
+  }
+
+  private getCalendarReminderConfig(
+    event: CalendarEvent,
+  ): CalendarReminderConfig | null {
+    const metadata = event.metadata ?? {};
+    const reminder = this.metadataRecord(metadata, 'calendarReminder');
+    const legacyMeetingReminder = this.metadataString(
+      metadata,
+      'meetingReminder',
+    );
+
+    if (reminder.enabled === false) {
+      return null;
+    }
+
+    const explicitEnabled = reminder.enabled === true;
+    const legacyEnabled =
+      legacyMeetingReminder === 'email' ||
+      legacyMeetingReminder === 'email_with_link';
+
+    if (!explicitEnabled && !legacyEnabled) {
+      return null;
+    }
+
+    const offsetMinutes =
+      typeof reminder.offsetMinutes === 'number' &&
+      Number.isFinite(reminder.offsetMinutes) &&
+      reminder.offsetMinutes > 0
+        ? Math.round(reminder.offsetMinutes)
+        : 60;
+    const channels = this.metadataChannelList(reminder.channels);
+
+    if (legacyEnabled && !channels.includes('email')) {
+      channels.push('email');
+    }
+
+    return {
+      enabled: true,
+      offsetMinutes,
+      channels: channels.length > 0 ? channels : ['in_app'],
+    };
+  }
+
+  private metadataRecord(metadata: Record<string, unknown>, key: string) {
+    const value = metadata[key];
+    return value && typeof value === 'object' && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {};
+  }
+
+  private metadataChannelList(value: unknown): CalendarReminderChannel[] {
+    if (!Array.isArray(value)) {
+      return [];
+    }
+
+    const allowed = new Set<CalendarReminderChannel>([
+      'in_app',
+      'email',
+      'whatsapp',
+    ]);
+    const unique = new Set<CalendarReminderChannel>();
+
+    for (const item of value) {
+      if (typeof item !== 'string') continue;
+      if (!allowed.has(item as CalendarReminderChannel)) continue;
+      unique.add(item as CalendarReminderChannel);
+    }
+
+    return [...unique];
+  }
+
+  private metadataString(metadata: Record<string, unknown>, key: string) {
+    const value = metadata[key];
+    return typeof value === 'string' ? value.trim() : '';
+  }
+
+  private metadataStringList(metadata: Record<string, unknown>, key: string) {
+    const value = metadata[key];
+    const items = Array.isArray(value) ? value : [];
+    const unique = new Set<string>();
+
+    for (const item of items) {
+      if (typeof item !== 'string') continue;
+      const email = item.trim().toLowerCase();
+      if (!email || !email.includes('@')) continue;
+      unique.add(email);
+    }
+
+    return [...unique];
   }
 }
 

@@ -8,6 +8,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Between, In, Not, Repository } from 'typeorm';
 import {
   TeamAttendanceEntry,
+  TeamConfigOption,
   TeamMember,
   TeamPayment,
   TeamPaymentBatch,
@@ -20,6 +21,7 @@ import {
   CreateTeamPaymentItemDto,
   GenerateTeamPaymentsDto,
   ListTeamPaymentsQueryDto,
+  MarkTeamPaymentPaidDto,
   UpdateTeamPaymentDto,
   UpdateTeamPaymentItemDto,
 } from '../dto';
@@ -41,6 +43,7 @@ import {
 } from '../../finance/enums';
 import type { FinanceRequestContext } from '../../finance/services/finance-context';
 import { DocumentPdfRendererService } from '../../document-layouts/document-pdf-renderer.service';
+import { AgencyContactsService } from '../../agency/agency-contacts.service';
 
 type RequestContext = {
   tenantId: string;
@@ -50,6 +53,18 @@ type RequestContext = {
 
 const AGENCY_CONNECTION = 'agency';
 
+const WORKER_TYPE_NAME_ALIASES: Record<string, string[]> = {
+  employee_full_time: ['employee_full_time', 'funcionario integral', 'full time'],
+  employee_part_time: ['employee_part_time', 'funcionario parcial', 'meio periodo', 'part time'],
+  contractor: ['contractor', 'prestador', 'contratado'],
+  freelancer: ['freelancer', 'autonomo'],
+  mei_contractor: ['mei_contractor', 'mei'],
+  vendor: ['vendor', 'fornecedor'],
+  intern: ['intern', 'estagiario'],
+  partner: ['partner', 'socio', 'parceiro'],
+  external_collaborator: ['external_collaborator', 'colaborador externo'],
+};
+
 function money(value: unknown): string {
   const number = Number(value ?? 0);
   return Number.isFinite(number) ? number.toFixed(2) : '0.00';
@@ -58,6 +73,25 @@ function money(value: unknown): string {
 function toNumber(value: unknown): number {
   const number = Number(value ?? 0);
   return Number.isFinite(number) ? number : 0;
+}
+
+function normalizeWorkerTypeName(value: unknown): string {
+  return String(value ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+function matchesWorkerTypeOption(option: TeamConfigOption, workerType: string): boolean {
+  const configuredKey = option.metadata?.workerType ?? option.metadata?.workerTypeKey;
+  if (configuredKey === workerType) return true;
+
+  const normalizedName = normalizeWorkerTypeName(option.name);
+  return (WORKER_TYPE_NAME_ALIASES[workerType] ?? [workerType])
+    .map(normalizeWorkerTypeName)
+    .includes(normalizedName);
 }
 
 function isCheckIn(type: unknown) {
@@ -99,8 +133,12 @@ export class TeamPaymentsService {
     @InjectRepository(TeamAttendanceEntry, AGENCY_CONNECTION)
     private readonly attendanceRepository: Repository<TeamAttendanceEntry>,
 
+    @InjectRepository(TeamConfigOption, AGENCY_CONNECTION)
+    private readonly configOptionRepository: Repository<TeamConfigOption>,
+
     private readonly financeBillingService: FinanceBillingService,
     private readonly pdfRendererService: DocumentPdfRendererService,
+    private readonly agencyContactsService: AgencyContactsService,
   ) {}
 
   listBatches(ctx: RequestContext) {
@@ -268,6 +306,16 @@ export class TeamPaymentsService {
 
     const saved = await this.paymentRepository.save(payment);
 
+    const financeRule = await this.findFinanceRule(ctx, saved.member?.workerType);
+    if (financeRule?.metadata?.createPayable === false) {
+      saved.metadata = {
+        ...(saved.metadata ?? {}),
+        financeSettingId: financeRule.id,
+        financeIntegrationSkipped: true,
+      };
+      return this.paymentRepository.save(saved);
+    }
+
     try {
       const bill = await this.createFinanceBillForPayment(ctx, saved);
       saved.financeBillId = bill.id;
@@ -291,57 +339,140 @@ export class TeamPaymentsService {
     }
   }
 
-  async markPaid(ctx: RequestContext, id: string) {
+  async markPaid(ctx: RequestContext, id: string, dto: MarkTeamPaymentPaidDto = {}) {
     const payment = await this.getPayment(ctx, id);
 
-    payment.status = TeamPaymentStatus.Paid;
-    payment.paidAt = new Date();
-    payment.metadata = {
-      ...(payment.metadata ?? {}),
-      paidManuallyAt: new Date().toISOString(),
-      paidManuallyById: ctx.userId || null,
-    };
+    if (![TeamPaymentStatus.Confirmed, TeamPaymentStatus.PaymentPending].includes(payment.status)) {
+      throw new BadRequestException('Apenas pagamentos confirmados ou pendentes podem ser pagos.');
+    }
 
-    const saved = await this.paymentRepository.save(payment);
+    const today = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/Sao_Paulo',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(new Date());
+    const paymentDate = dto.paymentDate ?? today;
+    if (paymentDate > today) {
+      throw new BadRequestException('A data do pagamento não pode ser posterior à data atual.');
+    }
 
-    if (saved.financeBillId && !saved.financePaymentId) {
+    const requestedAmount = dto.amount === undefined
+      ? toNumber(payment.netAmount)
+      : toNumber(dto.amount);
+    if (requestedAmount <= 0) {
+      throw new BadRequestException('O valor do pagamento deve ser maior que zero.');
+    }
+
+    if (payment.financeBillId) {
       try {
         const financeCtx = toFinanceCtx(ctx);
+        const contactId = await this.ensureMemberContact(ctx, payment.member);
+        const billBefore = await this.financeBillingService.getBill(financeCtx, payment.financeBillId);
+        if (contactId && billBefore.vendorId !== contactId) {
+          await this.financeBillingService.updateBill(financeCtx, payment.financeBillId, { vendorId: contactId });
+        }
+        const balanceDue = toNumber(billBefore.balanceDue);
+        if (requestedAmount > balanceDue + 0.005) {
+          throw new BadRequestException('O valor do pagamento não pode superar o saldo devedor.');
+        }
+
         const financePayment = await this.financeBillingService.createPayment(financeCtx, {
           direction: FinancePaymentDirection.Vendor,
           status: FinancePaymentStatus.Completed,
           method: FinancePaymentMethod.Manual,
-          paymentDate: new Date().toISOString().slice(0, 10),
-          amount: money(toNumber(saved.netAmount)),
-          currency: saved.currency ?? 'BRL',
-          description: `Pagamento equipe - ${saved.member?.displayName ?? saved.memberId} - ${saved.competenceStart}`,
+          paymentDate,
+          amount: money(requestedAmount),
+          currency: payment.currency ?? 'BRL',
+          bankAccountId: dto.bankAccountId ?? null,
+          contactId,
+          description: dto.description?.trim() || `Pagamento equipe - ${payment.member?.displayName ?? payment.memberId} - ${payment.competenceStart}`,
         });
 
         await this.financeBillingService.allocatePayment(financeCtx, financePayment.id, {
           targetType: FinanceAllocationTargetType.Bill,
-          targetId: saved.financeBillId,
-          amount: money(toNumber(saved.netAmount)),
+          targetId: payment.financeBillId,
+          amount: money(requestedAmount),
         });
 
-        saved.financePaymentId = financePayment.id;
-        saved.metadata = {
-          ...(saved.metadata ?? {}),
+        const billAfter = await this.financeBillingService.getBill(financeCtx, payment.financeBillId);
+        const isFullyPaid = billAfter.status === FinanceBillStatus.Paid || toNumber(billAfter.balanceDue) <= 0.005;
+        const previousIds = Array.isArray(payment.metadata?.financePaymentIds)
+          ? payment.metadata.financePaymentIds.filter((value): value is string => typeof value === 'string')
+          : payment.financePaymentId ? [payment.financePaymentId] : [];
+
+        payment.financePaymentId = financePayment.id;
+        payment.status = isFullyPaid ? TeamPaymentStatus.Paid : TeamPaymentStatus.PaymentPending;
+        payment.paidAt = isFullyPaid ? new Date(`${paymentDate}T12:00:00.000Z`) : null;
+        payment.metadata = {
+          ...(payment.metadata ?? {}),
+          financePaymentIds: [...new Set([...previousIds, financePayment.id])],
           financePaymentCreatedAt: new Date().toISOString(),
+          financePaymentPending: !isFullyPaid,
+          paidManuallyAt: isFullyPaid ? new Date().toISOString() : null,
+          paidManuallyById: ctx.userId || null,
         };
-        return this.paymentRepository.save(saved);
+        return this.paymentRepository.save(payment);
       } catch (error) {
+        if (error instanceof BadRequestException) throw error;
         const msg = error instanceof Error ? error.message : String(error);
         this.logger.warn(`Finance payment creation failed for payment ${id}: ${msg}`);
-        saved.metadata = {
-          ...(saved.metadata ?? {}),
+        payment.metadata = {
+          ...(payment.metadata ?? {}),
           financePaymentPending: true,
           financePaymentError: msg,
         };
-        return this.paymentRepository.save(saved);
+        return this.paymentRepository.save(payment);
       }
     }
 
-    return saved;
+    if (requestedAmount + 0.005 < toNumber(payment.netAmount)) {
+      throw new BadRequestException('Pagamentos parciais exigem uma conta a pagar vinculada no Finance.');
+    }
+    payment.status = TeamPaymentStatus.Paid;
+    payment.paidAt = new Date(`${paymentDate}T12:00:00.000Z`);
+    payment.metadata = {
+      ...(payment.metadata ?? {}),
+      paidManuallyAt: new Date().toISOString(),
+      paidManuallyById: ctx.userId || null,
+      manualPaymentAmount: money(requestedAmount),
+      manualPaymentDescription: dto.description?.trim() || null,
+    };
+    return this.paymentRepository.save(payment);
+  }
+
+  async revertPayment(ctx: RequestContext, id: string) {
+    const payment = await this.getPayment(ctx, id);
+
+    if (payment.status !== TeamPaymentStatus.Paid) {
+      throw new BadRequestException('Apenas pagamentos pagos podem voltar para provisório.');
+    }
+
+    if (payment.financePaymentId) {
+      const paymentIds = Array.isArray(payment.metadata?.financePaymentIds)
+        ? payment.metadata.financePaymentIds.filter((value): value is string => typeof value === 'string')
+        : [payment.financePaymentId];
+      await Promise.all(
+        [...new Set(paymentIds)].map((financePaymentId) =>
+          this.financeBillingService.updatePayment(
+            toFinanceCtx(ctx),
+            financePaymentId,
+            { status: FinancePaymentStatus.Pending },
+          ),
+        ),
+      );
+    }
+
+    payment.status = TeamPaymentStatus.PaymentPending;
+    payment.paidAt = null;
+    payment.metadata = {
+      ...(payment.metadata ?? {}),
+      paymentRevertedAt: new Date().toISOString(),
+      paymentRevertedById: ctx.userId || null,
+      financePaymentPending: Boolean(payment.financePaymentId),
+    };
+
+    return this.paymentRepository.save(payment);
   }
 
   async cancelPayment(ctx: RequestContext, id: string) {
@@ -501,6 +632,67 @@ export class TeamPaymentsService {
   ) {
     const payment = await this.getPayment(ctx, paymentId);
 
+    const benefits = (payment.items ?? []).filter(
+      (item) => item.type === TeamPaymentItemType.Benefit && toNumber(item.amount) > 0,
+    );
+    if (dto.type === TeamPaymentDocumentType.BenefitsDeclaration && benefits.length === 0) {
+      throw new BadRequestException(
+        'Não é possível emitir a declaração: este pagamento não possui benefícios.',
+      );
+    }
+
+    if (
+      dto.type === TeamPaymentDocumentType.Payslip &&
+      !(await this.isEmployeeWorkerType(ctx, payment.member?.workerType ?? ''))
+    ) {
+      throw new BadRequestException(
+        'Holerite disponível somente para vínculos marcados como funcionário.',
+      );
+    }
+
+    const requestedTemplateId =
+      typeof dto.metadata?.templateId === 'string' ? dto.metadata.templateId : null;
+    const template = requestedTemplateId
+      ? await this.configOptionRepository.findOne({
+          where: {
+            id: requestedTemplateId,
+            tenantId: ctx.tenantId,
+            workspaceId: ctx.workspaceId,
+            type: 'payment_document_template',
+            status: 'active',
+          },
+        })
+      : null;
+    if (requestedTemplateId && !template) {
+      throw new BadRequestException('Modelo de documento inválido ou inativo.');
+    }
+
+    if (template) {
+      const templateDocumentType = String(template.metadata?.documentType ?? '');
+      const expectedType =
+        templateDocumentType === 'payslip'
+          ? TeamPaymentDocumentType.Payslip
+          : templateDocumentType === 'benefit_acknowledgment'
+            ? TeamPaymentDocumentType.BenefitsDeclaration
+            : templateDocumentType === 'payment_statement'
+              ? TeamPaymentDocumentType.Statement
+              : null;
+      if (expectedType !== dto.type) {
+        throw new BadRequestException('O modelo selecionado não corresponde ao tipo de documento.');
+      }
+
+      const relationships = template.metadata?.applicableRelationshipTypes;
+      if (
+        Array.isArray(relationships) &&
+        relationships.length > 0 &&
+        !relationships.includes(payment.member?.workerType)
+      ) {
+        throw new BadRequestException('O modelo selecionado não se aplica a este vínculo.');
+      }
+    }
+
+    const htmlContent = dto.htmlContent ?? this.renderConfiguredPaymentDocument(payment, dto.type, template, dto.metadata);
+
     return this.documentRepository.save(
       this.documentRepository.create({
         tenantId: ctx.tenantId,
@@ -508,13 +700,36 @@ export class TeamPaymentsService {
         paymentId: payment.id,
         type: dto.type,
         title: dto.title,
-        htmlContent: dto.htmlContent ?? this.renderPaymentStatement(payment),
+        htmlContent,
         pdfFileKey: dto.pdfFileKey ?? null,
         status: dto.status ?? 'generated',
         generatedAt: new Date(),
-        metadata: dto.metadata ?? {},
+        metadata: {
+          ...(dto.metadata ?? {}),
+          templateId: template?.id ?? requestedTemplateId,
+          systemKey: template?.metadata?.systemKey ?? null,
+          signatureRequired: template?.metadata?.signatureRequired ?? true,
+        },
       }),
     );
+  }
+
+  private async isEmployeeWorkerType(ctx: RequestContext, workerType: string): Promise<boolean> {
+    const configuredTypes = await this.configOptionRepository.find({
+      where: {
+        tenantId: ctx.tenantId,
+        workspaceId: ctx.workspaceId,
+        type: 'worker_type',
+        status: 'active',
+      },
+    });
+    const configuredType = configuredTypes.find((option) =>
+      matchesWorkerTypeOption(option, workerType),
+    );
+
+    return typeof configuredType?.metadata?.isEmployee === 'boolean'
+      ? configuredType.metadata.isEmployee
+      : ['employee_full_time', 'employee_part_time'].includes(workerType);
   }
 
   async deleteDocument(ctx: RequestContext, paymentId: string, documentId: string) {
@@ -582,6 +797,14 @@ export class TeamPaymentsService {
     );
 
     const payments: TeamPayment[] = [];
+    const recurringTemplates = await this.configOptionRepository.find({
+      where: {
+        tenantId: ctx.tenantId,
+        workspaceId: ctx.workspaceId,
+        status: 'active',
+        type: In(['payment_benefit_template', 'payment_discount_template']),
+      },
+    });
 
     for (const member of members) {
       const calculated = await this.calculateMemberPayment(ctx, member, dto);
@@ -634,7 +857,40 @@ export class TeamPaymentsService {
         }),
       );
 
-      payments.push(payment);
+      const configuredItems = recurringTemplates.flatMap((template) => {
+        const metadata = (template.metadata ?? {}) as Record<string, unknown>;
+        const relationships = metadata.applicableRelationshipTypes;
+        if (metadata.recurring !== true) return [];
+        if (Array.isArray(relationships) && relationships.length > 0 && !relationships.includes(member.workerType)) {
+          return [];
+        }
+        const defaultAmount = toNumber(metadata.defaultAmount);
+        const defaultPercentage = toNumber(metadata.defaultPercentage);
+        const amount = defaultAmount > 0
+          ? defaultAmount
+          : defaultPercentage > 0
+            ? (toNumber(calculated.baseAmount) * defaultPercentage) / 100
+            : 0;
+        if (amount <= 0) return [];
+
+        return [this.itemRepository.create({
+          tenantId: ctx.tenantId,
+          workspaceId: ctx.workspaceId,
+          paymentId: payment.id,
+          type: template.type === 'payment_benefit_template'
+            ? TeamPaymentItemType.Benefit
+            : TeamPaymentItemType.Discount,
+          name: template.name,
+          description: template.description,
+          amount: money(amount),
+          quantity: '1.00',
+          unitValue: money(amount),
+          metadata: { templateId: template.id, templateSnapshot: metadata },
+        })];
+      });
+      if (configuredItems.length > 0) await this.itemRepository.save(configuredItems);
+
+      payments.push(await this.recalculatePayment(ctx, payment.id));
     }
 
     return {
@@ -658,11 +914,18 @@ export class TeamPaymentsService {
     let lines: Array<{ description: string; quantity?: string; unitPrice?: string }>;
 
     if (positiveItems.length > 0) {
-      lines = positiveItems.map((item) => ({
-        description: item.name,
-        quantity: '1',
-        unitPrice: money(toNumber(item.amount)),
-      }));
+      lines = [
+        ...positiveItems.map((item) => ({
+          description: item.name,
+          quantity: '1',
+          unitPrice: money(toNumber(item.amount)),
+        })),
+        ...discountItems.map((item) => ({
+          description: `Desconto — ${item.name}`,
+          quantity: '1',
+          unitPrice: money(-toNumber(item.amount)),
+        })),
+      ];
     } else {
       lines = [
         {
@@ -678,22 +941,67 @@ export class TeamPaymentsService {
         ? ` | Descontos: ${discountItems.map((d) => `${d.name} (-${money(toNumber(d.amount))})`).join(', ')}`
         : '';
 
+    const financeRule = await this.findFinanceRule(ctx, payment.member?.workerType);
+    const financeMetadata = (financeRule?.metadata ?? {}) as Record<string, unknown>;
+    const configuredId = (value: unknown) => typeof value === 'string' && value ? value : null;
+
+    const contactId = await this.ensureMemberContact(ctx, payment.member);
+
     return this.financeBillingService.createBill(financeCtx, {
+      vendorId: contactId,
       currency: payment.currency ?? 'BRL',
       dueDate: payment.dueDate ?? null,
       periodStart: payment.competenceStart,
       periodEnd: payment.competenceEnd,
       issueDate: new Date().toISOString().slice(0, 10),
       notes: `${descBase}${discountNote}`,
+      categoryId: configuredId(financeMetadata.defaultCategoryId),
+      costCenterId: configuredId(financeMetadata.defaultCostCenterId),
       metadata: {
         sourceModule: 'team',
         sourceType: 'team_payment',
         sourceId: payment.id,
         memberId: payment.memberId,
         batchId: payment.batchId ?? null,
+        financeSettingId: financeRule?.id ?? null,
       },
       lines,
     });
+  }
+
+  private async findFinanceRule(ctx: RequestContext, workerType?: string | null) {
+    const financeRules = await this.configOptionRepository.find({
+      where: {
+        tenantId: ctx.tenantId,
+        workspaceId: ctx.workspaceId,
+        type: 'payment_finance_setting',
+        status: 'active',
+      },
+    });
+    return financeRules.find((rule) => {
+      const relationships = (rule.metadata ?? {}).relationshipTypes;
+      return Array.isArray(relationships) && relationships.includes(workerType);
+    });
+  }
+
+  private async ensureMemberContact(ctx: RequestContext, member?: TeamMember | null) {
+    if (!member) return null;
+    if (member.contactId) return member.contactId;
+
+    const contact = await this.agencyContactsService.createContact(ctx, {
+      type: 'person',
+      displayName: member.displayName,
+      legalName: member.legalName ?? undefined,
+      jobTitle: member.jobTitle ?? member.roleName ?? undefined,
+      source: 'other',
+      businessMode: 'agency_service',
+      lifecycleStage: 'internal',
+      status: 'active',
+      notes: `Contato criado automaticamente a partir do membro da equipe ${member.id}.`,
+    });
+    member.contactId = contact.id;
+    await this.memberRepository.save(member);
+    return contact.id;
   }
 
   private async calculateMemberPayment(
@@ -835,5 +1143,125 @@ export class TeamPaymentsService {
         <p><strong>Valor líquido:</strong> ${payment.currency} ${payment.netAmount}</p>
       </article>
     `.trim();
+  }
+
+  private renderConfiguredPaymentDocument(
+    payment: TeamPayment,
+    type: TeamPaymentDocumentType,
+    template: TeamConfigOption | null,
+    requestMetadata?: Record<string, unknown>,
+  ) {
+    const templateMetadata = (template?.metadata ?? {}) as Record<string, unknown>;
+    const renderer = String(
+      templateMetadata.templateRenderer ??
+        (type === TeamPaymentDocumentType.Payslip
+          ? 'payslip'
+          : type === TeamPaymentDocumentType.BenefitsDeclaration
+            ? 'benefit_acknowledgment'
+            : type === TeamPaymentDocumentType.Statement
+              ? 'payment_statement'
+              : ''),
+    );
+    const memberMetadata = (payment.member?.metadata ?? {}) as Record<string, unknown>;
+    const agencySnapshot = (requestMetadata?.agencySnapshot ?? {}) as Record<string, unknown>;
+    const items = payment.items ?? [];
+    const benefits = items
+      .filter((item) => item.type === TeamPaymentItemType.Benefit && toNumber(item.amount) > 0)
+      .map((item) => ({ name: item.name, amount: toNumber(item.amount) }));
+    const deductions = items
+      .filter((item) => item.type === TeamPaymentItemType.Discount && toNumber(item.amount) > 0)
+      .map((item) => ({ name: item.name, amount: toNumber(item.amount) }));
+    const earnings = items
+      .filter((item) => [TeamPaymentItemType.Base, TeamPaymentItemType.Overtime, TeamPaymentItemType.Adjustment].includes(item.type) && toNumber(item.amount) !== 0)
+      .map((item) => ({ name: item.name, amount: toNumber(item.amount) }));
+    const locale = String(templateMetadata.countryScope) === 'US' ? 'en-US' : 'pt-BR';
+    const date = (value: string | null | undefined) => {
+      if (!value) return '';
+      const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      return match ? `${match[3]}/${match[2]}/${match[1]}` : value;
+    };
+    const periodLabel = new Intl.DateTimeFormat(locale, { month: 'long', year: 'numeric' }).format(
+      new Date(`${payment.competenceStart}T12:00:00Z`),
+    );
+    const common = {
+      agency: {
+        legalName: String(agencySnapshot.legalName ?? agencySnapshot.tradeName ?? 'Agência'),
+        publicName: String(agencySnapshot.tradeName ?? agencySnapshot.legalName ?? 'Agência'),
+        taxId: String(agencySnapshot.taxId ?? ''),
+        address: String(agencySnapshot.address ?? agencySnapshot.addressLine ?? ''),
+        email: String(agencySnapshot.email ?? agencySnapshot.billingEmail ?? agencySnapshot.supportEmail ?? ''),
+        phone: String(agencySnapshot.phone ?? ''),
+        signerName: String(agencySnapshot.signerName ?? 'Responsável financeiro'),
+        signerRole: String(agencySnapshot.signerRole ?? 'Responsável da agência'),
+      },
+      member: {
+        displayName: payment.member?.displayName ?? payment.memberId,
+        legalName: payment.member?.legalName ?? payment.member?.displayName ?? payment.memberId,
+        document: String(memberMetadata.personalTaxId ?? memberMetadata.document ?? ''),
+        role: payment.member?.jobTitle ?? payment.member?.roleName ?? '',
+        department: String(memberMetadata.departmentName ?? payment.member?.workerType ?? ''),
+      },
+      period: {
+        label: periodLabel,
+        startDate: date(payment.competenceStart),
+        endDate: date(payment.competenceEnd),
+        paymentDate: date(payment.paidAt ? payment.paidAt.toISOString().slice(0, 10) : payment.dueDate),
+      },
+      payment: {
+        currency: payment.currency,
+        baseAmount: toNumber(payment.baseAmount),
+        grossAmount: toNumber(payment.grossAmount),
+        netAmount: toNumber(payment.netAmount),
+        paymentMethod: String(payment.metadata?.paymentMethod ?? 'Transferência bancária'),
+        notes: payment.notes ?? 'Documento informativo. Não substitui cálculo fiscal ou trabalhista oficial.',
+      },
+      benefits,
+      earnings,
+      deductions,
+      signature: {
+        memberName: payment.member?.displayName ?? payment.memberId,
+        memberRole: payment.member?.jobTitle ?? payment.member?.roleName ?? '',
+        agencySignerName: String(agencySnapshot.signerName ?? 'Responsável financeiro'),
+        agencySignerRole: String(agencySnapshot.signerRole ?? 'Responsável da agência'),
+        city: String(agencySnapshot.city ?? ''),
+        date: new Intl.DateTimeFormat(locale).format(new Date()),
+      },
+      document: { name: template?.name ?? 'Documento de pagamento', locale },
+      presentation: {
+        headerPreset: String(templateMetadata.headerPreset ?? 'classic'),
+        footerPreset: String(templateMetadata.footerPreset ?? 'lyra'),
+        showLogo: templateMetadata.showLogo !== false,
+        logoUrl: typeof agencySnapshot.logoUrl === 'string'
+          ? agencySnapshot.logoUrl
+          : typeof agencySnapshot.avatarUrl === 'string'
+            ? agencySnapshot.avatarUrl
+            : null,
+        showCompanyData: templateMetadata.showCompanyData !== false,
+        showDocumentNumber: templateMetadata.showDocumentNumber === true,
+        documentNumber: `PAY-${payment.id.slice(0, 8).toUpperCase()}`,
+        showPoweredByLyra: templateMetadata.showPoweredByLyra !== false,
+      },
+    };
+
+    if (renderer === 'payslip') {
+      return this.pdfRendererService.buildTeamPayslipHtml({
+        ...common,
+        pageSize: templateMetadata.defaultPageSize === 'LETTER' ? 'LETTER' : 'A4',
+      });
+    }
+    if (renderer === 'benefit_acknowledgment') {
+      return this.pdfRendererService.buildTeamBenefitAcknowledgmentHtml(common);
+    }
+    if (renderer === 'payment_statement') {
+      return this.pdfRendererService.buildTeamPaymentStatementHtml({
+        ...common,
+        contract: {
+          number: String(payment.contractId ?? ''),
+          paymentTerms: String(payment.metadata?.paymentTerms ?? ''),
+        },
+      });
+    }
+
+    return this.renderPaymentStatement(payment);
   }
 }
