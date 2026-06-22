@@ -10,6 +10,7 @@ import {
   Post,
   Query,
   UploadedFile,
+  UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
@@ -21,9 +22,11 @@ import { CreateTaskDto, ListTasksQueryDto, UpdateTaskDto } from '../dto';
 import { MAX_IMAGE_UPLOAD_BYTES } from '../../../common/files/files.service';
 import {
   DangerousAction,
+  PermissionsGuard,
   RequireAnyPermission,
   RequirePermission,
 } from '../../permissions';
+import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 
 const TASK_ATTACHMENT_UPLOAD_OPTIONS = {
   storage: memoryStorage(),
@@ -73,6 +76,7 @@ function getContextFromHeaders(
   };
 }
 
+@UseGuards(JwtAuthGuard, PermissionsGuard)
 @Controller('agency/projects/tasks')
 export class TasksCrudController {
   constructor(

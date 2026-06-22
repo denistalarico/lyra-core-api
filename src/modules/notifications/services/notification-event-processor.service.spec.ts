@@ -135,12 +135,26 @@ function makeService(
   const realtime = {
     emitCreatedForRecipient: jest.fn().mockResolvedValue(undefined),
   } as unknown as jest.Mocked<NotificationRealtimeService>;
+  const preferencesRepo = { find: jest.fn().mockResolvedValue([]) };
+  const workspaceUsersRepo = { find: jest.fn().mockResolvedValue([]) };
+  const emailSettingsRepo = { findOne: jest.fn().mockResolvedValue(null) };
+  const emailService = { sendEmail: jest.fn().mockResolvedValue(undefined) };
+  const cryptoService = { decrypt: jest.fn() };
+  const configService = { get: jest.fn() };
+  const pushService = { sendToUsers: jest.fn().mockResolvedValue(undefined) };
   const service = new NotificationEventProcessorService(
     dataSource,
+    preferencesRepo as never,
+    workspaceUsersRepo as never,
+    emailSettingsRepo as never,
     catalog as never,
     recipientResolver as never,
     selfNotificationPolicy as never,
     realtime,
+    emailService as never,
+    cryptoService as never,
+    configService as never,
+    pushService as never,
   );
 
   return { service, realtime, repos };

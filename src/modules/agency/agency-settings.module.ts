@@ -4,10 +4,12 @@ import { SettingsCryptoService } from '../../common/crypto/settings-crypto.servi
 import { FilesModule } from '../../common/files/files.module';
 import { EmailModule } from '../email/email.module';
 import { PermissionsModule } from '../permissions';
+import { AgencySessionsCleanupService } from './agency-sessions-cleanup.service';
 import { AgencySettingsController } from './agency-settings.controller';
 import { AgencySettingsService } from './agency-settings.service';
 import {
   AgencyEmailTwoFactorCodeEntity,
+  AgencyUserLoginEventEntity,
   AgencyUserSecuritySettingsEntity,
   AgencyUserSessionEntity,
   AgencyUserTrustedDeviceEntity,
@@ -47,6 +49,7 @@ const AGENCY_CONNECTION = 'agency';
         AgencyUserSecuritySettingsEntity,
         AgencyUserSessionEntity,
         AgencyUserTrustedDeviceEntity,
+        AgencyUserLoginEventEntity,
         AgencyEmailTwoFactorCodeEntity,
         AgencyWorkspaceSecuritySettingsEntity,
         AgencyWorkspaceAppsSettingsEntity,
@@ -61,7 +64,11 @@ const AGENCY_CONNECTION = 'agency';
     ),
   ],
   controllers: [AgencySettingsController],
-  providers: [AgencySettingsService, SettingsCryptoService],
+  providers: [
+    AgencySettingsService,
+    SettingsCryptoService,
+    AgencySessionsCleanupService,
+  ],
   exports: [AgencySettingsService],
 })
 export class AgencySettingsModule {}

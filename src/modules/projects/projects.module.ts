@@ -26,6 +26,7 @@ import { ProjectSeedsController } from './controllers/project-seeds.controller';
 import { ProjectSettingsController } from './controllers/project-settings.controller';
 import { ProjectEventsController } from './controllers/project-events.controller';
 import { ProjectFollowersAttachmentsController } from './controllers/project-followers-attachments.controller';
+import { ProjectsPublicController } from './controllers/projects-public.controller';
 import { ProjectFollowersAttachmentsService } from './services/project-followers-attachments.service';
 import { ProjectsDashboardQueryService } from './services/projects-dashboard-query.service';
 import { ProjectsService } from './services/projects.service';
@@ -81,6 +82,7 @@ const AGENCY_CONNECTION = 'agency';
     ProjectEventsController,
     ProjectFollowersAttachmentsController,
     ProjectsCrudController,
+    ProjectsPublicController,
   ],
   providers: [
     ProjectsService,

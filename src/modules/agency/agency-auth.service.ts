@@ -8,7 +8,7 @@ import type { Request } from 'express';
 import { verify } from 'otplib';
 import { Repository } from 'typeorm';
 import { SettingsCryptoService } from '../../common/crypto/settings-crypto.service';
-import { EmailService } from '../email/email.service';
+import { EmailService, type EmailTransportOverride } from '../email/email.service';
 import { renderTransactionalEmail } from '../email/templates/transactional-email.template';
 import { LoginDto } from '../auth/dto/login.dto';
 import { RefreshTokenDto } from '../auth/dto/refresh-token.dto';
@@ -20,10 +20,13 @@ import {
 import {
   AgencyEmailTwoFactorCodeEntity,
   AgencyPasswordResetEntity,
+  AgencyUserLoginEventEntity,
   AgencyUserSecuritySettingsEntity,
   AgencyUserSessionEntity,
+  AgencyUserTrustedDeviceEntity,
 } from './entities/agency-auth.entities';
 import {
+  AgencyWorkspaceEmailSettingsEntity,
   AgencyWorkspaceUserEntity,
   AgencyWorkspaceUserPermissionEntity,
 } from './entities/agency-settings.entities';
@@ -59,6 +62,12 @@ export class AgencyAuthService {
     private readonly passwordResetRepo: Repository<AgencyPasswordResetEntity>,
     @InjectRepository(AgencyEmailTwoFactorCodeEntity, AGENCY_CONNECTION)
     private readonly emailTwoFactorRepo: Repository<AgencyEmailTwoFactorCodeEntity>,
+    @InjectRepository(AgencyUserLoginEventEntity, AGENCY_CONNECTION)
+    private readonly loginEventsRepo: Repository<AgencyUserLoginEventEntity>,
+    @InjectRepository(AgencyWorkspaceEmailSettingsEntity, AGENCY_CONNECTION)
+    private readonly emailSettingsRepo: Repository<AgencyWorkspaceEmailSettingsEntity>,
+    @InjectRepository(AgencyUserTrustedDeviceEntity, AGENCY_CONNECTION)
+    private readonly trustedDevicesRepo: Repository<AgencyUserTrustedDeviceEntity>,
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
     private readonly emailService: EmailService,
@@ -70,6 +79,7 @@ export class AgencyAuthService {
     const loginContext = await this.findLoginContext(email, dto.password);
 
     if (!loginContext) {
+      await this.recordFailedLoginIfKnownEmail(email, extractLoginContext(req));
       throw new UnauthorizedException('Invalid credentials');
     }
 
@@ -113,17 +123,36 @@ export class AgencyAuthService {
 
     const payload = this.buildTokenPayload(security, workspaceUser, session.id);
 
+    const newRefreshToken = randomBytes(48).toString('hex');
+    await this.sessionsRepo.update(session.id, {
+      sessionTokenHash: this.hashToken(newRefreshToken),
+      expiresAt: this.getRefreshExpirationDate(),
+    });
+
     return {
       accessToken: await this.signAccessToken(payload),
+      refreshToken: newRefreshToken,
       user: await this.buildUserResponse(payload),
     };
   }
 
   async logout(refreshToken: string) {
-    await this.sessionsRepo.update(
-      { sessionTokenHash: this.hashToken(refreshToken) },
-      { status: 'expired', revokedAt: new Date() },
-    );
+    const session = await this.sessionsRepo.findOne({
+      where: { sessionTokenHash: this.hashToken(refreshToken) },
+    });
+
+    if (session) {
+      await this.sessionsRepo.update(session.id, {
+        status: 'expired',
+        revokedAt: new Date(),
+      });
+      await this.recordLoginEvent(session.tenantId, session.userId, 'logout', {
+        deviceName: session.deviceName,
+        userAgent: session.userAgent,
+        ipAddress: session.ipAddress,
+        location: session.location,
+      });
+    }
 
     return { success: true };
   }
@@ -258,6 +287,51 @@ export class AgencyAuthService {
     return null;
   }
 
+  private async recordLoginEvent(
+    tenantId: string,
+    userId: string,
+    eventType: 'login_success' | 'login_failed' | 'logout',
+    client: {
+      deviceName?: string | null;
+      userAgent?: string | null;
+      ipAddress?: string | null;
+      location?: string | null;
+    },
+  ) {
+    await this.loginEventsRepo.save(
+      this.loginEventsRepo.create({
+        tenantId,
+        userId,
+        eventType,
+        deviceName: client.deviceName ?? null,
+        userAgent: client.userAgent ?? null,
+        ipAddress: client.ipAddress ?? null,
+        location: client.location ?? client.ipAddress ?? null,
+      }),
+    );
+  }
+
+  private async recordFailedLoginIfKnownEmail(
+    email: string,
+    client: LoginRequestContext,
+  ) {
+    const security = await this.securityRepo.findOne({
+      where: { currentEmail: email },
+      order: { updatedAt: 'DESC' },
+    });
+
+    if (!security) {
+      return;
+    }
+
+    await this.recordLoginEvent(
+      security.tenantId,
+      security.userId,
+      'login_failed',
+      client,
+    );
+  }
+
   private async findSecurityForPasswordReset(email: string) {
     const securityRecords = await this.securityRepo.find({
       where: { currentEmail: email },
@@ -358,8 +432,30 @@ export class AgencyAuthService {
 
     const payload = this.buildTokenPayload(security, workspaceUser, session.id);
 
+    await this.recordLoginEvent(security.tenantId, security.userId, 'login_success', client);
+
     if (security.loginAlertsEnabled) {
-      await this.sendNewLoginAlert(security, client);
+      await this.sendNewLoginAlert(security, client, workspaceUser.workspaceId);
+    }
+
+    const existingDeviceRecord = client.deviceFingerprint
+      ? await this.trustedDevicesRepo.findOne({
+          where: {
+            tenantId: security.tenantId,
+            userId: security.userId,
+            deviceFingerprint: client.deviceFingerprint,
+          },
+        })
+      : null;
+
+    const isTrustedDevice = Boolean(
+      existingDeviceRecord && !existingDeviceRecord.revokedAt,
+    );
+
+    if (isTrustedDevice && existingDeviceRecord) {
+      await this.trustedDevicesRepo.update(existingDeviceRecord.id, {
+        lastUsedAt: new Date(),
+      });
     }
 
     return {
@@ -367,8 +463,10 @@ export class AgencyAuthService {
       refreshToken,
       user: await this.buildUserResponse(payload),
       securityContext: {
-        isTrustedDevice: false,
-        isNewDevice: Boolean(client.deviceFingerprint),
+        isTrustedDevice,
+        isNewDevice: !existingDeviceRecord,
+        deviceName: client.deviceName,
+        location: client.location,
         isSuspiciousLogin: false,
       },
     };
@@ -489,6 +587,36 @@ export class AgencyAuthService {
     }
   }
 
+  private async getEmailTransportOverride(
+    tenantId: string,
+    workspaceId?: string,
+  ): Promise<EmailTransportOverride | undefined> {
+    const settings = await this.emailSettingsRepo.findOne({
+      where: workspaceId ? { tenantId, workspaceId } : { tenantId },
+      order: { updatedAt: 'DESC' },
+    });
+
+    if (!settings?.smtpHost || !settings.smtpUser || !settings.smtpPasswordEncrypted || !settings.fromEmail) {
+      return undefined;
+    }
+
+    const smtpPassword = this.cryptoService.decrypt(settings.smtpPasswordEncrypted);
+
+    if (!smtpPassword) {
+      return undefined;
+    }
+
+    return {
+      smtpHost: settings.smtpHost,
+      smtpPort: settings.smtpPort ?? 587,
+      smtpSecure: settings.smtpSecure,
+      smtpUser: settings.smtpUser,
+      smtpPassword,
+      fromName: settings.fromName,
+      fromEmail: settings.fromEmail,
+    };
+  }
+
   private async sendEmailTwoFactorCode(
     security: AgencyUserSecuritySettingsEntity,
     purpose: 'login' | 'setup',
@@ -518,6 +646,7 @@ export class AgencyAuthService {
       subject: `Codigo de verificacao do ${this.getProductName()}`,
       html,
       text,
+      override: await this.getEmailTransportOverride(security.tenantId),
     });
   }
 
@@ -549,16 +678,22 @@ export class AgencyAuthService {
       subject: `Recuperacao de senha do ${this.getProductName()}`,
       html,
       text,
+      override: await this.getEmailTransportOverride(security.tenantId),
     });
   }
 
   private async sendNewLoginAlert(
     security: AgencyUserSecuritySettingsEntity,
     client: LoginRequestContext,
+    workspaceId?: string,
   ) {
+    const originDescription = client.location
+      ? `${client.location} (IP ${client.ipAddress})`
+      : `IP ${client.ipAddress}`;
+
     const { html, text } = renderTransactionalEmail({
       title: 'Novo login detectado',
-      intro: `Detectamos um acesso em ${client.deviceName} usando o IP ${client.ipAddress}.`,
+      intro: `Detectamos um acesso em ${client.deviceName}, partindo de ${originDescription}.`,
       buttonLabel: `Abrir ${this.getProductName()}`,
       buttonUrl: this.getFrontendUrl(),
     });
@@ -568,6 +703,7 @@ export class AgencyAuthService {
       subject: `Novo login no ${this.getProductName()}`,
       html,
       text,
+      override: await this.getEmailTransportOverride(security.tenantId, workspaceId),
     });
   }
 

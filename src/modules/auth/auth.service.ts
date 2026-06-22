@@ -260,7 +260,10 @@ export class AuthService {
       throw new UnauthorizedException('Invalid session context');
     }
 
+    const newRefreshToken = this.createOpaqueRefreshToken();
+    session.sessionTokenHash = this.hashToken(newRefreshToken);
     session.lastSeen = new Date().toISOString();
+    session.expiresAt = this.getRefreshExpirationDate();
     await this.sessionsRepository.save(session);
 
     const payload: AuthTokenPayload = {
@@ -279,6 +282,7 @@ export class AuthService {
 
     return {
       accessToken: await this.signAccessToken(payload),
+      refreshToken: newRefreshToken,
       user: {
         ...payload,
         role: access.role,

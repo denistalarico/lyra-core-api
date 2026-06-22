@@ -11,10 +11,11 @@ import * as QRCode from 'qrcode';
 import { In, IsNull, Repository } from 'typeorm';
 import { SettingsCryptoService } from '../../common/crypto/settings-crypto.service';
 import { FilesService } from '../../common/files/files.service';
-import { EmailService } from '../email/email.service';
+import { EmailService, type EmailTransportOverride } from '../email/email.service';
 import { renderTransactionalEmail } from '../email/templates/transactional-email.template';
 import {
   AgencyEmailTwoFactorCodeEntity,
+  AgencyUserLoginEventEntity,
   AgencyUserSecuritySettingsEntity,
   AgencyUserSessionEntity,
   AgencyUserTrustedDeviceEntity,
@@ -117,6 +118,8 @@ export class AgencySettingsService {
     private readonly userSessionsRepo: Repository<AgencyUserSessionEntity>,
     @InjectRepository(AgencyUserTrustedDeviceEntity, AGENCY_CONNECTION)
     private readonly trustedDevicesRepo: Repository<AgencyUserTrustedDeviceEntity>,
+    @InjectRepository(AgencyUserLoginEventEntity, AGENCY_CONNECTION)
+    private readonly loginEventsRepo: Repository<AgencyUserLoginEventEntity>,
     @InjectRepository(AgencyEmailTwoFactorCodeEntity, AGENCY_CONNECTION)
     private readonly emailTwoFactorRepo: Repository<AgencyEmailTwoFactorCodeEntity>,
     @InjectRepository(AgencyWorkspaceAppsSettingsEntity, AGENCY_CONNECTION)
@@ -352,16 +355,18 @@ export class AgencySettingsService {
     userId: string,
     currentSessionId?: string,
   ) {
-    const [settings, sessions, trustedDevices] = await Promise.all([
+    const [settings, sessions, trustedDevices, history] = await Promise.all([
       this.getUserSecuritySettings(tenantId, userId),
       this.getUserSessions(tenantId, userId, currentSessionId),
       this.getTrustedDevices(tenantId, userId),
+      this.getLoginHistory(tenantId, userId),
     ]);
 
     return {
       settings,
       sessions,
       trustedDevices,
+      history,
       summary: {
         activeSessions: sessions.filter((session) => session.status !== 'expired')
           .length,
@@ -591,6 +596,105 @@ export class AgencySettingsService {
     await this.trustedDevicesRepo.save(device);
 
     return this.getSecurity(tenantId, userId, currentSessionId);
+  }
+
+  private async findCurrentSessionForDeviceTrust(
+    tenantId: string,
+    userId: string,
+    sessionId?: string,
+  ) {
+    if (!sessionId) {
+      throw new BadRequestException('No active session to identify the device.');
+    }
+
+    const session = await this.userSessionsRepo.findOne({
+      where: { tenantId, userId, id: sessionId },
+    });
+
+    if (!session || !session.deviceFingerprint) {
+      throw new BadRequestException('Unable to identify the current device.');
+    }
+
+    return session;
+  }
+
+  async trustCurrentDevice(
+    tenantId: string,
+    userId: string,
+    currentSessionId?: string,
+  ) {
+    const session = await this.findCurrentSessionForDeviceTrust(
+      tenantId,
+      userId,
+      currentSessionId,
+    );
+
+    const existing = await this.trustedDevicesRepo.findOne({
+      where: { tenantId, userId, deviceFingerprint: session.deviceFingerprint! },
+    });
+
+    await this.trustedDevicesRepo.save(
+      existing
+        ? {
+            ...existing,
+            deviceName: session.deviceName,
+            userAgent: session.userAgent,
+            ipAddress: session.ipAddress,
+            location: session.location,
+            trustedAt: new Date(),
+            lastUsedAt: new Date(),
+            revokedAt: null,
+          }
+        : this.trustedDevicesRepo.create({
+            tenantId,
+            userId,
+            deviceFingerprint: session.deviceFingerprint,
+            deviceName: session.deviceName,
+            userAgent: session.userAgent,
+            ipAddress: session.ipAddress,
+            location: session.location,
+            trustedAt: new Date(),
+            lastUsedAt: new Date(),
+            revokedAt: null,
+          }),
+    );
+
+    return this.getSecurity(tenantId, userId, currentSessionId);
+  }
+
+  async declineDeviceTrust(
+    tenantId: string,
+    userId: string,
+    currentSessionId?: string,
+  ) {
+    const session = await this.findCurrentSessionForDeviceTrust(
+      tenantId,
+      userId,
+      currentSessionId,
+    );
+
+    const existing = await this.trustedDevicesRepo.findOne({
+      where: { tenantId, userId, deviceFingerprint: session.deviceFingerprint! },
+    });
+
+    if (!existing) {
+      await this.trustedDevicesRepo.save(
+        this.trustedDevicesRepo.create({
+          tenantId,
+          userId,
+          deviceFingerprint: session.deviceFingerprint,
+          deviceName: session.deviceName,
+          userAgent: session.userAgent,
+          ipAddress: session.ipAddress,
+          location: session.location,
+          trustedAt: null,
+          lastUsedAt: null,
+          revokedAt: new Date(),
+        }),
+      );
+    }
+
+    return { success: true };
   }
 
   async getWorkspaceSecurity(tenantId: string, workspaceId: string) {
@@ -1476,6 +1580,36 @@ export class AgencySettingsService {
     return normalized;
   }
 
+  private async getEmailTransportOverride(
+    tenantId: string,
+    workspaceId?: string,
+  ): Promise<EmailTransportOverride | undefined> {
+    const settings = await this.emailRepo.findOne({
+      where: workspaceId ? { tenantId, workspaceId } : { tenantId },
+      order: { updatedAt: 'DESC' },
+    });
+
+    if (!settings?.smtpHost || !settings.smtpUser || !settings.smtpPasswordEncrypted || !settings.fromEmail) {
+      return undefined;
+    }
+
+    const smtpPassword = this.cryptoService.decrypt(settings.smtpPasswordEncrypted);
+
+    if (!smtpPassword) {
+      return undefined;
+    }
+
+    return {
+      smtpHost: settings.smtpHost,
+      smtpPort: settings.smtpPort ?? 587,
+      smtpSecure: settings.smtpSecure,
+      smtpUser: settings.smtpUser,
+      smtpPassword,
+      fromName: settings.fromName,
+      fromEmail: settings.fromEmail,
+    };
+  }
+
   private hashToken(value: string) {
     return createHash('sha256').update(value).digest('hex');
   }
@@ -1510,6 +1644,7 @@ export class AgencySettingsService {
       subject: 'Codigo de verificacao do Lyra Agency',
       html,
       text,
+      override: await this.getEmailTransportOverride(tenantId),
     });
   }
 
@@ -1633,6 +1768,24 @@ export class AgencySettingsService {
       lastUsedAt: device.lastUsedAt,
       createdAt: device.createdAt,
       updatedAt: device.updatedAt,
+    }));
+  }
+
+  private async getLoginHistory(tenantId: string, userId: string) {
+    const events = await this.loginEventsRepo.find({
+      where: { tenantId, userId },
+      order: { createdAt: 'DESC' },
+      take: 5,
+    });
+
+    return events.map((event) => ({
+      id: event.id,
+      eventType: event.eventType,
+      deviceName: event.deviceName,
+      userAgent: this.summarizeUserAgent(event.userAgent),
+      ipAddress: event.ipAddress,
+      location: event.location,
+      createdAt: event.createdAt,
     }));
   }
 

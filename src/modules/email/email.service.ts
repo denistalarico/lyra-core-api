@@ -29,12 +29,23 @@ type CalendarReminderEmailOptions = {
   meetingUrl?: string | null;
 };
 
+export type EmailTransportOverride = {
+  smtpHost: string;
+  smtpPort: number;
+  smtpSecure: boolean;
+  smtpUser: string;
+  smtpPassword: string;
+  fromName?: string | null;
+  fromEmail: string;
+};
+
 @Injectable()
 export class EmailService {
-  private transporter: nodemailer.Transporter;
+  private readonly defaultTransporter: nodemailer.Transporter;
+  private readonly overrideTransporterCache = new Map<string, nodemailer.Transporter>();
 
   constructor(private configService: ConfigService) {
-    this.transporter = nodemailer.createTransport({
+    this.defaultTransporter = nodemailer.createTransport({
       host: this.configService.get('SMTP_HOST'),
       port: Number(this.configService.get('SMTP_PORT')),
       secure: this.configService.get('SMTP_SECURE') === 'true',
@@ -45,14 +56,52 @@ export class EmailService {
     });
   }
 
+  /**
+   * Tenants with their own SMTP configured (workspace email settings) get
+   * their transactional emails sent from their own domain; otherwise we fall
+   * back to the shared Lyra transporter/sender below.
+   */
+  private getTransporter(override?: EmailTransportOverride) {
+    if (!override) {
+      return this.defaultTransporter;
+    }
+
+    const cacheKey = `${override.smtpHost}:${override.smtpPort}:${override.smtpUser}`;
+    const cached = this.overrideTransporterCache.get(cacheKey);
+
+    if (cached) {
+      return cached;
+    }
+
+    const transporter = nodemailer.createTransport({
+      host: override.smtpHost,
+      port: override.smtpPort,
+      secure: override.smtpSecure,
+      auth: {
+        user: override.smtpUser,
+        pass: override.smtpPassword,
+      },
+    });
+
+    this.overrideTransporterCache.set(cacheKey, transporter);
+    return transporter;
+  }
+
   async sendEmail(options: {
     to: string;
     subject: string;
     html: string;
     text?: string;
+    override?: EmailTransportOverride;
   }): Promise<void> {
-    await this.transporter.sendMail({
-      from: `"${this.configService.get('SMTP_FROM_NAME')}" <${this.configService.get('SMTP_FROM_EMAIL')}>`,
+    const transporter = this.getTransporter(options.override);
+    const fromName =
+      options.override?.fromName || this.configService.get('SMTP_FROM_NAME');
+    const fromEmail =
+      options.override?.fromEmail || this.configService.get('SMTP_FROM_EMAIL');
+
+    await transporter.sendMail({
+      from: `"${fromName}" <${fromEmail}>`,
       to: options.to,
       subject: options.subject,
       html: options.html,

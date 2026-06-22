@@ -9,10 +9,13 @@ import { AgencyAuthService } from './agency-auth.service';
 import {
   AgencyEmailTwoFactorCodeEntity,
   AgencyPasswordResetEntity,
+  AgencyUserLoginEventEntity,
   AgencyUserSecuritySettingsEntity,
   AgencyUserSessionEntity,
+  AgencyUserTrustedDeviceEntity,
 } from './entities/agency-auth.entities';
 import {
+  AgencyWorkspaceEmailSettingsEntity,
   AgencyWorkspaceUserEntity,
   AgencyWorkspaceUserPermissionEntity,
 } from './entities/agency-settings.entities';
@@ -32,6 +35,9 @@ const AGENCY_CONNECTION = 'agency';
         AgencyUserSessionEntity,
         AgencyPasswordResetEntity,
         AgencyEmailTwoFactorCodeEntity,
+        AgencyUserLoginEventEntity,
+        AgencyWorkspaceEmailSettingsEntity,
+        AgencyUserTrustedDeviceEntity,
       ],
       AGENCY_CONNECTION,
     ),

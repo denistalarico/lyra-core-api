@@ -1,6 +1,11 @@
-import { Controller, Get, Headers, Param } from '@nestjs/common';
+import { Controller, Get, Headers, Param, UseGuards } from '@nestjs/common';
 import { ProjectBoardsService } from '../services/project-boards.service';
-import { RequireAnyPermission, RequirePermission } from '../../permissions';
+import {
+  PermissionsGuard,
+  RequireAnyPermission,
+  RequirePermission,
+} from '../../permissions';
+import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 
 type RequestContext = {
   tenantId: string;
@@ -18,6 +23,7 @@ function getContextFromHeaders(
   };
 }
 
+@UseGuards(JwtAuthGuard, PermissionsGuard)
 @Controller('agency/projects')
 export class ProjectBoardsController {
   constructor(private readonly projectBoardsService: ProjectBoardsService) {}

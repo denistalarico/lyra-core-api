@@ -2,21 +2,63 @@ import {
   Body,
   Controller,
   Get,
+  Headers,
   Param,
   Patch,
+  Post,
   Query,
   UseGuards,
 } from '@nestjs/common';
 import { RequestContextData } from '../../../common/context/request-context.decorator';
 import type { RequestContext } from '../../../common/context/request-context.interface';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
-import { ListNotificationsQueryDto, ReadAllNotificationsDto } from '../dto';
-import { NotificationsService } from '../services';
+import {
+  ListNotificationsQueryDto,
+  ReadAllNotificationsDto,
+  SubscribePushDto,
+  UnsubscribePushDto,
+} from '../dto';
+import { NotificationPushService, NotificationsService } from '../services';
 
 @Controller('notifications')
 @UseGuards(JwtAuthGuard)
 export class NotificationsController {
-  constructor(private readonly notificationsService: NotificationsService) {}
+  constructor(
+    private readonly notificationsService: NotificationsService,
+    private readonly notificationPushService: NotificationPushService,
+  ) {}
+
+  @Get('push/public-key')
+  getPushPublicKey() {
+    return { publicKey: this.notificationPushService.getPublicKey() };
+  }
+
+  @Post('push/subscribe')
+  subscribePush(
+    @RequestContextData() context: RequestContext,
+    @Body() dto: SubscribePushDto,
+    @Headers('user-agent') userAgent?: string,
+  ) {
+    return this.notificationPushService.subscribe(
+      context.tenantId,
+      context.userId!,
+      dto.endpoint,
+      dto.keys,
+      userAgent,
+    );
+  }
+
+  @Post('push/unsubscribe')
+  unsubscribePush(
+    @RequestContextData() context: RequestContext,
+    @Body() dto: UnsubscribePushDto,
+  ) {
+    return this.notificationPushService.unsubscribe(
+      context.tenantId,
+      context.userId!,
+      dto.endpoint,
+    );
+  }
 
   @Get()
   list(

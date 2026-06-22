@@ -172,6 +172,37 @@ export class AgencyUserTrustedDeviceEntity {
   updatedAt!: Date;
 }
 
+@Entity('user_login_events')
+@Index('idx_agency_user_login_events_tenant_user', ['tenantId', 'userId'])
+export class AgencyUserLoginEventEntity {
+  @PrimaryGeneratedColumn('uuid')
+  id!: string;
+
+  @Column({ name: 'tenant_id', type: 'uuid' })
+  tenantId!: string;
+
+  @Column({ name: 'user_id', type: 'uuid' })
+  userId!: string;
+
+  @Column({ name: 'event_type', type: 'varchar', length: 30 })
+  eventType!: 'login_success' | 'login_failed' | 'logout';
+
+  @Column({ name: 'device_name', type: 'varchar', length: 120, nullable: true })
+  deviceName!: string | null;
+
+  @Column({ name: 'user_agent', type: 'text', nullable: true })
+  userAgent!: string | null;
+
+  @Column({ name: 'ip_address', type: 'varchar', length: 120, nullable: true })
+  ipAddress!: string | null;
+
+  @Column({ type: 'varchar', length: 120, nullable: true })
+  location!: string | null;
+
+  @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
+  createdAt!: Date;
+}
+
 @Entity('password_resets')
 @Index('idx_agency_password_resets_token_hash', ['tokenHash'])
 @Index('idx_agency_password_resets_tenant_user', ['tenantId', 'userId'])

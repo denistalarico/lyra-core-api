@@ -1,6 +1,7 @@
 // src/app.module.ts
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { ScheduleModule } from '@nestjs/schedule';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import env from './config/env';
 import {
@@ -45,6 +46,7 @@ import { PermissionsModule } from './modules/permissions';
       isGlobal: true,
       load: [env],
     }),
+    ScheduleModule.forRoot(),
     TypeOrmModule.forRoot(getTypeOrmConfig()),
     TypeOrmModule.forRoot(getAgencyTypeOrmConfig()),
     SettingsModule,

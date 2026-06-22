@@ -8,15 +8,18 @@ import {
   Param,
   Post,
   UploadedFile,
+  UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import {
   DangerousAction,
+  PermissionsGuard,
   RequireAnyPermission,
   RequirePermission,
 } from '../../permissions';
+import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 
 const ATTACHMENT_UPLOAD_OPTIONS = {
   storage: memoryStorage(),
@@ -36,6 +39,7 @@ function ctx(
   };
 }
 
+@UseGuards(JwtAuthGuard, PermissionsGuard)
 @Controller('agency/projects/:projectId')
 export class ProjectFollowersAttachmentsController {
   constructor(private readonly svc: ProjectFollowersAttachmentsService) {}

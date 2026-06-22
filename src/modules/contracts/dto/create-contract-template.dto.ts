@@ -53,6 +53,25 @@ headerPreset?: ContractHeaderPreset | null;
 footerPreset?: ContractFooterPreset | null;
 
 @IsOptional()
+@IsString()
+@MaxLength(20)
+locale?: string;
+
+@IsOptional()
+@IsString()
+@MaxLength(2)
+countryCode?: string | null;
+
+@IsOptional()
+@IsString()
+@MaxLength(120)
+jurisdictionRegion?: string | null;
+
+@IsOptional()
+@IsString()
+legalDisclaimer?: string | null;
+
+@IsOptional()
 showLogo?: boolean;
 
 @IsOptional()

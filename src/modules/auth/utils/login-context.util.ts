@@ -1,5 +1,6 @@
 import { createHash } from 'crypto';
 import type { Request } from 'express';
+import geoip from 'geoip-lite';
 
 export type LoginRequestContext = {
   ipAddress: string;
@@ -27,8 +28,24 @@ export function extractLoginContext(req: Request): LoginRequestContext {
       .update([userAgent, acceptLanguage].join('|'))
       .digest('hex'),
     deviceName: getDeviceName(userAgent),
-    location: null,
+    location: resolveApproxLocation(ipAddress),
   };
+}
+
+function resolveApproxLocation(ipAddress: string): string | null {
+  try {
+    const lookup = geoip.lookup(ipAddress);
+
+    if (!lookup) {
+      return null;
+    }
+
+    return [lookup.city, lookup.region, lookup.country]
+      .filter((part) => Boolean(part && part.trim()))
+      .join(', ');
+  } catch {
+    return null;
+  }
 }
 
 function getRequestIpAddress(req: Request): string {

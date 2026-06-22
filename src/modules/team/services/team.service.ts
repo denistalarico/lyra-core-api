@@ -46,6 +46,7 @@ import {
   LIFECYCLE_STEP_TYPE_DEFAULT_ICON,
   TEAM_LIFECYCLE_STEP_TYPE_PRESETS,
 } from './team-lifecycle-step-type-presets';
+import { CLIENT_LIFECYCLE_STEP_TYPE_PRESETS } from '../../clients/services/client-lifecycle-step-type-presets';
 import { TeamNotificationPublisher } from './team-notification.publisher';
 import { DocumentPdfRendererService } from '../../document-layouts/document-pdf-renderer.service';
 import { ContractsService } from '../../contracts/services/contracts.service';
@@ -58,6 +59,13 @@ import {
 } from './team-payment-document-context';
 
 const PAYMENT_CONFIG_OPTION_TYPES = Object.keys(TEAM_PAYMENT_TEMPLATE_PRESETS);
+
+// Tipos de config-option cuja estrutura (nome/ícone/cor/escopo) é protegida quando
+// `metadata.isSystemDefault === true` — Team e Clients compartilham essa regra.
+const LIFECYCLE_STEP_TYPE_CONFIG_TYPES: string[] = [
+  TeamConfigOptionType.LifecycleStepType,
+  TeamConfigOptionType.ClientLifecycleStepType,
+];
 
 type RequestContext = {
   tenantId: string;
@@ -367,6 +375,10 @@ export class TeamService {
       await this.ensureLifecycleStepTypeDefaults(ctx);
     }
 
+    if (type === TeamConfigOptionType.ClientLifecycleStepType) {
+      await this.ensureClientLifecycleStepTypeDefaults(ctx);
+    }
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const where: any = {
       tenantId: ctx.tenantId,
@@ -481,6 +493,51 @@ export class TeamService {
           tenantId: ctx.tenantId,
           workspaceId: ctx.workspaceId,
           type: TeamConfigOptionType.LifecycleStepType,
+          name: preset.name,
+          description: preset.description,
+          color: preset.color,
+          status: 'active' as const,
+          metadata: preset.metadata,
+          createdById: ctx.userId || null,
+          updatedById: ctx.userId || null,
+        })) as QueryDeepPartialEntity<TeamConfigOption>[],
+      )
+      .orIgnore()
+      .execute();
+  }
+
+  private async ensureClientLifecycleStepTypeDefaults(ctx: RequestContext) {
+    const existing = await this.configOptionRepository.find({
+      where: {
+        tenantId: ctx.tenantId,
+        workspaceId: ctx.workspaceId,
+        type: TeamConfigOptionType.ClientLifecycleStepType,
+      },
+    });
+
+    const existingSystemKeys = new Set(
+      existing
+        .map((option) => (option.metadata as Record<string, unknown> | null)?.systemKey)
+        .filter((key): key is string => typeof key === 'string'),
+    );
+
+    const presetsToCreate = CLIENT_LIFECYCLE_STEP_TYPE_PRESETS.filter(
+      (preset) => !existingSystemKeys.has(preset.metadata.systemKey),
+    );
+
+    if (presetsToCreate.length === 0) return;
+
+    // Garantia individual por systemKey: o índice único (tenant, workspace, type, name)
+    // arbitra corridas concorrentes sem duplicar presets já criados por outra request.
+    await this.configOptionRepository
+      .createQueryBuilder()
+      .insert()
+      .into(TeamConfigOption)
+      .values(
+        presetsToCreate.map((preset) => ({
+          tenantId: ctx.tenantId,
+          workspaceId: ctx.workspaceId,
+          type: TeamConfigOptionType.ClientLifecycleStepType,
           name: preset.name,
           description: preset.description,
           color: preset.color,
@@ -675,7 +732,7 @@ export class TeamService {
     const name = dto.name.trim();
     let metadata = dto.metadata ?? {};
 
-    if (dto.type === TeamConfigOptionType.LifecycleStepType) {
+    if (LIFECYCLE_STEP_TYPE_CONFIG_TYPES.includes(dto.type)) {
       const rawMetadata = metadata as Record<string, unknown>;
       metadata = {
         ...rawMetadata,
@@ -756,7 +813,7 @@ export class TeamService {
     const isProtectedTemplate =
       entity.type === 'payment_document_template' && protectedMetadata.isSystemTemplate === true;
     const isSystemLifecycleStepType =
-      entity.type === TeamConfigOptionType.LifecycleStepType && protectedMetadata.isSystemDefault === true;
+      LIFECYCLE_STEP_TYPE_CONFIG_TYPES.includes(entity.type) && protectedMetadata.isSystemDefault === true;
 
     if (isSystemLifecycleStepType) {
       // Tipos padrão só podem ter o status (ativo/arquivado) alterado — estrutura
@@ -798,7 +855,7 @@ export class TeamService {
             signatureRequired: true,
             signatureBlocks: protectedMetadata.signatureBlocks,
           }
-        : entity.type === TeamConfigOptionType.LifecycleStepType
+        : LIFECYCLE_STEP_TYPE_CONFIG_TYPES.includes(entity.type)
           ? {
               ...nextMetadata,
               isSystemDefault: false,
@@ -868,6 +925,28 @@ export class TeamService {
       }
     }
 
+    if (option.type === TeamConfigOptionType.ClientLifecycleStepType) {
+      if (option.metadata?.isSystemDefault === true) {
+        throw new BadRequestException('Tipos padrão do sistema não podem ser excluídos.');
+      }
+
+      const stepConfigs = await this.configOptionRepository.find({
+        where: [
+          { tenantId: ctx.tenantId, workspaceId: ctx.workspaceId, type: 'client_onboarding_task' },
+          { tenantId: ctx.tenantId, workspaceId: ctx.workspaceId, type: 'client_offboarding_task' },
+        ],
+      });
+      const inUseByConfig = stepConfigs.some(
+        (candidate) => (candidate.metadata as Record<string, unknown> | null)?.stepTypeId === id,
+      );
+
+      if (inUseByConfig) {
+        throw new BadRequestException(
+          'Este tipo de etapa está em uso e não pode ser excluído. Desative-o em vez de excluí-lo.',
+        );
+      }
+    }
+
     await this.configOptionRepository.remove(option);
 
     return {
@@ -906,6 +985,7 @@ export class TeamService {
       monthlyCost: dto.monthlyCost ?? null,
       currency: dto.currency ?? 'USD',
       notes: dto.notes ?? null,
+      metadata: dto.metadata ?? {},
       status: dto.status ?? TeamMemberStatus.Active,
       createdById: ctx.userId || null,
     });

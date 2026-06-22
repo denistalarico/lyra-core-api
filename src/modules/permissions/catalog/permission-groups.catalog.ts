@@ -96,6 +96,9 @@ const RAW_PERMISSION_GROUPS: RawPermissionGroup[] = [
       'agency.clients.products.view.assigned',
       'agency.clients.products.manage.admin',
       'agency.clients.managed_tenant.view.admin',
+      'agency.clients.lifecycle.view.assigned',
+      'agency.clients.lifecycle.manage.assigned',
+      'agency.clients.lifecycle.settings.manage.admin',
     ],
   },
   {

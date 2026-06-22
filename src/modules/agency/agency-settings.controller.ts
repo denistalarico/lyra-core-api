@@ -307,6 +307,28 @@ export class AgencySettingsController {
     );
   }
 
+  @Post('security/trusted-devices/current')
+  @RequirePermission('agency.settings.account.update.self')
+  trustCurrentDevice(@RequestContextData() ctx: RequestContext) {
+    this.assertUserContext(ctx);
+    return this.agencySettingsService.trustCurrentDevice(
+      ctx.tenantId,
+      ctx.userId,
+      ctx.sessionId,
+    );
+  }
+
+  @Post('security/trusted-devices/current/decline')
+  @RequirePermission('agency.settings.account.update.self')
+  declineDeviceTrust(@RequestContextData() ctx: RequestContext) {
+    this.assertUserContext(ctx);
+    return this.agencySettingsService.declineDeviceTrust(
+      ctx.tenantId,
+      ctx.userId,
+      ctx.sessionId,
+    );
+  }
+
   @Get('apps-integrations')
   @RequirePermission('agency.settings.apps.manage.admin')
   async getAppsIntegrations(@RequestContextData() ctx: RequestContext) {

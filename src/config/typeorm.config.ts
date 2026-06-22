@@ -59,6 +59,7 @@ import { CrmOpportunityEventEntity } from '../modules/crm/entities/crm-opportuni
 import {
   AgencyEmailTwoFactorCodeEntity,
   AgencyPasswordResetEntity,
+  AgencyUserLoginEventEntity,
   AgencyUserSecuritySettingsEntity,
   AgencyUserSessionEntity,
   AgencyUserTrustedDeviceEntity,
@@ -186,7 +187,11 @@ import {
   AgencyTaskStage,
   AgencyTaskTimeEntry,
 } from '../modules/projects/entities';
-import { AgencyClient } from '../modules/clients/entities';
+import {
+  AgencyClient,
+  ClientLifecycleProcess,
+  ClientLifecycleStep,
+} from '../modules/clients/entities';
 
 import {
   AgencyKnowledgeArticle,
@@ -219,6 +224,7 @@ import {
 import {
   NotificationDeliveryEntity,
   NotificationEntity,
+  NotificationPushSubscriptionEntity,
   NotificationRecipientEntity,
 } from '../modules/notifications/entities';
 
@@ -236,6 +242,7 @@ export const agencyEntities = [
   NotificationEntity,
   NotificationRecipientEntity,
   NotificationDeliveryEntity,
+  NotificationPushSubscriptionEntity,
 
   DocumentLayoutEntity,
   DocumentLayoutTemplateEntity,
@@ -256,6 +263,7 @@ export const agencyEntities = [
   AgencyUserSecuritySettingsEntity,
   AgencyUserSessionEntity,
   AgencyUserTrustedDeviceEntity,
+  AgencyUserLoginEventEntity,
   AgencyPasswordResetEntity,
   AgencyEmailTwoFactorCodeEntity,
   ContactEntity,
@@ -309,6 +317,8 @@ export const agencyEntities = [
   AgencyTaskComment,
   AgencyTaskTimeEntry,
   AgencyClient,
+  ClientLifecycleProcess,
+  ClientLifecycleStep,
   AgencyActivity,
   AgencyActivityLink,
   FinanceAccount,

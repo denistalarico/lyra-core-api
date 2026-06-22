@@ -173,6 +173,9 @@ const RAW_PERMISSIONS: RawPermission[] = [
   ['agency.clients.products.manage.admin', ADMIN_UP],
   ['agency.clients.managed_tenant.view.admin', ADMIN_UP],
   ['agency.clients.managed_tenant.manage.owner_only', OWNER_ONLY, true],
+  ['agency.clients.lifecycle.view.assigned', MANAGER_UP],
+  ['agency.clients.lifecycle.manage.assigned', MANAGER_UP],
+  ['agency.clients.lifecycle.settings.manage.admin', ADMIN_UP],
 
   // 9.7 Sales
   ['agency.sales.contacts.create', ALL_ROLES],

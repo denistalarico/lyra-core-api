@@ -9,6 +9,7 @@ import {
   Post,
   Put,
   Query,
+  UseGuards,
 } from '@nestjs/common';
 
 import {
@@ -32,9 +33,11 @@ import { TeamChatMeetingsService } from '../services/team-chat-meetings.service'
 import { TeamChatUserSettingsService } from '../services/team-chat-user-settings.service';
 import {
   DangerousAction,
+  PermissionsGuard,
   RequireAnyPermission,
   RequirePermission,
 } from '../../permissions';
+import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 
 type TeamChatContext = {
   tenantId: string;
@@ -43,6 +46,7 @@ type TeamChatContext = {
   role?: string | null;
 };
 
+@UseGuards(JwtAuthGuard, PermissionsGuard)
 @Controller('agency/team-chat')
 export class TeamChatController {
   constructor(

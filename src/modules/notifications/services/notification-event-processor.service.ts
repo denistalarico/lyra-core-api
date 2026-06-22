@@ -1,6 +1,15 @@
-import { Injectable } from '@nestjs/common';
-import { InjectDataSource } from '@nestjs/typeorm';
-import { DataSource } from 'typeorm';
+import { Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
+import { DataSource, In, Repository } from 'typeorm';
+import { SettingsCryptoService } from '../../../common/crypto/settings-crypto.service';
+import {
+  AgencyUserNotificationPreferencesEntity,
+  AgencyWorkspaceEmailSettingsEntity,
+  AgencyWorkspaceUserEntity,
+} from '../../agency/entities/agency-settings.entities';
+import { EmailService, type EmailTransportOverride } from '../../email/email.service';
+import { renderTransactionalEmail } from '../../email/templates/transactional-email.template';
 import { NotificationCatalogService } from '../catalog';
 import {
   NotificationDeliveryEntity,
@@ -16,25 +25,58 @@ import {
   NotificationProcessingResult,
   NotificationSourceEvent,
 } from '../types';
+import { NotificationPushService } from './notification-push.service';
 import { NotificationRealtimeService } from './notification-realtime.service';
 import { NotificationRecipientResolverService } from './notification-recipient-resolver.service';
+
+const NOTIFICATION_PREFERENCE_GROUP_BY_MODULE: Record<string, string> = {
+  'team-chat': 'messages',
+  finance: 'finance',
+  tasks: 'tasks',
+  projects: 'tasks',
+  activities: 'tasks',
+  calendar: 'calendar',
+  clients: 'clients',
+  sales: 'clients',
+  security: 'security',
+  settings: 'system',
+  system: 'system',
+  dashboards: 'system',
+  contracts: 'system',
+  team: 'system',
+  knowledge: 'system',
+};
 
 type NotificationPersistenceResult =
   | (Extract<NotificationProcessingResult, { status: 'created' }> & {
       realtimeRecipientIds: string[];
+      pendingEmailDeliveries: { deliveryId: string; email: string }[];
+      pendingPushDeliveries: { deliveryId: string; userId: string }[];
     })
   | Extract<NotificationProcessingResult, { status: 'duplicate' }>
   | Extract<NotificationProcessingResult, { status: 'skipped' }>;
 
 @Injectable()
 export class NotificationEventProcessorService {
+  private readonly logger = new Logger(NotificationEventProcessorService.name);
+
   constructor(
     @InjectDataSource('agency')
     private readonly dataSource: DataSource,
+    @InjectRepository(AgencyUserNotificationPreferencesEntity, 'agency')
+    private readonly preferencesRepo: Repository<AgencyUserNotificationPreferencesEntity>,
+    @InjectRepository(AgencyWorkspaceUserEntity, 'agency')
+    private readonly workspaceUsersRepo: Repository<AgencyWorkspaceUserEntity>,
+    @InjectRepository(AgencyWorkspaceEmailSettingsEntity, 'agency')
+    private readonly emailSettingsRepo: Repository<AgencyWorkspaceEmailSettingsEntity>,
     private readonly catalog: NotificationCatalogService,
     private readonly recipientResolver: NotificationRecipientResolverService,
     private readonly selfNotificationPolicy: SelfNotificationPolicy,
     private readonly realtimeService: NotificationRealtimeService,
+    private readonly emailService: EmailService,
+    private readonly cryptoService: SettingsCryptoService,
+    private readonly configService: ConfigService,
+    private readonly pushService: NotificationPushService,
   ) {}
 
   async process(
@@ -70,6 +112,13 @@ export class NotificationEventProcessorService {
         recipientCount: 0,
       };
     }
+
+    const recipientUserIds = recipients.map((recipient) => recipient.userId);
+
+    const [emailRecipients, pushRecipients] = await Promise.all([
+      this.resolveEmailRecipients(event, definition.moduleKey, recipientUserIds),
+      this.resolvePushRecipients(event, definition.moduleKey, recipientUserIds),
+    ]);
 
     const result: NotificationPersistenceResult =
       await this.dataSource.transaction(async (manager) => {
@@ -172,8 +221,8 @@ export class NotificationEventProcessorService {
       const deliveryRepo =
         manager.getRepository(NotificationDeliveryEntity);
 
-      const deliveries = savedRecipients.map((recipient) =>
-        deliveryRepo.create({
+      const deliveries = savedRecipients.flatMap((recipient) => {
+        const inAppDelivery = deliveryRepo.create({
           notificationRecipientId: recipient.id,
           channel: NotificationDeliveryChannel.IN_APP,
           status: NotificationDeliveryStatus.SENT,
@@ -183,15 +232,79 @@ export class NotificationEventProcessorService {
           failureReason: null,
           attempts: 1,
           providerMessageId: null,
-        }),
-      );
+        });
+
+        const extraDeliveries: NotificationDeliveryEntity[] = [];
+
+        if (emailRecipients.has(recipient.userId)) {
+          extraDeliveries.push(
+            deliveryRepo.create({
+              notificationRecipientId: recipient.id,
+              channel: NotificationDeliveryChannel.EMAIL,
+              status: NotificationDeliveryStatus.PENDING,
+              scheduledAt: null,
+              sentAt: null,
+              failedAt: null,
+              failureReason: null,
+              attempts: 0,
+              providerMessageId: null,
+            }),
+          );
+        }
+
+        if (pushRecipients.has(recipient.userId)) {
+          extraDeliveries.push(
+            deliveryRepo.create({
+              notificationRecipientId: recipient.id,
+              channel: NotificationDeliveryChannel.PUSH,
+              status: NotificationDeliveryStatus.PENDING,
+              scheduledAt: null,
+              sentAt: null,
+              failedAt: null,
+              failureReason: null,
+              attempts: 0,
+              providerMessageId: null,
+            }),
+          );
+        }
+
+        return [inAppDelivery, ...extraDeliveries];
+      });
 
       const savedDeliveries = await deliveryRepo.save(deliveries);
+
+      const pendingEmailDeliveries = savedDeliveries
+        .filter((delivery) => delivery.channel === NotificationDeliveryChannel.EMAIL)
+        .map((delivery) => {
+          const recipient = savedRecipients.find(
+            (candidate) => candidate.id === delivery.notificationRecipientId,
+          );
+
+          return {
+            deliveryId: delivery.id,
+            email: emailRecipients.get(recipient!.userId)!,
+          };
+        });
+
+      const pendingPushDeliveries = savedDeliveries
+        .filter((delivery) => delivery.channel === NotificationDeliveryChannel.PUSH)
+        .map((delivery) => {
+          const recipient = savedRecipients.find(
+            (candidate) => candidate.id === delivery.notificationRecipientId,
+          );
+
+          return {
+            deliveryId: delivery.id,
+            userId: recipient!.userId,
+          };
+        });
 
       return {
         status: 'created',
         notificationId: savedNotification.id,
         recipientCount: savedRecipients.length,
+        pendingEmailDeliveries,
+        pendingPushDeliveries,
         realtimeRecipientIds: savedDeliveries
           .filter(
             (delivery) =>
@@ -208,6 +321,14 @@ export class NotificationEventProcessorService {
           this.realtimeService.emitCreatedForRecipient(recipientId),
         ),
       );
+
+      if (result.pendingEmailDeliveries.length > 0) {
+        await this.sendEmailDeliveries(event, result.pendingEmailDeliveries);
+      }
+
+      if (result.pendingPushDeliveries.length > 0) {
+        await this.sendPushDeliveries(event, result.pendingPushDeliveries);
+      }
     }
 
     return {
@@ -215,6 +336,225 @@ export class NotificationEventProcessorService {
       notificationId: result.notificationId,
       recipientCount: result.recipientCount,
     };
+  }
+
+  private async resolveEmailRecipients(
+    event: NotificationSourceEvent,
+    moduleKey: string,
+    recipientUserIds: string[],
+  ): Promise<Map<string, string>> {
+    const preferenceGroup =
+      NOTIFICATION_PREFERENCE_GROUP_BY_MODULE[moduleKey] ?? 'system';
+
+    const [preferenceRows, workspaceUsers] = await Promise.all([
+      this.preferencesRepo.find({
+        where: { tenantId: event.tenantId, userId: In(recipientUserIds) },
+      }),
+      event.workspaceId
+        ? this.workspaceUsersRepo.find({
+            where: {
+              tenantId: event.tenantId,
+              workspaceId: event.workspaceId,
+              userId: In(recipientUserIds),
+            },
+          })
+        : Promise.resolve([]),
+    ]);
+
+    const emailByUserId = new Map(
+      workspaceUsers
+        .filter((user): user is AgencyWorkspaceUserEntity & { userId: string } =>
+          Boolean(user.userId && user.email),
+        )
+        .map((user) => [user.userId, user.email]),
+    );
+
+    const preferencesByUserId = new Map(
+      preferenceRows.map((row) => [row.userId, row.preferences]),
+    );
+
+    const result = new Map<string, string>();
+
+    for (const userId of recipientUserIds) {
+      const email = emailByUserId.get(userId);
+
+      if (!email) {
+        continue;
+      }
+
+      const preferences = preferencesByUserId.get(userId) ?? [];
+      const entry = preferences.find(
+        (pref) => pref.key === preferenceGroup,
+      ) as { email?: boolean; channels?: { email?: boolean } } | undefined;
+      const wantsEmail = entry?.email ?? entry?.channels?.email ?? false;
+
+      if (wantsEmail) {
+        result.set(userId, email);
+      }
+    }
+
+    return result;
+  }
+
+  private async resolvePushRecipients(
+    event: NotificationSourceEvent,
+    moduleKey: string,
+    recipientUserIds: string[],
+  ): Promise<Set<string>> {
+    const preferenceGroup =
+      NOTIFICATION_PREFERENCE_GROUP_BY_MODULE[moduleKey] ?? 'system';
+
+    const preferenceRows = await this.preferencesRepo.find({
+      where: { tenantId: event.tenantId, userId: In(recipientUserIds) },
+    });
+
+    const preferencesByUserId = new Map(
+      preferenceRows.map((row) => [row.userId, row.preferences]),
+    );
+
+    const result = new Set<string>();
+
+    for (const userId of recipientUserIds) {
+      const preferences = preferencesByUserId.get(userId) ?? [];
+      const entry = preferences.find(
+        (pref) => pref.key === preferenceGroup,
+      ) as { push?: boolean; channels?: { push?: boolean } } | undefined;
+      const wantsPush = entry?.push ?? entry?.channels?.push ?? false;
+
+      if (wantsPush) {
+        result.add(userId);
+      }
+    }
+
+    return result;
+  }
+
+  private async getEmailTransportOverride(
+    tenantId: string,
+    workspaceId?: string | null,
+  ): Promise<EmailTransportOverride | undefined> {
+    const settings = await this.emailSettingsRepo.findOne({
+      where: workspaceId ? { tenantId, workspaceId } : { tenantId },
+      order: { updatedAt: 'DESC' },
+    });
+
+    if (!settings?.smtpHost || !settings.smtpUser || !settings.smtpPasswordEncrypted || !settings.fromEmail) {
+      return undefined;
+    }
+
+    const smtpPassword = this.cryptoService.decrypt(settings.smtpPasswordEncrypted);
+
+    if (!smtpPassword) {
+      return undefined;
+    }
+
+    return {
+      smtpHost: settings.smtpHost,
+      smtpPort: settings.smtpPort ?? 587,
+      smtpSecure: settings.smtpSecure,
+      smtpUser: settings.smtpUser,
+      smtpPassword,
+      fromName: settings.fromName,
+      fromEmail: settings.fromEmail,
+    };
+  }
+
+  private async sendEmailDeliveries(
+    event: NotificationSourceEvent,
+    pendingDeliveries: { deliveryId: string; email: string }[],
+  ) {
+    const override = await this.getEmailTransportOverride(
+      event.tenantId,
+      event.workspaceId,
+    );
+
+    const title = this.resolveTitle(event);
+    const body = this.resolveBody(event);
+    const frontendUrl =
+      this.configService.get<string>('AGENCY_FRONTEND_URL') ??
+      'http://localhost:3003';
+
+    const { html, text } = renderTransactionalEmail({
+      title,
+      intro: body,
+      buttonLabel: 'Abrir Lyra Agency',
+      buttonUrl: frontendUrl,
+    });
+
+    const deliveryRepo = this.dataSource.getRepository(NotificationDeliveryEntity);
+
+    await Promise.allSettled(
+      pendingDeliveries.map(async (pending) => {
+        try {
+          await this.emailService.sendEmail({
+            to: pending.email,
+            subject: title,
+            html,
+            text,
+            override,
+          });
+
+          await deliveryRepo.update(pending.deliveryId, {
+            status: NotificationDeliveryStatus.SENT,
+            sentAt: new Date(),
+            attempts: 1,
+          });
+        } catch (error) {
+          this.logger.warn(
+            `Failed to send email notification delivery ${pending.deliveryId}: ${(error as Error).message}`,
+          );
+
+          await deliveryRepo.update(pending.deliveryId, {
+            status: NotificationDeliveryStatus.FAILED,
+            failedAt: new Date(),
+            failureReason: (error as Error).message?.slice(0, 250) ?? 'unknown_error',
+            attempts: 1,
+          });
+        }
+      }),
+    );
+  }
+
+  private async sendPushDeliveries(
+    event: NotificationSourceEvent,
+    pendingDeliveries: { deliveryId: string; userId: string }[],
+  ) {
+    const title = this.resolveTitle(event);
+    const body = this.resolveBody(event);
+    const frontendUrl =
+      this.configService.get<string>('AGENCY_FRONTEND_URL') ??
+      'http://localhost:3003';
+    const actionUrl = this.optionalString(event.payload.actionUrl);
+
+    const deliveryRepo = this.dataSource.getRepository(NotificationDeliveryEntity);
+    const userIds = [...new Set(pendingDeliveries.map((pending) => pending.userId))];
+
+    try {
+      await this.pushService.sendToUsers(event.tenantId, userIds, {
+        title,
+        body,
+        url: actionUrl ?? frontendUrl,
+      });
+
+      await deliveryRepo.update(
+        pendingDeliveries.map((pending) => pending.deliveryId),
+        { status: NotificationDeliveryStatus.SENT, sentAt: new Date(), attempts: 1 },
+      );
+    } catch (error) {
+      this.logger.warn(
+        `Failed to send push notification deliveries: ${(error as Error).message}`,
+      );
+
+      await deliveryRepo.update(
+        pendingDeliveries.map((pending) => pending.deliveryId),
+        {
+          status: NotificationDeliveryStatus.FAILED,
+          failedAt: new Date(),
+          failureReason: (error as Error).message?.slice(0, 250) ?? 'unknown_error',
+          attempts: 1,
+        },
+      );
+    }
   }
 
   private resolveTitle(

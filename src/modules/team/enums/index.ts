@@ -44,6 +44,12 @@ export enum TeamConfigOptionType {
   PaymentDocumentTemplate = 'payment_document_template',
   PaymentFinanceSetting = 'payment_finance_setting',
   LifecycleStepType = 'lifecycle_step_type',
+  ClientLossReason = 'client_loss_reason',
+  ClientOnboardingTemplate = 'client_onboarding_template',
+  ClientOffboardingTemplate = 'client_offboarding_template',
+  ClientLifecycleStepType = 'client_lifecycle_step_type',
+  ClientOnboardingTask = 'client_onboarding_task',
+  ClientOffboardingTask = 'client_offboarding_task',
 }
 
 export enum TeamSkillLevel {

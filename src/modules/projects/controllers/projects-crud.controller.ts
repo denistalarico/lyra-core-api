@@ -8,6 +8,7 @@ import {
   Patch,
   Post,
   Query,
+  UseGuards,
 } from '@nestjs/common';
 import { ProjectsCrudService } from '../services/projects-crud.service';
 import {
@@ -17,9 +18,11 @@ import {
 } from '../dto';
 import {
   DangerousAction,
+  PermissionsGuard,
   RequireAnyPermission,
   RequirePermission,
 } from '../../permissions';
+import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 
 type RequestContext = {
   tenantId: string;
@@ -39,6 +42,7 @@ function getContextFromHeaders(
   };
 }
 
+@UseGuards(JwtAuthGuard, PermissionsGuard)
 @Controller('agency/projects')
 export class ProjectsCrudController {
   constructor(private readonly projectsCrudService: ProjectsCrudService) {}

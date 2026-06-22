@@ -510,6 +510,18 @@ export const AGENCY_NOTIFICATION_CATALOG: readonly NotificationDefinition[] = [
     NotificationCategory.ONBOARDING,
     NotificationRecipientStrategy.PARTICIPANTS,
   ),
+  informational(
+    'client.offboarding_started',
+    'clients',
+    NotificationCategory.OFFBOARDING,
+    NotificationRecipientStrategy.PARTICIPANTS,
+  ),
+  informational(
+    'client.offboarding_completed',
+    'clients',
+    NotificationCategory.OFFBOARDING,
+    NotificationRecipientStrategy.PARTICIPANTS,
+  ),
   standard(
     'client.document_requested',
     'clients',

@@ -61,6 +61,10 @@ import { AddSprint7ContactsPermissions1760002054000 } from './migrations/1760002
 import { AddSprint8LeadflowAppointmentsPermissions1760002055000 } from './migrations/1760002055000-add-sprint8-leadflow-appointments-permissions';
 import { AddContractTemplateLetterheadPresets1760002056000 } from './migrations/1760002056000-add-contract-template-letterhead-presets';
 import { CreateTeamMemberLifecycle1760002057000 } from './migrations/1760002057000-create-team-member-lifecycle';
+import { CreateClientLifecycle1760002058000 } from './migrations/1760002058000-create-client-lifecycle';
+import { AddClientLifecyclePermissions1760002059000 } from './migrations/1760002059000-add-client-lifecycle-permissions';
+import { CreateUserLoginEvents1760002060000 } from './migrations/1760002060000-create-user-login-events';
+import { CreateNotificationPushSubscriptions1761000000000 } from './migrations/1761000000000-create-notification-push-subscriptions';
 
 export const AgencyDataSource = new DataSource({
   type: 'postgres',
@@ -135,5 +139,9 @@ export const AgencyDataSource = new DataSource({
     AddSprint8LeadflowAppointmentsPermissions1760002055000,
     AddContractTemplateLetterheadPresets1760002056000,
     CreateTeamMemberLifecycle1760002057000,
+    CreateClientLifecycle1760002058000,
+    AddClientLifecyclePermissions1760002059000,
+    CreateUserLoginEvents1760002060000,
+    CreateNotificationPushSubscriptions1761000000000,
   ],
 });

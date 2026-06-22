@@ -120,7 +120,9 @@ export class ContractsService {
     context: RequestContext,
     dto: CreateContractTemplateFromPresetDto,
   ) {
-    const preset = CONTRACT_TEMPLATE_PRESETS.find((p) => p.key === dto.presetKey);
+    const preset = CONTRACT_TEMPLATE_PRESETS.find(
+      (p) => p.key === dto.presetKey,
+    );
     if (!preset) {
       throw new NotFoundException(`Preset '${dto.presetKey}' not found`);
     }
@@ -135,7 +137,8 @@ export class ContractsService {
       category: preset.category,
       targetType: preset.targetType,
       status: ContractTemplateStatus.Draft,
-      defaultSignatureMode: dto.defaultSignatureMode ?? preset.defaultSignatureMode,
+      defaultSignatureMode:
+        dto.defaultSignatureMode ?? preset.defaultSignatureMode,
       headerHtml: content?.headerHtml ?? null,
       bodyHtml: content?.bodyHtml ?? '<p>Texto do contrato aqui.</p>',
       footerHtml: content?.footerHtml ?? null,
@@ -182,7 +185,8 @@ export class ContractsService {
       category: dto.category,
       targetType: dto.targetType,
       status: ContractTemplateStatus.Draft,
-      defaultSignatureMode: dto.defaultSignatureMode ?? ContractSignatureMode.Manual,
+      defaultSignatureMode:
+        dto.defaultSignatureMode ?? ContractSignatureMode.Manual,
       headerHtml: dto.headerHtml ?? null,
       bodyHtml: dto.bodyHtml,
       footerHtml: dto.footerHtml ?? null,
@@ -213,10 +217,7 @@ export class ContractsService {
     return saved;
   }
 
-  previewTemplate(
-    _context: RequestContext,
-    dto: PreviewContractTemplateDto,
-  ) {
+  previewTemplate(_context: RequestContext, dto: PreviewContractTemplateDto) {
     const variablesData = dto.variablesData ?? {};
     const headerHtml = this.renderTemplateString(
       this.resolveHeaderHtml({
@@ -254,7 +255,10 @@ export class ContractsService {
     context: RequestContext,
     provider: ContractSignatureProvider,
   ) {
-    const settings = await this.getOrCreateSignatureProviderSettings(context, provider);
+    const settings = await this.getOrCreateSignatureProviderSettings(
+      context,
+      provider,
+    );
     return this.serializeSignatureProviderSettings(settings);
   }
 
@@ -263,22 +267,30 @@ export class ContractsService {
     provider: ContractSignatureProvider,
     dto: UpdateSignatureProviderSettingsDto,
   ) {
-    const settings = await this.getOrCreateSignatureProviderSettings(context, provider);
+    const settings = await this.getOrCreateSignatureProviderSettings(
+      context,
+      provider,
+    );
 
-    if (dto.status !== undefined) settings.status = dto.status as 'active' | 'inactive';
-    if (dto.apiBaseUrl !== undefined) settings.apiBaseUrl = dto.apiBaseUrl ?? null;
+    if (dto.status !== undefined)
+      settings.status = dto.status as 'active' | 'inactive';
+    if (dto.apiBaseUrl !== undefined)
+      settings.apiBaseUrl = dto.apiBaseUrl ?? null;
     if (dto.apiToken !== undefined) {
-      settings.apiTokenEncrypted =
-        dto.apiToken ? this.encryptSecret(dto.apiToken) : null;
+      settings.apiTokenEncrypted = dto.apiToken
+        ? this.encryptSecret(dto.apiToken)
+        : null;
     }
     if (dto.webhookSecret !== undefined) {
-      settings.webhookSecretEncrypted =
-        dto.webhookSecret ? this.encryptSecret(dto.webhookSecret) : null;
+      settings.webhookSecretEncrypted = dto.webhookSecret
+        ? this.encryptSecret(dto.webhookSecret)
+        : null;
     }
     if (dto.defaultSignatureMode !== undefined) {
       settings.defaultSignatureMode = dto.defaultSignatureMode;
     }
-    if (dto.sandboxEnabled !== undefined) settings.sandboxEnabled = dto.sandboxEnabled;
+    if (dto.sandboxEnabled !== undefined)
+      settings.sandboxEnabled = dto.sandboxEnabled;
     if (dto.metadata !== undefined) settings.metadata = dto.metadata;
     settings.updatedById = context.userId;
 
@@ -290,7 +302,10 @@ export class ContractsService {
     context: RequestContext,
     provider: ContractSignatureProvider,
   ) {
-    const settings = await this.getOrCreateSignatureProviderSettings(context, provider);
+    const settings = await this.getOrCreateSignatureProviderSettings(
+      context,
+      provider,
+    );
 
     const hasApiBaseUrl = Boolean(settings.apiBaseUrl);
     const hasApiToken = Boolean(settings.apiTokenEncrypted);
@@ -380,12 +395,12 @@ export class ContractsService {
       showContractNumber: dto.showContractNumber ?? true,
       showPoweredByLyra: dto.showPoweredByLyra ?? true,
       variablesSchema: dto.variablesSchema ?? {},
-      locale: 'pt-BR',
-      countryCode: 'BR',
-      jurisdictionRegion: null,
+      locale: dto.locale ?? 'pt-BR',
+      countryCode: dto.countryCode ?? 'BR',
+      jurisdictionRegion: dto.jurisdictionRegion ?? null,
       templateSource: ContractTemplateSource.Custom,
-      editorMode: ContractTemplateEditorMode.Html,
-      legalDisclaimer: null,
+      editorMode: dto.editorMode ?? ContractTemplateEditorMode.Html,
+      legalDisclaimer: dto.legalDisclaimer ?? null,
       metadata: dto.metadata ?? {},
       createdById: context.userId,
       updatedById: context.userId,
@@ -1309,8 +1324,7 @@ export class ContractsService {
       })),
       options: {
         message:
-          dto.message ??
-          'Você recebeu um contrato para assinatura eletrônica.',
+          dto.message ?? 'Você recebeu um contrato para assinatura eletrônica.',
         sandboxEnabled: settings.sandboxEnabled,
       },
     };
@@ -1346,7 +1360,9 @@ export class ContractsService {
     }
 
     const mockResult = sendAutentiqueSignatureRequestMock(
-      providerPayload as Parameters<typeof sendAutentiqueSignatureRequestMock>[0],
+      providerPayload as Parameters<
+        typeof sendAutentiqueSignatureRequestMock
+      >[0],
     );
 
     contract.status = ContractStatus.SentForSignature;
@@ -1421,7 +1437,7 @@ export class ContractsService {
     }
 
     const normalizedBase64 = dto.fileBase64.includes(',')
-      ? dto.fileBase64.split(',').pop() ?? ''
+      ? (dto.fileBase64.split(',').pop() ?? '')
       : dto.fileBase64;
 
     const buffer = Buffer.from(normalizedBase64, 'base64');
@@ -1572,7 +1588,8 @@ export class ContractsService {
       context,
       saved.id,
       ContractEventType.ManuallySigned,
-      dto.note ?? 'Contrato marcado como assinado manualmente sem upload de PDF.',
+      dto.note ??
+        'Contrato marcado como assinado manualmente sem upload de PDF.',
       {
         signatureMode: ContractSignatureMode.Manual,
         signedAt: signedAt.toISOString(),
@@ -1980,26 +1997,43 @@ export class ContractsService {
     template: string,
     variablesData: Record<string, unknown>,
   ) {
-    return template.replace(
-      /{{\s*([a-zA-Z0-9_.-]+)\s*}}/g,
-      (_, key: string) => {
-        const value = this.getValueByPath(variablesData, key);
+    return template.replace(/{{([\s\S]*?)}}/g, (_, rawToken: string) => {
+      const keys = this.getTemplateVariableCandidates(rawToken);
+      const value = keys
+        .map((key) => this.getValueByPath(variablesData, key))
+        .find(
+          (candidate) =>
+            candidate !== undefined && candidate !== null && candidate !== '',
+        );
 
-        if (value === undefined || value === null) {
-          return '';
-        }
+      if (value === undefined || value === null) {
+        return '';
+      }
 
-        if (Array.isArray(value)) {
-          return this.escapeHtml(value.join(', '));
-        }
+      if (Array.isArray(value)) {
+        return this.escapeHtml(value.join(', '));
+      }
 
-        if (typeof value === 'object') {
-          return this.escapeHtml(JSON.stringify(value));
-        }
+      if (typeof value === 'object') {
+        return this.escapeHtml(JSON.stringify(value));
+      }
 
-        return this.escapeHtml(String(value));
-      },
-    );
+      return this.escapeHtml(String(value));
+    });
+  }
+
+  private getTemplateVariableCandidates(rawToken: string) {
+    const normalized = rawToken
+      // Rich-text editors can auto-link values such as member.email while
+      // keeping the anchor inside the {{ ... }} token.
+      .replace(/<[^>]*>/g, '')
+      .replace(/&nbsp;|&#160;/gi, ' ')
+      .replace(/&sol;|&#47;|&#x2f;/gi, '/');
+
+    return normalized
+      .split('/')
+      .map((key) => key.trim())
+      .filter((key) => /^[a-zA-Z0-9_.-]+$/.test(key));
   }
 
   private getMissingRequiredVariables(
@@ -2060,6 +2094,10 @@ export class ContractsService {
       'payment.paymentTerms': 'contract.paymentTerms',
       'contractor.fullName': 'member.displayName',
       'member.displayName': 'contractor.fullName',
+      'contract.dueDay': 'contract.invoiceDay',
+      'contract.invoiceDay': 'contract.dueDay',
+      'client.signatory.name': 'client.signatory',
+      'client.signatory': 'client.signatory.name',
     };
 
     const aliasPath = aliasMap[path];
@@ -2417,22 +2455,29 @@ export class ContractsService {
       this.resolvePlainVariable(variablesData, 'agency.website') ||
       this.resolvePlainVariable(variablesData, 'company.website') ||
       'Excelência em gestão de contratos';
-    const contractNumber = this.resolvePlainVariable(variablesData, 'contract.number');
-    const numberHtml = settings.showContractNumber !== false && contractNumber
-      ? `<span class="contract-letterhead-number">Contrato nº ${contractNumber}</span>`
-      : '';
+    const contractNumber = this.resolvePlainVariable(
+      variablesData,
+      'contract.number',
+    );
+    const numberHtml =
+      settings.showContractNumber !== false && contractNumber
+        ? `<span class="contract-letterhead-number">Contrato nº ${contractNumber}</span>`
+        : '';
     const companyData = [
       agencyName ? `<strong>${agencyName}</strong>` : '',
       taxId ? `<span>Tax ID/CNPJ: ${taxId}</span>` : '',
       address ? `<span>${address}</span>` : '',
       email ? `<span>${email}</span>` : '',
       numberHtml,
-    ].filter(Boolean).join('');
-    const logo = settings.showLogo !== false
-      ? logoUrl
-        ? `<div class="contract-letterhead-logo is-image"><img src="${logoUrl}" alt="${agencyName}" /></div>`
-        : `<div class="contract-letterhead-logo">${this.escapeHtml(agencyName).slice(0, 2).toUpperCase()}</div>`
-      : '';
+    ]
+      .filter(Boolean)
+      .join('');
+    const logo =
+      settings.showLogo !== false
+        ? logoUrl
+          ? `<div class="contract-letterhead-logo is-image"><img src="${logoUrl}" alt="${agencyName}" /></div>`
+          : `<div class="contract-letterhead-logo">${this.escapeHtml(agencyName).slice(0, 2).toUpperCase()}</div>`
+        : '';
 
     if (preset === ContractHeaderPreset.Minimal) {
       return `
@@ -2482,12 +2527,19 @@ export class ContractsService {
       'Sua agência';
     const taxId = this.resolvePlainVariable(variablesData, 'agency.taxId');
     const email = this.resolvePlainVariable(variablesData, 'agency.email');
-    const contractNumber = this.resolvePlainVariable(variablesData, 'contract.number');
+    const contractNumber = this.resolvePlainVariable(
+      variablesData,
+      'contract.number',
+    );
     const city = this.resolvePlainVariable(variablesData, 'contract.city');
-    const jurisdiction = this.resolvePlainVariable(variablesData, 'contract.jurisdiction');
-    const powered = settings.showPoweredByLyra !== false
-      ? '<span class="contract-letterhead-powered">Documento gerado por Lyra Suite</span>'
-      : '';
+    const jurisdiction = this.resolvePlainVariable(
+      variablesData,
+      'contract.jurisdiction',
+    );
+    const powered =
+      settings.showPoweredByLyra !== false
+        ? '<span class="contract-letterhead-powered">Documento gerado por Lyra Suite</span>'
+        : '';
 
     if (preset === ContractFooterPreset.None) {
       return powered

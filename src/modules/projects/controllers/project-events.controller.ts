@@ -6,14 +6,17 @@ import {
   Headers,
   Param,
   Post,
+  UseGuards,
 } from '@nestjs/common';
 import { CreateProjectEventDto } from '../dto';
 import { ProjectEventsService } from '../services/project-events.service';
 import {
   DangerousAction,
+  PermissionsGuard,
   RequireAnyPermission,
   RequirePermission,
 } from '../../permissions';
+import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 
 type RequestContext = {
   tenantId: string;
@@ -31,6 +34,7 @@ function getContextFromHeaders(
   };
 }
 
+@UseGuards(JwtAuthGuard, PermissionsGuard)
 @Controller('agency/projects/:projectId/events')
 export class ProjectEventsController {
   constructor(private readonly projectEventsService: ProjectEventsService) {}

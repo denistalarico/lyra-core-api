@@ -42,6 +42,7 @@ export enum ActivityEntityType {
   Invoice = 'invoice',
   InboxConversation = 'inbox_conversation',
   TeamLifecycleStep = 'team_lifecycle_step',
+  ClientLifecycleStep = 'client_lifecycle_step',
 }
 
 export enum ActivityRelationType {

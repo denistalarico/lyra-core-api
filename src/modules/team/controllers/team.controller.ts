@@ -212,7 +212,10 @@ export class TeamController {
       | 'client_loss_reason'
       | 'client_onboarding_template'
       | 'client_offboarding_template'
-      | 'lifecycle_step_type',
+      | 'lifecycle_step_type'
+      | 'client_lifecycle_step_type'
+      | 'client_onboarding_task'
+      | 'client_offboarding_task',
   ) {
     return this.teamService.listConfigOptions(getContextFromHeaders(headers), type);
   }

@@ -7,13 +7,16 @@ import {
   Param,
   Patch,
   Post,
+  UseGuards,
 } from '@nestjs/common';
 import { TaskWorkspaceService } from '../services/task-workspace.service';
 import {
   DangerousAction,
+  PermissionsGuard,
   RequireAnyPermission,
   RequirePermission,
 } from '../../permissions';
+import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 
 type RequestContext = {
   tenantId: string;
@@ -31,6 +34,7 @@ function getContextFromHeaders(
   };
 }
 
+@UseGuards(JwtAuthGuard, PermissionsGuard)
 @Controller('agency/projects/tasks/:taskId')
 export class TaskWorkspaceController {
   constructor(private readonly taskWorkspaceService: TaskWorkspaceService) {}

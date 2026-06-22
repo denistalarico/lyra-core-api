@@ -144,6 +144,50 @@ export class ClientNotificationPublisher {
     });
   }
 
+  publishOffboardingStarted(input: ClientNotificationInput) {
+    return this.publishClientEvent({
+      ...input,
+      eventType: 'client.offboarding_started',
+      eventIdParts: [
+        'client.offboarding_started',
+        input.client.id,
+        this.timestampFor(input.occurredAt ?? input.client.updatedAt),
+      ],
+      recipients:
+        input.recipients ??
+        [
+          {
+            userId: input.client.accountOwnerId,
+            interestReason: NotificationInterestReason.OWNER,
+          },
+        ],
+      title: 'Offboarding do cliente iniciado',
+      body: `O offboarding do cliente "${input.client.displayName}" foi iniciado.`,
+    });
+  }
+
+  publishOffboardingCompleted(input: ClientNotificationInput) {
+    return this.publishClientEvent({
+      ...input,
+      eventType: 'client.offboarding_completed',
+      eventIdParts: [
+        'client.offboarding_completed',
+        input.client.id,
+        this.timestampFor(input.occurredAt ?? input.client.updatedAt),
+      ],
+      recipients:
+        input.recipients ??
+        [
+          {
+            userId: input.client.accountOwnerId,
+            interestReason: NotificationInterestReason.OWNER,
+          },
+        ],
+      title: 'Offboarding do cliente concluído',
+      body: `O offboarding do cliente "${input.client.displayName}" foi concluído.`,
+    });
+  }
+
   publishDocumentRequested(
     input: ClientNotificationInput & {
       documentType?: string | null;

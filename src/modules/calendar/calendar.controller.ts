@@ -8,6 +8,7 @@ import {
   Patch,
   Post,
   Query,
+  UseGuards,
 } from '@nestjs/common';
 import { CalendarService } from './calendar.service';
 import { CreateCalendarEventDto } from './dto/create-calendar-event.dto';
@@ -17,10 +18,13 @@ import { UpdateCalendarRoutineBlockDto } from './dto/update-calendar-routine-blo
 import { UpdateCalendarSettingsDto } from './dto/update-calendar-settings.dto';
 import {
   DangerousAction,
+  PermissionsGuard,
   RequireAnyPermission,
   RequirePermission,
 } from '../permissions';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 
+@UseGuards(JwtAuthGuard, PermissionsGuard)
 @Controller('calendar')
 export class CalendarController {
   constructor(private readonly calendarService: CalendarService) {}
