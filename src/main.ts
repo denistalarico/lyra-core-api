@@ -3,11 +3,33 @@ import { NestFactory } from '@nestjs/core';
 import { json, urlencoded } from 'express';
 import { AppModule } from './app.module';
 
+function parseCorsOrigins(): string[] {
+  const configuredOrigins =
+    process.env.CORS_ORIGINS ??
+    process.env.APP_FRONTEND_URL ??
+    'http://localhost:3003';
+
+  return configuredOrigins
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+}
+
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
+  const allowedOrigins = parseCorsOrigins();
+
   app.enableCors({
-    origin: true,
+    origin(origin, callback) {
+      // Requisições server-to-server, healthchecks e curl podem não ter Origin.
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true);
+        return;
+      }
+
+      callback(new Error(`Origin not allowed by CORS: ${origin}`), false);
+    },
     methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: [
       'Content-Type',
@@ -34,9 +56,10 @@ async function bootstrap() {
     }),
   );
 
-  await app.listen(
-    process.env.PORT ? Number(process.env.PORT) : 3000,
-    '0.0.0.0',
-  );
+  const port = process.env.PORT ? Number(process.env.PORT) : 3000;
+  const host = process.env.HOST ?? '127.0.0.1';
+
+  await app.listen(port, host);
 }
+
 void bootstrap();

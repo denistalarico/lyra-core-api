@@ -36,9 +36,11 @@ import { PlatformModule } from './modules/platform';
 import { DashboardsModule } from './modules/dashboards';
 import { NotificationsModule } from './modules/notifications';
 import { PermissionsModule } from './modules/permissions';
+import { HealthModule } from './modules/health/health.module';
 
 @Module({
   imports: [
+    HealthModule,
     TeamChatModule,
     QuotesModule,
     DocumentLayoutsModule,
