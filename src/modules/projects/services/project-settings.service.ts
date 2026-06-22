@@ -36,7 +36,23 @@ const defaultTaskTypes: ProjectTaskTypeSetting[] = [
 const emptyBoardPreference: ProjectBoardPreference = {
   foldedStageIds: [],
   pinnedCardsByStage: {},
+  cardOrderByStage: {},
 };
+
+function normalizeCardIdsByStage(value?: Record<string, string[]> | null) {
+  return value && typeof value === 'object'
+    ? Object.fromEntries(
+        Object.entries(value)
+          .filter(([stageId]) => typeof stageId === 'string')
+          .map(([stageId, cardIds]) => [
+            stageId,
+            Array.isArray(cardIds)
+              ? cardIds.filter((cardId): cardId is string => typeof cardId === 'string')
+              : [],
+          ]),
+      )
+    : {};
+}
 
 function normalizeBoardPreference(
   value?: Partial<ProjectBoardPreference> | null,
@@ -47,21 +63,8 @@ function normalizeBoardPreference(
           (id): id is string => typeof id === 'string',
         )
       : [],
-    pinnedCardsByStage:
-      value?.pinnedCardsByStage && typeof value.pinnedCardsByStage === 'object'
-        ? Object.fromEntries(
-            Object.entries(value.pinnedCardsByStage)
-              .filter(([stageId]) => typeof stageId === 'string')
-              .map(([stageId, cardIds]) => [
-                stageId,
-                Array.isArray(cardIds)
-                  ? cardIds.filter(
-                      (cardId): cardId is string => typeof cardId === 'string',
-                    )
-                  : [],
-              ]),
-          )
-        : {},
+    pinnedCardsByStage: normalizeCardIdsByStage(value?.pinnedCardsByStage),
+    cardOrderByStage: normalizeCardIdsByStage(value?.cardOrderByStage),
   };
 }
 

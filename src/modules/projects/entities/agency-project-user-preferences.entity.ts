@@ -9,6 +9,7 @@ import {
 export type ProjectBoardPreference = {
   foldedStageIds: string[];
   pinnedCardsByStage: Record<string, string[]>;
+  cardOrderByStage: Record<string, string[]>;
 };
 
 export type ProjectUserPreferencesPayload = {
@@ -21,6 +22,7 @@ export type ProjectUserPreferencesPayload = {
 const emptyBoardPreference = {
   foldedStageIds: [],
   pinnedCardsByStage: {},
+  cardOrderByStage: {},
 };
 
 @Entity('agency_project_user_preferences')

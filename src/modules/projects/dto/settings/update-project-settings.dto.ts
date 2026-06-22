@@ -28,6 +28,7 @@ export class UpdateProjectPreferencesDto {
   projectBoard?: {
     foldedStageIds?: string[];
     pinnedCardsByStage?: Record<string, string[]>;
+    cardOrderByStage?: Record<string, string[]>;
   };
 
   @IsOptional()
@@ -35,6 +36,7 @@ export class UpdateProjectPreferencesDto {
   workspaceTaskBoard?: {
     foldedStageIds?: string[];
     pinnedCardsByStage?: Record<string, string[]>;
+    cardOrderByStage?: Record<string, string[]>;
   };
 
   @IsOptional()
@@ -42,5 +44,6 @@ export class UpdateProjectPreferencesDto {
   personalTaskBoard?: {
     foldedStageIds?: string[];
     pinnedCardsByStage?: Record<string, string[]>;
+    cardOrderByStage?: Record<string, string[]>;
   };
 }
