@@ -290,6 +290,39 @@ export class AgencySalesService {
     return this.itemsRepo.save(item);
   }
 
+  async deleteItem(context: AgencyContext, id: string) {
+    const item = await this.itemsRepo.findOne({
+      where: {
+        id,
+        tenantId: context.tenantId,
+        workspaceId: context.workspaceId,
+      },
+    });
+
+    if (!item) {
+      throw new BadRequestException('Sales item not found.');
+    }
+
+    await this.opportunityItemsRepo.update(
+      {
+        salesItemId: id,
+        tenantId: context.tenantId,
+        workspaceId: context.workspaceId,
+      },
+      {
+        salesItemId: null,
+      },
+    );
+
+    await this.itemsRepo.delete({
+      id,
+      tenantId: context.tenantId,
+      workspaceId: context.workspaceId,
+    });
+
+    return { deleted: true, id };
+  }
+
   async getProductSettings(context: AgencyContext) {
     const pipeline = await this.ensureSettingsPipeline(context);
     const productSettings = pipeline.metadata?.productSettings;

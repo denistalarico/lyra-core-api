@@ -107,6 +107,17 @@ export class AgencySalesController {
     );
   }
 
+  @Delete('items/:id')
+  @RequirePermission('agency.sales.products.manage.admin')
+  @DangerousAction()
+  deleteItem(
+    @AuthenticatedUser() user: AuthTokenPayload,
+    @Headers('x-workspace-id') workspaceId: string | undefined,
+    @Param('id') id: string,
+  ) {
+    return this.salesService.deleteItem(this.getContext(user, workspaceId), id);
+  }
+
   @Get('product-settings')
   @RequirePermission('agency.sales.products.manage.admin')
   getProductSettings(
