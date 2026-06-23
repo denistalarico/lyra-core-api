@@ -33,10 +33,12 @@ import {
   CreateAgencyBankDto,
   CreateAgencyContactBankAccountDto,
   CreateAgencyContactIdentificationTypeDto,
+  CreateAgencyContactSourceDto,
   UpdateAgencyBankDto,
   UpdateAgencyContactBankAccountDto,
   UpdateAgencyContactIdentificationTypeDto,
   UpdateAgencyContactProfileDto,
+  UpdateAgencyContactSourceDto,
 } from './dto/agency-contact-details.dto';
 import { CreateContactMethodDto } from '../contacts/dto/create-contact-method.dto';
 import { PatchContactMethodDto } from '../contacts/dto/patch-contact-method.dto';
@@ -199,6 +201,41 @@ export class AgencyContactsController {
     @Param('id') id: string,
   ) {
     return this.agencyContactsService.deleteIdentificationType(ctx, id);
+  }
+
+  @Get('sources')
+  @RequireAnyPermission(...CONTACT_VIEW_PERMISSIONS)
+  listContactSources(@RequestContextData() ctx: RequestContext) {
+    return this.agencyContactsService.listContactSources(ctx);
+  }
+
+  @Post('sources')
+  @RequirePermission('shared.contacts.update.client')
+  createContactSource(
+    @RequestContextData() ctx: RequestContext,
+    @Body() dto: CreateAgencyContactSourceDto,
+  ) {
+    return this.agencyContactsService.createContactSource(ctx, dto);
+  }
+
+  @Patch('sources/:id')
+  @RequirePermission('shared.contacts.update.client')
+  updateContactSource(
+    @RequestContextData() ctx: RequestContext,
+    @Param('id') id: string,
+    @Body() dto: UpdateAgencyContactSourceDto,
+  ) {
+    return this.agencyContactsService.updateContactSource(ctx, id, dto);
+  }
+
+  @Delete('sources/:id')
+  @RequirePermission('shared.contacts.delete.owner_only')
+  @DangerousAction()
+  deleteContactSource(
+    @RequestContextData() ctx: RequestContext,
+    @Param('id') id: string,
+  ) {
+    return this.agencyContactsService.deleteContactSource(ctx, id);
   }
 
   @Get('banks')
@@ -455,6 +492,34 @@ export class AgencyContactsController {
       ctx,
       contactId,
       tagId,
+    );
+  }
+
+  @Post(':contactId/companies/:companyContactId')
+  @RequireAnyPermission(...CONTACT_UPDATE_PERMISSIONS)
+  addCompanyLink(
+    @RequestContextData() ctx: RequestContext,
+    @Param('contactId') contactId: string,
+    @Param('companyContactId') companyContactId: string,
+  ) {
+    return this.agencyContactsService.addCompanyLink(
+      ctx,
+      contactId,
+      companyContactId,
+    );
+  }
+
+  @Delete(':contactId/companies/:companyContactId')
+  @RequireAnyPermission(...CONTACT_UPDATE_PERMISSIONS)
+  removeCompanyLink(
+    @RequestContextData() ctx: RequestContext,
+    @Param('contactId') contactId: string,
+    @Param('companyContactId') companyContactId: string,
+  ) {
+    return this.agencyContactsService.removeCompanyLink(
+      ctx,
+      contactId,
+      companyContactId,
     );
   }
 

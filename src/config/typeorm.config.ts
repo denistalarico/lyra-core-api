@@ -24,6 +24,7 @@ import { ContactListEntity } from '../modules/contacts/entities/contact-list.ent
 import { ContactListMemberEntity } from '../modules/contacts/entities/contact-list-member.entity';
 import { ContactTagEntity } from '../modules/contacts/entities/contact-tag.entity';
 import { ContactTagAssignmentEntity } from '../modules/contacts/entities/contact-tag-assignment.entity';
+import { ContactCompanyLinkEntity } from '../modules/contacts/entities/contact-company-link.entity';
 import { ContactCustomFieldEntity } from '../modules/contacts/entities/contact-custom-field.entity';
 import { ContactCustomFieldValueEntity } from '../modules/contacts/entities/contact-custom-field-value.entity';
 import { ContactSegmentEntity } from '../modules/contacts/entities/contact-segment.entity';
@@ -104,6 +105,7 @@ import {
   AgencyContactBankAccountEntity,
   AgencyContactIdentificationTypeEntity,
   AgencyContactProfileEntity,
+  AgencyContactSourceEntity,
 } from '../modules/agency/entities/agency-contact-details.entities';
 
 import {
@@ -273,6 +275,7 @@ export const agencyEntities = [
   ContactListMemberEntity,
   ContactTagEntity,
   ContactTagAssignmentEntity,
+  ContactCompanyLinkEntity,
   ContactCustomFieldEntity,
   ContactCustomFieldValueEntity,
   ContactSegmentEntity,
@@ -292,6 +295,7 @@ export const agencyEntities = [
   AgencySalesActivityEntity,
   AgencyContactProfileEntity,
   AgencyContactIdentificationTypeEntity,
+  AgencyContactSourceEntity,
   AgencyBankEntity,
   QuoteEntity,
   QuoteItemEntity,

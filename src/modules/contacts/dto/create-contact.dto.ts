@@ -58,18 +58,8 @@ export class CreateContactDto {
   companyContactId?: string;
 
   @IsOptional()
-  @IsIn([
-    'manual',
-    'whatsapp',
-    'instagram',
-    'facebook',
-    'webchat',
-    'form',
-    'import',
-    'referral',
-    'email',
-    'other',
-  ])
+  @IsString()
+  @Length(1, 40)
   source?: ContactSource;
 
   @IsOptional()

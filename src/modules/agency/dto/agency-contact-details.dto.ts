@@ -56,6 +56,28 @@ export class UpdateAgencyContactIdentificationTypeDto {
   code?: string;
 }
 
+export class CreateAgencyContactSourceDto {
+  @IsString()
+  @Length(2, 80)
+  name!: string;
+
+  @IsString()
+  @Length(2, 40)
+  code!: string;
+}
+
+export class UpdateAgencyContactSourceDto {
+  @IsOptional()
+  @IsString()
+  @Length(2, 80)
+  name?: string;
+
+  @IsOptional()
+  @IsString()
+  @Length(2, 40)
+  code?: string;
+}
+
 export class CreateAgencyBankDto {
   @IsString()
   @Length(2, 160)

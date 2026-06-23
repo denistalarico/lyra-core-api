@@ -66,6 +66,8 @@ import { AddClientLifecyclePermissions1760002059000 } from './migrations/1760002
 import { CreateUserLoginEvents1760002060000 } from './migrations/1760002060000-create-user-login-events';
 import { CreateNotificationPushSubscriptions1761000000000 } from './migrations/1761000000000-create-notification-push-subscriptions';
 import { AddContactLifecycleStagesArray1782171244936 } from './migrations/1782171244936-add-contact-lifecycle-stages-array';
+import { AddContactCompanyLinks1782171304936 } from './migrations/1782171304936-add-contact-company-links';
+import { AddAgencyContactSources1782171364936 } from './migrations/1782171364936-add-agency-contact-sources';
 
 export const AgencyDataSource = new DataSource({
   type: 'postgres',
@@ -145,5 +147,7 @@ export const AgencyDataSource = new DataSource({
     CreateUserLoginEvents1760002060000,
     CreateNotificationPushSubscriptions1761000000000,
     AddContactLifecycleStagesArray1782171244936,
+    AddContactCompanyLinks1782171304936,
+    AddAgencyContactSources1782171364936,
   ],
 });

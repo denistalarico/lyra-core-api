@@ -60,18 +60,8 @@ export class PatchContactDto {
   companyContactId?: string | null;
 
   @IsOptional()
-  @IsIn([
-    'manual',
-    'whatsapp',
-    'instagram',
-    'facebook',
-    'webchat',
-    'form',
-    'import',
-    'referral',
-    'email',
-    'other',
-  ])
+  @IsString()
+  @Length(1, 40)
   source?: ContactSource;
 
   @IsOptional()

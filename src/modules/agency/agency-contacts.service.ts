@@ -20,20 +20,24 @@ import { ContactAddressEntity } from '../contacts/entities/contact-address.entit
 import { ContactTagEntity } from '../contacts/entities/contact-tag.entity';
 import { ContactSegmentEntity } from '../contacts/entities/contact-segment.entity';
 import { ContactTagAssignmentEntity } from '../contacts/entities/contact-tag-assignment.entity';
+import { ContactCompanyLinkEntity } from '../contacts/entities/contact-company-link.entity';
 import {
   AgencyBankEntity,
   AgencyContactBankAccountEntity,
   AgencyContactIdentificationTypeEntity,
   AgencyContactProfileEntity,
+  AgencyContactSourceEntity,
 } from './entities/agency-contact-details.entities';
 import {
   CreateAgencyBankDto,
   CreateAgencyContactBankAccountDto,
   CreateAgencyContactIdentificationTypeDto,
+  CreateAgencyContactSourceDto,
   UpdateAgencyBankDto,
   UpdateAgencyContactBankAccountDto,
   UpdateAgencyContactIdentificationTypeDto,
   UpdateAgencyContactProfileDto,
+  UpdateAgencyContactSourceDto,
 } from './dto/agency-contact-details.dto';
 import { CreateContactMethodDto } from '../contacts/dto/create-contact-method.dto';
 import { PatchContactMethodDto } from '../contacts/dto/patch-contact-method.dto';
@@ -89,11 +93,17 @@ export class AgencyContactsService {
     @InjectRepository(ContactTagAssignmentEntity, AGENCY_CONNECTION)
     private readonly tagAssignmentsRepo: Repository<ContactTagAssignmentEntity>,
 
+    @InjectRepository(ContactCompanyLinkEntity, AGENCY_CONNECTION)
+    private readonly companyLinksRepo: Repository<ContactCompanyLinkEntity>,
+
     @InjectRepository(AgencyContactProfileEntity, AGENCY_CONNECTION)
     private readonly profilesRepo: Repository<AgencyContactProfileEntity>,
 
     @InjectRepository(AgencyContactIdentificationTypeEntity, AGENCY_CONNECTION)
     private readonly identificationTypesRepo: Repository<AgencyContactIdentificationTypeEntity>,
+
+    @InjectRepository(AgencyContactSourceEntity, AGENCY_CONNECTION)
+    private readonly contactSourcesRepo: Repository<AgencyContactSourceEntity>,
 
     @InjectRepository(AgencyBankEntity, AGENCY_CONNECTION)
     private readonly banksRepo: Repository<AgencyBankEntity>,
@@ -192,32 +202,205 @@ export class AgencyContactsService {
     }
   }
 
-  async getDefaults(ctx: RequestContext) {
-    await this.ensureDefaultIdentificationTypes(ctx);
+  private async ensureDefaultContactSources(ctx: RequestContext) {
+    const workspaceId = this.requireWorkspaceId(ctx);
+
+    const defaults = [
+      { name: 'Manual', code: 'manual', position: 10 },
+      { name: 'WhatsApp', code: 'whatsapp', position: 20 },
+      { name: 'Instagram', code: 'instagram', position: 30 },
+      { name: 'Facebook', code: 'facebook', position: 40 },
+      { name: 'Meta Ads', code: 'meta_ads', position: 50 },
+      { name: 'Google Ads', code: 'google_ads', position: 60 },
+      { name: 'LinkedIn', code: 'linkedin', position: 70 },
+      { name: 'TikTok', code: 'tiktok', position: 80 },
+      { name: 'Webchat', code: 'webchat', position: 90 },
+      { name: 'Formulário', code: 'form', position: 100 },
+      { name: 'Importação', code: 'import', position: 110 },
+      { name: 'Indicação', code: 'referral', position: 120 },
+      { name: 'E-mail', code: 'email', position: 130 },
+      { name: 'Outro', code: 'other', position: 140 },
+    ];
+
+    for (const item of defaults) {
+      const existing = await this.contactSourcesRepo.findOne({
+        where: {
+          tenantId: ctx.tenantId,
+          workspaceId,
+          code: item.code,
+        },
+      });
+
+      if (existing) {
+        let changed = false;
+
+        if (!existing.isSystem) {
+          existing.isSystem = true;
+          changed = true;
+        }
+
+        if (!existing.isProtected) {
+          existing.isProtected = true;
+          changed = true;
+        }
+
+        if (existing.position !== item.position) {
+          existing.position = item.position;
+          changed = true;
+        }
+
+        if (existing.name !== item.name) {
+          existing.name = item.name;
+          changed = true;
+        }
+
+        if (changed) {
+          await this.contactSourcesRepo.save(existing);
+        }
+
+        continue;
+      }
+
+      await this.contactSourcesRepo.save(
+        this.contactSourcesRepo.create({
+          tenantId: ctx.tenantId,
+          workspaceId,
+          name: item.name,
+          code: item.code,
+          isSystem: true,
+          isProtected: true,
+          position: item.position,
+        }),
+      );
+    }
+  }
+
+  async listContactSources(ctx: RequestContext) {
+    await this.ensureDefaultContactSources(ctx);
 
     const workspaceId = this.requireWorkspaceId(ctx);
 
-    const [identificationTypes, tags, segments, banks] = await Promise.all([
-      this.identificationTypesRepo.find({
-        where: { tenantId: ctx.tenantId, workspaceId },
-        order: { position: 'ASC', name: 'ASC' },
+    return this.contactSourcesRepo.find({
+      where: { tenantId: ctx.tenantId, workspaceId },
+      order: { position: 'ASC', name: 'ASC' },
+    });
+  }
+
+  async createContactSource(ctx: RequestContext, dto: CreateAgencyContactSourceDto) {
+    const workspaceId = this.requireWorkspaceId(ctx);
+
+    const code = this.normalizeCode(dto.code);
+
+    return this.contactSourcesRepo.save(
+      this.contactSourcesRepo.create({
+        tenantId: ctx.tenantId,
+        workspaceId,
+        name: dto.name.trim(),
+        code,
+        isSystem: false,
+        isProtected: false,
+        position: 1000,
       }),
-      this.tagsRepo.find({
-        where: { tenantId: ctx.tenantId, workspaceId },
-        order: { name: 'ASC' },
-      }),
-      this.segmentsRepo.find({
-        where: { tenantId: ctx.tenantId, workspaceId },
-        order: { name: 'ASC' },
-      }),
-      this.banksRepo.find({
-        where: { tenantId: ctx.tenantId, workspaceId },
-        order: { name: 'ASC' },
-      }),
-    ]);
+    );
+  }
+
+  async updateContactSource(
+    ctx: RequestContext,
+    id: string,
+    dto: UpdateAgencyContactSourceDto,
+  ) {
+    const workspaceId = this.requireWorkspaceId(ctx);
+
+    const item = await this.contactSourcesRepo.findOne({
+      where: { id, tenantId: ctx.tenantId, workspaceId },
+    });
+
+    if (!item) {
+      throw new NotFoundException('Contact source not found.');
+    }
+
+    if (item.isProtected) {
+      throw new BadRequestException(
+        'This contact source is protected and cannot be edited.',
+      );
+    }
+
+    if (dto.name !== undefined) item.name = dto.name.trim();
+    if (dto.code !== undefined) item.code = this.normalizeCode(dto.code);
+
+    return this.contactSourcesRepo.save(item);
+  }
+
+  async deleteContactSource(ctx: RequestContext, id: string) {
+    const workspaceId = this.requireWorkspaceId(ctx);
+
+    const item = await this.contactSourcesRepo.findOne({
+      where: { id, tenantId: ctx.tenantId, workspaceId },
+    });
+
+    if (!item) {
+      throw new NotFoundException('Contact source not found.');
+    }
+
+    if (item.isProtected) {
+      throw new BadRequestException(
+        'This contact source is protected and cannot be deleted.',
+      );
+    }
+
+    await this.contactSourcesRepo.delete({
+      id,
+      tenantId: ctx.tenantId,
+      workspaceId,
+    });
+
+    return { deleted: true };
+  }
+
+  private async ensureValidContactSource(ctx: RequestContext, code: string) {
+    await this.ensureDefaultContactSources(ctx);
+
+    const workspaceId = this.requireWorkspaceId(ctx);
+
+    const exists = await this.contactSourcesRepo.findOne({
+      where: { tenantId: ctx.tenantId, workspaceId, code },
+    });
+
+    if (!exists) {
+      throw new BadRequestException(`Unknown contact source: ${code}`);
+    }
+  }
+
+  async getDefaults(ctx: RequestContext) {
+    await this.ensureDefaultIdentificationTypes(ctx);
+    await this.ensureDefaultContactSources(ctx);
+
+    const workspaceId = this.requireWorkspaceId(ctx);
+
+    const [identificationTypes, contactSources, tags, segments, banks] =
+      await Promise.all([
+        this.identificationTypesRepo.find({
+          where: { tenantId: ctx.tenantId, workspaceId },
+          order: { position: 'ASC', name: 'ASC' },
+        }),
+        this.contactSourcesRepo.find({
+          where: { tenantId: ctx.tenantId, workspaceId },
+          order: { position: 'ASC', name: 'ASC' },
+        }),
+        this.listTags(ctx),
+        this.segmentsRepo.find({
+          where: { tenantId: ctx.tenantId, workspaceId },
+          order: { name: 'ASC' },
+        }),
+        this.banksRepo.find({
+          where: { tenantId: ctx.tenantId, workspaceId },
+          order: { name: 'ASC' },
+        }),
+      ]);
 
     return {
       identificationTypes,
+      contactSources,
       tags,
       segments,
       banks,
@@ -351,6 +534,9 @@ export class AgencyContactsService {
       await this.ensureContactExists(ctx, dto.companyContactId);
     }
 
+    const source = dto.source ?? 'manual';
+    await this.ensureValidContactSource(ctx, source);
+
     const lifecycleStages =
       dto.lifecycleStages && dto.lifecycleStages.length > 0
         ? dto.lifecycleStages
@@ -368,7 +554,7 @@ export class AgencyContactsService {
       documentNumber: this.optionalString(dto.documentNumber),
       jobTitle: this.optionalString(dto.jobTitle),
       companyContactId: dto.companyContactId ?? null,
-      source: dto.source ?? 'manual',
+      source,
       businessMode: dto.businessMode ?? 'agency_service',
       lifecycleStage: lifecycleStages[0],
       lifecycleStages,
@@ -378,7 +564,20 @@ export class AgencyContactsService {
       notes: this.optionalString(dto.notes),
     });
 
-    return this.contactsRepo.save(contact);
+    const saved = await this.contactsRepo.save(contact);
+
+    if (dto.companyContactId) {
+      await this.companyLinksRepo.save(
+        this.companyLinksRepo.create({
+          tenantId: ctx.tenantId,
+          workspaceId,
+          personContactId: saved.id,
+          companyContactId: dto.companyContactId,
+        }),
+      );
+    }
+
+    return saved;
   }
 
   async getContact(ctx: RequestContext, contactId: string) {
@@ -395,7 +594,8 @@ export class AgencyContactsService {
       addresses,
       bankAccounts,
       tagAssignments,
-      relatedContacts,
+      companyLinksAsCompany,
+      companyLinksAsPerson,
     ] = await Promise.all([
       this.profilesRepo.findOne({
         where: { tenantId: ctx.tenantId, workspaceId, contactId },
@@ -415,15 +615,43 @@ export class AgencyContactsService {
       this.tagAssignmentsRepo.find({
         where: { tenantId: ctx.tenantId, workspaceId, contactId },
       }),
-      this.contactsRepo.find({
-        where: {
-          tenantId: ctx.tenantId,
-          workspaceId,
-          companyContactId: contactId,
-        },
-        order: { displayName: 'ASC' },
+      this.companyLinksRepo.find({
+        where: { tenantId: ctx.tenantId, workspaceId, companyContactId: contactId },
+        order: { createdAt: 'ASC' },
+      }),
+      this.companyLinksRepo.find({
+        where: { tenantId: ctx.tenantId, workspaceId, personContactId: contactId },
+        order: { createdAt: 'ASC' },
       }),
     ]);
+
+    const relatedContactIds = companyLinksAsCompany.map((link) => link.personContactId);
+
+    const relatedContacts =
+      relatedContactIds.length > 0
+        ? await this.contactsRepo.find({
+            where: {
+              tenantId: ctx.tenantId,
+              workspaceId,
+              id: In(relatedContactIds),
+            },
+            order: { displayName: 'ASC' },
+          })
+        : [];
+
+    const relatedCompanyIds = companyLinksAsPerson.map((link) => link.companyContactId);
+
+    const relatedCompanies =
+      relatedCompanyIds.length > 0
+        ? await this.contactsRepo.find({
+            where: {
+              tenantId: ctx.tenantId,
+              workspaceId,
+              id: In(relatedCompanyIds),
+            },
+            order: { displayName: 'ASC' },
+          })
+        : [];
 
     const tagIds = tagAssignments.map((assignment) => assignment.tagId);
 
@@ -463,6 +691,7 @@ export class AgencyContactsService {
       bankAccounts,
       banks,
       relatedContacts,
+      relatedCompanies,
     };
   }
 
@@ -577,7 +806,10 @@ export class AgencyContactsService {
     if (dto.jobTitle !== undefined) {
       contact.jobTitle = this.nullableString(dto.jobTitle);
     }
-    if (dto.source !== undefined) contact.source = dto.source;
+    if (dto.source !== undefined) {
+      await this.ensureValidContactSource(ctx, dto.source);
+      contact.source = dto.source;
+    }
     if (dto.businessMode !== undefined) contact.businessMode = dto.businessMode;
     if (dto.lifecycleStages !== undefined) {
       const stages = dto.lifecycleStages.length > 0 ? dto.lifecycleStages : ['lead' as const];
@@ -647,6 +879,16 @@ export class AgencyContactsService {
         tenantId: ctx.tenantId,
         workspaceId,
         contactId: contact.id,
+      }),
+      this.companyLinksRepo.delete({
+        tenantId: ctx.tenantId,
+        workspaceId,
+        personContactId: contact.id,
+      }),
+      this.companyLinksRepo.delete({
+        tenantId: ctx.tenantId,
+        workspaceId,
+        companyContactId: contact.id,
       }),
     ]);
 
@@ -1522,15 +1764,19 @@ export class AgencyContactsService {
   async listTags(ctx: RequestContext) {
     const workspaceId = this.requireWorkspaceId(ctx);
 
-    return this.tagsRepo.find({
-      where: {
-        tenantId: ctx.tenantId,
-        workspaceId,
-      },
-      order: {
-        name: 'ASC',
-      },
-    });
+    return this.tagsRepo
+      .createQueryBuilder('tag')
+      .leftJoin(
+        'contact_tag_assignments',
+        'assignment',
+        'assignment.tag_id = tag.id',
+      )
+      .where('tag.tenantId = :tenantId', { tenantId: ctx.tenantId })
+      .andWhere('tag.workspaceId = :workspaceId', { workspaceId })
+      .groupBy('tag.id')
+      .orderBy('COUNT(assignment.id)', 'DESC')
+      .addOrderBy('tag.name', 'ASC')
+      .getMany();
   }
 
   async createTag(ctx: RequestContext, dto: CreateContactTagDto) {
@@ -1640,6 +1886,83 @@ export class AgencyContactsService {
       contactId,
       tagId,
     });
+
+    return { deleted: true };
+  }
+
+  private async syncPrimaryCompany(
+    ctx: RequestContext,
+    personContactId: string,
+  ) {
+    const workspaceId = this.requireWorkspaceId(ctx);
+
+    const remainingLinks = await this.companyLinksRepo.find({
+      where: { tenantId: ctx.tenantId, workspaceId, personContactId },
+      order: { createdAt: 'ASC' },
+    });
+
+    await this.contactsRepo.update(
+      { id: personContactId, tenantId: ctx.tenantId, workspaceId },
+      { companyContactId: remainingLinks[0]?.companyContactId ?? null },
+    );
+  }
+
+  async addCompanyLink(
+    ctx: RequestContext,
+    personContactId: string,
+    companyContactId: string,
+  ) {
+    const workspaceId = this.requireWorkspaceId(ctx);
+
+    if (personContactId === companyContactId) {
+      throw new BadRequestException('A contact cannot be its own company.');
+    }
+
+    await this.findContactOrFail(ctx, personContactId);
+    await this.findContactOrFail(ctx, companyContactId);
+
+    const existing = await this.companyLinksRepo.findOne({
+      where: {
+        tenantId: ctx.tenantId,
+        workspaceId,
+        personContactId,
+        companyContactId,
+      },
+    });
+
+    if (!existing) {
+      await this.companyLinksRepo.save(
+        this.companyLinksRepo.create({
+          tenantId: ctx.tenantId,
+          workspaceId,
+          personContactId,
+          companyContactId,
+        }),
+      );
+
+      await this.syncPrimaryCompany(ctx, personContactId);
+    }
+
+    return { linked: true };
+  }
+
+  async removeCompanyLink(
+    ctx: RequestContext,
+    personContactId: string,
+    companyContactId: string,
+  ) {
+    const workspaceId = this.requireWorkspaceId(ctx);
+
+    await this.findContactOrFail(ctx, personContactId);
+
+    await this.companyLinksRepo.delete({
+      tenantId: ctx.tenantId,
+      workspaceId,
+      personContactId,
+      companyContactId,
+    });
+
+    await this.syncPrimaryCompany(ctx, personContactId);
 
     return { deleted: true };
   }

@@ -89,6 +89,44 @@ export class AgencyContactIdentificationTypeEntity {
   updatedAt!: Date;
 }
 
+@Entity('agency_contact_sources')
+@Unique('uq_agency_contact_sources_workspace_code', ['workspaceId', 'code'])
+@Index('idx_agency_contact_sources_tenant_workspace', [
+  'tenantId',
+  'workspaceId',
+])
+export class AgencyContactSourceEntity {
+  @PrimaryGeneratedColumn('uuid')
+  id!: string;
+
+  @Column({ name: 'tenant_id', type: 'uuid' })
+  tenantId!: string;
+
+  @Column({ name: 'workspace_id', type: 'uuid' })
+  workspaceId!: string;
+
+  @Column({ type: 'varchar', length: 80 })
+  name!: string;
+
+  @Column({ type: 'varchar', length: 40 })
+  code!: string;
+
+  @Column({ name: 'is_system', type: 'boolean', default: false })
+  isSystem!: boolean;
+
+  @Column({ name: 'is_protected', type: 'boolean', default: false })
+  isProtected!: boolean;
+
+  @Column({ type: 'integer', default: 0 })
+  position!: number;
+
+  @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
+  createdAt!: Date;
+
+  @UpdateDateColumn({ name: 'updated_at', type: 'timestamptz' })
+  updatedAt!: Date;
+}
+
 @Entity('agency_banks')
 @Unique('uq_agency_banks_workspace_name', ['workspaceId', 'name'])
 @Index('idx_agency_banks_tenant_workspace', ['tenantId', 'workspaceId'])

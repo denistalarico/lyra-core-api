@@ -20,17 +20,7 @@ export type ContactLifecycleStage =
   | 'internal'
   | 'other';
 
-export type ContactSource =
-  | 'manual'
-  | 'whatsapp'
-  | 'instagram'
-  | 'facebook'
-  | 'webchat'
-  | 'form'
-  | 'import'
-  | 'referral'
-  | 'email'
-  | 'other';
+export type ContactSource = string;
 
 export type ContactBusinessMode =
   | 'general'

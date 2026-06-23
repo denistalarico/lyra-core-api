@@ -11,12 +11,14 @@ import {
   AgencyContactBankAccountEntity,
   AgencyContactIdentificationTypeEntity,
   AgencyContactProfileEntity,
+  AgencyContactSourceEntity,
 } from './entities/agency-contact-details.entities';
 import { ContactMethodEntity } from '../contacts/entities/contact-method.entity';
 import { ContactAddressEntity } from '../contacts/entities/contact-address.entity';
 import { ContactTagEntity } from '../contacts/entities/contact-tag.entity';
 import { ContactSegmentEntity } from '../contacts/entities/contact-segment.entity';
 import { ContactTagAssignmentEntity } from '../contacts/entities/contact-tag-assignment.entity';
+import { ContactCompanyLinkEntity } from '../contacts/entities/contact-company-link.entity';
 import { PermissionsModule } from '../permissions';
 
 const AGENCY_CONNECTION = 'agency';
@@ -32,6 +34,7 @@ const AGENCY_CONNECTION = 'agency';
         ContactListMemberEntity,
         AgencyContactProfileEntity,
         AgencyContactIdentificationTypeEntity,
+        AgencyContactSourceEntity,
         AgencyBankEntity,
         AgencyContactBankAccountEntity,
         ContactMethodEntity,
@@ -39,6 +42,7 @@ const AGENCY_CONNECTION = 'agency';
         ContactTagEntity,
         ContactSegmentEntity,
         ContactTagAssignmentEntity,
+        ContactCompanyLinkEntity,
       ],
       AGENCY_CONNECTION,
     ),
