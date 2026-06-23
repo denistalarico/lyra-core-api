@@ -758,7 +758,9 @@ export class DocumentPdfRendererService {
 
     return typeof value === 'string' && value.trim()
       ? value.trim()
-      : `Proposta comercial ${quote.quoteNumber}`;
+      : quote.quoteNumber
+        ? `Proposta comercial ${quote.quoteNumber}`
+        : 'Proposta comercial';
   }
 
   private escapeCssValue(value: string) {

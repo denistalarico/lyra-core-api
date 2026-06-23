@@ -127,6 +127,7 @@ export class QuoteTemplateSectionEntity {
 @Index('idx_quotes_opportunity', ['opportunityId'])
 @Index('idx_quotes_number', ['tenantId', 'workspaceId', 'quoteNumber'], {
   unique: true,
+  where: '"quote_number" IS NOT NULL',
 })
 export class QuoteEntity {
   @PrimaryGeneratedColumn('uuid')
@@ -141,8 +142,8 @@ export class QuoteEntity {
   @Column({ name: 'template_id', type: 'uuid', nullable: true })
   templateId!: string | null;
 
-  @Column({ name: 'quote_number', type: 'varchar', length: 40 })
-  quoteNumber!: string;
+  @Column({ name: 'quote_number', type: 'varchar', length: 40, nullable: true })
+  quoteNumber!: string | null;
 
   @Column({ type: 'varchar', length: 180 })
   title!: string;

@@ -272,12 +272,11 @@ export class QuotesService {
   }
 
   async createQuote(context: AgencyContext, dto: CreateQuoteDto) {
-    const quoteNumber = await this.generateQuoteNumber(context);
     const quote = this.quotesRepo.create({
       tenantId: context.tenantId,
       workspaceId: context.workspaceId,
-      quoteNumber,
-      title: dto.title?.trim() || quoteNumber,
+      quoteNumber: null,
+      title: dto.title?.trim() || 'Nova cotação',
       templateId: dto.templateId ?? null,
       contactId: dto.contactId ?? null,
       companyContactId: dto.companyContactId ?? null,
@@ -320,8 +319,8 @@ export class QuotesService {
     const duplicated = this.quotesRepo.create({
       tenantId: context.tenantId,
       workspaceId: context.workspaceId,
-      quoteNumber: await this.generateQuoteNumber(context),
-      title: `${original.quoteNumber} (cópia)`,
+      quoteNumber: null,
+      title: `${original.quoteNumber || original.title} (cópia)`,
       templateId: original.templateId,
       contactId: original.contactId,
       companyContactId: original.companyContactId,
@@ -383,7 +382,7 @@ export class QuotesService {
       savedQuote.id,
       null,
       'draft',
-      `Quote duplicated from ${original.quoteNumber}.`,
+      `Quote duplicated from ${original.quoteNumber || original.title}.`,
     );
 
     return this.getQuote(context, savedQuote.id);
@@ -421,6 +420,10 @@ export class QuotesService {
         ? { ...(quote.metadata ?? {}), ...dto.metadata }
         : quote.metadata,
     });
+
+    if (dto.status === 'accepted' && !quote.quoteNumber) {
+      quote.quoteNumber = await this.generateQuoteNumber(context);
+    }
 
     const saved = await this.quotesRepo.save(quote);
 
@@ -593,6 +596,9 @@ export class QuotesService {
     const previousStatus = quote.status;
 
     quote.status = 'accepted';
+    if (!quote.quoteNumber) {
+      quote.quoteNumber = await this.generateQuoteNumber(context);
+    }
     quote.acceptedAt = new Date();
     quote.acceptedByName = dto.acceptedByName ?? null;
     quote.acceptedByEmail = dto.acceptedByEmail ?? null;
@@ -737,14 +743,15 @@ export class QuotesService {
       where: {
         tenantId: context.tenantId,
         workspaceId: context.workspaceId,
+        quoteNumber: ILike(`${prefix}%`),
       },
     });
 
     return `${prefix}${String(count + 1).padStart(5, '0')}`;
   }
 
-  private buildQuotePdfFilename(quoteNumber: string) {
-    const safeQuoteNumber = quoteNumber
+  private buildQuotePdfFilename(quoteNumber: string | null) {
+    const safeQuoteNumber = (quoteNumber ?? '')
       .trim()
       .replace(/[^a-zA-Z0-9._-]+/g, '-')
       .replace(/^-+|-+$/g, '');
