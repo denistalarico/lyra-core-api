@@ -100,4 +100,14 @@ export class ProjectsCrudController {
   ) {
     return this.projectsCrudService.archive(getContextFromHeaders(headers), id);
   }
+
+  @Delete(':id/permanent')
+  @RequirePermission('agency.projects.project.delete.owner_only')
+  @DangerousAction()
+  remove(
+    @Headers() headers: Record<string, string | string[] | undefined>,
+    @Param('id') id: string,
+  ) {
+    return this.projectsCrudService.remove(getContextFromHeaders(headers), id);
+  }
 }

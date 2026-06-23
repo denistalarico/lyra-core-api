@@ -1,7 +1,15 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Brackets, Repository } from 'typeorm';
-import { AgencyProject, AgencyTask, AgencyProjectEvent } from '../entities';
+import {
+  AgencyProject,
+  AgencyTask,
+  AgencyProjectEvent,
+  AgencyTaskAttachment,
+  AgencyTaskChecklistItem,
+  AgencyTaskComment,
+  AgencyTaskTimeEntry,
+} from '../entities';
 import { TaskStatus, TaskVisibility } from '../enums';
 import {
   CreateTaskDto,
@@ -40,6 +48,18 @@ export class TasksCrudService {
 
     @InjectRepository(AgencyProject, 'agency')
     private readonly projectsRepository: Repository<AgencyProject>,
+
+    @InjectRepository(AgencyTaskAttachment, 'agency')
+    private readonly attachmentsRepository: Repository<AgencyTaskAttachment>,
+
+    @InjectRepository(AgencyTaskChecklistItem, 'agency')
+    private readonly checklistItemsRepository: Repository<AgencyTaskChecklistItem>,
+
+    @InjectRepository(AgencyTaskComment, 'agency')
+    private readonly commentsRepository: Repository<AgencyTaskComment>,
+
+    @InjectRepository(AgencyTaskTimeEntry, 'agency')
+    private readonly timeEntriesRepository: Repository<AgencyTaskTimeEntry>,
 
     private readonly filesService: FilesService,
     private readonly taskNotificationPublisher: TaskNotificationPublisher,
@@ -305,6 +325,33 @@ export class TasksCrudService {
     }
 
     return saved;
+  }
+
+  async remove(context: RequestContext, id: string) {
+    const task = await this.tasksRepository.findOne({
+      where: {
+        id,
+        tenantId: context.tenantId,
+        workspaceId: context.workspaceId,
+      },
+    });
+
+    if (!task) {
+      throw new NotFoundException('Task not found');
+    }
+
+    await this.checklistItemsRepository.delete({ taskId: id });
+    await this.commentsRepository.delete({ taskId: id });
+    await this.timeEntriesRepository.delete({ taskId: id });
+    await this.attachmentsRepository.delete({ taskId: id });
+
+    await this.tasksRepository.delete(task.id);
+
+    if (task.projectId) {
+      void this.recordProjectEvent(context, task.projectId, `Tarefa excluída permanentemente: "${task.title}"`);
+    }
+
+    return { deleted: true };
   }
 
   private applyFilters(qb: ReturnType<Repository<AgencyTask>['createQueryBuilder']>, query: ListTasksQueryDto) {

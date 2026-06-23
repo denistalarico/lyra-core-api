@@ -1,5 +1,11 @@
 import { Repository } from 'typeorm';
-import { AgencyProject, AgencyProjectEvent } from '../entities';
+import {
+  AgencyProject,
+  AgencyProjectAttachment,
+  AgencyProjectEvent,
+  AgencyProjectFollower,
+  AgencyTask,
+} from '../entities';
 import { ProjectsCrudService } from './projects-crud.service';
 
 describe('ProjectsCrudService collection scoping', () => {
@@ -51,9 +57,16 @@ function makeService() {
     save: jest.fn(async (value: AgencyProjectEvent) => value),
   };
 
+  const tasksRepository = {};
+  const followersRepository = {};
+  const attachmentsRepository = {};
+
   const service = new ProjectsCrudService(
     projectsRepository as unknown as Repository<AgencyProject>,
     eventsRepository as unknown as Repository<AgencyProjectEvent>,
+    tasksRepository as unknown as Repository<AgencyTask>,
+    followersRepository as unknown as Repository<AgencyProjectFollower>,
+    attachmentsRepository as unknown as Repository<AgencyProjectAttachment>,
   );
 
   return { service, queryBuilder };

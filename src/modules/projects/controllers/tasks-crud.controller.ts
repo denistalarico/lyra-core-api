@@ -207,6 +207,16 @@ export class TasksCrudController {
     return this.tasksCrudService.archive(getContextFromHeaders(headers), id);
   }
 
+  @Delete(':id/permanent')
+  @RequirePermission('agency.tasks.task.manage.department')
+  @DangerousAction()
+  remove(
+    @Headers() headers: Record<string, string | string[] | undefined>,
+    @Param('id') id: string,
+  ) {
+    return this.tasksCrudService.remove(getContextFromHeaders(headers), id);
+  }
+
   // ── Task Attachments ───────────────────────────────────────────────────────
 
   @Get(':id/attachments')

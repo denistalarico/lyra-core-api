@@ -1,7 +1,15 @@
 import { Repository } from 'typeorm';
 import { FilesService } from '../../../common/files/files.service';
 import { NotificationEventProcessorService } from '../../notifications/services';
-import { AgencyProject, AgencyProjectEvent, AgencyTask } from '../entities';
+import {
+  AgencyProject,
+  AgencyProjectEvent,
+  AgencyTask,
+  AgencyTaskAttachment,
+  AgencyTaskChecklistItem,
+  AgencyTaskComment,
+  AgencyTaskTimeEntry,
+} from '../entities';
 import { TaskPriority, TaskStatus, TaskVisibility } from '../enums';
 import { TaskNotificationPublisher } from './task-notification.publisher';
 import { TasksCrudService } from './tasks-crud.service';
@@ -256,10 +264,18 @@ function makeService(options: {
     }),
   };
   const publisher = options.publisher ?? makeTaskPublisher();
+  const attachmentsRepository = { delete: jest.fn() };
+  const checklistItemsRepository = { delete: jest.fn() };
+  const commentsRepository = { delete: jest.fn() };
+  const timeEntriesRepository = { delete: jest.fn() };
   const service = new TasksCrudService(
     tasksRepository as unknown as Repository<AgencyTask>,
     eventsRepository as unknown as Repository<AgencyProjectEvent>,
     projectsRepository as unknown as Repository<AgencyProject>,
+    attachmentsRepository as unknown as Repository<AgencyTaskAttachment>,
+    checklistItemsRepository as unknown as Repository<AgencyTaskChecklistItem>,
+    commentsRepository as unknown as Repository<AgencyTaskComment>,
+    timeEntriesRepository as unknown as Repository<AgencyTaskTimeEntry>,
     {} as FilesService,
     publisher,
   );

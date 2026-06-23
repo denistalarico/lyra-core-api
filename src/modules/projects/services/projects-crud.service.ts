@@ -1,7 +1,13 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Brackets, Repository } from 'typeorm';
-import { AgencyProject, AgencyProjectEvent } from '../entities';
+import {
+  AgencyProject,
+  AgencyProjectAttachment,
+  AgencyProjectEvent,
+  AgencyProjectFollower,
+  AgencyTask,
+} from '../entities';
 import { ProjectStatus } from '../enums';
 import {
   CreateProjectDto,
@@ -35,6 +41,15 @@ export class ProjectsCrudService {
 
     @InjectRepository(AgencyProjectEvent, 'agency')
     private readonly eventsRepository: Repository<AgencyProjectEvent>,
+
+    @InjectRepository(AgencyTask, 'agency')
+    private readonly tasksRepository: Repository<AgencyTask>,
+
+    @InjectRepository(AgencyProjectFollower, 'agency')
+    private readonly followersRepository: Repository<AgencyProjectFollower>,
+
+    @InjectRepository(AgencyProjectAttachment, 'agency')
+    private readonly attachmentsRepository: Repository<AgencyProjectAttachment>,
   ) {}
 
   private recordEvent(
@@ -291,5 +306,41 @@ export class ProjectsCrudService {
     void this.recordEvent(context, id, 'Projeto arquivado');
 
     return saved;
+  }
+
+  async remove(context: RequestContext, id: string) {
+    const project = await this.projectsRepository.findOne({
+      where: {
+        id,
+        tenantId: context.tenantId,
+        workspaceId: context.workspaceId,
+      },
+    });
+
+    if (!project) {
+      throw new NotFoundException('Project not found');
+    }
+
+    const remainingTasks = await this.tasksRepository.count({
+      where: {
+        projectId: id,
+        tenantId: context.tenantId,
+        workspaceId: context.workspaceId,
+      },
+    });
+
+    if (remainingTasks > 0) {
+      throw new BadRequestException(
+        'Não é possível excluir o projeto enquanto houver tarefas vinculadas. Exclua ou mova as tarefas primeiro.',
+      );
+    }
+
+    await this.eventsRepository.delete({ projectId: id });
+    await this.followersRepository.delete({ projectId: id });
+    await this.attachmentsRepository.delete({ projectId: id });
+
+    await this.projectsRepository.delete(project.id);
+
+    return { deleted: true };
   }
 }
