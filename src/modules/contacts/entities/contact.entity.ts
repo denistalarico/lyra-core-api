@@ -109,6 +109,9 @@ export class ContactEntity {
   @Column({ name: 'lifecycle_stage', type: 'varchar', length: 30, default: 'lead' })
   lifecycleStage!: ContactLifecycleStage;
 
+  @Column({ name: 'lifecycle_stages', type: 'text', array: true, default: '{}' })
+  lifecycleStages!: ContactLifecycleStage[];
+
   @Column({ type: 'varchar', length: 20, default: 'active' })
   status!: ContactStatus;
 

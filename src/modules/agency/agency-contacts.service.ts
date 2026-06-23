@@ -351,6 +351,11 @@ export class AgencyContactsService {
       await this.ensureContactExists(ctx, dto.companyContactId);
     }
 
+    const lifecycleStages =
+      dto.lifecycleStages && dto.lifecycleStages.length > 0
+        ? dto.lifecycleStages
+        : [dto.lifecycleStage ?? 'lead'];
+
     const contact = this.contactsRepo.create({
       tenantId: ctx.tenantId,
       workspaceId,
@@ -365,7 +370,8 @@ export class AgencyContactsService {
       companyContactId: dto.companyContactId ?? null,
       source: dto.source ?? 'manual',
       businessMode: dto.businessMode ?? 'agency_service',
-      lifecycleStage: dto.lifecycleStage ?? 'lead',
+      lifecycleStage: lifecycleStages[0],
+      lifecycleStages,
       status: dto.status ?? 'active',
       ownerUserId: dto.ownerUserId ?? ctx.userId ?? null,
       createdByUserId: ctx.userId ?? null,
@@ -573,8 +579,13 @@ export class AgencyContactsService {
     }
     if (dto.source !== undefined) contact.source = dto.source;
     if (dto.businessMode !== undefined) contact.businessMode = dto.businessMode;
-    if (dto.lifecycleStage !== undefined) {
+    if (dto.lifecycleStages !== undefined) {
+      const stages = dto.lifecycleStages.length > 0 ? dto.lifecycleStages : ['lead' as const];
+      contact.lifecycleStages = stages;
+      contact.lifecycleStage = stages[0];
+    } else if (dto.lifecycleStage !== undefined) {
       contact.lifecycleStage = dto.lifecycleStage;
+      contact.lifecycleStages = [dto.lifecycleStage];
     }
     if (dto.status !== undefined) contact.status = dto.status;
     if (dto.ownerUserId !== undefined) contact.ownerUserId = dto.ownerUserId;
@@ -678,7 +689,7 @@ export class AgencyContactsService {
     }
 
     if (query.lifecycleStage) {
-      builder.andWhere('contact.lifecycleStage = :lifecycleStage', {
+      builder.andWhere(':lifecycleStage = ANY(contact.lifecycleStages)', {
         lifecycleStage: query.lifecycleStage,
       });
     }

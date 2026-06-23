@@ -1,4 +1,5 @@
 import {
+  IsArray,
   IsIn,
   IsOptional,
   IsString,
@@ -98,6 +99,14 @@ export class PatchContactDto {
     'other',
   ])
   lifecycleStage?: ContactLifecycleStage;
+
+  @IsOptional()
+  @IsArray()
+  @IsIn(
+    ['lead', 'prospect', 'customer', 'partner', 'supplier', 'internal', 'other'],
+    { each: true },
+  )
+  lifecycleStages?: ContactLifecycleStage[];
 
   @IsOptional()
   @IsIn(['active', 'inactive', 'archived'])
