@@ -35,6 +35,7 @@ type BoardResponse<TCard> = {
 
 type ProjectBoardCard = AgencyProject & {
   taskCount: number;
+  clientName: string | null;
 };
 
 type TaskBoardCard = AgencyTask & {
@@ -111,10 +112,19 @@ export class ProjectBoardsService {
       }),
     ]);
 
-    const taskCounts = await this.getProjectTaskCounts(context, projects.map((project) => project.id));
+    const [taskCounts, clientNames] = await Promise.all([
+      this.getProjectTaskCounts(context, projects.map((project) => project.id)),
+      this.getProjectClientNames(
+        context,
+        projects
+          .map((project) => project.clientId)
+          .filter((clientId): clientId is string => Boolean(clientId)),
+      ),
+    ]);
     const cards = projects.map((project) =>
       Object.assign(project, {
         taskCount: taskCounts.get(project.id) ?? 0,
+        clientName: project.clientId ? clientNames.get(project.clientId) ?? null : null,
       }),
     );
 
@@ -239,6 +249,31 @@ export class ProjectBoardsService {
     });
 
     return counts;
+  }
+
+  private async getProjectClientNames(context: RequestContext, clientIds: string[]) {
+    const uniqueClientIds = Array.from(new Set(clientIds));
+    const names = new Map<string, string>();
+
+    if (!uniqueClientIds.length) {
+      return names;
+    }
+
+    const rows = await this.projectsRepository.manager
+      .createQueryBuilder()
+      .select('client.id', 'id')
+      .addSelect('client.display_name', 'name')
+      .from('agency_clients', 'client')
+      .where('client.tenant_id = :tenantId', { tenantId: context.tenantId })
+      .andWhere('client.workspace_id = :workspaceId', { workspaceId: context.workspaceId })
+      .andWhere('client.id IN (:...clientIds)', { clientIds: uniqueClientIds })
+      .getRawMany<{ id: string; name: string }>();
+
+    rows.forEach((row) => {
+      names.set(row.id, row.name);
+    });
+
+    return names;
   }
 
   private async withChecklistCounts(
