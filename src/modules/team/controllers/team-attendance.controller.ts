@@ -110,6 +110,38 @@ export class TeamAttendanceController {
     );
   }
 
+  @Get('members/me/access-code')
+  getOwnMemberAccessCodeStatus(
+    @Headers() headers: Record<string, string | string[] | undefined>,
+  ) {
+    return this.teamAttendanceService.getOwnMemberAccessCodeStatus(
+      getContextFromHeaders(headers),
+    );
+  }
+
+  @Patch('members/me/access-code')
+  updateOwnMemberAccessCode(
+    @Headers() headers: Record<string, string | string[] | undefined>,
+    @Body() dto: UpdateTeamMemberAccessCodeDto,
+  ) {
+    return this.teamAttendanceService.updateOwnMemberAccessCode(
+      getContextFromHeaders(headers),
+      dto,
+    );
+  }
+
+  @Get('members/:id/access-code')
+  @RequirePermission('agency.team.member.update.department')
+  getMemberAccessCodeStatus(
+    @Headers() headers: Record<string, string | string[] | undefined>,
+    @Param('id') id: string,
+  ) {
+    return this.teamAttendanceService.getMemberAccessCodeStatus(
+      getContextFromHeaders(headers),
+      id,
+    );
+  }
+
   @Patch('members/:id/access-code')
   @RequirePermission('agency.team.member.update.department')
   updateMemberAccessCode(

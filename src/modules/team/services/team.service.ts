@@ -89,6 +89,12 @@ function slugify(value: string) {
     .slice(0, 160);
 }
 
+function appendSlugSuffix(baseSlug: string, suffix: number) {
+  const safeBase = baseSlug || 'item';
+  const suffixText = `-${suffix}`;
+  return `${safeBase.slice(0, 160 - suffixText.length)}${suffixText}`;
+}
+
 @Injectable()
 export class TeamService {
   constructor(
@@ -182,12 +188,39 @@ export class TeamService {
     });
   }
 
-  createDepartment(ctx: RequestContext, dto: CreateTeamDepartmentDto) {
+  private async buildUniqueDepartmentSlug(
+    ctx: RequestContext,
+    name: string,
+    ignoreId?: string,
+  ) {
+    const baseSlug = slugify(name) || 'departamento';
+    let candidate = baseSlug;
+    let suffix = 2;
+
+    while (true) {
+      const existing = await this.departmentRepository.findOne({
+        where: {
+          tenantId: ctx.tenantId,
+          workspaceId: ctx.workspaceId,
+          slug: candidate,
+        },
+      });
+
+      if (!existing || existing.id === ignoreId) {
+        return candidate;
+      }
+
+      candidate = appendSlugSuffix(baseSlug, suffix);
+      suffix += 1;
+    }
+  }
+
+  async createDepartment(ctx: RequestContext, dto: CreateTeamDepartmentDto) {
     const entity = this.departmentRepository.create({
       tenantId: ctx.tenantId,
       workspaceId: ctx.workspaceId,
       name: dto.name,
-      slug: slugify(dto.name),
+      slug: await this.buildUniqueDepartmentSlug(ctx, dto.name),
       description: dto.description ?? null,
       color: dto.color ?? null,
       metadata: dto.metadata ?? {},
@@ -210,7 +243,7 @@ export class TeamService {
 
     if (dto.name !== undefined) {
       entity.name = dto.name;
-      entity.slug = slugify(dto.name);
+      entity.slug = await this.buildUniqueDepartmentSlug(ctx, dto.name, id);
     }
 
     if (dto.description !== undefined) entity.description = dto.description;
@@ -999,7 +1032,8 @@ export class TeamService {
       });
     }
 
-    return saved;
+    const [memberWithAvatar] = await this.withUserProfileAvatars(ctx, [saved]);
+    return memberWithAvatar;
   }
 
   async updateMember(
@@ -1064,7 +1098,8 @@ export class TeamService {
       }
     }
 
-    return saved;
+    const [memberWithAvatar] = await this.withUserProfileAvatars(ctx, [saved]);
+    return memberWithAvatar;
   }
 
   async uploadMemberAvatar(

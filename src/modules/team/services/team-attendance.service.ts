@@ -113,7 +113,7 @@ export class TeamAttendanceService {
     memberId: string,
     dto: UpdateTeamMemberAccessCodeDto,
   ) {
-    const member = await this.findMember(ctx, memberId);
+    const member = await this.findMemberWithAccessCode(ctx, memberId);
 
     if (dto.pinCode !== undefined) {
       member.pinCodeHash = dto.pinCode
@@ -134,6 +134,72 @@ export class TeamAttendanceService {
       displayName: saved.displayName,
       hasPinCode: Boolean(saved.pinCodeHash),
       barcodeValue: saved.barcodeValue,
+    };
+  }
+
+  async getMemberAccessCodeStatus(ctx: RequestContext, memberId: string) {
+    const member = await this.findMemberWithAccessCode(ctx, memberId);
+
+    return {
+      id: member.id,
+      displayName: member.displayName,
+      hasPinCode: Boolean(member.pinCodeHash),
+      barcodeValue: member.barcodeValue,
+      isSelf: member.userId === ctx.userId,
+    };
+  }
+
+  async getOwnMemberAccessCodeStatus(ctx: RequestContext) {
+    const member = await this.findOwnMemberWithAccessCode(ctx);
+
+    return {
+      id: member.id,
+      displayName: member.displayName,
+      hasPinCode: Boolean(member.pinCodeHash),
+      barcodeValue: member.barcodeValue,
+      isSelf: true,
+    };
+  }
+
+  async updateOwnMemberAccessCode(
+    ctx: RequestContext,
+    dto: UpdateTeamMemberAccessCodeDto,
+  ) {
+    const member = await this.findOwnMemberWithAccessCode(ctx);
+
+    if (dto.pinCode === undefined) {
+      throw new BadRequestException('PIN code is required');
+    }
+
+    if (member.pinCodeHash) {
+      if (!dto.currentPinCode) {
+        throw new BadRequestException('Current PIN code is required');
+      }
+
+      const currentHash = hashPinCode(
+        ctx.tenantId,
+        ctx.workspaceId,
+        dto.currentPinCode,
+      );
+
+      if (currentHash !== member.pinCodeHash) {
+        throw new BadRequestException('Current PIN code is invalid');
+      }
+    }
+
+    member.pinCodeHash = dto.pinCode
+      ? hashPinCode(ctx.tenantId, ctx.workspaceId, dto.pinCode)
+      : null;
+    member.updatedById = ctx.userId || null;
+
+    const saved = await this.memberRepository.save(member);
+
+    return {
+      id: saved.id,
+      displayName: saved.displayName,
+      hasPinCode: Boolean(saved.pinCodeHash),
+      barcodeValue: saved.barcodeValue,
+      isSelf: true,
     };
   }
 
@@ -302,6 +368,39 @@ export class TeamAttendanceService {
     });
 
     if (!member) throw new NotFoundException('Team member not found');
+    return member;
+  }
+
+  private async findMemberWithAccessCode(ctx: RequestContext, id: string) {
+    const member = await this.memberRepository
+      .createQueryBuilder('member')
+      .addSelect('member.pinCodeHash')
+      .where('member.tenant_id = :tenantId', { tenantId: ctx.tenantId })
+      .andWhere('member.workspace_id = :workspaceId', {
+        workspaceId: ctx.workspaceId,
+      })
+      .andWhere('member.id = :id', { id })
+      .getOne();
+
+    if (!member) throw new NotFoundException('Team member not found');
+    return member;
+  }
+
+  private async findOwnMemberWithAccessCode(ctx: RequestContext) {
+    const member = await this.memberRepository
+      .createQueryBuilder('member')
+      .addSelect('member.pinCodeHash')
+      .where('member.tenant_id = :tenantId', { tenantId: ctx.tenantId })
+      .andWhere('member.workspace_id = :workspaceId', {
+        workspaceId: ctx.workspaceId,
+      })
+      .andWhere('member.user_id = :userId', { userId: ctx.userId })
+      .getOne();
+
+    if (!member) {
+      throw new NotFoundException('Team member not found for current user');
+    }
+
     return member;
   }
 }

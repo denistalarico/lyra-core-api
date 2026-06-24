@@ -504,6 +504,11 @@ export class UpdateTeamMemberAccessCodeDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(40)
+  currentPinCode?: string | null;
+
+  @IsOptional()
+  @IsString()
   @MaxLength(180)
   barcodeValue?: string | null;
 }

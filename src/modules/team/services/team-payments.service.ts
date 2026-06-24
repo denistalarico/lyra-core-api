@@ -70,6 +70,27 @@ function money(value: unknown): string {
   return Number.isFinite(number) ? number.toFixed(2) : '0.00';
 }
 
+function readMonthlyDueDay(member: TeamMember) {
+  const metadata = (member.metadata ?? {}) as Record<string, unknown>;
+  const payment = metadata.payment as Record<string, unknown> | undefined;
+  const teamContract = metadata.teamContract as Record<string, unknown> | undefined;
+  const raw = payment?.monthlyDueDay ?? teamContract?.monthlyDueDay;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) return null;
+  return Math.min(31, Math.max(1, Math.trunc(parsed)));
+}
+
+function buildDueDateFromCompetence(competenceEnd: string, dueDay: number | null) {
+  if (!dueDay) return null;
+  const reference = new Date(competenceEnd);
+  if (Number.isNaN(reference.getTime())) return null;
+  const year = reference.getUTCFullYear();
+  const month = reference.getUTCMonth();
+  const lastDay = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+  const day = Math.min(dueDay, lastDay);
+  return new Date(Date.UTC(year, month, day)).toISOString().slice(0, 10);
+}
+
 function toNumber(value: unknown): number {
   const number = Number(value ?? 0);
   return Number.isFinite(number) ? number : 0;
@@ -819,7 +840,12 @@ export class TeamPaymentsService {
           financePaymentId: null,
           competenceStart: dto.competenceStart,
           competenceEnd: dto.competenceEnd,
-          dueDate: dto.dueDate ?? null,
+          dueDate:
+            dto.dueDate ??
+            buildDueDateFromCompetence(
+              dto.competenceEnd,
+              readMonthlyDueDay(member),
+            ),
           status: TeamPaymentStatus.Draft,
           calculationMode: calculated.calculationMode,
           baseAmount: calculated.baseAmount,
