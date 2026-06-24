@@ -6,7 +6,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Brackets, MoreThan, Repository } from 'typeorm';
+import { Brackets, In, MoreThan, Repository } from 'typeorm';
 import { AgencyActivity, AgencyActivityLink } from '../entities';
 import {
   ActivityEntityType,
@@ -161,7 +161,44 @@ export class ActivitiesService implements OnModuleInit {
     ];
   }
 
-  list(context: RequestContext, query: ListActivitiesQueryDto) {
+  /**
+   * Attaches each activity's links in a single batch query. The list endpoints
+   * return bare entities (no eager `links` relation), but the frontend relies on
+   * `activity.links` to map an activity back to its source entity (e.g. a CRM
+   * opportunity card). Without this, list results lose their links and the card
+   * appears to "drop" the activity on the next full reload.
+   */
+  private async attachLinks<T extends { id: string }>(
+    context: RequestContext,
+    activities: T[],
+  ): Promise<(T & { links: AgencyActivityLink[] })[]> {
+    if (activities.length === 0) {
+      return [];
+    }
+
+    const links = await this.linksRepository.find({
+      where: {
+        tenantId: context.tenantId,
+        workspaceId: context.workspaceId,
+        activityId: In(activities.map((activity) => activity.id)),
+      },
+      order: { createdAt: 'ASC' },
+    });
+
+    const linksByActivity = new Map<string, AgencyActivityLink[]>();
+    for (const link of links) {
+      const current = linksByActivity.get(link.activityId) ?? [];
+      current.push(link);
+      linksByActivity.set(link.activityId, current);
+    }
+
+    return activities.map((activity) => ({
+      ...activity,
+      links: linksByActivity.get(activity.id) ?? [],
+    }));
+  }
+
+  async list(context: RequestContext, query: ListActivitiesQueryDto) {
     const qb = this.activitiesRepository
       .createQueryBuilder('activity')
       .where('activity.tenant_id = :tenantId', { tenantId: context.tenantId })
@@ -175,10 +212,12 @@ export class ActivitiesService implements OnModuleInit {
 
     this.applyFilters(qb, query);
 
-    return qb
+    const activities = await qb
       .orderBy('activity.due_at', 'ASC', 'NULLS LAST')
       .addOrderBy('activity.updated_at', 'DESC')
       .getMany();
+
+    return this.attachLinks(context, activities);
   }
 
   async listByContext(
@@ -186,7 +225,7 @@ export class ActivitiesService implements OnModuleInit {
     entityType: ActivityEntityType,
     entityId: string,
   ) {
-    return this.activitiesRepository
+    const activities = await this.activitiesRepository
       .createQueryBuilder('activity')
       .innerJoin(
         AgencyActivityLink,
@@ -203,9 +242,11 @@ export class ActivitiesService implements OnModuleInit {
       .orderBy('activity.due_at', 'ASC', 'NULLS LAST')
       .addOrderBy('activity.updated_at', 'DESC')
       .getMany();
+
+    return this.attachLinks(context, activities);
   }
 
-  listMyActivities(context: RequestContext, query: ListActivitiesQueryDto) {
+  async listMyActivities(context: RequestContext, query: ListActivitiesQueryDto) {
     const qb = this.activitiesRepository
       .createQueryBuilder('activity')
       .where('activity.tenant_id = :tenantId', { tenantId: context.tenantId })
@@ -231,13 +272,15 @@ export class ActivitiesService implements OnModuleInit {
 
     this.applyFilters(qb, query);
 
-    return qb
+    const activities = await qb
       .orderBy('activity.due_at', 'ASC', 'NULLS LAST')
       .addOrderBy('activity.updated_at', 'DESC')
       .getMany();
+
+    return this.attachLinks(context, activities);
   }
 
-  listOverdueActivities(
+  async listOverdueActivities(
     context: RequestContext,
     query: ListActivitiesQueryDto,
   ) {
@@ -262,10 +305,12 @@ export class ActivitiesService implements OnModuleInit {
 
     this.applyFilters(qb, query);
 
-    return qb
+    const activities = await qb
       .orderBy('activity.due_at', 'ASC')
       .addOrderBy('activity.updated_at', 'DESC')
       .getMany();
+
+    return this.attachLinks(context, activities);
   }
 
   async getSummary(context: RequestContext) {
