@@ -398,6 +398,41 @@ describe('PermissionScopeEvaluatorService', () => {
     ).resolves.toBeUndefined();
   });
 
+  it('allows project stage management without treating the stage id as a project', async () => {
+    const { service, projectsRepository } = createService();
+
+    await expect(
+      service.assertScope(
+        { ...baseContext, role: PlatformRoleKey.Manager },
+        'agency.projects.project.update.department',
+        {
+          routePath: '/agency/projects/project-stages/:id',
+          params: { id: 'stage-1' },
+        },
+      ),
+    ).resolves.toBeUndefined();
+
+    // The stage id must NOT be looked up against the projects table.
+    expect(projectsRepository.findOne).not.toHaveBeenCalled();
+  });
+
+  it('allows task stage management without treating the stage id as a task', async () => {
+    const { service, tasksRepository } = createService();
+
+    await expect(
+      service.assertScope(
+        { ...baseContext, role: PlatformRoleKey.Manager },
+        'agency.tasks.task.manage.department',
+        {
+          routePath: '/agency/projects/task-stages/:id',
+          params: { id: 'stage-1' },
+        },
+      ),
+    ).resolves.toBeUndefined();
+
+    expect(tasksRepository.findOne).not.toHaveBeenCalled();
+  });
+
   it('allows calendar self access for the event owner', async () => {
     const { service, calendarEventsRepository } = createService();
     calendarEventsRepository.findOne.mockResolvedValue({

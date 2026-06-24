@@ -477,6 +477,12 @@ export class PermissionScopeEvaluatorService {
       return scopeKey === 'assigned';
     }
 
+    // Workspace-level stage configuration has no owner/department to scope by;
+    // holding the permission (already checked by `can`) is sufficient.
+    if (resource.kind === 'stage_config') {
+      return true;
+    }
+
     const project = resource.record as AgencyProject | undefined;
 
     if (!project) {
@@ -518,6 +524,10 @@ export class PermissionScopeEvaluatorService {
     scopeKey: string,
     resource: ResourceSummary,
   ): Promise<boolean> {
+    if (resource.kind === 'stage_config') {
+      return true;
+    }
+
     if (resource.kind === 'task_collection') {
       return scopeKey === 'self' || scopeKey === 'assigned';
     }
@@ -1461,6 +1471,19 @@ export class PermissionScopeEvaluatorService {
       };
     }
 
+    // Stage routes (project-stages/:id, task-stages/:id, my-task-stages/:id)
+    // carry a STAGE id in `:id`, not a project id. Stages are workspace-level
+    // configuration with no owner, so they must not be resolved as a project
+    // (doing so makes `exists` false and trips the out-of-scope guard).
+    if (path.includes('-stages')) {
+      return {
+        exists: false,
+        kind: 'stage_config',
+        id: null,
+        collectionSafe: true,
+      };
+    }
+
     if (!projectId) {
       return { exists: false, kind: 'project', id: null };
     }
@@ -1494,9 +1517,20 @@ export class PermissionScopeEvaluatorService {
     const entryId = firstParam(params.entryId);
     const taskId = firstParam(params.taskId) ?? firstParam(params.id);
 
+    // Stage routes (task-stages/:id, my-task-stages/:id) carry a STAGE id in
+    // `:id`, not a task id. Treat them as workspace-level stage configuration so
+    // the `:id` is not mistaken for a task and tripped by the out-of-scope guard.
+    if (path.includes('-stages')) {
+      return {
+        exists: false,
+        kind: 'stage_config',
+        id: null,
+        collectionSafe: true,
+      };
+    }
+
     if (
       path.includes('tasks/my') ||
-      path.includes('my-task-stages') ||
       path.includes('time-entries/stop-active')
     ) {
       return {
