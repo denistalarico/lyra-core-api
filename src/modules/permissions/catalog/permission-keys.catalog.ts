@@ -137,7 +137,7 @@ const RAW_PERMISSIONS: RawPermission[] = [
   ['agency.projects.project.archive.own', MANAGER_UP],
   ['agency.projects.project.archive.department', MANAGER_UP],
   ['agency.projects.project.delete.owner_only', OWNER_ONLY, true],
-  ['agency.projects.stages.manage.admin', ADMIN_UP],
+  ['agency.projects.stages.manage.admin', MANAGER_UP],
   ['agency.tasks.task.create.assigned', ALL_ROLES],
   ['agency.tasks.task.update.assigned', ALL_ROLES],
   ['agency.tasks.task.manage.department', MANAGER_UP],
