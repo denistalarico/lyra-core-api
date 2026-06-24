@@ -53,7 +53,10 @@ export class ProjectStagesController {
   constructor(private readonly projectStagesService: ProjectStagesService) {}
 
   @Get('project-stages')
-  @RequirePermission('agency.projects.stages.manage.admin')
+  @RequireAnyPermission(
+    'agency.projects.stages.manage.admin',
+    'agency.projects.project.update.department',
+  )
   listProjectStages(
     @Headers() headers: Record<string, string | string[] | undefined>,
   ) {
@@ -63,7 +66,10 @@ export class ProjectStagesController {
   }
 
   @Post('project-stages')
-  @RequirePermission('agency.projects.stages.manage.admin')
+  @RequireAnyPermission(
+    'agency.projects.stages.manage.admin',
+    'agency.projects.project.update.department',
+  )
   createProjectStage(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Body() dto: CreateProjectStageDto,
@@ -75,7 +81,10 @@ export class ProjectStagesController {
   }
 
   @Patch('project-stages/:id')
-  @RequirePermission('agency.projects.stages.manage.admin')
+  @RequireAnyPermission(
+    'agency.projects.stages.manage.admin',
+    'agency.projects.project.update.department',
+  )
   updateProjectStage(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('id') id: string,
@@ -89,7 +98,10 @@ export class ProjectStagesController {
   }
 
   @Delete('project-stages/:id')
-  @RequirePermission('agency.projects.stages.manage.admin')
+  @RequireAnyPermission(
+    'agency.projects.stages.manage.admin',
+    'agency.projects.project.archive.department',
+  )
   @DangerousAction()
   archiveProjectStage(
     @Headers() headers: Record<string, string | string[] | undefined>,
@@ -117,7 +129,10 @@ export class ProjectStagesController {
   }
 
   @Post('task-stages')
-  @RequirePermission('agency.projects.stages.manage.admin')
+  @RequireAnyPermission(
+    'agency.projects.stages.manage.admin',
+    'agency.tasks.task.manage.department',
+  )
   createTaskStage(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Body() dto: CreateTaskStageDto,
@@ -129,7 +144,10 @@ export class ProjectStagesController {
   }
 
   @Patch('task-stages/:id')
-  @RequirePermission('agency.projects.stages.manage.admin')
+  @RequireAnyPermission(
+    'agency.projects.stages.manage.admin',
+    'agency.tasks.task.manage.department',
+  )
   updateTaskStage(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('id') id: string,
@@ -143,7 +161,10 @@ export class ProjectStagesController {
   }
 
   @Delete('task-stages/:id')
-  @RequirePermission('agency.projects.stages.manage.admin')
+  @RequireAnyPermission(
+    'agency.projects.stages.manage.admin',
+    'agency.tasks.task.manage.department',
+  )
   @DangerousAction()
   archiveTaskStage(
     @Headers() headers: Record<string, string | string[] | undefined>,
