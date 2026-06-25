@@ -236,8 +236,9 @@ export class FinanceService {
   }
 
   createCategory(ctx: FinanceRequestContext, dto: CreateFinanceCategoryDto) {
+    const { description: _description, ...categoryData } = dto;
     const category = this.categoriesRepo.create({
-      ...dto,
+      ...categoryData,
       tenantId: ctx.tenantId,
       workspaceId: ctx.workspaceId,
     });
@@ -254,7 +255,8 @@ export class FinanceService {
       where: { id, tenantId: ctx.tenantId, workspaceId: ctx.workspaceId },
     });
     if (!category) throw new NotFoundException('Finance category not found');
-    Object.assign(category, dto);
+    const { description: _description, ...categoryData } = dto;
+    Object.assign(category, categoryData);
     return this.categoriesRepo.save(category);
   }
 

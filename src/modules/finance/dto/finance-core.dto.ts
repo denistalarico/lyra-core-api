@@ -185,6 +185,10 @@ export class CreateFinanceCategoryDto {
   @IsString()
   @MaxLength(24)
   color?: string | null;
+
+  @IsOptional()
+  @IsString()
+  description?: string | null;
 }
 
 export class UpdateFinanceCategoryDto {
@@ -209,6 +213,10 @@ export class UpdateFinanceCategoryDto {
   @IsString()
   @MaxLength(24)
   color?: string | null;
+
+  @IsOptional()
+  @IsString()
+  description?: string | null;
 }
 
 export class CreateFinanceTagDto {
