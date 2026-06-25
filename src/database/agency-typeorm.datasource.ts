@@ -71,6 +71,7 @@ import { AddAgencyContactSources1782171364936 } from './migrations/1782171364936
 import { AllowDraftQuotesWithoutNumber1782171424936 } from './migrations/1782171424936-allow-draft-quotes-without-number';
 import { GrantManagerProjectsStagesPermission1782260931927 } from './migrations/1782260931927-grant-manager-projects-stages-permission';
 import { BackfillDocumentLayoutSystemTemplates1782300000000 } from './migrations/1782300000000-backfill-document-layout-system-templates';
+import { AddQuoteItemTaxType1782400000000 } from './migrations/1782400000000-add-quote-item-tax-type';
 
 export const AgencyDataSource = new DataSource({
   type: 'postgres',
@@ -155,5 +156,6 @@ export const AgencyDataSource = new DataSource({
     AllowDraftQuotesWithoutNumber1782171424936,
     GrantManagerProjectsStagesPermission1782260931927,
     BackfillDocumentLayoutSystemTemplates1782300000000,
+    AddQuoteItemTaxType1782400000000,
   ],
 });

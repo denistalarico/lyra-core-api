@@ -189,6 +189,41 @@ describe('PermissionScopeEvaluatorService', () => {
     ).rejects.toBeInstanceOf(ForbiddenException);
   });
 
+  it('allows contact identification-type management without treating the config id as a contact', async () => {
+    const { service, agencyContactsRepository } = createService();
+
+    await expect(
+      service.assertScope(
+        { ...baseContext, role: PlatformRoleKey.Manager },
+        'shared.contacts.update.client',
+        {
+          routePath: '/agency/contacts/identification-types/:id',
+          params: { id: 'identification-type-1' },
+        },
+      ),
+    ).resolves.toBeUndefined();
+
+    // The config id must NOT be looked up against the contacts table.
+    expect(agencyContactsRepository.findOne).not.toHaveBeenCalled();
+  });
+
+  it('allows deleting a contact source as the owner without an out-of-scope error', async () => {
+    const { service, agencyContactsRepository } = createService();
+
+    await expect(
+      service.assertScope(
+        { ...baseContext, role: PlatformRoleKey.Owner },
+        'shared.contacts.delete.owner_only',
+        {
+          routePath: '/agency/contacts/sources/:id',
+          params: { id: 'source-1' },
+        },
+      ),
+    ).resolves.toBeUndefined();
+
+    expect(agencyContactsRepository.findOne).not.toHaveBeenCalled();
+  });
+
   it('allows assigned LeadFlow inbox conversation access', async () => {
     const { service, inboxConversationsRepository } = createService();
     inboxConversationsRepository.findOne.mockResolvedValue({

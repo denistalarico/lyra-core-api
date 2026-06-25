@@ -365,6 +365,12 @@ export class PermissionScopeEvaluatorService {
     scopeKey: string,
     resource: ResourceSummary,
   ): Promise<boolean> {
+    // Workspace-level contact configuration has no owner/department to scope
+    // by; holding the permission (already checked by `can`) is sufficient.
+    if (resource.kind === 'contact_config') {
+      return true;
+    }
+
     if (scopeKey === 'assigned') {
       const contact = resource.record as ContactEntity | undefined;
 
@@ -1222,6 +1228,31 @@ export class PermissionScopeEvaluatorService {
     const params = request?.params ?? {};
     const query = request?.query ?? {};
     const path = request?.routePath ?? '';
+
+    // Workspace-level contact configuration (identification types, sources,
+    // banks, bank accounts, tags, segments) is managed from the settings
+    // screens. The `:id`/`:tagId`/`:segmentId` carried here is a CONFIG id,
+    // not a contact id, so it must not be resolved as a contact (doing so
+    // makes `exists` false and trips the out-of-scope guard). These routes
+    // live directly under `agency/contacts/...`, never under `:contactId`.
+    const isContactConfigRoute =
+      !path.includes(':contactId') &&
+      (path.includes('identification-types') ||
+        path.includes('/sources') ||
+        path.includes('/banks') ||
+        path.includes('bank-accounts') ||
+        path.includes('/tags') ||
+        path.includes('/segments'));
+
+    if (isContactConfigRoute) {
+      return {
+        exists: false,
+        kind: 'contact_config',
+        id: null,
+        collectionSafe: true,
+      };
+    }
+
     const contactId =
       firstParam(params.contactId) ??
       firstParam(params.id) ??
