@@ -110,6 +110,8 @@ export class CreateQuotesCore1760001007000 implements MigrationInterface {
         "discount_type" varchar(20) NOT NULL DEFAULT 'none',
         "discount_value" int NOT NULL DEFAULT 0,
         "tax_rate_bps" int NOT NULL DEFAULT 0,
+        "tax_type" varchar(20) NOT NULL DEFAULT 'percentage',
+        "tax_value" int NOT NULL DEFAULT 0,
         "subtotal_cents" int NOT NULL DEFAULT 0,
         "discount_cents" int NOT NULL DEFAULT 0,
         "tax_cents" int NOT NULL DEFAULT 0,

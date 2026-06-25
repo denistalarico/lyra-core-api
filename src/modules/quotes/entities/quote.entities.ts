@@ -26,6 +26,7 @@ export type QuoteItemType =
   | 'custom';
 
 export type QuoteDiscountType = 'none' | 'fixed' | 'percentage';
+export type QuoteTaxType = 'fixed' | 'percentage';
 
 export type QuoteTemplateStatus = 'active' | 'inactive' | 'archived';
 
@@ -275,6 +276,12 @@ export class QuoteItemEntity {
 
   @Column({ name: 'tax_rate_bps', type: 'int', default: 0 })
   taxRateBps!: number;
+
+  @Column({ name: 'tax_type', type: 'varchar', length: 20, default: 'percentage' })
+  taxType!: QuoteTaxType;
+
+  @Column({ name: 'tax_value', type: 'int', default: 0 })
+  taxValue!: number;
 
   @Column({ name: 'subtotal_cents', type: 'int', default: 0 })
   subtotalCents!: number;

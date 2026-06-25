@@ -359,6 +359,8 @@ export class QuotesService {
           discountType: item.discountType,
           discountValue: item.discountValue,
           taxRateBps: item.taxRateBps,
+          taxType: item.taxType,
+          taxValue: item.taxValue,
           subtotalCents: item.subtotalCents,
           discountCents: item.discountCents,
           taxCents: item.taxCents,
@@ -469,6 +471,8 @@ export class QuotesService {
       discountType: dto.discountType ?? 'none',
       discountValue: dto.discountValue ?? 0,
       taxRateBps: dto.taxRateBps ?? 0,
+      taxType: dto.taxType ?? 'percentage',
+      taxValue: dto.taxValue ?? dto.taxRateBps ?? 0,
     });
 
     const item = this.itemsRepo.create({
@@ -487,6 +491,8 @@ export class QuotesService {
       discountType: dto.discountType ?? 'none',
       discountValue: dto.discountValue ?? 0,
       taxRateBps: dto.taxRateBps ?? 0,
+      taxType: dto.taxType ?? 'percentage',
+      taxValue: dto.taxValue ?? dto.taxRateBps ?? 0,
       subtotalCents: calculated.subtotalCents,
       discountCents: calculated.discountCents,
       taxCents: calculated.taxCents,
@@ -524,16 +530,12 @@ export class QuotesService {
       throw new NotFoundException('Quote item not found.');
     }
 
+    const definedUpdates = Object.fromEntries(
+      Object.entries(dto).filter(([, value]) => value !== undefined),
+    );
+
     Object.assign(item, {
-      ...dto,
-      salesItemId:
-        dto.salesItemId === undefined ? item.salesItemId : dto.salesItemId,
-      description:
-        dto.description === undefined ? item.description : dto.description,
-      recurrenceInterval:
-        dto.recurrenceInterval === undefined
-          ? item.recurrenceInterval
-          : dto.recurrenceInterval,
+      ...definedUpdates,
       metadata: dto.metadata
         ? { ...(item.metadata ?? {}), ...dto.metadata }
         : item.metadata,
@@ -547,6 +549,8 @@ export class QuotesService {
       discountType: item.discountType,
       discountValue: item.discountValue,
       taxRateBps: item.taxRateBps,
+      taxType: item.taxType,
+      taxValue: item.taxValue,
     });
 
     Object.assign(item, calculated);
@@ -767,6 +771,8 @@ export class QuotesService {
     discountType: 'none' | 'fixed' | 'percentage';
     discountValue: number;
     taxRateBps: number;
+    taxType?: 'fixed' | 'percentage';
+    taxValue?: number;
   }) {
     const quantity = Math.max(1, input.quantity);
     const baseSubtotal =
@@ -774,19 +780,22 @@ export class QuotesService {
     const recurringTotalCents = quantity * input.recurringPriceCents;
 
     let discountCents = 0;
+    const discountableSubtotal = Math.max(0, baseSubtotal);
 
     if (input.discountType === 'fixed') {
-      discountCents = Math.min(input.discountValue, baseSubtotal);
+      discountCents = Math.min(input.discountValue, discountableSubtotal);
     }
 
     if (input.discountType === 'percentage') {
-      discountCents = Math.floor((baseSubtotal * input.discountValue) / 10000);
+      discountCents = Math.floor((discountableSubtotal * input.discountValue) / 10000);
     }
 
-    const subtotalAfterDiscount = Math.max(0, baseSubtotal - discountCents);
-    const taxCents = Math.floor(
-      (subtotalAfterDiscount * input.taxRateBps) / 10000,
-    );
+    const subtotalAfterDiscount = baseSubtotal - discountCents;
+    const taxableSubtotal = Math.max(0, subtotalAfterDiscount);
+    const taxCents =
+      input.taxType === 'fixed'
+        ? input.taxValue ?? 0
+        : Math.floor((taxableSubtotal * input.taxRateBps) / 10000);
     const totalCents = subtotalAfterDiscount + taxCents;
 
     return {

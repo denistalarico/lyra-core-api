@@ -15,6 +15,7 @@ import type {
   QuoteStatus,
   QuoteTemplateStatus,
   QuoteTemplateType,
+  QuoteTaxType,
 } from '../entities/quote.entities';
 
 export class QuoteListQueryDto {
@@ -156,7 +157,6 @@ export class CreateQuoteItemDto {
 
   @IsOptional()
   @IsInt()
-  @Min(0)
   unitPriceCents?: number;
 
   @IsOptional()
@@ -182,6 +182,15 @@ export class CreateQuoteItemDto {
   @IsInt()
   @Min(0)
   taxRateBps?: number;
+
+  @IsOptional()
+  @IsIn(['fixed', 'percentage'])
+  taxType?: QuoteTaxType;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  taxValue?: number;
 
   @IsOptional()
   @IsString()
@@ -227,7 +236,6 @@ export class UpdateQuoteItemDto {
 
   @IsOptional()
   @IsInt()
-  @Min(0)
   unitPriceCents?: number;
 
   @IsOptional()
@@ -253,6 +261,15 @@ export class UpdateQuoteItemDto {
   @IsInt()
   @Min(0)
   taxRateBps?: number;
+
+  @IsOptional()
+  @IsIn(['fixed', 'percentage'])
+  taxType?: QuoteTaxType;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  taxValue?: number;
 
   @IsOptional()
   @IsString()
