@@ -1,4 +1,9 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import {
@@ -9,6 +14,7 @@ import {
   CreateFinanceJournalDto,
   CreateFinanceTagDto,
   UpdateFinanceAccountDto,
+  UpdateFinanceBankAccountDto,
   UpdateFinanceCategoryDto,
   UpdateFinanceCostCenterDto,
   UpdateFinanceJournalDto,
@@ -25,12 +31,14 @@ import {
   FinanceInvoice,
   FinanceJournal,
   FinanceMetricSnapshot,
+  FinancePayment,
   FinanceProfitabilityRule,
   FinanceRecurringProfile,
   FinanceReportSnapshot,
   FinanceSetting,
   FinanceTag,
 } from '../entities';
+import { FinanceAccountType, FinanceBankAccountType } from '../enums';
 import { FinanceRequestContext } from './finance-context';
 
 @Injectable()
@@ -56,6 +64,8 @@ export class FinanceService {
     private readonly costCentersRepo: Repository<FinanceCostCenter>,
     @InjectRepository(FinanceBankAccount, 'agency')
     private readonly bankAccountsRepo: Repository<FinanceBankAccount>,
+    @InjectRepository(FinancePayment, 'agency')
+    private readonly paymentsRepo: Repository<FinancePayment>,
     @InjectRepository(FinanceProfitabilityRule, 'agency')
     private readonly profitabilityRulesRepo: Repository<FinanceProfitabilityRule>,
     @InjectRepository(FinanceMetricSnapshot, 'agency')
@@ -339,15 +349,35 @@ export class FinanceService {
     });
   }
 
-  createBankAccount(
+  async getBankAccount(ctx: FinanceRequestContext, id: string) {
+    const bankAccount = await this.bankAccountsRepo.findOne({
+      where: { id, tenantId: ctx.tenantId, workspaceId: ctx.workspaceId },
+    });
+    if (!bankAccount) throw new NotFoundException('Bank account not found');
+    return bankAccount;
+  }
+
+  async createBankAccount(
     ctx: FinanceRequestContext,
     dto: CreateFinanceBankAccountDto,
   ) {
+    const type = dto.type ?? FinanceBankAccountType.Checking;
+    await this.assertChartAccountCompatible(ctx, type, dto.accountId ?? null);
+
+    const currency = (dto.currency ?? 'BRL').toUpperCase();
     const bankAccount = this.bankAccountsRepo.create({
       ...dto,
+      type,
+      currency,
+      bankDetails: dto.bankDetails ?? {},
+      cardDetails: dto.cardDetails ?? {},
       tenantId: ctx.tenantId,
       workspaceId: ctx.workspaceId,
     });
+
+    if (bankAccount.isPrimary) {
+      await this.clearPrimaryBankAccounts(ctx, currency, null);
+    }
 
     return this.bankAccountsRepo.save(bankAccount);
   }
@@ -355,14 +385,124 @@ export class FinanceService {
   async updateBankAccount(
     ctx: FinanceRequestContext,
     id: string,
-    dto: import('../dto').UpdateFinanceBankAccountDto,
+    dto: UpdateFinanceBankAccountDto,
   ) {
-    const bankAccount = await this.bankAccountsRepo.findOne({
-      where: { id, tenantId: ctx.tenantId, workspaceId: ctx.workspaceId },
-    });
-    if (!bankAccount) throw new NotFoundException('Bank account not found');
-    Object.assign(bankAccount, dto);
+    const bankAccount = await this.getBankAccount(ctx, id);
+
+    const nextType = dto.type ?? bankAccount.type;
+    const nextAccountId =
+      dto.accountId !== undefined ? dto.accountId : bankAccount.accountId;
+    if (dto.type !== undefined || dto.accountId !== undefined) {
+      await this.assertChartAccountCompatible(ctx, nextType, nextAccountId);
+    }
+
+    // Assign only the scalar fields that were actually provided so we never
+    // wipe columns that were omitted from the PATCH payload.
+    const { bankDetails, cardDetails, ...scalars } = dto;
+    const target = bankAccount as unknown as Record<string, unknown>;
+    for (const [key, value] of Object.entries(scalars)) {
+      if (value !== undefined) {
+        target[key] = value;
+      }
+    }
+    if (dto.currency !== undefined) {
+      bankAccount.currency = dto.currency.toUpperCase();
+    }
+
+    // JSON columns are merged so partial updates keep existing identifiers.
+    if (bankDetails !== undefined) {
+      bankAccount.bankDetails = { ...bankAccount.bankDetails, ...bankDetails };
+    }
+    if (cardDetails !== undefined) {
+      bankAccount.cardDetails = { ...bankAccount.cardDetails, ...cardDetails };
+    }
+
+    if (dto.isPrimary === true) {
+      await this.clearPrimaryBankAccounts(ctx, bankAccount.currency, id);
+    }
+
     return this.bankAccountsRepo.save(bankAccount);
+  }
+
+  async deleteBankAccount(ctx: FinanceRequestContext, id: string) {
+    const bankAccount = await this.getBankAccount(ctx, id);
+
+    const movements = await this.paymentsRepo.count({
+      where: {
+        tenantId: ctx.tenantId,
+        workspaceId: ctx.workspaceId,
+        bankAccountId: id,
+      },
+    });
+    if (movements > 0) {
+      throw new ConflictException(
+        'Esta conta possui movimentações e não pode ser excluída. Inative-a para impedir novos lançamentos.',
+      );
+    }
+
+    await this.bankAccountsRepo.remove(bankAccount);
+    return { success: true, id };
+  }
+
+  private async assertChartAccountCompatible(
+    ctx: FinanceRequestContext,
+    type: FinanceBankAccountType,
+    accountId: string | null,
+  ) {
+    if (!accountId) return;
+
+    const account = await this.accountsRepo.findOne({
+      where: {
+        id: accountId,
+        tenantId: ctx.tenantId,
+        workspaceId: ctx.workspaceId,
+      },
+    });
+    if (!account) {
+      throw new BadRequestException(
+        'A conta no plano de contas informada não foi encontrada.',
+      );
+    }
+
+    const requiresAsset =
+      type === FinanceBankAccountType.Checking ||
+      type === FinanceBankAccountType.Savings ||
+      type === FinanceBankAccountType.Cash ||
+      type === FinanceBankAccountType.PaymentProvider;
+    const requiresLiability = type === FinanceBankAccountType.CreditCard;
+
+    if (requiresAsset && account.type !== FinanceAccountType.Asset) {
+      throw new BadRequestException(
+        'A conta no plano de contas deve ser do tipo Ativo para este tipo de conta financeira.',
+      );
+    }
+    if (requiresLiability && account.type !== FinanceAccountType.Liability) {
+      throw new BadRequestException(
+        'Cartões devem usar uma conta contábil do tipo Passivo (ex.: Cartões de crédito a pagar).',
+      );
+    }
+    // "Outro" (Other) accepts both asset and liability accounts.
+  }
+
+  private async clearPrimaryBankAccounts(
+    ctx: FinanceRequestContext,
+    currency: string,
+    exceptId: string | null,
+  ) {
+    const qb = this.bankAccountsRepo
+      .createQueryBuilder()
+      .update(FinanceBankAccount)
+      .set({ isPrimary: false })
+      .where('tenant_id = :tenantId', { tenantId: ctx.tenantId })
+      .andWhere('workspace_id = :workspaceId', {
+        workspaceId: ctx.workspaceId,
+      })
+      .andWhere('currency = :currency', { currency })
+      .andWhere('is_primary = true');
+    if (exceptId) {
+      qb.andWhere('id != :exceptId', { exceptId });
+    }
+    await qb.execute();
   }
 
   async getProfitabilityRules(ctx: FinanceRequestContext) {

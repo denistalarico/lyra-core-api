@@ -72,6 +72,7 @@ import { AllowDraftQuotesWithoutNumber1782171424936 } from './migrations/1782171
 import { GrantManagerProjectsStagesPermission1782260931927 } from './migrations/1782260931927-grant-manager-projects-stages-permission';
 import { BackfillDocumentLayoutSystemTemplates1782300000000 } from './migrations/1782300000000-backfill-document-layout-system-templates';
 import { AddQuoteItemTaxType1782400000000 } from './migrations/1782400000000-add-quote-item-tax-type';
+import { EvolveFinanceBankAccounts1782500000000 } from './migrations/1782500000000-evolve-finance-bank-accounts';
 
 export const AgencyDataSource = new DataSource({
   type: 'postgres',
@@ -157,5 +158,6 @@ export const AgencyDataSource = new DataSource({
     GrantManagerProjectsStagesPermission1782260931927,
     BackfillDocumentLayoutSystemTemplates1782300000000,
     AddQuoteItemTaxType1782400000000,
+    EvolveFinanceBankAccounts1782500000000,
   ],
 });

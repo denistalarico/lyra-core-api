@@ -382,6 +382,12 @@ export class FinanceController {
     return this.financeService.listBankAccounts(getFinanceContext(req));
   }
 
+  @Get('bank-accounts/:id')
+  @RequireFinancePermission('agency.finance.transactions.view.finance_or_owner')
+  getBankAccount(@Req() req: Request, @Param('id') id: string) {
+    return this.financeService.getBankAccount(getFinanceContext(req), id);
+  }
+
   @Post('bank-accounts')
   @RequireFinancePermission('agency.finance.transactions.manage.finance_or_owner')
   createBankAccount(
@@ -399,6 +405,13 @@ export class FinanceController {
     @Body() dto: UpdateFinanceBankAccountDto,
   ) {
     return this.financeService.updateBankAccount(getFinanceContext(req), id, dto);
+  }
+
+  @Delete('bank-accounts/:id')
+  @DangerousAction()
+  @RequireFinancePermission('agency.finance.transactions.manage.finance_or_owner')
+  deleteBankAccount(@Req() req: Request, @Param('id') id: string) {
+    return this.financeService.deleteBankAccount(getFinanceContext(req), id);
   }
 
 

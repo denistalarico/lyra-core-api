@@ -7,9 +7,12 @@ import {
   IsOptional,
   IsString,
   IsUUID,
+  Max,
   MaxLength,
   Min,
+  ValidateNested,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 import {
   FinanceAccountStatus,
   FinanceAccountType,
@@ -258,6 +261,106 @@ export class UpdateFinanceCostCenterDto {
   relatedEntityId?: string | null;
 }
 
+export class FinanceBankDetailsDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  bankCode?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  branchNumber?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(10)
+  branchDigit?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  accountNumber?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(10)
+  accountDigit?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(180)
+  accountHolderName?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  accountHolderDocument?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  iban?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  swiftBic?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  routingNumber?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(60)
+  internationalAccountNumber?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(60)
+  localBankIdentifier?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(180)
+  pixKey?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  pixKeyType?: string | null;
+}
+
+export class FinanceCardDetailsDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  issuer?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(4)
+  lastFour?: string | null;
+
+  @IsOptional()
+  @IsNumberString()
+  creditLimit?: string | null;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(31)
+  statementClosingDay?: number | null;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(31)
+  paymentDueDay?: number | null;
+}
+
 export class CreateFinanceBankAccountDto {
   @IsString()
   @MaxLength(160)
@@ -279,12 +382,52 @@ export class CreateFinanceBankAccountDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(2)
+  countryCode?: string | null;
+
+  @IsOptional()
+  @IsUUID()
+  accountId?: string | null;
+
+  @IsOptional()
+  @IsString()
   @MaxLength(180)
   externalReference?: string | null;
 
   @IsOptional()
   @IsNumberString()
   openingBalance?: string;
+
+  @IsOptional()
+  @IsDateString()
+  initialBalanceDate?: string | null;
+
+  @IsOptional()
+  @IsBoolean()
+  isPrimary?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  reconciliationEnabled?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  active?: boolean;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  description?: string | null;
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => FinanceBankDetailsDto)
+  bankDetails?: FinanceBankDetailsDto;
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => FinanceCardDetailsDto)
+  cardDetails?: FinanceCardDetailsDto;
 }
 
 export class UpdateFinanceBankAccountDto {
@@ -294,6 +437,15 @@ export class UpdateFinanceBankAccountDto {
   name?: string;
 
   @IsOptional()
+  @IsEnum(FinanceBankAccountType)
+  type?: FinanceBankAccountType;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(3)
+  currency?: string;
+
+  @IsOptional()
   @IsUUID()
   accountId?: string | null;
 
@@ -301,6 +453,47 @@ export class UpdateFinanceBankAccountDto {
   @IsString()
   @MaxLength(160)
   bankName?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(2)
+  countryCode?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(180)
+  externalReference?: string | null;
+
+  @IsOptional()
+  @IsNumberString()
+  openingBalance?: string;
+
+  @IsOptional()
+  @IsDateString()
+  initialBalanceDate?: string | null;
+
+  @IsOptional()
+  @IsBoolean()
+  isPrimary?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  reconciliationEnabled?: boolean;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  description?: string | null;
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => FinanceBankDetailsDto)
+  bankDetails?: FinanceBankDetailsDto;
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => FinanceCardDetailsDto)
+  cardDetails?: FinanceCardDetailsDto;
 
   @IsOptional()
   @IsBoolean()
