@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { DocumentLayoutsModule } from '../document-layouts/document-layouts.module';
 import {
   AgencyProject,
+  AgencyProjectSettings,
   AgencyTask,
   AgencyTaskTimeEntry,
 } from '../projects/entities';
@@ -76,6 +77,7 @@ import { PermissionsModule } from '../permissions';
         FinancePaymentAllocation,
         FinanceRecurringProfile,
         AgencyProject,
+        AgencyProjectSettings,
         AgencyTask,
         AgencyTaskTimeEntry,
       ],

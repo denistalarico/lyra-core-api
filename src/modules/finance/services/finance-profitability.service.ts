@@ -1,8 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import {
   AgencyProject,
+  AgencyProjectSettings,
   AgencyTask,
   AgencyTaskTimeEntry,
 } from '../../projects/entities';
@@ -100,6 +101,9 @@ export class FinanceProfitabilityService {
 
     @InjectRepository(AgencyTaskTimeEntry, 'agency')
     private readonly timeEntriesRepo: Repository<AgencyTaskTimeEntry>,
+
+    @InjectRepository(AgencyProjectSettings, 'agency')
+    private readonly projectSettingsRepo: Repository<AgencyProjectSettings>,
   ) {}
 
   async getOverview(ctx: FinanceRequestContext) {
@@ -378,6 +382,8 @@ export class FinanceProfitabilityService {
       (project) => project.clientId === clientId,
     );
 
+    const hoursByTaskType = await this.getClientHoursByTaskType(ctx, clientId);
+
     return {
       status: 'ok',
       module: 'agency-finance',
@@ -388,8 +394,67 @@ export class FinanceProfitabilityService {
       rules: overview.rules,
       client,
       projects,
+      hoursByTaskType,
       notes: overview.notes,
     };
+  }
+
+  // Hours spent on a client's tasks grouped by task type (the "horas por tipo
+  // de tarefa" breakdown). Time comes from task time entries, falling back to
+  // each task's trackedMinutes, mirroring the labor-cost calculation. Task type
+  // ids are resolved to readable names from the workspace project settings.
+  private async getClientHoursByTaskType(
+    ctx: FinanceRequestContext,
+    clientId: string,
+  ): Promise<Array<{ taskType: string; minutes: number; hours: number }>> {
+    const [tasks, settings] = await Promise.all([
+      this.tasksRepo.find({
+        where: {
+          tenantId: ctx.tenantId,
+          workspaceId: ctx.workspaceId,
+          clientId,
+        },
+      }),
+      this.projectSettingsRepo.findOne({
+        where: { tenantId: ctx.tenantId, workspaceId: ctx.workspaceId },
+      }),
+    ]);
+
+    if (tasks.length === 0) return [];
+
+    const taskIds = tasks.map((task) => task.id);
+    const timeEntries = await this.timeEntriesRepo.find({
+      where: {
+        tenantId: ctx.tenantId,
+        workspaceId: ctx.workspaceId,
+        taskId: In(taskIds),
+      },
+    });
+
+    const entriesByTaskId = this.groupTimeEntriesByTask(timeEntries);
+    const typeNames = new Map(
+      (settings?.taskTypes ?? []).map((type) => [type.id, type.name]),
+    );
+
+    const minutesByType = new Map<string, number>();
+    for (const task of tasks) {
+      const minutes = this.resolveTaskTrackedMinutes(task, entriesByTaskId);
+      if (minutes <= 0) continue;
+
+      const label = task.taskTypeId
+        ? typeNames.get(task.taskTypeId) ?? 'Outros'
+        : 'Sem tipo';
+
+      minutesByType.set(label, (minutesByType.get(label) ?? 0) + minutes);
+    }
+
+    return Array.from(minutesByType.entries())
+      .map(([taskType, minutes]) => ({
+        taskType,
+        minutes,
+        hours: roundMoney(minutes / 60),
+      }))
+      .sort((a, b) => b.minutes - a.minutes);
   }
 
   private async getSettings(ctx: FinanceRequestContext) {

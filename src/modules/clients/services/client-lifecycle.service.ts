@@ -12,6 +12,7 @@ import {
   UpdateClientLifecycleStepDto,
 } from '../dto';
 import {
+  AgencyClientStatus,
   ClientLifecycleIntervalUnit,
   ClientLifecycleProcessStatus,
   ClientLifecycleProcessType,
@@ -236,6 +237,20 @@ export class ClientLifecycleService {
     await this.processRepository.save(process);
 
     const client = await this.findClient(ctx, clientId);
+
+    // Reflect the lifecycle outcome on the client status: a completed
+    // offboarding ends the relationship, while a completed onboarding promotes
+    // a client still flagged as "onboarding" to "active".
+    if (processType === ClientLifecycleProcessType.Offboarding) {
+      if (client.status !== AgencyClientStatus.Archived) {
+        client.status = AgencyClientStatus.Ended;
+        await this.clientRepository.save(client);
+      }
+    } else if (client.status === AgencyClientStatus.Onboarding) {
+      client.status = AgencyClientStatus.Active;
+      await this.clientRepository.save(client);
+    }
+
     if (processType === ClientLifecycleProcessType.Onboarding) {
       await this.clientNotificationPublisher.publishOnboardingCompleted({ client, actorUserId: ctx.userId });
     } else {
