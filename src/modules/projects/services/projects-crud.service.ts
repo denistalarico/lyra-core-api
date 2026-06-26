@@ -174,6 +174,16 @@ export class ProjectsCrudService {
     return project;
   }
 
+  async findPublicOne(id: string) {
+    const project = await this.projectsRepository.findOne({ where: { id } });
+
+    if (!project || project.archivedAt) {
+      throw new NotFoundException('Project not found');
+    }
+
+    return project;
+  }
+
   create(context: RequestContext, dto: CreateProjectDto) {
     const project = this.projectsRepository.create({
       tenantId: context.tenantId,

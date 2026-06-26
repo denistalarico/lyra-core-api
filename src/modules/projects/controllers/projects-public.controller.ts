@@ -1,4 +1,5 @@
-import { Controller, Get, Headers, NotFoundException, Param, Query } from '@nestjs/common';
+import { Controller, Get, NotFoundException, Param, Query } from '@nestjs/common';
+import { AgencyProject } from '../entities';
 import { ProjectsCrudService } from '../services/projects-crud.service';
 import { TasksCrudService } from '../services/tasks-crud.service';
 import { ProjectStagesService } from '../services/project-stages.service';
@@ -14,12 +15,10 @@ type RequestContext = {
   role?: string;
 };
 
-function getContextFromHeaders(
-  headers: Record<string, string | string[] | undefined>,
-): RequestContext {
+function getPublicContext(project: AgencyProject): RequestContext {
   return {
-    tenantId: String(headers['x-tenant-id'] ?? ''),
-    workspaceId: String(headers['x-workspace-id'] ?? ''),
+    tenantId: project.tenantId,
+    workspaceId: project.workspaceId,
     userId: '',
     // Public reads are already gated by isPublicPageEnabled + password below;
     // 'owner' bypasses the per-user ownership/assignment scoping that would
@@ -49,12 +48,10 @@ export class ProjectsPublicController {
   @Get(':projectId')
   async getPublicProject(
     @Param('projectId') projectId: string,
-    @Headers() headers: Record<string, string | string[] | undefined>,
     @Query('password') password?: string,
   ) {
-    const context = getContextFromHeaders(headers);
     const project = await this.projectsCrudService
-      .findOne(context, projectId)
+      .findPublicOne(projectId)
       .catch(() => null);
 
     if (!project || !project.isPublicPageEnabled) {
@@ -64,6 +61,8 @@ export class ProjectsPublicController {
     if (project.publicPagePassword && project.publicPagePassword !== password) {
       return { locked: true, project: { id: project.id, name: project.name } };
     }
+
+    const context = getPublicContext(project);
 
     const [tasks, stages, events, attachments] = await Promise.all([
       this.tasksCrudService.listWorkspaceTasks(context, { projectId }),
@@ -81,12 +80,10 @@ export class ProjectsPublicController {
   async getPublicTask(
     @Param('projectId') projectId: string,
     @Param('taskId') taskId: string,
-    @Headers() headers: Record<string, string | string[] | undefined>,
     @Query('password') password?: string,
   ) {
-    const context = getContextFromHeaders(headers);
     const project = await this.projectsCrudService
-      .findOne(context, projectId)
+      .findPublicOne(projectId)
       .catch(() => null);
 
     if (!project || !project.isPublicPageEnabled) {
@@ -97,6 +94,7 @@ export class ProjectsPublicController {
       return { locked: true, project: { id: project.id, name: project.name } };
     }
 
+    const context = getPublicContext(project);
     const task = await this.tasksCrudService.findOne(context, taskId);
 
     if (task.projectId !== projectId) {
