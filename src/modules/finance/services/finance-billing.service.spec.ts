@@ -22,6 +22,7 @@ import {
 } from '../enums';
 import { FinanceDocumentNumberingService } from './finance-document-numbering.service';
 import { FinanceJournalEntryService } from './finance-journal-entry.service';
+import { FinancePostingService } from './finance-posting.service';
 import { FinanceNotificationPublisher } from './finance-notification.publisher';
 import { FinanceBillingService } from './finance-billing.service';
 
@@ -242,6 +243,14 @@ function makeService(options: {
     ),
   };
   const publisher = makePublisher();
+  const postingService = {
+    postInvoiceConfirmed: jest.fn().mockResolvedValue(null),
+    reverseInvoice: jest.fn().mockResolvedValue([]),
+    postBillConfirmed: jest.fn().mockResolvedValue(null),
+    reverseBill: jest.fn().mockResolvedValue([]),
+    postPaymentAllocationSettlement: jest.fn().mockResolvedValue(null),
+    reversePayment: jest.fn().mockResolvedValue([]),
+  } as unknown as jest.Mocked<FinancePostingService>;
   const service = new FinanceBillingService(
     invoicesRepo as unknown as Repository<FinanceInvoice>,
     invoiceLinesRepo as unknown as Repository<FinanceInvoiceLine>,
@@ -255,10 +264,11 @@ function makeService(options: {
     dataSource as unknown as DataSource,
     {} as FinanceDocumentNumberingService,
     { create: jest.fn() } as unknown as FinanceJournalEntryService,
+    postingService,
     publisher,
   );
 
-  return { service, publisher, invoicesRepo };
+  return { service, publisher, invoicesRepo, postingService };
 }
 
 function makeTransactionManager(options: {

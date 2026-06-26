@@ -30,7 +30,6 @@ import {
   FinanceAllocationTargetType,
   FinanceBillStatus,
   FinanceInvoiceStatus,
-  FinanceJournalEntryLineType,
   FinancePaymentDirection,
   FinancePaymentStatus,
   FinanceRecurringInterval,
@@ -39,6 +38,7 @@ import {
 import { FinanceRequestContext } from './finance-context';
 import { FinanceDocumentNumberingService } from './finance-document-numbering.service';
 import { FinanceJournalEntryService } from './finance-journal-entry.service';
+import { FinancePostingService } from './finance-posting.service';
 import { FinanceNotificationPublisher } from './finance-notification.publisher';
 
 function toMoney(value: string | number | null | undefined): number {
@@ -93,6 +93,7 @@ export class FinanceBillingService {
 
     private readonly documentNumberingService: FinanceDocumentNumberingService,
     private readonly journalEntryService: FinanceJournalEntryService,
+    private readonly postingService: FinancePostingService,
     private readonly financeNotificationPublisher: FinanceNotificationPublisher,
   ) {}
 
@@ -215,6 +216,23 @@ export class FinanceBillingService {
     const { metadata: _meta, ...rest } = dto;
     Object.assign(invoice, rest);
     const saved = await this.invoicesRepo.save(invoice);
+
+    // Keep the ledger in sync when the status changes through a generic PATCH
+    // (the dedicated /issue and /cancel endpoints are the primary paths).
+    // Posting is idempotent, so a transition that was already posted is a no-op.
+    if (
+      previousStatus !== FinanceInvoiceStatus.Issued &&
+      saved.status === FinanceInvoiceStatus.Issued
+    ) {
+      await this.postingService.postInvoiceConfirmed(ctx, saved.id);
+    }
+
+    if (
+      previousStatus !== FinanceInvoiceStatus.Cancelled &&
+      saved.status === FinanceInvoiceStatus.Cancelled
+    ) {
+      await this.postingService.reverseInvoice(ctx, saved.id);
+    }
 
     // No tenant-validated recipient source exists yet (only the actor, who
     // is self-suppressed), so these calls currently resolve to zero
@@ -389,6 +407,7 @@ export class FinanceBillingService {
     if (!invoice) throw new NotFoundException('Finance invoice not found');
 
     const previousStatus = invoice.status;
+    const wasIssued = previousStatus === FinanceInvoiceStatus.Issued;
 
     invoice.status = FinanceInvoiceStatus.Issued;
     invoice.issuedAt = new Date();
@@ -397,9 +416,17 @@ export class FinanceBillingService {
       invoice.issueDate = new Date().toISOString().slice(0, 10);
     }
 
-    const saved = await this.invoicesRepo.save(invoice);
+    // Confirming an invoice and recognising it in the ledger are atomic:
+    // if the automatic posting fails, the status change rolls back.
+    const saved = await this.dataSource.transaction(async (manager) => {
+      const persisted = await manager.getRepository(FinanceInvoice).save(invoice);
+      if (!wasIssued) {
+        await this.postingService.postInvoiceConfirmed(ctx, persisted.id, manager);
+      }
+      return persisted;
+    });
 
-    if (previousStatus !== FinanceInvoiceStatus.Issued) {
+    if (!wasIssued) {
       // See updateInvoice: no validated recipient source yet, resolves to no-op.
       await this.financeNotificationPublisher.publishInvoiceIssued({
         resource: saved,
@@ -419,10 +446,18 @@ export class FinanceBillingService {
 
     if (!invoice) throw new NotFoundException('Finance invoice not found');
 
+    const wasCancelled = invoice.status === FinanceInvoiceStatus.Cancelled;
+
     invoice.status = FinanceInvoiceStatus.Cancelled;
     invoice.cancelledAt = new Date();
 
-    await this.invoicesRepo.save(invoice);
+    await this.dataSource.transaction(async (manager) => {
+      await manager.getRepository(FinanceInvoice).save(invoice);
+      if (!wasCancelled) {
+        await this.postingService.reverseInvoice(ctx, invoice.id, manager);
+      }
+    });
+
     return this.getInvoice(ctx, id);
   }
 
@@ -508,6 +543,10 @@ export class FinanceBillingService {
 
       await manager.getRepository(FinanceBillLine).save(lines);
 
+      // A bill is created already "Open" (confirmed), so recognise the payable
+      // in the ledger atomically with its creation.
+      await this.postingService.postBillConfirmed(ctx, bill.id, manager);
+
       return bill.id;
     });
 
@@ -526,13 +565,32 @@ export class FinanceBillingService {
 
     if (!bill) throw new NotFoundException('Finance bill not found');
 
+    const previousStatus = bill.status;
+
     Object.assign(bill, dto);
 
     if (dto.metadata !== undefined) {
       bill.metadata = dto.metadata;
     }
 
-    return this.billsRepo.save(bill);
+    const saved = await this.billsRepo.save(bill);
+
+    // Posting is idempotent; only acts on the first transition into each state.
+    if (
+      previousStatus === FinanceBillStatus.Draft &&
+      saved.status === FinanceBillStatus.Open
+    ) {
+      await this.postingService.postBillConfirmed(ctx, saved.id);
+    }
+
+    if (
+      previousStatus !== FinanceBillStatus.Cancelled &&
+      saved.status === FinanceBillStatus.Cancelled
+    ) {
+      await this.postingService.reverseBill(ctx, saved.id);
+    }
+
+    return saved;
   }
 
   async cancelBill(ctx: FinanceRequestContext, id: string) {
@@ -543,10 +601,20 @@ export class FinanceBillingService {
 
     if (!bill) throw new NotFoundException('Finance bill not found');
 
+    const wasCancelled = bill.status === FinanceBillStatus.Cancelled;
+
     bill.status = FinanceBillStatus.Cancelled;
     bill.cancelledAt = new Date();
 
-    return this.billsRepo.save(bill);
+    const saved = await this.dataSource.transaction(async (manager) => {
+      const persisted = await manager.getRepository(FinanceBill).save(bill);
+      if (!wasCancelled) {
+        await this.postingService.reverseBill(ctx, persisted.id, manager);
+      }
+      return persisted;
+    });
+
+    return saved;
   }
 
   async deleteBill(ctx: FinanceRequestContext, id: string) {
@@ -675,6 +743,18 @@ export class FinanceBillingService {
     Object.assign(payment, rest);
     const saved = await this.paymentsRepo.save(payment);
 
+    // Reverse the settlement entries when a completed payment is cancelled or
+    // refunded. Idempotent, so repeated transitions never double-reverse.
+    const becameVoid =
+      saved.status === FinancePaymentStatus.Cancelled ||
+      saved.status === FinancePaymentStatus.Refunded;
+    const wasVoid =
+      previousStatus === FinancePaymentStatus.Cancelled ||
+      previousStatus === FinancePaymentStatus.Refunded;
+    if (becameVoid && !wasVoid) {
+      await this.postingService.reversePayment(ctx, saved);
+    }
+
     // No tenant-validated recipient source exists yet (only the actor, who
     // is self-suppressed), so these calls currently resolve to zero
     // recipients and the publisher is a no-op.
@@ -710,6 +790,9 @@ export class FinanceBillingService {
       where: { id, tenantId: ctx.tenantId, workspaceId: ctx.workspaceId },
     });
     if (!payment) throw new NotFoundException('Finance payment not found');
+    // Keep the ledger consistent: reverse any settlement entries before the
+    // payment row is removed (posted entries are never deleted).
+    await this.postingService.reversePayment(ctx, payment);
     await this.paymentsRepo.remove(payment);
     return { success: true, id };
   }
@@ -735,10 +818,10 @@ export class FinanceBillingService {
       }),
     );
 
-    // Auto-create journal entry if accounts are configured
-    void this.autoCreatePaymentJournalEntry(ctx, payment, dto).catch(() => {
-      // Non-fatal: log and continue silently
-    });
+    // The settlement (baixa) entry is intentionally NOT created here: a bare
+    // payment is not yet tied to a receivable/payable. It is posted per
+    // allocation in allocatePayment, which knows the invoice/bill and amount
+    // and supports partial settlements. See FinancePostingService.
 
     // See updatePayment: no validated recipient source yet, resolves to no-op.
     if (
@@ -761,55 +844,6 @@ export class FinanceBillingService {
     }
 
     return payment;
-  }
-
-  private async autoCreatePaymentJournalEntry(
-    ctx: FinanceRequestContext,
-    payment: FinancePayment,
-    dto: CreateFinancePaymentDto,
-  ): Promise<void> {
-    const meta = (dto.metadata ?? {}) as Record<string, unknown>;
-    const journalId = (meta.journalId as string | null) ?? null;
-    const plAccountId = (meta.accountId as string | null) ?? null;
-
-    // Resolve bank/cash account from bank account's chart link
-    let bankChartAccountId: string | null = null;
-    if (payment.bankAccountId) {
-      const bankAccount = await this.bankAccountsRepo.findOne({
-        where: { id: payment.bankAccountId, tenantId: ctx.tenantId, workspaceId: ctx.workspaceId },
-      });
-      bankChartAccountId = bankAccount?.accountId ?? null;
-    }
-
-    // Both sides must be known for a balanced auto-entry
-    if (!plAccountId || !bankChartAccountId) return;
-
-    const amount = money(toMoney(payment.amount));
-    const isCustomer = payment.direction === FinancePaymentDirection.Customer;
-
-    // customer (receiving): DEBIT bank/cash, CREDIT revenue/receivable
-    // vendor   (paying):    DEBIT expense/payable, CREDIT bank/cash
-    const debitAccountId  = isCustomer ? bankChartAccountId : plAccountId;
-    const creditAccountId = isCustomer ? plAccountId : bankChartAccountId;
-
-    const sharedLineFields = {
-      categoryId:   null as string | null,
-      costCenterId: null as string | null,
-      contactId:    payment.contactId ?? null,
-      description:  payment.description ?? null,
-    };
-
-    await this.journalEntryService.create(ctx, {
-      entryDate:    payment.paymentDate,
-      description:  payment.description ?? `Pagamento ${payment.id.slice(0, 8)}`,
-      journalId,
-      sourceModule: 'payment',
-      sourceId:     payment.id,
-      lines: [
-        { ...sharedLineFields, lineType: FinanceJournalEntryLineType.Debit,  accountId: debitAccountId,  amount },
-        { ...sharedLineFields, lineType: FinanceJournalEntryLineType.Credit, accountId: creditAccountId, amount },
-      ],
-    });
   }
 
   async allocatePayment(
@@ -954,6 +988,16 @@ export class FinanceBillingService {
 
       payment.allocatedAmount = money(allocatedAmount + amount);
       await manager.getRepository(FinancePayment).save(payment);
+
+      // Settlement (baixa): one balanced entry per allocation. Customer →
+      // DEBIT bank / CREDIT receivable; vendor → DEBIT payable / CREDIT bank.
+      // Posted in the same transaction so the ledger matches the allocation.
+      await this.postingService.postPaymentAllocationSettlement(
+        ctx,
+        payment,
+        allocation,
+        manager,
+      );
 
       return {
         status: 'ok',

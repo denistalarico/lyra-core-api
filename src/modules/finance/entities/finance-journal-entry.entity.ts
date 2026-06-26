@@ -44,6 +44,25 @@ export class FinanceJournalEntry {
   @Column({ name: 'source_id', type: 'uuid', nullable: true })
   sourceId!: string | null;
 
+  // Specific source line this entry settles (e.g. a payment allocation),
+  // used to keep partial settlements idempotent.
+  @Column({ name: 'source_line_id', type: 'uuid', nullable: true })
+  sourceLineId!: string | null;
+
+  // Business event that produced this entry (invoice_confirmed, bill_confirmed,
+  // customer_payment_completed, supplier_payment_completed, *_reversed, ...).
+  @Column({ name: 'event_type', type: 'varchar', length: 60, nullable: true })
+  eventType!: string | null;
+
+  // Persistent dedup key: tenant:workspace:sourceType:sourceId:sourceLineId:event.
+  // Null for manual entries; unique (per tenant/workspace) for automatic ones.
+  @Column({ name: 'idempotency_key', type: 'varchar', length: 220, nullable: true })
+  idempotencyKey!: string | null;
+
+  // For reversal entries, the id of the original entry being reversed.
+  @Column({ name: 'reverses_entry_id', type: 'uuid', nullable: true })
+  reversesEntryId!: string | null;
+
   @Column({ name: 'total_debit', type: 'numeric', precision: 14, scale: 2, default: 0 })
   totalDebit!: string;
 
