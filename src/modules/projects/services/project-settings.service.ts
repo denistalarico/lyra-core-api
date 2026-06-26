@@ -6,6 +6,7 @@ import {
   AgencyProjectUserPreferences,
   ProjectBoardPreference,
   ProjectMarkerSetting,
+  ProjectStageTemplate,
   ProjectTaskExecutionMode,
   ProjectTaskTypeSetting,
 } from '../entities';
@@ -101,6 +102,10 @@ export class ProjectSettingsService {
 
     if (dto.taskExecutionMode !== undefined) {
       settings.taskExecutionMode = dto.taskExecutionMode;
+    }
+
+    if (dto.stageTemplates !== undefined) {
+      settings.stageTemplates = this.normalizeStageTemplates(dto.stageTemplates);
     }
 
     return this.serializeSettings(await this.settingsRepository.save(settings));
@@ -231,6 +236,26 @@ export class ProjectSettingsService {
       }));
   }
 
+  private normalizeStageTemplates(
+    templates: ProjectStageTemplate[],
+  ): ProjectStageTemplate[] {
+    if (!Array.isArray(templates)) return [];
+    return templates
+      .filter((template) => template && template.name?.trim())
+      .map((template) => ({
+        id: template.id || `stage-template-${Date.now()}`,
+        name: template.name.trim(),
+        stages: Array.isArray(template.stages)
+          ? template.stages
+              .filter((stage) => stage && stage.name?.trim())
+              .map((stage) => ({
+                name: stage.name.trim(),
+                color: stage.color ?? null,
+              }))
+          : [],
+      }));
+  }
+
   private serializeSettings(settings: AgencyProjectSettings) {
     return {
       projectMarkers: settings.projectMarkers?.length
@@ -245,6 +270,9 @@ export class ProjectSettingsService {
       taskExecutionMode:
         (settings.taskExecutionMode as ProjectTaskExecutionMode | undefined) ??
         'hybrid',
+      stageTemplates: Array.isArray(settings.stageTemplates)
+        ? settings.stageTemplates
+        : [],
     };
   }
 

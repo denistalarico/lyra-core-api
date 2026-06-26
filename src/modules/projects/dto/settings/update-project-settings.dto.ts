@@ -16,6 +16,14 @@ export class UpdateProjectSettingsDto {
   @IsOptional()
   @IsIn(['manual', 'timer', 'hybrid'])
   taskExecutionMode?: 'manual' | 'timer' | 'hybrid';
+
+  @IsOptional()
+  @IsArray()
+  stageTemplates?: Array<{
+    id: string;
+    name: string;
+    stages: Array<{ name: string; color: string | null }>;
+  }>;
 }
 
 export class UpdateProjectPreferencesDto {

@@ -17,6 +17,17 @@ export type ProjectTaskTypeSetting = {
   name: string;
 };
 
+export type ProjectStageTemplateStage = {
+  name: string;
+  color: string | null;
+};
+
+export type ProjectStageTemplate = {
+  id: string;
+  name: string;
+  stages: ProjectStageTemplateStage[];
+};
+
 export type ProjectTaskExecutionMode = 'manual' | 'timer' | 'hybrid';
 
 @Entity('agency_project_settings')
@@ -41,6 +52,9 @@ export class AgencyProjectSettings {
 
   @Column({ name: 'task_execution_mode', type: 'varchar', length: 24, default: 'hybrid' })
   taskExecutionMode!: ProjectTaskExecutionMode;
+
+  @Column({ name: 'stage_templates', type: 'jsonb', default: () => "'[]'::jsonb" })
+  stageTemplates!: ProjectStageTemplate[];
 
   @CreateDateColumn({ name: 'created_at' })
   createdAt!: Date;

@@ -35,6 +35,9 @@ export class AgencyTaskChecklistItem {
   @Column({ name: 'task_type_id', type: 'varchar', length: 120, nullable: true })
   taskTypeId!: string | null;
 
+  @Column({ name: 'assignee_id', type: 'uuid', nullable: true, default: null })
+  assigneeId!: string | null;
+
   @Column({ name: 'due_date', type: 'timestamptz', nullable: true, default: null })
   dueDate!: Date | null;
 

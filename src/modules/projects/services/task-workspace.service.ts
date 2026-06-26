@@ -21,6 +21,7 @@ type ChecklistPayload = {
   status?: string;
   position?: number;
   taskTypeId?: string | null;
+  assigneeId?: string | null;
   dueDate?: string | null;
 };
 
@@ -89,6 +90,7 @@ export class TaskWorkspaceService {
       status: payload.status ?? getChecklistStatusFromDone(payload.isDone ?? false),
       position: payload.position ?? currentCount,
       taskTypeId: payload.taskTypeId ?? null,
+      assigneeId: payload.assigneeId ?? null,
       dueDate: payload.dueDate ? new Date(payload.dueDate) : null,
     });
 
@@ -125,6 +127,7 @@ export class TaskWorkspaceService {
     }
     if (payload.position !== undefined) item.position = payload.position;
     if (payload.taskTypeId !== undefined) item.taskTypeId = payload.taskTypeId;
+    if (payload.assigneeId !== undefined) item.assigneeId = payload.assigneeId;
     if (payload.dueDate !== undefined) {
       item.dueDate = payload.dueDate ? new Date(payload.dueDate) : null;
     }

@@ -74,6 +74,8 @@ import { BackfillDocumentLayoutSystemTemplates1782300000000 } from './migrations
 import { AddQuoteItemTaxType1782400000000 } from './migrations/1782400000000-add-quote-item-tax-type';
 import { EvolveFinanceBankAccounts1782500000000 } from './migrations/1782500000000-evolve-finance-bank-accounts';
 import { AddFinanceJournalEntryPostingFields1782600000000 } from './migrations/1782600000000-add-finance-journal-entry-posting-fields';
+import { AddProjectStageTemplates1782700000000 } from './migrations/1782700000000-add-project-stage-templates';
+import { AddChecklistItemAssignee1782700100000 } from './migrations/1782700100000-add-checklist-item-assignee';
 
 export const AgencyDataSource = new DataSource({
   type: 'postgres',
@@ -161,5 +163,7 @@ export const AgencyDataSource = new DataSource({
     AddQuoteItemTaxType1782400000000,
     EvolveFinanceBankAccounts1782500000000,
     AddFinanceJournalEntryPostingFields1782600000000,
+    AddProjectStageTemplates1782700000000,
+    AddChecklistItemAssignee1782700100000,
   ],
 });
