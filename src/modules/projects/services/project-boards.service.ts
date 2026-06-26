@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { IsNull, Repository } from 'typeorm';
+import { Brackets, IsNull, Repository } from 'typeorm';
 import {
   AgencyPersonalTaskStage,
   AgencyProject,
@@ -132,59 +132,68 @@ export class ProjectBoardsService {
   }
 
   async getWorkspaceTasksBoard(context: RequestContext): Promise<BoardResponse<TaskBoardCard>> {
-    const [stages, tasks] = await Promise.all([
-      this.taskStagesRepository.find({
-        where: {
-          tenantId: context.tenantId,
-          workspaceId: context.workspaceId,
-          isArchived: false,
-          projectId: IsNull(),
-        },
-        order: {
-          position: 'ASC',
-          createdAt: 'ASC',
-        },
-      }),
-      this.tasksRepository.find({
-        where: {
-          tenantId: context.tenantId,
-          workspaceId: context.workspaceId,
-          archivedAt: IsNull(),
-          visibility: TaskVisibility.Workspace,
-        },
-        order: {
-          updatedAt: 'DESC',
-          createdAt: 'DESC',
-        },
-      }),
-    ]);
+    const tasks = await this.tasksRepository.find({
+      where: {
+        tenantId: context.tenantId,
+        workspaceId: context.workspaceId,
+        archivedAt: IsNull(),
+        visibility: TaskVisibility.Workspace,
+      },
+      order: {
+        updatedAt: 'DESC',
+        createdAt: 'DESC',
+      },
+    });
+    const stages = await this.listTaskStagesForBoard(context, null, tasks);
 
     return this.buildBoard(stages, await this.withChecklistCounts(context, tasks), 'Sem estágio');
   }
 
   async getProjectTasksBoard(context: RequestContext, projectId: string): Promise<BoardResponse<TaskBoardCard>> {
-    const [stages, tasks] = await Promise.all([
-      this.taskStagesRepository.find({
-        where: {
-          tenantId: context.tenantId,
-          workspaceId: context.workspaceId,
-          isArchived: false,
-          projectId,
-        },
-        order: { position: 'ASC', createdAt: 'ASC' },
-      }),
-      this.tasksRepository.find({
-        where: {
-          tenantId: context.tenantId,
-          workspaceId: context.workspaceId,
-          projectId,
-          archivedAt: IsNull(),
-        },
-        order: { updatedAt: 'DESC', createdAt: 'DESC' },
-      }),
-    ]);
+    const tasks = await this.tasksRepository.find({
+      where: {
+        tenantId: context.tenantId,
+        workspaceId: context.workspaceId,
+        projectId,
+        archivedAt: IsNull(),
+      },
+      order: { updatedAt: 'DESC', createdAt: 'DESC' },
+    });
+    const stages = await this.listTaskStagesForBoard(context, projectId, tasks);
 
     return this.buildBoard(stages, await this.withChecklistCounts(context, tasks), 'Sem estágio');
+  }
+
+  private listTaskStagesForBoard(
+    context: RequestContext,
+    projectId: string | null,
+    tasks: AgencyTask[],
+  ) {
+    const referencedStageIds = Array.from(
+      new Set(tasks.map((task) => task.stageId).filter((stageId): stageId is string => Boolean(stageId))),
+    );
+    const qb = this.taskStagesRepository
+      .createQueryBuilder('stage')
+      .where('stage.tenant_id = :tenantId', { tenantId: context.tenantId })
+      .andWhere('stage.workspace_id = :workspaceId', { workspaceId: context.workspaceId })
+      .andWhere('stage.is_archived = false')
+      .andWhere(
+        new Brackets((stageQb) => {
+          if (projectId) {
+            stageQb.where('stage.project_id = :projectId', { projectId });
+          } else {
+            stageQb.where('stage.project_id IS NULL');
+          }
+
+          if (referencedStageIds.length) {
+            stageQb.orWhere('stage.id IN (:...referencedStageIds)', { referencedStageIds });
+          }
+        }),
+      )
+      .orderBy('stage.position', 'ASC')
+      .addOrderBy('stage.created_at', 'ASC');
+
+    return qb.getMany();
   }
 
   async getMyTasksBoard(context: RequestContext): Promise<BoardResponse<TaskBoardCard>> {
@@ -319,15 +328,27 @@ export class ProjectBoardsService {
     cards: TCard[],
     unassignedName: string,
   ): BoardResponse<TCard> {
+    const stageIds = new Set(stages.map((stage) => stage.id));
+    const fallbackStageId = stages[0]?.id ?? null;
     const columns = stages.map((stage) => ({
       id: stage.id,
       name: stage.name,
       color: stage.color,
       position: stage.position,
-      cards: cards.filter((card) => card.stageId === stage.id),
+      cards: cards.filter(
+        (card) =>
+          card.stageId === stage.id ||
+          (stage.id === fallbackStageId &&
+            typeof card.stageId === 'string' &&
+            !stageIds.has(card.stageId)),
+      ),
     }));
 
-    const unassignedCards = cards.filter((card) => !card.stageId);
+    const unassignedCards = cards.filter(
+      (card) =>
+        !card.stageId ||
+        (!fallbackStageId && typeof card.stageId === 'string' && !stageIds.has(card.stageId)),
+    );
 
     return {
       columns,
