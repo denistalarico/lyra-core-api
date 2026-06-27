@@ -76,6 +76,7 @@ import { EvolveFinanceBankAccounts1782500000000 } from './migrations/17825000000
 import { AddFinanceJournalEntryPostingFields1782600000000 } from './migrations/1782600000000-add-finance-journal-entry-posting-fields';
 import { AddProjectStageTemplates1782700000000 } from './migrations/1782700000000-add-project-stage-templates';
 import { AddChecklistItemAssignee1782700100000 } from './migrations/1782700100000-add-checklist-item-assignee';
+import { AddTaskProjectStageId1782700200000 } from './migrations/1782700200000-add-task-project-stage-id';
 
 export const AgencyDataSource = new DataSource({
   type: 'postgres',
@@ -165,5 +166,6 @@ export const AgencyDataSource = new DataSource({
     AddFinanceJournalEntryPostingFields1782600000000,
     AddProjectStageTemplates1782700000000,
     AddChecklistItemAssignee1782700100000,
+    AddTaskProjectStageId1782700200000,
   ],
 });

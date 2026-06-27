@@ -25,4 +25,8 @@ export class ListProjectsQueryDto {
   @IsOptional()
   @IsEnum(ProjectPriority)
   priority?: ProjectPriority;
+
+  @IsOptional()
+  @IsString()
+  includeArchived?: string;
 }

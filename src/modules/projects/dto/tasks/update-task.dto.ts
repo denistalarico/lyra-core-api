@@ -36,6 +36,10 @@ export class UpdateTaskDto {
 
   @IsOptional()
   @IsUUID()
+  projectStageId?: string | null;
+
+  @IsOptional()
+  @IsUUID()
   personalStageId?: string | null;
 
   @IsOptional()

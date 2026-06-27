@@ -77,8 +77,11 @@ export class ProjectsCrudService {
       .where('project.tenant_id = :tenantId', { tenantId: context.tenantId })
       .andWhere('project.workspace_id = :workspaceId', {
         workspaceId: context.workspaceId,
-      })
-      .andWhere('project.archived_at IS NULL');
+      });
+
+    if (query.includeArchived !== 'true') {
+      qb.andWhere('project.archived_at IS NULL');
+    }
 
     this.applyCollectionScope(qb, context);
 

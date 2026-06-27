@@ -271,6 +271,7 @@ function makeTask(overrides: Partial<AgencyTask> = {}): AgencyTask {
     projectId: 'project-1',
     clientId: null,
     stageId: null,
+    projectStageId: null,
     personalStageId: null,
     assigneeId: null,
     createdById: 'user-owner',

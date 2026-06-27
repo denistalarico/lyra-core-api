@@ -35,6 +35,10 @@ export class CreateTaskDto {
 
   @IsOptional()
   @IsUUID()
+  projectStageId?: string | null;
+
+  @IsOptional()
+  @IsUUID()
   personalStageId?: string | null;
 
   @IsOptional()

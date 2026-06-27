@@ -27,6 +27,9 @@ export class AgencyTask {
   @Column({ name: 'stage_id', type: 'uuid', nullable: true })
   stageId!: string | null;
 
+  @Column({ name: 'project_stage_id', type: 'uuid', nullable: true })
+  projectStageId!: string | null;
+
   @Column({ name: 'personal_stage_id', type: 'uuid', nullable: true })
   personalStageId!: string | null;
 

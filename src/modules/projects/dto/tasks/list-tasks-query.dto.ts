@@ -20,6 +20,10 @@ export class ListTasksQueryDto {
 
   @IsOptional()
   @IsUUID()
+  projectStageId?: string;
+
+  @IsOptional()
+  @IsUUID()
   personalStageId?: string;
 
   @IsOptional()
@@ -37,4 +41,8 @@ export class ListTasksQueryDto {
   @IsOptional()
   @IsEnum(TaskVisibility)
   visibility?: TaskVisibility;
+
+  @IsOptional()
+  @IsString()
+  includeArchived?: string;
 }

@@ -1,10 +1,11 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Brackets, Repository } from 'typeorm';
+import { Brackets, IsNull, Repository } from 'typeorm';
 import {
   AgencyProject,
   AgencyTask,
   AgencyProjectEvent,
+  AgencyTaskStage,
   AgencyTaskAttachment,
   AgencyTaskChecklistItem,
   AgencyTaskComment,
@@ -49,6 +50,9 @@ export class TasksCrudService {
     @InjectRepository(AgencyProject, 'agency')
     private readonly projectsRepository: Repository<AgencyProject>,
 
+    @InjectRepository(AgencyTaskStage, 'agency')
+    private readonly taskStagesRepository: Repository<AgencyTaskStage>,
+
     @InjectRepository(AgencyTaskAttachment, 'agency')
     private readonly attachmentsRepository: Repository<AgencyTaskAttachment>,
 
@@ -79,13 +83,51 @@ export class TasksCrudService {
     return this.eventsRepository.save(event);
   }
 
+  private async getFirstWorkspaceTaskStageId(context: RequestContext) {
+    const stage = await this.taskStagesRepository.findOne({
+      where: {
+        tenantId: context.tenantId,
+        workspaceId: context.workspaceId,
+        projectId: IsNull(),
+        isArchived: false,
+      },
+      order: {
+        position: 'ASC',
+        createdAt: 'ASC',
+      },
+    });
+
+    return stage?.id ?? null;
+  }
+
+  private async getProjectStageIdFromLegacyStagePayload(
+    context: RequestContext,
+    projectId: string | null,
+    stageId: string | null | undefined,
+  ): Promise<string | null | undefined> {
+    if (!projectId || stageId === undefined || stageId === null) return undefined;
+
+    const stage = await this.taskStagesRepository.findOne({
+      where: {
+        id: stageId,
+        tenantId: context.tenantId,
+        workspaceId: context.workspaceId,
+      },
+    });
+
+    return stage?.projectId === projectId ? stage.id : undefined;
+  }
+
   listWorkspaceTasks(context: RequestContext, query: ListTasksQueryDto) {
     const qb = this.tasksRepository
       .createQueryBuilder('task')
       .where('task.tenant_id = :tenantId', { tenantId: context.tenantId })
       .andWhere('task.workspace_id = :workspaceId', { workspaceId: context.workspaceId })
-      .andWhere('task.archived_at IS NULL')
       .andWhere('task.visibility = :visibility', { visibility: TaskVisibility.Workspace });
+
+    if (query.includeArchived !== 'true') {
+      qb.andWhere('task.archived_at IS NULL');
+    }
 
     this.applyCollectionScope(qb, context);
     this.applyFilters(qb, query);
@@ -101,7 +143,6 @@ export class TasksCrudService {
       .createQueryBuilder('task')
       .where('task.tenant_id = :tenantId', { tenantId: context.tenantId })
       .andWhere('task.workspace_id = :workspaceId', { workspaceId: context.workspaceId })
-      .andWhere('task.archived_at IS NULL')
       .andWhere(
         new Brackets((subQb) => {
           subQb
@@ -135,6 +176,10 @@ export class TasksCrudService {
         }),
       );
 
+    if (query.includeArchived !== 'true') {
+      qb.andWhere('task.archived_at IS NULL');
+    }
+
     this.applyFilters(qb, query);
 
     return qb
@@ -164,12 +209,30 @@ export class TasksCrudService {
   }
 
   async createWorkspaceTask(context: RequestContext, dto: CreateTaskDto) {
+    const projectId = dto.projectId ?? null;
+    const legacyProjectStageId = await this.getProjectStageIdFromLegacyStagePayload(
+      context,
+      projectId,
+      dto.stageId,
+    );
+    const stageId =
+      legacyProjectStageId !== undefined
+        ? await this.getFirstWorkspaceTaskStageId(context)
+        : dto.stageId !== undefined
+          ? dto.stageId
+          : projectId
+            ? await this.getFirstWorkspaceTaskStageId(context)
+            : null;
     const task = this.tasksRepository.create({
       tenantId: context.tenantId,
       workspaceId: context.workspaceId,
       projectId: dto.projectId ?? null,
       clientId: dto.clientId ?? null,
-      stageId: dto.stageId ?? null,
+      stageId,
+      projectStageId:
+        dto.projectStageId !== undefined
+          ? dto.projectStageId
+          : legacyProjectStageId ?? null,
       personalStageId: null,
       assigneeId: dto.assigneeId ?? null,
       createdById: context.userId,
@@ -212,6 +275,7 @@ export class TasksCrudService {
       projectId: dto.projectId ?? null,
       clientId: dto.clientId ?? null,
       stageId: null,
+      projectStageId: null,
       personalStageId: dto.personalStageId ?? null,
       assigneeId: context.userId,
       createdById: context.userId,
@@ -245,7 +309,20 @@ export class TasksCrudService {
     if (dto.description !== undefined) task.description = dto.description;
     if (dto.projectId !== undefined) task.projectId = dto.projectId;
     if (dto.clientId !== undefined) task.clientId = dto.clientId;
-    if (dto.stageId !== undefined) task.stageId = dto.stageId;
+    if (dto.stageId !== undefined) {
+      const legacyProjectStageId = await this.getProjectStageIdFromLegacyStagePayload(
+        context,
+        task.projectId,
+        dto.stageId,
+      );
+
+      if (legacyProjectStageId !== undefined) {
+        task.projectStageId = legacyProjectStageId;
+      } else {
+        task.stageId = dto.stageId;
+      }
+    }
+    if (dto.projectStageId !== undefined) task.projectStageId = dto.projectStageId;
     if (dto.personalStageId !== undefined) task.personalStageId = dto.personalStageId;
     if (dto.assigneeId !== undefined) task.assigneeId = dto.assigneeId;
     if (dto.priority !== undefined) task.priority = dto.priority;
@@ -369,6 +446,12 @@ export class TasksCrudService {
 
     if (query.stageId) {
       qb.andWhere('task.stage_id = :stageId', { stageId: query.stageId });
+    }
+
+    if (query.projectStageId) {
+      qb.andWhere('task.project_stage_id = :projectStageId', {
+        projectStageId: query.projectStageId,
+      });
     }
 
     if (query.personalStageId) {

@@ -191,6 +191,14 @@ export class ProjectStagesService {
       },
       { stageId: null },
     );
+    await this.tasksRepository.update(
+      {
+        tenantId: context.tenantId,
+        workspaceId: context.workspaceId,
+        projectStageId: stage.id,
+      },
+      { projectStageId: null },
+    );
     await this.taskStagesRepository.delete(stage.id);
 
     return { deleted: true };

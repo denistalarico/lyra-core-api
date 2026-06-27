@@ -1,4 +1,4 @@
-import { Controller, Get, Headers, Param, UseGuards } from '@nestjs/common';
+import { Controller, Get, Headers, Param, Query, UseGuards } from '@nestjs/common';
 import { ProjectBoardsService } from '../services/project-boards.service';
 import {
   PermissionsGuard,
@@ -32,9 +32,11 @@ export class ProjectBoardsController {
   @RequirePermission('agency.projects.project.view.assigned')
   getProjectsBoard(
     @Headers() headers: Record<string, string | string[] | undefined>,
+    @Query('includeArchived') includeArchived?: string,
   ) {
     return this.projectBoardsService.getProjectsBoard(
       getContextFromHeaders(headers),
+      includeArchived === 'true',
     );
   }
 
@@ -52,9 +54,11 @@ export class ProjectBoardsController {
   @RequirePermission('agency.tasks.task.manage.department')
   getWorkspaceTasksBoard(
     @Headers() headers: Record<string, string | string[] | undefined>,
+    @Query('includeArchived') includeArchived?: string,
   ) {
     return this.projectBoardsService.getWorkspaceTasksBoard(
       getContextFromHeaders(headers),
+      includeArchived === 'true',
     );
   }
 
@@ -66,10 +70,12 @@ export class ProjectBoardsController {
   getProjectTasksBoard(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('projectId') projectId: string,
+    @Query('includeArchived') includeArchived?: string,
   ) {
     return this.projectBoardsService.getProjectTasksBoard(
       getContextFromHeaders(headers),
       projectId,
+      includeArchived === 'true',
     );
   }
 
@@ -77,9 +83,11 @@ export class ProjectBoardsController {
   @RequirePermission('agency.tasks.task.update.assigned')
   getMyTasksBoard(
     @Headers() headers: Record<string, string | string[] | undefined>,
+    @Query('includeArchived') includeArchived?: string,
   ) {
     return this.projectBoardsService.getMyTasksBoard(
       getContextFromHeaders(headers),
+      includeArchived === 'true',
     );
   }
 }

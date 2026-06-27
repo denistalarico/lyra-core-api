@@ -8,6 +8,7 @@ import {
   AgencyTaskAttachment,
   AgencyTaskChecklistItem,
   AgencyTaskComment,
+  AgencyTaskStage,
   AgencyTaskTimeEntry,
 } from '../entities';
 import { TaskPriority, TaskStatus, TaskVisibility } from '../enums';
@@ -263,6 +264,9 @@ function makeService(options: {
       ownerId: 'user-project-owner',
     }),
   };
+  const taskStagesRepository = {
+    findOne: jest.fn().mockResolvedValue(null),
+  };
   const publisher = options.publisher ?? makeTaskPublisher();
   const attachmentsRepository = { delete: jest.fn() };
   const checklistItemsRepository = { delete: jest.fn() };
@@ -272,6 +276,7 @@ function makeService(options: {
     tasksRepository as unknown as Repository<AgencyTask>,
     eventsRepository as unknown as Repository<AgencyProjectEvent>,
     projectsRepository as unknown as Repository<AgencyProject>,
+    taskStagesRepository as unknown as Repository<AgencyTaskStage>,
     attachmentsRepository as unknown as Repository<AgencyTaskAttachment>,
     checklistItemsRepository as unknown as Repository<AgencyTaskChecklistItem>,
     commentsRepository as unknown as Repository<AgencyTaskComment>,
@@ -355,6 +360,7 @@ function makeTask(overrides: Partial<AgencyTask> = {}): AgencyTask {
     projectId: 'project-1',
     clientId: null,
     stageId: null,
+    projectStageId: null,
     personalStageId: null,
     assigneeId: null,
     createdById: 'user-owner',

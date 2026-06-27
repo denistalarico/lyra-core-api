@@ -41,6 +41,7 @@ type ProjectBoardCard = AgencyProject & {
 type TaskBoardCard = AgencyTask & {
   checklistTotal: number;
   checklistDone: number;
+  progress: number;
 };
 
 export type ChecklistItemSummary = {
@@ -86,7 +87,10 @@ export class ProjectBoardsService {
     return rows;
   }
 
-  async getProjectsBoard(context: RequestContext): Promise<BoardResponse<ProjectBoardCard>> {
+  async getProjectsBoard(
+    context: RequestContext,
+    includeArchived = false,
+  ): Promise<BoardResponse<ProjectBoardCard>> {
     const [stages, projects] = await Promise.all([
       this.projectStagesRepository.find({
         where: {
@@ -103,7 +107,7 @@ export class ProjectBoardsService {
         where: {
           tenantId: context.tenantId,
           workspaceId: context.workspaceId,
-          archivedAt: IsNull(),
+          ...(includeArchived ? {} : { archivedAt: IsNull() }),
         },
         order: {
           updatedAt: 'DESC',
@@ -112,8 +116,9 @@ export class ProjectBoardsService {
       }),
     ]);
 
-    const [taskCounts, clientNames] = await Promise.all([
+    const [taskCounts, projectProgress, clientNames] = await Promise.all([
       this.getProjectTaskCounts(context, projects.map((project) => project.id)),
+      this.getProjectProgress(context, projects.map((project) => project.id)),
       this.getProjectClientNames(
         context,
         projects
@@ -124,6 +129,7 @@ export class ProjectBoardsService {
     const cards = projects.map((project) =>
       Object.assign(project, {
         taskCount: taskCounts.get(project.id) ?? 0,
+        progress: projectProgress.get(project.id) ?? project.progress,
         clientName: project.clientId ? clientNames.get(project.clientId) ?? null : null,
       }),
     );
@@ -131,12 +137,15 @@ export class ProjectBoardsService {
     return this.buildBoard(stages, cards, 'Sem estágio');
   }
 
-  async getWorkspaceTasksBoard(context: RequestContext): Promise<BoardResponse<TaskBoardCard>> {
+  async getWorkspaceTasksBoard(
+    context: RequestContext,
+    includeArchived = false,
+  ): Promise<BoardResponse<TaskBoardCard>> {
     const tasks = await this.tasksRepository.find({
       where: {
         tenantId: context.tenantId,
         workspaceId: context.workspaceId,
-        archivedAt: IsNull(),
+        ...(includeArchived ? {} : { archivedAt: IsNull() }),
         visibility: TaskVisibility.Workspace,
       },
       order: {
@@ -144,33 +153,43 @@ export class ProjectBoardsService {
         createdAt: 'DESC',
       },
     });
-    const stages = await this.listTaskStagesForBoard(context, null, tasks);
+    const stages = await this.listTaskStagesForBoard(context, null, tasks, 'stageId');
 
-    return this.buildBoard(stages, await this.withChecklistCounts(context, tasks), 'Sem estágio');
+    return this.buildBoard(stages, await this.withChecklistCounts(context, tasks), 'Sem estágio', 'stageId');
   }
 
-  async getProjectTasksBoard(context: RequestContext, projectId: string): Promise<BoardResponse<TaskBoardCard>> {
+  async getProjectTasksBoard(
+    context: RequestContext,
+    projectId: string,
+    includeArchived = false,
+  ): Promise<BoardResponse<TaskBoardCard>> {
     const tasks = await this.tasksRepository.find({
       where: {
         tenantId: context.tenantId,
         workspaceId: context.workspaceId,
         projectId,
-        archivedAt: IsNull(),
+        ...(includeArchived ? {} : { archivedAt: IsNull() }),
       },
       order: { updatedAt: 'DESC', createdAt: 'DESC' },
     });
-    const stages = await this.listTaskStagesForBoard(context, projectId, tasks);
+    const stages = await this.listTaskStagesForBoard(context, projectId, tasks, 'projectStageId');
 
-    return this.buildBoard(stages, await this.withChecklistCounts(context, tasks), 'Sem estágio');
+    return this.buildBoard(
+      stages,
+      await this.withChecklistCounts(context, tasks),
+      'Sem estágio',
+      'projectStageId',
+    );
   }
 
   private listTaskStagesForBoard(
     context: RequestContext,
     projectId: string | null,
     tasks: AgencyTask[],
+    stageField: 'stageId' | 'projectStageId',
   ) {
     const referencedStageIds = Array.from(
-      new Set(tasks.map((task) => task.stageId).filter((stageId): stageId is string => Boolean(stageId))),
+      new Set(tasks.map((task) => task[stageField]).filter((stageId): stageId is string => Boolean(stageId))),
     );
     const qb = this.taskStagesRepository
       .createQueryBuilder('stage')
@@ -196,7 +215,10 @@ export class ProjectBoardsService {
     return qb.getMany();
   }
 
-  async getMyTasksBoard(context: RequestContext): Promise<BoardResponse<TaskBoardCard>> {
+  async getMyTasksBoard(
+    context: RequestContext,
+    includeArchived = false,
+  ): Promise<BoardResponse<TaskBoardCard>> {
     const [stages, tasks] = await Promise.all([
       this.personalTaskStagesRepository.find({
         where: {
@@ -214,13 +236,13 @@ export class ProjectBoardsService {
           {
             tenantId: context.tenantId,
             workspaceId: context.workspaceId,
-            archivedAt: IsNull(),
+            ...(includeArchived ? {} : { archivedAt: IsNull() }),
             assigneeId: context.userId,
           },
           {
             tenantId: context.tenantId,
             workspaceId: context.workspaceId,
-            archivedAt: IsNull(),
+            ...(includeArchived ? {} : { archivedAt: IsNull() }),
             createdById: context.userId,
             visibility: TaskVisibility.Private,
           },
@@ -258,6 +280,64 @@ export class ProjectBoardsService {
     });
 
     return counts;
+  }
+
+  private async getProjectProgress(context: RequestContext, projectIds: string[]) {
+    const progress = new Map<string, number>();
+    const uniqueProjectIds = Array.from(new Set(projectIds));
+
+    if (!uniqueProjectIds.length) {
+      return progress;
+    }
+
+    const rows = await this.tasksRepository.manager
+      .createQueryBuilder()
+      .select('task.id', 'taskId')
+      .addSelect('task.project_id', 'projectId')
+      .addSelect('task.status', 'status')
+      .addSelect('COUNT(item.id)', 'checklistTotal')
+      .addSelect('SUM(CASE WHEN item.is_done THEN 1 ELSE 0 END)', 'checklistDone')
+      .from('agency_tasks', 'task')
+      .leftJoin(
+        'agency_task_checklist_items',
+        'item',
+        'item.task_id = task.id AND item.tenant_id = task.tenant_id AND item.workspace_id = task.workspace_id',
+      )
+      .where('task.tenant_id = :tenantId', { tenantId: context.tenantId })
+      .andWhere('task.workspace_id = :workspaceId', { workspaceId: context.workspaceId })
+      .andWhere('task.archived_at IS NULL')
+      .andWhere('task.project_id IN (:...projectIds)', { projectIds: uniqueProjectIds })
+      .groupBy('task.id')
+      .addGroupBy('task.project_id')
+      .addGroupBy('task.status')
+      .getRawMany<{
+        taskId: string;
+        projectId: string;
+        status: string;
+        checklistTotal: string;
+        checklistDone: string;
+      }>();
+
+    const byProject = new Map<string, number[]>();
+
+    rows.forEach((row) => {
+      const total = Number(row.checklistTotal);
+      const done = Number(row.checklistDone);
+      const taskProgress =
+        total > 0
+          ? Math.round((done / total) * 100)
+          : row.status === 'done' || row.status === 'approved'
+            ? 100
+            : 0;
+      byProject.set(row.projectId, [...(byProject.get(row.projectId) ?? []), taskProgress]);
+    });
+
+    byProject.forEach((taskProgresses, projectId) => {
+      const total = taskProgresses.reduce((sum, value) => sum + value, 0);
+      progress.set(projectId, Math.round(total / taskProgresses.length));
+    });
+
+    return progress;
   }
 
   private async getProjectClientNames(context: RequestContext, clientIds: string[]) {
@@ -315,21 +395,31 @@ export class ProjectBoardsService {
       ]),
     );
 
-    return tasks.map((task) =>
-      Object.assign(task, counts.get(task.id) ?? { checklistTotal: 0, checklistDone: 0 }),
-    );
+    return tasks.map((task) => {
+      const count = counts.get(task.id) ?? { checklistTotal: 0, checklistDone: 0 };
+      const progress =
+        count.checklistTotal > 0
+          ? Math.round((count.checklistDone / count.checklistTotal) * 100)
+          : task.status === 'done' || task.status === 'approved'
+            ? 100
+            : 0;
+
+      return Object.assign(task, count, { progress });
+    });
   }
 
   private buildBoard<
     TStage extends { id: string; name: string; color: string | null; position: number },
-    TCard extends { stageId: string | null }
+    TCard extends { stageId: string | null; projectStageId?: string | null }
   >(
     stages: TStage[],
     cards: TCard[],
     unassignedName: string,
+    stageField: 'stageId' | 'projectStageId' = 'stageId',
   ): BoardResponse<TCard> {
     const stageIds = new Set(stages.map((stage) => stage.id));
     const fallbackStageId = stages[0]?.id ?? null;
+    const getCardStageId = (card: TCard) => card[stageField] ?? null;
     const columns = stages.map((stage) => ({
       id: stage.id,
       name: stage.name,
@@ -337,17 +427,19 @@ export class ProjectBoardsService {
       position: stage.position,
       cards: cards.filter(
         (card) =>
-          card.stageId === stage.id ||
+          getCardStageId(card) === stage.id ||
           (stage.id === fallbackStageId &&
-            typeof card.stageId === 'string' &&
-            !stageIds.has(card.stageId)),
+            typeof getCardStageId(card) === 'string' &&
+            !stageIds.has(getCardStageId(card)!)),
       ),
     }));
 
     const unassignedCards = cards.filter(
       (card) =>
-        !card.stageId ||
-        (!fallbackStageId && typeof card.stageId === 'string' && !stageIds.has(card.stageId)),
+        !getCardStageId(card) ||
+        (!fallbackStageId &&
+          typeof getCardStageId(card) === 'string' &&
+          !stageIds.has(getCardStageId(card)!)),
     );
 
     return {
