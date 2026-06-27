@@ -23,6 +23,9 @@ export class AgencyTaskChecklistItem {
   @Column({ type: 'varchar', length: 220 })
   title!: string;
 
+  @Column({ type: 'text', nullable: true, default: null })
+  description!: string | null;
+
   @Column({ name: 'is_done', type: 'boolean', default: false })
   isDone!: boolean;
 

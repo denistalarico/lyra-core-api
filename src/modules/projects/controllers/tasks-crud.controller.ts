@@ -107,6 +107,16 @@ export class TasksCrudController {
     );
   }
 
+  @Get('my-assigned-subtasks')
+  @RequirePermission('agency.tasks.task.update.assigned')
+  listMyAssignedSubtasks(
+    @Headers() headers: Record<string, string | string[] | undefined>,
+  ) {
+    return this.taskWorkspaceService.getMyAssignedSubtaskCards(
+      getContextFromHeaders(headers),
+    );
+  }
+
   @Get('my')
   @RequirePermission('agency.tasks.task.update.assigned')
   listMyTasks(

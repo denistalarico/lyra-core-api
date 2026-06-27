@@ -20,6 +20,9 @@ export class AgencyTaskTimeEntry {
   @Column({ name: 'task_id', type: 'uuid' })
   taskId!: string;
 
+  @Column({ name: 'checklist_item_id', type: 'uuid', nullable: true, default: null })
+  checklistItemId!: string | null;
+
   @Column({ name: 'user_id', type: 'uuid' })
   userId!: string;
 

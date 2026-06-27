@@ -38,6 +38,7 @@ export enum ActivityEntityType {
   Client = 'client',
   Project = 'project',
   Task = 'task',
+  Subtask = 'subtask',
   CalendarEvent = 'calendar_event',
   Invoice = 'invoice',
   InboxConversation = 'inbox_conversation',

@@ -138,7 +138,16 @@ export class TasksCrudService {
       .getMany();
   }
 
-  listMyTasks(context: RequestContext, query: ListTasksQueryDto) {
+  async listMyTasks(context: RequestContext, query: ListTasksQueryDto) {
+    // Task assignees are stored as team-member ids; match both that and the raw
+    // user id so assigning a user to a task surfaces it in their My Tasks.
+    const memberRows: Array<{ id: string }> = await this.tasksRepository.manager.query(
+      `SELECT id FROM team_members WHERE tenant_id = $1 AND user_id = $2`,
+      [context.tenantId, context.userId],
+    );
+    const assigneeIds = Array.from(
+      new Set([context.userId, ...memberRows.map((row) => row.id)]),
+    );
     const qb = this.tasksRepository
       .createQueryBuilder('task')
       .where('task.tenant_id = :tenantId', { tenantId: context.tenantId })
@@ -146,7 +155,7 @@ export class TasksCrudService {
       .andWhere(
         new Brackets((subQb) => {
           subQb
-            .where('task.assignee_id = :userId', { userId: context.userId })
+            .where('task.assignee_id IN (:...assigneeIds)', { assigneeIds })
             .orWhere('task.created_by_id = :userId', {
               userId: context.userId,
             })

@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Brackets, IsNull, Repository } from 'typeorm';
+import { Brackets, In, IsNull, Repository } from 'typeorm';
 import {
   AgencyPersonalTaskStage,
   AgencyProject,
@@ -215,10 +215,22 @@ export class ProjectBoardsService {
     return qb.getMany();
   }
 
+  // Task assignees are stored as team-member ids, while the logged-in identity
+  // is a user id — resolve both so "assign a user to a task" reliably surfaces
+  // the card in their My Tasks.
+  private async resolveAssigneeIds(context: RequestContext) {
+    const rows: Array<{ id: string }> = await this.tasksRepository.manager.query(
+      `SELECT id FROM team_members WHERE tenant_id = $1 AND user_id = $2`,
+      [context.tenantId, context.userId],
+    );
+    return Array.from(new Set([context.userId, ...rows.map((row) => row.id)]));
+  }
+
   async getMyTasksBoard(
     context: RequestContext,
     includeArchived = false,
   ): Promise<BoardResponse<TaskBoardCard>> {
+    const assigneeIds = await this.resolveAssigneeIds(context);
     const [stages, tasks] = await Promise.all([
       this.personalTaskStagesRepository.find({
         where: {
@@ -237,7 +249,7 @@ export class ProjectBoardsService {
             tenantId: context.tenantId,
             workspaceId: context.workspaceId,
             ...(includeArchived ? {} : { archivedAt: IsNull() }),
-            assigneeId: context.userId,
+            assigneeId: In(assigneeIds),
           },
           {
             tenantId: context.tenantId,

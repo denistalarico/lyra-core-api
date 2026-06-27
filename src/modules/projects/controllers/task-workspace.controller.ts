@@ -65,6 +65,7 @@ export class TaskWorkspaceController {
     @Body()
     body: {
       title?: string;
+      description?: string | null;
       isDone?: boolean;
       status?: string;
       position?: number;
@@ -92,6 +93,7 @@ export class TaskWorkspaceController {
     @Body()
     body: {
       title?: string;
+      description?: string | null;
       isDone?: boolean;
       status?: string;
       position?: number;
@@ -120,6 +122,65 @@ export class TaskWorkspaceController {
     @Param('itemId') itemId: string,
   ) {
     return this.taskWorkspaceService.deleteChecklistItem(
+      getContextFromHeaders(headers),
+      taskId,
+      itemId,
+    );
+  }
+
+  @Get('checklist/:itemId')
+  @RequireAnyPermission(
+    'agency.tasks.task.update.assigned',
+    'agency.tasks.task.manage.department',
+  )
+  getChecklistItem(
+    @Headers() headers: Record<string, string | string[] | undefined>,
+    @Param('taskId') taskId: string,
+    @Param('itemId') itemId: string,
+  ) {
+    return this.taskWorkspaceService.getChecklistItem(
+      getContextFromHeaders(headers),
+      taskId,
+      itemId,
+    );
+  }
+
+  @Get('checklist/:itemId/time')
+  @RequirePermission('agency.tasks.time.track.self')
+  listChecklistTimeEntries(
+    @Headers() headers: Record<string, string | string[] | undefined>,
+    @Param('taskId') taskId: string,
+    @Param('itemId') itemId: string,
+  ) {
+    return this.taskWorkspaceService.listChecklistTimeEntries(
+      getContextFromHeaders(headers),
+      taskId,
+      itemId,
+    );
+  }
+
+  @Post('checklist/:itemId/time/start')
+  @RequirePermission('agency.tasks.time.track.self')
+  startChecklistTimer(
+    @Headers() headers: Record<string, string | string[] | undefined>,
+    @Param('taskId') taskId: string,
+    @Param('itemId') itemId: string,
+  ) {
+    return this.taskWorkspaceService.startChecklistTimer(
+      getContextFromHeaders(headers),
+      taskId,
+      itemId,
+    );
+  }
+
+  @Patch('checklist/:itemId/time/stop')
+  @RequirePermission('agency.tasks.time.track.self')
+  stopChecklistTimer(
+    @Headers() headers: Record<string, string | string[] | undefined>,
+    @Param('taskId') taskId: string,
+    @Param('itemId') itemId: string,
+  ) {
+    return this.taskWorkspaceService.stopChecklistTimer(
       getContextFromHeaders(headers),
       taskId,
       itemId,
