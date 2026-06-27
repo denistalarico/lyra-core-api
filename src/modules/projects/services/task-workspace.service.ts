@@ -24,6 +24,7 @@ type ChecklistPayload = {
   position?: number;
   taskTypeId?: string | null;
   assigneeId?: string | null;
+  personalStageId?: string | null;
   dueDate?: string | null;
 };
 
@@ -195,6 +196,7 @@ export class TaskWorkspaceService {
     if (payload.position !== undefined) item.position = payload.position;
     if (payload.taskTypeId !== undefined) item.taskTypeId = payload.taskTypeId;
     if (payload.assigneeId !== undefined) item.assigneeId = payload.assigneeId;
+    if (payload.personalStageId !== undefined) item.personalStageId = payload.personalStageId;
     if (payload.dueDate !== undefined) {
       item.dueDate = payload.dueDate ? new Date(payload.dueDate) : null;
     }
@@ -376,6 +378,7 @@ export class TaskWorkspaceService {
           status: item.status,
           dueDate: item.dueDate,
           assigneeId: item.assigneeId,
+          personalStageId: item.personalStageId ?? null,
           projectId: task.projectId ?? null,
           projectName: project?.name ?? null,
           clientId: project?.clientId ?? null,

@@ -71,6 +71,7 @@ export class TaskWorkspaceController {
       position?: number;
       taskTypeId?: string | null;
       assigneeId?: string | null;
+      personalStageId?: string | null;
       dueDate?: string | null;
     },
   ) {
@@ -99,6 +100,7 @@ export class TaskWorkspaceController {
       position?: number;
       taskTypeId?: string | null;
       assigneeId?: string | null;
+      personalStageId?: string | null;
       dueDate?: string | null;
     },
   ) {

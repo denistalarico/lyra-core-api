@@ -41,6 +41,12 @@ export class AgencyTaskChecklistItem {
   @Column({ name: 'assignee_id', type: 'uuid', nullable: true, default: null })
   assigneeId!: string | null;
 
+  // Personal-board stage chosen by the assignee in /projects/my-tasks. Only that
+  // board reads it — other boards use the parent task's stage fields, so moving a
+  // subtask here never affects its position/stage elsewhere.
+  @Column({ name: 'personal_stage_id', type: 'uuid', nullable: true, default: null })
+  personalStageId!: string | null;
+
   @Column({ name: 'due_date', type: 'timestamptz', nullable: true, default: null })
   dueDate!: Date | null;
 
