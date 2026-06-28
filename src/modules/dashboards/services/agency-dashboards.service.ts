@@ -219,6 +219,15 @@ export class AgencyDashboardsService {
       values.get('clientsProfitability'),
     );
 
+    // MRR reflects the client portfolio revenue ("Receita da carteira" in the
+    // Clients module), not the finance recurring-profile sum.
+    const portfolioRevenue = this.extractPortfolioRevenue(
+      values.get('clientsProfitability'),
+    );
+    if (finance && portfolioRevenue !== null) {
+      finance.metrics.mrr = portfolioRevenue;
+    }
+
     const sales = this.mapSalesWidget(values.get('sales'));
 
     const activities = this.mapActivitiesWidget(
@@ -657,6 +666,16 @@ export class AgencyDashboardsService {
   private toNumber(value: unknown): number {
     const parsed = Number(value);
     return Number.isFinite(parsed) ? parsed : 0;
+  }
+
+  // Total revenue of the client portfolio (clientsProfitability.summary.revenue).
+  private extractPortfolioRevenue(value: unknown): number | null {
+    if (!value || typeof value !== 'object') return null;
+    const summary = (value as Record<string, unknown>).summary;
+    if (!summary || typeof summary !== 'object') return null;
+    const revenue = (summary as Record<string, unknown>).revenue;
+    const parsed = Number(revenue);
+    return Number.isFinite(parsed) ? parsed : null;
   }
 
   private toStringValue(value: unknown): string {

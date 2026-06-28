@@ -22,6 +22,7 @@ import {
   TeamConfigOptionType,
   TeamPresenceStatus,
   TeamAttendanceType,
+  TeamAttendanceSource,
   TeamPaymentBatchStatus,
   TeamPaymentStatus,
   TeamPaymentCalculationMode,
@@ -451,6 +452,10 @@ export class UpdateTeamPresenceDto {
 export class CreateTeamAttendanceEntryDto {
   @IsEnum(TeamAttendanceType)
   type!: TeamAttendanceType;
+
+  @IsOptional()
+  @IsEnum(TeamAttendanceSource)
+  source?: TeamAttendanceSource;
 
   @IsOptional()
   @IsString()

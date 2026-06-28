@@ -90,7 +90,7 @@ export class TeamAttendanceService {
         workspaceId: ctx.workspaceId,
         memberId,
         type: dto.type,
-        source: TeamAttendanceSource.Web,
+        source: dto.source ?? TeamAttendanceSource.Web,
         occurredAt: dto.occurredAt ? new Date(dto.occurredAt) : new Date(),
         timezone: dto.timezone ?? member.timezone ?? null,
         note: dto.note ?? null,

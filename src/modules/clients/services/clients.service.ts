@@ -283,7 +283,10 @@ export class ClientsService {
     return {
       client,
       counters,
-      profitability,
+      // The web client expects a flat profitability snapshot here (laborHours,
+      // revenue, margin...), not the wrapper returned by getClientProfitability.
+      profitability:
+        (profitability as { profitability?: unknown }).profitability ?? null,
       recent: null,
     };
   }
@@ -307,6 +310,25 @@ export class ClientsService {
 
     const now = new Date();
 
+    // Tasks created inside a client's project carry only project_id, so the
+    // task scope must match either the direct client_id or one of the client's
+    // project ids.
+    const clientProjects = await this.projectsRepository.find({
+      where: {
+        tenantId: context.tenantId,
+        workspaceId: context.workspaceId,
+        clientId,
+      },
+      select: ['id'],
+    });
+    const projectIds = clientProjects.map((project) => project.id);
+    const taskScopeWhere = projectIds.length
+      ? '(task.client_id = :clientId OR task.project_id IN (:...projectIds))'
+      : 'task.client_id = :clientId';
+    const taskScopeParams = projectIds.length
+      ? { clientId, projectIds }
+      : { clientId };
+
     const [activeProjects, openTasks, overdueTasks, openActivities, overdueActivities] =
       await Promise.all([
         this.projectsRepository.count({
@@ -324,7 +346,7 @@ export class ClientsService {
           .andWhere('task.workspace_id = :workspaceId', {
             workspaceId: context.workspaceId,
           })
-          .andWhere('task.client_id = :clientId', { clientId })
+          .andWhere(taskScopeWhere, taskScopeParams)
           .andWhere('task.archived_at IS NULL')
           .andWhere('task.status IN (:...statuses)', {
             statuses: openTaskStatuses,
@@ -336,7 +358,7 @@ export class ClientsService {
           .andWhere('task.workspace_id = :workspaceId', {
             workspaceId: context.workspaceId,
           })
-          .andWhere('task.client_id = :clientId', { clientId })
+          .andWhere(taskScopeWhere, taskScopeParams)
           .andWhere('task.archived_at IS NULL')
           .andWhere('task.due_date IS NOT NULL')
           .andWhere('task.due_date < :now', { now })
