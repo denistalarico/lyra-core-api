@@ -48,6 +48,8 @@ import {
   CreateFinancePaymentDto,
   CreateFinanceRecurringProfileDto,
   UpdateFinanceRecurringProfileDto,
+  CreateFinanceBillRecurrenceDto,
+  UpdateFinanceBillRecurrenceDto,
   AllocateFinancePaymentDto,
 } from '../dto';
 import { FinanceService } from '../services/finance.service';
@@ -811,6 +813,77 @@ export class FinanceController {
       getFinanceContext(req),
       id,
       dto,
+    );
+  }
+
+  // ── Bill recurrences (contas a pagar recorrentes) ────────────────────────
+  // Static paths are declared before the `:id` routes so they are not captured
+  // as an id by the router.
+
+  @Post('bill-recurrences/run-due')
+  @RequireFinancePermission('agency.finance.billing.manage.owner_only')
+  generateDueBillRecurrences(@Req() req: Request) {
+    return this.financeBillingService.generateDueBillRecurrences(
+      getFinanceContext(req),
+    );
+  }
+
+  @Get('bill-recurrences')
+  @RequireFinancePermission('agency.finance.transactions.view.finance_or_owner')
+  listBillRecurrences(@Req() req: Request) {
+    return this.financeBillingService.listBillRecurrences(getFinanceContext(req));
+  }
+
+  @Post('bill-recurrences')
+  @RequireFinancePermission('agency.finance.billing.manage.owner_only')
+  createBillRecurrence(
+    @Req() req: Request,
+    @Body() dto: CreateFinanceBillRecurrenceDto,
+  ) {
+    return this.financeBillingService.createBillRecurrence(
+      getFinanceContext(req),
+      dto,
+    );
+  }
+
+  @Get('bill-recurrences/:id')
+  @RequireFinancePermission('agency.finance.transactions.view.finance_or_owner')
+  getBillRecurrence(@Req() req: Request, @Param('id') id: string) {
+    return this.financeBillingService.getBillRecurrence(getFinanceContext(req), id);
+  }
+
+  @Patch('bill-recurrences/:id')
+  @RequireFinancePermission('agency.finance.billing.manage.owner_only')
+  updateBillRecurrence(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Body() dto: UpdateFinanceBillRecurrenceDto,
+  ) {
+    return this.financeBillingService.updateBillRecurrence(
+      getFinanceContext(req),
+      id,
+      dto,
+    );
+  }
+
+  @Post('bill-recurrences/:id/pause')
+  @RequireFinancePermission('agency.finance.billing.manage.owner_only')
+  pauseBillRecurrence(@Req() req: Request, @Param('id') id: string) {
+    return this.financeBillingService.pauseBillRecurrence(getFinanceContext(req), id);
+  }
+
+  @Post('bill-recurrences/:id/resume')
+  @RequireFinancePermission('agency.finance.billing.manage.owner_only')
+  resumeBillRecurrence(@Req() req: Request, @Param('id') id: string) {
+    return this.financeBillingService.resumeBillRecurrence(getFinanceContext(req), id);
+  }
+
+  @Post('bill-recurrences/:id/generate')
+  @RequireFinancePermission('agency.finance.billing.manage.owner_only')
+  generateBillFromRecurrence(@Req() req: Request, @Param('id') id: string) {
+    return this.financeBillingService.generateBillFromRecurrence(
+      getFinanceContext(req),
+      id,
     );
   }
 

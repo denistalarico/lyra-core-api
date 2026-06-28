@@ -174,6 +174,33 @@ export enum FinanceRecurringInterval {
   Yearly = 'yearly',
 }
 
+/**
+ * Lifecycle of a payable (bill) recurrence profile. Mirrors the invoice
+ * recurring-profile lifecycle but is a dedicated type so the two never share a
+ * Postgres enum and can evolve independently.
+ */
+export enum FinanceBillRecurrenceStatus {
+  Draft = 'draft',
+  Active = 'active',
+  Paused = 'paused',
+  Cancelled = 'cancelled',
+  Completed = 'completed',
+}
+
+/**
+ * Base cadence of a payable recurrence. Combined with `intervalCount`
+ * ("a cada X períodos"), so a fortnightly ("quinzenal") schedule is
+ * `Biweekly` (or `Weekly` with intervalCount=2).
+ */
+export enum FinanceBillRecurrenceFrequency {
+  Weekly = 'weekly',
+  Biweekly = 'biweekly',
+  Monthly = 'monthly',
+  Quarterly = 'quarterly',
+  Semiannual = 'semiannual',
+  Yearly = 'yearly',
+}
+
 export enum FinanceDocumentType {
   Invoice = 'invoice',
   Bill = 'bill',

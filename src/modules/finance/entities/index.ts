@@ -11,6 +11,7 @@ export * from './finance-setting.entity';
 export * from './finance-tag.entity';
 export * from './finance-bill.entity';
 export * from './finance-bill-line.entity';
+export * from './finance-bill-recurrence.entity';
 export * from './finance-invoice.entity';
 export * from './finance-invoice-line.entity';
 export * from './finance-payment.entity';
