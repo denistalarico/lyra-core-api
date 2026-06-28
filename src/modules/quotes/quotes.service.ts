@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -24,6 +25,10 @@ import {
   QuoteTemplateEntity,
   QuoteTemplateSectionEntity,
 } from './entities/quote.entities';
+import {
+  GenerateInvoiceResult,
+  QuoteInvoiceService,
+} from './quote-invoice.service';
 
 const AGENCY_CONNECTION = 'agency';
 
@@ -35,6 +40,8 @@ type AgencyContext = {
 
 @Injectable()
 export class QuotesService {
+  private readonly logger = new Logger(QuotesService.name);
+
   constructor(
     @InjectRepository(QuoteEntity, AGENCY_CONNECTION)
     private readonly quotesRepo: Repository<QuoteEntity>,
@@ -49,6 +56,7 @@ export class QuotesService {
     private readonly documentLayoutsService: DocumentLayoutsService,
     private readonly documentPdfRenderer: DocumentPdfRendererService,
     private readonly salesNotificationPublisher: SalesNotificationPublisher,
+    private readonly quoteInvoiceService: QuoteInvoiceService,
   ) {}
 
   health() {
@@ -475,6 +483,24 @@ export class QuotesService {
       taxValue: dto.taxValue ?? dto.taxRateBps ?? 0,
     });
 
+    // Snapshot the catalog item's financial defaults onto the quote line so
+    // the future invoice keeps the configuration even if the catalog changes.
+    const financialSnapshot =
+      await this.quoteInvoiceService.buildItemFinancialSnapshot(
+        context,
+        dto.salesItemId,
+      );
+    const baseMetadata = dto.metadata ?? {};
+    const itemMetadata = financialSnapshot
+      ? {
+          ...baseMetadata,
+          financials: {
+            ...financialSnapshot,
+            ...((baseMetadata.financials as Record<string, unknown>) ?? {}),
+          },
+        }
+      : baseMetadata;
+
     const item = this.itemsRepo.create({
       tenantId: context.tenantId,
       workspaceId: context.workspaceId,
@@ -500,7 +526,7 @@ export class QuotesService {
       recurringTotalCents: calculated.recurringTotalCents,
       recurrenceInterval: dto.recurrenceInterval ?? null,
       position: dto.position ?? 0,
-      metadata: dto.metadata ?? {},
+      metadata: itemMetadata,
     });
 
     await this.itemsRepo.save(item);
@@ -628,7 +654,90 @@ export class QuotesService {
       });
     }
 
-    return this.getQuote(context, saved.id);
+    // Approving a quote creates a Finance invoice in DRAFT (no ledger entry).
+    // Best-effort and idempotent: a failure here never breaks the approval and
+    // re-approving never duplicates the invoice. The clear outcome is surfaced
+    // to the caller via `generatedInvoice` rather than being swallowed.
+    const generatedInvoice = await this.generateInvoiceForAcceptedQuote(
+      context,
+      saved,
+    );
+
+    const detail = await this.getQuote(context, saved.id);
+    return { ...detail, generatedInvoice };
+  }
+
+  private async generateInvoiceForAcceptedQuote(
+    context: AgencyContext,
+    quote: QuoteEntity,
+  ): Promise<{
+    status: 'created' | 'existing' | 'skipped' | 'error';
+    invoiceId: string | null;
+    invoiceNumber: string | null;
+    message?: string;
+  }> {
+    try {
+      const items = await this.itemsRepo.find({
+        where: {
+          tenantId: context.tenantId,
+          workspaceId: context.workspaceId,
+          quoteId: quote.id,
+        },
+        order: { position: 'ASC', createdAt: 'ASC' },
+      });
+
+      const result: GenerateInvoiceResult =
+        await this.quoteInvoiceService.getOrCreateDraftInvoiceForQuote(
+          context,
+          quote,
+          items,
+        );
+
+      if (result.invoice) {
+        await this.quotesRepo.update(
+          {
+            id: quote.id,
+            tenantId: context.tenantId,
+            workspaceId: context.workspaceId,
+          },
+          {
+            metadata: {
+              ...(quote.metadata ?? {}),
+              generatedInvoiceId: result.invoice.id,
+              generatedInvoiceNumber: result.invoice.invoiceNumber,
+            },
+          },
+        );
+
+        return {
+          status: result.created ? 'created' : 'existing',
+          invoiceId: result.invoice.id,
+          invoiceNumber: result.invoice.invoiceNumber,
+        };
+      }
+
+      return {
+        status: 'skipped',
+        invoiceId: null,
+        invoiceNumber: null,
+        message: 'Cotação sem itens; fatura não gerada.',
+      };
+    } catch (error) {
+      this.logger.error(
+        `Failed to generate draft invoice for quote ${quote.id}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return {
+        status: 'error',
+        invoiceId: null,
+        invoiceNumber: null,
+        message:
+          error instanceof Error
+            ? error.message
+            : 'Erro ao gerar fatura a partir da cotação.',
+      };
+    }
   }
 
   async rejectQuote(

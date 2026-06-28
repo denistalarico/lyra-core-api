@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AgencyActivity, AgencyActivityLink } from '../activities/entities';
 import { FinanceModule } from '../finance';
+import { FinanceCostCenter } from '../finance/entities';
 import { NotificationsModule } from '../notifications';
 import { PermissionsModule } from '../permissions';
 import { AgencyProject, AgencyTask } from '../projects/entities';
@@ -9,6 +10,7 @@ import { TeamConfigOption } from '../team/entities';
 import { ClientLifecycleController } from './controllers/client-lifecycle.controller';
 import { ClientsController } from './controllers/clients.controller';
 import { AgencyClient, ClientLifecycleProcess, ClientLifecycleStep } from './entities';
+import { ClientCostCenterService } from './services/client-cost-center.service';
 import { ClientLifecycleService } from './services/client-lifecycle.service';
 import { ClientNotificationPublisher } from './services/client-notification.publisher';
 import { ClientsProfitabilityService } from './services/clients-profitability.service';
@@ -31,6 +33,7 @@ const AGENCY_CONNECTION = 'agency';
         TeamConfigOption,
         ClientLifecycleProcess,
         ClientLifecycleStep,
+        FinanceCostCenter,
       ],
       AGENCY_CONNECTION,
     ),
@@ -41,7 +44,8 @@ const AGENCY_CONNECTION = 'agency';
     ClientsProfitabilityService,
     ClientNotificationPublisher,
     ClientLifecycleService,
+    ClientCostCenterService,
   ],
-  exports: [ClientsService, ClientsProfitabilityService],
+  exports: [ClientsService, ClientsProfitabilityService, ClientCostCenterService],
 })
 export class ClientsModule {}

@@ -80,6 +80,40 @@ export class ClientsController {
     );
   }
 
+  // Administrative backfill: create/link a cost center for every client that
+  // does not have one yet. Declared before the `:clientId` routes.
+  @Post('cost-centers/sync')
+  @RequirePermission('agency.clients.profile.create.admin')
+  syncCostCenters(
+    @Headers() headers: Record<string, string | string[] | undefined>,
+  ) {
+    return this.clientsService.syncCostCenters(getContextFromHeaders(headers));
+  }
+
+  @Get(':clientId/cost-center')
+  @RequirePermission('agency.clients.profile.view.basic.assigned')
+  getCostCenter(
+    @Headers() headers: Record<string, string | string[] | undefined>,
+    @Param('clientId') clientId: string,
+  ) {
+    return this.clientsService.getCostCenter(
+      getContextFromHeaders(headers),
+      clientId,
+    );
+  }
+
+  @Post(':clientId/cost-center')
+  @RequirePermission('agency.clients.profile.update.assigned')
+  ensureCostCenter(
+    @Headers() headers: Record<string, string | string[] | undefined>,
+    @Param('clientId') clientId: string,
+  ) {
+    return this.clientsService.ensureCostCenter(
+      getContextFromHeaders(headers),
+      clientId,
+    );
+  }
+
   @Get(':clientId')
   @RequirePermission('agency.clients.profile.view.basic.assigned')
   findOne(

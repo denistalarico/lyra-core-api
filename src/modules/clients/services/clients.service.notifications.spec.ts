@@ -7,6 +7,7 @@ import {
   AgencyClientLifecycleStage,
   AgencyClientStatus,
 } from '../enums';
+import { ClientCostCenterService } from './client-cost-center.service';
 import { ClientNotificationPublisher } from './client-notification.publisher';
 import { ClientsProfitabilityService } from './clients-profitability.service';
 import { ClientsService } from './clients.service';
@@ -19,6 +20,14 @@ describe('ClientsService notification triggers', () => {
 
     expect(publisher.publishAssigned).toHaveBeenCalledTimes(1);
     expect(publisher.publishOwnerChanged).not.toHaveBeenCalled();
+  });
+
+  it('auto-provisions a cost center on create', async () => {
+    const { service, clientCostCenterService } = makeService();
+
+    await service.create(makeContext(), makeCreateDto());
+
+    expect(clientCostCenterService.ensureForClientSafe).toHaveBeenCalledTimes(1);
   });
 
   it('does not publish client.assigned on create without an account owner', async () => {
@@ -134,6 +143,13 @@ function makeService(options: { client?: AgencyClient } = {}) {
     publishManagedTenantDisconnected: jest.fn(),
   } as unknown as jest.Mocked<ClientNotificationPublisher>;
 
+  const clientCostCenterService = {
+    ensureForClientSafe: jest.fn().mockResolvedValue(null),
+    ensureForClient: jest.fn(),
+    findLinkedCostCenter: jest.fn().mockResolvedValue(null),
+    syncAll: jest.fn(),
+  };
+
   const service = new ClientsService(
     clientsRepository as unknown as Repository<AgencyClient>,
     {} as Repository<AgencyProject>,
@@ -141,9 +157,10 @@ function makeService(options: { client?: AgencyClient } = {}) {
     {} as Repository<AgencyActivity>,
     {} as ClientsProfitabilityService,
     publisher,
+    clientCostCenterService as unknown as ClientCostCenterService,
   );
 
-  return { service, publisher, clientsRepository };
+  return { service, publisher, clientsRepository, clientCostCenterService };
 }
 
 function makeClient(overrides: Partial<AgencyClient> = {}): AgencyClient {

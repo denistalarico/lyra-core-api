@@ -11,6 +11,7 @@ import { ProjectStatus, TaskStatus } from '../../projects/enums';
 import { CreateClientDto, ListClientsQueryDto, UpdateClientDto } from '../dto';
 import { AgencyClient } from '../entities';
 import { AgencyClientLifecycleStage, AgencyClientStatus } from '../enums';
+import { ClientCostCenterService } from './client-cost-center.service';
 import { ClientNotificationPublisher } from './client-notification.publisher';
 import { ClientsProfitabilityService } from './clients-profitability.service';
 
@@ -37,6 +38,7 @@ export class ClientsService {
     private readonly activitiesRepository: Repository<AgencyActivity>,
     private readonly clientsProfitabilityService: ClientsProfitabilityService,
     private readonly clientNotificationPublisher: ClientNotificationPublisher,
+    private readonly clientCostCenterService: ClientCostCenterService,
   ) {}
 
   async list(context: RequestContext, query: ListClientsQueryDto) {
@@ -161,6 +163,11 @@ export class ClientsService {
 
     const saved = await this.clientsRepository.save(client);
 
+    // Auto-provision a dedicated cost center so quotes/invoices using the
+    // `use_client_cost_center` strategy can resolve it. Best-effort and
+    // idempotent: a failure here never blocks client creation.
+    await this.clientCostCenterService.ensureForClientSafe(context, saved);
+
     if (saved.accountOwnerId) {
       await this.clientNotificationPublisher.publishAssigned({
         client: saved,
@@ -169,6 +176,24 @@ export class ClientsService {
     }
 
     return saved;
+  }
+
+  async ensureCostCenter(context: RequestContext, clientId: string) {
+    const client = await this.findOne(context, clientId);
+    return this.clientCostCenterService.ensureForClient(context, client);
+  }
+
+  async getCostCenter(context: RequestContext, clientId: string) {
+    await this.findOne(context, clientId);
+    const costCenter = await this.clientCostCenterService.findLinkedCostCenter(
+      context,
+      clientId,
+    );
+    return { costCenter };
+  }
+
+  syncCostCenters(context: RequestContext) {
+    return this.clientCostCenterService.syncAll(context);
   }
 
   async findOne(context: RequestContext, clientId: string) {
@@ -271,13 +296,14 @@ export class ClientsService {
   }
 
   async getOverview(context: RequestContext, clientId: string) {
-    const [client, profitability, counters] = await Promise.all([
+    const [client, profitability, counters, costCenter] = await Promise.all([
       this.findOne(context, clientId),
       this.clientsProfitabilityService.getClientProfitability(
         context,
         clientId,
       ),
       this.getCounters(context, clientId),
+      this.clientCostCenterService.findLinkedCostCenter(context, clientId),
     ]);
 
     return {
@@ -287,6 +313,7 @@ export class ClientsService {
       // revenue, margin...), not the wrapper returned by getClientProfitability.
       profitability:
         (profitability as { profitability?: unknown }).profitability ?? null,
+      costCenter,
       recent: null,
     };
   }
