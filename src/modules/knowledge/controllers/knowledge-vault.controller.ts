@@ -52,6 +52,57 @@ export class KnowledgeVaultController {
     return this.vaultService.list(buildKnowledgeContext(headers));
   }
 
+  // ── Personal vault (any authenticated user, scoped to themselves) ────────
+
+  @Get('personal')
+  listPersonal(
+    @Headers() headers: Record<string, string | string[] | undefined>,
+  ) {
+    return this.vaultService.listPersonal(buildKnowledgeContext(headers));
+  }
+
+  @Post('personal')
+  createPersonal(
+    @Headers() headers: Record<string, string | string[] | undefined>,
+    @Body() dto: CreateKnowledgeVaultItemDto,
+  ) {
+    return this.vaultService.createPersonal(buildKnowledgeContext(headers), dto);
+  }
+
+  @Patch('personal/:id')
+  updatePersonal(
+    @Headers() headers: Record<string, string | string[] | undefined>,
+    @Param('id') id: string,
+    @Body() dto: UpdateKnowledgeVaultItemDto,
+  ) {
+    return this.vaultService.updatePersonal(
+      buildKnowledgeContext(headers),
+      id,
+      dto,
+    );
+  }
+
+  @Delete('personal/:id')
+  @DangerousAction()
+  deletePersonal(
+    @Headers() headers: Record<string, string | string[] | undefined>,
+    @Param('id') id: string,
+  ) {
+    return this.vaultService.deletePersonal(buildKnowledgeContext(headers), id);
+  }
+
+  @Post('personal/:id/reveal')
+  @DangerousAction()
+  async revealPersonal(
+    @Headers() headers: Record<string, string | string[] | undefined>,
+    @Param('id') id: string,
+    @Body() dto: RevealKnowledgeVaultItemDto,
+  ) {
+    const context = buildKnowledgeContext(headers);
+    await this.reauthService.verifyPassword(context, dto.password);
+    return this.vaultService.revealPersonal(context, id);
+  }
+
   @Post()
   @RequirePermission('agency.knowledge.categories.manage.admin')
   create(

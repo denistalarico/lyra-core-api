@@ -45,6 +45,12 @@ export enum AgencyKnowledgeVaultStatus {
   REVOKED = "revoked",
 }
 
+/** Discriminates shared (agency) vs personal (user-private) knowledge entries. */
+export enum AgencyKnowledgeScope {
+  SHARED = "shared",
+  PERSONAL = "personal",
+}
+
 export enum AgencyKnowledgeVaultServiceType {
   INSTAGRAM = "instagram",
   FACEBOOK = "facebook",

@@ -58,6 +58,62 @@ export class KnowledgeQuickNotesController {
     return this.notesService.create(buildKnowledgeContext(headers), body);
   }
 
+  // ── Personal board (any authenticated user, scoped to themselves) ────────
+
+  @Get('personal')
+  listPersonal(
+    @Headers() headers: Record<string, string | string[] | undefined>,
+  ) {
+    return this.notesService.listPersonal(buildKnowledgeContext(headers));
+  }
+
+  @Post('personal')
+  createPersonal(
+    @Headers() headers: Record<string, string | string[] | undefined>,
+    @Body()
+    body: {
+      title: string;
+      body?: string | null;
+      color?: string | null;
+      tags?: string[];
+      authorName: string;
+      positionX?: number;
+      positionY?: number;
+    },
+  ) {
+    return this.notesService.createPersonal(buildKnowledgeContext(headers), body);
+  }
+
+  @Patch('personal/:id')
+  updatePersonal(
+    @Headers() headers: Record<string, string | string[] | undefined>,
+    @Param('id') id: string,
+    @Body()
+    body: {
+      title?: string;
+      body?: string | null;
+      color?: string | null;
+      tags?: string[];
+      positionX?: number;
+      positionY?: number;
+    },
+  ) {
+    return this.notesService.updatePersonal(
+      buildKnowledgeContext(headers),
+      id,
+      body,
+    );
+  }
+
+  @Delete('personal/:id')
+  @DangerousAction()
+  deletePersonal(
+    @Headers() headers: Record<string, string | string[] | undefined>,
+    @Param('id') id: string,
+  ) {
+    return this.notesService.deletePersonal(buildKnowledgeContext(headers), id);
+  }
+
   @Patch(':id')
   @RequirePermission('agency.knowledge.categories.manage.admin')
   update(

@@ -6,6 +6,7 @@ import {
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from "typeorm";
+import { AgencyKnowledgeScope } from "../enums";
 
 @Entity("agency_knowledge_quick_notes")
 @Index(["tenantId", "workspaceId"])
@@ -24,6 +25,13 @@ export class AgencyKnowledgeQuickNote {
 
   @Column({ name: "author_name", type: "varchar", length: 120 })
   authorName!: string;
+
+  @Column({
+    type: "varchar",
+    length: 20,
+    default: AgencyKnowledgeScope.SHARED,
+  })
+  scope!: AgencyKnowledgeScope;
 
   @Column({ type: "varchar", length: 220 })
   title!: string;

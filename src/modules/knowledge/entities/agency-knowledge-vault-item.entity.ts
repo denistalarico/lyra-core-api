@@ -7,6 +7,7 @@ import {
   UpdateDateColumn,
 } from "typeorm";
 import {
+  AgencyKnowledgeScope,
   AgencyKnowledgeVaultServiceType,
   AgencyKnowledgeVaultStatus,
 } from "../enums";
@@ -78,6 +79,13 @@ export class AgencyKnowledgeVaultItem {
     default: AgencyKnowledgeVaultStatus.ACTIVE,
   })
   status!: AgencyKnowledgeVaultStatus;
+
+  @Column({
+    type: "varchar",
+    length: 20,
+    default: AgencyKnowledgeScope.SHARED,
+  })
+  scope!: AgencyKnowledgeScope;
 
   @Column({ name: "created_by_id", type: "uuid" })
   createdById!: string;

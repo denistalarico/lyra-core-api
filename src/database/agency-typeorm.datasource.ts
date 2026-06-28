@@ -79,6 +79,7 @@ import { AddChecklistItemAssignee1782700100000 } from './migrations/178270010000
 import { AddSubtaskDetailAndTime1782700300000 } from './migrations/1782700300000-add-subtask-detail-and-time';
 import { AddChecklistPersonalStage1782700400000 } from './migrations/1782700400000-add-checklist-personal-stage';
 import { AddTaskProjectStageId1782700200000 } from './migrations/1782700200000-add-task-project-stage-id';
+import { AddKnowledgePersonalScope1782700500000 } from './migrations/1782700500000-add-knowledge-personal-scope';
 
 export const AgencyDataSource = new DataSource({
   type: 'postgres',
@@ -171,5 +172,6 @@ export const AgencyDataSource = new DataSource({
     AddTaskProjectStageId1782700200000,
     AddSubtaskDetailAndTime1782700300000,
     AddChecklistPersonalStage1782700400000,
+    AddKnowledgePersonalScope1782700500000,
   ],
 });

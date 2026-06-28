@@ -16,6 +16,7 @@ import {
   AgencyKnowledgeVaultPermission,
 } from '../entities';
 import {
+  AgencyKnowledgeScope,
   AgencyKnowledgeVaultAccessAction,
   AgencyKnowledgeVaultPermissionRole,
   AgencyKnowledgeVaultServiceType,
@@ -36,35 +37,56 @@ export class KnowledgeVaultService {
     private readonly cryptoService: KnowledgeVaultCryptoService,
   ) {}
 
+  private readonly safeSelect = {
+    id: true,
+    tenantId: true,
+    workspaceId: true,
+    clientId: true,
+    articleId: true,
+    title: true,
+    description: true,
+    serviceType: true,
+    serviceUrl: true,
+    loginIdentifier: true,
+    status: true,
+    scope: true,
+    createdById: true,
+    updatedById: true,
+    lastRevealedAt: true,
+    archivedAt: true,
+    createdAt: true,
+    updatedAt: true,
+  } as const;
+
   list(context: KnowledgeContext) {
     return this.vaultItemsRepository.find({
       where: {
         tenantId: context.tenantId,
         workspaceId: context.workspaceId,
         status: AgencyKnowledgeVaultStatus.ACTIVE,
+        scope: AgencyKnowledgeScope.SHARED,
       },
       order: {
         updatedAt: 'DESC',
       },
-      select: {
-        id: true,
-        tenantId: true,
-        workspaceId: true,
-        clientId: true,
-        articleId: true,
-        title: true,
-        description: true,
-        serviceType: true,
-        serviceUrl: true,
-        loginIdentifier: true,
-        status: true,
-        createdById: true,
-        updatedById: true,
-        lastRevealedAt: true,
-        archivedAt: true,
-        createdAt: true,
-        updatedAt: true,
+      select: this.safeSelect,
+    });
+  }
+
+  // Personal vault: items owned by and visible only to their creator.
+  listPersonal(context: KnowledgeContext) {
+    return this.vaultItemsRepository.find({
+      where: {
+        tenantId: context.tenantId,
+        workspaceId: context.workspaceId,
+        status: AgencyKnowledgeVaultStatus.ACTIVE,
+        scope: AgencyKnowledgeScope.PERSONAL,
+        createdById: context.userId,
       },
+      order: {
+        updatedAt: 'DESC',
+      },
+      select: this.safeSelect,
     });
   }
 
@@ -115,6 +137,137 @@ export class KnowledgeVaultService {
     await this.log(context, saved.id, AgencyKnowledgeVaultAccessAction.CREATED);
 
     return this.toSafeVaultItem(saved);
+  }
+
+  // ── Personal vault (owner-only, no shared permission rows) ───────────────
+
+  async createPersonal(context: KnowledgeContext, dto: CreateKnowledgeVaultItemDto) {
+    const encryptedSecret = this.cryptoService.encrypt(dto.secret);
+    const encryptedNotes = dto.secureNotes
+      ? this.cryptoService.encrypt(dto.secureNotes)
+      : null;
+
+    const item = this.vaultItemsRepository.create({
+      tenantId: context.tenantId,
+      workspaceId: context.workspaceId,
+      clientId: null,
+      articleId: null,
+      title: dto.title,
+      description: dto.description ?? null,
+      serviceType: dto.serviceType ?? AgencyKnowledgeVaultServiceType.OTHER,
+      serviceUrl: dto.serviceUrl ?? null,
+      loginIdentifier: dto.loginIdentifier ?? null,
+      encryptedSecret: encryptedSecret.encryptedValue,
+      encryptedNotes: encryptedNotes?.encryptedValue ?? null,
+      encryptedNotesIv: encryptedNotes?.iv ?? null,
+      encryptedNotesAuthTag: encryptedNotes?.authTag ?? null,
+      encryptionIv: encryptedSecret.iv,
+      encryptionAuthTag: encryptedSecret.authTag,
+      keyVersion: encryptedSecret.keyVersion,
+      status: AgencyKnowledgeVaultStatus.ACTIVE,
+      scope: AgencyKnowledgeScope.PERSONAL,
+      createdById: context.userId,
+    });
+
+    const saved = await this.vaultItemsRepository.save(item);
+    await this.log(context, saved.id, AgencyKnowledgeVaultAccessAction.CREATED);
+
+    return this.toSafeVaultItem(saved);
+  }
+
+  async updatePersonal(
+    context: KnowledgeContext,
+    id: string,
+    dto: UpdateKnowledgeVaultItemDto,
+  ) {
+    const item = await this.getPersonalOrFail(context, id);
+
+    if (dto.secret) {
+      const encryptedSecret = this.cryptoService.encrypt(dto.secret);
+      item.encryptedSecret = encryptedSecret.encryptedValue;
+      item.encryptionIv = encryptedSecret.iv;
+      item.encryptionAuthTag = encryptedSecret.authTag;
+      item.keyVersion = encryptedSecret.keyVersion;
+    }
+
+    if (dto.secureNotes !== undefined) {
+      const encryptedNotes = dto.secureNotes
+        ? this.cryptoService.encrypt(dto.secureNotes)
+        : null;
+      item.encryptedNotes = encryptedNotes?.encryptedValue ?? null;
+      item.encryptedNotesIv = encryptedNotes?.iv ?? null;
+      item.encryptedNotesAuthTag = encryptedNotes?.authTag ?? null;
+    }
+
+    item.title = dto.title ?? item.title;
+    item.description =
+      dto.description === undefined ? item.description : dto.description;
+    item.serviceType = dto.serviceType ?? item.serviceType;
+    item.serviceUrl =
+      dto.serviceUrl === undefined ? item.serviceUrl : dto.serviceUrl;
+    item.loginIdentifier =
+      dto.loginIdentifier === undefined
+        ? item.loginIdentifier
+        : dto.loginIdentifier;
+    item.updatedById = context.userId;
+
+    const saved = await this.vaultItemsRepository.save(item);
+    await this.log(context, saved.id, AgencyKnowledgeVaultAccessAction.UPDATED);
+
+    return this.toSafeVaultItem(saved);
+  }
+
+  async revealPersonal(context: KnowledgeContext, id: string) {
+    const item = await this.getPersonalOrFail(context, id);
+    const { secret, secureNotes } = this.decryptItem(item);
+
+    item.lastRevealedAt = new Date();
+    await this.vaultItemsRepository.save(item);
+    await this.log(context, item.id, AgencyKnowledgeVaultAccessAction.REVEALED);
+
+    return {
+      ...this.toSafeVaultItem(item),
+      secret,
+      secureNotes,
+    };
+  }
+
+  async deletePersonal(context: KnowledgeContext, id: string) {
+    const item = await this.getPersonalOrFail(context, id);
+    await this.vaultItemsRepository.remove(item);
+    return { deleted: true, id };
+  }
+
+  private async getPersonalOrFail(context: KnowledgeContext, id: string) {
+    const item = await this.getRaw(context, id);
+    if (
+      item.scope !== AgencyKnowledgeScope.PERSONAL ||
+      item.createdById !== context.userId
+    ) {
+      throw new ForbiddenException(
+        'You do not have access to this personal vault item',
+      );
+    }
+    return item;
+  }
+
+  private decryptItem(item: AgencyKnowledgeVaultItem) {
+    const secret = this.cryptoService.decrypt(
+      item.encryptedSecret,
+      item.encryptionIv,
+      item.encryptionAuthTag,
+    );
+
+    const secureNotes =
+      item.encryptedNotes && item.encryptedNotesIv && item.encryptedNotesAuthTag
+        ? this.cryptoService.decrypt(
+            item.encryptedNotes,
+            item.encryptedNotesIv,
+            item.encryptedNotesAuthTag,
+          )
+        : null;
+
+    return { secret, secureNotes };
   }
 
   async update(
@@ -183,20 +336,7 @@ export class KnowledgeVaultService {
       );
     }
 
-    const secret = this.cryptoService.decrypt(
-      item.encryptedSecret,
-      item.encryptionIv,
-      item.encryptionAuthTag,
-    );
-
-    const secureNotes =
-      item.encryptedNotes && item.encryptedNotesIv && item.encryptedNotesAuthTag
-        ? this.cryptoService.decrypt(
-            item.encryptedNotes,
-            item.encryptedNotesIv,
-            item.encryptedNotesAuthTag,
-          )
-        : null;
+    const { secret, secureNotes } = this.decryptItem(item);
 
     item.lastRevealedAt = new Date();
     await this.vaultItemsRepository.save(item);
