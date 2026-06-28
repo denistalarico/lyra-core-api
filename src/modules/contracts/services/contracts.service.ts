@@ -1548,6 +1548,145 @@ export class ContractsService {
     };
   }
 
+  // Attaches a PDF to a contract WITHOUT the "manually signed / completed"
+  // semantics of `uploadManuallySignedContract`. Used by the manual contract
+  // flow on the client page, where the user uploads the contract document they
+  // produced outside the system to enable download/e-mail from Lyra.
+  async uploadContractAttachment(
+    context: RequestContext,
+    id: string,
+    dto: UploadManuallySignedContractDto,
+  ) {
+    const contract = await this.getContractOrFail(context, id);
+
+    if (
+      [ContractStatus.Cancelled, ContractStatus.Archived].includes(
+        contract.status,
+      )
+    ) {
+      throw new BadRequestException(
+        'Contract cannot receive an attachment in current status',
+      );
+    }
+
+    const mimeType = dto.mimeType ?? 'application/pdf';
+
+    if (mimeType !== 'application/pdf') {
+      throw new BadRequestException('Only PDF uploads are supported for now');
+    }
+
+    const normalizedBase64 = dto.fileBase64.includes(',')
+      ? (dto.fileBase64.split(',').pop() ?? '')
+      : dto.fileBase64;
+
+    const buffer = Buffer.from(normalizedBase64, 'base64');
+
+    if (!buffer.length) {
+      throw new BadRequestException('Invalid fileBase64 payload');
+    }
+
+    if (buffer.subarray(0, 4).toString('utf8') !== '%PDF') {
+      throw new BadRequestException('Uploaded file is not a valid PDF');
+    }
+
+    const fileName =
+      dto.fileName ??
+      `${this.slugifyFileName(contract.title || 'contract')}.pdf`;
+
+    const fileKey = this.buildContractPdfFileKey({
+      tenantId: context.tenantId,
+      workspaceId: context.workspaceId,
+      contractId: contract.id,
+      fileName,
+    });
+
+    const storage = await this.uploadPdfToObjectStorage({
+      buffer,
+      fileKey,
+      contentType: mimeType,
+    });
+
+    const document = await this.documentsRepository.save(
+      this.documentsRepository.create({
+        tenantId: context.tenantId,
+        workspaceId: context.workspaceId,
+        contractId: contract.id,
+        type: ContractDocumentType.Attachment,
+        fileName,
+        fileKey: storage.fileKey,
+        mimeType,
+        sizeBytes: String(buffer.length),
+        externalUrl: null,
+        uploadedById: context.userId,
+        metadata: {
+          uploadedAs: 'manual_contract_pdf',
+          uploadedAt: new Date().toISOString(),
+          storageBucket: storage.bucket,
+          storageProvider: 'minio',
+        },
+      }),
+    );
+
+    const existingClientContract =
+      ((contract.metadata ?? {}).clientContract as
+        | Record<string, unknown>
+        | undefined) ?? {};
+
+    contract.metadata = {
+      ...(contract.metadata ?? {}),
+      clientContract: {
+        ...existingClientContract,
+        attachedPdf: {
+          documentId: document.id,
+          fileName: document.fileName,
+          mimeType: document.mimeType,
+          sizeBytes: document.sizeBytes,
+          uploadedAt: new Date().toISOString(),
+        },
+      },
+    };
+    contract.updatedById = context.userId;
+
+    const saved = await this.contractsRepository.save(contract);
+
+    await this.createEvent(
+      context,
+      saved.id,
+      ContractEventType.DocumentAdded,
+      dto.note ?? 'PDF do contrato manual anexado.',
+      {
+        documentId: document.id,
+        fileName: document.fileName,
+        fileKey: document.fileKey,
+        sizeBytes: document.sizeBytes,
+      },
+    );
+
+    return { ...saved, attachedDocument: document };
+  }
+
+  // Returns a stored contract document as base64 so the web client can download
+  // it (mirrors the generate-pdf response shape).
+  async getContractDocumentBase64(
+    context: RequestContext,
+    contractId: string,
+    documentId: string,
+  ) {
+    const file = await this.getContractDocumentFile(
+      context,
+      contractId,
+      documentId,
+    );
+
+    return {
+      status: 'ok',
+      filename: file.fileName,
+      mimeType: file.mimeType,
+      sizeBytes: file.sizeBytes,
+      base64: file.buffer.toString('base64'),
+    };
+  }
+
   async markManuallySigned(
     context: RequestContext,
     id: string,

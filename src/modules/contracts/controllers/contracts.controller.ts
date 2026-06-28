@@ -423,6 +423,34 @@ export class ContractsController {
     );
   }
 
+  @Post(':id/upload-attachment')
+  @RequirePermission('agency.contracts.create.from_template')
+  uploadContractAttachment(
+    @Headers() headers: Record<string, string | string[] | undefined>,
+    @Param('id') id: string,
+    @Body() dto: UploadManuallySignedContractDto,
+  ) {
+    return this.contractsService.uploadContractAttachment(
+      getContextFromHeaders(headers),
+      id,
+      dto,
+    );
+  }
+
+  @Get(':id/documents/:documentId/file')
+  @RequirePermission('agency.contracts.view.assigned')
+  getContractDocumentFile(
+    @Headers() headers: Record<string, string | string[] | undefined>,
+    @Param('id') id: string,
+    @Param('documentId') documentId: string,
+  ) {
+    return this.contractsService.getContractDocumentBase64(
+      getContextFromHeaders(headers),
+      id,
+      documentId,
+    );
+  }
+
   @Post(':id/parties')
   @RequirePermission('agency.contracts.create.from_template')
   addParty(

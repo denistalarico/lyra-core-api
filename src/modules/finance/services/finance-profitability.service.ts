@@ -171,8 +171,17 @@ export class FinanceProfitabilityService {
     const defaultHourlyCost = toNumber(rules.defaultHourlyCost);
     const tasksById = new Map(tasks.map((task) => [task.id, task]));
     const tasksByProjectId = this.groupTasksByProject(tasks);
+    // A task inherits its client from its project when it has no client of its
+    // own — tasks created inside a client's project only carry projectId.
+    const projectClientById = new Map<string, string | null>(
+      projects.map((project) => [project.id, project.clientId ?? null]),
+    );
     const timeByProjectId = this.calculateTimeByProject(tasks, timeEntries);
-    const timeByClientId = this.calculateTimeByClient(tasks, timeEntries);
+    const timeByClientId = this.calculateTimeByClient(
+      tasks,
+      timeEntries,
+      projectClientById,
+    );
 
     const validInvoices = invoices.filter(
       (invoice) => !['cancelled', 'void'].includes(String(invoice.status)),
@@ -245,7 +254,10 @@ export class FinanceProfitabilityService {
         (project) => project.clientId === clientId,
       );
 
-      const clientTasks = tasks.filter((task) => task.clientId === clientId);
+      const clientTasks = tasks.filter(
+        (task) =>
+          this.resolveTaskClientId(task, projectClientById) === clientId,
+      );
 
       const laborMinutes = timeByClientId.get(clientId) ?? 0;
       const laborHours = laborMinutes / 60;
@@ -407,8 +419,8 @@ export class FinanceProfitabilityService {
     ctx: FinanceRequestContext,
     clientId: string,
   ): Promise<Array<{ taskType: string; minutes: number; hours: number }>> {
-    const [tasks, settings] = await Promise.all([
-      this.tasksRepo.find({
+    const [clientProjects, settings] = await Promise.all([
+      this.projectsRepo.find({
         where: {
           tenantId: ctx.tenantId,
           workspaceId: ctx.workspaceId,
@@ -420,9 +432,40 @@ export class FinanceProfitabilityService {
       }),
     ]);
 
+    const projectIds = clientProjects.map((project) => project.id);
+
+    // Tasks owned by the client directly OR belonging to one of its projects
+    // (tasks created inside a client's project only carry projectId).
+    const tasks = await this.tasksRepo.find({
+      where: [
+        {
+          tenantId: ctx.tenantId,
+          workspaceId: ctx.workspaceId,
+          clientId,
+        },
+        ...(projectIds.length
+          ? [
+              {
+                tenantId: ctx.tenantId,
+                workspaceId: ctx.workspaceId,
+                projectId: In(projectIds),
+              },
+            ]
+          : []),
+      ],
+    });
+
     if (tasks.length === 0) return [];
 
-    const taskIds = tasks.map((task) => task.id);
+    // Exclude tasks that were matched via projectId but explicitly tagged to a
+    // different client, so the breakdown matches the labor-hours total.
+    const relevantTasks = tasks.filter(
+      (task) => !task.clientId || task.clientId === clientId,
+    );
+
+    if (relevantTasks.length === 0) return [];
+
+    const taskIds = relevantTasks.map((task) => task.id);
     const timeEntries = await this.timeEntriesRepo.find({
       where: {
         tenantId: ctx.tenantId,
@@ -437,7 +480,7 @@ export class FinanceProfitabilityService {
     );
 
     const minutesByType = new Map<string, number>();
-    for (const task of tasks) {
+    for (const task of relevantTasks) {
       const minutes = this.resolveTaskTrackedMinutes(task, entriesByTaskId);
       if (minutes <= 0) continue;
 
@@ -531,18 +574,31 @@ export class FinanceProfitabilityService {
   private calculateTimeByClient(
     tasks: AgencyTask[],
     timeEntries: AgencyTaskTimeEntry[],
+    projectClientById: Map<string, string | null>,
   ) {
     const entriesByTaskId = this.groupTimeEntriesByTask(timeEntries);
     const result = new Map<string, number>();
 
     for (const task of tasks) {
-      if (!task.clientId) continue;
+      const clientId = this.resolveTaskClientId(task, projectClientById);
+      if (!clientId) continue;
 
       const minutes = this.resolveTaskTrackedMinutes(task, entriesByTaskId);
-      result.set(task.clientId, (result.get(task.clientId) ?? 0) + minutes);
+      result.set(clientId, (result.get(clientId) ?? 0) + minutes);
     }
 
     return result;
+  }
+
+  // Effective client of a task: its own clientId when set, otherwise the client
+  // of the project it belongs to.
+  private resolveTaskClientId(
+    task: AgencyTask,
+    projectClientById: Map<string, string | null>,
+  ): string | null {
+    if (task.clientId) return task.clientId;
+    if (task.projectId) return projectClientById.get(task.projectId) ?? null;
+    return null;
   }
 
   private groupTimeEntriesByTask(timeEntries: AgencyTaskTimeEntry[]) {
