@@ -132,6 +132,24 @@ export class TeamPaymentsController {
     return this.teamPaymentsService.confirmPayment(getContextFromHeaders(headers), id);
   }
 
+  @Post(':id/approve')
+  @RequirePermission('agency.team.compensation.view.owner_or_hr')
+  approvePayment(
+    @Headers() headers: Record<string, string | string[] | undefined>,
+    @Param('id') id: string,
+  ) {
+    return this.teamPaymentsService.approvePayment(getContextFromHeaders(headers), id);
+  }
+
+  @Post(':id/send-to-finance')
+  @RequirePermission('agency.team.compensation.view.owner_or_hr')
+  sendToFinance(
+    @Headers() headers: Record<string, string | string[] | undefined>,
+    @Param('id') id: string,
+  ) {
+    return this.teamPaymentsService.sendPaymentToFinance(getContextFromHeaders(headers), id);
+  }
+
   @Post(':id/mark-paid')
   @RequirePermission('agency.team.compensation.view.owner_or_hr')
   markPaid(

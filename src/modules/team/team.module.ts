@@ -19,6 +19,7 @@ import {
   TeamMemberLifecycleStep,
 } from './entities';
 import { AgencyActivityLink } from '../activities/entities';
+import { FinanceBill } from '../finance/entities';
 import { TeamController } from './controllers/team.controller';
 import { TeamAttendanceController } from './controllers/team-attendance.controller';
 import { TeamPaymentsController } from './controllers/team-payments.controller';
@@ -65,6 +66,8 @@ const AGENCY_CONNECTION = 'agency';
         TeamMemberLifecycleStep,
         AgencyUserProfileEntity,
         AgencyActivityLink,
+        // Read-only here: used solely for the Team→Finance idempotency lookup.
+        FinanceBill,
       ],
       AGENCY_CONNECTION,
     ),

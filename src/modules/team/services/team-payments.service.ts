@@ -34,6 +34,7 @@ import {
   TeamPaymentStatus,
 } from '../enums';
 import { FinanceBillingService } from '../../finance/services/finance-billing.service';
+import { FinanceBill } from '../../finance/entities';
 import {
   FinanceAllocationTargetType,
   FinanceBillStatus,
@@ -49,6 +50,24 @@ type RequestContext = {
   tenantId: string;
   workspaceId: string;
   userId: string;
+};
+
+/**
+ * Normalized view of a Team "payment_finance_setting" config option. Defaults
+ * preserve the historical behaviour: when no rule matches the worker type the
+ * competence still generates a payable and requires no approval.
+ */
+type ResolvedFinanceRule = {
+  id: string | null;
+  createPayable: boolean;
+  createExpense: boolean;
+  requireApproval: boolean;
+  categoryId: string | null;
+  costCenterId: string | null;
+  journalId: string | null;
+  accountId: string | null;
+  bankAccountId: string | null;
+  appliesTo: string | null;
 };
 
 const AGENCY_CONNECTION = 'agency';
@@ -156,6 +175,11 @@ export class TeamPaymentsService {
 
     @InjectRepository(TeamConfigOption, AGENCY_CONNECTION)
     private readonly configOptionRepository: Repository<TeamConfigOption>,
+
+    // Read-only access to bills for the Team→Finance idempotency guard. The
+    // bill lifecycle itself stays entirely in FinanceBillingService.
+    @InjectRepository(FinanceBill, AGENCY_CONNECTION)
+    private readonly financeBillRepository: Repository<FinanceBill>,
 
     private readonly financeBillingService: FinanceBillingService,
     private readonly pdfRendererService: DocumentPdfRendererService,
@@ -327,36 +351,155 @@ export class TeamPaymentsService {
 
     const saved = await this.paymentRepository.save(payment);
 
-    const financeRule = await this.findFinanceRule(ctx, saved.member?.workerType);
-    if (financeRule?.metadata?.createPayable === false) {
+    const rule = await this.resolveFinanceRuleConfig(ctx, saved.member?.workerType);
+
+    // Treatment 1 — "Não integrar com Finance" (no payable). A direct expense
+    // (gerarDespesa sem conta a pagar) is not supported in this flow: the only
+    // safe cost-recognition path is a payable that posts through
+    // FinancePostingService, so we record the payment in Team only and flag the
+    // reason instead of double-posting.
+    if (!rule.createPayable) {
       saved.metadata = {
         ...(saved.metadata ?? {}),
-        financeSettingId: financeRule.id,
+        financeSettingId: rule.id,
         financeIntegrationSkipped: true,
+        financeSkipReason: rule.createExpense ? 'expense_only_unsupported' : 'not_integrated',
       };
       return this.paymentRepository.save(saved);
     }
 
-    try {
-      const bill = await this.createFinanceBillForPayment(ctx, saved);
-      saved.financeBillId = bill.id;
-      saved.status = TeamPaymentStatus.PaymentPending;
+    // Treatment 2 — payable required but the rule demands human approval first.
+    // Do NOT touch Finance until the competence is approved.
+    if (rule.requireApproval) {
       saved.metadata = {
         ...(saved.metadata ?? {}),
+        financeSettingId: rule.id,
+        financeApprovalRequired: true,
+        financeApprovalStatus: 'pending_approval',
+        financeIntegrationSkipped: false,
+      };
+      return this.paymentRepository.save(saved);
+    }
+
+    // Treatment 3 — payable required, no approval gate → integrate immediately.
+    return this.runFinanceIntegration(ctx, saved, rule);
+  }
+
+  /**
+   * Approve a competence whose finance rule requires approval, then create the
+   * payable. No-op-safe: if a bill already exists it just reconciles status.
+   */
+  async approvePayment(ctx: RequestContext, id: string) {
+    const payment = await this.getPayment(ctx, id);
+
+    if (payment.financeBillId) {
+      payment.status = TeamPaymentStatus.PaymentPending;
+      payment.metadata = {
+        ...(payment.metadata ?? {}),
+        financeApprovalStatus: 'approved',
+      };
+      return this.paymentRepository.save(payment);
+    }
+
+    if (payment.status !== TeamPaymentStatus.Confirmed) {
+      throw new BadRequestException(
+        'Apenas competências confirmadas e aguardando aprovação podem ser aprovadas.',
+      );
+    }
+
+    const rule = await this.resolveFinanceRuleConfig(ctx, payment.member?.workerType);
+    if (!rule.createPayable) {
+      throw new BadRequestException(
+        'A regra financeira deste vínculo não gera conta a pagar.',
+      );
+    }
+
+    payment.metadata = {
+      ...(payment.metadata ?? {}),
+      financeSettingId: rule.id,
+      financeApprovalRequired: true,
+      financeApprovalStatus: 'approved',
+      financeApprovedAt: new Date().toISOString(),
+      financeApprovedById: ctx.userId || null,
+    };
+    // Persist the approval before integrating so an integration failure does
+    // not lose the approval decision.
+    const approved = await this.paymentRepository.save(payment);
+
+    return this.runFinanceIntegration(ctx, approved, rule);
+  }
+
+  /**
+   * Retry/reprocess the Finance integration for a confirmed competence that has
+   * no bill yet (e.g. previous integration error). Idempotent via occurrenceKey.
+   */
+  async sendPaymentToFinance(ctx: RequestContext, id: string) {
+    const payment = await this.getPayment(ctx, id);
+
+    if (payment.financeBillId) {
+      payment.status = TeamPaymentStatus.PaymentPending;
+      return this.paymentRepository.save(payment);
+    }
+
+    if (payment.status !== TeamPaymentStatus.Confirmed) {
+      throw new BadRequestException(
+        'Apenas competências confirmadas podem ser enviadas ao Finance.',
+      );
+    }
+
+    const rule = await this.resolveFinanceRuleConfig(ctx, payment.member?.workerType);
+    if (!rule.createPayable) {
+      throw new BadRequestException(
+        'A regra financeira deste vínculo não gera conta a pagar.',
+      );
+    }
+    if (
+      rule.requireApproval &&
+      (payment.metadata as Record<string, unknown>)?.financeApprovalStatus !== 'approved'
+    ) {
+      throw new BadRequestException(
+        'Esta competência exige aprovação antes de ser enviada ao Finance.',
+      );
+    }
+
+    return this.runFinanceIntegration(ctx, payment, rule);
+  }
+
+  /**
+   * Shared Finance integration step: creates (or reuses) the payable and links
+   * it to the competence. Never throws on Finance errors — records them on the
+   * payment so the UI can surface "Erro de integração" and offer a retry.
+   */
+  private async runFinanceIntegration(
+    ctx: RequestContext,
+    payment: TeamPayment,
+    rule: ResolvedFinanceRule,
+  ) {
+    try {
+      const bill = await this.createFinanceBillForPayment(ctx, payment, rule);
+      payment.financeBillId = bill.id;
+      payment.status = TeamPaymentStatus.PaymentPending;
+      payment.metadata = {
+        ...(payment.metadata ?? {}),
+        financeSettingId: rule.id,
         financeCreatedAt: new Date().toISOString(),
         financeCreatedById: ctx.userId || null,
         financeSource: 'team_payment',
+        financeIntegrationSkipped: false,
+        financeIntegrationPending: false,
+        financeIntegrationError: null,
       };
-      return this.paymentRepository.save(saved);
+      return this.paymentRepository.save(payment);
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
-      this.logger.warn(`Finance bill creation failed for payment ${id}: ${msg}`);
-      saved.metadata = {
-        ...(saved.metadata ?? {}),
+      this.logger.warn(`Finance bill creation failed for payment ${payment.id}: ${msg}`);
+      payment.metadata = {
+        ...(payment.metadata ?? {}),
+        financeSettingId: rule.id,
         financeIntegrationError: msg,
         financeIntegrationPending: true,
       };
-      return this.paymentRepository.save(saved);
+      return this.paymentRepository.save(payment);
     }
   }
 
@@ -541,16 +684,21 @@ export class TeamPaymentsService {
   async getPaymentFinanceStatus(ctx: RequestContext, id: string) {
     const payment = await this.getPayment(ctx, id);
 
+    const md = (payment.metadata ?? {}) as Record<string, unknown>;
     const result: Record<string, unknown> = {
       hasFinanceRecord: Boolean(payment.financeBillId),
       financeBillId: payment.financeBillId ?? null,
       financePaymentId: payment.financePaymentId ?? null,
-      financeCreatedAt: (payment.metadata as Record<string, unknown>)?.financeCreatedAt ?? null,
-      financeCreatedById: (payment.metadata as Record<string, unknown>)?.financeCreatedById ?? null,
-      financeSource: (payment.metadata as Record<string, unknown>)?.financeSource ?? null,
-      financeIntegrationError: (payment.metadata as Record<string, unknown>)?.financeIntegrationError ?? null,
-      financeIntegrationPending: (payment.metadata as Record<string, unknown>)?.financeIntegrationPending ?? false,
-      financePaymentPending: (payment.metadata as Record<string, unknown>)?.financePaymentPending ?? false,
+      financeCreatedAt: md.financeCreatedAt ?? null,
+      financeCreatedById: md.financeCreatedById ?? null,
+      financeSource: md.financeSource ?? null,
+      financeIntegrationError: md.financeIntegrationError ?? null,
+      financeIntegrationPending: md.financeIntegrationPending ?? false,
+      financeIntegrationSkipped: md.financeIntegrationSkipped ?? false,
+      financeSkipReason: md.financeSkipReason ?? null,
+      financeApprovalRequired: md.financeApprovalRequired ?? false,
+      financeApprovalStatus: md.financeApprovalStatus ?? null,
+      financePaymentPending: md.financePaymentPending ?? false,
     };
 
     if (payment.financeBillId) {
@@ -926,10 +1074,35 @@ export class TeamPaymentsService {
     };
   }
 
-  private async createFinanceBillForPayment(ctx: RequestContext, payment: TeamPayment) {
+  /** Stable origin key for one competence — anchors Finance idempotency. */
+  private teamPaymentOccurrenceKey(payment: TeamPayment) {
+    return `team_payment:${payment.id}`;
+  }
+
+  private async createFinanceBillForPayment(
+    ctx: RequestContext,
+    payment: TeamPayment,
+    rule: ResolvedFinanceRule,
+  ) {
     const financeCtx = toFinanceCtx(ctx);
     const memberName = payment.member?.displayName ?? 'membro';
     const descBase = `Pagamento de equipe - ${memberName} - ${payment.competenceStart} a ${payment.competenceEnd}`;
+    const occurrenceKey = this.teamPaymentOccurrenceKey(payment);
+    const competencePeriod = payment.competenceStart?.slice(0, 7) ?? null;
+
+    // Idempotency guard: never create a second payable for the same competence.
+    // Protects re-confirm, approve and reprocess from duplicating cost even if
+    // the financeBillId was not persisted on a previous attempt.
+    const existing = await this.financeBillRepository
+      .createQueryBuilder('bill')
+      .where('bill.tenantId = :tenantId', { tenantId: ctx.tenantId })
+      .andWhere('bill.workspaceId = :workspaceId', { workspaceId: ctx.workspaceId })
+      .andWhere("bill.metadata ->> 'teamPaymentOccurrenceKey' = :key", { key: occurrenceKey })
+      .andWhere('bill.status != :cancelled', { cancelled: FinanceBillStatus.Cancelled })
+      .getOne();
+    if (existing) {
+      return this.financeBillingService.getBill(financeCtx, existing.id);
+    }
 
     const items = payment.items ?? [];
     const positiveItems = items.filter(
@@ -937,19 +1110,48 @@ export class TeamPaymentsService {
     );
     const discountItems = items.filter((i) => i.type === TeamPaymentItemType.Discount);
 
-    let lines: Array<{ description: string; quantity?: string; unitPrice?: string }>;
+    // Shared per-line classification so every line is traceable back to the
+    // exact Team item and keeps the rule's category/cost center.
+    const lineMeta = (item: TeamPaymentItem | null, itemType: string) => ({
+      sourceModule: 'team',
+      sourceType: 'team_payment',
+      teamPaymentId: payment.id,
+      teamPaymentLineId: item?.id ?? null,
+      memberId: payment.memberId,
+      competencePeriod,
+      financialRuleId: rule.id,
+      itemType,
+    });
+    const lineDefaults = (item: TeamPaymentItem | null, itemType: string) => ({
+      categoryId: rule.categoryId,
+      costCenterId: rule.costCenterId,
+      metadata: lineMeta(item, itemType),
+    });
+
+    let lines: Array<{
+      description: string;
+      quantity?: string;
+      unitPrice?: string;
+      categoryId?: string | null;
+      costCenterId?: string | null;
+      metadata?: Record<string, unknown>;
+    }>;
 
     if (positiveItems.length > 0) {
       lines = [
         ...positiveItems.map((item) => ({
           description: item.name,
           quantity: '1',
+          // Discounts stay negative so the payable total equals the net amount;
+          // they are never turned into a positive expense line.
           unitPrice: money(toNumber(item.amount)),
+          ...lineDefaults(item, item.type),
         })),
         ...discountItems.map((item) => ({
           description: `Desconto — ${item.name}`,
           quantity: '1',
           unitPrice: money(-toNumber(item.amount)),
+          ...lineDefaults(item, item.type),
         })),
       ];
     } else {
@@ -958,6 +1160,7 @@ export class TeamPaymentsService {
           description: descBase,
           quantity: '1',
           unitPrice: money(toNumber(payment.netAmount)),
+          ...lineDefaults(null, 'net'),
         },
       ];
     }
@@ -967,32 +1170,56 @@ export class TeamPaymentsService {
         ? ` | Descontos: ${discountItems.map((d) => `${d.name} (-${money(toNumber(d.amount))})`).join(', ')}`
         : '';
 
-    const financeRule = await this.findFinanceRule(ctx, payment.member?.workerType);
-    const financeMetadata = (financeRule?.metadata ?? {}) as Record<string, unknown>;
-    const configuredId = (value: unknown) => typeof value === 'string' && value ? value : null;
-
     const contactId = await this.ensureMemberContact(ctx, payment.member);
 
-    return this.financeBillingService.createBill(financeCtx, {
-      vendorId: contactId,
-      currency: payment.currency ?? 'BRL',
-      dueDate: payment.dueDate ?? null,
-      periodStart: payment.competenceStart,
-      periodEnd: payment.competenceEnd,
-      issueDate: new Date().toISOString().slice(0, 10),
-      notes: `${descBase}${discountNote}`,
-      categoryId: configuredId(financeMetadata.defaultCategoryId),
-      costCenterId: configuredId(financeMetadata.defaultCostCenterId),
-      metadata: {
-        sourceModule: 'team',
-        sourceType: 'team_payment',
-        sourceId: payment.id,
-        memberId: payment.memberId,
-        batchId: payment.batchId ?? null,
-        financeSettingId: financeRule?.id ?? null,
-      },
-      lines,
-    });
+    try {
+      return await this.financeBillingService.createBill(financeCtx, {
+        vendorId: contactId,
+        currency: payment.currency ?? 'BRL',
+        dueDate: payment.dueDate ?? null,
+        periodStart: payment.competenceStart,
+        periodEnd: payment.competenceEnd,
+        issueDate: new Date().toISOString().slice(0, 10),
+        notes: `${descBase}${discountNote}`,
+        categoryId: rule.categoryId,
+        costCenterId: rule.costCenterId,
+        metadata: {
+          sourceModule: 'team',
+          sourceType: 'team_payment',
+          sourceId: payment.id,
+          teamPaymentId: payment.id,
+          teamPaymentOccurrenceKey: occurrenceKey,
+          occurrenceKey,
+          memberId: payment.memberId,
+          batchId: payment.batchId ?? null,
+          competencePeriod,
+          competenceStart: payment.competenceStart,
+          competenceEnd: payment.competenceEnd,
+          financeSettingId: rule.id,
+          financialRuleId: rule.id,
+          // Destination (company) bank hint only — the collaborator's personal
+          // bank data is never stored as a Finance bank account.
+          companyBankAccountId: rule.bankAccountId,
+        },
+        lines,
+      });
+    } catch (error) {
+      // Unique-index race for the same occurrence (UQ_finance_bills_team_payment_
+      // occurrence): a concurrent confirm/approve already created the payable.
+      // Reconcile by returning the existing bill instead of surfacing an error.
+      if ((error as { code?: string })?.code === '23505') {
+        const raced = await this.financeBillRepository
+          .createQueryBuilder('bill')
+          .where('bill.tenantId = :tenantId', { tenantId: ctx.tenantId })
+          .andWhere('bill.workspaceId = :workspaceId', { workspaceId: ctx.workspaceId })
+          .andWhere("bill.metadata ->> 'teamPaymentOccurrenceKey' = :key", { key: occurrenceKey })
+          .getOne();
+        if (raced) {
+          return this.financeBillingService.getBill(financeCtx, raced.id);
+        }
+      }
+      throw error;
+    }
   }
 
   private async findFinanceRule(ctx: RequestContext, workerType?: string | null) {
@@ -1004,10 +1231,45 @@ export class TeamPaymentsService {
         status: 'active',
       },
     });
-    return financeRules.find((rule) => {
+    const matches = financeRules.filter((rule) => {
       const relationships = (rule.metadata ?? {}).relationshipTypes;
       return Array.isArray(relationships) && relationships.includes(workerType);
     });
+    // Prefer the salary/custom (base pay) rule when several rules target the
+    // same worker type for different "Aplica-se a" buckets.
+    return (
+      matches.find((rule) => {
+        const appliesTo = (rule.metadata ?? {}).appliesTo;
+        return appliesTo === 'salary' || appliesTo === 'custom' || appliesTo == null;
+      }) ?? matches[0]
+    );
+  }
+
+  private async resolveFinanceRuleConfig(
+    ctx: RequestContext,
+    workerType?: string | null,
+  ): Promise<ResolvedFinanceRule> {
+    const rule = await this.findFinanceRule(ctx, workerType);
+    const md = (rule?.metadata ?? {}) as Record<string, unknown>;
+    const bool = (value: unknown, fallback: boolean) =>
+      typeof value === 'boolean' ? value : fallback;
+    const strId = (value: unknown) =>
+      typeof value === 'string' && value ? value : null;
+
+    return {
+      id: rule?.id ?? null,
+      // No rule → still generate a payable (preserves historical behaviour).
+      createPayable: bool(md.createPayable, true),
+      createExpense: bool(md.createExpense, false),
+      // Only block when a rule explicitly requires approval.
+      requireApproval: rule ? bool(md.requireApprovalBeforeFinance, false) : false,
+      categoryId: strId(md.defaultCategoryId),
+      costCenterId: strId(md.defaultCostCenterId),
+      journalId: strId(md.defaultJournalId),
+      accountId: strId(md.defaultFinanceAccountId),
+      bankAccountId: strId(md.defaultBankAccountId),
+      appliesTo: typeof md.appliesTo === 'string' ? md.appliesTo : null,
+    };
   }
 
   private async ensureMemberContact(ctx: RequestContext, member?: TeamMember | null) {
