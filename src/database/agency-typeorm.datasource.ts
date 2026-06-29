@@ -81,7 +81,7 @@ import { AddChecklistPersonalStage1782700400000 } from './migrations/17827004000
 import { AddTaskProjectStageId1782700200000 } from './migrations/1782700200000-add-task-project-stage-id';
 import { AddKnowledgePersonalScope1782700500000 } from './migrations/1782700500000-add-knowledge-personal-scope';
 import { CreateAgencyFinanceBillRecurrences1782800000000 } from './migrations/1782800000000-create-agency-finance-bill-recurrences';
-import { CreateAgencyHelpCenter1782900000000 } from './migrations/1782900000000-create-agency-help-center';
+import { CreateAgencyHelpCenter1783000000000 } from './migrations/1783000000000-create-agency-help-center';
 
 export const AgencyDataSource = new DataSource({
   type: 'postgres',
@@ -176,6 +176,6 @@ export const AgencyDataSource = new DataSource({
     AddChecklistPersonalStage1782700400000,
     AddKnowledgePersonalScope1782700500000,
     CreateAgencyFinanceBillRecurrences1782800000000,
-    CreateAgencyHelpCenter1782900000000,
+    CreateAgencyHelpCenter1783000000000,
   ],
 });

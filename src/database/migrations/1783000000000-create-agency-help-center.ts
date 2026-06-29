@@ -9,8 +9,8 @@ import { MigrationInterface, QueryRunner } from "typeorm";
  * (see modules/knowledge/help/content). It must never be mixed with the
  * tenant-scoped agency_knowledge_* tables, which hold user/company content.
  */
-export class CreateAgencyHelpCenter1782900000000 implements MigrationInterface {
-  name = "CreateAgencyHelpCenter1782900000000";
+export class CreateAgencyHelpCenter1783000000000 implements MigrationInterface {
+  name = "CreateAgencyHelpCenter1783000000000";
 
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`
