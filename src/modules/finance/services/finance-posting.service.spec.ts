@@ -147,6 +147,25 @@ function seedChartOfAccounts(store: InMemoryStore) {
   );
 }
 
+function seedCurrentMasterDataChart(store: InMemoryStore) {
+  const accounts: Array<Partial<FinanceAccount>> = [
+    { code: '1.01.002', name: 'Banco conta corrente', type: FinanceAccountType.Asset },
+    { code: '1.02.001', name: 'Clientes a receber', type: FinanceAccountType.Asset },
+    { code: '2.01.001', name: 'Fornecedores a pagar', type: FinanceAccountType.Liability },
+    { code: '4.01.013', name: 'Receita de Serviços', type: FinanceAccountType.Revenue },
+    { code: '6.04.011', name: 'Outras despesas operacionais', type: FinanceAccountType.Expense },
+  ];
+  const table = store.table(FinanceAccount);
+  for (const account of accounts) {
+    table.push({ id: `account-${account.code}`, tenantId: TENANT, workspaceId: WORKSPACE, ...account });
+  }
+  store.table(FinanceJournal).push(
+    { id: 'journal-sales', tenantId: TENANT, workspaceId: WORKSPACE, type: FinanceJournalType.Sales, active: true },
+    { id: 'journal-purchase', tenantId: TENANT, workspaceId: WORKSPACE, type: FinanceJournalType.Purchase, active: true },
+    { id: 'journal-bank', tenantId: TENANT, workspaceId: WORKSPACE, type: FinanceJournalType.Bank, active: true },
+  );
+}
+
 function accountId(store: InMemoryStore, code: string): string {
   return store.table(FinanceAccount).find((a) => a.code === code)?.id;
 }
@@ -223,6 +242,22 @@ describe('FinancePostingService', () => {
     expect(debit.amount).toBe('100.00');
     expect(credit.accountId).toBe(accountId(store, '3.1.01'));
     expect(credit.amount).toBe('100.00');
+    assertBalanced(store, entry!.id);
+  });
+
+  it('resolves the current master-data account anchors without setup/defaults codes', async () => {
+    const { service, store, manager } = makeService();
+    seedCurrentMasterDataChart(store);
+    const invoice = addInvoice(store, { totalAmount: '100.00' });
+    addInvoiceLine(store, invoice.id, '100.00');
+
+    const entry = await service.postInvoiceConfirmed(ctx(), invoice.id, manager);
+
+    const lines = linesOf(store, entry!.id);
+    const debit = lines.find((l) => l.lineType === FinanceJournalEntryLineType.Debit);
+    const credit = lines.find((l) => l.lineType === FinanceJournalEntryLineType.Credit);
+    expect(debit.accountId).toBe(accountId(store, '1.02.001'));
+    expect(credit.accountId).toBe(accountId(store, '4.01.013'));
     assertBalanced(store, entry!.id);
   });
 

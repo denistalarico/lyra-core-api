@@ -16,6 +16,8 @@ import {
   FinancePaymentAllocation,
 } from '../entities';
 import {
+  FinanceAccountStatus,
+  FinanceAccountType,
   FinanceDocumentType,
   FinanceJournalEntryLineType,
   FinanceJournalEntryStatus,
@@ -26,19 +28,51 @@ import {
 import { FinanceRequestContext } from './finance-context';
 import { FinanceDocumentNumberingService } from './finance-document-numbering.service';
 
-/**
- * Well-known chart-of-accounts codes seeded by FinanceDefaultsService. These
- * are the anchor accounts the automatic posting needs. They are resolved by
- * code (with no silent guessing) so a missing one surfaces a clear,
- * actionable error rather than an unbalanced ledger.
- */
-const SYSTEM_ACCOUNT_CODE = {
-  cashBank: '1.1.01', // Caixa e Bancos
-  receivable: '1.1.02', // Contas a Receber (Clientes a receber)
-  payable: '2.1.01', // Contas a Pagar (Fornecedores a pagar)
-  defaultRevenue: '3.1.01', // Receita de Serviços
-  defaultExpense: '5.1.01', // Despesas Operacionais
-} as const;
+type SystemAccountAnchor = {
+  label: string;
+  types: FinanceAccountType[];
+  codes: string[];
+  names: string[];
+  keywordGroups: string[][];
+};
+
+const SYSTEM_ACCOUNT_ANCHORS = {
+  cashBank: {
+    label: 'Caixa ou banco',
+    types: [FinanceAccountType.Asset],
+    codes: ['1.01.002', '1.01.001', '1.01.003', '1.1.01'],
+    names: ['Banco conta corrente', 'Caixa', 'Conta de pagamentos', 'Caixa e Bancos'],
+    keywordGroups: [['banco'], ['caixa'], ['pagamentos']],
+  },
+  receivable: {
+    label: 'Clientes a receber / Contas a Receber',
+    types: [FinanceAccountType.Asset],
+    codes: ['1.02.001', '1.1.02'],
+    names: ['Clientes a receber', 'Contas a Receber'],
+    keywordGroups: [['cliente', 'receber'], ['conta', 'receber'], ['receber']],
+  },
+  payable: {
+    label: 'Fornecedores a pagar / Contas a Pagar',
+    types: [FinanceAccountType.Liability],
+    codes: ['2.01.001', '2.1.01'],
+    names: ['Fornecedores a pagar', 'Contas a Pagar'],
+    keywordGroups: [['fornecedor', 'pagar'], ['conta', 'pagar'], ['pagar']],
+  },
+  defaultRevenue: {
+    label: 'Receita de serviços',
+    types: [FinanceAccountType.Revenue],
+    codes: ['4.01.013', '3.1.01'],
+    names: ['Receita de Serviços'],
+    keywordGroups: [['receita', 'servico'], ['receita']],
+  },
+  defaultExpense: {
+    label: 'Despesa operacional',
+    types: [FinanceAccountType.Expense, FinanceAccountType.CostOfGoodsSold],
+    codes: ['6.04.011', '5.1.01'],
+    names: ['Outras despesas operacionais', 'Despesas Operacionais'],
+    keywordGroups: [['despesa', 'operacional'], ['outras', 'despesas'], ['despesa']],
+  },
+} as const satisfies Record<string, SystemAccountAnchor>;
 
 type EventType =
   | 'invoice_confirmed'
@@ -140,8 +174,7 @@ export class FinancePostingService {
       const receivableId = await this.resolveSystemAccountId(
         m,
         ctx,
-        SYSTEM_ACCOUNT_CODE.receivable,
-        'Contas a Receber',
+        SYSTEM_ACCOUNT_ANCHORS.receivable,
       );
 
       // Group credits by (account, category, cost center) so distinct revenue
@@ -154,7 +187,7 @@ export class FinancePostingService {
       for (const line of lines) {
         const amount = toMoney(line.totalAmount);
         if (amount <= 0) continue;
-        const accountId = await this.resolveLineRevenueAccountId(m, ctx, line.categoryId);
+        const accountId = await this.resolveLineRevenueAccountId(m, ctx, line);
         const key = `${accountId}|${line.categoryId ?? '-'}|${line.costCenterId ?? '-'}`;
         const group = groups.get(key) ?? {
           accountId,
@@ -236,8 +269,7 @@ export class FinancePostingService {
       const payableId = await this.resolveSystemAccountId(
         m,
         ctx,
-        SYSTEM_ACCOUNT_CODE.payable,
-        'Contas a Pagar',
+        SYSTEM_ACCOUNT_ANCHORS.payable,
       );
 
       const groups = new Map<
@@ -250,7 +282,7 @@ export class FinancePostingService {
         if (amount <= 0) continue;
         const categoryId = line.categoryId ?? bill.categoryId ?? null;
         const costCenterId = line.costCenterId ?? bill.costCenterId ?? null;
-        const accountId = await this.resolveLineExpenseAccountId(m, ctx, categoryId);
+        const accountId = await this.resolveLineExpenseAccountId(m, ctx, line, categoryId);
         const key = `${accountId}|${categoryId ?? '-'}|${costCenterId ?? '-'}`;
         const group = groups.get(key) ?? { accountId, categoryId, costCenterId, amount: 0 };
         group.amount += amount;
@@ -335,8 +367,7 @@ export class FinancePostingService {
         const receivableId = await this.resolveSystemAccountId(
           m,
           ctx,
-          SYSTEM_ACCOUNT_CODE.receivable,
-          'Contas a Receber',
+          SYSTEM_ACCOUNT_ANCHORS.receivable,
         );
         lines = [
           {
@@ -359,8 +390,7 @@ export class FinancePostingService {
         const payableId = await this.resolveSystemAccountId(
           m,
           ctx,
-          SYSTEM_ACCOUNT_CODE.payable,
-          'Contas a Pagar',
+          SYSTEM_ACCOUNT_ANCHORS.payable,
         );
         lines = [
           {
@@ -632,27 +662,103 @@ export class FinancePostingService {
 
   // ── Account / journal resolution ────────────────────────────────────────
 
-  private async findAccountByCode(
+  private normalizeText(value: string) {
+    return value
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .trim();
+  }
+
+  private accountIsActive(account: FinanceAccount) {
+    return !account.status || account.status === FinanceAccountStatus.Active;
+  }
+
+  private accountMatchesTypes(account: FinanceAccount, types: FinanceAccountType[]) {
+    return types.includes(account.type);
+  }
+
+  private sortAccounts(accounts: FinanceAccount[]) {
+    return [...accounts].sort((a, b) =>
+      a.code.localeCompare(b.code, 'pt-BR', { numeric: true }),
+    );
+  }
+
+  private async findAccountById(
     m: EntityManager,
     ctx: FinanceRequestContext,
-    code: string,
+    id: string,
   ): Promise<FinanceAccount | null> {
     return m.getRepository(FinanceAccount).findOne({
-      where: { tenantId: ctx.tenantId, workspaceId: ctx.workspaceId, code },
+      where: { tenantId: ctx.tenantId, workspaceId: ctx.workspaceId, id },
     });
   }
 
   private async resolveSystemAccountId(
     m: EntityManager,
     ctx: FinanceRequestContext,
-    code: string,
-    label: string,
+    anchor: SystemAccountAnchor,
   ): Promise<string> {
-    const account = await this.findAccountByCode(m, ctx, code);
-    if (!account) {
+    const accounts = this.sortAccounts(
+      await m.getRepository(FinanceAccount).find({
+        where: { tenantId: ctx.tenantId, workspaceId: ctx.workspaceId },
+      }),
+    ).filter(
+      (account) =>
+        this.accountIsActive(account) &&
+        this.accountMatchesTypes(account, anchor.types),
+    );
+
+    const byCode = anchor.codes
+      .map((code) => accounts.find((account) => account.code === code))
+      .find(Boolean);
+    if (byCode) return byCode.id;
+
+    const normalizedNames = anchor.names.map((name) => this.normalizeText(name));
+    const byExactName = accounts.find((account) =>
+      normalizedNames.includes(this.normalizeText(account.name)),
+    );
+    if (byExactName) return byExactName.id;
+
+    const byKeywords = accounts.find((account) => {
+      const normalized = this.normalizeText(`${account.code} ${account.name}`);
+      return anchor.keywordGroups.some((keywords) =>
+        keywords.every((keyword) => normalized.includes(this.normalizeText(keyword))),
+      );
+    });
+    if (byKeywords) return byKeywords.id;
+
+    const fallback = accounts[0];
+    if (fallback) return fallback.id;
+
+    throw new BadRequestException(
+      `Conta contábil ativa para "${anchor.label}" não encontrada em /finance/master-data. ` +
+        `Cadastre uma conta dos tipos: ${anchor.types.join(', ')}.`,
+    );
+  }
+
+  private async resolveAccountOverrideId(
+    m: EntityManager,
+    ctx: FinanceRequestContext,
+    metadata: Record<string, unknown> | null | undefined,
+    expectedTypes: FinanceAccountType[],
+    label: string,
+  ): Promise<string | null> {
+    const accountId =
+      typeof metadata?.accountId === 'string' && metadata.accountId.trim()
+        ? metadata.accountId.trim()
+        : null;
+    if (!accountId) return null;
+
+    const account = await this.findAccountById(m, ctx, accountId);
+    if (!account || !this.accountIsActive(account)) {
       throw new BadRequestException(
-        `Conta de sistema "${label}" (${code}) não encontrada. ` +
-          'Execute a configuração padrão do Finance (setup/defaults).',
+        `A ${label} selecionada na linha não está ativa em /finance/master-data.`,
+      );
+    }
+    if (!this.accountMatchesTypes(account, expectedTypes)) {
+      throw new BadRequestException(
+        `A ${label} selecionada na linha não é compatível com este lançamento.`,
       );
     }
     return account.id;
@@ -661,30 +767,47 @@ export class FinancePostingService {
   private async resolveLineRevenueAccountId(
     m: EntityManager,
     ctx: FinanceRequestContext,
-    categoryId: string | null,
+    line: FinanceInvoiceLine,
   ): Promise<string> {
-    const fromCategory = await this.resolveCategoryAccountId(m, ctx, categoryId);
+    const fromMetadata = await this.resolveAccountOverrideId(
+      m,
+      ctx,
+      line.metadata,
+      [FinanceAccountType.Revenue],
+      'conta de receita',
+    );
+    if (fromMetadata) return fromMetadata;
+
+    const fromCategory = await this.resolveCategoryAccountId(m, ctx, line.categoryId);
     if (fromCategory) return fromCategory;
     return this.resolveSystemAccountId(
       m,
       ctx,
-      SYSTEM_ACCOUNT_CODE.defaultRevenue,
-      'Receita de Serviços',
+      SYSTEM_ACCOUNT_ANCHORS.defaultRevenue,
     );
   }
 
   private async resolveLineExpenseAccountId(
     m: EntityManager,
     ctx: FinanceRequestContext,
+    line: FinanceBillLine,
     categoryId: string | null,
   ): Promise<string> {
+    const fromMetadata = await this.resolveAccountOverrideId(
+      m,
+      ctx,
+      line.metadata,
+      [FinanceAccountType.Expense, FinanceAccountType.CostOfGoodsSold],
+      'conta de custo/despesa',
+    );
+    if (fromMetadata) return fromMetadata;
+
     const fromCategory = await this.resolveCategoryAccountId(m, ctx, categoryId);
     if (fromCategory) return fromCategory;
     return this.resolveSystemAccountId(
       m,
       ctx,
-      SYSTEM_ACCOUNT_CODE.defaultExpense,
-      'Despesas Operacionais',
+      SYSTEM_ACCOUNT_ANCHORS.defaultExpense,
     );
   }
 
@@ -716,8 +839,7 @@ export class FinancePostingService {
     return this.resolveSystemAccountId(
       m,
       ctx,
-      SYSTEM_ACCOUNT_CODE.cashBank,
-      'Caixa e Bancos',
+      SYSTEM_ACCOUNT_ANCHORS.cashBank,
     );
   }
 
