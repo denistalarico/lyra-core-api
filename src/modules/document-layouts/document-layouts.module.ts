@@ -7,13 +7,18 @@ import {
   DocumentLayoutEntity,
   DocumentLayoutTemplateEntity,
 } from './entities/document-layout.entities';
+import { WorkspaceSettingsCompanyEntity } from '../settings/entities/workspace-settings-company.entity';
 
 const AGENCY_CONNECTION = 'agency';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature(
-      [DocumentLayoutEntity, DocumentLayoutTemplateEntity],
+      [
+        DocumentLayoutEntity,
+        DocumentLayoutTemplateEntity,
+        WorkspaceSettingsCompanyEntity,
+      ],
       AGENCY_CONNECTION,
     ),
   ],

@@ -9,8 +9,16 @@ import {
   DocumentTemplateDocumentType,
   DocumentLayoutType,
 } from './entities/document-layout.entities';
+import { WorkspaceSettingsCompanyEntity } from '../settings/entities/workspace-settings-company.entity';
 
 const AGENCY_CONNECTION = 'agency';
+
+function firstNonEmpty(...values: Array<string | null | undefined>) {
+  return (
+    values.find((value) => typeof value === 'string' && value.trim())?.trim() ??
+    null
+  );
+}
 
 export type DocumentLayoutContext = {
   tenantId: string;
@@ -25,6 +33,8 @@ export class DocumentLayoutsService {
     private readonly layoutsRepo: Repository<DocumentLayoutEntity>,
     @InjectRepository(DocumentLayoutTemplateEntity, AGENCY_CONNECTION)
     private readonly templatesRepo: Repository<DocumentLayoutTemplateEntity>,
+    @InjectRepository(WorkspaceSettingsCompanyEntity, AGENCY_CONNECTION)
+    private readonly companyRepo: Repository<WorkspaceSettingsCompanyEntity>,
   ) {}
 
   getContext(
@@ -48,7 +58,7 @@ export class DocumentLayoutsService {
       },
     });
 
-    if (existing) return existing;
+    if (existing) return this.applyCompanyFallback(existing, context);
 
     const created = this.layoutsRepo.create({
       tenantId: context.tenantId,
@@ -78,7 +88,72 @@ export class DocumentLayoutsService {
       },
     });
 
-    return this.layoutsRepo.save(created);
+    const saved = await this.layoutsRepo.save(created);
+    return this.applyCompanyFallback(saved, context);
+  }
+
+  private async applyCompanyFallback(
+    layout: DocumentLayoutEntity,
+    context: DocumentLayoutContext,
+  ) {
+    const company = await this.companyRepo.findOne({
+      where: {
+        tenantId: context.tenantId,
+        workspaceId: context.workspaceId,
+      },
+    });
+
+    if (!company) return layout;
+
+    const companyName = firstNonEmpty(
+      company.publicName,
+      company.legalName,
+      company.workspaceName,
+    );
+    const companyDocumentLabel =
+      company.taxIdCustomLabel ||
+      (company.taxIdType === 'cnpj'
+        ? 'CNPJ'
+        : company.taxIdType === 'ein'
+          ? 'EIN'
+          : 'Documento');
+    const companyAddress = [company.addressLine1, company.addressLine2]
+      .filter(Boolean)
+      .join(', ');
+
+    return this.layoutsRepo.create({
+      ...layout,
+      logoUrl: firstNonEmpty(
+        layout.logoUrl,
+        company.logoUrl,
+        company.brandLogoUrl,
+      ),
+      primaryColor:
+        firstNonEmpty(layout.primaryColor, company.primaryColor) ?? '#2563EB',
+      secondaryColor:
+        firstNonEmpty(layout.secondaryColor, company.secondaryColor) ??
+        '#0F172A',
+      companyName: firstNonEmpty(layout.companyName, companyName),
+      companyDocumentLabel: firstNonEmpty(
+        layout.companyDocumentLabel,
+        companyDocumentLabel,
+      ),
+      companyDocumentValue: firstNonEmpty(
+        layout.companyDocumentValue,
+        company.taxId,
+      ),
+      companyAddress: firstNonEmpty(layout.companyAddress, companyAddress),
+      companyCity: firstNonEmpty(layout.companyCity, company.city),
+      companyRegion: firstNonEmpty(layout.companyRegion, company.stateRegion),
+      companyPostalCode: firstNonEmpty(
+        layout.companyPostalCode,
+        company.postalCode,
+      ),
+      companyCountry: firstNonEmpty(layout.companyCountry, company.country),
+      companyPhone: firstNonEmpty(layout.companyPhone, company.phone),
+      companyEmail: firstNonEmpty(layout.companyEmail, company.supportEmail),
+      companyWebsite: firstNonEmpty(layout.companyWebsite, company.website),
+    });
   }
 
   async updateDefaultLayout(

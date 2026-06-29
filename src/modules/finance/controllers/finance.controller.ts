@@ -743,6 +743,7 @@ export class FinanceController {
 
     const layout = await this.documentLayoutsService.getDefaultLayout(ctx);
     const template =
+      await this.documentLayoutsService.getSystemTemplateForType(layout.layoutType, 'invoice') ??
       await this.documentLayoutsService.getSystemTemplateForType(layout.layoutType, 'generic') ??
       await this.documentLayoutsService.getSystemTemplateForType(layout.layoutType, 'quote');
 
