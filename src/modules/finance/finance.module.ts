@@ -40,6 +40,7 @@ import { FinanceDefaultsService } from './services/finance-defaults.service';
 import { FinanceBillingService } from './services/finance-billing.service';
 import { FinancePostingService } from './services/finance-posting.service';
 import { FinanceProfitabilityService } from './services/finance-profitability.service';
+import { FinanceDreService } from './services/finance-dre.service';
 import { FinanceDocumentNumberingService } from './services/finance-document-numbering.service';
 import { FinanceFiscalService } from './services/finance-fiscal.service';
 import { FinancePaymentProviderService } from './services/finance-payment-provider.service';
@@ -95,6 +96,7 @@ import { PermissionsModule } from '../permissions';
     FinanceBillingService,
     FinancePostingService,
     FinanceProfitabilityService,
+    FinanceDreService,
     FinanceDocumentNumberingService,
     FinanceFiscalService,
     FinancePaymentProviderService,
@@ -107,6 +109,7 @@ import { PermissionsModule } from '../permissions';
     FinanceBillingService,
     FinancePostingService,
     FinanceProfitabilityService,
+    FinanceDreService,
     FinanceDocumentNumberingService,
     FinanceFiscalService,
     FinancePaymentProviderService,

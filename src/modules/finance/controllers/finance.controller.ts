@@ -36,6 +36,7 @@ import {
   UpdateFinanceProfitabilityRulesDto,
   UpdateFinanceSettingsDto,
   FinanceMetricsHistoryQueryDto,
+  FinanceDreQueryDto,
   UpdateFinanceFiscalProfileDto,
   CreateFinancePaymentProviderDto,
   UpdateFinancePaymentProviderDto,
@@ -61,6 +62,7 @@ import { FinanceService } from '../services/finance.service';
 import { FinanceDefaultsService } from '../services/finance-defaults.service';
 import { FinanceBillingService } from '../services/finance-billing.service';
 import { FinanceProfitabilityService } from '../services/finance-profitability.service';
+import { FinanceDreService } from '../services/finance-dre.service';
 import { FinanceDocumentNumberingService } from '../services/finance-document-numbering.service';
 import { FinanceFiscalService } from '../services/finance-fiscal.service';
 import { FinancePaymentProviderService } from '../services/finance-payment-provider.service';
@@ -113,6 +115,7 @@ export class FinanceController {
     private readonly financeDefaultsService: FinanceDefaultsService,
     private readonly financeBillingService: FinanceBillingService,
     private readonly financeProfitabilityService: FinanceProfitabilityService,
+    private readonly financeDreService: FinanceDreService,
     private readonly financeDocumentNumberingService: FinanceDocumentNumberingService,
     private readonly financeFiscalService: FinanceFiscalService,
     private readonly financePaymentProviderService: FinancePaymentProviderService,
@@ -500,6 +503,12 @@ export class FinanceController {
   }
 
 
+
+  @Get('reports/dre')
+  @RequireFinancePermission('agency.finance.reports.view.finance_or_owner')
+  getDre(@Req() req: Request, @Query() query: FinanceDreQueryDto) {
+    return this.financeDreService.getDre(getFinanceContext(req), query);
+  }
 
   @Get('reports/metrics/history')
   @RequireFinancePermission('agency.finance.reports.view.finance_or_owner')

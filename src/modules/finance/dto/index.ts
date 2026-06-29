@@ -1,4 +1,5 @@
 export * from './finance-core.dto';
+export * from './finance-dre.dto';
 export * from './finance-billing.dto';
 // AddFinanceInvoiceLineDto and UpdateFinanceInvoiceLineDto are also exported from finance-billing.dto
 export * from './finance-fiscal.dto';
