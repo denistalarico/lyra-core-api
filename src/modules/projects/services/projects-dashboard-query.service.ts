@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Brackets, Repository, SelectQueryBuilder } from 'typeorm';
-import { AgencyProject, AgencyTask } from '../entities';
+import { Brackets, In, IsNull, Repository, SelectQueryBuilder } from 'typeorm';
+import { AgencyProject, AgencyTask, AgencyTaskChecklistItem } from '../entities';
 import {
   ProjectPriority,
   ProjectStatus,
@@ -15,6 +15,8 @@ import type {
   ProjectsDashboardOverview,
   ProjectsDashboardQuery,
   ProjectsDashboardSummary,
+  SubtaskDashboardAttentionItem,
+  SubtasksDashboardSummary,
   TaskDashboardAttentionItem,
   TasksDashboardLast3Months,
   TasksDashboardSummary,
@@ -24,6 +26,11 @@ type DashboardRequestContext = {
   tenantId: string;
   workspaceId: string;
   userId: string;
+};
+
+type LoadedSubtasks = {
+  items: AgencyTaskChecklistItem[];
+  taskById: Map<string, AgencyTask>;
 };
 
 const CLOSED_TASK_STATUSES = [
@@ -46,6 +53,9 @@ export class ProjectsDashboardQueryService {
 
     @InjectRepository(AgencyTask, 'agency')
     private readonly tasksRepository: Repository<AgencyTask>,
+
+    @InjectRepository(AgencyTaskChecklistItem, 'agency')
+    private readonly checklistRepository: Repository<AgencyTaskChecklistItem>,
   ) {}
 
   async getOverview(
@@ -59,6 +69,19 @@ export class ProjectsDashboardQueryService {
       this.listVisibleProjects(context, query),
       this.listVisibleTasks(context, query),
       this.listPersonalTasks(context, query),
+    ]);
+
+    // Subtasks (checklist items with a due date). Workspace scope inherits the
+    // visibility of its parent task; personal scope is "assigned to me", which
+    // — like task assignees — is matched by team-member id.
+    const [workspaceSubtasks, personalSubtasks] = await Promise.all([
+      this.listVisibleSubtasks(context, tasks),
+      this.listPersonalSubtasks(context, query),
+    ]);
+
+    const subtaskAssigneeNames = await this.resolveSubtaskAssigneeNames(context, [
+      ...workspaceSubtasks.items,
+      ...personalSubtasks.items,
     ]);
 
     return {
@@ -76,6 +99,18 @@ export class ProjectsDashboardQueryService {
       ),
       personalTasks: this.buildPersonalTasksSummary(
         personalTasks,
+        dueSoonDays,
+        priorityLimit,
+      ),
+      subtasks: this.buildSubtasksSummary(
+        workspaceSubtasks,
+        subtaskAssigneeNames,
+        dueSoonDays,
+        priorityLimit,
+      ),
+      personalSubtasks: this.buildSubtasksSummary(
+        personalSubtasks,
+        subtaskAssigneeNames,
         dueSoonDays,
         priorityLimit,
       ),
@@ -205,6 +240,108 @@ export class ProjectsDashboardQueryService {
       .orderBy('task.due_date', 'ASC', 'NULLS LAST')
       .addOrderBy('task.updated_at', 'DESC')
       .getMany();
+  }
+
+  private async listVisibleSubtasks(
+    context: DashboardRequestContext,
+    visibleTasks: AgencyTask[],
+  ): Promise<LoadedSubtasks> {
+    const taskById = new Map(visibleTasks.map((task) => [task.id, task]));
+
+    if (taskById.size === 0) {
+      return { items: [], taskById };
+    }
+
+    const items = await this.checklistRepository
+      .createQueryBuilder('item')
+      .where('item.tenant_id = :tenantId', { tenantId: context.tenantId })
+      .andWhere('item.workspace_id = :workspaceId', {
+        workspaceId: context.workspaceId,
+      })
+      .andWhere('item.task_id IN (:...taskIds)', {
+        taskIds: Array.from(taskById.keys()),
+      })
+      .andWhere('item.due_date IS NOT NULL')
+      .andWhere('item.is_done = false')
+      .orderBy('item.due_date', 'ASC')
+      .getMany();
+
+    return { items, taskById };
+  }
+
+  private async listPersonalSubtasks(
+    context: DashboardRequestContext,
+    query: ProjectsDashboardQuery,
+  ): Promise<LoadedSubtasks> {
+    // Subtask assignees are stored as team-member ids (same convention as task
+    // assignees), so resolve the current user's member id(s) and match either
+    // that or the raw user id to be safe.
+    const memberRows: Array<{ id: string }> =
+      await this.checklistRepository.manager.query(
+        `SELECT id FROM team_members WHERE tenant_id = $1 AND user_id = $2`,
+        [context.tenantId, query.userId],
+      );
+    const assigneeIds = Array.from(
+      new Set([query.userId, ...memberRows.map((row) => row.id)]),
+    );
+
+    const items = await this.checklistRepository
+      .createQueryBuilder('item')
+      .where('item.tenant_id = :tenantId', { tenantId: context.tenantId })
+      .andWhere('item.workspace_id = :workspaceId', {
+        workspaceId: context.workspaceId,
+      })
+      .andWhere('item.assignee_id IN (:...assigneeIds)', { assigneeIds })
+      .andWhere('item.due_date IS NOT NULL')
+      .andWhere('item.is_done = false')
+      .orderBy('item.due_date', 'ASC')
+      .getMany();
+
+    if (items.length === 0) {
+      return { items: [], taskById: new Map() };
+    }
+
+    const taskIds = Array.from(new Set(items.map((item) => item.taskId)));
+    const tasks = await this.tasksRepository.find({
+      where: {
+        tenantId: context.tenantId,
+        workspaceId: context.workspaceId,
+        id: In(taskIds),
+        archivedAt: IsNull(),
+      },
+    });
+    const taskById = new Map(tasks.map((task) => [task.id, task]));
+
+    return {
+      // drop subtasks of archived/missing parent tasks
+      items: items.filter((item) => taskById.has(item.taskId)),
+      taskById,
+    };
+  }
+
+  private async resolveSubtaskAssigneeNames(
+    context: DashboardRequestContext,
+    items: AgencyTaskChecklistItem[],
+  ): Promise<Map<string, string>> {
+    const assigneeIds = Array.from(
+      new Set(
+        items
+          .map((item) => item.assigneeId)
+          .filter((id): id is string => Boolean(id)),
+      ),
+    );
+
+    if (assigneeIds.length === 0) {
+      return new Map();
+    }
+
+    const rows: Array<{ id: string; display_name: string }> =
+      await this.checklistRepository.manager.query(
+        `SELECT id, display_name FROM team_members WHERE tenant_id = $1 AND id = ANY($2::uuid[])`,
+        [context.tenantId, assigneeIds],
+      );
+
+    return new Map(rows.map((row) => [row.id, row.display_name]));
   }
 
   private applyTaskVisibility(
@@ -547,6 +684,85 @@ export class ProjectsDashboardQueryService {
         0,
       ),
       attentionItems,
+    };
+  }
+
+  private buildSubtasksSummary(
+    loaded: LoadedSubtasks,
+    assigneeNames: Map<string, string>,
+    dueSoonDays: number,
+    priorityLimit: number,
+  ): SubtasksDashboardSummary {
+    const now = new Date();
+    const startToday = this.startOfDay(now);
+    const endToday = this.endOfDay(now);
+    const endWeek = this.endOfDay(this.addDays(now, dueSoonDays));
+
+    const mapped = loaded.items
+      .filter((item) => loaded.taskById.has(item.taskId))
+      .map((item) =>
+        this.mapSubtaskAttentionItem(
+          item,
+          loaded.taskById.get(item.taskId)!,
+          assigneeNames,
+          startToday,
+          endToday,
+          endWeek,
+        ),
+      );
+
+    const sorted = [...mapped].sort((a, b) => {
+      if (a.overdue !== b.overdue) return a.overdue ? -1 : 1;
+      if (a.dueDate === null && b.dueDate === null) return 0;
+      if (a.dueDate === null) return 1;
+      if (b.dueDate === null) return -1;
+      return new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime();
+    });
+
+    return {
+      total: mapped.length,
+      overdue: mapped.filter((item) => item.overdue).length,
+      dueToday: mapped.filter((item) => item.dueToday).length,
+      dueThisWeek: mapped.filter((item) => item.dueThisWeek).length,
+      attentionItems: sorted.slice(0, priorityLimit),
+    };
+  }
+
+  private mapSubtaskAttentionItem(
+    item: AgencyTaskChecklistItem,
+    task: AgencyTask,
+    assigneeNames: Map<string, string>,
+    startToday: Date,
+    endToday: Date,
+    endWeek: Date,
+  ): SubtaskDashboardAttentionItem {
+    const due = item.dueDate;
+
+    return {
+      id: item.id,
+      title: item.title,
+      taskId: item.taskId,
+      taskTitle: task.title,
+      projectId: task.projectId,
+      clientId: task.clientId,
+      assigneeId: item.assigneeId,
+      assigneeName: item.assigneeId
+        ? (assigneeNames.get(item.assigneeId) ?? null)
+        : null,
+      status: item.status,
+      dueDate: due?.toISOString() ?? null,
+      overdue: due !== null && due.getTime() < startToday.getTime(),
+      dueToday:
+        due !== null &&
+        due.getTime() >= startToday.getTime() &&
+        due.getTime() <= endToday.getTime(),
+      dueThisWeek:
+        due !== null &&
+        due.getTime() >= startToday.getTime() &&
+        due.getTime() <= endWeek.getTime(),
+      href: task.projectId
+        ? `/projects/${task.projectId}/tasks/${item.taskId}/subtask/${item.id}`
+        : `/projects/tasks/${item.taskId}/subtask/${item.id}`,
     };
   }
 

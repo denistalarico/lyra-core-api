@@ -51,6 +51,31 @@ export type TaskDashboardAttentionItem = {
   href: string;
 };
 
+export type SubtaskDashboardAttentionItem = {
+  id: string;
+  title: string;
+  taskId: string;
+  taskTitle: string;
+  projectId: string | null;
+  clientId: string | null;
+  assigneeId: string | null;
+  assigneeName: string | null;
+  status: string;
+  dueDate: string | null;
+  overdue: boolean;
+  dueToday: boolean;
+  dueThisWeek: boolean;
+  href: string;
+};
+
+export type SubtasksDashboardSummary = {
+  total: number;
+  overdue: number;
+  dueToday: number;
+  dueThisWeek: number;
+  attentionItems: SubtaskDashboardAttentionItem[];
+};
+
 export type TasksDashboardLast3Months = {
   registered: number;
   completed: number;
@@ -115,4 +140,6 @@ export type ProjectsDashboardOverview = {
   projects: ProjectsDashboardSummary;
   tasks: TasksDashboardSummary;
   personalTasks: PersonalTasksDashboardSummary;
+  subtasks: SubtasksDashboardSummary;
+  personalSubtasks: SubtasksDashboardSummary;
 };
