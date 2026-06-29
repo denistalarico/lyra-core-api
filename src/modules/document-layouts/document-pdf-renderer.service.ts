@@ -742,13 +742,18 @@ export class DocumentPdfRendererService {
     if (/^[a-z][a-z\d+\-.]*:/i.test(value)) return value;
 
     if (value.startsWith('/')) {
-      const baseUrl = (
+      const apiBaseUrl = (
         process.env.AGENCY_PUBLIC_API_URL ||
         process.env.API_PUBLIC_URL ||
         'http://localhost:3000/api'
       ).replace(/\/$/, '');
+      const originBaseUrl = apiBaseUrl.replace(/\/api$/i, '');
 
-      return `${baseUrl}${value}`;
+      if (value.startsWith('/api/')) {
+        return `${originBaseUrl}${value}`;
+      }
+
+      return `${apiBaseUrl}${value}`;
     }
 
     return value;

@@ -16,12 +16,15 @@ import {
   ServiceUnavailableException,
   UseGuards,
 } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
 import type { Request, Response } from 'express';
+import { Repository } from 'typeorm';
 import { DocumentLayoutsService } from '../../document-layouts/document-layouts.service';
 import {
   DocumentPdfRendererService,
   PdfEngineUnavailableError,
 } from '../../document-layouts/document-pdf-renderer.service';
+import { ContactEntity } from '../../contacts/entities/contact.entity';
 import {
   CreateFinanceAccountDto,
   CreateFinanceBankAccountDto,
@@ -81,6 +84,8 @@ const RequireFinancePermission = (permissionKey: string) =>
     RequirePermission(permissionKey),
   );
 
+const AGENCY_CONNECTION = 'agency';
+
 @Controller('agency/finance')
 export class FinanceController {
   private readonly logger = new Logger(FinanceController.name);
@@ -122,7 +127,45 @@ export class FinanceController {
     private readonly financeJournalEntryService: FinanceJournalEntryService,
     private readonly documentLayoutsService: DocumentLayoutsService,
     private readonly documentPdfRenderer: DocumentPdfRendererService,
+    @InjectRepository(ContactEntity, AGENCY_CONNECTION)
+    private readonly contactsRepo: Repository<ContactEntity>,
   ) {}
+
+  private async resolveContactDisplayName(
+    ctx: ReturnType<typeof getFinanceContext>,
+    contactId: string | null | undefined,
+  ) {
+    if (!contactId) return null;
+
+    const contact = await this.contactsRepo.findOne({
+      where: {
+        tenantId: ctx.tenantId,
+        workspaceId: ctx.workspaceId,
+        id: contactId,
+      },
+      select: {
+        id: true,
+        displayName: true,
+        legalName: true,
+        firstName: true,
+        lastName: true,
+      },
+    });
+
+    if (!contact) return null;
+
+    const fullName = [contact.firstName, contact.lastName]
+      .map((value) => value?.trim())
+      .filter(Boolean)
+      .join(' ');
+
+    return (
+      contact.displayName?.trim() ||
+      contact.legalName?.trim() ||
+      fullName ||
+      null
+    );
+  }
 
   @Get('health')
   getHealth() {
@@ -625,6 +668,19 @@ export class FinanceController {
     const ctx = getFinanceContext(req);
     const invoice = await this.financeBillingService.getInvoice(ctx, id);
     const lines = invoice.lines ?? [];
+    const customerName = await this.resolveContactDisplayName(
+      ctx,
+      invoice.customerId,
+    );
+    const invoiceForPdf = customerName
+      ? {
+          ...invoice,
+          metadata: {
+            ...(invoice.metadata ?? {}),
+            customerName,
+          },
+        }
+      : invoice;
 
     const layout = await this.documentLayoutsService.getDefaultLayout(ctx);
     const template =
@@ -638,7 +694,7 @@ export class FinanceController {
     let buffer: Buffer;
     try {
       buffer = await this.documentPdfRenderer.renderInvoicePdf({
-        invoice,
+        invoice: invoiceForPdf,
         lines,
         layout,
         template,
@@ -740,6 +796,16 @@ export class FinanceController {
     const ctx = getFinanceContext(req);
     const bill = await this.financeBillingService.getBill(ctx, id);
     const lines = bill.lines ?? [];
+    const vendorName = await this.resolveContactDisplayName(ctx, bill.vendorId);
+    const billForPdf = vendorName
+      ? {
+          ...bill,
+          metadata: {
+            ...(bill.metadata ?? {}),
+            vendorName,
+          },
+        }
+      : bill;
 
     const layout = await this.documentLayoutsService.getDefaultLayout(ctx);
     const template =
@@ -754,7 +820,7 @@ export class FinanceController {
     let buffer: Buffer;
     try {
       buffer = await this.documentPdfRenderer.renderBillPdf({
-        bill,
+        bill: billForPdf,
         lines,
         layout,
         template,

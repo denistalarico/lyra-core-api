@@ -127,6 +127,8 @@ export class DocumentLayoutsService {
         layout.logoUrl,
         company.logoUrl,
         company.brandLogoUrl,
+        company.logoPath ? `/api/assets/${company.logoPath}` : null,
+        company.brandLogoAssetKey ? `/api/assets/${company.brandLogoAssetKey}` : null,
       ),
       primaryColor:
         firstNonEmpty(layout.primaryColor, company.primaryColor) ?? '#2563EB',

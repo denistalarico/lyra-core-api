@@ -48,6 +48,7 @@ import { FinanceJournalEntryService } from './services/finance-journal-entry.ser
 import { NotificationsModule } from '../notifications';
 import { FinanceNotificationPublisher } from './services/finance-notification.publisher';
 import { PermissionsModule } from '../permissions';
+import { ContactEntity } from '../contacts/entities/contact.entity';
 
 @Module({
   imports: [
@@ -85,6 +86,7 @@ import { PermissionsModule } from '../permissions';
         AgencyTask,
         AgencyTaskTimeEntry,
         TeamMember,
+        ContactEntity,
       ],
       'agency',
     ),
