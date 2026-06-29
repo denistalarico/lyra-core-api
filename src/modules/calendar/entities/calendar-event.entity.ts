@@ -17,7 +17,8 @@ export type CalendarEventType =
   | 'task_due'
   | 'sales_follow_up'
   | 'time_block'
-  | 'availability_block';
+  | 'availability_block'
+  | 'holiday';
 
 export type CalendarEventStatus =
   | 'scheduled'

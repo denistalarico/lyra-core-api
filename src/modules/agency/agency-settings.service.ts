@@ -230,18 +230,24 @@ export class AgencySettingsService {
     workspaceId: string,
     dto: PatchAgencyWorkspaceCompanyDto,
   ) {
+    const { firstWeekday, ...companyDto } = dto;
+    const existing = await this.getCompany(tenantId, workspaceId);
     await this.companyRepo.upsert(
       {
         tenantId,
         workspaceId,
-        ...dto,
-        website: dto.website ?? null,
-        supportEmail: dto.supportEmail ?? null,
-        billingEmail: dto.billingEmail ?? null,
-        phone: dto.phone ?? null,
-        addressLine: dto.addressLine ?? null,
-        industry: dto.industry ?? null,
-        companySize: dto.companySize ?? null,
+        ...companyDto,
+        website: companyDto.website ?? null,
+        supportEmail: companyDto.supportEmail ?? null,
+        billingEmail: companyDto.billingEmail ?? null,
+        phone: companyDto.phone ?? null,
+        addressLine: companyDto.addressLine ?? null,
+        industry: companyDto.industry ?? null,
+        companySize: companyDto.companySize ?? null,
+        metadata: {
+          ...(existing.metadata ?? {}),
+          ...(firstWeekday ? { firstWeekday } : {}),
+        },
       },
       ['tenantId', 'workspaceId'],
     );

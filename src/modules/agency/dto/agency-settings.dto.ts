@@ -131,6 +131,10 @@ export class PatchAgencyWorkspaceCompanyDto {
   @IsString()
   @MaxLength(40)
   companySize?: string | null;
+
+  @IsOptional()
+  @IsIn(['sunday', 'monday', 'saturday'])
+  firstWeekday?: 'sunday' | 'monday' | 'saturday';
 }
 
 export class QuietHourDto {

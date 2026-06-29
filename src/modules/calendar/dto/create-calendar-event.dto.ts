@@ -33,6 +33,7 @@ export class CreateCalendarEventDto {
     'sales_follow_up',
     'time_block',
     'availability_block',
+    'holiday',
   ])
   eventType?: CalendarEventType;
 
