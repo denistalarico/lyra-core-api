@@ -10,7 +10,12 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { CreateClientDto, ListClientsQueryDto, UpdateClientDto } from '../dto';
+import {
+  ClientProfitabilityMonthlyQueryDto,
+  CreateClientDto,
+  ListClientsQueryDto,
+  UpdateClientDto,
+} from '../dto';
 import { ClientsProfitabilityService } from '../services/clients-profitability.service';
 import { ClientsService } from '../services/clients.service';
 import {
@@ -147,6 +152,20 @@ export class ClientsController {
     return this.clientsProfitabilityService.getClientProfitability(
       getContextFromHeaders(headers),
       clientId,
+    );
+  }
+
+  @Get(':clientId/profitability/monthly')
+  @RequirePermission('agency.clients.profitability.view.owner_or_finance')
+  getClientMonthlyProfitability(
+    @Headers() headers: Record<string, string | string[] | undefined>,
+    @Param('clientId') clientId: string,
+    @Query() query: ClientProfitabilityMonthlyQueryDto,
+  ) {
+    return this.clientsProfitabilityService.getClientMonthlyProfitability(
+      getContextFromHeaders(headers),
+      clientId,
+      query,
     );
   }
 

@@ -94,6 +94,62 @@ function getMetadataString(
   return null;
 }
 
+function roundPercent(value: number): number {
+  return Math.round(value * 100) / 100;
+}
+
+// ── Month helpers (YYYY-MM) ──────────────────────────────────────────────────
+// The monthly profitability series buckets every figure into a YYYY-MM key and
+// fills gaps with zero so the chart stays continuous.
+
+const MONTH_RE = /^(\d{4})-(\d{2})/;
+
+// Accepts 'YYYY-MM' or any 'YYYY-MM-...' date string and returns the YYYY-MM
+// part, or null when the value is not a recognisable month.
+function normalizeMonth(value: string | null | undefined): string | null {
+  if (!value) return null;
+
+  const match = MONTH_RE.exec(String(value));
+  if (!match) return null;
+
+  const month = Number(match[2]);
+  if (month < 1 || month > 12) return null;
+
+  return `${match[1]}-${match[2]}`;
+}
+
+function monthIndex(month: string): number {
+  const [year, mon] = month.split('-').map(Number);
+  return year * 12 + (mon - 1);
+}
+
+function monthFromIndex(index: number): string {
+  const year = Math.floor(index / 12);
+  const mon = (index % 12) + 1;
+  return `${year}-${String(mon).padStart(2, '0')}`;
+}
+
+function listMonths(start: string, end: string): string[] {
+  const months: string[] = [];
+  for (let i = monthIndex(start); i <= monthIndex(end); i++) {
+    months.push(monthFromIndex(i));
+  }
+  return months;
+}
+
+// YYYY-MM bucket for a date (Date or string). Dates are read in UTC to match the
+// rest of the profitability window logic.
+function monthOfDate(value: string | Date | null | undefined): string | null {
+  if (!value) return null;
+
+  if (value instanceof Date) {
+    if (Number.isNaN(value.getTime())) return null;
+    return value.toISOString().slice(0, 7);
+  }
+
+  return normalizeMonth(value);
+}
+
 @Injectable()
 export class FinanceProfitabilityService {
   constructor(
@@ -475,6 +531,439 @@ export class FinanceProfitabilityService {
       hoursByTaskType,
       notes: overview.notes,
     };
+  }
+
+  // ── Monthly profitability series (análise mensal) ───────────────────────────
+  //
+  // Same canonical sources as the headline KPIs, aggregated per YYYY-MM month
+  // instead of the single current-month window:
+  //   • revenue     — confirmed/issued invoices by customerId (draft/cancelled/
+  //                   void excluded), bucketed by issueDate (createdAt fallback);
+  //   • directCost  — payable bill lines whose effective cost center is the
+  //                   client cost center (draft/cancelled bills excluded),
+  //                   bucketed by competence (metadata, then bill periodStart);
+  //   • laborCost   — tracked time (time entries by startedAt, task
+  //                   trackedMinutes fallback) × responsible member hourly cost.
+  //
+  // Months with no movement are emitted with zero so the chart stays continuous.
+  // Recurring profiles and contracted fees are NOT projected into the historical
+  // series (they are "current snapshot" concepts) — see notes.
+  async getClientMonthlyProfitability(
+    ctx: FinanceRequestContext,
+    clientId: string,
+    options: { startMonth?: string; endMonth?: string; months?: number } = {},
+  ) {
+    const [settings, rules] = await Promise.all([
+      this.getSettings(ctx),
+      this.getRules(ctx),
+    ]);
+    const defaultHourlyCost = toNumber(rules.defaultHourlyCost);
+
+    const range = this.resolveMonthRange(options);
+    const monthsInRange = new Set(range.months);
+
+    const [invoices, bills, billLines, costCenters, members, clientProjects] =
+      await Promise.all([
+        this.invoicesRepo.find({
+          where: { tenantId: ctx.tenantId, workspaceId: ctx.workspaceId },
+        }),
+        this.billsRepo.find({
+          where: { tenantId: ctx.tenantId, workspaceId: ctx.workspaceId },
+        }),
+        this.billLinesRepo.find({
+          where: { tenantId: ctx.tenantId, workspaceId: ctx.workspaceId },
+        }),
+        this.costCentersRepo.find({
+          where: { tenantId: ctx.tenantId, workspaceId: ctx.workspaceId },
+        }),
+        this.teamMembersRepo.find({
+          where: { tenantId: ctx.tenantId, workspaceId: ctx.workspaceId },
+        }),
+        this.projectsRepo.find({
+          where: {
+            tenantId: ctx.tenantId,
+            workspaceId: ctx.workspaceId,
+            clientId,
+          },
+        }),
+      ]);
+
+    const projectIds = clientProjects.map((project) => project.id);
+    const projectClientById = new Map<string, string | null>(
+      clientProjects.map((project) => [project.id, project.clientId ?? null]),
+    );
+
+    // Tasks owned by the client directly OR belonging to one of its projects.
+    const tasks = await this.tasksRepo.find({
+      where: [
+        { tenantId: ctx.tenantId, workspaceId: ctx.workspaceId, clientId },
+        ...(projectIds.length
+          ? [
+              {
+                tenantId: ctx.tenantId,
+                workspaceId: ctx.workspaceId,
+                projectId: In(projectIds),
+              },
+            ]
+          : []),
+      ],
+    });
+    const relevantTasks = tasks.filter(
+      (task) => this.resolveTaskClientId(task, projectClientById) === clientId,
+    );
+    const taskIds = relevantTasks.map((task) => task.id);
+
+    const timeEntries = taskIds.length
+      ? await this.timeEntriesRepo.find({
+          where: {
+            tenantId: ctx.tenantId,
+            workspaceId: ctx.workspaceId,
+            taskId: In(taskIds),
+          },
+        })
+      : [];
+
+    const revenueByMonth = this.aggregateClientRevenueByMonth(
+      invoices,
+      clientId,
+      monthsInRange,
+    );
+    const directCostByMonth = this.aggregateClientDirectCostByMonth(
+      bills,
+      billLines,
+      costCenters,
+      clientId,
+      monthsInRange,
+    );
+    const laborByMonth = this.aggregateClientLaborByMonth(
+      relevantTasks,
+      timeEntries,
+      members,
+      defaultHourlyCost,
+      monthsInRange,
+    );
+
+    let totalHoursWithoutCost = 0;
+    const allMembersMissing = new Set<string>();
+
+    const series = range.months.map((month) => {
+      const revenue = roundMoney(revenueByMonth.get(month) ?? 0);
+      const directCost = roundMoney(directCostByMonth.get(month) ?? 0);
+      const labor = laborByMonth.get(month);
+      const laborCost = roundMoney(labor?.cost ?? 0);
+      const directProfit = roundMoney(revenue - directCost - laborCost);
+      // Margin is 0 (not 100%) when there is no revenue, even if costs exist —
+      // the negative result is still visible in directProfit.
+      const directMargin =
+        revenue > 0 ? roundPercent((directProfit / revenue) * 100) : 0;
+      const minutes = labor?.minutes ?? 0;
+      const hoursWithoutCost = roundMoney((labor?.minutesWithoutCost ?? 0) / 60);
+      const membersMissingCost = labor
+        ? Array.from(labor.membersMissingCost)
+        : [];
+
+      totalHoursWithoutCost += labor?.minutesWithoutCost ?? 0;
+      membersMissingCost.forEach((name) => allMembersMissing.add(name));
+
+      return {
+        month,
+        revenue,
+        directCost,
+        laborCost,
+        directProfit,
+        directMargin,
+        hoursLogged: roundMoney(minutes / 60),
+        entriesWithoutCostCount: labor?.entriesWithoutCost ?? 0,
+        hoursWithoutCost,
+        membersMissingCost,
+      };
+    });
+
+    const sum = (pick: (point: (typeof series)[number]) => number) =>
+      roundMoney(series.reduce((total, point) => total + pick(point), 0));
+
+    return {
+      status: 'ok' as const,
+      module: 'agency-finance',
+      area: 'profitability',
+      type: 'client_monthly',
+      id: clientId,
+      currency: settings.baseCurrency,
+      period: {
+        type: 'monthly_series',
+        start: range.start,
+        end: range.end,
+        months: range.months.length,
+      },
+      series,
+      summary: {
+        revenue: sum((point) => point.revenue),
+        directCost: sum((point) => point.directCost),
+        laborCost: sum((point) => point.laborCost),
+        directProfit: sum((point) => point.directProfit),
+        hoursLogged: sum((point) => point.hoursLogged),
+        hoursWithoutCost: roundMoney(totalHoursWithoutCost / 60),
+        membersMissingCost: Array.from(allMembersMissing),
+      },
+      notes: [
+        'Monthly revenue: confirmed/issued invoices by customerId (draft/cancelled/void excluded), bucketed by issueDate (createdAt fallback). Recurring profiles and contracted monthly fees are NOT projected into the historical series.',
+        'Monthly direct cost: payable (bill) lines whose effective cost center is the client cost center (draft/cancelled bills excluded), bucketed by competence (metadata competencePeriod/accrualDate, then bill periodStart/issueDate/createdAt).',
+        'Monthly labor cost: tracked time (time entries by startedAt, task trackedMinutes fallback by completedAt/updatedAt) × responsible member hourly cost; hours without a configured cost are reported in hoursWithoutCost/membersMissingCost.',
+        'This is a DIRECT margin: shared/overhead costs are NOT allocated to the client in this view.',
+      ],
+    };
+  }
+
+  // Resolves the requested window into an inclusive ascending list of YYYY-MM
+  // months. Defaults to the trailing 12 months ending in the current month; a
+  // 36-month span cap protects against unbounded ranges.
+  private resolveMonthRange(options: {
+    startMonth?: string;
+    endMonth?: string;
+    months?: number;
+  }): { months: string[]; start: string; end: string } {
+    const MAX_MONTHS = 36;
+    const currentMonth = new Date().toISOString().slice(0, 7);
+
+    const end = normalizeMonth(options.endMonth) ?? currentMonth;
+    const startInput = normalizeMonth(options.startMonth);
+
+    let start: string;
+    if (startInput) {
+      start = startInput;
+    } else {
+      const requested = Math.trunc(Number(options.months));
+      const count = Math.min(
+        Math.max(Number.isFinite(requested) && requested > 0 ? requested : 12, 1),
+        MAX_MONTHS,
+      );
+      start = monthFromIndex(monthIndex(end) - (count - 1));
+    }
+
+    let from = monthIndex(start);
+    let to = monthIndex(end);
+    if (from > to) [from, to] = [to, from];
+    if (to - from + 1 > MAX_MONTHS) from = to - (MAX_MONTHS - 1);
+
+    const startMonth = monthFromIndex(from);
+    const endMonth = monthFromIndex(to);
+
+    return {
+      months: listMonths(startMonth, endMonth),
+      start: startMonth,
+      end: endMonth,
+    };
+  }
+
+  private aggregateClientRevenueByMonth(
+    invoices: FinanceInvoice[],
+    clientId: string,
+    monthsInRange: Set<string>,
+  ): Map<string, number> {
+    const byMonth = new Map<string, number>();
+
+    for (const invoice of invoices) {
+      if (invoice.customerId !== clientId) continue;
+      if (['cancelled', 'void', 'draft'].includes(String(invoice.status))) {
+        continue;
+      }
+
+      const month =
+        monthOfDate(invoice.issueDate) ?? monthOfDate(invoice.createdAt);
+      if (!month || !monthsInRange.has(month)) continue;
+
+      byMonth.set(month, (byMonth.get(month) ?? 0) + toNumber(invoice.totalAmount));
+    }
+
+    return byMonth;
+  }
+
+  private aggregateClientDirectCostByMonth(
+    bills: FinanceBill[],
+    billLines: FinanceBillLine[],
+    costCenters: FinanceCostCenter[],
+    clientId: string,
+    monthsInRange: Set<string>,
+  ): Map<string, number> {
+    const clientIdByCostCenterId = new Map<string, string>();
+    for (const cc of costCenters) {
+      if (cc.relatedEntityType === 'client' && cc.relatedEntityId) {
+        clientIdByCostCenterId.set(cc.id, cc.relatedEntityId);
+      }
+    }
+
+    const linesByBillId = new Map<string, FinanceBillLine[]>();
+    for (const line of billLines) {
+      const current = linesByBillId.get(line.billId) ?? [];
+      current.push(line);
+      linesByBillId.set(line.billId, current);
+    }
+
+    const byMonth = new Map<string, number>();
+
+    for (const bill of bills) {
+      const status = String(bill.status);
+      if (status === 'cancelled' || status === 'draft') continue;
+
+      const month = this.resolveBillCompetenceMonth(bill);
+      if (!month || !monthsInRange.has(month)) continue;
+
+      const lines = linesByBillId.get(bill.id) ?? [];
+      for (const line of lines) {
+        const amount = toNumber(line.totalAmount);
+        if (amount === 0) continue;
+
+        const effectiveCostCenter =
+          line.costCenterId ?? bill.costCenterId ?? null;
+        let lineClientId = effectiveCostCenter
+          ? clientIdByCostCenterId.get(effectiveCostCenter) ?? null
+          : null;
+
+        if (!lineClientId) {
+          lineClientId =
+            getMetadataString(line.metadata, [
+              'clientId',
+              'client_id',
+              'customerId',
+              'customer_id',
+            ]) ??
+            getMetadataString(bill.metadata, [
+              'clientId',
+              'client_id',
+              'customerId',
+              'customer_id',
+            ]);
+        }
+
+        if (lineClientId !== clientId) continue;
+        byMonth.set(month, (byMonth.get(month) ?? 0) + amount);
+      }
+    }
+
+    return byMonth;
+  }
+
+  // Competence month for a bill: metadata competence first, then the bill's own
+  // accrual/issue/creation dates as fallback.
+  private resolveBillCompetenceMonth(bill: FinanceBill): string | null {
+    const metadataMonth =
+      normalizeMonth(
+        getMetadataString(bill.metadata, [
+          'competencePeriod',
+          'competence',
+          'competenceMonth',
+        ]),
+      ) ??
+      monthOfDate(
+        getMetadataString(bill.metadata, ['accrualDate', 'competenceDate']),
+      );
+    if (metadataMonth) return metadataMonth;
+
+    return (
+      monthOfDate(bill.periodStart) ??
+      monthOfDate(bill.issueDate) ??
+      monthOfDate(bill.createdAt)
+    );
+  }
+
+  private aggregateClientLaborByMonth(
+    tasks: AgencyTask[],
+    timeEntries: AgencyTaskTimeEntry[],
+    members: TeamMember[],
+    defaultHourlyCost: number,
+    monthsInRange: Set<string>,
+  ): Map<
+    string,
+    {
+      minutes: number;
+      cost: number;
+      minutesWithoutCost: number;
+      entriesWithoutCost: number;
+      membersMissingCost: Set<string>;
+    }
+  > {
+    type MonthLabor = {
+      minutes: number;
+      cost: number;
+      minutesWithoutCost: number;
+      entriesWithoutCost: number;
+      membersMissingCost: Set<string>;
+    };
+
+    const memberByUserId = new Map<string, TeamMember>();
+    const memberById = new Map<string, TeamMember>();
+    for (const member of members) {
+      memberById.set(member.id, member);
+      if (member.userId) memberByUserId.set(member.userId, member);
+    }
+
+    const taskById = new Map(tasks.map((task) => [task.id, task]));
+    const byMonth = new Map<string, MonthLabor>();
+    const tasksWithEntries = new Set<string>();
+
+    const ensure = (month: string): MonthLabor => {
+      let bucket = byMonth.get(month);
+      if (!bucket) {
+        bucket = {
+          minutes: 0,
+          cost: 0,
+          minutesWithoutCost: 0,
+          entriesWithoutCost: 0,
+          membersMissingCost: new Set<string>(),
+        };
+        byMonth.set(month, bucket);
+      }
+      return bucket;
+    };
+
+    const addLabor = (
+      month: string | null,
+      minutes: number,
+      member: TeamMember | null,
+    ) => {
+      if (!month || !monthsInRange.has(month) || minutes <= 0) return;
+
+      const memberRate = this.resolveMemberHourlyCost(member);
+      const rate = memberRate > 0 ? memberRate : defaultHourlyCost;
+      const bucket = ensure(month);
+      bucket.minutes += minutes;
+      bucket.cost += (minutes / 60) * rate;
+      if (rate <= 0) {
+        bucket.minutesWithoutCost += minutes;
+        bucket.entriesWithoutCost += 1;
+        bucket.membersMissingCost.add(
+          member?.displayName ?? 'Responsável sem custo definido',
+        );
+      }
+    };
+
+    for (const entry of timeEntries) {
+      const task = taskById.get(entry.taskId);
+      if (!task) continue;
+      tasksWithEntries.add(task.id);
+      const minutes = entry.durationMinutes ?? 0;
+      if (minutes <= 0) continue;
+      const member = entry.userId
+        ? memberByUserId.get(entry.userId) ?? null
+        : null;
+      addLabor(monthOfDate(entry.startedAt), minutes, member);
+    }
+
+    for (const task of tasks) {
+      if (tasksWithEntries.has(task.id)) continue;
+      const minutes = task.trackedMinutes ?? 0;
+      if (minutes <= 0) continue;
+      const member = task.assigneeId
+        ? memberById.get(task.assigneeId) ?? null
+        : null;
+      const month =
+        monthOfDate(task.completedAt) ??
+        monthOfDate(task.updatedAt) ??
+        monthOfDate(task.createdAt);
+      addLabor(month, minutes, member);
+    }
+
+    return byMonth;
   }
 
   // Hours spent on a client's tasks grouped by task type (the "horas por tipo

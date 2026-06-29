@@ -165,6 +165,24 @@ export class ClientsProfitabilityService {
     };
   }
 
+  async getClientMonthlyProfitability(
+    ctx: RequestContext,
+    clientId: string,
+    options: { startMonth?: string; endMonth?: string; months?: number } = {},
+  ) {
+    const result =
+      await this.financeProfitabilityService.getClientMonthlyProfitability(
+        this.toFinanceContext(ctx),
+        clientId,
+        options,
+      );
+
+    return {
+      ...result,
+      module: 'agency-clients',
+    };
+  }
+
   private toFinanceContext(ctx: RequestContext): FinanceRequestContext {
     return {
       tenantId: ctx.tenantId,

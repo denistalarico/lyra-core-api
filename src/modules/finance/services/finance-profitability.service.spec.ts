@@ -322,3 +322,423 @@ describe('FinanceProfitabilityService — direct profitability', () => {
     expect(client?.laborCost).toBe(50);
   });
 });
+
+// ── Monthly profitability series ───────────────────────────────────────────────
+
+const CC_CLIENT = {
+  id: 'cc-client',
+  relatedEntityType: 'client',
+  relatedEntityId: CLIENT,
+} as Partial<FinanceCostCenter>;
+
+const MEMBER_50 = {
+  id: 'member-1',
+  userId: 'user-1',
+  displayName: 'Ana Dev',
+  hourlyCost: '50.00',
+  monthlyCost: null,
+  metadata: {},
+} as Partial<TeamMember>;
+
+// Minimal workspace for the monthly series: a client cost center, one project
+// and a member that costs R$ 50/h. Movement (invoices/bills/time) is added per
+// test so each figure can be asserted in its own month.
+function monthlyData(overrides: Partial<Data> = {}): Data {
+  return {
+    costCenters: [CC_CLIENT],
+    projects: [{ id: 'proj-1', name: 'Projeto X', clientId: CLIENT }],
+    tasks: [],
+    timeEntries: [],
+    members: [MEMBER_50],
+    invoices: [],
+    bills: [],
+    billLines: [],
+    ...overrides,
+  };
+}
+
+type MonthlyResult = Awaited<
+  ReturnType<FinanceProfitabilityService['getClientMonthlyProfitability']>
+>;
+
+async function monthlySeries(
+  data: Data,
+  options: { startMonth?: string; endMonth?: string; months?: number } = {
+    startMonth: '2026-01',
+    endMonth: '2026-12',
+  },
+): Promise<MonthlyResult> {
+  const service = makeService(data);
+  return service.getClientMonthlyProfitability(ctx(), CLIENT, options);
+}
+
+function pointFor(result: MonthlyResult, month: string) {
+  return result.series.find((point) => point.month === month);
+}
+
+function utcDate(year: number, monthIndex0: number, day: number): Date {
+  return new Date(Date.UTC(year, monthIndex0, day));
+}
+
+describe('FinanceProfitabilityService — monthly series', () => {
+  it('defaults to the trailing 12 months ending in the current month', async () => {
+    const service = makeService(monthlyData());
+    const result = await service.getClientMonthlyProfitability(ctx(), CLIENT, {});
+    expect(result.series).toHaveLength(12);
+    expect(result.period.months).toBe(12);
+    expect(result.series[result.series.length - 1].month).toBe(
+      new Date().toISOString().slice(0, 7),
+    );
+  });
+
+  it('honours an explicit months count', async () => {
+    const service = makeService(monthlyData());
+    const result = await service.getClientMonthlyProfitability(ctx(), CLIENT, {
+      months: 6,
+    });
+    expect(result.series).toHaveLength(6);
+  });
+
+  it('fills months without movement with zero and keeps the series continuous', async () => {
+    const result = await monthlySeries(monthlyData());
+    expect(result.series).toHaveLength(12);
+    const empty = pointFor(result, '2026-03');
+    expect(empty).toMatchObject({
+      revenue: 0,
+      directCost: 0,
+      laborCost: 0,
+      directProfit: 0,
+      directMargin: 0,
+      hoursLogged: 0,
+    });
+  });
+
+  it('places confirmed revenue in the issue-date month', async () => {
+    const result = await monthlySeries(
+      monthlyData({
+        invoices: [
+          {
+            id: 'inv-1',
+            customerId: CLIENT,
+            status: 'issued' as FinanceInvoice['status'],
+            totalAmount: '2500.00',
+            issueDate: '2026-07-10',
+            createdAt: new Date(),
+          } as Partial<FinanceInvoice>,
+        ],
+      }),
+    );
+    expect(pointFor(result, '2026-07')?.revenue).toBe(2500);
+    expect(pointFor(result, '2026-06')?.revenue).toBe(0);
+  });
+
+  it('excludes draft/cancelled invoices and other customers from revenue', async () => {
+    const result = await monthlySeries(
+      monthlyData({
+        invoices: [
+          {
+            id: 'inv-ok',
+            customerId: CLIENT,
+            status: 'issued' as FinanceInvoice['status'],
+            totalAmount: '2500.00',
+            issueDate: '2026-07-10',
+            createdAt: new Date(),
+          } as Partial<FinanceInvoice>,
+          {
+            id: 'inv-draft',
+            customerId: CLIENT,
+            status: 'draft' as FinanceInvoice['status'],
+            totalAmount: '9000.00',
+            issueDate: '2026-07-11',
+            createdAt: new Date(),
+          } as Partial<FinanceInvoice>,
+          {
+            id: 'inv-other',
+            customerId: 'other-client',
+            status: 'issued' as FinanceInvoice['status'],
+            totalAmount: '8000.00',
+            issueDate: '2026-07-12',
+            createdAt: new Date(),
+          } as Partial<FinanceInvoice>,
+        ],
+      }),
+    );
+    expect(pointFor(result, '2026-07')?.revenue).toBe(2500);
+  });
+
+  it('places direct cost in the competence month from bill metadata', async () => {
+    const result = await monthlySeries(
+      monthlyData({
+        bills: [
+          {
+            id: 'bill-1',
+            status: 'open' as FinanceBill['status'],
+            costCenterId: 'cc-client',
+            issueDate: '2026-05-01',
+            createdAt: new Date(),
+            metadata: { competencePeriod: '2026-08' },
+          } as Partial<FinanceBill>,
+        ],
+        billLines: [
+          {
+            id: 'bl-1',
+            billId: 'bill-1',
+            totalAmount: '420.00',
+            costCenterId: null,
+            metadata: {},
+          } as Partial<FinanceBillLine>,
+        ],
+      }),
+    );
+    // Competence (2026-08) wins over the issue date (2026-05).
+    expect(pointFor(result, '2026-08')?.directCost).toBe(420);
+    expect(pointFor(result, '2026-05')?.directCost).toBe(0);
+  });
+
+  it('falls back to the bill date for direct-cost competence', async () => {
+    const result = await monthlySeries(
+      monthlyData({
+        bills: [
+          {
+            id: 'bill-1',
+            status: 'open' as FinanceBill['status'],
+            costCenterId: 'cc-client',
+            issueDate: '2026-04-15',
+            createdAt: new Date(),
+            metadata: {},
+          } as Partial<FinanceBill>,
+        ],
+        billLines: [
+          {
+            id: 'bl-1',
+            billId: 'bill-1',
+            totalAmount: '100.00',
+            costCenterId: null,
+            metadata: {},
+          } as Partial<FinanceBillLine>,
+        ],
+      }),
+    );
+    expect(pointFor(result, '2026-04')?.directCost).toBe(100);
+  });
+
+  it('excludes draft/cancelled bills from direct cost', async () => {
+    const result = await monthlySeries(
+      monthlyData({
+        bills: [
+          {
+            id: 'bill-ok',
+            status: 'open' as FinanceBill['status'],
+            costCenterId: 'cc-client',
+            issueDate: '2026-07-01',
+            createdAt: new Date(),
+            metadata: {},
+          } as Partial<FinanceBill>,
+          {
+            id: 'bill-draft',
+            status: 'draft' as FinanceBill['status'],
+            costCenterId: 'cc-client',
+            issueDate: '2026-07-02',
+            createdAt: new Date(),
+            metadata: {},
+          } as Partial<FinanceBill>,
+        ],
+        billLines: [
+          {
+            id: 'bl-ok',
+            billId: 'bill-ok',
+            totalAmount: '300.00',
+            costCenterId: null,
+            metadata: {},
+          } as Partial<FinanceBillLine>,
+          {
+            id: 'bl-draft',
+            billId: 'bill-draft',
+            totalAmount: '9000.00',
+            costCenterId: null,
+            metadata: {},
+          } as Partial<FinanceBillLine>,
+        ],
+      }),
+    );
+    expect(pointFor(result, '2026-07')?.directCost).toBe(300);
+  });
+
+  it('places labor in the time-entry month and prices it with the member rate', async () => {
+    const result = await monthlySeries(
+      monthlyData({
+        tasks: [
+          {
+            id: 'task-1',
+            projectId: 'proj-1',
+            clientId: null,
+            assigneeId: 'member-1',
+            trackedMinutes: 0,
+          } as Partial<AgencyTask>,
+        ],
+        timeEntries: [
+          {
+            taskId: 'task-1',
+            userId: 'user-1',
+            durationMinutes: 120,
+            startedAt: utcDate(2026, 2, 10),
+          } as Partial<AgencyTaskTimeEntry>,
+        ],
+      }),
+    );
+    const march = pointFor(result, '2026-03');
+    expect(march?.hoursLogged).toBe(2);
+    expect(march?.laborCost).toBe(100); // 2h × R$ 50
+  });
+
+  it('buckets trackedMinutes fallback by the task completion month', async () => {
+    const result = await monthlySeries(
+      monthlyData({
+        tasks: [
+          {
+            id: 'task-1',
+            projectId: 'proj-1',
+            clientId: null,
+            assigneeId: 'member-1',
+            trackedMinutes: 60,
+            completedAt: utcDate(2026, 5, 20),
+            updatedAt: new Date(),
+            createdAt: new Date(),
+          } as Partial<AgencyTask>,
+        ],
+        timeEntries: [],
+      }),
+    );
+    const june = pointFor(result, '2026-06');
+    expect(june?.hoursLogged).toBe(1);
+    expect(june?.laborCost).toBe(50);
+  });
+
+  it('flags hours without cost per month and in the summary', async () => {
+    const result = await monthlySeries(
+      monthlyData({
+        members: [
+          {
+            id: 'member-1',
+            userId: 'user-1',
+            displayName: 'Ana Dev',
+            hourlyCost: null,
+            monthlyCost: null,
+            metadata: {},
+          } as Partial<TeamMember>,
+        ],
+        tasks: [
+          {
+            id: 'task-1',
+            projectId: 'proj-1',
+            clientId: null,
+            assigneeId: 'member-1',
+            trackedMinutes: 0,
+          } as Partial<AgencyTask>,
+        ],
+        timeEntries: [
+          {
+            taskId: 'task-1',
+            userId: 'user-1',
+            durationMinutes: 120,
+            startedAt: utcDate(2026, 2, 10),
+          } as Partial<AgencyTaskTimeEntry>,
+        ],
+      }),
+    );
+    const march = pointFor(result, '2026-03');
+    expect(march?.laborCost).toBe(0);
+    expect(march?.hoursWithoutCost).toBe(2);
+    expect(march?.entriesWithoutCostCount).toBe(1);
+    expect(march?.membersMissingCost).toContain('Ana Dev');
+    expect(result.summary.hoursWithoutCost).toBe(2);
+    expect(result.summary.membersMissingCost).toContain('Ana Dev');
+  });
+
+  it('computes directProfit and a non-100% directMargin when there are costs', async () => {
+    const result = await monthlySeries(
+      monthlyData({
+        invoices: [
+          {
+            id: 'inv-1',
+            customerId: CLIENT,
+            status: 'issued' as FinanceInvoice['status'],
+            totalAmount: '1000.00',
+            issueDate: '2026-07-10',
+            createdAt: new Date(),
+          } as Partial<FinanceInvoice>,
+        ],
+        bills: [
+          {
+            id: 'bill-1',
+            status: 'open' as FinanceBill['status'],
+            costCenterId: 'cc-client',
+            issueDate: '2026-07-05',
+            createdAt: new Date(),
+            metadata: {},
+          } as Partial<FinanceBill>,
+        ],
+        billLines: [
+          {
+            id: 'bl-1',
+            billId: 'bill-1',
+            totalAmount: '300.00',
+            costCenterId: null,
+            metadata: {},
+          } as Partial<FinanceBillLine>,
+        ],
+        tasks: [
+          {
+            id: 'task-1',
+            projectId: 'proj-1',
+            clientId: null,
+            assigneeId: 'member-1',
+            trackedMinutes: 0,
+          } as Partial<AgencyTask>,
+        ],
+        timeEntries: [
+          {
+            taskId: 'task-1',
+            userId: 'user-1',
+            durationMinutes: 120,
+            startedAt: utcDate(2026, 6, 10),
+          } as Partial<AgencyTaskTimeEntry>,
+        ],
+      }),
+    );
+    const july = pointFor(result, '2026-07');
+    expect(july?.directProfit).toBe(600); // 1000 - 300 - 100
+    expect(july?.directMargin).toBe(60);
+    expect(july?.directMargin).not.toBe(100);
+  });
+
+  it('returns margin 0 (not 100%) when there is cost but no revenue', async () => {
+    const result = await monthlySeries(
+      monthlyData({
+        bills: [
+          {
+            id: 'bill-1',
+            status: 'open' as FinanceBill['status'],
+            costCenterId: 'cc-client',
+            issueDate: '2026-09-05',
+            createdAt: new Date(),
+            metadata: {},
+          } as Partial<FinanceBill>,
+        ],
+        billLines: [
+          {
+            id: 'bl-1',
+            billId: 'bill-1',
+            totalAmount: '300.00',
+            costCenterId: null,
+            metadata: {},
+          } as Partial<FinanceBillLine>,
+        ],
+      }),
+    );
+    const september = pointFor(result, '2026-09');
+    expect(september?.revenue).toBe(0);
+    expect(september?.directProfit).toBe(-300);
+    expect(september?.directMargin).toBe(0);
+  });
+});
