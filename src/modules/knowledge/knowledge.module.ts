@@ -25,6 +25,15 @@ import {
   AgencyKnowledgeVaultPermission,
 } from './entities';
 import {
+  HelpArticle,
+  HelpCategory,
+  HelpCenterController,
+  HelpCenterSeedService,
+  HelpCenterService,
+  HelpTrail,
+  HelpTrailArticle,
+} from './help';
+import {
   KnowledgeArticlesService,
   KnowledgeCategoriesService,
   KnowledgeCommentsService,
@@ -52,6 +61,10 @@ import {
         AgencyKnowledgeVaultAccessLog,
         AgencyKnowledgeVaultItem,
         AgencyKnowledgeVaultPermission,
+        HelpCategory,
+        HelpTrail,
+        HelpArticle,
+        HelpTrailArticle,
       ],
       'agency',
     ),
@@ -63,6 +76,7 @@ import {
     KnowledgeQuickNotesController,
     KnowledgeReactionsController,
     KnowledgeVaultController,
+    HelpCenterController,
   ],
   providers: [
     KnowledgeArticlesService,
@@ -74,6 +88,8 @@ import {
     KnowledgeVaultCryptoService,
     KnowledgeVaultReauthService,
     KnowledgeVaultService,
+    HelpCenterService,
+    HelpCenterSeedService,
   ],
   exports: [
     KnowledgeArticlesService,
@@ -83,6 +99,7 @@ import {
     KnowledgeQuickNotesService,
     KnowledgeReactionsService,
     KnowledgeVaultService,
+    HelpCenterService,
   ],
 })
 export class KnowledgeModule {}

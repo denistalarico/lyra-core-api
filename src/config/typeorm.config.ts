@@ -207,6 +207,12 @@ import {
   AgencyKnowledgeVaultItem,
   AgencyKnowledgeVaultPermission,
 } from '../modules/knowledge/entities';
+import {
+  HelpArticle,
+  HelpCategory,
+  HelpTrail,
+  HelpTrailArticle,
+} from '../modules/knowledge/help/entities';
 
 import {
   AgencyChatChannel,
@@ -379,6 +385,10 @@ export const agencyEntities = [
   AgencyKnowledgeVaultAccessLog,
   AgencyKnowledgeVaultItem,
   AgencyKnowledgeVaultPermission,
+  HelpCategory,
+  HelpTrail,
+  HelpArticle,
+  HelpTrailArticle,
   AgencyChatChannel,
   AgencyChatChannelMember,
   AgencyChatMessage,
