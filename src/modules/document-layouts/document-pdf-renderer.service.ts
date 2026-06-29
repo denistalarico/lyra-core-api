@@ -1,5 +1,17 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { chromium } from 'playwright';
+
+/**
+ * Raised when the headless browser engine cannot be started (e.g. the Playwright
+ * chromium build is missing from the runtime). Callers can map this to a clean,
+ * user-facing response instead of surfacing a raw 500.
+ */
+export class PdfEngineUnavailableError extends Error {
+  constructor(readonly cause: unknown) {
+    super('PDF rendering engine is unavailable');
+    this.name = 'PdfEngineUnavailableError';
+  }
+}
 import type {
   QuoteEntity,
   QuoteItemEntity,
@@ -179,11 +191,35 @@ type RenderTeamBenefitAcknowledgmentInput = {
 
 @Injectable()
 export class DocumentPdfRendererService {
+  private readonly logger = new Logger(DocumentPdfRendererService.name);
+
+  /**
+   * Launches the headless browser used for every PDF render. Runs with the
+   * sandbox disabled so it works inside hardened service units (running as root
+   * / ProtectHome) and wraps launch failures in a typed error so the API can
+   * respond gracefully instead of throwing an opaque 500.
+   */
+  private async launchBrowser() {
+    try {
+      return await chromium.launch({
+        headless: true,
+        args: ['--no-sandbox', '--disable-setuid-sandbox'],
+      });
+    } catch (error) {
+      this.logger.error(
+        `Failed to launch PDF browser engine: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      throw new PdfEngineUnavailableError(error);
+    }
+  }
+
   async renderHtmlToPdf(
     html: string,
     options: RenderHtmlPdfOptions = {},
   ): Promise<Buffer> {
-    const browser = await chromium.launch({ headless: true });
+    const browser = await this.launchBrowser();
     let page: Awaited<ReturnType<typeof browser.newPage>> | null = null;
 
     try {
@@ -209,7 +245,7 @@ export class DocumentPdfRendererService {
 
   async renderQuotePdf(input: RenderQuotePdfInput): Promise<Buffer> {
     const html = this.buildQuoteHtml(input);
-    const browser = await chromium.launch({ headless: true });
+    const browser = await this.launchBrowser();
     let page: Awaited<ReturnType<typeof browser.newPage>> | null = null;
 
     try {
@@ -413,7 +449,7 @@ export class DocumentPdfRendererService {
 
   async renderInvoicePdf(input: RenderInvoicePdfInput): Promise<Buffer> {
     const html = this.buildInvoiceHtml(input);
-    const browser = await chromium.launch({ headless: true });
+    const browser = await this.launchBrowser();
     let page: Awaited<ReturnType<typeof browser.newPage>> | null = null;
     try {
       page = await browser.newPage();
@@ -432,7 +468,7 @@ export class DocumentPdfRendererService {
 
   async renderBillPdf(input: RenderBillPdfInput): Promise<Buffer> {
     const html = this.buildBillHtml(input);
-    const browser = await chromium.launch({ headless: true });
+    const browser = await this.launchBrowser();
     let page: Awaited<ReturnType<typeof browser.newPage>> | null = null;
     try {
       page = await browser.newPage();
@@ -726,14 +762,23 @@ export class DocumentPdfRendererService {
       </div>`;
   }
 
-  private formatDate(value: string | null) {
+  private formatDate(value: string | Date | null | undefined) {
     if (!value) return 'Sem validade definida';
 
-    const dateParts = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    // A `date` column is normally a string ('YYYY-MM-DD'), but be defensive in
+    // case a Date object (or anything else) reaches here — never throw.
+    if (value instanceof Date) {
+      return Number.isNaN(value.getTime())
+        ? 'Sem validade definida'
+        : new Intl.DateTimeFormat('pt-BR').format(value);
+    }
+
+    const text = String(value);
+    const dateParts = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
     if (dateParts) return `${dateParts[3]}/${dateParts[2]}/${dateParts[1]}`;
 
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) return value;
+    const date = new Date(text);
+    if (Number.isNaN(date.getTime())) return text;
 
     return new Intl.DateTimeFormat('pt-BR').format(date);
   }

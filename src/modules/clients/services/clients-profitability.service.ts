@@ -334,6 +334,8 @@ export class ClientsProfitabilityService {
       margin: item.margin,
       health: item.health,
       tasks: item.tasks,
+      hoursWithoutCost: item.hoursWithoutCost ?? 0,
+      membersMissingCost: item.membersMissingCost ?? [],
       metadata: item.metadata ?? null,
     };
   }
@@ -351,6 +353,8 @@ export class ClientsProfitabilityService {
       margin: 0,
       health: AgencyClientHealthStatus.NoRevenue,
       tasks: 0,
+      hoursWithoutCost: 0,
+      membersMissingCost: [],
       metadata: { projects: 0, source: 'agency_clients' },
     };
   }

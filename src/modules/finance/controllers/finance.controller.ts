@@ -5,6 +5,7 @@ import {
   Delete,
   Get,
   Headers,
+  Logger,
   NotFoundException,
   Param,
   Patch,
@@ -12,11 +13,15 @@ import {
   Query,
   Req,
   Res,
+  ServiceUnavailableException,
   UseGuards,
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { DocumentLayoutsService } from '../../document-layouts/document-layouts.service';
-import { DocumentPdfRendererService } from '../../document-layouts/document-pdf-renderer.service';
+import {
+  DocumentPdfRendererService,
+  PdfEngineUnavailableError,
+} from '../../document-layouts/document-pdf-renderer.service';
 import {
   CreateFinanceAccountDto,
   CreateFinanceBankAccountDto,
@@ -76,6 +81,33 @@ const RequireFinancePermission = (permissionKey: string) =>
 
 @Controller('agency/finance')
 export class FinanceController {
+  private readonly logger = new Logger(FinanceController.name);
+
+  // Maps PDF rendering failures to a clean, user-facing response. The real cause
+  // (e.g. a missing browser engine) is logged server-side while the client gets
+  // a friendly 503 instead of an opaque 500.
+  private handlePdfError(error: unknown, document: string): never {
+    if (error instanceof PdfEngineUnavailableError) {
+      this.logger.error(
+        `PDF engine unavailable while generating ${document}: ${
+          error.cause instanceof Error ? error.cause.message : String(error.cause)
+        }`,
+      );
+      throw new ServiceUnavailableException(
+        'Não foi possível gerar o PDF no momento: o motor de geração de documentos está indisponível. Tente novamente em instantes ou contate o suporte.',
+      );
+    }
+
+    this.logger.error(
+      `Failed to generate ${document}: ${
+        error instanceof Error ? (error.stack ?? error.message) : String(error)
+      }`,
+    );
+    throw new ServiceUnavailableException(
+      'Não foi possível gerar o PDF do documento. A falha foi registrada para análise.',
+    );
+  }
+
   constructor(
     private readonly financeService: FinanceService,
     private readonly financeDefaultsService: FinanceDefaultsService,
@@ -594,12 +626,17 @@ export class FinanceController {
       throw new NotFoundException('Document layout template not found.');
     }
 
-    const buffer = await this.documentPdfRenderer.renderInvoicePdf({
-      invoice,
-      lines,
-      layout,
-      template,
-    });
+    let buffer: Buffer;
+    try {
+      buffer = await this.documentPdfRenderer.renderInvoicePdf({
+        invoice,
+        lines,
+        layout,
+        template,
+      });
+    } catch (error) {
+      this.handlePdfError(error, `invoice ${invoice.invoiceNumber}`);
+    }
 
     const safeNumber = invoice.invoiceNumber.replace(/[^a-zA-Z0-9-_]/g, '-');
     response.set({
@@ -704,12 +741,17 @@ export class FinanceController {
       throw new NotFoundException('Document layout template not found.');
     }
 
-    const buffer = await this.documentPdfRenderer.renderBillPdf({
-      bill,
-      lines,
-      layout,
-      template,
-    });
+    let buffer: Buffer;
+    try {
+      buffer = await this.documentPdfRenderer.renderBillPdf({
+        bill,
+        lines,
+        layout,
+        template,
+      });
+    } catch (error) {
+      this.handlePdfError(error, `bill ${bill.billNumber}`);
+    }
 
     const safeNumber = bill.billNumber.replace(/[^a-zA-Z0-9-_]/g, '-');
     response.set({

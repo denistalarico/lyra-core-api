@@ -7,6 +7,7 @@ import {
   AgencyTask,
   AgencyTaskTimeEntry,
 } from '../projects/entities';
+import { TeamMember } from '../team/entities';
 import { FinanceController } from './controllers/finance.controller';
 import {
   FinanceAccount,
@@ -82,6 +83,7 @@ import { PermissionsModule } from '../permissions';
         AgencyProjectSettings,
         AgencyTask,
         AgencyTaskTimeEntry,
+        TeamMember,
       ],
       'agency',
     ),

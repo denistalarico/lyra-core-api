@@ -549,6 +549,7 @@ export class FinanceBillingService {
           totalAmount: money(total),
           categoryId: line.categoryId ?? dto.categoryId ?? null,
           costCenterId: line.costCenterId ?? dto.costCenterId ?? null,
+          metadata: line.metadata ?? {},
         });
       });
 
@@ -690,6 +691,7 @@ export class FinanceBillingService {
         totalAmount: money(total),
         categoryId: dto.categoryId ?? null,
         costCenterId: dto.costCenterId ?? null,
+        metadata: dto.metadata ?? {},
       }),
     );
 

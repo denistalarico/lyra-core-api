@@ -228,6 +228,13 @@ export class FinanceBillLineInputDto {
   @IsOptional()
   @IsUUID()
   costCenterId?: string | null;
+
+  // Advanced/optional per-line classification kept in metadata so no migration
+  // is needed: accountId (chart-of-accounts override), clientId/projectId
+  // (profitability context), competence (accrual period 'YYYY-MM'), notes, etc.
+  @IsOptional()
+  @IsObject()
+  metadata?: Record<string, unknown>;
 }
 
 /**

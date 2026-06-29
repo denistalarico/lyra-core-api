@@ -239,6 +239,35 @@ describe('FinanceBillingService bill recurrences', () => {
     expect(saved.nextGenerationDate).toBe('2026-08-01');
   });
 
+  it('copies line categoryId/costCenterId/metadata into the recurrence line template', async () => {
+    const { service, billRecurrencesRepo } = makeService();
+
+    await service.createBill(makeContext(), {
+      currency: 'BRL',
+      lines: [
+        {
+          description: 'Freelancer Cliente X',
+          quantity: '1',
+          unitPrice: '500.00',
+          categoryId: '44444444-4444-4444-4444-444444444444',
+          costCenterId: '55555555-5555-5555-5555-555555555555',
+          metadata: { clientId: '66666666-6666-6666-6666-666666666666', competence: '2026-07' },
+        },
+      ],
+      recurrence: {
+        frequency: FinanceBillRecurrenceFrequency.Monthly,
+        startDate: '2026-07-01',
+      },
+    });
+
+    const saved = billRecurrencesRepo.save.mock.calls[0][0];
+    expect(saved.lineTemplate[0]).toMatchObject({
+      categoryId: '44444444-4444-4444-4444-444444444444',
+      costCenterId: '55555555-5555-5555-5555-555555555555',
+      metadata: { clientId: '66666666-6666-6666-6666-666666666666', competence: '2026-07' },
+    });
+  });
+
   it('generates a draft bill that does NOT post, advancing the recurrence', async () => {
     const billRecurrence = makeBillRecurrence({ nextGenerationDate: '2026-07-01' });
     const { service, postingService, billRecurrencesRepo } = makeService({ billRecurrence });

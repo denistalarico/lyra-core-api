@@ -7,14 +7,29 @@ import {
   AgencyTask,
   AgencyTaskTimeEntry,
 } from '../../projects/entities';
+import { TeamMember } from '../../team/entities';
 import {
   FinanceBill,
+  FinanceBillLine,
+  FinanceCostCenter,
   FinanceInvoice,
   FinanceProfitabilityRule,
   FinanceRecurringProfile,
   FinanceSetting,
 } from '../entities';
 import { FinanceRequestContext } from './finance-context';
+
+// Average paid hours per month used to derive an hourly rate from a member's
+// monthly cost when neither an explicit hourly cost nor a contracted-hours value
+// is configured (≈ 40h/week × 52 weeks / 12 months).
+const DEFAULT_MONTHLY_HOURS = 173.33;
+
+type LaborAggregate = {
+  minutes: number;
+  cost: number;
+  minutesWithoutCost: number;
+  membersMissingCost: Set<string>;
+};
 
 type ProfitabilityHealth =
   | 'healthy'
@@ -38,6 +53,10 @@ type ProfitabilityItem = {
   margin: number;
   health: ProfitabilityHealth;
   tasks: number;
+  // Configuration completeness signals for labor cost: how much tracked time
+  // had no hourly cost available, and which responsibles are missing a cost.
+  hoursWithoutCost: number;
+  membersMissingCost: string[];
 };
 
 function toNumber(value: string | number | null | undefined): number {
@@ -90,6 +109,15 @@ export class FinanceProfitabilityService {
     @InjectRepository(FinanceBill, 'agency')
     private readonly billsRepo: Repository<FinanceBill>,
 
+    @InjectRepository(FinanceBillLine, 'agency')
+    private readonly billLinesRepo: Repository<FinanceBillLine>,
+
+    @InjectRepository(FinanceCostCenter, 'agency')
+    private readonly costCentersRepo: Repository<FinanceCostCenter>,
+
+    @InjectRepository(TeamMember, 'agency')
+    private readonly teamMembersRepo: Repository<TeamMember>,
+
     @InjectRepository(FinanceRecurringProfile, 'agency')
     private readonly recurringProfilesRepo: Repository<FinanceRecurringProfile>,
 
@@ -126,6 +154,9 @@ export class FinanceProfitabilityService {
       timeEntries,
       invoices,
       bills,
+      billLines,
+      costCenters,
+      teamMembers,
       recurringProfiles,
     ] = await Promise.all([
       this.getSettings(ctx),
@@ -160,6 +191,24 @@ export class FinanceProfitabilityService {
           workspaceId: ctx.workspaceId,
         },
       }),
+      this.billLinesRepo.find({
+        where: {
+          tenantId: ctx.tenantId,
+          workspaceId: ctx.workspaceId,
+        },
+      }),
+      this.costCentersRepo.find({
+        where: {
+          tenantId: ctx.tenantId,
+          workspaceId: ctx.workspaceId,
+        },
+      }),
+      this.teamMembersRepo.find({
+        where: {
+          tenantId: ctx.tenantId,
+          workspaceId: ctx.workspaceId,
+        },
+      }),
       this.recurringProfilesRepo.find({
         where: {
           tenantId: ctx.tenantId,
@@ -176,15 +225,21 @@ export class FinanceProfitabilityService {
     const projectClientById = new Map<string, string | null>(
       projects.map((project) => [project.id, project.clientId ?? null]),
     );
-    const timeByProjectId = this.calculateTimeByProject(tasks, timeEntries);
-    const timeByClientId = this.calculateTimeByClient(
+
+    // Labor cost = tracked time × the responsible member's hourly cost (with a
+    // monthlyCost/contracted-hours and a workspace-default fallback). Computed
+    // once and bucketed per project and per client.
+    const labor = this.calculateLabor(
       tasks,
       timeEntries,
+      teamMembers,
       projectClientById,
+      defaultHourlyCost,
     );
 
     const validInvoices = invoices.filter(
-      (invoice) => !['cancelled', 'void'].includes(String(invoice.status)),
+      (invoice) =>
+        !['cancelled', 'void', 'draft'].includes(String(invoice.status)),
     );
 
     const periodInvoices = validInvoices.filter((invoice) => {
@@ -201,15 +256,25 @@ export class FinanceProfitabilityService {
       return date >= periodStartDate && date <= periodEndDate;
     });
 
+    // Direct cost (per client) = confirmed payable lines whose effective cost
+    // center is the client's own cost center. Draft bills are not recognised yet
+    // so they never count as a realised direct cost.
+    const periodCostBills = periodBills.filter(
+      (bill) => String(bill.status) !== 'draft',
+    );
+    const directCostByClientId = this.calculateDirectCostByClient(
+      periodCostBills,
+      billLines,
+      costCenters,
+    );
+
     const activeRecurringProfiles = recurringProfiles.filter(
       (profile) => String(profile.status) === 'active',
     );
 
     const projectsProfitability = projects.map((project) => {
       const projectTasks = tasksByProjectId.get(project.id) ?? [];
-      const laborMinutes = timeByProjectId.get(project.id) ?? 0;
-      const laborHours = laborMinutes / 60;
-      const laborCost = laborHours * defaultHourlyCost;
+      const projectLabor = labor.byProject.get(project.id);
 
       const invoicedRevenue = this.sumProjectInvoiceRevenue(
         project.id,
@@ -221,7 +286,7 @@ export class FinanceProfitabilityService {
         activeRecurringProfiles,
       );
 
-      const directCosts = this.sumProjectDirectCosts(project.id, periodBills);
+      const directCosts = this.sumProjectDirectCosts(project.id, periodCostBills);
 
       return this.buildItem({
         id: project.id,
@@ -231,8 +296,9 @@ export class FinanceProfitabilityService {
         invoicedRevenue,
         recurringRevenue,
         directCosts,
-        laborMinutes,
-        laborCost,
+        laborMinutes: projectLabor?.minutes ?? 0,
+        laborCost: projectLabor?.cost ?? 0,
+        labor: projectLabor,
         tasks: projectTasks.length,
         rules,
       });
@@ -259,9 +325,7 @@ export class FinanceProfitabilityService {
           this.resolveTaskClientId(task, projectClientById) === clientId,
       );
 
-      const laborMinutes = timeByClientId.get(clientId) ?? 0;
-      const laborHours = laborMinutes / 60;
-      const laborCost = laborHours * defaultHourlyCost;
+      const clientLabor = labor.byClient.get(clientId);
 
       const invoicedRevenue = this.sumClientInvoiceRevenue(
         clientId,
@@ -273,7 +337,7 @@ export class FinanceProfitabilityService {
         activeRecurringProfiles,
       );
 
-      const directCosts = this.sumClientDirectCosts(clientId, periodBills);
+      const directCosts = directCostByClientId.get(clientId) ?? 0;
 
       return this.buildItem({
         id: clientId,
@@ -283,8 +347,9 @@ export class FinanceProfitabilityService {
         invoicedRevenue,
         recurringRevenue,
         directCosts,
-        laborMinutes,
-        laborCost,
+        laborMinutes: clientLabor?.minutes ?? 0,
+        laborCost: clientLabor?.cost ?? 0,
+        labor: clientLabor,
         tasks: clientTasks.length,
         rules,
         metadata: {
@@ -333,9 +398,10 @@ export class FinanceProfitabilityService {
       projects: projectsProfitability,
       clients: clientsProfitability,
       notes: [
-        'Revenue is linked by invoice/recurring sourceModule+sourceId or customerId.',
-        'Labor cost uses task time entries first; if a task has no time entries, trackedMinutes is used as fallback.',
-        'Direct costs use bill metadata projectId/clientId when available.',
+        'Revenue source: confirmed/issued invoices (draft and cancelled excluded) linked by customerId, plus active recurring profiles.',
+        'Direct cost source: confirmed payable (bill) lines whose effective cost center is the client cost center (draft/cancelled bills excluded). Falls back to bill/line metadata clientId when no cost center matches.',
+        'Labor cost: tracked time (time entries first, task trackedMinutes fallback) × responsible member hourly cost — fallback monthlyCost/contracted-hours, then workspace default; unconfigured costs are reported in membersMissingCost/hoursWithoutCost.',
+        'This is a DIRECT margin: shared/overhead costs (tools, infrastructure, internal cost centers) are NOT allocated to clients in this view.',
       ],
       debug: {
         invoicesInPeriod: periodInvoices.length,
@@ -554,37 +620,186 @@ export class FinanceProfitabilityService {
     return grouped;
   }
 
-  private calculateTimeByProject(
+  // ── Labor cost (mão de obra) ────────────────────────────────────────────
+  //
+  // Buckets tracked time and its cost per project and per client. Each minute is
+  // priced with the responsible member's hourly cost:
+  //   • time entries are priced by the user who logged them (entry.userId);
+  //   • tasks without entries fall back to trackedMinutes priced by the task
+  //     assignee (assigneeId is a team_member id).
+  // When no member cost is available, the workspace default rate is used; if that
+  // is also 0 the time is flagged in minutesWithoutCost / membersMissingCost so
+  // the UI can warn that hourly costs are not fully configured.
+  private calculateLabor(
     tasks: AgencyTask[],
     timeEntries: AgencyTaskTimeEntry[],
-  ) {
-    const entriesByTaskId = this.groupTimeEntriesByTask(timeEntries);
-    const result = new Map<string, number>();
-
-    for (const task of tasks) {
-      if (!task.projectId) continue;
-
-      const minutes = this.resolveTaskTrackedMinutes(task, entriesByTaskId);
-      result.set(task.projectId, (result.get(task.projectId) ?? 0) + minutes);
+    members: TeamMember[],
+    projectClientById: Map<string, string | null>,
+    defaultHourlyCost: number,
+  ): { byProject: Map<string, LaborAggregate>; byClient: Map<string, LaborAggregate> } {
+    const memberByUserId = new Map<string, TeamMember>();
+    const memberById = new Map<string, TeamMember>();
+    for (const member of members) {
+      memberById.set(member.id, member);
+      if (member.userId) memberByUserId.set(member.userId, member);
     }
 
-    return result;
-  }
+    const taskById = new Map(tasks.map((task) => [task.id, task]));
+    const byProject = new Map<string, LaborAggregate>();
+    const byClient = new Map<string, LaborAggregate>();
+    const tasksWithEntries = new Set<string>();
 
-  private calculateTimeByClient(
-    tasks: AgencyTask[],
-    timeEntries: AgencyTaskTimeEntry[],
-    projectClientById: Map<string, string | null>,
-  ) {
-    const entriesByTaskId = this.groupTimeEntriesByTask(timeEntries);
-    const result = new Map<string, number>();
+    const accumulate = (
+      map: Map<string, LaborAggregate>,
+      key: string | null,
+      minutes: number,
+      rate: number,
+      label: string,
+    ) => {
+      if (!key || minutes <= 0) return;
+      const agg = map.get(key) ?? {
+        minutes: 0,
+        cost: 0,
+        minutesWithoutCost: 0,
+        membersMissingCost: new Set<string>(),
+      };
+      agg.minutes += minutes;
+      agg.cost += (minutes / 60) * rate;
+      if (rate <= 0) {
+        agg.minutesWithoutCost += minutes;
+        agg.membersMissingCost.add(label);
+      }
+      map.set(key, agg);
+    };
+
+    const apply = (
+      task: AgencyTask,
+      minutes: number,
+      member: TeamMember | null,
+    ) => {
+      if (minutes <= 0) return;
+      const memberRate = this.resolveMemberHourlyCost(member);
+      const rate = memberRate > 0 ? memberRate : defaultHourlyCost;
+      const label = member?.displayName ?? 'Responsável sem custo definido';
+      const clientId = this.resolveTaskClientId(task, projectClientById);
+      accumulate(byClient, clientId, minutes, rate, label);
+      accumulate(byProject, task.projectId, minutes, rate, label);
+    };
+
+    for (const entry of timeEntries) {
+      const task = taskById.get(entry.taskId);
+      if (!task) continue;
+      tasksWithEntries.add(task.id);
+      const minutes = entry.durationMinutes ?? 0;
+      if (minutes <= 0) continue;
+      const member = entry.userId ? memberByUserId.get(entry.userId) ?? null : null;
+      apply(task, minutes, member);
+    }
 
     for (const task of tasks) {
-      const clientId = this.resolveTaskClientId(task, projectClientById);
-      if (!clientId) continue;
+      if (tasksWithEntries.has(task.id)) continue;
+      const minutes = task.trackedMinutes ?? 0;
+      if (minutes <= 0) continue;
+      const member = task.assigneeId
+        ? memberById.get(task.assigneeId) ?? null
+        : null;
+      apply(task, minutes, member);
+    }
 
-      const minutes = this.resolveTaskTrackedMinutes(task, entriesByTaskId);
-      result.set(clientId, (result.get(clientId) ?? 0) + minutes);
+    return { byProject, byClient };
+  }
+
+  // Hourly cost for a member following the configured fallback chain:
+  //   1. explicit hourlyCost; 2. monthlyCost / contracted-hours; else 0.
+  private resolveMemberHourlyCost(member: TeamMember | null | undefined): number {
+    if (!member) return 0;
+
+    const hourly = toNumber(member.hourlyCost);
+    if (hourly > 0) return hourly;
+
+    const monthly = toNumber(member.monthlyCost);
+    if (monthly > 0) {
+      const hours = this.resolveMonthlyContractedHours(member);
+      if (hours > 0) return monthly / hours;
+    }
+
+    return 0;
+  }
+
+  private resolveMonthlyContractedHours(member: TeamMember): number {
+    const metadata = member.metadata as Record<string, unknown> | undefined;
+    const monthly = toNumber(
+      (metadata?.contractedHours as number) ??
+        (metadata?.contractedMonthlyHours as number) ??
+        (metadata?.monthlyHours as number),
+    );
+    if (monthly > 0) return monthly;
+
+    const weekly = toNumber(
+      (metadata?.weeklyHours as number) ??
+        (metadata?.contractedWeeklyHours as number),
+    );
+    if (weekly > 0) return weekly * 4.333;
+
+    return DEFAULT_MONTHLY_HOURS;
+  }
+
+  // ── Direct cost (custo direto) ──────────────────────────────────────────
+  //
+  // Sums payable lines per client using the client's own cost center as the
+  // canonical link (effective cost center = line.costCenterId ?? bill.costCenterId).
+  // When a line resolves to no client cost center it falls back to a clientId
+  // stored in line/bill metadata, so each line is attributed at most once.
+  private calculateDirectCostByClient(
+    bills: FinanceBill[],
+    billLines: FinanceBillLine[],
+    costCenters: FinanceCostCenter[],
+  ): Map<string, number> {
+    const clientIdByCostCenterId = new Map<string, string>();
+    for (const cc of costCenters) {
+      if (cc.relatedEntityType === 'client' && cc.relatedEntityId) {
+        clientIdByCostCenterId.set(cc.id, cc.relatedEntityId);
+      }
+    }
+
+    const linesByBillId = new Map<string, FinanceBillLine[]>();
+    for (const line of billLines) {
+      const current = linesByBillId.get(line.billId) ?? [];
+      current.push(line);
+      linesByBillId.set(line.billId, current);
+    }
+
+    const result = new Map<string, number>();
+    for (const bill of bills) {
+      const lines = linesByBillId.get(bill.id) ?? [];
+      for (const line of lines) {
+        const amount = toNumber(line.totalAmount);
+        if (amount === 0) continue;
+
+        const effectiveCostCenter = line.costCenterId ?? bill.costCenterId ?? null;
+        let clientId = effectiveCostCenter
+          ? clientIdByCostCenterId.get(effectiveCostCenter) ?? null
+          : null;
+
+        if (!clientId) {
+          clientId =
+            getMetadataString(line.metadata, [
+              'clientId',
+              'client_id',
+              'customerId',
+              'customer_id',
+            ]) ??
+            getMetadataString(bill.metadata, [
+              'clientId',
+              'client_id',
+              'customerId',
+              'customer_id',
+            ]);
+        }
+
+        if (!clientId) continue;
+        result.set(clientId, (result.get(clientId) ?? 0) + amount);
+      }
     }
 
     return result;
@@ -676,21 +891,6 @@ export class FinanceProfitabilityService {
       .reduce((sum, bill) => sum + toNumber(bill.totalAmount), 0);
   }
 
-  private sumClientDirectCosts(clientId: string, bills: FinanceBill[]) {
-    return bills
-      .filter((bill) => {
-        const metadataClientId = getMetadataString(bill.metadata, [
-          'clientId',
-          'client_id',
-          'customerId',
-          'customer_id',
-        ]);
-
-        return metadataClientId === clientId;
-      })
-      .reduce((sum, bill) => sum + toNumber(bill.totalAmount), 0);
-  }
-
   private normalizeRecurringAmount(profile: FinanceRecurringProfile) {
     const amount = toNumber(profile.amount);
 
@@ -735,6 +935,7 @@ export class FinanceProfitabilityService {
     directCosts: number;
     laborMinutes: number;
     laborCost: number;
+    labor?: LaborAggregate;
     tasks: number;
     rules: FinanceProfitabilityRule;
     metadata?: Record<string, unknown>;
@@ -758,6 +959,10 @@ export class FinanceProfitabilityService {
       margin: roundRate(margin),
       health: this.resolveHealth(margin, input.revenue, grossProfit, input.rules),
       tasks: input.tasks,
+      hoursWithoutCost: roundMoney((input.labor?.minutesWithoutCost ?? 0) / 60),
+      membersMissingCost: input.labor
+        ? Array.from(input.labor.membersMissingCost)
+        : [],
       ...(input.metadata ? { metadata: input.metadata } : {}),
     };
   }
