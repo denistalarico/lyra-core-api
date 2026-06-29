@@ -14,13 +14,10 @@ const AGENCY_CONNECTION = 'agency';
 @Module({
   imports: [
     TypeOrmModule.forFeature(
-      [
-        DocumentLayoutEntity,
-        DocumentLayoutTemplateEntity,
-        WorkspaceSettingsCompanyEntity,
-      ],
+      [DocumentLayoutEntity, DocumentLayoutTemplateEntity],
       AGENCY_CONNECTION,
     ),
+    TypeOrmModule.forFeature([WorkspaceSettingsCompanyEntity]),
   ],
   controllers: [DocumentLayoutsController],
   providers: [DocumentLayoutsService, DocumentPdfRendererService],

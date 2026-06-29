@@ -33,7 +33,7 @@ export class DocumentLayoutsService {
     private readonly layoutsRepo: Repository<DocumentLayoutEntity>,
     @InjectRepository(DocumentLayoutTemplateEntity, AGENCY_CONNECTION)
     private readonly templatesRepo: Repository<DocumentLayoutTemplateEntity>,
-    @InjectRepository(WorkspaceSettingsCompanyEntity, AGENCY_CONNECTION)
+    @InjectRepository(WorkspaceSettingsCompanyEntity)
     private readonly companyRepo: Repository<WorkspaceSettingsCompanyEntity>,
   ) {}
 
