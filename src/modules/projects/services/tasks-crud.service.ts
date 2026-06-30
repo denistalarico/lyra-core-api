@@ -122,7 +122,10 @@ export class TasksCrudService {
     return stage?.projectId === projectId ? stage.id : undefined;
   }
 
-  private async stopEntryAndRollUp(entry: AgencyTaskTimeEntry) {
+  private async stopEntry(
+    entry: AgencyTaskTimeEntry,
+    options: { rollUpToTask?: boolean } = {},
+  ) {
     if (entry.stoppedAt) return entry;
 
     entry.stoppedAt = new Date();
@@ -131,6 +134,8 @@ export class TasksCrudService {
     );
     entry.durationMinutes = Math.max(0, Math.round(elapsedSeconds / 60));
     await this.timeEntriesRepository.save(entry);
+
+    if (!options.rollUpToTask) return entry;
 
     const task = await this.tasksRepository.findOne({
       where: {
@@ -159,7 +164,7 @@ export class TasksCrudService {
     });
 
     for (const entry of entries) {
-      await this.stopEntryAndRollUp(entry);
+      await this.stopEntry(entry, { rollUpToTask: !entry.checklistItemId });
     }
   }
 

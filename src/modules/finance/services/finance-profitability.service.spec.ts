@@ -118,8 +118,21 @@ function baseData(overrides: Partial<Data> = {}): Data {
         taskTypeId: null,
       } as Partial<AgencyTask>,
     ],
+    checklistItems: [
+      {
+        id: 'subtask-1',
+        taskId: 'task-1',
+        assigneeId: 'member-1',
+        taskTypeId: null,
+      } as Partial<AgencyTaskChecklistItem>,
+    ],
     timeEntries: [
-      { taskId: 'task-1', userId: 'user-1', durationMinutes: 120 } as Partial<AgencyTaskTimeEntry>,
+      {
+        taskId: 'task-1',
+        checklistItemId: 'subtask-1',
+        userId: 'user-1',
+        durationMinutes: 120,
+      } as Partial<AgencyTaskTimeEntry>,
     ],
     members: [
       {
@@ -319,7 +332,20 @@ describe('FinanceProfitabilityService — direct profitability', () => {
       } as Partial<AgencyTask>,
     ];
     data.timeEntries = [
-      { taskId: 'task-direct', userId: 'user-1', durationMinutes: 60 } as Partial<AgencyTaskTimeEntry>,
+      {
+        taskId: 'task-direct',
+        checklistItemId: 'subtask-direct',
+        userId: 'user-1',
+        durationMinutes: 60,
+      } as Partial<AgencyTaskTimeEntry>,
+    ];
+    data.checklistItems = [
+      {
+        id: 'subtask-direct',
+        taskId: 'task-direct',
+        assigneeId: 'member-1',
+        taskTypeId: null,
+      } as Partial<AgencyTaskChecklistItem>,
     ];
     const client = await clientItem(data);
     expect(client?.laborHours).toBe(1);
@@ -366,6 +392,49 @@ describe('FinanceProfitabilityService — direct profitability', () => {
     const client = await clientItem(data);
     expect(client?.laborHours).toBe(2);
     expect(client?.laborCost).toBe(160);
+  });
+
+  it('falls back to the task assignee when a timed subtask has no assignee', async () => {
+    const data = baseData();
+    data.checklistItems = [
+      {
+        id: 'subtask-1',
+        taskId: 'task-1',
+        assigneeId: null,
+      } as Partial<AgencyTaskChecklistItem>,
+    ];
+
+    const client = await clientItem(data);
+    expect(client?.laborHours).toBe(2);
+    expect(client?.laborCost).toBe(100);
+    expect(client?.hoursWithoutCost).toBe(0);
+  });
+
+  it('warns when neither subtask nor task has a responsible for labor cost', async () => {
+    const data = baseData();
+    data.tasks = [
+      {
+        id: 'task-1',
+        projectId: 'proj-1',
+        clientId: null,
+        assigneeId: null,
+        trackedMinutes: 0,
+        taskTypeId: null,
+      } as Partial<AgencyTask>,
+    ];
+    data.checklistItems = [
+      {
+        id: 'subtask-1',
+        taskId: 'task-1',
+        assigneeId: null,
+      } as Partial<AgencyTaskChecklistItem>,
+    ];
+
+    const client = await clientItem(data);
+    expect(client?.laborHours).toBe(2);
+    expect(client?.laborCost).toBe(0);
+    expect(client?.hoursWithoutCost).toBe(2);
+    expect(client?.membersMissingCost).toContain('Responsável sem custo definido');
   });
 
   it('groups client hours by the subtask type when a time entry belongs to a subtask', async () => {
@@ -666,9 +735,17 @@ describe('FinanceProfitabilityService — monthly series', () => {
             trackedMinutes: 0,
           } as Partial<AgencyTask>,
         ],
+        checklistItems: [
+          {
+            id: 'subtask-1',
+            taskId: 'task-1',
+            assigneeId: 'member-1',
+          } as Partial<AgencyTaskChecklistItem>,
+        ],
         timeEntries: [
           {
             taskId: 'task-1',
+            checklistItemId: 'subtask-1',
             userId: 'user-1',
             durationMinutes: 120,
             startedAt: utcDate(2026, 2, 10),
@@ -773,9 +850,17 @@ describe('FinanceProfitabilityService — monthly series', () => {
             trackedMinutes: 0,
           } as Partial<AgencyTask>,
         ],
+        checklistItems: [
+          {
+            id: 'subtask-1',
+            taskId: 'task-1',
+            assigneeId: 'member-1',
+          } as Partial<AgencyTaskChecklistItem>,
+        ],
         timeEntries: [
           {
             taskId: 'task-1',
+            checklistItemId: 'subtask-1',
             userId: 'user-1',
             durationMinutes: 120,
             startedAt: utcDate(2026, 2, 10),
@@ -833,9 +918,17 @@ describe('FinanceProfitabilityService — monthly series', () => {
             trackedMinutes: 0,
           } as Partial<AgencyTask>,
         ],
+        checklistItems: [
+          {
+            id: 'subtask-1',
+            taskId: 'task-1',
+            assigneeId: 'member-1',
+          } as Partial<AgencyTaskChecklistItem>,
+        ],
         timeEntries: [
           {
             taskId: 'task-1',
+            checklistItemId: 'subtask-1',
             userId: 'user-1',
             durationMinutes: 120,
             startedAt: utcDate(2026, 6, 10),

@@ -82,8 +82,8 @@ export class TaskWorkspaceService {
 
   // Adds per-subtask `trackedMinutes` (sum of stopped entries) and
   // `activeTimerStartedAt` (the current user's running entry for that item).
-  // The same time entry rolls up into the parent task total, so subtask time is
-  // never recorded as a second, separate task timer.
+  // Subtask entries drive labor cost; task-level entries stay separate and are
+  // used for elapsed task cycle time.
   private async augmentChecklistWithTime(
     context: RequestContext,
     items: AgencyTaskChecklistItem[],
@@ -226,9 +226,9 @@ export class TaskWorkspaceService {
   }
 
   // ── Per-subtask time tracking ────────────────────────────────────────────
-  // A subtask timer is still the parent task timer, tagged with checklistItemId
-  // so the subtask can show its own final amount. One user can have only one
-  // active entry per task.
+  // Each subtask keeps its own timer per user, and subtasks may run
+  // concurrently. These entries are tagged with checklistItemId and do not roll
+  // into the parent task elapsed timer.
   async listChecklistTimeEntries(
     context: RequestContext,
     taskId: string,
@@ -263,17 +263,14 @@ export class TaskWorkspaceService {
         tenantId: context.tenantId,
         workspaceId: context.workspaceId,
         taskId,
+        checklistItemId: itemId,
         userId: context.userId,
         stoppedAt: IsNull(),
       },
     });
 
     if (activeEntry) {
-      if (activeEntry.checklistItemId === itemId) {
-        return activeEntry;
-      }
-
-      await this.stopEntryAndRollUp(activeEntry);
+      return activeEntry;
     }
 
     const entry = this.timeEntriesRepository.create({
@@ -311,7 +308,7 @@ export class TaskWorkspaceService {
 
     if (!entry) return { stopped: false };
 
-    await this.stopEntryAndRollUp(entry);
+    await this.stopEntry(entry);
 
     return entry;
   }
@@ -453,6 +450,7 @@ export class TaskWorkspaceService {
         tenantId: context.tenantId,
         workspaceId: context.workspaceId,
         taskId,
+        checklistItemId: IsNull(),
         userId: context.userId,
         stoppedAt: IsNull(),
       },
@@ -466,6 +464,7 @@ export class TaskWorkspaceService {
       tenantId: context.tenantId,
       workspaceId: context.workspaceId,
       taskId,
+      checklistItemId: null,
       userId: context.userId,
       startedAt: new Date(),
       stoppedAt: null,
@@ -484,6 +483,7 @@ export class TaskWorkspaceService {
         tenantId: context.tenantId,
         workspaceId: context.workspaceId,
         taskId,
+        checklistItemId: IsNull(),
         userId: context.userId,
       },
     });
@@ -492,7 +492,7 @@ export class TaskWorkspaceService {
       throw new NotFoundException('Time entry not found');
     }
 
-    await this.stopEntryAndRollUp(entry);
+    await this.stopEntry(entry, { rollUpToTask: true });
 
     return entry;
   }
@@ -504,12 +504,13 @@ export class TaskWorkspaceService {
         tenantId: context.tenantId,
         workspaceId: context.workspaceId,
         taskId,
+        checklistItemId: IsNull(),
         userId: context.userId,
         stoppedAt: IsNull(),
       },
     });
     if (!entry) return { stopped: false };
-    await this.stopEntryAndRollUp(entry);
+    await this.stopEntry(entry, { rollUpToTask: true });
     return entry;
   }
 
@@ -557,11 +558,14 @@ export class TaskWorkspaceService {
     });
 
     for (const entry of entries) {
-      await this.stopEntryAndRollUp(entry);
+      await this.stopEntry(entry);
     }
   }
 
-  private async stopEntryAndRollUp(entry: AgencyTaskTimeEntry) {
+  private async stopEntry(
+    entry: AgencyTaskTimeEntry,
+    options: { rollUpToTask?: boolean } = {},
+  ) {
     if (entry.stoppedAt) return entry;
 
     entry.stoppedAt = new Date();
@@ -570,6 +574,10 @@ export class TaskWorkspaceService {
     );
     entry.durationMinutes = Math.max(0, Math.round(elapsedSeconds / 60));
     await this.timeEntriesRepository.save(entry);
+
+    if (!options.rollUpToTask) {
+      return entry;
+    }
 
     const task = await this.tasksRepository.findOne({
       where: {

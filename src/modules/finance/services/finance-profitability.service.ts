@@ -468,7 +468,7 @@ export class FinanceProfitabilityService {
       notes: [
         'Revenue source: confirmed/issued invoices (draft and cancelled excluded) linked by customerId, plus active recurring profiles.',
         'Direct cost source: confirmed payable (bill) lines whose effective cost center is the client cost center (draft/cancelled bills excluded). Falls back to bill/line metadata clientId when no cost center matches.',
-        'Labor cost: tracked time (time entries first, task trackedMinutes fallback) × responsible member hourly cost — fallback monthlyCost/contracted-hours, then workspace default; unconfigured costs are reported in membersMissingCost/hoursWithoutCost.',
+        'Labor cost: subtask time entries × subtask responsible hourly cost (falling back to task responsible). Task trackedMinutes is used only when a task has no subtask time; missing responsible/cost is reported in membersMissingCost/hoursWithoutCost.',
         'This is a DIRECT margin: shared/overhead costs (tools, infrastructure, internal cost centers) are NOT allocated to clients in this view.',
       ],
       debug: {
@@ -554,8 +554,9 @@ export class FinanceProfitabilityService {
   //   • directCost  — payable bill lines whose effective cost center is the
   //                   client cost center (draft/cancelled bills excluded),
   //                   bucketed by competence (metadata, then bill periodStart);
-  //   • laborCost   — tracked time (time entries by startedAt, task
-  //                   trackedMinutes fallback) × responsible member hourly cost.
+  //   • laborCost   — subtask time entries by startedAt × responsible member
+  //                   hourly cost, with task trackedMinutes fallback only when
+  //                   a task has no subtask time.
   //
   // Months with no movement are emitted with zero so the chart stays continuous.
   // Recurring profiles and contracted fees are NOT projected into the historical
@@ -730,7 +731,7 @@ export class FinanceProfitabilityService {
       notes: [
         'Monthly revenue: confirmed/issued invoices by customerId (draft/cancelled/void excluded), bucketed by issueDate (createdAt fallback). Recurring profiles and contracted monthly fees are NOT projected into the historical series.',
         'Monthly direct cost: payable (bill) lines whose effective cost center is the client cost center (draft/cancelled bills excluded), bucketed by competence (metadata competencePeriod/accrualDate, then bill periodStart/issueDate/createdAt).',
-        'Monthly labor cost: tracked time (time entries by startedAt, task trackedMinutes fallback by completedAt/updatedAt) × responsible member hourly cost; hours without a configured cost are reported in hoursWithoutCost/membersMissingCost.',
+        'Monthly labor cost: subtask time entries by startedAt × subtask/task responsible hourly cost; task trackedMinutes fallback is used only when a task has no subtask time. Missing responsible/cost is reported in hoursWithoutCost/membersMissingCost.',
         'This is a DIRECT margin: shared/overhead costs are NOT allocated to the client in this view.',
       ],
     };
@@ -913,11 +914,9 @@ export class FinanceProfitabilityService {
       membersMissingCost: Set<string>;
     };
 
-    const memberByUserId = new Map<string, TeamMember>();
     const memberById = new Map<string, TeamMember>();
     for (const member of members) {
       memberById.set(member.id, member);
-      if (member.userId) memberByUserId.set(member.userId, member);
     }
 
     const taskById = new Map(tasks.map((task) => [task.id, task]));
@@ -925,7 +924,7 @@ export class FinanceProfitabilityService {
       checklistItems.map((item) => [item.id, item]),
     );
     const byMonth = new Map<string, MonthLabor>();
-    const tasksWithEntries = new Set<string>();
+    const tasksWithSubtaskEntries = new Set<string>();
 
     const ensure = (month: string): MonthLabor => {
       let bucket = byMonth.get(month);
@@ -950,7 +949,7 @@ export class FinanceProfitabilityService {
       if (!month || !monthsInRange.has(month) || minutes <= 0) return;
 
       const memberRate = this.resolveMemberHourlyCost(member);
-      const rate = memberRate > 0 ? memberRate : defaultHourlyCost;
+      const rate = member ? (memberRate > 0 ? memberRate : defaultHourlyCost) : 0;
       const bucket = ensure(month);
       bucket.minutes += minutes;
       bucket.cost += (minutes / 60) * rate;
@@ -966,7 +965,8 @@ export class FinanceProfitabilityService {
     for (const entry of timeEntries) {
       const task = taskById.get(entry.taskId);
       if (!task) continue;
-      tasksWithEntries.add(task.id);
+      if (!entry.checklistItemId) continue;
+      tasksWithSubtaskEntries.add(task.id);
       const minutes = entry.durationMinutes ?? 0;
       if (minutes <= 0) continue;
       const checklistItem = entry.checklistItemId
@@ -974,14 +974,14 @@ export class FinanceProfitabilityService {
         : null;
       const member = checklistItem?.assigneeId
         ? memberById.get(checklistItem.assigneeId) ?? null
-        : entry.userId
-          ? memberByUserId.get(entry.userId) ?? null
+        : task.assigneeId
+          ? memberById.get(task.assigneeId) ?? null
           : null;
       addLabor(monthOfDate(entry.startedAt), minutes, member);
     }
 
     for (const task of tasks) {
-      if (tasksWithEntries.has(task.id)) continue;
+      if (tasksWithSubtaskEntries.has(task.id)) continue;
       const minutes = task.trackedMinutes ?? 0;
       if (minutes <= 0) continue;
       const member = task.assigneeId
@@ -1077,9 +1077,11 @@ export class FinanceProfitabilityService {
 
     const minutesByType = new Map<string, number>();
     for (const task of relevantTasks) {
-      const entries = entriesByTaskId.get(task.id) ?? [];
-      if (entries.length > 0) {
-        for (const entry of entries) {
+      const subtaskEntries = (entriesByTaskId.get(task.id) ?? []).filter(
+        (entry) => entry.checklistItemId,
+      );
+      if (subtaskEntries.length > 0) {
+        for (const entry of subtaskEntries) {
           const minutes = entry.durationMinutes ?? 0;
           if (minutes <= 0) continue;
           const checklistItem = entry.checklistItemId
@@ -1172,13 +1174,13 @@ export class FinanceProfitabilityService {
   //
   // Buckets tracked time and its cost per project and per client. Each minute is
   // priced with the responsible member's hourly cost:
-  //   • subtask time entries are priced by the checklist item's assignee;
-  //   • plain task time entries are priced by the user who logged them;
-  //   • tasks without entries fall back to trackedMinutes priced by the task
+  //   • subtask time entries are priced by the checklist item's assignee,
+  //     falling back to the parent task assignee;
+  //   • tasks without subtask entries fall back to trackedMinutes priced by the task
   //     assignee (assigneeId is a team_member id).
-  // When no member cost is available, the workspace default rate is used; if that
-  // is also 0 the time is flagged in minutesWithoutCost / membersMissingCost so
-  // the UI can warn that hourly costs are not fully configured.
+  // When a responsible member exists but has no cost, the workspace default rate
+  // is used. If there is no responsible, or every available rate is 0, the time
+  // is flagged in minutesWithoutCost / membersMissingCost.
   private calculateLabor(
     tasks: AgencyTask[],
     checklistItems: AgencyTaskChecklistItem[],
@@ -1187,11 +1189,9 @@ export class FinanceProfitabilityService {
     projectClientById: Map<string, string | null>,
     defaultHourlyCost: number,
   ): { byProject: Map<string, LaborAggregate>; byClient: Map<string, LaborAggregate> } {
-    const memberByUserId = new Map<string, TeamMember>();
     const memberById = new Map<string, TeamMember>();
     for (const member of members) {
       memberById.set(member.id, member);
-      if (member.userId) memberByUserId.set(member.userId, member);
     }
 
     const taskById = new Map(tasks.map((task) => [task.id, task]));
@@ -1200,7 +1200,7 @@ export class FinanceProfitabilityService {
     );
     const byProject = new Map<string, LaborAggregate>();
     const byClient = new Map<string, LaborAggregate>();
-    const tasksWithEntries = new Set<string>();
+    const tasksWithSubtaskEntries = new Set<string>();
 
     const accumulate = (
       map: Map<string, LaborAggregate>,
@@ -1232,7 +1232,7 @@ export class FinanceProfitabilityService {
     ) => {
       if (minutes <= 0) return;
       const memberRate = this.resolveMemberHourlyCost(member);
-      const rate = memberRate > 0 ? memberRate : defaultHourlyCost;
+      const rate = member ? (memberRate > 0 ? memberRate : defaultHourlyCost) : 0;
       const label = member?.displayName ?? 'Responsável sem custo definido';
       const clientId = this.resolveTaskClientId(task, projectClientById);
       accumulate(byClient, clientId, minutes, rate, label);
@@ -1242,7 +1242,8 @@ export class FinanceProfitabilityService {
     for (const entry of timeEntries) {
       const task = taskById.get(entry.taskId);
       if (!task) continue;
-      tasksWithEntries.add(task.id);
+      if (!entry.checklistItemId) continue;
+      tasksWithSubtaskEntries.add(task.id);
       const minutes = entry.durationMinutes ?? 0;
       if (minutes <= 0) continue;
       const checklistItem = entry.checklistItemId
@@ -1250,14 +1251,14 @@ export class FinanceProfitabilityService {
         : null;
       const member = checklistItem?.assigneeId
         ? memberById.get(checklistItem.assigneeId) ?? null
-        : entry.userId
-          ? memberByUserId.get(entry.userId) ?? null
+        : task.assigneeId
+          ? memberById.get(task.assigneeId) ?? null
           : null;
       apply(task, minutes, member);
     }
 
     for (const task of tasks) {
-      if (tasksWithEntries.has(task.id)) continue;
+      if (tasksWithSubtaskEntries.has(task.id)) continue;
       const minutes = task.trackedMinutes ?? 0;
       if (minutes <= 0) continue;
       const member = task.assigneeId
