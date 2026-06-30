@@ -38,6 +38,10 @@ function isElevatedRole(role?: string): boolean {
   return ['owner', 'admin'].includes(normalizeRole(role));
 }
 
+function isCompletedTaskStatus(status: TaskStatus) {
+  return status === TaskStatus.Done || status === TaskStatus.Approved;
+}
+
 @Injectable()
 export class TasksCrudService {
   constructor(
@@ -116,6 +120,47 @@ export class TasksCrudService {
     });
 
     return stage?.projectId === projectId ? stage.id : undefined;
+  }
+
+  private async stopEntryAndRollUp(entry: AgencyTaskTimeEntry) {
+    if (entry.stoppedAt) return entry;
+
+    entry.stoppedAt = new Date();
+    const elapsedSeconds = Math.floor(
+      (entry.stoppedAt.getTime() - entry.startedAt.getTime()) / 1000,
+    );
+    entry.durationMinutes = Math.max(0, Math.round(elapsedSeconds / 60));
+    await this.timeEntriesRepository.save(entry);
+
+    const task = await this.tasksRepository.findOne({
+      where: {
+        id: entry.taskId,
+        tenantId: entry.tenantId,
+        workspaceId: entry.workspaceId,
+      },
+    });
+
+    if (task) {
+      task.trackedMinutes = (task.trackedMinutes ?? 0) + (entry.durationMinutes ?? 0);
+      await this.tasksRepository.save(task);
+    }
+
+    return entry;
+  }
+
+  private async stopActiveTimersForTask(context: RequestContext, taskId: string) {
+    const entries = await this.timeEntriesRepository.find({
+      where: {
+        tenantId: context.tenantId,
+        workspaceId: context.workspaceId,
+        taskId,
+        stoppedAt: IsNull(),
+      },
+    });
+
+    for (const entry of entries) {
+      await this.stopEntryAndRollUp(entry);
+    }
   }
 
   listWorkspaceTasks(context: RequestContext, query: ListTasksQueryDto) {
@@ -365,7 +410,22 @@ export class TasksCrudService {
       }
     }
 
-    const saved = await this.tasksRepository.save(task);
+    let saved = await this.tasksRepository.save(task);
+
+    if (
+      dto.status !== undefined &&
+      dto.status !== previousStatus &&
+      isCompletedTaskStatus(dto.status)
+    ) {
+      await this.stopActiveTimersForTask(context, task.id);
+      saved = (await this.tasksRepository.findOne({
+        where: {
+          id: task.id,
+          tenantId: context.tenantId,
+          workspaceId: context.workspaceId,
+        },
+      })) ?? saved;
+    }
 
     if (task.projectId && dto.status !== undefined && dto.status !== previousStatus) {
       void this.recordProjectEvent(

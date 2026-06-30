@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, IsNull, Repository } from 'typeorm';
 import {
@@ -8,6 +8,7 @@ import {
   AgencyTaskComment,
   AgencyTaskTimeEntry,
 } from '../entities';
+import { TaskStatus } from '../enums';
 import { TasksCrudService } from './tasks-crud.service';
 
 type RequestContext = {
@@ -34,6 +35,10 @@ function getChecklistStatusFromDone(isDone: boolean) {
 
 function isChecklistStatusDone(status: string) {
   return status === 'done' || status === 'approved';
+}
+
+function isTaskStatusCompleted(status: string) {
+  return status === TaskStatus.Done || status === TaskStatus.Approved;
 }
 
 @Injectable()
@@ -77,7 +82,8 @@ export class TaskWorkspaceService {
 
   // Adds per-subtask `trackedMinutes` (sum of stopped entries) and
   // `activeTimerStartedAt` (the current user's running entry for that item).
-  // Timers are independent per subtask, so several can run at once.
+  // The same time entry rolls up into the parent task total, so subtask time is
+  // never recorded as a second, separate task timer.
   private async augmentChecklistWithTime(
     context: RequestContext,
     items: AgencyTaskChecklistItem[],
@@ -186,6 +192,8 @@ export class TaskWorkspaceService {
 
     if (payload.title !== undefined) item.title = payload.title;
     if (payload.description !== undefined) item.description = payload.description;
+    const wasDone = item.isDone;
+
     if (payload.status !== undefined) {
       item.status = payload.status;
       item.isDone = isChecklistStatusDone(payload.status);
@@ -202,6 +210,9 @@ export class TaskWorkspaceService {
     }
 
     const saved = await this.checklistRepository.save(item);
+    if (!wasDone && saved.isDone) {
+      await this.stopActiveChecklistTimers(context, taskId, itemId);
+    }
     const [augmented] = await this.augmentChecklistWithTime(context, [saved]);
     return augmented;
   }
@@ -215,9 +226,9 @@ export class TaskWorkspaceService {
   }
 
   // ── Per-subtask time tracking ────────────────────────────────────────────
-  // Each subtask keeps its own timer per user. Starting a subtask timer does
-  // NOT stop other subtasks' timers, so labour on several subtasks (possibly
-  // by the same person) can be tracked simultaneously and separately.
+  // A subtask timer is still the parent task timer, tagged with checklistItemId
+  // so the subtask can show its own final amount. One user can have only one
+  // active entry per task.
   async listChecklistTimeEntries(
     context: RequestContext,
     taskId: string,
@@ -240,21 +251,29 @@ export class TaskWorkspaceService {
     taskId: string,
     itemId: string,
   ) {
-    await this.getChecklistItem(context, taskId, itemId);
+    const [task, item] = await Promise.all([
+      this.tasksCrudService.findOne(context, taskId),
+      this.getChecklistItem(context, taskId, itemId),
+    ]);
+    this.assertTaskAllowsTimer(task);
+    this.assertChecklistAllowsTimer(item);
 
     const activeEntry = await this.timeEntriesRepository.findOne({
       where: {
         tenantId: context.tenantId,
         workspaceId: context.workspaceId,
         taskId,
-        checklistItemId: itemId,
         userId: context.userId,
         stoppedAt: IsNull(),
       },
     });
 
     if (activeEntry) {
-      return activeEntry;
+      if (activeEntry.checklistItemId === itemId) {
+        return activeEntry;
+      }
+
+      await this.stopEntryAndRollUp(activeEntry);
     }
 
     const entry = this.timeEntriesRepository.create({
@@ -292,22 +311,7 @@ export class TaskWorkspaceService {
 
     if (!entry) return { stopped: false };
 
-    entry.stoppedAt = new Date();
-    const elapsedSeconds = Math.floor(
-      (entry.stoppedAt.getTime() - entry.startedAt.getTime()) / 1000,
-    );
-    entry.durationMinutes = Math.round(elapsedSeconds / 60);
-    await this.timeEntriesRepository.save(entry);
-
-    // Roll subtask time up into the parent task so client labour cost /
-    // profitability keep counting it.
-    const task = await this.tasksRepository.findOne({
-      where: { id: taskId, tenantId: context.tenantId, workspaceId: context.workspaceId },
-    });
-    if (task) {
-      task.trackedMinutes = (task.trackedMinutes ?? 0) + entry.durationMinutes;
-      await this.tasksRepository.save(task);
-    }
+    await this.stopEntryAndRollUp(entry);
 
     return entry;
   }
@@ -442,7 +446,8 @@ export class TaskWorkspaceService {
   }
 
   async startTimer(context: RequestContext, taskId: string) {
-    await this.tasksCrudService.findOne(context, taskId);
+    const task = await this.tasksCrudService.findOne(context, taskId);
+    this.assertTaskAllowsTimer(task);
     const activeEntry = await this.timeEntriesRepository.findOne({
       where: {
         tenantId: context.tenantId,
@@ -487,26 +492,7 @@ export class TaskWorkspaceService {
       throw new NotFoundException('Time entry not found');
     }
 
-    if (!entry.stoppedAt) {
-      entry.stoppedAt = new Date();
-      // Store exact seconds-based duration (in minutes field, using fractional minutes for precision)
-      const elapsedSeconds = Math.floor((entry.stoppedAt.getTime() - entry.startedAt.getTime()) / 1000);
-      entry.durationMinutes = Math.round(elapsedSeconds / 60); // round to nearest minute for totals
-      await this.timeEntriesRepository.save(entry);
-
-      const task = await this.tasksRepository.findOne({
-        where: {
-          id: taskId,
-          tenantId: context.tenantId,
-          workspaceId: context.workspaceId,
-        },
-      });
-
-      if (task) {
-        task.trackedMinutes = (task.trackedMinutes ?? 0) + entry.durationMinutes;
-        await this.tasksRepository.save(task);
-      }
-    }
+    await this.stopEntryAndRollUp(entry);
 
     return entry;
   }
@@ -518,16 +504,12 @@ export class TaskWorkspaceService {
         tenantId: context.tenantId,
         workspaceId: context.workspaceId,
         taskId,
+        userId: context.userId,
         stoppedAt: IsNull(),
       },
     });
     if (!entry) return { stopped: false };
-    entry.stoppedAt = new Date();
-    const elapsedSeconds = Math.floor((entry.stoppedAt.getTime() - entry.startedAt.getTime()) / 1000);
-    entry.durationMinutes = Math.round(elapsedSeconds / 60);
-    await this.timeEntriesRepository.save(entry);
-    const task = await this.tasksRepository.findOne({ where: { id: taskId, tenantId: context.tenantId, workspaceId: context.workspaceId } });
-    if (task) { task.trackedMinutes = (task.trackedMinutes ?? 0) + entry.durationMinutes; await this.tasksRepository.save(task); }
+    await this.stopEntryAndRollUp(entry);
     return entry;
   }
 
@@ -538,8 +520,70 @@ export class TaskWorkspaceService {
         workspaceId: context.workspaceId,
         stoppedAt: IsNull(),
       },
-      select: ['taskId', 'startedAt'],
+      select: ['taskId', 'checklistItemId', 'startedAt'],
     });
-    return entries.map((e) => ({ taskId: e.taskId, startedAt: e.startedAt.toISOString() }));
+    return entries.map((e) => ({
+      taskId: e.taskId,
+      checklistItemId: e.checklistItemId,
+      startedAt: e.startedAt.toISOString(),
+    }));
+  }
+
+  private assertTaskAllowsTimer(task: AgencyTask) {
+    if (isTaskStatusCompleted(task.status)) {
+      throw new BadRequestException('Cannot track time on completed tasks');
+    }
+  }
+
+  private assertChecklistAllowsTimer(item: AgencyTaskChecklistItem) {
+    if (item.isDone || isChecklistStatusDone(item.status)) {
+      throw new BadRequestException('Cannot track time on completed subtasks');
+    }
+  }
+
+  private async stopActiveChecklistTimers(
+    context: RequestContext,
+    taskId: string,
+    itemId: string,
+  ) {
+    const entries = await this.timeEntriesRepository.find({
+      where: {
+        tenantId: context.tenantId,
+        workspaceId: context.workspaceId,
+        taskId,
+        checklistItemId: itemId,
+        stoppedAt: IsNull(),
+      },
+    });
+
+    for (const entry of entries) {
+      await this.stopEntryAndRollUp(entry);
+    }
+  }
+
+  private async stopEntryAndRollUp(entry: AgencyTaskTimeEntry) {
+    if (entry.stoppedAt) return entry;
+
+    entry.stoppedAt = new Date();
+    const elapsedSeconds = Math.floor(
+      (entry.stoppedAt.getTime() - entry.startedAt.getTime()) / 1000,
+    );
+    entry.durationMinutes = Math.max(0, Math.round(elapsedSeconds / 60));
+    await this.timeEntriesRepository.save(entry);
+
+    const task = await this.tasksRepository.findOne({
+      where: {
+        id: entry.taskId,
+        tenantId: entry.tenantId,
+        workspaceId: entry.workspaceId,
+      },
+    });
+
+    if (task) {
+      task.trackedMinutes = (task.trackedMinutes ?? 0) + (entry.durationMinutes ?? 0);
+      await this.tasksRepository.save(task);
+    }
+
+    return entry;
   }
 }
