@@ -123,6 +123,15 @@ function money(value: number): string {
   return (Math.round(value * 100) / 100).toFixed(2);
 }
 
+function invoiceLineNetAmount(line: FinanceInvoiceLine): number {
+  const quantity = toMoney(line.quantity);
+  const unitPrice = toMoney(line.unitPrice);
+  const discount = toMoney(line.discountAmount);
+  const tax = toMoney(line.taxAmount);
+  const calculated = quantity * unitPrice - discount + tax;
+  return calculated > 0 ? toMoney(calculated) : toMoney(line.totalAmount);
+}
+
 function cents(value: number): number {
   return Math.round(value * 100);
 }
@@ -183,9 +192,9 @@ export class FinancePostingService {
         string,
         { accountId: string; categoryId: string | null; costCenterId: string | null; amount: number }
       >();
-      let total = 0;
+      let lineTotal = 0;
       for (const line of lines) {
-        const amount = toMoney(line.totalAmount);
+        const amount = invoiceLineNetAmount(line);
         if (amount <= 0) continue;
         const accountId = await this.resolveLineRevenueAccountId(m, ctx, line);
         const key = `${accountId}|${line.categoryId ?? '-'}|${line.costCenterId ?? '-'}`;
@@ -197,8 +206,9 @@ export class FinancePostingService {
         };
         group.amount += amount;
         groups.set(key, group);
-        total += amount;
+        lineTotal += amount;
       }
+      const total = lineTotal;
       if (total <= 0) return null;
 
       const journalId = await this.resolveJournalId(m, ctx, FinanceJournalType.Sales);

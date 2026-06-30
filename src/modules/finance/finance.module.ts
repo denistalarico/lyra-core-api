@@ -1,6 +1,12 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { SettingsCryptoService } from '../../common/crypto/settings-crypto.service';
 import { DocumentLayoutsModule } from '../document-layouts/document-layouts.module';
+import { EmailModule } from '../email/email.module';
+import {
+  AgencyWorkspaceCompanySettingsEntity,
+  AgencyWorkspaceEmailSettingsEntity,
+} from '../agency/entities/agency-settings.entities';
 import {
   AgencyProject,
   AgencyProjectSettings,
@@ -49,10 +55,12 @@ import { NotificationsModule } from '../notifications';
 import { FinanceNotificationPublisher } from './services/finance-notification.publisher';
 import { PermissionsModule } from '../permissions';
 import { ContactEntity } from '../contacts/entities/contact.entity';
+import { ContactMethodEntity } from '../contacts/entities/contact-method.entity';
 
 @Module({
   imports: [
     DocumentLayoutsModule,
+    EmailModule,
     NotificationsModule,
     PermissionsModule,
     TypeOrmModule.forFeature(
@@ -87,6 +95,9 @@ import { ContactEntity } from '../contacts/entities/contact.entity';
         AgencyTaskTimeEntry,
         TeamMember,
         ContactEntity,
+        ContactMethodEntity,
+        AgencyWorkspaceCompanySettingsEntity,
+        AgencyWorkspaceEmailSettingsEntity,
       ],
       'agency',
     ),
@@ -104,6 +115,7 @@ import { ContactEntity } from '../contacts/entities/contact.entity';
     FinancePaymentProviderService,
     FinanceJournalEntryService,
     FinanceNotificationPublisher,
+    SettingsCryptoService,
   ],
   exports: [
     FinanceService,

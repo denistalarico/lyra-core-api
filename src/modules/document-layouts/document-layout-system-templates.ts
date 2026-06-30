@@ -24,16 +24,15 @@ export const documentLayoutHtmlTemplate = `
 
   <main class="doc-content">
     <section class="doc-hero">
-      <span class="doc-kicker">{{documentTypeLabel}}</span>
-      <h1>{{documentTitle}}</h1>
-      <p>{{documentSubtitle}}</p>
+      <div class="doc-hero-copy">
+        <span class="doc-kicker">{{documentTypeLabel}}</span>
+        <h1>{{documentTitle}}</h1>
+        <p>{{documentSubtitle}}</p>
+      </div>
+      {{customerHeaderBlock}}
     </section>
 
     <section class="doc-grid">
-      <div>
-        <small>{{clientLabel}}</small>
-        <strong>{{customerName}}</strong>
-      </div>
       <div>
         <small>{{documentNumberLabel}}</small>
         <strong>{{documentNumber}}</strong>
@@ -189,9 +188,17 @@ body {
 }
 
 .doc-hero {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  align-items: flex-start;
   border-radius: 24px;
   padding: 26px;
   background: linear-gradient(135deg, rgba(37, 99, 235, 0.1), transparent);
+}
+
+.doc-hero-copy {
+  min-width: 0;
 }
 
 .doc-kicker,
@@ -221,6 +228,49 @@ body {
   color: var(--doc-muted);
   font-size: 13px;
   line-height: 1.6;
+}
+
+.doc-customer-header {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  max-width: 245px;
+  text-align: right;
+}
+
+.doc-customer-header-avatar {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  flex: 0 0 42px;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--doc-primary);
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.doc-customer-header-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.doc-customer-header small {
+  display: block;
+  color: var(--doc-muted);
+  font-size: 9px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.doc-customer-header strong {
+  display: block;
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 1.25;
 }
 
 .doc-grid {
@@ -387,6 +437,15 @@ body {
   .doc-page {
     width: 100%;
     min-height: auto;
+  }
+
+  .doc-hero {
+    flex-direction: column;
+  }
+
+  .doc-customer-header {
+    max-width: none;
+    text-align: left;
   }
 
   .doc-grid,

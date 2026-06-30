@@ -93,6 +93,11 @@ export class EmailService {
     html: string;
     text?: string;
     override?: EmailTransportOverride;
+    attachments?: Array<{
+      filename: string;
+      content: Buffer | string;
+      contentType?: string;
+    }>;
   }): Promise<void> {
     const transporter = this.getTransporter(options.override);
     const fromName =
@@ -106,6 +111,7 @@ export class EmailService {
       subject: options.subject,
       html: options.html,
       text: options.text,
+      attachments: options.attachments,
     });
   }
 

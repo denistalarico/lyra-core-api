@@ -493,6 +493,14 @@ export class DocumentPdfRendererService {
       typeof metadata['customerName'] === 'string' && metadata['customerName'].trim()
         ? metadata['customerName'].trim()
         : 'Cliente não informado';
+    const customerAvatarUrl =
+      typeof metadata['customerAvatarUrl'] === 'string' && metadata['customerAvatarUrl'].trim()
+        ? metadata['customerAvatarUrl'].trim()
+        : null;
+    const customerInitial = customerName.trim().charAt(0).toUpperCase() || 'C';
+    const customerAvatarBlock = customerAvatarUrl
+      ? `<span class="doc-customer-header-avatar"><img src="${this.escapeHtml(customerAvatarUrl)}" alt="" /></span>`
+      : `<span class="doc-customer-header-avatar">${this.escapeHtml(customerInitial)}</span>`;
     const subtitle =
       typeof metadata['documentSubtitle'] === 'string' && metadata['documentSubtitle'].trim()
         ? metadata['documentSubtitle'].trim()
@@ -519,6 +527,14 @@ export class DocumentPdfRendererService {
       clientLabel: 'Cliente',
       documentNumberLabel: 'Número',
       customerName: this.escapeHtml(customerName),
+      customerHeaderBlock: [
+        '<div class="doc-customer-header">',
+        customerAvatarBlock,
+        '<div>',
+        `<small>Cliente</small><strong>${this.escapeHtml(customerName)}</strong>`,
+        '</div>',
+        '</div>',
+      ].join(''),
       documentNumber: this.escapeHtml(invoice.invoiceNumber),
       // new tokens (post-migration templates)
       dateGridCells: [
@@ -607,6 +623,14 @@ export class DocumentPdfRendererService {
       clientLabel: 'Fornecedor',
       documentNumberLabel: 'Número',
       customerName: this.escapeHtml(vendorName),
+      customerHeaderBlock: [
+        '<div class="doc-customer-header">',
+        `<span class="doc-customer-header-avatar">${this.escapeHtml(vendorName.trim().charAt(0).toUpperCase() || 'F')}</span>`,
+        '<div>',
+        `<small>Fornecedor</small><strong>${this.escapeHtml(vendorName)}</strong>`,
+        '</div>',
+        '</div>',
+      ].join(''),
       documentNumber: this.escapeHtml(bill.billNumber),
       // new tokens (post-migration templates)
       dateGridCells: `<div><small>Vencimento</small><strong>${this.escapeHtml(this.formatDate(bill.dueDate))}</strong></div>`,

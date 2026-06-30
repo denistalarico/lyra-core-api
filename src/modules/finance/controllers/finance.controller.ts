@@ -1,5 +1,6 @@
 import {
   applyDecorators,
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -17,14 +18,23 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { randomBytes } from 'crypto';
 import type { Request, Response } from 'express';
 import { Repository } from 'typeorm';
+import { SettingsCryptoService } from '../../../common/crypto/settings-crypto.service';
 import { DocumentLayoutsService } from '../../document-layouts/document-layouts.service';
 import {
   DocumentPdfRendererService,
   PdfEngineUnavailableError,
 } from '../../document-layouts/document-pdf-renderer.service';
 import { ContactEntity } from '../../contacts/entities/contact.entity';
+import { ContactMethodEntity } from '../../contacts/entities/contact-method.entity';
+import {
+  AgencyWorkspaceCompanySettingsEntity,
+  AgencyWorkspaceEmailSettingsEntity,
+} from '../../agency/entities/agency-settings.entities';
+import { EmailService, type EmailTransportOverride } from '../../email/email.service';
+import { renderInvoiceEmail } from '../../email/templates/invoice-email.template';
 import {
   CreateFinanceAccountDto,
   CreateFinanceBankAccountDto,
@@ -127,8 +137,16 @@ export class FinanceController {
     private readonly financeJournalEntryService: FinanceJournalEntryService,
     private readonly documentLayoutsService: DocumentLayoutsService,
     private readonly documentPdfRenderer: DocumentPdfRendererService,
+    private readonly emailService: EmailService,
+    private readonly cryptoService: SettingsCryptoService,
     @InjectRepository(ContactEntity, AGENCY_CONNECTION)
     private readonly contactsRepo: Repository<ContactEntity>,
+    @InjectRepository(ContactMethodEntity, AGENCY_CONNECTION)
+    private readonly contactMethodsRepo: Repository<ContactMethodEntity>,
+    @InjectRepository(AgencyWorkspaceCompanySettingsEntity, AGENCY_CONNECTION)
+    private readonly companySettingsRepo: Repository<AgencyWorkspaceCompanySettingsEntity>,
+    @InjectRepository(AgencyWorkspaceEmailSettingsEntity, AGENCY_CONNECTION)
+    private readonly emailSettingsRepo: Repository<AgencyWorkspaceEmailSettingsEntity>,
   ) {}
 
   private async resolveContactDisplayName(
@@ -165,6 +183,126 @@ export class FinanceController {
       fullName ||
       null
     );
+  }
+
+  private async resolveContactPrimaryEmail(
+    ctx: ReturnType<typeof getFinanceContext>,
+    contactId: string | null | undefined,
+  ) {
+    if (!contactId) return null;
+
+    const method = await this.contactMethodsRepo.findOne({
+      where: {
+        tenantId: ctx.tenantId,
+        workspaceId: ctx.workspaceId,
+        contactId,
+        type: 'email',
+      },
+      order: { isPrimary: 'DESC', createdAt: 'ASC' },
+    });
+
+    return method?.value ?? null;
+  }
+
+  private buildFrontendUrl(path: string) {
+    const base =
+      process.env.AGENCY_FRONTEND_URL ??
+      process.env.APP_FRONTEND_URL ??
+      'http://82.29.61.35:3003';
+    return `${base.replace(/\/$/, '')}${path}`;
+  }
+
+  private resolvePublicAssetUrl(value: string | null | undefined) {
+    if (!value) return null;
+    if (/^https?:\/\//i.test(value)) return value;
+    if (value.startsWith('/')) return this.buildFrontendUrl(value);
+    return value;
+  }
+
+  private getInvoicePublicMetadata(invoice: { metadata?: Record<string, unknown> | null }) {
+    const metadata = invoice.metadata ?? {};
+    const raw = metadata.publicInvoice;
+    return raw && typeof raw === 'object' ? raw as Record<string, unknown> : {};
+  }
+
+  private getInvoicePublicUrl(invoiceId: string, token: string) {
+    return this.buildFrontendUrl(`/finance/invoices/${invoiceId}/public?token=${encodeURIComponent(token)}`);
+  }
+
+  private async getEmailTransportOverride(
+    tenantId: string,
+    workspaceId?: string | null,
+  ): Promise<EmailTransportOverride | undefined> {
+    const settings = await this.emailSettingsRepo.findOne({
+      where: workspaceId ? { tenantId, workspaceId } : { tenantId },
+      order: { updatedAt: 'DESC' },
+    });
+
+    if (!settings?.smtpHost || !settings.smtpUser || !settings.smtpPasswordEncrypted || !settings.fromEmail) {
+      return undefined;
+    }
+
+    const smtpPassword = this.cryptoService.decrypt(settings.smtpPasswordEncrypted);
+    if (!smtpPassword) return undefined;
+
+    return {
+      smtpHost: settings.smtpHost,
+      smtpPort: settings.smtpPort ?? 587,
+      smtpSecure: settings.smtpSecure,
+      smtpUser: settings.smtpUser,
+      smtpPassword,
+      fromName: settings.fromName,
+      fromEmail: settings.fromEmail,
+    };
+  }
+
+  private formatCurrency(value: string | number | null | undefined, currency = 'BRL') {
+    return new Intl.NumberFormat('pt-BR', {
+      style: 'currency',
+      currency: currency || 'BRL',
+      minimumFractionDigits: 2,
+    }).format(Number(value ?? 0));
+  }
+
+  private formatDate(value: string | null | undefined) {
+    if (!value) return 'Sem vencimento';
+    const [year, month, day] = value.slice(0, 10).split('-');
+    if (!year || !month || !day) return value;
+    return `${day}/${month}/${year}`;
+  }
+
+  private async buildInvoicePdfBuffer(ctx: ReturnType<typeof getFinanceContext>, id: string) {
+    const invoice = await this.financeBillingService.getInvoice(ctx, id);
+    const lines = invoice.lines ?? [];
+    const customerName = await this.resolveContactDisplayName(ctx, invoice.customerId);
+    const invoiceForPdf = {
+      ...invoice,
+      metadata: {
+        ...(invoice.metadata ?? {}),
+        ...(customerName ? { customerName } : {}),
+      },
+    };
+
+    const layout = await this.documentLayoutsService.getDefaultLayout(ctx);
+    const template =
+      await this.documentLayoutsService.getSystemTemplateForType(layout.layoutType, 'invoice') ??
+      await this.documentLayoutsService.getSystemTemplateForType(layout.layoutType, 'quote');
+
+    if (!template) {
+      throw new NotFoundException('Document layout template not found.');
+    }
+
+    try {
+      const buffer = await this.documentPdfRenderer.renderInvoicePdf({
+        invoice: invoiceForPdf,
+        lines,
+        layout,
+        template,
+      });
+      return { invoice, buffer };
+    } catch (error) {
+      this.handlePdfError(error, `invoice ${invoice.invoiceNumber}`);
+    }
   }
 
   @Get('health')
@@ -584,6 +722,168 @@ export class FinanceController {
     return this.financeBillingService.createInvoice(getFinanceContext(req), dto);
   }
 
+  @Get('invoices/:id/public')
+  @RequireFinancePermission('agency.finance.transactions.view.finance_or_owner')
+  async getInvoicePublicToken(@Req() req: Request, @Param('id') id: string) {
+    const invoice = await this.financeBillingService.getInvoice(getFinanceContext(req), id);
+    const publicMeta = this.getInvoicePublicMetadata(invoice);
+    const token = typeof publicMeta.token === 'string' ? publicMeta.token : null;
+
+    return {
+      enabled: Boolean(token),
+      token,
+      publicUrl: token ? this.getInvoicePublicUrl(id, token) : null,
+    };
+  }
+
+  @Post('invoices/:id/public')
+  @RequireFinancePermission('agency.finance.billing.manage.owner_only')
+  async enableInvoicePublicToken(@Req() req: Request, @Param('id') id: string) {
+    const ctx = getFinanceContext(req);
+    const invoice = await this.financeBillingService.getInvoice(ctx, id);
+    const publicMeta = this.getInvoicePublicMetadata(invoice);
+    const token =
+      typeof publicMeta.token === 'string' && publicMeta.token
+        ? publicMeta.token
+        : randomBytes(24).toString('hex');
+
+    await this.financeBillingService.updateInvoice(ctx, id, {
+      metadata: {
+        publicInvoice: {
+          ...publicMeta,
+          token,
+          enabledAt: publicMeta.enabledAt ?? new Date().toISOString(),
+        },
+      },
+    });
+
+    return {
+      enabled: true,
+      token,
+      publicUrl: this.getInvoicePublicUrl(id, token),
+    };
+  }
+
+  @Get('public/invoices/:id')
+  async getPublicInvoice(
+    @Param('id') id: string,
+    @Query('token') token: string,
+  ) {
+    if (!token) throw new BadRequestException('Token público obrigatório.');
+
+    const invoice = await this.financeBillingService.getPublicInvoiceById(id).catch(() => null);
+
+    if (!invoice) throw new NotFoundException('Finance invoice not found');
+
+    const publicMeta = this.getInvoicePublicMetadata(invoice);
+    if (publicMeta.token !== token) {
+      throw new NotFoundException('Finance invoice not found');
+    }
+
+    const ctx = {
+      tenantId: invoice.tenantId,
+      workspaceId: invoice.workspaceId,
+      userId: null,
+    };
+    const customerName = await this.resolveContactDisplayName(ctx, invoice.customerId);
+
+    return {
+      invoice: {
+        ...invoice,
+        metadata: {
+          ...(invoice.metadata ?? {}),
+          ...(customerName ? { customerName } : {}),
+        },
+      },
+    };
+  }
+
+  @Post('invoices/:id/send-email')
+  @RequireFinancePermission('agency.finance.billing.manage.owner_only')
+  async sendInvoiceEmail(@Req() req: Request, @Param('id') id: string) {
+    const ctx = getFinanceContext(req);
+    const { invoice, buffer } = await this.buildInvoicePdfBuffer(ctx, id);
+    const recipientEmail = await this.resolveContactPrimaryEmail(ctx, invoice.customerId);
+    const customerName =
+      await this.resolveContactDisplayName(ctx, invoice.customerId) ??
+      'cliente';
+
+    if (!recipientEmail) {
+      throw new BadRequestException('Cliente sem e-mail principal cadastrado.');
+    }
+
+    const company = await this.companySettingsRepo.findOne({
+      where: { tenantId: ctx.tenantId, workspaceId: ctx.workspaceId },
+      order: { updatedAt: 'DESC' },
+    });
+    const publicMeta = this.getInvoicePublicMetadata(invoice);
+    const publicToken = typeof publicMeta.token === 'string' ? publicMeta.token : null;
+    const publicUrl = publicToken ? this.getInvoicePublicUrl(id, publicToken) : null;
+    const companyName =
+      company?.tradeName?.trim() ||
+      company?.workspaceName?.trim() ||
+      company?.legalName?.trim() ||
+      'Sua empresa';
+    const { html, text } = renderInvoiceEmail({
+      company: {
+        name: companyName,
+        legalName: company?.legalName ?? null,
+        taxId: company?.taxId ?? null,
+        taxIdType: company?.taxIdType ?? null,
+        logoUrl: this.resolvePublicAssetUrl(company?.logoUrl ?? company?.logoPath),
+        email: company?.billingEmail ?? company?.supportEmail ?? null,
+        phone: company?.phone ?? null,
+        website: company?.website ?? null,
+        addressLine: company?.addressLine ?? null,
+      },
+      customerName,
+      invoiceNumber: invoice.invoiceNumber,
+      totalLabel: this.formatCurrency(invoice.totalAmount, invoice.currency),
+      dueDateLabel: this.formatDate(invoice.dueDate),
+      publicUrl,
+    });
+    const safeNumber = invoice.invoiceNumber.replace(/[^a-zA-Z0-9-_]/g, '-');
+
+    await this.emailService.sendEmail({
+      to: recipientEmail,
+      subject: `Fatura ${invoice.invoiceNumber} - ${companyName}`,
+      html,
+      text,
+      override: await this.getEmailTransportOverride(ctx.tenantId, ctx.workspaceId),
+      attachments: [
+        {
+          filename: `fatura-${safeNumber}.pdf`,
+          content: buffer,
+          contentType: 'application/pdf',
+        },
+      ],
+    });
+
+    const metadata = invoice.metadata ?? {};
+    const events = Array.isArray(metadata.events) ? metadata.events : [];
+    await this.financeBillingService.updateInvoice(ctx, id, {
+      metadata: {
+        email: {
+          sentAt: new Date().toISOString(),
+          to: recipientEmail,
+        },
+        events: [
+          {
+            id: `email-${Date.now()}`,
+            kind: 'email_sent',
+            description: `Fatura enviada por e-mail para ${recipientEmail}.`,
+            authorName: 'Sistema',
+            authorId: ctx.userId,
+            createdAt: new Date().toISOString(),
+          },
+          ...events,
+        ],
+      },
+    });
+
+    return { success: true, to: recipientEmail };
+  }
+
   @Get('invoices/:id')
   @RequireFinancePermission('agency.finance.transactions.view.finance_or_owner')
   getInvoice(@Req() req: Request, @Param('id') id: string) {
@@ -666,43 +966,7 @@ export class FinanceController {
     @Res({ passthrough: false }) response: Response,
   ) {
     const ctx = getFinanceContext(req);
-    const invoice = await this.financeBillingService.getInvoice(ctx, id);
-    const lines = invoice.lines ?? [];
-    const customerName = await this.resolveContactDisplayName(
-      ctx,
-      invoice.customerId,
-    );
-    const invoiceForPdf = customerName
-      ? {
-          ...invoice,
-          metadata: {
-            ...(invoice.metadata ?? {}),
-            customerName,
-          },
-        }
-      : invoice;
-
-    const layout = await this.documentLayoutsService.getDefaultLayout(ctx);
-    const template =
-      await this.documentLayoutsService.getSystemTemplateForType(layout.layoutType, 'invoice') ??
-      await this.documentLayoutsService.getSystemTemplateForType(layout.layoutType, 'quote');
-
-    if (!template) {
-      throw new NotFoundException('Document layout template not found.');
-    }
-
-    let buffer: Buffer;
-    try {
-      buffer = await this.documentPdfRenderer.renderInvoicePdf({
-        invoice: invoiceForPdf,
-        lines,
-        layout,
-        template,
-      });
-    } catch (error) {
-      this.handlePdfError(error, `invoice ${invoice.invoiceNumber}`);
-    }
-
+    const { invoice, buffer } = await this.buildInvoicePdfBuffer(ctx, id);
     const safeNumber = invoice.invoiceNumber.replace(/[^a-zA-Z0-9-_]/g, '-');
     response.set({
       'Content-Type': 'application/pdf',

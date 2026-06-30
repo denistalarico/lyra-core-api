@@ -135,6 +135,24 @@ export class FinanceBillingService {
     return { ...invoice, lines };
   }
 
+  async getPublicInvoiceById(id: string) {
+    validateId(id, 'invoice id');
+    const invoice = await this.invoicesRepo.findOne({ where: { id } });
+
+    if (!invoice) throw new NotFoundException('Finance invoice not found');
+
+    const lines = await this.invoiceLinesRepo.find({
+      where: {
+        invoiceId: id,
+        tenantId: invoice.tenantId,
+        workspaceId: invoice.workspaceId,
+      },
+      order: { createdAt: 'ASC' },
+    });
+
+    return { ...invoice, lines };
+  }
+
   async createInvoice(
     ctx: FinanceRequestContext,
     dto: CreateFinanceInvoiceDto,
