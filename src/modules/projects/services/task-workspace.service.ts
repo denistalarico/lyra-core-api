@@ -34,7 +34,7 @@ function getChecklistStatusFromDone(isDone: boolean) {
 }
 
 function isChecklistStatusDone(status: string) {
-  return status === 'done' || status === 'approved';
+  return status === 'done';
 }
 
 function isTaskStatusCompleted(status: string) {
