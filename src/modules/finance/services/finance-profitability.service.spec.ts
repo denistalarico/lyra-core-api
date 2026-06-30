@@ -3,6 +3,7 @@ import {
   AgencyProject,
   AgencyProjectSettings,
   AgencyTask,
+  AgencyTaskChecklistItem,
   AgencyTaskTimeEntry,
 } from '../../projects/entities';
 import { TeamMember } from '../../team/entities';
@@ -37,6 +38,7 @@ type Data = {
   rules?: Partial<FinanceProfitabilityRule>;
   projects?: Partial<AgencyProject>[];
   tasks?: Partial<AgencyTask>[];
+  checklistItems?: Partial<AgencyTaskChecklistItem>[];
   timeEntries?: Partial<AgencyTaskTimeEntry>[];
   invoices?: Partial<FinanceInvoice>[];
   bills?: Partial<FinanceBill>[];
@@ -44,13 +46,14 @@ type Data = {
   costCenters?: Partial<FinanceCostCenter>[];
   members?: Partial<TeamMember>[];
   recurringProfiles?: Partial<FinanceRecurringProfile>[];
+  projectSettings?: Partial<AgencyProjectSettings>[];
 };
 
 function makeService(data: Data) {
   const repo = <T extends ObjectLiteral>(rows: Partial<T>[] = []) =>
     ({
       find: jest.fn().mockResolvedValue(rows),
-      findOne: jest.fn().mockResolvedValue(null),
+      findOne: jest.fn().mockResolvedValue(rows[0] ?? null),
       save: jest.fn(async (item: unknown) => item),
       create: jest.fn((value: unknown) => value),
     }) as unknown as Repository<T>;
@@ -87,8 +90,9 @@ function makeService(data: Data) {
     repo<FinanceRecurringProfile>(data.recurringProfiles),
     repo<AgencyProject>(data.projects),
     repo<AgencyTask>(data.tasks),
+    repo<AgencyTaskChecklistItem>(data.checklistItems),
     repo<AgencyTaskTimeEntry>(data.timeEntries),
-    repo<AgencyProjectSettings>([]),
+    repo<AgencyProjectSettings>(data.projectSettings),
   );
 
   return service;
@@ -320,6 +324,92 @@ describe('FinanceProfitabilityService — direct profitability', () => {
     const client = await clientItem(data);
     expect(client?.laborHours).toBe(1);
     expect(client?.laborCost).toBe(50);
+  });
+
+  it('prices subtask time with the subtask assignee hourly cost', async () => {
+    const data = baseData();
+    data.checklistItems = [
+      {
+        id: 'subtask-1',
+        taskId: 'task-1',
+        assigneeId: 'member-2',
+        taskTypeId: 'design',
+      } as Partial<AgencyTaskChecklistItem>,
+    ];
+    data.timeEntries = [
+      {
+        taskId: 'task-1',
+        checklistItemId: 'subtask-1',
+        userId: 'user-1',
+        durationMinutes: 120,
+      } as Partial<AgencyTaskTimeEntry>,
+    ];
+    data.members = [
+      {
+        id: 'member-1',
+        userId: 'user-1',
+        displayName: 'Ana Dev',
+        hourlyCost: '50.00',
+        monthlyCost: null,
+        metadata: {},
+      } as Partial<TeamMember>,
+      {
+        id: 'member-2',
+        userId: 'user-2',
+        displayName: 'Bia Design',
+        hourlyCost: '80.00',
+        monthlyCost: null,
+        metadata: {},
+      } as Partial<TeamMember>,
+    ];
+
+    const client = await clientItem(data);
+    expect(client?.laborHours).toBe(2);
+    expect(client?.laborCost).toBe(160);
+  });
+
+  it('groups client hours by the subtask type when a time entry belongs to a subtask', async () => {
+    const data = baseData({
+      projectSettings: [
+        {
+          taskTypes: [
+            { id: 'strategy', name: 'Estratégia' },
+            { id: 'design', name: 'Design' },
+          ],
+        } as Partial<AgencyProjectSettings>,
+      ],
+      tasks: [
+        {
+          id: 'task-1',
+          projectId: 'proj-1',
+          clientId: null,
+          assigneeId: 'member-1',
+          trackedMinutes: 0,
+          taskTypeId: 'strategy',
+        } as Partial<AgencyTask>,
+      ],
+      checklistItems: [
+        {
+          id: 'subtask-1',
+          taskId: 'task-1',
+          assigneeId: 'member-1',
+          taskTypeId: 'design',
+        } as Partial<AgencyTaskChecklistItem>,
+      ],
+      timeEntries: [
+        {
+          taskId: 'task-1',
+          checklistItemId: 'subtask-1',
+          userId: 'user-1',
+          durationMinutes: 90,
+        } as Partial<AgencyTaskTimeEntry>,
+      ],
+    });
+
+    const detail = await makeService(data).getClientDetail(ctx(), CLIENT);
+    expect(detail.hoursByTaskType).toEqual([
+      { taskType: 'Design', minutes: 90, hours: 1.5 },
+    ]);
   });
 });
 
@@ -589,6 +679,53 @@ describe('FinanceProfitabilityService — monthly series', () => {
     const march = pointFor(result, '2026-03');
     expect(march?.hoursLogged).toBe(2);
     expect(march?.laborCost).toBe(100); // 2h × R$ 50
+  });
+
+  it('prices monthly subtask labor with the subtask assignee rate', async () => {
+    const result = await monthlySeries(
+      monthlyData({
+        members: [
+          MEMBER_50,
+          {
+            id: 'member-2',
+            userId: 'user-2',
+            displayName: 'Bia Design',
+            hourlyCost: '80.00',
+            monthlyCost: null,
+            metadata: {},
+          } as Partial<TeamMember>,
+        ],
+        tasks: [
+          {
+            id: 'task-1',
+            projectId: 'proj-1',
+            clientId: null,
+            assigneeId: 'member-1',
+            trackedMinutes: 0,
+          } as Partial<AgencyTask>,
+        ],
+        checklistItems: [
+          {
+            id: 'subtask-1',
+            taskId: 'task-1',
+            assigneeId: 'member-2',
+          } as Partial<AgencyTaskChecklistItem>,
+        ],
+        timeEntries: [
+          {
+            taskId: 'task-1',
+            checklistItemId: 'subtask-1',
+            userId: 'user-1',
+            durationMinutes: 120,
+            startedAt: utcDate(2026, 2, 10),
+          } as Partial<AgencyTaskTimeEntry>,
+        ],
+      }),
+    );
+
+    const march = pointFor(result, '2026-03');
+    expect(march?.hoursLogged).toBe(2);
+    expect(march?.laborCost).toBe(160);
   });
 
   it('buckets trackedMinutes fallback by the task completion month', async () => {

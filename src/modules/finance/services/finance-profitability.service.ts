@@ -5,6 +5,7 @@ import {
   AgencyProject,
   AgencyProjectSettings,
   AgencyTask,
+  AgencyTaskChecklistItem,
   AgencyTaskTimeEntry,
 } from '../../projects/entities';
 import { TeamMember } from '../../team/entities';
@@ -183,6 +184,9 @@ export class FinanceProfitabilityService {
     @InjectRepository(AgencyTask, 'agency')
     private readonly tasksRepo: Repository<AgencyTask>,
 
+    @InjectRepository(AgencyTaskChecklistItem, 'agency')
+    private readonly checklistItemsRepo: Repository<AgencyTaskChecklistItem>,
+
     @InjectRepository(AgencyTaskTimeEntry, 'agency')
     private readonly timeEntriesRepo: Repository<AgencyTaskTimeEntry>,
 
@@ -207,6 +211,7 @@ export class FinanceProfitabilityService {
       rules,
       projects,
       tasks,
+      checklistItems,
       timeEntries,
       invoices,
       bills,
@@ -224,6 +229,12 @@ export class FinanceProfitabilityService {
         },
       }),
       this.tasksRepo.find({
+        where: {
+          tenantId: ctx.tenantId,
+          workspaceId: ctx.workspaceId,
+        },
+      }),
+      this.checklistItemsRepo.find({
         where: {
           tenantId: ctx.tenantId,
           workspaceId: ctx.workspaceId,
@@ -287,6 +298,7 @@ export class FinanceProfitabilityService {
     // once and bucketed per project and per client.
     const labor = this.calculateLabor(
       tasks,
+      checklistItems,
       timeEntries,
       teamMembers,
       projectClientById,
@@ -622,6 +634,15 @@ export class FinanceProfitabilityService {
           },
         })
       : [];
+    const checklistItems = taskIds.length
+      ? await this.checklistItemsRepo.find({
+          where: {
+            tenantId: ctx.tenantId,
+            workspaceId: ctx.workspaceId,
+            taskId: In(taskIds),
+          },
+        })
+      : [];
 
     const revenueByMonth = this.aggregateClientRevenueByMonth(
       invoices,
@@ -637,6 +658,7 @@ export class FinanceProfitabilityService {
     );
     const laborByMonth = this.aggregateClientLaborByMonth(
       relevantTasks,
+      checklistItems,
       timeEntries,
       members,
       defaultHourlyCost,
@@ -868,6 +890,7 @@ export class FinanceProfitabilityService {
 
   private aggregateClientLaborByMonth(
     tasks: AgencyTask[],
+    checklistItems: AgencyTaskChecklistItem[],
     timeEntries: AgencyTaskTimeEntry[],
     members: TeamMember[],
     defaultHourlyCost: number,
@@ -898,6 +921,9 @@ export class FinanceProfitabilityService {
     }
 
     const taskById = new Map(tasks.map((task) => [task.id, task]));
+    const checklistItemById = new Map(
+      checklistItems.map((item) => [item.id, item]),
+    );
     const byMonth = new Map<string, MonthLabor>();
     const tasksWithEntries = new Set<string>();
 
@@ -943,9 +969,14 @@ export class FinanceProfitabilityService {
       tasksWithEntries.add(task.id);
       const minutes = entry.durationMinutes ?? 0;
       if (minutes <= 0) continue;
-      const member = entry.userId
-        ? memberByUserId.get(entry.userId) ?? null
+      const checklistItem = entry.checklistItemId
+        ? checklistItemById.get(entry.checklistItemId) ?? null
         : null;
+      const member = checklistItem?.assigneeId
+        ? memberById.get(checklistItem.assigneeId) ?? null
+        : entry.userId
+          ? memberByUserId.get(entry.userId) ?? null
+          : null;
       addLabor(monthOfDate(entry.startedAt), minutes, member);
     }
 
@@ -966,10 +997,10 @@ export class FinanceProfitabilityService {
     return byMonth;
   }
 
-  // Hours spent on a client's tasks grouped by task type (the "horas por tipo
-  // de tarefa" breakdown). Time comes from task time entries, falling back to
-  // each task's trackedMinutes, mirroring the labor-cost calculation. Task type
-  // ids are resolved to readable names from the workspace project settings.
+  // Hours spent on a client's tasks grouped by task/subtask type (the "horas
+  // por tipo de tarefa" breakdown). Time entries tagged with a checklist item
+  // use that subtask's taskTypeId; plain task entries and trackedMinutes
+  // fallback use the parent task's type.
   private async getClientHoursByTaskType(
     ctx: FinanceRequestContext,
     clientId: string,
@@ -1028,15 +1059,43 @@ export class FinanceProfitabilityService {
         taskId: In(taskIds),
       },
     });
+    const checklistItems = await this.checklistItemsRepo.find({
+      where: {
+        tenantId: ctx.tenantId,
+        workspaceId: ctx.workspaceId,
+        taskId: In(taskIds),
+      },
+    });
 
     const entriesByTaskId = this.groupTimeEntriesByTask(timeEntries);
+    const checklistItemById = new Map(
+      checklistItems.map((item) => [item.id, item]),
+    );
     const typeNames = new Map(
       (settings?.taskTypes ?? []).map((type) => [type.id, type.name]),
     );
 
     const minutesByType = new Map<string, number>();
     for (const task of relevantTasks) {
-      const minutes = this.resolveTaskTrackedMinutes(task, entriesByTaskId);
+      const entries = entriesByTaskId.get(task.id) ?? [];
+      if (entries.length > 0) {
+        for (const entry of entries) {
+          const minutes = entry.durationMinutes ?? 0;
+          if (minutes <= 0) continue;
+          const checklistItem = entry.checklistItemId
+            ? checklistItemById.get(entry.checklistItemId) ?? null
+            : null;
+          const typeId = checklistItem?.taskTypeId ?? task.taskTypeId;
+          const label = typeId
+            ? typeNames.get(typeId) ?? 'Outros'
+            : 'Sem tipo';
+
+          minutesByType.set(label, (minutesByType.get(label) ?? 0) + minutes);
+        }
+        continue;
+      }
+
+      const minutes = task.trackedMinutes ?? 0;
       if (minutes <= 0) continue;
 
       const label = task.taskTypeId
@@ -1113,7 +1172,8 @@ export class FinanceProfitabilityService {
   //
   // Buckets tracked time and its cost per project and per client. Each minute is
   // priced with the responsible member's hourly cost:
-  //   • time entries are priced by the user who logged them (entry.userId);
+  //   • subtask time entries are priced by the checklist item's assignee;
+  //   • plain task time entries are priced by the user who logged them;
   //   • tasks without entries fall back to trackedMinutes priced by the task
   //     assignee (assigneeId is a team_member id).
   // When no member cost is available, the workspace default rate is used; if that
@@ -1121,6 +1181,7 @@ export class FinanceProfitabilityService {
   // the UI can warn that hourly costs are not fully configured.
   private calculateLabor(
     tasks: AgencyTask[],
+    checklistItems: AgencyTaskChecklistItem[],
     timeEntries: AgencyTaskTimeEntry[],
     members: TeamMember[],
     projectClientById: Map<string, string | null>,
@@ -1134,6 +1195,9 @@ export class FinanceProfitabilityService {
     }
 
     const taskById = new Map(tasks.map((task) => [task.id, task]));
+    const checklistItemById = new Map(
+      checklistItems.map((item) => [item.id, item]),
+    );
     const byProject = new Map<string, LaborAggregate>();
     const byClient = new Map<string, LaborAggregate>();
     const tasksWithEntries = new Set<string>();
@@ -1181,7 +1245,14 @@ export class FinanceProfitabilityService {
       tasksWithEntries.add(task.id);
       const minutes = entry.durationMinutes ?? 0;
       if (minutes <= 0) continue;
-      const member = entry.userId ? memberByUserId.get(entry.userId) ?? null : null;
+      const checklistItem = entry.checklistItemId
+        ? checklistItemById.get(entry.checklistItemId) ?? null
+        : null;
+      const member = checklistItem?.assigneeId
+        ? memberById.get(checklistItem.assigneeId) ?? null
+        : entry.userId
+          ? memberByUserId.get(entry.userId) ?? null
+          : null;
       apply(task, minutes, member);
     }
 

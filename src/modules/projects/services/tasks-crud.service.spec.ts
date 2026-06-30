@@ -271,7 +271,11 @@ function makeService(options: {
   const attachmentsRepository = { delete: jest.fn() };
   const checklistItemsRepository = { delete: jest.fn() };
   const commentsRepository = { delete: jest.fn() };
-  const timeEntriesRepository = { delete: jest.fn() };
+  const timeEntriesRepository = {
+    delete: jest.fn(),
+    find: jest.fn().mockResolvedValue([]),
+    save: jest.fn(async (item: AgencyTaskTimeEntry) => item),
+  };
   const service = new TasksCrudService(
     tasksRepository as unknown as Repository<AgencyTask>,
     eventsRepository as unknown as Repository<AgencyProjectEvent>,

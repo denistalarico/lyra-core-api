@@ -11,6 +11,7 @@ import {
   AgencyProject,
   AgencyProjectSettings,
   AgencyTask,
+  AgencyTaskChecklistItem,
   AgencyTaskTimeEntry,
 } from '../projects/entities';
 import { TeamMember } from '../team/entities';
@@ -92,6 +93,7 @@ import { ContactMethodEntity } from '../contacts/entities/contact-method.entity'
         AgencyProject,
         AgencyProjectSettings,
         AgencyTask,
+        AgencyTaskChecklistItem,
         AgencyTaskTimeEntry,
         TeamMember,
         ContactEntity,
