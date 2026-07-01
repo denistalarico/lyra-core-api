@@ -157,13 +157,10 @@ export class FinanceBillingService {
     ctx: FinanceRequestContext,
     dto: CreateFinanceInvoiceDto,
   ) {
-    if (!dto.lines?.length) {
-      throw new BadRequestException('Invoice must have at least one line');
-    }
-
     const invoiceNumber =
       dto.invoiceNumber ?? (await this.generateDocumentNumber(ctx, 'INV'));
-    const totals = this.calculateInvoiceTotals(dto.lines);
+    const invoiceLines = dto.lines ?? [];
+    const totals = this.calculateInvoiceTotals(invoiceLines);
 
     const invoiceId = await this.dataSource.transaction(async (manager) => {
       const invoice = await manager.getRepository(FinanceInvoice).save(
@@ -192,7 +189,7 @@ export class FinanceBillingService {
         }),
       );
 
-      const lines = dto.lines.map((line) => {
+      const lines = invoiceLines.map((line) => {
         const quantity = toMoney(line.quantity ?? '1');
         const unitPrice = toMoney(line.unitPrice ?? '0');
         const discount = toMoney(line.discountAmount ?? '0');
@@ -213,10 +210,13 @@ export class FinanceBillingService {
           totalAmount: money(total),
           categoryId: line.categoryId ?? null,
           costCenterId: line.costCenterId ?? null,
+          metadata: line.metadata ?? {},
         });
       });
 
-      await manager.getRepository(FinanceInvoiceLine).save(lines);
+      if (lines.length > 0) {
+        await manager.getRepository(FinanceInvoiceLine).save(lines);
+      }
 
       return invoice.id;
     });

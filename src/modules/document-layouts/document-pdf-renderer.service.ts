@@ -501,6 +501,18 @@ export class DocumentPdfRendererService {
     const customerAvatarBlock = customerAvatarUrl
       ? `<span class="doc-customer-header-avatar"><img src="${this.escapeHtml(customerAvatarUrl)}" alt="" /></span>`
       : `<span class="doc-customer-header-avatar">${this.escapeHtml(customerInitial)}</span>`;
+    const customerTitleBlock = [
+      '<span class="doc-title-customer">',
+      customerAvatarBlock,
+      `<span>${this.escapeHtml(customerName)}</span>`,
+      '</span>',
+    ].join('');
+    const dueDateBlock = [
+      '<div class="doc-due-header">',
+      '<small>Vencimento</small>',
+      `<strong>${this.escapeHtml(this.formatDate(invoice.dueDate))}</strong>`,
+      '</div>',
+    ].join('');
     const subtitle =
       typeof metadata['documentSubtitle'] === 'string' && metadata['documentSubtitle'].trim()
         ? metadata['documentSubtitle'].trim()
@@ -522,24 +534,16 @@ export class DocumentPdfRendererService {
       companyDocumentLabel: this.escapeHtml(layout.companyDocumentLabel ?? ''),
       companyDocumentValue: this.escapeHtml(layout.companyDocumentValue ?? ''),
       documentTypeLabel: 'Fatura',
-      documentTitle: this.escapeHtml(invoice.invoiceNumber),
+      documentTitle: `${this.escapeHtml(invoice.invoiceNumber)}${customerTitleBlock}`,
       documentSubtitle: this.escapeHtml(subtitle),
       clientLabel: 'Cliente',
       documentNumberLabel: 'Número',
       customerName: this.escapeHtml(customerName),
-      customerHeaderBlock: [
-        '<div class="doc-customer-header">',
-        customerAvatarBlock,
-        '<div>',
-        `<small>Cliente</small><strong>${this.escapeHtml(customerName)}</strong>`,
-        '</div>',
-        '</div>',
-      ].join(''),
+      customerHeaderBlock: dueDateBlock,
       documentNumber: this.escapeHtml(invoice.invoiceNumber),
       // new tokens (post-migration templates)
       dateGridCells: [
         `<div><small>Data de emissão</small><strong>${this.escapeHtml(this.formatDate(invoice.issueDate))}</strong></div>`,
-        `<div><small>Vencimento</small><strong>${this.escapeHtml(this.formatDate(invoice.dueDate))}</strong></div>`,
       ].join(''),
       termsBlock,
       closingModifier: termsBlock ? '' : ' doc-closing--no-terms',
@@ -556,6 +560,7 @@ export class DocumentPdfRendererService {
           quantity: l.quantity,
           unitPrice: l.unitPrice,
           totalAmount: l.totalAmount,
+          metadata: l.metadata,
         })),
         invoice.currency,
       ),
@@ -576,7 +581,7 @@ export class DocumentPdfRendererService {
       backgroundColor: this.escapeCssValue(layout.backgroundColor || '#FFFFFF'),
       fontFamily: this.escapeCssValue(layout.fontFamily || 'Inter'),
       headingFontFamily: this.escapeCssValue(layout.headingFontFamily || 'Sora'),
-    });
+    }) + this.buildInvoiceRefinementCss();
     return `<!doctype html>
 <html>
 <head>
@@ -680,12 +685,20 @@ export class DocumentPdfRendererService {
   }
 
   private buildFinanceItemsTable(
-    lines: { description: string; quantity: string; unitPrice: string; totalAmount: string }[],
+    lines: {
+      description: string;
+      quantity: string;
+      unitPrice: string;
+      totalAmount: string;
+      metadata?: Record<string, unknown>;
+    }[],
     fallbackCurrency: string,
   ) {
+    const noteLines = lines.filter((line) => line.metadata?.kind === 'note');
+    const itemLines = lines.filter((line) => line.metadata?.kind !== 'note');
     const rows =
-      lines.length > 0
-        ? lines
+      itemLines.length > 0
+        ? itemLines
             .map(
               (l) => `
         <tr>
@@ -697,6 +710,14 @@ export class DocumentPdfRendererService {
             )
             .join('')
         : `<tr><td colspan="4" style="text-align:center;color:#64748b;">Nenhum item informado.</td></tr>`;
+    const noteRows = noteLines
+      .map(
+        (l) => `
+        <tr class="doc-finance-note-row">
+          <td colspan="4"><strong>Nota</strong><span>${this.escapeHtml(l.description)}</span></td>
+        </tr>`,
+      )
+      .join('');
     return `
     <table class="doc-items-table">
       <thead>
@@ -707,9 +728,67 @@ export class DocumentPdfRendererService {
           <th style="text-align:right;">Total</th>
         </tr>
       </thead>
-      <tbody>${rows}
+      <tbody>${rows}${noteRows}
       </tbody>
     </table>`;
+  }
+
+  private buildInvoiceRefinementCss() {
+    return `
+.doc-title-customer {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: 12px;
+  color: var(--doc-muted, #64748b);
+  font-size: 12px;
+  font-family: var(--doc-font, inherit);
+  font-weight: 800;
+  line-height: 1;
+  vertical-align: middle;
+}
+.doc-title-customer .doc-customer-header-avatar {
+  width: 28px;
+  height: 28px;
+  flex-basis: 28px;
+  font-size: 10px;
+}
+.doc-due-header {
+  min-width: 180px;
+  align-self: stretch;
+  display: grid;
+  align-content: center;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 14px;
+  padding: 16px;
+  text-align: right;
+  background: rgba(248, 250, 252, 0.82);
+}
+.doc-due-header small,
+.doc-finance-note-row strong {
+  display: block;
+  color: var(--doc-muted, #64748b);
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.doc-due-header strong {
+  display: block;
+  margin-top: 5px;
+  color: var(--doc-text, #0f172a);
+  font-size: 16px;
+}
+.doc-finance-note-row td {
+  border-top: 1px solid rgba(148, 163, 184, 0.18);
+  background: rgba(248, 250, 252, 0.86);
+}
+.doc-finance-note-row span {
+  display: block;
+  margin-top: 4px;
+  color: var(--doc-text, #0f172a);
+  font-weight: 700;
+}`;
   }
 
   private buildFinanceTotalsTable(params: {
