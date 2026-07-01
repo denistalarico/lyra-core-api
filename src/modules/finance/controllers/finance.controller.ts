@@ -33,6 +33,7 @@ import {
   AgencyWorkspaceCompanySettingsEntity,
   AgencyWorkspaceEmailSettingsEntity,
 } from '../../agency/entities/agency-settings.entities';
+import { AgencyContactProfileEntity } from '../../agency/entities/agency-contact-details.entities';
 import { EmailService, type EmailTransportOverride } from '../../email/email.service';
 import { renderInvoiceEmail } from '../../email/templates/invoice-email.template';
 import {
@@ -143,6 +144,8 @@ export class FinanceController {
     private readonly contactsRepo: Repository<ContactEntity>,
     @InjectRepository(ContactMethodEntity, AGENCY_CONNECTION)
     private readonly contactMethodsRepo: Repository<ContactMethodEntity>,
+    @InjectRepository(AgencyContactProfileEntity, AGENCY_CONNECTION)
+    private readonly contactProfilesRepo: Repository<AgencyContactProfileEntity>,
     @InjectRepository(AgencyWorkspaceCompanySettingsEntity, AGENCY_CONNECTION)
     private readonly companySettingsRepo: Repository<AgencyWorkspaceCompanySettingsEntity>,
     @InjectRepository(AgencyWorkspaceEmailSettingsEntity, AGENCY_CONNECTION)
@@ -183,6 +186,33 @@ export class FinanceController {
       fullName ||
       null
     );
+  }
+
+  private async resolveContactInvoiceIdentity(
+    ctx: ReturnType<typeof getFinanceContext>,
+    contactId: string | null | undefined,
+  ) {
+    if (!contactId) return { customerName: null, customerAvatarUrl: null };
+
+    const [customerName, profile] = await Promise.all([
+      this.resolveContactDisplayName(ctx, contactId),
+      this.contactProfilesRepo.findOne({
+        where: {
+          tenantId: ctx.tenantId,
+          workspaceId: ctx.workspaceId,
+          contactId,
+        },
+        select: {
+          id: true,
+          avatarUrl: true,
+        },
+      }),
+    ]);
+
+    return {
+      customerName,
+      customerAvatarUrl: this.resolvePublicAssetUrl(profile?.avatarUrl),
+    };
   }
 
   private async resolveContactPrimaryEmail(
@@ -274,12 +304,17 @@ export class FinanceController {
   private async buildInvoicePdfBuffer(ctx: ReturnType<typeof getFinanceContext>, id: string) {
     const invoice = await this.financeBillingService.getInvoice(ctx, id);
     const lines = invoice.lines ?? [];
-    const customerName = await this.resolveContactDisplayName(ctx, invoice.customerId);
+    const customerIdentity = await this.resolveContactInvoiceIdentity(ctx, invoice.customerId);
     const invoiceForPdf = {
       ...invoice,
       metadata: {
         ...(invoice.metadata ?? {}),
-        ...(customerName ? { customerName } : {}),
+        ...(customerIdentity.customerName
+          ? { customerName: customerIdentity.customerName }
+          : {}),
+        ...(customerIdentity.customerAvatarUrl
+          ? { customerAvatarUrl: customerIdentity.customerAvatarUrl }
+          : {}),
       },
     };
 
@@ -785,14 +820,19 @@ export class FinanceController {
       workspaceId: invoice.workspaceId,
       userId: null,
     };
-    const customerName = await this.resolveContactDisplayName(ctx, invoice.customerId);
+    const customerIdentity = await this.resolveContactInvoiceIdentity(ctx, invoice.customerId);
 
     return {
       invoice: {
         ...invoice,
         metadata: {
           ...(invoice.metadata ?? {}),
-          ...(customerName ? { customerName } : {}),
+          ...(customerIdentity.customerName
+            ? { customerName: customerIdentity.customerName }
+            : {}),
+          ...(customerIdentity.customerAvatarUrl
+            ? { customerAvatarUrl: customerIdentity.customerAvatarUrl }
+            : {}),
         },
       },
     };

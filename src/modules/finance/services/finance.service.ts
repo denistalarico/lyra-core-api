@@ -39,6 +39,8 @@ import {
   FinanceTag,
 } from '../entities';
 import { FinanceAccountType, FinanceBankAccountType } from '../enums';
+import { AgencyClient } from '../../clients/entities';
+import { AgencyClientStatus } from '../../clients/enums';
 import { FinanceRequestContext } from './finance-context';
 
 @Injectable()
@@ -58,6 +60,8 @@ export class FinanceService {
     private readonly billsRepo: Repository<FinanceBill>,
     @InjectRepository(FinanceRecurringProfile, 'agency')
     private readonly recurringProfilesRepo: Repository<FinanceRecurringProfile>,
+    @InjectRepository(AgencyClient, 'agency')
+    private readonly clientsRepo: Repository<AgencyClient>,
     @InjectRepository(FinanceTag, 'agency')
     private readonly tagsRepo: Repository<FinanceTag>,
     @InjectRepository(FinanceCostCenter, 'agency')
@@ -555,6 +559,7 @@ export class FinanceService {
       invoices,
       bills,
       recurringProfiles,
+      clients,
       categories,
       metricsCount,
       reportsCount,
@@ -572,6 +577,12 @@ export class FinanceService {
         },
       }),
       this.recurringProfilesRepo.find({
+        where: {
+          tenantId: ctx.tenantId,
+          workspaceId: ctx.workspaceId,
+        },
+      }),
+      this.clientsRepo.find({
         where: {
           tenantId: ctx.tenantId,
           workspaceId: ctx.workspaceId,
@@ -630,9 +641,33 @@ export class FinanceService {
       (profile) => profile.status === 'active',
     );
 
-    const mrr = activeRecurringProfiles
-      .filter((profile) => profile.interval === 'monthly')
-      .reduce((sum, profile) => sum + this.toNumber(profile.amount), 0);
+    const activeMonthlyProfiles = activeRecurringProfiles.filter(
+      (profile) => profile.interval === 'monthly',
+    );
+    const recurringProfileContactIds = new Set(
+      activeMonthlyProfiles
+        .map((profile) => profile.customerId)
+        .filter((customerId): customerId is string => Boolean(customerId)),
+    );
+    const activeClients = clients.filter(
+      (client) =>
+        client.status === AgencyClientStatus.Active &&
+        !client.archivedAt,
+    );
+    const contractedClientMonthlyFees = activeClients
+      .filter(
+        (client) =>
+          !client.contactId || !recurringProfileContactIds.has(client.contactId),
+      )
+      .map((client) => this.readClientMonthlyFee(client))
+      .filter((fee) => fee > 0);
+
+    const mrr =
+      activeMonthlyProfiles.reduce(
+        (sum, profile) => sum + this.toNumber(profile.amount),
+        0,
+      ) +
+      contractedClientMonthlyFees.reduce((sum, fee) => sum + fee, 0);
 
     const revenueIssued = validMonthInvoices.reduce(
       (sum, invoice) => sum + this.toNumber(invoice.totalAmount),
@@ -698,7 +733,27 @@ export class FinanceService {
     const breakEvenPoint =
       grossMargin > 0 ? fixedCosts / grossMargin : fixedCosts;
 
-    const activeContracts = activeRecurringProfiles.length;
+    const contractedClientIds = activeClients
+      .filter(
+        (client) =>
+          this.readClientMonthlyFee(client) > 0 &&
+          (!client.contactId || !recurringProfileContactIds.has(client.contactId)),
+      )
+      .map((client) => client.id);
+    const activeClientContactIds = new Set(
+      activeClients
+        .map((client) => client.contactId)
+        .filter((contactId): contactId is string => Boolean(contactId)),
+    );
+    const activeContracts = new Set([
+      ...activeClients.map((client) => client.id),
+      ...activeRecurringProfiles
+        .filter(
+          (profile) =>
+            !profile.customerId || !activeClientContactIds.has(profile.customerId),
+        )
+        .map((profile) => profile.id),
+    ]).size;
 
     return {
       currency: settings.baseCurrency,
@@ -735,6 +790,8 @@ export class FinanceService {
         monthBills: validMonthBills.length,
         recurringProfiles: recurringProfiles.length,
         activeRecurringProfiles: activeRecurringProfiles.length,
+        activeClients: activeClients.length,
+        contractedClients: contractedClientIds.length,
       },
       status: 'calculated',
     };
@@ -907,11 +964,32 @@ export class FinanceService {
   private toNumber(value: string | number | null | undefined): number {
     if (value === null || value === undefined || value === '') return 0;
 
-    const parsed = Number(value);
+    if (typeof value === 'number') {
+      return Number.isFinite(value) ? value : 0;
+    }
+
+    const normalized = String(value)
+      .trim()
+      .replace(/[^\d,.-]/g, '')
+      .replace(/\.(?=\d{3}(?:\D|$))/g, '')
+      .replace(',', '.');
+    const parsed = Number(normalized);
 
     if (Number.isNaN(parsed)) return 0;
 
     return parsed;
+  }
+
+  private readClientMonthlyFee(client: AgencyClient | null): number {
+    const billing = (client?.metadata as Record<string, any> | null)?.billing;
+    if (!billing || typeof billing !== 'object') return 0;
+    if (billing.active === false) return 0;
+
+    const value = this.toNumber(
+      billing.monthlyFee ?? billing.monthlyValue ?? billing.amount,
+    );
+
+    return value > 0 ? value : 0;
   }
 
   private roundMoney(value: number): number {

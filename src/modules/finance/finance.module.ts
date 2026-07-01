@@ -7,6 +7,8 @@ import {
   AgencyWorkspaceCompanySettingsEntity,
   AgencyWorkspaceEmailSettingsEntity,
 } from '../agency/entities/agency-settings.entities';
+import { AgencyContactProfileEntity } from '../agency/entities/agency-contact-details.entities';
+import { AgencyClient } from '../clients/entities';
 import {
   AgencyProject,
   AgencyProjectSettings,
@@ -98,6 +100,8 @@ import { ContactMethodEntity } from '../contacts/entities/contact-method.entity'
         TeamMember,
         ContactEntity,
         ContactMethodEntity,
+        AgencyClient,
+        AgencyContactProfileEntity,
         AgencyWorkspaceCompanySettingsEntity,
         AgencyWorkspaceEmailSettingsEntity,
       ],

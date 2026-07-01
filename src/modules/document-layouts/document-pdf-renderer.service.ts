@@ -503,14 +503,20 @@ export class DocumentPdfRendererService {
       : `<span class="doc-customer-header-avatar">${this.escapeHtml(customerInitial)}</span>`;
     const customerTitleBlock = [
       '<span class="doc-title-customer">',
-      customerAvatarBlock,
       `<span>${this.escapeHtml(customerName)}</span>`,
+      customerAvatarBlock,
       '</span>',
     ].join('');
     const dueDateBlock = [
       '<div class="doc-due-header">',
       '<small>Vencimento</small>',
       `<strong>${this.escapeHtml(this.formatDate(invoice.dueDate))}</strong>`,
+      '</div>',
+    ].join('');
+    const invoiceHeaderSideBlock = [
+      '<div class="doc-invoice-header-side">',
+      customerTitleBlock,
+      dueDateBlock,
       '</div>',
     ].join('');
     const subtitle =
@@ -534,12 +540,12 @@ export class DocumentPdfRendererService {
       companyDocumentLabel: this.escapeHtml(layout.companyDocumentLabel ?? ''),
       companyDocumentValue: this.escapeHtml(layout.companyDocumentValue ?? ''),
       documentTypeLabel: 'Fatura',
-      documentTitle: `${this.escapeHtml(invoice.invoiceNumber)}${customerTitleBlock}`,
+      documentTitle: this.escapeHtml(invoice.invoiceNumber),
       documentSubtitle: this.escapeHtml(subtitle),
       clientLabel: 'Cliente',
       documentNumberLabel: 'Número',
       customerName: this.escapeHtml(customerName),
-      customerHeaderBlock: dueDateBlock,
+      customerHeaderBlock: invoiceHeaderSideBlock,
       documentNumber: this.escapeHtml(invoice.invoiceNumber),
       // new tokens (post-migration templates)
       dateGridCells: [
@@ -735,17 +741,23 @@ export class DocumentPdfRendererService {
 
   private buildInvoiceRefinementCss() {
     return `
+.doc-invoice-header-side {
+  min-width: 210px;
+  display: grid;
+  gap: 10px;
+  justify-items: end;
+}
 .doc-title-customer {
-  display: inline-flex;
+  display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 8px;
-  margin-left: 12px;
   color: var(--doc-muted, #64748b);
   font-size: 12px;
   font-family: var(--doc-font, inherit);
   font-weight: 800;
   line-height: 1;
-  vertical-align: middle;
+  text-align: right;
 }
 .doc-title-customer .doc-customer-header-avatar {
   width: 28px;
@@ -754,8 +766,8 @@ export class DocumentPdfRendererService {
   font-size: 10px;
 }
 .doc-due-header {
-  min-width: 180px;
-  align-self: stretch;
+  width: 100%;
+  box-sizing: border-box;
   display: grid;
   align-content: center;
   border: 1px solid rgba(148, 163, 184, 0.28);
