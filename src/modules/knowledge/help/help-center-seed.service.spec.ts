@@ -143,4 +143,68 @@ describe("HelpCenterSeedService", () => {
     expect(updated?.version).toBe(2);
     expect(updated?.content).toBe("<p>Conteúdo 1 revisado</p>");
   });
+
+  it("stores contentHash / sourcePath / lastSyncedAt for file-sourced articles", async () => {
+    const { service, articles } = makeService();
+    const registry = buildRegistry();
+    registry.articles[0].contentHash = "hash-a1";
+    registry.articles[0].sourcePath = "content/help-center/pt-BR/finance/a1.md";
+
+    await service.sync(registry);
+
+    const meta = articles.rows.find((a) => a.systemKey === "a-1")
+      ?.metadata as Record<string, unknown>;
+    expect(meta.contentHash).toBe("hash-a1");
+    expect(meta.sourcePath).toBe("content/help-center/pt-BR/finance/a1.md");
+    expect(typeof meta.lastSyncedAt).toBe("string");
+  });
+
+  it("re-syncs an article when the contentHash changes at the same version", async () => {
+    const { service, articles } = makeService();
+    const registry = buildRegistry();
+    registry.articles[0].contentHash = "hash-v1";
+
+    await service.sync(registry);
+
+    // Same version, edited body -> new hash -> must update.
+    registry.articles[0].contentHash = "hash-v2";
+    registry.articles[0].content = "<p>editado</p>";
+    const summary = await service.sync(registry);
+
+    expect(summary.articles.updated).toBe(1);
+    const a1 = articles.rows.find((a) => a.systemKey === "a-1");
+    expect(a1?.content).toBe("<p>editado</p>");
+    expect((a1?.metadata as Record<string, unknown>).contentHash).toBe("hash-v2");
+  });
+
+  it("is idempotent for hashed articles: no change means skipped", async () => {
+    const { service } = makeService();
+    const registry = buildRegistry();
+    registry.articles.forEach((a, i) => (a.contentHash = `h-${i}`));
+
+    await service.sync(registry);
+    const summary = await service.sync(registry);
+
+    expect(summary.articles).toEqual({ created: 0, updated: 0, skipped: 2 });
+  });
+
+  it("flags DB articles no longer present in the source (never deletes)", async () => {
+    const { service, articles } = makeService();
+    const registry = buildRegistry();
+
+    await service.sync(registry);
+    expect(articles.rows).toHaveLength(2);
+
+    // Drop a-2 from the source; a-1 stays.
+    registry.articles = registry.articles.filter((a) => a.systemKey === "a-1");
+    registry.trails[0].articles = [{ articleKey: "a-1" }];
+    const summary = await service.sync(registry);
+
+    expect(summary.missingFromSource).toBe(1);
+    expect(articles.rows).toHaveLength(2); // not deleted
+    const orphan = articles.rows.find((a) => a.systemKey === "a-2");
+    expect((orphan?.metadata as Record<string, unknown>).missingFromSource).toBe(true);
+    const kept = articles.rows.find((a) => a.systemKey === "a-1");
+    expect((kept?.metadata as Record<string, unknown>).missingFromSource).toBeUndefined();
+  });
 });

@@ -1,0 +1,74 @@
+[
+  {
+    "key": "primeiros-passos",
+    "title": "Primeiros passos",
+    "description": "Comece por aqui e entenda como o Lyra Agency se conecta.",
+    "icon": "Rocket",
+    "color": "#2563eb",
+    "productKey": "lyra-agency",
+    "moduleKey": "general",
+    "order": 1,
+    "locale": "pt-BR",
+    "status": "published"
+  },
+  {
+    "key": "finance",
+    "title": "Finance",
+    "description": "Faturas, contas a pagar, recebimentos e configuração financeira.",
+    "icon": "Wallet",
+    "color": "#16a34a",
+    "productKey": "lyra-agency",
+    "moduleKey": "finance",
+    "order": 2,
+    "locale": "pt-BR",
+    "status": "published"
+  },
+  {
+    "key": "team",
+    "title": "Team",
+    "description": "Custo de colaboradores, contratos e pagamentos da equipe.",
+    "icon": "Users",
+    "color": "#9333ea",
+    "productKey": "lyra-agency",
+    "moduleKey": "team",
+    "order": 3,
+    "locale": "pt-BR",
+    "status": "published"
+  },
+  {
+    "key": "clients",
+    "title": "Clients",
+    "description": "Centros de custo, custo direto e rentabilidade por cliente.",
+    "icon": "Briefcase",
+    "color": "#ea580c",
+    "productKey": "lyra-agency",
+    "moduleKey": "clients",
+    "order": 4,
+    "locale": "pt-BR",
+    "status": "published"
+  },
+  {
+    "key": "relatorios",
+    "title": "Relatórios",
+    "description": "DRE Gerencial e leitura de resultados financeiros.",
+    "icon": "BarChart2",
+    "color": "#0891b2",
+    "productKey": "lyra-agency",
+    "moduleKey": "finance",
+    "order": 5,
+    "locale": "pt-BR",
+    "status": "published"
+  },
+  {
+    "key": "boas-praticas",
+    "title": "Boas práticas",
+    "description": "Rotinas, checklists e erros comuns a evitar.",
+    "icon": "CheckCircle2",
+    "color": "#ca8a04",
+    "productKey": "lyra-agency",
+    "moduleKey": "general",
+    "order": 6,
+    "locale": "pt-BR",
+    "status": "published"
+  }
+]

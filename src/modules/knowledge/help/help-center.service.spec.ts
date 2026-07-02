@@ -224,4 +224,33 @@ describe("HelpCenterService", () => {
       NotFoundException,
     );
   });
+
+  it("renders markdown content to sanitized HTML in the article detail", async () => {
+    const categories = new FakeRepository<HelpCategory>();
+    const trails = new FakeRepository<HelpTrail>();
+    const articlesRepo = new FakeRepository<HelpArticle>();
+    const trailArticles = new FakeRepository<HelpTrailArticle>();
+
+    await articlesRepo.save(
+      article({
+        systemKey: "md-1",
+        slug: "md-artigo",
+        title: "Markdown",
+        content: "## Seção\n\nUm *texto* com `code`.",
+        contentFormat: "markdown",
+      }) as HelpArticle,
+    );
+
+    const service = new HelpCenterService(
+      categories as unknown as Repository<HelpCategory>,
+      trails as unknown as Repository<HelpTrail>,
+      articlesRepo as unknown as Repository<HelpArticle>,
+      trailArticles as unknown as Repository<HelpTrailArticle>,
+    );
+
+    const result = await service.getArticleBySlug("md-artigo");
+    expect(result.article.contentHtml).toContain("<h2>Seção</h2>");
+    expect(result.article.contentHtml).toContain("<em>texto</em>");
+    expect(result.article.contentHtml).toContain("<code>code</code>");
+  });
 });

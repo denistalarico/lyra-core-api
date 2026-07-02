@@ -8,8 +8,12 @@ import {
   HelpTrailArticle,
 } from "./entities";
 import { DEFAULT_HELP_LOCALE } from "./dto";
+import { markdownToHtml } from "./content/markdown-to-html";
 
 const PUBLISHED = "published";
+
+/** Article body pre-rendered to safe HTML for the reader. */
+export type HelpArticleWithHtml = HelpArticle & { contentHtml: string };
 
 export interface HelpArticleListItem {
   id: string;
@@ -135,7 +139,7 @@ export class HelpCenterService {
     slug: string,
     options: { locale?: string; trailSlug?: string } = {},
   ): Promise<{
-    article: HelpArticle;
+    article: HelpArticleWithHtml;
     category: HelpCategory | null;
     trails: HelpTrailListItem[];
     related: HelpArticleListItem[];
@@ -146,13 +150,23 @@ export class HelpCenterService {
     } | null;
   }> {
     const locale = this.resolveLocale(options.locale);
-    const article = await this.articlesRepo.findOne({
+    const found = await this.articlesRepo.findOne({
       where: { slug, locale, status: PUBLISHED },
     });
 
-    if (!article) {
+    if (!found) {
       throw new NotFoundException("Help article not found");
     }
+
+    // Markdown is the canonical stored form; render (and sanitize) to HTML for
+    // the reader. Legacy platform HTML is passed through unchanged.
+    const article: HelpArticleWithHtml = {
+      ...found,
+      contentHtml:
+        found.contentFormat === "markdown"
+          ? markdownToHtml(found.content)
+          : found.content,
+    };
 
     const category = article.categoryKey
       ? await this.categoriesRepo.findOne({

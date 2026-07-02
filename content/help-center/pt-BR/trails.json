@@ -1,0 +1,71 @@
+[
+  {
+    "key": "primeiros-passos-no-finance",
+    "title": "Primeiros passos no Finance",
+    "description": "Configure a base financeira e aprenda o ciclo da receita à baixa de pagamentos.",
+    "audience": "Quem está começando a operar o Finance",
+    "estimatedMinutes": 22,
+    "productKey": "lyra-agency",
+    "moduleKey": "finance",
+    "order": 1,
+    "locale": "pt-BR",
+    "status": "published",
+    "articleKeys": [
+      "finance-initial-setup",
+      "finance-products-services-plans",
+      "finance-quotes-invoices-receipts",
+      "finance-bills-recurrences-payments"
+    ]
+  },
+  {
+    "key": "rentabilidade-de-clientes",
+    "title": "Rentabilidade de clientes",
+    "description": "Da configuração de centros de custo à leitura da margem direta por cliente.",
+    "audience": "Gestores e financeiro",
+    "estimatedMinutes": 23,
+    "productKey": "lyra-agency",
+    "moduleKey": "clients",
+    "order": 2,
+    "locale": "pt-BR",
+    "status": "published",
+    "articleKeys": [
+      "clients-cost-centers-profitability",
+      "clients-direct-cost-labor-margin",
+      "team-member-contractor-cost",
+      "reports-managerial-dre"
+    ]
+  },
+  {
+    "key": "team-e-pagamentos",
+    "title": "Team e pagamentos",
+    "description": "Configure custo de pessoas e conecte pagamentos da equipe ao Finance.",
+    "audience": "RH, sócios e financeiro",
+    "estimatedMinutes": 11,
+    "productKey": "lyra-agency",
+    "moduleKey": "team",
+    "order": 3,
+    "locale": "pt-BR",
+    "status": "published",
+    "articleKeys": [
+      "team-member-contractor-cost",
+      "finance-bills-recurrences-payments"
+    ]
+  },
+  {
+    "key": "relatorios-financeiros",
+    "title": "Relatórios financeiros",
+    "description": "Entenda os termos, leia a DRE Gerencial e mantenha a rotina mensal.",
+    "audience": "Gestores e sócios",
+    "estimatedMinutes": 18,
+    "productKey": "lyra-agency",
+    "moduleKey": "finance",
+    "order": 4,
+    "locale": "pt-BR",
+    "status": "published",
+    "articleKeys": [
+      "finance-glossary",
+      "reports-managerial-dre",
+      "best-practices-monthly-routine"
+    ]
+  }
+]

@@ -40,7 +40,7 @@ export interface HelpArticleSeed {
   slug: string;
   title: string;
   summary: string;
-  /** Authored, trusted platform content (HTML by default). */
+  /** Authored, trusted platform content (Markdown by default). */
   content: string;
   contentFormat: HelpContentFormat;
   categoryKey: string;
@@ -53,6 +53,16 @@ export interface HelpArticleSeed {
   isFeatured: boolean;
   searchable: boolean;
   estimatedReadMinutes?: number;
+  /**
+   * Trails this article declares membership in (frontmatter `trailKeys`).
+   * Trail ordering itself is driven by trails.json `articleKeys`; this is
+   * kept for validation and back-linking.
+   */
+  trailKeys?: string[];
+  /** Stable sha256 of the source file — drives content-aware re-sync. */
+  contentHash?: string;
+  /** Repo-relative path of the markdown source (diagnostics/metadata). */
+  sourcePath?: string;
   metadata?: Record<string, unknown>;
 }
 
