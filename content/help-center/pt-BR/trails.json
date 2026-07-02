@@ -11,6 +11,7 @@
     "locale": "pt-BR",
     "status": "published",
     "articleKeys": [
+      "finance-clients-team-overview",
       "finance-initial-setup",
       "finance-products-services-plans",
       "finance-quotes-invoices-receipts",
@@ -29,6 +30,7 @@
     "locale": "pt-BR",
     "status": "published",
     "articleKeys": [
+      "finance-clients-team-overview",
       "clients-cost-centers-profitability",
       "clients-direct-cost-labor-margin",
       "team-member-contractor-cost",
