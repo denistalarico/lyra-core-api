@@ -19,6 +19,7 @@ import { InboxConversationEventEntity } from './entities/inbox-conversation-even
 import { InboxConversationParticipantEntity } from './entities/inbox-conversation-participant.entity';
 import { InboxMessageEntity } from './entities/inbox-message.entity';
 import { SettingsCryptoService } from '../../common/crypto/settings-crypto.service';
+import { mapInboxChannel } from './mappers/inbox-channel.mapper';
 
 export type InboxConversationFilters = {
   status?: string;
@@ -86,7 +87,7 @@ export class InboxService {
   }
 
   async listChannels(ctx: RequestContext) {
-    return this.channelsRepository.find({
+    const channels = await this.channelsRepository.find({
       where: {
         ...this.scope(ctx),
         deletedAt: IsNull(),
@@ -95,6 +96,8 @@ export class InboxService {
         createdAt: 'ASC',
       },
     });
+
+    return channels.map(mapInboxChannel);
   }
 
   async listForwardTargets(ctx: RequestContext) {
@@ -157,7 +160,9 @@ export class InboxService {
       metadata: dto.metadata ?? {},
     });
 
-    return this.channelsRepository.save(channel);
+    const saved = await this.channelsRepository.save(channel);
+
+    return mapInboxChannel(saved);
   }
 
   async patchChannel(
@@ -226,7 +231,9 @@ export class InboxService {
       metadata: dto.metadata ?? channel.metadata,
     });
 
-    return this.channelsRepository.save(channel);
+    const saved = await this.channelsRepository.save(channel);
+
+    return mapInboxChannel(saved);
   }
 
   async listConversations(
