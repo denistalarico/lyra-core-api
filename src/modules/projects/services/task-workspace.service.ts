@@ -29,6 +29,10 @@ type ChecklistPayload = {
   dueDate?: string | null;
 };
 
+// Marca uma time entry criada por edição manual do tempo (diferencia das
+// marcações reais do cronômetro).
+const MANUAL_TIME_NOTE = 'Ajuste manual';
+
 function getChecklistStatusFromDone(isDone: boolean) {
   return isDone ? 'done' : 'in_progress';
 }
@@ -512,6 +516,113 @@ export class TaskWorkspaceService {
     if (!entry) return { stopped: false };
     await this.stopEntry(entry, { rollUpToTask: true });
     return entry;
+  }
+
+  // Define manualmente o tempo total registrado de uma tarefa. O valor é
+  // materializado como uma entry de ajuste ("Ajuste manual") para manter a
+  // soma das time entries consistente com o total exibido, e também grava o
+  // valor no campo agregado da tarefa (usado por board e dashboards).
+  async setTaskTrackedMinutes(
+    context: RequestContext,
+    taskId: string,
+    minutes: number,
+  ) {
+    const task = await this.tasksCrudService.findOne(context, taskId);
+    const result = await this.applyManualTime(context, taskId, null, minutes);
+
+    task.trackedMinutes = result.trackedMinutes;
+    await this.tasksRepository.save(task);
+
+    return result;
+  }
+
+  // Define manualmente o tempo registrado de uma subtarefa (checklist item).
+  // Subtarefas não têm campo agregado próprio — o tempo é sempre derivado das
+  // time entries, então basta materializar a entry de ajuste.
+  async setChecklistTrackedMinutes(
+    context: RequestContext,
+    taskId: string,
+    itemId: string,
+    minutes: number,
+  ) {
+    await this.getChecklistItem(context, taskId, itemId);
+
+    return this.applyManualTime(context, taskId, itemId, minutes);
+  }
+
+  private async applyManualTime(
+    context: RequestContext,
+    taskId: string,
+    itemId: string | null,
+    minutes: number,
+  ): Promise<{ trackedMinutes: number }> {
+    const target = this.normalizeMinutes(minutes);
+
+    const checklistWhere = itemId
+      ? { checklistItemId: itemId }
+      : { checklistItemId: IsNull() };
+
+    const entries = await this.timeEntriesRepository.find({
+      where: {
+        tenantId: context.tenantId,
+        workspaceId: context.workspaceId,
+        taskId,
+        ...checklistWhere,
+      },
+    });
+
+    const manualEntries = entries.filter(
+      (entry) => entry.note === MANUAL_TIME_NOTE,
+    );
+    const timerMinutes = entries
+      .filter((entry) => entry.note !== MANUAL_TIME_NOTE && entry.stoppedAt)
+      .reduce((sum, entry) => sum + (entry.durationMinutes ?? 0), 0);
+
+    if (target < timerMinutes) {
+      throw new BadRequestException(
+        'O tempo informado é menor que o tempo já cronometrado. Ajuste ou remova as marcações antes de reduzir.',
+      );
+    }
+
+    if (manualEntries.length > 0) {
+      await this.timeEntriesRepository.remove(manualEntries);
+    }
+
+    const manualDelta = target - timerMinutes;
+
+    if (manualDelta > 0) {
+      const now = new Date();
+      await this.timeEntriesRepository.save(
+        this.timeEntriesRepository.create({
+          tenantId: context.tenantId,
+          workspaceId: context.workspaceId,
+          taskId,
+          checklistItemId: itemId,
+          userId: context.userId,
+          startedAt: now,
+          stoppedAt: now,
+          durationMinutes: manualDelta,
+          note: MANUAL_TIME_NOTE,
+        }),
+      );
+    }
+
+    return { trackedMinutes: target };
+  }
+
+  private normalizeMinutes(value: number): number {
+    if (typeof value !== 'number' || !Number.isFinite(value)) {
+      throw new BadRequestException('Tempo informado é inválido.');
+    }
+
+    const rounded = Math.round(value);
+
+    if (rounded < 0) {
+      throw new BadRequestException('O tempo não pode ser negativo.');
+    }
+
+    // Limite de sanidade: 1 ano em minutos.
+    return Math.min(rounded, 525_600);
   }
 
   async listActiveTimers(context: RequestContext) {

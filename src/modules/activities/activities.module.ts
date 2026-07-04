@@ -5,6 +5,7 @@ import { EmailModule } from '../email/email.module';
 import { ActivitiesController } from './controllers/activities.controller';
 import { ActivitiesService } from './services/activities.service';
 import { ActivityNotificationPublisher } from './services/activity-notification.publisher';
+import { ActivityDeadlineScheduler } from './services/activity-deadline.scheduler';
 import { AgencyActivity, AgencyActivityLink } from './entities';
 
 const AGENCY_CONNECTION = 'agency';
@@ -19,7 +20,11 @@ const AGENCY_CONNECTION = 'agency';
     ),
   ],
   controllers: [ActivitiesController],
-  providers: [ActivitiesService, ActivityNotificationPublisher],
+  providers: [
+    ActivitiesService,
+    ActivityNotificationPublisher,
+    ActivityDeadlineScheduler,
+  ],
   exports: [ActivitiesService],
 })
 export class ActivitiesModule {}

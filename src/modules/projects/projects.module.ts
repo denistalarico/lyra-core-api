@@ -43,6 +43,8 @@ import { FilesModule } from '../../common/files/files.module';
 import { NotificationsModule } from '../notifications';
 import { PermissionsModule } from '../permissions';
 import { TaskNotificationPublisher } from './services/task-notification.publisher';
+import { ProjectNotificationPublisher } from './services/project-notification.publisher';
+import { DeadlineNotificationScheduler } from './services/deadline-notification.scheduler';
 
 const AGENCY_CONNECTION = 'agency';
 
@@ -98,6 +100,8 @@ const AGENCY_CONNECTION = 'agency';
     ProjectFollowersAttachmentsService,
     ProjectsDashboardQueryService,
     TaskNotificationPublisher,
+    ProjectNotificationPublisher,
+    DeadlineNotificationScheduler,
   ],
   exports: [
     ProjectsService,

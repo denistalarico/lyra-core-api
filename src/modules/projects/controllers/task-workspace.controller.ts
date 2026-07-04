@@ -161,6 +161,22 @@ export class TaskWorkspaceController {
     );
   }
 
+  @Patch('checklist/:itemId/time/manual')
+  @RequirePermission('agency.tasks.time.track.self')
+  setChecklistTrackedMinutes(
+    @Headers() headers: Record<string, string | string[] | undefined>,
+    @Param('taskId') taskId: string,
+    @Param('itemId') itemId: string,
+    @Body() body: { minutes?: number },
+  ) {
+    return this.taskWorkspaceService.setChecklistTrackedMinutes(
+      getContextFromHeaders(headers),
+      taskId,
+      itemId,
+      Number(body?.minutes ?? 0),
+    );
+  }
+
   @Post('checklist/:itemId/time/start')
   @RequirePermission('agency.tasks.time.track.self')
   startChecklistTimer(
@@ -248,6 +264,20 @@ export class TaskWorkspaceController {
     return this.taskWorkspaceService.listTimeEntries(
       getContextFromHeaders(headers),
       taskId,
+    );
+  }
+
+  @Patch('time-entries/manual')
+  @RequirePermission('agency.tasks.time.track.self')
+  setTaskTrackedMinutes(
+    @Headers() headers: Record<string, string | string[] | undefined>,
+    @Param('taskId') taskId: string,
+    @Body() body: { minutes?: number },
+  ) {
+    return this.taskWorkspaceService.setTaskTrackedMinutes(
+      getContextFromHeaders(headers),
+      taskId,
+      Number(body?.minutes ?? 0),
     );
   }
 

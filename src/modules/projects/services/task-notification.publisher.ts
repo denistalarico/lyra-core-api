@@ -79,6 +79,46 @@ export class TaskNotificationPublisher {
     });
   }
 
+  publishDueSoon(input: TaskNotificationInput) {
+    return this.publishTaskEvent({
+      ...input,
+      eventType: 'task.due_soon',
+      eventIdParts: [
+        'task.due_soon',
+        input.task.id,
+        this.timestampFor(input.task.dueDate),
+      ],
+      recipients: [
+        {
+          userId: input.task.assigneeId,
+          interestReason: NotificationInterestReason.ASSIGNED,
+        },
+      ],
+      title: 'Tarefa próxima do vencimento',
+      body: `A tarefa "${input.task.title}" está próxima do vencimento.`,
+    });
+  }
+
+  publishOverdue(input: TaskNotificationInput) {
+    return this.publishTaskEvent({
+      ...input,
+      eventType: 'task.overdue',
+      eventIdParts: [
+        'task.overdue',
+        input.task.id,
+        this.timestampFor(input.task.dueDate),
+      ],
+      recipients: [
+        {
+          userId: input.task.assigneeId,
+          interestReason: NotificationInterestReason.ASSIGNED,
+        },
+      ],
+      title: 'Tarefa atrasada',
+      body: `A tarefa "${input.task.title}" está atrasada.`,
+    });
+  }
+
   publishMentioned(
     input: TaskNotificationInput & {
       mentionedUserIds: Array<string | null | undefined>;
