@@ -39,6 +39,8 @@ async function bootstrap() {
       'x-user-id',
       'x-user-role',
       'x-user-name',
+      'x-leadflow-operating-mode',
+      'x-client-id',
     ],
     credentials: false,
   });
