@@ -1,4 +1,6 @@
 import { Body, Controller, Post, UseGuards } from '@nestjs/common';
+import { RequestContextData } from '../../../../common/context/request-context.decorator';
+import type { RequestContext } from '../../../../common/context/request-context.interface';
 import { JwtAuthGuard } from '../../../auth/guards/jwt-auth.guard';
 import {
   PermissionsGuard,
@@ -21,8 +23,12 @@ export class WhatsAppOutboundController {
     'leadflow.inbox.conversation.reply.assigned',
     'leadflow.inbox.conversation.reply.client',
   )
-  async sendText(@Body() dto: SendWhatsAppTextDto) {
+  async sendText(
+    @RequestContextData() ctx: RequestContext,
+    @Body() dto: SendWhatsAppTextDto,
+  ) {
     const result = await this.whatsappOutboundService.sendText({
+      ctx,
       channelId: dto.channelId,
       conversationId: dto.conversationId,
       to: dto.to,

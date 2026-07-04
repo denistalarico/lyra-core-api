@@ -6,12 +6,14 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { IsNull, Repository } from 'typeorm';
 import { SettingsCryptoService } from '../../../../../common/crypto/settings-crypto.service';
+import type { RequestContext } from '../../../../../common/context/request-context.interface';
 import { InboxChannelEntity } from '../../../entities/inbox-channel.entity';
 import { InboxConversationEntity } from '../../../entities/inbox-conversation.entity';
 import { InboxConversationEventEntity } from '../../../entities/inbox-conversation-event.entity';
 import { InboxMessageEntity } from '../../../entities/inbox-message.entity';
 
 type SendWhatsAppTextInput = {
+  ctx: RequestContext;
   channelId: string;
   conversationId?: string;
   to: string;
@@ -52,15 +54,7 @@ export class WhatsAppOutboundService {
   ) {}
 
   async sendText(input: SendWhatsAppTextInput) {
-    const channel = await this.channelsRepository.findOne({
-      where: {
-        id: input.channelId,
-        type: 'whatsapp',
-        provider: 'meta',
-        status: 'active',
-        deletedAt: IsNull(),
-      },
-    });
+    const channel = await this.findChannelForContext(input.ctx, input.channelId);
 
     if (!channel) {
       throw new NotFoundException('Active WhatsApp Meta channel not found.');
@@ -81,7 +75,7 @@ export class WhatsAppOutboundService {
     }
 
     const conversation = input.conversationId
-      ? await this.findConversation(channel, input.conversationId)
+      ? await this.findConversation(input.ctx, channel, input.conversationId)
       : await this.findOrCreateConversation(channel, input.to);
 
     const response = await this.sendToMeta({
@@ -152,6 +146,7 @@ export class WhatsAppOutboundService {
   }
 
   private async findConversation(
+    ctx: RequestContext,
     channel: InboxChannelEntity,
     conversationId: string,
   ) {
@@ -164,11 +159,59 @@ export class WhatsAppOutboundService {
       },
     });
 
-    if (!conversation) {
+    if (!conversation || !this.channelMatchesContext(ctx, channel)) {
       throw new NotFoundException('Inbox conversation not found for channel.');
     }
 
     return conversation;
+  }
+
+  private async findChannelForContext(ctx: RequestContext, channelId: string) {
+    const channel = await this.channelsRepository.findOne({
+      where: {
+        id: channelId,
+        tenantId: ctx.tenantId,
+        workspaceId: this.requireWorkspaceId(ctx),
+        type: 'whatsapp',
+        provider: 'meta',
+        status: 'active',
+        deletedAt: IsNull(),
+      },
+    });
+
+    if (!channel || !this.channelMatchesContext(ctx, channel)) {
+      throw new NotFoundException('Active WhatsApp Meta channel not found.');
+    }
+
+    return channel;
+  }
+
+  private channelMatchesContext(
+    ctx: RequestContext,
+    channel: InboxChannelEntity,
+  ) {
+    const managedContext = ctx.managedContext;
+    const metadata = channel.metadata ?? {};
+    const clientId =
+      typeof metadata.clientId === 'string' ? metadata.clientId : null;
+    const operatingMode =
+      typeof metadata.operatingMode === 'string'
+        ? metadata.operatingMode
+        : null;
+
+    if (managedContext?.operatingMode === 'client') {
+      return clientId === managedContext.clientId;
+    }
+
+    return !clientId || operatingMode === 'agency';
+  }
+
+  private requireWorkspaceId(ctx: RequestContext) {
+    if (!ctx.workspaceId) {
+      throw new BadRequestException('Workspace context is required.');
+    }
+
+    return ctx.workspaceId;
   }
 
   private async findOrCreateConversation(

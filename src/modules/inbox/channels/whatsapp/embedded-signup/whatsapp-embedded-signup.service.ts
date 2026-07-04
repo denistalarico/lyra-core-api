@@ -16,6 +16,7 @@ type StartInput = {
   workspaceId: string;
   userId?: string | null;
   acceptedRules?: boolean;
+  metadata?: Record<string, unknown>;
 };
 
 type CompleteInput = {
@@ -64,6 +65,7 @@ export class WhatsAppEmbeddedSignupService {
         expiresAt,
         payload: {},
         metadata: {
+          ...(input.metadata ?? {}),
           acceptedRules: true,
           startedAt: new Date().toISOString(),
           connectionMode: 'embedded_signup',
@@ -355,6 +357,7 @@ export class WhatsAppEmbeddedSignupService {
       connectionSessionId: session.id,
       connectedVia: 'embedded_signup',
       embeddedSignupCompletedAt: new Date().toISOString(),
+      ...this.extractOperationalMetadata(session.metadata),
     };
 
     const channel =
@@ -416,6 +419,36 @@ export class WhatsAppEmbeddedSignupService {
     }
 
     return null;
+  }
+
+  private extractOperationalMetadata(metadata: Record<string, unknown> = {}) {
+    const setupSource =
+      typeof metadata.setupSource === 'string'
+        ? metadata.setupSource
+        : 'embedded_signup';
+    const operatingMode =
+      metadata.operatingMode === 'client' || metadata.operatingMode === 'agency'
+        ? metadata.operatingMode
+        : undefined;
+    const clientId =
+      typeof metadata.clientId === 'string' ? metadata.clientId : undefined;
+    const clientName =
+      typeof metadata.clientName === 'string' ? metadata.clientName : undefined;
+    const productKey =
+      typeof metadata.productKey === 'string' ? metadata.productKey : undefined;
+    const managedTenantId =
+      typeof metadata.managedTenantId === 'string'
+        ? metadata.managedTenantId
+        : undefined;
+
+    return {
+      setupSource,
+      ...(productKey ? { productKey } : {}),
+      ...(operatingMode ? { operatingMode } : {}),
+      ...(clientId ? { clientId } : {}),
+      ...(clientName ? { clientName } : {}),
+      ...(managedTenantId ? { managedTenantId } : {}),
+    };
   }
 
   private createState() {

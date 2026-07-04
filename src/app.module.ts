@@ -37,6 +37,7 @@ import { DashboardsModule } from './modules/dashboards';
 import { NotificationsModule } from './modules/notifications';
 import { PermissionsModule } from './modules/permissions';
 import { HealthModule } from './modules/health/health.module';
+import { ContextModule } from './common/context/context.module';
 
 @Module({
   imports: [
@@ -51,6 +52,7 @@ import { HealthModule } from './modules/health/health.module';
     ScheduleModule.forRoot(),
     TypeOrmModule.forRoot(getTypeOrmConfig()),
     TypeOrmModule.forRoot(getAgencyTypeOrmConfig()),
+    ContextModule,
     SettingsModule,
     AuthModule,
     EmailModule,

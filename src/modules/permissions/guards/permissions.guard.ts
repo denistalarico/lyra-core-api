@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import type { AuthenticatedRequest } from '../../auth/types/authenticated-request.type';
+import { OperationalContextResolver } from '../../../common/context/operational-context.resolver';
 import {
   ANY_PERMISSION_KEYS_METADATA,
   CLIENT_ACCESS_METADATA,
@@ -35,6 +36,7 @@ export class PermissionsGuard implements CanActivate {
   constructor(
     private readonly reflector: Reflector,
     private readonly permissionService: PlatformPermissionService,
+    private readonly operationalContextResolver: OperationalContextResolver,
   ) {}
 
   async canActivate(executionContext: ExecutionContext): Promise<boolean> {
@@ -99,6 +101,13 @@ export class PermissionsGuard implements CanActivate {
       userId: user.sub,
       role: user.role,
     };
+
+    request.managedContext ??= await this.operationalContextResolver.resolve({
+      request,
+      tenantId: user.tenantId,
+      workspaceId: user.workspaceId,
+    });
+
     const scopeRequest = {
       method: request.method,
       routePath: request.route?.path ?? null,

@@ -4,7 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { FindOptionsWhere, ILike, In, IsNull, Repository } from 'typeorm';
+import { Brackets, In, IsNull, Repository, SelectQueryBuilder } from 'typeorm';
 import type { RequestContext } from '../../common/context/request-context.interface';
 import { CreateInboxChannelDto } from './dto/create-inbox-channel.dto';
 import { CreateInboxConversationDto } from './dto/create-inbox-conversation.dto';
@@ -68,6 +68,115 @@ export class InboxService {
     };
   }
 
+  private applyChannelOperationalScope(
+    qb: SelectQueryBuilder<InboxChannelEntity>,
+    alias = 'channel',
+  ) {
+    qb.andWhere(
+      new Brackets((scopeQb) => {
+        scopeQb
+          .where(`${alias}.metadata->>'clientId' IS NULL`)
+          .orWhere(`${alias}.metadata->>'operatingMode' = 'agency'`);
+      }),
+    );
+  }
+
+  private applyContextualChannelScope(
+    qb: SelectQueryBuilder<InboxChannelEntity>,
+    ctx: RequestContext,
+    alias = 'channel',
+  ) {
+    const managedContext = ctx.managedContext;
+
+    if (managedContext?.operatingMode === 'client') {
+      qb.andWhere(`${alias}.metadata->>'clientId' = :managedClientId`, {
+        managedClientId: managedContext.clientId,
+      });
+      return;
+    }
+
+    this.applyChannelOperationalScope(qb, alias);
+  }
+
+  private applyContextualConversationScope(
+    qb: SelectQueryBuilder<InboxConversationEntity>,
+    ctx: RequestContext,
+  ) {
+    qb.leftJoin(
+      InboxChannelEntity,
+      'channel',
+      [
+        'channel.id = conversation.channel_id',
+        'channel.tenant_id = conversation.tenant_id',
+        'channel.workspace_id = conversation.workspace_id',
+        'channel.deleted_at IS NULL',
+      ].join(' AND '),
+    );
+
+    const managedContext = ctx.managedContext;
+
+    if (managedContext?.operatingMode === 'client') {
+      qb.andWhere('channel.id IS NOT NULL');
+      qb.andWhere("channel.metadata->>'clientId' = :managedClientId", {
+        managedClientId: managedContext.clientId,
+      });
+      return;
+    }
+
+    qb.andWhere(
+      new Brackets((scopeQb) => {
+        scopeQb
+          .where('conversation.channel_id IS NULL')
+          .orWhere("channel.metadata->>'clientId' IS NULL")
+          .orWhere("channel.metadata->>'operatingMode' = 'agency'");
+      }),
+    );
+  }
+
+  private channelMetadataForContext(
+    ctx: RequestContext,
+    metadata: Record<string, unknown> | undefined,
+  ) {
+    const managedContext = ctx.managedContext;
+    const nextMetadata = { ...(metadata ?? {}) };
+
+    if (!managedContext) {
+      return nextMetadata;
+    }
+
+    nextMetadata.productKey = managedContext.productKey;
+    nextMetadata.operatingMode = managedContext.operatingMode;
+    nextMetadata.clientId = managedContext.clientId;
+    nextMetadata.managedTenantId = managedContext.managedTenantId;
+
+    if (managedContext.clientName !== undefined) {
+      nextMetadata.clientName = managedContext.clientName;
+    }
+
+    return nextMetadata;
+  }
+
+  private async findChannelForContext(ctx: RequestContext, id: string) {
+    const qb = this.channelsRepository
+      .createQueryBuilder('channel')
+      .where('channel.tenant_id = :tenantId', { tenantId: ctx.tenantId })
+      .andWhere('channel.workspace_id = :workspaceId', {
+        workspaceId: this.getWorkspaceId(ctx),
+      })
+      .andWhere('channel.id = :id', { id })
+      .andWhere('channel.deleted_at IS NULL');
+
+    this.applyContextualChannelScope(qb, ctx);
+
+    const channel = await qb.getOne();
+
+    if (!channel) {
+      throw new NotFoundException('Inbox channel not found.');
+    }
+
+    return channel;
+  }
+
   private async createEvent(
     ctx: RequestContext,
     conversationId: string,
@@ -87,15 +196,18 @@ export class InboxService {
   }
 
   async listChannels(ctx: RequestContext) {
-    const channels = await this.channelsRepository.find({
-      where: {
-        ...this.scope(ctx),
-        deletedAt: IsNull(),
-      },
-      order: {
-        createdAt: 'ASC',
-      },
-    });
+    const qb = this.channelsRepository
+      .createQueryBuilder('channel')
+      .where('channel.tenant_id = :tenantId', { tenantId: ctx.tenantId })
+      .andWhere('channel.workspace_id = :workspaceId', {
+        workspaceId: this.getWorkspaceId(ctx),
+      })
+      .andWhere('channel.deleted_at IS NULL')
+      .orderBy('channel.created_at', 'ASC');
+
+    this.applyContextualChannelScope(qb, ctx);
+
+    const channels = await qb.getMany();
 
     return channels.map(mapInboxChannel);
   }
@@ -157,7 +269,7 @@ export class InboxService {
       defaultAgentId: dto.defaultAgentId ?? null,
       aiEnabled: dto.aiEnabled ?? false,
       settings: dto.settings ?? {},
-      metadata: dto.metadata ?? {},
+      metadata: this.channelMetadataForContext(ctx, dto.metadata),
     });
 
     const saved = await this.channelsRepository.save(channel);
@@ -170,17 +282,7 @@ export class InboxService {
     id: string,
     dto: PatchInboxChannelDto,
   ) {
-    const channel = await this.channelsRepository.findOne({
-      where: {
-        ...this.scope(ctx),
-        id,
-        deletedAt: IsNull(),
-      },
-    });
-
-    if (!channel) {
-      throw new NotFoundException('Inbox channel not found.');
-    }
+    const channel = await this.findChannelForContext(ctx, id);
 
     Object.assign(channel, {
       name: dto.name?.trim() ?? channel.name,
@@ -228,7 +330,10 @@ export class InboxService {
           : channel.defaultAgentId,
       aiEnabled: dto.aiEnabled ?? channel.aiEnabled,
       settings: dto.settings ?? channel.settings,
-      metadata: dto.metadata ?? channel.metadata,
+      metadata:
+        dto.metadata !== undefined
+          ? this.channelMetadataForContext(ctx, dto.metadata)
+          : channel.metadata,
     });
 
     const saved = await this.channelsRepository.save(channel);
@@ -240,27 +345,54 @@ export class InboxService {
     ctx: RequestContext,
     filters: InboxConversationFilters,
   ) {
-    const where: FindOptionsWhere<InboxConversationEntity> = {
-      ...this.scope(ctx),
-    };
+    const qb = this.conversationsRepository
+      .createQueryBuilder('conversation')
+      .where('conversation.tenant_id = :tenantId', { tenantId: ctx.tenantId })
+      .andWhere('conversation.workspace_id = :workspaceId', {
+        workspaceId: this.getWorkspaceId(ctx),
+      });
 
-    if (filters.status)
-      where.status = filters.status as InboxConversationEntity['status'];
-    if (filters.priority)
-      where.priority = filters.priority as InboxConversationEntity['priority'];
-    if (filters.channelId) where.channelId = filters.channelId;
-    if (filters.contactId) where.contactId = filters.contactId;
-    if (filters.assignedUserId) where.assignedUserId = filters.assignedUserId;
-    if (filters.q) where.title = ILike(`%${filters.q}%`);
+    this.applyContextualConversationScope(qb, ctx);
 
-    const [items, total] = await this.conversationsRepository.findAndCount({
-      where,
-      order: {
-        lastMessageAt: 'DESC',
-        updatedAt: 'DESC',
-      },
-      take: 100,
-    });
+    if (filters.status) {
+      qb.andWhere('conversation.status = :status', {
+        status: filters.status,
+      });
+    }
+
+    if (filters.priority) {
+      qb.andWhere('conversation.priority = :priority', {
+        priority: filters.priority,
+      });
+    }
+
+    if (filters.channelId) {
+      qb.andWhere('conversation.channel_id = :channelId', {
+        channelId: filters.channelId,
+      });
+    }
+
+    if (filters.contactId) {
+      qb.andWhere('conversation.contact_id = :contactId', {
+        contactId: filters.contactId,
+      });
+    }
+
+    if (filters.assignedUserId) {
+      qb.andWhere('conversation.assigned_user_id = :assignedUserId', {
+        assignedUserId: filters.assignedUserId,
+      });
+    }
+
+    if (filters.q) {
+      qb.andWhere('conversation.title ILIKE :q', { q: `%${filters.q}%` });
+    }
+
+    const [items, total] = await qb
+      .orderBy('conversation.last_message_at', 'DESC', 'NULLS LAST')
+      .addOrderBy('conversation.updated_at', 'DESC')
+      .take(100)
+      .getManyAndCount();
 
     return { items, total };
   }
@@ -270,6 +402,15 @@ export class InboxService {
     dto: CreateInboxConversationDto,
   ) {
     const now = new Date();
+    const managedContext = ctx.managedContext;
+
+    if (dto.channelId) {
+      await this.findChannelForContext(ctx, dto.channelId);
+    } else if (managedContext?.operatingMode === 'client') {
+      throw new BadRequestException(
+        'channelId is required when operating in client context.',
+      );
+    }
 
     const conversation = await this.conversationsRepository.save(
       this.conversationsRepository.create({
@@ -308,12 +449,17 @@ export class InboxService {
   }
 
   async getConversation(ctx: RequestContext, id: string) {
-    const conversation = await this.conversationsRepository.findOne({
-      where: {
-        ...this.scope(ctx),
-        id,
-      },
-    });
+    const qb = this.conversationsRepository
+      .createQueryBuilder('conversation')
+      .where('conversation.tenant_id = :tenantId', { tenantId: ctx.tenantId })
+      .andWhere('conversation.workspace_id = :workspaceId', {
+        workspaceId: this.getWorkspaceId(ctx),
+      })
+      .andWhere('conversation.id = :id', { id });
+
+    this.applyContextualConversationScope(qb, ctx);
+
+    const conversation = await qb.getOne();
 
     if (!conversation) {
       throw new NotFoundException('Inbox conversation not found.');
@@ -333,6 +479,17 @@ export class InboxService {
       priority: conversation.priority,
       assignedUserId: conversation.assignedUserId,
     };
+
+    if (dto.channelId !== undefined && dto.channelId !== null) {
+      await this.findChannelForContext(ctx, dto.channelId);
+    } else if (
+      dto.channelId === null &&
+      ctx.managedContext?.operatingMode === 'client'
+    ) {
+      throw new BadRequestException(
+        'channelId cannot be cleared when operating in client context.',
+      );
+    }
 
     Object.assign(conversation, {
       channelId:

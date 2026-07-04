@@ -46,6 +46,7 @@ export class WhatsAppEmbeddedSignupController {
       workspaceId,
       userId: userId ?? null,
       acceptedRules: dto.acceptedRules,
+      metadata: this.metadataFromContext(ctx),
     });
   }
 
@@ -70,5 +71,24 @@ export class WhatsAppEmbeddedSignupController {
       payload: dto.payload,
       metadata: dto.metadata,
     });
+  }
+
+  private metadataFromContext(ctx: RequestContext) {
+    const managedContext = ctx.managedContext;
+
+    if (!managedContext) {
+      return {
+        setupSource: 'embedded_signup',
+      };
+    }
+
+    return {
+      setupSource: 'embedded_signup',
+      productKey: managedContext.productKey,
+      operatingMode: managedContext.operatingMode,
+      clientId: managedContext.clientId,
+      clientName: managedContext.clientName ?? null,
+      managedTenantId: managedContext.managedTenantId,
+    };
   }
 }

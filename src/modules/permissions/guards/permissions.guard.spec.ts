@@ -36,10 +36,23 @@ function createGuard(metadata: Map<string, unknown>) {
     auditPermissionDecision: jest.fn(),
     isDangerousAction: jest.fn(),
   };
+  const operationalContextResolver = {
+    resolve: jest.fn().mockResolvedValue({
+      productKey: 'agency',
+      operatingMode: 'agency',
+      clientId: null,
+      managedTenantId: null,
+    }),
+  };
 
   return {
-    guard: new PermissionsGuard(reflector, permissionService as never),
+    guard: new PermissionsGuard(
+      reflector,
+      permissionService as never,
+      operationalContextResolver as never,
+    ),
     permissionService,
+    operationalContextResolver,
   };
 }
 

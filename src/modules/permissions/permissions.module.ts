@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { PlatformModule } from '../platform';
+import { ContextModule } from '../../common/context/context.module';
 import { TenantProductEntitlementEntity } from '../platform';
 import { AgencyClient } from '../clients/entities';
 import {
@@ -74,6 +75,7 @@ const AGENCY_CONNECTION = 'agency';
 @Module({
   imports: [
     PlatformModule,
+    ContextModule,
     TypeOrmModule.forFeature([
       ContactEntity,
       InboxChannelEntity,
@@ -139,6 +141,7 @@ const AGENCY_CONNECTION = 'agency';
     PermissionsGuard,
   ],
   exports: [
+    ContextModule,
     PlatformPermissionService,
     PermissionScopeEvaluatorService,
     PermissionsGuard,
