@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { FindOptionsWhere, Raw, Repository } from 'typeorm';
 import { FilesService } from '../../common/files/files.service';
 import { InboxService } from '../inbox/inbox.service';
 import { InboxSettingsService } from '../inbox/inbox-settings.service';
@@ -53,10 +53,10 @@ export class WebchatService {
     const workspaceId = this.requireWorkspaceId(ctx);
 
     return this.widgetsRepository.find({
-      where: {
+      where: this.withClientScope(ctx, {
         tenantId: ctx.tenantId,
         workspaceId,
-      },
+      }),
       order: {
         createdAt: 'DESC',
       },
@@ -87,7 +87,7 @@ export class WebchatService {
       brandFooterText: dto.brandFooterText?.trim() || 'By Lyra Suite',
       leadCaptureEnabled: dto.leadCaptureEnabled ?? false,
       leadCaptureMode: dto.leadCaptureMode ?? 'optional',
-      metadata: dto.metadata ?? {},
+      metadata: this.stampContext(ctx, dto.metadata ?? {}),
     });
 
     return this.widgetsRepository.save(widget);
@@ -143,7 +143,8 @@ export class WebchatService {
     if (dto.leadCaptureMode !== undefined) {
       widget.leadCaptureMode = dto.leadCaptureMode;
     }
-    if (dto.metadata !== undefined) widget.metadata = dto.metadata;
+    if (dto.metadata !== undefined)
+      widget.metadata = this.stampContext(ctx, dto.metadata);
 
     return this.widgetsRepository.save(widget);
   }
@@ -697,11 +698,11 @@ export class WebchatService {
     const workspaceId = this.requireWorkspaceId(ctx);
 
     const widget = await this.widgetsRepository.findOne({
-      where: {
+      where: this.withClientScope(ctx, {
         id: widgetId,
         tenantId: ctx.tenantId,
         workspaceId,
-      },
+      }),
     });
 
     if (!widget) {
@@ -893,6 +894,62 @@ export class WebchatService {
           .filter((domain): domain is string => Boolean(domain)),
       ),
     );
+  }
+
+  /**
+   * Restricts a widget query to the LeadFlow operating context of the request.
+   * In client mode only widgets stamped with the selected client's id match; in
+   * agency mode we match agency-owned or legacy (pre-scoping) widgets. Mirrors
+   * the CRM/Inbox scoping so each managed client only sees its own widgets.
+   */
+  private withClientScope<T>(
+    ctx: RequestContext,
+    where: FindOptionsWhere<T>,
+  ): FindOptionsWhere<T> {
+    const managed = ctx.managedContext;
+    const scoped = { ...where } as Record<string, unknown>;
+
+    if (managed?.operatingMode === 'client') {
+      scoped.metadata = Raw(
+        (column) => `${column} ->> 'clientId' = :lfClientId`,
+        { lfClientId: managed.clientId },
+      );
+    } else {
+      scoped.metadata = Raw(
+        (column) =>
+          `(${column} ->> 'clientId' IS NULL OR ${column} ->> 'operatingMode' = 'agency')`,
+      );
+    }
+
+    return scoped as FindOptionsWhere<T>;
+  }
+
+  /**
+   * Stamps the current LeadFlow operating context into a widget's metadata so it
+   * can later be filtered by {@link withClientScope}. Existing metadata keys
+   * (lead capture copy, theme, etc.) are preserved.
+   */
+  private stampContext(
+    ctx: RequestContext,
+    metadata: Record<string, unknown> = {},
+  ): Record<string, unknown> {
+    const managed = ctx.managedContext;
+
+    if (!managed) return { ...metadata };
+
+    const next: Record<string, unknown> = {
+      ...metadata,
+      productKey: managed.productKey,
+      operatingMode: managed.operatingMode,
+      clientId: managed.clientId,
+      managedTenantId: managed.managedTenantId,
+    };
+
+    if (managed.clientName !== undefined && managed.clientName !== null) {
+      next.clientName = managed.clientName;
+    }
+
+    return next;
   }
 
   private requireWorkspaceId(ctx: RequestContext) {

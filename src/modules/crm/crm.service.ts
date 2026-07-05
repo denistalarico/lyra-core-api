@@ -4,7 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { FindOptionsWhere, ILike, IsNull, Repository } from 'typeorm';
+import { FindOptionsWhere, ILike, IsNull, Raw, Repository } from 'typeorm';
 import { RequestContext } from '../../common/context/request-context.interface';
 import { ContactEntity } from '../contacts/entities/contact.entity';
 import { CreateCrmOpportunityDto } from './dto/create-crm-opportunity.dto';
@@ -78,7 +78,7 @@ export class CrmService {
     const workspaceId = this.requireWorkspaceId(ctx);
 
     return this.pipelinesRepository.find({
-      where: { tenantId, workspaceId, deletedAt: IsNull() },
+      where: this.withClientScope(ctx, { tenantId, workspaceId, deletedAt: IsNull() }),
       order: { sortOrder: 'ASC', createdAt: 'ASC' },
     });
   }
@@ -104,7 +104,7 @@ export class CrmService {
       settings: dto.settings ?? {},
       channels: dto.channels ?? [],
       allowedUserIds: dto.allowedUserIds ?? [],
-      metadata: dto.metadata ?? {},
+      metadata: this.stampContext(ctx, dto.metadata ?? {}),
     });
 
     return this.pipelinesRepository.save(pipeline);
@@ -118,7 +118,7 @@ export class CrmService {
     const workspaceId = this.requireWorkspaceId(ctx);
 
     const pipeline = await this.pipelinesRepository.findOne({
-      where: { id, tenantId, workspaceId, deletedAt: IsNull() },
+      where: this.withClientScope(ctx, { id, tenantId, workspaceId, deletedAt: IsNull() }),
     });
 
     if (!pipeline) throw new NotFoundException('CRM pipeline not found.');
@@ -146,7 +146,8 @@ export class CrmService {
     if (dto.channels !== undefined) pipeline.channels = dto.channels;
     if (dto.allowedUserIds !== undefined)
       pipeline.allowedUserIds = dto.allowedUserIds;
-    if (dto.metadata !== undefined) pipeline.metadata = dto.metadata;
+    if (dto.metadata !== undefined)
+      pipeline.metadata = this.stampContext(ctx, dto.metadata);
 
     return this.pipelinesRepository.save(pipeline);
   }
@@ -177,7 +178,7 @@ export class CrmService {
     if (pipelineId) where.pipelineId = pipelineId;
 
     return this.stagesRepository.find({
-      where,
+      where: this.withClientScope(ctx, where),
       order: { sortOrder: 'ASC', createdAt: 'ASC' },
     });
   }
@@ -204,7 +205,7 @@ export class CrmService {
       isWonStage: dto.isWonStage ?? false,
       isLostStage: dto.isLostStage ?? false,
       isFolded: dto.isFolded ?? false,
-      metadata: dto.metadata ?? {},
+      metadata: this.stampContext(ctx, dto.metadata ?? {}),
     });
 
     return this.stagesRepository.save(stage);
@@ -215,7 +216,7 @@ export class CrmService {
     const workspaceId = this.requireWorkspaceId(ctx);
 
     const stage = await this.stagesRepository.findOne({
-      where: { id, tenantId, workspaceId, deletedAt: IsNull() },
+      where: this.withClientScope(ctx, { id, tenantId, workspaceId, deletedAt: IsNull() }),
     });
 
     if (!stage) throw new NotFoundException('CRM stage not found.');
@@ -239,7 +240,8 @@ export class CrmService {
     if (dto.isWonStage !== undefined) stage.isWonStage = dto.isWonStage;
     if (dto.isLostStage !== undefined) stage.isLostStage = dto.isLostStage;
     if (dto.isFolded !== undefined) stage.isFolded = dto.isFolded;
-    if (dto.metadata !== undefined) stage.metadata = dto.metadata;
+    if (dto.metadata !== undefined)
+      stage.metadata = this.stampContext(ctx, dto.metadata);
 
     return this.stagesRepository.save(stage);
   }
@@ -282,7 +284,7 @@ export class CrmService {
     if (filters.search) where.title = ILike(`%${filters.search}%`);
 
     return this.opportunitiesRepository.find({
-      where,
+      where: this.withClientScope(ctx, where),
       order: {
         nextFollowUpAt: 'ASC',
         createdAt: 'DESC',
@@ -343,7 +345,7 @@ export class CrmService {
       followMode: dto.followMode ?? 'automatic',
       followMessage: dto.followMessage ?? null,
       followSendAutomatically: dto.followSendAutomatically ?? false,
-      metadata: dto.metadata ?? {},
+      metadata: this.stampContext(ctx, dto.metadata ?? {}),
     });
 
     const saved = await this.opportunitiesRepository.save(opportunity);
@@ -375,7 +377,7 @@ export class CrmService {
     const workspaceId = this.requireWorkspaceId(ctx);
 
     const opportunity = await this.opportunitiesRepository.findOne({
-      where: { id, tenantId, workspaceId, deletedAt: IsNull() },
+      where: this.withClientScope(ctx, { id, tenantId, workspaceId, deletedAt: IsNull() }),
     });
 
     if (!opportunity) throw new NotFoundException('CRM opportunity not found.');
@@ -441,7 +443,8 @@ export class CrmService {
       opportunity.followMessage = dto.followMessage;
     if (dto.followSendAutomatically !== undefined)
       opportunity.followSendAutomatically = dto.followSendAutomatically;
-    if (dto.metadata !== undefined) opportunity.metadata = dto.metadata;
+    if (dto.metadata !== undefined)
+      opportunity.metadata = this.stampContext(ctx, dto.metadata);
 
     const saved = await this.opportunitiesRepository.save(opportunity);
 
@@ -546,7 +549,7 @@ export class CrmService {
     const workspaceId = this.requireWorkspaceId(ctx);
 
     return this.tagsRepository.find({
-      where: { tenantId, workspaceId, deletedAt: IsNull() },
+      where: this.withClientScope(ctx, { tenantId, workspaceId, deletedAt: IsNull() }),
       order: { kind: 'ASC', name: 'ASC' },
     });
   }
@@ -572,7 +575,7 @@ export class CrmService {
         dto.ownerUserId ?? (dto.scope === 'user' ? this.getUserId(ctx) : null),
       description: dto.description ?? null,
       isEditable: kind === 'system' ? false : true,
-      metadata: dto.metadata ?? {},
+      metadata: this.stampContext(ctx, dto.metadata ?? {}),
     });
 
     return this.tagsRepository.save(tag);
@@ -583,7 +586,7 @@ export class CrmService {
     const workspaceId = this.requireWorkspaceId(ctx);
 
     const tag = await this.tagsRepository.findOne({
-      where: { id, tenantId, workspaceId, deletedAt: IsNull() },
+      where: this.withClientScope(ctx, { id, tenantId, workspaceId, deletedAt: IsNull() }),
     });
 
     if (!tag) throw new NotFoundException('CRM tag not found.');
@@ -611,7 +614,8 @@ export class CrmService {
     if (dto.ownerUserId !== undefined) tag.ownerUserId = dto.ownerUserId;
     if (dto.description !== undefined) tag.description = dto.description;
     if (dto.isEditable !== undefined) tag.isEditable = dto.isEditable;
-    if (dto.metadata !== undefined) tag.metadata = dto.metadata;
+    if (dto.metadata !== undefined)
+      tag.metadata = this.stampContext(ctx, dto.metadata);
 
     return this.tagsRepository.save(tag);
   }
@@ -859,12 +863,12 @@ export class CrmService {
     const workspaceId = this.requireWorkspaceId(ctx);
 
     const existing = await this.pipelinesRepository.findOne({
-      where: {
+      where: this.withClientScope(ctx, {
         tenantId,
         workspaceId,
         isDefault: true,
         deletedAt: IsNull(),
-      },
+      }),
       order: { createdAt: 'ASC' },
     });
 
@@ -880,7 +884,7 @@ export class CrmService {
         isDefault: true,
         status: 'active',
         sortOrder: 0,
-        metadata: { systemGenerated: true },
+        metadata: this.stampContext(ctx, { systemGenerated: true }),
       }),
     );
 
@@ -930,7 +934,7 @@ export class CrmService {
           probability: stage.probability,
           isWonStage: stage.isWonStage ?? false,
           isLostStage: stage.isLostStage ?? false,
-          metadata: { systemGenerated: true },
+          metadata: this.stampContext(ctx, { systemGenerated: true }),
         }),
       ),
     );
@@ -946,13 +950,13 @@ export class CrmService {
     const workspaceId = this.requireWorkspaceId(ctx);
 
     const stage = await this.stagesRepository.findOne({
-      where: {
+      where: this.withClientScope(ctx, {
         tenantId,
         workspaceId,
         pipelineId,
         type: 'open',
         deletedAt: IsNull(),
-      },
+      }),
       order: { sortOrder: 'ASC', createdAt: 'ASC' },
     });
 
@@ -1042,6 +1046,64 @@ export class CrmService {
     }
 
     return date;
+  }
+
+  /**
+   * Restricts a query to the LeadFlow operating context of the request.
+   *
+   * In client mode we only match records stamped with the selected client's id.
+   * In agency mode (or when no managed context is present) we match records that
+   * are agency-owned or were created before client scoping existed (legacy rows
+   * carry no `clientId`). Mirrors the Inbox module scoping so CRM data stays
+   * isolated per managed client without a schema change.
+   */
+  private withClientScope<T>(
+    ctx: RequestContext,
+    where: FindOptionsWhere<T>,
+  ): FindOptionsWhere<T> {
+    const managed = ctx.managedContext;
+    const scoped = { ...where } as Record<string, unknown>;
+
+    if (managed?.operatingMode === 'client') {
+      scoped.metadata = Raw(
+        (column) => `${column} ->> 'clientId' = :lfClientId`,
+        { lfClientId: managed.clientId },
+      );
+    } else {
+      scoped.metadata = Raw(
+        (column) =>
+          `(${column} ->> 'clientId' IS NULL OR ${column} ->> 'operatingMode' = 'agency')`,
+      );
+    }
+
+    return scoped as FindOptionsWhere<T>;
+  }
+
+  /**
+   * Stamps the current LeadFlow operating context into a record's metadata so it
+   * can later be filtered by {@link withClientScope}.
+   */
+  private stampContext(
+    ctx: RequestContext,
+    metadata: Record<string, unknown> = {},
+  ): Record<string, unknown> {
+    const managed = ctx.managedContext;
+
+    if (!managed) return { ...metadata };
+
+    const next: Record<string, unknown> = {
+      ...metadata,
+      productKey: managed.productKey,
+      operatingMode: managed.operatingMode,
+      clientId: managed.clientId,
+      managedTenantId: managed.managedTenantId,
+    };
+
+    if (managed.clientName !== undefined && managed.clientName !== null) {
+      next.clientName = managed.clientName;
+    }
+
+    return next;
   }
 
   private requireTenantId(ctx: RequestContext): string {

@@ -203,7 +203,7 @@ export class InboxService {
         workspaceId: this.getWorkspaceId(ctx),
       })
       .andWhere('channel.deleted_at IS NULL')
-      .orderBy('channel.created_at', 'ASC');
+      .orderBy('channel.createdAt', 'ASC');
 
     this.applyContextualChannelScope(qb, ctx);
 
@@ -389,8 +389,8 @@ export class InboxService {
     }
 
     const [items, total] = await qb
-      .orderBy('conversation.last_message_at', 'DESC', 'NULLS LAST')
-      .addOrderBy('conversation.updated_at', 'DESC')
+      .orderBy('conversation.lastMessageAt', 'DESC', 'NULLS LAST')
+      .addOrderBy('conversation.updatedAt', 'DESC')
       .take(100)
       .getManyAndCount();
 
