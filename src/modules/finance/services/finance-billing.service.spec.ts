@@ -193,7 +193,7 @@ describe('FinanceBillingService notification triggers', () => {
 describe('FinanceBillingService bill recurrences', () => {
   const recurringLines = [{ description: 'ChatGPT Plus', quantity: '1', unitPrice: '100.00' }];
 
-  it('creates a non-recurring bill without creating a recurrence and still posts', async () => {
+  it('creates a non-recurring bill as open by default and still posts', async () => {
     const { service, billRecurrencesRepo, postingService } = makeService();
 
     await service.createBill(makeContext(), {
@@ -203,6 +203,18 @@ describe('FinanceBillingService bill recurrences', () => {
 
     expect(billRecurrencesRepo.save).not.toHaveBeenCalled();
     expect(postingService.postBillConfirmed).toHaveBeenCalledTimes(1);
+  });
+
+  it('creates a draft bill without posting', async () => {
+    const { service, postingService } = makeService();
+
+    await service.createBill(makeContext(), {
+      status: FinanceBillStatus.Draft,
+      currency: 'BRL',
+      lines: recurringLines,
+    });
+
+    expect(postingService.postBillConfirmed).not.toHaveBeenCalled();
   });
 
   it('creates a recurrence profile when the bill is marked recurring, copying vendor/currency/lines', async () => {

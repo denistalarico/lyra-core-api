@@ -445,6 +445,10 @@ export class UpdateFinanceBillRecurrenceDto {
 
 export class CreateFinanceBillDto {
   @IsOptional()
+  @IsIn([FinanceBillStatus.Draft, FinanceBillStatus.Open])
+  status?: FinanceBillStatus.Draft | FinanceBillStatus.Open;
+
+  @IsOptional()
   @IsUUID()
   vendorId?: string | null;
 

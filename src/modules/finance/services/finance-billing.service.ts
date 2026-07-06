@@ -525,6 +525,7 @@ export class FinanceBillingService {
     const billNumber =
       dto.billNumber ?? (await this.generateDocumentNumber(ctx, 'BILL'));
     const totals = this.calculateBillTotals(dto.lines);
+    const status = dto.status ?? FinanceBillStatus.Open;
 
     const billId = await this.dataSource.transaction(async (manager) => {
       const bill = await manager.getRepository(FinanceBill).save(
@@ -533,7 +534,7 @@ export class FinanceBillingService {
           workspaceId: ctx.workspaceId,
           vendorId: dto.vendorId ?? null,
           billNumber,
-          status: FinanceBillStatus.Open,
+          status,
           currency: dto.currency ?? 'BRL',
           issueDate: dto.issueDate ?? null,
           dueDate: dto.dueDate ?? null,
@@ -573,9 +574,11 @@ export class FinanceBillingService {
 
       await manager.getRepository(FinanceBillLine).save(lines);
 
-      // A bill is created already "Open" (confirmed), so recognise the payable
-      // in the ledger atomically with its creation.
-      await this.postingService.postBillConfirmed(ctx, bill.id, manager);
+      // Draft bills do not post. If created already open, recognise the
+      // payable in the ledger atomically with its creation.
+      if (status === FinanceBillStatus.Open) {
+        await this.postingService.postBillConfirmed(ctx, bill.id, manager);
+      }
 
       return bill.id;
     });
@@ -604,10 +607,11 @@ export class FinanceBillingService {
 
     const previousStatus = bill.status;
 
-    Object.assign(bill, dto);
+    const { metadata, ...rest } = dto;
+    Object.assign(bill, rest);
 
-    if (dto.metadata !== undefined) {
-      bill.metadata = dto.metadata;
+    if (metadata !== undefined) {
+      bill.metadata = { ...bill.metadata, ...metadata };
     }
 
     const saved = await this.billsRepo.save(bill);
@@ -627,7 +631,7 @@ export class FinanceBillingService {
       await this.postingService.reverseBill(ctx, saved.id);
     }
 
-    return saved;
+    return this.getBill(ctx, saved.id);
   }
 
   async cancelBill(ctx: FinanceRequestContext, id: string) {
@@ -651,7 +655,7 @@ export class FinanceBillingService {
       return persisted;
     });
 
-    return saved;
+    return this.getBill(ctx, saved.id);
   }
 
   async deleteBill(ctx: FinanceRequestContext, id: string) {
