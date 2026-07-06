@@ -7,8 +7,12 @@ import {
   Patch,
   Post,
   Query,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
 import { RequestContextData } from '../../common/context/request-context.decorator';
 import type { RequestContext } from '../../common/context/request-context.interface';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -30,6 +34,11 @@ type MessageReactionBody = {
   emoji?: string;
 };
 
+const INBOX_ATTACHMENT_UPLOAD_OPTIONS = {
+  storage: memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 },
+};
+
 @Controller('inbox')
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 @RequireProductEntitlement('leadflow')
@@ -46,6 +55,19 @@ export class InboxController {
   @RequirePermission('leadflow.inbox.conversation.assign.client')
   listForwardTargets(@RequestContextData() ctx: RequestContext) {
     return this.inboxService.listForwardTargets(ctx);
+  }
+
+  @Post('attachments')
+  @RequireAnyPermission(
+    'leadflow.inbox.conversation.reply.assigned',
+    'leadflow.inbox.conversation.reply.client',
+  )
+  @UseInterceptors(FileInterceptor('file', INBOX_ATTACHMENT_UPLOAD_OPTIONS))
+  uploadAttachment(
+    @RequestContextData() ctx: RequestContext,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    return this.inboxService.uploadAttachment(ctx, file);
   }
 
   @Post('channels')

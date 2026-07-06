@@ -31,12 +31,14 @@ import { WhatsAppChannelHealthController } from './channels/whatsapp/whatsapp-ch
 import { WhatsAppChannelHealthService } from './channels/whatsapp/services/whatsapp-channel-health.service';
 import { PermissionsModule } from '../permissions';
 import { NotificationsModule } from '../notifications';
+import { FilesModule } from '../../common/files/files.module';
 import { InboxNotificationPublisher } from './services/inbox-notification.publisher';
 
 @Module({
   imports: [
     PermissionsModule,
     NotificationsModule,
+    FilesModule,
     TypeOrmModule.forFeature([
       InboxChannelEntity,
       InboxConversationEntity,

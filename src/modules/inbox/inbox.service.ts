@@ -19,6 +19,7 @@ import { InboxConversationEventEntity } from './entities/inbox-conversation-even
 import { InboxConversationParticipantEntity } from './entities/inbox-conversation-participant.entity';
 import { InboxMessageEntity } from './entities/inbox-message.entity';
 import { SettingsCryptoService } from '../../common/crypto/settings-crypto.service';
+import { FilesService } from '../../common/files/files.service';
 import { mapInboxChannel } from './mappers/inbox-channel.mapper';
 
 export type InboxConversationFilters = {
@@ -51,7 +52,33 @@ export class InboxService {
     @InjectRepository(UserProfileEntity)
     private readonly userProfilesRepository: Repository<UserProfileEntity>,
     private readonly cryptoService: SettingsCryptoService,
+    private readonly filesService: FilesService,
   ) {}
+
+  async uploadAttachment(ctx: RequestContext, file: Express.Multer.File) {
+    if (!file) {
+      throw new BadRequestException('Arquivo não enviado.');
+    }
+
+    const workspaceId = this.getWorkspaceId(ctx);
+    const ext = file.originalname.split('.').pop()?.toLowerCase() ?? 'bin';
+    const storagePath = `tenants/${ctx.tenantId}/workspaces/${workspaceId}/inbox/attachments/${Date.now()}-${Math.random()
+      .toString(36)
+      .slice(2)}.${ext}`;
+
+    const stored = await this.filesService.uploadRawFile({
+      file,
+      path: storagePath,
+    });
+
+    return {
+      url: stored.url,
+      path: stored.path,
+      name: file.originalname,
+      mimeType: file.mimetype,
+      size: file.size,
+    };
+  }
 
   private getWorkspaceId(ctx: RequestContext) {
     if (!ctx.workspaceId) {
