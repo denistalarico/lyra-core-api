@@ -4,6 +4,7 @@ import { DeepPartial, Repository } from 'typeorm';
 import { InboxConversationEntity } from '../../entities/inbox-conversation.entity';
 import { InboxConversationEventEntity } from '../../entities/inbox-conversation-event.entity';
 import { InboxMessageEntity } from '../../entities/inbox-message.entity';
+import { InboxNotificationPublisher } from '../../services/inbox-notification.publisher';
 import type { NormalizedInboundMessage } from '../types/normalized-inbound-message';
 
 @Injectable()
@@ -15,6 +16,7 @@ export class InboundMessageIngestionService {
     private readonly messagesRepository: Repository<InboxMessageEntity>,
     @InjectRepository(InboxConversationEventEntity)
     private readonly eventsRepository: Repository<InboxConversationEventEntity>,
+    private readonly notificationPublisher: InboxNotificationPublisher,
   ) {}
 
   async ingest(input: NormalizedInboundMessage) {
@@ -90,6 +92,11 @@ export class InboundMessageIngestionService {
         },
       }),
     );
+
+    await this.notificationPublisher.publishInboundMessage({
+      conversation,
+      message,
+    });
 
     return {
       conversation,

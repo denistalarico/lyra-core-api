@@ -602,6 +602,24 @@ export class InboxService {
     return saved;
   }
 
+  async unarchiveConversation(ctx: RequestContext, id: string) {
+    const conversation = await this.getConversation(ctx, id);
+    conversation.status = 'open';
+    conversation.archivedAt = null;
+    conversation.metadata = {
+      ...(conversation.metadata ?? {}),
+      archivedBy: null,
+      unarchivedBy: ctx.userId ?? null,
+      unarchivedAt: new Date().toISOString(),
+    };
+
+    const saved = await this.conversationsRepository.save(conversation);
+
+    await this.createEvent(ctx, saved.id, 'conversation_unarchived');
+
+    return saved;
+  }
+
   async toggleConversationFlag(
     ctx: RequestContext,
     id: string,

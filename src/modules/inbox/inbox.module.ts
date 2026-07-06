@@ -30,10 +30,13 @@ import { MetaGraphService } from './channels/meta/services/meta-graph.service';
 import { WhatsAppChannelHealthController } from './channels/whatsapp/whatsapp-channel-health.controller';
 import { WhatsAppChannelHealthService } from './channels/whatsapp/services/whatsapp-channel-health.service';
 import { PermissionsModule } from '../permissions';
+import { NotificationsModule } from '../notifications';
+import { InboxNotificationPublisher } from './services/inbox-notification.publisher';
 
 @Module({
   imports: [
     PermissionsModule,
+    NotificationsModule,
     TypeOrmModule.forFeature([
       InboxChannelEntity,
       InboxConversationEntity,
@@ -61,6 +64,7 @@ import { PermissionsModule } from '../permissions';
     InboxSettingsService,
     SettingsCryptoService,
     InboundMessageIngestionService,
+    InboxNotificationPublisher,
     MetaChannelResolverService,
     WhatsAppMetaAdapter,
     WebhookLogService,

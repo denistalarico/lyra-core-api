@@ -80,6 +80,13 @@ function required(
 }
 
 export const AGENCY_NOTIFICATION_CATALOG: readonly NotificationDefinition[] = [
+  // Inbox (LeadFlow)
+  standard(
+    'inbox.message_received',
+    'inbox',
+    NotificationCategory.MESSAGE,
+    NotificationRecipientStrategy.EXPLICIT_USERS,
+  ),
   // Team Chat
   standard(
     'chat.direct_message_received',

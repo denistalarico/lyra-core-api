@@ -162,6 +162,18 @@ export class InboxController {
     return this.inboxService.archiveConversation(ctx, id);
   }
 
+  @Post('conversations/:id/unarchive')
+  @RequireAnyPermission(
+    'leadflow.inbox.conversation.close.assigned',
+    'leadflow.inbox.conversation.close.client',
+  )
+  unarchiveConversation(
+    @RequestContextData() ctx: RequestContext,
+    @Param('id') id: string,
+  ) {
+    return this.inboxService.unarchiveConversation(ctx, id);
+  }
+
   @Post('conversations/:id/pin')
   @RequirePermission('leadflow.inbox.conversation.assign.client')
   toggleConversationPin(

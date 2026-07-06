@@ -31,6 +31,7 @@ import { NotificationRecipientResolverService } from './notification-recipient-r
 
 const NOTIFICATION_PREFERENCE_GROUP_BY_MODULE: Record<string, string> = {
   'team-chat': 'messages',
+  inbox: 'messages',
   finance: 'finance',
   tasks: 'tasks',
   projects: 'tasks',
