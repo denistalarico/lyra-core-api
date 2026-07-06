@@ -43,6 +43,7 @@ import { CreateContactMethodDto } from '../contacts/dto/create-contact-method.dt
 import { PatchContactMethodDto } from '../contacts/dto/patch-contact-method.dto';
 import { CreateContactAddressDto } from '../contacts/dto/create-contact-address.dto';
 import { PatchContactAddressDto } from '../contacts/dto/patch-contact-address.dto';
+import { CreateLeadFlowContactDto } from './dto/create-leadflow-contact.dto';
 import { CreateContactTagDto } from '../contacts/dto/create-contact-tag.dto';
 import { PatchContactTagDto } from '../contacts/dto/patch-contact-tag.dto';
 import { CreateContactSegmentDto } from '../contacts/dto/create-contact-segment.dto';
@@ -525,6 +526,177 @@ export class AgencyContactsService {
     });
 
     return this.listsRepo.save(leadFlowList);
+  }
+
+  // Per-client sublist under the "LeadFlow" system list, so each client's
+  // contacts stay separated. Idempotent, keyed by sourceContext=client:<id>.
+  private async ensureLeadFlowClientList(
+    ctx: RequestContext,
+    clientId: string,
+    clientName?: string | null,
+  ) {
+    const workspaceId = this.requireWorkspaceId(ctx);
+    const parent = await this.ensureLeadFlowSystemList(ctx);
+    const sourceContext = `client:${clientId}`;
+
+    const existing = await this.listsRepo.findOne({
+      where: {
+        tenantId: ctx.tenantId,
+        workspaceId,
+        parentListId: parent.id,
+        sourceContext,
+      },
+    });
+
+    if (existing) {
+      return existing;
+    }
+
+    const baseName = (clientName?.trim() || `Cliente ${clientId.slice(0, 8)}`).slice(
+      0,
+      120,
+    );
+
+    const buildList = (name: string) =>
+      this.listsRepo.create({
+        tenantId: ctx.tenantId,
+        workspaceId,
+        name,
+        description: 'Contatos do LeadFlow deste cliente.',
+        color: '#2563EB',
+        parentListId: parent.id,
+        visibility: 'workspace',
+        isSystem: true,
+        isProtected: true,
+        sourceProduct: 'leadflow',
+        sourceContext,
+        createdByUserId: ctx.userId ?? null,
+      });
+
+    try {
+      return await this.listsRepo.save(buildList(baseName));
+    } catch {
+      // The (workspace, name) uniqueness may collide with another list; fall
+      // back to a name suffixed with the client id.
+      const suffixed = `${baseName} (${clientId.slice(0, 6)})`.slice(0, 120);
+      return this.listsRepo.save(buildList(suffixed));
+    }
+  }
+
+  private async ensureListMembership(
+    ctx: RequestContext,
+    listId: string,
+    contactId: string,
+  ) {
+    const workspaceId = this.requireWorkspaceId(ctx);
+    const existing = await this.listMembersRepo.findOne({
+      where: { tenantId: ctx.tenantId, workspaceId, listId, contactId },
+    });
+
+    if (existing) {
+      return existing;
+    }
+
+    return this.listMembersRepo.save(
+      this.listMembersRepo.create({
+        tenantId: ctx.tenantId,
+        workspaceId,
+        listId,
+        contactId,
+      }),
+    );
+  }
+
+  async createLeadFlowContact(
+    ctx: RequestContext,
+    dto: CreateLeadFlowContactDto,
+  ) {
+    const workspaceId = this.requireWorkspaceId(ctx);
+
+    const contact = await this.contactsRepo.save(
+      this.contactsRepo.create({
+        tenantId: ctx.tenantId,
+        workspaceId,
+        type: dto.type,
+        displayName: dto.displayName.trim(),
+        documentType: this.optionalString(dto.documentType),
+        documentNumber: this.optionalString(dto.documentNumber),
+        source: 'manual',
+        businessMode: 'agency_service',
+        lifecycleStage: 'lead',
+        lifecycleStages: ['lead'],
+        status: 'active',
+        ownerUserId: ctx.userId ?? null,
+        createdByUserId: ctx.userId ?? null,
+      }),
+    );
+
+    const methods: Array<Partial<ContactMethodEntity>> = [];
+    if (dto.email?.trim()) {
+      methods.push({ type: 'email', value: dto.email.trim(), isPrimary: true });
+    }
+    if (dto.phone?.trim()) {
+      methods.push({
+        type: 'phone',
+        value: dto.phone.trim(),
+        label: this.optionalString(dto.phoneLabel),
+        isPrimary: true,
+      });
+    }
+    if (dto.website?.trim()) {
+      methods.push({ type: 'website', value: dto.website.trim() });
+    }
+
+    for (const method of methods) {
+      await this.methodsRepo.save(
+        this.methodsRepo.create({
+          tenantId: ctx.tenantId,
+          workspaceId,
+          contactId: contact.id,
+          ...method,
+        }),
+      );
+    }
+
+    const address = dto.address;
+    const hasAddress =
+      address &&
+      Object.values(address).some(
+        (value) => typeof value === 'string' && value.trim(),
+      );
+
+    if (hasAddress && address) {
+      await this.addressesRepo.save(
+        this.addressesRepo.create({
+          tenantId: ctx.tenantId,
+          workspaceId,
+          contactId: contact.id,
+          type: 'main',
+          street: this.optionalString(address.street ?? undefined),
+          number: this.optionalString(address.number ?? undefined),
+          complement: this.optionalString(address.complement ?? undefined),
+          district: this.optionalString(address.district ?? undefined),
+          city: this.optionalString(address.city ?? undefined),
+          state: this.optionalString(address.state ?? undefined),
+          postalCode: this.optionalString(address.postalCode ?? undefined),
+          country: this.optionalString(address.country ?? undefined),
+        }),
+      );
+    }
+
+    const parent = await this.ensureLeadFlowSystemList(ctx);
+    await this.ensureListMembership(ctx, parent.id, contact.id);
+
+    if (dto.clientId) {
+      const clientList = await this.ensureLeadFlowClientList(
+        ctx,
+        dto.clientId,
+        dto.clientName,
+      );
+      await this.ensureListMembership(ctx, clientList.id, contact.id);
+    }
+
+    return this.getContactDetail(ctx, contact.id);
   }
 
   async createContact(ctx: RequestContext, dto: CreateContactDto) {

@@ -28,6 +28,7 @@ import { AgencyContactsService } from './agency-contacts.service';
 import { CreateContactListDto } from '../contacts/dto/create-contact-list.dto';
 import { PatchContactListDto } from '../contacts/dto/patch-contact-list.dto';
 import { CreateContactDto } from '../contacts/dto/create-contact.dto';
+import { CreateLeadFlowContactDto } from './dto/create-leadflow-contact.dto';
 import { PatchContactDto } from '../contacts/dto/patch-contact.dto';
 import {
   CreateAgencyBankDto,
@@ -160,6 +161,15 @@ export class AgencyContactsController {
     @Body() dto: CreateContactDto,
   ) {
     return this.agencyContactsService.createContact(ctx, dto);
+  }
+
+  @Post('leadflow')
+  @RequirePermission('shared.contacts.create')
+  createLeadFlowContact(
+    @RequestContextData() ctx: RequestContext,
+    @Body() dto: CreateLeadFlowContactDto,
+  ) {
+    return this.agencyContactsService.createLeadFlowContact(ctx, dto);
   }
 
   @Get('defaults')
