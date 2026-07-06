@@ -18,6 +18,7 @@ import { PatchCrmOpportunityFollowDto } from './dto/patch-crm-opportunity-follow
 import { PatchCrmOpportunityVisibilityDto } from './dto/patch-crm-opportunity-visibility.dto';
 import { PatchCrmStageFoldDto } from './dto/patch-crm-stage-fold.dto';
 import { PatchCrmTagDto } from './dto/patch-crm-tag.dto';
+import { ReorderCrmOpportunitiesDto } from './dto/reorder-crm-opportunities.dto';
 import { ReorderCrmStagesDto } from './dto/reorder-crm-stages.dto';
 import { PatchCrmOpportunityDto } from './dto/patch-crm-opportunity.dto';
 import { PatchCrmOpportunityStageDto } from './dto/patch-crm-opportunity-stage.dto';
@@ -286,6 +287,7 @@ export class CrmService {
     return this.opportunitiesRepository.find({
       where: this.withClientScope(ctx, where),
       order: {
+        sortOrder: 'ASC',
         nextFollowUpAt: 'ASC',
         createdAt: 'DESC',
       },
@@ -341,6 +343,9 @@ export class CrmService {
       lastActivityAt: null,
       lostReason: dto.lostReason ?? null,
       cardColor: dto.cardColor ?? null,
+      sortOrder:
+        dto.sortOrder ??
+        (await this.getNextOpportunitySortOrder(ctx, pipeline.id, stage.id)),
       visibility: dto.visibility ?? 'workspace',
       followMode: dto.followMode ?? 'automatic',
       followMessage: dto.followMessage ?? null,
@@ -403,7 +408,17 @@ export class CrmService {
     await this.validateContactForOpportunity(ctx, dto.contactId);
 
     if (dto.pipelineId !== undefined) opportunity.pipelineId = dto.pipelineId;
-    if (dto.stageId !== undefined) opportunity.stageId = dto.stageId;
+    if (dto.stageId !== undefined) {
+      opportunity.stageId = dto.stageId;
+
+      if (dto.sortOrder === undefined) {
+        opportunity.sortOrder = await this.getNextOpportunitySortOrder(
+          ctx,
+          pipelineId,
+          dto.stageId,
+        );
+      }
+    }
     if (dto.contactId !== undefined) opportunity.contactId = dto.contactId;
     if (dto.contactName !== undefined)
       opportunity.contactName = dto.contactName;
@@ -437,6 +452,7 @@ export class CrmService {
       opportunity.nextFollowUpAt = this.toDateOrNull(dto.nextFollowUpAt);
     if (dto.lostReason !== undefined) opportunity.lostReason = dto.lostReason;
     if (dto.cardColor !== undefined) opportunity.cardColor = dto.cardColor;
+    if (dto.sortOrder !== undefined) opportunity.sortOrder = dto.sortOrder;
     if (dto.visibility !== undefined) opportunity.visibility = dto.visibility;
     if (dto.followMode !== undefined) opportunity.followMode = dto.followMode;
     if (dto.followMessage !== undefined)
@@ -491,6 +507,11 @@ export class CrmService {
     }
 
     opportunity.stageId = stage.id;
+    opportunity.sortOrder = await this.getNextOpportunitySortOrder(
+      ctx,
+      opportunity.pipelineId,
+      stage.id,
+    );
 
     if (stage.isWonStage || stage.type === 'won') {
       this.applyOpportunityStatus(opportunity, 'won');
@@ -804,6 +825,57 @@ export class CrmService {
     return updated.sort((a, b) => a.sortOrder - b.sortOrder);
   }
 
+  async reorderOpportunities(
+    ctx: RequestContext,
+    dto: ReorderCrmOpportunitiesDto,
+  ): Promise<CrmOpportunityEntity[]> {
+    const updated: CrmOpportunityEntity[] = [];
+
+    for (const item of dto.opportunities) {
+      const opportunity = await this.getOpportunity(ctx, item.id);
+      const previousStageId = opportunity.stageId;
+      const stage = await this.getStage(ctx, item.stageId);
+
+      if (stage.pipelineId !== opportunity.pipelineId) {
+        throw new BadRequestException(
+          'Stage does not belong to this opportunity pipeline.',
+        );
+      }
+
+      opportunity.stageId = item.stageId;
+      opportunity.sortOrder = item.sortOrder;
+
+      if (stage.isWonStage || stage.type === 'won') {
+        this.applyOpportunityStatus(opportunity, 'won');
+      }
+
+      if (stage.isLostStage || stage.type === 'lost') {
+        this.applyOpportunityStatus(opportunity, 'lost');
+      }
+
+      const saved = await this.opportunitiesRepository.save(opportunity);
+      updated.push(saved);
+
+      if (previousStageId !== saved.stageId) {
+        await this.createOpportunityEvent(ctx, saved.id, {
+          actorType: 'user',
+          eventType: 'stage_changed',
+          title: 'Etapa alterada',
+          beforeData: { stageId: previousStageId },
+          afterData: { stageId: saved.stageId, status: saved.status },
+        });
+      }
+    }
+
+    return updated.sort((first, second) => {
+      if (first.stageId !== second.stageId) {
+        return first.stageId.localeCompare(second.stageId);
+      }
+
+      return first.sortOrder - second.sortOrder;
+    });
+  }
+
   async listOpportunityEvents(
     ctx: RequestContext,
     opportunityId: string,
@@ -854,6 +926,27 @@ export class CrmService {
       .trim()
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/^-+|-+$/g, '');
+  }
+
+  private async getNextOpportunitySortOrder(
+    ctx: RequestContext,
+    pipelineId: string,
+    stageId: string,
+  ): Promise<number> {
+    const tenantId = this.requireTenantId(ctx);
+    const workspaceId = this.requireWorkspaceId(ctx);
+    const lastOpportunity = await this.opportunitiesRepository.findOne({
+      where: this.withClientScope(ctx, {
+        tenantId,
+        workspaceId,
+        pipelineId,
+        stageId,
+        deletedAt: IsNull(),
+      }),
+      order: { sortOrder: 'DESC' },
+    });
+
+    return (lastOpportunity?.sortOrder ?? -10) + 10;
   }
 
   private async ensureDefaultPipeline(

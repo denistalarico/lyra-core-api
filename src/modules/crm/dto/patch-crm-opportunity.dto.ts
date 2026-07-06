@@ -1,4 +1,4 @@
-import { IsBoolean, IsDateString, IsIn, IsNumberString, IsObject, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
+import { IsBoolean, IsDateString, IsIn, IsInt, IsNumberString, IsObject, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
 
 export class PatchCrmOpportunityDto {
   @IsOptional()
@@ -98,6 +98,10 @@ export class PatchCrmOpportunityDto {
   @IsString()
   @MaxLength(32)
   cardColor?: string | null;
+
+  @IsOptional()
+  @IsInt()
+  sortOrder?: number;
 
   @IsOptional()
   @IsIn(['workspace', 'assigned_only', 'private'])

@@ -35,6 +35,7 @@ import { PatchCrmOpportunityFollowDto } from './dto/patch-crm-opportunity-follow
 import { PatchCrmOpportunityVisibilityDto } from './dto/patch-crm-opportunity-visibility.dto';
 import { PatchCrmStageFoldDto } from './dto/patch-crm-stage-fold.dto';
 import { PatchCrmTagDto } from './dto/patch-crm-tag.dto';
+import { ReorderCrmOpportunitiesDto } from './dto/reorder-crm-opportunities.dto';
 import { ReorderCrmStagesDto } from './dto/reorder-crm-stages.dto';
 import { CrmOpportunityFilters, CrmService } from './crm.service';
 
@@ -230,6 +231,18 @@ export class CrmController {
     @Body() dto: CreateCrmOpportunityDto,
   ) {
     return this.crmService.createOpportunity(ctx, dto);
+  }
+
+  @Patch('opportunities/reorder')
+  @RequireAnyPermission(
+    'leadflow.crm.records.update.assigned',
+    'leadflow.crm.records.update.client',
+  )
+  reorderOpportunities(
+    @RequestContextData() ctx: RequestContext,
+    @Body() dto: ReorderCrmOpportunitiesDto,
+  ) {
+    return this.crmService.reorderOpportunities(ctx, dto);
   }
 
   @Get('opportunities/:id')

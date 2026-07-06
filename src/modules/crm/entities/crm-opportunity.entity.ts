@@ -93,6 +93,9 @@ export class CrmOpportunityEntity {
   @Column({ name: 'card_color', type: 'varchar', length: 32, nullable: true })
   cardColor!: string | null;
 
+  @Column({ name: 'sort_order', type: 'int', default: 0 })
+  sortOrder!: number;
+
   @Column({ type: 'varchar', length: 32, default: 'workspace' })
   visibility!: string;
 
