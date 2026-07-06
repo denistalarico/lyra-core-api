@@ -4,6 +4,7 @@ import type { RequestContext } from '../../common/context/request-context.interf
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import {
   PermissionsGuard,
+  RequireAnyPermission,
   RequirePermission,
   RequireProductEntitlement,
 } from '../permissions';
@@ -17,7 +18,14 @@ export class InboxSettingsController {
   constructor(private readonly inboxSettingsService: InboxSettingsService) {}
 
   @Get()
-  @RequirePermission('leadflow.settings.general.view.admin')
+  // Admins manage settings, but Inbox operators (managers/members) also need to
+  // read active channels/tags/quick replies to run the Inbox itself.
+  @RequireAnyPermission(
+    'leadflow.settings.general.view.admin',
+    'leadflow.inbox.conversation.view.assigned',
+    'leadflow.inbox.conversation.view.client',
+    'leadflow.inbox.conversation.view.all',
+  )
   getSettings(@RequestContextData() ctx: RequestContext) {
     return this.inboxSettingsService.getSettings(ctx);
   }
