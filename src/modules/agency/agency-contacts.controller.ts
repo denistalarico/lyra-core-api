@@ -172,6 +172,12 @@ export class AgencyContactsController {
     return this.agencyContactsService.createLeadFlowContact(ctx, dto);
   }
 
+  @Get('leadflow/client-list')
+  @RequireAnyPermission(...CONTACT_VIEW_PERMISSIONS)
+  getLeadFlowClientList(@RequestContextData() ctx: RequestContext) {
+    return this.agencyContactsService.getLeadFlowClientList(ctx);
+  }
+
   @Get('defaults')
   @RequireAnyPermission(...CONTACT_VIEW_PERMISSIONS)
   getDefaults(@RequestContextData() ctx: RequestContext) {

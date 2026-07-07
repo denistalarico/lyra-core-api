@@ -583,6 +583,20 @@ export class AgencyContactsService {
     }
   }
 
+  async getLeadFlowClientList(ctx: RequestContext) {
+    const managedContext = ctx.managedContext;
+
+    if (managedContext?.productKey === 'leadflow' && managedContext.clientId) {
+      return this.ensureLeadFlowClientList(
+        ctx,
+        managedContext.clientId,
+        managedContext.clientName,
+      );
+    }
+
+    return this.ensureLeadFlowSystemList(ctx);
+  }
+
   private async ensureListMembership(
     ctx: RequestContext,
     listId: string,
