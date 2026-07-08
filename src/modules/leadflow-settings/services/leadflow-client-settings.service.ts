@@ -101,7 +101,7 @@ export class LeadFlowClientSettingsService {
     }
 
     const [clients, total] = await qb
-      .orderBy('client.display_name', 'ASC')
+      .orderBy('client.displayName', 'ASC')
       .take(limit)
       .skip(offset)
       .getManyAndCount();
