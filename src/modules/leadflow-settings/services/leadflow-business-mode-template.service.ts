@@ -1,6 +1,7 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { IsNull, Repository } from 'typeorm';
+import type { RequestContext } from '../../../common/context/request-context.interface';
 import { LeadFlowBusinessModeTemplateEntity } from '../entities';
 import { LeadFlowBusinessMode } from '../enums/leadflow-business-mode.enum';
 import { LeadFlowSettingsStatus } from '../enums/leadflow-settings-status.enum';
@@ -12,12 +13,68 @@ export class LeadFlowBusinessModeTemplateService {
     private readonly templatesRepository: Repository<LeadFlowBusinessModeTemplateEntity>,
   ) {}
 
+  listTemplates(
+    ctx: RequestContext,
+  ): Promise<LeadFlowBusinessModeTemplateEntity[]> {
+    return this.templatesRepository.find({
+      where: [
+        {
+          tenantId: ctx.tenantId,
+          status: LeadFlowSettingsStatus.Active,
+          deletedAt: IsNull(),
+        },
+        {
+          tenantId: IsNull(),
+          status: LeadFlowSettingsStatus.Active,
+          deletedAt: IsNull(),
+        },
+      ],
+      order: { category: 'ASC', name: 'ASC', version: 'DESC' },
+    });
+  }
+
+  async getTemplateByKey(
+    ctx: RequestContext,
+    key: string,
+  ): Promise<LeadFlowBusinessModeTemplateEntity> {
+    const customTemplate = await this.templatesRepository.findOne({
+      where: {
+        tenantId: ctx.tenantId,
+        key: key as LeadFlowBusinessMode,
+        status: LeadFlowSettingsStatus.Active,
+        deletedAt: IsNull(),
+      },
+      order: { version: 'DESC' },
+    });
+
+    if (customTemplate) {
+      return customTemplate;
+    }
+
+    const officialTemplate = await this.templatesRepository.findOne({
+      where: {
+        tenantId: IsNull(),
+        key: key as LeadFlowBusinessMode,
+        status: LeadFlowSettingsStatus.Active,
+        deletedAt: IsNull(),
+      },
+      order: { version: 'DESC' },
+    });
+
+    if (!officialTemplate) {
+      throw new NotFoundException(`LeadFlow business mode '${key}' not found.`);
+    }
+
+    return officialTemplate;
+  }
+
   listOfficialActive(): Promise<LeadFlowBusinessModeTemplateEntity[]> {
     return this.templatesRepository.find({
       where: {
         tenantId: IsNull(),
         isOfficial: true,
         status: LeadFlowSettingsStatus.Active,
+        deletedAt: IsNull(),
       },
       order: { category: 'ASC', name: 'ASC', version: 'DESC' },
     });
