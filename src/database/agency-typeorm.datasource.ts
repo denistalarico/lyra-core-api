@@ -83,6 +83,7 @@ import { AddKnowledgePersonalScope1782700500000 } from './migrations/17827005000
 import { CreateAgencyFinanceBillRecurrences1782800000000 } from './migrations/1782800000000-create-agency-finance-bill-recurrences';
 import { CreateAgencyHelpCenter1783000000000 } from './migrations/1783000000000-create-agency-help-center';
 import { AddCrmOpportunitySortOrder1783100000000 } from './migrations/1783100000000-add-crm-opportunity-sort-order';
+import { CreateLeadflowSettingsCore1783200000000 } from './migrations/1783200000000-create-leadflow-settings-core';
 
 export const AgencyDataSource = new DataSource({
   type: 'postgres',
@@ -179,5 +180,6 @@ export const AgencyDataSource = new DataSource({
     CreateAgencyFinanceBillRecurrences1782800000000,
     CreateAgencyHelpCenter1783000000000,
     AddCrmOpportunitySortOrder1783100000000,
+    CreateLeadflowSettingsCore1783200000000,
   ],
 });

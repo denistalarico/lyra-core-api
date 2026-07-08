@@ -24,6 +24,7 @@
     "typecheck": "tsc --noEmit",
     "agency:seed-sales": "ts-node -r tsconfig-paths/register src/scripts/seed-agency-sales.ts",
     "agency:seed-help-center": "ts-node -r tsconfig-paths/register src/scripts/seed-help-center.ts",
+    "agency:seed-leadflow-business-modes": "ts-node -r tsconfig-paths/register src/scripts/seed-leadflow-business-modes.ts",
     "agency:update-document-layout-templates": "ts-node -r tsconfig-paths/register src/scripts/update-document-layout-templates.ts"
   },
   "dependencies": {
