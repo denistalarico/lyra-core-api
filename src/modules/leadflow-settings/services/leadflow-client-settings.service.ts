@@ -24,6 +24,7 @@ import {
   LeadFlowBusinessModeTemplateEntity,
   LeadFlowClientSettingsEntity,
 } from '../entities';
+import { LeadFlowSettingsContextType } from '../enums/leadflow-settings-context-type.enum';
 import { LeadFlowSettingsStatus } from '../enums/leadflow-settings-status.enum';
 import {
   DEFAULT_LEADFLOW_ENABLED_APPS_SCHEMA,
@@ -65,6 +66,7 @@ export class LeadFlowClientSettingsService {
           'settings.tenant_id = client.tenant_id',
           'settings.workspace_id = client.workspace_id',
           'settings.agency_client_id = client.id',
+          "settings.context_type = 'client'",
         ].join(' AND '),
       )
       .where('client.tenant_id = :tenantId', { tenantId: ctx.tenantId })
@@ -165,6 +167,7 @@ export class LeadFlowClientSettingsService {
     const settings = this.settingsRepository.create({
       tenantId: ctx.tenantId,
       workspaceId,
+      contextType: LeadFlowSettingsContextType.Client,
       agencyClientId,
       managedTenantId: agencyClient.managedTenantId,
       businessModeKey: template.key,
@@ -213,62 +216,151 @@ export class LeadFlowClientSettingsService {
       );
     }
 
-    let template: LeadFlowBusinessModeTemplateEntity | null = null;
-    if (dto.businessModeKey !== undefined) {
-      template = await this.resolveBusinessModeTemplate(
-        ctx,
-        dto.businessModeKey,
-      );
-      settings.businessModeKey = template.key;
-      settings.businessModeTemplateId = template.id;
-    } else if (
-      dto.enabledApps !== undefined ||
-      dto.enabledIntegrations !== undefined ||
-      dto.clientPromptConfig !== undefined
-    ) {
-      template = await this.resolveBusinessModeTemplate(
-        ctx,
-        settings.businessModeKey,
+    return this.applySettingsUpdate(ctx, settings, dto);
+  }
+
+  async getAgencySettings(
+    ctx: RequestContext,
+  ): Promise<LeadFlowClientSettingsResponse> {
+    const settings = await this.findAgencySettings(ctx);
+
+    if (!settings) {
+      throw new NotFoundException(
+        'LeadFlow settings not found for this agency.',
       );
     }
 
-    if (template) {
-      this.assertValidSettingsPayload(dto, template);
+    return mapLeadFlowClientSettingsResponse(settings);
+  }
+
+  async createAgencySettings(
+    ctx: RequestContext,
+    dto: CreateLeadFlowClientSettingsDto,
+  ): Promise<LeadFlowClientSettingsResponse> {
+    const existing = await this.findAgencySettings(ctx);
+
+    if (existing) {
+      throw new ConflictException(
+        'LeadFlow settings already exist for this agency.',
+      );
     }
 
-    if (dto.planKey !== undefined) settings.planKey = dto.planKey;
-    if (dto.status !== undefined) settings.status = dto.status;
-    if (dto.enabledApps !== undefined) settings.enabledApps = dto.enabledApps;
-    if (dto.enabledIntegrations !== undefined) {
-      settings.enabledIntegrations = dto.enabledIntegrations;
-    }
-    if (dto.permissionsConfig !== undefined) {
-      settings.permissionsConfig = dto.permissionsConfig;
-    }
-    if (dto.brandingConfig !== undefined)
-      settings.brandingConfig = dto.brandingConfig;
-    if (dto.agentConfig !== undefined) settings.agentConfig = dto.agentConfig;
-    if (dto.clientPromptConfig !== undefined) {
-      settings.clientPromptConfig = dto.clientPromptConfig;
-    }
-    if (dto.inboxConfig !== undefined) settings.inboxConfig = dto.inboxConfig;
-    if (dto.inboxOverrides !== undefined)
-      settings.inboxOverrides = dto.inboxOverrides;
-    if (dto.handoffOverrides !== undefined) {
-      settings.handoffOverrides = dto.handoffOverrides;
-    }
-    if (dto.leadsConfig !== undefined) settings.leadsConfig = dto.leadsConfig;
-    if (dto.pipelineRef !== undefined) settings.pipelineRef = dto.pipelineRef;
-    if (dto.businessModeOverrides !== undefined) {
-      settings.businessModeOverrides = dto.businessModeOverrides;
-    }
-    if (dto.metadata !== undefined) settings.metadata = dto.metadata;
+    const template = await this.resolveBusinessModeTemplate(
+      ctx,
+      dto.businessModeKey,
+    );
+    this.assertValidSettingsPayload(dto, template);
 
-    settings.updatedById = ctx.userId ?? null;
+    const workspaceId = this.requireWorkspaceId(ctx);
+    const settings = this.settingsRepository.create({
+      tenantId: ctx.tenantId,
+      workspaceId,
+      contextType: LeadFlowSettingsContextType.Agency,
+      agencyClientId: null,
+      managedTenantId: null,
+      businessModeKey: template.key,
+      businessModeTemplateId: template.id,
+      planKey: dto.planKey ?? null,
+      status: dto.status ?? LeadFlowSettingsStatus.Draft,
+      developerModeEnabled: false,
+      enabledApps: dto.enabledApps ?? this.buildDefaultEnabledApps(template),
+      enabledIntegrations:
+        dto.enabledIntegrations ??
+        this.buildDefaultEnabledIntegrations(template),
+      permissionsConfig: dto.permissionsConfig ?? {},
+      brandingConfig: dto.brandingConfig ?? {},
+      agentConfig: dto.agentConfig ?? {},
+      clientPromptConfig: dto.clientPromptConfig ?? {},
+      inboxConfig: dto.inboxConfig ?? {},
+      inboxOverrides: dto.inboxOverrides ?? {},
+      handoffOverrides: dto.handoffOverrides ?? {},
+      leadsConfig: dto.leadsConfig ?? {},
+      pipelineRef: dto.pipelineRef ?? {},
+      businessModeOverrides: dto.businessModeOverrides ?? {},
+      developerOverrides: {},
+      metadata: dto.metadata ?? {},
+      createdById: ctx.userId ?? null,
+      updatedById: ctx.userId ?? null,
+    });
 
     return mapLeadFlowClientSettingsResponse(
       await this.settingsRepository.save(settings),
     );
+  }
+
+  async updateAgencySettings(
+    ctx: RequestContext,
+    dto: UpdateLeadFlowClientSettingsDto,
+  ): Promise<LeadFlowClientSettingsResponse> {
+    this.assertDeveloperModeNotRequested(dto);
+
+    const settings = await this.findAgencySettings(ctx);
+
+    if (!settings) {
+      throw new NotFoundException(
+        'LeadFlow settings not found for this agency.',
+      );
+    }
+
+    return this.applySettingsUpdate(ctx, settings, dto);
+  }
+
+  async validateAgencySettings(
+    ctx: RequestContext,
+    dto: ValidateLeadFlowClientSettingsDto,
+  ): Promise<LeadFlowSettingsValidationResponse> {
+    const errors: LeadFlowSettingsValidationIssue[] = [];
+    const workspaceId = this.getWorkspaceId(ctx);
+
+    if (!workspaceId) {
+      errors.push({
+        field: 'workspaceId',
+        message: 'Workspace context is required.',
+      });
+    }
+
+    let template: LeadFlowBusinessModeTemplateEntity | null = null;
+    if (!dto.businessModeKey) {
+      errors.push({
+        field: 'businessModeKey',
+        message: 'Business mode is required.',
+      });
+    } else {
+      template = await this.findBusinessModeTemplate(ctx, dto.businessModeKey);
+      if (!template) {
+        errors.push({
+          field: 'businessModeKey',
+          message: 'Business mode not found.',
+        });
+      }
+    }
+
+    if (dto.enabledApps !== undefined) {
+      errors.push(...this.validateEnabledApps(dto.enabledApps, 'enabledApps'));
+    }
+    if (dto.enabledIntegrations !== undefined) {
+      errors.push(
+        ...this.validateEnabledIntegrations(
+          dto.enabledIntegrations,
+          'enabledIntegrations',
+        ),
+      );
+    }
+    if (template && dto.clientPromptConfig !== undefined) {
+      errors.push(
+        ...this.validateClientPromptConfig(
+          template,
+          dto.clientPromptConfig,
+          'clientPromptConfig',
+        ),
+      );
+    }
+
+    return {
+      valid: errors.length === 0,
+      errors,
+      warnings: [],
+    };
   }
 
   async validateSettings(
@@ -409,7 +501,23 @@ export class LeadFlowClientSettingsService {
       where: {
         tenantId: ctx.tenantId,
         workspaceId,
+        contextType: LeadFlowSettingsContextType.Client,
         agencyClientId,
+      },
+    });
+  }
+
+  private findAgencySettings(
+    ctx: RequestContext,
+  ): Promise<LeadFlowClientSettingsEntity | null> {
+    const workspaceId = this.requireWorkspaceId(ctx);
+
+    return this.settingsRepository.findOne({
+      where: {
+        tenantId: ctx.tenantId,
+        workspaceId,
+        contextType: LeadFlowSettingsContextType.Agency,
+        agencyClientId: IsNull(),
       },
     });
   }
@@ -427,11 +535,79 @@ export class LeadFlowClientSettingsService {
       where: {
         tenantId,
         workspaceId,
+        contextType: LeadFlowSettingsContextType.Client,
         agencyClientId: In(agencyClientIds),
       },
     });
 
-    return new Map(settings.map((item) => [item.agencyClientId, item]));
+    return new Map(
+      settings
+        .filter((item) => item.agencyClientId)
+        .map((item) => [item.agencyClientId as string, item]),
+    );
+  }
+
+  private async applySettingsUpdate(
+    ctx: RequestContext,
+    settings: LeadFlowClientSettingsEntity,
+    dto: UpdateLeadFlowClientSettingsDto,
+  ): Promise<LeadFlowClientSettingsResponse> {
+    let template: LeadFlowBusinessModeTemplateEntity | null = null;
+    if (dto.businessModeKey !== undefined) {
+      template = await this.resolveBusinessModeTemplate(
+        ctx,
+        dto.businessModeKey,
+      );
+      settings.businessModeKey = template.key;
+      settings.businessModeTemplateId = template.id;
+    } else if (
+      dto.enabledApps !== undefined ||
+      dto.enabledIntegrations !== undefined ||
+      dto.clientPromptConfig !== undefined
+    ) {
+      template = await this.resolveBusinessModeTemplate(
+        ctx,
+        settings.businessModeKey,
+      );
+    }
+
+    if (template) {
+      this.assertValidSettingsPayload(dto, template);
+    }
+
+    if (dto.planKey !== undefined) settings.planKey = dto.planKey;
+    if (dto.status !== undefined) settings.status = dto.status;
+    if (dto.enabledApps !== undefined) settings.enabledApps = dto.enabledApps;
+    if (dto.enabledIntegrations !== undefined) {
+      settings.enabledIntegrations = dto.enabledIntegrations;
+    }
+    if (dto.permissionsConfig !== undefined) {
+      settings.permissionsConfig = dto.permissionsConfig;
+    }
+    if (dto.brandingConfig !== undefined)
+      settings.brandingConfig = dto.brandingConfig;
+    if (dto.agentConfig !== undefined) settings.agentConfig = dto.agentConfig;
+    if (dto.clientPromptConfig !== undefined) {
+      settings.clientPromptConfig = dto.clientPromptConfig;
+    }
+    if (dto.inboxConfig !== undefined) settings.inboxConfig = dto.inboxConfig;
+    if (dto.inboxOverrides !== undefined)
+      settings.inboxOverrides = dto.inboxOverrides;
+    if (dto.handoffOverrides !== undefined) {
+      settings.handoffOverrides = dto.handoffOverrides;
+    }
+    if (dto.leadsConfig !== undefined) settings.leadsConfig = dto.leadsConfig;
+    if (dto.pipelineRef !== undefined) settings.pipelineRef = dto.pipelineRef;
+    if (dto.businessModeOverrides !== undefined) {
+      settings.businessModeOverrides = dto.businessModeOverrides;
+    }
+    if (dto.metadata !== undefined) settings.metadata = dto.metadata;
+
+    settings.updatedById = ctx.userId ?? null;
+
+    return mapLeadFlowClientSettingsResponse(
+      await this.settingsRepository.save(settings),
+    );
   }
 
   private buildDefaultEnabledApps(

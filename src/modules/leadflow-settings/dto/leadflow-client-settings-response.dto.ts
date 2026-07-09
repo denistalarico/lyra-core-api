@@ -1,4 +1,5 @@
 import type { LeadFlowClientSettingsEntity } from '../entities';
+import type { LeadFlowSettingsContextType } from '../enums/leadflow-settings-context-type.enum';
 import type { LeadFlowSettingsStatus } from '../enums/leadflow-settings-status.enum';
 import type {
   LeadFlowEnabledAppsConfig,
@@ -10,7 +11,8 @@ export type LeadFlowClientSettingsResponse = {
   id: string;
   tenantId: string;
   workspaceId: string;
-  agencyClientId: string;
+  contextType: LeadFlowSettingsContextType;
+  agencyClientId: string | null;
   managedTenantId: string | null;
   businessModeKey: string;
   businessModeTemplateId: string | null;
@@ -43,6 +45,7 @@ export function mapLeadFlowClientSettingsResponse(
     id: entity.id,
     tenantId: entity.tenantId,
     workspaceId: entity.workspaceId,
+    contextType: entity.contextType,
     agencyClientId: entity.agencyClientId,
     managedTenantId: entity.managedTenantId,
     businessModeKey: entity.businessModeKey,

@@ -84,6 +84,7 @@ import { CreateAgencyFinanceBillRecurrences1782800000000 } from './migrations/17
 import { CreateAgencyHelpCenter1783000000000 } from './migrations/1783000000000-create-agency-help-center';
 import { AddCrmOpportunitySortOrder1783100000000 } from './migrations/1783100000000-add-crm-opportunity-sort-order';
 import { CreateLeadflowSettingsCore1783200000000 } from './migrations/1783200000000-create-leadflow-settings-core';
+import { AddLeadflowAgencySettingsContext1783300000000 } from './migrations/1783300000000-add-leadflow-agency-settings-context';
 
 export const AgencyDataSource = new DataSource({
   type: 'postgres',
@@ -181,5 +182,6 @@ export const AgencyDataSource = new DataSource({
     CreateAgencyHelpCenter1783000000000,
     AddCrmOpportunitySortOrder1783100000000,
     CreateLeadflowSettingsCore1783200000000,
+    AddLeadflowAgencySettingsContext1783300000000,
   ],
 });

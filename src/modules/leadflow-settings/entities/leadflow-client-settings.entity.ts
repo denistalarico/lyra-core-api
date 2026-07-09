@@ -4,10 +4,10 @@ import {
   Entity,
   Index,
   PrimaryGeneratedColumn,
-  Unique,
   UpdateDateColumn,
 } from 'typeorm';
 import { LeadFlowBusinessMode } from '../enums/leadflow-business-mode.enum';
+import { LeadFlowSettingsContextType } from '../enums/leadflow-settings-context-type.enum';
 import { LeadFlowSettingsStatus } from '../enums/leadflow-settings-status.enum';
 import type {
   LeadFlowEnabledAppsConfig,
@@ -15,11 +15,19 @@ import type {
   LeadFlowJsonObject,
 } from '../types/leadflow-settings.types';
 
-@Unique('UQ_lf_client_settings_tenant_workspace_client', [
-  'tenantId',
-  'workspaceId',
-  'agencyClientId',
-])
+@Index('IDX_lf_client_settings_unique_agency_context', ['tenantId', 'workspaceId'], {
+  unique: true,
+  where: "context_type = 'agency'",
+})
+@Index(
+  'IDX_lf_client_settings_unique_client_context',
+  ['tenantId', 'workspaceId', 'agencyClientId'],
+  {
+    unique: true,
+    where: "context_type = 'client'",
+  },
+)
+@Index('IDX_lf_client_settings_context_type', ['contextType'])
 @Index('IDX_lf_client_settings_managed_tenant_id', ['managedTenantId'])
 @Index('IDX_lf_client_settings_business_mode_key', ['businessModeKey'])
 @Index('IDX_lf_client_settings_template_id', ['businessModeTemplateId'])
@@ -36,8 +44,16 @@ export class LeadFlowClientSettingsEntity {
   @Column({ name: 'workspace_id', type: 'uuid' })
   workspaceId!: string;
 
-  @Column({ name: 'agency_client_id', type: 'uuid' })
-  agencyClientId!: string;
+  @Column({
+    name: 'context_type',
+    type: 'varchar',
+    length: 30,
+    default: LeadFlowSettingsContextType.Client,
+  })
+  contextType!: LeadFlowSettingsContextType;
+
+  @Column({ name: 'agency_client_id', type: 'uuid', nullable: true })
+  agencyClientId!: string | null;
 
   @Column({ name: 'managed_tenant_id', type: 'uuid', nullable: true })
   managedTenantId!: string | null;

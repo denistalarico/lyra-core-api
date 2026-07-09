@@ -6,6 +6,7 @@ import {
   LeadFlowBusinessModeTemplateEntity,
   LeadFlowClientSettingsEntity,
 } from './entities';
+import { LeadFlowAgencySettingsController } from './leadflow-agency-settings.controller';
 import { LeadFlowBusinessModesController } from './leadflow-business-modes.controller';
 import { LeadFlowClientSettingsController } from './leadflow-client-settings.controller';
 import { LeadFlowBusinessModeTemplateSeederService } from './services/leadflow-business-mode-template-seeder.service';
@@ -25,6 +26,7 @@ import { LeadFlowClientSettingsService } from './services/leadflow-client-settin
     ),
   ],
   controllers: [
+    LeadFlowAgencySettingsController,
     LeadFlowBusinessModesController,
     LeadFlowClientSettingsController,
   ],
