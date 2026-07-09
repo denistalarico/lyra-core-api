@@ -304,7 +304,10 @@ export class FinanceController {
   private async buildInvoicePdfBuffer(ctx: ReturnType<typeof getFinanceContext>, id: string) {
     const invoice = await this.financeBillingService.getInvoice(ctx, id);
     const lines = invoice.lines ?? [];
-    const customerIdentity = await this.resolveContactInvoiceIdentity(ctx, invoice.customerId);
+    const [customerIdentity, paymentAccount] = await Promise.all([
+      this.resolveContactInvoiceIdentity(ctx, invoice.customerId),
+      this.resolveInvoicePaymentAccount(ctx),
+    ]);
     const invoiceForPdf = {
       ...invoice,
       metadata: {
@@ -333,11 +336,27 @@ export class FinanceController {
         lines,
         layout,
         template,
+        paymentAccount,
       });
       return { invoice, buffer };
     } catch (error) {
       this.handlePdfError(error, `invoice ${invoice.invoiceNumber}`);
     }
+  }
+
+  private async resolveInvoicePaymentAccount(ctx: ReturnType<typeof getFinanceContext>) {
+    const accounts = await this.financeService.listBankAccounts(ctx);
+    const activeAccounts = accounts.filter((account) => account.active !== false);
+    const hasPix = (account: (typeof activeAccounts)[number]) =>
+      Boolean(account.bankDetails?.pixKey?.trim());
+
+    return (
+      activeAccounts.find((account) => account.isPrimary && hasPix(account)) ??
+      activeAccounts.find(hasPix) ??
+      activeAccounts.find((account) => account.isPrimary) ??
+      activeAccounts[0] ??
+      null
+    );
   }
 
   @Get('health')

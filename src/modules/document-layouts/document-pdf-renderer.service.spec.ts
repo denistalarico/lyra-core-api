@@ -8,6 +8,9 @@ import type {
 } from './entities/document-layout.entities';
 import type { FinanceBill } from '../finance/entities/finance-bill.entity';
 import type { FinanceBillLine } from '../finance/entities/finance-bill-line.entity';
+import type { FinanceInvoice } from '../finance/entities/finance-invoice.entity';
+import type { FinanceInvoiceLine } from '../finance/entities/finance-invoice-line.entity';
+import type { FinanceBankAccount } from '../finance/entities/finance-bank-account.entity';
 
 function makeLayout(): DocumentLayoutEntity {
   return {
@@ -25,7 +28,37 @@ function makeLayout(): DocumentLayoutEntity {
 function makeTemplate(): DocumentLayoutTemplateEntity {
   return {
     htmlTemplate:
-      '<section>{{documentTypeLabel}} {{documentTitle}} {{customerName}} {{dateGridCells}} {{validUntil}} {{itemsTable}} {{totalsTable}} {{footerText}}</section>',
+      `<div class="doc-page doc-template-{{layoutType}}">
+        <header class="doc-header">
+          <div class="doc-brand">{{companyBrandBlock}}</div>
+          <div class="doc-company">
+            <span>{{companyAddress}}</span>
+            <span>{{companyCity}} {{companyRegion}} {{companyPostalCode}}</span>
+            <span>{{companyEmail}} {{companyPhone}}</span>
+          </div>
+        </header>
+        <main class="doc-content">
+          <section class="doc-hero">
+            <div class="doc-hero-copy">
+              <span class="doc-kicker">{{documentTypeLabel}}</span>
+              <h1>{{documentTitle}}</h1>
+              <p>{{documentSubtitle}}</p>
+            </div>
+            {{customerHeaderBlock}}
+          </section>
+          <section class="doc-grid">
+            <div><small>{{documentNumberLabel}}</small><strong>{{documentNumber}}</strong></div>
+            {{dateGridCells}}
+          </section>
+          <section class="doc-closing{{closingModifier}}">
+            {{termsBlock}}
+            <div class="doc-totals-panel doc-totals">
+              <h3>Resumo financeiro</h3>
+              {{totalsTable}}
+            </div>
+          </section>
+        </main>
+      </div>`,
     cssTemplate: 'body { color: {{textColor}}; font-family: {{fontFamily}}; }',
   } as unknown as DocumentLayoutTemplateEntity;
 }
@@ -55,6 +88,57 @@ function makeBareBill(overrides: Partial<FinanceBill> = {}): FinanceBill {
     metadata: {},
     ...overrides,
   } as unknown as FinanceBill;
+}
+
+function makeBareInvoice(overrides: Partial<FinanceInvoice> = {}): FinanceInvoice {
+  return {
+    id: 'invoice-1',
+    tenantId: 't',
+    workspaceId: 'w',
+    customerId: null,
+    invoiceNumber: 'INV-0001',
+    currency: 'BRL',
+    issueDate: '2026-07-01',
+    dueDate: '2026-07-10',
+    periodStart: null,
+    periodEnd: null,
+    subtotalAmount: '150.00',
+    discountAmount: '0.00',
+    taxAmount: '0.00',
+    totalAmount: '150.00',
+    paidAmount: '0.00',
+    balanceDue: '150.00',
+    terms: null,
+    notes: null,
+    metadata: {
+      customerName: 'Cliente Aurora',
+      customerAvatarUrl: 'https://example.com/avatar.png',
+    },
+    ...overrides,
+  } as unknown as FinanceInvoice;
+}
+
+function makePixBankAccount(overrides: Partial<FinanceBankAccount> = {}): FinanceBankAccount {
+  return {
+    id: 'bank-1',
+    tenantId: 't',
+    workspaceId: 'w',
+    name: 'Conta principal',
+    bankName: 'Banco Exemplo',
+    currency: 'BRL',
+    isPrimary: true,
+    active: true,
+    bankDetails: {
+      pixKey: 'financeiro@example.com',
+      pixKeyType: 'email',
+      accountHolderName: 'Lyra Agency',
+      accountHolderDocument: '12.345.678/0001-90',
+      branchNumber: '0001',
+      accountNumber: '12345',
+      accountDigit: '6',
+    },
+    ...overrides,
+  } as unknown as FinanceBankAccount;
 }
 
 describe('DocumentPdfRendererService — bill rendering resilience', () => {
@@ -105,4 +189,55 @@ describe('DocumentPdfRendererService — bill rendering resilience', () => {
     const bill = makeBareBill({ dueDate: new Date('2026-07-15') as unknown as string });
     await expectNoFieldAccessCrash(bill, []);
   }, 30000);
+});
+
+describe('DocumentPdfRendererService — invoice layout HTML', () => {
+  const service = new DocumentPdfRendererService();
+
+  async function buildInvoiceHtml(
+    invoice = makeBareInvoice(),
+    paymentAccount: FinanceBankAccount | null = makePixBankAccount(),
+  ) {
+    return (service as unknown as {
+      buildInvoiceHtml(input: {
+        invoice: FinanceInvoice;
+        lines: FinanceInvoiceLine[];
+        layout: DocumentLayoutEntity;
+        template: DocumentLayoutTemplateEntity;
+        paymentAccount?: FinanceBankAccount | null;
+      }): Promise<string>;
+    }).buildInvoiceHtml({
+      invoice,
+      lines: [],
+      layout: makeLayout(),
+      template: makeTemplate(),
+      paymentAccount,
+    });
+  }
+
+  it('renders the customer in the document header and removes the hero customer card', async () => {
+    const html = await buildInvoiceHtml();
+
+    expect(html).toContain('doc-company--invoice-customer');
+    expect(html).toContain('Cliente Aurora');
+    expect(html).not.toContain('doc-customer-header"><span');
+  });
+
+  it('renders only issue and due date cards for invoice data', async () => {
+    const html = await buildInvoiceHtml();
+
+    expect(html).toContain('Data de emissão');
+    expect(html).toContain('Data de vencimento');
+    expect(html).not.toContain('<small>Número</small>');
+  });
+
+  it('renders Pix QR code and bank payment details in the financial closing area', async () => {
+    const html = await buildInvoiceHtml();
+
+    expect(html).toContain('Dados para pagamento');
+    expect(html).toContain('Pix QR Code');
+    expect(html).toContain('financeiro@example.com');
+    expect(html).toContain('data:image/png;base64,');
+    expect(html).toContain('Resumo financeiro');
+  });
 });

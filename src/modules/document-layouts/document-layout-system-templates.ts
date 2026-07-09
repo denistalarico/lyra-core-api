@@ -15,11 +15,7 @@ export const documentLayoutHtmlTemplate = `
 <div class="doc-page doc-template-{{layoutType}} {{layoutType}}">
   <header class="doc-header">
     <div class="doc-brand">{{companyBrandBlock}}</div>
-    <div class="doc-company">
-      <span>{{companyAddress}}</span>
-      <span>{{companyCity}} {{companyRegion}} {{companyPostalCode}}</span>
-      <span>{{companyEmail}} {{companyPhone}}</span>
-    </div>
+    <div class="doc-company">{{headerSideBlock}}</div>
   </header>
 
   <main class="doc-content">

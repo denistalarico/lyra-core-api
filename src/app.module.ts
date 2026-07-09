@@ -38,6 +38,7 @@ import { NotificationsModule } from './modules/notifications';
 import { PermissionsModule } from './modules/permissions';
 import { LeadFlowSettingsModule } from './modules/leadflow-settings';
 import { LeadFlowAgentsModule } from './modules/leadflow-agents/leadflow-agents.module';
+import { LeadFlowAutomationsModule } from './modules/leadflow-automations/leadflow-automations.module';
 import { HealthModule } from './modules/health/health.module';
 import { ContextModule } from './common/context/context.module';
 
@@ -82,6 +83,7 @@ import { ContextModule } from './common/context/context.module';
     PermissionsModule,
     LeadFlowSettingsModule,
     LeadFlowAgentsModule,
+    LeadFlowAutomationsModule,
   ],
 })
 export class AppModule {}

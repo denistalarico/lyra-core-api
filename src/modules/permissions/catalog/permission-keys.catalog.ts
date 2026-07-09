@@ -291,6 +291,14 @@ const RAW_PERMISSIONS: RawPermission[] = [
   ['leadflow.automations.automation.update.admin', ADMIN_UP],
   ['leadflow.automations.automation.pause.manager_or_admin', MANAGER_UP],
   ['leadflow.automations.automation.delete.owner_or_admin_explicit', OWNER_ONLY, true],
+  // Automations Recipes & Rules Contract sprint (config-only)
+  ['leadflow.automations.automation.configure.admin', ADMIN_UP],
+  ['leadflow.automations.automation.activate.admin', ADMIN_UP],
+  ['leadflow.automations.automation.pause.admin', ADMIN_UP],
+  ['leadflow.automations.automation.publish.admin', ADMIN_UP],
+  ['leadflow.automations.logs.view.admin', ADMIN_UP],
+  ['leadflow.automations.runtime.preview.admin', ADMIN_UP],
+  ['leadflow.automations.developer.manage.owner_only', OWNER_ONLY, true],
 
   // 10.5 LeadFlow - Analytics
   ['leadflow.analytics.reports.view.operational', MANAGER_UP],

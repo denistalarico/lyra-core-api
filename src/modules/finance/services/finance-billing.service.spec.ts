@@ -358,6 +358,108 @@ describe('FinanceBillingService bill recurrences', () => {
   });
 });
 
+describe('FinanceBillingService payment lifecycle', () => {
+  const line = [{ description: 'Retainer', quantity: '1', unitPrice: '100.00' }];
+
+  it('creates a pending customer payment when an invoice is created', async () => {
+    const invoice = makeInvoice({
+      dueDate: '2026-07-20',
+      balanceDue: '100.00',
+      totalAmount: '100.00',
+    });
+    const { service, paymentsRepo } = makeService({ invoice });
+
+    await service.createInvoice(makeContext(), {
+      currency: 'BRL',
+      dueDate: '2026-07-20',
+      lines: line,
+    });
+
+    expect(paymentsRepo.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        direction: FinancePaymentDirection.Customer,
+        status: FinancePaymentStatus.Pending,
+        paymentDate: '2026-07-20',
+        amount: '100.00',
+        metadata: expect.objectContaining({
+          sourceModule: 'finance_invoice',
+          sourceId: invoice.id,
+          scheduledTarget: {
+            targetType: FinanceAllocationTargetType.Invoice,
+            targetId: invoice.id,
+          },
+        }),
+      }),
+    );
+  });
+
+  it('creates a pending vendor payment when a bill is created', async () => {
+    const bill = makeBill({
+      dueDate: '2026-07-25',
+      balanceDue: '100.00',
+      totalAmount: '100.00',
+    });
+    const { service, paymentsRepo } = makeService({ bill });
+
+    await service.createBill(makeContext(), {
+      currency: 'BRL',
+      dueDate: '2026-07-25',
+      lines: line,
+    });
+
+    expect(paymentsRepo.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        direction: FinancePaymentDirection.Vendor,
+        status: FinancePaymentStatus.Pending,
+        paymentDate: '2026-07-25',
+        amount: '100.00',
+        metadata: expect.objectContaining({
+          sourceModule: 'finance_bill',
+          sourceId: bill.id,
+          scheduledTarget: {
+            targetType: FinanceAllocationTargetType.Bill,
+            targetId: bill.id,
+          },
+        }),
+      }),
+    );
+  });
+
+  it('turns a direct bill paid status patch into a real completed payment allocation', async () => {
+    const bill = makeBill({
+      status: FinanceBillStatus.Open,
+      balanceDue: '50.00',
+      paidAmount: '0.00',
+      totalAmount: '50.00',
+    });
+    const payment = makePayment({
+      direction: FinancePaymentDirection.Vendor,
+      amount: '50.00',
+      allocatedAmount: '0.00',
+    });
+    const { service, paymentsRepo, postingService } = makeService({ bill, payment });
+
+    await service.updateBill(makeContext(), bill.id, {
+      status: FinanceBillStatus.Paid,
+    });
+
+    expect(paymentsRepo.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        direction: FinancePaymentDirection.Vendor,
+        status: FinancePaymentStatus.Completed,
+        method: FinancePaymentMethod.Manual,
+        amount: '50.00',
+        metadata: expect.objectContaining({
+          sourceModule: 'finance_bill',
+          sourceId: bill.id,
+          source: 'status_patch_paid',
+        }),
+      }),
+    );
+    expect(postingService.postPaymentAllocationSettlement).toHaveBeenCalledTimes(1);
+  });
+});
+
 function makeService(options: {
   invoice?: FinanceInvoice;
   payment?: FinancePayment;
@@ -470,6 +572,7 @@ function makeService(options: {
     publisher,
     invoicesRepo,
     billsRepo,
+    paymentsRepo,
     billsQbGetOne,
     billRecurrencesRepo,
     postingService,

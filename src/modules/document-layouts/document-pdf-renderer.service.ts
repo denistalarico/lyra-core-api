@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { chromium } from 'playwright';
+import * as QRCode from 'qrcode';
 
 /**
  * Raised when the headless browser engine cannot be started (e.g. the Playwright
@@ -24,6 +25,7 @@ import type { FinanceInvoice } from '../finance/entities/finance-invoice.entity'
 import type { FinanceInvoiceLine } from '../finance/entities/finance-invoice-line.entity';
 import type { FinanceBill } from '../finance/entities/finance-bill.entity';
 import type { FinanceBillLine } from '../finance/entities/finance-bill-line.entity';
+import type { FinanceBankAccount } from '../finance/entities/finance-bank-account.entity';
 
 type RenderQuotePdfInput = {
   quote: QuoteEntity;
@@ -37,6 +39,7 @@ type RenderInvoicePdfInput = {
   lines: FinanceInvoiceLine[];
   layout: DocumentLayoutEntity;
   template: DocumentLayoutTemplateEntity;
+  paymentAccount?: FinanceBankAccount | null;
 };
 
 type RenderBillPdfInput = {
@@ -286,6 +289,7 @@ export class DocumentPdfRendererService {
       companyPostalCode: this.escapeHtml(layout.companyPostalCode ?? ''),
       companyEmail: this.escapeHtml(layout.companyEmail ?? ''),
       companyPhone: this.escapeHtml(layout.companyPhone ?? ''),
+      headerSideBlock: this.buildCompanyHeaderSideBlock(layout),
       companyDocumentLabel: this.escapeHtml(layout.companyDocumentLabel ?? ''),
       companyDocumentValue: this.escapeHtml(layout.companyDocumentValue ?? ''),
       documentTypeLabel: 'Cotação',
@@ -448,7 +452,7 @@ export class DocumentPdfRendererService {
   }
 
   async renderInvoicePdf(input: RenderInvoicePdfInput): Promise<Buffer> {
-    const html = this.buildInvoiceHtml(input);
+    const html = await this.buildInvoiceHtml(input);
     const browser = await this.launchBrowser();
     let page: Awaited<ReturnType<typeof browser.newPage>> | null = null;
     try {
@@ -485,8 +489,8 @@ export class DocumentPdfRendererService {
     }
   }
 
-  private buildInvoiceHtml(input: RenderInvoicePdfInput) {
-    const { invoice, lines, layout, template } = input;
+  private async buildInvoiceHtml(input: RenderInvoicePdfInput) {
+    const { invoice, lines, layout, template, paymentAccount } = input;
     const companyBrandBlock = this.buildCompanyBrandBlock(layout);
     const metadata = invoice.metadata ?? {};
     const customerName =
@@ -502,21 +506,12 @@ export class DocumentPdfRendererService {
       ? `<span class="doc-customer-header-avatar"><img src="${this.escapeHtml(customerAvatarUrl)}" alt="" /></span>`
       : `<span class="doc-customer-header-avatar">${this.escapeHtml(customerInitial)}</span>`;
     const customerTitleBlock = [
-      '<span class="doc-title-customer">',
-      `<span>${this.escapeHtml(customerName)}</span>`,
+      '<div class="doc-invoice-customer-header">',
       customerAvatarBlock,
-      '</span>',
-    ].join('');
-    const dueDateBlock = [
-      '<div class="doc-due-header">',
-      '<small>Vencimento</small>',
-      `<strong>${this.escapeHtml(this.formatDate(invoice.dueDate))}</strong>`,
+      '<div>',
+      '<small>Cliente</small>',
+      `<strong>${this.escapeHtml(customerName)}</strong>`,
       '</div>',
-    ].join('');
-    const invoiceHeaderSideBlock = [
-      '<div class="doc-invoice-header-side">',
-      customerTitleBlock,
-      dueDateBlock,
       '</div>',
     ].join('');
     const subtitle =
@@ -524,7 +519,23 @@ export class DocumentPdfRendererService {
         ? metadata['documentSubtitle'].trim()
         : 'Fatura de serviços prestados';
     const termsBlock = this.buildTermsBlock(invoice.terms);
-    const html = this.replaceTokens(template.htmlTemplate, {
+    const paymentBlock = await this.buildInvoicePaymentBlock(
+      invoice,
+      paymentAccount,
+      layout,
+    );
+    const leftClosingBlock = [
+      paymentBlock,
+      termsBlock,
+    ].filter(Boolean).join('');
+    const leftClosingColumn = leftClosingBlock
+      ? `<div class="doc-payment-stack">${leftClosingBlock}</div>`
+      : '';
+    const invoiceDateGridCells = [
+      `<div><small>Data de emissão</small><strong>${this.escapeHtml(this.formatDate(invoice.issueDate))}</strong></div>`,
+      `<div><small>Data de vencimento</small><strong>${this.escapeHtml(this.formatDate(invoice.dueDate))}</strong></div>`,
+    ].join('');
+    let html = this.replaceTokens(template.htmlTemplate, {
       layoutType: this.escapeHtml(layout.layoutType),
       companyBrandBlock,
       companyLogoBlock: companyBrandBlock,
@@ -545,14 +556,13 @@ export class DocumentPdfRendererService {
       clientLabel: 'Cliente',
       documentNumberLabel: 'Número',
       customerName: this.escapeHtml(customerName),
-      customerHeaderBlock: invoiceHeaderSideBlock,
+      customerHeaderBlock: '',
+      headerSideBlock: customerTitleBlock,
       documentNumber: this.escapeHtml(invoice.invoiceNumber),
       // new tokens (post-migration templates)
-      dateGridCells: [
-        `<div><small>Data de emissão</small><strong>${this.escapeHtml(this.formatDate(invoice.issueDate))}</strong></div>`,
-      ].join(''),
-      termsBlock,
-      closingModifier: termsBlock ? '' : ' doc-closing--no-terms',
+      dateGridCells: invoiceDateGridCells,
+      termsBlock: leftClosingColumn,
+      closingModifier: '',
       // legacy tokens (pre-migration templates)
       validUntil: this.escapeHtml(
         invoice.dueDate
@@ -580,6 +590,8 @@ export class DocumentPdfRendererService {
       }),
       footerText: this.escapeHtml(layout.footerText ?? ''),
     });
+    html = this.ensureInvoiceHeaderCustomer(html, customerTitleBlock);
+    html = this.ensureInvoiceDateGrid(html, invoiceDateGridCells);
     const css = this.replaceTokens(template.cssTemplate, {
       primaryColor: this.escapeCssValue(layout.primaryColor || '#2563EB'),
       secondaryColor: this.escapeCssValue(layout.secondaryColor || '#0F172A'),
@@ -626,6 +638,7 @@ export class DocumentPdfRendererService {
       companyPostalCode: this.escapeHtml(layout.companyPostalCode ?? ''),
       companyEmail: this.escapeHtml(layout.companyEmail ?? ''),
       companyPhone: this.escapeHtml(layout.companyPhone ?? ''),
+      headerSideBlock: this.buildCompanyHeaderSideBlock(layout),
       companyDocumentLabel: this.escapeHtml(layout.companyDocumentLabel ?? ''),
       companyDocumentValue: this.escapeHtml(layout.companyDocumentValue ?? ''),
       documentTypeLabel: 'Conta a Pagar',
@@ -739,44 +752,212 @@ export class DocumentPdfRendererService {
     </table>`;
   }
 
+  private ensureInvoiceHeaderCustomer(html: string, customerBlock: string) {
+    const newHeader = `<div class="doc-company doc-company--invoice-customer">${customerBlock}</div>`;
+    if (html.includes('{{headerSideBlock}}')) {
+      return html.replaceAll('{{headerSideBlock}}', customerBlock);
+    }
+    return html.replace(
+      /<div class="doc-company">[\s\S]*?<\/div>\s*(?=<\/header>)/,
+      newHeader,
+    );
+  }
+
+  private ensureInvoiceDateGrid(html: string, dateGridCells: string) {
+    const invoiceGrid = `<section class="doc-grid doc-grid--invoice">${dateGridCells}</section>`;
+    return html.replace(
+      /<section class="doc-grid">[\s\S]*?<\/section>/,
+      invoiceGrid,
+    );
+  }
+
+  private async buildInvoicePaymentBlock(
+    invoice: FinanceInvoice,
+    paymentAccount: FinanceBankAccount | null | undefined,
+    layout: DocumentLayoutEntity,
+  ) {
+    const details = paymentAccount?.bankDetails ?? {};
+    const pixKey = details.pixKey?.trim();
+    const accountRows = [
+      pixKey ? ['Chave Pix', pixKey] : null,
+      details.pixKeyType ? ['Tipo da chave', this.pixKeyTypeLabel(details.pixKeyType)] : null,
+      details.accountHolderName ? ['Titular', details.accountHolderName] : null,
+      details.accountHolderDocument ? ['Documento', details.accountHolderDocument] : null,
+      paymentAccount?.bankName ? ['Banco', paymentAccount.bankName] : null,
+      details.bankCode ? ['Código do banco', details.bankCode] : null,
+      details.branchNumber ? ['Agência', [details.branchNumber, details.branchDigit].filter(Boolean).join('-')] : null,
+      details.accountNumber ? ['Conta', [details.accountNumber, details.accountDigit].filter(Boolean).join('-')] : null,
+      details.iban ? ['IBAN', details.iban] : null,
+      details.swiftBic ? ['SWIFT/BIC', details.swiftBic] : null,
+    ].filter((row): row is [string, string] => Boolean(row?.[1]));
+
+    const amount = this.invoicePaymentAmount(invoice);
+    const pixBrCode = pixKey
+      ? this.buildPixBrCode({
+          pixKey,
+          pixType: details.pixKeyType,
+          merchantName:
+            details.accountHolderName?.trim() ||
+            layout.companyName?.trim() ||
+            paymentAccount?.name ||
+            'Pagamento',
+          merchantCity: layout.companyCity,
+          amount,
+          description: `Fatura ${invoice.invoiceNumber}`,
+          txid: invoice.invoiceNumber,
+        })
+      : null;
+    const qrCodeDataUrl = pixBrCode
+      ? await QRCode.toDataURL(pixBrCode, {
+          width: 180,
+          margin: 1,
+          errorCorrectionLevel: 'M',
+        }).catch(() => null)
+      : null;
+
+    const rowsHtml = accountRows.length
+      ? accountRows
+          .map(
+            ([label, value]) => `
+        <div class="doc-payment-row">
+          <span>${this.escapeHtml(label)}</span>
+          <strong>${this.escapeHtml(value)}</strong>
+        </div>`,
+          )
+          .join('')
+      : `<p class="doc-payment-empty">Configure uma conta bancária ativa em Financeiro para exibir os dados de pagamento.</p>`;
+
+    const qrHtml = qrCodeDataUrl
+      ? `
+        <div class="doc-payment-qr">
+          <img src="${this.escapeHtml(qrCodeDataUrl)}" alt="QR Code Pix" />
+          <span>Pix QR Code</span>
+        </div>`
+      : '';
+    const pixCopyHtml = pixBrCode
+      ? `
+      <div class="doc-payment-pix-copy">
+        <span>Pix copia e cola</span>
+        <p>${this.escapeHtml(pixBrCode)}</p>
+      </div>`
+      : '';
+
+    return `
+    <div class="doc-payment-panel">
+      <h3>Dados para pagamento</h3>
+      <div class="doc-payment-content${qrCodeDataUrl ? ' has-qr' : ''}">
+        ${qrHtml}
+        <div class="doc-payment-details">${rowsHtml}</div>
+      </div>
+      ${pixCopyHtml}
+    </div>`;
+  }
+
+  private invoicePaymentAmount(invoice: FinanceInvoice) {
+    const balance = Number(invoice.balanceDue ?? 0);
+    if (Number.isFinite(balance) && balance > 0) return balance;
+    const total = Number(invoice.totalAmount ?? 0);
+    return Number.isFinite(total) && total > 0 ? total : null;
+  }
+
+  private pixKeyTypeLabel(value: string) {
+    const labels: Record<string, string> = {
+      cpf: 'CPF',
+      cnpj: 'CNPJ',
+      email: 'E-mail',
+      phone: 'Telefone',
+      random: 'Aleatória',
+    };
+    return labels[value] ?? value;
+  }
+
+  private emvField(id: string, value: string) {
+    return `${id}${value.length.toString().padStart(2, '0')}${value}`;
+  }
+
+  private sanitizePixValue(value: string, maxLength: number) {
+    const normalized = value
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^\x20-\x7E]/g, '')
+      .trim();
+    return normalized.slice(0, maxLength) || 'NA';
+  }
+
+  private crc16(payload: string) {
+    let crc = 0xffff;
+    for (let i = 0; i < payload.length; i += 1) {
+      crc ^= payload.charCodeAt(i) << 8;
+      for (let bit = 0; bit < 8; bit += 1) {
+        crc =
+          (crc & 0x8000) !== 0
+            ? ((crc << 1) ^ 0x1021) & 0xffff
+            : (crc << 1) & 0xffff;
+      }
+    }
+    return crc.toString(16).toUpperCase().padStart(4, '0');
+  }
+
+  private normalizePixKey(rawKey: string, pixType?: string | null) {
+    const trimmed = rawKey.trim();
+    if (pixType === 'cpf' || pixType === 'cnpj') return trimmed.replace(/\D/g, '');
+    if (pixType === 'phone') {
+      const digits = trimmed.replace(/[^\d+]/g, '');
+      return digits.startsWith('+') ? digits : `+55${digits}`;
+    }
+    return trimmed;
+  }
+
+  private buildPixBrCode(input: {
+    pixKey: string;
+    pixType?: string | null;
+    merchantName: string;
+    merchantCity?: string | null;
+    amount?: number | null;
+    description?: string | null;
+    txid?: string | null;
+  }) {
+    const merchantAccountInfo =
+      this.emvField('00', 'br.gov.bcb.pix') +
+      this.emvField('01', this.normalizePixKey(input.pixKey, input.pixType)) +
+      (input.description
+        ? this.emvField('02', this.sanitizePixValue(input.description, 72))
+        : '');
+    const additionalData = this.emvField(
+      '05',
+      this.sanitizePixValue(input.txid || '***', 25),
+    );
+    const body =
+      this.emvField('00', '01') +
+      this.emvField('26', merchantAccountInfo) +
+      this.emvField('52', '0000') +
+      this.emvField('53', '986') +
+      (input.amount && input.amount > 0
+        ? this.emvField('54', input.amount.toFixed(2))
+        : '') +
+      this.emvField('58', 'BR') +
+      this.emvField('59', this.sanitizePixValue(input.merchantName, 25)) +
+      this.emvField('60', this.sanitizePixValue(input.merchantCity || 'BRASIL', 15)) +
+      this.emvField('62', additionalData);
+    const payloadWithCrcId = `${body}6304`;
+    return `${payloadWithCrcId}${this.crc16(payloadWithCrcId)}`;
+  }
+
   private buildInvoiceRefinementCss() {
     return `
-.doc-invoice-header-side {
+.doc-company--invoice-customer {
   min-width: 210px;
-  display: grid;
-  gap: 10px;
-  justify-items: end;
 }
-.doc-title-customer {
+.doc-invoice-customer-header {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 8px;
-  color: var(--doc-muted, #64748b);
-  font-size: 12px;
+  gap: 10px;
+  color: var(--doc-text, #0f172a);
   font-family: var(--doc-font, inherit);
-  font-weight: 800;
-  line-height: 1;
   text-align: right;
 }
-.doc-title-customer .doc-customer-header-avatar {
-  width: 28px;
-  height: 28px;
-  flex-basis: 28px;
-  font-size: 10px;
-}
-.doc-due-header {
-  width: 100%;
-  box-sizing: border-box;
-  display: grid;
-  align-content: center;
-  border: 1px solid rgba(148, 163, 184, 0.28);
-  border-radius: 14px;
-  padding: 16px;
-  text-align: right;
-  background: rgba(248, 250, 252, 0.82);
-}
-.doc-due-header small,
+.doc-invoice-customer-header small,
 .doc-finance-note-row strong {
   display: block;
   color: var(--doc-muted, #64748b);
@@ -785,11 +966,104 @@ export class DocumentPdfRendererService {
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
-.doc-due-header strong {
+.doc-invoice-customer-header strong {
   display: block;
-  margin-top: 5px;
+  margin-top: 4px;
   color: var(--doc-text, #0f172a);
-  font-size: 16px;
+  font-size: 12px;
+  line-height: 1.25;
+}
+.doc-invoice-customer-header .doc-customer-header-avatar {
+  width: 36px;
+  height: 36px;
+  flex-basis: 36px;
+  font-size: 12px;
+}
+.doc-grid--invoice,
+.doc-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.doc-payment-stack {
+  display: grid;
+  gap: 12px;
+}
+.doc-payment-panel {
+  border: 1px solid rgba(148, 163, 184, 0.26);
+  border-radius: 16px;
+  padding: 16px 18px;
+  background: rgba(255, 255, 255, 0.78);
+  color: var(--doc-text);
+}
+.doc-payment-panel h3 {
+  margin: 0 0 10px;
+  color: var(--doc-text);
+  font-family: var(--doc-heading-font, inherit);
+  font-size: 11px;
+  line-height: 1.25;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.doc-payment-content {
+  display: grid;
+  gap: 12px;
+}
+.doc-payment-content.has-qr {
+  grid-template-columns: 92px minmax(0, 1fr);
+  align-items: start;
+}
+.doc-payment-qr {
+  display: grid;
+  gap: 5px;
+  justify-items: center;
+  color: var(--doc-muted, #64748b);
+  font-size: 8px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+.doc-payment-qr img {
+  width: 86px;
+  height: 86px;
+  object-fit: contain;
+}
+.doc-payment-details {
+  display: grid;
+  gap: 7px;
+}
+.doc-payment-row {
+  display: grid;
+  gap: 2px;
+}
+.doc-payment-row span,
+.doc-payment-pix-copy span {
+  color: var(--doc-muted, #64748b);
+  font-size: 8.5px;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.doc-payment-row strong {
+  color: var(--doc-text, #0f172a);
+  font-size: 10.5px;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+.doc-payment-pix-copy {
+  margin-top: 10px;
+  border-top: 1px solid rgba(148, 163, 184, 0.22);
+  padding-top: 8px;
+}
+.doc-payment-pix-copy p {
+  margin: 4px 0 0;
+  color: var(--doc-muted, #64748b);
+  font-size: 7.5px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+.doc-payment-empty {
+  margin: 0;
+  color: var(--doc-muted, #64748b);
+  font-size: 10.5px;
+  line-height: 1.45;
 }
 .doc-finance-note-row td {
   border-top: 1px solid rgba(148, 163, 184, 0.18);
@@ -848,6 +1122,27 @@ export class DocumentPdfRendererService {
       : 'left';
 
     return `<div class="doc-logo doc-logo--uploaded doc-logo--${this.escapeHtml(position)}"><img src="${this.escapeHtml(logoUrl)}" alt="" aria-label="Logo da empresa" onerror="this.closest('.doc-logo')?.remove();" /></div>`;
+  }
+
+  private buildCompanyHeaderSideBlock(layout: DocumentLayoutEntity) {
+    return [
+      layout.companyAddress ? `<span>${this.escapeHtml(layout.companyAddress)}</span>` : '',
+      [layout.companyCity, layout.companyRegion, layout.companyPostalCode]
+        .filter(Boolean)
+        .join(' ')
+        .trim()
+        ? `<span>${this.escapeHtml(
+            [layout.companyCity, layout.companyRegion, layout.companyPostalCode]
+              .filter(Boolean)
+              .join(' '),
+          )}</span>`
+        : '',
+      [layout.companyEmail, layout.companyPhone].filter(Boolean).join(' ').trim()
+        ? `<span>${this.escapeHtml(
+            [layout.companyEmail, layout.companyPhone].filter(Boolean).join(' '),
+          )}</span>`
+        : '',
+    ].join('');
   }
 
   private resolveAssetUrl(logoUrl: string | null | undefined) {

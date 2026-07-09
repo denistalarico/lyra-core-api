@@ -4,7 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, In, Repository } from 'typeorm';
 import {
   BillRecurrenceConfigDto,
   CreateFinanceBillDto,
@@ -39,6 +39,7 @@ import {
   FinanceBillStatus,
   FinanceInvoiceStatus,
   FinancePaymentDirection,
+  FinancePaymentMethod,
   FinancePaymentStatus,
   FinanceRecurringInterval,
   FinanceRecurringProfileStatus,
@@ -65,6 +66,11 @@ function validateId(value: string | null | undefined, name = 'id') {
     throw new BadRequestException(`Invalid ${name}`);
   }
 }
+
+type ScheduledPaymentTarget = {
+  targetType: FinanceAllocationTargetType;
+  targetId: string;
+};
 
 @Injectable()
 export class FinanceBillingService {
@@ -221,7 +227,9 @@ export class FinanceBillingService {
       return invoice.id;
     });
 
-    return this.getInvoice(ctx, invoiceId);
+    const invoice = await this.getInvoice(ctx, invoiceId);
+    await this.createScheduledPaymentForInvoice(ctx, invoice);
+    return invoice;
   }
 
   async updateInvoice(
@@ -238,12 +246,25 @@ export class FinanceBillingService {
 
     const previousStatus = invoice.status;
 
+    const shouldSettleFromStatusPatch =
+      dto.status === FinanceInvoiceStatus.Paid &&
+      previousStatus !== FinanceInvoiceStatus.Paid &&
+      toMoney(invoice.balanceDue) > 0;
+
     // Merge metadata deeply instead of overwriting
     if (dto.metadata !== undefined) {
       invoice.metadata = { ...invoice.metadata, ...dto.metadata };
     }
-    const { metadata: _meta, ...rest } = dto;
+    const { metadata: _meta, status: requestedStatus, ...rest } = dto;
     Object.assign(invoice, rest);
+    if (!shouldSettleFromStatusPatch && requestedStatus !== undefined) {
+      invoice.status = requestedStatus;
+    }
+    if (shouldSettleFromStatusPatch && invoice.status === FinanceInvoiceStatus.Draft) {
+      invoice.status = FinanceInvoiceStatus.Issued;
+      invoice.issuedAt = invoice.issuedAt ?? new Date();
+      invoice.issueDate = invoice.issueDate ?? new Date().toISOString().slice(0, 10);
+    }
     const saved = await this.invoicesRepo.save(invoice);
 
     // Keep the ledger in sync when the status changes through a generic PATCH
@@ -276,6 +297,13 @@ export class FinanceBillingService {
         actorUserId: ctx.userId,
         recipients: [],
       });
+    }
+
+    if (shouldSettleFromStatusPatch) {
+      await this.settleInvoiceBalance(ctx, saved, {
+        source: 'status_patch_paid',
+      });
+      return this.getInvoice(ctx, id);
     }
 
     if (
@@ -590,7 +618,9 @@ export class FinanceBillingService {
       await this.createRecurrenceFromBill(ctx, billId, dto, dto.recurrence);
     }
 
-    return this.getBill(ctx, billId);
+    const bill = await this.getBill(ctx, billId);
+    await this.createScheduledPaymentForBill(ctx, bill);
+    return bill;
   }
 
   async updateBill(
@@ -607,8 +637,19 @@ export class FinanceBillingService {
 
     const previousStatus = bill.status;
 
-    const { metadata, ...rest } = dto;
+    const shouldSettleFromStatusPatch =
+      dto.status === FinanceBillStatus.Paid &&
+      previousStatus !== FinanceBillStatus.Paid &&
+      toMoney(bill.balanceDue) > 0;
+
+    const { metadata, status: requestedStatus, ...rest } = dto;
     Object.assign(bill, rest);
+    if (!shouldSettleFromStatusPatch && requestedStatus !== undefined) {
+      bill.status = requestedStatus;
+    }
+    if (shouldSettleFromStatusPatch && bill.status === FinanceBillStatus.Draft) {
+      bill.status = FinanceBillStatus.Open;
+    }
 
     if (metadata !== undefined) {
       bill.metadata = { ...bill.metadata, ...metadata };
@@ -629,6 +670,13 @@ export class FinanceBillingService {
       saved.status === FinanceBillStatus.Cancelled
     ) {
       await this.postingService.reverseBill(ctx, saved.id);
+    }
+
+    if (shouldSettleFromStatusPatch) {
+      await this.settleBillBalance(ctx, saved, {
+        source: 'status_patch_paid',
+      });
+      return this.getBill(ctx, saved.id);
     }
 
     return this.getBill(ctx, saved.id);
@@ -1395,6 +1443,321 @@ export class FinanceBillingService {
     });
   }
 
+  private scheduledTargetMetadata(target: ScheduledPaymentTarget) {
+    return {
+      scheduledTarget: target,
+      targetType: target.targetType,
+      targetId: target.targetId,
+    };
+  }
+
+  private readScheduledTarget(
+    metadata: Record<string, unknown> | null | undefined,
+  ): ScheduledPaymentTarget | null {
+    const source =
+      metadata?.scheduledTarget &&
+      typeof metadata.scheduledTarget === 'object'
+        ? (metadata.scheduledTarget as Record<string, unknown>)
+        : metadata ?? {};
+    const targetType = source.targetType;
+    const targetId = source.targetId;
+    if (
+      (targetType === FinanceAllocationTargetType.Invoice ||
+        targetType === FinanceAllocationTargetType.Bill) &&
+      typeof targetId === 'string' &&
+      targetId
+    ) {
+      return { targetType, targetId };
+    }
+    return null;
+  }
+
+  private async createScheduledPaymentForInvoice(
+    ctx: FinanceRequestContext,
+    invoice: FinanceInvoice,
+  ) {
+    const amount = toMoney(invoice.balanceDue);
+    if (amount <= 0) return null;
+    return this.createPayment(ctx, {
+      direction: FinancePaymentDirection.Customer,
+      status: FinancePaymentStatus.Pending,
+      paymentDate:
+        invoice.dueDate ?? invoice.issueDate ?? new Date().toISOString().slice(0, 10),
+      amount: money(amount),
+      currency: invoice.currency ?? 'BRL',
+      contactId: invoice.customerId ?? null,
+      description: `Recebimento previsto da fatura ${invoice.invoiceNumber}`,
+      metadata: {
+        ...this.scheduledTargetMetadata({
+          targetType: FinanceAllocationTargetType.Invoice,
+          targetId: invoice.id,
+        }),
+        sourceModule: 'finance_invoice',
+        sourceId: invoice.id,
+        sourceNumber: invoice.invoiceNumber,
+        autoCreated: true,
+      },
+    });
+  }
+
+  private async createScheduledPaymentForBill(
+    ctx: FinanceRequestContext,
+    bill: FinanceBill,
+  ) {
+    const amount = toMoney(bill.balanceDue);
+    if (amount <= 0) return null;
+    return this.createPayment(ctx, {
+      direction: FinancePaymentDirection.Vendor,
+      status: FinancePaymentStatus.Pending,
+      paymentDate:
+        bill.dueDate ?? bill.issueDate ?? new Date().toISOString().slice(0, 10),
+      amount: money(amount),
+      currency: bill.currency ?? 'BRL',
+      contactId: bill.vendorId ?? null,
+      description: `Pagamento previsto da conta ${bill.billNumber}`,
+      metadata: {
+        ...this.scheduledTargetMetadata({
+          targetType: FinanceAllocationTargetType.Bill,
+          targetId: bill.id,
+        }),
+        sourceModule: 'finance_bill',
+        sourceId: bill.id,
+        sourceNumber: bill.billNumber,
+        autoCreated: true,
+      },
+    });
+  }
+
+  private async settleInvoiceBalance(
+    ctx: FinanceRequestContext,
+    invoice: FinanceInvoice,
+    metadata: Record<string, unknown> = {},
+  ) {
+    const amount = toMoney(invoice.balanceDue);
+    if (amount <= 0) return null;
+    const payment = await this.createPayment(ctx, {
+      direction: FinancePaymentDirection.Customer,
+      status: FinancePaymentStatus.Completed,
+      method: FinancePaymentMethod.Manual,
+      paymentDate: new Date().toISOString().slice(0, 10),
+      amount: money(amount),
+      currency: invoice.currency ?? 'BRL',
+      contactId: invoice.customerId ?? null,
+      description: `Pagamento da fatura ${invoice.invoiceNumber}`,
+      metadata: {
+        sourceModule: 'finance_invoice',
+        sourceId: invoice.id,
+        sourceNumber: invoice.invoiceNumber,
+        ...metadata,
+      },
+    });
+    await this.allocatePayment(ctx, payment.id, {
+      targetType: FinanceAllocationTargetType.Invoice,
+      targetId: invoice.id,
+      amount: money(amount),
+    });
+    return payment;
+  }
+
+  private async settleBillBalance(
+    ctx: FinanceRequestContext,
+    bill: FinanceBill,
+    metadata: Record<string, unknown> = {},
+  ) {
+    const amount = toMoney(bill.balanceDue);
+    if (amount <= 0) return null;
+    const payment = await this.createPayment(ctx, {
+      direction: FinancePaymentDirection.Vendor,
+      status: FinancePaymentStatus.Completed,
+      method: FinancePaymentMethod.Manual,
+      paymentDate: new Date().toISOString().slice(0, 10),
+      amount: money(amount),
+      currency: bill.currency ?? 'BRL',
+      contactId: bill.vendorId ?? null,
+      description: `Pagamento da conta ${bill.billNumber}`,
+      metadata: {
+        sourceModule: 'finance_bill',
+        sourceId: bill.id,
+        sourceNumber: bill.billNumber,
+        ...metadata,
+      },
+    });
+    await this.allocatePayment(ctx, payment.id, {
+      targetType: FinanceAllocationTargetType.Bill,
+      targetId: bill.id,
+      amount: money(amount),
+    });
+    return payment;
+  }
+
+  private async settleCompletedScheduledPayment(
+    ctx: FinanceRequestContext,
+    payment: FinancePayment,
+  ) {
+    if (payment.status !== FinancePaymentStatus.Completed) return payment;
+    const target = this.readScheduledTarget(payment.metadata);
+    if (!target) return payment;
+    const remaining = toMoney(payment.amount) - toMoney(payment.allocatedAmount);
+    if (remaining <= 0) return payment;
+
+    let targetBalance = 0;
+    if (target.targetType === FinanceAllocationTargetType.Invoice) {
+      const invoice = await this.invoicesRepo.findOne({
+        where: {
+          id: target.targetId,
+          tenantId: ctx.tenantId,
+          workspaceId: ctx.workspaceId,
+        },
+      });
+      targetBalance = toMoney(invoice?.balanceDue);
+    } else {
+      const bill = await this.billsRepo.findOne({
+        where: {
+          id: target.targetId,
+          tenantId: ctx.tenantId,
+          workspaceId: ctx.workspaceId,
+        },
+      });
+      targetBalance = toMoney(bill?.balanceDue);
+    }
+
+    const amount = Math.min(remaining, targetBalance);
+    if (amount <= 0) return payment;
+    await this.allocatePayment(ctx, payment.id, {
+      targetType: target.targetType,
+      targetId: target.targetId,
+      amount: money(amount),
+    });
+    return (
+      (await this.paymentsRepo.findOne({
+        where: { id: payment.id, tenantId: ctx.tenantId, workspaceId: ctx.workspaceId },
+      })) ?? payment
+    );
+  }
+
+  private async recalculateTargetsForAllocations(
+    ctx: FinanceRequestContext,
+    allocations: FinancePaymentAllocation[],
+  ) {
+    const invoiceIds = new Set<string>();
+    const billIds = new Set<string>();
+    for (const allocation of allocations) {
+      if (allocation.targetType === FinanceAllocationTargetType.Invoice) {
+        invoiceIds.add(allocation.targetId);
+      }
+      if (allocation.targetType === FinanceAllocationTargetType.Bill) {
+        billIds.add(allocation.targetId);
+      }
+    }
+    for (const invoiceId of invoiceIds) {
+      await this.recalculateInvoicePaymentState(ctx, invoiceId);
+    }
+    for (const billId of billIds) {
+      await this.recalculateBillPaymentState(ctx, billId);
+    }
+  }
+
+  private async recalculateInvoicePaymentState(
+    ctx: FinanceRequestContext,
+    invoiceId: string,
+  ) {
+    const invoice = await this.invoicesRepo.findOne({
+      where: { id: invoiceId, tenantId: ctx.tenantId, workspaceId: ctx.workspaceId },
+    });
+    if (!invoice) return;
+    const allocations = await this.paymentAllocationsRepo.find({
+      where: {
+        tenantId: ctx.tenantId,
+        workspaceId: ctx.workspaceId,
+        targetType: FinanceAllocationTargetType.Invoice,
+        targetId: invoiceId,
+      },
+    });
+    const paymentIds = [...new Set(allocations.map((allocation) => allocation.paymentId))];
+    const payments = paymentIds.length
+      ? await this.paymentsRepo.find({
+          where: { tenantId: ctx.tenantId, workspaceId: ctx.workspaceId, id: In(paymentIds) },
+        })
+      : [];
+    const completedPaymentIds = new Set(
+      payments
+        .filter((payment) => payment.status === FinancePaymentStatus.Completed)
+        .map((payment) => payment.id),
+    );
+    const paid = allocations
+      .filter((allocation) => completedPaymentIds.has(allocation.paymentId))
+      .reduce((sum, allocation) => sum + toMoney(allocation.amount), 0);
+    const total = toMoney(invoice.totalAmount);
+    invoice.paidAmount = money(paid);
+    invoice.balanceDue = money(Math.max(0, total - paid));
+    if (![FinanceInvoiceStatus.Cancelled, FinanceInvoiceStatus.Void].includes(invoice.status)) {
+      if (paid <= 0) {
+        invoice.status =
+          invoice.issuedAt || invoice.issueDate
+            ? FinanceInvoiceStatus.Issued
+            : FinanceInvoiceStatus.Draft;
+        invoice.paidAt = null;
+      } else if (paid >= total) {
+        invoice.status = FinanceInvoiceStatus.Paid;
+        invoice.balanceDue = '0.00';
+        invoice.paidAt = invoice.paidAt ?? new Date();
+      } else {
+        invoice.status = FinanceInvoiceStatus.PartiallyPaid;
+        invoice.paidAt = null;
+      }
+    }
+    await this.invoicesRepo.save(invoice);
+  }
+
+  private async recalculateBillPaymentState(
+    ctx: FinanceRequestContext,
+    billId: string,
+  ) {
+    const bill = await this.billsRepo.findOne({
+      where: { id: billId, tenantId: ctx.tenantId, workspaceId: ctx.workspaceId },
+    });
+    if (!bill) return;
+    const allocations = await this.paymentAllocationsRepo.find({
+      where: {
+        tenantId: ctx.tenantId,
+        workspaceId: ctx.workspaceId,
+        targetType: FinanceAllocationTargetType.Bill,
+        targetId: billId,
+      },
+    });
+    const paymentIds = [...new Set(allocations.map((allocation) => allocation.paymentId))];
+    const payments = paymentIds.length
+      ? await this.paymentsRepo.find({
+          where: { tenantId: ctx.tenantId, workspaceId: ctx.workspaceId, id: In(paymentIds) },
+        })
+      : [];
+    const completedPaymentIds = new Set(
+      payments
+        .filter((payment) => payment.status === FinancePaymentStatus.Completed)
+        .map((payment) => payment.id),
+    );
+    const paid = allocations
+      .filter((allocation) => completedPaymentIds.has(allocation.paymentId))
+      .reduce((sum, allocation) => sum + toMoney(allocation.amount), 0);
+    const total = toMoney(bill.totalAmount);
+    bill.paidAmount = money(paid);
+    bill.balanceDue = money(Math.max(0, total - paid));
+    if (bill.status !== FinanceBillStatus.Cancelled) {
+      if (paid <= 0) {
+        bill.status = FinanceBillStatus.Open;
+        bill.paidAt = null;
+      } else if (paid >= total) {
+        bill.status = FinanceBillStatus.Paid;
+        bill.balanceDue = '0.00';
+        bill.paidAt = bill.paidAt ?? new Date();
+      } else {
+        bill.status = FinanceBillStatus.PartiallyPaid;
+        bill.paidAt = null;
+      }
+    }
+    await this.billsRepo.save(bill);
+  }
+
   async updatePayment(
     ctx: FinanceRequestContext,
     id: string,
@@ -1411,7 +1774,7 @@ export class FinanceBillingService {
     }
     const { metadata: _meta, ...rest } = dto;
     Object.assign(payment, rest);
-    const saved = await this.paymentsRepo.save(payment);
+    let saved = await this.paymentsRepo.save(payment);
 
     // Reverse the settlement entries when a completed payment is cancelled or
     // refunded. Idempotent, so repeated transitions never double-reverse.
@@ -1422,7 +1785,22 @@ export class FinanceBillingService {
       previousStatus === FinancePaymentStatus.Cancelled ||
       previousStatus === FinancePaymentStatus.Refunded;
     if (becameVoid && !wasVoid) {
+      const allocations = await this.paymentAllocationsRepo.find({
+        where: {
+          tenantId: ctx.tenantId,
+          workspaceId: ctx.workspaceId,
+          paymentId: saved.id,
+        },
+      });
       await this.postingService.reversePayment(ctx, saved);
+      await this.recalculateTargetsForAllocations(ctx, allocations);
+    }
+
+    if (
+      previousStatus !== FinancePaymentStatus.Completed &&
+      saved.status === FinancePaymentStatus.Completed
+    ) {
+      saved = await this.settleCompletedScheduledPayment(ctx, saved);
     }
 
     // No tenant-validated recipient source exists yet (only the actor, who
@@ -1460,10 +1838,25 @@ export class FinanceBillingService {
       where: { id, tenantId: ctx.tenantId, workspaceId: ctx.workspaceId },
     });
     if (!payment) throw new NotFoundException('Finance payment not found');
+    const allocations = await this.paymentAllocationsRepo.find({
+      where: {
+        tenantId: ctx.tenantId,
+        workspaceId: ctx.workspaceId,
+        paymentId: payment.id,
+      },
+    });
     // Keep the ledger consistent: reverse any settlement entries before the
     // payment row is removed (posted entries are never deleted).
     await this.postingService.reversePayment(ctx, payment);
+    if (allocations.length > 0) {
+      await this.paymentAllocationsRepo.delete({
+        tenantId: ctx.tenantId,
+        workspaceId: ctx.workspaceId,
+        paymentId: payment.id,
+      });
+    }
     await this.paymentsRepo.remove(payment);
+    await this.recalculateTargetsForAllocations(ctx, allocations);
     return { success: true, id };
   }
 
@@ -1513,7 +1906,7 @@ export class FinanceBillingService {
       });
     }
 
-    return payment;
+    return this.settleCompletedScheduledPayment(ctx, payment);
   }
 
   async allocatePayment(
