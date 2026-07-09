@@ -37,6 +37,7 @@ import { DashboardsModule } from './modules/dashboards';
 import { NotificationsModule } from './modules/notifications';
 import { PermissionsModule } from './modules/permissions';
 import { LeadFlowSettingsModule } from './modules/leadflow-settings';
+import { LeadFlowAgentsModule } from './modules/leadflow-agents/leadflow-agents.module';
 import { HealthModule } from './modules/health/health.module';
 import { ContextModule } from './common/context/context.module';
 
@@ -80,6 +81,7 @@ import { ContextModule } from './common/context/context.module';
     NotificationsModule,
     PermissionsModule,
     LeadFlowSettingsModule,
+    LeadFlowAgentsModule,
   ],
 })
 export class AppModule {}

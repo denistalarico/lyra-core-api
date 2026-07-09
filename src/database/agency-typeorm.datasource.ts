@@ -85,6 +85,8 @@ import { CreateAgencyHelpCenter1783000000000 } from './migrations/1783000000000-
 import { AddCrmOpportunitySortOrder1783100000000 } from './migrations/1783100000000-add-crm-opportunity-sort-order';
 import { CreateLeadflowSettingsCore1783200000000 } from './migrations/1783200000000-create-leadflow-settings-core';
 import { AddLeadflowAgencySettingsContext1783300000000 } from './migrations/1783300000000-add-leadflow-agency-settings-context';
+import { CreateLeadflowAgentsCore1783400000000 } from './migrations/1783400000000-create-leadflow-agents-core';
+import { AddLeadflowAgentsPermissions1783500000000 } from './migrations/1783500000000-add-leadflow-agents-permissions';
 
 export const AgencyDataSource = new DataSource({
   type: 'postgres',
@@ -183,5 +185,7 @@ export const AgencyDataSource = new DataSource({
     AddCrmOpportunitySortOrder1783100000000,
     CreateLeadflowSettingsCore1783200000000,
     AddLeadflowAgencySettingsContext1783300000000,
+    CreateLeadflowAgentsCore1783400000000,
+    AddLeadflowAgentsPermissions1783500000000,
   ],
 });

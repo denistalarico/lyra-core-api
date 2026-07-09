@@ -277,7 +277,11 @@ const RAW_PERMISSIONS: RawPermission[] = [
   ['leadflow.agents.agent.configure.admin', ADMIN_UP],
   ['leadflow.agents.agent.activate.admin', ADMIN_UP],
   ['leadflow.agents.agent.deactivate.admin', ADMIN_UP],
+  ['leadflow.agents.agent.publish.admin', ADMIN_UP],
+  ['leadflow.agents.channel.manage.admin', ADMIN_UP],
+  ['leadflow.agents.runtime.preview.admin', ADMIN_UP],
   ['leadflow.agents.agent.delete.owner_only', OWNER_ONLY, true],
+  ['leadflow.agents.developer.manage.owner_only', OWNER_ONLY, true],
   ['leadflow.agents.system.manage.owner_only', OWNER_ONLY, true],
 
   // 10.5 LeadFlow - Automations
