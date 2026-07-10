@@ -39,6 +39,7 @@ import { PermissionsModule } from './modules/permissions';
 import { LeadFlowSettingsModule } from './modules/leadflow-settings';
 import { LeadFlowAgentsModule } from './modules/leadflow-agents/leadflow-agents.module';
 import { LeadFlowAutomationsModule } from './modules/leadflow-automations/leadflow-automations.module';
+import { LeadFlowEventsModule } from './modules/leadflow-events/leadflow-events.module';
 import { HealthModule } from './modules/health/health.module';
 import { ContextModule } from './common/context/context.module';
 
@@ -84,6 +85,7 @@ import { ContextModule } from './common/context/context.module';
     LeadFlowSettingsModule,
     LeadFlowAgentsModule,
     LeadFlowAutomationsModule,
+    LeadFlowEventsModule,
   ],
 })
 export class AppModule {}

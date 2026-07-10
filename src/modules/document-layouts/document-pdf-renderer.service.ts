@@ -556,8 +556,8 @@ export class DocumentPdfRendererService {
       clientLabel: 'Cliente',
       documentNumberLabel: 'Número',
       customerName: this.escapeHtml(customerName),
-      customerHeaderBlock: '',
-      headerSideBlock: customerTitleBlock,
+      customerHeaderBlock: customerTitleBlock,
+      headerSideBlock: this.buildCompanyHeaderSideBlock(layout),
       documentNumber: this.escapeHtml(invoice.invoiceNumber),
       // new tokens (post-migration templates)
       dateGridCells: invoiceDateGridCells,
@@ -590,7 +590,6 @@ export class DocumentPdfRendererService {
       }),
       footerText: this.escapeHtml(layout.footerText ?? ''),
     });
-    html = this.ensureInvoiceHeaderCustomer(html, customerTitleBlock);
     html = this.ensureInvoiceDateGrid(html, invoiceDateGridCells);
     const css = this.replaceTokens(template.cssTemplate, {
       primaryColor: this.escapeCssValue(layout.primaryColor || '#2563EB'),
@@ -752,17 +751,6 @@ export class DocumentPdfRendererService {
     </table>`;
   }
 
-  private ensureInvoiceHeaderCustomer(html: string, customerBlock: string) {
-    const newHeader = `<div class="doc-company doc-company--invoice-customer">${customerBlock}</div>`;
-    if (html.includes('{{headerSideBlock}}')) {
-      return html.replaceAll('{{headerSideBlock}}', customerBlock);
-    }
-    return html.replace(
-      /<div class="doc-company">[\s\S]*?<\/div>\s*(?=<\/header>)/,
-      newHeader,
-    );
-  }
-
   private ensureInvoiceDateGrid(html: string, dateGridCells: string) {
     const invoiceGrid = `<section class="doc-grid doc-grid--invoice">${dateGridCells}</section>`;
     return html.replace(
@@ -782,9 +770,7 @@ export class DocumentPdfRendererService {
       pixKey ? ['Chave Pix', pixKey] : null,
       details.pixKeyType ? ['Tipo da chave', this.pixKeyTypeLabel(details.pixKeyType)] : null,
       details.accountHolderName ? ['Titular', details.accountHolderName] : null,
-      details.accountHolderDocument ? ['Documento', details.accountHolderDocument] : null,
       paymentAccount?.bankName ? ['Banco', paymentAccount.bankName] : null,
-      details.bankCode ? ['Código do banco', details.bankCode] : null,
       details.branchNumber ? ['Agência', [details.branchNumber, details.branchDigit].filter(Boolean).join('-')] : null,
       details.accountNumber ? ['Conta', [details.accountNumber, details.accountDigit].filter(Boolean).join('-')] : null,
       details.iban ? ['IBAN', details.iban] : null,
@@ -864,9 +850,11 @@ export class DocumentPdfRendererService {
     const labels: Record<string, string> = {
       cpf: 'CPF',
       cnpj: 'CNPJ',
+      cpf_cnpj: 'CPF / CNPJ',
       email: 'E-mail',
       phone: 'Telefone',
       random: 'Aleatória',
+      evp: 'Chave aleatória',
     };
     return labels[value] ?? value;
   }
@@ -900,7 +888,9 @@ export class DocumentPdfRendererService {
 
   private normalizePixKey(rawKey: string, pixType?: string | null) {
     const trimmed = rawKey.trim();
-    if (pixType === 'cpf' || pixType === 'cnpj') return trimmed.replace(/\D/g, '');
+    if (pixType === 'cpf' || pixType === 'cnpj' || pixType === 'cpf_cnpj') {
+      return trimmed.replace(/\D/g, '');
+    }
     if (pixType === 'phone') {
       const digits = trimmed.replace(/[^\d+]/g, '');
       return digits.startsWith('+') ? digits : `+55${digits}`;
@@ -945,9 +935,6 @@ export class DocumentPdfRendererService {
 
   private buildInvoiceRefinementCss() {
     return `
-.doc-company--invoice-customer {
-  min-width: 210px;
-}
 .doc-invoice-customer-header {
   display: flex;
   align-items: center;

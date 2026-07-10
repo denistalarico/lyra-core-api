@@ -300,6 +300,12 @@ const RAW_PERMISSIONS: RawPermission[] = [
   ['leadflow.automations.runtime.preview.admin', ADMIN_UP],
   ['leadflow.automations.developer.manage.owner_only', OWNER_ONLY, true],
 
+  // 10.5 LeadFlow - Event Contract (contract-only, sem runtime)
+  ['leadflow.events.catalog.view', MANAGER_UP],
+  ['leadflow.events.validate.admin', ADMIN_UP],
+  ['leadflow.events.runtime.preview.admin', ADMIN_UP],
+  ['leadflow.events.developer.manage.owner_only', OWNER_ONLY, true],
+
   // 10.5 LeadFlow - Analytics
   ['leadflow.analytics.reports.view.operational', MANAGER_UP],
   ['leadflow.analytics.reports.view.full', ADMIN_UP],

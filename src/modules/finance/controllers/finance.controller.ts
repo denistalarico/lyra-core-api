@@ -308,6 +308,7 @@ export class FinanceController {
       this.resolveContactInvoiceIdentity(ctx, invoice.customerId),
       this.resolveInvoicePaymentAccount(ctx),
     ]);
+    await this.persistInvoiceCustomerIdentity(ctx, invoice, customerIdentity);
     const invoiceForPdf = {
       ...invoice,
       metadata: {
@@ -342,6 +343,34 @@ export class FinanceController {
     } catch (error) {
       this.handlePdfError(error, `invoice ${invoice.invoiceNumber}`);
     }
+  }
+
+  private async persistInvoiceCustomerIdentity(
+    ctx: ReturnType<typeof getFinanceContext>,
+    invoice: Awaited<ReturnType<FinanceBillingService['getInvoice']>>,
+    identity: { customerName: string | null; customerAvatarUrl: string | null },
+  ) {
+    if (!invoice.customerId) return;
+
+    const metadata = invoice.metadata ?? {};
+    const patch: Record<string, string> = {};
+    if (
+      identity.customerName &&
+      metadata.customerName !== identity.customerName
+    ) {
+      patch.customerName = identity.customerName;
+    }
+    if (
+      identity.customerAvatarUrl &&
+      metadata.customerAvatarUrl !== identity.customerAvatarUrl
+    ) {
+      patch.customerAvatarUrl = identity.customerAvatarUrl;
+    }
+    if (Object.keys(patch).length === 0) return;
+
+    await this.financeBillingService.updateInvoice(ctx, invoice.id, {
+      metadata: patch,
+    });
   }
 
   private async resolveInvoicePaymentAccount(ctx: ReturnType<typeof getFinanceContext>) {

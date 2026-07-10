@@ -22,6 +22,12 @@ function makeLayout(): DocumentLayoutEntity {
     backgroundColor: '#FFFFFF',
     fontFamily: 'Inter',
     headingFontFamily: 'Sora',
+    companyAddress: 'Rua das Agências, 100',
+    companyCity: 'São Paulo',
+    companyRegion: 'SP',
+    companyPostalCode: '01000-000',
+    companyEmail: 'financeiro@lyra.test',
+    companyPhone: '(11) 99999-0000',
   } as unknown as DocumentLayoutEntity;
 }
 
@@ -129,10 +135,11 @@ function makePixBankAccount(overrides: Partial<FinanceBankAccount> = {}): Financ
     isPrimary: true,
     active: true,
     bankDetails: {
-      pixKey: 'financeiro@example.com',
-      pixKeyType: 'email',
+      pixKey: '12.345.678/0001-90',
+      pixKeyType: 'cpf_cnpj',
       accountHolderName: 'Lyra Agency',
       accountHolderDocument: '12.345.678/0001-90',
+      bankCode: '001',
       branchNumber: '0001',
       accountNumber: '12345',
       accountDigit: '6',
@@ -215,10 +222,12 @@ describe('DocumentPdfRendererService — invoice layout HTML', () => {
     });
   }
 
-  it('renders the customer in the document header and removes the hero customer card', async () => {
+  it('keeps the agency data in the standard header and renders the customer in the invoice hero', async () => {
     const html = await buildInvoiceHtml();
 
-    expect(html).toContain('doc-company--invoice-customer');
+    expect(html).toContain('Rua das Agências, 100');
+    expect(html).not.toContain('doc-company--invoice-customer');
+    expect(html).toContain('doc-invoice-customer-header');
     expect(html).toContain('Cliente Aurora');
     expect(html).not.toContain('doc-customer-header"><span');
   });
@@ -236,7 +245,11 @@ describe('DocumentPdfRendererService — invoice layout HTML', () => {
 
     expect(html).toContain('Dados para pagamento');
     expect(html).toContain('Pix QR Code');
-    expect(html).toContain('financeiro@example.com');
+    expect(html).toContain('12.345.678/0001-90');
+    expect(html).toContain('CPF / CNPJ');
+    expect(html).not.toContain('cpf_cnpj');
+    expect(html).not.toContain('Documento');
+    expect(html).not.toContain('Código do banco');
     expect(html).toContain('data:image/png;base64,');
     expect(html).toContain('Resumo financeiro');
   });

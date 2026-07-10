@@ -255,6 +255,10 @@ import {
   LeadFlowAgentVersionEntity,
   LeadFlowAgentChannelBindingEntity,
 } from '../modules/leadflow-agents/entities';
+import {
+  LeadFlowAutomationEntity,
+  LeadFlowAutomationVersionEntity,
+} from '../modules/leadflow-automations/entities';
 
 export const agencyEntities = [
   NotificationEntity,
@@ -421,6 +425,8 @@ export const agencyEntities = [
   LeadFlowAgentEntity,
   LeadFlowAgentVersionEntity,
   LeadFlowAgentChannelBindingEntity,
+  LeadFlowAutomationEntity,
+  LeadFlowAutomationVersionEntity,
 ];
 
 export function getTypeOrmConfig(): TypeOrmModuleOptions {

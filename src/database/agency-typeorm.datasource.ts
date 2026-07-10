@@ -87,6 +87,8 @@ import { CreateLeadflowSettingsCore1783200000000 } from './migrations/1783200000
 import { AddLeadflowAgencySettingsContext1783300000000 } from './migrations/1783300000000-add-leadflow-agency-settings-context';
 import { CreateLeadflowAgentsCore1783400000000 } from './migrations/1783400000000-create-leadflow-agents-core';
 import { AddLeadflowAgentsPermissions1783500000000 } from './migrations/1783500000000-add-leadflow-agents-permissions';
+import { CreateLeadflowAutomationsCore1783600000000 } from './migrations/1783600000000-create-leadflow-automations-core';
+import { AddLeadflowAutomationsPermissions1783700000000 } from './migrations/1783700000000-add-leadflow-automations-permissions';
 
 export const AgencyDataSource = new DataSource({
   type: 'postgres',
@@ -187,5 +189,7 @@ export const AgencyDataSource = new DataSource({
     AddLeadflowAgencySettingsContext1783300000000,
     CreateLeadflowAgentsCore1783400000000,
     AddLeadflowAgentsPermissions1783500000000,
+    CreateLeadflowAutomationsCore1783600000000,
+    AddLeadflowAutomationsPermissions1783700000000,
   ],
 });
