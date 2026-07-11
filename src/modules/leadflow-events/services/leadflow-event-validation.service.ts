@@ -9,18 +9,53 @@ import {
   LEADFLOW_EVENT_MODULE_KEYS,
   LEADFLOW_EVENT_PRODUCT_KEY,
 } from '../types/leadflow-event.types';
+import type { LeadFlowEventPayloadFieldType } from '../types/leadflow-event.types';
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const FORBIDDEN_SENSITIVE_KEY_PATTERN =
+  /secret|token|password|credential|apikey|api_key|prompt|rawpayload|raw_payload|webhookpayload|webhook_payload|rawmessage|raw_message|messagetext|message_text|messagebody|message_body/i;
 
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0;
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return (
-    typeof value === 'object' && value !== null && !Array.isArray(value)
-  );
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function matchesPayloadFieldType(
+  value: unknown,
+  type: LeadFlowEventPayloadFieldType,
+): boolean {
+  if (type === 'array') return Array.isArray(value);
+  if (type === 'object') return isPlainObject(value);
+  return typeof value === type;
+}
+
+function collectForbiddenSensitiveKeys(
+  value: unknown,
+  path: string,
+  findings: string[],
+): void {
+  if (Array.isArray(value)) {
+    value.forEach((entry, index) =>
+      collectForbiddenSensitiveKeys(entry, `${path}[${index}]`, findings),
+    );
+    return;
+  }
+
+  if (!isPlainObject(value)) {
+    return;
+  }
+
+  for (const [key, nested] of Object.entries(value)) {
+    const nestedPath = `${path}.${key}`;
+    if (FORBIDDEN_SENSITIVE_KEY_PATTERN.test(key)) {
+      findings.push(nestedPath);
+    }
+    collectForbiddenSensitiveKeys(nested, nestedPath, findings);
+  }
 }
 
 /**
@@ -41,6 +76,13 @@ export class LeadFlowEventValidationService {
       });
     const invalid = (field: string, message: string) =>
       errors.push({ code: 'invalid_field', field, message });
+    const forbiddenSensitiveField = (field: string) =>
+      errors.push({
+        code: 'forbidden_sensitive_field',
+        field,
+        message:
+          'Eventos LeadFlow não podem carregar tokens, secrets, prompt bruto, payload bruto de webhook ou mensagem completa.',
+      });
 
     // eventId
     if (input.eventId === undefined || input.eventId === null) {
@@ -168,9 +210,15 @@ export class LeadFlowEventValidationService {
     }
 
     // payload
+    const payload =
+      input.payload !== undefined &&
+      input.payload !== null &&
+      isPlainObject(input.payload)
+        ? input.payload
+        : null;
     if (input.payload === undefined || input.payload === null) {
       missing('payload');
-    } else if (!isPlainObject(input.payload)) {
+    } else if (!payload) {
       invalid('payload', 'payload deve ser um objeto JSON.');
     }
 
@@ -223,6 +271,55 @@ export class LeadFlowEventValidationService {
           });
         }
       }
+
+      if (payload) {
+        const schema = catalogItem.payloadSchema;
+        const allowedPayloadFields = new Set(Object.keys(schema));
+
+        for (const [fieldName, spec] of Object.entries(schema)) {
+          const value = payload[fieldName];
+          if (value === undefined || value === null) {
+            if (spec.required) {
+              errors.push({
+                code: 'missing_payload_field',
+                field: `payload.${fieldName}`,
+                message: `${catalogItem.eventName} exige payload.${fieldName}.`,
+              });
+            }
+            continue;
+          }
+
+          if (!matchesPayloadFieldType(value, spec.type)) {
+            invalid(
+              `payload.${fieldName}`,
+              `payload.${fieldName} deve ser do tipo ${spec.type}.`,
+            );
+          }
+        }
+
+        for (const fieldName of Object.keys(payload)) {
+          if (!allowedPayloadFields.has(fieldName)) {
+            errors.push({
+              code: 'unexpected_payload_field',
+              field: `payload.${fieldName}`,
+              message: `${catalogItem.eventName} não declara payload.${fieldName} no contrato.`,
+            });
+          }
+        }
+      }
+    }
+
+    for (const rootField of [
+      'source',
+      'actor',
+      'correlation',
+      'context',
+      'payload',
+      'metadata',
+    ] as const) {
+      const findings: string[] = [];
+      collectForbiddenSensitiveKeys(input[rootField], rootField, findings);
+      findings.forEach(forbiddenSensitiveField);
     }
 
     return {

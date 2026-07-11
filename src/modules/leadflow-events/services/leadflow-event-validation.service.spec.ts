@@ -138,7 +138,10 @@ describe('LeadFlowEventValidationService', () => {
 
   it('requires the context ids declared by the catalog item', () => {
     const envelope = buildValidEnvelope();
-    envelope.context = { conversationId: (buildValidEnvelope().context as Record<string, string>).conversationId };
+    envelope.context = {
+      conversationId: (buildValidEnvelope().context as Record<string, string>)
+        .conversationId,
+    };
 
     const result = service.validate(envelope);
 
@@ -147,6 +150,88 @@ describe('LeadFlowEventValidationService', () => {
       expect.objectContaining({
         code: 'missing_required_context',
         field: 'context.contactId',
+      }),
+    );
+  });
+
+  it('requires payload fields declared by the catalog item', () => {
+    const envelope = buildValidEnvelope();
+    envelope.payload = { messageId: 'a6d5b3e5-6666-4777-9888-9999aaaabbbb' };
+
+    const result = service.validate(envelope);
+
+    expect(result.valid).toBe(false);
+    expect(result.errors).toContainEqual(
+      expect.objectContaining({
+        code: 'missing_payload_field',
+        field: 'payload.messageType',
+      }),
+    );
+  });
+
+  it('rejects payload fields not declared by the event contract', () => {
+    const envelope = buildValidEnvelope();
+    envelope.payload = {
+      messageId: 'a6d5b3e5-6666-4777-9888-9999aaaabbbb',
+      messageType: 'text',
+      fullText: 'conteudo completo indevido',
+    };
+
+    const result = service.validate(envelope);
+
+    expect(result.valid).toBe(false);
+    expect(result.errors).toContainEqual(
+      expect.objectContaining({
+        code: 'unexpected_payload_field',
+        field: 'payload.fullText',
+      }),
+    );
+  });
+
+  it('validates payload field types declared by the event contract', () => {
+    const envelope = buildValidEnvelope();
+    envelope.payload = {
+      messageId: 'a6d5b3e5-6666-4777-9888-9999aaaabbbb',
+      messageType: 'text',
+      hasMedia: 'yes',
+    };
+
+    const result = service.validate(envelope);
+
+    expect(result.valid).toBe(false);
+    expect(result.errors).toContainEqual(
+      expect.objectContaining({
+        code: 'invalid_field',
+        field: 'payload.hasMedia',
+      }),
+    );
+  });
+
+  it('rejects raw prompt, token, secret and raw webhook payload keys', () => {
+    const envelope = buildValidEnvelope();
+    envelope.payload = {
+      messageId: 'a6d5b3e5-6666-4777-9888-9999aaaabbbb',
+      messageType: 'text',
+      accessToken: 'must-not-enter-contract-validation',
+    };
+    envelope.metadata = {
+      schemaVersion: 1,
+      rawPrompt: 'must-not-enter-contract-validation',
+    };
+
+    const result = service.validate(envelope);
+
+    expect(result.valid).toBe(false);
+    expect(result.errors).toContainEqual(
+      expect.objectContaining({
+        code: 'forbidden_sensitive_field',
+        field: 'payload.accessToken',
+      }),
+    );
+    expect(result.errors).toContainEqual(
+      expect.objectContaining({
+        code: 'forbidden_sensitive_field',
+        field: 'metadata.rawPrompt',
       }),
     );
   });

@@ -30,7 +30,10 @@ export type LeadFlowEventValidationErrorCode =
   | 'unsupported_version'
   | 'invalid_product_key'
   | 'incompatible_module_key'
-  | 'missing_required_context';
+  | 'missing_required_context'
+  | 'missing_payload_field'
+  | 'unexpected_payload_field'
+  | 'forbidden_sensitive_field';
 
 export interface LeadFlowEventValidationError {
   code: LeadFlowEventValidationErrorCode;
