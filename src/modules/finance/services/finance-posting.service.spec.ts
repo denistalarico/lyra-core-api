@@ -14,6 +14,7 @@ import {
   FinancePaymentAllocation,
 } from '../entities';
 import {
+  FinanceAccountStatus,
   FinanceAccountType,
   FinanceAllocationTargetType,
   FinanceCategoryType,
@@ -287,6 +288,42 @@ describe('FinancePostingService', () => {
     expect(byAccount[accountId(store, '3.1.01')]).toBe('160.00');
     expect(byAccount[altRevenue.id]).toBe('90.00');
     assertBalanced(store, entry!.id);
+  });
+
+  it('uses the revenue account and sales journal inherited from the sales item', async () => {
+    const { service, store, manager } = makeService();
+    seedChartOfAccounts(store);
+    store.table(FinanceAccount).push({
+      id: 'account-product-revenue',
+      tenantId: TENANT,
+      workspaceId: WORKSPACE,
+      code: '3.1.99',
+      name: 'Receita do produto',
+      type: FinanceAccountType.Revenue,
+      status: FinanceAccountStatus.Active,
+    });
+    store.table(FinanceJournal).push({
+      id: 'journal-product-sales',
+      tenantId: TENANT,
+      workspaceId: WORKSPACE,
+      type: FinanceJournalType.Sales,
+      active: true,
+    });
+    const invoice = addInvoice(store, { totalAmount: '100.00' });
+    addInvoiceLine(store, invoice.id, '100.00', {
+      metadata: {
+        revenueAccountId: 'account-product-revenue',
+        salesJournalId: 'journal-product-sales',
+      },
+    });
+
+    const entry = await service.postInvoiceConfirmed(ctx(), invoice.id, manager);
+
+    expect(entry?.journalId).toBe('journal-product-sales');
+    const credit = linesOf(store, entry!.id).find(
+      (line) => line.lineType === FinanceJournalEntryLineType.Credit,
+    );
+    expect(credit.accountId).toBe('account-product-revenue');
   });
 
   it('3. does not duplicate when an invoice is confirmed twice (idempotent)', async () => {

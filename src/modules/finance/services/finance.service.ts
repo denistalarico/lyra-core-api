@@ -755,6 +755,66 @@ export class FinanceService {
         .map((profile) => profile.id),
     ]).size;
 
+    const clientEndDate = (client: AgencyClient) =>
+      client.endDate ??
+      client.archivedAt?.toISOString().slice(0, 10) ??
+      ([AgencyClientStatus.Ended, AgencyClientStatus.Archived].includes(client.status)
+        ? client.updatedAt.toISOString().slice(0, 10)
+        : null);
+    const clientsAtPeriodStart = clients.filter((client) => {
+      const createdDate = client.createdAt.toISOString().slice(0, 10);
+      const endedDate = clientEndDate(client);
+      return createdDate < periodStartDate && (!endedDate || endedDate >= periodStartDate);
+    });
+    const churnedClients = clients.filter((client) => {
+      if (![AgencyClientStatus.Ended, AgencyClientStatus.Archived].includes(client.status)) {
+        return false;
+      }
+      const endedDate = clientEndDate(client);
+      return Boolean(endedDate && endedDate >= periodStartDate && endedDate <= periodEndDate);
+    });
+    const customerChurn =
+      clientsAtPeriodStart.length > 0
+        ? churnedClients.length / clientsAtPeriodStart.length
+        : 0;
+
+    const recurringAtPeriodStart = recurringProfiles.filter(
+      (profile) =>
+        profile.interval === 'monthly' &&
+        profile.startDate < periodStartDate &&
+        (!profile.endDate || profile.endDate >= periodStartDate),
+    );
+    const recurringChurnedThisMonth = recurringProfiles.filter(
+      (profile) =>
+        profile.interval === 'monthly' &&
+        ['cancelled', 'completed'].includes(profile.status) &&
+        Boolean(
+          profile.endDate &&
+            profile.endDate >= periodStartDate &&
+            profile.endDate <= periodEndDate,
+        ),
+    );
+    const revenueAtPeriodStart =
+      clientsAtPeriodStart.reduce(
+        (sum, client) => sum + this.readClientMonthlyFee(client),
+        0,
+      ) +
+      recurringAtPeriodStart.reduce(
+        (sum, profile) => sum + this.toNumber(profile.amount),
+        0,
+      );
+    const churnedRevenue =
+      churnedClients.reduce(
+        (sum, client) => sum + this.readClientMonthlyFee(client),
+        0,
+      ) +
+      recurringChurnedThisMonth.reduce(
+        (sum, profile) => sum + this.toNumber(profile.amount),
+        0,
+      );
+    const revenueChurn =
+      revenueAtPeriodStart > 0 ? churnedRevenue / revenueAtPeriodStart : 0;
+
     return {
       currency: settings.baseCurrency,
       period: {
@@ -780,8 +840,8 @@ export class FinanceService {
         netMargin: this.roundRate(netMargin),
         breakEvenPoint: this.roundMoney(breakEvenPoint),
         activeContracts,
-        customerChurn: 0,
-        revenueChurn: 0,
+        customerChurn: this.roundRate(customerChurn),
+        revenueChurn: this.roundRate(revenueChurn),
       },
       counts: {
         invoices: validInvoices.length,

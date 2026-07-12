@@ -211,7 +211,7 @@ export class FinancePostingService {
       const total = lineTotal;
       if (total <= 0) return null;
 
-      const journalId = await this.resolveJournalId(m, ctx, FinanceJournalType.Sales);
+      const journalId = await this.resolveInvoiceJournalId(m, ctx, lines);
       const postingLines: PostingLine[] = [
         {
           lineType: FinanceJournalEntryLineType.Debit,
@@ -754,10 +754,14 @@ export class FinancePostingService {
     expectedTypes: FinanceAccountType[],
     label: string,
   ): Promise<string | null> {
-    const accountId =
-      typeof metadata?.accountId === 'string' && metadata.accountId.trim()
-        ? metadata.accountId.trim()
-        : null;
+    const candidateKeys =
+      expectedTypes.length === 1 && expectedTypes[0] === FinanceAccountType.Revenue
+        ? ['accountId', 'revenueAccountId', 'revenueAccount']
+        : ['accountId', 'expenseAccountId', 'expenseAccount'];
+    const accountId = candidateKeys
+      .map((key) => metadata?.[key])
+      .find((value): value is string => typeof value === 'string' && Boolean(value.trim()))
+      ?.trim() ?? null;
     if (!accountId) return null;
 
     const account = await this.findAccountById(m, ctx, accountId);
@@ -862,5 +866,47 @@ export class FinancePostingService {
       where: { tenantId: ctx.tenantId, workspaceId: ctx.workspaceId, type, active: true },
     });
     return journal?.id ?? null;
+  }
+
+  private async resolveInvoiceJournalId(
+    m: EntityManager,
+    ctx: FinanceRequestContext,
+    lines: FinanceInvoiceLine[],
+  ): Promise<string | null> {
+    const configuredIds = [
+      ...new Set(
+        lines
+          .map((line) => {
+            const value = line.metadata?.salesJournalId ?? line.metadata?.salesJournal;
+            return typeof value === 'string' && value.trim() ? value.trim() : null;
+          })
+          .filter((value): value is string => Boolean(value)),
+      ),
+    ];
+
+    if (configuredIds.length > 1) {
+      throw new BadRequestException(
+        'Os itens da fatura usam diários de vendas diferentes. Padronize o diário antes de emitir.',
+      );
+    }
+
+    if (configuredIds.length === 1) {
+      const journal = await m.getRepository(FinanceJournal).findOne({
+        where: {
+          id: configuredIds[0],
+          tenantId: ctx.tenantId,
+          workspaceId: ctx.workspaceId,
+          active: true,
+        },
+      });
+      if (!journal || journal.type !== FinanceJournalType.Sales) {
+        throw new BadRequestException(
+          'O diário de vendas configurado no produto não está ativo ou não é do tipo vendas.',
+        );
+      }
+      return journal.id;
+    }
+
+    return this.resolveJournalId(m, ctx, FinanceJournalType.Sales);
   }
 }

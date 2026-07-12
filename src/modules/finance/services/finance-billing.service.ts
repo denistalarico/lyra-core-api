@@ -1776,15 +1776,17 @@ export class FinanceBillingService {
     Object.assign(payment, rest);
     let saved = await this.paymentsRepo.save(payment);
 
-    // Reverse the settlement entries when a completed payment is cancelled or
-    // refunded. Idempotent, so repeated transitions never double-reverse.
+    // Leaving "completed" always removes the financial effect of the payment.
+    // For an editable/provisional status, the old allocations are removed and
+    // their target is preserved in metadata so completing this SAME payment
+    // allocates it again without creating a duplicate payment row.
     const becameVoid =
       saved.status === FinancePaymentStatus.Cancelled ||
       saved.status === FinancePaymentStatus.Refunded;
-    const wasVoid =
-      previousStatus === FinancePaymentStatus.Cancelled ||
-      previousStatus === FinancePaymentStatus.Refunded;
-    if (becameVoid && !wasVoid) {
+    if (
+      previousStatus === FinancePaymentStatus.Completed &&
+      saved.status !== FinancePaymentStatus.Completed
+    ) {
       const allocations = await this.paymentAllocationsRepo.find({
         where: {
           tenantId: ctx.tenantId,
@@ -1793,6 +1795,32 @@ export class FinanceBillingService {
         },
       });
       await this.postingService.reversePayment(ctx, saved);
+
+      if (!becameVoid && allocations.length > 0) {
+        const firstTarget = allocations[0];
+        const sameTarget = allocations.every(
+          (allocation) =>
+            allocation.targetType === firstTarget.targetType &&
+            allocation.targetId === firstTarget.targetId,
+        );
+        if (sameTarget) {
+          saved.metadata = {
+            ...saved.metadata,
+            ...this.scheduledTargetMetadata({
+              targetType: firstTarget.targetType,
+              targetId: firstTarget.targetId,
+            }),
+          };
+        }
+        await this.paymentAllocationsRepo.delete({
+          tenantId: ctx.tenantId,
+          workspaceId: ctx.workspaceId,
+          paymentId: saved.id,
+        });
+        saved.allocatedAmount = '0.00';
+        saved = await this.paymentsRepo.save(saved);
+      }
+
       await this.recalculateTargetsForAllocations(ctx, allocations);
     }
 

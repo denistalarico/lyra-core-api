@@ -107,6 +107,48 @@ describe('FinanceBillingService notification triggers', () => {
     );
   });
 
+  it('reopens a completed payment without duplicating it and preserves its allocation target', async () => {
+    const payment = makePayment({
+      status: FinancePaymentStatus.Completed,
+      amount: '100.00',
+      allocatedAmount: '100.00',
+    });
+    const invoice = makeInvoice({
+      status: FinanceInvoiceStatus.Paid,
+      totalAmount: '100.00',
+      paidAmount: '100.00',
+      balanceDue: '0.00',
+    });
+    const allocation = {
+      id: 'allocation-edit-1',
+      tenantId: 'tenant-1',
+      workspaceId: 'workspace-1',
+      paymentId: payment.id,
+      targetType: FinanceAllocationTargetType.Invoice,
+      targetId: invoice.id,
+      amount: '100.00',
+    } as FinancePaymentAllocation;
+    const { service, paymentsRepo, paymentAllocationsRepo, postingService } =
+      makeService({ payment, invoice, allocations: [allocation] });
+
+    const updated = await service.updatePayment(makeContext(), payment.id, {
+      status: FinancePaymentStatus.Pending,
+    });
+
+    expect(postingService.reversePayment).toHaveBeenCalledTimes(1);
+    expect(paymentAllocationsRepo.delete).toHaveBeenCalledTimes(1);
+    expect(paymentsRepo.create).not.toHaveBeenCalled();
+    expect(updated.allocatedAmount).toBe('0.00');
+    expect(updated.metadata).toEqual(
+      expect.objectContaining({
+        scheduledTarget: {
+          targetType: FinanceAllocationTargetType.Invoice,
+          targetId: invoice.id,
+        },
+      }),
+    );
+  });
+
   it('publishes invoice_paid after allocation pays an invoice without duplicating payment_received', async () => {
     const payment = makePayment({
       direction: FinancePaymentDirection.Customer,
@@ -466,6 +508,7 @@ function makeService(options: {
   bill?: FinanceBill;
   recurringProfile?: FinanceRecurringProfile;
   billRecurrence?: FinanceBillRecurrence;
+  allocations?: FinancePaymentAllocation[];
 } = {}) {
   const invoice = options.invoice ?? makeInvoice();
   const payment = options.payment ?? makePayment();
@@ -506,9 +549,17 @@ function makeService(options: {
       }),
     ),
     findOne: jest.fn().mockResolvedValue(payment),
+    find: jest.fn().mockResolvedValue([payment]),
     save: jest.fn(async (item: FinancePayment) => item),
   };
-  const paymentAllocationsRepo = {};
+  let currentAllocations = [...(options.allocations ?? [])];
+  const paymentAllocationsRepo = {
+    find: jest.fn(async () => currentAllocations),
+    delete: jest.fn(async () => {
+      currentAllocations = [];
+      return { affected: 1 };
+    }),
+  };
   const settingsRepo = {
     findOne: jest.fn().mockResolvedValue(makeFinanceSettings()),
     create: jest.fn((value: Partial<FinanceSetting>) => value),
@@ -576,6 +627,7 @@ function makeService(options: {
     billsQbGetOne,
     billRecurrencesRepo,
     postingService,
+    paymentAllocationsRepo,
   };
 }
 
