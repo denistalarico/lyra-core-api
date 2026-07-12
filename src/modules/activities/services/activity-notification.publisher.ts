@@ -212,6 +212,26 @@ export class ActivityNotificationPublisher {
     });
   }
 
+  publishDueToday(input: ActivityNotificationInput) {
+    return this.publishActivityEvent({
+      ...input,
+      eventType: 'activity.due_today',
+      eventIdParts: [
+        'activity.due_today',
+        input.activity.id,
+        this.timestampFor(input.activity.dueAt),
+      ],
+      recipients: input.recipients ?? [
+        {
+          userId: input.activity.assignedToId,
+          interestReason: NotificationInterestReason.ASSIGNED,
+        },
+      ],
+      title: 'Atividade vence hoje',
+      body: `A atividade "${input.activity.summary}" vence hoje.`,
+    });
+  }
+
   publishReminder(
     input: ActivityNotificationInput & {
       offsetMinutes: number;

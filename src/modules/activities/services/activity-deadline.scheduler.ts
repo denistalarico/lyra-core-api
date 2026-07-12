@@ -74,9 +74,16 @@ export class ActivityDeadlineScheduler {
 
       if (activity.dueAt.getTime() < now.getTime()) {
         await this.publisher.publishOverdue({ activity, links });
+      } else if (this.isSameLocalDay(activity.dueAt, now)) {
+        await this.publisher.publishDueToday({ activity, links });
       } else {
         await this.publisher.publishDueSoon({ activity, links });
       }
     }
+  }
+
+  /** Dia-calendário no fuso local do servidor (produção roda em America/Sao_Paulo). */
+  private isSameLocalDay(first: Date, second: Date) {
+    return first.toDateString() === second.toDateString();
   }
 }

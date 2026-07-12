@@ -1261,6 +1261,15 @@ export const AGENCY_NOTIFICATION_CATALOG: readonly NotificationDefinition[] = [
     },
   ),
   standard(
+    'activity.due_today',
+    'activities',
+    NotificationCategory.DEADLINE,
+    NotificationRecipientStrategy.ASSIGNED_USER,
+    {
+      selfNotificationPolicy: NotificationSelfPolicy.ALLOW_ACTOR,
+    },
+  ),
+  standard(
     'activity.reminder',
     'activities',
     NotificationCategory.DEADLINE,

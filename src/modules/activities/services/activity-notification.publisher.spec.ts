@@ -182,6 +182,34 @@ describe('ActivityNotificationPublisher', () => {
     );
   });
 
+  it('publishes activity.due_today to the assignee keyed by the due date', async () => {
+    const publisher = new ActivityNotificationPublisher(processor);
+    const dueAt = new Date('2026-06-12T18:00:00.000Z');
+    const activity = makeActivity({
+      assignedToId: 'user-assignee',
+      dueAt,
+    });
+
+    await publisher.publishDueToday({ activity, links: [] });
+
+    const event = expectProcessedEvent(processor);
+    expect(event).toEqual(
+      expect.objectContaining({
+        eventType: 'activity.due_today',
+        eventId: `activity.due_today:activity-1:${dueAt.toISOString()}`,
+        recipients: [
+          {
+            userId: 'user-assignee',
+            interestReason: NotificationInterestReason.ASSIGNED,
+          },
+        ],
+        payload: expect.objectContaining({
+          title: 'Atividade vence hoje',
+        }),
+      }),
+    );
+  });
+
   it('removes empty, duplicate, and actor recipients', async () => {
     const publisher = new ActivityNotificationPublisher(processor);
     const activity = makeActivity({
