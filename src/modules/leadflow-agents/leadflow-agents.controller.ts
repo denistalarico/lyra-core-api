@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Get,
@@ -28,12 +29,16 @@ import type {
 } from './dto/leadflow-agent-runtime-config-response.dto';
 import { LEADFLOW_AGENTS_PERMISSIONS } from './leadflow-agents.permissions';
 import { LeadFlowAgentService } from './services/leadflow-agent.service';
+import { OperationsRoomStateService } from './services/operations-room-state.service';
 
 @Controller('leadflow/agents')
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 @RequireProductEntitlement('leadflow')
 export class LeadFlowAgentsController {
-  constructor(private readonly agentService: LeadFlowAgentService) {}
+  constructor(
+    private readonly agentService: LeadFlowAgentService,
+    private readonly operationsRoomStateService: OperationsRoomStateService,
+  ) {}
 
   @Get()
   @RequirePermission(LEADFLOW_AGENTS_PERMISSIONS.view)
@@ -41,6 +46,20 @@ export class LeadFlowAgentsController {
     @RequestContextData() ctx: RequestContext,
   ): Promise<LeadFlowAgentListResponse> {
     return this.agentService.list(ctx);
+  }
+
+  @Get('room/state')
+  @RequirePermission(LEADFLOW_AGENTS_PERMISSIONS.view)
+  async roomState(@RequestContextData() ctx: RequestContext) {
+    const listed = await this.agentService.list(ctx);
+    if (!ctx.workspaceId) {
+      throw new BadRequestException('Workspace context is required.');
+    }
+    return this.operationsRoomStateService.getSnapshot(
+      ctx.tenantId,
+      ctx.workspaceId,
+      listed.items.map((agent) => agent.id),
+    );
   }
 
   @Get('presets')

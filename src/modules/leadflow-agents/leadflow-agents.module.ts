@@ -6,11 +6,15 @@ import {
   LeadFlowAgentChannelBindingEntity,
   LeadFlowAgentEntity,
   LeadFlowAgentVersionEntity,
+  LeadFlowAgentOperationalStateEntity,
+  OperationsRoomRevisionEntity,
+  OperationsRoomOutboxEntity,
 } from './entities';
 import { LeadFlowAgentsController } from './leadflow-agents.controller';
 import { LeadFlowAgentPresetService } from './services/leadflow-agent-preset.service';
 import { LeadFlowAgentRuntimeConfigService } from './services/leadflow-agent-runtime-config.service';
 import { LeadFlowAgentService } from './services/leadflow-agent.service';
+import { OperationsRoomStateService } from './services/operations-room-state.service';
 
 @Module({
   imports: [
@@ -21,6 +25,9 @@ import { LeadFlowAgentService } from './services/leadflow-agent.service';
         LeadFlowAgentVersionEntity,
         LeadFlowAgentChannelBindingEntity,
         LeadFlowClientSettingsEntity,
+        LeadFlowAgentOperationalStateEntity,
+        OperationsRoomRevisionEntity,
+        OperationsRoomOutboxEntity,
       ],
       'agency',
     ),
@@ -30,7 +37,12 @@ import { LeadFlowAgentService } from './services/leadflow-agent.service';
     LeadFlowAgentService,
     LeadFlowAgentPresetService,
     LeadFlowAgentRuntimeConfigService,
+    OperationsRoomStateService,
   ],
-  exports: [LeadFlowAgentService, LeadFlowAgentRuntimeConfigService],
+  exports: [
+    LeadFlowAgentService,
+    LeadFlowAgentRuntimeConfigService,
+    OperationsRoomStateService,
+  ],
 })
 export class LeadFlowAgentsModule {}

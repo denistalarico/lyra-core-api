@@ -41,10 +41,12 @@ import { CreateContractSignatureProviderSettings1760002024000 } from './migratio
 import { CreateAgencyTeamCore1760002025000 } from './migrations/1760002025000-create-agency-team-core';
 import { CreateAgencyTeamAttendance1760002026000 } from './migrations/1760002026000-create-agency-team-attendance';
 import { CreateAgencyTeamConfigOptions1760002031000 } from './migrations/1760002031000-create-agency-team-config-options';
+import { ReconcileAgencyTeamConfigOptionsSchema1760002031500 } from './migrations/1760002031500-reconcile-agency-team-config-options-schema';
 import { FixTeamConfigOptionsSeniorityUniqueIndex1760002032000 } from './migrations/1760002032000-fix-team-config-options-seniority-unique-index';
 import { CreateAgencyTeamPayments1760002030000 } from './migrations/1760002030000-create-agency-team-payments';
 import { AddBankAccountChartAccount1760002039000 } from './migrations/1760002039000-add-bank-account-chart-account';
 import { CreateAgencyKnowledgeCore1760002042000 } from './migrations/1760002042000-create-agency-knowledge-core';
+import { CreateAgencyKnowledgeQuickNotes1760002042500 } from './migrations/1760002042500-create-agency-knowledge-quick-notes';
 
 import { AddKnowledgeVaultNotesEncryptionFields1760002043000 } from './migrations/1760002043000-add-knowledge-vault-notes-encryption-fields';
 import { CreateAgencyTeamChatCore1760002044000 } from './migrations/1760002044000-create-agency-team-chat-core';
@@ -87,8 +89,10 @@ import { CreateLeadflowSettingsCore1783200000000 } from './migrations/1783200000
 import { AddLeadflowAgencySettingsContext1783300000000 } from './migrations/1783300000000-add-leadflow-agency-settings-context';
 import { CreateLeadflowAgentsCore1783400000000 } from './migrations/1783400000000-create-leadflow-agents-core';
 import { AddLeadflowAgentsPermissions1783500000000 } from './migrations/1783500000000-add-leadflow-agents-permissions';
+import { CreateLeadflowOperationsRoom1783900000000 } from './migrations/1783900000000-create-leadflow-operations-room';
 import { CreateLeadflowAutomationsCore1783600000000 } from './migrations/1783600000000-create-leadflow-automations-core';
 import { AddLeadflowAutomationsPermissions1783700000000 } from './migrations/1783700000000-add-leadflow-automations-permissions';
+import { AddLeadflowEventsPermissions1783800000000 } from './migrations/1783800000000-add-leadflow-events-permissions';
 
 export const AgencyDataSource = new DataSource({
   type: 'postgres',
@@ -140,6 +144,7 @@ export const AgencyDataSource = new DataSource({
     CreateContractSignatureProviderSettings1760002024000,
     CreateAgencyTeamCore1760002025000,
     CreateAgencyTeamConfigOptions1760002031000,
+    ReconcileAgencyTeamConfigOptionsSchema1760002031500,
     CreateAgencyTeamAttendance1760002026000,
     FixTeamConfigOptionsSeniorityUniqueIndex1760002032000,
     AddProjectIdToTaskStages1760002036000,
@@ -147,6 +152,7 @@ export const AgencyDataSource = new DataSource({
     AddTaskTypeFields1760002040000,
     CreateAgencyClientsCore1760002041000,
     CreateAgencyKnowledgeCore1760002042000,
+    CreateAgencyKnowledgeQuickNotes1760002042500,
     AddKnowledgeVaultNotesEncryptionFields1760002043000,
     CreateAgencyTeamChatCore1760002044000,
     CreateAgencyChatUserSettings1760002045000,
@@ -191,5 +197,7 @@ export const AgencyDataSource = new DataSource({
     AddLeadflowAgentsPermissions1783500000000,
     CreateLeadflowAutomationsCore1783600000000,
     AddLeadflowAutomationsPermissions1783700000000,
+    AddLeadflowEventsPermissions1783800000000,
+    CreateLeadflowOperationsRoom1783900000000,
   ],
 });
