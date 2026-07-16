@@ -45,8 +45,8 @@ export interface OperationsRoomEventEnvelope {
   occurredAt: string;
   tenantId: string;
   workspaceId: string;
-  roomVersion: number;
-  agentRevision: number;
+  roomVersion: string;
+  agentRevision: string;
   correlationId: string | null;
   payload: {
     agentId: string;
@@ -61,20 +61,20 @@ export interface OperationsRoomSnapshotResponse {
   contractVersion: 1;
   tenantId: string;
   workspaceId: string;
-  snapshotVersion: number;
+  snapshotVersion: string;
   generatedAt: string;
   timezone: string | null;
   agents: Array<{
     agentId: string;
     status: RoomAgentOperationalStatus;
     statusSince: string;
-    revision: number;
+    revision: string;
     source: RoomOperationalSource;
     reasonCode: string | null;
   }>;
   realtime: {
-    available: false;
-    transport: 'none';
+    available: boolean;
+    transport: 'websocket' | 'none';
     cursor: string | null;
   };
 }
@@ -82,5 +82,5 @@ export interface OperationsRoomSnapshotResponse {
 export interface RoomEventPage {
   kind: 'events' | 'snapshot_required';
   events: OperationsRoomEventEnvelope[];
-  nextRoomVersion: number | null;
+  nextRoomVersion: string | null;
 }

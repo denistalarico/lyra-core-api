@@ -59,4 +59,41 @@ describe('OperationsRoomStateService contract rules', () => {
     ).toBe(true);
     expect(JSON.stringify(snapshot)).not.toMatch(/prompt|message|token/i);
   });
+
+  it('requires snapshot when a replay cursor predates the retained window', async () => {
+    const query = jest
+      .fn()
+      .mockResolvedValue([{ current_version: '12', earliest_version: '9' }]);
+    const service = new OperationsRoomStateService(
+      { query } as never,
+      {} as never,
+      {} as never,
+    );
+
+    await expect(
+      service.listRoomEventsAfter('tenant-a', 'workspace-a', '3', 100),
+    ).resolves.toEqual({
+      kind: 'snapshot_required',
+      events: [],
+      nextRoomVersion: null,
+    });
+    expect(query).toHaveBeenCalledWith(
+      expect.stringContaining('tenant_id = $1 AND workspace_id = $2'),
+      ['tenant-a', 'workspace-a'],
+    );
+  });
+
+  it.each(['-1', '01', '1.2', '18446744073709551616', 'tenant-a'])(
+    'rejects an invalid or unsafe replay cursor (%s)',
+    async (cursor) => {
+      const service = new OperationsRoomStateService(
+        { query: jest.fn() } as never,
+        {} as never,
+        {} as never,
+      );
+      await expect(
+        service.listRoomEventsAfter('tenant-a', 'workspace-a', cursor, 100),
+      ).rejects.toThrow('Cursor de roomVersion inválido.');
+    },
+  );
 });

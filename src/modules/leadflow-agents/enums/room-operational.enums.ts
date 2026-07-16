@@ -21,6 +21,9 @@ export enum RoomOperationalSource {
 
 export enum RoomOutboxDeliveryState {
   Pending = 'pending',
+  Processing = 'processing',
+  Published = 'published',
+  DeadLetter = 'dead_letter',
 }
 
 export const ROOM_OPERATIONAL_STATUS_VALUES = Object.values(

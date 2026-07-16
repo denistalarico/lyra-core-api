@@ -13,13 +13,14 @@ import {
   RoomOutboxDeliveryState,
 } from '../enums/room-operational.enums';
 import type {
-  OperationsRoomEventEnvelope,
   OperationsRoomSnapshotResponse,
   RecordAgentOperationalTransitionCommand,
   RecordTransitionResult,
   RoomEventPage,
 } from '../types/operations-room.types';
 import { randomUUID } from 'node:crypto';
+import { OperationsRoomEventBusService } from '../realtime/operations-room-event-bus.service';
+import { mapOperationsRoomOutboxEvent } from '../realtime/operations-room-event.mapper';
 
 const AGENCY_CONNECTION = 'agency';
 const MAX_REPLAY_LIMIT = 500;
@@ -34,6 +35,7 @@ export class OperationsRoomStateService {
     private readonly stateRepository: Repository<LeadFlowAgentOperationalStateEntity>,
     @InjectRepository(OperationsRoomOutboxEntity, AGENCY_CONNECTION)
     private readonly outboxRepository: Repository<OperationsRoomOutboxEntity>,
+    private readonly eventBus?: OperationsRoomEventBusService,
   ) {}
 
   async recordTransition(
@@ -208,7 +210,7 @@ export class OperationsRoomStateService {
       contractVersion: 1,
       tenantId,
       workspaceId,
-      snapshotVersion: Number(revision?.roomVersion ?? '0'),
+      snapshotVersion: revision?.roomVersion ?? '0',
       generatedAt: generatedAt.toISOString(),
       timezone,
       agents: [...visibleAgentIds].sort().map((agentId) => {
@@ -217,12 +219,16 @@ export class OperationsRoomStateService {
           agentId,
           status: state?.status ?? RoomAgentOperationalStatus.Unknown,
           statusSince: (state?.statusSince ?? UNKNOWN_SINCE).toISOString(),
-          revision: Number(state?.agentRevision ?? '0'),
+          revision: state?.agentRevision ?? '0',
           source: state?.source ?? RoomOperationalSource.System,
           reasonCode: state?.reasonCode ?? null,
         };
       }),
-      realtime: { available: false, transport: 'none', cursor: null },
+      realtime: {
+        available: this.eventBus?.isReady() ?? false,
+        transport: this.eventBus?.isReady() ? 'websocket' : 'none',
+        cursor: revision?.roomVersion ?? '0',
+      },
     };
   }
 
@@ -234,10 +240,39 @@ export class OperationsRoomStateService {
   ): Promise<RoomEventPage> {
     if (!tenantId || !workspaceId)
       throw new BadRequestException('Contexto tenant/workspace obrigatório.');
+    if (!/^(0|[1-9][0-9]{0,18})$/.test(roomVersion)) {
+      throw new BadRequestException('Cursor de roomVersion inválido.');
+    }
     const safeLimit = Math.min(
       Math.max(Math.floor(limit), 1),
       MAX_REPLAY_LIMIT,
     );
+    const [window] = await this.dataSource.query<
+      Array<{ current_version: string; earliest_version: string | null }>
+    >(
+      `
+        SELECT
+          COALESCE((SELECT room_version FROM leadflow_operations_room_revision
+            WHERE tenant_id = $1 AND workspace_id = $2), 0)::text AS current_version,
+          (SELECT min(room_version)::text FROM leadflow_operations_room_event_outbox
+            WHERE tenant_id = $1 AND workspace_id = $2) AS earliest_version
+      `,
+      [tenantId, workspaceId],
+    );
+    const requested = BigInt(roomVersion);
+    const current = BigInt(window?.current_version ?? '0');
+    if (requested > current) {
+      throw new BadRequestException('Cursor posterior à versão atual do room.');
+    }
+    const earliest = window?.earliest_version
+      ? BigInt(window.earliest_version)
+      : null;
+    if (
+      requested < current &&
+      (earliest === null || requested + 1n < earliest)
+    ) {
+      return { kind: 'snapshot_required', events: [], nextRoomVersion: null };
+    }
     const events = await this.outboxRepository
       .createQueryBuilder('event')
       .where('event.tenant_id = :tenantId', { tenantId })
@@ -248,10 +283,8 @@ export class OperationsRoomStateService {
       .getMany();
     return {
       kind: 'events',
-      events: events.map(mapOutboxEvent),
-      nextRoomVersion: events.at(-1)
-        ? Number(events.at(-1)!.roomVersion)
-        : null,
+      events: events.map(mapOperationsRoomOutboxEvent),
+      nextRoomVersion: events.at(-1)?.roomVersion ?? null,
     };
   }
 
@@ -316,28 +349,4 @@ function isRetryableSerializationError(error: unknown) {
       ? (error as { code?: unknown }).code
       : null;
   return code === '40001' || code === '40P01';
-}
-
-function mapOutboxEvent(
-  event: OperationsRoomOutboxEntity,
-): OperationsRoomEventEnvelope {
-  const payload = event.payload as Record<string, unknown>;
-  return {
-    contractVersion: 1,
-    eventId: event.eventId,
-    eventType: 'agent.status.changed',
-    occurredAt: event.occurredAt.toISOString(),
-    tenantId: event.tenantId,
-    workspaceId: event.workspaceId,
-    roomVersion: Number(event.roomVersion),
-    agentRevision: Number(event.agentRevision ?? '0'),
-    correlationId: event.correlationId,
-    payload: {
-      agentId: String(payload.agentId),
-      status: payload.status as RoomAgentOperationalStatus,
-      statusSince: String(payload.statusSince),
-      source: payload.source as RoomOperationalSource,
-      reasonCode: (payload.reasonCode as string | null) ?? null,
-    },
-  };
 }

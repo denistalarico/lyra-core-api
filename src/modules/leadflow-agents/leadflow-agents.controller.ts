@@ -7,6 +7,7 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import { RequestContextData } from '../../common/context/request-context.decorator';
@@ -59,6 +60,32 @@ export class LeadFlowAgentsController {
       ctx.tenantId,
       ctx.workspaceId,
       listed.items.map((agent) => agent.id),
+    );
+  }
+
+  @Get('room/events')
+  @RequirePermission(LEADFLOW_AGENTS_PERMISSIONS.view)
+  async roomEvents(
+    @RequestContextData() ctx: RequestContext,
+    @Query('afterRoomVersion') afterRoomVersion = '0',
+    @Query('limit') rawLimit = '100',
+  ) {
+    await this.agentService.list(ctx);
+    if (!ctx.workspaceId) {
+      throw new BadRequestException('Workspace context is required.');
+    }
+    if (!/^[1-9][0-9]{0,2}$/.test(rawLimit)) {
+      throw new BadRequestException('Replay limit must be between 1 and 500.');
+    }
+    const limit = Number(rawLimit);
+    if (limit > 500) {
+      throw new BadRequestException('Replay limit must be between 1 and 500.');
+    }
+    return this.operationsRoomStateService.listRoomEventsAfter(
+      ctx.tenantId,
+      ctx.workspaceId,
+      afterRoomVersion,
+      limit,
     );
   }
 

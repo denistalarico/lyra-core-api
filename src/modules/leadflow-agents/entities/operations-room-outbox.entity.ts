@@ -81,6 +81,32 @@ export class OperationsRoomOutboxEntity {
   })
   deliveryState!: RoomOutboxDeliveryState;
 
+  @Column({ name: 'attempt_count', type: 'integer', default: 0 })
+  attemptCount!: number;
+
+  @Column({ name: 'next_attempt_at', type: 'timestamptz' })
+  nextAttemptAt!: Date;
+
+  @Column({ name: 'claimed_at', type: 'timestamptz', nullable: true })
+  claimedAt!: Date | null;
+
+  @Column({ name: 'claim_owner', type: 'varchar', length: 120, nullable: true })
+  claimOwner!: string | null;
+
+  @Column({
+    name: 'last_error_code',
+    type: 'varchar',
+    length: 80,
+    nullable: true,
+  })
+  lastErrorCode!: string | null;
+
+  @Column({ name: 'published_at', type: 'timestamptz', nullable: true })
+  publishedAt!: Date | null;
+
+  @Column({ name: 'dead_lettered_at', type: 'timestamptz', nullable: true })
+  deadLetteredAt!: Date | null;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;
 }

@@ -90,6 +90,7 @@ import { AddLeadflowAgencySettingsContext1783300000000 } from './migrations/1783
 import { CreateLeadflowAgentsCore1783400000000 } from './migrations/1783400000000-create-leadflow-agents-core';
 import { AddLeadflowAgentsPermissions1783500000000 } from './migrations/1783500000000-add-leadflow-agents-permissions';
 import { CreateLeadflowOperationsRoom1783900000000 } from './migrations/1783900000000-create-leadflow-operations-room';
+import { AddOperationsRoomOutboxDelivery1784000000000 } from './migrations/1784000000000-add-operations-room-outbox-delivery';
 import { CreateLeadflowAutomationsCore1783600000000 } from './migrations/1783600000000-create-leadflow-automations-core';
 import { AddLeadflowAutomationsPermissions1783700000000 } from './migrations/1783700000000-add-leadflow-automations-permissions';
 import { AddLeadflowEventsPermissions1783800000000 } from './migrations/1783800000000-add-leadflow-events-permissions';
@@ -199,5 +200,6 @@ export const AgencyDataSource = new DataSource({
     AddLeadflowAutomationsPermissions1783700000000,
     AddLeadflowEventsPermissions1783800000000,
     CreateLeadflowOperationsRoom1783900000000,
+    AddOperationsRoomOutboxDelivery1784000000000,
   ],
 });
