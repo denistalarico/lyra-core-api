@@ -403,8 +403,9 @@ describe('FinanceBillingService bill recurrences', () => {
 describe('FinanceBillingService payment lifecycle', () => {
   const line = [{ description: 'Retainer', quantity: '1', unitPrice: '100.00' }];
 
-  it('creates a pending customer payment when an invoice is created', async () => {
+  it('does not create a forecast payment while an invoice is a draft', async () => {
     const invoice = makeInvoice({
+      status: FinanceInvoiceStatus.Draft,
       dueDate: '2026-07-20',
       balanceDue: '100.00',
       totalAmount: '100.00',
@@ -416,6 +417,20 @@ describe('FinanceBillingService payment lifecycle', () => {
       dueDate: '2026-07-20',
       lines: line,
     });
+
+    expect(paymentsRepo.save).not.toHaveBeenCalled();
+  });
+
+  it('creates a pending customer payment when an invoice is issued', async () => {
+    const invoice = makeInvoice({
+      status: FinanceInvoiceStatus.Draft,
+      dueDate: '2026-07-20',
+      balanceDue: '100.00',
+      totalAmount: '100.00',
+    });
+    const { service, paymentsRepo } = makeService({ invoice });
+
+    await service.issueInvoice(makeContext(), invoice.id);
 
     expect(paymentsRepo.save).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -515,10 +530,16 @@ function makeService(options: {
   const bill = options.bill ?? makeBill();
   const recurringProfile = options.recurringProfile ?? makeRecurringProfile();
 
+  const invoicesQueryBuilder = {
+    where: jest.fn(() => invoicesQueryBuilder),
+    andWhere: jest.fn(() => invoicesQueryBuilder),
+    getCount: jest.fn().mockResolvedValue(0),
+  };
   const invoicesRepo = {
     findOne: jest.fn().mockResolvedValue(invoice),
     save: jest.fn(async (item: FinanceInvoice) => item),
     count: jest.fn().mockResolvedValue(0),
+    createQueryBuilder: jest.fn(() => invoicesQueryBuilder),
   };
   const invoiceLinesRepo = {
     find: jest.fn().mockResolvedValue([]),
@@ -533,13 +554,22 @@ function makeService(options: {
   const billsQueryBuilder = {
     where: jest.fn(() => billsQueryBuilder),
     andWhere: jest.fn(() => billsQueryBuilder),
+    orderBy: jest.fn(() => billsQueryBuilder),
     getOne: billsQbGetOne,
+    getCount: jest.fn().mockResolvedValue(0),
   };
   const billsRepo = {
     findOne: jest.fn().mockResolvedValue(bill),
     save: jest.fn(async (item: FinanceBill) => item),
     count: jest.fn().mockResolvedValue(0),
     createQueryBuilder: jest.fn(() => billsQueryBuilder),
+  };
+  const paymentsQbGetOne = jest.fn().mockResolvedValue(null);
+  const paymentsQueryBuilder = {
+    where: jest.fn(() => paymentsQueryBuilder),
+    andWhere: jest.fn(() => paymentsQueryBuilder),
+    orderBy: jest.fn(() => paymentsQueryBuilder),
+    getOne: paymentsQbGetOne,
   };
   const paymentsRepo = {
     create: jest.fn((value: Partial<FinancePayment>) =>
@@ -551,6 +581,7 @@ function makeService(options: {
     findOne: jest.fn().mockResolvedValue(payment),
     find: jest.fn().mockResolvedValue([payment]),
     save: jest.fn(async (item: FinancePayment) => item),
+    createQueryBuilder: jest.fn(() => paymentsQueryBuilder),
   };
   let currentAllocations = [...(options.allocations ?? [])];
   const paymentAllocationsRepo = {

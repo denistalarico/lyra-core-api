@@ -163,8 +163,10 @@ export class FinanceBillingService {
     ctx: FinanceRequestContext,
     dto: CreateFinanceInvoiceDto,
   ) {
-    const invoiceNumber =
-      dto.invoiceNumber ?? (await this.generateDocumentNumber(ctx, 'INV'));
+    // New invoices are born as drafts and carry no number: the sequence is
+    // only consumed when the invoice is issued (see issueInvoice), so an
+    // abandoned draft never burns a number.
+    const invoiceNumber = dto.invoiceNumber ?? '';
     const invoiceLines = dto.lines ?? [];
     const totals = this.calculateInvoiceTotals(invoiceLines);
 
@@ -227,9 +229,9 @@ export class FinanceBillingService {
       return invoice.id;
     });
 
-    const invoice = await this.getInvoice(ctx, invoiceId);
-    await this.createScheduledPaymentForInvoice(ctx, invoice);
-    return invoice;
+    // A draft invoice forecasts no "previsto" payment until it is issued
+    // (see issueInvoice / updateInvoice), so none is created here.
+    return this.getInvoice(ctx, invoiceId);
   }
 
   async updateInvoice(
@@ -265,6 +267,17 @@ export class FinanceBillingService {
       invoice.issuedAt = invoice.issuedAt ?? new Date();
       invoice.issueDate = invoice.issueDate ?? new Date().toISOString().slice(0, 10);
     }
+
+    // Issuing through a generic PATCH also consumes the number if the draft
+    // never had one.
+    if (
+      previousStatus !== FinanceInvoiceStatus.Issued &&
+      invoice.status === FinanceInvoiceStatus.Issued &&
+      !invoice.invoiceNumber
+    ) {
+      invoice.invoiceNumber = await this.generateDocumentNumber(ctx, 'INV');
+    }
+
     const saved = await this.invoicesRepo.save(invoice);
 
     // Keep the ledger in sync when the status changes through a generic PATCH
@@ -275,6 +288,12 @@ export class FinanceBillingService {
       saved.status === FinanceInvoiceStatus.Issued
     ) {
       await this.postingService.postInvoiceConfirmed(ctx, saved.id);
+      // Forecast the receivable once, on issue. Skipped when this same PATCH
+      // is settling the invoice straight to paid (which registers its own
+      // completed payment below).
+      if (!shouldSettleFromStatusPatch) {
+        await this.ensureScheduledPaymentForInvoice(ctx, saved);
+      }
     }
 
     if (
@@ -473,6 +492,12 @@ export class FinanceBillingService {
       invoice.issueDate = new Date().toISOString().slice(0, 10);
     }
 
+    // Issuing is what actually consumes the number: generate it now if the
+    // draft never had one.
+    if (!invoice.invoiceNumber) {
+      invoice.invoiceNumber = await this.generateDocumentNumber(ctx, 'INV');
+    }
+
     // Confirming an invoice and recognising it in the ledger are atomic:
     // if the automatic posting fails, the status change rolls back.
     const saved = await this.dataSource.transaction(async (manager) => {
@@ -484,6 +509,8 @@ export class FinanceBillingService {
     });
 
     if (!wasIssued) {
+      // Forecast the receivable as a "previsto" payment once, on issue.
+      await this.ensureScheduledPaymentForInvoice(ctx, saved);
       // See updateInvoice: no validated recipient source yet, resolves to no-op.
       await this.financeNotificationPublisher.publishInvoiceIssued({
         resource: saved,
@@ -546,14 +573,24 @@ export class FinanceBillingService {
   }
 
   async createBill(ctx: FinanceRequestContext, dto: CreateFinanceBillDto) {
-    if (!dto.lines?.length) {
+    const status = dto.status ?? FinanceBillStatus.Open;
+    const billLines = dto.lines ?? [];
+
+    // A draft can be created empty — this backs the "new bill" flow that opens
+    // the detail page directly and lets the user fill everything there. A bill
+    // that is created already open still needs at least one line.
+    if (status !== FinanceBillStatus.Draft && billLines.length === 0) {
       throw new BadRequestException('Bill must have at least one line');
     }
 
+    // Drafts carry no document number: the sequence is only consumed on
+    // confirm, so an abandoned draft never burns a number.
     const billNumber =
-      dto.billNumber ?? (await this.generateDocumentNumber(ctx, 'BILL'));
-    const totals = this.calculateBillTotals(dto.lines);
-    const status = dto.status ?? FinanceBillStatus.Open;
+      dto.billNumber ??
+      (status === FinanceBillStatus.Draft
+        ? ''
+        : await this.generateDocumentNumber(ctx, 'BILL'));
+    const totals = this.calculateBillTotals(billLines);
 
     const billId = await this.dataSource.transaction(async (manager) => {
       const bill = await manager.getRepository(FinanceBill).save(
@@ -579,7 +616,7 @@ export class FinanceBillingService {
         }),
       );
 
-      const lines = dto.lines.map((line) => {
+      const lines = billLines.map((line) => {
         const quantity = toMoney(line.quantity ?? '1');
         const unitPrice = toMoney(line.unitPrice ?? '0');
         const tax = toMoney(line.taxAmount ?? '0');
@@ -600,7 +637,9 @@ export class FinanceBillingService {
         });
       });
 
-      await manager.getRepository(FinanceBillLine).save(lines);
+      if (lines.length > 0) {
+        await manager.getRepository(FinanceBillLine).save(lines);
+      }
 
       // Draft bills do not post. If created already open, recognise the
       // payable in the ledger atomically with its creation.
@@ -619,7 +658,11 @@ export class FinanceBillingService {
     }
 
     const bill = await this.getBill(ctx, billId);
-    await this.createScheduledPaymentForBill(ctx, bill);
+    // A "previsto" payment is only forecast for a bill that is already open.
+    // Drafts forecast nothing until they are confirmed (see updateBill).
+    if (status === FinanceBillStatus.Open) {
+      await this.createScheduledPaymentForBill(ctx, bill);
+    }
     return bill;
   }
 
@@ -655,6 +698,16 @@ export class FinanceBillingService {
       bill.metadata = { ...bill.metadata, ...metadata };
     }
 
+    // Confirming a draft (draft → open) is what actually issues the number:
+    // generate it now if the draft never had one.
+    if (
+      previousStatus === FinanceBillStatus.Draft &&
+      bill.status === FinanceBillStatus.Open &&
+      !bill.billNumber
+    ) {
+      bill.billNumber = await this.generateDocumentNumber(ctx, 'BILL');
+    }
+
     const saved = await this.billsRepo.save(bill);
 
     // Posting is idempotent; only acts on the first transition into each state.
@@ -663,6 +716,12 @@ export class FinanceBillingService {
       saved.status === FinanceBillStatus.Open
     ) {
       await this.postingService.postBillConfirmed(ctx, saved.id);
+      // Forecast the payable as a "previsto" payment once, on confirmation.
+      // Skipped when the same PATCH is settling the bill straight to paid,
+      // which registers its own completed payment below.
+      if (!shouldSettleFromStatusPatch) {
+        await this.ensureScheduledPaymentForBill(ctx, saved);
+      }
     }
 
     if (
@@ -1526,6 +1585,47 @@ export class FinanceBillingService {
         autoCreated: true,
       },
     });
+  }
+
+  /**
+   * Locate the auto-created ("previsto") payment forecast for a bill/invoice,
+   * if any. Matched by the sourceId + autoCreated marker written when it was
+   * forecast, regardless of its current status — so we never forecast the same
+   * document twice, and the settlement flow can reuse (complete) it instead of
+   * creating a duplicate row.
+   */
+  private findScheduledPaymentForTarget(
+    ctx: FinanceRequestContext,
+    targetId: string,
+  ) {
+    return this.paymentsRepo
+      .createQueryBuilder('payment')
+      .where('payment.tenantId = :tenantId', { tenantId: ctx.tenantId })
+      .andWhere('payment.workspaceId = :workspaceId', {
+        workspaceId: ctx.workspaceId,
+      })
+      .andWhere("payment.metadata ->> 'sourceId' = :targetId", { targetId })
+      .andWhere("payment.metadata ->> 'autoCreated' = 'true'")
+      .orderBy('payment.createdAt', 'ASC')
+      .getOne();
+  }
+
+  private async ensureScheduledPaymentForBill(
+    ctx: FinanceRequestContext,
+    bill: FinanceBill,
+  ) {
+    const existing = await this.findScheduledPaymentForTarget(ctx, bill.id);
+    if (existing) return existing;
+    return this.createScheduledPaymentForBill(ctx, bill);
+  }
+
+  private async ensureScheduledPaymentForInvoice(
+    ctx: FinanceRequestContext,
+    invoice: FinanceInvoice,
+  ) {
+    const existing = await this.findScheduledPaymentForTarget(ctx, invoice.id);
+    if (existing) return existing;
+    return this.createScheduledPaymentForInvoice(ctx, invoice);
   }
 
   private async settleInvoiceBalance(
@@ -2507,14 +2607,29 @@ export class FinanceBillingService {
     ctx: FinanceRequestContext,
     prefix: string,
   ) {
+    // Only already-numbered documents consume the sequence. Drafts are stored
+    // with an empty number, so abandoned drafts never leave gaps and the count
+    // stays aligned with the numbers actually issued.
     const count =
       prefix === 'INV'
-        ? await this.invoicesRepo.count({
-            where: { tenantId: ctx.tenantId, workspaceId: ctx.workspaceId },
-          })
-        : await this.billsRepo.count({
-            where: { tenantId: ctx.tenantId, workspaceId: ctx.workspaceId },
-          });
+        ? await this.invoicesRepo
+            .createQueryBuilder('invoice')
+            .where('invoice.tenantId = :tenantId', { tenantId: ctx.tenantId })
+            .andWhere('invoice.workspaceId = :workspaceId', {
+              workspaceId: ctx.workspaceId,
+            })
+            .andWhere('invoice.invoiceNumber IS NOT NULL')
+            .andWhere("invoice.invoiceNumber <> ''")
+            .getCount()
+        : await this.billsRepo
+            .createQueryBuilder('bill')
+            .where('bill.tenantId = :tenantId', { tenantId: ctx.tenantId })
+            .andWhere('bill.workspaceId = :workspaceId', {
+              workspaceId: ctx.workspaceId,
+            })
+            .andWhere('bill.billNumber IS NOT NULL')
+            .andWhere("bill.billNumber <> ''")
+            .getCount();
 
     const next = count + 1;
     return `${prefix}-${String(next).padStart(5, '0')}`;
