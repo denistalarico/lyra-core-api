@@ -235,6 +235,7 @@ describe('InboxProviderService', () => {
       );
       const result = await provider.decide(decisionInput());
       const init = fetchMock.mock.calls[0][1] as RequestInit;
+      expect(init.redirect).toBe('error');
       if (typeof init.body !== 'string') throw new Error('body_missing');
       const serialized = init.body;
       const body = JSON.parse(serialized) as Record<string, unknown>;

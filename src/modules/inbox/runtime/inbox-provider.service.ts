@@ -346,6 +346,7 @@ export class InboxProviderService
       try {
         const response = await fetch(`${this.config.endpoint}${path}`, {
           ...init,
+          redirect: 'error',
           headers: {
             ...Object.fromEntries(new Headers(init.headers).entries()),
             Authorization: `Bearer ${this.config.apiKey}`,

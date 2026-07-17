@@ -17,7 +17,7 @@ export class InboxRuntimeConfigService implements OnModuleInit {
   readonly endpoint = (
     process.env.INBOX_PROVIDER_BASE_URL ?? 'https://api.openai.com/v1'
   ).replace(/\/$/, '');
-  readonly apiKey = process.env.INBOX_PROVIDER_API_KEY ?? '';
+  readonly apiKey = providerApiKey(this.endpoint);
   readonly transcriptionModel =
     process.env.INBOX_TRANSCRIPTION_MODEL ?? 'gpt-4o-mini-transcribe';
   readonly decisionModel = process.env.INBOX_DECISION_MODEL ?? 'gpt-5.6-terra';
@@ -122,6 +122,20 @@ export class InboxRuntimeConfigService implements OnModuleInit {
     if (parsed.protocol !== 'https:' && !local)
       throw new Error('inbox_provider_endpoint_must_use_https');
   }
+}
+
+function providerApiKey(endpoint: string): string {
+  const explicit = process.env.INBOX_PROVIDER_API_KEY?.trim();
+  if (explicit) return explicit;
+
+  try {
+    const parsed = new URL(endpoint);
+    if (parsed.hostname !== 'api.openai.com') return '';
+  } catch {
+    return '';
+  }
+
+  return process.env.OPENAI_API_KEY?.trim() ?? '';
 }
 
 function imageDetail(): 'low' | 'auto' | 'high' {
