@@ -73,6 +73,12 @@ export class AgentDecisionV1Service {
     )
       throw new Error('decision_schema_invalid');
   }
+
+  assertEvidenceRefs(decision: AgentDecisionV1, allowedRefs: string[]): void {
+    const allowed = new Set(allowedRefs);
+    if (decision.evidence_refs.some((ref) => !allowed.has(ref)))
+      throw new Error('decision_evidence_invalid');
+  }
 }
 
 @Injectable()
@@ -88,6 +94,7 @@ export class AgentDecisionPromptBuilder {
     opportunity: Record<string, unknown> | null;
     messages: unknown[];
     transcriptions: unknown[];
+    images: unknown[];
   }) {
     const systemPolicy = [
       'Você produz somente AgentDecision v1 estritamente estruturada.',
@@ -96,6 +103,7 @@ export class AgentDecisionPromptBuilder {
       'Você apenas propõe. Nunca afirme que enviou mensagem ou aplicou ação comercial.',
       `Business Mode: ${input.businessMode}.`,
       `Ações que podem ser propostas: ${input.allowedActions.join(', ') || 'nenhuma'}.`,
+      'Use somente evidence_refs fornecidas em messages, transcriptions ou images.',
     ].join('\n');
     const untrustedData = `UNTRUSTED_DATA_BEGIN\n${JSON.stringify({
       workspaceConfig: input.workspaceConfig,
@@ -104,6 +112,7 @@ export class AgentDecisionPromptBuilder {
       ownership: input.ownership,
       messages: input.messages,
       transcriptions: input.transcriptions,
+      images: input.images,
     })}\nUNTRUSTED_DATA_END`;
     return {
       systemPolicy,
@@ -236,7 +245,9 @@ function validAction(value: unknown): boolean {
     ['set_stage', 'add_tag', 'set_summary', 'close', 'handoff'].includes(
       String(item.type),
     ) &&
-    (item.value === undefined || typeof item.value === 'string')
+    (item.value === undefined ||
+      item.value === null ||
+      typeof item.value === 'string')
   );
 }
 function slug(value: string): string {

@@ -29,6 +29,7 @@ export default () => ({
         process.env.S3_BUCKET ??
         process.env.OBJECT_STORAGE_BUCKET ??
         'lyra-assets',
+      privateBucket: process.env.S3_PRIVATE_BUCKET ?? 'lyra-private-assets',
       region:
         process.env.S3_REGION ??
         process.env.OBJECT_STORAGE_REGION ??
@@ -46,7 +47,9 @@ export default () => ({
       publicBaseUrl:
         process.env.S3_PUBLIC_BASE_URL ??
         `${process.env.S3_ENDPOINT ?? process.env.OBJECT_STORAGE_ENDPOINT ?? 'http://localhost:9200'}/${
-          process.env.S3_BUCKET ?? process.env.OBJECT_STORAGE_BUCKET ?? 'lyra-assets'
+          process.env.S3_BUCKET ??
+          process.env.OBJECT_STORAGE_BUCKET ??
+          'lyra-assets'
         }`,
       forcePathStyle: process.env.S3_FORCE_PATH_STYLE !== 'false',
       createBucket: process.env.S3_CREATE_BUCKET !== 'false',

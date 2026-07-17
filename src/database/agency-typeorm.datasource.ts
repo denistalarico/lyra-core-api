@@ -101,6 +101,7 @@ import { CreateInboxWebhookLogs1760000025000 } from './migrations/1760000025000-
 import { CreateInboxChannelConnectionSessions1760000026000 } from './migrations/1760000026000-create-inbox-channel-connection-sessions';
 import { CreateLeadflowInboxRuntime1784100000000 } from './migrations/1784100000000-create-leadflow-inbox-runtime';
 import { HardenInboxSupervisedRuntime1784200000000 } from './migrations/1784200000000-harden-inbox-supervised-runtime';
+import { CreateInboxProviderUsageLedger1784300000000 } from './migrations/1784300000000-create-inbox-provider-usage-ledger';
 
 export const AgencyDataSource = new DataSource({
   type: 'postgres',
@@ -215,5 +216,6 @@ export const AgencyDataSource = new DataSource({
     AddOperationsRoomOutboxDelivery1784000000000,
     CreateLeadflowInboxRuntime1784100000000,
     HardenInboxSupervisedRuntime1784200000000,
+    CreateInboxProviderUsageLedger1784300000000,
   ],
 });

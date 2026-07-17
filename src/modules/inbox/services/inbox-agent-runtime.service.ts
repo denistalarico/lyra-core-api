@@ -72,7 +72,11 @@ export class InboxAgentRuntimeService {
   async claimAndProcess(workerId: string) {
     const batchId = await this.dataSource.transaction(async (manager) => {
       const rows = (await manager.query(
-        `SELECT id FROM inbox_processing_batches WHERE status = 'pending' AND due_at <= now()
+        `SELECT id FROM inbox_processing_batches
+         WHERE attempt_count < 3 AND (
+           (status = 'pending' AND due_at <= now())
+           OR (status = 'processing' AND claimed_at < now() - interval '2 minutes')
+         )
          ORDER BY due_at, id FOR UPDATE SKIP LOCKED LIMIT 1`,
       )) as unknown as Array<{ id: string }>;
       if (!rows[0]) return null;
@@ -188,6 +192,7 @@ export class InboxAgentRuntimeService {
       });
     const messageProjection = orderedMessages.map((message) => ({
       id: message.id,
+      evidenceRef: `message:${message.id}`,
       direction: message.direction,
       type: message.messageType,
       content: message.content.slice(0, 2_000),
@@ -200,6 +205,7 @@ export class InboxAgentRuntimeService {
       )
       .map((item) => ({
         assetId: item.mediaAssetId,
+        evidenceRef: `transcription:${item.mediaAssetId}`,
         kind: 'transcription',
         outcome: item.outcome,
         text: item.content?.slice(0, 4_000) ?? '',
@@ -213,6 +219,9 @@ export class InboxAgentRuntimeService {
         ...(await this.loadVisionFallback(media, derivatives)),
       );
     }
+    const images = this.provider.supportsMultimodal()
+      ? await this.loadImages(media)
+      : [];
     const prompt = this.promptBuilder.build({
       businessMode: conversation.businessMode,
       ownership: {
@@ -243,10 +252,12 @@ export class InboxAgentRuntimeService {
         : null,
       messages: messageProjection,
       transcriptions: transcriptionProjection,
+      images: images.map(({ assetId, evidenceRef, mimeType }) => ({
+        assetId,
+        evidenceRef,
+        mimeType,
+      })),
     });
-    const images = this.provider.supportsMultimodal()
-      ? await this.loadImages(media)
-      : [];
     const correlationId = randomUUID();
     let providerResult: AgentDecisionResult | null = null;
     let proposal: AgentDecisionV1 | null = null;
@@ -293,6 +304,13 @@ export class InboxAgentRuntimeService {
         });
         try {
           this.schema.assert(providerResult.decision);
+          this.schema.assertEvidenceRefs(providerResult.decision, [
+            ...messageProjection.map((item) => item.evidenceRef),
+            ...transcriptionProjection
+              .map((item) => item.evidenceRef)
+              .filter((item): item is string => typeof item === 'string'),
+            ...images.map((item) => item.evidenceRef),
+          ]);
           proposal = providerResult.decision;
           break;
         } catch {
@@ -644,8 +662,12 @@ export class InboxAgentRuntimeService {
   }
 
   private async loadImages(media: InboxMediaAssetEntity[]) {
-    const images: Array<{ assetId: string; mimeType: string; bytes: Buffer }> =
-      [];
+    const images: Array<{
+      assetId: string;
+      evidenceRef: string;
+      mimeType: string;
+      bytes: Buffer;
+    }> = [];
     for (const asset of media) {
       if (images.length >= this.config.maxImagesPerRun) break;
       if (
@@ -653,14 +675,15 @@ export class InboxAgentRuntimeService {
         asset.status !== 'available' ||
         !asset.objectKey ||
         !asset.mimeType ||
-        Number(asset.byteSize ?? 0) > 8 * 1024 * 1024
+        Number(asset.byteSize ?? 0) > this.config.maxImageBytes
       )
         continue;
       const file = await this.files.getPrivateAsset(asset.objectKey);
       images.push({
         assetId: asset.id,
+        evidenceRef: `image:${asset.id}`,
         mimeType: asset.mimeType,
-        bytes: await readStream(file.body, 8 * 1024 * 1024),
+        bytes: await readStream(file.body, this.config.maxImageBytes),
       });
     }
     return images;
@@ -698,7 +721,7 @@ export class InboxAgentRuntimeService {
         continue;
       }
       const file = await this.files.getPrivateAsset(asset.objectKey);
-      const bytes = await readStream(file.body, 8 * 1024 * 1024);
+      const bytes = await readStream(file.body, this.config.maxImageBytes);
       const result = await this.provider.analyzeImage({
         tenantId: asset.tenantId,
         workspaceId: asset.workspaceId,

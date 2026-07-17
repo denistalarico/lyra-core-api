@@ -10,6 +10,7 @@ import { AudioTranscriptionWorker } from './audio-transcription.worker';
 import { ConversationOwnershipService } from '../services/conversation-ownership.service';
 import { InboxAgentRuntimeService } from '../services/inbox-agent-runtime.service';
 import { InboxOutboxRelayService } from '../services/inbox-outbox-relay.service';
+import { InboxProviderBudgetService } from './inbox-provider-budget.service';
 
 const run =
   process.env.INBOX_PG_INTEGRATION === 'true' ? describe : describe.skip;
@@ -43,8 +44,77 @@ run('Inbox Runtime PostgreSQL concurrency', () => {
   });
   beforeEach(async () => {
     await AgencyDataSource.query(
-      `TRUNCATE inbox_domain_outbox, inbox_agent_decisions, inbox_processing_batches, inbox_media_derivatives, inbox_media_assets, inbox_messages, inbox_conversation_events, inbox_conversations RESTART IDENTITY CASCADE`,
+      `TRUNCATE inbox_provider_usage_ledger, inbox_domain_outbox, inbox_agent_decisions, inbox_processing_batches, inbox_media_derivatives, inbox_media_assets, inbox_messages, inbox_conversation_events, inbox_conversations RESTART IDENTITY CASCADE`,
     );
+  });
+
+  it('persists the budget across calls and never reserves the same logical charge twice', async () => {
+    const budget = new InboxProviderBudgetService(AgencyDataSource, {
+      activationSessionId: 'pg-budget-session',
+      budgetUsd: 0.15,
+      maxDecisionCalls: 20,
+      maxTranscriptionCalls: 10,
+      maxVisionCalls: 10,
+      maxImageInputs: 10,
+      decisionReserveUsd: 0.1,
+      transcriptionReserveUsd: 0.02,
+      visionReserveUsd: 0.05,
+      decisionInputUsdPerMillion: null,
+      decisionCachedInputUsdPerMillion: null,
+      decisionOutputUsdPerMillion: null,
+      transcriptionUsdPerMinute: null,
+    } as never);
+    const first = await budget.reserve({
+      tenantId,
+      workspaceId,
+      operation: 'decision',
+      idempotencyKey: 'same-logical-run',
+      provider: 'openai-compatible',
+      model: 'gpt-5.6-terra',
+      imageCount: 1,
+    });
+    await budget.succeed(first, {
+      model: 'gpt-5.6-terra',
+      usage: { inputTokens: 100, outputTokens: 50, images: 1 },
+      attempts: 1,
+      latencyMs: 10,
+    });
+    await expect(
+      budget.reserve({
+        tenantId,
+        workspaceId,
+        operation: 'decision',
+        idempotencyKey: 'same-logical-run',
+        provider: 'openai-compatible',
+        model: 'gpt-5.6-terra',
+        imageCount: 1,
+      }),
+    ).rejects.toMatchObject({ code: 'provider_idempotency_replayed' });
+    await budget.reserve({
+      tenantId,
+      workspaceId,
+      operation: 'decision',
+      idempotencyKey: 'second-logical-run',
+      provider: 'openai-compatible',
+      model: 'gpt-5.6-terra',
+      imageCount: 0,
+    });
+    await expect(
+      budget.reserve({
+        tenantId,
+        workspaceId,
+        operation: 'decision',
+        idempotencyKey: 'over-budget-run',
+        provider: 'openai-compatible',
+        model: 'gpt-5.6-terra',
+        imageCount: 0,
+      }),
+    ).rejects.toMatchObject({ code: 'provider_budget_exhausted' });
+    const [count] = await AgencyDataSource.query<Array<{ count: string }>>(
+      `SELECT count(*)::text count FROM inbox_provider_usage_ledger WHERE tenant_id=$1 AND workspace_id=$2`,
+      [tenantId, workspaceId],
+    );
+    expect(count.count).toBe('2');
   });
 
   it('allows only one derivative worker to pay for the same transcription', async () => {
@@ -118,7 +188,120 @@ run('Inbox Runtime PostgreSQL concurrency', () => {
     expect(row).toMatchObject({ status: 'available', content: 'Olá' });
   });
 
-  it('allows two runtime workers to create only one decision for a batch', async () => {
+  it('runs a supervised mock text, transcription and image batch end to end', async () => {
+    const conversationId = await insertConversation(
+      tenantId,
+      workspaceId,
+      'ai_active',
+    );
+    const messageId = randomUUID();
+    const audioAssetId = randomUUID();
+    const imageAssetId = randomUUID();
+    const batchId = randomUUID();
+    await AgencyDataSource.query(
+      `INSERT INTO inbox_messages
+        (id,tenant_id,workspace_id,conversation_id,direction,sender_type,
+         content,status,occurred_at)
+       VALUES ($1,$2,$3,$4,'inbound','contact','Mensagem sintética','received',now())`,
+      [messageId, tenantId, workspaceId, conversationId],
+    );
+    await AgencyDataSource.query(
+      `INSERT INTO inbox_media_assets
+        (id,tenant_id,workspace_id,conversation_id,message_id,channel_id,kind,
+         provider,external_media_id,mime_type,byte_size,checksum,object_key,status)
+       VALUES
+        ($1,$3,$4,$5,$6,$7,'audio','meta',$8,'audio/ogg',4,'audio-sum','private/audio','available'),
+        ($2,$3,$4,$5,$6,$7,'image','meta',$9,'image/png',3,'image-sum','private/image','available')`,
+      [
+        audioAssetId,
+        imageAssetId,
+        tenantId,
+        workspaceId,
+        conversationId,
+        messageId,
+        randomUUID(),
+        randomUUID(),
+        randomUUID(),
+      ],
+    );
+    await AgencyDataSource.query(
+      `INSERT INTO inbox_media_derivatives
+        (tenant_id,workspace_id,media_asset_id,kind,status,processor_version,
+         content,outcome,asset_checksum)
+       VALUES ($1,$2,$3,'transcription','available','test-v1',
+               'Transcrição sintética clara','content','audio-sum')`,
+      [tenantId, workspaceId, audioAssetId],
+    );
+    await AgencyDataSource.query(
+      `INSERT INTO inbox_processing_batches
+        (id,tenant_id,workspace_id,conversation_id,channel_id,status,due_at)
+       VALUES ($1,$2,$3,$4,$5,'pending',now()-interval '1 second')`,
+      [batchId, tenantId, workspaceId, conversationId, randomUUID()],
+    );
+    const decide = jest.fn().mockResolvedValue({
+      decision: {
+        ...validDecision,
+        evidence_refs: [
+          `message:${messageId}`,
+          `transcription:${audioAssetId}`,
+          `image:${imageAssetId}`,
+        ],
+      },
+      provider: 'mock',
+      model: 'mock-decision-v1',
+      usage: { inputTokens: 0, outputTokens: 0, images: 1 },
+      latencyMs: 1,
+    });
+    const runtime = new InboxAgentRuntimeService(
+      AgencyDataSource,
+      {
+        getPrivateAsset: jest.fn().mockResolvedValue({
+          body: Readable.from(Buffer.from('png')),
+        }),
+      } as never,
+      { supportsMultimodal: () => true, decide } as never,
+      {
+        maxImagesPerRun: 3,
+        maxImageBytes: 1024,
+        autoReplyEnabled: false,
+        autoCrmEnabled: false,
+      } as never,
+      new AgentDecisionPromptBuilder(),
+      new AgentDecisionV1Service(),
+      new BusinessModeActionPlanner(AgencyDataSource),
+    );
+    await runtime.claimAndProcess('mock-e2e-worker');
+    expect(decide).toHaveBeenCalledTimes(1);
+    expect(decide).toHaveBeenCalledWith(
+      expect.objectContaining({
+        images: [
+          expect.objectContaining({
+            assetId: imageAssetId,
+            evidenceRef: `image:${imageAssetId}`,
+            mimeType: 'image/png',
+          }),
+        ],
+      }),
+    );
+    const [decision] = await AgencyDataSource.query<
+      Array<{ id: string; status: string; provider: string; model: string }>
+    >(
+      `SELECT id,status,provider,model FROM inbox_agent_decisions WHERE batch_id=$1`,
+      [batchId],
+    );
+    const [outbox] = await AgencyDataSource.query<Array<{ count: string }>>(
+      `SELECT count(*)::text count FROM inbox_domain_outbox WHERE aggregate_id=$1`,
+      [decision.id],
+    );
+    expect(decision).toMatchObject({
+      status: 'proposed',
+      provider: 'mock',
+      model: 'mock-decision-v1',
+    });
+    expect(outbox.count).toBe('1');
+  });
+
+  it('recovers an abandoned runtime batch and lets two workers create only one decision', async () => {
     const conversationId = await insertConversation(
       tenantId,
       workspaceId,
@@ -130,7 +313,9 @@ run('Inbox Runtime PostgreSQL concurrency', () => {
       [tenantId, workspaceId, conversationId],
     );
     await AgencyDataSource.query(
-      `INSERT INTO inbox_processing_batches (id,tenant_id,workspace_id,conversation_id,channel_id,status,due_at) VALUES ($1,$2,$3,$4,$5,'pending',now()-interval '1 second')`,
+      `INSERT INTO inbox_processing_batches
+        (id,tenant_id,workspace_id,conversation_id,channel_id,status,due_at,claimed_at,claimed_by)
+       VALUES ($1,$2,$3,$4,$5,'processing',now()-interval '3 minutes',now()-interval '3 minutes','dead-worker')`,
       [batchId, tenantId, workspaceId, conversationId, randomUUID()],
     );
     const provider = {
@@ -294,6 +479,71 @@ run('Inbox Runtime PostgreSQL concurrency', () => {
         [],
       ),
     ).rejects.toThrow('Decision is no longer pending review.');
+  });
+
+  it('applies a partial approval exactly once when the operator retries it', async () => {
+    const conversationId = await insertConversation(
+      tenantId,
+      workspaceId,
+      'ai_active',
+    );
+    const batchId = randomUUID();
+    const decisionId = randomUUID();
+    await AgencyDataSource.query(
+      `INSERT INTO inbox_processing_batches (id,tenant_id,workspace_id,conversation_id,channel_id,status,due_at) VALUES ($1,$2,$3,$4,$5,'completed',now())`,
+      [batchId, tenantId, workspaceId, conversationId, randomUUID()],
+    );
+    await AgencyDataSource.query(
+      `INSERT INTO inbox_agent_decisions
+        (id,tenant_id,workspace_id,conversation_id,batch_id,ownership_version,
+         idempotency_key,correlation_id,status,action_plan)
+       VALUES ($1,$2,$3,$4,$5,1,$6,$7,'proposed',$8::jsonb)`,
+      [
+        decisionId,
+        tenantId,
+        workspaceId,
+        conversationId,
+        batchId,
+        randomUUID(),
+        randomUUID(),
+        JSON.stringify([
+          {
+            key: 'handoff',
+            type: 'handoff',
+            allowed: true,
+            reason: null,
+            value: 'operator_requested',
+          },
+        ]),
+      ],
+    );
+    const runtime = new InboxAgentRuntimeService(
+      AgencyDataSource,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+    const ctx = { tenantId, workspaceId, userId: randomUUID() };
+    await runtime.review(ctx, conversationId, decisionId, true, ['handoff']);
+    await runtime.review(ctx, conversationId, decisionId, true, ['handoff']);
+    const [conversation] = await AgencyDataSource.query<
+      Array<{ ownership_state: string; ownership_version: number }>
+    >(
+      `SELECT ownership_state,ownership_version FROM inbox_conversations WHERE id=$1`,
+      [conversationId],
+    );
+    const [events] = await AgencyDataSource.query<Array<{ count: string }>>(
+      `SELECT count(*)::text count FROM inbox_domain_outbox WHERE aggregate_id=$1`,
+      [decisionId],
+    );
+    expect(conversation).toMatchObject({
+      ownership_state: 'handoff_requested',
+      ownership_version: 2,
+    });
+    expect(events.count).toBe('1');
   });
 
   it('recovers an abandoned outbox lock and two relays publish one logical event', async () => {

@@ -50,6 +50,7 @@ import { InboxAgentRuntimeService } from './services/inbox-agent-runtime.service
 import { InboxAgentRuntimeWorker } from './services/inbox-agent-runtime.worker';
 import { InboxRuntimeConfigService } from './runtime/inbox-runtime-config.service';
 import { InboxProviderService } from './runtime/inbox-provider.service';
+import { InboxProviderBudgetService } from './runtime/inbox-provider-budget.service';
 import {
   AgentDecisionPromptBuilder,
   AgentDecisionV1Service,
@@ -119,6 +120,7 @@ import { InboxGateway } from './realtime/inbox.gateway';
     InboxAgentRuntimeWorker,
     InboxRuntimeConfigService,
     InboxProviderService,
+    InboxProviderBudgetService,
     AgentDecisionPromptBuilder,
     AgentDecisionV1Service,
     BusinessModeActionPlanner,

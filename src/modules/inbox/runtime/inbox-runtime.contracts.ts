@@ -1,5 +1,6 @@
 export type InboxProviderUsage = {
   inputTokens?: number;
+  cachedInputTokens?: number;
   outputTokens?: number;
   totalTokens?: number;
   audioSeconds?: number;
@@ -32,6 +33,7 @@ export type AudioTranscriptionResult = {
   startedAt: Date;
   completedAt: Date;
   latencyMs: number;
+  attempts?: number;
 };
 
 export interface AudioTranscriptionProvider {
@@ -55,6 +57,7 @@ export type VisionAnalysisResult = {
   processorVersion: string;
   usage: InboxProviderUsage;
   latencyMs: number;
+  attempts?: number;
 };
 
 export interface VisionAnalysisProvider {
@@ -78,7 +81,7 @@ export type AgentDecisionV1 = {
   evidence_refs: string[];
   proposed_actions: Array<{
     type: 'set_stage' | 'add_tag' | 'set_summary' | 'close' | 'handoff';
-    value?: string;
+    value?: string | null;
   }>;
 };
 
@@ -98,7 +101,12 @@ export type AgentDecisionInput = {
   untrustedData: string;
   promptVersion: string;
   promptHash: string;
-  images: Array<{ assetId: string; mimeType: string; bytes: Buffer }>;
+  images: Array<{
+    assetId: string;
+    evidenceRef: string;
+    mimeType: string;
+    bytes: Buffer;
+  }>;
   repairAttempt: boolean;
 };
 
@@ -108,6 +116,7 @@ export type AgentDecisionResult = {
   model: string;
   usage: InboxProviderUsage;
   latencyMs: number;
+  attempts?: number;
 };
 
 export interface AgentDecisionProvider {
@@ -119,6 +128,8 @@ export class InboxProviderError extends Error {
   constructor(
     public readonly code: string,
     public readonly retryable: boolean,
+    public readonly attempts = 0,
+    public readonly usage?: InboxProviderUsage,
   ) {
     super(code);
   }
