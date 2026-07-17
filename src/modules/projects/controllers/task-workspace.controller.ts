@@ -22,6 +22,7 @@ type RequestContext = {
   tenantId: string;
   workspaceId: string;
   userId: string;
+  role: string;
 };
 
 function getContextFromHeaders(
@@ -31,6 +32,7 @@ function getContextFromHeaders(
     tenantId: String(headers['x-tenant-id'] ?? ''),
     workspaceId: String(headers['x-workspace-id'] ?? ''),
     userId: String(headers['x-user-id'] ?? ''),
+    role: String(headers['x-user-role'] ?? headers['x-role'] ?? 'member'),
   };
 }
 

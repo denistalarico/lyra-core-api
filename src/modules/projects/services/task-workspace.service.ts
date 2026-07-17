@@ -1,6 +1,11 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, IsNull, Repository } from 'typeorm';
+import { In, IsNull, Not, Repository } from 'typeorm';
 import {
   AgencyProject,
   AgencyTask,
@@ -15,6 +20,7 @@ type RequestContext = {
   tenantId: string;
   workspaceId: string;
   userId: string;
+  role?: string;
 };
 
 type ChecklistPayload = {
@@ -32,6 +38,20 @@ type ChecklistPayload = {
 // Marca uma time entry criada por edição manual do tempo (diferencia das
 // marcações reais do cronômetro).
 const MANUAL_TIME_NOTE = 'Ajuste manual';
+
+// Marca a entry de tarefa aberta automaticamente quando um timer de subtarefa
+// inicia. Só entries com esta nota são pausadas junto com a subtarefa — um
+// timer iniciado manualmente pelo usuário nunca é pausado automaticamente.
+const AUTO_TASK_TIMER_NOTE = 'Timer automático (subtarefa)';
+
+const TIME_ADMIN_ROLES = new Set(['owner', 'admin']);
+
+function formatMinutesLabel(minutes: number) {
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  if (!h) return `${m}min`;
+  return `${h}h ${String(m).padStart(2, '0')}min`;
+}
 
 function getChecklistStatusFromDone(isDone: boolean) {
   return isDone ? 'done' : 'in_progress';
@@ -274,6 +294,7 @@ export class TaskWorkspaceService {
     });
 
     if (activeEntry) {
+      await this.ensureAutoTaskTimer(context, taskId);
       return activeEntry;
     }
 
@@ -289,7 +310,9 @@ export class TaskWorkspaceService {
       note: null,
     });
 
-    return this.timeEntriesRepository.save(entry);
+    const saved = await this.timeEntriesRepository.save(entry);
+    await this.ensureAutoTaskTimer(context, taskId);
+    return saved;
   }
 
   async stopChecklistTimer(
@@ -313,8 +336,77 @@ export class TaskWorkspaceService {
     if (!entry) return { stopped: false };
 
     await this.stopEntry(entry);
+    await this.releaseAutoTaskTimer(context, taskId, context.userId);
 
     return entry;
+  }
+
+  // Garante um timer de tarefa rodando para o usuário enquanto uma subtarefa
+  // cronometra. Se já existe entry ativa (manual ou automática), reaproveita.
+  private async ensureAutoTaskTimer(context: RequestContext, taskId: string) {
+    const activeEntry = await this.timeEntriesRepository.findOne({
+      where: {
+        tenantId: context.tenantId,
+        workspaceId: context.workspaceId,
+        taskId,
+        checklistItemId: IsNull(),
+        userId: context.userId,
+        stoppedAt: IsNull(),
+      },
+    });
+
+    if (activeEntry) return activeEntry;
+
+    return this.timeEntriesRepository.save(
+      this.timeEntriesRepository.create({
+        tenantId: context.tenantId,
+        workspaceId: context.workspaceId,
+        taskId,
+        checklistItemId: null,
+        userId: context.userId,
+        startedAt: new Date(),
+        stoppedAt: null,
+        durationMinutes: null,
+        note: AUTO_TASK_TIMER_NOTE,
+      }),
+    );
+  }
+
+  // Pausa o timer de tarefa iniciado automaticamente por uma subtarefa, mas só
+  // quando o usuário não tem mais nenhum timer de subtarefa rodando na tarefa.
+  private async releaseAutoTaskTimer(
+    context: RequestContext,
+    taskId: string,
+    userId: string,
+  ) {
+    const stillRunning = await this.timeEntriesRepository.findOne({
+      where: {
+        tenantId: context.tenantId,
+        workspaceId: context.workspaceId,
+        taskId,
+        checklistItemId: Not(IsNull()),
+        userId,
+        stoppedAt: IsNull(),
+      },
+    });
+
+    if (stillRunning) return;
+
+    const autoEntry = await this.timeEntriesRepository.findOne({
+      where: {
+        tenantId: context.tenantId,
+        workspaceId: context.workspaceId,
+        taskId,
+        checklistItemId: IsNull(),
+        userId,
+        stoppedAt: IsNull(),
+        note: AUTO_TASK_TIMER_NOTE,
+      },
+    });
+
+    if (autoEntry) {
+      await this.stopEntry(autoEntry, { rollUpToTask: true });
+    }
   }
 
   // Subtasks (checklist items) assigned to the current user, shaped as
@@ -545,7 +637,16 @@ export class TaskWorkspaceService {
     itemId: string,
     minutes: number,
   ) {
-    await this.getChecklistItem(context, taskId, itemId);
+    const item = await this.getChecklistItem(context, taskId, itemId);
+
+    if (
+      (item.isDone || isChecklistStatusDone(item.status)) &&
+      !TIME_ADMIN_ROLES.has(context.role ?? '')
+    ) {
+      throw new ForbiddenException(
+        'Somente owner ou admin podem editar o tempo de uma subtarefa concluída.',
+      );
+    }
 
     return this.applyManualTime(context, taskId, itemId, minutes);
   }
@@ -558,53 +659,94 @@ export class TaskWorkspaceService {
   ): Promise<{ trackedMinutes: number }> {
     const target = this.normalizeMinutes(minutes);
 
-    const checklistWhere = itemId
-      ? { checklistItemId: itemId }
-      : { checklistItemId: IsNull() };
-
-    const entries = await this.timeEntriesRepository.find({
+    const allEntries = await this.timeEntriesRepository.find({
       where: {
         tenantId: context.tenantId,
         workspaceId: context.workspaceId,
         taskId,
-        ...checklistWhere,
       },
     });
+
+    const entries = allEntries.filter((entry) =>
+      itemId ? entry.checklistItemId === itemId : !entry.checklistItemId,
+    );
+
+    // O tempo da tarefa nunca pode ficar abaixo do total já registrado nas
+    // subtarefas — esse total é a fonte do custo de mão de obra.
+    if (!itemId) {
+      const subtaskMinutes = allEntries
+        .filter((entry) => entry.checklistItemId && entry.stoppedAt)
+        .reduce((sum, entry) => sum + (entry.durationMinutes ?? 0), 0);
+
+      if (target < subtaskMinutes) {
+        throw new BadRequestException(
+          `O tempo da tarefa não pode ser menor que o total registrado nas subtarefas (${formatMinutesLabel(subtaskMinutes)}).`,
+        );
+      }
+    }
 
     const manualEntries = entries.filter(
       (entry) => entry.note === MANUAL_TIME_NOTE,
     );
-    const timerMinutes = entries
-      .filter((entry) => entry.note !== MANUAL_TIME_NOTE && entry.stoppedAt)
-      .reduce((sum, entry) => sum + (entry.durationMinutes ?? 0), 0);
-
-    if (target < timerMinutes) {
-      throw new BadRequestException(
-        'O tempo informado é menor que o tempo já cronometrado. Ajuste ou remova as marcações antes de reduzir.',
-      );
-    }
+    const timerEntries = entries.filter(
+      (entry) => entry.note !== MANUAL_TIME_NOTE && entry.stoppedAt,
+    );
+    const timerMinutes = timerEntries.reduce(
+      (sum, entry) => sum + (entry.durationMinutes ?? 0),
+      0,
+    );
 
     if (manualEntries.length > 0) {
       await this.timeEntriesRepository.remove(manualEntries);
     }
 
-    const manualDelta = target - timerMinutes;
+    if (target >= timerMinutes) {
+      const manualDelta = target - timerMinutes;
 
-    if (manualDelta > 0) {
-      const now = new Date();
-      await this.timeEntriesRepository.save(
-        this.timeEntriesRepository.create({
-          tenantId: context.tenantId,
-          workspaceId: context.workspaceId,
-          taskId,
-          checklistItemId: itemId,
-          userId: context.userId,
-          startedAt: now,
-          stoppedAt: now,
-          durationMinutes: manualDelta,
-          note: MANUAL_TIME_NOTE,
-        }),
+      if (manualDelta > 0) {
+        const now = new Date();
+        await this.timeEntriesRepository.save(
+          this.timeEntriesRepository.create({
+            tenantId: context.tenantId,
+            workspaceId: context.workspaceId,
+            taskId,
+            checklistItemId: itemId,
+            userId: context.userId,
+            startedAt: now,
+            stoppedAt: now,
+            durationMinutes: manualDelta,
+            note: MANUAL_TIME_NOTE,
+          }),
+        );
+      }
+
+      return { trackedMinutes: target };
+    }
+
+    // Redução abaixo do tempo cronometrado: apara as marcações mais recentes
+    // até a soma bater com o alvo (cobre o caso de timer esquecido rodando).
+    let excess = timerMinutes - target;
+    const trimmed: typeof timerEntries = [];
+    const ordered = [...timerEntries].sort(
+      (a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime(),
+    );
+
+    for (const entry of ordered) {
+      if (excess <= 0) break;
+      const duration = entry.durationMinutes ?? 0;
+      if (duration <= 0) continue;
+
+      const cut = Math.min(duration, excess);
+      entry.durationMinutes = duration - cut;
+      entry.stoppedAt = new Date(
+        new Date(entry.startedAt).getTime() + entry.durationMinutes * 60_000,
       );
+      excess -= cut;
+      trimmed.push(entry);
+    }
+
+    if (trimmed.length > 0) {
+      await this.timeEntriesRepository.save(trimmed);
     }
 
     return { trackedMinutes: target };
@@ -670,6 +812,13 @@ export class TaskWorkspaceService {
 
     for (const entry of entries) {
       await this.stopEntry(entry);
+    }
+
+    // Concluir a subtarefa também libera o timer automático da tarefa de cada
+    // usuário que estava cronometrando este item.
+    const userIds = Array.from(new Set(entries.map((entry) => entry.userId)));
+    for (const userId of userIds) {
+      await this.releaseAutoTaskTimer(context, taskId, userId);
     }
   }
 
