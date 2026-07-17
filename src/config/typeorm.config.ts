@@ -506,14 +506,6 @@ export function getTypeOrmConfig(): TypeOrmModuleOptions {
       ScheduledItemEntity,
       ScheduledItemParticipantEntity,
       ScheduledItemReminderEntity,
-      InboxChannelEntity,
-      InboxConversationEntity,
-      InboxMessageEntity,
-      InboxSettingsEntity,
-      InboxConversationParticipantEntity,
-      InboxConversationEventEntity,
-      InboxWebhookLogEntity,
-      InboxChannelConnectionSessionEntity,
     ],
   };
 }

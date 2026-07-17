@@ -43,6 +43,33 @@ export class InboxMediaDerivativeEntity {
     | null;
   @Column({ name: 'processor_version', type: 'varchar', length: 80 })
   processorVersion!: string;
+  @Column({
+    name: 'asset_checksum',
+    type: 'varchar',
+    length: 128,
+    nullable: true,
+  })
+  assetChecksum!: string | null;
+  @Column({ type: 'varchar', length: 24, nullable: true })
+  outcome!: 'content' | 'empty' | 'indeterminate' | null;
+  @Column({ name: 'attempt_count', type: 'int', default: 0 })
+  attemptCount!: number;
+  @Column({ name: 'available_at', type: 'timestamptz', nullable: true })
+  availableAt!: Date | null;
+  @Column({ name: 'next_attempt_at', type: 'timestamptz', nullable: true })
+  nextAttemptAt!: Date | null;
+  @Column({ name: 'locked_at', type: 'timestamptz', nullable: true })
+  lockedAt!: Date | null;
+  @Column({ name: 'locked_by', type: 'varchar', length: 120, nullable: true })
+  lockedBy!: string | null;
+  @Column({ name: 'completed_at', type: 'timestamptz', nullable: true })
+  completedAt!: Date | null;
+  @Column({ type: 'jsonb', default: () => "'{}'::jsonb" })
+  usage!: Record<string, unknown>;
+  @Column({ name: 'latency_ms', type: 'int', nullable: true })
+  latencyMs!: number | null;
+  @Column({ type: 'jsonb', default: () => "'{}'::jsonb" })
+  metadata!: Record<string, unknown>;
   @Column({ name: 'error_code', type: 'varchar', length: 80, nullable: true })
   errorCode!: string | null;
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })

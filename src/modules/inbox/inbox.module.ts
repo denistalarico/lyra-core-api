@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { JwtModule } from '@nestjs/jwt';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { InboxChannelEntity } from './entities/inbox-channel.entity';
 import { InboxConversationEntity } from './entities/inbox-conversation.entity';
@@ -10,6 +11,7 @@ import {
   AgencyWorkspaceUserEntity,
   AgencyUserProfileEntity,
 } from '../agency/entities/agency-settings.entities';
+import { AgencyUserSessionEntity } from '../agency/entities/agency-auth.entities';
 import { InboxController } from './inbox.controller';
 import { InboxSettingsController } from './inbox-settings.controller';
 import { InboxService } from './inbox.service';
@@ -46,9 +48,21 @@ import { MetaMediaIngestionWorker } from './channels/meta/services/meta-media-in
 import { ConversationOwnershipService } from './services/conversation-ownership.service';
 import { InboxAgentRuntimeService } from './services/inbox-agent-runtime.service';
 import { InboxAgentRuntimeWorker } from './services/inbox-agent-runtime.worker';
+import { InboxRuntimeConfigService } from './runtime/inbox-runtime-config.service';
+import { InboxProviderService } from './runtime/inbox-provider.service';
+import {
+  AgentDecisionPromptBuilder,
+  AgentDecisionV1Service,
+  BusinessModeActionPlanner,
+} from './runtime/agent-decision-v1.service';
+import { AudioTranscriptionWorker } from './runtime/audio-transcription.worker';
+import { InboxRealtimeEventBusService } from './realtime/inbox-realtime-event-bus.service';
+import { InboxOutboxRelayService } from './services/inbox-outbox-relay.service';
+import { InboxGateway } from './realtime/inbox.gateway';
 
 @Module({
   imports: [
+    JwtModule.register({}),
     PermissionsModule,
     NotificationsModule,
     FilesModule,
@@ -62,6 +76,7 @@ import { InboxAgentRuntimeWorker } from './services/inbox-agent-runtime.worker';
         InboxConversationEventEntity,
         AgencyWorkspaceUserEntity,
         AgencyUserProfileEntity,
+        AgencyUserSessionEntity,
         InboxWebhookLogEntity,
         InboxChannelConnectionSessionEntity,
         InboxMediaAssetEntity,
@@ -102,6 +117,15 @@ import { InboxAgentRuntimeWorker } from './services/inbox-agent-runtime.worker';
     ConversationOwnershipService,
     InboxAgentRuntimeService,
     InboxAgentRuntimeWorker,
+    InboxRuntimeConfigService,
+    InboxProviderService,
+    AgentDecisionPromptBuilder,
+    AgentDecisionV1Service,
+    BusinessModeActionPlanner,
+    AudioTranscriptionWorker,
+    InboxRealtimeEventBusService,
+    InboxOutboxRelayService,
+    InboxGateway,
   ],
   exports: [
     InboxService,

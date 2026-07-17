@@ -30,6 +30,8 @@ export class InboxProcessingBatchEntity {
   @Column({ name: 'due_at', type: 'timestamptz' }) dueAt!: Date;
   @Column({ name: 'message_count', type: 'int', default: 1 })
   messageCount!: number;
+  @Column({ name: 'attempt_count', type: 'int', default: 0 })
+  attemptCount!: number;
   @Column({ name: 'claimed_at', type: 'timestamptz', nullable: true })
   claimedAt!: Date | null;
   @Column({ name: 'claimed_by', type: 'varchar', length: 100, nullable: true })

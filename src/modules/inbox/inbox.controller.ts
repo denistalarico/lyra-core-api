@@ -37,6 +37,7 @@ type MessageReactionBody = {
 };
 
 type OwnershipActionBody = { reason?: string };
+type DecisionApprovalBody = { actionKeys?: string[] };
 
 const INBOX_ATTACHMENT_UPLOAD_OPTIONS = {
   storage: memoryStorage(),
@@ -315,15 +316,26 @@ export class InboxController {
 
   @Post('conversations/:id/agent-decisions/:decisionId/approve')
   @RequireAnyPermission(
-    'leadflow.inbox.conversation.reply.assigned',
-    'leadflow.inbox.conversation.reply.client',
+    'leadflow.crm.records.update.assigned',
+    'leadflow.crm.records.update.client',
   )
   approveAgentDecision(
     @RequestContextData() ctx: RequestContext,
     @Param('id') id: string,
     @Param('decisionId') decisionId: string,
+    @Body() body: DecisionApprovalBody,
   ) {
-    return this.agentRuntimeService.review(ctx, id, decisionId, true);
+    return this.agentRuntimeService.review(
+      ctx,
+      id,
+      decisionId,
+      true,
+      Array.isArray(body.actionKeys)
+        ? body.actionKeys.filter(
+            (item): item is string => typeof item === 'string',
+          )
+        : [],
+    );
   }
 
   @Post('conversations/:id/agent-decisions/:decisionId/reject')

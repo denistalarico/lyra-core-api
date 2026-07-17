@@ -8,6 +8,7 @@ import { FilesService } from '../../../../../common/files/files.service';
 import { InboxChannelEntity } from '../../../entities/inbox-channel.entity';
 import { InboxMediaAssetEntity } from '../../../entities/inbox-media-asset.entity';
 import { InboxMediaDerivativeEntity } from '../../../entities/inbox-media-derivative.entity';
+import { InboxDomainOutboxEntity } from '../../../entities/inbox-domain-outbox.entity';
 
 const ALLOWED_MIME = new Set([
   'image/jpeg',
@@ -123,35 +124,52 @@ export class MetaMediaIngestionWorker {
       asset.availableAt = new Date();
       asset.nextAttemptAt = null;
       asset.errorCode = null;
-      await repository.save(asset);
-      if (asset.kind === 'audio' || asset.kind === 'image') {
-        const derivatives = this.dataSource.getRepository(
-          InboxMediaDerivativeEntity,
-        );
-        await derivatives.upsert(
-          {
-            tenantId: asset.tenantId,
-            workspaceId: asset.workspaceId,
-            mediaAssetId: asset.id,
-            kind: asset.kind === 'audio' ? 'transcription' : 'vision',
-            status: 'pending',
-            content: null,
-            language: null,
-            confidence: null,
-            provider: null,
-            model: null,
-            processorVersion: 'v1',
-            errorCode: null,
+      await this.dataSource.transaction(async (manager) => {
+        await manager.getRepository(InboxMediaAssetEntity).save(asset);
+        if (asset.kind === 'audio') {
+          await manager.getRepository(InboxMediaDerivativeEntity).upsert(
+            {
+              tenantId: asset.tenantId,
+              workspaceId: asset.workspaceId,
+              mediaAssetId: asset.id,
+              kind: 'transcription',
+              status: 'pending',
+              content: null,
+              language: null,
+              confidence: null,
+              provider: null,
+              model: null,
+              processorVersion:
+                process.env.INBOX_TRANSCRIPTION_PROCESSOR_VERSION ??
+                'transcription-v1',
+              errorCode: null,
+            },
+            [
+              'tenantId',
+              'workspaceId',
+              'mediaAssetId',
+              'kind',
+              'processorVersion',
+            ],
+          );
+        }
+        await manager.getRepository(InboxDomainOutboxEntity).save({
+          tenantId: asset.tenantId,
+          workspaceId: asset.workspaceId,
+          aggregateType: 'inbox_media_asset',
+          aggregateId: asset.id,
+          eventName: 'leadflow.inbox.media.updated',
+          eventVersion: 1,
+          idempotencyKey: `media:${asset.id}:available:${asset.checksum}`,
+          payload: {
+            conversationId: asset.conversationId,
+            messageId: asset.messageId,
+            mediaId: asset.id,
+            status: asset.status,
           },
-          [
-            'tenantId',
-            'workspaceId',
-            'mediaAssetId',
-            'kind',
-            'processorVersion',
-          ],
-        );
-      }
+          publishedAt: null,
+        });
+      });
     } catch (error) {
       asset.status = 'failed';
       asset.errorCode = this.sanitizeError(error);

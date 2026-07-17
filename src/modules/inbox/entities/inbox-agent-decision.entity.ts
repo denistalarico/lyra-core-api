@@ -62,6 +62,33 @@ export class InboxAgentDecisionEntity {
   contextSnapshot!: Record<string, unknown>;
   @Column({ name: 'error_code', type: 'varchar', length: 80, nullable: true })
   errorCode!: string | null;
+  @Column({ type: 'varchar', length: 80, nullable: true })
+  provider!: string | null;
+  @Column({ type: 'varchar', length: 120, nullable: true })
+  model!: string | null;
+  @Column({
+    name: 'prompt_version',
+    type: 'varchar',
+    length: 80,
+    nullable: true,
+  })
+  promptVersion!: string | null;
+  @Column({ name: 'prompt_hash', type: 'varchar', length: 128, nullable: true })
+  promptHash!: string | null;
+  @Column({ type: 'jsonb', default: () => "'{}'::jsonb" })
+  usage!: Record<string, unknown>;
+  @Column({ name: 'latency_ms', type: 'int', nullable: true })
+  latencyMs!: number | null;
+  @Column({ name: 'action_plan', type: 'jsonb', default: () => "'[]'::jsonb" })
+  actionPlan!: Array<Record<string, unknown>>;
+  @Column({
+    name: 'applied_actions',
+    type: 'jsonb',
+    default: () => "'[]'::jsonb",
+  })
+  appliedActions!: Array<Record<string, unknown>>;
+  @Column({ name: 'applied_at', type: 'timestamptz', nullable: true })
+  appliedAt!: Date | null;
   @Column({ name: 'reviewed_by', type: 'uuid', nullable: true }) reviewedBy!:
     | string
     | null;

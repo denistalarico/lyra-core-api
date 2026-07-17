@@ -32,6 +32,21 @@ export class InboxDomainOutboxEntity {
   >;
   @Column({ name: 'published_at', type: 'timestamptz', nullable: true })
   publishedAt!: Date | null;
+  @Column({ type: 'varchar', length: 24, default: 'pending' })
+  status!: 'pending' | 'processing' | 'published' | 'dead_letter';
+  @Column({ type: 'int', default: 0 }) attempts!: number;
+  @Column({ name: 'available_at', type: 'timestamptz', default: () => 'now()' })
+  availableAt!: Date;
+  @Column({ name: 'locked_at', type: 'timestamptz', nullable: true })
+  lockedAt!: Date | null;
+  @Column({ name: 'locked_by', type: 'varchar', length: 120, nullable: true })
+  lockedBy!: string | null;
+  @Column({ name: 'last_error', type: 'varchar', length: 80, nullable: true })
+  lastError!: string | null;
+  @Column({ name: 'dead_lettered_at', type: 'timestamptz', nullable: true })
+  deadLetteredAt!: Date | null;
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;
+  @Column({ name: 'updated_at', type: 'timestamptz', default: () => 'now()' })
+  updatedAt!: Date;
 }

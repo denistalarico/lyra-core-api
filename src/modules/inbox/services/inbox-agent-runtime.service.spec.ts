@@ -6,23 +6,46 @@ import {
 import { ConversationOwnershipService } from './conversation-ownership.service';
 
 describe('InboxAgentRuntimeService safety contracts', () => {
+  const serviceWith = (dataSource: unknown) =>
+    new InboxAgentRuntimeService(
+      dataSource as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {
+        assert(value: unknown) {
+          const item = value as Record<string, unknown>;
+          if (!item || item.schema_version !== 1)
+            throw new Error('decision_schema_invalid');
+        },
+      } as never,
+      {} as never,
+    );
+
   it('claims due batches with transactional SKIP LOCKED', async () => {
     const query = jest.fn().mockResolvedValue([]);
     const dataSource = {
-      transaction: jest.fn(async (callback) => callback({ query })),
+      transaction: jest.fn(
+        (callback: (manager: { query: typeof query }) => unknown) =>
+          Promise.resolve(callback({ query })),
+      ),
     };
-    const service = new InboxAgentRuntimeService(dataSource as never);
+    const service = serviceWith(dataSource);
     await expect(service.claimAndProcess('worker-a')).resolves.toBeNull();
-    expect(query.mock.calls[0][0]).toContain('FOR UPDATE SKIP LOCKED');
+    expect(query).toHaveBeenCalledWith(
+      expect.stringContaining('FOR UPDATE SKIP LOCKED'),
+    );
   });
 
   it('rejects malformed LLM output without applying effects', () => {
-    const service = new InboxAgentRuntimeService({} as never);
+    const service = serviceWith({});
     expect(() =>
       service.assertValidProposal({ reply: 'missing fields' }),
-    ).toThrow('invalid_agent_decision_schema');
+    ).toThrow('decision_schema_invalid');
     expect(() =>
       service.assertValidProposal({
+        schema_version: 1,
         reply: null,
         follow_text: null,
         stage_name: null,
@@ -38,7 +61,7 @@ describe('InboxAgentRuntimeService safety contracts', () => {
   });
 
   it('treats failed derivatives as partial while preserving an available original', () => {
-    const service = new InboxAgentRuntimeService({} as never);
+    const service = serviceWith({});
     const original = { id: 'media', kind: 'audio', status: 'available' };
     const result = (
       service as unknown as {

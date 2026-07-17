@@ -5,30 +5,36 @@ import {
 } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { randomUUID } from 'crypto';
+import { Readable } from 'stream';
 import { DataSource } from 'typeorm';
+import { FilesService } from '../../../common/files/files.service';
 import type { RequestContext } from '../../../common/context/request-context.interface';
 import { CrmOpportunityEntity } from '../../crm/entities/crm-opportunity.entity';
 import { LeadFlowAgentEntity } from '../../leadflow-agents/entities/leadflow-agent.entity';
 import { LeadFlowAgentChannelBindingEntity } from '../../leadflow-agents/entities/leadflow-agent-channel-binding.entity';
+import { LeadFlowAgentVersionEntity } from '../../leadflow-agents/entities/leadflow-agent-version.entity';
+import { LeadFlowClientSettingsEntity } from '../../leadflow-settings/entities/leadflow-client-settings.entity';
 import { InboxAgentDecisionEntity } from '../entities/inbox-agent-decision.entity';
 import { InboxConversationEntity } from '../entities/inbox-conversation.entity';
 import { InboxMediaAssetEntity } from '../entities/inbox-media-asset.entity';
 import { InboxMediaDerivativeEntity } from '../entities/inbox-media-derivative.entity';
 import { InboxMessageEntity } from '../entities/inbox-message.entity';
 import { InboxProcessingBatchEntity } from '../entities/inbox-processing-batch.entity';
+import { InboxDomainOutboxEntity } from '../entities/inbox-domain-outbox.entity';
+import {
+  AgentDecisionPromptBuilder,
+  AgentDecisionV1Service,
+  BusinessModeActionPlanner,
+} from '../runtime/agent-decision-v1.service';
+import { InboxProviderService } from '../runtime/inbox-provider.service';
+import { InboxRuntimeConfigService } from '../runtime/inbox-runtime-config.service';
+import {
+  AgentDecisionV1,
+  AgentDecisionResult,
+  InboxProviderError,
+} from '../runtime/inbox-runtime.contracts';
 
-export type AgentDecisionProposal = {
-  reply: string | null;
-  follow_text: string | null;
-  stage_name: string | null;
-  tags: string[];
-  handoff: boolean;
-  handoff_reason: string | null;
-  agent_summary: string;
-  service: string | null;
-  urgency: 'low' | 'normal' | 'high' | 'urgent';
-  close_reason: string | null;
-};
+export type AgentDecisionProposal = AgentDecisionV1;
 
 export function orderContextMessages(messages: InboxMessageEntity[]) {
   return [...messages].sort((left, right) => {
@@ -55,6 +61,12 @@ export function orderContextMessages(messages: InboxMessageEntity[]) {
 export class InboxAgentRuntimeService {
   constructor(
     @InjectDataSource('agency') private readonly dataSource: DataSource,
+    private readonly files: FilesService,
+    private readonly provider: InboxProviderService,
+    private readonly config: InboxRuntimeConfigService,
+    private readonly promptBuilder: AgentDecisionPromptBuilder,
+    private readonly schema: AgentDecisionV1Service,
+    private readonly actionPlanner: BusinessModeActionPlanner,
   ) {}
 
   async claimAndProcess(workerId: string) {
@@ -70,6 +82,7 @@ export class InboxAgentRuntimeService {
           status: 'processing',
           claimedAt: new Date(),
           claimedBy: workerId,
+          attemptCount: () => 'attempt_count + 1',
         });
       return rows[0].id;
     });
@@ -103,6 +116,14 @@ export class InboxAgentRuntimeService {
         });
       return null;
     }
+    const existingDecision = await this.dataSource
+      .getRepository(InboxAgentDecisionEntity)
+      .findOneBy({
+        tenantId: batch.tenantId,
+        workspaceId: batch.workspaceId,
+        idempotencyKey: `batch:${batch.id}:decision:v1`,
+      });
+    if (existingDecision) return existingDecision;
     const messages = await this.dataSource
       .getRepository(InboxMessageEntity)
       .createQueryBuilder('message')
@@ -110,9 +131,9 @@ export class InboxAgentRuntimeService {
         'message.tenant_id = :tenantId AND message.workspace_id = :workspaceId AND message.conversation_id = :conversationId',
         batch,
       )
-      .orderBy('message.occurred_at', 'ASC')
-      .addOrderBy('message.provider_sequence', 'ASC', 'NULLS LAST')
-      .addOrderBy('message.id', 'ASC')
+      .orderBy('message.occurred_at', 'DESC')
+      .addOrderBy('message.provider_sequence', 'DESC', 'NULLS FIRST')
+      .addOrderBy('message.id', 'DESC')
       .take(50)
       .getMany();
     const orderedMessages = orderContextMessages(messages);
@@ -154,70 +175,259 @@ export class InboxAgentRuntimeService {
             },
       });
     const agent = await this.resolveAgent(batch, conversation);
-    const context = {
-      conversationId: conversation.id,
-      contactId: conversation.contactId,
-      opportunityId: opportunity?.id ?? conversation.opportunityId,
+    const version = agent?.publishedVersionId
+      ? await this.dataSource
+          .getRepository(LeadFlowAgentVersionEntity)
+          .findOneBy({ id: agent.publishedVersionId, tenantId: batch.tenantId })
+      : null;
+    const settings = await this.dataSource
+      .getRepository(LeadFlowClientSettingsEntity)
+      .findOne({
+        where: { tenantId: batch.tenantId, workspaceId: batch.workspaceId },
+        order: { updatedAt: 'DESC' },
+      });
+    const messageProjection = orderedMessages.map((message) => ({
+      id: message.id,
+      direction: message.direction,
+      type: message.messageType,
+      content: message.content.slice(0, 2_000),
+      occurredAt: message.occurredAt.toISOString(),
+      providerSequence: message.providerSequence,
+    }));
+    const transcriptionProjection: Array<Record<string, unknown>> = derivatives
+      .filter(
+        (item) => item.kind === 'transcription' && item.status === 'available',
+      )
+      .map((item) => ({
+        assetId: item.mediaAssetId,
+        kind: 'transcription',
+        outcome: item.outcome,
+        text: item.content?.slice(0, 4_000) ?? '',
+        language: item.language,
+      }));
+    if (
+      !this.provider.supportsMultimodal() &&
+      this.config.visionFallbackEnabled
+    ) {
+      transcriptionProjection.push(
+        ...(await this.loadVisionFallback(media, derivatives)),
+      );
+    }
+    const prompt = this.promptBuilder.build({
       businessMode: conversation.businessMode,
-      messages: orderedMessages.map((message) => ({
-        id: message.id,
-        direction: message.direction,
-        type: message.messageType,
-        content: message.content.slice(0, 2000),
-        occurredAt: message.occurredAt.toISOString(),
-      })),
-      media: media.map((asset) => ({
-        id: asset.id,
-        kind: asset.kind,
-        status: asset.status,
-        derivative:
-          derivatives.find((item) => item.mediaAssetId === asset.id)?.status ??
-          null,
-        derivedContent:
-          derivatives
-            .find(
-              (item) =>
-                item.mediaAssetId === asset.id && item.status === 'available',
-            )
-            ?.content?.slice(0, 3000) ?? null,
-      })),
-    };
-    const proposal = this.buildSupervisedProposal(
-      orderedMessages,
-      media,
-      derivatives,
-    );
-    this.assertValidProposal(proposal);
-    const decision = await this.dataSource
-      .getRepository(InboxAgentDecisionEntity)
-      .save({
+      ownership: {
+        state: conversation.ownershipState,
+        version: conversation.ownershipVersion,
+      },
+      allowedActions: [
+        'set_stage',
+        'add_tag',
+        'set_summary',
+        'close',
+        'handoff',
+      ],
+      workspaceConfig: {
+        clientPromptConfig: settings?.clientPromptConfig ?? {},
+        businessModeOverrides: settings?.businessModeOverrides ?? {},
+      },
+      contact: { id: conversation.contactId },
+      opportunity: opportunity
+        ? {
+            id: opportunity.id,
+            pipelineId: opportunity.pipelineId,
+            stageId: opportunity.stageId,
+            businessMode: opportunity.businessMode,
+            status: opportunity.status,
+            businessContext: opportunity.businessContext,
+          }
+        : null,
+      messages: messageProjection,
+      transcriptions: transcriptionProjection,
+    });
+    const images = this.provider.supportsMultimodal()
+      ? await this.loadImages(media)
+      : [];
+    const correlationId = randomUUID();
+    let providerResult: AgentDecisionResult | null = null;
+    let proposal: AgentDecisionV1 | null = null;
+    try {
+      for (let repairAttempt = 0; repairAttempt < 2; repairAttempt += 1) {
+        providerResult = await this.provider.decide({
+          tenantId: batch.tenantId,
+          workspaceId: batch.workspaceId,
+          correlationId,
+          idempotencyKey: `batch:${batch.id}:decision:v1${repairAttempt ? ':repair' : ''}`,
+          agent: {
+            id: agent?.id ?? null,
+            versionId: version?.id ?? null,
+            snapshot: version?.snapshot ?? {},
+          },
+          businessMode: conversation.businessMode,
+          workspaceConfig: settings?.agentConfig ?? {},
+          contact: { id: conversation.contactId },
+          opportunity: opportunity
+            ? {
+                id: opportunity.id,
+                pipelineId: opportunity.pipelineId,
+                stageId: opportunity.stageId,
+                status: opportunity.status,
+              }
+            : null,
+          ownership: {
+            state: conversation.ownershipState,
+            version: conversation.ownershipVersion,
+          },
+          allowedActions: [
+            'set_stage',
+            'add_tag',
+            'set_summary',
+            'close',
+            'handoff',
+          ],
+          systemPolicy: `${prompt.systemPolicy}${repairAttempt ? '\nREPAIR: a saída anterior violou o schema; devolva apenas JSON válido.' : ''}`,
+          untrustedData: prompt.untrustedData,
+          promptVersion: prompt.promptVersion,
+          promptHash: prompt.promptHash,
+          images,
+          repairAttempt: repairAttempt === 1,
+        });
+        try {
+          this.schema.assert(providerResult.decision);
+          proposal = providerResult.decision;
+          break;
+        } catch {
+          if (repairAttempt === 1)
+            throw new InboxProviderError('decision_schema_invalid', false);
+        }
+      }
+    } catch (error) {
+      await this.recordBatchFailure(batch, error);
+      return null;
+    }
+    if (!providerResult || !proposal) return null;
+    const actionPlan = await this.actionPlanner.plan({
+      tenantId: batch.tenantId,
+      workspaceId: batch.workspaceId,
+      businessMode: conversation.businessMode,
+      opportunity,
+      decision: proposal,
+    });
+    return this.dataSource.transaction(async (manager) => {
+      const lockedBatch = await manager
+        .getRepository(InboxProcessingBatchEntity)
+        .findOne({
+          where: {
+            id: batch.id,
+            tenantId: batch.tenantId,
+            workspaceId: batch.workspaceId,
+          },
+          lock: { mode: 'pessimistic_write' },
+        });
+      const lockedConversation = await manager
+        .getRepository(InboxConversationEntity)
+        .findOne({
+          where: {
+            id: conversation.id,
+            tenantId: batch.tenantId,
+            workspaceId: batch.workspaceId,
+          },
+          lock: { mode: 'pessimistic_read' },
+        });
+      if (
+        !lockedBatch ||
+        !lockedConversation ||
+        lockedConversation.ownershipState !== 'ai_active' ||
+        lockedConversation.ownershipVersion !== conversation.ownershipVersion
+      ) {
+        if (lockedBatch) {
+          lockedBatch.status = 'cancelled';
+          lockedBatch.errorCode = 'ownership_changed';
+          lockedBatch.completedAt = new Date();
+          await manager
+            .getRepository(InboxProcessingBatchEntity)
+            .save(lockedBatch);
+        }
+        return null;
+      }
+      const decision = await manager
+        .getRepository(InboxAgentDecisionEntity)
+        .save({
+          tenantId: batch.tenantId,
+          workspaceId: batch.workspaceId,
+          conversationId: batch.conversationId,
+          batchId: batch.id,
+          agentId: agent?.id ?? conversation.assignedAgentId,
+          agentVersionId: version?.id ?? null,
+          ownershipVersion: conversation.ownershipVersion,
+          schemaVersion: 1,
+          idempotencyKey: `batch:${batch.id}:decision:v1`,
+          correlationId,
+          status: 'proposed',
+          proposal,
+          policyResult: {
+            mode: 'supervised',
+            automaticEffectsAllowed: false,
+            automaticReplyAllowed: this.config.autoReplyEnabled,
+            automaticCrmAllowed: this.config.autoCrmEnabled,
+            mediaContext: this.mediaPolicy(media, derivatives),
+          },
+          contextSnapshot: {
+            conversationId: conversation.id,
+            opportunityId: opportunity?.id ?? null,
+            businessMode: conversation.businessMode,
+            messageRefs: messageProjection.map(({ id, occurredAt }) => ({
+              id,
+              occurredAt,
+            })),
+            mediaRefs: media.map(({ id, kind, status }) => ({
+              id,
+              kind,
+              status,
+            })),
+          },
+          errorCode: null,
+          provider: providerResult.provider,
+          model: providerResult.model,
+          promptVersion: prompt.promptVersion,
+          promptHash: prompt.promptHash,
+          usage: providerResult.usage,
+          latencyMs: providerResult.latencyMs,
+          actionPlan,
+          appliedActions: [],
+          appliedAt: null,
+          reviewedBy: null,
+          reviewedAt: null,
+        });
+      lockedBatch.status = 'completed';
+      lockedBatch.completedAt = new Date();
+      lockedBatch.errorCode = null;
+      await manager.getRepository(InboxProcessingBatchEntity).save(lockedBatch);
+      await manager.getRepository(InboxDomainOutboxEntity).save({
         tenantId: batch.tenantId,
         workspaceId: batch.workspaceId,
-        conversationId: batch.conversationId,
-        batchId: batch.id,
-        agentId: agent?.id ?? conversation.assignedAgentId,
-        agentVersionId: agent?.publishedVersionId ?? null,
-        ownershipVersion: conversation.ownershipVersion,
-        schemaVersion: 1,
-        idempotencyKey: `batch:${batch.id}:decision:v1`,
-        correlationId: randomUUID(),
-        status: 'proposed',
-        proposal,
-        policyResult: {
-          mode: 'supervised',
-          automaticEffectsAllowed: false,
-          mediaContext: this.mediaPolicy(media, derivatives),
+        aggregateType: 'inbox_agent_decision',
+        aggregateId: decision.id,
+        eventName: 'leadflow.inbox.agent_decision.updated',
+        eventVersion: 1,
+        idempotencyKey: `decision:${decision.id}:proposed`,
+        payload: {
+          conversationId: conversation.id,
+          decisionId: decision.id,
+          status: decision.status,
+          ownershipVersion: decision.ownershipVersion,
         },
-        contextSnapshot: context,
-        errorCode: null,
-        reviewedBy: null,
-        reviewedAt: null,
+        publishedAt: null,
+        status: 'pending',
+        attempts: 0,
+        availableAt: new Date(),
+        lockedAt: null,
+        lockedBy: null,
+        lastError: null,
+        deadLetteredAt: null,
+        updatedAt: new Date(),
       });
-    batch.status = 'completed';
-    batch.completedAt = new Date();
-    batch.errorCode = null;
-    await this.dataSource.getRepository(InboxProcessingBatchEntity).save(batch);
-    return decision;
+      return decision;
+    });
   }
 
   async list(ctx: RequestContext, conversationId: string) {
@@ -237,6 +447,7 @@ export class InboxAgentRuntimeService {
     conversationId: string,
     decisionId: string,
     approve: boolean,
+    actionKeys: string[] = [],
   ) {
     if (!ctx.workspaceId || !ctx.userId)
       throw new NotFoundException('Decision not found.');
@@ -254,6 +465,7 @@ export class InboxAgentRuntimeService {
           lock: { mode: 'pessimistic_write' },
         });
       if (!decision) throw new NotFoundException('Decision not found.');
+      if (decision.status === 'approved' && approve) return decision;
       if (decision.status !== 'proposed')
         throw new ConflictException('Decision is no longer pending review.');
       const conversation = await manager
@@ -272,77 +484,297 @@ export class InboxAgentRuntimeService {
         decision.errorCode = 'ownership_changed';
       } else {
         decision.status = approve ? 'approved' : 'rejected';
+        if (approve) {
+          const plan = Array.isArray(decision.actionPlan)
+            ? decision.actionPlan
+            : [];
+          const uniqueKeys = [...new Set(actionKeys)].slice(0, 30);
+          const selected = uniqueKeys.map((key) =>
+            plan.find((item) => item.key === key),
+          );
+          if (selected.some((item) => !item || item.allowed !== true)) {
+            throw new ConflictException(
+              'One or more actions are no longer allowed.',
+            );
+          }
+          await this.applyApprovedActions(
+            manager,
+            ctx,
+            conversation,
+            decision,
+            selected as Array<Record<string, unknown>>,
+          );
+          decision.appliedActions = selected as Array<Record<string, unknown>>;
+          decision.appliedAt = uniqueKeys.length ? new Date() : null;
+        }
       }
       decision.reviewedBy = reviewerUserId;
       decision.reviewedAt = new Date();
-      return manager.getRepository(InboxAgentDecisionEntity).save(decision);
+      const saved = await manager
+        .getRepository(InboxAgentDecisionEntity)
+        .save(decision);
+      await manager.getRepository(InboxDomainOutboxEntity).save({
+        tenantId: saved.tenantId,
+        workspaceId: saved.workspaceId,
+        aggregateType: 'inbox_agent_decision',
+        aggregateId: saved.id,
+        eventName: 'leadflow.inbox.agent_decision.updated',
+        eventVersion: 1,
+        idempotencyKey: `decision:${saved.id}:${saved.status}`,
+        payload: {
+          conversationId: saved.conversationId,
+          decisionId: saved.id,
+          status: saved.status,
+          ownershipVersion: saved.ownershipVersion,
+        },
+        publishedAt: null,
+        status: 'pending',
+        attempts: 0,
+        availableAt: new Date(),
+        lockedAt: null,
+        lockedBy: null,
+        lastError: null,
+        deadLetteredAt: null,
+        updatedAt: new Date(),
+      });
+      return saved;
     });
   }
 
-  assertValidProposal(value: unknown): asserts value is AgentDecisionProposal {
-    if (!value || typeof value !== 'object' || Array.isArray(value))
-      throw new Error('invalid_agent_decision_schema');
-    const item = value as Record<string, unknown>;
-    const required = [
-      'reply',
-      'follow_text',
-      'stage_name',
-      'tags',
-      'handoff',
-      'handoff_reason',
-      'agent_summary',
-      'service',
-      'urgency',
-      'close_reason',
-    ];
-    if (
-      !required.every((key) => key in item) ||
-      !Array.isArray(item.tags) ||
-      typeof item.handoff !== 'boolean' ||
-      typeof item.agent_summary !== 'string' ||
-      !['low', 'normal', 'high', 'urgent'].includes(String(item.urgency))
-    ) {
-      throw new Error('invalid_agent_decision_schema');
+  private async applyApprovedActions(
+    manager: import('typeorm').EntityManager,
+    ctx: RequestContext,
+    conversation: InboxConversationEntity,
+    decision: InboxAgentDecisionEntity,
+    actions: Array<Record<string, unknown>>,
+  ) {
+    const opportunity = await manager
+      .getRepository(CrmOpportunityEntity)
+      .findOne({
+        where: conversation.opportunityId
+          ? {
+              id: conversation.opportunityId,
+              tenantId: conversation.tenantId,
+              workspaceId: conversation.workspaceId,
+            }
+          : {
+              inboxConversationId: conversation.id,
+              tenantId: conversation.tenantId,
+              workspaceId: conversation.workspaceId,
+            },
+        lock: { mode: 'pessimistic_write' },
+      });
+    for (const action of actions) {
+      const type = action.type;
+      if (
+        type === 'set_stage' &&
+        opportunity &&
+        typeof action.stageId === 'string'
+      ) {
+        opportunity.stageId = action.stageId;
+      } else if (
+        type === 'set_summary' &&
+        opportunity &&
+        typeof action.value === 'string'
+      ) {
+        opportunity.businessContext = {
+          ...opportunity.businessContext,
+          agentSummary: action.value,
+        };
+      } else if (
+        type === 'add_tag' &&
+        opportunity &&
+        typeof action.value === 'string'
+      ) {
+        await manager.query(
+          `INSERT INTO crm_opportunity_tags (tenant_id, workspace_id, opportunity_id, tag_id, assigned_by_type, assigned_by_user_id, metadata)
+           SELECT $1, $2, $3, tag.id, 'user', $4, jsonb_build_object('agentDecisionId', $5)
+           FROM crm_tags tag
+           WHERE tag.tenant_id = $1 AND tag.workspace_id = $2 AND tag.slug = $6 AND tag.deleted_at IS NULL
+             AND NOT EXISTS (SELECT 1 FROM crm_opportunity_tags link WHERE link.tenant_id = $1 AND link.workspace_id = $2 AND link.opportunity_id = $3 AND link.tag_id = tag.id)`,
+          [
+            conversation.tenantId,
+            conversation.workspaceId,
+            opportunity.id,
+            ctx.userId,
+            decision.id,
+            slugValue(action.value),
+          ],
+        );
+      } else if (type === 'close' && typeof action.value === 'string') {
+        conversation.qualificationStatus = 'disqualified';
+        conversation.qualificationReason = action.value;
+        conversation.status =
+          action.value === 'archived' ? 'archived' : 'closed';
+        conversation.ownershipState = 'closed';
+        conversation.aiEnabled = false;
+        conversation.ownershipVersion += 1;
+        conversation.closedAt = new Date();
+        if (action.value === 'archived') conversation.archivedAt = new Date();
+        if (opportunity) {
+          opportunity.status =
+            action.value === 'lost' ? 'lost' : opportunity.status;
+          opportunity.lostAt =
+            action.value === 'lost' ? new Date() : opportunity.lostAt;
+          opportunity.lostReason = action.value;
+          opportunity.businessContext = {
+            ...opportunity.businessContext,
+            leadDisposition: action.value,
+          };
+        }
+      } else if (type === 'handoff') {
+        conversation.ownershipState = 'handoff_requested';
+        conversation.aiEnabled = false;
+        conversation.ownershipVersion += 1;
+        conversation.ownershipReason =
+          typeof action.value === 'string'
+            ? action.value.slice(0, 180)
+            : 'agent_decision_approved';
+        conversation.ownershipChangedAt = new Date();
+        conversation.status = 'handoff_requested';
+      }
     }
+    if (opportunity)
+      await manager.getRepository(CrmOpportunityEntity).save(opportunity);
+    await manager.getRepository(InboxConversationEntity).save(conversation);
   }
-  private buildSupervisedProposal(
-    messages: InboxMessageEntity[],
+
+  assertValidProposal(value: unknown): asserts value is AgentDecisionProposal {
+    this.schema.assert(value);
+  }
+
+  private async loadImages(media: InboxMediaAssetEntity[]) {
+    const images: Array<{ assetId: string; mimeType: string; bytes: Buffer }> =
+      [];
+    for (const asset of media) {
+      if (images.length >= this.config.maxImagesPerRun) break;
+      if (
+        asset.kind !== 'image' ||
+        asset.status !== 'available' ||
+        !asset.objectKey ||
+        !asset.mimeType ||
+        Number(asset.byteSize ?? 0) > 8 * 1024 * 1024
+      )
+        continue;
+      const file = await this.files.getPrivateAsset(asset.objectKey);
+      images.push({
+        assetId: asset.id,
+        mimeType: asset.mimeType,
+        bytes: await readStream(file.body, 8 * 1024 * 1024),
+      });
+    }
+    return images;
+  }
+
+  private async loadVisionFallback(
     media: InboxMediaAssetEntity[],
     derivatives: InboxMediaDerivativeEntity[],
-  ): AgentDecisionProposal {
-    const inbound = messages.filter(
-      (message) => message.direction === 'inbound',
-    );
-    const latest = inbound.at(-1)?.content ?? '';
-    const mediaPolicy = this.mediaPolicy(media, derivatives);
-    return {
-      reply:
-        'Olá! Obrigado pela mensagem. Vou analisar as informações e já continuo por aqui.',
-      follow_text: null,
-      stage_name: null,
-      tags: [],
-      handoff: false,
-      handoff_reason: null,
-      agent_summary: latest.slice(0, 500),
-      service: null,
-      urgency: 'normal',
-      close_reason: null,
-      ...(mediaPolicy === 'blocked'
+  ): Promise<Array<Record<string, unknown>>> {
+    const output: Array<Record<string, unknown>> = [];
+    for (const asset of media) {
+      if (output.length >= this.config.maxImagesPerRun) break;
+      if (
+        asset.kind !== 'image' ||
+        asset.status !== 'available' ||
+        !asset.objectKey ||
+        !asset.mimeType ||
+        !asset.checksum
+      )
+        continue;
+      const cached = derivatives.find(
+        (item) =>
+          item.mediaAssetId === asset.id &&
+          item.kind === 'vision' &&
+          item.processorVersion === this.config.visionProcessorVersion &&
+          item.assetChecksum === asset.checksum &&
+          item.status === 'available',
+      );
+      if (cached) {
+        output.push({
+          assetId: asset.id,
+          kind: 'vision_fallback',
+          text: cached.content?.slice(0, 4_000) ?? '',
+        });
+        continue;
+      }
+      const file = await this.files.getPrivateAsset(asset.objectKey);
+      const bytes = await readStream(file.body, 8 * 1024 * 1024);
+      const result = await this.provider.analyzeImage({
+        tenantId: asset.tenantId,
+        workspaceId: asset.workspaceId,
+        assetId: asset.id,
+        mimeType: asset.mimeType,
+        checksum: asset.checksum,
+        bytes,
+        idempotencyKey: `vision:${asset.workspaceId}:${asset.checksum}:${this.config.visionProcessorVersion}`,
+      });
+      await this.dataSource.getRepository(InboxMediaDerivativeEntity).upsert(
+        {
+          tenantId: asset.tenantId,
+          workspaceId: asset.workspaceId,
+          mediaAssetId: asset.id,
+          kind: 'vision',
+          status: 'available',
+          content: result.text,
+          language: null,
+          confidence: null,
+          provider: result.provider,
+          model: result.model,
+          processorVersion: result.processorVersion,
+          assetChecksum: asset.checksum,
+          outcome: result.text ? 'content' : 'empty',
+          attemptCount: 1,
+          availableAt: new Date(),
+          nextAttemptAt: null,
+          lockedAt: null,
+          lockedBy: null,
+          completedAt: new Date(),
+          usage: result.usage,
+          latencyMs: result.latencyMs,
+          metadata: { fallback: true },
+          errorCode: null,
+        },
+        ['tenantId', 'workspaceId', 'mediaAssetId', 'kind', 'processorVersion'],
+      );
+      output.push({
+        assetId: asset.id,
+        kind: 'vision_fallback',
+        text: result.text.slice(0, 4_000),
+      });
+    }
+    return output;
+  }
+
+  private async recordBatchFailure(
+    batch: InboxProcessingBatchEntity,
+    error: unknown,
+  ) {
+    const code = providerErrorCode(error);
+    const retryable = error instanceof InboxProviderError && error.retryable;
+    await this.dataSource.getRepository(InboxProcessingBatchEntity).update(
+      {
+        id: batch.id,
+        tenantId: batch.tenantId,
+        workspaceId: batch.workspaceId,
+      },
+      retryable && batch.attemptCount < 3
         ? {
-            reply: null,
-            handoff: true,
-            handoff_reason: 'media_derivative_unavailable',
+            status: 'pending',
+            dueAt: new Date(
+              Date.now() + 15_000 * 2 ** Math.max(0, batch.attemptCount - 1),
+            ),
+            claimedAt: null,
+            claimedBy: null,
+            errorCode: code,
           }
-        : {}),
-    };
+        : { status: 'failed', completedAt: new Date(), errorCode: code },
+    );
   }
   private mediaPolicy(
     media: InboxMediaAssetEntity[],
     derivatives: InboxMediaDerivativeEntity[],
   ) {
-    const needed = media.filter(
-      (item) => item.kind === 'audio' || item.kind === 'image',
-    );
+    const needed = media.filter((item) => item.kind === 'audio');
     if (!needed.length) return 'complete';
     if (needed.some((asset) => asset.status !== 'available')) return 'blocked';
     return needed.every((asset) =>
@@ -392,4 +824,38 @@ export class InboxAgentRuntimeService {
     }
     return qb.addOrderBy('agent.updated_at', 'DESC').getOne();
   }
+}
+
+async function readStream(stream: Readable, limit: number): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of stream) {
+    const part = Buffer.isBuffer(chunk)
+      ? chunk
+      : Buffer.from(chunk as Uint8Array);
+    size += part.length;
+    if (size > limit)
+      throw new InboxProviderError('image_size_not_allowed', false);
+    chunks.push(part);
+  }
+  return Buffer.concat(chunks);
+}
+
+function providerErrorCode(error: unknown): string {
+  const value =
+    error instanceof InboxProviderError
+      ? error.code
+      : error instanceof Error
+        ? error.message
+        : 'decision_provider_failed';
+  return /^[a-z0-9_]{1,80}$/.test(value) ? value : 'decision_provider_failed';
+}
+
+function slugValue(value: string): string {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '');
 }

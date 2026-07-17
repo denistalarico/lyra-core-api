@@ -21,6 +21,7 @@ import { InboxConversationEventEntity } from './entities/inbox-conversation-even
 import { InboxConversationParticipantEntity } from './entities/inbox-conversation-participant.entity';
 import { InboxMessageEntity } from './entities/inbox-message.entity';
 import { InboxMediaAssetEntity } from './entities/inbox-media-asset.entity';
+import { InboxMediaDerivativeEntity } from './entities/inbox-media-derivative.entity';
 import { SettingsCryptoService } from '../../common/crypto/settings-crypto.service';
 import { FilesService } from '../../common/files/files.service';
 import { mapInboxChannel } from './mappers/inbox-channel.mapper';
@@ -49,6 +50,8 @@ export class InboxService {
     private readonly messagesRepository: Repository<InboxMessageEntity>,
     @InjectRepository(InboxMediaAssetEntity, 'agency')
     private readonly mediaRepository: Repository<InboxMediaAssetEntity>,
+    @InjectRepository(InboxMediaDerivativeEntity, 'agency')
+    private readonly mediaDerivativesRepository: Repository<InboxMediaDerivativeEntity>,
     @InjectRepository(InboxConversationParticipantEntity, 'agency')
     private readonly participantsRepository: Repository<InboxConversationParticipantEntity>,
     @InjectRepository(InboxConversationEventEntity, 'agency')
@@ -779,6 +782,15 @@ export class InboxService {
       },
       order: { createdAt: 'ASC' },
     });
+    const derivatives = media.length
+      ? await this.mediaDerivativesRepository.find({
+          where: {
+            ...this.scope(ctx),
+            mediaAssetId: In(media.map((asset) => asset.id)),
+          },
+          order: { createdAt: 'DESC' },
+        })
+      : [];
     const byMessage = new Map<string, InboxMediaAssetEntity[]>();
     for (const asset of media) {
       byMessage.set(asset.messageId, [
@@ -794,6 +806,25 @@ export class InboxService {
         mimeType: asset.mimeType,
         status: asset.status,
         name: asset.safeFilename,
+        derivative: (() => {
+          const derivative = derivatives.find(
+            (item) => item.mediaAssetId === asset.id,
+          );
+          return derivative
+            ? {
+                id: derivative.id,
+                kind: derivative.kind,
+                status: derivative.status,
+                outcome: derivative.outcome,
+                content:
+                  derivative.status === 'available' ? derivative.content : null,
+                language: derivative.language,
+                confidence: derivative.confidence,
+                errorCode:
+                  derivative.status === 'failed' ? derivative.errorCode : null,
+              }
+            : null;
+        })(),
       })),
     }));
   }
