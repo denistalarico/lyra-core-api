@@ -28,7 +28,7 @@ type CreateWebhookLogInput = {
 @Injectable()
 export class WebhookLogService {
   constructor(
-    @InjectRepository(InboxWebhookLogEntity)
+    @InjectRepository(InboxWebhookLogEntity, 'agency')
     private readonly webhookLogsRepository: Repository<InboxWebhookLogEntity>,
   ) {}
 

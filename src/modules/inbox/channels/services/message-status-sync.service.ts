@@ -11,9 +11,9 @@ import type {
 @Injectable()
 export class MessageStatusSyncService {
   constructor(
-    @InjectRepository(InboxMessageEntity)
+    @InjectRepository(InboxMessageEntity, 'agency')
     private readonly messagesRepository: Repository<InboxMessageEntity>,
-    @InjectRepository(InboxConversationEventEntity)
+    @InjectRepository(InboxConversationEventEntity, 'agency')
     private readonly eventsRepository: Repository<InboxConversationEventEntity>,
   ) {}
 
@@ -29,7 +29,7 @@ export class MessageStatusSyncService {
 
     if (!message) {
       throw new NotFoundException(
-        `Inbox message not found for external_message_id ${input.externalMessageId}.`,
+        'Inbox message not found for the provider status update.',
       );
     }
 

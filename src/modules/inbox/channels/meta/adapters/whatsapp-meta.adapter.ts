@@ -87,12 +87,8 @@ export class WhatsAppMetaAdapter {
             status: this.mapDeliveryStatus(rawStatus.status),
             recipientId: rawStatus.recipient_id ?? null,
             occurredAt: this.parseTimestamp(rawStatus.timestamp),
-            rawPayload: payload as Record<string, unknown>,
             metadata: {
               phoneNumberId,
-              conversation: rawStatus.conversation ?? null,
-              pricing: rawStatus.pricing ?? null,
-              errors: rawStatus.errors ?? null,
             },
           });
         }
@@ -155,7 +151,6 @@ export class WhatsAppMetaAdapter {
       content,
       attachments: this.extractAttachments(rawMessage),
       occurredAt: this.parseTimestamp(rawMessage.timestamp),
-      rawPayload: payload as Record<string, unknown>,
       metadata: {
         metaObject: payload.object ?? null,
         whatsappMessageType: rawMessage.type ?? null,

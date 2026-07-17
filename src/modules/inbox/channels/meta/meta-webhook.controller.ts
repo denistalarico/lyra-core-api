@@ -7,7 +7,13 @@ import {
   HttpCode,
   Post,
   Query,
+  Req,
+  ServiceUnavailableException,
+  UnauthorizedException,
 } from '@nestjs/common';
+import type { RawBodyRequest } from '@nestjs/common';
+import { createHmac, timingSafeEqual } from 'crypto';
+import type { Request } from 'express';
 import { InboundMessageIngestionService } from '../services/inbound-message-ingestion.service';
 import { WhatsAppMetaAdapter } from './adapters/whatsapp-meta.adapter';
 import type { MetaWhatsAppWebhookPayload } from './types/meta-whatsapp-webhook.types';
@@ -29,8 +35,13 @@ export class MetaWebhookController {
     @Query('hub.verify_token') verifyToken: string | undefined,
     @Query('hub.challenge') challenge: string | undefined,
   ) {
-    const expectedToken =
-      process.env.META_WEBHOOK_VERIFY_TOKEN ?? 'lyra_meta_dev_verify_token';
+    const expectedToken = process.env.META_WEBHOOK_VERIFY_TOKEN;
+
+    if (!expectedToken) {
+      throw new ServiceUnavailableException(
+        'Meta webhook verification is not configured.',
+      );
+    }
 
     if (mode === 'subscribe' && verifyToken === expectedToken && challenge) {
       return challenge;
@@ -43,8 +54,10 @@ export class MetaWebhookController {
   @HttpCode(200)
   async receiveWebhook(
     @Headers('x-hub-signature-256') signature: string | undefined,
+    @Req() request: RawBodyRequest<Request>,
     @Body() payload: MetaWhatsAppWebhookPayload,
   ) {
+    this.assertValidSignature(signature, request.rawBody);
     const phoneNumberId = this.extractPhoneNumberId(payload);
     const accountId = payload.entry?.[0]?.id ?? null;
     const eventType = this.extractEventType(payload);
@@ -98,7 +111,7 @@ export class MetaWebhookController {
         signatureReceived: Boolean(signature),
         messagesProcessed: results.length,
         statusesProcessed: statusResults.length,
-        payload: payload as Record<string, unknown>,
+        payload: {},
         metadata: {
           results,
           statusResults,
@@ -108,7 +121,7 @@ export class MetaWebhookController {
       return {
         ok: true,
         provider: 'meta',
-        signatureReceived: Boolean(signature),
+        signatureReceived: true,
         messagesProcessed: results.length,
         statusesProcessed: statusResults.length,
         results,
@@ -124,10 +137,36 @@ export class MetaWebhookController {
         signatureReceived: Boolean(signature),
         errorMessage:
           error instanceof Error ? error.message : 'Unknown webhook error',
-        payload: payload as Record<string, unknown>,
+        payload: {},
       });
 
       throw error;
+    }
+  }
+
+  private assertValidSignature(
+    signature: string | undefined,
+    rawBody?: Buffer,
+  ) {
+    const secret = process.env.META_APP_SECRET;
+    if (!secret) {
+      throw new ServiceUnavailableException(
+        'Meta webhook signature validation is not configured.',
+      );
+    }
+    if (!signature || !rawBody || !signature.startsWith('sha256=')) {
+      throw new UnauthorizedException('Invalid Meta webhook signature.');
+    }
+    const expected = `sha256=${createHmac('sha256', secret)
+      .update(rawBody)
+      .digest('hex')}`;
+    const receivedBuffer = Buffer.from(signature);
+    const expectedBuffer = Buffer.from(expected);
+    if (
+      receivedBuffer.length !== expectedBuffer.length ||
+      !timingSafeEqual(receivedBuffer, expectedBuffer)
+    ) {
+      throw new UnauthorizedException('Invalid Meta webhook signature.');
     }
   }
 

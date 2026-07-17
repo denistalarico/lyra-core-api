@@ -33,6 +33,7 @@ export class WhatsAppOutboundController {
       conversationId: dto.conversationId,
       to: dto.to,
       text: dto.text,
+      idempotencyKey: dto.idempotencyKey,
     });
 
     return {

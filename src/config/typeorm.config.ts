@@ -48,6 +48,11 @@ import { InboxConversationParticipantEntity } from '../modules/inbox/entities/in
 import { InboxConversationEventEntity } from '../modules/inbox/entities/inbox-conversation-event.entity';
 import { InboxWebhookLogEntity } from '../modules/inbox/entities/inbox-webhook-log.entity';
 import { InboxChannelConnectionSessionEntity } from '../modules/inbox/entities/inbox-channel-connection-session.entity';
+import { InboxMediaAssetEntity } from '../modules/inbox/entities/inbox-media-asset.entity';
+import { InboxMediaDerivativeEntity } from '../modules/inbox/entities/inbox-media-derivative.entity';
+import { InboxProcessingBatchEntity } from '../modules/inbox/entities/inbox-processing-batch.entity';
+import { InboxAgentDecisionEntity } from '../modules/inbox/entities/inbox-agent-decision.entity';
+import { InboxDomainOutboxEntity } from '../modules/inbox/entities/inbox-domain-outbox.entity';
 
 import { CrmPipelineEntity } from '../modules/crm/entities/crm-pipeline.entity';
 import { CrmStageEntity } from '../modules/crm/entities/crm-stage.entity';
@@ -304,6 +309,19 @@ export const agencyEntities = [
   ContactSegmentEntity,
   ContactBusinessModeEntity,
   ContactViewPreferenceEntity,
+  InboxChannelEntity,
+  InboxConversationEntity,
+  InboxMessageEntity,
+  InboxSettingsEntity,
+  InboxConversationParticipantEntity,
+  InboxConversationEventEntity,
+  InboxWebhookLogEntity,
+  InboxChannelConnectionSessionEntity,
+  InboxMediaAssetEntity,
+  InboxMediaDerivativeEntity,
+  InboxProcessingBatchEntity,
+  InboxAgentDecisionEntity,
+  InboxDomainOutboxEntity,
   CrmPipelineEntity,
   CrmStageEntity,
   CrmOpportunityEntity,

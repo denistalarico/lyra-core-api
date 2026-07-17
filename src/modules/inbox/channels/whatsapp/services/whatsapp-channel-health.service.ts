@@ -19,7 +19,7 @@ type WhatsAppConnectionState =
 @Injectable()
 export class WhatsAppChannelHealthService {
   constructor(
-    @InjectRepository(InboxChannelEntity)
+    @InjectRepository(InboxChannelEntity, 'agency')
     private readonly channelsRepository: Repository<InboxChannelEntity>,
     private readonly cryptoService: SettingsCryptoService,
     private readonly metaGraphService: MetaGraphService,

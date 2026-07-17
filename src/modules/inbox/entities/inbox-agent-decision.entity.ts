@@ -1,0 +1,74 @@
+import {
+  Column,
+  CreateDateColumn,
+  Entity,
+  Index,
+  PrimaryGeneratedColumn,
+  UpdateDateColumn,
+} from 'typeorm';
+
+export type InboxAgentDecisionStatus =
+  | 'proposed'
+  | 'approved'
+  | 'rejected'
+  | 'invalidated'
+  | 'failed';
+
+@Entity('inbox_agent_decisions')
+@Index('idx_inbox_decision_scope', [
+  'tenantId',
+  'workspaceId',
+  'conversationId',
+])
+@Index(
+  'uq_inbox_decision_idempotency',
+  ['tenantId', 'workspaceId', 'idempotencyKey'],
+  { unique: true },
+)
+export class InboxAgentDecisionEntity {
+  @PrimaryGeneratedColumn('uuid') id!: string;
+  @Column({ name: 'tenant_id', type: 'uuid' }) tenantId!: string;
+  @Column({ name: 'workspace_id', type: 'uuid' }) workspaceId!: string;
+  @Column({ name: 'conversation_id', type: 'uuid' }) conversationId!: string;
+  @Column({ name: 'batch_id', type: 'uuid' }) batchId!: string;
+  @Column({ name: 'agent_id', type: 'uuid', nullable: true }) agentId!:
+    | string
+    | null;
+  @Column({ name: 'agent_version_id', type: 'uuid', nullable: true })
+  agentVersionId!: string | null;
+  @Column({ name: 'ownership_version', type: 'int' }) ownershipVersion!: number;
+  @Column({ name: 'schema_version', type: 'int', default: 1 })
+  schemaVersion!: number;
+  @Column({ name: 'idempotency_key', type: 'varchar', length: 180 })
+  idempotencyKey!: string;
+  @Column({ name: 'correlation_id', type: 'uuid' }) correlationId!: string;
+  @Column({ type: 'varchar', length: 24, default: 'proposed' })
+  status!: InboxAgentDecisionStatus;
+  @Column({ type: 'jsonb', default: () => "'{}'::jsonb" }) proposal!: Record<
+    string,
+    unknown
+  >;
+  @Column({
+    name: 'policy_result',
+    type: 'jsonb',
+    default: () => "'{}'::jsonb",
+  })
+  policyResult!: Record<string, unknown>;
+  @Column({
+    name: 'context_snapshot',
+    type: 'jsonb',
+    default: () => "'{}'::jsonb",
+  })
+  contextSnapshot!: Record<string, unknown>;
+  @Column({ name: 'error_code', type: 'varchar', length: 80, nullable: true })
+  errorCode!: string | null;
+  @Column({ name: 'reviewed_by', type: 'uuid', nullable: true }) reviewedBy!:
+    | string
+    | null;
+  @Column({ name: 'reviewed_at', type: 'timestamptz', nullable: true })
+  reviewedAt!: Date | null;
+  @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
+  createdAt!: Date;
+  @UpdateDateColumn({ name: 'updated_at', type: 'timestamptz' })
+  updatedAt!: Date;
+}

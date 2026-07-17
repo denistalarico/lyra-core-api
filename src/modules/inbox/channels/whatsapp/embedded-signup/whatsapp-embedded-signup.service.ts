@@ -35,9 +35,9 @@ type CompleteInput = {
 @Injectable()
 export class WhatsAppEmbeddedSignupService {
   constructor(
-    @InjectRepository(InboxChannelConnectionSessionEntity)
+    @InjectRepository(InboxChannelConnectionSessionEntity, 'agency')
     private readonly sessionsRepository: Repository<InboxChannelConnectionSessionEntity>,
-    @InjectRepository(InboxChannelEntity)
+    @InjectRepository(InboxChannelEntity, 'agency')
     private readonly channelsRepository: Repository<InboxChannelEntity>,
     private readonly metaGraphService: MetaGraphService,
     private readonly cryptoService: SettingsCryptoService,

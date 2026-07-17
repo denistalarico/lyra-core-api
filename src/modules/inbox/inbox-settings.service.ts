@@ -96,7 +96,8 @@ const defaultInboxSettings = {
       action: 'assign_to_ai',
       agentKey: 'main_sales_ai',
       handoffMode: 'on_high_intent',
-      description: 'Toda conversa do número dedicado pode ser assumida pela IA.',
+      description:
+        'Toda conversa do número dedicado pode ser assumida pela IA.',
     },
     {
       id: 'ai-rule-instagram-keywords',
@@ -131,7 +132,8 @@ const defaultInboxSettings = {
       enabled: true,
       strategy: 'random',
       targetRole: 'sales',
-      description: 'Distribuir aleatoriamente entre usuários do time comercial.',
+      description:
+        'Distribuir aleatoriamente entre usuários do time comercial.',
     },
     {
       id: 'human-rule-queue',
@@ -287,7 +289,7 @@ const defaultInboxSettings = {
 @Injectable()
 export class InboxSettingsService {
   constructor(
-    @InjectRepository(InboxSettingsEntity)
+    @InjectRepository(InboxSettingsEntity, 'agency')
     private readonly settingsRepository: Repository<InboxSettingsEntity>,
   ) {}
 
@@ -315,7 +317,8 @@ export class InboxSettingsService {
     if (dto.conversationAutomations !== undefined) {
       settings.conversationAutomations = dto.conversationAutomations;
     }
-    if (dto.quickReplies !== undefined) settings.quickReplies = dto.quickReplies;
+    if (dto.quickReplies !== undefined)
+      settings.quickReplies = dto.quickReplies;
     if (dto.leadRules !== undefined) settings.leadRules = dto.leadRules;
     if (dto.metadata !== undefined) settings.metadata = dto.metadata;
 
@@ -361,7 +364,8 @@ export class InboxSettingsService {
 
     const rules = settings.leadRules.filter((rule) => {
       const enabled = rule.enabled !== false;
-      const channel = typeof rule.channel === 'string' ? rule.channel.toLowerCase() : '';
+      const channel =
+        typeof rule.channel === 'string' ? rule.channel.toLowerCase() : '';
 
       return enabled && channel === normalizedChannel;
     });
@@ -415,5 +419,4 @@ export class InboxSettingsService {
       reason: null,
     };
   }
-
 }

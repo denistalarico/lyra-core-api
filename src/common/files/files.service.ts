@@ -47,9 +47,11 @@ export class FilesService {
   private readonly client: S3Client;
   private readonly endpoint: string;
   private readonly bucket: string;
+  private readonly privateBucket: string;
   private readonly shouldCreateBucket: boolean;
   private readonly shouldSetPublicReadPolicy: boolean;
   private bucketReady?: Promise<void>;
+  private privateBucketReady?: Promise<void>;
 
   constructor(private readonly configService: ConfigService) {
     this.endpoint =
@@ -57,6 +59,9 @@ export class FilesService {
       'http://localhost:9200';
     this.bucket =
       this.configService.get<string>('files.s3.bucket') ?? 'lyra-assets';
+    this.privateBucket =
+      this.configService.get<string>('files.s3.privateBucket') ??
+      'lyra-private-assets';
     this.shouldCreateBucket =
       this.configService.get<boolean>('files.s3.createBucket') ?? true;
     this.shouldSetPublicReadPolicy =
@@ -169,6 +174,56 @@ export class FilesService {
     }
   }
 
+  async uploadPrivateBuffer(input: {
+    body: Buffer;
+    path: string;
+    contentType: string;
+  }): Promise<{ path: string }> {
+    const normalizedPath = this.normalizeAssetPath(input.path);
+    await this.ensurePrivateBucket();
+    await this.client.send(
+      new PutObjectCommand({
+        Bucket: this.privateBucket,
+        Key: normalizedPath,
+        Body: input.body,
+        ContentType: input.contentType,
+        CacheControl: 'private, no-store',
+      }),
+    );
+    return { path: normalizedPath };
+  }
+
+  async getPrivateAsset(path: string): Promise<AssetFile> {
+    const normalizedPath = this.normalizeAssetPath(path);
+    try {
+      await this.ensurePrivateBucket();
+      const object = await this.client.send(
+        new GetObjectCommand({
+          Bucket: this.privateBucket,
+          Key: normalizedPath,
+        }),
+      );
+      if (!(object.Body instanceof Readable)) {
+        throw new InternalServerErrorException('Asset stream is unavailable.');
+      }
+      return {
+        body: object.Body,
+        contentType: object.ContentType ?? 'application/octet-stream',
+        cacheControl: 'private, no-store',
+      };
+    } catch (error) {
+      const statusCode = (error as { $metadata?: { httpStatusCode?: number } })
+        .$metadata?.httpStatusCode;
+      if (
+        statusCode === 404 ||
+        (error as { name?: string }).name === 'NoSuchKey'
+      ) {
+        throw new NotFoundException('Asset not found.');
+      }
+      throw error;
+    }
+  }
+
   private assertValidImage(file?: Express.Multer.File) {
     if (!file) {
       throw new BadRequestException('Image file is required.');
@@ -210,6 +265,31 @@ export class FilesService {
     }
 
     return this.bucketReady;
+  }
+
+  private ensurePrivateBucket() {
+    if (!this.privateBucketReady) {
+      this.privateBucketReady = this.resolvePrivateBucket();
+    }
+    return this.privateBucketReady;
+  }
+
+  private async resolvePrivateBucket() {
+    try {
+      await this.client.send(
+        new HeadBucketCommand({ Bucket: this.privateBucket }),
+      );
+      return;
+    } catch {
+      if (!this.shouldCreateBucket) {
+        throw new InternalServerErrorException(
+          'Private assets bucket is not available.',
+        );
+      }
+    }
+    await this.client.send(
+      new CreateBucketCommand({ Bucket: this.privateBucket }),
+    );
   }
 
   private async resolveBucket() {

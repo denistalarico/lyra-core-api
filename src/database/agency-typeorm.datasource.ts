@@ -94,6 +94,12 @@ import { AddOperationsRoomOutboxDelivery1784000000000 } from './migrations/17840
 import { CreateLeadflowAutomationsCore1783600000000 } from './migrations/1783600000000-create-leadflow-automations-core';
 import { AddLeadflowAutomationsPermissions1783700000000 } from './migrations/1783700000000-add-leadflow-automations-permissions';
 import { AddLeadflowEventsPermissions1783800000000 } from './migrations/1783800000000-add-leadflow-events-permissions';
+import { CreateInboxCore1760000020000 } from './migrations/1760000020000-create-inbox-core';
+import { CreateInboxSettings1760000021000 } from './migrations/1760000021000-create-inbox-settings';
+import { ExpandInboxChannelsFoundation1760000024000 } from './migrations/1760000024000-expand-inbox-channels-foundation';
+import { CreateInboxWebhookLogs1760000025000 } from './migrations/1760000025000-create-inbox-webhook-logs';
+import { CreateInboxChannelConnectionSessions1760000026000 } from './migrations/1760000026000-create-inbox-channel-connection-sessions';
+import { CreateLeadflowInboxRuntime1784100000000 } from './migrations/1784100000000-create-leadflow-inbox-runtime';
 
 export const AgencyDataSource = new DataSource({
   type: 'postgres',
@@ -109,6 +115,11 @@ export const AgencyDataSource = new DataSource({
   logging: false,
   entities: agencyEntities,
   migrations: [
+    CreateInboxCore1760000020000,
+    CreateInboxSettings1760000021000,
+    ExpandInboxChannelsFoundation1760000024000,
+    CreateInboxWebhookLogs1760000025000,
+    CreateInboxChannelConnectionSessions1760000026000,
     CreateAgencyTeamPayments1760002030000,
     CreateAgencySettingsCore1760001000000,
     CreateAgencyEmailSettings1760001001000,
@@ -201,5 +212,6 @@ export const AgencyDataSource = new DataSource({
     AddLeadflowEventsPermissions1783800000000,
     CreateLeadflowOperationsRoom1783900000000,
     AddOperationsRoomOutboxDelivery1784000000000,
+    CreateLeadflowInboxRuntime1784100000000,
   ],
 });

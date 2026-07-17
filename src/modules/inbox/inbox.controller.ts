@@ -29,10 +29,14 @@ import { CreateInboxMessageDto } from './dto/create-inbox-message.dto';
 import { PatchInboxChannelDto } from './dto/patch-inbox-channel.dto';
 import { PatchInboxConversationDto } from './dto/patch-inbox-conversation.dto';
 import { InboxService, InboxConversationFilters } from './inbox.service';
+import { ConversationOwnershipService } from './services/conversation-ownership.service';
+import { InboxAgentRuntimeService } from './services/inbox-agent-runtime.service';
 
 type MessageReactionBody = {
   emoji?: string;
 };
+
+type OwnershipActionBody = { reason?: string };
 
 const INBOX_ATTACHMENT_UPLOAD_OPTIONS = {
   storage: memoryStorage(),
@@ -43,7 +47,11 @@ const INBOX_ATTACHMENT_UPLOAD_OPTIONS = {
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 @RequireProductEntitlement('leadflow')
 export class InboxController {
-  constructor(private readonly inboxService: InboxService) {}
+  constructor(
+    private readonly inboxService: InboxService,
+    private readonly ownershipService: ConversationOwnershipService,
+    private readonly agentRuntimeService: InboxAgentRuntimeService,
+  ) {}
 
   @Get('channels')
   @RequirePermission('leadflow.channels.channel.view.client')
@@ -242,6 +250,93 @@ export class InboxController {
     @Param('id') id: string,
   ) {
     return this.inboxService.assumeConversation(ctx, id);
+  }
+
+  @Post('conversations/:id/handoff')
+  @RequirePermission('leadflow.inbox.conversation.assign.client')
+  requestHandoff(
+    @RequestContextData() ctx: RequestContext,
+    @Param('id') id: string,
+    @Body() body: OwnershipActionBody,
+  ) {
+    return this.ownershipService.transition(
+      ctx,
+      id,
+      'request_handoff',
+      body.reason,
+    );
+  }
+
+  @Post('conversations/:id/pause-ai')
+  @RequirePermission('leadflow.inbox.conversation.assign.client')
+  pauseAi(
+    @RequestContextData() ctx: RequestContext,
+    @Param('id') id: string,
+    @Body() body: OwnershipActionBody,
+  ) {
+    return this.ownershipService.transition(ctx, id, 'pause', body.reason);
+  }
+
+  @Post('conversations/:id/return-ai')
+  @RequirePermission('leadflow.inbox.conversation.assign.client')
+  returnAi(
+    @RequestContextData() ctx: RequestContext,
+    @Param('id') id: string,
+    @Body() body: OwnershipActionBody,
+  ) {
+    return this.ownershipService.transition(ctx, id, 'return_ai', body.reason);
+  }
+
+  @Post('conversations/:id/close')
+  @RequireAnyPermission(
+    'leadflow.inbox.conversation.close.assigned',
+    'leadflow.inbox.conversation.close.client',
+  )
+  close(
+    @RequestContextData() ctx: RequestContext,
+    @Param('id') id: string,
+    @Body() body: OwnershipActionBody,
+  ) {
+    return this.ownershipService.transition(ctx, id, 'close', body.reason);
+  }
+
+  @Get('conversations/:id/agent-decisions')
+  @RequireAnyPermission(
+    'leadflow.inbox.conversation.view.assigned',
+    'leadflow.inbox.conversation.view.client',
+    'leadflow.inbox.conversation.view.all',
+  )
+  listAgentDecisions(
+    @RequestContextData() ctx: RequestContext,
+    @Param('id') id: string,
+  ) {
+    return this.agentRuntimeService.list(ctx, id);
+  }
+
+  @Post('conversations/:id/agent-decisions/:decisionId/approve')
+  @RequireAnyPermission(
+    'leadflow.inbox.conversation.reply.assigned',
+    'leadflow.inbox.conversation.reply.client',
+  )
+  approveAgentDecision(
+    @RequestContextData() ctx: RequestContext,
+    @Param('id') id: string,
+    @Param('decisionId') decisionId: string,
+  ) {
+    return this.agentRuntimeService.review(ctx, id, decisionId, true);
+  }
+
+  @Post('conversations/:id/agent-decisions/:decisionId/reject')
+  @RequireAnyPermission(
+    'leadflow.inbox.conversation.reply.assigned',
+    'leadflow.inbox.conversation.reply.client',
+  )
+  rejectAgentDecision(
+    @RequestContextData() ctx: RequestContext,
+    @Param('id') id: string,
+    @Param('decisionId') decisionId: string,
+  ) {
+    return this.agentRuntimeService.review(ctx, id, decisionId, false);
   }
 
   @Post('conversations/:id/clear')

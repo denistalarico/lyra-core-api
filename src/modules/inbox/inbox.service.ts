@@ -11,16 +11,20 @@ import { CreateInboxConversationDto } from './dto/create-inbox-conversation.dto'
 import { CreateInboxMessageDto } from './dto/create-inbox-message.dto';
 import { PatchInboxChannelDto } from './dto/patch-inbox-channel.dto';
 import { PatchInboxConversationDto } from './dto/patch-inbox-conversation.dto';
-import { WorkspaceUserEntity } from '../settings/entities/workspace-user.entity';
-import { UserProfileEntity } from '../settings/entities/user-profile.entity';
+import {
+  AgencyWorkspaceUserEntity as WorkspaceUserEntity,
+  AgencyUserProfileEntity as UserProfileEntity,
+} from '../agency/entities/agency-settings.entities';
 import { InboxChannelEntity } from './entities/inbox-channel.entity';
 import { InboxConversationEntity } from './entities/inbox-conversation.entity';
 import { InboxConversationEventEntity } from './entities/inbox-conversation-event.entity';
 import { InboxConversationParticipantEntity } from './entities/inbox-conversation-participant.entity';
 import { InboxMessageEntity } from './entities/inbox-message.entity';
+import { InboxMediaAssetEntity } from './entities/inbox-media-asset.entity';
 import { SettingsCryptoService } from '../../common/crypto/settings-crypto.service';
 import { FilesService } from '../../common/files/files.service';
 import { mapInboxChannel } from './mappers/inbox-channel.mapper';
+import { ConversationOwnershipService } from './services/conversation-ownership.service';
 
 export type InboxConversationFilters = {
   status?: string;
@@ -37,22 +41,25 @@ type MessageFlag = 'pinned' | 'favorite';
 @Injectable()
 export class InboxService {
   constructor(
-    @InjectRepository(InboxChannelEntity)
+    @InjectRepository(InboxChannelEntity, 'agency')
     private readonly channelsRepository: Repository<InboxChannelEntity>,
-    @InjectRepository(InboxConversationEntity)
+    @InjectRepository(InboxConversationEntity, 'agency')
     private readonly conversationsRepository: Repository<InboxConversationEntity>,
-    @InjectRepository(InboxMessageEntity)
+    @InjectRepository(InboxMessageEntity, 'agency')
     private readonly messagesRepository: Repository<InboxMessageEntity>,
-    @InjectRepository(InboxConversationParticipantEntity)
+    @InjectRepository(InboxMediaAssetEntity, 'agency')
+    private readonly mediaRepository: Repository<InboxMediaAssetEntity>,
+    @InjectRepository(InboxConversationParticipantEntity, 'agency')
     private readonly participantsRepository: Repository<InboxConversationParticipantEntity>,
-    @InjectRepository(InboxConversationEventEntity)
+    @InjectRepository(InboxConversationEventEntity, 'agency')
     private readonly eventsRepository: Repository<InboxConversationEventEntity>,
-    @InjectRepository(WorkspaceUserEntity)
+    @InjectRepository(WorkspaceUserEntity, 'agency')
     private readonly workspaceUsersRepository: Repository<WorkspaceUserEntity>,
-    @InjectRepository(UserProfileEntity)
+    @InjectRepository(UserProfileEntity, 'agency')
     private readonly userProfilesRepository: Repository<UserProfileEntity>,
     private readonly cryptoService: SettingsCryptoService,
     private readonly filesService: FilesService,
+    private readonly ownershipService: ConversationOwnershipService,
   ) {}
 
   async uploadAttachment(ctx: RequestContext, file: Express.Multer.File) {
@@ -444,6 +451,7 @@ export class InboxService {
         ...this.scope(ctx),
         channelId: dto.channelId ?? null,
         contactId: dto.contactId ?? null,
+        opportunityId: null,
         externalThreadId: dto.externalThreadId?.trim() || null,
         title: dto.title?.trim() || null,
         status: dto.status ?? 'new',
@@ -453,6 +461,12 @@ export class InboxService {
         source: dto.source?.trim() || 'manual',
         businessMode: dto.businessMode?.trim() || 'general',
         aiEnabled: dto.aiEnabled ?? false,
+        ownershipState: dto.aiEnabled ? 'ai_active' : 'paused',
+        ownershipVersion: 1,
+        ownershipReason: 'conversation_created',
+        ownershipChangedAt: now,
+        qualificationStatus: 'pending',
+        qualificationReason: null,
         metadata: dto.metadata ?? {},
       }),
     );
@@ -501,6 +515,19 @@ export class InboxService {
     dto: PatchInboxConversationDto,
   ) {
     const conversation = await this.getConversation(ctx, id);
+    if (dto.aiEnabled !== undefined) {
+      throw new BadRequestException(
+        'Use the explicit conversation ownership actions to change AI control.',
+      );
+    }
+    if (
+      dto.status &&
+      ['handoff_requested', 'closed', 'resolved'].includes(dto.status)
+    ) {
+      throw new BadRequestException(
+        'Use the explicit handoff or close action for this status transition.',
+      );
+    }
     const before = {
       status: conversation.status,
       priority: conversation.priority,
@@ -678,32 +705,8 @@ export class InboxService {
   }
 
   async assumeConversation(ctx: RequestContext, id: string) {
-    if (!ctx.userId) {
-      throw new BadRequestException(
-        'User context is required to assume a conversation.',
-      );
-    }
-
-    const conversation = await this.getConversation(ctx, id);
-
-    conversation.assignedUserId = ctx.userId;
-    conversation.assignedAgentId = null;
-    conversation.aiEnabled = false;
-    conversation.status =
-      conversation.status === 'new' ? 'open' : conversation.status;
-    conversation.metadata = {
-      ...(conversation.metadata ?? {}),
-      assumedAt: new Date().toISOString(),
-      assumedBy: ctx.userId,
-    };
-
-    const saved = await this.conversationsRepository.save(conversation);
-
-    await this.createEvent(ctx, saved.id, 'conversation_assumed', {
-      assignedUserId: ctx.userId,
-    });
-
-    return saved;
+    await this.getConversation(ctx, id);
+    return this.ownershipService.transition(ctx, id, 'assume');
   }
 
   async clearConversation(ctx: RequestContext, id: string) {
@@ -756,16 +759,43 @@ export class InboxService {
   async listMessages(ctx: RequestContext, conversationId: string) {
     await this.getConversation(ctx, conversationId);
 
-    return this.messagesRepository.find({
+    const messages = await this.messagesRepository.find({
       where: {
         ...this.scope(ctx),
         conversationId,
       },
       order: {
-        createdAt: 'ASC',
+        occurredAt: 'ASC',
+        providerSequence: 'ASC',
+        id: 'ASC',
       },
       take: 200,
     });
+    if (!messages.length) return messages;
+    const media = await this.mediaRepository.find({
+      where: {
+        ...this.scope(ctx),
+        messageId: In(messages.map((message) => message.id)),
+      },
+      order: { createdAt: 'ASC' },
+    });
+    const byMessage = new Map<string, InboxMediaAssetEntity[]>();
+    for (const asset of media) {
+      byMessage.set(asset.messageId, [
+        ...(byMessage.get(asset.messageId) ?? []),
+        asset,
+      ]);
+    }
+    return messages.map((message) => ({
+      ...message,
+      attachments: (byMessage.get(message.id) ?? []).map((asset) => ({
+        id: asset.id,
+        kind: asset.kind,
+        mimeType: asset.mimeType,
+        status: asset.status,
+        name: asset.safeFilename,
+      })),
+    }));
   }
 
   async createMessage(
@@ -791,12 +821,17 @@ export class InboxService {
         senderUserId: dto.senderUserId ?? ctx.userId ?? null,
         senderAgentId: dto.senderAgentId ?? null,
         externalMessageId: dto.externalMessageId?.trim() || null,
+        idempotencyKey: null,
         messageType: dto.messageType ?? 'text',
         content: dto.content.trim(),
         status: dto.status ?? 'sent',
         attachments: dto.attachments ?? [],
         metadata: dto.metadata ?? {},
         sentAt: direction === 'outbound' ? now : null,
+        deliveredAt: null,
+        readAt: null,
+        occurredAt: now,
+        providerSequence: null,
       }),
     );
 
@@ -1073,6 +1108,7 @@ export class InboxService {
         workspaceId: input.workspaceId,
         channelId: channel.id,
         contactId: input.contactId ?? null,
+        opportunityId: null,
         externalThreadId: input.conversationId,
         title,
         status: mappedStatus,
@@ -1082,6 +1118,12 @@ export class InboxService {
         source: 'webchat',
         businessMode: 'general',
         aiEnabled: input.aiEnabled ?? false,
+        ownershipState: input.aiEnabled ? 'ai_active' : 'paused',
+        ownershipVersion: 1,
+        ownershipReason: 'webchat_synced',
+        ownershipChangedAt: new Date(),
+        qualificationStatus: 'pending',
+        qualificationReason: null,
         lastMessageAt: input.lastMessageAt
           ? new Date(input.lastMessageAt)
           : null,
@@ -1186,6 +1228,9 @@ export class InboxService {
         },
         sentAt: input.direction === 'outbound' ? new Date() : null,
         deliveredAt: input.direction === 'inbound' ? new Date() : null,
+        readAt: null,
+        occurredAt: input.createdAt ?? new Date(),
+        providerSequence: null,
       }),
     );
 

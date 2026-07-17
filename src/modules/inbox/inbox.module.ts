@@ -6,8 +6,10 @@ import { InboxConversationEventEntity } from './entities/inbox-conversation-even
 import { InboxConversationParticipantEntity } from './entities/inbox-conversation-participant.entity';
 import { InboxMessageEntity } from './entities/inbox-message.entity';
 import { InboxSettingsEntity } from './entities/inbox-settings.entity';
-import { WorkspaceUserEntity } from '../settings/entities/workspace-user.entity';
-import { UserProfileEntity } from '../settings/entities/user-profile.entity';
+import {
+  AgencyWorkspaceUserEntity,
+  AgencyUserProfileEntity,
+} from '../agency/entities/agency-settings.entities';
 import { InboxController } from './inbox.controller';
 import { InboxSettingsController } from './inbox-settings.controller';
 import { InboxService } from './inbox.service';
@@ -33,24 +35,43 @@ import { PermissionsModule } from '../permissions';
 import { NotificationsModule } from '../notifications';
 import { FilesModule } from '../../common/files/files.module';
 import { InboxNotificationPublisher } from './services/inbox-notification.publisher';
+import { InboxMediaAssetEntity } from './entities/inbox-media-asset.entity';
+import { InboxMediaDerivativeEntity } from './entities/inbox-media-derivative.entity';
+import { InboxProcessingBatchEntity } from './entities/inbox-processing-batch.entity';
+import { InboxAgentDecisionEntity } from './entities/inbox-agent-decision.entity';
+import { InboxDomainOutboxEntity } from './entities/inbox-domain-outbox.entity';
+import { InboxMediaController } from './inbox-media.controller';
+import { InboxMediaService } from './services/inbox-media.service';
+import { MetaMediaIngestionWorker } from './channels/meta/services/meta-media-ingestion.worker';
+import { ConversationOwnershipService } from './services/conversation-ownership.service';
+import { InboxAgentRuntimeService } from './services/inbox-agent-runtime.service';
+import { InboxAgentRuntimeWorker } from './services/inbox-agent-runtime.worker';
 
 @Module({
   imports: [
     PermissionsModule,
     NotificationsModule,
     FilesModule,
-    TypeOrmModule.forFeature([
-      InboxChannelEntity,
-      InboxConversationEntity,
-      InboxMessageEntity,
-      InboxSettingsEntity,
-      InboxConversationParticipantEntity,
-      InboxConversationEventEntity,
-      WorkspaceUserEntity,
-      UserProfileEntity,
-      InboxWebhookLogEntity,
-      InboxChannelConnectionSessionEntity,
-    ]),
+    TypeOrmModule.forFeature(
+      [
+        InboxChannelEntity,
+        InboxConversationEntity,
+        InboxMessageEntity,
+        InboxSettingsEntity,
+        InboxConversationParticipantEntity,
+        InboxConversationEventEntity,
+        AgencyWorkspaceUserEntity,
+        AgencyUserProfileEntity,
+        InboxWebhookLogEntity,
+        InboxChannelConnectionSessionEntity,
+        InboxMediaAssetEntity,
+        InboxMediaDerivativeEntity,
+        InboxProcessingBatchEntity,
+        InboxAgentDecisionEntity,
+        InboxDomainOutboxEntity,
+      ],
+      'agency',
+    ),
   ],
   controllers: [
     InboxController,
@@ -60,6 +81,7 @@ import { InboxNotificationPublisher } from './services/inbox-notification.publis
     WhatsAppOutboundController,
     WhatsAppEmbeddedSignupController,
     WhatsAppChannelHealthController,
+    InboxMediaController,
   ],
   providers: [
     InboxService,
@@ -75,6 +97,11 @@ import { InboxNotificationPublisher } from './services/inbox-notification.publis
     WhatsAppEmbeddedSignupService,
     MetaGraphService,
     WhatsAppChannelHealthService,
+    InboxMediaService,
+    MetaMediaIngestionWorker,
+    ConversationOwnershipService,
+    InboxAgentRuntimeService,
+    InboxAgentRuntimeWorker,
   ],
   exports: [
     InboxService,

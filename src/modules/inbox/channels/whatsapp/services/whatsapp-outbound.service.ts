@@ -1,16 +1,19 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { IsNull, Repository } from 'typeorm';
+import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
+import { DataSource, IsNull, Repository } from 'typeorm';
+import { randomUUID } from 'crypto';
 import { SettingsCryptoService } from '../../../../../common/crypto/settings-crypto.service';
 import type { RequestContext } from '../../../../../common/context/request-context.interface';
 import { InboxChannelEntity } from '../../../entities/inbox-channel.entity';
 import { InboxConversationEntity } from '../../../entities/inbox-conversation.entity';
 import { InboxConversationEventEntity } from '../../../entities/inbox-conversation-event.entity';
 import { InboxMessageEntity } from '../../../entities/inbox-message.entity';
+import { InboxDomainOutboxEntity } from '../../../entities/inbox-domain-outbox.entity';
 
 type SendWhatsAppTextInput = {
   ctx: RequestContext;
@@ -18,6 +21,7 @@ type SendWhatsAppTextInput = {
   conversationId?: string;
   to: string;
   text: string;
+  idempotencyKey?: string;
 };
 
 type MetaSendMessageResponse = {
@@ -42,19 +46,21 @@ type MetaSendMessageResponse = {
 @Injectable()
 export class WhatsAppOutboundService {
   constructor(
-    @InjectRepository(InboxChannelEntity)
+    @InjectDataSource('agency') private readonly dataSource: DataSource,
+    @InjectRepository(InboxChannelEntity, 'agency')
     private readonly channelsRepository: Repository<InboxChannelEntity>,
-    @InjectRepository(InboxConversationEntity)
+    @InjectRepository(InboxConversationEntity, 'agency')
     private readonly conversationsRepository: Repository<InboxConversationEntity>,
-    @InjectRepository(InboxMessageEntity)
+    @InjectRepository(InboxMessageEntity, 'agency')
     private readonly messagesRepository: Repository<InboxMessageEntity>,
-    @InjectRepository(InboxConversationEventEntity)
-    private readonly eventsRepository: Repository<InboxConversationEventEntity>,
     private readonly cryptoService: SettingsCryptoService,
   ) {}
 
   async sendText(input: SendWhatsAppTextInput) {
-    const channel = await this.findChannelForContext(input.ctx, input.channelId);
+    const channel = await this.findChannelForContext(
+      input.ctx,
+      input.channelId,
+    );
 
     if (!channel) {
       throw new NotFoundException('Active WhatsApp Meta channel not found.');
@@ -76,17 +82,31 @@ export class WhatsAppOutboundService {
 
     const conversation = input.conversationId
       ? await this.findConversation(input.ctx, channel, input.conversationId)
-      : await this.findOrCreateConversation(channel, input.to);
+      : await this.findOrCreateConversation(
+          channel,
+          input.to,
+          input.ctx.userId ?? null,
+        );
 
-    const response = await this.sendToMeta({
-      phoneNumberId: channel.externalPhoneNumberId,
-      accessToken,
-      to: input.to,
-      text: input.text,
+    if (conversation.ownershipState !== 'human_active') {
+      throw new ConflictException(
+        'A user must assume the conversation before replying through its channel.',
+      );
+    }
+
+    const idempotencyKey = input.idempotencyKey?.trim() || randomUUID();
+    const existing = await this.messagesRepository.findOne({
+      where: {
+        tenantId: channel.tenantId,
+        workspaceId: channel.workspaceId,
+        idempotencyKey,
+      },
     });
+    if (existing) {
+      return { conversation, message: existing, meta: {} };
+    }
 
-    const externalMessageId = response.messages?.[0]?.id ?? null;
-
+    const now = new Date();
     const message = await this.messagesRepository.save(
       this.messagesRepository.create({
         tenantId: channel.tenantId,
@@ -94,49 +114,86 @@ export class WhatsAppOutboundService {
         conversationId: conversation.id,
         channelId: channel.id,
         contactId: conversation.contactId ?? null,
-        direction: 'outbound' as InboxMessageEntity['direction'],
-        senderType: 'system' as InboxMessageEntity['senderType'],
-        senderUserId: null,
+        direction: 'outbound',
+        senderType: 'user',
+        senderUserId: input.ctx.userId ?? null,
         senderAgentId: null,
-        externalMessageId,
-        messageType: 'text' as InboxMessageEntity['messageType'],
+        externalMessageId: null,
+        idempotencyKey,
+        messageType: 'text',
         content: input.text,
-        status: 'sent' as InboxMessageEntity['status'],
+        status: 'pending',
         attachments: [],
-        metadata: {
-          provider: 'meta',
-          channelType: 'whatsapp',
-          to: input.to,
-          metaResponse: response,
-        },
-        sentAt: new Date(),
+        metadata: { provider: 'meta', channelType: 'whatsapp' },
+        sentAt: null,
         deliveredAt: null,
         readAt: null,
+        occurredAt: now,
+        providerSequence: null,
       }),
     );
 
-    conversation.lastMessagePreview = input.text.trim().slice(0, 260);
-    conversation.lastMessageAt = message.sentAt ?? new Date();
-    await this.conversationsRepository.save(conversation);
+    let response: MetaSendMessageResponse;
+    try {
+      response = await this.sendToMeta({
+        phoneNumberId: channel.externalPhoneNumberId,
+        accessToken,
+        to: input.to,
+        text: input.text,
+      });
+    } catch (error) {
+      message.status = 'failed';
+      message.metadata = {
+        ...message.metadata,
+        errorCode: 'provider_send_failed',
+      };
+      await this.messagesRepository.save(message);
+      throw error;
+    }
 
-    await this.eventsRepository.save(
-      this.eventsRepository.create({
+    const externalMessageId = response.messages?.[0]?.id ?? null;
+    await this.dataSource.transaction(async (manager) => {
+      message.externalMessageId = externalMessageId;
+      message.status = 'sent';
+      message.sentAt = new Date();
+      await manager.getRepository(InboxMessageEntity).save(message);
+
+      conversation.lastMessagePreview = input.text.trim().slice(0, 260);
+      conversation.lastMessageAt = message.sentAt;
+      await manager.getRepository(InboxConversationEntity).save(conversation);
+
+      await manager.getRepository(InboxConversationEventEntity).save({
         tenantId: channel.tenantId,
         workspaceId: channel.workspaceId,
         conversationId: conversation.id,
         eventType: 'message_sent',
-        actorType: 'system',
-        actorUserId: null,
+        actorType: input.ctx.userId ? 'user' : 'system',
+        actorUserId: input.ctx.userId ?? null,
         payload: {
           messageId: message.id,
           externalMessageId,
           channelId: channel.id,
           channelType: 'whatsapp',
           provider: 'meta',
-          to: input.to,
         },
-      }),
-    );
+      });
+      await manager.getRepository(InboxDomainOutboxEntity).save({
+        tenantId: channel.tenantId,
+        workspaceId: channel.workspaceId,
+        aggregateType: 'inbox_conversation',
+        aggregateId: conversation.id,
+        eventName: 'leadflow.inbox.conversation.message.sent',
+        eventVersion: 1,
+        idempotencyKey: `message.sent:${message.id}`,
+        payload: {
+          conversationId: conversation.id,
+          contactId: conversation.contactId,
+          messageId: message.id,
+          messageType: 'text',
+        },
+        publishedAt: null,
+      });
+    });
 
     return {
       conversation,
@@ -217,6 +274,7 @@ export class WhatsAppOutboundService {
   private async findOrCreateConversation(
     channel: InboxChannelEntity,
     externalThreadId: string,
+    userId: string | null,
   ) {
     const existing = await this.conversationsRepository.findOne({
       where: {
@@ -235,11 +293,12 @@ export class WhatsAppOutboundService {
         workspaceId: channel.workspaceId,
         channelId: channel.id,
         contactId: null,
+        opportunityId: null,
         externalThreadId,
         title: externalThreadId,
         status: 'new',
         priority: 'normal',
-        assignedUserId: null,
+        assignedUserId: userId,
         assignedAgentId: null,
         source: 'whatsapp',
         businessMode: 'general',
@@ -247,6 +306,12 @@ export class WhatsAppOutboundService {
         lastMessageAt: null,
         unreadCount: 0,
         aiEnabled: false,
+        ownershipState: 'human_active',
+        ownershipVersion: 1,
+        ownershipReason: 'human_outbound_started',
+        ownershipChangedAt: new Date(),
+        qualificationStatus: 'pending',
+        qualificationReason: null,
         closedAt: null,
         archivedAt: null,
         metadata: {
@@ -287,11 +352,9 @@ export class WhatsAppOutboundService {
     const data = (await response.json()) as MetaSendMessageResponse;
 
     if (!response.ok || data.error) {
-      throw new BadRequestException({
-        message: 'Failed to send WhatsApp message.',
-        status: response.status,
-        error: data.error ?? data,
-      });
+      throw new BadRequestException(
+        'Não foi possível enviar a mensagem pelo canal WhatsApp.',
+      );
     }
 
     return data;
