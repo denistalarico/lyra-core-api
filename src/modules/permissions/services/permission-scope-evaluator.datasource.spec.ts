@@ -17,6 +17,8 @@ import { InboxMediaAssetEntity } from '../../inbox/entities/inbox-media-asset.en
 import { InboxController } from '../../inbox/inbox.controller';
 import { InboxService } from '../../inbox/inbox.service';
 import { InboxAgentRuntimeService } from '../../inbox/services/inbox-agent-runtime.service';
+import { InboxChannelLifecycleService } from '../../inbox/services/inbox-channel-lifecycle.service';
+import { AgentActivationPolicyService } from '../../inbox/services/agent-activation-policy.service';
 import { ConversationOwnershipService } from '../../inbox/services/conversation-ownership.service';
 import { PlatformRoleKey } from '../enums/permission.enums';
 import { PERMISSION_KEY_METADATA } from '../decorators/permissions.decorators';
@@ -179,6 +181,8 @@ describe('Inbox channel permission scope HTTP integration', () => {
         { provide: InboxService, useValue: inboxService },
         { provide: ConversationOwnershipService, useValue: {} },
         { provide: InboxAgentRuntimeService, useValue: {} },
+        { provide: InboxChannelLifecycleService, useValue: {} },
+        { provide: AgentActivationPolicyService, useValue: {} },
         {
           provide: InboundMessageIngestionService,
           useValue: inboundIngestionService,

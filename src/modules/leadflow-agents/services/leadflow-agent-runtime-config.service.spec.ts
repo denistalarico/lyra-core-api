@@ -18,6 +18,10 @@ function buildSettings(): LeadFlowClientSettingsEntity {
     planKey: 'pro',
     developerModeEnabled: false,
     clientPromptConfig: { businessName: 'Clínica X' },
+    companyContextPublished: {
+      schemaVersion: 1,
+      identity: { publicName: 'Clínica X' },
+    },
   } as unknown as LeadFlowClientSettingsEntity;
 }
 
@@ -37,7 +41,9 @@ function buildAgent(): LeadFlowAgentEntity {
     isSystem: true,
     isCustom: false,
     behaviorConfig: { tone: 'acolhedor' },
-    promptConfig: { platformSystemPromptRef: 'lyra-leadflow-platform-system-v1' },
+    promptConfig: {
+      platformSystemPromptRef: 'lyra-leadflow-platform-system-v1',
+    },
     handoffPolicy: { target: 'assigned_owner' },
     crmPolicy: { createLeads: true },
     channelPolicy: { allowedChannels: ['whatsapp'] },
@@ -78,9 +84,12 @@ describe('LeadFlowAgentRuntimeConfigService', () => {
       isCustom: false,
     });
     expect(contract.agentIdentity.agentId).toBe('agent-1');
-    expect(contract.agentIdentity.presetKey).toBe('clinics_esthetics.reception');
+    expect(contract.agentIdentity.presetKey).toBe(
+      'clinics_esthetics.reception',
+    );
     expect(contract.clientPromptConfigSnapshot).toEqual({
-      businessName: 'Clínica X',
+      schemaVersion: 1,
+      identity: { publicName: 'Clínica X' },
     });
     expect(contract.channelBindings).toEqual([
       {
@@ -91,7 +100,10 @@ describe('LeadFlowAgentRuntimeConfigService', () => {
         config: {},
       },
     ]);
-    expect(contract.allowedActions).toEqual(['send_message', 'request_handoff']);
+    expect(contract.allowedActions).toEqual([
+      'send_message',
+      'request_handoff',
+    ]);
     expect(contract.safetyRules).toEqual(['never_diagnose']);
     expect(contract.publishedVersionId).toBe('version-9');
     expect(contract.leadflowSettingsSnapshot.settingsId).toBe('settings-1');
@@ -107,7 +119,11 @@ describe('LeadFlowAgentRuntimeConfigService', () => {
   });
 
   it('builds a context-level envelope wrapping every agent contract', () => {
-    const agentContract = service.buildAgentContract(buildAgent(), buildSettings(), []);
+    const agentContract = service.buildAgentContract(
+      buildAgent(),
+      buildSettings(),
+      [],
+    );
     const envelope = service.buildContextContract(
       'tenant-1',
       'workspace-1',

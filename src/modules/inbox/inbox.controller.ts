@@ -3,6 +3,7 @@ import {
   Controller,
   Delete,
   Get,
+  Headers,
   Param,
   Patch,
   Post,
@@ -26,11 +27,15 @@ import {
 import { CreateInboxChannelDto } from './dto/create-inbox-channel.dto';
 import { CreateInboxConversationDto } from './dto/create-inbox-conversation.dto';
 import { CreateInboxMessageDto } from './dto/create-inbox-message.dto';
-import { PatchInboxChannelDto } from './dto/patch-inbox-channel.dto';
+import {
+  InboxChannelLifecycleDto,
+  PatchInboxChannelDto,
+} from './dto/patch-inbox-channel.dto';
 import { PatchInboxConversationDto } from './dto/patch-inbox-conversation.dto';
 import { InboxService, InboxConversationFilters } from './inbox.service';
 import { ConversationOwnershipService } from './services/conversation-ownership.service';
 import { InboxAgentRuntimeService } from './services/inbox-agent-runtime.service';
+import { InboxChannelLifecycleService } from './services/inbox-channel-lifecycle.service';
 
 type MessageReactionBody = {
   emoji?: string;
@@ -52,6 +57,7 @@ export class InboxController {
     private readonly inboxService: InboxService,
     private readonly ownershipService: ConversationOwnershipService,
     private readonly agentRuntimeService: InboxAgentRuntimeService,
+    private readonly channelLifecycleService: InboxChannelLifecycleService,
   ) {}
 
   @Get('channels')
@@ -96,6 +102,58 @@ export class InboxController {
     @Body() dto: PatchInboxChannelDto,
   ) {
     return this.inboxService.patchChannel(ctx, id, dto);
+  }
+
+  @Post('channels/:id/pause')
+  @RequirePermission('leadflow.channels.channel.update.admin')
+  pauseChannel(
+    @RequestContextData() ctx: RequestContext,
+    @Param('id') id: string,
+    @Headers('idempotency-key') key: string | undefined,
+    @Body() dto: InboxChannelLifecycleDto,
+  ) {
+    return this.channelLifecycleService.execute(
+      ctx,
+      id,
+      'pause',
+      key,
+      dto.reason,
+    );
+  }
+
+  @Post('channels/:id/resume')
+  @RequirePermission('leadflow.channels.channel.update.admin')
+  resumeChannel(
+    @RequestContextData() ctx: RequestContext,
+    @Param('id') id: string,
+    @Headers('idempotency-key') key: string | undefined,
+    @Body() dto: InboxChannelLifecycleDto,
+  ) {
+    return this.channelLifecycleService.execute(
+      ctx,
+      id,
+      'resume',
+      key,
+      dto.reason,
+    );
+  }
+
+  @Post('channels/:id/disconnect')
+  @RequirePermission('leadflow.channels.channel.disconnect.owner_or_explicit')
+  @DangerousAction()
+  disconnectChannel(
+    @RequestContextData() ctx: RequestContext,
+    @Param('id') id: string,
+    @Headers('idempotency-key') key: string | undefined,
+    @Body() dto: InboxChannelLifecycleDto,
+  ) {
+    return this.channelLifecycleService.execute(
+      ctx,
+      id,
+      'disconnect',
+      key,
+      dto.reason,
+    );
   }
 
   @Get('conversations')

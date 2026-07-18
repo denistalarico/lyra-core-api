@@ -21,12 +21,25 @@ export class MetaChannelResolverService {
         provider: 'meta',
         externalPhoneNumberId: phoneNumberId,
         status: 'active',
+        connectionStatus: 'connected',
         deletedAt: IsNull(),
       },
       take: 2,
     });
 
     if (channels.length === 0) {
+      const unavailable = await this.channelsRepository.find({
+        where: {
+          type: 'whatsapp',
+          provider: 'meta',
+          externalPhoneNumberId: phoneNumberId,
+          deletedAt: IsNull(),
+        },
+        take: 2,
+      });
+      if (unavailable.length === 1) {
+        throw new MetaChannelUnavailableError(unavailable[0]);
+      }
       throw new NotFoundException(
         'WhatsApp channel not found for the supplied provider key.',
       );
@@ -39,5 +52,12 @@ export class MetaChannelResolverService {
     }
 
     return channels[0];
+  }
+}
+
+export class MetaChannelUnavailableError extends Error {
+  readonly code = 'meta_channel_unavailable';
+  constructor(public readonly channel: InboxChannelEntity) {
+    super('Meta channel is disconnected or suspended.');
   }
 }

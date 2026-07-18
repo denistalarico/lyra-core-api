@@ -36,6 +36,8 @@ import { LeadFlowAgentType } from '../enums/leadflow-agent-type.enum';
 import { LeadFlowAgentVersionStatus } from '../enums/leadflow-agent-version-status.enum';
 import { LEADFLOW_AGENTS_PERMISSIONS } from '../leadflow-agents.permissions';
 import type {
+  LeadFlowAgentBehaviorConfig,
+  LeadFlowAgentChannelPolicy,
   LeadFlowAgentReadiness,
   LeadFlowJsonObject,
 } from '../types/leadflow-agent.types';
@@ -87,7 +89,9 @@ export class LeadFlowAgentService {
     };
   }
 
-  async listPresets(ctx: RequestContext): Promise<LeadFlowAgentPresetListResponse> {
+  async listPresets(
+    ctx: RequestContext,
+  ): Promise<LeadFlowAgentPresetListResponse> {
     const active = await this.resolveActiveContext(ctx);
     const presets = this.presetService.listPresetsForBusinessMode(
       active.businessModeKey,
@@ -127,7 +131,10 @@ export class LeadFlowAgentService {
       }
 
       const preset = this.presetService.getPreset(dto.presetKey);
-      if (!preset || preset.businessModeKey !== active.businessModeKey) {
+      if (
+        !preset ||
+        String(preset.businessModeKey) !== String(active.businessModeKey)
+      ) {
         throw new BadRequestException(
           'Preset incompatível com o Business Mode ativo.',
         );
@@ -159,7 +166,11 @@ export class LeadFlowAgentService {
       };
       agent.handoffPolicy = {};
       agent.crmPolicy = {};
-      agent.channelPolicy = { allowedChannels: [], defaultChannel: null };
+      agent.channelPolicy = {
+        allowedChannels: [],
+        defaultChannel: null,
+        activationPolicy: this.safeActivationPolicy(),
+      };
       agent.avatarConfig = dto.avatarConfig ?? { preset: 'avatar-custom' };
       agent.metadata = {
         allowedActions: ['send_message', 'request_handoff'],
@@ -212,17 +223,23 @@ export class LeadFlowAgentService {
     if (dto.name !== undefined) agent.name = dto.name;
     if (dto.description !== undefined) agent.description = dto.description;
     if (dto.behaviorConfig !== undefined) {
-      agent.behaviorConfig = dto.behaviorConfig;
+      agent.behaviorConfig = this.validateBehaviorConfig(dto.behaviorConfig);
     }
     if (dto.promptConfig !== undefined) {
       // Non-developer callers cannot introduce raw overrides (guarded above),
       // so the payload is safe to persist as-is here.
       agent.promptConfig = dto.promptConfig;
     }
-    if (dto.handoffPolicy !== undefined) agent.handoffPolicy = dto.handoffPolicy;
+    if (dto.handoffPolicy !== undefined)
+      agent.handoffPolicy = dto.handoffPolicy;
     if (dto.crmPolicy !== undefined) agent.crmPolicy = dto.crmPolicy;
     if (dto.channelPolicy !== undefined) {
-      agent.channelPolicy = dto.channelPolicy;
+      agent.channelPolicy = {
+        ...dto.channelPolicy,
+        activationPolicy: this.validateActivationPolicy(
+          dto.channelPolicy.activationPolicy,
+        ),
+      };
     }
     if (dto.avatarConfig !== undefined) agent.avatarConfig = dto.avatarConfig;
     if (dto.metadata !== undefined) {
@@ -366,12 +383,21 @@ export class LeadFlowAgentService {
     agent.isSystem = preset.isSystem;
     agent.isCustom = false;
     agent.isProtected = preset.isProtected;
-    agent.behaviorConfig = { ...preset.behaviorConfig, ...(dto.behaviorConfig ?? {}) };
+    agent.behaviorConfig = {
+      ...preset.behaviorConfig,
+      ...(dto.behaviorConfig ?? {}),
+    };
     agent.promptConfig = { ...preset.promptConfig };
     agent.handoffPolicy = { ...preset.handoffPolicy };
     agent.crmPolicy = { ...preset.crmPolicy };
-    agent.channelPolicy = { ...preset.channelPolicy };
-    agent.avatarConfig = { ...preset.avatarConfig, ...(dto.avatarConfig ?? {}) };
+    agent.channelPolicy = {
+      ...preset.channelPolicy,
+      activationPolicy: this.safeActivationPolicy(),
+    };
+    agent.avatarConfig = {
+      ...preset.avatarConfig,
+      ...(dto.avatarConfig ?? {}),
+    };
     agent.metadata = {
       allowedActions: [...preset.allowedActions],
       safetyRules: [...preset.safetyRules],
@@ -423,16 +449,20 @@ export class LeadFlowAgentService {
   ): Promise<ActiveContext> {
     const workspaceId = this.requireWorkspaceId(ctx);
     const managed = ctx.managedContext;
-    const isClientMode =
-      managed?.operatingMode === 'client' && Boolean(managed.clientId);
+    const managedClientId =
+      managed?.operatingMode === 'client' &&
+      typeof managed.clientId === 'string' &&
+      managed.clientId
+        ? managed.clientId
+        : null;
 
-    const settings = isClientMode
+    const settings = managedClientId
       ? await this.settingsRepository.findOne({
           where: {
             tenantId: ctx.tenantId,
             workspaceId,
             contextType: LeadFlowSettingsContextType.Client,
-            agencyClientId: managed!.clientId as string,
+            agencyClientId: managedClientId,
           },
         })
       : await this.settingsRepository.findOne({
@@ -475,7 +505,9 @@ export class LeadFlowAgentService {
       }
 
       const provider =
-        typeof rawConfig.provider === 'string' ? rawConfig.provider : channelKey;
+        typeof rawConfig.provider === 'string'
+          ? rawConfig.provider
+          : channelKey;
       const connections = Array.isArray(rawConfig.connections)
         ? rawConfig.connections
         : [];
@@ -590,7 +622,11 @@ export class LeadFlowAgentService {
 
     const score = Math.max(0, 100 - missing.length * 30);
     const level: LeadFlowAgentReadiness['level'] =
-      missing.length === 0 ? 'ready' : missing.length === 1 ? 'partial' : 'not_ready';
+      missing.length === 0
+        ? 'ready'
+        : missing.length === 1
+          ? 'partial'
+          : 'not_ready';
 
     return { score, level, missing, checkedAt: new Date().toISOString() };
   }
@@ -619,7 +655,88 @@ export class LeadFlowAgentService {
     }
   }
 
-  private async can(ctx: RequestContext, permissionKey: string): Promise<boolean> {
+  private safeActivationPolicy(): NonNullable<
+    LeadFlowAgentChannelPolicy['activationPolicy']
+  > {
+    return {
+      version: 1,
+      trigger: 'manual',
+      keywords: [],
+      keywordMode: 'word',
+      adFilters: {},
+      expiresAfterMinutes: 1440,
+      afterHandoff: 'require_explicit_return',
+      automaticEffects: { reply: false, crm: false, followUp: false },
+    };
+  }
+
+  private validateActivationPolicy(
+    value: LeadFlowAgentChannelPolicy['activationPolicy'],
+  ) {
+    if (!value) return this.safeActivationPolicy();
+    if (
+      !['manual', 'every_eligible', 'keywords', 'ad_referral'].includes(
+        value.trigger,
+      )
+    ) {
+      throw new BadRequestException('Activation trigger is invalid.');
+    }
+    const keywords = value.keywords ?? [];
+    if (
+      keywords.length > 50 ||
+      keywords.some(
+        (item) => typeof item !== 'string' || !item.trim() || item.length > 80,
+      )
+    ) {
+      throw new BadRequestException('Activation keywords are invalid.');
+    }
+    if (keywords.some((item) => /[.*+?^${}()|[\]\\]/.test(item))) {
+      throw new BadRequestException(
+        'Regular expressions are not allowed in activation keywords.',
+      );
+    }
+    return {
+      ...this.safeActivationPolicy(),
+      ...value,
+      version: 1 as const,
+      keywords: keywords.map((item) => item.trim()),
+      automaticEffects: {
+        reply: false as const,
+        crm: false as const,
+        followUp: false as const,
+      },
+      afterHandoff: 'require_explicit_return' as const,
+    };
+  }
+
+  private validateBehaviorConfig(value: LeadFlowAgentBehaviorConfig) {
+    const introduction = value.introductionPolicy ?? 'when_asked';
+    if (!['never', 'first_reply', 'when_asked'].includes(introduction)) {
+      throw new BadRequestException('Agent introduction policy is invalid.');
+    }
+    const disclosure =
+      typeof value.aiDisclosure === 'string'
+        ? value.aiDisclosure.trim()
+        : 'Sou um assistente virtual.';
+    if (!disclosure || disclosure.length > 240)
+      throw new BadRequestException('AI disclosure is invalid.');
+    const forbiddenHumanClaim =
+      /\b(sou|como)\s+(uma?\s+)?(pessoa|humano|humana|funcion[aá]ri[oa])\b/i;
+    if (forbiddenHumanClaim.test(disclosure))
+      throw new BadRequestException(
+        'Agent cannot claim to be human or an employee.',
+      );
+    return {
+      ...value,
+      introductionPolicy: introduction,
+      aiDisclosure: disclosure,
+    };
+  }
+
+  private async can(
+    ctx: RequestContext,
+    permissionKey: string,
+  ): Promise<boolean> {
     if (!ctx.userId || !ctx.role) {
       return false;
     }

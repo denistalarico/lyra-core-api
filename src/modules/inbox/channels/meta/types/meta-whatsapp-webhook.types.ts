@@ -53,6 +53,14 @@ export type MetaWhatsAppMessage = {
     payload?: string;
   };
   interactive?: unknown;
+  referral?: {
+    source_id?: string;
+    source_type?: string;
+    source_url?: string;
+    headline?: string;
+    body?: string;
+    ctwa_clid?: string;
+  };
 };
 
 export type MetaWhatsAppMedia = {
@@ -68,7 +76,7 @@ export type MetaWhatsAppDocument = MetaWhatsAppMedia & {
 
 export type MetaWhatsAppStatus = {
   id?: string;
-  status?: 'sent' | 'delivered' | 'read' | 'failed' | string;
+  status?: string;
   timestamp?: string;
   recipient_id?: string;
   conversation?: Record<string, unknown>;

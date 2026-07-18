@@ -44,7 +44,11 @@ run('Inbox Runtime PostgreSQL concurrency', () => {
   });
   beforeEach(async () => {
     await AgencyDataSource.query(
-      `TRUNCATE inbox_provider_usage_ledger, inbox_domain_outbox, inbox_agent_decisions, inbox_processing_batches, inbox_media_derivatives, inbox_media_assets, inbox_messages, inbox_conversation_events, inbox_conversations RESTART IDENTITY CASCADE`,
+      `TRUNCATE inbox_provider_usage_ledger, inbox_domain_outbox, inbox_agent_decisions,
+       inbox_processing_batches, inbox_media_derivatives, inbox_media_assets,
+       inbox_messages, inbox_conversation_events, inbox_conversations,
+       leadflow_agent_channel_bindings, leadflow_agent_versions, leadflow_agents,
+       inbox_channels RESTART IDENTITY CASCADE`,
     );
   });
 
@@ -123,6 +127,7 @@ run('Inbox Runtime PostgreSQL concurrency', () => {
       workspaceId,
       'ai_active',
     );
+    const channelId = await channelIdForConversation(conversationId);
     const assetId = randomUUID();
     await AgencyDataSource.query(
       `INSERT INTO inbox_media_assets (id,tenant_id,workspace_id,conversation_id,message_id,channel_id,kind,provider,external_media_id,mime_type,byte_size,checksum,object_key,status) VALUES ($1,$2,$3,$4,$5,$6,'audio','meta',$7,'audio/ogg',4,'checksum','private/key','available')`,
@@ -132,7 +137,7 @@ run('Inbox Runtime PostgreSQL concurrency', () => {
         workspaceId,
         conversationId,
         randomUUID(),
-        randomUUID(),
+        channelId,
         randomUUID(),
       ],
     );
@@ -194,6 +199,7 @@ run('Inbox Runtime PostgreSQL concurrency', () => {
       workspaceId,
       'ai_active',
     );
+    const channelId = await channelIdForConversation(conversationId);
     const messageId = randomUUID();
     const audioAssetId = randomUUID();
     const imageAssetId = randomUUID();
@@ -219,7 +225,7 @@ run('Inbox Runtime PostgreSQL concurrency', () => {
         workspaceId,
         conversationId,
         messageId,
-        randomUUID(),
+        channelId,
         randomUUID(),
         randomUUID(),
       ],
@@ -236,7 +242,7 @@ run('Inbox Runtime PostgreSQL concurrency', () => {
       `INSERT INTO inbox_processing_batches
         (id,tenant_id,workspace_id,conversation_id,channel_id,status,due_at)
        VALUES ($1,$2,$3,$4,$5,'pending',now()-interval '1 second')`,
-      [batchId, tenantId, workspaceId, conversationId, randomUUID()],
+      [batchId, tenantId, workspaceId, conversationId, channelId],
     );
     const decide = jest.fn().mockResolvedValue({
       decision: {
@@ -307,6 +313,7 @@ run('Inbox Runtime PostgreSQL concurrency', () => {
       workspaceId,
       'ai_active',
     );
+    const channelId = await channelIdForConversation(conversationId);
     const batchId = randomUUID();
     await AgencyDataSource.query(
       `INSERT INTO inbox_messages (tenant_id,workspace_id,conversation_id,direction,sender_type,content,status,occurred_at) VALUES ($1,$2,$3,'inbound','contact','Quero saber mais','received',now())`,
@@ -316,7 +323,7 @@ run('Inbox Runtime PostgreSQL concurrency', () => {
       `INSERT INTO inbox_processing_batches
         (id,tenant_id,workspace_id,conversation_id,channel_id,status,due_at,claimed_at,claimed_by)
        VALUES ($1,$2,$3,$4,$5,'processing',now()-interval '3 minutes',now()-interval '3 minutes','dead-worker')`,
-      [batchId, tenantId, workspaceId, conversationId, randomUUID()],
+      [batchId, tenantId, workspaceId, conversationId, channelId],
     );
     const provider = {
       supportsMultimodal: () => true,
@@ -361,6 +368,7 @@ run('Inbox Runtime PostgreSQL concurrency', () => {
       workspaceId,
       'ai_active',
     );
+    const channelId = await channelIdForConversation(conversationId);
     const batchId = randomUUID();
     await AgencyDataSource.query(
       `INSERT INTO inbox_messages (tenant_id,workspace_id,conversation_id,direction,sender_type,content,status,occurred_at) VALUES ($1,$2,$3,'inbound','contact','fixture','received',now())`,
@@ -368,7 +376,7 @@ run('Inbox Runtime PostgreSQL concurrency', () => {
     );
     await AgencyDataSource.query(
       `INSERT INTO inbox_processing_batches (id,tenant_id,workspace_id,conversation_id,channel_id,status,due_at) VALUES ($1,$2,$3,$4,$5,'pending',now()-interval '1 second')`,
-      [batchId, tenantId, workspaceId, conversationId, randomUUID()],
+      [batchId, tenantId, workspaceId, conversationId, channelId],
     );
     const provider = {
       supportsMultimodal: () => true,
@@ -652,9 +660,71 @@ async function insertConversation(
   ownershipState: string,
 ): Promise<string> {
   const id = randomUUID();
+  const channelId = randomUUID();
+  const agentId = randomUUID();
+  const versionId = randomUUID();
   await AgencyDataSource.query(
-    `INSERT INTO inbox_conversations (id,tenant_id,workspace_id,status,source,business_mode,ai_enabled,ownership_state,ownership_version,ownership_reason,qualification_status) VALUES ($1,$2,$3,'open','whatsapp','general',$4,$5,1,'fixture','qualified')`,
-    [id, tenantId, workspaceId, ownershipState === 'ai_active', ownershipState],
+    `INSERT INTO leadflow_agents
+      (id,tenant_id,workspace_id,business_mode_key,type,name,status,is_system,
+       is_custom,is_protected,behavior_config,prompt_config,handoff_policy,
+       crm_policy,channel_policy,avatar_config,readiness,metadata)
+     VALUES ($1,$2,$3,'general','custom','Fixture Agent','active',false,true,
+             false,'{}','{}','{}','{}','{}','{}','{}','{}')`,
+    [agentId, tenantId, workspaceId],
+  );
+  await AgencyDataSource.query(
+    `INSERT INTO leadflow_agent_versions
+      (id,tenant_id,agent_id,version,status,snapshot)
+     VALUES ($1,$2,$3,1,'published',$4::jsonb)`,
+    [
+      versionId,
+      tenantId,
+      agentId,
+      JSON.stringify({
+        agentIdentity: { name: 'Fixture Agent' },
+        promptPolicy: {},
+      }),
+    ],
+  );
+  await AgencyDataSource.query(
+    `UPDATE leadflow_agents SET published_version_id=$1 WHERE id=$2`,
+    [versionId, agentId],
+  );
+  await AgencyDataSource.query(
+    `INSERT INTO inbox_channels
+      (id,tenant_id,workspace_id,name,type,status,connection_status,provider,
+       default_agent_id,ai_enabled,settings,metadata)
+     VALUES ($1,$2,$3,'Fixture Channel','whatsapp','active','connected','meta',
+             $4,true,'{}','{}')`,
+    [channelId, tenantId, workspaceId, agentId],
+  );
+  await AgencyDataSource.query(
+    `INSERT INTO leadflow_agent_channel_bindings
+      (tenant_id,workspace_id,agent_id,channel_key,provider,external_ref,status,config)
+     VALUES ($1,$2,$3,'whatsapp','meta',$4,'active','{}')`,
+    [tenantId, workspaceId, agentId, channelId],
+  );
+  await AgencyDataSource.query(
+    `INSERT INTO inbox_conversations
+      (id,tenant_id,workspace_id,channel_id,status,source,business_mode,ai_enabled,
+       ownership_state,ownership_version,ownership_reason,qualification_status)
+     VALUES ($1,$2,$3,$4,'open','whatsapp','general',$5,$6,1,'fixture','qualified')`,
+    [
+      id,
+      tenantId,
+      workspaceId,
+      channelId,
+      ownershipState === 'ai_active',
+      ownershipState,
+    ],
   );
   return id;
+}
+
+async function channelIdForConversation(conversationId: string) {
+  const [row] = await AgencyDataSource.query<Array<{ channel_id: string }>>(
+    `SELECT channel_id FROM inbox_conversations WHERE id=$1`,
+    [conversationId],
+  );
+  return row.channel_id;
 }

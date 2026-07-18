@@ -52,14 +52,30 @@ export class WhatsAppEmbeddedSignupController {
 
   @Get(':sessionId/status')
   @RequirePermission('leadflow.channels.channel.create.admin')
-  async status(@Param('sessionId') sessionId: string) {
-    return this.whatsappEmbeddedSignupService.getStatus(sessionId);
+  async status(
+    @RequestContextData() ctx: RequestContext,
+    @Param('sessionId') sessionId: string,
+  ) {
+    if (!ctx.workspaceId)
+      throw new BadRequestException('Workspace context is required.');
+    return this.whatsappEmbeddedSignupService.getStatus(
+      sessionId,
+      ctx.tenantId,
+      ctx.workspaceId,
+    );
   }
 
   @Post('complete')
   @RequirePermission('leadflow.channels.channel.create.admin')
-  async complete(@Body() dto: CompleteWhatsAppEmbeddedSignupDto) {
+  async complete(
+    @RequestContextData() ctx: RequestContext,
+    @Body() dto: CompleteWhatsAppEmbeddedSignupDto,
+  ) {
+    if (!ctx.workspaceId)
+      throw new BadRequestException('Workspace context is required.');
     return this.whatsappEmbeddedSignupService.complete({
+      tenantId: ctx.tenantId,
+      workspaceId: ctx.workspaceId,
       sessionId: dto.sessionId,
       state: dto.state,
       code: dto.code,

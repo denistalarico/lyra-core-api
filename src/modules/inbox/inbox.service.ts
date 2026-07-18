@@ -321,57 +321,25 @@ export class InboxService {
   ) {
     const channel = await this.findChannelForContext(ctx, id);
 
-    Object.assign(channel, {
-      name: dto.name?.trim() ?? channel.name,
-      type: dto.type ?? channel.type,
-      status: dto.status ?? channel.status,
-      provider:
-        dto.provider !== undefined
-          ? dto.provider?.trim() || null
-          : channel.provider,
-      externalId:
-        dto.externalId !== undefined
-          ? dto.externalId?.trim() || null
-          : channel.externalId,
-      externalAccountId:
-        dto.externalAccountId !== undefined
-          ? dto.externalAccountId?.trim() || null
-          : channel.externalAccountId,
-      externalPhoneNumberId:
-        dto.externalPhoneNumberId !== undefined
-          ? dto.externalPhoneNumberId?.trim() || null
-          : channel.externalPhoneNumberId,
-      externalPageId:
-        dto.externalPageId !== undefined
-          ? dto.externalPageId?.trim() || null
-          : channel.externalPageId,
-      accessTokenEncrypted:
-        dto.accessToken !== undefined
-          ? this.cryptoService.encrypt(dto.accessToken)
-          : channel.accessTokenEncrypted,
-      verifyToken:
-        dto.verifyToken !== undefined
-          ? dto.verifyToken?.trim() || null
-          : channel.verifyToken,
-      webhookSecret:
-        dto.webhookSecret !== undefined
-          ? dto.webhookSecret?.trim() || null
-          : channel.webhookSecret,
-      defaultAssignedUserId:
-        dto.defaultAssignedUserId !== undefined
-          ? dto.defaultAssignedUserId
-          : channel.defaultAssignedUserId,
-      defaultAgentId:
-        dto.defaultAgentId !== undefined
-          ? dto.defaultAgentId
-          : channel.defaultAgentId,
-      aiEnabled: dto.aiEnabled ?? channel.aiEnabled,
-      settings: dto.settings ?? channel.settings,
-      metadata:
-        dto.metadata !== undefined
-          ? this.channelMetadataForContext(ctx, dto.metadata)
-          : channel.metadata,
-    });
+    if (dto.name !== undefined) channel.name = dto.name.trim();
+    if (dto.aiEnabled !== undefined) {
+      if (
+        dto.aiEnabled &&
+        (channel.status !== 'active' ||
+          channel.connectionStatus !== 'connected')
+      ) {
+        throw new BadRequestException(
+          'AI cannot be enabled until the channel is connected and active.',
+        );
+      }
+      channel.aiEnabled = dto.aiEnabled;
+    }
+    if (dto.debounceSeconds !== undefined) {
+      channel.settings = {
+        ...(channel.settings ?? {}),
+        debounceSeconds: dto.debounceSeconds,
+      };
+    }
 
     const saved = await this.channelsRepository.save(channel);
 

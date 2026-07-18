@@ -60,6 +60,11 @@ import { AudioTranscriptionWorker } from './runtime/audio-transcription.worker';
 import { InboxRealtimeEventBusService } from './realtime/inbox-realtime-event-bus.service';
 import { InboxOutboxRelayService } from './services/inbox-outbox-relay.service';
 import { InboxGateway } from './realtime/inbox.gateway';
+import { InboxChannelLifecycleRequestEntity } from './entities/inbox-channel-lifecycle-request.entity';
+import { InboxChannelLifecycleService } from './services/inbox-channel-lifecycle.service';
+import { LeadFlowAgentChannelBindingEntity } from '../leadflow-agents/entities/leadflow-agent-channel-binding.entity';
+import { LeadFlowAgentEntity } from '../leadflow-agents/entities/leadflow-agent.entity';
+import { AgentActivationPolicyService } from './services/agent-activation-policy.service';
 
 @Module({
   imports: [
@@ -85,6 +90,9 @@ import { InboxGateway } from './realtime/inbox.gateway';
         InboxProcessingBatchEntity,
         InboxAgentDecisionEntity,
         InboxDomainOutboxEntity,
+        InboxChannelLifecycleRequestEntity,
+        LeadFlowAgentChannelBindingEntity,
+        LeadFlowAgentEntity,
       ],
       'agency',
     ),
@@ -128,6 +136,8 @@ import { InboxGateway } from './realtime/inbox.gateway';
     InboxRealtimeEventBusService,
     InboxOutboxRelayService,
     InboxGateway,
+    InboxChannelLifecycleService,
+    AgentActivationPolicyService,
   ],
   exports: [
     InboxService,

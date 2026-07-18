@@ -25,6 +25,12 @@ export type LeadFlowClientSettingsResponse = {
   brandingConfig: LeadFlowJsonObject;
   agentConfig: LeadFlowJsonObject;
   clientPromptConfig: LeadFlowJsonObject;
+  companyContextSchemaVersion: number;
+  companyContextDraft: LeadFlowJsonObject;
+  companyContextPublished: LeadFlowJsonObject;
+  companyContextPublishedVersion: number;
+  companyContextPublishedHash: string | null;
+  companyContextPublishedAt: Date | null;
   inboxConfig: LeadFlowJsonObject;
   inboxOverrides: LeadFlowJsonObject;
   handoffOverrides: LeadFlowJsonObject;
@@ -59,6 +65,12 @@ export function mapLeadFlowClientSettingsResponse(
     brandingConfig: entity.brandingConfig,
     agentConfig: entity.agentConfig,
     clientPromptConfig: entity.clientPromptConfig,
+    companyContextSchemaVersion: entity.companyContextSchemaVersion,
+    companyContextDraft: entity.companyContextDraft,
+    companyContextPublished: entity.companyContextPublished,
+    companyContextPublishedVersion: entity.companyContextPublishedVersion,
+    companyContextPublishedHash: entity.companyContextPublishedHash,
+    companyContextPublishedAt: entity.companyContextPublishedAt,
     inboxConfig: entity.inboxConfig,
     inboxOverrides: entity.inboxOverrides,
     handoffOverrides: entity.handoffOverrides,

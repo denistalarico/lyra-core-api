@@ -4,8 +4,9 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Brackets, In, IsNull, Repository } from 'typeorm';
+import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
+import { Brackets, DataSource, In, IsNull, Repository } from 'typeorm';
+import { randomUUID } from 'crypto';
 import type { RequestContext } from '../../../common/context/request-context.interface';
 import { AgencyClient } from '../../clients/entities';
 import {
@@ -34,6 +35,8 @@ import {
   LeadFlowJsonObject,
 } from '../types/leadflow-settings.types';
 import { LeadFlowBusinessModeTemplateService } from './leadflow-business-mode-template.service';
+import { CompanyContextService } from './company-context.service';
+import { InboxDomainOutboxEntity } from '../../inbox/entities/inbox-domain-outbox.entity';
 
 const AGENCY_CONNECTION = 'agency';
 const DEFAULT_LIMIT = 50;
@@ -42,11 +45,14 @@ const MAX_LIMIT = 200;
 @Injectable()
 export class LeadFlowClientSettingsService {
   constructor(
+    @InjectDataSource(AGENCY_CONNECTION)
+    private readonly dataSource: DataSource,
     @InjectRepository(AgencyClient, AGENCY_CONNECTION)
     private readonly agencyClientsRepository: Repository<AgencyClient>,
     @InjectRepository(LeadFlowClientSettingsEntity, AGENCY_CONNECTION)
     private readonly settingsRepository: Repository<LeadFlowClientSettingsEntity>,
     private readonly businessModeTemplateService: LeadFlowBusinessModeTemplateService,
+    private readonly companyContextService: CompanyContextService,
   ) {}
 
   async listClients(
@@ -183,6 +189,15 @@ export class LeadFlowClientSettingsService {
       brandingConfig: dto.brandingConfig ?? {},
       agentConfig: dto.agentConfig ?? {},
       clientPromptConfig: dto.clientPromptConfig ?? {},
+      companyContextSchemaVersion: 1,
+      companyContextDraft: dto.companyContextDraft
+        ? this.companyContextService.normalize(dto.companyContextDraft)
+        : this.companyContextService.fromLegacy(dto.clientPromptConfig ?? {}),
+      companyContextPublished: {},
+      companyContextPublishedVersion: 0,
+      companyContextPublishedHash: null,
+      companyContextPublishedAt: null,
+      companyContextPublishedBy: null,
       inboxConfig: dto.inboxConfig ?? {},
       inboxOverrides: dto.inboxOverrides ?? {},
       handoffOverrides: dto.handoffOverrides ?? {},
@@ -271,6 +286,15 @@ export class LeadFlowClientSettingsService {
       brandingConfig: dto.brandingConfig ?? {},
       agentConfig: dto.agentConfig ?? {},
       clientPromptConfig: dto.clientPromptConfig ?? {},
+      companyContextSchemaVersion: 1,
+      companyContextDraft: dto.companyContextDraft
+        ? this.companyContextService.normalize(dto.companyContextDraft)
+        : this.companyContextService.fromLegacy(dto.clientPromptConfig ?? {}),
+      companyContextPublished: {},
+      companyContextPublishedVersion: 0,
+      companyContextPublishedHash: null,
+      companyContextPublishedAt: null,
+      companyContextPublishedBy: null,
       inboxConfig: dto.inboxConfig ?? {},
       inboxOverrides: dto.inboxOverrides ?? {},
       handoffOverrides: dto.handoffOverrides ?? {},
@@ -303,6 +327,68 @@ export class LeadFlowClientSettingsService {
     }
 
     return this.applySettingsUpdate(ctx, settings, dto);
+  }
+
+  async publishCompanyContext(ctx: RequestContext, agencyClientId?: string) {
+    const settings = agencyClientId
+      ? await this.findSettings(ctx, agencyClientId)
+      : await this.findAgencySettings(ctx);
+    if (!settings) throw new NotFoundException('LeadFlow settings not found.');
+    return this.dataSource.transaction(async (manager) => {
+      const locked = await manager
+        .getRepository(LeadFlowClientSettingsEntity)
+        .findOne({
+          where: {
+            id: settings.id,
+            tenantId: settings.tenantId,
+            workspaceId: settings.workspaceId,
+          },
+          lock: { mode: 'pessimistic_write' },
+        });
+      if (!locked) throw new NotFoundException('LeadFlow settings not found.');
+      const published = this.companyContextService.normalize(
+        locked.companyContextDraft ?? {},
+      );
+      locked.companyContextPublished = published;
+      locked.companyContextPublishedVersion =
+        (locked.companyContextPublishedVersion || 0) + 1;
+      locked.companyContextPublishedHash =
+        this.companyContextService.hash(published);
+      locked.companyContextPublishedAt = new Date();
+      locked.companyContextPublishedBy = ctx.userId ?? null;
+      locked.updatedById = ctx.userId ?? null;
+      await manager.getRepository(LeadFlowClientSettingsEntity).save(locked);
+      await manager.getRepository(InboxDomainOutboxEntity).save(
+        manager.getRepository(InboxDomainOutboxEntity).create({
+          tenantId: locked.tenantId,
+          workspaceId: locked.workspaceId,
+          aggregateType: 'leadflow_company_context',
+          aggregateId: locked.id,
+          eventName: 'leadflow.context.published',
+          eventVersion: 1,
+          idempotencyKey: `company-context:${locked.id}:v${locked.companyContextPublishedVersion}`,
+          payload: {
+            settingsId: locked.id,
+            version: locked.companyContextPublishedVersion,
+            hash: locked.companyContextPublishedHash,
+          },
+          status: 'pending',
+          attempts: 0,
+          availableAt: new Date(),
+        }),
+      );
+      return mapLeadFlowClientSettingsResponse(locked);
+    });
+  }
+
+  async previewCompanyContext(ctx: RequestContext, agencyClientId?: string) {
+    const settings = agencyClientId
+      ? await this.findSettings(ctx, agencyClientId)
+      : await this.findAgencySettings(ctx);
+    if (!settings) throw new NotFoundException('LeadFlow settings not found.');
+    return this.companyContextService.preview(
+      settings.companyContextDraft ?? {},
+    );
   }
 
   async validateAgencySettings(
@@ -552,6 +638,9 @@ export class LeadFlowClientSettingsService {
     settings: LeadFlowClientSettingsEntity,
     dto: UpdateLeadFlowClientSettingsDto,
   ): Promise<LeadFlowClientSettingsResponse> {
+    const contextDraftChanged =
+      dto.clientPromptConfig !== undefined ||
+      dto.companyContextDraft !== undefined;
     let template: LeadFlowBusinessModeTemplateEntity | null = null;
     if (dto.businessModeKey !== undefined) {
       template = await this.resolveBusinessModeTemplate(
@@ -589,6 +678,17 @@ export class LeadFlowClientSettingsService {
     if (dto.agentConfig !== undefined) settings.agentConfig = dto.agentConfig;
     if (dto.clientPromptConfig !== undefined) {
       settings.clientPromptConfig = dto.clientPromptConfig;
+      if (dto.companyContextDraft === undefined) {
+        settings.companyContextDraft = this.companyContextService.fromLegacy(
+          dto.clientPromptConfig,
+        );
+      }
+    }
+    if (dto.companyContextDraft !== undefined) {
+      settings.companyContextDraft = this.companyContextService.normalize(
+        dto.companyContextDraft,
+      );
+      settings.companyContextSchemaVersion = 1;
     }
     if (dto.inboxConfig !== undefined) settings.inboxConfig = dto.inboxConfig;
     if (dto.inboxOverrides !== undefined)
@@ -604,6 +704,36 @@ export class LeadFlowClientSettingsService {
     if (dto.metadata !== undefined) settings.metadata = dto.metadata;
 
     settings.updatedById = ctx.userId ?? null;
+
+    if (contextDraftChanged) {
+      return this.dataSource.transaction(async (manager) => {
+        const saved = await manager
+          .getRepository(LeadFlowClientSettingsEntity)
+          .save(settings);
+        const hash = this.companyContextService.hash(saved.companyContextDraft);
+        const outbox = manager.getRepository(InboxDomainOutboxEntity);
+        await outbox.save(
+          outbox.create({
+            tenantId: saved.tenantId,
+            workspaceId: saved.workspaceId,
+            aggregateType: 'leadflow_company_context',
+            aggregateId: saved.id,
+            eventName: 'leadflow.context.draft_updated',
+            eventVersion: 1,
+            idempotencyKey: `company-context-draft:${saved.id}:${randomUUID()}`,
+            payload: {
+              settingsId: saved.id,
+              schemaVersion: saved.companyContextSchemaVersion,
+              draftHash: hash,
+            },
+            status: 'pending',
+            attempts: 0,
+            availableAt: new Date(),
+          }),
+        );
+        return mapLeadFlowClientSettingsResponse(saved);
+      });
+    }
 
     return mapLeadFlowClientSettingsResponse(
       await this.settingsRepository.save(settings),
@@ -836,26 +966,27 @@ export class LeadFlowClientSettingsService {
       return [];
     }
 
-    return fields
-      .filter((field) => this.isRecord(field) && field.required === true)
-      .flatMap((field) => {
-        const key = field.key;
-        if (typeof key !== 'string') {
-          return [];
-        }
-
-        const value = clientPromptConfig[key];
-        if (value === undefined || value === null || value === '') {
-          return [
-            {
-              field: `${fieldPrefix}.${key}`,
-              message: 'Required client prompt field is missing.',
-            },
-          ];
-        }
-
+    return fields.flatMap((field) => {
+      if (!this.isRecord(field) || field.required !== true) {
         return [];
-      });
+      }
+      const key = field.key;
+      if (typeof key !== 'string') {
+        return [];
+      }
+
+      const value = clientPromptConfig[key];
+      if (value === undefined || value === null || value === '') {
+        return [
+          {
+            field: `${fieldPrefix}.${key}`,
+            message: 'Required client prompt field is missing.',
+          },
+        ];
+      }
+
+      return [];
+    });
   }
 
   private parseLimit(raw?: string): number {

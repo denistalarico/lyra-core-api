@@ -49,6 +49,9 @@ export class CreateLeadFlowClientSettingsDto {
   @IsOptional()
   @IsObject()
   clientPromptConfig?: LeadFlowJsonObject;
+  @IsOptional()
+  @IsObject()
+  companyContextDraft?: LeadFlowJsonObject;
 
   @IsOptional()
   @IsObject()

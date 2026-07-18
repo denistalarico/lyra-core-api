@@ -1,4 +1,13 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 import { RequestContextData } from '../../common/context/request-context.decorator';
 import type { RequestContext } from '../../common/context/request-context.interface';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -83,6 +92,30 @@ export class LeadFlowClientSettingsController {
       ctx,
       agencyClientId,
       dto,
+    );
+  }
+
+  @Post(':agencyClientId/settings/company-context/publish')
+  @RequirePermission('leadflow.settings.general.update.admin')
+  publishCompanyContext(
+    @RequestContextData() ctx: RequestContext,
+    @Param('agencyClientId') agencyClientId: string,
+  ) {
+    return this.leadFlowClientSettingsService.publishCompanyContext(
+      ctx,
+      agencyClientId,
+    );
+  }
+
+  @Get(':agencyClientId/settings/company-context/preview')
+  @RequirePermission('leadflow.settings.general.view.admin')
+  previewCompanyContext(
+    @RequestContextData() ctx: RequestContext,
+    @Param('agencyClientId') agencyClientId: string,
+  ) {
+    return this.leadFlowClientSettingsService.previewCompanyContext(
+      ctx,
+      agencyClientId,
     );
   }
 }

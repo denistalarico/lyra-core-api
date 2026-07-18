@@ -18,6 +18,13 @@ export type LeadFlowJsonObject = Record<string, LeadFlowJsonValue>;
 export interface LeadFlowAgentBehaviorConfig {
   tone?: string;
   language?: string;
+  allowedLanguages?: string[];
+  roleTitle?: string;
+  formality?: 'informal' | 'balanced' | 'formal';
+  introductionPolicy?: 'never' | 'first_reply' | 'when_asked';
+  aiDisclosure?: string;
+  preferredClosing?: string;
+  behaviorLimits?: string[];
   proactivity?: 'low' | 'balanced' | 'high';
   responseStyle?: string;
   guardrails?: string[];
@@ -32,7 +39,7 @@ export interface LeadFlowAgentBehaviorConfig {
 export interface LeadFlowAgentPromptConfig {
   platformSystemPromptRef?: string;
   businessModePromptRef?: string;
-  clientPromptConfigRef?: 'settings' | string;
+  clientPromptConfigRef?: string;
   variables?: string[];
   /** Only present/editable with developer permission. */
   developerOverrides?: LeadFlowJsonObject;
@@ -57,6 +64,20 @@ export interface LeadFlowAgentCrmPolicy {
 export interface LeadFlowAgentChannelPolicy {
   allowedChannels?: string[];
   defaultChannel?: string | null;
+  activationPolicy?: {
+    version: 1;
+    trigger: 'manual' | 'every_eligible' | 'keywords' | 'ad_referral';
+    keywords?: string[];
+    keywordMode?: 'word' | 'phrase_contains';
+    adFilters?: {
+      accountId?: string[];
+      campaignId?: string[];
+      adId?: string[];
+    };
+    expiresAfterMinutes?: number;
+    afterHandoff?: 'require_explicit_return';
+    automaticEffects?: { reply: false; crm: false; followUp: false };
+  };
   [key: string]: LeadFlowJsonValue | undefined;
 }
 
@@ -108,6 +129,11 @@ export interface LeadFlowAgentRuntimeContract {
     isSystem: boolean;
     isCustom: boolean;
     avatar: LeadFlowAgentAvatarConfig;
+    roleTitle: string | null;
+    primaryLanguage: string;
+    allowedLanguages: string[];
+    introductionPolicy: string;
+    aiDisclosure: string;
   };
   behavior: LeadFlowAgentBehaviorConfig;
   promptPolicy: LeadFlowAgentPromptConfig;

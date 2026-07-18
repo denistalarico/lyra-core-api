@@ -3,11 +3,12 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
+import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { randomBytes } from 'crypto';
-import { IsNull, Repository } from 'typeorm';
+import { DataSource, IsNull, Repository } from 'typeorm';
 import { InboxChannelConnectionSessionEntity } from '../../../entities/inbox-channel-connection-session.entity';
 import { InboxChannelEntity } from '../../../entities/inbox-channel.entity';
+import { InboxDomainOutboxEntity } from '../../../entities/inbox-domain-outbox.entity';
 import { SettingsCryptoService } from '../../../../../common/crypto/settings-crypto.service';
 import { MetaGraphService } from '../../meta/services/meta-graph.service';
 
@@ -20,6 +21,8 @@ type StartInput = {
 };
 
 type CompleteInput = {
+  tenantId: string;
+  workspaceId: string;
   sessionId: string;
   state: string;
   code: string;
@@ -39,6 +42,7 @@ export class WhatsAppEmbeddedSignupService {
     private readonly sessionsRepository: Repository<InboxChannelConnectionSessionEntity>,
     @InjectRepository(InboxChannelEntity, 'agency')
     private readonly channelsRepository: Repository<InboxChannelEntity>,
+    @InjectDataSource('agency') private readonly dataSource: DataSource,
     private readonly metaGraphService: MetaGraphService,
     private readonly cryptoService: SettingsCryptoService,
   ) {}
@@ -86,10 +90,12 @@ export class WhatsAppEmbeddedSignupService {
     };
   }
 
-  async getStatus(sessionId: string) {
+  async getStatus(sessionId: string, tenantId?: string, workspaceId?: string) {
     const session = await this.sessionsRepository.findOne({
       where: {
         id: sessionId,
+        ...(tenantId ? { tenantId } : {}),
+        ...(workspaceId ? { workspaceId } : {}),
       },
     });
 
@@ -131,6 +137,8 @@ export class WhatsAppEmbeddedSignupService {
     const session = await this.sessionsRepository.findOne({
       where: {
         id: input.sessionId,
+        tenantId: input.tenantId,
+        workspaceId: input.workspaceId,
       },
     });
 
@@ -198,6 +206,7 @@ export class WhatsAppEmbeddedSignupService {
       channel.accessTokenEncrypted = this.cryptoService.encrypt(
         exchanged.accessToken,
       );
+      channel.credentialVersion = (channel.credentialVersion || 0) + 1;
 
       tokenExchange = {
         tokenType: exchanged.tokenType,
@@ -267,7 +276,19 @@ export class WhatsAppEmbeddedSignupService {
         await this.channelsRepository.save(channel);
       }
 
+      const wasReconnect = Boolean(
+        channel.disconnectedAt ||
+        channel.credentialRemovedAt ||
+        channel.connectionStatus === 'disconnected',
+      );
       channel.status = 'active';
+      channel.connectionStatus = 'connected';
+      channel.lifecycleVersion = (channel.lifecycleVersion || 0) + 1;
+      channel.aiEnabled = false;
+      channel.disconnectedAt = null;
+      channel.disconnectedBy = null;
+      channel.disconnectReason = null;
+      channel.credentialRemovedAt = null;
       channel.settings = {
         ...(channel.settings ?? {}),
         setupStep: 'active',
@@ -280,9 +301,65 @@ export class WhatsAppEmbeddedSignupService {
         embeddedSignupActivatedAt: new Date().toISOString(),
       };
 
-      await this.channelsRepository.save(channel);
+      await this.dataSource.transaction(async (manager) => {
+        const locked = await manager.getRepository(InboxChannelEntity).findOne({
+          where: {
+            id: channel.id,
+            tenantId: channel.tenantId,
+            workspaceId: channel.workspaceId,
+          },
+          lock: { mode: 'pessimistic_write' },
+        });
+        if (!locked) throw new NotFoundException('Inbox channel not found.');
+        locked.status = channel.status;
+        locked.connectionStatus = channel.connectionStatus;
+        locked.lifecycleVersion = channel.lifecycleVersion;
+        locked.credentialVersion = channel.credentialVersion;
+        locked.aiEnabled = false;
+        locked.accessTokenEncrypted = channel.accessTokenEncrypted;
+        locked.disconnectedAt = null;
+        locked.disconnectedBy = null;
+        locked.disconnectReason = null;
+        locked.credentialRemovedAt = null;
+        locked.settings = channel.settings;
+        locked.metadata = channel.metadata;
+        await manager.getRepository(InboxChannelEntity).save(locked);
+
+        const outbox = manager.getRepository(InboxDomainOutboxEntity);
+        const eventNames = [
+          'inbox.channel.credential_rotated',
+          wasReconnect
+            ? 'inbox.channel.reconnected'
+            : 'inbox.channel.connected',
+        ];
+        for (const eventName of eventNames) {
+          await outbox.save(
+            outbox.create({
+              tenantId: locked.tenantId,
+              workspaceId: locked.workspaceId,
+              aggregateType: 'inbox_channel',
+              aggregateId: locked.id,
+              eventName,
+              eventVersion: 1,
+              idempotencyKey: `channel:${locked.id}:credential:v${locked.credentialVersion}:${eventName}`,
+              payload: {
+                channelId: locked.id,
+                lifecycleVersion: locked.lifecycleVersion,
+                credentialVersion: locked.credentialVersion,
+                aiEnabled: false,
+              },
+              status: 'pending',
+              attempts: 0,
+              availableAt: new Date(),
+            }),
+          );
+        }
+      });
     } catch (error) {
       channel.status = 'draft';
+      channel.connectionStatus = 'error';
+      channel.aiEnabled = false;
+      channel.accessTokenEncrypted = null;
       channel.settings = {
         ...(channel.settings ?? {}),
         setupStep:
@@ -315,7 +392,11 @@ export class WhatsAppEmbeddedSignupService {
     }
 
     return {
-      ...(await this.getStatus(session.id)),
+      ...(await this.getStatus(
+        session.id,
+        session.tenantId,
+        session.workspaceId,
+      )),
       channelId: channel.id,
       channelStatus: channel.status,
       setupStep:
@@ -378,6 +459,8 @@ export class WhatsAppEmbeddedSignupService {
     channel.type = 'whatsapp';
     channel.provider = 'meta';
     channel.status = existing?.accessTokenEncrypted ? 'active' : 'draft';
+    channel.connectionStatus = 'connecting';
+    channel.aiEnabled = false;
     channel.externalId = session.phoneNumberId ?? session.wabaId ?? null;
     channel.externalAccountId = session.wabaId;
     channel.externalPhoneNumberId = session.phoneNumberId;

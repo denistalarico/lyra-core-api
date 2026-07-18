@@ -19,6 +19,7 @@ import type {
   NormalizedInboundAttachment,
   NormalizedInboundMessage,
 } from '../types/normalized-inbound-message';
+import { AgentActivationPolicyService } from '../../services/agent-activation-policy.service';
 
 const DEFAULT_DEBOUNCE_SECONDS = 20;
 
@@ -27,6 +28,7 @@ export class InboundMessageIngestionService {
   constructor(
     @InjectDataSource('agency') private readonly dataSource: DataSource,
     private readonly notificationPublisher: InboxNotificationPublisher,
+    private readonly activationPolicy?: AgentActivationPolicyService,
   ) {}
 
   async ingest(input: NormalizedInboundMessage) {
@@ -84,10 +86,34 @@ export class InboundMessageIngestionService {
             externalThreadId: input.externalThreadId,
           },
         });
+      const activation = this.activationPolicy
+        ? await this.activationPolicy.evaluate({
+            tenantId: input.tenantId,
+            workspaceId: input.workspaceId,
+            channelId: input.channelId,
+            messageText: input.content,
+            conversationState: conversation?.ownershipState,
+            internalContact: Boolean(internalContact),
+            duplicate: false,
+            qualificationStatus: qualification.status,
+            referralTrusted: input.metadata?.referralTrusted === true,
+            referral:
+              input.metadata?.referral &&
+              typeof input.metadata.referral === 'object'
+                ? (input.metadata.referral as Record<string, unknown>)
+                : {},
+          })
+        : {
+            wouldActivate:
+              qualification.status === 'qualified' && channel.aiEnabled,
+            policyVersion: 0,
+            reasonCode: 'legacy_test_fallback',
+            exclusions: [] as string[],
+          };
 
       if (!conversation) {
         const aiActive =
-          qualification.status === 'qualified' && channel.aiEnabled;
+          qualification.status === 'qualified' && activation.wouldActivate;
         conversation = manager.getRepository(InboxConversationEntity).create({
           tenantId: input.tenantId,
           workspaceId: input.workspaceId,
@@ -138,7 +164,10 @@ export class InboundMessageIngestionService {
       ) {
         conversation.qualificationStatus = 'qualified';
         conversation.qualificationReason = qualification.reason;
-        if (channel.aiEnabled && conversation.ownershipState === 'paused') {
+        if (
+          activation.wouldActivate &&
+          conversation.ownershipState === 'paused'
+        ) {
           conversation.ownershipState = 'ai_active';
           conversation.ownershipVersion += 1;
           conversation.ownershipChangedAt = new Date();
@@ -217,7 +246,49 @@ export class InboundMessageIngestionService {
           payload: { messageId: message.id, messageType: input.messageType },
         }),
       );
+      await manager.getRepository(InboxConversationEventEntity).save(
+        manager.getRepository(InboxConversationEventEntity).create({
+          tenantId: input.tenantId,
+          workspaceId: input.workspaceId,
+          conversationId: conversation.id,
+          eventType: activation.wouldActivate
+            ? 'agent_activated'
+            : 'agent_activation_ignored',
+          actorType: 'system',
+          actorUserId: null,
+          payload: {
+            policyVersion: activation.policyVersion,
+            reasonCode: activation.reasonCode,
+            exclusions: activation.exclusions,
+          },
+        }),
+      );
       await this.writeOutbox(manager, input, conversation, message);
+      await manager.getRepository(InboxDomainOutboxEntity).save(
+        manager.getRepository(InboxDomainOutboxEntity).create({
+          tenantId: input.tenantId,
+          workspaceId: input.workspaceId,
+          aggregateType: 'inbox_conversation',
+          aggregateId: conversation.id,
+          eventName: 'leadflow.agent.activation.evaluated',
+          eventVersion: 1,
+          idempotencyKey: `agent.activation.evaluated:${message.id}`,
+          payload: {
+            conversationId: conversation.id,
+            channelId: input.channelId,
+            policyVersion: activation.policyVersion,
+            wouldActivate: activation.wouldActivate,
+            reasonCode: activation.reasonCode,
+            exclusions: activation.exclusions,
+            automaticEffects: {
+              reply: false,
+              crm: false,
+              followUp: false,
+            },
+          },
+          publishedAt: null,
+        }),
+      );
 
       if (
         conversation.ownershipState === 'ai_active' &&

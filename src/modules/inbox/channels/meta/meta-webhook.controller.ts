@@ -19,6 +19,7 @@ import { WhatsAppMetaAdapter } from './adapters/whatsapp-meta.adapter';
 import type { MetaWhatsAppWebhookPayload } from './types/meta-whatsapp-webhook.types';
 import { WebhookLogService } from '../services/webhook-log.service';
 import { MessageStatusSyncService } from '../services/message-status-sync.service';
+import { MetaChannelUnavailableError } from './services/meta-channel-resolver.service';
 
 @Controller('inbox/channels/meta/webhook')
 export class MetaWebhookController {
@@ -128,6 +129,23 @@ export class MetaWebhookController {
         statusResults,
       };
     } catch (error) {
+      if (error instanceof MetaChannelUnavailableError) {
+        await this.webhookLogService.create({
+          tenantId: error.channel.tenantId,
+          workspaceId: error.channel.workspaceId,
+          channelId: error.channel.id,
+          provider: 'meta',
+          eventType,
+          status: 'ignored',
+          externalAccountId: accountId,
+          externalPhoneNumberId: phoneNumberId,
+          signatureReceived: Boolean(signature),
+          errorMessage: error.code,
+          payload: {},
+          metadata: { connectionStatus: error.channel.connectionStatus },
+        });
+        return { ok: true, ignored: true, reason: error.code };
+      }
       await this.webhookLogService.create({
         provider: 'meta',
         eventType,

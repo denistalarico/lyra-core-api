@@ -21,6 +21,13 @@ export type InboxChannelType =
   | 'other';
 
 export type InboxChannelStatus = 'draft' | 'active' | 'inactive' | 'archived';
+export type InboxChannelConnectionStatus =
+  | 'connecting'
+  | 'connected'
+  | 'disconnecting'
+  | 'disconnected'
+  | 'error'
+  | 'suspended';
 
 @Entity('inbox_channels')
 @Index('idx_inbox_channels_tenant_workspace', ['tenantId', 'workspaceId'])
@@ -44,6 +51,20 @@ export class InboxChannelEntity {
 
   @Column({ type: 'varchar', length: 32, default: 'active' })
   status!: InboxChannelStatus;
+
+  @Column({
+    name: 'connection_status',
+    type: 'varchar',
+    length: 24,
+    default: 'connected',
+  })
+  connectionStatus!: InboxChannelConnectionStatus;
+
+  @Column({ name: 'lifecycle_version', type: 'int', default: 1 })
+  lifecycleVersion!: number;
+
+  @Column({ name: 'credential_version', type: 'int', default: 0 })
+  credentialVersion!: number;
 
   @Column({ type: 'varchar', length: 80, nullable: true })
   provider!: string | null;
@@ -108,6 +129,30 @@ export class InboxChannelEntity {
 
   @Column({ type: 'jsonb', default: () => "'{}'::jsonb" })
   metadata!: Record<string, unknown>;
+
+  @Column({ name: 'suspended_at', type: 'timestamptz', nullable: true })
+  suspendedAt!: Date | null;
+
+  @Column({ name: 'disconnected_at', type: 'timestamptz', nullable: true })
+  disconnectedAt!: Date | null;
+
+  @Column({ name: 'disconnected_by', type: 'uuid', nullable: true })
+  disconnectedBy!: string | null;
+
+  @Column({
+    name: 'disconnect_reason',
+    type: 'varchar',
+    length: 500,
+    nullable: true,
+  })
+  disconnectReason!: string | null;
+
+  @Column({
+    name: 'credential_removed_at',
+    type: 'timestamptz',
+    nullable: true,
+  })
+  credentialRemovedAt!: Date | null;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;

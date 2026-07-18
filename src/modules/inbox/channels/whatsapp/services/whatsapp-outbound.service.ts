@@ -232,6 +232,7 @@ export class WhatsAppOutboundService {
         type: 'whatsapp',
         provider: 'meta',
         status: 'active',
+        connectionStatus: 'connected',
         deletedAt: IsNull(),
       },
     });

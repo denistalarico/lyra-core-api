@@ -15,6 +15,8 @@ import {
 } from '../../permissions';
 import { TestInboundMessageDto } from './dto/test-inbound-message.dto';
 import { InboundMessageIngestionService } from './services/inbound-message-ingestion.service';
+import { SimulateAgentActivationDto } from '../dto/simulate-agent-activation.dto';
+import { AgentActivationPolicyService } from '../services/agent-activation-policy.service';
 
 @Controller('inbox/channels')
 @UseGuards(JwtAuthGuard, PermissionsGuard)
@@ -22,6 +24,7 @@ import { InboundMessageIngestionService } from './services/inbound-message-inges
 export class InboxChannelsController {
   constructor(
     private readonly inboundIngestionService: InboundMessageIngestionService,
+    private readonly activationPolicyService: AgentActivationPolicyService,
   ) {}
 
   @Post('test-inbound')
@@ -62,5 +65,27 @@ export class InboxChannelsController {
       conversationId: result.conversation.id,
       messageId: result.message.id,
     };
+  }
+
+  @Post('activation/simulate')
+  @RequirePermission('leadflow.agents.runtime.preview.admin')
+  async simulateActivation(
+    @RequestContextData() ctx: RequestContext,
+    @Body() dto: SimulateAgentActivationDto,
+  ) {
+    if (!ctx.workspaceId)
+      throw new BadRequestException('Workspace context is required.');
+    return this.activationPolicyService.evaluate({
+      tenantId: ctx.tenantId,
+      workspaceId: ctx.workspaceId,
+      channelId: dto.channelId,
+      messageText: dto.messageText,
+      conversationState: dto.conversationState,
+      internalContact: dto.internalContact,
+      duplicate: dto.duplicate,
+      qualificationStatus: dto.qualificationStatus,
+      referralTrusted: dto.referralTrusted,
+      referral: dto.referral,
+    });
   }
 }

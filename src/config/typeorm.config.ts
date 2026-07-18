@@ -41,6 +41,7 @@ import { ScheduledItemParticipantEntity } from '../modules/appointments/entities
 import { ScheduledItemReminderEntity } from '../modules/appointments/entities/scheduled-item-reminder.entity';
 
 import { InboxChannelEntity } from '../modules/inbox/entities/inbox-channel.entity';
+import { InboxChannelLifecycleRequestEntity } from '../modules/inbox/entities/inbox-channel-lifecycle-request.entity';
 import { InboxConversationEntity } from '../modules/inbox/entities/inbox-conversation.entity';
 import { InboxMessageEntity } from '../modules/inbox/entities/inbox-message.entity';
 import { InboxSettingsEntity } from '../modules/inbox/entities/inbox-settings.entity';
@@ -310,6 +311,7 @@ export const agencyEntities = [
   ContactBusinessModeEntity,
   ContactViewPreferenceEntity,
   InboxChannelEntity,
+  InboxChannelLifecycleRequestEntity,
   InboxConversationEntity,
   InboxMessageEntity,
   InboxSettingsEntity,

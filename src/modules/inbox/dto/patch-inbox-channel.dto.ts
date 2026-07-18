@@ -1,18 +1,15 @@
 import {
   IsBoolean,
-  IsIn,
-  IsObject,
+  IsInt,
   IsOptional,
   IsString,
-  IsUUID,
+  Max,
   MaxLength,
+  Min,
   MinLength,
 } from 'class-validator';
-import type {
-  InboxChannelStatus,
-  InboxChannelType,
-} from '../entities/inbox-channel.entity';
 
+/** Operational allowlist only. Provider identity, credentials and ownership are lifecycle-owned. */
 export class PatchInboxChannelDto {
   @IsOptional()
   @IsString()
@@ -21,80 +18,19 @@ export class PatchInboxChannelDto {
   name?: string;
 
   @IsOptional()
-  @IsIn([
-    'internal',
-    'manual',
-    'webchat',
-    'whatsapp',
-    'instagram',
-    'facebook_messenger',
-    'facebook',
-    'email',
-    'phone',
-    'other',
-  ])
-  type?: InboxChannelType;
-
-  @IsOptional()
-  @IsIn(['draft', 'active', 'inactive', 'archived'])
-  status?: InboxChannelStatus;
-
-  @IsOptional()
-  @IsString()
-  @MaxLength(80)
-  provider?: string;
-
-  @IsOptional()
-  @IsString()
-  @MaxLength(180)
-  externalId?: string;
-
-  @IsOptional()
-  @IsString()
-  @MaxLength(180)
-  externalAccountId?: string;
-
-  @IsOptional()
-  @IsString()
-  @MaxLength(180)
-  externalPhoneNumberId?: string;
-
-  @IsOptional()
-  @IsString()
-  @MaxLength(180)
-  externalPageId?: string;
-
-  @IsOptional()
-  @IsString()
-  accessToken?: string;
-
-  @IsOptional()
-  @IsString()
-  @MaxLength(220)
-  verifyToken?: string;
-
-  @IsOptional()
-  @IsString()
-  @MaxLength(220)
-  webhookSecret?: string;
-
-  @IsOptional()
-  @IsUUID()
-  defaultAssignedUserId?: string;
-
-  @IsOptional()
-  @IsUUID()
-  defaultAgentId?: string;
-
-  @IsOptional()
   @IsBoolean()
   aiEnabled?: boolean;
 
   @IsOptional()
-  @IsObject()
-  settings?: Record<string, unknown>;
+  @IsInt()
+  @Min(1)
+  @Max(300)
+  debounceSeconds?: number;
+}
 
+export class InboxChannelLifecycleDto {
   @IsOptional()
-  @IsObject()
-  metadata?: Record<string, unknown>;
+  @IsString()
+  @MaxLength(500)
+  reason?: string;
 }

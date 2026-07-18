@@ -26,7 +26,7 @@ export class LeadFlowAgentRuntimeConfigService {
     settings: LeadFlowClientSettingsEntity | null,
     bindings: LeadFlowAgentChannelBindingEntity[],
   ): LeadFlowAgentRuntimeConfigResponse {
-    const metadata = (agent.metadata ?? {}) as LeadFlowJsonObject;
+    const metadata = agent.metadata ?? {};
 
     return {
       version: LEADFLOW_AGENT_RUNTIME_CONTRACT_VERSION,
@@ -48,6 +48,27 @@ export class LeadFlowAgentRuntimeConfigService {
         isSystem: agent.isSystem,
         isCustom: agent.isCustom,
         avatar: agent.avatarConfig ?? {},
+        roleTitle:
+          typeof agent.behaviorConfig?.roleTitle === 'string'
+            ? agent.behaviorConfig.roleTitle
+            : null,
+        primaryLanguage:
+          typeof agent.behaviorConfig?.language === 'string'
+            ? agent.behaviorConfig.language
+            : 'pt-BR',
+        allowedLanguages: Array.isArray(agent.behaviorConfig?.allowedLanguages)
+          ? agent.behaviorConfig.allowedLanguages.filter(
+              (item): item is string => typeof item === 'string',
+            )
+          : ['pt-BR'],
+        introductionPolicy:
+          typeof agent.behaviorConfig?.introductionPolicy === 'string'
+            ? agent.behaviorConfig.introductionPolicy
+            : 'when_asked',
+        aiDisclosure:
+          typeof agent.behaviorConfig?.aiDisclosure === 'string'
+            ? agent.behaviorConfig.aiDisclosure
+            : 'Sou um assistente virtual.',
       },
       behavior: agent.behaviorConfig ?? {},
       promptPolicy: agent.promptConfig ?? {},
@@ -78,7 +99,8 @@ export class LeadFlowAgentRuntimeConfigService {
       generatedAt: new Date().toISOString(),
       tenantId,
       workspaceId,
-      leadflowSettingsSnapshot: this.buildSettingsSnapshotFromSettings(settings),
+      leadflowSettingsSnapshot:
+        this.buildSettingsSnapshotFromSettings(settings),
       businessMode: {
         key: businessModeKey,
         isCustom: isCustomBusinessMode(businessModeKey),
@@ -120,7 +142,7 @@ export class LeadFlowAgentRuntimeConfigService {
   private buildClientPromptSnapshot(
     settings: LeadFlowClientSettingsEntity | null,
   ): LeadFlowJsonObject {
-    const value = settings?.clientPromptConfig;
+    const value = settings?.companyContextPublished;
     return value && typeof value === 'object' && !Array.isArray(value)
       ? (value as LeadFlowJsonObject)
       : {};

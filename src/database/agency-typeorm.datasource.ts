@@ -102,6 +102,7 @@ import { CreateInboxChannelConnectionSessions1760000026000 } from './migrations/
 import { CreateLeadflowInboxRuntime1784100000000 } from './migrations/1784100000000-create-leadflow-inbox-runtime';
 import { HardenInboxSupervisedRuntime1784200000000 } from './migrations/1784200000000-harden-inbox-supervised-runtime';
 import { CreateInboxProviderUsageLedger1784300000000 } from './migrations/1784300000000-create-inbox-provider-usage-ledger';
+import { PrepareLeadflowAgencyPilot1784400000000 } from './migrations/1784400000000-prepare-leadflow-agency-pilot';
 
 export const AgencyDataSource = new DataSource({
   type: 'postgres',
@@ -217,5 +218,6 @@ export const AgencyDataSource = new DataSource({
     CreateLeadflowInboxRuntime1784100000000,
     HardenInboxSupervisedRuntime1784200000000,
     CreateInboxProviderUsageLedger1784300000000,
+    PrepareLeadflowAgencyPilot1784400000000,
   ],
 });

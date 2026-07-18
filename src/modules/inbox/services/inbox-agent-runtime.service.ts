@@ -6,7 +6,7 @@ import {
 import { InjectDataSource } from '@nestjs/typeorm';
 import { randomUUID } from 'crypto';
 import { Readable } from 'stream';
-import { DataSource } from 'typeorm';
+import { DataSource, IsNull } from 'typeorm';
 import { FilesService } from '../../../common/files/files.service';
 import type { RequestContext } from '../../../common/context/request-context.interface';
 import { CrmOpportunityEntity } from '../../crm/entities/crm-opportunity.entity';
@@ -14,7 +14,10 @@ import { LeadFlowAgentEntity } from '../../leadflow-agents/entities/leadflow-age
 import { LeadFlowAgentChannelBindingEntity } from '../../leadflow-agents/entities/leadflow-agent-channel-binding.entity';
 import { LeadFlowAgentVersionEntity } from '../../leadflow-agents/entities/leadflow-agent-version.entity';
 import { LeadFlowClientSettingsEntity } from '../../leadflow-settings/entities/leadflow-client-settings.entity';
+import { LeadFlowBusinessModeTemplateEntity } from '../../leadflow-settings/entities/leadflow-business-mode-template.entity';
+import { LeadFlowSettingsContextType } from '../../leadflow-settings/enums/leadflow-settings-context-type.enum';
 import { InboxAgentDecisionEntity } from '../entities/inbox-agent-decision.entity';
+import { InboxChannelEntity } from '../entities/inbox-channel.entity';
 import { InboxConversationEntity } from '../entities/inbox-conversation.entity';
 import { InboxMediaAssetEntity } from '../entities/inbox-media-asset.entity';
 import { InboxMediaDerivativeEntity } from '../entities/inbox-media-derivative.entity';
@@ -106,16 +109,30 @@ export class InboxAgentRuntimeService {
         tenantId: batch.tenantId,
         workspaceId: batch.workspaceId,
       });
+    const channel = await this.dataSource
+      .getRepository(InboxChannelEntity)
+      .findOneBy({
+        id: batch.channelId,
+        tenantId: batch.tenantId,
+        workspaceId: batch.workspaceId,
+      });
     if (
       !conversation ||
       conversation.ownershipState !== 'ai_active' ||
-      !conversation.aiEnabled
+      !conversation.aiEnabled ||
+      !channel ||
+      channel.status !== 'active' ||
+      channel.connectionStatus !== 'connected' ||
+      !channel.aiEnabled
     ) {
       await this.dataSource
         .getRepository(InboxProcessingBatchEntity)
         .update(batch.id, {
           status: 'cancelled',
-          errorCode: 'ai_not_owner',
+          errorCode:
+            channel && channel.connectionStatus === 'connected'
+              ? 'ai_not_owner'
+              : 'channel_unavailable',
           completedAt: new Date(),
         });
       return null;
@@ -184,12 +201,45 @@ export class InboxAgentRuntimeService {
           .getRepository(LeadFlowAgentVersionEntity)
           .findOneBy({ id: agent.publishedVersionId, tenantId: batch.tenantId })
       : null;
+    if (!agent || !version) {
+      await this.dataSource
+        .getRepository(InboxProcessingBatchEntity)
+        .update(batch.id, {
+          status: 'cancelled',
+          errorCode: 'agent_unavailable',
+          completedAt: new Date(),
+        });
+      return null;
+    }
     const settings = await this.dataSource
       .getRepository(LeadFlowClientSettingsEntity)
       .findOne({
-        where: { tenantId: batch.tenantId, workspaceId: batch.workspaceId },
-        order: { updatedAt: 'DESC' },
+        where: agent?.settingsId
+          ? {
+              id: agent.settingsId,
+              tenantId: batch.tenantId,
+              workspaceId: batch.workspaceId,
+            }
+          : {
+              tenantId: batch.tenantId,
+              workspaceId: batch.workspaceId,
+              contextType: LeadFlowSettingsContextType.Agency,
+              agencyClientId: IsNull(),
+            },
       });
+    const businessModeTemplate = settings?.businessModeTemplateId
+      ? await this.dataSource
+          .getRepository(LeadFlowBusinessModeTemplateEntity)
+          .createQueryBuilder('template')
+          .where('template.id = :id', { id: settings.businessModeTemplateId })
+          .andWhere(
+            '(template.tenant_id IS NULL OR template.tenant_id = :tenantId)',
+            {
+              tenantId: batch.tenantId,
+            },
+          )
+          .getOne()
+      : null;
     const messageProjection = orderedMessages.map((message) => ({
       id: message.id,
       evidenceRef: `message:${message.id}`,
@@ -257,6 +307,20 @@ export class InboxAgentRuntimeService {
         evidenceRef,
         mimeType,
       })),
+      businessModeInstruction: businessModeTemplate?.agentPromptTemplate ?? {
+        key: conversation.businessMode,
+      },
+      businessModeVersion: businessModeTemplate?.version ?? 1,
+      agentProfile:
+        version?.snapshot && typeof version.snapshot === 'object'
+          ? ((version.snapshot as Record<string, unknown>).agentIdentity ?? {})
+          : agent
+            ? { name: agent.name, behavior: agent.behaviorConfig }
+            : {},
+      agentProfileVersion: version?.version ?? 0,
+      companyContext: settings?.companyContextPublished ?? {},
+      companyContextVersion: settings?.companyContextPublishedVersion ?? 0,
+      companyContextHash: settings?.companyContextPublishedHash ?? null,
     });
     const correlationId = randomUUID();
     let providerResult: AgentDecisionResult | null = null;
@@ -402,12 +466,18 @@ export class InboxAgentRuntimeService {
               kind,
               status,
             })),
+            companyContextVersion:
+              settings?.companyContextPublishedVersion ?? 0,
+            companyContextHash: settings?.companyContextPublishedHash ?? null,
           },
           errorCode: null,
           provider: providerResult.provider,
           model: providerResult.model,
           promptVersion: prompt.promptVersion,
           promptHash: prompt.promptHash,
+          contextVersion: settings?.companyContextPublishedVersion ?? 0,
+          contextHash: settings?.companyContextPublishedHash ?? null,
+          promptLayers: prompt.layers,
           usage: providerResult.usage,
           latencyMs: providerResult.latencyMs,
           actionPlan,
@@ -833,19 +903,17 @@ export class InboxAgentRuntimeService {
       )
       .andWhere("binding.status = 'active'")
       .andWhere(
-        '(binding.external_ref = :channelId OR binding.channel_key = :channelKey)',
+        "(binding.external_ref = :channelId OR binding.config->>'channelId' = :channelId)",
         {
           channelId: batch.channelId,
-          channelKey: 'whatsapp',
         },
       );
     if (conversation.assignedAgentId) {
-      qb.orderBy(
-        'CASE WHEN agent.id = :assignedAgentId THEN 0 ELSE 1 END',
-        'ASC',
-      ).setParameter('assignedAgentId', conversation.assignedAgentId);
+      qb.andWhere('agent.id = :assignedAgentId', {
+        assignedAgentId: conversation.assignedAgentId,
+      });
     }
-    return qb.addOrderBy('agent.updated_at', 'DESC').getOne();
+    return qb.orderBy('agent.updated_at', 'DESC').getOne();
   }
 }
 

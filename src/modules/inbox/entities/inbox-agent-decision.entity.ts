@@ -75,6 +75,16 @@ export class InboxAgentDecisionEntity {
   promptVersion!: string | null;
   @Column({ name: 'prompt_hash', type: 'varchar', length: 128, nullable: true })
   promptHash!: string | null;
+  @Column({ name: 'context_version', type: 'int', nullable: true })
+  contextVersion!: number | null;
+  @Column({ name: 'context_hash', type: 'varchar', length: 64, nullable: true })
+  contextHash!: string | null;
+  @Column({
+    name: 'prompt_layers',
+    type: 'jsonb',
+    default: () => "'[]'::jsonb",
+  })
+  promptLayers!: Array<Record<string, unknown>>;
   @Column({ type: 'jsonb', default: () => "'{}'::jsonb" })
   usage!: Record<string, unknown>;
   @Column({ name: 'latency_ms', type: 'int', nullable: true })

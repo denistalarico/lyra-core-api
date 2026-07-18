@@ -15,10 +15,14 @@ import type {
   LeadFlowJsonObject,
 } from '../types/leadflow-settings.types';
 
-@Index('IDX_lf_client_settings_unique_agency_context', ['tenantId', 'workspaceId'], {
-  unique: true,
-  where: "context_type = 'agency'",
-})
+@Index(
+  'IDX_lf_client_settings_unique_agency_context',
+  ['tenantId', 'workspaceId'],
+  {
+    unique: true,
+    where: "context_type = 'agency'",
+  },
+)
 @Index(
   'IDX_lf_client_settings_unique_client_context',
   ['tenantId', 'workspaceId', 'agencyClientId'],
@@ -114,6 +118,46 @@ export class LeadFlowClientSettingsEntity {
     default: () => "'{}'::jsonb",
   })
   clientPromptConfig!: LeadFlowJsonObject;
+
+  @Column({ name: 'company_context_schema_version', type: 'int', default: 1 })
+  companyContextSchemaVersion!: number;
+  @Column({
+    name: 'company_context_draft',
+    type: 'jsonb',
+    default: () => "'{}'::jsonb",
+  })
+  companyContextDraft!: LeadFlowJsonObject;
+  @Column({
+    name: 'company_context_published',
+    type: 'jsonb',
+    default: () => "'{}'::jsonb",
+  })
+  companyContextPublished!: LeadFlowJsonObject;
+  @Column({
+    name: 'company_context_published_version',
+    type: 'int',
+    default: 0,
+  })
+  companyContextPublishedVersion!: number;
+  @Column({
+    name: 'company_context_published_hash',
+    type: 'varchar',
+    length: 64,
+    nullable: true,
+  })
+  companyContextPublishedHash!: string | null;
+  @Column({
+    name: 'company_context_published_at',
+    type: 'timestamptz',
+    nullable: true,
+  })
+  companyContextPublishedAt!: Date | null;
+  @Column({
+    name: 'company_context_published_by',
+    type: 'uuid',
+    nullable: true,
+  })
+  companyContextPublishedBy!: string | null;
 
   @Column({ name: 'inbox_config', type: 'jsonb', default: () => "'{}'::jsonb" })
   inboxConfig!: LeadFlowJsonObject;

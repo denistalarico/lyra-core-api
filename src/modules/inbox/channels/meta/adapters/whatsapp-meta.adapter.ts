@@ -155,6 +155,14 @@ export class WhatsAppMetaAdapter {
         metaObject: payload.object ?? null,
         whatsappMessageType: rawMessage.type ?? null,
         phoneNumberId: value.metadata?.phone_number_id ?? null,
+        referralTrusted: Boolean(rawMessage.referral),
+        referral: rawMessage.referral
+          ? {
+              adId: rawMessage.referral.source_id ?? null,
+              sourceType: rawMessage.referral.source_type ?? null,
+              clickId: rawMessage.referral.ctwa_clid ?? null,
+            }
+          : null,
       },
     };
   }

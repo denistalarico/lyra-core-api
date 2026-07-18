@@ -58,4 +58,16 @@ export class LeadFlowAgencySettingsController {
   ): Promise<LeadFlowSettingsValidationResponse> {
     return this.leadFlowClientSettingsService.validateAgencySettings(ctx, dto);
   }
+
+  @Post('company-context/publish')
+  @RequirePermission('leadflow.settings.general.update.admin')
+  publishCompanyContext(@RequestContextData() ctx: RequestContext) {
+    return this.leadFlowClientSettingsService.publishCompanyContext(ctx);
+  }
+
+  @Get('company-context/preview')
+  @RequirePermission('leadflow.settings.general.view.admin')
+  previewCompanyContext(@RequestContextData() ctx: RequestContext) {
+    return this.leadFlowClientSettingsService.previewCompanyContext(ctx);
+  }
 }

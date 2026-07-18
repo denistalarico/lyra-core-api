@@ -20,6 +20,9 @@ export type InboxChannelResponse = {
   name: string;
   type: InboxChannelType;
   status: InboxChannelStatus;
+  connectionStatus: InboxChannelEntity['connectionStatus'];
+  lifecycleVersion: number;
+  credentialVersion: number;
   provider: string | null;
   externalId: string | null;
   externalAccountId: string | null;
@@ -33,6 +36,8 @@ export type InboxChannelResponse = {
   metadata: Record<string, unknown>;
   createdAt: Date;
   updatedAt: Date;
+  suspendedAt: Date | null;
+  disconnectedAt: Date | null;
   deletedAt: Date | null;
 };
 
@@ -50,6 +55,9 @@ export function mapInboxChannel(
     name: channel.name,
     type: channel.type,
     status: channel.status,
+    connectionStatus: channel.connectionStatus,
+    lifecycleVersion: channel.lifecycleVersion,
+    credentialVersion: channel.credentialVersion,
     provider: channel.provider,
     externalId: channel.externalId,
     externalAccountId: channel.externalAccountId,
@@ -63,6 +71,8 @@ export function mapInboxChannel(
     metadata: channel.metadata ?? {},
     createdAt: channel.createdAt,
     updatedAt: channel.updatedAt,
+    suspendedAt: channel.suspendedAt,
+    disconnectedAt: channel.disconnectedAt,
     deletedAt: channel.deletedAt,
   };
 }
