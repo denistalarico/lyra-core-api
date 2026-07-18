@@ -146,9 +146,9 @@ export class PermissionScopeEvaluatorService {
     private readonly contactsRepository: Repository<ContactEntity>,
     @InjectRepository(ContactEntity, AGENCY_CONNECTION)
     private readonly agencyContactsRepository: Repository<ContactEntity>,
-    @InjectRepository(InboxChannelEntity)
+    @InjectRepository(InboxChannelEntity, AGENCY_CONNECTION)
     private readonly inboxChannelsRepository: Repository<InboxChannelEntity>,
-    @InjectRepository(InboxConversationEntity)
+    @InjectRepository(InboxConversationEntity, AGENCY_CONNECTION)
     private readonly inboxConversationsRepository: Repository<InboxConversationEntity>,
     @InjectRepository(WebchatConversationEntity)
     private readonly webchatConversationsRepository: Repository<WebchatConversationEntity>,

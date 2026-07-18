@@ -78,8 +78,6 @@ const AGENCY_CONNECTION = 'agency';
     ContextModule,
     TypeOrmModule.forFeature([
       ContactEntity,
-      InboxChannelEntity,
-      InboxConversationEntity,
       WebchatConversationEntity,
       WebchatWidgetEntity,
       ScheduledItemEntity,
@@ -96,6 +94,8 @@ const AGENCY_CONNECTION = 'agency';
         PlatformPermissionAuditEventEntity,
         TenantProductEntitlementEntity,
         AgencyClient,
+        InboxChannelEntity,
+        InboxConversationEntity,
         TeamMember,
         TeamDepartment,
         TeamSkill,
