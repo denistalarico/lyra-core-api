@@ -79,12 +79,7 @@ export class CompanyContextService {
         timezone: value.timezone ?? '',
         regionsServed: value.regionsServed ?? '',
       },
-      offers: Array.isArray(value.mainOffers)
-        ? value.mainOffers
-        : typeof value.mainOffers === 'string' ||
-            typeof value.mainOffers === 'number'
-          ? [{ name: String(value.mainOffers) }]
-          : [],
+      offers: this.fromLegacyList(value.mainOffers),
       service: {
         businessHours: value.businessHours ?? '',
         handoffRules: value.handoffRules ?? '',
@@ -102,10 +97,20 @@ export class CompanyContextService {
         urgencySignals: value.urgencySignals ?? '',
       },
       policies: value.policies ?? '',
-      faq: value.faq ?? [],
-      links: value.links ?? [],
+      faq: this.fromLegacyList(value.faq),
+      links: this.fromLegacyList(value.links),
       legacyTone: value.tone ?? '',
     });
+  }
+
+  normalizePersisted(value: LeadFlowJsonObject): LeadFlowJsonObject {
+    const compatible = { ...value };
+    for (const key of ['offers', 'faq', 'links']) {
+      if (typeof compatible[key] === 'string') {
+        compatible[key] = this.splitLines(compatible[key]);
+      }
+    }
+    return this.normalize(compatible);
   }
 
   hash(value: LeadFlowJsonObject) {
@@ -116,6 +121,14 @@ export class CompanyContextService {
 
   preview(value: LeadFlowJsonObject) {
     const normalized = this.normalize(value);
+    return this.buildPreview(normalized);
+  }
+
+  previewPersisted(value: LeadFlowJsonObject) {
+    return this.buildPreview(this.normalizePersisted(value));
+  }
+
+  private buildPreview(normalized: LeadFlowJsonObject) {
     const serialized = this.stableStringify(normalized);
     return {
       schemaVersion: 1,
@@ -131,6 +144,20 @@ export class CompanyContextService {
       faqCount: Array.isArray(normalized.faq) ? normalized.faq.length : 0,
       linkCount: Array.isArray(normalized.links) ? normalized.links.length : 0,
     };
+  }
+
+  private fromLegacyList(value: unknown): unknown[] {
+    if (Array.isArray(value)) return value;
+    if (typeof value === 'string') return this.splitLines(value);
+    if (typeof value === 'number') return [String(value)];
+    return [];
+  }
+
+  private splitLines(value: string): string[] {
+    return value
+      .split(/\r?\n/)
+      .map((item) => item.trim())
+      .filter(Boolean);
   }
 
   private walk(value: unknown, key: string, depth: number): unknown {

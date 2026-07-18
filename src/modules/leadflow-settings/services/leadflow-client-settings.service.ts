@@ -346,7 +346,7 @@ export class LeadFlowClientSettingsService {
           lock: { mode: 'pessimistic_write' },
         });
       if (!locked) throw new NotFoundException('LeadFlow settings not found.');
-      const published = this.companyContextService.normalize(
+      const published = this.companyContextService.normalizePersisted(
         locked.companyContextDraft ?? {},
       );
       locked.companyContextPublished = published;
@@ -386,7 +386,7 @@ export class LeadFlowClientSettingsService {
       ? await this.findSettings(ctx, agencyClientId)
       : await this.findAgencySettings(ctx);
     if (!settings) throw new NotFoundException('LeadFlow settings not found.');
-    return this.companyContextService.preview(
+    return this.companyContextService.previewPersisted(
       settings.companyContextDraft ?? {},
     );
   }

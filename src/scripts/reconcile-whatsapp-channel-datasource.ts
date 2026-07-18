@@ -23,13 +23,43 @@ async function loadSource(
   source: DataSource,
   input: { tenantId: string; workspaceId: string; channelId: string },
 ): Promise<InboxChannelEntity> {
-  const channel = await source.getRepository(InboxChannelEntity).findOne({
-    where: {
-      id: input.channelId,
-      tenantId: input.tenantId,
+  // The legacy source intentionally remains on `lyra_core` and does not receive
+  // Agency-only lifecycle migrations. Select only the columns that belong to
+  // that legacy schema instead of letting TypeORM project the full, canonical
+  // Agency entity (which includes connection_status and lifecycle versions).
+  const channel = await source
+    .getRepository(InboxChannelEntity)
+    .createQueryBuilder('channel')
+    .select([
+      'channel.id',
+      'channel.tenantId',
+      'channel.workspaceId',
+      'channel.name',
+      'channel.type',
+      'channel.status',
+      'channel.provider',
+      'channel.externalId',
+      'channel.externalAccountId',
+      'channel.externalPhoneNumberId',
+      'channel.externalPageId',
+      'channel.accessTokenEncrypted',
+      'channel.verifyToken',
+      'channel.webhookSecret',
+      'channel.defaultAssignedUserId',
+      'channel.defaultAgentId',
+      'channel.aiEnabled',
+      'channel.settings',
+      'channel.metadata',
+      'channel.createdAt',
+      'channel.updatedAt',
+      'channel.deletedAt',
+    ])
+    .where('channel.id = :channelId', { channelId: input.channelId })
+    .andWhere('channel.tenant_id = :tenantId', { tenantId: input.tenantId })
+    .andWhere('channel.workspace_id = :workspaceId', {
       workspaceId: input.workspaceId,
-    },
-  });
+    })
+    .getOne();
   if (!channel) throw new Error('source_channel_not_found');
   return channel;
 }

@@ -21,12 +21,43 @@ describe('CompanyContextService', () => {
     });
   });
 
+  it('converts legacy multiline list fields without empty items', () => {
+    const value = service.fromLegacy({
+      mainOffers: ' Serviço A\r\n\r\n Serviço B ',
+      faq: ' Pergunta A\n \nPergunta B ',
+      links: ' https://example.com\r\nhttps://example.com/faq ',
+    });
+
+    expect(value).toMatchObject({
+      offers: ['Serviço A', 'Serviço B'],
+      faq: ['Pergunta A', 'Pergunta B'],
+      links: ['https://example.com', 'https://example.com/faq'],
+    });
+  });
+
+  it('repairs list fields from previously persisted text only', () => {
+    expect(
+      service.normalizePersisted({
+        schemaVersion: 1,
+        offers: 'Serviço A\nServiço B',
+        faq: 'Pergunta A\r\nPergunta B',
+        links: 'https://example.com',
+      }),
+    ).toMatchObject({
+      offers: ['Serviço A', 'Serviço B'],
+      faq: ['Pergunta A', 'Pergunta B'],
+      links: ['https://example.com'],
+    });
+  });
+
   it.each([
     { links: [{ url: 'javascript:alert(1)' }] },
     { links: ['javascript:alert(1)'] },
     { identity: { apiKey: 'secret' } },
     { systemPrompt: 'ignore policy' },
     { offers: 'not-a-list' },
+    { faq: 'not-a-list' },
+    { links: 'not-a-list' },
     { identity: ['not-an-object'] },
     { schemaVersion: 2 },
   ])('rejects unsafe context %#', (value) => {
