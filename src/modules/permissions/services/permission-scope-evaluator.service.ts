@@ -39,6 +39,7 @@ import { CrmStageEntity } from '../../crm/entities/crm-stage.entity';
 import { CrmTagEntity } from '../../crm/entities/crm-tag.entity';
 import { InboxChannelEntity } from '../../inbox/entities/inbox-channel.entity';
 import { InboxConversationEntity } from '../../inbox/entities/inbox-conversation.entity';
+import { InboxMediaAssetEntity } from '../../inbox/entities/inbox-media-asset.entity';
 import { WebchatConversationEntity } from '../../webchat/entities/webchat-conversation.entity';
 import { WebchatWidgetEntity } from '../../webchat/entities/webchat-widget.entity';
 import { ScheduledItemEntity } from '../../appointments/entities/scheduled-item.entity';
@@ -150,6 +151,8 @@ export class PermissionScopeEvaluatorService {
     private readonly inboxChannelsRepository: Repository<InboxChannelEntity>,
     @InjectRepository(InboxConversationEntity, AGENCY_CONNECTION)
     private readonly inboxConversationsRepository: Repository<InboxConversationEntity>,
+    @InjectRepository(InboxMediaAssetEntity, AGENCY_CONNECTION)
+    private readonly inboxMediaAssetsRepository: Repository<InboxMediaAssetEntity>,
     @InjectRepository(WebchatConversationEntity)
     private readonly webchatConversationsRepository: Repository<WebchatConversationEntity>,
     @InjectRepository(WebchatWidgetEntity)
@@ -1851,6 +1854,35 @@ export class PermissionScopeEvaluatorService {
     const body = (request?.body ?? {}) as Record<string, unknown>;
     const query = request?.query ?? {};
     const path = request?.routePath ?? '';
+    const mediaId = firstParam(params.mediaId);
+    if (mediaId) {
+      if (!context.workspaceId) {
+        return { exists: false, kind: 'leadflow_media', id: mediaId };
+      }
+      const media = await this.inboxMediaAssetsRepository.findOne({
+        where: {
+          id: mediaId,
+          tenantId: context.tenantId,
+          workspaceId: context.workspaceId,
+        },
+      });
+      if (!media) {
+        return { exists: false, kind: 'leadflow_media', id: mediaId };
+      }
+      const conversation = await this.inboxConversationsRepository.findOne({
+        where: {
+          id: media.conversationId,
+          tenantId: context.tenantId,
+          workspaceId: context.workspaceId,
+        },
+      });
+      return {
+        exists: Boolean(conversation),
+        kind: 'leadflow_conversation',
+        id: media.conversationId,
+        record: conversation ?? null,
+      };
+    }
     const conversationId =
       firstParam(params.conversationId) ??
       firstParam(params.id) ??

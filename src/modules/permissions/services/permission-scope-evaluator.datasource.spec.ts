@@ -13,6 +13,7 @@ import { InboxChannelsController } from '../../inbox/channels/inbox-channels.con
 import { InboundMessageIngestionService } from '../../inbox/channels/services/inbound-message-ingestion.service';
 import { InboxChannelEntity } from '../../inbox/entities/inbox-channel.entity';
 import { InboxConversationEntity } from '../../inbox/entities/inbox-conversation.entity';
+import { InboxMediaAssetEntity } from '../../inbox/entities/inbox-media-asset.entity';
 import { InboxController } from '../../inbox/inbox.controller';
 import { InboxService } from '../../inbox/inbox.service';
 import { InboxAgentRuntimeService } from '../../inbox/services/inbox-agent-runtime.service';
@@ -69,15 +70,28 @@ describe('PermissionScopeEvaluatorService datasource wiring', () => {
     InboxConversationEntity,
     AGENCY_CONNECTION,
   );
+  const defaultMediaToken = getRepositoryToken(InboxMediaAssetEntity);
+  const agencyMediaToken = getRepositoryToken(
+    InboxMediaAssetEntity,
+    AGENCY_CONNECTION,
+  );
 
   it('injects Inbox repositories exclusively from the agency datasource', () => {
     const tokens = repositoryTokens();
 
     expect(tokens).toEqual(
-      expect.arrayContaining([agencyChannelToken, agencyConversationToken]),
+      expect.arrayContaining([
+        agencyChannelToken,
+        agencyConversationToken,
+        agencyMediaToken,
+      ]),
     );
     expect(tokens).not.toEqual(
-      expect.arrayContaining([defaultChannelToken, defaultConversationToken]),
+      expect.arrayContaining([
+        defaultChannelToken,
+        defaultConversationToken,
+        defaultMediaToken,
+      ]),
     );
   });
 
@@ -85,10 +99,18 @@ describe('PermissionScopeEvaluatorService datasource wiring', () => {
     const tokens = typeOrmModuleRepositoryTokens();
 
     expect(tokens).toEqual(
-      expect.arrayContaining([agencyChannelToken, agencyConversationToken]),
+      expect.arrayContaining([
+        agencyChannelToken,
+        agencyConversationToken,
+        agencyMediaToken,
+      ]),
     );
     expect(tokens).not.toEqual(
-      expect.arrayContaining([defaultChannelToken, defaultConversationToken]),
+      expect.arrayContaining([
+        defaultChannelToken,
+        defaultConversationToken,
+        defaultMediaToken,
+      ]),
     );
   });
 });

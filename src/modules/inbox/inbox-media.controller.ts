@@ -16,7 +16,7 @@ import { InboxMediaService } from './services/inbox-media.service';
 export class InboxMediaController {
   constructor(private readonly mediaService: InboxMediaService) {}
 
-  @Get(':id/content')
+  @Get(':mediaId/content')
   @RequireAnyPermission(
     'leadflow.inbox.conversation.view.assigned',
     'leadflow.inbox.conversation.view.client',
@@ -24,10 +24,10 @@ export class InboxMediaController {
   )
   async content(
     @RequestContextData() ctx: RequestContext,
-    @Param('id') id: string,
+    @Param('mediaId') mediaId: string,
     @Res() response: Response,
   ) {
-    const { file } = await this.mediaService.getAuthorizedAsset(ctx, id);
+    const { file } = await this.mediaService.getAuthorizedAsset(ctx, mediaId);
     response.setHeader('Content-Type', file.contentType);
     response.setHeader('Cache-Control', 'private, no-store');
     response.setHeader('X-Content-Type-Options', 'nosniff');

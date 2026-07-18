@@ -24,6 +24,7 @@ import { CrmStageEntity } from '../crm/entities/crm-stage.entity';
 import { CrmTagEntity } from '../crm/entities/crm-tag.entity';
 import { InboxChannelEntity } from '../inbox/entities/inbox-channel.entity';
 import { InboxConversationEntity } from '../inbox/entities/inbox-conversation.entity';
+import { InboxMediaAssetEntity } from '../inbox/entities/inbox-media-asset.entity';
 import { WebchatConversationEntity } from '../webchat/entities/webchat-conversation.entity';
 import { WebchatWidgetEntity } from '../webchat/entities/webchat-widget.entity';
 import { ScheduledItemEntity } from '../appointments/entities/scheduled-item.entity';
@@ -96,6 +97,7 @@ const AGENCY_CONNECTION = 'agency';
         AgencyClient,
         InboxChannelEntity,
         InboxConversationEntity,
+        InboxMediaAssetEntity,
         TeamMember,
         TeamDepartment,
         TeamSkill,

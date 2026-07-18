@@ -1,6 +1,6 @@
 import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
-import { json, urlencoded } from 'express';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
 
 function parseCorsOrigins(): string[] {
@@ -16,7 +16,9 @@ function parseCorsOrigins(): string[] {
 }
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule, { rawBody: true });
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    rawBody: true,
+  });
   app.enableShutdownHooks();
 
   const allowedOrigins = parseCorsOrigins();
@@ -49,8 +51,10 @@ async function bootstrap() {
     credentials: false,
   });
 
-  app.use(json({ limit: '10mb' }));
-  app.use(urlencoded({ extended: true, limit: '10mb' }));
+  // Use Nest's adapter-aware parsers so `rawBody: true` keeps the exact
+  // request bytes required for Meta's X-Hub-Signature-256 validation.
+  app.useBodyParser('json', { limit: '10mb' });
+  app.useBodyParser('urlencoded', { extended: true, limit: '10mb' });
 
   app.setGlobalPrefix('api');
 

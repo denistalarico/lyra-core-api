@@ -66,7 +66,7 @@ export class InboxProviderService
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               model: this.config.visionModel,
-              temperature: 0,
+              ...chatGenerationControls(this.config.visionModel),
               messages: [
                 {
                   role: 'system',
@@ -150,7 +150,10 @@ export class InboxProviderService
       async () => {
         const form = new FormData();
         form.set('model', this.config.transcriptionModel);
-        form.set('response_format', 'verbose_json');
+        form.set(
+          'response_format',
+          transcriptionResponseFormat(this.config.transcriptionModel),
+        );
         if (input.expectedLanguage)
           form.set('language', input.expectedLanguage);
         form.set(
@@ -226,7 +229,7 @@ export class InboxProviderService
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               model: this.config.decisionModel,
-              temperature: 0,
+              ...chatGenerationControls(this.config.decisionModel),
               messages: [
                 { role: 'system', content: input.systemPolicy },
                 { role: 'user', content: dataParts },
@@ -458,6 +461,22 @@ function numeric(value: unknown): number | undefined {
     : undefined;
 }
 
+function transcriptionResponseFormat(model: string): 'json' | 'verbose_json' {
+  // GPT-4o transcription models only accept JSON. Whisper keeps the richer
+  // response used for duration/language accounting.
+  return model === 'whisper-1' ? 'verbose_json' : 'json';
+}
+
+function chatGenerationControls(
+  model: string,
+): { reasoning_effort: 'none' } | { temperature: 0 } {
+  // GPT-5 reasoning models reject sampling controls such as temperature.
+  // Preserve temperature=0 for older/OpenAI-compatible chat models.
+  return /^gpt-5(?:[.-]|$)/.test(model)
+    ? { reasoning_effort: 'none' }
+    : { temperature: 0 };
+}
+
 function firstChoice(body: Record<string, unknown>): Record<string, unknown> {
   const choices = Array.isArray(body.choices) ? body.choices : [];
   return choices[0] && typeof choices[0] === 'object'
@@ -516,6 +535,8 @@ function extension(mime: string): string {
   return (
     (
       {
+        'audio/wav': 'wav',
+        'audio/x-wav': 'wav',
         'audio/ogg': 'ogg',
         'audio/mpeg': 'mp3',
         'audio/mp4': 'm4a',

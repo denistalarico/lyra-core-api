@@ -57,7 +57,8 @@ export class AudioTranscriptionWorker {
            AND asset.kind = 'audio' AND asset.status = 'available'
            AND derivative.attempt_count < 3
            AND (
-             (derivative.status IN ('pending','failed') AND COALESCE(derivative.next_attempt_at, now()) <= now())
+             (derivative.status = 'pending' AND COALESCE(derivative.next_attempt_at, now()) <= now())
+             OR (derivative.status = 'failed' AND derivative.next_attempt_at IS NOT NULL AND derivative.next_attempt_at <= now())
              OR (derivative.status = 'processing' AND derivative.locked_at < now() - interval '2 minutes')
            )
          ORDER BY derivative.created_at, derivative.id

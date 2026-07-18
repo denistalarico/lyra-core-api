@@ -183,6 +183,60 @@ describe('InboxProviderService', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it('uses the JSON response format supported by GPT-4o transcription models', async () => {
+    const fetchMock = jest.spyOn(global, 'fetch').mockResolvedValue(
+      Response.json({
+        text: 'Mensagem sintética para o teste supervisionado.',
+        language: 'pt',
+        duration: 2.5,
+      }),
+    );
+    const provider = liveTranscriptionProvider();
+
+    await expect(
+      provider.transcribe({
+        ...transcriptionInput(),
+        mimeType: 'audio/wav',
+        bytes: Buffer.from('RIFF'),
+      }),
+    ).resolves.toMatchObject({
+      outcome: 'content',
+      text: 'Mensagem sintética para o teste supervisionado.',
+      model: 'gpt-4o-mini-transcribe',
+    });
+
+    const init = fetchMock.mock.calls[0][1] as RequestInit;
+    expect(init.body).toBeInstanceOf(FormData);
+    expect((init.body as FormData).get('response_format')).toBe('json');
+    expect(
+      ((init.body as FormData).get('file') as unknown as { name: string }).name,
+    ).toBe('a.wav');
+  });
+
+  it('preserves verbose JSON for Whisper transcription compatibility', async () => {
+    const fetchMock = jest.spyOn(global, 'fetch').mockResolvedValue(
+      Response.json({
+        text: 'Mensagem via Whisper.',
+        language: 'pt',
+        duration: 1.5,
+      }),
+    );
+    const provider = liveTranscriptionProvider({
+      transcriptionModel: 'whisper-1',
+    });
+
+    await expect(
+      provider.transcribe(transcriptionInput()),
+    ).resolves.toMatchObject({
+      text: 'Mensagem via Whisper.',
+      language: 'pt',
+      usage: { audioSeconds: 1.5 },
+    });
+
+    const init = fetchMock.mock.calls[0][1] as RequestInit;
+    expect((init.body as FormData).get('response_format')).toBe('verbose_json');
+  });
+
   it('categorizes a provider timeout as retryable and persists the failure', async () => {
     jest
       .spyOn(global, 'fetch')
@@ -201,9 +255,13 @@ describe('InboxProviderService', () => {
     );
   });
 
-  it.each(['gpt-5.6-terra', 'gpt-5.6-luna'])(
+  it.each([
+    ['gpt-5.6-terra', { reasoning_effort: 'none' }, 'temperature'],
+    ['gpt-5.6-luna', { reasoning_effort: 'none' }, 'temperature'],
+    ['gpt-4o', { temperature: 0 }, 'reasoning_effort'],
+  ] as const)(
     'serializes strict Chat Completions Structured Outputs for %s without leaking the key into the body',
-    async (model) => {
+    async (model, generationControls, absentControl) => {
       const fetchMock = jest.spyOn(global, 'fetch').mockResolvedValue(
         Response.json({
           choices: [
@@ -250,7 +308,8 @@ describe('InboxProviderService', () => {
         }
       ).proposed_actions.items;
       expect(serialized).not.toContain('test-secret-never-in-body');
-      expect(body).toMatchObject({ model });
+      expect(body).toMatchObject({ model, ...generationControls });
+      expect(body).not.toHaveProperty(absentControl);
       expect(schema).toMatchObject({ additionalProperties: false });
       expect(actionItems).toMatchObject({
         additionalProperties: false,

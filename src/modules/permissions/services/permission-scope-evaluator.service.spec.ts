@@ -14,6 +14,7 @@ function createService() {
   const agencyContactsRepository = createRepositoryMock();
   const inboxChannelsRepository = createRepositoryMock();
   const inboxConversationsRepository = createRepositoryMock();
+  const inboxMediaAssetsRepository = createRepositoryMock();
   const webchatConversationsRepository = createRepositoryMock();
   const webchatWidgetsRepository = createRepositoryMock();
   const scheduledItemsRepository = createRepositoryMock();
@@ -59,6 +60,7 @@ function createService() {
     agencyContactsRepository as never,
     inboxChannelsRepository as never,
     inboxConversationsRepository as never,
+    inboxMediaAssetsRepository as never,
     webchatConversationsRepository as never,
     webchatWidgetsRepository as never,
     scheduledItemsRepository as never,
@@ -106,6 +108,7 @@ function createService() {
     agencyContactsRepository,
     inboxChannelsRepository,
     inboxConversationsRepository,
+    inboxMediaAssetsRepository,
     webchatConversationsRepository,
     webchatWidgetsRepository,
     scheduledItemsRepository,
@@ -261,6 +264,68 @@ describe('PermissionScopeEvaluatorService', () => {
         {
           routePath: '/inbox/conversations/:id',
           params: { id: 'conversation-1' },
+        },
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('resolves LeadFlow media access through its assigned conversation', async () => {
+    const {
+      service,
+      inboxMediaAssetsRepository,
+      inboxConversationsRepository,
+    } = createService();
+    inboxMediaAssetsRepository.findOne.mockResolvedValue({
+      id: 'media-1',
+      tenantId: 'tenant-1',
+      workspaceId: 'workspace-1',
+      conversationId: 'conversation-1',
+    });
+    inboxConversationsRepository.findOne.mockResolvedValue({
+      id: 'conversation-1',
+      tenantId: 'tenant-1',
+      workspaceId: 'workspace-1',
+      assignedUserId: 'user-1',
+    });
+
+    await expect(
+      service.assertScope(
+        { ...baseContext, role: PlatformRoleKey.Member },
+        'leadflow.inbox.conversation.view.assigned',
+        {
+          routePath: '/inbox/media/:mediaId/content',
+          params: { mediaId: 'media-1' },
+        },
+      ),
+    ).resolves.toBeUndefined();
+  });
+
+  it('denies LeadFlow media access when its conversation is assigned elsewhere', async () => {
+    const {
+      service,
+      inboxMediaAssetsRepository,
+      inboxConversationsRepository,
+    } = createService();
+    inboxMediaAssetsRepository.findOne.mockResolvedValue({
+      id: 'media-1',
+      tenantId: 'tenant-1',
+      workspaceId: 'workspace-1',
+      conversationId: 'conversation-1',
+    });
+    inboxConversationsRepository.findOne.mockResolvedValue({
+      id: 'conversation-1',
+      tenantId: 'tenant-1',
+      workspaceId: 'workspace-1',
+      assignedUserId: 'user-2',
+    });
+
+    await expect(
+      service.assertScope(
+        { ...baseContext, role: PlatformRoleKey.Member },
+        'leadflow.inbox.conversation.view.assigned',
+        {
+          routePath: '/inbox/media/:mediaId/content',
+          params: { mediaId: 'media-1' },
         },
       ),
     ).rejects.toBeInstanceOf(ForbiddenException);
