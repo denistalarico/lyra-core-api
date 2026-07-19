@@ -80,7 +80,14 @@ export type AgentDecisionV1 = {
   confidence: number;
   evidence_refs: string[];
   proposed_actions: Array<{
-    type: 'set_stage' | 'add_tag' | 'set_summary' | 'close' | 'handoff';
+    type:
+      | 'set_stage'
+      | 'add_tag'
+      | 'set_summary'
+      | 'set_service'
+      | 'set_urgency'
+      | 'close'
+      | 'handoff';
     value?: string | null;
   }>;
 };

@@ -17,6 +17,8 @@ import { TestInboundMessageDto } from './dto/test-inbound-message.dto';
 import { InboundMessageIngestionService } from './services/inbound-message-ingestion.service';
 import { SimulateAgentActivationDto } from '../dto/simulate-agent-activation.dto';
 import { AgentActivationPolicyService } from '../services/agent-activation-policy.service';
+import { LeadFlowAgentBindingReconcilerService } from '../../leadflow-agents/services/leadflow-agent-binding-reconciler.service';
+import { ReconcileDefaultBindingDto } from './dto/reconcile-default-binding.dto';
 
 @Controller('inbox/channels')
 @UseGuards(JwtAuthGuard, PermissionsGuard)
@@ -25,7 +27,22 @@ export class InboxChannelsController {
   constructor(
     private readonly inboundIngestionService: InboundMessageIngestionService,
     private readonly activationPolicyService: AgentActivationPolicyService,
+    private readonly bindingReconciler: LeadFlowAgentBindingReconcilerService,
   ) {}
+
+  @Post('bindings/reconcile')
+  @RequirePermission('leadflow.channels.channel.update.admin')
+  reconcileDefaultBinding(
+    @RequestContextData() ctx: RequestContext,
+    @Body() dto: ReconcileDefaultBindingDto,
+  ) {
+    return this.bindingReconciler.reconcile(ctx, {
+      channelId: dto.channelId,
+      preferredAgentId: dto.defaultAgentId,
+      trigger: dto.defaultAgentId ? 'default_changed' : 'admin_check',
+      requireChoice: true,
+    });
+  }
 
   @Post('test-inbound')
   @RequirePermission('leadflow.channels.channel.update.admin')

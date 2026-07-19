@@ -9,7 +9,14 @@ import { AgentDecisionV1 } from './inbox-runtime.contracts';
 
 export type CommercialActionPlanItem = {
   key: string;
-  type: 'set_stage' | 'add_tag' | 'set_summary' | 'close' | 'handoff';
+  type:
+    | 'set_stage'
+    | 'add_tag'
+    | 'set_summary'
+    | 'set_service'
+    | 'set_urgency'
+    | 'close'
+    | 'handoff';
   allowed: boolean;
   reason: string | null;
   value?: string;
@@ -416,6 +423,21 @@ export class BusinessModeActionPlanner {
         reason: opportunity ? null : 'opportunity_missing',
         value: input.decision.agent_summary.trim().slice(0, 4_000),
       });
+    if (input.decision.service?.trim())
+      result.push({
+        key: 'service',
+        type: 'set_service',
+        allowed: Boolean(opportunity),
+        reason: opportunity ? null : 'opportunity_missing',
+        value: input.decision.service.trim().slice(0, 180),
+      });
+    result.push({
+      key: 'urgency',
+      type: 'set_urgency',
+      allowed: Boolean(opportunity),
+      reason: opportunity ? null : 'opportunity_missing',
+      value: input.decision.urgency,
+    });
     if (input.decision.handoff)
       result.push({
         key: 'handoff',
@@ -450,9 +472,15 @@ function validAction(value: unknown): boolean {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const item = value as Record<string, unknown>;
   return (
-    ['set_stage', 'add_tag', 'set_summary', 'close', 'handoff'].includes(
-      String(item.type),
-    ) &&
+    [
+      'set_stage',
+      'add_tag',
+      'set_summary',
+      'set_service',
+      'set_urgency',
+      'close',
+      'handoff',
+    ].includes(String(item.type)) &&
     (item.value === undefined ||
       item.value === null ||
       typeof item.value === 'string')

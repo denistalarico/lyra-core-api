@@ -200,11 +200,9 @@ run('InboxChannelLifecycleService PostgreSQL isolation', () => {
       ).count(),
     ).toBe(1);
     expect(
-      (
-        await AgencyDataSource.getRepository(InboxDomainOutboxEntity).find({
-          order: { eventName: 'ASC' },
-        })
-      ).map((event) => event.eventName),
+      (await AgencyDataSource.getRepository(InboxDomainOutboxEntity).find())
+        .map((event) => event.eventName)
+        .sort(),
     ).toEqual([
       'inbox.channel.credential_removed',
       'inbox.channel.disconnect_requested',

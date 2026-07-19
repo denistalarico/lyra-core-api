@@ -43,6 +43,7 @@ import type {
 } from '../types/leadflow-agent.types';
 import { LeadFlowAgentPresetService } from './leadflow-agent-preset.service';
 import { LeadFlowAgentRuntimeConfigService } from './leadflow-agent-runtime-config.service';
+import { LeadFlowAgentBindingReconcilerService } from './leadflow-agent-binding-reconciler.service';
 
 const AGENCY_CONNECTION = 'agency';
 
@@ -68,6 +69,7 @@ export class LeadFlowAgentService {
     private readonly presetService: LeadFlowAgentPresetService,
     private readonly runtimeConfigService: LeadFlowAgentRuntimeConfigService,
     private readonly permissionService: PlatformPermissionService,
+    private readonly bindingReconciler: LeadFlowAgentBindingReconcilerService,
   ) {}
 
   async list(ctx: RequestContext): Promise<LeadFlowAgentListResponse> {
@@ -304,6 +306,10 @@ export class LeadFlowAgentService {
     agent.updatedById = ctx.userId ?? null;
     await this.agentsRepository.save(agent);
 
+    await this.bindingReconciler.reconcile(ctx, {
+      trigger: 'agent_published',
+    });
+
     return this.detail(ctx, agent.id);
   }
 
@@ -367,6 +373,12 @@ export class LeadFlowAgentService {
     agent.status = status;
     agent.updatedById = ctx.userId ?? null;
     await this.agentsRepository.save(agent);
+
+    if (status === LeadFlowAgentStatus.Active) {
+      await this.bindingReconciler.reconcile(ctx, {
+        trigger: 'agent_activated',
+      });
+    }
 
     return this.detail(ctx, agent.id);
   }

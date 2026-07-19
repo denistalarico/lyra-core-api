@@ -134,4 +134,47 @@ describe('AgentDecision v1 schema and policy', () => {
       reason: 'business_mode_mismatch',
     });
   });
+
+  it('keeps service and urgency as separate selectively approvable CRM actions', async () => {
+    const dataSource = {
+      getRepository: () => ({
+        find: jest.fn().mockResolvedValue([]),
+        createQueryBuilder: () => ({
+          where: () => ({
+            andWhere: () => ({ getMany: jest.fn().mockResolvedValue([]) }),
+          }),
+        }),
+      }),
+    };
+    const planner = new BusinessModeActionPlanner(dataSource as never);
+    const plan = await planner.plan({
+      tenantId: 't',
+      workspaceId: 'w',
+      businessMode: 'services',
+      opportunity: {
+        id: 'o',
+        pipelineId: 'p',
+        businessMode: 'services',
+      } as never,
+      decision: {
+        ...validDecision,
+        service: 'Consultoria',
+        urgency: 'urgent',
+      },
+    });
+    expect(plan).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          key: 'service',
+          type: 'set_service',
+          allowed: true,
+        }),
+        expect.objectContaining({
+          key: 'urgency',
+          type: 'set_urgency',
+          allowed: true,
+        }),
+      ]),
+    );
+  });
 });

@@ -489,7 +489,7 @@ run('Inbox Runtime PostgreSQL concurrency', () => {
     ).rejects.toThrow('Decision is no longer pending review.');
   });
 
-  it('applies a partial approval exactly once when the operator retries it', async () => {
+  it('applies a partial approval once and rejects a retry without duplicating effects', async () => {
     const conversationId = await insertConversation(
       tenantId,
       workspaceId,
@@ -536,7 +536,9 @@ run('Inbox Runtime PostgreSQL concurrency', () => {
     );
     const ctx = { tenantId, workspaceId, userId: randomUUID() };
     await runtime.review(ctx, conversationId, decisionId, true, ['handoff']);
-    await runtime.review(ctx, conversationId, decisionId, true, ['handoff']);
+    await expect(
+      runtime.review(ctx, conversationId, decisionId, true, ['handoff']),
+    ).rejects.toThrow('Decision actions were already applied.');
     const [conversation] = await AgencyDataSource.query<
       Array<{ ownership_state: string; ownership_version: number }>
     >(
@@ -552,6 +554,95 @@ run('Inbox Runtime PostgreSQL concurrency', () => {
       ownership_version: 2,
     });
     expect(events.count).toBe('1');
+  });
+
+  it('approves analysis without actions exactly once and produces no effect', async () => {
+    const conversationId = await insertConversation(
+      tenantId,
+      workspaceId,
+      'ai_active',
+    );
+    const batchId = randomUUID();
+    const decisionId = randomUUID();
+    await AgencyDataSource.query(
+      `INSERT INTO inbox_processing_batches (id,tenant_id,workspace_id,conversation_id,channel_id,status,due_at)
+       VALUES ($1,$2,$3,$4,$5,'completed',now())`,
+      [batchId, tenantId, workspaceId, conversationId, randomUUID()],
+    );
+    await AgencyDataSource.query(
+      `INSERT INTO inbox_agent_decisions
+        (id,tenant_id,workspace_id,conversation_id,batch_id,ownership_version,
+         idempotency_key,correlation_id,status,action_plan)
+       VALUES ($1,$2,$3,$4,$5,1,$6,$7,'proposed',$8::jsonb)`,
+      [
+        decisionId,
+        tenantId,
+        workspaceId,
+        conversationId,
+        batchId,
+        randomUUID(),
+        randomUUID(),
+        JSON.stringify([
+          { key: 'handoff', type: 'handoff', allowed: true, reason: null },
+        ]),
+      ],
+    );
+    const runtime = new InboxAgentRuntimeService(
+      AgencyDataSource,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+    const ctx = { tenantId, workspaceId, userId: randomUUID() };
+    await runtime.review(ctx, conversationId, decisionId, true, [], 'analysis');
+    await runtime.review(ctx, conversationId, decisionId, true, [], 'analysis');
+    const [decision] = await AgencyDataSource.query<
+      Array<{
+        status: string;
+        review_outcome: string;
+        reviewed_action_keys: string[];
+        applied_actions: unknown[];
+      }>
+    >(
+      `SELECT status,review_outcome,reviewed_action_keys,applied_actions
+         FROM inbox_agent_decisions WHERE id=$1`,
+      [decisionId],
+    );
+    const [conversation] = await AgencyDataSource.query<
+      Array<{ ownership_state: string; ownership_version: number }>
+    >(
+      `SELECT ownership_state,ownership_version FROM inbox_conversations WHERE id=$1`,
+      [conversationId],
+    );
+    const [audit] = await AgencyDataSource.query<Array<{ count: string }>>(
+      `SELECT count(*)::text count FROM inbox_conversation_events
+        WHERE conversation_id=$1 AND event_type='agent_decision_reviewed'`,
+      [conversationId],
+    );
+    expect(decision).toMatchObject({
+      status: 'approved',
+      review_outcome: 'analysis_approved',
+      reviewed_action_keys: [],
+      applied_actions: [],
+    });
+    expect(conversation).toMatchObject({
+      ownership_state: 'ai_active',
+      ownership_version: 1,
+    });
+    expect(audit.count).toBe('1');
+    await expect(
+      runtime.review(
+        ctx,
+        conversationId,
+        decisionId,
+        true,
+        ['handoff'],
+        'actions',
+      ),
+    ).rejects.toThrow('Decision is no longer pending review.');
   });
 
   it('recovers an abandoned outbox lock and two relays publish one logical event', async () => {
@@ -573,6 +664,71 @@ run('Inbox Runtime PostgreSQL concurrency', () => {
       Array<{ status: string; attempts: number }>
     >(`SELECT status,attempts FROM inbox_domain_outbox WHERE id=$1`, [eventId]);
     expect(row.status).toBe('published');
+  });
+
+  it('finalizes realtime-only events as skipped while realtime is disabled', async () => {
+    const eventId = randomUUID();
+    const otherWorkspace = randomUUID();
+    await AgencyDataSource.query(
+      `INSERT INTO inbox_domain_outbox
+        (id,tenant_id,workspace_id,aggregate_type,aggregate_id,event_name,
+         idempotency_key,status,attempts,available_at)
+       VALUES ($1,$2,$3,'conversation',$4,'leadflow.inbox.conversation.updated',
+               $5,'pending',0,now()),
+              ($6,$2,$7,'conversation',$8,'leadflow.inbox.conversation.updated',
+               $9,'pending',0,now())`,
+      [
+        eventId,
+        tenantId,
+        workspaceId,
+        randomUUID(),
+        randomUUID(),
+        randomUUID(),
+        otherWorkspace,
+        randomUUID(),
+        randomUUID(),
+      ],
+    );
+    const notify = jest.fn();
+    const relay = new InboxOutboxRelayService(
+      AgencyDataSource,
+      { notify } as never,
+      { realtimeEnabled: false } as never,
+    );
+    await relay.processPending(10);
+    expect(notify).not.toHaveBeenCalled();
+    const [row] = await AgencyDataSource.query<
+      Array<{ status: string; skip_reason: string; retain_until: Date }>
+    >(
+      'SELECT status,skip_reason,retain_until FROM inbox_domain_outbox WHERE id=$1',
+      [eventId],
+    );
+    expect(row.status).toBe('skipped');
+    expect(row.skip_reason).toBe('realtime_disabled');
+    expect(row.retain_until).toBeTruthy();
+
+    const inspected = await relay.inspect(tenantId, workspaceId);
+    expect(inspected.items).toHaveLength(1);
+    expect(inspected.items[0]).not.toHaveProperty('payload');
+    const actorUserId = randomUUID();
+    await expect(
+      relay.reprocess(tenantId, workspaceId, eventId, actorUserId),
+    ).resolves.toEqual({ reprocessed: true });
+    await expect(
+      relay.reprocess(tenantId, workspaceId, inspected.items[0].aggregateId),
+    ).resolves.toEqual({ reprocessed: false });
+    const [audit] = await AgencyDataSource.query<
+      Array<{ actor_user_id: string; metadata: Record<string, unknown> }>
+    >(
+      `SELECT actor_user_id,metadata FROM platform_permission_audit_events
+        WHERE tenant_id=$1 AND workspace_id=$2
+          AND action='inbox.outbox.reprocessed' AND resource_id=$3`,
+      [tenantId, workspaceId, eventId],
+    );
+    expect(audit).toEqual({
+      actor_user_id: actorUserId,
+      metadata: { outcome: 'queued' },
+    });
   });
 
   it('rolls back state and outbox atomically and scopes decision queries by workspace', async () => {

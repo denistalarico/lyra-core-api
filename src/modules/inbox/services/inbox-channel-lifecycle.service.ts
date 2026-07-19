@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, EntityManager } from 'typeorm';
@@ -11,6 +12,7 @@ import { InboxChannelEntity } from '../entities/inbox-channel.entity';
 import { InboxChannelLifecycleRequestEntity } from '../entities/inbox-channel-lifecycle-request.entity';
 import { InboxDomainOutboxEntity } from '../entities/inbox-domain-outbox.entity';
 import { mapInboxChannel } from '../mappers/inbox-channel.mapper';
+import { LeadFlowAgentBindingReconcilerService } from '../../leadflow-agents/services/leadflow-agent-binding-reconciler.service';
 
 type Operation = 'pause' | 'resume' | 'disconnect';
 
@@ -18,6 +20,8 @@ type Operation = 'pause' | 'resume' | 'disconnect';
 export class InboxChannelLifecycleService {
   constructor(
     @InjectDataSource('agency') private readonly dataSource: DataSource,
+    @Optional()
+    private readonly bindingReconciler?: LeadFlowAgentBindingReconcilerService,
   ) {}
 
   async execute(
@@ -31,7 +35,7 @@ export class InboxChannelLifecycleService {
     const workspaceId = this.requireWorkspace(ctx);
     const sanitizedReason = reason?.trim().slice(0, 500) || null;
 
-    return this.dataSource.transaction(async (manager) => {
+    const result = await this.dataSource.transaction(async (manager) => {
       // Lock before reading the idempotency record. Concurrent requests with
       // the same key then serialize on the channel and the second one observes
       // the record written by the first instead of failing its unique index.
@@ -210,6 +214,13 @@ export class InboxChannelLifecycleService {
         channel: mapInboxChannel(channel),
       };
     });
+    if (operation === 'resume') {
+      await this.bindingReconciler?.reconcile(ctx, {
+        channelId,
+        trigger: 'channel_resumed',
+      });
+    }
+    return result;
   }
 
   private async recordRequest(

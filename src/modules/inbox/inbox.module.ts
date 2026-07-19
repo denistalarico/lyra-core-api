@@ -65,6 +65,8 @@ import { InboxChannelLifecycleService } from './services/inbox-channel-lifecycle
 import { LeadFlowAgentChannelBindingEntity } from '../leadflow-agents/entities/leadflow-agent-channel-binding.entity';
 import { LeadFlowAgentEntity } from '../leadflow-agents/entities/leadflow-agent.entity';
 import { AgentActivationPolicyService } from './services/agent-activation-policy.service';
+import { LeadFlowAgentsModule } from '../leadflow-agents/leadflow-agents.module';
+import { InboxOutboxAdminController } from './inbox-outbox-admin.controller';
 
 @Module({
   imports: [
@@ -72,6 +74,7 @@ import { AgentActivationPolicyService } from './services/agent-activation-policy
     PermissionsModule,
     NotificationsModule,
     FilesModule,
+    LeadFlowAgentsModule,
     TypeOrmModule.forFeature(
       [
         InboxChannelEntity,
@@ -106,6 +109,7 @@ import { AgentActivationPolicyService } from './services/agent-activation-policy
     WhatsAppEmbeddedSignupController,
     WhatsAppChannelHealthController,
     InboxMediaController,
+    InboxOutboxAdminController,
   ],
   providers: [
     InboxService,

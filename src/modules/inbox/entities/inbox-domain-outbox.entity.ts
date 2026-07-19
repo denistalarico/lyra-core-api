@@ -33,7 +33,14 @@ export class InboxDomainOutboxEntity {
   @Column({ name: 'published_at', type: 'timestamptz', nullable: true })
   publishedAt!: Date | null;
   @Column({ type: 'varchar', length: 24, default: 'pending' })
-  status!: 'pending' | 'processing' | 'published' | 'dead_letter';
+  status!: 'pending' | 'processing' | 'published' | 'skipped' | 'dead_letter';
+  @Column({
+    name: 'delivery_kind',
+    type: 'varchar',
+    length: 24,
+    default: 'realtime',
+  })
+  deliveryKind!: 'realtime';
   @Column({ type: 'int', default: 0 }) attempts!: number;
   @Column({ name: 'available_at', type: 'timestamptz', default: () => 'now()' })
   availableAt!: Date;
@@ -45,6 +52,12 @@ export class InboxDomainOutboxEntity {
   lastError!: string | null;
   @Column({ name: 'dead_lettered_at', type: 'timestamptz', nullable: true })
   deadLetteredAt!: Date | null;
+  @Column({ name: 'skipped_at', type: 'timestamptz', nullable: true })
+  skippedAt!: Date | null;
+  @Column({ name: 'skip_reason', type: 'varchar', length: 80, nullable: true })
+  skipReason!: string | null;
+  @Column({ name: 'retain_until', type: 'timestamptz', nullable: true })
+  retainUntil!: Date | null;
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;
   @Column({ name: 'updated_at', type: 'timestamptz', default: () => 'now()' })

@@ -11,6 +11,7 @@ import { InboxChannelEntity } from '../../../entities/inbox-channel.entity';
 import { InboxDomainOutboxEntity } from '../../../entities/inbox-domain-outbox.entity';
 import { SettingsCryptoService } from '../../../../../common/crypto/settings-crypto.service';
 import { MetaGraphService } from '../../meta/services/meta-graph.service';
+import { LeadFlowAgentBindingReconcilerService } from '../../../../leadflow-agents/services/leadflow-agent-binding-reconciler.service';
 
 type StartInput = {
   tenantId: string;
@@ -45,6 +46,7 @@ export class WhatsAppEmbeddedSignupService {
     @InjectDataSource('agency') private readonly dataSource: DataSource,
     private readonly metaGraphService: MetaGraphService,
     private readonly cryptoService: SettingsCryptoService,
+    private readonly bindingReconciler: LeadFlowAgentBindingReconcilerService,
   ) {}
 
   async start(input: StartInput) {
@@ -198,6 +200,7 @@ export class WhatsAppEmbeddedSignupService {
 
     let webhookSubscription: Record<string, unknown> | null = null;
     let phoneRegistration: Record<string, unknown> | null = null;
+    let wasReconnect = false;
 
     try {
       const exchanged =
@@ -276,7 +279,7 @@ export class WhatsAppEmbeddedSignupService {
         await this.channelsRepository.save(channel);
       }
 
-      const wasReconnect = Boolean(
+      wasReconnect = Boolean(
         channel.disconnectedAt ||
         channel.credentialRemovedAt ||
         channel.connectionStatus === 'disconnected',
@@ -390,6 +393,18 @@ export class WhatsAppEmbeddedSignupService {
 
       throw error;
     }
+
+    await this.bindingReconciler.reconcile(
+      {
+        tenantId: channel.tenantId,
+        workspaceId: channel.workspaceId,
+        userId: session.userId ?? undefined,
+      },
+      {
+        channelId: channel.id,
+        trigger: wasReconnect ? 'channel_reconnected' : 'channel_connected',
+      },
+    );
 
     return {
       ...(await this.getStatus(

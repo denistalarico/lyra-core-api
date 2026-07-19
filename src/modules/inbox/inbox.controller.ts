@@ -393,6 +393,51 @@ export class InboxController {
             (item): item is string => typeof item === 'string',
           )
         : [],
+      'actions',
+    );
+  }
+
+  @Post('conversations/:id/agent-decisions/:decisionId/preview')
+  @RequireAnyPermission(
+    'leadflow.inbox.conversation.view.assigned',
+    'leadflow.inbox.conversation.view.client',
+    'leadflow.inbox.conversation.view.all',
+  )
+  previewAgentDecision(
+    @RequestContextData() ctx: RequestContext,
+    @Param('id') id: string,
+    @Param('decisionId') decisionId: string,
+    @Body() body: DecisionApprovalBody,
+  ) {
+    return this.agentRuntimeService.previewReview(
+      ctx,
+      id,
+      decisionId,
+      Array.isArray(body.actionKeys)
+        ? body.actionKeys.filter(
+            (item): item is string => typeof item === 'string',
+          )
+        : [],
+    );
+  }
+
+  @Post('conversations/:id/agent-decisions/:decisionId/approve-analysis')
+  @RequireAnyPermission(
+    'leadflow.inbox.conversation.reply.assigned',
+    'leadflow.inbox.conversation.reply.client',
+  )
+  approveAgentDecisionAnalysis(
+    @RequestContextData() ctx: RequestContext,
+    @Param('id') id: string,
+    @Param('decisionId') decisionId: string,
+  ) {
+    return this.agentRuntimeService.review(
+      ctx,
+      id,
+      decisionId,
+      true,
+      [],
+      'analysis',
     );
   }
 

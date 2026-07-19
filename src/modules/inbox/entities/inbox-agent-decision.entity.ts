@@ -14,6 +14,12 @@ export type InboxAgentDecisionStatus =
   | 'invalidated'
   | 'failed';
 
+export type InboxAgentDecisionReviewOutcome =
+  | 'analysis_approved'
+  | 'actions_partially_approved'
+  | 'actions_applied'
+  | 'decision_rejected';
+
 @Entity('inbox_agent_decisions')
 @Index('idx_inbox_decision_scope', [
   'tenantId',
@@ -104,6 +110,19 @@ export class InboxAgentDecisionEntity {
     | null;
   @Column({ name: 'reviewed_at', type: 'timestamptz', nullable: true })
   reviewedAt!: Date | null;
+  @Column({
+    name: 'review_outcome',
+    type: 'varchar',
+    length: 40,
+    nullable: true,
+  })
+  reviewOutcome!: InboxAgentDecisionReviewOutcome | null;
+  @Column({
+    name: 'reviewed_action_keys',
+    type: 'jsonb',
+    default: () => "'[]'::jsonb",
+  })
+  reviewedActionKeys!: string[];
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;
   @UpdateDateColumn({ name: 'updated_at', type: 'timestamptz' })

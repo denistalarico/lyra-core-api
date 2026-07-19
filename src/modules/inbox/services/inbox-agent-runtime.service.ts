@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   NotFoundException,
@@ -17,8 +18,10 @@ import { LeadFlowClientSettingsEntity } from '../../leadflow-settings/entities/l
 import { LeadFlowBusinessModeTemplateEntity } from '../../leadflow-settings/entities/leadflow-business-mode-template.entity';
 import { LeadFlowSettingsContextType } from '../../leadflow-settings/enums/leadflow-settings-context-type.enum';
 import { InboxAgentDecisionEntity } from '../entities/inbox-agent-decision.entity';
+import type { InboxAgentDecisionReviewOutcome } from '../entities/inbox-agent-decision.entity';
 import { InboxChannelEntity } from '../entities/inbox-channel.entity';
 import { InboxConversationEntity } from '../entities/inbox-conversation.entity';
+import { InboxConversationEventEntity } from '../entities/inbox-conversation-event.entity';
 import { InboxMediaAssetEntity } from '../entities/inbox-media-asset.entity';
 import { InboxMediaDerivativeEntity } from '../entities/inbox-media-derivative.entity';
 import { InboxMessageEntity } from '../entities/inbox-message.entity';
@@ -38,6 +41,32 @@ import {
 } from '../runtime/inbox-runtime.contracts';
 
 export type AgentDecisionProposal = AgentDecisionV1;
+
+export function resolveDecisionReviewOutcome(
+  actionPlan: Array<Record<string, unknown>>,
+  approvalKind: 'analysis' | 'actions',
+  actionKeys: string[],
+): InboxAgentDecisionReviewOutcome {
+  if (approvalKind === 'analysis') return 'analysis_approved';
+  const allowedCount = actionPlan.filter(
+    (item) => item.allowed === true,
+  ).length;
+  return actionKeys.length < allowedCount
+    ? 'actions_partially_approved'
+    : 'actions_applied';
+}
+
+export function sameReviewActionKeys(
+  left: string[] | null | undefined,
+  right: string[],
+) {
+  const normalizedLeft = [...new Set(left ?? [])].sort();
+  const normalizedRight = [...new Set(right)].sort();
+  return (
+    normalizedLeft.length === normalizedRight.length &&
+    normalizedLeft.every((key, index) => key === normalizedRight[index])
+  );
+}
 
 export function orderContextMessages(messages: InboxMessageEntity[]) {
   return [...messages].sort((left, right) => {
@@ -530,12 +559,105 @@ export class InboxAgentRuntimeService {
       take: 20,
     });
   }
+
+  async previewReview(
+    ctx: RequestContext,
+    conversationId: string,
+    decisionId: string,
+    actionKeys: string[] = [],
+  ) {
+    if (!ctx.workspaceId) throw new NotFoundException('Decision not found.');
+    const decision = await this.dataSource
+      .getRepository(InboxAgentDecisionEntity)
+      .findOneBy({
+        id: decisionId,
+        tenantId: ctx.tenantId,
+        workspaceId: ctx.workspaceId,
+        conversationId,
+      });
+    const conversation = await this.dataSource
+      .getRepository(InboxConversationEntity)
+      .findOneBy({
+        id: conversationId,
+        tenantId: ctx.tenantId,
+        workspaceId: ctx.workspaceId,
+      });
+    if (!decision || !conversation) {
+      throw new NotFoundException('Decision not found.');
+    }
+    const opportunity = await this.dataSource
+      .getRepository(CrmOpportunityEntity)
+      .findOneBy(
+        conversation.opportunityId
+          ? {
+              id: conversation.opportunityId,
+              tenantId: ctx.tenantId,
+              workspaceId: ctx.workspaceId,
+            }
+          : {
+              inboxConversationId: conversation.id,
+              tenantId: ctx.tenantId,
+              workspaceId: ctx.workspaceId,
+            },
+      );
+    const selected = new Set(actionKeys);
+    const plan = Array.isArray(decision.actionPlan) ? decision.actionPlan : [];
+    return {
+      decisionId: decision.id,
+      status: decision.status,
+      reviewable:
+        decision.status === 'proposed' &&
+        decision.ownershipVersion === conversation.ownershipVersion &&
+        conversation.ownershipState === 'ai_active',
+      ownership: {
+        currentVersion: conversation.ownershipVersion,
+        decisionVersion: decision.ownershipVersion,
+        state: conversation.ownershipState,
+      },
+      current: {
+        stageId: opportunity?.stageId ?? null,
+        priority: opportunity?.priority ?? null,
+        service:
+          typeof opportunity?.businessContext?.service === 'string'
+            ? opportunity.businessContext.service
+            : null,
+        ownershipState: conversation.ownershipState,
+      },
+      proposed: plan.map((action) => ({
+        key: recordString(action.key),
+        type: recordString(action.type),
+        value: typeof action.value === 'string' ? action.value : null,
+        selected: selected.has(recordString(action.key)),
+        allowed: action.allowed === true,
+        reason: typeof action.reason === 'string' ? action.reason : null,
+        effect:
+          action.type === 'handoff' || action.type === 'close'
+            ? 'ownership'
+            : 'crm',
+        idempotencyKey: `decision:${decision.id}:action:${recordString(action.key)}`,
+      })),
+      rejectedByPolicy: plan
+        .filter((action) => action.allowed !== true)
+        .map((action) => ({
+          key: recordString(action.key),
+          reason:
+            typeof action.reason === 'string'
+              ? action.reason
+              : 'policy_rejected',
+        })),
+      externalEffects: [],
+    };
+  }
+
   async review(
     ctx: RequestContext,
     conversationId: string,
     decisionId: string,
     approve: boolean,
     actionKeys: string[] = [],
+    approvalKind: 'analysis' | 'actions' = actionKeys.length
+      ? 'actions'
+      : 'analysis',
   ) {
     if (!ctx.workspaceId || !ctx.userId)
       throw new NotFoundException('Decision not found.');
@@ -553,7 +675,49 @@ export class InboxAgentRuntimeService {
           lock: { mode: 'pessimistic_write' },
         });
       if (!decision) throw new NotFoundException('Decision not found.');
-      if (decision.status === 'approved' && approve) return decision;
+      const uniqueKeys = [...new Set(actionKeys)].slice(0, 30);
+      if (approve && approvalKind === 'actions' && uniqueKeys.length === 0) {
+        throw new BadRequestException(
+          'Select at least one action or approve the analysis without actions.',
+        );
+      }
+      const requestedOutcome = approve
+        ? resolveDecisionReviewOutcome(
+            Array.isArray(decision.actionPlan) ? decision.actionPlan : [],
+            approvalKind,
+            uniqueKeys,
+          )
+        : 'decision_rejected';
+      if (
+        decision.status === 'approved' &&
+        requestedOutcome === 'analysis_approved' &&
+        decision.reviewOutcome === requestedOutcome &&
+        sameReviewActionKeys(decision.reviewedActionKeys, uniqueKeys)
+      ) {
+        const currentConversation = await manager
+          .getRepository(InboxConversationEntity)
+          .findOneBy({
+            id: conversationId,
+            tenantId: ctx.tenantId,
+            workspaceId: ctx.workspaceId!,
+          });
+        if (
+          !currentConversation ||
+          currentConversation.ownershipVersion !== decision.ownershipVersion ||
+          currentConversation.ownershipState !== 'ai_active'
+        ) {
+          throw new ConflictException(
+            'Decision ownership changed and must be regenerated.',
+          );
+        }
+        return decision;
+      }
+      if (
+        decision.status === 'approved' &&
+        decision.reviewOutcome !== 'analysis_approved'
+      ) {
+        throw new ConflictException('Decision actions were already applied.');
+      }
       if (decision.status !== 'proposed')
         throw new ConflictException('Decision is no longer pending review.');
       const conversation = await manager
@@ -568,39 +732,55 @@ export class InboxAgentRuntimeService {
         conversation.ownershipVersion !== decision.ownershipVersion ||
         conversation.ownershipState !== 'ai_active'
       ) {
-        decision.status = 'invalidated';
-        decision.errorCode = 'ownership_changed';
-      } else {
-        decision.status = approve ? 'approved' : 'rejected';
-        if (approve) {
-          const plan = Array.isArray(decision.actionPlan)
-            ? decision.actionPlan
-            : [];
-          const uniqueKeys = [...new Set(actionKeys)].slice(0, 30);
-          const selected = uniqueKeys.map((key) =>
-            plan.find((item) => item.key === key),
+        throw new ConflictException(
+          'Decision ownership changed and must be regenerated.',
+        );
+      }
+
+      decision.status = approve ? 'approved' : 'rejected';
+      decision.reviewOutcome = requestedOutcome;
+      decision.reviewedActionKeys = uniqueKeys;
+      if (approve) {
+        const plan = Array.isArray(decision.actionPlan)
+          ? decision.actionPlan
+          : [];
+        const selected = uniqueKeys.map((key) =>
+          plan.find((item) => item.key === key),
+        );
+        if (selected.some((item) => !item || item.allowed !== true)) {
+          throw new ConflictException(
+            'One or more actions are no longer allowed.',
           );
-          if (selected.some((item) => !item || item.allowed !== true)) {
-            throw new ConflictException(
-              'One or more actions are no longer allowed.',
-            );
-          }
-          await this.applyApprovedActions(
-            manager,
-            ctx,
-            conversation,
-            decision,
-            selected as Array<Record<string, unknown>>,
-          );
-          decision.appliedActions = selected as Array<Record<string, unknown>>;
-          decision.appliedAt = uniqueKeys.length ? new Date() : null;
         }
+        await this.applyApprovedActions(
+          manager,
+          ctx,
+          conversation,
+          decision,
+          selected as Array<Record<string, unknown>>,
+        );
+        decision.appliedActions = selected as Array<Record<string, unknown>>;
+        decision.appliedAt = uniqueKeys.length ? new Date() : null;
       }
       decision.reviewedBy = reviewerUserId;
       decision.reviewedAt = new Date();
       const saved = await manager
         .getRepository(InboxAgentDecisionEntity)
         .save(decision);
+      await manager.getRepository(InboxConversationEventEntity).save({
+        tenantId: saved.tenantId,
+        workspaceId: saved.workspaceId,
+        conversationId: saved.conversationId,
+        eventType: 'agent_decision_reviewed',
+        actorType: 'user',
+        actorUserId: reviewerUserId,
+        payload: {
+          decisionId: saved.id,
+          outcome: saved.reviewOutcome,
+          selectedActionCount: saved.reviewedActionKeys.length,
+          ownershipVersion: saved.ownershipVersion,
+        },
+      });
       await manager.getRepository(InboxDomainOutboxEntity).save({
         tenantId: saved.tenantId,
         workspaceId: saved.workspaceId,
@@ -608,11 +788,13 @@ export class InboxAgentRuntimeService {
         aggregateId: saved.id,
         eventName: 'leadflow.inbox.agent_decision.updated',
         eventVersion: 1,
-        idempotencyKey: `decision:${saved.id}:${saved.status}`,
+        idempotencyKey: `decision:${saved.id}:review:${saved.reviewOutcome}`,
         payload: {
           conversationId: saved.conversationId,
           decisionId: saved.id,
           status: saved.status,
+          reviewOutcome: saved.reviewOutcome,
+          selectedActionCount: saved.reviewedActionKeys.length,
           ownershipVersion: saved.ownershipVersion,
         },
         publishedAt: null,
@@ -689,6 +871,26 @@ export class InboxAgentRuntimeService {
             slugValue(action.value),
           ],
         );
+      } else if (
+        type === 'set_service' &&
+        opportunity &&
+        typeof action.value === 'string'
+      ) {
+        opportunity.businessContext = {
+          ...opportunity.businessContext,
+          service: action.value,
+        };
+      } else if (
+        type === 'set_urgency' &&
+        opportunity &&
+        typeof action.value === 'string' &&
+        ['low', 'normal', 'high', 'urgent'].includes(action.value)
+      ) {
+        opportunity.priority = action.value;
+        opportunity.businessContext = {
+          ...opportunity.businessContext,
+          urgency: action.value,
+        };
       } else if (type === 'close' && typeof action.value === 'string') {
         conversation.qualificationStatus = 'disqualified';
         conversation.qualificationReason = action.value;
@@ -949,4 +1151,8 @@ function slugValue(value: string): string {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-|-$/g, '');
+}
+
+function recordString(value: unknown): string {
+  return typeof value === 'string' ? value : '';
 }

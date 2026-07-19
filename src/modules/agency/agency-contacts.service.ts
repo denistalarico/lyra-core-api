@@ -4,8 +4,8 @@ import {
   ConflictException,
   NotFoundException,
 } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository } from 'typeorm';
+import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
+import { DataSource, In, QueryFailedError, Repository } from 'typeorm';
 import { FilesService } from '../../common/files/files.service';
 import { ContactEntity } from '../contacts/entities/contact.entity';
 import { ContactListEntity } from '../contacts/entities/contact-list.entity';
@@ -70,6 +70,9 @@ type DeleteListOptions = {
 @Injectable()
 export class AgencyContactsService {
   constructor(
+    @InjectDataSource(AGENCY_CONNECTION)
+    private readonly dataSource: DataSource,
+
     @InjectRepository(ContactEntity, AGENCY_CONNECTION)
     private readonly contactsRepo: Repository<ContactEntity>,
 
@@ -1015,76 +1018,214 @@ export class AgencyContactsService {
   }
 
   async deleteContact(ctx: RequestContext, contactId: string) {
-    const contact = await this.findContactOrFail(ctx, contactId);
+    const workspaceId = this.requireWorkspaceId(ctx);
+    return this.dataSource.transaction(async (manager) => {
+      const contacts = manager.getRepository(ContactEntity);
+      const contact = await contacts.findOne({
+        where: { id: contactId, tenantId: ctx.tenantId, workspaceId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!contact) throw new NotFoundException('Contact not found.');
+      if (contact.status === 'archived') return contact;
 
-    contact.status = 'archived';
-
-    return this.contactsRepo.save(contact);
+      contact.status = 'archived';
+      const saved = await contacts.save(contact);
+      await this.recordContactLifecycleEvent(
+        manager,
+        ctx,
+        saved.id,
+        'archived',
+      );
+      return saved;
+    });
   }
 
   async permanentlyDeleteContact(ctx: RequestContext, contactId: string) {
     const workspaceId = this.requireWorkspaceId(ctx);
-    const contact = await this.findContactOrFail(ctx, contactId);
+    try {
+      return await this.dataSource.transaction(async (manager) => {
+        const contacts = manager.getRepository(ContactEntity);
+        const contact = await contacts.findOne({
+          where: { id: contactId, tenantId: ctx.tenantId, workspaceId },
+          lock: { mode: 'pessimistic_write' },
+        });
+        if (!contact) throw new NotFoundException('Contact not found.');
 
-    await this.contactsRepo.update(
-      {
-        tenantId: ctx.tenantId,
-        workspaceId,
-        companyContactId: contact.id,
-      },
-      { companyContactId: null },
-    );
+        const references = await this.findRetainedContactReferences(
+          manager,
+          ctx,
+          contact.id,
+        );
+        if (references.length > 0) {
+          throw new ConflictException(
+            `O contato possui ${this.describeRetainedReferences(references)}. Arquive-o para preservar o histórico.`,
+          );
+        }
 
-    await Promise.all([
-      this.profilesRepo.delete({
-        tenantId: ctx.tenantId,
-        workspaceId,
-        contactId: contact.id,
-      }),
-      this.methodsRepo.delete({
-        tenantId: ctx.tenantId,
-        workspaceId,
-        contactId: contact.id,
-      }),
-      this.addressesRepo.delete({
-        tenantId: ctx.tenantId,
-        workspaceId,
-        contactId: contact.id,
-      }),
-      this.bankAccountsRepo.delete({
-        tenantId: ctx.tenantId,
-        workspaceId,
-        contactId: contact.id,
-      }),
-      this.tagAssignmentsRepo.delete({
-        tenantId: ctx.tenantId,
-        workspaceId,
-        contactId: contact.id,
-      }),
-      this.listMembersRepo.delete({
-        tenantId: ctx.tenantId,
-        workspaceId,
-        contactId: contact.id,
-      }),
-      this.companyLinksRepo.delete({
-        tenantId: ctx.tenantId,
-        workspaceId,
-        personContactId: contact.id,
-      }),
-      this.companyLinksRepo.delete({
-        tenantId: ctx.tenantId,
-        workspaceId,
-        companyContactId: contact.id,
-      }),
+        await contacts.update(
+          { tenantId: ctx.tenantId, workspaceId, companyContactId: contact.id },
+          { companyContactId: null },
+        );
+        await this.recordContactLifecycleEvent(
+          manager,
+          ctx,
+          contact.id,
+          'permanently_deleted',
+        );
+        const result = await contacts.delete({
+          id: contact.id,
+          tenantId: ctx.tenantId,
+          workspaceId,
+        });
+        if (result.affected !== 1) {
+          throw new ConflictException(
+            'Contact deletion did not affect exactly one canonical record.',
+          );
+        }
+        const stillExists = await contacts.existsBy({
+          id: contact.id,
+          tenantId: ctx.tenantId,
+          workspaceId,
+        });
+        if (stillExists) {
+          throw new ConflictException(
+            'Contact remained visible after the deletion transaction.',
+          );
+        }
+        return { deleted: true as const };
+      });
+    } catch (error) {
+      if (
+        error instanceof QueryFailedError &&
+        (error.driverError as { code?: string } | undefined)?.code === '23503'
+      ) {
+        throw new ConflictException(
+          'Contact has retained commercial history. Archive it instead.',
+        );
+      }
+      throw error;
+    }
+  }
+
+  private async findRetainedContactReferences(
+    manager: import('typeorm').EntityManager,
+    ctx: RequestContext,
+    contactId: string,
+  ) {
+    const workspaceId = this.requireWorkspaceId(ctx);
+    const ownedTables = new Set([
+      'contacts',
+      'contact_methods',
+      'contact_addresses',
+      'contact_list_members',
+      'contact_tag_assignments',
+      'contact_custom_field_values',
+      'agency_contact_profiles',
+      'agency_contact_bank_accounts',
+      'contact_company_links',
     ]);
+    const columns = await manager.query<
+      Array<{ table_name: string; columns: string[] }>
+    >(
+      `SELECT table_name,
+              json_agg(column_name ORDER BY column_name) AS columns
+         FROM information_schema.columns
+        WHERE table_schema = current_schema()
+          AND column_name IN ('contact_id', 'company_contact_id', 'tenant_id', 'workspace_id')
+        GROUP BY table_name`,
+    );
+    const retained: string[] = [];
 
-    await this.contactsRepo.delete({
-      id: contact.id,
-      tenantId: ctx.tenantId,
-      workspaceId,
-    });
+    for (const table of columns) {
+      if (ownedTables.has(table.table_name)) continue;
+      const referenceColumns = table.columns.filter(
+        (column) => column === 'contact_id' || column === 'company_contact_id',
+      );
+      if (referenceColumns.length === 0) continue;
+      const quotedTable = `"${table.table_name.replaceAll('"', '""')}"`;
+      const referencePredicate = referenceColumns
+        .map((column) => `"${column}" = $1`)
+        .join(' OR ');
+      const params: string[] = [contactId];
+      const scopePredicates: string[] = [];
+      if (table.columns.includes('tenant_id')) {
+        params.push(ctx.tenantId);
+        scopePredicates.push(`"tenant_id" = $${params.length}`);
+      }
+      if (table.columns.includes('workspace_id')) {
+        params.push(workspaceId);
+        scopePredicates.push(`"workspace_id" = $${params.length}`);
+      }
+      const rows = await manager.query<unknown[]>(
+        `SELECT 1 FROM ${quotedTable}
+          WHERE (${referencePredicate})
+            ${scopePredicates.length ? `AND ${scopePredicates.join(' AND ')}` : ''}
+          LIMIT 1`,
+        params,
+      );
+      if (rows.length > 0) retained.push(table.table_name);
+    }
+    return retained.sort();
+  }
 
-    return { deleted: true };
+  private async recordContactLifecycleEvent(
+    manager: import('typeorm').EntityManager,
+    ctx: RequestContext,
+    contactId: string,
+    outcome: 'archived' | 'permanently_deleted',
+  ) {
+    const workspaceId = this.requireWorkspaceId(ctx);
+    await manager.query(
+      `INSERT INTO platform_permission_audit_events
+        (tenant_id, workspace_id, actor_user_id, action, resource_type,
+         resource_id, risk_level, metadata)
+       VALUES ($1, $2, $3, $4, 'contact', $5, 'high', $6::jsonb)`,
+      [
+        ctx.tenantId,
+        workspaceId,
+        ctx.userId ?? null,
+        `contact.${outcome}`,
+        contactId,
+        JSON.stringify({ outcome }),
+      ],
+    );
+    await manager.query(
+      `INSERT INTO inbox_domain_outbox
+        (tenant_id, workspace_id, aggregate_type, aggregate_id, event_name,
+         idempotency_key, payload)
+       VALUES ($1, $2, 'contact', $3, $4, $5, $6::jsonb)`,
+      [
+        ctx.tenantId,
+        workspaceId,
+        contactId,
+        `agency.contacts.contact.${outcome}`,
+        `contact:${contactId}:${outcome}:${Date.now()}`,
+        JSON.stringify({ contactId, outcome }),
+      ],
+    );
+  }
+
+  private describeRetainedReferences(tables: string[]) {
+    const labels = new Set<string>();
+    for (const table of tables) {
+      if (table.startsWith('inbox_') || table.startsWith('webchat_')) {
+        labels.add('conversas ou mensagens vinculadas');
+      } else if (
+        table.startsWith('crm_') ||
+        table.startsWith('agency_sales_')
+      ) {
+        labels.add('oportunidades ou atividades de CRM vinculadas');
+      } else if (
+        table.startsWith('finance_') ||
+        table.startsWith('agency_contract_') ||
+        table === 'quotes'
+      ) {
+        labels.add('histórico comercial, contratual ou financeiro vinculado');
+      } else {
+        labels.add('registros relacionados que precisam ser preservados');
+      }
+    }
+    return [...labels].join(' e ');
   }
 
   async listContacts(ctx: RequestContext, query: ListAgencyContactsQuery = {}) {

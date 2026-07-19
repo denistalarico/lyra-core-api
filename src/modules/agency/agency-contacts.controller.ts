@@ -602,6 +602,16 @@ export class AgencyContactsController {
     return this.agencyContactsService.permanentlyDeleteContact(ctx, contactId);
   }
 
+  @Post(':contactId/archive')
+  @RequireAnyPermission(...CONTACT_UPDATE_PERMISSIONS)
+  archiveContact(
+    @RequestContextData() ctx: RequestContext,
+    @Param('contactId') contactId: string,
+  ) {
+    return this.agencyContactsService.deleteContact(ctx, contactId);
+  }
+
+  /** @deprecated Use POST /:contactId/archive. Kept for existing clients. */
   @Delete(':contactId')
   @RequirePermission('shared.contacts.delete.owner_only')
   @DangerousAction()
