@@ -20,6 +20,7 @@ import { InboxAgentRuntimeService } from '../../inbox/services/inbox-agent-runti
 import { InboxChannelLifecycleService } from '../../inbox/services/inbox-channel-lifecycle.service';
 import { AgentActivationPolicyService } from '../../inbox/services/agent-activation-policy.service';
 import { ConversationOwnershipService } from '../../inbox/services/conversation-ownership.service';
+import { LeadFlowAgentBindingReconcilerService } from '../../leadflow-agents/services/leadflow-agent-binding-reconciler.service';
 import { PlatformRoleKey } from '../enums/permission.enums';
 import { PERMISSION_KEY_METADATA } from '../decorators/permissions.decorators';
 import { PermissionsGuard } from '../guards/permissions.guard';
@@ -183,6 +184,7 @@ describe('Inbox channel permission scope HTTP integration', () => {
         { provide: InboxAgentRuntimeService, useValue: {} },
         { provide: InboxChannelLifecycleService, useValue: {} },
         { provide: AgentActivationPolicyService, useValue: {} },
+        { provide: LeadFlowAgentBindingReconcilerService, useValue: {} },
         {
           provide: InboundMessageIngestionService,
           useValue: inboundIngestionService,
@@ -269,7 +271,7 @@ describe('Inbox channel permission scope HTTP integration', () => {
   });
 
   afterAll(async () => {
-    await app.close();
+    await app?.close();
   });
 
   beforeEach(() => {
