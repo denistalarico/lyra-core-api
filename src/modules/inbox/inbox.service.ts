@@ -768,7 +768,13 @@ export class InboxService {
     }
     return messages.map((message) => ({
       ...message,
-      attachments: (byMessage.get(message.id) ?? []).map((asset) => ({
+      // Mensagens outbound guardam o anexo como descriptor no próprio JSON
+      // (não geram media asset). Sem este fallback o anexo sumia na leitura.
+      attachments: !byMessage.has(message.id)
+        ? Array.isArray(message.attachments)
+          ? message.attachments
+          : []
+        : (byMessage.get(message.id) ?? []).map((asset) => ({
         id: asset.id,
         kind: asset.kind,
         mimeType: asset.mimeType,

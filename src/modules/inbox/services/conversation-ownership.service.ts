@@ -7,6 +7,10 @@ import {
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, EntityManager } from 'typeorm';
 import type { RequestContext } from '../../../common/context/request-context.interface';
+import {
+  AgencyWorkspaceUserEntity as WorkspaceUserEntity,
+  AgencyUserProfileEntity as UserProfileEntity,
+} from '../../agency/entities/agency-settings.entities';
 import { CrmOpportunityEntity } from '../../crm/entities/crm-opportunity.entity';
 import { InboxAgentDecisionEntity } from '../entities/inbox-agent-decision.entity';
 import { InboxChannelEntity } from '../entities/inbox-channel.entity';
@@ -68,9 +72,13 @@ export class ConversationOwnershipService {
         conversation.ownershipState === 'human_active'
       ) {
         if (conversation.assignedUserId === ctx.userId) return conversation;
-        throw new ConflictException(
-          'Conversation is already owned by another user.',
-        );
+        // Sem responsável (ex.: atribuição removida) a conversa está livre —
+        // qualquer operador pode assumir sem conflito.
+        if (conversation.assignedUserId) {
+          throw new ConflictException(
+            'Conversation is already owned by another user.',
+          );
+        }
       }
       if (
         action === 'return_ai' &&
@@ -91,6 +99,28 @@ export class ConversationOwnershipService {
       if (next === 'human_active') {
         conversation.assignedUserId = ctx.userId!;
         conversation.assignedAgentId = null;
+        // Guardamos nome/avatar de quem assumiu: listForwardTargets exclui o
+        // próprio usuário, então sem isto a UI só conseguiria mostrar iniciais.
+        const [workspaceUser, profile] = await Promise.all([
+          manager.getRepository(WorkspaceUserEntity).findOne({
+            where: {
+              tenantId: ctx.tenantId,
+              workspaceId: ctx.workspaceId,
+              userId: ctx.userId!,
+            },
+          }),
+          manager
+            .getRepository(UserProfileEntity)
+            .findOne({ where: { userId: ctx.userId! } }),
+        ]);
+        conversation.metadata = {
+          ...(conversation.metadata ?? {}),
+          assignedUserSnapshot: {
+            userId: ctx.userId,
+            name: workspaceUser?.name ?? null,
+            avatarUrl: profile?.avatarUrl ?? null,
+          },
+        };
         if (
           conversation.status === 'new' ||
           conversation.status === 'handoff_requested'
