@@ -2,10 +2,12 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { IsNull, Repository } from 'typeorm';
+import { randomUUID } from 'node:crypto';
 import type { RequestContext } from '../../../common/context/request-context.interface';
 import { LeadFlowClientSettingsEntity } from '../../leadflow-settings/entities';
 import { LeadFlowSettingsContextType } from '../../leadflow-settings/enums/leadflow-settings-context-type.enum';
@@ -34,6 +36,10 @@ import { LeadFlowAgentChannelStatus } from '../enums/leadflow-agent-channel-stat
 import { LeadFlowAgentStatus } from '../enums/leadflow-agent-status.enum';
 import { LeadFlowAgentType } from '../enums/leadflow-agent-type.enum';
 import { LeadFlowAgentVersionStatus } from '../enums/leadflow-agent-version-status.enum';
+import {
+  RoomAgentOperationalStatus,
+  RoomOperationalSource,
+} from '../enums/room-operational.enums';
 import { LEADFLOW_AGENTS_PERMISSIONS } from '../leadflow-agents.permissions';
 import type {
   LeadFlowAgentBehaviorConfig,
@@ -44,6 +50,7 @@ import type {
 import { LeadFlowAgentPresetService } from './leadflow-agent-preset.service';
 import { LeadFlowAgentRuntimeConfigService } from './leadflow-agent-runtime-config.service';
 import { LeadFlowAgentBindingReconcilerService } from './leadflow-agent-binding-reconciler.service';
+import { OperationsRoomStateService } from './operations-room-state.service';
 
 const AGENCY_CONNECTION = 'agency';
 
@@ -57,6 +64,8 @@ interface ActiveContext {
 
 @Injectable()
 export class LeadFlowAgentService {
+  private readonly logger = new Logger(LeadFlowAgentService.name);
+
   constructor(
     @InjectRepository(LeadFlowAgentEntity, AGENCY_CONNECTION)
     private readonly agentsRepository: Repository<LeadFlowAgentEntity>,
@@ -70,6 +79,7 @@ export class LeadFlowAgentService {
     private readonly runtimeConfigService: LeadFlowAgentRuntimeConfigService,
     private readonly permissionService: PlatformPermissionService,
     private readonly bindingReconciler: LeadFlowAgentBindingReconcilerService,
+    private readonly operationsRoomState: OperationsRoomStateService,
   ) {}
 
   async list(ctx: RequestContext): Promise<LeadFlowAgentListResponse> {
@@ -189,6 +199,11 @@ export class LeadFlowAgentService {
     if (dto.activate) {
       saved.status = LeadFlowAgentStatus.Active;
       await this.agentsRepository.save(saved);
+      await this.recordOperationalStatus(
+        saved,
+        RoomAgentOperationalStatus.Available,
+        'agent_provisioned_active',
+      );
     }
 
     return this.detail(ctx, saved.id);
@@ -380,7 +395,40 @@ export class LeadFlowAgentService {
       });
     }
 
+    await this.recordOperationalStatus(
+      agent,
+      status === LeadFlowAgentStatus.Active
+        ? RoomAgentOperationalStatus.Available
+        : RoomAgentOperationalStatus.Paused,
+      status === LeadFlowAgentStatus.Active
+        ? 'agent_activated'
+        : 'agent_paused',
+    );
+
     return this.detail(ctx, agent.id);
+  }
+
+  private async recordOperationalStatus(
+    agent: LeadFlowAgentEntity,
+    nextStatus: RoomAgentOperationalStatus,
+    reasonCode: string,
+  ) {
+    try {
+      await this.operationsRoomState.recordTransition({
+        tenantId: agent.tenantId,
+        workspaceId: agent.workspaceId,
+        agentId: agent.id,
+        nextStatus,
+        occurredAt: new Date(),
+        source: RoomOperationalSource.AgentRuntime,
+        sourceEventId: `${reasonCode}:${agent.id}:${randomUUID()}`,
+        reasonCode,
+      });
+    } catch (error) {
+      this.logger.warn(
+        `Não foi possível publicar telemetria ${reasonCode} do agente ${agent.id}: ${telemetryErrorCode(error)}`,
+      );
+    }
   }
 
   private applyPreset(
@@ -783,4 +831,11 @@ function mapAgentDetailSummary(
   // The list endpoint returns the richer detail shape so cards can render
   // config-derived fields without an extra round-trip.
   return mapAgentDetail(agent, bindings);
+}
+
+function telemetryErrorCode(error: unknown) {
+  const message = error instanceof Error ? error.message : 'unknown_error';
+  return /^[a-z0-9_.: -]{1,120}$/i.test(message)
+    ? message
+    : 'telemetry_publish_failed';
 }

@@ -4,9 +4,13 @@ import {
   orderContextMessages,
 } from './inbox-agent-runtime.service';
 import { ConversationOwnershipService } from './conversation-ownership.service';
+import {
+  RoomAgentOperationalStatus,
+  RoomOperationalSource,
+} from '../../leadflow-agents/enums/room-operational.enums';
 
 describe('InboxAgentRuntimeService safety contracts', () => {
-  const serviceWith = (dataSource: unknown) =>
+  const serviceWith = (dataSource: unknown, operationsRoomState?: unknown) =>
     new InboxAgentRuntimeService(
       dataSource as never,
       {} as never,
@@ -21,6 +25,7 @@ describe('InboxAgentRuntimeService safety contracts', () => {
         },
       } as never,
       {} as never,
+      operationsRoomState as never,
     );
 
   it('claims due batches with transactional SKIP LOCKED', async () => {
@@ -88,6 +93,42 @@ describe('InboxAgentRuntimeService safety contracts', () => {
       'b',
       'c',
     ]);
+  });
+
+  it('publishes runtime transitions with retry-safe batch identity', async () => {
+    const recordTransition = jest.fn().mockResolvedValue({ kind: 'applied' });
+    const service = serviceWith({}, { recordTransition });
+
+    await (
+      service as unknown as {
+        publishOperationalStatus(
+          batch: Record<string, unknown>,
+          agentId: string,
+          status: RoomAgentOperationalStatus,
+          phase: string,
+        ): Promise<void>;
+      }
+    ).publishOperationalStatus(
+      {
+        id: 'batch-1',
+        tenantId: 'tenant-1',
+        workspaceId: 'workspace-1',
+        attemptCount: 2,
+      },
+      'agent-1',
+      RoomAgentOperationalStatus.HandlingConversation,
+      'processing_started',
+    );
+
+    expect(recordTransition).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agentId: 'agent-1',
+        nextStatus: RoomAgentOperationalStatus.HandlingConversation,
+        source: RoomOperationalSource.AgentRuntime,
+        sourceEventId: 'inbox-batch:batch-1:attempt:2:processing_started',
+        reasonCode: 'inbox_processing_started',
+      }),
+    );
   });
 });
 

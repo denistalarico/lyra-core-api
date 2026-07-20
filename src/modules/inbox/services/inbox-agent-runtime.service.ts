@@ -2,7 +2,9 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { randomUUID } from 'crypto';
@@ -14,6 +16,11 @@ import { CrmOpportunityEntity } from '../../crm/entities/crm-opportunity.entity'
 import { LeadFlowAgentEntity } from '../../leadflow-agents/entities/leadflow-agent.entity';
 import { LeadFlowAgentChannelBindingEntity } from '../../leadflow-agents/entities/leadflow-agent-channel-binding.entity';
 import { LeadFlowAgentVersionEntity } from '../../leadflow-agents/entities/leadflow-agent-version.entity';
+import {
+  RoomAgentOperationalStatus,
+  RoomOperationalSource,
+} from '../../leadflow-agents/enums/room-operational.enums';
+import { OperationsRoomStateService } from '../../leadflow-agents/services/operations-room-state.service';
 import { LeadFlowClientSettingsEntity } from '../../leadflow-settings/entities/leadflow-client-settings.entity';
 import { LeadFlowBusinessModeTemplateEntity } from '../../leadflow-settings/entities/leadflow-business-mode-template.entity';
 import { LeadFlowSettingsContextType } from '../../leadflow-settings/enums/leadflow-settings-context-type.enum';
@@ -91,6 +98,8 @@ export function orderContextMessages(messages: InboxMessageEntity[]) {
 
 @Injectable()
 export class InboxAgentRuntimeService {
+  private readonly logger = new Logger(InboxAgentRuntimeService.name);
+
   constructor(
     @InjectDataSource('agency') private readonly dataSource: DataSource,
     private readonly files: FilesService,
@@ -99,6 +108,8 @@ export class InboxAgentRuntimeService {
     private readonly promptBuilder: AgentDecisionPromptBuilder,
     private readonly schema: AgentDecisionV1Service,
     private readonly actionPlanner: BusinessModeActionPlanner,
+    @Optional()
+    private readonly operationsRoomState?: OperationsRoomStateService,
   ) {}
 
   async claimAndProcess(workerId: string) {
@@ -240,311 +251,358 @@ export class InboxAgentRuntimeService {
         });
       return null;
     }
-    const settings = await this.dataSource
-      .getRepository(LeadFlowClientSettingsEntity)
-      .findOne({
-        where: agent?.settingsId
-          ? {
-              id: agent.settingsId,
-              tenantId: batch.tenantId,
-              workspaceId: batch.workspaceId,
-            }
-          : {
-              tenantId: batch.tenantId,
-              workspaceId: batch.workspaceId,
-              contextType: LeadFlowSettingsContextType.Agency,
-              agencyClientId: IsNull(),
-            },
-      });
-    const businessModeTemplate = settings?.businessModeTemplateId
-      ? await this.dataSource
-          .getRepository(LeadFlowBusinessModeTemplateEntity)
-          .createQueryBuilder('template')
-          .where('template.id = :id', { id: settings.businessModeTemplateId })
-          .andWhere(
-            '(template.tenant_id IS NULL OR template.tenant_id = :tenantId)',
-            {
-              tenantId: batch.tenantId,
-            },
-          )
-          .getOne()
-      : null;
-    const messageProjection = orderedMessages.map((message) => ({
-      id: message.id,
-      evidenceRef: `message:${message.id}`,
-      direction: message.direction,
-      type: message.messageType,
-      content: message.content.slice(0, 2_000),
-      occurredAt: message.occurredAt.toISOString(),
-      providerSequence: message.providerSequence,
-    }));
-    const transcriptionProjection: Array<Record<string, unknown>> = derivatives
-      .filter(
-        (item) => item.kind === 'transcription' && item.status === 'available',
-      )
-      .map((item) => ({
-        assetId: item.mediaAssetId,
-        evidenceRef: `transcription:${item.mediaAssetId}`,
-        kind: 'transcription',
-        outcome: item.outcome,
-        text: item.content?.slice(0, 4_000) ?? '',
-        language: item.language,
-      }));
-    if (
-      !this.provider.supportsMultimodal() &&
-      this.config.visionFallbackEnabled
-    ) {
-      transcriptionProjection.push(
-        ...(await this.loadVisionFallback(media, derivatives)),
-      );
-    }
-    const images = this.provider.supportsMultimodal()
-      ? await this.loadImages(media)
-      : [];
-    const prompt = this.promptBuilder.build({
-      businessMode: conversation.businessMode,
-      ownership: {
-        state: conversation.ownershipState,
-        version: conversation.ownershipVersion,
-      },
-      allowedActions: [
-        'set_stage',
-        'add_tag',
-        'set_summary',
-        'close',
-        'handoff',
-      ],
-      workspaceConfig: {
-        clientPromptConfig: settings?.clientPromptConfig ?? {},
-        businessModeOverrides: settings?.businessModeOverrides ?? {},
-      },
-      contact: { id: conversation.contactId },
-      opportunity: opportunity
-        ? {
-            id: opportunity.id,
-            pipelineId: opportunity.pipelineId,
-            stageId: opportunity.stageId,
-            businessMode: opportunity.businessMode,
-            status: opportunity.status,
-            businessContext: opportunity.businessContext,
-          }
-        : null,
-      messages: messageProjection,
-      transcriptions: transcriptionProjection,
-      images: images.map(({ assetId, evidenceRef, mimeType }) => ({
-        assetId,
-        evidenceRef,
-        mimeType,
-      })),
-      businessModeInstruction: businessModeTemplate?.agentPromptTemplate ?? {
-        key: conversation.businessMode,
-      },
-      businessModeVersion: businessModeTemplate?.version ?? 1,
-      agentProfile:
-        version?.snapshot && typeof version.snapshot === 'object'
-          ? ((version.snapshot as Record<string, unknown>).agentIdentity ?? {})
-          : agent
-            ? { name: agent.name, behavior: agent.behaviorConfig }
-            : {},
-      agentProfileVersion: version?.version ?? 0,
-      companyContext: settings?.companyContextPublished ?? {},
-      companyContextVersion: settings?.companyContextPublishedVersion ?? 0,
-      companyContextHash: settings?.companyContextPublishedHash ?? null,
-    });
-    const correlationId = randomUUID();
-    let providerResult: AgentDecisionResult | null = null;
-    let proposal: AgentDecisionV1 | null = null;
+    await this.publishOperationalStatus(
+      batch,
+      agent.id,
+      RoomAgentOperationalStatus.HandlingConversation,
+      'processing_started',
+    );
+
     try {
-      for (let repairAttempt = 0; repairAttempt < 2; repairAttempt += 1) {
-        providerResult = await this.provider.decide({
-          tenantId: batch.tenantId,
-          workspaceId: batch.workspaceId,
-          correlationId,
-          idempotencyKey: `batch:${batch.id}:decision:v1${repairAttempt ? ':repair' : ''}`,
-          agent: {
-            id: agent?.id ?? null,
-            versionId: version?.id ?? null,
-            snapshot: version?.snapshot ?? {},
-          },
-          businessMode: conversation.businessMode,
-          workspaceConfig: settings?.agentConfig ?? {},
-          contact: { id: conversation.contactId },
-          opportunity: opportunity
+      const settings = await this.dataSource
+        .getRepository(LeadFlowClientSettingsEntity)
+        .findOne({
+          where: agent?.settingsId
             ? {
-                id: opportunity.id,
-                pipelineId: opportunity.pipelineId,
-                stageId: opportunity.stageId,
-                status: opportunity.status,
+                id: agent.settingsId,
+                tenantId: batch.tenantId,
+                workspaceId: batch.workspaceId,
               }
-            : null,
-          ownership: {
-            state: conversation.ownershipState,
-            version: conversation.ownershipVersion,
-          },
-          allowedActions: [
-            'set_stage',
-            'add_tag',
-            'set_summary',
-            'close',
-            'handoff',
-          ],
-          systemPolicy: `${prompt.systemPolicy}${repairAttempt ? '\nREPAIR: a saída anterior violou o schema; devolva apenas JSON válido.' : ''}`,
-          untrustedData: prompt.untrustedData,
-          promptVersion: prompt.promptVersion,
-          promptHash: prompt.promptHash,
-          images,
-          repairAttempt: repairAttempt === 1,
+            : {
+                tenantId: batch.tenantId,
+                workspaceId: batch.workspaceId,
+                contextType: LeadFlowSettingsContextType.Agency,
+                agencyClientId: IsNull(),
+              },
         });
-        try {
-          this.schema.assert(providerResult.decision);
-          this.schema.assertEvidenceRefs(providerResult.decision, [
-            ...messageProjection.map((item) => item.evidenceRef),
-            ...transcriptionProjection
-              .map((item) => item.evidenceRef)
-              .filter((item): item is string => typeof item === 'string'),
-            ...images.map((item) => item.evidenceRef),
-          ]);
-          proposal = providerResult.decision;
-          break;
-        } catch {
-          if (repairAttempt === 1)
-            throw new InboxProviderError('decision_schema_invalid', false);
-        }
-      }
-    } catch (error) {
-      await this.recordBatchFailure(batch, error);
-      return null;
-    }
-    if (!providerResult || !proposal) return null;
-    const actionPlan = await this.actionPlanner.plan({
-      tenantId: batch.tenantId,
-      workspaceId: batch.workspaceId,
-      businessMode: conversation.businessMode,
-      opportunity,
-      decision: proposal,
-    });
-    return this.dataSource.transaction(async (manager) => {
-      const lockedBatch = await manager
-        .getRepository(InboxProcessingBatchEntity)
-        .findOne({
-          where: {
-            id: batch.id,
-            tenantId: batch.tenantId,
-            workspaceId: batch.workspaceId,
-          },
-          lock: { mode: 'pessimistic_write' },
-        });
-      const lockedConversation = await manager
-        .getRepository(InboxConversationEntity)
-        .findOne({
-          where: {
-            id: conversation.id,
-            tenantId: batch.tenantId,
-            workspaceId: batch.workspaceId,
-          },
-          lock: { mode: 'pessimistic_read' },
-        });
+      const businessModeTemplate = settings?.businessModeTemplateId
+        ? await this.dataSource
+            .getRepository(LeadFlowBusinessModeTemplateEntity)
+            .createQueryBuilder('template')
+            .where('template.id = :id', { id: settings.businessModeTemplateId })
+            .andWhere(
+              '(template.tenant_id IS NULL OR template.tenant_id = :tenantId)',
+              {
+                tenantId: batch.tenantId,
+              },
+            )
+            .getOne()
+        : null;
+      const messageProjection = orderedMessages.map((message) => ({
+        id: message.id,
+        evidenceRef: `message:${message.id}`,
+        direction: message.direction,
+        type: message.messageType,
+        content: message.content.slice(0, 2_000),
+        occurredAt: message.occurredAt.toISOString(),
+        providerSequence: message.providerSequence,
+      }));
+      const transcriptionProjection: Array<Record<string, unknown>> =
+        derivatives
+          .filter(
+            (item) =>
+              item.kind === 'transcription' && item.status === 'available',
+          )
+          .map((item) => ({
+            assetId: item.mediaAssetId,
+            evidenceRef: `transcription:${item.mediaAssetId}`,
+            kind: 'transcription',
+            outcome: item.outcome,
+            text: item.content?.slice(0, 4_000) ?? '',
+            language: item.language,
+          }));
       if (
-        !lockedBatch ||
-        !lockedConversation ||
-        lockedConversation.ownershipState !== 'ai_active' ||
-        lockedConversation.ownershipVersion !== conversation.ownershipVersion
+        !this.provider.supportsMultimodal() &&
+        this.config.visionFallbackEnabled
       ) {
-        if (lockedBatch) {
-          lockedBatch.status = 'cancelled';
-          lockedBatch.errorCode = 'ownership_changed';
-          lockedBatch.completedAt = new Date();
-          await manager
-            .getRepository(InboxProcessingBatchEntity)
-            .save(lockedBatch);
+        transcriptionProjection.push(
+          ...(await this.loadVisionFallback(media, derivatives)),
+        );
+      }
+      const images = this.provider.supportsMultimodal()
+        ? await this.loadImages(media)
+        : [];
+      const prompt = this.promptBuilder.build({
+        businessMode: conversation.businessMode,
+        ownership: {
+          state: conversation.ownershipState,
+          version: conversation.ownershipVersion,
+        },
+        allowedActions: [
+          'set_stage',
+          'add_tag',
+          'set_summary',
+          'close',
+          'handoff',
+        ],
+        workspaceConfig: {
+          clientPromptConfig: settings?.clientPromptConfig ?? {},
+          businessModeOverrides: settings?.businessModeOverrides ?? {},
+        },
+        contact: { id: conversation.contactId },
+        opportunity: opportunity
+          ? {
+              id: opportunity.id,
+              pipelineId: opportunity.pipelineId,
+              stageId: opportunity.stageId,
+              businessMode: opportunity.businessMode,
+              status: opportunity.status,
+              businessContext: opportunity.businessContext,
+            }
+          : null,
+        messages: messageProjection,
+        transcriptions: transcriptionProjection,
+        images: images.map(({ assetId, evidenceRef, mimeType }) => ({
+          assetId,
+          evidenceRef,
+          mimeType,
+        })),
+        businessModeInstruction: businessModeTemplate?.agentPromptTemplate ?? {
+          key: conversation.businessMode,
+        },
+        businessModeVersion: businessModeTemplate?.version ?? 1,
+        agentProfile:
+          version?.snapshot && typeof version.snapshot === 'object'
+            ? ((version.snapshot as Record<string, unknown>).agentIdentity ??
+              {})
+            : agent
+              ? { name: agent.name, behavior: agent.behaviorConfig }
+              : {},
+        agentProfileVersion: version?.version ?? 0,
+        companyContext: settings?.companyContextPublished ?? {},
+        companyContextVersion: settings?.companyContextPublishedVersion ?? 0,
+        companyContextHash: settings?.companyContextPublishedHash ?? null,
+      });
+      const correlationId = randomUUID();
+      let providerResult: AgentDecisionResult | null = null;
+      let proposal: AgentDecisionV1 | null = null;
+      try {
+        for (let repairAttempt = 0; repairAttempt < 2; repairAttempt += 1) {
+          providerResult = await this.provider.decide({
+            tenantId: batch.tenantId,
+            workspaceId: batch.workspaceId,
+            correlationId,
+            idempotencyKey: `batch:${batch.id}:decision:v1${repairAttempt ? ':repair' : ''}`,
+            agent: {
+              id: agent?.id ?? null,
+              versionId: version?.id ?? null,
+              snapshot: version?.snapshot ?? {},
+            },
+            businessMode: conversation.businessMode,
+            workspaceConfig: settings?.agentConfig ?? {},
+            contact: { id: conversation.contactId },
+            opportunity: opportunity
+              ? {
+                  id: opportunity.id,
+                  pipelineId: opportunity.pipelineId,
+                  stageId: opportunity.stageId,
+                  status: opportunity.status,
+                }
+              : null,
+            ownership: {
+              state: conversation.ownershipState,
+              version: conversation.ownershipVersion,
+            },
+            allowedActions: [
+              'set_stage',
+              'add_tag',
+              'set_summary',
+              'close',
+              'handoff',
+            ],
+            systemPolicy: `${prompt.systemPolicy}${repairAttempt ? '\nREPAIR: a saída anterior violou o schema; devolva apenas JSON válido.' : ''}`,
+            untrustedData: prompt.untrustedData,
+            promptVersion: prompt.promptVersion,
+            promptHash: prompt.promptHash,
+            images,
+            repairAttempt: repairAttempt === 1,
+          });
+          try {
+            this.schema.assert(providerResult.decision);
+            this.schema.assertEvidenceRefs(providerResult.decision, [
+              ...messageProjection.map((item) => item.evidenceRef),
+              ...transcriptionProjection
+                .map((item) => item.evidenceRef)
+                .filter((item): item is string => typeof item === 'string'),
+              ...images.map((item) => item.evidenceRef),
+            ]);
+            proposal = providerResult.decision;
+            break;
+          } catch {
+            if (repairAttempt === 1)
+              throw new InboxProviderError('decision_schema_invalid', false);
+          }
         }
+      } catch (error) {
+        await this.recordBatchFailure(batch, error);
         return null;
       }
-      const decision = await manager
-        .getRepository(InboxAgentDecisionEntity)
-        .save({
-          tenantId: batch.tenantId,
-          workspaceId: batch.workspaceId,
-          conversationId: batch.conversationId,
-          batchId: batch.id,
-          agentId: agent?.id ?? conversation.assignedAgentId,
-          agentVersionId: version?.id ?? null,
-          ownershipVersion: conversation.ownershipVersion,
-          schemaVersion: 1,
-          idempotencyKey: `batch:${batch.id}:decision:v1`,
-          correlationId,
-          status: 'proposed',
-          proposal,
-          policyResult: {
-            mode: 'supervised',
-            automaticEffectsAllowed: false,
-            automaticReplyAllowed: this.config.autoReplyEnabled,
-            automaticCrmAllowed: this.config.autoCrmEnabled,
-            mediaContext: this.mediaPolicy(media, derivatives),
-          },
-          contextSnapshot: {
-            conversationId: conversation.id,
-            opportunityId: opportunity?.id ?? null,
-            businessMode: conversation.businessMode,
-            messageRefs: messageProjection.map(({ id, occurredAt }) => ({
-              id,
-              occurredAt,
-            })),
-            mediaRefs: media.map(({ id, kind, status }) => ({
-              id,
-              kind,
-              status,
-            })),
-            companyContextVersion:
-              settings?.companyContextPublishedVersion ?? 0,
-            companyContextHash: settings?.companyContextPublishedHash ?? null,
-          },
-          errorCode: null,
-          provider: providerResult.provider,
-          model: providerResult.model,
-          promptVersion: prompt.promptVersion,
-          promptHash: prompt.promptHash,
-          contextVersion: settings?.companyContextPublishedVersion ?? 0,
-          contextHash: settings?.companyContextPublishedHash ?? null,
-          promptLayers: prompt.layers,
-          usage: providerResult.usage,
-          latencyMs: providerResult.latencyMs,
-          actionPlan,
-          appliedActions: [],
-          appliedAt: null,
-          reviewedBy: null,
-          reviewedAt: null,
-        });
-      lockedBatch.status = 'completed';
-      lockedBatch.completedAt = new Date();
-      lockedBatch.errorCode = null;
-      await manager.getRepository(InboxProcessingBatchEntity).save(lockedBatch);
-      await manager.getRepository(InboxDomainOutboxEntity).save({
+      if (!providerResult || !proposal) return null;
+      const actionPlan = await this.actionPlanner.plan({
         tenantId: batch.tenantId,
         workspaceId: batch.workspaceId,
-        aggregateType: 'inbox_agent_decision',
-        aggregateId: decision.id,
-        eventName: 'leadflow.inbox.agent_decision.updated',
-        eventVersion: 1,
-        idempotencyKey: `decision:${decision.id}:proposed`,
-        payload: {
-          conversationId: conversation.id,
-          decisionId: decision.id,
-          status: decision.status,
-          ownershipVersion: decision.ownershipVersion,
-        },
-        publishedAt: null,
-        status: 'pending',
-        attempts: 0,
-        availableAt: new Date(),
-        lockedAt: null,
-        lockedBy: null,
-        lastError: null,
-        deadLetteredAt: null,
-        updatedAt: new Date(),
+        businessMode: conversation.businessMode,
+        opportunity,
+        decision: proposal,
       });
-      return decision;
-    });
+      return await this.dataSource.transaction(async (manager) => {
+        const lockedBatch = await manager
+          .getRepository(InboxProcessingBatchEntity)
+          .findOne({
+            where: {
+              id: batch.id,
+              tenantId: batch.tenantId,
+              workspaceId: batch.workspaceId,
+            },
+            lock: { mode: 'pessimistic_write' },
+          });
+        const lockedConversation = await manager
+          .getRepository(InboxConversationEntity)
+          .findOne({
+            where: {
+              id: conversation.id,
+              tenantId: batch.tenantId,
+              workspaceId: batch.workspaceId,
+            },
+            lock: { mode: 'pessimistic_read' },
+          });
+        if (
+          !lockedBatch ||
+          !lockedConversation ||
+          lockedConversation.ownershipState !== 'ai_active' ||
+          lockedConversation.ownershipVersion !== conversation.ownershipVersion
+        ) {
+          if (lockedBatch) {
+            lockedBatch.status = 'cancelled';
+            lockedBatch.errorCode = 'ownership_changed';
+            lockedBatch.completedAt = new Date();
+            await manager
+              .getRepository(InboxProcessingBatchEntity)
+              .save(lockedBatch);
+          }
+          return null;
+        }
+        const decision = await manager
+          .getRepository(InboxAgentDecisionEntity)
+          .save({
+            tenantId: batch.tenantId,
+            workspaceId: batch.workspaceId,
+            conversationId: batch.conversationId,
+            batchId: batch.id,
+            agentId: agent?.id ?? conversation.assignedAgentId,
+            agentVersionId: version?.id ?? null,
+            ownershipVersion: conversation.ownershipVersion,
+            schemaVersion: 1,
+            idempotencyKey: `batch:${batch.id}:decision:v1`,
+            correlationId,
+            status: 'proposed',
+            proposal,
+            policyResult: {
+              mode: 'supervised',
+              automaticEffectsAllowed: false,
+              automaticReplyAllowed: this.config.autoReplyEnabled,
+              automaticCrmAllowed: this.config.autoCrmEnabled,
+              mediaContext: this.mediaPolicy(media, derivatives),
+            },
+            contextSnapshot: {
+              conversationId: conversation.id,
+              opportunityId: opportunity?.id ?? null,
+              businessMode: conversation.businessMode,
+              messageRefs: messageProjection.map(({ id, occurredAt }) => ({
+                id,
+                occurredAt,
+              })),
+              mediaRefs: media.map(({ id, kind, status }) => ({
+                id,
+                kind,
+                status,
+              })),
+              companyContextVersion:
+                settings?.companyContextPublishedVersion ?? 0,
+              companyContextHash: settings?.companyContextPublishedHash ?? null,
+            },
+            errorCode: null,
+            provider: providerResult.provider,
+            model: providerResult.model,
+            promptVersion: prompt.promptVersion,
+            promptHash: prompt.promptHash,
+            contextVersion: settings?.companyContextPublishedVersion ?? 0,
+            contextHash: settings?.companyContextPublishedHash ?? null,
+            promptLayers: prompt.layers,
+            usage: providerResult.usage,
+            latencyMs: providerResult.latencyMs,
+            actionPlan,
+            appliedActions: [],
+            appliedAt: null,
+            reviewedBy: null,
+            reviewedAt: null,
+          });
+        lockedBatch.status = 'completed';
+        lockedBatch.completedAt = new Date();
+        lockedBatch.errorCode = null;
+        await manager
+          .getRepository(InboxProcessingBatchEntity)
+          .save(lockedBatch);
+        await manager.getRepository(InboxDomainOutboxEntity).save({
+          tenantId: batch.tenantId,
+          workspaceId: batch.workspaceId,
+          aggregateType: 'inbox_agent_decision',
+          aggregateId: decision.id,
+          eventName: 'leadflow.inbox.agent_decision.updated',
+          eventVersion: 1,
+          idempotencyKey: `decision:${decision.id}:proposed`,
+          payload: {
+            conversationId: conversation.id,
+            decisionId: decision.id,
+            status: decision.status,
+            ownershipVersion: decision.ownershipVersion,
+          },
+          publishedAt: null,
+          status: 'pending',
+          attempts: 0,
+          availableAt: new Date(),
+          lockedAt: null,
+          lockedBy: null,
+          lastError: null,
+          deadLetteredAt: null,
+          updatedAt: new Date(),
+        });
+        return decision;
+      });
+    } finally {
+      await this.publishOperationalStatus(
+        batch,
+        agent.id,
+        RoomAgentOperationalStatus.Available,
+        'processing_finished',
+      );
+    }
+  }
+
+  private async publishOperationalStatus(
+    batch: InboxProcessingBatchEntity,
+    agentId: string,
+    nextStatus: RoomAgentOperationalStatus,
+    phase: string,
+  ) {
+    if (!this.operationsRoomState) return;
+    try {
+      await this.operationsRoomState.recordTransition({
+        tenantId: batch.tenantId,
+        workspaceId: batch.workspaceId,
+        agentId,
+        nextStatus,
+        occurredAt: new Date(),
+        source: RoomOperationalSource.AgentRuntime,
+        sourceEventId: `inbox-batch:${batch.id}:attempt:${batch.attemptCount}:${phase}`,
+        reasonCode: `inbox_${phase}`,
+        correlationId: batch.id,
+      });
+    } catch (error) {
+      this.logger.warn(
+        `Falha ao publicar telemetria ${phase} do agente ${agentId}: ${runtimeTelemetryErrorCode(error)}`,
+      );
+    }
   }
 
   async list(ctx: RequestContext, conversationId: string) {
@@ -1142,6 +1200,13 @@ function providerErrorCode(error: unknown): string {
         ? error.message
         : 'decision_provider_failed';
   return /^[a-z0-9_]{1,80}$/.test(value) ? value : 'decision_provider_failed';
+}
+
+function runtimeTelemetryErrorCode(error: unknown): string {
+  const value = error instanceof Error ? error.message : 'unknown_error';
+  return /^[a-z0-9_.: -]{1,120}$/i.test(value)
+    ? value
+    : 'telemetry_publish_failed';
 }
 
 function slugValue(value: string): string {
