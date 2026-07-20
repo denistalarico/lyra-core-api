@@ -26,6 +26,7 @@ import { SettingsCryptoService } from '../../common/crypto/settings-crypto.servi
 import { FilesService } from '../../common/files/files.service';
 import { mapInboxChannel } from './mappers/inbox-channel.mapper';
 import { ConversationOwnershipService } from './services/conversation-ownership.service';
+import { WhatsAppOutboundService } from './channels/whatsapp/services/whatsapp-outbound.service';
 
 export type InboxConversationFilters = {
   status?: string;
@@ -63,6 +64,7 @@ export class InboxService {
     private readonly cryptoService: SettingsCryptoService,
     private readonly filesService: FilesService,
     private readonly ownershipService: ConversationOwnershipService,
+    private readonly whatsappOutboundService: WhatsAppOutboundService,
   ) {}
 
   async uploadAttachment(ctx: RequestContext, file: Express.Multer.File) {
@@ -932,10 +934,28 @@ export class InboxService {
           },
         ];
 
+    // Reação nativa do canal (WhatsApp): emoji vazio remove no app do contato.
+    // A entrega é best-effort — se o canal não suportar, a reação continua
+    // valendo internamente, mas registramos como local para não mentir na UI.
+    const conversation = await this.getConversation(ctx, conversationId);
+    let reactionDelivery: 'sent' | 'local' | 'failed' = 'local';
+
+    try {
+      const delivered = await this.whatsappOutboundService.deliverReaction({
+        conversation,
+        message,
+        emoji: shouldRemoveReaction ? '' : normalizedEmoji.slice(0, 16),
+      });
+      if (delivered) reactionDelivery = 'sent';
+    } catch {
+      reactionDelivery = 'failed';
+    }
+
     message.metadata = {
       ...metadata,
       reaction: nextReactions.at(-1) ?? null,
       reactions: nextReactions,
+      reactionDelivery,
     };
 
     const saved = await this.messagesRepository.save(message);

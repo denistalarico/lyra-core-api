@@ -28,6 +28,7 @@ type SendWhatsAppTextInput = {
   conversationId?: string;
   to: string;
   text: string;
+  replyToMessageId?: string;
   idempotencyKey?: string;
 };
 
@@ -158,6 +159,26 @@ export class WhatsAppOutboundService {
       return { conversation, message: existing, meta: {} };
     }
 
+    // Resposta citada: precisamos do `wamid` da mensagem original para a Meta
+    // renderizar o balão citado no app do destinatário. Sem `wamid` (mensagem
+    // interna, por exemplo) a mensagem segue normalmente, só sem citação.
+    const replyTarget = input.replyToMessageId
+      ? await this.messagesRepository.findOne({
+          where: {
+            tenantId: channel.tenantId,
+            workspaceId: channel.workspaceId,
+            conversationId: conversation.id,
+            id: input.replyToMessageId,
+          },
+        })
+      : null;
+    const replyMetadata = replyTarget
+      ? {
+          replyToMessageId: replyTarget.id,
+          replyToPreview: (replyTarget.content ?? '').slice(0, 160),
+        }
+      : {};
+
     const now = new Date();
     const message = await this.messagesRepository.save(
       this.messagesRepository.create({
@@ -176,7 +197,11 @@ export class WhatsAppOutboundService {
         content: input.text,
         status: 'pending',
         attachments: [],
-        metadata: { provider: 'meta', channelType: 'whatsapp' },
+        metadata: {
+          provider: 'meta',
+          channelType: 'whatsapp',
+          ...replyMetadata,
+        },
         sentAt: null,
         deliveredAt: null,
         readAt: null,
@@ -192,6 +217,7 @@ export class WhatsAppOutboundService {
         accessToken,
         to: input.to,
         text: input.text,
+        contextMessageId: replyTarget?.externalMessageId ?? undefined,
       });
     } catch (error) {
       message.status = 'failed';
@@ -593,6 +619,7 @@ export class WhatsAppOutboundService {
     accessToken: string;
     to: string;
     text: string;
+    contextMessageId?: string;
   }): Promise<MetaSendMessageResponse> {
     const graphVersion = process.env.META_GRAPH_API_VERSION ?? 'v24.0';
     const url = `https://graph.facebook.com/${graphVersion}/${input.phoneNumberId}/messages`;
@@ -608,6 +635,9 @@ export class WhatsAppOutboundService {
         recipient_type: 'individual',
         to: input.to,
         type: 'text',
+        ...(input.contextMessageId
+          ? { context: { message_id: input.contextMessageId } }
+          : {}),
         text: {
           preview_url: false,
           body: input.text,
@@ -619,11 +649,85 @@ export class WhatsAppOutboundService {
 
     if (!response.ok || data.error) {
       throw new BadRequestException(
-        'Não foi possível enviar a mensagem pelo canal WhatsApp.',
+        [
+          'Não foi possível enviar a mensagem pelo canal WhatsApp.',
+          data.error?.message,
+        ]
+          .filter(Boolean)
+          .join(' '),
       );
     }
 
     return data;
+  }
+
+  // Reação nativa do WhatsApp (type: reaction). Emoji vazio remove a reação.
+  // Chamado pelo InboxService depois de persistir a reação no nosso metadata:
+  // retorna false quando o canal/mensagem não suporta entrega (fica só local).
+  async deliverReaction(input: {
+    conversation: InboxConversationEntity;
+    message: InboxMessageEntity;
+    emoji: string;
+  }): Promise<boolean> {
+    const channelId = input.message.channelId ?? input.conversation.channelId;
+    const externalMessageId = input.message.externalMessageId;
+    const to = input.conversation.externalThreadId?.trim();
+
+    if (!channelId || !externalMessageId || !to) return false;
+
+    const channel = await this.channelsRepository.findOne({
+      where: {
+        id: channelId,
+        tenantId: input.conversation.tenantId,
+        workspaceId: input.conversation.workspaceId,
+        type: 'whatsapp',
+        provider: 'meta',
+        status: 'active',
+        connectionStatus: 'connected',
+        deletedAt: IsNull(),
+      },
+    });
+
+    if (!channel?.externalPhoneNumberId) return false;
+
+    const accessToken = this.cryptoService.decrypt(channel.accessTokenEncrypted);
+    if (!accessToken) return false;
+
+    const graphVersion = process.env.META_GRAPH_API_VERSION ?? 'v24.0';
+    const url = `https://graph.facebook.com/${graphVersion}/${channel.externalPhoneNumberId}/messages`;
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        messaging_product: 'whatsapp',
+        recipient_type: 'individual',
+        to,
+        type: 'reaction',
+        reaction: {
+          message_id: externalMessageId,
+          emoji: input.emoji,
+        },
+      }),
+    });
+
+    const data = (await response.json()) as MetaSendMessageResponse;
+
+    if (!response.ok || data.error) {
+      throw new BadRequestException(
+        [
+          'Não foi possível enviar a reação pelo canal WhatsApp.',
+          data.error?.message,
+        ]
+          .filter(Boolean)
+          .join(' '),
+      );
+    }
+
+    return true;
   }
 
   // Remux de áudio para ogg/opus. Tenta copiar o stream (instantâneo, sem

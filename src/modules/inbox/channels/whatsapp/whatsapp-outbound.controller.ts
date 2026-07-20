@@ -48,6 +48,7 @@ export class WhatsAppOutboundController {
       conversationId: dto.conversationId,
       to: dto.to,
       text: dto.text,
+      replyToMessageId: dto.replyToMessageId,
       idempotencyKey: dto.idempotencyKey,
     });
 

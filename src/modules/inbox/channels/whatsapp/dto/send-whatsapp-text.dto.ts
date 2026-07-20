@@ -24,6 +24,12 @@ export class SendWhatsAppTextDto {
   @MaxLength(4096)
   text!: string;
 
+  // Id interno da mensagem respondida. O serviço resolve o `wamid` da Meta e
+  // envia como `context`, para o balão citado aparecer no app do destinatário.
+  @IsOptional()
+  @IsUUID()
+  replyToMessageId?: string;
+
   @IsOptional()
   @IsString()
   @MaxLength(180)
