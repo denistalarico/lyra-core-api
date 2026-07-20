@@ -5,12 +5,14 @@ import {
   NotificationProductKey,
 } from '../../notifications/enums';
 import { NotificationEventProcessorService } from '../../notifications/services';
+import { InboxChannelEntity } from '../entities/inbox-channel.entity';
 import { InboxConversationEntity } from '../entities/inbox-conversation.entity';
 import { InboxMessageEntity } from '../entities/inbox-message.entity';
 
 type InboundMessageNotificationInput = {
   conversation: InboxConversationEntity;
   message: InboxMessageEntity;
+  channel?: InboxChannelEntity | null;
 };
 
 @Injectable()
@@ -28,12 +30,24 @@ export class InboxNotificationPublisher {
    * operator to notify yet.
    */
   async publishInboundMessage(input: InboundMessageNotificationInput) {
-    const { conversation, message } = input;
+    const { conversation, message, channel } = input;
     const metadata = conversation.metadata ?? {};
 
     if (metadata.muted === true) {
       return;
     }
+
+    // O escopo de conversas do LeadFlow vive no canal (metadata.clientId). Sem
+    // ele, o mini-chat aberto pela notificação abre no contexto errado e a
+    // conversa não aparece. Levamos o clientId na actionUrl para o front alinhar
+    // o contexto (agência quando ausente).
+    const channelClientId =
+      channel && typeof channel.metadata?.clientId === 'string'
+        ? channel.metadata.clientId
+        : null;
+    const actionUrl = channelClientId
+      ? `/leadflow/inbox?client=${encodeURIComponent(channelClientId)}`
+      : '/leadflow/inbox';
 
     const assignedUserId = conversation.assignedUserId?.trim();
     if (!assignedUserId) {
@@ -70,8 +84,9 @@ export class InboxNotificationPublisher {
             ? `Nova mensagem de ${conversation.title}`
             : 'Nova mensagem no Inbox',
           body: preview || 'Você recebeu uma nova mensagem.',
-          actionUrl: '/leadflow/inbox',
+          actionUrl,
           conversationId: conversation.id,
+          clientId: channelClientId,
           messageId: message.id,
           channelType,
         },

@@ -297,7 +297,7 @@ export class InboundMessageIngestionService {
         await this.extendDebounce(manager, channel, conversation);
       }
 
-      return { conversation, message, deduplicated: false };
+      return { conversation, message, channel, deduplicated: false };
     });
 
     if (!result.deduplicated) {
