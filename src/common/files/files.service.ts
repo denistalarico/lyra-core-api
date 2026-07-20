@@ -112,12 +112,17 @@ export class FilesService {
   async uploadRawFile({
     file,
     path,
+    maxBytes = 10 * 1024 * 1024,
   }: {
     file: Express.Multer.File;
     path: string;
+    // Limite padrão de 10 MB; chamadas específicas (ex.: vídeo do WhatsApp, que a
+    // Meta aceita até 16 MB) podem elevar o teto.
+    maxBytes?: number;
   }): Promise<StoredFile> {
-    if (file.size > 10 * 1024 * 1024) {
-      throw new BadRequestException('File exceeds 10 MB limit');
+    if (file.size > maxBytes) {
+      const limitMb = Math.round(maxBytes / (1024 * 1024));
+      throw new BadRequestException(`File exceeds ${limitMb} MB limit`);
     }
 
     await this.ensureBucket();

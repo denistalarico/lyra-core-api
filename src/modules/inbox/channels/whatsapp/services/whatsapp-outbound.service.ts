@@ -70,6 +70,11 @@ const WHATSAPP_AUDIO_MIME_TYPES = new Set([
   'audio/ogg',
 ]);
 
+// Vídeo: versão enxuta — só MP4 (H.264/AAC) até 16 MB, que a Meta aceita sem
+// transcodificação. Outros contêineres exigiriam re-encode pesado (fica p/ depois).
+const WHATSAPP_VIDEO_MIME_TYPES = new Set(['video/mp4']);
+const WHATSAPP_VIDEO_MAX_BYTES = 16 * 1024 * 1024;
+
 function getBaseMimeType(mimeType: string) {
   return (mimeType || '').toLowerCase().split(';')[0].trim();
 }
@@ -337,6 +342,21 @@ export class WhatsAppOutboundService {
     const mediaType = resolveWhatsAppMediaType(input.file.mimetype);
     const caption = input.caption?.trim() || '';
 
+    // Vídeo: só MP4 até 16 MB (sem transcodificação). Falhamos cedo com mensagem
+    // clara em vez de deixar a Meta rejeitar com erro genérico.
+    if (mediaType === 'video') {
+      if (!WHATSAPP_VIDEO_MIME_TYPES.has(getBaseMimeType(input.file.mimetype))) {
+        throw new BadRequestException(
+          'No WhatsApp só enviamos vídeos em MP4 (H.264/AAC).',
+        );
+      }
+      if (input.file.size > WHATSAPP_VIDEO_MAX_BYTES) {
+        throw new BadRequestException(
+          'O vídeo excede o limite de 16 MB do WhatsApp.',
+        );
+      }
+    }
+
     // Navegadores Chromium gravam `audio/webm;codecs=opus`, que a Meta recusa.
     // Como o codec já é Opus, convertemos só o container (remux, sem perda).
     let uploadBuffer = input.file.buffer;
@@ -366,6 +386,8 @@ export class WhatsAppOutboundService {
     const stored = await this.filesService.uploadRawFile({
       file: input.file,
       path: storagePath,
+      maxBytes:
+        mediaType === 'video' ? WHATSAPP_VIDEO_MAX_BYTES : 10 * 1024 * 1024,
     });
 
     const now = new Date();

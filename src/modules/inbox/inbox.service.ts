@@ -732,7 +732,7 @@ export class InboxService {
   async listMessages(ctx: RequestContext, conversationId: string) {
     await this.getConversation(ctx, conversationId);
 
-    const messages = await this.messagesRepository.find({
+    const allMessages = await this.messagesRepository.find({
       where: {
         ...this.scope(ctx),
         conversationId,
@@ -744,6 +744,9 @@ export class InboxService {
       },
       take: 200,
     });
+    // Mensagens recebidas "excluídas só na UI" ficam ocultas (metadata.hiddenAt)
+    // mas o registro é preservado para auditoria. Ver deleteMessage.
+    const messages = allMessages.filter((message) => !message.metadata?.hiddenAt);
     if (!messages.length) return messages;
     const media = await this.mediaRepository.find({
       where: {
@@ -1011,14 +1014,30 @@ export class InboxService {
     messageId: string,
   ) {
     const message = await this.getMessage(ctx, conversationId, messageId);
+    const isInbound =
+      message.direction === 'inbound' || message.senderType === 'contact';
 
-    await this.messagesRepository.delete({
-      ...this.scope(ctx),
-      conversationId,
-      id: messageId,
-    });
+    // Mensagem RECEBIDA: não há como revogar no aparelho do contato, então
+    // "exclui só na UI" — ocultamos do nosso lado e preservamos o registro
+    // (auditoria). Mensagem ENVIADA por nós: removemos de vez ("para ambos" nos
+    // canais internos; no WhatsApp Cloud API não existe revogação, então vale
+    // do nosso lado). Ver listMessages (filtro metadata.hiddenAt).
+    if (isInbound) {
+      message.metadata = {
+        ...(message.metadata ?? {}),
+        hiddenAt: new Date().toISOString(),
+        hiddenBy: ctx.userId ?? null,
+      };
+      await this.messagesRepository.save(message);
+    } else {
+      await this.messagesRepository.delete({
+        ...this.scope(ctx),
+        conversationId,
+        id: messageId,
+      });
+    }
 
-    const latestMessage = await this.messagesRepository.findOne({
+    const recentMessages = await this.messagesRepository.find({
       where: {
         ...this.scope(ctx),
         conversationId,
@@ -1026,7 +1045,11 @@ export class InboxService {
       order: {
         createdAt: 'DESC',
       },
+      take: 20,
     });
+    const latestMessage = recentMessages.find(
+      (item) => !item.metadata?.hiddenAt,
+    );
 
     const conversation = await this.getConversation(ctx, conversationId);
     conversation.lastMessagePreview =
@@ -1035,11 +1058,14 @@ export class InboxService {
 
     await this.conversationsRepository.save(conversation);
 
-    await this.createEvent(ctx, conversationId, 'message_deleted', {
-      messageId: message.id,
-    });
+    await this.createEvent(
+      ctx,
+      conversationId,
+      isInbound ? 'message_hidden' : 'message_deleted',
+      { messageId: message.id },
+    );
 
-    return { deleted: true, id: messageId };
+    return { deleted: true, scope: isInbound ? 'local' : 'both', id: messageId };
   }
 
   async listEvents(ctx: RequestContext, conversationId: string) {
