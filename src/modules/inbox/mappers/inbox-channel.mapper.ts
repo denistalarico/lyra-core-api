@@ -4,6 +4,16 @@ import type {
   InboxChannelType,
 } from '../entities/inbox-channel.entity';
 
+export const INBOX_CHANNEL_CUSTOM_NAME_METADATA_KEY = 'customDisplayName';
+
+function getInboxChannelDisplayName(channel: InboxChannelEntity) {
+  const customName = channel.metadata?.[INBOX_CHANNEL_CUSTOM_NAME_METADATA_KEY];
+
+  return typeof customName === 'string' && customName.trim()
+    ? customName.trim()
+    : channel.name;
+}
+
 /**
  * Shape returned to API clients for an inbox channel.
  *
@@ -52,7 +62,7 @@ export function mapInboxChannel(
     id: channel.id,
     tenantId: channel.tenantId,
     workspaceId: channel.workspaceId,
-    name: channel.name,
+    name: getInboxChannelDisplayName(channel),
     type: channel.type,
     status: channel.status,
     connectionStatus: channel.connectionStatus,

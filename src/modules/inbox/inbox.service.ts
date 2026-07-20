@@ -24,7 +24,10 @@ import { InboxMediaAssetEntity } from './entities/inbox-media-asset.entity';
 import { InboxMediaDerivativeEntity } from './entities/inbox-media-derivative.entity';
 import { SettingsCryptoService } from '../../common/crypto/settings-crypto.service';
 import { FilesService } from '../../common/files/files.service';
-import { mapInboxChannel } from './mappers/inbox-channel.mapper';
+import {
+  INBOX_CHANNEL_CUSTOM_NAME_METADATA_KEY,
+  mapInboxChannel,
+} from './mappers/inbox-channel.mapper';
 import { ConversationOwnershipService } from './services/conversation-ownership.service';
 import { WhatsAppOutboundService } from './channels/whatsapp/services/whatsapp-outbound.service';
 
@@ -323,7 +326,14 @@ export class InboxService {
   ) {
     const channel = await this.findChannelForContext(ctx, id);
 
-    if (dto.name !== undefined) channel.name = dto.name.trim();
+    if (dto.name !== undefined) {
+      const customName = dto.name.trim();
+      channel.name = customName;
+      channel.metadata = {
+        ...(channel.metadata ?? {}),
+        [INBOX_CHANNEL_CUSTOM_NAME_METADATA_KEY]: customName,
+      };
+    }
     if (dto.aiEnabled !== undefined) {
       if (
         dto.aiEnabled &&
