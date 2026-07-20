@@ -5,6 +5,7 @@ import type { LeadFlowSettingsStatus } from '../enums/leadflow-settings-status.e
 export type LeadFlowClientSummaryResponse = {
   agencyClientId: string;
   displayName: string;
+  avatarUrl: string | null;
   status: string;
   managedTenantId: string | null;
   leadflow: {
@@ -27,9 +28,17 @@ export function mapLeadFlowClientSummaryResponse(
   agencyClient: AgencyClient,
   settings?: LeadFlowClientSettingsEntity | null,
 ): LeadFlowClientSummaryResponse {
+  // Avatar do cliente persistido no módulo Clients do Agency
+  // (agency_clients.metadata.contactAvatarUrl).
+  const contactAvatarUrl = agencyClient.metadata?.contactAvatarUrl;
+
   return {
     agencyClientId: agencyClient.id,
     displayName: agencyClient.displayName,
+    avatarUrl:
+      typeof contactAvatarUrl === 'string' && contactAvatarUrl.trim()
+        ? contactAvatarUrl
+        : null,
     status: agencyClient.status,
     managedTenantId: agencyClient.managedTenantId,
     leadflow: {
