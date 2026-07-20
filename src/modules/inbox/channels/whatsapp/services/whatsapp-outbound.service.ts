@@ -6,7 +6,13 @@ import {
 } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, IsNull, Repository } from 'typeorm';
+import { execFile } from 'child_process';
 import { randomUUID } from 'crypto';
+import { mkdtemp, readFile, rm, writeFile } from 'fs/promises';
+import { tmpdir } from 'os';
+import { join } from 'path';
+import { promisify } from 'util';
+import ffmpegStatic from 'ffmpeg-static';
 import { SettingsCryptoService } from '../../../../../common/crypto/settings-crypto.service';
 import { FilesService } from '../../../../../common/files/files.service';
 import type { RequestContext } from '../../../../../common/context/request-context.interface';
@@ -51,6 +57,23 @@ function resolveWhatsAppMediaType(mimeType: string): WhatsAppMediaType {
   if (normalized.startsWith('video/')) return 'video';
   return 'document';
 }
+
+// Formatos de áudio aceitos pela Meta. Navegadores Chromium gravam
+// `audio/webm;codecs=opus`, que NÃO está na lista — falhamos cedo com uma
+// mensagem clara em vez de deixar a Meta rejeitar com erro genérico.
+const WHATSAPP_AUDIO_MIME_TYPES = new Set([
+  'audio/aac',
+  'audio/amr',
+  'audio/mpeg',
+  'audio/mp4',
+  'audio/ogg',
+]);
+
+function getBaseMimeType(mimeType: string) {
+  return (mimeType || '').toLowerCase().split(';')[0].trim();
+}
+
+const execFileAsync = promisify(execFile);
 
 type MetaSendMessageResponse = {
   messaging_product?: string;
@@ -287,6 +310,27 @@ export class WhatsAppOutboundService {
 
     const mediaType = resolveWhatsAppMediaType(input.file.mimetype);
     const caption = input.caption?.trim() || '';
+
+    // Navegadores Chromium gravam `audio/webm;codecs=opus`, que a Meta recusa.
+    // Como o codec já é Opus, convertemos só o container (remux, sem perda).
+    let uploadBuffer = input.file.buffer;
+    let uploadMimeType = input.file.mimetype;
+    let uploadFilename = input.file.originalname;
+
+    if (
+      mediaType === 'audio' &&
+      !WHATSAPP_AUDIO_MIME_TYPES.has(getBaseMimeType(input.file.mimetype))
+    ) {
+      uploadBuffer = await this.convertAudioToOggOpus(input.file);
+      uploadMimeType = 'audio/ogg';
+      uploadFilename = `${input.file.originalname.replace(/\.[^.]+$/, '')}.ogg`;
+    }
+
+    // Não usamos o nome do arquivo como texto da mensagem: a UI mostraria
+    // "audio-123.webm" no balão. Sem legenda usamos um rótulo curto que o
+    // frontend esconde e a lista aproveita como preview.
+    const mediaLabel = `[${WHATSAPP_MEDIA_LABELS[mediaType]}]`;
+    const messageContent = caption || mediaLabel;
     const ext = input.file.originalname.split('.').pop()?.toLowerCase() ?? 'bin';
 
     // Guarda a cópia no nosso storage para renderizar o balão outbound.
@@ -313,7 +357,7 @@ export class WhatsAppOutboundService {
         externalMessageId: null,
         idempotencyKey,
         messageType: 'media',
-        content: caption || input.file.originalname,
+        content: messageContent,
         status: 'pending',
         attachments: [
           {
@@ -347,7 +391,9 @@ export class WhatsAppOutboundService {
       const mediaId = await this.uploadMediaToMeta({
         phoneNumberId: channel.externalPhoneNumberId,
         accessToken,
-        file: input.file,
+        buffer: uploadBuffer,
+        mimeType: uploadMimeType,
+        filename: uploadFilename,
       });
       response = await this.sendMediaToMeta({
         phoneNumberId: channel.externalPhoneNumberId,
@@ -369,7 +415,7 @@ export class WhatsAppOutboundService {
     }
 
     const externalMessageId = response.messages?.[0]?.id ?? null;
-    const preview = caption || `[${WHATSAPP_MEDIA_LABELS[mediaType]}]`;
+    const preview = messageContent;
     await this.dataSource.transaction(async (manager) => {
       message.externalMessageId = externalMessageId;
       message.status = 'sent';
@@ -580,23 +626,68 @@ export class WhatsAppOutboundService {
     return data;
   }
 
+  // Remux de áudio para ogg/opus. Tenta copiar o stream (instantâneo, sem
+  // perda) e só re-encoda se o codec de origem não for Opus.
+  private async convertAudioToOggOpus(
+    file: Express.Multer.File,
+  ): Promise<Buffer> {
+    const ffmpegPath =
+      process.env.FFMPEG_PATH?.trim() ||
+      ((ffmpegStatic as unknown as string | null) ?? '');
+
+    if (!ffmpegPath) {
+      throw new BadRequestException(
+        'Conversão de áudio indisponível no servidor (ffmpeg não encontrado).',
+      );
+    }
+
+    const directory = await mkdtemp(join(tmpdir(), 'lyra-audio-'));
+    const inputPath = join(directory, `in-${randomUUID()}`);
+    const outputPath = join(directory, `out-${randomUUID()}.ogg`);
+
+    try {
+      await writeFile(inputPath, file.buffer);
+
+      try {
+        await execFileAsync(ffmpegPath, [
+          '-y', '-i', inputPath, '-vn', '-c:a', 'copy', '-f', 'ogg', outputPath,
+        ]);
+      } catch {
+        await execFileAsync(ffmpegPath, [
+          '-y', '-i', inputPath, '-vn', '-c:a', 'libopus', '-b:a', '32k',
+          '-f', 'ogg', outputPath,
+        ]);
+      }
+
+      return await readFile(outputPath);
+    } catch {
+      throw new BadRequestException(
+        'Não foi possível converter o áudio para um formato aceito pelo WhatsApp.',
+      );
+    } finally {
+      await rm(directory, { recursive: true, force: true }).catch(
+        () => undefined,
+      );
+    }
+  }
+
   private async uploadMediaToMeta(input: {
     phoneNumberId: string;
     accessToken: string;
-    file: Express.Multer.File;
+    buffer: Buffer;
+    mimeType: string;
+    filename: string;
   }): Promise<string> {
     const graphVersion = process.env.META_GRAPH_API_VERSION ?? 'v24.0';
     const url = `https://graph.facebook.com/${graphVersion}/${input.phoneNumberId}/media`;
 
     const form = new FormData();
     form.append('messaging_product', 'whatsapp');
-    form.append('type', input.file.mimetype);
+    form.append('type', input.mimeType);
     form.append(
       'file',
-      new Blob([new Uint8Array(input.file.buffer)], {
-        type: input.file.mimetype,
-      }),
-      input.file.originalname,
+      new Blob([new Uint8Array(input.buffer)], { type: input.mimeType }),
+      input.filename,
     );
 
     const response = await fetch(url, {
@@ -605,11 +696,15 @@ export class WhatsAppOutboundService {
       body: form,
     });
 
-    const data = (await response.json()) as { id?: string; error?: unknown };
+    const data = (await response.json()) as {
+      id?: string;
+      error?: { message?: string };
+    };
 
     if (!response.ok || !data.id) {
+      const detail = data.error?.message ? ` (${data.error.message})` : '';
       throw new BadRequestException(
-        'Não foi possível enviar a mídia ao canal WhatsApp.',
+        `Não foi possível enviar a mídia ao canal WhatsApp.${detail}`,
       );
     }
 
@@ -655,8 +750,9 @@ export class WhatsAppOutboundService {
     const data = (await response.json()) as MetaSendMessageResponse;
 
     if (!response.ok || data.error) {
+      const detail = data.error?.message ? ` (${data.error.message})` : '';
       throw new BadRequestException(
-        'Não foi possível enviar a mídia pelo canal WhatsApp.',
+        `Não foi possível enviar a mídia pelo canal WhatsApp.${detail}`,
       );
     }
 
