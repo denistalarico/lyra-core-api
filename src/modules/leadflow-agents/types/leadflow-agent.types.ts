@@ -16,7 +16,7 @@ export type LeadFlowJsonObject = Record<string, LeadFlowJsonValue>;
  * safe, non-developer configuration exposed to common users.
  */
 export interface LeadFlowAgentBehaviorConfig {
-  tone?: string;
+  tone?: string | string[];
   language?: string;
   allowedLanguages?: string[];
   roleTitle?: string;
@@ -26,7 +26,7 @@ export interface LeadFlowAgentBehaviorConfig {
   preferredClosing?: string;
   behaviorLimits?: string[];
   proactivity?: 'low' | 'balanced' | 'high';
-  responseStyle?: string;
+  responseStyle?: string | string[];
   guardrails?: string[];
   [key: string]: LeadFlowJsonValue | undefined;
 }

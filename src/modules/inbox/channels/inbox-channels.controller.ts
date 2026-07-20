@@ -38,8 +38,10 @@ export class InboxChannelsController {
   ) {
     return this.bindingReconciler.reconcile(ctx, {
       channelId: dto.channelId,
-      preferredAgentId: dto.defaultAgentId,
-      trigger: dto.defaultAgentId ? 'default_changed' : 'admin_check',
+      preferredAgentId: dto.defaultAgentId ?? undefined,
+      clearDefault: dto.defaultAgentId === null,
+      trigger:
+        dto.defaultAgentId !== undefined ? 'default_changed' : 'admin_check',
       requireChoice: true,
     });
   }

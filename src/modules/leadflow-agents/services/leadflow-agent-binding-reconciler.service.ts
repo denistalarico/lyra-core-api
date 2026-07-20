@@ -42,6 +42,7 @@ export class LeadFlowAgentBindingReconcilerService {
     input: {
       channelId?: string;
       preferredAgentId?: string;
+      clearDefault?: boolean;
       trigger: BindingReconcileTrigger;
       requireChoice?: boolean;
     },
@@ -79,10 +80,14 @@ export class LeadFlowAgentBindingReconcilerService {
     channel: InboxChannelEntity,
     input: {
       preferredAgentId?: string;
+      clearDefault?: boolean;
       trigger: BindingReconcileTrigger;
       requireChoice?: boolean;
     },
   ): Promise<BindingReconcileResult> {
+    if (input.clearDefault) {
+      return this.clearDefault(manager, ctx, channel, input.trigger, 'unbound');
+    }
     const agents = await manager.getRepository(LeadFlowAgentEntity).find({
       where: {
         tenantId: ctx.tenantId,

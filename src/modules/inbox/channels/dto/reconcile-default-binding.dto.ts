@@ -7,5 +7,5 @@ export class ReconcileDefaultBindingDto {
 
   @IsOptional()
   @IsUUID()
-  defaultAgentId?: string;
+  defaultAgentId?: string | null;
 }

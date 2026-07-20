@@ -175,4 +175,26 @@ run('LeadFlow default binding reconciliation PostgreSQL', () => {
     });
     expect(result).toMatchObject({ status: 'unbound', defaultAgentId: null });
   });
+
+  it('clears an active default when the user removes the channel', async () => {
+    const agentId = await insertAgent();
+    const channelId = await insertChannel();
+    await service.reconcile(ctx, {
+      channelId,
+      preferredAgentId: agentId,
+      trigger: 'default_changed',
+    });
+
+    const [result] = await service.reconcile(ctx, {
+      channelId,
+      clearDefault: true,
+      trigger: 'default_changed',
+    });
+
+    expect(result).toMatchObject({
+      status: 'unbound',
+      defaultAgentId: null,
+      changed: true,
+    });
+  });
 });
