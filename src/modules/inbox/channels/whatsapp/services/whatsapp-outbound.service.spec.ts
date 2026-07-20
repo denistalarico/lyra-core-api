@@ -54,6 +54,11 @@ describe('WhatsAppOutboundService idempotency', () => {
       { findOne: jest.fn().mockResolvedValue(conversation) } as never,
       messagesRepository as never,
       { decrypt: jest.fn().mockReturnValue('test-access-token') } as never,
+      {
+        uploadRawFile: jest
+          .fn()
+          .mockResolvedValue({ url: 'https://files.test/x', path: 'x' }),
+      } as never,
     );
     const fetchMock = jest
       .spyOn(global, 'fetch')
