@@ -63,6 +63,9 @@ import { InboxGateway } from './realtime/inbox.gateway';
 import { InboxChannelLifecycleRequestEntity } from './entities/inbox-channel-lifecycle-request.entity';
 import { InboxChannelLifecycleService } from './services/inbox-channel-lifecycle.service';
 import { InboxMetaOperationEntity } from './entities/inbox-meta-operation.entity';
+import { InboxGovernedActionEntity } from './entities/inbox-governed-action.entity';
+import { InboxChannelContactIdentityEntity } from './entities/inbox-channel-contact-identity.entity';
+import { InboxAutonomyControlEntity } from './entities/inbox-autonomy-control.entity';
 import { InboxPilotOutboundPolicyService } from './channels/whatsapp/services/inbox-pilot-outbound-policy.service';
 import { InboxMetaOperationLedgerService } from './channels/whatsapp/services/inbox-meta-operation-ledger.service';
 import { LeadFlowAgentChannelBindingEntity } from '../leadflow-agents/entities/leadflow-agent-channel-binding.entity';
@@ -70,6 +73,10 @@ import { LeadFlowAgentEntity } from '../leadflow-agents/entities/leadflow-agent.
 import { AgentActivationPolicyService } from './services/agent-activation-policy.service';
 import { LeadFlowAgentsModule } from '../leadflow-agents/leadflow-agents.module';
 import { InboxOutboxAdminController } from './inbox-outbox-admin.controller';
+import { InboxGovernedAutonomyPolicyService } from './runtime/inbox-governed-autonomy-policy.service';
+import { InboxGovernedActionWorker } from './services/inbox-governed-action.worker';
+import { InboxAutonomyAdminService } from './services/inbox-autonomy-admin.service';
+import { InboxAutonomyAdminController } from './inbox-autonomy-admin.controller';
 
 @Module({
   imports: [
@@ -98,6 +105,9 @@ import { InboxOutboxAdminController } from './inbox-outbox-admin.controller';
         InboxDomainOutboxEntity,
         InboxChannelLifecycleRequestEntity,
         InboxMetaOperationEntity,
+        InboxGovernedActionEntity,
+        InboxChannelContactIdentityEntity,
+        InboxAutonomyControlEntity,
         LeadFlowAgentChannelBindingEntity,
         LeadFlowAgentEntity,
       ],
@@ -114,6 +124,7 @@ import { InboxOutboxAdminController } from './inbox-outbox-admin.controller';
     WhatsAppChannelHealthController,
     InboxMediaController,
     InboxOutboxAdminController,
+    InboxAutonomyAdminController,
   ],
   providers: [
     InboxService,
@@ -148,6 +159,9 @@ import { InboxOutboxAdminController } from './inbox-outbox-admin.controller';
     AgentActivationPolicyService,
     InboxPilotOutboundPolicyService,
     InboxMetaOperationLedgerService,
+    InboxGovernedAutonomyPolicyService,
+    InboxGovernedActionWorker,
+    InboxAutonomyAdminService,
   ],
   exports: [
     InboxService,

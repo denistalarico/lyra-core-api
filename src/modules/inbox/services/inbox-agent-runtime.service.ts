@@ -13,6 +13,8 @@ import { DataSource, IsNull } from 'typeorm';
 import { FilesService } from '../../../common/files/files.service';
 import type { RequestContext } from '../../../common/context/request-context.interface';
 import { CrmOpportunityEntity } from '../../crm/entities/crm-opportunity.entity';
+import { CrmPipelineEntity } from '../../crm/entities/crm-pipeline.entity';
+import { CrmStageEntity } from '../../crm/entities/crm-stage.entity';
 import { LeadFlowAgentEntity } from '../../leadflow-agents/entities/leadflow-agent.entity';
 import { LeadFlowAgentChannelBindingEntity } from '../../leadflow-agents/entities/leadflow-agent-channel-binding.entity';
 import { LeadFlowAgentVersionEntity } from '../../leadflow-agents/entities/leadflow-agent-version.entity';
@@ -34,6 +36,7 @@ import { InboxMediaDerivativeEntity } from '../entities/inbox-media-derivative.e
 import { InboxMessageEntity } from '../entities/inbox-message.entity';
 import { InboxProcessingBatchEntity } from '../entities/inbox-processing-batch.entity';
 import { InboxDomainOutboxEntity } from '../entities/inbox-domain-outbox.entity';
+import { InboxGovernedActionEntity } from '../entities/inbox-governed-action.entity';
 import {
   AgentDecisionPromptBuilder,
   AgentDecisionV1Service,
@@ -46,6 +49,12 @@ import {
   AgentDecisionResult,
   InboxProviderError,
 } from '../runtime/inbox-runtime.contracts';
+import {
+  InboxGovernedActionType,
+  InboxGovernedAutonomyPolicyService,
+  INBOX_AUTONOMY_POLICY_VERSION,
+} from '../runtime/inbox-governed-autonomy-policy.service';
+import { InboxPilotOutboundPolicyService } from '../channels/whatsapp/services/inbox-pilot-outbound-policy.service';
 
 export type AgentDecisionProposal = AgentDecisionV1;
 
@@ -110,6 +119,10 @@ export class InboxAgentRuntimeService {
     private readonly actionPlanner: BusinessModeActionPlanner,
     @Optional()
     private readonly operationsRoomState?: OperationsRoomStateService,
+    @Optional()
+    private readonly autonomyPolicy?: InboxGovernedAutonomyPolicyService,
+    @Optional()
+    private readonly pilotOutboundPolicy?: InboxPilotOutboundPolicyService,
   ) {}
 
   async claimAndProcess(workerId: string) {
@@ -324,6 +337,8 @@ export class InboxAgentRuntimeService {
             )
             .getOne()
         : null;
+      const effectiveBusinessMode =
+        settings?.businessModeKey ?? conversation.businessMode;
       const messageProjection = orderedMessages.map((message) => ({
         id: message.id,
         evidenceRef: `message:${message.id}`,
@@ -359,7 +374,7 @@ export class InboxAgentRuntimeService {
         ? await this.loadImages(media)
         : [];
       const prompt = this.promptBuilder.build({
-        businessMode: conversation.businessMode,
+        businessMode: effectiveBusinessMode,
         ownership: {
           state: conversation.ownershipState,
           version: conversation.ownershipVersion,
@@ -394,7 +409,7 @@ export class InboxAgentRuntimeService {
           mimeType,
         })),
         businessModeInstruction: businessModeTemplate?.agentPromptTemplate ?? {
-          key: conversation.businessMode,
+          key: effectiveBusinessMode,
         },
         businessModeVersion: businessModeTemplate?.version ?? 1,
         agentProfile:
@@ -424,7 +439,7 @@ export class InboxAgentRuntimeService {
               versionId: version?.id ?? null,
               snapshot: version?.snapshot ?? {},
             },
-            businessMode: conversation.businessMode,
+            businessMode: effectiveBusinessMode,
             workspaceConfig: settings?.agentConfig ?? {},
             contact: { id: conversation.contactId },
             opportunity: opportunity
@@ -477,7 +492,7 @@ export class InboxAgentRuntimeService {
       const actionPlan = await this.actionPlanner.plan({
         tenantId: batch.tenantId,
         workspaceId: batch.workspaceId,
-        businessMode: conversation.businessMode,
+        businessMode: effectiveBusinessMode,
         opportunity,
         decision: proposal,
       });
@@ -518,9 +533,121 @@ export class InboxAgentRuntimeService {
           }
           return null;
         }
+        const latestInbound = await manager
+          .getRepository(InboxMessageEntity)
+          .findOne({
+            where: {
+              tenantId: batch.tenantId,
+              workspaceId: batch.workspaceId,
+              conversationId: batch.conversationId,
+              direction: 'inbound',
+            },
+            order: { occurredAt: 'DESC', createdAt: 'DESC' },
+          });
+        const contextInbound = [...messageProjection]
+          .reverse()
+          .find((message) => message.direction === 'inbound');
+        const defaultPipelines = await manager
+          .getRepository(CrmPipelineEntity)
+          .find({
+            where: {
+              tenantId: batch.tenantId,
+              workspaceId: batch.workspaceId,
+              businessMode: effectiveBusinessMode,
+              isDefault: true,
+              status: 'active',
+              deletedAt: IsNull(),
+            },
+          });
+        const initialStage =
+          defaultPipelines.length === 1
+            ? await manager.getRepository(CrmStageEntity).findOne({
+                where: {
+                  tenantId: batch.tenantId,
+                  workspaceId: batch.workspaceId,
+                  pipelineId: defaultPipelines[0].id,
+                  type: 'open',
+                  deletedAt: IsNull(),
+                },
+                order: { sortOrder: 'ASC', createdAt: 'ASC' },
+              })
+            : null;
+        const identityDigits = lockedConversation.externalThreadId?.replace(
+          /\D/g,
+          '',
+        );
+        const identityMatches = identityDigits
+          ? await manager.query<Array<{ id: string; status: string }>>(
+              `SELECT DISTINCT contact.id, contact.status
+                 FROM contacts contact
+                 JOIN contact_methods method
+                   ON method.contact_id = contact.id
+                  AND method.tenant_id = contact.tenant_id
+                  AND method.workspace_id = contact.workspace_id
+                WHERE contact.tenant_id = $1 AND contact.workspace_id = $2
+                  AND method.type IN ('phone', 'whatsapp')
+                  AND regexp_replace(method.value, '\\D', '', 'g') = $3`,
+              [batch.tenantId, batch.workspaceId, identityDigits],
+            )
+          : [];
+        const decisionId = randomUUID();
+        await manager.query(
+          `INSERT INTO inbox_autonomy_controls (tenant_id,workspace_id)
+           VALUES ($1,$2) ON CONFLICT (tenant_id,workspace_id) DO NOTHING`,
+          [batch.tenantId, batch.workspaceId],
+        );
+        if (lockedConversation.businessMode !== effectiveBusinessMode) {
+          lockedConversation.businessMode = effectiveBusinessMode;
+          await manager
+            .getRepository(InboxConversationEntity)
+            .save(lockedConversation);
+        }
+        const policyActions = this.evaluateGovernedActions({
+          decisionId,
+          batch,
+          conversation: lockedConversation,
+          channel,
+          agentId: agent.id,
+          agentVersionId: version.id,
+          proposal,
+          actionPlan,
+          promptVersion: prompt.promptVersion,
+          modelVersion: providerResult.model,
+          companyContextPublished:
+            Boolean(settings?.companyContextPublishedVersion) &&
+            Boolean(settings?.companyContextPublishedHash),
+          companyContext: settings?.companyContextPublished ?? {},
+          companyContextHash: settings?.companyContextPublishedHash ?? null,
+          latestContext: Boolean(
+            latestInbound &&
+            contextInbound &&
+            latestInbound.id === contextInbound.id,
+          ),
+          latestInbound,
+          recipientAllowed: (
+            this.pilotOutboundPolicy ?? new InboxPilotOutboundPolicyService()
+          ).isAuthorized(lockedConversation.externalThreadId),
+          humanRouteConfigured: Boolean(
+            channel.defaultAssignedUserId ||
+            (settings?.handoffOverrides &&
+              Object.keys(settings.handoffOverrides).length),
+          ),
+          opportunityDefaultsResolved: Boolean(
+            defaultPipelines.length === 1 && initialStage,
+          ),
+          defaultPipelineId:
+            defaultPipelines.length === 1 ? defaultPipelines[0].id : null,
+          initialStageId: initialStage?.id ?? null,
+          canonicalIdentityResolved: Boolean(
+            identityDigits &&
+            identityMatches.length <= 1 &&
+            identityMatches[0]?.status !== 'archived',
+          ),
+        });
         const decision = await manager
           .getRepository(InboxAgentDecisionEntity)
           .save({
+            id: decisionId,
             tenantId: batch.tenantId,
             workspaceId: batch.workspaceId,
             conversationId: batch.conversationId,
@@ -534,16 +661,22 @@ export class InboxAgentRuntimeService {
             status: 'proposed',
             proposal,
             policyResult: {
-              mode: 'supervised',
-              automaticEffectsAllowed: false,
+              mode: 'governed',
+              policyVersion: INBOX_AUTONOMY_POLICY_VERSION,
+              automaticEffectsAllowed:
+                this.config.autoReplyEnabled ||
+                this.config.autoCrmEnabled ||
+                this.config.autoHandoffEnabled,
               automaticReplyAllowed: this.config.autoReplyEnabled,
               automaticCrmAllowed: this.config.autoCrmEnabled,
+              automaticHandoffAllowed: this.config.autoHandoffEnabled,
+              actions: policyActions,
               mediaContext: this.mediaPolicy(media, derivatives),
             },
             contextSnapshot: {
               conversationId: conversation.id,
               opportunityId: opportunity?.id ?? null,
-              businessMode: conversation.businessMode,
+              businessMode: effectiveBusinessMode,
               messageRefs: messageProjection.map(({ id, occurredAt }) => ({
                 id,
                 occurredAt,
@@ -573,6 +706,42 @@ export class InboxAgentRuntimeService {
             reviewedBy: null,
             reviewedAt: null,
           });
+        await manager.getRepository(InboxGovernedActionEntity).save(
+          policyActions.map((action) => ({
+            tenantId: action.tenantId,
+            workspaceId: action.workspaceId,
+            conversationId: action.conversationId,
+            decisionId: action.decisionId,
+            ownershipVersion: action.ownershipVersion,
+            policyVersion: action.policyVersion,
+            actionType: action.actionType,
+            actionKey: action.actionKey,
+            policyOutcome: action.outcome,
+            reasonCode: action.reasonCode,
+            idempotencyKey: action.idempotencyKey,
+            intentHash: createHash('sha256')
+              .update(
+                JSON.stringify({
+                  decisionId: action.decisionId,
+                  actionType: action.actionType,
+                  actionKey: action.actionKey,
+                  promptHash: prompt.promptHash,
+                  contextVersion: settings?.companyContextPublishedVersion ?? 0,
+                }),
+              )
+              .digest('hex'),
+            auditRef: action.auditRef,
+            status: action.outcome === 'allowed' ? 'planned' : action.outcome,
+            canonicalRefs: action.canonicalRefs,
+            applicationResult: {},
+            attempts: 0,
+            claimedAt: null,
+            claimedBy: null,
+            appliedAt: null,
+            failedAt: null,
+            errorCode: null,
+          })),
+        );
         lockedBatch.status = 'completed';
         lockedBatch.completedAt = new Date();
         lockedBatch.errorCode = null;
@@ -613,6 +782,149 @@ export class InboxAgentRuntimeService {
         'processing_finished',
       );
     }
+  }
+
+  private evaluateGovernedActions(input: {
+    decisionId: string;
+    batch: InboxProcessingBatchEntity;
+    conversation: InboxConversationEntity;
+    channel: InboxChannelEntity;
+    agentId: string;
+    agentVersionId: string;
+    proposal: AgentDecisionV1;
+    actionPlan: Array<Record<string, unknown>>;
+    promptVersion: string;
+    modelVersion: string;
+    companyContextPublished: boolean;
+    companyContext: Record<string, unknown>;
+    companyContextHash: string | null;
+    latestContext: boolean;
+    latestInbound: InboxMessageEntity | null;
+    recipientAllowed: boolean;
+    humanRouteConfigured: boolean;
+    opportunityDefaultsResolved: boolean;
+    defaultPipelineId: string | null;
+    initialStageId: string | null;
+    canonicalIdentityResolved: boolean;
+  }) {
+    const actions: Array<{
+      type: InboxGovernedActionType;
+      key: string;
+      value?: string | null;
+      resolved: boolean;
+    }> = [];
+    if (!input.conversation.contactId) {
+      actions.push({
+        type: 'ensure_contact',
+        key: 'contact',
+        value: null,
+        resolved: input.canonicalIdentityResolved,
+      });
+    }
+    if (
+      input.conversation.qualificationStatus === 'qualified' &&
+      !input.conversation.opportunityId
+    ) {
+      actions.push({
+        type: 'ensure_opportunity',
+        key: 'opportunity',
+        value: null,
+        resolved:
+          input.opportunityDefaultsResolved &&
+          Boolean(
+            input.conversation.contactId || input.canonicalIdentityResolved,
+          ),
+      });
+    }
+    if (input.proposal.reply !== null) {
+      actions.push({
+        type: 'reply',
+        key: 'reply',
+        value: input.proposal.reply,
+        resolved: true,
+      });
+    }
+    for (const action of input.actionPlan) {
+      if (!isGovernedActionType(action.type)) continue;
+      actions.push({
+        type: action.type,
+        key: recordString(action.key),
+        value: typeof action.value === 'string' ? action.value : null,
+        resolved: action.allowed === true,
+      });
+    }
+    const inboundText = input.latestInbound?.content ?? '';
+    const contextText = stableLowercase(input.companyContext);
+    return actions.map((action) =>
+      (
+        this.autonomyPolicy ?? new InboxGovernedAutonomyPolicyService()
+      ).evaluate({
+        tenantId: input.batch.tenantId,
+        workspaceId: input.batch.workspaceId,
+        conversationId: input.conversation.id,
+        ownershipVersion: input.conversation.ownershipVersion,
+        currentOwnershipVersion: input.conversation.ownershipVersion,
+        ownershipState: input.conversation.ownershipState,
+        decisionId: input.decisionId,
+        decisionSchemaVersion: 1,
+        promptVersion: input.promptVersion,
+        modelVersion: input.modelVersion,
+        actionType: action.type,
+        actionKey: action.key,
+        actionValue: action.value,
+        canonicalRefs: [
+          `channel:${input.channel.id}`,
+          `agent:${input.agentId}`,
+          `agent-version:${input.agentVersionId}`,
+          ...(input.companyContextHash
+            ? [`company-context:${input.companyContextHash}`]
+            : []),
+          ...(action.type === 'ensure_opportunity' && input.defaultPipelineId
+            ? [`pipeline:${input.defaultPipelineId}`]
+            : []),
+          ...(action.type === 'ensure_opportunity' && input.initialStageId
+            ? [`stage:${input.initialStageId}`]
+            : []),
+          ...(input.latestInbound ? [`message:${input.latestInbound.id}`] : []),
+        ],
+        auditRef: randomUUID(),
+        pilotMode: this.config.pilotMode,
+        effectEnabled:
+          action.type === 'reply'
+            ? this.config.autoReplyEnabled
+            : action.type === 'handoff'
+              ? this.config.autoHandoffEnabled
+              : this.config.autoCrmEnabled,
+        recipientAllowed: input.recipientAllowed,
+        channelEligible:
+          input.channel.type === 'whatsapp' &&
+          input.channel.status === 'active' &&
+          input.channel.connectionStatus === 'connected' &&
+          input.channel.aiEnabled,
+        agentPublished: Boolean(input.agentVersionId),
+        companyContextPublished: input.companyContextPublished,
+        latestContext: input.latestContext,
+        schemaValid: true,
+        idempotencyAvailable: true,
+        budgetAvailable: true,
+        channelWindowOpen: Boolean(
+          input.latestInbound &&
+          Date.now() - input.latestInbound.occurredAt.getTime() <=
+            24 * 60 * 60 * 1_000,
+        ),
+        promptInjectionDetected: detectsPromptInjection(inboundText),
+        sensitiveTopicDetected: detectsSensitiveTopic(inboundText),
+        factualClaimsSupported:
+          action.type !== 'reply' ||
+          factualReplyIsSupported(action.value ?? '', contextText),
+        canonicalTargetResolved: action.resolved,
+        // A existência do estágio não é uma máquina de transição. Até o
+        // Business Mode publicar transições explícitas, stage é humano.
+        transitionAllowed: action.type !== 'set_stage',
+        humanRouteConfigured: input.humanRouteConfigured,
+        leadEligible: input.conversation.qualificationStatus === 'qualified',
+      }),
+    );
   }
 
   private async publishOperationalStatus(
@@ -1388,6 +1700,64 @@ function slugValue(value: string): string {
 
 function recordString(value: unknown): string {
   return typeof value === 'string' ? value : '';
+}
+
+function isGovernedActionType(
+  value: unknown,
+): value is InboxGovernedActionType {
+  return [
+    'reply',
+    'ensure_contact',
+    'ensure_opportunity',
+    'set_stage',
+    'add_tag',
+    'set_summary',
+    'set_service',
+    'set_urgency',
+    'close',
+    'handoff',
+  ].includes(String(value));
+}
+
+function detectsPromptInjection(value: string): boolean {
+  return /(ignore|ignorem|desconsidere|revele|mostre|substitua|sobrescreva).{0,40}(instru[cç][oõ]es|prompt|policy|regras|sistema)|system\s*prompt|developer\s*message/i.test(
+    value,
+  );
+}
+
+function detectsSensitiveTopic(value: string): boolean {
+  return /(reclama[cç][aã]o|procon|processo|advogad|jur[ií]dic|privacidade|lgpd|vazamento|cobran[cç]a|estorno|fraude|amea[cç]a|imprensa)/i.test(
+    value,
+  );
+}
+
+function factualReplyIsSupported(reply: string, contextText: string): boolean {
+  const urls = reply.match(/https?:\/\/[^\s)]+/gi) ?? [];
+  if (urls.some((url) => !contextText.includes(url.toLowerCase())))
+    return false;
+  if (
+    /(r\$|\b\d+[,.]\d{2}\b|\b\d{1,2}h(?:\d{2})?\b|pre[cç]o|desconto|garantia|contrato|dispon[ií]vel|agenda|hor[aá]rio|prazo|pol[ií]tica|pix|parcel)/i.test(
+      reply,
+    )
+  )
+    return false;
+  if (
+    /\b(oferecemos|trabalhamos|temos|fazemos|atendemos|somos|garantimos|nosso(?:s|a|as)?)\b/i.test(
+      reply,
+    )
+  )
+    return false;
+  return /\?|\b(entendi|certo|perfeito|obrigad[oa]|ol[aá]|oi|posso|vou transferir)\b/i.test(
+    reply,
+  );
+}
+
+function stableLowercase(value: unknown): string {
+  try {
+    return JSON.stringify(value).toLowerCase();
+  } catch {
+    return '';
+  }
 }
 
 type CanonicalOpportunityState = {

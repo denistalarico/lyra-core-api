@@ -1,10 +1,10 @@
 import { INBOX_AGENT_GOLDEN_CASES } from './agent-eval-golden-cases';
 
 describe('Inbox Agent synthetic golden cases', () => {
-  it('versions the twelve required PII-free activation scenarios', () => {
-    expect(INBOX_AGENT_GOLDEN_CASES).toHaveLength(12);
+  it('versions the required PII-free activation scenarios', () => {
+    expect(INBOX_AGENT_GOLDEN_CASES).toHaveLength(16);
     expect(new Set(INBOX_AGENT_GOLDEN_CASES.map((item) => item.id)).size).toBe(
-      12,
+      16,
     );
     expect(
       INBOX_AGENT_GOLDEN_CASES.every(
@@ -22,6 +22,10 @@ describe('Inbox Agent synthetic golden cases', () => {
       ),
     );
     for (const id of [
+      'agency_services',
+      'service_quote',
+      'clinic_booking',
+      'restaurant_order',
       'service-simple-lead',
       'burst-single-context',
       'audio-clear',

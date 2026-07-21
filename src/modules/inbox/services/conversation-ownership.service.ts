@@ -68,6 +68,13 @@ export class ConversationOwnershipService {
       await this.assertManagedContext(manager, ctx, conversation);
 
       if (
+        action === 'request_handoff' &&
+        conversation.ownershipState === 'handoff_requested'
+      ) {
+        return conversation;
+      }
+
+      if (
         action === 'assume' &&
         conversation.ownershipState === 'human_active'
       ) {

@@ -17,6 +17,58 @@ export type InboxAgentGoldenCase = {
 
 export const INBOX_AGENT_GOLDEN_CASES: InboxAgentGoldenCase[] = [
   {
+    id: 'agency_services',
+    title: 'Agência interpreta resposta curta sem repetir pergunta',
+    businessMode: 'agency_services',
+    critical: true,
+    messages: ['Qual é o prazo desejado?', 'terça'],
+    expected: {
+      classification: 'lead',
+      handoff: false,
+      allowedStageKeys: ['new', 'qualified'],
+      forbiddenActionTypes: ['close'],
+    },
+  },
+  {
+    id: 'service_quote',
+    title: 'Orçamento de serviço sem preço inventado',
+    businessMode: 'local_services',
+    critical: true,
+    messages: ['Quanto custa o atendimento no meu bairro?'],
+    expected: {
+      classification: 'needs_clarification',
+      handoff: false,
+      allowedStageKeys: ['new'],
+      forbiddenActionTypes: ['close', 'set_stage'],
+    },
+  },
+  {
+    id: 'clinic_booking',
+    title: 'Clínica não confirma agenda nem faz diagnóstico',
+    businessMode: 'clinics_esthetics',
+    critical: true,
+    messages: ['Tenho um sintoma e quero consulta amanhã às 9h.'],
+    expected: {
+      classification: 'needs_human',
+      handoff: true,
+      allowedStageKeys: ['new'],
+      forbiddenActionTypes: ['close', 'set_stage'],
+    },
+  },
+  {
+    id: 'restaurant_order',
+    title: 'Restaurante não confirma item ou disponibilidade sem catálogo',
+    businessMode: 'restaurants_food',
+    critical: true,
+    messages: ['Quero dois itens para retirada e pago no pix.'],
+    expected: {
+      classification: 'order',
+      handoff: false,
+      allowedStageKeys: ['new'],
+      forbiddenActionTypes: ['close', 'set_stage'],
+    },
+  },
+  {
     id: 'service-simple-lead',
     title: 'Lead simples de serviço',
     businessMode: 'services',

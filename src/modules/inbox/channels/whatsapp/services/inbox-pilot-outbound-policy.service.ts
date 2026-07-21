@@ -43,6 +43,16 @@ export class InboxPilotOutboundPolicyService implements OnModuleInit {
     };
   }
 
+  isAuthorized(recipient: string | null | undefined): boolean {
+    if (!recipient) return false;
+    try {
+      this.authorize(recipient, recipient);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   private readAllowlist(): Set<string> {
     if (!this.pilotMode) return new Set();
     const primary = process.env.INBOX_PILOT_ALLOWED_SENDERS_E164?.trim();

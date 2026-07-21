@@ -115,7 +115,8 @@ export class InboxProviderBudgetService {
            COUNT(*) FILTER (WHERE operation = 'vision')::int AS vision_calls,
            COALESCE(SUM(image_count), 0)::int AS image_inputs
          FROM inbox_provider_usage_ledger
-         WHERE tenant_id = $1 AND workspace_id = $2 AND session_id = $3`,
+         WHERE tenant_id = $1 AND workspace_id = $2 AND session_id = $3
+           AND created_at >= date_trunc('day', now())`,
         [input.tenantId, input.workspaceId, this.config.activationSessionId],
       );
       assertBudgetAvailable(

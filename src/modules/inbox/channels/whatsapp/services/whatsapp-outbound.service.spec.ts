@@ -43,6 +43,13 @@ describe('WhatsAppOutboundService idempotency', () => {
       }),
     };
     const dataSource = {
+      query: jest.fn().mockResolvedValue([
+        {
+          policy_outcome: 'allowed',
+          status: 'claimed',
+          reply_enabled: true,
+        },
+      ]),
       transaction: jest.fn(
         (callback: (value: typeof manager) => Promise<unknown>) =>
           callback(manager),
@@ -77,7 +84,7 @@ describe('WhatsAppOutboundService idempotency', () => {
     );
     const fetchMock = jest
       .spyOn(global, 'fetch')
-      .mockResolvedValue(
+      .mockImplementation(async () =>
         Response.json({ messages: [{ id: 'wamid.synthetic' }] }),
       );
     const input = {
@@ -96,5 +103,37 @@ describe('WhatsAppOutboundService idempotency', () => {
     const second = await service.sendText(input);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(second.message).toBe(first.message);
+
+    storedMessage = null;
+    conversation.ownershipState = 'ai_active';
+    Object.assign(conversation, { aiEnabled: true, ownershipVersion: 4 });
+    const agentInput = {
+      ...input,
+      ctx: { tenantId: 'tenant', workspaceId: 'workspace' },
+      text: 'Resposta automática sintética',
+      idempotencyKey: 'agent-reply:test:1',
+      agentId: 'agent',
+      ownershipVersion: 4,
+      decisionId: 'decision',
+      policyVersion: 'inbox-autonomy-policy-v1',
+    };
+    const agentFirst = await service.sendAgentText(agentInput);
+    const agentReplay = await service.sendAgentText(agentInput);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(agentReplay.message).toBe(agentFirst.message);
+    expect(agentFirst.message).toMatchObject({
+      senderType: 'agent',
+      senderAgentId: 'agent',
+      idempotencyKey: 'agent-reply:test:1',
+    });
+
+    dataSource.query.mockResolvedValueOnce([]);
+    await expect(
+      service.sendAgentText({
+        ...agentInput,
+        idempotencyKey: 'agent-reply:without-policy',
+      }),
+    ).rejects.toThrow('Automatic reply blocked by governed policy.');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });

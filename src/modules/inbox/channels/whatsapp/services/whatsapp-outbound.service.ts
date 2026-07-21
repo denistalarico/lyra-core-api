@@ -34,6 +34,25 @@ type SendWhatsAppTextInput = {
   idempotencyKey?: string;
 };
 
+type SendWhatsAppAgentTextInput = SendWhatsAppTextInput & {
+  conversationId: string;
+  idempotencyKey: string;
+  agentId: string;
+  ownershipVersion: number;
+  decisionId: string;
+  policyVersion: string;
+};
+
+type WhatsAppTextActor =
+  | { type: 'user' }
+  | {
+      type: 'agent';
+      agentId: string;
+      ownershipVersion: number;
+      decisionId: string;
+      policyVersion: string;
+    };
+
 type SendWhatsAppMediaInput = {
   ctx: RequestContext;
   channelId: string;
@@ -119,6 +138,23 @@ export class WhatsAppOutboundService {
   ) {}
 
   async sendText(input: SendWhatsAppTextInput) {
+    return this.sendTextForActor(input, { type: 'user' });
+  }
+
+  async sendAgentText(input: SendWhatsAppAgentTextInput) {
+    return this.sendTextForActor(input, {
+      type: 'agent',
+      agentId: input.agentId,
+      ownershipVersion: input.ownershipVersion,
+      decisionId: input.decisionId,
+      policyVersion: input.policyVersion,
+    });
+  }
+
+  private async sendTextForActor(
+    input: SendWhatsAppTextInput,
+    actor: WhatsAppTextActor,
+  ) {
     const channel = await this.findChannelForContext(
       input.ctx,
       input.channelId,
@@ -150,10 +186,61 @@ export class WhatsAppOutboundService {
           input.ctx.userId ?? null,
         );
 
-    if (conversation.ownershipState !== 'human_active') {
+    if (
+      actor.type === 'user' &&
+      conversation.ownershipState !== 'human_active'
+    ) {
       throw new ConflictException(
         'A user must assume the conversation before replying through its channel.',
       );
+    }
+    if (
+      actor.type === 'agent' &&
+      (conversation.ownershipState !== 'ai_active' ||
+        !conversation.aiEnabled ||
+        conversation.ownershipVersion !== actor.ownershipVersion)
+    ) {
+      throw new ConflictException(
+        'AI send blocked by current conversation ownership.',
+      );
+    }
+    if (actor.type === 'agent') {
+      const [authorization] = await this.dataSource.query<
+        Array<{
+          policy_outcome: string;
+          status: string;
+          reply_enabled: boolean;
+        }>
+      >(
+        `SELECT action.policy_outcome,action.status,
+                COALESCE(control.reply_enabled,true) reply_enabled
+           FROM inbox_governed_actions action
+           LEFT JOIN inbox_autonomy_controls control
+             ON control.tenant_id=action.tenant_id
+            AND control.workspace_id=action.workspace_id
+          WHERE action.tenant_id=$1 AND action.workspace_id=$2
+            AND action.conversation_id=$3 AND action.decision_id=$4
+            AND action.idempotency_key=$5 AND action.action_type='reply'
+            AND action.policy_version=$6`,
+        [
+          channel.tenantId,
+          channel.workspaceId,
+          conversation.id,
+          actor.decisionId,
+          input.idempotencyKey,
+          actor.policyVersion,
+        ],
+      );
+      if (
+        !authorization ||
+        authorization.policy_outcome !== 'allowed' ||
+        !['planned', 'claimed', 'applied'].includes(authorization.status) ||
+        !authorization.reply_enabled
+      ) {
+        throw new ConflictException(
+          'Automatic reply blocked by governed policy.',
+        );
+      }
     }
 
     const recipient = this.outboundPolicy.authorize(
@@ -216,9 +303,9 @@ export class WhatsAppOutboundService {
       channelId: channel.id,
       contactId: conversation.contactId ?? null,
       direction: 'outbound',
-      senderType: 'user',
-      senderUserId: input.ctx.userId ?? null,
-      senderAgentId: null,
+      senderType: actor.type === 'agent' ? 'agent' : 'user',
+      senderUserId: actor.type === 'user' ? (input.ctx.userId ?? null) : null,
+      senderAgentId: actor.type === 'agent' ? actor.agentId : null,
       externalMessageId: null,
       idempotencyKey,
       messageType: 'text',
@@ -228,6 +315,13 @@ export class WhatsAppOutboundService {
       metadata: {
         provider: 'meta',
         channelType: 'whatsapp',
+        ...(actor.type === 'agent'
+          ? {
+              agentDecisionId: actor.decisionId,
+              policyVersion: actor.policyVersion,
+              ownershipVersion: actor.ownershipVersion,
+            }
+          : {}),
         ...replyMetadata,
       },
       sentAt: null,
@@ -300,14 +394,20 @@ export class WhatsAppOutboundService {
         workspaceId: channel.workspaceId,
         conversationId: conversation.id,
         eventType: 'message_sent',
-        actorType: input.ctx.userId ? 'user' : 'system',
-        actorUserId: input.ctx.userId ?? null,
+        actorType: actor.type === 'agent' ? 'agent' : 'user',
+        actorUserId: actor.type === 'user' ? (input.ctx.userId ?? null) : null,
         payload: {
           messageId: message.id,
           externalMessageId,
           channelId: channel.id,
           channelType: 'whatsapp',
           provider: 'meta',
+          ...(actor.type === 'agent'
+            ? {
+                decisionId: actor.decisionId,
+                policyVersion: actor.policyVersion,
+              }
+            : {}),
         },
       });
       await manager.getRepository(InboxDomainOutboxEntity).save({

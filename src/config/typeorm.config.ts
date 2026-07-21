@@ -55,6 +55,9 @@ import { InboxProcessingBatchEntity } from '../modules/inbox/entities/inbox-proc
 import { InboxAgentDecisionEntity } from '../modules/inbox/entities/inbox-agent-decision.entity';
 import { InboxDomainOutboxEntity } from '../modules/inbox/entities/inbox-domain-outbox.entity';
 import { InboxMetaOperationEntity } from '../modules/inbox/entities/inbox-meta-operation.entity';
+import { InboxGovernedActionEntity } from '../modules/inbox/entities/inbox-governed-action.entity';
+import { InboxChannelContactIdentityEntity } from '../modules/inbox/entities/inbox-channel-contact-identity.entity';
+import { InboxAutonomyControlEntity } from '../modules/inbox/entities/inbox-autonomy-control.entity';
 
 import { CrmPipelineEntity } from '../modules/crm/entities/crm-pipeline.entity';
 import { CrmStageEntity } from '../modules/crm/entities/crm-stage.entity';
@@ -326,6 +329,9 @@ export const agencyEntities = [
   InboxAgentDecisionEntity,
   InboxDomainOutboxEntity,
   InboxMetaOperationEntity,
+  InboxGovernedActionEntity,
+  InboxChannelContactIdentityEntity,
+  InboxAutonomyControlEntity,
   CrmPipelineEntity,
   CrmStageEntity,
   CrmOpportunityEntity,

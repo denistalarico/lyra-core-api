@@ -9,13 +9,9 @@ export class InboxRuntimeConfigService implements OnModuleInit {
   readonly decisionWorkerEnabled = enabled('INBOX_DECISION_WORKER_ENABLED');
   readonly outboxRelayEnabled = enabled('INBOX_OUTBOX_RELAY_ENABLED');
   readonly realtimeGatewayEnabled = enabled('INBOX_REALTIME_GATEWAY_ENABLED');
+  readonly pilotMode = enabled('INBOX_PILOT_MODE');
   readonly decisionTriggerMode = triggerMode();
-  readonly decisionWorkerConcurrency = boundedNumber(
-    'INBOX_DECISION_WORKER_CONCURRENCY',
-    1,
-    1,
-    1,
-  );
+  readonly decisionWorkerConcurrency = decisionConcurrency();
   readonly transcriptionMode = mode('INBOX_TRANSCRIPTION_PROVIDER_MODE');
   readonly decisionMode = mode('INBOX_DECISION_PROVIDER_MODE');
   readonly multimodalEnabled = process.env.INBOX_MULTIMODAL_ENABLED !== 'false';
@@ -63,24 +59,34 @@ export class InboxRuntimeConfigService implements OnModuleInit {
   readonly maxAttempts = boundedNumber('INBOX_PROVIDER_MAX_ATTEMPTS', 2, 1, 3);
   readonly budgetUsd = boundedDecimal(
     'INBOX_PROVIDER_BUDGET_USD',
-    2,
+    10,
     0.01,
     100,
   );
   readonly maxDecisionCalls = boundedNumber(
     'INBOX_MAX_DECISION_CALLS',
-    20,
+    200,
     1,
-    100,
+    10_000,
   );
   readonly maxTranscriptionCalls = boundedNumber(
     'INBOX_MAX_TRANSCRIPTION_CALLS',
-    10,
+    50,
     1,
-    100,
+    10_000,
   );
-  readonly maxVisionCalls = boundedNumber('INBOX_MAX_VISION_CALLS', 10, 0, 100);
-  readonly maxImageInputs = boundedNumber('INBOX_MAX_IMAGE_INPUTS', 10, 0, 100);
+  readonly maxVisionCalls = boundedNumber(
+    'INBOX_MAX_VISION_CALLS',
+    50,
+    0,
+    10_000,
+  );
+  readonly maxImageInputs = boundedNumber(
+    'INBOX_MAX_IMAGE_INPUTS',
+    50,
+    0,
+    10_000,
+  );
   readonly decisionReserveUsd = boundedDecimal(
     'INBOX_DECISION_RESERVE_USD',
     0.1,
@@ -113,14 +119,22 @@ export class InboxRuntimeConfigService implements OnModuleInit {
   );
 
   onModuleInit(): void {
+    if (this.followUpEnabled)
+      throw new Error('inbox_follow_up_requires_temporal');
     if (
-      this.autoReplyEnabled ||
-      this.autoCrmEnabled ||
-      this.autoHandoffEnabled ||
-      this.followUpEnabled
-    ) {
-      throw new Error('inbox_automatic_effects_not_supported');
-    }
+      (this.autoReplyEnabled ||
+        this.autoCrmEnabled ||
+        this.autoHandoffEnabled) &&
+      !this.pilotMode
+    )
+      throw new Error('inbox_automatic_effects_require_pilot_mode');
+    if (
+      (this.autoReplyEnabled ||
+        this.autoCrmEnabled ||
+        this.autoHandoffEnabled) &&
+      this.decisionWorkerConcurrency !== 1
+    )
+      throw new Error('inbox_automatic_effects_require_concurrency_one');
     if (this.transcriptionMode === 'live')
       this.assertLive(this.transcriptionModel);
     if (this.decisionMode === 'live') this.assertLive(this.decisionModel);
@@ -154,6 +168,12 @@ function triggerMode(): 'manual' | 'continuous' {
   const value = process.env.INBOX_DECISION_TRIGGER_MODE ?? 'manual';
   if (value === 'manual' || value === 'continuous') return value;
   throw new Error('inbox_decision_trigger_mode_invalid');
+}
+
+function decisionConcurrency(): 1 {
+  const raw = process.env.INBOX_DECISION_CONCURRENCY ?? '1';
+  if (raw !== '1') throw new Error('inbox_decision_concurrency_invalid');
+  return 1;
 }
 
 function providerApiKey(endpoint: string): string {

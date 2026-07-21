@@ -90,6 +90,7 @@ describe('AgentDecision v1 schema and policy', () => {
         id: 'o',
         pipelineId: 'p',
         businessMode: 'services',
+        businessContext: { allowedServices: ['Consultoria'] },
       } as never,
       decision: { ...validDecision, stage_key: 'invented' },
     });
@@ -155,6 +156,7 @@ describe('AgentDecision v1 schema and policy', () => {
         id: 'o',
         pipelineId: 'p',
         businessMode: 'services',
+        businessContext: { allowedServices: ['Consultoria'] },
       } as never,
       decision: {
         ...validDecision,

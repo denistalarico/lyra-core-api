@@ -19,6 +19,13 @@ const managedNames = [
   'INBOX_AUTO_HANDOFF_ENABLED',
   'INBOX_FOLLOW_UP_ENABLED',
   'INBOX_DECISION_TRIGGER_MODE',
+  'INBOX_DECISION_CONCURRENCY',
+  'INBOX_PILOT_MODE',
+  'INBOX_PROVIDER_BUDGET_USD',
+  'INBOX_MAX_DECISION_CALLS',
+  'INBOX_MAX_TRANSCRIPTION_CALLS',
+  'INBOX_MAX_VISION_CALLS',
+  'INBOX_MAX_IMAGE_INPUTS',
 ];
 
 describe('InboxRuntimeConfigService activation safety', () => {
@@ -57,22 +64,41 @@ describe('InboxRuntimeConfigService activation safety', () => {
       realtimeGatewayEnabled: false,
       decisionTriggerMode: 'manual',
       decisionWorkerConcurrency: 1,
+      pilotMode: false,
+      budgetUsd: 10,
+      maxDecisionCalls: 200,
+      maxTranscriptionCalls: 50,
+      maxVisionCalls: 50,
+      maxImageInputs: 50,
     });
   });
 
-  it('rejects automatic effects even when explicitly configured', () => {
+  it('requires pilot mode for automatic reply, CRM and handoff', () => {
     for (const name of [
       'INBOX_AUTO_REPLY_ENABLED',
       'INBOX_AUTO_CRM_ENABLED',
       'INBOX_AUTO_HANDOFF_ENABLED',
-      'INBOX_FOLLOW_UP_ENABLED',
     ]) {
       process.env[name] = 'true';
       expect(() => new InboxRuntimeConfigService().onModuleInit()).toThrow(
-        'inbox_automatic_effects_not_supported',
+        'inbox_automatic_effects_require_pilot_mode',
       );
       delete process.env[name];
     }
+  });
+
+  it('keeps follow-up fail-closed until Temporal exists', () => {
+    process.env.INBOX_FOLLOW_UP_ENABLED = 'true';
+    expect(() => new InboxRuntimeConfigService().onModuleInit()).toThrow(
+      'inbox_follow_up_requires_temporal',
+    );
+  });
+
+  it('rejects decision concurrency above the pilot ceiling', () => {
+    process.env.INBOX_DECISION_CONCURRENCY = '2';
+    expect(() => new InboxRuntimeConfigService()).toThrow(
+      'inbox_decision_concurrency_invalid',
+    );
   });
 
   it('refuses live mode without both a key and an explicit activation session', () => {

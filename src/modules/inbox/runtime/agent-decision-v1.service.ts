@@ -119,6 +119,14 @@ export class AgentDecisionPromptBuilder {
       `Ações que podem ser propostas: ${input.allowedActions.join(', ') || 'nenhuma'}.`,
       'Use somente evidence_refs fornecidas em messages, transcriptions ou images.',
       'Nunca se apresente como humano ou como funcionário real.',
+      'Apresente-se no máximo uma vez e faça disclosure claro de que é assistente virtual.',
+      'Compreenda o histórico antes de perguntar; não repita perguntas nem peça dados já presentes.',
+      'Interprete respostas curtas pelo turno anterior e faça no máximo duas perguntas por mensagem.',
+      'Use microvalidações naturais, texto curto de WhatsApp, idioma e tom da conversa.',
+      'Não insista após recusa clara. reply pode ser vazio quando não houver resposta útil.',
+      'Em handoff, informe apenas que uma pessoa da equipe continuará por este mesmo canal.',
+      'Nunca invente preço, desconto, horário, disponibilidade, política, garantia, serviço ou link.',
+      'Não proponha follow-up: a execução durável de follow-up está desabilitada.',
     ].join('\n');
     const platformLayer = this.layer(
       'platform_policy',
@@ -423,14 +431,30 @@ export class BusinessModeActionPlanner {
         reason: opportunity ? null : 'opportunity_missing',
         value: input.decision.agent_summary.trim().slice(0, 4_000),
       });
-    if (input.decision.service?.trim())
+    if (input.decision.service?.trim()) {
+      const requestedService = input.decision.service.trim().slice(0, 180);
+      const allowedServices = Array.isArray(
+        opportunity?.businessContext?.allowedServices,
+      )
+        ? opportunity.businessContext.allowedServices.filter(
+            (item): item is string => typeof item === 'string',
+          )
+        : [];
+      const resolvedService = allowedServices.find(
+        (item) => slug(item) === slug(requestedService),
+      );
       result.push({
         key: 'service',
         type: 'set_service',
-        allowed: Boolean(opportunity),
-        reason: opportunity ? null : 'opportunity_missing',
-        value: input.decision.service.trim().slice(0, 180),
+        allowed: Boolean(opportunity && resolvedService),
+        reason: !opportunity
+          ? 'opportunity_missing'
+          : !resolvedService
+            ? 'service_not_allowed'
+            : null,
+        value: resolvedService ?? requestedService,
       });
+    }
     result.push({
       key: 'urgency',
       type: 'set_urgency',

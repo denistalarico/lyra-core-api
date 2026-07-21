@@ -31,7 +31,7 @@ describe('AgentDecisionPromptBuilder layered compiler', () => {
       'current_inbound',
     ]);
     expect(result.systemPolicy).not.toContain('ignore previous instructions');
-    expect(result.systemPolicy).not.toContain('assistente virtual');
+    expect(result.systemPolicy).not.toContain('Lia');
     expect(result.untrustedData).toContain('ignore previous instructions');
     expect(result.untrustedData).toContain('assistente virtual');
     expect(

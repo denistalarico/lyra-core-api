@@ -11,6 +11,7 @@ import { ConversationOwnershipService } from '../services/conversation-ownership
 import { InboxAgentRuntimeService } from '../services/inbox-agent-runtime.service';
 import { InboxOutboxRelayService } from '../services/inbox-outbox-relay.service';
 import { InboxProviderBudgetService } from './inbox-provider-budget.service';
+import { InboxGovernedActionWorker } from '../services/inbox-governed-action.worker';
 
 const run =
   process.env.INBOX_PG_INTEGRATION === 'true' ? describe : describe.skip;
@@ -44,7 +45,8 @@ run('Inbox Runtime PostgreSQL concurrency', () => {
   });
   beforeEach(async () => {
     await AgencyDataSource.query(
-      `TRUNCATE inbox_meta_operations, inbox_provider_usage_ledger, inbox_domain_outbox, inbox_agent_decisions,
+      `TRUNCATE inbox_governed_actions, inbox_channel_contact_identities,
+       inbox_meta_operations, inbox_provider_usage_ledger, inbox_domain_outbox, inbox_agent_decisions,
        inbox_processing_batches, inbox_media_derivatives, inbox_media_assets,
        inbox_messages, inbox_conversation_events, inbox_conversations,
        leadflow_agent_channel_bindings, leadflow_agent_versions, leadflow_agents,
@@ -931,6 +933,108 @@ run('Inbox Runtime PostgreSQL concurrency', () => {
     );
     expect(rows).toHaveLength(1);
     expect(rows[0].workspaceId).toBe(workspaceId);
+  });
+
+  it('converges concurrent governed opportunity actions to one active card', async () => {
+    const conversationId = await insertConversation(
+      tenantId,
+      workspaceId,
+      'ai_active',
+    );
+    const channelId = await channelIdForConversation(conversationId);
+    const contactId = randomUUID();
+    const pipelineId = randomUUID();
+    const stageId = randomUUID();
+    await AgencyDataSource.query(
+      `INSERT INTO contacts
+        (id,tenant_id,workspace_id,type,display_name,source,business_mode,
+         lifecycle_stage,lifecycle_stages,status)
+       VALUES ($1,$2,$3,'person','Synthetic Contact','leadflow_whatsapp',
+               'general','lead',ARRAY['lead'],'active')`,
+      [contactId, tenantId, workspaceId],
+    );
+    await AgencyDataSource.query(
+      `UPDATE inbox_conversations
+          SET contact_id=$1, external_thread_id='+5511000000000'
+        WHERE id=$2`,
+      [contactId, conversationId],
+    );
+    await AgencyDataSource.query(
+      `INSERT INTO crm_pipelines
+        (id,tenant_id,workspace_id,name,business_mode,is_default,status)
+       VALUES ($1,$2,$3,'Synthetic Pipeline','general',true,'active')`,
+      [pipelineId, tenantId, workspaceId],
+    );
+    await AgencyDataSource.query(
+      `INSERT INTO crm_stages
+        (id,tenant_id,workspace_id,pipeline_id,name,type,sort_order)
+       VALUES ($1,$2,$3,$4,'Synthetic Initial','open',10)`,
+      [stageId, tenantId, workspaceId, pipelineId],
+    );
+    for (const [index, suffix] of ['a', 'b'].entries()) {
+      const batchId = randomUUID();
+      const decisionId = randomUUID();
+      await AgencyDataSource.query(
+        `INSERT INTO inbox_processing_batches
+          (id,tenant_id,workspace_id,conversation_id,channel_id,generation,status,due_at)
+         VALUES ($1,$2,$3,$4,$5,$6,'completed',now())`,
+        [batchId, tenantId, workspaceId, conversationId, channelId, index + 1],
+      );
+      await AgencyDataSource.query(
+        `INSERT INTO inbox_agent_decisions
+          (id,tenant_id,workspace_id,conversation_id,batch_id,ownership_version,
+           idempotency_key,correlation_id,status)
+         VALUES ($1,$2,$3,$4,$5,1,$6,$7,'proposed')`,
+        [
+          decisionId,
+          tenantId,
+          workspaceId,
+          conversationId,
+          batchId,
+          `decision-${suffix}`,
+          randomUUID(),
+        ],
+      );
+      await AgencyDataSource.query(
+        `INSERT INTO inbox_governed_actions
+          (tenant_id,workspace_id,conversation_id,decision_id,ownership_version,
+           policy_version,action_type,action_key,policy_outcome,reason_code,
+           idempotency_key,intent_hash,audit_ref,status)
+         VALUES ($1,$2,$3,$4,1,'inbox-autonomy-policy-v1','ensure_opportunity',
+                 'opportunity','allowed','opportunity_defaults_resolved',$5,$6,$7,'planned')`,
+        [
+          tenantId,
+          workspaceId,
+          conversationId,
+          decisionId,
+          `opportunity-${suffix}`,
+          'a'.repeat(64),
+          randomUUID(),
+        ],
+      );
+    }
+    const makeWorker = () =>
+      new InboxGovernedActionWorker(
+        AgencyDataSource,
+        {
+          autoReplyEnabled: false,
+          autoCrmEnabled: true,
+          autoHandoffEnabled: false,
+        } as never,
+        { sendAgentText: jest.fn() } as never,
+        { transition: jest.fn() } as never,
+      );
+    await Promise.all([
+      makeWorker().processOnce('worker-a'),
+      makeWorker().processOnce('worker-b'),
+    ]);
+    const [count] = await AgencyDataSource.query<Array<{ count: string }>>(
+      `SELECT count(*)::text count FROM crm_opportunities
+        WHERE tenant_id=$1 AND workspace_id=$2 AND inbox_conversation_id=$3
+          AND deleted_at IS NULL`,
+      [tenantId, workspaceId, conversationId],
+    );
+    expect(count.count).toBe('1');
   });
 });
 
