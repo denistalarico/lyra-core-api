@@ -1,0 +1,15 @@
+export const CORS_ALLOWED_HEADERS = [
+  'Content-Type',
+  'Authorization',
+  'Idempotency-Key',
+  'x-tenant-id',
+  'x-workspace-id',
+  'x-user-id',
+  'x-user-role',
+  'x-user-name',
+  'x-lyra-product-key',
+  'x-lyra-operating-mode',
+  'x-lyra-client-id',
+  'x-leadflow-operating-mode',
+  'x-client-id',
+] as const;

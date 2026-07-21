@@ -2,6 +2,7 @@ import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
+import { CORS_ALLOWED_HEADERS } from './config/cors.config';
 
 function parseCorsOrigins(): string[] {
   const configuredOrigins =
@@ -34,20 +35,7 @@ async function bootstrap() {
       callback(null, false);
     },
     methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: [
-      'Content-Type',
-      'Authorization',
-      'x-tenant-id',
-      'x-workspace-id',
-      'x-user-id',
-      'x-user-role',
-      'x-user-name',
-      'x-lyra-product-key',
-      'x-lyra-operating-mode',
-      'x-lyra-client-id',
-      'x-leadflow-operating-mode',
-      'x-client-id',
-    ],
+    allowedHeaders: [...CORS_ALLOWED_HEADERS],
     credentials: false,
   });
 
