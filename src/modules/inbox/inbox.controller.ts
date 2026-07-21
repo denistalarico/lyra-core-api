@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -42,7 +43,7 @@ type MessageReactionBody = {
 };
 
 type OwnershipActionBody = { reason?: string };
-type DecisionApprovalBody = { actionKeys?: string[] };
+type DecisionApprovalBody = { actionKeys?: string[]; expectedVersion?: string };
 
 const INBOX_ATTACHMENT_UPLOAD_OPTIONS = {
   storage: memoryStorage(),
@@ -372,6 +373,18 @@ export class InboxController {
     return this.agentRuntimeService.list(ctx, id);
   }
 
+  @Post('conversations/:id/agent-decisions/trigger')
+  @RequireAnyPermission(
+    'leadflow.inbox.conversation.reply.assigned',
+    'leadflow.inbox.conversation.reply.client',
+  )
+  triggerAgentDecision(
+    @RequestContextData() ctx: RequestContext,
+    @Param('id') id: string,
+  ) {
+    return this.agentRuntimeService.triggerManual(ctx, id);
+  }
+
   @Post('conversations/:id/agent-decisions/:decisionId/approve')
   @RequireAnyPermission(
     'leadflow.crm.records.update.assigned',
@@ -382,7 +395,14 @@ export class InboxController {
     @Param('id') id: string,
     @Param('decisionId') decisionId: string,
     @Body() body: DecisionApprovalBody,
+    @Headers('idempotency-key') idempotencyKey: string | undefined,
   ) {
+    if (!idempotencyKey?.trim()) {
+      throw new BadRequestException('Idempotency-Key header is required.');
+    }
+    if (!body.expectedVersion?.trim()) {
+      throw new BadRequestException('Decision preview version is required.');
+    }
     return this.agentRuntimeService.review(
       ctx,
       id,
@@ -394,6 +414,8 @@ export class InboxController {
           )
         : [],
       'actions',
+      idempotencyKey,
+      body.expectedVersion,
     );
   }
 
@@ -430,7 +452,11 @@ export class InboxController {
     @RequestContextData() ctx: RequestContext,
     @Param('id') id: string,
     @Param('decisionId') decisionId: string,
+    @Headers('idempotency-key') idempotencyKey: string | undefined,
   ) {
+    if (!idempotencyKey?.trim()) {
+      throw new BadRequestException('Idempotency-Key header is required.');
+    }
     return this.agentRuntimeService.review(
       ctx,
       id,
@@ -438,6 +464,7 @@ export class InboxController {
       true,
       [],
       'analysis',
+      idempotencyKey,
     );
   }
 
@@ -450,8 +477,20 @@ export class InboxController {
     @RequestContextData() ctx: RequestContext,
     @Param('id') id: string,
     @Param('decisionId') decisionId: string,
+    @Headers('idempotency-key') idempotencyKey: string | undefined,
   ) {
-    return this.agentRuntimeService.review(ctx, id, decisionId, false);
+    if (!idempotencyKey?.trim()) {
+      throw new BadRequestException('Idempotency-Key header is required.');
+    }
+    return this.agentRuntimeService.review(
+      ctx,
+      id,
+      decisionId,
+      false,
+      [],
+      'analysis',
+      idempotencyKey,
+    );
   }
 
   @Post('conversations/:id/clear')

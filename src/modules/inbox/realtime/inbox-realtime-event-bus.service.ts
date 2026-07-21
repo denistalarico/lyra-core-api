@@ -42,7 +42,7 @@ export class InboxRealtimeEventBusService
   ) {}
 
   async onApplicationBootstrap(): Promise<void> {
-    if (this.config.realtimeEnabled) await this.connect();
+    if (this.config.realtimeGatewayEnabled) await this.connect();
   }
   async onApplicationShutdown(): Promise<void> {
     this.stopping = true;
@@ -52,7 +52,7 @@ export class InboxRealtimeEventBusService
     this.emitter.removeAllListeners();
   }
   isReady(): boolean {
-    return this.config.realtimeEnabled && this.ready;
+    return this.config.realtimeGatewayEnabled && this.ready;
   }
   onEvent(listener: (event: InboxRealtimeEvent) => void): () => void {
     this.emitter.on('event', listener);

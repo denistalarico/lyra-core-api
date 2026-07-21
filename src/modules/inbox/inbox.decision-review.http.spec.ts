@@ -68,6 +68,7 @@ describe('Inbox decision review HTTP contract', () => {
       .post(
         `/inbox/conversations/${conversationId}/agent-decisions/${decisionId}/approve-analysis`,
       )
+      .set('Idempotency-Key', 'decision-review:test:analysis')
       .send({})
       .expect(201);
     expect((response.body as { reviewOutcome: string }).reviewOutcome).toBe(
@@ -83,6 +84,7 @@ describe('Inbox decision review HTTP contract', () => {
       true,
       [],
       'analysis',
+      'decision-review:test:analysis',
     );
   });
 });

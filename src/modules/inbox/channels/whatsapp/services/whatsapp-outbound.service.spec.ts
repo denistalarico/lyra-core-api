@@ -59,6 +59,21 @@ describe('WhatsAppOutboundService idempotency', () => {
           .fn()
           .mockResolvedValue({ url: 'https://files.test/x', path: 'x' }),
       } as never,
+      {
+        authorize: jest.fn((to: string) => ({
+          canonicalE164: `+${to.replace(/^\+/, '')}`,
+          transportRecipient: to.replace(/^\+/, ''),
+          recipientHash: 'a'.repeat(64),
+          recipientMasked: '+55******9999',
+        })),
+      } as never,
+      {
+        reserve: jest.fn().mockResolvedValue({}),
+        started: jest.fn(),
+        succeeded: jest.fn(),
+        failed: jest.fn(),
+        replay: jest.fn(),
+      } as never,
     );
     const fetchMock = jest
       .spyOn(global, 'fetch')

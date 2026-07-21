@@ -15,7 +15,8 @@ export class InboxAgentRuntimeWorker {
   @Interval(2000)
   async tick() {
     if (
-      !this.config.workersEnabled ||
+      !this.config.decisionWorkerEnabled ||
+      this.config.decisionTriggerMode !== 'continuous' ||
       this.config.decisionMode === 'disabled' ||
       this.running
     )

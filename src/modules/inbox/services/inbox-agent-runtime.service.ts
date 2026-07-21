@@ -7,7 +7,7 @@ import {
   Optional,
 } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
-import { randomUUID } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import { Readable } from 'stream';
 import { DataSource, IsNull } from 'typeorm';
 import { FilesService } from '../../../common/files/files.service';
@@ -134,6 +134,42 @@ export class InboxAgentRuntimeService {
       return rows[0].id;
     });
     if (!batchId) return null;
+    return this.processBatch(batchId);
+  }
+
+  async triggerManual(ctx: RequestContext, conversationId: string) {
+    if (!ctx.workspaceId || !ctx.userId) {
+      throw new NotFoundException('Processing batch not found.');
+    }
+    const batchId = await this.dataSource.transaction(async (manager) => {
+      const rows = await manager.query<Array<{ id: string }>>(
+        `SELECT batch.id
+           FROM inbox_processing_batches batch
+           JOIN inbox_conversations conversation
+             ON conversation.id = batch.conversation_id
+            AND conversation.tenant_id = batch.tenant_id
+            AND conversation.workspace_id = batch.workspace_id
+          WHERE batch.tenant_id = $1 AND batch.workspace_id = $2
+            AND batch.conversation_id = $3 AND batch.status = 'pending'
+            AND batch.due_at <= now() AND batch.attempt_count < 3
+            AND conversation.ownership_state = 'ai_active'
+            AND conversation.ai_enabled = true
+          ORDER BY batch.due_at, batch.id
+          FOR UPDATE OF batch SKIP LOCKED LIMIT 1`,
+        [ctx.tenantId, ctx.workspaceId, conversationId],
+      );
+      if (!rows[0]) return null;
+      await manager
+        .getRepository(InboxProcessingBatchEntity)
+        .update(rows[0].id, {
+          status: 'processing',
+          claimedAt: new Date(),
+          claimedBy: `manual:${ctx.userId}`,
+          attemptCount: () => 'attempt_count + 1',
+        });
+      return rows[0].id;
+    });
+    if (!batchId) throw new NotFoundException('Processing batch not found.');
     return this.processBatch(batchId);
   }
 
@@ -658,6 +694,29 @@ export class InboxAgentRuntimeService {
               workspaceId: ctx.workspaceId,
             },
       );
+    const tags = opportunity
+      ? await this.dataSource.query<Array<{ slug: string }>>(
+          `SELECT tag.slug
+             FROM crm_opportunity_tags link
+             JOIN crm_tags tag ON tag.id = link.tag_id
+              AND tag.tenant_id = link.tenant_id
+              AND tag.workspace_id = link.workspace_id
+            WHERE link.tenant_id = $1 AND link.workspace_id = $2
+              AND link.opportunity_id = $3 AND tag.deleted_at IS NULL
+            ORDER BY tag.slug`,
+          [ctx.tenantId, ctx.workspaceId, opportunity.id],
+        )
+      : [];
+    const current = canonicalOpportunityState(
+      opportunity,
+      tags.map((item) => item.slug),
+      conversation.ownershipState,
+    );
+    const expectedVersion = previewVersion(
+      decision.id,
+      decision.ownershipVersion,
+      current,
+    );
     const selected = new Set(actionKeys);
     const plan = Array.isArray(decision.actionPlan) ? decision.actionPlan : [];
     return {
@@ -672,28 +731,32 @@ export class InboxAgentRuntimeService {
         decisionVersion: decision.ownershipVersion,
         state: conversation.ownershipState,
       },
-      current: {
-        stageId: opportunity?.stageId ?? null,
-        priority: opportunity?.priority ?? null,
-        service:
-          typeof opportunity?.businessContext?.service === 'string'
-            ? opportunity.businessContext.service
-            : null,
-        ownershipState: conversation.ownershipState,
-      },
-      proposed: plan.map((action) => ({
-        key: recordString(action.key),
-        type: recordString(action.type),
-        value: typeof action.value === 'string' ? action.value : null,
-        selected: selected.has(recordString(action.key)),
-        allowed: action.allowed === true,
-        reason: typeof action.reason === 'string' ? action.reason : null,
-        effect:
-          action.type === 'handoff' || action.type === 'close'
-            ? 'ownership'
-            : 'crm',
-        idempotencyKey: `decision:${decision.id}:action:${recordString(action.key)}`,
-      })),
+      current,
+      expectedVersion,
+      proposed: plan.map((action) => {
+        const type = recordString(action.type);
+        return {
+          key: recordString(action.key),
+          type,
+          current: currentValueForAction(type, current),
+          proposed:
+            type === 'set_stage' && typeof action.stageId === 'string'
+              ? action.stageId
+              : typeof action.value === 'string'
+                ? action.value
+                : null,
+          selected: selected.has(recordString(action.key)),
+          allowed: action.allowed === true,
+          rejectionReason:
+            typeof action.reason === 'string' ? action.reason : null,
+          effectType:
+            action.type === 'handoff' || action.type === 'close'
+              ? 'ownership'
+              : 'crm',
+          idempotencyKey: `decision:${decision.id}:action:${recordString(action.key)}`,
+          expectedVersion,
+        };
+      }),
       rejectedByPolicy: plan
         .filter((action) => action.allowed !== true)
         .map((action) => ({
@@ -716,6 +779,8 @@ export class InboxAgentRuntimeService {
     approvalKind: 'analysis' | 'actions' = actionKeys.length
       ? 'actions'
       : 'analysis',
+    idempotencyKey?: string,
+    expectedVersion?: string,
   ) {
     if (!ctx.workspaceId || !ctx.userId)
       throw new NotFoundException('Decision not found.');
@@ -734,6 +799,65 @@ export class InboxAgentRuntimeService {
         });
       if (!decision) throw new NotFoundException('Decision not found.');
       const uniqueKeys = [...new Set(actionKeys)].slice(0, 30);
+      const reviewKey =
+        idempotencyKey?.trim() ||
+        `decision-review:${decision.id}:${approve ? approvalKind : 'reject'}`;
+      await manager.query(
+        `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`,
+        [`${ctx.tenantId}:${ctx.workspaceId}:decision-review:${reviewKey}`],
+      );
+      const intentHash = createHash('sha256')
+        .update(
+          JSON.stringify({
+            conversationId,
+            decisionId,
+            approve,
+            approvalKind,
+            actionKeys: [...uniqueKeys].sort(),
+            ownershipVersion: decision.ownershipVersion,
+            expectedVersion: expectedVersion ?? null,
+          }),
+        )
+        .digest('hex');
+      const reused = await manager
+        .getRepository(InboxAgentDecisionEntity)
+        .findOneBy({
+          tenantId: ctx.tenantId,
+          workspaceId: ctx.workspaceId!,
+          reviewIdempotencyKey: reviewKey,
+        });
+      if (reused && reused.id !== decision.id) {
+        throw new ConflictException(
+          'Review idempotency key was reused for another resource.',
+        );
+      }
+      if (decision.reviewIdempotencyKey) {
+        if (
+          decision.reviewIdempotencyKey !== reviewKey ||
+          decision.reviewIntentHash !== intentHash ||
+          !decision.reviewResponseSnapshot
+        ) {
+          throw new ConflictException('Review retry intent changed.');
+        }
+        const replayConversation = await manager
+          .getRepository(InboxConversationEntity)
+          .findOneBy({
+            id: conversationId,
+            tenantId: ctx.tenantId,
+            workspaceId: ctx.workspaceId!,
+          });
+        if (
+          !replayConversation ||
+          replayConversation.ownershipVersion !==
+            decision.reviewResponseSnapshot.resultingOwnershipVersion
+        ) {
+          throw new ConflictException('Review ownership changed after apply.');
+        }
+        return publicReviewSnapshot(
+          decision.reviewResponseSnapshot,
+          'replayed',
+        );
+      }
       if (approve && approvalKind === 'actions' && uniqueKeys.length === 0) {
         throw new BadRequestException(
           'Select at least one action or approve the analysis without actions.',
@@ -751,25 +875,8 @@ export class InboxAgentRuntimeService {
         requestedOutcome === 'analysis_approved' &&
         decision.reviewOutcome === requestedOutcome &&
         sameReviewActionKeys(decision.reviewedActionKeys, uniqueKeys)
-      ) {
-        const currentConversation = await manager
-          .getRepository(InboxConversationEntity)
-          .findOneBy({
-            id: conversationId,
-            tenantId: ctx.tenantId,
-            workspaceId: ctx.workspaceId!,
-          });
-        if (
-          !currentConversation ||
-          currentConversation.ownershipVersion !== decision.ownershipVersion ||
-          currentConversation.ownershipState !== 'ai_active'
-        ) {
-          throw new ConflictException(
-            'Decision ownership changed and must be regenerated.',
-          );
-        }
+      )
         return decision;
-      }
       if (
         decision.status === 'approved' &&
         decision.reviewOutcome !== 'analysis_approved'
@@ -793,6 +900,52 @@ export class InboxAgentRuntimeService {
         throw new ConflictException(
           'Decision ownership changed and must be regenerated.',
         );
+      }
+
+      if (approve && approvalKind === 'actions' && expectedVersion) {
+        const opportunity = await manager
+          .getRepository(CrmOpportunityEntity)
+          .findOne({
+            where: conversation.opportunityId
+              ? {
+                  id: conversation.opportunityId,
+                  tenantId: conversation.tenantId,
+                  workspaceId: conversation.workspaceId,
+                }
+              : {
+                  inboxConversationId: conversation.id,
+                  tenantId: conversation.tenantId,
+                  workspaceId: conversation.workspaceId,
+                },
+            lock: { mode: 'pessimistic_write' },
+          });
+        const tags = opportunity
+          ? await manager.query<Array<{ slug: string }>>(
+              `SELECT tag.slug
+                 FROM crm_opportunity_tags link
+                 JOIN crm_tags tag ON tag.id = link.tag_id
+                  AND tag.tenant_id = link.tenant_id
+                  AND tag.workspace_id = link.workspace_id
+                WHERE link.tenant_id = $1 AND link.workspace_id = $2
+                  AND link.opportunity_id = $3 AND tag.deleted_at IS NULL
+                ORDER BY tag.slug`,
+              [conversation.tenantId, conversation.workspaceId, opportunity.id],
+            )
+          : [];
+        const actualVersion = previewVersion(
+          decision.id,
+          decision.ownershipVersion,
+          canonicalOpportunityState(
+            opportunity,
+            tags.map((item) => item.slug),
+            conversation.ownershipState,
+          ),
+        );
+        if (actualVersion !== expectedVersion) {
+          throw new ConflictException(
+            'Decision preview is stale and must be refreshed.',
+          );
+        }
       }
 
       decision.status = approve ? 'approved' : 'rejected';
@@ -822,10 +975,25 @@ export class InboxAgentRuntimeService {
       }
       decision.reviewedBy = reviewerUserId;
       decision.reviewedAt = new Date();
+      decision.reviewIdempotencyKey = reviewKey;
+      decision.reviewIntentHash = intentHash;
+      decision.reviewExpectedVersion = expectedVersion ?? null;
+      decision.reviewAuditRef = randomUUID();
+      decision.reviewResponseSnapshot = {
+        status: 'applied',
+        outcome: decision.reviewOutcome,
+        appliedActionIds: [...decision.reviewedActionKeys],
+        originalAppliedAt: (
+          decision.appliedAt ?? decision.reviewedAt
+        ).toISOString(),
+        auditRef: decision.reviewAuditRef,
+        resultingOwnershipVersion: conversation.ownershipVersion,
+      };
       const saved = await manager
         .getRepository(InboxAgentDecisionEntity)
         .save(decision);
       await manager.getRepository(InboxConversationEventEntity).save({
+        id: saved.reviewAuditRef!,
         tenantId: saved.tenantId,
         workspaceId: saved.workspaceId,
         conversationId: saved.conversationId,
@@ -865,7 +1033,7 @@ export class InboxAgentRuntimeService {
         deadLetteredAt: null,
         updatedAt: new Date(),
       });
-      return saved;
+      return publicReviewSnapshot(saved.reviewResponseSnapshot!, 'applied');
     });
   }
 
@@ -1220,4 +1388,84 @@ function slugValue(value: string): string {
 
 function recordString(value: unknown): string {
   return typeof value === 'string' ? value : '';
+}
+
+type CanonicalOpportunityState = {
+  opportunityId: string | null;
+  pipelineId: string | null;
+  stageId: string | null;
+  tags: string[];
+  agentSummary: string | null;
+  service: string | null;
+  urgency: string | null;
+  priority: string | null;
+  closeReason: string | null;
+  status: string | null;
+  updatedAt: string | null;
+  ownershipState: string;
+};
+
+function canonicalOpportunityState(
+  opportunity: CrmOpportunityEntity | null,
+  tags: string[],
+  ownershipState: string,
+): CanonicalOpportunityState {
+  const context = opportunity?.businessContext ?? {};
+  return {
+    opportunityId: opportunity?.id ?? null,
+    pipelineId: opportunity?.pipelineId ?? null,
+    stageId: opportunity?.stageId ?? null,
+    tags: [...tags].sort(),
+    agentSummary:
+      typeof context.agentSummary === 'string' ? context.agentSummary : null,
+    service: typeof context.service === 'string' ? context.service : null,
+    urgency: typeof context.urgency === 'string' ? context.urgency : null,
+    priority: opportunity?.priority ?? null,
+    closeReason: opportunity?.lostReason ?? null,
+    status: opportunity?.status ?? null,
+    updatedAt: opportunity?.updatedAt?.toISOString() ?? null,
+    ownershipState,
+  };
+}
+
+function previewVersion(
+  decisionId: string,
+  ownershipVersion: number,
+  state: CanonicalOpportunityState,
+): string {
+  return createHash('sha256')
+    .update(JSON.stringify({ decisionId, ownershipVersion, state }))
+    .digest('hex');
+}
+
+function currentValueForAction(
+  type: string,
+  current: CanonicalOpportunityState,
+): string | string[] | null {
+  if (type === 'set_stage') return current.stageId;
+  if (type === 'add_tag') return current.tags;
+  if (type === 'set_summary') return current.agentSummary;
+  if (type === 'set_service') return current.service;
+  if (type === 'set_urgency') return current.urgency ?? current.priority;
+  if (type === 'close') return current.status;
+  if (type === 'handoff') return current.ownershipState;
+  return null;
+}
+
+function publicReviewSnapshot(
+  snapshot: Record<string, unknown>,
+  status: 'applied' | 'replayed',
+) {
+  return {
+    status,
+    outcome: snapshot.outcome ?? null,
+    appliedActionIds: Array.isArray(snapshot.appliedActionIds)
+      ? snapshot.appliedActionIds
+      : [],
+    originalAppliedAt:
+      typeof snapshot.originalAppliedAt === 'string'
+        ? snapshot.originalAppliedAt
+        : null,
+    auditRef: typeof snapshot.auditRef === 'string' ? snapshot.auditRef : null,
+  };
 }

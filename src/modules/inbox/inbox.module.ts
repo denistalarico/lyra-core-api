@@ -62,6 +62,9 @@ import { InboxOutboxRelayService } from './services/inbox-outbox-relay.service';
 import { InboxGateway } from './realtime/inbox.gateway';
 import { InboxChannelLifecycleRequestEntity } from './entities/inbox-channel-lifecycle-request.entity';
 import { InboxChannelLifecycleService } from './services/inbox-channel-lifecycle.service';
+import { InboxMetaOperationEntity } from './entities/inbox-meta-operation.entity';
+import { InboxPilotOutboundPolicyService } from './channels/whatsapp/services/inbox-pilot-outbound-policy.service';
+import { InboxMetaOperationLedgerService } from './channels/whatsapp/services/inbox-meta-operation-ledger.service';
 import { LeadFlowAgentChannelBindingEntity } from '../leadflow-agents/entities/leadflow-agent-channel-binding.entity';
 import { LeadFlowAgentEntity } from '../leadflow-agents/entities/leadflow-agent.entity';
 import { AgentActivationPolicyService } from './services/agent-activation-policy.service';
@@ -94,6 +97,7 @@ import { InboxOutboxAdminController } from './inbox-outbox-admin.controller';
         InboxAgentDecisionEntity,
         InboxDomainOutboxEntity,
         InboxChannelLifecycleRequestEntity,
+        InboxMetaOperationEntity,
         LeadFlowAgentChannelBindingEntity,
         LeadFlowAgentEntity,
       ],
@@ -142,6 +146,8 @@ import { InboxOutboxAdminController } from './inbox-outbox-admin.controller';
     InboxGateway,
     InboxChannelLifecycleService,
     AgentActivationPolicyService,
+    InboxPilotOutboundPolicyService,
+    InboxMetaOperationLedgerService,
   ],
   exports: [
     InboxService,

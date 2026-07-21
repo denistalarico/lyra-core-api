@@ -57,7 +57,7 @@ export class WhatsAppOutboundController {
       conversationId: result.conversation.id,
       messageId: result.message.id,
       externalMessageId: result.message.externalMessageId,
-      meta: result.meta,
+      meta: { accepted: Boolean(result.message.externalMessageId) },
     };
   }
 
@@ -87,7 +87,7 @@ export class WhatsAppOutboundController {
       conversationId: result.conversation.id,
       messageId: result.message.id,
       externalMessageId: result.message.externalMessageId,
-      meta: result.meta,
+      meta: { accepted: Boolean(result.message.externalMessageId) },
     };
   }
 }

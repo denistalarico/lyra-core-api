@@ -4,16 +4,27 @@ export type InboxProviderMode = 'disabled' | 'mock' | 'live';
 
 @Injectable()
 export class InboxRuntimeConfigService implements OnModuleInit {
-  readonly workersEnabled =
-    process.env.INBOX_RUNTIME_WORKERS_ENABLED === 'true';
-  readonly realtimeEnabled = process.env.INBOX_REALTIME_ENABLED === 'true';
+  readonly ingestionWorkerEnabled = enabled('INBOX_INGESTION_WORKER_ENABLED');
+  readonly mediaWorkerEnabled = enabled('INBOX_MEDIA_WORKER_ENABLED');
+  readonly decisionWorkerEnabled = enabled('INBOX_DECISION_WORKER_ENABLED');
+  readonly outboxRelayEnabled = enabled('INBOX_OUTBOX_RELAY_ENABLED');
+  readonly realtimeGatewayEnabled = enabled('INBOX_REALTIME_GATEWAY_ENABLED');
+  readonly decisionTriggerMode = triggerMode();
+  readonly decisionWorkerConcurrency = boundedNumber(
+    'INBOX_DECISION_WORKER_CONCURRENCY',
+    1,
+    1,
+    1,
+  );
   readonly transcriptionMode = mode('INBOX_TRANSCRIPTION_PROVIDER_MODE');
   readonly decisionMode = mode('INBOX_DECISION_PROVIDER_MODE');
   readonly multimodalEnabled = process.env.INBOX_MULTIMODAL_ENABLED !== 'false';
   readonly visionFallbackEnabled =
     process.env.INBOX_VISION_FALLBACK_ENABLED === 'true';
-  readonly autoReplyEnabled = false;
-  readonly autoCrmEnabled = false;
+  readonly autoReplyEnabled = enabled('INBOX_AUTO_REPLY_ENABLED');
+  readonly autoCrmEnabled = enabled('INBOX_AUTO_CRM_ENABLED');
+  readonly autoHandoffEnabled = enabled('INBOX_AUTO_HANDOFF_ENABLED');
+  readonly followUpEnabled = enabled('INBOX_FOLLOW_UP_ENABLED');
   readonly endpoint = (
     process.env.INBOX_PROVIDER_BASE_URL ?? 'https://api.openai.com/v1'
   ).replace(/\/$/, '');
@@ -102,6 +113,14 @@ export class InboxRuntimeConfigService implements OnModuleInit {
   );
 
   onModuleInit(): void {
+    if (
+      this.autoReplyEnabled ||
+      this.autoCrmEnabled ||
+      this.autoHandoffEnabled ||
+      this.followUpEnabled
+    ) {
+      throw new Error('inbox_automatic_effects_not_supported');
+    }
     if (this.transcriptionMode === 'live')
       this.assertLive(this.transcriptionModel);
     if (this.decisionMode === 'live') this.assertLive(this.decisionModel);
@@ -122,6 +141,19 @@ export class InboxRuntimeConfigService implements OnModuleInit {
     if (parsed.protocol !== 'https:' && !local)
       throw new Error('inbox_provider_endpoint_must_use_https');
   }
+}
+
+function enabled(name: string): boolean {
+  const value = process.env[name] ?? 'false';
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  throw new Error(`${name.toLowerCase()}_invalid`);
+}
+
+function triggerMode(): 'manual' | 'continuous' {
+  const value = process.env.INBOX_DECISION_TRIGGER_MODE ?? 'manual';
+  if (value === 'manual' || value === 'continuous') return value;
+  throw new Error('inbox_decision_trigger_mode_invalid');
 }
 
 function providerApiKey(endpoint: string): string {

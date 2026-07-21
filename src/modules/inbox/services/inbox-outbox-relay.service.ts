@@ -46,7 +46,8 @@ export class InboxOutboxRelayService
 
   @Interval(1_000)
   async tick(): Promise<void> {
-    if (this.running || this.stopping) return;
+    if (!this.config.outboxRelayEnabled || this.running || this.stopping)
+      return;
     this.running = true;
     try {
       await this.processPending(10);
@@ -95,7 +96,7 @@ export class InboxOutboxRelayService
     });
     if (!row) return;
     try {
-      if (!this.config.realtimeEnabled) {
+      if (!this.config.realtimeGatewayEnabled) {
         const skippedAt = new Date();
         await repo.update(
           { id: row.id, status: 'processing', lockedBy: this.workerId },

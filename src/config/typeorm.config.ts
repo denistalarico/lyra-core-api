@@ -54,6 +54,7 @@ import { InboxMediaDerivativeEntity } from '../modules/inbox/entities/inbox-medi
 import { InboxProcessingBatchEntity } from '../modules/inbox/entities/inbox-processing-batch.entity';
 import { InboxAgentDecisionEntity } from '../modules/inbox/entities/inbox-agent-decision.entity';
 import { InboxDomainOutboxEntity } from '../modules/inbox/entities/inbox-domain-outbox.entity';
+import { InboxMetaOperationEntity } from '../modules/inbox/entities/inbox-meta-operation.entity';
 
 import { CrmPipelineEntity } from '../modules/crm/entities/crm-pipeline.entity';
 import { CrmStageEntity } from '../modules/crm/entities/crm-stage.entity';
@@ -324,6 +325,7 @@ export const agencyEntities = [
   InboxProcessingBatchEntity,
   InboxAgentDecisionEntity,
   InboxDomainOutboxEntity,
+  InboxMetaOperationEntity,
   CrmPipelineEntity,
   CrmStageEntity,
   CrmOpportunityEntity,

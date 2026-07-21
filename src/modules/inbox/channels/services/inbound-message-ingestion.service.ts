@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, EntityManager } from 'typeorm';
 import { ContactEntity } from '../../../contacts/entities/contact.entity';
@@ -20,6 +20,7 @@ import type {
   NormalizedInboundMessage,
 } from '../types/normalized-inbound-message';
 import { AgentActivationPolicyService } from '../../services/agent-activation-policy.service';
+import { InboxRuntimeConfigService } from '../../runtime/inbox-runtime-config.service';
 
 const DEFAULT_DEBOUNCE_SECONDS = 20;
 
@@ -29,6 +30,7 @@ export class InboundMessageIngestionService {
     @InjectDataSource('agency') private readonly dataSource: DataSource,
     private readonly notificationPublisher: InboxNotificationPublisher,
     private readonly activationPolicy?: AgentActivationPolicyService,
+    @Optional() private readonly runtimeConfig?: InboxRuntimeConfigService,
   ) {}
 
   async ingest(input: NormalizedInboundMessage) {
@@ -291,6 +293,7 @@ export class InboundMessageIngestionService {
       );
 
       if (
+        (this.runtimeConfig?.ingestionWorkerEnabled ?? true) &&
         conversation.ownershipState === 'ai_active' &&
         conversation.qualificationStatus === 'qualified'
       ) {

@@ -21,6 +21,8 @@ import { InboxConversationEntity } from '../../../entities/inbox-conversation.en
 import { InboxConversationEventEntity } from '../../../entities/inbox-conversation-event.entity';
 import { InboxMessageEntity } from '../../../entities/inbox-message.entity';
 import { InboxDomainOutboxEntity } from '../../../entities/inbox-domain-outbox.entity';
+import { InboxPilotOutboundPolicyService } from './inbox-pilot-outbound-policy.service';
+import { InboxMetaOperationLedgerService } from './inbox-meta-operation-ledger.service';
 
 type SendWhatsAppTextInput = {
   ctx: RequestContext;
@@ -112,6 +114,8 @@ export class WhatsAppOutboundService {
     private readonly messagesRepository: Repository<InboxMessageEntity>,
     private readonly cryptoService: SettingsCryptoService,
     private readonly filesService: FilesService,
+    private readonly outboundPolicy: InboxPilotOutboundPolicyService,
+    private readonly metaLedger: InboxMetaOperationLedgerService,
   ) {}
 
   async sendText(input: SendWhatsAppTextInput) {
@@ -152,6 +156,11 @@ export class WhatsAppOutboundService {
       );
     }
 
+    const recipient = this.outboundPolicy.authorize(
+      input.to,
+      conversation.externalThreadId,
+    );
+
     const idempotencyKey = input.idempotencyKey?.trim() || randomUUID();
     const existing = await this.messagesRepository.findOne({
       where: {
@@ -161,6 +170,21 @@ export class WhatsAppOutboundService {
       },
     });
     if (existing) {
+      if (
+        existing.channelId !== channel.id ||
+        existing.conversationId !== conversation.id
+      ) {
+        throw new ConflictException('Outbound idempotency intent changed.');
+      }
+      await this.metaLedger.replay({
+        tenantId: channel.tenantId,
+        workspaceId: channel.workspaceId,
+        channelId: channel.id,
+        conversationId: conversation.id,
+        operation: 'send_text',
+        idempotencyKey,
+        recipient,
+      });
       return { conversation, message: existing, meta: {} };
     }
 
@@ -185,46 +209,72 @@ export class WhatsAppOutboundService {
       : {};
 
     const now = new Date();
-    const message = await this.messagesRepository.save(
-      this.messagesRepository.create({
-        tenantId: channel.tenantId,
-        workspaceId: channel.workspaceId,
-        conversationId: conversation.id,
-        channelId: channel.id,
-        contactId: conversation.contactId ?? null,
-        direction: 'outbound',
-        senderType: 'user',
-        senderUserId: input.ctx.userId ?? null,
-        senderAgentId: null,
-        externalMessageId: null,
-        idempotencyKey,
-        messageType: 'text',
-        content: input.text,
-        status: 'pending',
-        attachments: [],
-        metadata: {
-          provider: 'meta',
-          channelType: 'whatsapp',
-          ...replyMetadata,
-        },
-        sentAt: null,
-        deliveredAt: null,
-        readAt: null,
-        occurredAt: now,
-        providerSequence: null,
-      }),
+    const pendingMessage = this.messagesRepository.create({
+      tenantId: channel.tenantId,
+      workspaceId: channel.workspaceId,
+      conversationId: conversation.id,
+      channelId: channel.id,
+      contactId: conversation.contactId ?? null,
+      direction: 'outbound',
+      senderType: 'user',
+      senderUserId: input.ctx.userId ?? null,
+      senderAgentId: null,
+      externalMessageId: null,
+      idempotencyKey,
+      messageType: 'text',
+      content: input.text,
+      status: 'pending',
+      attachments: [],
+      metadata: {
+        provider: 'meta',
+        channelType: 'whatsapp',
+        ...replyMetadata,
+      },
+      sentAt: null,
+      deliveredAt: null,
+      readAt: null,
+      occurredAt: now,
+      providerSequence: null,
+    });
+    const textPersistence = await this.persistPendingMessage(
+      pendingMessage,
+      channel,
+      conversation,
     );
+    const message = textPersistence.message;
+    if (!textPersistence.created) {
+      return { conversation, message, meta: {} };
+    }
 
+    const ledger = await this.metaLedger.reserve({
+      tenantId: channel.tenantId,
+      workspaceId: channel.workspaceId,
+      channelId: channel.id,
+      conversationId: conversation.id,
+      messageId: message.id,
+      operation: 'send_text',
+      idempotencyKey,
+      recipient,
+    });
+    const startedMs = Date.now();
     let response: MetaSendMessageResponse;
     try {
+      await this.metaLedger.started(ledger);
       response = await this.sendToMeta({
         phoneNumberId: channel.externalPhoneNumberId,
         accessToken,
-        to: input.to,
+        to: recipient.transportRecipient,
+        expectedTo: conversation.externalThreadId ?? input.to,
         text: input.text,
         contextMessageId: replyTarget?.externalMessageId ?? undefined,
       });
+      await this.metaLedger.succeeded(
+        ledger,
+        startedMs,
+        response.messages?.[0]?.id,
+      );
     } catch (error) {
+      await this.metaLedger.failed(ledger, startedMs, error);
       message.status = 'failed';
       message.metadata = {
         ...message.metadata,
@@ -327,6 +377,11 @@ export class WhatsAppOutboundService {
       );
     }
 
+    const recipient = this.outboundPolicy.authorize(
+      input.to,
+      conversation.externalThreadId,
+    );
+
     const idempotencyKey = input.idempotencyKey?.trim() || randomUUID();
     const existing = await this.messagesRepository.findOne({
       where: {
@@ -336,6 +391,21 @@ export class WhatsAppOutboundService {
       },
     });
     if (existing) {
+      if (
+        existing.channelId !== channel.id ||
+        existing.conversationId !== conversation.id
+      ) {
+        throw new ConflictException('Outbound idempotency intent changed.');
+      }
+      await this.metaLedger.replay({
+        tenantId: channel.tenantId,
+        workspaceId: channel.workspaceId,
+        channelId: channel.id,
+        conversationId: conversation.id,
+        operation: 'send_media',
+        idempotencyKey,
+        recipient,
+      });
       return { conversation, message: existing, meta: {} };
     }
 
@@ -345,7 +415,9 @@ export class WhatsAppOutboundService {
     // Vídeo: só MP4 até 16 MB (sem transcodificação). Falhamos cedo com mensagem
     // clara em vez de deixar a Meta rejeitar com erro genérico.
     if (mediaType === 'video') {
-      if (!WHATSAPP_VIDEO_MIME_TYPES.has(getBaseMimeType(input.file.mimetype))) {
+      if (
+        !WHATSAPP_VIDEO_MIME_TYPES.has(getBaseMimeType(input.file.mimetype))
+      ) {
         throw new BadRequestException(
           'No WhatsApp só enviamos vídeos em MP4 (H.264/AAC).',
         );
@@ -377,7 +449,8 @@ export class WhatsAppOutboundService {
     // frontend esconde e a lista aproveita como preview.
     const mediaLabel = `[${WHATSAPP_MEDIA_LABELS[mediaType]}]`;
     const messageContent = caption || mediaLabel;
-    const ext = input.file.originalname.split('.').pop()?.toLowerCase() ?? 'bin';
+    const ext =
+      input.file.originalname.split('.').pop()?.toLowerCase() ?? 'bin';
 
     // Guarda a cópia no nosso storage para renderizar o balão outbound.
     const storagePath = `tenants/${channel.tenantId}/workspaces/${channel.workspaceId}/inbox/attachments/${Date.now()}-${Math.random()
@@ -391,51 +464,74 @@ export class WhatsAppOutboundService {
     });
 
     const now = new Date();
-    const message = await this.messagesRepository.save(
-      this.messagesRepository.create({
-        tenantId: channel.tenantId,
-        workspaceId: channel.workspaceId,
-        conversationId: conversation.id,
-        channelId: channel.id,
-        contactId: conversation.contactId ?? null,
-        direction: 'outbound',
-        senderType: 'user',
-        senderUserId: input.ctx.userId ?? null,
-        senderAgentId: null,
-        externalMessageId: null,
-        idempotencyKey,
-        messageType: 'media',
-        content: messageContent,
-        status: 'pending',
-        attachments: [
-          {
-            url: stored.url,
-            path: stored.path,
-            name: input.file.originalname,
-            mimeType: input.file.mimetype,
-            size: input.file.size,
-            kind: mediaType,
-          },
-        ],
-        metadata: {
-          provider: 'meta',
-          channelType: 'whatsapp',
-          mediaUrl: stored.url,
-          attachmentUrl: stored.url,
+    const pendingMessage = this.messagesRepository.create({
+      tenantId: channel.tenantId,
+      workspaceId: channel.workspaceId,
+      conversationId: conversation.id,
+      channelId: channel.id,
+      contactId: conversation.contactId ?? null,
+      direction: 'outbound',
+      senderType: 'user',
+      senderUserId: input.ctx.userId ?? null,
+      senderAgentId: null,
+      externalMessageId: null,
+      idempotencyKey,
+      messageType: 'media',
+      content: messageContent,
+      status: 'pending',
+      attachments: [
+        {
+          url: stored.url,
+          path: stored.path,
+          name: input.file.originalname,
           mimeType: input.file.mimetype,
-          fileName: input.file.originalname,
-          fileSize: input.file.size,
+          size: input.file.size,
+          kind: mediaType,
         },
-        sentAt: null,
-        deliveredAt: null,
-        readAt: null,
-        occurredAt: now,
-        providerSequence: null,
-      }),
+      ],
+      metadata: {
+        provider: 'meta',
+        channelType: 'whatsapp',
+        mediaUrl: stored.url,
+        attachmentUrl: stored.url,
+        mimeType: input.file.mimetype,
+        fileName: input.file.originalname,
+        fileSize: input.file.size,
+      },
+      sentAt: null,
+      deliveredAt: null,
+      readAt: null,
+      occurredAt: now,
+      providerSequence: null,
+    });
+    const mediaPersistence = await this.persistPendingMessage(
+      pendingMessage,
+      channel,
+      conversation,
     );
+    const message = mediaPersistence.message;
+    if (!mediaPersistence.created) {
+      return { conversation, message, meta: {} };
+    }
 
+    const ledger = await this.metaLedger.reserve({
+      tenantId: channel.tenantId,
+      workspaceId: channel.workspaceId,
+      channelId: channel.id,
+      conversationId: conversation.id,
+      messageId: message.id,
+      operation: 'send_media',
+      idempotencyKey,
+      recipient,
+    });
+    const startedMs = Date.now();
     let response: MetaSendMessageResponse;
     try {
+      await this.metaLedger.started(ledger);
+      this.outboundPolicy.authorize(
+        recipient.transportRecipient,
+        conversation.externalThreadId,
+      );
       const mediaId = await this.uploadMediaToMeta({
         phoneNumberId: channel.externalPhoneNumberId,
         accessToken,
@@ -446,13 +542,20 @@ export class WhatsAppOutboundService {
       response = await this.sendMediaToMeta({
         phoneNumberId: channel.externalPhoneNumberId,
         accessToken,
-        to: input.to,
+        to: recipient.transportRecipient,
+        expectedTo: conversation.externalThreadId ?? input.to,
         mediaType,
         mediaId,
         caption,
         filename: input.file.originalname,
       });
+      await this.metaLedger.succeeded(
+        ledger,
+        startedMs,
+        response.messages?.[0]?.id,
+      );
     } catch (error) {
+      await this.metaLedger.failed(ledger, startedMs, error);
       message.status = 'failed';
       message.metadata = {
         ...message.metadata,
@@ -534,6 +637,37 @@ export class WhatsAppOutboundService {
     }
 
     return conversation;
+  }
+
+  private async persistPendingMessage(
+    message: InboxMessageEntity,
+    channel: InboxChannelEntity,
+    conversation: InboxConversationEntity,
+  ): Promise<{ message: InboxMessageEntity; created: boolean }> {
+    try {
+      return {
+        message: await this.messagesRepository.save(message),
+        created: true,
+      };
+    } catch (error) {
+      const raced = message.idempotencyKey
+        ? await this.messagesRepository.findOne({
+            where: {
+              tenantId: channel.tenantId,
+              workspaceId: channel.workspaceId,
+              idempotencyKey: message.idempotencyKey,
+            },
+          })
+        : null;
+      if (!raced) throw error;
+      if (
+        raced.channelId !== channel.id ||
+        raced.conversationId !== conversation.id
+      ) {
+        throw new ConflictException('Outbound idempotency intent changed.');
+      }
+      return { message: raced, created: false };
+    }
   }
 
   private async findChannelForContext(ctx: RequestContext, channelId: string) {
@@ -640,9 +774,14 @@ export class WhatsAppOutboundService {
     phoneNumberId: string;
     accessToken: string;
     to: string;
+    expectedTo: string;
     text: string;
     contextMessageId?: string;
   }): Promise<MetaSendMessageResponse> {
+    const authorized = this.outboundPolicy.authorize(
+      input.to,
+      input.expectedTo,
+    );
     const graphVersion = process.env.META_GRAPH_API_VERSION ?? 'v24.0';
     const url = `https://graph.facebook.com/${graphVersion}/${input.phoneNumberId}/messages`;
 
@@ -655,7 +794,7 @@ export class WhatsAppOutboundService {
       body: JSON.stringify({
         messaging_product: 'whatsapp',
         recipient_type: 'individual',
-        to: input.to,
+        to: authorized.transportRecipient,
         type: 'text',
         ...(input.contextMessageId
           ? { context: { message_id: input.contextMessageId } }
@@ -665,6 +804,8 @@ export class WhatsAppOutboundService {
           body: input.text,
         },
       }),
+      redirect: 'error',
+      signal: AbortSignal.timeout(15_000),
     });
 
     const data = (await response.json()) as MetaSendMessageResponse;
@@ -712,33 +853,80 @@ export class WhatsAppOutboundService {
 
     if (!channel?.externalPhoneNumberId) return false;
 
-    const accessToken = this.cryptoService.decrypt(channel.accessTokenEncrypted);
+    const accessToken = this.cryptoService.decrypt(
+      channel.accessTokenEncrypted,
+    );
     if (!accessToken) return false;
+
+    const recipient = this.outboundPolicy.authorize(
+      to,
+      input.conversation.externalThreadId,
+    );
+    const idempotencyKey = `reaction:${input.message.id}:${input.emoji || 'remove'}`;
+    const ledger = await this.metaLedger.reserve({
+      tenantId: input.conversation.tenantId,
+      workspaceId: input.conversation.workspaceId,
+      channelId: channel.id,
+      conversationId: input.conversation.id,
+      messageId: input.message.id,
+      operation: 'reaction',
+      idempotencyKey,
+      recipient,
+    });
+    if (ledger.succeededAt) {
+      await this.metaLedger.replay({
+        tenantId: input.conversation.tenantId,
+        workspaceId: input.conversation.workspaceId,
+        channelId: channel.id,
+        conversationId: input.conversation.id,
+        operation: 'reaction',
+        idempotencyKey,
+        recipient,
+      });
+      return true;
+    }
 
     const graphVersion = process.env.META_GRAPH_API_VERSION ?? 'v24.0';
     const url = `https://graph.facebook.com/${graphVersion}/${channel.externalPhoneNumberId}/messages`;
 
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        messaging_product: 'whatsapp',
-        recipient_type: 'individual',
-        to,
-        type: 'reaction',
-        reaction: {
-          message_id: externalMessageId,
-          emoji: input.emoji,
+    const startedMs = Date.now();
+    await this.metaLedger.started(ledger);
+    let response: Response;
+    try {
+      const authorized = this.outboundPolicy.authorize(
+        recipient.transportRecipient,
+        input.conversation.externalThreadId,
+      );
+      response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
         },
-      }),
-    });
+        body: JSON.stringify({
+          messaging_product: 'whatsapp',
+          recipient_type: 'individual',
+          to: authorized.transportRecipient,
+          type: 'reaction',
+          reaction: {
+            message_id: externalMessageId,
+            emoji: input.emoji,
+          },
+        }),
+        redirect: 'error',
+        signal: AbortSignal.timeout(15_000),
+      });
+    } catch (error) {
+      await this.metaLedger.failed(ledger, startedMs, error);
+      throw error;
+    }
 
     const data = (await response.json()) as MetaSendMessageResponse;
 
     if (!response.ok || data.error) {
+      await this.metaLedger.failed(ledger, startedMs, {
+        status: response.status,
+      });
       throw new BadRequestException(
         [
           'Não foi possível enviar a reação pelo canal WhatsApp.',
@@ -748,6 +936,8 @@ export class WhatsAppOutboundService {
           .join(' '),
       );
     }
+
+    await this.metaLedger.succeeded(ledger, startedMs, data.messages?.[0]?.id);
 
     return true;
   }
@@ -776,12 +966,29 @@ export class WhatsAppOutboundService {
 
       try {
         await execFileAsync(ffmpegPath, [
-          '-y', '-i', inputPath, '-vn', '-c:a', 'copy', '-f', 'ogg', outputPath,
+          '-y',
+          '-i',
+          inputPath,
+          '-vn',
+          '-c:a',
+          'copy',
+          '-f',
+          'ogg',
+          outputPath,
         ]);
       } catch {
         await execFileAsync(ffmpegPath, [
-          '-y', '-i', inputPath, '-vn', '-c:a', 'libopus', '-b:a', '32k',
-          '-f', 'ogg', outputPath,
+          '-y',
+          '-i',
+          inputPath,
+          '-vn',
+          '-c:a',
+          'libopus',
+          '-b:a',
+          '32k',
+          '-f',
+          'ogg',
+          outputPath,
         ]);
       }
 
@@ -820,6 +1027,8 @@ export class WhatsAppOutboundService {
       method: 'POST',
       headers: { Authorization: `Bearer ${input.accessToken}` },
       body: form,
+      redirect: 'error',
+      signal: AbortSignal.timeout(15_000),
     });
 
     const data = (await response.json()) as {
@@ -841,11 +1050,16 @@ export class WhatsAppOutboundService {
     phoneNumberId: string;
     accessToken: string;
     to: string;
+    expectedTo: string;
     mediaType: WhatsAppMediaType;
     mediaId: string;
     caption: string;
     filename: string;
   }): Promise<MetaSendMessageResponse> {
+    const authorized = this.outboundPolicy.authorize(
+      input.to,
+      input.expectedTo,
+    );
     const graphVersion = process.env.META_GRAPH_API_VERSION ?? 'v24.0';
     const url = `https://graph.facebook.com/${graphVersion}/${input.phoneNumberId}/messages`;
 
@@ -867,10 +1081,12 @@ export class WhatsAppOutboundService {
       body: JSON.stringify({
         messaging_product: 'whatsapp',
         recipient_type: 'individual',
-        to: input.to,
+        to: authorized.transportRecipient,
         type: input.mediaType,
         [input.mediaType]: mediaPayload,
       }),
+      redirect: 'error',
+      signal: AbortSignal.timeout(15_000),
     });
 
     const data = (await response.json()) as MetaSendMessageResponse;

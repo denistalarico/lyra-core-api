@@ -106,6 +106,7 @@ import { PrepareLeadflowAgencyPilot1784400000000 } from './migrations/1784400000
 import { AddInboxDecisionReviewOutcomes1784500000000 } from './migrations/1784500000000-add-inbox-decision-review-outcomes';
 import { EnforceDefaultAgentBindingInvariant1784510000000 } from './migrations/1784510000000-enforce-default-agent-binding-invariant';
 import { AddInboxOutboxLifecycle1784520000000 } from './migrations/1784520000000-add-inbox-outbox-lifecycle';
+import { HardenInboxAssistedMode1784530000000 } from './migrations/1784530000000-harden-inbox-assisted-mode';
 
 export const AgencyDataSource = new DataSource({
   type: 'postgres',
@@ -225,5 +226,6 @@ export const AgencyDataSource = new DataSource({
     AddInboxDecisionReviewOutcomes1784500000000,
     EnforceDefaultAgentBindingInvariant1784510000000,
     AddInboxOutboxLifecycle1784520000000,
+    HardenInboxAssistedMode1784530000000,
   ],
 });

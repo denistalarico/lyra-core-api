@@ -29,7 +29,7 @@ export class AudioTranscriptionWorker {
   @Interval(2_000)
   async tick(): Promise<void> {
     if (
-      !this.config.workersEnabled ||
+      !this.config.mediaWorkerEnabled ||
       this.config.transcriptionMode === 'disabled' ||
       this.running
     )

@@ -32,6 +32,11 @@ export type InboxMessageStatus =
   ['tenantId', 'workspaceId', 'channelId', 'externalMessageId'],
   { unique: true },
 )
+@Index(
+  'uq_inbox_message_idempotency',
+  ['tenantId', 'workspaceId', 'idempotencyKey'],
+  { unique: true },
+)
 export class InboxMessageEntity {
   @PrimaryGeneratedColumn('uuid')
   id!: string;

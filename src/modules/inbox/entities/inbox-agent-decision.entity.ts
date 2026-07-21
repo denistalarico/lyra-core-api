@@ -123,6 +123,31 @@ export class InboxAgentDecisionEntity {
     default: () => "'[]'::jsonb",
   })
   reviewedActionKeys!: string[];
+  @Column({
+    name: 'review_idempotency_key',
+    type: 'varchar',
+    length: 180,
+    nullable: true,
+  })
+  reviewIdempotencyKey!: string | null;
+  @Column({
+    name: 'review_intent_hash',
+    type: 'char',
+    length: 64,
+    nullable: true,
+  })
+  reviewIntentHash!: string | null;
+  @Column({ name: 'review_response_snapshot', type: 'jsonb', nullable: true })
+  reviewResponseSnapshot!: Record<string, unknown> | null;
+  @Column({ name: 'review_audit_ref', type: 'uuid', nullable: true })
+  reviewAuditRef!: string | null;
+  @Column({
+    name: 'review_expected_version',
+    type: 'varchar',
+    length: 180,
+    nullable: true,
+  })
+  reviewExpectedVersion!: string | null;
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;
   @UpdateDateColumn({ name: 'updated_at', type: 'timestamptz' })

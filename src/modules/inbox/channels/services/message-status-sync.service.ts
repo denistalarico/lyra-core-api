@@ -7,6 +7,7 @@ import type {
   NormalizedMessageDeliveryStatus,
   NormalizedMessageStatusUpdate,
 } from '../types/normalized-message-status-update';
+import { InboxMetaOperationLedgerService } from '../whatsapp/services/inbox-meta-operation-ledger.service';
 
 @Injectable()
 export class MessageStatusSyncService {
@@ -15,6 +16,7 @@ export class MessageStatusSyncService {
     private readonly messagesRepository: Repository<InboxMessageEntity>,
     @InjectRepository(InboxConversationEventEntity, 'agency')
     private readonly eventsRepository: Repository<InboxConversationEventEntity>,
+    private readonly metaLedger: InboxMetaOperationLedgerService,
   ) {}
 
   async applyStatusUpdate(input: NormalizedMessageStatusUpdate) {
@@ -55,6 +57,14 @@ export class MessageStatusSyncService {
     };
 
     await this.messagesRepository.save(message);
+
+    await this.metaLedger.reconcileDelivery({
+      tenantId: input.tenantId,
+      workspaceId: input.workspaceId,
+      messageId: message.id,
+      status: input.status,
+      occurredAt,
+    });
 
     await this.eventsRepository.save(
       this.eventsRepository.create({

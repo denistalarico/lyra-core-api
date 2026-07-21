@@ -9,6 +9,16 @@ const managedNames = [
   'INBOX_LIVE_SESSION_ID',
   'INBOX_TRANSCRIPTION_MODEL',
   'INBOX_DECISION_MODEL',
+  'INBOX_INGESTION_WORKER_ENABLED',
+  'INBOX_MEDIA_WORKER_ENABLED',
+  'INBOX_DECISION_WORKER_ENABLED',
+  'INBOX_OUTBOX_RELAY_ENABLED',
+  'INBOX_REALTIME_GATEWAY_ENABLED',
+  'INBOX_AUTO_REPLY_ENABLED',
+  'INBOX_AUTO_CRM_ENABLED',
+  'INBOX_AUTO_HANDOFF_ENABLED',
+  'INBOX_FOLLOW_UP_ENABLED',
+  'INBOX_DECISION_TRIGGER_MODE',
 ];
 
 describe('InboxRuntimeConfigService activation safety', () => {
@@ -38,7 +48,31 @@ describe('InboxRuntimeConfigService activation safety', () => {
       decisionModel: 'gpt-5.6-terra',
       autoReplyEnabled: false,
       autoCrmEnabled: false,
+      autoHandoffEnabled: false,
+      followUpEnabled: false,
+      ingestionWorkerEnabled: false,
+      mediaWorkerEnabled: false,
+      decisionWorkerEnabled: false,
+      outboxRelayEnabled: false,
+      realtimeGatewayEnabled: false,
+      decisionTriggerMode: 'manual',
+      decisionWorkerConcurrency: 1,
     });
+  });
+
+  it('rejects automatic effects even when explicitly configured', () => {
+    for (const name of [
+      'INBOX_AUTO_REPLY_ENABLED',
+      'INBOX_AUTO_CRM_ENABLED',
+      'INBOX_AUTO_HANDOFF_ENABLED',
+      'INBOX_FOLLOW_UP_ENABLED',
+    ]) {
+      process.env[name] = 'true';
+      expect(() => new InboxRuntimeConfigService().onModuleInit()).toThrow(
+        'inbox_automatic_effects_not_supported',
+      );
+      delete process.env[name];
+    }
   });
 
   it('refuses live mode without both a key and an explicit activation session', () => {

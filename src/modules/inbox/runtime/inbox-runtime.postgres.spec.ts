@@ -44,7 +44,7 @@ run('Inbox Runtime PostgreSQL concurrency', () => {
   });
   beforeEach(async () => {
     await AgencyDataSource.query(
-      `TRUNCATE inbox_provider_usage_ledger, inbox_domain_outbox, inbox_agent_decisions,
+      `TRUNCATE inbox_meta_operations, inbox_provider_usage_ledger, inbox_domain_outbox, inbox_agent_decisions,
        inbox_processing_batches, inbox_media_derivatives, inbox_media_assets,
        inbox_messages, inbox_conversation_events, inbox_conversations,
        leadflow_agent_channel_bindings, leadflow_agent_versions, leadflow_agents,
@@ -489,7 +489,7 @@ run('Inbox Runtime PostgreSQL concurrency', () => {
     ).rejects.toThrow('Decision is no longer pending review.');
   });
 
-  it('applies a partial approval once and rejects a retry without duplicating effects', async () => {
+  it('applies a partial approval once and replays a retry without duplicating effects', async () => {
     const conversationId = await insertConversation(
       tenantId,
       workspaceId,
@@ -535,10 +535,18 @@ run('Inbox Runtime PostgreSQL concurrency', () => {
       {} as never,
     );
     const ctx = { tenantId, workspaceId, userId: randomUUID() };
-    await runtime.review(ctx, conversationId, decisionId, true, ['handoff']);
-    await expect(
+    const [first, replay] = await Promise.all([
       runtime.review(ctx, conversationId, decisionId, true, ['handoff']),
-    ).rejects.toThrow('Decision actions were already applied.');
+      runtime.review(ctx, conversationId, decisionId, true, ['handoff']),
+    ]);
+    const results = (
+      [first, replay] as Array<{
+        status: string;
+        auditRef?: string | null;
+      }>
+    ).sort((left, right) => left.status.localeCompare(right.status));
+    expect(results.map((item) => item.status)).toEqual(['applied', 'replayed']);
+    expect(results[1].auditRef).toBe(results[0].auditRef);
     const [conversation] = await AgencyDataSource.query<
       Array<{ ownership_state: string; ownership_version: number }>
     >(
@@ -642,7 +650,123 @@ run('Inbox Runtime PostgreSQL concurrency', () => {
         ['handoff'],
         'actions',
       ),
-    ).rejects.toThrow('Decision is no longer pending review.');
+    ).rejects.toThrow('Review retry intent changed.');
+  });
+
+  it('returns canonical CRM current values and rejects an approval after the preview becomes stale', async () => {
+    const conversationId = await insertConversation(
+      tenantId,
+      workspaceId,
+      'ai_active',
+    );
+    const pipelineId = randomUUID();
+    const stageId = randomUUID();
+    const opportunityId = randomUUID();
+    await AgencyDataSource.query(
+      `INSERT INTO crm_pipelines (id,tenant_id,workspace_id,name) VALUES ($1,$2,$3,'Synthetic')`,
+      [pipelineId, tenantId, workspaceId],
+    );
+    await AgencyDataSource.query(
+      `INSERT INTO crm_stages (id,tenant_id,workspace_id,pipeline_id,name) VALUES ($1,$2,$3,$4,'Synthetic')`,
+      [stageId, tenantId, workspaceId, pipelineId],
+    );
+    await AgencyDataSource.query(
+      `INSERT INTO crm_opportunities
+        (id,tenant_id,workspace_id,pipeline_id,stage_id,inbox_conversation_id,title,business_context)
+       VALUES ($1,$2,$3,$4,$5,$6,'Synthetic',$7::jsonb)`,
+      [
+        opportunityId,
+        tenantId,
+        workspaceId,
+        pipelineId,
+        stageId,
+        conversationId,
+        JSON.stringify({ agentSummary: 'before', service: 'service-a' }),
+      ],
+    );
+    await AgencyDataSource.query(
+      `UPDATE inbox_conversations SET opportunity_id=$2 WHERE id=$1`,
+      [conversationId, opportunityId],
+    );
+    const batchId = randomUUID();
+    const decisionId = randomUUID();
+    await AgencyDataSource.query(
+      `INSERT INTO inbox_processing_batches (id,tenant_id,workspace_id,conversation_id,channel_id,status,due_at)
+       VALUES ($1,$2,$3,$4,$5,'completed',now())`,
+      [batchId, tenantId, workspaceId, conversationId, randomUUID()],
+    );
+    await AgencyDataSource.query(
+      `INSERT INTO inbox_agent_decisions
+        (id,tenant_id,workspace_id,conversation_id,batch_id,ownership_version,idempotency_key,correlation_id,status,action_plan)
+       VALUES ($1,$2,$3,$4,$5,1,$6,$7,'proposed',$8::jsonb)`,
+      [
+        decisionId,
+        tenantId,
+        workspaceId,
+        conversationId,
+        batchId,
+        randomUUID(),
+        randomUUID(),
+        JSON.stringify([
+          {
+            key: 'summary',
+            type: 'set_summary',
+            value: 'after',
+            allowed: true,
+            reason: null,
+          },
+        ]),
+      ],
+    );
+    const runtime = new InboxAgentRuntimeService(
+      AgencyDataSource,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+    const ctx = { tenantId, workspaceId, userId: randomUUID() };
+    const preview = await runtime.previewReview(
+      ctx,
+      conversationId,
+      decisionId,
+      ['summary'],
+    );
+    expect(preview.current).toMatchObject({
+      opportunityId,
+      pipelineId,
+      stageId,
+      agentSummary: 'before',
+      service: 'service-a',
+      tags: [],
+    });
+    expect(preview.proposed[0]).toMatchObject({
+      current: 'before',
+      proposed: 'after',
+      effectType: 'crm',
+      expectedVersion: preview.expectedVersion,
+    });
+    await AgencyDataSource.query(
+      `UPDATE crm_opportunities
+          SET business_context=jsonb_set(business_context,'{agentSummary}','"changed"'),
+              updated_at=clock_timestamp()
+        WHERE id=$1 AND tenant_id=$2 AND workspace_id=$3`,
+      [opportunityId, tenantId, workspaceId],
+    );
+    await expect(
+      runtime.review(
+        ctx,
+        conversationId,
+        decisionId,
+        true,
+        ['summary'],
+        'actions',
+        'stale-review-key',
+        preview.expectedVersion,
+      ),
+    ).rejects.toThrow('Decision preview is stale');
   });
 
   it('recovers an abandoned outbox lock and two relays publish one logical event', async () => {
@@ -656,7 +780,7 @@ run('Inbox Runtime PostgreSQL concurrency', () => {
       new InboxOutboxRelayService(
         AgencyDataSource,
         { notify } as never,
-        { realtimeEnabled: true } as never,
+        { realtimeGatewayEnabled: true } as never,
       );
     await Promise.all([make().processPending(1), make().processPending(1)]);
     expect(notify).toHaveBeenCalledTimes(1);
@@ -693,7 +817,7 @@ run('Inbox Runtime PostgreSQL concurrency', () => {
     const relay = new InboxOutboxRelayService(
       AgencyDataSource,
       { notify } as never,
-      { realtimeEnabled: false } as never,
+      { realtimeGatewayEnabled: false } as never,
     );
     await relay.processPending(10);
     expect(notify).not.toHaveBeenCalled();

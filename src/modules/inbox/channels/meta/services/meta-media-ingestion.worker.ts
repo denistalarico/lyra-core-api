@@ -9,6 +9,7 @@ import { InboxChannelEntity } from '../../../entities/inbox-channel.entity';
 import { InboxMediaAssetEntity } from '../../../entities/inbox-media-asset.entity';
 import { InboxMediaDerivativeEntity } from '../../../entities/inbox-media-derivative.entity';
 import { InboxDomainOutboxEntity } from '../../../entities/inbox-domain-outbox.entity';
+import { InboxRuntimeConfigService } from '../../../runtime/inbox-runtime-config.service';
 
 const ALLOWED_MIME = new Set([
   'image/jpeg',
@@ -31,12 +32,12 @@ export class MetaMediaIngestionWorker {
     @InjectDataSource('agency') private readonly dataSource: DataSource,
     private readonly filesService: FilesService,
     private readonly cryptoService: SettingsCryptoService,
+    private readonly config: InboxRuntimeConfigService,
   ) {}
 
   @Interval(2000)
   async tick() {
-    if (process.env.INBOX_RUNTIME_WORKERS_ENABLED !== 'true' || this.running)
-      return;
+    if (!this.config.mediaWorkerEnabled || this.running) return;
     this.running = true;
     try {
       await this.processPending(5);
