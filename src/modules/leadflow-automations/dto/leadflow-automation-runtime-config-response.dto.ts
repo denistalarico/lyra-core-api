@@ -9,10 +9,7 @@ export type LeadFlowAutomationRuntimeConfigResponse =
 export type LeadFlowAutomationsRuntimeConfigResponse =
   LeadFlowAutomationsRuntimeContract;
 
-/**
- * Safe placeholder log entry. No execution happens in this sprint, so logs are
- * always an empty, well-typed envelope — never real message/dispatch data.
- */
+/** A log line derived from a real run record. */
 export interface LeadFlowAutomationLogEntry {
   id: string;
   automationId: string;
@@ -24,19 +21,43 @@ export interface LeadFlowAutomationLogEntry {
 
 export interface LeadFlowAutomationLogsResponse {
   automationId: string;
-  placeholder: true;
+  /** False now that entries come from persisted runs rather than a stub. */
+  placeholder: boolean;
   note: string;
   items: LeadFlowAutomationLogEntry[];
 }
 
-/** Result of a dry-run: a static, predictable preview with no side effects. */
+/** One condition evaluated during a dry-run. */
+export interface LeadFlowAutomationDryRunCheck {
+  key: string;
+  label: string;
+  passed: boolean;
+  detail: string;
+}
+
+/**
+ * Result of a dry-run: a real evaluation of the stored configuration against a
+ * simulated situation, persisted as a run with `mode = dry_run`. Produces no
+ * message, webhook, LLM call or cross-domain write.
+ */
 export interface LeadFlowAutomationDryRunResponse {
   automationId: string;
-  placeholder: true;
-  wouldTrigger: boolean;
+  /** The persisted run this simulation produced. */
+  runId: string;
+  wouldAct: boolean;
+  status: string;
+  skipReason: string | null;
+  /**
+   * True when the platform could not execute this automation even if every
+   * condition passed. Reported separately so a green evaluation is never read
+   * as "this is running".
+   */
+  blockedByDependency: boolean;
   note: string;
   simulatedTrigger: string;
-  simulatedActions: string[];
+  plannedActions: string[];
+  checks: LeadFlowAutomationDryRunCheck[];
+  context: Record<string, unknown>;
   readiness: LeadFlowAutomationRuntimeContract['readiness'];
   generatedAt: string;
 }

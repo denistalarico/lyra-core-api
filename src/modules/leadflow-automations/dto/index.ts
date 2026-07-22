@@ -1,5 +1,15 @@
 export { ProvisionAutomationDto } from './provision-automation.dto';
 export { PatchAutomationDto } from './patch-automation.dto';
+export { DryRunAutomationDto } from './dry-run-automation.dto';
+export {
+  mapAttempt,
+  mapRun,
+  mapRunDetail,
+  type LeadFlowAutomationAttemptResponse,
+  type LeadFlowAutomationRunDetailResponse,
+  type LeadFlowAutomationRunListResponse,
+  type LeadFlowAutomationRunResponse,
+} from './leadflow-automation-run-response.dto';
 export {
   mapAutomationDetail,
   mapAutomationSummary,

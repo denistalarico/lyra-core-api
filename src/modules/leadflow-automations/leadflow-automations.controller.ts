@@ -20,8 +20,14 @@ import type {
   LeadFlowAutomationDetailResponse,
   LeadFlowAutomationListResponse,
   LeadFlowAutomationRecipeListResponse,
+  LeadFlowAutomationRunDetailResponse,
+  LeadFlowAutomationRunListResponse,
 } from './dto';
-import { PatchAutomationDto, ProvisionAutomationDto } from './dto';
+import {
+  DryRunAutomationDto,
+  PatchAutomationDto,
+  ProvisionAutomationDto,
+} from './dto';
 import type {
   LeadFlowAutomationDryRunResponse,
   LeadFlowAutomationLogsResponse,
@@ -134,12 +140,37 @@ export class LeadFlowAutomationsController {
     return this.automationService.getLogs(ctx, id);
   }
 
+  @Get(':id/runs')
+  @RequirePermission(LEADFLOW_AUTOMATIONS_PERMISSIONS.logsView)
+  listRuns(
+    @RequestContextData() ctx: RequestContext,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<LeadFlowAutomationRunListResponse> {
+    return this.automationService.listRuns(ctx, id);
+  }
+
+  @Get(':id/runs/:runId')
+  @RequirePermission(LEADFLOW_AUTOMATIONS_PERMISSIONS.logsView)
+  getRun(
+    @RequestContextData() ctx: RequestContext,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('runId', ParseUUIDPipe) runId: string,
+  ): Promise<LeadFlowAutomationRunDetailResponse> {
+    return this.automationService.getRun(ctx, id, runId);
+  }
+
+  /**
+   * Evaluates the configuration against a simulated situation and records the
+   * result as a run. Side-effect free, so it stays behind the developer
+   * permission only because it exposes the evaluation internals.
+   */
   @Post(':id/dry-run')
   @RequirePermission(LEADFLOW_AUTOMATIONS_PERMISSIONS.developerManage)
   dryRun(
     @RequestContextData() ctx: RequestContext,
     @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: DryRunAutomationDto,
   ): Promise<LeadFlowAutomationDryRunResponse> {
-    return this.automationService.dryRun(ctx, id);
+    return this.automationService.dryRun(ctx, id, dto);
   }
 }

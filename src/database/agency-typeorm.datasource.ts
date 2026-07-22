@@ -114,6 +114,7 @@ import { AddDeterministicCrmRouting1784570000000 } from './migrations/1784570000
 import { CreateGovernedStageTransitions1784580000000 } from './migrations/1784580000000-create-governed-stage-transitions';
 import { AddCrmOpportunityLineage1784590000000 } from './migrations/1784590000000-add-crm-opportunity-lineage';
 import { AddLeadflowAutomationTemplateVersion1785000000000 } from './migrations/1785000000000-add-leadflow-automation-template-version';
+import { CreateLeadflowAutomationRuns1785500000000 } from './migrations/1785500000000-create-leadflow-automation-runs';
 
 export const AgencyDataSource = new DataSource({
   type: 'postgres',
@@ -241,5 +242,6 @@ export const AgencyDataSource = new DataSource({
     CreateGovernedStageTransitions1784580000000,
     AddCrmOpportunityLineage1784590000000,
     AddLeadflowAutomationTemplateVersion1785000000000,
+    CreateLeadflowAutomationRuns1785500000000,
   ],
 });

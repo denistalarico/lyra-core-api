@@ -271,6 +271,8 @@ import {
 } from '../modules/leadflow-agents/entities';
 import {
   LeadFlowAutomationEntity,
+  LeadFlowAutomationRunAttemptEntity,
+  LeadFlowAutomationRunEntity,
   LeadFlowAutomationVersionEntity,
 } from '../modules/leadflow-automations/entities';
 
@@ -463,6 +465,8 @@ export const agencyEntities = [
   OperationsRoomOutboxEntity,
   LeadFlowAutomationEntity,
   LeadFlowAutomationVersionEntity,
+  LeadFlowAutomationRunEntity,
+  LeadFlowAutomationRunAttemptEntity,
 ];
 
 export function getTypeOrmConfig(): TypeOrmModuleOptions {

@@ -4,12 +4,16 @@ import { LeadFlowClientSettingsEntity } from '../leadflow-settings/entities';
 import { PermissionsModule } from '../permissions';
 import {
   LeadFlowAutomationEntity,
+  LeadFlowAutomationRunAttemptEntity,
+  LeadFlowAutomationRunEntity,
   LeadFlowAutomationVersionEntity,
 } from './entities';
 import { LeadFlowAutomationsController } from './leadflow-automations.controller';
 import { LeadFlowAutomationConfigSchemaService } from './services/leadflow-automation-config-schema.service';
+import { LeadFlowAutomationEvaluationService } from './services/leadflow-automation-evaluation.service';
 import { LeadFlowAutomationLifecycleService } from './services/leadflow-automation-lifecycle.service';
 import { LeadFlowAutomationRecipeService } from './services/leadflow-automation-recipe.service';
+import { LeadFlowAutomationRunService } from './services/leadflow-automation-run.service';
 import { LeadFlowAutomationRuntimeConfigService } from './services/leadflow-automation-runtime-config.service';
 import { LeadFlowAutomationService } from './services/leadflow-automation.service';
 
@@ -20,6 +24,8 @@ import { LeadFlowAutomationService } from './services/leadflow-automation.servic
       [
         LeadFlowAutomationEntity,
         LeadFlowAutomationVersionEntity,
+        LeadFlowAutomationRunEntity,
+        LeadFlowAutomationRunAttemptEntity,
         LeadFlowClientSettingsEntity,
       ],
       'agency',
@@ -32,6 +38,8 @@ import { LeadFlowAutomationService } from './services/leadflow-automation.servic
     LeadFlowAutomationRuntimeConfigService,
     LeadFlowAutomationConfigSchemaService,
     LeadFlowAutomationLifecycleService,
+    LeadFlowAutomationEvaluationService,
+    LeadFlowAutomationRunService,
   ],
   exports: [LeadFlowAutomationService, LeadFlowAutomationRuntimeConfigService],
 })

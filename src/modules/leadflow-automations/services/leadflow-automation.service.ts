@@ -14,12 +14,17 @@ import { PlatformPermissionService } from '../../permissions';
 import type { PermissionContext } from '../../permissions';
 import type { LeadFlowAutomationRecipeCatalogItem } from '../catalog/automation-recipes.catalog';
 import {
+  DryRunAutomationDto,
   LeadFlowAutomationDetailResponse,
   LeadFlowAutomationListResponse,
   LeadFlowAutomationRecipeListResponse,
+  LeadFlowAutomationRunDetailResponse,
+  LeadFlowAutomationRunListResponse,
   mapAutomationDetail,
   mapAutomationRecipe,
   mapAutomationSummary,
+  mapRun,
+  mapRunDetail,
   PatchAutomationDto,
   ProvisionAutomationDto,
 } from '../dto';
@@ -36,6 +41,10 @@ import {
   LeadFlowAutomationVersionEntity,
 } from '../entities';
 import { LeadFlowAutomationReadinessState } from '../enums/leadflow-automation-readiness-state.enum';
+import {
+  LeadFlowAutomationRunMode,
+  LeadFlowAutomationRunStatus,
+} from '../enums/leadflow-automation-run.enums';
 import { LeadFlowAutomationStatus } from '../enums/leadflow-automation-status.enum';
 import { LeadFlowAutomationVersionStatus } from '../enums/leadflow-automation-version-status.enum';
 import { LEADFLOW_AUTOMATIONS_PERMISSIONS } from '../leadflow-automations.permissions';
@@ -47,11 +56,13 @@ import {
   LeadFlowAutomationConfigSchemaService,
   type LeadFlowAutomationConfigError,
 } from './leadflow-automation-config-schema.service';
+import { LeadFlowAutomationEvaluationService } from './leadflow-automation-evaluation.service';
 import {
   LeadFlowAutomationLifecycleService,
   type LeadFlowAutomationLifecycle,
 } from './leadflow-automation-lifecycle.service';
 import { LeadFlowAutomationRecipeService } from './leadflow-automation-recipe.service';
+import { LeadFlowAutomationRunService } from './leadflow-automation-run.service';
 import { LeadFlowAutomationRuntimeConfigService } from './leadflow-automation-runtime-config.service';
 
 const AGENCY_CONNECTION = 'agency';
@@ -80,6 +91,8 @@ export class LeadFlowAutomationService {
     private readonly runtimeConfigService: LeadFlowAutomationRuntimeConfigService,
     private readonly configSchemaService: LeadFlowAutomationConfigSchemaService,
     private readonly lifecycleService: LeadFlowAutomationLifecycleService,
+    private readonly evaluationService: LeadFlowAutomationEvaluationService,
+    private readonly runService: LeadFlowAutomationRunService,
     private readonly permissionService: PlatformPermissionService,
   ) {}
 
@@ -337,51 +350,131 @@ export class LeadFlowAutomationService {
     );
   }
 
-  /**
-   * Placeholder logs. No automation runs in this sprint, so this always returns
-   * a well-typed, empty envelope — never real dispatch data.
-   */
+  /** Log view derived from persisted runs. */
   async getLogs(
     ctx: RequestContext,
     id: string,
   ): Promise<LeadFlowAutomationLogsResponse> {
     const active = await this.resolveActiveContext(ctx);
     const automation = await this.findScopedAutomation(ctx, active, id);
+    const runs = await this.runService.listRuns(ctx, automation.id);
 
     return {
       automationId: automation.id,
-      placeholder: true,
-      note: 'Logs de execução ainda não estão disponíveis. Esta automação é um contrato de configuração; nenhuma execução real ocorre neste momento.',
-      items: [],
+      placeholder: false,
+      note:
+        runs.length === 0
+          ? 'Nenhum registro ainda. Execute uma simulação para ver como esta automação decidiria.'
+          : 'Registros derivados das execuções e simulações desta automação.',
+      items: runs.map((run) => ({
+        id: run.id,
+        automationId: run.automationId,
+        level:
+          run.status === LeadFlowAutomationRunStatus.Failed
+            ? ('error' as const)
+            : run.status === LeadFlowAutomationRunStatus.Skipped
+              ? ('warn' as const)
+              : ('info' as const),
+        event: `${run.mode}.${run.status}`,
+        message:
+          run.errorMessage ??
+          run.skipReason ??
+          (run.mode === LeadFlowAutomationRunMode.DryRun
+            ? 'Simulação concluída.'
+            : 'Execução concluída.'),
+        createdAt: run.createdAt.toISOString(),
+      })),
     };
   }
 
+  async listRuns(
+    ctx: RequestContext,
+    id: string,
+  ): Promise<LeadFlowAutomationRunListResponse> {
+    const active = await this.resolveActiveContext(ctx);
+    const automation = await this.findScopedAutomation(ctx, active, id);
+    const runs = await this.runService.listRuns(ctx, automation.id);
+
+    return {
+      automationId: automation.id,
+      liveRunCount: runs.filter(
+        (run) => run.mode === LeadFlowAutomationRunMode.Live,
+      ).length,
+      dryRunCount: runs.filter(
+        (run) => run.mode === LeadFlowAutomationRunMode.DryRun,
+      ).length,
+      items: runs.map(mapRun),
+    };
+  }
+
+  async getRun(
+    ctx: RequestContext,
+    id: string,
+    runId: string,
+  ): Promise<LeadFlowAutomationRunDetailResponse> {
+    const active = await this.resolveActiveContext(ctx);
+    const automation = await this.findScopedAutomation(ctx, active, id);
+    const { run, attempts } = await this.runService.getRun(
+      ctx,
+      automation.id,
+      runId,
+    );
+
+    return mapRunDetail(run, attempts);
+  }
+
   /**
-   * Placeholder dry-run. Produces a static, predictable preview of what *would*
-   * happen if the trigger fired — with zero side effects (no message, webhook,
-   * or LLM call).
+   * Evaluates the stored configuration against a simulated situation and
+   * persists the result as a run with `mode = dry_run`.
+   *
+   * This is a real evaluation, not a preview: the same condition logic a future
+   * engine will use decides the outcome. It requests no effects — no message,
+   * webhook, LLM call or cross-domain write — so it is safe to run against a
+   * live configuration at any time.
    */
   async dryRun(
     ctx: RequestContext,
     id: string,
+    dto: DryRunAutomationDto = {},
   ): Promise<LeadFlowAutomationDryRunResponse> {
     const active = await this.resolveActiveContext(ctx);
     const automation = await this.findScopedAutomation(ctx, active, id);
+    const recipe = this.recipeService.getRecipe(automation.recipeKey);
 
-    const trigger =
-      (automation.triggerConfig?.type as string) ?? 'conversation.created';
-    const primaryAction =
-      (automation.actionConfig?.primaryAction as string) ?? 'send_message';
-    const ready =
-      automation.readiness?.state === LeadFlowAutomationReadinessState.Ready;
+    const lifecycle = this.lifecycleFor(automation, active);
+    const blockedByDependency = lifecycle.unmetDependencies.length > 0;
+
+    const evaluation = this.evaluationService.evaluate(
+      automation,
+      recipe,
+      dto,
+    );
+
+    const { run } = await this.runService.recordDryRun(
+      ctx,
+      automation,
+      recipe,
+      evaluation,
+      { blockedByDependency },
+    );
 
     return {
       automationId: automation.id,
-      placeholder: true,
-      wouldTrigger: ready,
-      note: 'Simulação sem efeitos colaterais. Nenhuma mensagem, webhook ou IA é executada.',
-      simulatedTrigger: trigger,
-      simulatedActions: [primaryAction],
+      runId: run.id,
+      wouldAct: evaluation.wouldAct,
+      status: evaluation.status,
+      skipReason: evaluation.skipReason,
+      blockedByDependency,
+      note: blockedByDependency
+        ? 'Simulação sem efeitos colaterais. Mesmo que as condições passem, esta automação ainda não pode ser executada pela plataforma.'
+        : 'Simulação sem efeitos colaterais. Nenhuma mensagem, webhook ou IA é executada.',
+      simulatedTrigger:
+        (automation.triggerConfig?.type as string) ??
+        recipe?.trigger ??
+        'unknown',
+      plannedActions: evaluation.plannedActions,
+      checks: evaluation.checks,
+      context: evaluation.context as unknown as Record<string, unknown>,
       readiness: automation.readiness ?? {},
       generatedAt: new Date().toISOString(),
     };
