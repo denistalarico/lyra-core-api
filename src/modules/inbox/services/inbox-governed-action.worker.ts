@@ -184,7 +184,9 @@ export class InboxGovernedActionWorker
             CASE action_type
               WHEN 'ensure_contact' THEN 0
               WHEN 'ensure_opportunity' THEN 1
-              ELSE 2
+              WHEN 'reply' THEN 2
+              WHEN 'handoff' THEN 4
+              ELSE 3
             END,
             created_at, id
           FOR UPDATE SKIP LOCKED LIMIT 1`,

@@ -90,7 +90,7 @@ export class AgentDecisionV1Service {
 
 @Injectable()
 export class AgentDecisionPromptBuilder {
-  readonly version = 'leadflow-prompt-compiler-v2';
+  readonly version = 'leadflow-prompt-compiler-v3';
   readonly budgetCharacters = 24_000;
 
   build(input: {
@@ -110,6 +110,8 @@ export class AgentDecisionPromptBuilder {
     companyContext?: unknown;
     companyContextVersion?: number;
     companyContextHash?: string | null;
+    firstAgentReply?: boolean;
+    appointmentHandoffMode?: boolean;
   }) {
     const platformPolicy = [
       'Você produz somente AgentDecision v1 estritamente estruturada.',
@@ -119,18 +121,28 @@ export class AgentDecisionPromptBuilder {
       `Ações que podem ser propostas: ${input.allowedActions.join(', ') || 'nenhuma'}.`,
       'Use somente evidence_refs fornecidas em messages, transcriptions ou images.',
       'Nunca se apresente como humano ou como funcionário real.',
-      'Apresente-se no máximo uma vez e faça disclosure claro de que é assistente virtual.',
+      input.firstAgentReply
+        ? 'Esta é a primeira resposta do agente: apresente-se exatamente uma vez, use agentProfile.name como seu nome quando estiver preenchido e faça disclosure claro de que é assistente virtual.'
+        : 'Esta não é a primeira resposta do agente: não repita apresentação nem disclosure.',
       'Compreenda o histórico antes de perguntar; não repita perguntas nem peça dados já presentes.',
+      'Quando currentInbound.media[].transcription tiver outcome=content e texto não vazio, esse texto é o conteúdo disponível do áudio atual: compreenda-o e nunca diga que não conseguiu identificar o áudio. Só peça texto quando a transcrição estiver vazia, indeterminada ou ausente.',
       'Interprete respostas curtas pelo turno anterior e faça no máximo duas perguntas por mensagem.',
       'Use microvalidações naturais, texto curto de WhatsApp, idioma e tom da conversa.',
       'Não insista após recusa clara. reply pode ser vazio quando não houver resposta útil.',
       'Em handoff, informe apenas que uma pessoa da equipe continuará por este mesmo canal.',
+      ...(input.appointmentHandoffMode
+        ? [
+            'Este Business Mode atende agendamentos de diagnóstico, orçamento ou reunião. Quando o lead confirmar interesse em agendar, proponha handoff=true imediatamente, com handoff_reason curto e não vazio.',
+            'Para esse handoff bastam uma necessidade ou interesse identificável e o canal atual utilizável. Não bloqueie a passagem por falta de orçamento, autoridade decisória ou questionário completo.',
+            'Não afirme que data ou horário já foram confirmados; diga somente que uma pessoa da equipe continuará neste mesmo canal.',
+          ]
+        : []),
       'Nunca invente preço, desconto, horário, disponibilidade, política, garantia, serviço ou link.',
       'Não proponha follow-up: a execução durável de follow-up está desabilitada.',
     ].join('\n');
     const platformLayer = this.layer(
       'platform_policy',
-      'platform-system-policy-v2',
+      'platform-system-policy-v3',
       'trusted',
       platformPolicy,
     );

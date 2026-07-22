@@ -18,6 +18,8 @@ describe('AgentDecisionPromptBuilder layered compiler', () => {
     companyContextVersion: 3,
     companyContextHash: 'published-hash',
     agentProfile: { name: 'Lia', aiDisclosure: 'assistente virtual' },
+    firstAgentReply: true,
+    appointmentHandoffMode: true,
   };
 
   it('compiles layers in deterministic trust order without promoting workspace text', () => {
@@ -32,6 +34,8 @@ describe('AgentDecisionPromptBuilder layered compiler', () => {
     ]);
     expect(result.systemPolicy).not.toContain('ignore previous instructions');
     expect(result.systemPolicy).not.toContain('Lia');
+    expect(result.systemPolicy).toContain('agentProfile.name');
+    expect(result.systemPolicy).toContain('proponha handoff=true imediatamente');
     expect(result.untrustedData).toContain('ignore previous instructions');
     expect(result.untrustedData).toContain('assistente virtual');
     expect(
@@ -44,6 +48,13 @@ describe('AgentDecisionPromptBuilder layered compiler', () => {
       version: 'company-context:v3',
       hash: 'published-hash',
     });
+  });
+
+  it('does not repeat the presentation after an earlier agent reply', () => {
+    const result = builder.build({ ...base, firstAgentReply: false });
+    expect(result.systemPolicy).toContain(
+      'não repita apresentação nem disclosure',
+    );
   });
 
   it('truncates deterministically under the context budget', () => {

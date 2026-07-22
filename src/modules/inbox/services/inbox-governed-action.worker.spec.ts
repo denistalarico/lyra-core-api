@@ -62,4 +62,24 @@ describe('InboxGovernedActionWorker kill switches', () => {
       }),
     );
   });
+
+  it('claims reply and CRM effects before the ownership-changing handoff', async () => {
+    const query = jest.fn().mockResolvedValue([]);
+    const worker = new InboxGovernedActionWorker(
+      {
+        transaction: (callback: (manager: { query: typeof query }) => unknown) =>
+          Promise.resolve(callback({ query })),
+      } as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+
+    await expect(worker.processOnce('worker-test')).resolves.toBeNull();
+    expect(query).toHaveBeenCalledWith(
+      expect.stringMatching(
+        /WHEN 'ensure_contact' THEN 0[\s\S]*WHEN 'ensure_opportunity' THEN 1[\s\S]*WHEN 'reply' THEN 2[\s\S]*WHEN 'handoff' THEN 4[\s\S]*ELSE 3/,
+      ),
+    );
+  });
 });

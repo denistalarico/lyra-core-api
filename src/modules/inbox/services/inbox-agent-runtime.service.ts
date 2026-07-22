@@ -12,6 +12,7 @@ import { Readable } from 'stream';
 import { DataSource, IsNull } from 'typeorm';
 import { FilesService } from '../../../common/files/files.service';
 import type { RequestContext } from '../../../common/context/request-context.interface';
+import { AgencyWorkspaceUserEntity } from '../../agency/entities/agency-settings.entities';
 import { CrmOpportunityEntity } from '../../crm/entities/crm-opportunity.entity';
 import { CrmPipelineEntity } from '../../crm/entities/crm-pipeline.entity';
 import { CrmStageEntity } from '../../crm/entities/crm-stage.entity';
@@ -103,6 +104,76 @@ export function orderContextMessages(messages: InboxMessageEntity[]) {
     if (leftSequence === null && rightSequence !== null) return 1;
     return left.id.localeCompare(right.id);
   });
+}
+
+export function projectConversationEvidence(
+  messages: InboxMessageEntity[],
+  media: InboxMediaAssetEntity[],
+  derivatives: InboxMediaDerivativeEntity[],
+) {
+  const mediaById = new Map(media.map((asset) => [asset.id, asset]));
+  const transcriptions = derivatives
+    .filter(
+      (item) => item.kind === 'transcription' && item.status === 'available',
+    )
+    .flatMap((item) => {
+      const asset = mediaById.get(item.mediaAssetId);
+      if (!asset) return [];
+      return [
+        {
+          assetId: item.mediaAssetId,
+          messageId: asset.messageId,
+          messageEvidenceRef: `message:${asset.messageId}`,
+          evidenceRef: `transcription:${item.mediaAssetId}`,
+          kind: 'transcription',
+          outcome: item.outcome,
+          text: item.content?.slice(0, 4_000) ?? '',
+          language: item.language,
+        },
+      ];
+    });
+  const transcriptionByAssetId = new Map(
+    transcriptions.map((item) => [item.assetId, item]),
+  );
+  const assetsByMessageId = new Map<string, InboxMediaAssetEntity[]>();
+  for (const asset of media) {
+    const current = assetsByMessageId.get(asset.messageId) ?? [];
+    current.push(asset);
+    assetsByMessageId.set(asset.messageId, current);
+  }
+
+  return {
+    messages: messages.map((message) => ({
+      id: message.id,
+      evidenceRef: `message:${message.id}`,
+      direction: message.direction,
+      senderType: message.senderType,
+      type: message.messageType,
+      content: message.content.slice(0, 2_000),
+      occurredAt: message.occurredAt.toISOString(),
+      providerSequence: message.providerSequence,
+      media: (assetsByMessageId.get(message.id) ?? []).map((asset) => ({
+        assetId: asset.id,
+        kind: asset.kind,
+        status: asset.status,
+        transcription: transcriptionByAssetId.get(asset.id) ?? null,
+      })),
+    })),
+    transcriptions,
+  };
+}
+
+export function isAppointmentHandoffMode(
+  template: LeadFlowBusinessModeTemplateEntity | null,
+) {
+  if (!template) return false;
+  const recommendsAppointments = template.recommendedApps.some(
+    (item) => item.key === 'appointments' && item.recommended !== false,
+  );
+  if (recommendsAppointments) return true;
+  return /agend|reuni|diagn[oó]stic|or[cç]amento/i.test(
+    JSON.stringify(template.conversionGoals),
+  );
 }
 
 @Injectable()
@@ -339,29 +410,15 @@ export class InboxAgentRuntimeService {
         : null;
       const effectiveBusinessMode =
         settings?.businessModeKey ?? conversation.businessMode;
-      const messageProjection = orderedMessages.map((message) => ({
-        id: message.id,
-        evidenceRef: `message:${message.id}`,
-        direction: message.direction,
-        type: message.messageType,
-        content: message.content.slice(0, 2_000),
-        occurredAt: message.occurredAt.toISOString(),
-        providerSequence: message.providerSequence,
-      }));
-      const transcriptionProjection: Array<Record<string, unknown>> =
-        derivatives
-          .filter(
-            (item) =>
-              item.kind === 'transcription' && item.status === 'available',
-          )
-          .map((item) => ({
-            assetId: item.mediaAssetId,
-            evidenceRef: `transcription:${item.mediaAssetId}`,
-            kind: 'transcription',
-            outcome: item.outcome,
-            text: item.content?.slice(0, 4_000) ?? '',
-            language: item.language,
-          }));
+      const projectedEvidence = projectConversationEvidence(
+        orderedMessages,
+        media,
+        derivatives,
+      );
+      const messageProjection = projectedEvidence.messages;
+      const transcriptionProjection: Array<Record<string, unknown>> = [
+        ...projectedEvidence.transcriptions,
+      ];
       if (
         !this.provider.supportsMultimodal() &&
         this.config.visionFallbackEnabled
@@ -408,10 +465,22 @@ export class InboxAgentRuntimeService {
           evidenceRef,
           mimeType,
         })),
-        businessModeInstruction: businessModeTemplate?.agentPromptTemplate ?? {
-          key: effectiveBusinessMode,
-        },
+        businessModeInstruction: businessModeTemplate
+          ? {
+              prompt: businessModeTemplate.agentPromptTemplate,
+              conversionGoals: businessModeTemplate.conversionGoals,
+              qualificationFields: businessModeTemplate.qualificationFields,
+              handoffRules: businessModeTemplate.handoffRules,
+              recommendedApps: businessModeTemplate.recommendedApps,
+            }
+          : { key: effectiveBusinessMode },
         businessModeVersion: businessModeTemplate?.version ?? 1,
+        firstAgentReply: !messageProjection.some(
+          (message) =>
+            message.direction === 'outbound' && message.senderType === 'agent',
+        ),
+        appointmentHandoffMode:
+          isAppointmentHandoffMode(businessModeTemplate),
         agentProfile:
           version?.snapshot && typeof version.snapshot === 'object'
             ? ((version.snapshot as Record<string, unknown>).agentIdentity ??
@@ -590,6 +659,17 @@ export class InboxAgentRuntimeService {
               [batch.tenantId, batch.workspaceId, identityDigits],
             )
           : [];
+        const activeOwners = await manager
+          .getRepository(AgencyWorkspaceUserEntity)
+          .find({
+            where: {
+              tenantId: batch.tenantId,
+              workspaceId: batch.workspaceId,
+              role: 'owner',
+              status: 'active',
+            },
+            take: 2,
+          });
         const decisionId = randomUUID();
         await manager.query(
           `INSERT INTO inbox_autonomy_controls (tenant_id,workspace_id)
@@ -630,7 +710,8 @@ export class InboxAgentRuntimeService {
           humanRouteConfigured: Boolean(
             channel.defaultAssignedUserId ||
             (settings?.handoffOverrides &&
-              Object.keys(settings.handoffOverrides).length),
+              Object.keys(settings.handoffOverrides).length) ||
+            (activeOwners.length === 1 && activeOwners[0].userId),
           ),
           opportunityDefaultsResolved: Boolean(
             defaultPipelines.length === 1 && initialStage,

@@ -1,7 +1,9 @@
 import { ConflictException } from '@nestjs/common';
 import {
   InboxAgentRuntimeService,
+  isAppointmentHandoffMode,
   orderContextMessages,
+  projectConversationEvidence,
 } from './inbox-agent-runtime.service';
 import { ConversationOwnershipService } from './conversation-ownership.service';
 import {
@@ -93,6 +95,66 @@ describe('InboxAgentRuntimeService safety contracts', () => {
       'b',
       'c',
     ]);
+  });
+
+  it('associates an available transcription with its audio message', () => {
+    const occurredAt = new Date('2026-07-21T12:00:00.000Z');
+    const projected = projectConversationEvidence(
+      [
+        {
+          id: 'message-1',
+          direction: 'inbound',
+          senderType: 'contact',
+          messageType: 'media',
+          content: '[audio]',
+          occurredAt,
+          providerSequence: '1',
+        },
+      ] as never,
+      [
+        {
+          id: 'asset-1',
+          messageId: 'message-1',
+          kind: 'audio',
+          status: 'available',
+        },
+      ] as never,
+      [
+        {
+          mediaAssetId: 'asset-1',
+          kind: 'transcription',
+          status: 'available',
+          outcome: 'content',
+          content: 'Quero marcar uma conversa.',
+          language: 'pt',
+        },
+      ] as never,
+    );
+
+    expect(projected.transcriptions[0]).toMatchObject({
+      messageId: 'message-1',
+      messageEvidenceRef: 'message:message-1',
+      text: 'Quero marcar uma conversa.',
+    });
+    expect(projected.messages[0].media[0].transcription).toMatchObject({
+      evidenceRef: 'transcription:asset-1',
+      outcome: 'content',
+    });
+  });
+
+  it('detects appointment handoff modes from apps or conversion goals', () => {
+    expect(
+      isAppointmentHandoffMode({
+        recommendedApps: [{ key: 'appointments', recommended: true }],
+        conversionGoals: {},
+      } as never),
+    ).toBe(true);
+    expect(
+      isAppointmentHandoffMode({
+        recommendedApps: [],
+        conversionGoals: { primary: 'Agendar diagnóstico' },
+      } as never),
+    ).toBe(true);
   });
 
   it('publishes runtime transitions with retry-safe batch identity', async () => {
