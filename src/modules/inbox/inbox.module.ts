@@ -78,6 +78,7 @@ import { InboxGovernedActionWorker } from './services/inbox-governed-action.work
 import { InboxAutonomyAdminService } from './services/inbox-autonomy-admin.service';
 import { InboxAutonomyAdminController } from './inbox-autonomy-admin.controller';
 import { ConversationPlaybookStateService } from './runtime/conversation-playbook-state.service';
+import { CrmModule } from '../crm/crm.module';
 
 @Module({
   imports: [
@@ -86,6 +87,7 @@ import { ConversationPlaybookStateService } from './runtime/conversation-playboo
     NotificationsModule,
     FilesModule,
     LeadFlowAgentsModule,
+    CrmModule,
     TypeOrmModule.forFeature(
       [
         InboxChannelEntity,

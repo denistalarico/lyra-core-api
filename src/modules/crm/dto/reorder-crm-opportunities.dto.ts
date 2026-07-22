@@ -1,4 +1,10 @@
-import { IsArray, IsInt, IsUUID, ValidateNested } from 'class-validator';
+import {
+  IsArray,
+  IsInt,
+  IsOptional,
+  IsUUID,
+  ValidateNested,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class ReorderCrmOpportunityItemDto {
@@ -10,6 +16,10 @@ export class ReorderCrmOpportunityItemDto {
 
   @IsInt()
   sortOrder!: number;
+
+  @IsOptional()
+  @IsInt()
+  expectedVersion?: number;
 }
 
 export class ReorderCrmOpportunitiesDto {

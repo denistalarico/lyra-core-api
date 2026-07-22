@@ -32,6 +32,10 @@ import { CrmOpportunityEventEntity } from './entities/crm-opportunity-event.enti
 import { CrmOpportunityTagEntity } from './entities/crm-opportunity-tag.entity';
 import { CrmTagEntity } from './entities/crm-tag.entity';
 import { SalesNotificationPublisher } from './sales-notification.publisher';
+import {
+  CrmCommandOptions,
+  CrmOpportunityCommandService,
+} from './services/crm-opportunity-command.service';
 
 export type CrmOpportunityFilters = {
   pipelineId?: string;
@@ -69,6 +73,7 @@ export class CrmService {
 
     @InjectRepository(ContactEntity, 'agency')
     private readonly contactsRepository: Repository<ContactEntity>,
+    private readonly opportunityCommands: CrmOpportunityCommandService,
     private readonly salesNotificationPublisher: SalesNotificationPublisher,
   ) {}
 
@@ -311,6 +316,7 @@ export class CrmService {
   async createOpportunity(
     ctx: RequestContext,
     dto: CreateCrmOpportunityDto,
+    options: CrmCommandOptions = {},
   ): Promise<CrmOpportunityEntity> {
     const tenantId = this.requireTenantId(ctx);
     const workspaceId = this.requireWorkspaceId(ctx);
@@ -326,6 +332,18 @@ export class CrmService {
     if (stage.pipelineId !== pipeline.id) {
       throw new BadRequestException(
         'Stage does not belong to the selected pipeline.',
+      );
+    }
+
+    const stageStatus =
+      stage.isWonStage || stage.type === 'won'
+        ? 'won'
+        : stage.isLostStage || stage.type === 'lost'
+          ? 'lost'
+          : 'open';
+    if (dto.status !== undefined && dto.status !== stageStatus) {
+      throw new BadRequestException(
+        'Opportunity status must match the selected stage lifecycle.',
       );
     }
 
@@ -345,7 +363,7 @@ export class CrmService {
       description: dto.description ?? null,
       valueAmount: dto.valueAmount ?? null,
       currency: dto.currency ?? 'BRL',
-      status: dto.status ?? 'open',
+      status: stageStatus,
       priority: dto.priority ?? 'normal',
       source: dto.source ?? 'manual',
       businessMode: dto.businessMode ?? pipeline.businessMode ?? 'general',
@@ -356,6 +374,8 @@ export class CrmService {
       nextFollowUpAt: this.toDateOrNull(dto.nextFollowUpAt),
       lastActivityAt: null,
       lostReason: dto.lostReason ?? null,
+      wonAt: stageStatus === 'won' ? new Date() : null,
+      lostAt: stageStatus === 'lost' ? new Date() : null,
       cardColor: dto.cardColor ?? null,
       sortOrder:
         dto.sortOrder ??
@@ -367,14 +387,11 @@ export class CrmService {
       metadata: this.stampContext(ctx, dto.metadata ?? {}),
     });
 
-    const saved = await this.opportunitiesRepository.save(opportunity);
-
-    await this.createOpportunityEvent(ctx, saved.id, {
-      actorType: 'user',
-      eventType: 'opportunity_created',
-      title: 'Oportunidade criada',
-      afterData: { opportunityId: saved.id, title: saved.title },
-    });
+    const saved = await this.opportunityCommands.createOpportunity(
+      ctx,
+      opportunity,
+      options,
+    );
 
     if (saved.assignedUserId) {
       await this.salesNotificationPublisher.publishOpportunityAssigned({
@@ -413,31 +430,24 @@ export class CrmService {
     ctx: RequestContext,
     id: string,
     dto: PatchCrmOpportunityDto,
+    options: CrmCommandOptions = {},
   ): Promise<CrmOpportunityEntity> {
     const opportunity = await this.getOpportunity(ctx, id);
     const previousAssignedUserId = opportunity.assignedUserId;
 
-    const pipelineId = dto.pipelineId ?? opportunity.pipelineId;
-    const stageId = dto.stageId ?? opportunity.stageId;
-
     if (dto.pipelineId !== undefined || dto.stageId !== undefined) {
-      await this.validatePipelineStage(ctx, pipelineId, stageId);
+      throw new BadRequestException(
+        'Use the dedicated stage command to move an opportunity. Pipeline transfer is not available.',
+      );
+    }
+    if (dto.status !== undefined) {
+      throw new BadRequestException(
+        'Use the dedicated status command to change an opportunity status.',
+      );
     }
 
     await this.validateContactForOpportunity(ctx, dto.contactId);
 
-    if (dto.pipelineId !== undefined) opportunity.pipelineId = dto.pipelineId;
-    if (dto.stageId !== undefined) {
-      opportunity.stageId = dto.stageId;
-
-      if (dto.sortOrder === undefined) {
-        opportunity.sortOrder = await this.getNextOpportunitySortOrder(
-          ctx,
-          pipelineId,
-          dto.stageId,
-        );
-      }
-    }
     if (dto.contactId !== undefined) opportunity.contactId = dto.contactId;
     if (dto.contactName !== undefined)
       opportunity.contactName = dto.contactName;
@@ -453,8 +463,6 @@ export class CrmService {
     if (dto.valueAmount !== undefined)
       opportunity.valueAmount = dto.valueAmount;
     if (dto.currency !== undefined) opportunity.currency = dto.currency;
-    if (dto.status !== undefined)
-      this.applyOpportunityStatus(opportunity, dto.status, dto.lostReason);
     if (dto.priority !== undefined) {
       opportunity.priority = dto.priority;
       opportunity.businessContext = this.markHumanBusinessContextFields(
@@ -513,14 +521,14 @@ export class CrmService {
     if (dto.metadata !== undefined)
       opportunity.metadata = this.stampContext(ctx, dto.metadata);
 
-    const saved = await this.opportunitiesRepository.save(opportunity);
-
-    await this.createOpportunityEvent(ctx, saved.id, {
-      actorType: 'user',
-      eventType: 'opportunity_updated',
-      title: 'Oportunidade atualizada',
-      afterData: { opportunityId: saved.id },
-    });
+    const saved = await this.opportunityCommands.updateOpportunity(
+      ctx,
+      opportunity,
+      {
+        ...options,
+        expectedVersion: dto.expectedVersion ?? options.expectedVersion,
+      },
+    );
 
     if (
       dto.assignedUserId !== undefined &&
@@ -542,73 +550,62 @@ export class CrmService {
     ctx: RequestContext,
     id: string,
     dto: PatchCrmOpportunityStageDto,
+    options: CrmCommandOptions = {},
   ): Promise<CrmOpportunityEntity> {
-    const opportunity = await this.getOpportunity(ctx, id);
-    const previousStageId = opportunity.stageId;
+    const previous = await this.getOpportunity(ctx, id);
+    const previousStageId = previous.stageId;
     const stage = await this.getStage(ctx, dto.stageId);
-
-    if (stage.pipelineId !== opportunity.pipelineId) {
+    if (stage.pipelineId !== previous.pipelineId) {
       throw new BadRequestException(
         'Stage does not belong to this opportunity pipeline.',
       );
     }
-
-    if (previousStageId === stage.id) {
-      return opportunity;
-    }
-
-    opportunity.stageId = stage.id;
-    opportunity.sortOrder = await this.getNextOpportunitySortOrder(
+    const result = await this.opportunityCommands.moveStage(
       ctx,
-      opportunity.pipelineId,
-      stage.id,
+      id,
+      dto.stageId,
+      {
+        ...options,
+        expectedVersion: dto.expectedVersion ?? options.expectedVersion,
+        sortOrder: dto.sortOrder,
+        beforeOpportunityId: dto.beforeOpportunityId,
+      },
     );
-
-    if (stage.isWonStage || stage.type === 'won') {
-      this.applyOpportunityStatus(opportunity, 'won');
-    }
-
-    if (stage.isLostStage || stage.type === 'lost') {
-      this.applyOpportunityStatus(opportunity, 'lost');
-    }
-
-    const saved = await this.opportunitiesRepository.save(opportunity);
-
-    const event = await this.createOpportunityEvent(ctx, saved.id, {
-      actorType: 'user',
-      eventType: 'stage_changed',
-      title: 'Etapa alterada',
-      beforeData: { stageId: previousStageId },
-      afterData: { stageId: saved.stageId, status: saved.status },
-    });
-
     if (
-      stage.isWonStage ||
-      stage.isLostStage ||
-      stage.type === 'won' ||
-      stage.type === 'lost'
+      result.event &&
+      (stage.type === 'won' ||
+        stage.type === 'lost' ||
+        stage.isWonStage ||
+        stage.isLostStage)
     ) {
       await this.salesNotificationPublisher.publishOpportunityStageChanged({
-        resource: saved,
-        event,
+        resource: result.opportunity,
+        event: result.event,
         actorUserId: this.getUserId(ctx),
-        occurredAt: event.createdAt,
+        occurredAt: result.event.createdAt,
         previousStageId,
-        stageId: saved.stageId,
+        stageId: result.opportunity.stageId,
       });
     }
-
-    return saved;
+    return result.opportunity;
   }
 
   async patchOpportunityStatus(
     ctx: RequestContext,
     id: string,
     dto: PatchCrmOpportunityStatusDto,
+    options: CrmCommandOptions = {},
   ): Promise<CrmOpportunityEntity> {
-    const opportunity = await this.getOpportunity(ctx, id);
-    this.applyOpportunityStatus(opportunity, dto.status, dto.lostReason);
-    return this.opportunitiesRepository.save(opportunity);
+    return this.opportunityCommands.changeStatus(
+      ctx,
+      id,
+      dto.status,
+      dto.lostReason,
+      {
+        ...options,
+        expectedVersion: dto.expectedVersion ?? options.expectedVersion,
+      },
+    );
   }
 
   async deleteOpportunity(
@@ -617,7 +614,7 @@ export class CrmService {
   ): Promise<{ deleted: true }> {
     const opportunity = await this.getOpportunity(ctx, id);
     opportunity.deletedAt = new Date();
-    await this.opportunitiesRepository.save(opportunity);
+    await this.opportunityCommands.updateOpportunity(ctx, opportunity);
     return { deleted: true };
   }
 
@@ -811,16 +808,7 @@ export class CrmService {
   ): Promise<CrmOpportunityEntity> {
     const opportunity = await this.getOpportunity(ctx, id);
     opportunity.cardColor = dto.cardColor ?? null;
-    const saved = await this.opportunitiesRepository.save(opportunity);
-
-    await this.createOpportunityEvent(ctx, id, {
-      actorType: 'user',
-      eventType: 'card_color_changed',
-      title: 'Cor do card alterada',
-      afterData: { cardColor: saved.cardColor },
-    });
-
-    return saved;
+    return this.opportunityCommands.updateOpportunity(ctx, opportunity);
   }
 
   async patchOpportunityFollow(
@@ -839,20 +827,7 @@ export class CrmService {
       opportunity.followSendAutomatically = dto.followSendAutomatically;
     }
 
-    const saved = await this.opportunitiesRepository.save(opportunity);
-
-    await this.createOpportunityEvent(ctx, id, {
-      actorType: 'user',
-      eventType: 'follow_updated',
-      title: 'Follow-up atualizado',
-      afterData: {
-        followMode: saved.followMode,
-        nextFollowUpAt: saved.nextFollowUpAt,
-        followSendAutomatically: saved.followSendAutomatically,
-      },
-    });
-
-    return saved;
+    return this.opportunityCommands.updateOpportunity(ctx, opportunity);
   }
 
   async patchOpportunityVisibility(
@@ -862,7 +837,7 @@ export class CrmService {
   ): Promise<CrmOpportunityEntity> {
     const opportunity = await this.getOpportunity(ctx, id);
     opportunity.visibility = dto.visibility;
-    return this.opportunitiesRepository.save(opportunity);
+    return this.opportunityCommands.updateOpportunity(ctx, opportunity);
   }
 
   async patchStageFold(
@@ -893,45 +868,13 @@ export class CrmService {
   async reorderOpportunities(
     ctx: RequestContext,
     dto: ReorderCrmOpportunitiesDto,
+    options: CrmCommandOptions = {},
   ): Promise<CrmOpportunityEntity[]> {
-    const updated: CrmOpportunityEntity[] = [];
-
-    for (const item of dto.opportunities) {
-      const opportunity = await this.getOpportunity(ctx, item.id);
-      const previousStageId = opportunity.stageId;
-      const stage = await this.getStage(ctx, item.stageId);
-
-      if (stage.pipelineId !== opportunity.pipelineId) {
-        throw new BadRequestException(
-          'Stage does not belong to this opportunity pipeline.',
-        );
-      }
-
-      opportunity.stageId = item.stageId;
-      opportunity.sortOrder = item.sortOrder;
-
-      if (stage.isWonStage || stage.type === 'won') {
-        this.applyOpportunityStatus(opportunity, 'won');
-      }
-
-      if (stage.isLostStage || stage.type === 'lost') {
-        this.applyOpportunityStatus(opportunity, 'lost');
-      }
-
-      const saved = await this.opportunitiesRepository.save(opportunity);
-      updated.push(saved);
-
-      if (previousStageId !== saved.stageId) {
-        await this.createOpportunityEvent(ctx, saved.id, {
-          actorType: 'user',
-          eventType: 'stage_changed',
-          title: 'Etapa alterada',
-          beforeData: { stageId: previousStageId },
-          afterData: { stageId: saved.stageId, status: saved.status },
-        });
-      }
-    }
-
+    const updated = await this.opportunityCommands.reorder(
+      ctx,
+      dto.opportunities,
+      options,
+    );
     return updated.sort((first, second) => {
       if (first.stageId !== second.stageId) {
         return first.stageId.localeCompare(second.stageId);
@@ -961,15 +904,15 @@ export class CrmService {
     opportunityId: string,
     dto: CreateCrmOpportunityEventDto,
   ): Promise<CrmOpportunityEventEntity> {
-    const tenantId = this.requireTenantId(ctx);
-    const workspaceId = this.requireWorkspaceId(ctx);
-
-    const event = this.opportunityEventsRepository.create({
-      tenantId,
-      workspaceId,
-      opportunityId,
-      actorType: dto.actorType ?? 'user',
-      actorUserId: dto.actorUserId ?? this.getUserId(ctx),
+    return this.opportunityCommands.recordEvent(ctx, opportunityId, {
+      actor: {
+        type: (dto.actorType ?? 'user') as
+          | 'user'
+          | 'ai'
+          | 'automation'
+          | 'system',
+        userId: dto.actorUserId ?? this.getUserId(ctx),
+      },
       eventType: dto.eventType,
       title: dto.title,
       description: dto.description ?? null,
@@ -979,8 +922,6 @@ export class CrmService {
       confidence: dto.confidence ?? null,
       metadata: dto.metadata ?? {},
     });
-
-    return this.opportunityEventsRepository.save(event);
   }
 
   private slugify(value: string): string {

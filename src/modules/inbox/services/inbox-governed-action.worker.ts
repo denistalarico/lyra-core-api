@@ -3,6 +3,7 @@ import {
   Logger,
   OnModuleDestroy,
   OnModuleInit,
+  Optional,
 } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, EntityManager, IsNull } from 'typeorm';
@@ -27,6 +28,7 @@ import { InboxRuntimeConfigService } from '../runtime/inbox-runtime-config.servi
 import { resolveDefaultPipelineForBusinessMode } from '../runtime/inbox-crm-target-resolver';
 import { WhatsAppOutboundService } from '../channels/whatsapp/services/whatsapp-outbound.service';
 import { ConversationOwnershipService } from './conversation-ownership.service';
+import { CrmOpportunityCommandService } from '../../crm/services/crm-opportunity-command.service';
 
 @Injectable()
 export class InboxGovernedActionWorker
@@ -41,6 +43,8 @@ export class InboxGovernedActionWorker
     private readonly config: InboxRuntimeConfigService,
     private readonly outbound: WhatsAppOutboundService,
     private readonly ownership: ConversationOwnershipService,
+    @Optional()
+    private readonly opportunityCommands?: CrmOpportunityCommandService,
   ) {}
 
   onModuleInit(): void {
@@ -519,7 +523,26 @@ export class InboxGovernedActionWorker
             governedActionId: action.id,
           },
         };
-        await manager.getRepository(CrmOpportunityEntity).save(existing);
+        if (this.opportunityCommands) {
+          await this.opportunityCommands.updateWithinTransaction(
+            manager,
+            {
+              tenantId: action.tenantId,
+              workspaceId: action.workspaceId,
+            },
+            existing,
+            {
+              actor: { type: 'automation' },
+              idempotencyKey: `governed:${action.id}:opportunity-reused`,
+              correlationId: action.id,
+              causationId: action.decisionId,
+              policyVersion: action.policyVersion,
+              reason: 'governed_autonomy',
+            },
+          );
+        } else {
+          await manager.getRepository(CrmOpportunityEntity).save(existing);
+        }
         conversation.opportunityId = existing.id;
         linkPlaybookProgress(conversation, { opportunityId: existing.id });
         await manager.getRepository(InboxConversationEntity).save(conversation);
@@ -636,12 +659,39 @@ export class InboxGovernedActionWorker
           followMode: 'manual',
           followMessage: null,
           followSendAutomatically: false,
+          rowVersion: 1,
           metadata: {
             createdBy: 'governed_autonomy',
             conversionKey: readConversionKey(conversation.metadata),
             sourceProvenance: 'canonical_inbound_channel',
           },
         });
+      if (this.opportunityCommands) {
+        await this.opportunityCommands.appendHistory(
+          manager,
+          {
+            tenantId: action.tenantId,
+            workspaceId: action.workspaceId,
+          },
+          {
+            opportunity,
+            actor: { type: 'automation' },
+            eventType: 'opportunity_created',
+            title: 'Oportunidade criada por automação governada',
+            afterData: {
+              opportunityId: opportunity.id,
+              stageId: opportunity.stageId,
+              status: opportunity.status,
+              rowVersion: opportunity.rowVersion,
+            },
+            idempotencyKey: `governed:${action.id}:opportunity-created`,
+            correlationId: action.id,
+            causationId: action.decisionId,
+            policyVersion: action.policyVersion,
+            reason: 'governed_autonomy',
+          },
+        );
+      }
       conversation.opportunityId = opportunity.id;
       linkPlaybookProgress(conversation, { opportunityId: opportunity.id });
       await manager.getRepository(InboxConversationEntity).save(conversation);
@@ -845,7 +895,26 @@ export class InboxGovernedActionWorker
       } else {
         throw new Error('automatic_crm_action_not_supported');
       }
-      await manager.getRepository(CrmOpportunityEntity).save(opportunity);
+      if (this.opportunityCommands) {
+        await this.opportunityCommands.updateWithinTransaction(
+          manager,
+          {
+            tenantId: action.tenantId,
+            workspaceId: action.workspaceId,
+          },
+          opportunity,
+          {
+            actor: { type: 'automation' },
+            idempotencyKey: `governed:${action.id}:crm`,
+            correlationId: action.id,
+            causationId: action.decisionId,
+            policyVersion: action.policyVersion,
+            reason: 'governed_autonomy',
+          },
+        );
+      } else {
+        await manager.getRepository(CrmOpportunityEntity).save(opportunity);
+      }
       await manager.getRepository(InboxConversationEventEntity).save({
         id: action.auditRef,
         tenantId: action.tenantId,

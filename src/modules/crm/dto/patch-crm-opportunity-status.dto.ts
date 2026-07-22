@@ -1,4 +1,4 @@
-import { IsIn, IsOptional, IsString } from 'class-validator';
+import { IsIn, IsInt, IsOptional, IsString } from 'class-validator';
 
 export class PatchCrmOpportunityStatusDto {
   @IsIn(['open', 'won', 'lost', 'archived'])
@@ -7,4 +7,8 @@ export class PatchCrmOpportunityStatusDto {
   @IsOptional()
   @IsString()
   lostReason?: string | null;
+
+  @IsOptional()
+  @IsInt()
+  expectedVersion?: number;
 }

@@ -1,0 +1,865 @@
+import { createHash, randomUUID } from 'node:crypto';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { InjectDataSource } from '@nestjs/typeorm';
+import { DataSource, EntityManager, IsNull, Raw } from 'typeorm';
+import { RequestContext } from '../../../common/context/request-context.interface';
+import { InboxDomainOutboxEntity } from '../../inbox/entities/inbox-domain-outbox.entity';
+import { CrmOpportunityEventEntity } from '../entities/crm-opportunity-event.entity';
+import { CrmOpportunityEntity } from '../entities/crm-opportunity.entity';
+import { CrmStageEntity } from '../entities/crm-stage.entity';
+
+export type CrmCommandActor = {
+  type: 'user' | 'ai' | 'automation' | 'system';
+  userId?: string | null;
+  agentId?: string | null;
+};
+
+export type CrmCommandOptions = {
+  actor?: CrmCommandActor;
+  expectedVersion?: number;
+  idempotencyKey?: string;
+  correlationId?: string;
+  causationId?: string | null;
+  policyVersion?: string | null;
+  reason?: string | null;
+  metadata?: Record<string, unknown>;
+};
+
+export type CrmHistoryInput = CrmCommandOptions & {
+  opportunity: CrmOpportunityEntity;
+  eventType: string;
+  title: string;
+  description?: string | null;
+  beforeData?: Record<string, unknown>;
+  afterData?: Record<string, unknown>;
+  confidence?: number | string | null;
+};
+
+const MUTABLE_FIELDS: Array<keyof CrmOpportunityEntity> = [
+  'contactId',
+  'contactName',
+  'contactEmail',
+  'contactPhone',
+  'inboxConversationId',
+  'title',
+  'description',
+  'valueAmount',
+  'currency',
+  'priority',
+  'source',
+  'businessMode',
+  'operationalStatus',
+  'businessContext',
+  'assignedUserId',
+  'expectedCloseDate',
+  'nextFollowUpAt',
+  'lastActivityAt',
+  'lostReason',
+  'cardColor',
+  'sortOrder',
+  'visibility',
+  'followMode',
+  'followMessage',
+  'followSendAutomatically',
+  'metadata',
+  'deletedAt',
+];
+
+@Injectable()
+export class CrmOpportunityCommandService {
+  constructor(
+    @InjectDataSource('agency') private readonly dataSource: DataSource,
+  ) {}
+
+  async createOpportunity(
+    ctx: RequestContext,
+    opportunity: CrmOpportunityEntity,
+    options: CrmCommandOptions = {},
+  ): Promise<CrmOpportunityEntity> {
+    return this.dataSource.transaction(async (manager) => {
+      const replay = await this.findReplay(
+        manager,
+        ctx,
+        options.idempotencyKey,
+      );
+      if (replay) return replay;
+
+      opportunity.rowVersion = 1;
+      const saved = await manager
+        .getRepository(CrmOpportunityEntity)
+        .save(opportunity);
+      await this.appendHistory(manager, ctx, {
+        ...options,
+        opportunity: saved,
+        eventType: 'opportunity_created',
+        title: 'Oportunidade criada',
+        afterData: this.projection(saved),
+      });
+      return saved;
+    });
+  }
+
+  async recordEvent(
+    ctx: RequestContext,
+    opportunityId: string,
+    input: Omit<CrmHistoryInput, 'opportunity'>,
+  ): Promise<CrmOpportunityEventEntity> {
+    return this.dataSource.transaction(async (manager) => {
+      const opportunity = await this.findScopedOpportunity(
+        manager,
+        ctx,
+        opportunityId,
+        false,
+      );
+      return this.appendHistory(manager, ctx, { ...input, opportunity });
+    });
+  }
+
+  async updateOpportunity(
+    ctx: RequestContext,
+    candidate: CrmOpportunityEntity,
+    options: CrmCommandOptions = {},
+  ): Promise<CrmOpportunityEntity> {
+    return this.dataSource.transaction(async (manager) => {
+      const replay = await this.findReplay(
+        manager,
+        ctx,
+        options.idempotencyKey,
+      );
+      if (replay) return replay;
+
+      const locked = await this.findScopedOpportunity(
+        manager,
+        ctx,
+        candidate.id,
+        true,
+      );
+      this.assertVersion(locked, options.expectedVersion);
+      const before = this.projection(locked);
+      for (const field of MUTABLE_FIELDS) {
+        (locked[field] as unknown) = candidate[field];
+      }
+      locked.rowVersion += 1;
+      const saved = await manager
+        .getRepository(CrmOpportunityEntity)
+        .save(locked);
+      await this.appendHistory(manager, ctx, {
+        ...options,
+        opportunity: saved,
+        eventType: 'opportunity_updated',
+        title: 'Oportunidade atualizada',
+        beforeData: before,
+        afterData: this.projection(saved),
+      });
+      return saved;
+    });
+  }
+
+  async moveStage(
+    ctx: RequestContext,
+    opportunityId: string,
+    stageId: string,
+    options: CrmCommandOptions & {
+      sortOrder?: number;
+      beforeOpportunityId?: string | null;
+    } = {},
+  ): Promise<{
+    opportunity: CrmOpportunityEntity;
+    event: CrmOpportunityEventEntity | null;
+  }> {
+    return this.dataSource.transaction((manager) =>
+      this.moveStageWithinTransaction(
+        manager,
+        ctx,
+        opportunityId,
+        stageId,
+        options,
+      ),
+    );
+  }
+
+  async moveStageWithinTransaction(
+    manager: EntityManager,
+    ctx: RequestContext,
+    opportunityId: string,
+    stageId: string,
+    options: CrmCommandOptions & {
+      sortOrder?: number;
+      beforeOpportunityId?: string | null;
+    } = {},
+  ): Promise<{
+    opportunity: CrmOpportunityEntity;
+    event: CrmOpportunityEventEntity | null;
+  }> {
+    const replay = await this.findReplay(manager, ctx, options.idempotencyKey);
+    if (replay) return { opportunity: replay, event: null };
+
+    const opportunity = await this.findScopedOpportunity(
+      manager,
+      ctx,
+      opportunityId,
+      true,
+    );
+    this.assertVersion(opportunity, options.expectedVersion);
+    const stage = await this.findScopedStage(manager, ctx, stageId);
+    if (stage.pipelineId !== opportunity.pipelineId) {
+      throw new BadRequestException(
+        'Stage does not belong to this opportunity pipeline.',
+      );
+    }
+
+    const previousStageId = opportunity.stageId;
+    const previousStatus = opportunity.status;
+    const previousSortOrder = opportunity.sortOrder;
+    const nextStatus = this.statusForStage(stage);
+    const stageChanged = previousStageId !== stage.id;
+    const statusChanged = previousStatus !== nextStatus;
+    if (
+      !stageChanged &&
+      !statusChanged &&
+      options.sortOrder === undefined &&
+      options.beforeOpportunityId === undefined
+    ) {
+      return { opportunity, event: null };
+    }
+
+    opportunity.stageId = stage.id;
+    opportunity.status = nextStatus;
+    opportunity.sortOrder =
+      options.sortOrder ??
+      (await this.resolveMoveSortOrder(
+        manager,
+        ctx,
+        opportunity,
+        stage.id,
+        options.beforeOpportunityId,
+      ));
+    this.applyTerminalTimestamps(opportunity, nextStatus, previousStatus);
+    opportunity.rowVersion += 1;
+    const saved = await manager
+      .getRepository(CrmOpportunityEntity)
+      .save(opportunity);
+
+    let event: CrmOpportunityEventEntity | null = null;
+    if (stageChanged) {
+      event = await this.appendHistory(manager, ctx, {
+        ...options,
+        opportunity: saved,
+        eventType: 'stage_changed',
+        title: 'Etapa alterada',
+        beforeData: { stageId: previousStageId, status: previousStatus },
+        afterData: { stageId: saved.stageId, status: saved.status },
+      });
+    }
+    if (statusChanged) {
+      await this.appendStatusEvents(
+        manager,
+        ctx,
+        saved,
+        previousStatus,
+        options,
+      );
+    }
+    if (!stageChanged && !statusChanged) {
+      event = await this.appendHistory(manager, ctx, {
+        ...options,
+        opportunity: saved,
+        eventType: 'opportunity_updated',
+        title: 'Ordem da oportunidade alterada',
+        beforeData: { sortOrder: previousSortOrder },
+        afterData: { sortOrder: saved.sortOrder },
+      });
+    }
+    return { opportunity: saved, event };
+  }
+
+  async changeStatus(
+    ctx: RequestContext,
+    opportunityId: string,
+    status: string,
+    lostReason: string | null | undefined,
+    options: CrmCommandOptions = {},
+  ): Promise<CrmOpportunityEntity> {
+    return this.dataSource.transaction((manager) =>
+      this.changeStatusWithinTransaction(
+        manager,
+        ctx,
+        opportunityId,
+        status,
+        lostReason,
+        options,
+      ),
+    );
+  }
+
+  async changeStatusWithinTransaction(
+    manager: EntityManager,
+    ctx: RequestContext,
+    opportunityId: string,
+    status: string,
+    lostReason: string | null | undefined,
+    options: CrmCommandOptions = {},
+  ): Promise<CrmOpportunityEntity> {
+    const replay = await this.findReplay(manager, ctx, options.idempotencyKey);
+    if (replay) return replay;
+
+    const opportunity = await this.findScopedOpportunity(
+      manager,
+      ctx,
+      opportunityId,
+      true,
+    );
+    this.assertVersion(opportunity, options.expectedVersion);
+    const previousStatus = opportunity.status;
+    const previousStageId = opportunity.stageId;
+    let targetStage: CrmStageEntity | null = null;
+    if (status === 'won' || status === 'lost') {
+      targetStage = await this.uniqueLifecycleStage(
+        manager,
+        ctx,
+        opportunity.pipelineId,
+        status,
+      );
+    } else if (status === 'open') {
+      const current = await this.findScopedStage(
+        manager,
+        ctx,
+        opportunity.stageId,
+      );
+      if (this.statusForStage(current) !== 'open') {
+        targetStage = await this.firstOpenStage(
+          manager,
+          ctx,
+          opportunity.pipelineId,
+        );
+      }
+    }
+
+    opportunity.status = status;
+    if (targetStage) {
+      opportunity.stageId = targetStage.id;
+      opportunity.sortOrder = await this.nextSortOrder(
+        manager,
+        ctx,
+        opportunity.pipelineId,
+        targetStage.id,
+      );
+    }
+    if (lostReason !== undefined) opportunity.lostReason = lostReason;
+    this.applyTerminalTimestamps(opportunity, status, previousStatus);
+    opportunity.rowVersion += 1;
+    const saved = await manager
+      .getRepository(CrmOpportunityEntity)
+      .save(opportunity);
+
+    if (previousStageId !== saved.stageId) {
+      await this.appendHistory(manager, ctx, {
+        ...options,
+        opportunity: saved,
+        eventType: 'stage_changed',
+        title: 'Etapa alterada',
+        beforeData: { stageId: previousStageId, status: previousStatus },
+        afterData: { stageId: saved.stageId, status: saved.status },
+      });
+    }
+    if (previousStatus !== saved.status) {
+      await this.appendStatusEvents(
+        manager,
+        ctx,
+        saved,
+        previousStatus,
+        options,
+      );
+    }
+    return saved;
+  }
+
+  async updateWithinTransaction(
+    manager: EntityManager,
+    ctx: RequestContext,
+    candidate: CrmOpportunityEntity,
+    options: CrmCommandOptions = {},
+  ): Promise<CrmOpportunityEntity> {
+    const replay = await this.findReplay(manager, ctx, options.idempotencyKey);
+    if (replay) return replay;
+    const locked = await this.findScopedOpportunity(
+      manager,
+      ctx,
+      candidate.id,
+      true,
+    );
+    this.assertVersion(locked, options.expectedVersion);
+    const before = this.projection(locked);
+    for (const field of MUTABLE_FIELDS) {
+      (locked[field] as unknown) = candidate[field];
+    }
+    locked.rowVersion += 1;
+    const saved = await manager
+      .getRepository(CrmOpportunityEntity)
+      .save(locked);
+    await this.appendHistory(manager, ctx, {
+      ...options,
+      opportunity: saved,
+      eventType: 'opportunity_updated',
+      title: 'Oportunidade atualizada',
+      beforeData: before,
+      afterData: this.projection(saved),
+    });
+    return saved;
+  }
+
+  async reorder(
+    ctx: RequestContext,
+    items: Array<{
+      id: string;
+      stageId: string;
+      sortOrder: number;
+      expectedVersion?: number;
+    }>,
+    options: CrmCommandOptions = {},
+  ): Promise<CrmOpportunityEntity[]> {
+    return this.dataSource.transaction(async (manager) => {
+      const results: CrmOpportunityEntity[] = [];
+      for (const item of [...items].sort((a, b) => a.id.localeCompare(b.id))) {
+        const moved = await this.moveStageWithinTransaction(
+          manager,
+          ctx,
+          item.id,
+          item.stageId,
+          {
+            ...options,
+            expectedVersion: item.expectedVersion,
+            sortOrder: item.sortOrder,
+            idempotencyKey: options.idempotencyKey
+              ? `${options.idempotencyKey}:${item.id}`.slice(0, 180)
+              : undefined,
+          },
+        );
+        results.push(moved.opportunity);
+      }
+      return results;
+    });
+  }
+
+  async appendHistory(
+    manager: EntityManager,
+    ctx: RequestContext,
+    input: CrmHistoryInput,
+  ): Promise<CrmOpportunityEventEntity> {
+    const tenantId = this.requireTenantId(ctx);
+    const workspaceId = this.requireWorkspaceId(ctx);
+    if (
+      input.opportunity.tenantId !== tenantId ||
+      input.opportunity.workspaceId !== workspaceId
+    ) {
+      throw new BadRequestException(
+        'Opportunity scope does not match command scope.',
+      );
+    }
+    if (input.idempotencyKey && input.idempotencyKey.length > 180) {
+      throw new BadRequestException(
+        'Idempotency key must contain at most 180 characters.',
+      );
+    }
+
+    const correlationId = input.correlationId ?? randomUUID();
+    const actor = input.actor ?? {
+      type: 'user' as const,
+      userId: ctx.userId ?? null,
+    };
+    const event = manager.getRepository(CrmOpportunityEventEntity).create({
+      tenantId,
+      workspaceId,
+      opportunityId: input.opportunity.id,
+      actorType: actor.type,
+      actorUserId: actor.userId ?? null,
+      actorAgentId: actor.agentId ?? null,
+      eventType: input.eventType,
+      title: input.title,
+      description: input.description ?? null,
+      beforeData: input.beforeData ?? {},
+      afterData: input.afterData ?? {},
+      reason: input.reason ?? null,
+      confidence:
+        input.confidence === undefined || input.confidence === null
+          ? null
+          : String(input.confidence),
+      metadata: input.metadata ?? {},
+      eventVersion: 1,
+      idempotencyKey: input.idempotencyKey ?? null,
+      correlationId,
+      causationId: input.causationId ?? null,
+      policyVersion: input.policyVersion ?? null,
+    });
+    const saved = await manager
+      .getRepository(CrmOpportunityEventEntity)
+      .save(event);
+    const eventName = this.domainEventName(input.eventType);
+    const outboxKey = this.outboxKey(saved, input.idempotencyKey);
+    await manager.getRepository(InboxDomainOutboxEntity).save(
+      manager.getRepository(InboxDomainOutboxEntity).create({
+        tenantId,
+        workspaceId,
+        aggregateType: 'crm_opportunity',
+        aggregateId: input.opportunity.id,
+        eventName,
+        eventVersion: 1,
+        idempotencyKey: outboxKey,
+        payload: {
+          eventId: saved.id,
+          opportunityId: input.opportunity.id,
+          eventType: input.eventType,
+          correlationId,
+          causationId: input.causationId ?? null,
+          rowVersion: input.opportunity.rowVersion,
+        },
+        status: 'pending',
+        deliveryKind: 'realtime',
+        attempts: 0,
+        availableAt: new Date(),
+        publishedAt: null,
+        lockedAt: null,
+        lockedBy: null,
+        lastError: null,
+        deadLetteredAt: null,
+        skippedAt: null,
+        skipReason: null,
+        retainUntil: null,
+      }),
+    );
+    return saved;
+  }
+
+  private async appendStatusEvents(
+    manager: EntityManager,
+    ctx: RequestContext,
+    opportunity: CrmOpportunityEntity,
+    previousStatus: string,
+    options: CrmCommandOptions,
+  ): Promise<void> {
+    await this.appendHistory(manager, ctx, {
+      ...options,
+      opportunity,
+      eventType: 'status_changed',
+      title: 'Status alterado',
+      beforeData: { status: previousStatus },
+      afterData: { status: opportunity.status },
+    });
+    if (opportunity.status === 'won' || opportunity.status === 'lost') {
+      await this.appendHistory(manager, ctx, {
+        ...options,
+        opportunity,
+        eventType: `opportunity_${opportunity.status}`,
+        title:
+          opportunity.status === 'won'
+            ? 'Oportunidade ganha'
+            : 'Oportunidade perdida',
+        beforeData: { status: previousStatus },
+        afterData: { status: opportunity.status },
+      });
+    }
+  }
+
+  private async findReplay(
+    manager: EntityManager,
+    ctx: RequestContext,
+    idempotencyKey?: string,
+  ): Promise<CrmOpportunityEntity | null> {
+    if (!idempotencyKey) return null;
+    const event = await manager
+      .getRepository(CrmOpportunityEventEntity)
+      .findOne({
+        where: {
+          tenantId: this.requireTenantId(ctx),
+          workspaceId: this.requireWorkspaceId(ctx),
+          idempotencyKey,
+        },
+        order: { createdAt: 'ASC' },
+      });
+    if (!event) return null;
+    return this.findScopedOpportunity(manager, ctx, event.opportunityId, false);
+  }
+
+  private async findScopedOpportunity(
+    manager: EntityManager,
+    ctx: RequestContext,
+    id: string,
+    lock: boolean,
+  ): Promise<CrmOpportunityEntity> {
+    const opportunity = await manager
+      .getRepository(CrmOpportunityEntity)
+      .findOne({
+        where: this.withClientScope(ctx, {
+          id,
+          tenantId: this.requireTenantId(ctx),
+          workspaceId: this.requireWorkspaceId(ctx),
+          deletedAt: IsNull(),
+        }),
+        ...(lock ? { lock: { mode: 'pessimistic_write' as const } } : {}),
+      });
+    if (!opportunity) throw new NotFoundException('CRM opportunity not found.');
+    return opportunity;
+  }
+
+  private async findScopedStage(
+    manager: EntityManager,
+    ctx: RequestContext,
+    id: string,
+  ): Promise<CrmStageEntity> {
+    const stage = await manager.getRepository(CrmStageEntity).findOne({
+      where: this.withClientScope(ctx, {
+        id,
+        tenantId: this.requireTenantId(ctx),
+        workspaceId: this.requireWorkspaceId(ctx),
+        deletedAt: IsNull(),
+      }),
+    });
+    if (!stage) throw new NotFoundException('CRM stage not found.');
+    return stage;
+  }
+
+  private async uniqueLifecycleStage(
+    manager: EntityManager,
+    ctx: RequestContext,
+    pipelineId: string,
+    status: 'won' | 'lost',
+  ): Promise<CrmStageEntity> {
+    const flag = status === 'won' ? 'isWonStage' : 'isLostStage';
+    const stages = await manager.getRepository(CrmStageEntity).find({
+      where: [
+        this.withClientScope(ctx, {
+          tenantId: this.requireTenantId(ctx),
+          workspaceId: this.requireWorkspaceId(ctx),
+          pipelineId,
+          type: status,
+          deletedAt: IsNull(),
+        }),
+        this.withClientScope(ctx, {
+          tenantId: this.requireTenantId(ctx),
+          workspaceId: this.requireWorkspaceId(ctx),
+          pipelineId,
+          [flag]: true,
+          deletedAt: IsNull(),
+        }),
+      ],
+      take: 3,
+    });
+    const unique = [
+      ...new Map(stages.map((stage) => [stage.id, stage])).values(),
+    ];
+    if (unique.length !== 1) {
+      throw new ConflictException(
+        `Pipeline must have exactly one ${status} stage; found ${unique.length}.`,
+      );
+    }
+    return unique[0];
+  }
+
+  private async firstOpenStage(
+    manager: EntityManager,
+    ctx: RequestContext,
+    pipelineId: string,
+  ): Promise<CrmStageEntity> {
+    const stages = await manager.getRepository(CrmStageEntity).find({
+      where: this.withClientScope(ctx, {
+        tenantId: this.requireTenantId(ctx),
+        workspaceId: this.requireWorkspaceId(ctx),
+        pipelineId,
+        type: 'open',
+        isWonStage: false,
+        isLostStage: false,
+        deletedAt: IsNull(),
+      }),
+      order: { sortOrder: 'ASC', createdAt: 'ASC' },
+      take: 1,
+    });
+    if (!stages[0]) {
+      throw new ConflictException('Pipeline does not have an open stage.');
+    }
+    return stages[0];
+  }
+
+  private async nextSortOrder(
+    manager: EntityManager,
+    ctx: RequestContext,
+    pipelineId: string,
+    stageId: string,
+  ): Promise<number> {
+    const last = await manager.getRepository(CrmOpportunityEntity).findOne({
+      where: this.withClientScope(ctx, {
+        tenantId: this.requireTenantId(ctx),
+        workspaceId: this.requireWorkspaceId(ctx),
+        pipelineId,
+        stageId,
+        deletedAt: IsNull(),
+      }),
+      order: { sortOrder: 'DESC' },
+    });
+    return (last?.sortOrder ?? -1) + 1;
+  }
+
+  private async resolveMoveSortOrder(
+    manager: EntityManager,
+    ctx: RequestContext,
+    opportunity: CrmOpportunityEntity,
+    stageId: string,
+    beforeOpportunityId?: string | null,
+  ): Promise<number> {
+    if (!beforeOpportunityId) {
+      return this.nextSortOrder(manager, ctx, opportunity.pipelineId, stageId);
+    }
+    if (beforeOpportunityId === opportunity.id) return opportunity.sortOrder;
+
+    const before = await this.findScopedOpportunity(
+      manager,
+      ctx,
+      beforeOpportunityId,
+      true,
+    );
+    if (
+      before.pipelineId !== opportunity.pipelineId ||
+      before.stageId !== stageId
+    ) {
+      throw new BadRequestException(
+        'Order reference does not belong to the target stage.',
+      );
+    }
+
+    const clientId = ctx.managedContext?.clientId ?? null;
+    const targetSortOrder = before.sortOrder;
+    await manager.query(
+      `UPDATE crm_opportunities
+          SET sort_order = sort_order + 1,
+              row_version = row_version + 1,
+              updated_at = now()
+        WHERE tenant_id = $1
+          AND workspace_id = $2
+          AND pipeline_id = $3
+          AND stage_id = $4
+          AND id <> $5
+          AND sort_order >= $6
+          AND deleted_at IS NULL
+          AND ($7::text IS NULL OR metadata ->> 'clientId' = $7::text)`,
+      [
+        this.requireTenantId(ctx),
+        this.requireWorkspaceId(ctx),
+        opportunity.pipelineId,
+        stageId,
+        opportunity.id,
+        targetSortOrder,
+        clientId,
+      ],
+    );
+    return targetSortOrder;
+  }
+
+  private statusForStage(stage: CrmStageEntity): string {
+    if (stage.isWonStage || stage.type === 'won') return 'won';
+    if (stage.isLostStage || stage.type === 'lost') return 'lost';
+    return 'open';
+  }
+
+  private applyTerminalTimestamps(
+    opportunity: CrmOpportunityEntity,
+    status: string,
+    previousStatus: string,
+  ): void {
+    if (status === 'won') {
+      opportunity.wonAt ??= new Date();
+      opportunity.lostAt = null;
+      opportunity.lostReason = null;
+    } else if (status === 'lost') {
+      opportunity.lostAt ??= new Date();
+      opportunity.wonAt = null;
+    } else if (status === 'open' && previousStatus !== 'open') {
+      opportunity.wonAt = null;
+      opportunity.lostAt = null;
+      opportunity.lostReason = null;
+    }
+  }
+
+  private assertVersion(
+    opportunity: CrmOpportunityEntity,
+    expectedVersion?: number,
+  ): void {
+    if (
+      expectedVersion !== undefined &&
+      opportunity.rowVersion !== expectedVersion
+    ) {
+      throw new ConflictException({
+        code: 'CRM_OPPORTUNITY_VERSION_CONFLICT',
+        message: 'Opportunity was changed by another request.',
+        expectedVersion,
+        currentVersion: opportunity.rowVersion,
+      });
+    }
+  }
+
+  private projection(
+    opportunity: CrmOpportunityEntity,
+  ): Record<string, unknown> {
+    return {
+      opportunityId: opportunity.id,
+      pipelineId: opportunity.pipelineId,
+      stageId: opportunity.stageId,
+      status: opportunity.status,
+      assignedUserId: opportunity.assignedUserId,
+      sortOrder: opportunity.sortOrder,
+      rowVersion: opportunity.rowVersion,
+    };
+  }
+
+  private domainEventName(eventType: string): string {
+    const names: Record<string, string> = {
+      opportunity_created: 'leadflow.crm.opportunity.created',
+      opportunity_updated: 'leadflow.crm.opportunity.updated',
+      stage_changed: 'leadflow.crm.opportunity.stage.changed',
+      status_changed: 'leadflow.crm.opportunity.status.changed',
+      opportunity_won: 'leadflow.crm.opportunity.won',
+      opportunity_lost: 'leadflow.crm.opportunity.lost',
+    };
+    return names[eventType] ?? 'leadflow.crm.opportunity.updated';
+  }
+
+  private outboxKey(
+    event: CrmOpportunityEventEntity,
+    commandKey?: string,
+  ): string {
+    const source = commandKey
+      ? `${commandKey}:${event.eventType}`
+      : `event:${event.id}`;
+    return `crm:${createHash('sha256').update(source).digest('hex')}`;
+  }
+
+  private withClientScope<T extends Record<string, unknown>>(
+    ctx: RequestContext,
+    where: T,
+  ): T {
+    const clientId = ctx.managedContext?.clientId ?? null;
+    if (!clientId) return where;
+    return {
+      ...where,
+      metadata: Raw((alias) => `${alias} ->> 'clientId' = :managedClientId`, {
+        managedClientId: clientId,
+      }),
+    };
+  }
+
+  private requireTenantId(ctx: RequestContext): string {
+    if (!ctx.tenantId)
+      throw new BadRequestException('Tenant context is required.');
+    return ctx.tenantId;
+  }
+
+  private requireWorkspaceId(ctx: RequestContext): string {
+    if (!ctx.workspaceId) {
+      throw new BadRequestException('Workspace context is required.');
+    }
+    return ctx.workspaceId;
+  }
+}

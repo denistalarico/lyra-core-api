@@ -12,6 +12,8 @@ import { CrmStageEntity } from './entities/crm-stage.entity';
 import { CrmTagEntity } from './entities/crm-tag.entity';
 import { CrmOpportunityTagEntity } from './entities/crm-opportunity-tag.entity';
 import { CrmOpportunityEventEntity } from './entities/crm-opportunity-event.entity';
+import { InboxDomainOutboxEntity } from '../inbox/entities/inbox-domain-outbox.entity';
+import { CrmOpportunityCommandService } from './services/crm-opportunity-command.service';
 
 @Module({
   imports: [
@@ -25,13 +27,22 @@ import { CrmOpportunityEventEntity } from './entities/crm-opportunity-event.enti
         CrmTagEntity,
         CrmOpportunityTagEntity,
         CrmOpportunityEventEntity,
+        InboxDomainOutboxEntity,
         ContactEntity,
       ],
       'agency',
     ),
   ],
   controllers: [CrmController],
-  providers: [CrmService, SalesNotificationPublisher],
-  exports: [CrmService, SalesNotificationPublisher],
+  providers: [
+    CrmService,
+    CrmOpportunityCommandService,
+    SalesNotificationPublisher,
+  ],
+  exports: [
+    CrmService,
+    CrmOpportunityCommandService,
+    SalesNotificationPublisher,
+  ],
 })
 export class CrmModule {}

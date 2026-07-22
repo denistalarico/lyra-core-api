@@ -1,4 +1,9 @@
-import { Column, CreateDateColumn, Entity, PrimaryGeneratedColumn } from 'typeorm';
+import {
+  Column,
+  CreateDateColumn,
+  Entity,
+  PrimaryGeneratedColumn,
+} from 'typeorm';
 
 @Entity('crm_opportunity_events')
 export class CrmOpportunityEventEntity {
@@ -19,6 +24,9 @@ export class CrmOpportunityEventEntity {
 
   @Column({ name: 'actor_user_id', type: 'uuid', nullable: true })
   actorUserId!: string | null;
+
+  @Column({ name: 'actor_agent_id', type: 'uuid', nullable: true })
+  actorAgentId!: string | null;
 
   @Column({ name: 'event_type', type: 'varchar', length: 80 })
   eventType!: string;
@@ -43,6 +51,31 @@ export class CrmOpportunityEventEntity {
 
   @Column({ type: 'jsonb', default: () => "'{}'::jsonb" })
   metadata!: Record<string, unknown>;
+
+  @Column({ name: 'event_version', type: 'int', default: 1 })
+  eventVersion!: number;
+
+  @Column({
+    name: 'idempotency_key',
+    type: 'varchar',
+    length: 180,
+    nullable: true,
+  })
+  idempotencyKey!: string | null;
+
+  @Column({ name: 'correlation_id', type: 'uuid' })
+  correlationId!: string;
+
+  @Column({ name: 'causation_id', type: 'uuid', nullable: true })
+  causationId!: string | null;
+
+  @Column({
+    name: 'policy_version',
+    type: 'varchar',
+    length: 80,
+    nullable: true,
+  })
+  policyVersion!: string | null;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;

@@ -16,6 +16,7 @@ import { AgencyWorkspaceUserEntity } from '../../agency/entities/agency-settings
 import { CrmOpportunityEntity } from '../../crm/entities/crm-opportunity.entity';
 import { CrmPipelineEntity } from '../../crm/entities/crm-pipeline.entity';
 import { CrmStageEntity } from '../../crm/entities/crm-stage.entity';
+import { CrmOpportunityCommandService } from '../../crm/services/crm-opportunity-command.service';
 import { LeadFlowAgentEntity } from '../../leadflow-agents/entities/leadflow-agent.entity';
 import { LeadFlowAgentChannelBindingEntity } from '../../leadflow-agents/entities/leadflow-agent-channel-binding.entity';
 import { LeadFlowAgentVersionEntity } from '../../leadflow-agents/entities/leadflow-agent-version.entity';
@@ -229,6 +230,8 @@ export class InboxAgentRuntimeService {
     private readonly pilotOutboundPolicy?: InboxPilotOutboundPolicyService,
     @Optional()
     private readonly playbookState?: ConversationPlaybookStateService,
+    @Optional()
+    private readonly opportunityCommands?: CrmOpportunityCommandService,
   ) {}
 
   async claimAndProcess(workerId: string) {
@@ -1594,14 +1597,33 @@ export class InboxAgentRuntimeService {
             },
         lock: { mode: 'pessimistic_write' },
       });
-    for (const action of actions) {
+    for (const [actionIndex, action] of actions.entries()) {
       const type = action.type;
       if (
         type === 'set_stage' &&
         opportunity &&
         typeof action.stageId === 'string'
       ) {
-        opportunity.stageId = action.stageId;
+        if (this.opportunityCommands) {
+          const moved =
+            await this.opportunityCommands.moveStageWithinTransaction(
+              manager,
+              ctx,
+              opportunity.id,
+              action.stageId,
+              {
+                actor: { type: 'user', userId: ctx.userId ?? null },
+                idempotencyKey: `review:${decision.id}:stage:${actionIndex}`,
+                correlationId: decision.id,
+                causationId: decision.id,
+                reason: 'approved_agent_decision',
+                metadata: { reviewDecisionId: decision.id },
+              },
+            );
+          Object.assign(opportunity, moved.opportunity);
+        } else {
+          opportunity.stageId = action.stageId;
+        }
       } else if (
         type === 'set_summary' &&
         opportunity &&
@@ -1662,11 +1684,30 @@ export class InboxAgentRuntimeService {
         conversation.closedAt = new Date();
         if (action.value === 'archived') conversation.archivedAt = new Date();
         if (opportunity) {
-          opportunity.status =
-            action.value === 'lost' ? 'lost' : opportunity.status;
-          opportunity.lostAt =
-            action.value === 'lost' ? new Date() : opportunity.lostAt;
-          opportunity.lostReason = action.value;
+          if (action.value === 'lost' && this.opportunityCommands) {
+            const changed =
+              await this.opportunityCommands.changeStatusWithinTransaction(
+                manager,
+                ctx,
+                opportunity.id,
+                'lost',
+                action.value,
+                {
+                  actor: { type: 'user', userId: ctx.userId ?? null },
+                  idempotencyKey: `review:${decision.id}:status:${actionIndex}`,
+                  correlationId: decision.id,
+                  causationId: decision.id,
+                  reason: 'approved_agent_decision',
+                },
+              );
+            Object.assign(opportunity, changed);
+          } else {
+            opportunity.status =
+              action.value === 'lost' ? 'lost' : opportunity.status;
+            opportunity.lostAt =
+              action.value === 'lost' ? new Date() : opportunity.lostAt;
+            opportunity.lostReason = action.value;
+          }
           opportunity.businessContext = {
             ...opportunity.businessContext,
             leadDisposition: action.value,
@@ -1684,8 +1725,24 @@ export class InboxAgentRuntimeService {
         conversation.status = 'handoff_requested';
       }
     }
-    if (opportunity)
-      await manager.getRepository(CrmOpportunityEntity).save(opportunity);
+    if (opportunity) {
+      if (this.opportunityCommands) {
+        await this.opportunityCommands.updateWithinTransaction(
+          manager,
+          ctx,
+          opportunity,
+          {
+            actor: { type: 'user', userId: ctx.userId ?? null },
+            idempotencyKey: `review:${decision.id}:opportunity`,
+            correlationId: decision.id,
+            causationId: decision.id,
+            reason: 'approved_agent_decision',
+          },
+        );
+      } else {
+        await manager.getRepository(CrmOpportunityEntity).save(opportunity);
+      }
+    }
     await manager.getRepository(InboxConversationEntity).save(conversation);
   }
 

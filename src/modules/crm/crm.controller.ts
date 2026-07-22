@@ -3,6 +3,7 @@ import {
   Controller,
   Delete,
   Get,
+  Headers,
   Param,
   Patch,
   Post,
@@ -28,7 +29,6 @@ import { PatchCrmOpportunityStatusDto } from './dto/patch-crm-opportunity-status
 import { PatchCrmPipelineDto } from './dto/patch-crm-pipeline.dto';
 import { PatchCrmStageDto } from './dto/patch-crm-stage.dto';
 import { AssignCrmOpportunityTagDto } from './dto/assign-crm-opportunity-tag.dto';
-import { CreateCrmOpportunityEventDto } from './dto/create-crm-opportunity-event.dto';
 import { CreateCrmTagDto } from './dto/create-crm-tag.dto';
 import { PatchCrmOpportunityCardColorDto } from './dto/patch-crm-opportunity-card-color.dto';
 import { PatchCrmOpportunityFollowDto } from './dto/patch-crm-opportunity-follow.dto';
@@ -229,8 +229,9 @@ export class CrmController {
   createOpportunity(
     @RequestContextData() ctx: RequestContext,
     @Body() dto: CreateCrmOpportunityDto,
+    @Headers('idempotency-key') idempotencyKey?: string,
   ) {
-    return this.crmService.createOpportunity(ctx, dto);
+    return this.crmService.createOpportunity(ctx, dto, { idempotencyKey });
   }
 
   @Patch('opportunities/reorder')
@@ -241,8 +242,9 @@ export class CrmController {
   reorderOpportunities(
     @RequestContextData() ctx: RequestContext,
     @Body() dto: ReorderCrmOpportunitiesDto,
+    @Headers('idempotency-key') idempotencyKey?: string,
   ) {
-    return this.crmService.reorderOpportunities(ctx, dto);
+    return this.crmService.reorderOpportunities(ctx, dto, { idempotencyKey });
   }
 
   @Get('opportunities/:id')
@@ -266,8 +268,9 @@ export class CrmController {
     @RequestContextData() ctx: RequestContext,
     @Param('id') id: string,
     @Body() dto: PatchCrmOpportunityDto,
+    @Headers('idempotency-key') idempotencyKey?: string,
   ) {
-    return this.crmService.patchOpportunity(ctx, id, dto);
+    return this.crmService.patchOpportunity(ctx, id, dto, { idempotencyKey });
   }
 
   @Patch('opportunities/:id/stage')
@@ -279,8 +282,11 @@ export class CrmController {
     @RequestContextData() ctx: RequestContext,
     @Param('id') id: string,
     @Body() dto: PatchCrmOpportunityStageDto,
+    @Headers('idempotency-key') idempotencyKey?: string,
   ) {
-    return this.crmService.patchOpportunityStage(ctx, id, dto);
+    return this.crmService.patchOpportunityStage(ctx, id, dto, {
+      idempotencyKey,
+    });
   }
 
   @Patch('opportunities/:id/status')
@@ -292,8 +298,11 @@ export class CrmController {
     @RequestContextData() ctx: RequestContext,
     @Param('id') id: string,
     @Body() dto: PatchCrmOpportunityStatusDto,
+    @Headers('idempotency-key') idempotencyKey?: string,
   ) {
-    return this.crmService.patchOpportunityStatus(ctx, id, dto);
+    return this.crmService.patchOpportunityStatus(ctx, id, dto, {
+      idempotencyKey,
+    });
   }
 
   @Patch('opportunities/:id/card-color')
@@ -384,19 +393,6 @@ export class CrmController {
     @Param('id') id: string,
   ) {
     return this.crmService.listOpportunityEvents(ctx, id);
-  }
-
-  @Post('opportunities/:id/events')
-  @RequireAnyPermission(
-    'leadflow.crm.records.update.assigned',
-    'leadflow.crm.records.update.client',
-  )
-  createOpportunityEvent(
-    @RequestContextData() ctx: RequestContext,
-    @Param('id') id: string,
-    @Body() dto: CreateCrmOpportunityEventDto,
-  ) {
-    return this.crmService.createOpportunityEvent(ctx, id, dto);
   }
 
   @Delete('opportunities/:id')

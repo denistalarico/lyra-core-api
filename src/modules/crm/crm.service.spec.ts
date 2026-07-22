@@ -43,6 +43,18 @@ function createService() {
     publishOpportunityAssigned: jest.fn(),
     publishOpportunityStageChanged: jest.fn(),
   };
+  const opportunityCommands = {
+    createOpportunity: jest.fn(async (_ctx, opportunity) =>
+      opportunitiesRepository.save(opportunity),
+    ),
+    updateOpportunity: jest.fn(async (_ctx, opportunity) =>
+      opportunitiesRepository.save(opportunity),
+    ),
+    moveStage: jest.fn(),
+    changeStatus: jest.fn(),
+    reorder: jest.fn(),
+    recordEvent: jest.fn(),
+  };
 
   const service = new CrmService(
     pipelinesRepository as never,
@@ -52,6 +64,7 @@ function createService() {
     opportunityTagsRepository as never,
     opportunityEventsRepository as never,
     contactsRepository as never,
+    opportunityCommands as never,
     salesNotificationPublisher as never,
   );
 
@@ -65,6 +78,7 @@ function createService() {
     opportunityEventsRepository,
     contactsRepository,
     salesNotificationPublisher,
+    opportunityCommands,
   };
 }
 
@@ -337,5 +351,14 @@ describe('CRM activities cutover', () => {
     expect(routes).not.toContainEqual(
       expect.objectContaining({ path: expect.stringContaining('activities') }),
     );
+  });
+
+  it('does not expose a public endpoint for arbitrary opportunity events', () => {
+    expect(
+      Object.prototype.hasOwnProperty.call(
+        CrmController.prototype,
+        'createOpportunityEvent',
+      ),
+    ).toBe(false);
   });
 });

@@ -27,13 +27,28 @@ export class CrmOpportunityEntity {
   @Column({ name: 'contact_id', type: 'uuid', nullable: true })
   contactId!: string | null;
 
-  @Column({ name: 'contact_name', type: 'varchar', length: 180, nullable: true })
+  @Column({
+    name: 'contact_name',
+    type: 'varchar',
+    length: 180,
+    nullable: true,
+  })
   contactName!: string | null;
 
-  @Column({ name: 'contact_email', type: 'varchar', length: 180, nullable: true })
+  @Column({
+    name: 'contact_email',
+    type: 'varchar',
+    length: 180,
+    nullable: true,
+  })
   contactEmail!: string | null;
 
-  @Column({ name: 'contact_phone', type: 'varchar', length: 40, nullable: true })
+  @Column({
+    name: 'contact_phone',
+    type: 'varchar',
+    length: 40,
+    nullable: true,
+  })
   contactPhone!: string | null;
 
   @Column({ name: 'inbox_conversation_id', type: 'uuid', nullable: true })
@@ -45,7 +60,13 @@ export class CrmOpportunityEntity {
   @Column({ type: 'text', nullable: true })
   description!: string | null;
 
-  @Column({ name: 'value_amount', type: 'numeric', precision: 14, scale: 2, nullable: true })
+  @Column({
+    name: 'value_amount',
+    type: 'numeric',
+    precision: 14,
+    scale: 2,
+    nullable: true,
+  })
   valueAmount!: string | null;
 
   @Column({ type: 'varchar', length: 12, default: 'BRL' })
@@ -60,13 +81,27 @@ export class CrmOpportunityEntity {
   @Column({ type: 'varchar', length: 40, default: 'manual' })
   source!: string;
 
-  @Column({ name: 'business_mode', type: 'varchar', length: 80, default: 'general' })
+  @Column({
+    name: 'business_mode',
+    type: 'varchar',
+    length: 80,
+    default: 'general',
+  })
   businessMode!: string;
 
-  @Column({ name: 'operational_status', type: 'varchar', length: 80, nullable: true })
+  @Column({
+    name: 'operational_status',
+    type: 'varchar',
+    length: 80,
+    nullable: true,
+  })
   operationalStatus!: string | null;
 
-  @Column({ name: 'business_context', type: 'jsonb', default: () => "'{}'::jsonb" })
+  @Column({
+    name: 'business_context',
+    type: 'jsonb',
+    default: () => "'{}'::jsonb",
+  })
   businessContext!: Record<string, unknown>;
 
   @Column({ name: 'assigned_user_id', type: 'uuid', nullable: true })
@@ -99,17 +134,29 @@ export class CrmOpportunityEntity {
   @Column({ type: 'varchar', length: 32, default: 'workspace' })
   visibility!: string;
 
-  @Column({ name: 'follow_mode', type: 'varchar', length: 32, default: 'automatic' })
+  @Column({
+    name: 'follow_mode',
+    type: 'varchar',
+    length: 32,
+    default: 'automatic',
+  })
   followMode!: string;
 
   @Column({ name: 'follow_message', type: 'text', nullable: true })
   followMessage!: string | null;
 
-  @Column({ name: 'follow_send_automatically', type: 'boolean', default: false })
+  @Column({
+    name: 'follow_send_automatically',
+    type: 'boolean',
+    default: false,
+  })
   followSendAutomatically!: boolean;
 
   @Column({ type: 'jsonb', default: () => "'{}'::jsonb" })
   metadata!: Record<string, unknown>;
+
+  @Column({ name: 'row_version', type: 'int', default: 1 })
+  rowVersion!: number;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;
