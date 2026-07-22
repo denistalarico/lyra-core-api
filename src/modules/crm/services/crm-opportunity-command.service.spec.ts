@@ -207,7 +207,7 @@ function harness(
 
 describe('CrmOpportunityCommandService', () => {
   it('moves stage, synchronizes status and appends history/outbox atomically', async () => {
-    const initial = opportunity();
+    const initial = opportunity({ valueAmount: '250.00', currency: 'BRL' });
     const { service, committed } = harness({ initial: [initial] });
 
     const result = await service.moveStage(ctx, initial.id, stage().id, {
@@ -236,6 +236,13 @@ describe('CrmOpportunityCommandService', () => {
         transitionPolicyId: '00000000-0000-4000-8000-000000000090',
         transitionPolicyVersion: 1,
       },
+    });
+    expect(committed.events[1].afterData).toMatchObject({
+      status: 'won',
+      pipelineId: initial.pipelineId,
+      stageId: stage().id,
+      valueAmount: '250.00',
+      currency: 'BRL',
     });
   });
 

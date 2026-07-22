@@ -611,6 +611,10 @@ export class InboxGovernedActionWorker
         });
       const source =
         channel?.type === 'whatsapp' ? 'whatsapp' : conversation.source;
+      const routedClientId =
+        typeof channel.metadata?.clientId === 'string'
+          ? channel.metadata.clientId
+          : null;
       const opportunity = await manager
         .getRepository(CrmOpportunityEntity)
         .save({
@@ -676,6 +680,8 @@ export class InboxGovernedActionWorker
             createdBy: 'governed_autonomy',
             conversionKey: readConversionKey(conversation.metadata),
             sourceProvenance: 'canonical_inbound_channel',
+            operatingMode: routedClientId ? 'client' : 'agency',
+            clientId: routedClientId,
           },
         });
       if (this.opportunityCommands) {
@@ -692,6 +698,7 @@ export class InboxGovernedActionWorker
             title: 'Oportunidade criada por automação governada',
             afterData: {
               opportunityId: opportunity.id,
+              pipelineId: opportunity.pipelineId,
               stageId: opportunity.stageId,
               status: opportunity.status,
               rowVersion: opportunity.rowVersion,

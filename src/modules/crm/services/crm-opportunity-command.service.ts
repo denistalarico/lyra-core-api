@@ -785,7 +785,13 @@ export class CrmOpportunityCommandService {
       eventType: 'status_changed',
       title: 'Status alterado',
       beforeData: { status: previousStatus },
-      afterData: { status: opportunity.status },
+      afterData: {
+        status: opportunity.status,
+        pipelineId: opportunity.pipelineId,
+        stageId: opportunity.stageId,
+        valueAmount: opportunity.valueAmount,
+        currency: opportunity.currency,
+      },
     });
     if (opportunity.status === 'won' || opportunity.status === 'lost') {
       await this.appendHistory(manager, ctx, {
@@ -797,7 +803,13 @@ export class CrmOpportunityCommandService {
             ? 'Oportunidade ganha'
             : 'Oportunidade perdida',
         beforeData: { status: previousStatus },
-        afterData: { status: opportunity.status },
+        afterData: {
+          status: opportunity.status,
+          pipelineId: opportunity.pipelineId,
+          stageId: opportunity.stageId,
+          valueAmount: opportunity.valueAmount,
+          currency: opportunity.currency,
+        },
       });
     }
   }

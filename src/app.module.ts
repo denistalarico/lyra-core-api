@@ -42,6 +42,7 @@ import { LeadFlowAutomationsModule } from './modules/leadflow-automations/leadfl
 import { LeadFlowEventsModule } from './modules/leadflow-events/leadflow-events.module';
 import { HealthModule } from './modules/health/health.module';
 import { ContextModule } from './common/context/context.module';
+import { LeadFlowAnalyticsModule } from './modules/leadflow-analytics/leadflow-analytics.module';
 
 @Module({
   imports: [
@@ -86,6 +87,7 @@ import { ContextModule } from './common/context/context.module';
     LeadFlowAgentsModule,
     LeadFlowAutomationsModule,
     LeadFlowEventsModule,
+    LeadFlowAnalyticsModule,
   ],
 })
 export class AppModule {}

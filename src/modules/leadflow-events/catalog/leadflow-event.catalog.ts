@@ -94,7 +94,11 @@ export const LEADFLOW_EVENT_CATALOG: LeadFlowEventCatalogItem[] = [
     requiredContext: ['conversationId', 'contactId'],
     payloadSchema: {
       messageId: field('string', true, 'Id da mensagem no Inbox.'),
-      messageType: field('string', true, 'Tipo (text, image, audio, document).'),
+      messageType: field(
+        'string',
+        true,
+        'Tipo (text, image, audio, document).',
+      ),
       hasMedia: field('boolean', false, 'Se a mensagem contém mídia.'),
       summary: field(
         'string',
@@ -111,7 +115,11 @@ export const LEADFLOW_EVENT_CATALOG: LeadFlowEventCatalogItem[] = [
     requiredContext: ['conversationId', 'contactId'],
     payloadSchema: {
       messageId: field('string', true, 'Id da mensagem no Inbox.'),
-      messageType: field('string', true, 'Tipo (text, image, audio, document).'),
+      messageType: field(
+        'string',
+        true,
+        'Tipo (text, image, audio, document).',
+      ),
       authorType: field('string', false, 'Quem enviou (user, agent, system).'),
     },
     sensitive: true,
@@ -132,7 +140,11 @@ export const LEADFLOW_EVENT_CATALOG: LeadFlowEventCatalogItem[] = [
     requiredContext: ['conversationId'],
     payloadSchema: {
       assignedUserId: field('string', true, 'Usuário que assumiu a conversa.'),
-      previousUserId: field('string', false, 'Responsável anterior, se houver.'),
+      previousUserId: field(
+        'string',
+        false,
+        'Responsável anterior, se houver.',
+      ),
     },
   }),
   buildEvent({
@@ -188,6 +200,55 @@ export const LEADFLOW_EVENT_CATALOG: LeadFlowEventCatalogItem[] = [
       fromStageId: field('string', true, 'Estágio anterior.'),
       toStageId: field('string', true, 'Novo estágio.'),
       pipelineId: field('string', false, 'Pipeline do movimento.'),
+    },
+  }),
+  buildEvent({
+    eventName: 'leadflow.crm.opportunity.pipeline.exited',
+    description: 'Oportunidade saiu de um pipeline durante transferência.',
+    requiredContext: ['opportunityId'],
+    payloadSchema: {
+      pipelineId: field('string', true, 'Pipeline de origem.'),
+      stageId: field('string', false, 'Último estágio no pipeline de origem.'),
+    },
+  }),
+  buildEvent({
+    eventName: 'leadflow.crm.opportunity.stage.exited',
+    description: 'Oportunidade saiu de um estágio durante transferência.',
+    requiredContext: ['opportunityId'],
+    payloadSchema: {
+      pipelineId: field('string', true, 'Pipeline de origem.'),
+      stageId: field('string', true, 'Estágio de origem.'),
+    },
+  }),
+  buildEvent({
+    eventName: 'leadflow.crm.opportunity.pipeline.transferred',
+    description:
+      'Oportunidade canônica transferida atomicamente entre pipelines.',
+    requiredContext: ['opportunityId'],
+    payloadSchema: {
+      fromPipelineId: field('string', true, 'Pipeline de origem.'),
+      fromStageId: field('string', true, 'Estágio de origem.'),
+      toPipelineId: field('string', true, 'Pipeline de destino.'),
+      toStageId: field('string', true, 'Estágio de destino.'),
+      transferMode: field('string', true, 'Modo manual ou handoff.'),
+    },
+  }),
+  buildEvent({
+    eventName: 'leadflow.crm.opportunity.pipeline.entered',
+    description: 'Oportunidade entrou no pipeline de destino.',
+    requiredContext: ['opportunityId'],
+    payloadSchema: {
+      pipelineId: field('string', true, 'Pipeline de destino.'),
+      stageId: field('string', false, 'Primeiro estágio no destino.'),
+    },
+  }),
+  buildEvent({
+    eventName: 'leadflow.crm.opportunity.stage.entered',
+    description: 'Oportunidade entrou no estágio de destino.',
+    requiredContext: ['opportunityId'],
+    payloadSchema: {
+      pipelineId: field('string', true, 'Pipeline de destino.'),
+      stageId: field('string', true, 'Estágio de destino.'),
     },
   }),
   buildEvent({
@@ -253,7 +314,11 @@ export const LEADFLOW_EVENT_CATALOG: LeadFlowEventCatalogItem[] = [
       'Oportunidade vinculada a uma conversa do Inbox — evento central da regra estrutural Inbox → CRM. Este sprint só define o contrato; a execução não é implementada.',
     requiredContext: ['opportunityId', 'conversationId'],
     payloadSchema: {
-      linkType: field('string', true, 'created (card novo) ou linked (existente).'),
+      linkType: field(
+        'string',
+        true,
+        'created (card novo) ou linked (existente).',
+      ),
     },
   }),
   buildEvent({
@@ -384,7 +449,8 @@ export const LEADFLOW_EVENT_CATALOG: LeadFlowEventCatalogItem[] = [
   }),
   buildEvent({
     eventName: 'leadflow.automations.execution.started',
-    description: 'PLANEJADO: execução de automação iniciada por runtime futuro.',
+    description:
+      'PLANEJADO: execução de automação iniciada por runtime futuro.',
     requiredContext: ['automationId'],
     payloadSchema: {
       executionId: field('string', true, 'Id da execução.'),
