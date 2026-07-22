@@ -15,6 +15,12 @@ type InboundMessageNotificationInput = {
   channel?: InboxChannelEntity | null;
 };
 
+type HandoffRequestedNotificationInput = {
+  conversation: InboxConversationEntity;
+  recipientUserIds: string[];
+  clientId?: string | null;
+};
+
 @Injectable()
 export class InboxNotificationPublisher {
   private readonly logger = new Logger(InboxNotificationPublisher.name);
@@ -22,6 +28,51 @@ export class InboxNotificationPublisher {
   constructor(
     private readonly notificationEventProcessor: NotificationEventProcessorService,
   ) {}
+
+  async publishHandoffRequested(input: HandoffRequestedNotificationInput) {
+    const recipientUserIds = [
+      ...new Set(input.recipientUserIds.filter(Boolean)),
+    ];
+    if (recipientUserIds.length === 0) return;
+
+    const actionUrl = input.clientId
+      ? `/leadflow/inbox?client=${encodeURIComponent(input.clientId)}`
+      : '/leadflow/inbox';
+
+    try {
+      await this.notificationEventProcessor.process({
+        eventId: `inbox.handoff_requested:${input.conversation.id}:${input.conversation.ownershipVersion}`,
+        eventType: 'inbox.handoff_requested',
+        tenantId: input.conversation.tenantId,
+        workspaceId: input.conversation.workspaceId,
+        productKey: NotificationProductKey.AGENCY,
+        moduleKey: 'inbox',
+        actorType: NotificationActorType.AGENT,
+        actorUserId: null,
+        resourceType: 'inbox_conversation',
+        resourceId: input.conversation.id,
+        occurredAt: input.conversation.ownershipChangedAt.toISOString(),
+        recipients: recipientUserIds.map((userId) => ({
+          userId,
+          interestReason: NotificationInterestReason.RESPONSIBLE_ROLE,
+        })),
+        payload: {
+          title: 'Atendimento solicitado',
+          body: 'Uma conversa do Inbox precisa de atendimento humano.',
+          actionUrl,
+          conversationId: input.conversation.id,
+          clientId: input.clientId ?? null,
+          requiresAttention: true,
+          autoReadWhenInboxActive: true,
+        },
+      });
+    } catch (error) {
+      this.logger.error(
+        `Failed to publish inbox.handoff_requested for conversation ${input.conversation.id} tenant ${input.conversation.tenantId} workspace ${input.conversation.workspaceId}`,
+        error instanceof Error ? error.stack : String(error),
+      );
+    }
+  }
 
   /**
    * Notifies the operator handling a conversation about an inbound message.

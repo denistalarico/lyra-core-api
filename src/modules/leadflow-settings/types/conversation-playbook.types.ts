@@ -37,6 +37,7 @@ export type ConversationPlaybook = {
   ctaPolicy: {
     allowed: string[];
     minimumContextFields: number;
+    requiredContextFields?: string[];
     maxAgentRepliesWithoutCta: number;
     requiresOperationalCapability: Record<string, string>;
   };
@@ -53,12 +54,14 @@ export function readConversationPlaybook(
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const candidate = value as unknown as ConversationPlaybook;
   if (
-    candidate.version !== 1 ||
+    ![1, 2].includes(candidate.version) ||
     !candidate.businessModeKey ||
     !Array.isArray(candidate.phases) ||
     !Array.isArray(candidate.qualificationFields) ||
     !candidate.ctaPolicy ||
-    !Array.isArray(candidate.ctaPolicy.allowed)
+    !Array.isArray(candidate.ctaPolicy.allowed) ||
+    (candidate.ctaPolicy.requiredContextFields !== undefined &&
+      !Array.isArray(candidate.ctaPolicy.requiredContextFields))
   ) {
     return null;
   }

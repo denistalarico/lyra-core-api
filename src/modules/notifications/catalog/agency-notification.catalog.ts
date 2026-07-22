@@ -87,6 +87,12 @@ export const AGENCY_NOTIFICATION_CATALOG: readonly NotificationDefinition[] = [
     NotificationCategory.MESSAGE,
     NotificationRecipientStrategy.EXPLICIT_USERS,
   ),
+  required(
+    'inbox.handoff_requested',
+    'inbox',
+    NotificationCategory.ASSIGNMENT,
+    NotificationRecipientStrategy.EXPLICIT_USERS,
+  ),
   // Team Chat
   standard(
     'chat.direct_message_received',

@@ -1,5 +1,6 @@
 import { ConflictException } from '@nestjs/common';
 import {
+  canonicalConversationFacts,
   InboxAgentRuntimeService,
   factualReplyIsSupported,
   isAppointmentHandoffMode,
@@ -31,6 +32,20 @@ describe('InboxAgentRuntimeService safety contracts', () => {
       {} as never,
       operationsRoomState as never,
     );
+
+  it('uses a non-generic channel profile name as canonical lead context', () => {
+    expect(
+      canonicalConversationFacts({ conversationTitle: 'Lead Sintético' }),
+    ).toMatchObject({
+      lead_name: { value: 'Lead Sintético', confidence: 1 },
+    });
+    expect(
+      canonicalConversationFacts({ conversationTitle: 'Contato do WhatsApp' }),
+    ).toEqual({});
+    expect(
+      canonicalConversationFacts({ conversationTitle: '+5511999999999' }),
+    ).toEqual({});
+  });
 
   it('claims due batches with transactional SKIP LOCKED', async () => {
     const query = jest.fn().mockResolvedValue([]);
@@ -181,7 +196,10 @@ describe('InboxAgentRuntimeService safety contracts', () => {
       resolveDefaultPipelineForBusinessMode([general], 'agency_services'),
     ).toBe(general);
     expect(
-      resolveDefaultPipelineForBusinessMode([general, exact], 'agency_services'),
+      resolveDefaultPipelineForBusinessMode(
+        [general, exact],
+        'agency_services',
+      ),
     ).toBe(exact);
     expect(
       resolveDefaultPipelineForBusinessMode(

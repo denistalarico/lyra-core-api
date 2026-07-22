@@ -8,7 +8,7 @@ describe('LeadFlow Business Mode conversation playbooks', () => {
     for (const template of LEADFLOW_BUSINESS_MODE_TEMPLATES) {
       const playbook = readConversationPlaybook(template.metadata);
       expect(playbook).toMatchObject({
-        version: 1,
+        version: 2,
         businessModeKey: template.key,
       });
       expect(playbook?.phases.map((phase) => phase.key)).toEqual([
@@ -32,5 +32,17 @@ describe('LeadFlow Business Mode conversation playbooks', () => {
     );
     const playbook = readConversationPlaybook(template?.metadata);
     expect(playbook?.ctaPolicy.allowed).toContain(expectedCta);
+  });
+
+  it('requires name, niche and paid ads history before an agency CTA', () => {
+    const template = LEADFLOW_BUSINESS_MODE_TEMPLATES.find(
+      (item) => item.key === LeadFlowBusinessMode.AgencyServices,
+    );
+    const playbook = readConversationPlaybook(template?.metadata);
+
+    expect(playbook?.ctaPolicy).toMatchObject({
+      minimumContextFields: 3,
+      requiredContextFields: ['lead_name', 'niche', 'paid_ads_experience'],
+    });
   });
 });

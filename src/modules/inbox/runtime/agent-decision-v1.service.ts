@@ -155,6 +155,8 @@ export class AgentDecisionPromptBuilder {
       'Quando currentInbound.media[].transcription tiver outcome=content e texto não vazio, esse texto é o conteúdo disponível do áudio atual: compreenda-o e nunca diga que não conseguiu identificar o áudio. Só peça texto quando a transcrição estiver vazia, indeterminada ou ausente.',
       'Interprete respostas curtas pelo turno anterior e faça no máximo duas perguntas por mensagem.',
       'Siga o playbook estruturado do Business Mode. Proponha somente fases e CTAs declarados nele.',
+      'Nunca proponha CTA antes de todos os ctaPolicy.requiredContextFields estarem disponíveis no estado canônico ou terem sido extraídos com evidência na decisão atual.',
+      'Quando faltar contexto obrigatório para CTA, faça uma pergunta curta sobre o próximo campo ausente em vez de antecipar o CTA.',
       'Quando houver contexto mínimo, apresente um CTA concreto sem prolongar a conversa para coletar campos opcionais.',
       'Extraia fatos somente quando houver evidence_refs; o backend decidirá se serão persistidos.',
       'Use microvalidações naturais, texto curto de WhatsApp, idioma e tom da conversa.',

@@ -433,6 +433,34 @@ run('Inbox Runtime PostgreSQL concurrency', () => {
       'ai_active',
     );
     const batchId = randomUUID();
+    const pipelineId = randomUUID();
+    const stageId = randomUUID();
+    const opportunityId = randomUUID();
+    await AgencyDataSource.query(
+      `INSERT INTO crm_pipelines (id,tenant_id,workspace_id,name) VALUES ($1,$2,$3,'Takeover')`,
+      [pipelineId, tenantId, workspaceId],
+    );
+    await AgencyDataSource.query(
+      `INSERT INTO crm_stages (id,tenant_id,workspace_id,pipeline_id,name) VALUES ($1,$2,$3,$4,'Open')`,
+      [stageId, tenantId, workspaceId, pipelineId],
+    );
+    await AgencyDataSource.query(
+      `INSERT INTO crm_opportunities
+        (id,tenant_id,workspace_id,pipeline_id,stage_id,inbox_conversation_id,title)
+       VALUES ($1,$2,$3,$4,$5,$6,'Takeover')`,
+      [
+        opportunityId,
+        tenantId,
+        workspaceId,
+        pipelineId,
+        stageId,
+        conversationId,
+      ],
+    );
+    await AgencyDataSource.query(
+      `UPDATE inbox_conversations SET opportunity_id=$2 WHERE id=$1`,
+      [conversationId, opportunityId],
+    );
     await AgencyDataSource.query(
       `INSERT INTO inbox_processing_batches (id,tenant_id,workspace_id,conversation_id,channel_id,status,due_at) VALUES ($1,$2,$3,$4,$5,'completed',now())`,
       [batchId, tenantId, workspaceId, conversationId, randomUUID()],
@@ -474,6 +502,19 @@ run('Inbox Runtime PostgreSQL concurrency', () => {
       [conversationId],
     );
     expect(decision.status).toBe('invalidated');
+    const [ownershipProjection] = await AgencyDataSource.query<
+      Array<{ conversation_owner: string; opportunity_owner: string }>
+    >(
+      `SELECT conversation.assigned_user_id conversation_owner,
+              opportunity.assigned_user_id opportunity_owner
+         FROM inbox_conversations conversation
+         JOIN crm_opportunities opportunity ON opportunity.id=$2
+        WHERE conversation.id=$1`,
+      [conversationId, opportunityId],
+    );
+    expect(ownershipProjection.opportunity_owner).toBe(
+      ownershipProjection.conversation_owner,
+    );
     const runtime = new InboxAgentRuntimeService(
       AgencyDataSource,
       {} as never,
@@ -1163,10 +1204,11 @@ run('Inbox Runtime PostgreSQL concurrency', () => {
           id: string;
           status: string;
           source: string;
+          operational_status: string | null;
           deleted_at: Date | null;
         }>
       >(
-        `SELECT id,status,source,deleted_at FROM crm_opportunities
+        `SELECT id,status,source,operational_status,deleted_at FROM crm_opportunities
           WHERE tenant_id=$1 AND workspace_id=$2 AND inbox_conversation_id=$3
           ORDER BY created_at`,
         [tenantId, isolatedWorkspace, conversationId],
@@ -1183,7 +1225,7 @@ run('Inbox Runtime PostgreSQL concurrency', () => {
       ).toHaveLength(1);
       expect(
         rows.find((row) => row.id !== terminalOpportunityId),
-      ).toMatchObject({ source: 'whatsapp' });
+      ).toMatchObject({ source: 'whatsapp', operational_status: 'ai_active' });
       if (terminalStatus === 'lost' && !softDeleted) {
         const current = rows.find((row) => row.id !== terminalOpportunityId)!;
         await AgencyDataSource.query(

@@ -60,11 +60,37 @@ import {
 } from '../runtime/inbox-governed-autonomy-policy.service';
 import { InboxPilotOutboundPolicyService } from '../channels/whatsapp/services/inbox-pilot-outbound-policy.service';
 import {
+  type CanonicalConversationFact,
   ConversationPlaybookStateService,
   PLAYBOOK_PROGRESS_METADATA_KEY,
 } from '../runtime/conversation-playbook-state.service';
 
 export type AgentDecisionProposal = AgentDecisionV1;
+
+export function canonicalConversationFacts(input: {
+  conversationTitle?: string | null;
+  opportunityContactName?: string | null;
+}): Record<string, CanonicalConversationFact> {
+  const candidate = (
+    input.opportunityContactName ??
+    input.conversationTitle ??
+    ''
+  )
+    .trim()
+    .replace(/\s+/g, ' ');
+  const isGeneric =
+    !candidate ||
+    /^\+?\d[\d\s()-]+$/.test(candidate) ||
+    /^(contato( do whatsapp)?|whatsapp|sem nome)$/i.test(candidate);
+  if (isGeneric) return {};
+  return {
+    lead_name: {
+      value: candidate.slice(0, 160),
+      evidenceRefs: ['channel:profile_name'],
+      confidence: 1,
+    },
+  };
+}
 
 export function resolveDecisionReviewOutcome(
   actionPlan: Array<Record<string, unknown>>,
@@ -434,9 +460,26 @@ export class InboxAgentRuntimeService {
       const opportunity = incompatibleActiveOpportunity
         ? null
         : activeOpportunityCandidate;
+      const persistedConversationPlaybook = readConversationPlaybook(
+        businessModeTemplate?.metadata,
+      );
+      const catalogConversationPlaybook = getCatalogConversationPlaybook(
+        effectiveBusinessMode,
+      );
       const conversationPlaybook =
-        readConversationPlaybook(businessModeTemplate?.metadata) ??
-        getCatalogConversationPlaybook(effectiveBusinessMode);
+        persistedConversationPlaybook &&
+        persistedConversationPlaybook.version >=
+          (catalogConversationPlaybook?.version ?? 0)
+          ? persistedConversationPlaybook
+          : (catalogConversationPlaybook ?? persistedConversationPlaybook);
+      const canonicalFacts = canonicalConversationFacts({
+        conversationTitle: conversation.title,
+        opportunityContactName: opportunity?.contactName,
+      });
+      const canonicalLeadName =
+        typeof canonicalFacts.lead_name?.value === 'string'
+          ? canonicalFacts.lead_name.value
+          : null;
       const allowedServices = canonicalStringList(
         settings?.companyContextPublished?.offers,
       );
@@ -483,7 +526,10 @@ export class InboxAgentRuntimeService {
           clientPromptConfig: settings?.clientPromptConfig ?? {},
           businessModeOverrides: settings?.businessModeOverrides ?? {},
         },
-        contact: { id: conversation.contactId },
+        contact: {
+          id: conversation.contactId,
+          displayName: canonicalLeadName,
+        },
         opportunity: opportunity
           ? {
               id: opportunity.id,
@@ -517,7 +563,10 @@ export class InboxAgentRuntimeService {
             message.direction === 'outbound' && message.senderType === 'agent',
         ),
         appointmentHandoffMode: isAppointmentHandoffMode(businessModeTemplate),
-        conversationProgress: currentProgress,
+        conversationProgress: {
+          ...(currentProgress ?? {}),
+          canonicalFacts,
+        },
         agentProfile:
           version?.snapshot && typeof version.snapshot === 'object'
             ? ((version.snapshot as Record<string, unknown>).agentIdentity ??
@@ -547,7 +596,10 @@ export class InboxAgentRuntimeService {
             },
             businessMode: effectiveBusinessMode,
             workspaceConfig: settings?.agentConfig ?? {},
-            contact: { id: conversation.contactId },
+            contact: {
+              id: conversation.contactId,
+              displayName: canonicalLeadName,
+            },
             opportunity: opportunity
               ? {
                   id: opportunity.id,
@@ -596,6 +648,7 @@ export class InboxAgentRuntimeService {
                     message.direction === 'outbound' &&
                     message.senderType === 'agent',
                 ).length,
+                canonicalFacts,
               });
             }
             proposal = providerResult.decision;
@@ -747,6 +800,7 @@ export class InboxAgentRuntimeService {
             conversionKey: `conversation:${lockedConversation.id}:generation:${batch.generation}`,
             contactId: lockedConversation.contactId,
             opportunityId: opportunity?.id ?? null,
+            canonicalFacts,
           });
           lockedConversation.metadata = {
             ...lockedConversation.metadata,

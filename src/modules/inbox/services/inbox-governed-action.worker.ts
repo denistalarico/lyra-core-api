@@ -500,6 +500,13 @@ export class InboxGovernedActionWorker
         action,
       );
       if (existing) {
+        existing.operationalStatus = conversation.ownershipState;
+        if (
+          conversation.ownershipState === 'human_active' &&
+          conversation.assignedUserId
+        ) {
+          existing.assignedUserId = conversation.assignedUserId;
+        }
         existing.businessContext = {
           ...existing.businessContext,
           contactResolution: {
@@ -597,7 +604,7 @@ export class InboxGovernedActionWorker
           priority: conversation.priority,
           source,
           businessMode: conversation.businessMode,
-          operationalStatus: null,
+          operationalStatus: conversation.ownershipState,
           businessContext: {
             origin: 'leadflow_inbox',
             acquisitionChannel: source,
@@ -613,7 +620,10 @@ export class InboxGovernedActionWorker
               governedActionId: action.id,
             },
           },
-          assignedUserId: null,
+          assignedUserId:
+            conversation.ownershipState === 'human_active'
+              ? conversation.assignedUserId
+              : null,
           expectedCloseDate: null,
           nextFollowUpAt: null,
           lastActivityAt: null,

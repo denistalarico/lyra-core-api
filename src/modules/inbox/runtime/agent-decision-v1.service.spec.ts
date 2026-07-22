@@ -151,7 +151,7 @@ describe('AgentDecision v1 schema and policy', () => {
           key: 'fact:niche',
           type: 'set_fact',
           allowed: true,
-          crmTarget: 'business_context.niche',
+          crmTarget: 'business_context.leadNiche',
         }),
       ]),
     );

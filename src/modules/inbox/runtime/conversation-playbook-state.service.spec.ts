@@ -30,6 +30,15 @@ function decision(overrides: Partial<AgentDecisionV1> = {}): AgentDecisionV1 {
         requires_confirmation: false,
         update_intent: 'enrich',
       },
+      {
+        field_key: 'paid_ads_experience',
+        proposed_target: 'ignored.by.backend',
+        value: false,
+        evidence_refs: ['message:1'],
+        confidence: 0.95,
+        requires_confirmation: false,
+        update_intent: 'enrich',
+      },
     ],
     recommended_cta: {
       key: 'schedule_diagnostic',
@@ -57,6 +66,13 @@ describe('ConversationPlaybookStateService', () => {
       conversionKey: 'conversion-1',
       contactId: 'contact-1',
       opportunityId: null,
+      canonicalFacts: {
+        lead_name: {
+          value: 'Lead Sintético',
+          evidenceRefs: ['channel:profile_name'],
+          confidence: 1,
+        },
+      },
     });
 
     expect(state.phase).toBe('qualify');
@@ -101,6 +117,13 @@ describe('ConversationPlaybookStateService', () => {
         playbook,
         decision: decision({ recommended_cta: null }),
         priorAgentReplies: 3,
+        canonicalFacts: {
+          lead_name: {
+            value: 'Lead Sintético',
+            evidenceRefs: ['channel:profile_name'],
+            confidence: 1,
+          },
+        },
       }),
     ).toThrow('decision_playbook_invalid');
     expect(() =>
@@ -111,7 +134,44 @@ describe('ConversationPlaybookStateService', () => {
           reply: 'Qual nicho? Qual prazo? Qual orçamento?',
         }),
         priorAgentReplies: 0,
+        canonicalFacts: {
+          lead_name: {
+            value: 'Lead Sintético',
+            evidenceRefs: ['channel:profile_name'],
+            confidence: 1,
+          },
+        },
       }),
     ).toThrow('decision_playbook_invalid');
+  });
+
+  it('rejects an agency CTA until name, niche and paid ads history are known', () => {
+    const service = new ConversationPlaybookStateService();
+
+    expect(() =>
+      service.assertDecision({
+        previous: null,
+        playbook,
+        decision: decision({ extracted_facts: [] }),
+        priorAgentReplies: 0,
+        canonicalFacts: {
+          lead_name: {
+            value: 'Lead Sintético',
+            evidenceRefs: ['channel:profile_name'],
+            confidence: 1,
+          },
+        },
+      }),
+    ).toThrow('decision_playbook_invalid');
+
+    expect(() =>
+      service.assertDecision({
+        previous: null,
+        playbook,
+        decision: decision({ recommended_cta: null, extracted_facts: [] }),
+        priorAgentReplies: 4,
+        canonicalFacts: {},
+      }),
+    ).not.toThrow();
   });
 });

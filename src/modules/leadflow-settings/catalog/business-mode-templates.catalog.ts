@@ -178,10 +178,16 @@ function prompt(system: string, user: string): LeadFlowJsonObject {
 }
 
 const commonConversationFields: ConversationQualificationFieldRule[] = [
+  fieldRule('lead_name', 'business_context.leadName'),
   fieldRule('company', 'business_context.company'),
-  fieldRule('niche', 'business_context.niche'),
+  fieldRule('niche', 'business_context.leadNiche'),
+  fieldRule(
+    'paid_ads_experience',
+    'business_context.paidAdsExperience',
+    'boolean',
+  ),
   fieldRule('need', 'business_context.need'),
-  fieldRule('service_interest', 'business_context.serviceInterest'),
+  fieldRule('service_interest', 'business_context.projectType'),
   fieldRule('urgency', 'business_context.urgency'),
   fieldRule('budget', 'business_context.budget'),
   fieldRule('deadline', 'business_context.deadline'),
@@ -253,9 +259,17 @@ function conversationPlaybook(input: {
   for (const common of commonConversationFields) {
     if (!rules.some((rule) => rule.key === common.key)) rules.push(common);
   }
-  const essential = catalogRules.slice(0, 2).map((rule) => rule.key);
+  const agencyCtaFields = ['lead_name', 'niche', 'paid_ads_experience'];
+  const essential =
+    input.key === LeadFlowBusinessMode.AgencyServices
+      ? agencyCtaFields
+      : catalogRules.slice(0, 2).map((rule) => rule.key);
+  const requiredContextFields =
+    input.key === LeadFlowBusinessMode.AgencyServices
+      ? agencyCtaFields
+      : essential.slice(0, 1);
   return {
-    version: 1,
+    version: 2,
     businessModeKey: input.key,
     primaryGoal: input.goals[0] ?? 'definir um proximo passo comercial',
     successOutcomes: input.goals,
@@ -271,6 +285,12 @@ function conversationPlaybook(input: {
         guidance: [
           'demonstre compreensao antes de perguntar',
           'faca preferencialmente uma pergunta e nunca mais de duas',
+          ...(input.key === LeadFlowBusinessMode.AgencyServices
+            ? [
+                'se o nome do lead nao estiver disponivel, pergunte como ele prefere ser chamado',
+                'nao apresente CTA no primeiro contato sem nome, nicho e historico de investimento em anuncios',
+              ]
+            : []),
         ],
       },
       {
@@ -303,7 +323,8 @@ function conversationPlaybook(input: {
     qualificationFields: rules,
     ctaPolicy: {
       allowed: allowedCtas,
-      minimumContextFields: 1,
+      minimumContextFields: requiredContextFields.length,
+      requiredContextFields,
       maxAgentRepliesWithoutCta: 3,
       requiresOperationalCapability: Object.fromEntries(
         allowedCtas

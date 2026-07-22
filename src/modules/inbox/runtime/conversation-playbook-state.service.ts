@@ -5,6 +5,12 @@ import type { AgentDecisionV1 } from './inbox-runtime.contracts';
 
 export const PLAYBOOK_PROGRESS_METADATA_KEY = 'leadflowPlaybookProgress';
 
+export type CanonicalConversationFact = {
+  value: string | number | boolean;
+  evidenceRefs: string[];
+  confidence: number;
+};
+
 export type ConversationPlaybookProgress = {
   schemaVersion: 1;
   businessModeKey: string;
@@ -51,6 +57,7 @@ export class ConversationPlaybookStateService {
     playbook: ConversationPlaybook;
     decision: AgentDecisionV1;
     priorAgentReplies: number;
+    canonicalFacts?: Record<string, CanonicalConversationFact>;
   }) {
     const questions = input.decision.reply?.match(/\?/g)?.length ?? 0;
     if (questions > 2) throw new Error('decision_playbook_invalid');
@@ -75,9 +82,43 @@ export class ConversationPlaybookStateService {
     const addressesNow =
       input.decision.recommended_cta &&
       input.decision.recommended_cta.status !== 'pending';
+    const availableFacts = new Set(
+      Object.entries(input.previous?.facts ?? {})
+        .filter(([, fact]) => !fact.requiresConfirmation)
+        .map(([key]) => key),
+    );
+    for (const key of Object.keys(input.canonicalFacts ?? {})) {
+      availableFacts.add(key);
+    }
+    const allowedFields = new Set(
+      input.playbook.qualificationFields.map((rule) => rule.key),
+    );
+    for (const fact of input.decision.extracted_facts) {
+      if (
+        allowedFields.has(fact.field_key) &&
+        fact.value !== null &&
+        fact.evidence_refs.length > 0 &&
+        fact.confidence >= 0.65 &&
+        !fact.requires_confirmation
+      ) {
+        availableFacts.add(fact.field_key);
+      }
+    }
+    const requiredContextFields =
+      input.playbook.ctaPolicy.requiredContextFields ?? [];
+    const hasRequiredContext = requiredContextFields.every((key) =>
+      availableFacts.has(key),
+    );
+    const hasMinimumContext =
+      availableFacts.size >= input.playbook.ctaPolicy.minimumContextFields;
+    const contextReady = hasRequiredContext && hasMinimumContext;
+    if (addressesNow && !contextReady) {
+      throw new Error('decision_playbook_invalid');
+    }
     if (
       input.priorAgentReplies >=
         input.playbook.ctaPolicy.maxAgentRepliesWithoutCta &&
+      contextReady &&
       !alreadyAddressed &&
       !addressesNow
     ) {
@@ -93,6 +134,7 @@ export class ConversationPlaybookStateService {
     conversionKey: string;
     contactId: string | null;
     opportunityId: string | null;
+    canonicalFacts?: Record<string, CanonicalConversationFact>;
   }): ConversationPlaybookProgress {
     const phases = input.playbook.phases;
     const previousPhase = phases.find(
@@ -111,6 +153,15 @@ export class ConversationPlaybookStateService {
       input.playbook.qualificationFields.map((rule) => rule.key),
     );
     const facts = { ...(input.previous?.facts ?? {}) };
+    for (const [key, fact] of Object.entries(input.canonicalFacts ?? {})) {
+      facts[key] = {
+        value: fact.value,
+        evidenceRefs: [...new Set(fact.evidenceRefs)],
+        confidence: fact.confidence,
+        requiresConfirmation: false,
+        decisionId: input.decisionId,
+      };
+    }
     for (const fact of input.decision.extracted_facts) {
       if (
         !allowedFields.has(fact.field_key) ||

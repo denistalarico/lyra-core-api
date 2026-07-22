@@ -3,6 +3,7 @@ import {
   ConflictException,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, EntityManager } from 'typeorm';
@@ -21,6 +22,7 @@ import {
 import { InboxConversationEventEntity } from '../entities/inbox-conversation-event.entity';
 import { InboxDomainOutboxEntity } from '../entities/inbox-domain-outbox.entity';
 import { InboxProcessingBatchEntity } from '../entities/inbox-processing-batch.entity';
+import { InboxNotificationPublisher } from './inbox-notification.publisher';
 
 export type ConversationOwnershipAction =
   | 'request_handoff'
@@ -33,6 +35,8 @@ export type ConversationOwnershipAction =
 export class ConversationOwnershipService {
   constructor(
     @InjectDataSource('agency') private readonly dataSource: DataSource,
+    @Optional()
+    private readonly notificationPublisher?: InboxNotificationPublisher,
   ) {}
 
   async transition(
@@ -52,7 +56,7 @@ export class ConversationOwnershipService {
     ) {
       throw new BadRequestException('User context is required.');
     }
-    return this.dataSource.transaction(async (manager) => {
+    const result = await this.dataSource.transaction(async (manager) => {
       const conversation = await manager
         .getRepository(InboxConversationEntity)
         .findOne({
@@ -71,14 +75,26 @@ export class ConversationOwnershipService {
         action === 'request_handoff' &&
         conversation.ownershipState === 'handoff_requested'
       ) {
-        return conversation;
+        return {
+          conversation,
+          handoffRecipientUserIds: [] as string[],
+          channelClientId: null as string | null,
+          publishHandoffNotification: false,
+        };
       }
 
       if (
         action === 'assume' &&
         conversation.ownershipState === 'human_active'
       ) {
-        if (conversation.assignedUserId === ctx.userId) return conversation;
+        if (conversation.assignedUserId === ctx.userId) {
+          return {
+            conversation,
+            handoffRecipientUserIds: [] as string[],
+            channelClientId: null as string | null,
+            publishHandoffNotification: false,
+          };
+        }
         // Sem responsável (ex.: atribuição removida) a conversa está livre —
         // qualquer operador pode assumir sem conflito.
         if (conversation.assignedUserId) {
@@ -150,8 +166,28 @@ export class ConversationOwnershipService {
       if (next !== 'ai_active') await this.invalidateAutomation(manager, saved);
       await this.audit(manager, ctx, saved, action, previousVersion);
       await this.projectOpportunity(manager, saved);
-      return saved;
+      const handoffRoute =
+        next === 'handoff_requested'
+          ? await this.resolveHandoffNotificationRoute(manager, saved)
+          : {
+              recipientUserIds: [] as string[],
+              clientId: null as string | null,
+            };
+      return {
+        conversation: saved,
+        handoffRecipientUserIds: handoffRoute.recipientUserIds,
+        channelClientId: handoffRoute.clientId,
+        publishHandoffNotification: next === 'handoff_requested',
+      };
     });
+    if (result.publishHandoffNotification) {
+      await this.notificationPublisher?.publishHandoffRequested({
+        conversation: result.conversation,
+        recipientUserIds: result.handoffRecipientUserIds,
+        clientId: result.channelClientId,
+      });
+    }
+    return result.conversation;
   }
 
   async assertAiCanSend(input: {
@@ -313,5 +349,43 @@ export class ConversationOwnershipService {
         },
       )
       .execute();
+  }
+
+  private async resolveHandoffNotificationRoute(
+    manager: EntityManager,
+    conversation: InboxConversationEntity,
+  ) {
+    const channel = conversation.channelId
+      ? await manager.getRepository(InboxChannelEntity).findOneBy({
+          id: conversation.channelId,
+          tenantId: conversation.tenantId,
+          workspaceId: conversation.workspaceId,
+        })
+      : null;
+    const directRecipient =
+      conversation.assignedUserId ?? channel?.defaultAssignedUserId ?? null;
+    const owners = directRecipient
+      ? []
+      : await manager.getRepository(WorkspaceUserEntity).find({
+          where: {
+            tenantId: conversation.tenantId,
+            workspaceId: conversation.workspaceId,
+            role: 'owner',
+            status: 'active',
+          },
+        });
+    const clientId =
+      typeof channel?.metadata?.clientId === 'string'
+        ? channel.metadata.clientId
+        : null;
+
+    return {
+      recipientUserIds: directRecipient
+        ? [directRecipient]
+        : owners
+            .map((owner) => owner.userId)
+            .filter((userId): userId is string => Boolean(userId)),
+      clientId,
+    };
   }
 }

@@ -115,7 +115,7 @@ export type AgentDecisionInput = {
   agent: { id: string | null; versionId: string | null; snapshot: unknown };
   businessMode: string;
   workspaceConfig: Record<string, unknown>;
-  contact: { id: string | null };
+  contact: { id: string | null; displayName?: string | null };
   opportunity: Record<string, unknown> | null;
   ownership: { state: string; version: number };
   allowedActions: string[];
