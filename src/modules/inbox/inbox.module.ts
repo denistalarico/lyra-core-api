@@ -77,6 +77,7 @@ import { InboxGovernedAutonomyPolicyService } from './runtime/inbox-governed-aut
 import { InboxGovernedActionWorker } from './services/inbox-governed-action.worker';
 import { InboxAutonomyAdminService } from './services/inbox-autonomy-admin.service';
 import { InboxAutonomyAdminController } from './inbox-autonomy-admin.controller';
+import { ConversationPlaybookStateService } from './runtime/conversation-playbook-state.service';
 
 @Module({
   imports: [
@@ -162,6 +163,7 @@ import { InboxAutonomyAdminController } from './inbox-autonomy-admin.controller'
     InboxGovernedAutonomyPolicyService,
     InboxGovernedActionWorker,
     InboxAutonomyAdminService,
+    ConversationPlaybookStateService,
   ],
   exports: [
     InboxService,

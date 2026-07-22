@@ -79,7 +79,11 @@ export class CrmService {
     const workspaceId = this.requireWorkspaceId(ctx);
 
     return this.pipelinesRepository.find({
-      where: this.withClientScope(ctx, { tenantId, workspaceId, deletedAt: IsNull() }),
+      where: this.withClientScope(ctx, {
+        tenantId,
+        workspaceId,
+        deletedAt: IsNull(),
+      }),
       order: { sortOrder: 'ASC', createdAt: 'ASC' },
     });
   }
@@ -119,7 +123,12 @@ export class CrmService {
     const workspaceId = this.requireWorkspaceId(ctx);
 
     const pipeline = await this.pipelinesRepository.findOne({
-      where: this.withClientScope(ctx, { id, tenantId, workspaceId, deletedAt: IsNull() }),
+      where: this.withClientScope(ctx, {
+        id,
+        tenantId,
+        workspaceId,
+        deletedAt: IsNull(),
+      }),
     });
 
     if (!pipeline) throw new NotFoundException('CRM pipeline not found.');
@@ -217,7 +226,12 @@ export class CrmService {
     const workspaceId = this.requireWorkspaceId(ctx);
 
     const stage = await this.stagesRepository.findOne({
-      where: this.withClientScope(ctx, { id, tenantId, workspaceId, deletedAt: IsNull() }),
+      where: this.withClientScope(ctx, {
+        id,
+        tenantId,
+        workspaceId,
+        deletedAt: IsNull(),
+      }),
     });
 
     if (!stage) throw new NotFoundException('CRM stage not found.');
@@ -382,7 +396,12 @@ export class CrmService {
     const workspaceId = this.requireWorkspaceId(ctx);
 
     const opportunity = await this.opportunitiesRepository.findOne({
-      where: this.withClientScope(ctx, { id, tenantId, workspaceId, deletedAt: IsNull() }),
+      where: this.withClientScope(ctx, {
+        id,
+        tenantId,
+        workspaceId,
+        deletedAt: IsNull(),
+      }),
     });
 
     if (!opportunity) throw new NotFoundException('CRM opportunity not found.');
@@ -436,14 +455,46 @@ export class CrmService {
     if (dto.currency !== undefined) opportunity.currency = dto.currency;
     if (dto.status !== undefined)
       this.applyOpportunityStatus(opportunity, dto.status, dto.lostReason);
-    if (dto.priority !== undefined) opportunity.priority = dto.priority;
-    if (dto.source !== undefined) opportunity.source = dto.source;
+    if (dto.priority !== undefined) {
+      opportunity.priority = dto.priority;
+      opportunity.businessContext = this.markHumanBusinessContextFields(
+        opportunity.businessContext,
+        ['urgency'],
+        ctx.userId ?? null,
+      );
+    }
+    if (dto.source !== undefined) {
+      opportunity.source = dto.source;
+      opportunity.metadata = {
+        ...opportunity.metadata,
+        sourceProvenance: 'human',
+        sourceUpdatedBy: ctx.userId ?? null,
+      };
+    }
     if (dto.businessMode !== undefined)
       opportunity.businessMode = dto.businessMode;
     if (dto.operationalStatus !== undefined)
       opportunity.operationalStatus = dto.operationalStatus;
-    if (dto.businessContext !== undefined)
-      opportunity.businessContext = dto.businessContext;
+    if (dto.businessContext !== undefined) {
+      const changedFields = Object.keys(dto.businessContext).filter(
+        (key) =>
+          key !== 'fieldProvenance' &&
+          JSON.stringify(opportunity.businessContext[key]) !==
+            JSON.stringify(dto.businessContext?.[key]),
+      );
+      opportunity.businessContext = this.markHumanBusinessContextFields(
+        {
+          ...dto.businessContext,
+          ...(opportunity.businessContext.fieldProvenance
+            ? {
+                fieldProvenance: opportunity.businessContext.fieldProvenance,
+              }
+            : {}),
+        },
+        changedFields,
+        ctx.userId ?? null,
+      );
+    }
     if (dto.assignedUserId !== undefined)
       opportunity.assignedUserId = dto.assignedUserId;
     if (dto.expectedCloseDate !== undefined)
@@ -531,7 +582,12 @@ export class CrmService {
       afterData: { stageId: saved.stageId, status: saved.status },
     });
 
-    if (stage.isWonStage || stage.isLostStage || stage.type === 'won' || stage.type === 'lost') {
+    if (
+      stage.isWonStage ||
+      stage.isLostStage ||
+      stage.type === 'won' ||
+      stage.type === 'lost'
+    ) {
       await this.salesNotificationPublisher.publishOpportunityStageChanged({
         resource: saved,
         event,
@@ -570,7 +626,11 @@ export class CrmService {
     const workspaceId = this.requireWorkspaceId(ctx);
 
     return this.tagsRepository.find({
-      where: this.withClientScope(ctx, { tenantId, workspaceId, deletedAt: IsNull() }),
+      where: this.withClientScope(ctx, {
+        tenantId,
+        workspaceId,
+        deletedAt: IsNull(),
+      }),
       order: { kind: 'ASC', name: 'ASC' },
     });
   }
@@ -607,7 +667,12 @@ export class CrmService {
     const workspaceId = this.requireWorkspaceId(ctx);
 
     const tag = await this.tagsRepository.findOne({
-      where: this.withClientScope(ctx, { id, tenantId, workspaceId, deletedAt: IsNull() }),
+      where: this.withClientScope(ctx, {
+        id,
+        tenantId,
+        workspaceId,
+        deletedAt: IsNull(),
+      }),
     });
 
     if (!tag) throw new NotFoundException('CRM tag not found.');
@@ -1127,6 +1192,31 @@ export class CrmService {
       opportunity.lostAt = null;
       opportunity.lostReason = null;
     }
+  }
+
+  private markHumanBusinessContextFields(
+    context: Record<string, unknown>,
+    fields: string[],
+    userId: string | null,
+  ) {
+    const existing =
+      context.fieldProvenance &&
+      typeof context.fieldProvenance === 'object' &&
+      !Array.isArray(context.fieldProvenance)
+        ? (context.fieldProvenance as Record<string, unknown>)
+        : {};
+    return {
+      ...context,
+      fieldProvenance: {
+        ...existing,
+        ...Object.fromEntries(
+          fields.map((field) => [
+            field,
+            { source: 'human', userId, updatedAt: new Date().toISOString() },
+          ]),
+        ),
+      },
+    };
   }
 
   private toDateOrNull(value?: string | null): Date | null {

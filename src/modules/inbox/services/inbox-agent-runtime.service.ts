@@ -27,6 +27,8 @@ import { OperationsRoomStateService } from '../../leadflow-agents/services/opera
 import { LeadFlowClientSettingsEntity } from '../../leadflow-settings/entities/leadflow-client-settings.entity';
 import { LeadFlowBusinessModeTemplateEntity } from '../../leadflow-settings/entities/leadflow-business-mode-template.entity';
 import { LeadFlowSettingsContextType } from '../../leadflow-settings/enums/leadflow-settings-context-type.enum';
+import { readConversationPlaybook } from '../../leadflow-settings/types/conversation-playbook.types';
+import { getCatalogConversationPlaybook } from '../../leadflow-settings/catalog/business-mode-templates.catalog';
 import { InboxAgentDecisionEntity } from '../entities/inbox-agent-decision.entity';
 import type { InboxAgentDecisionReviewOutcome } from '../entities/inbox-agent-decision.entity';
 import { InboxChannelEntity } from '../entities/inbox-channel.entity';
@@ -50,12 +52,17 @@ import {
   AgentDecisionResult,
   InboxProviderError,
 } from '../runtime/inbox-runtime.contracts';
+import { resolveDefaultPipelineForBusinessMode } from '../runtime/inbox-crm-target-resolver';
 import {
   InboxGovernedActionType,
   InboxGovernedAutonomyPolicyService,
   INBOX_AUTONOMY_POLICY_VERSION,
 } from '../runtime/inbox-governed-autonomy-policy.service';
 import { InboxPilotOutboundPolicyService } from '../channels/whatsapp/services/inbox-pilot-outbound-policy.service';
+import {
+  ConversationPlaybookStateService,
+  PLAYBOOK_PROGRESS_METADATA_KEY,
+} from '../runtime/conversation-playbook-state.service';
 
 export type AgentDecisionProposal = AgentDecisionV1;
 
@@ -194,6 +201,8 @@ export class InboxAgentRuntimeService {
     private readonly autonomyPolicy?: InboxGovernedAutonomyPolicyService,
     @Optional()
     private readonly pilotOutboundPolicy?: InboxPilotOutboundPolicyService,
+    @Optional()
+    private readonly playbookState?: ConversationPlaybookStateService,
   ) {}
 
   async claimAndProcess(workerId: string) {
@@ -340,21 +349,29 @@ export class InboxAgentRuntimeService {
           })
           .getMany()
       : [];
-    const opportunity = await this.dataSource
+    const activeOpportunities = await this.dataSource
       .getRepository(CrmOpportunityEntity)
-      .findOne({
-        where: conversation.opportunityId
-          ? {
-              id: conversation.opportunityId,
-              tenantId: batch.tenantId,
-              workspaceId: batch.workspaceId,
-            }
-          : {
-              inboxConversationId: conversation.id,
-              tenantId: batch.tenantId,
-              workspaceId: batch.workspaceId,
-            },
+      .find({
+        where: {
+          inboxConversationId: conversation.id,
+          tenantId: batch.tenantId,
+          workspaceId: batch.workspaceId,
+          status: 'open',
+          deletedAt: IsNull(),
+        },
+        take: 2,
       });
+    if (activeOpportunities.length > 1) {
+      await this.dataSource
+        .getRepository(InboxProcessingBatchEntity)
+        .update(batch.id, {
+          status: 'cancelled',
+          errorCode: 'multiple_active_opportunities',
+          completedAt: new Date(),
+        });
+      return null;
+    }
+    const activeOpportunityCandidate = activeOpportunities[0] ?? null;
     const agent = await this.resolveAgent(batch, conversation);
     const version = agent?.publishedVersionId
       ? await this.dataSource
@@ -410,6 +427,22 @@ export class InboxAgentRuntimeService {
         : null;
       const effectiveBusinessMode =
         settings?.businessModeKey ?? conversation.businessMode;
+      const incompatibleActiveOpportunity = Boolean(
+        activeOpportunityCandidate &&
+        activeOpportunityCandidate.businessMode !== effectiveBusinessMode,
+      );
+      const opportunity = incompatibleActiveOpportunity
+        ? null
+        : activeOpportunityCandidate;
+      const conversationPlaybook =
+        readConversationPlaybook(businessModeTemplate?.metadata) ??
+        getCatalogConversationPlaybook(effectiveBusinessMode);
+      const allowedServices = canonicalStringList(
+        settings?.companyContextPublished?.offers,
+      );
+      const progressReader =
+        this.playbookState ?? new ConversationPlaybookStateService();
+      const currentProgress = progressReader.read(conversation.metadata);
       const projectedEvidence = projectConversationEvidence(
         orderedMessages,
         media,
@@ -440,6 +473,9 @@ export class InboxAgentRuntimeService {
           'set_stage',
           'add_tag',
           'set_summary',
+          'set_service',
+          'set_urgency',
+          'set_fact',
           'close',
           'handoff',
         ],
@@ -472,6 +508,7 @@ export class InboxAgentRuntimeService {
               qualificationFields: businessModeTemplate.qualificationFields,
               handoffRules: businessModeTemplate.handoffRules,
               recommendedApps: businessModeTemplate.recommendedApps,
+              conversationPlaybook,
             }
           : { key: effectiveBusinessMode },
         businessModeVersion: businessModeTemplate?.version ?? 1,
@@ -479,8 +516,8 @@ export class InboxAgentRuntimeService {
           (message) =>
             message.direction === 'outbound' && message.senderType === 'agent',
         ),
-        appointmentHandoffMode:
-          isAppointmentHandoffMode(businessModeTemplate),
+        appointmentHandoffMode: isAppointmentHandoffMode(businessModeTemplate),
+        conversationProgress: currentProgress,
         agentProfile:
           version?.snapshot && typeof version.snapshot === 'object'
             ? ((version.snapshot as Record<string, unknown>).agentIdentity ??
@@ -527,6 +564,9 @@ export class InboxAgentRuntimeService {
               'set_stage',
               'add_tag',
               'set_summary',
+              'set_service',
+              'set_urgency',
+              'set_fact',
               'close',
               'handoff',
             ],
@@ -546,6 +586,18 @@ export class InboxAgentRuntimeService {
                 .filter((item): item is string => typeof item === 'string'),
               ...images.map((item) => item.evidenceRef),
             ]);
+            if (conversationPlaybook) {
+              progressReader.assertDecision({
+                previous: currentProgress,
+                playbook: conversationPlaybook,
+                decision: providerResult.decision,
+                priorAgentReplies: messageProjection.filter(
+                  (message) =>
+                    message.direction === 'outbound' &&
+                    message.senderType === 'agent',
+                ).length,
+              });
+            }
             proposal = providerResult.decision;
             break;
           } catch {
@@ -564,6 +616,11 @@ export class InboxAgentRuntimeService {
         businessMode: effectiveBusinessMode,
         opportunity,
         decision: proposal,
+        playbook: conversationPlaybook,
+        opportunityWillBeEnsured:
+          conversation.qualificationStatus === 'qualified' &&
+          !incompatibleActiveOpportunity,
+        allowedServices,
       });
       return await this.dataSource.transaction(async (manager) => {
         const lockedBatch = await manager
@@ -622,25 +679,27 @@ export class InboxAgentRuntimeService {
             where: {
               tenantId: batch.tenantId,
               workspaceId: batch.workspaceId,
-              businessMode: effectiveBusinessMode,
               isDefault: true,
               status: 'active',
               deletedAt: IsNull(),
             },
           });
-        const initialStage =
-          defaultPipelines.length === 1
-            ? await manager.getRepository(CrmStageEntity).findOne({
-                where: {
-                  tenantId: batch.tenantId,
-                  workspaceId: batch.workspaceId,
-                  pipelineId: defaultPipelines[0].id,
-                  type: 'open',
-                  deletedAt: IsNull(),
-                },
-                order: { sortOrder: 'ASC', createdAt: 'ASC' },
-              })
-            : null;
+        const defaultPipeline = resolveDefaultPipelineForBusinessMode(
+          defaultPipelines,
+          effectiveBusinessMode,
+        );
+        const initialStage = defaultPipeline
+          ? await manager.getRepository(CrmStageEntity).findOne({
+              where: {
+                tenantId: batch.tenantId,
+                workspaceId: batch.workspaceId,
+                pipelineId: defaultPipeline.id,
+                type: 'open',
+                deletedAt: IsNull(),
+              },
+              order: { sortOrder: 'ASC', createdAt: 'ASC' },
+            })
+          : null;
         const identityDigits = lockedConversation.externalThreadId?.replace(
           /\D/g,
           '',
@@ -678,10 +737,25 @@ export class InboxAgentRuntimeService {
         );
         if (lockedConversation.businessMode !== effectiveBusinessMode) {
           lockedConversation.businessMode = effectiveBusinessMode;
-          await manager
-            .getRepository(InboxConversationEntity)
-            .save(lockedConversation);
         }
+        if (conversationPlaybook) {
+          const nextProgress = progressReader.apply({
+            previous: progressReader.read(lockedConversation.metadata),
+            playbook: conversationPlaybook,
+            decision: proposal,
+            decisionId,
+            conversionKey: `conversation:${lockedConversation.id}:generation:${batch.generation}`,
+            contactId: lockedConversation.contactId,
+            opportunityId: opportunity?.id ?? null,
+          });
+          lockedConversation.metadata = {
+            ...lockedConversation.metadata,
+            [PLAYBOOK_PROGRESS_METADATA_KEY]: nextProgress,
+          };
+        }
+        await manager
+          .getRepository(InboxConversationEntity)
+          .save(lockedConversation);
         const policyActions = this.evaluateGovernedActions({
           decisionId,
           batch,
@@ -714,16 +788,16 @@ export class InboxAgentRuntimeService {
             (activeOwners.length === 1 && activeOwners[0].userId),
           ),
           opportunityDefaultsResolved: Boolean(
-            defaultPipelines.length === 1 && initialStage,
+            defaultPipeline && initialStage && !incompatibleActiveOpportunity,
           ),
-          defaultPipelineId:
-            defaultPipelines.length === 1 ? defaultPipelines[0].id : null,
+          defaultPipelineId: defaultPipeline?.id ?? null,
           initialStageId: initialStage?.id ?? null,
           canonicalIdentityResolved: Boolean(
             identityDigits &&
             identityMatches.length <= 1 &&
             identityMatches[0]?.status !== 'archived',
           ),
+          activeOpportunityResolved: Boolean(opportunity),
         });
         const decision = await manager
           .getRepository(InboxAgentDecisionEntity)
@@ -758,10 +832,15 @@ export class InboxAgentRuntimeService {
               conversationId: conversation.id,
               opportunityId: opportunity?.id ?? null,
               businessMode: effectiveBusinessMode,
+              businessModeVersion: businessModeTemplate?.version ?? 1,
+              playbookVersion: conversationPlaybook?.version ?? null,
+              playbookPhase:
+                progressReader.read(lockedConversation.metadata)?.phase ?? null,
               messageRefs: messageProjection.map(({ id, occurredAt }) => ({
                 id,
                 occurredAt,
               })),
+              latestInboundId: contextInbound?.id ?? null,
               mediaRefs: media.map(({ id, kind, status }) => ({
                 id,
                 kind,
@@ -887,24 +966,26 @@ export class InboxAgentRuntimeService {
     defaultPipelineId: string | null;
     initialStageId: string | null;
     canonicalIdentityResolved: boolean;
+    activeOpportunityResolved: boolean;
   }) {
     const actions: Array<{
       type: InboxGovernedActionType;
       key: string;
       value?: string | null;
       resolved: boolean;
+      refs?: string[];
     }> = [];
-    if (!input.conversation.contactId) {
-      actions.push({
-        type: 'ensure_contact',
-        key: 'contact',
-        value: null,
-        resolved: input.canonicalIdentityResolved,
-      });
-    }
+    actions.push({
+      type: 'ensure_contact',
+      key: 'contact',
+      value: null,
+      resolved: Boolean(
+        input.conversation.contactId || input.canonicalIdentityResolved,
+      ),
+    });
     if (
       input.conversation.qualificationStatus === 'qualified' &&
-      !input.conversation.opportunityId
+      !input.activeOpportunityResolved
     ) {
       actions.push({
         type: 'ensure_opportunity',
@@ -932,6 +1013,11 @@ export class InboxAgentRuntimeService {
         key: recordString(action.key),
         value: typeof action.value === 'string' ? action.value : null,
         resolved: action.allowed === true,
+        refs: Array.isArray(action.evidenceRefs)
+          ? action.evidenceRefs.filter(
+              (ref): ref is string => typeof ref === 'string',
+            )
+          : [],
       });
     }
     const inboundText = input.latestInbound?.content ?? '';
@@ -967,6 +1053,7 @@ export class InboxAgentRuntimeService {
             ? [`stage:${input.initialStageId}`]
             : []),
           ...(input.latestInbound ? [`message:${input.latestInbound.id}`] : []),
+          ...(action.refs ?? []),
         ],
         auditRef: randomUUID(),
         pilotMode: this.config.pilotMode,
@@ -1795,9 +1882,19 @@ function isGovernedActionType(
     'set_summary',
     'set_service',
     'set_urgency',
+    'set_fact',
     'close',
     'handoff',
   ].includes(String(value));
+}
+
+function canonicalStringList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((item): item is string => typeof item === 'string')
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .slice(0, 100);
 }
 
 function detectsPromptInjection(value: string): boolean {
@@ -1812,24 +1909,79 @@ function detectsSensitiveTopic(value: string): boolean {
   );
 }
 
-function factualReplyIsSupported(reply: string, contextText: string): boolean {
+export function factualReplyIsSupported(
+  reply: string,
+  contextText: string,
+): boolean {
   const urls = reply.match(/https?:\/\/[^\s)]+/gi) ?? [];
   if (urls.some((url) => !contextText.includes(url.toLowerCase())))
     return false;
+  const normalizedReply = normalizeFactualText(reply);
+  const normalizedContext = normalizeFactualText(contextText);
+  const exactClaims = [
+    ...normalizedReply.matchAll(/r\$\s*\d+(?:[.,]\d{2})?/g),
+    ...normalizedReply.matchAll(/\b\d{1,2}h(?:\d{2})?\b/g),
+    ...normalizedReply.matchAll(/\b\d{1,2}\/\d{1,2}(?:\/\d{2,4})?\b/g),
+  ].map((match) => match[0]);
+  if (exactClaims.some((claim) => !normalizedContext.includes(claim)))
+    return false;
   if (
-    /(r\$|\b\d+[,.]\d{2}\b|\b\d{1,2}h(?:\d{2})?\b|pre[cç]o|desconto|garantia|contrato|dispon[ií]vel|agenda|hor[aá]rio|prazo|pol[ií]tica|pix|parcel)/i.test(
-      reply,
+    /\b(desconto|garantia|contrato|politica|pix|parcel(?:a|ado|amento)?)\b/.test(
+      normalizedReply,
+    ) &&
+    !/\b(desconto|garantia|contrato|politica|pix|parcel(?:a|ado|amento)?)\b/.test(
+      normalizedContext,
     )
   )
     return false;
   if (
     /\b(oferecemos|trabalhamos|temos|fazemos|atendemos|somos|garantimos|nosso(?:s|a|as)?)\b/i.test(
       reply,
-    )
+    ) &&
+    factualTokenSupport(normalizedReply, normalizedContext) < 0.35
   )
     return false;
   return /\?|\b(entendi|certo|perfeito|obrigad[oa]|ol[aá]|oi|posso|vou transferir)\b/i.test(
     reply,
+  );
+}
+
+function normalizeFactualText(value: string): string {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+}
+
+function factualTokenSupport(reply: string, context: string): number {
+  const ignored = new Set([
+    'aqui',
+    'como',
+    'com',
+    'isso',
+    'mais',
+    'para',
+    'pela',
+    'pelo',
+    'podemos',
+    'pode',
+    'que',
+    'seu',
+    'sua',
+    'tambem',
+    'uma',
+    'voce',
+  ]);
+  const tokens = [
+    ...new Set(
+      (reply.match(/[a-z0-9]{4,}/g) ?? []).filter(
+        (token) => !ignored.has(token),
+      ),
+    ),
+  ];
+  if (tokens.length === 0) return 0;
+  return (
+    tokens.filter((token) => context.includes(token)).length / tokens.length
   );
 }
 

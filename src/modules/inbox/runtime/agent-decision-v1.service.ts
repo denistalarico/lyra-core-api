@@ -6,6 +6,7 @@ import { CrmOpportunityEntity } from '../../crm/entities/crm-opportunity.entity'
 import { CrmStageEntity } from '../../crm/entities/crm-stage.entity';
 import { CrmTagEntity } from '../../crm/entities/crm-tag.entity';
 import { AgentDecisionV1 } from './inbox-runtime.contracts';
+import type { ConversationPlaybook } from '../../leadflow-settings/types/conversation-playbook.types';
 
 export type CommercialActionPlanItem = {
   key: string;
@@ -15,12 +16,18 @@ export type CommercialActionPlanItem = {
     | 'set_summary'
     | 'set_service'
     | 'set_urgency'
+    | 'set_fact'
     | 'close'
     | 'handoff';
   allowed: boolean;
   reason: string | null;
   value?: string;
   stageId?: string;
+  evidenceRefs?: string[];
+  confidence?: number;
+  requiresConfirmation?: boolean;
+  crmTarget?: string;
+  valueType?: 'string' | 'number' | 'boolean';
 };
 
 @Injectable()
@@ -74,6 +81,20 @@ export class AgentDecisionV1Service {
     )
       throw new Error('decision_schema_invalid');
     if (
+      !Array.isArray(item.extracted_facts) ||
+      item.extracted_facts.length > 30 ||
+      item.extracted_facts.some((fact) => !validFact(fact))
+    )
+      throw new Error('decision_schema_invalid');
+    if (item.recommended_cta !== null && !validCta(item.recommended_cta))
+      throw new Error('decision_schema_invalid');
+    if (
+      item.proposed_phase !== null &&
+      (typeof item.proposed_phase !== 'string' ||
+        item.proposed_phase.length > 80)
+    )
+      throw new Error('decision_schema_invalid');
+    if (
       !Array.isArray(item.proposed_actions) ||
       item.proposed_actions.length > 30 ||
       item.proposed_actions.some((action) => !validAction(action))
@@ -83,7 +104,12 @@ export class AgentDecisionV1Service {
 
   assertEvidenceRefs(decision: AgentDecisionV1, allowedRefs: string[]): void {
     const allowed = new Set(allowedRefs);
-    if (decision.evidence_refs.some((ref) => !allowed.has(ref)))
+    const referenced = [
+      ...decision.evidence_refs,
+      ...decision.extracted_facts.flatMap((fact) => fact.evidence_refs),
+      ...(decision.recommended_cta?.evidence_refs ?? []),
+    ];
+    if (referenced.some((ref) => !allowed.has(ref)))
       throw new Error('decision_evidence_invalid');
   }
 }
@@ -112,6 +138,7 @@ export class AgentDecisionPromptBuilder {
     companyContextHash?: string | null;
     firstAgentReply?: boolean;
     appointmentHandoffMode?: boolean;
+    conversationProgress?: unknown;
   }) {
     const platformPolicy = [
       'Você produz somente AgentDecision v1 estritamente estruturada.',
@@ -127,6 +154,9 @@ export class AgentDecisionPromptBuilder {
       'Compreenda o histórico antes de perguntar; não repita perguntas nem peça dados já presentes.',
       'Quando currentInbound.media[].transcription tiver outcome=content e texto não vazio, esse texto é o conteúdo disponível do áudio atual: compreenda-o e nunca diga que não conseguiu identificar o áudio. Só peça texto quando a transcrição estiver vazia, indeterminada ou ausente.',
       'Interprete respostas curtas pelo turno anterior e faça no máximo duas perguntas por mensagem.',
+      'Siga o playbook estruturado do Business Mode. Proponha somente fases e CTAs declarados nele.',
+      'Quando houver contexto mínimo, apresente um CTA concreto sem prolongar a conversa para coletar campos opcionais.',
+      'Extraia fatos somente quando houver evidence_refs; o backend decidirá se serão persistidos.',
       'Use microvalidações naturais, texto curto de WhatsApp, idioma e tom da conversa.',
       'Não insista após recusa clara. reply pode ser vazio quando não houver resposta útil.',
       'Em handoff, informe apenas que uma pessoa da equipe continuará por este mesmo canal.',
@@ -171,6 +201,7 @@ export class AgentDecisionPromptBuilder {
         conversationContext: {
           contact: input.contact,
           opportunity: input.opportunity,
+          playbookProgress: input.conversationProgress ?? {},
           ownership: input.ownership,
           messages: historicalMessages,
           transcriptions: input.transcriptions,
@@ -372,6 +403,9 @@ export class BusinessModeActionPlanner {
     businessMode: string;
     opportunity: CrmOpportunityEntity | null;
     decision: AgentDecisionV1;
+    playbook?: ConversationPlaybook | null;
+    opportunityWillBeEnsured?: boolean;
+    allowedServices?: string[];
   }): Promise<CommercialActionPlanItem[]> {
     const result: CommercialActionPlanItem[] = [];
     const opportunity = input.opportunity;
@@ -435,12 +469,15 @@ export class BusinessModeActionPlanner {
         value: tag.trim().slice(0, 80),
       });
     }
+    const opportunityAvailable = Boolean(
+      opportunity || input.opportunityWillBeEnsured,
+    );
     if (input.decision.agent_summary.trim())
       result.push({
         key: 'summary',
         type: 'set_summary',
-        allowed: Boolean(opportunity),
-        reason: opportunity ? null : 'opportunity_missing',
+        allowed: opportunityAvailable,
+        reason: opportunityAvailable ? null : 'opportunity_missing',
         value: input.decision.agent_summary.trim().slice(0, 4_000),
       });
     if (input.decision.service?.trim()) {
@@ -451,15 +488,15 @@ export class BusinessModeActionPlanner {
         ? opportunity.businessContext.allowedServices.filter(
             (item): item is string => typeof item === 'string',
           )
-        : [];
+        : (input.allowedServices ?? []);
       const resolvedService = allowedServices.find(
         (item) => slug(item) === slug(requestedService),
       );
       result.push({
         key: 'service',
         type: 'set_service',
-        allowed: Boolean(opportunity && resolvedService),
-        reason: !opportunity
+        allowed: Boolean(opportunityAvailable && resolvedService),
+        reason: !opportunityAvailable
           ? 'opportunity_missing'
           : !resolvedService
             ? 'service_not_allowed'
@@ -470,10 +507,59 @@ export class BusinessModeActionPlanner {
     result.push({
       key: 'urgency',
       type: 'set_urgency',
-      allowed: Boolean(opportunity),
-      reason: opportunity ? null : 'opportunity_missing',
+      allowed: opportunityAvailable,
+      reason: opportunityAvailable ? null : 'opportunity_missing',
       value: input.decision.urgency,
     });
+    const playbookRules = new Map(
+      (input.playbook?.qualificationFields ?? []).map((rule) => [
+        rule.key,
+        rule,
+      ]),
+    );
+    for (const fact of input.decision.extracted_facts) {
+      const rule = playbookRules.get(fact.field_key);
+      const value = scalarFactValue(fact.value, rule?.valueType);
+      const target = rule?.crmTarget;
+      const targetAllowed = Boolean(
+        target && /^business_context\.[a-zA-Z0-9_.-]{1,100}$/.test(target),
+      );
+      const evidenceValid = fact.evidence_refs.length > 0;
+      const confidenceValid = fact.confidence >= 0.65;
+      const allowed = Boolean(
+        opportunityAvailable &&
+        rule &&
+        targetAllowed &&
+        value !== null &&
+        evidenceValid &&
+        confidenceValid &&
+        !fact.requires_confirmation,
+      );
+      result.push({
+        key: `fact:${fact.field_key}`,
+        type: 'set_fact',
+        allowed,
+        reason: !opportunityAvailable
+          ? 'opportunity_missing'
+          : !rule || !targetAllowed
+            ? 'fact_target_not_allowed'
+            : value === null
+              ? 'fact_value_invalid'
+              : !evidenceValid
+                ? 'fact_evidence_missing'
+                : !confidenceValid
+                  ? 'fact_confidence_low'
+                  : fact.requires_confirmation
+                    ? 'fact_confirmation_required'
+                    : null,
+        value: value ?? undefined,
+        evidenceRefs: fact.evidence_refs,
+        confidence: fact.confidence,
+        requiresConfirmation: fact.requires_confirmation,
+        crmTarget: target,
+        valueType: rule?.valueType,
+      });
+    }
     if (input.decision.handoff)
       result.push({
         key: 'handoff',
@@ -514,6 +600,7 @@ function validAction(value: unknown): boolean {
       'set_summary',
       'set_service',
       'set_urgency',
+      'set_fact',
       'close',
       'handoff',
     ].includes(String(item.type)) &&
@@ -521,6 +608,71 @@ function validAction(value: unknown): boolean {
       item.value === null ||
       typeof item.value === 'string')
   );
+}
+
+function validFact(value: unknown): boolean {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const item = value as Record<string, unknown>;
+  const scalar = item.value;
+  return (
+    typeof item.field_key === 'string' &&
+    item.field_key.length > 0 &&
+    item.field_key.length <= 80 &&
+    (item.proposed_target === null ||
+      (typeof item.proposed_target === 'string' &&
+        item.proposed_target.length <= 120)) &&
+    (scalar === null ||
+      typeof scalar === 'string' ||
+      typeof scalar === 'number' ||
+      typeof scalar === 'boolean') &&
+    Array.isArray(item.evidence_refs) &&
+    item.evidence_refs.length <= 10 &&
+    item.evidence_refs.every(
+      (ref) => typeof ref === 'string' && ref.length <= 180,
+    ) &&
+    typeof item.confidence === 'number' &&
+    item.confidence >= 0 &&
+    item.confidence <= 1 &&
+    typeof item.requires_confirmation === 'boolean' &&
+    ['observe', 'enrich', 'correct'].includes(String(item.update_intent))
+  );
+}
+
+function validCta(value: unknown): boolean {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const item = value as Record<string, unknown>;
+  return (
+    typeof item.key === 'string' &&
+    item.key.length > 0 &&
+    item.key.length <= 80 &&
+    ['pending', 'presented', 'accepted', 'refused'].includes(
+      String(item.status),
+    ) &&
+    Array.isArray(item.evidence_refs) &&
+    item.evidence_refs.length <= 10 &&
+    item.evidence_refs.every(
+      (ref) => typeof ref === 'string' && ref.length <= 180,
+    )
+  );
+}
+
+function scalarFactValue(
+  value: string | number | boolean | null,
+  valueType?: 'string' | 'number' | 'boolean',
+) {
+  if (valueType === 'boolean')
+    return typeof value === 'boolean' ? String(value) : null;
+  if (valueType === 'number')
+    return typeof value === 'number' && Number.isFinite(value)
+      ? String(value)
+      : null;
+  if (typeof value === 'string') {
+    const normalized = value.trim().slice(0, 500);
+    return normalized || null;
+  }
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  if (typeof value === 'boolean') return String(value);
+  return null;
 }
 function slug(value: string): string {
   return value

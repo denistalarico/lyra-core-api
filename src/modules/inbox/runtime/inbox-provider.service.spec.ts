@@ -504,6 +504,9 @@ function validDecision() {
     close_reason: null,
     confidence: 0.9,
     evidence_refs: ['image:image'],
+    extracted_facts: [],
+    recommended_cta: null,
+    proposed_phase: null,
     proposed_actions: [],
   };
 }

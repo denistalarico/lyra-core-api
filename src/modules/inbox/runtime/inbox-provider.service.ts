@@ -401,6 +401,9 @@ const decisionSchema = {
     'close_reason',
     'confidence',
     'evidence_refs',
+    'extracted_facts',
+    'recommended_cta',
+    'proposed_phase',
     'proposed_actions',
   ],
   properties: {
@@ -418,6 +421,58 @@ const decisionSchema = {
     close_reason: { type: ['string', 'null'] },
     confidence: { type: 'number', minimum: 0, maximum: 1 },
     evidence_refs: { type: 'array', items: { type: 'string' }, maxItems: 30 },
+    extracted_facts: {
+      type: 'array',
+      maxItems: 30,
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: [
+          'field_key',
+          'proposed_target',
+          'value',
+          'evidence_refs',
+          'confidence',
+          'requires_confirmation',
+          'update_intent',
+        ],
+        properties: {
+          field_key: { type: 'string' },
+          proposed_target: { type: ['string', 'null'] },
+          value: { type: ['string', 'number', 'boolean', 'null'] },
+          evidence_refs: {
+            type: 'array',
+            items: { type: 'string' },
+            maxItems: 10,
+          },
+          confidence: { type: 'number', minimum: 0, maximum: 1 },
+          requires_confirmation: { type: 'boolean' },
+          update_intent: { enum: ['observe', 'enrich', 'correct'] },
+        },
+      },
+    },
+    recommended_cta: {
+      anyOf: [
+        { type: 'null' },
+        {
+          type: 'object',
+          additionalProperties: false,
+          required: ['key', 'status', 'evidence_refs'],
+          properties: {
+            key: { type: 'string' },
+            status: {
+              enum: ['pending', 'presented', 'accepted', 'refused'],
+            },
+            evidence_refs: {
+              type: 'array',
+              items: { type: 'string' },
+              maxItems: 10,
+            },
+          },
+        },
+      ],
+    },
+    proposed_phase: { type: ['string', 'null'] },
     proposed_actions: {
       type: 'array',
       maxItems: 30,
@@ -427,7 +482,16 @@ const decisionSchema = {
         required: ['type', 'value'],
         properties: {
           type: {
-            enum: ['set_stage', 'add_tag', 'set_summary', 'close', 'handoff'],
+            enum: [
+              'set_stage',
+              'add_tag',
+              'set_summary',
+              'set_service',
+              'set_urgency',
+              'set_fact',
+              'close',
+              'handoff',
+            ],
           },
           value: { type: ['string', 'null'] },
         },
@@ -452,6 +516,9 @@ function mockDecision() {
     close_reason: null,
     confidence: 0.8,
     evidence_refs: [],
+    extracted_facts: [],
+    recommended_cta: null,
+    proposed_phase: null,
     proposed_actions: [],
   };
 }

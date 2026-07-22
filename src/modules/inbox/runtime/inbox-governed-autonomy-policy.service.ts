@@ -11,6 +11,7 @@ export type InboxGovernedActionType =
   | 'set_summary'
   | 'set_service'
   | 'set_urgency'
+  | 'set_fact'
   | 'close'
   | 'handoff';
 

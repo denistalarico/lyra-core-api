@@ -30,6 +30,9 @@ const validDecision = {
   close_reason: null,
   confidence: 0.9,
   evidence_refs: [],
+  extracted_facts: [],
+  recommended_cta: null,
+  proposed_phase: null,
   proposed_actions: [],
 };
 
@@ -1036,7 +1039,249 @@ run('Inbox Runtime PostgreSQL concurrency', () => {
     );
     expect(count.count).toBe('1');
   });
+
+  it('creates one canonical WhatsApp contact and makes it visible in the LeadFlow list', async () => {
+    const isolatedWorkspace = randomUUID();
+    const conversationId = await insertConversation(
+      tenantId,
+      isolatedWorkspace,
+      'ai_active',
+    );
+    await AgencyDataSource.query(
+      `UPDATE inbox_conversations
+          SET external_thread_id='+5511999999999', title='Synthetic Profile'
+        WHERE id=$1`,
+      [conversationId],
+    );
+    await insertGovernedAction({
+      tenantId,
+      workspaceId: isolatedWorkspace,
+      conversationId,
+      actionType: 'ensure_contact',
+      actionKey: 'contact',
+    });
+    const worker = makeGovernedCrmWorker();
+    await worker.processOnce('contact-worker');
+    await worker.processOnce('contact-worker-retry');
+
+    const [result] = await AgencyDataSource.query<
+      Array<{ contacts: string; memberships: string; other_workspace: string }>
+    >(
+      `SELECT
+         (SELECT count(*)::text FROM contacts
+           WHERE tenant_id=$1 AND workspace_id=$2 AND source='leadflow_whatsapp') contacts,
+         (SELECT count(*)::text
+            FROM contact_list_members member
+            JOIN contact_lists list ON list.id=member.list_id
+            JOIN contacts contact ON contact.id=member.contact_id
+           WHERE contact.tenant_id=$1 AND contact.workspace_id=$2
+             AND list.name='LeadFlow') memberships,
+         (SELECT count(*)::text FROM contacts
+           WHERE tenant_id=$1 AND workspace_id<>$2 AND display_name='Synthetic Profile') other_workspace`,
+      [tenantId, isolatedWorkspace],
+    );
+    expect(result).toEqual({
+      contacts: '1',
+      memberships: '1',
+      other_workspace: '0',
+    });
+  });
+
+  it.each([
+    ['archived', false],
+    ['lost', false],
+    ['open', true],
+  ])(
+    'creates a new open opportunity when the prior one is %s (softDeleted=%s)',
+    async (terminalStatus, softDeleted) => {
+      const isolatedWorkspace = randomUUID();
+      const conversationId = await insertConversation(
+        tenantId,
+        isolatedWorkspace,
+        'ai_active',
+      );
+      const contactId = randomUUID();
+      const pipelineId = randomUUID();
+      const stageId = randomUUID();
+      const terminalOpportunityId = randomUUID();
+      await AgencyDataSource.query(
+        `INSERT INTO contacts
+          (id,tenant_id,workspace_id,type,display_name,source,business_mode,
+           lifecycle_stage,lifecycle_stages,status)
+         VALUES ($1,$2,$3,'person','Returning Contact','leadflow_whatsapp',
+                 'general','lead',ARRAY['lead'],'active')`,
+        [contactId, tenantId, isolatedWorkspace],
+      );
+      await AgencyDataSource.query(
+        `UPDATE inbox_conversations
+            SET contact_id=$1, opportunity_id=$2, external_thread_id='+5511888888888'
+          WHERE id=$3`,
+        [contactId, terminalOpportunityId, conversationId],
+      );
+      await AgencyDataSource.query(
+        `INSERT INTO crm_pipelines
+          (id,tenant_id,workspace_id,name,business_mode,is_default,status)
+         VALUES ($1,$2,$3,'Reconversion Pipeline','general',true,'active')`,
+        [pipelineId, tenantId, isolatedWorkspace],
+      );
+      await AgencyDataSource.query(
+        `INSERT INTO crm_stages
+          (id,tenant_id,workspace_id,pipeline_id,name,type,sort_order)
+         VALUES ($1,$2,$3,$4,'Initial','open',10)`,
+        [stageId, tenantId, isolatedWorkspace, pipelineId],
+      );
+      await AgencyDataSource.query(
+        `INSERT INTO crm_opportunities
+          (id,tenant_id,workspace_id,pipeline_id,stage_id,contact_id,
+           inbox_conversation_id,title,status,source,deleted_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,'Prior conversion',$8,'referral',$9)`,
+        [
+          terminalOpportunityId,
+          tenantId,
+          isolatedWorkspace,
+          pipelineId,
+          stageId,
+          contactId,
+          conversationId,
+          terminalStatus,
+          softDeleted ? new Date() : null,
+        ],
+      );
+      await insertGovernedAction({
+        tenantId,
+        workspaceId: isolatedWorkspace,
+        conversationId,
+        actionType: 'ensure_opportunity',
+        actionKey: 'opportunity',
+      });
+      const worker = makeGovernedCrmWorker();
+      await worker.processOnce('reconversion-worker');
+      await worker.processOnce('reconversion-worker-retry');
+
+      const rows = await AgencyDataSource.query<
+        Array<{
+          id: string;
+          status: string;
+          source: string;
+          deleted_at: Date | null;
+        }>
+      >(
+        `SELECT id,status,source,deleted_at FROM crm_opportunities
+          WHERE tenant_id=$1 AND workspace_id=$2 AND inbox_conversation_id=$3
+          ORDER BY created_at`,
+        [tenantId, isolatedWorkspace, conversationId],
+      );
+      expect(rows).toHaveLength(2);
+      expect(
+        rows.find((row) => row.id === terminalOpportunityId),
+      ).toMatchObject({
+        status: terminalStatus,
+        source: 'referral',
+      });
+      expect(
+        rows.filter((row) => row.status === 'open' && row.deleted_at === null),
+      ).toHaveLength(1);
+      expect(
+        rows.find((row) => row.id !== terminalOpportunityId),
+      ).toMatchObject({ source: 'whatsapp' });
+      if (terminalStatus === 'lost' && !softDeleted) {
+        const current = rows.find((row) => row.id !== terminalOpportunityId)!;
+        await AgencyDataSource.query(
+          `UPDATE crm_opportunities SET status='lost', lost_at=now() WHERE id=$1`,
+          [current.id],
+        );
+        await insertGovernedAction({
+          tenantId,
+          workspaceId: isolatedWorkspace,
+          conversationId,
+          actionType: 'ensure_opportunity',
+          actionKey: 'opportunity',
+        });
+        await worker.processOnce('distinct-reconversion-worker');
+        const [count] = await AgencyDataSource.query<Array<{ count: string }>>(
+          `SELECT count(*)::text count FROM crm_opportunities
+            WHERE tenant_id=$1 AND workspace_id=$2 AND inbox_conversation_id=$3`,
+          [tenantId, isolatedWorkspace, conversationId],
+        );
+        expect(count.count).toBe('3');
+      }
+    },
+  );
 });
+
+function makeGovernedCrmWorker() {
+  return new InboxGovernedActionWorker(
+    AgencyDataSource,
+    {
+      autoReplyEnabled: false,
+      autoCrmEnabled: true,
+      autoHandoffEnabled: false,
+    } as never,
+    { sendAgentText: jest.fn() } as never,
+    { transition: jest.fn() } as never,
+  );
+}
+
+async function insertGovernedAction(input: {
+  tenantId: string;
+  workspaceId: string;
+  conversationId: string;
+  actionType: 'ensure_contact' | 'ensure_opportunity';
+  actionKey: string;
+}) {
+  const channelId = await channelIdForConversation(input.conversationId);
+  const batchId = randomUUID();
+  const decisionId = randomUUID();
+  await AgencyDataSource.query(
+    `INSERT INTO inbox_processing_batches
+      (id,tenant_id,workspace_id,conversation_id,channel_id,generation,status,due_at)
+     VALUES ($1,$2,$3,$4,$5,
+       (SELECT coalesce(max(generation),0)+1 FROM inbox_processing_batches
+         WHERE tenant_id=$2 AND workspace_id=$3 AND conversation_id=$4),
+       'completed',now())`,
+    [
+      batchId,
+      input.tenantId,
+      input.workspaceId,
+      input.conversationId,
+      channelId,
+    ],
+  );
+  await AgencyDataSource.query(
+    `INSERT INTO inbox_agent_decisions
+      (id,tenant_id,workspace_id,conversation_id,batch_id,ownership_version,
+       idempotency_key,correlation_id,status)
+     VALUES ($1,$2,$3,$4,$5,1,$6,$7,'proposed')`,
+    [
+      decisionId,
+      input.tenantId,
+      input.workspaceId,
+      input.conversationId,
+      batchId,
+      `decision:${decisionId}`,
+      randomUUID(),
+    ],
+  );
+  await AgencyDataSource.query(
+    `INSERT INTO inbox_governed_actions
+      (tenant_id,workspace_id,conversation_id,decision_id,ownership_version,
+       policy_version,action_type,action_key,policy_outcome,reason_code,
+       idempotency_key,intent_hash,audit_ref,status)
+     VALUES ($1,$2,$3,$4,1,'inbox-autonomy-policy-v1',$5,$6,'allowed','fixture',
+             $7,$8,$9,'planned')`,
+    [
+      input.tenantId,
+      input.workspaceId,
+      input.conversationId,
+      decisionId,
+      input.actionType,
+      input.actionKey,
+      `action:${decisionId}:${input.actionKey}`,
+      'b'.repeat(64),
+      randomUUID(),
+    ],
+  );
+}
 
 async function insertConversation(
   tenantId: string,

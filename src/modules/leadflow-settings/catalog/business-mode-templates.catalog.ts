@@ -1,6 +1,10 @@
 import { LeadFlowBusinessMode } from '../enums/leadflow-business-mode.enum';
 import { LeadFlowSettingsStatus } from '../enums/leadflow-settings-status.enum';
 import { LeadFlowJsonObject } from '../types/leadflow-settings.types';
+import type {
+  ConversationPlaybook,
+  ConversationQualificationFieldRule,
+} from '../types/conversation-playbook.types';
 
 export type LeadFlowBusinessModeTemplateCatalogItem = {
   key: LeadFlowBusinessMode;
@@ -173,6 +177,162 @@ function prompt(system: string, user: string): LeadFlowJsonObject {
   };
 }
 
+const commonConversationFields: ConversationQualificationFieldRule[] = [
+  fieldRule('company', 'business_context.company'),
+  fieldRule('niche', 'business_context.niche'),
+  fieldRule('need', 'business_context.need'),
+  fieldRule('service_interest', 'business_context.serviceInterest'),
+  fieldRule('urgency', 'business_context.urgency'),
+  fieldRule('budget', 'business_context.budget'),
+  fieldRule('deadline', 'business_context.deadline'),
+  fieldRule('objection', 'business_context.objection'),
+  fieldRule('intent', 'business_context.intent'),
+  fieldRule('cta_accepted', 'business_context.ctaAccepted', 'boolean'),
+];
+
+function fieldRule(
+  key: string,
+  crmTarget: string,
+  valueType: 'string' | 'number' | 'boolean' = 'string',
+): ConversationQualificationFieldRule {
+  return {
+    key,
+    source: 'conversation',
+    requiredFor: [],
+    crmTarget,
+    valueType,
+    overwritePolicy: 'human_verified_wins',
+  };
+}
+
+function ctasFor(key: LeadFlowBusinessMode): string[] {
+  switch (key) {
+    case LeadFlowBusinessMode.AgencyServices:
+      return ['schedule_diagnostic', 'request_proposal', 'talk_to_specialist'];
+    case LeadFlowBusinessMode.LocalServices:
+      return ['request_quote', 'schedule_service', 'talk_to_specialist'];
+    case LeadFlowBusinessMode.ClinicsEsthetics:
+      return [
+        'request_evaluation',
+        'schedule_appointment',
+        'talk_to_specialist',
+      ];
+    case LeadFlowBusinessMode.RestaurantsFood:
+      return [
+        'confirm_interest',
+        'provide_order_details',
+        'talk_to_specialist',
+      ];
+    default:
+      return ['confirm_interest', 'request_quote', 'talk_to_specialist'];
+  }
+}
+
+function conversationPlaybook(input: {
+  key: LeadFlowBusinessMode;
+  goals: string[];
+  fields: string[];
+  recommendedApps: string[];
+}): ConversationPlaybook {
+  const allowedCtas = ctasFor(input.key);
+  const catalogRules = qualificationFields(input.fields).map((item) => {
+    const key = String(item.key);
+    const known = commonConversationFields.find((rule) =>
+      key.includes(rule.key),
+    );
+    return {
+      key,
+      source: 'conversation' as const,
+      requiredFor: ['qualification'],
+      crmTarget: known?.crmTarget ?? `business_context.${key}`,
+      valueType: 'string' as const,
+      overwritePolicy: 'human_verified_wins' as const,
+    };
+  });
+  const rules: ConversationQualificationFieldRule[] = [...catalogRules];
+  for (const common of commonConversationFields) {
+    if (!rules.some((rule) => rule.key === common.key)) rules.push(common);
+  }
+  const essential = catalogRules.slice(0, 2).map((rule) => rule.key);
+  return {
+    version: 1,
+    businessModeKey: input.key,
+    primaryGoal: input.goals[0] ?? 'definir um proximo passo comercial',
+    successOutcomes: input.goals,
+    phases: [
+      {
+        key: 'understand',
+        objective: 'compreender a necessidade atual sem repetir perguntas',
+        entryCriteria: [],
+        essentialFields: essential.slice(0, 1),
+        optionalFields: ['company', 'niche', 'need', 'service_interest'],
+        exitCriteria: ['necessidade ou interesse identificavel'],
+        allowedCtas,
+        guidance: [
+          'demonstre compreensao antes de perguntar',
+          'faca preferencialmente uma pergunta e nunca mais de duas',
+        ],
+      },
+      {
+        key: 'qualify',
+        objective: 'coletar somente os dados que mudam o proximo passo',
+        entryCriteria: ['necessidade ou interesse identificavel'],
+        essentialFields: essential,
+        optionalFields: ['urgency', 'budget', 'deadline', 'objection'],
+        exitCriteria: ['contexto minimo para CTA'],
+        allowedCtas,
+        guidance: [
+          'nao transforme a conversa em interrogatorio',
+          'CTA pode ser apresentado antes de toda a qualificacao',
+        ],
+      },
+      {
+        key: 'convert',
+        objective: 'propor um proximo passo concreto e permitido',
+        entryCriteria: ['contexto minimo para CTA'],
+        essentialFields: [],
+        optionalFields: ['intent', 'cta_accepted'],
+        exitCriteria: ['CTA aceito, recusado ou encaminhado'],
+        allowedCtas,
+        guidance: [
+          'nao confirme preco, agenda, pedido ou disponibilidade sem backend operacional',
+          'apos aceite, solicite handoff quando a execucao depender de humano',
+        ],
+      },
+    ],
+    qualificationFields: rules,
+    ctaPolicy: {
+      allowed: allowedCtas,
+      minimumContextFields: 1,
+      maxAgentRepliesWithoutCta: 3,
+      requiresOperationalCapability: Object.fromEntries(
+        allowedCtas
+          .filter((cta) => /schedule|appointment|order/.test(cta))
+          .map((cta) => [
+            cta,
+            input.recommendedApps.includes('appointments')
+              ? 'appointments'
+              : 'human_handoff',
+          ]),
+      ),
+    },
+    handoffRules: [
+      { key: 'human_requested', condition: 'lead solicita uma pessoa' },
+      {
+        key: 'operational_execution',
+        condition: 'CTA aceito exige capacidade operacional indisponivel',
+      },
+    ],
+    refusalRules: [
+      {
+        key: 'clear_refusal',
+        behavior:
+          'reconhecer a recusa, nao insistir e encerrar com naturalidade',
+      },
+    ],
+  };
+}
+
 function template(input: {
   key: LeadFlowBusinessMode;
   name: string;
@@ -214,6 +374,12 @@ function template(input: {
       source: 'lyra_official_catalog',
       locale: 'pt-BR',
       initialRelease: true,
+      conversationPlaybook: conversationPlaybook({
+        key: input.key,
+        goals: input.goals,
+        fields: input.fields,
+        recommendedApps: input.recommendedApps,
+      }) as unknown as LeadFlowJsonObject,
     },
   };
 }
@@ -525,3 +691,13 @@ export const LEADFLOW_BUSINESS_MODE_TEMPLATES: LeadFlowBusinessModeTemplateCatal
       supportedIntegrations: ['whatsapp', 'webchat'],
     }),
   ];
+
+export function getCatalogConversationPlaybook(key: string) {
+  const template = LEADFLOW_BUSINESS_MODE_TEMPLATES.find(
+    (item) => item.key === key,
+  );
+  const value = template?.metadata?.conversationPlaybook;
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as unknown as ConversationPlaybook)
+    : null;
+}

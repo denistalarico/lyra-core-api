@@ -1,4 +1,7 @@
-import { InboxGovernedActionWorker } from './inbox-governed-action.worker';
+import {
+  governedBusinessContextWriteAllowed,
+  InboxGovernedActionWorker,
+} from './inbox-governed-action.worker';
 
 describe('InboxGovernedActionWorker kill switches', () => {
   it('blocks a claimed action when the effect switch is disabled before execution', async () => {
@@ -67,8 +70,9 @@ describe('InboxGovernedActionWorker kill switches', () => {
     const query = jest.fn().mockResolvedValue([]);
     const worker = new InboxGovernedActionWorker(
       {
-        transaction: (callback: (manager: { query: typeof query }) => unknown) =>
-          Promise.resolve(callback({ query })),
+        transaction: (
+          callback: (manager: { query: typeof query }) => unknown,
+        ) => Promise.resolve(callback({ query })),
       } as never,
       {} as never,
       {} as never,
@@ -81,5 +85,32 @@ describe('InboxGovernedActionWorker kill switches', () => {
         /WHEN 'ensure_contact' THEN 0[\s\S]*WHEN 'ensure_opportunity' THEN 1[\s\S]*WHEN 'reply' THEN 2[\s\S]*WHEN 'handoff' THEN 4[\s\S]*ELSE 3/,
       ),
     );
+  });
+
+  it('preserves human CRM values while allowing idempotent or governed enrichment', () => {
+    expect(
+      governedBusinessContextWriteAllowed(
+        { niche: 'human value' },
+        'niche',
+        'agent value',
+      ),
+    ).toBe(false);
+    expect(
+      governedBusinessContextWriteAllowed(
+        { niche: 'human value' },
+        'niche',
+        'human value',
+      ),
+    ).toBe(true);
+    expect(
+      governedBusinessContextWriteAllowed(
+        {
+          niche: 'old agent value',
+          fieldProvenance: { niche: { source: 'governed_agent' } },
+        },
+        'niche',
+        'new agent value',
+      ),
+    ).toBe(true);
   });
 });

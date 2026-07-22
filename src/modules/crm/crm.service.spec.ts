@@ -102,6 +102,10 @@ function mockOpportunity(overrides: Record<string, unknown> = {}) {
     wonAt: null,
     lostAt: null,
     lostReason: null,
+    priority: 'normal',
+    source: 'manual',
+    businessContext: {},
+    metadata: {},
     deletedAt: null,
     ...overrides,
   };
@@ -281,6 +285,33 @@ describe('CrmService agency validation', () => {
     expect(
       salesNotificationPublisher.publishOpportunityAssigned,
     ).not.toHaveBeenCalled();
+  });
+
+  it('marks fields changed by a human so governed enrichment cannot silently overwrite them', async () => {
+    const { service, opportunitiesRepository } = createService();
+    opportunitiesRepository.findOne.mockResolvedValue(
+      mockOpportunity({
+        businessContext: { niche: 'old value' },
+      }),
+    );
+
+    const saved = await service.patchOpportunity(ctx, 'opportunity-a', {
+      priority: 'high',
+      source: 'referral',
+      businessContext: { niche: 'human value' },
+    });
+
+    expect(saved.businessContext).toMatchObject({
+      niche: 'human value',
+      fieldProvenance: {
+        niche: { source: 'human', userId: ctx.userId },
+        urgency: { source: 'human', userId: ctx.userId },
+      },
+    });
+    expect(saved.metadata).toMatchObject({
+      sourceProvenance: 'human',
+      sourceUpdatedBy: ctx.userId,
+    });
   });
 });
 

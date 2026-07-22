@@ -3,6 +3,9 @@ import {
   AgentDecisionV1Service,
   BusinessModeActionPlanner,
 } from './agent-decision-v1.service';
+import { LEADFLOW_BUSINESS_MODE_TEMPLATES } from '../../leadflow-settings/catalog/business-mode-templates.catalog';
+import { LeadFlowBusinessMode } from '../../leadflow-settings/enums/leadflow-business-mode.enum';
+import { readConversationPlaybook } from '../../leadflow-settings/types/conversation-playbook.types';
 
 const validDecision = {
   schema_version: 1 as const,
@@ -19,6 +22,9 @@ const validDecision = {
   close_reason: null,
   confidence: 0.8,
   evidence_refs: ['message:1'],
+  extracted_facts: [],
+  recommended_cta: null,
+  proposed_phase: null,
   proposed_actions: [],
 };
 
@@ -99,6 +105,56 @@ describe('AgentDecision v1 schema and policy', () => {
       allowed: false,
       reason: 'stage_not_allowed',
     });
+  });
+
+  it('plans evidenced CRM facts for an opportunity that will be created first', async () => {
+    const dataSource = {
+      getRepository: () => ({
+        createQueryBuilder: jest.fn(),
+      }),
+    };
+    const template = LEADFLOW_BUSINESS_MODE_TEMPLATES.find(
+      (item) => item.key === LeadFlowBusinessMode.AgencyServices,
+    )!;
+    const planner = new BusinessModeActionPlanner(dataSource as never);
+    const plan = await planner.plan({
+      tenantId: 'tenant',
+      workspaceId: 'workspace',
+      businessMode: template.key,
+      opportunity: null,
+      opportunityWillBeEnsured: true,
+      playbook: readConversationPlaybook(template.metadata),
+      decision: {
+        ...validDecision,
+        agent_summary: 'Resumo incremental',
+        extracted_facts: [
+          {
+            field_key: 'niche',
+            proposed_target: 'business_context.unsafe',
+            value: 'serviços locais',
+            evidence_refs: ['message:1'],
+            confidence: 0.91,
+            requires_confirmation: false,
+            update_intent: 'enrich',
+          },
+        ],
+      },
+    });
+
+    expect(plan).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          key: 'summary',
+          allowed: true,
+        }),
+        expect.objectContaining({
+          key: 'fact:niche',
+          type: 'set_fact',
+          allowed: true,
+          crmTarget: 'business_context.niche',
+        }),
+      ]),
+    );
   });
 
   it('rejects Business Mode mismatch even for an existing stage', async () => {

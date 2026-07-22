@@ -79,6 +79,21 @@ export type AgentDecisionV1 = {
   close_reason: string | null;
   confidence: number;
   evidence_refs: string[];
+  extracted_facts: Array<{
+    field_key: string;
+    proposed_target: string | null;
+    value: string | number | boolean | null;
+    evidence_refs: string[];
+    confidence: number;
+    requires_confirmation: boolean;
+    update_intent: 'observe' | 'enrich' | 'correct';
+  }>;
+  recommended_cta: {
+    key: string;
+    status: 'pending' | 'presented' | 'accepted' | 'refused';
+    evidence_refs: string[];
+  } | null;
+  proposed_phase: string | null;
   proposed_actions: Array<{
     type:
       | 'set_stage'

@@ -5,21 +5,26 @@ import {
   OnModuleInit,
 } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
-import { DataSource, EntityManager } from 'typeorm';
+import { DataSource, EntityManager, IsNull } from 'typeorm';
 import { createHash } from 'crypto';
 import { ContactEntity } from '../../contacts/entities/contact.entity';
 import { ContactMethodEntity } from '../../contacts/entities/contact-method.entity';
+import { ContactListEntity } from '../../contacts/entities/contact-list.entity';
+import { ContactListMemberEntity } from '../../contacts/entities/contact-list-member.entity';
 import { CrmOpportunityEntity } from '../../crm/entities/crm-opportunity.entity';
 import { CrmPipelineEntity } from '../../crm/entities/crm-pipeline.entity';
 import { CrmStageEntity } from '../../crm/entities/crm-stage.entity';
 import { InboxAgentDecisionEntity } from '../entities/inbox-agent-decision.entity';
 import { InboxConversationEntity } from '../entities/inbox-conversation.entity';
+import { InboxChannelEntity } from '../entities/inbox-channel.entity';
 import { InboxConversationEventEntity } from '../entities/inbox-conversation-event.entity';
 import { InboxDomainOutboxEntity } from '../entities/inbox-domain-outbox.entity';
 import { InboxGovernedActionEntity } from '../entities/inbox-governed-action.entity';
+import { InboxMessageEntity } from '../entities/inbox-message.entity';
 import { InboxChannelContactIdentityEntity } from '../entities/inbox-channel-contact-identity.entity';
 import { InboxAutonomyControlEntity } from '../entities/inbox-autonomy-control.entity';
 import { InboxRuntimeConfigService } from '../runtime/inbox-runtime-config.service';
+import { resolveDefaultPipelineForBusinessMode } from '../runtime/inbox-crm-target-resolver';
 import { WhatsAppOutboundService } from '../channels/whatsapp/services/whatsapp-outbound.service';
 import { ConversationOwnershipService } from './conversation-ownership.service';
 
@@ -117,14 +122,11 @@ export class InboxGovernedActionWorker
           messageId: sent.message.id,
         });
       } else if (action.actionType === 'ensure_contact') {
-        const contactId = await this.ensureContact(action, conversation);
-        await this.finish(action, 'applied', null, { contactId });
+        const result = await this.ensureContact(action, conversation);
+        await this.finish(action, 'applied', null, result);
       } else if (action.actionType === 'ensure_opportunity') {
-        const opportunityId = await this.ensureOpportunity(
-          action,
-          conversation,
-        );
-        await this.finish(action, 'applied', null, { opportunityId });
+        const result = await this.ensureOpportunity(action, conversation);
+        await this.finish(action, 'applied', null, result);
       } else if (action.actionType === 'handoff') {
         const planned = this.plannedAction(decision, action.actionKey);
         await this.ownership.transition(
@@ -207,7 +209,7 @@ export class InboxGovernedActionWorker
   private async ensureContact(
     action: InboxGovernedActionEntity,
     snapshot: InboxConversationEntity,
-  ): Promise<string> {
+  ): Promise<{ contactId: string; contactOutcome: 'created' | 'reused' }> {
     return this.dataSource.transaction(async (manager) => {
       await this.assertWorkspaceControl(manager, action, 'crm_enabled');
       const conversation = await manager
@@ -222,7 +224,19 @@ export class InboxGovernedActionWorker
         });
       if (!conversation?.channelId || !conversation.externalThreadId)
         throw new Error('canonical_identity_missing');
-      if (conversation.contactId) return conversation.contactId;
+      if (conversation.contactId) {
+        linkPlaybookProgress(conversation, {
+          contactId: conversation.contactId,
+        });
+        await manager.getRepository(InboxConversationEntity).save(conversation);
+        await this.ensureLeadFlowMembership(
+          manager,
+          action,
+          conversation.channelId,
+          conversation.contactId,
+        );
+        return { contactId: conversation.contactId, contactOutcome: 'reused' };
+      }
       const identity = normalizeIdentity(conversation.externalThreadId);
       const externalIdentityHash = createHash('sha256')
         .update(identity)
@@ -243,8 +257,15 @@ export class InboxGovernedActionWorker
         });
       if (existing) {
         conversation.contactId = existing.contactId;
+        linkPlaybookProgress(conversation, { contactId: existing.contactId });
         await manager.getRepository(InboxConversationEntity).save(conversation);
-        return existing.contactId;
+        await this.ensureLeadFlowMembership(
+          manager,
+          action,
+          conversation.channelId,
+          existing.contactId,
+        );
+        return { contactId: existing.contactId, contactOutcome: 'reused' };
       }
       const contactMatches = await manager.query<
         Array<{ id: string; status: string }>
@@ -278,8 +299,18 @@ export class InboxGovernedActionWorker
           },
         });
         conversation.contactId = contactMatches[0].id;
+        linkPlaybookProgress(conversation, { contactId: contactMatches[0].id });
         await manager.getRepository(InboxConversationEntity).save(conversation);
-        return contactMatches[0].id;
+        await this.ensureLeadFlowMembership(
+          manager,
+          action,
+          conversation.channelId,
+          contactMatches[0].id,
+        );
+        return {
+          contactId: contactMatches[0].id,
+          contactOutcome: 'reused',
+        };
       }
       const contact = await manager.getRepository(ContactEntity).save({
         tenantId: action.tenantId,
@@ -325,16 +356,107 @@ export class InboxGovernedActionWorker
         },
       });
       conversation.contactId = contact.id;
+      linkPlaybookProgress(conversation, { contactId: contact.id });
       await manager.getRepository(InboxConversationEntity).save(conversation);
+      await this.ensureLeadFlowMembership(
+        manager,
+        action,
+        conversation.channelId,
+        contact.id,
+      );
       await this.auditCreatedEntity(manager, action, 'contact', contact.id);
-      return contact.id;
+      return { contactId: contact.id, contactOutcome: 'created' };
     });
+  }
+
+  private async ensureLeadFlowMembership(
+    manager: EntityManager,
+    action: InboxGovernedActionEntity,
+    channelId: string,
+    contactId: string,
+  ) {
+    const channel = await manager.getRepository(InboxChannelEntity).findOneBy({
+      id: channelId,
+      tenantId: action.tenantId,
+      workspaceId: action.workspaceId,
+    });
+    const lists = manager.getRepository(ContactListEntity);
+    await manager.query(
+      `INSERT INTO contact_lists
+        (tenant_id,workspace_id,name,description,color,parent_list_id,visibility,
+         created_by_user_id,is_system,is_protected,source_product,source_context)
+       VALUES ($1,$2,'LeadFlow','Contatos canônicos do LeadFlow.','#2563EB',NULL,
+         'workspace',NULL,true,true,'leadflow','shared_contacts')
+       ON CONFLICT (workspace_id,name) DO UPDATE SET
+         is_system=true,is_protected=true,source_product='leadflow'`,
+      [action.tenantId, action.workspaceId],
+    );
+    const parent = await lists.findOneBy({
+      tenantId: action.tenantId,
+      workspaceId: action.workspaceId,
+      name: 'LeadFlow',
+    });
+    if (!parent) throw new Error('leadflow_contact_list_missing');
+    const listIds = [parent.id];
+    const clientId =
+      typeof channel?.metadata?.clientId === 'string'
+        ? channel.metadata.clientId
+        : null;
+    if (clientId) {
+      const clientName =
+        typeof channel?.metadata?.clientName === 'string' &&
+        channel.metadata.clientName.trim()
+          ? channel.metadata.clientName.trim().slice(0, 120)
+          : `Cliente ${clientId.slice(0, 8)}`;
+      await manager.query(
+        `INSERT INTO contact_lists
+          (tenant_id,workspace_id,name,description,color,parent_list_id,visibility,
+           created_by_user_id,is_system,is_protected,source_product,source_context)
+         VALUES ($1,$2,$3,'Contatos do LeadFlow deste cliente.','#2563EB',$4,
+           'workspace',NULL,true,true,'leadflow',$5)
+         ON CONFLICT (workspace_id,name) DO UPDATE SET
+           is_system=true,is_protected=true,source_product='leadflow',
+           source_context=EXCLUDED.source_context,parent_list_id=EXCLUDED.parent_list_id`,
+        [
+          action.tenantId,
+          action.workspaceId,
+          clientName,
+          parent.id,
+          `client:${clientId}`,
+        ],
+      );
+      const child = await lists.findOneBy({
+        tenantId: action.tenantId,
+        workspaceId: action.workspaceId,
+        parentListId: parent.id,
+        sourceContext: `client:${clientId}`,
+      });
+      if (child) listIds.push(child.id);
+    }
+    for (const listId of listIds) {
+      await manager
+        .getRepository(ContactListMemberEntity)
+        .createQueryBuilder()
+        .insert()
+        .values({
+          tenantId: action.tenantId,
+          workspaceId: action.workspaceId,
+          listId,
+          contactId,
+          addedByUserId: null,
+        })
+        .orIgnore()
+        .execute();
+    }
   }
 
   private async ensureOpportunity(
     action: InboxGovernedActionEntity,
     snapshot: InboxConversationEntity,
-  ): Promise<string> {
+  ): Promise<{
+    opportunityId: string;
+    opportunityOutcome: 'created' | 'reused';
+  }> {
     return this.dataSource.transaction(async (manager) => {
       await this.assertWorkspaceControl(manager, action, 'crm_enabled');
       const conversation = await manager
@@ -349,58 +471,120 @@ export class InboxGovernedActionWorker
         });
       if (!conversation || conversation.qualificationStatus !== 'qualified')
         throw new Error('lead_not_eligible');
-      const existing = await manager
+      await manager.query(
+        `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`,
+        [
+          `${action.tenantId}:${action.workspaceId}:${conversation.id}:opportunity`,
+        ],
+      );
+      const active = await manager
         .getRepository(CrmOpportunityEntity)
-        .findOne({
-          where: {
-            tenantId: action.tenantId,
-            workspaceId: action.workspaceId,
-            inboxConversationId: conversation.id,
-          },
-          lock: { mode: 'pessimistic_write' },
-        });
+        .createQueryBuilder('opportunity')
+        .setLock('pessimistic_write')
+        .where('opportunity.tenant_id = :tenantId', action)
+        .andWhere('opportunity.workspace_id = :workspaceId', action)
+        .andWhere('opportunity.inbox_conversation_id = :conversationId', {
+          conversationId: conversation.id,
+        })
+        .andWhere("opportunity.status = 'open'")
+        .andWhere('opportunity.deleted_at IS NULL')
+        .orderBy('opportunity.created_at', 'DESC')
+        .take(2)
+        .getMany();
+      if (active.length > 1) throw new Error('multiple_active_opportunities');
+      const existing = active[0];
+      if (existing && existing.businessMode !== conversation.businessMode)
+        throw new Error('active_opportunity_incompatible');
+      const contactOutcome = await this.contactOutcomeForDecision(
+        manager,
+        action,
+      );
       if (existing) {
-        if (conversation.opportunityId !== existing.id) {
-          conversation.opportunityId = existing.id;
-          await manager
-            .getRepository(InboxConversationEntity)
-            .save(conversation);
-        }
-        return existing.id;
+        existing.businessContext = {
+          ...existing.businessContext,
+          contactResolution: {
+            status: 'linked',
+            outcome: contactOutcome,
+            contactId: conversation.contactId,
+          },
+          opportunityResolution: {
+            outcome: 'reused',
+            governedActionId: action.id,
+          },
+        };
+        await manager.getRepository(CrmOpportunityEntity).save(existing);
+        conversation.opportunityId = existing.id;
+        linkPlaybookProgress(conversation, { opportunityId: existing.id });
+        await manager.getRepository(InboxConversationEntity).save(conversation);
+        return { opportunityId: existing.id, opportunityOutcome: 'reused' };
       }
       if (!conversation.contactId) throw new Error('contact_missing');
       const pipelines = await manager.getRepository(CrmPipelineEntity).find({
         where: {
           tenantId: action.tenantId,
           workspaceId: action.workspaceId,
-          businessMode: conversation.businessMode,
           isDefault: true,
           status: 'active',
+          deletedAt: IsNull(),
         },
       });
-      if (pipelines.length !== 1)
-        throw new Error('opportunity_defaults_ambiguous');
+      const pipeline = resolveDefaultPipelineForBusinessMode(
+        pipelines,
+        conversation.businessMode,
+      );
+      if (!pipeline) throw new Error('opportunity_defaults_ambiguous');
       const stage = await manager.getRepository(CrmStageEntity).findOne({
         where: {
           tenantId: action.tenantId,
           workspaceId: action.workspaceId,
-          pipelineId: pipelines[0].id,
+          pipelineId: pipeline.id,
           type: 'open',
+          deletedAt: IsNull(),
         },
         order: { sortOrder: 'ASC', createdAt: 'ASC' },
       });
       if (!stage) throw new Error('initial_stage_missing');
+      const channel = conversation.channelId
+        ? await manager.getRepository(InboxChannelEntity).findOneBy({
+            id: conversation.channelId,
+            tenantId: action.tenantId,
+            workspaceId: action.workspaceId,
+          })
+        : null;
+      const contact = await manager.getRepository(ContactEntity).findOneBy({
+        id: conversation.contactId,
+        tenantId: action.tenantId,
+        workspaceId: action.workspaceId,
+      });
+      const primaryMethod = await manager
+        .getRepository(ContactMethodEntity)
+        .findOne({
+          where: {
+            tenantId: action.tenantId,
+            workspaceId: action.workspaceId,
+            contactId: conversation.contactId,
+            isPrimary: true,
+          },
+          order: { createdAt: 'ASC' },
+        });
+      const source =
+        channel?.type === 'whatsapp' ? 'whatsapp' : conversation.source;
       const opportunity = await manager
         .getRepository(CrmOpportunityEntity)
         .save({
           tenantId: action.tenantId,
           workspaceId: action.workspaceId,
-          pipelineId: pipelines[0].id,
+          pipelineId: pipeline.id,
           stageId: stage.id,
           contactId: conversation.contactId,
-          contactName: safeContactName(conversation.title),
+          contactName:
+            contact?.displayName ?? safeContactName(conversation.title),
           contactEmail: null,
-          contactPhone: null,
+          contactPhone:
+            primaryMethod?.type === 'phone' ||
+            primaryMethod?.type === 'whatsapp'
+              ? primaryMethod.value
+              : null,
           inboxConversationId: conversation.id,
           title: `LeadFlow — ${safeContactName(conversation.title)}`.slice(
             0,
@@ -411,13 +595,23 @@ export class InboxGovernedActionWorker
           currency: 'BRL',
           status: 'open',
           priority: conversation.priority,
-          source: 'leadflow',
+          source,
           businessMode: conversation.businessMode,
           operationalStatus: null,
           businessContext: {
             origin: 'leadflow_inbox',
+            acquisitionChannel: source,
             channelId: conversation.channelId,
             governedActionId: action.id,
+            contactResolution: {
+              status: 'linked',
+              outcome: contactOutcome,
+              contactId: conversation.contactId,
+            },
+            opportunityResolution: {
+              outcome: 'created',
+              governedActionId: action.id,
+            },
           },
           assignedUserId: null,
           expectedCloseDate: null,
@@ -432,9 +626,14 @@ export class InboxGovernedActionWorker
           followMode: 'manual',
           followMessage: null,
           followSendAutomatically: false,
-          metadata: { createdBy: 'governed_autonomy' },
+          metadata: {
+            createdBy: 'governed_autonomy',
+            conversionKey: readConversionKey(conversation.metadata),
+            sourceProvenance: 'canonical_inbound_channel',
+          },
         });
       conversation.opportunityId = opportunity.id;
+      linkPlaybookProgress(conversation, { opportunityId: opportunity.id });
       await manager.getRepository(InboxConversationEntity).save(conversation);
       await this.auditCreatedEntity(
         manager,
@@ -442,8 +641,25 @@ export class InboxGovernedActionWorker
         'opportunity',
         opportunity.id,
       );
-      return opportunity.id;
+      return { opportunityId: opportunity.id, opportunityOutcome: 'created' };
     });
+  }
+
+  private async contactOutcomeForDecision(
+    manager: EntityManager,
+    action: InboxGovernedActionEntity,
+  ): Promise<'created' | 'reused'> {
+    const contactAction = await manager
+      .getRepository(InboxGovernedActionEntity)
+      .findOneBy({
+        tenantId: action.tenantId,
+        workspaceId: action.workspaceId,
+        decisionId: action.decisionId,
+        actionType: 'ensure_contact',
+      });
+    return contactAction?.applicationResult?.contactOutcome === 'created'
+      ? 'created'
+      : 'reused';
   }
 
   private async auditCreatedEntity(
@@ -513,6 +729,27 @@ export class InboxGovernedActionWorker
         lockedConversation.ownershipState !== 'ai_active'
       )
         throw new Error('ownership_changed');
+      const latestInbound = await manager
+        .getRepository(InboxMessageEntity)
+        .findOne({
+          where: {
+            tenantId: action.tenantId,
+            workspaceId: action.workspaceId,
+            conversationId: action.conversationId,
+            direction: 'inbound',
+          },
+          order: { occurredAt: 'DESC', createdAt: 'DESC' },
+        });
+      const expectedInboundId =
+        typeof decision.contextSnapshot?.latestInboundId === 'string'
+          ? decision.contextSnapshot.latestInboundId
+          : null;
+      if (
+        latestInbound &&
+        expectedInboundId &&
+        expectedInboundId !== latestInbound.id
+      )
+        throw new Error('decision_context_stale');
       const opportunity = await manager
         .getRepository(CrmOpportunityEntity)
         .findOne({
@@ -533,32 +770,67 @@ export class InboxGovernedActionWorker
       if (!opportunity || !planned || planned.allowed !== true)
         throw new Error('canonical_target_unresolved');
       const value = typeof planned.value === 'string' ? planned.value : null;
+      if (
+        lockedConversation.source === 'whatsapp' &&
+        opportunity.metadata?.createdBy === 'governed_autonomy' &&
+        opportunity.metadata?.sourceProvenance !== 'human'
+      ) {
+        opportunity.source = 'whatsapp';
+        opportunity.businessContext = {
+          ...opportunity.businessContext,
+          acquisitionChannel: 'whatsapp',
+        };
+      }
       if (action.actionType === 'set_summary' && value) {
-        opportunity.businessContext = {
-          ...opportunity.businessContext,
-          agentSummary: value,
-        };
+        setGovernedBusinessContextField(
+          opportunity,
+          'agentSummary',
+          value,
+          decision.id,
+          action,
+        );
       } else if (action.actionType === 'set_service' && value) {
-        opportunity.businessContext = {
-          ...opportunity.businessContext,
-          service: value,
-        };
+        setGovernedBusinessContextField(
+          opportunity,
+          'service',
+          value,
+          decision.id,
+          action,
+        );
       } else if (
         action.actionType === 'set_urgency' &&
         value &&
         ['low', 'normal', 'high', 'urgent'].includes(value)
       ) {
+        setGovernedBusinessContextField(
+          opportunity,
+          'urgency',
+          value,
+          decision.id,
+          action,
+        );
         opportunity.priority = value;
-        opportunity.businessContext = {
-          ...opportunity.businessContext,
-          urgency: value,
-        };
       } else if (action.actionType === 'add_tag' && value) {
         await this.assignExistingTag(
           manager,
           action,
           opportunity.id,
           slug(value),
+        );
+      } else if (action.actionType === 'set_fact' && value) {
+        const target =
+          typeof planned.crmTarget === 'string' ? planned.crmTarget : '';
+        if (!/^business_context\.[a-zA-Z0-9_.-]{1,100}$/.test(target))
+          throw new Error('fact_target_not_allowed');
+        const field = target.slice('business_context.'.length);
+        const typedValue = canonicalFactValue(value, planned.valueType);
+        if (typedValue === null) throw new Error('fact_value_invalid');
+        setGovernedBusinessContextField(
+          opportunity,
+          field,
+          typedValue,
+          decision.id,
+          action,
         );
       } else {
         throw new Error('automatic_crm_action_not_supported');
@@ -765,4 +1037,111 @@ function contactBusinessMode(value: string) {
     real_estate: 'real_estate',
   };
   return (mapped[value] ?? 'general') as ContactEntity['businessMode'];
+}
+
+function readConversionKey(metadata: Record<string, unknown>): string | null {
+  const progress = metadata.leadflowPlaybookProgress;
+  if (!progress || typeof progress !== 'object' || Array.isArray(progress))
+    return null;
+  const value = (progress as Record<string, unknown>).conversionKey;
+  return typeof value === 'string' ? value.slice(0, 220) : null;
+}
+
+function linkPlaybookProgress(
+  conversation: InboxConversationEntity,
+  refs: { contactId?: string; opportunityId?: string },
+) {
+  const value = conversation.metadata.leadflowPlaybookProgress;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return;
+  conversation.metadata = {
+    ...conversation.metadata,
+    leadflowPlaybookProgress: {
+      ...(value as Record<string, unknown>),
+      ...(refs.contactId ? { contactId: refs.contactId } : {}),
+      ...(refs.opportunityId ? { opportunityId: refs.opportunityId } : {}),
+      updatedAt: new Date().toISOString(),
+    },
+  };
+}
+
+function canonicalFactValue(value: string, valueType: unknown) {
+  if (valueType === 'boolean') {
+    if (value === 'true') return true;
+    if (value === 'false') return false;
+    return null;
+  }
+  if (valueType === 'number') {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  const normalized = value.trim().slice(0, 500);
+  return normalized || null;
+}
+
+function setGovernedBusinessContextField(
+  opportunity: CrmOpportunityEntity,
+  field: string,
+  value: string | number | boolean,
+  decisionId: string,
+  action: InboxGovernedActionEntity,
+) {
+  const provenance =
+    opportunity.businessContext.fieldProvenance &&
+    typeof opportunity.businessContext.fieldProvenance === 'object' &&
+    !Array.isArray(opportunity.businessContext.fieldProvenance)
+      ? (opportunity.businessContext.fieldProvenance as Record<string, unknown>)
+      : {};
+  if (
+    !governedBusinessContextWriteAllowed(
+      opportunity.businessContext,
+      field,
+      value,
+    )
+  ) {
+    throw new Error('human_verified_value_preserved');
+  }
+  opportunity.businessContext = {
+    ...opportunity.businessContext,
+    [field]: value,
+    fieldProvenance: {
+      ...provenance,
+      [field]: {
+        source: 'governed_agent',
+        decisionId,
+        actionId: action.id,
+        evidenceRefs: action.canonicalRefs.filter((ref) =>
+          /^(message|transcription|image):/.test(ref),
+        ),
+      },
+    },
+  };
+}
+
+export function governedBusinessContextWriteAllowed(
+  context: Record<string, unknown>,
+  field: string,
+  value: string | number | boolean,
+) {
+  const current = context[field];
+  if (
+    current === undefined ||
+    current === null ||
+    !String(current).trim() ||
+    String(current) === String(value)
+  ) {
+    return true;
+  }
+  const provenance =
+    context.fieldProvenance &&
+    typeof context.fieldProvenance === 'object' &&
+    !Array.isArray(context.fieldProvenance)
+      ? (context.fieldProvenance as Record<string, unknown>)
+      : {};
+  const fieldProvenance = provenance[field];
+  return Boolean(
+    fieldProvenance &&
+    typeof fieldProvenance === 'object' &&
+    !Array.isArray(fieldProvenance) &&
+    (fieldProvenance as Record<string, unknown>).source === 'governed_agent',
+  );
 }
