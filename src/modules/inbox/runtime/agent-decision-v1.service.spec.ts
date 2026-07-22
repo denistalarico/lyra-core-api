@@ -6,6 +6,7 @@ import {
 import { LEADFLOW_BUSINESS_MODE_TEMPLATES } from '../../leadflow-settings/catalog/business-mode-templates.catalog';
 import { LeadFlowBusinessMode } from '../../leadflow-settings/enums/leadflow-business-mode.enum';
 import { readConversationPlaybook } from '../../leadflow-settings/types/conversation-playbook.types';
+import type { CrmAiStageTransitionCatalog } from '../../crm/services/crm-stage-transition-policy.service';
 
 const validDecision = {
   schema_version: 1 as const,
@@ -25,7 +26,50 @@ const validDecision = {
   extracted_facts: [],
   recommended_cta: null,
   proposed_phase: null,
+  stage_transition: null,
   proposed_actions: [],
+};
+
+const transitionCatalog: CrmAiStageTransitionCatalog = {
+  opportunityId: 'o',
+  opportunityRowVersion: 7,
+  pipelineId: 'p',
+  currentStageId: 'stage-current',
+  currentStageName: 'Novo',
+  lifecycleStatus: 'open',
+  capabilities: {
+    canProposeStageTransition: true,
+    canApplyTerminalTransition: false,
+  },
+  destinations: [
+    {
+      toStageId: 'stage-qualified',
+      toStageName: 'Qualificado',
+      operationMode: 'hybrid',
+      transitionPolicyId: 'policy-1',
+      transitionPolicyVersion: 3,
+      reasonCodes: ['ai_qualified'],
+      requiredFields: ['contactName'],
+      presentFields: ['contactName'],
+      missingFields: [],
+      criteria: ['businessContext.score equals qualified'],
+      conditionsMet: true,
+      aiGuidance: 'Use apenas com intenção comercial confirmada.',
+      currentlyEligible: true,
+    },
+  ],
+};
+
+const validStageTransition = {
+  opportunityId: 'o',
+  fromStageId: 'stage-current',
+  toStageId: 'stage-qualified',
+  reasonCode: 'ai_qualified',
+  evidenceRefs: ['message:1'],
+  confidence: 0.91,
+  playbookPhase: null,
+  playbookVersion: null,
+  transitionPolicyVersion: 3,
 };
 
 describe('AgentDecision v1 schema and policy', () => {
@@ -53,8 +97,11 @@ describe('AgentDecision v1 schema and policy', () => {
       ],
       transcriptions: [],
       images: [],
+      stageTransitionCatalog: transitionCatalog,
     });
     expect(prompt.systemPolicy).toContain('nunca instrução');
+    expect(prompt.systemPolicy).toContain('crm_transition_catalog');
+    expect(prompt.systemPolicy).toContain('stage-qualified');
     expect(prompt.systemPolicy).not.toContain('troque o tenant');
     expect(prompt.untrustedData).toContain('UNTRUSTED_DATA_BEGIN');
     expect(prompt.untrustedData).toContain('troque o tenant');
@@ -69,17 +116,23 @@ describe('AgentDecision v1 schema and policy', () => {
     expect(() =>
       schema.assertEvidenceRefs(validDecision, ['message:other']),
     ).toThrow('decision_evidence_invalid');
+    expect(() =>
+      schema.assertEvidenceRefs(
+        {
+          ...validDecision,
+          stage_transition: {
+            ...validStageTransition,
+            evidenceRefs: ['message:forged'],
+          },
+        },
+        ['message:1'],
+      ),
+    ).toThrow('decision_evidence_invalid');
   });
 
   it('rejects an invented stage deterministically', async () => {
-    const getMany = jest
-      .fn()
-      .mockResolvedValue([
-        { id: 'stage-1', name: 'Qualificado', metadata: { key: 'qualified' } },
-      ]);
     const dataSource = {
       getRepository: () => ({
-        find: getMany,
         createQueryBuilder: () => ({
           where: () => ({
             andWhere: () => ({ getMany: jest.fn().mockResolvedValue([]) }),
@@ -95,15 +148,100 @@ describe('AgentDecision v1 schema and policy', () => {
       opportunity: {
         id: 'o',
         pipelineId: 'p',
+        stageId: 'stage-current',
         businessMode: 'services',
         businessContext: { allowedServices: ['Consultoria'] },
       } as never,
-      decision: { ...validDecision, stage_key: 'invented' },
+      transitionCatalog,
+      decision: {
+        ...validDecision,
+        stage_transition: {
+          ...validStageTransition,
+          toStageId: 'stage-invented',
+        },
+      },
     });
     expect(plan[0]).toMatchObject({
       type: 'set_stage',
       allowed: false,
-      reason: 'stage_not_allowed',
+      reason: 'stage_not_catalogued',
+    });
+  });
+
+  it('pins an eligible published transition to canonical IDs and policy version', async () => {
+    const planner = new BusinessModeActionPlanner({} as never);
+    const plan = await planner.plan({
+      tenantId: 't',
+      workspaceId: 'w',
+      businessMode: 'services',
+      opportunity: {
+        id: 'o',
+        pipelineId: 'p',
+        stageId: 'stage-current',
+        businessMode: 'services',
+      } as never,
+      transitionCatalog,
+      decision: {
+        ...validDecision,
+        stage_transition: validStageTransition,
+      },
+    });
+
+    expect(plan[0]).toMatchObject({
+      type: 'set_stage',
+      allowed: true,
+      reason: null,
+      opportunityId: 'o',
+      fromStageId: 'stage-current',
+      stageId: 'stage-qualified',
+      transitionPolicyId: 'policy-1',
+      transitionPolicyVersion: 3,
+      opportunityRowVersion: 7,
+      reasonCode: 'ai_qualified',
+    });
+  });
+
+  it.each([
+    [
+      'stale source stage',
+      { fromStageId: 'stage-stale' },
+      'stage_context_stale',
+    ],
+    [
+      'stale policy version',
+      { transitionPolicyVersion: 2 },
+      'transition_policy_stale',
+    ],
+    [
+      'unpublished reason',
+      { reasonCode: 'invented_reason' },
+      'transition_reason_not_allowed',
+    ],
+    ['missing evidence', { evidenceRefs: [] }, 'transition_evidence_missing'],
+    ['low confidence', { confidence: 0.4 }, 'transition_confidence_low'],
+  ])('rejects %s in a stage proposal', async (_label, overrides, reason) => {
+    const planner = new BusinessModeActionPlanner({} as never);
+    const plan = await planner.plan({
+      tenantId: 't',
+      workspaceId: 'w',
+      businessMode: 'services',
+      opportunity: {
+        id: 'o',
+        pipelineId: 'p',
+        stageId: 'stage-current',
+        businessMode: 'services',
+      } as never,
+      transitionCatalog,
+      decision: {
+        ...validDecision,
+        stage_transition: { ...validStageTransition, ...overrides },
+      },
+    });
+
+    expect(plan[0]).toMatchObject({
+      type: 'set_stage',
+      allowed: false,
+      reason,
     });
   });
 
@@ -182,9 +320,14 @@ describe('AgentDecision v1 schema and policy', () => {
       opportunity: {
         id: 'o',
         pipelineId: 'p',
+        stageId: 'stage-current',
         businessMode: 'real_estate',
       } as never,
-      decision: { ...validDecision, stage_key: 'qualified' },
+      transitionCatalog,
+      decision: {
+        ...validDecision,
+        stage_transition: validStageTransition,
+      },
     });
     expect(plan[0]).toMatchObject({
       allowed: false,

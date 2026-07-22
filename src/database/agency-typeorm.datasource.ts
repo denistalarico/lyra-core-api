@@ -110,6 +110,9 @@ import { HardenInboxAssistedMode1784530000000 } from './migrations/1784530000000
 import { CreateInboxGovernedActions1784540000000 } from './migrations/1784540000000-create-inbox-governed-actions';
 import { ScopeCrmOpportunityUniquenessToOpen1784550000000 } from './migrations/1784550000000-scope-crm-opportunity-uniqueness-to-open';
 import { HardenCrmOpportunityLifecycle1784560000000 } from './migrations/1784560000000-harden-crm-opportunity-lifecycle';
+import { AddDeterministicCrmRouting1784570000000 } from './migrations/1784570000000-add-deterministic-crm-routing';
+import { CreateGovernedStageTransitions1784580000000 } from './migrations/1784580000000-create-governed-stage-transitions';
+import { AddLeadflowAutomationTemplateVersion1785000000000 } from './migrations/1785000000000-add-leadflow-automation-template-version';
 
 export const AgencyDataSource = new DataSource({
   type: 'postgres',
@@ -233,5 +236,8 @@ export const AgencyDataSource = new DataSource({
     CreateInboxGovernedActions1784540000000,
     ScopeCrmOpportunityUniquenessToOpen1784550000000,
     HardenCrmOpportunityLifecycle1784560000000,
+    AddDeterministicCrmRouting1784570000000,
+    CreateGovernedStageTransitions1784580000000,
+    AddLeadflowAutomationTemplateVersion1785000000000,
   ],
 });

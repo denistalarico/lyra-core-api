@@ -27,6 +27,7 @@ function channel(
     accessTokenEncrypted: 'encrypted',
     defaultAssignedUserId: null,
     defaultAgentId: null,
+    defaultPipelineId: null,
     aiEnabled: false,
     settings: {},
     metadata: {},
@@ -53,8 +54,13 @@ describe('mapInboxChannel', () => {
   });
 
   it('falls back to the provider channel name without a custom name', () => {
-    expect(mapInboxChannel(channel()).name).toBe(
-      'WhatsApp +55 16 99999-0000',
-    );
+    expect(mapInboxChannel(channel()).name).toBe('WhatsApp +55 16 99999-0000');
+  });
+
+  it('exposes the non-secret canonical pipeline route', () => {
+    expect(
+      mapInboxChannel(channel({ defaultPipelineId: 'pipeline-1' }))
+        .defaultPipelineId,
+    ).toBe('pipeline-1');
   });
 });

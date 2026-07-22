@@ -3,10 +3,12 @@ import {
   IsInt,
   IsOptional,
   IsString,
+  IsUUID,
   Max,
   MaxLength,
   Min,
   MinLength,
+  ValidateIf,
 } from 'class-validator';
 
 /** Operational allowlist only. Provider identity, credentials and ownership are lifecycle-owned. */
@@ -26,6 +28,11 @@ export class PatchInboxChannelDto {
   @Min(1)
   @Max(300)
   debounceSeconds?: number;
+
+  @IsOptional()
+  @ValidateIf((_object, value) => value !== null)
+  @IsUUID()
+  defaultPipelineId?: string | null;
 }
 
 export class InboxChannelLifecycleDto {

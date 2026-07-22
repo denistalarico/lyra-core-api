@@ -46,6 +46,7 @@ function decision(overrides: Partial<AgentDecisionV1> = {}): AgentDecisionV1 {
       evidence_refs: ['message:1'],
     },
     proposed_phase: 'qualify',
+    stage_transition: null,
     proposed_actions: [],
     ...overrides,
   };

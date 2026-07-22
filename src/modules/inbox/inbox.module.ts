@@ -79,6 +79,7 @@ import { InboxAutonomyAdminService } from './services/inbox-autonomy-admin.servi
 import { InboxAutonomyAdminController } from './inbox-autonomy-admin.controller';
 import { ConversationPlaybookStateService } from './runtime/conversation-playbook-state.service';
 import { CrmModule } from '../crm/crm.module';
+import { CrmPipelineEntity } from '../crm/entities/crm-pipeline.entity';
 
 @Module({
   imports: [
@@ -113,6 +114,7 @@ import { CrmModule } from '../crm/crm.module';
         InboxAutonomyControlEntity,
         LeadFlowAgentChannelBindingEntity,
         LeadFlowAgentEntity,
+        CrmPipelineEntity,
       ],
       'agency',
     ),

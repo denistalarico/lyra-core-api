@@ -7,7 +7,6 @@ import {
   orderContextMessages,
   projectConversationEvidence,
 } from './inbox-agent-runtime.service';
-import { resolveDefaultPipelineForBusinessMode } from '../runtime/inbox-crm-target-resolver';
 import { ConversationOwnershipService } from './conversation-ownership.service';
 import {
   RoomAgentOperationalStatus,
@@ -187,26 +186,6 @@ describe('InboxAgentRuntimeService safety contracts', () => {
         '{}',
       ),
     ).toBe(false);
-  });
-
-  it('uses one general default CRM pipeline only as a canonical fallback', () => {
-    const general = { id: 'general', businessMode: 'general' };
-    const exact = { id: 'exact', businessMode: 'agency_services' };
-    expect(
-      resolveDefaultPipelineForBusinessMode([general], 'agency_services'),
-    ).toBe(general);
-    expect(
-      resolveDefaultPipelineForBusinessMode(
-        [general, exact],
-        'agency_services',
-      ),
-    ).toBe(exact);
-    expect(
-      resolveDefaultPipelineForBusinessMode(
-        [general, { ...general, id: 'other-general' }],
-        'agency_services',
-      ),
-    ).toBeNull();
   });
 
   it('publishes runtime transitions with retry-safe batch identity', async () => {

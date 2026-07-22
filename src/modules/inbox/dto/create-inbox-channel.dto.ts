@@ -86,6 +86,10 @@ export class CreateInboxChannelDto {
   defaultAgentId?: string;
 
   @IsOptional()
+  @IsUUID()
+  defaultPipelineId?: string;
+
+  @IsOptional()
   @IsBoolean()
   aiEnabled?: boolean;
 

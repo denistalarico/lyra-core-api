@@ -63,6 +63,7 @@ import { CreateInboxCore1760000020000 } from './migrations/1760000020000-create-
 import { CreateInboxSettings1760000021000 } from './migrations/1760000021000-create-inbox-settings';
 import { CrmPipelineEntity } from '../modules/crm/entities/crm-pipeline.entity';
 import { CrmStageEntity } from '../modules/crm/entities/crm-stage.entity';
+import { CrmStageTransitionPolicyEntity } from '../modules/crm/entities/crm-stage-transition-policy.entity';
 import { CrmOpportunityEntity } from '../modules/crm/entities/crm-opportunity.entity';
 import { CrmActivityEntity } from '../modules/crm/entities/crm-activity.entity';
 import { CrmTagEntity } from '../modules/crm/entities/crm-tag.entity';
@@ -127,6 +128,7 @@ export const AppDataSource = new DataSource({
     InboxConversationEventEntity,
     CrmPipelineEntity,
     CrmStageEntity,
+    CrmStageTransitionPolicyEntity,
     CrmOpportunityEntity,
     CrmActivityEntity,
     CrmTagEntity,

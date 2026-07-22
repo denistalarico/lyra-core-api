@@ -404,6 +404,7 @@ const decisionSchema = {
     'extracted_facts',
     'recommended_cta',
     'proposed_phase',
+    'stage_transition',
     'proposed_actions',
   ],
   properties: {
@@ -473,6 +474,42 @@ const decisionSchema = {
       ],
     },
     proposed_phase: { type: ['string', 'null'] },
+    stage_transition: {
+      anyOf: [
+        { type: 'null' },
+        {
+          type: 'object',
+          additionalProperties: false,
+          required: [
+            'opportunityId',
+            'fromStageId',
+            'toStageId',
+            'reasonCode',
+            'evidenceRefs',
+            'confidence',
+            'playbookPhase',
+            'playbookVersion',
+            'transitionPolicyVersion',
+          ],
+          properties: {
+            opportunityId: { type: 'string' },
+            fromStageId: { type: 'string' },
+            toStageId: { type: 'string' },
+            reasonCode: { type: 'string' },
+            evidenceRefs: {
+              type: 'array',
+              items: { type: 'string' },
+              minItems: 1,
+              maxItems: 20,
+            },
+            confidence: { type: 'number', minimum: 0, maximum: 1 },
+            playbookPhase: { type: ['string', 'null'] },
+            playbookVersion: { type: ['integer', 'null'], minimum: 1 },
+            transitionPolicyVersion: { type: 'integer', minimum: 1 },
+          },
+        },
+      ],
+    },
     proposed_actions: {
       type: 'array',
       maxItems: 30,
@@ -519,6 +556,7 @@ function mockDecision() {
     extracted_facts: [],
     recommended_cta: null,
     proposed_phase: null,
+    stage_transition: null,
     proposed_actions: [],
   };
 }

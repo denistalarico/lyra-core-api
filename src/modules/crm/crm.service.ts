@@ -4,7 +4,14 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { FindOptionsWhere, ILike, IsNull, Raw, Repository } from 'typeorm';
+import {
+  EntityManager,
+  FindOptionsWhere,
+  ILike,
+  IsNull,
+  Raw,
+  Repository,
+} from 'typeorm';
 import { RequestContext } from '../../common/context/request-context.interface';
 import { ContactEntity } from '../contacts/entities/contact.entity';
 import { CreateCrmOpportunityDto } from './dto/create-crm-opportunity.dto';
@@ -25,6 +32,7 @@ import { PatchCrmOpportunityStageDto } from './dto/patch-crm-opportunity-stage.d
 import { PatchCrmOpportunityStatusDto } from './dto/patch-crm-opportunity-status.dto';
 import { PatchCrmPipelineDto } from './dto/patch-crm-pipeline.dto';
 import { PatchCrmStageDto } from './dto/patch-crm-stage.dto';
+import { TransferCrmOpportunityDto } from './dto/transfer-crm-opportunity.dto';
 import { CrmOpportunityEntity } from './entities/crm-opportunity.entity';
 import { CrmPipelineEntity } from './entities/crm-pipeline.entity';
 import { CrmStageEntity } from './entities/crm-stage.entity';
@@ -205,25 +213,47 @@ export class CrmService {
     const tenantId = this.requireTenantId(ctx);
     const workspaceId = this.requireWorkspaceId(ctx);
 
-    await this.getPipeline(ctx, dto.pipelineId);
+    return this.stagesRepository.manager.transaction(async (manager) => {
+      await this.getPipelineWithManager(manager, ctx, dto.pipelineId, true);
+      const repository = manager.getRepository(CrmStageEntity);
+      const stageCount = await repository.count({
+        where: this.withClientScope(ctx, {
+          tenantId,
+          workspaceId,
+          pipelineId: dto.pipelineId,
+          deletedAt: IsNull(),
+        }),
+      });
+      const eligibleForInitial =
+        (dto.type ?? 'open') === 'open' &&
+        !(dto.isWonStage ?? false) &&
+        !(dto.isLostStage ?? false);
+      const isInitialStage =
+        dto.isInitialStage ?? (stageCount === 0 && eligibleForInitial);
+      const stage = repository.create({
+        tenantId,
+        workspaceId,
+        pipelineId: dto.pipelineId,
+        name: dto.name,
+        description: dto.description ?? null,
+        type: dto.type ?? 'open',
+        color: dto.color ?? null,
+        sortOrder: dto.sortOrder ?? 0,
+        probability: dto.probability ?? 0,
+        isWonStage: dto.isWonStage ?? false,
+        isLostStage: dto.isLostStage ?? false,
+        isFolded: dto.isFolded ?? false,
+        isInitialStage,
+        operationMode: dto.operationMode ?? 'hybrid',
+        metadata: this.stampContext(ctx, dto.metadata ?? {}),
+      });
 
-    const stage = this.stagesRepository.create({
-      tenantId,
-      workspaceId,
-      pipelineId: dto.pipelineId,
-      name: dto.name,
-      description: dto.description ?? null,
-      type: dto.type ?? 'open',
-      color: dto.color ?? null,
-      sortOrder: dto.sortOrder ?? 0,
-      probability: dto.probability ?? 0,
-      isWonStage: dto.isWonStage ?? false,
-      isLostStage: dto.isLostStage ?? false,
-      isFolded: dto.isFolded ?? false,
-      metadata: this.stampContext(ctx, dto.metadata ?? {}),
+      this.assertInitialStageEligibility(stage);
+      if (isInitialStage) {
+        await this.clearInitialStage(manager, ctx, dto.pipelineId);
+      }
+      return repository.save(stage);
     });
-
-    return this.stagesRepository.save(stage);
   }
 
   async getStage(ctx: RequestContext, id: string): Promise<CrmStageEntity> {
@@ -249,21 +279,43 @@ export class CrmService {
     id: string,
     dto: PatchCrmStageDto,
   ): Promise<CrmStageEntity> {
-    const stage = await this.getStage(ctx, id);
+    const currentStage = await this.getStage(ctx, id);
+    return this.stagesRepository.manager.transaction(async (manager) => {
+      await this.getPipelineWithManager(
+        manager,
+        ctx,
+        currentStage.pipelineId,
+        true,
+      );
+      const stage = await this.getStageWithManager(manager, ctx, id, true);
 
-    if (dto.name !== undefined) stage.name = dto.name;
-    if (dto.description !== undefined) stage.description = dto.description;
-    if (dto.type !== undefined) stage.type = dto.type;
-    if (dto.color !== undefined) stage.color = dto.color;
-    if (dto.sortOrder !== undefined) stage.sortOrder = dto.sortOrder;
-    if (dto.probability !== undefined) stage.probability = dto.probability;
-    if (dto.isWonStage !== undefined) stage.isWonStage = dto.isWonStage;
-    if (dto.isLostStage !== undefined) stage.isLostStage = dto.isLostStage;
-    if (dto.isFolded !== undefined) stage.isFolded = dto.isFolded;
-    if (dto.metadata !== undefined)
-      stage.metadata = this.stampContext(ctx, dto.metadata);
+      if (dto.name !== undefined) stage.name = dto.name;
+      if (dto.description !== undefined) stage.description = dto.description;
+      if (dto.type !== undefined) stage.type = dto.type;
+      if (dto.color !== undefined) stage.color = dto.color;
+      if (dto.sortOrder !== undefined) stage.sortOrder = dto.sortOrder;
+      if (dto.probability !== undefined) stage.probability = dto.probability;
+      if (dto.isWonStage !== undefined) stage.isWonStage = dto.isWonStage;
+      if (dto.isLostStage !== undefined) stage.isLostStage = dto.isLostStage;
+      if (dto.isFolded !== undefined) stage.isFolded = dto.isFolded;
+      if (dto.operationMode !== undefined)
+        stage.operationMode = dto.operationMode;
+      if (dto.metadata !== undefined)
+        stage.metadata = this.stampContext(ctx, dto.metadata);
 
-    return this.stagesRepository.save(stage);
+      if (dto.isInitialStage === false && stage.isInitialStage) {
+        throw new BadRequestException(
+          'Select another initial stage before clearing the current one.',
+        );
+      }
+      if (dto.isInitialStage === true) stage.isInitialStage = true;
+      this.assertInitialStageEligibility(stage);
+
+      if (dto.isInitialStage === true) {
+        await this.clearInitialStage(manager, ctx, stage.pipelineId, stage.id);
+      }
+      return manager.getRepository(CrmStageEntity).save(stage);
+    });
   }
 
   async deleteStage(
@@ -271,6 +323,11 @@ export class CrmService {
     id: string,
   ): Promise<{ deleted: true }> {
     const stage = await this.getStage(ctx, id);
+    if (stage.isInitialStage) {
+      throw new BadRequestException(
+        'Select another initial stage before deleting the current one.',
+      );
+    }
     stage.deletedAt = new Date();
     await this.stagesRepository.save(stage);
     return { deleted: true };
@@ -327,7 +384,7 @@ export class CrmService {
 
     const stage = dto.stageId
       ? await this.getStage(ctx, dto.stageId)
-      : await this.getFirstOpenStage(ctx, pipeline.id);
+      : await this.getInitialStage(ctx, pipeline.id);
 
     if (stage.pipelineId !== pipeline.id) {
       throw new BadRequestException(
@@ -569,6 +626,7 @@ export class CrmService {
         expectedVersion: dto.expectedVersion ?? options.expectedVersion,
         sortOrder: dto.sortOrder,
         beforeOpportunityId: dto.beforeOpportunityId,
+        reason: dto.reasonCode,
       },
     );
     if (
@@ -590,6 +648,28 @@ export class CrmService {
     return result.opportunity;
   }
 
+  async transferOpportunity(
+    ctx: RequestContext,
+    id: string,
+    dto: TransferCrmOpportunityDto,
+    options: CrmCommandOptions = {},
+  ): Promise<CrmOpportunityEntity> {
+    const result = await this.opportunityCommands.transferPipeline(
+      ctx,
+      id,
+      dto.pipelineId,
+      dto.stageId,
+      {
+        ...options,
+        actor: { type: 'user', userId: ctx.userId ?? null },
+        expectedVersion: dto.expectedVersion ?? options.expectedVersion,
+        reason: dto.reasonCode,
+        transferMode: 'manual',
+      },
+    );
+    return result.opportunity;
+  }
+
   async patchOpportunityStatus(
     ctx: RequestContext,
     id: string,
@@ -604,6 +684,7 @@ export class CrmService {
       {
         ...options,
         expectedVersion: dto.expectedVersion ?? options.expectedVersion,
+        reason: dto.reasonCode,
       },
     );
   }
@@ -1033,6 +1114,8 @@ export class CrmService {
           probability: stage.probability,
           isWonStage: stage.isWonStage ?? false,
           isLostStage: stage.isLostStage ?? false,
+          isInitialStage: stage.sortOrder === 10,
+          operationMode: 'hybrid',
           metadata: this.stampContext(ctx, { systemGenerated: true }),
         }),
       ),
@@ -1041,29 +1124,105 @@ export class CrmService {
     return pipeline;
   }
 
-  private async getFirstOpenStage(
+  private async getInitialStage(
     ctx: RequestContext,
     pipelineId: string,
   ): Promise<CrmStageEntity> {
     const tenantId = this.requireTenantId(ctx);
     const workspaceId = this.requireWorkspaceId(ctx);
 
-    const stage = await this.stagesRepository.findOne({
+    const stages = await this.stagesRepository.find({
       where: this.withClientScope(ctx, {
         tenantId,
         workspaceId,
         pipelineId,
+        isInitialStage: true,
         type: 'open',
+        isWonStage: false,
+        isLostStage: false,
         deletedAt: IsNull(),
       }),
-      order: { sortOrder: 'ASC', createdAt: 'ASC' },
+      take: 2,
     });
 
-    if (!stage) {
-      throw new BadRequestException('Selected pipeline has no open stage.');
+    if (stages.length !== 1) {
+      throw new BadRequestException(
+        'Selected pipeline must have exactly one active initial stage.',
+      );
     }
 
+    return stages[0];
+  }
+
+  private assertInitialStageEligibility(stage: CrmStageEntity): void {
+    if (
+      stage.isInitialStage &&
+      (stage.type !== 'open' || stage.isWonStage || stage.isLostStage)
+    ) {
+      throw new BadRequestException(
+        'The initial stage must be open and cannot be a won or lost stage.',
+      );
+    }
+  }
+
+  private async clearInitialStage(
+    manager: EntityManager,
+    ctx: RequestContext,
+    pipelineId: string,
+    exceptStageId?: string,
+  ): Promise<void> {
+    const tenantId = this.requireTenantId(ctx);
+    const workspaceId = this.requireWorkspaceId(ctx);
+    const qb = manager
+      .getRepository(CrmStageEntity)
+      .createQueryBuilder()
+      .update(CrmStageEntity)
+      .set({ isInitialStage: false })
+      .where('tenant_id = :tenantId', { tenantId })
+      .andWhere('workspace_id = :workspaceId', { workspaceId })
+      .andWhere('pipeline_id = :pipelineId', { pipelineId })
+      .andWhere('is_initial_stage = true')
+      .andWhere('deleted_at IS NULL');
+    if (exceptStageId) qb.andWhere('id <> :exceptStageId', { exceptStageId });
+    await qb.execute();
+  }
+
+  private async getStageWithManager(
+    manager: EntityManager,
+    ctx: RequestContext,
+    id: string,
+    lock = false,
+  ): Promise<CrmStageEntity> {
+    const stage = await manager.getRepository(CrmStageEntity).findOne({
+      where: this.withClientScope(ctx, {
+        id,
+        tenantId: this.requireTenantId(ctx),
+        workspaceId: this.requireWorkspaceId(ctx),
+        deletedAt: IsNull(),
+      }),
+      lock: lock ? { mode: 'pessimistic_write' } : undefined,
+    });
+    if (!stage) throw new NotFoundException('CRM stage not found.');
     return stage;
+  }
+
+  private async getPipelineWithManager(
+    manager: EntityManager,
+    ctx: RequestContext,
+    id: string,
+    lock = false,
+  ): Promise<CrmPipelineEntity> {
+    const pipeline = await manager.getRepository(CrmPipelineEntity).findOne({
+      where: this.withClientScope(ctx, {
+        id,
+        tenantId: this.requireTenantId(ctx),
+        workspaceId: this.requireWorkspaceId(ctx),
+        deletedAt: IsNull(),
+      }),
+      lock: lock ? { mode: 'pessimistic_write' } : undefined,
+    });
+    if (!pipeline) throw new NotFoundException('CRM pipeline not found.');
+    return pipeline;
   }
 
   private async validatePipelineStage(

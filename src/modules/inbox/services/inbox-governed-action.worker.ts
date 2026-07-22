@@ -13,8 +13,6 @@ import { ContactMethodEntity } from '../../contacts/entities/contact-method.enti
 import { ContactListEntity } from '../../contacts/entities/contact-list.entity';
 import { ContactListMemberEntity } from '../../contacts/entities/contact-list-member.entity';
 import { CrmOpportunityEntity } from '../../crm/entities/crm-opportunity.entity';
-import { CrmPipelineEntity } from '../../crm/entities/crm-pipeline.entity';
-import { CrmStageEntity } from '../../crm/entities/crm-stage.entity';
 import { InboxAgentDecisionEntity } from '../entities/inbox-agent-decision.entity';
 import { InboxConversationEntity } from '../entities/inbox-conversation.entity';
 import { InboxChannelEntity } from '../entities/inbox-channel.entity';
@@ -25,10 +23,13 @@ import { InboxMessageEntity } from '../entities/inbox-message.entity';
 import { InboxChannelContactIdentityEntity } from '../entities/inbox-channel-contact-identity.entity';
 import { InboxAutonomyControlEntity } from '../entities/inbox-autonomy-control.entity';
 import { InboxRuntimeConfigService } from '../runtime/inbox-runtime-config.service';
-import { resolveDefaultPipelineForBusinessMode } from '../runtime/inbox-crm-target-resolver';
+import { resolveRoutedCrmTarget } from '../runtime/inbox-crm-target-resolver';
 import { WhatsAppOutboundService } from '../channels/whatsapp/services/whatsapp-outbound.service';
 import { ConversationOwnershipService } from './conversation-ownership.service';
 import { CrmOpportunityCommandService } from '../../crm/services/crm-opportunity-command.service';
+import { CrmStageTransitionPolicyEntity } from '../../crm/entities/crm-stage-transition-policy.entity';
+import { LeadFlowAgentEntity } from '../../leadflow-agents/entities/leadflow-agent.entity';
+import { LeadFlowAgentStatus } from '../../leadflow-agents/enums/leadflow-agent-status.enum';
 
 @Injectable()
 export class InboxGovernedActionWorker
@@ -133,16 +134,17 @@ export class InboxGovernedActionWorker
         await this.finish(action, 'applied', null, result);
       } else if (action.actionType === 'handoff') {
         const planned = this.plannedAction(decision, action.actionKey);
-        await this.ownership.transition(
+        const transfer = await this.resolveHandoffTransfer(action, decision);
+        await this.ownership.requestHandoff(
           {
             tenantId: action.tenantId,
             workspaceId: action.workspaceId,
           },
           conversation.id,
-          'request_handoff',
           typeof planned?.value === 'string'
             ? planned.value
             : 'governed_handoff',
+          transfer,
         );
         await this.finish(action, 'applied', null, {
           conversationId: conversation.id,
@@ -178,6 +180,39 @@ export class InboxGovernedActionWorker
     }
   }
 
+  private async resolveHandoffTransfer(
+    action: InboxGovernedActionEntity,
+    decision: InboxAgentDecisionEntity,
+  ) {
+    if (!decision.agentId) return undefined;
+    const agent = await this.dataSource
+      .getRepository(LeadFlowAgentEntity)
+      .findOneBy({
+        id: decision.agentId,
+        tenantId: action.tenantId,
+        workspaceId: action.workspaceId,
+        status: LeadFlowAgentStatus.Active,
+      });
+    if (
+      !agent?.publishedVersionId ||
+      agent.handoffPolicy?.transferOpportunityOnHandoff !== true
+    ) {
+      return undefined;
+    }
+    return {
+      pipelineId:
+        typeof agent.handoffPolicy.targetPipelineId === 'string'
+          ? agent.handoffPolicy.targetPipelineId
+          : null,
+      stageId:
+        typeof agent.handoffPolicy.targetStageId === 'string'
+          ? agent.handoffPolicy.targetStageId
+          : null,
+      idempotencyKey: `handoff:${action.id}:pipeline-transfer`,
+      agentId: agent.id,
+    };
+  }
+
   private async claim(workerId: string): Promise<string | null> {
     return this.dataSource.transaction(async (manager) => {
       const rows = await manager.query<Array<{ id: string }>>(
@@ -191,8 +226,9 @@ export class InboxGovernedActionWorker
               WHEN 'ensure_contact' THEN 0
               WHEN 'ensure_opportunity' THEN 1
               WHEN 'reply' THEN 2
-              WHEN 'handoff' THEN 4
-              ELSE 3
+              WHEN 'set_stage' THEN 3
+              WHEN 'handoff' THEN 5
+              ELSE 4
             END,
             created_at, id
           FOR UPDATE SKIP LOCKED LIMIT 1`,
@@ -549,38 +585,14 @@ export class InboxGovernedActionWorker
         return { opportunityId: existing.id, opportunityOutcome: 'reused' };
       }
       if (!conversation.contactId) throw new Error('contact_missing');
-      const pipelines = await manager.getRepository(CrmPipelineEntity).find({
-        where: {
-          tenantId: action.tenantId,
-          workspaceId: action.workspaceId,
-          isDefault: true,
-          status: 'active',
-          deletedAt: IsNull(),
-        },
+      const routedCrmTarget = await resolveRoutedCrmTarget(manager, {
+        tenantId: action.tenantId,
+        workspaceId: action.workspaceId,
+        channelId: conversation.channelId,
+        businessMode: conversation.businessMode,
       });
-      const pipeline = resolveDefaultPipelineForBusinessMode(
-        pipelines,
-        conversation.businessMode,
-      );
-      if (!pipeline) throw new Error('opportunity_defaults_ambiguous');
-      const stage = await manager.getRepository(CrmStageEntity).findOne({
-        where: {
-          tenantId: action.tenantId,
-          workspaceId: action.workspaceId,
-          pipelineId: pipeline.id,
-          type: 'open',
-          deletedAt: IsNull(),
-        },
-        order: { sortOrder: 'ASC', createdAt: 'ASC' },
-      });
-      if (!stage) throw new Error('initial_stage_missing');
-      const channel = conversation.channelId
-        ? await manager.getRepository(InboxChannelEntity).findOneBy({
-            id: conversation.channelId,
-            tenantId: action.tenantId,
-            workspaceId: action.workspaceId,
-          })
-        : null;
+      if (!routedCrmTarget.ok) throw new Error(routedCrmTarget.errorCode);
+      const { pipeline, initialStage: stage, channel } = routedCrmTarget;
       const contact = await manager.getRepository(ContactEntity).findOneBy({
         id: conversation.contactId,
         tenantId: action.tenantId,
@@ -804,11 +816,7 @@ export class InboxGovernedActionWorker
         typeof decision.contextSnapshot?.latestInboundId === 'string'
           ? decision.contextSnapshot.latestInboundId
           : null;
-      if (
-        latestInbound &&
-        expectedInboundId &&
-        expectedInboundId !== latestInbound.id
-      )
+      if (expectedInboundId && expectedInboundId !== latestInbound?.id)
         throw new Error('decision_context_stale');
       const opportunity = await manager
         .getRepository(CrmOpportunityEntity)
@@ -829,7 +837,10 @@ export class InboxGovernedActionWorker
       const planned = this.plannedAction(decision, action.actionKey);
       if (!opportunity || !planned || planned.allowed !== true)
         throw new Error('canonical_target_unresolved');
+      if (opportunity.inboxConversationId !== lockedConversation.id)
+        throw new Error('opportunity_conversation_link_invalid');
       const value = typeof planned.value === 'string' ? planned.value : null;
+      let stageMoved = false;
       if (
         lockedConversation.source === 'whatsapp' &&
         opportunity.metadata?.createdBy === 'governed_autonomy' &&
@@ -841,7 +852,93 @@ export class InboxGovernedActionWorker
           acquisitionChannel: 'whatsapp',
         };
       }
-      if (action.actionType === 'set_summary' && value) {
+      if (action.actionType === 'set_stage') {
+        if (!this.opportunityCommands)
+          throw new Error('crm_command_authority_unavailable');
+        const opportunityId = safeRecordString(planned.opportunityId);
+        const fromStageId = safeRecordString(planned.fromStageId);
+        const toStageId = safeRecordString(planned.stageId);
+        const policyId = safeRecordString(planned.transitionPolicyId);
+        const reasonCode = safeRecordString(planned.reasonCode);
+        const policyVersion = Number(planned.transitionPolicyVersion);
+        const expectedVersion = Number(planned.opportunityRowVersion);
+        const evidenceRefs = Array.isArray(planned.evidenceRefs)
+          ? planned.evidenceRefs.filter(
+              (ref): ref is string => typeof ref === 'string',
+            )
+          : [];
+        const allowedEvidenceRefs = Array.isArray(
+          decision.contextSnapshot?.allowedEvidenceRefs,
+        )
+          ? decision.contextSnapshot.allowedEvidenceRefs.filter(
+              (ref): ref is string => typeof ref === 'string',
+            )
+          : [];
+        if (
+          !opportunityId ||
+          opportunityId !== opportunity.id ||
+          !fromStageId ||
+          fromStageId !== opportunity.stageId ||
+          !toStageId ||
+          !policyId ||
+          !reasonCode ||
+          !Number.isInteger(policyVersion) ||
+          !Number.isInteger(expectedVersion)
+        ) {
+          throw new Error('stage_transition_proposal_stale');
+        }
+        if (
+          evidenceRefs.length === 0 ||
+          evidenceRefs.some((ref) => !allowedEvidenceRefs.includes(ref))
+        ) {
+          throw new Error('decision_evidence_invalid');
+        }
+        const publishedPolicy = await manager
+          .getRepository(CrmStageTransitionPolicyEntity)
+          .findOne({
+            where: {
+              id: policyId,
+              tenantId: action.tenantId,
+              workspaceId: action.workspaceId,
+              pipelineId: opportunity.pipelineId,
+              fromStageId,
+              toStageId,
+              status: 'published',
+              version: policyVersion,
+              deletedAt: IsNull(),
+            },
+            lock: { mode: 'pessimistic_read' },
+          });
+        if (!publishedPolicy) throw new Error('transition_policy_stale');
+        if (!publishedPolicy.allowedActors.includes('ai'))
+          throw new Error('transition_actor_not_allowed');
+        const moved = await this.opportunityCommands.moveStageWithinTransaction(
+          manager,
+          {
+            tenantId: action.tenantId,
+            workspaceId: action.workspaceId,
+          },
+          opportunity.id,
+          toStageId,
+          {
+            actor: { type: 'ai', agentId: decision.agentId },
+            expectedVersion,
+            expectedTransitionPolicyId: policyId,
+            expectedTransitionPolicyVersion: policyVersion,
+            idempotencyKey: `governed:${action.id}:stage`,
+            correlationId: action.id,
+            causationId: action.decisionId,
+            reason: reasonCode,
+            metadata: {
+              governedActionId: action.id,
+              evidenceRefs,
+              proposalConfidence: planned.confidence,
+            },
+          },
+        );
+        Object.assign(opportunity, moved.opportunity);
+        stageMoved = true;
+      } else if (action.actionType === 'set_summary' && value) {
         setGovernedBusinessContextField(
           opportunity,
           'agentSummary',
@@ -895,7 +992,7 @@ export class InboxGovernedActionWorker
       } else {
         throw new Error('automatic_crm_action_not_supported');
       }
-      if (this.opportunityCommands) {
+      if (this.opportunityCommands && !stageMoved) {
         await this.opportunityCommands.updateWithinTransaction(
           manager,
           {
@@ -912,7 +1009,7 @@ export class InboxGovernedActionWorker
             reason: 'governed_autonomy',
           },
         );
-      } else {
+      } else if (!stageMoved) {
         await manager.getRepository(CrmOpportunityEntity).save(opportunity);
       }
       await manager.getRepository(InboxConversationEventEntity).save({
@@ -1087,8 +1184,25 @@ function slug(value: string): string {
 }
 
 function safeErrorCode(error: unknown): string {
-  const value = error instanceof Error ? error.message : 'effect_failed';
+  const response =
+    error && typeof error === 'object'
+      ? (error as { response?: unknown }).response
+      : null;
+  const responseReason =
+    response && typeof response === 'object'
+      ? (response as Record<string, unknown>).reasonCode
+      : null;
+  const value =
+    typeof responseReason === 'string'
+      ? responseReason
+      : error instanceof Error
+        ? error.message
+        : 'effect_failed';
   return /^[a-z0-9_]{1,80}$/.test(value) ? value : 'effect_failed';
+}
+
+function safeRecordString(value: unknown): string {
+  return typeof value === 'string' ? value : '';
 }
 
 function normalizeIdentity(value: string): string {
@@ -1202,14 +1316,16 @@ export function governedBusinessContextWriteAllowed(
   value: string | number | boolean,
 ) {
   const current = context[field];
-  if (
-    current === undefined ||
-    current === null ||
-    !String(current).trim() ||
-    String(current) === String(value)
-  ) {
+  if (current === undefined || current === null) {
     return true;
   }
+  if (
+    (typeof current === 'string' ||
+      typeof current === 'number' ||
+      typeof current === 'boolean') &&
+    (!String(current).trim() || String(current) === String(value))
+  )
+    return true;
   const provenance =
     context.fieldProvenance &&
     typeof context.fieldProvenance === 'object' &&

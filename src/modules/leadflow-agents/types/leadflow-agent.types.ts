@@ -50,6 +50,9 @@ export interface LeadFlowAgentHandoffPolicy {
   triggers?: string[];
   target?: string;
   slaMinutes?: number;
+  transferOpportunityOnHandoff?: boolean;
+  targetPipelineId?: string | null;
+  targetStageId?: string | null;
   [key: string]: LeadFlowJsonValue | undefined;
 }
 

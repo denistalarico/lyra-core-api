@@ -1,4 +1,10 @@
-import { IsInt, IsOptional, IsUUID } from 'class-validator';
+import {
+  IsInt,
+  IsOptional,
+  IsString,
+  IsUUID,
+  MaxLength,
+} from 'class-validator';
 
 export class PatchCrmOpportunityStageDto {
   @IsUUID()
@@ -15,4 +21,8 @@ export class PatchCrmOpportunityStageDto {
   @IsOptional()
   @IsUUID()
   beforeOpportunityId?: string | null;
+
+  @IsString()
+  @MaxLength(80)
+  reasonCode!: string;
 }

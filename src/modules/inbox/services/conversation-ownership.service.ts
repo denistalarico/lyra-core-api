@@ -13,6 +13,7 @@ import {
   AgencyUserProfileEntity as UserProfileEntity,
 } from '../../agency/entities/agency-settings.entities';
 import { CrmOpportunityEntity } from '../../crm/entities/crm-opportunity.entity';
+import { CrmOpportunityCommandService } from '../../crm/services/crm-opportunity-command.service';
 import { InboxAgentDecisionEntity } from '../entities/inbox-agent-decision.entity';
 import { InboxChannelEntity } from '../entities/inbox-channel.entity';
 import {
@@ -31,13 +32,100 @@ export type ConversationOwnershipAction =
   | 'return_ai'
   | 'close';
 
+export type HandoffOpportunityTransfer = {
+  pipelineId: string | null;
+  stageId: string | null;
+  idempotencyKey: string;
+  agentId?: string | null;
+};
+
 @Injectable()
 export class ConversationOwnershipService {
   constructor(
     @InjectDataSource('agency') private readonly dataSource: DataSource,
     @Optional()
     private readonly notificationPublisher?: InboxNotificationPublisher,
+    @Optional()
+    private readonly opportunityCommands?: CrmOpportunityCommandService,
   ) {}
+
+  async requestHandoff(
+    ctx: RequestContext,
+    conversationId: string,
+    reason?: string,
+    transfer?: HandoffOpportunityTransfer,
+  ): Promise<InboxConversationEntity> {
+    const conversation = await this.transition(
+      ctx,
+      conversationId,
+      'request_handoff',
+      reason,
+    );
+    if (!transfer) return conversation;
+
+    try {
+      if (!transfer.pipelineId || !transfer.stageId) {
+        throw new Error('handoff_transfer_configuration_invalid');
+      }
+      if (!this.opportunityCommands) {
+        throw new Error('crm_command_authority_unavailable');
+      }
+      const opportunity = conversation.opportunityId
+        ? await this.dataSource.getRepository(CrmOpportunityEntity).findOneBy({
+            id: conversation.opportunityId,
+            tenantId: conversation.tenantId,
+            workspaceId: conversation.workspaceId,
+          })
+        : await this.dataSource.getRepository(CrmOpportunityEntity).findOne({
+            where: {
+              inboxConversationId: conversation.id,
+              tenantId: conversation.tenantId,
+              workspaceId: conversation.workspaceId,
+              status: 'open',
+            },
+            order: { createdAt: 'DESC' },
+          });
+      if (!opportunity) throw new Error('handoff_opportunity_missing');
+      const result = await this.opportunityCommands.transferPipeline(
+        ctx,
+        opportunity.id,
+        transfer.pipelineId,
+        transfer.stageId,
+        {
+          actor: transfer.agentId
+            ? { type: 'ai', agentId: transfer.agentId }
+            : { type: 'system' },
+          expectedVersion: opportunity.rowVersion,
+          idempotencyKey: transfer.idempotencyKey,
+          correlationId: conversation.id,
+          causationId: conversation.id,
+          reason: 'handoff_pipeline_transfer',
+          transferMode: 'handoff',
+          metadata: {
+            conversationId: conversation.id,
+            ownershipVersion: conversation.ownershipVersion,
+          },
+        },
+      );
+      return this.recordHandoffTransferOutcome(
+        ctx,
+        conversation,
+        transfer,
+        'completed',
+        null,
+        result.opportunity.id,
+      );
+    } catch (error) {
+      return this.recordHandoffTransferOutcome(
+        ctx,
+        conversation,
+        transfer,
+        'failed',
+        ownershipErrorCode(error),
+        conversation.opportunityId,
+      );
+    }
+  }
 
   async transition(
     ctx: RequestContext,
@@ -388,4 +476,108 @@ export class ConversationOwnershipService {
       clientId,
     };
   }
+
+  private async recordHandoffTransferOutcome(
+    ctx: RequestContext,
+    snapshot: InboxConversationEntity,
+    transfer: HandoffOpportunityTransfer,
+    status: 'completed' | 'failed',
+    errorCode: string | null,
+    opportunityId: string | null,
+  ): Promise<InboxConversationEntity> {
+    return this.dataSource.transaction(async (manager) => {
+      const conversation = await manager
+        .getRepository(InboxConversationEntity)
+        .findOne({
+          where: {
+            id: snapshot.id,
+            tenantId: snapshot.tenantId,
+            workspaceId: snapshot.workspaceId,
+          },
+          lock: { mode: 'pessimistic_write' },
+        });
+      if (!conversation)
+        throw new NotFoundException('Inbox conversation not found.');
+      const previous = conversation.metadata?.handoffTransfer;
+      if (
+        previous &&
+        typeof previous === 'object' &&
+        !Array.isArray(previous) &&
+        (previous as Record<string, unknown>).idempotencyKey ===
+          transfer.idempotencyKey &&
+        (previous as Record<string, unknown>).status === status
+      ) {
+        return conversation;
+      }
+      conversation.metadata = {
+        ...(conversation.metadata ?? {}),
+        handoffTransfer: {
+          status,
+          errorCode,
+          opportunityId,
+          pipelineId: transfer.pipelineId,
+          stageId: transfer.stageId,
+          idempotencyKey: transfer.idempotencyKey,
+          occurredAt: new Date().toISOString(),
+        },
+      };
+      const saved = await manager
+        .getRepository(InboxConversationEntity)
+        .save(conversation);
+      await manager.getRepository(InboxConversationEventEntity).save({
+        tenantId: saved.tenantId,
+        workspaceId: saved.workspaceId,
+        conversationId: saved.id,
+        eventType: `handoff_transfer_${status}`,
+        actorType: ctx.userId ? 'user' : 'system',
+        actorUserId: ctx.userId ?? null,
+        payload: {
+          opportunityId,
+          pipelineId: transfer.pipelineId,
+          stageId: transfer.stageId,
+          errorCode,
+          ownershipState: saved.ownershipState,
+          ownershipVersion: saved.ownershipVersion,
+        },
+      });
+      await manager.getRepository(InboxDomainOutboxEntity).save({
+        tenantId: saved.tenantId,
+        workspaceId: saved.workspaceId,
+        aggregateType: 'inbox_conversation',
+        aggregateId: saved.id,
+        eventName: `leadflow.inbox.conversation.handoff.transfer.${status}`,
+        eventVersion: 1,
+        idempotencyKey: `handoff-transfer:${transfer.idempotencyKey}:${status}`,
+        payload: {
+          conversationId: saved.id,
+          opportunityId,
+          pipelineId: transfer.pipelineId,
+          stageId: transfer.stageId,
+          errorCode,
+          ownershipState: saved.ownershipState,
+          ownershipVersion: saved.ownershipVersion,
+        },
+        publishedAt: null,
+      });
+      return saved;
+    });
+  }
+}
+
+function ownershipErrorCode(error: unknown): string {
+  const response =
+    error && typeof error === 'object'
+      ? (error as { response?: unknown }).response
+      : null;
+  const responseReason =
+    response && typeof response === 'object'
+      ? (response as Record<string, unknown>).reasonCode
+      : null;
+  const value =
+    typeof responseReason === 'string'
+      ? responseReason
+      : error instanceof Error
+        ? error.message
+        : 'handoff_transfer_failed';
+  return /^[a-z0-9_]{1,80}$/.test(value) ? value : 'handoff_transfer_failed';
 }

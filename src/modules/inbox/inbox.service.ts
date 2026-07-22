@@ -30,6 +30,7 @@ import {
 } from './mappers/inbox-channel.mapper';
 import { ConversationOwnershipService } from './services/conversation-ownership.service';
 import { WhatsAppOutboundService } from './channels/whatsapp/services/whatsapp-outbound.service';
+import { CrmPipelineEntity } from '../crm/entities/crm-pipeline.entity';
 
 export type InboxConversationFilters = {
   status?: string;
@@ -48,6 +49,8 @@ export class InboxService {
   constructor(
     @InjectRepository(InboxChannelEntity, 'agency')
     private readonly channelsRepository: Repository<InboxChannelEntity>,
+    @InjectRepository(CrmPipelineEntity, 'agency')
+    private readonly pipelinesRepository: Repository<CrmPipelineEntity>,
     @InjectRepository(InboxConversationEntity, 'agency')
     private readonly conversationsRepository: Repository<InboxConversationEntity>,
     @InjectRepository(InboxMessageEntity, 'agency')
@@ -294,6 +297,9 @@ export class InboxService {
   }
 
   async createChannel(ctx: RequestContext, dto: CreateInboxChannelDto) {
+    if (dto.defaultPipelineId) {
+      await this.requireActivePipelineForChannel(ctx, dto.defaultPipelineId);
+    }
     const channel = this.channelsRepository.create({
       ...this.scope(ctx),
       name: dto.name.trim(),
@@ -309,6 +315,7 @@ export class InboxService {
       webhookSecret: dto.webhookSecret?.trim() || null,
       defaultAssignedUserId: dto.defaultAssignedUserId ?? null,
       defaultAgentId: dto.defaultAgentId ?? null,
+      defaultPipelineId: dto.defaultPipelineId ?? null,
       aiEnabled: dto.aiEnabled ?? false,
       settings: dto.settings ?? {},
       metadata: this.channelMetadataForContext(ctx, dto.metadata),
@@ -352,10 +359,50 @@ export class InboxService {
         debounceSeconds: dto.debounceSeconds,
       };
     }
+    if (dto.defaultPipelineId !== undefined) {
+      if (dto.defaultPipelineId) {
+        await this.requireActivePipelineForChannel(ctx, dto.defaultPipelineId);
+      }
+      channel.defaultPipelineId = dto.defaultPipelineId;
+    }
 
     const saved = await this.channelsRepository.save(channel);
 
     return mapInboxChannel(saved);
+  }
+
+  private async requireActivePipelineForChannel(
+    ctx: RequestContext,
+    pipelineId: string,
+  ): Promise<CrmPipelineEntity> {
+    const qb = this.pipelinesRepository
+      .createQueryBuilder('pipeline')
+      .where('pipeline.id = :pipelineId', { pipelineId })
+      .andWhere('pipeline.tenant_id = :tenantId', { tenantId: ctx.tenantId })
+      .andWhere('pipeline.workspace_id = :workspaceId', {
+        workspaceId: this.getWorkspaceId(ctx),
+      })
+      .andWhere('pipeline.status = :status', { status: 'active' })
+      .andWhere('pipeline.deleted_at IS NULL');
+
+    const managedContext = ctx.managedContext;
+    if (managedContext?.operatingMode === 'client') {
+      qb.andWhere("pipeline.metadata->>'clientId' = :clientId", {
+        clientId: managedContext.clientId,
+      });
+    } else {
+      qb.andWhere(
+        "(pipeline.metadata->>'clientId' IS NULL OR pipeline.metadata->>'operatingMode' = 'agency')",
+      );
+    }
+
+    const pipeline = await qb.getOne();
+    if (!pipeline) {
+      throw new BadRequestException(
+        'Default pipeline must be active and belong to the current operating context.',
+      );
+    }
+    return pipeline;
   }
 
   async listConversations(
@@ -756,7 +803,9 @@ export class InboxService {
     });
     // Mensagens recebidas "excluídas só na UI" ficam ocultas (metadata.hiddenAt)
     // mas o registro é preservado para auditoria. Ver deleteMessage.
-    const messages = allMessages.filter((message) => !message.metadata?.hiddenAt);
+    const messages = allMessages.filter(
+      (message) => !message.metadata?.hiddenAt,
+    );
     if (!messages.length) return messages;
     const media = await this.mediaRepository.find({
       where: {
@@ -790,31 +839,35 @@ export class InboxService {
           ? message.attachments
           : []
         : (byMessage.get(message.id) ?? []).map((asset) => ({
-        id: asset.id,
-        kind: asset.kind,
-        mimeType: asset.mimeType,
-        status: asset.status,
-        name: asset.safeFilename,
-        derivative: (() => {
-          const derivative = derivatives.find(
-            (item) => item.mediaAssetId === asset.id,
-          );
-          return derivative
-            ? {
-                id: derivative.id,
-                kind: derivative.kind,
-                status: derivative.status,
-                outcome: derivative.outcome,
-                content:
-                  derivative.status === 'available' ? derivative.content : null,
-                language: derivative.language,
-                confidence: derivative.confidence,
-                errorCode:
-                  derivative.status === 'failed' ? derivative.errorCode : null,
-              }
-            : null;
-        })(),
-      })),
+            id: asset.id,
+            kind: asset.kind,
+            mimeType: asset.mimeType,
+            status: asset.status,
+            name: asset.safeFilename,
+            derivative: (() => {
+              const derivative = derivatives.find(
+                (item) => item.mediaAssetId === asset.id,
+              );
+              return derivative
+                ? {
+                    id: derivative.id,
+                    kind: derivative.kind,
+                    status: derivative.status,
+                    outcome: derivative.outcome,
+                    content:
+                      derivative.status === 'available'
+                        ? derivative.content
+                        : null,
+                    language: derivative.language,
+                    confidence: derivative.confidence,
+                    errorCode:
+                      derivative.status === 'failed'
+                        ? derivative.errorCode
+                        : null,
+                  }
+                : null;
+            })(),
+          })),
     }));
   }
 
@@ -1075,7 +1128,11 @@ export class InboxService {
       { messageId: message.id },
     );
 
-    return { deleted: true, scope: isInbound ? 'local' : 'both', id: messageId };
+    return {
+      deleted: true,
+      scope: isInbound ? 'local' : 'both',
+      id: messageId,
+    };
   }
 
   async listEvents(ctx: RequestContext, conversationId: string) {

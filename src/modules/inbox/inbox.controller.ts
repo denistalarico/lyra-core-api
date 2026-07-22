@@ -319,12 +319,7 @@ export class InboxController {
     @Param('id') id: string,
     @Body() body: OwnershipActionBody,
   ) {
-    return this.ownershipService.transition(
-      ctx,
-      id,
-      'request_handoff',
-      body.reason,
-    );
+    return this.ownershipService.requestHandoff(ctx, id, body.reason);
   }
 
   @Post('conversations/:id/pause-ai')

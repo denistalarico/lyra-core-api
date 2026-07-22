@@ -38,12 +38,21 @@ import { PatchCrmTagDto } from './dto/patch-crm-tag.dto';
 import { ReorderCrmOpportunitiesDto } from './dto/reorder-crm-opportunities.dto';
 import { ReorderCrmStagesDto } from './dto/reorder-crm-stages.dto';
 import { CrmOpportunityFilters, CrmService } from './crm.service';
+import {
+  CreateCrmStageTransitionPolicyDto,
+  PatchCrmStageTransitionPolicyDto,
+} from './dto/crm-stage-transition-policy.dto';
+import { CrmStageTransitionPolicyService } from './services/crm-stage-transition-policy.service';
+import { TransferCrmOpportunityDto } from './dto/transfer-crm-opportunity.dto';
 
 @Controller('crm')
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 @RequireProductEntitlement('leadflow')
 export class CrmController {
-  constructor(private readonly crmService: CrmService) {}
+  constructor(
+    private readonly crmService: CrmService,
+    private readonly transitionPolicies: CrmStageTransitionPolicyService,
+  ) {}
 
   @Get('tags')
   @RequirePermission('leadflow.crm.records.view.client')
@@ -128,6 +137,62 @@ export class CrmController {
     @Param('id') id: string,
   ) {
     return this.crmService.deletePipeline(ctx, id);
+  }
+
+  @Get('stage-transition-policies')
+  @RequirePermission('leadflow.crm.records.view.client')
+  listStageTransitionPolicies(
+    @RequestContextData() ctx: RequestContext,
+    @Query('pipelineId') pipelineId: string,
+  ) {
+    return this.transitionPolicies.list(ctx, pipelineId);
+  }
+
+  @Post('stage-transition-policies')
+  @RequirePermission('leadflow.crm.stage.manage.manager_or_admin')
+  createStageTransitionPolicy(
+    @RequestContextData() ctx: RequestContext,
+    @Body() dto: CreateCrmStageTransitionPolicyDto,
+  ) {
+    return this.transitionPolicies.createDraft(ctx, dto);
+  }
+
+  @Patch('stage-transition-policies/:id')
+  @RequirePermission('leadflow.crm.stage.manage.manager_or_admin')
+  patchStageTransitionPolicy(
+    @RequestContextData() ctx: RequestContext,
+    @Param('id') id: string,
+    @Body() dto: PatchCrmStageTransitionPolicyDto,
+  ) {
+    return this.transitionPolicies.patchDraft(ctx, id, dto);
+  }
+
+  @Post('stage-transition-policies/:id/publish')
+  @RequirePermission('leadflow.crm.stage.manage.manager_or_admin')
+  publishStageTransitionPolicy(
+    @RequestContextData() ctx: RequestContext,
+    @Param('id') id: string,
+  ) {
+    return this.transitionPolicies.publish(ctx, id);
+  }
+
+  @Post('stage-transition-policies/:id/deactivate')
+  @RequirePermission('leadflow.crm.stage.manage.manager_or_admin')
+  deactivateStageTransitionPolicy(
+    @RequestContextData() ctx: RequestContext,
+    @Param('id') id: string,
+  ) {
+    return this.transitionPolicies.deactivate(ctx, id);
+  }
+
+  @Delete('stage-transition-policies/:id')
+  @RequirePermission('leadflow.crm.stage.manage.manager_or_admin')
+  @DangerousAction()
+  deleteStageTransitionPolicy(
+    @RequestContextData() ctx: RequestContext,
+    @Param('id') id: string,
+  ) {
+    return this.transitionPolicies.deleteDraft(ctx, id);
   }
 
   @Get('stages')
@@ -285,6 +350,22 @@ export class CrmController {
     @Headers('idempotency-key') idempotencyKey?: string,
   ) {
     return this.crmService.patchOpportunityStage(ctx, id, dto, {
+      idempotencyKey,
+    });
+  }
+
+  @Post('opportunities/:id/transfer')
+  @RequireAnyPermission(
+    'leadflow.crm.records.update.assigned',
+    'leadflow.crm.records.update.client',
+  )
+  transferOpportunity(
+    @RequestContextData() ctx: RequestContext,
+    @Param('id') id: string,
+    @Body() dto: TransferCrmOpportunityDto,
+    @Headers('idempotency-key') idempotencyKey?: string,
+  ) {
+    return this.crmService.transferOpportunity(ctx, id, dto, {
       idempotencyKey,
     });
   }

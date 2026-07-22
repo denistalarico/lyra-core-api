@@ -121,6 +121,9 @@ export class InboxChannelEntity {
   @Column({ name: 'default_agent_id', type: 'uuid', nullable: true })
   defaultAgentId!: string | null;
 
+  @Column({ name: 'default_pipeline_id', type: 'uuid', nullable: true })
+  defaultPipelineId!: string | null;
+
   @Column({ name: 'ai_enabled', type: 'boolean', default: false })
   aiEnabled!: boolean;
 

@@ -11,7 +11,9 @@ import { RequestContext } from '../../../common/context/request-context.interfac
 import { InboxDomainOutboxEntity } from '../../inbox/entities/inbox-domain-outbox.entity';
 import { CrmOpportunityEventEntity } from '../entities/crm-opportunity-event.entity';
 import { CrmOpportunityEntity } from '../entities/crm-opportunity.entity';
+import { CrmPipelineEntity } from '../entities/crm-pipeline.entity';
 import { CrmStageEntity } from '../entities/crm-stage.entity';
+import { CrmStageTransitionPolicyService } from './crm-stage-transition-policy.service';
 
 export type CrmCommandActor = {
   type: 'user' | 'ai' | 'automation' | 'system';
@@ -22,6 +24,9 @@ export type CrmCommandActor = {
 export type CrmCommandOptions = {
   actor?: CrmCommandActor;
   expectedVersion?: number;
+  expectedTransitionPolicyId?: string;
+  expectedTransitionPolicyVersion?: number;
+  transferMode?: 'manual' | 'handoff';
   idempotencyKey?: string;
   correlationId?: string;
   causationId?: string | null;
@@ -74,6 +79,7 @@ const MUTABLE_FIELDS: Array<keyof CrmOpportunityEntity> = [
 export class CrmOpportunityCommandService {
   constructor(
     @InjectDataSource('agency') private readonly dataSource: DataSource,
+    private readonly transitionPolicies: CrmStageTransitionPolicyService,
   ) {}
 
   async createOpportunity(
@@ -183,6 +189,184 @@ export class CrmOpportunityCommandService {
     );
   }
 
+  async transferPipeline(
+    ctx: RequestContext,
+    opportunityId: string,
+    pipelineId: string,
+    stageId: string,
+    options: CrmCommandOptions = {},
+  ): Promise<{
+    opportunity: CrmOpportunityEntity;
+    event: CrmOpportunityEventEntity | null;
+  }> {
+    return this.dataSource.transaction((manager) =>
+      this.transferPipelineWithinTransaction(
+        manager,
+        ctx,
+        opportunityId,
+        pipelineId,
+        stageId,
+        options,
+      ),
+    );
+  }
+
+  async transferPipelineWithinTransaction(
+    manager: EntityManager,
+    ctx: RequestContext,
+    opportunityId: string,
+    pipelineId: string,
+    stageId: string,
+    options: CrmCommandOptions = {},
+  ): Promise<{
+    opportunity: CrmOpportunityEntity;
+    event: CrmOpportunityEventEntity | null;
+  }> {
+    const replay = await this.findReplay(manager, ctx, options.idempotencyKey);
+    if (replay) return { opportunity: replay, event: null };
+
+    const opportunity = await this.findScopedOpportunity(
+      manager,
+      ctx,
+      opportunityId,
+      true,
+    );
+    this.assertVersion(opportunity, options.expectedVersion);
+    if (opportunity.status !== 'open') {
+      throw new ConflictException({
+        code: 'CRM_PIPELINE_TRANSFER_BLOCKED',
+        reasonCode: 'terminal_opportunity',
+        message: 'Terminal opportunities cannot be transferred.',
+      });
+    }
+    if (opportunity.pipelineId === pipelineId) {
+      throw new BadRequestException({
+        code: 'CRM_PIPELINE_TRANSFER_BLOCKED',
+        reasonCode: 'same_pipeline',
+        message: 'Use the stage command inside the current pipeline.',
+      });
+    }
+    this.assertPipelineTransferReason(options);
+    const [targetPipeline, targetStage] = await Promise.all([
+      this.findScopedPipeline(manager, ctx, pipelineId),
+      this.findScopedStage(manager, ctx, stageId),
+    ]);
+    if (targetPipeline.status !== 'active') {
+      throw new ConflictException({
+        code: 'CRM_PIPELINE_TRANSFER_BLOCKED',
+        reasonCode: 'target_pipeline_inactive',
+        message: 'The target pipeline is not active.',
+      });
+    }
+    if (targetStage.pipelineId !== targetPipeline.id) {
+      throw new BadRequestException({
+        code: 'CRM_PIPELINE_TRANSFER_BLOCKED',
+        reasonCode: 'target_stage_pipeline_mismatch',
+        message: 'The target stage does not belong to the target pipeline.',
+      });
+    }
+    if (this.statusForStage(targetStage) !== 'open') {
+      throw new ConflictException({
+        code: 'CRM_PIPELINE_TRANSFER_BLOCKED',
+        reasonCode: 'target_stage_terminal',
+        message: 'Pipeline transfer requires a non-terminal target stage.',
+      });
+    }
+    if (targetPipeline.businessMode !== opportunity.businessMode) {
+      throw new ConflictException({
+        code: 'CRM_PIPELINE_TRANSFER_BLOCKED',
+        reasonCode: 'business_mode_mismatch',
+        message: 'The target pipeline must use the opportunity business mode.',
+      });
+    }
+    if (
+      options.transferMode === 'handoff' &&
+      targetStage.operationMode === 'ai_managed'
+    ) {
+      throw new ConflictException({
+        code: 'CRM_PIPELINE_TRANSFER_BLOCKED',
+        reasonCode: 'handoff_target_not_human',
+        message: 'Handoff transfer requires a human or hybrid target stage.',
+      });
+    }
+
+    const beforeData = {
+      pipelineId: opportunity.pipelineId,
+      stageId: opportunity.stageId,
+      status: opportunity.status,
+      sortOrder: opportunity.sortOrder,
+    };
+    opportunity.pipelineId = targetPipeline.id;
+    opportunity.stageId = targetStage.id;
+    opportunity.status = 'open';
+    opportunity.sortOrder = await this.nextSortOrder(
+      manager,
+      ctx,
+      targetPipeline.id,
+      targetStage.id,
+    );
+    opportunity.rowVersion += 1;
+    opportunity.wonAt = null;
+    opportunity.lostAt = null;
+    opportunity.lostReason = null;
+    const saved = await manager
+      .getRepository(CrmOpportunityEntity)
+      .save(opportunity);
+    const governedOptions: CrmCommandOptions = {
+      ...options,
+      policyVersion: 'crm-pipeline-transfer-policy-v1',
+      metadata: {
+        ...(options.metadata ?? {}),
+        transferMode: options.transferMode ?? 'manual',
+        sourcePipelineId: beforeData.pipelineId,
+        sourceStageId: beforeData.stageId,
+        targetPipelineId: saved.pipelineId,
+        targetStageId: saved.stageId,
+      },
+    };
+    await this.appendHistory(manager, ctx, {
+      ...governedOptions,
+      opportunity: saved,
+      eventType: 'pipeline_exited',
+      title: 'Oportunidade saiu do pipeline',
+      beforeData,
+      afterData: this.projection(saved),
+    });
+    await this.appendHistory(manager, ctx, {
+      ...governedOptions,
+      opportunity: saved,
+      eventType: 'stage_exited',
+      title: 'Oportunidade saiu da etapa',
+      beforeData,
+      afterData: this.projection(saved),
+    });
+    const event = await this.appendHistory(manager, ctx, {
+      ...governedOptions,
+      opportunity: saved,
+      eventType: 'pipeline_transferred',
+      title: 'Oportunidade transferida entre pipelines',
+      beforeData,
+      afterData: this.projection(saved),
+    });
+    await this.appendHistory(manager, ctx, {
+      ...governedOptions,
+      opportunity: saved,
+      eventType: 'pipeline_entered',
+      title: 'Oportunidade entrou no pipeline',
+      beforeData,
+      afterData: this.projection(saved),
+    });
+    await this.appendHistory(manager, ctx, {
+      ...governedOptions,
+      opportunity: saved,
+      eventType: 'stage_entered',
+      title: 'Oportunidade entrou na etapa',
+      beforeData,
+      afterData: this.projection(saved),
+    });
+    return { opportunity: saved, event };
+  }
+
   async moveStageWithinTransaction(
     manager: EntityManager,
     ctx: RequestContext,
@@ -228,6 +412,41 @@ export class CrmOpportunityCommandService {
       return { opportunity, event: null };
     }
 
+    let governedOptions = options;
+    if (stageChanged) {
+      const policy =
+        await this.transitionPolicies.assertTransitionAllowedWithinTransaction(
+          manager,
+          ctx,
+          opportunity,
+          stage,
+          options.actor,
+          options.reason,
+        );
+      if (
+        (options.expectedTransitionPolicyId &&
+          policy.id !== options.expectedTransitionPolicyId) ||
+        (options.expectedTransitionPolicyVersion !== undefined &&
+          policy.version !== options.expectedTransitionPolicyVersion)
+      ) {
+        throw new ConflictException({
+          code: 'CRM_STAGE_TRANSITION_BLOCKED',
+          reasonCode: 'transition_policy_stale',
+          message:
+            'The published transition policy no longer matches the proposed version.',
+        });
+      }
+      governedOptions = {
+        ...options,
+        policyVersion: `${policy.id}:v${policy.version}`,
+        metadata: {
+          ...(options.metadata ?? {}),
+          transitionPolicyId: policy.id,
+          transitionPolicyVersion: policy.version,
+        },
+      };
+    }
+
     opportunity.stageId = stage.id;
     opportunity.status = nextStatus;
     opportunity.sortOrder =
@@ -248,7 +467,7 @@ export class CrmOpportunityCommandService {
     let event: CrmOpportunityEventEntity | null = null;
     if (stageChanged) {
       event = await this.appendHistory(manager, ctx, {
-        ...options,
+        ...governedOptions,
         opportunity: saved,
         eventType: 'stage_changed',
         title: 'Etapa alterada',
@@ -262,12 +481,12 @@ export class CrmOpportunityCommandService {
         ctx,
         saved,
         previousStatus,
-        options,
+        governedOptions,
       );
     }
     if (!stageChanged && !statusChanged) {
       event = await this.appendHistory(manager, ctx, {
-        ...options,
+        ...governedOptions,
         opportunity: saved,
         eventType: 'opportunity_updated',
         title: 'Ordem da oportunidade alterada',
@@ -317,6 +536,13 @@ export class CrmOpportunityCommandService {
     this.assertVersion(opportunity, options.expectedVersion);
     const previousStatus = opportunity.status;
     const previousStageId = opportunity.stageId;
+    if (previousStatus !== 'open' && status !== previousStatus) {
+      throw new ConflictException({
+        code: 'CRM_STAGE_TRANSITION_BLOCKED',
+        reasonCode: 'terminal_opportunity',
+        message: 'Terminal opportunities cannot be reopened or changed.',
+      });
+    }
     let targetStage: CrmStageEntity | null = null;
     if (status === 'won' || status === 'lost') {
       targetStage = await this.uniqueLifecycleStage(
@@ -325,19 +551,28 @@ export class CrmOpportunityCommandService {
         opportunity.pipelineId,
         status,
       );
-    } else if (status === 'open') {
-      const current = await this.findScopedStage(
-        manager,
-        ctx,
-        opportunity.stageId,
-      );
-      if (this.statusForStage(current) !== 'open') {
-        targetStage = await this.firstOpenStage(
+    }
+
+    let governedOptions = options;
+    if (targetStage && targetStage.id !== opportunity.stageId) {
+      const policy =
+        await this.transitionPolicies.assertTransitionAllowedWithinTransaction(
           manager,
           ctx,
-          opportunity.pipelineId,
+          opportunity,
+          targetStage,
+          options.actor,
+          options.reason,
         );
-      }
+      governedOptions = {
+        ...options,
+        policyVersion: `${policy.id}:v${policy.version}`,
+        metadata: {
+          ...(options.metadata ?? {}),
+          transitionPolicyId: policy.id,
+          transitionPolicyVersion: policy.version,
+        },
+      };
     }
 
     opportunity.status = status;
@@ -359,7 +594,7 @@ export class CrmOpportunityCommandService {
 
     if (previousStageId !== saved.stageId) {
       await this.appendHistory(manager, ctx, {
-        ...options,
+        ...governedOptions,
         opportunity: saved,
         eventType: 'stage_changed',
         title: 'Etapa alterada',
@@ -373,7 +608,7 @@ export class CrmOpportunityCommandService {
         ctx,
         saved,
         previousStatus,
-        options,
+        governedOptions,
       );
     }
     return saved;
@@ -420,6 +655,7 @@ export class CrmOpportunityCommandService {
       stageId: string;
       sortOrder: number;
       expectedVersion?: number;
+      reasonCode: string;
     }>,
     options: CrmCommandOptions = {},
   ): Promise<CrmOpportunityEntity[]> {
@@ -435,6 +671,7 @@ export class CrmOpportunityCommandService {
             ...options,
             expectedVersion: item.expectedVersion,
             sortOrder: item.sortOrder,
+            reason: item.reasonCode,
             idempotencyKey: options.idempotencyKey
               ? `${options.idempotencyKey}:${item.id}`.slice(0, 180)
               : undefined,
@@ -623,6 +860,24 @@ export class CrmOpportunityCommandService {
     return stage;
   }
 
+  private async findScopedPipeline(
+    manager: EntityManager,
+    ctx: RequestContext,
+    id: string,
+  ): Promise<CrmPipelineEntity> {
+    const pipeline = await manager.getRepository(CrmPipelineEntity).findOne({
+      where: this.withClientScope(ctx, {
+        id,
+        tenantId: this.requireTenantId(ctx),
+        workspaceId: this.requireWorkspaceId(ctx),
+        deletedAt: IsNull(),
+      }),
+      lock: { mode: 'pessimistic_read' },
+    });
+    if (!pipeline) throw new NotFoundException('CRM pipeline not found.');
+    return pipeline;
+  }
+
   private async uniqueLifecycleStage(
     manager: EntityManager,
     ctx: RequestContext,
@@ -800,6 +1055,21 @@ export class CrmOpportunityCommandService {
     }
   }
 
+  private assertPipelineTransferReason(options: CrmCommandOptions): void {
+    const mode = options.transferMode ?? 'manual';
+    const allowed =
+      mode === 'handoff'
+        ? ['handoff_pipeline_transfer']
+        : ['manual_pipeline_transfer', 'sales_process_reroute'];
+    if (!options.reason || !allowed.includes(options.reason)) {
+      throw new BadRequestException({
+        code: 'CRM_PIPELINE_TRANSFER_BLOCKED',
+        reasonCode: 'transfer_reason_not_allowed',
+        message: 'The transfer reason is not allowed by the active policy.',
+      });
+    }
+  }
+
   private projection(
     opportunity: CrmOpportunityEntity,
   ): Record<string, unknown> {
@@ -822,6 +1092,11 @@ export class CrmOpportunityCommandService {
       status_changed: 'leadflow.crm.opportunity.status.changed',
       opportunity_won: 'leadflow.crm.opportunity.won',
       opportunity_lost: 'leadflow.crm.opportunity.lost',
+      pipeline_exited: 'leadflow.crm.opportunity.pipeline.exited',
+      stage_exited: 'leadflow.crm.opportunity.stage.exited',
+      pipeline_transferred: 'leadflow.crm.opportunity.pipeline.transferred',
+      pipeline_entered: 'leadflow.crm.opportunity.pipeline.entered',
+      stage_entered: 'leadflow.crm.opportunity.stage.entered',
     };
     return names[eventType] ?? 'leadflow.crm.opportunity.updated';
   }

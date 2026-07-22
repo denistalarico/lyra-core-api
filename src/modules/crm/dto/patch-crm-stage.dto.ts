@@ -1,4 +1,14 @@
-import { IsBoolean, IsInt, IsObject, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
+import {
+  IsBoolean,
+  IsInt,
+  IsObject,
+  IsOptional,
+  IsIn,
+  IsString,
+  Max,
+  MaxLength,
+  Min,
+} from 'class-validator';
 
 export class PatchCrmStageDto {
   @IsOptional()
@@ -38,10 +48,17 @@ export class PatchCrmStageDto {
   @IsBoolean()
   isLostStage?: boolean;
 
-
   @IsOptional()
   @IsBoolean()
   isFolded?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  isInitialStage?: boolean;
+
+  @IsOptional()
+  @IsIn(['ai_managed', 'human_managed', 'hybrid'])
+  operationMode?: 'ai_managed' | 'human_managed' | 'hybrid';
 
   @IsOptional()
   @IsObject()

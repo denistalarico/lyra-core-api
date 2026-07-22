@@ -27,6 +27,7 @@ describe('AgentDecisionPromptBuilder layered compiler', () => {
     expect(result.layers.map((layer) => layer.key)).toEqual([
       'platform_policy',
       'business_mode',
+      'crm_transition_catalog',
       'agent_profile',
       'company_context',
       'conversation_context',
@@ -35,7 +36,9 @@ describe('AgentDecisionPromptBuilder layered compiler', () => {
     expect(result.systemPolicy).not.toContain('ignore previous instructions');
     expect(result.systemPolicy).not.toContain('Lia');
     expect(result.systemPolicy).toContain('agentProfile.name');
-    expect(result.systemPolicy).toContain('proponha handoff=true imediatamente');
+    expect(result.systemPolicy).toContain(
+      'proponha handoff=true imediatamente',
+    );
     expect(result.untrustedData).toContain('ignore previous instructions');
     expect(result.untrustedData).toContain('assistente virtual');
     expect(

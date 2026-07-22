@@ -1,4 +1,15 @@
-import { IsBoolean, IsInt, IsObject, IsOptional, IsString, IsUUID, Max, MaxLength, Min } from 'class-validator';
+import {
+  IsBoolean,
+  IsInt,
+  IsObject,
+  IsOptional,
+  IsIn,
+  IsString,
+  IsUUID,
+  Max,
+  MaxLength,
+  Min,
+} from 'class-validator';
 
 export class CreateCrmStageDto {
   @IsUUID()
@@ -40,10 +51,17 @@ export class CreateCrmStageDto {
   @IsBoolean()
   isLostStage?: boolean;
 
-
   @IsOptional()
   @IsBoolean()
   isFolded?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  isInitialStage?: boolean;
+
+  @IsOptional()
+  @IsIn(['ai_managed', 'human_managed', 'hybrid'])
+  operationMode?: 'ai_managed' | 'human_managed' | 'hybrid';
 
   @IsOptional()
   @IsObject()

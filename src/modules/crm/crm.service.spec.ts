@@ -4,13 +4,17 @@ import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { ActivityEntityType } from '../activities/enums';
 import { CrmController } from './crm.controller';
 import { CrmService } from './crm.service';
+import { CrmPipelineEntity } from './entities/crm-pipeline.entity';
 
 type RepositoryMock = {
   create: jest.Mock;
+  count: jest.Mock;
+  createQueryBuilder: jest.Mock;
   delete: jest.Mock;
   find: jest.Mock;
   findOne: jest.Mock;
   save: jest.Mock;
+  manager?: unknown;
 };
 
 const ctx = {
@@ -22,6 +26,8 @@ const ctx = {
 function createRepositoryMock(): RepositoryMock {
   return {
     create: jest.fn((value) => value),
+    count: jest.fn().mockResolvedValue(0),
+    createQueryBuilder: jest.fn(),
     delete: jest.fn(),
     find: jest.fn(),
     findOne: jest.fn(),
@@ -39,6 +45,25 @@ function createService() {
   const opportunityTagsRepository = createRepositoryMock();
   const opportunityEventsRepository = createRepositoryMock();
   const contactsRepository = createRepositoryMock();
+  const updateQueryBuilder = {
+    update: jest.fn(),
+    set: jest.fn(),
+    where: jest.fn(),
+    andWhere: jest.fn(),
+    execute: jest.fn().mockResolvedValue({ affected: 1 }),
+  };
+  Object.values(updateQueryBuilder).forEach((method) => {
+    if (method !== updateQueryBuilder.execute)
+      method.mockReturnValue(updateQueryBuilder);
+  });
+  stagesRepository.createQueryBuilder.mockReturnValue(updateQueryBuilder);
+  const manager = {
+    getRepository: jest.fn((entity) =>
+      entity === CrmPipelineEntity ? pipelinesRepository : stagesRepository,
+    ),
+    transaction: jest.fn((callback) => callback(manager)),
+  };
+  stagesRepository.manager = manager;
   const salesNotificationPublisher = {
     publishOpportunityAssigned: jest.fn(),
     publishOpportunityStageChanged: jest.fn(),
@@ -79,6 +104,7 @@ function createService() {
     contactsRepository,
     salesNotificationPublisher,
     opportunityCommands,
+    updateQueryBuilder,
   };
 }
 
@@ -126,6 +152,94 @@ function mockOpportunity(overrides: Record<string, unknown> = {}) {
 }
 
 describe('CrmService agency validation', () => {
+  it('makes the first eligible stage explicitly initial', async () => {
+    const { service, pipelinesRepository, stagesRepository } = createService();
+    pipelinesRepository.findOne.mockResolvedValue(mockPipeline());
+    stagesRepository.count.mockResolvedValue(0);
+
+    await expect(
+      service.createStage(ctx, {
+        pipelineId: 'pipeline-a',
+        name: 'Novo lead',
+        type: 'open',
+      }),
+    ).resolves.toMatchObject({
+      name: 'Novo lead',
+      isInitialStage: true,
+    });
+  });
+
+  it('rejects a terminal stage as the pipeline initial stage', async () => {
+    const { service, pipelinesRepository, stagesRepository } = createService();
+    pipelinesRepository.findOne.mockResolvedValue(mockPipeline());
+    stagesRepository.count.mockResolvedValue(1);
+
+    await expect(
+      service.createStage(ctx, {
+        pipelineId: 'pipeline-a',
+        name: 'Ganho',
+        type: 'won',
+        isWonStage: true,
+        isInitialStage: true,
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('allows a terminal stage to be created first without making it initial', async () => {
+    const { service, pipelinesRepository, stagesRepository } = createService();
+    pipelinesRepository.findOne.mockResolvedValue(mockPipeline());
+    stagesRepository.count.mockResolvedValue(0);
+
+    await expect(
+      service.createStage(ctx, {
+        pipelineId: 'pipeline-a',
+        name: 'Ganho',
+        type: 'won',
+        isWonStage: true,
+      }),
+    ).resolves.toMatchObject({ isInitialStage: false });
+  });
+
+  it('requires selecting a replacement instead of clearing the current initial stage', async () => {
+    const { service, pipelinesRepository, stagesRepository } = createService();
+    pipelinesRepository.findOne.mockResolvedValue(mockPipeline());
+    stagesRepository.findOne.mockResolvedValue({
+      ...mockStage(),
+      isInitialStage: true,
+      metadata: {},
+    });
+
+    await expect(
+      service.patchStage(ctx, 'stage-a', { isInitialStage: false }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('switches the initial stage inside the same transaction', async () => {
+    const {
+      service,
+      pipelinesRepository,
+      stagesRepository,
+      updateQueryBuilder,
+    } = createService();
+    pipelinesRepository.findOne.mockResolvedValue(mockPipeline());
+    stagesRepository.findOne.mockResolvedValue({
+      ...mockStage('stage-b'),
+      isInitialStage: false,
+      metadata: {},
+    });
+
+    await expect(
+      service.patchStage(ctx, 'stage-b', { isInitialStage: true }),
+    ).resolves.toMatchObject({
+      id: 'stage-b',
+      isInitialStage: true,
+    });
+    expect(updateQueryBuilder.set).toHaveBeenCalledWith({
+      isInitialStage: false,
+    });
+    expect(updateQueryBuilder.execute).toHaveBeenCalledTimes(1);
+  });
+
   it('rejects create opportunity when contactId is not found for the tenant', async () => {
     const {
       service,
@@ -241,6 +355,7 @@ describe('CrmService agency validation', () => {
     await expect(
       service.patchOpportunityStage(ctx, 'opportunity-a', {
         stageId: 'stage-b',
+        reasonCode: 'manual_stage_move',
       }),
     ).rejects.toBeInstanceOf(BadRequestException);
   });

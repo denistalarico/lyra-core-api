@@ -41,6 +41,7 @@ export type InboxChannelResponse = {
   hasAccessToken: boolean;
   defaultAssignedUserId: string | null;
   defaultAgentId: string | null;
+  defaultPipelineId: string | null;
   aiEnabled: boolean;
   settings: Record<string, unknown>;
   metadata: Record<string, unknown>;
@@ -76,6 +77,7 @@ export function mapInboxChannel(
     hasAccessToken: Boolean(channel.accessTokenEncrypted),
     defaultAssignedUserId: channel.defaultAssignedUserId,
     defaultAgentId: channel.defaultAgentId,
+    defaultPipelineId: channel.defaultPipelineId,
     aiEnabled: channel.aiEnabled,
     settings: channel.settings ?? {},
     metadata: channel.metadata ?? {},

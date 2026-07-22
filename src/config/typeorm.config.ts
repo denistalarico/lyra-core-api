@@ -61,6 +61,7 @@ import { InboxAutonomyControlEntity } from '../modules/inbox/entities/inbox-auto
 
 import { CrmPipelineEntity } from '../modules/crm/entities/crm-pipeline.entity';
 import { CrmStageEntity } from '../modules/crm/entities/crm-stage.entity';
+import { CrmStageTransitionPolicyEntity } from '../modules/crm/entities/crm-stage-transition-policy.entity';
 import { CrmOpportunityEntity } from '../modules/crm/entities/crm-opportunity.entity';
 import { CrmActivityEntity } from '../modules/crm/entities/crm-activity.entity';
 import { CrmTagEntity } from '../modules/crm/entities/crm-tag.entity';
@@ -334,6 +335,7 @@ export const agencyEntities = [
   InboxAutonomyControlEntity,
   CrmPipelineEntity,
   CrmStageEntity,
+  CrmStageTransitionPolicyEntity,
   CrmOpportunityEntity,
   CrmTagEntity,
   CrmOpportunityTagEntity,
@@ -477,6 +479,7 @@ export function getTypeOrmConfig(): TypeOrmModuleOptions {
     entities: [
       CrmPipelineEntity,
       CrmStageEntity,
+      CrmStageTransitionPolicyEntity,
       CrmOpportunityEntity,
       CrmActivityEntity,
       CrmTagEntity,

@@ -64,6 +64,18 @@ export interface VisionAnalysisProvider {
   analyzeImage(input: VisionAnalysisInput): Promise<VisionAnalysisResult>;
 }
 
+export type StageTransitionProposal = {
+  opportunityId: string;
+  fromStageId: string;
+  toStageId: string;
+  reasonCode: string;
+  evidenceRefs: string[];
+  confidence: number;
+  playbookPhase?: string | null;
+  playbookVersion?: number | null;
+  transitionPolicyVersion: number;
+};
+
 export type AgentDecisionV1 = {
   schema_version: 1;
   reply: string | null;
@@ -94,6 +106,7 @@ export type AgentDecisionV1 = {
     evidence_refs: string[];
   } | null;
   proposed_phase: string | null;
+  stage_transition: StageTransitionProposal | null;
   proposed_actions: Array<{
     type:
       | 'set_stage'

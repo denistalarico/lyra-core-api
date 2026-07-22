@@ -48,6 +48,17 @@ export class CrmStageEntity {
   @Column({ name: 'is_folded', type: 'boolean', default: false })
   isFolded!: boolean;
 
+  @Column({ name: 'is_initial_stage', type: 'boolean', default: false })
+  isInitialStage!: boolean;
+
+  @Column({
+    name: 'operation_mode',
+    type: 'varchar',
+    length: 24,
+    default: 'hybrid',
+  })
+  operationMode!: 'ai_managed' | 'human_managed' | 'hybrid';
+
   @Column({ type: 'jsonb', default: () => "'{}'::jsonb" })
   metadata!: Record<string, unknown>;
 

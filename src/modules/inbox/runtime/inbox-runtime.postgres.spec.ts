@@ -33,6 +33,7 @@ const validDecision = {
   extracted_facts: [],
   recommended_cta: null,
   proposed_phase: null,
+  stage_transition: null,
   proposed_actions: [],
 };
 

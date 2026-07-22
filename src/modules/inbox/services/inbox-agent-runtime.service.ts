@@ -14,9 +14,11 @@ import { FilesService } from '../../../common/files/files.service';
 import type { RequestContext } from '../../../common/context/request-context.interface';
 import { AgencyWorkspaceUserEntity } from '../../agency/entities/agency-settings.entities';
 import { CrmOpportunityEntity } from '../../crm/entities/crm-opportunity.entity';
-import { CrmPipelineEntity } from '../../crm/entities/crm-pipeline.entity';
-import { CrmStageEntity } from '../../crm/entities/crm-stage.entity';
 import { CrmOpportunityCommandService } from '../../crm/services/crm-opportunity-command.service';
+import {
+  CrmAiStageTransitionCatalog,
+  CrmStageTransitionPolicyService,
+} from '../../crm/services/crm-stage-transition-policy.service';
 import { LeadFlowAgentEntity } from '../../leadflow-agents/entities/leadflow-agent.entity';
 import { LeadFlowAgentChannelBindingEntity } from '../../leadflow-agents/entities/leadflow-agent-channel-binding.entity';
 import { LeadFlowAgentVersionEntity } from '../../leadflow-agents/entities/leadflow-agent-version.entity';
@@ -53,7 +55,7 @@ import {
   AgentDecisionResult,
   InboxProviderError,
 } from '../runtime/inbox-runtime.contracts';
-import { resolveDefaultPipelineForBusinessMode } from '../runtime/inbox-crm-target-resolver';
+import { resolveRoutedCrmTarget } from '../runtime/inbox-crm-target-resolver';
 import {
   InboxGovernedActionType,
   InboxGovernedAutonomyPolicyService,
@@ -232,6 +234,8 @@ export class InboxAgentRuntimeService {
     private readonly playbookState?: ConversationPlaybookStateService,
     @Optional()
     private readonly opportunityCommands?: CrmOpportunityCommandService,
+    @Optional()
+    private readonly transitionPolicies?: CrmStageTransitionPolicyService,
   ) {}
 
   async claimAndProcess(workerId: string) {
@@ -489,6 +493,28 @@ export class InboxAgentRuntimeService {
       const progressReader =
         this.playbookState ?? new ConversationPlaybookStateService();
       const currentProgress = progressReader.read(conversation.metadata);
+      const stageTransitionCatalog =
+        opportunity && this.transitionPolicies
+          ? await this.transitionPolicies.getAiTransitionCatalog(
+              {
+                tenantId: batch.tenantId,
+                workspaceId: batch.workspaceId,
+              },
+              opportunity,
+            )
+          : null;
+      const allowedActions = [
+        ...(stageTransitionCatalog?.capabilities.canProposeStageTransition
+          ? ['set_stage']
+          : []),
+        'add_tag',
+        'set_summary',
+        'set_service',
+        'set_urgency',
+        'set_fact',
+        'close',
+        'handoff',
+      ];
       const projectedEvidence = projectConversationEvidence(
         orderedMessages,
         media,
@@ -515,16 +541,7 @@ export class InboxAgentRuntimeService {
           state: conversation.ownershipState,
           version: conversation.ownershipVersion,
         },
-        allowedActions: [
-          'set_stage',
-          'add_tag',
-          'set_summary',
-          'set_service',
-          'set_urgency',
-          'set_fact',
-          'close',
-          'handoff',
-        ],
+        allowedActions,
         workspaceConfig: {
           clientPromptConfig: settings?.clientPromptConfig ?? {},
           businessModeOverrides: settings?.businessModeOverrides ?? {},
@@ -581,6 +598,7 @@ export class InboxAgentRuntimeService {
         companyContext: settings?.companyContextPublished ?? {},
         companyContextVersion: settings?.companyContextPublishedVersion ?? 0,
         companyContextHash: settings?.companyContextPublishedHash ?? null,
+        stageTransitionCatalog,
       });
       const correlationId = randomUUID();
       let providerResult: AgentDecisionResult | null = null;
@@ -615,16 +633,7 @@ export class InboxAgentRuntimeService {
               state: conversation.ownershipState,
               version: conversation.ownershipVersion,
             },
-            allowedActions: [
-              'set_stage',
-              'add_tag',
-              'set_summary',
-              'set_service',
-              'set_urgency',
-              'set_fact',
-              'close',
-              'handoff',
-            ],
+            allowedActions,
             systemPolicy: `${prompt.systemPolicy}${repairAttempt ? '\nREPAIR: a saída anterior violou o schema; devolva apenas JSON válido.' : ''}`,
             untrustedData: prompt.untrustedData,
             promptVersion: prompt.promptVersion,
@@ -677,6 +686,7 @@ export class InboxAgentRuntimeService {
           conversation.qualificationStatus === 'qualified' &&
           !incompatibleActiveOpportunity,
         allowedServices,
+        transitionCatalog: stageTransitionCatalog,
       });
       return await this.dataSource.transaction(async (manager) => {
         const lockedBatch = await manager
@@ -729,32 +739,17 @@ export class InboxAgentRuntimeService {
         const contextInbound = [...messageProjection]
           .reverse()
           .find((message) => message.direction === 'inbound');
-        const defaultPipelines = await manager
-          .getRepository(CrmPipelineEntity)
-          .find({
-            where: {
-              tenantId: batch.tenantId,
-              workspaceId: batch.workspaceId,
-              isDefault: true,
-              status: 'active',
-              deletedAt: IsNull(),
-            },
-          });
-        const defaultPipeline = resolveDefaultPipelineForBusinessMode(
-          defaultPipelines,
-          effectiveBusinessMode,
-        );
-        const initialStage = defaultPipeline
-          ? await manager.getRepository(CrmStageEntity).findOne({
-              where: {
-                tenantId: batch.tenantId,
-                workspaceId: batch.workspaceId,
-                pipelineId: defaultPipeline.id,
-                type: 'open',
-                deletedAt: IsNull(),
-              },
-              order: { sortOrder: 'ASC', createdAt: 'ASC' },
-            })
+        const routedCrmTarget = await resolveRoutedCrmTarget(manager, {
+          tenantId: batch.tenantId,
+          workspaceId: batch.workspaceId,
+          channelId: lockedConversation.channelId,
+          businessMode: effectiveBusinessMode,
+        });
+        const defaultPipeline = routedCrmTarget.ok
+          ? routedCrmTarget.pipeline
+          : null;
+        const initialStage = routedCrmTarget.ok
+          ? routedCrmTarget.initialStage
           : null;
         const identityDigits = lockedConversation.externalThreadId?.replace(
           /\D/g,
@@ -903,6 +898,16 @@ export class InboxAgentRuntimeService {
                 kind,
                 status,
               })),
+              allowedEvidenceRefs: [
+                ...messageProjection.map((item) => item.evidenceRef),
+                ...transcriptionProjection
+                  .map((item) => item.evidenceRef)
+                  .filter((item): item is string => typeof item === 'string'),
+                ...images.map((item) => item.evidenceRef),
+              ],
+              stageTransitionCatalog: this.transitionCatalogSnapshot(
+                stageTransitionCatalog,
+              ),
               companyContextVersion:
                 settings?.companyContextPublishedVersion ?? 0,
               companyContextHash: settings?.companyContextPublishedHash ?? null,
@@ -1031,6 +1036,7 @@ export class InboxAgentRuntimeService {
       value?: string | null;
       resolved: boolean;
       refs?: string[];
+      canonicalRefs?: string[];
     }> = [];
     actions.push({
       type: 'ensure_contact',
@@ -1075,6 +1081,26 @@ export class InboxAgentRuntimeService {
               (ref): ref is string => typeof ref === 'string',
             )
           : [],
+        canonicalRefs:
+          action.type === 'set_stage'
+            ? [
+                ...(typeof action.opportunityId === 'string'
+                  ? [`opportunity:${action.opportunityId}`]
+                  : []),
+                ...(typeof action.fromStageId === 'string'
+                  ? [`stage:${action.fromStageId}`]
+                  : []),
+                ...(typeof action.stageId === 'string'
+                  ? [`stage:${action.stageId}`]
+                  : []),
+                ...(typeof action.transitionPolicyId === 'string' &&
+                typeof action.transitionPolicyVersion === 'number'
+                  ? [
+                      `transition-policy:${action.transitionPolicyId}:v${action.transitionPolicyVersion}`,
+                    ]
+                  : []),
+              ]
+            : [],
       });
     }
     const inboundText = input.latestInbound?.content ?? '';
@@ -1111,6 +1137,7 @@ export class InboxAgentRuntimeService {
             : []),
           ...(input.latestInbound ? [`message:${input.latestInbound.id}`] : []),
           ...(action.refs ?? []),
+          ...(action.canonicalRefs ?? []),
         ],
         auditRef: randomUUID(),
         pilotMode: this.config.pilotMode,
@@ -1143,13 +1170,36 @@ export class InboxAgentRuntimeService {
           action.type !== 'reply' ||
           factualReplyIsSupported(action.value ?? '', contextText),
         canonicalTargetResolved: action.resolved,
-        // A existência do estágio não é uma máquina de transição. Até o
-        // Business Mode publicar transições explícitas, stage é humano.
-        transitionAllowed: action.type !== 'set_stage',
+        transitionAllowed:
+          action.type !== 'set_stage' || action.resolved === true,
         humanRouteConfigured: input.humanRouteConfigured,
         leadEligible: input.conversation.qualificationStatus === 'qualified',
       }),
     );
+  }
+
+  private transitionCatalogSnapshot(
+    catalog: CrmAiStageTransitionCatalog | null,
+  ): Record<string, unknown> | null {
+    if (!catalog) return null;
+    return {
+      opportunityId: catalog.opportunityId,
+      opportunityRowVersion: catalog.opportunityRowVersion,
+      pipelineId: catalog.pipelineId,
+      currentStageId: catalog.currentStageId,
+      lifecycleStatus: catalog.lifecycleStatus,
+      capabilities: catalog.capabilities,
+      destinations: catalog.destinations.map((destination) => ({
+        toStageId: destination.toStageId,
+        transitionPolicyId: destination.transitionPolicyId,
+        transitionPolicyVersion: destination.transitionPolicyVersion,
+        reasonCodes: destination.reasonCodes,
+        requiredFields: destination.requiredFields,
+        missingFields: destination.missingFields,
+        conditionsMet: destination.conditionsMet,
+        currentlyEligible: destination.currentlyEligible,
+      })),
+    };
   }
 
   private async publishOperationalStatus(
@@ -1604,6 +1654,19 @@ export class InboxAgentRuntimeService {
         opportunity &&
         typeof action.stageId === 'string'
       ) {
+        const proposedOpportunityId = recordString(action.opportunityId);
+        const proposedFromStageId = recordString(action.fromStageId);
+        if (
+          proposedOpportunityId !== opportunity.id ||
+          proposedFromStageId !== opportunity.stageId
+        ) {
+          throw new ConflictException({
+            code: 'CRM_STAGE_TRANSITION_STALE',
+            reasonCode: 'stage_transition_proposal_stale',
+            message:
+              'The reviewed stage proposal no longer matches the canonical opportunity.',
+          });
+        }
         if (this.opportunityCommands) {
           const moved =
             await this.opportunityCommands.moveStageWithinTransaction(
@@ -1613,16 +1676,24 @@ export class InboxAgentRuntimeService {
               action.stageId,
               {
                 actor: { type: 'user', userId: ctx.userId ?? null },
+                expectedTransitionPolicyId:
+                  recordString(action.transitionPolicyId) || undefined,
+                expectedTransitionPolicyVersion: Number.isInteger(
+                  Number(action.transitionPolicyVersion),
+                )
+                  ? Number(action.transitionPolicyVersion)
+                  : undefined,
                 idempotencyKey: `review:${decision.id}:stage:${actionIndex}`,
                 correlationId: decision.id,
                 causationId: decision.id,
-                reason: 'approved_agent_decision',
+                reason:
+                  recordString(action.reasonCode) || 'approved_agent_decision',
                 metadata: { reviewDecisionId: decision.id },
               },
             );
           Object.assign(opportunity, moved.opportunity);
         } else {
-          opportunity.stageId = action.stageId;
+          throw new Error('CRM opportunity command authority unavailable.');
         }
       } else if (
         type === 'set_summary' &&
@@ -1684,7 +1755,10 @@ export class InboxAgentRuntimeService {
         conversation.closedAt = new Date();
         if (action.value === 'archived') conversation.archivedAt = new Date();
         if (opportunity) {
-          if (action.value === 'lost' && this.opportunityCommands) {
+          if (action.value === 'lost') {
+            if (!this.opportunityCommands) {
+              throw new Error('CRM opportunity command authority unavailable.');
+            }
             const changed =
               await this.opportunityCommands.changeStatusWithinTransaction(
                 manager,
@@ -1701,12 +1775,6 @@ export class InboxAgentRuntimeService {
                 },
               );
             Object.assign(opportunity, changed);
-          } else {
-            opportunity.status =
-              action.value === 'lost' ? 'lost' : opportunity.status;
-            opportunity.lostAt =
-              action.value === 'lost' ? new Date() : opportunity.lostAt;
-            opportunity.lostReason = action.value;
           }
           opportunity.businessContext = {
             ...opportunity.businessContext,
@@ -2116,6 +2184,7 @@ type CanonicalOpportunityState = {
   closeReason: string | null;
   status: string | null;
   updatedAt: string | null;
+  rowVersion: number | null;
   ownershipState: string;
 };
 
@@ -2138,6 +2207,7 @@ function canonicalOpportunityState(
     closeReason: opportunity?.lostReason ?? null,
     status: opportunity?.status ?? null,
     updatedAt: opportunity?.updatedAt?.toISOString() ?? null,
+    rowVersion: opportunity?.rowVersion ?? null,
     ownershipState,
   };
 }

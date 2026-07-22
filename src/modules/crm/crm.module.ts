@@ -14,6 +14,8 @@ import { CrmOpportunityTagEntity } from './entities/crm-opportunity-tag.entity';
 import { CrmOpportunityEventEntity } from './entities/crm-opportunity-event.entity';
 import { InboxDomainOutboxEntity } from '../inbox/entities/inbox-domain-outbox.entity';
 import { CrmOpportunityCommandService } from './services/crm-opportunity-command.service';
+import { CrmStageTransitionPolicyEntity } from './entities/crm-stage-transition-policy.entity';
+import { CrmStageTransitionPolicyService } from './services/crm-stage-transition-policy.service';
 
 @Module({
   imports: [
@@ -23,6 +25,7 @@ import { CrmOpportunityCommandService } from './services/crm-opportunity-command
       [
         CrmPipelineEntity,
         CrmStageEntity,
+        CrmStageTransitionPolicyEntity,
         CrmOpportunityEntity,
         CrmTagEntity,
         CrmOpportunityTagEntity,
@@ -37,11 +40,13 @@ import { CrmOpportunityCommandService } from './services/crm-opportunity-command
   providers: [
     CrmService,
     CrmOpportunityCommandService,
+    CrmStageTransitionPolicyService,
     SalesNotificationPublisher,
   ],
   exports: [
     CrmService,
     CrmOpportunityCommandService,
+    CrmStageTransitionPolicyService,
     SalesNotificationPublisher,
   ],
 })
