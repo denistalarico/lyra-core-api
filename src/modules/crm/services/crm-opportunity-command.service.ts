@@ -9,6 +9,7 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, EntityManager, IsNull, Raw } from 'typeorm';
 import { RequestContext } from '../../../common/context/request-context.interface';
 import { InboxDomainOutboxEntity } from '../../inbox/entities/inbox-domain-outbox.entity';
+import { InboxConversationEntity } from '../../inbox/entities/inbox-conversation.entity';
 import { CrmOpportunityEventEntity } from '../entities/crm-opportunity-event.entity';
 import { CrmOpportunityEntity } from '../entities/crm-opportunity.entity';
 import { CrmPipelineEntity } from '../entities/crm-pipeline.entity';
@@ -45,12 +46,22 @@ export type CrmHistoryInput = CrmCommandOptions & {
   confidence?: number | string | null;
 };
 
+export type CrmCopyOpportunityInput = {
+  pipelineId: string;
+  stageId: string;
+  title?: string;
+};
+
+export type CrmReconvertOpportunityInput = {
+  pipelineId: string;
+  title?: string;
+};
+
 const MUTABLE_FIELDS: Array<keyof CrmOpportunityEntity> = [
   'contactId',
   'contactName',
   'contactEmail',
   'contactPhone',
-  'inboxConversationId',
   'title',
   'description',
   'valueAmount',
@@ -95,6 +106,12 @@ export class CrmOpportunityCommandService {
       );
       if (replay) return replay;
 
+      const conversation = await this.assertConversationAvailableForCreation(
+        manager,
+        ctx,
+        opportunity,
+      );
+
       opportunity.rowVersion = 1;
       const saved = await manager
         .getRepository(CrmOpportunityEntity)
@@ -106,6 +123,16 @@ export class CrmOpportunityCommandService {
         title: 'Oportunidade criada',
         afterData: this.projection(saved),
       });
+      if (conversation) {
+        await manager.getRepository(InboxConversationEntity).update(
+          {
+            id: conversation.id,
+            tenantId: conversation.tenantId,
+            workspaceId: conversation.workspaceId,
+          },
+          { opportunityId: saved.id },
+        );
+      }
       return saved;
     });
   }
@@ -147,6 +174,7 @@ export class CrmOpportunityCommandService {
       );
       this.assertVersion(locked, options.expectedVersion);
       const before = this.projection(locked);
+      this.assertImmutableIdentity(locked, candidate);
       for (const field of MUTABLE_FIELDS) {
         (locked[field] as unknown) = candidate[field];
       }
@@ -209,6 +237,358 @@ export class CrmOpportunityCommandService {
         options,
       ),
     );
+  }
+
+  async copyOpportunity(
+    ctx: RequestContext,
+    sourceOpportunityId: string,
+    input: CrmCopyOpportunityInput,
+    options: CrmCommandOptions = {},
+  ): Promise<CrmOpportunityEntity> {
+    return this.dataSource.transaction((manager) =>
+      this.copyOpportunityWithinTransaction(
+        manager,
+        ctx,
+        sourceOpportunityId,
+        input,
+        options,
+      ),
+    );
+  }
+
+  async copyOpportunityWithinTransaction(
+    manager: EntityManager,
+    ctx: RequestContext,
+    sourceOpportunityId: string,
+    input: CrmCopyOpportunityInput,
+    options: CrmCommandOptions = {},
+  ): Promise<CrmOpportunityEntity> {
+    const replay = await this.findReplay(manager, ctx, options.idempotencyKey);
+    if (replay) return replay;
+
+    const source = await this.findScopedOpportunity(
+      manager,
+      ctx,
+      sourceOpportunityId,
+      true,
+    );
+    this.assertVersion(source, options.expectedVersion);
+    this.assertCopyReason(options.reason);
+    if (!source.contactId) {
+      throw new ConflictException({
+        code: 'CRM_OPPORTUNITY_COPY_BLOCKED',
+        reasonCode: 'source_contact_missing',
+        message: 'A related negotiation requires a canonical contact.',
+      });
+    }
+
+    const [pipeline, stage] = await Promise.all([
+      this.findScopedPipeline(manager, ctx, input.pipelineId),
+      this.findScopedStage(manager, ctx, input.stageId),
+    ]);
+    this.assertDerivedTarget(source, pipeline, stage, false);
+
+    const correlationId = options.correlationId ?? randomUUID();
+    const opportunity = manager.getRepository(CrmOpportunityEntity).create({
+      tenantId: source.tenantId,
+      workspaceId: source.workspaceId,
+      pipelineId: pipeline.id,
+      stageId: stage.id,
+      contactId: source.contactId,
+      contactName: source.contactName,
+      contactEmail: source.contactEmail,
+      contactPhone: source.contactPhone,
+      inboxConversationId: null,
+      sourceOpportunityId: source.id,
+      title: this.derivedTitle(input.title, source.title),
+      description: source.description,
+      valueAmount: source.valueAmount,
+      currency: source.currency,
+      status: 'open',
+      priority: source.priority,
+      source: source.source,
+      businessMode: source.businessMode,
+      operationalStatus: null,
+      businessContext: {
+        origin: 'crm_related_negotiation',
+        opportunityResolution: {
+          outcome: 'copied',
+          sourceOpportunityId: source.id,
+        },
+      },
+      assignedUserId: null,
+      expectedCloseDate: null,
+      nextFollowUpAt: null,
+      lastActivityAt: null,
+      wonAt: null,
+      lostAt: null,
+      lostReason: null,
+      cardColor: null,
+      sortOrder: await this.nextSortOrder(manager, ctx, pipeline.id, stage.id),
+      visibility: 'workspace',
+      followMode: 'manual',
+      followMessage: null,
+      followSendAutomatically: false,
+      metadata: this.derivedMetadata(source, 'copy', options.reason),
+      rowVersion: 1,
+      deletedAt: null,
+    });
+    const saved = await manager
+      .getRepository(CrmOpportunityEntity)
+      .save(opportunity);
+    const governedOptions: CrmCommandOptions = {
+      ...options,
+      correlationId,
+      policyVersion: 'crm-opportunity-copy-policy-v1',
+      metadata: {
+        ...(options.metadata ?? {}),
+        sourceOpportunityId: source.id,
+        primaryConversationOpportunityId: source.inboxConversationId
+          ? source.id
+          : null,
+        copiedFields: [
+          'contact',
+          'title',
+          'description',
+          'valueAmount',
+          'currency',
+          'priority',
+          'source',
+          'businessMode',
+        ],
+        excludedRelations: [
+          'conversation',
+          'messages',
+          'activities',
+          'attachments',
+          'tags',
+        ],
+      },
+    };
+    await this.appendHistory(manager, ctx, {
+      ...governedOptions,
+      opportunity: saved,
+      eventType: 'opportunity_created',
+      title: 'Negociação relacionada criada',
+      afterData: this.projection(saved),
+      idempotencyKey: options.idempotencyKey
+        ? `${options.idempotencyKey}:created`.slice(0, 180)
+        : undefined,
+    });
+    await this.appendHistory(manager, ctx, {
+      ...governedOptions,
+      opportunity: saved,
+      eventType: 'opportunity_copied',
+      title: 'Oportunidade copiada para negociação relacionada',
+      beforeData: this.projection(source),
+      afterData: this.projection(saved),
+    });
+    return saved;
+  }
+
+  async reconvertOpportunity(
+    ctx: RequestContext,
+    sourceOpportunityId: string,
+    input: CrmReconvertOpportunityInput,
+    options: CrmCommandOptions = {},
+  ): Promise<CrmOpportunityEntity> {
+    return this.dataSource.transaction(async (manager) => {
+      const source = await this.findScopedOpportunity(
+        manager,
+        ctx,
+        sourceOpportunityId,
+        false,
+      );
+      const initialStage = await this.uniqueInitialStage(
+        manager,
+        ctx,
+        input.pipelineId,
+      );
+      const candidate = manager.getRepository(CrmOpportunityEntity).create({
+        tenantId: source.tenantId,
+        workspaceId: source.workspaceId,
+        pipelineId: input.pipelineId,
+        stageId: initialStage.id,
+        contactId: source.contactId,
+        contactName: source.contactName,
+        contactEmail: source.contactEmail,
+        contactPhone: source.contactPhone,
+        inboxConversationId: source.inboxConversationId,
+        title: this.derivedTitle(input.title, source.title),
+        description: null,
+        valueAmount: null,
+        currency: source.currency,
+        priority: source.priority,
+        source: source.source,
+        businessMode: source.businessMode,
+        operationalStatus: null,
+        businessContext: {
+          origin: 'crm_reconversion',
+          opportunityResolution: {
+            outcome: 'reconverted',
+            sourceOpportunityId: source.id,
+          },
+        },
+        assignedUserId: null,
+        visibility: 'workspace',
+        metadata: this.derivedMetadata(source, 'reconversion', options.reason),
+      });
+      return this.reconvertOpportunityWithinTransaction(
+        manager,
+        ctx,
+        sourceOpportunityId,
+        candidate,
+        options,
+      );
+    });
+  }
+
+  async reconvertOpportunityWithinTransaction(
+    manager: EntityManager,
+    ctx: RequestContext,
+    sourceOpportunityId: string,
+    candidate: CrmOpportunityEntity,
+    options: CrmCommandOptions = {},
+  ): Promise<CrmOpportunityEntity> {
+    const replay = await this.findReplay(manager, ctx, options.idempotencyKey);
+    if (replay) return replay;
+
+    const sourceSnapshot = await this.findScopedOpportunity(
+      manager,
+      ctx,
+      sourceOpportunityId,
+      false,
+    );
+    if (sourceSnapshot.inboxConversationId) {
+      await manager.query(
+        `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`,
+        [
+          `${sourceSnapshot.tenantId}:${sourceSnapshot.workspaceId}:${sourceSnapshot.inboxConversationId}:opportunity`,
+        ],
+      );
+    }
+    const source = await this.findScopedOpportunity(
+      manager,
+      ctx,
+      sourceOpportunityId,
+      true,
+    );
+    this.assertVersion(source, options.expectedVersion);
+    this.assertReconversionReason(options.reason);
+    if (source.status === 'open') {
+      throw new ConflictException({
+        code: 'CRM_OPPORTUNITY_RECONVERSION_BLOCKED',
+        reasonCode: 'source_not_terminal',
+        message: 'Reconversion requires a terminal source opportunity.',
+      });
+    }
+    if (!source.contactId || candidate.contactId !== source.contactId) {
+      throw new ConflictException({
+        code: 'CRM_OPPORTUNITY_RECONVERSION_BLOCKED',
+        reasonCode: 'contact_mismatch',
+        message: 'Reconversion must reuse the canonical contact.',
+      });
+    }
+    if (candidate.inboxConversationId !== source.inboxConversationId) {
+      throw new ConflictException({
+        code: 'CRM_OPPORTUNITY_RECONVERSION_BLOCKED',
+        reasonCode: 'conversation_mismatch',
+        message: 'Reconversion cannot attach a different conversation.',
+      });
+    }
+
+    const [pipeline, stage] = await Promise.all([
+      this.findScopedPipeline(manager, ctx, candidate.pipelineId),
+      this.findScopedStage(manager, ctx, candidate.stageId),
+    ]);
+    this.assertDerivedTarget(source, pipeline, stage, true);
+    await this.assertConversationAvailableForReconversion(manager, ctx, source);
+
+    const correlationId = options.correlationId ?? randomUUID();
+    const opportunity = manager.getRepository(CrmOpportunityEntity).create({
+      tenantId: source.tenantId,
+      workspaceId: source.workspaceId,
+      pipelineId: pipeline.id,
+      stageId: stage.id,
+      contactId: source.contactId,
+      contactName: candidate.contactName ?? source.contactName,
+      contactEmail: candidate.contactEmail ?? source.contactEmail,
+      contactPhone: candidate.contactPhone ?? source.contactPhone,
+      inboxConversationId: source.inboxConversationId,
+      sourceOpportunityId: source.id,
+      title: this.derivedTitle(candidate.title, source.title),
+      description: candidate.description ?? null,
+      valueAmount: candidate.valueAmount ?? null,
+      currency: candidate.currency || source.currency,
+      status: 'open',
+      priority: candidate.priority || source.priority,
+      source: candidate.source || source.source,
+      businessMode: source.businessMode,
+      operationalStatus: candidate.operationalStatus ?? null,
+      businessContext: candidate.businessContext ?? {},
+      assignedUserId: candidate.assignedUserId ?? null,
+      expectedCloseDate: null,
+      nextFollowUpAt: null,
+      lastActivityAt: null,
+      wonAt: null,
+      lostAt: null,
+      lostReason: null,
+      cardColor: null,
+      sortOrder: await this.nextSortOrder(manager, ctx, pipeline.id, stage.id),
+      visibility: candidate.visibility || 'workspace',
+      followMode: 'manual',
+      followMessage: null,
+      followSendAutomatically: false,
+      metadata: {
+        ...candidate.metadata,
+        ...this.derivedMetadata(source, 'reconversion', options.reason),
+      },
+      rowVersion: 1,
+      deletedAt: null,
+    });
+    const saved = await manager
+      .getRepository(CrmOpportunityEntity)
+      .save(opportunity);
+    if (source.inboxConversationId) {
+      await manager.getRepository(InboxConversationEntity).update(
+        {
+          id: source.inboxConversationId,
+          tenantId: source.tenantId,
+          workspaceId: source.workspaceId,
+        },
+        { opportunityId: saved.id },
+      );
+    }
+    const governedOptions: CrmCommandOptions = {
+      ...options,
+      correlationId,
+      policyVersion: 'crm-opportunity-reconversion-policy-v1',
+      metadata: {
+        ...(options.metadata ?? {}),
+        sourceOpportunityId: source.id,
+        conversationId: saved.inboxConversationId,
+        contactId: saved.contactId,
+      },
+    };
+    await this.appendHistory(manager, ctx, {
+      ...governedOptions,
+      opportunity: saved,
+      eventType: 'opportunity_created',
+      title: 'Nova oportunidade criada por reconversão',
+      afterData: this.projection(saved),
+      idempotencyKey: options.idempotencyKey
+        ? `${options.idempotencyKey}:created`.slice(0, 180)
+        : undefined,
+    });
+    await this.appendHistory(manager, ctx, {
+      ...governedOptions,
+      opportunity: saved,
+      eventType: 'opportunity_reconverted',
+      title: 'Contato reconvertido em novo ciclo comercial',
+      beforeData: this.projection(source),
+      afterData: this.projection(saved),
+    });
+    return saved;
   }
 
   async transferPipelineWithinTransaction(
@@ -630,6 +1010,7 @@ export class CrmOpportunityCommandService {
     );
     this.assertVersion(locked, options.expectedVersion);
     const before = this.projection(locked);
+    this.assertImmutableIdentity(locked, candidate);
     for (const field of MUTABLE_FIELDS) {
       (locked[field] as unknown) = candidate[field];
     }
@@ -750,7 +1131,13 @@ export class CrmOpportunityCommandService {
         payload: {
           eventId: saved.id,
           opportunityId: input.opportunity.id,
+          contactId: input.opportunity.contactId,
+          conversationId: input.opportunity.inboxConversationId,
+          sourceOpportunityId: input.opportunity.sourceOpportunityId,
+          pipelineId: input.opportunity.pipelineId,
+          stageId: input.opportunity.stageId,
           eventType: input.eventType,
+          reasonCode: input.reason ?? null,
           correlationId,
           causationId: input.causationId ?? null,
           rowVersion: input.opportunity.rowVersion,
@@ -1067,6 +1454,30 @@ export class CrmOpportunityCommandService {
     }
   }
 
+  private assertImmutableIdentity(
+    current: CrmOpportunityEntity,
+    candidate: CrmOpportunityEntity,
+  ): void {
+    if (candidate.inboxConversationId !== current.inboxConversationId) {
+      throw new ConflictException({
+        code: 'CRM_OPPORTUNITY_IDENTITY_IMMUTABLE',
+        reasonCode: 'conversation_link_immutable',
+        message:
+          'The primary conversation link is managed by governed commands.',
+      });
+    }
+    if (
+      current.sourceOpportunityId &&
+      candidate.contactId !== current.contactId
+    ) {
+      throw new ConflictException({
+        code: 'CRM_OPPORTUNITY_IDENTITY_IMMUTABLE',
+        reasonCode: 'lineage_contact_immutable',
+        message: 'A derived opportunity must preserve its canonical contact.',
+      });
+    }
+  }
+
   private assertPipelineTransferReason(options: CrmCommandOptions): void {
     const mode = options.transferMode ?? 'manual';
     const allowed =
@@ -1082,11 +1493,272 @@ export class CrmOpportunityCommandService {
     }
   }
 
+  private assertCopyReason(reason?: string | null): void {
+    if (
+      !reason ||
+      ![
+        'distinct_negotiation',
+        'parallel_sales_process',
+        'commercial_expansion',
+      ].includes(reason)
+    ) {
+      throw new BadRequestException({
+        code: 'CRM_OPPORTUNITY_COPY_BLOCKED',
+        reasonCode: 'copy_reason_not_allowed',
+        message: 'The copy reason is not allowed by the active policy.',
+      });
+    }
+  }
+
+  private assertReconversionReason(reason?: string | null): void {
+    if (
+      !reason ||
+      !['new_conversion', 'renewed_interest', 'new_sales_cycle'].includes(
+        reason,
+      )
+    ) {
+      throw new BadRequestException({
+        code: 'CRM_OPPORTUNITY_RECONVERSION_BLOCKED',
+        reasonCode: 'reconversion_reason_not_allowed',
+        message: 'The reconversion reason is not allowed by the active policy.',
+      });
+    }
+  }
+
+  private assertDerivedTarget(
+    source: CrmOpportunityEntity,
+    pipeline: CrmPipelineEntity,
+    stage: CrmStageEntity,
+    requireInitialStage: boolean,
+  ): void {
+    const code = requireInitialStage
+      ? 'CRM_OPPORTUNITY_RECONVERSION_BLOCKED'
+      : 'CRM_OPPORTUNITY_COPY_BLOCKED';
+    if (pipeline.status !== 'active') {
+      throw new ConflictException({
+        code,
+        reasonCode: 'target_pipeline_inactive',
+        message: 'The target pipeline is not active.',
+      });
+    }
+    if (stage.pipelineId !== pipeline.id) {
+      throw new BadRequestException({
+        code,
+        reasonCode: 'target_stage_pipeline_mismatch',
+        message: 'The target stage does not belong to the target pipeline.',
+      });
+    }
+    if (this.statusForStage(stage) !== 'open') {
+      throw new ConflictException({
+        code,
+        reasonCode: 'target_stage_terminal',
+        message: 'A derived opportunity requires a non-terminal target stage.',
+      });
+    }
+    if (requireInitialStage && !stage.isInitialStage) {
+      throw new ConflictException({
+        code,
+        reasonCode: 'target_stage_not_initial',
+        message: 'Reconversion must start in the configured initial stage.',
+      });
+    }
+    if (pipeline.businessMode !== source.businessMode) {
+      throw new ConflictException({
+        code,
+        reasonCode: 'business_mode_mismatch',
+        message: 'The target pipeline must use the source business mode.',
+      });
+    }
+  }
+
+  private async assertConversationAvailableForReconversion(
+    manager: EntityManager,
+    ctx: RequestContext,
+    source: CrmOpportunityEntity,
+  ): Promise<void> {
+    if (!source.inboxConversationId) return;
+    const conversation = await manager
+      .getRepository(InboxConversationEntity)
+      .findOne({
+        where: {
+          id: source.inboxConversationId,
+          tenantId: this.requireTenantId(ctx),
+          workspaceId: this.requireWorkspaceId(ctx),
+        },
+        lock: { mode: 'pessimistic_write' },
+      });
+    if (!conversation || conversation.contactId !== source.contactId) {
+      throw new ConflictException({
+        code: 'CRM_OPPORTUNITY_RECONVERSION_BLOCKED',
+        reasonCode: 'conversation_contact_mismatch',
+        message: 'The primary conversation no longer matches the contact.',
+      });
+    }
+    if (
+      conversation.opportunityId &&
+      conversation.opportunityId !== source.id
+    ) {
+      throw new ConflictException({
+        code: 'CRM_OPPORTUNITY_RECONVERSION_BLOCKED',
+        reasonCode: 'source_not_primary',
+        message:
+          'Only the primary conversation opportunity can be reconverted.',
+      });
+    }
+    const active = await manager.getRepository(CrmOpportunityEntity).findOne({
+      where: {
+        tenantId: source.tenantId,
+        workspaceId: source.workspaceId,
+        inboxConversationId: source.inboxConversationId,
+        status: 'open',
+        deletedAt: IsNull(),
+      },
+      lock: { mode: 'pessimistic_write' },
+    });
+    if (active) {
+      throw new ConflictException({
+        code: 'CRM_OPPORTUNITY_RECONVERSION_BLOCKED',
+        reasonCode: 'active_opportunity_exists',
+        message: 'The conversation already has an active opportunity.',
+      });
+    }
+  }
+
+  private async assertConversationAvailableForCreation(
+    manager: EntityManager,
+    ctx: RequestContext,
+    opportunity: CrmOpportunityEntity,
+  ): Promise<InboxConversationEntity | null> {
+    if (!opportunity.inboxConversationId) return null;
+    await manager.query(
+      `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`,
+      [
+        `${opportunity.tenantId}:${opportunity.workspaceId}:${opportunity.inboxConversationId}:opportunity`,
+      ],
+    );
+    const conversation = await manager
+      .getRepository(InboxConversationEntity)
+      .findOne({
+        where: {
+          id: opportunity.inboxConversationId,
+          tenantId: this.requireTenantId(ctx),
+          workspaceId: this.requireWorkspaceId(ctx),
+        },
+        lock: { mode: 'pessimistic_write' },
+      });
+    if (!conversation) {
+      throw new NotFoundException('Inbox conversation not found.');
+    }
+    if (
+      !conversation.contactId ||
+      conversation.contactId !== opportunity.contactId
+    ) {
+      throw new ConflictException({
+        code: 'CRM_OPPORTUNITY_CREATION_BLOCKED',
+        reasonCode: 'conversation_contact_mismatch',
+        message:
+          'The opportunity must reuse the conversation canonical contact.',
+      });
+    }
+    const previous = await manager.getRepository(CrmOpportunityEntity).findOne({
+      where: {
+        tenantId: opportunity.tenantId,
+        workspaceId: opportunity.workspaceId,
+        inboxConversationId: opportunity.inboxConversationId,
+        deletedAt: IsNull(),
+      },
+      order: { createdAt: 'DESC' },
+      lock: { mode: 'pessimistic_write' },
+    });
+    if (previous) {
+      throw new ConflictException({
+        code: 'CRM_OPPORTUNITY_CREATION_BLOCKED',
+        reasonCode:
+          previous.status === 'open'
+            ? 'active_opportunity_exists'
+            : 'terminal_opportunity_requires_reconversion',
+        message:
+          previous.status === 'open'
+            ? 'The conversation already has an active opportunity.'
+            : 'Use the explicit reconversion command after a terminal cycle.',
+      });
+    }
+    if (conversation.opportunityId) {
+      throw new ConflictException({
+        code: 'CRM_OPPORTUNITY_CREATION_BLOCKED',
+        reasonCode: 'conversation_primary_pointer_occupied',
+        message: 'The conversation already points to another opportunity.',
+      });
+    }
+    return conversation;
+  }
+
+  private async uniqueInitialStage(
+    manager: EntityManager,
+    ctx: RequestContext,
+    pipelineId: string,
+  ): Promise<CrmStageEntity> {
+    const stages = await manager.getRepository(CrmStageEntity).find({
+      where: this.withClientScope(ctx, {
+        tenantId: this.requireTenantId(ctx),
+        workspaceId: this.requireWorkspaceId(ctx),
+        pipelineId,
+        isInitialStage: true,
+        deletedAt: IsNull(),
+      }),
+      take: 2,
+    });
+    if (stages.length !== 1 || this.statusForStage(stages[0]) !== 'open') {
+      throw new ConflictException({
+        code: 'CRM_OPPORTUNITY_RECONVERSION_BLOCKED',
+        reasonCode: 'initial_stage_unresolved',
+        message:
+          'The target pipeline must have exactly one open initial stage.',
+      });
+    }
+    return stages[0];
+  }
+
+  private derivedTitle(
+    requested: string | undefined,
+    fallback: string,
+  ): string {
+    const title = requested?.trim() || fallback.trim();
+    if (!title) {
+      throw new BadRequestException('Opportunity title is required.');
+    }
+    return title.slice(0, 180);
+  }
+
+  private derivedMetadata(
+    source: CrmOpportunityEntity,
+    creationKind: 'copy' | 'reconversion',
+    reason?: string | null,
+  ): Record<string, unknown> {
+    const clientId =
+      typeof source.metadata?.clientId === 'string'
+        ? source.metadata.clientId
+        : null;
+    const operatingMode =
+      source.metadata?.operatingMode === 'client' ? 'client' : 'agency';
+    return {
+      creationKind,
+      sourceOpportunityId: source.id,
+      creationReason: reason ?? null,
+      operatingMode,
+      clientId,
+      sourceProvenance: 'crm_opportunity_lineage',
+    };
+  }
+
   private projection(
     opportunity: CrmOpportunityEntity,
   ): Record<string, unknown> {
     return {
       opportunityId: opportunity.id,
+      contactId: opportunity.contactId,
+      conversationId: opportunity.inboxConversationId,
+      sourceOpportunityId: opportunity.sourceOpportunityId,
       pipelineId: opportunity.pipelineId,
       stageId: opportunity.stageId,
       status: opportunity.status,
@@ -1099,6 +1771,8 @@ export class CrmOpportunityCommandService {
   private domainEventName(eventType: string): string {
     const names: Record<string, string> = {
       opportunity_created: 'leadflow.crm.opportunity.created',
+      opportunity_copied: 'leadflow.crm.opportunity.copied',
+      opportunity_reconverted: 'leadflow.crm.opportunity.reconverted',
       opportunity_updated: 'leadflow.crm.opportunity.updated',
       stage_changed: 'leadflow.crm.opportunity.stage.changed',
       status_changed: 'leadflow.crm.opportunity.status.changed',

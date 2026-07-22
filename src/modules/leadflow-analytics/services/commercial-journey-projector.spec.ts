@@ -20,6 +20,7 @@ function opportunity(
     contactEmail: null,
     contactPhone: null,
     inboxConversationId: 'conversation-1',
+    sourceOpportunityId: null,
     title: 'Negócio',
     description: null,
     valueAmount: '1250.50',

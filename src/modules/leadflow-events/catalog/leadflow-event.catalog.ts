@@ -187,6 +187,43 @@ export const LEADFLOW_EVENT_CATALOG: LeadFlowEventCatalogItem[] = [
     },
   }),
   buildEvent({
+    eventName: 'leadflow.crm.opportunity.copied',
+    description:
+      'Nova negociação relacionada criada com lineage explícita, sem copiar conversa, mensagens, atividades ou anexos.',
+    requiredContext: ['opportunityId', 'contactId'],
+    payloadSchema: {
+      sourceOpportunityId: field('string', true, 'Oportunidade de origem.'),
+      pipelineId: field('string', true, 'Pipeline da nova negociação.'),
+      stageId: field('string', true, 'Estágio inicial escolhido.'),
+      reasonCode: field('string', true, 'Motivo governado da cópia.'),
+    },
+  }),
+  buildEvent({
+    eventName: 'leadflow.crm.opportunity.reconverted',
+    description:
+      'Novo ciclo comercial criado para contato existente sem reabrir a oportunidade terminal anterior.',
+    requiredContext: ['opportunityId', 'contactId'],
+    payloadSchema: {
+      sourceOpportunityId: field(
+        'string',
+        true,
+        'Oportunidade terminal do ciclo anterior.',
+      ),
+      conversationId: field(
+        'string',
+        false,
+        'Conversa cujo ponteiro primário passou ao novo ciclo.',
+      ),
+      pipelineId: field(
+        'string',
+        true,
+        'Pipeline resolvido para o novo ciclo.',
+      ),
+      stageId: field('string', true, 'Estágio inicial resolvido.'),
+      reasonCode: field('string', true, 'Motivo governado da reconversão.'),
+    },
+  }),
+  buildEvent({
     eventName: 'leadflow.crm.opportunity.updated',
     description: 'Dados da oportunidade atualizados.',
     requiredContext: ['opportunityId'],

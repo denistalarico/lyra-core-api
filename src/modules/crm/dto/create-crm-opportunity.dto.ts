@@ -1,4 +1,15 @@
-import { IsBoolean, IsDateString, IsIn, IsInt, IsNumberString, IsObject, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
+import {
+  IsBoolean,
+  IsDateString,
+  IsIn,
+  IsInt,
+  IsNumberString,
+  IsObject,
+  IsOptional,
+  IsString,
+  IsUUID,
+  MaxLength,
+} from 'class-validator';
 
 export class CreateCrmOpportunityDto {
   @IsOptional()
@@ -91,7 +102,6 @@ export class CreateCrmOpportunityDto {
   @IsOptional()
   @IsString()
   lostReason?: string | null;
-
 
   @IsOptional()
   @IsString()

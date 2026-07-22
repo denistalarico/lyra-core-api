@@ -44,6 +44,8 @@ import {
 } from './dto/crm-stage-transition-policy.dto';
 import { CrmStageTransitionPolicyService } from './services/crm-stage-transition-policy.service';
 import { TransferCrmOpportunityDto } from './dto/transfer-crm-opportunity.dto';
+import { CopyCrmOpportunityDto } from './dto/copy-crm-opportunity.dto';
+import { ReconvertCrmOpportunityDto } from './dto/reconvert-crm-opportunity.dto';
 
 @Controller('crm')
 @UseGuards(JwtAuthGuard, PermissionsGuard)
@@ -366,6 +368,32 @@ export class CrmController {
     @Headers('idempotency-key') idempotencyKey?: string,
   ) {
     return this.crmService.transferOpportunity(ctx, id, dto, {
+      idempotencyKey,
+    });
+  }
+
+  @Post('opportunities/:id/copy')
+  @RequirePermission('leadflow.crm.records.create.client')
+  copyOpportunity(
+    @RequestContextData() ctx: RequestContext,
+    @Param('id') id: string,
+    @Body() dto: CopyCrmOpportunityDto,
+    @Headers('idempotency-key') idempotencyKey?: string,
+  ) {
+    return this.crmService.copyOpportunity(ctx, id, dto, {
+      idempotencyKey,
+    });
+  }
+
+  @Post('opportunities/:id/reconvert')
+  @RequirePermission('leadflow.crm.records.create.client')
+  reconvertOpportunity(
+    @RequestContextData() ctx: RequestContext,
+    @Param('id') id: string,
+    @Body() dto: ReconvertCrmOpportunityDto,
+    @Headers('idempotency-key') idempotencyKey?: string,
+  ) {
+    return this.crmService.reconvertOpportunity(ctx, id, dto, {
       idempotencyKey,
     });
   }

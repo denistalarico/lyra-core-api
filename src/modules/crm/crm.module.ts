@@ -13,6 +13,7 @@ import { CrmTagEntity } from './entities/crm-tag.entity';
 import { CrmOpportunityTagEntity } from './entities/crm-opportunity-tag.entity';
 import { CrmOpportunityEventEntity } from './entities/crm-opportunity-event.entity';
 import { InboxDomainOutboxEntity } from '../inbox/entities/inbox-domain-outbox.entity';
+import { InboxConversationEntity } from '../inbox/entities/inbox-conversation.entity';
 import { CrmOpportunityCommandService } from './services/crm-opportunity-command.service';
 import { CrmStageTransitionPolicyEntity } from './entities/crm-stage-transition-policy.entity';
 import { CrmStageTransitionPolicyService } from './services/crm-stage-transition-policy.service';
@@ -31,6 +32,7 @@ import { CrmStageTransitionPolicyService } from './services/crm-stage-transition
         CrmOpportunityTagEntity,
         CrmOpportunityEventEntity,
         InboxDomainOutboxEntity,
+        InboxConversationEntity,
         ContactEntity,
       ],
       'agency',

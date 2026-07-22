@@ -44,10 +44,6 @@ export class PatchCrmOpportunityDto {
   contactPhone?: string | null;
 
   @IsOptional()
-  @IsUUID()
-  inboxConversationId?: string | null;
-
-  @IsOptional()
   @IsString()
   @MaxLength(180)
   title?: string;

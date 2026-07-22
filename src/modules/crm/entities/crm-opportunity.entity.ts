@@ -54,6 +54,9 @@ export class CrmOpportunityEntity {
   @Column({ name: 'inbox_conversation_id', type: 'uuid', nullable: true })
   inboxConversationId!: string | null;
 
+  @Column({ name: 'source_opportunity_id', type: 'uuid', nullable: true })
+  sourceOpportunityId!: string | null;
+
   @Column({ type: 'varchar', length: 180 })
   title!: string;
 

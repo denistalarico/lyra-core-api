@@ -52,6 +52,8 @@ export type LeadFlowEventName =
   | 'leadflow.inbox.conversation.closed'
   // CRM / Leads
   | 'leadflow.crm.opportunity.created'
+  | 'leadflow.crm.opportunity.copied'
+  | 'leadflow.crm.opportunity.reconverted'
   | 'leadflow.crm.opportunity.updated'
   | 'leadflow.crm.opportunity.stage.changed'
   | 'leadflow.crm.opportunity.pipeline.exited'

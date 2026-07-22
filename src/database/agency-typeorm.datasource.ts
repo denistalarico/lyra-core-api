@@ -112,6 +112,7 @@ import { ScopeCrmOpportunityUniquenessToOpen1784550000000 } from './migrations/1
 import { HardenCrmOpportunityLifecycle1784560000000 } from './migrations/1784560000000-harden-crm-opportunity-lifecycle';
 import { AddDeterministicCrmRouting1784570000000 } from './migrations/1784570000000-add-deterministic-crm-routing';
 import { CreateGovernedStageTransitions1784580000000 } from './migrations/1784580000000-create-governed-stage-transitions';
+import { AddCrmOpportunityLineage1784590000000 } from './migrations/1784590000000-add-crm-opportunity-lineage';
 import { AddLeadflowAutomationTemplateVersion1785000000000 } from './migrations/1785000000000-add-leadflow-automation-template-version';
 
 export const AgencyDataSource = new DataSource({
@@ -238,6 +239,7 @@ export const AgencyDataSource = new DataSource({
     HardenCrmOpportunityLifecycle1784560000000,
     AddDeterministicCrmRouting1784570000000,
     CreateGovernedStageTransitions1784580000000,
+    AddCrmOpportunityLineage1784590000000,
     AddLeadflowAutomationTemplateVersion1785000000000,
   ],
 });

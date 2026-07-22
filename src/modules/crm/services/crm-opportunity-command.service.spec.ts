@@ -4,6 +4,7 @@ import { CrmOpportunityEntity } from '../entities/crm-opportunity.entity';
 import { CrmPipelineEntity } from '../entities/crm-pipeline.entity';
 import { CrmStageEntity } from '../entities/crm-stage.entity';
 import { InboxDomainOutboxEntity } from '../../inbox/entities/inbox-domain-outbox.entity';
+import { InboxConversationEntity } from '../../inbox/entities/inbox-conversation.entity';
 import { CrmOpportunityCommandService } from './crm-opportunity-command.service';
 
 const ctx = {
@@ -68,12 +69,14 @@ function harness(
     initial?: CrmOpportunityEntity[];
     stages?: CrmStageEntity[];
     pipelines?: CrmPipelineEntity[];
+    conversations?: InboxConversationEntity[];
   } = {},
 ) {
   const committed = {
     opportunities: [...(options.initial ?? [])],
     stages: [...(options.stages ?? [stage()])],
     pipelines: [...(options.pipelines ?? [])],
+    conversations: [...(options.conversations ?? [])],
     events: [] as CrmOpportunityEventEntity[],
     outbox: [] as InboxDomainOutboxEntity[],
   };
@@ -85,26 +88,40 @@ function harness(
           opportunities: committed.opportunities.map((item) => ({ ...item })),
           stages: committed.stages.map((item) => ({ ...item })),
           pipelines: committed.pipelines.map((item) => ({ ...item })),
+          conversations: committed.conversations.map((item) => ({ ...item })),
           events: committed.events.map((item) => ({ ...item })),
           outbox: committed.outbox.map((item) => ({ ...item })),
         };
         const repository = (entity: unknown) => {
           if (entity === CrmOpportunityEntity) {
             return {
-              findOne: jest.fn(({ where }: { where: { id?: string } }) =>
-                Promise.resolve(
-                  where.id
-                    ? (draft.opportunities.find(
-                        (item) => item.id === where.id,
-                      ) ?? null)
-                    : (draft.opportunities[0] ?? null),
-                ),
+              create: (value: CrmOpportunityEntity) => value,
+              findOne: jest.fn(
+                ({ where }: { where: Record<string, unknown> }) =>
+                  Promise.resolve(
+                    draft.opportunities.find(
+                      (item) =>
+                        (!where.id || item.id === where.id) &&
+                        (!where.pipelineId ||
+                          item.pipelineId === where.pipelineId) &&
+                        (!where.stageId || item.stageId === where.stageId) &&
+                        (!where.inboxConversationId ||
+                          item.inboxConversationId ===
+                            where.inboxConversationId) &&
+                        (!where.status || item.status === where.status),
+                    ) ?? null,
+                  ),
               ),
               save: jest.fn((value: CrmOpportunityEntity) => {
                 const index = draft.opportunities.findIndex(
                   (item) => item.id === value.id,
                 );
-                const saved = { ...value } as CrmOpportunityEntity;
+                const saved = {
+                  ...value,
+                  id:
+                    value.id ??
+                    `00000000-0000-4000-8000-${String(draft.opportunities.length + 200).padStart(12, '0')}`,
+                } as CrmOpportunityEntity;
                 if (index >= 0) draft.opportunities[index] = saved;
                 else draft.opportunities.push(saved);
                 return Promise.resolve(saved);
@@ -127,6 +144,28 @@ function harness(
                 Promise.resolve(
                   draft.pipelines.find((item) => item.id === where.id) ?? null,
                 ),
+              ),
+            };
+          }
+          if (entity === InboxConversationEntity) {
+            return {
+              findOne: jest.fn(({ where }: { where: { id?: string } }) =>
+                Promise.resolve(
+                  draft.conversations.find((item) => item.id === where.id) ??
+                    null,
+                ),
+              ),
+              update: jest.fn(
+                (
+                  where: { id: string },
+                  value: Partial<InboxConversationEntity>,
+                ) => {
+                  const current = draft.conversations.find(
+                    (item) => item.id === where.id,
+                  );
+                  if (current) Object.assign(current, value);
+                  return Promise.resolve({ affected: current ? 1 : 0 });
+                },
               ),
             };
           }
@@ -184,6 +223,7 @@ function harness(
         committed.opportunities = draft.opportunities;
         committed.stages = draft.stages;
         committed.pipelines = draft.pipelines;
+        committed.conversations = draft.conversations;
         committed.events = draft.events;
         committed.outbox = draft.outbox;
         return result;
@@ -341,6 +381,51 @@ describe('CrmOpportunityCommandService', () => {
     });
     expect(committed.events).toHaveLength(1);
     expect(committed.outbox).toHaveLength(0);
+  });
+
+  it('creates and points the first conversation opportunity atomically', async () => {
+    const conversationId = '00000000-0000-4000-8000-000000000050';
+    const contactId = '00000000-0000-4000-8000-000000000040';
+    const conversation = {
+      id: conversationId,
+      tenantId: ctx.tenantId,
+      workspaceId: ctx.workspaceId,
+      contactId,
+      opportunityId: null,
+    } as InboxConversationEntity;
+    const candidate = opportunity({
+      id: '00000000-0000-4000-8000-000000000012',
+      contactId,
+      inboxConversationId: conversationId,
+      sourceOpportunityId: null,
+      rowVersion: 1,
+    });
+    const { service, committed } = harness({ conversations: [conversation] });
+
+    const created = await service.createOpportunity(ctx, candidate, {
+      idempotencyKey: 'manual-conversation-create-1',
+    });
+
+    expect(committed.conversations[0].opportunityId).toBe(created.id);
+    expect(committed.events.map((event) => event.eventType)).toEqual([
+      'opportunity_created',
+    ]);
+    await expect(
+      service.createOpportunity(
+        ctx,
+        opportunity({
+          id: '00000000-0000-4000-8000-000000000013',
+          contactId,
+          inboxConversationId: conversationId,
+          sourceOpportunityId: null,
+          rowVersion: 1,
+        }),
+        { idempotencyKey: 'manual-conversation-create-2' },
+      ),
+    ).rejects.toMatchObject({
+      response: { reasonCode: 'active_opportunity_exists' },
+    });
+    expect(committed.opportunities).toHaveLength(1);
   });
 
   it('transfers the same opportunity atomically and records commercial entry/exit facts', async () => {
@@ -590,6 +675,237 @@ describe('CrmOpportunityCommandService', () => {
       pipelineId: initial.pipelineId,
       stageId: initial.stageId,
     });
+    expect(committed.events).toHaveLength(0);
+  });
+
+  it('copies only the governed commercial snapshot into an independent related negotiation', async () => {
+    const source = opportunity({
+      contactId: '00000000-0000-4000-8000-000000000040',
+      contactName: 'Contato canônico',
+      contactEmail: 'contato@example.com',
+      contactPhone: '+5511999999999',
+      inboxConversationId: '00000000-0000-4000-8000-000000000050',
+      sourceOpportunityId: null,
+      title: 'Negociação original',
+      description: 'Escopo comercial permitido',
+      valueAmount: '1500.00',
+      currency: 'BRL',
+      priority: 'high',
+      source: 'whatsapp',
+      businessMode: 'general',
+      operationalStatus: 'human_active',
+      businessContext: { agentSummary: 'não copiar' },
+      assignedUserId: ctx.userId,
+      expectedCloseDate: '2026-08-01',
+      nextFollowUpAt: new Date(),
+      lastActivityAt: new Date(),
+      followMode: 'automatic',
+      followMessage: 'não copiar',
+      followSendAutomatically: true,
+      visibility: 'workspace',
+      metadata: { clientId: 'client-1', operatingMode: 'client' },
+    });
+    const targetPipeline = pipeline();
+    const targetStage = stage({
+      id: '00000000-0000-4000-8000-000000000032',
+      pipelineId: targetPipeline.id,
+      type: 'open',
+      isWonStage: false,
+      isInitialStage: true,
+    });
+    const { service, committed } = harness({
+      initial: [source],
+      pipelines: [targetPipeline],
+      stages: [targetStage],
+    });
+    const options = {
+      expectedVersion: source.rowVersion,
+      idempotencyKey: 'copy-related-1',
+      reason: 'distinct_negotiation',
+    };
+
+    const copied = await service.copyOpportunity(
+      ctx,
+      source.id,
+      {
+        pipelineId: targetPipeline.id,
+        stageId: targetStage.id,
+        title: 'Nova negociação',
+      },
+      options,
+    );
+    const replay = await service.copyOpportunity(
+      ctx,
+      source.id,
+      {
+        pipelineId: targetPipeline.id,
+        stageId: targetStage.id,
+        title: 'Nova negociação',
+      },
+      options,
+    );
+
+    expect(copied).toMatchObject({
+      contactId: source.contactId,
+      sourceOpportunityId: source.id,
+      inboxConversationId: null,
+      assignedUserId: null,
+      operationalStatus: null,
+      expectedCloseDate: null,
+      nextFollowUpAt: null,
+      lastActivityAt: null,
+      followMode: 'manual',
+      followMessage: null,
+      followSendAutomatically: false,
+      status: 'open',
+      title: 'Nova negociação',
+      metadata: {
+        creationKind: 'copy',
+        clientId: 'client-1',
+      },
+    });
+    expect(copied.id).not.toBe(source.id);
+    expect(copied.businessContext).not.toHaveProperty('agentSummary');
+    expect(replay.id).toBe(copied.id);
+    expect(committed.opportunities).toHaveLength(2);
+    expect(committed.opportunities[0]).toMatchObject({
+      id: source.id,
+      inboxConversationId: source.inboxConversationId,
+      rowVersion: source.rowVersion,
+    });
+    expect(committed.events.map((event) => event.eventType)).toEqual([
+      'opportunity_created',
+      'opportunity_copied',
+    ]);
+    expect(committed.events[1]).toMatchObject({
+      reason: 'distinct_negotiation',
+      policyVersion: 'crm-opportunity-copy-policy-v1',
+    });
+  });
+
+  it('reconverts a terminal primary opportunity without reopening it and replays safely', async () => {
+    const conversationId = '00000000-0000-4000-8000-000000000050';
+    const contactId = '00000000-0000-4000-8000-000000000040';
+    const source = opportunity({
+      contactId,
+      contactName: 'Contato canônico',
+      inboxConversationId: conversationId,
+      sourceOpportunityId: null,
+      title: 'Ciclo encerrado',
+      status: 'lost',
+      lostAt: new Date('2026-07-01T00:00:00.000Z'),
+      businessMode: 'general',
+      currency: 'BRL',
+      priority: 'normal',
+      source: 'whatsapp',
+      metadata: { operatingMode: 'agency' },
+    });
+    const targetPipeline = pipeline();
+    const initialStage = stage({
+      id: '00000000-0000-4000-8000-000000000032',
+      pipelineId: targetPipeline.id,
+      type: 'open',
+      isWonStage: false,
+      isLostStage: false,
+      isInitialStage: true,
+    });
+    const conversation = {
+      id: conversationId,
+      tenantId: ctx.tenantId,
+      workspaceId: ctx.workspaceId,
+      contactId,
+      opportunityId: source.id,
+    } as InboxConversationEntity;
+    const { service, committed } = harness({
+      initial: [source],
+      pipelines: [targetPipeline],
+      stages: [initialStage],
+      conversations: [conversation],
+    });
+    const options = {
+      expectedVersion: source.rowVersion,
+      idempotencyKey: 'reconversion-1',
+      reason: 'renewed_interest',
+    };
+
+    const reconverted = await service.reconvertOpportunity(
+      ctx,
+      source.id,
+      { pipelineId: targetPipeline.id, title: 'Novo ciclo' },
+      options,
+    );
+    const replay = await service.reconvertOpportunity(
+      ctx,
+      source.id,
+      { pipelineId: targetPipeline.id, title: 'Novo ciclo' },
+      options,
+    );
+
+    expect(reconverted).toMatchObject({
+      contactId,
+      inboxConversationId: conversationId,
+      sourceOpportunityId: source.id,
+      pipelineId: targetPipeline.id,
+      stageId: initialStage.id,
+      status: 'open',
+      title: 'Novo ciclo',
+    });
+    expect(reconverted.id).not.toBe(source.id);
+    expect(replay.id).toBe(reconverted.id);
+    expect(committed.opportunities).toHaveLength(2);
+    expect(committed.opportunities[0]).toMatchObject({
+      id: source.id,
+      status: 'lost',
+      lostAt: source.lostAt,
+      rowVersion: source.rowVersion,
+    });
+    expect(committed.conversations[0].opportunityId).toBe(reconverted.id);
+    expect(committed.events.map((event) => event.eventType)).toEqual([
+      'opportunity_created',
+      'opportunity_reconverted',
+    ]);
+    expect(committed.events[1]).toMatchObject({
+      reason: 'renewed_interest',
+      policyVersion: 'crm-opportunity-reconversion-policy-v1',
+    });
+  });
+
+  it('rejects reconversion while the source opportunity is still open', async () => {
+    const source = opportunity({
+      contactId: '00000000-0000-4000-8000-000000000040',
+      inboxConversationId: null,
+      businessMode: 'general',
+      currency: 'BRL',
+      priority: 'normal',
+      source: 'manual',
+      title: 'Ciclo ativo',
+      metadata: {},
+    });
+    const targetPipeline = pipeline();
+    const initialStage = stage({
+      id: '00000000-0000-4000-8000-000000000032',
+      pipelineId: targetPipeline.id,
+      type: 'open',
+      isWonStage: false,
+      isInitialStage: true,
+    });
+    const { service, committed } = harness({
+      initial: [source],
+      pipelines: [targetPipeline],
+      stages: [initialStage],
+    });
+
+    await expect(
+      service.reconvertOpportunity(
+        ctx,
+        source.id,
+        { pipelineId: targetPipeline.id },
+        { reason: 'new_conversion' },
+      ),
+    ).rejects.toMatchObject({
+      response: { reasonCode: 'source_not_terminal' },
+    });
+    expect(committed.opportunities).toHaveLength(1);
     expect(committed.events).toHaveLength(0);
   });
 });

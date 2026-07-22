@@ -495,7 +495,7 @@ export class InboxGovernedActionWorker
     snapshot: InboxConversationEntity,
   ): Promise<{
     opportunityId: string;
-    opportunityOutcome: 'created' | 'reused';
+    opportunityOutcome: 'created' | 'reused' | 'reconverted';
   }> {
     return this.dataSource.transaction(async (manager) => {
       await this.assertWorkspaceControl(manager, action, 'crm_enabled');
@@ -584,6 +584,27 @@ export class InboxGovernedActionWorker
         await manager.getRepository(InboxConversationEntity).save(conversation);
         return { opportunityId: existing.id, opportunityOutcome: 'reused' };
       }
+      const terminalSource = await manager
+        .getRepository(CrmOpportunityEntity)
+        .createQueryBuilder('opportunity')
+        .setLock('pessimistic_write')
+        .where('opportunity.tenant_id = :tenantId', action)
+        .andWhere('opportunity.workspace_id = :workspaceId', action)
+        .andWhere('opportunity.inbox_conversation_id = :conversationId', {
+          conversationId: conversation.id,
+        })
+        .andWhere("opportunity.status <> 'open'")
+        .andWhere('opportunity.deleted_at IS NULL')
+        .orderBy(
+          'CASE WHEN opportunity.id = :primaryOpportunityId THEN 0 ELSE 1 END',
+          'ASC',
+        )
+        .addOrderBy('opportunity.created_at', 'DESC')
+        .setParameter(
+          'primaryOpportunityId',
+          conversation.opportunityId ?? '00000000-0000-0000-0000-000000000000',
+        )
+        .getOne();
       if (!conversation.contactId) throw new Error('contact_missing');
       const routedCrmTarget = await resolveRoutedCrmTarget(manager, {
         tenantId: action.tenantId,
@@ -615,9 +636,9 @@ export class InboxGovernedActionWorker
         typeof channel.metadata?.clientId === 'string'
           ? channel.metadata.clientId
           : null;
-      const opportunity = await manager
+      const opportunityCandidate = manager
         .getRepository(CrmOpportunityEntity)
-        .save({
+        .create({
           tenantId: action.tenantId,
           workspaceId: action.workspaceId,
           pipelineId: pipeline.id,
@@ -632,6 +653,7 @@ export class InboxGovernedActionWorker
               ? primaryMethod.value
               : null,
           inboxConversationId: conversation.id,
+          sourceOpportunityId: terminalSource?.id ?? null,
           title: `LeadFlow — ${safeContactName(conversation.title)}`.slice(
             0,
             180,
@@ -655,8 +677,11 @@ export class InboxGovernedActionWorker
               contactId: conversation.contactId,
             },
             opportunityResolution: {
-              outcome: 'created',
+              outcome: terminalSource ? 'reconverted' : 'created',
               governedActionId: action.id,
+              ...(terminalSource
+                ? { sourceOpportunityId: terminalSource.id }
+                : {}),
             },
           },
           assignedUserId:
@@ -684,7 +709,35 @@ export class InboxGovernedActionWorker
             clientId: routedClientId,
           },
         });
-      if (this.opportunityCommands) {
+      let opportunity: CrmOpportunityEntity;
+      if (terminalSource) {
+        if (!this.opportunityCommands)
+          throw new Error('crm_command_unavailable');
+        opportunity =
+          await this.opportunityCommands.reconvertOpportunityWithinTransaction(
+            manager,
+            {
+              tenantId: action.tenantId,
+              workspaceId: action.workspaceId,
+            },
+            terminalSource.id,
+            opportunityCandidate,
+            {
+              actor: { type: 'automation' },
+              idempotencyKey: `governed:${action.id}:opportunity-reconverted`,
+              correlationId: action.id,
+              causationId: action.decisionId,
+              policyVersion: action.policyVersion,
+              reason: 'new_conversion',
+              metadata: { governedActionId: action.id },
+            },
+          );
+      } else {
+        opportunity = await manager
+          .getRepository(CrmOpportunityEntity)
+          .save(opportunityCandidate);
+      }
+      if (this.opportunityCommands && !terminalSource) {
         await this.opportunityCommands.appendHistory(
           manager,
           {
@@ -720,7 +773,10 @@ export class InboxGovernedActionWorker
         'opportunity',
         opportunity.id,
       );
-      return { opportunityId: opportunity.id, opportunityOutcome: 'created' };
+      return {
+        opportunityId: opportunity.id,
+        opportunityOutcome: terminalSource ? 'reconverted' : 'created',
+      };
     });
   }
 

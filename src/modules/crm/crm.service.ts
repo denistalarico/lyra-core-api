@@ -33,6 +33,8 @@ import { PatchCrmOpportunityStatusDto } from './dto/patch-crm-opportunity-status
 import { PatchCrmPipelineDto } from './dto/patch-crm-pipeline.dto';
 import { PatchCrmStageDto } from './dto/patch-crm-stage.dto';
 import { TransferCrmOpportunityDto } from './dto/transfer-crm-opportunity.dto';
+import { CopyCrmOpportunityDto } from './dto/copy-crm-opportunity.dto';
+import { ReconvertCrmOpportunityDto } from './dto/reconvert-crm-opportunity.dto';
 import { CrmOpportunityEntity } from './entities/crm-opportunity.entity';
 import { CrmPipelineEntity } from './entities/crm-pipeline.entity';
 import { CrmStageEntity } from './entities/crm-stage.entity';
@@ -416,6 +418,7 @@ export class CrmService {
       contactEmail: dto.contactEmail ?? null,
       contactPhone: dto.contactPhone ?? null,
       inboxConversationId: dto.inboxConversationId ?? null,
+      sourceOpportunityId: null,
       title: dto.title,
       description: dto.description ?? null,
       valueAmount: dto.valueAmount ?? null,
@@ -512,8 +515,6 @@ export class CrmService {
       opportunity.contactEmail = dto.contactEmail;
     if (dto.contactPhone !== undefined)
       opportunity.contactPhone = dto.contactPhone;
-    if (dto.inboxConversationId !== undefined)
-      opportunity.inboxConversationId = dto.inboxConversationId;
     if (dto.title !== undefined) opportunity.title = dto.title;
     if (dto.description !== undefined)
       opportunity.description = dto.description;
@@ -668,6 +669,48 @@ export class CrmService {
       },
     );
     return result.opportunity;
+  }
+
+  async copyOpportunity(
+    ctx: RequestContext,
+    id: string,
+    dto: CopyCrmOpportunityDto,
+    options: CrmCommandOptions = {},
+  ): Promise<CrmOpportunityEntity> {
+    return this.opportunityCommands.copyOpportunity(
+      ctx,
+      id,
+      {
+        pipelineId: dto.pipelineId,
+        stageId: dto.stageId,
+        title: dto.title,
+      },
+      {
+        ...options,
+        actor: { type: 'user', userId: ctx.userId ?? null },
+        expectedVersion: dto.expectedVersion ?? options.expectedVersion,
+        reason: dto.reasonCode,
+      },
+    );
+  }
+
+  async reconvertOpportunity(
+    ctx: RequestContext,
+    id: string,
+    dto: ReconvertCrmOpportunityDto,
+    options: CrmCommandOptions = {},
+  ): Promise<CrmOpportunityEntity> {
+    return this.opportunityCommands.reconvertOpportunity(
+      ctx,
+      id,
+      { pipelineId: dto.pipelineId, title: dto.title },
+      {
+        ...options,
+        actor: { type: 'user', userId: ctx.userId ?? null },
+        expectedVersion: dto.expectedVersion ?? options.expectedVersion,
+        reason: dto.reasonCode,
+      },
+    );
   }
 
   async patchOpportunityStatus(
