@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
@@ -28,6 +29,8 @@ import type {
   LeadFlowAutomationRuntimeConfigResponse,
   LeadFlowAutomationsRuntimeConfigResponse,
 } from '../dto/leadflow-automation-runtime-config-response.dto';
+import { type LeadFlowAutomationConfigSection } from '../catalog/automation-config-schemas.catalog';
+import { isRuntimeAvailable } from '../catalog/automation-dependencies.registry';
 import {
   LeadFlowAutomationEntity,
   LeadFlowAutomationVersionEntity,
@@ -40,6 +43,14 @@ import type {
   LeadFlowAutomationReadiness,
   LeadFlowJsonObject,
 } from '../types/leadflow-automation.types';
+import {
+  LeadFlowAutomationConfigSchemaService,
+  type LeadFlowAutomationConfigError,
+} from './leadflow-automation-config-schema.service';
+import {
+  LeadFlowAutomationLifecycleService,
+  type LeadFlowAutomationLifecycle,
+} from './leadflow-automation-lifecycle.service';
 import { LeadFlowAutomationRecipeService } from './leadflow-automation-recipe.service';
 import { LeadFlowAutomationRuntimeConfigService } from './leadflow-automation-runtime-config.service';
 
@@ -67,6 +78,8 @@ export class LeadFlowAutomationService {
     private readonly settingsRepository: Repository<LeadFlowClientSettingsEntity>,
     private readonly recipeService: LeadFlowAutomationRecipeService,
     private readonly runtimeConfigService: LeadFlowAutomationRuntimeConfigService,
+    private readonly configSchemaService: LeadFlowAutomationConfigSchemaService,
+    private readonly lifecycleService: LeadFlowAutomationLifecycleService,
     private readonly permissionService: PlatformPermissionService,
   ) {}
 
@@ -80,7 +93,11 @@ export class LeadFlowAutomationService {
     return {
       businessModeKey: active.businessModeKey,
       isCustomBusinessMode: active.isCustomBusinessMode,
-      items: automations.map(mapAutomationSummary),
+      runtimeAvailable: isRuntimeAvailable(),
+      items: automations.map((automation) => ({
+        ...mapAutomationSummary(automation),
+        lifecycle: this.lifecycleFor(automation, active),
+      })),
     };
   }
 
@@ -102,6 +119,7 @@ export class LeadFlowAutomationService {
     return {
       businessModeKey: active.businessModeKey,
       isCustomBusinessMode: active.isCustomBusinessMode,
+      runtimeAvailable: isRuntimeAvailable(),
       items: recipes.map((recipe) =>
         mapAutomationRecipe(recipe, active.businessModeKey),
       ),
@@ -118,6 +136,12 @@ export class LeadFlowAutomationService {
     const recipe = this.recipeService.getRecipe(dto.recipeKey);
     if (!recipe) {
       throw new BadRequestException('Receita de automação desconhecida.');
+    }
+
+    if (recipe.deprecated) {
+      throw new BadRequestException(
+        'Esta receita foi descontinuada e não pode mais ser provisionada.',
+      );
     }
 
     if (recipe.isDeveloperOnly) {
@@ -142,14 +166,11 @@ export class LeadFlowAutomationService {
     const saved = await this.automationsRepository.save(automation);
 
     if (dto.activate) {
-      if (saved.readiness?.state === LeadFlowAutomationReadinessState.Ready) {
-        saved.status = LeadFlowAutomationStatus.Active;
-        await this.automationsRepository.save(saved);
-      } else {
-        throw new BadRequestException(
-          'A automação não está pronta para ativar. Ajuste a configuração pendente.',
-        );
-      }
+      // Same gate as the explicit activate endpoint — provisioning must not be
+      // a side door around dependency checks.
+      this.assertActivatable(this.lifecycleFor(saved, active));
+      saved.status = LeadFlowAutomationStatus.Active;
+      await this.automationsRepository.save(saved);
     }
 
     return this.detail(ctx, saved.id);
@@ -174,6 +195,13 @@ export class LeadFlowAutomationService {
       dto.developerConfig !== undefined || dto.webhookConfig !== undefined;
     if (touchesDeveloper) {
       await this.assertDeveloper(ctx);
+    }
+
+    const recipeForValidation = this.recipeService.getRecipe(
+      automation.recipeKey,
+    );
+    if (recipeForValidation) {
+      this.assertConfigMatchesSchema(recipeForValidation, dto);
     }
 
     if (dto.name !== undefined) automation.name = dto.name;
@@ -221,11 +249,7 @@ export class LeadFlowAutomationService {
     const active = await this.resolveActiveContext(ctx);
     const automation = await this.findScopedAutomation(ctx, active, id);
 
-    if (automation.readiness?.state !== LeadFlowAutomationReadinessState.Ready) {
-      throw new BadRequestException(
-        'A automação não está pronta para ativar. Ajuste a configuração pendente.',
-      );
-    }
+    this.assertActivatable(this.lifecycleFor(automation, active));
 
     return this.transition(ctx, automation, LeadFlowAutomationStatus.Active);
   }
@@ -394,12 +418,110 @@ export class LeadFlowAutomationService {
     automation.webhookConfig = recipe.isDeveloperOnly
       ? { enabled: false, direction: 'outgoing', method: 'POST' }
       : {};
+    automation.templateVersion = recipe.templateVersion;
     automation.metadata = {
       tier: recipe.tier,
       source: 'recipe',
       recipeKey: recipe.key,
+      templateVersion: recipe.templateVersion,
       safetyRules: [...recipe.safetyRules],
     };
+  }
+
+  /**
+   * Rejects a configuration patch that does not match the recipe schema.
+   * Closed by default: unknown keys and edits to structural fields are refused
+   * rather than silently persisted into jsonb.
+   */
+  private assertConfigMatchesSchema(
+    recipe: LeadFlowAutomationRecipeCatalogItem,
+    dto: PatchAutomationDto,
+  ): void {
+    const sections: Array<
+      [LeadFlowAutomationConfigSection, unknown, Record<string, unknown>]
+    > = [
+      ['trigger', dto.triggerConfig, recipe.defaultTriggerConfig],
+      ['conditions', dto.conditionConfig, recipe.defaultConditionConfig],
+      ['actions', dto.actionConfig, recipe.defaultActionConfig],
+      ['message', dto.messageConfig, recipe.defaultMessageConfig],
+      ['crmPolicy', dto.crmPolicy, recipe.defaultCrmPolicy],
+      ['schedulePolicy', dto.schedulePolicy, recipe.defaultSchedulePolicy],
+    ];
+
+    const errors: LeadFlowAutomationConfigError[] = [];
+    for (const [section, value, defaults] of sections) {
+      if (value === undefined) continue;
+      errors.push(
+        ...this.configSchemaService.validateSection(
+          recipe,
+          section,
+          value,
+          defaults,
+        ).errors,
+      );
+    }
+
+    if (errors.length > 0) {
+      throw new BadRequestException({
+        code: 'AUTOMATION_CONFIG_INVALID',
+        message: 'A configuração enviada não é válida para esta automação.',
+        errors,
+      });
+    }
+  }
+
+  /** Derives the effective lifecycle state of an automation instance. */
+  private lifecycleFor(
+    automation: LeadFlowAutomationEntity,
+    active: ActiveContext,
+  ): LeadFlowAutomationLifecycle {
+    const recipe = this.recipeService.getRecipe(automation.recipeKey);
+
+    return this.lifecycleService.evaluate({
+      status: automation.status,
+      recipe,
+      compatibleWithBusinessMode: recipe
+        ? this.recipeService.isCompatible(recipe, active.businessModeKey)
+        : false,
+      missingConfiguration: recipe
+        ? this.configSchemaService.findMissingRequiredFields(recipe, {
+            trigger: automation.triggerConfig ?? {},
+            conditions: automation.conditionConfig ?? {},
+            actions: automation.actionConfig ?? {},
+            message: automation.messageConfig ?? {},
+            crmPolicy: automation.crmPolicy ?? {},
+            schedulePolicy: automation.schedulePolicy ?? {},
+          })
+        : [],
+    });
+  }
+
+  /**
+   * The single gate that keeps the on/off switch honest. An automation may only
+   * be switched on when the platform can genuinely execute it.
+   */
+  private assertActivatable(lifecycle: LeadFlowAutomationLifecycle): void {
+    if (lifecycle.canActivate) {
+      return;
+    }
+
+    if (lifecycle.unmetDependencies.length > 0) {
+      throw new ConflictException({
+        code: 'AUTOMATION_BLOCKED_BY_DEPENDENCY',
+        message: lifecycle.blockedReason,
+        state: lifecycle.state,
+        unmetDependencies: lifecycle.unmetDependencies,
+      });
+    }
+
+    throw new BadRequestException({
+      code: 'AUTOMATION_NOT_ACTIVATABLE',
+      message:
+        lifecycle.blockedReason ??
+        'A automação não está pronta para ativar. Ajuste a configuração pendente.',
+      state: lifecycle.state,
+      missingConfiguration: lifecycle.missingConfiguration,
+    });
   }
 
   private async detail(
@@ -409,6 +531,7 @@ export class LeadFlowAutomationService {
     const active = await this.resolveActiveContext(ctx);
     const automation = await this.findScopedAutomation(ctx, active, id);
 
+    const recipe = this.recipeService.getRecipe(automation.recipeKey);
     const detail = mapAutomationDetail(automation);
     detail.capabilities = {
       developer: await this.can(
@@ -416,6 +539,10 @@ export class LeadFlowAutomationService {
         LEADFLOW_AUTOMATIONS_PERMISSIONS.developerManage,
       ),
     };
+    detail.lifecycle = this.lifecycleFor(automation, active);
+    detail.configSchema = recipe
+      ? this.configSchemaService.buildSchema(recipe)
+      : null;
     return detail;
   }
 
@@ -534,6 +661,27 @@ export class LeadFlowAutomationService {
       if (OUTBOUND_ACTIONS.has(primaryAction) && !this.hasChannel(active.settings)) {
         missing.push('channel');
         state = LeadFlowAutomationReadinessState.MissingChannel;
+      }
+    }
+
+    // Readiness used to check only channel/webhook, so an automation with empty
+    // required fields still reported "ready". Required fields now come from the
+    // recipe schema, which is the same source the validator enforces.
+    const missingFields = this.configSchemaService.findMissingRequiredFields(
+      recipe,
+      {
+        trigger: automation.triggerConfig ?? {},
+        conditions: automation.conditionConfig ?? {},
+        actions: automation.actionConfig ?? {},
+        message: automation.messageConfig ?? {},
+        crmPolicy: automation.crmPolicy ?? {},
+        schedulePolicy: automation.schedulePolicy ?? {},
+      },
+    );
+    if (missingFields.length > 0) {
+      missing.push(...missingFields);
+      if (state === LeadFlowAutomationReadinessState.Ready) {
+        state = LeadFlowAutomationReadinessState.MissingSettings;
       }
     }
 

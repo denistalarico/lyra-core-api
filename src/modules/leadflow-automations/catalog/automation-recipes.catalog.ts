@@ -1,5 +1,6 @@
 import { LeadFlowBusinessMode } from '../../leadflow-settings/enums/leadflow-business-mode.enum';
 import { LeadFlowAutomationCategory } from '../enums/leadflow-automation-category.enum';
+import { LeadFlowAutomationDependency } from '../enums/leadflow-automation-dependency.enum';
 import type {
   LeadFlowAutomationAction,
   LeadFlowAutomationActionConfig,
@@ -17,6 +18,55 @@ export type LeadFlowAutomationRecipeTier =
   | 'developer';
 
 /**
+ * How a trigger actually reaches the automation. The trigger *key* alone is
+ * misleading: several keys in {@link LeadFlowAutomationTrigger} are not domain
+ * events at all. Classifying them honestly here is what lets a future runtime
+ * pick the right delivery mechanism instead of assuming every trigger arrives
+ * as an event.
+ *
+ *  - `event`    — a real domain event published by an owning module.
+ *  - `derived`  — a state or window computed from other signals. Needs a
+ *                 detector or an evaluation pass; no event carries it today.
+ *  - `schedule` — driven by the clock, not by anything that happened.
+ *  - `webhook`  — an inbound external call.
+ */
+export type LeadFlowAutomationTriggerKind =
+  | 'event'
+  | 'derived'
+  | 'schedule'
+  | 'webhook';
+
+/**
+ * Honest classification of every trigger key. `business_hours.closed` is the
+ * clearest example of the audit finding: it reads like an event but is a window
+ * condition evaluated against an incoming message, so it is `derived`.
+ */
+export const LEADFLOW_AUTOMATION_TRIGGER_KINDS: Record<
+  LeadFlowAutomationTrigger,
+  LeadFlowAutomationTriggerKind
+> = {
+  'conversation.created': 'event',
+  'conversation.idle': 'derived',
+  'conversation.replied': 'event',
+  'conversation.handoff_requested': 'event',
+  'opportunity.created': 'event',
+  'opportunity.stage_changed': 'event',
+  'opportunity.score_changed': 'event',
+  'opportunity.hot_lead_detected': 'derived',
+  'opportunity.missing_fields_detected': 'derived',
+  'appointment.created': 'event',
+  'appointment.confirmation_pending': 'derived',
+  'appointment.no_show': 'event',
+  'appointment.completed': 'event',
+  'quote.sent': 'event',
+  'quote.idle': 'derived',
+  'business_hours.closed': 'derived',
+  'developer.webhook.received': 'webhook',
+  'schedule.daily': 'schedule',
+  'contact.special_date': 'schedule',
+};
+
+/**
  * A ready-made automation recipe. Recipes are a pure in-memory catalog (no DB
  * table) — the same pattern used by Agents presets. The active Business Mode is
  * read from LeadFlow Settings; a recipe declares which modes it targets
@@ -29,9 +79,24 @@ export interface LeadFlowAutomationRecipeCatalogItem {
   description: string;
   category: LeadFlowAutomationCategory;
   tier: LeadFlowAutomationRecipeTier;
+  /**
+   * Version of this recipe's contract. Bumped whenever defaults or the config
+   * schema change in a way an existing instance would notice. Instances record
+   * the version they were provisioned from so a catalog upgrade never silently
+   * rewrites a published configuration.
+   */
+  templateVersion: number;
+  /** Withdrawn recipes stay readable for existing instances but cannot be provisioned. */
+  deprecated: boolean;
+  /**
+   * Platform capabilities this recipe needs in order to execute. Unmet
+   * dependencies block activation — see the dependency registry.
+   */
+  requiredDependencies: LeadFlowAutomationDependency[];
   /** Business Modes this recipe is designed for. `'all'` = every mode. */
   businessModeKeys: LeadFlowBusinessMode[] | 'all';
   trigger: LeadFlowAutomationTrigger;
+  triggerKind: LeadFlowAutomationTriggerKind;
   primaryAction: LeadFlowAutomationAction;
   /** Human explanation of when the recipe fires. */
   whenLabel: string;
@@ -86,6 +151,9 @@ interface RecipeSeed {
   description: string;
   category: LeadFlowAutomationCategory;
   tier: LeadFlowAutomationRecipeTier;
+  templateVersion?: number;
+  deprecated?: boolean;
+  requiredDependencies: LeadFlowAutomationDependency[];
   businessModeKeys?: LeadFlowBusinessMode[] | 'all';
   trigger: LeadFlowAutomationTrigger;
   primaryAction: LeadFlowAutomationAction;
@@ -109,8 +177,12 @@ function buildRecipe(seed: RecipeSeed): LeadFlowAutomationRecipeCatalogItem {
     description: seed.description,
     category: seed.category,
     tier: seed.tier,
+    templateVersion: seed.templateVersion ?? 1,
+    deprecated: seed.deprecated ?? false,
+    requiredDependencies: [...seed.requiredDependencies],
     businessModeKeys: seed.businessModeKeys ?? 'all',
     trigger: seed.trigger,
+    triggerKind: LEADFLOW_AUTOMATION_TRIGGER_KINDS[seed.trigger],
     primaryAction: seed.primaryAction,
     whenLabel: seed.whenLabel,
     limitsLabel: seed.limitsLabel,
@@ -146,6 +218,11 @@ function buildRecipe(seed: RecipeSeed): LeadFlowAutomationRecipeCatalogItem {
 const ESSENTIAL_SEEDS: RecipeSeed[] = [
   {
     key: 'followup_idle_lead',
+    requiredDependencies: [
+      LeadFlowAutomationDependency.EventFanOut,
+      LeadFlowAutomationDependency.SchedulerRuntime,
+      LeadFlowAutomationDependency.MessageGeneration,
+    ],
     name: 'Follow-up de lead sem resposta',
     description:
       'Reengaja automaticamente uma conversa/oportunidade que ficou sem resposta por um período configurado.',
@@ -163,6 +240,11 @@ const ESSENTIAL_SEEDS: RecipeSeed[] = [
   },
   {
     key: 'followup_by_crm_stage',
+    requiredDependencies: [
+      LeadFlowAutomationDependency.EventFanOut,
+      LeadFlowAutomationDependency.SchedulerRuntime,
+      LeadFlowAutomationDependency.MessageGeneration,
+    ],
     name: 'Follow-up por etapa do CRM',
     description:
       'Dispara um follow-up conforme a etapa atual da oportunidade e o tempo parado nela.',
@@ -178,6 +260,11 @@ const ESSENTIAL_SEEDS: RecipeSeed[] = [
   },
   {
     key: 'appointment_reminder',
+    requiredDependencies: [
+      LeadFlowAutomationDependency.AgendaDomain,
+      LeadFlowAutomationDependency.SchedulerRuntime,
+      LeadFlowAutomationDependency.MessageGeneration,
+    ],
     name: 'Lembrete pré-agenda',
     description:
       'Lembra o lead antes de uma reunião, consulta, visita, reserva ou avaliação.',
@@ -198,6 +285,11 @@ const ESSENTIAL_SEEDS: RecipeSeed[] = [
   },
   {
     key: 'appointment_confirmation',
+    requiredDependencies: [
+      LeadFlowAutomationDependency.AgendaDomain,
+      LeadFlowAutomationDependency.SchedulerRuntime,
+      LeadFlowAutomationDependency.MessageGeneration,
+    ],
     name: 'Confirmação de agenda',
     description: 'Pergunta ao lead se ele confirma a presença no compromisso.',
     category: LeadFlowAutomationCategory.Appointments,
@@ -212,6 +304,11 @@ const ESSENTIAL_SEEDS: RecipeSeed[] = [
   },
   {
     key: 'appointment_no_show_recovery',
+    requiredDependencies: [
+      LeadFlowAutomationDependency.AgendaDomain,
+      LeadFlowAutomationDependency.SchedulerRuntime,
+      LeadFlowAutomationDependency.MessageGeneration,
+    ],
     name: 'No-show / não compareceu',
     description:
       'Recupera o lead que não compareceu e tenta reagendar o compromisso.',
@@ -221,12 +318,14 @@ const ESSENTIAL_SEEDS: RecipeSeed[] = [
     trigger: 'appointment.no_show',
     primaryAction: 'schedule_followup',
     whenLabel: 'Quando o lead não comparece ao compromisso.',
-    limitsLabel: 'Limite de tentativas de reagendamento e notificação ao responsável.',
+    limitsLabel:
+      'Limite de tentativas de reagendamento e notificação ao responsável.',
     actionConfig: { maxAttempts: 2, moveToStageRef: null },
     crmPolicy: { moveStageOnComplete: null },
   },
   {
     key: 'hot_lead_notification',
+    requiredDependencies: [LeadFlowAutomationDependency.EventFanOut],
     name: 'Lead quente detectado',
     description:
       'Avisa o responsável quando o score/intenção do lead ultrapassa um limiar.',
@@ -242,6 +341,7 @@ const ESSENTIAL_SEEDS: RecipeSeed[] = [
   },
   {
     key: 'automatic_handoff',
+    requiredDependencies: [LeadFlowAutomationDependency.EventFanOut],
     name: 'Handoff automático',
     description:
       'Transfere a conversa para um humano quando o contexto exige atendimento pessoal.',
@@ -251,13 +351,18 @@ const ESSENTIAL_SEEDS: RecipeSeed[] = [
     primaryAction: 'request_handoff',
     whenLabel:
       'Quando surgem intenções sensíveis, palavras-chave ou pedido explícito de humano.',
-    limitsLabel: 'Respeita horário e responsável definido; registra o motivo do handoff.',
+    limitsLabel:
+      'Respeita horário e responsável definido; registra o motivo do handoff.',
     conditionConfig: { intents: [], keywords: [] },
     actionConfig: { targetUserRef: null },
     extraSafetyRules: ['escalate_sensitive_or_complaint_topics'],
   },
   {
     key: 'outside_business_hours',
+    requiredDependencies: [
+      LeadFlowAutomationDependency.EventFanOut,
+      LeadFlowAutomationDependency.MessageGeneration,
+    ],
     name: 'Fora do horário',
     description:
       'Responde automaticamente quando o lead escreve fora do horário comercial.',
@@ -266,13 +371,19 @@ const ESSENTIAL_SEEDS: RecipeSeed[] = [
     trigger: 'business_hours.closed',
     primaryAction: 'send_message',
     whenLabel: 'Quando chega mensagem fora do horário comercial configurado.',
-    limitsLabel: 'Informa o próximo horário de retorno; pode criar tarefa/follow.',
+    limitsLabel:
+      'Informa o próximo horário de retorno; pode criar tarefa/follow.',
     conditionConfig: { businessHoursOnly: false, stopIfReplied: false },
     actionConfig: { primaryAction: 'send_message' },
     schedulePolicy: { respectBusinessHours: false },
   },
   {
     key: 'missing_fields_request',
+    requiredDependencies: [
+      LeadFlowAutomationDependency.MissingFieldsDetector,
+      LeadFlowAutomationDependency.EventFanOut,
+      LeadFlowAutomationDependency.MessageGeneration,
+    ],
     name: 'Campos faltantes',
     description:
       'Solicita dados mínimos ausentes do contato/oportunidade de forma guiada.',
@@ -280,7 +391,8 @@ const ESSENTIAL_SEEDS: RecipeSeed[] = [
     tier: 'essential',
     trigger: 'opportunity.missing_fields_detected',
     primaryAction: 'request_missing_fields',
-    whenLabel: 'Quando faltam campos obrigatórios definidos pelo Business Mode.',
+    whenLabel:
+      'Quando faltam campos obrigatórios definidos pelo Business Mode.',
     limitsLabel:
       'Limite de perguntas por mensagem; para se o lead demonstrar frustração.',
     conditionConfig: { requiredFields: [] },
@@ -289,6 +401,11 @@ const ESSENTIAL_SEEDS: RecipeSeed[] = [
   },
   {
     key: 'post_service_followup',
+    requiredDependencies: [
+      LeadFlowAutomationDependency.AgendaDomain,
+      LeadFlowAutomationDependency.SchedulerRuntime,
+      LeadFlowAutomationDependency.MessageGeneration,
+    ],
     name: 'Pós-atendimento',
     description:
       'Envia agradecimento e próximo passo após o atendimento/compromisso ser concluído.',
@@ -306,6 +423,11 @@ const ESSENTIAL_SEEDS: RecipeSeed[] = [
 const OPTIONAL_SEEDS: RecipeSeed[] = [
   {
     key: 'quote_recovery',
+    requiredDependencies: [
+      LeadFlowAutomationDependency.QuotesDomain,
+      LeadFlowAutomationDependency.SchedulerRuntime,
+      LeadFlowAutomationDependency.MessageGeneration,
+    ],
     name: 'Recuperação de orçamento',
     description:
       'Retoma leads com orçamento/proposta enviado que ficaram sem resposta.',
@@ -327,6 +449,11 @@ const OPTIONAL_SEEDS: RecipeSeed[] = [
   },
   {
     key: 'cold_lead_reactivation',
+    requiredDependencies: [
+      LeadFlowAutomationDependency.EventFanOut,
+      LeadFlowAutomationDependency.SchedulerRuntime,
+      LeadFlowAutomationDependency.MessageGeneration,
+    ],
     name: 'Reativação de lead frio',
     description: 'Reengaja leads antigos e inativos com uma nova abordagem.',
     category: LeadFlowAutomationCategory.Retention,
@@ -340,6 +467,10 @@ const OPTIONAL_SEEDS: RecipeSeed[] = [
   },
   {
     key: 'daily_opportunity_summary',
+    requiredDependencies: [
+      LeadFlowAutomationDependency.AnalyticsBackend,
+      LeadFlowAutomationDependency.SchedulerRuntime,
+    ],
     name: 'Resumo diário de oportunidades',
     description:
       'Envia ao responsável um resumo das oportunidades do dia (placeholder de resumo).',
@@ -349,11 +480,19 @@ const OPTIONAL_SEEDS: RecipeSeed[] = [
     primaryAction: 'generate_summary_placeholder',
     whenLabel: 'Uma vez por dia, no horário configurado.',
     limitsLabel: 'Somente notificação interna; nenhum contato com o lead.',
-    conditionConfig: { businessHoursOnly: false, stopIfReplied: false, stopIfHandoff: false },
+    conditionConfig: {
+      businessHoursOnly: false,
+      stopIfReplied: false,
+      stopIfHandoff: false,
+    },
     actionConfig: { targetUserRef: null },
   },
   {
     key: 'lead_distribution',
+    requiredDependencies: [
+      LeadFlowAutomationDependency.EventFanOut,
+      LeadFlowAutomationDependency.OwnershipCommand,
+    ],
     name: 'Distribuição de leads',
     description:
       'Distribui novas oportunidades entre responsáveis conforme a regra configurada.',
@@ -369,6 +508,7 @@ const OPTIONAL_SEEDS: RecipeSeed[] = [
   },
   {
     key: 'automatic_tagging',
+    requiredDependencies: [LeadFlowAutomationDependency.EventFanOut],
     name: 'Tag automática',
     description:
       'Aplica tags à oportunidade com base em critérios simples da conversa.',
@@ -378,12 +518,21 @@ const OPTIONAL_SEEDS: RecipeSeed[] = [
     primaryAction: 'add_tag',
     whenLabel: 'Quando uma nova conversa é iniciada.',
     limitsLabel: 'Apenas organização interna; sem envio de mensagem.',
-    conditionConfig: { businessHoursOnly: false, stopIfReplied: false, keywords: [] },
+    conditionConfig: {
+      businessHoursOnly: false,
+      stopIfReplied: false,
+      keywords: [],
+    },
     actionConfig: { primaryAction: 'add_tag', addTags: [] },
     crmPolicy: { addTags: [] },
   },
   {
     key: 'nps_feedback',
+    requiredDependencies: [
+      LeadFlowAutomationDependency.AgendaDomain,
+      LeadFlowAutomationDependency.SchedulerRuntime,
+      LeadFlowAutomationDependency.MessageGeneration,
+    ],
     name: 'Pós-venda / NPS',
     description: 'Pede feedback/NPS após a conclusão do atendimento.',
     category: LeadFlowAutomationCategory.Feedback,
@@ -397,8 +546,13 @@ const OPTIONAL_SEEDS: RecipeSeed[] = [
   },
   {
     key: 'birthday_or_special_date',
+    requiredDependencies: [
+      LeadFlowAutomationDependency.SchedulerRuntime,
+      LeadFlowAutomationDependency.MessageGeneration,
+    ],
     name: 'Aniversário / data especial',
-    description: 'Envia uma mensagem em aniversário ou data especial do contato.',
+    description:
+      'Envia uma mensagem em aniversário ou data especial do contato.',
     category: LeadFlowAutomationCategory.Lifecycle,
     tier: 'optional',
     trigger: 'contact.special_date',
@@ -409,11 +563,21 @@ const OPTIONAL_SEEDS: RecipeSeed[] = [
   },
   {
     key: 'pending_documents',
+    requiredDependencies: [
+      LeadFlowAutomationDependency.MissingFieldsDetector,
+      LeadFlowAutomationDependency.EventFanOut,
+      LeadFlowAutomationDependency.MessageGeneration,
+    ],
     name: 'Documentos pendentes',
     description: 'Solicita documentos pendentes necessários para avançar.',
     category: LeadFlowAutomationCategory.Documents,
     tier: 'optional',
-    businessModeKeys: [LegalAccounting, EducationCourses, RealEstate, Automotive],
+    businessModeKeys: [
+      LegalAccounting,
+      EducationCourses,
+      RealEstate,
+      Automotive,
+    ],
     trigger: 'opportunity.missing_fields_detected',
     primaryAction: 'request_missing_fields',
     whenLabel: 'Quando faltam documentos obrigatórios no processo.',
@@ -423,6 +587,11 @@ const OPTIONAL_SEEDS: RecipeSeed[] = [
   },
   {
     key: 'campaign_followup',
+    requiredDependencies: [
+      LeadFlowAutomationDependency.EventFanOut,
+      LeadFlowAutomationDependency.SchedulerRuntime,
+      LeadFlowAutomationDependency.MessageGeneration,
+    ],
     name: 'Follow-up de campanha',
     description:
       'Acompanha leads originados de uma campanha específica com uma sequência dedicada.',
@@ -437,6 +606,10 @@ const OPTIONAL_SEEDS: RecipeSeed[] = [
   },
   {
     key: 'developer_webhook',
+    requiredDependencies: [
+      LeadFlowAutomationDependency.EventFanOut,
+      LeadFlowAutomationDependency.WebhookDispatch,
+    ],
     name: 'Webhook developer',
     description:
       'Conecta eventos do LeadFlow a um endpoint externo via webhook (somente developer).',
@@ -448,7 +621,11 @@ const OPTIONAL_SEEDS: RecipeSeed[] = [
     limitsLabel:
       'Desativado por padrão; exige permissão de developer e publicação explícita. Nenhum disparo real neste sprint.',
     isDeveloperOnly: true,
-    conditionConfig: { businessHoursOnly: false, stopIfReplied: false, stopIfHandoff: false },
+    conditionConfig: {
+      businessHoursOnly: false,
+      stopIfReplied: false,
+      stopIfHandoff: false,
+    },
     actionConfig: { primaryAction: 'send_webhook' },
     extraSafetyRules: ['mask_secrets', 'no_real_dispatch_in_config_phase'],
   },
@@ -491,5 +668,7 @@ export function isRecipeCompatible(
   if (isCustomBusinessMode(businessModeKey)) {
     return true;
   }
-  return recipe.businessModeKeys.includes(businessModeKey as LeadFlowBusinessMode);
+  return recipe.businessModeKeys.includes(
+    businessModeKey as LeadFlowBusinessMode,
+  );
 }

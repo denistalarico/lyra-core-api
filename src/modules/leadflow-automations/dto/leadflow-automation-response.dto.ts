@@ -1,7 +1,10 @@
+import type { LeadFlowAutomationConfigSchema } from '../catalog/automation-config-schemas.catalog';
 import {
   getRecipeByKey,
   isRecipeCompatible,
+  type LeadFlowAutomationTriggerKind,
 } from '../catalog/automation-recipes.catalog';
+import type { LeadFlowAutomationLifecycle } from '../services/leadflow-automation-lifecycle.service';
 import type { LeadFlowAutomationEntity } from '../entities/leadflow-automation.entity';
 import { LeadFlowAutomationCategory } from '../enums/leadflow-automation-category.enum';
 import { LeadFlowAutomationStatus } from '../enums/leadflow-automation-status.enum';
@@ -44,11 +47,9 @@ export function maskWebhookConfig(
 
   const secret = typeof config.secret === 'string' ? config.secret : null;
   const secretMasked =
-    secret && secret.length > 0
-      ? `••••${secret.slice(-4)}`
-      : null;
+    secret && secret.length > 0 ? `••••${secret.slice(-4)}` : null;
 
-  const retry = (config.retryPolicy ?? {}) as LeadFlowJsonObject;
+  const retry = config.retryPolicy ?? {};
 
   return {
     enabled: config.enabled === true,
@@ -80,12 +81,22 @@ export interface LeadFlowAutomationSummaryResponse {
   status: LeadFlowAutomationStatus;
   businessModeKey: string;
   triggerType: LeadFlowAutomationTrigger | string;
+  triggerKind: LeadFlowAutomationTriggerKind | null;
   primaryAction: string;
   isDeveloperRecipe: boolean;
   compatibleWithBusinessMode: boolean;
+  /** Template version the instance was provisioned from. */
+  templateVersion: number;
+  /** True when the catalog has moved past the instance's template version. */
+  templateOutdated: boolean;
   readiness: LeadFlowAutomationReadiness;
   publishedVersionId: string | null;
   updatedAt: string;
+  /**
+   * Effective state. Attached by the service, which owns the business-mode and
+   * dependency context the mappers do not have.
+   */
+  lifecycle?: LeadFlowAutomationLifecycle;
 }
 
 export interface LeadFlowAutomationCapabilities {
@@ -93,8 +104,7 @@ export interface LeadFlowAutomationCapabilities {
   developer: boolean;
 }
 
-export interface LeadFlowAutomationDetailResponse
-  extends LeadFlowAutomationSummaryResponse {
+export interface LeadFlowAutomationDetailResponse extends LeadFlowAutomationSummaryResponse {
   contextType: string;
   agencyClientId: string | null;
   settingsId: string | null;
@@ -112,12 +122,20 @@ export interface LeadFlowAutomationDetailResponse
   safetyRules: string[];
   metadata: LeadFlowJsonObject;
   createdAt: string;
+  /**
+   * Closed schema of the fields this automation accepts, including which
+   * surface (essential/advanced/developer) each belongs to. Null when the
+   * recipe no longer exists in the catalog.
+   */
+  configSchema?: LeadFlowAutomationConfigSchema | null;
 }
 
 export interface LeadFlowAutomationListResponse {
   items: LeadFlowAutomationSummaryResponse[];
   businessModeKey: string;
   isCustomBusinessMode: boolean;
+  /** False while the platform has no execution engine at all. */
+  runtimeAvailable: boolean;
 }
 
 function readStringArray(value: unknown): string[] {
@@ -131,6 +149,7 @@ export function mapAutomationSummary(
   automation: LeadFlowAutomationEntity,
 ): LeadFlowAutomationSummaryResponse {
   const recipe = getRecipeByKey(automation.recipeKey);
+  const templateVersion = automation.templateVersion ?? 1;
 
   return {
     id: automation.id,
@@ -145,6 +164,7 @@ export function mapAutomationSummary(
       (automation.triggerConfig?.type as LeadFlowAutomationTrigger) ??
       recipe?.trigger ??
       'conversation.created',
+    triggerKind: recipe?.triggerKind ?? null,
     primaryAction:
       (automation.actionConfig?.primaryAction as string) ??
       recipe?.primaryAction ??
@@ -155,6 +175,10 @@ export function mapAutomationSummary(
     compatibleWithBusinessMode: recipe
       ? isRecipeCompatible(recipe, automation.businessModeKey)
       : true,
+    templateVersion,
+    // Surfaced, never auto-applied: upgrading a published configuration is an
+    // explicit operator decision, not a side effect of the catalog moving on.
+    templateOutdated: recipe ? recipe.templateVersion > templateVersion : false,
     readiness: automation.readiness ?? {},
     publishedVersionId: automation.publishedVersionId,
     updatedAt: automation.updatedAt.toISOString(),
@@ -165,7 +189,7 @@ export function mapAutomationDetail(
   automation: LeadFlowAutomationEntity,
 ): LeadFlowAutomationDetailResponse {
   const recipe = getRecipeByKey(automation.recipeKey);
-  const metadata = (automation.metadata ?? {}) as LeadFlowJsonObject;
+  const metadata = automation.metadata ?? {};
 
   return {
     ...mapAutomationSummary(automation),

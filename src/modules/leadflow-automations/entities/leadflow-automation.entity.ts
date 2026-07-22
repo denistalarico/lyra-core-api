@@ -71,6 +71,14 @@ export class LeadFlowAutomationEntity {
   @Column({ name: 'recipe_key', type: 'varchar', length: 120 })
   recipeKey!: string;
 
+  /**
+   * Recipe contract version this instance was provisioned from. Lets the
+   * catalog evolve without silently rewriting a published configuration — a
+   * newer catalog version is surfaced to the operator, never auto-applied.
+   */
+  @Column({ name: 'template_version', type: 'integer', default: 1 })
+  templateVersion!: number;
+
   @Column({ type: 'varchar', length: 160 })
   name!: string;
 

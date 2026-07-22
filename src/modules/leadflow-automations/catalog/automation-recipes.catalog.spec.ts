@@ -1,8 +1,10 @@
 import { LeadFlowBusinessMode } from '../../leadflow-settings/enums/leadflow-business-mode.enum';
+import { LeadFlowAutomationDependency } from '../enums/leadflow-automation-dependency.enum';
 import {
   getRecipeByKey,
   isRecipeCompatible,
   LEADFLOW_AUTOMATION_RECIPES,
+  LEADFLOW_AUTOMATION_TRIGGER_KINDS,
   listRecipes,
 } from './automation-recipes.catalog';
 
@@ -84,5 +86,74 @@ describe('automation recipes catalog', () => {
     expect(
       isRecipeCompatible(reminder, LeadFlowBusinessMode.EcommerceLight),
     ).toBe(false);
+  });
+
+  describe('versioning and dependencies', () => {
+    it('versions every recipe and ships none deprecated', () => {
+      for (const recipe of LEADFLOW_AUTOMATION_RECIPES) {
+        expect(recipe.templateVersion).toBeGreaterThanOrEqual(1);
+        expect(recipe.deprecated).toBe(false);
+      }
+    });
+
+    it('declares at least one dependency for every recipe', () => {
+      // A recipe with no dependencies would claim it can run today, which is
+      // false for every recipe in the catalog.
+      for (const recipe of LEADFLOW_AUTOMATION_RECIPES) {
+        expect(recipe.requiredDependencies.length).toBeGreaterThan(0);
+      }
+    });
+
+    it('routes agenda recipes to the Agenda domain, not the legacy module', () => {
+      for (const key of [
+        'appointment_reminder',
+        'appointment_confirmation',
+        'appointment_no_show_recovery',
+      ]) {
+        expect(getRecipeByKey(key)!.requiredDependencies).toContain(
+          LeadFlowAutomationDependency.AgendaDomain,
+        );
+      }
+    });
+
+    it('routes lead distribution through the canonical ownership command', () => {
+      expect(
+        getRecipeByKey('lead_distribution')!.requiredDependencies,
+      ).toContain(LeadFlowAutomationDependency.OwnershipCommand);
+    });
+
+    it('blocks the daily summary on the Analytics backend', () => {
+      expect(
+        getRecipeByKey('daily_opportunity_summary')!.requiredDependencies,
+      ).toContain(LeadFlowAutomationDependency.AnalyticsBackend);
+    });
+  });
+
+  describe('trigger classification', () => {
+    it('classifies every trigger key', () => {
+      for (const recipe of LEADFLOW_AUTOMATION_RECIPES) {
+        expect(recipe.triggerKind).toBeDefined();
+        expect(LEADFLOW_AUTOMATION_TRIGGER_KINDS[recipe.trigger]).toBe(
+          recipe.triggerKind,
+        );
+      }
+    });
+
+    it('treats the out-of-hours trigger as a derived window, not an event', () => {
+      // Audit finding: `business_hours.closed` reads like a domain event but is
+      // a condition evaluated against an incoming message.
+      expect(getRecipeByKey('outside_business_hours')!.triggerKind).toBe(
+        'derived',
+      );
+    });
+
+    it('treats clock-driven recipes as schedules', () => {
+      expect(getRecipeByKey('daily_opportunity_summary')!.triggerKind).toBe(
+        'schedule',
+      );
+      expect(getRecipeByKey('birthday_or_special_date')!.triggerKind).toBe(
+        'schedule',
+      );
+    });
   });
 });
