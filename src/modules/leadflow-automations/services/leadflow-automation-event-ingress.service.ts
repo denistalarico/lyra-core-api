@@ -9,6 +9,7 @@ import {
 } from '../../leadflow-events/catalog/leadflow-event.catalog';
 import { LeadFlowEventDeliveryEntity } from '../../leadflow-events/entities';
 import { LeadFlowEventStatus } from '../../leadflow-events/enums/leadflow-event-status.enum';
+import { LeadFlowAutomationShadowEvaluatorService } from './leadflow-automation-shadow-evaluator.service';
 
 export const LEADFLOW_AUTOMATIONS_EVENT_CONSUMER =
   'leadflow.automations' as const;
@@ -20,9 +21,9 @@ type IngressDecision =
 /**
  * Durable ingress boundary between canonical domain events and Automations.
  *
- * Phase 9 deliberately stops at delivery acknowledgement. It validates that
- * the event belongs to the active catalog and has a mapped event trigger, but
- * it never evaluates a recipe or asks an executor for an effect.
+ * Phase 10 acknowledges a delivery only after every matching published
+ * automation has a durable shadow run. The evaluation never asks an executor
+ * for an effect; it only records what the published configuration would do.
  */
 @Injectable()
 export class LeadFlowAutomationEventIngressService implements OnApplicationShutdown {
@@ -40,10 +41,12 @@ export class LeadFlowAutomationEventIngressService implements OnApplicationShutd
     deadLettered: 0,
     pruned: 0,
     lastLagMs: 0,
+    shadowEvaluated: 0,
   };
 
   constructor(
     @InjectDataSource('agency') private readonly dataSource: DataSource,
+    private readonly shadowEvaluator: LeadFlowAutomationShadowEvaluatorService,
   ) {}
 
   onApplicationShutdown(): void {
@@ -138,6 +141,11 @@ export class LeadFlowAutomationEventIngressService implements OnApplicationShutd
         return;
       }
 
+      // Persist every matching verdict before acknowledging the delivery. If
+      // anything fails, the delivery returns to pending; replay is safe because
+      // one shadow run is idempotent on event + automation and pins its version.
+      const summaries = await this.shadowEvaluator.evaluateDelivery(delivery);
+
       await repository.update(
         { id: delivery.id, status: 'processing', lockedBy: this.workerId },
         {
@@ -155,6 +163,7 @@ export class LeadFlowAutomationEventIngressService implements OnApplicationShutd
         0,
         now.getTime() - delivery.occurredAt.getTime(),
       );
+      this.metrics.shadowEvaluated += summaries.length;
     } catch (error) {
       const now = new Date();
       const dead = delivery.attempts >= 8;

@@ -20,14 +20,17 @@ export interface LeadFlowAutomationAttemptResponse {
 export interface LeadFlowAutomationRunResponse {
   id: string;
   automationId: string;
+  /** Exact immutable configuration evaluated by this run. */
+  automationVersionId: string | null;
   recipeKey: string;
   templateVersion: number;
-  /** `dry_run` or `live` — the field that keeps simulation out of "executions". */
+  /** `dry_run`, `shadow`, or `live`; only `live` may carry out effects. */
   mode: string;
   status: string;
   skipReason: string | null;
   triggerType: string;
   triggerKind: string;
+  sourceEventId: string | null;
   sourceEventName: string | null;
   correlationId: string | null;
   inputSnapshot: LeadFlowJsonObject;
@@ -50,6 +53,8 @@ export interface LeadFlowAutomationRunListResponse {
   /** Count of runs that actually executed. Zero until an engine exists. */
   liveRunCount: number;
   dryRunCount: number;
+  /** Real triggers evaluated without executing any effect. */
+  shadowRunCount: number;
   items: LeadFlowAutomationRunResponse[];
 }
 
@@ -63,6 +68,7 @@ export function mapRun(
   return {
     id: run.id,
     automationId: run.automationId,
+    automationVersionId: run.automationVersionId,
     recipeKey: run.recipeKey,
     templateVersion: run.templateVersion,
     mode: run.mode,
@@ -70,6 +76,7 @@ export function mapRun(
     skipReason: run.skipReason,
     triggerType: run.triggerType,
     triggerKind: run.triggerKind,
+    sourceEventId: run.sourceEventId,
     sourceEventName: run.sourceEventName,
     correlationId: run.correlationId,
     inputSnapshot: run.inputSnapshot ?? {},

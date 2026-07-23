@@ -4,12 +4,20 @@ import {
   type LeadFlowAutomationRecipeCatalogItem,
 } from '../catalog/automation-recipes.catalog';
 import type { LeadFlowAutomationEntity } from '../entities/leadflow-automation.entity';
-import { LeadFlowAutomationRunMode } from '../enums/leadflow-automation-run.enums';
+import type { LeadFlowAutomationVersionEntity } from '../entities/leadflow-automation-version.entity';
+import {
+  LeadFlowAutomationRunMode,
+  LeadFlowAutomationRunStatus,
+  LeadFlowAutomationSkipReason,
+} from '../enums/leadflow-automation-run.enums';
+import { LeadFlowAutomationStatus } from '../enums/leadflow-automation-status.enum';
 import { LeadFlowAutomationEvaluationService } from './leadflow-automation-evaluation.service';
-import { LeadFlowAutomationRecipeService } from './leadflow-automation-recipe.service';
 import type { LeadFlowAutomationRunService } from './leadflow-automation-run.service';
 import { LeadFlowAutomationShadowEvaluatorService } from './leadflow-automation-shadow-evaluator.service';
-import type { LeadFlowAutomationTriggerMatcherService } from './leadflow-automation-trigger-matcher.service';
+import type {
+  LeadFlowAutomationTriggerMatch,
+  LeadFlowAutomationTriggerMatcherService,
+} from './leadflow-automation-trigger-matcher.service';
 
 const idleLead = getRecipeByKey(
   'followup_idle_lead',
@@ -23,7 +31,8 @@ function buildAutomation(): LeadFlowAutomationEntity {
     recipeKey: idleLead.key,
     businessModeKey: 'agency_services',
     templateVersion: 1,
-    publishedVersionId: null,
+    publishedVersionId: '10000000-0000-4000-8000-000000000001',
+    status: LeadFlowAutomationStatus.Active,
     triggerConfig: { ...idleLead.defaultTriggerConfig },
     conditionConfig: { ...idleLead.defaultConditionConfig },
     actionConfig: { ...idleLead.defaultActionConfig },
@@ -31,6 +40,23 @@ function buildAutomation(): LeadFlowAutomationEntity {
     crmPolicy: { ...idleLead.defaultCrmPolicy },
     schedulePolicy: { ...idleLead.defaultSchedulePolicy },
   } as LeadFlowAutomationEntity;
+}
+
+function buildMatch(
+  overrides: Partial<LeadFlowAutomationEntity> = {},
+): LeadFlowAutomationTriggerMatch {
+  const source = Object.assign(buildAutomation(), overrides);
+  const automation = Object.assign(buildAutomation(), overrides);
+  return {
+    source,
+    automation,
+    version: {
+      id: '10000000-0000-4000-8000-000000000001',
+      automationId: automation.id,
+      tenantId: automation.tenantId,
+      version: 1,
+    } as LeadFlowAutomationVersionEntity,
+  };
 }
 
 function buildDelivery(
@@ -58,11 +84,11 @@ describe('LeadFlowAutomationShadowEvaluatorService', () => {
   /** Reads the `extras` argument of the recorded call, typed. */
   const extrasOf = (mock: jest.Mock): ShadowExtras => {
     const args = mock.mock.calls[0] as unknown[];
-    return args[3] as ShadowExtras;
+    return args[4] as ShadowExtras;
   };
 
   function build(
-    matches: LeadFlowAutomationEntity[],
+    matches: LeadFlowAutomationTriggerMatch[],
     recordShadowRun = jest.fn().mockResolvedValue({
       run: { id: 'run-1' },
       attempts: [],
@@ -78,7 +104,6 @@ describe('LeadFlowAutomationShadowEvaluatorService', () => {
 
     const service = new LeadFlowAutomationShadowEvaluatorService(
       matcher,
-      new LeadFlowAutomationRecipeService(),
       new LeadFlowAutomationEvaluationService(),
       runService,
     );
@@ -96,18 +121,27 @@ describe('LeadFlowAutomationShadowEvaluatorService', () => {
   });
 
   it('records a shadow run for each matching automation', async () => {
-    const { service, recordShadowRun } = build([buildAutomation()]);
+    const match = buildMatch();
+    const { service, recordShadowRun } = build([match]);
 
     const summaries = await service.evaluateDelivery(buildDelivery());
 
     expect(summaries).toHaveLength(1);
     expect(summaries[0].runId).toBe('run-1');
+    expect(summaries[0].automationVersionId).toBe(match.version.id);
     expect(recordShadowRun).toHaveBeenCalledTimes(1);
+    expect(recordShadowRun).toHaveBeenCalledWith(
+      match.automation,
+      match.version,
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+    );
   });
 
   it('reports that no executor could carry the planned action', async () => {
     // The whole point of shadow mode: the decision is real, the effect is not.
-    const { service } = build([buildAutomation()]);
+    const { service } = build([buildMatch()]);
 
     const summaries = await service.evaluateDelivery(buildDelivery());
 
@@ -133,7 +167,7 @@ describe('LeadFlowAutomationShadowEvaluatorService', () => {
 
   describe('signal derivation', () => {
     it('marks a handoff event as observed evidence of a handoff', async () => {
-      const { service, recordShadowRun } = build([buildAutomation()]);
+      const { service, recordShadowRun } = build([buildMatch()]);
 
       await service.evaluateDelivery(
         buildDelivery({
@@ -146,7 +180,7 @@ describe('LeadFlowAutomationShadowEvaluatorService', () => {
     });
 
     it('marks an inbound message as observed evidence the lead replied', async () => {
-      const { service, recordShadowRun } = build([buildAutomation()]);
+      const { service, recordShadowRun } = build([buildMatch()]);
 
       await service.evaluateDelivery(
         buildDelivery({
@@ -159,7 +193,7 @@ describe('LeadFlowAutomationShadowEvaluatorService', () => {
     });
 
     it('defaults signals the payload cannot supply', async () => {
-      const { service, recordShadowRun } = build([buildAutomation()]);
+      const { service, recordShadowRun } = build([buildMatch()]);
 
       await service.evaluateDelivery(buildDelivery());
 
@@ -169,7 +203,7 @@ describe('LeadFlowAutomationShadowEvaluatorService', () => {
     });
 
     it('takes a numeric score from the payload when present', async () => {
-      const { service, recordShadowRun } = build([buildAutomation()]);
+      const { service, recordShadowRun } = build([buildMatch()]);
 
       await service.evaluateDelivery(buildDelivery({ payload: { score: 82 } }));
 
@@ -178,13 +212,34 @@ describe('LeadFlowAutomationShadowEvaluatorService', () => {
     });
   });
 
-  it('never lets an evaluation failure corrupt delivery handling', async () => {
+  it('propagates persistence failure so ingress can retry the delivery', async () => {
     const failing = jest.fn().mockRejectedValue(new Error('db down'));
-    const { service } = build([buildAutomation()], failing);
+    const { service } = build([buildMatch()], failing);
 
-    await expect(service.evaluateDelivery(buildDelivery())).resolves.toEqual(
-      [],
+    await expect(service.evaluateDelivery(buildDelivery())).rejects.toThrow(
+      'db down',
     );
+  });
+
+  it('records a paused published automation as not active', async () => {
+    const { service, recordShadowRun } = build([
+      buildMatch({ status: LeadFlowAutomationStatus.Paused }),
+    ]);
+
+    await service.evaluateDelivery(buildDelivery());
+
+    const evaluation = recordShadowRun.mock.calls[0][3] as {
+      status: LeadFlowAutomationRunStatus;
+      skipReason: LeadFlowAutomationSkipReason | null;
+      wouldAct: boolean;
+      plannedActions: string[];
+    };
+    expect(evaluation).toMatchObject({
+      status: LeadFlowAutomationRunStatus.Skipped,
+      skipReason: LeadFlowAutomationSkipReason.NotActive,
+      wouldAct: false,
+      plannedActions: [],
+    });
   });
 
   it('uses the shadow mode, never live', () => {

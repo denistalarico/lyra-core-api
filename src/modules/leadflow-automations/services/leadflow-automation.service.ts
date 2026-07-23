@@ -382,7 +382,9 @@ export class LeadFlowAutomationService {
           run.skipReason ??
           (run.mode === LeadFlowAutomationRunMode.DryRun
             ? 'Simulação concluída.'
-            : 'Execução concluída.'),
+            : run.mode === LeadFlowAutomationRunMode.Shadow
+              ? 'Gatilho real avaliado sem executar efeitos.'
+              : 'Execução concluída.'),
         createdAt: run.createdAt.toISOString(),
       })),
     };
@@ -403,6 +405,9 @@ export class LeadFlowAutomationService {
       ).length,
       dryRunCount: runs.filter(
         (run) => run.mode === LeadFlowAutomationRunMode.DryRun,
+      ).length,
+      shadowRunCount: runs.filter(
+        (run) => run.mode === LeadFlowAutomationRunMode.Shadow,
       ).length,
       items: runs.map(mapRun),
     };
@@ -717,8 +722,9 @@ export class LeadFlowAutomationService {
   ): Promise<ActiveContext> {
     const workspaceId = this.requireWorkspaceId(ctx);
     const managed = ctx.managedContext;
-    const isClientMode =
-      managed?.operatingMode === 'client' && Boolean(managed.clientId);
+    const managedClientId =
+      managed?.operatingMode === 'client' ? managed.clientId : null;
+    const isClientMode = Boolean(managedClientId);
 
     const settings = isClientMode
       ? await this.settingsRepository.findOne({
@@ -726,7 +732,7 @@ export class LeadFlowAutomationService {
             tenantId: ctx.tenantId,
             workspaceId,
             contextType: LeadFlowSettingsContextType.Client,
-            agencyClientId: managed!.clientId as string,
+            agencyClientId: managedClientId,
           },
         })
       : await this.settingsRepository.findOne({

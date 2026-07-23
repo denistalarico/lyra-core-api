@@ -55,6 +55,16 @@ export interface LeadFlowAutomationEvaluation {
 }
 
 /**
+ * Catalog data actually consulted by the deterministic evaluator. Keeping this
+ * narrow lets a published runtime reconstruct the decision inputs from its
+ * immutable snapshot instead of silently inheriting a newer catalog revision.
+ */
+export type LeadFlowAutomationEvaluationRecipe = Pick<
+  LeadFlowAutomationRecipeCatalogItem,
+  'businessModeKeys' | 'primaryAction'
+>;
+
+/**
  * A plausible "the trigger just fired" situation.
  *
  * Chosen so a correctly configured automation reports "would act" by default —
@@ -80,7 +90,7 @@ const DEFAULT_CONTEXT = {
 export class LeadFlowAutomationEvaluationService {
   evaluate(
     automation: LeadFlowAutomationEntity,
-    recipe: LeadFlowAutomationRecipeCatalogItem | undefined,
+    recipe: LeadFlowAutomationEvaluationRecipe | undefined,
     input: LeadFlowAutomationEvaluationContext = {},
   ): LeadFlowAutomationEvaluation {
     const conditions = automation.conditionConfig ?? {};
@@ -284,7 +294,7 @@ export class LeadFlowAutomationEvaluationService {
   /** Actions the automation would request, in order. */
   private plannedActions(
     automation: LeadFlowAutomationEntity,
-    recipe: LeadFlowAutomationRecipeCatalogItem,
+    recipe: LeadFlowAutomationEvaluationRecipe,
   ): string[] {
     const actions = automation.actionConfig ?? {};
     const crmPolicy = automation.crmPolicy ?? {};

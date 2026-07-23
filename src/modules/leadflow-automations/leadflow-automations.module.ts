@@ -18,6 +18,8 @@ import { LeadFlowAutomationEventIngressService } from './services/leadflow-autom
 import { LeadFlowAutomationLifecycleService } from './services/leadflow-automation-lifecycle.service';
 import { LeadFlowAutomationRecipeService } from './services/leadflow-automation-recipe.service';
 import { LeadFlowAutomationRunService } from './services/leadflow-automation-run.service';
+import { LeadFlowAutomationShadowEvaluatorService } from './services/leadflow-automation-shadow-evaluator.service';
+import { LeadFlowAutomationTriggerMatcherService } from './services/leadflow-automation-trigger-matcher.service';
 import { LeadFlowAutomationRuntimeConfigService } from './services/leadflow-automation-runtime-config.service';
 import { LeadFlowAutomationService } from './services/leadflow-automation.service';
 
@@ -47,6 +49,8 @@ import { LeadFlowAutomationService } from './services/leadflow-automation.servic
     LeadFlowAutomationEvaluationService,
     LeadFlowAutomationEventIngressService,
     LeadFlowAutomationRunService,
+    LeadFlowAutomationShadowEvaluatorService,
+    LeadFlowAutomationTriggerMatcherService,
     LeadFlowAutomationCrmActionService,
   ],
   exports: [

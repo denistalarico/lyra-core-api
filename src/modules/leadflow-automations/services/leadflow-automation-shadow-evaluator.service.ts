@@ -1,13 +1,22 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import type { LeadFlowEventDeliveryEntity } from '../../leadflow-events/entities/leadflow-event-delivery.entity';
+import type { LeadFlowAutomationTrigger } from '../types/leadflow-automation.types';
 import { unavailableExecutors } from '../executors';
-import { LeadFlowAutomationRecipeService } from './leadflow-automation-recipe.service';
+import {
+  LeadFlowAutomationRunStatus,
+  LeadFlowAutomationSkipReason,
+} from '../enums/leadflow-automation-run.enums';
+import { LeadFlowAutomationStatus } from '../enums/leadflow-automation-status.enum';
 import {
   LeadFlowAutomationEvaluationService,
   type LeadFlowAutomationEvaluationContext,
+  type LeadFlowAutomationEvaluationRecipe,
 } from './leadflow-automation-evaluation.service';
 import { LeadFlowAutomationRunService } from './leadflow-automation-run.service';
-import { LeadFlowAutomationTriggerMatcherService } from './leadflow-automation-trigger-matcher.service';
+import {
+  type LeadFlowAutomationTriggerMatch,
+  LeadFlowAutomationTriggerMatcherService,
+} from './leadflow-automation-trigger-matcher.service';
 
 /**
  * Signals a condition may depend on, and where each one came from.
@@ -21,6 +30,7 @@ export type SignalOrigin = 'from_event' | 'defaulted';
 
 export interface ShadowEvaluationSummary {
   automationId: string;
+  automationVersionId: string;
   runId: string;
   wouldAct: boolean;
   blockedByExecutor: boolean;
@@ -38,13 +48,8 @@ export interface ShadowEvaluationSummary {
  */
 @Injectable()
 export class LeadFlowAutomationShadowEvaluatorService {
-  private readonly logger = new Logger(
-    LeadFlowAutomationShadowEvaluatorService.name,
-  );
-
   constructor(
     private readonly matcher: LeadFlowAutomationTriggerMatcherService,
-    private readonly recipeService: LeadFlowAutomationRecipeService,
     private readonly evaluationService: LeadFlowAutomationEvaluationService,
     private readonly runService: LeadFlowAutomationRunService,
   ) {}
@@ -52,62 +57,96 @@ export class LeadFlowAutomationShadowEvaluatorService {
   /**
    * Evaluates every automation matching a delivered event.
    *
-   * Never throws: shadow evaluation is observability, so a failure here must not
-   * fail the delivery that produced it. The ingress owns delivery state.
+   * Throws on persistence failure. Ingress acknowledges the delivery only after
+   * all matching runs exist; a retry is safe because each run is idempotent on
+   * source event + automation; the first run pins the published version.
    */
   async evaluateDelivery(
     delivery: LeadFlowEventDeliveryEntity,
   ): Promise<ShadowEvaluationSummary[]> {
-    try {
-      const automations = await this.matcher.findMatching(
-        delivery.tenantId,
-        delivery.workspaceId,
-        delivery.eventName,
+    const matches = await this.matcher.findMatching(
+      delivery.tenantId,
+      delivery.workspaceId,
+      delivery.eventName,
+    );
+    if (matches.length === 0) return [];
+
+    const { context, origins } = this.deriveContext(delivery);
+    const summaries: ShadowEvaluationSummary[] = [];
+
+    for (const match of matches) {
+      const { automation, source, version } = match;
+      const recipe = this.publishedRecipe(automation);
+      const evaluated = this.evaluationService.evaluate(
+        automation,
+        recipe,
+        context,
       );
-      if (automations.length === 0) return [];
+      const evaluation =
+        source.status === LeadFlowAutomationStatus.Active
+          ? evaluated
+          : {
+              ...evaluated,
+              wouldAct: false,
+              status: LeadFlowAutomationRunStatus.Skipped,
+              skipReason: LeadFlowAutomationSkipReason.NotActive,
+              plannedActions: [],
+            };
 
-      const { context, origins } = this.deriveContext(delivery);
-      const summaries: ShadowEvaluationSummary[] = [];
+      // Even a passing evaluation cannot act until every planned action has a
+      // productive adapter. Shadow records that fact and requests no effect.
+      const blocked = unavailableExecutors(evaluation.plannedActions);
 
-      for (const automation of automations) {
-        const recipe = this.recipeService.getRecipe(automation.recipeKey);
-        const evaluation = this.evaluationService.evaluate(
-          automation,
-          recipe,
-          context,
-        );
-
-        // Even a passing evaluation cannot act: no productive executor exists.
-        const blocked = unavailableExecutors(evaluation.plannedActions);
-
-        const { run } = await this.runService.recordShadowRun(
-          automation,
-          recipe,
-          evaluation,
-          {
-            delivery,
-            signalOrigins: origins,
-            unavailableActions: blocked,
-          },
-        );
-
-        summaries.push({
-          automationId: automation.id,
-          runId: run.id,
-          wouldAct: evaluation.wouldAct,
-          blockedByExecutor: blocked.length > 0,
-        });
-      }
-
-      return summaries;
-    } catch (error) {
-      this.logger.warn(
-        `Shadow evaluation failed for delivery ${delivery.id}: ${
-          error instanceof Error ? error.name : 'unknown_error'
-        }`,
+      const { run } = await this.runService.recordShadowRun(
+        automation,
+        version,
+        recipe,
+        evaluation,
+        {
+          delivery,
+          signalOrigins: origins,
+          unavailableActions: blocked,
+        },
       );
-      return [];
+
+      summaries.push({
+        automationId: automation.id,
+        automationVersionId: version.id,
+        runId: run.id,
+        wouldAct: evaluation.wouldAct,
+        blockedByExecutor: blocked.length > 0,
+      });
     }
+
+    return summaries;
+  }
+
+  /**
+   * Reconstructs the small recipe surface used by evaluation from the
+   * published snapshot. Catalog defaults may evolve after publication and must
+   * not rewrite the meaning of an already published automation.
+   */
+  private publishedRecipe(
+    automation: LeadFlowAutomationTriggerMatch['automation'],
+  ):
+    | (LeadFlowAutomationEvaluationRecipe & {
+        trigger: LeadFlowAutomationTrigger;
+        triggerKind: 'event';
+      })
+    | undefined {
+    const trigger = automation.triggerConfig?.type;
+    const primaryAction = automation.actionConfig?.primaryAction;
+    if (typeof trigger !== 'string' || typeof primaryAction !== 'string') {
+      return undefined;
+    }
+    return {
+      // Compatibility was resolved at publish time and the snapshot pins the
+      // selected mode. A later catalog change cannot invalidate that verdict.
+      businessModeKeys: 'all',
+      primaryAction,
+      trigger,
+      triggerKind: 'event',
+    };
   }
 
   /**
