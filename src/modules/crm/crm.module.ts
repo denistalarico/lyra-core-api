@@ -24,10 +24,12 @@ import { LEAD_SCORE_POLICY_PROVIDER } from './lead-score/lead-score.types';
 import { StaticLeadScorePolicyProvider } from './lead-score/policy/static-lead-score-policy.provider';
 import { LeadScoreBackfillService } from './lead-score/services/lead-score-backfill.service';
 import { LeadScoreEngineService } from './lead-score/services/lead-score-engine.service';
+import { LeadScoreEventIngressService } from './lead-score/services/lead-score-event-ingress.service';
 import { LeadScoreFeatureLoaderService } from './lead-score/services/lead-score-feature-loader.service';
 import { LeadScoreQueryService } from './lead-score/services/lead-score-query.service';
 import { InboxMessageEntity } from '../inbox/entities/inbox-message.entity';
 import { LeadFlowBusinessModeTemplateEntity } from '../leadflow-settings/entities';
+import { LeadFlowEventDeliveryEntity } from '../leadflow-events/entities';
 
 @Module({
   imports: [
@@ -49,6 +51,7 @@ import { LeadFlowBusinessModeTemplateEntity } from '../leadflow-settings/entitie
         InboxMessageEntity,
         CrmLeadScoreStateEntity,
         CrmLeadScoreSnapshotEntity,
+        LeadFlowEventDeliveryEntity,
       ],
       'agency',
     ),
@@ -61,6 +64,7 @@ import { LeadFlowBusinessModeTemplateEntity } from '../leadflow-settings/entitie
     CrmOpportunityFieldCatalogService,
     LeadScoreFeatureLoaderService,
     LeadScoreEngineService,
+    LeadScoreEventIngressService,
     LeadScoreQueryService,
     LeadScoreBackfillService,
     // Behind a token so an Analytics-published provider can replace the static

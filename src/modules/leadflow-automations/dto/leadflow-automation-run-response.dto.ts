@@ -17,6 +17,12 @@ export interface LeadFlowAutomationAttemptResponse {
   finishedAt: string | null;
 }
 
+export interface LeadFlowAutomationContextCostSummary {
+  queryCount: number;
+  durationMs: number;
+  sources: Array<{ source: string; queryCount: number; durationMs: number }>;
+}
+
 export interface LeadFlowAutomationRunResponse {
   id: string;
   automationId: string;
@@ -35,6 +41,19 @@ export interface LeadFlowAutomationRunResponse {
   correlationId: string | null;
   inputSnapshot: LeadFlowJsonObject;
   result: LeadFlowJsonObject;
+  /**
+   * Whether the verdict rested on observed state or partly on assumptions.
+   * Promoted out of the snapshot so a reader does not have to trust a nested
+   * blob to know how sound the decision was.
+   */
+  verdictBasis: string | null;
+  /** How many required signals could not be established for this run. */
+  contextGapCount: number;
+  /**
+   * Cost of assembling the context this verdict used. First-class so the
+   * coupling introduced by enrichment stays measurable across runs.
+   */
+  contextCost: LeadFlowAutomationContextCostSummary | null;
   errorCode: string | null;
   errorMessage: string | null;
   attemptCount: number;
@@ -62,6 +81,49 @@ function iso(value: Date | null): string | null {
   return value ? value.toISOString() : null;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** The context snapshot embedded in a shadow run's input snapshot, if any. */
+function contextSnapshotOf(
+  input: LeadFlowJsonObject | null,
+): Record<string, unknown> | null {
+  const snapshot = input?.contextSnapshot;
+  return isRecord(snapshot) ? snapshot : null;
+}
+
+function readVerdictBasis(input: LeadFlowJsonObject | null): string | null {
+  const basis = input?.verdictBasis;
+  return typeof basis === 'string' ? basis : null;
+}
+
+function readContextGapCount(input: LeadFlowJsonObject | null): number {
+  const snapshot = contextSnapshotOf(input);
+  const gaps = snapshot?.gaps;
+  return Array.isArray(gaps) ? gaps.length : 0;
+}
+
+function readContextCost(
+  input: LeadFlowJsonObject | null,
+): LeadFlowAutomationContextCostSummary | null {
+  const snapshot = contextSnapshotOf(input);
+  const cost = snapshot?.cost;
+  if (!isRecord(cost)) return null;
+  const sources = Array.isArray(cost.sources)
+    ? cost.sources.filter(isRecord).map((entry) => ({
+        source: typeof entry.source === 'string' ? entry.source : '',
+        queryCount: Number(entry.queryCount ?? 0),
+        durationMs: Number(entry.durationMs ?? 0),
+      }))
+    : [];
+  return {
+    queryCount: Number(cost.queryCount ?? 0),
+    durationMs: Number(cost.durationMs ?? 0),
+    sources,
+  };
+}
+
 export function mapRun(
   run: LeadFlowAutomationRunEntity,
 ): LeadFlowAutomationRunResponse {
@@ -81,6 +143,9 @@ export function mapRun(
     correlationId: run.correlationId,
     inputSnapshot: run.inputSnapshot ?? {},
     result: run.result ?? {},
+    verdictBasis: readVerdictBasis(run.inputSnapshot),
+    contextGapCount: readContextGapCount(run.inputSnapshot),
+    contextCost: readContextCost(run.inputSnapshot),
     errorCode: run.errorCode,
     errorMessage: run.errorMessage,
     attemptCount: run.attemptCount,
