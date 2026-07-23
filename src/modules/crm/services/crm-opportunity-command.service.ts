@@ -15,6 +15,8 @@ import { CrmOpportunityEntity } from '../entities/crm-opportunity.entity';
 import { CrmPipelineEntity } from '../entities/crm-pipeline.entity';
 import { CrmStageEntity } from '../entities/crm-stage.entity';
 import { CrmStageTransitionPolicyService } from './crm-stage-transition-policy.service';
+import { LeadScoreEngineService } from '../lead-score/services/lead-score-engine.service';
+import type { LeadScoreCalculationReason } from '../lead-score/lead-score.types';
 
 export type CrmCommandActor = {
   type: 'user' | 'ai' | 'automation' | 'system';
@@ -91,9 +93,24 @@ export class CrmOpportunityCommandService {
   constructor(
     @InjectDataSource('agency') private readonly dataSource: DataSource,
     private readonly transitionPolicies: CrmStageTransitionPolicyService,
+    private readonly leadScore: LeadScoreEngineService,
   ) {}
 
   async createOpportunity(
+    ctx: RequestContext,
+    opportunity: CrmOpportunityEntity,
+    options: CrmCommandOptions = {},
+  ): Promise<CrmOpportunityEntity> {
+    const saved = await this.createOpportunityInTransaction(
+      ctx,
+      opportunity,
+      options,
+    );
+    await this.scoreAfterCommand(ctx, saved.id, 'opportunity_created');
+    return saved;
+  }
+
+  private async createOpportunityInTransaction(
     ctx: RequestContext,
     opportunity: CrmOpportunityEntity,
     options: CrmCommandOptions = {},
@@ -158,6 +175,20 @@ export class CrmOpportunityCommandService {
     candidate: CrmOpportunityEntity,
     options: CrmCommandOptions = {},
   ): Promise<CrmOpportunityEntity> {
+    const saved = await this.updateOpportunityInTransaction(
+      ctx,
+      candidate,
+      options,
+    );
+    await this.scoreAfterCommand(ctx, saved.id, 'opportunity_updated');
+    return saved;
+  }
+
+  private async updateOpportunityInTransaction(
+    ctx: RequestContext,
+    candidate: CrmOpportunityEntity,
+    options: CrmCommandOptions = {},
+  ): Promise<CrmOpportunityEntity> {
     return this.dataSource.transaction(async (manager) => {
       const replay = await this.findReplay(
         manager,
@@ -206,7 +237,7 @@ export class CrmOpportunityCommandService {
     opportunity: CrmOpportunityEntity;
     event: CrmOpportunityEventEntity | null;
   }> {
-    return this.dataSource.transaction((manager) =>
+    const result = await this.dataSource.transaction((manager) =>
       this.moveStageWithinTransaction(
         manager,
         ctx,
@@ -215,6 +246,8 @@ export class CrmOpportunityCommandService {
         options,
       ),
     );
+    await this.scoreAfterCommand(ctx, opportunityId, 'stage_changed');
+    return result;
   }
 
   async transferPipeline(
@@ -884,7 +917,7 @@ export class CrmOpportunityCommandService {
     lostReason: string | null | undefined,
     options: CrmCommandOptions = {},
   ): Promise<CrmOpportunityEntity> {
-    return this.dataSource.transaction((manager) =>
+    const saved = await this.dataSource.transaction((manager) =>
       this.changeStatusWithinTransaction(
         manager,
         ctx,
@@ -894,6 +927,8 @@ export class CrmOpportunityCommandService {
         options,
       ),
     );
+    await this.scoreAfterCommand(ctx, opportunityId, 'lifecycle_changed');
+    return saved;
   }
 
   async changeStatusWithinTransaction(
@@ -1785,6 +1820,24 @@ export class CrmOpportunityCommandService {
       stage_entered: 'leadflow.crm.opportunity.stage.entered',
     };
     return names[eventType] ?? 'leadflow.crm.opportunity.updated';
+  }
+
+  /**
+   * Rescores a deal after the command that changed it has committed.
+   *
+   * Deliberately outside the command's transaction. Scoring takes its own
+   * advisory lock and reads other domains; nesting it would invite lock-order
+   * deadlocks, and a scoring failure would roll back a legitimate stage change.
+   * The trade is that the score trails the command by milliseconds — acceptable,
+   * because nothing acts on the score yet, and the alternative risks losing real
+   * CRM writes.
+   */
+  private async scoreAfterCommand(
+    ctx: RequestContext,
+    opportunityId: string,
+    reason: LeadScoreCalculationReason,
+  ): Promise<void> {
+    await this.leadScore.recalculateQuietly(ctx, { opportunityId, reason });
   }
 
   private outboxKey(

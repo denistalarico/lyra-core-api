@@ -62,6 +62,7 @@ export type LeadFlowEventName =
   | 'leadflow.crm.opportunity.pipeline.entered'
   | 'leadflow.crm.opportunity.stage.entered'
   | 'leadflow.crm.opportunity.score.changed'
+  | 'leadflow.crm.opportunity.hot_lead_detected'
   | 'leadflow.crm.opportunity.status.changed'
   | 'leadflow.crm.opportunity.owner.changed'
   | 'leadflow.crm.opportunity.won'

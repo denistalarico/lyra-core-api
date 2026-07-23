@@ -291,12 +291,65 @@ export const LEADFLOW_EVENT_CATALOG: LeadFlowEventCatalogItem[] = [
   buildEvent({
     eventName: 'leadflow.crm.opportunity.score.changed',
     description:
-      'Score da oportunidade alterado (base para hot lead notification futura).',
+      'Score da oportunidade alterado: o valor ou a faixa mudou em relação ao cálculo anterior.',
     requiredContext: ['opportunityId'],
     payloadSchema: {
-      previousScore: field('number', true, 'Score anterior.'),
-      newScore: field('number', true, 'Novo score.'),
-      scoreReason: field('string', false, 'Motivo resumido da mudança.'),
+      previousScore: field(
+        'number',
+        false,
+        'Score anterior; nulo no primeiro cálculo.',
+      ),
+      currentScore: field('number', true, 'Score atual, entre 0 e 100.'),
+      previousBand: field(
+        'string',
+        false,
+        'Faixa anterior; nula no primeiro cálculo.',
+      ),
+      currentBand: field('string', true, 'Faixa atual: cold, warm ou hot.'),
+      policyVersion: field(
+        'string',
+        true,
+        'Versão da política que produziu o score.',
+      ),
+      featureSchemaVersion: field(
+        'string',
+        true,
+        'Versão do schema de features.',
+      ),
+      maxAchievable: field(
+        'number',
+        true,
+        'Maior score que as regras ativas desta política podem produzir.',
+      ),
+      breakdownSummary: field(
+        'array',
+        true,
+        'Regras que contribuíram e quantos pontos aplicaram. Sem conteúdo sensível.',
+      ),
+      calculationReason: field('string', true, 'O que provocou o recálculo.'),
+      calculatedAt: field('string', true, 'Instante do cálculo.'),
+    },
+  }),
+  buildEvent({
+    eventName: 'leadflow.crm.opportunity.hot_lead_detected',
+    description:
+      'Oportunidade cruzou o limiar de lead quente. Emitido apenas na transição de abaixo para igual ou acima do limiar; permanecer quente não reemite.',
+    requiredContext: ['opportunityId'],
+    payloadSchema: {
+      previousScore: field(
+        'number',
+        false,
+        'Score anterior; nulo no primeiro cálculo.',
+      ),
+      currentScore: field('number', true, 'Score que cruzou o limiar.'),
+      threshold: field('number', true, 'Limiar de lead quente em vigor.'),
+      policyVersion: field(
+        'string',
+        true,
+        'Versão da política que produziu o score.',
+      ),
+      calculationReason: field('string', true, 'O que provocou o recálculo.'),
+      calculatedAt: field('string', true, 'Instante do cálculo.'),
     },
   }),
   buildEvent({
@@ -732,17 +785,17 @@ export const LEADFLOW_AUTOMATION_TRIGGER_EVENT_MAPPINGS: LeadFlowEventTriggerMap
     },
     {
       trigger: 'opportunity.score_changed',
-      eventName: null,
-      status: 'planned',
+      eventName: 'leadflow.crm.opportunity.score.changed',
+      status: 'mapped',
       notes:
-        'Depende do Lead Score V1 no CRM: não há pontuação persistida nem emissor. Volta a mapped quando o Score Engine existir.',
+        'Emitido pelo Score Engine do CRM quando o valor ou a faixa muda, na mesma transação do snapshot.',
     },
     {
       trigger: 'opportunity.hot_lead_detected',
-      eventName: null,
-      status: 'planned',
+      eventName: 'leadflow.crm.opportunity.hot_lead_detected',
+      status: 'mapped',
       notes:
-        'Derivado de mudança de score acima do limiar; depende do Lead Score V1 no CRM.',
+        'Emitido apenas no cruzamento do limiar (anterior < 70 e novo >= 70). Permanecer quente não reemite.',
     },
     {
       trigger: 'opportunity.missing_fields_detected',

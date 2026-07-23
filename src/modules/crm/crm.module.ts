@@ -18,6 +18,15 @@ import { CrmOpportunityCommandService } from './services/crm-opportunity-command
 import { CrmStageTransitionPolicyEntity } from './entities/crm-stage-transition-policy.entity';
 import { CrmStageTransitionPolicyService } from './services/crm-stage-transition-policy.service';
 import { CrmOpportunityFieldCatalogService } from './services/crm-opportunity-field-catalog.service';
+import { CrmLeadScoreSnapshotEntity } from './lead-score/entities/crm-lead-score-snapshot.entity';
+import { CrmLeadScoreStateEntity } from './lead-score/entities/crm-lead-score-state.entity';
+import { LEAD_SCORE_POLICY_PROVIDER } from './lead-score/lead-score.types';
+import { StaticLeadScorePolicyProvider } from './lead-score/policy/static-lead-score-policy.provider';
+import { LeadScoreBackfillService } from './lead-score/services/lead-score-backfill.service';
+import { LeadScoreEngineService } from './lead-score/services/lead-score-engine.service';
+import { LeadScoreFeatureLoaderService } from './lead-score/services/lead-score-feature-loader.service';
+import { LeadScoreQueryService } from './lead-score/services/lead-score-query.service';
+import { InboxMessageEntity } from '../inbox/entities/inbox-message.entity';
 import { LeadFlowBusinessModeTemplateEntity } from '../leadflow-settings/entities';
 
 @Module({
@@ -37,6 +46,9 @@ import { LeadFlowBusinessModeTemplateEntity } from '../leadflow-settings/entitie
         InboxConversationEntity,
         ContactEntity,
         LeadFlowBusinessModeTemplateEntity,
+        InboxMessageEntity,
+        CrmLeadScoreStateEntity,
+        CrmLeadScoreSnapshotEntity,
       ],
       'agency',
     ),
@@ -47,6 +59,16 @@ import { LeadFlowBusinessModeTemplateEntity } from '../leadflow-settings/entitie
     CrmOpportunityCommandService,
     CrmStageTransitionPolicyService,
     CrmOpportunityFieldCatalogService,
+    LeadScoreFeatureLoaderService,
+    LeadScoreEngineService,
+    LeadScoreQueryService,
+    LeadScoreBackfillService,
+    // Behind a token so an Analytics-published provider can replace the static
+    // one without touching the engine.
+    {
+      provide: LEAD_SCORE_POLICY_PROVIDER,
+      useClass: StaticLeadScorePolicyProvider,
+    },
     SalesNotificationPublisher,
   ],
   exports: [
@@ -54,6 +76,9 @@ import { LeadFlowBusinessModeTemplateEntity } from '../leadflow-settings/entitie
     CrmOpportunityCommandService,
     CrmStageTransitionPolicyService,
     CrmOpportunityFieldCatalogService,
+    LeadScoreEngineService,
+    LeadScoreQueryService,
+    LeadScoreBackfillService,
     SalesNotificationPublisher,
   ],
 })

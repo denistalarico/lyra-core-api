@@ -240,6 +240,9 @@ function harness(
           version: 1,
         }),
       } as never,
+      // Scoring runs after the command commits and must never be able to fail
+      // the command; these tests assert the command, not the score.
+      { recalculateQuietly: jest.fn().mockResolvedValue(undefined) } as never,
     ),
     committed,
   };

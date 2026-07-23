@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -44,9 +45,23 @@ import {
 } from './dto/crm-stage-transition-policy.dto';
 import { CrmStageTransitionPolicyService } from './services/crm-stage-transition-policy.service';
 import { CrmOpportunityFieldCatalogService } from './services/crm-opportunity-field-catalog.service';
+import { LeadScoreEngineService } from './lead-score/services/lead-score-engine.service';
+import { LeadScoreQueryService } from './lead-score/services/lead-score-query.service';
+import { RecalculateLeadScoreDto } from './lead-score/dto/recalculate-lead-score.dto';
 import { TransferCrmOpportunityDto } from './dto/transfer-crm-opportunity.dto';
 import { CopyCrmOpportunityDto } from './dto/copy-crm-opportunity.dto';
 import { ReconvertCrmOpportunityDto } from './dto/reconvert-crm-opportunity.dto';
+
+/** Scope always comes from the authenticated context, never from a body. */
+function requireScope(ctx: RequestContext): {
+  tenantId: string;
+  workspaceId: string;
+} {
+  if (!ctx.workspaceId) {
+    throw new BadRequestException('Workspace context is required.');
+  }
+  return { tenantId: ctx.tenantId, workspaceId: ctx.workspaceId };
+}
 
 @Controller('crm')
 @UseGuards(JwtAuthGuard, PermissionsGuard)
@@ -56,7 +71,46 @@ export class CrmController {
     private readonly crmService: CrmService,
     private readonly transitionPolicies: CrmStageTransitionPolicyService,
     private readonly fieldCatalog: CrmOpportunityFieldCatalogService,
+    private readonly leadScoreQuery: LeadScoreQueryService,
+    private readonly leadScoreEngine: LeadScoreEngineService,
   ) {}
+
+  /**
+   * Current lead score of one opportunity, read from the canonical projection.
+   * The breakdown explains the number, so it needs the same visibility as the
+   * record itself.
+   */
+  @Get('opportunities/:id/lead-score')
+  @RequirePermission('leadflow.crm.records.view.client')
+  getLeadScore(
+    @RequestContextData() ctx: RequestContext,
+    @Param('id') id: string,
+  ) {
+    return this.leadScoreQuery.getForOpportunity(requireScope(ctx), id, {
+      includeBreakdown: true,
+    });
+  }
+
+  /**
+   * Forces a recalculation from canonical state.
+   *
+   * Accepts a reason and nothing else: no score, no features, no breakdown. The
+   * scope comes from the authenticated context, never from the body, so a
+   * caller cannot reach another workspace's opportunity.
+   */
+  @Post('opportunities/:id/lead-score/recalculate')
+  @RequirePermission('leadflow.crm.stage.manage.manager_or_admin')
+  recalculateLeadScore(
+    @RequestContextData() ctx: RequestContext,
+    @Param('id') id: string,
+    @Body() dto: RecalculateLeadScoreDto,
+  ) {
+    return this.leadScoreEngine.recalculate(ctx, {
+      opportunityId: id,
+      reason: 'manual_recalculation',
+      sourceEventName: dto.reason,
+    });
+  }
 
   @Get('tags')
   @RequirePermission('leadflow.crm.records.view.client')
