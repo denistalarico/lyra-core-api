@@ -724,9 +724,10 @@ export class LeadFlowAutomationService {
     const managed = ctx.managedContext;
     const managedClientId =
       managed?.operatingMode === 'client' ? managed.clientId : null;
-    const isClientMode = Boolean(managedClientId);
 
-    const settings = isClientMode
+    // Branch on the value itself, not on a derived boolean, so the client id
+    // narrows to `string` here instead of needing an assertion.
+    const settings = managedClientId
       ? await this.settingsRepository.findOne({
           where: {
             tenantId: ctx.tenantId,
