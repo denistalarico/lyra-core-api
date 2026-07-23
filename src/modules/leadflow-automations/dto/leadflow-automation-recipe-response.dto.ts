@@ -8,6 +8,10 @@ import {
   type LeadFlowAutomationTriggerKind,
 } from '../catalog/automation-recipes.catalog';
 import { LeadFlowAutomationCategory } from '../enums/leadflow-automation-category.enum';
+import {
+  unavailableExecutors,
+  type AutomationExecutorAvailability,
+} from '../executors';
 
 export interface LeadFlowAutomationRecipeResponse {
   key: string;
@@ -32,6 +36,7 @@ export interface LeadFlowAutomationRecipeResponse {
    * recipe can be provisioned and configured, but never switched on yet.
    */
   unmetDependencies: LeadFlowAutomationUnmetDependency[];
+  unavailableActions: AutomationExecutorAvailability[];
   safetyRules: string[];
 }
 
@@ -65,6 +70,7 @@ export function mapAutomationRecipe(
       recipe.businessModeKeys === 'all' ? 'all' : [...recipe.businessModeKeys],
     compatibleWithBusinessMode: isRecipeCompatible(recipe, businessModeKey),
     unmetDependencies: findUnmetDependencies(recipe.requiredDependencies),
+    unavailableActions: unavailableExecutors([recipe.primaryAction]),
     safetyRules: [...recipe.safetyRules],
   };
 }

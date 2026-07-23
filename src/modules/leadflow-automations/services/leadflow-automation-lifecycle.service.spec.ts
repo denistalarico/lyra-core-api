@@ -30,8 +30,7 @@ describe('LeadFlowAutomationLifecycleService', () => {
       ...overrides,
     });
 
-  it('reports no runtime available on the current platform', () => {
-    // The whole point of Phase 1: nothing can execute yet, and the API says so.
+  it('does not report an execution runtime for ingress without executors', () => {
     expect(evaluate().runtimeAvailable).toBe(false);
   });
 
@@ -76,6 +75,29 @@ describe('LeadFlowAutomationLifecycleService', () => {
       for (const recipe of [idleLead]) {
         expect(evaluate({ recipe }).canActivate).toBe(false);
       }
+    });
+  });
+
+  describe('executor gating', () => {
+    it('blocks activation when ingress exists but the action adapter does not', () => {
+      const unavailableAction = {
+        actionKey: 'notify_user',
+        available: false,
+        reason: 'not_implemented' as const,
+        dependency: null,
+        owningDomain: 'platform.notifications',
+        description: 'Adapter ainda não implementado.',
+      };
+
+      const result = evaluate({ unavailableActions: [unavailableAction] });
+
+      expect(result.state).toBe(
+        LeadFlowAutomationLifecycleState.BlockedByDependency,
+      );
+      expect(result.canActivate).toBe(false);
+      expect(result.unmetDependencies).toEqual([]);
+      expect(result.unavailableActions).toEqual([unavailableAction]);
+      expect(result.blockedReason).toBe(unavailableAction.description);
     });
   });
 

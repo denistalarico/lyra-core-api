@@ -2,6 +2,7 @@ import {
   LEADFLOW_AUTOMATION_DEPENDENCY_LABELS,
   LeadFlowAutomationDependency,
 } from '../enums/leadflow-automation-dependency.enum';
+import { hasAvailableExecutor } from '../executors';
 
 /**
  * Which platform capabilities are actually available right now.
@@ -20,7 +21,7 @@ export const LEADFLOW_AUTOMATION_SATISFIED_DEPENDENCIES: Record<
   LeadFlowAutomationDependency,
   boolean
 > = {
-  [LeadFlowAutomationDependency.EventFanOut]: false,
+  [LeadFlowAutomationDependency.EventFanOut]: true,
   [LeadFlowAutomationDependency.SchedulerRuntime]: false,
   [LeadFlowAutomationDependency.MessageGeneration]: false,
   [LeadFlowAutomationDependency.OwnershipCommand]: false,
@@ -58,13 +59,13 @@ export function findUnmetDependencies(
 }
 
 /**
- * True only when some trigger-delivery runtime exists. Canonical domain
- * commands alone do not make configured recipes run automatically.
+ * True only when some trigger-delivery runtime and at least one productive
+ * action executor exist. Ingress alone must not make the UI promise execution.
  */
 export function isRuntimeAvailable(): boolean {
-  return (
+  const triggerDeliveryAvailable =
     isDependencySatisfied(LeadFlowAutomationDependency.EventFanOut) ||
     isDependencySatisfied(LeadFlowAutomationDependency.SchedulerRuntime) ||
-    isDependencySatisfied(LeadFlowAutomationDependency.WebhookDispatch)
-  );
+    isDependencySatisfied(LeadFlowAutomationDependency.WebhookDispatch);
+  return triggerDeliveryAvailable && hasAvailableExecutor();
 }

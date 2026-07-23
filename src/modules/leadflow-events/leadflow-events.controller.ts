@@ -19,7 +19,7 @@ import { LeadFlowEventValidationService } from './services/leadflow-event-valida
 
 /**
  * Inspection endpoints for the LeadFlow Event Contract (blueprint section 11).
- * None of these routes emit, persist or execute events.
+ * These inspection routes themselves never emit, persist or execute events.
  */
 @Controller('leadflow/events')
 @UseGuards(JwtAuthGuard, PermissionsGuard)

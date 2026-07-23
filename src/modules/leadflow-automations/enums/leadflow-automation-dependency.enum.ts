@@ -13,8 +13,8 @@
 export enum LeadFlowAutomationDependency {
   /**
    * Durable event fan-out with independent per-consumer delivery.
-   * Owned by the CRM/Inbox structural evolution track. The current Inbox outbox
-   * relay is realtime-only single-delivery, so no consumer can subscribe.
+   * Owned by the CRM/Inbox structural evolution track. Phase 9 adds an atomic,
+   * consumer-specific delivery alongside the realtime relay.
    */
   EventFanOut = 'event_fan_out',
 

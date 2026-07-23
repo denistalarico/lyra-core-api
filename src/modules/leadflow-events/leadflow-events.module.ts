@@ -6,9 +6,9 @@ import { LeadFlowEventRuntimeContractService } from './services/leadflow-event-r
 import { LeadFlowEventValidationService } from './services/leadflow-event-validation.service';
 
 /**
- * LeadFlow Event Contract module. Fully in-memory: no entities, no
- * migrations for data, no bus. It only documents and validates the event
- * surface that a future runtime will consume.
+ * LeadFlow Event Contract module. Catalog and validation stay pure; durable
+ * delivery is persisted in the shared Agency datasource and consumed by each
+ * owning module.
  */
 @Module({
   imports: [PermissionsModule],

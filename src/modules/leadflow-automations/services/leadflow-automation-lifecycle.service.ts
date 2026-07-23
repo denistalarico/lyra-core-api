@@ -7,6 +7,7 @@ import {
 import type { LeadFlowAutomationRecipeCatalogItem } from '../catalog/automation-recipes.catalog';
 import { LeadFlowAutomationLifecycleState } from '../enums/leadflow-automation-lifecycle-state.enum';
 import { LeadFlowAutomationStatus } from '../enums/leadflow-automation-status.enum';
+import type { AutomationExecutorAvailability } from '../executors';
 
 export interface LeadFlowAutomationLifecycle {
   /** Effective state shown to the operator. Derived, never persisted. */
@@ -18,6 +19,8 @@ export interface LeadFlowAutomationLifecycle {
   /** Business-language explanation when `canActivate` is false. */
   blockedReason: string | null;
   unmetDependencies: LeadFlowAutomationUnmetDependency[];
+  /** Published effects for which no productive adapter is wired yet. */
+  unavailableActions: AutomationExecutorAvailability[];
   /** `section.key` paths of required configuration that is still empty. */
   missingConfiguration: string[];
   /** False while the platform has no execution engine at all. */
@@ -30,6 +33,7 @@ export interface LeadFlowAutomationLifecycleInput {
   /** False when the instance's Business Mode no longer matches the recipe. */
   compatibleWithBusinessMode: boolean;
   missingConfiguration: string[];
+  unavailableActions?: AutomationExecutorAvailability[];
 }
 
 const UNKNOWN_RECIPE_REASON =
@@ -56,6 +60,7 @@ export class LeadFlowAutomationLifecycleService {
   ): LeadFlowAutomationLifecycle {
     const { status, recipe, compatibleWithBusinessMode } = input;
     const missingConfiguration = [...input.missingConfiguration];
+    const unavailableActions = [...(input.unavailableActions ?? [])];
     const runtimeAvailable = isRuntimeAvailable();
 
     if (!recipe) {
@@ -65,6 +70,7 @@ export class LeadFlowAutomationLifecycleService {
         canActivate: false,
         blockedReason: UNKNOWN_RECIPE_REASON,
         unmetDependencies: [],
+        unavailableActions,
         missingConfiguration,
         runtimeAvailable,
       };
@@ -82,6 +88,7 @@ export class LeadFlowAutomationLifecycleService {
         blockedReason:
           'Esta automação foi descontinuada e não pode mais ser ativada.',
         unmetDependencies,
+        unavailableActions,
         missingConfiguration,
         runtimeAvailable,
       };
@@ -96,6 +103,20 @@ export class LeadFlowAutomationLifecycleService {
         canActivate: false,
         blockedReason: unmetDependencies[0].reason,
         unmetDependencies,
+        unavailableActions,
+        missingConfiguration,
+        runtimeAvailable,
+      };
+    }
+
+    if (unavailableActions.length > 0) {
+      return {
+        state: LeadFlowAutomationLifecycleState.BlockedByDependency,
+        status,
+        canActivate: false,
+        blockedReason: unavailableActions[0].description,
+        unmetDependencies,
+        unavailableActions,
         missingConfiguration,
         runtimeAvailable,
       };
@@ -109,6 +130,7 @@ export class LeadFlowAutomationLifecycleService {
         blockedReason:
           'A última execução falhou. Revise a configuração antes de reativar.',
         unmetDependencies,
+        unavailableActions,
         missingConfiguration,
         runtimeAvailable,
       };
@@ -122,6 +144,7 @@ export class LeadFlowAutomationLifecycleService {
         blockedReason:
           'Esta automação não é compatível com o Business Mode ativo.',
         unmetDependencies,
+        unavailableActions,
         missingConfiguration,
         runtimeAvailable,
       };
@@ -134,6 +157,7 @@ export class LeadFlowAutomationLifecycleService {
         canActivate: false,
         blockedReason: 'Faltam informações obrigatórias na configuração.',
         unmetDependencies,
+        unavailableActions,
         missingConfiguration,
         runtimeAvailable,
       };
@@ -146,6 +170,7 @@ export class LeadFlowAutomationLifecycleService {
         canActivate: false,
         blockedReason: 'Esta automação foi arquivada.',
         unmetDependencies,
+        unavailableActions,
         missingConfiguration,
         runtimeAvailable,
       };
@@ -158,6 +183,7 @@ export class LeadFlowAutomationLifecycleService {
         canActivate: true,
         blockedReason: null,
         unmetDependencies,
+        unavailableActions,
         missingConfiguration,
         runtimeAvailable,
       };
@@ -170,6 +196,7 @@ export class LeadFlowAutomationLifecycleService {
         canActivate: false,
         blockedReason: null,
         unmetDependencies,
+        unavailableActions,
         missingConfiguration,
         runtimeAvailable,
       };
@@ -182,6 +209,7 @@ export class LeadFlowAutomationLifecycleService {
       canActivate: true,
       blockedReason: null,
       unmetDependencies,
+      unavailableActions,
       missingConfiguration,
       runtimeAvailable,
     };

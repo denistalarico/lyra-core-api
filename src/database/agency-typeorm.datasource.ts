@@ -116,6 +116,7 @@ import { AddCrmOpportunityLineage1784590000000 } from './migrations/178459000000
 import { AddLeadflowAutomationTemplateVersion1785000000000 } from './migrations/1785000000000-add-leadflow-automation-template-version';
 import { CreateLeadflowAutomationRuns1785500000000 } from './migrations/1785500000000-create-leadflow-automation-runs';
 import { AddLeadflowAutomationExecutionPermission1785600000000 } from './migrations/1785600000000-add-leadflow-automation-execution-permission';
+import { CreateLeadflowEventDeliveries1785700000000 } from './migrations/1785700000000-create-leadflow-event-deliveries';
 
 export const AgencyDataSource = new DataSource({
   type: 'postgres',
@@ -245,5 +246,6 @@ export const AgencyDataSource = new DataSource({
     AddLeadflowAutomationTemplateVersion1785000000000,
     CreateLeadflowAutomationRuns1785500000000,
     AddLeadflowAutomationExecutionPermission1785600000000,
+    CreateLeadflowEventDeliveries1785700000000,
   ],
 });

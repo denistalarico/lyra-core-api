@@ -47,6 +47,7 @@ import {
 } from '../enums/leadflow-automation-run.enums';
 import { LeadFlowAutomationStatus } from '../enums/leadflow-automation-status.enum';
 import { LeadFlowAutomationVersionStatus } from '../enums/leadflow-automation-version-status.enum';
+import { unavailableExecutors } from '../executors';
 import { LEADFLOW_AUTOMATIONS_PERMISSIONS } from '../leadflow-automations.permissions';
 import type {
   LeadFlowAutomationReadiness,
@@ -444,11 +445,7 @@ export class LeadFlowAutomationService {
     const lifecycle = this.lifecycleFor(automation, active);
     const blockedByDependency = lifecycle.unmetDependencies.length > 0;
 
-    const evaluation = this.evaluationService.evaluate(
-      automation,
-      recipe,
-      dto,
-    );
+    const evaluation = this.evaluationService.evaluate(automation, recipe, dto);
 
     const { run } = await this.runService.recordDryRun(
       ctx,
@@ -586,7 +583,49 @@ export class LeadFlowAutomationService {
             schedulePolicy: automation.schedulePolicy ?? {},
           })
         : [],
+      unavailableActions: recipe
+        ? unavailableExecutors(this.configuredActionKeys(automation, recipe))
+        : [],
     });
+  }
+
+  private configuredActionKeys(
+    automation: LeadFlowAutomationEntity,
+    recipe: LeadFlowAutomationRecipeCatalogItem,
+  ): string[] {
+    const actions = automation.actionConfig ?? {};
+    const crmPolicy = automation.crmPolicy ?? {};
+    const keys = [
+      typeof actions.primaryAction === 'string'
+        ? actions.primaryAction
+        : recipe.primaryAction,
+    ];
+    if (Array.isArray(crmPolicy.addTags) && crmPolicy.addTags.length > 0) {
+      keys.push('add_tag');
+    }
+    if (crmPolicy.appendNote === true) keys.push('append_note');
+    if (crmPolicy.updateScore === true) keys.push('update_opportunity_score');
+    if (
+      typeof crmPolicy.moveStageOnComplete === 'string' &&
+      typeof crmPolicy.moveStageReasonCode === 'string'
+    ) {
+      keys.push('move_opportunity_stage');
+    }
+    if (
+      typeof crmPolicy.transferToPipelineRef === 'string' &&
+      typeof crmPolicy.transferToStageRef === 'string' &&
+      typeof crmPolicy.transferReasonCode === 'string'
+    ) {
+      keys.push('transfer_opportunity_pipeline');
+    }
+    if (
+      typeof crmPolicy.copyToPipelineRef === 'string' &&
+      typeof crmPolicy.copyToStageRef === 'string' &&
+      typeof crmPolicy.copyReasonCode === 'string'
+    ) {
+      keys.push('copy_opportunity');
+    }
+    return keys;
   }
 
   /**
@@ -604,6 +643,15 @@ export class LeadFlowAutomationService {
         message: lifecycle.blockedReason,
         state: lifecycle.state,
         unmetDependencies: lifecycle.unmetDependencies,
+      });
+    }
+
+    if (lifecycle.unavailableActions.length > 0) {
+      throw new ConflictException({
+        code: 'AUTOMATION_EXECUTOR_UNAVAILABLE',
+        message: lifecycle.blockedReason,
+        state: lifecycle.state,
+        unavailableActions: lifecycle.unavailableActions,
       });
     }
 
@@ -751,7 +799,10 @@ export class LeadFlowAutomationService {
       (automation.actionConfig?.primaryAction as string) ??
       recipe.primaryAction;
     if (state === LeadFlowAutomationReadinessState.Ready) {
-      if (OUTBOUND_ACTIONS.has(primaryAction) && !this.hasChannel(active.settings)) {
+      if (
+        OUTBOUND_ACTIONS.has(primaryAction) &&
+        !this.hasChannel(active.settings)
+      ) {
         missing.push('channel');
         state = LeadFlowAutomationReadinessState.MissingChannel;
       }
@@ -814,7 +865,10 @@ export class LeadFlowAutomationService {
     }
   }
 
-  private async can(ctx: RequestContext, permissionKey: string): Promise<boolean> {
+  private async can(
+    ctx: RequestContext,
+    permissionKey: string,
+  ): Promise<boolean> {
     if (!ctx.userId || !ctx.role) {
       return false;
     }

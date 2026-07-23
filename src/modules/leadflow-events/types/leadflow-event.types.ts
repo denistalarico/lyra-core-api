@@ -223,7 +223,7 @@ export interface LeadFlowEventCatalogItem {
   payloadSchema: LeadFlowEventPayloadSchema;
   /** Module key (or `system` scheduler) expected to emit this event. */
   emittedBy: string;
-  /** Future consumers, contract-level only (nothing consumes events today). */
+  /** Declared consumers; each consumer owns its delivery and execution state. */
   consumedBy: string[];
   sensitive: boolean;
   status: LeadFlowEventStatus;
@@ -262,11 +262,11 @@ export interface LeadFlowEventSensitiveDataPolicy {
   guidance: string[];
 }
 
-/** Explicit "no runtime exists" flags returned by the runtime contract. */
+/** Runtime capability flags returned by the event contract. */
 export interface LeadFlowEventUnsupportedExecutionNotice {
   message: string;
-  eventBus: false;
-  persistence: false;
+  eventBus: true;
+  persistence: true;
   execution: false;
   redis: false;
   temporal: false;
@@ -275,8 +275,8 @@ export interface LeadFlowEventUnsupportedExecutionNotice {
 }
 
 /**
- * Full event runtime contract a future runtime consumes to understand the
- * LeadFlow event surface. Pure data — generating it has no side effects.
+ * Full event runtime contract consumers use to understand the LeadFlow event
+ * surface. Generating the contract itself has no side effects.
  */
 export interface LeadFlowEventRuntimeContract {
   productKey: LeadFlowEventProductKey;

@@ -15,20 +15,94 @@ export const LEADFLOW_EVENT_CONTRACT_VERSION = 1;
 
 /** Envelope contract, field by field (blueprint sections 6 and 7). */
 const ENVELOPE_SCHEMA: LeadFlowEventEnvelopeFieldSpec[] = [
-  { field: 'eventId', type: 'string (uuid)', required: true, description: 'Identificador único do evento.' },
-  { field: 'eventName', type: 'string', required: true, description: 'Nome estável no padrão leadflow.<module>.<resource>.<action>.' },
-  { field: 'eventVersion', type: 'number', required: true, description: 'Versão do contrato do evento; mudanças incompatíveis criam nova versão.' },
-  { field: 'occurredAt', type: 'string (ISO 8601)', required: true, description: 'Instante em que o fato ocorreu.' },
-  { field: 'tenantId', type: 'string (uuid)', required: true, description: 'Tenant dono do evento.' },
-  { field: 'workspaceId', type: 'string (uuid)', required: true, description: 'Workspace do evento.' },
-  { field: 'productKey', type: "'leadflow'", required: true, description: 'Sempre leadflow neste contrato.' },
-  { field: 'moduleKey', type: 'string', required: true, description: 'Módulo emissor (leadflow.inbox, leadflow.crm...).' },
-  { field: 'source', type: 'object { module, entityType, entityId }', required: true, description: 'Entidade que originou o evento.' },
-  { field: 'actor', type: 'object { type, id?, displayName? }', required: false, description: 'Quem causou o evento (user, agent, system, contact, external).' },
-  { field: 'correlation', type: 'object { correlationId, causationId?, sourceEventId? }', required: true, description: 'Cadeia de correlação para rastreio e deduplicação futura.' },
-  { field: 'context', type: 'object (ids LeadFlow)', required: false, description: 'Ids de contexto (conversationId, opportunityId...); o catálogo define os obrigatórios por evento.' },
-  { field: 'payload', type: 'object (JSON)', required: true, description: 'Dados mínimos do evento conforme payloadSchema do catálogo.' },
-  { field: 'metadata', type: 'object { schemaVersion, dedupeKey?, sensitive? }', required: true, description: 'Metadados de versionamento, dedupe e sensibilidade.' },
+  {
+    field: 'eventId',
+    type: 'string (uuid)',
+    required: true,
+    description: 'Identificador único do evento.',
+  },
+  {
+    field: 'eventName',
+    type: 'string',
+    required: true,
+    description:
+      'Nome estável no padrão leadflow.<module>.<resource>.<action>.',
+  },
+  {
+    field: 'eventVersion',
+    type: 'number',
+    required: true,
+    description:
+      'Versão do contrato do evento; mudanças incompatíveis criam nova versão.',
+  },
+  {
+    field: 'occurredAt',
+    type: 'string (ISO 8601)',
+    required: true,
+    description: 'Instante em que o fato ocorreu.',
+  },
+  {
+    field: 'tenantId',
+    type: 'string (uuid)',
+    required: true,
+    description: 'Tenant dono do evento.',
+  },
+  {
+    field: 'workspaceId',
+    type: 'string (uuid)',
+    required: true,
+    description: 'Workspace do evento.',
+  },
+  {
+    field: 'productKey',
+    type: "'leadflow'",
+    required: true,
+    description: 'Sempre leadflow neste contrato.',
+  },
+  {
+    field: 'moduleKey',
+    type: 'string',
+    required: true,
+    description: 'Módulo emissor (leadflow.inbox, leadflow.crm...).',
+  },
+  {
+    field: 'source',
+    type: 'object { module, entityType, entityId }',
+    required: true,
+    description: 'Entidade que originou o evento.',
+  },
+  {
+    field: 'actor',
+    type: 'object { type, id?, displayName? }',
+    required: false,
+    description:
+      'Quem causou o evento (user, agent, system, contact, external).',
+  },
+  {
+    field: 'correlation',
+    type: 'object { correlationId, causationId?, sourceEventId? }',
+    required: true,
+    description: 'Cadeia de correlação para rastreio e deduplicação futura.',
+  },
+  {
+    field: 'context',
+    type: 'object (ids LeadFlow)',
+    required: false,
+    description:
+      'Ids de contexto (conversationId, opportunityId...); o catálogo define os obrigatórios por evento.',
+  },
+  {
+    field: 'payload',
+    type: 'object (JSON)',
+    required: true,
+    description: 'Dados mínimos do evento conforme payloadSchema do catálogo.',
+  },
+  {
+    field: 'metadata',
+    type: 'object { schemaVersion, dedupeKey?, sensitive? }',
+    required: true,
+    description: 'Metadados de versionamento, dedupe e sensibilidade.',
+  },
 ];
 
 /** Blueprint section 14 — what events must never carry. */
@@ -50,9 +124,9 @@ const SENSITIVE_DATA_POLICY: LeadFlowEventSensitiveDataPolicy = {
 };
 
 /**
- * Builds the LeadFlow event runtime contract (blueprint section 11): the full
- * event surface a future runtime needs. Pure projection of in-memory contract
- * data — no bus, no queue, no persistence, no execution, no LLM.
+ * Builds the LeadFlow event runtime contract (blueprint section 11). Building
+ * this response is pure; delivery is implemented by durable, consumer-specific
+ * fan-out.
  */
 @Injectable()
 export class LeadFlowEventRuntimeContractService {
@@ -69,9 +143,9 @@ export class LeadFlowEventRuntimeContractService {
       sensitiveDataPolicy: SENSITIVE_DATA_POLICY,
       unsupportedExecutionNotice: {
         message:
-          'Contrato apenas. Não existe event bus, persistência de eventos, emissão real, execução de automações, Redis, Temporal, n8n ou LLM neste sprint.',
-        eventBus: false,
-        persistence: false,
+          'Eventos canônicos possuem persistência e fan-out durável para Automations. Avaliação de receitas e efeitos automáticos continuam desabilitados.',
+        eventBus: true,
+        persistence: true,
         execution: false,
         redis: false,
         temporal: false,

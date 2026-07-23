@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { LeadFlowClientSettingsEntity } from '../leadflow-settings/entities';
 import { PermissionsModule } from '../permissions';
 import { CrmModule } from '../crm/crm.module';
+import { LeadFlowEventDeliveryEntity } from '../leadflow-events/entities';
 import {
   LeadFlowAutomationEntity,
   LeadFlowAutomationRunAttemptEntity,
@@ -13,6 +14,7 @@ import { LeadFlowAutomationsController } from './leadflow-automations.controller
 import { LeadFlowAutomationConfigSchemaService } from './services/leadflow-automation-config-schema.service';
 import { LeadFlowAutomationCrmActionService } from './services/leadflow-automation-crm-action.service';
 import { LeadFlowAutomationEvaluationService } from './services/leadflow-automation-evaluation.service';
+import { LeadFlowAutomationEventIngressService } from './services/leadflow-automation-event-ingress.service';
 import { LeadFlowAutomationLifecycleService } from './services/leadflow-automation-lifecycle.service';
 import { LeadFlowAutomationRecipeService } from './services/leadflow-automation-recipe.service';
 import { LeadFlowAutomationRunService } from './services/leadflow-automation-run.service';
@@ -30,6 +32,7 @@ import { LeadFlowAutomationService } from './services/leadflow-automation.servic
         LeadFlowAutomationRunEntity,
         LeadFlowAutomationRunAttemptEntity,
         LeadFlowClientSettingsEntity,
+        LeadFlowEventDeliveryEntity,
       ],
       'agency',
     ),
@@ -42,6 +45,7 @@ import { LeadFlowAutomationService } from './services/leadflow-automation.servic
     LeadFlowAutomationConfigSchemaService,
     LeadFlowAutomationLifecycleService,
     LeadFlowAutomationEvaluationService,
+    LeadFlowAutomationEventIngressService,
     LeadFlowAutomationRunService,
     LeadFlowAutomationCrmActionService,
   ],

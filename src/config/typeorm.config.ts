@@ -275,6 +275,7 @@ import {
   LeadFlowAutomationRunEntity,
   LeadFlowAutomationVersionEntity,
 } from '../modules/leadflow-automations/entities';
+import { LeadFlowEventDeliveryEntity } from '../modules/leadflow-events/entities';
 
 export const agencyEntities = [
   NotificationEntity,
@@ -467,6 +468,7 @@ export const agencyEntities = [
   LeadFlowAutomationVersionEntity,
   LeadFlowAutomationRunEntity,
   LeadFlowAutomationRunAttemptEntity,
+  LeadFlowEventDeliveryEntity,
 ];
 
 export function getTypeOrmConfig(): TypeOrmModuleOptions {

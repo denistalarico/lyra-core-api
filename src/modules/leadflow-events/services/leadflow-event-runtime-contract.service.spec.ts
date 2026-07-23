@@ -55,9 +55,9 @@ describe('LeadFlowEventRuntimeContractService', () => {
   it('exposes the structural Inbox → CRM rule and trigger mappings', () => {
     const contract = service.buildRuntimeContract();
 
-    expect(
-      contract.structuralRules.everyConversationCreatesOpportunity,
-    ).toBe(true);
+    expect(contract.structuralRules.everyConversationCreatesOpportunity).toBe(
+      true,
+    );
     expect(contract.automationTriggerMappings.length).toBeGreaterThan(0);
     expect(
       contract.automationTriggerMappings.some(
@@ -71,8 +71,8 @@ describe('LeadFlowEventRuntimeContractService', () => {
   it('declares that no execution runtime exists', () => {
     const notice = service.buildRuntimeContract().unsupportedExecutionNotice;
 
-    expect(notice.eventBus).toBe(false);
-    expect(notice.persistence).toBe(false);
+    expect(notice.eventBus).toBe(true);
+    expect(notice.persistence).toBe(true);
     expect(notice.execution).toBe(false);
     expect(notice.redis).toBe(false);
     expect(notice.temporal).toBe(false);
@@ -116,15 +116,13 @@ describe('LeadFlowEventCatalogService', () => {
     expect(response.contractVersion).toBe(LEADFLOW_EVENT_CONTRACT_VERSION);
     expect(response.totalCount).toBe(LEADFLOW_EVENT_CATALOG.length);
     expect(response.items).toHaveLength(LEADFLOW_EVENT_CATALOG.length);
-    expect(
-      response.structuralRule.everyConversationCreatesOpportunity,
-    ).toBe(true);
+    expect(response.structuralRule.everyConversationCreatesOpportunity).toBe(
+      true,
+    );
   });
 
   it('returns one event with its related automation triggers', () => {
-    const response = service.getCatalogItem(
-      'leadflow.inbox.conversation.idle',
-    );
+    const response = service.getCatalogItem('leadflow.inbox.conversation.idle');
 
     expect(response.item.eventName).toBe('leadflow.inbox.conversation.idle');
     expect(response.relatedTriggers).toContainEqual(

@@ -15,7 +15,7 @@ import type {
  * In-memory LeadFlow event catalog (blueprint section 10) — the same pattern
  * used by Agents presets and Automations recipes. Nothing here is emitted,
  * persisted or executed; `status` describes the contract lifecycle only
- * (`active` = contract stable for a future runtime, `planned` = deferred).
+ * (`active` = stable and accepted by durable fan-out, `planned` = deferred).
  */
 
 function field(
@@ -35,7 +35,7 @@ const CHANGED_FIELDS: LeadFlowEventPayloadSchema = {
   ),
 };
 
-/** Future consumers declared at contract level. Nothing consumes events today. */
+/** Consumers declared at contract level; Automations has durable ingress. */
 const FUTURE_CONSUMERS = ['leadflow.automations', 'leadflow.analytics'];
 
 interface EventSeed {
@@ -441,7 +441,8 @@ export const LEADFLOW_EVENT_CATALOG: LeadFlowEventCatalogItem[] = [
   }),
   buildEvent({
     eventName: 'leadflow.automations.automation.activated',
-    description: 'Automação ativada (config-only; nada é executado).',
+    description:
+      'Automação ativada após validação de dependências e executores disponíveis.',
     requiredContext: ['automationId'],
     payloadSchema: {
       previousStatus: field('string', false, 'Status anterior.'),
