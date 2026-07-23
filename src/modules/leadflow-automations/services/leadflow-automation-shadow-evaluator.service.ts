@@ -70,15 +70,22 @@ export class LeadFlowAutomationShadowEvaluatorService {
     );
     if (matches.length === 0) return [];
 
+    // One batched context load for the whole delivery: every matched automation
+    // reacting to the same event asks about the same conversation and
+    // opportunity, so the reads are shared rather than repeated per automation.
+    const resolutions = await this.contextService.resolveForDelivery(
+      matches.map((match) => match.automation),
+      delivery,
+    );
+
     const summaries: ShadowEvaluationSummary[] = [];
 
     for (const match of matches) {
       const { automation, source, version } = match;
       const recipe = this.publishedRecipe(automation);
-      const resolution = this.contextService.resolveFromEnvelope(
-        automation,
-        delivery,
-      );
+      const resolution =
+        resolutions.get(automation.id) ??
+        this.contextService.resolveFromEnvelope(automation, delivery);
       const evaluated = this.evaluationService.evaluate(
         automation,
         recipe,

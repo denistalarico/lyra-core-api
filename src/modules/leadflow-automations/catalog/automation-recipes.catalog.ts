@@ -52,7 +52,7 @@ export const LEADFLOW_AUTOMATION_TRIGGER_KINDS: Record<
   'opportunity.created': 'event',
   'opportunity.stage_changed': 'event',
   'opportunity.score_changed': 'event',
-  'opportunity.hot_lead_detected': 'derived',
+  'opportunity.hot_lead_detected': 'event',
   'opportunity.missing_fields_detected': 'derived',
   'appointment.created': 'event',
   'appointment.confirmation_pending': 'derived',
@@ -335,7 +335,10 @@ const ESSENTIAL_SEEDS: RecipeSeed[] = [
   },
   {
     key: 'hot_lead_notification',
-    requiredDependencies: [LeadFlowAutomationDependency.EventFanOut],
+    requiredDependencies: [
+      LeadFlowAutomationDependency.EventFanOut,
+      LeadFlowAutomationDependency.LeadScoreEngine,
+    ],
     name: 'Lead quente detectado',
     description:
       'Avisa o responsável quando o score/intenção do lead ultrapassa um limiar.',

@@ -21,6 +21,15 @@ import { LeadFlowAutomationEventIngressService } from './leadflow-automation-eve
 import { LeadFlowAutomationRunService } from './leadflow-automation-run.service';
 import { LeadFlowAutomationShadowEvaluatorService } from './leadflow-automation-shadow-evaluator.service';
 import { LeadFlowAutomationTriggerMatcherService } from './leadflow-automation-trigger-matcher.service';
+import { LeadFlowAutomationContextLoaderService } from './leadflow-automation-context-loader.service';
+import { CrmOpportunityFieldCatalogService } from '../../crm/services/crm-opportunity-field-catalog.service';
+import { LeadScoreQueryService } from '../../crm/lead-score/services/lead-score-query.service';
+import { CrmLeadScoreStateEntity } from '../../crm/lead-score/entities/crm-lead-score-state.entity';
+import { CrmOpportunityEntity } from '../../crm/entities/crm-opportunity.entity';
+import { InboxConversationEntity } from '../../inbox/entities/inbox-conversation.entity';
+import { InboxMessageEntity } from '../../inbox/entities/inbox-message.entity';
+import { InboxSettingsEntity } from '../../inbox/entities/inbox-settings.entity';
+import { LeadFlowBusinessModeTemplateEntity } from '../../leadflow-settings/entities';
 
 const run =
   process.env.INBOX_PG_INTEGRATION === 'true' ? describe : describe.skip;
@@ -42,9 +51,23 @@ run('LeadFlow Automations shadow runtime PostgreSQL', () => {
       AgencyDataSource.getRepository(LeadFlowAutomationRunAttemptEntity),
       AgencyDataSource,
     );
+    const fieldCatalog = new CrmOpportunityFieldCatalogService(
+      AgencyDataSource.getRepository(LeadFlowBusinessModeTemplateEntity),
+    );
+    const loader = new LeadFlowAutomationContextLoaderService(
+      AgencyDataSource.getRepository(InboxConversationEntity),
+      AgencyDataSource.getRepository(InboxMessageEntity),
+      AgencyDataSource.getRepository(InboxSettingsEntity),
+      AgencyDataSource.getRepository(CrmOpportunityEntity),
+      AgencyDataSource.getRepository(LeadFlowAutomationRunEntity),
+      new LeadScoreQueryService(
+        AgencyDataSource.getRepository(CrmLeadScoreStateEntity),
+      ),
+      fieldCatalog,
+    );
     shadowEvaluator = new LeadFlowAutomationShadowEvaluatorService(
       matcher,
-      new LeadFlowAutomationContextService(),
+      new LeadFlowAutomationContextService(loader),
       new LeadFlowAutomationEvaluationService(),
       runService,
     );

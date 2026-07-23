@@ -14,6 +14,10 @@ import { LeadFlowAutomationsController } from './leadflow-automations.controller
 import { LeadFlowAutomationConfigSchemaService } from './services/leadflow-automation-config-schema.service';
 import { LeadFlowAutomationCrmActionService } from './services/leadflow-automation-crm-action.service';
 import { LeadFlowAutomationContextService } from './services/leadflow-automation-context.service';
+import {
+  LeadFlowAutomationContextLoaderService,
+  LEADFLOW_CONTEXT_LOADER_ENTITIES,
+} from './services/leadflow-automation-context-loader.service';
 import { LeadFlowAutomationEvaluationService } from './services/leadflow-automation-evaluation.service';
 import { LeadFlowAutomationEventIngressService } from './services/leadflow-automation-event-ingress.service';
 import { LeadFlowAutomationLifecycleService } from './services/leadflow-automation-lifecycle.service';
@@ -36,6 +40,7 @@ import { LeadFlowAutomationService } from './services/leadflow-automation.servic
         LeadFlowAutomationRunAttemptEntity,
         LeadFlowClientSettingsEntity,
         LeadFlowEventDeliveryEntity,
+        ...LEADFLOW_CONTEXT_LOADER_ENTITIES,
       ],
       'agency',
     ),
@@ -48,6 +53,7 @@ import { LeadFlowAutomationService } from './services/leadflow-automation.servic
     LeadFlowAutomationConfigSchemaService,
     LeadFlowAutomationLifecycleService,
     LeadFlowAutomationContextService,
+    LeadFlowAutomationContextLoaderService,
     LeadFlowAutomationEvaluationService,
     LeadFlowAutomationEventIngressService,
     LeadFlowAutomationRunService,

@@ -3,13 +3,13 @@ import {
   type LeadFlowAutomationRecipeCatalogItem,
 } from '../catalog/automation-recipes.catalog';
 import type { LeadFlowAutomationEntity } from '../entities/leadflow-automation.entity';
-import { LeadFlowAutomationDependency } from '../enums/leadflow-automation-dependency.enum';
 import {
   LeadFlowAutomationRunStatus,
   LeadFlowAutomationSkipReason,
 } from '../enums/leadflow-automation-run.enums';
 import { LeadFlowAutomationContextSignal } from '../types/leadflow-automation-context.types';
 import { LeadFlowAutomationContextService } from './leadflow-automation-context.service';
+import type { LeadFlowAutomationContextLoaderService } from './leadflow-automation-context-loader.service';
 import {
   LeadFlowAutomationEvaluationService,
   type LeadFlowAutomationEvaluationContext,
@@ -42,7 +42,14 @@ function buildAutomation(
 
 describe('LeadFlowAutomationEvaluationService', () => {
   const service = new LeadFlowAutomationEvaluationService();
-  const contextService = new LeadFlowAutomationContextService();
+  const contextService = new LeadFlowAutomationContextService({
+    load: jest.fn().mockResolvedValue({
+      shared: {},
+      perAutomation: new Map(),
+      gaps: [],
+      cost: { queryCount: 0, durationMs: 0, sources: [] },
+    }),
+  } as unknown as LeadFlowAutomationContextLoaderService);
 
   /**
    * Evaluates the way the dry-run endpoint does: context is resolved first, so
@@ -166,36 +173,33 @@ describe('LeadFlowAutomationEvaluationService', () => {
     it('never lets an absent score satisfy the threshold it is compared against', () => {
       // The defect this replaces: the score defaulted to the configured minimum,
       // so `minScore` always passed and the automation reported it would act on
-      // a lead nobody had measured.
+      // a lead nobody had measured. With the Score Engine live the simulator
+      // still refuses to invent one — the operator must state it.
       const result = simulate(scored());
 
       expect(result.wouldAct).toBe(false);
       expect(result.context.leadScore).toBeUndefined();
       expect(result.skipReason).toBe(
-        LeadFlowAutomationSkipReason.DependencyUnavailable,
+        LeadFlowAutomationSkipReason.MissingContext,
       );
     });
 
-    it('names the missing capability rather than blaming the lead', () => {
+    it('asks the operator for a value instead of blaming the lead', () => {
       const result = simulate(scored());
 
       const gap = result.gaps.find(
         (item) => item.signal === LeadFlowAutomationContextSignal.LeadScore,
       );
-      expect(gap?.gap).toBe('dependency_unavailable');
-      expect(gap?.dependency).toBe(
-        LeadFlowAutomationDependency.LeadScoreEngine,
-      );
+      expect(gap?.gap).toBe('missing_context');
+      expect(gap?.detail).toContain('informe um valor');
     });
 
-    it('refuses an asserted score too, because the live automation could not use one', () => {
-      // A simulation that validated a threshold the platform cannot evaluate
-      // would report a working configuration that can never work.
-      const result = simulate(scored(), { leadScore: 90 });
-
-      expect(result.wouldAct).toBe(false);
-      expect(result.skipReason).toBe(
-        LeadFlowAutomationSkipReason.DependencyUnavailable,
+    it('evaluates an asserted score now that the Score Engine is canonical', () => {
+      // The capability exists, so exploring a hypothetical score is a valid
+      // simulation rather than a promise the platform cannot keep.
+      expect(simulate(scored(), { leadScore: 90 }).wouldAct).toBe(true);
+      expect(simulate(scored(), { leadScore: 40 }).skipReason).toBe(
+        LeadFlowAutomationSkipReason.ScoreBelowThreshold,
       );
     });
 

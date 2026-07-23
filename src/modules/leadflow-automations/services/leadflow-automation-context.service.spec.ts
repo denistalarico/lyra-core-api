@@ -5,12 +5,12 @@ import {
 } from '../catalog/automation-recipes.catalog';
 import { requiredContextSignals } from '../catalog/automation-context-requirements.catalog';
 import type { LeadFlowAutomationEntity } from '../entities/leadflow-automation.entity';
-import { LeadFlowAutomationDependency } from '../enums/leadflow-automation-dependency.enum';
 import {
   LEADFLOW_AUTOMATION_CONTEXT_MAX_EVENT_AGE_MS,
   LeadFlowAutomationContextSignal,
 } from '../types/leadflow-automation-context.types';
 import { LeadFlowAutomationContextService } from './leadflow-automation-context.service';
+import type { LeadFlowAutomationContextLoaderService } from './leadflow-automation-context-loader.service';
 
 const idleLead = getRecipeByKey(
   'followup_idle_lead',
@@ -94,7 +94,14 @@ describe('requiredContextSignals', () => {
 });
 
 describe('LeadFlowAutomationContextService', () => {
-  const service = new LeadFlowAutomationContextService();
+  const service = new LeadFlowAutomationContextService({
+    load: jest.fn().mockResolvedValue({
+      shared: {},
+      perAutomation: new Map(),
+      gaps: [],
+      cost: { queryCount: 0, durationMs: 0, sources: [] },
+    }),
+  } as unknown as LeadFlowAutomationContextLoaderService);
 
   describe('resolveFromEnvelope', () => {
     it('performs no reads', () => {
@@ -185,7 +192,9 @@ describe('LeadFlowAutomationContextService', () => {
       ).toBe('stale_context');
     });
 
-    it('reports a signal with no producing capability as a dependency gap', () => {
+    it('reports an unloaded canonical signal as missing, not as a refusal', () => {
+      // Envelope-only resolution performs no reads, so a score that would need
+      // the canonical query stays a gap here; the batched path loads it.
       const resolution = service.resolveFromEnvelope(
         buildAutomation({
           conditionConfig: { minScore: 70 },
@@ -196,13 +205,8 @@ describe('LeadFlowAutomationContextService', () => {
       );
 
       expect(
-        resolution.gaps[LeadFlowAutomationContextSignal.LeadScore],
-      ).toEqual(
-        expect.objectContaining({
-          gap: 'dependency_unavailable',
-          dependency: LeadFlowAutomationDependency.LeadScoreEngine,
-        }),
-      );
+        resolution.gaps[LeadFlowAutomationContextSignal.LeadScore]?.gap,
+      ).toBe('missing_context');
     });
 
     it('records the age of the event it evaluated', () => {
@@ -239,7 +243,7 @@ describe('LeadFlowAutomationContextService', () => {
       ).toEqual({ origin: 'operator', value: 2 });
     });
 
-    it('never stands in for a signal with no canonical source', () => {
+    it('accepts an asserted score as an operator hypothesis', () => {
       const resolution = service.resolveForSimulation(
         buildAutomation({
           conditionConfig: { minScore: 70 },
@@ -249,10 +253,25 @@ describe('LeadFlowAutomationContextService', () => {
         { leadScore: 90 },
       );
 
+      expect(resolution.context.leadScore).toBe(90);
+      expect(
+        resolution.snapshot.resolved[LeadFlowAutomationContextSignal.LeadScore],
+      ).toEqual({ origin: 'operator', value: 90 });
+    });
+
+    it('never invents a score the operator did not state', () => {
+      const resolution = service.resolveForSimulation(
+        buildAutomation({
+          conditionConfig: { minScore: 70 },
+          actionConfig: {},
+          schedulePolicy: {},
+        }),
+      );
+
       expect(resolution.context.leadScore).toBeUndefined();
       expect(
         resolution.gaps[LeadFlowAutomationContextSignal.LeadScore]?.gap,
-      ).toBe('dependency_unavailable');
+      ).toBe('missing_context');
     });
 
     it('leaves a signal the simulator cannot invent as an explicit gap', () => {

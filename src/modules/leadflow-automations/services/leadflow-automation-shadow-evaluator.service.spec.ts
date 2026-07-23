@@ -10,7 +10,6 @@ import {
   LeadFlowAutomationRunStatus,
   LeadFlowAutomationSkipReason,
 } from '../enums/leadflow-automation-run.enums';
-import { LeadFlowAutomationDependency } from '../enums/leadflow-automation-dependency.enum';
 import { LeadFlowAutomationStatus } from '../enums/leadflow-automation-status.enum';
 import {
   LEADFLOW_AUTOMATION_CONTEXT_MAX_EVENT_AGE_MS,
@@ -19,6 +18,7 @@ import {
   type LeadFlowAutomationContextSnapshot,
 } from '../types/leadflow-automation-context.types';
 import { LeadFlowAutomationContextService } from './leadflow-automation-context.service';
+import type { LeadFlowAutomationContextLoaderService } from './leadflow-automation-context-loader.service';
 import { LeadFlowAutomationEvaluationService } from './leadflow-automation-evaluation.service';
 import type { LeadFlowAutomationRunService } from './leadflow-automation-run.service';
 import { LeadFlowAutomationShadowEvaluatorService } from './leadflow-automation-shadow-evaluator.service';
@@ -134,7 +134,14 @@ describe('LeadFlowAutomationShadowEvaluatorService', () => {
 
     const service = new LeadFlowAutomationShadowEvaluatorService(
       matcher,
-      new LeadFlowAutomationContextService(),
+      new LeadFlowAutomationContextService({
+        load: jest.fn().mockResolvedValue({
+          shared: {},
+          perAutomation: new Map(),
+          gaps: [],
+          cost: { queryCount: 0, durationMs: 0, sources: [] },
+        }),
+      } as unknown as LeadFlowAutomationContextLoaderService),
       new LeadFlowAutomationEvaluationService(),
       runService,
     );
@@ -273,7 +280,9 @@ describe('LeadFlowAutomationShadowEvaluatorService', () => {
       );
     });
 
-    it('reports a score condition as a platform dependency, never as a lead that failed it', async () => {
+    it('reports an unscored opportunity as missing context, never as a lead that failed', async () => {
+      // The loader answered nothing for this opportunity: the verdict must say
+      // "could not check", not "the score was too low".
       const { service, recordShadowRun } = build([
         buildMatch({
           conditionConfig: { ...idleLead.defaultConditionConfig, minScore: 70 },
@@ -287,10 +296,7 @@ describe('LeadFlowAutomationShadowEvaluatorService', () => {
         contextSnapshot,
         LeadFlowAutomationContextSignal.LeadScore,
       );
-      expect(gap?.gap).toBe('dependency_unavailable');
-      expect(gap?.dependency).toBe(
-        LeadFlowAutomationDependency.LeadScoreEngine,
-      );
+      expect(gap?.gap).toBe('missing_context');
     });
 
     it('refuses to choose between disagreeing subject references', async () => {

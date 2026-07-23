@@ -19,6 +19,7 @@ import {
   type LeadFlowAutomationSignalOrigin,
 } from '../types/leadflow-automation-context.types';
 import type { LeadFlowAutomationEvaluationContext } from './leadflow-automation-evaluation.service';
+import { LeadFlowAutomationContextLoaderService } from './leadflow-automation-context-loader.service';
 
 export interface LeadFlowAutomationContextResolution {
   snapshot: LeadFlowAutomationContextSnapshot;
@@ -77,6 +78,10 @@ const GAP_PRECEDENCE: LeadFlowAutomationContextGap[] = [
  */
 @Injectable()
 export class LeadFlowAutomationContextService {
+  constructor(
+    private readonly loader: LeadFlowAutomationContextLoaderService,
+  ) {}
+
   /**
    * Context for a real delivered trigger.
    *
@@ -139,6 +144,159 @@ export class LeadFlowAutomationContextService {
       eventAgeMs,
       durationMs: Date.now() - startedAt,
     });
+  }
+
+  /**
+   * Context for every automation matched by one delivery, in one pass.
+   *
+   * Two phases on purpose. First each automation declares what its published
+   * configuration consults — no reads, so an event that concerns nobody costs
+   * nothing. Then the union of those signals is loaded once, and each
+   * automation is assembled from the shared result.
+   *
+   * Loading per automation instead would multiply the cost of a workspace's
+   * configuration by every message that arrives: ten follow-up recipes on the
+   * same conversation would ask the same question ten times.
+   */
+  async resolveForDelivery(
+    automations: LeadFlowAutomationEntity[],
+    delivery: LeadFlowEventDeliveryEntity,
+    now: Date = new Date(),
+  ): Promise<Map<string, LeadFlowAutomationContextResolution>> {
+    const startedAt = Date.now();
+    const { subjects, ambiguous } = this.resolveSubjects(delivery);
+    const eventAgeMs = Math.max(
+      0,
+      now.getTime() - delivery.occurredAt.getTime(),
+    );
+    const stale = eventAgeMs > LEADFLOW_AUTOMATION_CONTEXT_MAX_EVENT_AGE_MS;
+
+    const requiredByAutomation = new Map<
+      string,
+      LeadFlowAutomationContextSignal[]
+    >();
+    const loadable = new Set<LeadFlowAutomationContextSignal>();
+
+    for (const automation of automations) {
+      const required = requiredContextSignals(automation);
+      requiredByAutomation.set(automation.id, required);
+      for (const signal of required) {
+        const spec = LEADFLOW_AUTOMATION_CONTEXT_SIGNAL_SPECS[signal];
+        // A capability that does not exist cannot be read, and a signal the
+        // event already evidences does not need to be.
+        if (spec.dependency && !isDependencySatisfied(spec.dependency))
+          continue;
+        if (this.signalFromEvent(signal, delivery) !== undefined) continue;
+        loadable.add(signal);
+      }
+    }
+
+    const loaded = await this.loader.load({
+      tenantId: delivery.tenantId,
+      workspaceId: delivery.workspaceId,
+      subjects,
+      signals: loadable,
+      triggerMessageId:
+        typeof delivery.payload?.messageId === 'string'
+          ? delivery.payload.messageId
+          : null,
+      automationIds: automations.map((automation) => automation.id),
+      now,
+    });
+    const loadedGaps = new Map(
+      loaded.gaps.map((record) => [record.signal, record]),
+    );
+
+    const resolutions = new Map<string, LeadFlowAutomationContextResolution>();
+
+    for (const automation of automations) {
+      const required = requiredByAutomation.get(automation.id) ?? [];
+      const context: LeadFlowAutomationEvaluationContext = {};
+      const resolved: LeadFlowAutomationContextSnapshot['resolved'] = {};
+      const gaps: LeadFlowAutomationContextGapRecord[] = [];
+      const own = loaded.perAutomation.get(automation.id) ?? {};
+
+      for (const signal of required) {
+        const spec = LEADFLOW_AUTOMATION_CONTEXT_SIGNAL_SPECS[signal];
+
+        if (spec.dependency && !isDependencySatisfied(spec.dependency)) {
+          gaps.push({
+            signal,
+            gap: 'dependency_unavailable',
+            detail: LEADFLOW_AUTOMATION_DEPENDENCY_LABELS[spec.dependency],
+            dependency: spec.dependency,
+          });
+          continue;
+        }
+
+        const fromEvent = this.signalFromEvent(signal, delivery);
+        if (fromEvent !== undefined) {
+          this.assign(context, signal, fromEvent);
+          resolved[signal] = { origin: 'from_event', value: fromEvent };
+          continue;
+        }
+
+        // Ambiguity is decided from the envelope and outranks anything a
+        // loader could have returned: reading either candidate would be a guess.
+        if (ambiguous.has(spec.subject)) {
+          gaps.push(
+            this.canonicalGap(signal, spec.subject, subjects, ambiguous, stale),
+          );
+          continue;
+        }
+
+        const value = signal in own ? own[signal] : loaded.shared[signal];
+        if (value === undefined) {
+          gaps.push(
+            loadedGaps.get(signal) ??
+              this.canonicalGap(
+                signal,
+                spec.subject,
+                subjects,
+                ambiguous,
+                stale,
+              ),
+          );
+          continue;
+        }
+
+        // A value read now describes now. If the event waited too long, the
+        // reading may not describe the moment that triggered it.
+        if (stale) {
+          gaps.push({
+            signal,
+            gap: 'stale_context',
+            detail: `${spec.label}: o evento demorou demais para ser processado e o estado atual pode não descrever o momento em que ele ocorreu.`,
+            dependency: null,
+          });
+          continue;
+        }
+
+        this.assign(context, signal, value);
+        resolved[signal] = { origin: 'canonical_read', value };
+      }
+
+      const resolution = this.buildResolution({
+        required,
+        subjects,
+        resolved,
+        gaps,
+        context,
+        capturedAt: now,
+        eventAgeMs,
+        durationMs: Date.now() - startedAt,
+      });
+      // Cost is a property of the delivery, reported on every run it produced
+      // so a single expensive event is visible from any of them.
+      resolution.snapshot.cost = {
+        queryCount: loaded.cost.queryCount,
+        durationMs: loaded.cost.durationMs,
+        sources: loaded.cost.sources,
+      };
+      resolutions.set(automation.id, resolution);
+    }
+
+    return resolutions;
   }
 
   /**
