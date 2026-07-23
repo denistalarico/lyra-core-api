@@ -7,6 +7,7 @@ import {
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, EntityManager, IsNull, Raw } from 'typeorm';
 import { RequestContext } from '../../../common/context/request-context.interface';
+import { isAddressableOpportunityField } from '../catalog/crm-opportunity-field.catalog';
 import {
   CreateCrmStageTransitionPolicyDto,
   PatchCrmStageTransitionPolicyDto,
@@ -20,26 +21,6 @@ import {
   CrmStageTransitionPolicyEntity,
 } from '../entities/crm-stage-transition-policy.entity';
 import type { CrmCommandActor } from './crm-opportunity-command.service';
-
-const CANONICAL_FIELDS = new Set([
-  'contactId',
-  'contactName',
-  'contactEmail',
-  'contactPhone',
-  'title',
-  'description',
-  'valueAmount',
-  'currency',
-  'priority',
-  'source',
-  'businessMode',
-  'operationalStatus',
-  'assignedUserId',
-  'expectedCloseDate',
-  'nextFollowUpAt',
-  'lastActivityAt',
-  'lostReason',
-]);
 
 export type CrmAiStageTransitionCatalog = {
   opportunityId: string;
@@ -590,10 +571,10 @@ export class CrmStageTransitionPolicyService {
   }
 
   private assertField(field: string): void {
-    if (
-      !CANONICAL_FIELDS.has(field) &&
-      !/^businessContext\.[A-Za-z0-9_-]{1,80}$/.test(field)
-    ) {
+    // Structural, not catalog-scoped: a published policy must not become
+    // invalid because the client later switched Business Mode. The catalog
+    // decides what to offer an operator; this decides what is addressable.
+    if (!isAddressableOpportunityField(field)) {
       throw new BadRequestException(`Unsupported transition field: ${field}.`);
     }
   }

@@ -43,6 +43,7 @@ import {
   PatchCrmStageTransitionPolicyDto,
 } from './dto/crm-stage-transition-policy.dto';
 import { CrmStageTransitionPolicyService } from './services/crm-stage-transition-policy.service';
+import { CrmOpportunityFieldCatalogService } from './services/crm-opportunity-field-catalog.service';
 import { TransferCrmOpportunityDto } from './dto/transfer-crm-opportunity.dto';
 import { CopyCrmOpportunityDto } from './dto/copy-crm-opportunity.dto';
 import { ReconvertCrmOpportunityDto } from './dto/reconvert-crm-opportunity.dto';
@@ -54,6 +55,7 @@ export class CrmController {
   constructor(
     private readonly crmService: CrmService,
     private readonly transitionPolicies: CrmStageTransitionPolicyService,
+    private readonly fieldCatalog: CrmOpportunityFieldCatalogService,
   ) {}
 
   @Get('tags')
@@ -139,6 +141,22 @@ export class CrmController {
     @Param('id') id: string,
   ) {
     return this.crmService.deletePipeline(ctx, id);
+  }
+
+  /**
+   * Fields a transition policy may require, named for an operator.
+   *
+   * `businessMode` selects which qualification fields the client declared; the
+   * response says whether it actually resolved, so the UI can distinguish "this
+   * mode has no qualification fields" from "we could not find the mode".
+   */
+  @Get('opportunity-fields')
+  @RequirePermission('leadflow.crm.records.view.client')
+  listOpportunityFields(
+    @RequestContextData() ctx: RequestContext,
+    @Query('businessMode') businessMode?: string,
+  ) {
+    return this.fieldCatalog.listFields(ctx, businessMode ?? null);
   }
 
   @Get('stage-transition-policies')

@@ -17,6 +17,8 @@ import { InboxConversationEntity } from '../inbox/entities/inbox-conversation.en
 import { CrmOpportunityCommandService } from './services/crm-opportunity-command.service';
 import { CrmStageTransitionPolicyEntity } from './entities/crm-stage-transition-policy.entity';
 import { CrmStageTransitionPolicyService } from './services/crm-stage-transition-policy.service';
+import { CrmOpportunityFieldCatalogService } from './services/crm-opportunity-field-catalog.service';
+import { LeadFlowBusinessModeTemplateEntity } from '../leadflow-settings/entities';
 
 @Module({
   imports: [
@@ -34,6 +36,7 @@ import { CrmStageTransitionPolicyService } from './services/crm-stage-transition
         InboxDomainOutboxEntity,
         InboxConversationEntity,
         ContactEntity,
+        LeadFlowBusinessModeTemplateEntity,
       ],
       'agency',
     ),
@@ -43,12 +46,14 @@ import { CrmStageTransitionPolicyService } from './services/crm-stage-transition
     CrmService,
     CrmOpportunityCommandService,
     CrmStageTransitionPolicyService,
+    CrmOpportunityFieldCatalogService,
     SalesNotificationPublisher,
   ],
   exports: [
     CrmService,
     CrmOpportunityCommandService,
     CrmStageTransitionPolicyService,
+    CrmOpportunityFieldCatalogService,
     SalesNotificationPublisher,
   ],
 })
