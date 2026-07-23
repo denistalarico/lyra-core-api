@@ -7,9 +7,9 @@ import {
   LeadFlowAutomationSkipReason,
 } from '../enums/leadflow-automation-run.enums';
 import { LeadFlowAutomationStatus } from '../enums/leadflow-automation-status.enum';
+import { LeadFlowAutomationContextService } from './leadflow-automation-context.service';
 import {
   LeadFlowAutomationEvaluationService,
-  type LeadFlowAutomationEvaluationContext,
   type LeadFlowAutomationEvaluationRecipe,
 } from './leadflow-automation-evaluation.service';
 import { LeadFlowAutomationRunService } from './leadflow-automation-run.service';
@@ -18,22 +18,14 @@ import {
   LeadFlowAutomationTriggerMatcherService,
 } from './leadflow-automation-trigger-matcher.service';
 
-/**
- * Signals a condition may depend on, and where each one came from.
- *
- * Recorded per run because a verdict computed from defaults is weaker than one
- * computed from observed state, and the difference must be visible. Without
- * this an operator could read "would act" as certainty when half the inputs
- * were assumptions.
- */
-export type SignalOrigin = 'from_event' | 'defaulted';
-
 export interface ShadowEvaluationSummary {
   automationId: string;
   automationVersionId: string;
   runId: string;
   wouldAct: boolean;
   blockedByExecutor: boolean;
+  /** Required signals that could not be established for this evaluation. */
+  contextGapCount: number;
 }
 
 /**
@@ -45,11 +37,16 @@ export interface ShadowEvaluationSummary {
  * every action still resolves to an unavailable executor — so the value here is
  * observability: seeing which automations *would* have fired on real traffic,
  * before any effect is switched on.
+ *
+ * Context is resolved per automation and only for the signals that automation's
+ * published configuration actually consults, so an event concerning nobody
+ * costs nothing beyond the match query.
  */
 @Injectable()
 export class LeadFlowAutomationShadowEvaluatorService {
   constructor(
     private readonly matcher: LeadFlowAutomationTriggerMatcherService,
+    private readonly contextService: LeadFlowAutomationContextService,
     private readonly evaluationService: LeadFlowAutomationEvaluationService,
     private readonly runService: LeadFlowAutomationRunService,
   ) {}
@@ -64,6 +61,8 @@ export class LeadFlowAutomationShadowEvaluatorService {
   async evaluateDelivery(
     delivery: LeadFlowEventDeliveryEntity,
   ): Promise<ShadowEvaluationSummary[]> {
+    // Envelope-only filtering first: tenant, workspace and trigger decide
+    // relevance before any context work is even considered.
     const matches = await this.matcher.findMatching(
       delivery.tenantId,
       delivery.workspaceId,
@@ -71,16 +70,20 @@ export class LeadFlowAutomationShadowEvaluatorService {
     );
     if (matches.length === 0) return [];
 
-    const { context, origins } = this.deriveContext(delivery);
     const summaries: ShadowEvaluationSummary[] = [];
 
     for (const match of matches) {
       const { automation, source, version } = match;
       const recipe = this.publishedRecipe(automation);
+      const resolution = this.contextService.resolveFromEnvelope(
+        automation,
+        delivery,
+      );
       const evaluated = this.evaluationService.evaluate(
         automation,
         recipe,
-        context,
+        resolution.context,
+        resolution.gaps,
       );
       const evaluation =
         source.status === LeadFlowAutomationStatus.Active
@@ -104,7 +107,7 @@ export class LeadFlowAutomationShadowEvaluatorService {
         evaluation,
         {
           delivery,
-          signalOrigins: origins,
+          contextSnapshot: resolution.snapshot,
           unavailableActions: blocked,
         },
       );
@@ -115,6 +118,7 @@ export class LeadFlowAutomationShadowEvaluatorService {
         runId: run.id,
         wouldAct: evaluation.wouldAct,
         blockedByExecutor: blocked.length > 0,
+        contextGapCount: resolution.snapshot.gaps.length,
       });
     }
 
@@ -147,50 +151,5 @@ export class LeadFlowAutomationShadowEvaluatorService {
       trigger,
       triggerKind: 'event',
     };
-  }
-
-  /**
-   * Builds an evaluation context from the event payload alone.
-   *
-   * Deliberately does not read the CRM or Inbox to enrich it. Reading canonical
-   * state from here would put cross-domain queries inside a background loop that
-   * runs on every event, and the value does not yet justify that coupling — the
-   * outcome is recorded, not acted on. Signals the payload cannot supply are
-   * marked `defaulted` so the verdict is never mistaken for a full observation.
-   */
-  private deriveContext(delivery: LeadFlowEventDeliveryEntity): {
-    context: LeadFlowAutomationEvaluationContext;
-    origins: Record<string, SignalOrigin>;
-  } {
-    const payload = delivery.payload ?? {};
-    const context: LeadFlowAutomationEvaluationContext = {};
-    const origins: Record<string, SignalOrigin> = {
-      leadScore: 'defaulted',
-      leadReplied: 'defaulted',
-      handoffActive: 'defaulted',
-      insideBusinessHours: 'defaulted',
-      attemptsSoFar: 'defaulted',
-      hoursSinceLastRun: 'defaulted',
-    };
-
-    const score = payload.score ?? payload.leadScore;
-    if (typeof score === 'number' && Number.isFinite(score)) {
-      context.leadScore = score;
-      origins.leadScore = 'from_event';
-    }
-
-    // A handoff event is itself the evidence; no lookup needed.
-    if (delivery.eventName.includes('handoff')) {
-      context.handoffActive = true;
-      origins.handoffActive = 'from_event';
-    }
-
-    // An inbound message event means the lead has spoken.
-    if (delivery.eventName.includes('message.received')) {
-      context.leadReplied = true;
-      origins.leadReplied = 'from_event';
-    }
-
-    return { context, origins };
   }
 }

@@ -18,6 +18,30 @@ import type {
  * No productive executor exists yet — see {@link UnavailableExecutor}.
  */
 
+/**
+ * The obligation to confirm the decision still holds before acting on it.
+ *
+ * A verdict is computed from state read at some earlier moment; by the time an
+ * effect is requested that state may have moved — the lead replied, the
+ * opportunity changed stage, a human took over. Carrying this on every request
+ * makes the re-read impossible to forget: an executor receives the premise it
+ * is expected to re-verify, not just the instruction.
+ */
+export interface AutomationEffectRevalidation {
+  /** Format of the context snapshot the decision was computed from. */
+  contextSchemaVersion: number;
+  /** When that context was captured. */
+  capturedAt: string;
+  /** Subjects the decision was about, by kind. */
+  subjects: Record<string, string>;
+  /**
+   * Version the target aggregate had when the decision was made, for domains
+   * that expose optimistic concurrency. Null only when the target has none —
+   * never as a way to opt out of the check.
+   */
+  expectedVersion: number | null;
+}
+
 export interface AutomationEffectRequest {
   tenantId: string;
   workspaceId: string;
@@ -31,8 +55,19 @@ export interface AutomationEffectRequest {
    * This is what makes a retry safe, so it is required rather than optional.
    */
   idempotencyKey: string;
+  /**
+   * Who the effect is attributed to in the owning domain.
+   *
+   * Required, not optional: an effect nobody can be held responsible for must
+   * not be attempted at all. An executor that cannot resolve an actor fails
+   * closed rather than acting as the system.
+   */
+  actorRef: string;
+  /** Governing policy of the owning domain, resolved before the request. */
+  policyRef: string;
   /** Action-specific input, already validated against the recipe schema. */
   payload: LeadFlowJsonObject;
+  revalidation: AutomationEffectRevalidation;
 }
 
 export type AutomationEffectStatus =
@@ -90,7 +125,12 @@ export interface AutomationExecutor {
 
   /**
    * Requests the effect from its owning domain.
-   * Implementations must be idempotent on `request.idempotencyKey`.
+   *
+   * Implementations must be idempotent on `request.idempotencyKey`, and must
+   * re-read canonical state before acting, refusing when it no longer matches
+   * `request.revalidation`. The decision that produced this request was made
+   * against a snapshot; acting without confirming it is acting on a premise
+   * that may already be false.
    */
   execute(request: AutomationEffectRequest): Promise<AutomationEffectResult>;
 }

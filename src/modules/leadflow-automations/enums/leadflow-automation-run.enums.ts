@@ -45,7 +45,21 @@ export enum LeadFlowAutomationSkipReason {
   BlockedByDependency = 'blocked_by_dependency',
   NotActive = 'not_active',
   IncompleteConfiguration = 'incomplete_configuration',
+  /** A condition was evaluated against a known value and said no. */
   ConditionNotMet = 'condition_not_met',
+  /**
+   * A signal the configuration requires was not established, so no condition
+   * depending on it could be evaluated. Deliberately not the same as
+   * `ConditionNotMet`: "I checked and the answer is no" and "I could not check"
+   * are different facts, and only the first is a working automation.
+   */
+  MissingContext = 'missing_context',
+  /** Sources disagreed about which subject the event concerns. */
+  AmbiguousContext = 'ambiguous_context',
+  /** The event waited long enough that current state may not describe it. */
+  StaleContext = 'stale_context',
+  /** No platform capability produces the required signal at all. */
+  DependencyUnavailable = 'dependency_unavailable',
   OutsideBusinessHours = 'outside_business_hours',
   LeadReplied = 'lead_replied',
   HandoffInProgress = 'handoff_in_progress',

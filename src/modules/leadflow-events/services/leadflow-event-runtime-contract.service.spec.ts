@@ -62,10 +62,21 @@ describe('LeadFlowEventRuntimeContractService', () => {
     expect(
       contract.automationTriggerMappings.some(
         (mapping) =>
-          mapping.trigger === 'conversation.idle' &&
-          mapping.eventName === 'leadflow.inbox.conversation.idle',
+          mapping.trigger === 'conversation.replied' &&
+          mapping.eventName === 'leadflow.inbox.conversation.message.received',
       ),
     ).toBe(true);
+  });
+
+  it('only claims a trigger is mapped when an event name backs it', () => {
+    // A trigger advertised as mapped is a promise that something will arrive.
+    const contract = service.buildRuntimeContract();
+
+    for (const mapping of contract.automationTriggerMappings) {
+      if (mapping.status === 'mapped') {
+        expect(mapping.eventName).toEqual(expect.any(String));
+      }
+    }
   });
 
   it('declares that no execution runtime exists', () => {
@@ -122,11 +133,15 @@ describe('LeadFlowEventCatalogService', () => {
   });
 
   it('returns one event with its related automation triggers', () => {
-    const response = service.getCatalogItem('leadflow.inbox.conversation.idle');
+    const response = service.getCatalogItem(
+      'leadflow.inbox.conversation.message.received',
+    );
 
-    expect(response.item.eventName).toBe('leadflow.inbox.conversation.idle');
+    expect(response.item.eventName).toBe(
+      'leadflow.inbox.conversation.message.received',
+    );
     expect(response.relatedTriggers).toContainEqual(
-      expect.objectContaining({ trigger: 'conversation.idle' }),
+      expect.objectContaining({ trigger: 'conversation.replied' }),
     );
   });
 

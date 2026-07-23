@@ -697,13 +697,17 @@ export const LEADFLOW_AUTOMATION_TRIGGER_EVENT_MAPPINGS: LeadFlowEventTriggerMap
   [
     {
       trigger: 'conversation.created',
-      eventName: 'leadflow.inbox.conversation.created',
-      status: 'mapped',
+      eventName: null,
+      status: 'planned',
+      notes:
+        'Nome contratado, mas nenhum produtor emite este evento hoje. Volta a mapped quando o Inbox publicá-lo.',
     },
     {
       trigger: 'conversation.idle',
-      eventName: 'leadflow.inbox.conversation.idle',
-      status: 'mapped',
+      eventName: null,
+      status: 'planned',
+      notes:
+        'Estado derivado: depende de um detector de ociosidade que ainda não existe.',
     },
     {
       trigger: 'conversation.replied',
@@ -728,15 +732,17 @@ export const LEADFLOW_AUTOMATION_TRIGGER_EVENT_MAPPINGS: LeadFlowEventTriggerMap
     },
     {
       trigger: 'opportunity.score_changed',
-      eventName: 'leadflow.crm.opportunity.score.changed',
-      status: 'mapped',
+      eventName: null,
+      status: 'planned',
+      notes:
+        'Depende do Lead Score V1 no CRM: não há pontuação persistida nem emissor. Volta a mapped quando o Score Engine existir.',
     },
     {
       trigger: 'opportunity.hot_lead_detected',
-      eventName: 'leadflow.crm.opportunity.score.changed',
-      status: 'mapped',
+      eventName: null,
+      status: 'planned',
       notes:
-        'Hot lead é derivado de mudança de score acima do limiar configurado.',
+        'Derivado de mudança de score acima do limiar; depende do Lead Score V1 no CRM.',
     },
     {
       trigger: 'opportunity.missing_fields_detected',
@@ -746,8 +752,10 @@ export const LEADFLOW_AUTOMATION_TRIGGER_EVENT_MAPPINGS: LeadFlowEventTriggerMap
     },
     {
       trigger: 'appointment.created',
-      eventName: 'leadflow.calendar.appointment.created',
-      status: 'mapped',
+      eventName: null,
+      status: 'planned',
+      notes:
+        'Depende do domínio de Agenda do LeadFlow; nenhum produtor emite eventos de agenda hoje.',
     },
     {
       trigger: 'appointment.confirmation_pending',
@@ -757,13 +765,15 @@ export const LEADFLOW_AUTOMATION_TRIGGER_EVENT_MAPPINGS: LeadFlowEventTriggerMap
     },
     {
       trigger: 'appointment.no_show',
-      eventName: 'leadflow.calendar.appointment.no_show',
-      status: 'mapped',
+      eventName: null,
+      status: 'planned',
+      notes: 'Depende do domínio de Agenda do LeadFlow.',
     },
     {
       trigger: 'appointment.completed',
-      eventName: 'leadflow.calendar.appointment.completed',
-      status: 'mapped',
+      eventName: null,
+      status: 'planned',
+      notes: 'Depende do domínio de Agenda do LeadFlow.',
     },
     {
       trigger: 'quote.sent',

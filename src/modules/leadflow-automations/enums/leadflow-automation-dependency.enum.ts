@@ -67,6 +67,18 @@ export enum LeadFlowAutomationDependency {
   /** Detector that decides when required fields/documents are missing. */
   MissingFieldsDetector = 'missing_fields_detector',
 
+  /**
+   * Deterministic lead scoring owned by the CRM: current score on the
+   * opportunity, explainable breakdown, policy version, historical snapshots
+   * and canonical `score.changed` / hot-lead emission.
+   *
+   * Recorded as a dependency rather than a missing field because the absence is
+   * structural — no column, no emitter, no policy. Automations consumes the
+   * score and must never derive one, so any condition needing it fails closed
+   * until the CRM ships it.
+   */
+  LeadScoreEngine = 'lead_score_engine',
+
   /** Outbound webhook dispatch with SSRF protection, signing and retries. */
   WebhookDispatch = 'webhook_dispatch',
 }
@@ -88,6 +100,7 @@ export const LEADFLOW_AUTOMATION_DEPENDENCY_OWNERS: Record<
   [LeadFlowAutomationDependency.AnalyticsBackend]: 'leadflow_analytics',
   [LeadFlowAutomationDependency.QuotesDomain]: 'quotes_domain',
   [LeadFlowAutomationDependency.MissingFieldsDetector]: 'leadflow_crm',
+  [LeadFlowAutomationDependency.LeadScoreEngine]: 'leadflow_crm',
   [LeadFlowAutomationDependency.WebhookDispatch]: 'leadflow_automations',
 };
 
@@ -118,6 +131,8 @@ export const LEADFLOW_AUTOMATION_DEPENDENCY_LABELS: Record<
     'Domínio de Orçamentos ainda não disponível.',
   [LeadFlowAutomationDependency.MissingFieldsDetector]:
     'Detecção de campos/documentos obrigatórios ainda não disponível.',
+  [LeadFlowAutomationDependency.LeadScoreEngine]:
+    'Pontuação de leads ainda não é calculada pelo CRM.',
   [LeadFlowAutomationDependency.WebhookDispatch]:
     'Disparo de webhooks ainda não disponível.',
 };

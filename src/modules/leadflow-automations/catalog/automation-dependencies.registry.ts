@@ -32,6 +32,7 @@ export const LEADFLOW_AUTOMATION_SATISFIED_DEPENDENCIES: Record<
   [LeadFlowAutomationDependency.AnalyticsBackend]: false,
   [LeadFlowAutomationDependency.QuotesDomain]: false,
   [LeadFlowAutomationDependency.MissingFieldsDetector]: false,
+  [LeadFlowAutomationDependency.LeadScoreEngine]: false,
   [LeadFlowAutomationDependency.WebhookDispatch]: false,
 };
 

@@ -57,6 +57,7 @@ import {
   LeadFlowAutomationConfigSchemaService,
   type LeadFlowAutomationConfigError,
 } from './leadflow-automation-config-schema.service';
+import { LeadFlowAutomationContextService } from './leadflow-automation-context.service';
 import { LeadFlowAutomationEvaluationService } from './leadflow-automation-evaluation.service';
 import {
   LeadFlowAutomationLifecycleService,
@@ -93,6 +94,7 @@ export class LeadFlowAutomationService {
     private readonly configSchemaService: LeadFlowAutomationConfigSchemaService,
     private readonly lifecycleService: LeadFlowAutomationLifecycleService,
     private readonly evaluationService: LeadFlowAutomationEvaluationService,
+    private readonly contextService: LeadFlowAutomationContextService,
     private readonly runService: LeadFlowAutomationRunService,
     private readonly permissionService: PlatformPermissionService,
   ) {}
@@ -450,14 +452,26 @@ export class LeadFlowAutomationService {
     const lifecycle = this.lifecycleFor(automation, active);
     const blockedByDependency = lifecycle.unmetDependencies.length > 0;
 
-    const evaluation = this.evaluationService.evaluate(automation, recipe, dto);
+    // A simulation is explicitly hypothetical, so an operator may assert
+    // signals the platform cannot observe — but only by stating them. Anything
+    // left blank stays unresolved instead of acquiring a plausible value.
+    const resolution = this.contextService.resolveForSimulation(
+      automation,
+      dto,
+    );
+    const evaluation = this.evaluationService.evaluate(
+      automation,
+      recipe,
+      resolution.context,
+      resolution.gaps,
+    );
 
     const { run } = await this.runService.recordDryRun(
       ctx,
       automation,
       recipe,
       evaluation,
-      { blockedByDependency },
+      { blockedByDependency, contextSnapshot: resolution.snapshot },
     );
 
     return {

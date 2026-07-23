@@ -3,11 +3,17 @@ import {
   type LeadFlowAutomationRecipeCatalogItem,
 } from '../catalog/automation-recipes.catalog';
 import type { LeadFlowAutomationEntity } from '../entities/leadflow-automation.entity';
+import { LeadFlowAutomationDependency } from '../enums/leadflow-automation-dependency.enum';
 import {
   LeadFlowAutomationRunStatus,
   LeadFlowAutomationSkipReason,
 } from '../enums/leadflow-automation-run.enums';
-import { LeadFlowAutomationEvaluationService } from './leadflow-automation-evaluation.service';
+import { LeadFlowAutomationContextSignal } from '../types/leadflow-automation-context.types';
+import { LeadFlowAutomationContextService } from './leadflow-automation-context.service';
+import {
+  LeadFlowAutomationEvaluationService,
+  type LeadFlowAutomationEvaluationContext,
+} from './leadflow-automation-evaluation.service';
 
 const idleLead = getRecipeByKey(
   'followup_idle_lead',
@@ -36,11 +42,31 @@ function buildAutomation(
 
 describe('LeadFlowAutomationEvaluationService', () => {
   const service = new LeadFlowAutomationEvaluationService();
+  const contextService = new LeadFlowAutomationContextService();
 
-  it('acts on a correctly configured automation with default context', () => {
-    // The default context models "the trigger just fired" so a dry-run is
+  /**
+   * Evaluates the way the dry-run endpoint does: context is resolved first, so
+   * a signal the operator did not assert is either a declared simulator
+   * assumption or an explicit gap — never an invented value.
+   */
+  function simulate(
+    automation: LeadFlowAutomationEntity,
+    input: LeadFlowAutomationEvaluationContext = {},
+    recipe: LeadFlowAutomationRecipeCatalogItem | undefined = idleLead,
+  ) {
+    const resolution = contextService.resolveForSimulation(automation, input);
+    return service.evaluate(
+      automation,
+      recipe,
+      resolution.context,
+      resolution.gaps,
+    );
+  }
+
+  it('acts on a correctly configured automation with the simulator defaults', () => {
+    // The simulator's stand-ins model "the trigger just fired", so a dry-run is
     // useful for validating configuration rather than always reporting no.
-    const result = service.evaluate(buildAutomation(), idleLead);
+    const result = simulate(buildAutomation());
 
     expect(result.wouldAct).toBe(true);
     expect(result.status).toBe(LeadFlowAutomationRunStatus.Succeeded);
@@ -50,9 +76,7 @@ describe('LeadFlowAutomationEvaluationService', () => {
 
   describe('cancellation signals', () => {
     it('cancels when the lead replied', () => {
-      const result = service.evaluate(buildAutomation(), idleLead, {
-        leadReplied: true,
-      });
+      const result = simulate(buildAutomation(), { leadReplied: true });
 
       expect(result.wouldAct).toBe(false);
       expect(result.status).toBe(LeadFlowAutomationRunStatus.Skipped);
@@ -61,9 +85,7 @@ describe('LeadFlowAutomationEvaluationService', () => {
     });
 
     it('cancels when a handoff is in progress', () => {
-      const result = service.evaluate(buildAutomation(), idleLead, {
-        handoffActive: true,
-      });
+      const result = simulate(buildAutomation(), { handoffActive: true });
 
       expect(result.skipReason).toBe(
         LeadFlowAutomationSkipReason.HandoffInProgress,
@@ -71,7 +93,7 @@ describe('LeadFlowAutomationEvaluationService', () => {
     });
 
     it('cancels outside business hours when the automation requires them', () => {
-      const result = service.evaluate(buildAutomation(), idleLead, {
+      const result = simulate(buildAutomation(), {
         insideBusinessHours: false,
       });
 
@@ -88,9 +110,7 @@ describe('LeadFlowAutomationEvaluationService', () => {
         },
       });
 
-      const result = service.evaluate(automation, idleLead, {
-        insideBusinessHours: false,
-      });
+      const result = simulate(automation, { insideBusinessHours: false });
 
       expect(result.wouldAct).toBe(true);
     });
@@ -98,9 +118,7 @@ describe('LeadFlowAutomationEvaluationService', () => {
 
   describe('rate limits', () => {
     it('stops once the attempt limit is reached', () => {
-      const result = service.evaluate(buildAutomation(), idleLead, {
-        attemptsSoFar: 3,
-      });
+      const result = simulate(buildAutomation(), { attemptsSoFar: 3 });
 
       expect(result.skipReason).toBe(
         LeadFlowAutomationSkipReason.AttemptLimitReached,
@@ -108,9 +126,7 @@ describe('LeadFlowAutomationEvaluationService', () => {
     });
 
     it('stops while the cooldown is still active', () => {
-      const result = service.evaluate(buildAutomation(), idleLead, {
-        hoursSinceLastRun: 1,
-      });
+      const result = simulate(buildAutomation(), { hoursSinceLastRun: 1 });
 
       expect(result.skipReason).toBe(
         LeadFlowAutomationSkipReason.CooldownActive,
@@ -119,33 +135,68 @@ describe('LeadFlowAutomationEvaluationService', () => {
   });
 
   describe('qualification', () => {
-    it('stops below the configured score', () => {
-      const automation = buildAutomation({
-        conditionConfig: {
-          ...idleLead.defaultConditionConfig,
-          minScore: 70,
-        },
+    const scored = () =>
+      buildAutomation({
+        conditionConfig: { ...idleLead.defaultConditionConfig, minScore: 70 },
       });
 
-      const result = service.evaluate(automation, idleLead, { leadScore: 40 });
+    it('stops below the threshold once a score can actually be established', () => {
+      // Evaluated directly with a resolved score: this is the comparison the
+      // CRM's Lead Score V1 will feed. Until then the dependency gate below
+      // prevents it from ever running.
+      const result = service.evaluate(
+        scored(),
+        idleLead,
+        {
+          leadScore: 40,
+          insideBusinessHours: true,
+          leadReplied: false,
+          handoffActive: false,
+          attemptsSoFar: 0,
+          hoursSinceLastRun: 999,
+        },
+        {},
+      );
 
       expect(result.skipReason).toBe(
         LeadFlowAutomationSkipReason.ScoreBelowThreshold,
       );
     });
 
-    it('defaults the score to the threshold so configuration validates', () => {
-      const automation = buildAutomation({
-        conditionConfig: {
-          ...idleLead.defaultConditionConfig,
-          minScore: 70,
-        },
-      });
+    it('never lets an absent score satisfy the threshold it is compared against', () => {
+      // The defect this replaces: the score defaulted to the configured minimum,
+      // so `minScore` always passed and the automation reported it would act on
+      // a lead nobody had measured.
+      const result = simulate(scored());
 
-      const result = service.evaluate(automation, idleLead);
+      expect(result.wouldAct).toBe(false);
+      expect(result.context.leadScore).toBeUndefined();
+      expect(result.skipReason).toBe(
+        LeadFlowAutomationSkipReason.DependencyUnavailable,
+      );
+    });
 
-      expect(result.context.leadScore).toBe(70);
-      expect(result.wouldAct).toBe(true);
+    it('names the missing capability rather than blaming the lead', () => {
+      const result = simulate(scored());
+
+      const gap = result.gaps.find(
+        (item) => item.signal === LeadFlowAutomationContextSignal.LeadScore,
+      );
+      expect(gap?.gap).toBe('dependency_unavailable');
+      expect(gap?.dependency).toBe(
+        LeadFlowAutomationDependency.LeadScoreEngine,
+      );
+    });
+
+    it('refuses an asserted score too, because the live automation could not use one', () => {
+      // A simulation that validated a threshold the platform cannot evaluate
+      // would report a working configuration that can never work.
+      const result = simulate(scored(), { leadScore: 90 });
+
+      expect(result.wouldAct).toBe(false);
+      expect(result.skipReason).toBe(
+        LeadFlowAutomationSkipReason.DependencyUnavailable,
+      );
     });
 
     it('requires a configured keyword to appear', () => {
@@ -156,29 +207,30 @@ describe('LeadFlowAutomationEvaluationService', () => {
         },
       });
 
-      expect(service.evaluate(automation, idleLead).skipReason).toBe(
-        LeadFlowAutomationSkipReason.ConditionNotMet,
+      // Nothing observed the message, so the answer is "unknown", not "no".
+      expect(simulate(automation).skipReason).toBe(
+        LeadFlowAutomationSkipReason.MissingContext,
       );
       expect(
-        service.evaluate(automation, idleLead, {
-          matchedKeywords: ['orçamento'],
-        }).wouldAct,
+        simulate(automation, { matchedKeywords: ['orçamento'] }).wouldAct,
       ).toBe(true);
+      expect(
+        simulate(automation, { matchedKeywords: ['outra'] }).skipReason,
+      ).toBe(LeadFlowAutomationSkipReason.ConditionNotMet);
     });
   });
 
   describe('data-quality recipes act on absence', () => {
-    const automation = buildAutomation({
-      conditionConfig: {
-        ...idleLead.defaultConditionConfig,
-        requiredFields: ['email', 'telefone'],
-      },
-    });
+    const automation = () =>
+      buildAutomation({
+        conditionConfig: {
+          ...idleLead.defaultConditionConfig,
+          requiredFields: ['email', 'telefone'],
+        },
+      });
 
     it('acts while a required field is still missing', () => {
-      const result = service.evaluate(automation, idleLead, {
-        presentFields: ['email'],
-      });
+      const result = simulate(automation(), { presentFields: ['email'] });
 
       expect(result.wouldAct).toBe(true);
       expect(
@@ -187,13 +239,23 @@ describe('LeadFlowAutomationEvaluationService', () => {
     });
 
     it('stops once every required field is present', () => {
-      const result = service.evaluate(automation, idleLead, {
+      const result = simulate(automation(), {
         presentFields: ['email', 'telefone'],
       });
 
       expect(result.wouldAct).toBe(false);
       expect(result.skipReason).toBe(
         LeadFlowAutomationSkipReason.ConditionNotMet,
+      );
+    });
+
+    it('does not treat an unreadable record as an empty one', () => {
+      // Otherwise the automation would chase a lead for data already provided.
+      const result = simulate(automation());
+
+      expect(result.wouldAct).toBe(false);
+      expect(result.skipReason).toBe(
+        LeadFlowAutomationSkipReason.MissingContext,
       );
     });
   });
@@ -204,7 +266,7 @@ describe('LeadFlowAutomationEvaluationService', () => {
         crmPolicy: { addTags: ['quente'], appendNote: true, updateScore: true },
       });
 
-      const result = service.evaluate(automation, idleLead);
+      const result = simulate(automation);
 
       expect(result.plannedActions).toEqual(
         expect.arrayContaining([
@@ -225,7 +287,7 @@ describe('LeadFlowAutomationEvaluationService', () => {
         crmPolicy: { addTags: ['quente'] },
       });
 
-      const result = service.evaluate(automation, idleLead);
+      const result = simulate(automation);
 
       expect(result.plannedActions.filter((a) => a === 'add_tag')).toHaveLength(
         1,
@@ -246,7 +308,7 @@ describe('LeadFlowAutomationEvaluationService', () => {
         },
       });
 
-      expect(service.evaluate(automation, idleLead).plannedActions).toEqual(
+      expect(simulate(automation).plannedActions).toEqual(
         expect.arrayContaining([
           'move_opportunity_stage',
           'transfer_opportunity_pipeline',
@@ -255,15 +317,15 @@ describe('LeadFlowAutomationEvaluationService', () => {
       );
 
       automation.crmPolicy.copyReasonCode = null;
-      expect(
-        service.evaluate(automation, idleLead).plannedActions,
-      ).not.toContain('copy_opportunity');
+      expect(simulate(automation).plannedActions).not.toContain(
+        'copy_opportunity',
+      );
     });
   });
 
   it('reports the first failing check as the reason', () => {
     // Several conditions fail at once; the operator gets one actionable cause.
-    const result = service.evaluate(buildAutomation(), idleLead, {
+    const result = simulate(buildAutomation(), {
       leadReplied: true,
       handoffActive: true,
       attemptsSoFar: 99,
@@ -275,21 +337,42 @@ describe('LeadFlowAutomationEvaluationService', () => {
     ).toBeGreaterThan(1);
   });
 
+  it('prefers an observed refusal over an unresolved signal', () => {
+    // The lead replying is a certain no; a gap only becomes the headline when
+    // resolving it might have let the automation act.
+    const automation = buildAutomation({
+      conditionConfig: {
+        ...idleLead.defaultConditionConfig,
+        keywords: ['orçamento'],
+      },
+    });
+
+    const result = simulate(automation, { leadReplied: true });
+
+    expect(result.skipReason).toBe(LeadFlowAutomationSkipReason.LeadReplied);
+  });
+
   it('refuses to evaluate an automation whose recipe vanished', () => {
-    const result = service.evaluate(buildAutomation(), undefined);
+    const automation = buildAutomation();
+    const resolution = contextService.resolveForSimulation(automation);
+
+    const result = service.evaluate(
+      automation,
+      undefined,
+      resolution.context,
+      resolution.gaps,
+    );
 
     expect(result.wouldAct).toBe(false);
     expect(result.checks[0].key).toBe('recipe');
   });
 
-  it('returns the resolved context so the result is reproducible', () => {
-    const result = service.evaluate(buildAutomation(), idleLead, {
-      leadScore: 55,
-      attemptsSoFar: 1,
-    });
+  it('returns only the signals that were established', () => {
+    const result = simulate(buildAutomation(), { attemptsSoFar: 1 });
 
-    expect(result.context.leadScore).toBe(55);
     expect(result.context.attemptsSoFar).toBe(1);
     expect(result.context.insideBusinessHours).toBe(true);
+    // Never consulted by this configuration, so never resolved.
+    expect(result.context.leadScore).toBeUndefined();
   });
 });

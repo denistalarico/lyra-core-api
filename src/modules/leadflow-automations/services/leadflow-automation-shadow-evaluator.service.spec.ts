@@ -10,7 +10,15 @@ import {
   LeadFlowAutomationRunStatus,
   LeadFlowAutomationSkipReason,
 } from '../enums/leadflow-automation-run.enums';
+import { LeadFlowAutomationDependency } from '../enums/leadflow-automation-dependency.enum';
 import { LeadFlowAutomationStatus } from '../enums/leadflow-automation-status.enum';
+import {
+  LEADFLOW_AUTOMATION_CONTEXT_MAX_EVENT_AGE_MS,
+  LEADFLOW_AUTOMATION_CONTEXT_SCHEMA_VERSION,
+  LeadFlowAutomationContextSignal,
+  type LeadFlowAutomationContextSnapshot,
+} from '../types/leadflow-automation-context.types';
+import { LeadFlowAutomationContextService } from './leadflow-automation-context.service';
 import { LeadFlowAutomationEvaluationService } from './leadflow-automation-evaluation.service';
 import type { LeadFlowAutomationRunService } from './leadflow-automation-run.service';
 import { LeadFlowAutomationShadowEvaluatorService } from './leadflow-automation-shadow-evaluator.service';
@@ -69,14 +77,25 @@ function buildDelivery(
     workspaceId: 'workspace-1',
     eventName: 'leadflow.crm.opportunity.created',
     eventVersion: 1,
+    aggregateType: 'crm_opportunity',
+    aggregateId: '30000000-0000-4000-8000-000000000001',
     payload: {},
-    occurredAt: new Date('2026-07-22T12:00:00Z'),
+    // Recent by default: staleness is a property under test, not a background
+    // condition every other assertion has to work around.
+    occurredAt: new Date(),
     ...overrides,
   } as LeadFlowEventDeliveryEntity;
 }
 
+type RecordedEvaluation = {
+  status: LeadFlowAutomationRunStatus;
+  skipReason: LeadFlowAutomationSkipReason | null;
+  wouldAct: boolean;
+  plannedActions: string[];
+};
+
 type ShadowExtras = {
-  signalOrigins: Record<string, string>;
+  contextSnapshot: LeadFlowAutomationContextSnapshot;
   unavailableActions: unknown[];
 };
 
@@ -86,6 +105,17 @@ describe('LeadFlowAutomationShadowEvaluatorService', () => {
     const args = mock.mock.calls[0] as unknown[];
     return args[4] as ShadowExtras;
   };
+
+  /** Reads the `evaluation` argument of the recorded call, typed. */
+  const evaluationOf = (mock: jest.Mock): RecordedEvaluation => {
+    const args = mock.mock.calls[0] as unknown[];
+    return args[3] as RecordedEvaluation;
+  };
+
+  const gapFor = (
+    snapshot: LeadFlowAutomationContextSnapshot,
+    signal: LeadFlowAutomationContextSignal,
+  ) => snapshot.gaps.find((record) => record.signal === signal);
 
   function build(
     matches: LeadFlowAutomationTriggerMatch[],
@@ -104,6 +134,7 @@ describe('LeadFlowAutomationShadowEvaluatorService', () => {
 
     const service = new LeadFlowAutomationShadowEvaluatorService(
       matcher,
+      new LeadFlowAutomationContextService(),
       new LeadFlowAutomationEvaluationService(),
       runService,
     );
@@ -141,10 +172,20 @@ describe('LeadFlowAutomationShadowEvaluatorService', () => {
 
   it('reports that no executor could carry the planned action', async () => {
     // The whole point of shadow mode: the decision is real, the effect is not.
-    const { service } = build([buildMatch()]);
+    // Uses a configuration that consults no context, so the evaluation reaches
+    // action planning and the executor gate is what stops it.
+    const { service } = build([
+      buildMatch({
+        conditionConfig: {},
+        actionConfig: { primaryAction: 'schedule_followup' },
+        schedulePolicy: {},
+      }),
+    ]);
 
     const summaries = await service.evaluateDelivery(buildDelivery());
 
+    expect(summaries[0].wouldAct).toBe(true);
+    expect(summaries[0].contextGapCount).toBe(0);
     expect(summaries[0].blockedByExecutor).toBe(true);
   });
 
@@ -165,18 +206,21 @@ describe('LeadFlowAutomationShadowEvaluatorService', () => {
     );
   });
 
-  describe('signal derivation', () => {
+  describe('context resolution', () => {
     it('marks a handoff event as observed evidence of a handoff', async () => {
       const { service, recordShadowRun } = build([buildMatch()]);
 
       await service.evaluateDelivery(
         buildDelivery({
+          aggregateType: 'inbox_conversation',
           eventName: 'leadflow.inbox.conversation.handoff.requested',
         }),
       );
 
-      const extras = extrasOf(recordShadowRun);
-      expect(extras.signalOrigins.handoffActive).toBe('from_event');
+      const { contextSnapshot } = extrasOf(recordShadowRun);
+      expect(
+        contextSnapshot.resolved[LeadFlowAutomationContextSignal.HandoffActive],
+      ).toEqual({ origin: 'from_event', value: true });
     });
 
     it('marks an inbound message as observed evidence the lead replied', async () => {
@@ -184,32 +228,141 @@ describe('LeadFlowAutomationShadowEvaluatorService', () => {
 
       await service.evaluateDelivery(
         buildDelivery({
+          aggregateType: 'inbox_conversation',
           eventName: 'leadflow.inbox.conversation.message.received',
         }),
       );
 
-      const extras = extrasOf(recordShadowRun);
-      expect(extras.signalOrigins.leadReplied).toBe('from_event');
+      const { contextSnapshot } = extrasOf(recordShadowRun);
+      expect(
+        contextSnapshot.resolved[LeadFlowAutomationContextSignal.LeadReplied],
+      ).toEqual({ origin: 'from_event', value: true });
     });
 
-    it('defaults signals the payload cannot supply', async () => {
+    it('records a gap instead of inventing a signal the event cannot supply', async () => {
+      // The heart of the change: an unreadable signal stays unresolved. The old
+      // behaviour assumed a plausible value and let the verdict look certain.
       const { service, recordShadowRun } = build([buildMatch()]);
 
       await service.evaluateDelivery(buildDelivery());
 
-      const extras = extrasOf(recordShadowRun);
-      expect(extras.signalOrigins.leadReplied).toBe('defaulted');
-      expect(extras.signalOrigins.insideBusinessHours).toBe('defaulted');
+      const { contextSnapshot } = extrasOf(recordShadowRun);
+      expect(
+        contextSnapshot.resolved[
+          LeadFlowAutomationContextSignal.InsideBusinessHours
+        ],
+      ).toBeUndefined();
+      expect(
+        gapFor(
+          contextSnapshot,
+          LeadFlowAutomationContextSignal.InsideBusinessHours,
+        )?.gap,
+      ).toBe('missing_context');
     });
 
-    it('takes a numeric score from the payload when present', async () => {
+    it('only requires the signals the configuration actually consults', async () => {
+      // The idle-lead defaults never mention a score, so nothing should try to
+      // establish one.
       const { service, recordShadowRun } = build([buildMatch()]);
 
-      await service.evaluateDelivery(buildDelivery({ payload: { score: 82 } }));
+      await service.evaluateDelivery(buildDelivery());
 
-      const extras = extrasOf(recordShadowRun);
-      expect(extras.signalOrigins.leadScore).toBe('from_event');
+      const { contextSnapshot } = extrasOf(recordShadowRun);
+      expect(contextSnapshot.required).not.toContain(
+        LeadFlowAutomationContextSignal.LeadScore,
+      );
     });
+
+    it('reports a score condition as a platform dependency, never as a lead that failed it', async () => {
+      const { service, recordShadowRun } = build([
+        buildMatch({
+          conditionConfig: { ...idleLead.defaultConditionConfig, minScore: 70 },
+        }),
+      ]);
+
+      await service.evaluateDelivery(buildDelivery());
+
+      const { contextSnapshot } = extrasOf(recordShadowRun);
+      const gap = gapFor(
+        contextSnapshot,
+        LeadFlowAutomationContextSignal.LeadScore,
+      );
+      expect(gap?.gap).toBe('dependency_unavailable');
+      expect(gap?.dependency).toBe(
+        LeadFlowAutomationDependency.LeadScoreEngine,
+      );
+    });
+
+    it('refuses to choose between disagreeing subject references', async () => {
+      const { service, recordShadowRun } = build([buildMatch()]);
+
+      await service.evaluateDelivery(
+        buildDelivery({
+          aggregateType: 'inbox_conversation',
+          aggregateId: '20000000-0000-4000-8000-000000000001',
+          payload: { conversationId: '20000000-0000-4000-8000-000000000002' },
+        }),
+      );
+
+      const { contextSnapshot } = extrasOf(recordShadowRun);
+      expect(
+        gapFor(contextSnapshot, LeadFlowAutomationContextSignal.LeadReplied)
+          ?.gap,
+      ).toBe('ambiguous_context');
+    });
+
+    it('flags state reads as stale when the event waited too long', async () => {
+      const { service, recordShadowRun } = build([buildMatch()]);
+
+      await service.evaluateDelivery(
+        buildDelivery({
+          occurredAt: new Date(
+            Date.now() - LEADFLOW_AUTOMATION_CONTEXT_MAX_EVENT_AGE_MS - 1000,
+          ),
+        }),
+      );
+
+      const { contextSnapshot } = extrasOf(recordShadowRun);
+      expect(
+        gapFor(
+          contextSnapshot,
+          LeadFlowAutomationContextSignal.InsideBusinessHours,
+        )?.gap,
+      ).toBe('stale_context');
+    });
+
+    it('costs no queries while resolution is envelope-only', async () => {
+      const { service, recordShadowRun } = build([buildMatch()]);
+
+      await service.evaluateDelivery(buildDelivery());
+
+      expect(extrasOf(recordShadowRun).contextSnapshot.cost.queryCount).toBe(0);
+    });
+
+    it('persists a versioned snapshot so the verdict stays re-readable', async () => {
+      const { service, recordShadowRun } = build([buildMatch()]);
+
+      await service.evaluateDelivery(buildDelivery());
+
+      const { contextSnapshot } = extrasOf(recordShadowRun);
+      expect(contextSnapshot.schemaVersion).toBe(
+        LEADFLOW_AUTOMATION_CONTEXT_SCHEMA_VERSION,
+      );
+      expect(contextSnapshot.capturedAt).toEqual(expect.any(String));
+    });
+  });
+
+  it('does not act when a required signal could not be established', async () => {
+    const { service, recordShadowRun } = build([buildMatch()]);
+
+    const summaries = await service.evaluateDelivery(buildDelivery());
+
+    expect(summaries[0].wouldAct).toBe(false);
+    expect(summaries[0].contextGapCount).toBeGreaterThan(0);
+    const evaluation = evaluationOf(recordShadowRun);
+    expect(evaluation.skipReason).toBe(
+      LeadFlowAutomationSkipReason.MissingContext,
+    );
   });
 
   it('propagates persistence failure so ingress can retry the delivery', async () => {
@@ -228,12 +381,7 @@ describe('LeadFlowAutomationShadowEvaluatorService', () => {
 
     await service.evaluateDelivery(buildDelivery());
 
-    const evaluation = recordShadowRun.mock.calls[0][3] as {
-      status: LeadFlowAutomationRunStatus;
-      skipReason: LeadFlowAutomationSkipReason | null;
-      wouldAct: boolean;
-      plannedActions: string[];
-    };
+    const evaluation = evaluationOf(recordShadowRun);
     expect(evaluation).toMatchObject({
       status: LeadFlowAutomationRunStatus.Skipped,
       skipReason: LeadFlowAutomationSkipReason.NotActive,

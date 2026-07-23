@@ -16,6 +16,7 @@ import {
   LeadFlowAutomationRunMode,
 } from '../enums/leadflow-automation-run.enums';
 import type { LeadFlowJsonObject } from '../types/leadflow-automation.types';
+import type { LeadFlowAutomationContextSnapshot } from '../types/leadflow-automation-context.types';
 import type { LeadFlowEventDeliveryEntity } from '../../leadflow-events/entities/leadflow-event-delivery.entity';
 import type { AutomationExecutorAvailability } from '../executors';
 import type { LeadFlowAutomationEvaluation } from './leadflow-automation-evaluation.service';
@@ -67,7 +68,10 @@ export class LeadFlowAutomationRunService {
     automation: LeadFlowAutomationEntity,
     recipe: LeadFlowAutomationRunRecipe | undefined,
     evaluation: LeadFlowAutomationEvaluation,
-    extras: { blockedByDependency: boolean } = { blockedByDependency: false },
+    extras: {
+      blockedByDependency: boolean;
+      contextSnapshot?: LeadFlowAutomationContextSnapshot;
+    } = { blockedByDependency: false },
   ): Promise<LeadFlowAutomationRunWithAttempts> {
     const now = new Date();
     const correlationId = randomUUID();
@@ -97,6 +101,8 @@ export class LeadFlowAutomationRunService {
         idempotencyKey: null,
         inputSnapshot: {
           context: evaluation.context as unknown as LeadFlowJsonObject,
+          contextSnapshot:
+            (extras.contextSnapshot as unknown as LeadFlowJsonObject) ?? null,
           blockedByDependency: extras.blockedByDependency,
         },
         result: {
@@ -104,6 +110,7 @@ export class LeadFlowAutomationRunService {
           checks: evaluation.checks as unknown as LeadFlowJsonObject[],
           plannedActions: evaluation.plannedActions,
           blockedByDependency: extras.blockedByDependency,
+          contextGaps: evaluation.gaps as unknown as LeadFlowJsonObject[],
         } as unknown as LeadFlowJsonObject,
         errorCode: null,
         errorMessage: null,
@@ -157,11 +164,11 @@ export class LeadFlowAutomationRunService {
     evaluation: LeadFlowAutomationEvaluation,
     extras: {
       delivery: LeadFlowEventDeliveryEntity;
-      signalOrigins: Record<string, string>;
+      contextSnapshot: LeadFlowAutomationContextSnapshot;
       unavailableActions: AutomationExecutorAvailability[];
     },
   ): Promise<LeadFlowAutomationRunWithAttempts> {
-    const { delivery, signalOrigins, unavailableActions } = extras;
+    const { delivery, contextSnapshot, unavailableActions } = extras;
     const digest = createHash('sha256')
       .update(
         [
@@ -205,9 +212,7 @@ export class LeadFlowAutomationRunService {
       const now = new Date();
       // A verdict built partly on assumed signals is weaker than one built on
       // observed state; the distinction is recorded rather than smoothed over.
-      const fullyObserved = Object.values(signalOrigins).every(
-        (origin) => origin === 'from_event',
-      );
+      const fullyObserved = isFullyObserved(contextSnapshot);
       const correlationId = uuidFrom(delivery.payload.correlationId)
         ? String(delivery.payload.correlationId)
         : delivery.sourceEventId;
@@ -238,7 +243,10 @@ export class LeadFlowAutomationRunService {
           idempotencyKey,
           inputSnapshot: {
             context: evaluation.context as unknown as LeadFlowJsonObject,
-            signalOrigins: signalOrigins as LeadFlowJsonObject,
+            // Immutable record of what the verdict was computed from. Versioned
+            // so a stored decision is always re-readable under the rules that
+            // produced it.
+            contextSnapshot: contextSnapshot as unknown as LeadFlowJsonObject,
             verdictBasis: fullyObserved ? 'observed' : 'partially_assumed',
             deliveryId: delivery.id,
             occurredAt: delivery.occurredAt.toISOString(),
@@ -253,6 +261,9 @@ export class LeadFlowAutomationRunService {
             unavailableActions:
               unavailableActions as unknown as LeadFlowJsonObject[],
             blockedByExecutor: unavailableActions.length > 0,
+            contextGaps:
+              contextSnapshot.gaps as unknown as LeadFlowJsonObject[],
+            contextCost: contextSnapshot.cost as unknown as LeadFlowJsonObject,
             executedAnything: false,
           } as unknown as LeadFlowJsonObject,
           errorCode: null,
@@ -376,6 +387,23 @@ export class LeadFlowAutomationRunService {
     }
     return grouped;
   }
+}
+
+/**
+ * True only when every signal the configuration required was actually observed.
+ *
+ * A single gap, or a single value that came from a simulator default, is enough
+ * to make the verdict partly assumed — there is no partial credit, because a
+ * decision is only as sound as its weakest input.
+ */
+function isFullyObserved(snapshot: LeadFlowAutomationContextSnapshot): boolean {
+  if (snapshot.gaps.length > 0) return false;
+  return snapshot.required.every((signal) => {
+    const resolved = snapshot.resolved[signal];
+    return (
+      resolved?.origin === 'from_event' || resolved?.origin === 'canonical_read'
+    );
+  });
 }
 
 function uuidFrom(value: unknown): value is string {

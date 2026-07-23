@@ -15,6 +15,7 @@ import {
 import { LeadFlowAutomationStatus } from '../enums/leadflow-automation-status.enum';
 import { LeadFlowAutomationVersionStatus } from '../enums/leadflow-automation-version-status.enum';
 import type { LeadFlowAutomationRuntimeContract } from '../types/leadflow-automation.types';
+import { LeadFlowAutomationContextService } from './leadflow-automation-context.service';
 import { LeadFlowAutomationEvaluationService } from './leadflow-automation-evaluation.service';
 import { LeadFlowAutomationEventIngressService } from './leadflow-automation-event-ingress.service';
 import { LeadFlowAutomationRunService } from './leadflow-automation-run.service';
@@ -43,6 +44,7 @@ run('LeadFlow Automations shadow runtime PostgreSQL', () => {
     );
     shadowEvaluator = new LeadFlowAutomationShadowEvaluatorService(
       matcher,
+      new LeadFlowAutomationContextService(),
       new LeadFlowAutomationEvaluationService(),
       runService,
     );
