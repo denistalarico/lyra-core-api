@@ -11,9 +11,12 @@ import {
 import type { LeadFlowAutomationEntity } from '../entities/leadflow-automation.entity';
 import {
   LeadFlowAutomationAttemptStatus,
+  LeadFlowAutomationErrorClass,
   LeadFlowAutomationRunMode,
 } from '../enums/leadflow-automation-run.enums';
 import type { LeadFlowJsonObject } from '../types/leadflow-automation.types';
+import type { LeadFlowEventDeliveryEntity } from '../../leadflow-events/entities/leadflow-event-delivery.entity';
+import type { AutomationExecutorAvailability } from '../executors';
 import type { LeadFlowAutomationEvaluation } from './leadflow-automation-evaluation.service';
 
 const AGENCY_CONNECTION = 'agency';
@@ -125,6 +128,132 @@ export class LeadFlowAutomationRunService {
           finishedAt: now,
         }),
       ),
+    );
+
+    return { run, attempts };
+  }
+
+  /**
+   * Records the evaluation of a real delivered trigger that carried out nothing.
+   *
+   * Idempotent on the delivery/automation pair: a redelivered event re-enters
+   * the ingress, and without this key the same trigger would accumulate a new
+   * run on every retry. Returns the existing run instead of failing, because a
+   * duplicate here means the work was already done, not that something broke.
+   */
+  async recordShadowRun(
+    automation: LeadFlowAutomationEntity,
+    recipe: LeadFlowAutomationRecipeCatalogItem | undefined,
+    evaluation: LeadFlowAutomationEvaluation,
+    extras: {
+      delivery: LeadFlowEventDeliveryEntity;
+      signalOrigins: Record<string, string>;
+      unavailableActions: AutomationExecutorAvailability[];
+    },
+  ): Promise<LeadFlowAutomationRunWithAttempts> {
+    const { delivery, signalOrigins, unavailableActions } = extras;
+    const idempotencyKey = `shadow:${delivery.id}:${automation.id}`.slice(
+      0,
+      180,
+    );
+
+    const existing = await this.runsRepository.findOne({
+      where: {
+        tenantId: automation.tenantId,
+        workspaceId: automation.workspaceId,
+        idempotencyKey,
+      },
+    });
+    if (existing) {
+      const attempts = await this.attemptsRepository.find({
+        where: { runId: existing.id },
+        order: { attemptNumber: 'ASC' },
+      });
+      return { run: existing, attempts };
+    }
+
+    const now = new Date();
+    // A verdict built partly on assumed signals is weaker than one built on
+    // observed state; the distinction is recorded rather than smoothed over.
+    const fullyObserved = Object.values(signalOrigins).every(
+      (origin) => origin === 'from_event',
+    );
+
+    const run = await this.runsRepository.save(
+      this.runsRepository.create({
+        tenantId: automation.tenantId,
+        workspaceId: automation.workspaceId,
+        automationId: automation.id,
+        automationVersionId: automation.publishedVersionId,
+        recipeKey: automation.recipeKey,
+        templateVersion: automation.templateVersion ?? 1,
+        mode: LeadFlowAutomationRunMode.Shadow,
+        status: evaluation.status,
+        skipReason: evaluation.skipReason,
+        triggerType:
+          (automation.triggerConfig?.type as string) ??
+          recipe?.trigger ??
+          'unknown',
+        triggerKind: recipe?.triggerKind ?? 'event',
+        sourceEventId: delivery.sourceEventId,
+        sourceEventName: delivery.eventName,
+        correlationId: null,
+        causationId: null,
+        idempotencyKey,
+        inputSnapshot: {
+          context: evaluation.context as unknown as LeadFlowJsonObject,
+          signalOrigins: signalOrigins as LeadFlowJsonObject,
+          verdictBasis: fullyObserved ? 'observed' : 'partially_assumed',
+          deliveryId: delivery.id,
+          occurredAt: delivery.occurredAt.toISOString(),
+        },
+        result: {
+          wouldAct: evaluation.wouldAct,
+          checks: evaluation.checks as unknown as LeadFlowJsonObject[],
+          plannedActions: evaluation.plannedActions,
+          unavailableActions:
+            unavailableActions as unknown as LeadFlowJsonObject[],
+          executedAnything: false,
+        } as unknown as LeadFlowJsonObject,
+        errorCode: null,
+        errorMessage: null,
+        attemptCount: evaluation.plannedActions.length,
+        scheduledAt: null,
+        startedAt: now,
+        finishedAt: now,
+        createdById: null,
+      }),
+    );
+
+    const blockedByAction = new Map(
+      unavailableActions.map((item) => [item.actionKey, item]),
+    );
+
+    const attempts = await this.attemptsRepository.save(
+      evaluation.plannedActions.map((actionKey, index) => {
+        const blocked = blockedByAction.get(actionKey);
+        return this.attemptsRepository.create({
+          tenantId: automation.tenantId,
+          workspaceId: automation.workspaceId,
+          runId: run.id,
+          attemptNumber: index + 1,
+          actionKey,
+          status: LeadFlowAutomationAttemptStatus.Simulated,
+          errorClass: blocked ? LeadFlowAutomationErrorClass.Permanent : null,
+          errorCode: blocked
+            ? blocked.reason === 'dependency_missing'
+              ? 'executor_dependency_missing'
+              : 'executor_not_implemented'
+            : null,
+          errorMessage: blocked ? blocked.description : null,
+          effectRequested: { action: actionKey, shadow: true },
+          // Never true in shadow mode: nothing was asked of any domain.
+          effectConfirmed: false,
+          durationMs: 0,
+          startedAt: now,
+          finishedAt: now,
+        });
+      }),
     );
 
     return { run, attempts };

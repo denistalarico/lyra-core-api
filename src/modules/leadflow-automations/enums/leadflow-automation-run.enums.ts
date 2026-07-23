@@ -9,7 +9,17 @@
 export enum LeadFlowAutomationRunMode {
   /** Evaluated with zero side effects, on demand, by an operator. */
   DryRun = 'dry_run',
-  /** Produced by the execution engine. Unreachable until the engine exists. */
+  /**
+   * Produced by a real delivered trigger and evaluated against real state, but
+   * carrying out no effect because no productive executor is registered.
+   *
+   * This is the honest middle ground the platform actually occupies: triggers
+   * arrive for real, the decision is real, and nothing happens. Folding it into
+   * `Live` would claim effects that never occurred; folding it into `DryRun`
+   * would claim an operator asked for it.
+   */
+  Shadow = 'shadow',
+  /** Produced by the execution engine with at least one confirmed effect. */
   Live = 'live',
 }
 
