@@ -65,6 +65,40 @@ describe('TasksCrudService notification triggers', () => {
     expect(publisher.publishReassigned).not.toHaveBeenCalled();
   });
 
+  it('preserves the cover image when creating a workspace task copy', async () => {
+    const { service, tasksRepository } = makeService();
+
+    const created = await service.createWorkspaceTask(makeContext(), {
+      title: 'Cópia de Preparar proposta',
+      priority: TaskPriority.Medium,
+      coverImageUrl: '/uploads/tasks/source-cover.webp',
+    });
+
+    expect(tasksRepository.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        coverImageUrl: '/uploads/tasks/source-cover.webp',
+      }),
+    );
+    expect(created.coverImageUrl).toBe('/uploads/tasks/source-cover.webp');
+  });
+
+  it('preserves the cover image when creating a private task copy', async () => {
+    const { service, tasksRepository } = makeService();
+
+    const created = await service.createMyTask(makeContext(), {
+      title: 'Cópia de Tarefa pessoal',
+      priority: TaskPriority.Medium,
+      coverImageUrl: '/uploads/tasks/private-cover.webp',
+    });
+
+    expect(tasksRepository.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        coverImageUrl: '/uploads/tasks/private-cover.webp',
+      }),
+    );
+    expect(created.coverImageUrl).toBe('/uploads/tasks/private-cover.webp');
+  });
+
   it('publishes assigned when assignee changes from null to user', async () => {
     const task = makeTask({ assigneeId: null });
     const { service, publisher } = makeService({ task });

@@ -87,4 +87,8 @@ export class CreateTaskDto {
   @IsArray()
   @IsString({ each: true })
   markerIds?: string[];
+
+  @IsOptional()
+  @IsString()
+  coverImageUrl?: string | null;
 }

@@ -309,6 +309,7 @@ export class TasksCrudService {
       isBlocked: dto.isBlocked ?? false,
       blockedReason: dto.blockedReason ?? null,
       markerIds: dto.markerIds ?? [],
+      coverImageUrl: dto.coverImageUrl ?? null,
       archivedAt: null,
     });
 
@@ -352,6 +353,7 @@ export class TasksCrudService {
       isBlocked: dto.isBlocked ?? false,
       blockedReason: dto.blockedReason ?? null,
       markerIds: dto.markerIds ?? [],
+      coverImageUrl: dto.coverImageUrl ?? null,
       archivedAt: null,
     });
 
