@@ -27,7 +27,7 @@ export type CrmCommandOptions = {
   expectedVersion?: number;
   expectedTransitionPolicyId?: string;
   expectedTransitionPolicyVersion?: number;
-  transferMode?: 'manual' | 'handoff';
+  transferMode?: 'manual' | 'handoff' | 'automation';
   idempotencyKey?: string;
   correlationId?: string;
   causationId?: string | null;

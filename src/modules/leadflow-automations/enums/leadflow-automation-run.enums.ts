@@ -52,6 +52,7 @@ export enum LeadFlowAutomationErrorClass {
 }
 
 export enum LeadFlowAutomationAttemptStatus {
+  Running = 'running',
   Succeeded = 'succeeded',
   Skipped = 'skipped',
   Failed = 'failed',

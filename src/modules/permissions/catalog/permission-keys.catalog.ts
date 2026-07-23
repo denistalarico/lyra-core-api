@@ -41,7 +41,9 @@ function resolveRiskLevel(
   dangerous: boolean,
 ): PermissionRiskLevel {
   if (dangerous) {
-    return roles.length === 1 ? PermissionRiskLevel.Critical : PermissionRiskLevel.High;
+    return roles.length === 1
+      ? PermissionRiskLevel.Critical
+      : PermissionRiskLevel.High;
   }
 
   if (roles.includes(Member)) {
@@ -55,7 +57,11 @@ function resolveRiskLevel(
   return PermissionRiskLevel.High;
 }
 
-function buildDefinition([key, roles, dangerous = false]: RawPermission): PermissionDefinition {
+function buildDefinition([
+  key,
+  roles,
+  dangerous = false,
+]: RawPermission): PermissionDefinition {
   const segments = key.split('.');
   const [productKey, moduleKey, ...rest] = segments;
 
@@ -290,7 +296,11 @@ const RAW_PERMISSIONS: RawPermission[] = [
   ['leadflow.automations.automation.create.admin', ADMIN_UP],
   ['leadflow.automations.automation.update.admin', ADMIN_UP],
   ['leadflow.automations.automation.pause.manager_or_admin', MANAGER_UP],
-  ['leadflow.automations.automation.delete.owner_or_admin_explicit', OWNER_ONLY, true],
+  [
+    'leadflow.automations.automation.delete.owner_or_admin_explicit',
+    OWNER_ONLY,
+    true,
+  ],
   // Automations Recipes & Rules Contract sprint (config-only)
   ['leadflow.automations.automation.configure.admin', ADMIN_UP],
   ['leadflow.automations.automation.activate.admin', ADMIN_UP],
@@ -298,6 +308,7 @@ const RAW_PERMISSIONS: RawPermission[] = [
   ['leadflow.automations.automation.publish.admin', ADMIN_UP],
   ['leadflow.automations.logs.view.admin', ADMIN_UP],
   ['leadflow.automations.runtime.preview.admin', ADMIN_UP],
+  ['leadflow.automations.execution.execute.admin', ADMIN_UP],
   ['leadflow.automations.developer.manage.owner_only', OWNER_ONLY, true],
 
   // 10.5 LeadFlow - Event Contract (contract-only, sem runtime)
@@ -346,7 +357,11 @@ const RAW_PERMISSIONS: RawPermission[] = [
   ['social.campaigns.campaign.create.manager', MANAGER_UP],
   ['social.campaigns.campaign.update.manager', MANAGER_UP],
   ['social.campaigns.campaign.manage_status.manager', MANAGER_UP],
-  ['social.campaigns.campaign.delete.owner_or_admin_explicit', OWNER_ONLY, true],
+  [
+    'social.campaigns.campaign.delete.owner_or_admin_explicit',
+    OWNER_ONLY,
+    true,
+  ],
   ['social.ads.campaign.view.client', MANAGER_UP],
   ['social.ads.campaign.manage.admin_or_explicit', ADMIN_UP],
 
@@ -356,7 +371,11 @@ const RAW_PERMISSIONS: RawPermission[] = [
   ['social.approvals.review.request_changes.manager', MANAGER_UP],
   ['social.approvals.review.approve_internal.manager', MANAGER_UP],
   ['social.approvals.review.approve_final.admin_or_client', ADMIN_UP],
-  ['social.approvals.review.override.owner_or_admin_explicit', OWNER_ONLY, true],
+  [
+    'social.approvals.review.override.owner_or_admin_explicit',
+    OWNER_ONLY,
+    true,
+  ],
 
   // 11.5 Social - Brand Kit
   ['social.brandkit.asset.view.client', ALL_ROLES],
@@ -377,20 +396,25 @@ const RAW_PERMISSIONS: RawPermission[] = [
   ['social.settings.danger_zone.manage.owner_only', OWNER_ONLY, true],
 ];
 
-export const PERMISSION_DEFINITIONS: PermissionDefinition[] = RAW_PERMISSIONS.map(buildDefinition);
+export const PERMISSION_DEFINITIONS: PermissionDefinition[] =
+  RAW_PERMISSIONS.map(buildDefinition);
 
-export const PERMISSION_KEYS = PERMISSION_DEFINITIONS.map((definition) => definition.key);
+export const PERMISSION_KEYS = PERMISSION_DEFINITIONS.map(
+  (definition) => definition.key,
+);
 
 export function isKnownPermissionKey(key: string): boolean {
   return PERMISSION_KEYS.includes(key);
 }
 
-export function getPermissionDefinition(key: string): PermissionDefinition | undefined {
+export function getPermissionDefinition(
+  key: string,
+): PermissionDefinition | undefined {
   return PERMISSION_DEFINITIONS.find((definition) => definition.key === key);
 }
 
 export function getDangerousPermissionKeys(): string[] {
-  return PERMISSION_DEFINITIONS.filter((definition) => definition.isDangerous).map(
-    (definition) => definition.key,
-  );
+  return PERMISSION_DEFINITIONS.filter(
+    (definition) => definition.isDangerous,
+  ).map((definition) => definition.key);
 }

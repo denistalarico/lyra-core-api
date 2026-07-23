@@ -11,10 +11,10 @@ import {
  * flipping a flag here is an explicit, reviewable decision that must be made in
  * the same change that ships the capability — never a side effect.
  *
- * Every value is `false` today. LeadFlow Automations is a configuration control
- * plane with no execution engine: there is no durable event fan-out, no
- * scheduler, no executor, and no dispatch path. Anything that claims otherwise
- * in the UI would be lying to the operator.
+ * Domain-command capabilities may be true even while trigger delivery remains
+ * unavailable. `isRuntimeAvailable` therefore checks ingress/runtime
+ * capabilities specifically instead of treating one callable command as a
+ * complete automation engine.
  */
 export const LEADFLOW_AUTOMATION_SATISFIED_DEPENDENCIES: Record<
   LeadFlowAutomationDependency,
@@ -24,7 +24,9 @@ export const LEADFLOW_AUTOMATION_SATISFIED_DEPENDENCIES: Record<
   [LeadFlowAutomationDependency.SchedulerRuntime]: false,
   [LeadFlowAutomationDependency.MessageGeneration]: false,
   [LeadFlowAutomationDependency.OwnershipCommand]: false,
-  [LeadFlowAutomationDependency.PipelineTransferCommand]: false,
+  [LeadFlowAutomationDependency.PipelineTransferCommand]: true,
+  [LeadFlowAutomationDependency.StageTransitionCommand]: true,
+  [LeadFlowAutomationDependency.OpportunityCopyCommand]: true,
   [LeadFlowAutomationDependency.AgendaDomain]: false,
   [LeadFlowAutomationDependency.AnalyticsBackend]: false,
   [LeadFlowAutomationDependency.QuotesDomain]: false,
@@ -56,11 +58,13 @@ export function findUnmetDependencies(
 }
 
 /**
- * True when the platform can execute *nothing*. Used to explain the global
- * situation once, instead of repeating the same blocker on every card.
+ * True only when some trigger-delivery runtime exists. Canonical domain
+ * commands alone do not make configured recipes run automatically.
  */
 export function isRuntimeAvailable(): boolean {
-  return Object.values(LEADFLOW_AUTOMATION_SATISFIED_DEPENDENCIES).some(
-    Boolean,
+  return (
+    isDependencySatisfied(LeadFlowAutomationDependency.EventFanOut) ||
+    isDependencySatisfied(LeadFlowAutomationDependency.SchedulerRuntime) ||
+    isDependencySatisfied(LeadFlowAutomationDependency.WebhookDispatch)
   );
 }

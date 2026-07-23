@@ -39,12 +39,14 @@ export type LeadFlowAutomationTrigger =
   | 'schedule.daily'
   | 'contact.special_date';
 
-/** Foreseen action keys (blueprint section 11). Contract-only, never executed. */
+/** Action keys exposed by the governed automation contract. */
 export type LeadFlowAutomationAction =
   | 'send_message'
   | 'schedule_followup'
   | 'notify_user'
   | 'move_opportunity_stage'
+  | 'transfer_opportunity_pipeline'
+  | 'copy_opportunity'
   | 'update_opportunity_score'
   | 'add_tag'
   | 'request_missing_fields'
@@ -101,6 +103,13 @@ export interface LeadFlowAutomationMessageConfig {
  */
 export interface LeadFlowAutomationCrmPolicy {
   moveStageOnComplete?: string | null;
+  moveStageReasonCode?: string | null;
+  transferToPipelineRef?: string | null;
+  transferToStageRef?: string | null;
+  transferReasonCode?: string | null;
+  copyToPipelineRef?: string | null;
+  copyToStageRef?: string | null;
+  copyReasonCode?: string | null;
   updateScore?: boolean;
   addTags?: string[];
   appendNote?: boolean;

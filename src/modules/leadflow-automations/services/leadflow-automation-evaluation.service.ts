@@ -304,6 +304,26 @@ export class LeadFlowAutomationEvaluationService {
     if (crmPolicy.updateScore === true) {
       planned.push('update_opportunity_score');
     }
+    if (
+      typeof crmPolicy.moveStageOnComplete === 'string' &&
+      typeof crmPolicy.moveStageReasonCode === 'string'
+    ) {
+      planned.push('move_opportunity_stage');
+    }
+    if (
+      typeof crmPolicy.transferToPipelineRef === 'string' &&
+      typeof crmPolicy.transferToStageRef === 'string' &&
+      typeof crmPolicy.transferReasonCode === 'string'
+    ) {
+      planned.push('transfer_opportunity_pipeline');
+    }
+    if (
+      typeof crmPolicy.copyToPipelineRef === 'string' &&
+      typeof crmPolicy.copyToStageRef === 'string' &&
+      typeof crmPolicy.copyReasonCode === 'string'
+    ) {
+      planned.push('copy_opportunity');
+    }
 
     return [...new Set(planned)];
   }

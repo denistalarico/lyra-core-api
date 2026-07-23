@@ -42,6 +42,12 @@ export enum LeadFlowAutomationDependency {
    */
   PipelineTransferCommand = 'pipeline_transfer_command',
 
+  /** Canonical, policy-governed stage transition command owned by CRM. */
+  StageTransitionCommand = 'stage_transition_command',
+
+  /** Canonical opportunity-copy command with explicit lineage owned by CRM. */
+  OpportunityCopyCommand = 'opportunity_copy_command',
+
   /**
    * The LeadFlow Agenda domain and its canonical appointment events. The legacy
    * Appointments module and the Agency Calendar are explicitly NOT this
@@ -76,6 +82,8 @@ export const LEADFLOW_AUTOMATION_DEPENDENCY_OWNERS: Record<
   [LeadFlowAutomationDependency.OwnershipCommand]: 'crm_structural_track',
   [LeadFlowAutomationDependency.PipelineTransferCommand]:
     'crm_structural_track',
+  [LeadFlowAutomationDependency.StageTransitionCommand]: 'crm_structural_track',
+  [LeadFlowAutomationDependency.OpportunityCopyCommand]: 'crm_structural_track',
   [LeadFlowAutomationDependency.AgendaDomain]: 'leadflow_agenda_domain',
   [LeadFlowAutomationDependency.AnalyticsBackend]: 'leadflow_analytics',
   [LeadFlowAutomationDependency.QuotesDomain]: 'quotes_domain',
@@ -98,6 +106,10 @@ export const LEADFLOW_AUTOMATION_DEPENDENCY_LABELS: Record<
     'Atribuição canônica de responsável ainda não disponível.',
   [LeadFlowAutomationDependency.PipelineTransferCommand]:
     'Transferência canônica de pipeline ainda não disponível.',
+  [LeadFlowAutomationDependency.StageTransitionCommand]:
+    'Transição canônica de etapa ainda não disponível.',
+  [LeadFlowAutomationDependency.OpportunityCopyCommand]:
+    'Cópia canônica de oportunidade ainda não disponível.',
   [LeadFlowAutomationDependency.AgendaDomain]:
     'Domínio de Agenda do LeadFlow ainda não disponível.',
   [LeadFlowAutomationDependency.AnalyticsBackend]:

@@ -21,6 +21,8 @@ export const LEADFLOW_AUTOMATIONS_PERMISSIONS = {
   logsView: 'leadflow.automations.logs.view.admin',
   /** leadflow.automations.runtime.preview.admin (new) */
   runtimePreview: 'leadflow.automations.runtime.preview.admin',
+  /** Execute a published effect, still subject to the owning domain permission. */
+  execute: 'leadflow.automations.execution.execute.admin',
 } as const;
 
 /** New keys introduced by this sprint (added to catalog + seeded). */
@@ -32,6 +34,7 @@ export const LEADFLOW_AUTOMATIONS_NEW_PERMISSION_KEYS: string[] = [
   LEADFLOW_AUTOMATIONS_PERMISSIONS.developerManage,
   LEADFLOW_AUTOMATIONS_PERMISSIONS.logsView,
   LEADFLOW_AUTOMATIONS_PERMISSIONS.runtimePreview,
+  LEADFLOW_AUTOMATIONS_PERMISSIONS.execute,
 ];
 
 /** All automations keys seeded by this sprint (pre-existing view + new). */

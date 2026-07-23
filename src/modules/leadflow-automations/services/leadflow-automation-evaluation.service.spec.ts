@@ -231,6 +231,34 @@ describe('LeadFlowAutomationEvaluationService', () => {
         1,
       );
     });
+
+    it('plans only fully configured governed CRM actions', () => {
+      const automation = buildAutomation({
+        crmPolicy: {
+          moveStageOnComplete: 'stage-2',
+          moveStageReasonCode: 'qualified',
+          transferToPipelineRef: 'pipeline-2',
+          transferToStageRef: 'stage-3',
+          transferReasonCode: 'specialist_route',
+          copyToPipelineRef: 'pipeline-3',
+          copyToStageRef: 'stage-4',
+          copyReasonCode: 'parallel_process',
+        },
+      });
+
+      expect(service.evaluate(automation, idleLead).plannedActions).toEqual(
+        expect.arrayContaining([
+          'move_opportunity_stage',
+          'transfer_opportunity_pipeline',
+          'copy_opportunity',
+        ]),
+      );
+
+      automation.crmPolicy.copyReasonCode = null;
+      expect(
+        service.evaluate(automation, idleLead).plannedActions,
+      ).not.toContain('copy_opportunity');
+    });
   });
 
   it('reports the first failing check as the reason', () => {

@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  Headers,
   Param,
   ParseUUIDPipe,
   Patch,
@@ -25,6 +26,8 @@ import type {
 } from './dto';
 import {
   DryRunAutomationDto,
+  ExecuteCrmAutomationActionDto,
+  mapRunDetail,
   PatchAutomationDto,
   ProvisionAutomationDto,
 } from './dto';
@@ -36,12 +39,16 @@ import type {
 } from './dto/leadflow-automation-runtime-config-response.dto';
 import { LEADFLOW_AUTOMATIONS_PERMISSIONS } from './leadflow-automations.permissions';
 import { LeadFlowAutomationService } from './services/leadflow-automation.service';
+import { LeadFlowAutomationCrmActionService } from './services/leadflow-automation-crm-action.service';
 
 @Controller('leadflow/automations')
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 @RequireProductEntitlement('leadflow')
 export class LeadFlowAutomationsController {
-  constructor(private readonly automationService: LeadFlowAutomationService) {}
+  constructor(
+    private readonly automationService: LeadFlowAutomationService,
+    private readonly crmActionService: LeadFlowAutomationCrmActionService,
+  ) {}
 
   @Get('recipes')
   @RequirePermission(LEADFLOW_AUTOMATIONS_PERMISSIONS.view)
@@ -172,5 +179,26 @@ export class LeadFlowAutomationsController {
     @Body() dto: DryRunAutomationDto,
   ): Promise<LeadFlowAutomationDryRunResponse> {
     return this.automationService.dryRun(ctx, id, dto);
+  }
+
+  /**
+   * Controlled live boundary for CRM effects. It does not subscribe to events
+   * or schedule work; future runtimes call the same service after delivery.
+   */
+  @Post(':id/actions/crm')
+  @RequirePermission(LEADFLOW_AUTOMATIONS_PERMISSIONS.execute)
+  async executeCrmAction(
+    @RequestContextData() ctx: RequestContext,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ExecuteCrmAutomationActionDto,
+    @Headers('idempotency-key') idempotencyKey?: string,
+  ): Promise<LeadFlowAutomationRunDetailResponse> {
+    const { run, attempts } = await this.crmActionService.execute(
+      ctx,
+      id,
+      dto,
+      idempotencyKey,
+    );
+    return mapRunDetail(run, attempts);
   }
 }
