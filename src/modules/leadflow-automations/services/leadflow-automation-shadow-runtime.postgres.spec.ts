@@ -17,6 +17,7 @@ import { LeadFlowAutomationVersionStatus } from '../enums/leadflow-automation-ve
 import type { LeadFlowAutomationRuntimeContract } from '../types/leadflow-automation.types';
 import { LeadFlowAutomationContextService } from './leadflow-automation-context.service';
 import { LeadFlowAutomationEvaluationService } from './leadflow-automation-evaluation.service';
+import type { LeadFlowAutomationExecutionService } from './leadflow-automation-execution.service';
 import { LeadFlowAutomationEventIngressService } from './leadflow-automation-event-ingress.service';
 import { LeadFlowAutomationRunService } from './leadflow-automation-run.service';
 import { LeadFlowAutomationShadowEvaluatorService } from './leadflow-automation-shadow-evaluator.service';
@@ -70,6 +71,12 @@ run('LeadFlow Automations shadow runtime PostgreSQL', () => {
       new LeadFlowAutomationContextService(loader),
       new LeadFlowAutomationEvaluationService(),
       runService,
+      // Canary gate is off in this suite (no env), so execution never runs and
+      // the delivery path stays shadow-only, which is what this test asserts.
+      {
+        execute: () =>
+          Promise.resolve({ executed: false, reason: 'execution_disabled' }),
+      } as unknown as LeadFlowAutomationExecutionService,
     );
     ingress = new LeadFlowAutomationEventIngressService(
       AgencyDataSource,

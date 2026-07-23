@@ -9,6 +9,7 @@ import { LeadFlowAutomationStatus } from '../enums/leadflow-automation-status.en
 import { LeadFlowAutomationContextService } from './leadflow-automation-context.service';
 import { LeadFlowAutomationContextLoaderService } from './leadflow-automation-context-loader.service';
 import { LeadFlowAutomationEvaluationService } from './leadflow-automation-evaluation.service';
+import type { LeadFlowAutomationExecutionService } from './leadflow-automation-execution.service';
 import type { LeadFlowAutomationRunService } from './leadflow-automation-run.service';
 import { LeadFlowAutomationShadowEvaluatorService } from './leadflow-automation-shadow-evaluator.service';
 import type {
@@ -184,6 +185,12 @@ function build(
     new LeadFlowAutomationContextService(loader),
     new LeadFlowAutomationEvaluationService(),
     { recordShadowRun } as unknown as LeadFlowAutomationRunService,
+    // Gate closed: A3 measures the shadow enrichment path, not execution.
+    {
+      execute: jest
+        .fn()
+        .mockResolvedValue({ executed: false, reason: 'execution_disabled' }),
+    } as unknown as LeadFlowAutomationExecutionService,
   );
 
   const snapshotOf = () => {

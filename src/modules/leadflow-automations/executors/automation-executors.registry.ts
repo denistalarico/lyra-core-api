@@ -1,7 +1,36 @@
+import { isDependencySatisfied } from '../catalog/automation-dependencies.registry';
 import { LeadFlowAutomationDependency } from '../enums/leadflow-automation-dependency.enum';
 import type { LeadFlowAutomationAction } from '../types/leadflow-automation.types';
 import type { AutomationExecutorAvailability } from './automation-executor.types';
 import { UnavailableExecutor } from './unavailable.executor';
+
+/**
+ * Availability of the governed stage-transition action.
+ *
+ * Distinct from the other entries because a real executor exists for it
+ * (`MoveOpportunityStageExecutor`), gated at run time by the execution gate.
+ * Here we only report capability: the canonical command is callable, so the
+ * action is available. Whether it is *permitted* to run for a given tenant is
+ * the gate's decision, made separately, so a closed gate never looks like a
+ * missing capability.
+ */
+function stageTransitionAvailability(): AutomationExecutorAvailability {
+  const available = isDependencySatisfied(
+    LeadFlowAutomationDependency.StageTransitionCommand,
+  );
+  return {
+    actionKey: 'move_opportunity_stage',
+    available,
+    reason: available ? null : 'dependency_missing',
+    dependency: available
+      ? null
+      : LeadFlowAutomationDependency.StageTransitionCommand,
+    owningDomain: 'leadflow.crm',
+    description: available
+      ? 'Transição governada de etapa via comando canônico do CRM (ator automation, etapas não terminais).'
+      : 'O comando canônico de transição de etapa ainda não está disponível.',
+  };
+}
 
 const unavailable = (
   actionKey: LeadFlowAutomationAction,
@@ -42,11 +71,6 @@ const EXECUTORS = [
     'notify_user',
     'platform.notifications',
     'O adapter governado de notificações ainda não foi implementado.',
-  ),
-  unavailable(
-    'move_opportunity_stage',
-    'leadflow.crm',
-    'O command CRM existe, mas o adapter automático com ator e versão esperada ainda não foi implementado.',
   ),
   unavailable(
     'transfer_opportunity_pipeline',
@@ -108,9 +132,23 @@ const BY_ACTION = new Map(
   EXECUTORS.map((executor) => [executor.actionKey, executor]),
 );
 
+/**
+ * Availability descriptors that are computed rather than fixed, because a real
+ * executor exists and its capability depends on a platform dependency.
+ */
+const COMPUTED_AVAILABILITY: Record<
+  string,
+  () => AutomationExecutorAvailability
+> = {
+  move_opportunity_stage: stageTransitionAvailability,
+};
+
 export function executorAvailability(
   actionKey: string,
 ): AutomationExecutorAvailability {
+  const computed = COMPUTED_AVAILABILITY[actionKey];
+  if (computed) return computed();
+
   const executor = BY_ACTION.get(actionKey as LeadFlowAutomationAction);
   return executor
     ? executor.availability()
@@ -133,5 +171,8 @@ export function unavailableExecutors(
 }
 
 export function hasAvailableExecutor(): boolean {
-  return EXECUTORS.some((executor) => executor.availability().available);
+  return (
+    EXECUTORS.some((executor) => executor.availability().available) ||
+    Object.values(COMPUTED_AVAILABILITY).some((fn) => fn().available)
+  );
 }

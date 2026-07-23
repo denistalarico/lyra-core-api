@@ -12,6 +12,7 @@ import {
   LeadFlowAutomationEvaluationService,
   type LeadFlowAutomationEvaluationRecipe,
 } from './leadflow-automation-evaluation.service';
+import { LeadFlowAutomationExecutionService } from './leadflow-automation-execution.service';
 import { LeadFlowAutomationRunService } from './leadflow-automation-run.service';
 import {
   type LeadFlowAutomationTriggerMatch,
@@ -24,6 +25,8 @@ export interface ShadowEvaluationSummary {
   runId: string;
   wouldAct: boolean;
   blockedByExecutor: boolean;
+  /** True when the gate permitted a real effect and a live run was recorded. */
+  executed: boolean;
   /** Required signals that could not be established for this evaluation. */
   contextGapCount: number;
 }
@@ -49,6 +52,7 @@ export class LeadFlowAutomationShadowEvaluatorService {
     private readonly contextService: LeadFlowAutomationContextService,
     private readonly evaluationService: LeadFlowAutomationEvaluationService,
     private readonly runService: LeadFlowAutomationRunService,
+    private readonly executionService: LeadFlowAutomationExecutionService,
   ) {}
 
   /**
@@ -104,8 +108,36 @@ export class LeadFlowAutomationShadowEvaluatorService {
             };
 
       // Even a passing evaluation cannot act until every planned action has a
-      // productive adapter. Shadow records that fact and requests no effect.
+      // productive adapter available.
       const blocked = unavailableExecutors(evaluation.plannedActions);
+      const eligibleForExecution = evaluation.wouldAct && blocked.length === 0;
+
+      // When the verdict could act and nothing is capability-blocked, offer it
+      // to execution. The gate — closed by default — decides whether anything
+      // actually happens; if it refuses, we fall through to a shadow run exactly
+      // as before, so the default behaviour of the whole platform is unchanged.
+      if (eligibleForExecution) {
+        const outcome = await this.executionService.execute({
+          automation,
+          version,
+          recipe,
+          evaluation,
+          delivery,
+          contextSnapshot: resolution.snapshot,
+        });
+        if (outcome.executed) {
+          summaries.push({
+            automationId: automation.id,
+            automationVersionId: version.id,
+            runId: outcome.runId,
+            wouldAct: evaluation.wouldAct,
+            blockedByExecutor: false,
+            executed: true,
+            contextGapCount: resolution.snapshot.gaps.length,
+          });
+          continue;
+        }
+      }
 
       const { run } = await this.runService.recordShadowRun(
         automation,
@@ -125,6 +157,7 @@ export class LeadFlowAutomationShadowEvaluatorService {
         runId: run.id,
         wouldAct: evaluation.wouldAct,
         blockedByExecutor: blocked.length > 0,
+        executed: false,
         contextGapCount: resolution.snapshot.gaps.length,
       });
     }

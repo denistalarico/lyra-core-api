@@ -22,25 +22,31 @@ const ACTIONS: LeadFlowAutomationAction[] = [
 ];
 
 describe('automation executor registry', () => {
-  it('registers every action explicitly and fails closed', () => {
+  it('registers every action explicitly with an owning domain and description', () => {
     for (const action of ACTIONS) {
       const availability = executorAvailability(action);
       expect(availability.actionKey).toBe(action);
-      expect(availability.available).toBe(false);
       expect(availability.owningDomain).not.toBe('unknown');
       expect(availability.description).toBeTruthy();
     }
   });
 
-  it('does not confuse a callable CRM command with an automatic adapter', () => {
+  it('reports the governed stage transition as available now that a real executor exists', () => {
+    // Its dependency (StageTransitionCommand) is satisfied; capability is real.
+    // Whether it is permitted to run is the execution gate's separate decision.
+    const availability = executorAvailability('move_opportunity_stage');
+    expect(availability.available).toBe(true);
+    expect(availability.owningDomain).toBe('leadflow.crm');
+  });
+
+  it('still fails closed for CRM commands with no automatic adapter yet', () => {
     for (const action of [
-      'move_opportunity_stage',
       'transfer_opportunity_pipeline',
       'copy_opportunity',
     ]) {
       const availability = executorAvailability(action);
+      expect(availability.available).toBe(false);
       expect(availability.reason).toBe('not_implemented');
-      expect(availability.dependency).toBeNull();
       expect(availability.owningDomain).toBe('leadflow.crm');
     }
   });

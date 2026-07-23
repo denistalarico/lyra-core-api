@@ -14,14 +14,41 @@ import {
   LeadFlowAutomationAttemptStatus,
   LeadFlowAutomationErrorClass,
   LeadFlowAutomationRunMode,
+  LeadFlowAutomationRunStatus,
 } from '../enums/leadflow-automation-run.enums';
 import type { LeadFlowJsonObject } from '../types/leadflow-automation.types';
 import type { LeadFlowAutomationContextSnapshot } from '../types/leadflow-automation-context.types';
 import type { LeadFlowEventDeliveryEntity } from '../../leadflow-events/entities/leadflow-event-delivery.entity';
-import type { AutomationExecutorAvailability } from '../executors';
+import type {
+  AutomationEffectResult,
+  AutomationExecutorAvailability,
+} from '../executors';
 import type { LeadFlowAutomationEvaluation } from './leadflow-automation-evaluation.service';
 
 const AGENCY_CONNECTION = 'agency';
+
+/** One action actually requested from its owning domain during a live run. */
+export interface LeadFlowAutomationLiveEffect {
+  actionKey: string;
+  result: AutomationEffectResult;
+  durationMs: number;
+}
+
+/** Maps an effect status onto the attempt status recorded for it. */
+function attemptStatusFor(
+  status: AutomationEffectResult['status'],
+): LeadFlowAutomationAttemptStatus {
+  switch (status) {
+    case 'confirmed':
+      return LeadFlowAutomationAttemptStatus.Succeeded;
+    case 'failed':
+      return LeadFlowAutomationAttemptStatus.Failed;
+    // A governed refusal, or an unavailable executor that slipped through, did
+    // not succeed and is not a fault: it deliberately did nothing.
+    default:
+      return LeadFlowAutomationAttemptStatus.Skipped;
+  }
+}
 
 /** Runs are history, not a feed — a page is enough for the detail view. */
 const DEFAULT_RUN_LIMIT = 25;
@@ -309,6 +336,176 @@ export class LeadFlowAutomationRunService {
             finishedAt: now,
           });
         }),
+      );
+
+      return { run, attempts };
+    });
+  }
+
+  /**
+   * Records a live run: a real delivered trigger whose planned actions were
+   * actually requested from their owning domains.
+   *
+   * Distinguished from a shadow run only by mode and by the attempts carrying
+   * real effect results — `effectConfirmed` is true only where a domain
+   * acknowledged the effect. Idempotent on the delivery/automation pair under a
+   * `live:` key, so a redelivery of the same event does not re-execute: the
+   * per-effect idempotency in the executor is the second line, this is the
+   * first.
+   */
+  async recordLiveRun(
+    automation: LeadFlowAutomationEntity,
+    version: LeadFlowAutomationVersionEntity,
+    recipe: LeadFlowAutomationRunRecipe | undefined,
+    evaluation: LeadFlowAutomationEvaluation,
+    extras: {
+      delivery: LeadFlowEventDeliveryEntity;
+      contextSnapshot: LeadFlowAutomationContextSnapshot;
+      effects: LeadFlowAutomationLiveEffect[];
+    },
+  ): Promise<LeadFlowAutomationRunWithAttempts> {
+    const { delivery, contextSnapshot, effects } = extras;
+    const digest = createHash('sha256')
+      .update(
+        [
+          delivery.tenantId,
+          delivery.workspaceId,
+          delivery.sourceEventId,
+          automation.id,
+        ].join(':'),
+      )
+      .digest('hex');
+    const idempotencyKey = `live:${digest}`;
+
+    return this.dataSource.transaction(async (manager) => {
+      await manager.query(
+        'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
+        [idempotencyKey],
+      );
+      const runs = manager.getRepository(LeadFlowAutomationRunEntity);
+      const attemptsRepository = manager.getRepository(
+        LeadFlowAutomationRunAttemptEntity,
+      );
+      const existing = await runs.findOne({
+        where: {
+          tenantId: automation.tenantId,
+          workspaceId: automation.workspaceId,
+          idempotencyKey,
+        },
+      });
+      if (existing) {
+        const attempts = await attemptsRepository.find({
+          where: {
+            runId: existing.id,
+            tenantId: automation.tenantId,
+            workspaceId: automation.workspaceId,
+          },
+          order: { attemptNumber: 'ASC' },
+        });
+        return { run: existing, attempts };
+      }
+
+      const now = new Date();
+      const anyConfirmed = effects.some(
+        (effect) => effect.result.effectConfirmed,
+      );
+      const anyFailed = effects.some(
+        (effect) => effect.result.status === 'failed',
+      );
+      // A run that broke is failed; one where every effect landed is a success;
+      // one that was governed-refused did nothing wrong but did nothing either.
+      const status = anyFailed
+        ? LeadFlowAutomationRunStatus.Failed
+        : anyConfirmed
+          ? LeadFlowAutomationRunStatus.Succeeded
+          : LeadFlowAutomationRunStatus.Skipped;
+      const firstError = effects.find((effect) => effect.result.errorCode);
+      const correlationId = uuidFrom(delivery.payload.correlationId)
+        ? String(delivery.payload.correlationId)
+        : delivery.sourceEventId;
+
+      const run = await runs.save(
+        runs.create({
+          tenantId: automation.tenantId,
+          workspaceId: automation.workspaceId,
+          automationId: automation.id,
+          automationVersionId: version.id,
+          recipeKey: automation.recipeKey,
+          templateVersion: automation.templateVersion ?? 1,
+          mode: LeadFlowAutomationRunMode.Live,
+          status,
+          skipReason: null,
+          triggerType:
+            (automation.triggerConfig?.type as string) ??
+            recipe?.trigger ??
+            'unknown',
+          triggerKind: recipe?.triggerKind ?? 'event',
+          sourceEventId: delivery.sourceEventId,
+          sourceEventName: delivery.eventName,
+          correlationId,
+          causationId: uuidFrom(delivery.payload.causationId)
+            ? String(delivery.payload.causationId)
+            : null,
+          idempotencyKey,
+          inputSnapshot: {
+            context: evaluation.context as unknown as LeadFlowJsonObject,
+            contextSnapshot: contextSnapshot as unknown as LeadFlowJsonObject,
+            verdictBasis: isFullyObserved(contextSnapshot)
+              ? 'observed'
+              : 'partially_assumed',
+            deliveryId: delivery.id,
+            occurredAt: delivery.occurredAt.toISOString(),
+            publishedVersionNumber: version.version,
+          },
+          result: {
+            wouldAct: evaluation.wouldAct,
+            plannedActions: evaluation.plannedActions,
+            executedAnything: anyConfirmed,
+            confirmedCount: effects.filter(
+              (effect) => effect.result.effectConfirmed,
+            ).length,
+            refusedCount: effects.filter(
+              (effect) => effect.result.status === 'refused',
+            ).length,
+            failedCount: effects.filter(
+              (effect) => effect.result.status === 'failed',
+            ).length,
+            contextCost: contextSnapshot.cost as unknown as LeadFlowJsonObject,
+          } as unknown as LeadFlowJsonObject,
+          errorCode: firstError?.result.errorCode ?? null,
+          errorMessage: firstError?.result.errorMessage ?? null,
+          attemptCount: effects.length,
+          scheduledAt: null,
+          startedAt: now,
+          finishedAt: now,
+          createdById: null,
+        }),
+      );
+
+      const attempts = await attemptsRepository.save(
+        effects.map((effect, index) =>
+          attemptsRepository.create({
+            tenantId: automation.tenantId,
+            workspaceId: automation.workspaceId,
+            runId: run.id,
+            attemptNumber: index + 1,
+            actionKey: effect.actionKey,
+            status: attemptStatusFor(effect.result.status),
+            errorClass: effect.result.errorClass ?? null,
+            errorCode: effect.result.errorCode ?? null,
+            errorMessage: effect.result.errorMessage ?? null,
+            effectRequested: {
+              action: effect.actionKey,
+              live: true,
+              automationVersionId: version.id,
+            },
+            // True only where the owning domain acknowledged the effect.
+            effectConfirmed: effect.result.effectConfirmed,
+            durationMs: effect.durationMs,
+            startedAt: now,
+            finishedAt: now,
+          }),
+        ),
       );
 
       return { run, attempts };

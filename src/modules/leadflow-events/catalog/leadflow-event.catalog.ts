@@ -779,6 +779,13 @@ export const LEADFLOW_AUTOMATION_TRIGGER_EVENT_MAPPINGS: LeadFlowEventTriggerMap
       status: 'mapped',
     },
     {
+      trigger: 'opportunity.updated',
+      eventName: 'leadflow.crm.opportunity.updated',
+      status: 'mapped',
+      notes:
+        'Reavaliada quando campos da oportunidade mudam; usada pelo avanço governado de etapa.',
+    },
+    {
       trigger: 'opportunity.stage_changed',
       eventName: 'leadflow.crm.opportunity.stage.changed',
       status: 'mapped',

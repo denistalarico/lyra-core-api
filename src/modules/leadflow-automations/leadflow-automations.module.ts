@@ -19,6 +19,9 @@ import {
   LEADFLOW_CONTEXT_LOADER_ENTITIES,
 } from './services/leadflow-automation-context-loader.service';
 import { LeadFlowAutomationEvaluationService } from './services/leadflow-automation-evaluation.service';
+import { LeadFlowAutomationExecutionGate } from './services/leadflow-automation-execution-gate.service';
+import { LeadFlowAutomationExecutionService } from './services/leadflow-automation-execution.service';
+import { MoveOpportunityStageExecutor } from './executors/move-opportunity-stage.executor';
 import { LeadFlowAutomationEventIngressService } from './services/leadflow-automation-event-ingress.service';
 import { LeadFlowAutomationLifecycleService } from './services/leadflow-automation-lifecycle.service';
 import { LeadFlowAutomationRecipeService } from './services/leadflow-automation-recipe.service';
@@ -55,6 +58,9 @@ import { LeadFlowAutomationService } from './services/leadflow-automation.servic
     LeadFlowAutomationContextService,
     LeadFlowAutomationContextLoaderService,
     LeadFlowAutomationEvaluationService,
+    LeadFlowAutomationExecutionGate,
+    LeadFlowAutomationExecutionService,
+    MoveOpportunityStageExecutor,
     LeadFlowAutomationEventIngressService,
     LeadFlowAutomationRunService,
     LeadFlowAutomationShadowEvaluatorService,

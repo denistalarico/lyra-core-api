@@ -24,6 +24,7 @@ export type LeadFlowAutomationTrigger =
   | 'conversation.replied'
   | 'conversation.handoff_requested'
   | 'opportunity.created'
+  | 'opportunity.updated'
   | 'opportunity.stage_changed'
   | 'opportunity.score_changed'
   | 'opportunity.hot_lead_detected'

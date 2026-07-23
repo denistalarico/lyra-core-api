@@ -50,6 +50,7 @@ export const LEADFLOW_AUTOMATION_TRIGGER_KINDS: Record<
   'conversation.replied': 'event',
   'conversation.handoff_requested': 'event',
   'opportunity.created': 'event',
+  'opportunity.updated': 'event',
   'opportunity.stage_changed': 'event',
   'opportunity.score_changed': 'event',
   'opportunity.hot_lead_detected': 'event',
@@ -430,6 +431,37 @@ const ESSENTIAL_SEEDS: RecipeSeed[] = [
     limitsLabel: 'Um envio por evento concluído; respeita cooldown.',
     schedulePolicy: { cooldownHours: 72 },
     crmPolicy: { moveStageOnComplete: null, addTags: [] },
+  },
+  {
+    key: 'governed_stage_advance',
+    // The only capability the platform can execute end-to-end today: a governed,
+    // non-terminal stage transition. Requires the canonical command; delivery
+    // still needs the durable fan-out. Deliberately has no secondary action, so
+    // the one effect it performs is the one the executor can actually carry out.
+    requiredDependencies: [
+      LeadFlowAutomationDependency.EventFanOut,
+      LeadFlowAutomationDependency.StageTransitionCommand,
+    ],
+    name: 'Avançar etapa automaticamente',
+    description:
+      'Avança a oportunidade para a próxima etapa assim que os requisitos governados da transição são atendidos. Nunca move para etapas de ganho ou perda.',
+    category: LeadFlowAutomationCategory.Routing,
+    tier: 'essential',
+    trigger: 'opportunity.updated',
+    primaryAction: 'move_opportunity_stage',
+    whenLabel:
+      'Quando os campos e condições exigidos pela política de transição são preenchidos.',
+    limitsLabel:
+      'Só entre etapas não terminais; respeita a política de transição publicada e o motivo governado.',
+    conditionConfig: {
+      businessHoursOnly: false,
+      stopIfReplied: false,
+      stopIfHandoff: false,
+    },
+    // The target stage and reason are per-instance: an operator picks which
+    // stage this advances to. Null until configured, so the automation stays in
+    // "requires configuration" rather than guessing a destination.
+    crmPolicy: { moveStageOnComplete: null, moveStageReasonCode: null },
   },
 ];
 

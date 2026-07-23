@@ -20,6 +20,7 @@ import {
 import { LeadFlowAutomationContextService } from './leadflow-automation-context.service';
 import type { LeadFlowAutomationContextLoaderService } from './leadflow-automation-context-loader.service';
 import { LeadFlowAutomationEvaluationService } from './leadflow-automation-evaluation.service';
+import type { LeadFlowAutomationExecutionService } from './leadflow-automation-execution.service';
 import type { LeadFlowAutomationRunService } from './leadflow-automation-run.service';
 import { LeadFlowAutomationShadowEvaluatorService } from './leadflow-automation-shadow-evaluator.service';
 import type {
@@ -123,6 +124,10 @@ describe('LeadFlowAutomationShadowEvaluatorService', () => {
       run: { id: 'run-1' },
       attempts: [],
     }),
+    execute = jest.fn().mockResolvedValue({
+      executed: false,
+      reason: 'execution_disabled',
+    }),
   ) {
     const findMatching = jest.fn().mockResolvedValue(matches);
     const matcher = {
@@ -131,6 +136,10 @@ describe('LeadFlowAutomationShadowEvaluatorService', () => {
     const runService = {
       recordShadowRun,
     } as unknown as LeadFlowAutomationRunService;
+    // Gate closed by default, so these tests observe the shadow behaviour.
+    const executionService = {
+      execute,
+    } as unknown as LeadFlowAutomationExecutionService;
 
     const service = new LeadFlowAutomationShadowEvaluatorService(
       matcher,
@@ -144,9 +153,10 @@ describe('LeadFlowAutomationShadowEvaluatorService', () => {
       } as unknown as LeadFlowAutomationContextLoaderService),
       new LeadFlowAutomationEvaluationService(),
       runService,
+      executionService,
     );
 
-    return { service, findMatching, recordShadowRun };
+    return { service, findMatching, recordShadowRun, execute };
   }
 
   it('records nothing when no automation matches the event', async () => {
@@ -400,5 +410,64 @@ describe('LeadFlowAutomationShadowEvaluatorService', () => {
     // Guards the honesty invariant at the type level.
     expect(LeadFlowAutomationRunMode.Shadow).toBe('shadow');
     expect(LeadFlowAutomationRunMode.Live).toBe('live');
+  });
+
+  describe('gated execution', () => {
+    /** A match whose only planned action is the available stage transition. */
+    const executable = () =>
+      buildMatch({
+        conditionConfig: {},
+        actionConfig: { primaryAction: 'move_opportunity_stage' },
+        schedulePolicy: {},
+      });
+
+    it('offers an eligible verdict to execution', async () => {
+      const { service, execute } = build([executable()]);
+
+      await service.evaluateDelivery(buildDelivery());
+
+      expect(execute).toHaveBeenCalledTimes(1);
+    });
+
+    it('records a live run and no shadow run when the gate executes', async () => {
+      const execute = jest
+        .fn()
+        .mockResolvedValue({ executed: true, runId: 'live-run-9' });
+      const { service, recordShadowRun } = build(
+        [executable()],
+        undefined,
+        execute,
+      );
+
+      const summaries = await service.evaluateDelivery(buildDelivery());
+
+      expect(summaries[0]).toMatchObject({
+        runId: 'live-run-9',
+        executed: true,
+        blockedByExecutor: false,
+      });
+      // The whole point: a real effect does not also leave a shadow record.
+      expect(recordShadowRun).not.toHaveBeenCalled();
+    });
+
+    it('falls back to a shadow run when the gate refuses', async () => {
+      // Default build: execute returns { executed: false }.
+      const { service, recordShadowRun } = build([executable()]);
+
+      const summaries = await service.evaluateDelivery(buildDelivery());
+
+      expect(summaries[0].executed).toBe(false);
+      expect(recordShadowRun).toHaveBeenCalledTimes(1);
+    });
+
+    it('never offers an ineligible verdict to execution', async () => {
+      // The idle-lead recipe's primary action is unavailable, so nothing is
+      // eligible and execution is never consulted.
+      const { service, execute } = build([buildMatch()]);
+
+      await service.evaluateDelivery(buildDelivery());
+
+      expect(execute).not.toHaveBeenCalled();
+    });
   });
 });

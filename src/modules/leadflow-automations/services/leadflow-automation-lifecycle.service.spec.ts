@@ -30,8 +30,11 @@ describe('LeadFlowAutomationLifecycleService', () => {
       ...overrides,
     });
 
-  it('does not report an execution runtime for ingress without executors', () => {
-    expect(evaluate().runtimeAvailable).toBe(false);
+  it('reports an execution runtime now that a productive executor exists', () => {
+    // The governed stage-transition executor is real and its dependency is
+    // satisfied, so the platform genuinely can carry out an effect. The canary
+    // gate — a separate concern — is what limits which tenants may.
+    expect(evaluate().runtimeAvailable).toBe(true);
   });
 
   describe('dependency gating', () => {
