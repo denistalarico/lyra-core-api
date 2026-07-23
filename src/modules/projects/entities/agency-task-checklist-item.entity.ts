@@ -20,7 +20,7 @@ export class AgencyTaskChecklistItem {
   @Column({ name: 'task_id', type: 'uuid' })
   taskId!: string;
 
-  @Column({ type: 'varchar', length: 220 })
+  @Column({ type: 'text' })
   title!: string;
 
   @Column({ type: 'text', nullable: true, default: null })
@@ -35,7 +35,12 @@ export class AgencyTaskChecklistItem {
   @Column({ type: 'int', default: 0 })
   position!: number;
 
-  @Column({ name: 'task_type_id', type: 'varchar', length: 120, nullable: true })
+  @Column({
+    name: 'task_type_id',
+    type: 'varchar',
+    length: 120,
+    nullable: true,
+  })
   taskTypeId!: string | null;
 
   @Column({ name: 'assignee_id', type: 'uuid', nullable: true, default: null })
@@ -44,10 +49,20 @@ export class AgencyTaskChecklistItem {
   // Personal-board stage chosen by the assignee in /projects/my-tasks. Only that
   // board reads it — other boards use the parent task's stage fields, so moving a
   // subtask here never affects its position/stage elsewhere.
-  @Column({ name: 'personal_stage_id', type: 'uuid', nullable: true, default: null })
+  @Column({
+    name: 'personal_stage_id',
+    type: 'uuid',
+    nullable: true,
+    default: null,
+  })
   personalStageId!: string | null;
 
-  @Column({ name: 'due_date', type: 'timestamptz', nullable: true, default: null })
+  @Column({
+    name: 'due_date',
+    type: 'timestamptz',
+    nullable: true,
+    default: null,
+  })
   dueDate!: Date | null;
 
   @CreateDateColumn({ name: 'created_at' })
