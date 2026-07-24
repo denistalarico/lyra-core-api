@@ -44,6 +44,7 @@ function opportunity(
     followMode: 'manual',
     followMessage: null,
     followSendAutomatically: false,
+    autonomyMode: 'automatic',
     metadata: {},
     rowVersion: 4,
     createdAt: startedAt,

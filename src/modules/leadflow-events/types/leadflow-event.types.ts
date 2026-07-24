@@ -65,6 +65,7 @@ export type LeadFlowEventName =
   | 'leadflow.crm.opportunity.hot_lead_detected'
   | 'leadflow.crm.opportunity.status.changed'
   | 'leadflow.crm.opportunity.owner.changed'
+  | 'leadflow.crm.opportunity.autonomy_mode.changed'
   | 'leadflow.crm.opportunity.won'
   | 'leadflow.crm.opportunity.lost'
   | 'leadflow.crm.opportunity.idle'

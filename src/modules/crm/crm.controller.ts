@@ -32,6 +32,7 @@ import { PatchCrmStageDto } from './dto/patch-crm-stage.dto';
 import { AssignCrmOpportunityTagDto } from './dto/assign-crm-opportunity-tag.dto';
 import { CreateCrmTagDto } from './dto/create-crm-tag.dto';
 import { PatchCrmOpportunityCardColorDto } from './dto/patch-crm-opportunity-card-color.dto';
+import { PatchCrmOpportunityAutonomyModeDto } from './dto/patch-crm-opportunity-autonomy-mode.dto';
 import { PatchCrmOpportunityFollowDto } from './dto/patch-crm-opportunity-follow.dto';
 import { PatchCrmOpportunityVisibilityDto } from './dto/patch-crm-opportunity-visibility.dto';
 import { PatchCrmStageFoldDto } from './dto/patch-crm-stage-fold.dto';
@@ -524,6 +525,24 @@ export class CrmController {
     @Body() dto: PatchCrmOpportunityFollowDto,
   ) {
     return this.crmService.patchOpportunityFollow(ctx, id, dto);
+  }
+
+  /**
+   * D3: set the card's autonomy mode. Moving a LeadFlow card by hand already
+   * flips it to `manual`; this endpoint lets an operator reactivate `automatic`
+   * (or set `manual` explicitly). Audited via the autonomy_mode.changed event.
+   */
+  @Patch('opportunities/:id/autonomy-mode')
+  @RequireAnyPermission(
+    'leadflow.crm.records.update.assigned',
+    'leadflow.crm.records.update.client',
+  )
+  patchOpportunityAutonomyMode(
+    @RequestContextData() ctx: RequestContext,
+    @Param('id') id: string,
+    @Body() dto: PatchCrmOpportunityAutonomyModeDto,
+  ) {
+    return this.crmService.setOpportunityAutonomyMode(ctx, id, dto);
   }
 
   @Patch('opportunities/:id/visibility')

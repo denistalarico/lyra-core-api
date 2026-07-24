@@ -912,3 +912,101 @@ describe('CrmOpportunityCommandService', () => {
     expect(committed.events).toHaveLength(0);
   });
 });
+
+describe('CrmOpportunityCommandService — autonomy mode (D3)', () => {
+  // A non-terminal destination so a stage move produces no status events —
+  // isolating the autonomy behaviour from won/lost side effects.
+  const openStage = () =>
+    stage({
+      id: '00000000-0000-4000-8000-000000000032',
+      type: 'open',
+      isWonStage: false,
+      isLostStage: false,
+    });
+
+  it('refuses an automation stage move on a manual card', async () => {
+    const initial = opportunity({
+      autonomyMode: 'manual',
+      inboxConversationId: '00000000-0000-4000-8000-0000000000c0',
+    });
+    const { service, committed } = harness({
+      initial: [initial],
+      stages: [openStage()],
+    });
+
+    await expect(
+      service.moveStage(ctx, initial.id, openStage().id, {
+        actor: { type: 'automation' },
+        expectedVersion: 3,
+        reason: 'governed_stage_advance',
+      }),
+    ).rejects.toMatchObject({ response: { reasonCode: 'opportunity_is_manual' } });
+
+    expect(committed.opportunities[0]).toMatchObject({
+      stageId: initial.stageId,
+      autonomyMode: 'manual',
+      rowVersion: 3,
+    });
+    expect(committed.events).toHaveLength(0);
+  });
+
+  it('flips a LeadFlow card to manual on a human move and records the event', async () => {
+    const initial = opportunity({
+      autonomyMode: 'automatic',
+      inboxConversationId: '00000000-0000-4000-8000-0000000000c1',
+    });
+    const { service, committed } = harness({
+      initial: [initial],
+      stages: [openStage()],
+    });
+
+    const result = await service.moveStage(ctx, initial.id, openStage().id, {
+      expectedVersion: 3,
+      reason: 'manual_stage_move',
+    });
+
+    expect(result.opportunity.autonomyMode).toBe('manual');
+    expect(committed.events.map((event) => event.eventType)).toEqual([
+      'stage_changed',
+      'autonomy_mode_changed',
+    ]);
+    const autonomyEvent = committed.events.find(
+      (event) => event.eventType === 'autonomy_mode_changed',
+    );
+    expect(autonomyEvent?.afterData).toMatchObject({ autonomyMode: 'manual' });
+  });
+
+  it('does not flip or emit for a non-LeadFlow (Agency Sales) human move', async () => {
+    const initial = opportunity({ autonomyMode: 'automatic' }); // no LeadFlow signals
+    const { service, committed } = harness({
+      initial: [initial],
+      stages: [openStage()],
+    });
+
+    const result = await service.moveStage(ctx, initial.id, openStage().id, {
+      expectedVersion: 3,
+      reason: 'manual_stage_move',
+    });
+
+    expect(result.opportunity.autonomyMode).toBe('automatic');
+    expect(committed.events.map((event) => event.eventType)).toEqual([
+      'stage_changed',
+    ]);
+  });
+
+  it('setAutonomyMode changes the mode, emits once, and is idempotent', async () => {
+    const initial = opportunity({ autonomyMode: 'automatic' });
+    const { service, committed } = harness({ initial: [initial] });
+
+    const first = await service.setAutonomyMode(ctx, initial.id, 'manual');
+    expect(first.autonomyMode).toBe('manual');
+    expect(committed.events.map((event) => event.eventType)).toEqual([
+      'autonomy_mode_changed',
+    ]);
+
+    const second = await service.setAutonomyMode(ctx, initial.id, 'manual');
+    expect(second.autonomyMode).toBe('manual');
+    // No second event: setting the same mode is a no-op.
+    expect(committed.events).toHaveLength(1);
+  });
+});

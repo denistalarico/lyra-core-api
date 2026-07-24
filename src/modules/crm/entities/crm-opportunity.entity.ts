@@ -155,6 +155,19 @@ export class CrmOpportunityEntity {
   })
   followSendAutomatically!: boolean;
 
+  /**
+   * D3: who is allowed to move this card. `automatic` lets automations/agents
+   * act; `manual` means a human took over and non-human stage moves are refused.
+   * A human move flips a LeadFlow card to `manual` (see CrmOpportunityCommandService).
+   */
+  @Column({
+    name: 'autonomy_mode',
+    type: 'varchar',
+    length: 16,
+    default: 'automatic',
+  })
+  autonomyMode!: 'automatic' | 'manual';
+
   @Column({ type: 'jsonb', default: () => "'{}'::jsonb" })
   metadata!: Record<string, unknown>;
 

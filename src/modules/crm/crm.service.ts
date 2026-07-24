@@ -21,6 +21,7 @@ import { AssignCrmOpportunityTagDto } from './dto/assign-crm-opportunity-tag.dto
 import { CreateCrmOpportunityEventDto } from './dto/create-crm-opportunity-event.dto';
 import { CreateCrmTagDto } from './dto/create-crm-tag.dto';
 import { PatchCrmOpportunityCardColorDto } from './dto/patch-crm-opportunity-card-color.dto';
+import { PatchCrmOpportunityAutonomyModeDto } from './dto/patch-crm-opportunity-autonomy-mode.dto';
 import { PatchCrmOpportunityFollowDto } from './dto/patch-crm-opportunity-follow.dto';
 import { PatchCrmOpportunityVisibilityDto } from './dto/patch-crm-opportunity-visibility.dto';
 import { PatchCrmStageFoldDto } from './dto/patch-crm-stage-fold.dto';
@@ -647,6 +648,19 @@ export class CrmService {
       });
     }
     return result.opportunity;
+  }
+
+  async setOpportunityAutonomyMode(
+    ctx: RequestContext,
+    id: string,
+    dto: PatchCrmOpportunityAutonomyModeDto,
+    options: CrmCommandOptions = {},
+  ): Promise<CrmOpportunityEntity> {
+    return this.opportunityCommands.setAutonomyMode(ctx, id, dto.mode, {
+      ...options,
+      actor: { type: 'user', userId: ctx.userId ?? null },
+      expectedVersion: dto.expectedVersion ?? options.expectedVersion,
+    });
   }
 
   async transferOpportunity(

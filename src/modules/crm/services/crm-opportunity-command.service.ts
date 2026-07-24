@@ -250,6 +250,46 @@ export class CrmOpportunityCommandService {
     return result;
   }
 
+  /**
+   * D3: explicitly set a card's autonomy mode (e.g. an operator reactivating
+   * `automatic` after having taken a card over). Idempotent — no event when the
+   * mode is unchanged. Emits the same audit event as the human-move flip.
+   */
+  async setAutonomyMode(
+    ctx: RequestContext,
+    opportunityId: string,
+    mode: 'automatic' | 'manual',
+    options: CrmCommandOptions = {},
+  ): Promise<CrmOpportunityEntity> {
+    return this.dataSource.transaction(async (manager) => {
+      const replay = await this.findReplay(manager, ctx, options.idempotencyKey);
+      if (replay) return replay;
+      const opportunity = await this.findScopedOpportunity(
+        manager,
+        ctx,
+        opportunityId,
+        true,
+      );
+      this.assertVersion(opportunity, options.expectedVersion);
+      const previousMode = opportunity.autonomyMode;
+      if (previousMode === mode) return opportunity;
+      opportunity.autonomyMode = mode;
+      opportunity.rowVersion += 1;
+      const saved = await manager
+        .getRepository(CrmOpportunityEntity)
+        .save(opportunity);
+      await this.appendHistory(manager, ctx, {
+        ...options,
+        opportunity: saved,
+        eventType: 'autonomy_mode_changed',
+        title: 'Modo de automação alterado',
+        beforeData: { autonomyMode: previousMode },
+        afterData: { autonomyMode: mode },
+      });
+      return saved;
+    });
+  }
+
   async transferPipeline(
     ctx: RequestContext,
     opportunityId: string,
@@ -825,6 +865,32 @@ export class CrmOpportunityCommandService {
       return { opportunity, event: null };
     }
 
+    // D3: a manual card is human-driven; automations and agents may not move it.
+    // A clean, non-retryable refusal — MoveOpportunityStageExecutor maps this
+    // ConflictException to `refused`. Applies to any manual card (automations
+    // only ever target LeadFlow cards anyway), so Agency Sales is unaffected.
+    if (
+      stageChanged &&
+      this.isAutonomousActor(options.actor) &&
+      opportunity.autonomyMode === 'manual'
+    ) {
+      throw new ConflictException({
+        code: 'CRM_STAGE_TRANSITION_BLOCKED',
+        reasonCode: 'opportunity_is_manual',
+        message:
+          'A oportunidade está em modo manual; automações não movem este card.',
+      });
+    }
+
+    // D3: a human moving a LeadFlow card takes it over — flip it to manual and
+    // record the change. Scoped to LeadFlow provenance so Agency Sales moves are
+    // untouched (no flip, no event). No-op when already manual.
+    const flipToManual =
+      stageChanged &&
+      this.isHumanActor(options.actor) &&
+      this.isLeadFlowManaged(opportunity) &&
+      opportunity.autonomyMode !== 'manual';
+
     let governedOptions = options;
     if (stageChanged) {
       const policy =
@@ -872,6 +938,7 @@ export class CrmOpportunityCommandService {
         options.beforeOpportunityId,
       ));
     this.applyTerminalTimestamps(opportunity, nextStatus, previousStatus);
+    if (flipToManual) opportunity.autonomyMode = 'manual';
     opportunity.rowVersion += 1;
     const saved = await manager
       .getRepository(CrmOpportunityEntity)
@@ -886,6 +953,18 @@ export class CrmOpportunityCommandService {
         title: 'Etapa alterada',
         beforeData: { stageId: previousStageId, status: previousStatus },
         afterData: { stageId: saved.stageId, status: saved.status },
+      });
+    }
+    if (flipToManual) {
+      // D3 audit trail: the card became human-managed. beforeData/afterData carry
+      // the mode change; the outbox event feeds future Analytics.
+      await this.appendHistory(manager, ctx, {
+        ...governedOptions,
+        opportunity: saved,
+        eventType: 'autonomy_mode_changed',
+        title: 'Modo de automação alterado',
+        beforeData: { autonomyMode: 'automatic' },
+        afterData: { autonomyMode: 'manual' },
       });
     }
     if (statusChanged) {
@@ -1803,6 +1882,42 @@ export class CrmOpportunityCommandService {
     };
   }
 
+  /**
+   * A non-human, automatic mover: an automation executor or an agent (`ai`).
+   * These are the actors a `manual` card refuses. `system` moves (internal
+   * reconciliation) are neither refused nor cause a flip. Actor is optional; an
+   * absent actor is treated as a human (`user`), matching {@link appendHistory}.
+   */
+  private isAutonomousActor(actor?: CrmCommandActor): boolean {
+    return actor?.type === 'automation' || actor?.type === 'ai';
+  }
+
+  /** A human operator. Absent actor defaults to human, as elsewhere in this service. */
+  private isHumanActor(actor?: CrmCommandActor): boolean {
+    return !actor || actor.type === 'user';
+  }
+
+  /**
+   * Whether the card belongs to LeadFlow (as opposed to Agency Sales, which
+   * shares this table). Only LeadFlow cards flip to `manual` on a human move and
+   * emit the autonomy audit event — Agency Sales behaviour is left untouched.
+   *
+   * LeadFlow provenance signals set by the Inbox governed-action worker and the
+   * LeadFlow CRM: a linked Inbox conversation, a `leadflow`-prefixed source, or
+   * LeadFlow scoping in metadata (`clientId` / `origin: 'leadflow_inbox'`).
+   */
+  private isLeadFlowManaged(opportunity: CrmOpportunityEntity): boolean {
+    if (opportunity.inboxConversationId) return true;
+    if (typeof opportunity.source === 'string' && opportunity.source.startsWith('leadflow')) {
+      return true;
+    }
+    const metadata = opportunity.metadata ?? {};
+    return (
+      typeof metadata.clientId === 'string' ||
+      metadata.origin === 'leadflow_inbox'
+    );
+  }
+
   private domainEventName(eventType: string): string {
     const names: Record<string, string> = {
       opportunity_created: 'leadflow.crm.opportunity.created',
@@ -1818,6 +1933,7 @@ export class CrmOpportunityCommandService {
       pipeline_transferred: 'leadflow.crm.opportunity.pipeline.transferred',
       pipeline_entered: 'leadflow.crm.opportunity.pipeline.entered',
       stage_entered: 'leadflow.crm.opportunity.stage.entered',
+      autonomy_mode_changed: 'leadflow.crm.opportunity.autonomy_mode.changed',
     };
     return names[eventType] ?? 'leadflow.crm.opportunity.updated';
   }

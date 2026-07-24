@@ -371,6 +371,17 @@ export const LEADFLOW_EVENT_CATALOG: LeadFlowEventCatalogItem[] = [
     },
   }),
   buildEvent({
+    eventName: 'leadflow.crm.opportunity.autonomy_mode.changed',
+    description:
+      'Modo de automação da oportunidade alterado (D3). Emitido quando um humano assume um card LeadFlow (automatic→manual) ou reativa/define o modo explicitamente. Não é um gatilho de automação — serve auditoria e Analytics.',
+    requiredContext: ['opportunityId'],
+    payloadSchema: {
+      fromMode: field('string', false, 'Modo anterior (automatic|manual); nulo no primeiro registro.'),
+      toMode: field('string', true, 'Novo modo (automatic|manual).'),
+      changedByActorType: field('string', false, 'Quem alterou (user|automation|ai|system).'),
+    },
+  }),
+  buildEvent({
     eventName: 'leadflow.crm.opportunity.won',
     description: 'Oportunidade marcada como ganha.',
     requiredContext: ['opportunityId'],
