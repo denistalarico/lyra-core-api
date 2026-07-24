@@ -2,6 +2,7 @@ import { BadRequestException, ConflictException } from '@nestjs/common';
 import { CrmOpportunityEntity } from '../entities/crm-opportunity.entity';
 import { CrmStageEntity } from '../entities/crm-stage.entity';
 import { CrmStageTransitionPolicyEntity } from '../entities/crm-stage-transition-policy.entity';
+import { CrmLeadScoreStateEntity } from '../lead-score/entities/crm-lead-score-state.entity';
 import { CrmStageTransitionPolicyService } from './crm-stage-transition-policy.service';
 
 const ctx = {
@@ -67,11 +68,18 @@ function policy(overrides: Record<string, unknown> = {}) {
   } as CrmStageTransitionPolicyEntity;
 }
 
-function harness(resolvedPolicy: CrmStageTransitionPolicyEntity | null) {
+function harness(
+  resolvedPolicy: CrmStageTransitionPolicyEntity | null,
+  leadScoreState: { score: number; band: string } | null = null,
+) {
   const findOne = jest.fn().mockResolvedValue(resolvedPolicy);
+  const leadScoreFindOne = jest.fn().mockResolvedValue(leadScoreState);
   const manager = {
     getRepository: jest.fn((entity) => {
       if (entity === CrmStageTransitionPolicyEntity) return { findOne };
+      if (entity === CrmLeadScoreStateEntity) {
+        return { findOne: leadScoreFindOne };
+      }
       throw new Error('Unexpected repository');
     }),
   };
@@ -79,6 +87,7 @@ function harness(resolvedPolicy: CrmStageTransitionPolicyEntity | null) {
     service: new CrmStageTransitionPolicyService({} as never),
     manager,
     findOne,
+    leadScoreFindOne,
   };
 }
 
@@ -285,6 +294,168 @@ describe('CrmStageTransitionPolicyService', () => {
         reasonCode: 'required_fields_missing',
         missingFields: ['contactPhone'],
       },
+    });
+  });
+
+  describe('lead score qualification (Fase 1C)', () => {
+    const bandCondition = {
+      all: [
+        { field: 'leadScore.band', operator: 'in', value: ['warm', 'hot'] },
+      ],
+    };
+    const scoreCondition = {
+      all: [{ field: 'leadScore.score', operator: 'gte', value: 30 }],
+    };
+
+    it('blocks a human transition when the score band is below the minimum', async () => {
+      const { service, manager } = harness(
+        policy({ requiredFields: [], conditionContract: bandCondition }),
+        { score: 8, band: 'cold' },
+      );
+
+      await expect(
+        service.assertTransitionAllowedWithinTransaction(
+          manager as never,
+          ctx,
+          opportunity(),
+          stage(),
+          { type: 'user' },
+          'manual_stage_move',
+        ),
+      ).rejects.toMatchObject({
+        response: {
+          code: 'CRM_STAGE_TRANSITION_BLOCKED',
+          reasonCode: 'conditions_not_met',
+          failedFields: ['leadScore.band'],
+        },
+      });
+    });
+
+    it('allows a human transition when the score band meets the minimum', async () => {
+      const expected = policy({
+        requiredFields: [],
+        conditionContract: bandCondition,
+      });
+      const { service, manager } = harness(expected, {
+        score: 30,
+        band: 'warm',
+      });
+
+      await expect(
+        service.assertTransitionAllowedWithinTransaction(
+          manager as never,
+          ctx,
+          opportunity(),
+          stage(),
+          { type: 'user' },
+          'manual_stage_move',
+        ),
+      ).resolves.toBe(expected);
+    });
+
+    it('blocks when the numeric score is below the gte threshold', async () => {
+      const { service, manager } = harness(
+        policy({ requiredFields: [], conditionContract: scoreCondition }),
+        { score: 10, band: 'cold' },
+      );
+
+      await expect(
+        service.assertTransitionAllowedWithinTransaction(
+          manager as never,
+          ctx,
+          opportunity(),
+          stage(),
+          { type: 'user' },
+          'manual_stage_move',
+        ),
+      ).rejects.toMatchObject({
+        response: {
+          reasonCode: 'conditions_not_met',
+          failedFields: ['leadScore.score'],
+        },
+      });
+    });
+
+    it('fails closed on a score gate when the lead was never scored', async () => {
+      const { service, manager, leadScoreFindOne } = harness(
+        policy({ requiredFields: [], conditionContract: scoreCondition }),
+        null,
+      );
+
+      await expect(
+        service.assertTransitionAllowedWithinTransaction(
+          manager as never,
+          ctx,
+          opportunity(),
+          stage(),
+          { type: 'user' },
+          'manual_stage_move',
+        ),
+      ).rejects.toMatchObject({
+        response: { reasonCode: 'conditions_not_met' },
+      });
+      expect(leadScoreFindOne).toHaveBeenCalledTimes(1);
+    });
+
+    it('never queries the score when no policy field references it', async () => {
+      const { service, manager, leadScoreFindOne } = harness(policy());
+
+      await service.assertTransitionAllowedWithinTransaction(
+        manager as never,
+        ctx,
+        opportunity(),
+        stage(),
+        { type: 'user' },
+        'manual_stage_move',
+      );
+
+      expect(leadScoreFindOne).not.toHaveBeenCalled();
+    });
+
+    it('reflects the loaded band in the AI transition catalog, reading it once', async () => {
+      const current = stage({
+        id: '00000000-0000-4000-8000-000000000030',
+        name: 'Novo',
+      });
+      const target = stage({ name: 'Qualificado' });
+      const stageRepository = {
+        findOne: jest.fn().mockResolvedValue(current),
+        find: jest.fn().mockResolvedValue([target]),
+      };
+      const policyRepository = {
+        find: jest.fn().mockResolvedValue([
+          policy({
+            allowedActors: ['ai'],
+            requiredFields: [],
+            reasonCodes: ['ai_qualified'],
+            conditionContract: bandCondition,
+          }),
+        ]),
+      };
+      const leadScoreRepository = {
+        findOne: jest.fn().mockResolvedValue({ score: 30, band: 'warm' }),
+      };
+      const service = new CrmStageTransitionPolicyService({
+        getRepository: jest.fn((entity) => {
+          if (entity === CrmStageEntity) return stageRepository;
+          if (entity === CrmLeadScoreStateEntity) return leadScoreRepository;
+          return policyRepository;
+        }),
+      } as never);
+
+      await expect(
+        service.getAiTransitionCatalog(ctx, opportunity()),
+      ).resolves.toMatchObject({
+        destinations: [
+          {
+            toStageId: target.id,
+            conditionsMet: true,
+            currentlyEligible: true,
+            criteria: ['leadScore.band:in:["warm","hot"]'],
+          },
+        ],
+      });
+      expect(leadScoreRepository.findOne).toHaveBeenCalledTimes(1);
     });
   });
 

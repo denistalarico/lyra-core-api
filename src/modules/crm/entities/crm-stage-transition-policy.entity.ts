@@ -13,7 +13,7 @@ export type CrmStageTransitionPolicyStatus = 'draft' | 'published' | 'inactive';
 
 export type CrmStageTransitionCondition = {
   field: string;
-  operator: 'present' | 'equals' | 'not_equals' | 'in';
+  operator: 'present' | 'equals' | 'not_equals' | 'in' | 'gte' | 'lte';
   value?: unknown;
 };
 

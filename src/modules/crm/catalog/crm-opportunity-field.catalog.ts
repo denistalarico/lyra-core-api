@@ -31,7 +31,13 @@ export type CrmOpportunityFieldOrigin =
   /** A column of the opportunity itself, present in every Business Mode. */
   | 'core'
   /** A qualification field declared by the active Business Mode template. */
-  | 'business_mode';
+  | 'business_mode'
+  /**
+   * A projection of the deterministic Lead Score. Not a column: the score
+   * lives in its own 1:1 table so writing it cannot look like the deal
+   * changing. Addressable so "qualified" can mean "the score says so".
+   */
+  | 'lead_score';
 
 /** Coarse grouping, used only to organise the picker. */
 export type CrmOpportunityFieldGroup =
@@ -97,6 +103,54 @@ export const CRM_CORE_OPPORTUNITY_FIELDS: readonly CrmOpportunityFieldSpec[] = [
 
 const CORE_KEYS = new Set(CRM_CORE_OPPORTUNITY_FIELDS.map((spec) => spec.key));
 
+/** Bands the Lead Score resolves to, coldest first. Stable across versions. */
+export const CRM_LEAD_SCORE_BAND_VALUES = ['cold', 'warm', 'hot'] as const;
+
+/**
+ * Virtual fields projecting the deterministic Lead Score into policy.
+ *
+ * The score is never a column on the opportunity — it lives in its own 1:1
+ * projection so that writing it cannot look like the deal itself changing.
+ * These keys let a transition policy read it anyway, so a stage can require a
+ * qualified lead without inventing a second definition of the number.
+ * `leadScore.band` is the version-stable signal (bands never move between
+ * policy versions, so a published gate keeps meaning the same thing);
+ * `leadScore.score` is the raw number, for an operator who prefers a floor.
+ */
+export const CRM_LEAD_SCORE_FIELDS: readonly CrmOpportunityFieldSpec[] = [
+  {
+    key: 'leadScore.band',
+    label: 'Faixa do Lead Score',
+    type: 'enum',
+    origin: 'lead_score',
+    group: 'system',
+    developerOnly: false,
+    essential: false,
+  },
+  {
+    key: 'leadScore.score',
+    label: 'Lead Score (pontos)',
+    type: 'number',
+    origin: 'lead_score',
+    group: 'system',
+    developerOnly: false,
+    essential: false,
+  },
+];
+
+const LEAD_SCORE_KEYS = new Set(CRM_LEAD_SCORE_FIELDS.map((spec) => spec.key));
+
+/**
+ * Whether a key addresses the Lead Score projection rather than a column.
+ *
+ * Callers that evaluate policy read these from the score's own table instead of
+ * the opportunity, and load it only on demand — a policy that never mentions the
+ * score must never pay for a query against it.
+ */
+export function isLeadScoreField(key: string): boolean {
+  return LEAD_SCORE_KEYS.has(key);
+}
+
 /**
  * Whether a policy may reference this key at all.
  *
@@ -106,6 +160,7 @@ const CORE_KEYS = new Set(CRM_CORE_OPPORTUNITY_FIELDS.map((spec) => spec.key));
  */
 export function isAddressableOpportunityField(key: string): boolean {
   if (CORE_KEYS.has(key)) return true;
+  if (LEAD_SCORE_KEYS.has(key)) return true;
   if (!key.startsWith(CRM_BUSINESS_CONTEXT_PREFIX)) return false;
   return CRM_BUSINESS_CONTEXT_KEY_PATTERN.test(
     key.slice(CRM_BUSINESS_CONTEXT_PREFIX.length),

@@ -7,13 +7,17 @@ import {
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, EntityManager, IsNull, Raw } from 'typeorm';
 import { RequestContext } from '../../../common/context/request-context.interface';
-import { isAddressableOpportunityField } from '../catalog/crm-opportunity-field.catalog';
+import {
+  isAddressableOpportunityField,
+  isLeadScoreField,
+} from '../catalog/crm-opportunity-field.catalog';
 import {
   CreateCrmStageTransitionPolicyDto,
   PatchCrmStageTransitionPolicyDto,
 } from '../dto/crm-stage-transition-policy.dto';
 import { CrmOpportunityEntity } from '../entities/crm-opportunity.entity';
 import { CrmStageEntity } from '../entities/crm-stage.entity';
+import { CrmLeadScoreStateEntity } from '../lead-score/entities/crm-lead-score-state.entity';
 import {
   CrmStageTransitionActor,
   CrmStageTransitionCondition,
@@ -21,6 +25,14 @@ import {
   CrmStageTransitionPolicyEntity,
 } from '../entities/crm-stage-transition-policy.entity';
 import type { CrmCommandActor } from './crm-opportunity-command.service';
+
+/**
+ * The Lead Score of the opportunity under evaluation, or `null` when it was
+ * never scored. Loaded from the score's own table only when a policy references
+ * it. `null` is not zero: a policy that gates on the score refuses to advance an
+ * unscored lead rather than treating "we could not tell" as "the answer is no".
+ */
+type LeadScoreProjection = { score: number; band: string } | null;
 
 export type CrmAiStageTransitionCatalog = {
   opportunityId: string;
@@ -284,6 +296,23 @@ export class CrmStageTransitionPolicyService {
         })
       : [];
     const targets = new Map(targetStages.map((stage) => [stage.id, stage]));
+    // One read per opportunity, and only when some destination gates on the
+    // score — the catalog must not query a table no policy here consults.
+    const leadScore = aiPolicies.some((policy) =>
+      this.contractReferencesLeadScore(
+        policy.requiredFields,
+        policy.conditionContract,
+      ),
+    )
+      ? await this.loadLeadScore(
+          this.dataSource,
+          {
+            tenantId: opportunity.tenantId,
+            workspaceId: opportunity.workspaceId,
+          },
+          opportunity.id,
+        )
+      : null;
     const destinations = aiPolicies.flatMap((policy) => {
       const target = targets.get(policy.toStageId);
       if (
@@ -294,13 +323,13 @@ export class CrmStageTransitionPolicyService {
         return [];
       }
       const presentFields = policy.requiredFields.filter((field) =>
-        this.isPresent(this.readField(opportunity, field)),
+        this.isPresent(this.readField(opportunity, field, leadScore)),
       );
       const missingFields = policy.requiredFields.filter(
         (field) => !presentFields.includes(field),
       );
       const failedConditions = (policy.conditionContract.all ?? []).filter(
-        (condition) => !this.matches(opportunity, condition),
+        (condition) => !this.matches(opportunity, condition, leadScore),
       );
       return [
         {
@@ -608,8 +637,18 @@ export class CrmStageTransitionPolicyService {
         'The reason code is not allowed by the published policy.',
       );
     }
+    const leadScore = this.contractReferencesLeadScore(
+      policy.requiredFields,
+      policy.conditionContract,
+    )
+      ? await this.loadLeadScore(
+          manager,
+          { tenantId: this.tenantId(ctx), workspaceId: this.workspaceId(ctx) },
+          opportunity.id,
+        )
+      : null;
     const missingFields = policy.requiredFields.filter(
-      (field) => !this.isPresent(this.readField(opportunity, field)),
+      (field) => !this.isPresent(this.readField(opportunity, field, leadScore)),
     );
     if (missingFields.length > 0) {
       throw new ConflictException({
@@ -622,7 +661,7 @@ export class CrmStageTransitionPolicyService {
       });
     }
     const failedConditions = (policy.conditionContract.all ?? []).filter(
-      (condition) => !this.matches(opportunity, condition),
+      (condition) => !this.matches(opportunity, condition, leadScore),
     );
     if (failedConditions.length > 0) {
       throw new ConflictException({
@@ -713,7 +752,9 @@ export class CrmStageTransitionPolicyService {
     for (const condition of contract.all ?? []) {
       this.assertField(condition.field);
       if (
-        !['present', 'equals', 'not_equals', 'in'].includes(condition.operator)
+        !['present', 'equals', 'not_equals', 'in', 'gte', 'lte'].includes(
+          condition.operator,
+        )
       ) {
         throw new BadRequestException(
           `Unsupported condition operator: ${condition.operator}.`,
@@ -722,6 +763,15 @@ export class CrmStageTransitionPolicyService {
       if (condition.operator === 'in' && !Array.isArray(condition.value)) {
         throw new BadRequestException(
           `Condition ${condition.field} requires an array value.`,
+        );
+      }
+      if (
+        (condition.operator === 'gte' || condition.operator === 'lte') &&
+        (typeof condition.value !== 'number' ||
+          !Number.isFinite(condition.value))
+      ) {
+        throw new BadRequestException(
+          `Condition ${condition.field} requires a numeric value.`,
         );
       }
     }
@@ -739,27 +789,92 @@ export class CrmStageTransitionPolicyService {
   private matches(
     opportunity: CrmOpportunityEntity,
     condition: CrmStageTransitionCondition,
+    leadScore: LeadScoreProjection,
   ): boolean {
-    const actual = this.readField(opportunity, condition.field);
+    const actual = this.readField(opportunity, condition.field, leadScore);
     if (condition.operator === 'present') return this.isPresent(actual);
     if (condition.operator === 'equals') return actual === condition.value;
     if (condition.operator === 'not_equals') return actual !== condition.value;
+    if (condition.operator === 'gte') {
+      return (
+        typeof actual === 'number' &&
+        typeof condition.value === 'number' &&
+        actual >= condition.value
+      );
+    }
+    if (condition.operator === 'lte') {
+      return (
+        typeof actual === 'number' &&
+        typeof condition.value === 'number' &&
+        actual <= condition.value
+      );
+    }
     return Array.isArray(condition.value) && condition.value.includes(actual);
   }
 
   private conditionSummary(condition: CrmStageTransitionCondition): string {
     if (condition.operator === 'present') return `${condition.field}:present`;
+    if (condition.operator === 'gte') {
+      return `${condition.field}:>=${JSON.stringify(condition.value)}`;
+    }
+    if (condition.operator === 'lte') {
+      return `${condition.field}:<=${JSON.stringify(condition.value)}`;
+    }
     const value = JSON.stringify(condition.value);
     return `${condition.field}:${condition.operator}:${value.slice(0, 180)}`;
   }
 
-  private readField(opportunity: CrmOpportunityEntity, field: string): unknown {
+  private readField(
+    opportunity: CrmOpportunityEntity,
+    field: string,
+    leadScore: LeadScoreProjection,
+  ): unknown {
+    // The score is not on the opportunity by design; read it from the
+    // projection loaded for this evaluation. Absent when unscored, which every
+    // operator treats as "no value" rather than a silent zero.
+    if (field === 'leadScore.band') return leadScore?.band ?? undefined;
+    if (field === 'leadScore.score') return leadScore?.score ?? undefined;
     if (field.startsWith('businessContext.')) {
       return opportunity.businessContext?.[
         field.slice('businessContext.'.length)
       ];
     }
     return (opportunity as unknown as Record<string, unknown>)[field];
+  }
+
+  /** Whether a policy reads the Lead Score, so it is loaded only when needed. */
+  private contractReferencesLeadScore(
+    requiredFields: string[],
+    contract: CrmStageTransitionConditionContract,
+  ): boolean {
+    if (requiredFields.some((field) => isLeadScoreField(field))) return true;
+    return (contract.all ?? []).some((condition) =>
+      isLeadScoreField(condition.field),
+    );
+  }
+
+  /**
+   * Reads the opportunity's current score from its own table.
+   *
+   * `reader` is the caller's transaction manager in enforcement and the data
+   * source in the read-only catalog — both expose the same repository, so the
+   * evaluation stays inside whatever transaction the caller already opened.
+   */
+  private async loadLeadScore(
+    reader: DataSource | EntityManager,
+    scope: { tenantId: string; workspaceId: string },
+    opportunityId: string,
+  ): Promise<LeadScoreProjection> {
+    const state = await reader
+      .getRepository(CrmLeadScoreStateEntity)
+      .findOne({
+        where: {
+          tenantId: scope.tenantId,
+          workspaceId: scope.workspaceId,
+          opportunityId,
+        },
+      });
+    return state ? { score: state.score, band: state.band } : null;
   }
 
   private isPresent(value: unknown): boolean {

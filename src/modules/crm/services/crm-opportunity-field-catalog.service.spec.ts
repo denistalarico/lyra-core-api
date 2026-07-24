@@ -26,7 +26,14 @@ describe('CrmOpportunityFieldCatalogService', () => {
     const catalog = await service.listFields(ctx, null);
 
     expect(catalog.businessModeResolved).toBe(false);
-    expect(catalog.fields.every((spec) => spec.origin === 'core')).toBe(true);
+    // No mode means no business-mode qualification fields, but core and the
+    // always-available Lead Score projection fields are still offered.
+    expect(catalog.fields.every((spec) => spec.origin !== 'business_mode')).toBe(
+      true,
+    );
+    expect(catalog.fields.some((spec) => spec.key === 'leadScore.band')).toBe(
+      true,
+    );
     expect(findOne).not.toHaveBeenCalled();
   });
 

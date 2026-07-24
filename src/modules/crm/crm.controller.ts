@@ -46,6 +46,7 @@ import {
 } from './dto/crm-stage-transition-policy.dto';
 import { CrmStageTransitionPolicyService } from './services/crm-stage-transition-policy.service';
 import { CrmOpportunityFieldCatalogService } from './services/crm-opportunity-field-catalog.service';
+import { resolveCrmLossReasons } from './catalog/crm-loss-reason.catalog';
 import { LeadScoreEngineService } from './lead-score/services/lead-score-engine.service';
 import { LeadScoreQueryService } from './lead-score/services/lead-score-query.service';
 import { RecalculateLeadScoreDto } from './lead-score/dto/recalculate-lead-score.dto';
@@ -212,6 +213,20 @@ export class CrmController {
     @Query('businessMode') businessMode?: string,
   ) {
     return this.fieldCatalog.listFields(ctx, businessMode ?? null);
+  }
+
+  /**
+   * Standardised loss reasons for a Business Mode, so a lost transition records
+   * a code Analytics can count rather than free text. The mode's own reasons
+   * come first, then the shared ones; an unknown mode still gets the shared set.
+   */
+  @Get('loss-reasons')
+  @RequirePermission('leadflow.crm.records.view.client')
+  listLossReasons(@Query('businessMode') businessMode?: string) {
+    return {
+      businessMode: businessMode ?? null,
+      reasons: resolveCrmLossReasons(businessMode ?? null),
+    };
   }
 
   /**
