@@ -12,7 +12,11 @@ import { LeadFlowClientSettingsEntity } from '../../leadflow-settings/entities';
 import { LeadFlowSettingsContextType } from '../../leadflow-settings/enums/leadflow-settings-context-type.enum';
 import { PlatformPermissionService } from '../../permissions';
 import type { PermissionContext } from '../../permissions';
-import type { LeadFlowAutomationRecipeCatalogItem } from '../catalog/automation-recipes.catalog';
+import {
+  GOVERNED_STAGE_ADVANCE_RECIPE_KEY,
+  type LeadFlowAutomationRecipeCatalogItem,
+} from '../catalog/automation-recipes.catalog';
+import { CrmStageTransitionPolicyService } from '../../crm/services/crm-stage-transition-policy.service';
 import {
   DryRunAutomationDto,
   LeadFlowAutomationDetailResponse,
@@ -97,6 +101,7 @@ export class LeadFlowAutomationService {
     private readonly contextService: LeadFlowAutomationContextService,
     private readonly runService: LeadFlowAutomationRunService,
     private readonly permissionService: PlatformPermissionService,
+    private readonly transitionPolicies: CrmStageTransitionPolicyService,
   ) {}
 
   async list(ctx: RequestContext): Promise<LeadFlowAutomationListResponse> {
@@ -219,6 +224,11 @@ export class LeadFlowAutomationService {
     if (recipeForValidation) {
       this.assertConfigMatchesSchema(recipeForValidation, dto);
     }
+
+    // A governed stage-advance may only be saved with a destination the CRM
+    // actually admits for automations. Validated here so an impossible
+    // configuration is refused at save, not silently ignored at run time.
+    await this.assertGovernedStageAdvanceConfig(ctx, automation, dto);
 
     if (dto.name !== undefined) automation.name = dto.name;
     if (dto.description !== undefined) automation.description = dto.description;
@@ -577,6 +587,44 @@ export class LeadFlowAutomationService {
         errors,
       });
     }
+  }
+
+  /**
+   * Fail-closed validation for the governed stage-advance recipe.
+   *
+   * When the patch sets both a destination stage and a reason on this recipe,
+   * the pair must correspond to a published transition policy that admits the
+   * automation actor. A partial configuration (one of the two) is left to the
+   * ordinary "requires configuration" lifecycle rather than blocked here.
+   */
+  private async assertGovernedStageAdvanceConfig(
+    ctx: RequestContext,
+    automation: LeadFlowAutomationEntity,
+    dto: PatchAutomationDto,
+  ): Promise<void> {
+    if (
+      automation.recipeKey !== GOVERNED_STAGE_ADVANCE_RECIPE_KEY ||
+      dto.crmPolicy === undefined
+    ) {
+      return;
+    }
+    const policy = dto.crmPolicy;
+    const toStageId =
+      typeof policy.moveStageOnComplete === 'string'
+        ? policy.moveStageOnComplete
+        : null;
+    const reasonCode =
+      typeof policy.moveStageReasonCode === 'string'
+        ? policy.moveStageReasonCode
+        : null;
+    // Both empty is a legitimate "not configured yet"; both present is what we
+    // validate. One present is caught by the required-field lifecycle.
+    if (!toStageId || !reasonCode) return;
+
+    await this.transitionPolicies.assertAutomationDestination(ctx, {
+      toStageId,
+      reasonCode,
+    });
   }
 
   /** Derives the effective lifecycle state of an automation instance. */

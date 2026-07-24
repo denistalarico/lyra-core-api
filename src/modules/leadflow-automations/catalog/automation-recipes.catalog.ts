@@ -679,6 +679,13 @@ const OPTIONAL_SEEDS: RecipeSeed[] = [
 export const LEADFLOW_AUTOMATION_RECIPES: LeadFlowAutomationRecipeCatalogItem[] =
   [...ESSENTIAL_SEEDS, ...OPTIONAL_SEEDS].map(buildRecipe);
 
+/**
+ * The one recipe whose single effect is a governed stage transition — the first
+ * productive executor's target. Named so config validation and the UI can
+ * special-case it without matching on a string literal in several places.
+ */
+export const GOVERNED_STAGE_ADVANCE_RECIPE_KEY = 'governed_stage_advance';
+
 const OFFICIAL_BUSINESS_MODES = new Set<string>(
   Object.values(LeadFlowBusinessMode),
 );

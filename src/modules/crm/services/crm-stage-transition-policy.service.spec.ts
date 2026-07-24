@@ -287,4 +287,176 @@ describe('CrmStageTransitionPolicyService', () => {
       },
     });
   });
+
+  describe('getAutomationDestinations', () => {
+    const from = () =>
+      stage({ id: '00000000-0000-4000-8000-000000000030', name: 'Novo' });
+    const to = () => stage({ name: 'Qualificado' });
+
+    function service(
+      policies: CrmStageTransitionPolicyEntity[],
+      stages: CrmStageEntity[],
+    ) {
+      const policyRepository = { find: jest.fn().mockResolvedValue(policies) };
+      const stageRepository = { find: jest.fn().mockResolvedValue(stages) };
+      return new CrmStageTransitionPolicyService({
+        getRepository: jest.fn((entity) =>
+          entity === CrmStageEntity ? stageRepository : policyRepository,
+        ),
+      } as never);
+    }
+
+    it('offers only edges a published automation policy admits, to non-terminal stages', async () => {
+      const target = to();
+      const won = stage({
+        id: '00000000-0000-4000-8000-000000000033',
+        name: 'Ganho',
+        type: 'won',
+        isWonStage: true,
+      });
+      const svc = service(
+        [
+          policy({
+            allowedActors: ['automation'],
+            toStageId: target.id,
+            reasonCodes: ['auto_qualified'],
+          }),
+          policy({
+            id: 'policy-won',
+            allowedActors: ['automation'],
+            toStageId: won.id,
+          }),
+          policy({ id: 'policy-human-only', allowedActors: ['human'] }),
+        ],
+        [from(), target, won],
+      );
+
+      const destinations = await svc.getAutomationDestinations(
+        ctx,
+        '00000000-0000-4000-8000-000000000020',
+      );
+
+      expect(destinations).toEqual([
+        expect.objectContaining({
+          toStageId: target.id,
+          toStageName: 'Qualificado',
+          fromStageName: 'Novo',
+          reasonCodes: ['auto_qualified'],
+        }),
+      ]);
+    });
+
+    it('returns nothing when no policy admits automations', async () => {
+      const svc = service(
+        [policy({ allowedActors: ['human'] })],
+        [from(), to()],
+      );
+
+      await expect(
+        svc.getAutomationDestinations(
+          ctx,
+          '00000000-0000-4000-8000-000000000020',
+        ),
+      ).resolves.toEqual([]);
+    });
+  });
+
+  describe('assertAutomationDestination', () => {
+    function service(
+      policies: CrmStageTransitionPolicyEntity[],
+      toStage: CrmStageEntity | null,
+    ) {
+      const policyRepository = { find: jest.fn().mockResolvedValue(policies) };
+      const stageRepository = {
+        findOne: jest.fn().mockResolvedValue(toStage),
+      };
+      return new CrmStageTransitionPolicyService({
+        getRepository: jest.fn((entity) =>
+          entity === CrmStageEntity ? stageRepository : policyRepository,
+        ),
+      } as never);
+    }
+
+    it('accepts a destination and reason a published automation policy admits', async () => {
+      const svc = service(
+        [
+          policy({
+            allowedActors: ['automation'],
+            reasonCodes: ['auto_qualified'],
+          }),
+        ],
+        stage({ name: 'Qualificado' }),
+      );
+
+      await expect(
+        svc.assertAutomationDestination(ctx, {
+          toStageId: '00000000-0000-4000-8000-000000000031',
+          reasonCode: 'auto_qualified',
+        }),
+      ).resolves.toBeUndefined();
+    });
+
+    it('refuses a reason no admitting policy declares', async () => {
+      const svc = service(
+        [
+          policy({
+            allowedActors: ['automation'],
+            reasonCodes: ['auto_qualified'],
+          }),
+        ],
+        stage(),
+      );
+
+      await expect(
+        svc.assertAutomationDestination(ctx, {
+          toStageId: '00000000-0000-4000-8000-000000000031',
+          reasonCode: 'made_up',
+        }),
+      ).rejects.toMatchObject({
+        response: { code: 'AUTOMATION_TRANSITION_NOT_ALLOWED' },
+      });
+    });
+
+    it('refuses a destination only human policies admit', async () => {
+      const svc = service(
+        [
+          policy({
+            allowedActors: ['human'],
+            reasonCodes: ['manual_stage_move'],
+          }),
+        ],
+        stage(),
+      );
+
+      await expect(
+        svc.assertAutomationDestination(ctx, {
+          toStageId: '00000000-0000-4000-8000-000000000031',
+          reasonCode: 'manual_stage_move',
+        }),
+      ).rejects.toMatchObject({
+        response: { code: 'AUTOMATION_TRANSITION_NOT_ALLOWED' },
+      });
+    });
+
+    it('refuses a terminal destination even when a policy admits it', async () => {
+      const svc = service(
+        [
+          policy({
+            allowedActors: ['automation'],
+            reasonCodes: ['auto_qualified'],
+          }),
+        ],
+        stage({ type: 'won', isWonStage: true }),
+      );
+
+      await expect(
+        svc.assertAutomationDestination(ctx, {
+          toStageId: '00000000-0000-4000-8000-000000000031',
+          reasonCode: 'auto_qualified',
+        }),
+      ).rejects.toMatchObject({
+        response: { code: 'AUTOMATION_TRANSITION_TERMINAL' },
+      });
+    });
+  });
 });

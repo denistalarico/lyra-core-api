@@ -50,6 +50,24 @@ export type CrmAiStageTransitionCatalog = {
   }>;
 };
 
+/**
+ * A destination an automation may drive an opportunity to, for configuration.
+ *
+ * Sourced from the published transition policies that admit the `automation`
+ * actor — never invented. An operator configuring the governed stage-advance
+ * recipe picks from these, so the value they save is one the runtime can
+ * actually carry out, rather than a free-typed stage id that the executor would
+ * later refuse.
+ */
+export type CrmAutomationTransitionDestination = {
+  fromStageId: string;
+  fromStageName: string;
+  toStageId: string;
+  toStageName: string;
+  reasonCodes: string[];
+  requiredFields: string[];
+};
+
 @Injectable()
 export class CrmStageTransitionPolicyService {
   constructor(
@@ -70,6 +88,145 @@ export class CrmStageTransitionPolicyService {
       },
       order: { fromStageId: 'ASC', toStageId: 'ASC', version: 'DESC' },
     });
+  }
+
+  /**
+   * Destinations an automation may target in a pipeline.
+   *
+   * Only edges a published policy admits for the `automation` actor, and only
+   * to non-terminal, non-human-managed stages — the exact set the runtime will
+   * accept. A terminal or human-only stage is filtered here so it can never be
+   * offered, mirroring the executor's own refusals but at configuration time.
+   */
+  async getAutomationDestinations(
+    ctx: RequestContext,
+    pipelineId: string,
+  ): Promise<CrmAutomationTransitionDestination[]> {
+    const policies = await this.dataSource
+      .getRepository(CrmStageTransitionPolicyEntity)
+      .find({
+        where: {
+          tenantId: this.tenantId(ctx),
+          workspaceId: this.workspaceId(ctx),
+          pipelineId,
+          status: 'published',
+          deletedAt: IsNull(),
+          ...this.clientScope(ctx),
+        },
+        order: { fromStageId: 'ASC', toStageId: 'ASC', version: 'DESC' },
+      });
+
+    const automationPolicies = policies.filter((policy) =>
+      policy.allowedActors.includes('automation'),
+    );
+    if (automationPolicies.length === 0) return [];
+
+    const stageIds = [
+      ...new Set(
+        automationPolicies.flatMap((policy) => [
+          policy.fromStageId,
+          policy.toStageId,
+        ]),
+      ),
+    ];
+    const stages = await this.dataSource.getRepository(CrmStageEntity).find({
+      where: stageIds.map((id) => ({
+        id,
+        tenantId: this.tenantId(ctx),
+        workspaceId: this.workspaceId(ctx),
+        pipelineId,
+        deletedAt: IsNull(),
+      })),
+    });
+    const stageById = new Map(stages.map((stage) => [stage.id, stage]));
+
+    // Only the newest published policy per edge is offered; the ASC/DESC order
+    // above puts it first, so the first seen for an edge wins.
+    const seenEdges = new Set<string>();
+    const destinations: CrmAutomationTransitionDestination[] = [];
+    for (const policy of automationPolicies) {
+      const edge = `${policy.fromStageId}:${policy.toStageId}`;
+      if (seenEdges.has(edge)) continue;
+      seenEdges.add(edge);
+
+      const fromStage = stageById.get(policy.fromStageId);
+      const toStage = stageById.get(policy.toStageId);
+      if (
+        !fromStage ||
+        !toStage ||
+        toStage.operationMode === 'human_managed' ||
+        this.isTerminal(toStage)
+      ) {
+        continue;
+      }
+
+      destinations.push({
+        fromStageId: fromStage.id,
+        fromStageName: fromStage.name,
+        toStageId: toStage.id,
+        toStageName: toStage.name,
+        reasonCodes: policy.reasonCodes,
+        requiredFields: policy.requiredFields,
+      });
+    }
+    return destinations;
+  }
+
+  /**
+   * Fails closed on a governed stage-advance configuration.
+   *
+   * Refuses to save a destination and reason that no published automation
+   * policy admits. The executor would refuse the same combination at run time;
+   * catching it here means an operator cannot store a configuration that is
+   * guaranteed to do nothing.
+   */
+  async assertAutomationDestination(
+    ctx: RequestContext,
+    input: { toStageId: string; reasonCode: string },
+  ): Promise<void> {
+    const destinations = await this.dataSource
+      .getRepository(CrmStageTransitionPolicyEntity)
+      .find({
+        where: {
+          tenantId: this.tenantId(ctx),
+          workspaceId: this.workspaceId(ctx),
+          toStageId: input.toStageId,
+          status: 'published',
+          deletedAt: IsNull(),
+          ...this.clientScope(ctx),
+        },
+      });
+
+    const admitting = destinations.filter(
+      (policy) =>
+        policy.allowedActors.includes('automation') &&
+        policy.reasonCodes.includes(input.reasonCode),
+    );
+    if (admitting.length === 0) {
+      throw new BadRequestException({
+        code: 'AUTOMATION_TRANSITION_NOT_ALLOWED',
+        message:
+          'A etapa de destino e o motivo escolhidos não correspondem a nenhuma transição governada publicada que permita automações.',
+      });
+    }
+
+    const toStage = await this.dataSource
+      .getRepository(CrmStageEntity)
+      .findOne({
+        where: {
+          id: input.toStageId,
+          tenantId: this.tenantId(ctx),
+          workspaceId: this.workspaceId(ctx),
+          deletedAt: IsNull(),
+        },
+      });
+    if (!toStage || this.isTerminal(toStage)) {
+      throw new BadRequestException({
+        code: 'AUTOMATION_TRANSITION_TERMINAL',
+        message:
+          'Automações não podem avançar para uma etapa de ganho ou perda.',
+      });
+    }
   }
 
   async getAiTransitionCatalog(

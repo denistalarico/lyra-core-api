@@ -213,6 +213,20 @@ export class CrmController {
     return this.fieldCatalog.listFields(ctx, businessMode ?? null);
   }
 
+  /**
+   * Destinations an automation may target in a pipeline, for configuring the
+   * governed stage-advance recipe. Only edges a published policy admits for the
+   * automation actor, to non-terminal stages.
+   */
+  @Get('pipelines/:id/automation-transitions')
+  @RequirePermission('leadflow.crm.records.view.client')
+  listAutomationTransitions(
+    @RequestContextData() ctx: RequestContext,
+    @Param('id') pipelineId: string,
+  ) {
+    return this.transitionPolicies.getAutomationDestinations(ctx, pipelineId);
+  }
+
   @Get('stage-transition-policies')
   @RequirePermission('leadflow.crm.records.view.client')
   listStageTransitionPolicies(
