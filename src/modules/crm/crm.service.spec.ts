@@ -477,3 +477,86 @@ describe('CRM activities cutover', () => {
     ).toBe(false);
   });
 });
+
+describe('CrmService stage roles (D4)', () => {
+  it('creates a stage with a unique role when none exists', async () => {
+    const { service, pipelinesRepository, stagesRepository, updateQueryBuilder } =
+      createService();
+    pipelinesRepository.findOne.mockResolvedValue(mockPipeline());
+    stagesRepository.count.mockResolvedValue(1);
+    (updateQueryBuilder as { getCount?: jest.Mock }).getCount = jest
+      .fn()
+      .mockResolvedValue(0);
+
+    await expect(
+      service.createStage(ctx, {
+        pipelineId: 'pipeline-a',
+        name: 'Ganho',
+        type: 'won',
+        isWonStage: true,
+        role: 'won',
+      }),
+    ).resolves.toMatchObject({ role: 'won' });
+  });
+
+  it('rejects creating a second stage with a unique role', async () => {
+    const { service, pipelinesRepository, stagesRepository, updateQueryBuilder } =
+      createService();
+    pipelinesRepository.findOne.mockResolvedValue(mockPipeline());
+    stagesRepository.count.mockResolvedValue(1);
+    (updateQueryBuilder as { getCount?: jest.Mock }).getCount = jest
+      .fn()
+      .mockResolvedValue(1);
+
+    await expect(
+      service.createStage(ctx, {
+        pipelineId: 'pipeline-a',
+        name: 'Ganho 2',
+        type: 'won',
+        isWonStage: true,
+        role: 'won',
+      }),
+    ).rejects.toMatchObject({
+      response: { reasonCode: 'stage_role_not_unique' },
+    });
+  });
+
+  it('allows repeated non-unique roles without querying uniqueness', async () => {
+    const { service, pipelinesRepository, stagesRepository, updateQueryBuilder } =
+      createService();
+    pipelinesRepository.findOne.mockResolvedValue(mockPipeline());
+    stagesRepository.count.mockResolvedValue(1);
+    const getCount = jest.fn().mockResolvedValue(3);
+    (updateQueryBuilder as { getCount?: jest.Mock }).getCount = getCount;
+
+    await expect(
+      service.createStage(ctx, {
+        pipelineId: 'pipeline-a',
+        name: 'Qualificação 2',
+        type: 'open',
+        role: 'qualification',
+      }),
+    ).resolves.toMatchObject({ role: 'qualification' });
+    expect(getCount).not.toHaveBeenCalled();
+  });
+
+  it('rejects patching a stage to a duplicate unique role', async () => {
+    const { service, pipelinesRepository, stagesRepository, updateQueryBuilder } =
+      createService();
+    pipelinesRepository.findOne.mockResolvedValue(mockPipeline());
+    stagesRepository.findOne.mockResolvedValue({
+      ...mockStage('stage-b'),
+      role: 'custom',
+      metadata: {},
+    });
+    (updateQueryBuilder as { getCount?: jest.Mock }).getCount = jest
+      .fn()
+      .mockResolvedValue(1);
+
+    await expect(
+      service.patchStage(ctx, 'stage-b', { role: 'won' }),
+    ).rejects.toMatchObject({
+      response: { reasonCode: 'stage_role_not_unique' },
+    });
+  });
+});

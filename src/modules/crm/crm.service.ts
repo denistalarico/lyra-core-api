@@ -38,7 +38,11 @@ import { CopyCrmOpportunityDto } from './dto/copy-crm-opportunity.dto';
 import { ReconvertCrmOpportunityDto } from './dto/reconvert-crm-opportunity.dto';
 import { CrmOpportunityEntity } from './entities/crm-opportunity.entity';
 import { CrmPipelineEntity } from './entities/crm-pipeline.entity';
-import { CrmStageEntity } from './entities/crm-stage.entity';
+import {
+  CRM_UNIQUE_STAGE_ROLES,
+  CrmStageEntity,
+  type CrmStageRole,
+} from './entities/crm-stage.entity';
 import { CrmOpportunityEventEntity } from './entities/crm-opportunity-event.entity';
 import { CrmOpportunityTagEntity } from './entities/crm-opportunity-tag.entity';
 import { CrmTagEntity } from './entities/crm-tag.entity';
@@ -248,10 +252,18 @@ export class CrmService {
         isFolded: dto.isFolded ?? false,
         isInitialStage,
         operationMode: dto.operationMode ?? 'hybrid',
+        role: dto.role ?? 'custom',
+        roleConfig: dto.roleConfig ?? {},
         metadata: this.stampContext(ctx, dto.metadata ?? {}),
       });
 
       this.assertInitialStageEligibility(stage);
+      await this.assertUniqueStageRole(
+        manager,
+        ctx,
+        dto.pipelineId,
+        stage.role,
+      );
       if (isInitialStage) {
         await this.clearInitialStage(manager, ctx, dto.pipelineId);
       }
@@ -303,8 +315,20 @@ export class CrmService {
       if (dto.isFolded !== undefined) stage.isFolded = dto.isFolded;
       if (dto.operationMode !== undefined)
         stage.operationMode = dto.operationMode;
+      if (dto.role !== undefined) stage.role = dto.role;
+      if (dto.roleConfig !== undefined) stage.roleConfig = dto.roleConfig;
       if (dto.metadata !== undefined)
         stage.metadata = this.stampContext(ctx, dto.metadata);
+
+      if (dto.role !== undefined) {
+        await this.assertUniqueStageRole(
+          manager,
+          ctx,
+          stage.pipelineId,
+          stage.role,
+          stage.id,
+        );
+      }
 
       if (dto.isInitialStage === false && stage.isInitialStage) {
         throw new BadRequestException(
@@ -1242,6 +1266,41 @@ export class CrmService {
       .andWhere('deleted_at IS NULL');
     if (exceptStageId) qb.andWhere('id <> :exceptStageId', { exceptStageId });
     await qb.execute();
+  }
+
+  /**
+   * D4: enforce that `entry`/`won`/`lost` appear at most once per pipeline.
+   * Other roles (qualification/follow_up/contacted/handoff/custom) may repeat.
+   * Independent of the legacy `is_*_stage` flags.
+   */
+  private async assertUniqueStageRole(
+    manager: EntityManager,
+    ctx: RequestContext,
+    pipelineId: string,
+    role: CrmStageRole,
+    exceptStageId?: string,
+  ): Promise<void> {
+    if (!CRM_UNIQUE_STAGE_ROLES.has(role)) return;
+    const tenantId = this.requireTenantId(ctx);
+    const workspaceId = this.requireWorkspaceId(ctx);
+    const qb = manager
+      .getRepository(CrmStageEntity)
+      .createQueryBuilder('stage')
+      .where('stage.tenant_id = :tenantId', { tenantId })
+      .andWhere('stage.workspace_id = :workspaceId', { workspaceId })
+      .andWhere('stage.pipeline_id = :pipelineId', { pipelineId })
+      .andWhere('stage.role = :role', { role })
+      .andWhere('stage.deleted_at IS NULL');
+    if (exceptStageId) {
+      qb.andWhere('stage.id <> :exceptStageId', { exceptStageId });
+    }
+    if ((await qb.getCount()) > 0) {
+      throw new BadRequestException({
+        code: 'CRM_STAGE_ROLE_NOT_UNIQUE',
+        reasonCode: 'stage_role_not_unique',
+        message: `Já existe um estágio com o papel "${role}" neste pipeline. Entrada, ganho e perda permitem apenas um estágio cada.`,
+      });
+    }
   }
 
   private async getStageWithManager(

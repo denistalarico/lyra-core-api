@@ -9,6 +9,7 @@ import {
   MaxLength,
   Min,
 } from 'class-validator';
+import { CRM_STAGE_ROLES, type CrmStageRole } from '../entities/crm-stage.entity';
 
 export class PatchCrmStageDto {
   @IsOptional()
@@ -59,6 +60,14 @@ export class PatchCrmStageDto {
   @IsOptional()
   @IsIn(['ai_managed', 'human_managed', 'hybrid'])
   operationMode?: 'ai_managed' | 'human_managed' | 'hybrid';
+
+  @IsOptional()
+  @IsIn(CRM_STAGE_ROLES as unknown as string[])
+  role?: CrmStageRole;
+
+  @IsOptional()
+  @IsObject()
+  roleConfig?: Record<string, unknown>;
 
   @IsOptional()
   @IsObject()

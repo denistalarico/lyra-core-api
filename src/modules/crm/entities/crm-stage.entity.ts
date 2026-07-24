@@ -7,6 +7,40 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 
+/**
+ * D4: the structural role a stage plays in the pipeline. Independent from the
+ * legacy `type`/`is_*_stage` flags (which Agency Sales still uses). Multiple
+ * `qualification`/`follow_up`/`contacted`/`handoff`/`custom` stages are allowed;
+ * `entry`/`won`/`lost` are unique per pipeline.
+ */
+export type CrmStageRole =
+  | 'entry'
+  | 'contacted'
+  | 'qualification'
+  | 'handoff'
+  | 'follow_up'
+  | 'won'
+  | 'lost'
+  | 'custom';
+
+export const CRM_STAGE_ROLES: readonly CrmStageRole[] = [
+  'entry',
+  'contacted',
+  'qualification',
+  'handoff',
+  'follow_up',
+  'won',
+  'lost',
+  'custom',
+];
+
+/** Roles that may appear at most once per pipeline. */
+export const CRM_UNIQUE_STAGE_ROLES: ReadonlySet<CrmStageRole> = new Set([
+  'entry',
+  'won',
+  'lost',
+]);
+
 @Entity('crm_stages')
 export class CrmStageEntity {
   @PrimaryGeneratedColumn('uuid')
@@ -58,6 +92,14 @@ export class CrmStageEntity {
     default: 'hybrid',
   })
   operationMode!: 'ai_managed' | 'human_managed' | 'hybrid';
+
+  /** D4: structural role of this stage. Default `custom`; see {@link CrmStageRole}. */
+  @Column({ type: 'varchar', length: 24, default: 'custom' })
+  role!: CrmStageRole;
+
+  /** Role-specific configuration (e.g. qualification criteria, follow-up settings). */
+  @Column({ name: 'role_config', type: 'jsonb', default: () => "'{}'::jsonb" })
+  roleConfig!: Record<string, unknown>;
 
   @Column({ type: 'jsonb', default: () => "'{}'::jsonb" })
   metadata!: Record<string, unknown>;
