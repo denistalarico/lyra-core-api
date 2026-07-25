@@ -25,6 +25,8 @@ export const LEADFLOW_AUTOMATION_SATISFIED_DEPENDENCIES: Record<
   [LeadFlowAutomationDependency.SchedulerRuntime]: false,
   [LeadFlowAutomationDependency.MessageGeneration]: false,
   [LeadFlowAutomationDependency.OwnershipCommand]: false,
+  // The canonical CRM lead-distribution command shipped in Fase 4A.
+  [LeadFlowAutomationDependency.LeadDistributionCommand]: true,
   [LeadFlowAutomationDependency.PipelineTransferCommand]: true,
   [LeadFlowAutomationDependency.StageTransitionCommand]: true,
   [LeadFlowAutomationDependency.OpportunityCopyCommand]: true,

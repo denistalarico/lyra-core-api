@@ -39,6 +39,12 @@ describe('automation executor registry', () => {
     expect(availability.owningDomain).toBe('leadflow.crm');
   });
 
+  it('reports lead distribution as available now that its command exists', () => {
+    const availability = executorAvailability('assign_opportunity_owner');
+    expect(availability.available).toBe(true);
+    expect(availability.owningDomain).toBe('leadflow.crm');
+  });
+
   it('still fails closed for CRM commands with no automatic adapter yet', () => {
     for (const action of [
       'transfer_opportunity_pipeline',

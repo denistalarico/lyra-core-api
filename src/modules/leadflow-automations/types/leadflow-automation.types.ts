@@ -46,6 +46,7 @@ export type LeadFlowAutomationAction =
   | 'schedule_followup'
   | 'notify_user'
   | 'move_opportunity_stage'
+  | 'assign_opportunity_owner'
   | 'transfer_opportunity_pipeline'
   | 'copy_opportunity'
   | 'update_opportunity_score'
@@ -86,6 +87,12 @@ export interface LeadFlowAutomationActionConfig {
   targetUserRef?: string | null;
   addTags?: string[];
   requireHumanApproval?: boolean;
+  /** Rule the lead-distribution action uses to pick a participant. */
+  distributionStrategy?: 'least_volume' | 'round_robin' | 'by_channel';
+  /** Source-channel → user, for the `by_channel` distribution strategy. */
+  distributionChannelMap?: Record<string, string>;
+  /** Preferred assignee when a distribution strategy cannot resolve one. */
+  distributionFallbackUserRef?: string | null;
   [key: string]: LeadFlowJsonValue | undefined;
 }
 

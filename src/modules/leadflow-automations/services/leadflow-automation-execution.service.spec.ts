@@ -3,6 +3,7 @@ import type { LeadFlowAutomationEntity } from '../entities/leadflow-automation.e
 import type { LeadFlowAutomationVersionEntity } from '../entities/leadflow-automation-version.entity';
 import type { AutomationEffectResult } from '../executors';
 import type { MoveOpportunityStageExecutor } from '../executors/move-opportunity-stage.executor';
+import type { AssignOpportunityOwnerExecutor } from '../executors/assign-opportunity-owner.executor';
 import type { LeadFlowAutomationContextSnapshot } from '../types/leadflow-automation-context.types';
 import type { LeadFlowAutomationEvaluation } from './leadflow-automation-evaluation.service';
 import { LeadFlowAutomationExecutionService } from './leadflow-automation-execution.service';
@@ -71,6 +72,10 @@ function build(options: {
     actionKey: 'move_opportunity_stage',
     execute,
   } as unknown as MoveOpportunityStageExecutor;
+  const assignOwnerExecutor = {
+    actionKey: 'assign_opportunity_owner',
+    execute,
+  } as unknown as AssignOpportunityOwnerExecutor;
 
   const gate = {
     evaluate: jest.fn().mockResolvedValue(
@@ -94,6 +99,7 @@ function build(options: {
     gate,
     runService,
     moveStageExecutor,
+    assignOwnerExecutor,
   );
   return { service, execute, recordLiveRun };
 }

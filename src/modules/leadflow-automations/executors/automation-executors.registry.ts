@@ -32,6 +32,30 @@ function stageTransitionAvailability(): AutomationExecutorAvailability {
   };
 }
 
+/**
+ * Availability of the lead-distribution action. Like the stage transition, a
+ * real executor exists (`AssignOpportunityOwnerExecutor`) and its capability is
+ * the CRM's canonical distribution command; whether a given tenant may run it is
+ * the gate's separate decision.
+ */
+function leadDistributionAvailability(): AutomationExecutorAvailability {
+  const available = isDependencySatisfied(
+    LeadFlowAutomationDependency.LeadDistributionCommand,
+  );
+  return {
+    actionKey: 'assign_opportunity_owner',
+    available,
+    reason: available ? null : 'dependency_missing',
+    dependency: available
+      ? null
+      : LeadFlowAutomationDependency.LeadDistributionCommand,
+    owningDomain: 'leadflow.crm',
+    description: available
+      ? 'Distribuição de leads via comando canônico do CRM (ator automation, apenas leads abertos e sem dono).'
+      : 'O comando canônico de distribuição de leads ainda não está disponível.',
+  };
+}
+
 const unavailable = (
   actionKey: LeadFlowAutomationAction,
   owningDomain: string,
@@ -141,6 +165,7 @@ const COMPUTED_AVAILABILITY: Record<
   () => AutomationExecutorAvailability
 > = {
   move_opportunity_stage: stageTransitionAvailability,
+  assign_opportunity_owner: leadDistributionAvailability,
 };
 
 export function executorAvailability(

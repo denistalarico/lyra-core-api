@@ -3,8 +3,13 @@ import { Injectable, Logger } from '@nestjs/common';
 import type { LeadFlowEventDeliveryEntity } from '../../leadflow-events/entities/leadflow-event-delivery.entity';
 import type { LeadFlowAutomationEntity } from '../entities/leadflow-automation.entity';
 import type { LeadFlowAutomationVersionEntity } from '../entities/leadflow-automation-version.entity';
-import type { AutomationEffectRequest, AutomationExecutor } from '../executors';
+import type {
+  AutomationEffectRequest,
+  AutomationExecutor,
+} from '../executors';
 import { MoveOpportunityStageExecutor } from '../executors/move-opportunity-stage.executor';
+import { AssignOpportunityOwnerExecutor } from '../executors/assign-opportunity-owner.executor';
+import type { LeadFlowJsonObject } from '../types/leadflow-automation.types';
 import type { LeadFlowAutomationContextSnapshot } from '../types/leadflow-automation-context.types';
 import type { LeadFlowAutomationTrigger } from '../types/leadflow-automation.types';
 import type { LeadFlowAutomationEvaluation } from './leadflow-automation-evaluation.service';
@@ -51,11 +56,13 @@ export class LeadFlowAutomationExecutionService {
     private readonly gate: LeadFlowAutomationExecutionGate,
     private readonly runService: LeadFlowAutomationRunService,
     moveStageExecutor: MoveOpportunityStageExecutor,
+    assignOwnerExecutor: AssignOpportunityOwnerExecutor,
   ) {
-    // The only productive executor this phase wires. The gate's action
-    // allowlist is the authority on what may run; this map is what *can*.
-    this.executors = new Map([
+    // The productive executors this phase wires. The gate's action allowlist is
+    // the authority on what may run; this map is what *can*.
+    this.executors = new Map<string, AutomationExecutor>([
       [moveStageExecutor.actionKey, moveStageExecutor],
+      [assignOwnerExecutor.actionKey, assignOwnerExecutor],
     ]);
   }
 
@@ -145,6 +152,23 @@ export class LeadFlowAutomationExecutionService {
         ? delivery.payload.rowVersion
         : null;
 
+    // Each action carries its own configured input; the rest of the request —
+    // scope, idempotency, revalidation — is the same regardless of effect.
+    const isDistribution = actionKey === 'assign_opportunity_owner';
+    const payload: LeadFlowJsonObject = isDistribution
+      ? this.distributionPayload(automation, opportunityId)
+      : {
+          opportunityId,
+          toStageId:
+            typeof crmPolicy.moveStageOnComplete === 'string'
+              ? crmPolicy.moveStageOnComplete
+              : null,
+          reasonCode:
+            typeof crmPolicy.moveStageReasonCode === 'string'
+              ? crmPolicy.moveStageReasonCode
+              : null,
+        };
+
     return {
       tenantId: automation.tenantId,
       workspaceId: automation.workspaceId,
@@ -156,24 +180,41 @@ export class LeadFlowAutomationExecutionService {
       idempotencyKey,
       // An effect nobody can be held responsible for must not be attempted.
       actorRef: `automation:${automation.id}`,
-      policyRef: `stage_transition:${version.id}`,
-      payload: {
-        opportunityId,
-        toStageId:
-          typeof crmPolicy.moveStageOnComplete === 'string'
-            ? crmPolicy.moveStageOnComplete
-            : null,
-        reasonCode:
-          typeof crmPolicy.moveStageReasonCode === 'string'
-            ? crmPolicy.moveStageReasonCode
-            : null,
-      },
+      policyRef: `${
+        isDistribution ? 'lead_distribution' : 'stage_transition'
+      }:${version.id}`,
+      payload,
       revalidation: {
         contextSchemaVersion: contextSnapshot.schemaVersion,
         capturedAt: contextSnapshot.capturedAt,
         subjects: subjectsToRecord(contextSnapshot.subjects),
         expectedVersion,
       },
+    };
+  }
+
+  /** The lead-distribution effect's input, read from the automation config. */
+  private distributionPayload(
+    automation: LeadFlowAutomationEntity,
+    opportunityId: string,
+  ): LeadFlowJsonObject {
+    const config = automation.actionConfig ?? {};
+    return {
+      opportunityId,
+      strategy:
+        typeof config.distributionStrategy === 'string'
+          ? config.distributionStrategy
+          : 'least_volume',
+      channelMap:
+        config.distributionChannelMap &&
+        typeof config.distributionChannelMap === 'object' &&
+        !Array.isArray(config.distributionChannelMap)
+          ? config.distributionChannelMap
+          : null,
+      fallbackUserId:
+        typeof config.distributionFallbackUserRef === 'string'
+          ? config.distributionFallbackUserRef
+          : null,
     };
   }
 }

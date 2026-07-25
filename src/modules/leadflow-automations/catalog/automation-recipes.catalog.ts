@@ -536,7 +536,7 @@ const OPTIONAL_SEEDS: RecipeSeed[] = [
     key: 'lead_distribution',
     requiredDependencies: [
       LeadFlowAutomationDependency.EventFanOut,
-      LeadFlowAutomationDependency.OwnershipCommand,
+      LeadFlowAutomationDependency.LeadDistributionCommand,
     ],
     name: 'Distribuição de leads',
     description:
@@ -545,11 +545,11 @@ const OPTIONAL_SEEDS: RecipeSeed[] = [
     tier: 'optional',
     businessModeKeys: [RealEstate, AgencyServices, Automotive, LocalServices],
     trigger: 'opportunity.created',
-    primaryAction: 'notify_user',
+    primaryAction: 'assign_opportunity_owner',
     whenLabel: 'Quando uma nova oportunidade é criada.',
     limitsLabel: 'Distribuição interna; não envia mensagem ao lead.',
     conditionConfig: { businessHoursOnly: false, stopIfReplied: false },
-    actionConfig: { targetUserRef: null },
+    actionConfig: { distributionStrategy: 'least_volume' },
   },
   {
     key: 'automatic_tagging',

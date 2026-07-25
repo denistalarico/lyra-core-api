@@ -37,6 +37,14 @@ export enum LeadFlowAutomationDependency {
   OwnershipCommand = 'ownership_command',
 
   /**
+   * Canonical lead-distribution command owned by the CRM: assigns a new,
+   * unclaimed opportunity to a pipeline participant by a configured strategy.
+   * Distinct from OwnershipCommand (inbox handoff): this one only sets the
+   * opportunity's owner and never touches the conversation.
+   */
+  LeadDistributionCommand = 'lead_distribution_command',
+
+  /**
    * Canonical pipeline transfer command (same opportunity, atomic pipeline +
    * stage change). Owned by the CRM structural track.
    */
@@ -92,6 +100,8 @@ export const LEADFLOW_AUTOMATION_DEPENDENCY_OWNERS: Record<
   [LeadFlowAutomationDependency.SchedulerRuntime]: 'leadflow_automations',
   [LeadFlowAutomationDependency.MessageGeneration]: 'leadflow_agents_and_inbox',
   [LeadFlowAutomationDependency.OwnershipCommand]: 'crm_structural_track',
+  [LeadFlowAutomationDependency.LeadDistributionCommand]:
+    'crm_structural_track',
   [LeadFlowAutomationDependency.PipelineTransferCommand]:
     'crm_structural_track',
   [LeadFlowAutomationDependency.StageTransitionCommand]: 'crm_structural_track',
@@ -117,6 +127,8 @@ export const LEADFLOW_AUTOMATION_DEPENDENCY_LABELS: Record<
     'Geração e envio canônico de mensagens ainda não disponíveis.',
   [LeadFlowAutomationDependency.OwnershipCommand]:
     'Atribuição canônica de responsável ainda não disponível.',
+  [LeadFlowAutomationDependency.LeadDistributionCommand]:
+    'Distribuição canônica de leads ainda não disponível.',
   [LeadFlowAutomationDependency.PipelineTransferCommand]:
     'Transferência canônica de pipeline ainda não disponível.',
   [LeadFlowAutomationDependency.StageTransitionCommand]:

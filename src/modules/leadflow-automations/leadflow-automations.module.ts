@@ -22,6 +22,7 @@ import { LeadFlowAutomationEvaluationService } from './services/leadflow-automat
 import { LeadFlowAutomationExecutionGate } from './services/leadflow-automation-execution-gate.service';
 import { LeadFlowAutomationExecutionService } from './services/leadflow-automation-execution.service';
 import { MoveOpportunityStageExecutor } from './executors/move-opportunity-stage.executor';
+import { AssignOpportunityOwnerExecutor } from './executors/assign-opportunity-owner.executor';
 import { LeadFlowAutomationEventIngressService } from './services/leadflow-automation-event-ingress.service';
 import { LeadFlowAutomationLifecycleService } from './services/leadflow-automation-lifecycle.service';
 import { LeadFlowAutomationRecipeService } from './services/leadflow-automation-recipe.service';
@@ -61,6 +62,7 @@ import { LeadFlowAutomationService } from './services/leadflow-automation.servic
     LeadFlowAutomationExecutionGate,
     LeadFlowAutomationExecutionService,
     MoveOpportunityStageExecutor,
+    AssignOpportunityOwnerExecutor,
     LeadFlowAutomationEventIngressService,
     LeadFlowAutomationRunService,
     LeadFlowAutomationShadowEvaluatorService,

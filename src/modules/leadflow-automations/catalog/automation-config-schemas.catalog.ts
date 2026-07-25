@@ -214,6 +214,15 @@ const FIELD_SPECS: Record<string, LeadFlowAutomationFieldSpec> = {
     nullable: true,
     maxLength: 64,
   },
+  'actions.distributionStrategy': {
+    key: 'distributionStrategy',
+    type: 'string',
+    label: 'Regra de distribuição',
+    surface: 'essential',
+    required: true,
+    maxLength: 20,
+    values: ['least_volume', 'round_robin', 'by_channel'],
+  },
   'actions.addTags': {
     key: 'addTags',
     type: 'string[]',

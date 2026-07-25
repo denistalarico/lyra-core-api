@@ -12,3 +12,5 @@ export {
   unavailableExecutors,
 } from './automation-executors.registry';
 export { UnavailableExecutor } from './unavailable.executor';
+export { MoveOpportunityStageExecutor } from './move-opportunity-stage.executor';
+export { AssignOpportunityOwnerExecutor } from './assign-opportunity-owner.executor';

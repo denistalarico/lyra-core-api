@@ -116,10 +116,10 @@ describe('automation recipes catalog', () => {
       }
     });
 
-    it('routes lead distribution through the canonical ownership command', () => {
+    it('routes lead distribution through the canonical distribution command', () => {
       expect(
         getRecipeByKey('lead_distribution')!.requiredDependencies,
-      ).toContain(LeadFlowAutomationDependency.OwnershipCommand);
+      ).toContain(LeadFlowAutomationDependency.LeadDistributionCommand);
     });
 
     it('blocks the daily summary on the Analytics backend', () => {

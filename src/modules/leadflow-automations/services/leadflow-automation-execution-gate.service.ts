@@ -9,12 +9,15 @@ const AGENCY_CONNECTION = 'agency';
 /**
  * Actions the canary is allowed to carry out.
  *
- * Exactly one for this phase. Transfer and copy stay out even though their
- * commands exist: the first productive effect is the smallest, most reversible
- * one — a non-terminal stage move — and widening the set is a later, explicit
- * decision.
+ * A non-terminal stage move and lead distribution — both governed CRM commands
+ * that only ever narrow (a stage the policy allows; an unclaimed lead to a
+ * pipeline participant). Transfer and copy stay out even though their commands
+ * exist: widening the set is a later, explicit decision.
  */
-const CANARY_ACTION_ALLOWLIST = new Set<string>(['move_opportunity_stage']);
+const CANARY_ACTION_ALLOWLIST = new Set<string>([
+  'move_opportunity_stage',
+  'assign_opportunity_owner',
+]);
 
 export type ExecutionGateDecision =
   | { allowed: true }
