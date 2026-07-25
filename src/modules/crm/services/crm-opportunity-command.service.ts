@@ -17,6 +17,10 @@ import { CrmStageEntity } from '../entities/crm-stage.entity';
 import { CrmStageTransitionPolicyService } from './crm-stage-transition-policy.service';
 import { LeadScoreEngineService } from '../lead-score/services/lead-score-engine.service';
 import type { LeadScoreCalculationReason } from '../lead-score/lead-score.types';
+import {
+  chooseAssignee,
+  type LeadDistributionStrategy,
+} from './lead-distribution.strategy';
 
 export type CrmCommandActor = {
   type: 'user' | 'ai' | 'automation' | 'system';
@@ -287,6 +291,141 @@ export class CrmOpportunityCommandService {
         afterData: { autonomyMode: mode },
       });
       return saved;
+    });
+  }
+
+  /**
+   * Distributes a new, unclaimed opportunity to a pipeline participant.
+   *
+   * This is the canonical command the lead-distribution automation drives as the
+   * `automation` actor. It owns the rules distribution must respect — never
+   * override a human's assignment, never touch a closed deal, only ever choose
+   * from the pipeline's own participants — while the pure strategy engine owns
+   * *which* eligible participant. Idempotent on `idempotencyKey`; refuses (a
+   * clean `Conflict`, not a fault) when there is nothing to distribute.
+   */
+  async distributeOpportunityOwner(
+    ctx: RequestContext,
+    opportunityId: string,
+    config: {
+      strategy: LeadDistributionStrategy;
+      channelMap?: Record<string, string>;
+      fallbackUserId?: string | null;
+    },
+    options: CrmCommandOptions = {},
+  ): Promise<{
+    opportunity: CrmOpportunityEntity;
+    assignedUserId: string;
+    reasonCode: string;
+  }> {
+    return this.dataSource.transaction(async (manager) => {
+      const replay = await this.findReplay(manager, ctx, options.idempotencyKey);
+      if (replay) {
+        return {
+          opportunity: replay,
+          assignedUserId: replay.assignedUserId ?? '',
+          reasonCode: 'replayed',
+        };
+      }
+      const opportunity = await this.findScopedOpportunity(
+        manager,
+        ctx,
+        opportunityId,
+        true,
+      );
+      this.assertVersion(opportunity, options.expectedVersion);
+
+      // Only an open, unclaimed lead is ever distributed: never reopen a closed
+      // deal, never override an assignment a human (or a prior run) already made.
+      if (opportunity.status !== 'open') {
+        this.blockDistribution(
+          'opportunity_not_open',
+          'Somente oportunidades abertas podem ser distribuídas.',
+        );
+      }
+      if (opportunity.assignedUserId) {
+        this.blockDistribution(
+          'already_assigned',
+          'A oportunidade já possui um responsável.',
+        );
+      }
+
+      const pipeline = await this.findScopedPipeline(
+        manager,
+        ctx,
+        opportunity.pipelineId,
+      );
+      const eligible = this.eligibleAssignees(pipeline);
+      if (eligible.length === 0) {
+        this.blockDistribution(
+          'no_eligible_assignee',
+          'O pipeline não tem responsáveis elegíveis configurados.',
+        );
+      }
+
+      const loads =
+        config.strategy === 'least_volume'
+          ? await this.openOpportunityLoads(
+              manager,
+              ctx,
+              opportunity.pipelineId,
+              eligible,
+            )
+          : undefined;
+      const cursorUserId =
+        config.strategy === 'round_robin'
+          ? this.readDistributionCursor(pipeline)
+          : null;
+
+      const choice = chooseAssignee({
+        strategy: config.strategy,
+        eligible,
+        loads,
+        cursorUserId,
+        channelMap: config.channelMap,
+        source: opportunity.source,
+        fallbackUserId: config.fallbackUserId ?? pipeline.ownerUserId,
+      });
+      if (!choice) {
+        this.blockDistribution(
+          'no_eligible_assignee',
+          'Nenhum responsável elegível para distribuir.',
+        );
+      }
+
+      opportunity.assignedUserId = choice.userId;
+      opportunity.rowVersion += 1;
+      const saved = await manager
+        .getRepository(CrmOpportunityEntity)
+        .save(opportunity);
+
+      // The rotation cursor is per-pipeline state; only round_robin advances it.
+      if (config.strategy === 'round_robin') {
+        pipeline.metadata = {
+          ...(pipeline.metadata ?? {}),
+          distributionCursorUserId: choice.userId,
+        };
+        await manager.getRepository(CrmPipelineEntity).save(pipeline);
+      }
+
+      await this.appendHistory(manager, ctx, {
+        ...options,
+        opportunity: saved,
+        eventType: 'owner_assigned',
+        title: 'Responsável distribuído',
+        beforeData: { assignedUserId: null },
+        afterData: {
+          assignedUserId: choice.userId,
+          strategy: config.strategy,
+        },
+        reason: options.reason ?? choice.reasonCode,
+      });
+
+      return {
+        opportunity: saved,
+        assignedUserId: choice.userId,
+        reasonCode: choice.reasonCode,
+      };
     });
   }
 
@@ -1918,6 +2057,62 @@ export class CrmOpportunityCommandService {
     );
   }
 
+  /** A distribution refusal: a clean "nothing to distribute", never a fault. */
+  private blockDistribution(reasonCode: string, message: string): never {
+    throw new ConflictException({
+      code: 'CRM_LEAD_DISTRIBUTION_BLOCKED',
+      reasonCode,
+      message,
+    });
+  }
+
+  /** The pipeline's participants, plus its owner as a last eligible resort. */
+  private eligibleAssignees(pipeline: CrmPipelineEntity): string[] {
+    const participants = Array.isArray(pipeline.allowedUserIds)
+      ? pipeline.allowedUserIds.filter(
+          (id): id is string => typeof id === 'string' && id.length > 0,
+        )
+      : [];
+    const pool = [...participants];
+    if (pipeline.ownerUserId && !pool.includes(pipeline.ownerUserId)) {
+      pool.push(pipeline.ownerUserId);
+    }
+    return pool;
+  }
+
+  /** The last user round_robin assigned in this pipeline, from its metadata. */
+  private readDistributionCursor(pipeline: CrmPipelineEntity): string | null {
+    const cursor = (pipeline.metadata ?? {}).distributionCursorUserId;
+    return typeof cursor === 'string' ? cursor : null;
+  }
+
+  /** Open-opportunity counts per eligible user, for the least_volume rule. */
+  private async openOpportunityLoads(
+    manager: EntityManager,
+    ctx: RequestContext,
+    pipelineId: string,
+    eligible: string[],
+  ): Promise<Record<string, number>> {
+    const rows = await manager
+      .getRepository(CrmOpportunityEntity)
+      .createQueryBuilder('o')
+      .select('o.assigned_user_id', 'userId')
+      .addSelect('COUNT(*)', 'count')
+      .where('o.tenant_id = :tenantId', { tenantId: this.requireTenantId(ctx) })
+      .andWhere('o.workspace_id = :workspaceId', {
+        workspaceId: this.requireWorkspaceId(ctx),
+      })
+      .andWhere('o.pipeline_id = :pipelineId', { pipelineId })
+      .andWhere('o.status = :status', { status: 'open' })
+      .andWhere('o.deleted_at IS NULL')
+      .andWhere('o.assigned_user_id IN (:...eligible)', { eligible })
+      .groupBy('o.assigned_user_id')
+      .getRawMany<{ userId: string; count: string }>();
+    const loads: Record<string, number> = {};
+    for (const row of rows) loads[row.userId] = Number(row.count);
+    return loads;
+  }
+
   private domainEventName(eventType: string): string {
     const names: Record<string, string> = {
       opportunity_created: 'leadflow.crm.opportunity.created',
@@ -1934,6 +2129,7 @@ export class CrmOpportunityCommandService {
       pipeline_entered: 'leadflow.crm.opportunity.pipeline.entered',
       stage_entered: 'leadflow.crm.opportunity.stage.entered',
       autonomy_mode_changed: 'leadflow.crm.opportunity.autonomy_mode.changed',
+      owner_assigned: 'leadflow.crm.opportunity.owner_assigned',
     };
     return names[eventType] ?? 'leadflow.crm.opportunity.updated';
   }

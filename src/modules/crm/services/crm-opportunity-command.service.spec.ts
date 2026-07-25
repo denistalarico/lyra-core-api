@@ -249,6 +249,110 @@ function harness(
 }
 
 describe('CrmOpportunityCommandService', () => {
+  describe('distributeOpportunityOwner (Fase 4)', () => {
+    const pipelineId = opportunity().pipelineId;
+
+    it('assigns an unclaimed lead by channel and emits owner_assigned', async () => {
+      const lead = opportunity({ source: 'whatsapp' });
+      const { service, committed } = harness({
+        initial: [lead],
+        pipelines: [
+          pipeline({ id: pipelineId, allowedUserIds: ['user-a', 'user-b'] }),
+        ],
+      });
+
+      const result = await service.distributeOpportunityOwner(
+        ctx,
+        lead.id,
+        { strategy: 'by_channel', channelMap: { whatsapp: 'user-b' } },
+        { actor: { type: 'automation' }, expectedVersion: 3, idempotencyKey: 'dist-1' },
+      );
+
+      expect(result).toMatchObject({
+        assignedUserId: 'user-b',
+        reasonCode: 'by_channel',
+      });
+      expect(result.opportunity).toMatchObject({
+        assignedUserId: 'user-b',
+        rowVersion: 4,
+      });
+      expect(committed.events.map((event) => event.eventType)).toEqual([
+        'owner_assigned',
+      ]);
+      expect(committed.events[0]).toMatchObject({
+        actorType: 'automation',
+        afterData: { assignedUserId: 'user-b', strategy: 'by_channel' },
+      });
+      expect(committed.outbox).toHaveLength(1);
+      expect(committed.outbox[0].eventName).toBe(
+        'leadflow.crm.opportunity.owner_assigned',
+      );
+    });
+
+    it('refuses when the lead already has an owner', async () => {
+      const lead = opportunity({ assignedUserId: 'human-1' });
+      const { service, committed } = harness({
+        initial: [lead],
+        pipelines: [pipeline({ id: pipelineId, allowedUserIds: ['user-a'] })],
+      });
+
+      await expect(
+        service.distributeOpportunityOwner(
+          ctx,
+          lead.id,
+          { strategy: 'by_channel' },
+          { expectedVersion: 3 },
+        ),
+      ).rejects.toMatchObject({
+        response: {
+          code: 'CRM_LEAD_DISTRIBUTION_BLOCKED',
+          reasonCode: 'already_assigned',
+        },
+      });
+      expect(committed.events).toHaveLength(0);
+    });
+
+    it('refuses when the pipeline has no eligible assignee', async () => {
+      const lead = opportunity();
+      const { service } = harness({
+        initial: [lead],
+        pipelines: [
+          pipeline({ id: pipelineId, allowedUserIds: [], ownerUserId: null }),
+        ],
+      });
+
+      await expect(
+        service.distributeOpportunityOwner(
+          ctx,
+          lead.id,
+          { strategy: 'by_channel' },
+          { expectedVersion: 3 },
+        ),
+      ).rejects.toMatchObject({
+        response: { reasonCode: 'no_eligible_assignee' },
+      });
+    });
+
+    it('refuses to distribute a closed opportunity', async () => {
+      const lead = opportunity({ status: 'won' });
+      const { service } = harness({
+        initial: [lead],
+        pipelines: [pipeline({ id: pipelineId, allowedUserIds: ['user-a'] })],
+      });
+
+      await expect(
+        service.distributeOpportunityOwner(
+          ctx,
+          lead.id,
+          { strategy: 'by_channel' },
+          { expectedVersion: 3 },
+        ),
+      ).rejects.toMatchObject({
+        response: { reasonCode: 'opportunity_not_open' },
+      });
+    });
+  });
+
   it('moves stage, synchronizes status and appends history/outbox atomically', async () => {
     const initial = opportunity({ valueAmount: '250.00', currency: 'BRL' });
     const { service, committed } = harness({ initial: [initial] });
