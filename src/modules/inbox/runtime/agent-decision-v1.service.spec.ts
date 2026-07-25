@@ -378,4 +378,101 @@ describe('AgentDecision v1 schema and policy', () => {
       ]),
     );
   });
+
+  describe('role policy gating', () => {
+    const closerActions = new Set([
+      'set_stage',
+      'add_tag',
+      'set_summary',
+      'set_service',
+      'set_urgency',
+      'set_fact',
+      'close',
+      'handoff',
+    ]);
+    const supportActions = new Set([
+      'add_tag',
+      'set_summary',
+      'set_urgency',
+      'set_fact',
+      'handoff',
+    ]);
+
+    it('refuses a stage a restrictive role may not attempt, even when eligible', async () => {
+      const planner = new BusinessModeActionPlanner({} as never);
+      const plan = await planner.plan({
+        tenantId: 't',
+        workspaceId: 'w',
+        businessMode: 'services',
+        opportunity: {
+          id: 'o',
+          pipelineId: 'p',
+          stageId: 'stage-current',
+          businessMode: 'services',
+        } as never,
+        transitionCatalog,
+        decision: { ...validDecision, stage_transition: validStageTransition },
+        allowedDecisionActions: supportActions,
+      });
+      expect(plan[0]).toMatchObject({
+        type: 'set_stage',
+        allowed: false,
+        reason: 'action_not_allowed_for_role',
+      });
+    });
+
+    it('keeps a stage allowed when the role permits it', async () => {
+      const planner = new BusinessModeActionPlanner({} as never);
+      const plan = await planner.plan({
+        tenantId: 't',
+        workspaceId: 'w',
+        businessMode: 'services',
+        opportunity: {
+          id: 'o',
+          pipelineId: 'p',
+          stageId: 'stage-current',
+          businessMode: 'services',
+        } as never,
+        transitionCatalog,
+        decision: { ...validDecision, stage_transition: validStageTransition },
+        allowedDecisionActions: closerActions,
+      });
+      expect(plan[0]).toMatchObject({
+        type: 'set_stage',
+        allowed: true,
+        reason: null,
+      });
+    });
+
+    it('refuses close for a role that may not close, even with a valid reason', async () => {
+      const dataSource = {
+        getRepository: () => ({
+          createQueryBuilder: () => ({
+            where: () => ({
+              andWhere: () => ({ getMany: jest.fn().mockResolvedValue([]) }),
+            }),
+          }),
+        }),
+      };
+      const planner = new BusinessModeActionPlanner(dataSource as never);
+      const plan = await planner.plan({
+        tenantId: 't',
+        workspaceId: 'w',
+        businessMode: 'services',
+        opportunity: {
+          id: 'o',
+          pipelineId: 'p',
+          stageId: 'stage-current',
+          businessMode: 'services',
+        } as never,
+        decision: { ...validDecision, close_reason: 'lost' },
+        allowedDecisionActions: supportActions,
+      });
+      const close = plan.find((item) => item.type === 'close');
+      expect(close).toMatchObject({
+        allowed: false,
+        reason: 'action_not_allowed_for_role',
+      });
+    });
+  });
 });

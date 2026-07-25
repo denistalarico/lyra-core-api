@@ -441,6 +441,13 @@ export class BusinessModeActionPlanner {
     transitionCatalog?: CrmAiStageTransitionCatalog | null;
     opportunityWillBeEnsured?: boolean;
     allowedServices?: string[];
+    /**
+     * Actions the acting agent's role permits. When present, an action outside
+     * the set is refused regardless of whether the rest of its context checks
+     * out — the role is the outermost gate. Absent means no role restriction
+     * (every action stays subject only to its own checks).
+     */
+    allowedDecisionActions?: ReadonlySet<string>;
   }): Promise<CommercialActionPlanItem[]> {
     const result: CommercialActionPlanItem[] = [];
     const opportunity = input.opportunity;
@@ -662,6 +669,17 @@ export class BusinessModeActionPlanner {
           : 'close_reason_not_allowed',
         value: input.decision.close_reason,
       });
+    }
+    // The role is the outermost gate: an action the agent's role does not
+    // permit is refused even when its own context checks out. Applied last so
+    // the refusal reason is unambiguous.
+    if (input.allowedDecisionActions) {
+      for (const item of result) {
+        if (!input.allowedDecisionActions.has(item.type)) {
+          item.allowed = false;
+          item.reason = 'action_not_allowed_for_role';
+        }
+      }
     }
     return result;
   }

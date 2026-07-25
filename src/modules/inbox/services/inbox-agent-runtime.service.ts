@@ -20,6 +20,7 @@ import {
   CrmStageTransitionPolicyService,
 } from '../../crm/services/crm-stage-transition-policy.service';
 import { LeadFlowAgentEntity } from '../../leadflow-agents/entities/leadflow-agent.entity';
+import { resolveAgentRolePolicy } from '../../leadflow-agents/catalog/agent-role-policy.catalog';
 import { LeadFlowAgentChannelBindingEntity } from '../../leadflow-agents/entities/leadflow-agent-channel-binding.entity';
 import { LeadFlowAgentVersionEntity } from '../../leadflow-agents/entities/leadflow-agent-version.entity';
 import {
@@ -503,10 +504,18 @@ export class InboxAgentRuntimeService {
               opportunity,
             )
           : null;
+      // The agent's role decides which commercial actions it may attempt; the
+      // stage transition is additionally gated by the governed catalog. Offering
+      // only role-permitted actions keeps the model from proposing what the
+      // planner would refuse anyway (the planner still enforces it server-side).
+      const rolePolicy = resolveAgentRolePolicy(agent.type);
+      const roleAllows = new Set<string>(rolePolicy.allowedDecisionActions);
+      const canProposeStage = Boolean(
+        stageTransitionCatalog?.capabilities.canProposeStageTransition &&
+          roleAllows.has('set_stage'),
+      );
       const allowedActions = [
-        ...(stageTransitionCatalog?.capabilities.canProposeStageTransition
-          ? ['set_stage']
-          : []),
+        ...(canProposeStage ? ['set_stage'] : []),
         'add_tag',
         'set_summary',
         'set_service',
@@ -514,7 +523,7 @@ export class InboxAgentRuntimeService {
         'set_fact',
         'close',
         'handoff',
-      ];
+      ].filter((action) => action === 'set_stage' || roleAllows.has(action));
       const projectedEvidence = projectConversationEvidence(
         orderedMessages,
         media,
@@ -687,6 +696,7 @@ export class InboxAgentRuntimeService {
           !incompatibleActiveOpportunity,
         allowedServices,
         transitionCatalog: stageTransitionCatalog,
+        allowedDecisionActions: roleAllows,
       });
       return await this.dataSource.transaction(async (manager) => {
         const lockedBatch = await manager
