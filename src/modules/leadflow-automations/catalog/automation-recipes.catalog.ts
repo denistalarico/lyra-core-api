@@ -355,7 +355,10 @@ const ESSENTIAL_SEEDS: RecipeSeed[] = [
   },
   {
     key: 'automatic_handoff',
-    requiredDependencies: [LeadFlowAutomationDependency.EventFanOut],
+    requiredDependencies: [
+      LeadFlowAutomationDependency.EventFanOut,
+      LeadFlowAutomationDependency.OwnershipCommand,
+    ],
     name: 'Handoff automático',
     description:
       'Transfere a conversa para um humano quando o contexto exige atendimento pessoal.',

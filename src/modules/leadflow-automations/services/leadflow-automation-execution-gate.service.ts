@@ -9,14 +9,16 @@ const AGENCY_CONNECTION = 'agency';
 /**
  * Actions the canary is allowed to carry out.
  *
- * A non-terminal stage move and lead distribution — both governed CRM commands
- * that only ever narrow (a stage the policy allows; an unclaimed lead to a
- * pipeline participant). Transfer and copy stay out even though their commands
- * exist: widening the set is a later, explicit decision.
+ * A non-terminal stage move, lead distribution and a governed handoff — each a
+ * canonical command that only ever narrows (a stage the policy allows; an
+ * unclaimed lead to a pipeline participant; a conversation to a human, which the
+ * ownership command makes idempotent per cycle). Transfer and copy stay out even
+ * though their commands exist: widening the set is a later, explicit decision.
  */
 const CANARY_ACTION_ALLOWLIST = new Set<string>([
   'move_opportunity_stage',
   'assign_opportunity_owner',
+  'request_handoff',
 ]);
 
 export type ExecutionGateDecision =

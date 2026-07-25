@@ -56,6 +56,30 @@ function leadDistributionAvailability(): AutomationExecutorAvailability {
   };
 }
 
+/**
+ * Availability of the governed handoff action. A real executor exists
+ * (`RequestHandoffExecutor`) and its capability is the inbox's canonical
+ * `requestHandoff` command; whether a given tenant may run it is the gate's
+ * separate decision.
+ */
+function ownershipCommandAvailability(): AutomationExecutorAvailability {
+  const available = isDependencySatisfied(
+    LeadFlowAutomationDependency.OwnershipCommand,
+  );
+  return {
+    actionKey: 'request_handoff',
+    available,
+    reason: available ? null : 'dependency_missing',
+    dependency: available
+      ? null
+      : LeadFlowAutomationDependency.OwnershipCommand,
+    owningDomain: 'leadflow.inbox',
+    description: available
+      ? 'Handoff governado da conversa via comando canônico do Inbox (ator automation, notificação in-app idempotente por ciclo).'
+      : 'O comando canônico de ownership/handoff ainda não está disponível ao Automations.',
+  };
+}
+
 const unavailable = (
   actionKey: LeadFlowAutomationAction,
   owningDomain: string,
@@ -123,12 +147,6 @@ const EXECUTORS = [
     LeadFlowAutomationDependency.MissingFieldsDetector,
   ),
   unavailable(
-    'request_handoff',
-    'leadflow.inbox',
-    'O command canônico de ownership/handoff ainda não está disponível ao Automations.',
-    LeadFlowAutomationDependency.OwnershipCommand,
-  ),
-  unavailable(
     'create_task',
     'agency.projects',
     'O adapter governado de criação de tarefas ainda não foi implementado.',
@@ -166,6 +184,7 @@ const COMPUTED_AVAILABILITY: Record<
 > = {
   move_opportunity_stage: stageTransitionAvailability,
   assign_opportunity_owner: leadDistributionAvailability,
+  request_handoff: ownershipCommandAvailability,
 };
 
 export function executorAvailability(

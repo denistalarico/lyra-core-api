@@ -24,7 +24,9 @@ export const LEADFLOW_AUTOMATION_SATISFIED_DEPENDENCIES: Record<
   [LeadFlowAutomationDependency.EventFanOut]: true,
   [LeadFlowAutomationDependency.SchedulerRuntime]: false,
   [LeadFlowAutomationDependency.MessageGeneration]: false,
-  [LeadFlowAutomationDependency.OwnershipCommand]: false,
+  // The canonical inbox ownership/handoff command reached Automations in Fase 5A
+  // (RequestHandoffExecutor drives ConversationOwnershipService.requestHandoff).
+  [LeadFlowAutomationDependency.OwnershipCommand]: true,
   // The canonical CRM lead-distribution command shipped in Fase 4A.
   [LeadFlowAutomationDependency.LeadDistributionCommand]: true,
   [LeadFlowAutomationDependency.PipelineTransferCommand]: true,

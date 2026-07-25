@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { LeadFlowClientSettingsEntity } from '../leadflow-settings/entities';
 import { PermissionsModule } from '../permissions';
 import { CrmModule } from '../crm/crm.module';
+import { InboxModule } from '../inbox/inbox.module';
 import { LeadFlowEventDeliveryEntity } from '../leadflow-events/entities';
 import {
   LeadFlowAutomationEntity,
@@ -23,6 +24,7 @@ import { LeadFlowAutomationExecutionGate } from './services/leadflow-automation-
 import { LeadFlowAutomationExecutionService } from './services/leadflow-automation-execution.service';
 import { MoveOpportunityStageExecutor } from './executors/move-opportunity-stage.executor';
 import { AssignOpportunityOwnerExecutor } from './executors/assign-opportunity-owner.executor';
+import { RequestHandoffExecutor } from './executors/request-handoff.executor';
 import { LeadFlowAutomationEventIngressService } from './services/leadflow-automation-event-ingress.service';
 import { LeadFlowAutomationLifecycleService } from './services/leadflow-automation-lifecycle.service';
 import { LeadFlowAutomationRecipeService } from './services/leadflow-automation-recipe.service';
@@ -36,6 +38,7 @@ import { LeadFlowAutomationService } from './services/leadflow-automation.servic
   imports: [
     PermissionsModule,
     CrmModule,
+    InboxModule,
     TypeOrmModule.forFeature(
       [
         LeadFlowAutomationEntity,
@@ -63,6 +66,7 @@ import { LeadFlowAutomationService } from './services/leadflow-automation.servic
     LeadFlowAutomationExecutionService,
     MoveOpportunityStageExecutor,
     AssignOpportunityOwnerExecutor,
+    RequestHandoffExecutor,
     LeadFlowAutomationEventIngressService,
     LeadFlowAutomationRunService,
     LeadFlowAutomationShadowEvaluatorService,

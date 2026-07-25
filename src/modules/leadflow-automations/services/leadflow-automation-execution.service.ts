@@ -9,6 +9,7 @@ import type {
 } from '../executors';
 import { MoveOpportunityStageExecutor } from '../executors/move-opportunity-stage.executor';
 import { AssignOpportunityOwnerExecutor } from '../executors/assign-opportunity-owner.executor';
+import { RequestHandoffExecutor } from '../executors/request-handoff.executor';
 import type { LeadFlowJsonObject } from '../types/leadflow-automation.types';
 import type { LeadFlowAutomationContextSnapshot } from '../types/leadflow-automation-context.types';
 import type { LeadFlowAutomationTrigger } from '../types/leadflow-automation.types';
@@ -20,6 +21,21 @@ import {
 } from './leadflow-automation-run.service';
 
 type RunRecipe = { trigger: LeadFlowAutomationTrigger; triggerKind: 'event' };
+
+/** The aggregate an effect can be aimed at, resolved from the event envelope. */
+interface EffectSubject {
+  opportunityId: string | null;
+  conversationId: string | null;
+}
+
+/** Actions whose effect targets a CRM opportunity in the envelope. */
+const OPPORTUNITY_ACTIONS = new Set<string>([
+  'move_opportunity_stage',
+  'assign_opportunity_owner',
+]);
+
+/** Actions whose effect targets an inbox conversation in the envelope. */
+const CONVERSATION_ACTIONS = new Set<string>(['request_handoff']);
 
 export interface ExecutionInput {
   automation: LeadFlowAutomationEntity;
@@ -57,12 +73,14 @@ export class LeadFlowAutomationExecutionService {
     private readonly runService: LeadFlowAutomationRunService,
     moveStageExecutor: MoveOpportunityStageExecutor,
     assignOwnerExecutor: AssignOpportunityOwnerExecutor,
+    requestHandoffExecutor: RequestHandoffExecutor,
   ) {
     // The productive executors this phase wires. The gate's action allowlist is
     // the authority on what may run; this map is what *can*.
     this.executors = new Map<string, AutomationExecutor>([
       [moveStageExecutor.actionKey, moveStageExecutor],
       [assignOwnerExecutor.actionKey, assignOwnerExecutor],
+      [requestHandoffExecutor.actionKey, requestHandoffExecutor],
     ]);
   }
 
@@ -80,14 +98,29 @@ export class LeadFlowAutomationExecutionService {
       return { executed: false, reason: decision.reason };
     }
 
-    // Scope of every effect: the opportunity the envelope names. A stage move
-    // cannot be aimed by anything other than the aggregate the event concerns.
-    const opportunityId =
-      delivery.aggregateType === 'crm_opportunity'
-        ? delivery.aggregateId
-        : null;
-    if (!opportunityId) {
-      return { executed: false, reason: 'no_opportunity_in_envelope' };
+    // Scope of every effect: the aggregate the envelope names. Each action can
+    // only be aimed at the aggregate kind its owning domain concerns — a CRM
+    // effect at the opportunity, a handoff at the conversation. An effect
+    // pointed at the wrong kind of subject cannot be attempted.
+    const subject: EffectSubject = {
+      opportunityId:
+        delivery.aggregateType === 'crm_opportunity'
+          ? delivery.aggregateId
+          : null,
+      conversationId:
+        delivery.aggregateType === 'inbox_conversation'
+          ? delivery.aggregateId
+          : null,
+    };
+    if (actionKeys.some((key) => OPPORTUNITY_ACTIONS.has(key))) {
+      if (!subject.opportunityId) {
+        return { executed: false, reason: 'no_opportunity_in_envelope' };
+      }
+    }
+    if (actionKeys.some((key) => CONVERSATION_ACTIONS.has(key))) {
+      if (!subject.conversationId) {
+        return { executed: false, reason: 'no_conversation_in_envelope' };
+      }
     }
 
     const effects: LeadFlowAutomationLiveEffect[] = [];
@@ -99,7 +132,7 @@ export class LeadFlowAutomationExecutionService {
         return { executed: false, reason: 'executor_not_wired' };
       }
 
-      const request = this.buildRequest(input, opportunityId, actionKey);
+      const request = this.buildRequest(input, subject, actionKey);
       const startedAt = Date.now();
       const result = await executor.execute(request);
       effects.push({ actionKey, result, durationMs: Date.now() - startedAt });
@@ -129,11 +162,10 @@ export class LeadFlowAutomationExecutionService {
 
   private buildRequest(
     input: ExecutionInput,
-    opportunityId: string,
+    subject: EffectSubject,
     actionKey: string,
   ): AutomationEffectRequest {
     const { automation, delivery, contextSnapshot, version } = input;
-    const crmPolicy = automation.crmPolicy ?? {};
 
     const idempotencyKey = `effect:${createHash('sha256')
       .update(
@@ -154,20 +186,11 @@ export class LeadFlowAutomationExecutionService {
 
     // Each action carries its own configured input; the rest of the request —
     // scope, idempotency, revalidation — is the same regardless of effect.
-    const isDistribution = actionKey === 'assign_opportunity_owner';
-    const payload: LeadFlowJsonObject = isDistribution
-      ? this.distributionPayload(automation, opportunityId)
-      : {
-          opportunityId,
-          toStageId:
-            typeof crmPolicy.moveStageOnComplete === 'string'
-              ? crmPolicy.moveStageOnComplete
-              : null,
-          reasonCode:
-            typeof crmPolicy.moveStageReasonCode === 'string'
-              ? crmPolicy.moveStageReasonCode
-              : null,
-        };
+    const { payload, policyPrefix } = this.effectPayload(
+      automation,
+      subject,
+      actionKey,
+    );
 
     return {
       tenantId: automation.tenantId,
@@ -180,9 +203,7 @@ export class LeadFlowAutomationExecutionService {
       idempotencyKey,
       // An effect nobody can be held responsible for must not be attempted.
       actorRef: `automation:${automation.id}`,
-      policyRef: `${
-        isDistribution ? 'lead_distribution' : 'stage_transition'
-      }:${version.id}`,
+      policyRef: `${policyPrefix}:${version.id}`,
       payload,
       revalidation: {
         contextSchemaVersion: contextSnapshot.schemaVersion,
@@ -193,10 +214,53 @@ export class LeadFlowAutomationExecutionService {
     };
   }
 
+  /**
+   * The action-specific effect input and its governing-policy prefix, resolved
+   * from the automation config and the envelope's subject. The scope, idempotency
+   * and revalidation around it are identical regardless of effect.
+   */
+  private effectPayload(
+    automation: LeadFlowAutomationEntity,
+    subject: EffectSubject,
+    actionKey: string,
+  ): { payload: LeadFlowJsonObject; policyPrefix: string } {
+    if (actionKey === 'request_handoff') {
+      // The domain derives and clamps the reason; the executor defaults it when
+      // absent. Keeping it null here keeps the handoff config surface untouched.
+      return {
+        policyPrefix: 'handoff',
+        payload: { conversationId: subject.conversationId, reason: null },
+      };
+    }
+
+    if (actionKey === 'assign_opportunity_owner') {
+      return {
+        policyPrefix: 'lead_distribution',
+        payload: this.distributionPayload(automation, subject.opportunityId),
+      };
+    }
+
+    const crmPolicy = automation.crmPolicy ?? {};
+    return {
+      policyPrefix: 'stage_transition',
+      payload: {
+        opportunityId: subject.opportunityId,
+        toStageId:
+          typeof crmPolicy.moveStageOnComplete === 'string'
+            ? crmPolicy.moveStageOnComplete
+            : null,
+        reasonCode:
+          typeof crmPolicy.moveStageReasonCode === 'string'
+            ? crmPolicy.moveStageReasonCode
+            : null,
+      },
+    };
+  }
+
   /** The lead-distribution effect's input, read from the automation config. */
   private distributionPayload(
     automation: LeadFlowAutomationEntity,
-    opportunityId: string,
+    opportunityId: string | null,
   ): LeadFlowJsonObject {
     const config = automation.actionConfig ?? {};
     return {

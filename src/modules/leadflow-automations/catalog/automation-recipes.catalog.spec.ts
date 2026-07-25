@@ -122,6 +122,12 @@ describe('automation recipes catalog', () => {
       ).toContain(LeadFlowAutomationDependency.LeadDistributionCommand);
     });
 
+    it('routes the automatic handoff through the canonical ownership command', () => {
+      expect(
+        getRecipeByKey('automatic_handoff')!.requiredDependencies,
+      ).toContain(LeadFlowAutomationDependency.OwnershipCommand);
+    });
+
     it('blocks the daily summary on the Analytics backend', () => {
       expect(
         getRecipeByKey('daily_opportunity_summary')!.requiredDependencies,

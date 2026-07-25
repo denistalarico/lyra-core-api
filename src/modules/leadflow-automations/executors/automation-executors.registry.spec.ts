@@ -45,6 +45,12 @@ describe('automation executor registry', () => {
     expect(availability.owningDomain).toBe('leadflow.crm');
   });
 
+  it('reports the governed handoff as available now that its command is wired', () => {
+    const availability = executorAvailability('request_handoff');
+    expect(availability.available).toBe(true);
+    expect(availability.owningDomain).toBe('leadflow.inbox');
+  });
+
   it('still fails closed for CRM commands with no automatic adapter yet', () => {
     for (const action of [
       'transfer_opportunity_pipeline',

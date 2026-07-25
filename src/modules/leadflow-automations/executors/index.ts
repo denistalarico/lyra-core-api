@@ -14,3 +14,4 @@ export {
 export { UnavailableExecutor } from './unavailable.executor';
 export { MoveOpportunityStageExecutor } from './move-opportunity-stage.executor';
 export { AssignOpportunityOwnerExecutor } from './assign-opportunity-owner.executor';
+export { RequestHandoffExecutor } from './request-handoff.executor';

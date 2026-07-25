@@ -4,6 +4,7 @@ import type { LeadFlowAutomationVersionEntity } from '../entities/leadflow-autom
 import type { AutomationEffectResult } from '../executors';
 import type { MoveOpportunityStageExecutor } from '../executors/move-opportunity-stage.executor';
 import type { AssignOpportunityOwnerExecutor } from '../executors/assign-opportunity-owner.executor';
+import type { RequestHandoffExecutor } from '../executors/request-handoff.executor';
 import type { LeadFlowAutomationContextSnapshot } from '../types/leadflow-automation-context.types';
 import type { LeadFlowAutomationEvaluation } from './leadflow-automation-evaluation.service';
 import { LeadFlowAutomationExecutionService } from './leadflow-automation-execution.service';
@@ -76,6 +77,10 @@ function build(options: {
     actionKey: 'assign_opportunity_owner',
     execute,
   } as unknown as AssignOpportunityOwnerExecutor;
+  const requestHandoffExecutor = {
+    actionKey: 'request_handoff',
+    execute,
+  } as unknown as RequestHandoffExecutor;
 
   const gate = {
     evaluate: jest.fn().mockResolvedValue(
@@ -100,6 +105,7 @@ function build(options: {
     runService,
     moveStageExecutor,
     assignOwnerExecutor,
+    requestHandoffExecutor,
   );
   return { service, execute, recordLiveRun };
 }
@@ -197,6 +203,50 @@ describe('LeadFlowAutomationExecutionService', () => {
     expect(outcome).toEqual({
       executed: false,
       reason: 'no_opportunity_in_envelope',
+    });
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it('aims a handoff at the conversation the envelope names', async () => {
+    const { service, execute } = build({ gate: { allowed: true } });
+
+    const outcome = await service.execute({
+      ...input(),
+      evaluation: {
+        wouldAct: true,
+        plannedActions: ['request_handoff'],
+      } as LeadFlowAutomationEvaluation,
+      delivery: delivery({
+        eventName: 'leadflow.inbox.conversation.handoff.requested',
+        aggregateType: 'inbox_conversation',
+        aggregateId: 'conversation-9',
+      }),
+    });
+
+    expect(outcome).toMatchObject({ executed: true });
+    const request = (execute.mock.calls[0] as unknown[])[0] as {
+      payload: Record<string, unknown>;
+      policyRef: string;
+    };
+    expect(request.payload).toMatchObject({ conversationId: 'conversation-9' });
+    expect(request.policyRef).toContain('handoff:');
+  });
+
+  it('refuses a handoff when the event names no conversation', async () => {
+    const { service, execute } = build({ gate: { allowed: true } });
+
+    const outcome = await service.execute({
+      ...input(),
+      evaluation: {
+        wouldAct: true,
+        plannedActions: ['request_handoff'],
+      } as LeadFlowAutomationEvaluation,
+      delivery: delivery(),
+    });
+
+    expect(outcome).toEqual({
+      executed: false,
+      reason: 'no_conversation_in_envelope',
     });
     expect(execute).not.toHaveBeenCalled();
   });

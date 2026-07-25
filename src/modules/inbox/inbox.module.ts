@@ -179,6 +179,7 @@ import { CrmPipelineEntity } from '../crm/entities/crm-pipeline.entity';
     WhatsAppEmbeddedSignupService,
     MetaGraphService,
     WhatsAppChannelHealthService,
+    ConversationOwnershipService,
   ],
 })
 export class InboxModule {}
