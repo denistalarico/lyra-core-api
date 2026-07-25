@@ -19,6 +19,9 @@ const CANARY_ACTION_ALLOWLIST = new Set<string>([
   'move_opportunity_stage',
   'assign_opportunity_owner',
   'request_handoff',
+  // Internal in-app alert only; it never contacts the lead and only narrows to
+  // the subject's owner or a configured user.
+  'notify_user',
 ]);
 
 export type ExecutionGateDecision =

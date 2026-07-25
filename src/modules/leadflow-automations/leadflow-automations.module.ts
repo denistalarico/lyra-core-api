@@ -4,6 +4,7 @@ import { LeadFlowClientSettingsEntity } from '../leadflow-settings/entities';
 import { PermissionsModule } from '../permissions';
 import { CrmModule } from '../crm/crm.module';
 import { InboxModule } from '../inbox/inbox.module';
+import { NotificationsModule } from '../notifications';
 import { LeadFlowEventDeliveryEntity } from '../leadflow-events/entities';
 import {
   LeadFlowAutomationEntity,
@@ -25,6 +26,8 @@ import { LeadFlowAutomationExecutionService } from './services/leadflow-automati
 import { MoveOpportunityStageExecutor } from './executors/move-opportunity-stage.executor';
 import { AssignOpportunityOwnerExecutor } from './executors/assign-opportunity-owner.executor';
 import { RequestHandoffExecutor } from './executors/request-handoff.executor';
+import { NotifyUserExecutor } from './executors/notify-user.executor';
+import { LeadFlowAutomationNotificationPublisher } from './services/leadflow-automation-notification.publisher';
 import { LeadFlowAutomationEventIngressService } from './services/leadflow-automation-event-ingress.service';
 import { LeadFlowAutomationLifecycleService } from './services/leadflow-automation-lifecycle.service';
 import { LeadFlowAutomationRecipeService } from './services/leadflow-automation-recipe.service';
@@ -39,6 +42,7 @@ import { LeadFlowAutomationService } from './services/leadflow-automation.servic
     PermissionsModule,
     CrmModule,
     InboxModule,
+    NotificationsModule,
     TypeOrmModule.forFeature(
       [
         LeadFlowAutomationEntity,
@@ -67,6 +71,8 @@ import { LeadFlowAutomationService } from './services/leadflow-automation.servic
     MoveOpportunityStageExecutor,
     AssignOpportunityOwnerExecutor,
     RequestHandoffExecutor,
+    NotifyUserExecutor,
+    LeadFlowAutomationNotificationPublisher,
     LeadFlowAutomationEventIngressService,
     LeadFlowAutomationRunService,
     LeadFlowAutomationShadowEvaluatorService,

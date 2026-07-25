@@ -93,6 +93,15 @@ export const AGENCY_NOTIFICATION_CATALOG: readonly NotificationDefinition[] = [
     NotificationCategory.ASSIGNMENT,
     NotificationRecipientStrategy.EXPLICIT_USERS,
   ),
+  // LeadFlow automations — in-app effect of the `notify_user` action (e.g. the
+  // hot-lead alert). Recipients are resolved explicitly by the publisher.
+  standard(
+    'leadflow.automation.notify',
+    'sales',
+    NotificationCategory.STATUS,
+    NotificationRecipientStrategy.EXPLICIT_USERS,
+    { defaultPriority: NotificationPriority.HIGH },
+  ),
   // Team Chat
   standard(
     'chat.direct_message_received',

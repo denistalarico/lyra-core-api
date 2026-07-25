@@ -10,6 +10,7 @@ import type {
 import { MoveOpportunityStageExecutor } from '../executors/move-opportunity-stage.executor';
 import { AssignOpportunityOwnerExecutor } from '../executors/assign-opportunity-owner.executor';
 import { RequestHandoffExecutor } from '../executors/request-handoff.executor';
+import { NotifyUserExecutor } from '../executors/notify-user.executor';
 import type { LeadFlowJsonObject } from '../types/leadflow-automation.types';
 import type { LeadFlowAutomationContextSnapshot } from '../types/leadflow-automation-context.types';
 import type { LeadFlowAutomationTrigger } from '../types/leadflow-automation.types';
@@ -32,6 +33,8 @@ interface EffectSubject {
 const OPPORTUNITY_ACTIONS = new Set<string>([
   'move_opportunity_stage',
   'assign_opportunity_owner',
+  // notify_user routes to the opportunity's owner when no explicit target is set.
+  'notify_user',
 ]);
 
 /** Actions whose effect targets an inbox conversation in the envelope. */
@@ -74,6 +77,7 @@ export class LeadFlowAutomationExecutionService {
     moveStageExecutor: MoveOpportunityStageExecutor,
     assignOwnerExecutor: AssignOpportunityOwnerExecutor,
     requestHandoffExecutor: RequestHandoffExecutor,
+    notifyUserExecutor: NotifyUserExecutor,
   ) {
     // The productive executors this phase wires. The gate's action allowlist is
     // the authority on what may run; this map is what *can*.
@@ -81,6 +85,7 @@ export class LeadFlowAutomationExecutionService {
       [moveStageExecutor.actionKey, moveStageExecutor],
       [assignOwnerExecutor.actionKey, assignOwnerExecutor],
       [requestHandoffExecutor.actionKey, requestHandoffExecutor],
+      [notifyUserExecutor.actionKey, notifyUserExecutor],
     ]);
   }
 
@@ -230,6 +235,26 @@ export class LeadFlowAutomationExecutionService {
       return {
         policyPrefix: 'handoff',
         payload: { conversationId: subject.conversationId, reason: null },
+      };
+    }
+
+    if (actionKey === 'notify_user') {
+      // Recipient is the configured target, else the opportunity owner (resolved
+      // by the publisher). The message frames the only trigger wired to this
+      // action today — a hot lead crossing its threshold.
+      const config = automation.actionConfig ?? {};
+      return {
+        policyPrefix: 'notify',
+        payload: {
+          opportunityId: subject.opportunityId,
+          targetUserId:
+            typeof config.targetUserRef === 'string'
+              ? config.targetUserRef
+              : null,
+          title: 'Lead quente',
+          body: 'Um lead cruzou o limiar de qualificação — priorize o atendimento.',
+          actionUrl: '/leadflow/crm',
+        },
       };
     }
 

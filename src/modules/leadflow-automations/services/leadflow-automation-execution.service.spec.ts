@@ -5,6 +5,7 @@ import type { AutomationEffectResult } from '../executors';
 import type { MoveOpportunityStageExecutor } from '../executors/move-opportunity-stage.executor';
 import type { AssignOpportunityOwnerExecutor } from '../executors/assign-opportunity-owner.executor';
 import type { RequestHandoffExecutor } from '../executors/request-handoff.executor';
+import type { NotifyUserExecutor } from '../executors/notify-user.executor';
 import type { LeadFlowAutomationContextSnapshot } from '../types/leadflow-automation-context.types';
 import type { LeadFlowAutomationEvaluation } from './leadflow-automation-evaluation.service';
 import { LeadFlowAutomationExecutionService } from './leadflow-automation-execution.service';
@@ -81,6 +82,10 @@ function build(options: {
     actionKey: 'request_handoff',
     execute,
   } as unknown as RequestHandoffExecutor;
+  const notifyUserExecutor = {
+    actionKey: 'notify_user',
+    execute,
+  } as unknown as NotifyUserExecutor;
 
   const gate = {
     evaluate: jest.fn().mockResolvedValue(
@@ -106,6 +111,7 @@ function build(options: {
     moveStageExecutor,
     assignOwnerExecutor,
     requestHandoffExecutor,
+    notifyUserExecutor,
   );
   return { service, execute, recordLiveRun };
 }
@@ -230,6 +236,36 @@ describe('LeadFlowAutomationExecutionService', () => {
     };
     expect(request.payload).toMatchObject({ conversationId: 'conversation-9' });
     expect(request.policyRef).toContain('handoff:');
+  });
+
+  it('builds a notify_user effect aimed at the opportunity, carrying the configured target', async () => {
+    const { service, execute } = build({ gate: { allowed: true } });
+
+    await service.execute({
+      ...input(),
+      automation: {
+        ...automation(),
+        actionConfig: { targetUserRef: 'user-9' },
+      } as LeadFlowAutomationEntity,
+      evaluation: {
+        wouldAct: true,
+        plannedActions: ['notify_user'],
+      } as LeadFlowAutomationEvaluation,
+      delivery: delivery({
+        eventName: 'leadflow.crm.opportunity.hot_lead_detected',
+      }),
+    });
+
+    const request = (execute.mock.calls[0] as unknown[])[0] as {
+      payload: Record<string, unknown>;
+      policyRef: string;
+    };
+    expect(request.payload).toMatchObject({
+      opportunityId: OPPORTUNITY,
+      targetUserId: 'user-9',
+    });
+    expect(request.payload.title).toBeTruthy();
+    expect(request.policyRef).toContain('notify:');
   });
 
   it('refuses a handoff when the event names no conversation', async () => {

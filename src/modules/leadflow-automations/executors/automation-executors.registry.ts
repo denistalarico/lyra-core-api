@@ -80,6 +80,25 @@ function ownershipCommandAvailability(): AutomationExecutorAvailability {
   };
 }
 
+/**
+ * Availability of the internal-notification action. Unlike the CRM/inbox
+ * commands, the platform's Notifications layer is unconditional core infra — no
+ * dependency gates it — so once the adapter (`NotifyUserExecutor`) exists the
+ * capability is simply available. Whether a tenant may run it is the gate's
+ * separate decision.
+ */
+function notifyUserAvailability(): AutomationExecutorAvailability {
+  return {
+    actionKey: 'notify_user',
+    available: true,
+    reason: null,
+    dependency: null,
+    owningDomain: 'platform.notifications',
+    description:
+      'Notificação interna in-app (+ realtime) via a camada de Notifications da plataforma.',
+  };
+}
+
 const unavailable = (
   actionKey: LeadFlowAutomationAction,
   owningDomain: string,
@@ -114,11 +133,6 @@ const EXECUTORS = [
     'leadflow.automations',
     'O scheduler durável de follow-up ainda não existe.',
     LeadFlowAutomationDependency.SchedulerRuntime,
-  ),
-  unavailable(
-    'notify_user',
-    'platform.notifications',
-    'O adapter governado de notificações ainda não foi implementado.',
   ),
   unavailable(
     'transfer_opportunity_pipeline',
@@ -185,6 +199,7 @@ const COMPUTED_AVAILABILITY: Record<
   move_opportunity_stage: stageTransitionAvailability,
   assign_opportunity_owner: leadDistributionAvailability,
   request_handoff: ownershipCommandAvailability,
+  notify_user: notifyUserAvailability,
 };
 
 export function executorAvailability(

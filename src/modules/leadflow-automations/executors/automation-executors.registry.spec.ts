@@ -51,6 +51,13 @@ describe('automation executor registry', () => {
     expect(availability.owningDomain).toBe('leadflow.inbox');
   });
 
+  it('reports notify_user as available (notifications are unconditional core infra)', () => {
+    const availability = executorAvailability('notify_user');
+    expect(availability.available).toBe(true);
+    expect(availability.owningDomain).toBe('platform.notifications');
+    expect(availability.dependency).toBeNull();
+  });
+
   it('still fails closed for CRM commands with no automatic adapter yet', () => {
     for (const action of [
       'transfer_opportunity_pipeline',
