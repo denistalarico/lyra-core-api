@@ -150,6 +150,21 @@ export interface LeadFlowAgentRuntimeContract {
   crmPolicy: LeadFlowAgentCrmPolicy;
   handoffPolicy: LeadFlowAgentHandoffPolicy;
   allowedActions: string[];
+  /**
+   * The formal role policy for this agent's type: what it is for and exactly
+   * which commercial decision actions it may attempt. This is the authoritative
+   * per-type permission the runtime enforces, surfaced so a consumer never has
+   * to re-derive it from the agent's free configuration.
+   */
+  role: {
+    type: LeadFlowAgentType;
+    roleTitle: string;
+    objective: string;
+    allowedDecisionActions: string[];
+    canProposeStageTransition: boolean;
+  };
+  /** Whether the agent can actually run, and what is missing if it cannot. */
+  readiness: LeadFlowAgentReadiness;
   safetyRules: string[];
   publishedVersionId: string | null;
 }

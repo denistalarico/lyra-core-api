@@ -109,6 +109,37 @@ describe('LeadFlowAgentRuntimeConfigService', () => {
     expect(contract.leadflowSettingsSnapshot.settingsId).toBe('settings-1');
   });
 
+  it('surfaces the formal role policy for the agent type', () => {
+    const contract = service.buildAgentContract(buildAgent(), buildSettings(), [
+      buildBinding(),
+    ]);
+
+    // A reception agent observes and routes; it may not advance the stage.
+    expect(contract.role).toMatchObject({
+      type: LeadFlowAgentType.Reception,
+      roleTitle: 'Recepção',
+      canProposeStageTransition: false,
+    });
+    expect(contract.role.allowedDecisionActions).toContain('handoff');
+    expect(contract.role.allowedDecisionActions).not.toContain('set_stage');
+    expect(contract.role.objective).toEqual(expect.any(String));
+  });
+
+  it('reports a real readiness verdict computed from dependencies', () => {
+    const contract = service.buildAgentContract(buildAgent(), buildSettings(), [
+      buildBinding(),
+    ]);
+    // Name, client context, a bound channel and a published version are all
+    // present in the fixture, so the agent is ready.
+    expect(contract.readiness).toMatchObject({ level: 'ready', missing: [] });
+  });
+
+  it('reports channels missing when no binding is present', () => {
+    const contract = service.buildAgentContract(buildAgent(), buildSettings(), []);
+    expect(contract.readiness.level).toBe('partial');
+    expect(contract.readiness.missing).toEqual(['channels']);
+  });
+
   it('flags custom Business Modes in the contract', () => {
     const agent = buildAgent();
     agent.businessModeKey = 'my_custom_mode';

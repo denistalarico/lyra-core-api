@@ -1,6 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import type { LeadFlowClientSettingsEntity } from '../../leadflow-settings/entities';
 import { isCustomBusinessMode } from '../catalog/agent-presets.catalog';
+import { resolveAgentRolePolicy } from '../catalog/agent-role-policy.catalog';
+import { computeAgentReadiness } from './agent-readiness';
 import type { LeadFlowAgentChannelBindingEntity } from '../entities/leadflow-agent-channel-binding.entity';
 import type { LeadFlowAgentEntity } from '../entities/leadflow-agent.entity';
 import type {
@@ -27,6 +29,7 @@ export class LeadFlowAgentRuntimeConfigService {
     bindings: LeadFlowAgentChannelBindingEntity[],
   ): LeadFlowAgentRuntimeConfigResponse {
     const metadata = agent.metadata ?? {};
+    const rolePolicy = resolveAgentRolePolicy(agent.type);
 
     return {
       version: LEADFLOW_AGENT_RUNTIME_CONTRACT_VERSION,
@@ -51,7 +54,7 @@ export class LeadFlowAgentRuntimeConfigService {
         roleTitle:
           typeof agent.behaviorConfig?.roleTitle === 'string'
             ? agent.behaviorConfig.roleTitle
-            : null,
+            : rolePolicy.roleTitle,
         primaryLanguage:
           typeof agent.behaviorConfig?.language === 'string'
             ? agent.behaviorConfig.language
@@ -82,6 +85,14 @@ export class LeadFlowAgentRuntimeConfigService {
       crmPolicy: agent.crmPolicy ?? {},
       handoffPolicy: agent.handoffPolicy ?? {},
       allowedActions: this.readStringArray(metadata.allowedActions),
+      role: {
+        type: rolePolicy.type,
+        roleTitle: rolePolicy.roleTitle,
+        objective: rolePolicy.objective,
+        allowedDecisionActions: [...rolePolicy.allowedDecisionActions],
+        canProposeStageTransition: rolePolicy.canProposeStageTransition,
+      },
+      readiness: computeAgentReadiness(agent, settings, bindings),
       safetyRules: this.readStringArray(metadata.safetyRules),
       publishedVersionId: agent.publishedVersionId,
     };

@@ -33,6 +33,7 @@ import {
   LeadFlowAgentVersionEntity,
 } from '../entities';
 import { LeadFlowAgentChannelStatus } from '../enums/leadflow-agent-channel-status.enum';
+import { computeAgentReadiness } from './agent-readiness';
 import { LeadFlowAgentStatus } from '../enums/leadflow-agent-status.enum';
 import { LeadFlowAgentType } from '../enums/leadflow-agent-type.enum';
 import { LeadFlowAgentVersionStatus } from '../enums/leadflow-agent-version-status.enum';
@@ -191,7 +192,9 @@ export class LeadFlowAgentService {
       };
     }
 
-    agent.readiness = this.buildInitialReadiness();
+    // No bindings exist yet at creation; readiness honestly reports them
+    // missing rather than a hard-coded placeholder.
+    agent.readiness = this.computeReadiness(agent, active.settings, []);
     const saved = await this.agentsRepository.save(agent);
 
     await this.createDefaultBindings(saved, active.settings);
@@ -646,49 +649,14 @@ export class LeadFlowAgentService {
     return (latest?.version ?? 0) + 1;
   }
 
-  private buildInitialReadiness(): LeadFlowAgentReadiness {
-    return {
-      score: 40,
-      level: 'partial',
-      missing: ['channels', 'review'],
-      checkedAt: new Date().toISOString(),
-    };
-  }
-
   private computeReadiness(
     agent: LeadFlowAgentEntity,
-    settings: LeadFlowClientSettingsEntity,
+    settings: LeadFlowClientSettingsEntity | null,
     bindings: LeadFlowAgentChannelBindingEntity[],
   ): LeadFlowAgentReadiness {
-    const missing: string[] = [];
-
-    if (!agent.name?.trim()) {
-      missing.push('name');
-    }
-
-    const promptConfigured =
-      this.isRecord(settings.clientPromptConfig) &&
-      Object.keys(settings.clientPromptConfig).length > 0;
-    if (!promptConfigured) {
-      missing.push('client_prompt');
-    }
-
-    const hasChannel = bindings.some(
-      (binding) => binding.status !== LeadFlowAgentChannelStatus.Unbound,
-    );
-    if (!hasChannel) {
-      missing.push('channels');
-    }
-
-    const score = Math.max(0, 100 - missing.length * 30);
-    const level: LeadFlowAgentReadiness['level'] =
-      missing.length === 0
-        ? 'ready'
-        : missing.length === 1
-          ? 'partial'
-          : 'not_ready';
-
-    return { score, level, missing, checkedAt: new Date().toISOString() };
+    // Single source of truth, shared with the runtime contract, so the
+    // readiness we persist and the readiness a runtime reads never disagree.
+    return computeAgentReadiness(agent, settings, bindings);
   }
 
   private async assertDeveloper(ctx: RequestContext): Promise<void> {
