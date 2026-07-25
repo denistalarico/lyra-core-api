@@ -35,6 +35,7 @@ import { TeamChatModule } from './modules/team-chat/team-chat.module';
 import { PlatformModule } from './modules/platform';
 import { DashboardsModule } from './modules/dashboards';
 import { NotificationsModule } from './modules/notifications';
+import { PlatformWhatsAppNotificationModule } from './modules/notifications/platform-whatsapp/platform-whatsapp-notification.module';
 import { PermissionsModule } from './modules/permissions';
 import { LeadFlowSettingsModule } from './modules/leadflow-settings';
 import { LeadFlowAgentsModule } from './modules/leadflow-agents/leadflow-agents.module';
@@ -82,6 +83,7 @@ import { LeadFlowAnalyticsModule } from './modules/leadflow-analytics/leadflow-a
     PlatformModule,
     DashboardsModule,
     NotificationsModule,
+    PlatformWhatsAppNotificationModule,
     PermissionsModule,
     LeadFlowSettingsModule,
     LeadFlowAgentsModule,
