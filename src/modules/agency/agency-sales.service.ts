@@ -679,6 +679,11 @@ export class AgencySalesService {
     }
 
     const closedAt = dto.closedAt ? new Date(dto.closedAt) : new Date();
+    const lostReason = dto.lostReason?.trim();
+
+    if (!lostReason) {
+      throw new BadRequestException('Loss reason is required.');
+    }
 
     await this.opportunitiesRepo.update(
       {
@@ -691,7 +696,7 @@ export class AgencySalesService {
         stageId: targetStage.id,
         status: 'lost',
         closedAt,
-        lostReason: dto.lostReason ?? 'Não informado',
+        lostReason,
         metadata: {
           ...(opportunity.metadata ?? {}),
           outcome: dto.outcome ?? undefined,
@@ -1166,6 +1171,11 @@ export class AgencySalesService {
       : targetStage.isClosed
         ? 'lost'
         : 'open';
+    const lostReason = dto.lostReason?.trim();
+
+    if (status === 'lost' && opportunity.status !== 'lost' && !lostReason) {
+      throw new BadRequestException('Loss reason is required.');
+    }
 
     await this.opportunitiesRepo.update(
       {
@@ -1178,6 +1188,8 @@ export class AgencySalesService {
         stageId: targetStage.id,
         status,
         closedAt: targetStage.isClosed ? new Date() : null,
+        lostReason:
+          status === 'lost' ? (lostReason ?? opportunity.lostReason) : null,
       },
     );
 
@@ -1395,6 +1407,11 @@ export class AgencySalesService {
     dto: UpdateAgencySalesOpportunityDto,
   ) {
     const { metadata, ...opportunityPatch } = dto;
+    const lostReason = dto.lostReason?.trim();
+
+    if (dto.status === 'lost' && !lostReason) {
+      throw new BadRequestException('Loss reason is required.');
+    }
 
     await this.opportunitiesRepo.update(
       { id, tenantId: context.tenantId, workspaceId: context.workspaceId },
@@ -1406,7 +1423,10 @@ export class AgencySalesService {
         ownerUserId:
           dto.ownerUserId === undefined ? undefined : dto.ownerUserId,
         expectedCloseDate: dto.expectedCloseDate ?? undefined,
-        lostReason: dto.lostReason ?? undefined,
+        lostReason:
+          dto.status === 'open' || dto.status === 'won'
+            ? null
+            : (lostReason ?? undefined),
         metadata: metadata as never,
       },
     );
