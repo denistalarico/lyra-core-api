@@ -3,6 +3,7 @@ import type { LeadFlowClientSettingsEntity } from '../../leadflow-settings/entit
 import { isCustomBusinessMode } from '../catalog/agent-presets.catalog';
 import { resolveAgentRolePolicy } from '../catalog/agent-role-policy.catalog';
 import { computeAgentReadiness } from './agent-readiness';
+import { resolveServiceAudience } from '../enums/leadflow-service-audience.enum';
 import type { LeadFlowAgentChannelBindingEntity } from '../entities/leadflow-agent-channel-binding.entity';
 import type { LeadFlowAgentEntity } from '../entities/leadflow-agent.entity';
 import type {
@@ -93,6 +94,7 @@ export class LeadFlowAgentRuntimeConfigService {
         canProposeStageTransition: rolePolicy.canProposeStageTransition,
       },
       readiness: computeAgentReadiness(agent, settings, bindings),
+      serviceAudience: resolveServiceAudience(agent.behaviorConfig),
       safetyRules: this.readStringArray(metadata.safetyRules),
       publishedVersionId: agent.publishedVersionId,
     };

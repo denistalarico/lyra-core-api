@@ -107,6 +107,8 @@ describe('LeadFlowAgentRuntimeConfigService', () => {
     expect(contract.safetyRules).toEqual(['never_diagnose']);
     expect(contract.publishedVersionId).toBe('version-9');
     expect(contract.leadflowSettingsSnapshot.settingsId).toBe('settings-1');
+    // Audience defaults to serving both when unset in the behaviour config.
+    expect(contract.serviceAudience).toBe('leads_and_customers');
   });
 
   it('surfaces the formal role policy for the agent type', () => {

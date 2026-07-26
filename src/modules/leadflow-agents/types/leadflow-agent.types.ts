@@ -28,6 +28,13 @@ export interface LeadFlowAgentBehaviorConfig {
   proactivity?: 'low' | 'balanced' | 'high';
   responseStyle?: string | string[];
   guardrails?: string[];
+  /**
+   * Who this agent serves: leads, customers, or both. Stored here (in the
+   * behaviour config jsonb) as a stable technical field; resolved via
+   * `resolveServiceAudience` with a safe default. Internal users are never served
+   * regardless of this value.
+   */
+  serviceAudience?: 'leads' | 'customers' | 'leads_and_customers';
   [key: string]: LeadFlowJsonValue | undefined;
 }
 
@@ -165,6 +172,12 @@ export interface LeadFlowAgentRuntimeContract {
   };
   /** Whether the agent can actually run, and what is missing if it cannot. */
   readiness: LeadFlowAgentReadiness;
+  /**
+   * The commercial audience this agent serves (leads / customers / both). An
+   * internal user is never served, whatever this says — that is enforced by the
+   * contact-relationship rule, not by this field.
+   */
+  serviceAudience: 'leads' | 'customers' | 'leads_and_customers';
   safetyRules: string[];
   publishedVersionId: string | null;
 }

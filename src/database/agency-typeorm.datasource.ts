@@ -118,6 +118,14 @@ import { CreateLeadflowAutomationRuns1785500000000 } from './migrations/17855000
 import { AddLeadflowAutomationExecutionPermission1785600000000 } from './migrations/1785600000000-add-leadflow-automation-execution-permission';
 import { CreateLeadflowEventDeliveries1785700000000 } from './migrations/1785700000000-create-leadflow-event-deliveries';
 import { ExpandTaskChecklistItemTitle1786100000000 } from './migrations/1786100000000-expand-task-checklist-item-title';
+// Agency-app migrations that were created but left unregistered here (they run
+// against the agency database — finance/CRM/LeadFlow); registering them so
+// `agency:migration:run` actually applies them. All are idempotent (IF NOT EXISTS).
+import { AddFinanceBillTeamPaymentOccurrenceIndex1782900000000 } from './migrations/1782900000000-add-finance-bill-team-payment-occurrence-index';
+import { CreateCrmLeadScore1786000000000 } from './migrations/1786000000000-create-crm-lead-score';
+import { FanoutLeadScoreConsumer1786500000000 } from './migrations/1786500000000-fanout-lead-score-consumer';
+import { AddCrmOpportunityAutonomyMode1786600000000 } from './migrations/1786600000000-add-crm-opportunity-autonomy-mode';
+import { AddCrmStageRole1786700000000 } from './migrations/1786700000000-add-crm-stage-role';
 import { CreatePlatformWhatsAppNotificationDeliveries1786800000000 } from './migrations/1786800000000-create-platform-whatsapp-notification-deliveries';
 
 export const AgencyDataSource = new DataSource({
@@ -250,6 +258,11 @@ export const AgencyDataSource = new DataSource({
     AddLeadflowAutomationExecutionPermission1785600000000,
     CreateLeadflowEventDeliveries1785700000000,
     ExpandTaskChecklistItemTitle1786100000000,
+    AddFinanceBillTeamPaymentOccurrenceIndex1782900000000,
+    CreateCrmLeadScore1786000000000,
+    FanoutLeadScoreConsumer1786500000000,
+    AddCrmOpportunityAutonomyMode1786600000000,
+    AddCrmStageRole1786700000000,
     CreatePlatformWhatsAppNotificationDeliveries1786800000000,
   ],
 });
