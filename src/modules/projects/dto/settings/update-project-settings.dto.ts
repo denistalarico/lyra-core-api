@@ -24,6 +24,14 @@ export class UpdateProjectSettingsDto {
     name: string;
     stages: Array<{ name: string; color: string | null }>;
   }>;
+
+  @IsOptional()
+  @IsObject()
+  projectCardDisplayDefaults?: Record<string, boolean>;
+
+  @IsOptional()
+  @IsObject()
+  taskCardDisplayDefaults?: Record<string, boolean>;
 }
 
 export class UpdateProjectPreferencesDto {

@@ -127,6 +127,7 @@ import { FanoutLeadScoreConsumer1786500000000 } from './migrations/1786500000000
 import { AddCrmOpportunityAutonomyMode1786600000000 } from './migrations/1786600000000-add-crm-opportunity-autonomy-mode';
 import { AddCrmStageRole1786700000000 } from './migrations/1786700000000-add-crm-stage-role';
 import { CreatePlatformWhatsAppNotificationDeliveries1786800000000 } from './migrations/1786800000000-create-platform-whatsapp-notification-deliveries';
+import { AddProjectCardDisplayDefaults1786900000000 } from './migrations/1786900000000-add-project-card-display-defaults';
 
 export const AgencyDataSource = new DataSource({
   type: 'postgres',
@@ -264,5 +265,6 @@ export const AgencyDataSource = new DataSource({
     AddCrmOpportunityAutonomyMode1786600000000,
     AddCrmStageRole1786700000000,
     CreatePlatformWhatsAppNotificationDeliveries1786800000000,
+    AddProjectCardDisplayDefaults1786900000000,
   ],
 });

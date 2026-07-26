@@ -4,6 +4,7 @@ import { Repository } from 'typeorm';
 import {
   AgencyProjectSettings,
   AgencyProjectUserPreferences,
+  ProjectCardDisplaySettings,
   ProjectBoardPreference,
   ProjectMarkerSetting,
   ProjectStageTemplate,
@@ -34,6 +35,25 @@ const defaultTaskTypes: ProjectTaskTypeSetting[] = [
   { id: 'task-type-setup', name: 'Setup' },
 ];
 
+const defaultCardDisplaySettings: ProjectCardDisplaySettings = {
+  client: true,
+  project: true,
+  cover: true,
+  markers: true,
+  priority: true,
+  progress: true,
+  taskCount: true,
+  activity: true,
+  subtasks: true,
+  responsible: true,
+  dueDate: true,
+  status: true,
+};
+
+const cardDisplaySettingKeys = Object.keys(defaultCardDisplaySettings) as Array<
+  keyof ProjectCardDisplaySettings
+>;
+
 const emptyBoardPreference: ProjectBoardPreference = {
   foldedStageIds: [],
   pinnedCardsByStage: {},
@@ -48,7 +68,9 @@ function normalizeCardIdsByStage(value?: Record<string, string[]> | null) {
           .map(([stageId, cardIds]) => [
             stageId,
             Array.isArray(cardIds)
-              ? cardIds.filter((cardId): cardId is string => typeof cardId === 'string')
+              ? cardIds.filter(
+                  (cardId): cardId is string => typeof cardId === 'string',
+                )
               : [],
           ]),
       )
@@ -105,7 +127,21 @@ export class ProjectSettingsService {
     }
 
     if (dto.stageTemplates !== undefined) {
-      settings.stageTemplates = this.normalizeStageTemplates(dto.stageTemplates);
+      settings.stageTemplates = this.normalizeStageTemplates(
+        dto.stageTemplates,
+      );
+    }
+
+    if (dto.projectCardDisplayDefaults !== undefined) {
+      settings.projectCardDisplayDefaults = this.normalizeCardDisplaySettings(
+        dto.projectCardDisplayDefaults,
+      );
+    }
+
+    if (dto.taskCardDisplayDefaults !== undefined) {
+      settings.taskCardDisplayDefaults = this.normalizeCardDisplaySettings(
+        dto.taskCardDisplayDefaults,
+      );
     }
 
     return this.serializeSettings(await this.settingsRepository.save(settings));
@@ -169,6 +205,8 @@ export class ProjectSettingsService {
         taskMarkers: defaultTaskMarkers,
         taskTypes: defaultTaskTypes,
         taskExecutionMode: 'hybrid',
+        projectCardDisplayDefaults: defaultCardDisplaySettings,
+        taskCardDisplayDefaults: defaultCardDisplaySettings,
       },
       ['tenantId', 'workspaceId'],
     );
@@ -256,6 +294,21 @@ export class ProjectSettingsService {
       }));
   }
 
+  private normalizeCardDisplaySettings(
+    value?: Record<string, boolean> | null,
+  ): ProjectCardDisplaySettings {
+    return cardDisplaySettingKeys.reduce<ProjectCardDisplaySettings>(
+      (normalized, key) => {
+        normalized[key] =
+          typeof value?.[key] === 'boolean'
+            ? value[key]
+            : defaultCardDisplaySettings[key];
+        return normalized;
+      },
+      { ...defaultCardDisplaySettings },
+    );
+  }
+
   private serializeSettings(settings: AgencyProjectSettings) {
     return {
       projectMarkers: settings.projectMarkers?.length
@@ -273,6 +326,12 @@ export class ProjectSettingsService {
       stageTemplates: Array.isArray(settings.stageTemplates)
         ? settings.stageTemplates
         : [],
+      projectCardDisplayDefaults: this.normalizeCardDisplaySettings(
+        settings.projectCardDisplayDefaults,
+      ),
+      taskCardDisplayDefaults: this.normalizeCardDisplaySettings(
+        settings.taskCardDisplayDefaults,
+      ),
     };
   }
 
