@@ -118,21 +118,38 @@ export class LeadFlowAutomationConfigSchemaService {
 
       for (const spec of specs) {
         if (!spec.required) continue;
+        // Existing Fase 6 rows predate the per-step contract. Preserve their
+        // implicit WhatsApp policy until an operator saves the new surface.
+        if (
+          section === 'message' &&
+          spec.key === 'followupSteps' &&
+          values.followupSteps === undefined &&
+          typeof values.baseMessage === 'string' &&
+          values.baseMessage.trim()
+        ) {
+          continue;
+        }
         if (this.isEmpty(values[spec.key])) {
           missing.push(`${section}.${spec.key}`);
         }
       }
     }
 
-    // A follow-up normally fires at or beyond Meta's rolling 24-hour customer
-    // service window. It is unsafe to activate one without an approved template:
-    // the Inbox command refuses free-form text outside that window.
     if (
       ['followup_idle_lead', 'followup_by_crm_stage'].includes(recipe.key) &&
-      this.isEmpty(config.message?.templateRef) &&
-      !missing.includes('message.templateRef')
+      Array.isArray(config.message?.followupSteps) &&
+      !config.message.followupSteps.some(
+        (step) =>
+          this.isPlainObject(step) &&
+          Array.isArray(step.channels) &&
+          step.channels.some(
+            (channel) =>
+              this.isPlainObject(channel) && channel.enabled === true,
+          ),
+      ) &&
+      !missing.includes('message.followupSteps')
     ) {
-      missing.push('message.templateRef');
+      missing.push('message.followupSteps');
     }
 
     return missing;
@@ -272,9 +289,180 @@ export class LeadFlowAutomationConfigSchemaService {
         return [];
       }
 
+      case 'followup_step[]':
+        return this.validateFollowupSteps(path, spec, raw);
+
       default:
         return [];
     }
+  }
+
+  private validateFollowupSteps(
+    path: string,
+    spec: LeadFlowAutomationFieldSpec,
+    raw: unknown,
+  ): LeadFlowAutomationConfigError[] {
+    if (!Array.isArray(raw)) {
+      return [this.typeError(path, spec, 'uma lista de passos')];
+    }
+    if (spec.maxItems !== undefined && raw.length > spec.maxItems) {
+      return [
+        {
+          path,
+          code: 'too_many_items',
+          message: `"${spec.label}" aceita no máximo ${spec.maxItems} itens.`,
+        },
+      ];
+    }
+
+    const stepKeys = new Set<string>();
+    const allowedChannels = new Set([
+      'whatsapp',
+      'email',
+      'sms',
+      'facebook_messenger',
+      'instagram_direct',
+      'webchat',
+    ]);
+    const insideWindowOnly = new Set([
+      'facebook_messenger',
+      'instagram_direct',
+      'webchat',
+    ]);
+
+    for (const step of raw) {
+      if (
+        !this.isPlainObject(step) ||
+        !this.hasOnlyKeys(step, ['stepKey', 'delayMinutes', 'channels']) ||
+        typeof step.stepKey !== 'string' ||
+        !step.stepKey.trim() ||
+        step.stepKey.length > 80 ||
+        typeof step.delayMinutes !== 'number' ||
+        !Number.isFinite(step.delayMinutes) ||
+        step.delayMinutes < 0 ||
+        !Array.isArray(step.channels)
+      ) {
+        return [
+          {
+            path,
+            code: 'invalid_type',
+            message:
+              'Cada passo precisa ter chave, atraso em minutos e uma lista de canais.',
+          },
+        ];
+      }
+      if (stepKeys.has(step.stepKey)) {
+        return [
+          {
+            path,
+            code: 'invalid_type',
+            message: 'As chaves dos passos do follow-up não podem se repetir.',
+          },
+        ];
+      }
+      stepKeys.add(step.stepKey);
+
+      const channels = new Set<string>();
+      for (const channelConfig of step.channels) {
+        if (
+          !this.isPlainObject(channelConfig) ||
+          !this.hasOnlyKeys(channelConfig, [
+            'channel',
+            'enabled',
+            'outsideWindowEnabled',
+            'connectionRef',
+            'whatsappTemplate',
+          ]) ||
+          typeof channelConfig.channel !== 'string' ||
+          !allowedChannels.has(channelConfig.channel) ||
+          typeof channelConfig.enabled !== 'boolean' ||
+          typeof channelConfig.outsideWindowEnabled !== 'boolean'
+        ) {
+          return [
+            {
+              path,
+              code: 'invalid_type',
+              message: 'A política de um canal do follow-up é inválida.',
+            },
+          ];
+        }
+        if (channels.has(channelConfig.channel)) {
+          return [
+            {
+              path,
+              code: 'invalid_type',
+              message: 'Um canal não pode se repetir no mesmo passo.',
+            },
+          ];
+        }
+        channels.add(channelConfig.channel);
+        if (
+          insideWindowOnly.has(channelConfig.channel) &&
+          channelConfig.outsideWindowEnabled
+        ) {
+          return [
+            {
+              path,
+              code: 'invalid_type',
+              message:
+                'Messenger, Instagram Direct e Webchat não aceitam follow-up fora da janela nesta fase.',
+            },
+          ];
+        }
+        if (
+          channelConfig.connectionRef !== undefined &&
+          channelConfig.connectionRef !== null &&
+          (typeof channelConfig.connectionRef !== 'string' ||
+            !channelConfig.connectionRef.trim() ||
+            channelConfig.connectionRef.length > 64)
+        ) {
+          return [
+            {
+              path,
+              code: 'invalid_type',
+              message: 'A referência da conexão do canal é inválida.',
+            },
+          ];
+        }
+        if (channelConfig.whatsappTemplate !== undefined) {
+          const template = channelConfig.whatsappTemplate;
+          if (
+            channelConfig.channel !== 'whatsapp' ||
+            !this.isPlainObject(template) ||
+            !this.hasOnlyKeys(template, [
+              'providerTemplateName',
+              'languageCode',
+              'status',
+            ]) ||
+            typeof template.providerTemplateName !== 'string' ||
+            template.providerTemplateName.length > 512 ||
+            typeof template.languageCode !== 'string' ||
+            !template.languageCode.trim() ||
+            template.languageCode.length > 35 ||
+            (template.status !== undefined &&
+              (typeof template.status !== 'string' ||
+                ![
+                  'not_configured',
+                  'pending_validation',
+                  'valid',
+                  'not_found',
+                  'not_approved',
+                  'language_mismatch',
+                  'components_unsupported',
+                ].includes(template.status)))
+          ) {
+            return [
+              {
+                path,
+                code: 'invalid_type',
+                message: 'A referência do template WhatsApp é inválida.',
+              },
+            ];
+          }
+        }
+      }
+    }
+    return [];
   }
 
   private typeError(
@@ -298,5 +486,12 @@ export class LeadFlowAutomationConfigSchemaService {
 
   private isPlainObject(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null && !Array.isArray(value);
+  }
+
+  private hasOnlyKeys(
+    value: Record<string, unknown>,
+    allowed: string[],
+  ): boolean {
+    return Object.keys(value).every((key) => allowed.includes(key));
   }
 }

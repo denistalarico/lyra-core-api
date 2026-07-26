@@ -1,9 +1,11 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import { WhatsAppOutboundService } from '../../inbox/channels/whatsapp/services/whatsapp-outbound.service';
+import { WhatsAppAutomationTemplateError } from '../../inbox/channels/whatsapp/services/whatsapp-outbound.service';
 import { LeadFlowAutomationErrorClass } from '../enums/leadflow-automation-run.enums';
 import { executorAvailability } from './automation-executors.registry';
 import type {
@@ -32,6 +34,10 @@ export class SendMessageExecutor implements AutomationExecutor {
     const text = nullableString(request.payload.text);
     const templateRef = nullableString(request.payload.templateRef);
     if (!text && !templateRef) return refused('message_content_required');
+    const channel = nullableString(request.payload.channel) ?? 'whatsapp';
+    if (channel !== 'whatsapp') {
+      return refused('followup_channel_transport_unavailable');
+    }
 
     try {
       const result = await this.outbound.sendAutomationMessage({
@@ -44,6 +50,7 @@ export class SendMessageExecutor implements AutomationExecutor {
         templateRef,
         templateLanguage:
           nullableString(request.payload.templateLanguage) ?? 'pt_BR',
+        connectionRef: nullableString(request.payload.connectionRef),
       });
       return {
         status: 'confirmed',
@@ -51,14 +58,26 @@ export class SendMessageExecutor implements AutomationExecutor {
         reference: result.message.id,
       };
     } catch (error) {
+      if (error instanceof WhatsAppAutomationTemplateError) {
+        return refused(
+          error.reason === 'language_mismatch'
+            ? 'whatsapp_template_language_mismatch'
+            : error.reason === 'components_unsupported'
+              ? 'whatsapp_template_components_unsupported'
+              : 'whatsapp_template_invalid',
+        );
+      }
       if (
         error instanceof ConflictException ||
-        error instanceof NotFoundException
+        error instanceof NotFoundException ||
+        error instanceof BadRequestException
       ) {
         return refused(
           error instanceof NotFoundException
             ? 'message_conversation_not_found'
-            : conflictCode(error),
+            : error instanceof ConflictException
+              ? conflictCode(error)
+              : 'message_channel_unavailable',
         );
       }
       return {

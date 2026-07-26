@@ -146,7 +146,7 @@ describe('LeadFlowAutomationConfigSchemaService', () => {
   });
 
   describe('findMissingRequiredFields', () => {
-    it('requires an approved WhatsApp template before follow-up activation', () => {
+    it('does not make a global WhatsApp template an activation requirement', () => {
       const missing = service.findMissingRequiredFields(idleLead, {
         trigger: idleLead.defaultTriggerConfig,
         conditions: idleLead.defaultConditionConfig,
@@ -156,23 +156,91 @@ describe('LeadFlowAutomationConfigSchemaService', () => {
         schedulePolicy: idleLead.defaultSchedulePolicy,
       });
 
-      expect(missing).toContain('message.templateRef');
+      expect(missing).not.toContain('message.templateRef');
+      expect(missing).toContain('message.followupSteps');
     });
 
-    it('accepts the follow-up configuration after a template is selected', () => {
+    it('accepts an eligible WhatsApp step without a template', () => {
       const missing = service.findMissingRequiredFields(idleLead, {
         trigger: idleLead.defaultTriggerConfig,
         conditions: idleLead.defaultConditionConfig,
         actions: idleLead.defaultActionConfig,
         message: {
           ...idleLead.defaultMessageConfig,
-          templateRef: 'followup_v1',
+          followupSteps: [
+            {
+              stepKey: 'd1',
+              delayMinutes: 1440,
+              channels: [
+                {
+                  channel: 'whatsapp',
+                  enabled: true,
+                  outsideWindowEnabled: false,
+                  connectionRef: 'channel-1',
+                },
+              ],
+            },
+          ],
         },
         crmPolicy: idleLead.defaultCrmPolicy,
         schedulePolicy: idleLead.defaultSchedulePolicy,
       });
 
       expect(missing).toEqual([]);
+    });
+
+    it('rejects outside-window enablement for an inside-window-only channel', () => {
+      const result = service.validateSection(
+        idleLead,
+        'message',
+        {
+          followupSteps: [
+            {
+              stepKey: 'd1',
+              delayMinutes: 1440,
+              channels: [
+                {
+                  channel: 'webchat',
+                  enabled: true,
+                  outsideWindowEnabled: true,
+                },
+              ],
+            },
+          ],
+        },
+        idleLead.defaultMessageConfig,
+      );
+
+      expect(result.valid).toBe(false);
+      expect(result.errors[0].message).toContain('não aceitam follow-up');
+    });
+
+    it('rejects credentials in the per-channel jsonb contract', () => {
+      const result = service.validateSection(
+        idleLead,
+        'message',
+        {
+          followupSteps: [
+            {
+              stepKey: 'd1',
+              delayMinutes: 1440,
+              channels: [
+                {
+                  channel: 'whatsapp',
+                  enabled: true,
+                  outsideWindowEnabled: false,
+                  connectionRef: 'channel-1',
+                  accessToken: 'must-not-be-persisted',
+                },
+              ],
+            },
+          ],
+        },
+        idleLead.defaultMessageConfig,
+      );
+
+      expect(result.valid).toBe(false);
+      expect(result.errors[0].message).toContain('política');
     });
 
     it('reports an empty required list as missing', () => {

@@ -378,9 +378,25 @@ export class LeadFlowAutomationExecutionService {
       : delivery.occurredAt;
     const maxAttempts = clampInteger(actions.maxAttempts, 1, 7, 1);
 
+    const configuredSteps = Array.isArray(message.followupSteps)
+      ? message.followupSteps
+          .filter(
+            (step) =>
+              typeof step === 'object' &&
+              step !== null &&
+              !Array.isArray(step) &&
+              typeof step.delayMinutes === 'number' &&
+              Number.isFinite(step.delayMinutes) &&
+              step.delayMinutes >= 0,
+          )
+          .slice(0, maxAttempts)
+      : [];
     let offsets: number[];
     let firstOffset: number;
-    if (delivery.eventName === 'leadflow.inbox.conversation.idle') {
+    if (configuredSteps.length > 0) {
+      offsets = configuredSteps.map((step) => step.delayMinutes / 60);
+      firstOffset = offsets[0];
+    } else if (delivery.eventName === 'leadflow.inbox.conversation.idle') {
       const delay = positiveNumber(trigger.delayHours, 24);
       offsets = [delay, delay * 3, delay * 7].slice(0, maxAttempts);
       firstOffset = delay;
@@ -425,6 +441,7 @@ export class LeadFlowAutomationExecutionService {
         typeof message.templateLanguage === 'string'
           ? message.templateLanguage
           : 'pt_BR',
+      followupSteps: configuredSteps.length > 0 ? configuredSteps : null,
     };
   }
 }

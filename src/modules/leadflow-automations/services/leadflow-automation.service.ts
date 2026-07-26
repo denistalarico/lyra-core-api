@@ -6,9 +6,10 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { IsNull, Repository } from 'typeorm';
+import { In, IsNull, Repository } from 'typeorm';
 import type { RequestContext } from '../../../common/context/request-context.interface';
 import { LeadFlowClientSettingsEntity } from '../../leadflow-settings/entities';
+import { InboxChannelEntity } from '../../inbox/entities/inbox-channel.entity';
 import { LeadFlowSettingsContextType } from '../../leadflow-settings/enums/leadflow-settings-context-type.enum';
 import { PlatformPermissionService } from '../../permissions';
 import type { PermissionContext } from '../../permissions';
@@ -93,6 +94,8 @@ export class LeadFlowAutomationService {
     private readonly versionsRepository: Repository<LeadFlowAutomationVersionEntity>,
     @InjectRepository(LeadFlowClientSettingsEntity, AGENCY_CONNECTION)
     private readonly settingsRepository: Repository<LeadFlowClientSettingsEntity>,
+    @InjectRepository(InboxChannelEntity, AGENCY_CONNECTION)
+    private readonly inboxChannelsRepository: Repository<InboxChannelEntity>,
     private readonly recipeService: LeadFlowAutomationRecipeService,
     private readonly runtimeConfigService: LeadFlowAutomationRuntimeConfigService,
     private readonly configSchemaService: LeadFlowAutomationConfigSchemaService,
@@ -115,10 +118,15 @@ export class LeadFlowAutomationService {
       businessModeKey: active.businessModeKey,
       isCustomBusinessMode: active.isCustomBusinessMode,
       runtimeAvailable: isRuntimeAvailable(),
-      items: automations.map((automation) => ({
-        ...mapAutomationSummary(automation),
-        lifecycle: this.lifecycleFor(automation, active),
-      })),
+      items: await Promise.all(
+        automations.map(async (automation) => ({
+          ...mapAutomationSummary(automation),
+          lifecycle: await this.lifecycleWithChannelAvailability(
+            automation,
+            active,
+          ),
+        })),
+      ),
     };
   }
 
@@ -189,7 +197,9 @@ export class LeadFlowAutomationService {
     if (dto.activate) {
       // Same gate as the explicit activate endpoint — provisioning must not be
       // a side door around dependency checks.
-      this.assertActivatable(this.lifecycleFor(saved, active));
+      this.assertActivatable(
+        await this.lifecycleWithChannelAvailability(saved, active),
+      );
       saved.status = LeadFlowAutomationStatus.Active;
       await this.automationsRepository.save(saved);
     }
@@ -275,7 +285,9 @@ export class LeadFlowAutomationService {
     const active = await this.resolveActiveContext(ctx);
     const automation = await this.findScopedAutomation(ctx, active, id);
 
-    this.assertActivatable(this.lifecycleFor(automation, active));
+    this.assertActivatable(
+      await this.lifecycleWithChannelAvailability(automation, active),
+    );
 
     return this.transition(ctx, automation, LeadFlowAutomationStatus.Active);
   }
@@ -656,6 +668,95 @@ export class LeadFlowAutomationService {
     });
   }
 
+  private async lifecycleWithChannelAvailability(
+    automation: LeadFlowAutomationEntity,
+    active: ActiveContext,
+  ): Promise<LeadFlowAutomationLifecycle> {
+    const lifecycle = this.lifecycleFor(automation, active);
+    if (
+      !['followup_idle_lead', 'followup_by_crm_stage'].includes(
+        automation.recipeKey,
+      ) ||
+      lifecycle.missingConfiguration.includes('message.followupSteps') ||
+      (await this.hasProductiveFollowupChannel(automation))
+    ) {
+      return lifecycle;
+    }
+
+    const recipe = this.recipeService.getRecipe(automation.recipeKey);
+    return this.lifecycleService.evaluate({
+      status: automation.status,
+      recipe,
+      compatibleWithBusinessMode: recipe
+        ? this.recipeService.isCompatible(recipe, active.businessModeKey)
+        : false,
+      missingConfiguration: [
+        ...lifecycle.missingConfiguration,
+        'message.followupSteps',
+      ],
+      unavailableActions: lifecycle.unavailableActions,
+    });
+  }
+
+  private async hasProductiveFollowupChannel(
+    automation: LeadFlowAutomationEntity,
+  ): Promise<boolean> {
+    const steps = Array.isArray(automation.messageConfig?.followupSteps)
+      ? automation.messageConfig.followupSteps
+      : null;
+    const configured = steps
+      ? steps.flatMap((step) =>
+          Array.isArray(step.channels)
+            ? step.channels.filter(
+                (channel) =>
+                  channel.enabled === true &&
+                  typeof channel.connectionRef === 'string',
+              )
+            : [],
+        )
+      : [];
+    const connectionRefs = configured.map(
+      (channel) => channel.connectionRef as string,
+    );
+
+    const channels = await this.inboxChannelsRepository.find({
+      where: {
+        tenantId: automation.tenantId,
+        workspaceId: automation.workspaceId,
+        status: 'active',
+        connectionStatus: 'connected',
+        deletedAt: IsNull(),
+        ...(connectionRefs.length > 0 ? { id: In(connectionRefs) } : {}),
+        ...(steps ? {} : { type: 'whatsapp' }),
+      },
+    });
+
+    return channels.some((channel) => {
+      if (
+        channel.type === 'whatsapp' &&
+        channel.provider === 'meta' &&
+        channel.externalPhoneNumberId &&
+        channel.accessTokenEncrypted
+      ) {
+        return (
+          !steps ||
+          configured.some(
+            (item) =>
+              item.channel === 'whatsapp' && item.connectionRef === channel.id,
+          )
+        );
+      }
+      return (
+        channel.metadata?.followupOutboundAvailable === true &&
+        configured.some(
+          (item) =>
+            followupChannelMatchesInboxType(item.channel, channel.type) &&
+            item.connectionRef === channel.id,
+        )
+      );
+    });
+  }
+
   private configuredActionKeys(
     automation: LeadFlowAutomationEntity,
     recipe: LeadFlowAutomationRecipeCatalogItem,
@@ -747,7 +848,10 @@ export class LeadFlowAutomationService {
         LEADFLOW_AUTOMATIONS_PERMISSIONS.developerManage,
       ),
     };
-    detail.lifecycle = this.lifecycleFor(automation, active);
+    detail.lifecycle = await this.lifecycleWithChannelAvailability(
+      automation,
+      active,
+    );
     detail.configSchema = recipe
       ? this.configSchemaService.buildSchema(recipe)
       : null;
@@ -963,4 +1067,12 @@ export class LeadFlowAutomationService {
   private isRecord(value: unknown): value is LeadFlowJsonObject {
     return typeof value === 'object' && value !== null && !Array.isArray(value);
   }
+}
+
+function followupChannelMatchesInboxType(
+  followupChannel: string,
+  inboxType: InboxChannelEntity['type'],
+): boolean {
+  if (followupChannel === 'instagram_direct') return inboxType === 'instagram';
+  return followupChannel === inboxType;
 }

@@ -53,7 +53,20 @@ export type SendWhatsAppAutomationMessageInput = {
   text?: string | null;
   templateRef?: string | null;
   templateLanguage?: string | null;
+  connectionRef?: string | null;
 };
+
+export type WhatsAppAutomationTemplateErrorReason =
+  | 'invalid'
+  | 'language_mismatch'
+  | 'components_unsupported';
+
+export class WhatsAppAutomationTemplateError extends Error {
+  constructor(readonly reason: WhatsAppAutomationTemplateErrorReason) {
+    super(`whatsapp_automation_template_${reason}`);
+    this.name = 'WhatsAppAutomationTemplateError';
+  }
+}
 
 type WhatsAppTextActor =
   | { type: 'user' }
@@ -189,6 +202,11 @@ export class WhatsAppOutboundService {
     ) {
       throw new NotFoundException(
         'WhatsApp conversation not found for automation.',
+      );
+    }
+    if (input.connectionRef && conversation.channelId !== input.connectionRef) {
+      throw new NotFoundException(
+        'Configured WhatsApp connection is not the conversation channel.',
       );
     }
     if (
@@ -1245,9 +1263,21 @@ export class WhatsAppOutboundService {
     });
     const data = (await response.json()) as MetaSendMessageResponse;
     if (!response.ok || data.error) {
-      throw new BadRequestException(
-        'Não foi possível enviar o modelo pelo canal WhatsApp.',
-      );
+      const providerMessage = data.error?.message?.toLowerCase() ?? '';
+      if (
+        providerMessage.includes('language') ||
+        providerMessage.includes('idioma')
+      ) {
+        throw new WhatsAppAutomationTemplateError('language_mismatch');
+      }
+      if (
+        providerMessage.includes('component') ||
+        providerMessage.includes('parameter') ||
+        providerMessage.includes('parâmetro')
+      ) {
+        throw new WhatsAppAutomationTemplateError('components_unsupported');
+      }
+      throw new WhatsAppAutomationTemplateError('invalid');
     }
     return data;
   }

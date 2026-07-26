@@ -169,6 +169,145 @@ describe('LeadFlowFollowupTimerConsumer', () => {
     );
   });
 
+  it('allows WhatsApp text inside the rolling window without a template', async () => {
+    messagesFindOne.mockResolvedValueOnce(null).mockResolvedValueOnce({
+      id: 'inbound-1',
+      occurredAt: new Date('2026-07-27T11:30:00.000Z'),
+    });
+    const envelope = deliveryEnvelope() as {
+      payload: Record<string, unknown>;
+    };
+    envelope.payload.templateRef = null;
+    envelope.payload.followupSteps = [
+      {
+        stepKey: 'd1',
+        delayMinutes: 1440,
+        channels: [
+          {
+            channel: 'whatsapp',
+            enabled: true,
+            outsideWindowEnabled: false,
+            connectionRef: 'channel-1',
+          },
+        ],
+      },
+    ];
+
+    await consumer.handleTimer(envelope as never);
+
+    expect(send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payload: expect.objectContaining({
+          channel: 'whatsapp',
+          templateRef: null,
+        }),
+      }),
+    );
+  });
+
+  it('records a template-required skip without cancelling the next step', async () => {
+    const envelope = deliveryEnvelope() as {
+      payload: Record<string, unknown>;
+    };
+    envelope.payload.templateRef = null;
+    envelope.payload.followupSteps = [
+      {
+        stepKey: 'd1',
+        delayMinutes: 1440,
+        channels: [
+          {
+            channel: 'whatsapp',
+            enabled: true,
+            outsideWindowEnabled: true,
+            connectionRef: 'channel-1',
+          },
+        ],
+      },
+      {
+        stepKey: 'd3',
+        delayMinutes: 4320,
+        channels: [
+          {
+            channel: 'whatsapp',
+            enabled: true,
+            outsideWindowEnabled: false,
+            connectionRef: 'channel-1',
+          },
+        ],
+      },
+    ];
+
+    await consumer.handleTimer(envelope as never);
+
+    expect(send).not.toHaveBeenCalled();
+    expect(outboxInsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventName: 'leadflow.automations.followup.channel_result',
+        payload: expect.objectContaining({
+          stepKey: 'd1',
+          channel: 'whatsapp',
+          result: 'skipped_template_required',
+        }),
+      }),
+    );
+    expect(schedule).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payload: expect.objectContaining({ attemptIndex: 1 }),
+      }),
+    );
+  });
+
+  it('keeps other channels independent when one is unavailable', async () => {
+    messagesFindOne.mockResolvedValueOnce(null).mockResolvedValueOnce({
+      id: 'inbound-1',
+      occurredAt: new Date('2026-07-27T11:30:00.000Z'),
+    });
+    send
+      .mockResolvedValueOnce({
+        status: 'confirmed',
+        effectConfirmed: true,
+        reference: 'message-1',
+      })
+      .mockResolvedValueOnce({
+        status: 'unavailable',
+        effectConfirmed: false,
+        errorCode: 'followup_channel_transport_unavailable',
+      });
+    const envelope = deliveryEnvelope() as {
+      payload: Record<string, unknown>;
+    };
+    envelope.payload.followupSteps = [
+      {
+        stepKey: 'd1',
+        delayMinutes: 1440,
+        channels: [
+          {
+            channel: 'whatsapp',
+            enabled: true,
+            outsideWindowEnabled: false,
+          },
+          {
+            channel: 'webchat',
+            enabled: true,
+            outsideWindowEnabled: false,
+          },
+        ],
+      },
+    ];
+
+    await consumer.handleTimer(envelope as never);
+
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(outboxInsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payload: expect.objectContaining({
+          channel: 'webchat',
+          result: 'skipped_channel_unavailable',
+        }),
+      }),
+    );
+  });
+
   it('honors the kill switch again when the timer fires', async () => {
     gateEvaluate.mockResolvedValue({
       allowed: false,

@@ -99,10 +99,70 @@ export interface LeadFlowAutomationActionConfig {
 export interface LeadFlowAutomationMessageConfig {
   channel?: string | null;
   templateRef?: string | null;
+  templateLanguage?: string | null;
   baseMessage?: string;
   quickReplies?: string[];
+  /**
+   * Channel policy for the two productive follow-up recipes.
+   *
+   * It remains in the existing jsonb message_config column: connection
+   * references are opaque ids and credentials never cross this contract.
+   */
+  followupSteps?: LeadFlowFollowupStepConfig[];
   [key: string]: LeadFlowJsonValue | undefined;
 }
+
+export type LeadFlowFollowupChannel =
+  | 'whatsapp'
+  | 'email'
+  | 'sms'
+  | 'facebook_messenger'
+  | 'instagram_direct'
+  | 'webchat';
+
+export type LeadFlowWhatsappTemplateReferenceStatus =
+  | 'not_configured'
+  | 'pending_validation'
+  | 'valid'
+  | 'not_found'
+  | 'not_approved'
+  | 'language_mismatch'
+  | 'components_unsupported';
+
+export type LeadFlowWhatsappTemplateReference = LeadFlowJsonObject & {
+  providerTemplateName: string;
+  languageCode: string;
+  status?: LeadFlowWhatsappTemplateReferenceStatus;
+};
+
+export type LeadFlowFollowupChannelConfig = LeadFlowJsonObject & {
+  channel: LeadFlowFollowupChannel;
+  enabled: boolean;
+  outsideWindowEnabled: boolean;
+  connectionRef?: string | null;
+  whatsappTemplate?: LeadFlowWhatsappTemplateReference;
+};
+
+export type LeadFlowFollowupStepConfig = LeadFlowJsonObject & {
+  stepKey: string;
+  delayMinutes: number;
+  channels: LeadFlowFollowupChannelConfig[];
+};
+
+export type LeadFlowFollowupChannelResult =
+  | 'sent'
+  | 'skipped_outside_messaging_window'
+  | 'skipped_template_required'
+  | 'skipped_template_invalid'
+  | 'skipped_template_language_mismatch'
+  | 'skipped_template_components_unsupported'
+  | 'skipped_email_opt_out'
+  | 'skipped_email_missing_consent'
+  | 'skipped_sms_opt_out'
+  | 'skipped_sms_missing_consent'
+  | 'skipped_channel_unavailable'
+  | 'skipped_recipient_unavailable'
+  | 'failed_provider';
 
 /**
  * Per-automation CRM behaviour. The *structural* rule "every conversation

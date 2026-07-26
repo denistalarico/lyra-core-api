@@ -251,6 +251,11 @@ const ESSENTIAL_SEEDS: RecipeSeed[] = [
     messageConfig: {
       baseMessage:
         'Olá! Podemos continuar seu atendimento? Se ainda tiver interesse, responda a esta mensagem.',
+      followupSteps: [
+        { stepKey: 'd1', delayMinutes: 1440, channels: [] },
+        { stepKey: 'd3', delayMinutes: 4320, channels: [] },
+        { stepKey: 'd7', delayMinutes: 10080, channels: [] },
+      ],
     },
     schedulePolicy: { cooldownHours: 24 },
   },
@@ -277,6 +282,13 @@ const ESSENTIAL_SEEDS: RecipeSeed[] = [
     messageConfig: {
       baseMessage:
         'Olá! Podemos continuar seu atendimento? Se ainda tiver interesse, responda a esta mensagem.',
+      followupSteps: [
+        {
+          stepKey: 'stage_followup',
+          delayMinutes: 2880,
+          channels: [],
+        },
+      ],
     },
   },
   {

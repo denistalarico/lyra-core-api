@@ -6,6 +6,7 @@ import { CrmModule } from '../crm/crm.module';
 import { InboxModule } from '../inbox/inbox.module';
 import { NotificationsModule } from '../notifications';
 import { InboxDomainOutboxEntity } from '../inbox/entities/inbox-domain-outbox.entity';
+import { InboxChannelEntity } from '../inbox/entities/inbox-channel.entity';
 import { LeadFlowEventDeliveryEntity } from '../leadflow-events/entities';
 import {
   LeadFlowAutomationEntity,
@@ -64,6 +65,7 @@ import { LeadFlowFollowupIdleDetectorService } from './services/leadflow-followu
         LeadFlowEventDeliveryEntity,
         LeadFlowScheduledTimerEntity,
         InboxDomainOutboxEntity,
+        InboxChannelEntity,
         ...LEADFLOW_CONTEXT_LOADER_ENTITIES,
       ],
       'agency',

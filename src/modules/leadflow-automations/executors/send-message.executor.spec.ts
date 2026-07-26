@@ -1,5 +1,6 @@
 import { ConflictException } from '@nestjs/common';
 import { SendMessageExecutor } from './send-message.executor';
+import { WhatsAppAutomationTemplateError } from '../../inbox/channels/whatsapp/services/whatsapp-outbound.service';
 import type { AutomationEffectRequest } from './automation-executor.types';
 
 describe('SendMessageExecutor', () => {
@@ -44,6 +45,38 @@ describe('SendMessageExecutor', () => {
   it('fails closed when no conversation is present', async () => {
     const result = await executor.execute(request({ conversationId: null }));
     expect(result.status).toBe('refused');
+    expect(sendAutomationMessage).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['invalid', 'whatsapp_template_invalid'],
+    ['language_mismatch', 'whatsapp_template_language_mismatch'],
+    ['components_unsupported', 'whatsapp_template_components_unsupported'],
+  ] as const)(
+    'maps template %s to a channel-scoped skip',
+    async (reason, code) => {
+      sendAutomationMessage.mockRejectedValue(
+        new WhatsAppAutomationTemplateError(reason),
+      );
+
+      const result = await executor.execute(request());
+
+      expect(result).toMatchObject({
+        status: 'refused',
+        errorCode: code,
+        effectConfirmed: false,
+      });
+    },
+  );
+
+  it('does not simulate success for a transport without an adapter', async () => {
+    const result = await executor.execute(request({ channel: 'sms' }));
+
+    expect(result).toMatchObject({
+      status: 'refused',
+      effectConfirmed: false,
+      errorCode: 'followup_channel_transport_unavailable',
+    });
     expect(sendAutomationMessage).not.toHaveBeenCalled();
   });
 });

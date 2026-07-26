@@ -23,7 +23,8 @@ export type LeadFlowAutomationFieldType =
   | 'string'
   | 'string[]'
   | 'enum'
-  | 'offset[]';
+  | 'offset[]'
+  | 'followup_step[]';
 
 /**
  * Which surface a field belongs to. Consumed by the configuration UI so the
@@ -255,6 +256,14 @@ const FIELD_SPECS: Record<string, LeadFlowAutomationFieldSpec> = {
     nullable: true,
     maxLength: 64,
   },
+  'message.templateLanguage': {
+    key: 'templateLanguage',
+    type: 'string',
+    label: 'Idioma do modelo',
+    surface: 'advanced',
+    nullable: true,
+    maxLength: 35,
+  },
   'message.baseMessage': {
     key: 'baseMessage',
     type: 'string',
@@ -269,6 +278,14 @@ const FIELD_SPECS: Record<string, LeadFlowAutomationFieldSpec> = {
     surface: 'essential',
     maxItems: 10,
     maxLength: 60,
+  },
+  'message.followupSteps': {
+    key: 'followupSteps',
+    type: 'followup_step[]',
+    label: 'Canais por passo do follow-up',
+    surface: 'essential',
+    required: true,
+    maxItems: 7,
   },
 
   // -------------------------------------------------------------- crmPolicy
