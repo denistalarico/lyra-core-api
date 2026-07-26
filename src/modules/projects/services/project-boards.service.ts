@@ -468,15 +468,21 @@ export class ProjectBoardsService {
     stages: AgencyPersonalTaskStage[],
     tasks: TaskBoardCard[],
   ): BoardResponse<TaskBoardCard> {
+    const stageIds = new Set(stages.map((stage) => stage.id));
+    const fallbackStageId = stages[0]?.id ?? null;
+    const resolveStageId = (task: TaskBoardCard) =>
+      task.personalStageId && stageIds.has(task.personalStageId)
+        ? task.personalStageId
+        : fallbackStageId;
     const columns = stages.map((stage) => ({
       id: stage.id,
       name: stage.name,
       color: stage.color,
       position: stage.position,
-      cards: tasks.filter((task) => task.personalStageId === stage.id),
+      cards: tasks.filter((task) => resolveStageId(task) === stage.id),
     }));
 
-    const unassignedCards = tasks.filter((task) => !task.personalStageId);
+    const unassignedCards = fallbackStageId ? [] : tasks;
 
     return {
       columns,

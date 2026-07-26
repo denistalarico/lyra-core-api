@@ -30,6 +30,21 @@ export type ProjectStageTemplate = {
 
 export type ProjectTaskExecutionMode = 'manual' | 'timer' | 'hybrid';
 
+export type ProjectCardDisplaySettings = {
+  client: boolean;
+  project: boolean;
+  cover: boolean;
+  markers: boolean;
+  priority: boolean;
+  progress: boolean;
+  taskCount: boolean;
+  activity: boolean;
+  subtasks: boolean;
+  responsible: boolean;
+  dueDate: boolean;
+  status: boolean;
+};
+
 @Entity('agency_project_settings')
 export class AgencyProjectSettings {
   @PrimaryGeneratedColumn('uuid')
@@ -41,7 +56,11 @@ export class AgencyProjectSettings {
   @Column({ name: 'workspace_id', type: 'uuid' })
   workspaceId!: string;
 
-  @Column({ name: 'project_markers', type: 'jsonb', default: () => "'[]'::jsonb" })
+  @Column({
+    name: 'project_markers',
+    type: 'jsonb',
+    default: () => "'[]'::jsonb",
+  })
   projectMarkers!: ProjectMarkerSetting[];
 
   @Column({ name: 'task_markers', type: 'jsonb', default: () => "'[]'::jsonb" })
@@ -50,11 +69,34 @@ export class AgencyProjectSettings {
   @Column({ name: 'task_types', type: 'jsonb', default: () => "'[]'::jsonb" })
   taskTypes!: ProjectTaskTypeSetting[];
 
-  @Column({ name: 'task_execution_mode', type: 'varchar', length: 24, default: 'hybrid' })
+  @Column({
+    name: 'task_execution_mode',
+    type: 'varchar',
+    length: 24,
+    default: 'hybrid',
+  })
   taskExecutionMode!: ProjectTaskExecutionMode;
 
-  @Column({ name: 'stage_templates', type: 'jsonb', default: () => "'[]'::jsonb" })
+  @Column({
+    name: 'stage_templates',
+    type: 'jsonb',
+    default: () => "'[]'::jsonb",
+  })
   stageTemplates!: ProjectStageTemplate[];
+
+  @Column({
+    name: 'project_card_display_defaults',
+    type: 'jsonb',
+    default: () => "'{}'::jsonb",
+  })
+  projectCardDisplayDefaults!: Partial<ProjectCardDisplaySettings>;
+
+  @Column({
+    name: 'task_card_display_defaults',
+    type: 'jsonb',
+    default: () => "'{}'::jsonb",
+  })
+  taskCardDisplayDefaults!: Partial<ProjectCardDisplaySettings>;
 
   @CreateDateColumn({ name: 'created_at' })
   createdAt!: Date;
