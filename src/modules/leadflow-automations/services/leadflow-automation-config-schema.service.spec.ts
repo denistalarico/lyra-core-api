@@ -146,6 +146,35 @@ describe('LeadFlowAutomationConfigSchemaService', () => {
   });
 
   describe('findMissingRequiredFields', () => {
+    it('requires an approved WhatsApp template before follow-up activation', () => {
+      const missing = service.findMissingRequiredFields(idleLead, {
+        trigger: idleLead.defaultTriggerConfig,
+        conditions: idleLead.defaultConditionConfig,
+        actions: idleLead.defaultActionConfig,
+        message: idleLead.defaultMessageConfig,
+        crmPolicy: idleLead.defaultCrmPolicy,
+        schedulePolicy: idleLead.defaultSchedulePolicy,
+      });
+
+      expect(missing).toContain('message.templateRef');
+    });
+
+    it('accepts the follow-up configuration after a template is selected', () => {
+      const missing = service.findMissingRequiredFields(idleLead, {
+        trigger: idleLead.defaultTriggerConfig,
+        conditions: idleLead.defaultConditionConfig,
+        actions: idleLead.defaultActionConfig,
+        message: {
+          ...idleLead.defaultMessageConfig,
+          templateRef: 'followup_v1',
+        },
+        crmPolicy: idleLead.defaultCrmPolicy,
+        schedulePolicy: idleLead.defaultSchedulePolicy,
+      });
+
+      expect(missing).toEqual([]);
+    });
+
     it('reports an empty required list as missing', () => {
       // `requiredFields` ships as `[]`, so this recipe is genuinely not ready
       // until the operator fills it — the old readiness check missed this.

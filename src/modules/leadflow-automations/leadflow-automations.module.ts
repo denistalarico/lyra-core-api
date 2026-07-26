@@ -5,11 +5,13 @@ import { PermissionsModule } from '../permissions';
 import { CrmModule } from '../crm/crm.module';
 import { InboxModule } from '../inbox/inbox.module';
 import { NotificationsModule } from '../notifications';
+import { InboxDomainOutboxEntity } from '../inbox/entities/inbox-domain-outbox.entity';
 import { LeadFlowEventDeliveryEntity } from '../leadflow-events/entities';
 import {
   LeadFlowAutomationEntity,
   LeadFlowAutomationRunAttemptEntity,
   LeadFlowAutomationRunEntity,
+  LeadFlowScheduledTimerEntity,
   LeadFlowAutomationVersionEntity,
 } from './entities';
 import { LeadFlowAutomationsController } from './leadflow-automations.controller';
@@ -27,6 +29,8 @@ import { MoveOpportunityStageExecutor } from './executors/move-opportunity-stage
 import { AssignOpportunityOwnerExecutor } from './executors/assign-opportunity-owner.executor';
 import { RequestHandoffExecutor } from './executors/request-handoff.executor';
 import { NotifyUserExecutor } from './executors/notify-user.executor';
+import { ScheduleFollowupExecutor } from './executors/schedule-followup.executor';
+import { SendMessageExecutor } from './executors/send-message.executor';
 import { LeadFlowAutomationNotificationPublisher } from './services/leadflow-automation-notification.publisher';
 import { LeadFlowAutomationEventIngressService } from './services/leadflow-automation-event-ingress.service';
 import { LeadFlowAutomationLifecycleService } from './services/leadflow-automation-lifecycle.service';
@@ -36,6 +40,13 @@ import { LeadFlowAutomationShadowEvaluatorService } from './services/leadflow-au
 import { LeadFlowAutomationTriggerMatcherService } from './services/leadflow-automation-trigger-matcher.service';
 import { LeadFlowAutomationRuntimeConfigService } from './services/leadflow-automation-runtime-config.service';
 import { LeadFlowAutomationService } from './services/leadflow-automation.service';
+import {
+  PostgresSchedulerRuntime,
+  SCHEDULER_RUNTIME,
+  ScheduledTimerConsumerRegistry,
+} from './scheduler';
+import { LeadFlowFollowupTimerConsumer } from './services/leadflow-followup-timer.consumer';
+import { LeadFlowFollowupIdleDetectorService } from './services/leadflow-followup-idle-detector.service';
 
 @Module({
   imports: [
@@ -51,6 +62,8 @@ import { LeadFlowAutomationService } from './services/leadflow-automation.servic
         LeadFlowAutomationRunAttemptEntity,
         LeadFlowClientSettingsEntity,
         LeadFlowEventDeliveryEntity,
+        LeadFlowScheduledTimerEntity,
+        InboxDomainOutboxEntity,
         ...LEADFLOW_CONTEXT_LOADER_ENTITIES,
       ],
       'agency',
@@ -72,6 +85,16 @@ import { LeadFlowAutomationService } from './services/leadflow-automation.servic
     AssignOpportunityOwnerExecutor,
     RequestHandoffExecutor,
     NotifyUserExecutor,
+    ScheduleFollowupExecutor,
+    SendMessageExecutor,
+    ScheduledTimerConsumerRegistry,
+    PostgresSchedulerRuntime,
+    {
+      provide: SCHEDULER_RUNTIME,
+      useExisting: PostgresSchedulerRuntime,
+    },
+    LeadFlowFollowupTimerConsumer,
+    LeadFlowFollowupIdleDetectorService,
     LeadFlowAutomationNotificationPublisher,
     LeadFlowAutomationEventIngressService,
     LeadFlowAutomationRunService,

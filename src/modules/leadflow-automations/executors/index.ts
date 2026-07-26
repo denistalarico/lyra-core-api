@@ -16,3 +16,5 @@ export { MoveOpportunityStageExecutor } from './move-opportunity-stage.executor'
 export { AssignOpportunityOwnerExecutor } from './assign-opportunity-owner.executor';
 export { RequestHandoffExecutor } from './request-handoff.executor';
 export { NotifyUserExecutor } from './notify-user.executor';
+export { SendMessageExecutor } from './send-message.executor';
+export { ScheduleFollowupExecutor } from './schedule-followup.executor';

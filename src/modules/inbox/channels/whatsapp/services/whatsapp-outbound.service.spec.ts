@@ -84,8 +84,10 @@ describe('WhatsAppOutboundService idempotency', () => {
     );
     const fetchMock = jest
       .spyOn(global, 'fetch')
-      .mockImplementation(async () =>
-        Response.json({ messages: [{ id: 'wamid.synthetic' }] }),
+      .mockImplementation(() =>
+        Promise.resolve(
+          Response.json({ messages: [{ id: 'wamid.synthetic' }] }),
+        ),
       );
     const input = {
       ctx: {
@@ -135,5 +137,124 @@ describe('WhatsAppOutboundService idempotency', () => {
       }),
     ).rejects.toThrow('Automatic reply blocked by governed policy.');
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('WhatsAppOutboundService automation window', () => {
+  afterEach(() => jest.restoreAllMocks());
+
+  const conversation = {
+    id: 'conversation',
+    tenantId: 'tenant',
+    workspaceId: 'workspace',
+    channelId: 'channel',
+    externalThreadId: '5511999999999',
+    ownershipState: 'ai_active',
+    aiEnabled: true,
+  };
+
+  function build(lastInboundAt: Date | null) {
+    const service = new WhatsAppOutboundService(
+      {} as never,
+      {} as never,
+      { findOne: jest.fn().mockResolvedValue(conversation) } as never,
+      {
+        findOne: jest
+          .fn()
+          .mockResolvedValue(
+            lastInboundAt
+              ? { id: 'inbound-1', occurredAt: lastInboundAt }
+              : null,
+          ),
+      } as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+    return service;
+  }
+
+  it('uses free-form text only inside the rolling 24-hour window', async () => {
+    const service = build(new Date(Date.now() - 60 * 60 * 1_000));
+    const sendText = jest
+      .spyOn(service as never, 'sendTextForActor' as never)
+      .mockResolvedValue({
+        message: { id: 'message-text', status: 'sent' },
+      } as never);
+
+    await service.sendAutomationMessage({
+      tenantId: 'tenant',
+      workspaceId: 'workspace',
+      conversationId: 'conversation',
+      automationId: 'automation',
+      idempotencyKey: 'followup-1',
+      text: 'Podemos continuar?',
+      templateRef: 'followup_v1',
+    });
+
+    expect(sendText).toHaveBeenCalledWith(
+      expect.objectContaining({ text: 'Podemos continuar?' }),
+      { type: 'automation', automationId: 'automation' },
+    );
+  });
+
+  it('uses the configured template outside the 24-hour window', async () => {
+    const service = build(new Date(Date.now() - 25 * 60 * 60 * 1_000));
+    const sendTemplate = jest
+      .spyOn(service as never, 'sendAutomationTemplate' as never)
+      .mockResolvedValue({
+        message: { id: 'message-template', status: 'sent' },
+      } as never);
+
+    await service.sendAutomationMessage({
+      tenantId: 'tenant',
+      workspaceId: 'workspace',
+      conversationId: 'conversation',
+      automationId: 'automation',
+      idempotencyKey: 'followup-1',
+      text: 'Texto livre bloqueado',
+      templateRef: 'followup_v1',
+    });
+
+    expect(sendTemplate).toHaveBeenCalledWith(
+      expect.objectContaining({ templateRef: 'followup_v1' }),
+    );
+  });
+
+  it('does not treat an uncertain idempotent replay as confirmed', async () => {
+    const service = build(new Date(Date.now() - 60 * 60 * 1_000));
+    jest
+      .spyOn(service as never, 'sendTextForActor' as never)
+      .mockResolvedValue({
+        message: { id: 'message-pending', status: 'pending' },
+      } as never);
+
+    await expect(
+      service.sendAutomationMessage({
+        tenantId: 'tenant',
+        workspaceId: 'workspace',
+        conversationId: 'conversation',
+        automationId: 'automation',
+        idempotencyKey: 'followup-uncertain',
+        text: 'Podemos continuar?',
+      }),
+    ).rejects.toThrow('Automation message delivery is not confirmed.');
+  });
+
+  it('fails closed outside the window when no template is configured', async () => {
+    const service = build(new Date(Date.now() - 25 * 60 * 60 * 1_000));
+    await expect(
+      service.sendAutomationMessage({
+        tenantId: 'tenant',
+        workspaceId: 'workspace',
+        conversationId: 'conversation',
+        automationId: 'automation',
+        idempotencyKey: 'followup-1',
+        text: 'Texto livre bloqueado',
+      }),
+    ).rejects.toThrow(
+      'whatsapp_template_required_outside_customer_service_window',
+    );
   });
 });

@@ -128,6 +128,7 @@ import { AddCrmOpportunityAutonomyMode1786600000000 } from './migrations/1786600
 import { AddCrmStageRole1786700000000 } from './migrations/1786700000000-add-crm-stage-role';
 import { CreatePlatformWhatsAppNotificationDeliveries1786800000000 } from './migrations/1786800000000-create-platform-whatsapp-notification-deliveries';
 import { AddProjectCardDisplayDefaults1786900000000 } from './migrations/1786900000000-add-project-card-display-defaults';
+import { CreateLeadflowScheduledTimers1787000000000 } from './migrations/1787000000000-create-leadflow-scheduled-timers';
 
 export const AgencyDataSource = new DataSource({
   type: 'postgres',
@@ -266,5 +267,6 @@ export const AgencyDataSource = new DataSource({
     AddCrmStageRole1786700000000,
     CreatePlatformWhatsAppNotificationDeliveries1786800000000,
     AddProjectCardDisplayDefaults1786900000000,
+    CreateLeadflowScheduledTimers1787000000000,
   ],
 });

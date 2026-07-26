@@ -18,11 +18,9 @@ import type { LeadFlowJsonObject } from '../types/leadflow-automation.types';
  * single consumer. Temporal is reconsidered only when genuinely long/complex
  * workflows justify operating it.
  *
- * THIS FILE IS CONTRACT-ONLY. It declares the port and its shapes; it wires no
- * provider, imports no runtime, and is imported by nobody yet. The concrete
- * Postgres implementation (and its migration) land in the follow-up phase
- * ("SchedulerRuntime + follow-up"), not here — Phase 0 only fixes the shape so
- * later phases have a stable extension point.
+ * THIS FILE REMAINS CONTRACT-ONLY. Phase 6 bound the port to the concrete
+ * Postgres implementation and its migration; consumers still import only this
+ * contract/token, preserving the replacement boundary defined in Phase 0.
  *
  * Invariants every implementation MUST uphold:
  *  - **Idempotent by `timerKey`** within `dedupeScope`: scheduling the same key

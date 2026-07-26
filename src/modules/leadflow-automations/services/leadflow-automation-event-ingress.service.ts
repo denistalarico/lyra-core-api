@@ -1,4 +1,9 @@
-import { Injectable, Logger, OnApplicationShutdown } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  OnApplicationShutdown,
+  Optional,
+} from '@nestjs/common';
 import { Interval } from '@nestjs/schedule';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { hostname } from 'node:os';
@@ -10,6 +15,7 @@ import {
 import { LeadFlowEventDeliveryEntity } from '../../leadflow-events/entities';
 import { LeadFlowEventStatus } from '../../leadflow-events/enums/leadflow-event-status.enum';
 import { LeadFlowAutomationShadowEvaluatorService } from './leadflow-automation-shadow-evaluator.service';
+import { LeadFlowFollowupIdleDetectorService } from './leadflow-followup-idle-detector.service';
 
 export const LEADFLOW_AUTOMATIONS_EVENT_CONSUMER =
   'leadflow.automations' as const;
@@ -47,6 +53,8 @@ export class LeadFlowAutomationEventIngressService implements OnApplicationShutd
   constructor(
     @InjectDataSource('agency') private readonly dataSource: DataSource,
     private readonly shadowEvaluator: LeadFlowAutomationShadowEvaluatorService,
+    @Optional()
+    private readonly idleDetector?: LeadFlowFollowupIdleDetectorService,
   ) {}
 
   onApplicationShutdown(): void {
@@ -121,6 +129,10 @@ export class LeadFlowAutomationEventIngressService implements OnApplicationShutd
     if (!delivery) return;
 
     try {
+      // Derived idle detection observes message.sent even though that event is
+      // not itself an automation trigger. Scheduling is idempotent, so a retry
+      // of this delivery never creates a second detector timer.
+      await this.idleDetector?.observeDelivery(delivery);
       const decision = this.accept(delivery);
       const now = new Date();
       if (decision.status === 'skipped') {

@@ -22,6 +22,11 @@ const CANARY_ACTION_ALLOWLIST = new Set<string>([
   // Internal in-app alert only; it never contacts the lead and only narrows to
   // the subject's owner or a configured user.
   'notify_user',
+  // Fase 6: the schedule action only persists a timer. The eventual message
+  // revalidates reply/handoff/autonomy and is constrained by the WhatsApp 24h
+  // window/template rule in the Inbox command.
+  'schedule_followup',
+  'send_message',
 ]);
 
 export type ExecutionGateDecision =

@@ -127,7 +127,7 @@ export const LEADFLOW_EVENT_CATALOG: LeadFlowEventCatalogItem[] = [
   buildEvent({
     eventName: 'leadflow.inbox.conversation.idle',
     description:
-      'Conversa sem resposta do lead há N horas. Detectado por um scheduler futuro — nenhum detector roda neste sprint.',
+      'Conversa sem resposta do lead há N horas. Produzido pelo detector durável do SchedulerRuntime.',
     requiredContext: ['conversationId'],
     payloadSchema: {
       idleSince: field('string', true, 'ISO da última interação do lead.'),
@@ -376,9 +376,17 @@ export const LEADFLOW_EVENT_CATALOG: LeadFlowEventCatalogItem[] = [
       'Modo de automação da oportunidade alterado (D3). Emitido quando um humano assume um card LeadFlow (automatic→manual) ou reativa/define o modo explicitamente. Não é um gatilho de automação — serve auditoria e Analytics.',
     requiredContext: ['opportunityId'],
     payloadSchema: {
-      fromMode: field('string', false, 'Modo anterior (automatic|manual); nulo no primeiro registro.'),
+      fromMode: field(
+        'string',
+        false,
+        'Modo anterior (automatic|manual); nulo no primeiro registro.',
+      ),
       toMode: field('string', true, 'Novo modo (automatic|manual).'),
-      changedByActorType: field('string', false, 'Quem alterou (user|automation|ai|system).'),
+      changedByActorType: field(
+        'string',
+        false,
+        'Quem alterou (user|automation|ai|system).',
+      ),
     },
   }),
   buildEvent({
@@ -768,10 +776,10 @@ export const LEADFLOW_AUTOMATION_TRIGGER_EVENT_MAPPINGS: LeadFlowEventTriggerMap
     },
     {
       trigger: 'conversation.idle',
-      eventName: null,
-      status: 'planned',
+      eventName: 'leadflow.inbox.conversation.idle',
+      status: 'mapped',
       notes:
-        'Estado derivado: depende de um detector de ociosidade que ainda não existe.',
+        'Estado derivado: o detector agenda a partir de message.sent e revalida a conversa antes de emitir.',
     },
     {
       trigger: 'conversation.replied',

@@ -67,11 +67,23 @@ export class LeadFlowAutomationShadowEvaluatorService {
   ): Promise<ShadowEvaluationSummary[]> {
     // Envelope-only filtering first: tenant, workspace and trigger decide
     // relevance before any context work is even considered.
-    const matches = await this.matcher.findMatching(
+    let matches = await this.matcher.findMatching(
       delivery.tenantId,
       delivery.workspaceId,
       delivery.eventName,
     );
+    const detectorAutomationId =
+      typeof delivery.payload?.automationId === 'string'
+        ? delivery.payload.automationId
+        : null;
+    if (
+      detectorAutomationId &&
+      delivery.eventName === 'leadflow.inbox.conversation.idle'
+    ) {
+      matches = matches.filter(
+        (match) => match.source.id === detectorAutomationId,
+      );
+    }
     if (matches.length === 0) return [];
 
     // One batched context load for the whole delivery: every matched automation

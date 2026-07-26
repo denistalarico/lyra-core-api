@@ -3,6 +3,7 @@ import {
   ConflictException,
   Injectable,
   NotFoundException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, IsNull, Repository } from 'typeorm';
@@ -43,6 +44,17 @@ type SendWhatsAppAgentTextInput = SendWhatsAppTextInput & {
   policyVersion: string;
 };
 
+export type SendWhatsAppAutomationMessageInput = {
+  tenantId: string;
+  workspaceId: string;
+  conversationId: string;
+  automationId: string;
+  idempotencyKey: string;
+  text?: string | null;
+  templateRef?: string | null;
+  templateLanguage?: string | null;
+};
+
 type WhatsAppTextActor =
   | { type: 'user' }
   | {
@@ -51,6 +63,10 @@ type WhatsAppTextActor =
       ownershipVersion: number;
       decisionId: string;
       policyVersion: string;
+    }
+  | {
+      type: 'automation';
+      automationId: string;
     };
 
 type SendWhatsAppMediaInput = {
@@ -151,6 +167,101 @@ export class WhatsAppOutboundService {
     });
   }
 
+  /**
+   * Canonical WhatsApp command for a governed automation.
+   *
+   * Free-form text is allowed only inside Meta's rolling 24-hour customer
+   * service window. Outside it, the caller must provide an approved template
+   * reference; the command never falls back to free-form text.
+   */
+  async sendAutomationMessage(input: SendWhatsAppAutomationMessageInput) {
+    const conversation = await this.conversationsRepository.findOne({
+      where: {
+        id: input.conversationId,
+        tenantId: input.tenantId,
+        workspaceId: input.workspaceId,
+      },
+    });
+    if (
+      !conversation ||
+      !conversation.channelId ||
+      !conversation.externalThreadId
+    ) {
+      throw new NotFoundException(
+        'WhatsApp conversation not found for automation.',
+      );
+    }
+    if (
+      conversation.ownershipState !== 'ai_active' ||
+      !conversation.aiEnabled
+    ) {
+      throw new ConflictException(
+        'Automatic message blocked by current conversation ownership.',
+      );
+    }
+
+    const lastInbound = await this.messagesRepository.findOne({
+      where: {
+        tenantId: input.tenantId,
+        workspaceId: input.workspaceId,
+        conversationId: conversation.id,
+        direction: 'inbound',
+      },
+      select: { id: true, occurredAt: true },
+      order: { occurredAt: 'DESC' },
+    });
+    const insideCustomerServiceWindow =
+      lastInbound !== null &&
+      Date.now() - lastInbound.occurredAt.getTime() < 24 * 60 * 60 * 1_000;
+    const text = input.text?.trim() ?? '';
+
+    if (insideCustomerServiceWindow && text) {
+      const result = await this.sendTextForActor(
+        {
+          ctx: {
+            tenantId: input.tenantId,
+            workspaceId: input.workspaceId,
+          },
+          channelId: conversation.channelId,
+          conversationId: conversation.id,
+          to: conversation.externalThreadId,
+          text,
+          idempotencyKey: input.idempotencyKey,
+        },
+        { type: 'automation', automationId: input.automationId },
+      );
+      this.assertAutomationSendConfirmed(result.message);
+      return result;
+    }
+
+    const templateRef = input.templateRef?.trim() ?? '';
+    if (!templateRef) {
+      throw new ConflictException(
+        'whatsapp_template_required_outside_customer_service_window',
+      );
+    }
+    const result = await this.sendAutomationTemplate({
+      conversation,
+      templateRef,
+      language: input.templateLanguage?.trim() || 'pt_BR',
+      automationId: input.automationId,
+      idempotencyKey: input.idempotencyKey,
+    });
+    this.assertAutomationSendConfirmed(result.message);
+    return result;
+  }
+
+  private assertAutomationSendConfirmed(message: InboxMessageEntity): void {
+    if (!['sent', 'delivered', 'read'].includes(message.status)) {
+      // A retry may find a previous pending/failed row with the same effect
+      // key. It must never reinterpret that uncertain outcome as confirmation
+      // and advance the D+N sequence.
+      throw new ServiceUnavailableException(
+        'Automation message delivery is not confirmed.',
+      );
+    }
+  }
+
   private async sendTextForActor(
     input: SendWhatsAppTextInput,
     actor: WhatsAppTextActor,
@@ -202,6 +313,14 @@ export class WhatsAppOutboundService {
     ) {
       throw new ConflictException(
         'AI send blocked by current conversation ownership.',
+      );
+    }
+    if (
+      actor.type === 'automation' &&
+      (conversation.ownershipState !== 'ai_active' || !conversation.aiEnabled)
+    ) {
+      throw new ConflictException(
+        'Automatic message blocked by current conversation ownership.',
       );
     }
     if (actor.type === 'agent') {
@@ -303,7 +422,12 @@ export class WhatsAppOutboundService {
       channelId: channel.id,
       contactId: conversation.contactId ?? null,
       direction: 'outbound',
-      senderType: actor.type === 'agent' ? 'agent' : 'user',
+      senderType:
+        actor.type === 'agent'
+          ? 'agent'
+          : actor.type === 'automation'
+            ? 'system'
+            : 'user',
       senderUserId: actor.type === 'user' ? (input.ctx.userId ?? null) : null,
       senderAgentId: actor.type === 'agent' ? actor.agentId : null,
       externalMessageId: null,
@@ -321,7 +445,9 @@ export class WhatsAppOutboundService {
               policyVersion: actor.policyVersion,
               ownershipVersion: actor.ownershipVersion,
             }
-          : {}),
+          : actor.type === 'automation'
+            ? { automationId: actor.automationId }
+            : {}),
         ...replyMetadata,
       },
       sentAt: null,
@@ -394,7 +520,12 @@ export class WhatsAppOutboundService {
         workspaceId: channel.workspaceId,
         conversationId: conversation.id,
         eventType: 'message_sent',
-        actorType: actor.type === 'agent' ? 'agent' : 'user',
+        actorType:
+          actor.type === 'agent'
+            ? 'agent'
+            : actor.type === 'automation'
+              ? 'system'
+              : 'user',
         actorUserId: actor.type === 'user' ? (input.ctx.userId ?? null) : null,
         payload: {
           messageId: message.id,
@@ -407,7 +538,9 @@ export class WhatsAppOutboundService {
                 decisionId: actor.decisionId,
                 policyVersion: actor.policyVersion,
               }
-            : {}),
+            : actor.type === 'automation'
+              ? { automationId: actor.automationId }
+              : {}),
         },
       });
       await manager.getRepository(InboxDomainOutboxEntity).save({
@@ -423,6 +556,15 @@ export class WhatsAppOutboundService {
           contactId: conversation.contactId,
           messageId: message.id,
           messageType: 'text',
+          authorType:
+            actor.type === 'automation'
+              ? 'system'
+              : actor.type === 'agent'
+                ? 'agent'
+                : 'user',
+          ...(actor.type === 'automation'
+            ? { automationId: actor.automationId }
+            : {}),
         },
         publishedAt: null,
       });
@@ -868,6 +1010,246 @@ export class WhatsAppOutboundService {
         },
       }),
     );
+  }
+
+  private async sendAutomationTemplate(input: {
+    conversation: InboxConversationEntity;
+    templateRef: string;
+    language: string;
+    automationId: string;
+    idempotencyKey: string;
+  }) {
+    const channel = await this.channelsRepository.findOne({
+      where: {
+        id: input.conversation.channelId as string,
+        tenantId: input.conversation.tenantId,
+        workspaceId: input.conversation.workspaceId,
+        type: 'whatsapp',
+        provider: 'meta',
+        status: 'active',
+        connectionStatus: 'connected',
+        deletedAt: IsNull(),
+      },
+    });
+    if (!channel?.externalPhoneNumberId) {
+      throw new NotFoundException('Active WhatsApp Meta channel not found.');
+    }
+    const accessToken = this.cryptoService.decrypt(
+      channel.accessTokenEncrypted,
+    );
+    if (!accessToken) {
+      throw new BadRequestException('WhatsApp access token is not configured.');
+    }
+    const recipient = this.outboundPolicy.authorize(
+      input.conversation.externalThreadId as string,
+      input.conversation.externalThreadId,
+    );
+
+    const existing = await this.messagesRepository.findOne({
+      where: {
+        tenantId: channel.tenantId,
+        workspaceId: channel.workspaceId,
+        idempotencyKey: input.idempotencyKey,
+      },
+    });
+    if (existing) {
+      if (
+        existing.channelId !== channel.id ||
+        existing.conversationId !== input.conversation.id
+      ) {
+        throw new ConflictException('Outbound idempotency intent changed.');
+      }
+      await this.metaLedger.replay({
+        tenantId: channel.tenantId,
+        workspaceId: channel.workspaceId,
+        channelId: channel.id,
+        conversationId: input.conversation.id,
+        operation: 'send_template',
+        idempotencyKey: input.idempotencyKey,
+        recipient,
+      });
+      return { conversation: input.conversation, message: existing, meta: {} };
+    }
+
+    const now = new Date();
+    const pending = this.messagesRepository.create({
+      tenantId: channel.tenantId,
+      workspaceId: channel.workspaceId,
+      conversationId: input.conversation.id,
+      channelId: channel.id,
+      contactId: input.conversation.contactId ?? null,
+      direction: 'outbound',
+      senderType: 'system',
+      senderUserId: null,
+      senderAgentId: null,
+      externalMessageId: null,
+      idempotencyKey: input.idempotencyKey,
+      messageType: 'template',
+      content: `[template:${input.templateRef}]`,
+      status: 'pending',
+      attachments: [],
+      metadata: {
+        provider: 'meta',
+        channelType: 'whatsapp',
+        automationId: input.automationId,
+        templateRef: input.templateRef,
+        templateLanguage: input.language,
+      },
+      sentAt: null,
+      deliveredAt: null,
+      readAt: null,
+      occurredAt: now,
+      providerSequence: null,
+    });
+    const persisted = await this.persistPendingMessage(
+      pending,
+      channel,
+      input.conversation,
+    );
+    if (!persisted.created) {
+      return {
+        conversation: input.conversation,
+        message: persisted.message,
+        meta: {},
+      };
+    }
+
+    const ledger = await this.metaLedger.reserve({
+      tenantId: channel.tenantId,
+      workspaceId: channel.workspaceId,
+      channelId: channel.id,
+      conversationId: input.conversation.id,
+      messageId: persisted.message.id,
+      operation: 'send_template',
+      idempotencyKey: input.idempotencyKey,
+      recipient,
+    });
+    const startedMs = Date.now();
+    let response: MetaSendMessageResponse;
+    try {
+      await this.metaLedger.started(ledger);
+      response = await this.sendTemplateToMeta({
+        phoneNumberId: channel.externalPhoneNumberId,
+        accessToken,
+        to: recipient.transportRecipient,
+        expectedTo: input.conversation.externalThreadId as string,
+        templateRef: input.templateRef,
+        language: input.language,
+      });
+      await this.metaLedger.succeeded(
+        ledger,
+        startedMs,
+        response.messages?.[0]?.id,
+      );
+    } catch (error) {
+      await this.metaLedger.failed(ledger, startedMs, error);
+      persisted.message.status = 'failed';
+      persisted.message.metadata = {
+        ...persisted.message.metadata,
+        errorCode: 'provider_send_failed',
+      };
+      await this.messagesRepository.save(persisted.message);
+      throw error;
+    }
+
+    const sentAt = new Date();
+    const externalMessageId = response.messages?.[0]?.id ?? null;
+    await this.dataSource.transaction(async (manager) => {
+      persisted.message.externalMessageId = externalMessageId;
+      persisted.message.status = 'sent';
+      persisted.message.sentAt = sentAt;
+      await manager.getRepository(InboxMessageEntity).save(persisted.message);
+
+      input.conversation.lastMessagePreview = '[modelo de mensagem]';
+      input.conversation.lastMessageAt = sentAt;
+      await manager
+        .getRepository(InboxConversationEntity)
+        .save(input.conversation);
+
+      await manager.getRepository(InboxConversationEventEntity).save({
+        tenantId: channel.tenantId,
+        workspaceId: channel.workspaceId,
+        conversationId: input.conversation.id,
+        eventType: 'message_sent',
+        actorType: 'system',
+        actorUserId: null,
+        payload: {
+          messageId: persisted.message.id,
+          externalMessageId,
+          channelId: channel.id,
+          channelType: 'whatsapp',
+          provider: 'meta',
+          automationId: input.automationId,
+          templateRef: input.templateRef,
+        },
+      });
+      await manager.getRepository(InboxDomainOutboxEntity).save({
+        tenantId: channel.tenantId,
+        workspaceId: channel.workspaceId,
+        aggregateType: 'inbox_conversation',
+        aggregateId: input.conversation.id,
+        eventName: 'leadflow.inbox.conversation.message.sent',
+        eventVersion: 1,
+        idempotencyKey: `message.sent:${persisted.message.id}`,
+        payload: {
+          conversationId: input.conversation.id,
+          contactId: input.conversation.contactId,
+          messageId: persisted.message.id,
+          messageType: 'template',
+          authorType: 'system',
+          automationId: input.automationId,
+        },
+        publishedAt: null,
+      });
+    });
+
+    return {
+      conversation: input.conversation,
+      message: persisted.message,
+      meta: response,
+    };
+  }
+
+  private async sendTemplateToMeta(input: {
+    phoneNumberId: string;
+    accessToken: string;
+    to: string;
+    expectedTo: string;
+    templateRef: string;
+    language: string;
+  }): Promise<MetaSendMessageResponse> {
+    const authorized = this.outboundPolicy.authorize(
+      input.to,
+      input.expectedTo,
+    );
+    const graphVersion = process.env.META_GRAPH_API_VERSION ?? 'v24.0';
+    const url = `https://graph.facebook.com/${graphVersion}/${input.phoneNumberId}/messages`;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${input.accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        messaging_product: 'whatsapp',
+        recipient_type: 'individual',
+        to: authorized.transportRecipient,
+        type: 'template',
+        template: {
+          name: input.templateRef,
+          language: { code: input.language },
+        },
+      }),
+      redirect: 'error',
+      signal: AbortSignal.timeout(15_000),
+    });
+    const data = (await response.json()) as MetaSendMessageResponse;
+    if (!response.ok || data.error) {
+      throw new BadRequestException(
+        'Não foi possível enviar o modelo pelo canal WhatsApp.',
+      );
+    }
+    return data;
   }
 
   private async sendToMeta(input: {

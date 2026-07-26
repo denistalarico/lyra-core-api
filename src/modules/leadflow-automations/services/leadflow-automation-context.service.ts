@@ -439,6 +439,15 @@ export class LeadFlowAutomationContextService {
       return true;
     }
     if (
+      signal === LeadFlowAutomationContextSignal.LeadReplied &&
+      delivery.eventName === 'leadflow.inbox.conversation.idle'
+    ) {
+      // The idle detector re-reads canonical message history immediately
+      // before emitting this event. The event is therefore evidence that no
+      // inbound reply exists after its baseline.
+      return false;
+    }
+    if (
       signal === LeadFlowAutomationContextSignal.HandoffActive &&
       delivery.eventName.startsWith(
         'leadflow.inbox.conversation.handoff.requested',

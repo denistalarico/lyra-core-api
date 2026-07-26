@@ -187,10 +187,9 @@ describe('LeadFlowAutomationShadowEvaluatorService', () => {
     );
   });
 
-  it('reports that no executor could carry the planned action', async () => {
-    // The whole point of shadow mode: the decision is real, the effect is not.
-    // Uses a configuration that consults no context, so the evaluation reaches
-    // action planning and the executor gate is what stops it.
+  it('reports the scheduler action as available after Fase 6', async () => {
+    // Capability is now present. The default-closed execution gate still sends
+    // this path to a shadow run, but it is no longer executor-blocked.
     const { service } = build([
       buildMatch({
         conditionConfig: {},
@@ -203,7 +202,7 @@ describe('LeadFlowAutomationShadowEvaluatorService', () => {
 
     expect(summaries[0].wouldAct).toBe(true);
     expect(summaries[0].contextGapCount).toBe(0);
-    expect(summaries[0].blockedByExecutor).toBe(true);
+    expect(summaries[0].blockedByExecutor).toBe(false);
   });
 
   it('scopes the match to the delivery tenant and workspace', async () => {

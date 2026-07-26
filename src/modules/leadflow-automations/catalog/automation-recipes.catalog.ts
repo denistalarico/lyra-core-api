@@ -229,6 +229,7 @@ function buildRecipe(seed: RecipeSeed): LeadFlowAutomationRecipeCatalogItem {
 const ESSENTIAL_SEEDS: RecipeSeed[] = [
   {
     key: 'followup_idle_lead',
+    templateVersion: 3,
     requiredDependencies: [
       LeadFlowAutomationDependency.EventFanOut,
       LeadFlowAutomationDependency.SchedulerRuntime,
@@ -247,10 +248,15 @@ const ESSENTIAL_SEEDS: RecipeSeed[] = [
     triggerConfig: { delayHours: 24 },
     conditionConfig: {},
     actionConfig: { maxAttempts: 3 },
+    messageConfig: {
+      baseMessage:
+        'Olá! Podemos continuar seu atendimento? Se ainda tiver interesse, responda a esta mensagem.',
+    },
     schedulePolicy: { cooldownHours: 24 },
   },
   {
     key: 'followup_by_crm_stage',
+    templateVersion: 3,
     requiredDependencies: [
       LeadFlowAutomationDependency.EventFanOut,
       LeadFlowAutomationDependency.SchedulerRuntime,
@@ -268,6 +274,10 @@ const ESSENTIAL_SEEDS: RecipeSeed[] = [
     limitsLabel: 'Respeita limite por oportunidade e horário comercial.',
     triggerConfig: { idleHoursInStage: 48, stageRef: null, pipelineRef: null },
     actionConfig: { maxAttempts: 2 },
+    messageConfig: {
+      baseMessage:
+        'Olá! Podemos continuar seu atendimento? Se ainda tiver interesse, responda a esta mensagem.',
+    },
   },
   {
     key: 'appointment_reminder',

@@ -59,6 +59,27 @@ export class LeadFlowAutomationTriggerMatcherService {
     eventName: string,
   ): Promise<LeadFlowAutomationTriggerMatch[]> {
     const triggers = this.triggersForEvent(eventName);
+    return this.findMatchingTriggers(tenantId, workspaceId, triggers);
+  }
+
+  /**
+   * Used by derived-trigger producers before a canonical event exists. It reads
+   * the same immutable published snapshot as event matching, so scheduling an
+   * idle detector cannot use a draft configuration.
+   */
+  async findMatchingTrigger(
+    tenantId: string,
+    workspaceId: string,
+    trigger: string,
+  ): Promise<LeadFlowAutomationTriggerMatch[]> {
+    return this.findMatchingTriggers(tenantId, workspaceId, [trigger]);
+  }
+
+  private async findMatchingTriggers(
+    tenantId: string,
+    workspaceId: string,
+    triggers: string[],
+  ): Promise<LeadFlowAutomationTriggerMatch[]> {
     if (triggers.length === 0) {
       return [];
     }

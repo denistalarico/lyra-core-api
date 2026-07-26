@@ -316,7 +316,7 @@ export class LeadFlowAutomationContextLoaderService {
         queryCount += 1;
         // Own table, so this is not a cross-domain read. One grouped query
         // answers for every automation matched by this delivery.
-        const rows = await this.runs
+        const query = this.runs
           .createQueryBuilder('run')
           .select('run.automation_id', 'automationId')
           .addSelect('COUNT(*)', 'attempts')
@@ -327,13 +327,25 @@ export class LeadFlowAutomationContextLoaderService {
           })
           .andWhere('run.automation_id IN (:...ids)', {
             ids: request.automationIds,
-          })
-          .groupBy('run.automation_id')
-          .getRawMany<{
-            automationId: string;
-            attempts: string;
-            lastRunAt: Date | null;
-          }>();
+          });
+        const historySubject =
+          request.subjects.inbox_conversation ??
+          request.subjects.crm_opportunity ??
+          null;
+        if (historySubject) {
+          query.andWhere(
+            `(
+              run.input_snapshot #>> '{contextSnapshot,subjects,inbox_conversation}' = :historySubject
+              OR run.input_snapshot #>> '{contextSnapshot,subjects,crm_opportunity}' = :historySubject
+            )`,
+            { historySubject },
+          );
+        }
+        const rows = await query.groupBy('run.automation_id').getRawMany<{
+          automationId: string;
+          attempts: string;
+          lastRunAt: Date | null;
+        }>();
 
         const byAutomation = new Map(
           rows.map((row) => [row.automationId, row]),

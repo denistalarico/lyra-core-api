@@ -1,16 +1,15 @@
 import { createHash } from 'node:crypto';
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import type { LeadFlowEventDeliveryEntity } from '../../leadflow-events/entities/leadflow-event-delivery.entity';
 import type { LeadFlowAutomationEntity } from '../entities/leadflow-automation.entity';
 import type { LeadFlowAutomationVersionEntity } from '../entities/leadflow-automation-version.entity';
-import type {
-  AutomationEffectRequest,
-  AutomationExecutor,
-} from '../executors';
+import type { AutomationEffectRequest, AutomationExecutor } from '../executors';
 import { MoveOpportunityStageExecutor } from '../executors/move-opportunity-stage.executor';
 import { AssignOpportunityOwnerExecutor } from '../executors/assign-opportunity-owner.executor';
 import { RequestHandoffExecutor } from '../executors/request-handoff.executor';
 import { NotifyUserExecutor } from '../executors/notify-user.executor';
+import { ScheduleFollowupExecutor } from '../executors/schedule-followup.executor';
+import { SendMessageExecutor } from '../executors/send-message.executor';
 import type { LeadFlowJsonObject } from '../types/leadflow-automation.types';
 import type { LeadFlowAutomationContextSnapshot } from '../types/leadflow-automation-context.types';
 import type { LeadFlowAutomationTrigger } from '../types/leadflow-automation.types';
@@ -38,7 +37,10 @@ const OPPORTUNITY_ACTIONS = new Set<string>([
 ]);
 
 /** Actions whose effect targets an inbox conversation in the envelope. */
-const CONVERSATION_ACTIONS = new Set<string>(['request_handoff']);
+const CONVERSATION_ACTIONS = new Set<string>([
+  'request_handoff',
+  'send_message',
+]);
 
 export interface ExecutionInput {
   automation: LeadFlowAutomationEntity;
@@ -78,6 +80,8 @@ export class LeadFlowAutomationExecutionService {
     assignOwnerExecutor: AssignOpportunityOwnerExecutor,
     requestHandoffExecutor: RequestHandoffExecutor,
     notifyUserExecutor: NotifyUserExecutor,
+    @Optional() scheduleFollowupExecutor?: ScheduleFollowupExecutor,
+    @Optional() sendMessageExecutor?: SendMessageExecutor,
   ) {
     // The productive executors this phase wires. The gate's action allowlist is
     // the authority on what may run; this map is what *can*.
@@ -87,6 +91,15 @@ export class LeadFlowAutomationExecutionService {
       [requestHandoffExecutor.actionKey, requestHandoffExecutor],
       [notifyUserExecutor.actionKey, notifyUserExecutor],
     ]);
+    if (scheduleFollowupExecutor) {
+      this.executors.set(
+        scheduleFollowupExecutor.actionKey,
+        scheduleFollowupExecutor,
+      );
+    }
+    if (sendMessageExecutor) {
+      this.executors.set(sendMessageExecutor.actionKey, sendMessageExecutor);
+    }
   }
 
   async execute(input: ExecutionInput): Promise<ExecutionOutcome> {
@@ -126,6 +139,13 @@ export class LeadFlowAutomationExecutionService {
       if (!subject.conversationId) {
         return { executed: false, reason: 'no_conversation_in_envelope' };
       }
+    }
+    if (
+      actionKeys.includes('schedule_followup') &&
+      !subject.conversationId &&
+      !subject.opportunityId
+    ) {
+      return { executed: false, reason: 'no_followup_subject_in_envelope' };
     }
 
     const effects: LeadFlowAutomationLiveEffect[] = [];
@@ -193,6 +213,7 @@ export class LeadFlowAutomationExecutionService {
     // scope, idempotency, revalidation — is the same regardless of effect.
     const { payload, policyPrefix } = this.effectPayload(
       automation,
+      delivery,
       subject,
       actionKey,
     );
@@ -226,6 +247,7 @@ export class LeadFlowAutomationExecutionService {
    */
   private effectPayload(
     automation: LeadFlowAutomationEntity,
+    delivery: LeadFlowEventDeliveryEntity,
     subject: EffectSubject,
     actionKey: string,
   ): { payload: LeadFlowJsonObject; policyPrefix: string } {
@@ -254,6 +276,35 @@ export class LeadFlowAutomationExecutionService {
           title: 'Lead quente',
           body: 'Um lead cruzou o limiar de qualificação — priorize o atendimento.',
           actionUrl: '/leadflow/crm',
+        },
+      };
+    }
+
+    if (actionKey === 'schedule_followup') {
+      return {
+        policyPrefix: 'followup',
+        payload: this.followupPayload(automation, delivery, subject),
+      };
+    }
+
+    if (actionKey === 'send_message') {
+      const message = automation.messageConfig ?? {};
+      return {
+        policyPrefix: 'message',
+        payload: {
+          conversationId: subject.conversationId,
+          text:
+            typeof message.baseMessage === 'string'
+              ? message.baseMessage
+              : null,
+          templateRef:
+            typeof message.templateRef === 'string'
+              ? message.templateRef
+              : null,
+          templateLanguage:
+            typeof message.templateLanguage === 'string'
+              ? message.templateLanguage
+              : 'pt_BR',
         },
       };
     }
@@ -306,6 +357,76 @@ export class LeadFlowAutomationExecutionService {
           : null,
     };
   }
+
+  private followupPayload(
+    automation: LeadFlowAutomationEntity,
+    delivery: LeadFlowEventDeliveryEntity,
+    subject: EffectSubject,
+  ): LeadFlowJsonObject {
+    const trigger = automation.triggerConfig ?? {};
+    const actions = automation.actionConfig ?? {};
+    const conditions = automation.conditionConfig ?? {};
+    const message = automation.messageConfig ?? {};
+    const schedule = automation.schedulePolicy ?? {};
+    const baselineAt =
+      typeof delivery.payload?.idleSince === 'string'
+        ? delivery.payload.idleSince
+        : delivery.occurredAt.toISOString();
+    const baseline = new Date(baselineAt);
+    const safeBaseline = Number.isFinite(baseline.getTime())
+      ? baseline
+      : delivery.occurredAt;
+    const maxAttempts = clampInteger(actions.maxAttempts, 1, 7, 1);
+
+    let offsets: number[];
+    let firstOffset: number;
+    if (delivery.eventName === 'leadflow.inbox.conversation.idle') {
+      const delay = positiveNumber(trigger.delayHours, 24);
+      offsets = [delay, delay * 3, delay * 7].slice(0, maxAttempts);
+      firstOffset = delay;
+    } else {
+      const idle = positiveNumber(trigger.idleHoursInStage, 48);
+      const cooldown = positiveNumber(schedule.cooldownHours, idle);
+      offsets = Array.from(
+        { length: maxAttempts },
+        (_, index) => idle + cooldown * index,
+      );
+      firstOffset = idle;
+    }
+    const firstDue = new Date(
+      safeBaseline.getTime() + firstOffset * 60 * 60 * 1_000,
+    );
+    const fireAt = new Date(Math.max(Date.now(), firstDue.getTime()));
+
+    return {
+      conversationId: subject.conversationId,
+      opportunityId:
+        subject.opportunityId ??
+        (typeof delivery.payload?.opportunityId === 'string'
+          ? delivery.payload.opportunityId
+          : null),
+      expectedStageId:
+        typeof delivery.payload?.toStageId === 'string'
+          ? delivery.payload.toStageId
+          : null,
+      baselineAt: safeBaseline.toISOString(),
+      fireAt: fireAt.toISOString(),
+      attemptOffsetsHours: offsets,
+      stopIfReplied: conditions.stopIfReplied !== false,
+      stopIfHandoff: conditions.stopIfHandoff !== false,
+      respectBusinessHours:
+        conditions.businessHoursOnly === true ||
+        schedule.respectBusinessHours !== false,
+      text:
+        typeof message.baseMessage === 'string' ? message.baseMessage : null,
+      templateRef:
+        typeof message.templateRef === 'string' ? message.templateRef : null,
+      templateLanguage:
+        typeof message.templateLanguage === 'string'
+          ? message.templateLanguage
+          : 'pt_BR',
+    };
+  }
 }
 
 function subjectsToRecord(
@@ -321,4 +442,21 @@ function subjectsToRecord(
 function uuidOrEvent(delivery: LeadFlowEventDeliveryEntity): string {
   const value = delivery.payload?.correlationId;
   return typeof value === 'string' ? value : delivery.sourceEventId;
+}
+
+function positiveNumber(value: unknown, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0
+    ? value
+    : fallback;
+}
+
+function clampInteger(
+  value: unknown,
+  min: number,
+  max: number,
+  fallback: number,
+): number {
+  return typeof value === 'number' && Number.isInteger(value)
+    ? Math.max(min, Math.min(max, value))
+    : fallback;
 }

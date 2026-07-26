@@ -22,8 +22,11 @@ export const LEADFLOW_AUTOMATION_SATISFIED_DEPENDENCIES: Record<
   boolean
 > = {
   [LeadFlowAutomationDependency.EventFanOut]: true,
-  [LeadFlowAutomationDependency.SchedulerRuntime]: false,
-  [LeadFlowAutomationDependency.MessageGeneration]: false,
+  // Fase 6A: PostgreSQL timers + durable poller implement the approved D2 port.
+  [LeadFlowAutomationDependency.SchedulerRuntime]: true,
+  // Fase 6C: static/template outbound is available through the Inbox command.
+  // LLM copy generation is not implied; baseMessage/templateRef remain config.
+  [LeadFlowAutomationDependency.MessageGeneration]: true,
   // The canonical inbox ownership/handoff command reached Automations in Fase 5A
   // (RequestHandoffExecutor drives ConversationOwnershipService.requestHandoff).
   [LeadFlowAutomationDependency.OwnershipCommand]: true,

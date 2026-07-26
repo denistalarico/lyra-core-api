@@ -38,45 +38,39 @@ describe('LeadFlowAutomationLifecycleService', () => {
   });
 
   describe('dependency gating', () => {
-    it('blocks a recipe whose dependencies are unmet', () => {
+    it('reports the follow-up recipe dependencies as satisfied after Fase 6', () => {
       const result = evaluate({ recipe: idleLead });
 
-      expect(result.state).toBe(
-        LeadFlowAutomationLifecycleState.BlockedByDependency,
-      );
-      expect(result.canActivate).toBe(false);
-      expect(result.unmetDependencies.length).toBeGreaterThan(0);
-      expect(result.blockedReason).toBeTruthy();
+      expect(result.state).toBe(LeadFlowAutomationLifecycleState.Ready);
+      expect(result.canActivate).toBe(true);
+      expect(result.unmetDependencies).toEqual([]);
     });
 
-    it('reports a persisted `active` row as blocked, not active', () => {
-      // Rows switched on before gating existed must not keep claiming to run.
+    it('reports a persisted active follow-up row as active', () => {
       const result = evaluate({
         recipe: idleLead,
         status: LeadFlowAutomationStatus.Active,
       });
 
-      expect(result.state).toBe(
-        LeadFlowAutomationLifecycleState.BlockedByDependency,
-      );
+      expect(result.state).toBe(LeadFlowAutomationLifecycleState.Active);
       expect(result.status).toBe(LeadFlowAutomationStatus.Active);
       expect(result.canActivate).toBe(false);
     });
 
-    it('outranks a configuration problem, because config cannot fix it', () => {
+    it('surfaces configuration now that dependencies are available', () => {
       const result = evaluate({
         recipe: idleLead,
         missingConfiguration: ['trigger.delayHours'],
       });
 
       expect(result.state).toBe(
-        LeadFlowAutomationLifecycleState.BlockedByDependency,
+        LeadFlowAutomationLifecycleState.RequiresConfiguration,
       );
     });
 
-    it('every catalogued recipe is blocked today', () => {
+    it('the follow-up recipe can activate when configured', () => {
       for (const recipe of [idleLead]) {
-        expect(evaluate({ recipe }).canActivate).toBe(false);
+        expect(evaluate({ recipe }).canActivate).toBe(true);
       }
     });
   });

@@ -6,6 +6,8 @@ import type { MoveOpportunityStageExecutor } from '../executors/move-opportunity
 import type { AssignOpportunityOwnerExecutor } from '../executors/assign-opportunity-owner.executor';
 import type { RequestHandoffExecutor } from '../executors/request-handoff.executor';
 import type { NotifyUserExecutor } from '../executors/notify-user.executor';
+import type { ScheduleFollowupExecutor } from '../executors/schedule-followup.executor';
+import type { SendMessageExecutor } from '../executors/send-message.executor';
 import type { LeadFlowAutomationContextSnapshot } from '../types/leadflow-automation-context.types';
 import type { LeadFlowAutomationEvaluation } from './leadflow-automation-evaluation.service';
 import { LeadFlowAutomationExecutionService } from './leadflow-automation-execution.service';
@@ -86,6 +88,14 @@ function build(options: {
     actionKey: 'notify_user',
     execute,
   } as unknown as NotifyUserExecutor;
+  const scheduleFollowupExecutor = {
+    actionKey: 'schedule_followup',
+    execute,
+  } as unknown as ScheduleFollowupExecutor;
+  const sendMessageExecutor = {
+    actionKey: 'send_message',
+    execute,
+  } as unknown as SendMessageExecutor;
 
   const gate = {
     evaluate: jest.fn().mockResolvedValue(
@@ -112,6 +122,8 @@ function build(options: {
     assignOwnerExecutor,
     requestHandoffExecutor,
     notifyUserExecutor,
+    scheduleFollowupExecutor,
+    sendMessageExecutor,
   );
   return { service, execute, recordLiveRun };
 }
@@ -285,5 +297,83 @@ describe('LeadFlowAutomationExecutionService', () => {
       reason: 'no_conversation_in_envelope',
     });
     expect(execute).not.toHaveBeenCalled();
+  });
+
+  it('builds the durable D+1/D+3/D+7 follow-up schedule', async () => {
+    const { service, execute } = build({ gate: { allowed: true } });
+
+    await service.execute({
+      ...input(),
+      automation: {
+        ...automation(),
+        recipeKey: 'followup_idle_lead',
+        triggerConfig: { delayHours: 24 },
+        actionConfig: { maxAttempts: 3 },
+        conditionConfig: { stopIfReplied: true, stopIfHandoff: true },
+        messageConfig: {
+          baseMessage: 'Podemos continuar?',
+          templateRef: 'followup_v1',
+        },
+        schedulePolicy: { respectBusinessHours: true },
+      } as LeadFlowAutomationEntity,
+      evaluation: {
+        wouldAct: true,
+        plannedActions: ['schedule_followup'],
+      } as LeadFlowAutomationEvaluation,
+      delivery: delivery({
+        eventName: 'leadflow.inbox.conversation.idle',
+        aggregateType: 'inbox_conversation',
+        aggregateId: 'conversation-9',
+        occurredAt: new Date('2026-07-27T12:00:00.000Z'),
+        payload: {
+          idleSince: '2026-07-26T12:00:00.000Z',
+          opportunityId: OPPORTUNITY,
+        },
+      }),
+    });
+
+    const request = (execute.mock.calls[0] as unknown[])[0] as {
+      payload: Record<string, unknown>;
+    };
+    expect(request.payload).toMatchObject({
+      conversationId: 'conversation-9',
+      opportunityId: OPPORTUNITY,
+      baselineAt: '2026-07-26T12:00:00.000Z',
+      attemptOffsetsHours: [24, 72, 168],
+      templateRef: 'followup_v1',
+      respectBusinessHours: true,
+    });
+  });
+
+  it('maps a direct send_message only to the conversation envelope', async () => {
+    const { service, execute } = build({ gate: { allowed: true } });
+
+    await service.execute({
+      ...input(),
+      automation: {
+        ...automation(),
+        messageConfig: {
+          baseMessage: 'Olá!',
+          templateRef: 'welcome_v1',
+        },
+      } as LeadFlowAutomationEntity,
+      evaluation: {
+        wouldAct: true,
+        plannedActions: ['send_message'],
+      } as LeadFlowAutomationEvaluation,
+      delivery: delivery({
+        aggregateType: 'inbox_conversation',
+        aggregateId: 'conversation-9',
+      }),
+    });
+
+    const request = (execute.mock.calls[0] as unknown[])[0] as {
+      payload: Record<string, unknown>;
+    };
+    expect(request.payload).toMatchObject({
+      conversationId: 'conversation-9',
+      text: 'Olá!',
+      templateRef: 'welcome_v1',
+    });
   });
 });

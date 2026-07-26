@@ -124,6 +124,17 @@ export class LeadFlowAutomationConfigSchemaService {
       }
     }
 
+    // A follow-up normally fires at or beyond Meta's rolling 24-hour customer
+    // service window. It is unsafe to activate one without an approved template:
+    // the Inbox command refuses free-form text outside that window.
+    if (
+      ['followup_idle_lead', 'followup_by_crm_stage'].includes(recipe.key) &&
+      this.isEmpty(config.message?.templateRef) &&
+      !missing.includes('message.templateRef')
+    ) {
+      missing.push('message.templateRef');
+    }
+
     return missing;
   }
 

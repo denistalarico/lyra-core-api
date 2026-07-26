@@ -99,6 +99,42 @@ function notifyUserAvailability(): AutomationExecutorAvailability {
   };
 }
 
+function sendMessageAvailability(): AutomationExecutorAvailability {
+  const available = isDependencySatisfied(
+    LeadFlowAutomationDependency.MessageGeneration,
+  );
+  return {
+    actionKey: 'send_message',
+    available,
+    reason: available ? null : 'dependency_missing',
+    dependency: available
+      ? null
+      : LeadFlowAutomationDependency.MessageGeneration,
+    owningDomain: 'leadflow.inbox',
+    description: available
+      ? 'Envio WhatsApp governado pelo Inbox, com texto apenas na janela de 24h e template obrigatório fora dela.'
+      : 'O comando canônico de mensagem automática ainda não está disponível.',
+  };
+}
+
+function scheduleFollowupAvailability(): AutomationExecutorAvailability {
+  const available = isDependencySatisfied(
+    LeadFlowAutomationDependency.SchedulerRuntime,
+  );
+  return {
+    actionKey: 'schedule_followup',
+    available,
+    reason: available ? null : 'dependency_missing',
+    dependency: available
+      ? null
+      : LeadFlowAutomationDependency.SchedulerRuntime,
+    owningDomain: 'leadflow.automations',
+    description: available
+      ? 'Follow-up agendado no SchedulerRuntime durável em PostgreSQL.'
+      : 'O scheduler durável de follow-up ainda não está disponível.',
+  };
+}
+
 const unavailable = (
   actionKey: LeadFlowAutomationAction,
   owningDomain: string,
@@ -122,18 +158,6 @@ const unavailable = (
  * payload without inventing privilege.
  */
 const EXECUTORS = [
-  unavailable(
-    'send_message',
-    'leadflow.inbox',
-    'O adapter de envio canônico pelo Inbox ainda não foi conectado.',
-    LeadFlowAutomationDependency.MessageGeneration,
-  ),
-  unavailable(
-    'schedule_followup',
-    'leadflow.automations',
-    'O scheduler durável de follow-up ainda não existe.',
-    LeadFlowAutomationDependency.SchedulerRuntime,
-  ),
   unavailable(
     'transfer_opportunity_pipeline',
     'leadflow.crm',
@@ -200,6 +224,8 @@ const COMPUTED_AVAILABILITY: Record<
   assign_opportunity_owner: leadDistributionAvailability,
   request_handoff: ownershipCommandAvailability,
   notify_user: notifyUserAvailability,
+  send_message: sendMessageAvailability,
+  schedule_followup: scheduleFollowupAvailability,
 };
 
 export function executorAvailability(
