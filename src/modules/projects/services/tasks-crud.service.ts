@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Brackets, IsNull, Repository } from 'typeorm';
 import {
+  AgencyPersonalTaskStage,
   AgencyProject,
   AgencyTask,
   AgencyProjectEvent,
@@ -12,11 +13,7 @@ import {
   AgencyTaskTimeEntry,
 } from '../entities';
 import { TaskStatus, TaskVisibility } from '../enums';
-import {
-  CreateTaskDto,
-  ListTasksQueryDto,
-  UpdateTaskDto,
-} from '../dto';
+import { CreateTaskDto, ListTasksQueryDto, UpdateTaskDto } from '../dto';
 import { FilesService } from '../../../common/files/files.service';
 import { TaskNotificationPublisher } from './task-notification.publisher';
 
@@ -57,6 +54,9 @@ export class TasksCrudService {
     @InjectRepository(AgencyTaskStage, 'agency')
     private readonly taskStagesRepository: Repository<AgencyTaskStage>,
 
+    @InjectRepository(AgencyPersonalTaskStage, 'agency')
+    private readonly personalTaskStagesRepository: Repository<AgencyPersonalTaskStage>,
+
     @InjectRepository(AgencyTaskAttachment, 'agency')
     private readonly attachmentsRepository: Repository<AgencyTaskAttachment>,
 
@@ -73,7 +73,11 @@ export class TasksCrudService {
     private readonly taskNotificationPublisher: TaskNotificationPublisher,
   ) {}
 
-  private recordProjectEvent(context: RequestContext, projectId: string, body: string) {
+  private recordProjectEvent(
+    context: RequestContext,
+    projectId: string,
+    body: string,
+  ) {
     const event = this.eventsRepository.create({
       tenantId: context.tenantId,
       workspaceId: context.workspaceId,
@@ -104,12 +108,60 @@ export class TasksCrudService {
     return stage?.id ?? null;
   }
 
+  private async resolveAssigneeUserId(
+    context: RequestContext,
+    assigneeId: string,
+  ): Promise<string | null> {
+    const rows: Array<{ userId: string | null }> =
+      await this.tasksRepository.manager.query(
+        `SELECT user_id AS "userId"
+         FROM team_members
+         WHERE tenant_id = $1
+           AND workspace_id = $2
+           AND id = $3
+         LIMIT 1`,
+        [context.tenantId, context.workspaceId, assigneeId],
+      );
+
+    if (rows.length > 0) {
+      return rows[0].userId;
+    }
+
+    // Some legacy and private tasks store the user id directly.
+    return assigneeId;
+  }
+
+  private async getInitialPersonalTaskStageId(
+    context: RequestContext,
+    assigneeId: string,
+  ) {
+    const userId = await this.resolveAssigneeUserId(context, assigneeId);
+
+    if (!userId) return null;
+
+    const stage = await this.personalTaskStagesRepository.findOne({
+      where: {
+        tenantId: context.tenantId,
+        workspaceId: context.workspaceId,
+        userId,
+      },
+      order: {
+        isDefault: 'DESC',
+        position: 'ASC',
+        createdAt: 'ASC',
+      },
+    });
+
+    return stage?.id ?? null;
+  }
+
   private async getProjectStageIdFromLegacyStagePayload(
     context: RequestContext,
     projectId: string | null,
     stageId: string | null | undefined,
   ): Promise<string | null | undefined> {
-    if (!projectId || stageId === undefined || stageId === null) return undefined;
+    if (!projectId || stageId === undefined || stageId === null)
+      return undefined;
 
     const stage = await this.taskStagesRepository.findOne({
       where: {
@@ -146,14 +198,18 @@ export class TasksCrudService {
     });
 
     if (task) {
-      task.trackedMinutes = (task.trackedMinutes ?? 0) + (entry.durationMinutes ?? 0);
+      task.trackedMinutes =
+        (task.trackedMinutes ?? 0) + (entry.durationMinutes ?? 0);
       await this.tasksRepository.save(task);
     }
 
     return entry;
   }
 
-  private async stopActiveTimersForTask(context: RequestContext, taskId: string) {
+  private async stopActiveTimersForTask(
+    context: RequestContext,
+    taskId: string,
+  ) {
     const entries = await this.timeEntriesRepository.find({
       where: {
         tenantId: context.tenantId,
@@ -172,8 +228,12 @@ export class TasksCrudService {
     const qb = this.tasksRepository
       .createQueryBuilder('task')
       .where('task.tenant_id = :tenantId', { tenantId: context.tenantId })
-      .andWhere('task.workspace_id = :workspaceId', { workspaceId: context.workspaceId })
-      .andWhere('task.visibility = :visibility', { visibility: TaskVisibility.Workspace });
+      .andWhere('task.workspace_id = :workspaceId', {
+        workspaceId: context.workspaceId,
+      })
+      .andWhere('task.visibility = :visibility', {
+        visibility: TaskVisibility.Workspace,
+      });
 
     if (query.includeArchived !== 'true') {
       qb.andWhere('task.archived_at IS NULL');
@@ -191,17 +251,20 @@ export class TasksCrudService {
   async listMyTasks(context: RequestContext, query: ListTasksQueryDto) {
     // Task assignees are stored as team-member ids; match both that and the raw
     // user id so assigning a user to a task surfaces it in their My Tasks.
-    const memberRows: Array<{ id: string }> = await this.tasksRepository.manager.query(
-      `SELECT id FROM team_members WHERE tenant_id = $1 AND user_id = $2`,
-      [context.tenantId, context.userId],
-    );
+    const memberRows: Array<{ id: string }> =
+      await this.tasksRepository.manager.query(
+        `SELECT id FROM team_members WHERE tenant_id = $1 AND user_id = $2`,
+        [context.tenantId, context.userId],
+      );
     const assigneeIds = Array.from(
       new Set([context.userId, ...memberRows.map((row) => row.id)]),
     );
     const qb = this.tasksRepository
       .createQueryBuilder('task')
       .where('task.tenant_id = :tenantId', { tenantId: context.tenantId })
-      .andWhere('task.workspace_id = :workspaceId', { workspaceId: context.workspaceId })
+      .andWhere('task.workspace_id = :workspaceId', {
+        workspaceId: context.workspaceId,
+      })
       .andWhere(
         new Brackets((subQb) => {
           subQb
@@ -260,7 +323,10 @@ export class TasksCrudService {
       throw new NotFoundException('Task not found');
     }
 
-    if (task.visibility === TaskVisibility.Private && task.createdById !== context.userId) {
+    if (
+      task.visibility === TaskVisibility.Private &&
+      task.createdById !== context.userId
+    ) {
       throw new NotFoundException('Task not found');
     }
 
@@ -269,11 +335,13 @@ export class TasksCrudService {
 
   async createWorkspaceTask(context: RequestContext, dto: CreateTaskDto) {
     const projectId = dto.projectId ?? null;
-    const legacyProjectStageId = await this.getProjectStageIdFromLegacyStagePayload(
-      context,
-      projectId,
-      dto.stageId,
-    );
+    const assigneeId = dto.assigneeId ?? null;
+    const legacyProjectStageId =
+      await this.getProjectStageIdFromLegacyStagePayload(
+        context,
+        projectId,
+        dto.stageId,
+      );
     const stageId =
       legacyProjectStageId !== undefined
         ? await this.getFirstWorkspaceTaskStageId(context)
@@ -282,6 +350,9 @@ export class TasksCrudService {
           : projectId
             ? await this.getFirstWorkspaceTaskStageId(context)
             : null;
+    const personalStageId = assigneeId
+      ? await this.getInitialPersonalTaskStageId(context, assigneeId)
+      : null;
     const task = this.tasksRepository.create({
       tenantId: context.tenantId,
       workspaceId: context.workspaceId,
@@ -291,9 +362,9 @@ export class TasksCrudService {
       projectStageId:
         dto.projectStageId !== undefined
           ? dto.projectStageId
-          : legacyProjectStageId ?? null,
-      personalStageId: null,
-      assigneeId: dto.assigneeId ?? null,
+          : (legacyProjectStageId ?? null),
+      personalStageId,
+      assigneeId,
       createdById: context.userId,
       title: dto.title,
       description: dto.description ?? null,
@@ -315,7 +386,11 @@ export class TasksCrudService {
 
     const saved = await this.tasksRepository.save(task);
     if (dto.projectId) {
-      void this.recordProjectEvent(context, dto.projectId, `Tarefa criada: "${dto.title}"`);
+      void this.recordProjectEvent(
+        context,
+        dto.projectId,
+        `Tarefa criada: "${dto.title}"`,
+      );
     }
 
     if (saved.assigneeId) {
@@ -328,7 +403,10 @@ export class TasksCrudService {
     return saved;
   }
 
-  createMyTask(context: RequestContext, dto: CreateTaskDto) {
+  async createMyTask(context: RequestContext, dto: CreateTaskDto) {
+    const personalStageId =
+      dto.personalStageId ??
+      (await this.getInitialPersonalTaskStageId(context, context.userId));
     const task = this.tasksRepository.create({
       tenantId: context.tenantId,
       workspaceId: context.workspaceId,
@@ -336,7 +414,7 @@ export class TasksCrudService {
       clientId: dto.clientId ?? null,
       stageId: null,
       projectStageId: null,
-      personalStageId: dto.personalStageId ?? null,
+      personalStageId,
       assigneeId: context.userId,
       createdById: context.userId,
       title: dto.title,
@@ -371,11 +449,12 @@ export class TasksCrudService {
     if (dto.projectId !== undefined) task.projectId = dto.projectId;
     if (dto.clientId !== undefined) task.clientId = dto.clientId;
     if (dto.stageId !== undefined) {
-      const legacyProjectStageId = await this.getProjectStageIdFromLegacyStagePayload(
-        context,
-        task.projectId,
-        dto.stageId,
-      );
+      const legacyProjectStageId =
+        await this.getProjectStageIdFromLegacyStagePayload(
+          context,
+          task.projectId,
+          dto.stageId,
+        );
 
       if (legacyProjectStageId !== undefined) {
         task.projectStageId = legacyProjectStageId;
@@ -383,14 +462,29 @@ export class TasksCrudService {
         task.stageId = dto.stageId;
       }
     }
-    if (dto.projectStageId !== undefined) task.projectStageId = dto.projectStageId;
-    if (dto.personalStageId !== undefined) task.personalStageId = dto.personalStageId;
-    if (dto.assigneeId !== undefined) task.assigneeId = dto.assigneeId;
+    if (dto.projectStageId !== undefined)
+      task.projectStageId = dto.projectStageId;
+    if (dto.personalStageId !== undefined)
+      task.personalStageId = dto.personalStageId;
+    if (dto.assigneeId !== undefined) {
+      task.assigneeId = dto.assigneeId;
+
+      if (
+        dto.personalStageId === undefined &&
+        dto.assigneeId !== previousAssigneeId
+      ) {
+        task.personalStageId = dto.assigneeId
+          ? await this.getInitialPersonalTaskStageId(context, dto.assigneeId)
+          : null;
+      }
+    }
     if (dto.priority !== undefined) task.priority = dto.priority;
     if (dto.taskTypeId !== undefined) task.taskTypeId = dto.taskTypeId;
     if (dto.visibility !== undefined) task.visibility = dto.visibility;
-    if (dto.estimatedMinutes !== undefined) task.estimatedMinutes = dto.estimatedMinutes;
-    if (dto.trackedMinutes !== undefined) task.trackedMinutes = dto.trackedMinutes;
+    if (dto.estimatedMinutes !== undefined)
+      task.estimatedMinutes = dto.estimatedMinutes;
+    if (dto.trackedMinutes !== undefined)
+      task.trackedMinutes = dto.trackedMinutes;
     if (dto.isBlocked !== undefined) task.isBlocked = dto.isBlocked;
     if (dto.blockedReason !== undefined) task.blockedReason = dto.blockedReason;
     if (dto.color !== undefined) task.color = dto.color;
@@ -425,16 +519,21 @@ export class TasksCrudService {
       isCompletedTaskStatus(dto.status)
     ) {
       await this.stopActiveTimersForTask(context, task.id);
-      saved = (await this.tasksRepository.findOne({
-        where: {
-          id: task.id,
-          tenantId: context.tenantId,
-          workspaceId: context.workspaceId,
-        },
-      })) ?? saved;
+      saved =
+        (await this.tasksRepository.findOne({
+          where: {
+            id: task.id,
+            tenantId: context.tenantId,
+            workspaceId: context.workspaceId,
+          },
+        })) ?? saved;
     }
 
-    if (task.projectId && dto.status !== undefined && dto.status !== previousStatus) {
+    if (
+      task.projectId &&
+      dto.status !== undefined &&
+      dto.status !== previousStatus
+    ) {
       void this.recordProjectEvent(
         context,
         task.projectId,
@@ -451,7 +550,11 @@ export class TasksCrudService {
     return saved;
   }
 
-  async uploadCover(context: RequestContext, id: string, file: Express.Multer.File) {
+  async uploadCover(
+    context: RequestContext,
+    id: string,
+    file: Express.Multer.File,
+  ) {
     const task = await this.findOne(context, id);
     const stored = await this.filesService.uploadImageAsset({
       file,
@@ -474,7 +577,11 @@ export class TasksCrudService {
     const saved = await this.tasksRepository.save(task);
 
     if (task.projectId) {
-      void this.recordProjectEvent(context, task.projectId, `Tarefa arquivada: "${task.title}"`);
+      void this.recordProjectEvent(
+        context,
+        task.projectId,
+        `Tarefa arquivada: "${task.title}"`,
+      );
     }
 
     return saved;
@@ -501,19 +608,28 @@ export class TasksCrudService {
     await this.tasksRepository.delete(task.id);
 
     if (task.projectId) {
-      void this.recordProjectEvent(context, task.projectId, `Tarefa excluída permanentemente: "${task.title}"`);
+      void this.recordProjectEvent(
+        context,
+        task.projectId,
+        `Tarefa excluída permanentemente: "${task.title}"`,
+      );
     }
 
     return { deleted: true };
   }
 
-  private applyFilters(qb: ReturnType<Repository<AgencyTask>['createQueryBuilder']>, query: ListTasksQueryDto) {
+  private applyFilters(
+    qb: ReturnType<Repository<AgencyTask>['createQueryBuilder']>,
+    query: ListTasksQueryDto,
+  ) {
     if (query.search) {
       qb.andWhere('task.title ILIKE :search', { search: `%${query.search}%` });
     }
 
     if (query.projectId) {
-      qb.andWhere('task.project_id = :projectId', { projectId: query.projectId });
+      qb.andWhere('task.project_id = :projectId', {
+        projectId: query.projectId,
+      });
     }
 
     if (query.clientId) {
@@ -537,7 +653,9 @@ export class TasksCrudService {
     }
 
     if (query.assigneeId) {
-      qb.andWhere('task.assignee_id = :assigneeId', { assigneeId: query.assigneeId });
+      qb.andWhere('task.assignee_id = :assigneeId', {
+        assigneeId: query.assigneeId,
+      });
     }
 
     if (query.status) {
@@ -549,7 +667,9 @@ export class TasksCrudService {
     }
 
     if (query.visibility) {
-      qb.andWhere('task.visibility = :visibility', { visibility: query.visibility });
+      qb.andWhere('task.visibility = :visibility', {
+        visibility: query.visibility,
+      });
     }
   }
 

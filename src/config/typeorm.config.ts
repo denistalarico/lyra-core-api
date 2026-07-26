@@ -247,6 +247,7 @@ import {
   NotificationPushSubscriptionEntity,
   NotificationRecipientEntity,
 } from '../modules/notifications/entities';
+import { PlatformWhatsAppNotificationDeliveryEntity } from '../modules/notifications/platform-whatsapp/platform-whatsapp-notification-delivery.entity';
 
 import {
   AgencyClientAccessEntity,
@@ -282,6 +283,7 @@ export const agencyEntities = [
   NotificationRecipientEntity,
   NotificationDeliveryEntity,
   NotificationPushSubscriptionEntity,
+  PlatformWhatsAppNotificationDeliveryEntity,
 
   DocumentLayoutEntity,
   DocumentLayoutTemplateEntity,

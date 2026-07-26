@@ -2,6 +2,7 @@ import { Repository } from 'typeorm';
 import { FilesService } from '../../../common/files/files.service';
 import { NotificationEventProcessorService } from '../../notifications/services';
 import {
+  AgencyPersonalTaskStage,
   AgencyProject,
   AgencyProjectEvent,
   AgencyTask,
@@ -19,10 +20,7 @@ describe('TasksCrudService notification triggers', () => {
   it('scopes workspace task lists to assigned, created, or permitted project tasks for members', async () => {
     const { service, queryBuilder } = makeService();
 
-    await service.listWorkspaceTasks(
-      { ...makeContext(), role: 'member' },
-      {},
-    );
+    await service.listWorkspaceTasks({ ...makeContext(), role: 'member' }, {});
 
     expect(queryBuilder.scopeClauses.join('\n')).toContain(
       'task.assignee_id = :scopeUserId',
@@ -49,6 +47,40 @@ describe('TasksCrudService notification triggers', () => {
       expect.objectContaining({
         actorUserId: 'user-actor',
         task: expect.objectContaining({ assigneeId: 'user-assignee' }),
+      }),
+    );
+  });
+
+  it('places a newly assigned workspace task in the assignee default personal stage', async () => {
+    const { service, tasksRepository, personalTaskStagesRepository } =
+      makeService({
+        assigneeUserId: 'user-assignee',
+        personalStage: makePersonalStage({
+          id: 'personal-stage-default',
+          userId: 'user-assignee',
+        }),
+      });
+
+    await service.createWorkspaceTask(makeContext(), {
+      title: 'Preparar proposta',
+      priority: TaskPriority.Medium,
+      assigneeId: 'member-assignee',
+    });
+
+    expect(personalTaskStagesRepository.findOne).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ userId: 'user-assignee' }),
+        order: {
+          isDefault: 'DESC',
+          position: 'ASC',
+          createdAt: 'ASC',
+        },
+      }),
+    );
+    expect(tasksRepository.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assigneeId: 'member-assignee',
+        personalStageId: 'personal-stage-default',
       }),
     );
   });
@@ -99,6 +131,27 @@ describe('TasksCrudService notification triggers', () => {
     expect(created.coverImageUrl).toBe('/uploads/tasks/private-cover.webp');
   });
 
+  it('uses the current user default stage when creating a private task without a stage', async () => {
+    const { service, tasksRepository } = makeService({
+      personalStage: makePersonalStage({
+        id: 'personal-stage-default',
+        userId: 'user-actor',
+      }),
+    });
+
+    await service.createMyTask(makeContext(), {
+      title: 'Tarefa pessoal',
+      priority: TaskPriority.Medium,
+    });
+
+    expect(tasksRepository.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assigneeId: 'user-actor',
+        personalStageId: 'personal-stage-default',
+      }),
+    );
+  });
+
   it('publishes assigned when assignee changes from null to user', async () => {
     const task = makeTask({ assigneeId: null });
     const { service, publisher } = makeService({ task });
@@ -134,6 +187,28 @@ describe('TasksCrudService notification triggers', () => {
     );
   });
 
+  it('moves a reassigned task to the new assignee default personal stage', async () => {
+    const task = makeTask({
+      assigneeId: 'member-old',
+      personalStageId: 'personal-stage-old',
+    });
+    const { service } = makeService({
+      task,
+      assigneeUserId: 'user-new',
+      personalStage: makePersonalStage({
+        id: 'personal-stage-new',
+        userId: 'user-new',
+      }),
+    });
+
+    await service.update(makeContext(), task.id, {
+      assigneeId: 'member-new',
+    });
+
+    expect(task.assigneeId).toBe('member-new');
+    expect(task.personalStageId).toBe('personal-stage-new');
+  });
+
   it('does not publish assignment notifications when assignee changes to null', async () => {
     const task = makeTask({ assigneeId: 'user-old' });
     const { service, publisher } = makeService({ task });
@@ -144,6 +219,7 @@ describe('TasksCrudService notification triggers', () => {
 
     expect(publisher.publishAssigned).not.toHaveBeenCalled();
     expect(publisher.publishReassigned).not.toHaveBeenCalled();
+    expect(task.personalStageId).toBeNull();
   });
 
   it('does not publish assignment notifications when assignee did not change', async () => {
@@ -267,10 +343,14 @@ describe('TasksCrudService notification triggers', () => {
   });
 });
 
-function makeService(options: {
-  task?: AgencyTask;
-  publisher?: jest.Mocked<TaskNotificationPublisher>;
-} = {}) {
+function makeService(
+  options: {
+    task?: AgencyTask;
+    publisher?: jest.Mocked<TaskNotificationPublisher>;
+    assigneeUserId?: string | null;
+    personalStage?: AgencyPersonalTaskStage | null;
+  } = {},
+) {
   const savedTask = options.task ?? makeTask();
   const queryBuilder = createQueryBuilderMock<AgencyTask>();
   const tasksRepository = {
@@ -287,6 +367,15 @@ function makeService(options: {
     ),
     findOne: jest.fn().mockResolvedValue(savedTask),
     save: jest.fn(async (item: AgencyTask) => item),
+    manager: {
+      query: jest
+        .fn()
+        .mockResolvedValue(
+          Object.prototype.hasOwnProperty.call(options, 'assigneeUserId')
+            ? [{ userId: options.assigneeUserId ?? null }]
+            : [],
+        ),
+    },
   };
   const eventsRepository = {
     create: jest.fn((value: Partial<AgencyProjectEvent>) => value),
@@ -300,6 +389,9 @@ function makeService(options: {
   };
   const taskStagesRepository = {
     findOne: jest.fn().mockResolvedValue(null),
+  };
+  const personalTaskStagesRepository = {
+    findOne: jest.fn().mockResolvedValue(options.personalStage ?? null),
   };
   const publisher = options.publisher ?? makeTaskPublisher();
   const attachmentsRepository = { delete: jest.fn() };
@@ -315,6 +407,7 @@ function makeService(options: {
     eventsRepository as unknown as Repository<AgencyProjectEvent>,
     projectsRepository as unknown as Repository<AgencyProject>,
     taskStagesRepository as unknown as Repository<AgencyTaskStage>,
+    personalTaskStagesRepository as unknown as Repository<AgencyPersonalTaskStage>,
     attachmentsRepository as unknown as Repository<AgencyTaskAttachment>,
     checklistItemsRepository as unknown as Repository<AgencyTaskChecklistItem>,
     commentsRepository as unknown as Repository<AgencyTaskComment>,
@@ -328,6 +421,7 @@ function makeService(options: {
     tasksRepository,
     publisher,
     queryBuilder,
+    personalTaskStagesRepository,
   };
 }
 
@@ -354,8 +448,9 @@ function createQueryBuilderMock<T>() {
         typeof (condition as { whereFactory?: unknown }).whereFactory ===
           'function'
       ) {
-        (condition as { whereFactory: (qb: typeof bracketQb) => void })
-          .whereFactory(bracketQb);
+        (
+          condition as { whereFactory: (qb: typeof bracketQb) => void }
+        ).whereFactory(bracketQb);
       } else if (typeof condition === 'string') {
         scopeClauses.push(condition);
       }
@@ -420,6 +515,26 @@ function makeTask(overrides: Partial<AgencyTask> = {}): AgencyTask {
     coverImageAssetKey: null,
     markerIds: [],
     archivedAt: null,
+    createdAt: now,
+    updatedAt: now,
+    ...overrides,
+  };
+}
+
+function makePersonalStage(
+  overrides: Partial<AgencyPersonalTaskStage> = {},
+): AgencyPersonalTaskStage {
+  const now = new Date('2026-06-12T12:00:00.000Z');
+
+  return {
+    id: 'personal-stage-1',
+    tenantId: 'tenant-1',
+    workspaceId: 'workspace-1',
+    userId: 'user-actor',
+    name: 'Hoje',
+    color: '#2563EB',
+    position: 1,
+    isDefault: true,
     createdAt: now,
     updatedAt: now,
     ...overrides,

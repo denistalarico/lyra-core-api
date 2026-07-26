@@ -35,6 +35,7 @@ import { WhatsAppChannelHealthController } from './channels/whatsapp/whatsapp-ch
 import { WhatsAppChannelHealthService } from './channels/whatsapp/services/whatsapp-channel-health.service';
 import { PermissionsModule } from '../permissions';
 import { NotificationsModule } from '../notifications';
+import { PlatformWhatsAppNotificationModule } from '../notifications/platform-whatsapp/platform-whatsapp-notification.module';
 import { FilesModule } from '../../common/files/files.module';
 import { InboxNotificationPublisher } from './services/inbox-notification.publisher';
 import { InboxMediaAssetEntity } from './entities/inbox-media-asset.entity';
@@ -46,6 +47,7 @@ import { InboxMediaController } from './inbox-media.controller';
 import { InboxMediaService } from './services/inbox-media.service';
 import { MetaMediaIngestionWorker } from './channels/meta/services/meta-media-ingestion.worker';
 import { ConversationOwnershipService } from './services/conversation-ownership.service';
+import { InboxHandoffWhatsAppNotifier } from './services/inbox-handoff-whatsapp.notifier';
 import { InboxAgentRuntimeService } from './services/inbox-agent-runtime.service';
 import { InboxAgentRuntimeWorker } from './services/inbox-agent-runtime.worker';
 import { InboxRuntimeConfigService } from './runtime/inbox-runtime-config.service';
@@ -86,6 +88,7 @@ import { CrmPipelineEntity } from '../crm/entities/crm-pipeline.entity';
     JwtModule.register({}),
     PermissionsModule,
     NotificationsModule,
+    PlatformWhatsAppNotificationModule,
     FilesModule,
     LeadFlowAgentsModule,
     CrmModule,
@@ -148,6 +151,7 @@ import { CrmPipelineEntity } from '../crm/entities/crm-pipeline.entity';
     InboxMediaService,
     MetaMediaIngestionWorker,
     ConversationOwnershipService,
+    InboxHandoffWhatsAppNotifier,
     InboxAgentRuntimeService,
     InboxAgentRuntimeWorker,
     InboxRuntimeConfigService,

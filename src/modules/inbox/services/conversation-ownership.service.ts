@@ -24,6 +24,7 @@ import { InboxConversationEventEntity } from '../entities/inbox-conversation-eve
 import { InboxDomainOutboxEntity } from '../entities/inbox-domain-outbox.entity';
 import { InboxProcessingBatchEntity } from '../entities/inbox-processing-batch.entity';
 import { InboxNotificationPublisher } from './inbox-notification.publisher';
+import { InboxHandoffWhatsAppNotifier } from './inbox-handoff-whatsapp.notifier';
 
 export type ConversationOwnershipAction =
   | 'request_handoff'
@@ -47,6 +48,8 @@ export class ConversationOwnershipService {
     private readonly notificationPublisher?: InboxNotificationPublisher,
     @Optional()
     private readonly opportunityCommands?: CrmOpportunityCommandService,
+    @Optional()
+    private readonly whatsAppNotifier?: InboxHandoffWhatsAppNotifier,
   ) {}
 
   async requestHandoff(
@@ -269,10 +272,17 @@ export class ConversationOwnershipService {
       };
     });
     if (result.publishHandoffNotification) {
+      // Canonical order: the in-app notification (persisted + realtime) first,
+      // then the additional, fully isolated WhatsApp attempt. The latter never
+      // affects the handoff or the in-app notification.
       await this.notificationPublisher?.publishHandoffRequested({
         conversation: result.conversation,
         recipientUserIds: result.handoffRecipientUserIds,
         clientId: result.channelClientId,
+      });
+      await this.whatsAppNotifier?.notifyHandoff({
+        conversation: result.conversation,
+        recipientUserIds: result.handoffRecipientUserIds,
       });
     }
     return result.conversation;

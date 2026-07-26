@@ -71,7 +71,9 @@ export class ProjectBoardsService {
     private readonly personalTaskStagesRepository: Repository<AgencyPersonalTaskStage>,
   ) {}
 
-  async listAllChecklistItems(context: RequestContext): Promise<ChecklistItemSummary[]> {
+  async listAllChecklistItems(
+    context: RequestContext,
+  ): Promise<ChecklistItemSummary[]> {
     const rows = await this.tasksRepository.manager
       .createQueryBuilder()
       .select('item.id', 'id')
@@ -81,7 +83,9 @@ export class ProjectBoardsService {
       .addSelect('item.updated_at', 'updatedAt')
       .from('agency_task_checklist_items', 'item')
       .where('item.tenant_id = :tenantId', { tenantId: context.tenantId })
-      .andWhere('item.workspace_id = :workspaceId', { workspaceId: context.workspaceId })
+      .andWhere('item.workspace_id = :workspaceId', {
+        workspaceId: context.workspaceId,
+      })
       .getRawMany<ChecklistItemSummary>();
 
     return rows;
@@ -117,8 +121,14 @@ export class ProjectBoardsService {
     ]);
 
     const [taskCounts, projectProgress, clientNames] = await Promise.all([
-      this.getProjectTaskCounts(context, projects.map((project) => project.id)),
-      this.getProjectProgress(context, projects.map((project) => project.id)),
+      this.getProjectTaskCounts(
+        context,
+        projects.map((project) => project.id),
+      ),
+      this.getProjectProgress(
+        context,
+        projects.map((project) => project.id),
+      ),
       this.getProjectClientNames(
         context,
         projects
@@ -130,7 +140,9 @@ export class ProjectBoardsService {
       Object.assign(project, {
         taskCount: taskCounts.get(project.id) ?? 0,
         progress: projectProgress.get(project.id) ?? project.progress,
-        clientName: project.clientId ? clientNames.get(project.clientId) ?? null : null,
+        clientName: project.clientId
+          ? (clientNames.get(project.clientId) ?? null)
+          : null,
       }),
     );
 
@@ -153,9 +165,19 @@ export class ProjectBoardsService {
         createdAt: 'DESC',
       },
     });
-    const stages = await this.listTaskStagesForBoard(context, null, tasks, 'stageId');
+    const stages = await this.listTaskStagesForBoard(
+      context,
+      null,
+      tasks,
+      'stageId',
+    );
 
-    return this.buildBoard(stages, await this.withChecklistCounts(context, tasks), 'Sem estágio', 'stageId');
+    return this.buildBoard(
+      stages,
+      await this.withChecklistCounts(context, tasks),
+      'Sem estágio',
+      'stageId',
+    );
   }
 
   async getProjectTasksBoard(
@@ -172,7 +194,12 @@ export class ProjectBoardsService {
       },
       order: { updatedAt: 'DESC', createdAt: 'DESC' },
     });
-    const stages = await this.listTaskStagesForBoard(context, projectId, tasks, 'projectStageId');
+    const stages = await this.listTaskStagesForBoard(
+      context,
+      projectId,
+      tasks,
+      'projectStageId',
+    );
 
     return this.buildBoard(
       stages,
@@ -189,12 +216,18 @@ export class ProjectBoardsService {
     stageField: 'stageId' | 'projectStageId',
   ) {
     const referencedStageIds = Array.from(
-      new Set(tasks.map((task) => task[stageField]).filter((stageId): stageId is string => Boolean(stageId))),
+      new Set(
+        tasks
+          .map((task) => task[stageField])
+          .filter((stageId): stageId is string => Boolean(stageId)),
+      ),
     );
     const qb = this.taskStagesRepository
       .createQueryBuilder('stage')
       .where('stage.tenant_id = :tenantId', { tenantId: context.tenantId })
-      .andWhere('stage.workspace_id = :workspaceId', { workspaceId: context.workspaceId })
+      .andWhere('stage.workspace_id = :workspaceId', {
+        workspaceId: context.workspaceId,
+      })
       .andWhere('stage.is_archived = false')
       .andWhere(
         new Brackets((stageQb) => {
@@ -205,7 +238,9 @@ export class ProjectBoardsService {
           }
 
           if (referencedStageIds.length) {
-            stageQb.orWhere('stage.id IN (:...referencedStageIds)', { referencedStageIds });
+            stageQb.orWhere('stage.id IN (:...referencedStageIds)', {
+              referencedStageIds,
+            });
           }
         }),
       )
@@ -219,10 +254,11 @@ export class ProjectBoardsService {
   // is a user id — resolve both so "assign a user to a task" reliably surfaces
   // the card in their My Tasks.
   private async resolveAssigneeIds(context: RequestContext) {
-    const rows: Array<{ id: string }> = await this.tasksRepository.manager.query(
-      `SELECT id FROM team_members WHERE tenant_id = $1 AND user_id = $2`,
-      [context.tenantId, context.userId],
-    );
+    const rows: Array<{ id: string }> =
+      await this.tasksRepository.manager.query(
+        `SELECT id FROM team_members WHERE tenant_id = $1 AND user_id = $2`,
+        [context.tenantId, context.userId],
+      );
     return Array.from(new Set([context.userId, ...rows.map((row) => row.id)]));
   }
 
@@ -266,10 +302,16 @@ export class ProjectBoardsService {
       }),
     ]);
 
-    return this.buildPersonalTasksBoard(stages, await this.withChecklistCounts(context, tasks));
+    return this.buildPersonalTasksBoard(
+      stages,
+      await this.withChecklistCounts(context, tasks),
+    );
   }
 
-  private async getProjectTaskCounts(context: RequestContext, projectIds: string[]) {
+  private async getProjectTaskCounts(
+    context: RequestContext,
+    projectIds: string[],
+  ) {
     const counts = new Map<string, number>();
 
     if (!projectIds.length) {
@@ -281,7 +323,9 @@ export class ProjectBoardsService {
       .select('task.project_id', 'projectId')
       .addSelect('COUNT(task.id)', 'taskCount')
       .where('task.tenant_id = :tenantId', { tenantId: context.tenantId })
-      .andWhere('task.workspace_id = :workspaceId', { workspaceId: context.workspaceId })
+      .andWhere('task.workspace_id = :workspaceId', {
+        workspaceId: context.workspaceId,
+      })
       .andWhere('task.archived_at IS NULL')
       .andWhere('task.project_id IN (:...projectIds)', { projectIds })
       .groupBy('task.project_id')
@@ -294,7 +338,10 @@ export class ProjectBoardsService {
     return counts;
   }
 
-  private async getProjectProgress(context: RequestContext, projectIds: string[]) {
+  private async getProjectProgress(
+    context: RequestContext,
+    projectIds: string[],
+  ) {
     const progress = new Map<string, number>();
     const uniqueProjectIds = Array.from(new Set(projectIds));
 
@@ -308,7 +355,10 @@ export class ProjectBoardsService {
       .addSelect('task.project_id', 'projectId')
       .addSelect('task.status', 'status')
       .addSelect('COUNT(item.id)', 'checklistTotal')
-      .addSelect('SUM(CASE WHEN item.is_done THEN 1 ELSE 0 END)', 'checklistDone')
+      .addSelect(
+        'SUM(CASE WHEN item.is_done THEN 1 ELSE 0 END)',
+        'checklistDone',
+      )
       .from('agency_tasks', 'task')
       .leftJoin(
         'agency_task_checklist_items',
@@ -316,9 +366,13 @@ export class ProjectBoardsService {
         'item.task_id = task.id AND item.tenant_id = task.tenant_id AND item.workspace_id = task.workspace_id',
       )
       .where('task.tenant_id = :tenantId', { tenantId: context.tenantId })
-      .andWhere('task.workspace_id = :workspaceId', { workspaceId: context.workspaceId })
+      .andWhere('task.workspace_id = :workspaceId', {
+        workspaceId: context.workspaceId,
+      })
       .andWhere('task.archived_at IS NULL')
-      .andWhere('task.project_id IN (:...projectIds)', { projectIds: uniqueProjectIds })
+      .andWhere('task.project_id IN (:...projectIds)', {
+        projectIds: uniqueProjectIds,
+      })
       .groupBy('task.id')
       .addGroupBy('task.project_id')
       .addGroupBy('task.status')
@@ -341,7 +395,10 @@ export class ProjectBoardsService {
           : row.status === 'done' || row.status === 'approved'
             ? 100
             : 0;
-      byProject.set(row.projectId, [...(byProject.get(row.projectId) ?? []), taskProgress]);
+      byProject.set(row.projectId, [
+        ...(byProject.get(row.projectId) ?? []),
+        taskProgress,
+      ]);
     });
 
     byProject.forEach((taskProgresses, projectId) => {
@@ -352,7 +409,10 @@ export class ProjectBoardsService {
     return progress;
   }
 
-  private async getProjectClientNames(context: RequestContext, clientIds: string[]) {
+  private async getProjectClientNames(
+    context: RequestContext,
+    clientIds: string[],
+  ) {
     const uniqueClientIds = Array.from(new Set(clientIds));
     const names = new Map<string, string>();
 
@@ -366,7 +426,9 @@ export class ProjectBoardsService {
       .addSelect('client.display_name', 'name')
       .from('agency_clients', 'client')
       .where('client.tenant_id = :tenantId', { tenantId: context.tenantId })
-      .andWhere('client.workspace_id = :workspaceId', { workspaceId: context.workspaceId })
+      .andWhere('client.workspace_id = :workspaceId', {
+        workspaceId: context.workspaceId,
+      })
       .andWhere('client.id IN (:...clientIds)', { clientIds: uniqueClientIds })
       .getRawMany<{ id: string; name: string }>();
 
@@ -392,8 +454,12 @@ export class ProjectBoardsService {
       .addSelect('SUM(CASE WHEN item.is_done THEN 1 ELSE 0 END)', 'done')
       .from('agency_task_checklist_items', 'item')
       .where('item.tenant_id = :tenantId', { tenantId: context.tenantId })
-      .andWhere('item.workspace_id = :workspaceId', { workspaceId: context.workspaceId })
-      .andWhere('item.task_id IN (:...taskIds)', { taskIds: tasks.map((task) => task.id) })
+      .andWhere('item.workspace_id = :workspaceId', {
+        workspaceId: context.workspaceId,
+      })
+      .andWhere('item.task_id IN (:...taskIds)', {
+        taskIds: tasks.map((task) => task.id),
+      })
       .groupBy('item.task_id')
       .getRawMany<{ taskId: string; total: string; done: string }>();
 
@@ -408,7 +474,10 @@ export class ProjectBoardsService {
     );
 
     return tasks.map((task) => {
-      const count = counts.get(task.id) ?? { checklistTotal: 0, checklistDone: 0 };
+      const count = counts.get(task.id) ?? {
+        checklistTotal: 0,
+        checklistDone: 0,
+      };
       const progress =
         count.checklistTotal > 0
           ? Math.round((count.checklistDone / count.checklistTotal) * 100)
@@ -421,8 +490,13 @@ export class ProjectBoardsService {
   }
 
   private buildBoard<
-    TStage extends { id: string; name: string; color: string | null; position: number },
-    TCard extends { stageId: string | null; projectStageId?: string | null }
+    TStage extends {
+      id: string;
+      name: string;
+      color: string | null;
+      position: number;
+    },
+    TCard extends { stageId: string | null; projectStageId?: string | null },
   >(
     stages: TStage[],
     cards: TCard[],
@@ -468,15 +542,28 @@ export class ProjectBoardsService {
     stages: AgencyPersonalTaskStage[],
     tasks: TaskBoardCard[],
   ): BoardResponse<TaskBoardCard> {
+    const stageIds = new Set(stages.map((stage) => stage.id));
+    const fallbackStageId =
+      stages.find((stage) => stage.isDefault)?.id ?? stages[0]?.id ?? null;
     const columns = stages.map((stage) => ({
       id: stage.id,
       name: stage.name,
       color: stage.color,
       position: stage.position,
-      cards: tasks.filter((task) => task.personalStageId === stage.id),
+      cards: tasks.filter(
+        (task) =>
+          task.personalStageId === stage.id ||
+          (stage.id === fallbackStageId &&
+            (!task.personalStageId || !stageIds.has(task.personalStageId))),
+      ),
     }));
 
-    const unassignedCards = tasks.filter((task) => !task.personalStageId);
+    const unassignedCards = fallbackStageId
+      ? []
+      : tasks.filter(
+          (task) =>
+            !task.personalStageId || !stageIds.has(task.personalStageId),
+        );
 
     return {
       columns,

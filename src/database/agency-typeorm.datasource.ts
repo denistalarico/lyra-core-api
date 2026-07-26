@@ -118,6 +118,7 @@ import { CreateLeadflowAutomationRuns1785500000000 } from './migrations/17855000
 import { AddLeadflowAutomationExecutionPermission1785600000000 } from './migrations/1785600000000-add-leadflow-automation-execution-permission';
 import { CreateLeadflowEventDeliveries1785700000000 } from './migrations/1785700000000-create-leadflow-event-deliveries';
 import { ExpandTaskChecklistItemTitle1786100000000 } from './migrations/1786100000000-expand-task-checklist-item-title';
+import { CreatePlatformWhatsAppNotificationDeliveries1786800000000 } from './migrations/1786800000000-create-platform-whatsapp-notification-deliveries';
 
 export const AgencyDataSource = new DataSource({
   type: 'postgres',
@@ -249,5 +250,6 @@ export const AgencyDataSource = new DataSource({
     AddLeadflowAutomationExecutionPermission1785600000000,
     CreateLeadflowEventDeliveries1785700000000,
     ExpandTaskChecklistItemTitle1786100000000,
+    CreatePlatformWhatsAppNotificationDeliveries1786800000000,
   ],
 });
