@@ -20,6 +20,7 @@ import type {
   NormalizedInboundMessage,
 } from '../types/normalized-inbound-message';
 import { AgentActivationPolicyService } from '../../services/agent-activation-policy.service';
+import { ContactRelationshipResolver } from '../../services/contact-relationship.resolver';
 import { InboxRuntimeConfigService } from '../../runtime/inbox-runtime-config.service';
 
 const DEFAULT_DEBOUNCE_SECONDS = 20;
@@ -31,6 +32,8 @@ export class InboundMessageIngestionService {
     private readonly notificationPublisher: InboxNotificationPublisher,
     private readonly activationPolicy?: AgentActivationPolicyService,
     @Optional() private readonly runtimeConfig?: InboxRuntimeConfigService,
+    @Optional()
+    private readonly contactRelationshipResolver?: ContactRelationshipResolver,
   ) {}
 
   async ingest(input: NormalizedInboundMessage) {
@@ -88,6 +91,15 @@ export class InboundMessageIngestionService {
             externalThreadId: input.externalThreadId,
           },
         });
+      const contactRelationship = this.contactRelationshipResolver
+        ? await this.contactRelationshipResolver.resolve(manager, {
+            tenantId: input.tenantId,
+            workspaceId: input.workspaceId,
+            contactId: conversation?.contactId ?? internalContact?.id ?? null,
+            isInternalUser: Boolean(internalContact),
+            qualificationStatus: qualification.status,
+          })
+        : undefined;
       const activation = this.activationPolicy
         ? await this.activationPolicy.evaluate({
             tenantId: input.tenantId,
@@ -104,6 +116,7 @@ export class InboundMessageIngestionService {
               typeof input.metadata.referral === 'object'
                 ? (input.metadata.referral as Record<string, unknown>)
                 : {},
+            contactRelationship,
           })
         : {
             wouldActivate:

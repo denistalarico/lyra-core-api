@@ -1,5 +1,6 @@
 import {
   buildHandoffTemplateParameters,
+  isPlatformWhatsAppTemplateKeyAllowed,
   LEADFLOW_HANDOFF_TEMPLATE_KEY,
   resolvePlatformWhatsAppTemplate,
 } from './platform-whatsapp-notification.catalog';
@@ -31,6 +32,17 @@ describe('platform whatsapp template catalog', () => {
 
     it('returns null for an unknown key (caller maps to skipped_template_unavailable)', () => {
       expect(resolvePlatformWhatsAppTemplate('leadflow.unknown')).toBeNull();
+    });
+  });
+
+  describe('isPlatformWhatsAppTemplateKeyAllowed', () => {
+    it('allows only a key that resolves to an approved template', () => {
+      expect(
+        isPlatformWhatsAppTemplateKeyAllowed(LEADFLOW_HANDOFF_TEMPLATE_KEY),
+      ).toBe(true);
+      expect(isPlatformWhatsAppTemplateKeyAllowed('leadflow.invented')).toBe(
+        false,
+      );
     });
   });
 

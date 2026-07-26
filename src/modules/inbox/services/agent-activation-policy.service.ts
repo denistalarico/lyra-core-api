@@ -5,6 +5,11 @@ import { LeadFlowAgentEntity } from '../../leadflow-agents/entities/leadflow-age
 import { LeadFlowAgentChannelBindingEntity } from '../../leadflow-agents/entities/leadflow-agent-channel-binding.entity';
 import { LeadFlowAgentStatus } from '../../leadflow-agents/enums/leadflow-agent-status.enum';
 import { InboxChannelEntity } from '../entities/inbox-channel.entity';
+import {
+  audienceServesRelationship,
+  ContactRelationship,
+} from '../../leadflow-agents/catalog/contact-relationship.catalog';
+import { resolveServiceAudience } from '../../leadflow-agents/enums/leadflow-service-audience.enum';
 
 export type ActivationReasonCode =
   | 'already_active'
@@ -21,7 +26,8 @@ export type ActivationReasonCode =
   | 'internal_contact'
   | 'duplicate_message'
   | 'conversation_human_or_closed'
-  | 'disqualified_contact';
+  | 'disqualified_contact'
+  | 'audience_mismatch';
 
 @Injectable()
 export class AgentActivationPolicyService {
@@ -40,6 +46,7 @@ export class AgentActivationPolicyService {
     qualificationStatus?: string;
     referralTrusted?: boolean;
     referral?: Record<string, unknown>;
+    contactRelationship?: ContactRelationship;
   }) {
     const exclusions: ActivationReasonCode[] = [];
     const channel = await this.dataSource
@@ -115,6 +122,21 @@ export class AgentActivationPolicyService {
           .getOne()
       : null;
     if (!binding) exclusions.push('binding_ineligible');
+
+    // Audience filtering: an agent only serves the relationships its
+    // `serviceAudience` covers. An internal user is never served; an unknown
+    // relationship never blocks (only a definite opposite does), so this cannot
+    // silence a legitimate lead just because classification was incomplete.
+    if (
+      agent &&
+      input.contactRelationship &&
+      !audienceServesRelationship(
+        resolveServiceAudience(agent.behaviorConfig),
+        input.contactRelationship,
+      )
+    ) {
+      exclusions.push('audience_mismatch');
+    }
 
     const rawPolicy = agent?.channelPolicy?.activationPolicy;
     const policy =

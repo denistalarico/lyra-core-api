@@ -4,7 +4,10 @@ import {
 } from './agent-activation-policy.service';
 
 describe('AgentActivationPolicyService', () => {
-  function service(policy: Record<string, unknown>) {
+  function service(
+    policy: Record<string, unknown>,
+    behaviorConfig: Record<string, unknown> = {},
+  ) {
     const channel = {
       id: 'c',
       status: 'active',
@@ -17,6 +20,7 @@ describe('AgentActivationPolicyService', () => {
       status: 'active',
       publishedVersionId: 'v1',
       channelPolicy: { activationPolicy: policy },
+      behaviorConfig,
     };
     const binding = { id: 'b', status: 'active' };
     const repo = (entity: { name: string }) => ({
@@ -114,4 +118,32 @@ describe('AgentActivationPolicyService', () => {
       expect(result.exclusions).toContain(expected);
     },
   );
+
+  it('excludes a customer when the agent only serves leads', async () => {
+    const result = await service(
+      { trigger: 'every_eligible' },
+      { serviceAudience: 'leads' },
+    ).evaluate({
+      tenantId: 't',
+      workspaceId: 'w',
+      channelId: 'c',
+      contactRelationship: 'customer' as never,
+    });
+    expect(result.wouldActivate).toBe(false);
+    expect(result.exclusions).toContain('audience_mismatch');
+  });
+
+  it('serves a lead when the agent serves leads, without an audience exclusion', async () => {
+    const result = await service(
+      { trigger: 'every_eligible' },
+      { serviceAudience: 'leads' },
+    ).evaluate({
+      tenantId: 't',
+      workspaceId: 'w',
+      channelId: 'c',
+      contactRelationship: 'lead' as never,
+    });
+    expect(result.exclusions).not.toContain('audience_mismatch');
+    expect(result.wouldActivate).toBe(true);
+  });
 });

@@ -73,6 +73,7 @@ import { InboxMetaOperationLedgerService } from './channels/whatsapp/services/in
 import { LeadFlowAgentChannelBindingEntity } from '../leadflow-agents/entities/leadflow-agent-channel-binding.entity';
 import { LeadFlowAgentEntity } from '../leadflow-agents/entities/leadflow-agent.entity';
 import { AgentActivationPolicyService } from './services/agent-activation-policy.service';
+import { ContactRelationshipResolver } from './services/contact-relationship.resolver';
 import { LeadFlowAgentsModule } from '../leadflow-agents/leadflow-agents.module';
 import { InboxOutboxAdminController } from './inbox-outbox-admin.controller';
 import { InboxGovernedAutonomyPolicyService } from './runtime/inbox-governed-autonomy-policy.service';
@@ -166,6 +167,7 @@ import { CrmPipelineEntity } from '../crm/entities/crm-pipeline.entity';
     InboxGateway,
     InboxChannelLifecycleService,
     AgentActivationPolicyService,
+    ContactRelationshipResolver,
     InboxPilotOutboundPolicyService,
     InboxMetaOperationLedgerService,
     InboxGovernedAutonomyPolicyService,

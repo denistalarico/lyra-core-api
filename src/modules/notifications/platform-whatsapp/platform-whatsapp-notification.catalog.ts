@@ -93,6 +93,22 @@ export function resolvePlatformWhatsAppTemplate(
   return forKey.find((template) => !template.businessModeKey) ?? null;
 }
 
+/**
+ * Whether a logical `templateKey` is one an agent may legitimately reference:
+ * it must resolve to an approved template (Business-Mode-specific or generic).
+ *
+ * This is the guard for "the LLM may only suggest a templateKey from the
+ * catalog" — an agent-suggested key that does not resolve is refused rather than
+ * invented. Role-scoping and the agent-decision call site come with the phase
+ * that lets agents propose templates.
+ */
+export function isPlatformWhatsAppTemplateKeyAllowed(
+  templateKey: string,
+  businessModeKey?: string | null,
+): boolean {
+  return resolvePlatformWhatsAppTemplate(templateKey, businessModeKey) !== null;
+}
+
 /** Terminal fallbacks, applied when a variable is empty after normalization. */
 export const HANDOFF_VARIABLE_FALLBACKS: LeadFlowHandoffTemplateVariables = {
   workspaceName: 'Sua empresa',
