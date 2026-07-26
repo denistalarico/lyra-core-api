@@ -5,8 +5,10 @@ import {
   TeamAttendanceEntry,
   TeamDepartment,
   TeamMember,
+  TeamMemberLifecycleProcess,
   TeamMemberPresence,
 } from '../entities';
+import { TeamLifecycleProcessStatus } from '../enums';
 import type { TeamDashboardSummary } from '../types';
 
 type TeamDashboardContext = {
@@ -28,6 +30,9 @@ export class TeamDashboardQueryService {
 
     @InjectRepository(TeamDepartment, 'agency')
     private readonly departmentRepository: Repository<TeamDepartment>,
+
+    @InjectRepository(TeamMemberLifecycleProcess, 'agency')
+    private readonly lifecycleProcessRepository: Repository<TeamMemberLifecycleProcess>,
   ) {}
 
   async getSummary(
@@ -37,8 +42,13 @@ export class TeamDashboardQueryService {
     const todayStart = this.startOfUtcDay(now);
     const todayEnd = this.endOfUtcDay(now);
 
-    const [members, presences, departments, attendanceToday] =
-      await Promise.all([
+    const [
+      members,
+      presences,
+      departments,
+      attendanceToday,
+      lifecycleProcesses,
+    ] = await Promise.all([
         this.memberRepository.find({
           where: {
             tenantId: context.tenantId,
@@ -75,6 +85,18 @@ export class TeamDashboardQueryService {
             todayEnd,
           })
           .getMany(),
+
+        this.lifecycleProcessRepository.find({
+          where: {
+            tenantId: context.tenantId,
+            workspaceId: context.workspaceId,
+            status: TeamLifecycleProcessStatus.InProgress,
+          },
+          order: {
+            startedAt: 'DESC',
+            createdAt: 'DESC',
+          },
+        }),
       ]);
 
     const activeMembers = members.filter(
@@ -128,6 +150,9 @@ export class TeamDashboardQueryService {
     const attendanceMemberIds = new Set(
       attendanceToday.map((entry) => entry.memberId),
     );
+    const memberById = new Map(
+      members.map((member) => [member.id, member]),
+    );
 
     return {
       generatedAt: now.toISOString(),
@@ -178,6 +203,26 @@ export class TeamDashboardQueryService {
         entries: attendanceToday.length,
         membersWithEntries: attendanceMemberIds.size,
       },
+
+      lifecycleProcesses: lifecycleProcesses.flatMap((process) => {
+        const member = memberById.get(process.memberId);
+
+        if (!member || member.archivedAt !== null) {
+          return [];
+        }
+
+        return [
+          {
+            id: process.id,
+            memberId: process.memberId,
+            memberName: member.displayName,
+            processType: process.processType,
+            status: TeamLifecycleProcessStatus.InProgress as const,
+            startedAt: process.startedAt?.toISOString() ?? null,
+            href: `/team/members/${process.memberId}?tab=lifecycle&process=${process.processType}`,
+          },
+        ];
+      }),
     };
   }
 
