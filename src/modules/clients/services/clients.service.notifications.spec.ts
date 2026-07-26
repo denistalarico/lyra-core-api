@@ -1,7 +1,7 @@
 import { Repository } from 'typeorm';
 import { AgencyActivity } from '../../activities/entities';
 import { AgencyProject, AgencyTask } from '../../projects/entities';
-import { AgencyClient } from '../entities';
+import { AgencyClient, ClientLifecycleProcess } from '../entities';
 import {
   AgencyClientHealthStatus,
   AgencyClientLifecycleStage,
@@ -152,6 +152,7 @@ function makeService(options: { client?: AgencyClient } = {}) {
 
   const service = new ClientsService(
     clientsRepository as unknown as Repository<AgencyClient>,
+    {} as Repository<ClientLifecycleProcess>,
     {} as Repository<AgencyProject>,
     {} as Repository<AgencyTask>,
     {} as Repository<AgencyActivity>,

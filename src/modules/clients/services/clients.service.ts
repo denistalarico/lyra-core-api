@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Brackets, IsNull, Repository } from 'typeorm';
+import { Brackets, In, IsNull, Repository } from 'typeorm';
 import {
   AgencyActivity,
   AgencyActivityLink,
@@ -9,8 +9,12 @@ import { ActivityEntityType, ActivityStatus } from '../../activities/enums';
 import { AgencyProject, AgencyTask } from '../../projects/entities';
 import { ProjectStatus, TaskStatus } from '../../projects/enums';
 import { CreateClientDto, ListClientsQueryDto, UpdateClientDto } from '../dto';
-import { AgencyClient } from '../entities';
-import { AgencyClientLifecycleStage, AgencyClientStatus } from '../enums';
+import { AgencyClient, ClientLifecycleProcess } from '../entities';
+import {
+  AgencyClientLifecycleStage,
+  AgencyClientStatus,
+  ClientLifecycleProcessStatus,
+} from '../enums';
 import { ClientCostCenterService } from './client-cost-center.service';
 import { ClientNotificationPublisher } from './client-notification.publisher';
 import { ClientsProfitabilityService } from './clients-profitability.service';
@@ -30,6 +34,8 @@ export class ClientsService {
   constructor(
     @InjectRepository(AgencyClient, AGENCY_CONNECTION)
     private readonly clientsRepository: Repository<AgencyClient>,
+    @InjectRepository(ClientLifecycleProcess, AGENCY_CONNECTION)
+    private readonly lifecycleProcessesRepository: Repository<ClientLifecycleProcess>,
     @InjectRepository(AgencyProject, AGENCY_CONNECTION)
     private readonly projectsRepository: Repository<AgencyProject>,
     @InjectRepository(AgencyTask, AGENCY_CONNECTION)
@@ -99,8 +105,45 @@ export class ClientsService {
       .skip(offset)
       .getManyAndCount();
 
+    const clientIds = items.map((client) => client.id);
+    const lifecycleProcesses =
+      clientIds.length > 0
+        ? await this.lifecycleProcessesRepository.find({
+            where: {
+              tenantId: context.tenantId,
+              workspaceId: context.workspaceId,
+              clientId: In(clientIds),
+              status: ClientLifecycleProcessStatus.InProgress,
+            },
+            order: { startedAt: 'DESC', createdAt: 'DESC' },
+          })
+        : [];
+    const processesByClient = new Map<
+      string,
+      Array<{
+        id: string;
+        processType: ClientLifecycleProcess['processType'];
+        status: ClientLifecycleProcess['status'];
+        startedAt: Date | null;
+      }>
+    >();
+
+    for (const process of lifecycleProcesses) {
+      const clientProcesses = processesByClient.get(process.clientId) ?? [];
+      clientProcesses.push({
+        id: process.id,
+        processType: process.processType,
+        status: process.status,
+        startedAt: process.startedAt,
+      });
+      processesByClient.set(process.clientId, clientProcesses);
+    }
+
     return {
-      items,
+      items: items.map((client) => ({
+        ...client,
+        activeLifecycleProcesses: processesByClient.get(client.id) ?? [],
+      })),
       total,
       limit,
       offset,
