@@ -210,7 +210,10 @@ describe('TasksCrudService notification triggers', () => {
   });
 
   it('does not publish assignment notifications when assignee changes to null', async () => {
-    const task = makeTask({ assigneeId: 'user-old' });
+    const task = makeTask({
+      assigneeId: 'user-old',
+      personalStageId: 'personal-stage-old',
+    });
     const { service, publisher } = makeService({ task });
 
     await service.update(makeContext(), task.id, {
