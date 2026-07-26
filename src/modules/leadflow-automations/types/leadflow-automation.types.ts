@@ -77,6 +77,10 @@ export interface LeadFlowAutomationConditionConfig {
   intents?: string[];
   keywords?: string[];
   requiredFields?: string[];
+  /** Canonical CRM opportunity field evaluated by automatic tagging. */
+  ruleField?: string;
+  ruleOperator?: 'equals' | 'not_equals' | 'contains' | 'is_present';
+  ruleValue?: string | null;
   [key: string]: LeadFlowJsonValue | undefined;
 }
 
@@ -85,6 +89,11 @@ export interface LeadFlowAutomationActionConfig {
   maxAttempts?: number;
   moveToStageRef?: string | null;
   targetUserRef?: string | null;
+  notifyOpportunityOwner?: boolean;
+  notifyPipelineOwner?: boolean;
+  notifyPipelineParticipants?: boolean;
+  specificRecipientUserRefs?: string[];
+  notificationChannels?: LeadFlowHotLeadNotificationChannel[];
   addTags?: string[];
   requireHumanApproval?: boolean;
   /** Rule the lead-distribution action uses to pick a participant. */
@@ -95,6 +104,13 @@ export interface LeadFlowAutomationActionConfig {
   distributionFallbackUserRef?: string | null;
   [key: string]: LeadFlowJsonValue | undefined;
 }
+
+export type LeadFlowHotLeadNotificationChannel =
+  | 'in_app'
+  | 'push'
+  | 'platform_whatsapp'
+  | 'email'
+  | 'sms';
 
 export interface LeadFlowAutomationMessageConfig {
   channel?: string | null;

@@ -1,7 +1,9 @@
 import {
   buildHandoffTemplateParameters,
+  buildHotLeadTemplateParameters,
   isPlatformWhatsAppTemplateKeyAllowed,
   LEADFLOW_HANDOFF_TEMPLATE_KEY,
+  LEADFLOW_HOT_LEAD_TEMPLATE_KEY,
   resolvePlatformWhatsAppTemplate,
 } from './platform-whatsapp-notification.catalog';
 
@@ -32,6 +34,39 @@ describe('platform whatsapp template catalog', () => {
 
     it('returns null for an unknown key (caller maps to skipped_template_unavailable)', () => {
       expect(resolvePlatformWhatsAppTemplate('leadflow.unknown')).toBeNull();
+    });
+
+    it('resolves the Meta-approved hot-lead template', () => {
+      expect(
+        resolvePlatformWhatsAppTemplate(LEADFLOW_HOT_LEAD_TEMPLATE_KEY),
+      ).toMatchObject({
+        providerTemplateName: 'lyra_leadflow_hot_lead_alert_v1',
+        languageCode: 'pt_BR',
+        category: 'utility',
+        status: 'approved',
+      });
+      expect(
+        isPlatformWhatsAppTemplateKeyAllowed(LEADFLOW_HOT_LEAD_TEMPLATE_KEY),
+      ).toBe(true);
+    });
+  });
+
+  describe('buildHotLeadTemplateParameters', () => {
+    it('uses the semantic order and governed fallbacks', () => {
+      expect(
+        buildHotLeadTemplateParameters({
+          workspaceName: 'Acme',
+          leadDisplayName: 'João',
+          leadScore: '82',
+        }),
+      ).toEqual(['Acme', 'João', '82']);
+      expect(
+        buildHotLeadTemplateParameters({
+          workspaceName: '',
+          leadDisplayName: '',
+          leadScore: '',
+        }),
+      ).toEqual(['Sua empresa', 'Lead sem nome', 'Alto']);
     });
   });
 

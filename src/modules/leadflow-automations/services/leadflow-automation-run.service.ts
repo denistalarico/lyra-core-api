@@ -471,6 +471,12 @@ export class LeadFlowAutomationRunService {
               (effect) => effect.result.status === 'failed',
             ).length,
             contextCost: contextSnapshot.cost as unknown as LeadFlowJsonObject,
+            effects: effects.map((effect) => ({
+              actionKey: effect.actionKey,
+              status: effect.result.status,
+              effectConfirmed: effect.result.effectConfirmed,
+              details: effect.result.details ?? {},
+            })),
           } as unknown as LeadFlowJsonObject,
           errorCode: firstError?.result.errorCode ?? null,
           errorMessage: firstError?.result.errorMessage ?? null,
@@ -498,6 +504,7 @@ export class LeadFlowAutomationRunService {
               action: effect.actionKey,
               live: true,
               automationVersionId: version.id,
+              resultDetails: effect.result.details ?? {},
             },
             // True only where the owning domain acknowledged the effect.
             effectConfirmed: effect.result.effectConfirmed,

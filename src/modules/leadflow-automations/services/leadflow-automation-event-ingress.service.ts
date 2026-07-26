@@ -16,6 +16,7 @@ import { LeadFlowEventDeliveryEntity } from '../../leadflow-events/entities';
 import { LeadFlowEventStatus } from '../../leadflow-events/enums/leadflow-event-status.enum';
 import { LeadFlowAutomationShadowEvaluatorService } from './leadflow-automation-shadow-evaluator.service';
 import { LeadFlowFollowupIdleDetectorService } from './leadflow-followup-idle-detector.service';
+import { LeadFlowBusinessHoursClosedDetectorService } from './leadflow-business-hours-closed-detector.service';
 
 export const LEADFLOW_AUTOMATIONS_EVENT_CONSUMER =
   'leadflow.automations' as const;
@@ -55,6 +56,8 @@ export class LeadFlowAutomationEventIngressService implements OnApplicationShutd
     private readonly shadowEvaluator: LeadFlowAutomationShadowEvaluatorService,
     @Optional()
     private readonly idleDetector?: LeadFlowFollowupIdleDetectorService,
+    @Optional()
+    private readonly businessHoursDetector?: LeadFlowBusinessHoursClosedDetectorService,
   ) {}
 
   onApplicationShutdown(): void {
@@ -133,6 +136,7 @@ export class LeadFlowAutomationEventIngressService implements OnApplicationShutd
       // not itself an automation trigger. Scheduling is idempotent, so a retry
       // of this delivery never creates a second detector timer.
       await this.idleDetector?.observeDelivery(delivery);
+      await this.businessHoursDetector?.observeDelivery(delivery);
       const decision = this.accept(delivery);
       const now = new Date();
       if (decision.status === 'skipped') {

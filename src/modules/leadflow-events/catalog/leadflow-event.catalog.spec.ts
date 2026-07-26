@@ -23,6 +23,7 @@ const BLUEPRINT_EVENT_NAMES = [
   'leadflow.inbox.conversation.idle',
   'leadflow.inbox.conversation.assigned',
   'leadflow.inbox.conversation.handoff.requested',
+  'leadflow.inbox.business_hours.closed',
   'leadflow.inbox.conversation.handoff.accepted',
   'leadflow.inbox.conversation.closed',
   // CRM
@@ -139,7 +140,7 @@ describe('leadflow event catalog', () => {
 
   it('filters by module and status', () => {
     const inboxEvents = listEvents({ moduleKey: 'leadflow.inbox' });
-    expect(inboxEvents).toHaveLength(9);
+    expect(inboxEvents).toHaveLength(10);
     expect(
       inboxEvents.every((item) => item.moduleKey === 'leadflow.inbox'),
     ).toBe(true);

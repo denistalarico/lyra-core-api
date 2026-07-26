@@ -32,6 +32,7 @@ import { RequestHandoffExecutor } from './executors/request-handoff.executor';
 import { NotifyUserExecutor } from './executors/notify-user.executor';
 import { ScheduleFollowupExecutor } from './executors/schedule-followup.executor';
 import { SendMessageExecutor } from './executors/send-message.executor';
+import { AddOpportunityTagExecutor } from './executors/add-opportunity-tag.executor';
 import { LeadFlowAutomationNotificationPublisher } from './services/leadflow-automation-notification.publisher';
 import { LeadFlowAutomationEventIngressService } from './services/leadflow-automation-event-ingress.service';
 import { LeadFlowAutomationLifecycleService } from './services/leadflow-automation-lifecycle.service';
@@ -48,6 +49,19 @@ import {
 } from './scheduler';
 import { LeadFlowFollowupTimerConsumer } from './services/leadflow-followup-timer.consumer';
 import { LeadFlowFollowupIdleDetectorService } from './services/leadflow-followup-idle-detector.service';
+import { LeadFlowBusinessHoursClosedDetectorService } from './services/leadflow-business-hours-closed-detector.service';
+import { InboxSettingsEntity } from '../inbox/entities/inbox-settings.entity';
+import {
+  AgencyUserProfileEntity,
+  AgencyUserNotificationPreferencesEntity,
+  AgencyWorkspaceCompanySettingsEntity,
+  AgencyWorkspaceEmailSettingsEntity,
+  AgencyWorkspaceUserEntity,
+  AgencyWorkspaceUserPermissionEntity,
+} from '../agency/entities/agency-settings.entities';
+import { CrmPipelineEntity } from '../crm/entities/crm-pipeline.entity';
+import { NotificationRecipientEntity } from '../notifications/entities';
+import { PlatformWhatsAppNotificationModule } from '../notifications/platform-whatsapp/platform-whatsapp-notification.module';
 
 @Module({
   imports: [
@@ -55,6 +69,7 @@ import { LeadFlowFollowupIdleDetectorService } from './services/leadflow-followu
     CrmModule,
     InboxModule,
     NotificationsModule,
+    PlatformWhatsAppNotificationModule,
     TypeOrmModule.forFeature(
       [
         LeadFlowAutomationEntity,
@@ -65,6 +80,15 @@ import { LeadFlowFollowupIdleDetectorService } from './services/leadflow-followu
         LeadFlowEventDeliveryEntity,
         LeadFlowScheduledTimerEntity,
         InboxDomainOutboxEntity,
+        InboxSettingsEntity,
+        CrmPipelineEntity,
+        AgencyWorkspaceUserEntity,
+        AgencyWorkspaceUserPermissionEntity,
+        AgencyUserProfileEntity,
+        AgencyUserNotificationPreferencesEntity,
+        AgencyWorkspaceCompanySettingsEntity,
+        AgencyWorkspaceEmailSettingsEntity,
+        NotificationRecipientEntity,
         InboxChannelEntity,
         ...LEADFLOW_CONTEXT_LOADER_ENTITIES,
       ],
@@ -89,6 +113,7 @@ import { LeadFlowFollowupIdleDetectorService } from './services/leadflow-followu
     NotifyUserExecutor,
     ScheduleFollowupExecutor,
     SendMessageExecutor,
+    AddOpportunityTagExecutor,
     ScheduledTimerConsumerRegistry,
     PostgresSchedulerRuntime,
     {
@@ -97,6 +122,7 @@ import { LeadFlowFollowupIdleDetectorService } from './services/leadflow-followu
     },
     LeadFlowFollowupTimerConsumer,
     LeadFlowFollowupIdleDetectorService,
+    LeadFlowBusinessHoursClosedDetectorService,
     LeadFlowAutomationNotificationPublisher,
     LeadFlowAutomationEventIngressService,
     LeadFlowAutomationRunService,

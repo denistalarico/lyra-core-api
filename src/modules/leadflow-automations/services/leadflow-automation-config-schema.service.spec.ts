@@ -12,6 +12,12 @@ describe('LeadFlowAutomationConfigSchemaService', () => {
   const missingFields = getRecipeByKey(
     'missing_fields_request',
   ) as LeadFlowAutomationRecipeCatalogItem;
+  const hotLead = getRecipeByKey(
+    'hot_lead_notification',
+  ) as LeadFlowAutomationRecipeCatalogItem;
+  const automaticTagging = getRecipeByKey(
+    'automatic_tagging',
+  ) as LeadFlowAutomationRecipeCatalogItem;
 
   describe('validateSection', () => {
     it('accepts the recipe defaults unchanged', () => {
@@ -142,6 +148,21 @@ describe('LeadFlowAutomationConfigSchemaService', () => {
       );
 
       expect(result.valid).toBe(true);
+    });
+
+    it('rejects SMS because it is visible-only and not persistable in phase 7', () => {
+      const result = service.validateSection(
+        hotLead,
+        'actions',
+        { notificationChannels: ['in_app', 'sms'] },
+        hotLead.defaultActionConfig,
+      );
+
+      expect(result.valid).toBe(false);
+      expect(result.errors[0]).toMatchObject({
+        path: 'actions.notificationChannels',
+        code: 'invalid_type',
+      });
     });
   });
 
@@ -284,6 +305,42 @@ describe('LeadFlowAutomationConfigSchemaService', () => {
       });
 
       expect(missing).toContain('actions.maxAttempts');
+    });
+
+    it('accepts the approved platform WhatsApp channel in the closed schema', () => {
+      const missing = service.findMissingRequiredFields(hotLead, {
+        trigger: hotLead.defaultTriggerConfig,
+        conditions: hotLead.defaultConditionConfig,
+        actions: {
+          ...hotLead.defaultActionConfig,
+          notificationChannels: ['platform_whatsapp'],
+        },
+        message: hotLead.defaultMessageConfig,
+        crmPolicy: hotLead.defaultCrmPolicy,
+        schedulePolicy: hotLead.defaultSchedulePolicy,
+      });
+
+      expect(missing).not.toContain('actions.notificationChannels');
+    });
+
+    it('requires a comparison value for automatic tagging except is_present', () => {
+      const missing = service.findMissingRequiredFields(automaticTagging, {
+        trigger: automaticTagging.defaultTriggerConfig,
+        conditions: {
+          ...automaticTagging.defaultConditionConfig,
+          ruleOperator: 'equals',
+          ruleValue: null,
+        },
+        actions: {
+          ...automaticTagging.defaultActionConfig,
+          addTags: ['tag-1'],
+        },
+        message: automaticTagging.defaultMessageConfig,
+        crmPolicy: automaticTagging.defaultCrmPolicy,
+        schedulePolicy: automaticTagging.defaultSchedulePolicy,
+      });
+
+      expect(missing).toContain('conditions.ruleValue');
     });
   });
 });

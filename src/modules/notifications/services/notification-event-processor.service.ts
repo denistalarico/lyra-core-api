@@ -8,7 +8,10 @@ import {
   AgencyWorkspaceEmailSettingsEntity,
   AgencyWorkspaceUserEntity,
 } from '../../agency/entities/agency-settings.entities';
-import { EmailService, type EmailTransportOverride } from '../../email/email.service';
+import {
+  EmailService,
+  type EmailTransportOverride,
+} from '../../email/email.service';
 import { renderTransactionalEmail } from '../../email/templates/transactional-email.template';
 import { NotificationCatalogService } from '../catalog';
 import {
@@ -115,206 +118,226 @@ export class NotificationEventProcessorService {
     }
 
     const recipientUserIds = recipients.map((recipient) => recipient.userId);
+    const requestedChannels = this.requestedChannels(event);
+    const wantsChannel = (channel: NotificationDeliveryChannel) =>
+      requestedChannels === null || requestedChannels.has(channel);
 
-    const [emailRecipients, pushRecipients] = await Promise.all([
-      this.resolveEmailRecipients(event, definition.moduleKey, recipientUserIds),
-      this.resolvePushRecipients(event, definition.moduleKey, recipientUserIds),
-    ]);
+    const [inAppRecipients, emailRecipients, pushRecipients] =
+      await Promise.all([
+        wantsChannel(NotificationDeliveryChannel.IN_APP)
+          ? this.resolveInAppRecipients(event, recipientUserIds)
+          : Promise.resolve(new Set<string>()),
+        wantsChannel(NotificationDeliveryChannel.EMAIL)
+          ? this.resolveEmailRecipients(
+              event,
+              definition.moduleKey,
+              recipientUserIds,
+            )
+          : Promise.resolve(new Map<string, string>()),
+        wantsChannel(NotificationDeliveryChannel.PUSH)
+          ? this.resolvePushRecipients(
+              event,
+              definition.moduleKey,
+              recipientUserIds,
+            )
+          : Promise.resolve(new Set<string>()),
+      ]);
 
     const result: NotificationPersistenceResult =
       await this.dataSource.transaction(async (manager) => {
-      const notificationRepo =
-        manager.getRepository(NotificationEntity);
+        const notificationRepo = manager.getRepository(NotificationEntity);
 
-      const existing = await notificationRepo.findOne({
-        where: {
+        const existing = await notificationRepo.findOne({
+          where: {
+            tenantId: event.tenantId,
+            sourceEventId: event.eventId,
+          },
+          relations: {
+            recipients: true,
+          },
+        });
+
+        if (existing) {
+          return {
+            status: 'duplicate',
+            notificationId: existing.id,
+            recipientCount: existing.recipients?.length ?? 0,
+          };
+        }
+
+        const occurredAt = new Date(event.occurredAt);
+
+        if (Number.isNaN(occurredAt.getTime())) {
+          throw new Error(
+            `Invalid notification occurredAt: ${event.occurredAt}`,
+          );
+        }
+
+        const expiresAt = definition.expiresAfterSeconds
+          ? new Date(
+              occurredAt.getTime() + definition.expiresAfterSeconds * 1000,
+            )
+          : null;
+
+        const notification = notificationRepo.create({
           tenantId: event.tenantId,
+          workspaceId: event.workspaceId ?? null,
+          managedTenantId: event.managedTenantId ?? null,
+
+          productKey: definition.productKey,
+          moduleKey: definition.moduleKey,
+          eventType: definition.eventType,
+          category: definition.category,
+          priority: definition.defaultPriority,
+
+          title: this.resolveTitle(event),
+          body: this.resolveBody(event),
+
+          actionType: definition.defaultActionType,
+          actionUrl: this.optionalString(event.payload.actionUrl),
+
+          resourceType: event.resourceType ?? null,
+          resourceId: event.resourceId ?? null,
+
+          actorType: event.actorType,
+          actorUserId: event.actorUserId ?? null,
+          initiatedByUserId: event.initiatedByUserId ?? null,
+
           sourceEventId: event.eventId,
-        },
-        relations: {
-          recipients: true,
-        },
-      });
+          deduplicationKey: this.optionalString(event.payload.deduplicationKey),
 
-      if (existing) {
-        return {
-          status: 'duplicate',
-          notificationId: existing.id,
-          recipientCount: existing.recipients?.length ?? 0,
-        };
-      }
+          templateKey: `notifications.${event.eventType}`,
+          templateVariables: event.payload,
+          metadata: this.resolveMetadata(event),
 
-      const occurredAt = new Date(event.occurredAt);
+          occurredAt,
+          expiresAt,
+        });
 
-      if (Number.isNaN(occurredAt.getTime())) {
-        throw new Error(
-          `Invalid notification occurredAt: ${event.occurredAt}`,
+        const savedNotification = await notificationRepo.save(notification);
+
+        const recipientRepo = manager.getRepository(
+          NotificationRecipientEntity,
         );
-      }
 
-      const expiresAt = definition.expiresAfterSeconds
-        ? new Date(
-            occurredAt.getTime() +
-              definition.expiresAfterSeconds * 1000,
-          )
-        : null;
+        const recipientEntities = recipients.map((recipient) =>
+          recipientRepo.create({
+            notificationId: savedNotification.id,
+            userId: recipient.userId,
+            interestReason: recipient.interestReason,
+            seenAt: null,
+            readAt: null,
+            archivedAt: null,
+            dismissedAt: null,
+          }),
+        );
 
-      const notification = notificationRepo.create({
-        tenantId: event.tenantId,
-        workspaceId: event.workspaceId ?? null,
-        managedTenantId: event.managedTenantId ?? null,
+        const savedRecipients = await recipientRepo.save(recipientEntities);
 
-        productKey: definition.productKey,
-        moduleKey: definition.moduleKey,
-        eventType: definition.eventType,
-        category: definition.category,
-        priority: definition.defaultPriority,
+        const deliveryRepo = manager.getRepository(NotificationDeliveryEntity);
 
-        title: this.resolveTitle(event),
-        body: this.resolveBody(event),
+        const deliveries = savedRecipients.flatMap((recipient) => {
+          const extraDeliveries: NotificationDeliveryEntity[] = [];
 
-        actionType: definition.defaultActionType,
-        actionUrl: this.optionalString(
-          event.payload.actionUrl,
-        ),
+          if (inAppRecipients.has(recipient.userId)) {
+            extraDeliveries.push(
+              deliveryRepo.create({
+                notificationRecipientId: recipient.id,
+                channel: NotificationDeliveryChannel.IN_APP,
+                status: NotificationDeliveryStatus.SENT,
+                scheduledAt: null,
+                sentAt: new Date(),
+                failedAt: null,
+                failureReason: null,
+                attempts: 1,
+                providerMessageId: null,
+              }),
+            );
+          }
 
-        resourceType: event.resourceType ?? null,
-        resourceId: event.resourceId ?? null,
+          if (emailRecipients.has(recipient.userId)) {
+            extraDeliveries.push(
+              deliveryRepo.create({
+                notificationRecipientId: recipient.id,
+                channel: NotificationDeliveryChannel.EMAIL,
+                status: NotificationDeliveryStatus.PENDING,
+                scheduledAt: null,
+                sentAt: null,
+                failedAt: null,
+                failureReason: null,
+                attempts: 0,
+                providerMessageId: null,
+              }),
+            );
+          }
 
-        actorType: event.actorType,
-        actorUserId: event.actorUserId ?? null,
-        initiatedByUserId: event.initiatedByUserId ?? null,
+          if (pushRecipients.has(recipient.userId)) {
+            extraDeliveries.push(
+              deliveryRepo.create({
+                notificationRecipientId: recipient.id,
+                channel: NotificationDeliveryChannel.PUSH,
+                status: NotificationDeliveryStatus.PENDING,
+                scheduledAt: null,
+                sentAt: null,
+                failedAt: null,
+                failureReason: null,
+                attempts: 0,
+                providerMessageId: null,
+              }),
+            );
+          }
 
-        sourceEventId: event.eventId,
-        deduplicationKey: this.optionalString(
-          event.payload.deduplicationKey,
-        ),
-
-        templateKey: `notifications.${event.eventType}`,
-        templateVariables: event.payload,
-        metadata: this.resolveMetadata(event),
-
-        occurredAt,
-        expiresAt,
-      });
-
-      const savedNotification =
-        await notificationRepo.save(notification);
-
-      const recipientRepo =
-        manager.getRepository(NotificationRecipientEntity);
-
-      const recipientEntities = recipients.map((recipient) =>
-        recipientRepo.create({
-          notificationId: savedNotification.id,
-          userId: recipient.userId,
-          interestReason: recipient.interestReason,
-          seenAt: null,
-          readAt: null,
-          archivedAt: null,
-          dismissedAt: null,
-        }),
-      );
-
-      const savedRecipients =
-        await recipientRepo.save(recipientEntities);
-
-      const deliveryRepo =
-        manager.getRepository(NotificationDeliveryEntity);
-
-      const deliveries = savedRecipients.flatMap((recipient) => {
-        const inAppDelivery = deliveryRepo.create({
-          notificationRecipientId: recipient.id,
-          channel: NotificationDeliveryChannel.IN_APP,
-          status: NotificationDeliveryStatus.SENT,
-          scheduledAt: null,
-          sentAt: new Date(),
-          failedAt: null,
-          failureReason: null,
-          attempts: 1,
-          providerMessageId: null,
+          return extraDeliveries;
         });
 
-        const extraDeliveries: NotificationDeliveryEntity[] = [];
+        const savedDeliveries = await deliveryRepo.save(deliveries);
 
-        if (emailRecipients.has(recipient.userId)) {
-          extraDeliveries.push(
-            deliveryRepo.create({
-              notificationRecipientId: recipient.id,
-              channel: NotificationDeliveryChannel.EMAIL,
-              status: NotificationDeliveryStatus.PENDING,
-              scheduledAt: null,
-              sentAt: null,
-              failedAt: null,
-              failureReason: null,
-              attempts: 0,
-              providerMessageId: null,
-            }),
-          );
-        }
-
-        if (pushRecipients.has(recipient.userId)) {
-          extraDeliveries.push(
-            deliveryRepo.create({
-              notificationRecipientId: recipient.id,
-              channel: NotificationDeliveryChannel.PUSH,
-              status: NotificationDeliveryStatus.PENDING,
-              scheduledAt: null,
-              sentAt: null,
-              failedAt: null,
-              failureReason: null,
-              attempts: 0,
-              providerMessageId: null,
-            }),
-          );
-        }
-
-        return [inAppDelivery, ...extraDeliveries];
-      });
-
-      const savedDeliveries = await deliveryRepo.save(deliveries);
-
-      const pendingEmailDeliveries = savedDeliveries
-        .filter((delivery) => delivery.channel === NotificationDeliveryChannel.EMAIL)
-        .map((delivery) => {
-          const recipient = savedRecipients.find(
-            (candidate) => candidate.id === delivery.notificationRecipientId,
-          );
-
-          return {
-            deliveryId: delivery.id,
-            email: emailRecipients.get(recipient!.userId)!,
-          };
-        });
-
-      const pendingPushDeliveries = savedDeliveries
-        .filter((delivery) => delivery.channel === NotificationDeliveryChannel.PUSH)
-        .map((delivery) => {
-          const recipient = savedRecipients.find(
-            (candidate) => candidate.id === delivery.notificationRecipientId,
-          );
-
-          return {
-            deliveryId: delivery.id,
-            userId: recipient!.userId,
-          };
-        });
-
-      return {
-        status: 'created',
-        notificationId: savedNotification.id,
-        recipientCount: savedRecipients.length,
-        pendingEmailDeliveries,
-        pendingPushDeliveries,
-        realtimeRecipientIds: savedDeliveries
+        const pendingEmailDeliveries = savedDeliveries
           .filter(
             (delivery) =>
-              delivery.channel === NotificationDeliveryChannel.IN_APP &&
-              delivery.status === NotificationDeliveryStatus.SENT,
+              delivery.channel === NotificationDeliveryChannel.EMAIL,
           )
-          .map((delivery) => delivery.notificationRecipientId),
-      };
-    });
+          .map((delivery) => {
+            const recipient = savedRecipients.find(
+              (candidate) => candidate.id === delivery.notificationRecipientId,
+            );
+
+            return {
+              deliveryId: delivery.id,
+              email: emailRecipients.get(recipient!.userId)!,
+            };
+          });
+
+        const pendingPushDeliveries = savedDeliveries
+          .filter(
+            (delivery) => delivery.channel === NotificationDeliveryChannel.PUSH,
+          )
+          .map((delivery) => {
+            const recipient = savedRecipients.find(
+              (candidate) => candidate.id === delivery.notificationRecipientId,
+            );
+
+            return {
+              deliveryId: delivery.id,
+              userId: recipient!.userId,
+            };
+          });
+
+        return {
+          status: 'created',
+          notificationId: savedNotification.id,
+          recipientCount: savedRecipients.length,
+          pendingEmailDeliveries,
+          pendingPushDeliveries,
+          realtimeRecipientIds: savedDeliveries
+            .filter(
+              (delivery) =>
+                delivery.channel === NotificationDeliveryChannel.IN_APP &&
+                delivery.status === NotificationDeliveryStatus.SENT,
+            )
+            .map((delivery) => delivery.notificationRecipientId),
+        };
+      });
 
     if (result.status === 'created') {
       await Promise.allSettled(
@@ -364,8 +387,9 @@ export class NotificationEventProcessorService {
 
     const emailByUserId = new Map(
       workspaceUsers
-        .filter((user): user is AgencyWorkspaceUserEntity & { userId: string } =>
-          Boolean(user.userId && user.email),
+        .filter(
+          (user): user is AgencyWorkspaceUserEntity & { userId: string } =>
+            Boolean(user.userId && user.email),
         )
         .map((user) => [user.userId, user.email]),
     );
@@ -384,8 +408,10 @@ export class NotificationEventProcessorService {
       }
 
       const preferences = preferencesByUserId.get(userId) ?? [];
-      const entry = preferences.find(
-        (pref) => pref.key === preferenceGroup,
+      const entry = this.findPreference(
+        preferences,
+        event.eventType,
+        preferenceGroup,
       ) as { email?: boolean; channels?: { email?: boolean } } | undefined;
       const wantsEmail = entry?.email ?? entry?.channels?.email ?? false;
 
@@ -417,8 +443,10 @@ export class NotificationEventProcessorService {
 
     for (const userId of recipientUserIds) {
       const preferences = preferencesByUserId.get(userId) ?? [];
-      const entry = preferences.find(
-        (pref) => pref.key === preferenceGroup,
+      const entry = this.findPreference(
+        preferences,
+        event.eventType,
+        preferenceGroup,
       ) as { push?: boolean; channels?: { push?: boolean } } | undefined;
       const wantsPush = entry?.push ?? entry?.channels?.push ?? false;
 
@@ -430,6 +458,43 @@ export class NotificationEventProcessorService {
     return result;
   }
 
+  private async resolveInAppRecipients(
+    event: NotificationSourceEvent,
+    recipientUserIds: string[],
+  ): Promise<Set<string>> {
+    // Existing notification events retain their historical always-in-app
+    // behaviour. The exact hot-lead preference is opt-out: absent means the
+    // primary System channel stays enabled.
+    if (event.eventType !== 'leadflow.hot_lead.detected') {
+      return new Set(recipientUserIds);
+    }
+    const rows = await this.preferencesRepo.find({
+      where: { tenantId: event.tenantId, userId: In(recipientUserIds) },
+    });
+    const byUser = new Map(rows.map((row) => [row.userId, row.preferences]));
+    return new Set(
+      recipientUserIds.filter((userId) => {
+        const preferences = byUser.get(userId) ?? [];
+        const exact = preferences.find(
+          (preference) => preference.key === event.eventType,
+        ) as { app?: boolean; channels?: { app?: boolean } } | undefined;
+        if (!exact) return true;
+        return exact.app ?? exact.channels?.app ?? true;
+      }),
+    );
+  }
+
+  private findPreference(
+    preferences: Array<Record<string, unknown>>,
+    eventType: string,
+    fallbackKey: string,
+  ): Record<string, unknown> | undefined {
+    return (
+      preferences.find((preference) => preference.key === eventType) ??
+      preferences.find((preference) => preference.key === fallbackKey)
+    );
+  }
+
   private async getEmailTransportOverride(
     tenantId: string,
     workspaceId?: string | null,
@@ -439,11 +504,18 @@ export class NotificationEventProcessorService {
       order: { updatedAt: 'DESC' },
     });
 
-    if (!settings?.smtpHost || !settings.smtpUser || !settings.smtpPasswordEncrypted || !settings.fromEmail) {
+    if (
+      !settings?.smtpHost ||
+      !settings.smtpUser ||
+      !settings.smtpPasswordEncrypted ||
+      !settings.fromEmail
+    ) {
       return undefined;
     }
 
-    const smtpPassword = this.cryptoService.decrypt(settings.smtpPasswordEncrypted);
+    const smtpPassword = this.cryptoService.decrypt(
+      settings.smtpPasswordEncrypted,
+    );
 
     if (!smtpPassword) {
       return undefined;
@@ -482,7 +554,9 @@ export class NotificationEventProcessorService {
       buttonUrl: frontendUrl,
     });
 
-    const deliveryRepo = this.dataSource.getRepository(NotificationDeliveryEntity);
+    const deliveryRepo = this.dataSource.getRepository(
+      NotificationDeliveryEntity,
+    );
 
     await Promise.allSettled(
       pendingDeliveries.map(async (pending) => {
@@ -508,7 +582,8 @@ export class NotificationEventProcessorService {
           await deliveryRepo.update(pending.deliveryId, {
             status: NotificationDeliveryStatus.FAILED,
             failedAt: new Date(),
-            failureReason: (error as Error).message?.slice(0, 250) ?? 'unknown_error',
+            failureReason:
+              (error as Error).message?.slice(0, 250) ?? 'unknown_error',
             attempts: 1,
           });
         }
@@ -527,19 +602,46 @@ export class NotificationEventProcessorService {
       'http://localhost:3003';
     const actionUrl = this.optionalString(event.payload.actionUrl);
 
-    const deliveryRepo = this.dataSource.getRepository(NotificationDeliveryEntity);
-    const userIds = [...new Set(pendingDeliveries.map((pending) => pending.userId))];
+    const deliveryRepo = this.dataSource.getRepository(
+      NotificationDeliveryEntity,
+    );
+    const userIds = [
+      ...new Set(pendingDeliveries.map((pending) => pending.userId)),
+    ];
 
     try {
-      await this.pushService.sendToUsers(event.tenantId, userIds, {
-        title,
-        body,
-        url: actionUrl ?? frontendUrl,
-      });
-
-      await deliveryRepo.update(
-        pendingDeliveries.map((pending) => pending.deliveryId),
-        { status: NotificationDeliveryStatus.SENT, sentAt: new Date(), attempts: 1 },
+      const outcomes = await this.pushService.sendToUsers(
+        event.tenantId,
+        userIds,
+        {
+          title,
+          body,
+          url: actionUrl ?? frontendUrl,
+        },
+      );
+      await Promise.all(
+        pendingDeliveries.map((pending) => {
+          const outcome = outcomes.get(pending.userId) ?? 'unavailable';
+          if (outcome === 'sent') {
+            return deliveryRepo.update(pending.deliveryId, {
+              status: NotificationDeliveryStatus.SENT,
+              sentAt: new Date(),
+              attempts: 1,
+            });
+          }
+          return deliveryRepo.update(pending.deliveryId, {
+            status:
+              outcome === 'failed'
+                ? NotificationDeliveryStatus.FAILED
+                : NotificationDeliveryStatus.SKIPPED,
+            failedAt: outcome === 'failed' ? new Date() : null,
+            failureReason:
+              outcome === 'failed'
+                ? 'web_push_provider_failed'
+                : 'skipped_web_push_unavailable',
+            attempts: outcome === 'failed' ? 1 : 0,
+          });
+        }),
       );
     } catch (error) {
       this.logger.warn(
@@ -551,16 +653,15 @@ export class NotificationEventProcessorService {
         {
           status: NotificationDeliveryStatus.FAILED,
           failedAt: new Date(),
-          failureReason: (error as Error).message?.slice(0, 250) ?? 'unknown_error',
+          failureReason:
+            (error as Error).message?.slice(0, 250) ?? 'unknown_error',
           attempts: 1,
         },
       );
     }
   }
 
-  private resolveTitle(
-    event: NotificationSourceEvent,
-  ): string {
+  private resolveTitle(event: NotificationSourceEvent): string {
     const title = event.payload.title;
 
     if (typeof title === 'string' && title.trim()) {
@@ -570,11 +671,23 @@ export class NotificationEventProcessorService {
     return event.eventType;
   }
 
-  private resolveBody(
+  private requestedChannels(
     event: NotificationSourceEvent,
-  ): string {
-    const body =
-      event.payload.body ?? event.payload.message;
+  ): Set<NotificationDeliveryChannel> | null {
+    const raw = event.payload.deliveryChannels;
+    if (!Array.isArray(raw)) return null;
+    const allowed = new Set(Object.values(NotificationDeliveryChannel));
+    return new Set(
+      raw.filter(
+        (item): item is NotificationDeliveryChannel =>
+          typeof item === 'string' &&
+          allowed.has(item as NotificationDeliveryChannel),
+      ),
+    );
+  }
+
+  private resolveBody(event: NotificationSourceEvent): string {
+    const body = event.payload.body ?? event.payload.message;
 
     if (typeof body === 'string' && body.trim()) {
       return body.trim();
@@ -588,11 +701,7 @@ export class NotificationEventProcessorService {
   ): Record<string, unknown> {
     const metadata = event.payload.metadata;
 
-    if (
-      metadata &&
-      typeof metadata === 'object' &&
-      !Array.isArray(metadata)
-    ) {
+    if (metadata && typeof metadata === 'object' && !Array.isArray(metadata)) {
       return metadata as Record<string, unknown>;
     }
 

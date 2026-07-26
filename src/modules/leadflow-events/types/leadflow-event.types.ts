@@ -48,6 +48,7 @@ export type LeadFlowEventName =
   | 'leadflow.inbox.conversation.idle'
   | 'leadflow.inbox.conversation.assigned'
   | 'leadflow.inbox.conversation.handoff.requested'
+  | 'leadflow.inbox.business_hours.closed'
   | 'leadflow.inbox.conversation.handoff.accepted'
   | 'leadflow.inbox.conversation.closed'
   // CRM / Leads

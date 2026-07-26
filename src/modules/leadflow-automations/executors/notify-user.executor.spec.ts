@@ -44,9 +44,16 @@ function build(publish: jest.Mock) {
 describe('NotifyUserExecutor', () => {
   it('confirms and carries the notification id when the alert is sent', async () => {
     const publish = jest.fn().mockResolvedValue({
-      status: 'sent',
+      status: 'processed',
       notificationId: 'notif-1',
-      recipientUserId: 'user-owner',
+      recipientUserIds: ['user-owner'],
+      channelResults: [
+        {
+          recipientUserId: 'user-owner',
+          channel: 'in_app',
+          status: 'sent',
+        },
+      ],
     });
     const executor = build(publish);
 
@@ -56,21 +63,30 @@ describe('NotifyUserExecutor', () => {
     expect(result.effectConfirmed).toBe(true);
     expect(result.reference).toBe('notif-1');
 
-    expect(publish.mock.calls[0][0]).toMatchObject({
-      tenantId: 'tenant-1',
-      workspaceId: 'workspace-1',
-      idempotencyKey: 'effect:abc',
-      opportunityId: 'opportunity-1',
-      title: 'Lead quente',
-      actionUrl: '/leadflow/crm',
-    });
+    expect(publish).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tenantId: 'tenant-1',
+        workspaceId: 'workspace-1',
+        idempotencyKey: 'effect:abc',
+        opportunityId: 'opportunity-1',
+        title: 'Lead quente',
+        actionUrl: '/leadflow/crm',
+      }),
+    );
   });
 
   it('defaults message and action url when the payload omits them', async () => {
     const publish = jest.fn().mockResolvedValue({
-      status: 'sent',
+      status: 'processed',
       notificationId: 'notif-1',
-      recipientUserId: 'user-owner',
+      recipientUserIds: ['user-owner'],
+      channelResults: [
+        {
+          recipientUserId: 'user-owner',
+          channel: 'in_app',
+          status: 'sent',
+        },
+      ],
     });
     const executor = build(publish);
 
@@ -78,10 +94,12 @@ describe('NotifyUserExecutor', () => {
       request({ payload: { opportunityId: 'opportunity-1' } }),
     );
 
-    expect(publish.mock.calls[0][0]).toMatchObject({
-      title: 'Alerta de lead',
-      actionUrl: '/leadflow/crm',
-    });
+    expect(publish).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: 'Alerta de lead',
+        actionUrl: '/leadflow/crm',
+      }),
+    );
   });
 
   it('refuses when no recipient can be resolved', async () => {
@@ -93,6 +111,34 @@ describe('NotifyUserExecutor', () => {
     expect(result.status).toBe('refused');
     expect(result.errorClass).toBe(LeadFlowAutomationErrorClass.Permanent);
     expect(result.errorCode).toBe('notify_no_recipient');
+  });
+
+  it('confirms the processed event while preserving a total delivery failure', async () => {
+    const publish = jest.fn().mockResolvedValue({
+      status: 'processed',
+      notificationId: 'notif-1',
+      recipientUserIds: ['user-owner'],
+      channelResults: [
+        {
+          recipientUserId: 'user-owner',
+          channel: 'email',
+          status: 'failed',
+        },
+      ],
+    });
+    const executor = build(publish);
+
+    const result = await executor.execute(request());
+
+    expect(result).toMatchObject({
+      status: 'confirmed',
+      effectConfirmed: true,
+      details: {
+        successfulDeliveries: 0,
+        failedDeliveries: 1,
+        totalFailure: true,
+      },
+    });
   });
 
   it('treats an unexpected error as a transient failure', async () => {

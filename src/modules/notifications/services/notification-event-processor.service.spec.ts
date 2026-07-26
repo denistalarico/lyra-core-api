@@ -89,6 +89,36 @@ describe('NotificationEventProcessorService realtime', () => {
 
     expect(result.status).toBe('created');
   });
+
+  it('records Web Push as skipped when the user has no usable subscription', async () => {
+    const { service, repos } = makeService({
+      preferenceRows: [
+        {
+          userId: 'user-1',
+          preferences: [{ key: 'tasks', push: true }],
+        },
+        {
+          userId: 'user-2',
+          preferences: [{ key: 'tasks', push: true }],
+        },
+      ],
+      pushOutcomes: new Map([
+        ['user-1', 'unavailable'],
+        ['user-2', 'unavailable'],
+      ]),
+    });
+
+    await service.process(makeEvent());
+
+    expect(repos.delivery.update).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        status: NotificationDeliveryStatus.SKIPPED,
+        failureReason: 'skipped_web_push_unavailable',
+        attempts: 0,
+      }),
+    );
+  });
 });
 
 function makeService(
@@ -98,18 +128,25 @@ function makeService(
       userId: string;
       interestReason: NotificationInterestReason;
     }>;
+    preferenceRows?: Array<Record<string, unknown>>;
+    pushOutcomes?: Map<string, string>;
   } = {},
 ) {
   const repos = makeRepositories(options.existingNotification ?? null);
   const dataSource = {
-    transaction: jest.fn(async (callback) => callback({
-      getRepository: (entity: { name: string }) => {
-        if (entity.name === 'NotificationEntity') return repos.notification;
-        if (entity.name === 'NotificationRecipientEntity') return repos.recipient;
-        if (entity.name === 'NotificationDeliveryEntity') return repos.delivery;
-        throw new Error(`Unexpected repository ${entity.name}`);
-      },
-    })),
+    transaction: jest.fn(async (callback) =>
+      callback({
+        getRepository: (entity: { name: string }) => {
+          if (entity.name === 'NotificationEntity') return repos.notification;
+          if (entity.name === 'NotificationRecipientEntity')
+            return repos.recipient;
+          if (entity.name === 'NotificationDeliveryEntity')
+            return repos.delivery;
+          throw new Error(`Unexpected repository ${entity.name}`);
+        },
+      }),
+    ),
+    getRepository: jest.fn(() => repos.delivery),
   } as unknown as DataSource;
   const catalog = {
     requireDefinition: jest.fn(() => makeDefinition()),
@@ -135,13 +172,17 @@ function makeService(
   const realtime = {
     emitCreatedForRecipient: jest.fn().mockResolvedValue(undefined),
   } as unknown as jest.Mocked<NotificationRealtimeService>;
-  const preferencesRepo = { find: jest.fn().mockResolvedValue([]) };
+  const preferencesRepo = {
+    find: jest.fn().mockResolvedValue(options.preferenceRows ?? []),
+  };
   const workspaceUsersRepo = { find: jest.fn().mockResolvedValue([]) };
   const emailSettingsRepo = { findOne: jest.fn().mockResolvedValue(null) };
   const emailService = { sendEmail: jest.fn().mockResolvedValue(undefined) };
   const cryptoService = { decrypt: jest.fn() };
   const configService = { get: jest.fn() };
-  const pushService = { sendToUsers: jest.fn().mockResolvedValue(undefined) };
+  const pushService = {
+    sendToUsers: jest.fn().mockResolvedValue(options.pushOutcomes ?? new Map()),
+  };
   const service = new NotificationEventProcessorService(
     dataSource,
     preferencesRepo as never,
@@ -160,7 +201,9 @@ function makeService(
   return { service, realtime, repos };
 }
 
-function makeRepositories(existingNotification: Record<string, unknown> | null) {
+function makeRepositories(
+  existingNotification: Record<string, unknown> | null,
+) {
   const notification = {
     findOne: jest.fn().mockResolvedValue(existingNotification),
     create: jest.fn((input) => input),
@@ -188,6 +231,7 @@ function makeRepositories(existingNotification: Record<string, unknown> | null) 
         id: `delivery-${index + 1}`,
       })),
     ),
+    update: jest.fn().mockResolvedValue({ affected: 1 }),
   };
 
   return { notification, recipient, delivery };

@@ -158,6 +158,29 @@ export const LEADFLOW_EVENT_CATALOG: LeadFlowEventCatalogItem[] = [
     },
   }),
   buildEvent({
+    eventName: 'leadflow.inbox.business_hours.closed',
+    description:
+      'Handoff solicitado fora do horário comercial oficial do workspace. Evento derivado apenas do contexto de handoff.',
+    requiredContext: ['conversationId'],
+    payloadSchema: {
+      handoffEventId: field(
+        'string',
+        true,
+        'Evento canônico de handoff que originou a derivação.',
+      ),
+      timezone: field(
+        'string',
+        true,
+        'Fuso usado para avaliar o horário oficial.',
+      ),
+      evaluatedAt: field(
+        'string',
+        true,
+        'Instante em que a janela foi avaliada.',
+      ),
+    },
+  }),
+  buildEvent({
     eventName: 'leadflow.inbox.conversation.handoff.accepted',
     description: 'Handoff aceito por um humano; agente pausa na conversa.',
     requiredContext: ['conversationId'],
@@ -868,9 +891,10 @@ export const LEADFLOW_AUTOMATION_TRIGGER_EVENT_MAPPINGS: LeadFlowEventTriggerMap
     },
     {
       trigger: 'business_hours.closed',
-      eventName: null,
-      status: 'planned',
-      notes: 'Condição de janela, não um evento de domínio.',
+      eventName: 'leadflow.inbox.business_hours.closed',
+      status: 'mapped',
+      notes:
+        'Derivado exclusivamente de handoff.requested contra o horário oficial do Inbox Settings.',
     },
     {
       trigger: 'developer.webhook.received',

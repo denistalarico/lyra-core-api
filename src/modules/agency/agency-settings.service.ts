@@ -11,7 +11,10 @@ import * as QRCode from 'qrcode';
 import { In, IsNull, Repository } from 'typeorm';
 import { SettingsCryptoService } from '../../common/crypto/settings-crypto.service';
 import { FilesService } from '../../common/files/files.service';
-import { EmailService, type EmailTransportOverride } from '../email/email.service';
+import {
+  EmailService,
+  type EmailTransportOverride,
+} from '../email/email.service';
 import { renderTransactionalEmail } from '../email/templates/transactional-email.template';
 import {
   AgencyEmailTwoFactorCodeEntity,
@@ -76,12 +79,7 @@ const AGENCY_APP_KEYS = [
   'profitability',
   'settings',
 ] as const;
-const AGENCY_WORKSPACE_ROLES = [
-  'owner',
-  'admin',
-  'manager',
-  'member',
-] as const;
+const AGENCY_WORKSPACE_ROLES = ['owner', 'admin', 'manager', 'member'] as const;
 type AgencyWorkspaceRoleKey = (typeof AGENCY_WORKSPACE_ROLES)[number];
 type AgencyPermissionAccessValue = 'full' | 'partial' | 'blocked';
 type AgencyPermissionMatrix = Record<
@@ -374,8 +372,9 @@ export class AgencySettingsService {
       trustedDevices,
       history,
       summary: {
-        activeSessions: sessions.filter((session) => session.status !== 'expired')
-          .length,
+        activeSessions: sessions.filter(
+          (session) => session.status !== 'expired',
+        ).length,
         trustedDevices: trustedDevices.length,
         twoFactorStatus: settings.twoFactorEnabled
           ? 'enabled'
@@ -610,7 +609,9 @@ export class AgencySettingsService {
     sessionId?: string,
   ) {
     if (!sessionId) {
-      throw new BadRequestException('No active session to identify the device.');
+      throw new BadRequestException(
+        'No active session to identify the device.',
+      );
     }
 
     const session = await this.userSessionsRepo.findOne({
@@ -636,7 +637,11 @@ export class AgencySettingsService {
     );
 
     const existing = await this.trustedDevicesRepo.findOne({
-      where: { tenantId, userId, deviceFingerprint: session.deviceFingerprint! },
+      where: {
+        tenantId,
+        userId,
+        deviceFingerprint: session.deviceFingerprint!,
+      },
     });
 
     await this.trustedDevicesRepo.save(
@@ -680,7 +685,11 @@ export class AgencySettingsService {
     );
 
     const existing = await this.trustedDevicesRepo.findOne({
-      where: { tenantId, userId, deviceFingerprint: session.deviceFingerprint! },
+      where: {
+        tenantId,
+        userId,
+        deviceFingerprint: session.deviceFingerprint!,
+      },
     });
 
     if (!existing) {
@@ -818,14 +827,14 @@ export class AgencySettingsService {
         smtpUser: this.normalizeNullableString(dto.smtpUser),
         smtpPasswordEncrypted: smtpPassword
           ? this.cryptoService.encrypt(smtpPassword)
-          : existing?.smtpPasswordEncrypted ?? null,
+          : (existing?.smtpPasswordEncrypted ?? null),
         imapHost,
         imapPort: dto.imapPort ?? existing?.imapPort ?? null,
         imapSecure: dto.imapSecure ?? existing?.imapSecure ?? true,
         imapUser: this.normalizeNullableString(dto.imapUser),
         imapPasswordEncrypted: imapPassword
           ? this.cryptoService.encrypt(imapPassword)
-          : existing?.imapPasswordEncrypted ?? null,
+          : (existing?.imapPasswordEncrypted ?? null),
         status:
           dto.status ??
           this.resolveEmailStatus({
@@ -1041,7 +1050,10 @@ export class AgencySettingsService {
     dto: InviteAgencyWorkspaceUserDto,
   ) {
     const normalizedEmail = dto.email.trim().toLowerCase();
-    const permissionMatrix = await this.getPermissionMatrix(tenantId, workspaceId);
+    const permissionMatrix = await this.getPermissionMatrix(
+      tenantId,
+      workspaceId,
+    );
 
     const user = await this.workspaceUsersRepo.save(
       this.workspaceUsersRepo.create({
@@ -1270,26 +1282,30 @@ export class AgencySettingsService {
       };
     }
 
-    const effective = await this.platformPermissionService.getEffectivePermissions({
-      tenantId,
-      workspaceId,
-      userId: user.userId,
-      role: user.role,
-    });
+    const effective =
+      await this.platformPermissionService.getEffectivePermissions({
+        tenantId,
+        workspaceId,
+        userId: user.userId,
+        role: user.role,
+      });
 
     const dangerousKeys = new Set(getDangerousPermissionKeys());
-    const overrides = await this.platformPermissionService.listUserPermissionOverrides(
-      tenantId,
-      user.userId,
-      workspaceId,
-    );
+    const overrides =
+      await this.platformPermissionService.listUserPermissionOverrides(
+        tenantId,
+        user.userId,
+        workspaceId,
+      );
 
     return {
       workspaceUserId: user.id,
       role: user.role,
       pendingAcceptance: false,
       effectivePermissions: [...effective].sort(),
-      dangerousPermissions: [...effective].filter((key) => dangerousKeys.has(key)).sort(),
+      dangerousPermissions: [...effective]
+        .filter((key) => dangerousKeys.has(key))
+        .sort(),
       overrides: overrides.map((override) => ({
         permissionKey: override.permissionKey,
         enabled: override.enabled,
@@ -1337,7 +1353,11 @@ export class AgencySettingsService {
       actorUserId,
     });
 
-    return this.getWorkspaceUserPermissions(tenantId, workspaceId, workspaceUserId);
+    return this.getWorkspaceUserPermissions(
+      tenantId,
+      workspaceId,
+      workspaceUserId,
+    );
   }
 
   async removeWorkspaceUserPermissionOverride(
@@ -1369,7 +1389,11 @@ export class AgencySettingsService {
       actorUserId,
     });
 
-    return this.getWorkspaceUserPermissions(tenantId, workspaceId, workspaceUserId);
+    return this.getWorkspaceUserPermissions(
+      tenantId,
+      workspaceId,
+      workspaceUserId,
+    );
   }
 
   async deactivateWorkspaceUser(
@@ -1530,11 +1554,11 @@ export class AgencySettingsService {
     return value === 'full' || value === 'partial' || value === 'blocked';
   }
 
-  private readPermissionMatrixFromApps(
-    apps: Array<Record<string, unknown>>,
-  ) {
-    const matrix: Record<string, Partial<Record<AgencyWorkspaceRoleKey, AgencyPermissionAccessValue>>> =
-      {};
+  private readPermissionMatrixFromApps(apps: Array<Record<string, unknown>>) {
+    const matrix: Record<
+      string,
+      Partial<Record<AgencyWorkspaceRoleKey, AgencyPermissionAccessValue>>
+    > = {};
 
     for (const app of apps) {
       const appKey = typeof app.appKey === 'string' ? app.appKey : null;
@@ -1595,11 +1619,18 @@ export class AgencySettingsService {
       order: { updatedAt: 'DESC' },
     });
 
-    if (!settings?.smtpHost || !settings.smtpUser || !settings.smtpPasswordEncrypted || !settings.fromEmail) {
+    if (
+      !settings?.smtpHost ||
+      !settings.smtpUser ||
+      !settings.smtpPasswordEncrypted ||
+      !settings.fromEmail
+    ) {
       return undefined;
     }
 
-    const smtpPassword = this.cryptoService.decrypt(settings.smtpPasswordEncrypted);
+    const smtpPassword = this.cryptoService.decrypt(
+      settings.smtpPasswordEncrypted,
+    );
 
     if (!smtpPassword) {
       return undefined;
@@ -1856,6 +1887,13 @@ export class AgencySettingsService {
       { key: 'clients', app: true, email: true, push: false },
       { key: 'security', app: true, email: true, push: true },
       { key: 'system', app: true, email: false, push: false },
+      {
+        key: 'leadflow.hot_lead.detected',
+        app: true,
+        email: false,
+        push: false,
+        whatsapp: false,
+      },
     ];
   }
 

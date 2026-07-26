@@ -2,14 +2,25 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  Inject,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, IsNull, Repository } from 'typeorm';
 import type { RequestContext } from '../../../common/context/request-context.interface';
 import { LeadFlowClientSettingsEntity } from '../../leadflow-settings/entities';
 import { InboxChannelEntity } from '../../inbox/entities/inbox-channel.entity';
+import { AgencyWorkspaceEmailSettingsEntity } from '../../agency/entities/agency-settings.entities';
+import {
+  PLATFORM_WHATSAPP_NOTIFICATION_CONFIG,
+  type PlatformWhatsAppNotificationConfigProvider,
+} from '../../notifications/platform-whatsapp/platform-whatsapp-notification.config';
+import {
+  LEADFLOW_HOT_LEAD_TEMPLATE_KEY,
+  resolvePlatformWhatsAppTemplate,
+} from '../../notifications/platform-whatsapp/platform-whatsapp-notification.catalog';
 import { LeadFlowSettingsContextType } from '../../leadflow-settings/enums/leadflow-settings-context-type.enum';
 import { PlatformPermissionService } from '../../permissions';
 import type { PermissionContext } from '../../permissions';
@@ -39,6 +50,7 @@ import type {
   LeadFlowAutomationRuntimeConfigResponse,
   LeadFlowAutomationsRuntimeConfigResponse,
 } from '../dto/leadflow-automation-runtime-config-response.dto';
+import type { LeadFlowNotificationChannelCapabilities } from '../dto/leadflow-automation-response.dto';
 import { type LeadFlowAutomationConfigSection } from '../catalog/automation-config-schemas.catalog';
 import { isRuntimeAvailable } from '../catalog/automation-dependencies.registry';
 import {
@@ -96,6 +108,8 @@ export class LeadFlowAutomationService {
     private readonly settingsRepository: Repository<LeadFlowClientSettingsEntity>,
     @InjectRepository(InboxChannelEntity, AGENCY_CONNECTION)
     private readonly inboxChannelsRepository: Repository<InboxChannelEntity>,
+    @InjectRepository(AgencyWorkspaceEmailSettingsEntity, AGENCY_CONNECTION)
+    private readonly workspaceEmailSettingsRepository: Repository<AgencyWorkspaceEmailSettingsEntity>,
     private readonly recipeService: LeadFlowAutomationRecipeService,
     private readonly runtimeConfigService: LeadFlowAutomationRuntimeConfigService,
     private readonly configSchemaService: LeadFlowAutomationConfigSchemaService,
@@ -105,6 +119,9 @@ export class LeadFlowAutomationService {
     private readonly runService: LeadFlowAutomationRunService,
     private readonly permissionService: PlatformPermissionService,
     private readonly transitionPolicies: CrmStageTransitionPolicyService,
+    private readonly configService: ConfigService,
+    @Inject(PLATFORM_WHATSAPP_NOTIFICATION_CONFIG)
+    private readonly platformWhatsAppConfig: PlatformWhatsAppNotificationConfigProvider,
   ) {}
 
   async list(ctx: RequestContext): Promise<LeadFlowAutomationListResponse> {
@@ -673,6 +690,47 @@ export class LeadFlowAutomationService {
     active: ActiveContext,
   ): Promise<LeadFlowAutomationLifecycle> {
     const lifecycle = this.lifecycleFor(automation, active);
+
+    if (automation.recipeKey === 'hot_lead_notification') {
+      const configured = Array.isArray(
+        automation.actionConfig?.notificationChannels,
+      )
+        ? automation.actionConfig.notificationChannels
+        : [];
+      const capabilities = await this.notificationChannelCapabilities(
+        automation.tenantId,
+        automation.workspaceId,
+      );
+      const hasAvailableChannel = configured.some((channel) => {
+        const capability =
+          capabilities[
+            channel as keyof LeadFlowNotificationChannelCapabilities
+          ];
+        return capability?.available === true;
+      });
+
+      if (
+        !hasAvailableChannel &&
+        !lifecycle.missingConfiguration.includes('actions.notificationChannels')
+      ) {
+        const recipe = this.recipeService.getRecipe(automation.recipeKey);
+        return this.lifecycleService.evaluate({
+          status: automation.status,
+          recipe,
+          compatibleWithBusinessMode: recipe
+            ? this.recipeService.isCompatible(recipe, active.businessModeKey)
+            : false,
+          missingConfiguration: [
+            ...lifecycle.missingConfiguration,
+            'actions.notificationChannels',
+          ],
+          unavailableActions: lifecycle.unavailableActions,
+        });
+      }
+
+      return lifecycle;
+    }
+
     if (
       !['followup_idle_lead', 'followup_by_crm_stage'].includes(
         automation.recipeKey,
@@ -848,6 +906,13 @@ export class LeadFlowAutomationService {
         LEADFLOW_AUTOMATIONS_PERMISSIONS.developerManage,
       ),
     };
+    if (automation.recipeKey === 'hot_lead_notification') {
+      detail.notificationChannelCapabilities =
+        await this.notificationChannelCapabilities(
+          automation.tenantId,
+          automation.workspaceId,
+        );
+    }
     detail.lifecycle = await this.lifecycleWithChannelAvailability(
       automation,
       active,
@@ -856,6 +921,79 @@ export class LeadFlowAutomationService {
       ? this.configSchemaService.buildSchema(recipe)
       : null;
     return detail;
+  }
+
+  private async notificationChannelCapabilities(
+    tenantId: string,
+    workspaceId: string,
+  ): Promise<LeadFlowNotificationChannelCapabilities> {
+    const pushAvailable =
+      Boolean(this.configService.get<string>('WEB_PUSH_VAPID_PUBLIC_KEY')) &&
+      Boolean(this.configService.get<string>('WEB_PUSH_VAPID_PRIVATE_KEY'));
+    const globalEmailAvailable =
+      Boolean(this.configService.get<string>('SMTP_HOST')) &&
+      Boolean(this.configService.get<string>('SMTP_USER')) &&
+      Boolean(this.configService.get<string>('SMTP_PASS')) &&
+      Boolean(this.configService.get<string>('SMTP_FROM_EMAIL'));
+    const workspaceEmail = globalEmailAvailable
+      ? null
+      : await this.workspaceEmailSettingsRepository.findOne({
+          where: { tenantId, workspaceId },
+          select: {
+            id: true,
+            smtpHost: true,
+            smtpUser: true,
+            smtpPasswordEncrypted: true,
+            fromEmail: true,
+          },
+          order: { updatedAt: 'DESC' },
+        });
+    const emailAvailable =
+      globalEmailAvailable ||
+      Boolean(
+        workspaceEmail?.smtpHost &&
+        workspaceEmail.smtpUser &&
+        workspaceEmail.smtpPasswordEncrypted &&
+        workspaceEmail.fromEmail,
+      );
+    const platformWhatsApp = this.platformWhatsAppConfig.get();
+    const hotLeadTemplateApproved = Boolean(
+      resolvePlatformWhatsAppTemplate(LEADFLOW_HOT_LEAD_TEMPLATE_KEY),
+    );
+    const platformWhatsAppAvailable =
+      hotLeadTemplateApproved &&
+      platformWhatsApp.enabled &&
+      platformWhatsApp.testRecipientAllowList.length > 0;
+    const platformWhatsAppReason = !hotLeadTemplateApproved
+      ? 'Template de lead quente ainda não aprovado pela Meta.'
+      : !platformWhatsApp.enabled
+        ? 'WhatsApp não configurado para notificações da plataforma.'
+        : platformWhatsApp.testRecipientAllowList.length === 0
+          ? 'Nenhum destinatário de teste autorizado para o WhatsApp da plataforma.'
+          : null;
+
+    return {
+      in_app: { available: true, reason: null },
+      push: {
+        available: pushAvailable,
+        reason: pushAvailable
+          ? null
+          : 'Web Push indisponível para este ambiente.',
+      },
+      platform_whatsapp: {
+        available: platformWhatsAppAvailable,
+        reason: platformWhatsAppReason,
+      },
+      email: {
+        available: emailAvailable,
+        reason: emailAvailable ? null : 'Nenhum provedor de e-mail disponível.',
+      },
+      sms: {
+        available: false,
+        reason:
+          'Canal ainda não disponível. A integração com SMS será adicionada futuramente.',
+      },
+    };
   }
 
   private async findScopedAutomation(

@@ -71,6 +71,9 @@ describe('automation executor registry', () => {
   });
 
   it('deduplicates configured action keys', () => {
-    expect(unavailableExecutors(['add_tag', 'add_tag'])).toHaveLength(1);
+    expect(executorAvailability('add_tag').available).toBe(true);
+    expect(unavailableExecutors(['append_note', 'append_note'])).toHaveLength(
+      1,
+    );
   });
 });

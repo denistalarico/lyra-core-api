@@ -27,6 +27,7 @@ const CANARY_ACTION_ALLOWLIST = new Set<string>([
   // window/template rule in the Inbox command.
   'schedule_followup',
   'send_message',
+  'add_tag',
 ]);
 
 export type ExecutionGateDecision =

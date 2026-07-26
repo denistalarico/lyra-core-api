@@ -104,11 +104,23 @@ export interface LeadFlowAutomationCapabilities {
   developer: boolean;
 }
 
+export interface LeadFlowNotificationChannelCapability {
+  available: boolean;
+  reason: string | null;
+}
+
+export type LeadFlowNotificationChannelCapabilities = Record<
+  'in_app' | 'push' | 'platform_whatsapp' | 'email' | 'sms',
+  LeadFlowNotificationChannelCapability
+>;
+
 export interface LeadFlowAutomationDetailResponse extends LeadFlowAutomationSummaryResponse {
   contextType: string;
   agencyClientId: string | null;
   settingsId: string | null;
   capabilities: LeadFlowAutomationCapabilities;
+  /** Runtime-backed availability for the hot-lead channel selector. */
+  notificationChannelCapabilities?: LeadFlowNotificationChannelCapabilities;
   whenLabel: string | null;
   limitsLabel: string | null;
   triggerConfig: LeadFlowAutomationTriggerConfig;

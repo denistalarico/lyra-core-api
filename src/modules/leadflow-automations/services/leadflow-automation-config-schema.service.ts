@@ -152,6 +152,31 @@ export class LeadFlowAutomationConfigSchemaService {
       missing.push('message.followupSteps');
     }
 
+    if (recipe.key === 'hot_lead_notification') {
+      const channels = Array.isArray(config.actions?.notificationChannels)
+        ? config.actions.notificationChannels
+        : [];
+      const eligible = channels.some((channel) =>
+        ['in_app', 'push', 'platform_whatsapp', 'email'].includes(
+          String(channel),
+        ),
+      );
+      if (!eligible && !missing.includes('actions.notificationChannels')) {
+        // Provider availability is evaluated dynamically by the lifecycle.
+        // SMS remains unimplemented and cannot make a configuration ready.
+        missing.push('actions.notificationChannels');
+      }
+    }
+
+    if (
+      recipe.key === 'automatic_tagging' &&
+      config.conditions?.ruleOperator !== 'is_present' &&
+      this.isEmpty(config.conditions?.ruleValue) &&
+      !missing.includes('conditions.ruleValue')
+    ) {
+      missing.push('conditions.ruleValue');
+    }
+
     return missing;
   }
 
@@ -242,6 +267,15 @@ export class LeadFlowAutomationConfigSchemaService {
         for (const item of raw) {
           if (typeof item !== 'string') {
             return [this.typeError(path, spec, 'uma lista de textos')];
+          }
+          if (spec.values && !spec.values.includes(item)) {
+            return [
+              {
+                path,
+                code: 'invalid_type',
+                message: `"${spec.label}" contém um valor não permitido.`,
+              },
+            ];
           }
           if (spec.maxLength !== undefined && item.length > spec.maxLength) {
             return [

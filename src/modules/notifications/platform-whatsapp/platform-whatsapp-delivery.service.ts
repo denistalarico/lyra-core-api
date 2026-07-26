@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import type { LeadFlowHandoffTemplateVariables } from './platform-whatsapp-notification.catalog';
+import type { PlatformWhatsAppTemplateVariables } from './platform-whatsapp-notification.catalog';
 import { PlatformWhatsAppNotificationDeliveryEntity } from './platform-whatsapp-notification-delivery.entity';
 import {
   buildPlatformWhatsAppDeliveryKey,
@@ -20,7 +20,7 @@ export interface PlatformWhatsAppDeliveryRequest {
   templateKey: string;
   businessModeKey?: string | null;
   toPhoneE164: string;
-  variables: LeadFlowHandoffTemplateVariables;
+  variables: PlatformWhatsAppTemplateVariables;
 }
 
 export type PlatformWhatsAppDeliveryResult =

@@ -10,6 +10,7 @@ import { RequestHandoffExecutor } from '../executors/request-handoff.executor';
 import { NotifyUserExecutor } from '../executors/notify-user.executor';
 import { ScheduleFollowupExecutor } from '../executors/schedule-followup.executor';
 import { SendMessageExecutor } from '../executors/send-message.executor';
+import { AddOpportunityTagExecutor } from '../executors/add-opportunity-tag.executor';
 import type { LeadFlowJsonObject } from '../types/leadflow-automation.types';
 import type { LeadFlowAutomationContextSnapshot } from '../types/leadflow-automation-context.types';
 import type { LeadFlowAutomationTrigger } from '../types/leadflow-automation.types';
@@ -34,6 +35,7 @@ const OPPORTUNITY_ACTIONS = new Set<string>([
   'assign_opportunity_owner',
   // notify_user routes to the opportunity's owner when no explicit target is set.
   'notify_user',
+  'add_tag',
 ]);
 
 /** Actions whose effect targets an inbox conversation in the envelope. */
@@ -80,6 +82,7 @@ export class LeadFlowAutomationExecutionService {
     assignOwnerExecutor: AssignOpportunityOwnerExecutor,
     requestHandoffExecutor: RequestHandoffExecutor,
     notifyUserExecutor: NotifyUserExecutor,
+    addTagExecutor: AddOpportunityTagExecutor,
     @Optional() scheduleFollowupExecutor?: ScheduleFollowupExecutor,
     @Optional() sendMessageExecutor?: SendMessageExecutor,
   ) {
@@ -90,6 +93,7 @@ export class LeadFlowAutomationExecutionService {
       [assignOwnerExecutor.actionKey, assignOwnerExecutor],
       [requestHandoffExecutor.actionKey, requestHandoffExecutor],
       [notifyUserExecutor.actionKey, notifyUserExecutor],
+      [addTagExecutor.actionKey, addTagExecutor],
     ]);
     if (scheduleFollowupExecutor) {
       this.executors.set(
@@ -273,6 +277,27 @@ export class LeadFlowAutomationExecutionService {
             typeof config.targetUserRef === 'string'
               ? config.targetUserRef
               : null,
+          notifyOpportunityOwner: config.notifyOpportunityOwner !== false,
+          notifyPipelineOwner: config.notifyPipelineOwner === true,
+          notifyPipelineParticipants:
+            config.notifyPipelineParticipants === true,
+          specificRecipientUserIds: Array.isArray(
+            config.specificRecipientUserRefs,
+          )
+            ? config.specificRecipientUserRefs
+            : [],
+          notificationChannels: Array.isArray(config.notificationChannels)
+            ? config.notificationChannels
+            : ['in_app'],
+          cycleId: delivery.sourceEventId,
+          policyVersion:
+            typeof delivery.payload.policyVersion === 'string'
+              ? delivery.payload.policyVersion
+              : 'unknown',
+          currentScore:
+            typeof delivery.payload.currentScore === 'number'
+              ? delivery.payload.currentScore
+              : null,
           title: 'Lead quente',
           body: 'Um lead cruzou o limiar de qualificação — priorize o atendimento.',
           actionUrl: '/leadflow/crm',
@@ -305,6 +330,37 @@ export class LeadFlowAutomationExecutionService {
             typeof message.templateLanguage === 'string'
               ? message.templateLanguage
               : 'pt_BR',
+        },
+      };
+    }
+
+    if (actionKey === 'add_tag') {
+      const actions = automation.actionConfig ?? {};
+      const conditions = automation.conditionConfig ?? {};
+      const crmPolicy = automation.crmPolicy ?? {};
+      const configured =
+        Array.isArray(actions.addTags) && actions.addTags.length > 0
+          ? actions.addTags
+          : Array.isArray(crmPolicy.addTags)
+            ? crmPolicy.addTags
+            : [];
+      return {
+        policyPrefix: 'tag',
+        payload: {
+          opportunityId: subject.opportunityId,
+          tagIds: configured,
+          ruleField:
+            typeof conditions.ruleField === 'string'
+              ? conditions.ruleField
+              : 'source',
+          ruleOperator:
+            typeof conditions.ruleOperator === 'string'
+              ? conditions.ruleOperator
+              : 'is_present',
+          ruleValue:
+            typeof conditions.ruleValue === 'string'
+              ? conditions.ruleValue
+              : null,
         },
       };
     }

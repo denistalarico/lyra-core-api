@@ -135,6 +135,18 @@ function scheduleFollowupAvailability(): AutomationExecutorAvailability {
   };
 }
 
+function addTagAvailability(): AutomationExecutorAvailability {
+  return {
+    actionKey: 'add_tag',
+    available: true,
+    reason: null,
+    dependency: null,
+    owningDomain: 'leadflow.crm',
+    description:
+      'Aplicação idempotente de tags existentes pela camada canônica do CRM, após revalidar a regra campo/operador/valor.',
+  };
+}
+
 const unavailable = (
   actionKey: LeadFlowAutomationAction,
   owningDomain: string,
@@ -172,11 +184,6 @@ const EXECUTORS = [
     'update_opportunity_score',
     'leadflow.crm',
     'Não há executor canônico de score conectado ao Automations.',
-  ),
-  unavailable(
-    'add_tag',
-    'leadflow.crm',
-    'Não há executor canônico de tags conectado ao Automations.',
   ),
   unavailable(
     'request_missing_fields',
@@ -226,6 +233,7 @@ const COMPUTED_AVAILABILITY: Record<
   notify_user: notifyUserAvailability,
   send_message: sendMessageAvailability,
   schedule_followup: scheduleFollowupAvailability,
+  add_tag: addTagAvailability,
 };
 
 export function executorAvailability(

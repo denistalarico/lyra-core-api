@@ -358,6 +358,7 @@ const ESSENTIAL_SEEDS: RecipeSeed[] = [
   },
   {
     key: 'hot_lead_notification',
+    templateVersion: 3,
     requiredDependencies: [
       LeadFlowAutomationDependency.EventFanOut,
       LeadFlowAutomationDependency.LeadScoreEngine,
@@ -373,7 +374,15 @@ const ESSENTIAL_SEEDS: RecipeSeed[] = [
     limitsLabel:
       'Movimentação de etapa exige aprovação humana quando configurada.',
     conditionConfig: { minScore: 70, intents: [] },
-    actionConfig: { targetUserRef: null, requireHumanApproval: true },
+    actionConfig: {
+      targetUserRef: null,
+      notifyOpportunityOwner: true,
+      notifyPipelineOwner: false,
+      notifyPipelineParticipants: false,
+      specificRecipientUserRefs: [],
+      notificationChannels: ['in_app'],
+      requireHumanApproval: true,
+    },
   },
   {
     key: 'automatic_handoff',
@@ -398,6 +407,7 @@ const ESSENTIAL_SEEDS: RecipeSeed[] = [
   },
   {
     key: 'outside_business_hours',
+    templateVersion: 3,
     requiredDependencies: [
       LeadFlowAutomationDependency.EventFanOut,
       LeadFlowAutomationDependency.MessageGeneration,
@@ -414,6 +424,10 @@ const ESSENTIAL_SEEDS: RecipeSeed[] = [
       'Informa o próximo horário de retorno; pode criar tarefa/follow.',
     conditionConfig: { businessHoursOnly: false, stopIfReplied: false },
     actionConfig: { primaryAction: 'send_message' },
+    messageConfig: {
+      baseMessage:
+        'No momento estamos fora do horário de atendimento. Assim que retornarmos, vamos responder por aqui.',
+    },
     schedulePolicy: { respectBusinessHours: false },
   },
   {
@@ -578,20 +592,24 @@ const OPTIONAL_SEEDS: RecipeSeed[] = [
   },
   {
     key: 'automatic_tagging',
+    templateVersion: 3,
     requiredDependencies: [LeadFlowAutomationDependency.EventFanOut],
     name: 'Tag automática',
     description:
       'Aplica tags à oportunidade com base em critérios simples da conversa.',
     category: LeadFlowAutomationCategory.Tagging,
     tier: 'optional',
-    trigger: 'conversation.created',
+    trigger: 'opportunity.created',
     primaryAction: 'add_tag',
-    whenLabel: 'Quando uma nova conversa é iniciada.',
+    whenLabel: 'Quando uma nova oportunidade é criada.',
     limitsLabel: 'Apenas organização interna; sem envio de mensagem.',
     conditionConfig: {
       businessHoursOnly: false,
       stopIfReplied: false,
       keywords: [],
+      ruleField: 'source',
+      ruleOperator: 'is_present',
+      ruleValue: null,
     },
     actionConfig: { primaryAction: 'add_tag', addTags: [] },
     crmPolicy: { addTags: [] },

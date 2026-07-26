@@ -33,6 +33,10 @@ import { PlatformWhatsAppNotificationSender } from './platform-whatsapp-notifica
     PlatformWhatsAppNotificationSender,
     PlatformWhatsAppDeliveryService,
   ],
-  exports: [PlatformWhatsAppNotificationSender, PlatformWhatsAppDeliveryService],
+  exports: [
+    PLATFORM_WHATSAPP_NOTIFICATION_CONFIG,
+    PlatformWhatsAppNotificationSender,
+    PlatformWhatsAppDeliveryService,
+  ],
 })
 export class PlatformWhatsAppNotificationModule {}

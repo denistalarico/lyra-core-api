@@ -9,6 +9,7 @@
 
 /** The one logical key this phase implements. */
 export const LEADFLOW_HANDOFF_TEMPLATE_KEY = 'leadflow.handoff.requested';
+export const LEADFLOW_HOT_LEAD_TEMPLATE_KEY = 'leadflow.hot_lead.detected';
 
 /**
  * Body variables of the handoff alert, as an explicit named contract rather than
@@ -22,6 +23,20 @@ export interface LeadFlowHandoffTemplateVariables {
   contactDisplayName: string;
   handoffReason: string;
 }
+
+/**
+ * Semantic contract for the hot-lead alert. The provider alone knows the
+ * physical template and positional ordering.
+ */
+export interface HotLeadWhatsAppTemplateVariables {
+  workspaceName: string;
+  leadDisplayName: string;
+  leadScore: string;
+}
+
+export type PlatformWhatsAppTemplateVariables =
+  | LeadFlowHandoffTemplateVariables
+  | HotLeadWhatsAppTemplateVariables;
 
 export type PlatformWhatsAppTemplateCategory =
   | 'utility'
@@ -61,6 +76,18 @@ export const PLATFORM_WHATSAPP_TEMPLATES: readonly PlatformWhatsAppTemplateDefin
       providerTemplateName: 'lyra_leadflow_handoff_alert_v1',
       languageCode: 'pt_BR',
       category: 'utility',
+      status: 'approved',
+      version: 1,
+    },
+    {
+      templateKey: LEADFLOW_HOT_LEAD_TEMPLATE_KEY,
+      businessModeKey: null,
+      providerTemplateName: 'lyra_leadflow_hot_lead_alert_v1',
+      languageCode: 'pt_BR',
+      category: 'utility',
+      // Approval confirmed by the user on 2026-07-26. Provider credentials,
+      // kill switch, recipient policy and user preference remain independent
+      // fail-closed gates.
       status: 'approved',
       version: 1,
     },
@@ -116,6 +143,12 @@ export const HANDOFF_VARIABLE_FALLBACKS: LeadFlowHandoffTemplateVariables = {
   handoffReason: 'Solicitação de atendimento humano',
 };
 
+export const HOT_LEAD_VARIABLE_FALLBACKS: HotLeadWhatsAppTemplateVariables = {
+  workspaceName: 'Sua empresa',
+  leadDisplayName: 'Lead sem nome',
+  leadScore: 'Alto',
+};
+
 const MAX_PARAMETER_LENGTH = 160;
 
 /**
@@ -143,6 +176,39 @@ export function buildHandoffTemplateParameters(
       HANDOFF_VARIABLE_FALLBACKS.handoffReason,
     ),
   ];
+}
+
+export function buildHotLeadTemplateParameters(
+  variables: HotLeadWhatsAppTemplateVariables,
+): [string, string, string] {
+  return [
+    normalizeParameter(
+      variables.workspaceName,
+      HOT_LEAD_VARIABLE_FALLBACKS.workspaceName,
+    ),
+    normalizeParameter(
+      variables.leadDisplayName,
+      HOT_LEAD_VARIABLE_FALLBACKS.leadDisplayName,
+    ),
+    normalizeParameter(
+      variables.leadScore,
+      HOT_LEAD_VARIABLE_FALLBACKS.leadScore,
+    ),
+  ];
+}
+
+export function buildPlatformTemplateParameters(
+  templateKey: string,
+  variables: PlatformWhatsAppTemplateVariables,
+): [string, string, string] {
+  if (templateKey === LEADFLOW_HOT_LEAD_TEMPLATE_KEY) {
+    return buildHotLeadTemplateParameters(
+      variables as HotLeadWhatsAppTemplateVariables,
+    );
+  }
+  return buildHandoffTemplateParameters(
+    variables as LeadFlowHandoffTemplateVariables,
+  );
 }
 
 function normalizeParameter(

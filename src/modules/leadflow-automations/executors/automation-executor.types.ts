@@ -93,6 +93,8 @@ export interface AutomationEffectResult {
   errorMessage?: string;
   /** Opaque reference returned by the owning domain (message id, run id, …). */
   reference?: string | null;
+  /** Sanitized structured evidence, such as per-channel delivery outcomes. */
+  details?: LeadFlowJsonObject;
 }
 
 /** Why an executor cannot run today. */

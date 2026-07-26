@@ -8,6 +8,7 @@ import type { RequestHandoffExecutor } from '../executors/request-handoff.execut
 import type { NotifyUserExecutor } from '../executors/notify-user.executor';
 import type { ScheduleFollowupExecutor } from '../executors/schedule-followup.executor';
 import type { SendMessageExecutor } from '../executors/send-message.executor';
+import type { AddOpportunityTagExecutor } from '../executors/add-opportunity-tag.executor';
 import type { LeadFlowAutomationContextSnapshot } from '../types/leadflow-automation-context.types';
 import type { LeadFlowAutomationEvaluation } from './leadflow-automation-evaluation.service';
 import { LeadFlowAutomationExecutionService } from './leadflow-automation-execution.service';
@@ -92,6 +93,10 @@ function build(options: {
     actionKey: 'schedule_followup',
     execute,
   } as unknown as ScheduleFollowupExecutor;
+  const addTagExecutor = {
+    actionKey: 'add_tag',
+    execute,
+  } as unknown as AddOpportunityTagExecutor;
   const sendMessageExecutor = {
     actionKey: 'send_message',
     execute,
@@ -122,6 +127,7 @@ function build(options: {
     assignOwnerExecutor,
     requestHandoffExecutor,
     notifyUserExecutor,
+    addTagExecutor,
     scheduleFollowupExecutor,
     sendMessageExecutor,
   );

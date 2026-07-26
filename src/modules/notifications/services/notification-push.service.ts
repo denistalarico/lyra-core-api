@@ -11,6 +11,8 @@ export type PushPayload = {
   url?: string;
 };
 
+export type PushUserDeliveryStatus = 'sent' | 'failed' | 'unavailable';
+
 @Injectable()
 export class NotificationPushService {
   private readonly logger = new Logger(NotificationPushService.name);
@@ -90,9 +92,11 @@ export class NotificationPushService {
     tenantId: string,
     userIds: string[],
     payload: PushPayload,
-  ): Promise<void> {
+  ): Promise<Map<string, PushUserDeliveryStatus>> {
+    const outcomes = new Map<string, PushUserDeliveryStatus>();
     if (!this.vapidConfigured || userIds.length === 0) {
-      return;
+      userIds.forEach((userId) => outcomes.set(userId, 'unavailable'));
+      return outcomes;
     }
 
     const subscriptions = await this.subscriptionsRepo.find({
@@ -100,41 +104,71 @@ export class NotificationPushService {
     });
 
     if (subscriptions.length === 0) {
-      return;
+      userIds.forEach((userId) => outcomes.set(userId, 'unavailable'));
+      return outcomes;
     }
 
     const body = JSON.stringify(payload);
+    const subscriptionsByUser = new Map<
+      string,
+      NotificationPushSubscriptionEntity[]
+    >();
+    for (const subscription of subscriptions) {
+      const current = subscriptionsByUser.get(subscription.userId) ?? [];
+      current.push(subscription);
+      subscriptionsByUser.set(subscription.userId, current);
+    }
 
-    await Promise.allSettled(
-      subscriptions.map(async (subscription) => {
-        try {
-          await webpush.sendNotification(
-            {
-              endpoint: subscription.endpoint,
-              keys: {
-                p256dh: subscription.p256dhKey,
-                auth: subscription.authKey,
-              },
-            },
-            body,
-          );
-
-          await this.subscriptionsRepo.update(subscription.id, {
-            lastUsedAt: new Date(),
-          });
-        } catch (error) {
-          const statusCode = (error as { statusCode?: number }).statusCode;
-
-          if (statusCode === 404 || statusCode === 410) {
-            await this.subscriptionsRepo.delete(subscription.id);
-            return;
-          }
-
-          this.logger.warn(
-            `Failed to send push notification to subscription ${subscription.id}: ${(error as Error).message}`,
-          );
+    await Promise.all(
+      userIds.map(async (userId) => {
+        const userSubscriptions = subscriptionsByUser.get(userId) ?? [];
+        if (userSubscriptions.length === 0) {
+          outcomes.set(userId, 'unavailable');
+          return;
         }
+        const attempts = await Promise.all(
+          userSubscriptions.map(async (subscription) => {
+            try {
+              await webpush.sendNotification(
+                {
+                  endpoint: subscription.endpoint,
+                  keys: {
+                    p256dh: subscription.p256dhKey,
+                    auth: subscription.authKey,
+                  },
+                },
+                body,
+              );
+
+              await this.subscriptionsRepo.update(subscription.id, {
+                lastUsedAt: new Date(),
+              });
+              return 'sent' as const;
+            } catch (error) {
+              const statusCode = (error as { statusCode?: number }).statusCode;
+
+              if (statusCode === 404 || statusCode === 410) {
+                await this.subscriptionsRepo.delete(subscription.id);
+                return 'unavailable' as const;
+              }
+
+              this.logger.warn(
+                `Failed to send push notification to subscription ${subscription.id}: ${(error as Error).message}`,
+              );
+              return 'failed' as const;
+            }
+          }),
+        );
+        outcomes.set(
+          userId,
+          attempts.includes('sent')
+            ? 'sent'
+            : attempts.includes('failed')
+              ? 'failed'
+              : 'unavailable',
+        );
       }),
     );
+    return outcomes;
   }
 }

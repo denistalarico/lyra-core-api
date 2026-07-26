@@ -4,9 +4,9 @@ import {
   type PlatformWhatsAppNotificationConfigProvider,
 } from './platform-whatsapp-notification.config';
 import {
-  buildHandoffTemplateParameters,
+  buildPlatformTemplateParameters,
   resolvePlatformWhatsAppTemplate,
-  type LeadFlowHandoffTemplateVariables,
+  type PlatformWhatsAppTemplateVariables,
 } from './platform-whatsapp-notification.catalog';
 
 export interface PlatformWhatsAppSendInput {
@@ -16,7 +16,7 @@ export interface PlatformWhatsAppSendInput {
   templateKey: string;
   /** Optional Business Mode scope for future per-mode templates. */
   businessModeKey?: string | null;
-  variables: LeadFlowHandoffTemplateVariables;
+  variables: PlatformWhatsAppTemplateVariables;
 }
 
 export type PlatformWhatsAppSendOutcome =
@@ -57,9 +57,7 @@ type MetaSendResponse = {
  */
 @Injectable()
 export class PlatformWhatsAppNotificationSender {
-  private readonly logger = new Logger(
-    PlatformWhatsAppNotificationSender.name,
-  );
+  private readonly logger = new Logger(PlatformWhatsAppNotificationSender.name);
 
   constructor(
     @Inject(PLATFORM_WHATSAPP_NOTIFICATION_CONFIG)
@@ -83,9 +81,7 @@ export class PlatformWhatsAppNotificationSender {
     // permitted — the provider never sends to an unlisted number during testing.
     if (
       config.testRecipientAllowList.length === 0 ||
-      !config.testRecipientAllowList
-        .map(normalizeRecipient)
-        .includes(recipient)
+      !config.testRecipientAllowList.map(normalizeRecipient).includes(recipient)
     ) {
       return { status: 'skipped', reasonCode: 'recipient_not_allowlisted' };
     }
@@ -98,7 +94,10 @@ export class PlatformWhatsAppNotificationSender {
       return { status: 'skipped', reasonCode: 'template_unavailable' };
     }
 
-    const parameters = buildHandoffTemplateParameters(input.variables);
+    const parameters = buildPlatformTemplateParameters(
+      input.templateKey,
+      input.variables,
+    );
     const body = {
       messaging_product: 'whatsapp',
       recipient_type: 'individual',
@@ -138,9 +137,7 @@ export class PlatformWhatsAppNotificationSender {
 
       if (!response.ok || data.error || !providerMessageId) {
         const providerCode =
-          typeof data.error?.code === 'number'
-            ? String(data.error.code)
-            : null;
+          typeof data.error?.code === 'number' ? String(data.error.code) : null;
         this.logger.warn(
           `Platform WhatsApp notification rejected (code ${providerCode ?? 'unknown'}).`,
         );

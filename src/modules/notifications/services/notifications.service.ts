@@ -4,18 +4,13 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import {
-  Brackets,
-  Repository,
-  SelectQueryBuilder,
-} from 'typeorm';
+import { Brackets, Repository, SelectQueryBuilder } from 'typeorm';
 import { ListNotificationsQueryDto } from '../dto';
-import {
-  NotificationEntity,
-  NotificationRecipientEntity,
-} from '../entities';
+import { NotificationEntity, NotificationRecipientEntity } from '../entities';
 import {
   NotificationActionType,
+  NotificationDeliveryChannel,
+  NotificationDeliveryStatus,
   NotificationProductKey,
 } from '../enums';
 import {
@@ -123,9 +118,7 @@ export class NotificationsService {
         count: string;
       }>();
 
-    const byProduct: Partial<
-      Record<NotificationProductKey, number>
-    > = {};
+    const byProduct: Partial<Record<NotificationProductKey, number>> = {};
 
     let count = 0;
 
@@ -148,10 +141,7 @@ export class NotificationsService {
   ): Promise<NotificationListItem> {
     this.validateContext(context);
 
-    const recipient = await this.findRecipientOrFail(
-      context,
-      notificationId,
-    );
+    const recipient = await this.findRecipientOrFail(context, notificationId);
 
     return mapNotificationRecipientToListItem(recipient);
   }
@@ -160,10 +150,7 @@ export class NotificationsService {
     context: NotificationsContext,
     notificationId: string,
   ): Promise<NotificationListItem> {
-    const recipient = await this.findRecipientOrFail(
-      context,
-      notificationId,
-    );
+    const recipient = await this.findRecipientOrFail(context, notificationId);
 
     if (!recipient.seenAt) {
       recipient.seenAt = new Date();
@@ -177,10 +164,7 @@ export class NotificationsService {
     context: NotificationsContext,
     notificationId: string,
   ): Promise<NotificationListItem> {
-    const recipient = await this.findRecipientOrFail(
-      context,
-      notificationId,
-    );
+    const recipient = await this.findRecipientOrFail(context, notificationId);
 
     const now = new Date();
 
@@ -266,10 +250,7 @@ export class NotificationsService {
     context: NotificationsContext,
     notificationId: string,
   ): Promise<NotificationListItem> {
-    const recipient = await this.findRecipientOrFail(
-      context,
-      notificationId,
-    );
+    const recipient = await this.findRecipientOrFail(context, notificationId);
 
     const now = new Date();
 
@@ -288,9 +269,15 @@ export class NotificationsService {
     return this.recipientRepo
       .createQueryBuilder('recipient')
       .innerJoin(
-        'recipient.notification',
-        'notificationScope',
+        'recipient.deliveries',
+        'inAppDelivery',
+        'inAppDelivery.channel = :inAppChannel AND inAppDelivery.status = :inAppStatus',
+        {
+          inAppChannel: NotificationDeliveryChannel.IN_APP,
+          inAppStatus: NotificationDeliveryStatus.SENT,
+        },
       )
+      .innerJoin('recipient.notification', 'notificationScope')
       .where('recipient.userId = :userId', {
         userId: context.userId,
       })
@@ -301,12 +288,9 @@ export class NotificationsService {
         new Brackets((workspaceQb) => {
           workspaceQb
             .where('notificationScope.workspaceId IS NULL')
-            .orWhere(
-              'notificationScope.workspaceId = :workspaceId',
-              {
-                workspaceId: context.workspaceId ?? null,
-              },
-            );
+            .orWhere('notificationScope.workspaceId = :workspaceId', {
+              workspaceId: context.workspaceId ?? null,
+            });
         }),
       );
   }
@@ -385,10 +369,7 @@ export class NotificationsService {
     this.validateContext(context);
 
     const recipient = await this.createUserQuery(context)
-      .leftJoinAndSelect(
-        'recipient.notification',
-        'notification',
-      )
+      .leftJoinAndSelect('recipient.notification', 'notification')
       .andWhere('notificationScope.id = :notificationId', {
         notificationId,
       })
@@ -401,9 +382,7 @@ export class NotificationsService {
     return recipient;
   }
 
-  private validateContext(
-    context: NotificationsContext,
-  ): void {
+  private validateContext(context: NotificationsContext): void {
     if (!context.tenantId) {
       throw new BadRequestException('tenantId is required.');
     }
@@ -414,10 +393,7 @@ export class NotificationsService {
   }
 
   private encodeCursor(payload: CursorPayload): string {
-    return Buffer.from(
-      JSON.stringify(payload),
-      'utf8',
-    ).toString('base64url');
+    return Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
   }
 
   private decodeCursor(cursor: string): CursorPayload {
@@ -439,9 +415,7 @@ export class NotificationsService {
         recipientId: payload.recipientId,
       };
     } catch {
-      throw new BadRequestException(
-        'Invalid notifications cursor.',
-      );
+      throw new BadRequestException('Invalid notifications cursor.');
     }
   }
 }
