@@ -8,6 +8,16 @@ export type TeamDashboardDepartmentCount = {
   count: number;
 };
 
+export type TeamDashboardLifecycleProcess = {
+  id: string;
+  memberId: string;
+  memberName: string;
+  processType: 'onboarding' | 'offboarding';
+  status: 'in_progress';
+  startedAt: string | null;
+  href: string;
+};
+
 export type TeamDashboardSummary = {
   generatedAt: string;
   members: {
@@ -32,4 +42,5 @@ export type TeamDashboardSummary = {
     entries: number;
     membersWithEntries: number;
   };
+  lifecycleProcesses: TeamDashboardLifecycleProcess[];
 };

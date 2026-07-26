@@ -1,141 +1,112 @@
-import { AgencyPersonalTaskStage, AgencyTask } from '../entities';
-import { TaskPriority, TaskStatus, TaskVisibility } from '../enums';
+import { Repository } from 'typeorm';
+import {
+  AgencyPersonalTaskStage,
+  AgencyProject,
+  AgencyProjectStage,
+  AgencyTask,
+  AgencyTaskStage,
+} from '../entities';
 import { ProjectBoardsService } from './project-boards.service';
 
-describe('ProjectBoardsService personal tasks board', () => {
-  const buildPersonalTasksBoard = (
+type PersonalBoard = {
+  columns: Array<{
+    id: string;
+    cards: AgencyTask[];
+  }>;
+  unassigned: {
+    cards: AgencyTask[];
+  };
+};
+
+type PersonalBoardBuilder = {
+  buildPersonalTasksBoard(
     stages: AgencyPersonalTaskStage[],
     tasks: AgencyTask[],
-  ) => {
-    const service = new ProjectBoardsService(
-      {} as never,
-      {} as never,
-      {} as never,
-      {} as never,
-      {} as never,
+  ): PersonalBoard;
+};
+
+describe('ProjectBoardsService personal task stages', () => {
+  it('shows tasks without a valid personal stage in the first configured stage', () => {
+    const service = makeService();
+    const stages = [
+      makeStage({ id: 'stage-first', position: 0 }),
+      makeStage({ id: 'stage-second', position: 1 }),
+    ];
+    const unstagedTask = makeTask({
+      id: 'task-unstaged',
+      personalStageId: null,
+    });
+    const invalidStageTask = makeTask({
+      id: 'task-invalid',
+      personalStageId: 'removed-stage',
+    });
+    const secondStageTask = makeTask({
+      id: 'task-second',
+      personalStageId: 'stage-second',
+    });
+
+    const board = getPersonalBoardBuilder(service).buildPersonalTasksBoard(
+      stages,
+      [unstagedTask, invalidStageTask, secondStageTask],
     );
 
-    return (
-      service as unknown as {
-        buildPersonalTasksBoard: (
-          stageRows: AgencyPersonalTaskStage[],
-          taskRows: AgencyTask[],
-        ) => {
-          columns: Array<{ id: string; cards: AgencyTask[] }>;
-          unassigned: { cards: AgencyTask[] };
-        };
-      }
-    ).buildPersonalTasksBoard(stages, tasks);
-  };
-
-  it('places tasks without a personal stage in the default column', () => {
-    const stages = [
-      makePersonalStage({
-        id: 'stage-later',
-        position: 1,
-        isDefault: false,
-      }),
-      makePersonalStage({
-        id: 'stage-default',
-        position: 2,
-        isDefault: true,
-      }),
-    ];
-    const task = makeTask({ personalStageId: null });
-
-    const board = buildPersonalTasksBoard(stages, [task]);
-
-    expect(
-      board.columns.find((column) => column.id === 'stage-default')?.cards,
-    ).toEqual([task]);
+    expect(board.columns[0].cards).toEqual([unstagedTask, invalidStageTask]);
+    expect(board.columns[1].cards).toEqual([secondStageTask]);
     expect(board.unassigned.cards).toEqual([]);
   });
 
-  it('places tasks with a stale personal stage in the first column when there is no default', () => {
-    const stages = [
-      makePersonalStage({
-        id: 'stage-first',
-        position: 1,
-        isDefault: false,
-      }),
-      makePersonalStage({
-        id: 'stage-second',
-        position: 2,
-        isDefault: false,
-      }),
-    ];
-    const task = makeTask({ personalStageId: 'stage-from-previous-assignee' });
+  it('keeps tasks unassigned when no personal stage is configured', () => {
+    const service = makeService();
+    const task = makeTask({ id: 'task-unstaged', personalStageId: null });
 
-    const board = buildPersonalTasksBoard(stages, [task]);
-
-    expect(board.columns[0].cards).toEqual([task]);
-    expect(board.unassigned.cards).toEqual([]);
-  });
-
-  it('keeps tasks unassigned only when the user has no configured stages', () => {
-    const task = makeTask({ personalStageId: null });
-
-    const board = buildPersonalTasksBoard([], [task]);
+    const board = getPersonalBoardBuilder(service).buildPersonalTasksBoard(
+      [],
+      [task],
+    );
 
     expect(board.columns).toEqual([]);
     expect(board.unassigned.cards).toEqual([task]);
   });
 });
 
-function makePersonalStage(
+function makeService() {
+  return new ProjectBoardsService(
+    {} as Repository<AgencyProject>,
+    {} as Repository<AgencyProjectStage>,
+    {} as Repository<AgencyTask>,
+    {} as Repository<AgencyTaskStage>,
+    {} as Repository<AgencyPersonalTaskStage>,
+  );
+}
+
+function getPersonalBoardBuilder(
+  service: ProjectBoardsService,
+): PersonalBoardBuilder {
+  return service as unknown as PersonalBoardBuilder;
+}
+
+function makeStage(
   overrides: Partial<AgencyPersonalTaskStage> = {},
 ): AgencyPersonalTaskStage {
-  const now = new Date('2026-06-12T12:00:00.000Z');
-
   return {
     id: 'stage-1',
     tenantId: 'tenant-1',
     workspaceId: 'workspace-1',
     userId: 'user-1',
-    name: 'Hoje',
-    color: '#2563EB',
-    position: 1,
-    isDefault: true,
-    createdAt: now,
-    updatedAt: now,
+    name: 'Etapa',
+    color: null,
+    position: 0,
+    isDefault: false,
+    createdAt: new Date('2026-07-26T12:00:00.000Z'),
+    updatedAt: new Date('2026-07-26T12:00:00.000Z'),
     ...overrides,
   };
 }
 
 function makeTask(overrides: Partial<AgencyTask> = {}): AgencyTask {
-  const now = new Date('2026-06-12T12:00:00.000Z');
-
   return {
     id: 'task-1',
-    tenantId: 'tenant-1',
-    workspaceId: 'workspace-1',
-    projectId: null,
-    clientId: null,
-    stageId: null,
-    projectStageId: null,
     personalStageId: null,
-    assigneeId: 'member-1',
-    createdById: 'user-1',
-    title: 'Tarefa',
-    description: null,
-    status: TaskStatus.InProgress,
-    priority: TaskPriority.Medium,
-    taskTypeId: null,
-    visibility: TaskVisibility.Workspace,
-    startDate: null,
-    dueDate: null,
-    completedAt: null,
-    estimatedMinutes: null,
-    trackedMinutes: 0,
-    isBlocked: false,
-    blockedReason: null,
-    color: null,
-    coverImageUrl: null,
-    coverImageAssetKey: null,
-    markerIds: [],
-    archivedAt: null,
-    createdAt: now,
-    updatedAt: now,
     ...overrides,
-  };
+  } as AgencyTask;
 }

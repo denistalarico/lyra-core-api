@@ -115,6 +115,7 @@ export class ClientLifecycleService {
     processType: ClientLifecycleProcessType,
     dto: StartClientLifecycleDto,
   ) {
+    await this.assertNoConflictingProcess(ctx, clientId, processType);
     const existing = await this.findActiveProcess(ctx, clientId, processType);
     if (existing) {
       return this.getLifecycle(ctx, clientId, processType);
@@ -157,6 +158,7 @@ export class ClientLifecycleService {
     processType: ClientLifecycleProcessType,
     templateConfigOptionId?: string,
   ) {
+    await this.assertNoConflictingProcess(ctx, clientId, processType);
     let process = await this.findActiveProcess(ctx, clientId, processType);
 
     if (!process) {
@@ -409,6 +411,18 @@ export class ClientLifecycleService {
     if (!template) {
       throw new BadRequestException('Modelo não encontrado.');
     }
+    const expectedTemplateType =
+      process.processType === ClientLifecycleProcessType.Onboarding
+        ? 'client_onboarding_template'
+        : 'client_offboarding_template';
+    if (template.type !== expectedTemplateType) {
+      throw new BadRequestException('O modelo não pertence a este processo.');
+    }
+
+    if (process.templateConfigOptionId !== template.id) {
+      process.templateConfigOptionId = template.id;
+      await this.processRepository.save(process);
+    }
 
     const snapshotSteps = Array.isArray((template.metadata as Record<string, unknown>)?.steps)
       ? ((template.metadata as Record<string, unknown>).steps as TemplateStepSnapshot[])
@@ -611,6 +625,37 @@ export class ClientLifecycleService {
       },
       order: { createdAt: 'DESC' },
     });
+  }
+
+  private async assertNoConflictingProcess(
+    ctx: RequestContext,
+    clientId: string,
+    processType: ClientLifecycleProcessType,
+  ) {
+    const oppositeType =
+      processType === ClientLifecycleProcessType.Onboarding
+        ? ClientLifecycleProcessType.Offboarding
+        : ClientLifecycleProcessType.Onboarding;
+    const conflictingProcess = await this.processRepository.findOne({
+      where: {
+        tenantId: ctx.tenantId,
+        workspaceId: ctx.workspaceId,
+        clientId,
+        processType: oppositeType,
+        status: ClientLifecycleProcessStatus.InProgress,
+      },
+      order: { createdAt: 'DESC' },
+    });
+
+    if (conflictingProcess) {
+      const oppositeLabel =
+        oppositeType === ClientLifecycleProcessType.Onboarding
+          ? 'onboarding'
+          : 'offboarding';
+      throw new BadRequestException(
+        `Conclua ou cancele o ${oppositeLabel} em andamento antes de iniciar outro processo.`,
+      );
+    }
   }
 
   private async findClient(ctx: RequestContext, id: string) {

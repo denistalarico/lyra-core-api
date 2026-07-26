@@ -410,6 +410,11 @@ export class MoveAgencySalesOpportunityDto {
   @IsOptional()
   @IsUUID()
   pipelineId?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(160)
+  lostReason?: string;
 }
 
 export class CreateAgencySalesActivityDto {

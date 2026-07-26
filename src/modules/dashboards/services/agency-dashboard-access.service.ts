@@ -13,7 +13,7 @@ export class AgencyDashboardAccessService {
     }
 
     if (role === 'admin' || role === 'administrator') {
-      return 'agency';
+      return 'executive';
     }
 
     if (role === 'manager') {

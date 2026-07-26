@@ -129,6 +129,15 @@ export type AgencyDashboardClientsWidget = {
   byStatus: Record<string, number>;
   byLifecycleStage: Record<string, number>;
   byHealthStatus: Record<string, number>;
+  lifecycleProcesses: Array<{
+    id: string;
+    clientId: string;
+    clientName: string;
+    processType: 'onboarding' | 'offboarding';
+    status: 'in_progress';
+    startedAt: string | null;
+    href: string;
+  }>;
 
   profitabilitySummary: {
     officialClients: number;

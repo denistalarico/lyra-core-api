@@ -40,6 +40,85 @@ type DashboardSource =
   | 'calendar'
   | 'team';
 
+export function resolveDashboardClientHealthCounts(
+  profitabilityValue: unknown,
+  fallback: Record<string, number>,
+): Record<string, number> {
+  if (!profitabilityValue || typeof profitabilityValue !== 'object') {
+    return fallback;
+  }
+
+  const profitability = profitabilityValue as Record<string, unknown>;
+  const profitabilityClients = Array.isArray(profitability.clients)
+    ? profitability.clients
+    : [];
+
+  return profitabilityClients.reduce<Record<string, number>>(
+    (result, item) => {
+      if (!item || typeof item !== 'object') {
+        return result;
+      }
+
+      const client = item as Record<string, unknown>;
+
+      // Finance can contain records that are not linked to an Agency client.
+      // Those records must not create client-health priorities.
+      if (client.status === null || client.status === undefined) {
+        return result;
+      }
+
+      const health =
+        typeof client.health === 'string' && client.health
+          ? client.health
+          : 'unknown';
+
+      result[health] = (result[health] ?? 0) + 1;
+      return result;
+    },
+    {},
+  );
+}
+
+export function mapDashboardClientLifecycleProcesses(
+  value: unknown,
+): AgencyDashboardClientsWidget['lifecycleProcesses'] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.flatMap((item) => {
+    if (!item || typeof item !== 'object') {
+      return [];
+    }
+
+    const process = item as Record<string, unknown>;
+    const processType =
+      process.processType === 'onboarding' ||
+      process.processType === 'offboarding'
+        ? process.processType
+        : null;
+
+    if (!processType) {
+      return [];
+    }
+
+    return [
+      {
+        id: typeof process.id === 'string' ? process.id : '',
+        clientId:
+          typeof process.clientId === 'string' ? process.clientId : '',
+        clientName:
+          typeof process.clientName === 'string' ? process.clientName : '',
+        processType,
+        status: 'in_progress' as const,
+        startedAt:
+          typeof process.startedAt === 'string' ? process.startedAt : null,
+        href: typeof process.href === 'string' ? process.href : '',
+      },
+    ];
+  });
+}
+
 @Injectable()
 export class AgencyDashboardsService {
   constructor(
@@ -125,7 +204,10 @@ export class AgencyDashboardsService {
         ? this.clientsService.summary(domainContext)
         : Promise.resolve(null),
 
-      clientsProfitability: access.canViewProfitability
+      // The calculated health classification is part of the client portfolio
+      // experience even when the role cannot see financial profitability.
+      // Sensitive profitability details are stripped from the mapped widget.
+      clientsProfitability: access.canViewPortfolio
         ? this.clientsProfitabilityService.getPortfolio(domainContext)
         : Promise.resolve(null),
 
@@ -217,6 +299,7 @@ export class AgencyDashboardsService {
     const clients = this.mapClientsWidget(
       values.get('clients'),
       values.get('clientsProfitability'),
+      access.canViewProfitability,
     );
 
     // MRR reflects the client portfolio revenue ("Receita da carteira" in the
@@ -495,6 +578,7 @@ export class AgencyDashboardsService {
   private mapClientsWidget(
     summaryValue: unknown,
     profitabilityValue: unknown,
+    exposeProfitability: boolean,
   ): AgencyDashboardClientsWidget | null {
     if (!summaryValue || typeof summaryValue !== 'object') {
       return null;
@@ -507,6 +591,7 @@ export class AgencyDashboardsService {
       byStatus?: unknown;
       byLifecycleStage?: unknown;
       byHealthStatus?: unknown;
+      lifecycleProcesses?: unknown;
     };
 
     const officialClients = this.toNumber(summary.total);
@@ -514,6 +599,13 @@ export class AgencyDashboardsService {
     let linkedClients = 0;
     let unlinkedFinancialClients = 0;
     let clientsWithoutProfitabilityData = 0;
+    const registryHealthStatusCounts = this.toNumberRecord(
+      summary.byHealthStatus,
+    );
+    const healthStatusCounts = resolveDashboardClientHealthCounts(
+      profitabilityValue,
+      registryHealthStatusCounts,
+    );
 
     if (
       profitabilityValue &&
@@ -566,8 +658,9 @@ export class AgencyDashboardsService {
       byLifecycleStage: this.toNumberRecord(
         summary.byLifecycleStage,
       ),
-      byHealthStatus: this.toNumberRecord(
-        summary.byHealthStatus,
+      byHealthStatus: healthStatusCounts,
+      lifecycleProcesses: mapDashboardClientLifecycleProcesses(
+        summary.lifecycleProcesses,
       ),
       profitabilitySummary: {
         officialClients,
@@ -576,6 +669,7 @@ export class AgencyDashboardsService {
         clientsWithoutProfitabilityData,
       },
       profitability:
+        exposeProfitability &&
         profitabilityValue &&
         typeof profitabilityValue === 'object'
           ? profitabilityValue as Record<string, unknown>
