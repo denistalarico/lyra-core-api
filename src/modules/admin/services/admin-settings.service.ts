@@ -11,6 +11,7 @@ import { generateSecret, generateURI, verify } from 'otplib';
 import QRCode from 'qrcode';
 import { type FindOptionsWhere, MoreThan, Not, Repository } from 'typeorm';
 import { SettingsCryptoService } from '../../../common/crypto/settings-crypto.service';
+import { FilesService } from '../../../common/files/files.service';
 import type { LoginRequestContext } from '../../auth/utils/login-context.util';
 import { AgencyUserSecuritySettingsEntity } from '../../agency/entities/agency-auth.entities';
 import { EmailService } from '../../email/email.service';
@@ -54,6 +55,7 @@ export class AdminSettingsService {
     private readonly auditService: AdminAuditService,
     private readonly cryptoService: SettingsCryptoService,
     private readonly emailService: EmailService,
+    private readonly filesService: FilesService,
   ) {}
 
   async getOverview(principal: AdminPrincipal) {
@@ -105,7 +107,6 @@ export class AdminSettingsService {
       displayName: dto.displayName,
       phone: normalizeNullable(dto.phone),
       jobTitle: normalizeNullable(dto.jobTitle),
-      avatarUrl: normalizeNullable(dto.avatarUrl),
     };
     const gateway = this.identityGateway as AdminIdentityGateway & {
       findByIdentity?: unknown;
@@ -130,8 +131,38 @@ export class AdminSettingsService {
         'displayName',
         ...(dto.phone !== undefined ? ['phone'] : []),
         ...(dto.jobTitle !== undefined ? ['jobTitle'] : []),
-        ...(dto.avatarUrl !== undefined ? ['avatarUrl'] : []),
       ],
+    });
+    return this.getProfile(principal);
+  }
+
+  async uploadProfileAvatar(
+    principal: AdminPrincipal,
+    file: Express.Multer.File,
+    client: LoginRequestContext,
+  ) {
+    const reference = principalIdentityReference(principal);
+    const identity = await this.requireIdentity(principal);
+    const subjectPath =
+      reference.source === 'agency'
+        ? `agency/tenants/${reference.tenantId}/users/${reference.userId}`
+        : `admin/identities/${reference.identityId}`;
+    const stored = await this.filesService.uploadImageAsset({
+      file,
+      path: `${subjectPath}/avatar-${Date.now()}.webp`,
+      maxDimension: 512,
+    });
+    const updated = await this.identityGateway.updateProfile(reference, {
+      displayName: identity.displayName,
+      phone: identity.phone ?? null,
+      jobTitle: identity.jobTitle ?? null,
+      avatarUrl: stored.url,
+    });
+    if (!updated) {
+      throw new NotFoundException('Administrative profile was not found.');
+    }
+    await this.audit(principal, client, 'admin.settings.avatar_updated', {
+      path: stored.path,
     });
     return this.getProfile(principal);
   }

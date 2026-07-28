@@ -2,7 +2,6 @@ import {
   IsIn,
   IsOptional,
   IsString,
-  IsUrl,
   Length,
   Matches,
   MaxLength,
@@ -24,11 +23,6 @@ export class UpdateAdminProfileDto {
   @IsString()
   @MaxLength(80)
   jobTitle?: string | null;
-
-  @IsOptional()
-  @IsUrl({ require_protocol: true })
-  @MaxLength(2048)
-  avatarUrl?: string | null;
 }
 
 export class UpdateAdminPreferencesDto {

@@ -35,6 +35,15 @@ export class PlatformAdminIdentityEntity {
   @Column({ name: 'display_name', type: 'varchar', length: 160 })
   displayName!: string;
 
+  @Column({ type: 'varchar', length: 40, nullable: true })
+  phone!: string | null;
+
+  @Column({ name: 'job_title', type: 'varchar', length: 80, nullable: true })
+  jobTitle!: string | null;
+
+  @Column({ name: 'avatar_url', type: 'text', nullable: true })
+  avatarUrl!: string | null;
+
   @Column({ type: 'varchar', length: 20 })
   status!: PlatformAdminIdentityStatus;
 

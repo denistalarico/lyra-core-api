@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import type { Repository } from 'typeorm';
 import type { SettingsCryptoService } from '../../../common/crypto/settings-crypto.service';
+import type { FilesService } from '../../../common/files/files.service';
 import type { AgencyUserSecuritySettingsEntity } from '../../agency/entities/agency-auth.entities';
 import type { EmailService } from '../../email/email.service';
 import type {
@@ -201,6 +202,12 @@ function createHarness() {
       return Promise.resolve(event);
     }),
   };
+  const filesService = {
+    uploadImageAsset: jest.fn().mockResolvedValue({
+      url: '/assets/admin/avatar.webp',
+      path: 'admin/avatar.webp',
+    }),
+  };
   const service = new AdminSettingsService(
     adminRepository as unknown as Repository<PlatformInternalAdminEntity>,
     sessionRepository as unknown as Repository<PlatformAdminSessionEntity>,
@@ -213,6 +220,7 @@ function createHarness() {
       decrypt: jest.fn((value: string) => value.replace('encrypted:', '')),
     } as unknown as SettingsCryptoService,
     { sendEmail: jest.fn() } as unknown as EmailService,
+    filesService as unknown as FilesService,
   );
   return {
     service,
@@ -222,6 +230,7 @@ function createHarness() {
     sessions,
     gateway,
     auditService,
+    filesService,
   };
 }
 
@@ -236,13 +245,46 @@ describe('AdminSettingsService', () => {
     );
     await harness.service.updateProfile(
       principal,
-      { displayName: 'Dana', phone: null, jobTitle: null, avatarUrl: null },
+      { displayName: 'Dana', phone: null, jobTitle: null },
       client,
     );
     expect(harness.gateway.updateProfile).toHaveBeenCalledWith(
       principal.identityTenantId,
       principal.userId,
       expect.objectContaining({ displayName: 'Dana' }),
+    );
+  });
+
+  it('uploads and persists a cropped profile avatar', async () => {
+    const harness = createHarness();
+    const gateway = harness.gateway as typeof harness.gateway & {
+      findByReference: jest.Mock;
+    };
+    gateway.findByReference = jest.fn().mockResolvedValue(harness.identity);
+    gateway.updateProfile.mockImplementation((_reference, update) =>
+      Promise.resolve(Object.assign(harness.identity, update)),
+    );
+
+    await expect(
+      harness.service.uploadProfileAvatar(
+        principal,
+        {
+          buffer: Buffer.from('avatar'),
+          mimetype: 'image/webp',
+          size: 6,
+          originalname: 'avatar.webp',
+        } as Express.Multer.File,
+        client,
+      ),
+    ).resolves.toEqual(
+      expect.objectContaining({ avatarUrl: '/assets/admin/avatar.webp' }),
+    );
+    expect(harness.filesService.uploadImageAsset).toHaveBeenCalledWith(
+      expect.objectContaining({ maxDimension: 512 }),
+    );
+    expect(gateway.updateProfile).toHaveBeenCalledWith(
+      expect.objectContaining({ source: 'agency' }),
+      expect.objectContaining({ avatarUrl: '/assets/admin/avatar.webp' }),
     );
   });
 

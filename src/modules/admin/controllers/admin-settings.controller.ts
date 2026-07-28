@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -8,10 +9,15 @@ import {
   Post,
   Req,
   Res,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { FileInterceptor } from '@nestjs/platform-express';
 import type { Response } from 'express';
+import { memoryStorage } from 'multer';
+import { MAX_IMAGE_UPLOAD_BYTES } from '../../../common/files/files.service';
 import { extractLoginContext } from '../../auth/utils/login-context.util';
 import { RequireAdminPermissions } from '../decorators/require-admin-permissions.decorator';
 import {
@@ -33,6 +39,26 @@ import {
   ADMIN_REFRESH_COOKIE,
   ADMIN_REFRESH_COOKIE_PATH,
 } from './admin-auth.controller';
+
+const ADMIN_AVATAR_UPLOAD_OPTIONS = {
+  storage: memoryStorage(),
+  limits: { fileSize: MAX_IMAGE_UPLOAD_BYTES },
+  fileFilter: (
+    _request: unknown,
+    file: Express.Multer.File,
+    callback: (error: Error | null, acceptFile: boolean) => void,
+  ) => {
+    if (
+      !['image/jpeg', 'image/jpg', 'image/png', 'image/webp'].includes(
+        file.mimetype,
+      )
+    ) {
+      callback(new BadRequestException('Unsupported image format.'), false);
+      return;
+    }
+    callback(null, true);
+  },
+};
 
 @Controller('admin/settings')
 @UseGuards(AdminBrowserOriginGuard, AdminAuthenticationGuard, AdminAccessGuard)
@@ -63,6 +89,20 @@ export class AdminSettingsController {
     return this.settingsService.updateProfile(
       request.adminPrincipal!,
       dto,
+      extractLoginContext(request),
+    );
+  }
+
+  @Post('profile/avatar')
+  @RequireAdminPermissions('admin.settings.update')
+  @UseInterceptors(FileInterceptor('file', ADMIN_AVATAR_UPLOAD_OPTIONS))
+  uploadProfileAvatar(
+    @UploadedFile() file: Express.Multer.File,
+    @Req() request: AdminAuthenticatedRequest,
+  ) {
+    return this.settingsService.uploadProfileAvatar(
+      request.adminPrincipal!,
+      file,
       extractLoginContext(request),
     );
   }

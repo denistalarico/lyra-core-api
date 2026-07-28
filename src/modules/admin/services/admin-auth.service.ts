@@ -650,6 +650,7 @@ export class AdminAuthService {
       identitySource: principal.identitySource,
       email: principal.email,
       displayName: principal.displayName,
+      avatarUrl: identity.avatarUrl ?? null,
       roleKey: principal.roleKey,
       permissions: principal.permissions,
       twoFactorEnabled: identity.twoFactorEnabled,

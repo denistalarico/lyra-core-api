@@ -3,6 +3,7 @@ import { ConfigModule } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { SettingsCryptoService } from '../../common/crypto/settings-crypto.service';
+import { FilesModule } from '../../common/files/files.module';
 import { AgencyUserSecuritySettingsEntity } from '../agency/entities/agency-auth.entities';
 import { EmailModule } from '../email/email.module';
 import {
@@ -49,6 +50,7 @@ const AGENCY_CONNECTION = 'agency';
 @Module({
   imports: [
     ConfigModule,
+    FilesModule,
     JwtModule.register({}),
     EmailModule,
     TypeOrmModule.forFeature(

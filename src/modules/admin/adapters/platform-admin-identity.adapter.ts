@@ -58,11 +58,19 @@ export class PlatformAdminIdentityAdapter {
 
   async updateProfile(
     reference: AdminIdentityReference,
-    profile: { displayName: string },
+    profile: {
+      displayName: string;
+      phone?: string | null;
+      jobTitle?: string | null;
+      avatarUrl?: string | null;
+    },
   ) {
     const identity = await this.load(reference);
     if (!identity) return null;
     identity.displayName = profile.displayName.trim();
+    if (profile.phone !== undefined) identity.phone = profile.phone;
+    if (profile.jobTitle !== undefined) identity.jobTitle = profile.jobTitle;
+    if (profile.avatarUrl !== undefined) identity.avatarUrl = profile.avatarUrl;
     return this.toRecord(await this.repository.save(identity));
   }
 
@@ -206,9 +214,9 @@ export class PlatformAdminIdentityAdapter {
       twoFactorMethod:
         identity.twoFactorMethod === 'email' ? 'email' : 'authenticator',
       lockedUntil: identity.lockedUntil,
-      phone: null,
-      jobTitle: null,
-      avatarUrl: null,
+      phone: identity.phone ?? null,
+      jobTitle: identity.jobTitle ?? null,
+      avatarUrl: identity.avatarUrl ?? null,
     };
   }
 }
