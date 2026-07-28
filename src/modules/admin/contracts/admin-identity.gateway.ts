@@ -7,6 +7,9 @@ export type AdminIdentityRecord = {
   passwordConfigured: boolean;
   twoFactorEnabled: boolean;
   twoFactorMethod: 'authenticator' | 'email';
+  phone?: string | null;
+  jobTitle?: string | null;
+  avatarUrl?: string | null;
 };
 
 export abstract class AdminIdentityGateway {
@@ -23,5 +26,23 @@ export abstract class AdminIdentityGateway {
     tenantId: string,
     userId: string,
     password: string,
+  ): Promise<boolean>;
+
+  abstract updateProfile(
+    tenantId: string,
+    userId: string,
+    profile: {
+      displayName: string;
+      phone?: string | null;
+      jobTitle?: string | null;
+      avatarUrl?: string | null;
+    },
+  ): Promise<AdminIdentityRecord | null>;
+
+  abstract updatePassword(
+    tenantId: string,
+    userId: string,
+    currentPassword: string,
+    newPassword: string,
   ): Promise<boolean>;
 }

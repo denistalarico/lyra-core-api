@@ -58,6 +58,8 @@ function admin(
     locale: 'pt-BR',
     theme: 'system',
     timezone: 'America/Sao_Paulo',
+    dateFormat: 'dd/MM/yyyy',
+    timeFormat: '24h',
     lastAdminLoginAt: null,
     createdBy: null,
     updatedBy: null,

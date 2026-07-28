@@ -131,6 +131,8 @@ import { AddProjectCardDisplayDefaults1786900000000 } from './migrations/1786900
 import { CreateLeadflowScheduledTimers1787000000000 } from './migrations/1787000000000-create-leadflow-scheduled-timers';
 import { CreatePlatformAdminIdentityAccess1787100000000 } from './migrations/1787100000000-create-platform-admin-identity-access';
 import { CreatePlatformAdminSessions1787200000000 } from './migrations/1787200000000-create-platform-admin-sessions';
+import { AddPlatformAdminPreferenceFormats1787300000000 } from './migrations/1787300000000-add-platform-admin-preference-formats';
+import { CreatePlatformAdminInvitations1787400000000 } from './migrations/1787400000000-create-platform-admin-invitations';
 
 export const AgencyDataSource = new DataSource({
   type: 'postgres',
@@ -272,5 +274,7 @@ export const AgencyDataSource = new DataSource({
     CreateLeadflowScheduledTimers1787000000000,
     CreatePlatformAdminIdentityAccess1787100000000,
     CreatePlatformAdminSessions1787200000000,
+    AddPlatformAdminPreferenceFormats1787300000000,
+    CreatePlatformAdminInvitations1787400000000,
   ],
 });

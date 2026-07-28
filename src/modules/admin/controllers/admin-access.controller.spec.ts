@@ -15,7 +15,7 @@ describe('AdminAccessController', () => {
         module: 'admin',
         sessionContext: 'admin',
         identitySource: 'agency-adapter',
-        authRuntimeImplemented: false,
+        authRuntimeImplemented: true,
       }),
     );
   });

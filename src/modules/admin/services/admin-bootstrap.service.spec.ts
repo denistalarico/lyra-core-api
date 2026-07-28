@@ -46,6 +46,8 @@ function admin(
     locale: 'en-US',
     theme: 'dark',
     timezone: 'Europe/Lisbon',
+    dateFormat: 'dd/MM/yyyy',
+    timeFormat: '24h',
     lastAdminLoginAt: new Date('2026-07-01T12:00:00.000Z'),
     createdBy: null,
     updatedBy: null,

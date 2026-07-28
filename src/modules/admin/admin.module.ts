@@ -13,8 +13,12 @@ import { AgencyAdminIdentityAdapter } from './adapters/agency-admin-identity.ada
 import { AdminIdentityGateway } from './contracts/admin-identity.gateway';
 import { AdminAccessController } from './controllers/admin-access.controller';
 import { AdminAuthController } from './controllers/admin-auth.controller';
+import { AdminInternalUsersController } from './controllers/admin-internal-users.controller';
+import { AdminInvitationsPublicController } from './controllers/admin-invitations-public.controller';
+import { AdminSettingsController } from './controllers/admin-settings.controller';
 import {
   PlatformAdminAuditEventEntity,
+  PlatformAdminInvitationEntity,
   PlatformAdminSessionEntity,
   PlatformAdminTwoFactorCodeEntity,
   PlatformInternalAdminEntity,
@@ -29,6 +33,11 @@ import { AdminAuthService } from './services/admin-auth.service';
 import { AdminAuditService } from './services/admin-audit.service';
 import { AdminBootstrapService } from './services/admin-bootstrap.service';
 import { AdminIdentityService } from './services/admin-identity.service';
+import { AdminInternalUsersService } from './services/admin-internal-users.service';
+import { AdminInvitationsService } from './services/admin-invitations.service';
+import { AdminInvitationTokenService } from './services/admin-invitation-token.service';
+import { AdminRolePolicyService } from './services/admin-role-policy.service';
+import { AdminSettingsService } from './services/admin-settings.service';
 
 const AGENCY_CONNECTION = 'agency';
 
@@ -41,6 +50,7 @@ const AGENCY_CONNECTION = 'agency';
       [
         PlatformInternalAdminEntity,
         PlatformAdminAuditEventEntity,
+        PlatformAdminInvitationEntity,
         PlatformAdminSessionEntity,
         PlatformAdminTwoFactorCodeEntity,
         AgencyUserSecuritySettingsEntity,
@@ -50,7 +60,13 @@ const AGENCY_CONNECTION = 'agency';
       AGENCY_CONNECTION,
     ),
   ],
-  controllers: [AdminAccessController, AdminAuthController],
+  controllers: [
+    AdminAccessController,
+    AdminAuthController,
+    AdminInvitationsPublicController,
+    AdminInternalUsersController,
+    AdminSettingsController,
+  ],
   providers: [
     {
       provide: AdminIdentityGateway,
@@ -63,6 +79,11 @@ const AGENCY_CONNECTION = 'agency';
     AdminAuthRateLimitService,
     AdminAuthService,
     AdminBootstrapService,
+    AdminSettingsService,
+    AdminInternalUsersService,
+    AdminInvitationsService,
+    AdminInvitationTokenService,
+    AdminRolePolicyService,
     SettingsCryptoService,
     AdminAuthenticationGuard,
     AdminAccessGuard,
@@ -76,6 +97,11 @@ const AGENCY_CONNECTION = 'agency';
     AdminAuthTokenService,
     AdminAuthService,
     AdminBootstrapService,
+    AdminSettingsService,
+    AdminInternalUsersService,
+    AdminInvitationsService,
+    AdminInvitationTokenService,
+    AdminRolePolicyService,
     AdminAuthenticationGuard,
     AdminAccessGuard,
     AdminBrowserOriginGuard,

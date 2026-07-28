@@ -52,6 +52,7 @@ function createAdapter(options?: {
           : options.securityRecord,
       ),
     find: jest.fn(),
+    save: jest.fn().mockImplementation((value) => Promise.resolve(value)),
   };
   const membershipRepository = {
     findOne: jest
@@ -73,6 +74,7 @@ function createAdapter(options?: {
           } as AgencyUserProfileEntity)
         : options.profileRecord,
     ),
+    save: jest.fn().mockImplementation((value) => Promise.resolve(value)),
   };
 
   return {
@@ -83,6 +85,7 @@ function createAdapter(options?: {
     ),
     securityRepository,
     membershipRepository,
+    profileRepository,
   };
 }
 
@@ -101,6 +104,9 @@ describe('AgencyAdminIdentityAdapter', () => {
       passwordConfigured: true,
       twoFactorEnabled: true,
       twoFactorMethod: 'authenticator',
+      phone: null,
+      jobTitle: null,
+      avatarUrl: null,
     });
     expect(identity).not.toHaveProperty('passwordHash');
     expect(identity).not.toHaveProperty('twoFactorSecretEncrypted');
@@ -155,5 +161,57 @@ describe('AgencyAdminIdentityAdapter', () => {
     await expect(
       malformedHash.verifyPassword(TENANT_ID, USER_ID, 'password'),
     ).resolves.toBe(false);
+  });
+
+  it('updates the Agency hash with Argon2 only after validating the current password', async () => {
+    const record = security({
+      passwordHash: await argon2.hash('current-password'),
+    });
+    const { adapter, securityRepository } = createAdapter({
+      securityRecord: record,
+    });
+
+    await expect(
+      adapter.updatePassword(
+        TENANT_ID,
+        USER_ID,
+        'wrong-password',
+        'new-password',
+      ),
+    ).resolves.toBe(false);
+    expect(securityRepository.save).not.toHaveBeenCalled();
+
+    await expect(
+      adapter.updatePassword(
+        TENANT_ID,
+        USER_ID,
+        'current-password',
+        'new-password',
+      ),
+    ).resolves.toBe(true);
+    expect(await argon2.verify(record.passwordHash!, 'new-password')).toBe(
+      true,
+    );
+    expect(securityRepository.save).toHaveBeenCalledWith(record);
+  });
+
+  it('updates only reusable profile fields and returns no Agency entity', async () => {
+    const { adapter, profileRepository } = createAdapter();
+    const result = await adapter.updateProfile(TENANT_ID, USER_ID, {
+      displayName: 'Updated Owner',
+      phone: '+55 11 99999-9999',
+      jobTitle: 'Platform',
+      avatarUrl: null,
+    });
+
+    expect(profileRepository.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        displayName: 'Updated Owner',
+        phone: '+55 11 99999-9999',
+        jobTitle: 'Platform',
+        avatarUrl: null,
+      }),
+    );
+    expect(result).not.toHaveProperty('passwordHash');
   });
 });

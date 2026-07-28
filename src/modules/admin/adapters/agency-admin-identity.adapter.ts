@@ -72,6 +72,9 @@ export class AgencyAdminIdentityAdapter extends AdminIdentityGateway {
         security.twoFactorEnabled || Boolean(security.twoFactorSecretEncrypted),
       twoFactorMethod:
         security.twoFactorMethod === 'email' ? 'email' : 'authenticator',
+      phone: profile?.phone ?? null,
+      jobTitle: profile?.jobTitle ?? null,
+      avatarUrl: profile?.avatarUrl ?? null,
     };
   }
 
@@ -130,5 +133,61 @@ export class AgencyAdminIdentityAdapter extends AdminIdentityGateway {
     } catch {
       return false;
     }
+  }
+
+  async updateProfile(
+    tenantId: string,
+    userId: string,
+    input: {
+      displayName: string;
+      phone?: string | null;
+      jobTitle?: string | null;
+      avatarUrl?: string | null;
+    },
+  ): Promise<AdminIdentityRecord | null> {
+    const [profile, activeMembership] = await Promise.all([
+      this.profileRepository.findOne({ where: { tenantId, userId } }),
+      this.membershipRepository.findOne({
+        where: { tenantId, userId, status: 'active' },
+      }),
+    ]);
+    if (!profile || !activeMembership) {
+      return null;
+    }
+
+    profile.displayName = input.displayName.trim();
+    if (input.phone !== undefined) profile.phone = input.phone;
+    if (input.jobTitle !== undefined) profile.jobTitle = input.jobTitle;
+    if (input.avatarUrl !== undefined) profile.avatarUrl = input.avatarUrl;
+    await this.profileRepository.save(profile);
+
+    return this.findByIdentity(tenantId, userId);
+  }
+
+  async updatePassword(
+    tenantId: string,
+    userId: string,
+    currentPassword: string,
+    newPassword: string,
+  ): Promise<boolean> {
+    const security = await this.securityRepository.findOne({
+      where: { tenantId, userId },
+    });
+    if (!security?.passwordHash) {
+      return false;
+    }
+
+    try {
+      if (!(await argon2.verify(security.passwordHash, currentPassword))) {
+        return false;
+      }
+    } catch {
+      return false;
+    }
+
+    security.passwordHash = await argon2.hash(newPassword);
+    security.passwordUpdatedAt = new Date();
+    await this.securityRepository.save(security);
+    return true;
   }
 }

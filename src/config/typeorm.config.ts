@@ -280,6 +280,7 @@ import {
 import { LeadFlowEventDeliveryEntity } from '../modules/leadflow-events/entities';
 import {
   PlatformAdminAuditEventEntity,
+  PlatformAdminInvitationEntity,
   PlatformAdminSessionEntity,
   PlatformAdminTwoFactorCodeEntity,
   PlatformInternalAdminEntity,
@@ -288,6 +289,7 @@ import {
 export const agencyEntities = [
   PlatformInternalAdminEntity,
   PlatformAdminAuditEventEntity,
+  PlatformAdminInvitationEntity,
   PlatformAdminSessionEntity,
   PlatformAdminTwoFactorCodeEntity,
   NotificationEntity,

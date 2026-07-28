@@ -214,6 +214,8 @@ export class AdminBootstrapService {
                   locale: DEFAULT_LOCALE,
                   theme: DEFAULT_THEME,
                   timezone: DEFAULT_TIMEZONE,
+                  dateFormat: 'dd/MM/yyyy',
+                  timeFormat: '24h',
                   lastAdminLoginAt: null,
                   createdBy: null,
                   updatedBy: null,

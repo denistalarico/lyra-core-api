@@ -545,6 +545,8 @@ export class AdminAuthService {
       locale: admin.locale,
       theme: admin.theme,
       timezone: admin.timezone,
+      dateFormat: admin.dateFormat,
+      timeFormat: admin.timeFormat,
       sessionId: principal.sessionId,
     };
   }

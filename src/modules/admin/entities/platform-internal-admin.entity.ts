@@ -49,6 +49,17 @@ export class PlatformInternalAdminEntity {
   timezone!: string;
 
   @Column({
+    name: 'date_format',
+    type: 'varchar',
+    length: 20,
+    default: 'dd/MM/yyyy',
+  })
+  dateFormat!: string;
+
+  @Column({ name: 'time_format', type: 'varchar', length: 10, default: '24h' })
+  timeFormat!: '12h' | '24h';
+
+  @Column({
     name: 'last_admin_login_at',
     type: 'timestamptz',
     nullable: true,
