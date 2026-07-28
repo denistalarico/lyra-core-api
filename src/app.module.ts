@@ -44,6 +44,7 @@ import { LeadFlowEventsModule } from './modules/leadflow-events/leadflow-events.
 import { HealthModule } from './modules/health/health.module';
 import { ContextModule } from './common/context/context.module';
 import { LeadFlowAnalyticsModule } from './modules/leadflow-analytics/leadflow-analytics.module';
+import { AdminModule } from './modules/admin';
 
 @Module({
   imports: [
@@ -90,6 +91,7 @@ import { LeadFlowAnalyticsModule } from './modules/leadflow-analytics/leadflow-a
     LeadFlowAutomationsModule,
     LeadFlowEventsModule,
     LeadFlowAnalyticsModule,
+    AdminModule,
   ],
 })
 export class AppModule {}

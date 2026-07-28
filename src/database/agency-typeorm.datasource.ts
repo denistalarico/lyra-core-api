@@ -129,6 +129,8 @@ import { AddCrmStageRole1786700000000 } from './migrations/1786700000000-add-crm
 import { CreatePlatformWhatsAppNotificationDeliveries1786800000000 } from './migrations/1786800000000-create-platform-whatsapp-notification-deliveries';
 import { AddProjectCardDisplayDefaults1786900000000 } from './migrations/1786900000000-add-project-card-display-defaults';
 import { CreateLeadflowScheduledTimers1787000000000 } from './migrations/1787000000000-create-leadflow-scheduled-timers';
+import { CreatePlatformAdminIdentityAccess1787100000000 } from './migrations/1787100000000-create-platform-admin-identity-access';
+import { CreatePlatformAdminSessions1787200000000 } from './migrations/1787200000000-create-platform-admin-sessions';
 
 export const AgencyDataSource = new DataSource({
   type: 'postgres',
@@ -268,5 +270,7 @@ export const AgencyDataSource = new DataSource({
     CreatePlatformWhatsAppNotificationDeliveries1786800000000,
     AddProjectCardDisplayDefaults1786900000000,
     CreateLeadflowScheduledTimers1787000000000,
+    CreatePlatformAdminIdentityAccess1787100000000,
+    CreatePlatformAdminSessions1787200000000,
   ],
 });

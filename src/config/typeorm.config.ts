@@ -278,8 +278,18 @@ import {
   LeadFlowAutomationVersionEntity,
 } from '../modules/leadflow-automations/entities';
 import { LeadFlowEventDeliveryEntity } from '../modules/leadflow-events/entities';
+import {
+  PlatformAdminAuditEventEntity,
+  PlatformAdminSessionEntity,
+  PlatformAdminTwoFactorCodeEntity,
+  PlatformInternalAdminEntity,
+} from '../modules/admin/entities';
 
 export const agencyEntities = [
+  PlatformInternalAdminEntity,
+  PlatformAdminAuditEventEntity,
+  PlatformAdminSessionEntity,
+  PlatformAdminTwoFactorCodeEntity,
   NotificationEntity,
   NotificationRecipientEntity,
   NotificationDeliveryEntity,
