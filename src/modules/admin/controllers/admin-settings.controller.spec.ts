@@ -50,6 +50,7 @@ describe('AdminSettingsController', () => {
   it.each([
     ['overview', 'admin.settings.read'],
     ['updateProfile', 'admin.settings.update'],
+    ['uploadProfileAvatar', 'admin.settings.update'],
     ['security', 'admin.security.read'],
     ['changePassword', 'admin.security.manage'],
     ['sessions', 'admin.sessions.read'],
