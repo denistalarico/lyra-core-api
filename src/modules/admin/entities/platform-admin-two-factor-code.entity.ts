@@ -8,6 +8,9 @@ import {
 
 @Entity('platform_admin_two_factor_codes')
 @Index('idx_platform_admin_2fa_codes_admin_purpose', ['adminId', 'purpose'])
+@Index('idx_platform_admin_2fa_codes_platform_identity', [
+  'platformAdminIdentityId',
+])
 export class PlatformAdminTwoFactorCodeEntity {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
@@ -15,11 +18,21 @@ export class PlatformAdminTwoFactorCodeEntity {
   @Column({ name: 'admin_id', type: 'uuid' })
   adminId!: string;
 
-  @Column({ name: 'user_id', type: 'uuid' })
-  userId!: string;
+  @Column({ name: 'identity_source', type: 'varchar', length: 30 })
+  identitySource?: 'agency' | 'platform_admin';
 
-  @Column({ name: 'identity_tenant_id', type: 'uuid' })
-  identityTenantId!: string;
+  @Column({ name: 'user_id', type: 'uuid', nullable: true })
+  userId!: string | null;
+
+  @Column({ name: 'identity_tenant_id', type: 'uuid', nullable: true })
+  identityTenantId!: string | null;
+
+  @Column({
+    name: 'platform_admin_identity_id',
+    type: 'uuid',
+    nullable: true,
+  })
+  platformAdminIdentityId?: string | null;
 
   @Column({ name: 'code_hash', type: 'text' })
   codeHash!: string;

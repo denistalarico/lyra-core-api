@@ -191,7 +191,22 @@ export class AdminBootstrapService {
             }
 
             const identity = candidates[0];
-            resolvedActorUserId = identity.userId;
+            const reference =
+              identity.reference ??
+              (identity.tenantId && identity.userId
+                ? {
+                    source: 'agency' as const,
+                    tenantId: identity.tenantId,
+                    userId: identity.userId,
+                  }
+                : null);
+            if (!reference || reference.source !== 'agency') {
+              return {
+                ok: false,
+                code: 'platform_admin_identity_not_found',
+              };
+            }
+            resolvedActorUserId = reference.userId;
             resolvedTwoFactorEnabled = identity.twoFactorEnabled;
 
             const adminRepository = manager.getRepository(
@@ -199,15 +214,17 @@ export class AdminBootstrapService {
             );
             const existing = await this.findExistingAdmin(
               adminRepository,
-              identity.tenantId,
-              identity.userId,
+              reference.tenantId,
+              reference.userId,
             );
 
             if (!existing) {
               const created = await adminRepository.save(
                 adminRepository.create({
-                  identityTenantId: identity.tenantId,
-                  userId: identity.userId,
+                  identitySource: 'agency',
+                  identityTenantId: reference.tenantId,
+                  userId: reference.userId,
+                  platformAdminIdentityId: null,
                   status: 'active',
                   roleKey: input.requestedRole,
                   twoFactorRequired: true,
@@ -224,7 +241,7 @@ export class AdminBootstrapService {
               );
 
               await recordAudit(manager, {
-                actorUserId: identity.userId,
+                actorUserId: reference.userId,
                 action: 'admin.bootstrap.created',
                 outcome: 'success',
                 targetId: created.id,
@@ -271,7 +288,7 @@ export class AdminBootstrapService {
             }
 
             await recordAudit(manager, {
-              actorUserId: identity.userId,
+              actorUserId: reference.userId,
               action: roleChangeDenied
                 ? 'admin.bootstrap.denied'
                 : result === 'updated'
@@ -323,7 +340,7 @@ export class AdminBootstrapService {
     userId: string,
   ): Promise<PlatformInternalAdminEntity | null> {
     return repository.findOne({
-      where: { identityTenantId, userId },
+      where: { identitySource: 'agency', identityTenantId, userId },
       lock: { mode: 'pessimistic_write' },
     });
   }

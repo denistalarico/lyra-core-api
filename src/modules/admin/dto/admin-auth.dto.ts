@@ -1,4 +1,12 @@
-import { IsEmail, IsIn, IsNotEmpty, IsString, Matches } from 'class-validator';
+import {
+  IsEmail,
+  IsIn,
+  IsNotEmpty,
+  IsString,
+  Matches,
+  MaxLength,
+  MinLength,
+} from 'class-validator';
 import type { AdminTwoFactorMethod } from '../types/admin-access.types';
 
 export class AdminLoginDto {
@@ -41,3 +49,43 @@ export class AdminTwoFactorSetupConfirmDto extends AdminTwoFactorVerifyDto {
 }
 
 export class AdminEmptyBodyDto {}
+
+export class AdminPublicEmailDto {
+  @IsEmail()
+  @MaxLength(320)
+  email!: string;
+}
+
+export class AdminIdentityTokenQueryDto {
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(512)
+  token!: string;
+}
+
+export class CompleteAdminActivationDto extends AdminIdentityTokenQueryDto {
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(160)
+  displayName!: string;
+
+  @IsString()
+  @MinLength(12)
+  @MaxLength(128)
+  password!: string;
+
+  @IsString()
+  @MaxLength(128)
+  passwordConfirmation!: string;
+}
+
+export class ResetAdminPasswordDto extends AdminIdentityTokenQueryDto {
+  @IsString()
+  @MinLength(12)
+  @MaxLength(128)
+  password!: string;
+
+  @IsString()
+  @MaxLength(128)
+  passwordConfirmation!: string;
+}

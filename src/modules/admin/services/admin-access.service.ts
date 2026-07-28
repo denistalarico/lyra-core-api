@@ -10,6 +10,7 @@ import {
   isPlatformAdminPermission,
   isPlatformAdminRoleKey,
 } from '../types/admin-access.types';
+import { adminIdentityReference } from '../utils/admin-identity.util';
 
 const AGENCY_CONNECTION = 'agency';
 
@@ -63,10 +64,23 @@ export class AdminAccessService {
       return null;
     }
 
-    const identity = await this.identityGateway.findByIdentity(
-      admin.identityTenantId,
-      admin.userId,
-    );
+    const reference = adminIdentityReference(admin);
+    if (!reference) return null;
+    const legacyGateway = this.identityGateway as AdminIdentityGateway & {
+      findByIdentity?: (
+        tenantId: string,
+        userId: string,
+      ) => ReturnType<AdminIdentityGateway['findByReference']>;
+    };
+    const identity =
+      typeof legacyGateway.findByReference === 'function'
+        ? await legacyGateway.findByReference(reference)
+        : reference.source === 'agency' && legacyGateway.findByIdentity
+          ? await legacyGateway.findByIdentity(
+              reference.tenantId,
+              reference.userId,
+            )
+          : null;
     if (!identity || identity.status !== 'active') {
       return null;
     }
@@ -78,8 +92,13 @@ export class AdminAccessService {
 
     return {
       adminId: admin.id,
-      userId: identity.userId,
-      identityTenantId: identity.tenantId,
+      userId: reference.source === 'agency' ? reference.userId : null,
+      identityTenantId:
+        reference.source === 'agency' ? reference.tenantId : null,
+      platformAdminIdentityId:
+        reference.source === 'platform_admin' ? reference.identityId : null,
+      identitySource: reference.source,
+      subjectId: identity.subjectId,
       email: identity.email,
       displayName: identity.displayName,
       roleKey: admin.roleKey,

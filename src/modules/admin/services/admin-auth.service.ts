@@ -1,4 +1,5 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { Injectable, Optional, UnauthorizedException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { createHash, randomBytes, randomInt } from 'crypto';
 import { generateSecret, generateURI, verify } from 'otplib';
@@ -9,7 +10,13 @@ import type { LoginRequestContext } from '../../auth/utils/login-context.util';
 import { AgencyUserSecuritySettingsEntity } from '../../agency/entities/agency-auth.entities';
 import { EmailService } from '../../email/email.service';
 import { renderTransactionalEmail } from '../../email/templates/transactional-email.template';
-import { AdminIdentityGateway } from '../contracts/admin-identity.gateway';
+import {
+  AdminIdentityGateway,
+  type AdminIdentityRecord,
+  type AdminIdentityReference,
+  resolveAdminIdentityRecord,
+  type ResolvedAdminIdentityRecord,
+} from '../contracts/admin-identity.gateway';
 import {
   PlatformAdminSessionEntity,
   PlatformAdminTwoFactorCodeEntity,
@@ -25,7 +32,11 @@ import {
   isPlatformAdminRoleKey,
   PLATFORM_ADMIN_ROLE_PERMISSIONS,
 } from '../types/admin-access.types';
-import { normalizeAdminEmail } from '../utils/admin-identity.util';
+import {
+  adminIdentityReference,
+  identityColumns,
+  normalizeAdminEmail,
+} from '../utils/admin-identity.util';
 import { AdminAccessService } from './admin-access.service';
 import { AdminAuditService } from './admin-audit.service';
 import { AdminAuthTokenService } from './admin-auth-token.service';
@@ -36,14 +47,7 @@ const GENERIC_TWO_FACTOR_ERROR = 'Invalid administrative verification context.';
 
 type AdminLoginContext = {
   admin: PlatformInternalAdminEntity;
-  identity: {
-    tenantId: string;
-    userId: string;
-    email: string;
-    displayName: string;
-    twoFactorEnabled: boolean;
-    twoFactorMethod: AdminTwoFactorMethod;
-  };
+  identity: ResolvedAdminIdentityRecord;
 };
 
 export type AdminAuthenticatedSessionResult = {
@@ -60,7 +64,7 @@ export class AdminAuthService {
     @InjectRepository(PlatformAdminSessionEntity, AGENCY_CONNECTION)
     private readonly sessionRepository: Repository<PlatformAdminSessionEntity>,
     @InjectRepository(AgencyUserSecuritySettingsEntity, AGENCY_CONNECTION)
-    private readonly securityRepository: Repository<AgencyUserSecuritySettingsEntity>,
+    private readonly legacySecurityRepository: Repository<AgencyUserSecuritySettingsEntity>,
     @InjectRepository(PlatformAdminTwoFactorCodeEntity, AGENCY_CONNECTION)
     private readonly emailCodeRepository: Repository<PlatformAdminTwoFactorCodeEntity>,
     private readonly identityGateway: AdminIdentityGateway,
@@ -69,6 +73,8 @@ export class AdminAuthService {
     private readonly tokenService: AdminAuthTokenService,
     private readonly cryptoService: SettingsCryptoService,
     private readonly emailService: EmailService,
+    @Optional()
+    private readonly configService?: ConfigService,
   ) {}
 
   async login(
@@ -96,24 +102,76 @@ export class AdminAuthService {
         reason:
           candidates.length > 1 ? 'ambiguous_identity' : 'invalid_credentials',
       });
+      if (candidates.length > 1) {
+        await this.auditService.record({
+          action: 'admin.identity.action_denied',
+          outcome: 'denied',
+          ipAddress: client.ipAddress,
+          userAgent: client.userAgent,
+          metadata: {
+            identitySource: 'ambiguous',
+            reason: 'ambiguous_identity',
+            result: 'denied',
+          },
+        });
+      }
       throw new UnauthorizedException(GENERIC_AUTH_ERROR);
     }
 
-    const identity = candidates[0];
+    const identity = resolveAdminIdentityRecord(candidates[0]);
+    if (!identity) {
+      throw new UnauthorizedException(GENERIC_AUTH_ERROR);
+    }
     const passwordValid = await this.identityGateway.verifyPassword(
-      identity.tenantId,
-      identity.userId,
+      identity.reference,
       password,
     );
     const admin = await this.adminRepository.findOne({
-      where: {
-        identityTenantId: identity.tenantId,
-        userId: identity.userId,
-      },
+      where:
+        identity.reference.source === 'agency'
+          ? {
+              identitySource: 'agency',
+              identityTenantId: identity.reference.tenantId,
+              userId: identity.reference.userId,
+            }
+          : {
+              identitySource: 'platform_admin',
+              platformAdminIdentityId: identity.reference.identityId,
+            },
     });
 
+    if (!passwordValid) {
+      const { locked } =
+        typeof this.identityGateway.registerFailedLogin === 'function'
+          ? await this.identityGateway.registerFailedLogin(
+              identity.reference,
+              this.getMaxLoginAttempts(),
+              this.getLoginLockTtlMs(),
+            )
+          : { locked: false };
+      if (locked && admin) {
+        await this.auditService.record({
+          actorAdminId: admin.id,
+          action: 'admin.identity.locked',
+          targetType: 'platform_admin_identity',
+          targetId: identity.subjectId,
+          outcome: 'success',
+          ipAddress: client.ipAddress,
+          userAgent: client.userAgent,
+          metadata: {
+            identitySource: identity.source,
+            identityId: identity.subjectId,
+          },
+        });
+      }
+    }
+
     if (
-      identity.status !== 'active' ||
+      (identity.status !== 'active' &&
+        !(
+          identity.status === 'locked' &&
+          (identity.lockedUntil?.getTime() ?? 0) <= Date.now()
+        )) ||
       !passwordValid ||
       !admin ||
       admin.status !== 'active' ||
@@ -131,6 +189,27 @@ export class AdminAuthService {
       throw new UnauthorizedException(GENERIC_AUTH_ERROR);
     }
 
+    const wasLocked =
+      identity.status === 'locked' || Boolean(identity.lockedUntil);
+    if (typeof this.identityGateway.registerSuccessfulLogin === 'function') {
+      await this.identityGateway.registerSuccessfulLogin(identity.reference);
+    }
+    if (wasLocked) {
+      await this.auditService.record({
+        actorAdminId: admin.id,
+        action: 'admin.identity.unlocked',
+        targetType: 'platform_admin_identity',
+        targetId: identity.subjectId,
+        outcome: 'success',
+        ipAddress: client.ipAddress,
+        userAgent: client.userAgent,
+        metadata: {
+          identitySource: identity.source,
+          identityId: identity.subjectId,
+        },
+      });
+    }
+
     const context: AdminLoginContext = { admin, identity };
     if (admin.twoFactorRequired && !identity.twoFactorEnabled) {
       const tempToken = await this.tokenService.signTwoFactorToken(
@@ -138,7 +217,10 @@ export class AdminAuthService {
       );
       await this.auditService.record({
         actorAdminId: admin.id,
-        actorUserId: identity.userId,
+        actorUserId:
+          identity.reference.source === 'agency'
+            ? identity.reference.userId
+            : null,
         action: 'admin.auth.two_factor_setup_required',
         targetType: 'platform_admin',
         targetId: admin.id,
@@ -164,7 +246,10 @@ export class AdminAuthService {
       }
       await this.auditService.record({
         actorAdminId: admin.id,
-        actorUserId: identity.userId,
+        actorUserId:
+          identity.reference.source === 'agency'
+            ? identity.reference.userId
+            : null,
         action: 'admin.auth.two_factor_challenged',
         targetType: 'platform_admin',
         targetId: admin.id,
@@ -205,7 +290,10 @@ export class AdminAuthService {
 
     await this.auditService.record({
       actorAdminId: context.admin.id,
-      actorUserId: context.identity.userId,
+      actorUserId:
+        context.identity.reference.source === 'agency'
+          ? context.identity.reference.userId
+          : null,
       action: 'admin.auth.two_factor_succeeded',
       targetType: 'platform_admin',
       targetId: context.admin.id,
@@ -248,19 +336,17 @@ export class AdminAuthService {
     );
     const context = await this.loadEligibleContext(payload);
     this.assertSetupStillRequired(context);
-    const security = await this.loadSecurity(context);
-
     if (method === 'email') {
-      security.twoFactorPendingSecretEncrypted = null;
-      await this.securityRepository.save(security);
+      await this.setPendingTwoFactorSecret(context.identity.reference, null);
       await this.sendEmailCode(context, 'admin_setup');
       return { method, emailSent: true };
     }
 
     const secret = generateSecret();
-    security.twoFactorPendingSecretEncrypted =
-      this.cryptoService.encrypt(secret);
-    await this.securityRepository.save(security);
+    await this.setPendingTwoFactorSecret(
+      context.identity.reference,
+      this.cryptoService.encrypt(secret),
+    );
 
     const otpauthUrl = generateURI({
       issuer: 'Lyra Admin',
@@ -281,7 +367,6 @@ export class AdminAuthService {
     client: LoginRequestContext,
   ): Promise<AdminAuthenticatedSessionResult> {
     let context: AdminLoginContext;
-    let security: AgencyUserSecuritySettingsEntity;
     try {
       const payload = await this.tokenService.verifyTwoFactorToken(
         tempToken,
@@ -289,29 +374,26 @@ export class AdminAuthService {
       );
       context = await this.loadEligibleContext(payload);
       this.assertSetupStillRequired(context);
-      security = await this.loadSecurity(context);
 
       if (method === 'email') {
         await this.verifyEmailCode(context, 'admin_setup', code);
-        security.twoFactorEnabled = true;
-        security.twoFactorMethod = 'email';
-        security.twoFactorSecretEncrypted = null;
-        security.twoFactorPendingSecretEncrypted = null;
+        await this.activateTwoFactor(context.identity.reference, 'email', null);
       } else {
+        const material = await this.getSecurityMaterial(
+          context.identity.reference,
+        );
         const secret = this.safeDecrypt(
-          security.twoFactorPendingSecretEncrypted,
+          material?.twoFactorPendingSecretEncrypted ?? null,
         );
         if (!secret || !(await this.verifyAuthenticator(secret, code))) {
           throw new UnauthorizedException(GENERIC_TWO_FACTOR_ERROR);
         }
-        security.twoFactorEnabled = true;
-        security.twoFactorMethod = 'authenticator';
-        security.twoFactorSecretEncrypted =
-          security.twoFactorPendingSecretEncrypted;
-        security.twoFactorPendingSecretEncrypted = null;
+        await this.activateTwoFactor(
+          context.identity.reference,
+          'authenticator',
+          material?.twoFactorPendingSecretEncrypted ?? null,
+        );
       }
-
-      await this.securityRepository.save(security);
     } catch (error) {
       await this.auditDenied('admin.auth.two_factor_failed', client, {
         reason: 'invalid_setup_confirmation',
@@ -324,7 +406,10 @@ export class AdminAuthService {
 
     await this.auditService.record({
       actorAdminId: context.admin.id,
-      actorUserId: context.identity.userId,
+      actorUserId:
+        context.identity.reference.source === 'agency'
+          ? context.identity.reference.userId
+          : null,
       action: 'admin.auth.two_factor_succeeded',
       targetType: 'platform_admin',
       targetId: context.admin.id,
@@ -384,8 +469,20 @@ export class AdminAuthService {
     try {
       context = await this.loadEligibleContextByIdentity(
         session.adminId,
-        session.userId,
-        session.identityTenantId,
+        (session.identitySource === 'agency' || !session.identitySource) &&
+          session.identityTenantId &&
+          session.userId
+          ? {
+              source: 'agency',
+              tenantId: session.identityTenantId,
+              userId: session.userId,
+            }
+          : session.platformAdminIdentityId
+            ? {
+                source: 'platform_admin',
+                identityId: session.platformAdminIdentityId,
+              }
+            : null,
       );
     } catch (error) {
       await this.revokeSession(session, client, 'admin_access_invalidated');
@@ -422,7 +519,10 @@ export class AdminAuthService {
     const principal = await this.requirePrincipal(context.admin.id, session.id);
     await this.auditService.record({
       actorAdminId: context.admin.id,
-      actorUserId: context.identity.userId,
+      actorUserId:
+        context.identity.reference.source === 'agency'
+          ? context.identity.reference.userId
+          : null,
       action: 'admin.auth.session_refreshed',
       targetType: 'platform_admin_session',
       targetId: session.id,
@@ -489,8 +589,13 @@ export class AdminAuthService {
       session.revokedAt ||
       session.expiresAt.getTime() <= Date.now() ||
       session.adminId !== payload.adminId ||
-      session.userId !== payload.sub ||
-      session.identityTenantId !== payload.identityTenantId
+      (session.identitySource ?? 'agency') !==
+        (payload.identitySource ?? 'agency') ||
+      ((session.identitySource ?? 'agency') === 'agency'
+        ? session.userId !== payload.sub ||
+          session.identityTenantId !== payload.identityTenantId
+        : session.platformAdminIdentityId !== payload.platformAdminIdentityId ||
+          session.platformAdminIdentityId !== payload.sub)
     ) {
       throw new UnauthorizedException('Invalid administrative session.');
     }
@@ -518,30 +623,37 @@ export class AdminAuthService {
   }
 
   async getMe(principal: AdminPrincipal) {
-    const [admin, security] = await Promise.all([
+    const [admin, identity] = await Promise.all([
       this.adminRepository.findOne({ where: { id: principal.adminId } }),
-      this.securityRepository.findOne({
-        where: {
-          tenantId: principal.identityTenantId,
-          userId: principal.userId,
-        },
-      }),
+      this.findIdentity(
+        (principal.identitySource === 'agency' || !principal.identitySource) &&
+          principal.identityTenantId &&
+          principal.userId
+          ? {
+              source: 'agency',
+              tenantId: principal.identityTenantId,
+              userId: principal.userId,
+            }
+          : {
+              source: 'platform_admin',
+              identityId: principal.platformAdminIdentityId ?? '',
+            },
+      ),
     ]);
-    if (!admin || !security) {
+    if (!admin || !identity) {
       throw new UnauthorizedException('Invalid administrative session.');
     }
 
     return {
       adminId: principal.adminId,
       userId: principal.userId,
+      identitySource: principal.identitySource,
       email: principal.email,
       displayName: principal.displayName,
       roleKey: principal.roleKey,
       permissions: principal.permissions,
-      twoFactorEnabled:
-        security.twoFactorEnabled || Boolean(security.twoFactorSecretEncrypted),
-      twoFactorMethod:
-        security.twoFactorMethod === 'email' ? 'email' : 'authenticator',
+      twoFactorEnabled: identity.twoFactorEnabled,
+      twoFactorMethod: identity.twoFactorMethod,
       locale: admin.locale,
       theme: admin.theme,
       timezone: admin.timezone,
@@ -560,8 +672,7 @@ export class AdminAuthService {
     const session = await this.sessionRepository.save(
       this.sessionRepository.create({
         adminId: context.admin.id,
-        userId: context.identity.userId,
-        identityTenantId: context.identity.tenantId,
+        ...identityColumns(context.identity.reference),
         refreshTokenHash: this.hashToken(refreshToken),
         previousRefreshTokenHash: null,
         status: 'active',
@@ -586,7 +697,10 @@ export class AdminAuthService {
     const principal = await this.requirePrincipal(context.admin.id, session.id);
     await this.auditService.record({
       actorAdminId: context.admin.id,
-      actorUserId: context.identity.userId,
+      actorUserId:
+        context.identity.reference.source === 'agency'
+          ? context.identity.reference.userId
+          : null,
       action: 'admin.auth.login_succeeded',
       targetType: 'platform_admin_session',
       targetId: session.id,
@@ -610,9 +724,15 @@ export class AdminAuthService {
 
   private buildAccessPayload(principal: AdminPrincipal): AdminAuthTokenPayload {
     return {
-      sub: principal.userId,
+      sub:
+        principal.subjectId ??
+        principal.userId ??
+        principal.platformAdminIdentityId ??
+        '',
       adminId: principal.adminId,
+      identitySource: principal.identitySource,
       identityTenantId: principal.identityTenantId,
+      platformAdminIdentityId: principal.platformAdminIdentityId,
       sessionId: principal.sessionId,
       email: principal.email,
       roleKey: principal.roleKey,
@@ -626,9 +746,17 @@ export class AdminAuthService {
     method?: AdminTwoFactorMethod,
   ): AdminTwoFactorTokenPayload {
     return {
-      sub: context.identity.userId,
+      sub: context.identity.subjectId,
       adminId: context.admin.id,
-      identityTenantId: context.identity.tenantId,
+      identitySource: context.identity.source,
+      identityTenantId:
+        context.identity.reference.source === 'agency'
+          ? context.identity.reference.tenantId
+          : null,
+      platformAdminIdentityId:
+        context.identity.reference.source === 'platform_admin'
+          ? context.identity.reference.identityId
+          : null,
       email: context.identity.email,
       roleKey: context.admin.roleKey,
       flow,
@@ -642,10 +770,22 @@ export class AdminAuthService {
   ): Promise<AdminLoginContext> {
     const context = await this.loadEligibleContextByIdentity(
       payload.adminId,
-      payload.sub,
-      payload.identityTenantId,
+      (payload.identitySource === 'agency' || !payload.identitySource) &&
+        payload.identityTenantId
+        ? {
+            source: 'agency',
+            tenantId: payload.identityTenantId,
+            userId: payload.sub,
+          }
+        : payload.platformAdminIdentityId
+          ? {
+              source: 'platform_admin',
+              identityId: payload.platformAdminIdentityId,
+            }
+          : null,
     );
     if (
+      payload.sub !== context.identity.subjectId ||
       payload.email !== context.identity.email ||
       payload.roleKey !== context.admin.roleKey
     ) {
@@ -656,47 +796,37 @@ export class AdminAuthService {
 
   private async loadEligibleContextByIdentity(
     adminId: string,
-    userId: string,
-    identityTenantId: string,
+    reference: AdminIdentityReference | null,
   ): Promise<AdminLoginContext> {
     const admin = await this.adminRepository.findOne({
       where: { id: adminId },
     });
     if (
       !admin ||
+      !reference ||
       admin.status !== 'active' ||
-      admin.userId !== userId ||
-      admin.identityTenantId !== identityTenantId ||
       !isPlatformAdminRoleKey(admin.roleKey) ||
       !PLATFORM_ADMIN_ROLE_PERMISSIONS[admin.roleKey].includes('admin.access')
     ) {
       throw new UnauthorizedException(GENERIC_TWO_FACTOR_ERROR);
     }
 
-    const identity = await this.identityGateway.findByIdentity(
-      admin.identityTenantId,
-      admin.userId,
-    );
+    const adminReference = adminIdentityReference(admin);
+    if (
+      !adminReference ||
+      JSON.stringify(adminReference) !== JSON.stringify(reference)
+    ) {
+      throw new UnauthorizedException(GENERIC_TWO_FACTOR_ERROR);
+    }
+    const identityRecord = await this.findIdentity(reference);
+    const identity = identityRecord
+      ? resolveAdminIdentityRecord(identityRecord)
+      : null;
     if (!identity || identity.status !== 'active') {
       throw new UnauthorizedException(GENERIC_TWO_FACTOR_ERROR);
     }
 
     return { admin, identity };
-  }
-
-  private async loadSecurity(
-    context: AdminLoginContext,
-  ): Promise<AgencyUserSecuritySettingsEntity> {
-    const security = await this.securityRepository.findOne({
-      where: {
-        tenantId: context.identity.tenantId,
-        userId: context.identity.userId,
-      },
-    });
-    if (!security) {
-      throw new UnauthorizedException(GENERIC_TWO_FACTOR_ERROR);
-    }
-    return security;
   }
 
   private async verifyConfiguredTwoFactor(
@@ -717,8 +847,8 @@ export class AdminAuthService {
       return;
     }
 
-    const security = await this.loadSecurity(context);
-    const secret = this.safeDecrypt(security.twoFactorSecretEncrypted);
+    const material = await this.getSecurityMaterial(context.identity.reference);
+    const secret = this.safeDecrypt(material?.twoFactorSecretEncrypted ?? null);
     if (!secret || !(await this.verifyAuthenticator(secret, code))) {
       throw new UnauthorizedException(GENERIC_TWO_FACTOR_ERROR);
     }
@@ -732,8 +862,6 @@ export class AdminAuthService {
     const record = await this.emailCodeRepository.findOne({
       where: {
         adminId: context.admin.id,
-        identityTenantId: context.identity.tenantId,
-        userId: context.identity.userId,
         purpose,
       },
       order: { createdAt: 'DESC' },
@@ -764,8 +892,7 @@ export class AdminAuthService {
     await this.emailCodeRepository.save(
       this.emailCodeRepository.create({
         adminId: context.admin.id,
-        identityTenantId: context.identity.tenantId,
-        userId: context.identity.userId,
+        ...identityColumns(context.identity.reference),
         codeHash: this.hashToken(code),
         purpose,
         expiresAt: new Date(Date.now() + 5 * 60 * 1000),
@@ -862,6 +989,81 @@ export class AdminAuthService {
     }
   }
 
+  private findIdentity(reference: AdminIdentityReference) {
+    const gateway = this.identityGateway as AdminIdentityGateway & {
+      findByIdentity?: (
+        tenantId: string,
+        userId: string,
+      ) => Promise<AdminIdentityRecord | null>;
+    };
+    if (typeof gateway.findByReference === 'function') {
+      return gateway.findByReference(reference);
+    }
+    return reference.source === 'agency' && gateway.findByIdentity
+      ? gateway.findByIdentity(reference.tenantId, reference.userId)
+      : Promise.resolve(null);
+  }
+
+  private async getSecurityMaterial(reference: AdminIdentityReference) {
+    if (typeof this.identityGateway.getSecurityMaterial === 'function') {
+      return this.identityGateway.getSecurityMaterial(reference);
+    }
+    if (reference.source !== 'agency') return null;
+    const security = await this.legacySecurityRepository.findOne({
+      where: { tenantId: reference.tenantId, userId: reference.userId },
+    });
+    return security
+      ? {
+          twoFactorSecretEncrypted: security.twoFactorSecretEncrypted,
+          twoFactorPendingSecretEncrypted:
+            security.twoFactorPendingSecretEncrypted,
+        }
+      : null;
+  }
+
+  private async setPendingTwoFactorSecret(
+    reference: AdminIdentityReference,
+    value: string | null,
+  ) {
+    if (typeof this.identityGateway.setPendingTwoFactorSecret === 'function') {
+      return this.identityGateway.setPendingTwoFactorSecret(reference, value);
+    }
+    if (reference.source !== 'agency') return false;
+    const security = await this.legacySecurityRepository.findOne({
+      where: { tenantId: reference.tenantId, userId: reference.userId },
+    });
+    if (!security) return false;
+    security.twoFactorPendingSecretEncrypted = value;
+    await this.legacySecurityRepository.save(security);
+    return true;
+  }
+
+  private async activateTwoFactor(
+    reference: AdminIdentityReference,
+    method: AdminTwoFactorMethod,
+    encryptedSecret: string | null,
+  ) {
+    if (typeof this.identityGateway.activateTwoFactor === 'function') {
+      return this.identityGateway.activateTwoFactor(
+        reference,
+        method,
+        encryptedSecret,
+      );
+    }
+    if (reference.source !== 'agency') return false;
+    const security = await this.legacySecurityRepository.findOne({
+      where: { tenantId: reference.tenantId, userId: reference.userId },
+    });
+    if (!security) return false;
+    security.twoFactorEnabled = true;
+    security.twoFactorMethod = method;
+    security.twoFactorSecretEncrypted =
+      method === 'authenticator' ? encryptedSecret : null;
+    security.twoFactorPendingSecretEncrypted = null;
+    await this.legacySecurityRepository.save(security);
+    return true;
+  }
+
   private safeDecrypt(value: string | null): string | null {
     try {
       return this.cryptoService.decrypt(value);
@@ -883,5 +1085,25 @@ export class AdminAuthService {
 
   private hashToken(value: string): string {
     return createHash('sha256').update(value).digest('hex');
+  }
+
+  private getMaxLoginAttempts(): number {
+    const value = Number(
+      this.configService?.get<string>('ADMIN_LOGIN_MAX_ATTEMPTS') ??
+        process.env.ADMIN_LOGIN_MAX_ATTEMPTS ??
+        '5',
+    );
+    return Number.isInteger(value) && value >= 3 && value <= 20 ? value : 5;
+  }
+
+  private getLoginLockTtlMs(): number {
+    const value =
+      this.configService?.get<string>('ADMIN_LOGIN_LOCK_TTL') ??
+      process.env.ADMIN_LOGIN_LOCK_TTL ??
+      '15m';
+    const match = value.match(/^(\d+)(m|h)$/);
+    if (!match) return 15 * 60_000;
+    const amount = Number(match[1]);
+    return amount * (match[2] === 'h' ? 3_600_000 : 60_000);
   }
 }

@@ -1,4 +1,6 @@
 export * from './platform-admin-audit-event.entity';
+export * from './platform-admin-identity-token.entity';
+export * from './platform-admin-identity.entity';
 export * from './platform-admin-invitation.entity';
 export * from './platform-admin-session.entity';
 export * from './platform-admin-two-factor-code.entity';

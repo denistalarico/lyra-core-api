@@ -55,7 +55,8 @@ export class ChangeAdminPasswordDto {
   currentPassword!: string;
 
   @IsString()
-  @MinLength(8)
+  @MinLength(12)
+  @MaxLength(128)
   newPassword!: string;
 }
 

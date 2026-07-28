@@ -9,7 +9,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { createHash, randomInt } from 'crypto';
 import { generateSecret, generateURI, verify } from 'otplib';
 import QRCode from 'qrcode';
-import { MoreThan, Not, Repository } from 'typeorm';
+import { type FindOptionsWhere, MoreThan, Not, Repository } from 'typeorm';
 import { SettingsCryptoService } from '../../../common/crypto/settings-crypto.service';
 import type { LoginRequestContext } from '../../auth/utils/login-context.util';
 import { AgencyUserSecuritySettingsEntity } from '../../agency/entities/agency-auth.entities';
@@ -29,6 +29,10 @@ import {
   PlatformInternalAdminEntity,
 } from '../entities';
 import type { AdminPrincipal } from '../types/admin-access.types';
+import {
+  identityColumns,
+  principalIdentityReference,
+} from '../utils/admin-identity.util';
 import { AdminAuditService } from './admin-audit.service';
 
 const AGENCY_CONNECTION = 'agency';
@@ -43,7 +47,7 @@ export class AdminSettingsService {
     @InjectRepository(PlatformAdminSessionEntity, AGENCY_CONNECTION)
     private readonly sessionRepository: Repository<PlatformAdminSessionEntity>,
     @InjectRepository(AgencyUserSecuritySettingsEntity, AGENCY_CONNECTION)
-    private readonly securityRepository: Repository<AgencyUserSecuritySettingsEntity>,
+    private readonly legacySecurityRepository: Repository<AgencyUserSecuritySettingsEntity>,
     @InjectRepository(PlatformAdminTwoFactorCodeEntity, AGENCY_CONNECTION)
     private readonly emailCodeRepository: Repository<PlatformAdminTwoFactorCodeEntity>,
     private readonly identityGateway: AdminIdentityGateway,
@@ -61,8 +65,6 @@ export class AdminSettingsService {
         this.sessionRepository.count({
           where: {
             adminId: principal.adminId,
-            userId: principal.userId,
-            identityTenantId: principal.identityTenantId,
             status: 'active',
             expiresAt: MoreThan(new Date()),
           },
@@ -98,16 +100,28 @@ export class AdminSettingsService {
     dto: UpdateAdminProfileDto,
     client: LoginRequestContext,
   ) {
-    const identity = await this.identityGateway.updateProfile(
-      principal.identityTenantId,
-      principal.userId,
-      {
-        displayName: dto.displayName,
-        phone: normalizeNullable(dto.phone),
-        jobTitle: normalizeNullable(dto.jobTitle),
-        avatarUrl: normalizeNullable(dto.avatarUrl),
-      },
-    );
+    const reference = principalIdentityReference(principal);
+    const profile = {
+      displayName: dto.displayName,
+      phone: normalizeNullable(dto.phone),
+      jobTitle: normalizeNullable(dto.jobTitle),
+      avatarUrl: normalizeNullable(dto.avatarUrl),
+    };
+    const gateway = this.identityGateway as AdminIdentityGateway & {
+      findByIdentity?: unknown;
+    };
+    const identity =
+      typeof gateway.findByReference === 'function'
+        ? await gateway.updateProfile(reference, profile)
+        : reference.source === 'agency'
+          ? await (
+              gateway.updateProfile as unknown as (
+                tenantId: string,
+                userId: string,
+                value: typeof profile,
+              ) => ReturnType<AdminIdentityGateway['updateProfile']>
+            )(reference.tenantId, reference.userId, profile)
+          : null;
     if (!identity) {
       throw new NotFoundException('Administrative profile was not found.');
     }
@@ -177,17 +191,49 @@ export class AdminSettingsService {
     dto: ChangeAdminPasswordDto,
     client: LoginRequestContext,
   ) {
-    const updated = await this.identityGateway.updatePassword(
-      principal.identityTenantId,
-      principal.userId,
-      dto.currentPassword,
-      dto.newPassword,
-    );
+    if (
+      normalizeAdminPassword(dto.newPassword) ===
+      normalizeAdminPassword(principal.email)
+    ) {
+      throw new BadRequestException(
+        'Password does not meet the security policy.',
+      );
+    }
+    const reference = principalIdentityReference(principal);
+    const legacy = this.identityGateway as AdminIdentityGateway & {
+      updatePassword?: (
+        tenantId: string,
+        userId: string,
+        currentPassword: string,
+        newPassword: string,
+      ) => Promise<boolean>;
+    };
+    const updated =
+      typeof legacy.changePassword === 'function'
+        ? await legacy.changePassword(
+            reference,
+            dto.currentPassword,
+            dto.newPassword,
+          )
+        : reference.source === 'agency' && legacy.updatePassword
+          ? await legacy.updatePassword(
+              reference.tenantId,
+              reference.userId,
+              dto.currentPassword,
+              dto.newPassword,
+            )
+          : false;
     if (!updated) {
       throw new UnauthorizedException(GENERIC_PASSWORD_ERROR);
     }
     const revokedCount = await this.revokeOtherSessions(principal);
     await this.audit(principal, client, 'admin.settings.password_changed', {
+      otherSessionsRevoked: revokedCount,
+    });
+    await this.audit(principal, client, 'admin.identity.password_changed', {
+      identitySource: principal.identitySource ?? 'agency',
+      identityId:
+        principal.platformAdminIdentityId ?? principal.userId ?? undefined,
       otherSessionsRevoked: revokedCount,
     });
     return { success: true, otherSessionsRevoked: revokedCount };
@@ -198,20 +244,18 @@ export class AdminSettingsService {
     dto: BeginAdminTwoFactorSetupDto,
   ) {
     await this.assertPassword(principal, dto.currentPassword);
-    const [identity, security] = await Promise.all([
-      this.requireIdentity(principal),
-      this.requireSecurity(principal),
-    ]);
+    const identity = await this.requireIdentity(principal);
+    const reference = principalIdentityReference(principal);
     if (dto.method === 'email') {
-      security.twoFactorPendingSecretEncrypted = null;
-      await this.securityRepository.save(security);
+      await this.setPendingTwoFactorSecret(reference, null);
       await this.sendEmailCode(principal, identity.email);
       return { method: 'email' as const, emailSent: true as const };
     }
     const secret = generateSecret();
-    security.twoFactorPendingSecretEncrypted =
-      this.cryptoService.encrypt(secret);
-    await this.securityRepository.save(security);
+    await this.setPendingTwoFactorSecret(
+      reference,
+      this.cryptoService.encrypt(secret),
+    );
     const otpauthUrl = generateURI({
       issuer: 'Lyra Admin',
       label: identity.email,
@@ -228,32 +272,29 @@ export class AdminSettingsService {
     dto: ConfirmAdminTwoFactorSetupDto,
     client: LoginRequestContext,
   ) {
-    const [identity, security] = await Promise.all([
-      this.requireIdentity(principal),
-      this.requireSecurity(principal),
-    ]);
+    const identity = await this.requireIdentity(principal);
+    const reference = principalIdentityReference(principal);
     const previousMethod = identity.twoFactorMethod;
     if (dto.method === 'email') {
       await this.verifyEmailCode(principal, dto.code);
-      security.twoFactorEnabled = true;
-      security.twoFactorMethod = 'email';
-      security.twoFactorSecretEncrypted = null;
-      security.twoFactorPendingSecretEncrypted = null;
+      await this.activateTwoFactor(reference, 'email', null);
     } else {
-      const secret = this.safeDecrypt(security.twoFactorPendingSecretEncrypted);
+      const material = await this.getSecurityMaterial(reference);
+      const secret = this.safeDecrypt(
+        material?.twoFactorPendingSecretEncrypted ?? null,
+      );
       if (
         !secret ||
         !(await verify({ token: dto.code.trim(), secret })).valid
       ) {
         throw new UnauthorizedException(GENERIC_TWO_FACTOR_ERROR);
       }
-      security.twoFactorEnabled = true;
-      security.twoFactorMethod = 'authenticator';
-      security.twoFactorSecretEncrypted =
-        security.twoFactorPendingSecretEncrypted;
-      security.twoFactorPendingSecretEncrypted = null;
+      await this.activateTwoFactor(
+        reference,
+        'authenticator',
+        material?.twoFactorPendingSecretEncrypted ?? null,
+      );
     }
-    await this.securityRepository.save(security);
     await this.audit(
       principal,
       client,
@@ -286,11 +327,11 @@ export class AdminSettingsService {
         'Two-factor authentication is required for this account.',
       );
     }
-    const security = await this.requireSecurity(principal);
-    security.twoFactorEnabled = false;
-    security.twoFactorSecretEncrypted = null;
-    security.twoFactorPendingSecretEncrypted = null;
-    await this.securityRepository.save(security);
+    if (!(await this.clearTwoFactor(principalIdentityReference(principal)))) {
+      throw new ForbiddenException(
+        'Two-factor authentication cannot be changed through this identity source.',
+      );
+    }
     await this.audit(
       principal,
       client,
@@ -304,9 +345,8 @@ export class AdminSettingsService {
     const sessions = await this.sessionRepository.find({
       where: {
         adminId: principal.adminId,
-        userId: principal.userId,
-        identityTenantId: principal.identityTenantId,
-      },
+        ...identityColumns(principalIdentityReference(principal)),
+      } as unknown as FindOptionsWhere<PlatformAdminSessionEntity>,
       order: { lastSeenAt: 'DESC' },
       take: 50,
     });
@@ -324,9 +364,8 @@ export class AdminSettingsService {
       where: {
         id: sessionId,
         adminId: principal.adminId,
-        userId: principal.userId,
-        identityTenantId: principal.identityTenantId,
-      },
+        ...identityColumns(principalIdentityReference(principal)),
+      } as unknown as FindOptionsWhere<PlatformAdminSessionEntity>,
     });
     if (!session) {
       throw new NotFoundException('Administrative session was not found.');
@@ -369,11 +408,10 @@ export class AdminSettingsService {
     const sessions = await this.sessionRepository.find({
       where: {
         adminId: principal.adminId,
-        userId: principal.userId,
-        identityTenantId: principal.identityTenantId,
+        ...identityColumns(principalIdentityReference(principal)),
         status: 'active',
         id: Not(principal.sessionId),
-      },
+      } as unknown as FindOptionsWhere<PlatformAdminSessionEntity>,
     });
     const now = new Date();
     for (const session of sessions) {
@@ -390,9 +428,8 @@ export class AdminSettingsService {
     const admin = await this.adminRepository.findOne({
       where: {
         id: principal.adminId,
-        userId: principal.userId,
-        identityTenantId: principal.identityTenantId,
-      },
+        ...identityColumns(principalIdentityReference(principal)),
+      } as unknown as FindOptionsWhere<PlatformInternalAdminEntity>,
     });
     if (!admin) {
       throw new NotFoundException('Administrative account was not found.');
@@ -401,37 +438,45 @@ export class AdminSettingsService {
   }
 
   private async requireIdentity(principal: AdminPrincipal) {
-    const identity = await this.identityGateway.findByIdentity(
-      principal.identityTenantId,
-      principal.userId,
-    );
+    const reference = principalIdentityReference(principal);
+    const legacyGateway = this.identityGateway as AdminIdentityGateway & {
+      findByIdentity?: (
+        tenantId: string,
+        userId: string,
+      ) => ReturnType<AdminIdentityGateway['findByReference']>;
+    };
+    const identity =
+      typeof legacyGateway.findByReference === 'function'
+        ? await legacyGateway.findByReference(reference)
+        : reference.source === 'agency' && legacyGateway.findByIdentity
+          ? await legacyGateway.findByIdentity(
+              reference.tenantId,
+              reference.userId,
+            )
+          : null;
     if (!identity || identity.status !== 'active') {
       throw new NotFoundException('Administrative identity was not found.');
     }
     return identity;
   }
 
-  private async requireSecurity(principal: AdminPrincipal) {
-    const security = await this.securityRepository.findOne({
-      where: {
-        tenantId: principal.identityTenantId,
-        userId: principal.userId,
-      },
-    });
-    if (!security) {
-      throw new NotFoundException(
-        'Administrative security state was not found.',
-      );
-    }
-    return security;
-  }
-
   private async assertPassword(principal: AdminPrincipal, password: string) {
-    const valid = await this.identityGateway.verifyPassword(
-      principal.identityTenantId,
-      principal.userId,
-      password,
-    );
+    const reference = principalIdentityReference(principal);
+    const gateway = this.identityGateway as AdminIdentityGateway & {
+      findByIdentity?: unknown;
+    };
+    const valid =
+      typeof gateway.findByReference === 'function'
+        ? await gateway.verifyPassword(reference, password)
+        : reference.source === 'agency'
+          ? await (
+              gateway.verifyPassword as unknown as (
+                tenantId: string,
+                userId: string,
+                value: string,
+              ) => Promise<boolean>
+            )(reference.tenantId, reference.userId, password)
+          : false;
     if (!valid) {
       throw new UnauthorizedException(GENERIC_PASSWORD_ERROR);
     }
@@ -465,8 +510,7 @@ export class AdminSettingsService {
     await this.emailCodeRepository.save(
       this.emailCodeRepository.create({
         adminId: principal.adminId,
-        identityTenantId: principal.identityTenantId,
-        userId: principal.userId,
+        ...identityColumns(principalIdentityReference(principal)),
         codeHash: hashValue(code),
         purpose: 'admin_setup',
         expiresAt: new Date(Date.now() + 5 * 60 * 1000),
@@ -493,8 +537,6 @@ export class AdminSettingsService {
     const record = await this.emailCodeRepository.findOne({
       where: {
         adminId: principal.adminId,
-        identityTenantId: principal.identityTenantId,
-        userId: principal.userId,
         purpose: 'admin_setup',
       },
       order: { createdAt: 'DESC' },
@@ -522,6 +564,87 @@ export class AdminSettingsService {
     } catch {
       return null;
     }
+  }
+
+  private async getSecurityMaterial(
+    reference: ReturnType<typeof principalIdentityReference>,
+  ) {
+    if (typeof this.identityGateway.getSecurityMaterial === 'function') {
+      return this.identityGateway.getSecurityMaterial(reference);
+    }
+    if (reference.source !== 'agency') return null;
+    const security = await this.legacySecurityRepository.findOne({
+      where: { tenantId: reference.tenantId, userId: reference.userId },
+    });
+    return security
+      ? {
+          twoFactorSecretEncrypted: security.twoFactorSecretEncrypted,
+          twoFactorPendingSecretEncrypted:
+            security.twoFactorPendingSecretEncrypted,
+        }
+      : null;
+  }
+
+  private async setPendingTwoFactorSecret(
+    reference: ReturnType<typeof principalIdentityReference>,
+    value: string | null,
+  ) {
+    if (typeof this.identityGateway.setPendingTwoFactorSecret === 'function') {
+      return this.identityGateway.setPendingTwoFactorSecret(reference, value);
+    }
+    if (reference.source !== 'agency') return false;
+    const security = await this.legacySecurityRepository.findOne({
+      where: { tenantId: reference.tenantId, userId: reference.userId },
+    });
+    if (!security) return false;
+    security.twoFactorPendingSecretEncrypted = value;
+    await this.legacySecurityRepository.save(security);
+    return true;
+  }
+
+  private async activateTwoFactor(
+    reference: ReturnType<typeof principalIdentityReference>,
+    method: 'authenticator' | 'email',
+    encryptedSecret: string | null,
+  ) {
+    if (typeof this.identityGateway.activateTwoFactor === 'function') {
+      return this.identityGateway.activateTwoFactor(
+        reference,
+        method,
+        encryptedSecret,
+      );
+    }
+    if (reference.source !== 'agency') return false;
+    const security = await this.legacySecurityRepository.findOne({
+      where: { tenantId: reference.tenantId, userId: reference.userId },
+    });
+    if (!security) return false;
+    security.twoFactorEnabled = true;
+    security.twoFactorMethod = method;
+    security.twoFactorSecretEncrypted =
+      method === 'authenticator' ? encryptedSecret : null;
+    security.twoFactorPendingSecretEncrypted = null;
+    await this.legacySecurityRepository.save(security);
+    return true;
+  }
+
+  private async clearTwoFactor(
+    reference: ReturnType<typeof principalIdentityReference>,
+  ) {
+    if (typeof this.identityGateway.clearTwoFactor === 'function') {
+      return this.identityGateway.clearTwoFactor(reference);
+    }
+    if (reference.source !== 'agency') return false;
+    const security = await this.legacySecurityRepository.findOne({
+      where: { tenantId: reference.tenantId, userId: reference.userId },
+    });
+    if (!security) return false;
+    security.twoFactorEnabled = false;
+    security.twoFactorMethod = 'authenticator';
+    security.twoFactorSecretEncrypted = null;
+    security.twoFactorPendingSecretEncrypted = null;
+    await this.legacySecurityRepository.save(security);
+    return true;
   }
 
   private audit(
@@ -557,6 +680,10 @@ function normalizeNullable(
   if (value === undefined || value === null) return value;
   const trimmed = value.trim();
   return trimmed || null;
+}
+
+function normalizeAdminPassword(value: string): string {
+  return value.trim().toLowerCase();
 }
 
 export function isValidTimeZone(value: string): boolean {

@@ -10,7 +10,13 @@ export type AdminAuthRateLimitAction =
   | 'login'
   | 'two_factor_verify'
   | 'two_factor_email'
-  | 'refresh';
+  | 'refresh'
+  | 'activation_validate'
+  | 'activation_complete'
+  | 'password_forgot'
+  | 'password_reset'
+  | 'two_factor_recovery_request'
+  | 'two_factor_recovery_complete';
 
 const RULES: Record<
   AdminAuthRateLimitAction,
@@ -20,6 +26,12 @@ const RULES: Record<
   two_factor_verify: { limit: 10, windowMs: 5 * 60 * 1000 },
   two_factor_email: { limit: 5, windowMs: 5 * 60 * 1000 },
   refresh: { limit: 30, windowMs: 60 * 1000 },
+  activation_validate: { limit: 20, windowMs: 15 * 60 * 1000 },
+  activation_complete: { limit: 8, windowMs: 15 * 60 * 1000 },
+  password_forgot: { limit: 5, windowMs: 15 * 60 * 1000 },
+  password_reset: { limit: 8, windowMs: 15 * 60 * 1000 },
+  two_factor_recovery_request: { limit: 5, windowMs: 15 * 60 * 1000 },
+  two_factor_recovery_complete: { limit: 6, windowMs: 15 * 60 * 1000 },
 };
 
 @Injectable()

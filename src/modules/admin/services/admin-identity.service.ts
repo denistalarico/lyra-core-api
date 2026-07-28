@@ -2,6 +2,7 @@ import { ConflictException, Injectable } from '@nestjs/common';
 import {
   AdminIdentityGateway,
   type AdminIdentityRecord,
+  type AdminIdentityReference,
 } from '../contracts/admin-identity.gateway';
 import { normalizeAdminEmail } from '../utils/admin-identity.util';
 
@@ -10,10 +11,9 @@ export class AdminIdentityService {
   constructor(private readonly identityGateway: AdminIdentityGateway) {}
 
   findByIdentity(
-    tenantId: string,
-    userId: string,
+    reference: AdminIdentityReference,
   ): Promise<AdminIdentityRecord | null> {
-    return this.identityGateway.findByIdentity(tenantId, userId);
+    return this.identityGateway.findByReference(reference);
   }
 
   findCandidatesByEmail(email: string): Promise<AdminIdentityRecord[]> {
@@ -36,10 +36,9 @@ export class AdminIdentityService {
   }
 
   verifyPassword(
-    tenantId: string,
-    userId: string,
+    reference: AdminIdentityReference,
     password: string,
   ): Promise<boolean> {
-    return this.identityGateway.verifyPassword(tenantId, userId, password);
+    return this.identityGateway.verifyPassword(reference, password);
   }
 }

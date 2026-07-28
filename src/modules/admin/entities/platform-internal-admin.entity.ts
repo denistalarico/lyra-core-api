@@ -4,7 +4,6 @@ import {
   Entity,
   Index,
   PrimaryGeneratedColumn,
-  Unique,
   UpdateDateColumn,
 } from 'typeorm';
 import type {
@@ -18,17 +17,26 @@ import type {
  * administrative authorization record to Agency tables.
  */
 @Entity('platform_internal_admins')
-@Unique('uq_platform_internal_admins_identity', ['identityTenantId', 'userId'])
 @Index('idx_platform_internal_admins_status', ['status'])
 export class PlatformInternalAdminEntity {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 
-  @Column({ name: 'identity_tenant_id', type: 'uuid' })
-  identityTenantId!: string;
+  @Column({ name: 'identity_source', type: 'varchar', length: 30 })
+  identitySource?: 'agency' | 'platform_admin';
 
-  @Column({ name: 'user_id', type: 'uuid' })
-  userId!: string;
+  @Column({ name: 'identity_tenant_id', type: 'uuid', nullable: true })
+  identityTenantId!: string | null;
+
+  @Column({ name: 'user_id', type: 'uuid', nullable: true })
+  userId!: string | null;
+
+  @Column({
+    name: 'platform_admin_identity_id',
+    type: 'uuid',
+    nullable: true,
+  })
+  platformAdminIdentityId?: string | null;
 
   @Column({ type: 'varchar', length: 20 })
   status!: PlatformAdminStatus;

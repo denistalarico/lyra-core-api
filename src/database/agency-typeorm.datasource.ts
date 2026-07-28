@@ -133,6 +133,7 @@ import { CreatePlatformAdminIdentityAccess1787100000000 } from './migrations/178
 import { CreatePlatformAdminSessions1787200000000 } from './migrations/1787200000000-create-platform-admin-sessions';
 import { AddPlatformAdminPreferenceFormats1787300000000 } from './migrations/1787300000000-add-platform-admin-preference-formats';
 import { CreatePlatformAdminInvitations1787400000000 } from './migrations/1787400000000-create-platform-admin-invitations';
+import { CreatePlatformAdminIdentities1787500000000 } from './migrations/1787500000000-create-platform-admin-identities';
 
 export const AgencyDataSource = new DataSource({
   type: 'postgres',
@@ -276,5 +277,6 @@ export const AgencyDataSource = new DataSource({
     CreatePlatformAdminSessions1787200000000,
     AddPlatformAdminPreferenceFormats1787300000000,
     CreatePlatformAdminInvitations1787400000000,
+    CreatePlatformAdminIdentities1787500000000,
   ],
 });

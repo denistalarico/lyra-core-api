@@ -27,6 +27,7 @@ import {
   type PlatformAdminRoleKey,
   type PlatformAdminStatus,
 } from '../types/admin-access.types';
+import { adminIdentityReference } from '../utils/admin-identity.util';
 import { AdminAuditService } from './admin-audit.service';
 import { AdminRolePolicyService } from './admin-role-policy.service';
 
@@ -68,10 +69,12 @@ export class AdminInternalUsersService {
     const records = await Promise.all(
       admins.map(async (admin) => ({
         admin,
-        identity: await this.identityGateway.findByIdentity(
-          admin.identityTenantId,
-          admin.userId,
-        ),
+        identity: await (async () => {
+          const reference = adminIdentityReference(admin);
+          return reference
+            ? this.identityGateway.findByReference(reference)
+            : null;
+        })(),
       })),
     );
     const normalizedSearch = query.search?.trim().toLowerCase();
@@ -122,10 +125,12 @@ export class AdminInternalUsersService {
     const admin = await this.requireAdmin(adminId);
     const [identity, activeSessionsCount, activeSuperAdminCount] =
       await Promise.all([
-        this.identityGateway.findByIdentity(
-          admin.identityTenantId,
-          admin.userId,
-        ),
+        (() => {
+          const reference = adminIdentityReference(admin);
+          return reference
+            ? this.identityGateway.findByReference(reference)
+            : Promise.resolve(null);
+        })(),
         this.sessionRepository.count({
           where: { adminId, status: 'active', expiresAt: MoreThan(new Date()) },
         }),
@@ -358,7 +363,7 @@ export class AdminInternalUsersService {
   private toSafeUser(
     admin: PlatformInternalAdminEntity,
     identity: Awaited<
-      ReturnType<AdminIdentityGateway['findByIdentity']>
+      ReturnType<AdminIdentityGateway['findByReference']>
     > | null,
     activeSessionsCount: number,
     principal: AdminPrincipal,
@@ -378,6 +383,8 @@ export class AdminInternalUsersService {
     return {
       adminId: admin.id,
       userId: admin.userId,
+      identitySource: admin.identitySource,
+      platformAdminIdentityId: admin.platformAdminIdentityId,
       email: identity?.email ?? '',
       displayName: identity?.displayName ?? 'Identity unavailable',
       status: admin.status,

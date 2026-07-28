@@ -4,6 +4,7 @@ import {
   GoneException,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
@@ -11,7 +12,10 @@ import type { LoginRequestContext } from '../../auth/utils/login-context.util';
 import { renderTransactionalEmail } from '../../email/templates/transactional-email.template';
 import { EmailService } from '../../email/email.service';
 import { DataSource, LessThan, Not, Repository } from 'typeorm';
-import { AdminIdentityGateway } from '../contracts/admin-identity.gateway';
+import {
+  AdminIdentityGateway,
+  resolveAdminIdentityRecord,
+} from '../contracts/admin-identity.gateway';
 import type {
   CreateAdminInvitationDto,
   ListAdminInvitationsQueryDto,
@@ -22,9 +26,14 @@ import {
   PlatformInternalAdminEntity,
 } from '../entities';
 import type { AdminPrincipal } from '../types/admin-access.types';
-import { normalizeAdminEmail } from '../utils/admin-identity.util';
+import {
+  adminIdentityReference,
+  identityColumns,
+  normalizeAdminEmail,
+} from '../utils/admin-identity.util';
 import { AdminAuditService } from './admin-audit.service';
 import { AdminInvitationTokenService } from './admin-invitation-token.service';
+import { AdminIdentityLifecycleService } from './admin-identity-lifecycle.service';
 import { AdminRolePolicyService } from './admin-role-policy.service';
 
 const AGENCY_CONNECTION = 'agency';
@@ -45,6 +54,8 @@ export class AdminInvitationsService {
     private readonly auditService: AdminAuditService,
     private readonly emailService: EmailService,
     private readonly configService: ConfigService,
+    @Optional()
+    private readonly identityLifecycle?: AdminIdentityLifecycleService,
   ) {}
 
   async create(
@@ -246,12 +257,20 @@ export class AdminInvitationsService {
     const candidates = await this.identityGateway.findCandidatesByEmail(
       invitation.normalizedEmail,
     );
+    const identity =
+      candidates.length === 1
+        ? resolveAdminIdentityRecord(candidates[0])
+        : null;
     return {
       valid: true,
       emailMasked: maskEmail(invitation.email),
       roleKey: invitation.roleKey,
       expiresAt: invitation.expiresAt,
-      identityExists: candidates.length === 1,
+      identityExists: Boolean(
+        identity &&
+        identity.source === 'agency' &&
+        identity.status === 'active',
+      ),
     };
   }
 
@@ -280,18 +299,33 @@ export class AdminInvitationsService {
       if (candidates.length === 0) {
         return {
           kind: 'provisioning_required' as const,
-          invitationId: invitation.id,
+          invitation,
         };
       }
       if (candidates.length > 1) {
         return { kind: 'ambiguous_identity' as const };
       }
-      const identity = candidates[0];
+      const identity = resolveAdminIdentityRecord(candidates[0]);
+      if (!identity) return { kind: 'ambiguous_identity' as const };
+      if (
+        identity.source === 'platform_admin' &&
+        identity.status === 'pending'
+      ) {
+        return { kind: 'provisioning_required' as const, invitation };
+      }
+      const columns = identityColumns(identity.reference);
       let admin = await manager.findOne(PlatformInternalAdminEntity, {
-        where: {
-          identityTenantId: identity.tenantId,
-          userId: identity.userId,
-        },
+        where:
+          identity.reference.source === 'agency'
+            ? {
+                identitySource: 'agency',
+                identityTenantId: identity.reference.tenantId,
+                userId: identity.reference.userId,
+              }
+            : {
+                identitySource: 'platform_admin',
+                platformAdminIdentityId: identity.reference.identityId,
+              },
         lock: { mode: 'pessimistic_write' },
       });
       if (admin && admin.status !== 'pending') {
@@ -299,8 +333,7 @@ export class AdminInvitationsService {
       }
       if (!admin) {
         admin = manager.create(PlatformInternalAdminEntity, {
-          identityTenantId: identity.tenantId,
-          userId: identity.userId,
+          ...columns,
           createdBy: invitation.invitedByAdminId,
           metadata: {},
         });
@@ -308,11 +341,17 @@ export class AdminInvitationsService {
       admin.status = 'active';
       admin.roleKey = invitation.roleKey;
       admin.twoFactorRequired = true;
-      admin.updatedBy = identity.userId;
+      admin.updatedBy =
+        identity.reference.source === 'agency'
+          ? identity.reference.userId
+          : null;
       await manager.save(admin);
       invitation.status = 'accepted';
       invitation.acceptedAt = new Date();
-      invitation.acceptedByUserId = identity.userId;
+      invitation.acceptedByUserId =
+        identity.reference.source === 'agency'
+          ? identity.reference.userId
+          : null;
       await manager.save(invitation);
       await manager.update(
         PlatformAdminInvitationEntity,
@@ -351,12 +390,17 @@ export class AdminInvitationsService {
       throw new GoneException('Administrative invitation was cancelled.');
     }
     if (result.kind === 'provisioning_required') {
-      throw new ConflictException({
-        code: 'ADMIN_IDENTITY_PROVISIONING_REQUIRED',
-        message:
-          'An active Agency identity must be provisioned before this invitation can be accepted.',
-        identityExists: false,
-      });
+      if (!this.identityLifecycle) {
+        throw new ConflictException({
+          code: 'ADMIN_IDENTITY_PROVISIONING_REQUIRED',
+          message: 'Administrative identity provisioning is required.',
+          identityExists: false,
+        });
+      }
+      return this.identityLifecycle.provisionFromInvitation(
+        result.invitation,
+        client,
+      );
     }
     if (result.kind === 'ambiguous_identity') {
       throw new ConflictException({
@@ -377,7 +421,10 @@ export class AdminInvitationsService {
     }
     await this.auditService.record({
       actorAdminId: result.admin.id,
-      actorUserId: result.identity.userId,
+      actorUserId:
+        result.identity.reference.source === 'agency'
+          ? result.identity.reference.userId
+          : null,
       action: 'admin.internal_user.invitation_accepted',
       targetType: 'platform_internal_admin',
       targetId: result.admin.id,
@@ -386,7 +433,11 @@ export class AdminInvitationsService {
       userAgent: client.userAgent,
       metadata: {
         targetAdminId: result.admin.id,
-        targetUserId: result.identity.userId,
+        targetUserId:
+          result.identity.reference.source === 'agency'
+            ? result.identity.reference.userId
+            : null,
+        identitySource: result.identity.source,
         invitationId: result.invitation.id,
         identityExists: true,
       },
@@ -469,11 +520,20 @@ export class AdminInvitationsService {
     const candidates =
       await this.identityGateway.findCandidatesByEmail(normalizedEmail);
     for (const identity of candidates) {
+      const resolved = resolveAdminIdentityRecord(identity);
+      if (!resolved) continue;
       const existing = await this.adminRepository.findOne({
-        where: {
-          identityTenantId: identity.tenantId,
-          userId: identity.userId,
-        },
+        where:
+          resolved.reference.source === 'agency'
+            ? {
+                identitySource: 'agency',
+                identityTenantId: resolved.reference.tenantId,
+                userId: resolved.reference.userId,
+              }
+            : {
+                identitySource: 'platform_admin',
+                platformAdminIdentityId: resolved.reference.identityId,
+              },
       });
       if (existing) {
         throw new ConflictException(
@@ -495,10 +555,10 @@ export class AdminInvitationsService {
       where: { id: adminId },
     });
     if (!admin) return 'Lyra Admin';
-    const identity = await this.identityGateway.findByIdentity(
-      admin.identityTenantId,
-      admin.userId,
-    );
+    const reference = adminIdentityReference(admin);
+    const identity = reference
+      ? await this.identityGateway.findByReference(reference)
+      : null;
     return identity?.displayName ?? 'Lyra Admin';
   }
 

@@ -2,7 +2,9 @@ import {
   Body,
   Controller,
   Get,
+  Optional,
   Post,
+  Query,
   Req,
   Res,
   UnauthorizedException,
@@ -14,7 +16,11 @@ import { extractLoginContext } from '../../auth/utils/login-context.util';
 import { RequireAdminPermissions } from '../decorators/require-admin-permissions.decorator';
 import {
   AdminEmptyBodyDto,
+  AdminIdentityTokenQueryDto,
   AdminLoginDto,
+  AdminPublicEmailDto,
+  CompleteAdminActivationDto,
+  ResetAdminPasswordDto,
   AdminTwoFactorEmailSendDto,
   AdminTwoFactorSetupConfirmDto,
   AdminTwoFactorSetupDto,
@@ -30,6 +36,7 @@ import {
 } from '../services/admin-auth.service';
 import { AdminAuthRateLimitService } from '../services/admin-auth-rate-limit.service';
 import { AdminAuthTokenService } from '../services/admin-auth-token.service';
+import { AdminIdentityLifecycleService } from '../services/admin-identity-lifecycle.service';
 
 export const ADMIN_REFRESH_COOKIE = 'lyra_admin_refresh';
 export const ADMIN_REFRESH_COOKIE_PATH = '/api/admin/auth';
@@ -42,6 +49,8 @@ export class AdminAuthController {
     private readonly tokenService: AdminAuthTokenService,
     private readonly rateLimitService: AdminAuthRateLimitService,
     private readonly configService: ConfigService,
+    @Optional()
+    private readonly identityLifecycle?: AdminIdentityLifecycleService,
   ) {}
 
   @Post('login')
@@ -61,6 +70,115 @@ export class AdminAuthController {
       client,
     );
     return this.writeSessionIfPresent(response, result);
+  }
+
+  @Get('activation/validate')
+  validateActivation(
+    @Query() query: AdminIdentityTokenQueryDto,
+    @Req() request: Request,
+  ) {
+    const client = extractLoginContext(request);
+    this.rateLimitService.assertAllowed(
+      'activation_validate',
+      `${client.ipAddress}:${query.token.slice(0, 12)}`,
+    );
+    return this.identityLifecycle!.validateActivation(query.token);
+  }
+
+  @Post('activation/complete')
+  completeActivation(
+    @Body() dto: CompleteAdminActivationDto,
+    @Req() request: Request,
+  ) {
+    const client = extractLoginContext(request);
+    this.rateLimitService.assertAllowed(
+      'activation_complete',
+      `${client.ipAddress}:${dto.token.slice(0, 12)}`,
+    );
+    return this.identityLifecycle!.completeActivation(
+      dto.token,
+      dto.displayName,
+      dto.password,
+      dto.passwordConfirmation,
+      client,
+    );
+  }
+
+  @Post('password/forgot')
+  forgotPassword(@Body() dto: AdminPublicEmailDto, @Req() request: Request) {
+    const client = extractLoginContext(request);
+    this.rateLimitService.assertAllowed(
+      'password_forgot',
+      `${client.ipAddress}:${dto.email.trim().toLowerCase()}`,
+    );
+    return this.identityLifecycle!.requestPasswordReset(dto.email, client);
+  }
+
+  @Get('password/reset/validate')
+  validatePasswordReset(
+    @Query() query: AdminIdentityTokenQueryDto,
+    @Req() request: Request,
+  ) {
+    const client = extractLoginContext(request);
+    this.rateLimitService.assertAllowed(
+      'password_reset',
+      `${client.ipAddress}:${query.token.slice(0, 12)}`,
+    );
+    return this.identityLifecycle!.validatePasswordReset(query.token);
+  }
+
+  @Post('password/reset')
+  resetPassword(@Body() dto: ResetAdminPasswordDto, @Req() request: Request) {
+    const client = extractLoginContext(request);
+    this.rateLimitService.assertAllowed(
+      'password_reset',
+      `${client.ipAddress}:${dto.token.slice(0, 12)}`,
+    );
+    return this.identityLifecycle!.resetPassword(
+      dto.token,
+      dto.password,
+      dto.passwordConfirmation,
+      client,
+    );
+  }
+
+  @Post('2fa/recovery/request')
+  requestTwoFactorRecovery(
+    @Body() dto: AdminPublicEmailDto,
+    @Req() request: Request,
+  ) {
+    const client = extractLoginContext(request);
+    this.rateLimitService.assertAllowed(
+      'two_factor_recovery_request',
+      `${client.ipAddress}:${dto.email.trim().toLowerCase()}`,
+    );
+    return this.identityLifecycle!.requestTwoFactorRecovery(dto.email, client);
+  }
+
+  @Get('2fa/recovery/validate')
+  validateTwoFactorRecovery(
+    @Query() query: AdminIdentityTokenQueryDto,
+    @Req() request: Request,
+  ) {
+    const client = extractLoginContext(request);
+    this.rateLimitService.assertAllowed(
+      'two_factor_recovery_complete',
+      `${client.ipAddress}:${query.token.slice(0, 12)}`,
+    );
+    return this.identityLifecycle!.validateTwoFactorRecovery(query.token);
+  }
+
+  @Post('2fa/recovery/complete')
+  completeTwoFactorRecovery(
+    @Body() dto: AdminIdentityTokenQueryDto,
+    @Req() request: Request,
+  ) {
+    const client = extractLoginContext(request);
+    this.rateLimitService.assertAllowed(
+      'two_factor_recovery_complete',
+      `${client.ipAddress}:${dto.token.slice(0, 12)}`,
+    );
+    return this.identityLifecycle!.completeTwoFactorRecovery(dto.token, client);
   }
 
   @Post('2fa/login')

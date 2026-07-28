@@ -96,8 +96,11 @@ export const PLATFORM_ADMIN_ROLE_PERMISSIONS: Readonly<
 
 export type AdminPrincipal = {
   adminId: string;
-  userId: string;
-  identityTenantId: string;
+  userId: string | null;
+  identityTenantId: string | null;
+  platformAdminIdentityId?: string | null;
+  identitySource?: 'agency' | 'platform_admin';
+  subjectId?: string;
   email: string;
   displayName: string;
   roleKey: PlatformAdminRoleKey;
@@ -109,7 +112,9 @@ export type AdminPrincipal = {
 export type AdminAuthTokenPayload = {
   sub: string;
   adminId: string;
-  identityTenantId: string;
+  identitySource?: 'agency' | 'platform_admin';
+  identityTenantId: string | null;
+  platformAdminIdentityId?: string | null;
   sessionId: string;
   email: string;
   roleKey: PlatformAdminRoleKey;
@@ -121,7 +126,9 @@ export type AdminTwoFactorMethod = 'authenticator' | 'email';
 export type AdminTwoFactorTokenPayload = {
   sub: string;
   adminId: string;
-  identityTenantId: string;
+  identitySource?: 'agency' | 'platform_admin';
+  identityTenantId: string | null;
+  platformAdminIdentityId?: string | null;
   email: string;
   roleKey: PlatformAdminRoleKey;
   flow: 'login' | 'setup';

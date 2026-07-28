@@ -58,7 +58,12 @@ export class AdminAuthTokenService implements OnModuleInit {
         payload.sessionContext !== 'admin' ||
         !payload.sub ||
         !payload.adminId ||
-        !payload.identityTenantId ||
+        !['agency', 'platform_admin'].includes(
+          payload.identitySource ?? 'agency',
+        ) ||
+        ((payload.identitySource ?? 'agency') === 'agency'
+          ? !payload.identityTenantId
+          : !payload.platformAdminIdentityId) ||
         !payload.sessionId ||
         !payload.email ||
         !isPlatformAdminRoleKey(payload.roleKey)
@@ -86,7 +91,12 @@ export class AdminAuthTokenService implements OnModuleInit {
         payload.sessionContext !== 'admin-2fa' ||
         !payload.sub ||
         !payload.adminId ||
-        !payload.identityTenantId ||
+        !['agency', 'platform_admin'].includes(
+          payload.identitySource ?? 'agency',
+        ) ||
+        ((payload.identitySource ?? 'agency') === 'agency'
+          ? !payload.identityTenantId
+          : !payload.platformAdminIdentityId) ||
         !payload.email ||
         !isPlatformAdminRoleKey(payload.roleKey) ||
         (expectedFlow && payload.flow !== expectedFlow)

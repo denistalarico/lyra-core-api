@@ -19,6 +19,9 @@ export type PlatformAdminSessionStatus =
 @Entity('platform_admin_sessions')
 @Index('idx_platform_admin_sessions_admin_id', ['adminId'])
 @Index('idx_platform_admin_sessions_user_id', ['userId'])
+@Index('idx_platform_admin_sessions_platform_identity', [
+  'platformAdminIdentityId',
+])
 @Index('idx_platform_admin_sessions_refresh_token_hash', ['refreshTokenHash'])
 @Index('idx_platform_admin_sessions_status', ['status'])
 @Index('idx_platform_admin_sessions_expires_at', ['expiresAt'])
@@ -29,11 +32,21 @@ export class PlatformAdminSessionEntity {
   @Column({ name: 'admin_id', type: 'uuid' })
   adminId!: string;
 
-  @Column({ name: 'user_id', type: 'uuid' })
-  userId!: string;
+  @Column({ name: 'identity_source', type: 'varchar', length: 30 })
+  identitySource?: 'agency' | 'platform_admin';
 
-  @Column({ name: 'identity_tenant_id', type: 'uuid' })
-  identityTenantId!: string;
+  @Column({ name: 'user_id', type: 'uuid', nullable: true })
+  userId!: string | null;
+
+  @Column({ name: 'identity_tenant_id', type: 'uuid', nullable: true })
+  identityTenantId!: string | null;
+
+  @Column({
+    name: 'platform_admin_identity_id',
+    type: 'uuid',
+    nullable: true,
+  })
+  platformAdminIdentityId?: string | null;
 
   @Column({ name: 'refresh_token_hash', type: 'text' })
   refreshTokenHash!: string;
