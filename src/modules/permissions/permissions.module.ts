@@ -81,7 +81,6 @@ const AGENCY_CONNECTION = 'agency';
       ContactEntity,
       WebchatConversationEntity,
       WebchatWidgetEntity,
-      ScheduledItemEntity,
     ]),
     TypeOrmModule.forFeature(
       [
@@ -132,6 +131,7 @@ const AGENCY_CONNECTION = 'agency';
         AgencyKnowledgeComment,
         AgencyKnowledgeQuickNote,
         AgencyKnowledgeVaultItem,
+        ScheduledItemEntity,
       ],
       AGENCY_CONNECTION,
     ),

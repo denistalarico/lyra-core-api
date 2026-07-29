@@ -1,8 +1,12 @@
 import { randomUUID } from 'crypto';
 
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { EntityManager, Repository } from 'typeorm';
 
 import {
   AgencyMeetingAiSummary,
@@ -37,6 +41,26 @@ type TeamChatContext = {
 };
 
 const AGENCY_CONNECTION = 'agency';
+
+export type AppointmentMeetingBindingInput = {
+  appointmentId: string;
+  title: string;
+  description?: string | null;
+  startsAt?: Date | null;
+  lifecycleStatus?:
+    | 'pending'
+    | 'confirmed'
+    | 'rescheduled'
+    | 'canceled'
+    | 'no_show'
+    | 'completed';
+};
+
+export type AppointmentMeetingBinding = {
+  meetingRoomId: string;
+  publicUrl: string;
+  providerRoomName: string | null;
+};
 
 @Injectable()
 export class TeamChatMeetingsService {
@@ -108,6 +132,153 @@ export class TeamChatMeetingsService {
     }
 
     return meeting;
+  }
+
+  /**
+   * Creates the native LiveKit room that belongs to one LeadFlow appointment.
+   *
+   * The caller supplies its EntityManager so the room, appointment and
+   * appointment outbox event commit atomically in the Agency datasource.
+   */
+  async createForAppointment(
+    context: TeamChatContext,
+    input: AppointmentMeetingBindingInput,
+    manager: EntityManager,
+  ): Promise<AppointmentMeetingBinding> {
+    const publicSlug = this.createPublicSlug();
+    const meeting = await manager.getRepository(AgencyMeetingRoom).save(
+      manager.getRepository(AgencyMeetingRoom).create({
+        tenantId: context.tenantId,
+        workspaceId: context.workspaceId,
+        title: input.title,
+        description: input.description?.trim() || null,
+        status: TeamChatMeetingStatus.SCHEDULED,
+        accessMode: TeamChatMeetingAccessMode.PUBLIC_LINK,
+        provider: TeamChatMeetingProvider.LIVEKIT,
+        providerRoomName: `agency-${context.workspaceId}-${publicSlug}`,
+        publicSlug,
+        channelId: null,
+        relatedClientId: null,
+        relatedProjectId: null,
+        relatedTaskId: null,
+        hostUserId: context.userId ?? null,
+        startsAt: input.startsAt ?? null,
+        startedAt: null,
+        endedAt: null,
+        recordingEnabled: false,
+        transcriptionEnabled: false,
+        aiSummaryEnabled: true,
+        metadata: {
+          source: 'leadflow_appointment',
+          appointmentId: input.appointmentId,
+        },
+      }),
+    );
+
+    await manager.getRepository(AgencyMeetingAiSummary).save(
+      manager.getRepository(AgencyMeetingAiSummary).create({
+        tenantId: context.tenantId,
+        workspaceId: context.workspaceId,
+        meetingRoomId: meeting.id,
+        status: TeamChatAiSummaryStatus.PENDING,
+        requestedById: context.userId ?? null,
+      }),
+    );
+
+    return {
+      meetingRoomId: meeting.id,
+      publicUrl: `/meet/${meeting.publicSlug}`,
+      providerRoomName: meeting.providerRoomName,
+    };
+  }
+
+  /** Keeps a previously bound room aligned with its appointment lifecycle. */
+  async syncAppointmentBinding(
+    context: TeamChatContext,
+    meetingRoomId: string,
+    input: AppointmentMeetingBindingInput,
+    manager: EntityManager,
+  ): Promise<AppointmentMeetingBinding> {
+    const repository = manager.getRepository(AgencyMeetingRoom);
+    const meeting = await repository.findOne({
+      where: {
+        id: meetingRoomId,
+        tenantId: context.tenantId,
+        workspaceId: context.workspaceId,
+      },
+    });
+    if (!meeting) {
+      throw new NotFoundException(
+        'Sala vinculada ao agendamento não encontrada.',
+      );
+    }
+
+    meeting.title = input.title;
+    meeting.description = input.description?.trim() || null;
+    meeting.startsAt = input.startsAt ?? null;
+    meeting.metadata = {
+      ...(meeting.metadata ?? {}),
+      source: 'leadflow_appointment',
+      appointmentId: input.appointmentId,
+    };
+
+    if (
+      input.lifecycleStatus === 'canceled' ||
+      input.lifecycleStatus === 'no_show'
+    ) {
+      meeting.status = TeamChatMeetingStatus.CANCELED;
+      meeting.endedAt = meeting.endedAt ?? new Date();
+    } else if (input.lifecycleStatus === 'completed') {
+      meeting.status = TeamChatMeetingStatus.ENDED;
+      meeting.endedAt = meeting.endedAt ?? new Date();
+    } else if (
+      meeting.status === TeamChatMeetingStatus.CANCELED &&
+      (input.lifecycleStatus === 'pending' ||
+        input.lifecycleStatus === 'confirmed' ||
+        input.lifecycleStatus === 'rescheduled')
+    ) {
+      meeting.status = TeamChatMeetingStatus.SCHEDULED;
+      meeting.endedAt = null;
+    }
+
+    const saved = await repository.save(meeting);
+    return {
+      meetingRoomId: saved.id,
+      publicUrl: `/meet/${saved.publicSlug}`,
+      providerRoomName: saved.providerRoomName,
+    };
+  }
+
+  /** Cancels and releases a room when an appointment stops using native video. */
+  async detachAppointmentBinding(
+    context: TeamChatContext,
+    meetingRoomId: string,
+    appointmentId: string,
+    manager: EntityManager,
+  ): Promise<void> {
+    const repository = manager.getRepository(AgencyMeetingRoom);
+    const meeting = await repository.findOne({
+      where: {
+        id: meetingRoomId,
+        tenantId: context.tenantId,
+        workspaceId: context.workspaceId,
+      },
+    });
+    if (!meeting) {
+      throw new NotFoundException(
+        'Sala vinculada ao agendamento não encontrada.',
+      );
+    }
+
+    meeting.status = TeamChatMeetingStatus.CANCELED;
+    meeting.endedAt = meeting.endedAt ?? new Date();
+    meeting.metadata = {
+      ...(meeting.metadata ?? {}),
+      source: 'leadflow_appointment',
+      appointmentId,
+      detachedAt: new Date().toISOString(),
+    };
+    await repository.save(meeting);
   }
 
   async get(context: TeamChatContext, meetingId: string) {
@@ -451,17 +622,16 @@ export class TeamChatMeetingsService {
 
     const identity = `guest:${randomUUID()}`;
 
-    let participant =
-      dto.guestEmail
-        ? await this.participantsRepository.findOne({
-            where: {
-              tenantId: meeting.tenantId,
-              workspaceId: meeting.workspaceId,
-              meetingRoomId: meeting.id,
-              guestEmail: dto.guestEmail,
-            },
-          })
-        : null;
+    let participant = dto.guestEmail
+      ? await this.participantsRepository.findOne({
+          where: {
+            tenantId: meeting.tenantId,
+            workspaceId: meeting.workspaceId,
+            meetingRoomId: meeting.id,
+            guestEmail: dto.guestEmail,
+          },
+        })
+      : null;
 
     if (participant) {
       participant.status = TeamChatMeetingParticipantStatus.JOINED;

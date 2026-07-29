@@ -19,13 +19,17 @@ import {
   RequirePermission,
   RequireProductEntitlement,
 } from '../permissions';
-import { AppointmentsService, ScheduledItemsFilters } from './appointments.service';
+import {
+  AppointmentsService,
+  ScheduledItemsFilters,
+} from './appointments.service';
 import { CreateScheduledItemDto } from './dto/create-scheduled-item.dto';
 import { CreateScheduledItemParticipantDto } from './dto/create-scheduled-item-participant.dto';
 import { CreateScheduledItemReminderDto } from './dto/create-scheduled-item-reminder.dto';
 import { PatchScheduledItemDto } from './dto/patch-scheduled-item.dto';
 import { PatchScheduledItemParticipantResponseDto } from './dto/patch-scheduled-item-participant-response.dto';
 import { PatchScheduledItemStatusDto } from './dto/patch-scheduled-item-status.dto';
+import { PatchAppointmentLifecycleStatusDto } from './dto/patch-appointment-lifecycle-status.dto';
 
 @Controller('appointments')
 @UseGuards(JwtAuthGuard, PermissionsGuard)
@@ -104,6 +108,23 @@ export class AppointmentsController {
     @Body() dto: PatchScheduledItemStatusDto,
   ) {
     return this.appointmentsService.patchScheduledItemStatus(ctx, id, dto);
+  }
+
+  @Patch(':id/lifecycle-status')
+  @RequireAnyPermission(
+    'leadflow.appointments.item.update.assigned',
+    'leadflow.appointments.item.update.client',
+  )
+  patchAppointmentLifecycleStatus(
+    @RequestContextData() ctx: RequestContext,
+    @Param('id') id: string,
+    @Body() dto: PatchAppointmentLifecycleStatusDto,
+  ) {
+    return this.appointmentsService.patchAppointmentLifecycleStatus(
+      ctx,
+      id,
+      dto,
+    );
   }
 
   @Delete(':id')

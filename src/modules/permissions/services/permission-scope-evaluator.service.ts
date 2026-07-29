@@ -157,7 +157,7 @@ export class PermissionScopeEvaluatorService {
     private readonly webchatConversationsRepository: Repository<WebchatConversationEntity>,
     @InjectRepository(WebchatWidgetEntity)
     private readonly webchatWidgetsRepository: Repository<WebchatWidgetEntity>,
-    @InjectRepository(ScheduledItemEntity)
+    @InjectRepository(ScheduledItemEntity, AGENCY_CONNECTION)
     private readonly scheduledItemsRepository: Repository<ScheduledItemEntity>,
     @InjectRepository(AgencyClient, AGENCY_CONNECTION)
     private readonly clientsRepository: Repository<AgencyClient>,

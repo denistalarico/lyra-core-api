@@ -137,6 +137,7 @@ import { CreatePlatformAdminIdentities1787500000000 } from './migrations/1787500
 import { AddPlatformAdminProfileFields1787700000000 } from './migrations/1787700000000-add-platform-admin-profile-fields';
 import { FanoutLeadflowAnalyticsConsumer1787800000000 } from './migrations/1787800000000-fanout-leadflow-analytics-consumer';
 import { CreateLeadflowCsatResponses1787900000000 } from './migrations/1787900000000-create-leadflow-csat-responses';
+import { CreateLeadflowAppointmentsCore1788000000000 } from './migrations/1788000000000-create-leadflow-appointments-core';
 
 export const AgencyDataSource = new DataSource({
   type: 'postgres',
@@ -284,5 +285,6 @@ export const AgencyDataSource = new DataSource({
     AddPlatformAdminProfileFields1787700000000,
     FanoutLeadflowAnalyticsConsumer1787800000000,
     CreateLeadflowCsatResponses1787900000000,
+    CreateLeadflowAppointmentsCore1788000000000,
   ],
 });

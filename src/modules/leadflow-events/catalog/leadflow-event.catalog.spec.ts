@@ -210,4 +210,42 @@ describe('leadflow event catalog', () => {
       }
     }
   });
+
+  it('maps the Phase 9 appointment triggers to canonical calendar events', () => {
+    expect(
+      LEADFLOW_AUTOMATION_TRIGGER_EVENT_MAPPINGS.filter((mapping) =>
+        [
+          'appointment.created',
+          'appointment.confirmation_pending',
+          'appointment.no_show',
+          'appointment.completed',
+        ].includes(mapping.trigger),
+      ).map(({ trigger, eventName, status }) => ({
+        trigger,
+        eventName,
+        status,
+      })),
+    ).toEqual([
+      {
+        trigger: 'appointment.created',
+        eventName: 'leadflow.calendar.appointment.created',
+        status: 'mapped',
+      },
+      {
+        trigger: 'appointment.confirmation_pending',
+        eventName: 'leadflow.calendar.appointment.confirmation_pending',
+        status: 'mapped',
+      },
+      {
+        trigger: 'appointment.no_show',
+        eventName: 'leadflow.calendar.appointment.no_show',
+        status: 'mapped',
+      },
+      {
+        trigger: 'appointment.completed',
+        eventName: 'leadflow.calendar.appointment.completed',
+        status: 'mapped',
+      },
+    ]);
+  });
 });

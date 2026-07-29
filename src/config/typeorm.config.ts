@@ -491,6 +491,9 @@ export const agencyEntities = [
   LeadFlowScheduledTimerEntity,
   LeadFlowEventDeliveryEntity,
   LeadFlowCsatResponseEntity,
+  ScheduledItemEntity,
+  ScheduledItemParticipantEntity,
+  ScheduledItemReminderEntity,
 ];
 
 export function getTypeOrmConfig(): TypeOrmModuleOptions {

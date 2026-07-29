@@ -923,28 +923,31 @@ export const LEADFLOW_AUTOMATION_TRIGGER_EVENT_MAPPINGS: LeadFlowEventTriggerMap
     },
     {
       trigger: 'appointment.created',
-      eventName: null,
-      status: 'planned',
+      eventName: 'leadflow.calendar.appointment.created',
+      status: 'mapped',
       notes:
-        'Depende do domínio de Agenda do LeadFlow; nenhum produtor emite eventos de agenda hoje.',
+        'Emitido transacionalmente pelo AppointmentsService ao criar um compromisso com horário.',
     },
     {
       trigger: 'appointment.confirmation_pending',
-      eventName: null,
-      status: 'planned',
-      notes: 'Estado derivado; evento próprio ainda não contratado.',
+      eventName: 'leadflow.calendar.appointment.confirmation_pending',
+      status: 'mapped',
+      notes:
+        'Emitido quando o lifecycle explícito do compromisso entra em pending; o agendamento temporal da janela pertence à Fase 10.',
     },
     {
       trigger: 'appointment.no_show',
-      eventName: null,
-      status: 'planned',
-      notes: 'Depende do domínio de Agenda do LeadFlow.',
+      eventName: 'leadflow.calendar.appointment.no_show',
+      status: 'mapped',
+      notes:
+        'Emitido na mesma transação que registra o lifecycle no_show/missed.',
     },
     {
       trigger: 'appointment.completed',
-      eventName: null,
-      status: 'planned',
-      notes: 'Depende do domínio de Agenda do LeadFlow.',
+      eventName: 'leadflow.calendar.appointment.completed',
+      status: 'mapped',
+      notes:
+        'Emitido na mesma transação que registra a conclusão do compromisso.',
     },
     {
       trigger: 'quote.sent',

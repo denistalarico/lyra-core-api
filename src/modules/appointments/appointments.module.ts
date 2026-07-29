@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { InboxDomainOutboxEntity } from '../inbox/entities/inbox-domain-outbox.entity';
 import { PermissionsModule } from '../permissions';
+import { TeamChatModule } from '../team-chat/team-chat.module';
 import { AppointmentsController } from './appointments.controller';
 import { AppointmentsService } from './appointments.service';
 import { ScheduledItemEntity } from './entities/scheduled-item.entity';
@@ -10,11 +12,16 @@ import { ScheduledItemReminderEntity } from './entities/scheduled-item-reminder.
 @Module({
   imports: [
     PermissionsModule,
-    TypeOrmModule.forFeature([
-      ScheduledItemEntity,
-      ScheduledItemParticipantEntity,
-      ScheduledItemReminderEntity,
-    ]),
+    TeamChatModule,
+    TypeOrmModule.forFeature(
+      [
+        ScheduledItemEntity,
+        ScheduledItemParticipantEntity,
+        ScheduledItemReminderEntity,
+        InboxDomainOutboxEntity,
+      ],
+      'agency',
+    ),
   ],
   controllers: [AppointmentsController],
   providers: [AppointmentsService],
