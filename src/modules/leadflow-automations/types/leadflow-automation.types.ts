@@ -45,6 +45,8 @@ export type LeadFlowAutomationTrigger =
 export type LeadFlowAutomationAction =
   | 'send_message'
   | 'schedule_followup'
+  /** Persists the timers that deliver an appointment's reminders. */
+  | 'schedule_appointment_reminder'
   | 'notify_user'
   | 'move_opportunity_stage'
   | 'assign_opportunity_owner'

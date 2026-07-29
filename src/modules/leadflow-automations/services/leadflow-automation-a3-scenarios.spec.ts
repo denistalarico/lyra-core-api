@@ -104,6 +104,7 @@ function buildLoader(state: CanonicalState) {
     messages as never,
     inboxSettings as never,
     opportunities as never,
+    { findOne: jest.fn().mockResolvedValue(null) } as never,
     runs as never,
     leadScore as never,
     fieldCatalog as never,

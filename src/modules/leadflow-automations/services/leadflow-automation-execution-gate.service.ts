@@ -26,6 +26,10 @@ const CANARY_ACTION_ALLOWLIST = new Set<string>([
   // revalidates reply/handoff/autonomy and is constrained by the WhatsApp 24h
   // window/template rule in the Inbox command.
   'schedule_followup',
+  // Fase 10: like the follow-up schedule, this action only persists timers. The
+  // eventual reminder re-reads the commitment, its lifecycle and the
+  // conversation before the Inbox command is even asked for a message.
+  'schedule_appointment_reminder',
   'send_message',
   'add_tag',
   'request_csat',

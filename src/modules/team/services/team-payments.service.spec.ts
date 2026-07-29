@@ -1,9 +1,6 @@
 import { BadRequestException } from '@nestjs/common';
 import { TeamPaymentsService } from './team-payments.service';
-import {
-  TeamPaymentItemType,
-  TeamPaymentStatus,
-} from '../enums';
+import { TeamPaymentItemType, TeamPaymentStatus } from '../enums';
 import { FinanceBillStatus } from '../../finance/enums';
 
 type AnyRecord = Record<string, unknown>;
@@ -33,7 +30,12 @@ function makePayment(overrides: AnyRecord = {}) {
     discountsTotal: '0.00',
     netAmount: '3000.00',
     metadata: {},
-    member: { id: 'member-1', displayName: 'João', contactId: 'contact-1', workerType: 'contractor' },
+    member: {
+      id: 'member-1',
+      displayName: 'João',
+      contactId: 'contact-1',
+      workerType: 'contractor',
+    },
     items: [],
     ...overrides,
   } as AnyRecord;
@@ -58,7 +60,10 @@ function makeService(opts: {
     id: 'bill-1',
     status: FinanceBillStatus.Open,
   }));
-  const getBill = jest.fn(async (_ctx: unknown, id: string) => ({ id, status: FinanceBillStatus.Open }));
+  const getBill = jest.fn(async (_ctx: unknown, id: string) => ({
+    id,
+    status: FinanceBillStatus.Open,
+  }));
 
   const paymentRepository = {
     findOne: jest.fn(async () => opts.payment),
@@ -92,7 +97,13 @@ function makeService(opts: {
     agencyContactsService as never,
   );
 
-  return { service, createBill, getBill, paymentRepository, qb };
+  return {
+    service,
+    createBill,
+    getBill,
+    paymentRepository,
+    qb,
+  };
 }
 
 describe('TeamPaymentsService — Team → Finance integration', () => {
@@ -100,15 +111,22 @@ describe('TeamPaymentsService — Team → Finance integration', () => {
     const payment = makePayment();
     const { service, createBill, paymentRepository } = makeService({
       payment,
-      rules: [makeRule({ createPayable: true, requireApprovalBeforeFinance: true })],
+      rules: [
+        makeRule({ createPayable: true, requireApprovalBeforeFinance: true }),
+      ],
     });
 
-    const result = (await service.confirmPayment(CTX, 'pay-1')) as unknown as AnyRecord;
+    const result = (await service.confirmPayment(
+      CTX,
+      'pay-1',
+    )) as unknown as AnyRecord;
 
     expect(createBill).not.toHaveBeenCalled();
     expect(result.status).toBe(TeamPaymentStatus.Confirmed);
     expect(result.financeBillId).toBeNull();
-    expect((result.metadata as AnyRecord).financeApprovalStatus).toBe('pending_approval');
+    expect((result.metadata as AnyRecord).financeApprovalStatus).toBe(
+      'pending_approval',
+    );
     expect(paymentRepository.save).toHaveBeenCalled();
   });
 
@@ -116,10 +134,15 @@ describe('TeamPaymentsService — Team → Finance integration', () => {
     const payment = makePayment();
     const { service, createBill } = makeService({
       payment,
-      rules: [makeRule({ createPayable: true, requireApprovalBeforeFinance: false })],
+      rules: [
+        makeRule({ createPayable: true, requireApprovalBeforeFinance: false }),
+      ],
     });
 
-    const result = (await service.confirmPayment(CTX, 'pay-1')) as unknown as AnyRecord;
+    const result = (await service.confirmPayment(
+      CTX,
+      'pay-1',
+    )) as unknown as AnyRecord;
 
     expect(createBill).toHaveBeenCalledTimes(1);
     expect(result.financeBillId).toBe('bill-1');
@@ -133,41 +156,61 @@ describe('TeamPaymentsService — Team → Finance integration', () => {
       rules: [makeRule({ createPayable: false, createExpense: true })],
     });
 
-    const result = (await service.confirmPayment(CTX, 'pay-1')) as unknown as AnyRecord;
+    const result = (await service.confirmPayment(
+      CTX,
+      'pay-1',
+    )) as unknown as AnyRecord;
 
     expect(createBill).not.toHaveBeenCalled();
     expect(result.financeBillId).toBeNull();
     expect((result.metadata as AnyRecord).financeIntegrationSkipped).toBe(true);
-    expect((result.metadata as AnyRecord).financeSkipReason).toBe('expense_only_unsupported');
+    expect((result.metadata as AnyRecord).financeSkipReason).toBe(
+      'expense_only_unsupported',
+    );
   });
 
   it('generates a payable on approve and marks it approved', async () => {
     const payment = makePayment({
       status: TeamPaymentStatus.Confirmed,
-      metadata: { financeApprovalRequired: true, financeApprovalStatus: 'pending_approval' },
+      metadata: {
+        financeApprovalRequired: true,
+        financeApprovalStatus: 'pending_approval',
+      },
     });
     const { service, createBill } = makeService({
       payment,
-      rules: [makeRule({ createPayable: true, requireApprovalBeforeFinance: true })],
+      rules: [
+        makeRule({ createPayable: true, requireApprovalBeforeFinance: true }),
+      ],
     });
 
-    const result = (await service.approvePayment(CTX, 'pay-1')) as unknown as AnyRecord;
+    const result = (await service.approvePayment(
+      CTX,
+      'pay-1',
+    )) as unknown as AnyRecord;
 
     expect(createBill).toHaveBeenCalledTimes(1);
     expect(result.financeBillId).toBe('bill-1');
     expect(result.status).toBe(TeamPaymentStatus.PaymentPending);
-    expect((result.metadata as AnyRecord).financeApprovalStatus).toBe('approved');
+    expect((result.metadata as AnyRecord).financeApprovalStatus).toBe(
+      'approved',
+    );
   });
 
   it('is idempotent: reuses an existing bill instead of creating a duplicate', async () => {
     const payment = makePayment({ status: TeamPaymentStatus.Confirmed });
     const { service, createBill, getBill } = makeService({
       payment,
-      rules: [makeRule({ createPayable: true, requireApprovalBeforeFinance: false })],
+      rules: [
+        makeRule({ createPayable: true, requireApprovalBeforeFinance: false }),
+      ],
       existingBill: { id: 'bill-existing', status: FinanceBillStatus.Open },
     });
 
-    const result = (await service.sendPaymentToFinance(CTX, 'pay-1')) as unknown as AnyRecord;
+    const result = (await service.sendPaymentToFinance(
+      CTX,
+      'pay-1',
+    )) as unknown as AnyRecord;
 
     expect(createBill).not.toHaveBeenCalled();
     expect(getBill).toHaveBeenCalledWith(expect.anything(), 'bill-existing');
@@ -180,8 +223,18 @@ describe('TeamPaymentsService — Team → Finance integration', () => {
       discountsTotal: '200.00',
       netAmount: '2800.00',
       items: [
-        { id: 'it-base', type: TeamPaymentItemType.Base, name: 'Salário', amount: '3000.00' },
-        { id: 'it-disc', type: TeamPaymentItemType.Discount, name: 'Vale', amount: '200.00' },
+        {
+          id: 'it-base',
+          type: TeamPaymentItemType.Base,
+          name: 'Salário',
+          amount: '3000.00',
+        },
+        {
+          id: 'it-disc',
+          type: TeamPaymentItemType.Discount,
+          name: 'Vale',
+          amount: '200.00',
+        },
       ],
     });
     const { service, createBill } = makeService({
@@ -202,7 +255,9 @@ describe('TeamPaymentsService — Team → Finance integration', () => {
     const lines = dto.lines as AnyRecord[];
     expect(lines).toHaveLength(2);
     const base = lines.find((l) => l.description === 'Salário')!;
-    const discount = lines.find((l) => String(l.description).startsWith('Desconto'))!;
+    const discount = lines.find((l) =>
+      String(l.description).startsWith('Desconto'),
+    )!;
     expect(base.unitPrice).toBe('3000.00');
     expect(discount.unitPrice).toBe('-200.00');
     // Per-line classification preserved.
@@ -210,24 +265,33 @@ describe('TeamPaymentsService — Team → Finance integration', () => {
     expect(base.costCenterId).toBe('cc-1');
     expect((base.metadata as AnyRecord).teamPaymentId).toBe('pay-1');
     expect((base.metadata as AnyRecord).teamPaymentLineId).toBe('it-base');
-    expect((base.metadata as AnyRecord).itemType).toBe(TeamPaymentItemType.Base);
+    expect((base.metadata as AnyRecord).itemType).toBe(
+      TeamPaymentItemType.Base,
+    );
     // Bill-level origin/idempotency metadata.
-    expect((dto.metadata as AnyRecord).teamPaymentOccurrenceKey).toBe('team_payment:pay-1');
+    expect((dto.metadata as AnyRecord).teamPaymentOccurrenceKey).toBe(
+      'team_payment:pay-1',
+    );
     expect((dto.metadata as AnyRecord).sourceModule).toBe('team');
   });
 
   it('blocks sending to Finance when approval is still pending', async () => {
     const payment = makePayment({
       status: TeamPaymentStatus.Confirmed,
-      metadata: { financeApprovalRequired: true, financeApprovalStatus: 'pending_approval' },
+      metadata: {
+        financeApprovalRequired: true,
+        financeApprovalStatus: 'pending_approval',
+      },
     });
     const { service } = makeService({
       payment,
-      rules: [makeRule({ createPayable: true, requireApprovalBeforeFinance: true })],
+      rules: [
+        makeRule({ createPayable: true, requireApprovalBeforeFinance: true }),
+      ],
     });
 
-    await expect(service.sendPaymentToFinance(CTX, 'pay-1')).rejects.toBeInstanceOf(
-      BadRequestException,
-    );
+    await expect(
+      service.sendPaymentToFinance(CTX, 'pay-1'),
+    ).rejects.toBeInstanceOf(BadRequestException);
   });
 });

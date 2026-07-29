@@ -9,12 +9,17 @@ import { AssignOpportunityOwnerExecutor } from '../executors/assign-opportunity-
 import { RequestHandoffExecutor } from '../executors/request-handoff.executor';
 import { NotifyUserExecutor } from '../executors/notify-user.executor';
 import { ScheduleFollowupExecutor } from '../executors/schedule-followup.executor';
+import { ScheduleAppointmentReminderExecutor } from '../executors/schedule-appointment-reminder.executor';
 import { SendMessageExecutor } from '../executors/send-message.executor';
 import { AddOpportunityTagExecutor } from '../executors/add-opportunity-tag.executor';
 import { RequestCsatExecutor } from '../executors/request-csat.executor';
 import { GenerateDailySummaryExecutor } from '../executors/generate-daily-summary.executor';
 import type { LeadFlowJsonObject } from '../types/leadflow-automation.types';
-import type { LeadFlowAutomationContextSnapshot } from '../types/leadflow-automation-context.types';
+import {
+  LeadFlowAutomationContextSignal,
+  type LeadFlowAutomationAppointmentContext,
+  type LeadFlowAutomationContextSnapshot,
+} from '../types/leadflow-automation-context.types';
 import type { LeadFlowAutomationTrigger } from '../types/leadflow-automation.types';
 import type { LeadFlowAutomationEvaluation } from './leadflow-automation-evaluation.service';
 import { LeadFlowAutomationExecutionGate } from './leadflow-automation-execution-gate.service';
@@ -29,6 +34,7 @@ type RunRecipe = { trigger: LeadFlowAutomationTrigger; triggerKind: 'event' };
 interface EffectSubject {
   opportunityId: string | null;
   conversationId: string | null;
+  appointmentId: string | null;
 }
 
 /** Actions whose effect targets a CRM opportunity in the envelope. */
@@ -46,6 +52,9 @@ const CONVERSATION_ACTIONS = new Set<string>([
   'request_handoff',
   'send_message',
 ]);
+
+/** Actions whose effect is about a commitment in the Agenda. */
+const APPOINTMENT_ACTIONS = new Set<string>(['schedule_appointment_reminder']);
 
 export interface ExecutionInput {
   automation: LeadFlowAutomationEntity;
@@ -87,6 +96,8 @@ export class LeadFlowAutomationExecutionService {
     notifyUserExecutor: NotifyUserExecutor,
     addTagExecutor: AddOpportunityTagExecutor,
     @Optional() scheduleFollowupExecutor?: ScheduleFollowupExecutor,
+    @Optional()
+    scheduleAppointmentReminderExecutor?: ScheduleAppointmentReminderExecutor,
     @Optional() sendMessageExecutor?: SendMessageExecutor,
     @Optional() requestCsatExecutor?: RequestCsatExecutor,
     @Optional() generateDailySummaryExecutor?: GenerateDailySummaryExecutor,
@@ -104,6 +115,12 @@ export class LeadFlowAutomationExecutionService {
       this.executors.set(
         scheduleFollowupExecutor.actionKey,
         scheduleFollowupExecutor,
+      );
+    }
+    if (scheduleAppointmentReminderExecutor) {
+      this.executors.set(
+        scheduleAppointmentReminderExecutor.actionKey,
+        scheduleAppointmentReminderExecutor,
       );
     }
     if (sendMessageExecutor) {
@@ -138,16 +155,33 @@ export class LeadFlowAutomationExecutionService {
     // only be aimed at the aggregate kind its owning domain concerns — a CRM
     // effect at the opportunity, a handoff at the conversation. An effect
     // pointed at the wrong kind of subject cannot be attempted.
+    //
+    // An agenda event names only the commitment, so the conversation and the
+    // opportunity come from the links the Agenda itself wrote and the context
+    // resolver already established. That is a followed reference, not a guess:
+    // without it every agenda action would be permanently unaimed.
+    const appointment = appointmentContextOf(input.contextSnapshot);
     const subject: EffectSubject = {
       opportunityId:
         delivery.aggregateType === 'crm_opportunity'
           ? delivery.aggregateId
-          : null,
+          : (appointment?.opportunityId ?? null),
       conversationId:
         delivery.aggregateType === 'inbox_conversation'
           ? delivery.aggregateId
-          : null,
+          : (appointment?.conversationId ?? null),
+      appointmentId:
+        delivery.aggregateType === 'scheduled_item'
+          ? delivery.aggregateId
+          : (appointment?.appointmentId ?? null),
     };
+    if (actionKeys.some((key) => APPOINTMENT_ACTIONS.has(key))) {
+      // The guard must hold at execution time too: the verdict may have been
+      // reached from a snapshot, but the effect is aimed with these values.
+      if (!subject.appointmentId || !appointment) {
+        return { executed: false, reason: 'no_appointment_in_envelope' };
+      }
+    }
     if (actionKeys.some((key) => OPPORTUNITY_ACTIONS.has(key))) {
       if (!subject.opportunityId) {
         return { executed: false, reason: 'no_opportunity_in_envelope' };
@@ -234,6 +268,7 @@ export class LeadFlowAutomationExecutionService {
       delivery,
       subject,
       actionKey,
+      appointmentContextOf(contextSnapshot),
     );
 
     return {
@@ -268,7 +303,36 @@ export class LeadFlowAutomationExecutionService {
     delivery: LeadFlowEventDeliveryEntity,
     subject: EffectSubject,
     actionKey: string,
+    appointment: LeadFlowAutomationAppointmentContext | null,
   ): { payload: LeadFlowJsonObject; policyPrefix: string } {
+    if (actionKey === 'schedule_appointment_reminder') {
+      const message = automation.messageConfig ?? {};
+      const schedule = automation.schedulePolicy ?? {};
+      return {
+        policyPrefix: 'appointment_reminder',
+        payload: {
+          appointmentId: subject.appointmentId,
+          conversationId: subject.conversationId,
+          startsAt: appointment?.startsAt ?? null,
+          timezone: appointment?.timezone ?? null,
+          serviceRef: appointment?.serviceRef ?? null,
+          offsets: Array.isArray(schedule.offsets) ? schedule.offsets : [],
+          text:
+            typeof message.baseMessage === 'string'
+              ? message.baseMessage
+              : null,
+          templateRef:
+            typeof message.templateRef === 'string'
+              ? message.templateRef
+              : null,
+          templateLanguage:
+            typeof message.templateLanguage === 'string'
+              ? message.templateLanguage
+              : 'pt_BR',
+        },
+      };
+    }
+
     if (actionKey === 'request_handoff') {
       // The domain derives and clamps the reason; the executor defaults it when
       // absent. Keeping it null here keeps the handoff config surface untouched.
@@ -514,6 +578,7 @@ export class LeadFlowAutomationExecutionService {
           )
           .slice(0, maxAttempts)
       : [];
+    const fromAppointment = isAppointmentEvent(delivery.eventName);
     let offsets: number[];
     let firstOffset: number;
     if (configuredSteps.length > 0) {
@@ -522,6 +587,16 @@ export class LeadFlowAutomationExecutionService {
     } else if (delivery.eventName === 'leadflow.inbox.conversation.idle') {
       const delay = positiveNumber(trigger.delayHours, 24);
       offsets = [delay, delay * 3, delay * 7].slice(0, maxAttempts);
+      firstOffset = delay;
+    } else if (fromAppointment) {
+      // The commitment already happened; the clock starts at the event, not at
+      // a stage the opportunity may not even be sitting on.
+      const delay = positiveNumber(trigger.delayHours, 1);
+      const cooldown = positiveNumber(schedule.cooldownHours, delay);
+      offsets = Array.from(
+        { length: maxAttempts },
+        (_, index) => delay + cooldown * index,
+      );
       firstOffset = delay;
     } else {
       const idle = positiveNumber(trigger.idleHoursInStage, 48);
@@ -556,7 +631,13 @@ export class LeadFlowAutomationExecutionService {
       baselineAt: safeBaseline.toISOString(),
       fireAt: fireAt.toISOString(),
       attemptOffsetsHours: offsets,
-      stopIfReplied: conditions.stopIfReplied !== false,
+      // The two flags answer different questions and must not be conflated. As
+      // an entry condition, "did the lead reply" is about the whole
+      // conversation, and an agenda recipe deliberately ignores it — a lead who
+      // spoke to us months ago must still be recovered after a no-show. At the
+      // timer it is about this chain only: someone who answered the recovery
+      // message has been recovered, so the chain always stops there.
+      stopIfReplied: fromAppointment || conditions.stopIfReplied !== false,
       stopIfHandoff: conditions.stopIfHandoff !== false,
       respectBusinessHours:
         conditions.businessHoursOnly === true ||
@@ -572,6 +653,28 @@ export class LeadFlowAutomationExecutionService {
       followupSteps: configuredSteps.length > 0 ? configuredSteps : null,
     };
   }
+}
+
+/** The commitment the context resolver established, if this delivery is about one. */
+function appointmentContextOf(
+  snapshot: LeadFlowAutomationContextSnapshot,
+): LeadFlowAutomationAppointmentContext | null {
+  // A snapshot persisted under an earlier schema version may not carry the
+  // section at all; an absent commitment is simply not an agenda delivery.
+  const value =
+    snapshot.resolved?.[LeadFlowAutomationContextSignal.AppointmentContext]
+      ?.value;
+  return value &&
+    typeof value === 'object' &&
+    !Array.isArray(value) &&
+    typeof (value as LeadFlowAutomationAppointmentContext).appointmentId ===
+      'string'
+    ? (value as LeadFlowAutomationAppointmentContext)
+    : null;
+}
+
+function isAppointmentEvent(eventName: string): boolean {
+  return eventName.startsWith('leadflow.calendar.appointment.');
 }
 
 function subjectsToRecord(

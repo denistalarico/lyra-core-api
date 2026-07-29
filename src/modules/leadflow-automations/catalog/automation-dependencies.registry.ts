@@ -35,7 +35,12 @@ export const LEADFLOW_AUTOMATION_SATISFIED_DEPENDENCIES: Record<
   [LeadFlowAutomationDependency.PipelineTransferCommand]: true,
   [LeadFlowAutomationDependency.StageTransitionCommand]: true,
   [LeadFlowAutomationDependency.OpportunityCopyCommand]: true,
-  [LeadFlowAutomationDependency.AgendaDomain]: false,
+  // Fase 9 ported the Agenda into the Agency and made `AppointmentsService`
+  // publish `appointment.*` transactionally; Fase 10 connected those events to
+  // the automations that consume them. The commitment is now readable, its
+  // lifecycle canonical, and its links to conversation and opportunity are
+  // written by the domain itself.
+  [LeadFlowAutomationDependency.AgendaDomain]: true,
   [LeadFlowAutomationDependency.AnalyticsBackend]: false,
   [LeadFlowAutomationDependency.QuotesDomain]: false,
   [LeadFlowAutomationDependency.MissingFieldsDetector]: false,

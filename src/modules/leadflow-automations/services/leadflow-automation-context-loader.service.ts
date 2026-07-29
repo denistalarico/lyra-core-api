@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { IsNull, Repository } from 'typeorm';
+import { ScheduledItemEntity } from '../../appointments/entities/scheduled-item.entity';
 import { LeadScoreQueryService } from '../../crm/lead-score/services/lead-score-query.service';
 import { CrmOpportunityEntity } from '../../crm/entities/crm-opportunity.entity';
 import { CrmOpportunityFieldCatalogService } from '../../crm/services/crm-opportunity-field-catalog.service';
@@ -10,6 +11,7 @@ import { InboxSettingsEntity } from '../../inbox/entities/inbox-settings.entity'
 import { LeadFlowAutomationRunEntity } from '../entities/leadflow-automation-run.entity';
 import {
   LeadFlowAutomationContextSignal,
+  type LeadFlowAutomationAppointmentContext,
   type LeadFlowAutomationContextGapRecord,
   type LeadFlowAutomationContextSubject,
 } from '../types/leadflow-automation-context.types';
@@ -18,6 +20,17 @@ const AGENCY_CONNECTION = 'agency';
 
 /** Ownership states that mean a human is handling the conversation. */
 const HANDOFF_STATES = new Set(['handoff_requested', 'human_active']);
+
+/** Scheduled item types the Agenda treats as a commitment with a contact. */
+const APPOINTMENT_TYPES = new Set(['event', 'meeting', 'call']);
+
+/** Storage status → canonical lifecycle, mirroring `AppointmentsService`. */
+const LIFECYCLE_BY_STORAGE_STATUS: Record<string, string> = {
+  completed: 'completed',
+  canceled: 'canceled',
+  missed: 'no_show',
+  postponed: 'rescheduled',
+};
 
 export interface LeadFlowAutomationLoadRequest {
   tenantId: string;
@@ -35,6 +48,15 @@ export interface LeadFlowAutomationLoadRequest {
 export interface LeadFlowAutomationLoadedContext {
   /** Signals shared by every automation matched by the same delivery. */
   shared: Partial<Record<LeadFlowAutomationContextSignal, unknown>>;
+  /**
+   * Subjects the envelope did not name but a canonical record links to.
+   *
+   * An appointment event names only the commitment, yet the conversation and
+   * the opportunity it belongs to were written by the Agenda itself when the
+   * commitment was created. Following that link is not a guess, so it is
+   * reported here and recorded on the snapshot like any other subject.
+   */
+  derivedSubjects: Partial<Record<LeadFlowAutomationContextSubject, string>>;
   /** Signals derived from each automation's own history. */
   perAutomation: Map<
     string,
@@ -73,6 +95,8 @@ export class LeadFlowAutomationContextLoaderService {
     private readonly inboxSettings: Repository<InboxSettingsEntity>,
     @InjectRepository(CrmOpportunityEntity, AGENCY_CONNECTION)
     private readonly opportunities: Repository<CrmOpportunityEntity>,
+    @InjectRepository(ScheduledItemEntity, AGENCY_CONNECTION)
+    private readonly appointments: Repository<ScheduledItemEntity>,
     @InjectRepository(LeadFlowAutomationRunEntity, AGENCY_CONNECTION)
     private readonly runs: Repository<LeadFlowAutomationRunEntity>,
     private readonly leadScore: LeadScoreQueryService,
@@ -86,6 +110,8 @@ export class LeadFlowAutomationContextLoaderService {
     const shared: LeadFlowAutomationLoadedContext['shared'] = {};
     const perAutomation: LeadFlowAutomationLoadedContext['perAutomation'] =
       new Map();
+    const derivedSubjects: LeadFlowAutomationLoadedContext['derivedSubjects'] =
+      {};
     const gaps: LeadFlowAutomationContextGapRecord[] = [];
     const sources: LeadFlowAutomationLoadedContext['cost']['sources'] = [];
     let queryCount = 0;
@@ -94,8 +120,9 @@ export class LeadFlowAutomationContextLoaderService {
       tenantId: request.tenantId,
       workspaceId: request.workspaceId,
     };
-    const conversationId = request.subjects.inbox_conversation ?? null;
-    const opportunityId = request.subjects.crm_opportunity ?? null;
+    let conversationId = request.subjects.inbox_conversation ?? null;
+    let opportunityId = request.subjects.crm_opportunity ?? null;
+    const appointmentId = request.subjects.scheduled_item ?? null;
     const want = (signal: LeadFlowAutomationContextSignal) =>
       request.signals.has(signal);
 
@@ -112,12 +139,99 @@ export class LeadFlowAutomationContextLoaderService {
       return value;
     };
 
+    // --- the commitment itself, and the links it carries -------------------
+    // Runs first: everything else about an agenda event — the conversation to
+    // reply in, the opportunity it belongs to — is reachable only through the
+    // commitment, so resolving it late would make the other signals look
+    // unreachable when they are merely unread.
+    if (want(LeadFlowAutomationContextSignal.AppointmentContext)) {
+      if (!appointmentId) {
+        gaps.push(
+          gap(
+            LeadFlowAutomationContextSignal.AppointmentContext,
+            'missing_context',
+            'O evento não identifica o compromisso a que a automação se refere.',
+          ),
+        );
+      } else {
+        await source('scheduled_item', async () => {
+          queryCount += 1;
+          const item = await this.appointments.findOne({
+            where: { id: appointmentId, ...scope, deletedAt: IsNull() },
+          });
+          if (!item) {
+            gaps.push(
+              gap(
+                LeadFlowAutomationContextSignal.AppointmentContext,
+                'missing_context',
+                'O compromisso referido pelo evento não foi encontrado neste workspace.',
+              ),
+            );
+            return;
+          }
+
+          // The guard the phase exists for. Each part answers a question the
+          // automation cannot avoid asking — when it happens, what it is, who
+          // it is with, where a reply would arrive — so a commitment missing
+          // any of them is reported as unusable rather than half-processed.
+          const startsAt = item.startAt ?? item.dueAt;
+          const missing: string[] = [];
+          if (!startsAt) missing.push('data e hora');
+          if (!APPOINTMENT_TYPES.has(item.type)) missing.push('tipo');
+          if (!item.contactId && !item.sourceConversationId) {
+            missing.push('contato');
+          }
+          if (!item.sourceChannel?.trim()) missing.push('canal');
+          if (missing.length > 0 || !startsAt) {
+            gaps.push(
+              gap(
+                LeadFlowAutomationContextSignal.AppointmentContext,
+                'missing_context',
+                `O compromisso não informa ${formatList(missing)}; sem isso a automação de agenda não tem sobre o que agir.`,
+              ),
+            );
+            return;
+          }
+
+          const confirmationDueAt = item.metadata?.confirmationDueAt;
+          const value: LeadFlowAutomationAppointmentContext = {
+            appointmentId: item.id,
+            startsAt: startsAt.toISOString(),
+            timezone: item.timezone,
+            serviceRef: item.type,
+            channel: item.sourceChannel,
+            contactId: item.contactId,
+            conversationId: item.sourceConversationId,
+            opportunityId: item.sourceOpportunityId,
+            lifecycleStatus: appointmentLifecycleStatus(item),
+            confirmationDueAt:
+              typeof confirmationDueAt === 'string' &&
+              !Number.isNaN(Date.parse(confirmationDueAt))
+                ? new Date(confirmationDueAt).toISOString()
+                : null,
+          };
+          shared[LeadFlowAutomationContextSignal.AppointmentContext] = value;
+
+          // Links written by the Agenda in the same transaction as the event.
+          if (!conversationId && item.sourceConversationId) {
+            conversationId = item.sourceConversationId;
+            derivedSubjects.inbox_conversation = item.sourceConversationId;
+          }
+          if (!opportunityId && item.sourceOpportunityId) {
+            opportunityId = item.sourceOpportunityId;
+            derivedSubjects.crm_opportunity = item.sourceOpportunityId;
+          }
+        });
+      }
+    }
+
     // --- conversation: handoff -------------------------------------------
     if (want(LeadFlowAutomationContextSignal.HandoffActive) && conversationId) {
+      const subjectId = conversationId;
       await source('inbox_conversation', async () => {
         queryCount += 1;
         const conversation = await this.conversations.findOne({
-          where: { id: conversationId, ...scope },
+          where: { id: subjectId, ...scope },
           select: { id: true, ownershipState: true },
         });
         if (!conversation) {
@@ -137,11 +251,12 @@ export class LeadFlowAutomationContextLoaderService {
 
     // --- conversation: did the lead reply ---------------------------------
     if (want(LeadFlowAutomationContextSignal.LeadReplied) && conversationId) {
+      const subjectId = conversationId;
       await source('inbox_message_reply', async () => {
         queryCount += 1;
         // Existence, not history: one row answers the question.
         const inbound = await this.messages.findOne({
-          where: { conversationId, ...scope, direction: 'inbound' },
+          where: { conversationId: subjectId, ...scope, direction: 'inbound' },
           select: { id: true },
           order: { createdAt: 'DESC' },
         });
@@ -248,11 +363,12 @@ export class LeadFlowAutomationContextLoaderService {
           ),
         );
       } else {
+        const subjectId = opportunityId;
         await source('crm_lead_score', async () => {
           queryCount += 1;
           const score = await this.leadScore.getForOpportunity(
             scope,
-            opportunityId,
+            subjectId,
           );
           if (score.availability !== 'available' || score.score === null) {
             gaps.push(
@@ -280,10 +396,11 @@ export class LeadFlowAutomationContextLoaderService {
           ),
         );
       } else {
+        const subjectId = opportunityId;
         await source('crm_opportunity_fields', async () => {
           queryCount += 1;
           const opportunity = await this.opportunities.findOne({
-            where: { id: opportunityId, ...scope },
+            where: { id: subjectId, ...scope },
           });
           if (!opportunity) {
             gaps.push(
@@ -328,14 +445,20 @@ export class LeadFlowAutomationContextLoaderService {
           .andWhere('run.automation_id IN (:...ids)', {
             ids: request.automationIds,
           });
+        // The commitment wins when the event names one: an attempt cap on a
+        // no-show recovery is per appointment, not per lead. Counting across a
+        // contact's whole history would let one past no-show exhaust the budget
+        // of every commitment they ever book.
         const historySubject =
+          request.subjects.scheduled_item ??
           request.subjects.inbox_conversation ??
           request.subjects.crm_opportunity ??
           null;
         if (historySubject) {
           query.andWhere(
             `(
-              run.input_snapshot #>> '{contextSnapshot,subjects,inbox_conversation}' = :historySubject
+              run.input_snapshot #>> '{contextSnapshot,subjects,scheduled_item}' = :historySubject
+              OR run.input_snapshot #>> '{contextSnapshot,subjects,inbox_conversation}' = :historySubject
               OR run.input_snapshot #>> '{contextSnapshot,subjects,crm_opportunity}' = :historySubject
             )`,
             { historySubject },
@@ -379,6 +502,7 @@ export class LeadFlowAutomationContextLoaderService {
     return {
       shared,
       perAutomation,
+      derivedSubjects,
       gaps,
       cost: { queryCount, durationMs: Date.now() - startedAt, sources },
     };
@@ -396,6 +520,25 @@ function gap(
   detail: string,
 ): LeadFlowAutomationContextGapRecord {
   return { signal, gap: kind, detail, dependency: null };
+}
+
+/**
+ * Canonical lifecycle of a commitment.
+ *
+ * `metadata.appointmentStatus` is what the Appointments domain writes and is
+ * therefore authoritative; the storage `status` column is only the legacy
+ * projection kept for the shared Calendar surface.
+ */
+function appointmentLifecycleStatus(item: ScheduledItemEntity): string {
+  const explicit = item.metadata?.appointmentStatus;
+  if (typeof explicit === 'string' && explicit.trim()) return explicit;
+  return LIFECYCLE_BY_STORAGE_STATUS[item.status] ?? 'confirmed';
+}
+
+/** "data e hora, tipo e contato" — a list an operator can read out loud. */
+function formatList(items: string[]): string {
+  if (items.length <= 1) return items[0] ?? 'os dados mínimos';
+  return `${items.slice(0, -1).join(', ')} e ${items[items.length - 1]}`;
 }
 
 /**
@@ -481,5 +624,6 @@ export const LEADFLOW_CONTEXT_LOADER_ENTITIES = [
   InboxMessageEntity,
   InboxSettingsEntity,
   CrmOpportunityEntity,
+  ScheduledItemEntity,
   LeadFlowAutomationRunEntity,
 ];

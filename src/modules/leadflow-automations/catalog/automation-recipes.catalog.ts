@@ -294,6 +294,7 @@ const ESSENTIAL_SEEDS: RecipeSeed[] = [
   },
   {
     key: 'appointment_reminder',
+    templateVersion: 3,
     requiredDependencies: [
       LeadFlowAutomationDependency.AgendaDomain,
       LeadFlowAutomationDependency.SchedulerRuntime,
@@ -306,10 +307,21 @@ const ESSENTIAL_SEEDS: RecipeSeed[] = [
     tier: 'essential',
     businessModeKeys: AGENDA_MODES,
     trigger: 'appointment.created',
-    primaryAction: 'send_message',
+    primaryAction: 'schedule_appointment_reminder',
     whenLabel: 'Antes do horário agendado (24h, 2h e 30min).',
-    limitsLabel: 'Envia apenas dentro da janela do compromisso.',
+    limitsLabel:
+      'Só agenda antecedências que ainda não passaram; cancela sozinho se o compromisso for cancelado, remarcado ou assumido por uma pessoa.',
+    // A reminder belongs to the appointment's clock, not to the office's: a 7h
+    // appointment needs its 30-minute reminder at 6h30. Reply history is
+    // likewise irrelevant — being reminded is not a conversation to abandon
+    // because the lead once wrote to us.
+    conditionConfig: { businessHoursOnly: false, stopIfReplied: false },
+    messageConfig: {
+      baseMessage:
+        'Olá! Passando para lembrar do seu compromisso. Se precisar remarcar, é só responder por aqui.',
+    },
     schedulePolicy: {
+      respectBusinessHours: false,
       offsets: [
         { label: '24h antes', minutesBefore: 24 * 60 },
         { label: '2h antes', minutesBefore: 2 * 60 },
@@ -319,6 +331,7 @@ const ESSENTIAL_SEEDS: RecipeSeed[] = [
   },
   {
     key: 'appointment_confirmation',
+    templateVersion: 3,
     requiredDependencies: [
       LeadFlowAutomationDependency.AgendaDomain,
       LeadFlowAutomationDependency.SchedulerRuntime,
@@ -331,13 +344,23 @@ const ESSENTIAL_SEEDS: RecipeSeed[] = [
     businessModeKeys: AGENDA_MODES,
     trigger: 'appointment.confirmation_pending',
     primaryAction: 'send_message',
-    whenLabel: 'No prazo de confirmação configurado antes do compromisso.',
+    // The event already means "the window to ask has been reached" — the Agenda
+    // decides when a commitment enters `pending`. Adding a timer here would
+    // delay the question past the deadline it exists to beat.
+    whenLabel:
+      'Assim que o compromisso entra em confirmação pendente na Agenda.',
     limitsLabel:
-      'Ações distintas para confirmar, cancelar ou não responder; sem insistência excessiva.',
-    messageConfig: { quickReplies: ['Confirmar', 'Reagendar', 'Cancelar'] },
+      'Uma pergunta por ciclo de confirmação; para se houver atendimento humano em curso.',
+    conditionConfig: { businessHoursOnly: false, stopIfReplied: false },
+    messageConfig: {
+      baseMessage:
+        'Podemos confirmar seu compromisso? Responda Confirmar, Reagendar ou Cancelar.',
+      quickReplies: ['Confirmar', 'Reagendar', 'Cancelar'],
+    },
   },
   {
     key: 'appointment_no_show_recovery',
+    templateVersion: 3,
     requiredDependencies: [
       LeadFlowAutomationDependency.AgendaDomain,
       LeadFlowAutomationDependency.SchedulerRuntime,
@@ -351,10 +374,18 @@ const ESSENTIAL_SEEDS: RecipeSeed[] = [
     businessModeKeys: AGENDA_MODES,
     trigger: 'appointment.no_show',
     primaryAction: 'schedule_followup',
-    whenLabel: 'Quando o lead não comparece ao compromisso.',
+    whenLabel:
+      'Uma hora depois do não comparecimento, e de novo no dia seguinte.',
     limitsLabel:
-      'Limite de tentativas de reagendamento e notificação ao responsável.',
+      'Duas tentativas por compromisso, dentro do horário comercial, encerradas assim que o lead responder.',
+    conditionConfig: { businessHoursOnly: false, stopIfReplied: false },
+    triggerConfig: { delayHours: 1 },
     actionConfig: { maxAttempts: 2, moveToStageRef: null },
+    messageConfig: {
+      baseMessage:
+        'Sentimos sua falta no horário combinado. Quer remarcar? Responda por aqui que eu ajudo.',
+    },
+    schedulePolicy: { cooldownHours: 24 },
     crmPolicy: { moveStageOnComplete: null },
   },
   {
@@ -455,6 +486,7 @@ const ESSENTIAL_SEEDS: RecipeSeed[] = [
   },
   {
     key: 'post_service_followup',
+    templateVersion: 3,
     requiredDependencies: [
       LeadFlowAutomationDependency.AgendaDomain,
       LeadFlowAutomationDependency.SchedulerRuntime,
@@ -467,8 +499,15 @@ const ESSENTIAL_SEEDS: RecipeSeed[] = [
     tier: 'essential',
     trigger: 'appointment.completed',
     primaryAction: 'schedule_followup',
-    whenLabel: 'Após o fechamento, agenda concluída ou handoff resolvido.',
-    limitsLabel: 'Um envio por evento concluído; respeita cooldown.',
+    whenLabel: 'Duas horas depois do compromisso concluído.',
+    limitsLabel:
+      'Um envio por compromisso concluído, em horário comercial, respeitando o intervalo mínimo.',
+    conditionConfig: { businessHoursOnly: false, stopIfReplied: false },
+    triggerConfig: { delayHours: 2 },
+    messageConfig: {
+      baseMessage:
+        'Obrigado pela visita! Como foi sua experiência? Se precisar de qualquer coisa, é só responder por aqui.',
+    },
     schedulePolicy: { cooldownHours: 72 },
     crmPolicy: { moveStageOnComplete: null, addTags: [] },
   },

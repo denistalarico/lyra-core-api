@@ -5,8 +5,10 @@ import {
   LeadFlowAutomationRunStatus,
   LeadFlowAutomationSkipReason,
 } from '../enums/leadflow-automation-run.enums';
+import { LEADFLOW_APPOINTMENT_TRIGGERS } from '../catalog/automation-context-requirements.catalog';
 import {
   LeadFlowAutomationContextSignal,
+  type LeadFlowAutomationAppointmentContext,
   type LeadFlowAutomationContextGap,
   type LeadFlowAutomationContextGapMap,
   type LeadFlowAutomationContextGapRecord,
@@ -30,6 +32,8 @@ export interface LeadFlowAutomationEvaluationContext {
   matchedIntents?: string[];
   /** Fields already known about the lead — used by the data-quality recipes. */
   presentFields?: string[];
+  /** The commitment an agenda automation is about. */
+  appointmentContext?: LeadFlowAutomationAppointmentContext;
 }
 
 export interface LeadFlowAutomationEvaluationCheck {
@@ -179,6 +183,45 @@ export class LeadFlowAutomationEvaluationService {
       `Business Mode ativo: ${automation.businessModeKey}.`,
       LeadFlowAutomationSkipReason.UnsupportedBusinessMode,
     );
+
+    // --- the commitment an agenda automation speaks about ------------------
+    // Not a condition an operator configures: it is the subject itself. A
+    // reminder about a commitment nobody could read is not a reminder that
+    // failed a check, it is a reminder with nothing to say — so the run is
+    // skipped as unresolved context rather than as a condition that said no.
+    if (
+      LEADFLOW_APPOINTMENT_TRIGGERS.has(automation.triggerConfig?.type ?? '')
+    ) {
+      const label = 'Dados do compromisso disponíveis';
+      if (
+        !blocked(
+          'appointmentContext',
+          label,
+          LeadFlowAutomationContextSignal.AppointmentContext,
+        )
+      ) {
+        const appointment = context.appointmentContext;
+        if (!appointment) {
+          checks.push({
+            key: 'appointmentContext',
+            label,
+            passed: false,
+            detail:
+              'Os dados mínimos do compromisso (data e hora, tipo, contato e canal) não puderam ser estabelecidos.',
+            gap: 'missing_context',
+          });
+          blockingGap ??= 'missing_context';
+        } else {
+          check(
+            'appointmentContext',
+            label,
+            true,
+            `Compromisso de ${appointment.serviceRef} em ${appointment.startsAt}, via ${appointment.channel}.`,
+            LeadFlowAutomationSkipReason.MissingContext,
+          );
+        }
+      }
+    }
 
     // --- window and cancellation signals -----------------------------------
     if (conditions.businessHoursOnly === true) {

@@ -135,6 +135,43 @@ function scheduleFollowupAvailability(): AutomationExecutorAvailability {
   };
 }
 
+/**
+ * Availability of the appointment-reminder scheduling action.
+ *
+ * Three capabilities, because the action spans three domains: the Agenda owns
+ * the commitment the reminder is about, the scheduler owns the instant it fires
+ * at, and the Inbox owns the message that eventually goes out. Reporting the
+ * first unmet one keeps the operator's next step unambiguous.
+ */
+function scheduleAppointmentReminderAvailability(): AutomationExecutorAvailability {
+  const agenda = isDependencySatisfied(
+    LeadFlowAutomationDependency.AgendaDomain,
+  );
+  const scheduler = isDependencySatisfied(
+    LeadFlowAutomationDependency.SchedulerRuntime,
+  );
+  const messaging = isDependencySatisfied(
+    LeadFlowAutomationDependency.MessageGeneration,
+  );
+  const available = agenda && scheduler && messaging;
+  return {
+    actionKey: 'schedule_appointment_reminder',
+    available,
+    reason: available ? null : 'dependency_missing',
+    dependency: !agenda
+      ? LeadFlowAutomationDependency.AgendaDomain
+      : !scheduler
+        ? LeadFlowAutomationDependency.SchedulerRuntime
+        : !messaging
+          ? LeadFlowAutomationDependency.MessageGeneration
+          : null,
+    owningDomain: 'leadflow.calendar',
+    description: available
+      ? 'Lembretes do compromisso agendados no SchedulerRuntime durável, revalidados no vencimento antes de qualquer envio.'
+      : 'O lembrete de agenda depende da Agenda, do scheduler durável e do envio canônico de mensagens.',
+  };
+}
+
 function addTagAvailability(): AutomationExecutorAvailability {
   return {
     actionKey: 'add_tag',
@@ -269,6 +306,7 @@ const COMPUTED_AVAILABILITY: Record<
   notify_user: notifyUserAvailability,
   send_message: sendMessageAvailability,
   schedule_followup: scheduleFollowupAvailability,
+  schedule_appointment_reminder: scheduleAppointmentReminderAvailability,
   add_tag: addTagAvailability,
   request_csat: requestCsatAvailability,
   generate_summary_placeholder: dailySummaryAvailability,

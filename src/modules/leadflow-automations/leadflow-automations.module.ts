@@ -32,6 +32,7 @@ import { AssignOpportunityOwnerExecutor } from './executors/assign-opportunity-o
 import { RequestHandoffExecutor } from './executors/request-handoff.executor';
 import { NotifyUserExecutor } from './executors/notify-user.executor';
 import { ScheduleFollowupExecutor } from './executors/schedule-followup.executor';
+import { ScheduleAppointmentReminderExecutor } from './executors/schedule-appointment-reminder.executor';
 import { SendMessageExecutor } from './executors/send-message.executor';
 import { AddOpportunityTagExecutor } from './executors/add-opportunity-tag.executor';
 import { RequestCsatExecutor } from './executors/request-csat.executor';
@@ -51,6 +52,7 @@ import {
   ScheduledTimerConsumerRegistry,
 } from './scheduler';
 import { LeadFlowFollowupTimerConsumer } from './services/leadflow-followup-timer.consumer';
+import { LeadFlowAppointmentTimerConsumer } from './services/leadflow-appointment-timer.consumer';
 import { LeadFlowFollowupIdleDetectorService } from './services/leadflow-followup-idle-detector.service';
 import { LeadFlowBusinessHoursClosedDetectorService } from './services/leadflow-business-hours-closed-detector.service';
 import { InboxSettingsEntity } from '../inbox/entities/inbox-settings.entity';
@@ -119,6 +121,7 @@ import { LeadFlowDailySummarySchedulerService } from './services/leadflow-daily-
     RequestHandoffExecutor,
     NotifyUserExecutor,
     ScheduleFollowupExecutor,
+    ScheduleAppointmentReminderExecutor,
     SendMessageExecutor,
     AddOpportunityTagExecutor,
     RequestCsatExecutor,
@@ -130,6 +133,7 @@ import { LeadFlowDailySummarySchedulerService } from './services/leadflow-daily-
       useExisting: PostgresSchedulerRuntime,
     },
     LeadFlowFollowupTimerConsumer,
+    LeadFlowAppointmentTimerConsumer,
     LeadFlowCsatExpiryTimerConsumer,
     LeadFlowDailySummaryTimerConsumer,
     LeadFlowDailySummarySchedulerService,

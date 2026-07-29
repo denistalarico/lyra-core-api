@@ -164,7 +164,8 @@ export class LeadFlowAutomationContextService {
     now: Date = new Date(),
   ): Promise<Map<string, LeadFlowAutomationContextResolution>> {
     const startedAt = Date.now();
-    const { subjects, ambiguous } = this.resolveSubjects(delivery);
+    const { subjects: envelopeSubjects, ambiguous } =
+      this.resolveSubjects(delivery);
     const eventAgeMs = Math.max(
       0,
       now.getTime() - delivery.occurredAt.getTime(),
@@ -194,7 +195,7 @@ export class LeadFlowAutomationContextService {
     const loaded = await this.loader.load({
       tenantId: delivery.tenantId,
       workspaceId: delivery.workspaceId,
-      subjects,
+      subjects: envelopeSubjects,
       signals: loadable,
       triggerMessageId:
         typeof delivery.payload?.messageId === 'string'
@@ -206,6 +207,10 @@ export class LeadFlowAutomationContextService {
     const loadedGaps = new Map(
       loaded.gaps.map((record) => [record.signal, record]),
     );
+    // A subject the loader followed from a canonical link is as identified as
+    // one the envelope named, so it belongs on the snapshot the run is
+    // explained by — and it is what makes the remaining signals reachable.
+    const subjects = { ...envelopeSubjects, ...loaded.derivedSubjects };
 
     const resolutions = new Map<string, LeadFlowAutomationContextResolution>();
 
@@ -412,6 +417,7 @@ export class LeadFlowAutomationContextService {
 
     const isConversation = delivery.aggregateType === 'inbox_conversation';
     const isOpportunity = delivery.aggregateType === 'crm_opportunity';
+    const isScheduledItem = delivery.aggregateType === 'scheduled_item';
 
     claim(
       'inbox_conversation',
@@ -422,6 +428,11 @@ export class LeadFlowAutomationContextService {
       'crm_opportunity',
       isOpportunity ? delivery.aggregateId : null,
       payload.opportunityId,
+    );
+    claim(
+      'scheduled_item',
+      isScheduledItem ? delivery.aggregateId : null,
+      payload.appointmentId,
     );
 
     return { subjects, ambiguous };

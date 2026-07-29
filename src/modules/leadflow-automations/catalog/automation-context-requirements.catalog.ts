@@ -104,7 +104,29 @@ export const LEADFLOW_AUTOMATION_CONTEXT_SIGNAL_SPECS: Record<
     dependency: null,
     label: 'Campos preenchidos da oportunidade',
   },
+  [LeadFlowAutomationContextSignal.AppointmentContext]: {
+    signal: LeadFlowAutomationContextSignal.AppointmentContext,
+    contextKey: 'appointmentContext',
+    subject: 'scheduled_item',
+    owningDomain: 'leadflow_calendar',
+    dependency: LeadFlowAutomationDependency.AgendaDomain,
+    label: 'Dados do compromisso',
+  },
 };
+
+/**
+ * Triggers whose subject is a commitment in the Agenda.
+ *
+ * Kept as data rather than a string prefix test because it is also the list the
+ * evaluator uses to decide that an appointment context is mandatory: a trigger
+ * that is added here starts requiring the guard in the same change.
+ */
+export const LEADFLOW_APPOINTMENT_TRIGGERS: ReadonlySet<string> = new Set([
+  'appointment.created',
+  'appointment.confirmation_pending',
+  'appointment.no_show',
+  'appointment.completed',
+]);
 
 /**
  * Which signals an automation's published configuration actually needs.
@@ -123,6 +145,14 @@ export function requiredContextSignals(
   const schedule = automation.schedulePolicy ?? {};
   const required = new Set<LeadFlowAutomationContextSignal>();
 
+  // Required by the trigger rather than by a condition: an agenda automation
+  // says something about a specific commitment, so without that commitment
+  // there is nothing for any condition to be about. Deriving it from the
+  // published trigger keeps the rule config-driven — an instance configured
+  // against another trigger never pays for this read.
+  if (LEADFLOW_APPOINTMENT_TRIGGERS.has(automation.triggerConfig?.type ?? '')) {
+    required.add(LeadFlowAutomationContextSignal.AppointmentContext);
+  }
   if (conditions.businessHoursOnly === true) {
     required.add(LeadFlowAutomationContextSignal.InsideBusinessHours);
   }

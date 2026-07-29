@@ -73,8 +73,17 @@ type ResolvedFinanceRule = {
 const AGENCY_CONNECTION = 'agency';
 
 const WORKER_TYPE_NAME_ALIASES: Record<string, string[]> = {
-  employee_full_time: ['employee_full_time', 'funcionario integral', 'full time'],
-  employee_part_time: ['employee_part_time', 'funcionario parcial', 'meio periodo', 'part time'],
+  employee_full_time: [
+    'employee_full_time',
+    'funcionario integral',
+    'full time',
+  ],
+  employee_part_time: [
+    'employee_part_time',
+    'funcionario parcial',
+    'meio periodo',
+    'part time',
+  ],
   contractor: ['contractor', 'prestador', 'contratado'],
   freelancer: ['freelancer', 'autonomo'],
   mei_contractor: ['mei_contractor', 'mei'],
@@ -90,16 +99,21 @@ function money(value: unknown): string {
 }
 
 function readMonthlyDueDay(member: TeamMember) {
-  const metadata = (member.metadata ?? {}) as Record<string, unknown>;
+  const metadata = member.metadata ?? {};
   const payment = metadata.payment as Record<string, unknown> | undefined;
-  const teamContract = metadata.teamContract as Record<string, unknown> | undefined;
+  const teamContract = metadata.teamContract as
+    | Record<string, unknown>
+    | undefined;
   const raw = payment?.monthlyDueDay ?? teamContract?.monthlyDueDay;
   const parsed = Number(raw);
   if (!Number.isFinite(parsed)) return null;
   return Math.min(31, Math.max(1, Math.trunc(parsed)));
 }
 
-function buildDueDateFromCompetence(competenceEnd: string, dueDay: number | null) {
+function buildDueDateFromCompetence(
+  competenceEnd: string,
+  dueDay: number | null,
+) {
   if (!dueDay) return null;
   const reference = new Date(competenceEnd);
   if (Number.isNaN(reference.getTime())) return null;
@@ -124,8 +138,12 @@ function normalizeWorkerTypeName(value: unknown): string {
     .trim();
 }
 
-function matchesWorkerTypeOption(option: TeamConfigOption, workerType: string): boolean {
-  const configuredKey = option.metadata?.workerType ?? option.metadata?.workerTypeKey;
+function matchesWorkerTypeOption(
+  option: TeamConfigOption,
+  workerType: string,
+): boolean {
+  const configuredKey =
+    option.metadata?.workerType ?? option.metadata?.workerTypeKey;
   if (configuredKey === workerType) return true;
 
   const normalizedName = normalizeWorkerTypeName(option.name);
@@ -211,7 +229,10 @@ export class TeamPaymentsService {
     }
 
     if (query.competenceStart && query.competenceEnd) {
-      where.competenceStart = Between(query.competenceStart, query.competenceEnd);
+      where.competenceStart = Between(
+        query.competenceStart,
+        query.competenceEnd,
+      );
     }
 
     if (query.departmentId) {
@@ -284,23 +305,35 @@ export class TeamPaymentsService {
     return this.paymentRepository.save(payment);
   }
 
-  async updatePayment(ctx: RequestContext, id: string, dto: UpdateTeamPaymentDto) {
+  async updatePayment(
+    ctx: RequestContext,
+    id: string,
+    dto: UpdateTeamPaymentDto,
+  ) {
     const payment = await this.getPayment(ctx, id);
 
     Object.assign(payment, {
       ...dto,
       dueDate: dto.dueDate === undefined ? payment.dueDate : dto.dueDate,
       notes: dto.notes === undefined ? payment.notes : dto.notes,
-      metadata: dto.metadata === undefined ? payment.metadata : dto.metadata ?? {},
+      metadata:
+        dto.metadata === undefined ? payment.metadata : (dto.metadata ?? {}),
     });
 
-    if (dto.baseAmount !== undefined) payment.baseAmount = money(dto.baseAmount);
-    if (dto.workedHours !== undefined) payment.workedHours = money(dto.workedHours);
-    if (dto.overtimeHours !== undefined) payment.overtimeHours = money(dto.overtimeHours);
-    if (dto.workedDays !== undefined) payment.workedDays = money(dto.workedDays);
-    if (dto.grossAmount !== undefined) payment.grossAmount = money(dto.grossAmount);
-    if (dto.benefitsTotal !== undefined) payment.benefitsTotal = money(dto.benefitsTotal);
-    if (dto.discountsTotal !== undefined) payment.discountsTotal = money(dto.discountsTotal);
+    if (dto.baseAmount !== undefined)
+      payment.baseAmount = money(dto.baseAmount);
+    if (dto.workedHours !== undefined)
+      payment.workedHours = money(dto.workedHours);
+    if (dto.overtimeHours !== undefined)
+      payment.overtimeHours = money(dto.overtimeHours);
+    if (dto.workedDays !== undefined)
+      payment.workedDays = money(dto.workedDays);
+    if (dto.grossAmount !== undefined)
+      payment.grossAmount = money(dto.grossAmount);
+    if (dto.benefitsTotal !== undefined)
+      payment.benefitsTotal = money(dto.benefitsTotal);
+    if (dto.discountsTotal !== undefined)
+      payment.discountsTotal = money(dto.discountsTotal);
     if (dto.netAmount !== undefined) payment.netAmount = money(dto.netAmount);
 
     return this.paymentRepository.save(payment);
@@ -333,8 +366,14 @@ export class TeamPaymentsService {
   async confirmPayment(ctx: RequestContext, id: string) {
     const payment = await this.getPayment(ctx, id);
 
-    if (![TeamPaymentStatus.Draft, TeamPaymentStatus.Scheduled].includes(payment.status)) {
-      throw new BadRequestException('Apenas pagamentos em rascunho ou programados podem ser confirmados');
+    if (
+      ![TeamPaymentStatus.Draft, TeamPaymentStatus.Scheduled].includes(
+        payment.status,
+      )
+    ) {
+      throw new BadRequestException(
+        'Apenas pagamentos em rascunho ou programados podem ser confirmados',
+      );
     }
 
     if (payment.financeBillId) {
@@ -351,7 +390,10 @@ export class TeamPaymentsService {
 
     const saved = await this.paymentRepository.save(payment);
 
-    const rule = await this.resolveFinanceRuleConfig(ctx, saved.member?.workerType);
+    const rule = await this.resolveFinanceRuleConfig(
+      ctx,
+      saved.member?.workerType,
+    );
 
     // Treatment 1 — "Não integrar com Finance" (no payable). A direct expense
     // (gerarDespesa sem conta a pagar) is not supported in this flow: the only
@@ -363,7 +405,9 @@ export class TeamPaymentsService {
         ...(saved.metadata ?? {}),
         financeSettingId: rule.id,
         financeIntegrationSkipped: true,
-        financeSkipReason: rule.createExpense ? 'expense_only_unsupported' : 'not_integrated',
+        financeSkipReason: rule.createExpense
+          ? 'expense_only_unsupported'
+          : 'not_integrated',
       };
       return this.paymentRepository.save(saved);
     }
@@ -407,7 +451,10 @@ export class TeamPaymentsService {
       );
     }
 
-    const rule = await this.resolveFinanceRuleConfig(ctx, payment.member?.workerType);
+    const rule = await this.resolveFinanceRuleConfig(
+      ctx,
+      payment.member?.workerType,
+    );
     if (!rule.createPayable) {
       throw new BadRequestException(
         'A regra financeira deste vínculo não gera conta a pagar.',
@@ -447,7 +494,10 @@ export class TeamPaymentsService {
       );
     }
 
-    const rule = await this.resolveFinanceRuleConfig(ctx, payment.member?.workerType);
+    const rule = await this.resolveFinanceRuleConfig(
+      ctx,
+      payment.member?.workerType,
+    );
     if (!rule.createPayable) {
       throw new BadRequestException(
         'A regra financeira deste vínculo não gera conta a pagar.',
@@ -455,7 +505,7 @@ export class TeamPaymentsService {
     }
     if (
       rule.requireApproval &&
-      (payment.metadata as Record<string, unknown>)?.financeApprovalStatus !== 'approved'
+      payment.metadata?.financeApprovalStatus !== 'approved'
     ) {
       throw new BadRequestException(
         'Esta competência exige aprovação antes de ser enviada ao Finance.',
@@ -492,7 +542,9 @@ export class TeamPaymentsService {
       return this.paymentRepository.save(payment);
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
-      this.logger.warn(`Finance bill creation failed for payment ${payment.id}: ${msg}`);
+      this.logger.warn(
+        `Finance bill creation failed for payment ${payment.id}: ${msg}`,
+      );
       payment.metadata = {
         ...(payment.metadata ?? {}),
         financeSettingId: rule.id,
@@ -503,11 +555,21 @@ export class TeamPaymentsService {
     }
   }
 
-  async markPaid(ctx: RequestContext, id: string, dto: MarkTeamPaymentPaidDto = {}) {
+  async markPaid(
+    ctx: RequestContext,
+    id: string,
+    dto: MarkTeamPaymentPaidDto = {},
+  ) {
     const payment = await this.getPayment(ctx, id);
 
-    if (![TeamPaymentStatus.Confirmed, TeamPaymentStatus.PaymentPending].includes(payment.status)) {
-      throw new BadRequestException('Apenas pagamentos confirmados ou pendentes podem ser pagos.');
+    if (
+      ![TeamPaymentStatus.Confirmed, TeamPaymentStatus.PaymentPending].includes(
+        payment.status,
+      )
+    ) {
+      throw new BadRequestException(
+        'Apenas pagamentos confirmados ou pendentes podem ser pagos.',
+      );
     }
 
     const today = new Intl.DateTimeFormat('en-CA', {
@@ -518,56 +580,92 @@ export class TeamPaymentsService {
     }).format(new Date());
     const paymentDate = dto.paymentDate ?? today;
     if (paymentDate > today) {
-      throw new BadRequestException('A data do pagamento não pode ser posterior à data atual.');
+      throw new BadRequestException(
+        'A data do pagamento não pode ser posterior à data atual.',
+      );
     }
 
-    const requestedAmount = dto.amount === undefined
-      ? toNumber(payment.netAmount)
-      : toNumber(dto.amount);
+    const requestedAmount =
+      dto.amount === undefined
+        ? toNumber(payment.netAmount)
+        : toNumber(dto.amount);
     if (requestedAmount <= 0) {
-      throw new BadRequestException('O valor do pagamento deve ser maior que zero.');
+      throw new BadRequestException(
+        'O valor do pagamento deve ser maior que zero.',
+      );
     }
 
     if (payment.financeBillId) {
       try {
         const financeCtx = toFinanceCtx(ctx);
         const contactId = await this.ensureMemberContact(ctx, payment.member);
-        const billBefore = await this.financeBillingService.getBill(financeCtx, payment.financeBillId);
+        const billBefore = await this.financeBillingService.getBill(
+          financeCtx,
+          payment.financeBillId,
+        );
         if (contactId && billBefore.vendorId !== contactId) {
-          await this.financeBillingService.updateBill(financeCtx, payment.financeBillId, { vendorId: contactId });
+          await this.financeBillingService.updateBill(
+            financeCtx,
+            payment.financeBillId,
+            { vendorId: contactId },
+          );
         }
         const balanceDue = toNumber(billBefore.balanceDue);
         if (requestedAmount > balanceDue + 0.005) {
-          throw new BadRequestException('O valor do pagamento não pode superar o saldo devedor.');
+          throw new BadRequestException(
+            'O valor do pagamento não pode superar o saldo devedor.',
+          );
         }
 
-        const financePayment = await this.financeBillingService.createPayment(financeCtx, {
-          direction: FinancePaymentDirection.Vendor,
-          status: FinancePaymentStatus.Completed,
-          method: FinancePaymentMethod.Manual,
-          paymentDate,
-          amount: money(requestedAmount),
-          currency: payment.currency ?? 'BRL',
-          bankAccountId: dto.bankAccountId ?? null,
-          contactId,
-          description: dto.description?.trim() || `Pagamento equipe - ${payment.member?.displayName ?? payment.memberId} - ${payment.competenceStart}`,
-        });
+        const financePayment = await this.financeBillingService.createPayment(
+          financeCtx,
+          {
+            direction: FinancePaymentDirection.Vendor,
+            status: FinancePaymentStatus.Completed,
+            method: FinancePaymentMethod.Manual,
+            paymentDate,
+            amount: money(requestedAmount),
+            currency: payment.currency ?? 'BRL',
+            bankAccountId: dto.bankAccountId ?? null,
+            contactId,
+            description:
+              dto.description?.trim() ||
+              `Pagamento equipe - ${payment.member?.displayName ?? payment.memberId} - ${payment.competenceStart}`,
+          },
+        );
 
-        await this.financeBillingService.allocatePayment(financeCtx, financePayment.id, {
-          targetType: FinanceAllocationTargetType.Bill,
-          targetId: payment.financeBillId,
-          amount: money(requestedAmount),
-        });
+        await this.financeBillingService.allocatePayment(
+          financeCtx,
+          financePayment.id,
+          {
+            targetType: FinanceAllocationTargetType.Bill,
+            targetId: payment.financeBillId,
+            amount: money(requestedAmount),
+          },
+        );
 
-        const billAfter = await this.financeBillingService.getBill(financeCtx, payment.financeBillId);
-        const isFullyPaid = billAfter.status === FinanceBillStatus.Paid || toNumber(billAfter.balanceDue) <= 0.005;
+        const billAfter = await this.financeBillingService.getBill(
+          financeCtx,
+          payment.financeBillId,
+        );
+        const isFullyPaid =
+          billAfter.status === FinanceBillStatus.Paid ||
+          toNumber(billAfter.balanceDue) <= 0.005;
         const previousIds = Array.isArray(payment.metadata?.financePaymentIds)
-          ? payment.metadata.financePaymentIds.filter((value): value is string => typeof value === 'string')
-          : payment.financePaymentId ? [payment.financePaymentId] : [];
+          ? payment.metadata.financePaymentIds.filter(
+              (value): value is string => typeof value === 'string',
+            )
+          : payment.financePaymentId
+            ? [payment.financePaymentId]
+            : [];
 
         payment.financePaymentId = financePayment.id;
-        payment.status = isFullyPaid ? TeamPaymentStatus.Paid : TeamPaymentStatus.PaymentPending;
-        payment.paidAt = isFullyPaid ? new Date(`${paymentDate}T12:00:00.000Z`) : null;
+        payment.status = isFullyPaid
+          ? TeamPaymentStatus.Paid
+          : TeamPaymentStatus.PaymentPending;
+        payment.paidAt = isFullyPaid
+          ? new Date(`${paymentDate}T12:00:00.000Z`)
+          : null;
         payment.metadata = {
           ...(payment.metadata ?? {}),
           financePaymentIds: [...new Set([...previousIds, financePayment.id])],
@@ -580,7 +678,9 @@ export class TeamPaymentsService {
       } catch (error) {
         if (error instanceof BadRequestException) throw error;
         const msg = error instanceof Error ? error.message : String(error);
-        this.logger.warn(`Finance payment creation failed for payment ${id}: ${msg}`);
+        this.logger.warn(
+          `Finance payment creation failed for payment ${id}: ${msg}`,
+        );
         payment.metadata = {
           ...(payment.metadata ?? {}),
           financePaymentPending: true,
@@ -591,7 +691,9 @@ export class TeamPaymentsService {
     }
 
     if (requestedAmount + 0.005 < toNumber(payment.netAmount)) {
-      throw new BadRequestException('Pagamentos parciais exigem uma conta a pagar vinculada no Finance.');
+      throw new BadRequestException(
+        'Pagamentos parciais exigem uma conta a pagar vinculada no Finance.',
+      );
     }
     payment.status = TeamPaymentStatus.Paid;
     payment.paidAt = new Date(`${paymentDate}T12:00:00.000Z`);
@@ -609,12 +711,16 @@ export class TeamPaymentsService {
     const payment = await this.getPayment(ctx, id);
 
     if (payment.status !== TeamPaymentStatus.Paid) {
-      throw new BadRequestException('Apenas pagamentos pagos podem voltar para provisório.');
+      throw new BadRequestException(
+        'Apenas pagamentos pagos podem voltar para provisório.',
+      );
     }
 
     if (payment.financePaymentId) {
       const paymentIds = Array.isArray(payment.metadata?.financePaymentIds)
-        ? payment.metadata.financePaymentIds.filter((value): value is string => typeof value === 'string')
+        ? payment.metadata.financePaymentIds.filter(
+            (value): value is string => typeof value === 'string',
+          )
         : [payment.financePaymentId];
       await Promise.all(
         [...new Set(paymentIds)].map((financePaymentId) =>
@@ -645,7 +751,10 @@ export class TeamPaymentsService {
     if (payment.financeBillId) {
       const financeCtx = toFinanceCtx(ctx);
       try {
-        const bill = await this.financeBillingService.getBill(financeCtx, payment.financeBillId);
+        const bill = await this.financeBillingService.getBill(
+          financeCtx,
+          payment.financeBillId,
+        );
         if (
           bill.status === FinanceBillStatus.Paid ||
           bill.status === FinanceBillStatus.PartiallyPaid
@@ -655,12 +764,17 @@ export class TeamPaymentsService {
           );
         }
         if (bill.status !== FinanceBillStatus.Cancelled) {
-          await this.financeBillingService.cancelBill(financeCtx, payment.financeBillId);
+          await this.financeBillingService.cancelBill(
+            financeCtx,
+            payment.financeBillId,
+          );
         }
       } catch (error) {
         if (error instanceof BadRequestException) throw error;
         const msg = error instanceof Error ? error.message : String(error);
-        this.logger.warn(`Could not cancel finance bill for payment ${id}: ${msg}`);
+        this.logger.warn(
+          `Could not cancel finance bill for payment ${id}: ${msg}`,
+        );
       }
     }
 
@@ -684,7 +798,7 @@ export class TeamPaymentsService {
   async getPaymentFinanceStatus(ctx: RequestContext, id: string) {
     const payment = await this.getPayment(ctx, id);
 
-    const md = (payment.metadata ?? {}) as Record<string, unknown>;
+    const md = payment.metadata ?? {};
     const result: Record<string, unknown> = {
       hasFinanceRecord: Boolean(payment.financeBillId),
       financeBillId: payment.financeBillId ?? null,
@@ -720,7 +834,11 @@ export class TeamPaymentsService {
     return result;
   }
 
-  async createItem(ctx: RequestContext, paymentId: string, dto: CreateTeamPaymentItemDto) {
+  async createItem(
+    ctx: RequestContext,
+    paymentId: string,
+    dto: CreateTeamPaymentItemDto,
+  ) {
     const payment = await this.getPayment(ctx, paymentId);
 
     const item = await this.itemRepository.save(
@@ -765,8 +883,10 @@ export class TeamPaymentsService {
 
     Object.assign(item, {
       ...dto,
-      description: dto.description === undefined ? item.description : dto.description,
-      metadata: dto.metadata === undefined ? item.metadata : dto.metadata ?? {},
+      description:
+        dto.description === undefined ? item.description : dto.description,
+      metadata:
+        dto.metadata === undefined ? item.metadata : (dto.metadata ?? {}),
     });
 
     if (dto.amount !== undefined) item.amount = money(dto.amount);
@@ -802,9 +922,13 @@ export class TeamPaymentsService {
     const payment = await this.getPayment(ctx, paymentId);
 
     const benefits = (payment.items ?? []).filter(
-      (item) => item.type === TeamPaymentItemType.Benefit && toNumber(item.amount) > 0,
+      (item) =>
+        item.type === TeamPaymentItemType.Benefit && toNumber(item.amount) > 0,
     );
-    if (dto.type === TeamPaymentDocumentType.BenefitsDeclaration && benefits.length === 0) {
+    if (
+      dto.type === TeamPaymentDocumentType.BenefitsDeclaration &&
+      benefits.length === 0
+    ) {
       throw new BadRequestException(
         'Não é possível emitir a declaração: este pagamento não possui benefícios.',
       );
@@ -820,7 +944,9 @@ export class TeamPaymentsService {
     }
 
     const requestedTemplateId =
-      typeof dto.metadata?.templateId === 'string' ? dto.metadata.templateId : null;
+      typeof dto.metadata?.templateId === 'string'
+        ? dto.metadata.templateId
+        : null;
     const template = requestedTemplateId
       ? await this.configOptionRepository.findOne({
           where: {
@@ -837,7 +963,9 @@ export class TeamPaymentsService {
     }
 
     if (template) {
-      const templateDocumentType = String(template.metadata?.documentType ?? '');
+      const templateDocumentType = String(
+        template.metadata?.documentType ?? '',
+      );
       const expectedType =
         templateDocumentType === 'payslip'
           ? TeamPaymentDocumentType.Payslip
@@ -847,7 +975,9 @@ export class TeamPaymentsService {
               ? TeamPaymentDocumentType.Statement
               : null;
       if (expectedType !== dto.type) {
-        throw new BadRequestException('O modelo selecionado não corresponde ao tipo de documento.');
+        throw new BadRequestException(
+          'O modelo selecionado não corresponde ao tipo de documento.',
+        );
       }
 
       const relationships = template.metadata?.applicableRelationshipTypes;
@@ -856,11 +986,20 @@ export class TeamPaymentsService {
         relationships.length > 0 &&
         !relationships.includes(payment.member?.workerType)
       ) {
-        throw new BadRequestException('O modelo selecionado não se aplica a este vínculo.');
+        throw new BadRequestException(
+          'O modelo selecionado não se aplica a este vínculo.',
+        );
       }
     }
 
-    const htmlContent = dto.htmlContent ?? this.renderConfiguredPaymentDocument(payment, dto.type, template, dto.metadata);
+    const htmlContent =
+      dto.htmlContent ??
+      this.renderConfiguredPaymentDocument(
+        payment,
+        dto.type,
+        template,
+        dto.metadata,
+      );
 
     return this.documentRepository.save(
       this.documentRepository.create({
@@ -883,7 +1022,10 @@ export class TeamPaymentsService {
     );
   }
 
-  private async isEmployeeWorkerType(ctx: RequestContext, workerType: string): Promise<boolean> {
+  private async isEmployeeWorkerType(
+    ctx: RequestContext,
+    workerType: string,
+  ): Promise<boolean> {
     const configuredTypes = await this.configOptionRepository.find({
       where: {
         tenantId: ctx.tenantId,
@@ -901,7 +1043,11 @@ export class TeamPaymentsService {
       : ['employee_full_time', 'employee_part_time'].includes(workerType);
   }
 
-  async deleteDocument(ctx: RequestContext, paymentId: string, documentId: string) {
+  async deleteDocument(
+    ctx: RequestContext,
+    paymentId: string,
+    documentId: string,
+  ) {
     await this.getPayment(ctx, paymentId);
 
     const doc = await this.documentRepository.findOne({
@@ -921,7 +1067,11 @@ export class TeamPaymentsService {
     return { deleted: true, id: documentId };
   }
 
-  async generateDocumentPdf(ctx: RequestContext, paymentId: string, documentId: string) {
+  async generateDocumentPdf(
+    ctx: RequestContext,
+    paymentId: string,
+    documentId: string,
+  ) {
     await this.getPayment(ctx, paymentId);
 
     const doc = await this.documentRepository.findOne({
@@ -934,7 +1084,8 @@ export class TeamPaymentsService {
     });
 
     if (!doc) throw new NotFoundException('Team payment document not found');
-    if (!doc.htmlContent) throw new BadRequestException('Document has no HTML content to render');
+    if (!doc.htmlContent)
+      throw new BadRequestException('Document has no HTML content to render');
 
     return this.pdfRendererService.renderHtmlToPdf(doc.htmlContent);
   }
@@ -1032,37 +1183,46 @@ export class TeamPaymentsService {
       );
 
       const configuredItems = recurringTemplates.flatMap((template) => {
-        const metadata = (template.metadata ?? {}) as Record<string, unknown>;
+        const metadata = template.metadata ?? {};
         const relationships = metadata.applicableRelationshipTypes;
         if (metadata.recurring !== true) return [];
-        if (Array.isArray(relationships) && relationships.length > 0 && !relationships.includes(member.workerType)) {
+        if (
+          Array.isArray(relationships) &&
+          relationships.length > 0 &&
+          !relationships.includes(member.workerType)
+        ) {
           return [];
         }
         const defaultAmount = toNumber(metadata.defaultAmount);
         const defaultPercentage = toNumber(metadata.defaultPercentage);
-        const amount = defaultAmount > 0
-          ? defaultAmount
-          : defaultPercentage > 0
-            ? (toNumber(calculated.baseAmount) * defaultPercentage) / 100
-            : 0;
+        const amount =
+          defaultAmount > 0
+            ? defaultAmount
+            : defaultPercentage > 0
+              ? (toNumber(calculated.baseAmount) * defaultPercentage) / 100
+              : 0;
         if (amount <= 0) return [];
 
-        return [this.itemRepository.create({
-          tenantId: ctx.tenantId,
-          workspaceId: ctx.workspaceId,
-          paymentId: payment.id,
-          type: template.type === 'payment_benefit_template'
-            ? TeamPaymentItemType.Benefit
-            : TeamPaymentItemType.Discount,
-          name: template.name,
-          description: template.description,
-          amount: money(amount),
-          quantity: '1.00',
-          unitValue: money(amount),
-          metadata: { templateId: template.id, templateSnapshot: metadata },
-        })];
+        return [
+          this.itemRepository.create({
+            tenantId: ctx.tenantId,
+            workspaceId: ctx.workspaceId,
+            paymentId: payment.id,
+            type:
+              template.type === 'payment_benefit_template'
+                ? TeamPaymentItemType.Benefit
+                : TeamPaymentItemType.Discount,
+            name: template.name,
+            description: template.description,
+            amount: money(amount),
+            quantity: '1.00',
+            unitValue: money(amount),
+            metadata: { templateId: template.id, templateSnapshot: metadata },
+          }),
+        ];
       });
-      if (configuredItems.length > 0) await this.itemRepository.save(configuredItems);
+      if (configuredItems.length > 0)
+        await this.itemRepository.save(configuredItems);
 
       payments.push(await this.recalculatePayment(ctx, payment.id));
     }
@@ -1096,9 +1256,15 @@ export class TeamPaymentsService {
     const existing = await this.financeBillRepository
       .createQueryBuilder('bill')
       .where('bill.tenantId = :tenantId', { tenantId: ctx.tenantId })
-      .andWhere('bill.workspaceId = :workspaceId', { workspaceId: ctx.workspaceId })
-      .andWhere("bill.metadata ->> 'teamPaymentOccurrenceKey' = :key", { key: occurrenceKey })
-      .andWhere('bill.status != :cancelled', { cancelled: FinanceBillStatus.Cancelled })
+      .andWhere('bill.workspaceId = :workspaceId', {
+        workspaceId: ctx.workspaceId,
+      })
+      .andWhere("bill.metadata ->> 'teamPaymentOccurrenceKey' = :key", {
+        key: occurrenceKey,
+      })
+      .andWhere('bill.status != :cancelled', {
+        cancelled: FinanceBillStatus.Cancelled,
+      })
       .getOne();
     if (existing) {
       return this.financeBillingService.getBill(financeCtx, existing.id);
@@ -1108,7 +1274,9 @@ export class TeamPaymentsService {
     const positiveItems = items.filter(
       (i) => i.type !== TeamPaymentItemType.Discount,
     );
-    const discountItems = items.filter((i) => i.type === TeamPaymentItemType.Discount);
+    const discountItems = items.filter(
+      (i) => i.type === TeamPaymentItemType.Discount,
+    );
 
     // Shared per-line classification so every line is traceable back to the
     // exact Team item and keeps the rule's category/cost center.
@@ -1211,8 +1379,12 @@ export class TeamPaymentsService {
         const raced = await this.financeBillRepository
           .createQueryBuilder('bill')
           .where('bill.tenantId = :tenantId', { tenantId: ctx.tenantId })
-          .andWhere('bill.workspaceId = :workspaceId', { workspaceId: ctx.workspaceId })
-          .andWhere("bill.metadata ->> 'teamPaymentOccurrenceKey' = :key", { key: occurrenceKey })
+          .andWhere('bill.workspaceId = :workspaceId', {
+            workspaceId: ctx.workspaceId,
+          })
+          .andWhere("bill.metadata ->> 'teamPaymentOccurrenceKey' = :key", {
+            key: occurrenceKey,
+          })
           .getOne();
         if (raced) {
           return this.financeBillingService.getBill(financeCtx, raced.id);
@@ -1222,7 +1394,10 @@ export class TeamPaymentsService {
     }
   }
 
-  private async findFinanceRule(ctx: RequestContext, workerType?: string | null) {
+  private async findFinanceRule(
+    ctx: RequestContext,
+    workerType?: string | null,
+  ) {
     const financeRules = await this.configOptionRepository.find({
       where: {
         tenantId: ctx.tenantId,
@@ -1240,7 +1415,9 @@ export class TeamPaymentsService {
     return (
       matches.find((rule) => {
         const appliesTo = (rule.metadata ?? {}).appliesTo;
-        return appliesTo === 'salary' || appliesTo === 'custom' || appliesTo == null;
+        return (
+          appliesTo === 'salary' || appliesTo === 'custom' || appliesTo == null
+        );
       }) ?? matches[0]
     );
   }
@@ -1250,7 +1427,7 @@ export class TeamPaymentsService {
     workerType?: string | null,
   ): Promise<ResolvedFinanceRule> {
     const rule = await this.findFinanceRule(ctx, workerType);
-    const md = (rule?.metadata ?? {}) as Record<string, unknown>;
+    const md = rule?.metadata ?? {};
     const bool = (value: unknown, fallback: boolean) =>
       typeof value === 'boolean' ? value : fallback;
     const strId = (value: unknown) =>
@@ -1262,7 +1439,9 @@ export class TeamPaymentsService {
       createPayable: bool(md.createPayable, true),
       createExpense: bool(md.createExpense, false),
       // Only block when a rule explicitly requires approval.
-      requireApproval: rule ? bool(md.requireApprovalBeforeFinance, false) : false,
+      requireApproval: rule
+        ? bool(md.requireApprovalBeforeFinance, false)
+        : false,
       categoryId: strId(md.defaultCategoryId),
       costCenterId: strId(md.defaultCostCenterId),
       journalId: strId(md.defaultJournalId),
@@ -1272,7 +1451,10 @@ export class TeamPaymentsService {
     };
   }
 
-  private async ensureMemberContact(ctx: RequestContext, member?: TeamMember | null) {
+  private async ensureMemberContact(
+    ctx: RequestContext,
+    member?: TeamMember | null,
+  ) {
     if (!member) return null;
     if (member.contactId) return member.contactId;
 
@@ -1325,7 +1507,9 @@ export class TeamPaymentsService {
 
         if (end > start) {
           workedMs += end - start;
-          workedDaysSet.add(new Date(open.occurredAt).toISOString().slice(0, 10));
+          workedDaysSet.add(
+            new Date(open.occurredAt).toISOString().slice(0, 10),
+          );
         }
 
         open = null;
@@ -1383,7 +1567,11 @@ export class TeamPaymentsService {
 
     const gross = items
       .filter((item) =>
-        [TeamPaymentItemType.Base, TeamPaymentItemType.Overtime, TeamPaymentItemType.Adjustment].includes(item.type),
+        [
+          TeamPaymentItemType.Base,
+          TeamPaymentItemType.Overtime,
+          TeamPaymentItemType.Adjustment,
+        ].includes(item.type),
       )
       .reduce((sum, item) => sum + toNumber(item.amount), 0);
 
@@ -1439,7 +1627,7 @@ export class TeamPaymentsService {
     template: TeamConfigOption | null,
     requestMetadata?: Record<string, unknown>,
   ) {
-    const templateMetadata = (template?.metadata ?? {}) as Record<string, unknown>;
+    const templateMetadata = template?.metadata ?? {};
     const renderer = String(
       templateMetadata.templateRenderer ??
         (type === TeamPaymentDocumentType.Payslip
@@ -1450,58 +1638,108 @@ export class TeamPaymentsService {
               ? 'payment_statement'
               : ''),
     );
-    const memberMetadata = (payment.member?.metadata ?? {}) as Record<string, unknown>;
-    const agencySnapshot = (requestMetadata?.agencySnapshot ?? {}) as Record<string, unknown>;
+    const memberMetadata = payment.member?.metadata ?? {};
+    const agencySnapshot = (requestMetadata?.agencySnapshot ?? {}) as Record<
+      string,
+      unknown
+    >;
     const items = payment.items ?? [];
     const benefits = items
-      .filter((item) => item.type === TeamPaymentItemType.Benefit && toNumber(item.amount) > 0)
+      .filter(
+        (item) =>
+          item.type === TeamPaymentItemType.Benefit &&
+          toNumber(item.amount) > 0,
+      )
       .map((item) => ({ name: item.name, amount: toNumber(item.amount) }));
     const deductions = items
-      .filter((item) => item.type === TeamPaymentItemType.Discount && toNumber(item.amount) > 0)
+      .filter(
+        (item) =>
+          item.type === TeamPaymentItemType.Discount &&
+          toNumber(item.amount) > 0,
+      )
       .map((item) => ({ name: item.name, amount: toNumber(item.amount) }));
     const earnings = items
-      .filter((item) => [TeamPaymentItemType.Base, TeamPaymentItemType.Overtime, TeamPaymentItemType.Adjustment].includes(item.type) && toNumber(item.amount) !== 0)
+      .filter(
+        (item) =>
+          [
+            TeamPaymentItemType.Base,
+            TeamPaymentItemType.Overtime,
+            TeamPaymentItemType.Adjustment,
+          ].includes(item.type) && toNumber(item.amount) !== 0,
+      )
       .map((item) => ({ name: item.name, amount: toNumber(item.amount) }));
-    const locale = String(templateMetadata.countryScope) === 'US' ? 'en-US' : 'pt-BR';
+    const locale =
+      String(templateMetadata.countryScope) === 'US' ? 'en-US' : 'pt-BR';
     const date = (value: string | null | undefined) => {
       if (!value) return '';
       const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
       return match ? `${match[3]}/${match[2]}/${match[1]}` : value;
     };
-    const periodLabel = new Intl.DateTimeFormat(locale, { month: 'long', year: 'numeric' }).format(
-      new Date(`${payment.competenceStart}T12:00:00Z`),
-    );
+    const periodLabel = new Intl.DateTimeFormat(locale, {
+      month: 'long',
+      year: 'numeric',
+    }).format(new Date(`${payment.competenceStart}T12:00:00Z`));
     const common = {
       agency: {
-        legalName: String(agencySnapshot.legalName ?? agencySnapshot.tradeName ?? 'Agência'),
-        publicName: String(agencySnapshot.tradeName ?? agencySnapshot.legalName ?? 'Agência'),
+        legalName: String(
+          agencySnapshot.legalName ?? agencySnapshot.tradeName ?? 'Agência',
+        ),
+        publicName: String(
+          agencySnapshot.tradeName ?? agencySnapshot.legalName ?? 'Agência',
+        ),
         taxId: String(agencySnapshot.taxId ?? ''),
-        address: String(agencySnapshot.address ?? agencySnapshot.addressLine ?? ''),
-        email: String(agencySnapshot.email ?? agencySnapshot.billingEmail ?? agencySnapshot.supportEmail ?? ''),
+        address: String(
+          agencySnapshot.address ?? agencySnapshot.addressLine ?? '',
+        ),
+        email: String(
+          agencySnapshot.email ??
+            agencySnapshot.billingEmail ??
+            agencySnapshot.supportEmail ??
+            '',
+        ),
         phone: String(agencySnapshot.phone ?? ''),
-        signerName: String(agencySnapshot.signerName ?? 'Responsável financeiro'),
-        signerRole: String(agencySnapshot.signerRole ?? 'Responsável da agência'),
+        signerName: String(
+          agencySnapshot.signerName ?? 'Responsável financeiro',
+        ),
+        signerRole: String(
+          agencySnapshot.signerRole ?? 'Responsável da agência',
+        ),
       },
       member: {
         displayName: payment.member?.displayName ?? payment.memberId,
-        legalName: payment.member?.legalName ?? payment.member?.displayName ?? payment.memberId,
-        document: String(memberMetadata.personalTaxId ?? memberMetadata.document ?? ''),
+        legalName:
+          payment.member?.legalName ??
+          payment.member?.displayName ??
+          payment.memberId,
+        document: String(
+          memberMetadata.personalTaxId ?? memberMetadata.document ?? '',
+        ),
         role: payment.member?.jobTitle ?? payment.member?.roleName ?? '',
-        department: String(memberMetadata.departmentName ?? payment.member?.workerType ?? ''),
+        department: String(
+          memberMetadata.departmentName ?? payment.member?.workerType ?? '',
+        ),
       },
       period: {
         label: periodLabel,
         startDate: date(payment.competenceStart),
         endDate: date(payment.competenceEnd),
-        paymentDate: date(payment.paidAt ? payment.paidAt.toISOString().slice(0, 10) : payment.dueDate),
+        paymentDate: date(
+          payment.paidAt
+            ? payment.paidAt.toISOString().slice(0, 10)
+            : payment.dueDate,
+        ),
       },
       payment: {
         currency: payment.currency,
         baseAmount: toNumber(payment.baseAmount),
         grossAmount: toNumber(payment.grossAmount),
         netAmount: toNumber(payment.netAmount),
-        paymentMethod: String(payment.metadata?.paymentMethod ?? 'Transferência bancária'),
-        notes: payment.notes ?? 'Documento informativo. Não substitui cálculo fiscal ou trabalhista oficial.',
+        paymentMethod: String(
+          payment.metadata?.paymentMethod ?? 'Transferência bancária',
+        ),
+        notes:
+          payment.notes ??
+          'Documento informativo. Não substitui cálculo fiscal ou trabalhista oficial.',
       },
       benefits,
       earnings,
@@ -1509,8 +1747,12 @@ export class TeamPaymentsService {
       signature: {
         memberName: payment.member?.displayName ?? payment.memberId,
         memberRole: payment.member?.jobTitle ?? payment.member?.roleName ?? '',
-        agencySignerName: String(agencySnapshot.signerName ?? 'Responsável financeiro'),
-        agencySignerRole: String(agencySnapshot.signerRole ?? 'Responsável da agência'),
+        agencySignerName: String(
+          agencySnapshot.signerName ?? 'Responsável financeiro',
+        ),
+        agencySignerRole: String(
+          agencySnapshot.signerRole ?? 'Responsável da agência',
+        ),
         city: String(agencySnapshot.city ?? ''),
         date: new Intl.DateTimeFormat(locale).format(new Date()),
       },
@@ -1519,11 +1761,12 @@ export class TeamPaymentsService {
         headerPreset: String(templateMetadata.headerPreset ?? 'classic'),
         footerPreset: String(templateMetadata.footerPreset ?? 'lyra'),
         showLogo: templateMetadata.showLogo !== false,
-        logoUrl: typeof agencySnapshot.logoUrl === 'string'
-          ? agencySnapshot.logoUrl
-          : typeof agencySnapshot.avatarUrl === 'string'
-            ? agencySnapshot.avatarUrl
-            : null,
+        logoUrl:
+          typeof agencySnapshot.logoUrl === 'string'
+            ? agencySnapshot.logoUrl
+            : typeof agencySnapshot.avatarUrl === 'string'
+              ? agencySnapshot.avatarUrl
+              : null,
         showCompanyData: templateMetadata.showCompanyData !== false,
         showDocumentNumber: templateMetadata.showDocumentNumber === true,
         documentNumber: `PAY-${payment.id.slice(0, 8).toUpperCase()}`,
@@ -1534,7 +1777,8 @@ export class TeamPaymentsService {
     if (renderer === 'payslip') {
       return this.pdfRendererService.buildTeamPayslipHtml({
         ...common,
-        pageSize: templateMetadata.defaultPageSize === 'LETTER' ? 'LETTER' : 'A4',
+        pageSize:
+          templateMetadata.defaultPageSize === 'LETTER' ? 'LETTER' : 'A4',
       });
     }
     if (renderer === 'benefit_acknowledgment') {

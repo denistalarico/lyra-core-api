@@ -58,6 +58,7 @@ function loaded(
   return {
     shared: {},
     perAutomation: new Map(),
+    derivedSubjects: {},
     gaps: [],
     cost: { queryCount: 0, durationMs: 0, sources: [] },
     ...overrides,

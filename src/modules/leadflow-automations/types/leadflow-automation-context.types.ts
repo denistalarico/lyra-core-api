@@ -18,6 +18,40 @@ export enum LeadFlowAutomationContextSignal {
   MatchedKeywords = 'matched_keywords',
   MatchedIntents = 'matched_intents',
   PresentFields = 'present_fields',
+  /** Everything an agenda automation must know before speaking about a commitment. */
+  AppointmentContext = 'appointment_context',
+}
+
+/**
+ * The minimum an agenda automation needs in order to act on a commitment.
+ *
+ * Deliberately one signal rather than five: the parts are useless apart. A
+ * reminder that knows the time but not who to send it to is not a partially
+ * working reminder, and a recovery message about an appointment whose type
+ * nobody could read would be a message about nothing. Establishing them
+ * together is what lets the evaluator refuse once, with one honest reason,
+ * instead of half-acting.
+ *
+ * `conversationId`/`opportunityId` are the links the Appointments domain wrote
+ * itself when the commitment was created, so reading them here is following a
+ * reference rather than guessing a relationship.
+ */
+export interface LeadFlowAutomationAppointmentContext {
+  appointmentId: string;
+  /** ISO instant the commitment starts. Never absent — a commitment without a time is not one. */
+  startsAt: string;
+  timezone: string | null;
+  /** What was booked (the `type` of the scheduled item). */
+  serviceRef: string;
+  /** Where the booking came from, which is also where a reply would arrive. */
+  channel: string;
+  contactId: string | null;
+  conversationId: string | null;
+  opportunityId: string | null;
+  /** Canonical lifecycle: pending | confirmed | canceled | no_show | completed | rescheduled. */
+  lifecycleStatus: string;
+  /** ISO deadline for the contact to confirm, when the commitment declares one. */
+  confirmationDueAt: string | null;
 }
 
 /**
@@ -27,6 +61,8 @@ export enum LeadFlowAutomationContextSignal {
 export type LeadFlowAutomationContextSubject =
   | 'inbox_conversation'
   | 'crm_opportunity'
+  /** A commitment in the Agenda (`scheduled_items`). */
+  | 'scheduled_item'
   /** The workspace itself (settings, business hours). */
   | 'workspace'
   /** The automation's own run history. Not a cross-domain read. */

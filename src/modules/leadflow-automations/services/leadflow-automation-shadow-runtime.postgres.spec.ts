@@ -26,6 +26,7 @@ import { LeadFlowAutomationContextLoaderService } from './leadflow-automation-co
 import { CrmOpportunityFieldCatalogService } from '../../crm/services/crm-opportunity-field-catalog.service';
 import { LeadScoreQueryService } from '../../crm/lead-score/services/lead-score-query.service';
 import { CrmLeadScoreStateEntity } from '../../crm/lead-score/entities/crm-lead-score-state.entity';
+import { ScheduledItemEntity } from '../../appointments/entities/scheduled-item.entity';
 import { CrmOpportunityEntity } from '../../crm/entities/crm-opportunity.entity';
 import { InboxConversationEntity } from '../../inbox/entities/inbox-conversation.entity';
 import { InboxMessageEntity } from '../../inbox/entities/inbox-message.entity';
@@ -60,6 +61,7 @@ run('LeadFlow Automations shadow runtime PostgreSQL', () => {
       AgencyDataSource.getRepository(InboxMessageEntity),
       AgencyDataSource.getRepository(InboxSettingsEntity),
       AgencyDataSource.getRepository(CrmOpportunityEntity),
+      AgencyDataSource.getRepository(ScheduledItemEntity),
       AgencyDataSource.getRepository(LeadFlowAutomationRunEntity),
       new LeadScoreQueryService(
         AgencyDataSource.getRepository(CrmLeadScoreStateEntity),
