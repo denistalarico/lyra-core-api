@@ -123,6 +123,26 @@ export class FinanceTeamPaymentReconciliationService {
     return this.reconcilePayments(ctx, payments);
   }
 
+  async reconcileBills(
+    ctx: FinanceRequestContext,
+    financeBillIds: string[],
+  ): Promise<TeamPayment[]> {
+    const billIds = [...new Set(financeBillIds.filter(Boolean))];
+    if (billIds.length === 0) return [];
+
+    const payments = await this.teamPaymentsRepository.find({
+      where: {
+        tenantId: ctx.tenantId,
+        workspaceId: ctx.workspaceId,
+        financeBillId: In(billIds),
+        status: Not(
+          In([TeamPaymentStatus.Cancelled, TeamPaymentStatus.Archived]),
+        ),
+      },
+    });
+    return this.reconcilePayments(ctx, payments);
+  }
+
   async reconcilePayments(
     ctx: FinanceRequestContext,
     teamPayments: TeamPayment[],

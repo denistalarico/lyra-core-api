@@ -323,4 +323,25 @@ describe('FinanceTeamPaymentReconciliationService', () => {
       memberId: 'member-1',
     });
   });
+
+  it('reconciles only Team payments linked to the affected Finance bills', async () => {
+    const teamPayment = makeTeamPayment();
+    const { service, teamPaymentsRepository } = makeService({
+      teamPayments: [teamPayment],
+      bills: [makeBill()],
+      allocations: [],
+      financePayments: [],
+    });
+
+    await service.reconcileBills(CTX, ['bill-1', 'bill-1']);
+
+    expect(teamPaymentsRepository.find).toHaveBeenCalledTimes(1);
+    const findOptions = teamPaymentsRepository.find.mock.calls[0][0] as {
+      where: Record<string, unknown>;
+    };
+    expect(findOptions.where).toMatchObject({
+      tenantId: CTX.tenantId,
+      workspaceId: CTX.workspaceId,
+    });
+  });
 });

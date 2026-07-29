@@ -28,6 +28,7 @@ import { FinanceJournalEntryService } from './finance-journal-entry.service';
 import { FinancePostingService } from './finance-posting.service';
 import { FinanceNotificationPublisher } from './finance-notification.publisher';
 import { FinanceBillingService } from './finance-billing.service';
+import { FinanceTeamPaymentReconciliationService } from './finance-team-payment-reconciliation.service';
 
 describe('FinanceBillingService notification triggers', () => {
   it('publishes invoice_issued on draft to issued transition without using metadata recipients', async () => {
@@ -196,7 +197,8 @@ describe('FinanceBillingService notification triggers', () => {
       paidAmount: '0.00',
       metadata: { ownerUserId: 'user-bill-owner' },
     });
-    const { service, publisher } = makeService({ payment, bill });
+    const { service, publisher, financeTeamPaymentReconciliationService } =
+      makeService({ payment, bill });
 
     await service.allocatePayment(makeContext(), payment.id, {
       targetType: FinanceAllocationTargetType.Bill,
@@ -214,6 +216,162 @@ describe('FinanceBillingService notification triggers', () => {
         recipients: [],
       }),
     );
+    expect(
+      financeTeamPaymentReconciliationService.reconcileBills,
+    ).toHaveBeenCalledWith(makeContext(), [bill.id]);
+  });
+
+  it('reconciles Team when a scheduled vendor payment is completed', async () => {
+    const bill = makeBill({
+      status: FinanceBillStatus.Open,
+      totalAmount: '100.00',
+      paidAmount: '0.00',
+      balanceDue: '100.00',
+    });
+    const payment = makePayment({
+      direction: FinancePaymentDirection.Vendor,
+      status: FinancePaymentStatus.Pending,
+      amount: '100.00',
+      allocatedAmount: '0.00',
+      metadata: {
+        scheduledTarget: {
+          targetType: FinanceAllocationTargetType.Bill,
+          targetId: bill.id,
+        },
+      },
+    });
+    const { service, financeTeamPaymentReconciliationService } = makeService({
+      payment,
+      bill,
+    });
+
+    await service.updatePayment(makeContext(), payment.id, {
+      status: FinancePaymentStatus.Completed,
+    });
+
+    expect(
+      financeTeamPaymentReconciliationService.reconcileBills,
+    ).toHaveBeenCalledWith(makeContext(), [bill.id]);
+  });
+
+  it.each([
+    FinancePaymentStatus.Pending,
+    FinancePaymentStatus.Cancelled,
+    FinancePaymentStatus.Refunded,
+  ])(
+    'reconciles Team when a completed vendor payment changes to %s',
+    async (nextStatus) => {
+      const payment = makePayment({
+        direction: FinancePaymentDirection.Vendor,
+        status: FinancePaymentStatus.Completed,
+        amount: '100.00',
+        allocatedAmount: '100.00',
+      });
+      const bill = makeBill({
+        status: FinanceBillStatus.Paid,
+        totalAmount: '100.00',
+        paidAmount: '100.00',
+        balanceDue: '0.00',
+      });
+      const allocation = {
+        id: 'allocation-bill-reopen-1',
+        tenantId: 'tenant-1',
+        workspaceId: 'workspace-1',
+        paymentId: payment.id,
+        targetType: FinanceAllocationTargetType.Bill,
+        targetId: bill.id,
+        amount: '100.00',
+      } as FinancePaymentAllocation;
+      const { service, financeTeamPaymentReconciliationService } = makeService({
+        payment,
+        bill,
+        allocations: [allocation],
+      });
+
+      await service.updatePayment(makeContext(), payment.id, {
+        status: nextStatus,
+      });
+
+      expect(
+        financeTeamPaymentReconciliationService.reconcileBills,
+      ).toHaveBeenCalledWith(makeContext(), [bill.id]);
+    },
+  );
+
+  it('reconciles Team after deleting an allocated vendor payment', async () => {
+    const payment = makePayment({
+      direction: FinancePaymentDirection.Vendor,
+      status: FinancePaymentStatus.Completed,
+      amount: '100.00',
+      allocatedAmount: '100.00',
+    });
+    const bill = makeBill({
+      status: FinanceBillStatus.Paid,
+      totalAmount: '100.00',
+      paidAmount: '100.00',
+      balanceDue: '0.00',
+    });
+    const allocation = {
+      id: 'allocation-bill-delete-1',
+      tenantId: 'tenant-1',
+      workspaceId: 'workspace-1',
+      paymentId: payment.id,
+      targetType: FinanceAllocationTargetType.Bill,
+      targetId: bill.id,
+      amount: '100.00',
+    } as FinancePaymentAllocation;
+    const { service, financeTeamPaymentReconciliationService } = makeService({
+      payment,
+      bill,
+      allocations: [allocation],
+    });
+
+    await service.deletePayment(makeContext(), payment.id);
+
+    expect(
+      financeTeamPaymentReconciliationService.reconcileBills,
+    ).toHaveBeenCalledWith(makeContext(), [bill.id]);
+  });
+
+  it('reconciles Team when a linked Finance bill is cancelled', async () => {
+    const bill = makeBill();
+    const { service, financeTeamPaymentReconciliationService } = makeService({
+      bill,
+    });
+
+    await service.cancelBill(makeContext(), bill.id);
+
+    expect(
+      financeTeamPaymentReconciliationService.reconcileBills,
+    ).toHaveBeenCalledWith(makeContext(), [bill.id]);
+  });
+
+  it('keeps a successful bill allocation successful when Team reconciliation fails', async () => {
+    const payment = makePayment({
+      direction: FinancePaymentDirection.Vendor,
+      amount: '50.00',
+      allocatedAmount: '0.00',
+    });
+    const bill = makeBill({
+      status: FinanceBillStatus.Open,
+      balanceDue: '50.00',
+      paidAmount: '0.00',
+    });
+    const { service, financeTeamPaymentReconciliationService } = makeService({
+      payment,
+      bill,
+    });
+    financeTeamPaymentReconciliationService.reconcileBills.mockRejectedValueOnce(
+      new Error('Team unavailable'),
+    );
+
+    await expect(
+      service.allocatePayment(makeContext(), payment.id, {
+        targetType: FinanceAllocationTargetType.Bill,
+        targetId: bill.id,
+        amount: '50.00',
+      }),
+    ).resolves.toEqual(expect.objectContaining({ status: 'ok' }));
   });
 
   it('does not auto-fire finance.recurring_charge_created when generating an invoice from a recurring profile', async () => {
@@ -581,6 +739,7 @@ function makeService(options: {
     findOne: jest.fn().mockResolvedValue(payment),
     find: jest.fn().mockResolvedValue([payment]),
     save: jest.fn(async (item: FinancePayment) => item),
+    remove: jest.fn(async (item: FinancePayment) => item),
     createQueryBuilder: jest.fn(() => paymentsQueryBuilder),
   };
   let currentAllocations = [...(options.allocations ?? [])];
@@ -631,6 +790,9 @@ function makeService(options: {
     postPaymentAllocationSettlement: jest.fn().mockResolvedValue(null),
     reversePayment: jest.fn().mockResolvedValue([]),
   } as unknown as jest.Mocked<FinancePostingService>;
+  const financeTeamPaymentReconciliationService = {
+    reconcileBills: jest.fn().mockResolvedValue([]),
+  } as unknown as jest.Mocked<FinanceTeamPaymentReconciliationService>;
   const service = new FinanceBillingService(
     invoicesRepo as unknown as Repository<FinanceInvoice>,
     invoiceLinesRepo as unknown as Repository<FinanceInvoiceLine>,
@@ -647,6 +809,7 @@ function makeService(options: {
     { create: jest.fn() } as unknown as FinanceJournalEntryService,
     postingService,
     publisher,
+    financeTeamPaymentReconciliationService,
   );
 
   return {
@@ -659,6 +822,7 @@ function makeService(options: {
     billRecurrencesRepo,
     postingService,
     paymentAllocationsRepo,
+    financeTeamPaymentReconciliationService,
   };
 }
 

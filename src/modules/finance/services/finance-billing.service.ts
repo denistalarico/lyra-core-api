@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
@@ -49,6 +50,7 @@ import { FinanceDocumentNumberingService } from './finance-document-numbering.se
 import { FinanceJournalEntryService } from './finance-journal-entry.service';
 import { FinancePostingService } from './finance-posting.service';
 import { FinanceNotificationPublisher } from './finance-notification.publisher';
+import { FinanceTeamPaymentReconciliationService } from './finance-team-payment-reconciliation.service';
 
 function toMoney(value: string | number | null | undefined): number {
   if (value === null || value === undefined || value === '') return 0;
@@ -74,6 +76,8 @@ type ScheduledPaymentTarget = {
 
 @Injectable()
 export class FinanceBillingService {
+  private readonly logger = new Logger(FinanceBillingService.name);
+
   constructor(
     @InjectRepository(FinanceInvoice, 'agency')
     private readonly invoicesRepo: Repository<FinanceInvoice>,
@@ -112,7 +116,27 @@ export class FinanceBillingService {
     private readonly journalEntryService: FinanceJournalEntryService,
     private readonly postingService: FinancePostingService,
     private readonly financeNotificationPublisher: FinanceNotificationPublisher,
+    private readonly financeTeamPaymentReconciliationService: FinanceTeamPaymentReconciliationService,
   ) {}
+
+  private async reconcileTeamPaymentsForBills(
+    ctx: FinanceRequestContext,
+    billIds: Iterable<string>,
+  ) {
+    const uniqueBillIds = [...new Set(billIds)];
+    if (uniqueBillIds.length === 0) return;
+    try {
+      await this.financeTeamPaymentReconciliationService.reconcileBills(
+        ctx,
+        uniqueBillIds,
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.warn(
+        `Team payment reconciliation failed for Finance bills ${uniqueBillIds.join(', ')}: ${message}`,
+      );
+    }
+  }
 
   listInvoices(ctx: FinanceRequestContext) {
     return this.invoicesRepo.find({
@@ -729,6 +753,7 @@ export class FinanceBillingService {
       saved.status === FinanceBillStatus.Cancelled
     ) {
       await this.postingService.reverseBill(ctx, saved.id);
+      await this.reconcileTeamPaymentsForBills(ctx, [saved.id]);
     }
 
     if (shouldSettleFromStatusPatch) {
@@ -762,6 +787,7 @@ export class FinanceBillingService {
       return persisted;
     });
 
+    await this.reconcileTeamPaymentsForBills(ctx, [saved.id]);
     return this.getBill(ctx, saved.id);
   }
 
@@ -1755,6 +1781,7 @@ export class FinanceBillingService {
     for (const billId of billIds) {
       await this.recalculateBillPaymentState(ctx, billId);
     }
+    await this.reconcileTeamPaymentsForBills(ctx, billIds);
   }
 
   private async recalculateInvoicePaymentState(
@@ -2224,6 +2251,9 @@ export class FinanceBillingService {
       });
     }
 
+    if (dto.targetType === FinanceAllocationTargetType.Bill) {
+      await this.reconcileTeamPaymentsForBills(ctx, [dto.targetId]);
+    }
     return result;
   }
 
