@@ -109,6 +109,12 @@ export const AGENCY_NOTIFICATION_CATALOG: readonly NotificationDefinition[] = [
     NotificationRecipientStrategy.EXPLICIT_USERS,
     { defaultPriority: NotificationPriority.HIGH },
   ),
+  standard(
+    'leadflow.daily_opportunity_summary.ready',
+    'sales',
+    NotificationCategory.STATUS,
+    NotificationRecipientStrategy.EXPLICIT_USERS,
+  ),
   // Team Chat
   standard(
     'chat.direct_message_received',

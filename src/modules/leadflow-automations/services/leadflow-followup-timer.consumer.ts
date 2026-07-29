@@ -7,6 +7,7 @@ import { InboxConversationEntity } from '../../inbox/entities/inbox-conversation
 import { InboxDomainOutboxEntity } from '../../inbox/entities/inbox-domain-outbox.entity';
 import { InboxMessageEntity } from '../../inbox/entities/inbox-message.entity';
 import { InboxSettingsEntity } from '../../inbox/entities/inbox-settings.entity';
+import { hasLeadFlowOutboundOptOut } from '../../inbox/services/leadflow-contact-opt-out';
 import { LeadFlowAutomationEntity } from '../entities';
 import { LeadFlowAutomationStatus } from '../enums/leadflow-automation-status.enum';
 import { SendMessageExecutor } from '../executors/send-message.executor';
@@ -96,9 +97,16 @@ export class LeadFlowFollowupTimerConsumer
     const automation = await this.activeAutomation(
       envelope,
       automationId,
-      'followup_idle_lead',
+      null,
     );
-    if (!automation) return;
+    if (
+      !automation ||
+      !['followup_idle_lead', 'cold_lead_reactivation'].includes(
+        automation.recipeKey,
+      )
+    ) {
+      return;
+    }
     const conversation = await this.conversations.findOne({
       where: {
         id: conversationId,
@@ -216,6 +224,13 @@ export class LeadFlowFollowupTimerConsumer
       isHandoff(conversation)
     )
       return;
+    if (
+      stringField(envelope.payload.automationRecipeKey) ===
+        'cold_lead_reactivation' &&
+      hasLeadFlowOutboundOptOut(conversation)
+    ) {
+      return;
+    }
     if (booleanField(envelope.payload.stopIfReplied, true)) {
       const replied = await this.messages.exist({
         where: {

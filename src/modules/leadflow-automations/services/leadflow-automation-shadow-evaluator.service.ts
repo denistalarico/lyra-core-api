@@ -78,7 +78,10 @@ export class LeadFlowAutomationShadowEvaluatorService {
         : null;
     if (
       detectorAutomationId &&
-      delivery.eventName === 'leadflow.inbox.conversation.idle'
+      [
+        'leadflow.inbox.conversation.idle',
+        'leadflow.automations.schedule.daily',
+      ].includes(delivery.eventName)
     ) {
       matches = matches.filter(
         (match) => match.source.id === detectorAutomationId,

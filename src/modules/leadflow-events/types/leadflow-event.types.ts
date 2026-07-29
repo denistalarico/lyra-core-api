@@ -93,8 +93,9 @@ export type LeadFlowEventName =
   | 'leadflow.automations.execution.completed'
   | 'leadflow.automations.execution.failed'
   | 'leadflow.automations.execution.skipped'
-  // Automations (feedback outcome contract; producer arrives in Phase 8)
+  // Automations (feedback outcome and recurring schedule)
   | 'leadflow.automations.csat.response.recorded'
+  | 'leadflow.automations.schedule.daily'
   // Calendar / Agenda
   | 'leadflow.calendar.appointment.created'
   | 'leadflow.calendar.appointment.updated'

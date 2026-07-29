@@ -50,7 +50,11 @@ export class ScheduleFollowupExecutor implements AutomationExecutor {
         timerKey: `followup:${request.automationId}:${subjectId}:${baselineAt}:1`,
         dedupeScope: request.automationId,
         fireAt,
-        purpose: 'automation_followup',
+        purpose:
+          stringField(request.payload.timerPurpose) ===
+          'automation_reactivation'
+            ? 'automation_reactivation'
+            : 'automation_followup',
         consumerKey: LEADFLOW_FOLLOWUP_TIMER_CONSUMER,
         payload: {
           ...request.payload,

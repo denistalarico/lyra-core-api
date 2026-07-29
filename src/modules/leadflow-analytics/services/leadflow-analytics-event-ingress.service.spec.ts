@@ -35,10 +35,17 @@ function build(row = delivery()) {
   const dataSource = {
     getRepository: jest.fn().mockReturnValue(repository),
   } as unknown as DataSource;
+  const csat = {
+    observeInboundDelivery: jest.fn().mockResolvedValue(null),
+  };
   return {
-    service: new LeadFlowAnalyticsEventIngressService(dataSource),
+    service: new LeadFlowAnalyticsEventIngressService(
+      dataSource,
+      csat as never,
+    ),
     repository,
     updates,
+    csat,
   };
 }
 
@@ -61,7 +68,7 @@ describe('LeadFlowAnalyticsEventIngressService', () => {
   });
 
   it('skips an event outside the published catalog', async () => {
-    const { service, updates } = build(
+    const { service, updates, csat } = build(
       delivery({ eventName: 'leadflow.crm.opportunity.unknown' }),
     );
 
@@ -71,6 +78,7 @@ describe('LeadFlowAnalyticsEventIngressService', () => {
       status: 'skipped',
       skipReason: 'event_not_catalogued',
     });
+    expect(csat.observeInboundDelivery).not.toHaveBeenCalled();
   });
 
   it('skips a planned contract until its owning phase activates it', async () => {

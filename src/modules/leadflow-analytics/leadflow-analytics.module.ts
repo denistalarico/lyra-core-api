@@ -12,6 +12,7 @@ import { LeadFlowCsatResponseEntity } from './entities';
 import { LeadFlowAnalyticsController } from './leadflow-analytics.controller';
 import { LeadFlowAnalyticsEventIngressService } from './services/leadflow-analytics-event-ingress.service';
 import { LeadFlowAnalyticsService } from './services/leadflow-analytics.service';
+import { LeadFlowCsatService } from './services/leadflow-csat.service';
 
 @Module({
   imports: [
@@ -31,7 +32,11 @@ import { LeadFlowAnalyticsService } from './services/leadflow-analytics.service'
     ),
   ],
   controllers: [LeadFlowAnalyticsController],
-  providers: [LeadFlowAnalyticsService, LeadFlowAnalyticsEventIngressService],
-  exports: [LeadFlowAnalyticsService],
+  providers: [
+    LeadFlowAnalyticsService,
+    LeadFlowAnalyticsEventIngressService,
+    LeadFlowCsatService,
+  ],
+  exports: [LeadFlowAnalyticsService, LeadFlowCsatService],
 })
 export class LeadFlowAnalyticsModule {}

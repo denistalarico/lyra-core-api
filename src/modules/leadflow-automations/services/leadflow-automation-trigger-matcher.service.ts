@@ -75,6 +75,69 @@ export class LeadFlowAutomationTriggerMatcherService {
     return this.findMatchingTriggers(tenantId, workspaceId, [trigger]);
   }
 
+  /**
+   * Finds active published schedules across every tenant/workspace.
+   *
+   * Only the scheduler coordinator uses this cross-scope scan. Each returned
+   * match still carries and validates its own tenant/workspace snapshot before
+   * a timer is persisted, so the later fire remains strictly scoped.
+   */
+  async findActiveMatchingTriggerAcrossScopes(
+    trigger: string,
+  ): Promise<LeadFlowAutomationTriggerMatch[]> {
+    const candidates = await this.automationsRepository.find({
+      where: {
+        publishedVersionId: Not(IsNull()),
+        status: LeadFlowAutomationStatus.Active,
+      },
+      order: { createdAt: 'ASC' },
+    });
+    const versionIds = candidates
+      .map((automation) => automation.publishedVersionId)
+      .filter((id): id is string => typeof id === 'string');
+    if (versionIds.length === 0) return [];
+
+    const versions = await this.versionsRepository.find({
+      where: {
+        id: In(versionIds),
+        status: LeadFlowAutomationVersionStatus.Published,
+      },
+    });
+    const versionsById = new Map(
+      versions.map((version) => [version.id, version]),
+    );
+
+    const matches: LeadFlowAutomationTriggerMatch[] = [];
+    for (const source of candidates) {
+      const version = source.publishedVersionId
+        ? versionsById.get(source.publishedVersionId)
+        : undefined;
+      if (
+        !version ||
+        version.automationId !== source.id ||
+        version.tenantId !== source.tenantId
+      ) {
+        continue;
+      }
+      const snapshot = this.readSnapshot(version);
+      if (
+        !snapshot ||
+        snapshot.tenantId !== source.tenantId ||
+        snapshot.workspaceId !== source.workspaceId ||
+        snapshot.automationId !== source.id ||
+        snapshot.trigger?.type !== trigger
+      ) {
+        continue;
+      }
+      matches.push({
+        source,
+        version,
+        automation: this.fromSnapshot(source, snapshot),
+      });
+    }
+    return matches;
+  }
+
   private async findMatchingTriggers(
     tenantId: string,
     workspaceId: string,

@@ -6,6 +6,7 @@ import { DataSource } from 'typeorm';
 import { getEventByName } from '../../leadflow-events/catalog/leadflow-event.catalog';
 import { LeadFlowEventDeliveryEntity } from '../../leadflow-events/entities';
 import { LeadFlowEventStatus } from '../../leadflow-events/enums/leadflow-event-status.enum';
+import { LeadFlowCsatService } from './leadflow-csat.service';
 
 export const LEADFLOW_ANALYTICS_EVENT_CONSUMER = 'leadflow.analytics' as const;
 
@@ -40,6 +41,7 @@ export class LeadFlowAnalyticsEventIngressService implements OnApplicationShutdo
 
   constructor(
     @InjectDataSource('agency') private readonly dataSource: DataSource,
+    private readonly csat: LeadFlowCsatService,
   ) {}
 
   onApplicationShutdown(): void {
@@ -133,6 +135,10 @@ export class LeadFlowAnalyticsEventIngressService implements OnApplicationShutdo
         this.metrics.skipped += 1;
         return;
       }
+
+      // A stateful projection may only observe an event after the catalog,
+      // version and consumer-ownership checks accept its contract.
+      await this.csat.observeInboundDelivery(delivery);
 
       await repository.update(
         { id: delivery.id, status: 'processing', lockedBy: this.workerId },

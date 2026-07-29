@@ -19,6 +19,7 @@ const ACTIONS: LeadFlowAutomationAction[] = [
   'send_webhook',
   'append_note',
   'generate_summary_placeholder',
+  'request_csat',
 ];
 
 describe('automation executor registry', () => {
@@ -74,6 +75,13 @@ describe('automation executor registry', () => {
     expect(executorAvailability('add_tag').available).toBe(true);
     expect(unavailableExecutors(['append_note', 'append_note'])).toHaveLength(
       1,
+    );
+  });
+
+  it('exposes the Phase 8 feedback and daily summary executors', () => {
+    expect(executorAvailability('request_csat').available).toBe(true);
+    expect(executorAvailability('generate_summary_placeholder').available).toBe(
+      true,
     );
   });
 });

@@ -18,6 +18,12 @@ describe('LeadFlowAutomationConfigSchemaService', () => {
   const automaticTagging = getRecipeByKey(
     'automatic_tagging',
   ) as LeadFlowAutomationRecipeCatalogItem;
+  const coldReactivation = getRecipeByKey(
+    'cold_lead_reactivation',
+  ) as LeadFlowAutomationRecipeCatalogItem;
+  const dailySummary = getRecipeByKey(
+    'daily_opportunity_summary',
+  ) as LeadFlowAutomationRecipeCatalogItem;
 
   describe('validateSection', () => {
     it('accepts the recipe defaults unchanged', () => {
@@ -42,6 +48,32 @@ describe('LeadFlowAutomationConfigSchemaService', () => {
       );
 
       expect(result.valid).toBe(true);
+    });
+
+    it('validates daily wall-clock time and IANA timezone', () => {
+      expect(
+        service.validateSection(
+          dailySummary,
+          'schedulePolicy',
+          { dailyTime: '08:30', timezone: 'America/Sao_Paulo' },
+          dailySummary.defaultSchedulePolicy,
+        ).valid,
+      ).toBe(true);
+      expect(
+        service
+          .validateSection(
+            dailySummary,
+            'schedulePolicy',
+            { dailyTime: '8h30', timezone: 'Mars/Olympus' },
+            dailySummary.defaultSchedulePolicy,
+          )
+          .errors.map((error) => error.path),
+      ).toEqual(
+        expect.arrayContaining([
+          'schedulePolicy.dailyTime',
+          'schedulePolicy.timezone',
+        ]),
+      );
     });
 
     it('rejects an unknown field instead of persisting it', () => {
@@ -167,6 +199,19 @@ describe('LeadFlowAutomationConfigSchemaService', () => {
   });
 
   describe('findMissingRequiredFields', () => {
+    it('keeps cold reactivation unready until a delivery channel is enabled', () => {
+      const missing = service.findMissingRequiredFields(coldReactivation, {
+        trigger: coldReactivation.defaultTriggerConfig,
+        conditions: coldReactivation.defaultConditionConfig,
+        actions: coldReactivation.defaultActionConfig,
+        message: coldReactivation.defaultMessageConfig,
+        crmPolicy: coldReactivation.defaultCrmPolicy,
+        schedulePolicy: coldReactivation.defaultSchedulePolicy,
+      });
+
+      expect(missing).toContain('message.followupSteps');
+    });
+
     it('does not make a global WhatsApp template an activation requirement', () => {
       const missing = service.findMissingRequiredFields(idleLead, {
         trigger: idleLead.defaultTriggerConfig,

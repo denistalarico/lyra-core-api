@@ -623,7 +623,7 @@ export const LEADFLOW_EVENT_CATALOG: LeadFlowEventCatalogItem[] = [
   buildEvent({
     eventName: 'leadflow.automations.csat.response.recorded',
     description:
-      'Resposta de Avaliação do atendimento (CSAT) registrada na escala de 1 a 5. O produtor será ligado pela Fase 8.',
+      'Resposta de avaliação do atendimento (CSAT) registrada na escala de 1 a 5.',
     requiredContext: ['automationId', 'csatResponseId'],
     payloadSchema: {
       score: field(
@@ -647,6 +647,26 @@ export const LEADFLOW_EVENT_CATALOG: LeadFlowEventCatalogItem[] = [
         'Canal pelo qual a resposta foi recebida.',
       ),
     },
+  }),
+  buildEvent({
+    eventName: 'leadflow.automations.schedule.daily',
+    description:
+      'Janela diária de uma automação atingida pelo SchedulerRuntime durável.',
+    requiredContext: ['automationId'],
+    payloadSchema: {
+      scheduledFor: field(
+        'string',
+        true,
+        'ISO do instante diário que originou a execução.',
+      ),
+      localDate: field(
+        'string',
+        true,
+        'Data local YYYY-MM-DD usada para a janela do resumo.',
+      ),
+      timezone: field('string', true, 'Fuso IANA da rotina diária.'),
+    },
+    emittedBy: 'system.scheduler',
   }),
 
   // ── Calendar / Agenda (app opcional premium) ─────────────────────────────
@@ -889,6 +909,13 @@ export const LEADFLOW_AUTOMATION_TRIGGER_EVENT_MAPPINGS: LeadFlowEventTriggerMap
         'Emitido apenas no cruzamento do limiar (anterior < 70 e novo >= 70). Permanecer quente não reemite.',
     },
     {
+      trigger: 'opportunity.won',
+      eventName: 'leadflow.crm.opportunity.won',
+      status: 'mapped',
+      notes:
+        'Produtor canônico do CRM; a Fase 8 usa o ganho como ciclo disponível para solicitar CSAT.',
+    },
+    {
       trigger: 'opportunity.missing_fields_detected',
       eventName: null,
       status: 'planned',
@@ -946,9 +973,10 @@ export const LEADFLOW_AUTOMATION_TRIGGER_EVENT_MAPPINGS: LeadFlowEventTriggerMap
     },
     {
       trigger: 'schedule.daily',
-      eventName: null,
-      status: 'planned',
-      notes: 'Depende do scheduler futuro.',
+      eventName: 'leadflow.automations.schedule.daily',
+      status: 'mapped',
+      notes:
+        'Produzido pelo SchedulerRuntime para cada automação diária ativa e publicada.',
     },
     {
       trigger: 'contact.special_date',

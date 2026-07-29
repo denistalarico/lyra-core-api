@@ -28,6 +28,8 @@ const CANARY_ACTION_ALLOWLIST = new Set<string>([
   'schedule_followup',
   'send_message',
   'add_tag',
+  'request_csat',
+  'generate_summary_placeholder',
 ]);
 
 export type ExecutionGateDecision =

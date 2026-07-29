@@ -22,6 +22,10 @@ import type {
 import { AgentActivationPolicyService } from '../../services/agent-activation-policy.service';
 import { ContactRelationshipResolver } from '../../services/contact-relationship.resolver';
 import { InboxRuntimeConfigService } from '../../runtime/inbox-runtime-config.service';
+import {
+  isExplicitLeadFlowOptOut,
+  recordLeadFlowOutboundOptOut,
+} from '../../services/leadflow-contact-opt-out';
 
 const DEFAULT_DEBOUNCE_SECONDS = 20;
 
@@ -77,6 +81,7 @@ export class InboundMessageIngestionService {
           workspaceId: input.workspaceId,
         });
       const internalContact = await this.findInternalContact(manager, input);
+      const explicitOptOut = isExplicitLeadFlowOptOut(input.content);
       const qualification = internalContact
         ? { status: 'internal' as const, reason: 'workspace_internal_contact' }
         : await this.qualify(manager, input);
@@ -117,6 +122,7 @@ export class InboundMessageIngestionService {
                 ? (input.metadata.referral as Record<string, unknown>)
                 : {},
             contactRelationship,
+            contactOptOut: explicitOptOut,
           })
         : {
             wouldActivate:
@@ -219,6 +225,23 @@ export class InboundMessageIngestionService {
           providerSequence: this.readProviderSequence(input.metadata),
         }),
       );
+
+      if (explicitOptOut) {
+        conversation.metadata = recordLeadFlowOutboundOptOut(
+          conversation.metadata,
+          {
+            recordedAt: occurredAt,
+            sourceMessageId: message.id,
+          },
+        );
+        conversation.aiEnabled = false;
+        if (conversation.ownershipState === 'ai_active') {
+          conversation.ownershipState = 'paused';
+          conversation.ownershipVersion += 1;
+          conversation.ownershipChangedAt = occurredAt;
+          conversation.ownershipReason = 'contact_opt_out';
+        }
+      }
 
       const media = await this.createMediaAssets(
         manager,

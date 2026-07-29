@@ -5,6 +5,7 @@ import { PermissionsModule } from '../permissions';
 import { CrmModule } from '../crm/crm.module';
 import { InboxModule } from '../inbox/inbox.module';
 import { NotificationsModule } from '../notifications';
+import { LeadFlowAnalyticsModule } from '../leadflow-analytics/leadflow-analytics.module';
 import { InboxDomainOutboxEntity } from '../inbox/entities/inbox-domain-outbox.entity';
 import { InboxChannelEntity } from '../inbox/entities/inbox-channel.entity';
 import { LeadFlowEventDeliveryEntity } from '../leadflow-events/entities';
@@ -33,6 +34,8 @@ import { NotifyUserExecutor } from './executors/notify-user.executor';
 import { ScheduleFollowupExecutor } from './executors/schedule-followup.executor';
 import { SendMessageExecutor } from './executors/send-message.executor';
 import { AddOpportunityTagExecutor } from './executors/add-opportunity-tag.executor';
+import { RequestCsatExecutor } from './executors/request-csat.executor';
+import { GenerateDailySummaryExecutor } from './executors/generate-daily-summary.executor';
 import { LeadFlowAutomationNotificationPublisher } from './services/leadflow-automation-notification.publisher';
 import { LeadFlowAutomationEventIngressService } from './services/leadflow-automation-event-ingress.service';
 import { LeadFlowAutomationLifecycleService } from './services/leadflow-automation-lifecycle.service';
@@ -62,6 +65,9 @@ import {
 import { CrmPipelineEntity } from '../crm/entities/crm-pipeline.entity';
 import { NotificationRecipientEntity } from '../notifications/entities';
 import { PlatformWhatsAppNotificationModule } from '../notifications/platform-whatsapp/platform-whatsapp-notification.module';
+import { LeadFlowCsatExpiryTimerConsumer } from './services/leadflow-csat-expiry-timer.consumer';
+import { LeadFlowDailySummaryTimerConsumer } from './services/leadflow-daily-summary-timer.consumer';
+import { LeadFlowDailySummarySchedulerService } from './services/leadflow-daily-summary-scheduler.service';
 
 @Module({
   imports: [
@@ -69,6 +75,7 @@ import { PlatformWhatsAppNotificationModule } from '../notifications/platform-wh
     CrmModule,
     InboxModule,
     NotificationsModule,
+    LeadFlowAnalyticsModule,
     PlatformWhatsAppNotificationModule,
     TypeOrmModule.forFeature(
       [
@@ -114,6 +121,8 @@ import { PlatformWhatsAppNotificationModule } from '../notifications/platform-wh
     ScheduleFollowupExecutor,
     SendMessageExecutor,
     AddOpportunityTagExecutor,
+    RequestCsatExecutor,
+    GenerateDailySummaryExecutor,
     ScheduledTimerConsumerRegistry,
     PostgresSchedulerRuntime,
     {
@@ -121,6 +130,9 @@ import { PlatformWhatsAppNotificationModule } from '../notifications/platform-wh
       useExisting: PostgresSchedulerRuntime,
     },
     LeadFlowFollowupTimerConsumer,
+    LeadFlowCsatExpiryTimerConsumer,
+    LeadFlowDailySummaryTimerConsumer,
+    LeadFlowDailySummarySchedulerService,
     LeadFlowFollowupIdleDetectorService,
     LeadFlowBusinessHoursClosedDetectorService,
     LeadFlowAutomationNotificationPublisher,

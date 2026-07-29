@@ -450,6 +450,23 @@ const FIELD_SPECS: Record<string, LeadFlowAutomationFieldSpec> = {
     nullable: true,
     maxLength: 64,
   },
+  'schedulePolicy.dailyTime': {
+    key: 'dailyTime',
+    type: 'string',
+    label: 'Horário do resumo',
+    surface: 'essential',
+    required: true,
+    maxLength: 5,
+  },
+  'schedulePolicy.responseWindowHours': {
+    key: 'responseWindowHours',
+    type: 'number',
+    label: 'Prazo para responder (horas)',
+    surface: 'advanced',
+    required: true,
+    min: 1,
+    max: 720,
+  },
   'schedulePolicy.offsets': {
     key: 'offsets',
     type: 'offset[]',

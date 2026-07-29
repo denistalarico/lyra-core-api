@@ -54,6 +54,7 @@ export const LEADFLOW_AUTOMATION_TRIGGER_KINDS: Record<
   'opportunity.stage_changed': 'event',
   'opportunity.score_changed': 'event',
   'opportunity.hot_lead_detected': 'event',
+  'opportunity.won': 'event',
   'opportunity.missing_fields_detected': 'derived',
   'appointment.created': 'event',
   'appointment.confirmation_pending': 'derived',
@@ -533,6 +534,7 @@ const OPTIONAL_SEEDS: RecipeSeed[] = [
   },
   {
     key: 'cold_lead_reactivation',
+    templateVersion: 4,
     requiredDependencies: [
       LeadFlowAutomationDependency.EventFanOut,
       LeadFlowAutomationDependency.SchedulerRuntime,
@@ -547,17 +549,39 @@ const OPTIONAL_SEEDS: RecipeSeed[] = [
     whenLabel: 'Quando o lead está inativo há um longo período.',
     limitsLabel: 'Baixa frequência; respeita opt-out e cooldown longo.',
     triggerConfig: { delayHours: 720 },
+    conditionConfig: {
+      businessHoursOnly: true,
+      stopIfReplied: true,
+      stopIfHandoff: true,
+    },
+    actionConfig: { maxAttempts: 1 },
+    messageConfig: {
+      baseMessage:
+        'Olá! Faz algum tempo desde nosso último contato. Se ainda fizer sentido para você, responda a esta mensagem e retomamos por aqui.',
+      followupSteps: [
+        {
+          stepKey: 'reactivation_30d',
+          delayMinutes: 720 * 60,
+          channels: [],
+        },
+      ],
+    },
     schedulePolicy: { cooldownHours: 720 },
+    extraSafetyRules: [
+      'respect_explicit_contact_opt_out',
+      'limit_reactivation_attempts',
+    ],
   },
   {
     key: 'daily_opportunity_summary',
+    templateVersion: 3,
     requiredDependencies: [
-      LeadFlowAutomationDependency.AnalyticsBackend,
       LeadFlowAutomationDependency.SchedulerRuntime,
+      LeadFlowAutomationDependency.EventFanOut,
     ],
     name: 'Resumo diário de oportunidades',
     description:
-      'Envia ao responsável um resumo das oportunidades do dia (placeholder de resumo).',
+      'Envia aos responsáveis um resumo real das oportunidades do dia.',
     category: LeadFlowAutomationCategory.Reporting,
     tier: 'optional',
     trigger: 'schedule.daily',
@@ -570,6 +594,11 @@ const OPTIONAL_SEEDS: RecipeSeed[] = [
       stopIfHandoff: false,
     },
     actionConfig: { targetUserRef: null },
+    schedulePolicy: {
+      respectBusinessHours: false,
+      timezone: 'America/Sao_Paulo',
+      dailyTime: '08:00',
+    },
   },
   {
     key: 'lead_distribution',
@@ -615,22 +644,42 @@ const OPTIONAL_SEEDS: RecipeSeed[] = [
     crmPolicy: { addTags: [] },
   },
   {
-    key: 'nps_feedback',
+    key: 'post_service_csat',
+    templateVersion: 3,
     requiredDependencies: [
-      LeadFlowAutomationDependency.AgendaDomain,
+      LeadFlowAutomationDependency.EventFanOut,
       LeadFlowAutomationDependency.SchedulerRuntime,
       LeadFlowAutomationDependency.MessageGeneration,
     ],
-    name: 'Pós-venda / NPS',
-    description: 'Pede feedback/NPS após a conclusão do atendimento.',
+    name: 'Avaliação do atendimento',
+    description:
+      'Solicita uma avaliação simples do atendimento e registra a resposta de 1 a 5.',
     category: LeadFlowAutomationCategory.Feedback,
     tier: 'optional',
-    trigger: 'appointment.completed',
-    primaryAction: 'send_message',
-    whenLabel: 'Após o atendimento ou venda concluída.',
-    limitsLabel: 'Um pedido por evento; respeita opt-out.',
-    messageConfig: { quickReplies: ['0-6', '7-8', '9-10'] },
-    schedulePolicy: { cooldownHours: 168 },
+    trigger: 'opportunity.won',
+    primaryAction: 'request_csat',
+    whenLabel: 'Quando uma oportunidade é marcada como ganha.',
+    limitsLabel:
+      'Um pedido por ciclo; aceita somente notas inteiras de 1 a 5 e respeita opt-out.',
+    conditionConfig: {
+      businessHoursOnly: false,
+      stopIfReplied: false,
+      stopIfHandoff: false,
+    },
+    messageConfig: {
+      channel: 'whatsapp',
+      baseMessage:
+        'Como você avalia nosso atendimento? Responda somente com uma nota de 1 a 5, sendo 1 muito insatisfeito e 5 muito satisfeito.',
+      quickReplies: ['1', '2', '3', '4', '5'],
+    },
+    schedulePolicy: {
+      respectBusinessHours: false,
+      responseWindowHours: 168,
+    },
+    extraSafetyRules: [
+      'respect_explicit_contact_opt_out',
+      'never_use_zero_for_missing_csat_response',
+    ],
   },
   {
     key: 'birthday_or_special_date',
@@ -741,7 +790,15 @@ export function isCustomBusinessMode(businessModeKey: string): boolean {
 export function getRecipeByKey(
   recipeKey: string,
 ): LeadFlowAutomationRecipeCatalogItem | undefined {
-  return LEADFLOW_AUTOMATION_RECIPES.find((recipe) => recipe.key === recipeKey);
+  const canonicalKey =
+    recipeKey === 'nps_feedback' ? 'post_service_csat' : recipeKey;
+  const recipe = LEADFLOW_AUTOMATION_RECIPES.find(
+    (item) => item.key === canonicalKey,
+  );
+  if (!recipe || recipeKey !== 'nps_feedback') return recipe;
+  // Existing rows keep their historical key but resolve to the corrected
+  // contract. New provisioning only lists/creates `post_service_csat`.
+  return { ...recipe, key: 'nps_feedback', deprecated: true };
 }
 
 export function listRecipes(): LeadFlowAutomationRecipeCatalogItem[] {

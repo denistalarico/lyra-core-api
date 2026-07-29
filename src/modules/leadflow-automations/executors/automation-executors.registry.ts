@@ -147,6 +147,48 @@ function addTagAvailability(): AutomationExecutorAvailability {
   };
 }
 
+function requestCsatAvailability(): AutomationExecutorAvailability {
+  const scheduler = isDependencySatisfied(
+    LeadFlowAutomationDependency.SchedulerRuntime,
+  );
+  const messaging = isDependencySatisfied(
+    LeadFlowAutomationDependency.MessageGeneration,
+  );
+  const available = scheduler && messaging;
+  return {
+    actionKey: 'request_csat',
+    available,
+    reason: available ? null : 'dependency_missing',
+    dependency: !scheduler
+      ? LeadFlowAutomationDependency.SchedulerRuntime
+      : !messaging
+        ? LeadFlowAutomationDependency.MessageGeneration
+        : null,
+    owningDomain: 'leadflow.analytics',
+    description: available
+      ? 'Solicitação de CSAT 1–5 com mensagem canônica, persistência do ciclo e expiração durável.'
+      : 'CSAT depende do scheduler e do envio canônico de mensagens.',
+  };
+}
+
+function dailySummaryAvailability(): AutomationExecutorAvailability {
+  const available = isDependencySatisfied(
+    LeadFlowAutomationDependency.SchedulerRuntime,
+  );
+  return {
+    actionKey: 'generate_summary_placeholder',
+    available,
+    reason: available ? null : 'dependency_missing',
+    dependency: available
+      ? null
+      : LeadFlowAutomationDependency.SchedulerRuntime,
+    owningDomain: 'leadflow.crm',
+    description: available
+      ? 'Resumo operacional de oportunidades do CRM entregue por notificação interna.'
+      : 'O resumo diário depende do scheduler durável.',
+  };
+}
+
 const unavailable = (
   actionKey: LeadFlowAutomationAction,
   owningDomain: string,
@@ -207,12 +249,6 @@ const EXECUTORS = [
     'leadflow.crm',
     'Não há command canônico de notas conectado ao Automations.',
   ),
-  unavailable(
-    'generate_summary_placeholder',
-    'leadflow.analytics',
-    'O executor de resumo depende do backend analítico.',
-    LeadFlowAutomationDependency.AnalyticsBackend,
-  ),
 ] as const;
 
 const BY_ACTION = new Map(
@@ -234,6 +270,8 @@ const COMPUTED_AVAILABILITY: Record<
   send_message: sendMessageAvailability,
   schedule_followup: scheduleFollowupAvailability,
   add_tag: addTagAvailability,
+  request_csat: requestCsatAvailability,
+  generate_summary_placeholder: dailySummaryAvailability,
 };
 
 export function executorAvailability(

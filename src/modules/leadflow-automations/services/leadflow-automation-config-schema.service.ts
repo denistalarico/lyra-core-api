@@ -123,6 +123,9 @@ export class LeadFlowAutomationConfigSchemaService {
         if (
           section === 'message' &&
           spec.key === 'followupSteps' &&
+          ['followup_idle_lead', 'followup_by_crm_stage'].includes(
+            recipe.key,
+          ) &&
           values.followupSteps === undefined &&
           typeof values.baseMessage === 'string' &&
           values.baseMessage.trim()
@@ -136,7 +139,11 @@ export class LeadFlowAutomationConfigSchemaService {
     }
 
     if (
-      ['followup_idle_lead', 'followup_by_crm_stage'].includes(recipe.key) &&
+      [
+        'followup_idle_lead',
+        'followup_by_crm_stage',
+        'cold_lead_reactivation',
+      ].includes(recipe.key) &&
       Array.isArray(config.message?.followupSteps) &&
       !config.message.followupSteps.some(
         (step) =>
@@ -247,6 +254,31 @@ export class LeadFlowAutomationConfigSchemaService {
               message: `"${spec.label}" excede ${spec.maxLength} caracteres.`,
             },
           ];
+        }
+        if (
+          spec.key === 'dailyTime' &&
+          !/^([01]\d|2[0-3]):[0-5]\d$/.test(raw)
+        ) {
+          return [
+            {
+              path,
+              code: 'invalid_type',
+              message: `"${spec.label}" deve usar o formato HH:mm.`,
+            },
+          ];
+        }
+        if (spec.key === 'timezone') {
+          try {
+            new Intl.DateTimeFormat('pt-BR', { timeZone: raw }).format();
+          } catch {
+            return [
+              {
+                path,
+                code: 'invalid_type',
+                message: `"${spec.label}" precisa ser um fuso IANA válido.`,
+              },
+            ];
+          }
         }
         return [];
       }

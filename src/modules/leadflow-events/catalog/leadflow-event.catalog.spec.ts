@@ -54,6 +54,7 @@ const BLUEPRINT_EVENT_NAMES = [
   'leadflow.automations.automation.published',
   'leadflow.automations.runtime.config.updated',
   'leadflow.automations.csat.response.recorded',
+  'leadflow.automations.schedule.daily',
   // Calendar
   'leadflow.calendar.appointment.created',
   'leadflow.calendar.appointment.updated',
@@ -108,6 +109,13 @@ describe('leadflow event catalog', () => {
       type: 'number',
       required: true,
     });
+    expect(getEventByName('leadflow.automations.schedule.daily')).toMatchObject(
+      {
+        status: LeadFlowEventStatus.Active,
+        requiredContext: ['automationId'],
+        emittedBy: 'system.scheduler',
+      },
+    );
 
     expect(
       getEventByName('leadflow.calendar.appointment.confirmation_pending'),

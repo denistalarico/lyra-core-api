@@ -27,7 +27,8 @@ export type ActivationReasonCode =
   | 'duplicate_message'
   | 'conversation_human_or_closed'
   | 'disqualified_contact'
-  | 'audience_mismatch';
+  | 'audience_mismatch'
+  | 'contact_opt_out';
 
 @Injectable()
 export class AgentActivationPolicyService {
@@ -47,6 +48,7 @@ export class AgentActivationPolicyService {
     referralTrusted?: boolean;
     referral?: Record<string, unknown>;
     contactRelationship?: ContactRelationship;
+    contactOptOut?: boolean;
   }) {
     const exclusions: ActivationReasonCode[] = [];
     const channel = await this.dataSource
@@ -64,6 +66,7 @@ export class AgentActivationPolicyService {
       exclusions.push('channel_unavailable');
     if (!channel?.aiEnabled) exclusions.push('channel_ai_disabled');
     if (input.internalContact) exclusions.push('internal_contact');
+    if (input.contactOptOut) exclusions.push('contact_opt_out');
     if (input.duplicate) exclusions.push('duplicate_message');
     if (
       ['human_active', 'paused', 'closed'].includes(

@@ -27,7 +27,7 @@ const OPTIONAL_KEYS = [
   'daily_opportunity_summary',
   'lead_distribution',
   'automatic_tagging',
-  'nps_feedback',
+  'post_service_csat',
   'birthday_or_special_date',
   'pending_documents',
   'campaign_followup',
@@ -128,10 +128,26 @@ describe('automation recipes catalog', () => {
       ).toContain(LeadFlowAutomationDependency.OwnershipCommand);
     });
 
-    it('blocks the daily summary on the Analytics backend', () => {
+    it('routes the daily summary through the durable scheduler and event fan-out', () => {
       expect(
         getRecipeByKey('daily_opportunity_summary')!.requiredDependencies,
-      ).toContain(LeadFlowAutomationDependency.AnalyticsBackend);
+      ).toEqual(
+        expect.arrayContaining([
+          LeadFlowAutomationDependency.SchedulerRuntime,
+          LeadFlowAutomationDependency.EventFanOut,
+        ]),
+      );
+    });
+
+    it('keeps the old NPS key readable while provisioning CSAT under the new key', () => {
+      expect(
+        listRecipes().some((recipe) => recipe.key === 'nps_feedback'),
+      ).toBe(false);
+      expect(getRecipeByKey('nps_feedback')).toMatchObject({
+        key: 'nps_feedback',
+        deprecated: true,
+        primaryAction: 'request_csat',
+      });
     });
   });
 

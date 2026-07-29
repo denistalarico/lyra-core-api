@@ -28,6 +28,7 @@ export type LeadFlowAutomationTrigger =
   | 'opportunity.stage_changed'
   | 'opportunity.score_changed'
   | 'opportunity.hot_lead_detected'
+  | 'opportunity.won'
   | 'opportunity.missing_fields_detected'
   | 'appointment.created'
   | 'appointment.confirmation_pending'
@@ -56,6 +57,7 @@ export type LeadFlowAutomationAction =
   | 'create_task'
   | 'send_webhook'
   | 'append_note'
+  | 'request_csat'
   | 'generate_summary_placeholder';
 
 export interface LeadFlowAutomationTriggerConfig {
@@ -209,6 +211,10 @@ export interface LeadFlowAutomationScheduleOffset {
 export interface LeadFlowAutomationSchedulePolicy {
   respectBusinessHours?: boolean;
   timezone?: string | null;
+  /** Local wall-clock time (HH:mm) used by recurring daily automations. */
+  dailyTime?: string;
+  /** How long a pending CSAT request remains answerable. */
+  responseWindowHours?: number;
   /** Array of `{ label, minutesBefore }` objects (see {@link LeadFlowAutomationScheduleOffset}). */
   offsets?: LeadFlowJsonObject[];
   cooldownHours?: number;

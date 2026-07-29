@@ -11,6 +11,8 @@ import { NotifyUserExecutor } from '../executors/notify-user.executor';
 import { ScheduleFollowupExecutor } from '../executors/schedule-followup.executor';
 import { SendMessageExecutor } from '../executors/send-message.executor';
 import { AddOpportunityTagExecutor } from '../executors/add-opportunity-tag.executor';
+import { RequestCsatExecutor } from '../executors/request-csat.executor';
+import { GenerateDailySummaryExecutor } from '../executors/generate-daily-summary.executor';
 import type { LeadFlowJsonObject } from '../types/leadflow-automation.types';
 import type { LeadFlowAutomationContextSnapshot } from '../types/leadflow-automation-context.types';
 import type { LeadFlowAutomationTrigger } from '../types/leadflow-automation.types';
@@ -36,6 +38,7 @@ const OPPORTUNITY_ACTIONS = new Set<string>([
   // notify_user routes to the opportunity's owner when no explicit target is set.
   'notify_user',
   'add_tag',
+  'request_csat',
 ]);
 
 /** Actions whose effect targets an inbox conversation in the envelope. */
@@ -85,6 +88,8 @@ export class LeadFlowAutomationExecutionService {
     addTagExecutor: AddOpportunityTagExecutor,
     @Optional() scheduleFollowupExecutor?: ScheduleFollowupExecutor,
     @Optional() sendMessageExecutor?: SendMessageExecutor,
+    @Optional() requestCsatExecutor?: RequestCsatExecutor,
+    @Optional() generateDailySummaryExecutor?: GenerateDailySummaryExecutor,
   ) {
     // The productive executors this phase wires. The gate's action allowlist is
     // the authority on what may run; this map is what *can*.
@@ -103,6 +108,15 @@ export class LeadFlowAutomationExecutionService {
     }
     if (sendMessageExecutor) {
       this.executors.set(sendMessageExecutor.actionKey, sendMessageExecutor);
+    }
+    if (requestCsatExecutor) {
+      this.executors.set(requestCsatExecutor.actionKey, requestCsatExecutor);
+    }
+    if (generateDailySummaryExecutor) {
+      this.executors.set(
+        generateDailySummaryExecutor.actionKey,
+        generateDailySummaryExecutor,
+      );
     }
   }
 
@@ -334,6 +348,59 @@ export class LeadFlowAutomationExecutionService {
       };
     }
 
+    if (actionKey === 'request_csat') {
+      const message = automation.messageConfig ?? {};
+      const schedule = automation.schedulePolicy ?? {};
+      return {
+        policyPrefix: 'csat',
+        payload: {
+          opportunityId: subject.opportunityId,
+          channel:
+            typeof message.channel === 'string' ? message.channel : 'whatsapp',
+          text:
+            typeof message.baseMessage === 'string'
+              ? message.baseMessage
+              : null,
+          templateRef:
+            typeof message.templateRef === 'string'
+              ? message.templateRef
+              : null,
+          templateLanguage:
+            typeof message.templateLanguage === 'string'
+              ? message.templateLanguage
+              : 'pt_BR',
+          responseWindowHours:
+            typeof schedule.responseWindowHours === 'number'
+              ? schedule.responseWindowHours
+              : 168,
+        },
+      };
+    }
+
+    if (actionKey === 'generate_summary_placeholder') {
+      const actions = automation.actionConfig ?? {};
+      const schedule = automation.schedulePolicy ?? {};
+      return {
+        policyPrefix: 'daily_summary',
+        payload: {
+          targetUserId:
+            typeof actions.targetUserRef === 'string'
+              ? actions.targetUserRef
+              : null,
+          localDate:
+            typeof delivery.payload.localDate === 'string'
+              ? delivery.payload.localDate
+              : null,
+          timezone:
+            typeof delivery.payload.timezone === 'string'
+              ? delivery.payload.timezone
+              : typeof schedule.timezone === 'string'
+                ? schedule.timezone
+                : 'UTC',
+        },
+      };
+    }
+
     if (actionKey === 'add_tag') {
       const actions = automation.actionConfig ?? {};
       const conditions = automation.conditionConfig ?? {};
@@ -471,6 +538,11 @@ export class LeadFlowAutomationExecutionService {
     const fireAt = new Date(Math.max(Date.now(), firstDue.getTime()));
 
     return {
+      automationRecipeKey: automation.recipeKey,
+      timerPurpose:
+        automation.recipeKey === 'cold_lead_reactivation'
+          ? 'automation_reactivation'
+          : 'automation_followup',
       conversationId: subject.conversationId,
       opportunityId:
         subject.opportunityId ??
