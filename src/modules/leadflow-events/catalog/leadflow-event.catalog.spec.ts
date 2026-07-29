@@ -53,9 +53,11 @@ const BLUEPRINT_EVENT_NAMES = [
   'leadflow.automations.automation.paused',
   'leadflow.automations.automation.published',
   'leadflow.automations.runtime.config.updated',
+  'leadflow.automations.csat.response.recorded',
   // Calendar
   'leadflow.calendar.appointment.created',
   'leadflow.calendar.appointment.updated',
+  'leadflow.calendar.appointment.confirmation_pending',
   'leadflow.calendar.appointment.confirmed',
   'leadflow.calendar.appointment.cancelled',
   'leadflow.calendar.appointment.no_show',
@@ -93,6 +95,30 @@ describe('leadflow event catalog', () => {
       expect(item).toBeDefined();
       expect(item?.status).toBe(LeadFlowEventStatus.Planned);
     }
+  });
+
+  it('publishes the CSAT 1-5 and appointment confirmation contracts for their owning phases', () => {
+    const csat = getEventByName('leadflow.automations.csat.response.recorded');
+    expect(csat).toMatchObject({
+      status: LeadFlowEventStatus.Active,
+      requiredContext: ['automationId', 'csatResponseId'],
+    });
+    expect(csat?.consumedBy).toContain('leadflow.analytics');
+    expect(csat?.payloadSchema.score).toMatchObject({
+      type: 'number',
+      required: true,
+    });
+
+    expect(
+      getEventByName('leadflow.calendar.appointment.confirmation_pending'),
+    ).toMatchObject({
+      status: LeadFlowEventStatus.Active,
+      requiredContext: ['appointmentId'],
+    });
+    expect(
+      getEventByName('leadflow.calendar.appointment.confirmation_pending')
+        ?.consumedBy,
+    ).toContain('leadflow.analytics');
   });
 
   it('has unique, well-formed event names', () => {

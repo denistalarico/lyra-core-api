@@ -35,8 +35,8 @@ const CHANGED_FIELDS: LeadFlowEventPayloadSchema = {
   ),
 };
 
-/** Consumers declared at contract level; Automations has durable ingress. */
-const FUTURE_CONSUMERS = ['leadflow.automations', 'leadflow.analytics'];
+/** Default durable consumers. Each one owns an independent delivery row. */
+const DEFAULT_CONSUMERS = ['leadflow.automations', 'leadflow.analytics'];
 
 interface EventSeed {
   eventName: LeadFlowEventName;
@@ -63,7 +63,7 @@ function buildEvent(seed: EventSeed): LeadFlowEventCatalogItem {
     requiredContext: seed.requiredContext ?? [],
     payloadSchema: seed.payloadSchema ?? {},
     emittedBy: seed.emittedBy ?? moduleKey,
-    consumedBy: seed.consumedBy ?? [...FUTURE_CONSUMERS],
+    consumedBy: seed.consumedBy ?? [...DEFAULT_CONSUMERS],
     sensitive: seed.sensitive ?? false,
     status: seed.status ?? LeadFlowEventStatus.Active,
   };
@@ -620,6 +620,34 @@ export const LEADFLOW_EVENT_CATALOG: LeadFlowEventCatalogItem[] = [
     },
     status: LeadFlowEventStatus.Planned,
   }),
+  buildEvent({
+    eventName: 'leadflow.automations.csat.response.recorded',
+    description:
+      'Resposta de Avaliação do atendimento (CSAT) registrada na escala de 1 a 5. O produtor será ligado pela Fase 8.',
+    requiredContext: ['automationId', 'csatResponseId'],
+    payloadSchema: {
+      score: field(
+        'number',
+        true,
+        'Nota inteira de 1 a 5. Ausência de resposta é estado persistido, nunca nota zero.',
+      ),
+      requestedAt: field(
+        'string',
+        true,
+        'ISO do instante em que a avaliação foi solicitada.',
+      ),
+      respondedAt: field(
+        'string',
+        true,
+        'ISO do instante em que a resposta foi registrada.',
+      ),
+      channel: field(
+        'string',
+        false,
+        'Canal pelo qual a resposta foi recebida.',
+      ),
+    },
+  }),
 
   // ── Calendar / Agenda (app opcional premium) ─────────────────────────────
   buildEvent({
@@ -637,6 +665,20 @@ export const LEADFLOW_EVENT_CATALOG: LeadFlowEventCatalogItem[] = [
     description: 'Agendamento atualizado (horário, serviço, observações).',
     requiredContext: ['appointmentId'],
     payloadSchema: CHANGED_FIELDS,
+  }),
+  buildEvent({
+    eventName: 'leadflow.calendar.appointment.confirmation_pending',
+    description:
+      'Agendamento entrou na janela em que a confirmação do contato deve ser solicitada.',
+    requiredContext: ['appointmentId'],
+    payloadSchema: {
+      startsAt: field('string', true, 'ISO do início do agendamento.'),
+      confirmationDueAt: field(
+        'string',
+        true,
+        'ISO do limite para confirmação.',
+      ),
+    },
   }),
   buildEvent({
     eventName: 'leadflow.calendar.appointment.confirmed',

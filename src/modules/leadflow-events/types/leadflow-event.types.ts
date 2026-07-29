@@ -93,9 +93,12 @@ export type LeadFlowEventName =
   | 'leadflow.automations.execution.completed'
   | 'leadflow.automations.execution.failed'
   | 'leadflow.automations.execution.skipped'
+  // Automations (feedback outcome contract; producer arrives in Phase 8)
+  | 'leadflow.automations.csat.response.recorded'
   // Calendar / Agenda
   | 'leadflow.calendar.appointment.created'
   | 'leadflow.calendar.appointment.updated'
+  | 'leadflow.calendar.appointment.confirmation_pending'
   | 'leadflow.calendar.appointment.confirmed'
   | 'leadflow.calendar.appointment.cancelled'
   | 'leadflow.calendar.appointment.no_show'
@@ -162,6 +165,7 @@ export interface LeadFlowEventContext {
   agentId?: string;
   automationId?: string;
   appointmentId?: string;
+  csatResponseId?: string;
   [key: string]: LeadFlowJsonValue | undefined;
 }
 

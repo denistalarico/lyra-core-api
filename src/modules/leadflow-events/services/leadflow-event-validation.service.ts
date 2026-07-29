@@ -306,6 +306,18 @@ export class LeadFlowEventValidationService {
             });
           }
         }
+
+        if (
+          eventName === 'leadflow.automations.csat.response.recorded' &&
+          (!Number.isInteger(payload.score) ||
+            (payload.score as number) < 1 ||
+            (payload.score as number) > 5)
+        ) {
+          invalid(
+            'payload.score',
+            'payload.score deve ser uma nota inteira de 1 a 5.',
+          );
+        }
       }
     }
 

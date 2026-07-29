@@ -278,6 +278,7 @@ import {
   LeadFlowAutomationVersionEntity,
 } from '../modules/leadflow-automations/entities';
 import { LeadFlowEventDeliveryEntity } from '../modules/leadflow-events/entities';
+import { LeadFlowCsatResponseEntity } from '../modules/leadflow-analytics/entities';
 import {
   PlatformAdminAuditEventEntity,
   PlatformAdminIdentityEntity,
@@ -489,6 +490,7 @@ export const agencyEntities = [
   LeadFlowAutomationRunAttemptEntity,
   LeadFlowScheduledTimerEntity,
   LeadFlowEventDeliveryEntity,
+  LeadFlowCsatResponseEntity,
 ];
 
 export function getTypeOrmConfig(): TypeOrmModuleOptions {

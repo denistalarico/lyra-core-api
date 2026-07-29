@@ -289,4 +289,37 @@ describe('LeadFlowEventValidationService', () => {
     expect(result.valid).toBe(true);
     expect(result.catalogStatus).toBe('planned');
   });
+
+  it('accepts only integer CSAT scores from 1 to 5', () => {
+    const envelope = buildValidEnvelope();
+    envelope.eventName = 'leadflow.automations.csat.response.recorded';
+    envelope.moduleKey = 'leadflow.automations';
+    envelope.source = {
+      module: 'automations',
+      entityType: 'csat_response',
+      entityId: 'd3a2e0b2-3333-4444-a555-666677778888',
+    };
+    envelope.context = {
+      automationId: 'e4b3f1c3-4444-4555-b666-777788889999',
+      csatResponseId: 'd3a2e0b2-3333-4444-a555-666677778888',
+    };
+    envelope.payload = {
+      score: 5,
+      requestedAt: '2026-07-09T11:00:00.000Z',
+      respondedAt: '2026-07-09T12:00:00.000Z',
+      channel: 'whatsapp',
+    };
+
+    expect(service.validate(envelope).valid).toBe(true);
+
+    for (const invalidScore of [0, 6, 4.5]) {
+      (envelope.payload as Record<string, unknown>).score = invalidScore;
+      expect(service.validate(envelope).errors).toContainEqual(
+        expect.objectContaining({
+          code: 'invalid_field',
+          field: 'payload.score',
+        }),
+      );
+    }
+  });
 });
