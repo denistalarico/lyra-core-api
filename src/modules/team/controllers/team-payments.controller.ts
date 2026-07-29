@@ -4,6 +4,7 @@ import {
   Delete,
   Get,
   Headers,
+  Logger,
   Param,
   Patch,
   Post,
@@ -23,6 +24,7 @@ import {
   UpdateTeamPaymentItemDto,
 } from '../dto';
 import { TeamPaymentsService } from '../services/team-payments.service';
+import { FinanceTeamPaymentReconciliationService } from '../../finance/services/finance-team-payment-reconciliation.service';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import {
   DangerousAction,
@@ -49,11 +51,34 @@ function getContextFromHeaders(
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 @Controller('agency/team/payments')
 export class TeamPaymentsController {
-  constructor(private readonly teamPaymentsService: TeamPaymentsService) {}
+  private readonly logger = new Logger(TeamPaymentsController.name);
+
+  constructor(
+    private readonly teamPaymentsService: TeamPaymentsService,
+    private readonly financeTeamPaymentReconciliationService: FinanceTeamPaymentReconciliationService,
+  ) {}
+
+  private async getReconciledPayment(ctx: RequestContext, id: string) {
+    const payment = await this.teamPaymentsService.getPayment(ctx, id);
+    try {
+      return await this.financeTeamPaymentReconciliationService.reconcilePayment(
+        ctx,
+        payment,
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.warn(
+        `Finance reconciliation failed for Team payment ${id}: ${message}`,
+      );
+      return payment;
+    }
+  }
 
   @Get('batches')
   @RequirePermission('agency.team.compensation.view.owner_or_hr')
-  listBatches(@Headers() headers: Record<string, string | string[] | undefined>) {
+  listBatches(
+    @Headers() headers: Record<string, string | string[] | undefined>,
+  ) {
     return this.teamPaymentsService.listBatches(getContextFromHeaders(headers));
   }
 
@@ -63,16 +88,36 @@ export class TeamPaymentsController {
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Body() dto: GenerateTeamPaymentsDto,
   ) {
-    return this.teamPaymentsService.generatePayments(getContextFromHeaders(headers), dto);
+    return this.teamPaymentsService.generatePayments(
+      getContextFromHeaders(headers),
+      dto,
+    );
   }
 
   @Get()
   @RequirePermission('agency.team.compensation.view.owner_or_hr')
-  listPayments(
+  async listPayments(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Query() query: ListTeamPaymentsQueryDto,
   ) {
-    return this.teamPaymentsService.listPayments(getContextFromHeaders(headers), query);
+    const ctx = getContextFromHeaders(headers);
+    try {
+      await this.financeTeamPaymentReconciliationService.reconcileWorkspacePayments(
+        ctx,
+        {
+          memberId: query.memberId,
+          batchId: query.batchId,
+          competenceStart: query.competenceStart,
+          competenceEnd: query.competenceEnd,
+        },
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.warn(
+        `Finance reconciliation failed for Team payments: ${message}`,
+      );
+    }
+    return this.teamPaymentsService.listPayments(ctx, query);
   }
 
   @Post()
@@ -81,16 +126,20 @@ export class TeamPaymentsController {
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Body() dto: CreateTeamPaymentDto,
   ) {
-    return this.teamPaymentsService.createPayment(getContextFromHeaders(headers), dto);
+    return this.teamPaymentsService.createPayment(
+      getContextFromHeaders(headers),
+      dto,
+    );
   }
 
   @Get(':id')
   @RequirePermission('agency.team.compensation.view.owner_or_hr')
-  getPayment(
+  async getPayment(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('id') id: string,
   ) {
-    return this.teamPaymentsService.getPayment(getContextFromHeaders(headers), id);
+    const ctx = getContextFromHeaders(headers);
+    return this.getReconciledPayment(ctx, id);
   }
 
   @Patch(':id')
@@ -100,7 +149,11 @@ export class TeamPaymentsController {
     @Param('id') id: string,
     @Body() dto: UpdateTeamPaymentDto,
   ) {
-    return this.teamPaymentsService.updatePayment(getContextFromHeaders(headers), id, dto);
+    return this.teamPaymentsService.updatePayment(
+      getContextFromHeaders(headers),
+      id,
+      dto,
+    );
   }
 
   @Delete(':id')
@@ -110,7 +163,10 @@ export class TeamPaymentsController {
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('id') id: string,
   ) {
-    return this.teamPaymentsService.deletePayment(getContextFromHeaders(headers), id);
+    return this.teamPaymentsService.deletePayment(
+      getContextFromHeaders(headers),
+      id,
+    );
   }
 
   @Post(':id/archive')
@@ -120,7 +176,10 @@ export class TeamPaymentsController {
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('id') id: string,
   ) {
-    return this.teamPaymentsService.archivePayment(getContextFromHeaders(headers), id);
+    return this.teamPaymentsService.archivePayment(
+      getContextFromHeaders(headers),
+      id,
+    );
   }
 
   @Post(':id/confirm')
@@ -129,7 +188,10 @@ export class TeamPaymentsController {
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('id') id: string,
   ) {
-    return this.teamPaymentsService.confirmPayment(getContextFromHeaders(headers), id);
+    return this.teamPaymentsService.confirmPayment(
+      getContextFromHeaders(headers),
+      id,
+    );
   }
 
   @Post(':id/approve')
@@ -138,7 +200,10 @@ export class TeamPaymentsController {
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('id') id: string,
   ) {
-    return this.teamPaymentsService.approvePayment(getContextFromHeaders(headers), id);
+    return this.teamPaymentsService.approvePayment(
+      getContextFromHeaders(headers),
+      id,
+    );
   }
 
   @Post(':id/send-to-finance')
@@ -147,7 +212,10 @@ export class TeamPaymentsController {
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('id') id: string,
   ) {
-    return this.teamPaymentsService.sendPaymentToFinance(getContextFromHeaders(headers), id);
+    return this.teamPaymentsService.sendPaymentToFinance(
+      getContextFromHeaders(headers),
+      id,
+    );
   }
 
   @Post(':id/mark-paid')
@@ -157,7 +225,11 @@ export class TeamPaymentsController {
     @Param('id') id: string,
     @Body() dto: MarkTeamPaymentPaidDto,
   ) {
-    return this.teamPaymentsService.markPaid(getContextFromHeaders(headers), id, dto);
+    return this.teamPaymentsService.markPaid(
+      getContextFromHeaders(headers),
+      id,
+      dto,
+    );
   }
 
   @Post(':id/revert-payment')
@@ -166,7 +238,10 @@ export class TeamPaymentsController {
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('id') id: string,
   ) {
-    return this.teamPaymentsService.revertPayment(getContextFromHeaders(headers), id);
+    return this.teamPaymentsService.revertPayment(
+      getContextFromHeaders(headers),
+      id,
+    );
   }
 
   @Post(':id/cancel')
@@ -176,7 +251,10 @@ export class TeamPaymentsController {
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('id') id: string,
   ) {
-    return this.teamPaymentsService.cancelPayment(getContextFromHeaders(headers), id);
+    return this.teamPaymentsService.cancelPayment(
+      getContextFromHeaders(headers),
+      id,
+    );
   }
 
   @Post(':id/back-to-draft')
@@ -185,7 +263,10 @@ export class TeamPaymentsController {
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('id') id: string,
   ) {
-    return this.teamPaymentsService.backToDraft(getContextFromHeaders(headers), id);
+    return this.teamPaymentsService.backToDraft(
+      getContextFromHeaders(headers),
+      id,
+    );
   }
 
   @Post(':id/items')
@@ -195,7 +276,11 @@ export class TeamPaymentsController {
     @Param('id') id: string,
     @Body() dto: CreateTeamPaymentItemDto,
   ) {
-    return this.teamPaymentsService.createItem(getContextFromHeaders(headers), id, dto);
+    return this.teamPaymentsService.createItem(
+      getContextFromHeaders(headers),
+      id,
+      dto,
+    );
   }
 
   @Patch(':id/items/:itemId')
@@ -222,16 +307,22 @@ export class TeamPaymentsController {
     @Param('id') id: string,
     @Param('itemId') itemId: string,
   ) {
-    return this.teamPaymentsService.deleteItem(getContextFromHeaders(headers), id, itemId);
+    return this.teamPaymentsService.deleteItem(
+      getContextFromHeaders(headers),
+      id,
+      itemId,
+    );
   }
 
   @Get(':id/finance')
   @RequirePermission('agency.team.compensation.view.owner_or_hr')
-  getPaymentFinanceStatus(
+  async getPaymentFinanceStatus(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('id') id: string,
   ) {
-    return this.teamPaymentsService.getPaymentFinanceStatus(getContextFromHeaders(headers), id);
+    const ctx = getContextFromHeaders(headers);
+    await this.getReconciledPayment(ctx, id);
+    return this.teamPaymentsService.getPaymentFinanceStatus(ctx, id);
   }
 
   @Post(':id/documents')
@@ -241,7 +332,11 @@ export class TeamPaymentsController {
     @Param('id') id: string,
     @Body() dto: CreateTeamPaymentDocumentDto,
   ) {
-    return this.teamPaymentsService.createDocument(getContextFromHeaders(headers), id, dto);
+    return this.teamPaymentsService.createDocument(
+      getContextFromHeaders(headers),
+      id,
+      dto,
+    );
   }
 
   @Delete(':id/documents/:documentId')
@@ -273,7 +368,10 @@ export class TeamPaymentsController {
       documentId,
     );
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `inline; filename="document-${documentId}.pdf"`);
+    res.setHeader(
+      'Content-Disposition',
+      `inline; filename="document-${documentId}.pdf"`,
+    );
     res.send(buffer);
   }
 }

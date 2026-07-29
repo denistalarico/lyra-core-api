@@ -16,7 +16,7 @@ import {
   AgencyTaskChecklistItem,
   AgencyTaskTimeEntry,
 } from '../projects/entities';
-import { TeamMember } from '../team/entities';
+import { TeamMember, TeamPayment } from '../team/entities';
 import { FinanceController } from './controllers/finance.controller';
 import {
   FinanceAccount,
@@ -56,6 +56,7 @@ import { FinancePaymentProviderService } from './services/finance-payment-provid
 import { FinanceJournalEntryService } from './services/finance-journal-entry.service';
 import { NotificationsModule } from '../notifications';
 import { FinanceNotificationPublisher } from './services/finance-notification.publisher';
+import { FinanceTeamPaymentReconciliationService } from './services/finance-team-payment-reconciliation.service';
 import { PermissionsModule } from '../permissions';
 import { ContactEntity } from '../contacts/entities/contact.entity';
 import { ContactMethodEntity } from '../contacts/entities/contact-method.entity';
@@ -98,6 +99,7 @@ import { ContactMethodEntity } from '../contacts/entities/contact-method.entity'
         AgencyTaskChecklistItem,
         AgencyTaskTimeEntry,
         TeamMember,
+        TeamPayment,
         ContactEntity,
         ContactMethodEntity,
         AgencyClient,
@@ -121,6 +123,7 @@ import { ContactMethodEntity } from '../contacts/entities/contact-method.entity'
     FinancePaymentProviderService,
     FinanceJournalEntryService,
     FinanceNotificationPublisher,
+    FinanceTeamPaymentReconciliationService,
     SettingsCryptoService,
   ],
   exports: [
@@ -134,6 +137,7 @@ import { ContactMethodEntity } from '../contacts/entities/contact-method.entity'
     FinanceFiscalService,
     FinancePaymentProviderService,
     FinanceJournalEntryService,
+    FinanceTeamPaymentReconciliationService,
   ],
 })
 export class FinanceModule {}
