@@ -321,6 +321,7 @@ const RAW_PERMISSIONS: RawPermission[] = [
   ['leadflow.analytics.reports.view.operational', MANAGER_UP],
   ['leadflow.analytics.reports.view.full', ADMIN_UP],
   ['leadflow.analytics.reports.export.admin', ADMIN_UP],
+  ['leadflow.analytics.recommendations.manage.admin', ADMIN_UP],
 
   // 10.5 LeadFlow - Settings
   ['leadflow.settings.general.view.admin', ADMIN_UP],

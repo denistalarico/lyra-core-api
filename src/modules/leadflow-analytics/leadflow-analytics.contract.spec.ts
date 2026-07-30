@@ -6,6 +6,7 @@ describe('LeadFlow Analytics HTTP contract', () => {
   it.each([
     'getCommercialJourney',
     'getOperationalOverview',
+    'getRecommendations',
     'renderReportPdf',
   ] as const)(
     'requires an operational or full analytics permission on %s',
@@ -21,6 +22,20 @@ describe('LeadFlow Analytics HTTP contract', () => {
       ]);
     },
   );
+
+  it.each([
+    'generateRecommendations',
+    'decideRecommendation',
+    'evaluateRecommendation',
+    'rollbackRecommendation',
+  ] as const)('requires full analytics permission on %s', (handler) => {
+    const permission = Reflect.getMetadata(
+      'permissions:permission_key',
+      LeadFlowAnalyticsController.prototype[handler],
+    ) as unknown;
+
+    expect(permission).toBe('leadflow.analytics.recommendations.manage.admin');
+  });
 
   it('keeps the operational endpoint separate from the commercial cohort', () => {
     expect(
