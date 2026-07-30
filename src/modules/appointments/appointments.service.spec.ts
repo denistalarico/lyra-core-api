@@ -113,7 +113,7 @@ describe('AppointmentsService', () => {
     );
   });
 
-  it('creates a pending native-video appointment, room and outbox events atomically', async () => {
+  it('creates a pending native-video appointment and leaves its future confirmation window to the scheduler', async () => {
     const result = await service.createScheduledItem(ctx, {
       type: 'meeting',
       title: 'Diagnóstico',
@@ -131,6 +131,22 @@ describe('AppointmentsService', () => {
       meetingProvider: 'livekit',
     });
     expect(meetings.createForAppointment).toHaveBeenCalledTimes(1);
+    expect(outbox.map((event) => event.eventName)).toEqual([
+      'leadflow.calendar.appointment.created',
+    ]);
+  });
+
+  it('publishes confirmation_pending immediately when the declared window is already due', async () => {
+    await service.createScheduledItem(ctx, {
+      type: 'meeting',
+      title: 'Diagnóstico imediato',
+      startAt: '2030-08-01T13:00:00.000Z',
+      metadata: {
+        appointmentStatus: 'pending',
+        confirmationDueAt: '2020-01-01T00:00:00.000Z',
+      },
+    });
+
     expect(outbox.map((event) => event.eventName)).toEqual([
       'leadflow.calendar.appointment.created',
       'leadflow.calendar.appointment.confirmation_pending',
@@ -184,6 +200,60 @@ describe('AppointmentsService', () => {
       status: 'no_show',
     });
     expect(outbox).toHaveLength(2);
+  });
+
+  it('marks an overdue current appointment as no-show atomically and rejects an obsolete clock', async () => {
+    const item = Object.assign(new ScheduledItemEntity(), {
+      id: '51000000-0000-4000-8000-000000000005',
+      tenantId: ctx.tenantId,
+      workspaceId: ctx.workspaceId,
+      type: 'meeting',
+      status: 'scheduled',
+      title: 'Reunião sem presença',
+      description: null,
+      startAt: new Date('2026-08-02T13:00:00.000Z'),
+      endAt: new Date('2026-08-02T14:00:00.000Z'),
+      dueAt: null,
+      locationType: 'physical',
+      videoMode: null,
+      videoUrl: null,
+      sourceChannel: 'manual',
+      metadata: { appointmentStatus: 'pending' },
+      createdAt: new Date('2026-07-28T12:00:00.000Z'),
+      updatedAt: new Date('2026-07-28T12:00:00.000Z'),
+      deletedAt: null,
+    });
+    items.push(item);
+
+    await expect(
+      service.markNoShowIfDue(
+        ctx,
+        item.id,
+        '2026-08-01T13:00:00.000Z',
+        new Date('2026-08-02T14:30:00.000Z'),
+      ),
+    ).resolves.toBe('not_eligible');
+    expect(outbox).toHaveLength(0);
+
+    await expect(
+      service.markNoShowIfDue(
+        ctx,
+        item.id,
+        item.startAt.toISOString(),
+        new Date('2026-08-02T14:30:00.000Z'),
+      ),
+    ).resolves.toBe('marked');
+
+    expect(item.status).toBe('missed');
+    expect(item.metadata).toMatchObject({
+      appointmentStatus: 'no_show',
+      noShowDetection: 'scheduler',
+      noShowDetectedAt: '2026-08-02T14:30:00.000Z',
+    });
+    expect(outbox.map((event) => event.eventName)).toEqual([
+      'leadflow.calendar.appointment.updated',
+      'leadflow.calendar.appointment.no_show',
+    ]);
   });
 
   it.each([

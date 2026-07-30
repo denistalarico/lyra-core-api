@@ -70,6 +70,8 @@ import { PlatformWhatsAppNotificationModule } from '../notifications/platform-wh
 import { LeadFlowCsatExpiryTimerConsumer } from './services/leadflow-csat-expiry-timer.consumer';
 import { LeadFlowDailySummaryTimerConsumer } from './services/leadflow-daily-summary-timer.consumer';
 import { LeadFlowDailySummarySchedulerService } from './services/leadflow-daily-summary-scheduler.service';
+import { AppointmentsModule } from '../appointments/appointments.module';
+import { LeadFlowAppointmentLifecycleSchedulerService } from './services/leadflow-appointment-lifecycle-scheduler.service';
 
 @Module({
   imports: [
@@ -78,6 +80,7 @@ import { LeadFlowDailySummarySchedulerService } from './services/leadflow-daily-
     InboxModule,
     NotificationsModule,
     LeadFlowAnalyticsModule,
+    AppointmentsModule,
     PlatformWhatsAppNotificationModule,
     TypeOrmModule.forFeature(
       [
@@ -134,6 +137,7 @@ import { LeadFlowDailySummarySchedulerService } from './services/leadflow-daily-
     },
     LeadFlowFollowupTimerConsumer,
     LeadFlowAppointmentTimerConsumer,
+    LeadFlowAppointmentLifecycleSchedulerService,
     LeadFlowCsatExpiryTimerConsumer,
     LeadFlowDailySummaryTimerConsumer,
     LeadFlowDailySummarySchedulerService,

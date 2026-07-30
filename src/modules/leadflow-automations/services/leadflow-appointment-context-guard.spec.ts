@@ -62,10 +62,20 @@ function delivery(): LeadFlowEventDeliveryEntity {
   } as unknown as LeadFlowEventDeliveryEntity;
 }
 
-function build(appointment: Record<string, unknown> | null) {
+function build(
+  appointment: Record<string, unknown> | null,
+  conversation: Record<string, unknown> | null = {
+    id: CONVERSATION,
+    source: 'whatsapp',
+    opportunityId: OPPORTUNITY,
+  },
+) {
   const appointments = { findOne: jest.fn().mockResolvedValue(appointment) };
   const loader = new LeadFlowAutomationContextLoaderService(
-    { findOne: jest.fn().mockResolvedValue(null), exist: jest.fn() } as never,
+    {
+      findOne: jest.fn().mockResolvedValue(conversation),
+      exist: jest.fn(),
+    } as never,
     { findOne: jest.fn().mockResolvedValue(null) } as never,
     { findOne: jest.fn().mockResolvedValue(null) } as never,
     { findOne: jest.fn().mockResolvedValue(null) } as never,
@@ -127,7 +137,6 @@ describe('agenda context guard', () => {
       { contactId: null, sourceConversationId: null },
       'contato',
     ],
-    ['sem canal', { sourceChannel: '   ' }, 'canal'],
   ])(
     'ignora por contexto ausente um compromisso %s',
     async (_label, missing, expected) => {
@@ -158,6 +167,59 @@ describe('agenda context guard', () => {
       expect(verdict.plannedActions).toEqual([]);
     },
   );
+
+  it('ignora quando nenhum canal pode ser resolvido da Agenda ou da conversa', async () => {
+    const { contextService, evaluation } = build(
+      commitment({ sourceChannel: '   ' }),
+      { id: CONVERSATION, source: '   ', opportunityId: OPPORTUNITY },
+    );
+
+    const resolutions = await contextService.resolveForDelivery(
+      [automation()],
+      delivery(),
+    );
+    const resolution = resolutions.get('automation-1');
+    const verdict = evaluation.evaluate(
+      automation(),
+      recipe,
+      resolution?.context,
+      resolution?.gaps,
+    );
+
+    expect(verdict.skipReason).toBe(
+      LeadFlowAutomationSkipReason.MissingContext,
+    );
+    expect(
+      resolution?.gaps[LeadFlowAutomationContextSignal.AppointmentContext]
+        ?.detail,
+    ).toContain('canal');
+  });
+
+  it('resolve a conversa canônica a partir do contato quando o appointment não armazena o thread', async () => {
+    const { contextService } = build(
+      commitment({
+        sourceConversationId: null,
+        sourceOpportunityId: null,
+        sourceChannel: 'manual',
+      }),
+    );
+
+    const resolutions = await contextService.resolveForDelivery(
+      [automation()],
+      delivery(),
+    );
+    const resolution = resolutions.get('automation-1');
+
+    expect(resolution?.snapshot.subjects).toMatchObject({
+      scheduled_item: APPOINTMENT,
+      inbox_conversation: CONVERSATION,
+      crm_opportunity: OPPORTUNITY,
+    });
+    expect(resolution?.context.appointmentContext).toMatchObject({
+      conversationId: CONVERSATION,
+      channel: 'whatsapp',
+    });
+  });
 
   it('ignora por contexto ausente quando o compromisso não existe no workspace', async () => {
     const { contextService, evaluation } = build(null);

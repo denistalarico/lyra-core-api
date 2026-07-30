@@ -346,6 +346,66 @@ export class AppointmentsService {
     });
   }
 
+  /**
+   * Records an automatically detected no-show only while the timer still
+   * describes the current commitment.
+   *
+   * The scheduler is at-least-once and a commitment can be moved while its old
+   * timer is waiting. Locking and comparing the expected start inside the same
+   * transaction as the lifecycle write keeps an old fire from marking the new
+   * appointment time as missed.
+   */
+  async markNoShowIfDue(
+    ctx: RequestContext,
+    id: string,
+    expectedStartsAt: string,
+    detectedAt: Date,
+  ): Promise<'marked' | 'not_due' | 'not_eligible'> {
+    return this.dataSource.transaction(async (manager) => {
+      const item = await this.getScheduledItemForUpdate(manager, ctx, id);
+      if (!this.isAppointmentItem(item)) return 'not_eligible';
+
+      const lifecycle = this.resolveLifecycleStatus(item);
+      if (!['pending', 'confirmed'].includes(lifecycle)) {
+        return 'not_eligible';
+      }
+
+      const startsAt = item.startAt ?? item.dueAt;
+      if (!startsAt || startsAt.toISOString() !== expectedStartsAt) {
+        return 'not_eligible';
+      }
+      const attendanceEndsAt = item.endAt ?? startsAt;
+      if (detectedAt.getTime() < attendanceEndsAt.getTime()) {
+        return 'not_due';
+      }
+
+      item.status = this.storageStatusForLifecycle('no_show');
+      item.metadata = {
+        ...item.metadata,
+        appointmentStatus: 'no_show',
+        noShowDetectedAt: detectedAt.toISOString(),
+        noShowDetection: 'scheduler',
+      };
+      await this.syncNativeMeetingBinding(manager, ctx, item, 'no_show');
+      const saved = await manager.getRepository(ScheduledItemEntity).save(item);
+      await this.emitAppointmentEvent(
+        manager,
+        saved,
+        'leadflow.calendar.appointment.updated',
+        {
+          appointmentId: saved.id,
+          changedFields: ['status', 'metadata.noShowDetectedAt'],
+        },
+        `updated:${saved.updatedAt.toISOString()}`,
+      );
+      await this.emitLifecycleEvent(manager, saved, 'no_show', {
+        reason: 'scheduler_detected',
+        detectedAt: detectedAt.toISOString(),
+      });
+      return 'marked';
+    });
+  }
+
   async deleteScheduledItem(
     ctx: RequestContext,
     id: string,
@@ -722,7 +782,11 @@ export class AppointmentsService {
     manager: EntityManager,
     item: ScheduledItemEntity,
     status: AppointmentLifecycleStatus,
-    options: { reason?: string; confirmedVia?: string },
+    options: {
+      reason?: string;
+      confirmedVia?: string;
+      detectedAt?: string;
+    },
   ): Promise<void> {
     if (status === 'pending') {
       const startsAt = this.requireStartsAt(item);
@@ -732,6 +796,10 @@ export class AppointmentsService {
         !Number.isNaN(Date.parse(configuredDueAt))
           ? new Date(configuredDueAt).toISOString()
           : startsAt;
+      // A future deadline is reconciled by the appointment lifecycle scheduler.
+      // Publishing now would make `confirmation_pending` mean "appointment was
+      // created" instead of "the confirmation window has been reached".
+      if (Date.parse(confirmationDueAt) > Date.now()) return;
       await this.emitAppointmentEvent(
         manager,
         item,
@@ -778,7 +846,8 @@ export class AppointmentsService {
         'leadflow.calendar.appointment.no_show',
         {
           appointmentId: item.id,
-          detectedAt: new Date().toISOString(),
+          detectedAt: options.detectedAt ?? new Date().toISOString(),
+          detectionReason: options.reason ?? 'status_changed',
         },
         `no-show:${item.updatedAt.toISOString()}`,
       );

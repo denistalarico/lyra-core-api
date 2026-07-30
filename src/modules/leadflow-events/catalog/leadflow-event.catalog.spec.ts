@@ -55,6 +55,7 @@ const BLUEPRINT_EVENT_NAMES = [
   'leadflow.automations.runtime.config.updated',
   'leadflow.automations.csat.response.recorded',
   'leadflow.automations.schedule.daily',
+  'leadflow.automations.appointment.reminder_result',
   // Calendar
   'leadflow.calendar.appointment.created',
   'leadflow.calendar.appointment.updated',
@@ -229,6 +230,11 @@ describe('leadflow event catalog', () => {
       {
         trigger: 'appointment.created',
         eventName: 'leadflow.calendar.appointment.created',
+        status: 'mapped',
+      },
+      {
+        trigger: 'appointment.created',
+        eventName: 'leadflow.calendar.appointment.updated',
         status: 'mapped',
       },
       {

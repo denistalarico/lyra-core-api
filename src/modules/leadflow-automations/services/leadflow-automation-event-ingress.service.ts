@@ -17,6 +17,7 @@ import { LeadFlowEventStatus } from '../../leadflow-events/enums/leadflow-event-
 import { LeadFlowAutomationShadowEvaluatorService } from './leadflow-automation-shadow-evaluator.service';
 import { LeadFlowFollowupIdleDetectorService } from './leadflow-followup-idle-detector.service';
 import { LeadFlowBusinessHoursClosedDetectorService } from './leadflow-business-hours-closed-detector.service';
+import { LeadFlowAppointmentLifecycleSchedulerService } from './leadflow-appointment-lifecycle-scheduler.service';
 
 export const LEADFLOW_AUTOMATIONS_EVENT_CONSUMER =
   'leadflow.automations' as const;
@@ -58,6 +59,8 @@ export class LeadFlowAutomationEventIngressService implements OnApplicationShutd
     private readonly idleDetector?: LeadFlowFollowupIdleDetectorService,
     @Optional()
     private readonly businessHoursDetector?: LeadFlowBusinessHoursClosedDetectorService,
+    @Optional()
+    private readonly appointmentLifecycleScheduler?: LeadFlowAppointmentLifecycleSchedulerService,
   ) {}
 
   onApplicationShutdown(): void {
@@ -137,6 +140,7 @@ export class LeadFlowAutomationEventIngressService implements OnApplicationShutd
       // of this delivery never creates a second detector timer.
       await this.idleDetector?.observeDelivery(delivery);
       await this.businessHoursDetector?.observeDelivery(delivery);
+      await this.appointmentLifecycleScheduler?.observeDelivery(delivery);
       const decision = this.accept(delivery);
       const now = new Date();
       if (decision.status === 'skipped') {

@@ -352,6 +352,7 @@ const ESSENTIAL_SEEDS: RecipeSeed[] = [
     limitsLabel:
       'Uma pergunta por ciclo de confirmação; para se houver atendimento humano em curso.',
     conditionConfig: { businessHoursOnly: false, stopIfReplied: false },
+    triggerConfig: { confirmationHoursBefore: 24 },
     messageConfig: {
       baseMessage:
         'Podemos confirmar seu compromisso? Responda Confirmar, Reagendar ou Cancelar.',
@@ -379,7 +380,7 @@ const ESSENTIAL_SEEDS: RecipeSeed[] = [
     limitsLabel:
       'Duas tentativas por compromisso, dentro do horário comercial, encerradas assim que o lead responder.',
     conditionConfig: { businessHoursOnly: false, stopIfReplied: false },
-    triggerConfig: { delayHours: 1 },
+    triggerConfig: { delayHours: 1, noShowGraceMinutes: 30 },
     actionConfig: { maxAttempts: 2, moveToStageRef: null },
     messageConfig: {
       baseMessage:

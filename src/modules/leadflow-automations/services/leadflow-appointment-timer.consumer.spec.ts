@@ -34,6 +34,7 @@ function harness(
     appointment?: Record<string, unknown> | null;
     conversation?: Record<string, unknown> | null;
     gateAllowed?: boolean;
+    automationRecipe?: string;
   } = {},
 ) {
   const registry = { register: jest.fn(), resolve: jest.fn() };
@@ -57,7 +58,7 @@ function harness(
     findOne: jest.fn().mockResolvedValue({
       id: 'automation-1',
       publishedVersionId: 'version-1',
-      recipeKey: 'appointment_reminder',
+      recipeKey: overrides.automationRecipe ?? 'appointment_reminder',
     }),
   };
   const appointments = {
@@ -94,6 +95,9 @@ function harness(
     insert: jest.fn().mockResolvedValue(undefined),
     create: jest.fn((row: Record<string, unknown>) => row),
   };
+  const appointmentsService = {
+    markNoShowIfDue: jest.fn().mockResolvedValue('marked'),
+  };
 
   const consumer = new LeadFlowAppointmentTimerConsumer(
     registry as never,
@@ -103,8 +107,17 @@ function harness(
     appointments as never,
     conversations as never,
     outbox as never,
+    appointmentsService as never,
   );
-  return { consumer, gate, sendMessage, automations, outbox, registry };
+  return {
+    consumer,
+    gate,
+    sendMessage,
+    automations,
+    appointmentsService,
+    outbox,
+    registry,
+  };
 }
 
 function outboxEvents(outbox: { insert: jest.Mock }): string[] {
@@ -227,5 +240,93 @@ describe('LeadFlowAppointmentTimerConsumer', () => {
     await expect(
       consumer.handleTimer(envelope({ kind: 'followup_delivery' })),
     ).rejects.toThrow('appointment_timer_payload_invalid');
+  });
+
+  it('publishes confirmation_pending when the configured window is reached', async () => {
+    const { consumer, outbox } = harness({
+      automationRecipe: 'appointment_confirmation',
+      appointment: {
+        metadata: {
+          appointmentStatus: 'pending',
+          confirmationDueAt: '2026-07-31T13:00:00.000Z',
+        },
+      },
+    });
+
+    await consumer.handleTimer(
+      envelope({
+        kind: 'appointment_confirmation',
+        expectedConfirmationDueAt: '2026-07-31T13:00:00.000Z',
+      }),
+    );
+
+    expect(outboxEvents(outbox)).toEqual([
+      'leadflow.calendar.appointment.confirmation_pending',
+    ]);
+  });
+
+  it('drops an obsolete confirmation timer after the deadline changes', async () => {
+    const { consumer, outbox } = harness({
+      automationRecipe: 'appointment_confirmation',
+      appointment: {
+        metadata: {
+          appointmentStatus: 'pending',
+          confirmationDueAt: '2026-08-01T10:00:00.000Z',
+        },
+      },
+    });
+
+    await consumer.handleTimer(
+      envelope({
+        kind: 'appointment_confirmation',
+        expectedConfirmationDueAt: '2026-07-31T13:00:00.000Z',
+      }),
+    );
+
+    expect(outbox.insert).not.toHaveBeenCalled();
+  });
+
+  it('marks an overdue pending appointment as no-show behind the gate', async () => {
+    const { consumer, appointmentsService, gate } = harness({
+      automationRecipe: 'appointment_no_show_recovery',
+      appointment: { metadata: { appointmentStatus: 'pending' } },
+    });
+
+    const noShowEnvelope = envelope({
+      kind: 'appointment_no_show_check',
+      expectedCheckAt: '2026-08-01T13:30:00.000Z',
+    });
+    noShowEnvelope.firedAt = '2026-08-01T14:00:00.000Z';
+    await consumer.handleTimer(noShowEnvelope);
+
+    expect(gate.evaluate).toHaveBeenCalledWith(
+      expect.objectContaining({ actionKeys: ['schedule_followup'] }),
+    );
+    expect(appointmentsService.markNoShowIfDue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tenantId: 'tenant-1',
+        workspaceId: 'workspace-1',
+      }),
+      APPOINTMENT,
+      STARTS_AT.toISOString(),
+      new Date('2026-08-01T14:00:00.000Z'),
+    );
+  });
+
+  it('does not mutate appointment state while the execution gate is closed', async () => {
+    const { consumer, appointmentsService } = harness({
+      automationRecipe: 'appointment_no_show_recovery',
+      gateAllowed: false,
+      appointment: { metadata: { appointmentStatus: 'pending' } },
+    });
+
+    await consumer.handleTimer(
+      envelope({
+        kind: 'appointment_no_show_check',
+        expectedCheckAt: '2026-08-01T10:30:00.000Z',
+      }),
+    );
+
+    expect(appointmentsService.markNoShowIfDue).not.toHaveBeenCalled();
   });
 });

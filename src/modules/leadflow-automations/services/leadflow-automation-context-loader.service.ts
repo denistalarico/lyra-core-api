@@ -170,6 +170,23 @@ export class LeadFlowAutomationContextLoaderService {
             return;
           }
 
+          // Appointments created from the Agency UI commonly carry the CRM
+          // contact but not the Inbox thread id. Following the contact's latest
+          // canonical conversation is deterministic inside the workspace and
+          // gives message executors the thread they actually require. Without
+          // it the context guard would approve a contact-only commitment and
+          // the effect would fail later as "unconfigured".
+          let linkedConversation: InboxConversationEntity | null = null;
+          if (item.sourceConversationId || item.contactId) {
+            queryCount += 1;
+            linkedConversation = await this.conversations.findOne({
+              where: item.sourceConversationId
+                ? { id: item.sourceConversationId, ...scope }
+                : { contactId: item.contactId as string, ...scope },
+              order: { lastMessageAt: 'DESC', createdAt: 'DESC' },
+            });
+          }
+
           // The guard the phase exists for. Each part answers a question the
           // automation cannot avoid asking — when it happens, what it is, who
           // it is with, where a reply would arrive — so a commitment missing
@@ -181,7 +198,12 @@ export class LeadFlowAutomationContextLoaderService {
           if (!item.contactId && !item.sourceConversationId) {
             missing.push('contato');
           }
-          if (!item.sourceChannel?.trim()) missing.push('canal');
+          if (!linkedConversation) missing.push('conversa do contato');
+          const channel =
+            item.sourceChannel?.trim() && item.sourceChannel !== 'manual'
+              ? item.sourceChannel
+              : (linkedConversation?.source?.trim() ?? '');
+          if (!channel) missing.push('canal');
           if (missing.length > 0 || !startsAt) {
             gaps.push(
               gap(
@@ -199,10 +221,13 @@ export class LeadFlowAutomationContextLoaderService {
             startsAt: startsAt.toISOString(),
             timezone: item.timezone,
             serviceRef: item.type,
-            channel: item.sourceChannel,
+            channel,
             contactId: item.contactId,
-            conversationId: item.sourceConversationId,
-            opportunityId: item.sourceOpportunityId,
+            conversationId: linkedConversation?.id ?? null,
+            opportunityId:
+              item.sourceOpportunityId ??
+              linkedConversation?.opportunityId ??
+              null,
             lifecycleStatus: appointmentLifecycleStatus(item),
             confirmationDueAt:
               typeof confirmationDueAt === 'string' &&
@@ -213,13 +238,15 @@ export class LeadFlowAutomationContextLoaderService {
           shared[LeadFlowAutomationContextSignal.AppointmentContext] = value;
 
           // Links written by the Agenda in the same transaction as the event.
-          if (!conversationId && item.sourceConversationId) {
-            conversationId = item.sourceConversationId;
-            derivedSubjects.inbox_conversation = item.sourceConversationId;
+          if (!conversationId && linkedConversation?.id) {
+            conversationId = linkedConversation.id;
+            derivedSubjects.inbox_conversation = linkedConversation.id;
           }
-          if (!opportunityId && item.sourceOpportunityId) {
-            opportunityId = item.sourceOpportunityId;
-            derivedSubjects.crm_opportunity = item.sourceOpportunityId;
+          const linkedOpportunityId =
+            item.sourceOpportunityId ?? linkedConversation?.opportunityId;
+          if (!opportunityId && linkedOpportunityId) {
+            opportunityId = linkedOpportunityId;
+            derivedSubjects.crm_opportunity = linkedOpportunityId;
           }
         });
       }

@@ -2,10 +2,12 @@ import { Injectable, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { createHash } from 'node:crypto';
 import { IsNull, Repository } from 'typeorm';
+import { AppointmentsService } from '../../appointments/appointments.service';
 import { ScheduledItemEntity } from '../../appointments/entities/scheduled-item.entity';
 import { InboxConversationEntity } from '../../inbox/entities/inbox-conversation.entity';
 import { InboxDomainOutboxEntity } from '../../inbox/entities/inbox-domain-outbox.entity';
 import { hasLeadFlowOutboundOptOut } from '../../inbox/services/leadflow-contact-opt-out';
+import type { LeadFlowEventName } from '../../leadflow-events/types/leadflow-event.types';
 import { LeadFlowAutomationEntity } from '../entities';
 import { LeadFlowAutomationStatus } from '../enums/leadflow-automation-status.enum';
 import { SendMessageExecutor } from '../executors/send-message.executor';
@@ -78,6 +80,7 @@ export class LeadFlowAppointmentTimerConsumer
     private readonly conversations: Repository<InboxConversationEntity>,
     @InjectRepository(InboxDomainOutboxEntity, 'agency')
     private readonly outbox: Repository<InboxDomainOutboxEntity>,
+    private readonly appointmentsService: AppointmentsService,
   ) {}
 
   onModuleInit(): void {
@@ -85,10 +88,20 @@ export class LeadFlowAppointmentTimerConsumer
   }
 
   async handleTimer(envelope: TimerFireEnvelope): Promise<void> {
-    if (stringField(envelope.payload.kind) !== 'appointment_reminder') {
-      throw new Error('appointment_timer_payload_invalid');
+    const kind = stringField(envelope.payload.kind);
+    if (kind === 'appointment_reminder') {
+      await this.deliverReminder(envelope);
+      return;
     }
-    await this.deliverReminder(envelope);
+    if (kind === 'appointment_confirmation') {
+      await this.publishConfirmationPending(envelope);
+      return;
+    }
+    if (kind === 'appointment_no_show_check') {
+      await this.detectNoShow(envelope);
+      return;
+    }
+    throw new Error('appointment_timer_payload_invalid');
   }
 
   private async deliverReminder(envelope: TimerFireEnvelope): Promise<void> {
@@ -105,15 +118,12 @@ export class LeadFlowAppointmentTimerConsumer
       throw new Error('appointment_reminder_payload_invalid');
     }
 
-    const automation = await this.automations.findOne({
-      where: {
-        id: automationId,
-        tenantId: envelope.tenantId,
-        workspaceId: envelope.workspaceId,
-        status: LeadFlowAutomationStatus.Active,
-      },
-    });
-    if (!automation || !automation.publishedVersionId) return;
+    const automation = await this.activeAutomation(
+      envelope,
+      automationId,
+      'appointment_reminder',
+    );
+    if (!automation) return;
 
     const appointment = await this.appointments.findOne({
       where: {
@@ -211,6 +221,129 @@ export class LeadFlowAppointmentTimerConsumer
     }
   }
 
+  /**
+   * Produces the canonical confirmation-window event after revalidating the
+   * appointment clock. Message delivery remains on the ordinary event →
+   * automation path, so it gets the same run, gate and audit model as every
+   * other effect.
+   */
+  private async publishConfirmationPending(
+    envelope: TimerFireEnvelope,
+  ): Promise<void> {
+    const automationId = stringField(envelope.payload.automationId);
+    const appointmentId = stringField(envelope.payload.appointmentId);
+    const expectedStartsAt = stringField(envelope.payload.expectedStartsAt);
+    const expectedDueAt = dateField(envelope.payload.expectedConfirmationDueAt);
+    if (
+      !automationId ||
+      !appointmentId ||
+      !expectedStartsAt ||
+      !expectedDueAt
+    ) {
+      throw new Error('appointment_confirmation_payload_invalid');
+    }
+    if (
+      !(await this.activeAutomation(
+        envelope,
+        automationId,
+        'appointment_confirmation',
+      ))
+    ) {
+      return;
+    }
+
+    const appointment = await this.findAppointment(envelope, appointmentId);
+    if (!appointment || lifecycleStatus(appointment) !== 'pending') return;
+    const startsAt = appointment.startAt ?? appointment.dueAt;
+    if (!startsAt || startsAt.toISOString() !== expectedStartsAt) return;
+
+    const currentDueAt = dateField(appointment.metadata?.confirmationDueAt);
+    if (
+      currentDueAt &&
+      currentDueAt.toISOString() !== expectedDueAt.toISOString()
+    ) {
+      return;
+    }
+
+    await this.insertOutbox(envelope, appointmentId, {
+      eventName: 'leadflow.calendar.appointment.confirmation_pending',
+      idempotencyKey:
+        `appointment.confirmation_pending:${appointmentId}:` +
+        `${expectedStartsAt}:${expectedDueAt.toISOString()}`,
+      payload: {
+        appointmentId,
+        startsAt: expectedStartsAt,
+        confirmationDueAt: expectedDueAt.toISOString(),
+      },
+    });
+  }
+
+  /**
+   * Converts an overdue pending/confirmed commitment into a no-show.
+   *
+   * Unlike confirmation-window publication, this changes domain state and
+   * therefore obeys the execution gate. AppointmentsService owns the locked,
+   * transactional status transition and publishes the canonical no-show event;
+   * that event then starts the existing recovery follow-up recipe.
+   */
+  private async detectNoShow(envelope: TimerFireEnvelope): Promise<void> {
+    const automationId = stringField(envelope.payload.automationId);
+    const appointmentId = stringField(envelope.payload.appointmentId);
+    const expectedStartsAt = stringField(envelope.payload.expectedStartsAt);
+    const expectedCheckAt = dateField(envelope.payload.expectedCheckAt);
+    if (
+      !automationId ||
+      !appointmentId ||
+      !expectedStartsAt ||
+      !expectedCheckAt
+    ) {
+      throw new Error('appointment_no_show_payload_invalid');
+    }
+    if (
+      !(await this.activeAutomation(
+        envelope,
+        automationId,
+        'appointment_no_show_recovery',
+      ))
+    ) {
+      return;
+    }
+
+    const appointment = await this.findAppointment(envelope, appointmentId);
+    if (!appointment) return;
+    const startsAt = appointment.startAt ?? appointment.dueAt;
+    if (
+      !startsAt ||
+      startsAt.toISOString() !== expectedStartsAt ||
+      !['pending', 'confirmed'].includes(lifecycleStatus(appointment))
+    ) {
+      return;
+    }
+
+    const firedAt = dateField(envelope.firedAt) ?? new Date();
+    if (firedAt.getTime() < expectedCheckAt.getTime()) {
+      throw new Error('appointment_no_show_timer_fired_early');
+    }
+
+    const gate = await this.gate.evaluate({
+      tenantId: envelope.tenantId,
+      workspaceId: envelope.workspaceId,
+      automationId,
+      actionKeys: ['schedule_followup'],
+    });
+    if (!gate.allowed) return;
+
+    await this.appointmentsService.markNoShowIfDue(
+      {
+        tenantId: envelope.tenantId,
+        workspaceId: envelope.workspaceId,
+      },
+      appointmentId,
+      expectedStartsAt,
+      firedAt,
+    );
+  }
+
   /** The canonical "the reminder window was reached" event. */
   private async publishReminderDue(
     envelope: TimerFireEnvelope,
@@ -255,7 +388,7 @@ export class LeadFlowAppointmentTimerConsumer
     envelope: TimerFireEnvelope,
     appointmentId: string,
     event: {
-      eventName: string;
+      eventName: LeadFlowEventName;
       idempotencyKey: string;
       payload: Record<string, unknown>;
     },
@@ -279,6 +412,38 @@ export class LeadFlowAppointmentTimerConsumer
       // Only the idempotency boundary is tolerated; never rewrite a published row.
       if (!isUniqueViolation(error)) throw error;
     }
+  }
+
+  private async activeAutomation(
+    envelope: TimerFireEnvelope,
+    automationId: string,
+    recipeKey: string,
+  ): Promise<LeadFlowAutomationEntity | null> {
+    const automation = await this.automations.findOne({
+      where: {
+        id: automationId,
+        tenantId: envelope.tenantId,
+        workspaceId: envelope.workspaceId,
+        status: LeadFlowAutomationStatus.Active,
+      },
+    });
+    return automation?.publishedVersionId && automation.recipeKey === recipeKey
+      ? automation
+      : null;
+  }
+
+  private findAppointment(
+    envelope: TimerFireEnvelope,
+    appointmentId: string,
+  ): Promise<ScheduledItemEntity | null> {
+    return this.appointments.findOne({
+      where: {
+        id: appointmentId,
+        tenantId: envelope.tenantId,
+        workspaceId: envelope.workspaceId,
+        deletedAt: IsNull(),
+      },
+    });
   }
 }
 
@@ -316,6 +481,12 @@ function integerField(value: unknown): number | null {
   return typeof value === 'number' && Number.isInteger(value) && value >= 0
     ? value
     : null;
+}
+
+function dateField(value: unknown): Date | null {
+  if (typeof value !== 'string') return null;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
 function isUniqueViolation(error: unknown): boolean {

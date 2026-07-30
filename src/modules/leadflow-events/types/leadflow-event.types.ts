@@ -96,6 +96,7 @@ export type LeadFlowEventName =
   // Automations (feedback outcome and recurring schedule)
   | 'leadflow.automations.csat.response.recorded'
   | 'leadflow.automations.schedule.daily'
+  | 'leadflow.automations.appointment.reminder_result'
   // Calendar / Agenda
   | 'leadflow.calendar.appointment.created'
   | 'leadflow.calendar.appointment.updated'

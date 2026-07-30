@@ -668,6 +668,32 @@ export const LEADFLOW_EVENT_CATALOG: LeadFlowEventCatalogItem[] = [
     },
     emittedBy: 'system.scheduler',
   }),
+  buildEvent({
+    eventName: 'leadflow.automations.appointment.reminder_result',
+    description:
+      'Resultado auditável de uma tentativa de lembrete de compromisso.',
+    requiredContext: ['appointmentId'],
+    payloadSchema: {
+      timerId: field('string', true, 'Timer que originou a tentativa.'),
+      reminderOffsetMinutes: field(
+        'number',
+        true,
+        'Antecedência do lembrete em minutos.',
+      ),
+      result: field('string', true, 'Resultado confirmado, recusado ou falho.'),
+      errorCode: field(
+        'string',
+        false,
+        'Código de recusa/falha, quando aplicável.',
+      ),
+      reference: field(
+        'string',
+        false,
+        'Referência do transporte, quando confirmada.',
+      ),
+    },
+    emittedBy: 'leadflow.automations.appointment',
+  }),
 
   // ── Calendar / Agenda (app opcional premium) ─────────────────────────────
   buildEvent({
@@ -722,6 +748,11 @@ export const LEADFLOW_EVENT_CATALOG: LeadFlowEventCatalogItem[] = [
     requiredContext: ['appointmentId'],
     payloadSchema: {
       detectedAt: field('string', true, 'ISO da detecção do no-show.'),
+      detectionReason: field(
+        'string',
+        false,
+        'Origem/motivo que registrou o não comparecimento.',
+      ),
     },
   }),
   buildEvent({
@@ -735,7 +766,7 @@ export const LEADFLOW_EVENT_CATALOG: LeadFlowEventCatalogItem[] = [
   buildEvent({
     eventName: 'leadflow.calendar.appointment.reminder_due',
     description:
-      'Janela de lembrete do agendamento atingida. Emitido por scheduler futuro — nenhum agendador roda neste sprint.',
+      'Janela de lembrete do agendamento atingida pelo SchedulerRuntime.',
     requiredContext: ['appointmentId'],
     payloadSchema: {
       startsAt: field('string', true, 'ISO do início do agendamento.'),
@@ -927,6 +958,13 @@ export const LEADFLOW_AUTOMATION_TRIGGER_EVENT_MAPPINGS: LeadFlowEventTriggerMap
       status: 'mapped',
       notes:
         'Emitido transacionalmente pelo AppointmentsService ao criar um compromisso com horário.',
+    },
+    {
+      trigger: 'appointment.created',
+      eventName: 'leadflow.calendar.appointment.updated',
+      status: 'mapped',
+      notes:
+        'Uma alteração de horário reconcilia novamente os timers da receita de lembrete; timers do horário anterior viram no-op na revalidação.',
     },
     {
       trigger: 'appointment.confirmation_pending',
