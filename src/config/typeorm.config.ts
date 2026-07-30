@@ -286,6 +286,13 @@ import {
   LeadFlowIntelligenceResultEntity,
 } from '../modules/leadflow-analytics/entities';
 import {
+  LeadFlowProductTelemetryDailyEntity,
+  LeadFlowTelemetryAuditEventEntity,
+  LeadFlowTelemetryConsentEntity,
+  LeadFlowTelemetryConsentNoticeEntity,
+  LeadFlowTelemetryIdentityLinkEntity,
+} from '../modules/leadflow-privacy/entities';
+import {
   PlatformAdminAuditEventEntity,
   PlatformAdminIdentityEntity,
   PlatformAdminIdentityTokenEntity,
@@ -501,6 +508,11 @@ export const agencyEntities = [
   LeadFlowIntelligenceDecisionEntity,
   LeadFlowIntelligenceConfigVersionEntity,
   LeadFlowIntelligenceResultEntity,
+  LeadFlowTelemetryConsentNoticeEntity,
+  LeadFlowTelemetryConsentEntity,
+  LeadFlowTelemetryIdentityLinkEntity,
+  LeadFlowProductTelemetryDailyEntity,
+  LeadFlowTelemetryAuditEventEntity,
   ScheduledItemEntity,
   ScheduledItemParticipantEntity,
   ScheduledItemReminderEntity,

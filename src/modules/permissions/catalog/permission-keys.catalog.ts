@@ -328,6 +328,8 @@ const RAW_PERMISSIONS: RawPermission[] = [
   ['leadflow.settings.general.update.admin', ADMIN_UP],
   ['leadflow.settings.integrations.manage.admin', ADMIN_UP],
   ['leadflow.settings.permissions.manage.admin', ADMIN_UP],
+  ['leadflow.settings.telemetry.view.admin', ADMIN_UP],
+  ['leadflow.settings.telemetry.manage.owner_only', OWNER_ONLY, true],
   ['leadflow.settings.danger_zone.manage.owner_only', OWNER_ONLY, true],
 
   // 10.5 LeadFlow - Appointments
