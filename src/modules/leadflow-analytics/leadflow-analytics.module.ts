@@ -4,6 +4,7 @@ import { CrmOpportunityEntity } from '../crm/entities/crm-opportunity.entity';
 import { CrmOpportunityEventEntity } from '../crm/entities/crm-opportunity-event.entity';
 import { CrmPipelineEntity } from '../crm/entities/crm-pipeline.entity';
 import { CrmStageEntity } from '../crm/entities/crm-stage.entity';
+import { DocumentLayoutsModule } from '../document-layouts/document-layouts.module';
 import { InboxConversationEventEntity } from '../inbox/entities/inbox-conversation-event.entity';
 import { LeadFlowAutomationRunEntity } from '../leadflow-automations/entities';
 import { LeadFlowEventDeliveryEntity } from '../leadflow-events/entities';
@@ -11,6 +12,7 @@ import { PermissionsModule } from '../permissions';
 import { LeadFlowCsatResponseEntity } from './entities';
 import { LeadFlowAnalyticsController } from './leadflow-analytics.controller';
 import { LeadFlowAnalyticsEventIngressService } from './services/leadflow-analytics-event-ingress.service';
+import { LeadFlowAnalyticsReportService } from './services/leadflow-analytics-report.service';
 import { LeadFlowAnalyticsService } from './services/leadflow-analytics.service';
 import { LeadFlowCsatService } from './services/leadflow-csat.service';
 import { LeadFlowOperationalAnalyticsService } from './services/leadflow-operational-analytics.service';
@@ -18,6 +20,7 @@ import { LeadFlowOperationalAnalyticsService } from './services/leadflow-operati
 @Module({
   imports: [
     PermissionsModule,
+    DocumentLayoutsModule,
     TypeOrmModule.forFeature(
       [
         CrmOpportunityEntity,
@@ -36,12 +39,14 @@ import { LeadFlowOperationalAnalyticsService } from './services/leadflow-operati
   providers: [
     LeadFlowAnalyticsService,
     LeadFlowOperationalAnalyticsService,
+    LeadFlowAnalyticsReportService,
     LeadFlowAnalyticsEventIngressService,
     LeadFlowCsatService,
   ],
   exports: [
     LeadFlowAnalyticsService,
     LeadFlowOperationalAnalyticsService,
+    LeadFlowAnalyticsReportService,
     LeadFlowCsatService,
   ],
 })

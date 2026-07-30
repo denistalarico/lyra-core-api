@@ -3,7 +3,11 @@ import { ANY_PERMISSION_KEYS_METADATA } from '../permissions';
 import { LeadFlowAnalyticsController } from './leadflow-analytics.controller';
 
 describe('LeadFlow Analytics HTTP contract', () => {
-  it.each(['getCommercialJourney', 'getOperationalOverview'] as const)(
+  it.each([
+    'getCommercialJourney',
+    'getOperationalOverview',
+    'renderReportPdf',
+  ] as const)(
     'requires an operational or full analytics permission on %s',
     (handler) => {
       const permissions = Reflect.getMetadata(
@@ -25,6 +29,16 @@ describe('LeadFlow Analytics HTTP contract', () => {
     ).not.toBe(
       // eslint-disable-next-line @typescript-eslint/unbound-method
       LeadFlowAnalyticsController.prototype.getCommercialJourney,
+    );
+  });
+
+  it('keeps PDF generation behind a dedicated controller method', () => {
+    expect(
+      // eslint-disable-next-line @typescript-eslint/unbound-method
+      LeadFlowAnalyticsController.prototype.renderReportPdf,
+    ).not.toBe(
+      // eslint-disable-next-line @typescript-eslint/unbound-method
+      LeadFlowAnalyticsController.prototype.getOperationalOverview,
     );
   });
 });
