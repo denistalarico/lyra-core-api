@@ -1,7 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { FinanceDocumentSequence } from '../entities';
+import { EntityManager, Repository } from 'typeorm';
+import {
+  FinanceBill,
+  FinanceDocumentSequence,
+  FinanceInvoice,
+} from '../entities';
 import { FinanceDocumentType } from '../enums';
 import { FinanceRequestContext } from './finance-context';
 
@@ -56,17 +60,54 @@ export class FinanceDocumentNumberingService {
         );
       }
 
-      const generatedNumber = `${sequence.prefix}-${sequence.periodYear}-${String(
-        sequence.nextNumber,
-      ).padStart(sequence.padding, '0')}`;
+      let generatedNumber: string;
+      do {
+        generatedNumber = `${sequence.prefix}-${sequence.periodYear}-${String(
+          sequence.nextNumber,
+        ).padStart(sequence.padding, '0')}`;
+        sequence.nextNumber += 1;
+      } while (
+        await this.documentNumberExists(
+          manager,
+          ctx,
+          documentType,
+          generatedNumber,
+        )
+      );
 
       sequence.lastGeneratedNumber = generatedNumber;
-      sequence.nextNumber += 1;
 
       await manager.getRepository(FinanceDocumentSequence).save(sequence);
 
       return generatedNumber;
     });
+  }
+
+  private documentNumberExists(
+    manager: EntityManager,
+    ctx: FinanceRequestContext,
+    documentType: FinanceDocumentType,
+    documentNumber: string,
+  ) {
+    if (documentType === FinanceDocumentType.Bill) {
+      return manager.getRepository(FinanceBill).exists({
+        where: {
+          tenantId: ctx.tenantId,
+          workspaceId: ctx.workspaceId,
+          billNumber: documentNumber,
+        },
+      });
+    }
+    if (documentType === FinanceDocumentType.Invoice) {
+      return manager.getRepository(FinanceInvoice).exists({
+        where: {
+          tenantId: ctx.tenantId,
+          workspaceId: ctx.workspaceId,
+          invoiceNumber: documentNumber,
+        },
+      });
+    }
+    return Promise.resolve(false);
   }
 
   listSequences(ctx: FinanceRequestContext) {

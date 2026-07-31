@@ -286,10 +286,14 @@ export class FinanceBillingService {
     if (!shouldSettleFromStatusPatch && requestedStatus !== undefined) {
       invoice.status = requestedStatus;
     }
-    if (shouldSettleFromStatusPatch && invoice.status === FinanceInvoiceStatus.Draft) {
+    if (
+      shouldSettleFromStatusPatch &&
+      invoice.status === FinanceInvoiceStatus.Draft
+    ) {
       invoice.status = FinanceInvoiceStatus.Issued;
       invoice.issuedAt = invoice.issuedAt ?? new Date();
-      invoice.issueDate = invoice.issueDate ?? new Date().toISOString().slice(0, 10);
+      invoice.issueDate =
+        invoice.issueDate ?? new Date().toISOString().slice(0, 10);
     }
 
     // Issuing through a generic PATCH also consumes the number if the draft
@@ -363,11 +367,20 @@ export class FinanceBillingService {
     return this.getInvoice(ctx, id);
   }
 
-  private async recalcInvoiceTotals(ctx: FinanceRequestContext, invoiceId: string) {
+  private async recalcInvoiceTotals(
+    ctx: FinanceRequestContext,
+    invoiceId: string,
+  ) {
     const lines = await this.invoiceLinesRepo.find({
-      where: { invoiceId, tenantId: ctx.tenantId, workspaceId: ctx.workspaceId },
+      where: {
+        invoiceId,
+        tenantId: ctx.tenantId,
+        workspaceId: ctx.workspaceId,
+      },
     });
-    let subtotal = 0, tax = 0, discount = 0;
+    let subtotal = 0,
+      tax = 0,
+      discount = 0;
     for (const l of lines) {
       const qty = toMoney(l.quantity);
       const price = toMoney(l.unitPrice);
@@ -395,7 +408,11 @@ export class FinanceBillingService {
   ) {
     validateId(invoiceId, 'invoice id');
     const invoice = await this.invoicesRepo.findOne({
-      where: { id: invoiceId, tenantId: ctx.tenantId, workspaceId: ctx.workspaceId },
+      where: {
+        id: invoiceId,
+        tenantId: ctx.tenantId,
+        workspaceId: ctx.workspaceId,
+      },
     });
     if (!invoice) throw new NotFoundException('Finance invoice not found');
 
@@ -435,18 +452,29 @@ export class FinanceBillingService {
     validateId(invoiceId, 'invoice id');
     validateId(lineId, 'line id');
     const line = await this.invoiceLinesRepo.findOne({
-      where: { id: lineId, invoiceId, tenantId: ctx.tenantId, workspaceId: ctx.workspaceId },
+      where: {
+        id: lineId,
+        invoiceId,
+        tenantId: ctx.tenantId,
+        workspaceId: ctx.workspaceId,
+      },
     });
     if (!line) throw new NotFoundException('Invoice line not found');
 
     if (dto.description !== undefined) line.description = dto.description;
-    if (dto.quantity !== undefined) line.quantity = toMoney(dto.quantity).toFixed(4);
-    if (dto.unitPrice !== undefined) line.unitPrice = money(toMoney(dto.unitPrice));
-    if (dto.discountAmount !== undefined) line.discountAmount = money(toMoney(dto.discountAmount));
-    if (dto.taxAmount !== undefined) line.taxAmount = money(toMoney(dto.taxAmount));
+    if (dto.quantity !== undefined)
+      line.quantity = toMoney(dto.quantity).toFixed(4);
+    if (dto.unitPrice !== undefined)
+      line.unitPrice = money(toMoney(dto.unitPrice));
+    if (dto.discountAmount !== undefined)
+      line.discountAmount = money(toMoney(dto.discountAmount));
+    if (dto.taxAmount !== undefined)
+      line.taxAmount = money(toMoney(dto.taxAmount));
     if (dto.categoryId !== undefined) line.categoryId = dto.categoryId ?? null;
-    if (dto.costCenterId !== undefined) line.costCenterId = dto.costCenterId ?? null;
-    if (dto.metadata !== undefined) line.metadata = { ...line.metadata, ...dto.metadata };
+    if (dto.costCenterId !== undefined)
+      line.costCenterId = dto.costCenterId ?? null;
+    if (dto.metadata !== undefined)
+      line.metadata = { ...line.metadata, ...dto.metadata };
 
     const qty = toMoney(line.quantity);
     const price = toMoney(line.unitPrice);
@@ -467,7 +495,12 @@ export class FinanceBillingService {
     validateId(invoiceId, 'invoice id');
     validateId(lineId, 'line id');
     const line = await this.invoiceLinesRepo.findOne({
-      where: { id: lineId, invoiceId, tenantId: ctx.tenantId, workspaceId: ctx.workspaceId },
+      where: {
+        id: lineId,
+        invoiceId,
+        tenantId: ctx.tenantId,
+        workspaceId: ctx.workspaceId,
+      },
     });
     if (!line) throw new NotFoundException('Invoice line not found');
 
@@ -482,7 +515,11 @@ export class FinanceBillingService {
       where: { id, tenantId: ctx.tenantId, workspaceId: ctx.workspaceId },
     });
     if (!invoice) throw new NotFoundException('Finance invoice not found');
-    await this.invoiceLinesRepo.delete({ invoiceId: id, tenantId: ctx.tenantId, workspaceId: ctx.workspaceId });
+    await this.invoiceLinesRepo.delete({
+      invoiceId: id,
+      tenantId: ctx.tenantId,
+      workspaceId: ctx.workspaceId,
+    });
     await this.invoicesRepo.remove(invoice);
     return { success: true, id };
   }
@@ -525,9 +562,15 @@ export class FinanceBillingService {
     // Confirming an invoice and recognising it in the ledger are atomic:
     // if the automatic posting fails, the status change rolls back.
     const saved = await this.dataSource.transaction(async (manager) => {
-      const persisted = await manager.getRepository(FinanceInvoice).save(invoice);
+      const persisted = await manager
+        .getRepository(FinanceInvoice)
+        .save(invoice);
       if (!wasIssued) {
-        await this.postingService.postInvoiceConfirmed(ctx, persisted.id, manager);
+        await this.postingService.postInvoiceConfirmed(
+          ctx,
+          persisted.id,
+          manager,
+        );
       }
       return persisted;
     });
@@ -685,7 +728,7 @@ export class FinanceBillingService {
     // A "previsto" payment is only forecast for a bill that is already open.
     // Drafts forecast nothing until they are confirmed (see updateBill).
     if (status === FinanceBillStatus.Open) {
-      await this.createScheduledPaymentForBill(ctx, bill);
+      await this.ensureScheduledPaymentForBillSafely(ctx, bill);
     }
     return bill;
   }
@@ -714,7 +757,10 @@ export class FinanceBillingService {
     if (!shouldSettleFromStatusPatch && requestedStatus !== undefined) {
       bill.status = requestedStatus;
     }
-    if (shouldSettleFromStatusPatch && bill.status === FinanceBillStatus.Draft) {
+    if (
+      shouldSettleFromStatusPatch &&
+      bill.status === FinanceBillStatus.Draft
+    ) {
       bill.status = FinanceBillStatus.Open;
     }
 
@@ -732,28 +778,66 @@ export class FinanceBillingService {
       bill.billNumber = await this.generateDocumentNumber(ctx, 'BILL');
     }
 
-    const saved = await this.billsRepo.save(bill);
+    const isConfirming =
+      previousStatus === FinanceBillStatus.Draft &&
+      bill.status === FinanceBillStatus.Open;
+    const isCancelling =
+      previousStatus !== FinanceBillStatus.Cancelled &&
+      bill.status === FinanceBillStatus.Cancelled;
+
+    if (isConfirming) {
+      const lineCount = await this.billLinesRepo.count({
+        where: {
+          billId: id,
+          tenantId: ctx.tenantId,
+          workspaceId: ctx.workspaceId,
+        },
+      });
+      if (lineCount === 0 || toMoney(bill.totalAmount) <= 0) {
+        throw new BadRequestException(
+          'Adicione ao menos um item com valor maior que zero antes de confirmar a conta.',
+        );
+      }
+    }
+
+    // Status and accounting entry must succeed or fail together. Previously the
+    // PATCH persisted `open` before posting, leaving a half-confirmed bill when
+    // account/journal validation failed.
+    const saved = await this.dataSource.transaction(async (manager) => {
+      const persisted = await manager.getRepository(FinanceBill).save(bill);
+      if (isConfirming) {
+        await this.postingService.postBillConfirmed(ctx, persisted.id, manager);
+      }
+      if (isCancelling) {
+        await this.postingService.reverseBill(ctx, persisted.id, manager);
+      }
+      return persisted;
+    });
 
     // Posting is idempotent; only acts on the first transition into each state.
-    if (
-      previousStatus === FinanceBillStatus.Draft &&
-      saved.status === FinanceBillStatus.Open
-    ) {
-      await this.postingService.postBillConfirmed(ctx, saved.id);
+    if (isConfirming) {
       // Forecast the payable as a "previsto" payment once, on confirmation.
       // Skipped when the same PATCH is settling the bill straight to paid,
       // which registers its own completed payment below.
       if (!shouldSettleFromStatusPatch) {
-        await this.ensureScheduledPaymentForBill(ctx, saved);
+        await this.ensureScheduledPaymentForBillSafely(ctx, saved);
       }
     }
 
-    if (
-      previousStatus !== FinanceBillStatus.Cancelled &&
-      saved.status === FinanceBillStatus.Cancelled
-    ) {
-      await this.postingService.reverseBill(ctx, saved.id);
+    if (isCancelling) {
       await this.reconcileTeamPaymentsForBills(ctx, [saved.id]);
+    }
+
+    if (dto.vendorId !== undefined) {
+      const scheduled = await this.findScheduledPaymentForTarget(ctx, saved.id);
+      if (
+        scheduled &&
+        scheduled.status !== FinancePaymentStatus.Completed &&
+        scheduled.status !== FinancePaymentStatus.Cancelled
+      ) {
+        scheduled.contactId = saved.vendorId;
+        await this.paymentsRepo.save(scheduled);
+      }
     }
 
     if (shouldSettleFromStatusPatch) {
@@ -797,8 +881,43 @@ export class FinanceBillingService {
       where: { id, tenantId: ctx.tenantId, workspaceId: ctx.workspaceId },
     });
     if (!bill) throw new NotFoundException('Finance bill not found');
-    await this.billLinesRepo.delete({ billId: id, tenantId: ctx.tenantId, workspaceId: ctx.workspaceId });
-    await this.billsRepo.remove(bill);
+
+    const allocations = await this.paymentAllocationsRepo.count({
+      where: {
+        tenantId: ctx.tenantId,
+        workspaceId: ctx.workspaceId,
+        targetType: FinanceAllocationTargetType.Bill,
+        targetId: id,
+      },
+    });
+    if (allocations > 0) {
+      throw new BadRequestException(
+        'Esta conta possui pagamentos registrados. Reverta ou arquive os pagamentos antes de excluí-la.',
+      );
+    }
+
+    await this.dataSource.transaction(async (manager) => {
+      await this.postingService.reverseBill(ctx, id, manager);
+      await manager
+        .getRepository(FinancePayment)
+        .createQueryBuilder()
+        .delete()
+        .where('tenant_id = :tenantId', { tenantId: ctx.tenantId })
+        .andWhere('workspace_id = :workspaceId', {
+          workspaceId: ctx.workspaceId,
+        })
+        .andWhere("metadata ->> 'sourceId' = :id", { id })
+        .andWhere('status <> :completed', {
+          completed: FinancePaymentStatus.Completed,
+        })
+        .execute();
+      await manager.getRepository(FinanceBillLine).delete({
+        billId: id,
+        tenantId: ctx.tenantId,
+        workspaceId: ctx.workspaceId,
+      });
+      await manager.getRepository(FinanceBill).remove(bill);
+    });
     return { success: true, id };
   }
 
@@ -806,7 +925,8 @@ export class FinanceBillingService {
     const lines = await this.billLinesRepo.find({
       where: { billId, tenantId: ctx.tenantId, workspaceId: ctx.workspaceId },
     });
-    let subtotal = 0, tax = 0;
+    let subtotal = 0,
+      tax = 0;
     for (const l of lines) {
       subtotal += toMoney(l.quantity) * toMoney(l.unitPrice);
       tax += toMoney(l.taxAmount);
@@ -814,7 +934,12 @@ export class FinanceBillingService {
     const total = subtotal + tax;
     await this.billsRepo.update(
       { id: billId, tenantId: ctx.tenantId, workspaceId: ctx.workspaceId },
-      { subtotalAmount: money(subtotal), taxAmount: money(tax), totalAmount: money(total), balanceDue: money(total) },
+      {
+        subtotalAmount: money(subtotal),
+        taxAmount: money(tax),
+        totalAmount: money(total),
+        balanceDue: money(total),
+      },
     );
   }
 
@@ -825,7 +950,11 @@ export class FinanceBillingService {
   ) {
     validateId(billId, 'bill id');
     const bill = await this.billsRepo.findOne({
-      where: { id: billId, tenantId: ctx.tenantId, workspaceId: ctx.workspaceId },
+      where: {
+        id: billId,
+        tenantId: ctx.tenantId,
+        workspaceId: ctx.workspaceId,
+      },
     });
     if (!bill) throw new NotFoundException('Finance bill not found');
 
@@ -863,29 +992,51 @@ export class FinanceBillingService {
     validateId(billId, 'bill id');
     validateId(lineId, 'line id');
     const line = await this.billLinesRepo.findOne({
-      where: { id: lineId, billId, tenantId: ctx.tenantId, workspaceId: ctx.workspaceId },
+      where: {
+        id: lineId,
+        billId,
+        tenantId: ctx.tenantId,
+        workspaceId: ctx.workspaceId,
+      },
     });
     if (!line) throw new NotFoundException('Bill line not found');
 
     if (dto.description !== undefined) line.description = dto.description;
-    if (dto.quantity !== undefined) line.quantity = toMoney(dto.quantity).toFixed(4);
-    if (dto.unitPrice !== undefined) line.unitPrice = money(toMoney(dto.unitPrice));
-    if (dto.taxAmount !== undefined) line.taxAmount = money(toMoney(dto.taxAmount));
+    if (dto.quantity !== undefined)
+      line.quantity = toMoney(dto.quantity).toFixed(4);
+    if (dto.unitPrice !== undefined)
+      line.unitPrice = money(toMoney(dto.unitPrice));
+    if (dto.taxAmount !== undefined)
+      line.taxAmount = money(toMoney(dto.taxAmount));
     if (dto.categoryId !== undefined) line.categoryId = dto.categoryId ?? null;
-    if (dto.costCenterId !== undefined) line.costCenterId = dto.costCenterId ?? null;
-    if (dto.metadata !== undefined) line.metadata = { ...line.metadata, ...dto.metadata };
+    if (dto.costCenterId !== undefined)
+      line.costCenterId = dto.costCenterId ?? null;
+    if (dto.metadata !== undefined)
+      line.metadata = { ...line.metadata, ...dto.metadata };
 
-    line.totalAmount = money(toMoney(line.quantity) * toMoney(line.unitPrice) + toMoney(line.taxAmount));
+    line.totalAmount = money(
+      toMoney(line.quantity) * toMoney(line.unitPrice) +
+        toMoney(line.taxAmount),
+    );
     await this.billLinesRepo.save(line);
     await this.recalcBillTotals(ctx, billId);
     return this.getBill(ctx, billId);
   }
 
-  async removeBillLine(ctx: FinanceRequestContext, billId: string, lineId: string) {
+  async removeBillLine(
+    ctx: FinanceRequestContext,
+    billId: string,
+    lineId: string,
+  ) {
     validateId(billId, 'bill id');
     validateId(lineId, 'line id');
     const line = await this.billLinesRepo.findOne({
-      where: { id: lineId, billId, tenantId: ctx.tenantId, workspaceId: ctx.workspaceId },
+      where: {
+        id: lineId,
+        billId,
+        tenantId: ctx.tenantId,
+        workspaceId: ctx.workspaceId,
+      },
     });
     if (!line) throw new NotFoundException('Bill line not found');
     await this.billLinesRepo.remove(line);
@@ -912,7 +1063,8 @@ export class FinanceBillingService {
     const recurrence = await this.billRecurrencesRepo.findOne({
       where: { id, tenantId: ctx.tenantId, workspaceId: ctx.workspaceId },
     });
-    if (!recurrence) throw new NotFoundException('Finance bill recurrence not found');
+    if (!recurrence)
+      throw new NotFoundException('Finance bill recurrence not found');
     return recurrence;
   }
 
@@ -922,7 +1074,9 @@ export class FinanceBillingService {
     dto: CreateFinanceBillRecurrenceDto,
   ) {
     if (!dto.lines?.length) {
-      throw new BadRequestException('Bill recurrence must have at least one line');
+      throw new BadRequestException(
+        'Bill recurrence must have at least one line',
+      );
     }
 
     const template = this.buildRecurrenceLineTemplate(
@@ -1037,7 +1191,11 @@ export class FinanceBillingService {
 
     // Back-link the source bill so the detail page can surface the recurrence.
     const sourceBill = await this.billsRepo.findOne({
-      where: { id: billId, tenantId: ctx.tenantId, workspaceId: ctx.workspaceId },
+      where: {
+        id: billId,
+        tenantId: ctx.tenantId,
+        workspaceId: ctx.workspaceId,
+      },
     });
     if (sourceBill) {
       sourceBill.metadata = {
@@ -1059,7 +1217,8 @@ export class FinanceBillingService {
     const recurrence = await this.getBillRecurrence(ctx, id);
 
     if (dto.name !== undefined) recurrence.name = dto.name;
-    if (dto.description !== undefined) recurrence.description = dto.description ?? null;
+    if (dto.description !== undefined)
+      recurrence.description = dto.description ?? null;
     if (dto.frequency !== undefined) recurrence.frequency = dto.frequency;
     if (dto.intervalCount !== undefined)
       recurrence.intervalCount = Math.max(1, dto.intervalCount);
@@ -1074,7 +1233,8 @@ export class FinanceBillingService {
     if (dto.generateAsStatus !== undefined)
       recurrence.generateAsStatus = dto.generateAsStatus;
     if (dto.vendorId !== undefined) recurrence.vendorId = dto.vendorId ?? null;
-    if (dto.categoryId !== undefined) recurrence.categoryId = dto.categoryId ?? null;
+    if (dto.categoryId !== undefined)
+      recurrence.categoryId = dto.categoryId ?? null;
     if (dto.costCenterId !== undefined)
       recurrence.costCenterId = dto.costCenterId ?? null;
     if (dto.metadata !== undefined)
@@ -1098,10 +1258,16 @@ export class FinanceBillingService {
     if (dto.active !== undefined) {
       recurrence.active = dto.active;
       // Keep the lifecycle in sync with the simple on/off flag.
-      if (!dto.active && recurrence.status === FinanceBillRecurrenceStatus.Active) {
+      if (
+        !dto.active &&
+        recurrence.status === FinanceBillRecurrenceStatus.Active
+      ) {
         recurrence.status = FinanceBillRecurrenceStatus.Paused;
       }
-      if (dto.active && recurrence.status === FinanceBillRecurrenceStatus.Paused) {
+      if (
+        dto.active &&
+        recurrence.status === FinanceBillRecurrenceStatus.Paused
+      ) {
         recurrence.status = FinanceBillRecurrenceStatus.Active;
       }
     }
@@ -1153,7 +1319,12 @@ export class FinanceBillingService {
       recurrence.startDate ??
       new Date().toISOString().slice(0, 10);
 
-    return this.generateBillForRecurrence(ctx, recurrence, generationDate, settings);
+    return this.generateBillForRecurrence(
+      ctx,
+      recurrence,
+      generationDate,
+      settings,
+    );
   }
 
   /** Run all active recurrences whose nextGenerationDate is due (manual scheduler). */
@@ -1188,7 +1359,8 @@ export class FinanceBillingService {
     // Generate at most one occurrence per recurrence per run (no mass backfill).
     for (const recurrence of due) {
       try {
-        const generationDate = recurrence.nextGenerationDate ?? recurrence.startDate;
+        const generationDate =
+          recurrence.nextGenerationDate ?? recurrence.startDate;
         const result = await this.generateBillForRecurrence(
           ctx,
           recurrence,
@@ -1196,7 +1368,10 @@ export class FinanceBillingService {
           settings,
         );
         if (result.skipped) {
-          skipped.push({ recurrenceId: recurrence.id, reason: result.reason ?? 'skipped' });
+          skipped.push({
+            recurrenceId: recurrence.id,
+            reason: result.reason ?? 'skipped',
+          });
         } else {
           generated.push({
             recurrenceId: recurrence.id,
@@ -1241,7 +1416,9 @@ export class FinanceBillingService {
   }> {
     const template = recurrence.lineTemplate ?? [];
     if (!template.length) {
-      throw new BadRequestException('Recurrence has no line template to generate from');
+      throw new BadRequestException(
+        'Recurrence has no line template to generate from',
+      );
     }
 
     const competencePeriod = generationDate.slice(0, 7);
@@ -1252,7 +1429,9 @@ export class FinanceBillingService {
     const existing = await this.billsRepo
       .createQueryBuilder('bill')
       .where('bill.tenantId = :tenantId', { tenantId: ctx.tenantId })
-      .andWhere('bill.workspaceId = :workspaceId', { workspaceId: ctx.workspaceId })
+      .andWhere('bill.workspaceId = :workspaceId', {
+        workspaceId: ctx.workspaceId,
+      })
       .andWhere("bill.metadata ->> 'recurrenceOccurrenceKey' = :key", {
         key: occurrenceKey,
       })
@@ -1332,7 +1511,8 @@ export class FinanceBillingService {
             unitPrice: money(toMoney(line.unitPrice)),
             taxAmount: money(toMoney(line.taxAmount)),
             totalAmount: money(
-              toMoney(line.quantity) * toMoney(line.unitPrice) + toMoney(line.taxAmount),
+              toMoney(line.quantity) * toMoney(line.unitPrice) +
+                toMoney(line.taxAmount),
             ),
             categoryId: line.categoryId ?? recurrence.categoryId ?? null,
             costCenterId: line.costCenterId ?? recurrence.costCenterId ?? null,
@@ -1399,7 +1579,9 @@ export class FinanceBillingService {
   }
 
   private buildRecurrenceLineTemplate(
-    lines: Array<FinanceBillRecurrenceLineInputDto | CreateFinanceBillDto['lines'][number]>,
+    lines: Array<
+      FinanceBillRecurrenceLineInputDto | CreateFinanceBillDto['lines'][number]
+    >,
     fallbackCategoryId: string | null,
     fallbackCostCenterId: string | null,
   ): FinanceBillRecurrenceLineTemplate[] {
@@ -1428,7 +1610,9 @@ export class FinanceBillingService {
   ): number {
     return template.reduce(
       (sum, line) =>
-        sum + toMoney(line.quantity) * toMoney(line.unitPrice) + toMoney(line.taxAmount),
+        sum +
+        toMoney(line.quantity) * toMoney(line.unitPrice) +
+        toMoney(line.taxAmount),
       0,
     );
   }
@@ -1460,7 +1644,9 @@ export class FinanceBillingService {
     return `${competencePeriod}-${String(dim).padStart(2, '0')}`;
   }
 
-  private isMonthBasedFrequency(frequency: FinanceBillRecurrenceFrequency): boolean {
+  private isMonthBasedFrequency(
+    frequency: FinanceBillRecurrenceFrequency,
+  ): boolean {
     return (
       frequency === FinanceBillRecurrenceFrequency.Monthly ||
       frequency === FinanceBillRecurrenceFrequency.Quarterly ||
@@ -1514,7 +1700,10 @@ export class FinanceBillingService {
       let due = this.applyDayOfMonth(generationDate, dueDay);
       // If the due day already passed within the generation month, roll to next.
       if (due < generationDate) {
-        due = this.applyDayOfMonth(this.addMonthsClamped(generationDate, 1), dueDay);
+        due = this.applyDayOfMonth(
+          this.addMonthsClamped(generationDate, 1),
+          dueDay,
+        );
       }
       return due;
     }
@@ -1540,10 +1729,9 @@ export class FinanceBillingService {
     metadata: Record<string, unknown> | null | undefined,
   ): ScheduledPaymentTarget | null {
     const source =
-      metadata?.scheduledTarget &&
-      typeof metadata.scheduledTarget === 'object'
+      metadata?.scheduledTarget && typeof metadata.scheduledTarget === 'object'
         ? (metadata.scheduledTarget as Record<string, unknown>)
-        : metadata ?? {};
+        : (metadata ?? {});
     const targetType = source.targetType;
     const targetId = source.targetId;
     if (
@@ -1567,7 +1755,9 @@ export class FinanceBillingService {
       direction: FinancePaymentDirection.Customer,
       status: FinancePaymentStatus.Pending,
       paymentDate:
-        invoice.dueDate ?? invoice.issueDate ?? new Date().toISOString().slice(0, 10),
+        invoice.dueDate ??
+        invoice.issueDate ??
+        new Date().toISOString().slice(0, 10),
       amount: money(amount),
       currency: invoice.currency ?? 'BRL',
       contactId: invoice.customerId ?? null,
@@ -1645,6 +1835,22 @@ export class FinanceBillingService {
     return this.createScheduledPaymentForBill(ctx, bill);
   }
 
+  private async ensureScheduledPaymentForBillSafely(
+    ctx: FinanceRequestContext,
+    bill: FinanceBill,
+  ) {
+    try {
+      return await this.ensureScheduledPaymentForBill(ctx, bill);
+    } catch (error) {
+      this.logger.error(
+        `Bill ${bill.id} was confirmed, but its scheduled payment could not be created: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return null;
+    }
+  }
+
   private async ensureScheduledPaymentForInvoice(
     ctx: FinanceRequestContext,
     invoice: FinanceInvoice,
@@ -1692,6 +1898,30 @@ export class FinanceBillingService {
   ) {
     const amount = toMoney(bill.balanceDue);
     if (amount <= 0) return null;
+
+    const scheduled = await this.findScheduledPaymentForTarget(ctx, bill.id);
+    if (
+      scheduled &&
+      scheduled.status !== FinancePaymentStatus.Completed &&
+      scheduled.status !== FinancePaymentStatus.Cancelled &&
+      scheduled.status !== FinancePaymentStatus.Refunded
+    ) {
+      return this.updatePayment(ctx, scheduled.id, {
+        status: FinancePaymentStatus.Completed,
+        method: FinancePaymentMethod.Manual,
+        contactId: bill.vendorId ?? null,
+        paymentDate: new Date().toISOString().slice(0, 10),
+        amount: money(amount),
+        description: `Pagamento da conta ${bill.billNumber}`,
+        metadata: {
+          sourceModule: 'finance_bill',
+          sourceId: bill.id,
+          sourceNumber: bill.billNumber,
+          ...metadata,
+        },
+      });
+    }
+
     const payment = await this.createPayment(ctx, {
       direction: FinancePaymentDirection.Vendor,
       status: FinancePaymentStatus.Completed,
@@ -1723,7 +1953,8 @@ export class FinanceBillingService {
     if (payment.status !== FinancePaymentStatus.Completed) return payment;
     const target = this.readScheduledTarget(payment.metadata);
     if (!target) return payment;
-    const remaining = toMoney(payment.amount) - toMoney(payment.allocatedAmount);
+    const remaining =
+      toMoney(payment.amount) - toMoney(payment.allocatedAmount);
     if (remaining <= 0) return payment;
 
     let targetBalance = 0;
@@ -1756,7 +1987,11 @@ export class FinanceBillingService {
     });
     return (
       (await this.paymentsRepo.findOne({
-        where: { id: payment.id, tenantId: ctx.tenantId, workspaceId: ctx.workspaceId },
+        where: {
+          id: payment.id,
+          tenantId: ctx.tenantId,
+          workspaceId: ctx.workspaceId,
+        },
       })) ?? payment
     );
   }
@@ -1789,7 +2024,11 @@ export class FinanceBillingService {
     invoiceId: string,
   ) {
     const invoice = await this.invoicesRepo.findOne({
-      where: { id: invoiceId, tenantId: ctx.tenantId, workspaceId: ctx.workspaceId },
+      where: {
+        id: invoiceId,
+        tenantId: ctx.tenantId,
+        workspaceId: ctx.workspaceId,
+      },
     });
     if (!invoice) return;
     const allocations = await this.paymentAllocationsRepo.find({
@@ -1800,10 +2039,16 @@ export class FinanceBillingService {
         targetId: invoiceId,
       },
     });
-    const paymentIds = [...new Set(allocations.map((allocation) => allocation.paymentId))];
+    const paymentIds = [
+      ...new Set(allocations.map((allocation) => allocation.paymentId)),
+    ];
     const payments = paymentIds.length
       ? await this.paymentsRepo.find({
-          where: { tenantId: ctx.tenantId, workspaceId: ctx.workspaceId, id: In(paymentIds) },
+          where: {
+            tenantId: ctx.tenantId,
+            workspaceId: ctx.workspaceId,
+            id: In(paymentIds),
+          },
         })
       : [];
     const completedPaymentIds = new Set(
@@ -1817,7 +2062,11 @@ export class FinanceBillingService {
     const total = toMoney(invoice.totalAmount);
     invoice.paidAmount = money(paid);
     invoice.balanceDue = money(Math.max(0, total - paid));
-    if (![FinanceInvoiceStatus.Cancelled, FinanceInvoiceStatus.Void].includes(invoice.status)) {
+    if (
+      ![FinanceInvoiceStatus.Cancelled, FinanceInvoiceStatus.Void].includes(
+        invoice.status,
+      )
+    ) {
       if (paid <= 0) {
         invoice.status =
           invoice.issuedAt || invoice.issueDate
@@ -1841,7 +2090,11 @@ export class FinanceBillingService {
     billId: string,
   ) {
     const bill = await this.billsRepo.findOne({
-      where: { id: billId, tenantId: ctx.tenantId, workspaceId: ctx.workspaceId },
+      where: {
+        id: billId,
+        tenantId: ctx.tenantId,
+        workspaceId: ctx.workspaceId,
+      },
     });
     if (!bill) return;
     const allocations = await this.paymentAllocationsRepo.find({
@@ -1852,10 +2105,16 @@ export class FinanceBillingService {
         targetId: billId,
       },
     });
-    const paymentIds = [...new Set(allocations.map((allocation) => allocation.paymentId))];
+    const paymentIds = [
+      ...new Set(allocations.map((allocation) => allocation.paymentId)),
+    ];
     const payments = paymentIds.length
       ? await this.paymentsRepo.find({
-          where: { tenantId: ctx.tenantId, workspaceId: ctx.workspaceId, id: In(paymentIds) },
+          where: {
+            tenantId: ctx.tenantId,
+            workspaceId: ctx.workspaceId,
+            id: In(paymentIds),
+          },
         })
       : [];
     const completedPaymentIds = new Set(
@@ -2015,7 +2274,10 @@ export class FinanceBillingService {
     return { success: true, id };
   }
 
-  async createPayment(ctx: FinanceRequestContext, dto: CreateFinancePaymentDto) {
+  async createPayment(
+    ctx: FinanceRequestContext,
+    dto: CreateFinancePaymentDto,
+  ) {
     const payment = await this.paymentsRepo.save(
       this.paymentsRepo.create({
         tenantId: ctx.tenantId,
@@ -2664,5 +2926,4 @@ export class FinanceBillingService {
     const next = count + 1;
     return `${prefix}-${String(next).padStart(5, '0')}`;
   }
-
 }

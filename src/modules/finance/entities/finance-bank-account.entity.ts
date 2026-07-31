@@ -64,14 +64,28 @@ export class FinanceBankAccount {
   @Column({ name: 'bank_name', type: 'varchar', length: 160, nullable: true })
   bankName!: string | null;
 
-  @Column({ name: 'external_reference', type: 'varchar', length: 180, nullable: true })
+  @Column({ name: 'avatar_url', type: 'varchar', length: 500, nullable: true })
+  avatarUrl!: string | null;
+
+  @Column({
+    name: 'external_reference',
+    type: 'varchar',
+    length: 180,
+    nullable: true,
+  })
   externalReference!: string | null;
 
   // Links this bank account to a chart-of-accounts entry for automatic journal entries
   @Column({ name: 'account_id', type: 'uuid', nullable: true })
   accountId!: string | null;
 
-  @Column({ name: 'opening_balance', type: 'numeric', precision: 14, scale: 2, default: 0 })
+  @Column({
+    name: 'opening_balance',
+    type: 'numeric',
+    precision: 14,
+    scale: 2,
+    default: 0,
+  })
   openingBalance!: string;
 
   @Column({ name: 'initial_balance_date', type: 'date', nullable: true })

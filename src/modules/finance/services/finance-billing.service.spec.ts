@@ -384,14 +384,19 @@ describe('FinanceBillingService notification triggers', () => {
 
     invoicesRepo.findOne.mockResolvedValueOnce(null);
 
-    await service.generateInvoiceFromRecurringProfile(makeContext(), profile.id);
+    await service.generateInvoiceFromRecurringProfile(
+      makeContext(),
+      profile.id,
+    );
 
     expect(publisher.publishRecurringChargeCreated).not.toHaveBeenCalled();
   });
 });
 
 describe('FinanceBillingService bill recurrences', () => {
-  const recurringLines = [{ description: 'ChatGPT Plus', quantity: '1', unitPrice: '100.00' }];
+  const recurringLines = [
+    { description: 'ChatGPT Plus', quantity: '1', unitPrice: '100.00' },
+  ];
 
   it('creates a non-recurring bill as open by default and still posts', async () => {
     const { service, billRecurrencesRepo, postingService } = makeService();
@@ -446,7 +451,9 @@ describe('FinanceBillingService bill recurrences', () => {
       sourceBillId: 'bill-1',
     });
     expect(saved.lineTemplate).toHaveLength(1);
-    expect(saved.lineTemplate[0]).toMatchObject({ description: 'ChatGPT Plus' });
+    expect(saved.lineTemplate[0]).toMatchObject({
+      description: 'ChatGPT Plus',
+    });
     // next generation is the period AFTER the start date, on the generation day
     expect(saved.nextGenerationDate).toBe('2026-08-01');
   });
@@ -463,7 +470,10 @@ describe('FinanceBillingService bill recurrences', () => {
           unitPrice: '500.00',
           categoryId: '44444444-4444-4444-4444-444444444444',
           costCenterId: '55555555-5555-5555-5555-555555555555',
-          metadata: { clientId: '66666666-6666-6666-6666-666666666666', competence: '2026-07' },
+          metadata: {
+            clientId: '66666666-6666-6666-6666-666666666666',
+            competence: '2026-07',
+          },
         },
       ],
       recurrence: {
@@ -476,15 +486,25 @@ describe('FinanceBillingService bill recurrences', () => {
     expect(saved.lineTemplate[0]).toMatchObject({
       categoryId: '44444444-4444-4444-4444-444444444444',
       costCenterId: '55555555-5555-5555-5555-555555555555',
-      metadata: { clientId: '66666666-6666-6666-6666-666666666666', competence: '2026-07' },
+      metadata: {
+        clientId: '66666666-6666-6666-6666-666666666666',
+        competence: '2026-07',
+      },
     });
   });
 
   it('generates a draft bill that does NOT post, advancing the recurrence', async () => {
-    const billRecurrence = makeBillRecurrence({ nextGenerationDate: '2026-07-01' });
-    const { service, postingService, billRecurrencesRepo } = makeService({ billRecurrence });
+    const billRecurrence = makeBillRecurrence({
+      nextGenerationDate: '2026-07-01',
+    });
+    const { service, postingService, billRecurrencesRepo } = makeService({
+      billRecurrence,
+    });
 
-    const result = await service.generateBillFromRecurrence(makeContext(), billRecurrence.id);
+    const result = await service.generateBillFromRecurrence(
+      makeContext(),
+      billRecurrence.id,
+    );
 
     expect(result.skipped).toBe(false);
     expect(postingService.postBillConfirmed).not.toHaveBeenCalled();
@@ -495,7 +515,9 @@ describe('FinanceBillingService bill recurrences', () => {
   });
 
   it('stamps competence metadata and occurrence key on the generated bill', async () => {
-    const billRecurrence = makeBillRecurrence({ nextGenerationDate: '2026-07-01' });
+    const billRecurrence = makeBillRecurrence({
+      nextGenerationDate: '2026-07-01',
+    });
     const { service, billsRepo } = makeService({ billRecurrence });
 
     await service.generateBillFromRecurrence(makeContext(), billRecurrence.id);
@@ -519,11 +541,18 @@ describe('FinanceBillingService bill recurrences', () => {
   });
 
   it('is idempotent: skips generation when a bill already exists for the occurrence', async () => {
-    const billRecurrence = makeBillRecurrence({ nextGenerationDate: '2026-07-01' });
-    const { service, billsQbGetOne, billRecurrencesRepo } = makeService({ billRecurrence });
+    const billRecurrence = makeBillRecurrence({
+      nextGenerationDate: '2026-07-01',
+    });
+    const { service, billsQbGetOne, billRecurrencesRepo } = makeService({
+      billRecurrence,
+    });
     billsQbGetOne.mockResolvedValueOnce(makeBill({ id: 'existing-bill' }));
 
-    const result = await service.generateBillFromRecurrence(makeContext(), billRecurrence.id);
+    const result = await service.generateBillFromRecurrence(
+      makeContext(),
+      billRecurrence.id,
+    );
 
     expect(result.skipped).toBe(true);
     expect(result.billId).toBe('existing-bill');
@@ -559,7 +588,9 @@ describe('FinanceBillingService bill recurrences', () => {
 });
 
 describe('FinanceBillingService payment lifecycle', () => {
-  const line = [{ description: 'Retainer', quantity: '1', unitPrice: '100.00' }];
+  const line = [
+    { description: 'Retainer', quantity: '1', unitPrice: '100.00' },
+  ];
 
   it('does not create a forecast payment while an invoice is a draft', async () => {
     const invoice = makeInvoice({
@@ -652,7 +683,10 @@ describe('FinanceBillingService payment lifecycle', () => {
       amount: '50.00',
       allocatedAmount: '0.00',
     });
-    const { service, paymentsRepo, postingService } = makeService({ bill, payment });
+    const { service, paymentsRepo, postingService } = makeService({
+      bill,
+      payment,
+    });
 
     await service.updateBill(makeContext(), bill.id, {
       status: FinanceBillStatus.Paid,
@@ -671,18 +705,88 @@ describe('FinanceBillingService payment lifecycle', () => {
         }),
       }),
     );
-    expect(postingService.postPaymentAllocationSettlement).toHaveBeenCalledTimes(1);
+    expect(
+      postingService.postPaymentAllocationSettlement,
+    ).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps bill confirmation and accounting posting in the same transaction', async () => {
+    const bill = makeBill({
+      status: FinanceBillStatus.Draft,
+      billNumber: '',
+      totalAmount: '100.00',
+      balanceDue: '100.00',
+    });
+    const { service, postingService, paymentsRepo } = makeService({ bill });
+
+    await service.updateBill(makeContext(), bill.id, {
+      status: FinanceBillStatus.Open,
+    });
+
+    expect(postingService.postBillConfirmed).toHaveBeenCalledWith(
+      makeContext(),
+      bill.id,
+      expect.objectContaining({ getRepository: expect.any(Function) }),
+    );
+    expect(paymentsRepo.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: FinancePaymentStatus.Pending,
+        metadata: expect.objectContaining({ sourceId: bill.id }),
+      }),
+    );
+  });
+
+  it('does not create a forecast when transactional bill posting fails', async () => {
+    const bill = makeBill({
+      status: FinanceBillStatus.Draft,
+      billNumber: '',
+      totalAmount: '100.00',
+      balanceDue: '100.00',
+    });
+    const { service, postingService, paymentsRepo } = makeService({ bill });
+    postingService.postBillConfirmed.mockRejectedValueOnce(
+      new Error('posting failed'),
+    );
+
+    await expect(
+      service.updateBill(makeContext(), bill.id, {
+        status: FinanceBillStatus.Open,
+      }),
+    ).rejects.toThrow('posting failed');
+
+    expect(paymentsRepo.save).not.toHaveBeenCalled();
+  });
+
+  it('does not fail an otherwise valid confirmation when forecast creation fails', async () => {
+    const bill = makeBill({
+      status: FinanceBillStatus.Draft,
+      billNumber: '',
+      totalAmount: '100.00',
+      balanceDue: '100.00',
+    });
+    const { service, postingService, paymentsRepo } = makeService({ bill });
+    paymentsRepo.save.mockRejectedValueOnce(new Error('forecast unavailable'));
+
+    await expect(
+      service.updateBill(makeContext(), bill.id, {
+        status: FinanceBillStatus.Open,
+      }),
+    ).resolves.toEqual(expect.objectContaining({ id: bill.id }));
+
+    expect(postingService.postBillConfirmed).toHaveBeenCalledTimes(1);
   });
 });
 
-function makeService(options: {
-  invoice?: FinanceInvoice;
-  payment?: FinancePayment;
-  bill?: FinanceBill;
-  recurringProfile?: FinanceRecurringProfile;
-  billRecurrence?: FinanceBillRecurrence;
-  allocations?: FinancePaymentAllocation[];
-} = {}) {
+function makeService(
+  options: {
+    invoice?: FinanceInvoice;
+    payment?: FinancePayment;
+    bill?: FinanceBill;
+    recurringProfile?: FinanceRecurringProfile;
+    billRecurrence?: FinanceBillRecurrence;
+    allocations?: FinancePaymentAllocation[];
+  } = {},
+) {
   const invoice = options.invoice ?? makeInvoice();
   const payment = options.payment ?? makePayment();
   const bill = options.bill ?? makeBill();
@@ -704,6 +808,7 @@ function makeService(options: {
   };
   const billLinesRepo = {
     find: jest.fn().mockResolvedValue([]),
+    count: jest.fn().mockResolvedValue(1),
     save: jest.fn(async (item: FinanceBillLine) => item),
     create: jest.fn((value: Partial<FinanceBillLine>) => value),
     delete: jest.fn().mockResolvedValue({ affected: 0 }),
@@ -765,9 +870,11 @@ function makeService(options: {
   };
   const billRecurrencesRepo = {
     findOne: jest.fn().mockResolvedValue(options.billRecurrence ?? null),
-    find: jest.fn().mockResolvedValue(
-      options.billRecurrence ? [options.billRecurrence] : [],
-    ),
+    find: jest
+      .fn()
+      .mockResolvedValue(
+        options.billRecurrence ? [options.billRecurrence] : [],
+      ),
     create: jest.fn((value: Partial<FinanceBillRecurrence>) => ({
       id: 'bill-recurrence-1',
       ...value,
@@ -800,12 +907,16 @@ function makeService(options: {
     billLinesRepo as unknown as Repository<FinanceBillLine>,
     paymentsRepo as unknown as Repository<FinancePayment>,
     paymentAllocationsRepo as unknown as Repository<FinancePaymentAllocation>,
-    { findOne: jest.fn().mockResolvedValue(null) } as unknown as Repository<FinanceBankAccount>,
+    {
+      findOne: jest.fn().mockResolvedValue(null),
+    } as unknown as Repository<FinanceBankAccount>,
     recurringProfilesRepo as unknown as Repository<FinanceRecurringProfile>,
     billRecurrencesRepo as unknown as Repository<FinanceBillRecurrence>,
     settingsRepo as unknown as Repository<FinanceSetting>,
     dataSource as unknown as DataSource,
-    {} as FinanceDocumentNumberingService,
+    {
+      generate: jest.fn().mockResolvedValue('BILL-2026-000002'),
+    } as unknown as FinanceDocumentNumberingService,
     { create: jest.fn() } as unknown as FinanceJournalEntryService,
     postingService,
     publisher,
@@ -1007,7 +1118,9 @@ function makeBill(overrides: Partial<FinanceBill> = {}): FinanceBill {
   };
 }
 
-function makeFinanceSettings(overrides: Partial<FinanceSetting> = {}): FinanceSetting {
+function makeFinanceSettings(
+  overrides: Partial<FinanceSetting> = {},
+): FinanceSetting {
   const now = new Date('2026-06-12T12:00:00.000Z');
 
   return {

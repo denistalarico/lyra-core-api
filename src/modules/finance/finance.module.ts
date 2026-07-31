@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { SettingsCryptoService } from '../../common/crypto/settings-crypto.service';
+import { FilesModule } from '../../common/files/files.module';
 import { DocumentLayoutsModule } from '../document-layouts/document-layouts.module';
 import { EmailModule } from '../email/email.module';
 import {
@@ -63,6 +64,7 @@ import { ContactMethodEntity } from '../contacts/entities/contact-method.entity'
 
 @Module({
   imports: [
+    FilesModule,
     DocumentLayoutsModule,
     EmailModule,
     NotificationsModule,

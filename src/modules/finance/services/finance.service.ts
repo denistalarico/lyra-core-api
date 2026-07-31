@@ -42,6 +42,7 @@ import { FinanceAccountType, FinanceBankAccountType } from '../enums';
 import { AgencyClient } from '../../clients/entities';
 import { AgencyClientStatus } from '../../clients/enums';
 import { FinanceRequestContext } from './finance-context';
+import { FilesService } from '../../../common/files/files.service';
 
 @Injectable()
 export class FinanceService {
@@ -76,6 +77,7 @@ export class FinanceService {
     private readonly metricSnapshotsRepo: Repository<FinanceMetricSnapshot>,
     @InjectRepository(FinanceReportSnapshot, 'agency')
     private readonly reportSnapshotsRepo: Repository<FinanceReportSnapshot>,
+    private readonly filesService: FilesService,
   ) {}
 
   getHealth() {
@@ -329,7 +331,8 @@ export class FinanceService {
     const costCenter = await this.costCentersRepo.findOne({
       where: { id, tenantId: ctx.tenantId, workspaceId: ctx.workspaceId },
     });
-    if (!costCenter) throw new NotFoundException('Finance cost center not found');
+    if (!costCenter)
+      throw new NotFoundException('Finance cost center not found');
     Object.assign(costCenter, dto);
     return this.costCentersRepo.save(costCenter);
   }
@@ -338,7 +341,8 @@ export class FinanceService {
     const costCenter = await this.costCentersRepo.findOne({
       where: { id, tenantId: ctx.tenantId, workspaceId: ctx.workspaceId },
     });
-    if (!costCenter) throw new NotFoundException('Finance cost center not found');
+    if (!costCenter)
+      throw new NotFoundException('Finance cost center not found');
     await this.costCentersRepo.remove(costCenter);
     return { success: true, id };
   }
@@ -427,6 +431,21 @@ export class FinanceService {
       await this.clearPrimaryBankAccounts(ctx, bankAccount.currency, id);
     }
 
+    return this.bankAccountsRepo.save(bankAccount);
+  }
+
+  async uploadBankAccountAvatar(
+    ctx: FinanceRequestContext,
+    id: string,
+    file: Express.Multer.File,
+  ) {
+    const bankAccount = await this.getBankAccount(ctx, id);
+    const stored = await this.filesService.uploadImageAsset({
+      file,
+      path: `agency/tenants/${ctx.tenantId}/workspaces/${ctx.workspaceId}/finance/bank-accounts/${id}/avatar-${Date.now()}.webp`,
+      maxDimension: 512,
+    });
+    bankAccount.avatarUrl = stored.url;
     return this.bankAccountsRepo.save(bankAccount);
   }
 
@@ -651,13 +670,13 @@ export class FinanceService {
     );
     const activeClients = clients.filter(
       (client) =>
-        client.status === AgencyClientStatus.Active &&
-        !client.archivedAt,
+        client.status === AgencyClientStatus.Active && !client.archivedAt,
     );
     const contractedClientMonthlyFees = activeClients
       .filter(
         (client) =>
-          !client.contactId || !recurringProfileContactIds.has(client.contactId),
+          !client.contactId ||
+          !recurringProfileContactIds.has(client.contactId),
       )
       .map((client) => this.readClientMonthlyFee(client))
       .filter((fee) => fee > 0);
@@ -666,8 +685,7 @@ export class FinanceService {
       activeMonthlyProfiles.reduce(
         (sum, profile) => sum + this.toNumber(profile.amount),
         0,
-      ) +
-      contractedClientMonthlyFees.reduce((sum, fee) => sum + fee, 0);
+      ) + contractedClientMonthlyFees.reduce((sum, fee) => sum + fee, 0);
 
     const revenueIssued = validMonthInvoices.reduce(
       (sum, invoice) => sum + this.toNumber(invoice.totalAmount),
@@ -737,7 +755,8 @@ export class FinanceService {
       .filter(
         (client) =>
           this.readClientMonthlyFee(client) > 0 &&
-          (!client.contactId || !recurringProfileContactIds.has(client.contactId)),
+          (!client.contactId ||
+            !recurringProfileContactIds.has(client.contactId)),
       )
       .map((client) => client.id);
     const activeClientContactIds = new Set(
@@ -750,7 +769,8 @@ export class FinanceService {
       ...activeRecurringProfiles
         .filter(
           (profile) =>
-            !profile.customerId || !activeClientContactIds.has(profile.customerId),
+            !profile.customerId ||
+            !activeClientContactIds.has(profile.customerId),
         )
         .map((profile) => profile.id),
     ]).size;
@@ -758,20 +778,31 @@ export class FinanceService {
     const clientEndDate = (client: AgencyClient) =>
       client.endDate ??
       client.archivedAt?.toISOString().slice(0, 10) ??
-      ([AgencyClientStatus.Ended, AgencyClientStatus.Archived].includes(client.status)
+      ([AgencyClientStatus.Ended, AgencyClientStatus.Archived].includes(
+        client.status,
+      )
         ? client.updatedAt.toISOString().slice(0, 10)
         : null);
     const clientsAtPeriodStart = clients.filter((client) => {
       const createdDate = client.createdAt.toISOString().slice(0, 10);
       const endedDate = clientEndDate(client);
-      return createdDate < periodStartDate && (!endedDate || endedDate >= periodStartDate);
+      return (
+        createdDate < periodStartDate &&
+        (!endedDate || endedDate >= periodStartDate)
+      );
     });
     const churnedClients = clients.filter((client) => {
-      if (![AgencyClientStatus.Ended, AgencyClientStatus.Archived].includes(client.status)) {
+      if (
+        ![AgencyClientStatus.Ended, AgencyClientStatus.Archived].includes(
+          client.status,
+        )
+      ) {
         return false;
       }
       const endedDate = clientEndDate(client);
-      return Boolean(endedDate && endedDate >= periodStartDate && endedDate <= periodEndDate);
+      return Boolean(
+        endedDate && endedDate >= periodStartDate && endedDate <= periodEndDate,
+      );
     });
     const customerChurn =
       clientsAtPeriodStart.length > 0
@@ -790,8 +821,8 @@ export class FinanceService {
         ['cancelled', 'completed'].includes(profile.status) &&
         Boolean(
           profile.endDate &&
-            profile.endDate >= periodStartDate &&
-            profile.endDate <= periodEndDate,
+          profile.endDate >= periodStartDate &&
+          profile.endDate <= periodEndDate,
         ),
     );
     const revenueAtPeriodStart =
@@ -857,8 +888,6 @@ export class FinanceService {
     };
   }
 
-
-
   async getMetricsHistory(
     ctx: FinanceRequestContext,
     query: FinanceMetricsHistoryQueryDto,
@@ -872,7 +901,10 @@ export class FinanceService {
 
     if (query.metricKey) {
       // Accept both camelCase (frontend) and snake_case (DB enum) — always normalise to snake_case
-      const snakeKey = query.metricKey.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`);
+      const snakeKey = query.metricKey.replace(
+        /[A-Z]/g,
+        (c) => `_${c.toLowerCase()}`,
+      );
       qb.andWhere('metric.metric_key = :metricKey', { metricKey: snakeKey });
     }
 
@@ -960,7 +992,9 @@ export class FinanceService {
       periodType: periodType as FinanceMetricSnapshot['periodType'],
       periodStart,
       periodEnd,
-      metricKey: In(metricKeys as unknown as FinanceMetricSnapshot['metricKey'][]),
+      metricKey: In(
+        metricKeys as unknown as FinanceMetricSnapshot['metricKey'][],
+      ),
     });
 
     await this.reportSnapshotsRepo.delete({

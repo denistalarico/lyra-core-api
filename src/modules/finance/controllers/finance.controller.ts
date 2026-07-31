@@ -15,13 +15,18 @@ import {
   Req,
   Res,
   ServiceUnavailableException,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { randomBytes } from 'crypto';
 import type { Request, Response } from 'express';
-import { Repository } from 'typeorm';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
+import { In, Repository } from 'typeorm';
 import { SettingsCryptoService } from '../../../common/crypto/settings-crypto.service';
+import { MAX_IMAGE_UPLOAD_BYTES } from '../../../common/files/files.service';
 import { DocumentLayoutsService } from '../../document-layouts/document-layouts.service';
 import {
   DocumentPdfRendererService,
@@ -34,7 +39,10 @@ import {
   AgencyWorkspaceEmailSettingsEntity,
 } from '../../agency/entities/agency-settings.entities';
 import { AgencyContactProfileEntity } from '../../agency/entities/agency-contact-details.entities';
-import { EmailService, type EmailTransportOverride } from '../../email/email.service';
+import {
+  EmailService,
+  type EmailTransportOverride,
+} from '../../email/email.service';
 import { renderInvoiceEmail } from '../../email/templates/invoice-email.template';
 import {
   CreateFinanceAccountDto,
@@ -97,6 +105,26 @@ const RequireFinancePermission = (permissionKey: string) =>
 
 const AGENCY_CONNECTION = 'agency';
 
+const BANK_ACCOUNT_AVATAR_UPLOAD_OPTIONS = {
+  storage: memoryStorage(),
+  limits: { fileSize: MAX_IMAGE_UPLOAD_BYTES },
+  fileFilter: (
+    _request: unknown,
+    file: Express.Multer.File,
+    callback: (error: Error | null, acceptFile: boolean) => void,
+  ) => {
+    if (
+      !['image/jpeg', 'image/jpg', 'image/png', 'image/webp'].includes(
+        file.mimetype,
+      )
+    ) {
+      callback(new BadRequestException('Unsupported image format.'), false);
+      return;
+    }
+    callback(null, true);
+  },
+};
+
 @Controller('agency/finance')
 export class FinanceController {
   private readonly logger = new Logger(FinanceController.name);
@@ -108,7 +136,9 @@ export class FinanceController {
     if (error instanceof PdfEngineUnavailableError) {
       this.logger.error(
         `PDF engine unavailable while generating ${document}: ${
-          error.cause instanceof Error ? error.cause.message : String(error.cause)
+          error.cause instanceof Error
+            ? error.cause.message
+            : String(error.cause)
         }`,
       );
       throw new ServiceUnavailableException(
@@ -249,14 +279,20 @@ export class FinanceController {
     return value;
   }
 
-  private getInvoicePublicMetadata(invoice: { metadata?: Record<string, unknown> | null }) {
+  private getInvoicePublicMetadata(invoice: {
+    metadata?: Record<string, unknown> | null;
+  }) {
     const metadata = invoice.metadata ?? {};
     const raw = metadata.publicInvoice;
-    return raw && typeof raw === 'object' ? raw as Record<string, unknown> : {};
+    return raw && typeof raw === 'object'
+      ? (raw as Record<string, unknown>)
+      : {};
   }
 
   private getInvoicePublicUrl(invoiceId: string, token: string) {
-    return this.buildFrontendUrl(`/finance/invoices/${invoiceId}/public?token=${encodeURIComponent(token)}`);
+    return this.buildFrontendUrl(
+      `/finance/invoices/${invoiceId}/public?token=${encodeURIComponent(token)}`,
+    );
   }
 
   private async getEmailTransportOverride(
@@ -268,11 +304,18 @@ export class FinanceController {
       order: { updatedAt: 'DESC' },
     });
 
-    if (!settings?.smtpHost || !settings.smtpUser || !settings.smtpPasswordEncrypted || !settings.fromEmail) {
+    if (
+      !settings?.smtpHost ||
+      !settings.smtpUser ||
+      !settings.smtpPasswordEncrypted ||
+      !settings.fromEmail
+    ) {
       return undefined;
     }
 
-    const smtpPassword = this.cryptoService.decrypt(settings.smtpPasswordEncrypted);
+    const smtpPassword = this.cryptoService.decrypt(
+      settings.smtpPasswordEncrypted,
+    );
     if (!smtpPassword) return undefined;
 
     return {
@@ -286,7 +329,10 @@ export class FinanceController {
     };
   }
 
-  private formatCurrency(value: string | number | null | undefined, currency = 'BRL') {
+  private formatCurrency(
+    value: string | number | null | undefined,
+    currency = 'BRL',
+  ) {
     return new Intl.NumberFormat('pt-BR', {
       style: 'currency',
       currency: currency || 'BRL',
@@ -301,7 +347,10 @@ export class FinanceController {
     return `${day}/${month}/${year}`;
   }
 
-  private async buildInvoicePdfBuffer(ctx: ReturnType<typeof getFinanceContext>, id: string) {
+  private async buildInvoicePdfBuffer(
+    ctx: ReturnType<typeof getFinanceContext>,
+    id: string,
+  ) {
     const invoice = await this.financeBillingService.getInvoice(ctx, id);
     const lines = invoice.lines ?? [];
     const [customerIdentity, paymentAccount] = await Promise.all([
@@ -324,8 +373,14 @@ export class FinanceController {
 
     const layout = await this.documentLayoutsService.getDefaultLayout(ctx);
     const template =
-      await this.documentLayoutsService.getSystemTemplateForType(layout.layoutType, 'invoice') ??
-      await this.documentLayoutsService.getSystemTemplateForType(layout.layoutType, 'quote');
+      (await this.documentLayoutsService.getSystemTemplateForType(
+        layout.layoutType,
+        'invoice',
+      )) ??
+      (await this.documentLayoutsService.getSystemTemplateForType(
+        layout.layoutType,
+        'quote',
+      ));
 
     if (!template) {
       throw new NotFoundException('Document layout template not found.');
@@ -373,9 +428,13 @@ export class FinanceController {
     });
   }
 
-  private async resolveInvoicePaymentAccount(ctx: ReturnType<typeof getFinanceContext>) {
+  private async resolveInvoicePaymentAccount(
+    ctx: ReturnType<typeof getFinanceContext>,
+  ) {
     const accounts = await this.financeService.listBankAccounts(ctx);
-    const activeAccounts = accounts.filter((account) => account.active !== false);
+    const activeAccounts = accounts.filter(
+      (account) => account.active !== false,
+    );
     const hasPix = (account: (typeof activeAccounts)[number]) =>
       Boolean(account.bankDetails?.pixKey?.trim());
 
@@ -399,10 +458,6 @@ export class FinanceController {
     return this.financeDefaultsService.setupDefaults(getFinanceContext(req));
   }
 
-
-
-
-
   @Get('entries')
   @RequireFinancePermission('agency.finance.transactions.view.finance_or_owner')
   listJournalEntries(@Req() req: Request) {
@@ -410,7 +465,9 @@ export class FinanceController {
   }
 
   @Post('entries')
-  @RequireFinancePermission('agency.finance.transactions.manage.finance_or_owner')
+  @RequireFinancePermission(
+    'agency.finance.transactions.manage.finance_or_owner',
+  )
   createJournalEntry(
     @Req() req: Request,
     @Body() dto: CreateFinanceJournalEntryDto,
@@ -425,14 +482,18 @@ export class FinanceController {
   }
 
   @Post('entries/:id/post')
-  @RequireFinancePermission('agency.finance.transactions.manage.finance_or_owner')
+  @RequireFinancePermission(
+    'agency.finance.transactions.manage.finance_or_owner',
+  )
   postJournalEntry(@Req() req: Request, @Param('id') id: string) {
     return this.financeJournalEntryService.post(getFinanceContext(req), id);
   }
 
   @Post('entries/:id/cancel')
   @DangerousAction()
-  @RequireFinancePermission('agency.finance.transactions.manage.finance_or_owner')
+  @RequireFinancePermission(
+    'agency.finance.transactions.manage.finance_or_owner',
+  )
   cancelJournalEntry(@Req() req: Request, @Param('id') id: string) {
     return this.financeJournalEntryService.cancel(getFinanceContext(req), id);
   }
@@ -449,7 +510,10 @@ export class FinanceController {
     @Req() req: Request,
     @Body() dto: CreateFinancePaymentProviderDto,
   ) {
-    return this.financePaymentProviderService.create(getFinanceContext(req), dto);
+    return this.financePaymentProviderService.create(
+      getFinanceContext(req),
+      dto,
+    );
   }
 
   @Get('payment-providers/:id')
@@ -476,13 +540,19 @@ export class FinanceController {
   @DangerousAction()
   @RequireFinancePermission('agency.finance.billing.manage.owner_only')
   deletePaymentProvider(@Req() req: Request, @Param('id') id: string) {
-    return this.financePaymentProviderService.delete(getFinanceContext(req), id);
+    return this.financePaymentProviderService.delete(
+      getFinanceContext(req),
+      id,
+    );
   }
 
   @Post('payment-providers/:id/connect')
   @RequireFinancePermission('agency.finance.billing.manage.owner_only')
   connectPaymentProvider(@Req() req: Request, @Param('id') id: string) {
-    return this.financePaymentProviderService.connect(getFinanceContext(req), id);
+    return this.financePaymentProviderService.connect(
+      getFinanceContext(req),
+      id,
+    );
   }
 
   @Post('payment-providers/:id/disconnect')
@@ -521,7 +591,9 @@ export class FinanceController {
   @Post('document-sequences/defaults')
   @RequireFinancePermission('agency.finance.fiscal.manage.owner_only')
   upsertDefaultSequences(@Req() req: Request) {
-    return this.financeDocumentNumberingService.upsertDefaults(getFinanceContext(req));
+    return this.financeDocumentNumberingService.upsertDefaults(
+      getFinanceContext(req),
+    );
   }
 
   @Patch('document-sequences/:id')
@@ -531,7 +603,11 @@ export class FinanceController {
     @Param('id') id: string,
     @Body() dto: { prefix?: string; padding?: number; nextNumber?: number },
   ) {
-    return this.financeDocumentNumberingService.updateSequence(getFinanceContext(req), id, dto);
+    return this.financeDocumentNumberingService.updateSequence(
+      getFinanceContext(req),
+      id,
+      dto,
+    );
   }
 
   @Get('settings')
@@ -553,13 +629,17 @@ export class FinanceController {
   }
 
   @Post('accounts')
-  @RequireFinancePermission('agency.finance.transactions.manage.finance_or_owner')
+  @RequireFinancePermission(
+    'agency.finance.transactions.manage.finance_or_owner',
+  )
   createAccount(@Req() req: Request, @Body() dto: CreateFinanceAccountDto) {
     return this.financeService.createAccount(getFinanceContext(req), dto);
   }
 
   @Patch('accounts/:id')
-  @RequireFinancePermission('agency.finance.transactions.manage.finance_or_owner')
+  @RequireFinancePermission(
+    'agency.finance.transactions.manage.finance_or_owner',
+  )
   updateAccount(
     @Req() req: Request,
     @Param('id') id: string,
@@ -570,7 +650,9 @@ export class FinanceController {
 
   @Delete('accounts/:id')
   @DangerousAction()
-  @RequireFinancePermission('agency.finance.transactions.manage.finance_or_owner')
+  @RequireFinancePermission(
+    'agency.finance.transactions.manage.finance_or_owner',
+  )
   deleteAccount(@Req() req: Request, @Param('id') id: string) {
     return this.financeService.deleteAccount(getFinanceContext(req), id);
   }
@@ -582,13 +664,17 @@ export class FinanceController {
   }
 
   @Post('journals')
-  @RequireFinancePermission('agency.finance.transactions.manage.finance_or_owner')
+  @RequireFinancePermission(
+    'agency.finance.transactions.manage.finance_or_owner',
+  )
   createJournal(@Req() req: Request, @Body() dto: CreateFinanceJournalDto) {
     return this.financeService.createJournal(getFinanceContext(req), dto);
   }
 
   @Patch('journals/:id')
-  @RequireFinancePermission('agency.finance.transactions.manage.finance_or_owner')
+  @RequireFinancePermission(
+    'agency.finance.transactions.manage.finance_or_owner',
+  )
   updateJournal(
     @Req() req: Request,
     @Param('id') id: string,
@@ -599,7 +685,9 @@ export class FinanceController {
 
   @Delete('journals/:id')
   @DangerousAction()
-  @RequireFinancePermission('agency.finance.transactions.manage.finance_or_owner')
+  @RequireFinancePermission(
+    'agency.finance.transactions.manage.finance_or_owner',
+  )
   deleteJournal(@Req() req: Request, @Param('id') id: string) {
     return this.financeService.deleteJournal(getFinanceContext(req), id);
   }
@@ -611,13 +699,17 @@ export class FinanceController {
   }
 
   @Post('categories')
-  @RequireFinancePermission('agency.finance.transactions.manage.finance_or_owner')
+  @RequireFinancePermission(
+    'agency.finance.transactions.manage.finance_or_owner',
+  )
   createCategory(@Req() req: Request, @Body() dto: CreateFinanceCategoryDto) {
     return this.financeService.createCategory(getFinanceContext(req), dto);
   }
 
   @Patch('categories/:id')
-  @RequireFinancePermission('agency.finance.transactions.manage.finance_or_owner')
+  @RequireFinancePermission(
+    'agency.finance.transactions.manage.finance_or_owner',
+  )
   updateCategory(
     @Req() req: Request,
     @Param('id') id: string,
@@ -628,7 +720,9 @@ export class FinanceController {
 
   @Delete('categories/:id')
   @DangerousAction()
-  @RequireFinancePermission('agency.finance.transactions.manage.finance_or_owner')
+  @RequireFinancePermission(
+    'agency.finance.transactions.manage.finance_or_owner',
+  )
   deleteCategory(@Req() req: Request, @Param('id') id: string) {
     return this.financeService.deleteCategory(getFinanceContext(req), id);
   }
@@ -640,7 +734,9 @@ export class FinanceController {
   }
 
   @Post('tags')
-  @RequireFinancePermission('agency.finance.transactions.manage.finance_or_owner')
+  @RequireFinancePermission(
+    'agency.finance.transactions.manage.finance_or_owner',
+  )
   createTag(@Req() req: Request, @Body() dto: CreateFinanceTagDto) {
     return this.financeService.createTag(getFinanceContext(req), dto);
   }
@@ -652,7 +748,9 @@ export class FinanceController {
   }
 
   @Post('cost-centers')
-  @RequireFinancePermission('agency.finance.transactions.manage.finance_or_owner')
+  @RequireFinancePermission(
+    'agency.finance.transactions.manage.finance_or_owner',
+  )
   createCostCenter(
     @Req() req: Request,
     @Body() dto: CreateFinanceCostCenterDto,
@@ -661,18 +759,26 @@ export class FinanceController {
   }
 
   @Patch('cost-centers/:id')
-  @RequireFinancePermission('agency.finance.transactions.manage.finance_or_owner')
+  @RequireFinancePermission(
+    'agency.finance.transactions.manage.finance_or_owner',
+  )
   updateCostCenter(
     @Req() req: Request,
     @Param('id') id: string,
     @Body() dto: UpdateFinanceCostCenterDto,
   ) {
-    return this.financeService.updateCostCenter(getFinanceContext(req), id, dto);
+    return this.financeService.updateCostCenter(
+      getFinanceContext(req),
+      id,
+      dto,
+    );
   }
 
   @Delete('cost-centers/:id')
   @DangerousAction()
-  @RequireFinancePermission('agency.finance.transactions.manage.finance_or_owner')
+  @RequireFinancePermission(
+    'agency.finance.transactions.manage.finance_or_owner',
+  )
   deleteCostCenter(@Req() req: Request, @Param('id') id: string) {
     return this.financeService.deleteCostCenter(getFinanceContext(req), id);
   }
@@ -690,7 +796,9 @@ export class FinanceController {
   }
 
   @Post('bank-accounts')
-  @RequireFinancePermission('agency.finance.transactions.manage.finance_or_owner')
+  @RequireFinancePermission(
+    'agency.finance.transactions.manage.finance_or_owner',
+  )
   createBankAccount(
     @Req() req: Request,
     @Body() dto: CreateFinanceBankAccountDto,
@@ -699,32 +807,59 @@ export class FinanceController {
   }
 
   @Patch('bank-accounts/:id')
-  @RequireFinancePermission('agency.finance.transactions.manage.finance_or_owner')
+  @RequireFinancePermission(
+    'agency.finance.transactions.manage.finance_or_owner',
+  )
   updateBankAccount(
     @Req() req: Request,
     @Param('id') id: string,
     @Body() dto: UpdateFinanceBankAccountDto,
   ) {
-    return this.financeService.updateBankAccount(getFinanceContext(req), id, dto);
+    return this.financeService.updateBankAccount(
+      getFinanceContext(req),
+      id,
+      dto,
+    );
+  }
+
+  @Post('bank-accounts/:id/avatar')
+  @RequireFinancePermission(
+    'agency.finance.transactions.manage.finance_or_owner',
+  )
+  @UseInterceptors(FileInterceptor('file', BANK_ACCOUNT_AVATAR_UPLOAD_OPTIONS))
+  uploadBankAccountAvatar(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    return this.financeService.uploadBankAccountAvatar(
+      getFinanceContext(req),
+      id,
+      file,
+    );
   }
 
   @Delete('bank-accounts/:id')
   @DangerousAction()
-  @RequireFinancePermission('agency.finance.transactions.manage.finance_or_owner')
+  @RequireFinancePermission(
+    'agency.finance.transactions.manage.finance_or_owner',
+  )
   deleteBankAccount(@Req() req: Request, @Param('id') id: string) {
     return this.financeService.deleteBankAccount(getFinanceContext(req), id);
   }
 
-
   @Get('profitability/overview')
-  @RequireFinancePermission('agency.finance.profitability.view.finance_or_owner')
+  @RequireFinancePermission(
+    'agency.finance.profitability.view.finance_or_owner',
+  )
   getProfitabilityOverview(@Req() req: Request) {
     return this.financeProfitabilityService.getOverview(getFinanceContext(req));
   }
 
-
   @Get('profitability/projects/:id')
-  @RequireFinancePermission('agency.finance.profitability.view.finance_or_owner')
+  @RequireFinancePermission(
+    'agency.finance.profitability.view.finance_or_owner',
+  )
   getProjectProfitability(@Req() req: Request, @Param('id') id: string) {
     return this.financeProfitabilityService.getProjectDetail(
       getFinanceContext(req),
@@ -733,7 +868,9 @@ export class FinanceController {
   }
 
   @Get('profitability/clients/:id')
-  @RequireFinancePermission('agency.finance.profitability.view.finance_or_owner')
+  @RequireFinancePermission(
+    'agency.finance.profitability.view.finance_or_owner',
+  )
   getClientProfitability(@Req() req: Request, @Param('id') id: string) {
     return this.financeProfitabilityService.getClientDetail(
       getFinanceContext(req),
@@ -741,9 +878,10 @@ export class FinanceController {
     );
   }
 
-
   @Get('profitability/rules')
-  @RequireFinancePermission('agency.finance.profitability.view.finance_or_owner')
+  @RequireFinancePermission(
+    'agency.finance.profitability.view.finance_or_owner',
+  )
   getProfitabilityRules(@Req() req: Request) {
     return this.financeService.getProfitabilityRules(getFinanceContext(req));
   }
@@ -766,8 +904,6 @@ export class FinanceController {
     return this.financeService.getReportsOverview(getFinanceContext(req));
   }
 
-
-
   @Get('reports/dre')
   @RequireFinancePermission('agency.finance.reports.view.finance_or_owner')
   getDre(@Req() req: Request, @Query() query: FinanceDreQueryDto) {
@@ -780,18 +916,16 @@ export class FinanceController {
     @Req() req: Request,
     @Query() query: FinanceMetricsHistoryQueryDto,
   ) {
-    return this.financeService.getMetricsHistory(
-      getFinanceContext(req),
-      query,
-    );
+    return this.financeService.getMetricsHistory(getFinanceContext(req), query);
   }
 
   @Post('reports/snapshots/monthly')
   @RequireFinancePermission('agency.finance.reports.view.finance_or_owner')
   createMonthlyReportSnapshot(@Req() req: Request) {
-    return this.financeService.createMonthlyReportSnapshot(getFinanceContext(req));
+    return this.financeService.createMonthlyReportSnapshot(
+      getFinanceContext(req),
+    );
   }
-
 
   @Get('invoices')
   @RequireFinancePermission('agency.finance.transactions.view.finance_or_owner')
@@ -802,15 +936,22 @@ export class FinanceController {
   @Post('invoices')
   @RequireFinancePermission('agency.finance.billing.manage.owner_only')
   createInvoice(@Req() req: Request, @Body() dto: CreateFinanceInvoiceDto) {
-    return this.financeBillingService.createInvoice(getFinanceContext(req), dto);
+    return this.financeBillingService.createInvoice(
+      getFinanceContext(req),
+      dto,
+    );
   }
 
   @Get('invoices/:id/public')
   @RequireFinancePermission('agency.finance.transactions.view.finance_or_owner')
   async getInvoicePublicToken(@Req() req: Request, @Param('id') id: string) {
-    const invoice = await this.financeBillingService.getInvoice(getFinanceContext(req), id);
+    const invoice = await this.financeBillingService.getInvoice(
+      getFinanceContext(req),
+      id,
+    );
     const publicMeta = this.getInvoicePublicMetadata(invoice);
-    const token = typeof publicMeta.token === 'string' ? publicMeta.token : null;
+    const token =
+      typeof publicMeta.token === 'string' ? publicMeta.token : null;
 
     return {
       enabled: Boolean(token),
@@ -854,7 +995,9 @@ export class FinanceController {
   ) {
     if (!token) throw new BadRequestException('Token público obrigatório.');
 
-    const invoice = await this.financeBillingService.getPublicInvoiceById(id).catch(() => null);
+    const invoice = await this.financeBillingService
+      .getPublicInvoiceById(id)
+      .catch(() => null);
 
     if (!invoice) throw new NotFoundException('Finance invoice not found');
 
@@ -868,7 +1011,10 @@ export class FinanceController {
       workspaceId: invoice.workspaceId,
       userId: null,
     };
-    const customerIdentity = await this.resolveContactInvoiceIdentity(ctx, invoice.customerId);
+    const customerIdentity = await this.resolveContactInvoiceIdentity(
+      ctx,
+      invoice.customerId,
+    );
 
     return {
       invoice: {
@@ -891,9 +1037,12 @@ export class FinanceController {
   async sendInvoiceEmail(@Req() req: Request, @Param('id') id: string) {
     const ctx = getFinanceContext(req);
     const { invoice, buffer } = await this.buildInvoicePdfBuffer(ctx, id);
-    const recipientEmail = await this.resolveContactPrimaryEmail(ctx, invoice.customerId);
+    const recipientEmail = await this.resolveContactPrimaryEmail(
+      ctx,
+      invoice.customerId,
+    );
     const customerName =
-      await this.resolveContactDisplayName(ctx, invoice.customerId) ??
+      (await this.resolveContactDisplayName(ctx, invoice.customerId)) ??
       'cliente';
 
     if (!recipientEmail) {
@@ -905,8 +1054,11 @@ export class FinanceController {
       order: { updatedAt: 'DESC' },
     });
     const publicMeta = this.getInvoicePublicMetadata(invoice);
-    const publicToken = typeof publicMeta.token === 'string' ? publicMeta.token : null;
-    const publicUrl = publicToken ? this.getInvoicePublicUrl(id, publicToken) : null;
+    const publicToken =
+      typeof publicMeta.token === 'string' ? publicMeta.token : null;
+    const publicUrl = publicToken
+      ? this.getInvoicePublicUrl(id, publicToken)
+      : null;
     const companyName =
       company?.tradeName?.trim() ||
       company?.workspaceName?.trim() ||
@@ -918,7 +1070,9 @@ export class FinanceController {
         legalName: company?.legalName ?? null,
         taxId: company?.taxId ?? null,
         taxIdType: company?.taxIdType ?? null,
-        logoUrl: this.resolvePublicAssetUrl(company?.logoUrl ?? company?.logoPath),
+        logoUrl: this.resolvePublicAssetUrl(
+          company?.logoUrl ?? company?.logoPath,
+        ),
         email: company?.billingEmail ?? company?.supportEmail ?? null,
         phone: company?.phone ?? null,
         website: company?.website ?? null,
@@ -937,7 +1091,10 @@ export class FinanceController {
       subject: `Fatura ${invoice.invoiceNumber} - ${companyName}`,
       html,
       text,
-      override: await this.getEmailTransportOverride(ctx.tenantId, ctx.workspaceId),
+      override: await this.getEmailTransportOverride(
+        ctx.tenantId,
+        ctx.workspaceId,
+      ),
       attachments: [
         {
           filename: `fatura-${safeNumber}.pdf`,
@@ -985,7 +1142,11 @@ export class FinanceController {
     @Param('id') id: string,
     @Body() dto: UpdateFinanceInvoiceDto,
   ) {
-    return this.financeBillingService.updateInvoice(getFinanceContext(req), id, dto);
+    return this.financeBillingService.updateInvoice(
+      getFinanceContext(req),
+      id,
+      dto,
+    );
   }
 
   @Delete('invoices/:id')
@@ -1011,7 +1172,10 @@ export class FinanceController {
   @Post('invoices/:id/revert-draft')
   @RequireFinancePermission('agency.finance.billing.manage.owner_only')
   revertInvoiceToDraft(@Req() req: Request, @Param('id') id: string) {
-    return this.financeBillingService.revertInvoiceToDraft(getFinanceContext(req), id);
+    return this.financeBillingService.revertInvoiceToDraft(
+      getFinanceContext(req),
+      id,
+    );
   }
 
   @Post('invoices/:id/lines')
@@ -1021,7 +1185,11 @@ export class FinanceController {
     @Param('id') id: string,
     @Body() dto: AddFinanceInvoiceLineDto,
   ) {
-    return this.financeBillingService.addInvoiceLine(getFinanceContext(req), id, dto);
+    return this.financeBillingService.addInvoiceLine(
+      getFinanceContext(req),
+      id,
+      dto,
+    );
   }
 
   @Patch('invoices/:id/lines/:lineId')
@@ -1032,7 +1200,12 @@ export class FinanceController {
     @Param('lineId') lineId: string,
     @Body() dto: UpdateFinanceInvoiceLineDto,
   ) {
-    return this.financeBillingService.updateInvoiceLine(getFinanceContext(req), id, lineId, dto);
+    return this.financeBillingService.updateInvoiceLine(
+      getFinanceContext(req),
+      id,
+      lineId,
+      dto,
+    );
   }
 
   @Delete('invoices/:id/lines/:lineId')
@@ -1043,7 +1216,11 @@ export class FinanceController {
     @Param('id') id: string,
     @Param('lineId') lineId: string,
   ) {
-    return this.financeBillingService.removeInvoiceLine(getFinanceContext(req), id, lineId);
+    return this.financeBillingService.removeInvoiceLine(
+      getFinanceContext(req),
+      id,
+      lineId,
+    );
   }
 
   @Post('invoices/:id/pdf')
@@ -1089,7 +1266,11 @@ export class FinanceController {
     @Param('id') id: string,
     @Body() dto: UpdateFinanceBillDto,
   ) {
-    return this.financeBillingService.updateBill(getFinanceContext(req), id, dto);
+    return this.financeBillingService.updateBill(
+      getFinanceContext(req),
+      id,
+      dto,
+    );
   }
 
   @Delete('bills/:id')
@@ -1113,7 +1294,11 @@ export class FinanceController {
     @Param('id') id: string,
     @Body() dto: AddFinanceBillLineDto,
   ) {
-    return this.financeBillingService.addBillLine(getFinanceContext(req), id, dto);
+    return this.financeBillingService.addBillLine(
+      getFinanceContext(req),
+      id,
+      dto,
+    );
   }
 
   @Patch('bills/:id/lines/:lineId')
@@ -1124,7 +1309,12 @@ export class FinanceController {
     @Param('lineId') lineId: string,
     @Body() dto: UpdateFinanceBillLineDto,
   ) {
-    return this.financeBillingService.updateBillLine(getFinanceContext(req), id, lineId, dto);
+    return this.financeBillingService.updateBillLine(
+      getFinanceContext(req),
+      id,
+      lineId,
+      dto,
+    );
   }
 
   @Delete('bills/:id/lines/:lineId')
@@ -1135,7 +1325,11 @@ export class FinanceController {
     @Param('id') id: string,
     @Param('lineId') lineId: string,
   ) {
-    return this.financeBillingService.removeBillLine(getFinanceContext(req), id, lineId);
+    return this.financeBillingService.removeBillLine(
+      getFinanceContext(req),
+      id,
+      lineId,
+    );
   }
 
   @Post('bills/:id/pdf')
@@ -1161,9 +1355,18 @@ export class FinanceController {
 
     const layout = await this.documentLayoutsService.getDefaultLayout(ctx);
     const template =
-      await this.documentLayoutsService.getSystemTemplateForType(layout.layoutType, 'invoice') ??
-      await this.documentLayoutsService.getSystemTemplateForType(layout.layoutType, 'generic') ??
-      await this.documentLayoutsService.getSystemTemplateForType(layout.layoutType, 'quote');
+      (await this.documentLayoutsService.getSystemTemplateForType(
+        layout.layoutType,
+        'invoice',
+      )) ??
+      (await this.documentLayoutsService.getSystemTemplateForType(
+        layout.layoutType,
+        'generic',
+      )) ??
+      (await this.documentLayoutsService.getSystemTemplateForType(
+        layout.layoutType,
+        'quote',
+      ));
 
     if (!template) {
       throw new NotFoundException('Document layout template not found.');
@@ -1192,14 +1395,63 @@ export class FinanceController {
 
   @Get('payments')
   @RequireFinancePermission('agency.finance.transactions.view.finance_or_owner')
-  listPayments(@Req() req: Request) {
-    return this.financeBillingService.listPayments(getFinanceContext(req));
+  async listPayments(@Req() req: Request) {
+    const ctx = getFinanceContext(req);
+    const payments = await this.financeBillingService.listPayments(ctx);
+    const contactIds = [
+      ...new Set(
+        payments
+          .map((payment) => payment.contactId)
+          .filter((id): id is string => Boolean(id)),
+      ),
+    ];
+    if (contactIds.length === 0) return payments;
+
+    const contacts = await this.contactsRepo.find({
+      where: {
+        tenantId: ctx.tenantId,
+        workspaceId: ctx.workspaceId,
+        id: In(contactIds),
+      },
+      select: {
+        id: true,
+        displayName: true,
+        legalName: true,
+        firstName: true,
+        lastName: true,
+      },
+    });
+    const names = new Map(
+      contacts.map((contact) => {
+        const fullName = [contact.firstName, contact.lastName]
+          .map((value) => value?.trim())
+          .filter(Boolean)
+          .join(' ');
+        return [
+          contact.id,
+          contact.displayName?.trim() ||
+            contact.legalName?.trim() ||
+            fullName ||
+            null,
+        ];
+      }),
+    );
+
+    return payments.map((payment) => ({
+      ...payment,
+      contactName: payment.contactId
+        ? (names.get(payment.contactId) ?? null)
+        : null,
+    }));
   }
 
   @Post('payments')
   @RequireFinancePermission('agency.finance.billing.manage.owner_only')
   createPayment(@Req() req: Request, @Body() dto: CreateFinancePaymentDto) {
-    return this.financeBillingService.createPayment(getFinanceContext(req), dto);
+    return this.financeBillingService.createPayment(
+      getFinanceContext(req),
+      dto,
+    );
   }
 
   @Patch('payments/:id')
@@ -1209,7 +1461,11 @@ export class FinanceController {
     @Param('id') id: string,
     @Body() dto: UpdateFinancePaymentDto,
   ) {
-    return this.financeBillingService.updatePayment(getFinanceContext(req), id, dto);
+    return this.financeBillingService.updatePayment(
+      getFinanceContext(req),
+      id,
+      dto,
+    );
   }
 
   @Delete('payments/:id')
@@ -1232,7 +1488,6 @@ export class FinanceController {
       dto,
     );
   }
-
 
   @Post('recurring-profiles/:id/generate-invoice')
   @RequireFinancePermission('agency.finance.billing.manage.owner_only')
@@ -1257,7 +1512,9 @@ export class FinanceController {
   @Get('recurring-profiles')
   @RequireFinancePermission('agency.finance.transactions.view.finance_or_owner')
   listRecurringProfiles(@Req() req: Request) {
-    return this.financeBillingService.listRecurringProfiles(getFinanceContext(req));
+    return this.financeBillingService.listRecurringProfiles(
+      getFinanceContext(req),
+    );
   }
 
   @Post('recurring-profiles')
@@ -1301,7 +1558,9 @@ export class FinanceController {
   @Get('bill-recurrences')
   @RequireFinancePermission('agency.finance.transactions.view.finance_or_owner')
   listBillRecurrences(@Req() req: Request) {
-    return this.financeBillingService.listBillRecurrences(getFinanceContext(req));
+    return this.financeBillingService.listBillRecurrences(
+      getFinanceContext(req),
+    );
   }
 
   @Post('bill-recurrences')
@@ -1319,7 +1578,10 @@ export class FinanceController {
   @Get('bill-recurrences/:id')
   @RequireFinancePermission('agency.finance.transactions.view.finance_or_owner')
   getBillRecurrence(@Req() req: Request, @Param('id') id: string) {
-    return this.financeBillingService.getBillRecurrence(getFinanceContext(req), id);
+    return this.financeBillingService.getBillRecurrence(
+      getFinanceContext(req),
+      id,
+    );
   }
 
   @Patch('bill-recurrences/:id')
@@ -1339,13 +1601,19 @@ export class FinanceController {
   @Post('bill-recurrences/:id/pause')
   @RequireFinancePermission('agency.finance.billing.manage.owner_only')
   pauseBillRecurrence(@Req() req: Request, @Param('id') id: string) {
-    return this.financeBillingService.pauseBillRecurrence(getFinanceContext(req), id);
+    return this.financeBillingService.pauseBillRecurrence(
+      getFinanceContext(req),
+      id,
+    );
   }
 
   @Post('bill-recurrences/:id/resume')
   @RequireFinancePermission('agency.finance.billing.manage.owner_only')
   resumeBillRecurrence(@Req() req: Request, @Param('id') id: string) {
-    return this.financeBillingService.resumeBillRecurrence(getFinanceContext(req), id);
+    return this.financeBillingService.resumeBillRecurrence(
+      getFinanceContext(req),
+      id,
+    );
   }
 
   @Post('bill-recurrences/:id/generate')
@@ -1356,5 +1624,4 @@ export class FinanceController {
       id,
     );
   }
-
 }
