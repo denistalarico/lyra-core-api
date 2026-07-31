@@ -1,6 +1,12 @@
 import { ConflictException } from '@nestjs/common';
 import { LeadFlowSettingsContextType } from '../../leadflow-settings/enums/leadflow-settings-context-type.enum';
 import { LEADFLOW_PRODUCT_TELEMETRY_PURPOSE } from '../dto/telemetry-consent.dto';
+import {
+  LeadFlowProductTelemetryDailyEntity,
+  LeadFlowTelemetryAuditEventEntity,
+  LeadFlowTelemetryConsentEntity,
+  LeadFlowTelemetryIdentityLinkEntity,
+} from '../entities';
 import { LeadFlowTelemetryPrivacyService } from './leadflow-telemetry-privacy.service';
 
 const tenantId = '3fcf6e35-9881-4713-b704-795956eec0c8';
@@ -19,6 +25,7 @@ function repositoryMock() {
     save: jest.fn((value: Record<string, unknown>) => Promise.resolve(value)),
     upsert: jest.fn().mockResolvedValue(undefined),
     delete: jest.fn().mockResolvedValue({ affected: 0 }),
+    remove: jest.fn((value: Record<string, unknown>) => Promise.resolve(value)),
   };
 }
 
@@ -221,5 +228,67 @@ describe('LeadFlowTelemetryPrivacyService', () => {
     expect(query).toContain('HAVING COUNT(DISTINCT scope_pseudonym) >= $3');
     expect(query).not.toContain('tenant_id');
     expect(params[2]).toBeGreaterThanOrEqual(5);
+  });
+
+  it('performs erasure transactionally and records how many pseudonymous facts were removed', async () => {
+    const fixture = createFixture();
+    const consentRepository = repositoryMock();
+    const identityRepository = repositoryMock();
+    const auditRepository = repositoryMock();
+    const identity = {
+      tenantId,
+      workspaceId,
+      contextType: LeadFlowSettingsContextType.Agency,
+      agencyClientId: null,
+      scopePseudonym: pseudonym,
+    };
+    consentRepository.findOne.mockResolvedValue({
+      noticeId,
+      purposeKey: LEADFLOW_PRODUCT_TELEMETRY_PURPOSE,
+      status: 'opted_in',
+      noticeVersion: 1,
+      noticeContentHash: contentHash,
+    });
+    identityRepository.findOne.mockResolvedValue(identity);
+    const manager = {
+      getRepository: jest.fn((entity: unknown) => {
+        if (entity === LeadFlowTelemetryConsentEntity) return consentRepository;
+        if (entity === LeadFlowTelemetryIdentityLinkEntity) {
+          return identityRepository;
+        }
+        if (entity === LeadFlowTelemetryAuditEventEntity)
+          return auditRepository;
+        throw new Error('unexpected_repository');
+      }),
+      delete: jest.fn().mockResolvedValue({ affected: 2 }),
+    };
+    fixture.dataSource.transaction.mockImplementation(
+      async (operation: (value: typeof manager) => Promise<void>) =>
+        operation(manager),
+    );
+    jest
+      .spyOn(fixture.service, 'getStatus')
+      .mockResolvedValue({ status: 'erased' } as never);
+
+    await expect(
+      fixture.service.eraseContribution(ctx, {
+        reasonCode: 'user_request',
+      }),
+    ).resolves.toEqual({ status: 'erased' });
+
+    expect(manager.delete).toHaveBeenCalledWith(
+      LeadFlowProductTelemetryDailyEntity,
+      { scopePseudonym: pseudonym },
+    );
+    expect(identityRepository.remove).toHaveBeenCalledWith(identity);
+    expect(consentRepository.save).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'erased' }),
+    );
+    expect(auditRepository.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'telemetry_erasure_completed',
+        details: expect.objectContaining({ deletedFacts: 2 }),
+      }),
+    );
   });
 });

@@ -18,6 +18,7 @@
     "test:cov": "jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
     "test:e2e": "jest --config ./test/jest-e2e.json",
+    "test:leadflow:beta-staging": "LEADFLOW_BETA_E2E=true jest src/modules/inbox/e2e/leadflow-beta-staging.playwright.spec.ts --runInBand",
     "migration:run": "ts-node -r tsconfig-paths/register src/database/run-migrations.ts",
     "agency:migration:run": "ts-node -r tsconfig-paths/register src/database/run-agency-migrations.ts",
     "agency:seed-owner": "ts-node -r tsconfig-paths/register src/scripts/seed-agency-owner.ts",
