@@ -660,6 +660,28 @@ export class ActivitiesService implements OnModuleInit {
       throw new NotFoundException('Activity not found');
     }
 
+    activity.archivedAt = new Date();
+    activity.status = ActivityStatus.Archived;
+
+    const saved = await this.activitiesRepository.save(activity);
+    this.clearReminderTimers(saved.id);
+
+    return saved;
+  }
+
+  async remove(context: RequestContext, id: string) {
+    const activity = await this.activitiesRepository.findOne({
+      where: {
+        id,
+        tenantId: context.tenantId,
+        workspaceId: context.workspaceId,
+      },
+    });
+
+    if (!activity) {
+      throw new NotFoundException('Activity not found');
+    }
+
     await this.activitiesRepository.remove(activity);
     this.clearReminderTimers(activity.id);
 

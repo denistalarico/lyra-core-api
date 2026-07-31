@@ -122,6 +122,14 @@ export class ActivitiesController {
   }
 
   @Delete(':id')
+  remove(
+    @Headers() headers: Record<string, string | string[] | undefined>,
+    @Param('id') id: string,
+  ) {
+    return this.activitiesService.remove(getContextFromHeaders(headers), id);
+  }
+
+  @Post(':id/archive')
   archive(
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Param('id') id: string,
