@@ -195,4 +195,29 @@ export class ClientsController {
       clientId,
     );
   }
+
+  @Post(':clientId/unarchive')
+  @RequirePermission('agency.clients.profile.archive.admin')
+  unarchive(
+    @Headers() headers: Record<string, string | string[] | undefined>,
+    @Param('clientId') clientId: string,
+  ) {
+    return this.clientsService.unarchive(
+      getContextFromHeaders(headers),
+      clientId,
+    );
+  }
+
+  @Delete(':clientId/permanent')
+  @DangerousAction()
+  @RequirePermission('agency.clients.profile.delete.owner_only')
+  remove(
+    @Headers() headers: Record<string, string | string[] | undefined>,
+    @Param('clientId') clientId: string,
+  ) {
+    return this.clientsService.remove(
+      getContextFromHeaders(headers),
+      clientId,
+    );
+  }
 }

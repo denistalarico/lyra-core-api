@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Brackets, In, IsNull, Repository } from 'typeorm';
 import {
@@ -383,6 +387,49 @@ export class ClientsService {
     client.archivedAt = new Date();
 
     return this.clientsRepository.save(client);
+  }
+
+  async unarchive(context: RequestContext, clientId: string) {
+    const client = await this.findAny(context, clientId);
+
+    if (client.status !== AgencyClientStatus.Archived) {
+      return client;
+    }
+
+    client.status = AgencyClientStatus.Active;
+    client.archivedAt = null;
+
+    return this.clientsRepository.save(client);
+  }
+
+  async remove(context: RequestContext, clientId: string) {
+    const client = await this.findAny(context, clientId);
+
+    if (client.status !== AgencyClientStatus.Archived) {
+      throw new BadRequestException(
+        'Client must be archived before it can be permanently deleted',
+      );
+    }
+
+    await this.clientsRepository.remove(client);
+
+    return { deleted: true };
+  }
+
+  private async findAny(context: RequestContext, clientId: string) {
+    const client = await this.clientsRepository.findOne({
+      where: {
+        id: clientId,
+        tenantId: context.tenantId,
+        workspaceId: context.workspaceId,
+      },
+    });
+
+    if (!client) {
+      throw new NotFoundException('Client not found');
+    }
+
+    return client;
   }
 
   async getOverview(context: RequestContext, clientId: string) {
