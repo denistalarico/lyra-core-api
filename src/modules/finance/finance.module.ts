@@ -30,6 +30,7 @@ import {
   FinanceBill,
   FinanceBillRecurrence,
   FinanceBankAccount,
+  FinanceBankTransfer,
   FinanceCategory,
   FinanceCostCenter,
   FinanceDocumentSequence,
@@ -58,6 +59,7 @@ import { FinanceJournalEntryService } from './services/finance-journal-entry.ser
 import { NotificationsModule } from '../notifications';
 import { FinanceNotificationPublisher } from './services/finance-notification.publisher';
 import { FinanceTeamPaymentReconciliationService } from './services/finance-team-payment-reconciliation.service';
+import { FinanceBankTransferService } from './services/finance-bank-transfer.service';
 import { PermissionsModule } from '../permissions';
 import { ContactEntity } from '../contacts/entities/contact.entity';
 import { ContactMethodEntity } from '../contacts/entities/contact-method.entity';
@@ -73,6 +75,7 @@ import { ContactMethodEntity } from '../contacts/entities/contact-method.entity'
       [
         FinanceAccount,
         FinanceBankAccount,
+        FinanceBankTransfer,
         FinanceCategory,
         FinanceCostCenter,
         FinanceDocumentSequence,
@@ -126,6 +129,7 @@ import { ContactMethodEntity } from '../contacts/entities/contact-method.entity'
     FinanceJournalEntryService,
     FinanceNotificationPublisher,
     FinanceTeamPaymentReconciliationService,
+    FinanceBankTransferService,
     SettingsCryptoService,
   ],
   exports: [
@@ -140,6 +144,7 @@ import { ContactMethodEntity } from '../contacts/entities/contact-method.entity'
     FinancePaymentProviderService,
     FinanceJournalEntryService,
     FinanceTeamPaymentReconciliationService,
+    FinanceBankTransferService,
   ],
 })
 export class FinanceModule {}

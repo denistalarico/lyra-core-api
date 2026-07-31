@@ -2,6 +2,7 @@ import { DataSource, EntityManager } from 'typeorm';
 import {
   FinanceAccount,
   FinanceBankAccount,
+  FinanceBankTransfer,
   FinanceBill,
   FinanceBillLine,
   FinanceCategory,
@@ -17,6 +18,7 @@ import {
   FinanceAccountStatus,
   FinanceAccountType,
   FinanceAllocationTargetType,
+  FinanceBankTransferStatus,
   FinanceCategoryType,
   FinanceJournalEntryLineType,
   FinanceJournalEntryStatus,
@@ -450,6 +452,71 @@ describe('FinancePostingService', () => {
     const debit = all.reduce((s, e) => s + Number(e.totalDebit), 0);
     const credit = all.reduce((s, e) => s + Number(e.totalCredit), 0);
     expect(debit).toBe(credit);
+  });
+
+  it('posts and reverses a bank transfer without touching revenue or expense', async () => {
+    const { service, store, manager } = makeService();
+    seedChartOfAccounts(store);
+    store.table(FinanceAccount).push({
+      id: 'account-card-liability',
+      tenantId: TENANT,
+      workspaceId: WORKSPACE,
+      code: '2.1.02',
+      name: 'Cartões de crédito a pagar',
+      type: FinanceAccountType.Liability,
+    });
+    store.table(FinanceBankAccount).push(
+      {
+        id: 'bank-checking',
+        tenantId: TENANT,
+        workspaceId: WORKSPACE,
+        name: 'Conta corrente',
+        accountId: accountId(store, '1.1.01'),
+        active: true,
+      },
+      {
+        id: 'bank-card',
+        tenantId: TENANT,
+        workspaceId: WORKSPACE,
+        name: 'Cartão empresarial',
+        accountId: 'account-card-liability',
+        active: true,
+      },
+    );
+    const transfer = {
+      id: 'transfer-1',
+      tenantId: TENANT,
+      workspaceId: WORKSPACE,
+      fromBankAccountId: 'bank-checking',
+      toBankAccountId: 'bank-card',
+      transferDate: '2026-06-25',
+      amount: '250.00',
+      currency: 'BRL',
+      description: 'Pagamento da fatura do cartão',
+      status: FinanceBankTransferStatus.Completed,
+    } as FinanceBankTransfer;
+
+    const entry = await service.postBankTransfer(ctx(), transfer, manager);
+
+    expect(entry.eventType).toBe('bank_transfer_completed');
+    expect(entry.sourceModule).toBe('bank_transfer');
+    const lines = linesOf(store, entry.id);
+    expect(lines.find((line) => line.lineType === FinanceJournalEntryLineType.Debit).accountId).toBe('account-card-liability');
+    expect(lines.find((line) => line.lineType === FinanceJournalEntryLineType.Credit).accountId).toBe(accountId(store, '1.1.01'));
+    expect(
+      lines.some((line) =>
+        [FinanceAccountType.Revenue, FinanceAccountType.Expense].includes(
+          store.table(FinanceAccount).find((account) => account.id === line.accountId)?.type,
+        ),
+      ),
+    ).toBe(false);
+    assertBalanced(store, entry.id);
+
+    const reversals = await service.reverseBankTransfer(ctx(), transfer.id, manager);
+    expect(reversals).toHaveLength(1);
+    expect(reversals[0].eventType).toBe('bank_transfer_reversed');
+    expect(reversals[0].reversesEntryId).toBe(entry.id);
+    assertBalanced(store, reversals[0].id);
   });
 
   it('10. isolates posting by tenant/workspace (no cross-tenant entries or duplicates)', async () => {

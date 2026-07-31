@@ -1,5 +1,6 @@
 export * from './finance-account.entity';
 export * from './finance-bank-account.entity';
+export * from './finance-bank-transfer.entity';
 export * from './finance-category.entity';
 export * from './finance-cost-center.entity';
 export * from './finance-journal.entity';

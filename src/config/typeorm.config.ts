@@ -130,6 +130,7 @@ import { CalendarSettings } from '../modules/calendar/entities/calendar-settings
 import {
   FinanceAccount,
   FinanceBankAccount,
+  FinanceBankTransfer,
   FinanceCategory,
   FinanceCostCenter,
   FinanceDocumentSequence,
@@ -416,6 +417,7 @@ export const agencyEntities = [
   AgencyActivityLink,
   FinanceAccount,
   FinanceBankAccount,
+  FinanceBankTransfer,
   FinanceCategory,
   FinanceCostCenter,
   FinanceDocumentSequence,

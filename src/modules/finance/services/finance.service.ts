@@ -25,6 +25,7 @@ import {
 import {
   FinanceAccount,
   FinanceBankAccount,
+  FinanceBankTransfer,
   FinanceBill,
   FinanceCategory,
   FinanceCostCenter,
@@ -71,6 +72,8 @@ export class FinanceService {
     private readonly bankAccountsRepo: Repository<FinanceBankAccount>,
     @InjectRepository(FinancePayment, 'agency')
     private readonly paymentsRepo: Repository<FinancePayment>,
+    @InjectRepository(FinanceBankTransfer, 'agency')
+    private readonly bankTransfersRepo: Repository<FinanceBankTransfer>,
     @InjectRepository(FinanceProfitabilityRule, 'agency')
     private readonly profitabilityRulesRepo: Repository<FinanceProfitabilityRule>,
     @InjectRepository(FinanceMetricSnapshot, 'agency')
@@ -452,13 +455,30 @@ export class FinanceService {
   async deleteBankAccount(ctx: FinanceRequestContext, id: string) {
     const bankAccount = await this.getBankAccount(ctx, id);
 
-    const movements = await this.paymentsRepo.count({
-      where: {
-        tenantId: ctx.tenantId,
-        workspaceId: ctx.workspaceId,
-        bankAccountId: id,
-      },
-    });
+    const [payments, transfers] = await Promise.all([
+      this.paymentsRepo.count({
+        where: {
+          tenantId: ctx.tenantId,
+          workspaceId: ctx.workspaceId,
+          bankAccountId: id,
+        },
+      }),
+      this.bankTransfersRepo.count({
+        where: [
+          {
+            tenantId: ctx.tenantId,
+            workspaceId: ctx.workspaceId,
+            fromBankAccountId: id,
+          },
+          {
+            tenantId: ctx.tenantId,
+            workspaceId: ctx.workspaceId,
+            toBankAccountId: id,
+          },
+        ],
+      }),
+    ]);
+    const movements = payments + transfers;
     if (movements > 0) {
       throw new ConflictException(
         'Esta conta possui movimentações e não pode ser excluída. Inative-a para impedir novos lançamentos.',

@@ -153,6 +153,11 @@ export enum FinancePaymentMethod {
   Other = 'other',
 }
 
+export enum FinanceBankTransferStatus {
+  Completed = 'completed',
+  Reversed = 'reversed',
+}
+
 export enum FinanceAllocationTargetType {
   Invoice = 'invoice',
   Bill = 'bill',
@@ -272,4 +277,3 @@ export enum FinanceJournalEntryLineType {
   Debit = 'debit',
   Credit = 'credit',
 }
-

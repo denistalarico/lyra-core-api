@@ -79,6 +79,7 @@ import {
   CreateFinanceBillRecurrenceDto,
   UpdateFinanceBillRecurrenceDto,
   AllocateFinancePaymentDto,
+  CreateFinanceBankTransferDto,
 } from '../dto';
 import { FinanceService } from '../services/finance.service';
 import { FinanceDefaultsService } from '../services/finance-defaults.service';
@@ -89,6 +90,7 @@ import { FinanceDocumentNumberingService } from '../services/finance-document-nu
 import { FinanceFiscalService } from '../services/finance-fiscal.service';
 import { FinancePaymentProviderService } from '../services/finance-payment-provider.service';
 import { FinanceJournalEntryService } from '../services/finance-journal-entry.service';
+import { FinanceBankTransferService } from '../services/finance-bank-transfer.service';
 import { getFinanceContext } from '../services/finance-context';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import {
@@ -166,6 +168,7 @@ export class FinanceController {
     private readonly financeFiscalService: FinanceFiscalService,
     private readonly financePaymentProviderService: FinancePaymentProviderService,
     private readonly financeJournalEntryService: FinanceJournalEntryService,
+    private readonly financeBankTransferService: FinanceBankTransferService,
     private readonly documentLayoutsService: DocumentLayoutsService,
     private readonly documentPdfRenderer: DocumentPdfRendererService,
     private readonly emailService: EmailService,
@@ -1443,6 +1446,32 @@ export class FinanceController {
         ? (names.get(payment.contactId) ?? null)
         : null,
     }));
+  }
+
+  @Get('bank-transfers')
+  @RequireFinancePermission('agency.finance.transactions.view.finance_or_owner')
+  listBankTransfers(@Req() req: Request) {
+    return this.financeBankTransferService.list(getFinanceContext(req));
+  }
+
+  @Post('bank-transfers')
+  @RequireFinancePermission(
+    'agency.finance.transactions.manage.finance_or_owner',
+  )
+  createBankTransfer(
+    @Req() req: Request,
+    @Body() dto: CreateFinanceBankTransferDto,
+  ) {
+    return this.financeBankTransferService.create(getFinanceContext(req), dto);
+  }
+
+  @Post('bank-transfers/:id/reverse')
+  @DangerousAction()
+  @RequireFinancePermission(
+    'agency.finance.transactions.manage.finance_or_owner',
+  )
+  reverseBankTransfer(@Req() req: Request, @Param('id') id: string) {
+    return this.financeBankTransferService.reverse(getFinanceContext(req), id);
   }
 
   @Post('payments')

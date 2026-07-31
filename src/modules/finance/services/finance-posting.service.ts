@@ -4,6 +4,7 @@ import { DataSource, EntityManager } from 'typeorm';
 import {
   FinanceAccount,
   FinanceBankAccount,
+  FinanceBankTransfer,
   FinanceBill,
   FinanceBillLine,
   FinanceCategory,
@@ -18,6 +19,7 @@ import {
 import {
   FinanceAccountStatus,
   FinanceAccountType,
+  FinanceBankAccountType,
   FinanceDocumentType,
   FinanceJournalEntryLineType,
   FinanceJournalEntryStatus,
@@ -81,12 +83,15 @@ type EventType =
   | 'bill_reversed'
   | 'customer_payment_completed'
   | 'supplier_payment_completed'
-  | 'payment_reversed';
+  | 'payment_reversed'
+  | 'bank_transfer_completed'
+  | 'bank_transfer_reversed';
 
 const REVERSAL_EVENTS: EventType[] = [
   'invoice_reversed',
   'bill_reversed',
   'payment_reversed',
+  'bank_transfer_reversed',
 ];
 
 interface PostingLine {
@@ -98,7 +103,6 @@ interface PostingLine {
   description?: string | null;
   amount: number;
 }
-
 interface CreatePostedEntryParams {
   entryDate: string;
   description: string | null;
@@ -447,6 +451,69 @@ export class FinancePostingService {
   ): Promise<FinanceJournalEntry[]> {
     return this.withManager(manager, (m) =>
       this.reverseEntriesForSource(m, ctx, 'payment', payment.id, 'payment_reversed'),
+    );
+  }
+
+
+  /** Internal transfer → DEBIT destination / CREDIT source. */
+  async postBankTransfer(
+    ctx: FinanceRequestContext,
+    transfer: FinanceBankTransfer,
+    manager?: EntityManager,
+  ): Promise<FinanceJournalEntry> {
+    return this.withManager(manager, async (m) => {
+      const [fromAccount, toAccount] = await Promise.all([
+        this.resolveTransferBankAccount(m, ctx, transfer.fromBankAccountId),
+        this.resolveTransferBankAccount(m, ctx, transfer.toBankAccountId),
+      ]);
+      const amount = toMoney(transfer.amount);
+      const journalId = await this.resolveJournalId(m, ctx, FinanceJournalType.Bank);
+      const description =
+        transfer.description ??
+        `Transferência ${fromAccount.name} → ${toAccount.name}`;
+
+      return this.createPostedEntry(m, ctx, {
+        entryDate: transfer.transferDate,
+        description,
+        journalId,
+        sourceType: 'bank_transfer',
+        sourceId: transfer.id,
+        eventType: 'bank_transfer_completed',
+        metadata: {
+          fromBankAccountId: fromAccount.id,
+          toBankAccountId: toAccount.id,
+        },
+        lines: [
+          {
+            lineType: FinanceJournalEntryLineType.Debit,
+            accountId: toAccount.accountId,
+            description: `Entrada em ${toAccount.name}`,
+            amount,
+          },
+          {
+            lineType: FinanceJournalEntryLineType.Credit,
+            accountId: fromAccount.accountId,
+            description: `Saída de ${fromAccount.name}`,
+            amount,
+          },
+        ],
+      });
+    });
+  }
+
+  async reverseBankTransfer(
+    ctx: FinanceRequestContext,
+    transferId: string,
+    manager?: EntityManager,
+  ): Promise<FinanceJournalEntry[]> {
+    return this.withManager(manager, (m) =>
+      this.reverseEntriesForSource(
+        m,
+        ctx,
+        'bank_transfer',
+        transferId,
+        'bank_transfer_reversed',
+      ),
     );
   }
 
@@ -846,7 +913,15 @@ export class FinancePostingService {
       const bankAccount = await m.getRepository(FinanceBankAccount).findOne({
         where: { id: bankAccountId, tenantId: ctx.tenantId, workspaceId: ctx.workspaceId },
       });
-      if (bankAccount?.accountId) return bankAccount.accountId;
+      if (!bankAccount) {
+        throw new BadRequestException('A conta financeira informada não foi encontrada.');
+      }
+      if (bankAccount.accountId) return bankAccount.accountId;
+      if (bankAccount.type === FinanceBankAccountType.CreditCard) {
+        throw new BadRequestException(
+          'Vincule a conta do cartão a uma conta contábil do tipo Passivo antes de registrar o pagamento.',
+        );
+      }
     }
     // Fall back to the system cash/bank account so settlements never break on a
     // bank account that has not been linked to the chart of accounts yet.
@@ -855,6 +930,42 @@ export class FinancePostingService {
       ctx,
       SYSTEM_ACCOUNT_ANCHORS.cashBank,
     );
+  }
+
+
+  private async resolveTransferBankAccount(
+    m: EntityManager,
+    ctx: FinanceRequestContext,
+    bankAccountId: string,
+  ): Promise<FinanceBankAccount> {
+    const bankAccount = await m.getRepository(FinanceBankAccount).findOne({
+      where: {
+        id: bankAccountId,
+        tenantId: ctx.tenantId,
+        workspaceId: ctx.workspaceId,
+      },
+    });
+    if (!bankAccount || bankAccount.active === false) {
+      throw new BadRequestException(
+        'A conta financeira da transferência não existe ou está inativa.',
+      );
+    }
+    if (!bankAccount.accountId) {
+      throw new BadRequestException(
+        `Vincule a conta "${bankAccount.name}" ao plano de contas antes de transferir.`,
+      );
+    }
+    const chartAccount = await this.findAccountById(
+      m,
+      ctx,
+      bankAccount.accountId,
+    );
+    if (!chartAccount || !this.accountIsActive(chartAccount)) {
+      throw new BadRequestException(
+        `A conta contábil vinculada a "${bankAccount.name}" não está ativa.`,
+      );
+    }
+    return bankAccount;
   }
 
   private async resolveJournalId(
