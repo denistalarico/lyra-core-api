@@ -12,7 +12,7 @@ const defaultFrontendUrl = 'http://82.29.61.35:3001';
 function getLogoUrl() {
   const frontendUrl = process.env.APP_FRONTEND_URL ?? defaultFrontendUrl;
 
-  return `${frontendUrl.replace(/\/$/, '')}/brand/logo-full-light.svg`;
+  return `${frontendUrl.replace(/\/$/, '')}/brand/suite-full-light.svg`;
 }
 
 export function renderTransactionalEmail(options: TransactionalEmailOptions) {
