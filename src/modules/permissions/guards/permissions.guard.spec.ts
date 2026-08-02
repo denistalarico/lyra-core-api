@@ -1,9 +1,10 @@
-import { UnauthorizedException } from '@nestjs/common';
+import { ForbiddenException, UnauthorizedException } from '@nestjs/common';
 import type { ExecutionContext } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import {
   ANY_PERMISSION_KEYS_METADATA,
   PERMISSION_KEY_METADATA,
+  PRODUCT_ENTITLEMENT_METADATA,
 } from '../decorators/permissions.decorators';
 import { PermissionsGuard } from './permissions.guard';
 
@@ -162,5 +163,110 @@ describe('PermissionsGuard', () => {
         body: undefined,
       },
     );
+  });
+
+  it('denies a client-mode LeadFlow request when the caller is not authorized for that client', async () => {
+    const metadata = new Map<string, unknown>([
+      [PRODUCT_ENTITLEMENT_METADATA, 'leadflow'],
+    ]);
+    const { guard, permissionService, operationalContextResolver } =
+      createGuard(metadata);
+    operationalContextResolver.resolve.mockResolvedValue({
+      productKey: 'leadflow',
+      operatingMode: 'client',
+      clientId: 'client-1',
+      managedTenantId: 'managed-tenant-1',
+    });
+    permissionService.canAccessProduct.mockResolvedValue(true);
+    permissionService.canAccessClientProduct.mockResolvedValue(false);
+
+    await expect(
+      guard.canActivate(
+        createExecutionContext({
+          method: 'GET',
+          route: { path: '/leadflow/crm/pipelines' },
+          headers: { 'x-lyra-client-id': 'client-1' },
+          user: {
+            sub: 'user-1',
+            tenantId: 'tenant-1',
+            workspaceId: 'workspace-1',
+            role: 'member',
+          },
+        }),
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+
+    expect(permissionService.canAccessClientProduct).toHaveBeenCalledWith({
+      tenantId: 'tenant-1',
+      workspaceId: 'workspace-1',
+      userId: 'user-1',
+      role: 'member',
+      clientId: 'client-1',
+      productKey: 'leadflow',
+    });
+  });
+
+  it('allows a client-mode LeadFlow request once managed client-product access is confirmed', async () => {
+    const metadata = new Map<string, unknown>([
+      [PRODUCT_ENTITLEMENT_METADATA, 'leadflow'],
+    ]);
+    const { guard, permissionService, operationalContextResolver } =
+      createGuard(metadata);
+    operationalContextResolver.resolve.mockResolvedValue({
+      productKey: 'leadflow',
+      operatingMode: 'client',
+      clientId: 'client-1',
+      managedTenantId: 'managed-tenant-1',
+    });
+    permissionService.canAccessProduct.mockResolvedValue(true);
+    permissionService.canAccessClientProduct.mockResolvedValue(true);
+
+    await expect(
+      guard.canActivate(
+        createExecutionContext({
+          method: 'GET',
+          route: { path: '/leadflow/crm/pipelines' },
+          headers: { 'x-lyra-client-id': 'client-1' },
+          user: {
+            sub: 'user-1',
+            tenantId: 'tenant-1',
+            workspaceId: 'workspace-1',
+            role: 'member',
+          },
+        }),
+      ),
+    ).resolves.toBe(true);
+  });
+
+  it('does not enforce managed client-product access in agency operating mode', async () => {
+    const metadata = new Map<string, unknown>([
+      [PRODUCT_ENTITLEMENT_METADATA, 'leadflow'],
+    ]);
+    const { guard, permissionService, operationalContextResolver } =
+      createGuard(metadata);
+    operationalContextResolver.resolve.mockResolvedValue({
+      productKey: 'leadflow',
+      operatingMode: 'agency',
+      clientId: null,
+      managedTenantId: null,
+    });
+    permissionService.canAccessProduct.mockResolvedValue(true);
+
+    await expect(
+      guard.canActivate(
+        createExecutionContext({
+          method: 'GET',
+          route: { path: '/leadflow/crm/pipelines' },
+          user: {
+            sub: 'user-1',
+            tenantId: 'tenant-1',
+            workspaceId: 'workspace-1',
+            role: 'member',
+          },
+        }),
+      ),
+    ).resolves.toBe(true);
+
+    expect(permissionService.canAccessClientProduct).not.toHaveBeenCalled();
   });
 });

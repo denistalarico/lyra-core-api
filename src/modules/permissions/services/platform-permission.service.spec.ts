@@ -411,4 +411,92 @@ describe('PlatformPermissionService', () => {
       ],
     });
   });
+
+  describe('listAuthorizedManagedClients', () => {
+    it('returns an empty list for an unknown product key', async () => {
+      const { service, clientsRepository } = createService();
+
+      await expect(
+        service.listAuthorizedManagedClients(
+          {
+            tenantId: 'tenant-1',
+            workspaceId: 'workspace-1',
+            userId: 'user-1',
+            role: PlatformRoleKey.Owner,
+          },
+          'not-a-product',
+        ),
+      ).resolves.toEqual([]);
+
+      expect(clientsRepository.find).not.toHaveBeenCalled();
+    });
+
+    it('grants owner/admin every active client with an active entitlement, skipping access checks', async () => {
+      const { service, clientsRepository, entitlementsRepository, clientAccessRepository } =
+        createService();
+      clientsRepository.find.mockResolvedValue([
+        { ...activeClient, id: 'client-1', displayName: 'Client One' },
+        { ...activeClient, id: 'client-2', displayName: 'Client Two', managedTenantId: 'managed-tenant-2' },
+      ]);
+      entitlementsRepository.find.mockResolvedValue([
+        { ...activeEntitlement, tenantId: 'managed-tenant-1', productKey: 'leadflow' },
+        {
+          ...activeEntitlement,
+          tenantId: 'managed-tenant-2',
+          productKey: 'leadflow',
+          status: 'suspended',
+        },
+      ]);
+
+      const result = await service.listAuthorizedManagedClients(
+        {
+          tenantId: 'tenant-1',
+          workspaceId: 'workspace-1',
+          userId: 'owner-1',
+          role: PlatformRoleKey.Owner,
+        },
+        'leadflow',
+      );
+
+      expect(result).toEqual([
+        expect.objectContaining({ clientId: 'client-1', managedTenantId: 'managed-tenant-1' }),
+      ]);
+      expect(clientAccessRepository.find).not.toHaveBeenCalled();
+    });
+
+    it('excludes clients without an explicit client + client-product access grant for non-privileged users', async () => {
+      const {
+        service,
+        clientsRepository,
+        entitlementsRepository,
+        clientAccessRepository,
+        clientProductAccessRepository,
+      } = createService();
+      clientsRepository.find.mockResolvedValue([
+        { ...activeClient, id: 'client-1' },
+        { ...activeClient, id: 'client-2', managedTenantId: 'managed-tenant-1' },
+      ]);
+      entitlementsRepository.find.mockResolvedValue([
+        { ...activeEntitlement, tenantId: 'managed-tenant-1', productKey: 'leadflow' },
+      ]);
+      clientAccessRepository.find.mockResolvedValue([
+        { clientId: 'client-1', managedTenantId: 'managed-tenant-1' },
+      ]);
+      clientProductAccessRepository.find.mockResolvedValue([
+        { clientId: 'client-1', managedTenantId: 'managed-tenant-1' },
+      ]);
+
+      const result = await service.listAuthorizedManagedClients(
+        {
+          tenantId: 'tenant-1',
+          workspaceId: 'workspace-1',
+          userId: 'member-1',
+          role: PlatformRoleKey.Member,
+        },
+        'leadflow',
+      );
+
+      expect(result).toEqual([expect.objectContaining({ clientId: 'client-1' })]);
+    });
+  });
 });

@@ -4,7 +4,7 @@ import {
   Injectable,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { type FindOptionsWhere, IsNull, Repository } from 'typeorm';
+import { type FindOptionsWhere, In, IsNull, Repository } from 'typeorm';
 import {
   getPermissionDefinition,
   isKnownPermissionKey,
@@ -31,6 +31,7 @@ import {
   TenantProductEntitlementEntity,
 } from '../../platform';
 import {
+  AuthorizedManagedClientEntry,
   ClientAccessCheck,
   ClientProductAccessCheck,
   PermissionAuditDecision,
@@ -369,6 +370,155 @@ export class PlatformPermissionService {
     const grantedIndex = CLIENT_PRODUCT_ROLE_ORDER.indexOf(access.roleKey);
 
     return grantedIndex >= requiredIndex;
+  }
+
+  /**
+   * Lists the managed clients the caller is authorized to operate a given
+   * product in: active client with an active entitlement on its managed
+   * tenant, plus (unless owner/admin) an explicit client + client-product
+   * access grant for the caller. This is the authoritative "which contexts
+   * can I operate" source — no client is ever returned solely because it
+   * belongs to the tenant (blueprint sections 8.3, 9.6 and 12.6).
+   */
+  async listAuthorizedManagedClients(
+    context: PermissionContext,
+    productKey: string,
+  ): Promise<AuthorizedManagedClientEntry[]> {
+    if (!context.workspaceId || !CLIENT_PRODUCT_KEYS.has(productKey)) {
+      return [];
+    }
+
+    const clients = await this.clientsRepository.find({
+      where: {
+        tenantId: context.tenantId,
+        workspaceId: context.workspaceId,
+        status: AgencyClientStatus.Active,
+        archivedAt: IsNull(),
+      },
+    });
+
+    const managedTenantIds = [
+      ...new Set(
+        clients
+          .map((client) => client.managedTenantId)
+          .filter((managedTenantId): managedTenantId is string =>
+            Boolean(managedTenantId),
+          ),
+      ),
+    ];
+
+    if (managedTenantIds.length === 0) {
+      return [];
+    }
+
+    const entitlements = await this.entitlementsRepository.find({
+      where: {
+        tenantId: In(managedTenantIds),
+        productKey: productKey as PlatformProductKey,
+      },
+    });
+
+    const entitlementByManagedTenantId = new Map(
+      entitlements.map((entitlement) => [entitlement.tenantId, entitlement]),
+    );
+
+    const roleKey = normalizeRole(context.role);
+    const isPrivileged =
+      roleKey === PlatformRoleKey.Owner || roleKey === PlatformRoleKey.Admin;
+
+    let accessByClientId: Map<string, AgencyClientAccessEntity> | null = null;
+    let productAccessByClientId: Map<
+      string,
+      AgencyClientProductAccessEntity
+    > | null = null;
+
+    if (!isPrivileged) {
+      const clientIds = clients.map((client) => client.id);
+
+      const [accessRows, productAccessRows] = await Promise.all([
+        this.clientAccessRepository.find({
+          where: {
+            tenantId: context.tenantId,
+            workspaceId: context.workspaceId,
+            userId: context.userId,
+            clientId: In(clientIds),
+          },
+        }),
+        this.clientProductAccessRepository.find({
+          where: {
+            tenantId: context.tenantId,
+            workspaceId: context.workspaceId,
+            userId: context.userId,
+            clientId: In(clientIds),
+            productKey: productKey as AgencyClientProductAccessEntity['productKey'],
+          },
+        }),
+      ]);
+
+      accessByClientId = new Map(accessRows.map((row) => [row.clientId, row]));
+      productAccessByClientId = new Map(
+        productAccessRows.map((row) => [row.clientId, row]),
+      );
+    }
+
+    const entries: AuthorizedManagedClientEntry[] = [];
+
+    for (const client of clients) {
+      if (!client.managedTenantId) continue;
+
+      const entitlement =
+        entitlementByManagedTenantId.get(client.managedTenantId) ?? null;
+
+      if (!this.isActiveEntitlement(entitlement)) continue;
+
+      if (!isPrivileged) {
+        const access = accessByClientId?.get(client.id);
+        const productAccess = productAccessByClientId?.get(client.id);
+
+        if (!access || access.managedTenantId !== client.managedTenantId) {
+          continue;
+        }
+
+        if (
+          !productAccess ||
+          productAccess.managedTenantId !== client.managedTenantId
+        ) {
+          continue;
+        }
+      }
+
+      entries.push({
+        clientId: client.id,
+        displayName: client.displayName,
+        avatarUrl: this.extractClientAvatarUrl(client),
+        status: client.status,
+        managedTenantId: client.managedTenantId,
+        entitlement: {
+          status: entitlement!.status,
+          planKey: entitlement!.planKey,
+          source: entitlement!.source,
+          startsAt: this.toIsoStringOrNull(entitlement!.startsAt),
+          endsAt: this.toIsoStringOrNull(entitlement!.endsAt),
+          trialEndsAt: this.toIsoStringOrNull(entitlement!.trialEndsAt),
+        },
+      });
+    }
+
+    entries.sort((a, b) => a.displayName.localeCompare(b.displayName));
+
+    return entries;
+  }
+
+  private extractClientAvatarUrl(client: AgencyClient): string | null {
+    const contactAvatarUrl = client.metadata?.contactAvatarUrl;
+
+    return typeof contactAvatarUrl === 'string' && contactAvatarUrl.trim()
+      ? contactAvatarUrl
+      : null;
+  }
+
+  private toIsoStringOrNull(value: Date | null): string | null {
+    return value ? value.toISOString() : null;
   }
 
   private isActiveEntitlement(

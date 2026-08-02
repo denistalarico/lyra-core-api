@@ -20,6 +20,9 @@ import {
 } from '../decorators/permissions.decorators';
 import { PlatformPermissionService } from '../services/platform-permission.service';
 import { PermissionContext } from '../types/permission-context.types';
+import type { ProductKey } from '../../../common/context/request-context.interface';
+
+const CLIENT_PRODUCT_HEADER_KEYS = new Set<ProductKey>(['leadflow', 'social']);
 
 /**
  * Enforces the permission/entitlement/client-access metadata declared via
@@ -107,6 +110,47 @@ export class PermissionsGuard implements CanActivate {
       tenantId: user.tenantId,
       workspaceId: user.workspaceId,
     });
+
+    const managedContext = request.managedContext;
+
+    // The client id/managedTenantId in `managedContext` come straight from a
+    // client-controlled header (x-lyra-client-id / x-client-id). The resolver
+    // only checks that the client belongs to the tenant and is active — it
+    // does not know whether *this user* is allowed into *this* client's
+    // product. Every client-mode LeadFlow/Social request must additionally
+    // pass the same entitlement + explicit access check used by
+    // canAccessClientProduct, or an authenticated agency member could switch
+    // into any client's context via headers alone.
+    if (
+      managedContext &&
+      managedContext.operatingMode === 'client' &&
+      managedContext.clientId &&
+      CLIENT_PRODUCT_HEADER_KEYS.has(managedContext.productKey)
+    ) {
+      const allowedManagedContext =
+        await this.permissionService.canAccessClientProduct({
+          ...context,
+          clientId: managedContext.clientId,
+          productKey: managedContext.productKey,
+        });
+
+      if (!allowedManagedContext) {
+        await this.permissionService.auditPermissionDecision({
+          tenantId: context.tenantId,
+          workspaceId: context.workspaceId ?? null,
+          actorUserId: context.userId,
+          action: 'access_denied',
+          permissionKey: `managed_context:${managedContext.productKey}`,
+          resourceType: 'agency_client',
+          resourceId: managedContext.clientId,
+          riskLevel: 'high',
+        });
+
+        throw new ForbiddenException(
+          `You do not have access to the "${managedContext.productKey}" product for this client.`,
+        );
+      }
+    }
 
     const scopeRequest = {
       method: request.method,
