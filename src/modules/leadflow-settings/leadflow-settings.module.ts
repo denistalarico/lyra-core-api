@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AgencyClient } from '../clients/entities';
 import { PermissionsModule } from '../permissions';
+import { TenantProductEntitlementEntity } from '../platform';
 import {
   LeadFlowBusinessModeTemplateEntity,
   LeadFlowClientSettingsEntity,
@@ -24,6 +25,7 @@ import { InboxDomainOutboxEntity } from '../inbox/entities/inbox-domain-outbox.e
         LeadFlowBusinessModeTemplateEntity,
         LeadFlowClientSettingsEntity,
         InboxDomainOutboxEntity,
+        TenantProductEntitlementEntity,
       ],
       'agency',
     ),

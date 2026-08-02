@@ -1,23 +1,35 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
-import { Brackets, DataSource, In, IsNull, Repository } from 'typeorm';
+import {
+  Brackets,
+  DataSource,
+  EntityManager,
+  In,
+  IsNull,
+  Not,
+  Repository,
+} from 'typeorm';
 import { randomUUID } from 'crypto';
 import type { RequestContext } from '../../../common/context/request-context.interface';
 import { AgencyClient } from '../../clients/entities';
+import { PlatformProductKey, TenantProductEntitlementEntity } from '../../platform';
 import {
   CreateLeadFlowClientSettingsDto,
   LeadFlowClientSettingsResponse,
   LeadFlowClientSummaryListResponse,
+  LeadFlowCompanyCapacityResponse,
   LeadFlowSettingsValidationIssue,
   LeadFlowSettingsValidationResponse,
   ListLeadFlowClientsQueryDto,
   mapLeadFlowClientSettingsResponse,
   mapLeadFlowClientSummaryResponse,
+  mapLeadFlowCompanyCapacityResponse,
   UpdateLeadFlowClientSettingsDto,
   ValidateLeadFlowClientSettingsDto,
 } from '../dto';
@@ -51,6 +63,8 @@ export class LeadFlowClientSettingsService {
     private readonly agencyClientsRepository: Repository<AgencyClient>,
     @InjectRepository(LeadFlowClientSettingsEntity, AGENCY_CONNECTION)
     private readonly settingsRepository: Repository<LeadFlowClientSettingsEntity>,
+    @InjectRepository(TenantProductEntitlementEntity, AGENCY_CONNECTION)
+    private readonly entitlementsRepository: Repository<TenantProductEntitlementEntity>,
     private readonly businessModeTemplateService: LeadFlowBusinessModeTemplateService,
     private readonly companyContextService: CompanyContextService,
   ) {}
@@ -133,6 +147,34 @@ export class LeadFlowClientSettingsService {
     };
   }
 
+  /**
+   * Structured capacity contract for the tenant's LeadFlow entitlement:
+   * active companies, configured limit and remaining slots. This is the
+   * single source of truth consumed both by the API and the UI — the
+   * `plan` free-text field on settings never authorizes or blocks.
+   */
+  async getCapacity(
+    ctx: RequestContext,
+  ): Promise<LeadFlowCompanyCapacityResponse> {
+    const workspaceId = this.requireWorkspaceId(ctx);
+    const entitlement = await this.findLeadFlowEntitlement(
+      this.entitlementsRepository,
+      ctx.tenantId,
+    );
+    const limit = this.resolveCompanyLimit(entitlement);
+    const activeCompanies = await this.countActiveCompanies(
+      this.settingsRepository,
+      ctx.tenantId,
+      workspaceId,
+    );
+
+    return mapLeadFlowCompanyCapacityResponse(
+      activeCompanies,
+      limit,
+      entitlement,
+    );
+  }
+
   async getSettings(
     ctx: RequestContext,
     agencyClientId: string,
@@ -170,49 +212,59 @@ export class LeadFlowClientSettingsService {
     this.assertValidSettingsPayload(dto, template);
 
     const workspaceId = this.requireWorkspaceId(ctx);
-    const settings = this.settingsRepository.create({
-      tenantId: ctx.tenantId,
-      workspaceId,
-      contextType: LeadFlowSettingsContextType.Client,
-      agencyClientId,
-      managedTenantId: agencyClient.managedTenantId,
-      businessModeKey: template.key,
-      businessModeTemplateId: template.id,
-      planKey: dto.planKey ?? null,
-      status: dto.status ?? LeadFlowSettingsStatus.Draft,
-      developerModeEnabled: false,
-      enabledApps: dto.enabledApps ?? this.buildDefaultEnabledApps(template),
-      enabledIntegrations:
-        dto.enabledIntegrations ??
-        this.buildDefaultEnabledIntegrations(template),
-      permissionsConfig: dto.permissionsConfig ?? {},
-      brandingConfig: dto.brandingConfig ?? {},
-      agentConfig: dto.agentConfig ?? {},
-      clientPromptConfig: dto.clientPromptConfig ?? {},
-      companyContextSchemaVersion: 1,
-      companyContextDraft: dto.companyContextDraft
-        ? this.companyContextService.normalize(dto.companyContextDraft)
-        : this.companyContextService.fromLegacy(dto.clientPromptConfig ?? {}),
-      companyContextPublished: {},
-      companyContextPublishedVersion: 0,
-      companyContextPublishedHash: null,
-      companyContextPublishedAt: null,
-      companyContextPublishedBy: null,
-      inboxConfig: dto.inboxConfig ?? {},
-      inboxOverrides: dto.inboxOverrides ?? {},
-      handoffOverrides: dto.handoffOverrides ?? {},
-      leadsConfig: dto.leadsConfig ?? {},
-      pipelineRef: dto.pipelineRef ?? {},
-      businessModeOverrides: dto.businessModeOverrides ?? {},
-      developerOverrides: {},
-      metadata: dto.metadata ?? {},
-      createdById: ctx.userId ?? null,
-      updatedById: ctx.userId ?? null,
-    });
 
-    return mapLeadFlowClientSettingsResponse(
-      await this.settingsRepository.save(settings),
-    );
+    return this.dataSource.transaction(async (manager) => {
+      await this.assertCapacityAvailable(manager, ctx.tenantId, workspaceId);
+
+      const settingsRepository = manager.getRepository(
+        LeadFlowClientSettingsEntity,
+      );
+      const settings = settingsRepository.create({
+        tenantId: ctx.tenantId,
+        workspaceId,
+        contextType: LeadFlowSettingsContextType.Client,
+        agencyClientId,
+        managedTenantId: agencyClient.managedTenantId,
+        businessModeKey: template.key,
+        businessModeTemplateId: template.id,
+        planKey: dto.planKey ?? null,
+        status: dto.status ?? LeadFlowSettingsStatus.Draft,
+        developerModeEnabled: false,
+        enabledApps: dto.enabledApps ?? this.buildDefaultEnabledApps(template),
+        enabledIntegrations:
+          dto.enabledIntegrations ??
+          this.buildDefaultEnabledIntegrations(template),
+        permissionsConfig: dto.permissionsConfig ?? {},
+        brandingConfig: dto.brandingConfig ?? {},
+        agentConfig: dto.agentConfig ?? {},
+        clientPromptConfig: dto.clientPromptConfig ?? {},
+        companyContextSchemaVersion: 1,
+        companyContextDraft: dto.companyContextDraft
+          ? this.companyContextService.normalize(dto.companyContextDraft)
+          : this.companyContextService.fromLegacy(
+              dto.clientPromptConfig ?? {},
+            ),
+        companyContextPublished: {},
+        companyContextPublishedVersion: 0,
+        companyContextPublishedHash: null,
+        companyContextPublishedAt: null,
+        companyContextPublishedBy: null,
+        inboxConfig: dto.inboxConfig ?? {},
+        inboxOverrides: dto.inboxOverrides ?? {},
+        handoffOverrides: dto.handoffOverrides ?? {},
+        leadsConfig: dto.leadsConfig ?? {},
+        pipelineRef: dto.pipelineRef ?? {},
+        businessModeOverrides: dto.businessModeOverrides ?? {},
+        developerOverrides: {},
+        metadata: dto.metadata ?? {},
+        createdById: ctx.userId ?? null,
+        updatedById: ctx.userId ?? null,
+      });
+
+      return mapLeadFlowClientSettingsResponse(
+        await settingsRepository.save(settings),
+      );
+    });
   }
 
   async updateSettings(
@@ -608,6 +660,82 @@ export class LeadFlowClientSettingsService {
     });
   }
 
+  private findLeadFlowEntitlement(
+    entitlementsRepository: Repository<TenantProductEntitlementEntity>,
+    tenantId: string,
+  ): Promise<TenantProductEntitlementEntity | null> {
+    return entitlementsRepository.findOne({
+      where: { tenantId, productKey: PlatformProductKey.LeadFlow },
+    });
+  }
+
+  private resolveCompanyLimit(
+    entitlement: TenantProductEntitlementEntity | null,
+  ): number | null {
+    const raw = entitlement?.settings?.maxManagedClients;
+
+    return typeof raw === 'number' && Number.isFinite(raw) && raw >= 0
+      ? raw
+      : null;
+  }
+
+  private countActiveCompanies(
+    settingsRepository: Repository<LeadFlowClientSettingsEntity>,
+    tenantId: string,
+    workspaceId: string,
+  ): Promise<number> {
+    return settingsRepository.count({
+      where: {
+        tenantId,
+        workspaceId,
+        contextType: LeadFlowSettingsContextType.Client,
+        status: Not(LeadFlowSettingsStatus.Archived),
+      },
+    });
+  }
+
+  /**
+   * Blocks creating or reactivating a company once the tenant's LeadFlow
+   * entitlement limit is reached. Locks the entitlement row for the
+   * duration of the transaction so two concurrent creations cannot both
+   * observe a free slot and both succeed (Fase 2 risk: "corrida de duas
+   * criações").
+   */
+  private async assertCapacityAvailable(
+    manager: EntityManager,
+    tenantId: string,
+    workspaceId: string,
+  ): Promise<void> {
+    const entitlement = await manager
+      .getRepository(TenantProductEntitlementEntity)
+      .findOne({
+        where: { tenantId, productKey: PlatformProductKey.LeadFlow },
+        lock: { mode: 'pessimistic_write' },
+      });
+
+    const limit = this.resolveCompanyLimit(entitlement);
+
+    if (limit === null) {
+      return;
+    }
+
+    const activeCompanies = await this.countActiveCompanies(
+      manager.getRepository(LeadFlowClientSettingsEntity),
+      tenantId,
+      workspaceId,
+    );
+
+    if (activeCompanies >= limit) {
+      throw new ForbiddenException({
+        message: 'LeadFlow company capacity limit reached for this tenant.',
+        code: 'leadflow_company_capacity_exceeded',
+        activeCompanies,
+        limit,
+        availableSlots: 0,
+      });
+    }
+  }
+
   private async loadSettingsByClientId(
     tenantId: string,
     workspaceId: string,
@@ -641,6 +769,11 @@ export class LeadFlowClientSettingsService {
     const contextDraftChanged =
       dto.clientPromptConfig !== undefined ||
       dto.companyContextDraft !== undefined;
+    const isReactivatingCompany =
+      settings.contextType === LeadFlowSettingsContextType.Client &&
+      settings.status === LeadFlowSettingsStatus.Archived &&
+      dto.status !== undefined &&
+      dto.status !== LeadFlowSettingsStatus.Archived;
     let template: LeadFlowBusinessModeTemplateEntity | null = null;
     if (dto.businessModeKey !== undefined) {
       template = await this.resolveBusinessModeTemplate(
@@ -705,32 +838,46 @@ export class LeadFlowClientSettingsService {
 
     settings.updatedById = ctx.userId ?? null;
 
-    if (contextDraftChanged) {
+    if (contextDraftChanged || isReactivatingCompany) {
       return this.dataSource.transaction(async (manager) => {
+        if (isReactivatingCompany) {
+          await this.assertCapacityAvailable(
+            manager,
+            settings.tenantId,
+            settings.workspaceId,
+          );
+        }
+
         const saved = await manager
           .getRepository(LeadFlowClientSettingsEntity)
           .save(settings);
-        const hash = this.companyContextService.hash(saved.companyContextDraft);
-        const outbox = manager.getRepository(InboxDomainOutboxEntity);
-        await outbox.save(
-          outbox.create({
-            tenantId: saved.tenantId,
-            workspaceId: saved.workspaceId,
-            aggregateType: 'leadflow_company_context',
-            aggregateId: saved.id,
-            eventName: 'leadflow.context.draft_updated',
-            eventVersion: 1,
-            idempotencyKey: `company-context-draft:${saved.id}:${randomUUID()}`,
-            payload: {
-              settingsId: saved.id,
-              schemaVersion: saved.companyContextSchemaVersion,
-              draftHash: hash,
-            },
-            status: 'pending',
-            attempts: 0,
-            availableAt: new Date(),
-          }),
-        );
+
+        if (contextDraftChanged) {
+          const hash = this.companyContextService.hash(
+            saved.companyContextDraft,
+          );
+          const outbox = manager.getRepository(InboxDomainOutboxEntity);
+          await outbox.save(
+            outbox.create({
+              tenantId: saved.tenantId,
+              workspaceId: saved.workspaceId,
+              aggregateType: 'leadflow_company_context',
+              aggregateId: saved.id,
+              eventName: 'leadflow.context.draft_updated',
+              eventVersion: 1,
+              idempotencyKey: `company-context-draft:${saved.id}:${randomUUID()}`,
+              payload: {
+                settingsId: saved.id,
+                schemaVersion: saved.companyContextSchemaVersion,
+                draftHash: hash,
+              },
+              status: 'pending',
+              attempts: 0,
+              availableAt: new Date(),
+            }),
+          );
+        }
+
         return mapLeadFlowClientSettingsResponse(saved);
       });
     }

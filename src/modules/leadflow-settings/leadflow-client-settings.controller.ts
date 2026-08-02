@@ -20,6 +20,7 @@ import {
   CreateLeadFlowClientSettingsDto,
   LeadFlowClientSettingsResponse,
   LeadFlowClientSummaryListResponse,
+  LeadFlowCompanyCapacityResponse,
   LeadFlowSettingsValidationResponse,
   ListLeadFlowClientsQueryDto,
   UpdateLeadFlowClientSettingsDto,
@@ -42,6 +43,14 @@ export class LeadFlowClientSettingsController {
     @Query() query: ListLeadFlowClientsQueryDto,
   ): Promise<LeadFlowClientSummaryListResponse> {
     return this.leadFlowClientSettingsService.listClients(ctx, query);
+  }
+
+  @Get('capacity')
+  @RequirePermission('leadflow.settings.general.view.admin')
+  getCapacity(
+    @RequestContextData() ctx: RequestContext,
+  ): Promise<LeadFlowCompanyCapacityResponse> {
+    return this.leadFlowClientSettingsService.getCapacity(ctx);
   }
 
   @Get(':agencyClientId/settings')

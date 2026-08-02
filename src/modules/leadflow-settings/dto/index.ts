@@ -1,5 +1,6 @@
 export * from './create-leadflow-client-settings.dto';
 export * from './leadflow-business-mode-template-response.dto';
+export * from './leadflow-company-capacity-response.dto';
 export * from './leadflow-client-settings-response.dto';
 export * from './leadflow-client-summary-response.dto';
 export * from './leadflow-settings-validation-response.dto';
