@@ -114,26 +114,33 @@ describe('AppointmentsService', () => {
   });
 
   it('creates a pending native-video appointment and leaves its future confirmation window to the scheduler', async () => {
-    const result = await service.createScheduledItem(ctx, {
-      type: 'meeting',
-      title: 'Diagnóstico',
-      startAt: '2026-08-01T13:00:00.000Z',
-      endAt: '2026-08-01T14:00:00.000Z',
-      locationType: 'video',
-      videoMode: 'native',
-      metadata: { appointmentStatus: 'pending' },
-    });
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-07-31T12:00:00.000Z'));
 
-    expect(result.videoUrl).toBe('/meet/leadflow-room');
-    expect(result.metadata).toMatchObject({
-      appointmentStatus: 'pending',
-      meetingRoomId: '40000000-0000-4000-8000-000000000004',
-      meetingProvider: 'livekit',
-    });
-    expect(meetings.createForAppointment).toHaveBeenCalledTimes(1);
-    expect(outbox.map((event) => event.eventName)).toEqual([
-      'leadflow.calendar.appointment.created',
-    ]);
+    try {
+      const result = await service.createScheduledItem(ctx, {
+        type: 'meeting',
+        title: 'Diagnóstico',
+        startAt: '2026-08-01T13:00:00.000Z',
+        endAt: '2026-08-01T14:00:00.000Z',
+        locationType: 'video',
+        videoMode: 'native',
+        metadata: { appointmentStatus: 'pending' },
+      });
+
+      expect(result.videoUrl).toBe('/meet/leadflow-room');
+      expect(result.metadata).toMatchObject({
+        appointmentStatus: 'pending',
+        meetingRoomId: '40000000-0000-4000-8000-000000000004',
+        meetingProvider: 'livekit',
+      });
+      expect(meetings.createForAppointment).toHaveBeenCalledTimes(1);
+      expect(outbox.map((event) => event.eventName)).toEqual([
+        'leadflow.calendar.appointment.created',
+      ]);
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it('publishes confirmation_pending immediately when the declared window is already due', async () => {
