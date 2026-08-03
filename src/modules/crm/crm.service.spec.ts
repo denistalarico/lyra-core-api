@@ -152,6 +152,49 @@ function mockOpportunity(overrides: Record<string, unknown> = {}) {
 }
 
 describe('CrmService agency validation', () => {
+  it('keeps a stage that is still used by an opportunity', async () => {
+    const { service, stagesRepository, opportunitiesRepository } =
+      createService();
+    stagesRepository.findOne.mockResolvedValue(mockStage('stage-a'));
+    opportunitiesRepository.count.mockResolvedValue(1);
+
+    await expect(service.deleteStage(ctx, 'stage-a')).rejects.toMatchObject({
+      response: { code: 'CRM_STAGE_IN_USE' },
+    });
+  });
+
+  it('normalizes tag names and refuses case or accent duplicates', async () => {
+    const { service, tagsRepository } = createService();
+    tagsRepository.findOne.mockResolvedValue({ id: 'existing-tag' });
+
+    await expect(
+      service.createTag(ctx, {
+        name: 'Prioridade',
+        slug: 'prioridade',
+      }),
+    ).rejects.toMatchObject({
+      response: { code: 'CRM_TAG_NAME_CONFLICT' },
+    });
+  });
+
+  it('keeps a tag that is still applied to an opportunity', async () => {
+    const { service, tagsRepository, opportunityTagsRepository } =
+      createService();
+    tagsRepository.findOne.mockResolvedValue({
+      id: 'tag-a',
+      tenantId: ctx.tenantId,
+      workspaceId: ctx.workspaceId,
+      kind: 'user',
+      isEditable: true,
+      deletedAt: null,
+    });
+    opportunityTagsRepository.count.mockResolvedValue(1);
+
+    await expect(service.deleteTag(ctx, 'tag-a')).rejects.toMatchObject({
+      response: { code: 'CRM_TAG_IN_USE' },
+    });
+  });
+
   it('makes the first eligible stage explicitly initial', async () => {
     const { service, pipelinesRepository, stagesRepository } = createService();
     pipelinesRepository.findOne.mockResolvedValue(mockPipeline());

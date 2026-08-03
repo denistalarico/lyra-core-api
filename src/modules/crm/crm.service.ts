@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -350,10 +351,26 @@ export class CrmService {
     id: string,
   ): Promise<{ deleted: true }> {
     const stage = await this.getStage(ctx, id);
-    if (stage.isInitialStage) {
+    if (this.isProtectedStage(stage)) {
       throw new BadRequestException(
-        'Select another initial stage before deleting the current one.',
+        'Entry and terminal CRM stages cannot be deleted.',
       );
+    }
+    const references = await this.opportunitiesRepository.count({
+      where: {
+        tenantId: stage.tenantId,
+        workspaceId: stage.workspaceId,
+        stageId: stage.id,
+        deletedAt: IsNull(),
+      },
+    });
+    if (references > 0) {
+      throw new ConflictException({
+        code: 'CRM_STAGE_IN_USE',
+        message:
+          'This stage is still used by opportunities and cannot be deleted.',
+        references,
+      });
     }
     stage.deletedAt = new Date();
     await this.stagesRepository.save(stage);
@@ -802,11 +819,14 @@ export class CrmService {
     const workspaceId = this.requireWorkspaceId(ctx);
 
     const kind = dto.kind ?? 'user';
+    const name = dto.name.trim();
+    const slug = this.slugify(dto.slug ?? name);
+    await this.assertAvailableTagSlug(ctx, slug);
     const tag = this.tagsRepository.create({
       tenantId,
       workspaceId,
-      name: dto.name,
-      slug: dto.slug ?? this.slugify(dto.name),
+      name,
+      slug,
       color: dto.color ?? null,
       icon: dto.icon ?? null,
       kind,
@@ -818,7 +838,7 @@ export class CrmService {
       metadata: this.stampContext(ctx, dto.metadata ?? {}),
     });
 
-    return this.tagsRepository.save(tag);
+    return this.saveTagWithConflict(tag);
   }
 
   async getTag(ctx: RequestContext, id: string): Promise<CrmTagEntity> {
@@ -850,8 +870,13 @@ export class CrmService {
       throw new BadRequestException('System tags cannot be edited.');
     }
 
-    if (dto.name !== undefined) tag.name = dto.name;
-    if (dto.slug !== undefined) tag.slug = dto.slug;
+    const nextName = dto.name?.trim() ?? tag.name;
+    const nextSlug = this.slugify(dto.slug ?? nextName);
+    if (dto.name !== undefined || dto.slug !== undefined) {
+      await this.assertAvailableTagSlug(ctx, nextSlug, tag.id);
+      tag.name = nextName;
+      tag.slug = nextSlug;
+    }
     if (dto.color !== undefined) tag.color = dto.color;
     if (dto.icon !== undefined) tag.icon = dto.icon;
     if (dto.kind !== undefined) tag.kind = dto.kind;
@@ -862,7 +887,7 @@ export class CrmService {
     if (dto.metadata !== undefined)
       tag.metadata = this.stampContext(ctx, dto.metadata);
 
-    return this.tagsRepository.save(tag);
+    return this.saveTagWithConflict(tag);
   }
 
   async deleteTag(ctx: RequestContext, id: string): Promise<{ deleted: true }> {
@@ -870,6 +895,22 @@ export class CrmService {
 
     if (!tag.isEditable || tag.kind === 'system') {
       throw new BadRequestException('System tags cannot be deleted.');
+    }
+
+    const references = await this.opportunityTagsRepository.count({
+      where: {
+        tenantId: tag.tenantId,
+        workspaceId: tag.workspaceId,
+        tagId: tag.id,
+      },
+    });
+    if (references > 0) {
+      throw new ConflictException({
+        code: 'CRM_TAG_IN_USE',
+        message:
+          'This tag is still applied to opportunities and cannot be deleted.',
+        references,
+      });
     }
 
     tag.deletedAt = new Date();
@@ -1094,6 +1135,59 @@ export class CrmService {
       .trim()
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/^-+|-+$/g, '');
+  }
+
+  private async assertAvailableTagSlug(
+    ctx: RequestContext,
+    slug: string,
+    excludingId?: string,
+  ): Promise<void> {
+    if (!slug) {
+      throw new BadRequestException('CRM tag name must contain letters or numbers.');
+    }
+    const existing = await this.tagsRepository.findOne({
+      where: this.withClientScope(ctx, {
+        tenantId: this.requireTenantId(ctx),
+        workspaceId: this.requireWorkspaceId(ctx),
+        slug,
+        deletedAt: IsNull(),
+      }),
+    });
+    if (existing && existing.id !== excludingId) {
+      throw new ConflictException({
+        code: 'CRM_TAG_NAME_CONFLICT',
+        message:
+          'A tag with the same name already exists in this workspace (case and accents are ignored).',
+      });
+    }
+  }
+
+  private async saveTagWithConflict(tag: CrmTagEntity): Promise<CrmTagEntity> {
+    try {
+      return await this.tagsRepository.save(tag);
+    } catch (error) {
+      if ((error as { code?: string }).code === '23505') {
+        throw new ConflictException({
+          code: 'CRM_TAG_NAME_CONFLICT',
+          message:
+            'A tag with the same name already exists in this workspace (case and accents are ignored).',
+        });
+      }
+      throw error;
+    }
+  }
+
+  private isProtectedStage(stage: CrmStageEntity): boolean {
+    return (
+      stage.isInitialStage ||
+      stage.isWonStage ||
+      stage.isLostStage ||
+      stage.type === 'won' ||
+      stage.type === 'lost' ||
+      stage.role === 'entry' ||
+      stage.role === 'won' ||
+      stage.role === 'lost'
+    );
   }
 
   private async getNextOpportunitySortOrder(

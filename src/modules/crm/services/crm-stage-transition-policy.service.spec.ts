@@ -92,6 +92,48 @@ function harness(
 }
 
 describe('CrmStageTransitionPolicyService', () => {
+  it('rejects terminal sources and entry destinations while defining a policy', () => {
+    const service = new CrmStageTransitionPolicyService({} as never);
+    const assertEdge = (
+      service as unknown as {
+        assertConfigurableEdge(
+          fromStage: CrmStageEntity,
+          toStage: CrmStageEntity,
+        ): void;
+      }
+    ).assertConfigurableEdge.bind(service);
+
+    expect(() =>
+      assertEdge(
+        stage({ isWonStage: true, type: 'won' }),
+        stage({ id: '00000000-0000-4000-8000-000000000032' }),
+      ),
+    ).toThrow(
+      expect.objectContaining({
+        response: expect.objectContaining({
+          code: 'CRM_STAGE_TRANSITION_TERMINAL_SOURCE',
+        }),
+      }),
+    );
+
+    expect(() =>
+      assertEdge(
+        stage(),
+        stage({
+          id: '00000000-0000-4000-8000-000000000032',
+          isInitialStage: true,
+          role: 'entry',
+        }),
+      ),
+    ).toThrow(
+      expect.objectContaining({
+        response: expect.objectContaining({
+          code: 'CRM_STAGE_TRANSITION_INITIAL_DESTINATION',
+        }),
+      }),
+    );
+  });
+
   it('catalogues only published, non-terminal AI destinations in the current scope', async () => {
     const current = stage({
       id: '00000000-0000-4000-8000-000000000030',

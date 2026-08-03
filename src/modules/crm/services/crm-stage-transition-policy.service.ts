@@ -392,6 +392,7 @@ export class CrmStageTransitionPolicyService {
           'Transition source and destination must differ.',
         );
       }
+      this.assertConfigurableEdge(fromStage, toStage);
       this.validateContract(
         dto.requiredFields ?? [],
         dto.conditionContract ?? {},
@@ -492,12 +493,11 @@ export class CrmStageTransitionPolicyService {
         policy.fromStageId,
         policy.toStageId,
       );
-      const toStage = await this.stage(
-        manager,
-        ctx,
-        policy.pipelineId,
-        policy.toStageId,
-      );
+      const [fromStage, toStage] = await Promise.all([
+        this.stage(manager, ctx, policy.pipelineId, policy.fromStageId),
+        this.stage(manager, ctx, policy.pipelineId, policy.toStageId),
+      ]);
+      this.assertConfigurableEdge(fromStage, toStage);
       this.validateContract(policy.requiredFields, policy.conditionContract);
       if (
         policy.allowedActors.length === 0 ||
@@ -896,6 +896,30 @@ export class CrmStageTransitionPolicyService {
       stage.isWonStage ||
       stage.isLostStage
     );
+  }
+
+  /**
+   * The UI can guide an operator, but this is the authority that prevents a
+   * direct API caller from defining an impossible lifecycle edge. Entry stages
+   * are chosen when an opportunity is created; terminal stages end its path.
+   */
+  private assertConfigurableEdge(
+    fromStage: CrmStageEntity,
+    toStage: CrmStageEntity,
+  ): void {
+    if (this.isTerminal(fromStage)) {
+      throw new BadRequestException({
+        code: 'CRM_STAGE_TRANSITION_TERMINAL_SOURCE',
+        message: 'Won and lost stages cannot have outgoing transitions.',
+      });
+    }
+    if (toStage.isInitialStage || toStage.role === 'entry') {
+      throw new BadRequestException({
+        code: 'CRM_STAGE_TRANSITION_INITIAL_DESTINATION',
+        message:
+          'The entry stage is selected when creating an opportunity and cannot be a transition destination.',
+      });
+    }
   }
 
   private assertDraft(policy: CrmStageTransitionPolicyEntity): void {
