@@ -54,7 +54,10 @@ import type {
   LeadFlowAutomationsRuntimeConfigResponse,
 } from '../dto/leadflow-automation-runtime-config-response.dto';
 import type { LeadFlowNotificationChannelCapabilities } from '../dto/leadflow-automation-response.dto';
-import { type LeadFlowAutomationConfigSection } from '../catalog/automation-config-schemas.catalog';
+import {
+  isInheritableConfigField,
+  type LeadFlowAutomationConfigSection,
+} from '../catalog/automation-config-schemas.catalog';
 import { isRuntimeAvailable } from '../catalog/automation-dependencies.registry';
 import {
   LeadFlowAutomationEntity,
@@ -284,7 +287,11 @@ export class LeadFlowAutomationService {
     });
 
     this.applyRecipe(automation, recipe, dto);
-    automation.readiness = this.computeReadiness(automation, active, recipe);
+    automation.readiness = await this.computeReadiness(
+      automation,
+      active,
+      recipe,
+    );
 
     const saved = await this.automationsRepository.save(automation);
 
@@ -366,7 +373,11 @@ export class LeadFlowAutomationService {
 
     automation.updatedById = ctx.userId ?? null;
     const recipe = this.recipeService.getRecipe(automation.recipeKey);
-    automation.readiness = this.computeReadiness(automation, active, recipe);
+    automation.readiness = await this.computeReadiness(
+      automation,
+      active,
+      recipe,
+    );
 
     await this.automationsRepository.save(automation);
     return this.detail(ctx, automation.id);
@@ -652,12 +663,27 @@ export class LeadFlowAutomationService {
     automation.name = dto.name ?? recipe.name;
     automation.description = dto.description ?? recipe.description;
     automation.category = recipe.category;
-    automation.triggerConfig = { ...recipe.defaultTriggerConfig };
-    automation.conditionConfig = { ...recipe.defaultConditionConfig };
-    automation.actionConfig = { ...recipe.defaultActionConfig };
-    automation.messageConfig = { ...recipe.defaultMessageConfig };
+    automation.triggerConfig = clearInheritedConfigFields(
+      'trigger',
+      recipe.defaultTriggerConfig,
+    );
+    automation.conditionConfig = clearInheritedConfigFields(
+      'conditions',
+      recipe.defaultConditionConfig,
+    );
+    automation.actionConfig = clearInheritedConfigFields(
+      'actions',
+      recipe.defaultActionConfig,
+    );
+    automation.messageConfig = clearInheritedConfigFields(
+      'message',
+      recipe.defaultMessageConfig,
+    );
     automation.crmPolicy = { ...recipe.defaultCrmPolicy };
-    automation.schedulePolicy = { ...recipe.defaultSchedulePolicy };
+    automation.schedulePolicy = clearInheritedConfigFields(
+      'schedulePolicy',
+      recipe.defaultSchedulePolicy,
+    );
     automation.developerConfig = { enabled: false, dryRunEnabled: false };
     automation.webhookConfig = recipe.isDeveloperOnly
       ? { enabled: false, direction: 'outgoing', method: 'POST' }
@@ -1165,11 +1191,11 @@ export class LeadFlowAutomationService {
     };
   }
 
-  private computeReadiness(
+  private async computeReadiness(
     automation: LeadFlowAutomationEntity,
     active: ActiveContext,
     recipe: LeadFlowAutomationRecipeCatalogItem | undefined,
-  ): LeadFlowAutomationReadiness {
+  ): Promise<LeadFlowAutomationReadiness> {
     const checkedAt = new Date().toISOString();
 
     if (!recipe) {
@@ -1221,15 +1247,34 @@ export class LeadFlowAutomationService {
     // Readiness used to check only channel/webhook, so an automation with empty
     // required fields still reported "ready". Required fields now come from the
     // recipe schema, which is the same source the validator enforces.
-    const missingFields = this.configSchemaService.findMissingRequiredFields(
-      recipe,
-      {
+    const globalDefaults = await this.globalConfigService.getCurrent(
+      active.settings,
+    );
+    const effective = this.globalConfigService.resolve(globalDefaults, {
+      template: {
+        trigger: recipe.defaultTriggerConfig,
+        conditions: recipe.defaultConditionConfig,
+        actions: recipe.defaultActionConfig,
+        message: recipe.defaultMessageConfig,
+        schedulePolicy: recipe.defaultSchedulePolicy,
+      },
+      override: {
         trigger: automation.triggerConfig ?? {},
         conditions: automation.conditionConfig ?? {},
         actions: automation.actionConfig ?? {},
         message: automation.messageConfig ?? {},
-        crmPolicy: automation.crmPolicy ?? {},
         schedulePolicy: automation.schedulePolicy ?? {},
+      },
+    });
+    const missingFields = this.configSchemaService.findMissingRequiredFields(
+      recipe,
+      {
+        trigger: effective.trigger,
+        conditions: effective.conditions,
+        actions: effective.actions,
+        message: effective.message,
+        crmPolicy: automation.crmPolicy ?? {},
+        schedulePolicy: effective.schedulePolicy,
       },
     );
     if (missingFields.length > 0) {
@@ -1304,6 +1349,23 @@ export class LeadFlowAutomationService {
   private isRecord(value: unknown): value is LeadFlowJsonObject {
     return typeof value === 'object' && value !== null && !Array.isArray(value);
   }
+}
+
+/**
+ * New instances store `null` only for fields that the matrix marks as
+ * inheritable. Legacy instances are never rewritten, so their published and
+ * current behavior remains reproducible until an operator chooses a reset.
+ */
+export function clearInheritedConfigFields<T extends Record<string, unknown>>(
+  section: LeadFlowAutomationConfigSection,
+  values: T,
+): T {
+  return Object.fromEntries(
+    Object.entries(values).map(([key, value]) => [
+      key,
+      isInheritableConfigField(section, key) ? null : value,
+    ]),
+  ) as T;
 }
 
 function followupChannelMatchesInboxType(

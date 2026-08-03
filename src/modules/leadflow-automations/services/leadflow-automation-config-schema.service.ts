@@ -194,6 +194,10 @@ export class LeadFlowAutomationConfigSchemaService {
   ): LeadFlowAutomationConfigError[] {
     const path = `${section}.${spec.key}`;
 
+    if (raw === null && spec.inheritable) {
+      return [];
+    }
+
     if (raw === null || raw === undefined) {
       if (spec.nullable || raw === undefined) {
         return [];

@@ -65,7 +65,7 @@ export type LeadFlowAutomationAction =
 export interface LeadFlowAutomationTriggerConfig {
   type?: LeadFlowAutomationTrigger;
   /** Idle delay before firing (e.g. follow-up de lead sem resposta). */
-  delayHours?: number;
+  delayHours?: number | null;
   /** Time an opportunity has been sitting on a stage. */
   idleHoursInStage?: number;
   pipelineRef?: string | null;
@@ -74,9 +74,9 @@ export interface LeadFlowAutomationTriggerConfig {
 }
 
 export interface LeadFlowAutomationConditionConfig {
-  businessHoursOnly?: boolean;
+  businessHoursOnly?: boolean | null;
   /** Never relaxes a global consent requirement during resolution. */
-  requireExplicitConsent?: boolean;
+  requireExplicitConsent?: boolean | null;
   stopIfReplied?: boolean;
   stopIfHandoff?: boolean;
   minScore?: number;
@@ -92,7 +92,7 @@ export interface LeadFlowAutomationConditionConfig {
 
 export interface LeadFlowAutomationActionConfig {
   primaryAction?: LeadFlowAutomationAction;
-  maxAttempts?: number;
+  maxAttempts?: number | null;
   moveToStageRef?: string | null;
   targetUserRef?: string | null;
   notifyOpportunityOwner?: boolean;
@@ -253,7 +253,7 @@ export interface LeadFlowAutomationScheduleOffset {
 }
 
 export interface LeadFlowAutomationSchedulePolicy {
-  respectBusinessHours?: boolean;
+  respectBusinessHours?: boolean | null;
   timezone?: string | null;
   /** Local wall-clock time (HH:mm) used by recurring daily automations. */
   dailyTime?: string;

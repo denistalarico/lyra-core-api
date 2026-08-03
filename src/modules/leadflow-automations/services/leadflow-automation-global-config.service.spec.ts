@@ -77,6 +77,8 @@ describe('LeadFlowAutomationGlobalConfigService', () => {
         'conditions.requireExplicitConsent',
       ]),
     );
+    expect(effective.inheritedFields).not.toContain('trigger.pipelineRef');
+    expect(effective.inheritedFields).not.toContain('actions.maxAttempts');
   });
 
   it('rejects an open or malformed defaults schema', () => {

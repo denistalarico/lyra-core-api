@@ -160,12 +160,23 @@ describe('LeadFlowAutomationConfigSchemaService', () => {
       expect(result.errors[0].code).toBe('too_many_items');
     });
 
-    it('rejects a null value on a field that is not nullable', () => {
+    it('accepts null as a reset for an inheritable field', () => {
       const result = service.validateSection(
         idleLead,
         'trigger',
         { delayHours: null },
         idleLead.defaultTriggerConfig,
+      );
+
+      expect(result.valid).toBe(true);
+    });
+
+    it('rejects null on an exclusive field that is not nullable', () => {
+      const result = service.validateSection(
+        idleLead,
+        'conditions',
+        { stopIfReplied: null },
+        idleLead.defaultConditionConfig,
       );
 
       expect(result.errors[0].code).toBe('not_nullable');

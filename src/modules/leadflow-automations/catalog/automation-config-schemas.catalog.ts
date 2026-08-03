@@ -46,6 +46,8 @@ export interface LeadFlowAutomationFieldSpec {
   nullable?: boolean;
   /** Structural field defined by the recipe; may not be changed by the operator. */
   readOnly?: boolean;
+  /** A `null` instance value deliberately inherits the resolved default. */
+  inheritable?: boolean;
   min?: number;
   max?: number;
   maxLength?: number;
@@ -100,6 +102,7 @@ const FIELD_SPECS: Record<string, LeadFlowAutomationFieldSpec> = {
     required: true,
     min: 1,
     max: HOURS_IN_A_YEAR,
+    inheritable: true,
   },
   'trigger.confirmationHoursBefore': {
     key: 'confirmationHoursBefore',
@@ -135,6 +138,7 @@ const FIELD_SPECS: Record<string, LeadFlowAutomationFieldSpec> = {
     surface: 'advanced',
     nullable: true,
     maxLength: 64,
+    inheritable: true,
   },
   'trigger.stageRef': {
     key: 'stageRef',
@@ -143,6 +147,7 @@ const FIELD_SPECS: Record<string, LeadFlowAutomationFieldSpec> = {
     surface: 'advanced',
     nullable: true,
     maxLength: 64,
+    inheritable: true,
   },
 
   // ------------------------------------------------------------- conditions
@@ -151,6 +156,14 @@ const FIELD_SPECS: Record<string, LeadFlowAutomationFieldSpec> = {
     type: 'boolean',
     label: 'Agir somente em horário comercial',
     surface: 'advanced',
+    inheritable: true,
+  },
+  'conditions.requireExplicitConsent': {
+    key: 'requireExplicitConsent',
+    type: 'boolean',
+    label: 'Exigir consentimento explícito',
+    surface: 'advanced',
+    inheritable: true,
   },
   'conditions.stopIfReplied': {
     key: 'stopIfReplied',
@@ -240,6 +253,7 @@ const FIELD_SPECS: Record<string, LeadFlowAutomationFieldSpec> = {
     required: true,
     min: 1,
     max: 10,
+    inheritable: true,
   },
   'actions.moveToStageRef': {
     key: 'moveToStageRef',
@@ -326,6 +340,7 @@ const FIELD_SPECS: Record<string, LeadFlowAutomationFieldSpec> = {
     surface: 'essential',
     nullable: true,
     maxLength: 64,
+    inheritable: true,
   },
   'message.templateRef': {
     key: 'templateRef',
@@ -459,6 +474,7 @@ const FIELD_SPECS: Record<string, LeadFlowAutomationFieldSpec> = {
     type: 'boolean',
     label: 'Respeitar horário comercial',
     surface: 'advanced',
+    inheritable: true,
   },
   'schedulePolicy.timezone': {
     key: 'timezone',
@@ -467,6 +483,7 @@ const FIELD_SPECS: Record<string, LeadFlowAutomationFieldSpec> = {
     surface: 'essential',
     nullable: true,
     maxLength: 64,
+    inheritable: true,
   },
   'schedulePolicy.dailyTime': {
     key: 'dailyTime',
@@ -508,6 +525,14 @@ export function getFieldSpec(
   key: string,
 ): LeadFlowAutomationFieldSpec | undefined {
   return FIELD_SPECS[`${section}.${key}`];
+}
+
+/** The field matrix shared by provisioning, validation, and the editor. */
+export function isInheritableConfigField(
+  section: LeadFlowAutomationConfigSection,
+  key: string,
+): boolean {
+  return getFieldSpec(section, key)?.inheritable === true;
 }
 
 const SECTION_DEFAULTS: Record<

@@ -193,6 +193,9 @@ function buildRecipe(seed: RecipeSeed): LeadFlowAutomationRecipeCatalogItem {
     defaultTriggerConfig: { type: seed.trigger, ...(seed.triggerConfig ?? {}) },
     defaultConditionConfig: {
       businessHoursOnly: true,
+      // A `null` instance value delegates to the global consent policy. The
+      // resolver keeps a true global requirement monotonic.
+      requireExplicitConsent: null,
       stopIfReplied: true,
       stopIfHandoff: true,
       ...(seed.conditionConfig ?? {}),

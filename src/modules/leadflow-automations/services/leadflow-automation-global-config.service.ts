@@ -197,7 +197,7 @@ export function resolveLeadFlowAutomationEffectiveConfig(
     'trigger.delayHours',
     inheritedFields,
   );
-  applyOverride(trigger, override.trigger);
+  applyOverride(trigger, override.trigger, inheritedFields, 'trigger');
 
   const conditions = { ...(template.conditions ?? {}) };
   applyGlobal(
@@ -211,11 +211,19 @@ export function resolveLeadFlowAutomationEffectiveConfig(
   if (global.consent.requireExplicitConsent && !overrideConsent) {
     conditions.requireExplicitConsent = true;
     inheritedFields.push('conditions.requireExplicitConsent');
-  } else if (override.conditions?.requireExplicitConsent !== undefined) {
+  } else if (
+    override.conditions?.requireExplicitConsent !== undefined &&
+    override.conditions.requireExplicitConsent !== null
+  ) {
     conditions.requireExplicitConsent =
       override.conditions.requireExplicitConsent;
   }
-  applyOverride(conditions, withoutConsent(override.conditions));
+  applyOverride(
+    conditions,
+    withoutConsent(override.conditions),
+    inheritedFields,
+    'conditions',
+  );
 
   const actions = { ...(template.actions ?? {}) };
   applyGlobal(
@@ -225,7 +233,7 @@ export function resolveLeadFlowAutomationEffectiveConfig(
     'actions.maxAttempts',
     inheritedFields,
   );
-  applyOverride(actions, override.actions);
+  applyOverride(actions, override.actions, inheritedFields, 'actions');
 
   const message = { ...(template.message ?? {}) };
   applyGlobal(
@@ -235,7 +243,7 @@ export function resolveLeadFlowAutomationEffectiveConfig(
     'message.channel',
     inheritedFields,
   );
-  applyOverride(message, override.message);
+  applyOverride(message, override.message, inheritedFields, 'message');
 
   const schedulePolicy = { ...(template.schedulePolicy ?? {}) };
   applyGlobal(
@@ -252,7 +260,12 @@ export function resolveLeadFlowAutomationEffectiveConfig(
     'schedulePolicy.respectBusinessHours',
     inheritedFields,
   );
-  applyOverride(schedulePolicy, override.schedulePolicy);
+  applyOverride(
+    schedulePolicy,
+    override.schedulePolicy,
+    inheritedFields,
+    'schedulePolicy',
+  );
 
   return {
     trigger,
@@ -282,10 +295,19 @@ function applyGlobal<T extends Record<string, unknown>>(
 function applyOverride<T extends Record<string, unknown>>(
   target: T,
   override: Record<string, unknown> | undefined,
+  inheritedFields?: string[],
+  section?: string,
 ): void {
   if (!override) return;
   for (const [key, value] of Object.entries(override)) {
-    if (value !== null) (target as Record<string, unknown>)[key] = value;
+    if (value !== null) {
+      (target as Record<string, unknown>)[key] = value;
+      if (inheritedFields && section) {
+        const path = `${section}.${key}`;
+        const index = inheritedFields.indexOf(path);
+        if (index >= 0) inheritedFields.splice(index, 1);
+      }
+    }
   }
 }
 

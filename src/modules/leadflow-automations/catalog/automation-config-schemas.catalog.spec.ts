@@ -2,6 +2,7 @@ import {
   buildConfigSchema,
   findUnspecifiedDefaultKeys,
   getFieldSpec,
+  isInheritableConfigField,
   LEADFLOW_AUTOMATION_CONFIG_SECTIONS,
 } from './automation-config-schemas.catalog';
 import { LEADFLOW_AUTOMATION_RECIPES } from './automation-recipes.catalog';
@@ -51,6 +52,29 @@ describe('automation config schemas catalog', () => {
   it('keeps technical fields out of the essential surface', () => {
     expect(getFieldSpec('trigger', 'type')?.surface).toBe('developer');
     expect(getFieldSpec('actions', 'primaryAction')?.surface).toBe('developer');
+  });
+
+  it('declares the complete reversible inheritance matrix and no exclusive fields', () => {
+    const inheritable = [
+      ['trigger', 'delayHours'],
+      ['trigger', 'pipelineRef'],
+      ['trigger', 'stageRef'],
+      ['conditions', 'businessHoursOnly'],
+      ['conditions', 'requireExplicitConsent'],
+      ['actions', 'maxAttempts'],
+      ['message', 'channel'],
+      ['schedulePolicy', 'respectBusinessHours'],
+      ['schedulePolicy', 'timezone'],
+    ] as const;
+
+    for (const [section, key] of inheritable) {
+      expect(isInheritableConfigField(section, key)).toBe(true);
+    }
+    expect(isInheritableConfigField('actions', 'primaryAction')).toBe(false);
+    expect(isInheritableConfigField('message', 'baseMessage')).toBe(false);
+    expect(isInheritableConfigField('crmPolicy', 'moveStageOnComplete')).toBe(
+      false,
+    );
   });
 
   it('gives every field a business-facing label', () => {
