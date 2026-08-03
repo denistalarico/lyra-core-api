@@ -11,6 +11,7 @@ import { InboxChannelEntity } from '../inbox/entities/inbox-channel.entity';
 import { LeadFlowEventDeliveryEntity } from '../leadflow-events/entities';
 import {
   LeadFlowAutomationEntity,
+  LeadFlowAutomationGlobalConfigVersionEntity,
   LeadFlowAutomationRunAttemptEntity,
   LeadFlowAutomationRunEntity,
   LeadFlowScheduledTimerEntity,
@@ -45,6 +46,7 @@ import { LeadFlowAutomationRunService } from './services/leadflow-automation-run
 import { LeadFlowAutomationShadowEvaluatorService } from './services/leadflow-automation-shadow-evaluator.service';
 import { LeadFlowAutomationTriggerMatcherService } from './services/leadflow-automation-trigger-matcher.service';
 import { LeadFlowAutomationRuntimeConfigService } from './services/leadflow-automation-runtime-config.service';
+import { LeadFlowAutomationGlobalConfigService } from './services/leadflow-automation-global-config.service';
 import { LeadFlowAutomationService } from './services/leadflow-automation.service';
 import {
   PostgresSchedulerRuntime,
@@ -85,6 +87,7 @@ import { LeadFlowAppointmentLifecycleSchedulerService } from './services/leadflo
     TypeOrmModule.forFeature(
       [
         LeadFlowAutomationEntity,
+        LeadFlowAutomationGlobalConfigVersionEntity,
         LeadFlowAutomationVersionEntity,
         LeadFlowAutomationRunEntity,
         LeadFlowAutomationRunAttemptEntity,
@@ -112,6 +115,7 @@ import { LeadFlowAppointmentLifecycleSchedulerService } from './services/leadflo
     LeadFlowAutomationService,
     LeadFlowAutomationRecipeService,
     LeadFlowAutomationRuntimeConfigService,
+    LeadFlowAutomationGlobalConfigService,
     LeadFlowAutomationConfigSchemaService,
     LeadFlowAutomationLifecycleService,
     LeadFlowAutomationContextService,

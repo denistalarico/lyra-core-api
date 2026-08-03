@@ -75,6 +75,8 @@ export interface LeadFlowAutomationTriggerConfig {
 
 export interface LeadFlowAutomationConditionConfig {
   businessHoursOnly?: boolean;
+  /** Never relaxes a global consent requirement during resolution. */
+  requireExplicitConsent?: boolean;
   stopIfReplied?: boolean;
   stopIfHandoff?: boolean;
   minScore?: number;
@@ -139,6 +141,46 @@ export type LeadFlowFollowupChannel =
   | 'facebook_messenger'
   | 'instagram_direct'
   | 'webchat';
+
+/**
+ * Governed defaults shared by automations in one LeadFlow Settings context.
+ * The shape is deliberately closed by the global-config service.
+ */
+export interface LeadFlowAutomationGlobalDefaults {
+  schemaVersion: 1;
+  timezone: string;
+  businessHours: {
+    enabled: boolean;
+    /** Optional windows keyed by ISO weekday (mon..sun). */
+    windows: Partial<
+      Record<
+        'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun',
+        { start: string; end: string }
+      >
+    >;
+  };
+  crm: {
+    pipelineRef: string | null;
+    stageRef: string | null;
+  };
+  channels: {
+    defaultChannel: LeadFlowFollowupChannel | null;
+  };
+  consent: {
+    requireExplicitConsent: boolean;
+  };
+  followUp: {
+    defaultDelayHours: number | null;
+    maxAttempts: number | null;
+  };
+}
+
+export interface LeadFlowAutomationGlobalDefaultsSnapshot {
+  version: number;
+  source: 'fallback' | 'persisted';
+  createdAt: string | null;
+  config: LeadFlowAutomationGlobalDefaults;
+}
 
 export type LeadFlowWhatsappTemplateReferenceStatus =
   | 'not_configured'
@@ -308,6 +350,10 @@ export interface LeadFlowAutomationRuntimeContract {
     planKey: string | null;
     developerModeEnabled: boolean;
   };
+  /** Defaults and version actually used to resolve this runtime contract. */
+  globalDefaults: LeadFlowAutomationGlobalDefaultsSnapshot;
+  /** Values supplied by global defaults rather than this instance. */
+  inheritedFields: string[];
   trigger: LeadFlowAutomationTriggerConfig;
   conditions: LeadFlowAutomationConditionConfig;
   actions: LeadFlowAutomationActionConfig;
@@ -340,6 +386,7 @@ export interface LeadFlowAutomationsRuntimeContract {
   workspaceId: string;
   businessMode: LeadFlowAutomationRuntimeContract['businessMode'];
   leadflowSettingsSnapshot: LeadFlowAutomationRuntimeContract['leadflowSettingsSnapshot'];
+  globalDefaults: LeadFlowAutomationGlobalDefaultsSnapshot;
   structuralRules: LeadFlowAutomationStructuralRules;
   enabledAutomations: LeadFlowAutomationRuntimeContract[];
 }

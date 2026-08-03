@@ -2,6 +2,7 @@ import { LeadFlowAutomationCategory } from '../enums/leadflow-automation-categor
 import { LeadFlowAutomationStatus } from '../enums/leadflow-automation-status.enum';
 import type { LeadFlowAutomationEntity } from '../entities/leadflow-automation.entity';
 import { LeadFlowAutomationRuntimeConfigService } from './leadflow-automation-runtime-config.service';
+import type { LeadFlowAutomationGlobalDefaultsSnapshot } from '../types/leadflow-automation.types';
 
 function buildAutomation(
   overrides: Partial<LeadFlowAutomationEntity> = {},
@@ -90,5 +91,44 @@ describe('LeadFlowAutomationRuntimeConfigService', () => {
       null,
     );
     expect(contract.webhook).toBeNull();
+  });
+
+  it('records the effective global defaults in the runtime contract for publication', () => {
+    const globalDefaults: LeadFlowAutomationGlobalDefaultsSnapshot = {
+      version: 4,
+      source: 'persisted',
+      createdAt: '2026-08-03T12:00:00.000Z',
+      config: {
+        schemaVersion: 1,
+        timezone: 'America/Sao_Paulo',
+        businessHours: { enabled: true, windows: {} },
+        crm: { pipelineRef: null, stageRef: null },
+        channels: { defaultChannel: null },
+        consent: { requireExplicitConsent: true },
+        followUp: { defaultDelayHours: null, maxAttempts: null },
+      },
+    };
+    const contract = service.buildAutomationContract(
+      buildAutomation({
+        conditionConfig: {},
+        schedulePolicy: {},
+      }),
+      null,
+      globalDefaults,
+    );
+
+    expect(contract.version).toBe(2);
+    expect(contract.globalDefaults).toEqual(globalDefaults);
+    expect(contract.schedulePolicy).toMatchObject({
+      timezone: 'America/Sao_Paulo',
+      respectBusinessHours: true,
+    });
+    expect(contract.conditions.requireExplicitConsent).toBe(true);
+    expect(contract.inheritedFields).toEqual(
+      expect.arrayContaining([
+        'schedulePolicy.timezone',
+        'conditions.requireExplicitConsent',
+      ]),
+    );
   });
 });

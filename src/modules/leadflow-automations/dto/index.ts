@@ -1,6 +1,7 @@
 export { ProvisionAutomationDto } from './provision-automation.dto';
 export { PatchAutomationDto } from './patch-automation.dto';
 export { DryRunAutomationDto } from './dry-run-automation.dto';
+export { UpdateLeadFlowAutomationGlobalConfigDto } from './update-leadflow-automation-global-config.dto';
 export {
   ExecuteCrmAutomationActionDto,
   LeadFlowAutomationCrmAction,

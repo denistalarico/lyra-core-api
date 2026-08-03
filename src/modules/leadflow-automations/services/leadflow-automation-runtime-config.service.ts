@@ -11,12 +11,24 @@ import type {
 } from '../dto/leadflow-automation-runtime-config-response.dto';
 import type { LeadFlowAutomationEntity } from '../entities/leadflow-automation.entity';
 import type {
+  LeadFlowAutomationGlobalDefaultsSnapshot,
   LeadFlowAutomationRuntimeContract,
   LeadFlowAutomationStructuralRules,
   LeadFlowJsonObject,
 } from '../types/leadflow-automation.types';
+import {
+  DEFAULT_LEADFLOW_AUTOMATION_GLOBAL_DEFAULTS,
+  resolveLeadFlowAutomationEffectiveConfig,
+} from './leadflow-automation-global-config.service';
 
-export const LEADFLOW_AUTOMATION_RUNTIME_CONTRACT_VERSION = 1;
+export const LEADFLOW_AUTOMATION_RUNTIME_CONTRACT_VERSION = 2;
+
+const FALLBACK_GLOBAL_DEFAULTS: LeadFlowAutomationGlobalDefaultsSnapshot = {
+  version: 0,
+  source: 'fallback',
+  createdAt: null,
+  config: DEFAULT_LEADFLOW_AUTOMATION_GLOBAL_DEFAULTS,
+};
 
 const STRUCTURAL_RULES: LeadFlowAutomationStructuralRules = {
   everyConversationCreatesOpportunity: true,
@@ -35,8 +47,27 @@ export class LeadFlowAutomationRuntimeConfigService {
   buildAutomationContract(
     automation: LeadFlowAutomationEntity,
     settings: LeadFlowClientSettingsEntity | null,
+    globalDefaults: LeadFlowAutomationGlobalDefaultsSnapshot = FALLBACK_GLOBAL_DEFAULTS,
   ): LeadFlowAutomationRuntimeConfigResponse {
     const recipe = getRecipeByKey(automation.recipeKey);
+    const effective = resolveLeadFlowAutomationEffectiveConfig(globalDefaults, {
+      template: recipe
+        ? {
+            trigger: recipe.defaultTriggerConfig,
+            conditions: recipe.defaultConditionConfig,
+            actions: recipe.defaultActionConfig,
+            message: recipe.defaultMessageConfig,
+            schedulePolicy: recipe.defaultSchedulePolicy,
+          }
+        : undefined,
+      override: {
+        trigger: automation.triggerConfig ?? {},
+        conditions: automation.conditionConfig ?? {},
+        actions: automation.actionConfig ?? {},
+        message: automation.messageConfig ?? {},
+        schedulePolicy: automation.schedulePolicy ?? {},
+      },
+    });
 
     return {
       version: LEADFLOW_AUTOMATION_RUNTIME_CONTRACT_VERSION,
@@ -52,13 +83,18 @@ export class LeadFlowAutomationRuntimeConfigService {
         key: automation.businessModeKey,
         isCustom: isCustomBusinessMode(automation.businessModeKey),
       },
-      leadflowSettingsSnapshot: this.buildSettingsSnapshot(automation, settings),
-      trigger: automation.triggerConfig ?? {},
-      conditions: automation.conditionConfig ?? {},
-      actions: automation.actionConfig ?? {},
-      message: automation.messageConfig ?? {},
+      leadflowSettingsSnapshot: this.buildSettingsSnapshot(
+        automation,
+        settings,
+      ),
+      globalDefaults: effective.globalDefaults,
+      inheritedFields: effective.inheritedFields,
+      trigger: effective.trigger,
+      conditions: effective.conditions,
+      actions: effective.actions,
+      message: effective.message,
       crmPolicy: automation.crmPolicy ?? {},
-      schedulePolicy: automation.schedulePolicy ?? {},
+      schedulePolicy: effective.schedulePolicy,
       developerConfig: this.buildDeveloperConfig(automation),
       webhook: maskWebhookConfig(automation.webhookConfig),
       safetyRules: recipe ? [...recipe.safetyRules] : [],
@@ -73,6 +109,7 @@ export class LeadFlowAutomationRuntimeConfigService {
     settings: LeadFlowClientSettingsEntity | null,
     businessModeKey: string,
     automationContracts: LeadFlowAutomationRuntimeContract[],
+    globalDefaults: LeadFlowAutomationGlobalDefaultsSnapshot = FALLBACK_GLOBAL_DEFAULTS,
   ): LeadFlowAutomationsRuntimeConfigResponse {
     return {
       version: LEADFLOW_AUTOMATION_RUNTIME_CONTRACT_VERSION,
@@ -83,7 +120,9 @@ export class LeadFlowAutomationRuntimeConfigService {
         key: businessModeKey,
         isCustom: isCustomBusinessMode(businessModeKey),
       },
-      leadflowSettingsSnapshot: this.buildSettingsSnapshotFromSettings(settings),
+      leadflowSettingsSnapshot:
+        this.buildSettingsSnapshotFromSettings(settings),
+      globalDefaults,
       structuralRules: STRUCTURAL_RULES,
       enabledAutomations: automationContracts,
     };

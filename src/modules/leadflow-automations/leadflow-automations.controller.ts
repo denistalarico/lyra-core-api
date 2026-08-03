@@ -7,6 +7,7 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Put,
   Query,
   UseGuards,
 } from '@nestjs/common';
@@ -32,6 +33,7 @@ import {
   mapRunDetail,
   PatchAutomationDto,
   ProvisionAutomationDto,
+  UpdateLeadFlowAutomationGlobalConfigDto,
 } from './dto';
 import type {
   LeadFlowAutomationDryRunResponse,
@@ -40,6 +42,7 @@ import type {
   LeadFlowAutomationsRuntimeConfigResponse,
 } from './dto/leadflow-automation-runtime-config-response.dto';
 import { LEADFLOW_AUTOMATIONS_PERMISSIONS } from './leadflow-automations.permissions';
+import type { LeadFlowAutomationGlobalDefaultsSnapshot } from './types/leadflow-automation.types';
 import { LeadFlowAutomationService } from './services/leadflow-automation.service';
 import { LeadFlowAutomationCrmActionService } from './services/leadflow-automation-crm-action.service';
 
@@ -96,6 +99,24 @@ export class LeadFlowAutomationsController {
     @Body() dto: ProvisionAutomationDto,
   ): Promise<LeadFlowAutomationDetailResponse> {
     return this.automationService.provision(ctx, dto);
+  }
+
+  /** Versioned defaults for the active agency/client Settings context. */
+  @Get('settings')
+  @RequirePermission(LEADFLOW_AUTOMATIONS_PERMISSIONS.view)
+  getGlobalDefaults(
+    @RequestContextData() ctx: RequestContext,
+  ): Promise<LeadFlowAutomationGlobalDefaultsSnapshot> {
+    return this.automationService.getGlobalDefaults(ctx);
+  }
+
+  @Put('settings')
+  @RequirePermission(LEADFLOW_AUTOMATIONS_PERMISSIONS.configure)
+  updateGlobalDefaults(
+    @RequestContextData() ctx: RequestContext,
+    @Body() dto: UpdateLeadFlowAutomationGlobalConfigDto,
+  ): Promise<LeadFlowAutomationGlobalDefaultsSnapshot> {
+    return this.automationService.updateGlobalDefaults(ctx, dto);
   }
 
   @Get(':id')

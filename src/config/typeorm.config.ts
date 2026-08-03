@@ -273,6 +273,7 @@ import {
 } from '../modules/leadflow-agents/entities';
 import {
   LeadFlowAutomationEntity,
+  LeadFlowAutomationGlobalConfigVersionEntity,
   LeadFlowAutomationRunAttemptEntity,
   LeadFlowAutomationRunEntity,
   LeadFlowScheduledTimerEntity,
@@ -500,6 +501,7 @@ export const agencyEntities = [
   OperationsRoomRevisionEntity,
   OperationsRoomOutboxEntity,
   LeadFlowAutomationEntity,
+  LeadFlowAutomationGlobalConfigVersionEntity,
   LeadFlowAutomationVersionEntity,
   LeadFlowAutomationRunEntity,
   LeadFlowAutomationRunAttemptEntity,

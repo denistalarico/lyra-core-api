@@ -71,6 +71,7 @@ import { unavailableExecutors } from '../executors';
 import { LEADFLOW_AUTOMATIONS_PERMISSIONS } from '../leadflow-automations.permissions';
 import type {
   LeadFlowAutomationReadiness,
+  LeadFlowAutomationGlobalDefaultsSnapshot,
   LeadFlowJsonObject,
 } from '../types/leadflow-automation.types';
 import {
@@ -86,6 +87,7 @@ import {
 import { LeadFlowAutomationRecipeService } from './leadflow-automation-recipe.service';
 import { LeadFlowAutomationRunService } from './leadflow-automation-run.service';
 import { LeadFlowAutomationRuntimeConfigService } from './leadflow-automation-runtime-config.service';
+import { LeadFlowAutomationGlobalConfigService } from './leadflow-automation-global-config.service';
 
 const AGENCY_CONNECTION = 'agency';
 
@@ -115,6 +117,7 @@ export class LeadFlowAutomationService {
     private readonly workspaceEmailSettingsRepository: Repository<AgencyWorkspaceEmailSettingsEntity>,
     private readonly recipeService: LeadFlowAutomationRecipeService,
     private readonly runtimeConfigService: LeadFlowAutomationRuntimeConfigService,
+    private readonly globalConfigService: LeadFlowAutomationGlobalConfigService,
     private readonly configSchemaService: LeadFlowAutomationConfigSchemaService,
     private readonly lifecycleService: LeadFlowAutomationLifecycleService,
     private readonly evaluationService: LeadFlowAutomationEvaluationService,
@@ -148,6 +151,26 @@ export class LeadFlowAutomationService {
         })),
       ),
     };
+  }
+
+  async getGlobalDefaults(
+    ctx: RequestContext,
+  ): Promise<LeadFlowAutomationGlobalDefaultsSnapshot> {
+    const active = await this.resolveActiveContext(ctx);
+    return this.globalConfigService.getCurrent(active.settings);
+  }
+
+  async updateGlobalDefaults(
+    ctx: RequestContext,
+    input: { config: unknown; expectedVersion?: number },
+  ): Promise<LeadFlowAutomationGlobalDefaultsSnapshot> {
+    const active = await this.resolveActiveContext(ctx);
+    return this.globalConfigService.createVersion(
+      active.settings,
+      input.config,
+      input.expectedVersion,
+      ctx.userId,
+    );
   }
 
   async listRecipes(
@@ -379,9 +402,13 @@ export class LeadFlowAutomationService {
     const active = await this.resolveActiveContext(ctx);
     const automation = await this.findScopedAutomation(ctx, active, id);
 
+    const globalDefaults = await this.globalConfigService.getCurrent(
+      active.settings,
+    );
     const snapshot = this.runtimeConfigService.buildAutomationContract(
       automation,
       active.settings,
+      globalDefaults,
     );
 
     const nextVersion = await this.nextVersionNumber(automation.id);
@@ -410,9 +437,13 @@ export class LeadFlowAutomationService {
     const active = await this.resolveActiveContext(ctx);
     const automation = await this.findScopedAutomation(ctx, active, id);
 
+    const globalDefaults = await this.globalConfigService.getCurrent(
+      active.settings,
+    );
     return this.runtimeConfigService.buildAutomationContract(
       automation,
       active.settings,
+      globalDefaults,
     );
   }
 
@@ -430,10 +461,14 @@ export class LeadFlowAutomationService {
       order: { createdAt: 'ASC' },
     });
 
+    const globalDefaults = await this.globalConfigService.getCurrent(
+      active.settings,
+    );
     const contracts = automations.map((automation) =>
       this.runtimeConfigService.buildAutomationContract(
         automation,
         active.settings,
+        globalDefaults,
       ),
     );
 
@@ -443,6 +478,7 @@ export class LeadFlowAutomationService {
       active.settings,
       active.businessModeKey,
       contracts,
+      globalDefaults,
     );
   }
 

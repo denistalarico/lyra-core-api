@@ -144,6 +144,7 @@ import { RefineFinanceBillsAndBankAvatars1788300000000 } from './migrations/1788
 import { CreateFinanceBankTransfers1788400000000 } from './migrations/1788400000000-create-finance-bank-transfers';
 import { CreateLeadflowBriefingProvenance1788500000000 } from './migrations/1788500000000-create-leadflow-briefing-provenance';
 import { AddLeadflowBriefingPermissions1788600000000 } from './migrations/1788600000000-add-leadflow-briefing-permissions';
+import { CreateLeadflowAutomationGlobalConfigVersions1788700000000 } from './migrations/1788700000000-create-leadflow-automation-global-config-versions';
 
 export const AgencyDataSource = new DataSource({
   type: 'postgres',
@@ -298,5 +299,6 @@ export const AgencyDataSource = new DataSource({
     CreateFinanceBankTransfers1788400000000,
     CreateLeadflowBriefingProvenance1788500000000,
     AddLeadflowBriefingPermissions1788600000000,
+    CreateLeadflowAutomationGlobalConfigVersions1788700000000,
   ],
 });
