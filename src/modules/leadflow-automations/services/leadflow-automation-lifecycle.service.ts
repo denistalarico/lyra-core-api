@@ -32,6 +32,8 @@ export interface LeadFlowAutomationLifecycleInput {
   recipe: LeadFlowAutomationRecipeCatalogItem | undefined;
   /** False when the instance's Business Mode no longer matches the recipe. */
   compatibleWithBusinessMode: boolean;
+  /** An activation always runs an immutable published snapshot. */
+  hasPublishedVersion?: boolean;
   missingConfiguration: string[];
   unavailableActions?: AutomationExecutorAvailability[];
 }
@@ -59,6 +61,9 @@ export class LeadFlowAutomationLifecycleService {
     input: LeadFlowAutomationLifecycleInput,
   ): LeadFlowAutomationLifecycle {
     const { status, recipe, compatibleWithBusinessMode } = input;
+    // Abstract recipe callers predate publishing; real instances always pass
+    // this field explicitly from `publishedVersionId`.
+    const hasPublishedVersion = input.hasPublishedVersion ?? true;
     const missingConfiguration = [...input.missingConfiguration];
     const unavailableActions = [...(input.unavailableActions ?? [])];
     const runtimeAvailable = isRuntimeAvailable();
@@ -156,6 +161,20 @@ export class LeadFlowAutomationLifecycleService {
         status,
         canActivate: false,
         blockedReason: 'Faltam informações obrigatórias na configuração.',
+        unmetDependencies,
+        unavailableActions,
+        missingConfiguration,
+        runtimeAvailable,
+      };
+    }
+
+    if (!hasPublishedVersion) {
+      return {
+        state: LeadFlowAutomationLifecycleState.RequiresConfiguration,
+        status,
+        canActivate: false,
+        blockedReason:
+          'Publique uma versão da automação antes de ativá-la.',
         unmetDependencies,
         unavailableActions,
         missingConfiguration,

@@ -594,6 +594,12 @@ export class LeadFlowAutomationService {
     automation: LeadFlowAutomationEntity,
     status: LeadFlowAutomationStatus,
   ): Promise<LeadFlowAutomationDetailResponse> {
+    // Confirmation retries and double-clicks must not create a second state
+    // transition or rewrite its timestamp.
+    if (automation.status === status) {
+      return this.detail(ctx, automation.id);
+    }
+
     automation.status = status;
     automation.updatedById = ctx.userId ?? null;
     await this.automationsRepository.save(automation);
@@ -723,6 +729,7 @@ export class LeadFlowAutomationService {
       compatibleWithBusinessMode: recipe
         ? this.recipeService.isCompatible(recipe, active.businessModeKey)
         : false,
+      hasPublishedVersion: Boolean(automation.publishedVersionId),
       missingConfiguration: recipe
         ? this.configSchemaService.findMissingRequiredFields(recipe, {
             trigger: automation.triggerConfig ?? {},
@@ -774,6 +781,7 @@ export class LeadFlowAutomationService {
           compatibleWithBusinessMode: recipe
             ? this.recipeService.isCompatible(recipe, active.businessModeKey)
             : false,
+          hasPublishedVersion: Boolean(automation.publishedVersionId),
           missingConfiguration: [
             ...lifecycle.missingConfiguration,
             'actions.notificationChannels',
@@ -802,6 +810,7 @@ export class LeadFlowAutomationService {
       compatibleWithBusinessMode: recipe
         ? this.recipeService.isCompatible(recipe, active.businessModeKey)
         : false,
+      hasPublishedVersion: Boolean(automation.publishedVersionId),
       missingConfiguration: [
         ...lifecycle.missingConfiguration,
         'message.followupSteps',

@@ -130,6 +130,18 @@ describe('LeadFlowAutomationLifecycleService', () => {
       expect(result.canActivate).toBe(false);
     });
 
+    it('requires a published snapshot before it can activate', () => {
+      const result = evaluate({ hasPublishedVersion: false });
+
+      expect(result.state).toBe(
+        LeadFlowAutomationLifecycleState.RequiresConfiguration,
+      );
+      expect(result.canActivate).toBe(false);
+      expect(result.blockedReason).toBe(
+        'Publique uma versão da automação antes de ativá-la.',
+      );
+    });
+
     it('reports paused and allows switching back on', () => {
       const result = evaluate({ status: LeadFlowAutomationStatus.Paused });
 
