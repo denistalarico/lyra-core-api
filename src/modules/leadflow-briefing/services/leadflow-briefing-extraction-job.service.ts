@@ -137,15 +137,32 @@ export class LeadFlowBriefingExtractionJobService {
     });
   }
 
+  /** Lists every extraction job for a settings target, most recent first — powers the review panel's per-source job status. */
+  async listForSettings(
+    ctx: RequestContext,
+    settingsId: string,
+  ): Promise<BriefingExtractionJobResponse[]> {
+    const workspaceId = this.requireWorkspaceId(ctx);
+    const repo = this.dataSource.getRepository(LeadFlowBriefingExtractionJobEntity);
+    const jobs = await repo.find({
+      where: { tenantId: ctx.tenantId, workspaceId, settingsId },
+      order: { createdAt: 'DESC' },
+    });
+    return jobs.map((job) => this.mapJob(job));
+  }
+
   private mapJob(
     job: LeadFlowBriefingExtractionJobEntity,
   ): BriefingExtractionJobResponse {
     return {
       id: job.id,
+      sourceId: job.sourceId,
       sourceVersionId: job.sourceVersionId,
       status: job.status,
       attempts: job.attempts,
       idempotencyKey: job.idempotencyKey,
+      lastError: job.lastError,
+      createdAt: job.createdAt,
     };
   }
 

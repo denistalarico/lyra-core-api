@@ -5,22 +5,29 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
-import { DataSource } from 'typeorm';
+import { DataSource, In } from 'typeorm';
 import type { RequestContext } from '../../../common/context/request-context.interface';
 import { LeadFlowClientSettingsEntity } from '../../leadflow-settings/entities';
-import { CompanyContextService } from '../../leadflow-settings/services/company-context.service';
+import {
+  CompanyContextService,
+  getCompanyContextScalarFieldPaths,
+} from '../../leadflow-settings/services/company-context.service';
 import {
   LeadFlowBriefingContextSnapshotEntity,
+  LeadFlowBriefingSourceEntity,
   LeadFlowBriefingSourceVersionEntity,
   LeadFlowBriefingSuggestionApplicationEntity,
   LeadFlowBriefingSuggestionEntity,
 } from '../entities';
 import { LeadFlowBriefingSnapshotKind } from '../enums/leadflow-briefing-snapshot-kind.enum';
+import { LeadFlowBriefingSourceKind } from '../enums/leadflow-briefing-source-kind.enum';
 import { LeadFlowBriefingSuggestionStatus } from '../enums/leadflow-briefing-suggestion-status.enum';
 import type {
   ApplySuggestionInput,
   BriefingApplicationResponse,
   BriefingFieldProvenanceResponse,
+  BriefingReviewResponse,
+  BriefingSuggestionListItemResponse,
   BriefingSuggestionResponse,
   RecordSuggestionsInput,
   RejectSuggestionInput,
@@ -201,6 +208,8 @@ export class LeadFlowBriefingSuggestionService {
       );
 
       suggestion.status = LeadFlowBriefingSuggestionStatus.Applied;
+      suggestion.decidedById = input.appliedById;
+      suggestion.decidedAt = new Date();
       await suggestionRepo.save(suggestion);
 
       return {
@@ -235,6 +244,91 @@ export class LeadFlowBriefingSuggestionService {
     suggestion.decidedAt = new Date();
     const saved = await repo.save(suggestion);
     return this.mapSuggestion(saved);
+  }
+
+  /**
+   * The review panel's single read: pending/applied/rejected suggestions
+   * (superseded ones are dead, never actionable, excluded) joined to their
+   * source for display, plus the current draft value per row (so a conflict
+   * can be shown side-by-side), plus gaps — scalar fields with no draft
+   * value and no pending suggestion already covering them.
+   */
+  async listForReview(ctx: RequestContext, settingsId: string): Promise<BriefingReviewResponse> {
+    const workspaceId = this.requireWorkspaceId(ctx);
+
+    const settings = await this.dataSource.getRepository(LeadFlowClientSettingsEntity).findOne({
+      where: { id: settingsId, tenantId: ctx.tenantId, workspaceId },
+    });
+    if (!settings) throw new NotFoundException('LeadFlow settings not found.');
+    const draft = settings.companyContextDraft ?? {};
+
+    const rows = await this.dataSource.getRepository(LeadFlowBriefingSuggestionEntity).find({
+      where: {
+        tenantId: ctx.tenantId,
+        workspaceId,
+        settingsId,
+        status: In([
+          LeadFlowBriefingSuggestionStatus.Pending,
+          LeadFlowBriefingSuggestionStatus.Applied,
+          LeadFlowBriefingSuggestionStatus.Rejected,
+        ]),
+      },
+      order: { createdAt: 'DESC' },
+    });
+
+    const versionIds = [...new Set(rows.map((row) => row.sourceVersionId))];
+    const versions = versionIds.length
+      ? await this.dataSource
+          .getRepository(LeadFlowBriefingSourceVersionEntity)
+          .find({ where: { id: In(versionIds) } })
+      : [];
+    const versionById = new Map(versions.map((version) => [version.id, version]));
+
+    const sourceIds = [...new Set(versions.map((version) => version.sourceId))];
+    const sources = sourceIds.length
+      ? await this.dataSource
+          .getRepository(LeadFlowBriefingSourceEntity)
+          .find({ where: { id: In(sourceIds) } })
+      : [];
+    const sourceById = new Map(sources.map((source) => [source.id, source]));
+
+    const suggestions: BriefingSuggestionListItemResponse[] = rows.map((row) => {
+      const version = versionById.get(row.sourceVersionId);
+      const source = version ? sourceById.get(version.sourceId) : undefined;
+      return {
+        id: row.id,
+        fieldPath: row.fieldPath,
+        status: row.status,
+        suggestedValue: row.suggestedValue,
+        confidence: row.confidence != null ? Number(row.confidence) : null,
+        rationale: row.rationale,
+        currentValue: getAtFieldPath(draft, row.fieldPath) ?? null,
+        conflictsWithSuggestionId: row.conflictsWithSuggestionId,
+        origin: {
+          sourceId: source?.id ?? '',
+          sourceLabel: source?.label ?? '',
+          sourceKind: source?.kind ?? version?.kind ?? LeadFlowBriefingSourceKind.Upload,
+          sourceVersionId: row.sourceVersionId,
+          versionNumber: version?.versionNumber ?? 0,
+        },
+        decidedById: row.decidedById,
+        decidedAt: row.decidedAt,
+        createdAt: row.createdAt,
+      };
+    });
+
+    const pendingFieldPaths = new Set(
+      rows
+        .filter((row) => row.status === LeadFlowBriefingSuggestionStatus.Pending)
+        .map((row) => row.fieldPath),
+    );
+    const gaps = getCompanyContextScalarFieldPaths().filter((fieldPath) => {
+      if (pendingFieldPaths.has(fieldPath)) return false;
+      const value = getAtFieldPath(draft, fieldPath);
+      return value === undefined || value === null || (typeof value === 'string' && value.trim() === '');
+    });
+
+    return { suggestions, gaps };
   }
 
   /** No application row = manual/legacy origin. Never treated as an absence of data — always an explicit answer. */

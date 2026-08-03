@@ -23,6 +23,7 @@ import {
   LeadFlowCompanyCapacityResponse,
   LeadFlowSettingsValidationResponse,
   ListLeadFlowClientsQueryDto,
+  PublishCompanyContextDto,
   UpdateLeadFlowClientSettingsDto,
   ValidateLeadFlowClientSettingsDto,
 } from './dto';
@@ -109,10 +110,12 @@ export class LeadFlowClientSettingsController {
   publishCompanyContext(
     @RequestContextData() ctx: RequestContext,
     @Param('agencyClientId') agencyClientId: string,
+    @Body() dto: PublishCompanyContextDto,
   ) {
     return this.leadFlowClientSettingsService.publishCompanyContext(
       ctx,
       agencyClientId,
+      dto?.expectedDraftHash,
     );
   }
 

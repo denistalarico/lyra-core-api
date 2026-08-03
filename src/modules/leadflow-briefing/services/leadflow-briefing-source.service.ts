@@ -1,12 +1,19 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
-import { DataSource } from 'typeorm';
+import { DataSource, In } from 'typeorm';
 import type { RequestContext } from '../../../common/context/request-context.interface';
 import {
   LeadFlowBriefingSourceEntity,
   LeadFlowBriefingSourceVersionEntity,
 } from '../entities';
+import { LeadFlowBriefingSourceVersionStatus } from '../enums/leadflow-briefing-source-version-status.enum';
 import type {
+  BriefingSourceListItemResponse,
   BriefingSourceResponse,
   BriefingSourceVersionResponse,
   CreateBriefingSourceInput,
@@ -99,6 +106,96 @@ export class LeadFlowBriefingSourceService {
 
       return this.mapVersion(version);
     });
+  }
+
+  /** Scoped lookup used by the extract-trigger route to resolve a source's settingsId. */
+  async getSource(ctx: RequestContext, sourceId: string): Promise<BriefingSourceResponse> {
+    const workspaceId = this.requireWorkspaceId(ctx);
+    const repo = this.dataSource.getRepository(LeadFlowBriefingSourceEntity);
+    const source = await repo.findOne({
+      where: { id: sourceId, tenantId: ctx.tenantId, workspaceId },
+    });
+    if (!source) throw new NotFoundException('Briefing source not found.');
+    return this.mapSource(source);
+  }
+
+  /** Lists a settings target's sources with their latest version only (no full version history — not needed by the review panel). */
+  async listSources(
+    ctx: RequestContext,
+    settingsId: string,
+  ): Promise<BriefingSourceListItemResponse[]> {
+    const workspaceId = this.requireWorkspaceId(ctx);
+    const sourceRepo = this.dataSource.getRepository(LeadFlowBriefingSourceEntity);
+    const versionRepo = this.dataSource.getRepository(LeadFlowBriefingSourceVersionEntity);
+
+    const sources = await sourceRepo.find({
+      where: { tenantId: ctx.tenantId, workspaceId, settingsId },
+      order: { createdAt: 'DESC' },
+    });
+    if (sources.length === 0) return [];
+
+    const versions = await versionRepo.find({
+      where: { sourceId: In(sources.map((source) => source.id)) },
+    });
+    const latestBySource = new Map<string, LeadFlowBriefingSourceVersionEntity>();
+    for (const version of versions) {
+      const current = latestBySource.get(version.sourceId);
+      if (!current || version.versionNumber > current.versionNumber) {
+        latestBySource.set(version.sourceId, version);
+      }
+    }
+
+    return sources.map((source) => {
+      const latest = latestBySource.get(source.id) ?? null;
+      return {
+        id: source.id,
+        kind: source.kind,
+        label: source.label,
+        status: source.status,
+        latestVersion: latest
+          ? {
+              id: latest.id,
+              versionNumber: latest.versionNumber,
+              status: latest.status,
+              errorCode: latest.errorCode,
+              createdAt: latest.createdAt,
+            }
+          : null,
+        createdAt: source.createdAt,
+      };
+    });
+  }
+
+  /**
+   * Resolves an available version for extraction (same scoped-lookup shape
+   * as LeadFlowBriefingContentService.getAuthorizedVersionContent) and
+   * returns the owning source's settingsId, needed to enqueue a job.
+   */
+  async getAvailableVersionForExtraction(
+    ctx: RequestContext,
+    sourceId: string,
+    versionId: string,
+  ): Promise<{ settingsId: string; sourceId: string; versionId: string }> {
+    const workspaceId = this.requireWorkspaceId(ctx);
+    const sourceRepo = this.dataSource.getRepository(LeadFlowBriefingSourceEntity);
+    const versionRepo = this.dataSource.getRepository(LeadFlowBriefingSourceVersionEntity);
+
+    const source = await sourceRepo.findOne({
+      where: { id: sourceId, tenantId: ctx.tenantId, workspaceId },
+    });
+    if (!source) throw new NotFoundException('Briefing source not found.');
+
+    const version = await versionRepo.findOne({
+      where: { id: versionId, sourceId, tenantId: ctx.tenantId, workspaceId },
+    });
+    if (!version) throw new NotFoundException('Briefing source version not found.');
+    if (version.status !== LeadFlowBriefingSourceVersionStatus.Available) {
+      throw new ConflictException(
+        `Version is ${version.status}, only an available version can be extracted.`,
+      );
+    }
+
+    return { settingsId: source.settingsId, sourceId: source.id, versionId: version.id };
   }
 
   private mapSource(source: LeadFlowBriefingSourceEntity): BriefingSourceResponse {

@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Get,
@@ -23,8 +24,10 @@ import {
 } from './dto';
 import { LEADFLOW_BRIEFING_PERMISSIONS } from './leadflow-briefing.permissions';
 import { LeadFlowBriefingContentService } from './services/leadflow-briefing-content.service';
+import { LeadFlowBriefingExtractionJobService } from './services/leadflow-briefing-extraction-job.service';
 import { LeadFlowBriefingIngestionService } from './services/leadflow-briefing-ingestion.service';
 import { LeadFlowBriefingSourceService } from './services/leadflow-briefing-source.service';
+import { LeadFlowBriefingSuggestionService } from './services/leadflow-briefing-suggestion.service';
 
 const BRIEFING_UPLOAD_OPTIONS = {
   storage: memoryStorage(),
@@ -32,9 +35,9 @@ const BRIEFING_UPLOAD_OPTIONS = {
 };
 
 /**
- * Ingestion surface for LF-RF-F4-002 — upload/URL/paste sources and read
- * back their stored content. No review/apply endpoints here (F4-004); no
- * content interpretation (F4-003).
+ * Ingestion + review surface: upload/URL/paste sources (F4-002), read back
+ * their stored content, list sources/jobs, trigger extraction (enqueues the
+ * F4-003 worker's job), and review/apply/reject suggestions (F4-004).
  */
 @Controller('leadflow/briefing')
 @UseGuards(JwtAuthGuard, PermissionsGuard)
@@ -44,6 +47,8 @@ export class LeadFlowBriefingController {
     private readonly sourceService: LeadFlowBriefingSourceService,
     private readonly ingestionService: LeadFlowBriefingIngestionService,
     private readonly contentService: LeadFlowBriefingContentService,
+    private readonly jobService: LeadFlowBriefingExtractionJobService,
+    private readonly suggestionService: LeadFlowBriefingSuggestionService,
   ) {}
 
   @Post('sources')
@@ -114,5 +119,84 @@ export class LeadFlowBriefingController {
     }
     response.setHeader('Content-Type', result.mimeType);
     response.send(result.text);
+  }
+
+  @Get('settings/:settingsId/sources')
+  @RequireAnyPermission(
+    LEADFLOW_BRIEFING_PERMISSIONS.sourcesManage,
+    LEADFLOW_BRIEFING_PERMISSIONS.suggestionsReview,
+  )
+  listSources(
+    @RequestContextData() ctx: RequestContext,
+    @Param('settingsId') settingsId: string,
+  ) {
+    return this.sourceService.listSources(ctx, settingsId);
+  }
+
+  @Get('settings/:settingsId/jobs')
+  @RequireAnyPermission(
+    LEADFLOW_BRIEFING_PERMISSIONS.jobsManage,
+    LEADFLOW_BRIEFING_PERMISSIONS.suggestionsReview,
+  )
+  listJobs(
+    @RequestContextData() ctx: RequestContext,
+    @Param('settingsId') settingsId: string,
+  ) {
+    return this.jobService.listForSettings(ctx, settingsId);
+  }
+
+  @Post('sources/:sourceId/versions/:versionId/extract')
+  @RequireAnyPermission(LEADFLOW_BRIEFING_PERMISSIONS.jobsManage)
+  async extract(
+    @RequestContextData() ctx: RequestContext,
+    @Param('sourceId') sourceId: string,
+    @Param('versionId') versionId: string,
+  ) {
+    const resolved = await this.sourceService.getAvailableVersionForExtraction(
+      ctx,
+      sourceId,
+      versionId,
+    );
+    return this.jobService.enqueueJob(ctx, {
+      settingsId: resolved.settingsId,
+      sourceId: resolved.sourceId,
+      sourceVersionId: resolved.versionId,
+      createdById: ctx.userId ?? null,
+    });
+  }
+
+  @Get('settings/:settingsId/review')
+  @RequireAnyPermission(LEADFLOW_BRIEFING_PERMISSIONS.suggestionsReview)
+  review(
+    @RequestContextData() ctx: RequestContext,
+    @Param('settingsId') settingsId: string,
+  ) {
+    return this.suggestionService.listForReview(ctx, settingsId);
+  }
+
+  @Post('suggestions/:suggestionId/apply')
+  @RequireAnyPermission(LEADFLOW_BRIEFING_PERMISSIONS.suggestionsApply)
+  applySuggestion(
+    @RequestContextData() ctx: RequestContext,
+    @Param('suggestionId') suggestionId: string,
+  ) {
+    if (!ctx.userId) throw new BadRequestException('User context is required.');
+    return this.suggestionService.applySuggestion(ctx, {
+      suggestionId,
+      appliedById: ctx.userId,
+    });
+  }
+
+  @Post('suggestions/:suggestionId/reject')
+  @RequireAnyPermission(LEADFLOW_BRIEFING_PERMISSIONS.suggestionsReview)
+  rejectSuggestion(
+    @RequestContextData() ctx: RequestContext,
+    @Param('suggestionId') suggestionId: string,
+  ) {
+    if (!ctx.userId) throw new BadRequestException('User context is required.');
+    return this.suggestionService.rejectSuggestion(ctx, {
+      suggestionId,
+      decidedById: ctx.userId,
+    });
   }
 }

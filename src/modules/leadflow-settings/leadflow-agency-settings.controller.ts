@@ -11,6 +11,7 @@ import {
   CreateLeadFlowClientSettingsDto,
   LeadFlowClientSettingsResponse,
   LeadFlowSettingsValidationResponse,
+  PublishCompanyContextDto,
   UpdateLeadFlowClientSettingsDto,
   ValidateLeadFlowClientSettingsDto,
 } from './dto';
@@ -61,8 +62,15 @@ export class LeadFlowAgencySettingsController {
 
   @Post('company-context/publish')
   @RequirePermission('leadflow.settings.general.update.admin')
-  publishCompanyContext(@RequestContextData() ctx: RequestContext) {
-    return this.leadFlowClientSettingsService.publishCompanyContext(ctx);
+  publishCompanyContext(
+    @RequestContextData() ctx: RequestContext,
+    @Body() dto: PublishCompanyContextDto,
+  ) {
+    return this.leadFlowClientSettingsService.publishCompanyContext(
+      ctx,
+      undefined,
+      dto?.expectedDraftHash,
+    );
   }
 
   @Get('company-context/preview')

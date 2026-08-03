@@ -20,6 +20,8 @@ import type { RequestContext } from '../../../common/context/request-context.int
 import { AgencyClient } from '../../clients/entities';
 import { PlatformProductKey, TenantProductEntitlementEntity } from '../../platform';
 import {
+  CompanyContextFieldChange,
+  CompanyContextPreviewResponse,
   CreateLeadFlowClientSettingsDto,
   LeadFlowClientSettingsResponse,
   LeadFlowClientSummaryListResponse,
@@ -46,9 +48,19 @@ import {
   LeadFlowEnabledIntegrationsConfig,
   LeadFlowJsonObject,
 } from '../types/leadflow-settings.types';
+import {
+  getCompanyContextScalarFieldPaths,
+} from './company-context.service';
 import { LeadFlowBusinessModeTemplateService } from './leadflow-business-mode-template.service';
 import { CompanyContextService } from './company-context.service';
 import { InboxDomainOutboxEntity } from '../../inbox/entities/inbox-domain-outbox.entity';
+import {
+  LeadFlowBriefingContextSnapshotEntity,
+  LeadFlowBriefingSuggestionApplicationEntity,
+} from '../../leadflow-briefing/entities';
+import { LeadFlowBriefingSnapshotKind } from '../../leadflow-briefing/enums/leadflow-briefing-snapshot-kind.enum';
+
+const COMPANY_CONTEXT_LIST_FIELD_PATHS = ['offers', 'faq', 'links'];
 
 const AGENCY_CONNECTION = 'agency';
 const DEFAULT_LIMIT = 50;
@@ -381,7 +393,11 @@ export class LeadFlowClientSettingsService {
     return this.applySettingsUpdate(ctx, settings, dto);
   }
 
-  async publishCompanyContext(ctx: RequestContext, agencyClientId?: string) {
+  async publishCompanyContext(
+    ctx: RequestContext,
+    agencyClientId?: string,
+    expectedDraftHash?: string,
+  ) {
     const settings = agencyClientId
       ? await this.findSettings(ctx, agencyClientId)
       : await this.findAgencySettings(ctx);
@@ -401,11 +417,16 @@ export class LeadFlowClientSettingsService {
       const published = this.companyContextService.normalizePersisted(
         locked.companyContextDraft ?? {},
       );
+      const hash = this.companyContextService.hash(published);
+      if (expectedDraftHash && expectedDraftHash !== hash) {
+        throw new ConflictException(
+          'O rascunho mudou desde a pré-visualização. Atualize a pré-visualização antes de publicar.',
+        );
+      }
       locked.companyContextPublished = published;
       locked.companyContextPublishedVersion =
         (locked.companyContextPublishedVersion || 0) + 1;
-      locked.companyContextPublishedHash =
-        this.companyContextService.hash(published);
+      locked.companyContextPublishedHash = hash;
       locked.companyContextPublishedAt = new Date();
       locked.companyContextPublishedBy = ctx.userId ?? null;
       locked.updatedById = ctx.userId ?? null;
@@ -429,18 +450,139 @@ export class LeadFlowClientSettingsService {
           availableAt: new Date(),
         }),
       );
+      const snapshotRepo = manager.getRepository(
+        LeadFlowBriefingContextSnapshotEntity,
+      );
+      await snapshotRepo.save(
+        snapshotRepo.create({
+          tenantId: locked.tenantId,
+          workspaceId: locked.workspaceId,
+          settingsId: locked.id,
+          snapshotKind: LeadFlowBriefingSnapshotKind.Published,
+          draftValue: published,
+          draftHash: hash,
+          schemaVersion: 1,
+          publishedVersion: locked.companyContextPublishedVersion,
+          createdById: ctx.userId ?? null,
+        }),
+      );
       return mapLeadFlowClientSettingsResponse(locked);
     });
   }
 
-  async previewCompanyContext(ctx: RequestContext, agencyClientId?: string) {
+  async previewCompanyContext(
+    ctx: RequestContext,
+    agencyClientId?: string,
+  ): Promise<CompanyContextPreviewResponse> {
     const settings = agencyClientId
       ? await this.findSettings(ctx, agencyClientId)
       : await this.findAgencySettings(ctx);
     if (!settings) throw new NotFoundException('LeadFlow settings not found.');
-    return this.companyContextService.previewPersisted(
+    const draft = this.companyContextService.normalizePersisted(
       settings.companyContextDraft ?? {},
     );
+    const preview = this.companyContextService.previewPersisted(
+      settings.companyContextDraft ?? {},
+    );
+    const changes = await this.tagChangeOrigins(
+      settings.tenantId,
+      settings.workspaceId,
+      settings.id,
+      this.computeCompanyContextDiff(
+        settings.companyContextPublished ?? {},
+        draft,
+      ),
+    );
+    return {
+      ...preview,
+      changes,
+      hasChanges: changes.length > 0,
+      currentPublishedVersion: settings.companyContextPublishedVersion,
+      currentPublishedHash: settings.companyContextPublishedHash,
+    };
+  }
+
+  private getAtDottedPath(value: LeadFlowJsonObject, path: string): unknown {
+    return path
+      .split('.')
+      .reduce<unknown>(
+        (cursor, key) =>
+          cursor && typeof cursor === 'object'
+            ? (cursor as Record<string, unknown>)[key]
+            : undefined,
+        value,
+      );
+  }
+
+  private computeCompanyContextDiff(
+    previous: LeadFlowJsonObject,
+    next: LeadFlowJsonObject,
+  ): Array<Omit<CompanyContextFieldChange, 'origin'>> {
+    const changes: Array<Omit<CompanyContextFieldChange, 'origin'>> = [];
+    for (const fieldPath of [
+      ...getCompanyContextScalarFieldPaths(),
+      ...COMPANY_CONTEXT_LIST_FIELD_PATHS,
+    ]) {
+      const previousValue = this.getAtDottedPath(previous, fieldPath);
+      const nextValue = this.getAtDottedPath(next, fieldPath);
+      if (JSON.stringify(previousValue) !== JSON.stringify(nextValue)) {
+        changes.push({ fieldPath, previousValue, nextValue });
+      }
+    }
+    return changes;
+  }
+
+  private async tagChangeOrigins(
+    tenantId: string,
+    workspaceId: string,
+    settingsId: string,
+    changes: Array<Omit<CompanyContextFieldChange, 'origin'>>,
+  ): Promise<CompanyContextFieldChange[]> {
+    const scalarFieldPaths = new Set(getCompanyContextScalarFieldPaths());
+    const scalarChangedPaths = changes
+      .map((change) => change.fieldPath)
+      .filter((fieldPath) => scalarFieldPaths.has(fieldPath));
+
+    const applicationByFieldPath = new Map<
+      string,
+      LeadFlowBriefingSuggestionApplicationEntity
+    >();
+    if (scalarChangedPaths.length > 0) {
+      const applications = await this.dataSource
+        .getRepository(LeadFlowBriefingSuggestionApplicationEntity)
+        .find({
+          where: {
+            tenantId,
+            workspaceId,
+            settingsId,
+            fieldPath: In(scalarChangedPaths),
+          },
+          order: { createdAt: 'DESC' },
+        });
+      for (const application of applications) {
+        if (!applicationByFieldPath.has(application.fieldPath)) {
+          applicationByFieldPath.set(application.fieldPath, application);
+        }
+      }
+    }
+
+    return changes.map((change) => {
+      const application = applicationByFieldPath.get(change.fieldPath);
+      if (
+        application &&
+        JSON.stringify(application.appliedValue) ===
+          JSON.stringify(change.nextValue)
+      ) {
+        return {
+          ...change,
+          origin: 'suggestion',
+          suggestionId: application.suggestionId,
+          appliedById: application.appliedById,
+          appliedAt: application.createdAt,
+        };
+      }
+      return { ...change, origin: 'manual' };
+    });
   }
 
   async validateAgencySettings(

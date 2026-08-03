@@ -30,9 +30,10 @@ import { SsrfSafeUrlFetcherService } from './services/ssrf-safe-url-fetcher.serv
 /**
  * F4-001 laid the RFC/entities/migration/contracts. F4-002 added the
  * ingestion surface (upload/URL/paste, SSRF guard, ClamAV scan, quota).
- * F4-003 adds the worker that claims queued extraction jobs and turns
- * already-safe source-version content into suggestion rows. Still no
- * review/apply endpoints — that's F4-004.
+ * F4-003 added the worker that claims queued extraction jobs and turns
+ * already-safe source-version content into suggestion rows. F4-004 adds
+ * the review surface: list sources/jobs, trigger extraction, list
+ * suggestions+gaps, apply/reject.
  */
 @Module({
   imports: [

@@ -30,6 +30,40 @@ export function isForbiddenCompanyContextKey(key: string): boolean {
   return FORBIDDEN_KEY.test(key);
 }
 
+const SCALAR_FIELD_PATHS = [
+  'identity.publicName',
+  'identity.legalName',
+  'identity.summary',
+  'identity.valueProposition',
+  'identity.differentiators',
+  'identity.targetAudience',
+  'identity.languages',
+  'identity.timezone',
+  'identity.regionsServed',
+  'service.businessHours',
+  'service.handoffRules',
+  'service.serviceLevel',
+  'service.emergencyRules',
+  'service.unsupportedRequests',
+  'qualification.conversionGoal',
+  'qualification.preferredCta',
+  'qualification.essentialQuestions',
+  'qualification.qualifiedCriteria',
+  'qualification.disqualificationCriteria',
+  'qualification.priorityServices',
+  'qualification.urgencySignals',
+  'policies',
+];
+
+/**
+ * Fixed scalar leaf-field catalog, used only for "gap" detection (a field
+ * with no value at all). Suggestion field-path validation (`isValidFieldPath`)
+ * stays broader — it accepts anything under a valid root key, not just these.
+ */
+export function getCompanyContextScalarFieldPaths(): string[] {
+  return [...SCALAR_FIELD_PATHS];
+}
+
 @Injectable()
 export class CompanyContextService {
   normalize(value: LeadFlowJsonObject): LeadFlowJsonObject {

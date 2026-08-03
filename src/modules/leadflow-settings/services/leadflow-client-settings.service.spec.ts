@@ -1,4 +1,4 @@
-import { ForbiddenException, NotFoundException } from '@nestjs/common';
+import { ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { Not } from 'typeorm';
 import type { DataSource, EntityManager, Repository } from 'typeorm';
 import type { RequestContext } from '../../../common/context/request-context.interface';
@@ -11,6 +11,12 @@ import { LeadFlowSettingsStatus } from '../enums/leadflow-settings-status.enum';
 import { CompanyContextService } from './company-context.service';
 import type { LeadFlowBusinessModeTemplateService } from './leadflow-business-mode-template.service';
 import { LeadFlowClientSettingsService } from './leadflow-client-settings.service';
+import { InboxDomainOutboxEntity } from '../../inbox/entities/inbox-domain-outbox.entity';
+import {
+  LeadFlowBriefingContextSnapshotEntity,
+  LeadFlowBriefingSuggestionApplicationEntity,
+} from '../../leadflow-briefing/entities';
+import { LeadFlowBriefingSnapshotKind } from '../../leadflow-briefing/enums/leadflow-briefing-snapshot-kind.enum';
 
 describe('LeadFlowClientSettingsService tenant/workspace isolation', () => {
   const ctx: RequestContext = {
@@ -341,5 +347,269 @@ describe('LeadFlowClientSettingsService company capacity', () => {
     } as never);
 
     expect(dataSource.transaction).not.toHaveBeenCalled();
+  });
+});
+
+describe('LeadFlowClientSettingsService.previewCompanyContext', () => {
+  const ctx: RequestContext = {
+    tenantId: 'tenant-a',
+    workspaceId: 'workspace-a',
+    userId: 'user-a',
+  };
+
+  function buildSettings(overrides: Record<string, unknown> = {}) {
+    return {
+      id: 'settings-1',
+      tenantId: 'tenant-a',
+      workspaceId: 'workspace-a',
+      companyContextDraft: {},
+      companyContextPublished: {},
+      companyContextPublishedVersion: 1,
+      companyContextPublishedHash: 'prev-hash',
+      ...overrides,
+    } as unknown as LeadFlowClientSettingsEntity;
+  }
+
+  function setup(
+    settings: LeadFlowClientSettingsEntity | null,
+    applications: Record<string, unknown>[] = [],
+  ) {
+    const settingsRepository = {
+      findOne: jest.fn().mockResolvedValue(settings),
+    } as unknown as Repository<LeadFlowClientSettingsEntity>;
+    const applicationRepo = {
+      find: jest.fn().mockResolvedValue(applications),
+    };
+    const dataSource = {
+      getRepository: jest.fn((entity: unknown) => {
+        if (entity === LeadFlowBriefingSuggestionApplicationEntity)
+          return applicationRepo;
+        throw new Error('Unexpected repository requested in test.');
+      }),
+    };
+    const service = new LeadFlowClientSettingsService(
+      dataSource as unknown as DataSource,
+      {} as unknown as Repository<AgencyClient>,
+      settingsRepository,
+      {} as unknown as Repository<TenantProductEntitlementEntity>,
+      {} as LeadFlowBusinessModeTemplateService,
+      new CompanyContextService(),
+    );
+    return { service, settingsRepository, applicationRepo };
+  }
+
+  it('reports no changes when the draft equals the last published snapshot', async () => {
+    const { service } = setup(
+      buildSettings({
+        companyContextDraft: { identity: { publicName: 'Acme' } },
+        companyContextPublished: { identity: { publicName: 'Acme' } },
+      }),
+    );
+
+    const result = await service.previewCompanyContext(ctx);
+
+    expect(result.hasChanges).toBe(false);
+    expect(result.changes).toEqual([]);
+  });
+
+  it('tags a changed scalar field "suggestion" when a matching applied suggestion exists', async () => {
+    const { service } = setup(
+      buildSettings({
+        companyContextDraft: { identity: { publicName: 'New Name' } },
+        companyContextPublished: { identity: { publicName: 'Old Name' } },
+      }),
+      [
+        {
+          fieldPath: 'identity.publicName',
+          appliedValue: 'New Name',
+          suggestionId: 'sug-1',
+          appliedById: 'user-ai',
+          createdAt: new Date('2026-01-01T00:00:00Z'),
+        },
+      ],
+    );
+
+    const result = await service.previewCompanyContext(ctx);
+
+    expect(result.changes).toContainEqual(
+      expect.objectContaining({
+        fieldPath: 'identity.publicName',
+        origin: 'suggestion',
+        suggestionId: 'sug-1',
+        appliedById: 'user-ai',
+      }),
+    );
+  });
+
+  it('tags a changed scalar field "manual" when the latest application no longer matches the draft value', async () => {
+    const { service } = setup(
+      buildSettings({
+        companyContextDraft: { identity: { publicName: 'Manually Typed' } },
+        companyContextPublished: { identity: { publicName: 'Old Name' } },
+      }),
+      [
+        {
+          fieldPath: 'identity.publicName',
+          appliedValue: 'Something Else Entirely',
+          suggestionId: 'sug-1',
+          appliedById: 'user-ai',
+          createdAt: new Date('2026-01-01T00:00:00Z'),
+        },
+      ],
+    );
+
+    const result = await service.previewCompanyContext(ctx);
+
+    expect(result.changes).toContainEqual(
+      expect.objectContaining({
+        fieldPath: 'identity.publicName',
+        origin: 'manual',
+      }),
+    );
+  });
+
+  it('tags a changed list field (offers) "manual" regardless of applications', async () => {
+    const { service } = setup(
+      buildSettings({
+        companyContextDraft: { offers: ['Consultoria'] },
+        companyContextPublished: { offers: [] },
+      }),
+    );
+
+    const result = await service.previewCompanyContext(ctx);
+
+    expect(result.changes).toContainEqual(
+      expect.objectContaining({ fieldPath: 'offers', origin: 'manual' }),
+    );
+  });
+
+  it('404s when settings do not exist for this tenant', async () => {
+    const { service } = setup(null);
+    await expect(service.previewCompanyContext(ctx)).rejects.toThrow(
+      NotFoundException,
+    );
+  });
+});
+
+describe('LeadFlowClientSettingsService.publishCompanyContext', () => {
+  const ctx: RequestContext = {
+    tenantId: 'tenant-a',
+    workspaceId: 'workspace-a',
+    userId: 'user-a',
+  };
+
+  const baseSettings = {
+    id: 'settings-1',
+    tenantId: 'tenant-a',
+    workspaceId: 'workspace-a',
+    companyContextDraft: { identity: { publicName: 'Acme' } },
+    companyContextPublished: {},
+    companyContextPublishedVersion: 0,
+    companyContextPublishedHash: null,
+  };
+
+  function setupPublish(settings: Record<string, unknown> | null) {
+    const locked = settings ? { ...settings } : null;
+    const settingsEntityRepo = {
+      findOne: jest.fn().mockResolvedValue(locked),
+      save: jest.fn().mockImplementation((row) => Promise.resolve(row)),
+    };
+    const outboxRepo = {
+      create: jest.fn((row) => row),
+      save: jest.fn().mockResolvedValue({ id: 'outbox-1' }),
+    };
+    const snapshotRepo = {
+      create: jest.fn((row) => row),
+      save: jest.fn().mockResolvedValue({ id: 'snapshot-1' }),
+    };
+    const manager = {
+      getRepository: jest.fn((entity: unknown) => {
+        if (entity === LeadFlowClientSettingsEntity) return settingsEntityRepo;
+        if (entity === InboxDomainOutboxEntity) return outboxRepo;
+        if (entity === LeadFlowBriefingContextSnapshotEntity) return snapshotRepo;
+        throw new Error('Unexpected repository requested in test.');
+      }),
+    };
+    const outerSettingsRepo = {
+      findOne: jest.fn().mockResolvedValue(settings),
+    } as unknown as Repository<LeadFlowClientSettingsEntity>;
+    const dataSource = {
+      transaction: jest.fn(async (run: (m: typeof manager) => Promise<unknown>) =>
+        run(manager),
+      ),
+    };
+    const service = new LeadFlowClientSettingsService(
+      dataSource as unknown as DataSource,
+      {} as unknown as Repository<AgencyClient>,
+      outerSettingsRepo,
+      {} as unknown as Repository<TenantProductEntitlementEntity>,
+      {} as LeadFlowBusinessModeTemplateService,
+      new CompanyContextService(),
+    );
+    return { service, settingsEntityRepo, outboxRepo, snapshotRepo };
+  }
+
+  it('rejects publish when expectedDraftHash does not match the current draft hash (optimistic concurrency)', async () => {
+    const { service, settingsEntityRepo } = setupPublish(baseSettings);
+
+    await expect(
+      service.publishCompanyContext(ctx, undefined, 'stale-hash'),
+    ).rejects.toThrow(ConflictException);
+    expect(settingsEntityRepo.save).not.toHaveBeenCalled();
+  });
+
+  it('publishes when expectedDraftHash matches the current draft hash', async () => {
+    const { service, settingsEntityRepo } = setupPublish(baseSettings);
+    const preview = new CompanyContextService().previewPersisted(
+      baseSettings.companyContextDraft,
+    );
+
+    await service.publishCompanyContext(ctx, undefined, preview.hash);
+
+    expect(settingsEntityRepo.save).toHaveBeenCalled();
+  });
+
+  it('publishes when expectedDraftHash is omitted', async () => {
+    const { service, settingsEntityRepo } = setupPublish(baseSettings);
+
+    await service.publishCompanyContext(ctx);
+
+    expect(settingsEntityRepo.save).toHaveBeenCalled();
+  });
+
+  it('hash is stable: hashing the same normalized draft twice yields the same hash', () => {
+    const companyContextService = new CompanyContextService();
+    const normalized = companyContextService.normalizePersisted(
+      baseSettings.companyContextDraft,
+    );
+
+    expect(companyContextService.hash(normalized)).toEqual(
+      companyContextService.hash(normalized),
+    );
+  });
+
+  it('records a Published-kind snapshot row with the new publishedVersion', async () => {
+    const { service, snapshotRepo } = setupPublish({
+      ...baseSettings,
+      companyContextPublishedVersion: 3,
+    });
+
+    await service.publishCompanyContext(ctx);
+
+    expect(snapshotRepo.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        snapshotKind: LeadFlowBriefingSnapshotKind.Published,
+        publishedVersion: 4,
+        settingsId: 'settings-1',
+      }),
+    );
+  });
+
+  it('404s when settings do not exist for this tenant', async () => {
+    const { service } = setupPublish(null);
+
+    await expect(service.publishCompanyContext(ctx)).rejects.toThrow(
+      NotFoundException,
+    );
   });
 });

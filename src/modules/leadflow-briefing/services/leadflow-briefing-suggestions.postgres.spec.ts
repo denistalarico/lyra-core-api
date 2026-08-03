@@ -184,4 +184,65 @@ run('LeadFlow Briefing suggestions PostgreSQL', () => {
     expect(secondSuggestion.status).toBe(LeadFlowBriefingSuggestionStatus.Pending);
     expect(secondSuggestion.conflictsWithSuggestionId).toBe(firstSuggestion.id);
   });
+
+  it('listForReview: conflito, lacuna, aplicação parcial e refresh — round trip completo', async () => {
+    const contradictoryField = 'identity.differentiators';
+    const untouchedField = 'identity.timezone';
+    const gapField = 'qualification.conversionGoal';
+
+    const first = await makeJob();
+    const [firstSuggestion] = await suggestionService.recordSuggestions(ctx(), {
+      extractionJobId: first.job.id,
+      settingsId,
+      sourceVersionId: first.version.id,
+      suggestions: [
+        { fieldPath: contradictoryField, suggestedValue: 'Atendimento 24h' },
+        { fieldPath: untouchedField, suggestedValue: 'America/Sao_Paulo' },
+      ],
+    });
+
+    // gap: before any suggestion targets it, a truly-empty scalar field shows up.
+    const beforeSecondJob = await suggestionService.listForReview(ctx(), settingsId);
+    expect(beforeSecondJob.gaps).toContain(gapField);
+
+    // aplicação parcial: apply one of two pending suggestions from the same job.
+    await suggestionService.applySuggestion(ctx(), {
+      suggestionId: firstSuggestion.id,
+      appliedById: randomUUID(),
+    });
+
+    const afterPartialApply = await suggestionService.listForReview(ctx(), settingsId);
+    const untouchedRow = afterPartialApply.suggestions.find(
+      (row) => row.fieldPath === untouchedField,
+    );
+    expect(untouchedRow?.status).toBe(LeadFlowBriefingSuggestionStatus.Pending);
+
+    // refresh: the just-applied suggestion is immediately visible as Applied, no caching.
+    const appliedRow = afterPartialApply.suggestions.find(
+      (row) => row.fieldPath === contradictoryField,
+    );
+    expect(appliedRow?.status).toBe(LeadFlowBriefingSuggestionStatus.Applied);
+    expect(appliedRow?.decidedById).toBeTruthy();
+    expect(appliedRow?.decidedAt).toBeTruthy();
+
+    // conflito: a second job proposes a contradictory value for the already-applied field.
+    const second = await makeJob();
+    const [conflictingSuggestion] = await suggestionService.recordSuggestions(ctx(), {
+      extractionJobId: second.job.id,
+      settingsId,
+      sourceVersionId: second.version.id,
+      suggestions: [{ fieldPath: contradictoryField, suggestedValue: 'Atendimento em horário comercial' }],
+    });
+
+    const afterConflict = await suggestionService.listForReview(ctx(), settingsId);
+    const conflictRow = afterConflict.suggestions.find((row) => row.id === conflictingSuggestion.id);
+    expect(conflictRow?.status).toBe(LeadFlowBriefingSuggestionStatus.Pending);
+    expect(conflictRow?.conflictsWithSuggestionId).toBe(firstSuggestion.id);
+    expect(conflictRow?.currentValue).toBe('Atendimento 24h');
+    expect(conflictRow?.suggestedValue).toBe('Atendimento em horário comercial');
+
+    // lacuna: a field with a pending suggestion is never double-counted as a gap.
+    expect(afterConflict.gaps).not.toContain(untouchedField);
+    expect(afterConflict.gaps).not.toContain(contradictoryField);
+  });
 });
