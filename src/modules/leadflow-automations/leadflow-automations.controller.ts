@@ -32,6 +32,7 @@ import {
   ExecuteCrmAutomationActionDto,
   mapRunDetail,
   PatchAutomationDto,
+  PublishAutomationDto,
   ProvisionAutomationDto,
   UpdateLeadFlowAutomationGlobalConfigDto,
 } from './dto';
@@ -161,8 +162,9 @@ export class LeadFlowAutomationsController {
   publish(
     @RequestContextData() ctx: RequestContext,
     @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: PublishAutomationDto,
   ): Promise<LeadFlowAutomationDetailResponse> {
-    return this.automationService.publish(ctx, id);
+    return this.automationService.publish(ctx, id, dto);
   }
 
   @Get(':id/runtime-config')

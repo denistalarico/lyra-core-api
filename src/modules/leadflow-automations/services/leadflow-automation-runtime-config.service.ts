@@ -48,6 +48,10 @@ export class LeadFlowAutomationRuntimeConfigService {
     automation: LeadFlowAutomationEntity,
     settings: LeadFlowClientSettingsEntity | null,
     globalDefaults: LeadFlowAutomationGlobalDefaultsSnapshot = FALLBACK_GLOBAL_DEFAULTS,
+    publication: LeadFlowAutomationRuntimeContract['publication'] = {
+      currentVersion: 0,
+      nextVersion: 1,
+    },
   ): LeadFlowAutomationRuntimeConfigResponse {
     const recipe = getRecipeByKey(automation.recipeKey);
     const effective = resolveLeadFlowAutomationEffectiveConfig(globalDefaults, {
@@ -100,6 +104,7 @@ export class LeadFlowAutomationRuntimeConfigService {
       safetyRules: recipe ? [...recipe.safetyRules] : [],
       readiness: automation.readiness ?? {},
       publishedVersionId: automation.publishedVersionId,
+      publication,
     };
   }
 

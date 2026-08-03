@@ -45,6 +45,7 @@ import {
   mapRun,
   mapRunDetail,
   PatchAutomationDto,
+  PublishAutomationDto,
   ProvisionAutomationDto,
 } from '../dto';
 import type {
@@ -96,6 +97,28 @@ const AGENCY_CONNECTION = 'agency';
 
 /** Actions that reach out to the lead and therefore need a channel to be ready. */
 const OUTBOUND_ACTIONS = new Set(['send_message', 'schedule_followup']);
+
+/**
+ * Keeps a stale review from silently creating a newer immutable snapshot.
+ * Exported for the narrow contract test; the service remains the only caller
+ * that reads the current version from persistence.
+ */
+export function assertExpectedPublicationVersion(
+  expectedVersion: number | undefined,
+  currentVersion: number,
+): void {
+  if (expectedVersion === undefined || expectedVersion === currentVersion) {
+    return;
+  }
+
+  throw new ConflictException({
+    code: 'AUTOMATION_PUBLICATION_VERSION_CONFLICT',
+    message:
+      'Uma versão mais recente foi publicada. Recarregue a revisão antes de publicar novamente.',
+    expectedVersion,
+    currentVersion,
+  });
+}
 
 interface ActiveContext {
   settings: LeadFlowClientSettingsEntity;
@@ -409,9 +432,13 @@ export class LeadFlowAutomationService {
   async publish(
     ctx: RequestContext,
     id: string,
+    dto: PublishAutomationDto = {},
   ): Promise<LeadFlowAutomationDetailResponse> {
     const active = await this.resolveActiveContext(ctx);
     const automation = await this.findScopedAutomation(ctx, active, id);
+
+    const currentVersion = await this.currentVersionNumber(automation.id);
+    assertExpectedPublicationVersion(dto.expectedVersion, currentVersion);
 
     const globalDefaults = await this.globalConfigService.getCurrent(
       active.settings,
@@ -420,19 +447,35 @@ export class LeadFlowAutomationService {
       automation,
       active.settings,
       globalDefaults,
+      { currentVersion, nextVersion: currentVersion + 1 },
     );
 
-    const nextVersion = await this.nextVersionNumber(automation.id);
-    const version = await this.versionsRepository.save(
-      this.versionsRepository.create({
-        tenantId: automation.tenantId,
-        automationId: automation.id,
-        version: nextVersion,
-        status: LeadFlowAutomationVersionStatus.Published,
-        snapshot,
-        createdById: ctx.userId ?? null,
-      }),
-    );
+    const nextVersion = currentVersion + 1;
+    let version: LeadFlowAutomationVersionEntity;
+    try {
+      version = await this.versionsRepository.save(
+        this.versionsRepository.create({
+          tenantId: automation.tenantId,
+          automationId: automation.id,
+          version: nextVersion,
+          status: LeadFlowAutomationVersionStatus.Published,
+          snapshot,
+          createdById: ctx.userId ?? null,
+        }),
+      );
+    } catch (error) {
+      // The unique automation/version index closes the tiny read→insert race
+      // between two tabs that reviewed the same version concurrently.
+      if (this.isPublicationVersionConflict(error)) {
+        throw new ConflictException({
+          code: 'AUTOMATION_PUBLICATION_VERSION_CONFLICT',
+          message:
+            'Outra publicação foi concluída antes desta. Recarregue a revisão antes de tentar novamente.',
+          expectedVersion: currentVersion,
+        });
+      }
+      throw error;
+    }
 
     automation.publishedVersionId = version.id;
     automation.updatedById = ctx.userId ?? null;
@@ -455,6 +498,7 @@ export class LeadFlowAutomationService {
       automation,
       active.settings,
       globalDefaults,
+      await this.publicationPreview(automation.id),
     );
   }
 
@@ -475,11 +519,14 @@ export class LeadFlowAutomationService {
     const globalDefaults = await this.globalConfigService.getCurrent(
       active.settings,
     );
-    const contracts = automations.map((automation) =>
-      this.runtimeConfigService.buildAutomationContract(
-        automation,
-        active.settings,
-        globalDefaults,
+    const contracts = await Promise.all(
+      automations.map(async (automation) =>
+        this.runtimeConfigService.buildAutomationContract(
+          automation,
+          active.settings,
+          globalDefaults,
+          await this.publicationPreview(automation.id),
+        ),
       ),
     );
 
@@ -1299,13 +1346,29 @@ export class LeadFlowAutomationService {
     );
   }
 
-  private async nextVersionNumber(automationId: string): Promise<number> {
+  private async currentVersionNumber(automationId: string): Promise<number> {
     const latest = await this.versionsRepository.findOne({
       where: { automationId },
       order: { version: 'DESC' },
     });
 
-    return (latest?.version ?? 0) + 1;
+    return latest?.version ?? 0;
+  }
+
+  private async publicationPreview(
+    automationId: string,
+  ): Promise<LeadFlowAutomationRuntimeConfigResponse['publication']> {
+    const currentVersion = await this.currentVersionNumber(automationId);
+    return { currentVersion, nextVersion: currentVersion + 1 };
+  }
+
+  private isPublicationVersionConflict(error: unknown): boolean {
+    return (
+      typeof error === 'object' &&
+      error !== null &&
+      'code' in error &&
+      (error as { code?: unknown }).code === '23505'
+    );
   }
 
   private async assertDeveloper(ctx: RequestContext): Promise<void> {

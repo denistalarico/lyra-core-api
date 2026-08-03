@@ -367,6 +367,11 @@ export interface LeadFlowAutomationRuntimeContract {
   safetyRules: string[];
   readiness: LeadFlowAutomationReadiness;
   publishedVersionId: string | null;
+  /** Immutable snapshot version currently reviewed by the operator. */
+  publication?: {
+    currentVersion: number;
+    nextVersion: number;
+  };
 }
 
 /** The structural, non-optional LeadFlow rule surfaced in every context contract. */
