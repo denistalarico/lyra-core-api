@@ -89,6 +89,8 @@ export class LeadFlowBriefingSourceService {
           checksum: input.checksum ?? null,
           safeFilename: input.safeFilename ?? null,
           createdById: input.createdById,
+          ...(input.status ? { status: input.status } : {}),
+          ...(input.errorCode !== undefined ? { errorCode: input.errorCode } : {}),
         }),
       );
 

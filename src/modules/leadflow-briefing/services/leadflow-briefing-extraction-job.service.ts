@@ -60,7 +60,13 @@ export class LeadFlowBriefingExtractionJobService {
     ctx: RequestContext,
     jobId: string,
     to: LeadFlowBriefingJobStatus,
-    options: { lastError?: string } = {},
+    options: {
+      lastError?: string;
+      /** Backoff target for a Failed -> Queued retry. Defaults to now() when omitted. */
+      availableAt?: Date;
+      /** Records the reserved/actual provider cost alongside a Succeeded/Failed transition. */
+      costBudgetCents?: number;
+    } = {},
   ): Promise<BriefingExtractionJobResponse> {
     const workspaceId = this.requireWorkspaceId(ctx);
 
@@ -86,14 +92,18 @@ export class LeadFlowBriefingExtractionJobService {
         case LeadFlowBriefingJobStatus.Succeeded:
           job.completedAt = now;
           job.lockedAt = null;
+          if (options.costBudgetCents !== undefined)
+            job.costBudgetCents = options.costBudgetCents;
           break;
         case LeadFlowBriefingJobStatus.Failed:
           job.failedAt = now;
           job.lockedAt = null;
           if (options.lastError) job.lastError = options.lastError;
+          if (options.costBudgetCents !== undefined)
+            job.costBudgetCents = options.costBudgetCents;
           break;
         case LeadFlowBriefingJobStatus.Queued:
-          job.availableAt = now;
+          job.availableAt = options.availableAt ?? now;
           job.lockedAt = null;
           break;
         case LeadFlowBriefingJobStatus.Cancelled:

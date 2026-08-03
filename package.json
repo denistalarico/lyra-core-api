@@ -54,6 +54,7 @@
     "otplib": "^13.4.0",
     "passport": "^0.7.0",
     "passport-jwt": "^4.0.1",
+    "pdf-parse": "^1.1.1",
     "pg": "^8.20.0",
     "playwright": "^1.60.0",
     "qrcode": "^1.5.4",
@@ -64,6 +65,7 @@
     "socket.io": "^4.8.3",
     "socket.io-client": "^4.8.3",
     "typeorm": "^0.3.28",
+    "undici": "^7.29.0",
     "web-push": "^3.6.7"
   },
   "devDependencies": {
@@ -79,6 +81,7 @@
     "@types/node": "^24.0.0",
     "@types/nodemailer": "^8.0.0",
     "@types/passport-jwt": "^4.0.1",
+    "@types/pdf-parse": "^1.1.5",
     "@types/pg": "^8.20.0",
     "@types/qrcode": "^1.5.6",
     "@types/sanitize-html": "^2.16.1",

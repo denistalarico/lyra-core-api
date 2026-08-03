@@ -1,5 +1,6 @@
 import type { LeadFlowSettingsContextType } from '../../leadflow-settings/enums/leadflow-settings-context-type.enum';
 import type { LeadFlowBriefingSourceKind } from '../enums/leadflow-briefing-source-kind.enum';
+import type { LeadFlowBriefingSourceVersionStatus } from '../enums/leadflow-briefing-source-version-status.enum';
 
 /**
  * Internal service contracts for the leadflow-briefing module. No HTTP
@@ -37,6 +38,14 @@ export interface CreateBriefingSourceVersionInput {
   checksum?: string | null;
   safeFilename?: string | null;
   createdById: string | null;
+  /**
+   * Defaults to Pending (the F4-001 behavior) when omitted. F4-002's
+   * ingestion flow validates/scans/uploads content BEFORE this call, so it
+   * passes Available directly — the row is only ever created once the
+   * content is already known-safe, never inserted first and validated after.
+   */
+  status?: LeadFlowBriefingSourceVersionStatus;
+  errorCode?: string | null;
 }
 
 export interface BriefingSourceVersionResponse {
