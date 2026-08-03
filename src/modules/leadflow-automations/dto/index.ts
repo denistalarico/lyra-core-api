@@ -28,6 +28,12 @@ export {
   type LeadFlowAutomationRecipeResponse,
 } from './leadflow-automation-recipe-response.dto';
 export {
+  buildAutomationCatalogItems,
+  paginateAutomationCatalog,
+  type LeadFlowAutomationCatalogItemResponse,
+  type LeadFlowAutomationCatalogResponse,
+} from './leadflow-automation-catalog-response.dto';
+export {
   type LeadFlowAutomationDryRunResponse,
   type LeadFlowAutomationLogEntry,
   type LeadFlowAutomationLogsResponse,

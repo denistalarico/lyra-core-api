@@ -32,8 +32,11 @@ import { CrmStageTransitionPolicyService } from '../../crm/services/crm-stage-tr
 import {
   DryRunAutomationDto,
   LeadFlowAutomationDetailResponse,
+  LeadFlowAutomationCatalogResponse,
   LeadFlowAutomationListResponse,
   LeadFlowAutomationRecipeListResponse,
+  buildAutomationCatalogItems,
+  paginateAutomationCatalog,
   LeadFlowAutomationRunDetailResponse,
   LeadFlowAutomationRunListResponse,
   mapAutomationDetail,
@@ -168,6 +171,57 @@ export class LeadFlowAutomationService {
       runtimeAvailable: isRuntimeAvailable(),
       items: recipes.map((recipe) =>
         mapAutomationRecipe(recipe, active.businessModeKey),
+      ),
+    };
+  }
+
+  /**
+   * Catalog projection used by the Business Mode discovery surface. It makes a
+   * single scoped instance read for the requested recipe page, then keeps the
+   * recipe contract and each instance's effective lifecycle side by side.
+   */
+  async listCatalog(
+    ctx: RequestContext,
+    pagination: { page?: number; pageSize?: number } = {},
+  ): Promise<LeadFlowAutomationCatalogResponse> {
+    const active = await this.resolveActiveContext(ctx);
+    const canDeveloper = await this.can(
+      ctx,
+      LEADFLOW_AUTOMATIONS_PERMISSIONS.developerManage,
+    );
+    const recipes = this.recipeService
+      .listRecipes()
+      .filter((recipe) => !recipe.isDeveloperOnly || canDeveloper);
+    const page = paginateAutomationCatalog(recipes, pagination);
+    const pageRecipes = page.items;
+    const recipeKeys = pageRecipes.map((recipe) => recipe.key);
+    const automations = recipeKeys.length
+      ? await this.automationsRepository.find({
+          where: { ...this.scopeWhere(ctx, active), recipeKey: In(recipeKeys) },
+          order: { createdAt: 'ASC' },
+        })
+      : [];
+    const instances = await Promise.all(
+      automations.map(async (automation) => ({
+        ...mapAutomationSummary(automation),
+        lifecycle: await this.lifecycleWithChannelAvailability(
+          automation,
+          active,
+        ),
+      })),
+    );
+
+    return {
+      businessModeKey: active.businessModeKey,
+      isCustomBusinessMode: active.isCustomBusinessMode,
+      runtimeAvailable: isRuntimeAvailable(),
+      page: page.page,
+      pageSize: page.pageSize,
+      total: page.total,
+      items: buildAutomationCatalogItems(
+        pageRecipes,
+        instances,
+        active.businessModeKey,
       ),
     };
   }

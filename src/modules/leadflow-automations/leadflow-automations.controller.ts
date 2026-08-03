@@ -7,6 +7,7 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import { RequestContextData } from '../../common/context/request-context.decorator';
@@ -19,6 +20,7 @@ import {
 } from '../permissions';
 import type {
   LeadFlowAutomationDetailResponse,
+  LeadFlowAutomationCatalogResponse,
   LeadFlowAutomationListResponse,
   LeadFlowAutomationRecipeListResponse,
   LeadFlowAutomationRunDetailResponse,
@@ -56,6 +58,19 @@ export class LeadFlowAutomationsController {
     @RequestContextData() ctx: RequestContext,
   ): Promise<LeadFlowAutomationRecipeListResponse> {
     return this.automationService.listRecipes(ctx);
+  }
+
+  @Get('catalog')
+  @RequirePermission(LEADFLOW_AUTOMATIONS_PERMISSIONS.view)
+  listCatalog(
+    @RequestContextData() ctx: RequestContext,
+    @Query('page') page?: string,
+    @Query('pageSize') pageSize?: string,
+  ): Promise<LeadFlowAutomationCatalogResponse> {
+    return this.automationService.listCatalog(ctx, {
+      page: parsePositiveInteger(page),
+      pageSize: parsePositiveInteger(pageSize),
+    });
   }
 
   @Get()
@@ -201,4 +216,10 @@ export class LeadFlowAutomationsController {
     );
     return mapRunDetail(run, attempts);
   }
+}
+
+function parsePositiveInteger(value: string | undefined): number | undefined {
+  if (!value || !/^\d+$/.test(value)) return undefined;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
 }
