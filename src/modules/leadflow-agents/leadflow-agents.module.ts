@@ -19,6 +19,7 @@ import { LeadFlowAgentRuntimeConfigService } from './services/leadflow-agent-run
 import { LeadFlowAgentService } from './services/leadflow-agent.service';
 import { LeadFlowAgentBindingReconcilerService } from './services/leadflow-agent-binding-reconciler.service';
 import { InboxChannelEntity } from '../inbox/entities/inbox-channel.entity';
+import { InboxConversationEntity } from '../inbox/entities/inbox-conversation.entity';
 import { InboxDomainOutboxEntity } from '../inbox/entities/inbox-domain-outbox.entity';
 import { OperationsRoomStateService } from './services/operations-room-state.service';
 import { OperationsRoomEventBusService } from './realtime/operations-room-event-bus.service';
@@ -43,6 +44,7 @@ import { OperationsRoomRealtimeMetrics } from './realtime/operations-room-realti
         AgencyUserSessionEntity,
         AgencyWorkspaceUserEntity,
         InboxChannelEntity,
+        InboxConversationEntity,
         InboxDomainOutboxEntity,
       ],
       'agency',

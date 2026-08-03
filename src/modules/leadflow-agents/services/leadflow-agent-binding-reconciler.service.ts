@@ -17,6 +17,7 @@ import { LeadFlowAgentStatus } from '../enums/leadflow-agent-status.enum';
 export type BindingReconcileTrigger =
   | 'agent_published'
   | 'agent_activated'
+  | 'agent_archived'
   | 'channel_connected'
   | 'channel_reconnected'
   | 'channel_resumed'

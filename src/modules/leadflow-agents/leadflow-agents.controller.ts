@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   ParseUUIDPipe,
@@ -158,6 +159,33 @@ export class LeadFlowAgentsController {
     @Param('id', ParseUUIDPipe) id: string,
   ): Promise<LeadFlowAgentDetailResponse> {
     return this.agentService.publish(ctx, id);
+  }
+
+  @Post(':id/archive')
+  @RequirePermission(LEADFLOW_AGENTS_PERMISSIONS.pause)
+  archive(
+    @RequestContextData() ctx: RequestContext,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<LeadFlowAgentDetailResponse> {
+    return this.agentService.archive(ctx, id);
+  }
+
+  @Post(':id/unarchive')
+  @RequirePermission(LEADFLOW_AGENTS_PERMISSIONS.pause)
+  unarchive(
+    @RequestContextData() ctx: RequestContext,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<LeadFlowAgentDetailResponse> {
+    return this.agentService.unarchive(ctx, id);
+  }
+
+  @Delete(':id')
+  @RequirePermission(LEADFLOW_AGENTS_PERMISSIONS.delete)
+  remove(
+    @RequestContextData() ctx: RequestContext,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<LeadFlowAgentDetailResponse> {
+    return this.agentService.softDelete(ctx, id);
   }
 
   @Get(':id/runtime-config')

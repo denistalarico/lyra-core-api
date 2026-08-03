@@ -1,6 +1,7 @@
 import {
   Column,
   CreateDateColumn,
+  DeleteDateColumn,
   Entity,
   Index,
   PrimaryGeneratedColumn,
@@ -81,6 +82,15 @@ export class LeadFlowAgentEntity {
 
   @Column({ name: 'is_protected', type: 'boolean', default: false })
   isProtected!: boolean;
+
+  @Column({ name: 'archived_at', type: 'timestamptz', nullable: true })
+  archivedAt!: Date | null;
+
+  @DeleteDateColumn({ name: 'deleted_at', type: 'timestamptz', nullable: true })
+  deletedAt!: Date | null;
+
+  @Column({ name: 'deleted_by_id', type: 'uuid', nullable: true })
+  deletedById!: string | null;
 
   @Column({
     name: 'behavior_config',

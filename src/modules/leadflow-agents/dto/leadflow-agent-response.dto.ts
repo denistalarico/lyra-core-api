@@ -37,6 +37,8 @@ export interface LeadFlowAgentSummaryResponse {
   readiness: LeadFlowAgentReadiness;
   channels: LeadFlowAgentChannelBindingResponse[];
   publishedVersionId: string | null;
+  archivedAt: string | null;
+  deletedAt: string | null;
   updatedAt: string;
 }
 
@@ -91,6 +93,8 @@ export function mapAgentSummary(
     readiness: agent.readiness ?? {},
     channels: bindings.map(mapChannelBinding),
     publishedVersionId: agent.publishedVersionId,
+    archivedAt: agent.archivedAt ? agent.archivedAt.toISOString() : null,
+    deletedAt: agent.deletedAt ? agent.deletedAt.toISOString() : null,
     updatedAt: agent.updatedAt.toISOString(),
   };
 }

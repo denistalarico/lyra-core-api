@@ -21,6 +21,8 @@ export const LEADFLOW_AGENTS_PERMISSIONS = {
   runtimePreview: 'leadflow.agents.runtime.preview.admin',
   /** leadflow.agents.developer.manage.owner_only (new) */
   developerManage: 'leadflow.agents.developer.manage.owner_only',
+  /** leadflow.agents.agent.delete.owner_only (already seeded, now wired) */
+  delete: 'leadflow.agents.agent.delete.owner_only',
 } as const;
 
 /** New keys introduced by this sprint (added to catalog + seeded). */

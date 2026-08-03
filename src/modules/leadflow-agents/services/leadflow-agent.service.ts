@@ -1,14 +1,16 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { IsNull, Repository } from 'typeorm';
+import { In, IsNull, Not, Repository } from 'typeorm';
 import { randomUUID } from 'node:crypto';
 import type { RequestContext } from '../../../common/context/request-context.interface';
+import { InboxConversationEntity } from '../../inbox/entities/inbox-conversation.entity';
 import { LeadFlowClientSettingsEntity } from '../../leadflow-settings/entities';
 import { LeadFlowSettingsContextType } from '../../leadflow-settings/enums/leadflow-settings-context-type.enum';
 import { PlatformPermissionService } from '../../permissions';
@@ -76,6 +78,8 @@ export class LeadFlowAgentService {
     private readonly bindingsRepository: Repository<LeadFlowAgentChannelBindingEntity>,
     @InjectRepository(LeadFlowClientSettingsEntity, AGENCY_CONNECTION)
     private readonly settingsRepository: Repository<LeadFlowClientSettingsEntity>,
+    @InjectRepository(InboxConversationEntity, AGENCY_CONNECTION)
+    private readonly conversationsRepository: Repository<InboxConversationEntity>,
     private readonly presetService: LeadFlowAgentPresetService,
     private readonly runtimeConfigService: LeadFlowAgentRuntimeConfigService,
     private readonly permissionService: PlatformPermissionService,
@@ -216,7 +220,7 @@ export class LeadFlowAgentService {
     ctx: RequestContext,
     id: string,
   ): Promise<LeadFlowAgentDetailResponse> {
-    return this.detail(ctx, id);
+    return this.detail(ctx, id, { withDeleted: true });
   }
 
   async patch(
@@ -294,12 +298,106 @@ export class LeadFlowAgentService {
     return this.transition(ctx, id, LeadFlowAgentStatus.Paused);
   }
 
+  async archive(
+    ctx: RequestContext,
+    id: string,
+  ): Promise<LeadFlowAgentDetailResponse> {
+    const active = await this.resolveActiveContext(ctx);
+    const agent = await this.findScopedAgent(ctx, active, id);
+
+    if (agent.isProtected) {
+      throw new BadRequestException(
+        'Este agente é protegido pela plataforma e não pode ser arquivado.',
+      );
+    }
+
+    if (agent.status !== LeadFlowAgentStatus.Archived) {
+      agent.status = LeadFlowAgentStatus.Archived;
+      agent.archivedAt = new Date();
+      agent.updatedById = ctx.userId ?? null;
+      await this.agentsRepository.save(agent);
+
+      await this.bindingReconciler.reconcile(ctx, {
+        trigger: 'agent_archived',
+      });
+
+      await this.recordOperationalStatus(
+        agent,
+        RoomAgentOperationalStatus.Offline,
+        'agent_archived',
+      );
+    }
+
+    return this.detail(ctx, agent.id);
+  }
+
+  async unarchive(
+    ctx: RequestContext,
+    id: string,
+  ): Promise<LeadFlowAgentDetailResponse> {
+    const active = await this.resolveActiveContext(ctx);
+    const agent = await this.findScopedAgent(ctx, active, id);
+
+    if (agent.status !== LeadFlowAgentStatus.Archived) {
+      throw new BadRequestException('Este agente não está arquivado.');
+    }
+
+    agent.status = LeadFlowAgentStatus.Draft;
+    agent.archivedAt = null;
+    agent.updatedById = ctx.userId ?? null;
+    await this.agentsRepository.save(agent);
+
+    return this.detail(ctx, agent.id);
+  }
+
+  async softDelete(
+    ctx: RequestContext,
+    id: string,
+  ): Promise<LeadFlowAgentDetailResponse> {
+    const active = await this.resolveActiveContext(ctx);
+    const agent = await this.findScopedAgent(ctx, active, id);
+
+    if (agent.status !== LeadFlowAgentStatus.Archived) {
+      throw new BadRequestException(
+        'Arquive o agente antes de excluí-lo.',
+      );
+    }
+
+    const activeConversations = await this.conversationsRepository.count({
+      where: {
+        tenantId: agent.tenantId,
+        workspaceId: agent.workspaceId,
+        assignedAgentId: agent.id,
+        status: Not(In(['resolved', 'closed', 'archived'])),
+      },
+    });
+
+    if (activeConversations > 0) {
+      throw new ConflictException(
+        `Este agente ainda possui ${activeConversations} conversa(s) em andamento. Encerre-as antes de excluir.`,
+      );
+    }
+
+    agent.deletedAt = new Date();
+    agent.deletedById = ctx.userId ?? null;
+    await this.agentsRepository.save(agent);
+
+    return this.detail(ctx, agent.id, { withDeleted: true });
+  }
+
   async publish(
     ctx: RequestContext,
     id: string,
   ): Promise<LeadFlowAgentDetailResponse> {
     const active = await this.resolveActiveContext(ctx);
     const agent = await this.findScopedAgent(ctx, active, id);
+
+    if (agent.status === LeadFlowAgentStatus.Archived) {
+      throw new BadRequestException(
+        'Desarquive o agente antes de ativar, pausar ou publicar.',
+      );
+    }
+
     const bindings = await this.loadBindings(agent.id);
 
     const snapshot = this.runtimeConfigService.buildAgentContract(
@@ -388,6 +486,12 @@ export class LeadFlowAgentService {
     const active = await this.resolveActiveContext(ctx);
     const agent = await this.findScopedAgent(ctx, active, id);
 
+    if (agent.status === LeadFlowAgentStatus.Archived) {
+      throw new BadRequestException(
+        'Desarquive o agente antes de ativar, pausar ou publicar.',
+      );
+    }
+
     agent.status = status;
     agent.updatedById = ctx.userId ?? null;
     await this.agentsRepository.save(agent);
@@ -474,9 +578,10 @@ export class LeadFlowAgentService {
   private async detail(
     ctx: RequestContext,
     id: string,
+    opts?: { withDeleted?: boolean },
   ): Promise<LeadFlowAgentDetailResponse> {
     const active = await this.resolveActiveContext(ctx);
-    const agent = await this.findScopedAgent(ctx, active, id);
+    const agent = await this.findScopedAgent(ctx, active, id, opts);
     const bindings = await this.loadBindings(agent.id);
 
     return mapAgentDetail(agent, bindings);
@@ -486,9 +591,11 @@ export class LeadFlowAgentService {
     ctx: RequestContext,
     active: ActiveContext,
     id: string,
+    opts?: { withDeleted?: boolean },
   ): Promise<LeadFlowAgentEntity> {
     const agent = await this.agentsRepository.findOne({
       where: { ...this.scopeWhere(ctx, active), id },
+      withDeleted: opts?.withDeleted ?? false,
     });
 
     if (!agent) {
