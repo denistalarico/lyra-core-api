@@ -142,6 +142,8 @@ import { CreateLeadflowIntelligenceLayer1788100000000 } from './migrations/17881
 import { CreateLeadflowPrivacyTelemetry1788200000000 } from './migrations/1788200000000-create-leadflow-privacy-telemetry';
 import { RefineFinanceBillsAndBankAvatars1788300000000 } from './migrations/1788300000000-refine-finance-bills-and-bank-avatars';
 import { CreateFinanceBankTransfers1788400000000 } from './migrations/1788400000000-create-finance-bank-transfers';
+import { CreateLeadflowBriefingProvenance1788500000000 } from './migrations/1788500000000-create-leadflow-briefing-provenance';
+import { AddLeadflowBriefingPermissions1788600000000 } from './migrations/1788600000000-add-leadflow-briefing-permissions';
 
 export const AgencyDataSource = new DataSource({
   type: 'postgres',
@@ -294,5 +296,7 @@ export const AgencyDataSource = new DataSource({
     CreateLeadflowPrivacyTelemetry1788200000000,
     RefineFinanceBillsAndBankAvatars1788300000000,
     CreateFinanceBankTransfers1788400000000,
+    CreateLeadflowBriefingProvenance1788500000000,
+    AddLeadflowBriefingPermissions1788600000000,
   ],
 });

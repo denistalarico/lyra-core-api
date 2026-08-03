@@ -1,8 +1,35 @@
 import { BadRequestException } from '@nestjs/common';
-import { CompanyContextService } from './company-context.service';
+import {
+  CompanyContextService,
+  getCompanyContextRootKeys,
+  isForbiddenCompanyContextKey,
+} from './company-context.service';
 
 describe('CompanyContextService', () => {
   const service = new CompanyContextService();
+
+  it('exposes the canonical root keys without schemaVersion', () => {
+    const keys = getCompanyContextRootKeys();
+    expect(keys).toEqual(
+      expect.arrayContaining([
+        'identity',
+        'offers',
+        'service',
+        'qualification',
+        'policies',
+        'faq',
+        'links',
+        'legacyTone',
+      ]),
+    );
+    expect(keys).not.toContain('schemaVersion');
+  });
+
+  it('flags secret-like field names as forbidden', () => {
+    expect(isForbiddenCompanyContextKey('apiKey')).toBe(true);
+    expect(isForbiddenCompanyContextKey('systemPrompt')).toBe(true);
+    expect(isForbiddenCompanyContextKey('publicName')).toBe(false);
+  });
 
   it('migrates the six legacy fields without losing their values', () => {
     const value = service.fromLegacy({

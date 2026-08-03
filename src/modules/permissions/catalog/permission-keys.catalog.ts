@@ -317,6 +317,13 @@ const RAW_PERMISSIONS: RawPermission[] = [
   ['leadflow.events.runtime.preview.admin', ADMIN_UP],
   ['leadflow.events.developer.manage.owner_only', OWNER_ONLY, true],
 
+  // 10.5 LeadFlow - Briefing (RFC/entities/migration only, sem extração/UI)
+  ['leadflow.briefing.sources.manage.admin', ADMIN_UP],
+  ['leadflow.briefing.jobs.manage.admin', ADMIN_UP],
+  ['leadflow.briefing.suggestions.review.admin', ADMIN_UP],
+  ['leadflow.briefing.suggestions.apply.admin', ADMIN_UP],
+  ['leadflow.briefing.provenance.view.admin', MANAGER_UP],
+
   // 10.5 LeadFlow - Analytics
   ['leadflow.analytics.reports.view.operational', MANAGER_UP],
   ['leadflow.analytics.reports.view.full', ADMIN_UP],

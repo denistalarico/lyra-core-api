@@ -17,6 +17,19 @@ const FORBIDDEN_KEY =
   /(secret|token|password|api.?key|credential|system.?prompt|developer.?instruction)/i;
 const URL_KEY = /(url|website|link|links)$/i;
 
+/**
+ * Canonical root-key list, exposed so other modules (e.g. leadflow-briefing's
+ * field-path validator) check against this single source of truth instead of
+ * forking a copy that could drift from what normalize() actually accepts.
+ */
+export function getCompanyContextRootKeys(): string[] {
+  return Array.from(ROOT_KEYS).filter((key) => key !== 'schemaVersion');
+}
+
+export function isForbiddenCompanyContextKey(key: string): boolean {
+  return FORBIDDEN_KEY.test(key);
+}
+
 @Injectable()
 export class CompanyContextService {
   normalize(value: LeadFlowJsonObject): LeadFlowJsonObject {
