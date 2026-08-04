@@ -264,6 +264,14 @@ import {
   LeadFlowClientSettingsEntity,
 } from '../modules/leadflow-settings/entities';
 import {
+  LeadFlowBriefingContextSnapshotEntity,
+  LeadFlowBriefingExtractionJobEntity,
+  LeadFlowBriefingSourceEntity,
+  LeadFlowBriefingSourceVersionEntity,
+  LeadFlowBriefingSuggestionApplicationEntity,
+  LeadFlowBriefingSuggestionEntity,
+} from '../modules/leadflow-briefing/entities';
+import {
   LeadFlowAgentEntity,
   LeadFlowAgentVersionEntity,
   LeadFlowAgentChannelBindingEntity,
@@ -495,6 +503,12 @@ export const agencyEntities = [
   PlatformPermissionAuditEventEntity,
   LeadFlowBusinessModeTemplateEntity,
   LeadFlowClientSettingsEntity,
+  LeadFlowBriefingSourceEntity,
+  LeadFlowBriefingSourceVersionEntity,
+  LeadFlowBriefingExtractionJobEntity,
+  LeadFlowBriefingSuggestionEntity,
+  LeadFlowBriefingContextSnapshotEntity,
+  LeadFlowBriefingSuggestionApplicationEntity,
   LeadFlowAgentEntity,
   LeadFlowAgentVersionEntity,
   LeadFlowAgentChannelBindingEntity,
