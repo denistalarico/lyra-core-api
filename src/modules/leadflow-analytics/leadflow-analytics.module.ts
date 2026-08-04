@@ -6,11 +6,13 @@ import { CrmPipelineEntity } from '../crm/entities/crm-pipeline.entity';
 import { CrmStageEntity } from '../crm/entities/crm-stage.entity';
 import { DocumentLayoutsModule } from '../document-layouts/document-layouts.module';
 import { InboxConversationEventEntity } from '../inbox/entities/inbox-conversation-event.entity';
+import { InboxModule } from '../inbox/inbox.module';
 import {
   LeadFlowAutomationEntity,
   LeadFlowAutomationRunEntity,
 } from '../leadflow-automations/entities';
 import { LeadFlowEventDeliveryEntity } from '../leadflow-events/entities';
+import { LeadFlowSettingsModule } from '../leadflow-settings/leadflow-settings.module';
 import { PermissionsModule } from '../permissions';
 import {
   LeadFlowCsatResponseEntity,
@@ -26,11 +28,14 @@ import { LeadFlowAnalyticsService } from './services/leadflow-analytics.service'
 import { LeadFlowCsatService } from './services/leadflow-csat.service';
 import { LeadFlowIntelligenceService } from './services/leadflow-intelligence.service';
 import { LeadFlowOperationalAnalyticsService } from './services/leadflow-operational-analytics.service';
+import { LeadFlowOverviewService } from './services/leadflow-overview.service';
 
 @Module({
   imports: [
     PermissionsModule,
     DocumentLayoutsModule,
+    InboxModule,
+    LeadFlowSettingsModule,
     TypeOrmModule.forFeature(
       [
         CrmOpportunityEntity,
@@ -54,6 +59,7 @@ import { LeadFlowOperationalAnalyticsService } from './services/leadflow-operati
   providers: [
     LeadFlowAnalyticsService,
     LeadFlowOperationalAnalyticsService,
+    LeadFlowOverviewService,
     LeadFlowAnalyticsReportService,
     LeadFlowAnalyticsEventIngressService,
     LeadFlowCsatService,
@@ -62,6 +68,7 @@ import { LeadFlowOperationalAnalyticsService } from './services/leadflow-operati
   exports: [
     LeadFlowAnalyticsService,
     LeadFlowOperationalAnalyticsService,
+    LeadFlowOverviewService,
     LeadFlowAnalyticsReportService,
     LeadFlowCsatService,
     LeadFlowIntelligenceService,

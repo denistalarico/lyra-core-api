@@ -27,12 +27,14 @@ import { DecideIntelligenceRecommendationDto } from './dto/decide-intelligence-r
 import { GenerateIntelligenceRecommendationsDto } from './dto/generate-intelligence-recommendations.dto';
 import { GetCommercialJourneyAnalyticsDto } from './dto/get-commercial-journey-analytics.dto';
 import { GetIntelligenceRecommendationsDto } from './dto/get-intelligence-recommendations.dto';
+import { GetLeadFlowOverviewDto } from './dto/get-leadflow-overview.dto';
 import { GetOperationalAnalyticsDto } from './dto/get-operational-analytics.dto';
 import { LEADFLOW_ANALYTICS_PERMISSIONS } from './leadflow-analytics.permissions';
 import { LeadFlowAnalyticsReportService } from './services/leadflow-analytics-report.service';
 import { LeadFlowAnalyticsService } from './services/leadflow-analytics.service';
 import { LeadFlowIntelligenceService } from './services/leadflow-intelligence.service';
 import { LeadFlowOperationalAnalyticsService } from './services/leadflow-operational-analytics.service';
+import { LeadFlowOverviewService } from './services/leadflow-overview.service';
 
 @Controller('leadflow/analytics')
 @UseGuards(JwtAuthGuard, PermissionsGuard)
@@ -43,9 +45,22 @@ export class LeadFlowAnalyticsController {
   constructor(
     private readonly analytics: LeadFlowAnalyticsService,
     private readonly operationalAnalytics: LeadFlowOperationalAnalyticsService,
+    private readonly overview: LeadFlowOverviewService,
     private readonly reports: LeadFlowAnalyticsReportService,
     private readonly intelligence: LeadFlowIntelligenceService,
   ) {}
+
+  @Get('overview')
+  @RequireAnyPermission(
+    LEADFLOW_ANALYTICS_PERMISSIONS.operationalView,
+    LEADFLOW_ANALYTICS_PERMISSIONS.fullView,
+  )
+  getOverview(
+    @RequestContextData() ctx: RequestContext,
+    @Query() query: GetLeadFlowOverviewDto,
+  ) {
+    return this.overview.getOverview(ctx, query);
+  }
 
   @Get('commercial-journey')
   @RequireAnyPermission(
