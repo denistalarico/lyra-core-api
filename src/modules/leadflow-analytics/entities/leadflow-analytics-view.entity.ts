@@ -65,6 +65,16 @@ export class LeadFlowAnalyticsViewEntity {
   @Column({ name: 'agent_id', type: 'uuid', nullable: true })
   agentId!: string | null;
 
+  @Column({ name: 'widget_order', type: 'jsonb', default: () => "'[]'::jsonb" })
+  widgetOrder!: string[];
+
+  @Column({
+    name: 'hidden_widget_ids',
+    type: 'jsonb',
+    default: () => "'[]'::jsonb",
+  })
+  hiddenWidgetIds!: string[];
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;
 

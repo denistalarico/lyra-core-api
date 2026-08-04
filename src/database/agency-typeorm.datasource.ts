@@ -147,6 +147,7 @@ import { AddLeadflowBriefingPermissions1788600000000 } from './migrations/178860
 import { CreateLeadflowAutomationGlobalConfigVersions1788700000000 } from './migrations/1788700000000-create-leadflow-automation-global-config-versions';
 import { AddLeadflowAgentsLifecycle1788800000000 } from './migrations/1788800000000-add-leadflow-agents-lifecycle';
 import { CreateLeadflowAnalyticsViews1788900000000 } from './migrations/1788900000000-create-leadflow-analytics-views';
+import { AddLeadflowAnalyticsWidgetLayout1789000000000 } from './migrations/1789000000000-add-leadflow-analytics-widget-layout';
 
 export const AgencyDataSource = new DataSource({
   type: 'postgres',
@@ -304,5 +305,6 @@ export const AgencyDataSource = new DataSource({
     CreateLeadflowAutomationGlobalConfigVersions1788700000000,
     AddLeadflowAgentsLifecycle1788800000000,
     CreateLeadflowAnalyticsViews1788900000000,
+    AddLeadflowAnalyticsWidgetLayout1789000000000,
   ],
 });

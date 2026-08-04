@@ -1,4 +1,6 @@
 import {
+  ArrayMaxSize,
+  IsArray,
   IsIn,
   IsOptional,
   IsString,
@@ -10,6 +12,13 @@ import {
   LEADFLOW_ANALYTICS_REPORT_TYPES,
   type LeadFlowAnalyticsReportType,
 } from './create-analytics-report.dto';
+
+export const LEADFLOW_ANALYTICS_WIDGET_IDS = [
+  'commercial_summary',
+  'operational_summary',
+  'recommendations',
+  'data_quality',
+] as const;
 
 export class UpsertAnalyticsViewDto {
   @IsString()
@@ -38,4 +47,16 @@ export class UpsertAnalyticsViewDto {
   @IsOptional()
   @IsUUID()
   agentId?: string;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(4)
+  @IsIn(LEADFLOW_ANALYTICS_WIDGET_IDS, { each: true })
+  widgetOrder?: string[];
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(4)
+  @IsIn(LEADFLOW_ANALYTICS_WIDGET_IDS, { each: true })
+  hiddenWidgetIds?: string[];
 }

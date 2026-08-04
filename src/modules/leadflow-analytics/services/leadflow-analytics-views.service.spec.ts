@@ -99,4 +99,13 @@ describe('LeadFlowAnalyticsViewsService', () => {
       }),
     );
   });
+
+  it('rejects widget ids outside the governed catalog', async () => {
+    const { service, repository } = buildService();
+
+    await expect(
+      service.create(ctx, { ...view, widgetOrder: ['not-a-widget'] }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(repository.create).not.toHaveBeenCalled();
+  });
 });

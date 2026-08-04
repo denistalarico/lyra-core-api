@@ -8,12 +8,16 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { IsNull, Repository } from 'typeorm';
 import type { RequestContext } from '../../../common/context/request-context.interface';
 import { LeadFlowSettingsContextType } from '../../leadflow-settings/enums/leadflow-settings-context-type.enum';
-import type { UpsertAnalyticsViewDto } from '../dto/upsert-analytics-view.dto';
+import {
+  LEADFLOW_ANALYTICS_WIDGET_IDS,
+  type UpsertAnalyticsViewDto,
+} from '../dto/upsert-analytics-view.dto';
 import { LeadFlowAnalyticsViewEntity } from '../entities/leadflow-analytics-view.entity';
 
 const AGENCY_CONNECTION = 'agency';
 const ANALYTICS_VIEW_SCHEMA_VERSION = 1;
 const MAX_ANALYTICS_VIEWS_PER_SCOPE = 20;
+const analyticsWidgetIds = new Set<string>(LEADFLOW_ANALYTICS_WIDGET_IDS);
 
 type AnalyticsViewScope = {
   tenantId: string;
@@ -103,6 +107,12 @@ export class LeadFlowAnalyticsViewsService {
       throw new ConflictException('Já existe uma visão com este nome.');
     }
     Object.assign(view, value, {
+      widgetOrder:
+        dto.widgetOrder === undefined ? view.widgetOrder : value.widgetOrder,
+      hiddenWidgetIds:
+        dto.hiddenWidgetIds === undefined
+          ? view.hiddenWidgetIds
+          : value.hiddenWidgetIds,
       schemaVersion: ANALYTICS_VIEW_SCHEMA_VERSION,
     });
     return this.views.save(view);
@@ -158,6 +168,11 @@ export class LeadFlowAnalyticsViewsService {
     if (dto.from > dto.to) {
       throw new BadRequestException('O período da visão é inválido.');
     }
+    const widgetOrder = this.sanitizeWidgetIds(dto.widgetOrder, 'ordem');
+    const hiddenWidgetIds = this.sanitizeWidgetIds(
+      dto.hiddenWidgetIds,
+      'visibilidade',
+    );
     return {
       name,
       reportType: dto.reportType,
@@ -166,6 +181,27 @@ export class LeadFlowAnalyticsViewsService {
       channelId: dto.channelId ?? null,
       businessMode: dto.businessMode?.trim() || null,
       agentId: dto.agentId ?? null,
+      widgetOrder,
+      hiddenWidgetIds,
     };
+  }
+
+  private sanitizeWidgetIds(value: unknown, field: string) {
+    if (value === undefined) return [];
+    if (!Array.isArray(value)) {
+      throw new BadRequestException(`A ${field} dos widgets é inválida.`);
+    }
+    const ids = value.filter(
+      (item): item is string => typeof item === 'string',
+    );
+    if (ids.length !== value.length || new Set(ids).size !== ids.length) {
+      throw new BadRequestException(`A ${field} dos widgets é inválida.`);
+    }
+    if (ids.some((id) => !analyticsWidgetIds.has(id))) {
+      throw new BadRequestException(
+        'O catálogo de widgets informado não é permitido.',
+      );
+    }
+    return ids;
   }
 }
