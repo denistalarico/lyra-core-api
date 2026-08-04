@@ -25,6 +25,7 @@ function createService(options?: {
   account?: PlatformAccountEntity | null;
   fallbackProduct?: string;
   entitlements?: TenantProductEntitlementEntity[];
+  authorizedClients?: unknown[];
 }) {
   const entitlementsRepository: EntitlementRepositoryMock = {
     find: jest.fn().mockResolvedValue(options?.entitlements ?? []),
@@ -40,14 +41,39 @@ function createService(options?: {
     ),
   } as Pick<ConfigService, 'get'> as ConfigService;
 
+  const managedContextDirectory = {
+    resolveActiveContext: jest.fn().mockImplementation((_identity, requested) =>
+      Promise.resolve({
+        active: {
+          kind: 'agency',
+          productKey: requested?.productKey ?? 'agency',
+          clientId: null,
+          managedTenantId: null,
+          displayName: null,
+        },
+        requested: requested ?? {
+          productKey: null,
+          operatingMode: null,
+          clientId: null,
+        },
+        rejection: null,
+      }),
+    ),
+    listAuthorizedClients: jest
+      .fn()
+      .mockResolvedValue(options?.authorizedClients ?? []),
+  };
+
   return {
     service: new PlatformContextService(
       entitlementsRepository as never,
       platformAccountsRepository as never,
       configService,
+      managedContextDirectory as never,
     ),
     entitlementsRepository,
     platformAccountsRepository,
+    managedContextDirectory,
   };
 }
 
@@ -322,5 +348,99 @@ describe('PlatformContextService', () => {
     expect(
       findProduct(response.products, PlatformProductKey.LeadFlow).access,
     ).toBe('available');
+  });
+
+  describe('managed context (LF-RF-F12-001)', () => {
+    it('lists the authorized contexts per client-scoped product', async () => {
+      const { service, managedContextDirectory } = createService({
+        entitlements: [
+          makeEntitlement(
+            PlatformProductKey.LeadFlow,
+            ProductEntitlementStatus.Active,
+          ),
+        ],
+      });
+
+      const response = await service.getContext(contextInput);
+
+      expect(Object.keys(response.managedContext.available).sort()).toEqual([
+        'leadflow',
+        'social',
+      ]);
+      expect(response.managedContext.available.leadflow.agency.available).toBe(
+        true,
+      );
+      expect(response.managedContext.available.social.agency.available).toBe(
+        false,
+      );
+      expect(managedContextDirectory.listAuthorizedClients).toHaveBeenCalledWith(
+        {
+          tenantId: contextInput.tenantId,
+          workspaceId: contextInput.workspaceId,
+          userId: contextInput.userId,
+          role: contextInput.role,
+        },
+        'leadflow',
+      );
+    });
+
+    it('reports the context the server accepted, not the one requested', async () => {
+      const { service, managedContextDirectory } = createService();
+
+      managedContextDirectory.resolveActiveContext.mockResolvedValue({
+        active: {
+          kind: 'agency',
+          productKey: 'leadflow',
+          clientId: null,
+          managedTenantId: null,
+          displayName: null,
+        },
+        requested: {
+          productKey: 'leadflow',
+          operatingMode: 'client',
+          clientId: 'client-from-another-tenant',
+        },
+        rejection: {
+          code: 'context_not_authorized',
+          requestedClientId: 'client-from-another-tenant',
+          requestedProductKey: 'leadflow',
+        },
+      });
+
+      const response = await service.getContext({
+        ...contextInput,
+        requestedContext: {
+          productKey: 'leadflow',
+          operatingMode: 'client',
+          clientId: 'client-from-another-tenant',
+        },
+      });
+
+      expect(response.managedContext.active.kind).toBe('agency');
+      expect(response.managedContext.rejection?.code).toBe(
+        'context_not_authorized',
+      );
+    });
+
+    it('marks modules of a locked product as unavailable', async () => {
+      const { service } = createService({
+        entitlements: [
+          makeEntitlement(
+            PlatformProductKey.LeadFlow,
+            ProductEntitlementStatus.Active,
+          ),
+        ],
+      });
+
+      const response = await service.getContext(contextInput);
+
+      expect(response.modules['leadflow.inbox']).toEqual({
+        key: 'leadflow.inbox',
+        productKey: PlatformProductKey.LeadFlow,
+        available: true,
+      });
+      expect(response.modules['social.planner'].available).toBe(false);
+      expect(response.modules['agency.finance'].available).toBe(false);
+    });
   });
 });

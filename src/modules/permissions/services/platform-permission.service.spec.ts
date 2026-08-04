@@ -3,6 +3,7 @@ import {
   PlatformRoleKey,
 } from '../enums/permission.enums';
 import { ProductEntitlementStatus } from '../../platform';
+import { ManagedContextDirectoryService } from '../../../common/context/managed-context-directory.service';
 import { PlatformPermissionService } from './platform-permission.service';
 
 function createRepositoryMock() {
@@ -30,21 +31,30 @@ function createService() {
     assertScope: jest.fn().mockResolvedValue(undefined),
   };
 
+  // The directory is instantiated for real (not mocked) on top of the same
+  // repository mocks: managed-context authorization now lives there, and
+  // these tests are the matrix that proves it.
+  const managedContextDirectory = new ManagedContextDirectoryService(
+    clientsRepository as never,
+    entitlementsRepository as never,
+    clientAccessRepository as never,
+    clientProductAccessRepository as never,
+  );
+
   const service = new PlatformPermissionService(
     rolesRepository as never,
     rolePermissionsRepository as never,
     userPermissionsRepository as never,
     clientAccessRepository as never,
-    clientProductAccessRepository as never,
-    clientsRepository as never,
-    entitlementsRepository as never,
     auditRepository as never,
     platformContextService as never,
     scopeEvaluator as never,
+    managedContextDirectory,
   );
 
   return {
     service,
+    managedContextDirectory,
     rolesRepository,
     rolePermissionsRepository,
     userPermissionsRepository,

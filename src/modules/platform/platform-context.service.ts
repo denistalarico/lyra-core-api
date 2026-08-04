@@ -2,7 +2,14 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { ManagedContextDirectoryService } from '../../common/context/managed-context-directory.service';
 import {
+  MANAGED_CLIENT_PRODUCT_KEYS,
+  type ManagedClientProductKey,
+  type RequestedManagedContext,
+} from '../../common/context/managed-context.contract';
+import {
+  getProductModuleKeys,
   isPlatformProductKey,
   PLATFORM_PRODUCT_KEYS,
 } from './catalog/platform-products.catalog';
@@ -14,18 +21,33 @@ import {
   ProductEntitlementStatus,
 } from './enums/platform-product.enums';
 import type {
+  PlatformContextModule,
   PlatformContextProduct,
+  PlatformContextProductContexts,
   PlatformContextProductStatus,
   PlatformContextResponse,
+  PlatformManagedContext,
 } from './types/platform-context.types';
 
 const AGENCY_CONNECTION = 'agency';
+
+const EMPTY_REQUESTED_CONTEXT: RequestedManagedContext = {
+  productKey: null,
+  operatingMode: null,
+  clientId: null,
+};
 
 type PlatformContextInput = {
   tenantId: string;
   workspaceId: string;
   userId: string;
   role: string;
+  /**
+   * Context the caller asked for, read from request headers. Optional so
+   * non-HTTP callers (workers, other services) still get a valid agency
+   * context instead of having to fake headers.
+   */
+  requestedContext?: RequestedManagedContext;
 };
 
 @Injectable()
@@ -36,11 +58,14 @@ export class PlatformContextService {
     @InjectRepository(PlatformAccountEntity, AGENCY_CONNECTION)
     private readonly platformAccountsRepository: Repository<PlatformAccountEntity>,
     private readonly configService: ConfigService,
+    private readonly managedContextDirectory: ManagedContextDirectoryService,
   ) {}
 
   async getContext(
     input: PlatformContextInput,
   ): Promise<PlatformContextResponse> {
+    const requestedContext = input.requestedContext ?? EMPTY_REQUESTED_CONTEXT;
+
     const [entitlements, account] = await Promise.all([
       this.entitlementsRepository.find({
         where: { tenantId: input.tenantId },
@@ -56,6 +81,12 @@ export class PlatformContextService {
         ? this.buildProductsWithCompatibilityFallback()
         : this.buildProductsFromEntitlements(entitlements);
 
+    const managedContext = await this.buildManagedContext(
+      input,
+      requestedContext,
+      products,
+    );
+
     return {
       account: {
         tenantId: input.tenantId,
@@ -70,9 +101,89 @@ export class PlatformContextService {
         role: input.role,
       },
       products,
-      modules: {},
-      managedContext: null,
+      modules: this.buildModules(products),
+      managedContext,
     };
+  }
+
+  /**
+   * Resolves the shell contract: which contexts the caller may operate per
+   * client-scoped product, and which one this request is actually in
+   * (LF-RF-F12-001). Both answers come from
+   * {@link ManagedContextDirectoryService} — the same code the permission
+   * guard enforces with — so the switcher can never offer a context the
+   * guard would refuse.
+   */
+  private async buildManagedContext(
+    input: PlatformContextInput,
+    requestedContext: RequestedManagedContext,
+    products: PlatformContextProduct[],
+  ): Promise<PlatformManagedContext> {
+    const identity = {
+      tenantId: input.tenantId,
+      workspaceId: input.workspaceId,
+      userId: input.userId,
+      role: input.role,
+    };
+
+    const [resolution, ...availabilityEntries] = await Promise.all([
+      this.managedContextDirectory.resolveActiveContext(
+        identity,
+        requestedContext,
+      ),
+      ...MANAGED_CLIENT_PRODUCT_KEYS.map(async (productKey) => {
+        const clients = await this.managedContextDirectory.listAuthorizedClients(
+          identity,
+          productKey,
+        );
+
+        return [
+          productKey,
+          {
+            agency: {
+              available: this.isProductAvailable(products, productKey),
+            },
+            clients,
+          },
+        ] as [ManagedClientProductKey, PlatformContextProductContexts];
+      }),
+    ]);
+
+    return {
+      active: resolution.active,
+      requested: resolution.requested,
+      rejection: resolution.rejection,
+      available: Object.fromEntries(availabilityEntries) as Record<
+        ManagedClientProductKey,
+        PlatformContextProductContexts
+      >,
+    };
+  }
+
+  private isProductAvailable(
+    products: PlatformContextProduct[],
+    productKey: string,
+  ): boolean {
+    return (
+      products.find((product) => product.key === productKey)?.access ===
+      'available'
+    );
+  }
+
+  private buildModules(
+    products: PlatformContextProduct[],
+  ): Record<string, PlatformContextModule> {
+    const modules: Record<string, PlatformContextModule> = {};
+
+    for (const productKey of PLATFORM_PRODUCT_KEYS) {
+      const available = this.isProductAvailable(products, productKey);
+
+      for (const moduleKey of getProductModuleKeys(productKey)) {
+        modules[moduleKey] = { key: moduleKey, productKey, available };
+      }
+    }
+
+    return modules;
   }
 
   private buildProductsWithCompatibilityFallback(): PlatformContextProduct[] {

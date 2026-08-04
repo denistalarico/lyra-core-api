@@ -4,7 +4,7 @@ import {
   Injectable,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { type FindOptionsWhere, In, IsNull, Repository } from 'typeorm';
+import { type FindOptionsWhere, IsNull, Repository } from 'typeorm';
 import {
   getPermissionDefinition,
   isKnownPermissionKey,
@@ -13,23 +13,15 @@ import {
 import { isOwnerOnlyPermissionKey } from '../catalog/permission-groups.catalog';
 import {
   CLIENT_ACCESS_LEVEL_ORDER,
-  CLIENT_PRODUCT_ROLE_ORDER,
   PlatformRoleKey,
 } from '../enums/permission.enums';
+import { ManagedContextDirectoryService } from '../../../common/context/managed-context-directory.service';
 import { AgencyClientAccessEntity } from '../entities/agency-client-access.entity';
-import { AgencyClientProductAccessEntity } from '../entities/agency-client-product-access.entity';
 import { PlatformPermissionAuditEventEntity } from '../entities/platform-permission-audit-event.entity';
 import { PlatformRoleEntity } from '../entities/platform-role.entity';
 import { PlatformRolePermissionEntity } from '../entities/platform-role-permission.entity';
 import { PlatformUserPermissionEntity } from '../entities/platform-user-permission.entity';
 import { PlatformContextService } from '../../platform/platform-context.service';
-import { AgencyClient } from '../../clients/entities';
-import { AgencyClientStatus } from '../../clients/enums';
-import {
-  PlatformProductKey,
-  ProductEntitlementStatus,
-  TenantProductEntitlementEntity,
-} from '../../platform';
 import {
   AuthorizedManagedClientEntry,
   ClientAccessCheck,
@@ -41,14 +33,6 @@ import {
 import { PermissionScopeEvaluatorService } from './permission-scope-evaluator.service';
 
 const AGENCY_CONNECTION = 'agency';
-const CLIENT_PRODUCT_KEYS = new Set<string>([
-  PlatformProductKey.LeadFlow,
-  PlatformProductKey.Social,
-]);
-const ACTIVE_ENTITLEMENT_STATUSES = new Set<string>([
-  ProductEntitlementStatus.Active,
-  ProductEntitlementStatus.Trial,
-]);
 
 function normalizeRole(role: string): PlatformRoleKey {
   if (role === 'owner') return PlatformRoleKey.Owner;
@@ -69,16 +53,11 @@ export class PlatformPermissionService {
     private readonly userPermissionsRepository: Repository<PlatformUserPermissionEntity>,
     @InjectRepository(AgencyClientAccessEntity, AGENCY_CONNECTION)
     private readonly clientAccessRepository: Repository<AgencyClientAccessEntity>,
-    @InjectRepository(AgencyClientProductAccessEntity, AGENCY_CONNECTION)
-    private readonly clientProductAccessRepository: Repository<AgencyClientProductAccessEntity>,
-    @InjectRepository(AgencyClient, AGENCY_CONNECTION)
-    private readonly clientsRepository: Repository<AgencyClient>,
-    @InjectRepository(TenantProductEntitlementEntity, AGENCY_CONNECTION)
-    private readonly entitlementsRepository: Repository<TenantProductEntitlementEntity>,
     @InjectRepository(PlatformPermissionAuditEventEntity, AGENCY_CONNECTION)
     private readonly auditRepository: Repository<PlatformPermissionAuditEventEntity>,
     private readonly platformContextService: PlatformContextService,
     private readonly scopeEvaluator: PermissionScopeEvaluatorService,
+    private readonly managedContextDirectory: ManagedContextDirectoryService,
   ) {}
 
   /**
@@ -275,101 +254,14 @@ export class PlatformPermissionService {
   /**
    * Checks whether the user can operate a product (LeadFlow, Social, ...)
    * contracted by a managed client (blueprint sections 8.3 and 10/11).
+   *
+   * Delegates to {@link ManagedContextDirectoryService}, which is the single
+   * implementation shared with the shell context contract (LF-RF-F12-001).
    */
   async canAccessClientProduct(
     check: ClientProductAccessCheck,
   ): Promise<boolean> {
-    const roleKey = normalizeRole(check.role);
-
-    if (
-      !check.tenantId ||
-      !check.workspaceId ||
-      !check.clientId ||
-      !check.userId ||
-      !CLIENT_PRODUCT_KEYS.has(check.productKey)
-    ) {
-      return false;
-    }
-
-    const client = await this.clientsRepository.findOne({
-      where: {
-        id: check.clientId,
-        tenantId: check.tenantId,
-        workspaceId: check.workspaceId,
-      },
-    });
-
-    if (
-      !client ||
-      client.status === AgencyClientStatus.Archived ||
-      client.archivedAt ||
-      !client.managedTenantId
-    ) {
-      return false;
-    }
-
-    const entitlement = await this.entitlementsRepository.findOne({
-      where: {
-        tenantId: client.managedTenantId,
-        productKey: check.productKey as PlatformProductKey,
-      },
-    });
-
-    if (!this.isActiveEntitlement(entitlement)) {
-      return false;
-    }
-
-    if (
-      roleKey === PlatformRoleKey.Owner ||
-      roleKey === PlatformRoleKey.Admin
-    ) {
-      return true;
-    }
-
-    const clientAccessWhere: FindOptionsWhere<AgencyClientAccessEntity> = {
-      tenantId: check.tenantId,
-      clientId: check.clientId,
-      userId: check.userId,
-      workspaceId: check.workspaceId,
-    };
-
-    const clientAccess = await this.clientAccessRepository.findOne({
-      where: clientAccessWhere,
-    });
-
-    if (
-      !clientAccess ||
-      clientAccess.managedTenantId !== client.managedTenantId
-    ) {
-      return false;
-    }
-
-    const where: FindOptionsWhere<AgencyClientProductAccessEntity> = {
-      tenantId: check.tenantId,
-      workspaceId: check.workspaceId,
-      clientId: check.clientId,
-      managedTenantId: client.managedTenantId,
-      productKey:
-        check.productKey as AgencyClientProductAccessEntity['productKey'],
-      userId: check.userId,
-    };
-
-    const access = await this.clientProductAccessRepository.findOne({
-      where,
-    });
-
-    if (!access) {
-      return false;
-    }
-
-    if (!check.requiredRole) {
-      return true;
-    }
-
-    const requiredIndex = CLIENT_PRODUCT_ROLE_ORDER.indexOf(check.requiredRole);
-    const grantedIndex = CLIENT_PRODUCT_ROLE_ORDER.indexOf(access.roleKey);
-
-    return grantedIndex >= requiredIndex;
+    return this.managedContextDirectory.canAccessClientProduct(check);
   }
 
   /**
@@ -384,169 +276,12 @@ export class PlatformPermissionService {
     context: PermissionContext,
     productKey: string,
   ): Promise<AuthorizedManagedClientEntry[]> {
-    if (!context.workspaceId || !CLIENT_PRODUCT_KEYS.has(productKey)) {
-      return [];
-    }
-
-    const clients = await this.clientsRepository.find({
-      where: {
-        tenantId: context.tenantId,
-        workspaceId: context.workspaceId,
-        status: AgencyClientStatus.Active,
-        archivedAt: IsNull(),
-      },
-    });
-
-    const managedTenantIds = [
-      ...new Set(
-        clients
-          .map((client) => client.managedTenantId)
-          .filter((managedTenantId): managedTenantId is string =>
-            Boolean(managedTenantId),
-          ),
-      ),
-    ];
-
-    if (managedTenantIds.length === 0) {
-      return [];
-    }
-
-    const entitlements = await this.entitlementsRepository.find({
-      where: {
-        tenantId: In(managedTenantIds),
-        productKey: productKey as PlatformProductKey,
-      },
-    });
-
-    const entitlementByManagedTenantId = new Map(
-      entitlements.map((entitlement) => [entitlement.tenantId, entitlement]),
+    const entries = await this.managedContextDirectory.listAuthorizedClients(
+      context,
+      productKey,
     );
 
-    const roleKey = normalizeRole(context.role);
-    const isPrivileged =
-      roleKey === PlatformRoleKey.Owner || roleKey === PlatformRoleKey.Admin;
-
-    let accessByClientId: Map<string, AgencyClientAccessEntity> | null = null;
-    let productAccessByClientId: Map<
-      string,
-      AgencyClientProductAccessEntity
-    > | null = null;
-
-    if (!isPrivileged) {
-      const clientIds = clients.map((client) => client.id);
-
-      const [accessRows, productAccessRows] = await Promise.all([
-        this.clientAccessRepository.find({
-          where: {
-            tenantId: context.tenantId,
-            workspaceId: context.workspaceId,
-            userId: context.userId,
-            clientId: In(clientIds),
-          },
-        }),
-        this.clientProductAccessRepository.find({
-          where: {
-            tenantId: context.tenantId,
-            workspaceId: context.workspaceId,
-            userId: context.userId,
-            clientId: In(clientIds),
-            productKey: productKey as AgencyClientProductAccessEntity['productKey'],
-          },
-        }),
-      ]);
-
-      accessByClientId = new Map(accessRows.map((row) => [row.clientId, row]));
-      productAccessByClientId = new Map(
-        productAccessRows.map((row) => [row.clientId, row]),
-      );
-    }
-
-    const entries: AuthorizedManagedClientEntry[] = [];
-
-    for (const client of clients) {
-      if (!client.managedTenantId) continue;
-
-      const entitlement =
-        entitlementByManagedTenantId.get(client.managedTenantId) ?? null;
-
-      if (!this.isActiveEntitlement(entitlement)) continue;
-
-      if (!isPrivileged) {
-        const access = accessByClientId?.get(client.id);
-        const productAccess = productAccessByClientId?.get(client.id);
-
-        if (!access || access.managedTenantId !== client.managedTenantId) {
-          continue;
-        }
-
-        if (
-          !productAccess ||
-          productAccess.managedTenantId !== client.managedTenantId
-        ) {
-          continue;
-        }
-      }
-
-      entries.push({
-        clientId: client.id,
-        displayName: client.displayName,
-        avatarUrl: this.extractClientAvatarUrl(client),
-        status: client.status,
-        managedTenantId: client.managedTenantId,
-        entitlement: {
-          status: entitlement!.status,
-          planKey: entitlement!.planKey,
-          source: entitlement!.source,
-          startsAt: this.toIsoStringOrNull(entitlement!.startsAt),
-          endsAt: this.toIsoStringOrNull(entitlement!.endsAt),
-          trialEndsAt: this.toIsoStringOrNull(entitlement!.trialEndsAt),
-        },
-      });
-    }
-
-    entries.sort((a, b) => a.displayName.localeCompare(b.displayName));
-
-    return entries;
-  }
-
-  private extractClientAvatarUrl(client: AgencyClient): string | null {
-    const contactAvatarUrl = client.metadata?.contactAvatarUrl;
-
-    return typeof contactAvatarUrl === 'string' && contactAvatarUrl.trim()
-      ? contactAvatarUrl
-      : null;
-  }
-
-  private toIsoStringOrNull(value: Date | null): string | null {
-    return value ? value.toISOString() : null;
-  }
-
-  private isActiveEntitlement(
-    entitlement: TenantProductEntitlementEntity | null,
-  ): boolean {
-    if (!entitlement || !ACTIVE_ENTITLEMENT_STATUSES.has(entitlement.status)) {
-      return false;
-    }
-
-    const now = new Date();
-
-    if (entitlement.startsAt && entitlement.startsAt > now) {
-      return false;
-    }
-
-    if (entitlement.endsAt && entitlement.endsAt <= now) {
-      return false;
-    }
-
-    if (
-      entitlement.status === ProductEntitlementStatus.Trial &&
-      entitlement.trialEndsAt &&
-      entitlement.trialEndsAt <= now
-    ) {
-      return false;
-    }
-
-    return true;
+    return entries as AuthorizedManagedClientEntry[];
   }
 
   isDangerousAction(permissionKey: string): boolean {
