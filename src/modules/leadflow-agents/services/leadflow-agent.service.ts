@@ -16,6 +16,7 @@ import { LeadFlowSettingsContextType } from '../../leadflow-settings/enums/leadf
 import { PlatformPermissionService } from '../../permissions';
 import type { PermissionContext } from '../../permissions';
 import type { LeadFlowAgentPresetCatalogItem } from '../catalog/agent-presets.catalog';
+import { getHandoffDefaultsByType } from '../catalog/agent-presets.catalog';
 import {
   LeadFlowAgentDetailResponse,
   LeadFlowAgentListResponse,
@@ -118,6 +119,7 @@ export class LeadFlowAgentService {
       businessModeKey: active.businessModeKey,
       isCustomBusinessMode: active.isCustomBusinessMode,
       items: presets.map(mapAgentPreset),
+      handoffDefaultsByType: getHandoffDefaultsByType(),
     };
   }
 

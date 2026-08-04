@@ -18,6 +18,7 @@ export interface LeadFlowAgentPresetListResponse {
   businessModeKey: string;
   isCustomBusinessMode: boolean;
   items: LeadFlowAgentPresetResponse[];
+  handoffDefaultsByType: Record<string, { target: string; slaMinutes: number }>;
 }
 
 export function mapAgentPreset(

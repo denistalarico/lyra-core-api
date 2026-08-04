@@ -298,6 +298,29 @@ export function getPresetsForBusinessMode(
   );
 }
 
+/**
+ * Handoff target/SLA defaults per agent type, as seeded by the preset
+ * catalog (constant across Business Modes). This is the only "global"
+ * source of truth for these two fields today — there is no per-tenant
+ * override table for them.
+ */
+export function getHandoffDefaultsByType(): Record<
+  LeadFlowAgentType,
+  { target: string; slaMinutes: number }
+> {
+  const result = {} as Record<
+    LeadFlowAgentType,
+    { target: string; slaMinutes: number }
+  >;
+  for (const spec of Object.values(ARCHETYPES)) {
+    result[spec.type] = {
+      target: spec.handoff.target ?? 'assigned_owner',
+      slaMinutes: spec.handoff.slaMinutes ?? 15,
+    };
+  }
+  return result;
+}
+
 export function getPresetByKey(
   presetKey: string,
 ): LeadFlowAgentPresetCatalogItem | undefined {
