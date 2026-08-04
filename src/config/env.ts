@@ -60,7 +60,9 @@ export default () => ({
     clamav: {
       host: process.env.LEADFLOW_BRIEFING_CLAMAV_HOST ?? 'localhost',
       port: Number(process.env.LEADFLOW_BRIEFING_CLAMAV_PORT ?? 3310),
-      timeoutMs: Number(process.env.LEADFLOW_BRIEFING_CLAMAV_TIMEOUT_MS ?? 15000),
+      timeoutMs: Number(
+        process.env.LEADFLOW_BRIEFING_CLAMAV_TIMEOUT_MS ?? 15000,
+      ),
     },
     maxUploadBytes: Number(
       process.env.LEADFLOW_BRIEFING_MAX_UPLOAD_BYTES ?? 20 * 1024 * 1024,
@@ -71,8 +73,12 @@ export default () => ({
     maxPasteBytes: Number(
       process.env.LEADFLOW_BRIEFING_MAX_PASTE_BYTES ?? 200 * 1024,
     ),
+    maxExtractedChars: Number(
+      process.env.LEADFLOW_BRIEFING_EXTRACTION_MAX_EXTRACTED_CHARS ?? 40_000,
+    ),
     maxTotalBytesPerSettings: Number(
-      process.env.LEADFLOW_BRIEFING_MAX_TOTAL_BYTES_PER_SETTINGS ?? 200 * 1024 * 1024,
+      process.env.LEADFLOW_BRIEFING_MAX_TOTAL_BYTES_PER_SETTINGS ??
+        200 * 1024 * 1024,
     ),
     urlFetchTimeoutMs: Number(
       process.env.LEADFLOW_BRIEFING_URL_FETCH_TIMEOUT_MS ?? 15000,

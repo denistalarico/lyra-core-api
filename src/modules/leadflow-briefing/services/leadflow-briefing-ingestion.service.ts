@@ -1,5 +1,10 @@
 import { randomUUID, createHash } from 'node:crypto';
-import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Inject,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -9,10 +14,24 @@ import type { BriefingSourceVersionResponse } from '../dto';
 import { LeadFlowBriefingSourceEntity } from '../entities';
 import { LeadFlowBriefingSourceKind } from '../enums/leadflow-briefing-source-kind.enum';
 import { LeadFlowBriefingSourceVersionStatus } from '../enums/leadflow-briefing-source-version-status.enum';
-import { BRIEFING_FILE_KIND_MIME, assertExpectedKind, detectFileKind } from './magic-bytes.util';
-import { MALWARE_SCANNER_ADAPTER, type MalwareScannerAdapter } from './malware-scanner.adapter';
+import {
+  BRIEFING_FILE_KIND_MIME,
+  assertExpectedKind,
+  detectFileKind,
+} from './magic-bytes.util';
+import {
+  MALWARE_SCANNER_ADAPTER,
+  type MalwareScannerAdapter,
+  type MalwareScanResult,
+} from './malware-scanner.adapter';
 import { LeadFlowBriefingQuotaService } from './leadflow-briefing-quota.service';
 import { LeadFlowBriefingSourceService } from './leadflow-briefing-source.service';
+import {
+  assertBriefingOfficeSignature,
+  BRIEFING_OFFICE_MIME,
+  extractBriefingOfficeText,
+  getBriefingOfficeKind,
+} from './leadflow-briefing-office-text.util';
 import { SsrfSafeUrlFetcherService } from './ssrf-safe-url-fetcher.service';
 
 const AGENCY_CONNECTION = 'agency';
@@ -46,32 +65,62 @@ export class LeadFlowBriefingIngestionService {
   async ingestUpload(
     ctx: RequestContext,
     sourceId: string,
-    file: { buffer: Buffer; mimetype: string; originalname: string; size: number },
+    file: {
+      buffer: Buffer;
+      mimetype: string;
+      originalname: string;
+      size: number;
+    },
   ): Promise<BriefingSourceVersionResponse> {
     const source = await this.resolveSource(ctx, sourceId);
 
-    const maxBytes = this.configService.get<number>('leadflowBriefing.maxUploadBytes') ?? 20 * 1024 * 1024;
+    const maxBytes =
+      this.configService.get<number>('leadflowBriefing.maxUploadBytes') ??
+      20 * 1024 * 1024;
     if (file.size > maxBytes || file.buffer.length > maxBytes) {
       throw new BadRequestException('Uploaded file exceeds the allowed size.');
     }
 
-    const kind = assertExpectedKind(file.buffer, UPLOAD_ALLOWED_KINDS);
-    await this.quotaService.assertWithinQuota(ctx, source.settingsId, file.buffer.length);
+    const officeKind = getBriefingOfficeKind(file.originalname);
+    if (officeKind) assertBriefingOfficeSignature(file.buffer, officeKind);
+    const kind = officeKind
+      ? null
+      : assertExpectedKind(file.buffer, UPLOAD_ALLOWED_KINDS);
+    await this.quotaService.assertWithinQuota(
+      ctx,
+      source.settingsId,
+      file.buffer.length,
+    );
     await this.scanAndRejectIfUnsafe(file.buffer);
+
+    const maxExtractedChars =
+      this.configService.get<number>('leadflowBriefing.maxExtractedChars') ??
+      40_000;
+    const extractedOfficeText = officeKind
+      ? await extractBriefingOfficeText(
+          file.buffer,
+          officeKind,
+          maxExtractedChars,
+        )
+      : null;
+    const contentType = officeKind
+      ? BRIEFING_OFFICE_MIME[officeKind]
+      : BRIEFING_FILE_KIND_MIME[kind!];
 
     const checksum = this.checksum(file.buffer);
     const objectKey = this.buildObjectKey(ctx, sourceId);
     await this.filesService.uploadPrivateBuffer({
       body: file.buffer,
       path: objectKey,
-      contentType: BRIEFING_FILE_KIND_MIME[kind],
+      contentType,
     });
 
     return this.sourceService.createSourceVersion(ctx, {
       sourceId,
       kind: LeadFlowBriefingSourceKind.Upload,
       objectKey,
-      mimeType: BRIEFING_FILE_KIND_MIME[kind],
+      mimeType: contentType,
+      rawText: extractedOfficeText,
       byteSize: String(file.buffer.length),
       checksum,
       safeFilename: this.sanitizeFilename(file.originalname),
@@ -88,15 +137,22 @@ export class LeadFlowBriefingIngestionService {
     const source = await this.resolveSource(ctx, sourceId);
 
     const maxBytes =
-      this.configService.get<number>('leadflowBriefing.maxUrlFetchBytes') ?? 10 * 1024 * 1024;
+      this.configService.get<number>('leadflowBriefing.maxUrlFetchBytes') ??
+      10 * 1024 * 1024;
     const timeoutMs =
-      this.configService.get<number>('leadflowBriefing.urlFetchTimeoutMs') ?? 15000;
+      this.configService.get<number>('leadflowBriefing.urlFetchTimeoutMs') ??
+      15000;
 
-    const fetched = await this.ssrfSafeUrlFetcher.fetchUrl(url, { maxBytes, timeoutMs });
+    const fetched = await this.ssrfSafeUrlFetcher.fetchUrl(url, {
+      maxBytes,
+      timeoutMs,
+    });
 
     const detectedKind = detectFileKind(fetched.body);
-    const contentType = fetched.contentType?.split(';')[0]?.trim().toLowerCase() ?? null;
-    const isTextual = contentType?.startsWith(TEXTUAL_CONTENT_TYPE_PREFIX) ?? false;
+    const contentType =
+      fetched.contentType?.split(';')[0]?.trim().toLowerCase() ?? null;
+    const isTextual =
+      contentType?.startsWith(TEXTUAL_CONTENT_TYPE_PREFIX) ?? false;
 
     if (detectedKind === 'unknown' && !isTextual) {
       throw new BadRequestException(
@@ -104,12 +160,18 @@ export class LeadFlowBriefingIngestionService {
       );
     }
 
-    await this.quotaService.assertWithinQuota(ctx, source.settingsId, fetched.body.length);
+    await this.quotaService.assertWithinQuota(
+      ctx,
+      source.settingsId,
+      fetched.body.length,
+    );
     await this.scanAndRejectIfUnsafe(fetched.body);
 
     const checksum = this.checksum(fetched.body);
     const mimeType =
-      detectedKind !== 'unknown' ? BRIEFING_FILE_KIND_MIME[detectedKind] : (contentType ?? 'text/html');
+      detectedKind !== 'unknown'
+        ? BRIEFING_FILE_KIND_MIME[detectedKind]
+        : (contentType ?? 'text/html');
     const objectKey = this.buildObjectKey(ctx, sourceId);
     await this.filesService.uploadPrivateBuffer({
       body: fetched.body,
@@ -137,7 +199,9 @@ export class LeadFlowBriefingIngestionService {
   ): Promise<BriefingSourceVersionResponse> {
     const source = await this.resolveSource(ctx, sourceId);
 
-    const maxBytes = this.configService.get<number>('leadflowBriefing.maxPasteBytes') ?? 200 * 1024;
+    const maxBytes =
+      this.configService.get<number>('leadflowBriefing.maxPasteBytes') ??
+      200 * 1024;
     const buffer = Buffer.from(text, 'utf8');
     if (buffer.length === 0) {
       throw new BadRequestException('Pasted text is empty.');
@@ -146,7 +210,11 @@ export class LeadFlowBriefingIngestionService {
       throw new BadRequestException('Pasted text exceeds the allowed size.');
     }
 
-    await this.quotaService.assertWithinQuota(ctx, source.settingsId, buffer.length);
+    await this.quotaService.assertWithinQuota(
+      ctx,
+      source.settingsId,
+      buffer.length,
+    );
     await this.scanAndRejectIfUnsafe(buffer);
 
     return this.sourceService.createSourceVersion(ctx, {
@@ -169,7 +237,11 @@ export class LeadFlowBriefingIngestionService {
       throw new BadRequestException('Workspace context is required.');
     }
     const source = await this.sourceRepository.findOne({
-      where: { id: sourceId, tenantId: ctx.tenantId, workspaceId: ctx.workspaceId },
+      where: {
+        id: sourceId,
+        tenantId: ctx.tenantId,
+        workspaceId: ctx.workspaceId,
+      },
     });
     if (!source) {
       throw new NotFoundException('Briefing source not found.');
@@ -178,16 +250,20 @@ export class LeadFlowBriefingIngestionService {
   }
 
   private async scanAndRejectIfUnsafe(buffer: Buffer): Promise<void> {
-    let result;
+    let result: MalwareScanResult;
     try {
       result = await this.scanner.scan(buffer);
     } catch {
       // Fail closed: a scanner that can't be reached is not the same as a
       // clean file. Never fall back to "assume safe" here.
-      throw new BadRequestException('Content could not be scanned for malware — try again.');
+      throw new BadRequestException(
+        'Content could not be scanned for malware — try again.',
+      );
     }
     if (!result.clean) {
-      throw new BadRequestException('Content was rejected by the malware scanner.');
+      throw new BadRequestException(
+        'Content was rejected by the malware scanner.',
+      );
     }
   }
 
