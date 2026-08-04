@@ -6,6 +6,10 @@ describe('LeadFlow Analytics HTTP contract', () => {
   it.each([
     'getCommercialJourney',
     'getOperationalOverview',
+    'listViews',
+    'createView',
+    'updateView',
+    'removeView',
     'getRecommendations',
     'renderReportPdf',
   ] as const)(

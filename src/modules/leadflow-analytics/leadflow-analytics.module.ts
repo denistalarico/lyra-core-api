@@ -20,6 +20,7 @@ import {
   LeadFlowIntelligenceDecisionEntity,
   LeadFlowIntelligenceRecommendationEntity,
   LeadFlowIntelligenceResultEntity,
+  LeadFlowAnalyticsViewEntity,
 } from './entities';
 import { LeadFlowAnalyticsController } from './leadflow-analytics.controller';
 import { LeadFlowAnalyticsEventIngressService } from './services/leadflow-analytics-event-ingress.service';
@@ -29,6 +30,7 @@ import { LeadFlowCsatService } from './services/leadflow-csat.service';
 import { LeadFlowIntelligenceService } from './services/leadflow-intelligence.service';
 import { LeadFlowOperationalAnalyticsService } from './services/leadflow-operational-analytics.service';
 import { LeadFlowOverviewService } from './services/leadflow-overview.service';
+import { LeadFlowAnalyticsViewsService } from './services/leadflow-analytics-views.service';
 
 @Module({
   imports: [
@@ -51,6 +53,7 @@ import { LeadFlowOverviewService } from './services/leadflow-overview.service';
         LeadFlowIntelligenceDecisionEntity,
         LeadFlowIntelligenceConfigVersionEntity,
         LeadFlowIntelligenceResultEntity,
+        LeadFlowAnalyticsViewEntity,
       ],
       'agency',
     ),
@@ -64,6 +67,7 @@ import { LeadFlowOverviewService } from './services/leadflow-overview.service';
     LeadFlowAnalyticsEventIngressService,
     LeadFlowCsatService,
     LeadFlowIntelligenceService,
+    LeadFlowAnalyticsViewsService,
   ],
   exports: [
     LeadFlowAnalyticsService,

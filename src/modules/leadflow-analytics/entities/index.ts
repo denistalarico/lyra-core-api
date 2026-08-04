@@ -4,3 +4,4 @@ export { LeadFlowIntelligenceConfigVersionEntity } from './leadflow-intelligence
 export { LeadFlowIntelligenceDecisionEntity } from './leadflow-intelligence-decision.entity';
 export { LeadFlowIntelligenceRecommendationEntity } from './leadflow-intelligence-recommendation.entity';
 export { LeadFlowIntelligenceResultEntity } from './leadflow-intelligence-result.entity';
+export { LeadFlowAnalyticsViewEntity } from './leadflow-analytics-view.entity';

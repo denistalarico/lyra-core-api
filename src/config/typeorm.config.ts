@@ -286,6 +286,7 @@ import {
   LeadFlowIntelligenceDecisionEntity,
   LeadFlowIntelligenceRecommendationEntity,
   LeadFlowIntelligenceResultEntity,
+  LeadFlowAnalyticsViewEntity,
 } from '../modules/leadflow-analytics/entities';
 import {
   LeadFlowProductTelemetryDailyEntity,
@@ -512,6 +513,7 @@ export const agencyEntities = [
   LeadFlowIntelligenceDecisionEntity,
   LeadFlowIntelligenceConfigVersionEntity,
   LeadFlowIntelligenceResultEntity,
+  LeadFlowAnalyticsViewEntity,
   LeadFlowTelemetryConsentNoticeEntity,
   LeadFlowTelemetryConsentEntity,
   LeadFlowTelemetryIdentityLinkEntity,

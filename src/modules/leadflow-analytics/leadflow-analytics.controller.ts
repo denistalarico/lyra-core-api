@@ -2,10 +2,12 @@ import {
   Body,
   Controller,
   Get,
+  Delete,
   Logger,
   Param,
   ParseUUIDPipe,
   Post,
+  Put,
   Query,
   Res,
   ServiceUnavailableException,
@@ -29,12 +31,14 @@ import { GetCommercialJourneyAnalyticsDto } from './dto/get-commercial-journey-a
 import { GetIntelligenceRecommendationsDto } from './dto/get-intelligence-recommendations.dto';
 import { GetLeadFlowOverviewDto } from './dto/get-leadflow-overview.dto';
 import { GetOperationalAnalyticsDto } from './dto/get-operational-analytics.dto';
+import { UpsertAnalyticsViewDto } from './dto/upsert-analytics-view.dto';
 import { LEADFLOW_ANALYTICS_PERMISSIONS } from './leadflow-analytics.permissions';
 import { LeadFlowAnalyticsReportService } from './services/leadflow-analytics-report.service';
 import { LeadFlowAnalyticsService } from './services/leadflow-analytics.service';
 import { LeadFlowIntelligenceService } from './services/leadflow-intelligence.service';
 import { LeadFlowOperationalAnalyticsService } from './services/leadflow-operational-analytics.service';
 import { LeadFlowOverviewService } from './services/leadflow-overview.service';
+import { LeadFlowAnalyticsViewsService } from './services/leadflow-analytics-views.service';
 
 @Controller('leadflow/analytics')
 @UseGuards(JwtAuthGuard, PermissionsGuard)
@@ -48,7 +52,54 @@ export class LeadFlowAnalyticsController {
     private readonly overview: LeadFlowOverviewService,
     private readonly reports: LeadFlowAnalyticsReportService,
     private readonly intelligence: LeadFlowIntelligenceService,
+    private readonly views: LeadFlowAnalyticsViewsService,
   ) {}
+
+  @Get('views')
+  @RequireAnyPermission(
+    LEADFLOW_ANALYTICS_PERMISSIONS.operationalView,
+    LEADFLOW_ANALYTICS_PERMISSIONS.fullView,
+  )
+  listViews(@RequestContextData() ctx: RequestContext) {
+    return this.views.list(ctx);
+  }
+
+  @Post('views')
+  @RequireAnyPermission(
+    LEADFLOW_ANALYTICS_PERMISSIONS.operationalView,
+    LEADFLOW_ANALYTICS_PERMISSIONS.fullView,
+  )
+  createView(
+    @RequestContextData() ctx: RequestContext,
+    @Body() dto: UpsertAnalyticsViewDto,
+  ) {
+    return this.views.create(ctx, dto);
+  }
+
+  @Put('views/:id')
+  @RequireAnyPermission(
+    LEADFLOW_ANALYTICS_PERMISSIONS.operationalView,
+    LEADFLOW_ANALYTICS_PERMISSIONS.fullView,
+  )
+  updateView(
+    @RequestContextData() ctx: RequestContext,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpsertAnalyticsViewDto,
+  ) {
+    return this.views.update(ctx, id, dto);
+  }
+
+  @Delete('views/:id')
+  @RequireAnyPermission(
+    LEADFLOW_ANALYTICS_PERMISSIONS.operationalView,
+    LEADFLOW_ANALYTICS_PERMISSIONS.fullView,
+  )
+  removeView(
+    @RequestContextData() ctx: RequestContext,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.views.remove(ctx, id);
+  }
 
   @Get('overview')
   @RequireAnyPermission(
