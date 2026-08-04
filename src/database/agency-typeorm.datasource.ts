@@ -148,6 +148,7 @@ import { CreateLeadflowAutomationGlobalConfigVersions1788700000000 } from './mig
 import { AddLeadflowAgentsLifecycle1788800000000 } from './migrations/1788800000000-add-leadflow-agents-lifecycle';
 import { CreateLeadflowAnalyticsViews1788900000000 } from './migrations/1788900000000-create-leadflow-analytics-views';
 import { AddLeadflowAnalyticsWidgetLayout1789000000000 } from './migrations/1789000000000-add-leadflow-analytics-widget-layout';
+import { ReconcileLeadflowBriefingFullSchema1789050000000 } from './migrations/1789050000000-reconcile-leadflow-briefing-full-schema';
 import { ReconcileLeadflowBriefingReviewSchema1789100000000 } from './migrations/1789100000000-reconcile-leadflow-briefing-review-schema';
 
 export const AgencyDataSource = new DataSource({
@@ -307,6 +308,7 @@ export const AgencyDataSource = new DataSource({
     AddLeadflowAgentsLifecycle1788800000000,
     CreateLeadflowAnalyticsViews1788900000000,
     AddLeadflowAnalyticsWidgetLayout1789000000000,
+    ReconcileLeadflowBriefingFullSchema1789050000000,
     ReconcileLeadflowBriefingReviewSchema1789100000000,
   ],
 });
