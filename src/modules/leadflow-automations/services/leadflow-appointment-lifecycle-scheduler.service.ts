@@ -134,7 +134,10 @@ export class LeadFlowAppointmentLifecycleSchedulerService {
         `appointment_confirmation:${automationId}:${appointment.id}:` +
         `${startsAt.toISOString()}:${dueAt.toISOString()}`,
       dedupeScope: automationId,
-      fireAt: new Date(Math.max(Date.now(), dueAt.getTime())).toISOString(),
+      // Keep the canonical deadline. The scheduler runtime decides whether an
+      // overdue timer is due immediately; replacing it with wall-clock time
+      // would make retries non-deterministic and change the timer key meaning.
+      fireAt: dueAt.toISOString(),
       purpose: 'appointment_confirmation',
       consumerKey: LEADFLOW_APPOINTMENT_TIMER_CONSUMER,
       payload: {
@@ -166,7 +169,7 @@ export class LeadFlowAppointmentLifecycleSchedulerService {
         `appointment_no_show_check:${automationId}:${appointment.id}:` +
         `${startsAt.toISOString()}:${checkAt.toISOString()}`,
       dedupeScope: automationId,
-      fireAt: new Date(Math.max(Date.now(), checkAt.getTime())).toISOString(),
+      fireAt: checkAt.toISOString(),
       purpose: 'appointment_no_show_check',
       consumerKey: LEADFLOW_APPOINTMENT_TIMER_CONSUMER,
       payload: {

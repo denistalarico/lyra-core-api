@@ -119,6 +119,23 @@ describe('LeadFlowAppointmentLifecycleSchedulerService', () => {
     });
   });
 
+  it('keeps the canonical confirmation deadline when the process clock is later', async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-08-04T18:05:00.000Z'));
+    try {
+      const { scheduler, service } = harness();
+
+      await service.observeDelivery(delivery());
+
+      const [confirmation] = scheduler.schedule.mock.calls.map(
+        ([request]) => request,
+      );
+      expect(confirmation.fireAt).toBe('2026-08-04T13:00:00.000Z');
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
   it('reconciles clocks after an appointment update', async () => {
     const { scheduler, service } = harness();
 
