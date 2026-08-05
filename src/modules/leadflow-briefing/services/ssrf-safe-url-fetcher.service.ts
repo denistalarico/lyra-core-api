@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { promises as dns, type LookupAddress } from 'dns';
+import type { LookupFunction } from 'node:net';
 import { Agent, request } from 'undici';
 import { isPublicIp } from './ip-guard.util';
 import { isAllowedPort, isAllowedProtocol } from './url-policy.util';
@@ -15,6 +16,22 @@ export interface FetchUrlOptions {
 export interface FetchUrlResult {
   body: Buffer;
   contentType: string | null;
+}
+
+/**
+ * Node enables automatic address-family selection by calling custom DNS
+ * lookups with `all: true`. In that mode the callback must receive an array,
+ * not the legacy `(address, family)` pair. Returning the wrong shape makes
+ * node:net try to connect to `undefined` and surface ERR_INVALID_IP_ADDRESS.
+ */
+export function createPinnedLookup(pinnedIp: LookupAddress): LookupFunction {
+  return (_hostname, options, callback) => {
+    if (options.all) {
+      callback(null, [pinnedIp]);
+      return;
+    }
+    callback(null, pinnedIp.address, pinnedIp.family);
+  };
 }
 
 /**
@@ -36,9 +53,7 @@ export class SsrfSafeUrlFetcherService {
 
       const agent = new Agent({
         connect: {
-          lookup: (_hostname, _options, callback) => {
-            callback(null, pinnedIp.address, pinnedIp.family);
-          },
+          lookup: createPinnedLookup(pinnedIp),
           timeout: opts.timeoutMs,
         },
       });
@@ -57,7 +72,9 @@ export class SsrfSafeUrlFetcherService {
           await response.body.dump().catch(() => undefined);
           const location = response.headers.location;
           if (!location || Array.isArray(location)) {
-            throw new BadRequestException('Redirect without a valid Location header.');
+            throw new BadRequestException(
+              'Redirect without a valid Location header.',
+            );
           }
           currentUrl = new URL(location, parsed).toString();
           continue;
@@ -65,7 +82,9 @@ export class SsrfSafeUrlFetcherService {
 
         if (response.statusCode < 200 || response.statusCode >= 300) {
           await response.body.dump().catch(() => undefined);
-          throw new BadRequestException(`URL fetch failed with status ${response.statusCode}.`);
+          throw new BadRequestException(
+            `URL fetch failed with status ${response.statusCode}.`,
+          );
         }
 
         const body = await this.readBodyWithCap(response.body, opts.maxBytes);
@@ -112,7 +131,9 @@ export class SsrfSafeUrlFetcherService {
       throw new BadRequestException('Could not resolve host.');
     }
     if (!addresses.every((entry) => isPublicIp(entry.address))) {
-      throw new BadRequestException('URL resolves to a disallowed network address.');
+      throw new BadRequestException(
+        'URL resolves to a disallowed network address.',
+      );
     }
     const chosen = addresses[0];
     return { address: chosen.address, family: chosen.family as 4 | 6 };
@@ -129,7 +150,9 @@ export class SsrfSafeUrlFetcherService {
       if (total > maxBytes) {
         const destroy = (body as { destroy?: () => void }).destroy;
         if (typeof destroy === 'function') destroy.call(body);
-        throw new BadRequestException('Response body exceeds the allowed size.');
+        throw new BadRequestException(
+          'Response body exceeds the allowed size.',
+        );
       }
       chunks.push(chunk);
     }
