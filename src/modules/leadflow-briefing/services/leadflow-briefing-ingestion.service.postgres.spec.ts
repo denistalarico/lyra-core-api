@@ -201,7 +201,7 @@ run('LeadFlowBriefingIngestionService PostgreSQL', () => {
         originalname: 'brief.pdf',
         size: PDF_BYTES.length,
       }),
-    ).rejects.toThrow(/could not be scanned/);
+    ).rejects.toMatchObject({ status: 503 });
     expect(files.uploaded).toHaveLength(0);
   });
 

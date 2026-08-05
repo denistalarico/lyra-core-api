@@ -4,6 +4,7 @@ import {
   Inject,
   Injectable,
   NotFoundException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -256,8 +257,8 @@ export class LeadFlowBriefingIngestionService {
     } catch {
       // Fail closed: a scanner that can't be reached is not the same as a
       // clean file. Never fall back to "assume safe" here.
-      throw new BadRequestException(
-        'Content could not be scanned for malware — try again.',
+      throw new ServiceUnavailableException(
+        'A verificação de segurança está temporariamente indisponível. Tente novamente em alguns instantes.',
       );
     }
     if (!result.clean) {
