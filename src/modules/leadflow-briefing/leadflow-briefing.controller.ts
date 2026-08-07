@@ -2,7 +2,9 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
+  HttpCode,
   Param,
   Post,
   Res,
@@ -18,6 +20,8 @@ import type { RequestContext } from '../../common/context/request-context.interf
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionsGuard, RequireAnyPermission, RequireProductEntitlement } from '../permissions';
 import {
+  ApplyBriefingSuggestionRequestDto,
+  ConfirmBriefingSuggestionsRequestDto,
   CreateBriefingSourceRequestDto,
   IngestBriefingPasteRequestDto,
   IngestBriefingUrlRequestDto,
@@ -65,6 +69,16 @@ export class LeadFlowBriefingController {
       label: dto.label,
       createdById: ctx.userId ?? null,
     });
+  }
+
+  @Delete('sources/:sourceId')
+  @HttpCode(204)
+  @RequireAnyPermission(LEADFLOW_BRIEFING_PERMISSIONS.sourcesManage)
+  async removeSource(
+    @RequestContextData() ctx: RequestContext,
+    @Param('sourceId') sourceId: string,
+  ) {
+    await this.sourceService.archiveSource(ctx, sourceId);
   }
 
   @Post('sources/:sourceId/versions/upload')
@@ -179,11 +193,31 @@ export class LeadFlowBriefingController {
   applySuggestion(
     @RequestContextData() ctx: RequestContext,
     @Param('suggestionId') suggestionId: string,
+    @Body() dto: ApplyBriefingSuggestionRequestDto,
   ) {
     if (!ctx.userId) throw new BadRequestException('User context is required.');
     return this.suggestionService.applySuggestion(ctx, {
       suggestionId,
       appliedById: ctx.userId,
+      ...(dto?.value !== undefined ? { value: dto.value } : {}),
+    });
+  }
+
+  @Post('settings/:settingsId/suggestions/confirm')
+  @RequireAnyPermission(LEADFLOW_BRIEFING_PERMISSIONS.suggestionsApply)
+  confirmSuggestions(
+    @RequestContextData() ctx: RequestContext,
+    @Param('settingsId') settingsId: string,
+    @Body() dto: ConfirmBriefingSuggestionsRequestDto,
+  ) {
+    if (!ctx.userId) throw new BadRequestException('User context is required.');
+    return this.suggestionService.confirmSuggestions(ctx, {
+      settingsId,
+      appliedById: ctx.userId,
+      items: dto.items.map((item) => ({
+        suggestionId: item.suggestionId,
+        ...(item.value !== undefined ? { value: item.value } : {}),
+      })),
     });
   }
 

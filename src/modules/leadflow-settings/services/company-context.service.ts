@@ -64,6 +64,47 @@ export function getCompanyContextScalarFieldPaths(): string[] {
   return [...SCALAR_FIELD_PATHS];
 }
 
+const FIELD_DESCRIPTIONS: Record<string, string> = {
+  'identity.publicName': 'nome com que o negócio se apresenta ao público',
+  'identity.legalName': 'razão social / nome jurídico',
+  'identity.summary': 'resumo do que o negócio faz',
+  'identity.valueProposition': 'proposta de valor principal',
+  'identity.differentiators': 'diferenciais em relação a concorrentes',
+  'identity.targetAudience': 'público-alvo atendido',
+  'identity.languages': 'idiomas de atendimento',
+  'identity.timezone': 'fuso horário de operação',
+  'identity.regionsServed': 'regiões ou cidades atendidas',
+  'service.businessHours': 'horários de atendimento',
+  'service.handoffRules': 'quando transferir a conversa para um humano',
+  'service.serviceLevel': 'prazo/SLA de resposta prometido',
+  'service.emergencyRules': 'como tratar urgências e emergências',
+  'service.unsupportedRequests': 'pedidos que o atendimento não resolve',
+  'qualification.conversionGoal': 'objetivo de conversão da conversa',
+  'qualification.preferredCta': 'chamada para ação preferida',
+  'qualification.essentialQuestions': 'perguntas essenciais para qualificar',
+  'qualification.qualifiedCriteria': 'o que caracteriza um lead qualificado',
+  'qualification.disqualificationCriteria': 'o que desqualifica um contato',
+  'qualification.priorityServices': 'serviços ou produtos prioritários',
+  'qualification.urgencySignals': 'sinais de urgência do contato',
+  policies: 'políticas de pagamento, entrega, cancelamento, garantia e privacidade',
+};
+
+/**
+ * The scalar catalog paired with a short pt-BR description of each field.
+ * The briefing extraction prompt sends this so the model proposes only paths
+ * that actually exist in the draft, instead of inventing plausible-looking
+ * ones that `isValidFieldPath` would later reject.
+ */
+export function getCompanyContextFieldCatalog(): Array<{
+  fieldPath: string;
+  description: string;
+}> {
+  return SCALAR_FIELD_PATHS.map((fieldPath) => ({
+    fieldPath,
+    description: FIELD_DESCRIPTIONS[fieldPath] ?? fieldPath,
+  }));
+}
+
 @Injectable()
 export class CompanyContextService {
   normalize(value: LeadFlowJsonObject): LeadFlowJsonObject {

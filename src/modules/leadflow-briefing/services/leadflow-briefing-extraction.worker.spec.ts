@@ -1,4 +1,5 @@
 import { Logger } from '@nestjs/common';
+import { Readable } from 'node:stream';
 import { LeadFlowBriefingExtractionWorker } from './leadflow-briefing-extraction.worker';
 import {
   LeadFlowBriefingExtractionJobEntity,
@@ -101,7 +102,7 @@ function setup(options: {
     permissionService as never,
   );
 
-  return { worker, dataSource, jobRepo, versionRepo, jobService, suggestionService, provider, permissionService, manager };
+  return { worker, dataSource, files, jobRepo, versionRepo, jobService, suggestionService, provider, permissionService, manager };
 }
 
 describe('LeadFlowBriefingExtractionWorker', () => {
@@ -265,5 +266,89 @@ describe('LeadFlowBriefingExtractionWorker', () => {
     await worker.processPending(1);
 
     expect(errorSpy).not.toHaveBeenCalled();
+  });
+
+  it('offers the model the field catalog rather than bare root keys', async () => {
+    const { worker, provider } = setup({});
+    provider.extract.mockResolvedValue({
+      suggestions: [],
+      provider: 'mock',
+      model: 'mock',
+      usage: { images: 0 },
+      latencyMs: 1,
+      attempts: 1,
+    });
+
+    await worker.processPending(1);
+
+    const fields = provider.extract.mock.calls[0]?.[0]?.fields as Array<{
+      fieldPath: string;
+      description: string;
+    }>;
+    expect(fields).toContainEqual(
+      expect.objectContaining({ fieldPath: 'identity.publicName' }),
+    );
+    expect(fields.every((field) => field.description.length > 0)).toBe(true);
+  });
+
+  it('keeps the good rows when the model returns an unknown, repeated or empty field', async () => {
+    const { worker, suggestionService, provider } = setup({});
+    provider.extract.mockResolvedValue({
+      suggestions: [
+        { fieldPath: 'identity.publicName', value: '  Acme  ', confidence: 0.9, rationale: null },
+        { fieldPath: 'contato.telefone', value: '11 99999-0000', confidence: 0.9, rationale: null },
+        { fieldPath: 'identity.publicName', value: 'Acme Duplicada', confidence: 0.2, rationale: null },
+        { fieldPath: 'identity.summary', value: '   ', confidence: 0.4, rationale: null },
+      ],
+      provider: 'mock',
+      model: 'mock',
+      usage: { images: 0 },
+      latencyMs: 1,
+      attempts: 1,
+    });
+
+    await worker.processPending(1);
+
+    expect(suggestionService.recordSuggestions).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        suggestions: [
+          expect.objectContaining({
+            fieldPath: 'identity.publicName',
+            suggestedValue: 'Acme',
+          }),
+        ],
+      }),
+    );
+  });
+
+  it('sends a fetched page as readable text instead of raw markup', async () => {
+    const html =
+      '<html><head><style>.a{color:red}</style></head><body><script>track()</script>' +
+      '<h1>Acme Reformas</h1><p>Atendemos S&atilde;o Paulo</p></body></html>';
+    const { worker, files, provider } = setup({
+      version: baseVersion({
+        rawText: null,
+        objectKey: 'briefing/page.html',
+        mimeType: 'text/html',
+      }),
+    });
+    files.getPrivateAsset.mockResolvedValue({ body: Readable.from([Buffer.from(html)]) });
+    provider.extract.mockResolvedValue({
+      suggestions: [],
+      provider: 'mock',
+      model: 'mock',
+      usage: { images: 0 },
+      latencyMs: 1,
+      attempts: 1,
+    });
+
+    await worker.processPending(1);
+
+    const text = provider.extract.mock.calls[0]?.[0]?.text as string;
+    expect(text).toContain('Acme Reformas');
+    expect(text).toContain('Atendemos São Paulo');
+    expect(text).not.toContain('track()');
+    expect(text).not.toContain('<');
   });
 });

@@ -5,9 +5,10 @@ import { hostname } from 'node:os';
 import { Readable } from 'node:stream';
 import { DataSource } from 'typeorm';
 import type { RequestContext } from '../../../common/context/request-context.interface';
+import type { RecordSuggestionInput } from '../dto';
 import { FilesService } from '../../../common/files/files.service';
 import { PlatformPermissionService } from '../../permissions/services/platform-permission.service';
-import { getCompanyContextRootKeys } from '../../leadflow-settings/services/company-context.service';
+import { getCompanyContextFieldCatalog } from '../../leadflow-settings/services/company-context.service';
 import {
   LeadFlowBriefingExtractionJobEntity,
   LeadFlowBriefingSourceVersionEntity,
@@ -17,6 +18,7 @@ import { LeadFlowBriefingSourceVersionStatus } from '../enums/leadflow-briefing-
 import { LeadFlowBriefingExtractionConfigService } from './leadflow-briefing-extraction-config.service';
 import { LeadFlowBriefingExtractionJobService } from './leadflow-briefing-extraction-job.service';
 import {
+  ExtractionSuggestion,
   ExtractionUsage,
   LeadFlowBriefingExtractionProvider,
 } from './leadflow-briefing-extraction-provider';
@@ -141,13 +143,13 @@ export class LeadFlowBriefingExtractionWorker {
         throw new LeadFlowBriefingExtractionError('source_version_not_available');
 
       const { text, images } = await this.buildContent(version);
-      const allowedRootKeys = getCompanyContextRootKeys();
+      const fields = getCompanyContextFieldCatalog();
 
       const result = await this.provider.extract({
         tenantId: job.tenantId,
         workspaceId: job.workspaceId,
         idempotencyKey: job.idempotencyKey,
-        allowedRootKeys,
+        fields,
         text,
         images,
       });
@@ -156,12 +158,10 @@ export class LeadFlowBriefingExtractionWorker {
         extractionJobId: job.id,
         settingsId: job.settingsId,
         sourceVersionId: job.sourceVersionId,
-        suggestions: result.suggestions.map((suggestion) => ({
-          fieldPath: suggestion.fieldPath,
-          suggestedValue: suggestion.value,
-          confidence: suggestion.confidence,
-          rationale: suggestion.rationale,
-        })),
+        suggestions: usableSuggestions(
+          result.suggestions,
+          fields.map((field) => field.fieldPath),
+        ),
       });
 
       const actualCents = this.estimateCostCents(result.usage);
@@ -213,10 +213,12 @@ export class LeadFlowBriefingExtractionWorker {
 
     if (version.objectKey) {
       const buffer = await this.readObject(version.objectKey, version.byteSize);
-      return {
-        text: buffer.toString('utf8').slice(0, this.config.maxExtractedChars),
-        images: [],
-      };
+      const raw = buffer.toString('utf8');
+      // A fetched page is stored as its original bytes, so markup reaches
+      // here verbatim. Sent as-is, the char budget is spent on scripts and
+      // attributes instead of the copy the briefing is actually about.
+      const text = isMarkup(mimeType) ? htmlToText(raw) : raw;
+      return { text: text.slice(0, this.config.maxExtractedChars), images: [] };
     }
 
     throw new LeadFlowBriefingExtractionError('unsupported_source_content');
@@ -254,6 +256,108 @@ export class LeadFlowBriefingExtractionWorker {
     const ms = Math.min(60_000, 1_000 * 2 ** Math.max(0, attempts - 1));
     return new Date(Date.now() + ms);
   }
+}
+
+function isMarkup(mimeType: string): boolean {
+  return /html|xml/.test(mimeType);
+}
+
+/**
+ * The HTML 4 Latin-1 names map onto U+00C0..U+00FF in this exact order, so
+ * the whole accented range — which is most of a Brazilian page's prose —
+ * comes from one table instead of sixty hand-written entries.
+ */
+const LATIN1_ENTITY_NAMES =
+  'Agrave Aacute Acirc Atilde Auml Aring AElig Ccedil Egrave Eacute Ecirc Euml ' +
+  'Igrave Iacute Icirc Iuml ETH Ntilde Ograve Oacute Ocirc Otilde Ouml times ' +
+  'Oslash Ugrave Uacute Ucirc Uuml Yacute THORN szlig agrave aacute acirc ' +
+  'atilde auml aring aelig ccedil egrave eacute ecirc euml igrave iacute icirc ' +
+  'iuml eth ntilde ograve oacute ocirc otilde ouml divide oslash ugrave uacute ' +
+  'ucirc uuml yacute thorn yuml';
+
+const HTML_ENTITIES: Record<string, string> = {
+  ...Object.fromEntries(
+    LATIN1_ENTITY_NAMES.split(' ').map((name, index) => [
+      name,
+      String.fromCodePoint(0x00c0 + index),
+    ]),
+  ),
+  amp: '&',
+  lt: '<',
+  gt: '>',
+  quot: '"',
+  apos: "'",
+  nbsp: ' ',
+  ordf: 'ª',
+  ordm: 'º',
+  deg: '°',
+  copy: '©',
+  reg: '®',
+  trade: '™',
+  euro: '€',
+  laquo: '«',
+  raquo: '»',
+  middot: '·',
+  hellip: '…',
+  ndash: '–',
+  mdash: '—',
+  lsquo: '‘',
+  rsquo: '’',
+  ldquo: '“',
+  rdquo: '”',
+};
+
+function htmlToText(html: string): string {
+  return html
+    .replace(/<(script|style|noscript|svg|head)\b[^>]*>[\s\S]*?<\/\1>/gi, ' ')
+    .replace(/<!--[\s\S]*?-->/g, ' ')
+    .replace(/<\/(p|div|li|tr|h[1-6]|section|article)>/gi, '\n')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&#x([0-9a-f]+);/gi, (_, hex: string) =>
+      String.fromCodePoint(Number.parseInt(hex, 16)),
+    )
+    .replace(/&#(\d+);/g, (_, code: string) => String.fromCodePoint(Number(code)))
+    .replace(
+      /&([a-z][a-z0-9]*);/gi,
+      (match, name: string) => HTML_ENTITIES[name] ?? match,
+    )
+    .replace(/[ \t\f\v]+/g, ' ')
+    .replace(/\n\s*\n\s*/g, '\n')
+    .trim();
+}
+
+/**
+ * recordSuggestions rejects an unknown field path and a repeated one, and it
+ * does so for the whole batch — so a single stray row from the model would
+ * throw away an otherwise good extraction. Everything unusable is dropped
+ * here instead, keeping the rest.
+ */
+function usableSuggestions(
+  suggestions: ExtractionSuggestion[],
+  allowedFieldPaths: string[],
+): RecordSuggestionInput[] {
+  const allowed = new Set(allowedFieldPaths);
+  const seen = new Set<string>();
+  const usable: RecordSuggestionInput[] = [];
+
+  for (const suggestion of suggestions) {
+    if (!allowed.has(suggestion.fieldPath)) continue;
+    if (seen.has(suggestion.fieldPath)) continue;
+    const value =
+      typeof suggestion.value === 'string' ? suggestion.value.trim() : suggestion.value;
+    if (value === null || value === undefined || value === '') continue;
+
+    seen.add(suggestion.fieldPath);
+    usable.push({
+      fieldPath: suggestion.fieldPath,
+      suggestedValue: value,
+      confidence: suggestion.confidence,
+      rationale: suggestion.rationale,
+    });
+  }
+
+  return usable;
 }
 
 async function streamBuffer(stream: Readable, maxBytes: number): Promise<Buffer> {

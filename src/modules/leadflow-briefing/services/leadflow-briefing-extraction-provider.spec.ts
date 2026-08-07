@@ -33,7 +33,10 @@ describe('LeadFlowBriefingExtractionProvider', () => {
     tenantId: 't',
     workspaceId: 'w',
     idempotencyKey: 'idem-1',
-    allowedRootKeys: ['identity', 'offers'],
+    fields: [
+      { fieldPath: 'identity.publicName', description: 'nome público' },
+      { fieldPath: 'identity.summary', description: 'resumo do negócio' },
+    ],
     text: 'untrusted document text',
     images: [],
   };
@@ -60,7 +63,7 @@ describe('LeadFlowBriefingExtractionProvider', () => {
 
     expect(fetchSpy).not.toHaveBeenCalled();
     expect(result.provider).toBe('mock');
-    expect(result.suggestions[0]?.fieldPath).toBe('identity');
+    expect(result.suggestions[0]?.fieldPath).toBe('identity.publicName');
   });
 
   it('parses a successful live response into normalized suggestions', async () => {

@@ -26,21 +26,36 @@ export class LeadFlowBriefingExtractionJobService {
     private readonly stateMachine: LeadFlowBriefingJobStateMachine,
   ) {}
 
-  /** Idempotent by (source_version_id, job_kind): re-enqueueing returns the existing job, never a duplicate row. */
+  /**
+   * Idempotent while a run for (source_version_id, job_kind) is still in
+   * flight: re-enqueueing returns that job rather than a duplicate row. Once
+   * the run reaches a terminal state a fresh attempt is enqueued instead —
+   * without this, a dead-lettered extraction could never be retried and the
+   * panel's "extract" button would silently do nothing forever.
+   */
   async enqueueJob(
     ctx: RequestContext,
     input: EnqueueExtractionJobInput,
   ): Promise<BriefingExtractionJobResponse> {
     const workspaceId = this.requireWorkspaceId(ctx);
     const jobKind = input.jobKind ?? DEFAULT_JOB_KIND;
-    const idempotencyKey = `briefing-extraction:${input.sourceVersionId}:${jobKind}`;
     const repo = this.dataSource.getRepository(LeadFlowBriefingExtractionJobEntity);
 
-    const existing = await repo.findOne({
-      where: { tenantId: ctx.tenantId, workspaceId, idempotencyKey },
+    const previous = await repo.find({
+      where: {
+        tenantId: ctx.tenantId,
+        workspaceId,
+        sourceVersionId: input.sourceVersionId,
+        jobKind,
+      },
+      order: { createdAt: 'DESC' },
     });
-    if (existing) return this.mapJob(existing);
+    const latest = previous[0];
+    if (latest && !this.stateMachine.isTerminal(latest.status)) {
+      return this.mapJob(latest);
+    }
 
+    const baseKey = `briefing-extraction:${input.sourceVersionId}:${jobKind}`;
     const job = await repo.save(
       repo.create({
         tenantId: ctx.tenantId,
@@ -49,7 +64,8 @@ export class LeadFlowBriefingExtractionJobService {
         sourceId: input.sourceId,
         sourceVersionId: input.sourceVersionId,
         jobKind,
-        idempotencyKey,
+        idempotencyKey:
+          previous.length === 0 ? baseKey : `${baseKey}:${previous.length + 1}`,
         createdById: input.createdById,
       }),
     );

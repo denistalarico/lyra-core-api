@@ -10,8 +10,10 @@ import type { RequestContext } from '../../../common/context/request-context.int
 import {
   LeadFlowBriefingSourceEntity,
   LeadFlowBriefingSourceVersionEntity,
+  LeadFlowBriefingSuggestionEntity,
 } from '../entities';
 import { LeadFlowBriefingSourceVersionStatus } from '../enums/leadflow-briefing-source-version-status.enum';
+import { LeadFlowBriefingSuggestionStatus } from '../enums/leadflow-briefing-suggestion-status.enum';
 import type {
   BriefingSourceListItemResponse,
   BriefingSourceResponse,
@@ -108,6 +110,53 @@ export class LeadFlowBriefingSourceService {
     });
   }
 
+  /**
+   * Removes a source from the panel. Rows are archived rather than deleted:
+   * jobs, versions and applications reference a source with ON DELETE RESTRICT
+   * precisely so an already-applied field can always be traced back to what it
+   * came from. Suggestions still awaiting review are rejected in the same
+   * transaction — leaving them pending would keep offering fields from a
+   * source the user just removed.
+   */
+  async archiveSource(ctx: RequestContext, sourceId: string): Promise<void> {
+    const workspaceId = this.requireWorkspaceId(ctx);
+
+    await this.dataSource.transaction(async (manager) => {
+      const sourceRepo = manager.getRepository(LeadFlowBriefingSourceEntity);
+      const source = await sourceRepo.findOne({
+        where: { id: sourceId, tenantId: ctx.tenantId, workspaceId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!source) throw new NotFoundException('Briefing source not found.');
+      if (source.status === 'archived') return;
+
+      const versions = await manager
+        .getRepository(LeadFlowBriefingSourceVersionEntity)
+        .find({ where: { sourceId: source.id } });
+
+      if (versions.length > 0) {
+        await manager
+          .createQueryBuilder()
+          .update(LeadFlowBriefingSuggestionEntity)
+          .set({
+            status: LeadFlowBriefingSuggestionStatus.Rejected,
+            decidedById: ctx.userId ?? null,
+            decidedAt: new Date(),
+          })
+          .where('source_version_id IN (:...versionIds)', {
+            versionIds: versions.map((version) => version.id),
+          })
+          .andWhere('status = :pending', {
+            pending: LeadFlowBriefingSuggestionStatus.Pending,
+          })
+          .execute();
+      }
+
+      source.status = 'archived';
+      await sourceRepo.save(source);
+    });
+  }
+
   /** Scoped lookup used by the extract-trigger route to resolve a source's settingsId. */
   async getSource(ctx: RequestContext, sourceId: string): Promise<BriefingSourceResponse> {
     const workspaceId = this.requireWorkspaceId(ctx);
@@ -129,7 +178,7 @@ export class LeadFlowBriefingSourceService {
     const versionRepo = this.dataSource.getRepository(LeadFlowBriefingSourceVersionEntity);
 
     const sources = await sourceRepo.find({
-      where: { tenantId: ctx.tenantId, workspaceId, settingsId },
+      where: { tenantId: ctx.tenantId, workspaceId, settingsId, status: 'active' },
       order: { createdAt: 'DESC' },
     });
     if (sources.length === 0) return [];

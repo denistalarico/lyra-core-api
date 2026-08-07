@@ -25,10 +25,12 @@ import { LeadFlowBriefingSuggestionStatus } from '../enums/leadflow-briefing-sug
 import type {
   ApplySuggestionInput,
   BriefingApplicationResponse,
+  BriefingConfirmationResponse,
   BriefingFieldProvenanceResponse,
   BriefingReviewResponse,
   BriefingSuggestionListItemResponse,
   BriefingSuggestionResponse,
+  ConfirmSuggestionsInput,
   RecordSuggestionsInput,
   RejectSuggestionInput,
 } from '../dto';
@@ -164,6 +166,8 @@ export class LeadFlowBriefingSuggestionService {
       });
       if (!settings) throw new NotFoundException('LeadFlow settings not found.');
 
+      const appliedValue =
+        input.value !== undefined ? input.value : suggestion.suggestedValue;
       const previousValue = getAtFieldPath(
         settings.companyContextDraft ?? {},
         suggestion.fieldPath,
@@ -171,7 +175,7 @@ export class LeadFlowBriefingSuggestionService {
       const mutatedDraft = setAtFieldPath(
         settings.companyContextDraft ?? {},
         suggestion.fieldPath,
-        suggestion.suggestedValue,
+        appliedValue,
       );
       const normalizedDraft = this.companyContextService.normalizePersisted(mutatedDraft);
       const draftHash = this.companyContextService.hash(normalizedDraft);
@@ -201,7 +205,7 @@ export class LeadFlowBriefingSuggestionService {
           suggestionId: suggestion.id,
           fieldPath: suggestion.fieldPath,
           previousValue: previousValue ?? null,
-          appliedValue: suggestion.suggestedValue,
+          appliedValue,
           resultingSnapshotId: snapshot.id,
           appliedById: input.appliedById,
         }),
@@ -219,6 +223,134 @@ export class LeadFlowBriefingSuggestionService {
         resultingSnapshotId: application.resultingSnapshotId,
         createdAt: application.createdAt,
       };
+    });
+  }
+
+  /**
+   * Confirms a reviewed batch in one go: every field lands in the draft
+   * together, under a single snapshot, or none does. The panel presents the
+   * extraction as one editable summary with one confirm button, so a partial
+   * commit — half the fields written, the rest lost to an error midway — would
+   * leave a draft no one asked for.
+   */
+  async confirmSuggestions(
+    ctx: RequestContext,
+    input: ConfirmSuggestionsInput,
+  ): Promise<BriefingConfirmationResponse> {
+    const workspaceId = this.requireWorkspaceId(ctx);
+    if (input.items.length === 0) {
+      throw new BadRequestException('No suggestion was selected to confirm.');
+    }
+
+    const seen = new Set<string>();
+    for (const item of input.items) {
+      if (seen.has(item.suggestionId)) {
+        throw new BadRequestException(
+          'The same suggestion was sent twice in one confirmation.',
+        );
+      }
+      seen.add(item.suggestionId);
+    }
+
+    return this.dataSource.transaction(async (manager) => {
+      const suggestionRepo = manager.getRepository(LeadFlowBriefingSuggestionEntity);
+      const settingsRepo = manager.getRepository(LeadFlowClientSettingsEntity);
+      const snapshotRepo = manager.getRepository(LeadFlowBriefingContextSnapshotEntity);
+      const applicationRepo = manager.getRepository(
+        LeadFlowBriefingSuggestionApplicationEntity,
+      );
+
+      const settings = await settingsRepo.findOne({
+        where: { id: input.settingsId, tenantId: ctx.tenantId, workspaceId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!settings) throw new NotFoundException('LeadFlow settings not found.');
+
+      let draft = settings.companyContextDraft ?? {};
+      const staged: Array<{
+        suggestion: LeadFlowBriefingSuggestionEntity;
+        previousValue: unknown;
+        appliedValue: unknown;
+      }> = [];
+
+      for (const item of input.items) {
+        const suggestion = await suggestionRepo.findOne({
+          where: { id: item.suggestionId, tenantId: ctx.tenantId, workspaceId },
+          lock: { mode: 'pessimistic_write' },
+        });
+        if (!suggestion) throw new NotFoundException('Suggestion not found.');
+        if (suggestion.settingsId !== input.settingsId) {
+          throw new BadRequestException(
+            'Suggestion does not belong to these settings.',
+          );
+        }
+        if (suggestion.status !== LeadFlowBriefingSuggestionStatus.Pending) {
+          throw new ConflictException(
+            `Suggestion is ${suggestion.status}, only a pending suggestion can be applied.`,
+          );
+        }
+
+        const appliedValue =
+          item.value !== undefined ? item.value : suggestion.suggestedValue;
+        staged.push({
+          suggestion,
+          previousValue: getAtFieldPath(draft, suggestion.fieldPath),
+          appliedValue,
+        });
+        draft = setAtFieldPath(draft, suggestion.fieldPath, appliedValue);
+      }
+
+      const normalizedDraft = this.companyContextService.normalizePersisted(draft);
+      const draftHash = this.companyContextService.hash(normalizedDraft);
+
+      settings.companyContextDraft = normalizedDraft;
+      settings.companyContextSchemaVersion = 1;
+      settings.updatedById = input.appliedById;
+      await settingsRepo.save(settings);
+
+      const snapshot = await snapshotRepo.save(
+        snapshotRepo.create({
+          tenantId: ctx.tenantId,
+          workspaceId,
+          settingsId: settings.id,
+          snapshotKind: LeadFlowBriefingSnapshotKind.SuggestionApplied,
+          draftValue: normalizedDraft,
+          draftHash,
+          createdById: input.appliedById,
+        }),
+      );
+
+      const applications: BriefingApplicationResponse[] = [];
+      for (const entry of staged) {
+        const application = await applicationRepo.save(
+          applicationRepo.create({
+            tenantId: ctx.tenantId,
+            workspaceId,
+            settingsId: settings.id,
+            suggestionId: entry.suggestion.id,
+            fieldPath: entry.suggestion.fieldPath,
+            previousValue: entry.previousValue ?? null,
+            appliedValue: entry.appliedValue,
+            resultingSnapshotId: snapshot.id,
+            appliedById: input.appliedById,
+          }),
+        );
+
+        entry.suggestion.status = LeadFlowBriefingSuggestionStatus.Applied;
+        entry.suggestion.decidedById = input.appliedById;
+        entry.suggestion.decidedAt = new Date();
+        await suggestionRepo.save(entry.suggestion);
+
+        applications.push({
+          id: application.id,
+          suggestionId: application.suggestionId,
+          fieldPath: application.fieldPath,
+          resultingSnapshotId: application.resultingSnapshotId,
+          createdAt: application.createdAt,
+        });
+      }
+
+      return { snapshotId: snapshot.id, applications };
     });
   }
 

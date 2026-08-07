@@ -100,6 +100,24 @@ export interface BriefingSuggestionResponse {
 export interface ApplySuggestionInput {
   suggestionId: string;
   appliedById: string;
+  /**
+   * Reviewer-edited replacement for the model's proposal. The suggestion row
+   * keeps the original suggested_value — what a human actually committed is
+   * recorded on the application row, so provenance still distinguishes
+   * "the model said this" from "a person approved that".
+   */
+  value?: unknown;
+}
+
+export interface ConfirmSuggestionsInput {
+  settingsId: string;
+  appliedById: string;
+  items: Array<{ suggestionId: string; value?: unknown }>;
+}
+
+export interface BriefingConfirmationResponse {
+  snapshotId: string;
+  applications: BriefingApplicationResponse[];
 }
 
 export interface RejectSuggestionInput {
