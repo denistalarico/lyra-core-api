@@ -38,6 +38,7 @@ import {
   FinanceBillRecurrenceFrequency,
   FinanceBillRecurrenceStatus,
   FinanceBillStatus,
+  FinanceDocumentType,
   FinanceInvoiceStatus,
   FinancePaymentDirection,
   FinancePaymentMethod,
@@ -2899,31 +2900,8 @@ export class FinanceBillingService {
     ctx: FinanceRequestContext,
     prefix: string,
   ) {
-    // Only already-numbered documents consume the sequence. Drafts are stored
-    // with an empty number, so abandoned drafts never leave gaps and the count
-    // stays aligned with the numbers actually issued.
-    const count =
-      prefix === 'INV'
-        ? await this.invoicesRepo
-            .createQueryBuilder('invoice')
-            .where('invoice.tenantId = :tenantId', { tenantId: ctx.tenantId })
-            .andWhere('invoice.workspaceId = :workspaceId', {
-              workspaceId: ctx.workspaceId,
-            })
-            .andWhere('invoice.invoiceNumber IS NOT NULL')
-            .andWhere("invoice.invoiceNumber <> ''")
-            .getCount()
-        : await this.billsRepo
-            .createQueryBuilder('bill')
-            .where('bill.tenantId = :tenantId', { tenantId: ctx.tenantId })
-            .andWhere('bill.workspaceId = :workspaceId', {
-              workspaceId: ctx.workspaceId,
-            })
-            .andWhere('bill.billNumber IS NOT NULL')
-            .andWhere("bill.billNumber <> ''")
-            .getCount();
-
-    const next = count + 1;
-    return `${prefix}-${String(next).padStart(5, '0')}`;
+    const documentType =
+      prefix === 'INV' ? FinanceDocumentType.Invoice : FinanceDocumentType.Bill;
+    return this.documentNumberingService.generate(ctx, documentType);
   }
 }
