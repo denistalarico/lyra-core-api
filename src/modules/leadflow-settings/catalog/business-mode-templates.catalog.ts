@@ -107,6 +107,8 @@ const clientPromptSchema = {
       required: false,
       visibility: 'basic',
       source: 'user',
+      description:
+        'O próximo passo que você quer que a conversa alcance. É por ele que a Lyra conduz o atendimento.',
       contextPath: 'qualification.conversionGoal',
     },
     {
@@ -116,6 +118,7 @@ const clientPromptSchema = {
       required: false,
       visibility: 'basic',
       source: 'user',
+      description: 'A frase com que a Lyra convida o contato a avançar.',
       contextPath: 'qualification.preferredCta',
     },
     {
@@ -125,26 +128,16 @@ const clientPromptSchema = {
       required: false,
       visibility: 'basic',
       source: 'user',
+      description:
+        'As situações em que a Lyra deve parar de responder e passar a conversa para alguém.',
       contextPath: 'service.handoffRules',
     },
 
+    // Tone is deliberately absent: it belongs to the agent, not to the company.
+    // The same business answers a price question and a complaint in different
+    // voices, so `behaviorConfig.tone` is edited per agent in the Agents module.
+
     // --- advanced: seeded by the Business Mode, never asked -----------------
-    {
-      key: 'tone',
-      label: 'Tom de voz',
-      type: 'select',
-      required: false,
-      visibility: 'advanced',
-      source: 'default',
-      contextPath: 'legacyTone',
-      options: [
-        'profissional',
-        'acolhedor',
-        'consultivo',
-        'objetivo',
-        'descontraido',
-      ],
-    },
     {
       key: 'targetAudience',
       label: 'Público-alvo',

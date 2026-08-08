@@ -102,8 +102,8 @@ describe('LeadFlow client prompt schema classification', () => {
 
       for (const field of defaulted) {
         const path = field.contextPath as string;
-        // `tone`, `languages` and `timezone` are answered by product-level
-        // fallbacks rather than catalog copy; the rest must be shipped here.
+        // `languages` and `timezone` are answered by product-level fallbacks
+        // rather than catalog copy; the rest must be shipped here.
         if (!LEADFLOW_CONTEXT_DEFAULT_PATHS.includes(path as never)) continue;
 
         const [section, leaf] = path.split('.');
@@ -112,6 +112,18 @@ describe('LeadFlow client prompt schema classification', () => {
         )?.[leaf];
         expect(typeof value === 'string' && value.trim().length > 0).toBe(true);
       }
+    }
+  });
+
+  it('never asks the company for a tone of voice', () => {
+    // Tone is a property of the agent, not of the business: the same company
+    // answers a price question and a complaint in different voices. It lives in
+    // `behaviorConfig.tone`, edited per agent in the Agents module.
+    for (const template of LEADFLOW_BUSINESS_MODE_TEMPLATES) {
+      const toneFields = fieldsOf(template).filter(
+        (field) => field.key === 'tone' || field.contextPath === 'legacyTone',
+      );
+      expect(toneFields).toEqual([]);
     }
   });
 
