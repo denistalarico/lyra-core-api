@@ -106,3 +106,75 @@ describe('CompanyContextService', () => {
     expect(service.preview(left).estimatedTokens).toBeGreaterThan(0);
   });
 });
+
+describe('CompanyContextService.withDefaults', () => {
+  const service = new CompanyContextService();
+
+  const defaults = {
+    identity: { targetAudience: 'Público padrão do nicho' },
+    service: { serviceLevel: 'Responder em até 5 minutos' },
+    qualification: {
+      conversionGoal: 'Agendar uma visita',
+      preferredCta: 'Agendar visita',
+    },
+  };
+
+  it('fills every empty field so the screen has nothing left to ask', () => {
+    const draft = service.withDefaults(service.fromLegacy({}), defaults);
+
+    expect(draft).toMatchObject({
+      identity: { targetAudience: 'Público padrão do nicho' },
+      service: { serviceLevel: 'Responder em até 5 minutos' },
+      qualification: {
+        conversionGoal: 'Agendar uma visita',
+        preferredCta: 'Agendar visita',
+      },
+    });
+  });
+
+  it('never overwrites what the operator or the briefing already answered', () => {
+    const answered = service.fromLegacy({
+      conversionGoal: 'Fechar o pedido no WhatsApp',
+      serviceLevel: 'Responder em 1 minuto',
+    });
+
+    const draft = service.withDefaults(answered, defaults);
+
+    expect(draft).toMatchObject({
+      qualification: {
+        conversionGoal: 'Fechar o pedido no WhatsApp',
+        preferredCta: 'Agendar visita',
+      },
+      service: { serviceLevel: 'Responder em 1 minuto' },
+    });
+  });
+
+  it('treats whitespace-only values as unanswered', () => {
+    const draft = service.withDefaults(
+      { schemaVersion: 1, qualification: { conversionGoal: '   ' } },
+      defaults,
+    );
+
+    expect(draft).toMatchObject({
+      qualification: { conversionGoal: 'Agendar uma visita' },
+    });
+  });
+
+  it('leaves sections the defaults do not mention untouched', () => {
+    const draft = service.withDefaults(
+      { schemaVersion: 1, offers: [{ name: 'Corte' }], policies: 'Sem troca' },
+      defaults,
+    );
+
+    expect(draft).toMatchObject({
+      offers: [{ name: 'Corte' }],
+      policies: 'Sem troca',
+    });
+  });
+
+  it('keeps the result a valid company context', () => {
+    expect(() =>
+      service.withDefaults({ schemaVersion: 1 }, { bogusSection: { a: 'b' } }),
+    ).toThrow(BadRequestException);
+  });
+});

@@ -24,6 +24,7 @@ import {
   LeadFlowSettingsValidationResponse,
   ListLeadFlowClientsQueryDto,
   PublishCompanyContextDto,
+  SetLeadFlowDeveloperModeDto,
   UpdateLeadFlowClientSettingsDto,
   ValidateLeadFlowClientSettingsDto,
 } from './dto';
@@ -88,6 +89,20 @@ export class LeadFlowClientSettingsController {
       ctx,
       agencyClientId,
       dto,
+    );
+  }
+
+  @Patch(':agencyClientId/settings/developer-mode')
+  @RequirePermission('leadflow.settings.danger_zone.manage.owner_only')
+  setDeveloperMode(
+    @RequestContextData() ctx: RequestContext,
+    @Param('agencyClientId') agencyClientId: string,
+    @Body() dto: SetLeadFlowDeveloperModeDto,
+  ): Promise<LeadFlowClientSettingsResponse> {
+    return this.leadFlowClientSettingsService.setDeveloperMode(
+      ctx,
+      agencyClientId,
+      dto.enabled,
     );
   }
 

@@ -153,6 +153,45 @@ export class CompanyContextService {
     }
   }
 
+  /**
+   * Seed a draft with the Business Mode's shipped copy, filling only what is
+   * still empty. This is what turns a catalog default into something the end
+   * user never has to see: the value is already in the context, so the screen
+   * has nothing to ask. Anything already answered — by the operator or by the
+   * briefing — always wins.
+   */
+  withDefaults(
+    draft: LeadFlowJsonObject,
+    defaults: LeadFlowJsonObject,
+  ): LeadFlowJsonObject {
+    const merged: LeadFlowJsonObject = { ...draft };
+
+    for (const [section, sectionDefaults] of Object.entries(defaults)) {
+      if (!this.isPlainObject(sectionDefaults)) continue;
+
+      const current = this.isPlainObject(merged[section])
+        ? { ...(merged[section] as LeadFlowJsonObject) }
+        : {};
+
+      for (const [field, fallback] of Object.entries(sectionDefaults)) {
+        if (this.isBlank(current[field])) current[field] = fallback;
+      }
+
+      merged[section] = current;
+    }
+
+    return this.normalize(merged);
+  }
+
+  private isPlainObject(value: unknown): value is LeadFlowJsonObject {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
+  }
+
+  private isBlank(value: unknown): boolean {
+    if (value === undefined || value === null) return true;
+    return typeof value === 'string' && value.trim() === '';
+  }
+
   fromLegacy(value: LeadFlowJsonObject): LeadFlowJsonObject {
     return this.normalize({
       schemaVersion: 1,

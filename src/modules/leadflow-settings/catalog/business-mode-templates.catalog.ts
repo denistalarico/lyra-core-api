@@ -1,4 +1,5 @@
 import { LeadFlowBusinessMode } from '../enums/leadflow-business-mode.enum';
+import { getContextDefaults } from './business-mode-context-defaults.catalog';
 import { LeadFlowSettingsStatus } from '../enums/leadflow-settings-status.enum';
 import { LeadFlowJsonObject } from '../types/leadflow-settings.types';
 import type {
@@ -26,46 +27,116 @@ export type LeadFlowBusinessModeTemplateCatalogItem = {
   recommendedApps: LeadFlowJsonObject[];
   supportedIntegrations: LeadFlowJsonObject;
   developerOverridesSchema: LeadFlowJsonObject;
+  /**
+   * Company-context values the mode ships with. Seeded into the draft at
+   * creation, so the operator inherits a working agent instead of a blank form.
+   */
+  contextDefaults: LeadFlowJsonObject;
   metadata: LeadFlowJsonObject;
 };
 
+/**
+ * Every field the agent context can hold, with the two properties that decide
+ * how much work the end user is asked to do:
+ *
+ * - `source` — who fills it. `default` comes from the Business Mode catalog and
+ *   is already in the draft before anyone opens the screen; `briefing` is
+ *   extracted from the customer's own material and only needs confirming;
+ *   `user` is the short list nobody else can answer.
+ * - `visibility` — `basic` is the handful worth showing to a non-technical
+ *   owner; `advanced` only surfaces under Developer Mode.
+ *
+ * The web app renders straight from this list, so re-classifying a field is a
+ * catalog change here and not a frontend release.
+ */
 const clientPromptSchema = {
+  version: 2,
   fields: [
+    // --- basic: extracted from the customer's material, user confirms -------
     {
       key: 'businessName',
       label: 'Nome do negócio',
       type: 'text',
       required: true,
+      visibility: 'basic',
+      source: 'briefing',
+      contextPath: 'identity.publicName',
     },
     {
       key: 'businessSummary',
       label: 'Resumo do negócio',
       type: 'textarea',
       required: true,
+      visibility: 'basic',
+      source: 'briefing',
+      contextPath: 'identity.summary',
     },
     {
       key: 'mainOffers',
       label: 'Principais produtos ou serviços',
       type: 'textarea',
       required: true,
+      visibility: 'basic',
+      source: 'briefing',
+      contextPath: 'offers',
     },
     {
       key: 'businessHours',
       label: 'Horário de atendimento',
       type: 'textarea',
       required: false,
+      visibility: 'basic',
+      source: 'briefing',
+      contextPath: 'service.businessHours',
+    },
+    {
+      key: 'regionsServed',
+      label: 'Regiões atendidas',
+      type: 'text',
+      required: false,
+      visibility: 'basic',
+      source: 'briefing',
+      contextPath: 'identity.regionsServed',
+    },
+
+    // --- basic: the only questions the product genuinely has to ask ---------
+    {
+      key: 'conversionGoal',
+      label: 'O que conta como sucesso',
+      type: 'text',
+      required: false,
+      visibility: 'basic',
+      source: 'user',
+      contextPath: 'qualification.conversionGoal',
+    },
+    {
+      key: 'preferredCta',
+      label: 'Convite usado na conversa',
+      type: 'text',
+      required: false,
+      visibility: 'basic',
+      source: 'user',
+      contextPath: 'qualification.preferredCta',
     },
     {
       key: 'handoffRules',
-      label: 'Quando chamar um humano',
+      label: 'Quando chamar uma pessoa do time',
       type: 'textarea',
       required: false,
+      visibility: 'basic',
+      source: 'user',
+      contextPath: 'service.handoffRules',
     },
+
+    // --- advanced: seeded by the Business Mode, never asked -----------------
     {
       key: 'tone',
       label: 'Tom de voz',
       type: 'select',
       required: false,
+      visibility: 'advanced',
+      source: 'default',
+      contextPath: 'legacyTone',
       options: [
         'profissional',
         'acolhedor',
@@ -73,6 +144,163 @@ const clientPromptSchema = {
         'objetivo',
         'descontraido',
       ],
+    },
+    {
+      key: 'targetAudience',
+      label: 'Público-alvo',
+      type: 'textarea',
+      required: false,
+      visibility: 'advanced',
+      source: 'default',
+      contextPath: 'identity.targetAudience',
+    },
+    {
+      key: 'languages',
+      label: 'Idiomas',
+      type: 'text',
+      required: false,
+      visibility: 'advanced',
+      source: 'default',
+      contextPath: 'identity.languages',
+    },
+    {
+      key: 'timezone',
+      label: 'Fuso horário',
+      type: 'text',
+      required: false,
+      visibility: 'advanced',
+      source: 'default',
+      contextPath: 'identity.timezone',
+    },
+    {
+      key: 'serviceLevel',
+      label: 'Prazo de resposta',
+      type: 'textarea',
+      required: false,
+      visibility: 'advanced',
+      source: 'default',
+      contextPath: 'service.serviceLevel',
+    },
+    {
+      key: 'emergencyRules',
+      label: 'Urgência e emergência',
+      type: 'textarea',
+      required: false,
+      visibility: 'advanced',
+      source: 'default',
+      contextPath: 'service.emergencyRules',
+    },
+    {
+      key: 'unsupportedRequests',
+      label: 'O que o agente não resolve',
+      type: 'textarea',
+      required: false,
+      visibility: 'advanced',
+      source: 'default',
+      contextPath: 'service.unsupportedRequests',
+    },
+    {
+      key: 'qualifiedCriteria',
+      label: 'Critérios de lead qualificado',
+      type: 'textarea',
+      required: false,
+      visibility: 'advanced',
+      source: 'default',
+      contextPath: 'qualification.qualifiedCriteria',
+    },
+    {
+      key: 'disqualificationCriteria',
+      label: 'Desqualificação / não-lead',
+      type: 'textarea',
+      required: false,
+      visibility: 'advanced',
+      source: 'default',
+      contextPath: 'qualification.disqualificationCriteria',
+    },
+    {
+      key: 'urgencySignals',
+      label: 'Sinais de urgência',
+      type: 'textarea',
+      required: false,
+      visibility: 'advanced',
+      source: 'default',
+      contextPath: 'qualification.urgencySignals',
+    },
+
+    // --- advanced: refinements the customer's material may already carry ----
+    {
+      key: 'legalName',
+      label: 'Razão social',
+      type: 'text',
+      required: false,
+      visibility: 'advanced',
+      source: 'briefing',
+      contextPath: 'identity.legalName',
+    },
+    {
+      key: 'valueProposition',
+      label: 'Proposta de valor',
+      type: 'textarea',
+      required: false,
+      visibility: 'advanced',
+      source: 'briefing',
+      contextPath: 'identity.valueProposition',
+    },
+    {
+      key: 'differentiators',
+      label: 'Diferenciais',
+      type: 'textarea',
+      required: false,
+      visibility: 'advanced',
+      source: 'briefing',
+      contextPath: 'identity.differentiators',
+    },
+    {
+      key: 'policies',
+      label: 'Pagamento, entrega, cancelamento e garantia',
+      type: 'textarea',
+      required: false,
+      visibility: 'advanced',
+      source: 'briefing',
+      contextPath: 'policies',
+    },
+    {
+      key: 'faq',
+      label: 'Perguntas frequentes',
+      type: 'textarea',
+      required: false,
+      visibility: 'advanced',
+      source: 'briefing',
+      contextPath: 'faq',
+    },
+    {
+      key: 'links',
+      label: 'Links públicos',
+      type: 'textarea',
+      required: false,
+      visibility: 'advanced',
+      source: 'briefing',
+      contextPath: 'links',
+    },
+
+    // --- advanced: fine-tuning for operators who want it --------------------
+    {
+      key: 'essentialQuestions',
+      label: 'Perguntas essenciais',
+      type: 'textarea',
+      required: false,
+      visibility: 'advanced',
+      source: 'user',
+      contextPath: 'qualification.essentialQuestions',
+    },
+    {
+      key: 'priorityServices',
+      label: 'Serviços prioritários',
+      type: 'textarea',
+      required: false,
+      visibility: 'advanced',
+      source: 'user',
+      contextPath: 'qualification.priorityServices',
     },
   ],
 };
@@ -391,10 +619,12 @@ function template(input: {
     recommendedApps: apps(input.recommendedApps),
     supportedIntegrations: integrations(input.supportedIntegrations),
     developerOverridesSchema,
+    contextDefaults: getContextDefaults(input.key),
     metadata: {
       source: 'lyra_official_catalog',
       locale: 'pt-BR',
       initialRelease: true,
+      contextDefaults: getContextDefaults(input.key),
       conversationPlaybook: conversationPlaybook({
         key: input.key,
         goals: input.goals,

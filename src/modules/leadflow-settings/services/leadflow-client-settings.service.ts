@@ -32,6 +32,7 @@ import {
   mapLeadFlowClientSettingsResponse,
   mapLeadFlowClientSummaryResponse,
   mapLeadFlowCompanyCapacityResponse,
+  readContextDefaults,
   UpdateLeadFlowClientSettingsDto,
   ValidateLeadFlowClientSettingsDto,
 } from '../dto';
@@ -251,11 +252,7 @@ export class LeadFlowClientSettingsService {
         agentConfig: dto.agentConfig ?? {},
         clientPromptConfig: dto.clientPromptConfig ?? {},
         companyContextSchemaVersion: 1,
-        companyContextDraft: dto.companyContextDraft
-          ? this.companyContextService.normalize(dto.companyContextDraft)
-          : this.companyContextService.fromLegacy(
-              dto.clientPromptConfig ?? {},
-            ),
+        companyContextDraft: this.buildInitialCompanyContextDraft(dto, template),
         companyContextPublished: {},
         companyContextPublishedVersion: 0,
         companyContextPublishedHash: null,
@@ -351,9 +348,7 @@ export class LeadFlowClientSettingsService {
       agentConfig: dto.agentConfig ?? {},
       clientPromptConfig: dto.clientPromptConfig ?? {},
       companyContextSchemaVersion: 1,
-      companyContextDraft: dto.companyContextDraft
-        ? this.companyContextService.normalize(dto.companyContextDraft)
-        : this.companyContextService.fromLegacy(dto.clientPromptConfig ?? {}),
+      companyContextDraft: this.buildInitialCompanyContextDraft(dto, template),
       companyContextPublished: {},
       companyContextPublishedVersion: 0,
       companyContextPublishedHash: null,
@@ -1099,6 +1094,35 @@ export class LeadFlowClientSettingsService {
     return defaults;
   }
 
+  /**
+   * Owner-only switch that reopens every advanced field of the agent context in
+   * the UI. The stored flag already travels to the agent and automation runtime
+   * snapshots, so flipping it is a real product decision, not a view preference.
+   */
+  async setDeveloperMode(
+    ctx: RequestContext,
+    agencyClientId: string | null,
+    enabled: boolean,
+  ): Promise<LeadFlowClientSettingsResponse> {
+    if (agencyClientId) await this.assertAgencyClient(ctx, agencyClientId);
+
+    const settings = agencyClientId
+      ? await this.findSettings(ctx, agencyClientId)
+      : await this.findAgencySettings(ctx);
+
+    if (!settings) {
+      throw new NotFoundException('LeadFlow settings not found.');
+    }
+
+    if (settings.developerModeEnabled !== enabled) {
+      settings.developerModeEnabled = enabled;
+      settings.updatedById = ctx.userId ?? null;
+      await this.settingsRepository.save(settings);
+    }
+
+    return mapLeadFlowClientSettingsResponse(settings);
+  }
+
   private assertDeveloperModeNotRequested(
     dto: UpdateLeadFlowClientSettingsDto,
   ): void {
@@ -1113,6 +1137,26 @@ export class LeadFlowClientSettingsService {
         'Developer overrides cannot be changed in this endpoint.',
       );
     }
+  }
+
+  /**
+   * The draft a brand-new configuration starts from: whatever the caller sent,
+   * topped up with the Business Mode's shipped copy for every field still
+   * empty. Without this the operator would meet a blank form and have to author
+   * SLA, urgency and qualification wording the catalog already knows.
+   */
+  private buildInitialCompanyContextDraft(
+    dto: CreateLeadFlowClientSettingsDto,
+    template: LeadFlowBusinessModeTemplateEntity,
+  ): LeadFlowJsonObject {
+    const draft = dto.companyContextDraft
+      ? this.companyContextService.normalize(dto.companyContextDraft)
+      : this.companyContextService.fromLegacy(dto.clientPromptConfig ?? {});
+
+    return this.companyContextService.withDefaults(
+      draft,
+      readContextDefaults(template.metadata),
+    );
   }
 
   private assertValidSettingsPayload(

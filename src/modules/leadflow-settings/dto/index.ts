@@ -8,3 +8,4 @@ export * from './list-leadflow-clients-query.dto';
 export * from './publish-company-context.dto';
 export * from './update-leadflow-client-settings.dto';
 export * from './validate-leadflow-client-settings.dto';
+export * from './set-developer-mode.dto';

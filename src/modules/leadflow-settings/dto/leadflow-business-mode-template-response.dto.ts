@@ -28,11 +28,27 @@ export type LeadFlowBusinessModeTemplateDetailResponse =
     inboxRules: LeadFlowJsonObject;
     handoffRules: LeadFlowJsonObject;
     developerOverridesSchema: LeadFlowJsonObject;
+    /**
+     * Company-context copy the mode ships with. Persisted inside `metadata`
+     * (no dedicated column), but promoted here so consumers read a stable
+     * field instead of reaching into the metadata bag.
+     */
+    contextDefaults: LeadFlowJsonObject;
   };
 
 export type LeadFlowBusinessModeTemplateListResponse = {
   items: LeadFlowBusinessModeTemplateSummaryResponse[];
 };
+
+/** Older rows seeded before the catalog shipped defaults simply have none. */
+export function readContextDefaults(
+  metadata: LeadFlowJsonObject | null | undefined,
+): LeadFlowJsonObject {
+  const value = metadata?.contextDefaults;
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? (value as LeadFlowJsonObject)
+    : {};
+}
 
 export function mapBusinessModeTemplateSummary(
   template: LeadFlowBusinessModeTemplateEntity,
@@ -67,5 +83,6 @@ export function mapBusinessModeTemplateDetail(
     inboxRules: template.inboxRules,
     handoffRules: template.handoffRules,
     developerOverridesSchema: template.developerOverridesSchema,
+    contextDefaults: readContextDefaults(template.metadata),
   };
 }

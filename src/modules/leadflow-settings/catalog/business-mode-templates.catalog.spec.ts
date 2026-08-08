@@ -1,4 +1,12 @@
-import { LEADFLOW_BUSINESS_MODE_TEMPLATES } from './business-mode-templates.catalog';
+import {
+  LEADFLOW_BUSINESS_MODE_TEMPLATES,
+  type LeadFlowBusinessModeTemplateCatalogItem,
+} from './business-mode-templates.catalog';
+import { LEADFLOW_CONTEXT_DEFAULT_PATHS } from './business-mode-context-defaults.catalog';
+import {
+  getCompanyContextRootKeys,
+  getCompanyContextScalarFieldPaths,
+} from '../services/company-context.service';
 import { LeadFlowBusinessMode } from '../enums/leadflow-business-mode.enum';
 import { readConversationPlaybook } from '../types/conversation-playbook.types';
 
@@ -44,5 +52,84 @@ describe('LeadFlow Business Mode conversation playbooks', () => {
       minimumContextFields: 3,
       requiredContextFields: ['lead_name', 'niche', 'paid_ads_experience'],
     });
+  });
+});
+
+describe('LeadFlow client prompt schema classification', () => {
+  const VALID_PATHS = new Set([
+    ...getCompanyContextScalarFieldPaths(),
+    ...getCompanyContextRootKeys(),
+  ]);
+
+  function fieldsOf(template: LeadFlowBusinessModeTemplateCatalogItem) {
+    return (template.clientPromptSchema as { fields: Array<Record<string, unknown>> })
+      .fields;
+  }
+
+  it('classifies every field by who fills it and where it shows', () => {
+    for (const template of LEADFLOW_BUSINESS_MODE_TEMPLATES) {
+      for (const field of fieldsOf(template)) {
+        expect(['basic', 'advanced']).toContain(field.visibility);
+        expect(['default', 'briefing', 'user']).toContain(field.source);
+        expect(VALID_PATHS.has(field.contextPath as string)).toBe(true);
+      }
+    }
+  });
+
+  it('keeps the screen short: at most eight fields reach a non-technical owner', () => {
+    for (const template of LEADFLOW_BUSINESS_MODE_TEMPLATES) {
+      const basic = fieldsOf(template).filter(
+        (field) => field.visibility === 'basic',
+      );
+      expect(basic.length).toBeLessThanOrEqual(8);
+    }
+  });
+
+  it('never hides a required field behind Developer Mode', () => {
+    for (const template of LEADFLOW_BUSINESS_MODE_TEMPLATES) {
+      const hiddenRequired = fieldsOf(template).filter(
+        (field) => field.required === true && field.visibility !== 'basic',
+      );
+      expect(hiddenRequired).toEqual([]);
+    }
+  });
+
+  it('ships a value for every field it claims the Business Mode answers', () => {
+    for (const template of LEADFLOW_BUSINESS_MODE_TEMPLATES) {
+      const defaulted = fieldsOf(template).filter(
+        (field) => field.source === 'default',
+      );
+
+      for (const field of defaulted) {
+        const path = field.contextPath as string;
+        // `tone`, `languages` and `timezone` are answered by product-level
+        // fallbacks rather than catalog copy; the rest must be shipped here.
+        if (!LEADFLOW_CONTEXT_DEFAULT_PATHS.includes(path as never)) continue;
+
+        const [section, leaf] = path.split('.');
+        const value = (
+          template.contextDefaults[section] as Record<string, unknown>
+        )?.[leaf];
+        expect(typeof value === 'string' && value.trim().length > 0).toBe(true);
+      }
+    }
+  });
+
+  it('gives all twelve modes their own conversion goal and CTA', () => {
+    const goals = new Set<string>();
+
+    for (const template of LEADFLOW_BUSINESS_MODE_TEMPLATES) {
+      const qualification = template.contextDefaults.qualification as Record<
+        string,
+        string
+      >;
+      expect(qualification.conversionGoal).toBeTruthy();
+      expect(qualification.preferredCta).toBeTruthy();
+      goals.add(qualification.conversionGoal);
+    }
+
+    // A shared goal across every mode would mean the catalog is not really
+    // per-niche, which is the whole reason it exists.
+    expect(goals.size).toBeGreaterThan(8);
   });
 });
