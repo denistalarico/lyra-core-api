@@ -4,6 +4,7 @@ import type { OperationalAnalytics } from '../types/operational-analytics.types'
 
 type ReportRenderInput = {
   reportType: LeadFlowAnalyticsReportType;
+  reportTypes?: LeadFlowAnalyticsReportType[];
   title?: string;
   commercial: CommercialJourneyAnalytics | null;
   operational: OperationalAnalytics | null;
@@ -28,21 +29,27 @@ export function buildLeadFlowAnalyticsReportHtml(
 
   const title =
     input.title?.trim() || `LeadFlow · ${REPORT_LABELS[input.reportType]}`;
+  const reportTypes = new Set(
+    input.reportTypes?.length ? input.reportTypes : [input.reportType],
+  );
   const sections = [
-    input.reportType === 'overview'
+    reportTypes.has('overview')
       ? renderExecutiveOverview(input.commercial, input.operational)
       : '',
-    input.commercial ? renderCommercial(input.commercial) : '',
+    input.commercial &&
+    (reportTypes.has('overview') || reportTypes.has('commercial'))
+      ? renderCommercial(input.commercial)
+      : '',
     input.operational &&
-    (input.reportType === 'overview' || input.reportType === 'messages')
+    (reportTypes.has('overview') || reportTypes.has('messages'))
       ? renderMessages(input.operational)
       : '',
     input.operational &&
-    (input.reportType === 'overview' || input.reportType === 'lead_score')
+    (reportTypes.has('overview') || reportTypes.has('lead_score'))
       ? renderLeadScore(input.operational)
       : '',
     input.operational &&
-    (input.reportType === 'overview' || input.reportType === 'automations')
+    (reportTypes.has('overview') || reportTypes.has('automations'))
       ? renderAutomations(input.operational)
       : '',
     renderDataQuality(input.commercial, input.operational),
@@ -92,7 +99,11 @@ export function buildLeadFlowAnalyticsReportHtml(
       <p>Dados canônicos do CRM, Inbox, Lead Score e execuções de automação.</p>
     </header>
     <div class="meta">
-      <div><span>Relatório</span><strong>${escapeHtml(REPORT_LABELS[input.reportType])}</strong></div>
+      <div><span>Relatório</span><strong>${escapeHtml(
+        reportTypes.size > 1
+          ? 'Visões selecionadas'
+          : REPORT_LABELS[input.reportType],
+      )}</strong></div>
       <div><span>Período</span><strong>${formatDate(period.from)} — ${formatDate(period.to)}</strong></div>
       <div><span>Gerado em</span><strong>${formatDateTime(input.generatedAt.toISOString())}</strong></div>
     </div>

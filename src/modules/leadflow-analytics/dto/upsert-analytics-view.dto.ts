@@ -1,5 +1,6 @@
 import {
   ArrayMaxSize,
+  IsBoolean,
   IsArray,
   IsIn,
   IsOptional,
@@ -14,6 +15,10 @@ import {
 } from './create-analytics-report.dto';
 
 export const LEADFLOW_ANALYTICS_WIDGET_IDS = [
+  'commercial_performance',
+  'service_performance',
+  'lead_quality',
+  'automation_performance',
   'commercial_summary',
   'operational_summary',
   'recommendations',
@@ -50,13 +55,17 @@ export class UpsertAnalyticsViewDto {
 
   @IsOptional()
   @IsArray()
-  @ArrayMaxSize(4)
+  @ArrayMaxSize(8)
   @IsIn(LEADFLOW_ANALYTICS_WIDGET_IDS, { each: true })
   widgetOrder?: string[];
 
   @IsOptional()
   @IsArray()
-  @ArrayMaxSize(4)
+  @ArrayMaxSize(8)
   @IsIn(LEADFLOW_ANALYTICS_WIDGET_IDS, { each: true })
   hiddenWidgetIds?: string[];
+
+  @IsOptional()
+  @IsBoolean()
+  isDefault?: boolean;
 }

@@ -70,6 +70,9 @@ export class LeadFlowAnalyticsViewsService {
         `Limite de ${MAX_ANALYTICS_VIEWS_PER_SCOPE} visões salvas por contexto atingido.`,
       );
     }
+    if (value.isDefault) {
+      await this.views.update(this.scopeWhere(scope), { isDefault: false });
+    }
     return this.views.save(
       this.views.create({
         ...scope,
@@ -115,6 +118,9 @@ export class LeadFlowAnalyticsViewsService {
           : value.hiddenWidgetIds,
       schemaVersion: ANALYTICS_VIEW_SCHEMA_VERSION,
     });
+    if (value.isDefault) {
+      await this.views.update(this.scopeWhere(scope), { isDefault: false });
+    }
     return this.views.save(view);
   }
 
@@ -183,6 +189,7 @@ export class LeadFlowAnalyticsViewsService {
       agentId: dto.agentId ?? null,
       widgetOrder,
       hiddenWidgetIds,
+      isDefault: dto.isDefault ?? false,
     };
   }
 

@@ -1,4 +1,11 @@
-import { IsIn, IsOptional, IsString, MaxLength } from 'class-validator';
+import {
+  ArrayMaxSize,
+  IsArray,
+  IsIn,
+  IsOptional,
+  IsString,
+  MaxLength,
+} from 'class-validator';
 import { GetOperationalAnalyticsDto } from './get-operational-analytics.dto';
 
 export const LEADFLOW_ANALYTICS_REPORT_TYPES = [
@@ -16,6 +23,12 @@ export class CreateAnalyticsReportDto extends GetOperationalAnalyticsDto {
   @IsOptional()
   @IsIn(LEADFLOW_ANALYTICS_REPORT_TYPES)
   reportType: LeadFlowAnalyticsReportType = 'overview';
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(5)
+  @IsIn(LEADFLOW_ANALYTICS_REPORT_TYPES, { each: true })
+  reportTypes?: LeadFlowAnalyticsReportType[];
 
   @IsOptional()
   @IsString()

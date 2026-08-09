@@ -8,6 +8,7 @@ describe('CreateAnalyticsReportDto', () => {
       from: '2026-07-01T00:00:00.000Z',
       to: '2026-07-22T23:00:00.000Z',
       reportType: 'automations',
+      reportTypes: ['commercial', 'messages', 'automations'],
       title: 'Saúde das automações',
       businessMode: 'real_estate',
     });
@@ -16,6 +17,7 @@ describe('CreateAnalyticsReportDto', () => {
       validate(dto, { whitelist: true, forbidNonWhitelisted: true }),
     ).resolves.toHaveLength(0);
     expect(dto.reportType).toBe('automations');
+    expect(dto.reportTypes).toEqual(['commercial', 'messages', 'automations']);
   });
 
   it('defaults to the overview and rejects unknown report kinds', async () => {

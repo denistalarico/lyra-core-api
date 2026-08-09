@@ -26,6 +26,7 @@ function buildService() {
     count: jest.fn(async () => 0),
     create: jest.fn((value) => value),
     save: jest.fn(async (value) => ({ ...value, id: 'view-id' })),
+    update: jest.fn(async () => ({ affected: 1 })),
     delete: jest.fn(async () => ({ affected: 1 })),
     createQueryBuilder: jest.fn(() => query),
   };
@@ -107,5 +108,23 @@ describe('LeadFlowAnalyticsViewsService', () => {
       service.create(ctx, { ...view, widgetOrder: ['not-a-widget'] }),
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(repository.create).not.toHaveBeenCalled();
+  });
+
+  it('keeps only one default view in the authenticated scope', async () => {
+    const { service, repository } = buildService();
+
+    await service.create(ctx, { ...view, isDefault: true });
+
+    expect(repository.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tenantId: ctx.tenantId,
+        workspaceId: ctx.workspaceId,
+        userId: ctx.userId,
+      }),
+      { isDefault: false },
+    );
+    expect(repository.save).toHaveBeenCalledWith(
+      expect.objectContaining({ isDefault: true }),
+    );
   });
 });

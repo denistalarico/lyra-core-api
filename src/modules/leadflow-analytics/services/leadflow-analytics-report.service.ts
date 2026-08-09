@@ -15,9 +15,16 @@ export class LeadFlowAnalyticsReportService {
   ) {}
 
   async renderPdf(ctx: RequestContext, query: CreateAnalyticsReportDto) {
+    const reportTypes = Array.from(
+      new Set(
+        query.reportTypes?.length ? query.reportTypes : [query.reportType],
+      ),
+    );
     const includeCommercial =
-      query.reportType === 'overview' || query.reportType === 'commercial';
-    const includeOperational = query.reportType !== 'commercial';
+      reportTypes.includes('overview') || reportTypes.includes('commercial');
+    const includeOperational = reportTypes.some(
+      (type) => type !== 'commercial',
+    );
 
     const [commercial, operational] = await Promise.all([
       includeCommercial
@@ -30,6 +37,7 @@ export class LeadFlowAnalyticsReportService {
     const generatedAt = new Date();
     const html = buildLeadFlowAnalyticsReportHtml({
       reportType: query.reportType,
+      reportTypes,
       title: query.title,
       commercial,
       operational,
@@ -51,7 +59,7 @@ export class LeadFlowAnalyticsReportService {
 
     return {
       buffer,
-      filename: `leadflow-${query.reportType}-${from}-${to}.pdf`,
+      filename: `leadflow-${reportTypes.length > 1 ? 'completo' : query.reportType}-${from}-${to}.pdf`,
     };
   }
 }
