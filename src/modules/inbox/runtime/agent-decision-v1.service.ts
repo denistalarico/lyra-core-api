@@ -150,6 +150,7 @@ export class AgentDecisionPromptBuilder {
     companyContext?: unknown;
     companyContextVersion?: number;
     companyContextHash?: string | null;
+    operationalRules?: unknown;
     firstAgentReply?: boolean;
     appointmentHandoffMode?: boolean;
     conversationProgress?: unknown;
@@ -188,6 +189,7 @@ export class AgentDecisionPromptBuilder {
           ]
         : []),
       'Nunca invente preço, desconto, horário, disponibilidade, política, garantia, serviço ou link.',
+      'operationalRules é a fonte canônica de disponibilidade e fechamentos: respeite seus períodos, nunca prometa um recurso marcado como unavailable/closed e só informe liberação quando houver regra available compatível.',
       'Não proponha follow-up: a execução durável de follow-up está desabilitada.',
     ].join('\n');
     const platformLayer = this.layer(
@@ -231,6 +233,7 @@ export class AgentDecisionPromptBuilder {
       {
         agentProfile: input.agentProfile ?? {},
         companyContext: input.companyContext ?? input.workspaceConfig,
+        operationalRules: input.operationalRules ?? [],
         conversationContext: {
           contact: input.contact,
           opportunity: input.opportunity,
@@ -264,6 +267,12 @@ export class AgentDecisionPromptBuilder {
         'untrusted',
         untrustedPayload.companyContext ?? {},
         input.companyContextHash,
+      ),
+      this.layer(
+        'operational_rules',
+        'operational-rules:v1',
+        'untrusted',
+        untrustedPayload.operationalRules ?? [],
       ),
       this.layer(
         'conversation_context',

@@ -10,6 +10,8 @@ import {
   LeadFlowAgentEntity,
   LeadFlowAgentVersionEntity,
   LeadFlowAgentOperationalStateEntity,
+  LeadFlowOperationsActionEntity,
+  LeadFlowOperationsActionEventEntity,
   OperationsRoomRevisionEntity,
   OperationsRoomOutboxEntity,
 } from './entities';
@@ -27,6 +29,7 @@ import { OperationsRoomGateway } from './realtime/operations-room.gateway';
 import { OperationsRoomOutboxWorker } from './realtime/operations-room-outbox.worker';
 import { OperationsRoomRealtimeHealthService } from './realtime/operations-room-realtime-health.service';
 import { OperationsRoomRealtimeMetrics } from './realtime/operations-room-realtime.metrics';
+import { LeadFlowOperationsActionService } from './services/leadflow-operations-action.service';
 
 @Module({
   imports: [
@@ -39,6 +42,8 @@ import { OperationsRoomRealtimeMetrics } from './realtime/operations-room-realti
         LeadFlowAgentChannelBindingEntity,
         LeadFlowClientSettingsEntity,
         LeadFlowAgentOperationalStateEntity,
+        LeadFlowOperationsActionEntity,
+        LeadFlowOperationsActionEventEntity,
         OperationsRoomRevisionEntity,
         OperationsRoomOutboxEntity,
         AgencyUserSessionEntity,
@@ -61,6 +66,7 @@ import { OperationsRoomRealtimeMetrics } from './realtime/operations-room-realti
     OperationsRoomOutboxWorker,
     OperationsRoomRealtimeMetrics,
     OperationsRoomRealtimeHealthService,
+    LeadFlowOperationsActionService,
     OperationsRoomGateway,
   ],
   exports: [

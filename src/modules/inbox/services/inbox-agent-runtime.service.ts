@@ -23,11 +23,13 @@ import { LeadFlowAgentEntity } from '../../leadflow-agents/entities/leadflow-age
 import { resolveAgentRolePolicy } from '../../leadflow-agents/catalog/agent-role-policy.catalog';
 import { LeadFlowAgentChannelBindingEntity } from '../../leadflow-agents/entities/leadflow-agent-channel-binding.entity';
 import { LeadFlowAgentVersionEntity } from '../../leadflow-agents/entities/leadflow-agent-version.entity';
+import { LeadFlowOperationsActionEntity } from '../../leadflow-agents/entities/leadflow-operations-action.entity';
 import {
   RoomAgentOperationalStatus,
   RoomOperationalSource,
 } from '../../leadflow-agents/enums/room-operational.enums';
 import { OperationsRoomStateService } from '../../leadflow-agents/services/operations-room-state.service';
+import { projectLeadFlowOperationalRules } from '../../leadflow-agents/services/leadflow-operations-runtime-projection';
 import { LeadFlowClientSettingsEntity } from '../../leadflow-settings/entities/leadflow-client-settings.entity';
 import { LeadFlowBusinessModeTemplateEntity } from '../../leadflow-settings/entities/leadflow-business-mode-template.entity';
 import { LeadFlowSettingsContextType } from '../../leadflow-settings/enums/leadflow-settings-context-type.enum';
@@ -491,6 +493,22 @@ export class InboxAgentRuntimeService {
       const allowedServices = canonicalStringList(
         settings?.companyContextPublished?.offers,
       );
+      const operationalRules = settings
+        ? projectLeadFlowOperationalRules(
+            await this.dataSource
+              .getRepository(LeadFlowOperationsActionEntity)
+              .find({
+                where: {
+                  tenantId: batch.tenantId,
+                  workspaceId: batch.workspaceId,
+                  settingsId: settings.id,
+                  status: 'confirmed',
+                },
+                order: { confirmedAt: 'ASC' },
+                take: 100,
+              }),
+          )
+        : [];
       const progressReader =
         this.playbookState ?? new ConversationPlaybookStateService();
       const currentProgress = progressReader.read(conversation.metadata);
@@ -512,7 +530,7 @@ export class InboxAgentRuntimeService {
       const roleAllows = new Set<string>(rolePolicy.allowedDecisionActions);
       const canProposeStage = Boolean(
         stageTransitionCatalog?.capabilities.canProposeStageTransition &&
-          roleAllows.has('set_stage'),
+        roleAllows.has('set_stage'),
       );
       const allowedActions = [
         ...(canProposeStage ? ['set_stage'] : []),
@@ -607,6 +625,7 @@ export class InboxAgentRuntimeService {
         companyContext: settings?.companyContextPublished ?? {},
         companyContextVersion: settings?.companyContextPublishedVersion ?? 0,
         companyContextHash: settings?.companyContextPublishedHash ?? null,
+        operationalRules,
         stageTransitionCatalog,
       });
       const correlationId = randomUUID();
@@ -832,7 +851,10 @@ export class InboxAgentRuntimeService {
           companyContextPublished:
             Boolean(settings?.companyContextPublishedVersion) &&
             Boolean(settings?.companyContextPublishedHash),
-          companyContext: settings?.companyContextPublished ?? {},
+          companyContext: {
+            ...(settings?.companyContextPublished ?? {}),
+            operationalRules,
+          },
           companyContextHash: settings?.companyContextPublishedHash ?? null,
           latestContext: Boolean(
             latestInbound &&

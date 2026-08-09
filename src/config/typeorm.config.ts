@@ -276,6 +276,8 @@ import {
   LeadFlowAgentVersionEntity,
   LeadFlowAgentChannelBindingEntity,
   LeadFlowAgentOperationalStateEntity,
+  LeadFlowOperationsActionEntity,
+  LeadFlowOperationsActionEventEntity,
   OperationsRoomRevisionEntity,
   OperationsRoomOutboxEntity,
 } from '../modules/leadflow-agents/entities';
@@ -513,6 +515,8 @@ export const agencyEntities = [
   LeadFlowAgentVersionEntity,
   LeadFlowAgentChannelBindingEntity,
   LeadFlowAgentOperationalStateEntity,
+  LeadFlowOperationsActionEntity,
+  LeadFlowOperationsActionEventEntity,
   OperationsRoomRevisionEntity,
   OperationsRoomOutboxEntity,
   LeadFlowAutomationEntity,

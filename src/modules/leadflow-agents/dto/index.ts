@@ -14,3 +14,9 @@ export {
   type LeadFlowAgentPresetListResponse,
   type LeadFlowAgentPresetResponse,
 } from './leadflow-agent-preset-response.dto';
+export {
+  ConfirmLeadFlowOperationsActionDto,
+  CreateLeadFlowOperationsActionDto,
+  type LeadFlowOperationsActionListResponse,
+  type LeadFlowOperationsActionResponse,
+} from './leadflow-operations-action.dto';

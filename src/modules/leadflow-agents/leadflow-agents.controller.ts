@@ -23,8 +23,15 @@ import type {
   LeadFlowAgentDetailResponse,
   LeadFlowAgentListResponse,
   LeadFlowAgentPresetListResponse,
+  LeadFlowOperationsActionListResponse,
+  LeadFlowOperationsActionResponse,
 } from './dto';
-import { PatchAgentDto, ProvisionAgentDto } from './dto';
+import {
+  ConfirmLeadFlowOperationsActionDto,
+  CreateLeadFlowOperationsActionDto,
+  PatchAgentDto,
+  ProvisionAgentDto,
+} from './dto';
 import type {
   LeadFlowAgentRuntimeConfigResponse,
   LeadFlowAgentsRuntimeConfigResponse,
@@ -32,6 +39,7 @@ import type {
 import { LEADFLOW_AGENTS_PERMISSIONS } from './leadflow-agents.permissions';
 import { LeadFlowAgentService } from './services/leadflow-agent.service';
 import { OperationsRoomStateService } from './services/operations-room-state.service';
+import { LeadFlowOperationsActionService } from './services/leadflow-operations-action.service';
 
 @Controller('leadflow/agents')
 @UseGuards(JwtAuthGuard, PermissionsGuard)
@@ -40,6 +48,7 @@ export class LeadFlowAgentsController {
   constructor(
     private readonly agentService: LeadFlowAgentService,
     private readonly operationsRoomStateService: OperationsRoomStateService,
+    private readonly operationsActionService: LeadFlowOperationsActionService,
   ) {}
 
   @Get()
@@ -88,6 +97,43 @@ export class LeadFlowAgentsController {
       afterRoomVersion,
       limit,
     );
+  }
+
+  @Get('room/actions')
+  @RequirePermission(LEADFLOW_AGENTS_PERMISSIONS.manage)
+  listRoomActions(
+    @RequestContextData() ctx: RequestContext,
+  ): Promise<LeadFlowOperationsActionListResponse> {
+    return this.operationsActionService.list(ctx);
+  }
+
+  @Post('room/actions')
+  @RequirePermission(LEADFLOW_AGENTS_PERMISSIONS.manage)
+  proposeRoomAction(
+    @RequestContextData() ctx: RequestContext,
+    @Body() dto: CreateLeadFlowOperationsActionDto,
+  ): Promise<LeadFlowOperationsActionResponse> {
+    return this.operationsActionService.propose(ctx, dto);
+  }
+
+  @Post('room/actions/:actionId/confirm')
+  @RequirePermission(LEADFLOW_AGENTS_PERMISSIONS.manage)
+  confirmRoomAction(
+    @RequestContextData() ctx: RequestContext,
+    @Param('actionId', ParseUUIDPipe) actionId: string,
+    @Body() dto: ConfirmLeadFlowOperationsActionDto,
+  ): Promise<LeadFlowOperationsActionResponse> {
+    return this.operationsActionService.confirm(ctx, actionId, dto);
+  }
+
+  @Post('room/actions/:actionId/cancel')
+  @RequirePermission(LEADFLOW_AGENTS_PERMISSIONS.manage)
+  cancelRoomAction(
+    @RequestContextData() ctx: RequestContext,
+    @Param('actionId', ParseUUIDPipe) actionId: string,
+    @Body() dto: ConfirmLeadFlowOperationsActionDto,
+  ): Promise<LeadFlowOperationsActionResponse> {
+    return this.operationsActionService.cancel(ctx, actionId, dto);
   }
 
   @Get('presets')

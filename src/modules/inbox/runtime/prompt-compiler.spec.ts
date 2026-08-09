@@ -17,6 +17,13 @@ describe('AgentDecisionPromptBuilder layered compiler', () => {
     companyContext: { identity: { publicName: 'Demo' } },
     companyContextVersion: 3,
     companyContextHash: 'published-hash',
+    operationalRules: [
+      {
+        actionId: 'availability-1',
+        state: 'unavailable',
+        resourceKey: 'reservations',
+      },
+    ],
     agentProfile: { name: 'Lia', aiDisclosure: 'assistente virtual' },
     firstAgentReply: true,
     appointmentHandoffMode: true,
@@ -30,6 +37,7 @@ describe('AgentDecisionPromptBuilder layered compiler', () => {
       'crm_transition_catalog',
       'agent_profile',
       'company_context',
+      'operational_rules',
       'conversation_context',
       'current_inbound',
     ]);
@@ -51,6 +59,10 @@ describe('AgentDecisionPromptBuilder layered compiler', () => {
       version: 'company-context:v3',
       hash: 'published-hash',
     });
+    expect(
+      result.layers.find((layer) => layer.key === 'operational_rules'),
+    ).toMatchObject({ trust: 'untrusted', version: 'operational-rules:v1' });
+    expect(result.untrustedData).toContain('availability-1');
   });
 
   it('does not repeat the presentation after an earlier agent reply', () => {
