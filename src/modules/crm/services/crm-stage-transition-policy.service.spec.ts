@@ -673,3 +673,137 @@ describe('CrmStageTransitionPolicyService', () => {
     });
   });
 });
+
+/**
+ * The board is fail-closed, so a pipeline without policies is a pipeline where
+ * nothing moves. These cover the seeding that makes it usable without asking a
+ * non-technical operator to author 26 governed edges by hand.
+ */
+describe('CrmStageTransitionPolicyService.ensureDefaultPolicies', () => {
+  const pipelineId = '00000000-0000-4000-8000-000000000020';
+
+  function seedingHarness(
+    existing: CrmStageTransitionPolicyEntity[],
+    stages: CrmStageEntity[],
+  ) {
+    const created: Array<Record<string, unknown>> = [];
+    const policyRepository = {
+      find: jest.fn().mockResolvedValue(existing),
+      create: jest.fn((input: Record<string, unknown>) => input),
+      save: jest.fn(async (rows: Array<Record<string, unknown>>) => {
+        created.push(...rows);
+        return rows;
+      }),
+    };
+    const stageRepository = { find: jest.fn().mockResolvedValue(stages) };
+    const manager = {
+      query: jest.fn().mockResolvedValue(undefined),
+      getRepository: jest.fn((entity: unknown) =>
+        entity === CrmStageTransitionPolicyEntity
+          ? policyRepository
+          : stageRepository,
+      ),
+    };
+    const dataSource = {
+      transaction: jest.fn((callback: (m: unknown) => unknown) =>
+        callback(manager),
+      ),
+    };
+
+    return {
+      service: new CrmStageTransitionPolicyService(dataSource as never),
+      created,
+      policyRepository,
+      manager,
+    };
+  }
+
+  const entry = stage({
+    id: '00000000-0000-4000-8000-000000000030',
+    isInitialStage: true,
+    sortOrder: 10,
+  });
+  const middle = stage({
+    id: '00000000-0000-4000-8000-000000000031',
+    sortOrder: 20,
+  });
+  const won = stage({
+    id: '00000000-0000-4000-8000-000000000032',
+    type: 'won',
+    isWonStage: true,
+    sortOrder: 30,
+  });
+
+  it('publishes the whole plan for a pipeline that has none', async () => {
+    const { service, created } = seedingHarness([], [entry, middle, won]);
+
+    const result = await service.ensureDefaultPolicies(
+      ctx as never,
+      pipelineId,
+    );
+
+    // entry→middle, entry→won, middle→won.
+    expect(result).toEqual({ created: 3 });
+    expect(created.every((policy) => policy.status === 'published')).toBe(true);
+    expect(created.every((policy) => policy.version === 1)).toBe(true);
+    expect(
+      created.every(
+        (policy) => (policy.reasonCodes as string[]).length > 0,
+      ),
+    ).toBe(true);
+  });
+
+  it('never reopens an edge someone deleted or narrowed', async () => {
+    const { service, created } = seedingHarness(
+      [
+        policy({
+          fromStageId: entry.id,
+          toStageId: middle.id,
+          status: 'inactive',
+          deletedAt: new Date(),
+        }),
+      ],
+      [entry, middle, won],
+    );
+
+    const result = await service.ensureDefaultPolicies(
+      ctx as never,
+      pipelineId,
+    );
+
+    expect(result).toEqual({ created: 2 });
+    expect(
+      created.some(
+        (item) =>
+          item.fromStageId === entry.id && item.toStageId === middle.id,
+      ),
+    ).toBe(false);
+  });
+
+  it('heals only pipelines that were never configured', async () => {
+    const { service, policyRepository } = seedingHarness(
+      [policy({ fromStageId: entry.id, toStageId: middle.id })],
+      [entry, middle, won],
+    );
+
+    const result = await service.ensureDefaultPolicies(ctx as never, pipelineId, {
+      onlyWhenUnconfigured: true,
+    });
+
+    expect(result).toEqual({ created: 0 });
+    expect(policyRepository.save).not.toHaveBeenCalled();
+  });
+
+  it('serializes concurrent seedings of the same pipeline', async () => {
+    const { service, manager } = seedingHarness([], [entry, middle, won]);
+
+    await service.ensureDefaultPolicies(ctx as never, pipelineId);
+
+    // Per-edge locks would let two callers each read an empty plan and race
+    // into the unique index on the published pair.
+    expect(manager.query).toHaveBeenCalledWith(
+      'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
+      [expect.stringContaining('crm-transition-pipeline:')],
+    );
+  });
+});

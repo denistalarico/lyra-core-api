@@ -252,6 +252,20 @@ export class CrmController {
     return this.transitionPolicies.list(ctx, pipelineId);
   }
 
+  /**
+   * Republishes the movements a pipeline admits by default, filling only the
+   * pairs that have no policy at all. An operator who narrowed or removed a
+   * transition keeps that decision.
+   */
+  @Post('pipelines/:id/stage-transition-defaults')
+  @RequirePermission('leadflow.crm.stage.manage.manager_or_admin')
+  restoreStageTransitionDefaults(
+    @RequestContextData() ctx: RequestContext,
+    @Param('id') pipelineId: string,
+  ) {
+    return this.transitionPolicies.ensureDefaultPolicies(ctx, pipelineId);
+  }
+
   @Post('stage-transition-policies')
   @RequirePermission('leadflow.crm.stage.manage.manager_or_admin')
   createStageTransitionPolicy(

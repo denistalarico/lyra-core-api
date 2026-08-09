@@ -81,6 +81,10 @@ function createService() {
     recordEvent: jest.fn(),
   };
 
+  const transitionPolicies = {
+    ensureDefaultPolicies: jest.fn(async () => ({ created: 0 })),
+  };
+
   const service = new CrmService(
     pipelinesRepository as never,
     stagesRepository as never,
@@ -91,6 +95,7 @@ function createService() {
     contactsRepository as never,
     opportunityCommands as never,
     salesNotificationPublisher as never,
+    transitionPolicies as never,
   );
 
   return {

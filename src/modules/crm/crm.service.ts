@@ -52,6 +52,7 @@ import {
   CrmCommandOptions,
   CrmOpportunityCommandService,
 } from './services/crm-opportunity-command.service';
+import { CrmStageTransitionPolicyService } from './services/crm-stage-transition-policy.service';
 
 export type CrmOpportunityFilters = {
   pipelineId?: string;
@@ -91,6 +92,7 @@ export class CrmService {
     private readonly contactsRepository: Repository<ContactEntity>,
     private readonly opportunityCommands: CrmOpportunityCommandService,
     private readonly salesNotificationPublisher: SalesNotificationPublisher,
+    private readonly transitionPolicies: CrmStageTransitionPolicyService,
   ) {}
 
   async listPipelines(ctx: RequestContext): Promise<CrmPipelineEntity[]> {
@@ -221,7 +223,7 @@ export class CrmService {
     const tenantId = this.requireTenantId(ctx);
     const workspaceId = this.requireWorkspaceId(ctx);
 
-    return this.stagesRepository.manager.transaction(async (manager) => {
+    const created = await this.stagesRepository.manager.transaction(async (manager) => {
       await this.getPipelineWithManager(manager, ctx, dto.pipelineId, true);
       const repository = manager.getRepository(CrmStageEntity);
       const stageCount = await repository.count({
@@ -270,6 +272,13 @@ export class CrmService {
       }
       return repository.save(stage);
     });
+
+    // A stage nobody can enter or leave is worse than no stage at all, and the
+    // operator has no way to tell from the board why their card will not move.
+    // Outside the transaction above because the seeding takes its own.
+    await this.transitionPolicies.ensureDefaultPolicies(ctx, dto.pipelineId);
+
+    return created;
   }
 
   async getStage(ctx: RequestContext, id: string): Promise<CrmStageEntity> {
@@ -1227,7 +1236,16 @@ export class CrmService {
       order: { createdAt: 'ASC' },
     });
 
-    if (existing) return existing;
+    if (existing) {
+      // Pipelines created before the default plan existed have stages and no
+      // policies, so their board rejects every drag. Healing here — rather than
+      // in a migration — reaches them on the next load and stays inert
+      // afterwards, because it acts only on a pipeline that never had a policy.
+      await this.transitionPolicies.ensureDefaultPolicies(ctx, existing.id, {
+        onlyWhenUnconfigured: true,
+      });
+      return existing;
+    }
 
     const pipeline = await this.pipelinesRepository.save(
       this.pipelinesRepository.create({
@@ -1295,6 +1313,8 @@ export class CrmService {
         }),
       ),
     );
+
+    await this.transitionPolicies.ensureDefaultPolicies(ctx, pipeline.id);
 
     return pipeline;
   }

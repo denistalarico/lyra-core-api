@@ -17,6 +17,7 @@ import {
 } from '../dto/crm-stage-transition-policy.dto';
 import { CrmOpportunityEntity } from '../entities/crm-opportunity.entity';
 import { CrmStageEntity } from '../entities/crm-stage.entity';
+import { buildDefaultTransitionPlan } from './crm-stage-transition-defaults';
 import { CrmLeadScoreStateEntity } from '../lead-score/entities/crm-lead-score-state.entity';
 import {
   CrmStageTransitionActor,
@@ -99,6 +100,93 @@ export class CrmStageTransitionPolicyService {
         ...this.clientScope(ctx),
       },
       order: { fromStageId: 'ASC', toStageId: 'ASC', version: 'DESC' },
+    });
+  }
+
+  /**
+   * Publishes the pipeline's default movement plan, skipping edges that already
+   * have a policy.
+   *
+   * Governance here is fail-closed, so a pipeline without policies is a board
+   * where nothing can move. Rather than asking an operator to author 26 edges
+   * before the first drag, the structurally legal ones start published and
+   * governance becomes something they narrow.
+   *
+   * An edge is skipped when *any* row exists for it, deleted rows included: a
+   * transition someone deactivated or deleted was a decision, and healing must
+   * never silently reopen it. `onlyWhenUnconfigured` is the healing path for
+   * pipelines created before this existed — it acts only on a pipeline that has
+   * never had a single policy, which is unambiguous, and never on one that is
+   * partially configured.
+   */
+  async ensureDefaultPolicies(
+    ctx: RequestContext,
+    pipelineId: string,
+    options: { onlyWhenUnconfigured?: boolean } = {},
+  ): Promise<{ created: number }> {
+    return this.dataSource.transaction(async (manager) => {
+      await this.lockPipeline(manager, ctx, pipelineId);
+      const repository = manager.getRepository(CrmStageTransitionPolicyEntity);
+      const existing = await repository.find({
+        where: {
+          tenantId: this.tenantId(ctx),
+          workspaceId: this.workspaceId(ctx),
+          pipelineId,
+          ...this.clientScope(ctx),
+        },
+        withDeleted: true,
+      });
+      if (options.onlyWhenUnconfigured && existing.length > 0) {
+        return { created: 0 };
+      }
+
+      const stages = await manager.getRepository(CrmStageEntity).find({
+        where: {
+          tenantId: this.tenantId(ctx),
+          workspaceId: this.workspaceId(ctx),
+          pipelineId,
+          deletedAt: IsNull(),
+          ...this.clientScope(ctx),
+        },
+      });
+      const configured = new Set(
+        existing.map((policy) => `${policy.fromStageId}>${policy.toStageId}`),
+      );
+      const missing = buildDefaultTransitionPlan(stages).filter(
+        (edge) => !configured.has(`${edge.fromStageId}>${edge.toStageId}`),
+      );
+      if (missing.length === 0) return { created: 0 };
+
+      const publishedAt = new Date();
+      await repository.save(
+        missing.map((edge) =>
+          repository.create({
+            tenantId: this.tenantId(ctx),
+            workspaceId: this.workspaceId(ctx),
+            pipelineId,
+            fromStageId: edge.fromStageId,
+            toStageId: edge.toStageId,
+            allowedActors: edge.allowedActors,
+            requiredFields: [],
+            conditionContract: {},
+            reasonCodes: edge.reasonCodes,
+            aiGuidance: null,
+            status: 'published',
+            version: 1,
+            publishedAt,
+            publishedById: ctx.userId ?? null,
+            createdById: ctx.userId ?? null,
+            supersededByPolicyId: null,
+            metadata: {
+              systemGenerated: true,
+              ...(ctx.managedContext?.clientId
+                ? { clientId: ctx.managedContext.clientId }
+                : {}),
+            },
+          }),
+        ),
+      );
+      return { created: missing.length };
     });
   }
 
@@ -721,6 +809,24 @@ export class CrmStageTransitionPolicyService {
         'CRM stage not found in the selected pipeline.',
       );
     return stage;
+  }
+
+  /**
+   * Serializes work that spans every edge of a pipeline. `lockEdge` is per pair,
+   * so two concurrent seedings would each see an empty plan and race into the
+   * unique index on the published pair.
+   */
+  private async lockPipeline(
+    manager: EntityManager,
+    ctx: RequestContext,
+    pipelineId: string,
+  ) {
+    await manager.query(
+      'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
+      [
+        `crm-transition-pipeline:${this.tenantId(ctx)}:${this.workspaceId(ctx)}:${pipelineId}`,
+      ],
+    );
   }
 
   private async lockEdge(
