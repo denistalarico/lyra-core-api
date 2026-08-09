@@ -12,6 +12,7 @@ import { randomUUID } from 'node:crypto';
 import type { RequestContext } from '../../../common/context/request-context.interface';
 import { InboxConversationEntity } from '../../inbox/entities/inbox-conversation.entity';
 import { LeadFlowClientSettingsEntity } from '../../leadflow-settings/entities';
+import { getOperationsChatCatalog } from '../../leadflow-settings/catalog/business-mode-operations-chat.catalog';
 import { LeadFlowSettingsContextType } from '../../leadflow-settings/enums/leadflow-settings-context-type.enum';
 import { PlatformPermissionService } from '../../permissions';
 import type { PermissionContext } from '../../permissions';
@@ -101,6 +102,7 @@ export class LeadFlowAgentService {
     return {
       businessModeKey: active.businessModeKey,
       isCustomBusinessMode: active.isCustomBusinessMode,
+      operationsChat: getOperationsChatCatalog(active.businessModeKey),
       items: agents.map((agent) =>
         mapAgentDetailSummary(agent, bindingsByAgent.get(agent.id) ?? []),
       ),
@@ -360,9 +362,7 @@ export class LeadFlowAgentService {
     const agent = await this.findScopedAgent(ctx, active, id);
 
     if (agent.status !== LeadFlowAgentStatus.Archived) {
-      throw new BadRequestException(
-        'Arquive o agente antes de excluí-lo.',
-      );
+      throw new BadRequestException('Arquive o agente antes de excluí-lo.');
     }
 
     const activeConversations = await this.conversationsRepository.count({

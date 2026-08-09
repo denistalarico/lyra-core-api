@@ -55,6 +55,48 @@ describe('LeadFlow Business Mode conversation playbooks', () => {
   });
 });
 
+describe('LeadFlow Operations Room chat catalog', () => {
+  it('publishes typed availability actions for every Business Mode', () => {
+    for (const template of LEADFLOW_BUSINESS_MODE_TEMPLATES) {
+      const operationsChat = template.metadata.operationsChat as {
+        version?: number;
+        readIntents?: unknown[];
+        writeIntents?: unknown[];
+        modeActions?: Array<{
+          intent?: string;
+          resourceKinds?: unknown[];
+          requiredFields?: unknown[];
+          owningCapability?: string;
+        }>;
+      };
+
+      expect(operationsChat.version).toBe(1);
+      expect(operationsChat.readIntents).toContain('general_report');
+      expect(operationsChat.writeIntents).toContain('capacity_released');
+      expect(operationsChat.modeActions).toHaveLength(2);
+      expect(
+        operationsChat.modeActions?.map((action) => action.intent),
+      ).toEqual(
+        expect.arrayContaining(['capacity_unavailable', 'capacity_released']),
+      );
+
+      for (const action of operationsChat.modeActions ?? []) {
+        expect(action.resourceKinds?.length).toBeGreaterThan(0);
+        expect(action.requiredFields).toEqual(
+          expect.arrayContaining([
+            'resourceRef',
+            'effectivePeriod',
+            'timezone',
+          ]),
+        );
+        expect(['agenda', 'availability', 'inventory']).toContain(
+          action.owningCapability,
+        );
+      }
+    }
+  });
+});
+
 describe('LeadFlow client prompt schema classification', () => {
   const VALID_PATHS = new Set([
     ...getCompanyContextScalarFieldPaths(),
@@ -62,8 +104,9 @@ describe('LeadFlow client prompt schema classification', () => {
   ]);
 
   function fieldsOf(template: LeadFlowBusinessModeTemplateCatalogItem) {
-    return (template.clientPromptSchema as { fields: Array<Record<string, unknown>> })
-      .fields;
+    return (
+      template.clientPromptSchema as { fields: Array<Record<string, unknown>> }
+    ).fields;
   }
 
   it('classifies every field by who fills it and where it shows', () => {

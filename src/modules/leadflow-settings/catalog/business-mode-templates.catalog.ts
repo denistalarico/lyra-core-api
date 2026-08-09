@@ -1,5 +1,6 @@
 import { LeadFlowBusinessMode } from '../enums/leadflow-business-mode.enum';
 import { getContextDefaults } from './business-mode-context-defaults.catalog';
+import { getOperationsChatCatalog } from './business-mode-operations-chat.catalog';
 import { LeadFlowSettingsStatus } from '../enums/leadflow-settings-status.enum';
 import { LeadFlowJsonObject } from '../types/leadflow-settings.types';
 import type {
@@ -624,6 +625,7 @@ function template(input: {
         fields: input.fields,
         recommendedApps: input.recommendedApps,
       }) as unknown as LeadFlowJsonObject,
+      operationsChat: getOperationsChatCatalog(input.key),
     },
   };
 }

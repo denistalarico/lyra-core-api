@@ -59,6 +59,7 @@ export interface LeadFlowAgentListResponse {
   items: LeadFlowAgentSummaryResponse[];
   businessModeKey: string;
   isCustomBusinessMode: boolean;
+  operationsChat: Record<string, unknown>;
 }
 
 export function mapChannelBinding(
