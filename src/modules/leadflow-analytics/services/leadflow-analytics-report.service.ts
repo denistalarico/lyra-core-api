@@ -21,10 +21,31 @@ export class LeadFlowAnalyticsReportService {
       ),
     );
     const includeCommercial =
-      reportTypes.includes('overview') || reportTypes.includes('commercial');
-    const includeOperational = reportTypes.some(
-      (type) => type !== 'commercial',
-    );
+      reportTypes.includes('overview') ||
+      reportTypes.includes('commercial') ||
+      Boolean(query.sectionIds?.includes('commercial_performance')) ||
+      Boolean(
+        query.summaryTypes?.some((type) =>
+          ['executive', 'commercial'].includes(type),
+        ),
+      );
+    const includeOperational =
+      reportTypes.some((type) => type !== 'commercial') ||
+      Boolean(
+        query.sectionIds?.some((id) =>
+          [
+            'service_performance',
+            'lead_quality',
+            'automation_performance',
+            'data_quality',
+          ].includes(id),
+        ),
+      ) ||
+      Boolean(
+        query.summaryTypes?.some((type) =>
+          ['executive', 'service', 'automation'].includes(type),
+        ),
+      );
 
     const [commercial, operational] = await Promise.all([
       includeCommercial
@@ -39,6 +60,9 @@ export class LeadFlowAnalyticsReportService {
       reportType: query.reportType,
       reportTypes,
       title: query.title,
+      summaryTypes: query.summaryTypes,
+      sectionIds: query.sectionIds,
+      chartModes: query.chartModes,
       commercial,
       operational,
       generatedAt,

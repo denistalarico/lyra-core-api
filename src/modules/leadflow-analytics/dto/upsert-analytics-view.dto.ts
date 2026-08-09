@@ -4,6 +4,7 @@ import {
   IsArray,
   IsIn,
   IsOptional,
+  IsObject,
   IsString,
   IsUUID,
   Matches,
@@ -24,6 +25,36 @@ export const LEADFLOW_ANALYTICS_WIDGET_IDS = [
   'recommendations',
   'data_quality',
 ] as const;
+
+export const LEADFLOW_ANALYTICS_SUMMARY_TYPES = [
+  'executive',
+  'service',
+  'commercial',
+  'automation',
+] as const;
+
+export type LeadFlowAnalyticsSummaryType =
+  (typeof LEADFLOW_ANALYTICS_SUMMARY_TYPES)[number];
+
+export const LEADFLOW_ANALYTICS_CHART_IDS = [
+  'commercial_stages',
+  'commercial_handoff',
+  'message_channels',
+  'agent_performance',
+  'lead_score_distribution',
+  'automation_outcomes',
+] as const;
+
+export const LEADFLOW_ANALYTICS_CHART_MODES = [
+  'horizontal_bar',
+  'vertical_bar',
+  'pie',
+  'line',
+  'area',
+] as const;
+
+export type LeadFlowAnalyticsChartMode =
+  (typeof LEADFLOW_ANALYTICS_CHART_MODES)[number];
 
 export class UpsertAnalyticsViewDto {
   @IsString()
@@ -64,6 +95,16 @@ export class UpsertAnalyticsViewDto {
   @ArrayMaxSize(8)
   @IsIn(LEADFLOW_ANALYTICS_WIDGET_IDS, { each: true })
   hiddenWidgetIds?: string[];
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(4)
+  @IsIn(LEADFLOW_ANALYTICS_SUMMARY_TYPES, { each: true })
+  summaryTypes?: LeadFlowAnalyticsSummaryType[];
+
+  @IsOptional()
+  @IsObject()
+  chartModes?: Record<string, LeadFlowAnalyticsChartMode>;
 
   @IsOptional()
   @IsBoolean()

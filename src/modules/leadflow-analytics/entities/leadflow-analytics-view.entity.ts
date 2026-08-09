@@ -8,6 +8,10 @@ import {
 } from 'typeorm';
 import { LeadFlowSettingsContextType } from '../../leadflow-settings/enums/leadflow-settings-context-type.enum';
 import type { LeadFlowAnalyticsReportType } from '../dto/create-analytics-report.dto';
+import type {
+  LeadFlowAnalyticsChartMode,
+  LeadFlowAnalyticsSummaryType,
+} from '../dto/upsert-analytics-view.dto';
 
 @Index('IDX_lf_analytics_views_scope_user', [
   'tenantId',
@@ -74,6 +78,16 @@ export class LeadFlowAnalyticsViewEntity {
     default: () => "'[]'::jsonb",
   })
   hiddenWidgetIds!: string[];
+
+  @Column({
+    name: 'summary_types',
+    type: 'jsonb',
+    default: () => "'[]'::jsonb",
+  })
+  summaryTypes!: LeadFlowAnalyticsSummaryType[];
+
+  @Column({ name: 'chart_modes', type: 'jsonb', default: () => "'{}'::jsonb" })
+  chartModes!: Record<string, LeadFlowAnalyticsChartMode>;
 
   @Column({ name: 'is_default', type: 'boolean', default: false })
   isDefault!: boolean;

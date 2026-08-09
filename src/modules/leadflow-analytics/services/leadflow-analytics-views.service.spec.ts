@@ -127,4 +127,39 @@ describe('LeadFlowAnalyticsViewsService', () => {
       expect.objectContaining({ isDefault: true }),
     );
   });
+
+  it('persists governed summary and chart preferences', async () => {
+    const { service, repository } = buildService();
+
+    await service.create(ctx, {
+      ...view,
+      summaryTypes: ['executive', 'commercial'],
+      chartModes: {
+        commercial_stages: 'vertical_bar',
+        commercial_handoff: 'area',
+      },
+    });
+
+    expect(repository.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        schemaVersion: 2,
+        summaryTypes: ['executive', 'commercial'],
+        chartModes: {
+          commercial_stages: 'vertical_bar',
+          commercial_handoff: 'area',
+        },
+      }),
+    );
+  });
+
+  it('rejects unknown chart preferences', async () => {
+    const { service } = buildService();
+
+    await expect(
+      service.create(ctx, {
+        ...view,
+        chartModes: { commercial_stages: 'radar' as never },
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
 });

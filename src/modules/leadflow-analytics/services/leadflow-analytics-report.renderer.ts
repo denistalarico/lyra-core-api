@@ -5,6 +5,9 @@ import type { OperationalAnalytics } from '../types/operational-analytics.types'
 type ReportRenderInput = {
   reportType: LeadFlowAnalyticsReportType;
   reportTypes?: LeadFlowAnalyticsReportType[];
+  summaryTypes?: string[];
+  sectionIds?: string[];
+  chartModes?: Record<string, string>;
   title?: string;
   commercial: CommercialJourneyAnalytics | null;
   operational: OperationalAnalytics | null;
@@ -32,27 +35,58 @@ export function buildLeadFlowAnalyticsReportHtml(
   const reportTypes = new Set(
     input.reportTypes?.length ? input.reportTypes : [input.reportType],
   );
+  const hasExplicitSections = Boolean(input.sectionIds?.length);
+  const sectionIds = new Set(input.sectionIds ?? []);
+  const includeSection = (id: string, fallback: boolean) =>
+    hasExplicitSections ? sectionIds.has(id) : fallback;
+  const summaryTypes = input.summaryTypes?.length
+    ? input.summaryTypes
+    : reportTypes.has('overview')
+      ? ['executive']
+      : Array.from(reportTypes).map((type) =>
+          type === 'messages'
+            ? 'service'
+            : type === 'automations'
+              ? 'automation'
+              : type === 'commercial'
+                ? 'commercial'
+                : 'executive',
+        );
   const sections = [
-    reportTypes.has('overview')
-      ? renderExecutiveOverview(input.commercial, input.operational)
-      : '',
+    ...summaryTypes.map((type) =>
+      renderSummary(type, input.commercial, input.operational),
+    ),
     input.commercial &&
-    (reportTypes.has('overview') || reportTypes.has('commercial'))
-      ? renderCommercial(input.commercial)
+    includeSection(
+      'commercial_performance',
+      reportTypes.has('overview') || reportTypes.has('commercial'),
+    )
+      ? renderCommercial(input.commercial, input.chartModes)
       : '',
     input.operational &&
-    (reportTypes.has('overview') || reportTypes.has('messages'))
-      ? renderMessages(input.operational)
+    includeSection(
+      'service_performance',
+      reportTypes.has('overview') || reportTypes.has('messages'),
+    )
+      ? renderMessages(input.operational, input.chartModes)
       : '',
     input.operational &&
-    (reportTypes.has('overview') || reportTypes.has('lead_score'))
-      ? renderLeadScore(input.operational)
+    includeSection(
+      'lead_quality',
+      reportTypes.has('overview') || reportTypes.has('lead_score'),
+    )
+      ? renderLeadScore(input.operational, input.chartModes)
       : '',
     input.operational &&
-    (reportTypes.has('overview') || reportTypes.has('automations'))
-      ? renderAutomations(input.operational)
+    includeSection(
+      'automation_performance',
+      reportTypes.has('overview') || reportTypes.has('automations'),
+    )
+      ? renderAutomations(input.operational, input.chartModes)
       : '',
-    renderDataQuality(input.commercial, input.operational),
+    includeSection('data_quality', true)
+      ? renderDataQuality(input.commercial, input.operational)
+      : '',
   ].filter(Boolean);
 
   return `<!doctype html>
@@ -88,6 +122,26 @@ export function buildLeadFlowAnalyticsReportHtml(
       .note { margin-top: 8px; padding: 8px 10px; border-left: 3px solid #2563eb; background: #eff6ff; color: #334155; }
       .quality { padding: 10px 12px; border: 1px solid #dfe4ec; border-radius: 9px; background: #f8fafc; }
       .quality ul { margin: 5px 0 0; padding-left: 16px; }
+      .chart { margin-top: 10px; padding: 10px 0 12px; border-top: 1px solid #dfe4ec; break-inside: avoid; }
+      .chart h3 { margin: 0 0 2px; font-size: 12px; }
+      .chart > p { margin: 0 0 8px; color: #667085; font-size: 8px; }
+      .hbars { display: grid; gap: 6px; }
+      .hbar { display: grid; grid-template-columns: 120px 1fr 42px; align-items: center; gap: 7px; }
+      .hbar > span { overflow: hidden; color: #475467; white-space: nowrap; text-overflow: ellipsis; }
+      .hbar-track { height: 10px; overflow: hidden; border-radius: 3px; background: #eef2f6; }
+      .hbar-fill { height: 100%; background: #2563eb; }
+      .hbar strong { text-align: right; }
+      .vbars { display: flex; align-items: end; gap: 7px; height: 132px; padding-top: 8px; border-bottom: 1px solid #94a3b8; }
+      .vbar { display: grid; grid-template-rows: 1fr auto; align-items: end; min-width: 0; flex: 1; height: 100%; text-align: center; }
+      .vbar-fill { min-height: 2px; background: #2563eb; border-radius: 3px 3px 0 0; }
+      .vbar span { overflow: hidden; padding-top: 4px; color: #667085; font-size: 7px; white-space: nowrap; text-overflow: ellipsis; }
+      .pie-layout { display: flex; align-items: center; gap: 18px; }
+      .pie { width: 118px; height: 118px; flex: 0 0 auto; border-radius: 50%; }
+      .pie-legend { display: grid; gap: 5px; }
+      .pie-legend div { display: grid; grid-template-columns: 8px 1fr auto; align-items: center; gap: 6px; }
+      .pie-legend i { width: 8px; height: 8px; border-radius: 2px; }
+      .line-chart { width: 100%; height: 145px; }
+      .line-chart text { fill: #667085; font-size: 7px; }
       footer { margin-top: 18px; padding-top: 8px; border-top: 1px solid #dfe4ec; color: #667085; font-size: 8px; }
       @page { size: A4; margin: 11mm; }
     </style>
@@ -170,7 +224,92 @@ function renderExecutiveOverview(
   );
 }
 
-function renderCommercial(report: CommercialJourneyAnalytics) {
+function renderSummary(
+  type: string,
+  commercial: CommercialJourneyAnalytics | null,
+  operational: OperationalAnalytics | null,
+) {
+  if (type === 'executive') {
+    return renderExecutiveOverview(commercial, operational);
+  }
+  if (type === 'service' && operational) {
+    const summary = operational.messages.summary;
+    return section(
+      'Resumo Atendimento',
+      'Velocidade e volume das conversas no período.',
+      metrics([
+        ['Conversas', number(summary.conversations), 'No período'],
+        [
+          'Primeira resposta',
+          duration(summary.averageFirstResponseSeconds),
+          percent(summary.firstResponseRate),
+        ],
+        ['Mensagens', number(summary.total), `${summary.inbound} recebidas`],
+        [
+          'Respostas após IA',
+          number(summary.leadRepliesAfterFirstAgentReply),
+          `${summary.automatedOutbound} envios de agentes`,
+        ],
+      ]),
+    );
+  }
+  if (type === 'automation' && operational) {
+    const summary = operational.automations.summary;
+    return section(
+      'Resumo Automação',
+      'Execuções e efeitos confirmados no período.',
+      metrics([
+        ['Execuções', number(summary.runs), `${summary.live} produtivas`],
+        [
+          'Sucesso',
+          percent(summary.successRate),
+          `${summary.succeeded} concluídas`,
+        ],
+        [
+          'Efeitos confirmados',
+          number(summary.confirmedEffects),
+          'Ações realizadas',
+        ],
+        [
+          'Falhas',
+          number(summary.failed),
+          `${summary.failedAttempts} tentativas`,
+        ],
+      ]),
+    );
+  }
+  if (type === 'commercial' && commercial) {
+    const summary = commercial.summary;
+    return section(
+      'Resumo Comercial',
+      'Conversão e influência da IA no período.',
+      metrics([
+        [
+          'Oportunidades',
+          number(summary.opportunities),
+          `${summary.open} abertas`,
+        ],
+        ['Conversão', percent(summary.winRate), `${summary.won} ganhos`],
+        [
+          'Influência da IA',
+          percent(summary.aiInfluenceRate),
+          `${summary.aiInfluencedWins} ganhos`,
+        ],
+        [
+          'Handoffs aceitos',
+          number(summary.handoffAccepted),
+          `${summary.handoffRequested} solicitados`,
+        ],
+      ]),
+    );
+  }
+  return '';
+}
+
+function renderCommercial(
+  report: CommercialJourneyAnalytics,
+  chartModes: Record<string, string> = {},
+) {
   const summary = report.summary;
   const wonValue = report.wonValueByCurrency.length
     ? report.wonValueByCurrency
@@ -195,6 +334,23 @@ function renderCommercial(report: CommercialJourneyAnalytics) {
       ],
       ['Valor ganho', wonValue, 'Sem soma cambial'],
     ])}
+    ${chart(
+      'Oportunidades por estágio',
+      report.stages.slice(0, 12).map((item) => ({
+        label: item.name,
+        value: item.uniqueOpportunities,
+      })),
+      chartModes.commercial_stages,
+    )}
+    ${chart(
+      'Funil de handoff',
+      [
+        { label: 'Solicitados', value: summary.handoffRequested },
+        { label: 'Aceitos', value: summary.handoffAccepted },
+        { label: 'Concluídos', value: summary.handoffTransferCompleted },
+      ],
+      chartModes.commercial_handoff,
+    )}
     ${table(
       ['Pipeline', 'Coorte', 'Visitas', 'Ganhos', 'Abertas', 'Tempo médio'],
       report.pipelines.map((item) => [
@@ -227,7 +383,10 @@ function renderCommercial(report: CommercialJourneyAnalytics) {
   );
 }
 
-function renderMessages(report: OperationalAnalytics) {
+function renderMessages(
+  report: OperationalAnalytics,
+  chartModes: Record<string, string> = {},
+) {
   const summary = report.messages.summary;
   return section(
     'Conversas e atendimento',
@@ -250,6 +409,22 @@ function renderMessages(report: OperationalAnalytics) {
         `${summary.automatedOutbound} envios de agentes`,
       ],
     ])}
+    ${chart(
+      'Mensagens por canal',
+      report.messages.byChannel.slice(0, 12).map((item) => ({
+        label: item.name,
+        value: item.inbound + item.outbound,
+      })),
+      chartModes.message_channels,
+    )}
+    ${chart(
+      'Atuação dos agentes de IA',
+      report.messages.byAgent.slice(0, 12).map((item) => ({
+        label: item.name,
+        value: item.outbound,
+      })),
+      chartModes.agent_performance,
+    )}
     ${table(
       ['Canal', 'Recebidas', 'Enviadas', 'Conversas', 'Resposta média'],
       report.messages.byChannel.map((item) => [
@@ -279,7 +454,10 @@ function renderMessages(report: OperationalAnalytics) {
   );
 }
 
-function renderLeadScore(report: OperationalAnalytics) {
+function renderLeadScore(
+  report: OperationalAnalytics,
+  chartModes: Record<string, string> = {},
+) {
   const summary = report.leadScore.summary;
   return section(
     'Lead Score',
@@ -306,6 +484,14 @@ function renderLeadScore(report: OperationalAnalytics) {
         'Cruzamentos de faixa',
       ],
     ])}
+    ${chart(
+      'Distribuição do Lead Score',
+      report.leadScore.distribution.map((item) => ({
+        label: scoreBand(item.band),
+        value: item.opportunities,
+      })),
+      chartModes.lead_score_distribution,
+    )}
     ${table(
       ['Faixa', 'Oportunidades', 'Participação'],
       report.leadScore.distribution.map((item) => [
@@ -325,7 +511,10 @@ function renderLeadScore(report: OperationalAnalytics) {
   );
 }
 
-function renderAutomations(report: OperationalAnalytics) {
+function renderAutomations(
+  report: OperationalAnalytics,
+  chartModes: Record<string, string> = {},
+) {
   const summary = report.automations.summary;
   const ignoredFilters =
     report.dataQuality.filtersNotApplicableToAutomationRuns.length > 0
@@ -353,6 +542,14 @@ function renderAutomations(report: OperationalAnalytics) {
         `${summary.failedAttempts} tentativas`,
       ],
     ])}
+    ${chart(
+      'Desfechos por automação',
+      report.automations.byRecipe.slice(0, 12).map((item) => ({
+        label: item.name,
+        value: item.runs,
+      })),
+      chartModes.automation_outcomes,
+    )}
     ${ignoredFilters}
     ${table(
       [
@@ -457,6 +654,90 @@ function table(headers: string[], rows: Array<Array<string | number>>) {
   return `<table><thead><tr>${headers
     .map((header) => `<th>${escapeHtml(header)}</th>`)
     .join('')}</tr></thead><tbody>${body}</tbody></table>`;
+}
+
+function chart(
+  title: string,
+  items: Array<{ label: string; value: number }>,
+  requestedMode = 'horizontal_bar',
+) {
+  const data = items.filter((item) => Number.isFinite(item.value));
+  if (!data.length) return '';
+  const mode = [
+    'horizontal_bar',
+    'vertical_bar',
+    'pie',
+    'line',
+    'area',
+  ].includes(requestedMode)
+    ? requestedMode
+    : 'horizontal_bar';
+  const max = Math.max(...data.map((item) => item.value), 1);
+  const description =
+    mode === 'pie'
+      ? 'Participação no total.'
+      : mode === 'line' || mode === 'area'
+        ? 'Progressão na ordem apresentada.'
+        : 'Comparação em valores absolutos.';
+
+  if (mode === 'pie') {
+    const palette = ['#2563eb', '#b45309', '#7c3aed', '#94a3b8', '#64748b'];
+    const total = Math.max(
+      data.reduce((sum, item) => sum + item.value, 0),
+      1,
+    );
+    let cursor = 0;
+    const stops = data.map((item, index) => {
+      const start = cursor;
+      cursor += (item.value / total) * 100;
+      return `${palette[index % palette.length]} ${start}% ${cursor}%`;
+    });
+    return `<div class="chart"><h3>${escapeHtml(title)}</h3><p>${description}</p><div class="pie-layout"><div class="pie" style="background:conic-gradient(${stops.join(',')})"></div><div class="pie-legend">${data
+      .map(
+        (item, index) =>
+          `<div><i style="background:${palette[index % palette.length]}"></i><span>${escapeHtml(item.label)}</span><strong>${number(item.value)}</strong></div>`,
+      )
+      .join('')}</div></div></div>`;
+  }
+
+  if (mode === 'vertical_bar') {
+    return `<div class="chart"><h3>${escapeHtml(title)}</h3><p>${description}</p><div class="vbars">${data
+      .map(
+        (item) =>
+          `<div class="vbar"><div class="vbar-fill" title="${escapeHtml(item.label)}: ${item.value}" style="height:${Math.max(2, (item.value / max) * 100)}%"></div><span>${escapeHtml(item.label)}</span></div>`,
+      )
+      .join('')}</div></div>`;
+  }
+
+  if (mode === 'line' || mode === 'area') {
+    const width = 720;
+    const height = 116;
+    const step = data.length > 1 ? width / (data.length - 1) : width / 2;
+    const points = data.map((item, index) => ({
+      x: data.length > 1 ? index * step : width / 2,
+      y: height - (item.value / max) * (height - 16),
+      ...item,
+    }));
+    const polyline = points.map((point) => `${point.x},${point.y}`).join(' ');
+    const areaPoints = `0,${height} ${polyline} ${width},${height}`;
+    return `<div class="chart"><h3>${escapeHtml(title)}</h3><p>${description}</p><svg class="line-chart" viewBox="0 0 ${width} 145" role="img" aria-label="${escapeHtml(title)}">${
+      mode === 'area'
+        ? `<polygon points="${areaPoints}" fill="#2563eb" fill-opacity=".14"></polygon>`
+        : ''
+    }<polyline points="${polyline}" fill="none" stroke="#2563eb" stroke-width="3"></polyline>${points
+      .map(
+        (point) =>
+          `<circle cx="${point.x}" cy="${point.y}" r="4" fill="#2563eb"></circle><text x="${point.x}" y="138" text-anchor="middle">${escapeHtml(point.label.slice(0, 18))}</text>`,
+      )
+      .join('')}</svg></div>`;
+  }
+
+  return `<div class="chart"><h3>${escapeHtml(title)}</h3><p>${description}</p><div class="hbars">${data
+    .map(
+      (item) =>
+        `<div class="hbar"><span>${escapeHtml(item.label)}</span><div class="hbar-track"><div class="hbar-fill" style="width:${(item.value / max) * 100}%"></div></div><strong>${number(item.value)}</strong></div>`,
+    )
+    .join('')}</div></div>`;
 }
 
 function escapeHtml(value: string) {

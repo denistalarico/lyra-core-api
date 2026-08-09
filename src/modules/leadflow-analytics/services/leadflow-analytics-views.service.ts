@@ -9,15 +9,36 @@ import { IsNull, Repository } from 'typeorm';
 import type { RequestContext } from '../../../common/context/request-context.interface';
 import { LeadFlowSettingsContextType } from '../../leadflow-settings/enums/leadflow-settings-context-type.enum';
 import {
+  LEADFLOW_ANALYTICS_CHART_IDS,
+  LEADFLOW_ANALYTICS_CHART_MODES,
+  LEADFLOW_ANALYTICS_SUMMARY_TYPES,
   LEADFLOW_ANALYTICS_WIDGET_IDS,
+  type LeadFlowAnalyticsChartMode,
+  type LeadFlowAnalyticsSummaryType,
   type UpsertAnalyticsViewDto,
 } from '../dto/upsert-analytics-view.dto';
 import { LeadFlowAnalyticsViewEntity } from '../entities/leadflow-analytics-view.entity';
 
 const AGENCY_CONNECTION = 'agency';
-const ANALYTICS_VIEW_SCHEMA_VERSION = 1;
+const ANALYTICS_VIEW_SCHEMA_VERSION = 2;
 const MAX_ANALYTICS_VIEWS_PER_SCOPE = 20;
 const analyticsWidgetIds = new Set<string>(LEADFLOW_ANALYTICS_WIDGET_IDS);
+const analyticsSummaryTypes = new Set<string>(LEADFLOW_ANALYTICS_SUMMARY_TYPES);
+const analyticsChartIds = new Set<string>(LEADFLOW_ANALYTICS_CHART_IDS);
+const analyticsChartModes = new Set<string>(LEADFLOW_ANALYTICS_CHART_MODES);
+const applicableChartModes: Record<string, Set<string>> = {
+  commercial_stages: new Set(['horizontal_bar', 'vertical_bar']),
+  commercial_handoff: new Set([
+    'horizontal_bar',
+    'vertical_bar',
+    'line',
+    'area',
+  ]),
+  message_channels: new Set(['horizontal_bar', 'vertical_bar']),
+  agent_performance: new Set(['horizontal_bar', 'vertical_bar', 'pie']),
+  lead_score_distribution: new Set(['horizontal_bar', 'vertical_bar', 'pie']),
+  automation_outcomes: new Set(['horizontal_bar', 'vertical_bar']),
+};
 
 type AnalyticsViewScope = {
   tenantId: string;
@@ -116,6 +137,10 @@ export class LeadFlowAnalyticsViewsService {
         dto.hiddenWidgetIds === undefined
           ? view.hiddenWidgetIds
           : value.hiddenWidgetIds,
+      summaryTypes:
+        dto.summaryTypes === undefined ? view.summaryTypes : value.summaryTypes,
+      chartModes:
+        dto.chartModes === undefined ? view.chartModes : value.chartModes,
       schemaVersion: ANALYTICS_VIEW_SCHEMA_VERSION,
     });
     if (value.isDefault) {
@@ -179,6 +204,11 @@ export class LeadFlowAnalyticsViewsService {
       dto.hiddenWidgetIds,
       'visibilidade',
     );
+    const summaryTypes = this.sanitizeSummaryTypes(
+      dto.summaryTypes,
+      dto.reportType,
+    );
+    const chartModes = this.sanitizeChartModes(dto.chartModes);
     return {
       name,
       reportType: dto.reportType,
@@ -189,8 +219,67 @@ export class LeadFlowAnalyticsViewsService {
       agentId: dto.agentId ?? null,
       widgetOrder,
       hiddenWidgetIds,
+      summaryTypes,
+      chartModes,
       isDefault: dto.isDefault ?? false,
     };
+  }
+
+  private sanitizeSummaryTypes(
+    value: unknown,
+    reportType: UpsertAnalyticsViewDto['reportType'],
+  ): LeadFlowAnalyticsSummaryType[] {
+    if (value === undefined) {
+      if (reportType === 'messages') return ['service'];
+      if (reportType === 'commercial') return ['commercial'];
+      if (reportType === 'automations') return ['automation'];
+      return ['executive'];
+    }
+    if (!Array.isArray(value) || value.length === 0) {
+      throw new BadRequestException('Escolha pelo menos um resumo da visão.');
+    }
+    const types = value.filter(
+      (item): item is LeadFlowAnalyticsSummaryType => typeof item === 'string',
+    );
+    if (
+      types.length !== value.length ||
+      new Set(types).size !== types.length ||
+      types.some((type) => !analyticsSummaryTypes.has(type))
+    ) {
+      throw new BadRequestException(
+        'Os resumos informados não são permitidos.',
+      );
+    }
+    return types;
+  }
+
+  private sanitizeChartModes(
+    value: unknown,
+  ): Record<string, LeadFlowAnalyticsChartMode> {
+    if (value === undefined) return {};
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      throw new BadRequestException(
+        'As visualizações dos gráficos são inválidas.',
+      );
+    }
+    const entries = Object.entries(value as Record<string, unknown>);
+    if (
+      entries.some(
+        ([chartId, mode]) =>
+          !analyticsChartIds.has(chartId) ||
+          typeof mode !== 'string' ||
+          !analyticsChartModes.has(mode) ||
+          !applicableChartModes[chartId]?.has(mode),
+      )
+    ) {
+      throw new BadRequestException(
+        'Uma visualização de gráfico informada não é permitida.',
+      );
+    }
+    return Object.fromEntries(entries) as Record<
+      string,
+      LeadFlowAnalyticsChartMode
+    >;
   }
 
   private sanitizeWidgetIds(value: unknown, field: string) {
