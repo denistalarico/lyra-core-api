@@ -162,6 +162,12 @@ export class LeadFlowAutomationService {
       where: this.scopeWhere(ctx, active),
       order: { createdAt: 'ASC' },
     });
+    // Every instance in this response shares the same settings context. Resolve
+    // the global snapshot once so inherited required fields are evaluated
+    // consistently without turning the list into one query per automation.
+    const globalDefaults = automations.length
+      ? await this.globalConfigService.getCurrent(active.settings)
+      : undefined;
 
     return {
       businessModeKey: active.businessModeKey,
@@ -173,6 +179,7 @@ export class LeadFlowAutomationService {
           lifecycle: await this.lifecycleWithChannelAvailability(
             automation,
             active,
+            globalDefaults,
           ),
         })),
       ),
@@ -250,12 +257,16 @@ export class LeadFlowAutomationService {
           order: { createdAt: 'ASC' },
         })
       : [];
+    const globalDefaults = automations.length
+      ? await this.globalConfigService.getCurrent(active.settings)
+      : undefined;
     const instances = await Promise.all(
       automations.map(async (automation) => ({
         ...mapAutomationSummary(automation),
         lifecycle: await this.lifecycleWithChannelAvailability(
           automation,
           active,
+          globalDefaults,
         ),
       })),
     );
@@ -636,7 +647,7 @@ export class LeadFlowAutomationService {
     const automation = await this.findScopedAutomation(ctx, active, id);
     const recipe = this.recipeService.getRecipe(automation.recipeKey);
 
-    const lifecycle = this.lifecycleFor(automation, active);
+    const lifecycle = await this.lifecycleFor(automation, active);
     const blockedByDependency = lifecycle.unmetDependencies.length > 0;
 
     // A simulation is explicitly hypothetical, so an operator may assert
@@ -826,10 +837,11 @@ export class LeadFlowAutomationService {
   }
 
   /** Derives the effective lifecycle state of an automation instance. */
-  private lifecycleFor(
+  private async lifecycleFor(
     automation: LeadFlowAutomationEntity,
     active: ActiveContext,
-  ): LeadFlowAutomationLifecycle {
+    globalDefaults?: LeadFlowAutomationGlobalDefaultsSnapshot,
+  ): Promise<LeadFlowAutomationLifecycle> {
     const recipe = this.recipeService.getRecipe(automation.recipeKey);
 
     return this.lifecycleService.evaluate({
@@ -839,15 +851,16 @@ export class LeadFlowAutomationService {
         ? this.recipeService.isCompatible(recipe, active.businessModeKey)
         : false,
       hasPublishedVersion: Boolean(automation.publishedVersionId),
+      // The form displays effective values (recipe < global < local). Checking
+      // the raw JSON here made an inherited `null` look empty even while the UI
+      // showed a valid global value, producing a false incomplete-config alert.
       missingConfiguration: recipe
-        ? this.configSchemaService.findMissingRequiredFields(recipe, {
-            trigger: automation.triggerConfig ?? {},
-            conditions: automation.conditionConfig ?? {},
-            actions: automation.actionConfig ?? {},
-            message: automation.messageConfig ?? {},
-            crmPolicy: automation.crmPolicy ?? {},
-            schedulePolicy: automation.schedulePolicy ?? {},
-          })
+        ? await this.findMissingEffectiveConfiguration(
+            automation,
+            active,
+            recipe,
+            globalDefaults,
+          )
         : [],
       unavailableActions: recipe
         ? unavailableExecutors(this.configuredActionKeys(automation, recipe))
@@ -858,8 +871,13 @@ export class LeadFlowAutomationService {
   private async lifecycleWithChannelAvailability(
     automation: LeadFlowAutomationEntity,
     active: ActiveContext,
+    globalDefaults?: LeadFlowAutomationGlobalDefaultsSnapshot,
   ): Promise<LeadFlowAutomationLifecycle> {
-    const lifecycle = this.lifecycleFor(automation, active);
+    const lifecycle = await this.lifecycleFor(
+      automation,
+      active,
+      globalDefaults,
+    );
 
     if (automation.recipeKey === 'hot_lead_notification') {
       const configured = Array.isArray(
@@ -1294,10 +1312,41 @@ export class LeadFlowAutomationService {
     // Readiness used to check only channel/webhook, so an automation with empty
     // required fields still reported "ready". Required fields now come from the
     // recipe schema, which is the same source the validator enforces.
-    const globalDefaults = await this.globalConfigService.getCurrent(
-      active.settings,
+    const missingFields = await this.findMissingEffectiveConfiguration(
+      automation,
+      active,
+      recipe,
     );
-    const effective = this.globalConfigService.resolve(globalDefaults, {
+    if (missingFields.length > 0) {
+      missing.push(...missingFields);
+      if (state === LeadFlowAutomationReadinessState.Ready) {
+        state = LeadFlowAutomationReadinessState.MissingSettings;
+      }
+    }
+
+    const score = Math.max(0, 100 - missing.length * 40);
+    const level: LeadFlowAutomationReadiness['level'] =
+      missing.length === 0 ? 'ready' : 'partial';
+
+    return { score, level, state, missing, checkedAt };
+  }
+
+  /**
+   * Required-field validation must use the same effective configuration the
+   * runtime contract and the form expose. Keeping this resolution in one helper
+   * prevents the persisted readiness score and the live lifecycle from
+   * disagreeing about inherited values.
+   */
+  private async findMissingEffectiveConfiguration(
+    automation: LeadFlowAutomationEntity,
+    active: ActiveContext,
+    recipe: LeadFlowAutomationRecipeCatalogItem,
+    globalDefaults?: LeadFlowAutomationGlobalDefaultsSnapshot,
+  ): Promise<string[]> {
+    const resolvedDefaults =
+      globalDefaults ??
+      (await this.globalConfigService.getCurrent(active.settings));
+    const effective = this.globalConfigService.resolve(resolvedDefaults, {
       template: {
         trigger: recipe.defaultTriggerConfig,
         conditions: recipe.defaultConditionConfig,
@@ -1313,29 +1362,15 @@ export class LeadFlowAutomationService {
         schedulePolicy: automation.schedulePolicy ?? {},
       },
     });
-    const missingFields = this.configSchemaService.findMissingRequiredFields(
-      recipe,
-      {
-        trigger: effective.trigger,
-        conditions: effective.conditions,
-        actions: effective.actions,
-        message: effective.message,
-        crmPolicy: automation.crmPolicy ?? {},
-        schedulePolicy: effective.schedulePolicy,
-      },
-    );
-    if (missingFields.length > 0) {
-      missing.push(...missingFields);
-      if (state === LeadFlowAutomationReadinessState.Ready) {
-        state = LeadFlowAutomationReadinessState.MissingSettings;
-      }
-    }
 
-    const score = Math.max(0, 100 - missing.length * 40);
-    const level: LeadFlowAutomationReadiness['level'] =
-      missing.length === 0 ? 'ready' : 'partial';
-
-    return { score, level, state, missing, checkedAt };
+    return this.configSchemaService.findMissingRequiredFields(recipe, {
+      trigger: effective.trigger,
+      conditions: effective.conditions,
+      actions: effective.actions,
+      message: effective.message,
+      crmPolicy: automation.crmPolicy ?? {},
+      schedulePolicy: effective.schedulePolicy,
+    });
   }
 
   private hasChannel(settings: LeadFlowClientSettingsEntity): boolean {
