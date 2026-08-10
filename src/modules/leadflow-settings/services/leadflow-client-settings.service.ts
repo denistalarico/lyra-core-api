@@ -57,7 +57,10 @@ import { CompanyContextService } from './company-context.service';
 import { InboxDomainOutboxEntity } from '../../inbox/entities/inbox-domain-outbox.entity';
 import {
   LeadFlowBriefingContextSnapshotEntity,
+  LeadFlowBriefingExtractionJobEntity,
+  LeadFlowBriefingSourceEntity,
   LeadFlowBriefingSuggestionApplicationEntity,
+  LeadFlowBriefingSuggestionEntity,
 } from '../../leadflow-briefing/entities';
 import { LeadFlowBriefingSnapshotKind } from '../../leadflow-briefing/enums/leadflow-briefing-snapshot-kind.enum';
 
@@ -66,6 +69,30 @@ const COMPANY_CONTEXT_LIST_FIELD_PATHS = ['offers', 'faq', 'links'];
 const AGENCY_CONNECTION = 'agency';
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
+
+/**
+ * Companies a tenant may keep active when its LeadFlow entitlement does not pin
+ * an explicit `maxManagedClients`. Until subscription plans define their own
+ * ceilings, every tenant starts here — an unset entitlement means "the starter
+ * allowance", never "unlimited", so a missing/misconfigured row can't hand out
+ * unbounded capacity.
+ */
+const DEFAULT_MAX_MANAGED_CLIENTS = 10;
+
+/**
+ * Tenants exempt from the company limit, as a comma-separated list of tenant
+ * ids in `LEADFLOW_UNLIMITED_COMPANY_TENANTS`. This is how the operating agency
+ * keeps unlimited capacity while every other tenant sits on the default until
+ * billing owns the number.
+ */
+function readUnlimitedCompanyTenants(): Set<string> {
+  return new Set(
+    (process.env.LEADFLOW_UNLIMITED_COMPANY_TENANTS ?? '')
+      .split(',')
+      .map((value) => value.trim())
+      .filter((value) => value.length > 0),
+  );
+}
 
 @Injectable()
 export class LeadFlowClientSettingsService {
@@ -174,7 +201,7 @@ export class LeadFlowClientSettingsService {
       this.entitlementsRepository,
       ctx.tenantId,
     );
-    const limit = this.resolveCompanyLimit(entitlement);
+    const limit = this.resolveCompanyLimit(entitlement, ctx.tenantId);
     const activeCompanies = await this.countActiveCompanies(
       this.settingsRepository,
       ctx.tenantId,
@@ -293,6 +320,71 @@ export class LeadFlowClientSettingsService {
     }
 
     return this.applySettingsUpdate(ctx, settings, dto);
+  }
+
+  /**
+   * Erases a company's LeadFlow configuration so the company can be onboarded
+   * from scratch. Archiving already frees the capacity slot and is reversible —
+   * this is the irreversible step, so it only accepts an already archived
+   * context and is gated on the danger-zone permission at the controller.
+   *
+   * The briefing provenance of this context (sources, versions, extraction
+   * jobs, suggestions, applications and published snapshots) is deleted with
+   * it: those tables carry `ON DELETE RESTRICT` and only describe this
+   * configuration. Data owned by other modules is untouched — agents and
+   * automations keep their rows with `settings_id` nulled out by the schema,
+   * and Inbox conversations, CRM leads and appointments belong to the agency
+   * client, not to this row.
+   */
+  async deleteSettings(
+    ctx: RequestContext,
+    agencyClientId: string,
+  ): Promise<void> {
+    await this.assertAgencyClient(ctx, agencyClientId);
+
+    const settings = await this.findSettings(ctx, agencyClientId);
+
+    if (!settings) {
+      throw new NotFoundException(
+        'LeadFlow settings not found for this agency client.',
+      );
+    }
+
+    if (settings.status !== LeadFlowSettingsStatus.Archived) {
+      throw new ConflictException({
+        message:
+          'Archive the company before deleting its LeadFlow configuration.',
+        code: 'leadflow_company_not_archived',
+        status: settings.status,
+      });
+    }
+
+    const settingsId = settings.id;
+
+    await this.dataSource.transaction(async (manager) => {
+      // Order matters: every step below is referenced by the one above it with
+      // ON DELETE RESTRICT, so deleting out of order aborts the transaction.
+      await manager
+        .getRepository(LeadFlowBriefingSuggestionApplicationEntity)
+        .delete({ settingsId });
+      await manager
+        .getRepository(LeadFlowBriefingSuggestionEntity)
+        .delete({ settingsId });
+      await manager
+        .getRepository(LeadFlowBriefingExtractionJobEntity)
+        .delete({ settingsId });
+      await manager
+        .getRepository(LeadFlowBriefingContextSnapshotEntity)
+        .delete({ settingsId });
+      // Source versions cascade with their source.
+      await manager
+        .getRepository(LeadFlowBriefingSourceEntity)
+        .delete({ settingsId });
+
+      await manager
+        .getRepository(LeadFlowClientSettingsEntity)
+        .delete({ id: settingsId });
+    });
   }
 
   async getAgencySettings(
@@ -806,14 +898,37 @@ export class LeadFlowClientSettingsService {
     });
   }
 
+  /**
+   * Resolution order, most specific first:
+   *   1. a numeric `maxManagedClients` on the entitlement (what a plan writes);
+   *   2. `maxManagedClients: 'unlimited'` — the only in-band way to opt out;
+   *   3. the tenant allowlist in `LEADFLOW_UNLIMITED_COMPANY_TENANTS`;
+   *   4. {@link DEFAULT_MAX_MANAGED_CLIENTS}.
+   *
+   * `null` means "no limit". Returning it from the fallback branch would make
+   * every unconfigured tenant unlimited, so the default is a number.
+   */
   private resolveCompanyLimit(
     entitlement: TenantProductEntitlementEntity | null,
+    tenantId?: string | null,
   ): number | null {
     const raw = entitlement?.settings?.maxManagedClients;
 
-    return typeof raw === 'number' && Number.isFinite(raw) && raw >= 0
-      ? raw
-      : null;
+    if (typeof raw === 'number' && Number.isFinite(raw) && raw >= 0) {
+      return raw;
+    }
+
+    if (raw === 'unlimited') {
+      return null;
+    }
+
+    const resolvedTenantId = tenantId ?? entitlement?.tenantId ?? null;
+
+    if (resolvedTenantId && readUnlimitedCompanyTenants().has(resolvedTenantId)) {
+      return null;
+    }
+
+    return DEFAULT_MAX_MANAGED_CLIENTS;
   }
 
   private countActiveCompanies(
@@ -850,7 +965,7 @@ export class LeadFlowClientSettingsService {
         lock: { mode: 'pessimistic_write' },
       });
 
-    const limit = this.resolveCompanyLimit(entitlement);
+    const limit = this.resolveCompanyLimit(entitlement, tenantId);
 
     if (limit === null) {
       return;

@@ -14,7 +14,10 @@ import { LeadFlowClientSettingsService } from './leadflow-client-settings.servic
 import { InboxDomainOutboxEntity } from '../../inbox/entities/inbox-domain-outbox.entity';
 import {
   LeadFlowBriefingContextSnapshotEntity,
+  LeadFlowBriefingExtractionJobEntity,
+  LeadFlowBriefingSourceEntity,
   LeadFlowBriefingSuggestionApplicationEntity,
+  LeadFlowBriefingSuggestionEntity,
 } from '../../leadflow-briefing/entities';
 import { LeadFlowBriefingSnapshotKind } from '../../leadflow-briefing/enums/leadflow-briefing-snapshot-kind.enum';
 
@@ -115,7 +118,7 @@ describe('LeadFlowClientSettingsService company capacity', () => {
   } as unknown as LeadFlowBusinessModeTemplateEntity;
 
   function buildEntitlement(
-    maxManagedClients: number | null,
+    maxManagedClients: number | 'unlimited' | null,
   ): TenantProductEntitlementEntity {
     return {
       tenantId: 'tenant-a',
@@ -125,6 +128,18 @@ describe('LeadFlowClientSettingsService company capacity', () => {
         maxManagedClients === null ? {} : { maxManagedClients },
     } as unknown as TenantProductEntitlementEntity;
   }
+
+  const originalUnlimitedTenants =
+    process.env.LEADFLOW_UNLIMITED_COMPANY_TENANTS;
+
+  afterEach(() => {
+    if (originalUnlimitedTenants === undefined) {
+      delete process.env.LEADFLOW_UNLIMITED_COMPANY_TENANTS;
+    } else {
+      process.env.LEADFLOW_UNLIMITED_COMPANY_TENANTS =
+        originalUnlimitedTenants;
+    }
+  });
 
   function setup() {
     const agencyClientsRepository = {
@@ -189,8 +204,9 @@ describe('LeadFlowClientSettingsService company capacity', () => {
     };
   }
 
-  it('reports unlimited capacity when the tenant has no LeadFlow entitlement configured', async () => {
+  it('falls back to the default allowance when the tenant has no LeadFlow entitlement configured', async () => {
     const { service, settingsRepository, entitlementsRepository } = setup();
+    delete process.env.LEADFLOW_UNLIMITED_COMPANY_TENANTS;
     jest.mocked(entitlementsRepository.findOne).mockResolvedValue(null);
     jest.mocked(settingsRepository.count).mockResolvedValue(5);
 
@@ -198,11 +214,51 @@ describe('LeadFlowClientSettingsService company capacity', () => {
 
     expect(capacity).toEqual({
       activeCompanies: 5,
-      limit: null,
-      availableSlots: null,
+      limit: 10,
+      availableSlots: 5,
       planKey: null,
       entitlementStatus: null,
     });
+  });
+
+  it('reports unlimited capacity for a tenant on the unlimited allowlist', async () => {
+    const { service, settingsRepository, entitlementsRepository } = setup();
+    process.env.LEADFLOW_UNLIMITED_COMPANY_TENANTS = 'tenant-z, tenant-a';
+    jest.mocked(entitlementsRepository.findOne).mockResolvedValue(null);
+    jest.mocked(settingsRepository.count).mockResolvedValue(42);
+
+    const capacity = await service.getCapacity(ctx);
+
+    expect(capacity.limit).toBeNull();
+    expect(capacity.availableSlots).toBeNull();
+  });
+
+  it('reports unlimited capacity when the entitlement pins maxManagedClients to "unlimited"', async () => {
+    const { service, settingsRepository, entitlementsRepository } = setup();
+    delete process.env.LEADFLOW_UNLIMITED_COMPANY_TENANTS;
+    jest
+      .mocked(entitlementsRepository.findOne)
+      .mockResolvedValue(buildEntitlement('unlimited'));
+    jest.mocked(settingsRepository.count).mockResolvedValue(42);
+
+    const capacity = await service.getCapacity(ctx);
+
+    expect(capacity.limit).toBeNull();
+    expect(capacity.availableSlots).toBeNull();
+  });
+
+  it('keeps an explicit entitlement limit ahead of the unlimited allowlist', async () => {
+    const { service, settingsRepository, entitlementsRepository } = setup();
+    process.env.LEADFLOW_UNLIMITED_COMPANY_TENANTS = 'tenant-a';
+    jest
+      .mocked(entitlementsRepository.findOne)
+      .mockResolvedValue(buildEntitlement(3));
+    jest.mocked(settingsRepository.count).mockResolvedValue(1);
+
+    const capacity = await service.getCapacity(ctx);
+
+    expect(capacity.limit).toBe(3);
+    expect(capacity.availableSlots).toBe(2);
   });
 
   it('computes remaining slots against the configured limit, scoped to tenant and workspace', async () => {
@@ -270,8 +326,24 @@ describe('LeadFlowClientSettingsService company capacity', () => {
     expect(managerSettingsRepo.save).toHaveBeenCalled();
   });
 
-  it('does not gate creation when the tenant has no configured company limit', async () => {
+  it('applies the default allowance to a tenant with no entitlement instead of skipping the gate', async () => {
     const { service, managerEntitlementRepo, managerSettingsRepo } = setup();
+    delete process.env.LEADFLOW_UNLIMITED_COMPANY_TENANTS;
+    managerEntitlementRepo.findOne.mockResolvedValue(null);
+    managerSettingsRepo.count.mockResolvedValue(10);
+
+    await expect(
+      service.createSettings(ctx, 'client-a', {
+        businessModeKey: 'default',
+      } as never),
+    ).rejects.toThrow(ForbiddenException);
+
+    expect(managerSettingsRepo.save).not.toHaveBeenCalled();
+  });
+
+  it('does not gate creation for a tenant on the unlimited allowlist', async () => {
+    const { service, managerEntitlementRepo, managerSettingsRepo } = setup();
+    process.env.LEADFLOW_UNLIMITED_COMPANY_TENANTS = 'tenant-a';
     managerEntitlementRepo.findOne.mockResolvedValue(null);
 
     await service.createSettings(ctx, 'client-a', {
@@ -347,6 +419,111 @@ describe('LeadFlowClientSettingsService company capacity', () => {
     } as never);
 
     expect(dataSource.transaction).not.toHaveBeenCalled();
+  });
+});
+
+describe('LeadFlowClientSettingsService.deleteSettings', () => {
+  const ctx: RequestContext = {
+    tenantId: 'tenant-a',
+    workspaceId: 'workspace-a',
+    userId: 'user-a',
+  };
+
+  function setup(settings: Partial<LeadFlowClientSettingsEntity> | null) {
+    const agencyClientsRepository = {
+      findOne: jest.fn().mockResolvedValue({
+        id: 'client-a',
+        managedTenantId: 'managed-a',
+      } as AgencyClient),
+    } as unknown as Repository<AgencyClient>;
+    const settingsRepository = {
+      findOne: jest.fn().mockResolvedValue(settings),
+    } as unknown as Repository<LeadFlowClientSettingsEntity>;
+    const entitlementsRepository = {
+      findOne: jest.fn(),
+    } as unknown as Repository<TenantProductEntitlementEntity>;
+
+    const deletedByEntity: unknown[] = [];
+    const dataSource = {
+      transaction: jest.fn(async (cb: (manager: EntityManager) => unknown) =>
+        cb({
+          getRepository: jest.fn((entity: unknown) => ({
+            delete: jest.fn(async (criteria: unknown) => {
+              deletedByEntity.push({ entity, criteria });
+              return { affected: 1 };
+            }),
+          })),
+        } as unknown as EntityManager),
+      ),
+    } as unknown as DataSource;
+
+    const service = new LeadFlowClientSettingsService(
+      dataSource,
+      agencyClientsRepository,
+      settingsRepository,
+      entitlementsRepository,
+      {} as unknown as LeadFlowBusinessModeTemplateService,
+      new CompanyContextService(),
+    );
+
+    return { service, dataSource, deletedByEntity };
+  }
+
+  it('refuses to delete a company that is not archived yet', async () => {
+    const { service, dataSource } = setup({
+      id: 'settings-a',
+      status: LeadFlowSettingsStatus.Paused,
+    } as LeadFlowClientSettingsEntity);
+
+    await expect(service.deleteSettings(ctx, 'client-a')).rejects.toThrow(
+      ConflictException,
+    );
+    expect(dataSource.transaction).not.toHaveBeenCalled();
+  });
+
+  it('reports a missing configuration instead of silently succeeding', async () => {
+    const { service, dataSource } = setup(null);
+
+    await expect(service.deleteSettings(ctx, 'client-a')).rejects.toThrow(
+      NotFoundException,
+    );
+    expect(dataSource.transaction).not.toHaveBeenCalled();
+  });
+
+  it('clears the briefing provenance before the settings row, in FK order', async () => {
+    const { service, deletedByEntity } = setup({
+      id: 'settings-a',
+      status: LeadFlowSettingsStatus.Archived,
+    } as LeadFlowClientSettingsEntity);
+
+    await service.deleteSettings(ctx, 'client-a');
+
+    expect(deletedByEntity).toEqual([
+      {
+        entity: LeadFlowBriefingSuggestionApplicationEntity,
+        criteria: { settingsId: 'settings-a' },
+      },
+      {
+        entity: LeadFlowBriefingSuggestionEntity,
+        criteria: { settingsId: 'settings-a' },
+      },
+      {
+        entity: LeadFlowBriefingExtractionJobEntity,
+        criteria: { settingsId: 'settings-a' },
+      },
+      {
+        entity: LeadFlowBriefingContextSnapshotEntity,
+        criteria: { settingsId: 'settings-a' },
+      },
+      {
+        entity: LeadFlowBriefingSourceEntity,
+        criteria: { settingsId: 'settings-a' },
+      },
+      {
+        entity: LeadFlowClientSettingsEntity,
+        criteria: { id: 'settings-a' },
+      },
+    ]);
   });
 });
 

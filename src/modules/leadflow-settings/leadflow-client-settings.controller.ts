@@ -1,7 +1,9 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
+  HttpCode,
   Param,
   Patch,
   Post,
@@ -89,6 +91,24 @@ export class LeadFlowClientSettingsController {
       ctx,
       agencyClientId,
       dto,
+    );
+  }
+
+  /**
+   * Irreversible: erases the company's LeadFlow configuration and briefing
+   * provenance. The service only accepts an already archived context, so this
+   * can never be the first destructive step a caller takes.
+   */
+  @Delete(':agencyClientId/settings')
+  @HttpCode(204)
+  @RequirePermission('leadflow.settings.danger_zone.manage.owner_only')
+  deleteSettings(
+    @RequestContextData() ctx: RequestContext,
+    @Param('agencyClientId') agencyClientId: string,
+  ): Promise<void> {
+    return this.leadFlowClientSettingsService.deleteSettings(
+      ctx,
+      agencyClientId,
     );
   }
 
