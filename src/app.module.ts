@@ -59,7 +59,11 @@ import { AdminModule } from './modules/admin';
       isGlobal: true,
       load: [env],
     }),
-    ScheduleModule.forRoot(),
+    ScheduleModule.forRoot({
+      cronJobs: process.env.SCHEDULES_ENABLED !== 'false',
+      intervals: process.env.SCHEDULES_ENABLED !== 'false',
+      timeouts: process.env.SCHEDULES_ENABLED !== 'false',
+    }),
     TypeOrmModule.forRoot(getTypeOrmConfig()),
     TypeOrmModule.forRoot(getAgencyTypeOrmConfig()),
     ContextModule,

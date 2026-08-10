@@ -9,7 +9,7 @@ const run = process.env.LEADFLOW_BETA_E2E === 'true' ? describe : describe.skip;
 
 jest.setTimeout(180_000);
 
-run('LeadFlow beta authenticated staging smoke (Playwright)', () => {
+run('LeadFlow beta authenticated development smoke (Playwright)', () => {
   let browser: Browser;
 
   beforeAll(async () => {

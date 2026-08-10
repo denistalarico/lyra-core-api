@@ -12,7 +12,7 @@ const CHANNEL_ID = '33333333-3333-4333-8333-333333333333';
 
 function options(overrides: Record<string, string> = {}) {
   return parseReconciliationOptions({
-    RECONCILE_ENVIRONMENT: 'staging',
+    RECONCILE_ENVIRONMENT: 'development',
     RECONCILE_MODE: 'dry-run',
     RECONCILE_TENANT_ID: TENANT_ID,
     RECONCILE_WORKSPACE_ID: WORKSPACE_ID,
@@ -77,26 +77,26 @@ describe('WhatsApp channel datasource reconciliation', () => {
     );
     expect(() =>
       assertDatabaseTargets({
-        environment: 'staging',
-        sourceDatabase: 'lyra_core_staging',
-        targetDatabase: 'lyra_core_staging',
+        environment: 'development',
+        sourceDatabase: 'lyra_core_dev',
+        targetDatabase: 'lyra_core_dev',
       }),
     ).toThrow('reconciliation_database_target_mismatch');
 
     expect(() =>
       assertDatabaseTargets({
-        environment: 'staging',
-        sourceDatabase: 'lyra_core_staging_reconcile_test_a',
-        targetDatabase: 'lyra_agency_staging_reconcile_test_b',
+        environment: 'development',
+        sourceDatabase: 'lyra_core_dev_reconcile_test_a',
+        targetDatabase: 'lyra_agency_dev_reconcile_test_b',
         allowCloneDatabases: true,
       }),
     ).toThrow('reconciliation_database_target_mismatch');
 
     expect(() =>
       assertDatabaseTargets({
-        environment: 'staging',
-        sourceDatabase: 'lyra_core_staging_reconcile_test_a',
-        targetDatabase: 'lyra_agency_staging_reconcile_test_a',
+        environment: 'development',
+        sourceDatabase: 'lyra_core_dev_reconcile_test_a',
+        targetDatabase: 'lyra_agency_dev_reconcile_test_a',
         allowCloneDatabases: true,
       }),
     ).not.toThrow();

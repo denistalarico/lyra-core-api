@@ -5,7 +5,7 @@ import { InboxChannelEntity } from '../modules/inbox/entities/inbox-channel.enti
 export type ReconciliationMode = 'dry-run' | 'apply';
 
 export type ReconciliationOptions = {
-  environment: 'staging' | 'production';
+  environment: 'development' | 'production';
   mode: ReconciliationMode;
   tenantId: string;
   workspaceId: string;
@@ -46,8 +46,8 @@ export function parseReconciliationOptions(
   env: NodeJS.ProcessEnv,
 ): ReconciliationOptions {
   const environment = env.RECONCILE_ENVIRONMENT?.trim();
-  if (environment !== 'staging' && environment !== 'production') {
-    throw new Error('reconcile_environment_must_be_staging_or_production');
+  if (environment !== 'development' && environment !== 'production') {
+    throw new Error('reconcile_environment_must_be_development_or_production');
   }
 
   const mode = env.RECONCILE_MODE?.trim() || 'dry-run';
@@ -295,10 +295,10 @@ export function assertDatabaseTargets(input: {
   allowCloneDatabases?: boolean;
 }): void {
   const expected =
-    input.environment === 'staging'
+    input.environment === 'development'
       ? {
-          source: 'lyra_core_staging',
-          target: 'lyra_agency_staging',
+          source: 'lyra_core_dev',
+          target: 'lyra_agency_dev',
         }
       : { source: 'lyra_core', target: 'lyra_agency' };
 

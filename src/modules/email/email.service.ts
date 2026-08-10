@@ -42,7 +42,10 @@ export type EmailTransportOverride = {
 @Injectable()
 export class EmailService {
   private readonly defaultTransporter: nodemailer.Transporter;
-  private readonly overrideTransporterCache = new Map<string, nodemailer.Transporter>();
+  private readonly overrideTransporterCache = new Map<
+    string,
+    nodemailer.Transporter
+  >();
 
   constructor(private configService: ConfigService) {
     this.defaultTransporter = nodemailer.createTransport({
@@ -99,6 +102,10 @@ export class EmailService {
       contentType?: string;
     }>;
   }): Promise<void> {
+    if (this.configService.get('EMAIL_DELIVERY_MODE') === 'disabled') {
+      return;
+    }
+
     const transporter = this.getTransporter(options.override);
     const fromName =
       options.override?.fromName || this.configService.get('SMTP_FROM_NAME');

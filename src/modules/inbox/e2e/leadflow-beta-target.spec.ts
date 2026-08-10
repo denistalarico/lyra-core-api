@@ -5,22 +5,22 @@ import {
 } from './leadflow-beta-target';
 
 const baseEnv = {
-  LEADFLOW_BETA_AGENCY_URL: 'https://staging-agency.lyrasuite.com',
-  LEADFLOW_BETA_API_URL: 'https://staging-api.lyrasuite.com/api',
+  LEADFLOW_BETA_AGENCY_URL: 'http://127.0.0.1:3203',
+  LEADFLOW_BETA_API_URL: 'http://127.0.0.1:3200/api',
   LEADFLOW_BETA_EMAIL: 'beta@example.test',
   LEADFLOW_BETA_PASSWORD: 'secret',
 };
 
 describe('LeadFlow beta E2E target guard', () => {
-  it('accepts an explicit staging target and normalizes URLs', () => {
+  it('accepts an explicit development target and normalizes URLs', () => {
     const target = resolveLeadFlowBetaTarget(baseEnv);
     expect(target).toMatchObject({
-      agencyUrl: 'https://staging-agency.lyrasuite.com',
-      apiUrl: 'https://staging-api.lyrasuite.com/api',
+      agencyUrl: 'http://127.0.0.1:3203',
+      apiUrl: 'http://127.0.0.1:3200/api',
     });
     expect(leadFlowBetaRoutes(target)).toHaveLength(7);
     expect(socketIoUrl(target.apiUrl)).toBe(
-      'https://staging-api.lyrasuite.com/socket.io/?EIO=4&transport=polling',
+      'http://127.0.0.1:3200/socket.io/?EIO=4&transport=polling',
     );
   });
 
@@ -44,7 +44,7 @@ describe('LeadFlow beta E2E target guard', () => {
     expect(() =>
       resolveLeadFlowBetaTarget({
         ...baseEnv,
-        LEADFLOW_BETA_AGENCY_URL: 'http://staging-agency.lyrasuite.com',
+        LEADFLOW_BETA_AGENCY_URL: 'http://dev-agency.example.test',
       }),
     ).toThrow('leadflow_beta_agency_url_must_use_https');
   });
