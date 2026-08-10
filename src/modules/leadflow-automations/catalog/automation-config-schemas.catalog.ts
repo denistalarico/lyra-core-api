@@ -266,8 +266,8 @@ const FIELD_SPECS: Record<string, LeadFlowAutomationFieldSpec> = {
   'actions.targetUserRef': {
     key: 'targetUserRef',
     type: 'string',
-    label: 'Quem será avisado',
-    surface: 'essential',
+    label: 'Destinatário fixo (ID de usuário)',
+    surface: 'developer',
     nullable: true,
     maxLength: 64,
   },
@@ -289,11 +289,14 @@ const FIELD_SPECS: Record<string, LeadFlowAutomationFieldSpec> = {
     label: 'Avisar participantes do pipeline',
     surface: 'advanced',
   },
+  // Internal user identifiers. As free text they can only be filled correctly by
+  // someone who can read the database, so they stay on the developer surface
+  // until there is a real people picker to choose from.
   'actions.specificRecipientUserRefs': {
     key: 'specificRecipientUserRefs',
     type: 'string[]',
-    label: 'Usuários específicos',
-    surface: 'essential',
+    label: 'Usuários específicos (IDs)',
+    surface: 'developer',
     maxItems: 20,
     maxLength: 64,
   },
@@ -307,9 +310,11 @@ const FIELD_SPECS: Record<string, LeadFlowAutomationFieldSpec> = {
     maxLength: 32,
     values: ['in_app', 'push', 'platform_whatsapp', 'email'],
   },
+  // Declared as `enum`, not `string`: the validator already refused anything
+  // outside `values`, so a free-text box could only ever be filled wrong.
   'actions.distributionStrategy': {
     key: 'distributionStrategy',
-    type: 'string',
+    type: 'enum',
     label: 'Regra de distribuição',
     surface: 'essential',
     required: true,
@@ -333,28 +338,42 @@ const FIELD_SPECS: Record<string, LeadFlowAutomationFieldSpec> = {
   },
 
   // ---------------------------------------------------------------- message
+  // The set of channels a message can leave through is closed and known — the
+  // same list the follow-up step policy validates against. Typing one is not a
+  // decision the operator can get right by hand.
   'message.channel': {
     key: 'channel',
-    type: 'string',
+    type: 'enum',
     label: 'Canal de envio',
     surface: 'essential',
     nullable: true,
     maxLength: 64,
     inheritable: true,
+    values: [
+      'whatsapp',
+      'email',
+      'sms',
+      'facebook_messenger',
+      'instagram_direct',
+      'webchat',
+    ],
   },
+  // Provider template plumbing: the follow-up panel already carries the approved
+  // WhatsApp template per channel, and these two only matter to whoever wires a
+  // provider account.
   'message.templateRef': {
     key: 'templateRef',
     type: 'string',
-    label: 'Modelo de mensagem',
-    surface: 'advanced',
+    label: 'Modelo de mensagem (provider)',
+    surface: 'developer',
     nullable: true,
     maxLength: 64,
   },
   'message.templateLanguage': {
     key: 'templateLanguage',
     type: 'string',
-    label: 'Idioma do modelo',
-    surface: 'advanced',
+    label: 'Idioma do modelo (provider)',
+    surface: 'developer',
     nullable: true,
     maxLength: 35,
   },
@@ -383,10 +402,18 @@ const FIELD_SPECS: Record<string, LeadFlowAutomationFieldSpec> = {
   },
 
   // -------------------------------------------------------------- crmPolicy
+  //
+  // Every recipe inherits the whole CRM policy block from the base defaults,
+  // including keys for transferring and copying an opportunity — actions no
+  // recipe in the catalog performs and no executor implements. Rather than
+  // remove the keys (which would make every stored configuration fail the
+  // fail-closed validator on its next save), they are demoted to the developer
+  // surface: the contract is unchanged, the operator stops being asked about
+  // effects that cannot happen.
   'crmPolicy.moveStageOnComplete': {
     key: 'moveStageOnComplete',
     type: 'string',
-    label: 'Etapa ao concluir',
+    label: 'Mover para a etapa ao concluir',
     surface: 'advanced',
     nullable: true,
     maxLength: 64,
@@ -395,7 +422,7 @@ const FIELD_SPECS: Record<string, LeadFlowAutomationFieldSpec> = {
     key: 'moveStageReasonCode',
     type: 'string',
     label: 'Motivo governado da mudança de etapa',
-    surface: 'advanced',
+    surface: 'developer',
     nullable: true,
     maxLength: 120,
   },
@@ -403,7 +430,7 @@ const FIELD_SPECS: Record<string, LeadFlowAutomationFieldSpec> = {
     key: 'transferToPipelineRef',
     type: 'string',
     label: 'Pipeline de destino da transferência',
-    surface: 'advanced',
+    surface: 'developer',
     nullable: true,
     maxLength: 64,
   },
@@ -411,7 +438,7 @@ const FIELD_SPECS: Record<string, LeadFlowAutomationFieldSpec> = {
     key: 'transferToStageRef',
     type: 'string',
     label: 'Etapa de destino da transferência',
-    surface: 'advanced',
+    surface: 'developer',
     nullable: true,
     maxLength: 64,
   },
@@ -419,7 +446,7 @@ const FIELD_SPECS: Record<string, LeadFlowAutomationFieldSpec> = {
     key: 'transferReasonCode',
     type: 'string',
     label: 'Motivo governado da transferência',
-    surface: 'advanced',
+    surface: 'developer',
     nullable: true,
     maxLength: 120,
   },
@@ -427,7 +454,7 @@ const FIELD_SPECS: Record<string, LeadFlowAutomationFieldSpec> = {
     key: 'copyToPipelineRef',
     type: 'string',
     label: 'Pipeline da nova negociação relacionada',
-    surface: 'advanced',
+    surface: 'developer',
     nullable: true,
     maxLength: 64,
   },
@@ -435,7 +462,7 @@ const FIELD_SPECS: Record<string, LeadFlowAutomationFieldSpec> = {
     key: 'copyToStageRef',
     type: 'string',
     label: 'Etapa da nova negociação relacionada',
-    surface: 'advanced',
+    surface: 'developer',
     nullable: true,
     maxLength: 64,
   },
@@ -443,7 +470,7 @@ const FIELD_SPECS: Record<string, LeadFlowAutomationFieldSpec> = {
     key: 'copyReasonCode',
     type: 'string',
     label: 'Motivo governado da cópia',
-    surface: 'advanced',
+    surface: 'developer',
     nullable: true,
     maxLength: 120,
   },
@@ -476,11 +503,15 @@ const FIELD_SPECS: Record<string, LeadFlowAutomationFieldSpec> = {
     surface: 'advanced',
     inheritable: true,
   },
+  // The time zone is a property of the business, decided once in the global
+  // automation settings. Asking it again per automation invites two answers to
+  // the same question; the per-instance override survives as a technical escape
+  // hatch on the developer surface.
   'schedulePolicy.timezone': {
     key: 'timezone',
     type: 'string',
-    label: 'Fuso horário',
-    surface: 'essential',
+    label: 'Fuso horário (sobrescreve o global)',
+    surface: 'developer',
     nullable: true,
     maxLength: 64,
     inheritable: true,

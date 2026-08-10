@@ -77,6 +77,47 @@ describe('automation config schemas catalog', () => {
     );
   });
 
+  it('never asks the operator to type a value only the system can produce', () => {
+    // A closed set of values reached the UI as a text box, which the validator
+    // then refused: the field could only ever be filled wrong. Declaring the
+    // type as `enum` is what makes the form render a list.
+    for (const [section, key] of [
+      ['message', 'channel'],
+      ['actions', 'distributionStrategy'],
+      ['conditions', 'ruleOperator'],
+    ] as const) {
+      const spec = getFieldSpec(section, key);
+      expect(spec?.type).toBe('enum');
+      expect(spec?.values?.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('keeps effects no recipe performs off the operator surfaces', () => {
+    // Every recipe inherits the whole CRM policy block from the base defaults,
+    // including transfer and copy — actions no recipe declares and no executor
+    // implements. They stay in the contract, out of the operator's way.
+    for (const key of [
+      'transferToPipelineRef',
+      'transferToStageRef',
+      'transferReasonCode',
+      'copyToPipelineRef',
+      'copyToStageRef',
+      'copyReasonCode',
+      'moveStageReasonCode',
+    ]) {
+      expect(getFieldSpec('crmPolicy', key)?.surface).toBe('developer');
+    }
+  });
+
+  it('asks the time zone once, in the global settings', () => {
+    expect(getFieldSpec('schedulePolicy', 'timezone')?.surface).toBe(
+      'developer',
+    );
+    // Still inheritable: an instance that overrode it keeps resolving the same
+    // way, the question just left the per-automation form.
+    expect(isInheritableConfigField('schedulePolicy', 'timezone')).toBe(true);
+  });
+
   it('gives every field a business-facing label', () => {
     for (const recipe of LEADFLOW_AUTOMATION_RECIPES) {
       const schema = buildConfigSchema(recipe);
