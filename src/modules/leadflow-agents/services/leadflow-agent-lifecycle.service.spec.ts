@@ -60,7 +60,9 @@ function buildService(agent: ReturnType<typeof buildAgent>) {
 
   const agentsRepository = {
     findOne: jest.fn().mockImplementation(async () => agent),
-    save: jest.fn().mockImplementation(async (value) => Object.assign(agent, value)),
+    save: jest
+      .fn()
+      .mockImplementation(async (value) => Object.assign(agent, value)),
   };
   const bindingsRepository = {
     find: jest.fn().mockResolvedValue([]),
@@ -104,14 +106,23 @@ function buildService(agent: ReturnType<typeof buildAgent>) {
   };
 }
 
-const ctx = { tenantId: 'tenant-1', workspaceId: 'workspace-1', userId: 'user-1', role: 'admin' } as never;
+const ctx = {
+  tenantId: 'tenant-1',
+  workspaceId: 'workspace-1',
+  userId: 'user-1',
+  role: 'admin',
+} as never;
 
 describe('LeadFlowAgentService lifecycle (archive / unarchive / soft delete)', () => {
   describe('archive', () => {
     it('sets status and archivedAt, reconciles bindings, and records offline status', async () => {
       const agent = buildAgent({ status: LeadFlowAgentStatus.Active });
-      const { service, agentsRepository, bindingReconciler, operationsRoomState } =
-        buildService(agent);
+      const {
+        service,
+        agentsRepository,
+        bindingReconciler,
+        operationsRoomState,
+      } = buildService(agent);
 
       const result = await service.archive(ctx, agent.id);
 
@@ -122,7 +133,9 @@ describe('LeadFlowAgentService lifecycle (archive / unarchive / soft delete)', (
         trigger: 'agent_archived',
       });
       expect(operationsRoomState.recordTransition).toHaveBeenCalledWith(
-        expect.objectContaining({ nextStatus: RoomAgentOperationalStatus.Offline }),
+        expect.objectContaining({
+          nextStatus: RoomAgentOperationalStatus.Offline,
+        }),
       );
     });
 
@@ -130,7 +143,9 @@ describe('LeadFlowAgentService lifecycle (archive / unarchive / soft delete)', (
       const agent = buildAgent({ isProtected: true });
       const { service, agentsRepository } = buildService(agent);
 
-      await expect(service.archive(ctx, agent.id)).rejects.toThrow(BadRequestException);
+      await expect(service.archive(ctx, agent.id)).rejects.toThrow(
+        BadRequestException,
+      );
       expect(agentsRepository.save).not.toHaveBeenCalled();
     });
 
@@ -139,8 +154,12 @@ describe('LeadFlowAgentService lifecycle (archive / unarchive / soft delete)', (
         status: LeadFlowAgentStatus.Archived,
         archivedAt: new Date('2026-01-01T00:00:00.000Z'),
       });
-      const { service, agentsRepository, bindingReconciler, operationsRoomState } =
-        buildService(agent);
+      const {
+        service,
+        agentsRepository,
+        bindingReconciler,
+        operationsRoomState,
+      } = buildService(agent);
 
       await service.archive(ctx, agent.id);
 
@@ -168,26 +187,60 @@ describe('LeadFlowAgentService lifecycle (archive / unarchive / soft delete)', (
       const agent = buildAgent({ status: LeadFlowAgentStatus.Draft });
       const { service } = buildService(agent);
 
-      await expect(service.unarchive(ctx, agent.id)).rejects.toThrow(BadRequestException);
+      await expect(service.unarchive(ctx, agent.id)).rejects.toThrow(
+        BadRequestException,
+      );
     });
   });
 
   describe('softDelete', () => {
-    it('requires the agent to already be archived', async () => {
+    it('archives and soft-deletes an operational agent in one safe action', async () => {
       const agent = buildAgent({ status: LeadFlowAgentStatus.Draft });
+      const {
+        service,
+        agentsRepository,
+        bindingReconciler,
+        operationsRoomState,
+      } = buildService(agent);
+
+      const result = await service.softDelete(ctx, agent.id);
+
+      expect(result.status).toBe(LeadFlowAgentStatus.Archived);
+      expect(agent.archivedAt).toBeInstanceOf(Date);
+      expect(agent.deletedAt).toBeInstanceOf(Date);
+      expect(agentsRepository.save).toHaveBeenCalled();
+      expect(bindingReconciler.reconcile).toHaveBeenCalledWith(ctx, {
+        trigger: 'agent_archived',
+      });
+      expect(operationsRoomState.recordTransition).toHaveBeenCalledWith(
+        expect.objectContaining({
+          nextStatus: RoomAgentOperationalStatus.Offline,
+        }),
+      );
+    });
+
+    it('rejects deletion of a protected agent', async () => {
+      const agent = buildAgent({ isProtected: true });
       const { service, agentsRepository } = buildService(agent);
 
-      await expect(service.softDelete(ctx, agent.id)).rejects.toThrow(BadRequestException);
+      await expect(service.softDelete(ctx, agent.id)).rejects.toThrow(
+        BadRequestException,
+      );
       expect(agentsRepository.save).not.toHaveBeenCalled();
     });
 
     it('rejects deletion when the agent has a live assigned conversation', async () => {
-      const agent = buildAgent({ status: LeadFlowAgentStatus.Archived });
-      const { service, agentsRepository, conversationsRepository } = buildService(agent);
+      const agent = buildAgent({ status: LeadFlowAgentStatus.Active });
+      const { service, agentsRepository, conversationsRepository } =
+        buildService(agent);
       conversationsRepository.count.mockResolvedValue(2);
 
-      await expect(service.softDelete(ctx, agent.id)).rejects.toThrow(ConflictException);
+      await expect(service.softDelete(ctx, agent.id)).rejects.toThrow(
+        ConflictException,
+      );
       expect(agentsRepository.save).not.toHaveBeenCalled();
+      expect(agent.status).toBe(LeadFlowAgentStatus.Active);
+      expect(agent.deletedAt).toBeNull();
     });
 
     it('soft-deletes when there is no live conversation, setting deletedAt/deletedById', async () => {
@@ -200,7 +253,9 @@ describe('LeadFlowAgentService lifecycle (archive / unarchive / soft delete)', (
       expect(agent.deletedById).toBe('user-1');
       expect(result.status).toBe(LeadFlowAgentStatus.Archived);
       const lastFindOneCall =
-        agentsRepository.findOne.mock.calls[agentsRepository.findOne.mock.calls.length - 1];
+        agentsRepository.findOne.mock.calls[
+          agentsRepository.findOne.mock.calls.length - 1
+        ];
       expect(lastFindOneCall[0]).toMatchObject({ withDeleted: true });
     });
   });
@@ -212,9 +267,12 @@ describe('LeadFlowAgentService lifecycle (archive / unarchive / soft delete)', (
         const agent = buildAgent({ status: LeadFlowAgentStatus.Archived });
         const { service } = buildService(agent);
 
-        await expect((service[method] as (ctx: unknown, id: string) => Promise<unknown>)(ctx, agent.id)).rejects.toThrow(
-          BadRequestException,
-        );
+        await expect(
+          (service[method] as (ctx: unknown, id: string) => Promise<unknown>)(
+            ctx,
+            agent.id,
+          ),
+        ).rejects.toThrow(BadRequestException);
       },
     );
   });
@@ -225,7 +283,9 @@ describe('LeadFlowAgentService lifecycle (archive / unarchive / soft delete)', (
       const { service, agentsRepository } = buildService(agent);
       agentsRepository.findOne.mockResolvedValueOnce(null);
 
-      await expect(service.archive(ctx, agent.id)).rejects.toThrow(NotFoundException);
+      await expect(service.archive(ctx, agent.id)).rejects.toThrow(
+        NotFoundException,
+      );
     });
   });
 });

@@ -121,8 +121,13 @@ run('LeadFlow agent archive/soft-delete lifecycle PostgreSQL', () => {
   it('archiving releases the agent as a channel default and preserves version/binding history', async () => {
     const agentId = await insertAgent();
     const channelId = await insertChannel();
-    const reconciler = new LeadFlowAgentBindingReconcilerService(AgencyDataSource);
-    await reconciler.reconcile(ctx, { channelId, trigger: 'channel_connected' });
+    const reconciler = new LeadFlowAgentBindingReconcilerService(
+      AgencyDataSource,
+    );
+    await reconciler.reconcile(ctx, {
+      channelId,
+      trigger: 'channel_connected',
+    });
 
     const [beforeChannel] = await AgencyDataSource.query<
       Array<{ default_agent_id: string }>
@@ -139,9 +144,10 @@ run('LeadFlow agent archive/soft-delete lifecycle PostgreSQL', () => {
 
     const [{ count: versionCount }] = await AgencyDataSource.query<
       Array<{ count: string }>
-    >('SELECT count(*)::text count FROM leadflow_agent_versions WHERE agent_id=$1', [
-      agentId,
-    ]);
+    >(
+      'SELECT count(*)::text count FROM leadflow_agent_versions WHERE agent_id=$1',
+      [agentId],
+    );
     const [{ count: bindingCount }] = await AgencyDataSource.query<
       Array<{ count: string }>
     >(
@@ -162,15 +168,10 @@ run('LeadFlow agent archive/soft-delete lifecycle PostgreSQL', () => {
 
     const unarchived = await service.unarchive(ctx, agentId);
     expect(unarchived.status).toBe(LeadFlowAgentStatus.Draft);
-
-    await expect(service.softDelete(ctx, agentId)).rejects.toThrow(
-      BadRequestException,
-    );
   });
 
   it('rejects deletion while a live conversation is assigned, then succeeds once resolved, keeping history intact', async () => {
     const agentId = await insertAgent();
-    await service.archive(ctx, agentId);
 
     const conversation = await AgencyDataSource.getRepository(
       InboxConversationEntity,
@@ -206,9 +207,10 @@ run('LeadFlow agent archive/soft-delete lifecycle PostgreSQL', () => {
 
     const [{ count: versionCount }] = await AgencyDataSource.query<
       Array<{ count: string }>
-    >('SELECT count(*)::text count FROM leadflow_agent_versions WHERE agent_id=$1', [
-      agentId,
-    ]);
+    >(
+      'SELECT count(*)::text count FROM leadflow_agent_versions WHERE agent_id=$1',
+      [agentId],
+    );
     expect(versionCount).toBe('1');
   });
 

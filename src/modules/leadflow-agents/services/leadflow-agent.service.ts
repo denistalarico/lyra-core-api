@@ -361,8 +361,10 @@ export class LeadFlowAgentService {
     const active = await this.resolveActiveContext(ctx);
     const agent = await this.findScopedAgent(ctx, active, id);
 
-    if (agent.status !== LeadFlowAgentStatus.Archived) {
-      throw new BadRequestException('Arquive o agente antes de excluí-lo.');
+    if (agent.isProtected) {
+      throw new BadRequestException(
+        'Este agente é protegido pela plataforma e não pode ser excluído.',
+      );
     }
 
     const activeConversations = await this.conversationsRepository.count({
@@ -380,9 +382,27 @@ export class LeadFlowAgentService {
       );
     }
 
-    agent.deletedAt = new Date();
+    const archivedByDeletion = agent.status !== LeadFlowAgentStatus.Archived;
+    const deletedAt = new Date();
+    if (archivedByDeletion) {
+      agent.status = LeadFlowAgentStatus.Archived;
+      agent.archivedAt = deletedAt;
+      agent.updatedById = ctx.userId ?? null;
+    }
+    agent.deletedAt = deletedAt;
     agent.deletedById = ctx.userId ?? null;
     await this.agentsRepository.save(agent);
+
+    if (archivedByDeletion) {
+      await this.bindingReconciler.reconcile(ctx, {
+        trigger: 'agent_archived',
+      });
+      await this.recordOperationalStatus(
+        agent,
+        RoomAgentOperationalStatus.Offline,
+        'agent_archived',
+      );
+    }
 
     return this.detail(ctx, agent.id, { withDeleted: true });
   }
