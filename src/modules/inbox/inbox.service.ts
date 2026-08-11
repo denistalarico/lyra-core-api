@@ -1384,6 +1384,66 @@ export class InboxService {
     return message;
   }
 
+  /**
+   * Registers (or retires) the Inbox channel that represents a Webchat widget.
+   *
+   * Called when a widget is published or paused, so the Inbox knows about the
+   * channel before the first visitor arrives — otherwise a freshly published
+   * widget looks unintegrated until someone happens to start a conversation.
+   */
+  async syncWebchatChannel(input: {
+    tenantId: string;
+    workspaceId: string;
+    widgetId: string;
+    widgetName?: string;
+    active: boolean;
+  }) {
+    const channel = await this.ensureWebchatChannel(input);
+
+    const nextStatus: InboxChannelEntity['status'] = input.active
+      ? 'active'
+      : 'inactive';
+    const nextConnection: InboxChannelEntity['connectionStatus'] = input.active
+      ? 'connected'
+      : 'suspended';
+
+    if (
+      channel.status === nextStatus &&
+      channel.connectionStatus === nextConnection &&
+      (!input.widgetName || channel.name === input.widgetName)
+    ) {
+      return channel;
+    }
+
+    channel.status = nextStatus;
+    channel.connectionStatus = nextConnection;
+    if (input.widgetName) channel.name = input.widgetName;
+
+    return this.channelsRepository.save(channel);
+  }
+
+  /**
+   * Removes the Inbox channel of a deleted widget. Conversations already synced
+   * keep their `channelId`, so history survives the disconnection.
+   */
+  async retireWebchatChannel(input: {
+    tenantId: string;
+    workspaceId: string;
+    widgetId: string;
+  }) {
+    await this.channelsRepository.update(
+      {
+        tenantId: input.tenantId,
+        workspaceId: input.workspaceId,
+        type: 'webchat',
+        provider: 'lyra_webchat',
+        externalId: input.widgetId,
+        deletedAt: IsNull(),
+      },
+      { status: 'archived', connectionStatus: 'disconnected' },
+    );
+  }
+
   private async ensureWebchatChannel(input: {
     tenantId: string;
     workspaceId: string;

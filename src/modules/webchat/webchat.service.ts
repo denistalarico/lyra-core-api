@@ -146,19 +146,33 @@ export class WebchatService {
     if (dto.metadata !== undefined)
       widget.metadata = this.stampContext(ctx, dto.metadata);
 
-    return this.widgetsRepository.save(widget);
+    const saved = await this.widgetsRepository.save(widget);
+
+    if (dto.status !== undefined || dto.name !== undefined) {
+      await this.syncInboxChannel(saved);
+    }
+
+    return saved;
   }
 
   async activateWidget(ctx: RequestContext, widgetId: string) {
     const widget = await this.findWidgetOrFail(ctx, widgetId);
     widget.status = 'active';
-    return this.widgetsRepository.save(widget);
+    const saved = await this.widgetsRepository.save(widget);
+
+    await this.syncInboxChannel(saved);
+
+    return saved;
   }
 
   async deactivateWidget(ctx: RequestContext, widgetId: string) {
     const widget = await this.findWidgetOrFail(ctx, widgetId);
     widget.status = 'inactive';
-    return this.widgetsRepository.save(widget);
+    const saved = await this.widgetsRepository.save(widget);
+
+    await this.syncInboxChannel(saved);
+
+    return saved;
   }
 
   async deleteWidget(ctx: RequestContext, widgetId: string) {
@@ -170,7 +184,28 @@ export class WebchatService {
       workspaceId: widget.workspaceId,
     });
 
+    await this.inboxService.retireWebchatChannel({
+      tenantId: widget.tenantId,
+      workspaceId: widget.workspaceId,
+      widgetId: widget.id,
+    });
+
     return { deleted: true };
+  }
+
+  /**
+   * Mirrors the widget's publication state onto its Inbox channel. Without this
+   * the channel only appeared once a visitor wrote in, so a published Webchat
+   * showed up in the Inbox as "not integrated yet".
+   */
+  private async syncInboxChannel(widget: WebchatWidgetEntity) {
+    await this.inboxService.syncWebchatChannel({
+      tenantId: widget.tenantId,
+      workspaceId: widget.workspaceId,
+      widgetId: widget.id,
+      widgetName: widget.name,
+      active: widget.status === 'active',
+    });
   }
 
   async uploadWidgetAvatar(
@@ -778,6 +813,12 @@ export class WebchatService {
       position: widget.position,
       defaultLocale: widget.defaultLocale,
       aiEnabled: widget.aiEnabled,
+      /**
+       * Whether an agent answers this widget. The id itself stays private — the
+       * public runtime only needs the fact, to decide whether the lead form
+       * should step in when nobody is configured to reply.
+       */
+      hasAgent: Boolean(widget.defaultAgentId),
       agentDisplayName: widget.agentDisplayName,
       agentAvatarUrl: widget.agentAvatarUrl,
       brandFooterEnabled: widget.brandFooterEnabled,
