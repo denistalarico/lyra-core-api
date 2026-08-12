@@ -588,6 +588,29 @@ describe('CrmService stage roles (D4)', () => {
     expect(getCount).not.toHaveBeenCalled();
   });
 
+  // Uma etapa de handoff é o ponto único em que uma pessoa assume a conversa;
+  // duas delas no mesmo pipeline não têm resposta para "assumir onde?".
+  it('rejects a second handoff stage in the same pipeline', async () => {
+    const { service, pipelinesRepository, stagesRepository, updateQueryBuilder } =
+      createService();
+    pipelinesRepository.findOne.mockResolvedValue(mockPipeline());
+    stagesRepository.count.mockResolvedValue(2);
+    (updateQueryBuilder as { getCount?: jest.Mock }).getCount = jest
+      .fn()
+      .mockResolvedValue(1);
+
+    await expect(
+      service.createStage(ctx, {
+        pipelineId: 'pipeline-a',
+        name: 'Atender 2',
+        type: 'open',
+        role: 'handoff',
+      }),
+    ).rejects.toMatchObject({
+      response: { reasonCode: 'stage_role_not_unique' },
+    });
+  });
+
   it('rejects patching a stage to a duplicate unique role', async () => {
     const { service, pipelinesRepository, stagesRepository, updateQueryBuilder } =
       createService();

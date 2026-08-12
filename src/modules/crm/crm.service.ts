@@ -1383,9 +1383,9 @@ export class CrmService {
   }
 
   /**
-   * D4: enforce that `entry`/`won`/`lost` appear at most once per pipeline.
-   * Other roles (qualification/follow_up/contacted/handoff/custom) may repeat.
-   * Independent of the legacy `is_*_stage` flags.
+   * D4: enforce that `entry`/`won`/`lost`/`handoff` appear at most once per
+   * pipeline. Other roles (qualification/follow_up/contacted/custom) may
+   * repeat. Independent of the legacy `is_*_stage` flags.
    */
   private async assertUniqueStageRole(
     manager: EntityManager,
@@ -1412,7 +1412,7 @@ export class CrmService {
       throw new BadRequestException({
         code: 'CRM_STAGE_ROLE_NOT_UNIQUE',
         reasonCode: 'stage_role_not_unique',
-        message: `Já existe um estágio com o papel "${role}" neste pipeline. Entrada, ganho e perda permitem apenas um estágio cada.`,
+        message: `Já existe um estágio com o papel "${role}" neste pipeline. Entrada, ganho, perda e handoff permitem apenas um estágio cada.`,
       });
     }
   }

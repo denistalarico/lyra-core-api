@@ -10,8 +10,8 @@ import {
 /**
  * D4: the structural role a stage plays in the pipeline. Independent from the
  * legacy `type`/`is_*_stage` flags (which Agency Sales still uses). Multiple
- * `qualification`/`follow_up`/`contacted`/`handoff`/`custom` stages are allowed;
- * `entry`/`won`/`lost` are unique per pipeline.
+ * `qualification`/`follow_up`/`contacted`/`custom` stages are allowed;
+ * `entry`/`won`/`lost`/`handoff` are unique per pipeline.
  */
 export type CrmStageRole =
   | 'entry'
@@ -34,11 +34,17 @@ export const CRM_STAGE_ROLES: readonly CrmStageRole[] = [
   'custom',
 ];
 
-/** Roles that may appear at most once per pipeline. */
+/**
+ * Roles that may appear at most once per pipeline. `handoff` joined them when
+ * the settings screen started offering it as a marking: a pipeline with two
+ * "atender" stages has no single place for a person to take the conversation
+ * over. Clearing a duplicate is always possible — `custom` is not governed.
+ */
 export const CRM_UNIQUE_STAGE_ROLES: ReadonlySet<CrmStageRole> = new Set([
   'entry',
   'won',
   'lost',
+  'handoff',
 ]);
 
 @Entity('crm_stages')
