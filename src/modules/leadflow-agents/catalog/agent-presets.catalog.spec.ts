@@ -1,10 +1,13 @@
 import { LeadFlowBusinessMode } from '../../leadflow-settings/enums/leadflow-business-mode.enum';
 import {
+  getHandoffDefaultsByType,
+  getHandoffPolicyDefaultsForType,
   getPresetByKey,
   getPresetsForBusinessMode,
   isCustomBusinessMode,
   LEADFLOW_AGENT_PRESETS,
 } from './agent-presets.catalog';
+import { LeadFlowAgentType } from '../enums/leadflow-agent-type.enum';
 
 describe('agent-presets.catalog', () => {
   it('exposes at least one preset for every official Business Mode', () => {
@@ -46,7 +49,29 @@ describe('agent-presets.catalog', () => {
     expect(getPresetByKey(preset.key)).toEqual(preset);
     expect(getPresetByKey('does.not.exist')).toBeUndefined();
 
-    expect(isCustomBusinessMode(LeadFlowBusinessMode.AgencyServices)).toBe(false);
+    expect(isCustomBusinessMode(LeadFlowBusinessMode.AgencyServices)).toBe(
+      false,
+    );
     expect(isCustomBusinessMode('my_custom_mode')).toBe(true);
+  });
+
+  it('keeps handoff triggers, destination and SLA as backend defaults by type', () => {
+    expect(getHandoffPolicyDefaultsForType(LeadFlowAgentType.Sales)).toEqual({
+      triggers: [
+        'payment_or_contract_question',
+        'negotiation_authority_needed',
+        'lead_asks_for_human',
+      ],
+      target: 'assigned_owner',
+      slaMinutes: 10,
+    });
+
+    const defaults = getHandoffDefaultsByType();
+    for (const type of Object.values(LeadFlowAgentType)) {
+      expect(defaults[type]).toEqual({
+        target: 'assigned_owner',
+        slaMinutes: expect.any(Number),
+      });
+    }
   });
 });

@@ -76,9 +76,7 @@ function buildService(agent: ReturnType<typeof buildAgent>) {
       const found = versions.find((version) => version.id === where.id);
       // O Postgres devolve jsonb sem preservar a ordem das chaves: embaralhar
       // aqui garante que a comparação não dependa dela.
-      return found
-        ? { ...found, snapshot: shuffleKeys(found.snapshot) }
-        : null;
+      return found ? { ...found, snapshot: shuffleKeys(found.snapshot) } : null;
     }),
   };
   const bindingsRepository = { find: jest.fn().mockResolvedValue([]) };
@@ -223,13 +221,39 @@ describe('LeadFlowAgentService agent type change', () => {
     expect(agent.avatarConfig).toEqual({ preset: 'avatar-03' });
   });
 
-  it('refuses to change the type of a platform-protected agent', async () => {
-    const { service, agent } = buildService(buildAgent({ isProtected: true }));
+  it('converts a platform-protected preset into an editable custom agent', async () => {
+    const { service, agent } = buildService(
+      buildAgent({
+        presetKey: 'agency_services.reception',
+        isSystem: true,
+        isCustom: false,
+        isProtected: true,
+        handoffPolicy: {
+          target: 'assigned_owner',
+          slaMinutes: 15,
+          triggers: ['lead_asks_for_human'],
+          targetUserIds: ['33333333-3333-4333-8333-333333333333'],
+        },
+      }),
+    );
 
-    await expect(
-      service.patch(ctx, agent.id, { type: LeadFlowAgentType.Sales }),
-    ).rejects.toBeInstanceOf(BadRequestException);
-    expect(agent.type).toBe(LeadFlowAgentType.Reception);
+    await service.patch(ctx, agent.id, { type: LeadFlowAgentType.Sales });
+
+    expect(agent.type).toBe(LeadFlowAgentType.Sales);
+    expect(agent.isProtected).toBe(false);
+    expect(agent.isSystem).toBe(false);
+    expect(agent.isCustom).toBe(true);
+    expect(agent.presetKey).toBeNull();
+    expect(agent.handoffPolicy).toMatchObject({
+      target: 'assigned_owner',
+      slaMinutes: 10,
+      triggers: [
+        'payment_or_contract_question',
+        'negotiation_authority_needed',
+        'lead_asks_for_human',
+      ],
+      targetUserIds: ['33333333-3333-4333-8333-333333333333'],
+    });
   });
 });
 

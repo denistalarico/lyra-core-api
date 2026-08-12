@@ -104,6 +104,11 @@ describe('LeadFlowAgentRuntimeConfigService', () => {
       'send_message',
       'request_handoff',
     ]);
+    expect(contract.handoffPolicy).toMatchObject({
+      target: 'assigned_owner',
+      slaMinutes: 15,
+      triggers: ['lead_asks_for_human', 'complaint_or_sensitive_topic'],
+    });
     expect(contract.safetyRules).toEqual(['never_diagnose']);
     expect(contract.publishedVersionId).toBe('version-9');
     expect(contract.leadflowSettingsSnapshot.settingsId).toBe('settings-1');
@@ -137,7 +142,11 @@ describe('LeadFlowAgentRuntimeConfigService', () => {
   });
 
   it('reports channels missing when no binding is present', () => {
-    const contract = service.buildAgentContract(buildAgent(), buildSettings(), []);
+    const contract = service.buildAgentContract(
+      buildAgent(),
+      buildSettings(),
+      [],
+    );
     expect(contract.readiness.level).toBe('partial');
     expect(contract.readiness.missing).toEqual(['channels']);
   });

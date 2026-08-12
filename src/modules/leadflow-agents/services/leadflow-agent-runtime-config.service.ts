@@ -1,6 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import type { LeadFlowClientSettingsEntity } from '../../leadflow-settings/entities';
-import { isCustomBusinessMode } from '../catalog/agent-presets.catalog';
+import {
+  isCustomBusinessMode,
+  resolveHandoffPolicyForType,
+} from '../catalog/agent-presets.catalog';
 import { resolveAgentRolePolicy } from '../catalog/agent-role-policy.catalog';
 import { computeAgentReadiness } from './agent-readiness';
 import { resolveServiceAudience } from '../enums/leadflow-service-audience.enum';
@@ -84,7 +87,10 @@ export class LeadFlowAgentRuntimeConfigService {
         config: binding.config ?? {},
       })),
       crmPolicy: agent.crmPolicy ?? {},
-      handoffPolicy: agent.handoffPolicy ?? {},
+      handoffPolicy: resolveHandoffPolicyForType(
+        agent.type,
+        agent.handoffPolicy,
+      ),
       allowedActions: this.readStringArray(metadata.allowedActions),
       role: {
         type: rolePolicy.type,

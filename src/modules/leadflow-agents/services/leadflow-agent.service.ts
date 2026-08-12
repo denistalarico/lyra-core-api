@@ -25,6 +25,8 @@ import type { LeadFlowAgentPresetCatalogItem } from '../catalog/agent-presets.ca
 import {
   getAllowedActionsForType,
   getHandoffDefaultsByType,
+  getHandoffPolicyDefaultsForType,
+  resolveHandoffPolicyForType,
 } from '../catalog/agent-presets.catalog';
 import {
   LeadFlowAgentDetailResponse,
@@ -255,7 +257,7 @@ export class LeadFlowAgentService {
         businessModePromptRef: `leadflow-business-mode-${active.businessModeKey}-v1`,
         clientPromptConfigRef: 'settings',
       };
-      agent.handoffPolicy = {};
+      agent.handoffPolicy = getHandoffPolicyDefaultsForType(agent.type);
       agent.crmPolicy = {};
       agent.channelPolicy = {
         allowedChannels: [],
@@ -331,10 +333,15 @@ export class LeadFlowAgentService {
     }
     if (dto.handoffPolicy !== undefined) {
       agent.handoffPolicy = {
+        ...agent.handoffPolicy,
         ...dto.handoffPolicy,
-        targetUserIds: this.validateHandoffTargetUserIds(
-          dto.handoffPolicy.targetUserIds,
-        ),
+        ...(dto.handoffPolicy.targetUserIds !== undefined
+          ? {
+              targetUserIds: this.validateHandoffTargetUserIds(
+                dto.handoffPolicy.targetUserIds,
+              ),
+            }
+          : {}),
       };
     }
     if (dto.crmPolicy !== undefined) agent.crmPolicy = dto.crmPolicy;
@@ -529,7 +536,10 @@ export class LeadFlowAgentService {
       bindings,
     );
 
-    if (!opts?.force && (await this.matchesPublishedSnapshot(agent, snapshot))) {
+    if (
+      !opts?.force &&
+      (await this.matchesPublishedSnapshot(agent, snapshot))
+    ) {
       return false;
     }
 
@@ -584,7 +594,9 @@ export class LeadFlowAgentService {
     });
     if (!published?.snapshot) return false;
 
-    return comparableSnapshot(published.snapshot) === comparableSnapshot(snapshot);
+    return (
+      comparableSnapshot(published.snapshot) === comparableSnapshot(snapshot)
+    );
   }
 
   async getAgentRuntimeConfig(
@@ -745,7 +757,13 @@ export class LeadFlowAgentService {
     const agent = await this.findScopedAgent(ctx, active, id, opts);
     const bindings = await this.loadBindings(agent.id);
 
-    return mapAgentDetail(agent, bindings);
+    return {
+      ...mapAgentDetail(agent, bindings),
+      handoffPolicy: resolveHandoffPolicyForType(
+        agent.type,
+        agent.handoffPolicy,
+      ),
+    };
   }
 
   private async findScopedAgent(
@@ -970,10 +988,10 @@ export class LeadFlowAgentService {
    * Troca o papel de um agente já provisionado.
    *
    * Mantém tudo que é escolha do operador (nome, descrição, avatar, tom,
-   * canais) e ajusta só o que o papel governa: as ações permitidas. Um agente
-   * que veio de um preset deixa de ser aquele preset — continuar apontando
-   * para ele diria que este é o modelo "Recepção" da Lyra quando ele passou a
-   * ser um agente de vendas.
+   * canais e responsáveis nominais) e ajusta só o que o papel governa: ações
+   * permitidas e defaults de handoff. Um agente que veio de um preset deixa de
+   * ser aquele preset — continuar apontando para ele diria que este é o modelo
+   * "Recepção" da Lyra quando ele passou a ser um agente de vendas.
    */
   private applyTypeChange(
     agent: LeadFlowAgentEntity,
@@ -981,26 +999,30 @@ export class LeadFlowAgentService {
   ): void {
     if (agent.type === type) return;
 
-    if (agent.isProtected) {
-      throw new BadRequestException(
-        'Este agente é protegido pela plataforma e não pode mudar de tipo.',
-      );
-    }
-
     agent.type = type;
+    agent.handoffPolicy = {
+      ...agent.handoffPolicy,
+      ...getHandoffPolicyDefaultsForType(type),
+    };
     agent.metadata = {
       ...agent.metadata,
       allowedActions: getAllowedActionsForType(type),
     };
 
-    if (agent.presetKey) {
+    if (agent.presetKey || agent.isProtected || agent.isSystem) {
+      const originPresetKey =
+        agent.presetKey ??
+        (typeof agent.metadata?.presetKey === 'string'
+          ? agent.metadata.presetKey
+          : null);
       agent.presetKey = null;
       agent.isSystem = false;
       agent.isCustom = true;
+      agent.isProtected = false;
       agent.metadata = {
         ...agent.metadata,
         source: 'custom',
-        derivedFromPresetKey: agent.metadata?.presetKey ?? null,
+        derivedFromPresetKey: originPresetKey,
         presetKey: null,
       };
     }

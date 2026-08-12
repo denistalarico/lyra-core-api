@@ -46,19 +46,20 @@ const BASE_SAFETY_RULES = [
   'respect_client_business_hours',
 ];
 
-const REGULATED_SAFETY_RULES: Partial<Record<LeadFlowBusinessMode, string[]>> = {
-  [LeadFlowBusinessMode.ClinicsEsthetics]: [
-    'never_diagnose',
-    'no_promises_of_clinical_results',
-  ],
-  [LeadFlowBusinessMode.LegalAccounting]: [
-    'no_legal_or_tax_advice',
-    'only_initial_triage',
-  ],
-  [LeadFlowBusinessMode.FitnessWellness]: [
-    'no_individual_training_or_diet_prescription',
-  ],
-};
+const REGULATED_SAFETY_RULES: Partial<Record<LeadFlowBusinessMode, string[]>> =
+  {
+    [LeadFlowBusinessMode.ClinicsEsthetics]: [
+      'never_diagnose',
+      'no_promises_of_clinical_results',
+    ],
+    [LeadFlowBusinessMode.LegalAccounting]: [
+      'no_legal_or_tax_advice',
+      'only_initial_triage',
+    ],
+    [LeadFlowBusinessMode.FitnessWellness]: [
+      'no_individual_training_or_diet_prescription',
+    ],
+  };
 
 interface ArchetypeSpec {
   type: LeadFlowAgentType;
@@ -90,7 +91,11 @@ const ARCHETYPES: Record<Archetype, ArchetypeSpec> = {
     },
     crm: { createLeads: true, updateStageOnQualified: false },
     allowedActions: ['send_message', 'capture_lead', 'request_handoff'],
-    avatar: { preset: 'avatar-reception', outfit: 'office-blue', icon: 'headset' },
+    avatar: {
+      preset: 'avatar-reception',
+      outfit: 'office-blue',
+      icon: 'headset',
+    },
   },
   qualifier: {
     type: LeadFlowAgentType.Qualifier,
@@ -116,7 +121,11 @@ const ARCHETYPES: Record<Archetype, ArchetypeSpec> = {
       'update_crm_stage',
       'request_handoff',
     ],
-    avatar: { preset: 'avatar-qualifier', outfit: 'smart-casual', icon: 'clipboard-check' },
+    avatar: {
+      preset: 'avatar-qualifier',
+      outfit: 'smart-casual',
+      icon: 'clipboard-check',
+    },
   },
   scheduler: {
     type: LeadFlowAgentType.Scheduler,
@@ -142,7 +151,11 @@ const ARCHETYPES: Record<Archetype, ArchetypeSpec> = {
       'update_crm_stage',
       'request_handoff',
     ],
-    avatar: { preset: 'avatar-scheduler', outfit: 'office-green', icon: 'calendar' },
+    avatar: {
+      preset: 'avatar-scheduler',
+      outfit: 'office-green',
+      icon: 'calendar',
+    },
   },
   sales: {
     type: LeadFlowAgentType.Sales,
@@ -192,7 +205,11 @@ const ARCHETYPES: Record<Archetype, ArchetypeSpec> = {
     },
     crm: { createLeads: false, updateStageOnQualified: false },
     allowedActions: ['send_message', 'request_handoff'],
-    avatar: { preset: 'avatar-support', outfit: 'office-neutral', icon: 'life-buoy' },
+    avatar: {
+      preset: 'avatar-support',
+      outfit: 'office-neutral',
+      icon: 'life-buoy',
+    },
   },
 };
 
@@ -214,7 +231,11 @@ const MODE_LABELS: Record<LeadFlowBusinessMode, string> = {
 const MODE_ARCHETYPES: Record<LeadFlowBusinessMode, Archetype[]> = {
   [LeadFlowBusinessMode.AgencyServices]: ['reception', 'qualifier', 'sales'],
   [LeadFlowBusinessMode.LocalServices]: ['reception', 'qualifier', 'scheduler'],
-  [LeadFlowBusinessMode.ClinicsEsthetics]: ['reception', 'qualifier', 'scheduler'],
+  [LeadFlowBusinessMode.ClinicsEsthetics]: [
+    'reception',
+    'qualifier',
+    'scheduler',
+  ],
   [LeadFlowBusinessMode.RestaurantsFood]: ['reception', 'scheduler', 'support'],
   [LeadFlowBusinessMode.RealEstate]: ['reception', 'qualifier', 'scheduler'],
   [LeadFlowBusinessMode.EducationCourses]: ['reception', 'qualifier', 'sales'],
@@ -222,8 +243,16 @@ const MODE_ARCHETYPES: Record<LeadFlowBusinessMode, Archetype[]> = {
   [LeadFlowBusinessMode.RetailStore]: ['reception', 'sales', 'support'],
   [LeadFlowBusinessMode.EcommerceLight]: ['reception', 'sales', 'support'],
   [LeadFlowBusinessMode.EventsTourism]: ['reception', 'qualifier', 'sales'],
-  [LeadFlowBusinessMode.LegalAccounting]: ['reception', 'qualifier', 'scheduler'],
-  [LeadFlowBusinessMode.FitnessWellness]: ['reception', 'qualifier', 'scheduler'],
+  [LeadFlowBusinessMode.LegalAccounting]: [
+    'reception',
+    'qualifier',
+    'scheduler',
+  ],
+  [LeadFlowBusinessMode.FitnessWellness]: [
+    'reception',
+    'qualifier',
+    'scheduler',
+  ],
 };
 
 function buildPreset(
@@ -258,7 +287,10 @@ function buildPreset(
     isDeveloperOnly: false,
     behaviorConfig: { ...spec.behavior },
     promptConfig,
-    handoffPolicy: { ...spec.handoff, triggers: [...(spec.handoff.triggers ?? [])] },
+    handoffPolicy: {
+      ...spec.handoff,
+      triggers: [...(spec.handoff.triggers ?? [])],
+    },
     crmPolicy: { ...spec.crm },
     channelPolicy: { allowedChannels: [], defaultChannel: null },
     avatarConfig: { ...spec.avatar },
@@ -312,13 +344,60 @@ export function getHandoffDefaultsByType(): Record<
     LeadFlowAgentType,
     { target: string; slaMinutes: number }
   >;
-  for (const spec of Object.values(ARCHETYPES)) {
-    result[spec.type] = {
-      target: spec.handoff.target ?? 'assigned_owner',
-      slaMinutes: spec.handoff.slaMinutes ?? 15,
+  for (const type of Object.values(LeadFlowAgentType)) {
+    const policy = getHandoffPolicyDefaultsForType(type);
+    result[type] = {
+      target: policy.target ?? 'assigned_owner',
+      slaMinutes: policy.slaMinutes ?? 15,
     };
   }
   return result;
+}
+
+const FALLBACK_HANDOFF_POLICY: LeadFlowAgentHandoffPolicy = {
+  triggers: [
+    'lead_asks_for_human',
+    'low_confidence_answer',
+    'complaint_or_sensitive_topic',
+  ],
+  target: 'assigned_owner',
+  slaMinutes: 15,
+};
+
+/**
+ * Configuração operacional de handoff administrada pelo backend para cada
+ * papel. Agentes custom/concierge usam um conjunto seguro e abrangente; os
+ * demais reutilizam o mesmo arquétipo que alimenta os presets.
+ */
+export function getHandoffPolicyDefaultsForType(
+  type: LeadFlowAgentType,
+): LeadFlowAgentHandoffPolicy {
+  const policy =
+    Object.values(ARCHETYPES).find((item) => item.type === type)?.handoff ??
+    FALLBACK_HANDOFF_POLICY;
+
+  return {
+    ...policy,
+    triggers: [...(policy.triggers ?? [])],
+  };
+}
+
+/**
+ * Completa configurações legadas sem sobrescrever extensões operacionais já
+ * persistidas, como responsáveis nominais ou transferência de oportunidade.
+ */
+export function resolveHandoffPolicyForType(
+  type: LeadFlowAgentType,
+  policy: LeadFlowAgentHandoffPolicy | null | undefined,
+): LeadFlowAgentHandoffPolicy {
+  const defaults = getHandoffPolicyDefaultsForType(type);
+  return {
+    ...defaults,
+    ...(policy ?? {}),
+    triggers: Array.isArray(policy?.triggers)
+      ? [...policy.triggers]
+      : [...(defaults.triggers ?? [])],
+  };
 }
 
 export function getPresetByKey(
@@ -339,7 +418,5 @@ export function getPresetByKey(
  */
 export function getAllowedActionsForType(type: LeadFlowAgentType): string[] {
   const spec = Object.values(ARCHETYPES).find((item) => item.type === type);
-  return spec
-    ? [...spec.allowedActions]
-    : ['send_message', 'request_handoff'];
+  return spec ? [...spec.allowedActions] : ['send_message', 'request_handoff'];
 }
