@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import type { RequestContext } from '../../../common/context/request-context.interface';
 import { CrmOpportunityCommandService } from '../../crm/services/crm-opportunity-command.service';
+import { CrmStageTransitionPolicyService } from '../../crm/services/crm-stage-transition-policy.service';
 import { LeadFlowAutomationErrorClass } from '../enums/leadflow-automation-run.enums';
 import { executorAvailability } from './automation-executors.registry';
 import type {
@@ -34,7 +35,10 @@ import type {
 export class MoveOpportunityStageExecutor implements AutomationExecutor {
   readonly actionKey = 'move_opportunity_stage';
 
-  constructor(private readonly crmCommand: CrmOpportunityCommandService) {}
+  constructor(
+    private readonly crmCommand: CrmOpportunityCommandService,
+    private readonly transitionPolicies: CrmStageTransitionPolicyService,
+  ) {}
 
   availability(): AutomationExecutorAvailability {
     return executorAvailability(this.actionKey);
@@ -45,20 +49,20 @@ export class MoveOpportunityStageExecutor implements AutomationExecutor {
   ): Promise<AutomationEffectResult> {
     const payload = request.payload;
     const opportunityId = stringField(payload.opportunityId);
-    const toStageId = stringField(payload.toStageId);
-    const reasonCode = stringField(payload.reasonCode);
+    let toStageId = stringField(payload.toStageId);
+    let reasonCode = stringField(payload.reasonCode);
 
     // A destination and a governed reason are required. Without them the effect
     // is unconfigured, not failed — refusing is the honest outcome, and no
     // retry could supply what the configuration is missing.
-    if (!opportunityId || !toStageId || !reasonCode) {
+    if (!opportunityId) {
       return {
         status: 'refused',
         effectConfirmed: false,
         errorClass: LeadFlowAutomationErrorClass.Permanent,
         errorCode: 'stage_transition_unconfigured',
         errorMessage:
-          'A transição de etapa exige oportunidade, etapa de destino e motivo governado configurados.',
+          'A transição de etapa exige uma oportunidade configurada.',
         reference: null,
       };
     }
@@ -67,6 +71,33 @@ export class MoveOpportunityStageExecutor implements AutomationExecutor {
       tenantId: request.tenantId,
       workspaceId: request.workspaceId,
     } as RequestContext;
+
+    // New CRM-managed instances deliberately keep destination and reason out of
+    // the automation JSON. The published stage rules are the single source of
+    // truth, so the executor resolves the first eligible next stage at the last
+    // responsible moment. Legacy instances with both values keep their exact
+    // published behaviour.
+    if (!toStageId && !reasonCode) {
+      const eligible =
+        await this.transitionPolicies.resolveEligibleAutomationDestination(
+          ctx,
+          opportunityId,
+        );
+      toStageId = eligible?.toStageId ?? null;
+      reasonCode = eligible?.reasonCode ?? null;
+    }
+
+    if (!toStageId || !reasonCode) {
+      return {
+        status: 'refused',
+        effectConfirmed: false,
+        errorClass: LeadFlowAutomationErrorClass.Permanent,
+        errorCode: 'stage_transition_requirements_not_met',
+        errorMessage:
+          'Nenhuma regra automática de estágio está configurada e atendida para esta oportunidade.',
+        reference: null,
+      };
+    }
 
     try {
       const { opportunity } = await this.crmCommand.moveStage(

@@ -342,6 +342,80 @@ export class LeadFlowAutomationService {
     return this.detail(ctx, saved.id);
   }
 
+  /**
+   * Keeps the single CRM-managed stage automation aligned with the movement
+   * rules configured in CRM Settings. The automation is provisioned, published
+   * and activated after the first real rule; removing the last rule pauses it.
+   * Its destination stays null on purpose because the executor resolves the
+   * eligible next stage from the CRM policies at run time.
+   */
+  async syncGovernedStageAdvance(
+    ctx: RequestContext,
+    pipelineId: string,
+  ): Promise<{
+    enabled: boolean;
+    automationId: string | null;
+    status: LeadFlowAutomationStatus | null;
+  }> {
+    const active = await this.resolveActiveContext(ctx);
+    const configured =
+      await this.transitionPolicies.hasConfiguredAutomationRules(
+        ctx,
+        pipelineId,
+      );
+    let automation = await this.automationsRepository.findOne({
+      where: {
+        ...this.scopeWhere(ctx, active),
+        recipeKey: GOVERNED_STAGE_ADVANCE_RECIPE_KEY,
+      },
+      order: { updatedAt: 'DESC' },
+    });
+
+    if (!configured) {
+      if (automation && automation.status === LeadFlowAutomationStatus.Active) {
+        await this.transition(ctx, automation, LeadFlowAutomationStatus.Paused);
+        automation.status = LeadFlowAutomationStatus.Paused;
+      }
+      return {
+        enabled: false,
+        automationId: automation?.id ?? null,
+        status: automation?.status ?? null,
+      };
+    }
+
+    if (
+      !automation ||
+      automation.status === LeadFlowAutomationStatus.Archived
+    ) {
+      const created = await this.provision(ctx, {
+        recipeKey: GOVERNED_STAGE_ADVANCE_RECIPE_KEY,
+        name: 'Movimentação automática do CRM',
+        description:
+          'Move oportunidades automaticamente conforme os requisitos definidos em CRM > Configurações > Movimentos.',
+      });
+      automation = await this.automationsRepository.findOneOrFail({
+        where: { id: created.id },
+      });
+    }
+
+    if (!automation.publishedVersionId) {
+      await this.publish(ctx, automation.id);
+      automation = await this.automationsRepository.findOneOrFail({
+        where: { id: automation.id },
+      });
+    }
+    if (automation.status !== LeadFlowAutomationStatus.Active) {
+      await this.activate(ctx, automation.id);
+      automation.status = LeadFlowAutomationStatus.Active;
+    }
+
+    return {
+      enabled: true,
+      automationId: automation.id,
+      status: automation.status,
+    };
+  }
+
   async getById(
     ctx: RequestContext,
     id: string,

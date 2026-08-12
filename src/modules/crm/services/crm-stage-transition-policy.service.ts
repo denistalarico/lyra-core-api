@@ -81,6 +81,11 @@ export type CrmAutomationTransitionDestination = {
   requiredFields: string[];
 };
 
+export type CrmEligibleAutomationTransition = {
+  toStageId: string;
+  reasonCode: string;
+};
+
 @Injectable()
 export class CrmStageTransitionPolicyService {
   constructor(
@@ -270,6 +275,144 @@ export class CrmStageTransitionPolicyService {
       });
     }
     return destinations;
+  }
+
+  /**
+   * Whether the CRM settings contain at least one real automatic movement rule.
+   *
+   * System-generated, unrestricted movement policies keep manual board drag
+   * working, but must never turn the automation on by themselves. A rule only
+   * counts as configured when it admits the automation actor and declares
+   * fields or conditions that the backend can validate.
+   */
+  async hasConfiguredAutomationRules(
+    ctx: RequestContext,
+    pipelineId: string,
+  ): Promise<boolean> {
+    const policies = await this.dataSource
+      .getRepository(CrmStageTransitionPolicyEntity)
+      .find({
+        where: {
+          tenantId: this.tenantId(ctx),
+          workspaceId: this.workspaceId(ctx),
+          pipelineId,
+          status: 'published',
+          deletedAt: IsNull(),
+          ...this.clientScope(ctx),
+        },
+      });
+
+    return policies.some((policy) => this.isConfiguredAutomationRule(policy));
+  }
+
+  /**
+   * Resolves the first eligible destination for the opportunity's current
+   * stage. The executor calls this when the automation is CRM-managed instead
+   * of carrying a duplicated destination in its own JSON configuration.
+   */
+  async resolveEligibleAutomationDestination(
+    ctx: RequestContext,
+    opportunityId: string,
+  ): Promise<CrmEligibleAutomationTransition | null> {
+    const opportunity = await this.dataSource
+      .getRepository(CrmOpportunityEntity)
+      .findOne({
+        where: {
+          id: opportunityId,
+          tenantId: this.tenantId(ctx),
+          workspaceId: this.workspaceId(ctx),
+          deletedAt: IsNull(),
+        },
+      });
+    if (
+      !opportunity ||
+      opportunity.status !== 'open' ||
+      opportunity.autonomyMode !== 'automatic'
+    ) {
+      return null;
+    }
+
+    const policies = await this.dataSource
+      .getRepository(CrmStageTransitionPolicyEntity)
+      .find({
+        where: {
+          tenantId: opportunity.tenantId,
+          workspaceId: opportunity.workspaceId,
+          pipelineId: opportunity.pipelineId,
+          fromStageId: opportunity.stageId,
+          status: 'published',
+          deletedAt: IsNull(),
+        },
+        order: { version: 'DESC' },
+      });
+    const configured = policies.filter((policy) =>
+      this.isConfiguredAutomationRule(policy),
+    );
+    if (configured.length === 0) return null;
+
+    const targetIds = [
+      ...new Set(configured.map((policy) => policy.toStageId)),
+    ];
+    const targets = await this.dataSource.getRepository(CrmStageEntity).find({
+      where: targetIds.map((id) => ({
+        id,
+        tenantId: opportunity.tenantId,
+        workspaceId: opportunity.workspaceId,
+        pipelineId: opportunity.pipelineId,
+        deletedAt: IsNull(),
+      })),
+      order: { sortOrder: 'ASC' },
+    });
+    const targetById = new Map(targets.map((stage) => [stage.id, stage]));
+    const leadScore = configured.some((policy) =>
+      this.contractReferencesLeadScore(
+        policy.requiredFields,
+        policy.conditionContract,
+      ),
+    )
+      ? await this.loadLeadScore(
+          this.dataSource,
+          {
+            tenantId: opportunity.tenantId,
+            workspaceId: opportunity.workspaceId,
+          },
+          opportunity.id,
+        )
+      : null;
+
+    const eligible = configured
+      .map((policy) => ({ policy, target: targetById.get(policy.toStageId) }))
+      .filter(
+        (
+          item,
+        ): item is {
+          policy: CrmStageTransitionPolicyEntity;
+          target: CrmStageEntity;
+        } =>
+          Boolean(item.target) &&
+          item.target?.operationMode !== 'human_managed' &&
+          !this.isTerminal(item.target as CrmStageEntity),
+      )
+      .sort((left, right) => left.target.sortOrder - right.target.sortOrder)
+      .find(({ policy }) => {
+        const fieldsPresent = policy.requiredFields.every((field) =>
+          this.isPresent(this.readField(opportunity, field, leadScore)),
+        );
+        const conditionsMet = (policy.conditionContract.all ?? []).every(
+          (condition) => this.matches(opportunity, condition, leadScore),
+        );
+        return fieldsPresent && conditionsMet;
+      });
+
+    if (!eligible) return null;
+    return {
+      toStageId: eligible.target.id,
+      reasonCode: eligible.policy.reasonCodes.includes(
+        'automatic_stage_advance',
+      )
+        ? 'automatic_stage_advance'
+        : eligible.policy.reasonCodes[0],
+    };
   }
 
   /**
@@ -959,6 +1102,16 @@ export class CrmStageTransitionPolicyService {
     );
   }
 
+  private isConfiguredAutomationRule(
+    policy: CrmStageTransitionPolicyEntity,
+  ): boolean {
+    return (
+      policy.allowedActors.includes('automation') &&
+      (policy.requiredFields.length > 0 ||
+        (policy.conditionContract.all?.length ?? 0) > 0)
+    );
+  }
+
   /**
    * Reads the opportunity's current score from its own table.
    *
@@ -971,15 +1124,13 @@ export class CrmStageTransitionPolicyService {
     scope: { tenantId: string; workspaceId: string },
     opportunityId: string,
   ): Promise<LeadScoreProjection> {
-    const state = await reader
-      .getRepository(CrmLeadScoreStateEntity)
-      .findOne({
-        where: {
-          tenantId: scope.tenantId,
-          workspaceId: scope.workspaceId,
-          opportunityId,
-        },
-      });
+    const state = await reader.getRepository(CrmLeadScoreStateEntity).findOne({
+      where: {
+        tenantId: scope.tenantId,
+        workspaceId: scope.workspaceId,
+        opportunityId,
+      },
+    });
     return state ? { score: state.score, band: state.band } : null;
   }
 

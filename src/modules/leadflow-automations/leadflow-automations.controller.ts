@@ -102,6 +102,15 @@ export class LeadFlowAutomationsController {
     return this.automationService.provision(ctx, dto);
   }
 
+  @Post('governed-stage-advance/sync')
+  @RequirePermission('leadflow.crm.stage.manage.manager_or_admin')
+  syncGovernedStageAdvance(
+    @RequestContextData() ctx: RequestContext,
+    @Body('pipelineId', ParseUUIDPipe) pipelineId: string,
+  ) {
+    return this.automationService.syncGovernedStageAdvance(ctx, pipelineId);
+  }
+
   /** Versioned defaults for the active agency/client Settings context. */
   @Get('settings')
   @RequirePermission(LEADFLOW_AUTOMATIONS_PERMISSIONS.view)

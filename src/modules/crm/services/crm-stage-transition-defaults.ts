@@ -28,6 +28,7 @@ export const DEFAULT_TRANSITION_REASON_CODES = [
   'manual_stage_move',
   'manual_status_change',
   'approved_agent_decision',
+  'automatic_stage_advance',
 ];
 
 const ALL_ACTORS: CrmStageTransitionActor[] = [

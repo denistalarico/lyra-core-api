@@ -1,5 +1,6 @@
 import { ConflictException, NotFoundException } from '@nestjs/common';
 import type { CrmOpportunityCommandService } from '../../crm/services/crm-opportunity-command.service';
+import type { CrmStageTransitionPolicyService } from '../../crm/services/crm-stage-transition-policy.service';
 import { LeadFlowAutomationErrorClass } from '../enums/leadflow-automation-run.enums';
 import type { AutomationEffectRequest } from './automation-executor.types';
 import { MoveOpportunityStageExecutor } from './move-opportunity-stage.executor';
@@ -33,9 +34,17 @@ function request(
   };
 }
 
-function build(moveStage: jest.Mock) {
+function build(
+  moveStage: jest.Mock,
+  resolveEligibleAutomationDestination: jest.Mock = jest
+    .fn()
+    .mockResolvedValue(null),
+) {
   const crmCommand = { moveStage } as unknown as CrmOpportunityCommandService;
-  return new MoveOpportunityStageExecutor(crmCommand);
+  const transitionPolicies = {
+    resolveEligibleAutomationDestination,
+  } as unknown as CrmStageTransitionPolicyService;
+  return new MoveOpportunityStageExecutor(crmCommand, transitionPolicies);
 }
 
 describe('MoveOpportunityStageExecutor', () => {
@@ -84,8 +93,41 @@ describe('MoveOpportunityStageExecutor', () => {
     );
 
     expect(result.status).toBe('refused');
-    expect(result.errorCode).toBe('stage_transition_unconfigured');
+    expect(result.errorCode).toBe('stage_transition_requirements_not_met');
     expect(moveStage).not.toHaveBeenCalled();
+  });
+
+  it('resolves a CRM-managed destination when the automation has no duplicated target', async () => {
+    const moveStage = jest
+      .fn()
+      .mockResolvedValue({ opportunity: { id: 'opportunity-1' } });
+    const resolve = jest.fn().mockResolvedValue({
+      toStageId: 'stage-from-crm-rule',
+      reasonCode: 'automatic_stage_advance',
+    });
+    const executor = build(moveStage, resolve);
+
+    const result = await executor.execute(
+      request({
+        payload: {
+          opportunityId: 'opportunity-1',
+          toStageId: null,
+          reasonCode: null,
+        },
+      }),
+    );
+
+    expect(result.status).toBe('confirmed');
+    expect(resolve).toHaveBeenCalledWith(
+      { tenantId: 'tenant-1', workspaceId: 'workspace-1' },
+      'opportunity-1',
+    );
+    expect(moveStage).toHaveBeenCalledWith(
+      expect.any(Object),
+      'opportunity-1',
+      'stage-from-crm-rule',
+      expect.objectContaining({ reason: 'automatic_stage_advance' }),
+    );
   });
 
   it('treats a governed refusal as refused, not failed, and does not retry', async () => {

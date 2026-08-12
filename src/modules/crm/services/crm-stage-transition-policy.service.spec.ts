@@ -574,6 +574,110 @@ describe('CrmStageTransitionPolicyService', () => {
     });
   });
 
+  describe('CRM-managed automatic movement rules', () => {
+    function service(input: {
+      opportunity?: CrmOpportunityEntity | null;
+      policies: CrmStageTransitionPolicyEntity[];
+      stages?: CrmStageEntity[];
+      leadScore?: { score: number; band: string } | null;
+    }) {
+      const opportunityRepository = {
+        findOne: jest.fn().mockResolvedValue(input.opportunity ?? null),
+      };
+      const policyRepository = {
+        find: jest.fn().mockResolvedValue(input.policies),
+      };
+      const stageRepository = {
+        find: jest.fn().mockResolvedValue(input.stages ?? []),
+      };
+      const leadScoreRepository = {
+        findOne: jest.fn().mockResolvedValue(input.leadScore ?? null),
+      };
+      return new CrmStageTransitionPolicyService({
+        getRepository: jest.fn((entity) => {
+          if (entity === CrmOpportunityEntity) return opportunityRepository;
+          if (entity === CrmStageEntity) return stageRepository;
+          if (entity === CrmLeadScoreStateEntity) return leadScoreRepository;
+          return policyRepository;
+        }),
+      } as never);
+    }
+
+    it('does not treat an unrestricted default policy as configuration', async () => {
+      const svc = service({
+        policies: [
+          policy({
+            allowedActors: ['human', 'automation'],
+            requiredFields: [],
+            conditionContract: {},
+          }),
+        ],
+      });
+
+      await expect(
+        svc.hasConfiguredAutomationRules(
+          ctx,
+          '00000000-0000-4000-8000-000000000020',
+        ),
+      ).resolves.toBe(false);
+    });
+
+    it('resolves a field-qualified destination from the current stage', async () => {
+      const target = stage({
+        name: 'Qualificado',
+        sortOrder: 20,
+      });
+      const svc = service({
+        opportunity: opportunity({ autonomyMode: 'automatic' }),
+        policies: [
+          policy({
+            allowedActors: ['human', 'automation'],
+            requiredFields: ['contactName'],
+            conditionContract: {},
+            reasonCodes: ['automatic_stage_advance'],
+          }),
+        ],
+        stages: [target],
+      });
+
+      await expect(
+        svc.resolveEligibleAutomationDestination(
+          ctx,
+          '00000000-0000-4000-8000-000000000010',
+        ),
+      ).resolves.toEqual({
+        toStageId: target.id,
+        reasonCode: 'automatic_stage_advance',
+      });
+    });
+
+    it('waits when the canonical Lead Score has not reached the threshold', async () => {
+      const target = stage({ sortOrder: 20 });
+      const svc = service({
+        opportunity: opportunity({ autonomyMode: 'automatic' }),
+        policies: [
+          policy({
+            allowedActors: ['automation'],
+            requiredFields: [],
+            conditionContract: {
+              all: [{ field: 'leadScore.score', operator: 'gte', value: 70 }],
+            },
+            reasonCodes: ['automatic_stage_advance'],
+          }),
+        ],
+        stages: [target],
+        leadScore: { score: 60, band: 'warm' },
+      });
+
+      await expect(
+        svc.resolveEligibleAutomationDestination(
+          ctx,
+          '00000000-0000-4000-8000-000000000010',
+        ),
+      ).resolves.toBeNull();
+    });
+  });
+
   describe('assertAutomationDestination', () => {
     function service(
       policies: CrmStageTransitionPolicyEntity[],
@@ -747,9 +851,7 @@ describe('CrmStageTransitionPolicyService.ensureDefaultPolicies', () => {
     expect(created.every((policy) => policy.status === 'published')).toBe(true);
     expect(created.every((policy) => policy.version === 1)).toBe(true);
     expect(
-      created.every(
-        (policy) => (policy.reasonCodes as string[]).length > 0,
-      ),
+      created.every((policy) => (policy.reasonCodes as string[]).length > 0),
     ).toBe(true);
   });
 
@@ -774,8 +876,7 @@ describe('CrmStageTransitionPolicyService.ensureDefaultPolicies', () => {
     expect(result).toEqual({ created: 2 });
     expect(
       created.some(
-        (item) =>
-          item.fromStageId === entry.id && item.toStageId === middle.id,
+        (item) => item.fromStageId === entry.id && item.toStageId === middle.id,
       ),
     ).toBe(false);
   });
@@ -786,9 +887,13 @@ describe('CrmStageTransitionPolicyService.ensureDefaultPolicies', () => {
       [entry, middle, won],
     );
 
-    const result = await service.ensureDefaultPolicies(ctx as never, pipelineId, {
-      onlyWhenUnconfigured: true,
-    });
+    const result = await service.ensureDefaultPolicies(
+      ctx as never,
+      pipelineId,
+      {
+        onlyWhenUnconfigured: true,
+      },
+    );
 
     expect(result).toEqual({ created: 0 });
     expect(policyRepository.save).not.toHaveBeenCalled();
