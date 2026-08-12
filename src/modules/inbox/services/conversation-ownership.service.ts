@@ -14,6 +14,7 @@ import {
 } from '../../agency/entities/agency-settings.entities';
 import { CrmOpportunityEntity } from '../../crm/entities/crm-opportunity.entity';
 import { CrmOpportunityCommandService } from '../../crm/services/crm-opportunity-command.service';
+import { LeadFlowAgentEntity } from '../../leadflow-agents/entities/leadflow-agent.entity';
 import { InboxAgentDecisionEntity } from '../entities/inbox-agent-decision.entity';
 import { InboxChannelEntity } from '../entities/inbox-channel.entity';
 import {
@@ -460,31 +461,88 @@ export class ConversationOwnershipService {
           workspaceId: conversation.workspaceId,
         })
       : null;
-    const directRecipient =
-      conversation.assignedUserId ?? channel?.defaultAssignedUserId ?? null;
-    const owners = directRecipient
-      ? []
-      : await manager.getRepository(WorkspaceUserEntity).find({
-          where: {
-            tenantId: conversation.tenantId,
-            workspaceId: conversation.workspaceId,
-            role: 'owner',
-            status: 'active',
-          },
-        });
+    // O destino do handoff é configuração do agente que atendia: um SDR
+    // entrega ao comercial, uma recepção entrega à secretária. Só depois disso
+    // valem os fallbacks genéricos (responsável da conversa, do canal, owners).
+    const configuredRecipients = await this.resolveAgentHandoffRecipients(
+      manager,
+      conversation,
+    );
+    const directRecipient = configuredRecipients.length
+      ? null
+      : (conversation.assignedUserId ?? channel?.defaultAssignedUserId ?? null);
+    const owners =
+      configuredRecipients.length || directRecipient
+        ? []
+        : await manager.getRepository(WorkspaceUserEntity).find({
+            where: {
+              tenantId: conversation.tenantId,
+              workspaceId: conversation.workspaceId,
+              role: 'owner',
+              status: 'active',
+            },
+          });
     const clientId =
       typeof channel?.metadata?.clientId === 'string'
         ? channel.metadata.clientId
         : null;
 
     return {
-      recipientUserIds: directRecipient
-        ? [directRecipient]
-        : owners
-            .map((owner) => owner.userId)
-            .filter((userId): userId is string => Boolean(userId)),
+      recipientUserIds: configuredRecipients.length
+        ? configuredRecipients
+        : directRecipient
+          ? [directRecipient]
+          : owners
+              .map((owner) => owner.userId)
+              .filter((userId): userId is string => Boolean(userId)),
       clientId,
     };
+  }
+
+  /**
+   * Os usuários que o agente da conversa designou para receber o handoff.
+   *
+   * Cada id é confirmado contra um usuário ativo do mesmo workspace: uma
+   * configuração antiga apontando para alguém que saiu da equipe não pode
+   * engolir a notificação — nesse caso a lista volta vazia e a rota herdada
+   * assume.
+   */
+  private async resolveAgentHandoffRecipients(
+    manager: EntityManager,
+    conversation: InboxConversationEntity,
+  ): Promise<string[]> {
+    if (!conversation.assignedAgentId) return [];
+
+    const agent = await manager.getRepository(LeadFlowAgentEntity).findOneBy({
+      id: conversation.assignedAgentId,
+      tenantId: conversation.tenantId,
+      workspaceId: conversation.workspaceId,
+    });
+    const configured = agent?.handoffPolicy?.targetUserIds;
+    if (!Array.isArray(configured) || configured.length === 0) return [];
+
+    const requested = [
+      ...new Set(
+        configured.filter(
+          (userId): userId is string =>
+            typeof userId === 'string' && userId.trim() !== '',
+        ),
+      ),
+    ];
+    if (requested.length === 0) return [];
+
+    const members = await manager.getRepository(WorkspaceUserEntity).find({
+      where: requested.map((userId) => ({
+        tenantId: conversation.tenantId,
+        workspaceId: conversation.workspaceId,
+        userId,
+        status: 'active',
+      })),
+    });
+
+    return members
+      .map((member) => member.userId)
+      .filter((userId): userId is string => Boolean(userId));
   }
 
   private async recordHandoffTransferOutcome(

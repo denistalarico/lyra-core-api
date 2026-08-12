@@ -1,4 +1,11 @@
-import { IsObject, IsOptional, IsString, MaxLength } from 'class-validator';
+import {
+  IsEnum,
+  IsObject,
+  IsOptional,
+  IsString,
+  MaxLength,
+} from 'class-validator';
+import { LeadFlowAgentType } from '../enums/leadflow-agent-type.enum';
 import type {
   LeadFlowAgentAvatarConfig,
   LeadFlowAgentBehaviorConfig,
@@ -14,6 +21,16 @@ export class PatchAgentDto {
   @IsString()
   @MaxLength(160)
   name?: string;
+
+  /**
+   * O papel do agente. Um agente provisionado como recepção pode virar
+   * qualificação sem ser recriado — a troca reajusta as ações permitidas ao
+   * novo papel e desvincula o preset de origem, já que ele deixou de ser
+   * aquele modelo.
+   */
+  @IsOptional()
+  @IsEnum(LeadFlowAgentType)
+  type?: LeadFlowAgentType;
 
   @IsOptional()
   @IsString()

@@ -1,6 +1,10 @@
 import { randomUUID } from 'crypto';
 import { BadRequestException, ConflictException } from '@nestjs/common';
 import { AgencyDataSource } from '../../../database/agency-typeorm.datasource';
+import {
+  AgencyUserProfileEntity,
+  AgencyWorkspaceUserEntity,
+} from '../../agency/entities/agency-settings.entities';
 import { InboxConversationEntity } from '../../inbox/entities/inbox-conversation.entity';
 import { LeadFlowBusinessMode } from '../../leadflow-settings/enums/leadflow-business-mode.enum';
 import { LeadFlowSettingsContextType } from '../../leadflow-settings/enums/leadflow-settings-context-type.enum';
@@ -34,6 +38,8 @@ run('LeadFlow agent archive/soft-delete lifecycle PostgreSQL', () => {
       AgencyDataSource.getRepository(LeadFlowAgentChannelBindingEntity),
       AgencyDataSource.getRepository(LeadFlowClientSettingsEntity),
       AgencyDataSource.getRepository(InboxConversationEntity),
+      AgencyDataSource.getRepository(AgencyWorkspaceUserEntity),
+      AgencyDataSource.getRepository(AgencyUserProfileEntity),
       new LeadFlowAgentPresetService(),
       {} as never,
       {} as never,

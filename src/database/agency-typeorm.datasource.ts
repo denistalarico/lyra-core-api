@@ -151,6 +151,7 @@ import { AddLeadflowAnalyticsWidgetLayout1789000000000 } from './migrations/1789
 import { ReconcileLeadflowBriefingFullSchema1789050000000 } from './migrations/1789050000000-reconcile-leadflow-briefing-full-schema';
 import { ReconcileLeadflowBriefingReviewSchema1789100000000 } from './migrations/1789100000000-reconcile-leadflow-briefing-review-schema';
 import { CreateLeadflowOperationsActions1789300000000 } from './migrations/1789300000000-create-leadflow-operations-actions';
+import { AddUserProfileWhatsapp1789400000000 } from './migrations/1789400000000-add-user-profile-whatsapp';
 
 export const AgencyDataSource = new DataSource({
   type: 'postgres',
@@ -312,5 +313,6 @@ export const AgencyDataSource = new DataSource({
     ReconcileLeadflowBriefingFullSchema1789050000000,
     ReconcileLeadflowBriefingReviewSchema1789100000000,
     CreateLeadflowOperationsActions1789300000000,
+    AddUserProfileWhatsapp1789400000000,
   ],
 });

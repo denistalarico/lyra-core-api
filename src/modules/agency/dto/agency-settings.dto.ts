@@ -32,6 +32,19 @@ export class PatchAgencyUserProfileDto {
   @MaxLength(40)
   phone?: string | null;
 
+  /**
+   * Marcado, o telefone acima também é o WhatsApp — é assim que o handoff sabe
+   * para onde mandar a notificação sem pedir o número duas vezes.
+   */
+  @IsOptional()
+  @IsBoolean()
+  whatsappSameAsPhone?: boolean;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  whatsappPhone?: string | null;
+
   @IsOptional()
   @IsString()
   @MaxLength(80)

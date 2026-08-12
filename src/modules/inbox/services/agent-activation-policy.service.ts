@@ -141,11 +141,16 @@ export class AgentActivationPolicyService {
       exclusions.push('audience_mismatch');
     }
 
-    const rawPolicy = agent?.channelPolicy?.activationPolicy;
+    // A regra de ativação é do canal, não do agente: um número de WhatsApp
+    // dedicado pode assumir toda conversa elegível enquanto o mesmo agente, no
+    // Instagram, só entra por palavra-chave. Sem regra própria, o canal usa a
+    // regra padrão do agente.
+    const channelPolicies = asRecord(
+      agent?.channelPolicy?.channelActivationPolicies,
+    );
     const policy =
-      rawPolicy && typeof rawPolicy === 'object' && !Array.isArray(rawPolicy)
-        ? (rawPolicy as Record<string, unknown>)
-        : { trigger: 'manual' };
+      asRecord(channelPolicies?.[input.channelId]) ??
+      asRecord(agent?.channelPolicy?.activationPolicy) ?? { trigger: 'manual' };
     const trigger =
       typeof policy.trigger === 'string' ? policy.trigger : 'manual';
     let matched = false;
@@ -247,6 +252,12 @@ export class AgentActivationPolicyService {
       automaticEffects: { reply: false, crm: false, followUp: false },
     };
   }
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
 }
 
 export function normalize(value: string) {

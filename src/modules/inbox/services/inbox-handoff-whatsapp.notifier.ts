@@ -5,6 +5,7 @@ import {
   AgencyUserProfileEntity,
   AgencyWorkspaceCompanySettingsEntity,
 } from '../../agency/entities/agency-settings.entities';
+import { resolveUserWhatsAppPhone } from '../../agency/user-whatsapp-phone';
 import {
   LEADFLOW_HANDOFF_TEMPLATE_KEY,
   type LeadFlowHandoffTemplateVariables,
@@ -73,10 +74,15 @@ export class InboxHandoffWhatsAppNotifier {
       .getRepository(AgencyUserProfileEntity)
       .findOne({
         where: { tenantId: conversation.tenantId, userId: recipientUserId },
-        select: { id: true, phone: true },
+        select: {
+          id: true,
+          phone: true,
+          whatsappPhone: true,
+          whatsappSameAsPhone: true,
+        },
       });
 
-    const phone = profile?.phone?.trim();
+    const phone = resolveUserWhatsAppPhone(profile);
     if (!phone) {
       // No number on file — nothing to attempt. The in-app notification stands.
       return;

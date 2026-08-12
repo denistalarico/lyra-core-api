@@ -60,6 +60,13 @@ export interface LeadFlowAgentHandoffPolicy {
   transferOpportunityOnHandoff?: boolean;
   targetPipelineId?: string | null;
   targetStageId?: string | null;
+  /**
+   * Quem recebe a conversa quando este agente pede handoff. Um SDR entrega ao
+   * time comercial, uma recepção entrega à secretária — por isso o destino é
+   * configuração do agente, e não uma regra global. Vazio mantém a rota
+   * herdada (responsável da conversa → responsável do canal → owners).
+   */
+  targetUserIds?: string[];
   [key: string]: LeadFlowJsonValue | undefined;
 }
 
@@ -71,23 +78,38 @@ export interface LeadFlowAgentCrmPolicy {
   [key: string]: LeadFlowJsonValue | undefined;
 }
 
+// Type alias (não interface): o `channelPolicy` tem index signature JSON e só
+// um object type literal ganha a index signature implícita que a torna
+// atribuível.
+export type LeadFlowAgentActivationPolicy = {
+  version: 1;
+  trigger: 'manual' | 'every_eligible' | 'keywords' | 'ad_referral';
+  keywords?: string[];
+  keywordMode?: 'word' | 'phrase_contains';
+  adFilters?: {
+    accountId?: string[];
+    campaignId?: string[];
+    adId?: string[];
+  };
+  expiresAfterMinutes?: number;
+  afterHandoff?: 'require_explicit_return';
+  automaticEffects?: { reply: false; crm: false; followUp: false };
+};
+
 export interface LeadFlowAgentChannelPolicy {
   allowedChannels?: string[];
   defaultChannel?: string | null;
-  activationPolicy?: {
-    version: 1;
-    trigger: 'manual' | 'every_eligible' | 'keywords' | 'ad_referral';
-    keywords?: string[];
-    keywordMode?: 'word' | 'phrase_contains';
-    adFilters?: {
-      accountId?: string[];
-      campaignId?: string[];
-      adId?: string[];
-    };
-    expiresAfterMinutes?: number;
-    afterHandoff?: 'require_explicit_return';
-    automaticEffects?: { reply: false; crm: false; followUp: false };
-  };
+  /** Regra usada por qualquer canal sem regra própria. */
+  activationPolicy?: LeadFlowAgentActivationPolicy;
+  /**
+   * Ativação por canal, indexada pelo id do canal do Inbox.
+   *
+   * A regra certa depende do canal, não do agente: um número de WhatsApp
+   * dedicado ao agente pode assumir toda conversa elegível, enquanto no
+   * Instagram/Facebook o mesmo agente só deve entrar por palavra-chave. Um
+   * canal sem entrada aqui cai em `activationPolicy`.
+   */
+  channelActivationPolicies?: Record<string, LeadFlowAgentActivationPolicy>;
   [key: string]: LeadFlowJsonValue | undefined;
 }
 

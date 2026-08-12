@@ -37,7 +37,10 @@ import type {
   LeadFlowAgentsRuntimeConfigResponse,
 } from './dto/leadflow-agent-runtime-config-response.dto';
 import { LEADFLOW_AGENTS_PERMISSIONS } from './leadflow-agents.permissions';
-import { LeadFlowAgentService } from './services/leadflow-agent.service';
+import {
+  LeadFlowAgentService,
+  type LeadFlowHandoffTargetResponse,
+} from './services/leadflow-agent.service';
 import { OperationsRoomStateService } from './services/operations-room-state.service';
 import { LeadFlowOperationsActionService } from './services/leadflow-operations-action.service';
 
@@ -142,6 +145,14 @@ export class LeadFlowAgentsController {
     @RequestContextData() ctx: RequestContext,
   ): Promise<LeadFlowAgentPresetListResponse> {
     return this.agentService.listPresets(ctx);
+  }
+
+  @Get('handoff-targets')
+  @RequirePermission(LEADFLOW_AGENTS_PERMISSIONS.view)
+  listHandoffTargets(
+    @RequestContextData() ctx: RequestContext,
+  ): Promise<LeadFlowHandoffTargetResponse[]> {
+    return this.agentService.listHandoffTargets(ctx);
   }
 
   @Get('runtime-config')

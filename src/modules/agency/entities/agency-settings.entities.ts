@@ -82,6 +82,16 @@ export class AgencyUserProfileEntity {
   @Column({ type: 'varchar', length: 40, nullable: true })
   phone!: string | null;
 
+  /**
+   * Número de WhatsApp próprio, usado só quando `whatsappSameAsPhone` é falso.
+   * A resolução canônica vive em `resolveUserWhatsAppPhone`.
+   */
+  @Column({ name: 'whatsapp_phone', type: 'varchar', length: 40, nullable: true })
+  whatsappPhone!: string | null;
+
+  @Column({ name: 'whatsapp_same_as_phone', type: 'boolean', default: true })
+  whatsappSameAsPhone!: boolean;
+
   @Column({ name: 'job_title', type: 'varchar', length: 80, nullable: true })
   jobTitle!: string | null;
 

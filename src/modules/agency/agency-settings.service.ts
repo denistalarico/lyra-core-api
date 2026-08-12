@@ -181,6 +181,9 @@ export class AgencySettingsService {
         userId,
         ...dto,
         phone: dto.phone ?? null,
+        whatsappPhone: dto.whatsappPhone ?? null,
+        // Omitir o campo mantém o padrão histórico: o telefone é o WhatsApp.
+        whatsappSameAsPhone: dto.whatsappSameAsPhone ?? true,
         jobTitle: dto.jobTitle ?? null,
       },
       ['tenantId', 'userId'],

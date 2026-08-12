@@ -11,13 +11,21 @@ import { In, IsNull, Not, Repository } from 'typeorm';
 import { randomUUID } from 'node:crypto';
 import type { RequestContext } from '../../../common/context/request-context.interface';
 import { InboxConversationEntity } from '../../inbox/entities/inbox-conversation.entity';
+import {
+  AgencyUserProfileEntity,
+  AgencyWorkspaceUserEntity,
+} from '../../agency/entities/agency-settings.entities';
+import { resolveUserWhatsAppPhone } from '../../agency/user-whatsapp-phone';
 import { LeadFlowClientSettingsEntity } from '../../leadflow-settings/entities';
 import { getOperationsChatCatalog } from '../../leadflow-settings/catalog/business-mode-operations-chat.catalog';
 import { LeadFlowSettingsContextType } from '../../leadflow-settings/enums/leadflow-settings-context-type.enum';
 import { PlatformPermissionService } from '../../permissions';
 import type { PermissionContext } from '../../permissions';
 import type { LeadFlowAgentPresetCatalogItem } from '../catalog/agent-presets.catalog';
-import { getHandoffDefaultsByType } from '../catalog/agent-presets.catalog';
+import {
+  getAllowedActionsForType,
+  getHandoffDefaultsByType,
+} from '../catalog/agent-presets.catalog';
 import {
   LeadFlowAgentDetailResponse,
   LeadFlowAgentListResponse,
@@ -47,6 +55,7 @@ import {
 } from '../enums/room-operational.enums';
 import { LEADFLOW_AGENTS_PERMISSIONS } from '../leadflow-agents.permissions';
 import type {
+  LeadFlowAgentActivationPolicy,
   LeadFlowAgentBehaviorConfig,
   LeadFlowAgentChannelPolicy,
   LeadFlowAgentReadiness,
@@ -58,6 +67,19 @@ import { LeadFlowAgentBindingReconcilerService } from './leadflow-agent-binding-
 import { OperationsRoomStateService } from './operations-room-state.service';
 
 const AGENCY_CONNECTION = 'agency';
+
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export interface LeadFlowHandoffTargetResponse {
+  userId: string;
+  name: string;
+  email: string;
+  jobTitle: string | null;
+  avatarUrl: string | null;
+  /** Se este usuário tem um WhatsApp resolvível no perfil. */
+  hasWhatsApp: boolean;
+}
 
 interface ActiveContext {
   settings: LeadFlowClientSettingsEntity;
@@ -82,6 +104,10 @@ export class LeadFlowAgentService {
     private readonly settingsRepository: Repository<LeadFlowClientSettingsEntity>,
     @InjectRepository(InboxConversationEntity, AGENCY_CONNECTION)
     private readonly conversationsRepository: Repository<InboxConversationEntity>,
+    @InjectRepository(AgencyWorkspaceUserEntity, AGENCY_CONNECTION)
+    private readonly workspaceUsersRepository: Repository<AgencyWorkspaceUserEntity>,
+    @InjectRepository(AgencyUserProfileEntity, AGENCY_CONNECTION)
+    private readonly userProfilesRepository: Repository<AgencyUserProfileEntity>,
     private readonly presetService: LeadFlowAgentPresetService,
     private readonly runtimeConfigService: LeadFlowAgentRuntimeConfigService,
     private readonly permissionService: PlatformPermissionService,
@@ -123,6 +149,50 @@ export class LeadFlowAgentService {
       items: presets.map(mapAgentPreset),
       handoffDefaultsByType: getHandoffDefaultsByType(),
     };
+  }
+
+  /**
+   * Quem pode ser escolhido como responsável pelo handoff de um agente.
+   *
+   * Todos os membros ativos do workspace, inclusive quem está pedindo — o
+   * dono da conta é um destino legítimo, ao contrário de um encaminhamento de
+   * conversa, onde encaminhar para si mesmo não faz sentido. `hasWhatsApp`
+   * diz se aquela pessoa também receberia o aviso no WhatsApp, para a tela
+   * poder sinalizar quem só receberia notificação no app.
+   */
+  async listHandoffTargets(
+    ctx: RequestContext,
+  ): Promise<LeadFlowHandoffTargetResponse[]> {
+    const workspaceId = this.requireWorkspaceId(ctx);
+    const members = await this.workspaceUsersRepository.find({
+      where: { tenantId: ctx.tenantId, workspaceId, status: 'active' },
+      order: { name: 'ASC' },
+    });
+
+    const userIds = members
+      .map((member) => member.userId)
+      .filter((userId): userId is string => Boolean(userId));
+    const profiles = userIds.length
+      ? await this.userProfilesRepository.find({
+          where: { tenantId: ctx.tenantId, userId: In(userIds) },
+        })
+      : [];
+
+    return members
+      .filter((member): member is typeof member & { userId: string } =>
+        Boolean(member.userId),
+      )
+      .map((member) => {
+        const profile = profiles.find((item) => item.userId === member.userId);
+        return {
+          userId: member.userId,
+          name: profile?.displayName?.trim() || member.name || member.email,
+          email: member.email,
+          jobTitle: profile?.jobTitle ?? null,
+          avatarUrl: profile?.avatarUrl ?? null,
+          hasWhatsApp: Boolean(resolveUserWhatsAppPhone(profile ?? null)),
+        };
+      });
   }
 
   async provision(
@@ -249,6 +319,7 @@ export class LeadFlowAgentService {
     }
 
     if (dto.name !== undefined) agent.name = dto.name;
+    if (dto.type !== undefined) this.applyTypeChange(agent, dto.type);
     if (dto.description !== undefined) agent.description = dto.description;
     if (dto.behaviorConfig !== undefined) {
       agent.behaviorConfig = this.validateBehaviorConfig(dto.behaviorConfig);
@@ -258,14 +329,23 @@ export class LeadFlowAgentService {
       // so the payload is safe to persist as-is here.
       agent.promptConfig = dto.promptConfig;
     }
-    if (dto.handoffPolicy !== undefined)
-      agent.handoffPolicy = dto.handoffPolicy;
+    if (dto.handoffPolicy !== undefined) {
+      agent.handoffPolicy = {
+        ...dto.handoffPolicy,
+        targetUserIds: this.validateHandoffTargetUserIds(
+          dto.handoffPolicy.targetUserIds,
+        ),
+      };
+    }
     if (dto.crmPolicy !== undefined) agent.crmPolicy = dto.crmPolicy;
     if (dto.channelPolicy !== undefined) {
       agent.channelPolicy = {
         ...dto.channelPolicy,
         activationPolicy: this.validateActivationPolicy(
           dto.channelPolicy.activationPolicy,
+        ),
+        channelActivationPolicies: this.validateChannelActivationPolicies(
+          dto.channelPolicy.channelActivationPolicies,
         ),
       };
     }
@@ -285,6 +365,9 @@ export class LeadFlowAgentService {
     agent.readiness = this.computeReadiness(agent, active.settings, bindings);
 
     await this.agentsRepository.save(agent);
+    // Um agente ativo não deve exigir um passo manual de publicação: se ele já
+    // está operando, a configuração salva é a configuração vigente.
+    await this.republishIfLive(ctx, agent, active);
     return this.detail(ctx, agent.id);
   }
 
@@ -420,6 +503,24 @@ export class LeadFlowAgentService {
       );
     }
 
+    await this.publishVersion(ctx, agent, active, { force: true });
+
+    return this.detail(ctx, agent.id);
+  }
+
+  /**
+   * Publica a configuração atual do agente como uma nova versão.
+   *
+   * Sem `force`, uma publicação cuja fotografia é idêntica à versão vigente é
+   * ignorada — é o que permite publicar automaticamente a cada alteração de um
+   * agente ativo sem encher o histórico de versões iguais.
+   */
+  private async publishVersion(
+    ctx: RequestContext,
+    agent: LeadFlowAgentEntity,
+    active: ActiveContext,
+    opts?: { force?: boolean },
+  ): Promise<boolean> {
     const bindings = await this.loadBindings(agent.id);
 
     const snapshot = this.runtimeConfigService.buildAgentContract(
@@ -427,6 +528,10 @@ export class LeadFlowAgentService {
       active.settings,
       bindings,
     );
+
+    if (!opts?.force && (await this.matchesPublishedSnapshot(agent, snapshot))) {
+      return false;
+    }
 
     const nextVersion = await this.nextVersionNumber(agent.id);
     const version = await this.versionsRepository.save(
@@ -442,13 +547,44 @@ export class LeadFlowAgentService {
 
     agent.publishedVersionId = version.id;
     agent.updatedById = ctx.userId ?? null;
+    // A versão publicada é uma das dependências de readiness: sem recalcular
+    // aqui, o agente continuaria reportando "published_version" em falta.
+    agent.readiness = this.computeReadiness(agent, active.settings, bindings);
     await this.agentsRepository.save(agent);
 
     await this.bindingReconciler.reconcile(ctx, {
       trigger: 'agent_published',
     });
 
-    return this.detail(ctx, agent.id);
+    return true;
+  }
+
+  /**
+   * Publicação automática de um agente em operação. Um agente pausado ou em
+   * rascunho não publica sozinho: sua configuração ainda está sendo montada, e
+   * publicar seria colocá-la em vigor antes da decisão de ativar.
+   */
+  private async republishIfLive(
+    ctx: RequestContext,
+    agent: LeadFlowAgentEntity,
+    active: ActiveContext,
+  ): Promise<void> {
+    if (agent.status !== LeadFlowAgentStatus.Active) return;
+    await this.publishVersion(ctx, agent, active);
+  }
+
+  private async matchesPublishedSnapshot(
+    agent: LeadFlowAgentEntity,
+    snapshot: LeadFlowAgentRuntimeConfigResponse,
+  ): Promise<boolean> {
+    if (!agent.publishedVersionId) return false;
+
+    const published = await this.versionsRepository.findOne({
+      where: { id: agent.publishedVersionId, agentId: agent.id },
+    });
+    if (!published?.snapshot) return false;
+
+    return comparableSnapshot(published.snapshot) === comparableSnapshot(snapshot);
   }
 
   async getAgentRuntimeConfig(
@@ -519,6 +655,9 @@ export class LeadFlowAgentService {
     await this.agentsRepository.save(agent);
 
     if (status === LeadFlowAgentStatus.Active) {
+      // Ativar já publica: a operação não deve depender de o usuário lembrar
+      // de um segundo botão para o agente sair do papel.
+      await this.publishVersion(ctx, agent, active);
       await this.bindingReconciler.reconcile(ctx, {
         trigger: 'agent_activated',
       });
@@ -827,6 +966,99 @@ export class LeadFlowAgentService {
     };
   }
 
+  /**
+   * Troca o papel de um agente já provisionado.
+   *
+   * Mantém tudo que é escolha do operador (nome, descrição, avatar, tom,
+   * canais) e ajusta só o que o papel governa: as ações permitidas. Um agente
+   * que veio de um preset deixa de ser aquele preset — continuar apontando
+   * para ele diria que este é o modelo "Recepção" da Lyra quando ele passou a
+   * ser um agente de vendas.
+   */
+  private applyTypeChange(
+    agent: LeadFlowAgentEntity,
+    type: LeadFlowAgentType,
+  ): void {
+    if (agent.type === type) return;
+
+    if (agent.isProtected) {
+      throw new BadRequestException(
+        'Este agente é protegido pela plataforma e não pode mudar de tipo.',
+      );
+    }
+
+    agent.type = type;
+    agent.metadata = {
+      ...agent.metadata,
+      allowedActions: getAllowedActionsForType(type),
+    };
+
+    if (agent.presetKey) {
+      agent.presetKey = null;
+      agent.isSystem = false;
+      agent.isCustom = true;
+      agent.metadata = {
+        ...agent.metadata,
+        source: 'custom',
+        derivedFromPresetKey: agent.metadata?.presetKey ?? null,
+        presetKey: null,
+      };
+    }
+  }
+
+  /**
+   * Ids de usuário do handoff: UUIDs, em número sensato. Repetição não é erro
+   * — a lista vem de uma seleção na tela — mas é guardada uma vez só, para o
+   * destinatário não receber a mesma notificação duas vezes.
+   */
+  private validateHandoffTargetUserIds(value: unknown): string[] {
+    if (value === undefined || value === null) return [];
+    if (!Array.isArray(value) || value.length > 20) {
+      throw new BadRequestException('Handoff target users are invalid.');
+    }
+    if (value.some((item) => typeof item !== 'string')) {
+      throw new BadRequestException('Handoff target users are invalid.');
+    }
+
+    const ids = [...new Set(value as string[])];
+    if (ids.some((id) => !UUID_PATTERN.test(id))) {
+      throw new BadRequestException('Handoff target users are invalid.');
+    }
+
+    return ids;
+  }
+
+  /**
+   * Regras de ativação por canal. As chaves são ids de canal do Inbox; o valor
+   * passa pela mesma validação da regra padrão, então nenhuma delas pode
+   * introduzir keyword com regex ou efeito automático.
+   */
+  private validateChannelActivationPolicies(
+    value: LeadFlowAgentChannelPolicy['channelActivationPolicies'],
+  ): Record<string, LeadFlowAgentActivationPolicy> {
+    if (!value) return {};
+    if (typeof value !== 'object' || Array.isArray(value)) {
+      throw new BadRequestException('Channel activation policies are invalid.');
+    }
+
+    const entries = Object.entries(value);
+    if (entries.length > 50) {
+      throw new BadRequestException('Channel activation policies are invalid.');
+    }
+
+    const result: Record<string, LeadFlowAgentActivationPolicy> = {};
+    for (const [channelId, policy] of entries) {
+      if (!UUID_PATTERN.test(channelId)) {
+        throw new BadRequestException(
+          'Channel activation policies are invalid.',
+        );
+      }
+      result[channelId] = this.validateActivationPolicy(policy);
+    }
+
+    return result;
+  }
+
   private validateActivationPolicy(
     value: LeadFlowAgentChannelPolicy['activationPolicy'],
   ) {
@@ -928,6 +1160,46 @@ function mapAgentDetailSummary(
   // The list endpoint returns the richer detail shape so cards can render
   // config-derived fields without an extra round-trip.
   return mapAgentDetail(agent, bindings);
+}
+
+/**
+ * Campos voláteis ou derivados: comparar qualquer um deles diria que toda
+ * configuração mudou. `generatedAt` é o carimbo da chamada, `readiness` é
+ * consequência calculada do resto do contrato e `publishedVersionId` é a
+ * autorreferência da publicação anterior — nenhum deles é configuração.
+ */
+const SNAPSHOT_VOLATILE_KEYS = new Set([
+  'generatedAt',
+  'readiness',
+  'publishedVersionId',
+]);
+
+/**
+ * Serialização estável da fotografia do agente, para responder "a configuração
+ * mudou?".
+ *
+ * As chaves são ordenadas porque o snapshot vindo do Postgres é `jsonb`, que
+ * não preserva a ordem de inserção: sem isso, a versão lida do banco nunca
+ * casaria com a recém-construída em memória.
+ */
+function comparableSnapshot(snapshot: unknown): string {
+  return JSON.stringify(stableValue(snapshot, true));
+}
+
+function stableValue(value: unknown, isRoot = false): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) => stableValue(item));
+  }
+  if (value && typeof value === 'object') {
+    const source = value as Record<string, unknown>;
+    const result: Record<string, unknown> = {};
+    for (const key of Object.keys(source).sort()) {
+      if (isRoot && SNAPSHOT_VOLATILE_KEYS.has(key)) continue;
+      result[key] = stableValue(source[key]);
+    }
+    return result;
+  }
+  return value;
 }
 
 function telemetryErrorCode(error: unknown) {

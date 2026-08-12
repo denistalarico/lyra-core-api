@@ -7,6 +7,7 @@ describe('AgentActivationPolicyService', () => {
   function service(
     policy: Record<string, unknown>,
     behaviorConfig: Record<string, unknown> = {},
+    channelActivationPolicies?: Record<string, Record<string, unknown>>,
   ) {
     const channel = {
       id: 'c',
@@ -19,7 +20,10 @@ describe('AgentActivationPolicyService', () => {
       id: 'a',
       status: 'active',
       publishedVersionId: 'v1',
-      channelPolicy: { activationPolicy: policy },
+      channelPolicy: {
+        activationPolicy: policy,
+        ...(channelActivationPolicies ? { channelActivationPolicies } : {}),
+      },
       behaviorConfig,
     };
     const binding = { id: 'b', status: 'active' };
@@ -145,5 +149,48 @@ describe('AgentActivationPolicyService', () => {
     });
     expect(result.exclusions).not.toContain('audience_mismatch');
     expect(result.wouldActivate).toBe(true);
+  });
+
+  describe('per-channel activation rules', () => {
+    // A regra é do canal: o mesmo agente pode assumir toda conversa no número
+    // dedicado de WhatsApp e só entrar por palavra-chave no Instagram.
+    it("prefers the channel's own rule over the agent default", async () => {
+      const result = await service(
+        { trigger: 'every_eligible' },
+        {},
+        { c: { trigger: 'keywords', keywords: ['orçamento'] } },
+      ).evaluate({
+        tenantId: 't',
+        workspaceId: 'w',
+        channelId: 'c',
+        messageText: 'Olá, tudo bem?',
+      });
+      expect(result.wouldActivate).toBe(false);
+      expect(result.reasonCode).toBe('keyword_missing');
+    });
+
+    it("applies the channel's own rule when it matches", async () => {
+      const result = await service(
+        { trigger: 'manual' },
+        {},
+        { c: { trigger: 'every_eligible' } },
+      ).evaluate({ tenantId: 't', workspaceId: 'w', channelId: 'c' });
+      expect(result).toMatchObject({
+        wouldActivate: true,
+        reasonCode: 'eligible_channel',
+      });
+    });
+
+    it('falls back to the agent default for a channel without its own rule', async () => {
+      const result = await service(
+        { trigger: 'every_eligible' },
+        {},
+        { 'other-channel': { trigger: 'manual' } },
+      ).evaluate({ tenantId: 't', workspaceId: 'w', channelId: 'c' });
+      expect(result).toMatchObject({
+        wouldActivate: true,
+        reasonCode: 'eligible_channel',
+      });
+    });
   });
 });

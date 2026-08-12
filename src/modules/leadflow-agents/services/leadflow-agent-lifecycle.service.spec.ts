@@ -73,6 +73,12 @@ function buildService(agent: ReturnType<typeof buildAgent>) {
   const conversationsRepository = {
     count: jest.fn().mockResolvedValue(0),
   };
+  const workspaceUsersRepository = {
+    find: jest.fn().mockResolvedValue([]),
+  };
+  const userProfilesRepository = {
+    find: jest.fn().mockResolvedValue([]),
+  };
   const presetService = {
     isCustomBusinessMode: jest.fn().mockReturnValue(false),
   };
@@ -89,6 +95,8 @@ function buildService(agent: ReturnType<typeof buildAgent>) {
     bindingsRepository as never,
     settingsRepository as never,
     conversationsRepository as never,
+    workspaceUsersRepository as never,
+    userProfilesRepository as never,
     presetService as never,
     {} as never,
     {} as never,

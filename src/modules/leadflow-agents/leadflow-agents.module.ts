@@ -4,7 +4,10 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { LeadFlowClientSettingsEntity } from '../leadflow-settings/entities';
 import { PermissionsModule } from '../permissions';
 import { AgencyUserSessionEntity } from '../agency/entities/agency-auth.entities';
-import { AgencyWorkspaceUserEntity } from '../agency/entities/agency-settings.entities';
+import {
+  AgencyUserProfileEntity,
+  AgencyWorkspaceUserEntity,
+} from '../agency/entities/agency-settings.entities';
 import {
   LeadFlowAgentChannelBindingEntity,
   LeadFlowAgentEntity,
@@ -48,6 +51,7 @@ import { LeadFlowOperationsActionService } from './services/leadflow-operations-
         OperationsRoomOutboxEntity,
         AgencyUserSessionEntity,
         AgencyWorkspaceUserEntity,
+        AgencyUserProfileEntity,
         InboxChannelEntity,
         InboxConversationEntity,
         InboxDomainOutboxEntity,

@@ -326,3 +326,20 @@ export function getPresetByKey(
 ): LeadFlowAgentPresetCatalogItem | undefined {
   return LEADFLOW_AGENT_PRESETS.find((preset) => preset.key === presetKey);
 }
+
+/**
+ * As ações que um tipo de agente pode executar, segundo o arquétipo do
+ * catálogo. É o que muda quando um operador troca o tipo de um agente já
+ * provisionado: o resto (nome, avatar, tom, canais) é escolha dele e é
+ * preservado, mas as ações permitidas têm de acompanhar o novo papel — senão
+ * um agente virado "Vendas" continuaria com as permissões de "Recepção".
+ *
+ * `custom` não tem arquétipo: fica com o mínimo seguro, o mesmo que o
+ * provisionamento customizado aplica.
+ */
+export function getAllowedActionsForType(type: LeadFlowAgentType): string[] {
+  const spec = Object.values(ARCHETYPES).find((item) => item.type === type);
+  return spec
+    ? [...spec.allowedActions]
+    : ['send_message', 'request_handoff'];
+}
