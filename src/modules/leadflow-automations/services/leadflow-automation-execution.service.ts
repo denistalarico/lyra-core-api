@@ -419,8 +419,8 @@ export class LeadFlowAutomationExecutionService {
         policyPrefix: 'csat',
         payload: {
           opportunityId: subject.opportunityId,
-          channel:
-            typeof message.channel === 'string' ? message.channel : 'whatsapp',
+          // No channel: the executor reads it off the conversation, so the
+          // request always leaves through the channel the lead came in on.
           text:
             typeof message.baseMessage === 'string'
               ? message.baseMessage
