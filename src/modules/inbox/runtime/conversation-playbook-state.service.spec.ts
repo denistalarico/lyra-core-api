@@ -9,6 +9,7 @@ function decision(overrides: Partial<AgentDecisionV1> = {}): AgentDecisionV1 {
     schema_version: 1,
     reply: 'Entendi. Podemos avançar para um diagnóstico?',
     follow_text: null,
+    follow_text_next_day: null,
     stage_key: null,
     stage_name: null,
     tags: [],

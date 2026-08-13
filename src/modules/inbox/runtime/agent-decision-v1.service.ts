@@ -47,6 +47,7 @@ export class AgentDecisionV1Service {
     const nullableStrings = [
       'reply',
       'follow_text',
+      'follow_text_next_day',
       'stage_key',
       'stage_name',
       'handoff_reason',
@@ -190,11 +191,13 @@ export class AgentDecisionPromptBuilder {
         : []),
       'Nunca invente preço, desconto, horário, disponibilidade, política, garantia, serviço ou link.',
       'operationalRules é a fonte canônica de disponibilidade e fechamentos: respeite seus períodos, nunca prometa um recurso marcado como unavailable/closed e só informe liberação quando houver regra available compatível.',
-      'Não proponha follow-up: a execução durável de follow-up está desabilitada.',
+      'Proponha sempre dois rascunhos de follow-up para o caso de o lead não responder: follow_text para ainda hoje e follow_text_next_day para o dia seguinte. São rascunhos; você não os envia nem afirma que serão enviados.',
+      'Cada rascunho é uma retomada curta, específica do que já foi conversado, com um próximo passo claro e sem repetir a resposta atual. O do dia seguinte assume que o de hoje não foi respondido.',
+      'Quando não houver follow-up aplicável — recusa clara, conversa encerrada, handoff pedido ou nada pendente do lado do lead — os dois campos devem ser null.',
     ].join('\n');
     const platformLayer = this.layer(
       'platform_policy',
-      'platform-system-policy-v4',
+      'platform-system-policy-v5',
       'trusted',
       platformPolicy,
     );

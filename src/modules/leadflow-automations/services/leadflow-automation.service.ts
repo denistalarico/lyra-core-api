@@ -30,6 +30,10 @@ import {
   NOTIFICATION_CHANNEL_RECIPE_KEYS,
   type LeadFlowAutomationRecipeCatalogItem,
 } from '../catalog/automation-recipes.catalog';
+import {
+  enabledFollowupSteps,
+  isInConversationStep,
+} from '../catalog/followup-plan.catalog';
 import { CrmStageTransitionPolicyService } from '../../crm/services/crm-stage-transition-policy.service';
 import {
   DryRunAutomationDto,
@@ -1041,6 +1045,18 @@ export class LeadFlowAutomationService {
   private async hasProductiveFollowupChannel(
     automation: LeadFlowAutomationEntity,
   ): Promise<boolean> {
+    // An attempt that answers inside the conversation declares no channel: it
+    // leaves through the connection the lead already used. Requiring a
+    // configured one would block a plan that is complete.
+    if (
+      automation.recipeKey === 'followup_idle_lead' &&
+      enabledFollowupSteps(automation.messageConfig?.followupSteps).some(
+        (step) => isInConversationStep(step.stepKey),
+      )
+    ) {
+      return true;
+    }
+
     const steps = Array.isArray(automation.messageConfig?.followupSteps)
       ? automation.messageConfig.followupSteps
       : null;

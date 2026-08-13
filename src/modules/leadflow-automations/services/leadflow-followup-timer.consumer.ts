@@ -3,19 +3,34 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { createHash } from 'node:crypto';
 import { MoreThan, Repository } from 'typeorm';
 import { CrmOpportunityEntity } from '../../crm/entities/crm-opportunity.entity';
+import {
+  readOpportunityFollowUp,
+  type CrmOpportunityFollowUpState,
+} from '../../crm/services/crm-opportunity-follow-up';
+import { InboxChannelEntity } from '../../inbox/entities/inbox-channel.entity';
 import { InboxConversationEntity } from '../../inbox/entities/inbox-conversation.entity';
 import { InboxDomainOutboxEntity } from '../../inbox/entities/inbox-domain-outbox.entity';
 import { InboxMessageEntity } from '../../inbox/entities/inbox-message.entity';
 import { InboxSettingsEntity } from '../../inbox/entities/inbox-settings.entity';
 import { hasLeadFlowOutboundOptOut } from '../../inbox/services/leadflow-contact-opt-out';
+import {
+  enabledFollowupSteps,
+  FOLLOWUP_STEP_KEYS,
+  isFollowupStepKey,
+  isInConversationStep,
+  type FollowupPlanStep,
+  type FollowupStepKey,
+} from '../catalog/followup-plan.catalog';
 import { LeadFlowAutomationEntity } from '../entities';
 import { LeadFlowAutomationStatus } from '../enums/leadflow-automation-status.enum';
 import { SendMessageExecutor } from '../executors/send-message.executor';
 import type {
+  LeadFlowFollowupChannel,
   LeadFlowFollowupChannelConfig,
   LeadFlowFollowupChannelResult,
   LeadFlowFollowupStepConfig,
 } from '../types/leadflow-automation.types';
+import { resolveFollowupSendAt } from './followup-quiet-hours';
 import {
   SCHEDULER_RUNTIME,
   ScheduledTimerConsumerRegistry,
@@ -28,6 +43,9 @@ import { evaluateBusinessHours } from './leadflow-automation-context-loader.serv
 
 export const LEADFLOW_FOLLOWUP_TIMER_CONSUMER =
   'leadflow.automations.followup' as const;
+
+/** The recipe whose cadence is the canonical d0/d1/d3/d7 plan. */
+const FOLLOWUP_IDLE_LEAD_RECIPE_KEY = 'followup_idle_lead';
 
 /**
  * Owns the two timer payloads used by Fase 6:
@@ -59,6 +77,8 @@ export class LeadFlowFollowupTimerConsumer
     private readonly opportunities: Repository<CrmOpportunityEntity>,
     @InjectRepository(InboxSettingsEntity, 'agency')
     private readonly inboxSettings: Repository<InboxSettingsEntity>,
+    @InjectRepository(InboxChannelEntity, 'agency')
+    private readonly inboxChannels: Repository<InboxChannelEntity>,
   ) {}
 
   onModuleInit(): void {
@@ -189,6 +209,7 @@ export class LeadFlowFollowupTimerConsumer
     const opportunityId = stringField(envelope.payload.opportunityId);
     let conversationId = stringField(envelope.payload.conversationId);
     let expectedVersion: number | null = null;
+    let followUp: CrmOpportunityFollowUpState | null = null;
     if (opportunityId) {
       const opportunity = await this.opportunities.findOne({
         where: {
@@ -208,6 +229,13 @@ export class LeadFlowFollowupTimerConsumer
       if (expectedStageId && opportunity.stageId !== expectedStageId) return;
       conversationId ??= opportunity.inboxConversationId;
       expectedVersion = opportunity.rowVersion;
+      // The card's own switch. Turning it off stops the chain for this
+      // opportunity only — every other one the automation governs is untouched.
+      followUp = readOpportunityFollowUp(opportunity);
+      if (followUp.mode === 'disabled') {
+        await this.clearNextFollowUp(envelope, opportunityId);
+        return;
+      }
     }
     if (!conversationId) return;
 
@@ -263,20 +291,61 @@ export class LeadFlowFollowupTimerConsumer
     ) {
       return;
     }
-    if (booleanField(envelope.payload.respectBusinessHours, true)) {
-      const settings = await this.inboxSettings.findOne({
-        where: {
-          tenantId: envelope.tenantId,
-          workspaceId: envelope.workspaceId,
-        },
-        select: { businessHours: true },
+    // Which plan governs this fire, and which attempt of it this is. The
+    // canonical cadence is addressed by name, so a plan edited mid-chain — an
+    // attempt switched off on the card — moves the chain instead of breaking it.
+    const canonical =
+      stringField(envelope.payload.automationRecipeKey) ===
+      FOLLOWUP_IDLE_LEAD_RECIPE_KEY;
+    const plan = canonical
+      ? enabledFollowupSteps(
+          followUp?.mode === 'manual'
+            ? followUp.steps
+            : envelope.payload.followupSteps,
+        )
+      : [];
+    const currentKey = canonical
+      ? (isFollowupStepKey(envelope.payload.stepKey)
+          ? envelope.payload.stepKey
+          : (plan[attemptIndex]?.stepKey ?? null))
+      : null;
+    const step = canonical
+      ? (plan.find((item) => item.stepKey === currentKey) ?? null)
+      : (followupSteps(envelope.payload.followupSteps)[attemptIndex] ?? null);
+    if (canonical && !currentKey) return;
+
+    // Quiet hours move an attempt, they never delete it. Returning here — which
+    // is what the business-hours check used to do — dropped this attempt *and*
+    // every one after it, because the next is only scheduled once this one runs.
+    // An attempt that is no longer in the plan has nothing to hold back: it
+    // skips straight to the hand-over below, and holding it against a stale
+    // offset would park the whole chain on an attempt that will never send.
+    if (!canonical || step) {
+      const firedAt = new Date(envelope.firedAt);
+      const dueMinutes = step
+        ? step.delayMinutes
+        : (numberList(envelope.payload.attemptOffsetsHours)[attemptIndex] ??
+            0) * 60;
+      // A chain armed before the cadence had names carries offsets instead of a
+      // plan; with neither, the fire itself is the best due time there is. What
+      // must not happen is a lead hearing from us at three in the morning
+      // because the payload was too old to say when the attempt was due.
+      const dueAt = dueMinutes
+        ? new Date(baselineAt.getTime() + dueMinutes * 60 * 1_000)
+        : firedAt;
+      const sendAt = resolveFollowupSendAt({
+        dueAt,
+        now: firedAt,
+        timeZone: await this.resolveTimeZone(envelope),
+        respectQuietHours: booleanField(
+          envelope.payload.respectBusinessHours,
+          true,
+        ),
+        allowAnticipation:
+          canonical && step !== null && isInConversationStep(step.stepKey),
       });
-      if (
-        evaluateBusinessHours(
-          settings?.businessHours ?? null,
-          new Date(envelope.firedAt),
-        ) !== true
-      ) {
+      if (sendAt.getTime() > firedAt.getTime() + 60 * 1_000) {
+        await this.deferAttempt(envelope, sendAt);
         return;
       }
     }
@@ -289,11 +358,12 @@ export class LeadFlowFollowupTimerConsumer
     });
     if (!gate.allowed) return;
 
-    const step =
-      followupSteps(envelope.payload.followupSteps)[attemptIndex] ?? null;
-    const channelConfigs = step
-      ? step.channels.filter((item) => item.enabled)
-      : [legacyWhatsappConfig(envelope.payload)];
+    const channelConfigs = await this.resolveChannelConfigs({
+      envelope,
+      canonical,
+      step,
+      conversation,
+    });
     const lastInbound = await this.messages.findOne({
       where: {
         tenantId: envelope.tenantId,
@@ -310,6 +380,16 @@ export class LeadFlowFollowupTimerConsumer
         24 * 60 * 60 * 1_000;
     let failedProviders = 0;
 
+    // What this attempt says. Inside the conversation it is the agent's
+    // proposal (or, on a card in manual mode, what the person wrote); an
+    // attempt that leaves the window is a template and carries no free text.
+    const text = resolveAttemptText({
+      canonical,
+      step,
+      followUp,
+      fallback: nullableString(envelope.payload.text),
+    });
+
     for (const channelConfig of channelConfigs) {
       let channelResult: LeadFlowFollowupChannelResult;
       let reference: string | null = null;
@@ -319,7 +399,11 @@ export class LeadFlowFollowupTimerConsumer
         'webchat',
       ].includes(channelConfig.channel);
 
-      if (!insideMessagingWindow && outsideUnsupported) {
+      if (canonical && step && isInConversationStep(step.stepKey) && !text) {
+        // Manual mode with nothing written yet: there is no message to send,
+        // and the default copy is not this card's voice to borrow.
+        channelResult = 'skipped_message_unavailable';
+      } else if (!insideMessagingWindow && outsideUnsupported) {
         channelResult = 'skipped_outside_messaging_window';
       } else if (
         !insideMessagingWindow &&
@@ -380,7 +464,7 @@ export class LeadFlowFollowupTimerConsumer
             conversationId,
             channel: channelConfig.channel,
             connectionRef: channelConfig.connectionRef ?? null,
-            text: nullableString(envelope.payload.text),
+            text,
             templateRef:
               channelConfig.whatsappTemplate?.providerTemplateName ??
               nullableString(envelope.payload.templateRef),
@@ -422,18 +506,38 @@ export class LeadFlowFollowupTimerConsumer
       throw new Error('followup_message_failed');
     }
 
-    const offsets = numberList(envelope.payload.attemptOffsetsHours);
-    const nextIndex = attemptIndex + 1;
-    if (nextIndex >= offsets.length) return;
-    const nextAt = new Date(
-      baselineAt.getTime() + offsets[nextIndex] * 60 * 60 * 1_000,
+    // The next attempt is resolved by name against the plan in force, not by
+    // walking a frozen list of offsets: an attempt switched off mid-chain must
+    // hand over to the one after it, not end the sequence.
+    const next = canonical
+      ? nextPlanStep(plan, currentKey)
+      : legacyNextStep(envelope.payload, attemptIndex);
+    if (!next) {
+      if (opportunityId) await this.clearNextFollowUp(envelope, opportunityId);
+      return;
+    }
+
+    const nextDueAt = new Date(
+      baselineAt.getTime() + next.delayMinutes * 60 * 1_000,
     );
-    const fireAt = new Date(Math.max(Date.now(), nextAt.getTime()));
+    const fireAt = resolveFollowupSendAt({
+      dueAt: nextDueAt,
+      now: new Date(),
+      timeZone: await this.resolveTimeZone(envelope),
+      respectQuietHours: booleanField(
+        envelope.payload.respectBusinessHours,
+        true,
+      ),
+      allowAnticipation: canonical && isInConversationStep(next.stepKey),
+    });
+    const nextIndex = canonical
+      ? plan.findIndex((item) => item.stepKey === next.stepKey)
+      : attemptIndex + 1;
     const subjectId = opportunityId ?? conversationId;
     await this.scheduler.schedule({
       tenantId: envelope.tenantId,
       workspaceId: envelope.workspaceId,
-      timerKey: `followup:${automationId}:${subjectId}:${baselineAt.toISOString()}:${nextIndex + 1}`,
+      timerKey: `followup:${automationId}:${subjectId}:${baselineAt.toISOString()}:${next.stepKey}`,
       dedupeScope: automationId,
       fireAt: fireAt.toISOString(),
       purpose: 'automation_followup',
@@ -442,8 +546,119 @@ export class LeadFlowFollowupTimerConsumer
         ...envelope.payload,
         conversationId,
         attemptIndex: nextIndex,
+        stepKey: next.stepKey,
       },
     });
+    // What the card shows as "próximo follow-up". Nothing else writes it, and
+    // it is a projection of the timer above — not a governed decision.
+    if (opportunityId) {
+      await this.opportunities.update(
+        {
+          id: opportunityId,
+          tenantId: envelope.tenantId,
+          workspaceId: envelope.workspaceId,
+        },
+        { nextFollowUpAt: fireAt },
+      );
+    }
+  }
+
+  /** Re-arms this same attempt for the first instant it may reach the lead. */
+  private async deferAttempt(
+    envelope: TimerFireEnvelope,
+    sendAt: Date,
+  ): Promise<void> {
+    await this.scheduler.schedule({
+      tenantId: envelope.tenantId,
+      workspaceId: envelope.workspaceId,
+      // The instant is part of the key, so a repeated deferral to the same
+      // moment is the same timer rather than a second one.
+      timerKey: `${envelope.timerKey}:defer:${sendAt.toISOString()}`.slice(
+        0,
+        180,
+      ),
+      dedupeScope: stringField(envelope.payload.automationId) ?? envelope.timerId,
+      fireAt: sendAt.toISOString(),
+      purpose: envelope.purpose,
+      consumerKey: this.consumerKey,
+      payload: envelope.payload,
+    });
+  }
+
+  /** The zone the quiet-hours envelope is read in. */
+  private async resolveTimeZone(envelope: TimerFireEnvelope): Promise<string> {
+    const configured = stringField(envelope.payload.timezone);
+    if (configured) return configured;
+    const settings = await this.inboxSettings.findOne({
+      where: {
+        tenantId: envelope.tenantId,
+        workspaceId: envelope.workspaceId,
+      },
+      select: { businessHours: true },
+    });
+    const businessHours = settings?.businessHours ?? null;
+    const timezone =
+      businessHours && typeof businessHours.timezone === 'string'
+        ? businessHours.timezone
+        : null;
+    return timezone ?? 'America/Sao_Paulo';
+  }
+
+  private async clearNextFollowUp(
+    envelope: TimerFireEnvelope,
+    opportunityId: string,
+  ): Promise<void> {
+    await this.opportunities.update(
+      {
+        id: opportunityId,
+        tenantId: envelope.tenantId,
+        workspaceId: envelope.workspaceId,
+      },
+      { nextFollowUpAt: null },
+    );
+  }
+
+  /**
+   * The channels one attempt actually goes out on.
+   *
+   * d0 and d1 answer inside the conversation the lead opened, so they carry no
+   * channel of their own — offering the choice is what would let a lead who
+   * wrote on Instagram be answered on WhatsApp. d3 and d7 have left the window
+   * and need a transport that can start a conversation, which is the channel
+   * list the operator configured.
+   */
+  private async resolveChannelConfigs(input: {
+    envelope: TimerFireEnvelope;
+    canonical: boolean;
+    step: { stepKey: string; channels: LeadFlowFollowupChannelConfig[] } | null;
+    conversation: InboxConversationEntity;
+  }): Promise<LeadFlowFollowupChannelConfig[]> {
+    const { envelope, canonical, step, conversation } = input;
+    // No step in a named cadence means this attempt was switched off after the
+    // timer was armed: nothing goes out, and the chain moves on to the next.
+    if (!step) return canonical ? [] : [legacyWhatsappConfig(envelope.payload)];
+    if (!canonical || !isInConversationStep(step.stepKey)) {
+      return step.channels.filter((item) => item.enabled);
+    }
+    if (!conversation.channelId) return [];
+    const channel = await this.inboxChannels.findOne({
+      where: {
+        id: conversation.channelId,
+        tenantId: envelope.tenantId,
+        workspaceId: envelope.workspaceId,
+      },
+      select: { id: true, type: true },
+    });
+    const mapped = channel ? mapInboxChannelType(channel.type) : null;
+    if (!mapped) return [];
+    return [
+      {
+        channel: mapped,
+        enabled: true,
+        outsideWindowEnabled: false,
+        connectionRef: channel!.id,
+      },
+    ];
   }
 
   private async recordChannelResult(input: {
@@ -508,6 +723,71 @@ export class LeadFlowFollowupTimerConsumer
     }
     return automation;
   }
+}
+
+/** The next enabled attempt after `currentKey`, in cadence order. */
+function nextPlanStep(
+  plan: FollowupPlanStep[],
+  currentKey: FollowupStepKey | null,
+): { stepKey: string; delayMinutes: number } | null {
+  if (!currentKey) return null;
+  const current = FOLLOWUP_STEP_KEYS.indexOf(currentKey);
+  return (
+    plan.find((step) => FOLLOWUP_STEP_KEYS.indexOf(step.stepKey) > current) ??
+    null
+  );
+}
+
+/**
+ * The chain of a recipe that still declares its cadence as a list of offsets.
+ * The step key reproduces the 1-based position the timer keys already use, so
+ * a chain armed before this change keeps its identity and is not duplicated.
+ */
+function legacyNextStep(
+  payload: Record<string, unknown>,
+  attemptIndex: number,
+): { stepKey: string; delayMinutes: number } | null {
+  const offsets = numberList(payload.attemptOffsetsHours);
+  const nextIndex = attemptIndex + 1;
+  if (nextIndex >= offsets.length) return null;
+  return {
+    stepKey: String(nextIndex + 1),
+    delayMinutes: offsets[nextIndex] * 60,
+  };
+}
+
+/**
+ * The words this attempt goes out with.
+ *
+ * Only the attempts that answer inside the conversation carry free text. On an
+ * automatic card that text is what the agent proposed while reading the
+ * conversation, falling back to the recipe's default copy; on a manual card it
+ * is only what the person wrote — borrowing the default would put words in
+ * their mouth.
+ */
+function resolveAttemptText(input: {
+  canonical: boolean;
+  step: { stepKey: string } | null;
+  followUp: CrmOpportunityFollowUpState | null;
+  fallback: string | null;
+}): string | null {
+  const { canonical, step, followUp, fallback } = input;
+  if (!canonical || !step || !isInConversationStep(step.stepKey)) {
+    return fallback;
+  }
+  const proposed =
+    step.stepKey === 'd0' ? followUp?.texts.d0 : followUp?.texts.d1;
+  if (followUp?.mode === 'manual') return proposed ?? null;
+  return proposed ?? fallback;
+}
+
+function mapInboxChannelType(type: string): LeadFlowFollowupChannel | null {
+  if (type === 'instagram') return 'instagram_direct';
+  return ['whatsapp', 'email', 'sms', 'facebook_messenger', 'webchat'].includes(
+    type,
+  )
+    ? (type as LeadFlowFollowupChannel)
+    : null;
 }
 
 function isConversationTerminal(

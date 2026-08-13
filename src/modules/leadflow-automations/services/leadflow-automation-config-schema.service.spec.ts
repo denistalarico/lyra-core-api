@@ -234,6 +234,34 @@ describe('LeadFlowAutomationConfigSchemaService', () => {
       });
 
       expect(missing).not.toContain('message.templateRef');
+      // The recipe's own defaults are a complete plan: D+0 and D+1 answer
+      // inside the conversation and need no channel to be configured.
+      expect(missing).not.toContain('message.followupSteps');
+    });
+
+    it('is only unready when every attempt of the plan is switched off', () => {
+      const missing = service.findMissingRequiredFields(idleLead, {
+        trigger: idleLead.defaultTriggerConfig,
+        conditions: idleLead.defaultConditionConfig,
+        actions: idleLead.defaultActionConfig,
+        message: {
+          ...idleLead.defaultMessageConfig,
+          followupSteps: [
+            { stepKey: 'd0', enabled: false, delayMinutes: 180, channels: [] },
+            { stepKey: 'd1', enabled: false, delayMinutes: 1320, channels: [] },
+            { stepKey: 'd3', enabled: false, delayMinutes: 4320, channels: [] },
+            {
+              stepKey: 'd7',
+              enabled: false,
+              delayMinutes: 10080,
+              channels: [],
+            },
+          ],
+        },
+        crmPolicy: idleLead.defaultCrmPolicy,
+        schedulePolicy: idleLead.defaultSchedulePolicy,
+      });
+
       expect(missing).toContain('message.followupSteps');
     });
 

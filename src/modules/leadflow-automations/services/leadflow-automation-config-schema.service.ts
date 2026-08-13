@@ -11,6 +11,7 @@ import {
   NOTIFICATION_CHANNEL_RECIPE_KEYS,
   type LeadFlowAutomationRecipeCatalogItem,
 } from '../catalog/automation-recipes.catalog';
+import { enabledFollowupSteps } from '../catalog/followup-plan.catalog';
 
 export interface LeadFlowAutomationConfigError {
   /** `section.key`, or just `section` for a malformed section. */
@@ -141,12 +142,23 @@ export class LeadFlowAutomationConfigSchemaService {
       }
     }
 
+    // The canonical cadence answers "does this attempt happen" with `enabled`,
+    // because d0 and d1 reply inside the conversation and have no channel of
+    // their own to switch on. The other two recipes still declare their channel
+    // per step, so for them a step without one configures nothing.
     if (
-      [
-        'followup_idle_lead',
-        'followup_by_crm_stage',
-        'cold_lead_reactivation',
-      ].includes(recipe.key) &&
+      recipe.key === 'followup_idle_lead' &&
+      Array.isArray(config.message?.followupSteps) &&
+      enabledFollowupSteps(config.message.followupSteps).length === 0 &&
+      !missing.includes('message.followupSteps')
+    ) {
+      missing.push('message.followupSteps');
+    }
+
+    if (
+      ['followup_by_crm_stage', 'cold_lead_reactivation'].includes(
+        recipe.key,
+      ) &&
       Array.isArray(config.message?.followupSteps) &&
       !config.message.followupSteps.some(
         (step) =>
@@ -406,10 +418,18 @@ export class LeadFlowAutomationConfigSchemaService {
     for (const step of raw) {
       if (
         !this.isPlainObject(step) ||
-        !this.hasOnlyKeys(step, ['stepKey', 'delayMinutes', 'channels']) ||
+        // `enabled` is what lets an attempt with no channel of its own — d0 and
+        // d1 answer inside the conversation — still say that it happens.
+        !this.hasOnlyKeys(step, [
+          'stepKey',
+          'enabled',
+          'delayMinutes',
+          'channels',
+        ]) ||
         typeof step.stepKey !== 'string' ||
         !step.stepKey.trim() ||
         step.stepKey.length > 80 ||
+        (step.enabled !== undefined && typeof step.enabled !== 'boolean') ||
         typeof step.delayMinutes !== 'number' ||
         !Number.isFinite(step.delayMinutes) ||
         step.delayMinutes < 0 ||

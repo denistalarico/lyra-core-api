@@ -1,4 +1,6 @@
 /* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-return */
+import type { TimerFireEnvelope } from '../scheduler';
+import type { LeadFlowJsonValue } from '../types/leadflow-automation.types';
 import { LeadFlowAutomationStatus } from '../enums/leadflow-automation-status.enum';
 import { LeadFlowFollowupTimerConsumer } from './leadflow-followup-timer.consumer';
 
@@ -14,7 +16,9 @@ describe('LeadFlowFollowupTimerConsumer', () => {
   const outboxInsert = jest.fn();
   const outboxCreate = jest.fn((value) => value);
   const opportunitiesFindOne = jest.fn();
+  const opportunitiesUpdate = jest.fn();
   const inboxSettingsFindOne = jest.fn();
+  const inboxChannelsFindOne = jest.fn();
 
   const consumer = new LeadFlowFollowupTimerConsumer(
     { register } as never,
@@ -25,8 +29,9 @@ describe('LeadFlowFollowupTimerConsumer', () => {
     { findOne: conversationsFindOne } as never,
     { findOne: messagesFindOne, exist: messagesExist } as never,
     { insert: outboxInsert, create: outboxCreate } as never,
-    { findOne: opportunitiesFindOne } as never,
+    { findOne: opportunitiesFindOne, update: opportunitiesUpdate } as never,
     { findOne: inboxSettingsFindOne } as never,
+    { findOne: inboxChannelsFindOne } as never,
   );
 
   beforeEach(() => {
@@ -317,23 +322,262 @@ describe('LeadFlowFollowupTimerConsumer', () => {
     expect(send).not.toHaveBeenCalled();
   });
 
-  it('does not send outside the configured business hours', async () => {
-    inboxSettingsFindOne.mockResolvedValue({
-      businessHours: {
-        enabled: true,
-        timezone: 'UTC',
-        days: [
-          {
-            day: 'monday',
-            enabled: true,
-            start: '09:00',
-            end: '10:00',
+  describe('the canonical cadence', () => {
+    beforeEach(() => {
+      jest.useFakeTimers().setSystemTime(new Date('2026-07-27T12:00:00.000Z'));
+    });
+    afterEach(() => jest.useRealTimers());
+
+    /** A chain of the named plan, on a card with a follow-up mode. */
+    function canonicalEnvelope(
+      followUp: Record<string, unknown> = {},
+      plan?: LeadFlowJsonValue,
+    ) {
+      opportunitiesFindOne.mockResolvedValue({
+        id: 'opportunity-1',
+        status: 'open',
+        autonomyMode: 'automatic',
+        stageId: 'stage-1',
+        inboxConversationId: 'conversation-1',
+        rowVersion: 4,
+        followMode: 'automatic',
+        followMessage: null,
+        metadata: {},
+        ...followUp,
+      });
+      conversationsFindOne.mockResolvedValue({
+        id: 'conversation-1',
+        tenantId: 'tenant-1',
+        workspaceId: 'workspace-1',
+        opportunityId: 'opportunity-1',
+        channelId: 'channel-1',
+        status: 'open',
+        ownershipState: 'ai_active',
+        ownershipVersion: 3,
+        aiEnabled: true,
+      });
+      inboxChannelsFindOne.mockResolvedValue({
+        id: 'channel-1',
+        type: 'whatsapp',
+      });
+      // No outbound after the baseline, and an inbound recent enough that the
+      // messaging window is still open — which is what D+0 and D+1 assume.
+      // Answering by query rather than by call order: a queued `once` that a
+      // test does not consume leaks into the next one.
+      messagesFindOne.mockImplementation((query: { where?: { direction?: string } }) =>
+        Promise.resolve(
+          query?.where?.direction === 'inbound'
+            ? { id: 'inbound-1', occurredAt: new Date('2026-07-27T09:00:00.000Z') }
+            : null,
+        ),
+      );
+      const envelope = deliveryEnvelope();
+      envelope.payload.baselineAt = '2026-07-27T09:00:00.000Z';
+      envelope.payload.templateRef = null;
+      envelope.payload.automationRecipeKey = 'followup_idle_lead';
+      envelope.payload.opportunityId = 'opportunity-1';
+      envelope.payload.respectBusinessHours = false;
+      envelope.payload.stepKey = 'd0';
+      envelope.payload.followupSteps = plan ?? [
+        { stepKey: 'd0', enabled: true, delayMinutes: 180, channels: [] },
+        { stepKey: 'd1', enabled: true, delayMinutes: 1320, channels: [] },
+      ];
+      return envelope;
+    }
+
+    it('answers on the connection the lead already used', async () => {
+      // The attempt carries no channel of its own: offering the choice is what
+      // would let a lead who wrote on Instagram be answered on WhatsApp.
+      await consumer.handleTimer(canonicalEnvelope());
+
+      expect(inboxChannelsFindOne).toHaveBeenCalled();
+      expect(send).toHaveBeenCalledWith(
+        expect.objectContaining({
+          payload: expect.objectContaining({
+            channel: 'whatsapp',
+            connectionRef: 'channel-1',
+          }),
+        }),
+      );
+    });
+
+    it('says what the agent proposed for this attempt', async () => {
+      await consumer.handleTimer(
+        canonicalEnvelope({
+          followMessage: 'Consegue me dizer se o horário serve?',
+          metadata: {
+            followUp: {
+              texts: { d1: 'Ontem falamos do orçamento — seguimos?' },
+            },
           },
-        ],
-      },
+        }),
+      );
+
+      expect(send).toHaveBeenCalledWith(
+        expect.objectContaining({
+          payload: expect.objectContaining({
+            text: 'Consegue me dizer se o horário serve?',
+          }),
+        }),
+      );
+    });
+
+    it('stops for a card whose follow-up was switched off', async () => {
+      await consumer.handleTimer(canonicalEnvelope({ followMode: 'disabled' }));
+
+      expect(send).not.toHaveBeenCalled();
+      expect(schedule).not.toHaveBeenCalled();
+      expect(opportunitiesUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'opportunity-1' }),
+        { nextFollowUpAt: null },
+      );
+    });
+
+    it('runs the card own plan when the card is manual', async () => {
+      const envelope = canonicalEnvelope({
+        followMode: 'manual',
+        metadata: {
+          followUp: {
+            steps: [
+              {
+                stepKey: 'd0',
+                enabled: true,
+                delayMinutes: 180,
+                channels: [],
+              },
+            ],
+            texts: { d0: 'Escrito à mão' },
+          },
+        },
+      });
+
+      await consumer.handleTimer(envelope);
+
+      expect(send).toHaveBeenCalledWith(
+        expect.objectContaining({
+          payload: expect.objectContaining({ text: 'Escrito à mão' }),
+        }),
+      );
+      // The manual plan has one attempt, so the chain ends here rather than
+      // continuing into the automation's D+1.
+      expect(schedule).not.toHaveBeenCalled();
+    });
+
+    it('never borrows the default copy for a manual card', async () => {
+      await consumer.handleTimer(
+        canonicalEnvelope({
+          followMode: 'manual',
+          metadata: {
+            followUp: {
+              steps: [
+                {
+                  stepKey: 'd0',
+                  enabled: true,
+                  delayMinutes: 180,
+                  channels: [],
+                },
+              ],
+            },
+          },
+        }),
+      );
+
+      expect(send).not.toHaveBeenCalled();
+      expect(outboxInsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          payload: expect.objectContaining({
+            result: 'skipped_message_unavailable',
+          }),
+        }),
+      );
+    });
+
+    it('hands over to the next attempt by name, and dates the card', async () => {
+      const envelope = canonicalEnvelope();
+      await consumer.handleTimer(envelope);
+
+      expect(schedule).toHaveBeenCalledWith(
+        expect.objectContaining({
+          timerKey: expect.stringContaining(':d1'),
+          payload: expect.objectContaining({ stepKey: 'd1', attemptIndex: 1 }),
+        }),
+      );
+      expect(opportunitiesUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'opportunity-1' }),
+        { nextFollowUpAt: new Date('2026-07-28T07:00:00.000Z') },
+      );
+    });
+
+    it('skips an attempt switched off mid-chain instead of ending there', async () => {
+      const envelope = canonicalEnvelope({}, [
+        { stepKey: 'd0', enabled: false, delayMinutes: 180, channels: [] },
+        {
+          stepKey: 'd7',
+          enabled: true,
+          delayMinutes: 10080,
+          channels: [{ channel: 'whatsapp', enabled: true }],
+        },
+      ]);
+
+      await consumer.handleTimer(envelope);
+
+      expect(send).not.toHaveBeenCalled();
+      expect(schedule).toHaveBeenCalledWith(
+        expect.objectContaining({
+          payload: expect.objectContaining({ stepKey: 'd7' }),
+        }),
+      );
+    });
+  });
+
+  it('defers an attempt that comes due outside the quiet-hours envelope', async () => {
+    // The old behaviour was to return here, which dropped this attempt *and*
+    // the rest of the chain: the next one is only scheduled once this one runs.
+    inboxSettingsFindOne.mockResolvedValue({
+      businessHours: { enabled: true, timezone: 'UTC' },
+    });
+    const envelope = deliveryEnvelope();
+    envelope.firedAt = '2026-07-27T04:00:00.000Z';
+    envelope.payload.baselineAt = '2026-07-27T04:00:00.000Z';
+    envelope.payload.attemptOffsetsHours = [0, 72, 168];
+
+    await consumer.handleTimer(envelope);
+
+    expect(send).not.toHaveBeenCalled();
+    expect(schedule).toHaveBeenCalledWith(
+      expect.objectContaining({
+        fireAt: '2026-07-27T07:00:00.000Z',
+        payload: envelope.payload,
+      }),
+    );
+  });
+
+  it('sends when the attempt comes due inside the envelope', async () => {
+    inboxSettingsFindOne.mockResolvedValue({
+      businessHours: { enabled: true, timezone: 'UTC' },
     });
     await consumer.handleTimer(deliveryEnvelope());
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
+  it('reads the envelope in the automation zone, not the workspace one', async () => {
+    // 23:00 in São Paulo is 02:00 UTC: the same instant is inside the envelope
+    // for a workspace in UTC and well outside it for one in São Paulo.
+    inboxSettingsFindOne.mockResolvedValue({
+      businessHours: { enabled: true, timezone: 'UTC' },
+    });
+    const envelope = deliveryEnvelope();
+    envelope.firedAt = '2026-07-28T02:00:00.000Z';
+    envelope.payload.baselineAt = '2026-07-28T02:00:00.000Z';
+    envelope.payload.attemptOffsetsHours = [0, 72, 168];
+    envelope.payload.timezone = 'America/Sao_Paulo';
+
+    await consumer.handleTimer(envelope);
+
     expect(send).not.toHaveBeenCalled();
+    expect(schedule).toHaveBeenCalledWith(
+      expect.objectContaining({ fireAt: '2026-07-28T10:00:00.000Z' }),
+    );
   });
 });
 
@@ -359,7 +603,9 @@ function idleEnvelope() {
   } as never;
 }
 
-function deliveryEnvelope() {
+function deliveryEnvelope(): TimerFireEnvelope & {
+  payload: Record<string, unknown>;
+} {
   return {
     timerId: 'timer-delivery',
     timerKey: 'delivery',
@@ -383,5 +629,5 @@ function deliveryEnvelope() {
       text: 'Podemos continuar?',
       templateRef: 'followup_v1',
     },
-  } as never;
+  };
 }

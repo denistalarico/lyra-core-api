@@ -538,7 +538,9 @@ export class CrmOpportunityCommandService {
       cardColor: null,
       sortOrder: await this.nextSortOrder(manager, ctx, pipeline.id, stage.id),
       visibility: 'workspace',
-      followMode: 'manual',
+      // A copy is a second negotiation about the same lead, not a second lead:
+      // it inherits how the original is followed up rather than inventing it.
+      followMode: source.followMode,
       followMessage: null,
       followSendAutomatically: false,
       metadata: this.derivedMetadata(source, 'copy', options.reason),
@@ -748,7 +750,8 @@ export class CrmOpportunityCommandService {
       cardColor: null,
       sortOrder: await this.nextSortOrder(manager, ctx, pipeline.id, stage.id),
       visibility: candidate.visibility || 'workspace',
-      followMode: 'manual',
+      // Same conversation, reopened: the mode the card had is the mode it keeps.
+      followMode: source.followMode,
       followMessage: null,
       followSendAutomatically: false,
       metadata: {

@@ -125,7 +125,8 @@ describe('LeadFlowAutomationEvaluationService', () => {
 
   describe('rate limits', () => {
     it('stops once the attempt limit is reached', () => {
-      const result = simulate(buildAutomation(), { attemptsSoFar: 3 });
+      // Four attempts now: the cadence is d0, d1, d3 and d7.
+      const result = simulate(buildAutomation(), { attemptsSoFar: 4 });
 
       expect(result.skipReason).toBe(
         LeadFlowAutomationSkipReason.AttemptLimitReached,

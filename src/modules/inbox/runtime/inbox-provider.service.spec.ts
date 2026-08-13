@@ -493,6 +493,7 @@ function validDecision() {
     schema_version: 1,
     reply: 'Resposta supervisionada',
     follow_text: null,
+    follow_text_next_day: null,
     stage_key: null,
     stage_name: null,
     tags: [],

@@ -15,6 +15,10 @@ import { AddOpportunityTagExecutor } from '../executors/add-opportunity-tag.exec
 import { RequestCsatExecutor } from '../executors/request-csat.executor';
 import { GenerateDailySummaryExecutor } from '../executors/generate-daily-summary.executor';
 import { GOVERNED_STAGE_ADVANCE_RECIPE_KEY } from '../catalog/automation-recipes.catalog';
+import {
+  enabledFollowupSteps,
+  toStoredFollowupSteps,
+} from '../catalog/followup-plan.catalog';
 import type { LeadFlowJsonObject } from '../types/leadflow-automation.types';
 import {
   LeadFlowAutomationContextSignal,
@@ -579,19 +583,25 @@ export class LeadFlowAutomationExecutionService {
       : delivery.occurredAt;
     const maxAttempts = clampInteger(actions.maxAttempts, 1, 7, 1);
 
-    const configuredSteps = Array.isArray(message.followupSteps)
-      ? message.followupSteps
-          .filter(
-            (step) =>
-              typeof step === 'object' &&
-              step !== null &&
-              !Array.isArray(step) &&
-              typeof step.delayMinutes === 'number' &&
-              Number.isFinite(step.delayMinutes) &&
-              step.delayMinutes >= 0,
-          )
-          .slice(0, maxAttempts)
-      : [];
+    // The canonical cadence is the plan itself: four named attempts, of which
+    // the enabled ones are the chain. `maxAttempts` no longer truncates it —
+    // a stored 3 would silently drop D+7 from a plan the operator switched on.
+    const canonicalPlan = automation.recipeKey === 'followup_idle_lead';
+    const configuredSteps = canonicalPlan
+      ? toStoredFollowupSteps(enabledFollowupSteps(message.followupSteps))
+      : Array.isArray(message.followupSteps)
+        ? message.followupSteps
+            .filter(
+              (step) =>
+                typeof step === 'object' &&
+                step !== null &&
+                !Array.isArray(step) &&
+                typeof step.delayMinutes === 'number' &&
+                Number.isFinite(step.delayMinutes) &&
+                step.delayMinutes >= 0,
+            )
+            .slice(0, maxAttempts)
+        : [];
     const fromAppointment = isAppointmentEvent(delivery.eventName);
     let offsets: number[];
     let firstOffset: number;
@@ -656,6 +666,9 @@ export class LeadFlowAutomationExecutionService {
       respectBusinessHours:
         conditions.businessHoursOnly === true ||
         schedule.respectBusinessHours !== false,
+      // The zone the quiet-hours envelope is read in. Null lets the consumer
+      // fall back to the workspace's own business-hours zone.
+      timezone: typeof schedule.timezone === 'string' ? schedule.timezone : null,
       text:
         typeof message.baseMessage === 'string' ? message.baseMessage : null,
       templateRef:

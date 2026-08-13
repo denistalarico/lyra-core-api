@@ -9,12 +9,16 @@ import {
 import { InjectDataSource } from '@nestjs/typeorm';
 import { createHash, randomUUID } from 'crypto';
 import { Readable } from 'stream';
-import { DataSource, IsNull } from 'typeorm';
+import { DataSource, EntityManager, IsNull } from 'typeorm';
 import { FilesService } from '../../../common/files/files.service';
 import type { RequestContext } from '../../../common/context/request-context.interface';
 import { AgencyWorkspaceUserEntity } from '../../agency/entities/agency-settings.entities';
 import { CrmOpportunityEntity } from '../../crm/entities/crm-opportunity.entity';
 import { CrmOpportunityCommandService } from '../../crm/services/crm-opportunity-command.service';
+import {
+  readOpportunityFollowUp,
+  writeOpportunityFollowUp,
+} from '../../crm/services/crm-opportunity-follow-up';
 import {
   CrmAiStageTransitionCatalog,
   CrmStageTransitionPolicyService,
@@ -837,6 +841,7 @@ export class InboxAgentRuntimeService {
         await manager
           .getRepository(InboxConversationEntity)
           .save(lockedConversation);
+        await this.saveFollowUpDrafts(manager, opportunity, proposal);
         const policyActions = this.evaluateGovernedActions({
           decisionId,
           batch,
@@ -1036,6 +1041,48 @@ export class InboxAgentRuntimeService {
         'processing_finished',
       );
     }
+  }
+
+  /**
+   * Keeps the follow-up drafts the agent wrote on the opportunity.
+   *
+   * This is not an effect and does not go through the governed-action review:
+   * nothing is sent, and what is stored is a draft the card shows and a person
+   * can rewrite. It is saved at decision time because that is when the agent
+   * has the conversation in front of it — by the time the cadence comes due,
+   * days later, the reason it knew what to say is gone.
+   *
+   * Only an automatic card is written to. On a manual card the texts belong to
+   * whoever configured the follow-up there, and a proposal would overwrite them.
+   */
+  private async saveFollowUpDrafts(
+    manager: EntityManager,
+    opportunity: CrmOpportunityEntity | null | undefined,
+    proposal: AgentDecisionV1,
+  ): Promise<void> {
+    if (!opportunity) return;
+    const sameDay = draftText(proposal.follow_text);
+    const nextDay = draftText(proposal.follow_text_next_day);
+    if (!sameDay && !nextDay) return;
+    if (readOpportunityFollowUp(opportunity).mode !== 'automatic') return;
+
+    writeOpportunityFollowUp(opportunity, {
+      texts: { d0: sameDay, d1: nextDay },
+      textsSource: 'agent',
+    });
+    await manager.getRepository(CrmOpportunityEntity).update(
+      {
+        id: opportunity.id,
+        tenantId: opportunity.tenantId,
+        workspaceId: opportunity.workspaceId,
+      },
+      {
+        followMessage: opportunity.followMessage,
+        // TypeORM's deep-partial type cannot express an open jsonb bag; the
+        // value is the entity's own column, already merged by the writer above.
+        metadata: opportunity.metadata as never,
+      },
+    );
   }
 
   private evaluateGovernedActions(input: {
@@ -2284,4 +2331,11 @@ function publicReviewSnapshot(
         : null,
     auditRef: typeof snapshot.auditRef === 'string' ? snapshot.auditRef : null,
   };
+}
+
+/** A follow-up draft, trimmed and capped. Empty means the agent proposed none. */
+function draftText(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const text = value.replace(/\s+/g, ' ').trim();
+  return text ? text.slice(0, 1_000) : null;
 }

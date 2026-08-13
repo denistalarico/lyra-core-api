@@ -697,7 +697,10 @@ export class InboxGovernedActionWorker
           cardColor: null,
           sortOrder: 0,
           visibility: 'workspace',
-          followMode: 'manual',
+          // The agent qualified this conversation and wrote the follow-up
+          // drafts along with its reply, so the card starts automatic: the
+          // cadence has both a reason to run and something to say.
+          followMode: 'automatic',
           followMessage: null,
           followSendAutomatically: false,
           rowVersion: 1,

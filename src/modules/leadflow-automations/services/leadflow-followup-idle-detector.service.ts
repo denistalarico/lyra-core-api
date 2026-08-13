@@ -1,5 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import type { LeadFlowEventDeliveryEntity } from '../../leadflow-events/entities';
+import { enabledFollowupSteps } from '../catalog/followup-plan.catalog';
+import type { LeadFlowAutomationEntity } from '../entities';
 import { LeadFlowAutomationStatus } from '../enums/leadflow-automation-status.enum';
 import { SCHEDULER_RUNTIME, type SchedulerRuntime } from '../scheduler';
 import { LEADFLOW_FOLLOWUP_TIMER_CONSUMER } from './leadflow-followup-timer.consumer';
@@ -50,10 +52,7 @@ export class LeadFlowFollowupIdleDetectorService {
     let scheduled = 0;
     for (const match of matches) {
       if (match.source.status !== LeadFlowAutomationStatus.Active) continue;
-      const delayHours = finitePositive(
-        match.automation.triggerConfig?.delayHours,
-        24,
-      );
+      const delayHours = idleDelayHours(match.automation);
       const fireAt = new Date(
         delivery.occurredAt.getTime() + delayHours * 60 * 60 * 1_000,
       );
@@ -78,6 +77,21 @@ export class LeadFlowFollowupIdleDetectorService {
     }
     return scheduled;
   }
+}
+
+/**
+ * How long the conversation must stay unanswered before the chain is armed.
+ *
+ * It is the first enabled attempt, not a separate field. Asking twice — once
+ * for "how long without a reply" and once for "when is the first attempt" —
+ * let the two disagree: a plan whose first attempt was three hours away sat
+ * behind a detector that only woke a day later, and the attempt went out then.
+ * `trigger.delayHours` survives as the fallback for a recipe with no plan.
+ */
+function idleDelayHours(automation: LeadFlowAutomationEntity): number {
+  const [first] = enabledFollowupSteps(automation.messageConfig?.followupSteps);
+  if (first) return first.delayMinutes / 60;
+  return finitePositive(automation.triggerConfig?.delayHours, 24);
 }
 
 function finitePositive(value: unknown, fallback: number): number {

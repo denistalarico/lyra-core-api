@@ -19,6 +19,7 @@ const validDecision = {
   schema_version: 1 as const,
   reply: 'Revisar',
   follow_text: null,
+    follow_text_next_day: null,
   stage_key: null,
   stage_name: null,
   tags: [],

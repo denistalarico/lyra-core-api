@@ -861,7 +861,9 @@ describe('CrmOpportunityCommandService', () => {
       expectedCloseDate: null,
       nextFollowUpAt: null,
       lastActivityAt: null,
-      followMode: 'manual',
+      // A copy is a second negotiation about the same lead: it is followed up
+      // the way the original is, rather than starting from a global default.
+      followMode: 'automatic',
       followMessage: null,
       followSendAutomatically: false,
       status: 'open',

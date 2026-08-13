@@ -71,6 +71,7 @@ describe('InboxAgentRuntimeService safety contracts', () => {
         schema_version: 1,
         reply: null,
         follow_text: null,
+    follow_text_next_day: null,
         stage_name: null,
         tags: [],
         handoff: false,

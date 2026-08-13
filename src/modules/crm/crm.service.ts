@@ -24,6 +24,10 @@ import { CreateCrmTagDto } from './dto/create-crm-tag.dto';
 import { PatchCrmOpportunityCardColorDto } from './dto/patch-crm-opportunity-card-color.dto';
 import { PatchCrmOpportunityAutonomyModeDto } from './dto/patch-crm-opportunity-autonomy-mode.dto';
 import { PatchCrmOpportunityFollowDto } from './dto/patch-crm-opportunity-follow.dto';
+import {
+  writeOpportunityFollowUp,
+  type CrmOpportunityFollowMode,
+} from './services/crm-opportunity-follow-up';
 import { PatchCrmOpportunityVisibilityDto } from './dto/patch-crm-opportunity-visibility.dto';
 import { PatchCrmStageFoldDto } from './dto/patch-crm-stage-fold.dto';
 import { PatchCrmTagDto } from './dto/patch-crm-tag.dto';
@@ -492,7 +496,14 @@ export class CrmService {
         dto.sortOrder ??
         (await this.getNextOpportunitySortOrder(ctx, pipeline.id, stage.id)),
       visibility: dto.visibility ?? 'workspace',
-      followMode: dto.followMode ?? 'automatic',
+      // The follow-up mode follows the card's origin. A card typed into the
+      // CRM has nobody waiting on a reply, so it starts with no follow-up at
+      // all; one opened from a real conversation starts manual, because there
+      // is a lead to come back to but no agent proposal to send. The automatic
+      // mode is reserved for what the agent itself qualified — see the governed
+      // action worker.
+      followMode:
+        dto.followMode ?? (dto.inboxConversationId ? 'manual' : 'disabled'),
       followMessage: dto.followMessage ?? null,
       followSendAutomatically: dto.followSendAutomatically ?? false,
       metadata: this.stampContext(ctx, dto.metadata ?? {}),
@@ -1030,14 +1041,31 @@ export class CrmService {
   ): Promise<CrmOpportunityEntity> {
     const opportunity = await this.getOpportunity(ctx, id);
 
-    if (dto.followMode !== undefined) opportunity.followMode = dto.followMode;
     if (dto.nextFollowUpAt !== undefined)
       opportunity.nextFollowUpAt = this.toDateOrNull(dto.nextFollowUpAt);
-    if (dto.followMessage !== undefined)
-      opportunity.followMessage = dto.followMessage;
     if (dto.followSendAutomatically !== undefined) {
       opportunity.followSendAutomatically = dto.followSendAutomatically;
     }
+    // Mode, plan and texts share one writer, because the first text lives in a
+    // column and the rest in metadata. `followMessage` stays accepted on its
+    // own for callers that predate the two-text cadence.
+    writeOpportunityFollowUp(opportunity, {
+      ...(dto.followMode
+        ? { mode: dto.followMode as CrmOpportunityFollowMode }
+        : {}),
+      ...(dto.steps !== undefined ? { steps: dto.steps } : {}),
+      ...(dto.texts !== undefined || dto.followMessage !== undefined
+        ? {
+            texts: {
+              ...(dto.texts ?? {}),
+              ...(dto.followMessage !== undefined
+                ? { d0: dto.followMessage }
+                : {}),
+            },
+            textsSource: 'manual',
+          }
+        : {}),
+    });
 
     return this.opportunityCommands.updateOpportunity(ctx, opportunity);
   }

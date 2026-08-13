@@ -233,32 +233,37 @@ function buildRecipe(seed: RecipeSeed): LeadFlowAutomationRecipeCatalogItem {
 const ESSENTIAL_SEEDS: RecipeSeed[] = [
   {
     key: 'followup_idle_lead',
-    templateVersion: 3,
+    // v4: the cadence became a closed vocabulary (d0/d1/d3/d7) instead of an
+    // open list of delays. See followup-plan.catalog.ts.
+    templateVersion: 4,
     requiredDependencies: [
       LeadFlowAutomationDependency.EventFanOut,
       LeadFlowAutomationDependency.SchedulerRuntime,
       LeadFlowAutomationDependency.MessageGeneration,
     ],
-    name: 'Follow-up de lead sem resposta',
+    name: 'Follow-up automático',
     description:
-      'Reengaja automaticamente uma conversa/oportunidade que ficou sem resposta por um período configurado.',
+      'Retoma o lead que parou de responder, em até quatro tentativas, e para sozinho quando ele volta a falar.',
     category: LeadFlowAutomationCategory.Followup,
     tier: 'essential',
     trigger: 'conversation.idle',
     primaryAction: 'schedule_followup',
-    whenLabel: 'Quando o lead fica sem responder por 24h (configurável).',
+    whenLabel: 'Quando o lead deixa a última mensagem sem resposta.',
     limitsLabel:
-      'Para se o lead responder, se houver handoff ou ao atingir o limite de tentativas.',
-    triggerConfig: { delayHours: 24 },
+      'Para assim que o lead responder, se houver handoff, e respeita o modo de follow-up de cada oportunidade.',
+    // Kept for instances provisioned before the derived trigger: the detector
+    // now wakes at the earliest enabled attempt, and only falls back to this.
+    triggerConfig: { delayHours: 22 },
     conditionConfig: {},
-    actionConfig: { maxAttempts: 3 },
+    actionConfig: { maxAttempts: 4 },
     messageConfig: {
       baseMessage:
         'Olá! Podemos continuar seu atendimento? Se ainda tiver interesse, responda a esta mensagem.',
       followupSteps: [
-        { stepKey: 'd1', delayMinutes: 1440, channels: [] },
-        { stepKey: 'd3', delayMinutes: 4320, channels: [] },
-        { stepKey: 'd7', delayMinutes: 10080, channels: [] },
+        { stepKey: 'd0', enabled: true, delayMinutes: 180, channels: [] },
+        { stepKey: 'd1', enabled: true, delayMinutes: 1320, channels: [] },
+        { stepKey: 'd3', enabled: false, delayMinutes: 4320, channels: [] },
+        { stepKey: 'd7', enabled: false, delayMinutes: 10080, channels: [] },
       ],
     },
     schedulePolicy: { cooldownHours: 24 },

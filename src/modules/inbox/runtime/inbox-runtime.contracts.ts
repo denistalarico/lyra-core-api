@@ -79,7 +79,16 @@ export type StageTransitionProposal = {
 export type AgentDecisionV1 = {
   schema_version: 1;
   reply: string | null;
+  /**
+   * The two follow-up drafts, for the attempts that answer inside the messaging
+   * window: `follow_text` is the same-day one and `follow_text_next_day` the
+   * one for the day after. The agent writes them while it still has the
+   * conversation in front of it — a follow-up composed a day later, from a
+   * template, is the generic nudge everyone ignores. Both are drafts: nothing
+   * is sent until the cadence comes due, and the card can still be edited.
+   */
   follow_text: string | null;
+  follow_text_next_day: string | null;
   stage_key: string | null;
   stage_name: string | null;
   tags: string[];
