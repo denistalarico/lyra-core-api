@@ -422,6 +422,65 @@ describe('LeadFlowFollowupTimerConsumer', () => {
       );
     });
 
+    it('records on the card which attempt went out', async () => {
+      // The channel-result event is the log; the board needs state it can read
+      // without replaying anything.
+      await consumer.handleTimer(canonicalEnvelope());
+
+      expect(opportunitiesUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'opportunity-1' }),
+        expect.objectContaining({
+          metadata: expect.objectContaining({
+            followUp: expect.objectContaining({
+              attempts: [
+                expect.objectContaining({
+                  stepKey: 'd0',
+                  result: 'sent',
+                  channel: 'whatsapp',
+                  runId: 'timer-delivery',
+                }),
+              ],
+            }),
+          }),
+        }),
+      );
+    });
+
+    it('records why an attempt did not go out', async () => {
+      await consumer.handleTimer(
+        canonicalEnvelope({
+          followMode: 'manual',
+          metadata: {
+            followUp: {
+              steps: [
+                {
+                  stepKey: 'd0',
+                  enabled: true,
+                  delayMinutes: 180,
+                  channels: [],
+                },
+              ],
+            },
+          },
+        }),
+      );
+
+      expect(opportunitiesUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'opportunity-1' }),
+        expect.objectContaining({
+          metadata: expect.objectContaining({
+            followUp: expect.objectContaining({
+              attempts: [
+                expect.objectContaining({
+                  result: 'skipped_message_unavailable',
+                }),
+              ],
+            }),
+          }),
+        }),
+      );
+    });
+
     it('stops for a card whose follow-up was switched off', async () => {
       await consumer.handleTimer(canonicalEnvelope({ followMode: 'disabled' }));
 

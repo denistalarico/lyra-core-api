@@ -5,6 +5,8 @@ import { MoreThan, Repository } from 'typeorm';
 import { CrmOpportunityEntity } from '../../crm/entities/crm-opportunity.entity';
 import {
   readOpportunityFollowUp,
+  writeOpportunityFollowUp,
+  type CrmOpportunityFollowUpAttempt,
   type CrmOpportunityFollowUpState,
 } from '../../crm/services/crm-opportunity-follow-up';
 import { InboxChannelEntity } from '../../inbox/entities/inbox-channel.entity';
@@ -488,15 +490,31 @@ export class LeadFlowFollowupTimerConsumer
         if (channelResult === 'failed_provider') failedProviders += 1;
       }
 
+      const stepKey = step?.stepKey ?? `legacy_${attemptIndex + 1}`;
       await this.recordChannelResult({
         envelope,
         automationId,
         conversationId,
-        stepKey: step?.stepKey ?? `legacy_${attemptIndex + 1}`,
+        stepKey,
         channel: channelConfig.channel,
         result: channelResult,
         reference,
       });
+      // The event above is the log; this is the state the board reads. Without
+      // it, "o follow foi enviado?" could only be answered by replaying events.
+      if (opportunityId) {
+        await this.recordAttemptOnCard({
+          envelope,
+          opportunityId,
+          attempt: {
+            stepKey,
+            result: channelResult,
+            channel: channelConfig.channel,
+            at: envelope.firedAt,
+            runId: envelope.timerId,
+          },
+        });
+      }
     }
 
     if (
@@ -602,6 +620,31 @@ export class LeadFlowFollowupTimerConsumer
         ? businessHours.timezone
         : null;
     return timezone ?? 'America/Sao_Paulo';
+  }
+
+  /**
+   * Keeps the outcome of one attempt on the opportunity.
+   *
+   * Read-modify-write on the jsonb bag, so it re-reads the row rather than
+   * trusting the copy loaded before the send: the attempt may have taken a
+   * while, and the agent may have written its drafts in between.
+   */
+  private async recordAttemptOnCard(input: {
+    envelope: TimerFireEnvelope;
+    opportunityId: string;
+    attempt: CrmOpportunityFollowUpAttempt;
+  }): Promise<void> {
+    const scope = {
+      id: input.opportunityId,
+      tenantId: input.envelope.tenantId,
+      workspaceId: input.envelope.workspaceId,
+    };
+    const opportunity = await this.opportunities.findOne({ where: scope });
+    if (!opportunity) return;
+    writeOpportunityFollowUp(opportunity, { attempt: input.attempt });
+    await this.opportunities.update(scope, {
+      metadata: opportunity.metadata as never,
+    });
   }
 
   private async clearNextFollowUp(

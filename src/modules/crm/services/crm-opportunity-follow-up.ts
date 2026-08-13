@@ -35,8 +35,29 @@ export interface CrmOpportunityFollowUpTexts {
   d1: string | null;
 }
 
+/**
+ * What happened on one attempt, kept on the card.
+ *
+ * The runtime already emits a channel-result event per attempt, but an event
+ * stream answers "what happened" for whoever is reading the log — not "where is
+ * this lead" for whoever is looking at the board. The last outcome of each
+ * attempt lives here so both the card and the drawer can say it without
+ * replaying anything.
+ */
+export interface CrmOpportunityFollowUpAttempt {
+  stepKey: string;
+  /** The runtime's own result vocabulary; `sent` is the only success. */
+  result: string;
+  channel: string;
+  at: string;
+  /** The timer that produced it, so one run's channels do not fight. */
+  runId: string;
+}
+
 export interface CrmOpportunityFollowUpState {
   mode: CrmOpportunityFollowMode;
+  /** Last outcome per attempt, newest write wins. */
+  attempts: CrmOpportunityFollowUpAttempt[];
   /**
    * The plan this card carries. Only read in manual mode — in automatic mode
    * the automation's plan is the one that governs — but kept either way so
@@ -60,6 +81,7 @@ export function readOpportunityFollowUp(
   const texts = plainObject(stored?.texts);
   return {
     mode: readMode(opportunity.followMode),
+    attempts: readAttempts(stored?.attempts),
     steps: Array.isArray(stored?.steps) ? stored.steps : null,
     texts: {
       // The column is the older home of the first text and stays authoritative
@@ -90,6 +112,8 @@ export function writeOpportunityFollowUp(
     steps?: unknown[] | null;
     texts?: Partial<CrmOpportunityFollowUpTexts>;
     textsSource?: 'agent' | 'manual';
+    /** Replaces the outcome of the attempt it names, keeping the others. */
+    attempt?: CrmOpportunityFollowUpAttempt;
   },
 ): void {
   const current = readOpportunityFollowUp(opportunity);
@@ -102,6 +126,9 @@ export function writeOpportunityFollowUp(
     ...(opportunity.metadata ?? {}),
     [OPPORTUNITY_FOLLOW_UP_METADATA_KEY]: {
       steps: patch.steps !== undefined ? patch.steps : current.steps,
+      attempts: patch.attempt
+        ? mergeAttempt(current.attempts, patch.attempt)
+        : current.attempts,
       texts: {
         d0: texts.d0,
         d1: texts.d1,
@@ -109,6 +136,44 @@ export function writeOpportunityFollowUp(
       },
     },
   };
+}
+
+/**
+ * One verdict per attempt.
+ *
+ * The same attempt writes once per channel, so within a single run a delivery
+ * must not be undone by a channel that could not deliver: a WhatsApp that went
+ * out is still a follow-up the lead received, whatever the SMS did. Across runs
+ * the newest verdict simply replaces the old one — `runId` is what tells the
+ * two cases apart.
+ */
+function mergeAttempt(
+  attempts: CrmOpportunityFollowUpAttempt[],
+  next: CrmOpportunityFollowUpAttempt,
+): CrmOpportunityFollowUpAttempt[] {
+  const previous = attempts.find((item) => item.stepKey === next.stepKey);
+  if (
+    previous?.result === 'sent' &&
+    previous.runId === next.runId &&
+    next.result !== 'sent'
+  ) {
+    return attempts;
+  }
+  return [
+    ...attempts.filter((item) => item.stepKey !== next.stepKey),
+    next,
+  ];
+}
+
+function readAttempts(value: unknown): CrmOpportunityFollowUpAttempt[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter(
+    (item): item is CrmOpportunityFollowUpAttempt =>
+      Boolean(item) &&
+      typeof item === 'object' &&
+      typeof (item as CrmOpportunityFollowUpAttempt).stepKey === 'string' &&
+      typeof (item as CrmOpportunityFollowUpAttempt).result === 'string',
+  );
 }
 
 function readMode(value: unknown): CrmOpportunityFollowMode {

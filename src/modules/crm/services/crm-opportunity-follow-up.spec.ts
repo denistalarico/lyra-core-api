@@ -82,6 +82,72 @@ describe('opportunity follow-up state', () => {
     expect(subject.metadata.clientId).toBe('client-1');
   });
 
+  describe('attempt outcomes', () => {
+    const sent = {
+      stepKey: 'd0',
+      result: 'sent',
+      channel: 'whatsapp',
+      at: '2026-08-13T12:00:00.000Z',
+      runId: 'timer-1',
+    };
+
+    it('keeps one verdict per attempt', () => {
+      const subject = card();
+      writeOpportunityFollowUp(subject, { attempt: sent });
+      writeOpportunityFollowUp(subject, {
+        attempt: { ...sent, stepKey: 'd1', result: 'skipped_template_required' },
+      });
+
+      expect(readOpportunityFollowUp(subject).attempts).toEqual([
+        sent,
+        expect.objectContaining({ stepKey: 'd1' }),
+      ]);
+    });
+
+    it('does not let one channel of a run undo the delivery of another', () => {
+      // D+3 can run on more than one transport. A WhatsApp that went out is
+      // still a follow-up the lead received, whatever the SMS did.
+      const subject = card();
+      writeOpportunityFollowUp(subject, { attempt: sent });
+      writeOpportunityFollowUp(subject, {
+        attempt: {
+          ...sent,
+          channel: 'sms',
+          result: 'skipped_channel_unavailable',
+        },
+      });
+
+      expect(readOpportunityFollowUp(subject).attempts[0].result).toBe('sent');
+    });
+
+    it('lets a later run supersede an older delivery', () => {
+      // A new idle cycle re-runs the same attempt: the card must show what this
+      // cycle did, not what the previous one managed.
+      const subject = card();
+      writeOpportunityFollowUp(subject, { attempt: sent });
+      writeOpportunityFollowUp(subject, {
+        attempt: {
+          ...sent,
+          runId: 'timer-2',
+          at: '2026-08-20T12:00:00.000Z',
+          result: 'failed_provider',
+        },
+      });
+
+      expect(readOpportunityFollowUp(subject).attempts).toEqual([
+        expect.objectContaining({ result: 'failed_provider' }),
+      ]);
+    });
+
+    it('survives a write that is about something else entirely', () => {
+      const subject = card();
+      writeOpportunityFollowUp(subject, { attempt: sent });
+      writeOpportunityFollowUp(subject, { mode: 'manual' });
+
+      expect(readOpportunityFollowUp(subject).attempts).toHaveLength(1);
+    });
+  });
+
   it('accepts exactly the attempts the cadence declares, and no others', async () => {
     // The DTO cannot import the catalog — the CRM does not depend on LeadFlow
     // Automations, and inverting that would close a cycle — so this is what
