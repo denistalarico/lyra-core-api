@@ -14,6 +14,7 @@ import { SendMessageExecutor } from '../executors/send-message.executor';
 import { AddOpportunityTagExecutor } from '../executors/add-opportunity-tag.executor';
 import { RequestCsatExecutor } from '../executors/request-csat.executor';
 import { GenerateDailySummaryExecutor } from '../executors/generate-daily-summary.executor';
+import { GOVERNED_STAGE_ADVANCE_RECIPE_KEY } from '../catalog/automation-recipes.catalog';
 import type { LeadFlowJsonObject } from '../types/leadflow-automation.types';
 import {
   LeadFlowAutomationContextSignal,
@@ -504,16 +505,23 @@ export class LeadFlowAutomationExecutionService {
     }
 
     const crmPolicy = automation.crmPolicy ?? {};
+    // The governed stage advance is owned by the CRM: the published movement
+    // rules decide which stage may follow the one the opportunity is in. Sending
+    // a destination from the automation's own JSON would pin it to a single
+    // stage that those rules no longer propose — which is what legacy instances
+    // still carry, from when this screen asked for one. Withholding both values
+    // is what puts the executor on the CRM-managed path.
+    const crmManaged = automation.recipeKey === GOVERNED_STAGE_ADVANCE_RECIPE_KEY;
     return {
       policyPrefix: 'stage_transition',
       payload: {
         opportunityId: subject.opportunityId,
         toStageId:
-          typeof crmPolicy.moveStageOnComplete === 'string'
+          !crmManaged && typeof crmPolicy.moveStageOnComplete === 'string'
             ? crmPolicy.moveStageOnComplete
             : null,
         reasonCode:
-          typeof crmPolicy.moveStageReasonCode === 'string'
+          !crmManaged && typeof crmPolicy.moveStageReasonCode === 'string'
             ? crmPolicy.moveStageReasonCode
             : null,
       },

@@ -17,7 +17,9 @@ import type { LeadFlowAutomationRunService } from './leadflow-automation-run.ser
 
 const OPPORTUNITY = '30000000-0000-4000-8000-000000000001';
 
-function automation(): LeadFlowAutomationEntity {
+function automation(
+  overrides: Partial<LeadFlowAutomationEntity> = {},
+): LeadFlowAutomationEntity {
   return {
     id: 'automation-1',
     tenantId: 'tenant-1',
@@ -27,6 +29,7 @@ function automation(): LeadFlowAutomationEntity {
       moveStageOnComplete: 'stage-2',
       moveStageReasonCode: 'qualified',
     },
+    ...overrides,
   } as LeadFlowAutomationEntity;
 }
 
@@ -135,8 +138,8 @@ function build(options: {
   return { service, execute, recordLiveRun };
 }
 
-const input = () => ({
-  automation: automation(),
+const input = (overrides: Partial<LeadFlowAutomationEntity> = {}) => ({
+  automation: automation(overrides),
   version: { id: 'version-1', version: 1 } as LeadFlowAutomationVersionEntity,
   recipe: {
     trigger: 'opportunity.updated' as const,
@@ -187,14 +190,33 @@ describe('LeadFlowAutomationExecutionService', () => {
       revalidation: { expectedVersion: number | null };
       actorRef: string;
     };
+    // The stage advance is CRM-managed: a destination left over in the
+    // automation's own configuration must not reach the executor, which
+    // resolves the eligible next stage from the published movement rules.
     expect(request.payload).toMatchObject({
       opportunityId: OPPORTUNITY,
-      toStageId: 'stage-2',
-      reasonCode: 'qualified',
+      toStageId: null,
+      reasonCode: null,
     });
     // Expected version comes from the event payload, closing the decision→act gap.
     expect(request.revalidation.expectedVersion).toBe(4);
     expect(request.actorRef).toBe('automation:automation-1');
+  });
+
+  it('keeps the configured destination for a recipe the CRM does not manage', async () => {
+    // A stage move requested as a secondary effect of another recipe is still
+    // configured on the automation, and must keep working exactly as published.
+    const { service, execute } = build({ gate: { allowed: true } });
+
+    await service.execute(input({ recipeKey: 'post_service_csat' }));
+
+    const request = (execute.mock.calls[0] as unknown[])[0] as {
+      payload: Record<string, unknown>;
+    };
+    expect(request.payload).toMatchObject({
+      toStageId: 'stage-2',
+      reasonCode: 'qualified',
+    });
   });
 
   it('still records a live run when the effect was governed-refused', async () => {
