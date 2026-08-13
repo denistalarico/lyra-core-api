@@ -112,11 +112,10 @@ export const PLATFORM_WHATSAPP_TEMPLATES: readonly PlatformWhatsAppTemplateDefin
       providerTemplateName: 'lyra_leadflow_lead_assigned_v1',
       languageCode: 'pt_BR',
       category: 'utility',
-      // Declared, not yet submitted: the template does not exist in the WABA.
-      // `pending` resolves to null, so the WhatsApp channel of the distribution
-      // alert reports `skipped_whatsapp_template_unavailable` and the operator
-      // sees it as unavailable — fail-closed until Meta approves it.
-      status: 'pending',
+      // Approval confirmed by the user on 2026-08-13. Provider credentials,
+      // kill switch, recipient policy and user preference remain independent
+      // fail-closed gates.
+      status: 'approved',
       version: 1,
     },
   ];

@@ -1,9 +1,12 @@
 import {
   buildHandoffTemplateParameters,
   buildHotLeadTemplateParameters,
+  buildLeadDistributedTemplateParameters,
+  buildPlatformTemplateParameters,
   isPlatformWhatsAppTemplateKeyAllowed,
   LEADFLOW_HANDOFF_TEMPLATE_KEY,
   LEADFLOW_HOT_LEAD_TEMPLATE_KEY,
+  LEADFLOW_LEAD_DISTRIBUTED_TEMPLATE_KEY,
   resolvePlatformWhatsAppTemplate,
 } from './platform-whatsapp-notification.catalog';
 
@@ -48,6 +51,47 @@ describe('platform whatsapp template catalog', () => {
       expect(
         isPlatformWhatsAppTemplateKeyAllowed(LEADFLOW_HOT_LEAD_TEMPLATE_KEY),
       ).toBe(true);
+    });
+
+    it('resolves the Meta-approved lead-distribution template', () => {
+      expect(
+        resolvePlatformWhatsAppTemplate(LEADFLOW_LEAD_DISTRIBUTED_TEMPLATE_KEY),
+      ).toMatchObject({
+        providerTemplateName: 'lyra_leadflow_lead_assigned_v1',
+        languageCode: 'pt_BR',
+        category: 'utility',
+        status: 'approved',
+      });
+    });
+  });
+
+  describe('buildLeadDistributedTemplateParameters', () => {
+    it('uses the semantic order and governed fallbacks', () => {
+      expect(
+        buildLeadDistributedTemplateParameters({
+          workspaceName: 'Acme',
+          leadDisplayName: 'Maria',
+          leadSource: 'WhatsApp',
+        }),
+      ).toEqual(['Acme', 'Maria', 'WhatsApp']);
+      expect(
+        buildLeadDistributedTemplateParameters({
+          workspaceName: '',
+          leadDisplayName: '',
+          leadSource: '',
+        }),
+      ).toEqual(['Sua empresa', 'Lead sem nome', 'Origem não informada']);
+    });
+
+    it('is the flattening the provider applies for that key', () => {
+      // The sender never picks the builder itself: it names the logical key.
+      expect(
+        buildPlatformTemplateParameters(LEADFLOW_LEAD_DISTRIBUTED_TEMPLATE_KEY, {
+          workspaceName: 'Acme',
+          leadDisplayName: 'Maria',
+          leadSource: 'Instagram',
+        }),
+      ).toEqual(['Acme', 'Maria', 'Instagram']);
     });
   });
 
