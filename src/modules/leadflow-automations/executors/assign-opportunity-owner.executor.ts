@@ -1,12 +1,16 @@
 import {
   ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import type { RequestContext } from '../../../common/context/request-context.interface';
 import { CrmOpportunityCommandService } from '../../crm/services/crm-opportunity-command.service';
 import type { LeadDistributionStrategy } from '../../crm/services/lead-distribution.strategy';
 import { LeadFlowAutomationErrorClass } from '../enums/leadflow-automation-run.enums';
+import { LeadFlowAutomationNotificationPublisher } from '../services/leadflow-automation-notification.publisher';
+import type { HotLeadNotificationChannel } from '../services/leadflow-automation-notification.publisher';
+import type { LeadFlowJsonObject } from '../types/leadflow-automation.types';
 import { executorAvailability } from './automation-executors.registry';
 import type {
   AutomationEffectRequest,
@@ -31,12 +35,21 @@ const STRATEGIES: readonly LeadDistributionStrategy[] = [
  * version, and enforces the only-open-and-unclaimed rule and the pipeline's own
  * participant pool. So this cannot assign a lead a human already owns, and the
  * revalidation window between deciding and acting stays closed.
+ *
+ * Once the lead has an owner, that person is told. Being handed a lead nobody
+ * announced is the same as not being handed one, and the CRM's own assignment
+ * notification only covers the manual handover — the governed distribution
+ * command deliberately raises no notification of its own.
  */
 @Injectable()
 export class AssignOpportunityOwnerExecutor implements AutomationExecutor {
   readonly actionKey = 'assign_opportunity_owner';
+  private readonly logger = new Logger(AssignOpportunityOwnerExecutor.name);
 
-  constructor(private readonly crmCommand: CrmOpportunityCommandService) {}
+  constructor(
+    private readonly crmCommand: CrmOpportunityCommandService,
+    private readonly notifications: LeadFlowAutomationNotificationPublisher,
+  ) {}
 
   availability(): AutomationExecutorAvailability {
     return executorAvailability(this.actionKey);
@@ -82,10 +95,13 @@ export class AssignOpportunityOwnerExecutor implements AutomationExecutor {
         },
       );
 
+      const notice = await this.announce(request, opportunityId, result.assignedUserId);
+
       return {
         status: 'confirmed',
         effectConfirmed: true,
         reference: result.assignedUserId || result.opportunity.id,
+        details: notice ? { notice } : undefined,
       };
     } catch (error) {
       // A governed refusal — already assigned, no eligible participant, a stale
@@ -115,6 +131,84 @@ export class AssignOpportunityOwnerExecutor implements AutomationExecutor {
       };
     }
   }
+
+  /**
+   * Tells the new owner, over the channels the automation configures.
+   *
+   * The lead already has its owner when this runs, and that is the effect this
+   * executor confirms. So the announcement is a child outcome: a provider that
+   * is down, a channel the recipient silenced or a template Meta has not
+   * approved is reported in `details` and never undoes — or retries — the
+   * distribution itself.
+   */
+  private async announce(
+    request: AutomationEffectRequest,
+    opportunityId: string,
+    assignedUserId: string | null,
+  ): Promise<LeadFlowJsonObject | null> {
+    const channels = channelList(request.payload.notificationChannels);
+    if (!assignedUserId || channels.length === 0) return null;
+
+    try {
+      const outcome = await this.notifications.publish({
+        tenantId: request.tenantId,
+        workspaceId: request.workspaceId,
+        idempotencyKey: request.idempotencyKey,
+        opportunityId,
+        targetUserId: assignedUserId,
+        // The one recipient is the person who just got the lead. Widening this
+        // would notify people the distribution did not concern.
+        notifyOpportunityOwner: false,
+        notifyPipelineOwner: false,
+        notifyPipelineParticipants: false,
+        specificRecipientUserIds: [],
+        channels,
+        cycleId: request.runId,
+        policyVersion: request.policyRef,
+        currentScore: null,
+        title: 'Novo lead para você',
+        body: 'Um lead foi atribuído a você pela distribuição automática.',
+        actionUrl: '/leadflow/crm',
+        alert: 'lead_distributed',
+      });
+
+      if (outcome.status === 'no_recipient') {
+        return { notified: false, reason: 'no_recipient' };
+      }
+      return {
+        notified: true,
+        recipientUserIds: outcome.recipientUserIds,
+        channelResults: outcome.channelResults.map((result) => ({
+          recipientUserId: result.recipientUserId,
+          channel: result.channel,
+          status: result.status,
+        })),
+      };
+    } catch (error) {
+      this.logger.warn(
+        `Lead distribution notice failed: ${error instanceof Error ? error.name : 'unknown_error'}`,
+      );
+      return { notified: false, reason: 'notification_failed' };
+    }
+  }
+}
+
+const NOTIFICATION_CHANNELS: readonly HotLeadNotificationChannel[] = [
+  'in_app',
+  'push',
+  'platform_whatsapp',
+  'email',
+];
+
+function channelList(value: unknown): HotLeadNotificationChannel[] {
+  if (!Array.isArray(value)) return [];
+  return [
+    ...new Set(
+      value.filter((item): item is HotLeadNotificationChannel =>
+        NOTIFICATION_CHANNELS.includes(item as HotLeadNotificationChannel),
+      ),
+    ),
+  ];
 }
 
 function stringField(value: unknown): string | null {

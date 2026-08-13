@@ -550,6 +550,12 @@ export class LeadFlowAutomationExecutionService {
         typeof config.distributionFallbackUserRef === 'string'
           ? config.distributionFallbackUserRef
           : null,
+      // How the new owner hears about it. A row provisioned before the alert
+      // existed carries no key, and inherits the recipe's default rather than
+      // distributing leads in silence.
+      notificationChannels: Array.isArray(config.notificationChannels)
+        ? config.notificationChannels
+        : ['in_app'],
     };
   }
 

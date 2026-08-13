@@ -645,6 +645,8 @@ const OPTIONAL_SEEDS: RecipeSeed[] = [
   },
   {
     key: 'lead_distribution',
+    // v3: the new owner is told over the configured channels.
+    templateVersion: 3,
     requiredDependencies: [
       LeadFlowAutomationDependency.EventFanOut,
       LeadFlowAutomationDependency.LeadDistributionCommand,
@@ -660,7 +662,10 @@ const OPTIONAL_SEEDS: RecipeSeed[] = [
     whenLabel: 'Quando uma nova oportunidade é criada.',
     limitsLabel: 'Distribuição interna; não envia mensagem ao lead.',
     conditionConfig: { businessHoursOnly: false, stopIfReplied: false },
-    actionConfig: { distributionStrategy: 'least_volume' },
+    actionConfig: {
+      distributionStrategy: 'least_volume',
+      notificationChannels: ['in_app'],
+    },
   },
   {
     key: 'automatic_tagging',
@@ -820,6 +825,17 @@ export const LEADFLOW_AUTOMATION_RECIPES: LeadFlowAutomationRecipeCatalogItem[] 
  * special-case it without matching on a string literal in several places.
  */
 export const GOVERNED_STAGE_ADVANCE_RECIPE_KEY = 'governed_stage_advance';
+
+/**
+ * The recipes whose effect includes telling a colleague, over the channels the
+ * operator picks in `actions.notificationChannels`. Readiness, the channel
+ * availability check and the detail payload all key off this list rather than
+ * repeating the recipe names.
+ */
+export const NOTIFICATION_CHANNEL_RECIPE_KEYS: readonly string[] = [
+  'hot_lead_notification',
+  'lead_distribution',
+];
 
 const OFFICIAL_BUSINESS_MODES = new Set<string>(
   Object.values(LeadFlowBusinessMode),

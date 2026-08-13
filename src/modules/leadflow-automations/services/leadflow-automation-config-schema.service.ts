@@ -7,7 +7,10 @@ import {
   type LeadFlowAutomationConfigSection,
   type LeadFlowAutomationFieldSpec,
 } from '../catalog/automation-config-schemas.catalog';
-import type { LeadFlowAutomationRecipeCatalogItem } from '../catalog/automation-recipes.catalog';
+import {
+  NOTIFICATION_CHANNEL_RECIPE_KEYS,
+  type LeadFlowAutomationRecipeCatalogItem,
+} from '../catalog/automation-recipes.catalog';
 
 export interface LeadFlowAutomationConfigError {
   /** `section.key`, or just `section` for a malformed section. */
@@ -159,7 +162,7 @@ export class LeadFlowAutomationConfigSchemaService {
       missing.push('message.followupSteps');
     }
 
-    if (recipe.key === 'hot_lead_notification') {
+    if (NOTIFICATION_CHANNEL_RECIPE_KEYS.includes(recipe.key)) {
       const channels = Array.isArray(config.actions?.notificationChannels)
         ? config.actions.notificationChannels
         : [];

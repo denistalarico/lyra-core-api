@@ -1,6 +1,7 @@
 import { ConflictException, NotFoundException } from '@nestjs/common';
 import type { CrmOpportunityCommandService } from '../../crm/services/crm-opportunity-command.service';
 import { LeadFlowAutomationErrorClass } from '../enums/leadflow-automation-run.enums';
+import type { LeadFlowAutomationNotificationPublisher } from '../services/leadflow-automation-notification.publisher';
 import type { AutomationEffectRequest } from './automation-executor.types';
 import { AssignOpportunityOwnerExecutor } from './assign-opportunity-owner.executor';
 
@@ -23,6 +24,7 @@ function request(
       strategy: 'least_volume',
       channelMap: null,
       fallbackUserId: null,
+      notificationChannels: ['in_app'],
     },
     revalidation: {
       contextSchemaVersion: 1,
@@ -34,11 +36,23 @@ function request(
   };
 }
 
-function build(distributeOpportunityOwner: jest.Mock) {
+function build(distributeOpportunityOwner: jest.Mock, publish?: jest.Mock) {
   const crmCommand = {
     distributeOpportunityOwner,
   } as unknown as CrmOpportunityCommandService;
-  return new AssignOpportunityOwnerExecutor(crmCommand);
+  const notifications = {
+    publish:
+      publish ??
+      jest.fn().mockResolvedValue({
+        status: 'processed',
+        notificationId: 'notification-1',
+        recipientUserIds: ['user-b'],
+        channelResults: [
+          { recipientUserId: 'user-b', channel: 'in_app', status: 'sent' },
+        ],
+      }),
+  } as unknown as LeadFlowAutomationNotificationPublisher;
+  return new AssignOpportunityOwnerExecutor(crmCommand, notifications);
 }
 
 describe('AssignOpportunityOwnerExecutor', () => {
@@ -70,6 +84,91 @@ describe('AssignOpportunityOwnerExecutor', () => {
       expectedVersion: 4,
       idempotencyKey: 'effect:abc',
     });
+  });
+
+  it('tells the person who just got the lead, and nobody else', async () => {
+    const distribute = jest.fn().mockResolvedValue({
+      opportunity: { id: 'opportunity-1' },
+      assignedUserId: 'user-b',
+      reasonCode: 'least_volume',
+    });
+    const publish = jest.fn().mockResolvedValue({
+      status: 'processed',
+      notificationId: 'notification-1',
+      recipientUserIds: ['user-b'],
+      channelResults: [
+        { recipientUserId: 'user-b', channel: 'in_app', status: 'sent' },
+      ],
+    });
+    const executor = build(distribute, publish);
+
+    const result = await executor.execute(
+      request({
+        payload: {
+          opportunityId: 'opportunity-1',
+          strategy: 'least_volume',
+          notificationChannels: ['in_app', 'platform_whatsapp'],
+        },
+      }),
+    );
+
+    expect(result.status).toBe('confirmed');
+    expect(publish).toHaveBeenCalledWith(
+      expect.objectContaining({
+        alert: 'lead_distributed',
+        targetUserId: 'user-b',
+        channels: ['in_app', 'platform_whatsapp'],
+        // Widening the audience would notify people the distribution did not
+        // concern.
+        notifyOpportunityOwner: false,
+        notifyPipelineOwner: false,
+        notifyPipelineParticipants: false,
+      }),
+    );
+    expect(result.details).toMatchObject({ notice: { notified: true } });
+  });
+
+  it('keeps the distribution confirmed when the notice cannot be delivered', async () => {
+    const distribute = jest.fn().mockResolvedValue({
+      opportunity: { id: 'opportunity-1' },
+      assignedUserId: 'user-b',
+      reasonCode: 'least_volume',
+    });
+    const publish = jest.fn().mockRejectedValue(new Error('provider down'));
+    const executor = build(distribute, publish);
+
+    const result = await executor.execute(request());
+
+    // The lead already has its owner: that is the effect, and a failed alert
+    // must not retry it or roll it back.
+    expect(result.status).toBe('confirmed');
+    expect(result.effectConfirmed).toBe(true);
+    expect(result.details).toMatchObject({
+      notice: { notified: false, reason: 'notification_failed' },
+    });
+  });
+
+  it('says nothing when no channel is configured', async () => {
+    const distribute = jest.fn().mockResolvedValue({
+      opportunity: { id: 'opportunity-1' },
+      assignedUserId: 'user-b',
+      reasonCode: 'least_volume',
+    });
+    const publish = jest.fn();
+    const executor = build(distribute, publish);
+
+    const result = await executor.execute(
+      request({
+        payload: {
+          opportunityId: 'opportunity-1',
+          strategy: 'least_volume',
+          notificationChannels: [],
+        },
+      }),
+    );
+
+    expect(result.status).toBe('confirmed');
+    expect(publish).not.toHaveBeenCalled();
   });
 
   it('defaults an unknown strategy to least_volume', async () => {

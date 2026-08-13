@@ -19,6 +19,7 @@ import {
 } from '../../notifications/platform-whatsapp/platform-whatsapp-notification.config';
 import {
   LEADFLOW_HOT_LEAD_TEMPLATE_KEY,
+  LEADFLOW_LEAD_DISTRIBUTED_TEMPLATE_KEY,
   resolvePlatformWhatsAppTemplate,
 } from '../../notifications/platform-whatsapp/platform-whatsapp-notification.catalog';
 import { LeadFlowSettingsContextType } from '../../leadflow-settings/enums/leadflow-settings-context-type.enum';
@@ -26,6 +27,7 @@ import { PlatformPermissionService } from '../../permissions';
 import type { PermissionContext } from '../../permissions';
 import {
   GOVERNED_STAGE_ADVANCE_RECIPE_KEY,
+  NOTIFICATION_CHANNEL_RECIPE_KEYS,
   type LeadFlowAutomationRecipeCatalogItem,
 } from '../catalog/automation-recipes.catalog';
 import { CrmStageTransitionPolicyService } from '../../crm/services/crm-stage-transition-policy.service';
@@ -97,6 +99,18 @@ const AGENCY_CONNECTION = 'agency';
 
 /** Actions that reach out to the lead and therefore need a channel to be ready. */
 const OUTBOUND_ACTIONS = new Set(['send_message', 'schedule_followup']);
+
+/** Each alerting recipe carries its own approved WhatsApp template. */
+const WHATSAPP_TEMPLATE_BY_RECIPE: Record<string, string> = {
+  hot_lead_notification: LEADFLOW_HOT_LEAD_TEMPLATE_KEY,
+  lead_distribution: LEADFLOW_LEAD_DISTRIBUTED_TEMPLATE_KEY,
+};
+
+/** How the operator hears about a template Meta has not approved yet. */
+const WHATSAPP_TEMPLATE_LABELS: Record<string, string> = {
+  [LEADFLOW_HOT_LEAD_TEMPLATE_KEY]: 'Template de lead quente',
+  [LEADFLOW_LEAD_DISTRIBUTED_TEMPLATE_KEY]: 'Template de lead atribuído',
+};
 
 /**
  * Keeps a stale review from silently creating a newer immutable snapshot.
@@ -953,6 +967,9 @@ export class LeadFlowAutomationService {
       globalDefaults,
     );
 
+    // Only the hot-lead alert is blocked by an unavailable channel: there, the
+    // notification IS the effect. The distribution still hands the lead over
+    // when the notice cannot leave, so an unreachable channel must not stop it.
     if (automation.recipeKey === 'hot_lead_notification') {
       const configured = Array.isArray(
         automation.actionConfig?.notificationChannels,
@@ -962,6 +979,7 @@ export class LeadFlowAutomationService {
       const capabilities = await this.notificationChannelCapabilities(
         automation.tenantId,
         automation.workspaceId,
+        LEADFLOW_HOT_LEAD_TEMPLATE_KEY,
       );
       const hasAvailableChannel = configured.some((channel) => {
         const capability =
@@ -1170,11 +1188,13 @@ export class LeadFlowAutomationService {
         LEADFLOW_AUTOMATIONS_PERMISSIONS.developerManage,
       ),
     };
-    if (automation.recipeKey === 'hot_lead_notification') {
+    if (NOTIFICATION_CHANNEL_RECIPE_KEYS.includes(automation.recipeKey)) {
       detail.notificationChannelCapabilities =
         await this.notificationChannelCapabilities(
           automation.tenantId,
           automation.workspaceId,
+          WHATSAPP_TEMPLATE_BY_RECIPE[automation.recipeKey] ??
+            LEADFLOW_HOT_LEAD_TEMPLATE_KEY,
         );
     }
     detail.lifecycle = await this.lifecycleWithChannelAvailability(
@@ -1190,6 +1210,7 @@ export class LeadFlowAutomationService {
   private async notificationChannelCapabilities(
     tenantId: string,
     workspaceId: string,
+    whatsappTemplateKey: string,
   ): Promise<LeadFlowNotificationChannelCapabilities> {
     const pushAvailable =
       Boolean(this.configService.get<string>('WEB_PUSH_VAPID_PUBLIC_KEY')) &&
@@ -1221,15 +1242,15 @@ export class LeadFlowAutomationService {
         workspaceEmail.fromEmail,
       );
     const platformWhatsApp = this.platformWhatsAppConfig.get();
-    const hotLeadTemplateApproved = Boolean(
-      resolvePlatformWhatsAppTemplate(LEADFLOW_HOT_LEAD_TEMPLATE_KEY),
+    const templateApproved = Boolean(
+      resolvePlatformWhatsAppTemplate(whatsappTemplateKey),
     );
     const platformWhatsAppAvailable =
-      hotLeadTemplateApproved &&
+      templateApproved &&
       platformWhatsApp.enabled &&
       platformWhatsApp.testRecipientAllowList.length > 0;
-    const platformWhatsAppReason = !hotLeadTemplateApproved
-      ? 'Template de lead quente ainda não aprovado pela Meta.'
+    const platformWhatsAppReason = !templateApproved
+      ? `${WHATSAPP_TEMPLATE_LABELS[whatsappTemplateKey] ?? 'Template'} ainda não aprovado pela Meta.`
       : !platformWhatsApp.enabled
         ? 'WhatsApp não configurado para notificações da plataforma.'
         : platformWhatsApp.testRecipientAllowList.length === 0

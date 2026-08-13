@@ -22,7 +22,8 @@ import {
 } from '../../notifications/enums';
 import {
   LEADFLOW_HOT_LEAD_TEMPLATE_KEY,
-  type HotLeadWhatsAppTemplateVariables,
+  LEADFLOW_LEAD_DISTRIBUTED_TEMPLATE_KEY,
+  type PlatformWhatsAppTemplateVariables,
 } from '../../notifications/platform-whatsapp/platform-whatsapp-notification.catalog';
 import { PlatformWhatsAppDeliveryService } from '../../notifications/platform-whatsapp/platform-whatsapp-delivery.service';
 import { NotificationEventProcessorService } from '../../notifications/services';
@@ -53,6 +54,55 @@ export interface HotLeadChannelResult {
   status: HotLeadDeliveryStatus;
 }
 
+/**
+ * Which alert is being published. The fan-out — recipients, per-channel
+ * independence, idempotency, preferences — is the same for both; what differs is
+ * the catalog event the recipient's preferences are keyed by, the WhatsApp
+ * template, and the sentence each carries.
+ */
+export type AutomationAlertKind = 'hot_lead' | 'lead_distributed';
+
+interface AutomationAlertDefinition {
+  eventType: string;
+  templateKey: string;
+  /** The line the in-app/e-mail notification carries, per alert. */
+  body: (facts: AutomationAlertFacts) => string;
+  /** The three approved template variables, in the catalog's semantic order. */
+  variables: (facts: AutomationAlertFacts) => PlatformWhatsAppTemplateVariables;
+}
+
+interface AutomationAlertFacts {
+  workspaceName: string;
+  leadDisplayName: string;
+  leadScore: string;
+  leadSource: string;
+}
+
+const ALERTS: Record<AutomationAlertKind, AutomationAlertDefinition> = {
+  hot_lead: {
+    eventType: 'leadflow.hot_lead.detected',
+    templateKey: LEADFLOW_HOT_LEAD_TEMPLATE_KEY,
+    body: (facts) =>
+      `${facts.leadDisplayName} atingiu Lead Score ${facts.leadScore} em ${facts.workspaceName}.`,
+    variables: (facts) => ({
+      workspaceName: facts.workspaceName,
+      leadDisplayName: facts.leadDisplayName,
+      leadScore: facts.leadScore,
+    }),
+  },
+  lead_distributed: {
+    eventType: 'leadflow.lead_distributed',
+    templateKey: LEADFLOW_LEAD_DISTRIBUTED_TEMPLATE_KEY,
+    body: (facts) =>
+      `${facts.leadDisplayName} (${facts.leadSource}) foi atribuído a você em ${facts.workspaceName}.`,
+    variables: (facts) => ({
+      workspaceName: facts.workspaceName,
+      leadDisplayName: facts.leadDisplayName,
+      leadSource: facts.leadSource,
+    }),
+  },
+};
+
 export interface AutomationNotificationInput {
   tenantId: string;
   workspaceId: string;
@@ -70,6 +120,8 @@ export interface AutomationNotificationInput {
   title: string;
   body: string;
   actionUrl: string;
+  /** Defaults to the hot-lead alert, the only one until lead distribution. */
+  alert?: AutomationAlertKind;
 }
 
 export type AutomationNotificationOutcome =
@@ -164,6 +216,13 @@ export class LeadFlowAutomationNotificationPublisher {
       typeof input.currentScore === 'number'
         ? String(Math.max(0, Math.min(100, Math.round(input.currentScore))))
         : 'Alto';
+    const alert = ALERTS[input.alert ?? 'hot_lead'];
+    const facts: AutomationAlertFacts = {
+      workspaceName,
+      leadDisplayName,
+      leadScore,
+      leadSource: leadSourceLabel(opportunity.source),
+    };
 
     const channelResults: HotLeadChannelResult[] = [];
     let notificationId: string | null = null;
@@ -176,7 +235,7 @@ export class LeadFlowAutomationNotificationPublisher {
       try {
         const processed = await this.processor.process({
           eventId: `${input.idempotencyKey}:notifications`,
-          eventType: 'leadflow.hot_lead.detected',
+          eventType: alert.eventType,
           tenantId: input.tenantId,
           workspaceId: input.workspaceId,
           productKey: NotificationProductKey.AGENCY,
@@ -192,7 +251,7 @@ export class LeadFlowAutomationNotificationPublisher {
           })),
           payload: {
             title: input.title,
-            body: `${leadDisplayName} atingiu Lead Score ${leadScore} em ${workspaceName}.`,
+            body: alert.body(facts),
             actionUrl: input.actionUrl,
             opportunityId: input.opportunityId,
             leadScore: input.currentScore,
@@ -228,9 +287,8 @@ export class LeadFlowAutomationNotificationPublisher {
           input,
           opportunity,
           recipientUserIds,
-          workspaceName,
-          leadDisplayName,
-          leadScore,
+          alert,
+          facts,
         )),
       );
     }
@@ -332,9 +390,8 @@ export class LeadFlowAutomationNotificationPublisher {
     input: AutomationNotificationInput,
     opportunity: CrmOpportunityEntity,
     recipientUserIds: string[],
-    workspaceName: string,
-    leadDisplayName: string,
-    leadScore: string,
+    alert: AutomationAlertDefinition,
+    facts: AutomationAlertFacts,
   ): Promise<HotLeadChannelResult[]> {
     const [profiles, preferenceRows] = await Promise.all([
       this.profiles.find({
@@ -358,14 +415,10 @@ export class LeadFlowAutomationNotificationPublisher {
     const whatsappPreferenceByUser = new Map(
       preferenceRows.map((row) => [
         row.userId,
-        acceptsHotLeadWhatsApp(row.preferences),
+        acceptsWhatsApp(row.preferences, alert.eventType),
       ]),
     );
-    const variables: HotLeadWhatsAppTemplateVariables = {
-      workspaceName,
-      leadDisplayName,
-      leadScore,
-    };
+    const variables = alert.variables(facts);
 
     const results: HotLeadChannelResult[] = [];
     for (const recipientUserId of recipientUserIds) {
@@ -394,7 +447,7 @@ export class LeadFlowAutomationNotificationPublisher {
           subjectId: input.opportunityId,
           handoffCycleId: `${input.policyVersion}:${input.cycleId}`,
           recipientUserId,
-          templateKey: LEADFLOW_HOT_LEAD_TEMPLATE_KEY,
+          templateKey: alert.templateKey,
           businessModeKey: opportunity.businessMode,
           toPhoneE164: phone,
           variables,
@@ -479,6 +532,29 @@ function firstNonEmpty(
   return null;
 }
 
+/** The opportunity's origin, as a person reads it rather than as it is stored. */
+const LEAD_SOURCE_LABELS: Record<string, string> = {
+  manual: 'Cadastro manual',
+  whatsapp: 'WhatsApp',
+  webchat: 'Chat do site',
+  instagram: 'Instagram',
+  instagram_direct: 'Instagram',
+  facebook: 'Facebook',
+  facebook_messenger: 'Facebook',
+  email: 'E-mail',
+  sms: 'SMS',
+  inbox: 'Inbox',
+  import: 'Importação',
+  api: 'Integração',
+  webform: 'Formulário do site',
+};
+
+function leadSourceLabel(value: string | null | undefined): string {
+  const key = (value ?? '').trim().toLowerCase();
+  if (!key) return 'Origem não informada';
+  return LEAD_SOURCE_LABELS[key] ?? key.replace(/[_-]+/g, ' ');
+}
+
 function maskPhone(value: string | null | undefined): string | null {
   const digits = (value ?? '').replace(/[^\d]/g, '');
   return digits.length >= 4 ? `••••${digits.slice(-4)}` : null;
@@ -488,11 +564,17 @@ function errorName(error: unknown): string {
   return error instanceof Error ? error.name : 'unknown_error';
 }
 
-function acceptsHotLeadWhatsApp(
+/**
+ * WhatsApp is opt-in per alert: the recipient must have turned that channel on
+ * for this event. No entry means no message — an internal alert must never be
+ * the reason someone gets an unexpected WhatsApp.
+ */
+function acceptsWhatsApp(
   preferences: Array<Record<string, unknown>>,
+  eventType: string,
 ): boolean {
   const exact = preferences.find(
-    (preference) => preference.key === 'leadflow.hot_lead.detected',
+    (preference) => preference.key === eventType,
   );
   if (!exact) return false;
   if (typeof exact.whatsapp === 'boolean') return exact.whatsapp;

@@ -109,6 +109,16 @@ export const AGENCY_NOTIFICATION_CATALOG: readonly NotificationDefinition[] = [
     NotificationRecipientStrategy.EXPLICIT_USERS,
     { defaultPriority: NotificationPriority.HIGH },
   ),
+  // The lead a distribution automation just handed to someone. Its own event —
+  // and not `sales.opportunity_assigned` — so the person can silence the manual
+  // handover without silencing the automatic one, or the other way round.
+  standard(
+    'leadflow.lead_distributed',
+    'sales',
+    NotificationCategory.ASSIGNMENT,
+    NotificationRecipientStrategy.EXPLICIT_USERS,
+    { defaultPriority: NotificationPriority.HIGH },
+  ),
   standard(
     'leadflow.daily_opportunity_summary.ready',
     'sales',

@@ -10,6 +10,8 @@
 /** The one logical key this phase implements. */
 export const LEADFLOW_HANDOFF_TEMPLATE_KEY = 'leadflow.handoff.requested';
 export const LEADFLOW_HOT_LEAD_TEMPLATE_KEY = 'leadflow.hot_lead.detected';
+export const LEADFLOW_LEAD_DISTRIBUTED_TEMPLATE_KEY =
+  'leadflow.lead_distributed';
 
 /**
  * Body variables of the handoff alert, as an explicit named contract rather than
@@ -34,9 +36,22 @@ export interface HotLeadWhatsAppTemplateVariables {
   leadScore: string;
 }
 
+/**
+ * Semantic contract for the lead-distribution alert: the lead a distribution
+ * automation just handed to this person.
+ *
+ *   {{1}} = workspaceName · {{2}} = leadDisplayName · {{3}} = leadSource
+ */
+export interface LeadDistributedWhatsAppTemplateVariables {
+  workspaceName: string;
+  leadDisplayName: string;
+  leadSource: string;
+}
+
 export type PlatformWhatsAppTemplateVariables =
   | LeadFlowHandoffTemplateVariables
-  | HotLeadWhatsAppTemplateVariables;
+  | HotLeadWhatsAppTemplateVariables
+  | LeadDistributedWhatsAppTemplateVariables;
 
 export type PlatformWhatsAppTemplateCategory =
   | 'utility'
@@ -89,6 +104,19 @@ export const PLATFORM_WHATSAPP_TEMPLATES: readonly PlatformWhatsAppTemplateDefin
       // kill switch, recipient policy and user preference remain independent
       // fail-closed gates.
       status: 'approved',
+      version: 1,
+    },
+    {
+      templateKey: LEADFLOW_LEAD_DISTRIBUTED_TEMPLATE_KEY,
+      businessModeKey: null,
+      providerTemplateName: 'lyra_leadflow_lead_assigned_v1',
+      languageCode: 'pt_BR',
+      category: 'utility',
+      // Declared, not yet submitted: the template does not exist in the WABA.
+      // `pending` resolves to null, so the WhatsApp channel of the distribution
+      // alert reports `skipped_whatsapp_template_unavailable` and the operator
+      // sees it as unavailable — fail-closed until Meta approves it.
+      status: 'pending',
       version: 1,
     },
   ];
@@ -149,6 +177,13 @@ export const HOT_LEAD_VARIABLE_FALLBACKS: HotLeadWhatsAppTemplateVariables = {
   leadScore: 'Alto',
 };
 
+export const LEAD_DISTRIBUTED_VARIABLE_FALLBACKS: LeadDistributedWhatsAppTemplateVariables =
+  {
+    workspaceName: 'Sua empresa',
+    leadDisplayName: 'Lead sem nome',
+    leadSource: 'Origem não informada',
+  };
+
 const MAX_PARAMETER_LENGTH = 160;
 
 /**
@@ -197,6 +232,25 @@ export function buildHotLeadTemplateParameters(
   ];
 }
 
+export function buildLeadDistributedTemplateParameters(
+  variables: LeadDistributedWhatsAppTemplateVariables,
+): [string, string, string] {
+  return [
+    normalizeParameter(
+      variables.workspaceName,
+      LEAD_DISTRIBUTED_VARIABLE_FALLBACKS.workspaceName,
+    ),
+    normalizeParameter(
+      variables.leadDisplayName,
+      LEAD_DISTRIBUTED_VARIABLE_FALLBACKS.leadDisplayName,
+    ),
+    normalizeParameter(
+      variables.leadSource,
+      LEAD_DISTRIBUTED_VARIABLE_FALLBACKS.leadSource,
+    ),
+  ];
+}
+
 export function buildPlatformTemplateParameters(
   templateKey: string,
   variables: PlatformWhatsAppTemplateVariables,
@@ -204,6 +258,11 @@ export function buildPlatformTemplateParameters(
   if (templateKey === LEADFLOW_HOT_LEAD_TEMPLATE_KEY) {
     return buildHotLeadTemplateParameters(
       variables as HotLeadWhatsAppTemplateVariables,
+    );
+  }
+  if (templateKey === LEADFLOW_LEAD_DISTRIBUTED_TEMPLATE_KEY) {
+    return buildLeadDistributedTemplateParameters(
+      variables as LeadDistributedWhatsAppTemplateVariables,
     );
   }
   return buildHandoffTemplateParameters(
