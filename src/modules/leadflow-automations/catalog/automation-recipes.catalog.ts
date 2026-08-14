@@ -269,38 +269,6 @@ const ESSENTIAL_SEEDS: RecipeSeed[] = [
     schedulePolicy: { cooldownHours: 24 },
   },
   {
-    key: 'followup_by_crm_stage',
-    templateVersion: 3,
-    requiredDependencies: [
-      LeadFlowAutomationDependency.EventFanOut,
-      LeadFlowAutomationDependency.SchedulerRuntime,
-      LeadFlowAutomationDependency.MessageGeneration,
-    ],
-    name: 'Follow-up por etapa do CRM',
-    description:
-      'Dispara um follow-up conforme a etapa atual da oportunidade e o tempo parado nela.',
-    category: LeadFlowAutomationCategory.Followup,
-    tier: 'essential',
-    trigger: 'opportunity.stage_changed',
-    primaryAction: 'schedule_followup',
-    whenLabel:
-      'Quando a oportunidade permanece numa etapa além do tempo configurado.',
-    limitsLabel: 'Respeita limite por oportunidade e horário comercial.',
-    triggerConfig: { idleHoursInStage: 48, stageRef: null, pipelineRef: null },
-    actionConfig: { maxAttempts: 2 },
-    messageConfig: {
-      baseMessage:
-        'Olá! Podemos continuar seu atendimento? Se ainda tiver interesse, responda a esta mensagem.',
-      followupSteps: [
-        {
-          stepKey: 'stage_followup',
-          delayMinutes: 2880,
-          channels: [],
-        },
-      ],
-    },
-  },
-  {
     key: 'appointment_reminder',
     templateVersion: 3,
     requiredDependencies: [
@@ -426,27 +394,6 @@ const ESSENTIAL_SEEDS: RecipeSeed[] = [
     },
   },
   {
-    key: 'automatic_handoff',
-    requiredDependencies: [
-      LeadFlowAutomationDependency.EventFanOut,
-      LeadFlowAutomationDependency.OwnershipCommand,
-    ],
-    name: 'Handoff automático',
-    description:
-      'Transfere a conversa para um humano quando o contexto exige atendimento pessoal.',
-    category: LeadFlowAutomationCategory.Handoff,
-    tier: 'essential',
-    trigger: 'conversation.handoff_requested',
-    primaryAction: 'request_handoff',
-    whenLabel:
-      'Quando surgem intenções sensíveis, palavras-chave ou pedido explícito de humano.',
-    limitsLabel:
-      'Respeita horário e responsável definido; registra o motivo do handoff.',
-    conditionConfig: { intents: [], keywords: [] },
-    actionConfig: { targetUserRef: null },
-    extraSafetyRules: ['escalate_sensitive_or_complaint_topics'],
-  },
-  {
     key: 'outside_business_hours',
     templateVersion: 3,
     requiredDependencies: [
@@ -470,55 +417,6 @@ const ESSENTIAL_SEEDS: RecipeSeed[] = [
         'No momento estamos fora do horário de atendimento. Assim que retornarmos, vamos responder por aqui.',
     },
     schedulePolicy: { respectBusinessHours: false },
-  },
-  {
-    key: 'missing_fields_request',
-    requiredDependencies: [
-      LeadFlowAutomationDependency.MissingFieldsDetector,
-      LeadFlowAutomationDependency.EventFanOut,
-      LeadFlowAutomationDependency.MessageGeneration,
-    ],
-    name: 'Campos faltantes',
-    description:
-      'Solicita dados mínimos ausentes do contato/oportunidade de forma guiada.',
-    category: LeadFlowAutomationCategory.DataQuality,
-    tier: 'essential',
-    trigger: 'opportunity.missing_fields_detected',
-    primaryAction: 'request_missing_fields',
-    whenLabel:
-      'Quando faltam campos obrigatórios definidos pelo Business Mode.',
-    limitsLabel:
-      'Limite de perguntas por mensagem; para se o lead demonstrar frustração.',
-    conditionConfig: { requiredFields: [] },
-    actionConfig: { maxAttempts: 2 },
-    crmPolicy: { appendNote: true },
-  },
-  {
-    key: 'post_service_followup',
-    templateVersion: 3,
-    requiredDependencies: [
-      LeadFlowAutomationDependency.AgendaDomain,
-      LeadFlowAutomationDependency.SchedulerRuntime,
-      LeadFlowAutomationDependency.MessageGeneration,
-    ],
-    name: 'Pós-atendimento',
-    description:
-      'Envia agradecimento e próximo passo após o atendimento/compromisso ser concluído.',
-    category: LeadFlowAutomationCategory.PostService,
-    tier: 'essential',
-    trigger: 'appointment.completed',
-    primaryAction: 'schedule_followup',
-    whenLabel: 'Duas horas depois do compromisso concluído.',
-    limitsLabel:
-      'Um envio por compromisso concluído, em horário comercial, respeitando o intervalo mínimo.',
-    conditionConfig: { businessHoursOnly: false, stopIfReplied: false },
-    triggerConfig: { delayHours: 2 },
-    messageConfig: {
-      baseMessage:
-        'Obrigado pela visita! Como foi sua experiência? Se precisar de qualquer coisa, é só responder por aqui.',
-    },
-    schedulePolicy: { cooldownHours: 72 },
-    crmPolicy: { moveStageOnComplete: null, addTags: [] },
   },
   {
     key: 'governed_stage_advance',
@@ -554,72 +452,6 @@ const ESSENTIAL_SEEDS: RecipeSeed[] = [
 ];
 
 const OPTIONAL_SEEDS: RecipeSeed[] = [
-  {
-    key: 'quote_recovery',
-    requiredDependencies: [
-      LeadFlowAutomationDependency.QuotesDomain,
-      LeadFlowAutomationDependency.SchedulerRuntime,
-      LeadFlowAutomationDependency.MessageGeneration,
-    ],
-    name: 'Recuperação de orçamento',
-    description:
-      'Retoma leads com orçamento/proposta enviado que ficaram sem resposta.',
-    category: LeadFlowAutomationCategory.Retention,
-    tier: 'optional',
-    businessModeKeys: [
-      AgencyServices,
-      RealEstate,
-      Automotive,
-      LocalServices,
-      EducationCourses,
-    ],
-    trigger: 'quote.idle',
-    primaryAction: 'schedule_followup',
-    whenLabel: 'Quando um orçamento enviado fica parado sem resposta.',
-    limitsLabel: 'Limite de tentativas; para se o lead responder ou fechar.',
-    triggerConfig: { delayHours: 48 },
-    actionConfig: { maxAttempts: 2 },
-  },
-  {
-    key: 'cold_lead_reactivation',
-    templateVersion: 4,
-    requiredDependencies: [
-      LeadFlowAutomationDependency.EventFanOut,
-      LeadFlowAutomationDependency.SchedulerRuntime,
-      LeadFlowAutomationDependency.MessageGeneration,
-    ],
-    name: 'Reativação de lead frio',
-    description: 'Reengaja leads antigos e inativos com uma nova abordagem.',
-    category: LeadFlowAutomationCategory.Retention,
-    tier: 'optional',
-    trigger: 'conversation.idle',
-    primaryAction: 'schedule_followup',
-    whenLabel: 'Quando o lead está inativo há um longo período.',
-    limitsLabel: 'Baixa frequência; respeita opt-out e cooldown longo.',
-    triggerConfig: { delayHours: 720 },
-    conditionConfig: {
-      businessHoursOnly: true,
-      stopIfReplied: true,
-      stopIfHandoff: true,
-    },
-    actionConfig: { maxAttempts: 1 },
-    messageConfig: {
-      baseMessage:
-        'Olá! Faz algum tempo desde nosso último contato. Se ainda fizer sentido para você, responda a esta mensagem e retomamos por aqui.',
-      followupSteps: [
-        {
-          stepKey: 'reactivation_30d',
-          delayMinutes: 720 * 60,
-          channels: [],
-        },
-      ],
-    },
-    schedulePolicy: { cooldownHours: 720 },
-    extraSafetyRules: [
-      'respect_explicit_contact_opt_out',
-      'limit_reactivation_attempts',
-    ],
-  },
   {
     key: 'daily_opportunity_summary',
     templateVersion: 3,
@@ -735,66 +567,6 @@ const OPTIONAL_SEEDS: RecipeSeed[] = [
     ],
   },
   {
-    key: 'birthday_or_special_date',
-    requiredDependencies: [
-      LeadFlowAutomationDependency.SchedulerRuntime,
-      LeadFlowAutomationDependency.MessageGeneration,
-    ],
-    name: 'Aniversário / data especial',
-    description:
-      'Envia uma mensagem em aniversário ou data especial do contato.',
-    category: LeadFlowAutomationCategory.Lifecycle,
-    tier: 'optional',
-    trigger: 'contact.special_date',
-    primaryAction: 'send_message',
-    whenLabel: 'Na data especial cadastrada do contato.',
-    limitsLabel: 'Uma vez por data; respeita opt-out.',
-    conditionConfig: { businessHoursOnly: true, stopIfReplied: false },
-  },
-  {
-    key: 'pending_documents',
-    requiredDependencies: [
-      LeadFlowAutomationDependency.MissingFieldsDetector,
-      LeadFlowAutomationDependency.EventFanOut,
-      LeadFlowAutomationDependency.MessageGeneration,
-    ],
-    name: 'Documentos pendentes',
-    description: 'Solicita documentos pendentes necessários para avançar.',
-    category: LeadFlowAutomationCategory.Documents,
-    tier: 'optional',
-    businessModeKeys: [
-      LegalAccounting,
-      EducationCourses,
-      RealEstate,
-      Automotive,
-    ],
-    trigger: 'opportunity.missing_fields_detected',
-    primaryAction: 'request_missing_fields',
-    whenLabel: 'Quando faltam documentos obrigatórios no processo.',
-    limitsLabel: 'Limite de lembretes; para ao receber os documentos.',
-    conditionConfig: { requiredFields: [] },
-    actionConfig: { maxAttempts: 3 },
-  },
-  {
-    key: 'campaign_followup',
-    requiredDependencies: [
-      LeadFlowAutomationDependency.EventFanOut,
-      LeadFlowAutomationDependency.SchedulerRuntime,
-      LeadFlowAutomationDependency.MessageGeneration,
-    ],
-    name: 'Follow-up de campanha',
-    description:
-      'Acompanha leads originados de uma campanha específica com uma sequência dedicada.',
-    category: LeadFlowAutomationCategory.Followup,
-    tier: 'optional',
-    trigger: 'conversation.created',
-    primaryAction: 'schedule_followup',
-    whenLabel: 'Quando chega um lead de uma campanha marcada.',
-    limitsLabel: 'Para se o lead responder ou for qualificado.',
-    conditionConfig: { keywords: [] },
-    actionConfig: { maxAttempts: 2 },
-  },
-  {
     key: 'developer_webhook',
     requiredDependencies: [
       LeadFlowAutomationDependency.EventFanOut,
@@ -825,11 +597,54 @@ export const LEADFLOW_AUTOMATION_RECIPES: LeadFlowAutomationRecipeCatalogItem[] 
   [...ESSENTIAL_SEEDS, ...OPTIONAL_SEEDS].map(buildRecipe);
 
 /**
+ * Recipes withdrawn from the catalog, kept here only as a record of what the
+ * keys used to mean. They resolve to nothing — `getRecipeByKey` returns
+ * `undefined` — because the instances were deleted by migration
+ * `1789700000000`, not left orphaned.
+ *
+ * Two reasons, and neither is "we did not get around to it":
+ *
+ *  - **Duplicated the follow-up.** `followup_by_crm_stage`,
+ *    `cold_lead_reactivation`, `post_service_followup`, `campaign_followup`,
+ *    `quote_recovery`, `missing_fields_request` and `pending_documents` were all
+ *    "wait, then send a message". The canonical cadence in `followup_idle_lead`
+ *    (d0/d1/d3/d7, per-opportunity mode, agent-written copy) does that job, and
+ *    an operator configuring the same thing in seven places configures it wrong
+ *    in six.
+ *  - **Owned elsewhere.** `automatic_handoff` re-declared a handoff that the
+ *    agent already performs through the governed action worker and the
+ *    ownership command — including who receives it, configured on the agent.
+ *    `birthday_or_special_date` needed a birth date the platform never collects.
+ *
+ * The trigger vocabulary, the dependency registry and the action list keep the
+ * entries these recipes used: they belong to the event contract and to the
+ * executor registry, not to the catalog.
+ */
+export const RETIRED_AUTOMATION_RECIPE_KEYS: readonly string[] = [
+  'automatic_handoff',
+  'birthday_or_special_date',
+  'campaign_followup',
+  'cold_lead_reactivation',
+  'followup_by_crm_stage',
+  'missing_fields_request',
+  'pending_documents',
+  'post_service_followup',
+  'quote_recovery',
+];
+
+/**
  * The one recipe whose single effect is a governed stage transition — the first
  * productive executor's target. Named so config validation and the UI can
  * special-case it without matching on a string literal in several places.
  */
 export const GOVERNED_STAGE_ADVANCE_RECIPE_KEY = 'governed_stage_advance';
+
+/**
+ * The one follow-up recipe. It owns the canonical d0/d1/d3/d7 cadence, so the
+ * config schema, the lifecycle and the timer consumer all key off this name
+ * instead of listing the several follow-up recipes that used to exist.
+ */
+export const FOLLOWUP_IDLE_LEAD_RECIPE_KEY = 'followup_idle_lead';
 
 /**
  * The recipes whose effect includes telling a colleague, over the channels the

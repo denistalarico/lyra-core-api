@@ -224,6 +224,8 @@ export type LeadFlowFollowupChannelResult =
   | 'skipped_sms_missing_consent'
   | 'skipped_channel_unavailable'
   | 'skipped_recipient_unavailable'
+  /** The contact refused outbound contact; only the attempts that reach out. */
+  | 'skipped_contact_opt_out'
   /** A manual card whose text for this attempt was never written. */
   | 'skipped_message_unavailable'
   | 'failed_provider';

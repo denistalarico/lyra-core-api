@@ -446,6 +446,49 @@ describe('LeadFlowFollowupTimerConsumer', () => {
       );
     });
 
+    it('stops for a lead who asked to stop receiving messages', async () => {
+      // The reactivation recipe used to be the only one honouring this, and it
+      // was retired. A follow-up is automated outbound like any other.
+      const envelope = canonicalEnvelope();
+      conversationsFindOne.mockResolvedValue({
+        id: 'conversation-1',
+        tenantId: 'tenant-1',
+        workspaceId: 'workspace-1',
+        opportunityId: 'opportunity-1',
+        channelId: 'channel-1',
+        status: 'open',
+        ownershipState: 'ai_active',
+        ownershipVersion: 3,
+        aiEnabled: true,
+        metadata: {
+          leadflowOutboundOptOut: {
+            status: 'opted_out',
+            recordedAt: '2026-07-26T10:00:00.000Z',
+            source: 'inbound_keyword',
+            sourceMessageId: 'message-9',
+          },
+        },
+      });
+
+      await consumer.handleTimer(envelope);
+
+      expect(send).not.toHaveBeenCalled();
+      expect(opportunitiesUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'opportunity-1' }),
+        expect.objectContaining({
+          metadata: expect.objectContaining({
+            followUp: expect.objectContaining({
+              attempts: [
+                expect.objectContaining({
+                  result: 'skipped_contact_opt_out',
+                }),
+              ],
+            }),
+          }),
+        }),
+      );
+    });
+
     it('records why an attempt did not go out', async () => {
       await consumer.handleTimer(
         canonicalEnvelope({

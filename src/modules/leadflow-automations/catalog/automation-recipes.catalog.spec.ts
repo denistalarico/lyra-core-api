@@ -1,4 +1,5 @@
 import { LeadFlowBusinessMode } from '../../leadflow-settings/enums/leadflow-business-mode.enum';
+import { LeadFlowAutomationCategory } from '../enums/leadflow-automation-category.enum';
 import { LeadFlowAutomationDependency } from '../enums/leadflow-automation-dependency.enum';
 import {
   getRecipeByKey,
@@ -6,31 +7,23 @@ import {
   LEADFLOW_AUTOMATION_RECIPES,
   LEADFLOW_AUTOMATION_TRIGGER_KINDS,
   listRecipes,
+  RETIRED_AUTOMATION_RECIPE_KEYS,
 } from './automation-recipes.catalog';
 
 const ESSENTIAL_KEYS = [
   'followup_idle_lead',
-  'followup_by_crm_stage',
   'appointment_reminder',
   'appointment_confirmation',
   'appointment_no_show_recovery',
   'hot_lead_notification',
-  'automatic_handoff',
   'outside_business_hours',
-  'missing_fields_request',
-  'post_service_followup',
 ];
 
 const OPTIONAL_KEYS = [
-  'quote_recovery',
-  'cold_lead_reactivation',
   'daily_opportunity_summary',
   'lead_distribution',
   'automatic_tagging',
   'post_service_csat',
-  'birthday_or_special_date',
-  'pending_documents',
-  'campaign_followup',
   'developer_webhook',
 ];
 
@@ -47,6 +40,28 @@ describe('automation recipes catalog', () => {
     for (const key of OPTIONAL_KEYS) {
       expect(getRecipeByKey(key)).toBeDefined();
     }
+  });
+
+  it('offers nothing under a retired key', () => {
+    // A retired recipe that still resolves is worse than none: provisioning
+    // would create a card the operator can open and cannot configure.
+    for (const key of RETIRED_AUTOMATION_RECIPE_KEYS) {
+      expect(getRecipeByKey(key)).toBeUndefined();
+      expect(listRecipes().some((recipe) => recipe.key === key)).toBe(false);
+    }
+  });
+
+  it('keeps a single follow-up recipe', () => {
+    // Seven recipes used to schedule a message after a wait, each with its own
+    // cadence to configure. The point of retiring them is that this stays one.
+    // The no-show recovery also schedules a follow-up, but it recovers a missed
+    // appointment — the Agenda owns when that happens, not the cadence.
+    const followups = listRecipes().filter(
+      (recipe) => recipe.category === LeadFlowAutomationCategory.Followup,
+    );
+    expect(followups.map((recipe) => recipe.key)).toEqual([
+      'followup_idle_lead',
+    ]);
   });
 
   it('has unique recipe keys', () => {
@@ -122,12 +137,6 @@ describe('automation recipes catalog', () => {
       ).toContain(LeadFlowAutomationDependency.LeadDistributionCommand);
     });
 
-    it('routes the automatic handoff through the canonical ownership command', () => {
-      expect(
-        getRecipeByKey('automatic_handoff')!.requiredDependencies,
-      ).toContain(LeadFlowAutomationDependency.OwnershipCommand);
-    });
-
     it('routes the daily summary through the durable scheduler and event fan-out', () => {
       expect(
         getRecipeByKey('daily_opportunity_summary')!.requiredDependencies,
@@ -171,9 +180,6 @@ describe('automation recipes catalog', () => {
 
     it('treats clock-driven recipes as schedules', () => {
       expect(getRecipeByKey('daily_opportunity_summary')!.triggerKind).toBe(
-        'schedule',
-      );
-      expect(getRecipeByKey('birthday_or_special_date')!.triggerKind).toBe(
         'schedule',
       );
     });

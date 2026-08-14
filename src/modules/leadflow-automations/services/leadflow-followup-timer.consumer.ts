@@ -15,6 +15,7 @@ import { InboxDomainOutboxEntity } from '../../inbox/entities/inbox-domain-outbo
 import { InboxMessageEntity } from '../../inbox/entities/inbox-message.entity';
 import { InboxSettingsEntity } from '../../inbox/entities/inbox-settings.entity';
 import { hasLeadFlowOutboundOptOut } from '../../inbox/services/leadflow-contact-opt-out';
+import { FOLLOWUP_IDLE_LEAD_RECIPE_KEY } from '../catalog/automation-recipes.catalog';
 import {
   enabledFollowupSteps,
   FOLLOWUP_STEP_KEYS,
@@ -45,9 +46,6 @@ import { evaluateBusinessHours } from './leadflow-automation-context-loader.serv
 
 export const LEADFLOW_FOLLOWUP_TIMER_CONSUMER =
   'leadflow.automations.followup' as const;
-
-/** The recipe whose cadence is the canonical d0/d1/d3/d7 plan. */
-const FOLLOWUP_IDLE_LEAD_RECIPE_KEY = 'followup_idle_lead';
 
 /**
  * Owns the two timer payloads used by Fase 6:
@@ -121,12 +119,7 @@ export class LeadFlowFollowupTimerConsumer
       automationId,
       null,
     );
-    if (
-      !automation ||
-      !['followup_idle_lead', 'cold_lead_reactivation'].includes(
-        automation.recipeKey,
-      )
-    ) {
+    if (!automation || automation.recipeKey !== FOLLOWUP_IDLE_LEAD_RECIPE_KEY) {
       return;
     }
     const conversation = await this.conversations.findOne({
@@ -254,13 +247,6 @@ export class LeadFlowFollowupTimerConsumer
       isHandoff(conversation)
     )
       return;
-    if (
-      stringField(envelope.payload.automationRecipeKey) ===
-        'cold_lead_reactivation' &&
-      hasLeadFlowOutboundOptOut(conversation)
-    ) {
-      return;
-    }
     if (booleanField(envelope.payload.stopIfReplied, true)) {
       const replied = await this.messages.exist({
         where: {
@@ -391,6 +377,12 @@ export class LeadFlowFollowupTimerConsumer
       followUp,
       fallback: nullableString(envelope.payload.text),
     });
+    // A lead who wrote "parar" asked for automated messages to stop, and every
+    // attempt of this cadence is one. The check used to belong to the
+    // reactivation recipe alone; the cadence inherited its job when that recipe
+    // was retired, and applying it to the whole plan is the reading of consent
+    // that does not need a rule about which attempt counts.
+    const optedOut = hasLeadFlowOutboundOptOut(conversation);
 
     for (const channelConfig of channelConfigs) {
       let channelResult: LeadFlowFollowupChannelResult;
@@ -401,7 +393,9 @@ export class LeadFlowFollowupTimerConsumer
         'webchat',
       ].includes(channelConfig.channel);
 
-      if (canonical && step && isInConversationStep(step.stepKey) && !text) {
+      if (optedOut) {
+        channelResult = 'skipped_contact_opt_out';
+      } else if (canonical && step && isInConversationStep(step.stepKey) && !text) {
         // Manual mode with nothing written yet: there is no message to send,
         // and the default copy is not this card's voice to borrow.
         channelResult = 'skipped_message_unavailable';

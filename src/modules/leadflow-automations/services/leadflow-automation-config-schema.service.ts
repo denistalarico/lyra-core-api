@@ -8,6 +8,7 @@ import {
   type LeadFlowAutomationFieldSpec,
 } from '../catalog/automation-config-schemas.catalog';
 import {
+  FOLLOWUP_IDLE_LEAD_RECIPE_KEY,
   NOTIFICATION_CHANNEL_RECIPE_KEYS,
   type LeadFlowAutomationRecipeCatalogItem,
 } from '../catalog/automation-recipes.catalog';
@@ -127,9 +128,7 @@ export class LeadFlowAutomationConfigSchemaService {
         if (
           section === 'message' &&
           spec.key === 'followupSteps' &&
-          ['followup_idle_lead', 'followup_by_crm_stage'].includes(
-            recipe.key,
-          ) &&
+          recipe.key === FOLLOWUP_IDLE_LEAD_RECIPE_KEY &&
           values.followupSteps === undefined &&
           typeof values.baseMessage === 'string' &&
           values.baseMessage.trim()
@@ -144,31 +143,12 @@ export class LeadFlowAutomationConfigSchemaService {
 
     // The canonical cadence answers "does this attempt happen" with `enabled`,
     // because d0 and d1 reply inside the conversation and have no channel of
-    // their own to switch on. The other two recipes still declare their channel
-    // per step, so for them a step without one configures nothing.
+    // their own to switch on. A plan with every attempt off is a follow-up that
+    // never sends anything, so it counts as unconfigured.
     if (
-      recipe.key === 'followup_idle_lead' &&
+      recipe.key === FOLLOWUP_IDLE_LEAD_RECIPE_KEY &&
       Array.isArray(config.message?.followupSteps) &&
       enabledFollowupSteps(config.message.followupSteps).length === 0 &&
-      !missing.includes('message.followupSteps')
-    ) {
-      missing.push('message.followupSteps');
-    }
-
-    if (
-      ['followup_by_crm_stage', 'cold_lead_reactivation'].includes(
-        recipe.key,
-      ) &&
-      Array.isArray(config.message?.followupSteps) &&
-      !config.message.followupSteps.some(
-        (step) =>
-          this.isPlainObject(step) &&
-          Array.isArray(step.channels) &&
-          step.channels.some(
-            (channel) =>
-              this.isPlainObject(channel) && channel.enabled === true,
-          ),
-      ) &&
       !missing.includes('message.followupSteps')
     ) {
       missing.push('message.followupSteps');

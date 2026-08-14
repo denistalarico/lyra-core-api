@@ -66,11 +66,11 @@ function harness(action: LeadFlowAutomationCrmAction) {
     workspaceId: ids.workspace,
     contextType: 'agency',
     agencyClientId: null,
-    recipeKey: 'followup_by_crm_stage',
+    recipeKey: 'followup_idle_lead',
     templateVersion: 2,
     status: LeadFlowAutomationStatus.Active,
     publishedVersionId: ids.version,
-    triggerConfig: { type: 'opportunity.stage_changed' },
+    triggerConfig: { type: 'conversation.idle' },
   } as LeadFlowAutomationEntity;
   const version = {
     id: ids.version,

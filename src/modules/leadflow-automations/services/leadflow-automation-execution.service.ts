@@ -638,10 +638,10 @@ export class LeadFlowAutomationExecutionService {
 
     return {
       automationRecipeKey: automation.recipeKey,
-      timerPurpose:
-        automation.recipeKey === 'cold_lead_reactivation'
-          ? 'automation_reactivation'
-          : 'automation_followup',
+      // `automation_reactivation` stays in the purpose vocabulary for timers
+      // scheduled before the reactivation recipe was retired; nothing schedules
+      // one now.
+      timerPurpose: 'automation_followup',
       conversationId: subject.conversationId,
       opportunityId:
         subject.opportunityId ??

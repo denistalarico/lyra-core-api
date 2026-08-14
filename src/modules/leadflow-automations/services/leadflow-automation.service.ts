@@ -26,6 +26,7 @@ import { LeadFlowSettingsContextType } from '../../leadflow-settings/enums/leadf
 import { PlatformPermissionService } from '../../permissions';
 import type { PermissionContext } from '../../permissions';
 import {
+  FOLLOWUP_IDLE_LEAD_RECIPE_KEY,
   GOVERNED_STAGE_ADVANCE_RECIPE_KEY,
   NOTIFICATION_CHANNEL_RECIPE_KEYS,
   type LeadFlowAutomationRecipeCatalogItem,
@@ -1017,9 +1018,7 @@ export class LeadFlowAutomationService {
     }
 
     if (
-      !['followup_idle_lead', 'followup_by_crm_stage'].includes(
-        automation.recipeKey,
-      ) ||
+      automation.recipeKey !== FOLLOWUP_IDLE_LEAD_RECIPE_KEY ||
       lifecycle.missingConfiguration.includes('message.followupSteps') ||
       (await this.hasProductiveFollowupChannel(automation))
     ) {

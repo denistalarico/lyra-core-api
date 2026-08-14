@@ -9,17 +9,11 @@ describe('LeadFlowAutomationConfigSchemaService', () => {
   const idleLead = getRecipeByKey(
     'followup_idle_lead',
   ) as LeadFlowAutomationRecipeCatalogItem;
-  const missingFields = getRecipeByKey(
-    'missing_fields_request',
-  ) as LeadFlowAutomationRecipeCatalogItem;
   const hotLead = getRecipeByKey(
     'hot_lead_notification',
   ) as LeadFlowAutomationRecipeCatalogItem;
   const automaticTagging = getRecipeByKey(
     'automatic_tagging',
-  ) as LeadFlowAutomationRecipeCatalogItem;
-  const coldReactivation = getRecipeByKey(
-    'cold_lead_reactivation',
   ) as LeadFlowAutomationRecipeCatalogItem;
   const dailySummary = getRecipeByKey(
     'daily_opportunity_summary',
@@ -151,10 +145,10 @@ describe('LeadFlowAutomationConfigSchemaService', () => {
 
     it('enforces list item limits', () => {
       const result = service.validateSection(
-        missingFields,
-        'conditions',
-        { requiredFields: Array.from({ length: 40 }, (_, i) => `f${i}`) },
-        missingFields.defaultConditionConfig,
+        automaticTagging,
+        'actions',
+        { addTags: Array.from({ length: 40 }, (_, i) => `tag-${i}`) },
+        automaticTagging.defaultActionConfig,
       );
 
       expect(result.errors[0].code).toBe('too_many_items');
@@ -210,19 +204,6 @@ describe('LeadFlowAutomationConfigSchemaService', () => {
   });
 
   describe('findMissingRequiredFields', () => {
-    it('keeps cold reactivation unready until a delivery channel is enabled', () => {
-      const missing = service.findMissingRequiredFields(coldReactivation, {
-        trigger: coldReactivation.defaultTriggerConfig,
-        conditions: coldReactivation.defaultConditionConfig,
-        actions: coldReactivation.defaultActionConfig,
-        message: coldReactivation.defaultMessageConfig,
-        crmPolicy: coldReactivation.defaultCrmPolicy,
-        schedulePolicy: coldReactivation.defaultSchedulePolicy,
-      });
-
-      expect(missing).toContain('message.followupSteps');
-    });
-
     it('does not make a global WhatsApp template an activation requirement', () => {
       const missing = service.findMissingRequiredFields(idleLead, {
         trigger: idleLead.defaultTriggerConfig,
@@ -349,46 +330,46 @@ describe('LeadFlowAutomationConfigSchemaService', () => {
     });
 
     it('reports an empty required list as missing', () => {
-      // `requiredFields` ships as `[]`, so this recipe is genuinely not ready
-      // until the operator fills it — the old readiness check missed this.
-      const missing = service.findMissingRequiredFields(missingFields, {
-        trigger: missingFields.defaultTriggerConfig,
-        conditions: missingFields.defaultConditionConfig,
-        actions: missingFields.defaultActionConfig,
-        message: missingFields.defaultMessageConfig,
-        crmPolicy: missingFields.defaultCrmPolicy,
-        schedulePolicy: missingFields.defaultSchedulePolicy,
+      // `addTags` ships as `[]`, so this recipe is genuinely not ready until the
+      // operator fills it — the old readiness check missed this.
+      const missing = service.findMissingRequiredFields(automaticTagging, {
+        trigger: automaticTagging.defaultTriggerConfig,
+        conditions: automaticTagging.defaultConditionConfig,
+        actions: automaticTagging.defaultActionConfig,
+        message: automaticTagging.defaultMessageConfig,
+        crmPolicy: automaticTagging.defaultCrmPolicy,
+        schedulePolicy: automaticTagging.defaultSchedulePolicy,
       });
 
-      expect(missing).toContain('conditions.requiredFields');
+      expect(missing).toContain('actions.addTags');
     });
 
     it('reports nothing once required fields are filled', () => {
-      const missing = service.findMissingRequiredFields(missingFields, {
-        trigger: missingFields.defaultTriggerConfig,
-        conditions: {
-          ...missingFields.defaultConditionConfig,
-          requiredFields: ['email'],
+      const missing = service.findMissingRequiredFields(automaticTagging, {
+        trigger: automaticTagging.defaultTriggerConfig,
+        conditions: automaticTagging.defaultConditionConfig,
+        actions: {
+          ...automaticTagging.defaultActionConfig,
+          addTags: ['origem-instagram'],
         },
-        actions: missingFields.defaultActionConfig,
-        message: missingFields.defaultMessageConfig,
-        crmPolicy: missingFields.defaultCrmPolicy,
-        schedulePolicy: missingFields.defaultSchedulePolicy,
+        message: automaticTagging.defaultMessageConfig,
+        crmPolicy: automaticTagging.defaultCrmPolicy,
+        schedulePolicy: automaticTagging.defaultSchedulePolicy,
       });
 
       expect(missing).toEqual([]);
     });
 
     it('treats a blank string as missing', () => {
-      const missing = service.findMissingRequiredFields(missingFields, {
-        conditions: {
-          ...missingFields.defaultConditionConfig,
-          requiredFields: ['ok'],
+      const missing = service.findMissingRequiredFields(automaticTagging, {
+        conditions: { ...automaticTagging.defaultConditionConfig, ruleField: '   ' },
+        actions: {
+          ...automaticTagging.defaultActionConfig,
+          addTags: ['origem-instagram'],
         },
-        actions: { ...missingFields.defaultActionConfig, maxAttempts: null },
       });
 
-      expect(missing).toContain('actions.maxAttempts');
+      expect(missing).toContain('conditions.ruleField');
     });
 
     it('accepts the approved platform WhatsApp channel in the closed schema', () => {
