@@ -72,6 +72,12 @@ function harness(
     conversations?: InboxConversationEntity[];
   } = {},
 ) {
+  const transitionPolicies = {
+    assertTransitionAllowedWithinTransaction: jest.fn().mockResolvedValue({
+      id: '00000000-0000-4000-8000-000000000090',
+      version: 1,
+    }),
+  };
   const committed = {
     opportunities: [...(options.initial ?? [])],
     stages: [...(options.stages ?? [stage()])],
@@ -234,17 +240,13 @@ function harness(
   return {
     service: new CrmOpportunityCommandService(
       dataSource as never,
-      {
-        assertTransitionAllowedWithinTransaction: jest.fn().mockResolvedValue({
-          id: '00000000-0000-4000-8000-000000000090',
-          version: 1,
-        }),
-      } as never,
+      transitionPolicies as never,
       // Scoring runs after the command commits and must never be able to fail
       // the command; these tests assert the command, not the score.
       { recalculateQuietly: jest.fn().mockResolvedValue(undefined) } as never,
     ),
     committed,
+    transitionPolicies,
   };
 }
 
@@ -1080,6 +1082,72 @@ describe('CrmOpportunityCommandService — autonomy mode (D3)', () => {
       (event) => event.eventType === 'autonomy_mode_changed',
     );
     expect(autonomyEvent?.afterData).toMatchObject({ autonomyMode: 'manual' });
+  });
+
+  it('lets a LeadFlow CRM human override a missing transition policy', async () => {
+    const initial = opportunity({ autonomyMode: 'automatic' });
+    const { service, committed, transitionPolicies } = harness({
+      initial: [initial],
+      stages: [openStage()],
+    });
+    transitionPolicies.assertTransitionAllowedWithinTransaction.mockRejectedValue(
+      new ConflictException({
+        code: 'CRM_STAGE_TRANSITION_BLOCKED',
+        reasonCode: 'transition_policy_missing',
+      }),
+    );
+
+    const result = await service.moveStage(ctx, initial.id, openStage().id, {
+      actor: { type: 'user', userId: ctx.userId },
+      expectedVersion: 3,
+      reason: 'manual_stage_move',
+      manualStageOverride: true,
+    });
+
+    expect(transitionPolicies.assertTransitionAllowedWithinTransaction).not.toHaveBeenCalled();
+    expect(result.opportunity).toMatchObject({
+      stageId: openStage().id,
+      autonomyMode: 'manual',
+      rowVersion: 4,
+    });
+    expect(committed.events.map((event) => event.eventType)).toEqual([
+      'stage_changed',
+      'autonomy_mode_changed',
+    ]);
+    expect(committed.events[0]).toMatchObject({
+      reason: 'manual_stage_move',
+      policyVersion: null,
+      metadata: {
+        transitionPolicyBypassed: true,
+        transitionPolicyBypassReason: 'leadflow_human_override',
+      },
+    });
+  });
+
+  it('never lets an automation use the manual transition override', async () => {
+    const initial = opportunity({ autonomyMode: 'automatic' });
+    const { service, transitionPolicies } = harness({
+      initial: [initial],
+      stages: [openStage()],
+    });
+    transitionPolicies.assertTransitionAllowedWithinTransaction.mockRejectedValue(
+      new ConflictException({
+        code: 'CRM_STAGE_TRANSITION_BLOCKED',
+        reasonCode: 'transition_policy_missing',
+      }),
+    );
+
+    await expect(
+      service.moveStage(ctx, initial.id, openStage().id, {
+        actor: { type: 'automation' },
+        expectedVersion: 3,
+        reason: 'governed_stage_advance',
+        manualStageOverride: true,
+      }),
+    ).rejects.toMatchObject({
+      response: { reasonCode: 'transition_policy_missing' },
+    });
+    expect(transitionPolicies.assertTransitionAllowedWithinTransaction).toHaveBeenCalledTimes(1);
   });
 
   it('does not flip or emit for a non-LeadFlow (Agency Sales) human move', async () => {

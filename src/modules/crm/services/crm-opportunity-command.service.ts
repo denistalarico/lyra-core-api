@@ -30,6 +30,8 @@ export type CrmCommandActor = {
 
 export type CrmCommandOptions = {
   actor?: CrmCommandActor;
+  /** Human-only CRM override; automation and AI actors can never use it. */
+  manualStageOverride?: boolean;
   expectedVersion?: number;
   expectedTransitionPolicyId?: string;
   expectedTransitionPolicyVersion?: number;
@@ -1025,16 +1027,21 @@ export class CrmOpportunityCommandService {
     }
 
     // D3: a human moving a LeadFlow card takes it over — flip it to manual and
-    // record the change. Scoped to LeadFlow provenance so Agency Sales moves are
-    // untouched (no flip, no event). No-op when already manual.
+    // record the change. Existing provenance keeps governed LeadFlow callers
+    // covered; the CRM UI declares its human override explicitly, so even a
+    // legacy manually-created card is recognized. No-op when already manual.
+    const humanManualOverride =
+      stageChanged &&
+      options.manualStageOverride === true &&
+      this.isHumanActor(options.actor);
     const flipToManual =
       stageChanged &&
       this.isHumanActor(options.actor) &&
-      this.isLeadFlowManaged(opportunity) &&
+      (humanManualOverride || this.isLeadFlowManaged(opportunity)) &&
       opportunity.autonomyMode !== 'manual';
 
     let governedOptions = options;
-    if (stageChanged) {
+    if (stageChanged && !humanManualOverride) {
       const policy =
         await this.transitionPolicies.assertTransitionAllowedWithinTransaction(
           manager,
@@ -1064,6 +1071,16 @@ export class CrmOpportunityCommandService {
           ...(options.metadata ?? {}),
           transitionPolicyId: policy.id,
           transitionPolicyVersion: policy.version,
+        },
+      };
+    } else if (humanManualOverride) {
+      governedOptions = {
+        ...options,
+        policyVersion: null,
+        metadata: {
+          ...(options.metadata ?? {}),
+          transitionPolicyBypassed: true,
+          transitionPolicyBypassReason: 'leadflow_human_override',
         },
       };
     }

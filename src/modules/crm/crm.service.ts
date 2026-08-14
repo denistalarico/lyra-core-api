@@ -686,6 +686,10 @@ export class CrmService {
       dto.stageId,
       {
         ...options,
+        actor: dto.manualOverride
+          ? { type: 'user', userId: ctx.userId ?? null }
+          : options.actor,
+        manualStageOverride: dto.manualOverride === true,
         expectedVersion: dto.expectedVersion ?? options.expectedVersion,
         sortOrder: dto.sortOrder,
         beforeOpportunityId: dto.beforeOpportunityId,

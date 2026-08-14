@@ -1,4 +1,5 @@
 import {
+  IsBoolean,
   IsInt,
   IsOptional,
   IsString,
@@ -21,6 +22,14 @@ export class PatchCrmOpportunityStageDto {
   @IsOptional()
   @IsUUID()
   beforeOpportunityId?: string | null;
+
+  /**
+   * A human drag performed in the LeadFlow CRM. It deliberately bypasses the
+   * published automation transition graph and takes the card into manual mode.
+   */
+  @IsOptional()
+  @IsBoolean()
+  manualOverride?: boolean;
 
   @IsString()
   @MaxLength(80)
