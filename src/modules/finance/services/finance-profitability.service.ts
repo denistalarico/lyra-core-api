@@ -379,6 +379,11 @@ export class FinanceProfitabilityService {
           ...tasks.map((task) => task.clientId),
           ...periodInvoices.map((invoice) => invoice.customerId),
           ...activeRecurringProfiles.map((profile) => profile.customerId),
+          // A client may have no project, task, invoice or recurring profile
+          // yet. Its linked payable cost center must still make it visible in
+          // profitability, otherwise the direct cost is calculated and then
+          // silently discarded before the client rows are built.
+          ...directCostByClientId.keys(),
         ].filter(Boolean) as string[],
       ),
     );
@@ -426,7 +431,10 @@ export class FinanceProfitabilityService {
       });
     });
 
-    const totals = this.calculateTotals(projectsProfitability);
+    // The portfolio summary is client-based. Using project rows here omitted
+    // payable lines linked directly to a client's cost center (the canonical
+    // direct-cost path) whenever they had no project metadata.
+    const totals = this.calculateTotals(clientsProfitability);
 
     return {
       status: 'ok',

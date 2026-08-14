@@ -191,6 +191,30 @@ describe('FinanceProfitabilityService — direct profitability', () => {
     expect(client?.directCosts).toBe(300);
   });
 
+  it('keeps a client with only a linked direct cost in profitability', async () => {
+    const data = baseData({
+      projects: [],
+      tasks: [],
+      checklistItems: [],
+      timeEntries: [],
+      invoices: [],
+      recurringProfiles: [],
+    });
+    data.bills = data.bills?.map((bill) => ({
+      ...bill,
+      status: 'paid' as FinanceBill['status'],
+    }));
+    const service = makeService(data);
+
+    const overview = await service.getOverview(ctx());
+    const client = overview.clients.find((item) => item.id === CLIENT);
+
+    expect(client?.directCosts).toBe(300);
+    expect(client?.grossProfit).toBe(-300);
+    expect(client?.health).toBe('loss');
+    expect(overview.summary.directCosts).toBe(300);
+  });
+
   it('computes revenue, profit and a non-100% margin when there are costs', async () => {
     const client = await clientItem(baseData());
     expect(client?.revenue).toBe(1000);

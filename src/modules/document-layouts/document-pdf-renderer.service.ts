@@ -1497,7 +1497,8 @@ export class DocumentPdfRendererService {
   <title>${this.escapeHtml(input.title)}</title>
   <style>
     @page { size: ${input.pageSize === 'LETTER' ? 'Letter' : 'A4'}; margin: 16mm; }
-    body { font-family: Arial, Helvetica, sans-serif; color: #0F172A; font-size: 12px; }
+    :root { color-scheme: light; }
+    body { margin: 0; background: #FFFFFF; font-family: Arial, Helvetica, sans-serif; color: #0F172A; font-size: 12px; }
     h1 { font-size: 18px; margin: 0 0 12px; }
     h2 { font-size: 14px; margin: 0 0 8px; }
     .team-doc-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 16px; margin-bottom: 16px; font-size: 11px; }
