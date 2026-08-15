@@ -11,15 +11,25 @@ import {
   type SchedulerRuntime,
   type TimerFireEnvelope,
 } from '../scheduler';
-import { nextDailyOccurrence } from './leadflow-daily-schedule';
+import {
+  dailyOccurrenceForDate,
+  nextScheduledOccurrence,
+  previousScheduledOccurrence,
+  readSummarySchedule,
+  type SummarySchedule,
+} from './leadflow-daily-schedule';
 
 export const LEADFLOW_DAILY_SUMMARY_TIMER_CONSUMER =
   'leadflow.automations.daily-summary' as const;
 
 /**
- * Revalidates a daily schedule, emits its canonical trigger and chains the next
- * local-day timer. The outbox idempotency key makes an at-least-once timer fire
- * produce at most one automation delivery for the date.
+ * Revalidates a summary schedule, emits its canonical trigger and chains the
+ * next timer. The outbox idempotency key makes an at-least-once timer fire
+ * produce at most one automation delivery for the occurrence.
+ *
+ * The cadence in force is read from the automation row rather than from the
+ * timer payload, so an operator who switches from daily to weekly does not get
+ * one last delivery under the old rule.
  */
 @Injectable()
 export class LeadFlowDailySummaryTimerConsumer
@@ -67,6 +77,14 @@ export class LeadFlowDailySummaryTimerConsumer
       return;
     }
 
+    const schedule: SummarySchedule = readSummarySchedule(
+      automation.schedulePolicy,
+    ) ?? { frequency: 'daily', dailyTime, timezone };
+    const period = previousScheduledOccurrence(
+      dailyOccurrenceForDate(localDate, schedule.dailyTime, schedule.timezone),
+      schedule,
+    );
+
     await this.outbox
       .createQueryBuilder()
       .insert()
@@ -83,7 +101,10 @@ export class LeadFlowDailySummaryTimerConsumer
             automationId,
             scheduledFor,
             localDate,
-            timezone,
+            timezone: schedule.timezone,
+            frequency: schedule.frequency,
+            periodStart: period.fireAt.toISOString(),
+            periodEnd: scheduledFor,
           },
           publishedAt: null,
         }) as never,
@@ -91,14 +112,10 @@ export class LeadFlowDailySummaryTimerConsumer
       .orIgnore()
       .execute();
 
-    // Do not replay a long backlog one day at a time after an outage. The
-    // durable current fire is honored, then recurrence resumes at the next
+    // Do not replay a long backlog one occurrence at a time after an outage.
+    // The durable current fire is honored, then recurrence resumes at the next
     // future wall-clock occurrence.
-    const next = nextDailyOccurrence(
-      new Date(envelope.firedAt),
-      dailyTime,
-      timezone,
-    );
+    const next = nextScheduledOccurrence(new Date(envelope.firedAt), schedule);
     await this.scheduler.schedule({
       tenantId: envelope.tenantId,
       workspaceId: envelope.workspaceId,
@@ -110,8 +127,9 @@ export class LeadFlowDailySummaryTimerConsumer
       payload: {
         automationId,
         localDate: next.localDate,
-        dailyTime,
-        timezone,
+        dailyTime: schedule.dailyTime,
+        timezone: schedule.timezone,
+        frequency: schedule.frequency,
         scheduledFor: next.fireAt.toISOString(),
       },
     });

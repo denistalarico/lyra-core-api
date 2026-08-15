@@ -38,6 +38,17 @@ export type LeadFlowAutomationFieldSurface =
   | 'advanced'
   | 'developer';
 
+/**
+ * Who a field belongs to, which is a different axis from which surface it sits
+ * on. A surface answers "how technical is this decision"; an audience answers
+ * "whose decision is it at all".
+ *
+ * An agency-only field is not merely hidden from a client context: the schema
+ * never declares it there, so the fail-closed validator rejects it on write for
+ * the same reason the UI cannot draw it. One rule, two enforcement points.
+ */
+export type LeadFlowAutomationConfigAudience = 'agency' | 'client';
+
 export interface LeadFlowAutomationFieldSpec {
   key: string;
   type: LeadFlowAutomationFieldType;
@@ -50,6 +61,8 @@ export interface LeadFlowAutomationFieldSpec {
   readOnly?: boolean;
   /** A `null` instance value deliberately inherits the resolved default. */
   inheritable?: boolean;
+  /** Restricts the field to one audience; absent means everyone sees it. */
+  audience?: LeadFlowAutomationConfigAudience;
   min?: number;
   max?: number;
   maxLength?: number;
@@ -318,6 +331,25 @@ const FIELD_SPECS: Record<string, LeadFlowAutomationFieldSpec> = {
     label: 'Exigir aprovação humana',
     surface: 'advanced',
   },
+  // Publishing into the agency's own Team Chat is an agency decision about an
+  // agency space. A client context has no channel to point at, so it does not
+  // receive these two fields at all — not to read and not to write.
+  'actions.deliverToTeamChat': {
+    key: 'deliverToTeamChat',
+    type: 'boolean',
+    label: 'Publicar no Team Chat',
+    surface: 'essential',
+    audience: 'agency',
+  },
+  'actions.teamChatChannelId': {
+    key: 'teamChatChannelId',
+    type: 'string',
+    label: 'Canal do Team Chat',
+    surface: 'essential',
+    nullable: true,
+    maxLength: 64,
+    audience: 'agency',
+  },
 
   // ---------------------------------------------------------------- message
   // The set of channels a message can leave through is closed and known — the
@@ -498,13 +530,53 @@ const FIELD_SPECS: Record<string, LeadFlowAutomationFieldSpec> = {
     maxLength: 64,
     inheritable: true,
   },
+  // Cadence is three fields because it is three questions, and two of them only
+  // exist inside one answer: a weekly summary needs a weekday, a monthly one a
+  // day of the month, and a daily one neither. Keeping the unused one stored
+  // (rather than cleared on every switch) means the operator gets their previous
+  // choice back when they switch cadence again.
+  'schedulePolicy.frequency': {
+    key: 'frequency',
+    type: 'enum',
+    label: 'Frequência',
+    surface: 'essential',
+    required: true,
+    maxLength: 10,
+    values: ['daily', 'weekly', 'monthly'],
+  },
   'schedulePolicy.dailyTime': {
     key: 'dailyTime',
     type: 'string',
-    label: 'Horário do resumo',
+    label: 'Horário do envio',
     surface: 'essential',
     required: true,
     maxLength: 5,
+  },
+  'schedulePolicy.weekday': {
+    key: 'weekday',
+    type: 'enum',
+    label: 'Dia da semana',
+    surface: 'essential',
+    nullable: true,
+    maxLength: 10,
+    values: [
+      'monday',
+      'tuesday',
+      'wednesday',
+      'thursday',
+      'friday',
+      'saturday',
+      'sunday',
+    ],
+  },
+  'schedulePolicy.dayOfMonth': {
+    key: 'dayOfMonth',
+    type: 'number',
+    label: 'Dia do mês',
+    surface: 'essential',
+    nullable: true,
+    min: 1,
+    max: 31,
   },
   'schedulePolicy.responseWindowHours': {
     key: 'responseWindowHours',
@@ -574,18 +646,20 @@ const SECTION_DEFAULTS: Record<
 
 /**
  * Allowed keys for one section of one recipe: exactly the keys its defaults
- * declare. Anything else is rejected by the validator.
+ * declare, minus the ones addressed to another audience. Anything else is
+ * rejected by the validator.
  */
 export function getSectionSchema(
   recipe: LeadFlowAutomationRecipeCatalogItem,
   section: LeadFlowAutomationConfigSection,
+  audience: LeadFlowAutomationConfigAudience = 'agency',
 ): LeadFlowAutomationFieldSpec[] {
   const defaults = SECTION_DEFAULTS[section](recipe) ?? {};
   const specs: LeadFlowAutomationFieldSpec[] = [];
 
   for (const key of Object.keys(defaults)) {
     const spec = getFieldSpec(section, key);
-    if (spec) {
+    if (spec && (!spec.audience || spec.audience === audience)) {
       specs.push(spec);
     }
   }
@@ -595,14 +669,15 @@ export function getSectionSchema(
 
 export function buildConfigSchema(
   recipe: LeadFlowAutomationRecipeCatalogItem,
+  audience: LeadFlowAutomationConfigAudience = 'agency',
 ): LeadFlowAutomationConfigSchema {
   return {
-    trigger: getSectionSchema(recipe, 'trigger'),
-    conditions: getSectionSchema(recipe, 'conditions'),
-    actions: getSectionSchema(recipe, 'actions'),
-    message: getSectionSchema(recipe, 'message'),
-    crmPolicy: getSectionSchema(recipe, 'crmPolicy'),
-    schedulePolicy: getSectionSchema(recipe, 'schedulePolicy'),
+    trigger: getSectionSchema(recipe, 'trigger', audience),
+    conditions: getSectionSchema(recipe, 'conditions', audience),
+    actions: getSectionSchema(recipe, 'actions', audience),
+    message: getSectionSchema(recipe, 'message', audience),
+    crmPolicy: getSectionSchema(recipe, 'crmPolicy', audience),
+    schedulePolicy: getSectionSchema(recipe, 'schedulePolicy', audience),
   };
 }
 

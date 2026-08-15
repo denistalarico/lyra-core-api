@@ -20,6 +20,7 @@ import {
 import {
   LEADFLOW_HOT_LEAD_TEMPLATE_KEY,
   LEADFLOW_LEAD_DISTRIBUTED_TEMPLATE_KEY,
+  LEADFLOW_OPPORTUNITY_SUMMARY_TEMPLATE_KEY,
   resolvePlatformWhatsAppTemplate,
 } from '../../notifications/platform-whatsapp/platform-whatsapp-notification.catalog';
 import { LeadFlowSettingsContextType } from '../../leadflow-settings/enums/leadflow-settings-context-type.enum';
@@ -64,6 +65,7 @@ import type {
 import type { LeadFlowNotificationChannelCapabilities } from '../dto/leadflow-automation-response.dto';
 import {
   isInheritableConfigField,
+  type LeadFlowAutomationConfigAudience,
   type LeadFlowAutomationConfigSection,
 } from '../catalog/automation-config-schemas.catalog';
 import { isRuntimeAvailable } from '../catalog/automation-dependencies.registry';
@@ -109,12 +111,15 @@ const OUTBOUND_ACTIONS = new Set(['send_message', 'schedule_followup']);
 const WHATSAPP_TEMPLATE_BY_RECIPE: Record<string, string> = {
   hot_lead_notification: LEADFLOW_HOT_LEAD_TEMPLATE_KEY,
   lead_distribution: LEADFLOW_LEAD_DISTRIBUTED_TEMPLATE_KEY,
+  daily_opportunity_summary: LEADFLOW_OPPORTUNITY_SUMMARY_TEMPLATE_KEY,
 };
 
 /** How the operator hears about a template Meta has not approved yet. */
 const WHATSAPP_TEMPLATE_LABELS: Record<string, string> = {
   [LEADFLOW_HOT_LEAD_TEMPLATE_KEY]: 'Template de lead quente',
   [LEADFLOW_LEAD_DISTRIBUTED_TEMPLATE_KEY]: 'Template de lead atribuído',
+  [LEADFLOW_OPPORTUNITY_SUMMARY_TEMPLATE_KEY]:
+    'Template de resumo de oportunidades',
 };
 
 /**
@@ -460,7 +465,11 @@ export class LeadFlowAutomationService {
       automation.recipeKey,
     );
     if (recipeForValidation) {
-      this.assertConfigMatchesSchema(recipeForValidation, dto);
+      this.assertConfigMatchesSchema(
+        recipeForValidation,
+        dto,
+        audienceOf(active),
+      );
     }
 
     // A governed stage-advance may only be saved with a destination the CRM
@@ -857,6 +866,7 @@ export class LeadFlowAutomationService {
   private assertConfigMatchesSchema(
     recipe: LeadFlowAutomationRecipeCatalogItem,
     dto: PatchAutomationDto,
+    audience: LeadFlowAutomationConfigAudience,
   ): void {
     const sections: Array<
       [LeadFlowAutomationConfigSection, unknown, Record<string, unknown>]
@@ -878,6 +888,7 @@ export class LeadFlowAutomationService {
           section,
           value,
           defaults,
+          audience,
         ).errors,
       );
     }
@@ -1217,7 +1228,7 @@ export class LeadFlowAutomationService {
       active,
     );
     detail.configSchema = recipe
-      ? this.configSchemaService.buildSchema(recipe)
+      ? this.configSchemaService.buildSchema(recipe, audienceOf(active))
       : null;
     return detail;
   }
@@ -1473,14 +1484,18 @@ export class LeadFlowAutomationService {
       },
     });
 
-    return this.configSchemaService.findMissingRequiredFields(recipe, {
-      trigger: effective.trigger,
-      conditions: effective.conditions,
-      actions: effective.actions,
-      message: effective.message,
-      crmPolicy: automation.crmPolicy ?? {},
-      schedulePolicy: effective.schedulePolicy,
-    });
+    return this.configSchemaService.findMissingRequiredFields(
+      recipe,
+      {
+        trigger: effective.trigger,
+        conditions: effective.conditions,
+        actions: effective.actions,
+        message: effective.message,
+        crmPolicy: automation.crmPolicy ?? {},
+        schedulePolicy: effective.schedulePolicy,
+      },
+      audienceOf(active),
+    );
   }
 
   private hasChannel(settings: LeadFlowClientSettingsEntity): boolean {
@@ -1574,6 +1589,20 @@ export function clearInheritedConfigFields<T extends Record<string, unknown>>(
       isInheritableConfigField(section, key) ? null : value,
     ]),
   ) as T;
+}
+
+/**
+ * Which audience the active context speaks for.
+ *
+ * Derived from the context the automation itself belongs to, never from a
+ * header: an agency member who switched into a client context is asking as that
+ * client, and the fields addressed to the agency are not part of that
+ * conversation.
+ */
+function audienceOf(active: ActiveContext): LeadFlowAutomationConfigAudience {
+  return active.contextType === LeadFlowSettingsContextType.Agency
+    ? 'agency'
+    : 'client';
 }
 
 function followupChannelMatchesInboxType(

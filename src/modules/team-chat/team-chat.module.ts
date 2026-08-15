@@ -27,6 +27,7 @@ import { FilesModule } from '../../common/files/files.module';
 import { NotificationsModule } from '../notifications';
 import { PermissionsModule } from '../permissions';
 import { TeamChatNotificationPublisher } from './services/team-chat-notification.publisher';
+import { TeamChatCardPostService } from './services/team-chat-card-post.service';
 
 const AGENCY_CONNECTION = 'agency';
 
@@ -64,6 +65,7 @@ const AGENCY_CONNECTION = 'agency';
     TeamChatLiveKitProviderService,
     TeamChatNotificationPublisher,
     TeamChatUserSettingsService,
+    TeamChatCardPostService,
     TeamChatGateway,
   ],
   exports: [
@@ -74,6 +76,7 @@ const AGENCY_CONNECTION = 'agency';
     TeamChatLiveKitProviderService,
     TeamChatNotificationPublisher,
     TeamChatUserSettingsService,
+    TeamChatCardPostService,
   ],
 })
 export class TeamChatModule {}

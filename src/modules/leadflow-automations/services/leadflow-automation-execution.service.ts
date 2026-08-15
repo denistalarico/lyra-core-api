@@ -466,6 +466,30 @@ export class LeadFlowAutomationExecutionService {
               : typeof schedule.timezone === 'string'
                 ? schedule.timezone
                 : 'UTC',
+          // The window the trigger closed. Absent on deliveries emitted before
+          // cadence existed, where the executor falls back to the local day.
+          frequency:
+            typeof delivery.payload.frequency === 'string'
+              ? delivery.payload.frequency
+              : 'daily',
+          periodStart:
+            typeof delivery.payload.periodStart === 'string'
+              ? delivery.payload.periodStart
+              : null,
+          periodEnd:
+            typeof delivery.payload.periodEnd === 'string'
+              ? delivery.payload.periodEnd
+              : null,
+          notificationChannels: Array.isArray(actions.notificationChannels)
+            ? actions.notificationChannels
+            : ['in_app'],
+          deliverToTeamChat: actions.deliverToTeamChat === true,
+          teamChatChannelId:
+            typeof actions.teamChatChannelId === 'string'
+              ? actions.teamChatChannelId
+              : null,
+          contextType: automation.contextType,
+          agencyClientId: automation.agencyClientId ?? null,
         },
       };
     }

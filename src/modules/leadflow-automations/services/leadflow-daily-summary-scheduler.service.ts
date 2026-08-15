@@ -8,16 +8,21 @@ import {
 import { Interval } from '@nestjs/schedule';
 import { LeadFlowAutomationStatus } from '../enums/leadflow-automation-status.enum';
 import { SCHEDULER_RUNTIME, type SchedulerRuntime } from '../scheduler';
-import { nextDailyOccurrence } from './leadflow-daily-schedule';
+import {
+  nextScheduledOccurrence,
+  readSummarySchedule,
+} from './leadflow-daily-schedule';
 import { LEADFLOW_DAILY_SUMMARY_TIMER_CONSUMER } from './leadflow-daily-summary-timer.consumer';
 import { LeadFlowAutomationTriggerMatcherService } from './leadflow-automation-trigger-matcher.service';
 
 /**
- * Maintains one durable next-occurrence timer for each active daily summary.
+ * Maintains one durable next-occurrence timer for each active summary.
  *
  * Reconciliation runs on startup and periodically so a freshly activated or
  * edited automation does not depend on an application restart. Scheduler
- * idempotency makes repeated reconciliation safe.
+ * idempotency makes repeated reconciliation safe, and the drift check below is
+ * what makes an edited cadence — a new weekday, a new hour — take effect within
+ * a minute instead of at the next fire.
  */
 @Injectable()
 export class LeadFlowDailySummarySchedulerService
@@ -71,13 +76,11 @@ export class LeadFlowDailySummarySchedulerService
     let scheduled = 0;
     for (const match of matches) {
       if (match.source.status !== LeadFlowAutomationStatus.Active) continue;
-      const dailyTime = stringField(match.automation.schedulePolicy?.dailyTime);
-      const timezone =
-        stringField(match.automation.schedulePolicy?.timezone) ?? 'UTC';
-      if (!dailyTime) continue;
+      const schedule = readSummarySchedule(match.automation.schedulePolicy);
+      if (!schedule) continue;
 
       try {
-        const occurrence = nextDailyOccurrence(now, dailyTime, timezone);
+        const occurrence = nextScheduledOccurrence(now, schedule);
         const request = {
           tenantId: match.source.tenantId,
           workspaceId: match.source.workspaceId,
@@ -89,8 +92,9 @@ export class LeadFlowDailySummarySchedulerService
           payload: {
             automationId: match.source.id,
             localDate: occurrence.localDate,
-            dailyTime,
-            timezone,
+            dailyTime: schedule.dailyTime,
+            timezone: schedule.timezone,
+            frequency: schedule.frequency,
             scheduledFor: occurrence.fireAt.toISOString(),
           },
         };
@@ -111,10 +115,6 @@ export class LeadFlowDailySummarySchedulerService
 
 function timerKey(automationId: string, localDate: string): string {
   return `daily-summary:${automationId}:${localDate}`;
-}
-
-function stringField(value: unknown): string | null {
-  return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
 
 function errorCode(error: unknown): string {

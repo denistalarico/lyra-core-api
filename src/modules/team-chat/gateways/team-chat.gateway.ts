@@ -79,7 +79,11 @@ export class TeamChatGateway implements OnGatewayDisconnect {
     @ConnectedSocket() client: Socket,
     @MessageBody() payload: JoinChannelPayload,
   ) {
-    const room = this.getChannelRoom(payload.tenantId, payload.workspaceId, payload.channelId);
+    const room = this.getChannelRoom(
+      payload.tenantId,
+      payload.workspaceId,
+      payload.channelId,
+    );
 
     await client.join(room);
 
@@ -105,7 +109,11 @@ export class TeamChatGateway implements OnGatewayDisconnect {
     @ConnectedSocket() client: Socket,
     @MessageBody() payload: LeaveChannelPayload,
   ) {
-    const room = this.getChannelRoom(payload.tenantId, payload.workspaceId, payload.channelId);
+    const room = this.getChannelRoom(
+      payload.tenantId,
+      payload.workspaceId,
+      payload.channelId,
+    );
 
     await client.leave(room);
 
@@ -127,14 +135,22 @@ export class TeamChatGateway implements OnGatewayDisconnect {
     @MessageBody() payload: SendMessagePayload,
   ) {
     const context = this.getContext(payload);
-    const message = await this.messagesService.create(context, payload.channelId, {
-      kind: payload.kind as never,
-      body: payload.body,
-      parentMessageId: payload.parentMessageId,
-      senderDisplayName: payload.senderDisplayName,
-    });
+    const message = await this.messagesService.create(
+      context,
+      payload.channelId,
+      {
+        kind: payload.kind as never,
+        body: payload.body,
+        parentMessageId: payload.parentMessageId,
+        senderDisplayName: payload.senderDisplayName,
+      },
+    );
 
-    const room = this.getChannelRoom(payload.tenantId, payload.workspaceId, payload.channelId);
+    const room = this.getChannelRoom(
+      payload.tenantId,
+      payload.workspaceId,
+      payload.channelId,
+    );
 
     // Broadcast to all OTHER clients in the room (sender gets message via ACK callback)
     client.to(room).emit('team-chat:message-created', message);
@@ -148,7 +164,11 @@ export class TeamChatGateway implements OnGatewayDisconnect {
     @ConnectedSocket() client: Socket,
     @MessageBody() payload: TypingPayload,
   ) {
-    const room = this.getChannelRoom(payload.tenantId, payload.workspaceId, payload.channelId);
+    const room = this.getChannelRoom(
+      payload.tenantId,
+      payload.workspaceId,
+      payload.channelId,
+    );
 
     client.to(room).emit('team-chat:user-typing', {
       channelId: payload.channelId,
@@ -168,7 +188,11 @@ export class TeamChatGateway implements OnGatewayDisconnect {
     @ConnectedSocket() client: Socket,
     @MessageBody() payload: TypingPayload,
   ) {
-    const room = this.getChannelRoom(payload.tenantId, payload.workspaceId, payload.channelId);
+    const room = this.getChannelRoom(
+      payload.tenantId,
+      payload.workspaceId,
+      payload.channelId,
+    );
 
     client.to(room).emit('team-chat:user-typing', {
       channelId: payload.channelId,
@@ -189,8 +213,15 @@ export class TeamChatGateway implements OnGatewayDisconnect {
     @MessageBody() payload: ReadChannelPayload,
   ) {
     const context = this.getContext(payload);
-    const readState = await this.messagesService.markAsRead(context, payload.channelId);
-    const room = this.getChannelRoom(payload.tenantId, payload.workspaceId, payload.channelId);
+    const readState = await this.messagesService.markAsRead(
+      context,
+      payload.channelId,
+    );
+    const room = this.getChannelRoom(
+      payload.tenantId,
+      payload.workspaceId,
+      payload.channelId,
+    );
 
     this.server.to(room).emit('team-chat:channel-read', {
       channelId: payload.channelId,
@@ -202,6 +233,25 @@ export class TeamChatGateway implements OnGatewayDisconnect {
       ok: true,
       readState,
     };
+  }
+
+  /**
+   * Pushes a message created outside a socket — by REST, or by another module
+   * posting on behalf of the platform — to everyone watching the channel.
+   *
+   * `client.to(room)` in the socket handler above excludes the sender, which is
+   * right when a person typed the message. Here there is no sender socket to
+   * exclude, so the server broadcasts to the whole room.
+   */
+  broadcastMessageCreated(
+    tenantId: string,
+    workspaceId: string,
+    channelId: string,
+    message: unknown,
+  ): void {
+    this.server
+      ?.to(this.getChannelRoom(tenantId, workspaceId, channelId))
+      .emit('team-chat:message-created', message);
   }
 
   private getContext(payload: {

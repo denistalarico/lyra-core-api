@@ -468,30 +468,40 @@ const ESSENTIAL_SEEDS: RecipeSeed[] = [
 const OPTIONAL_SEEDS: RecipeSeed[] = [
   {
     key: 'daily_opportunity_summary',
-    templateVersion: 3,
+    // v4: cadence (daily/weekly/monthly), configurable notification channels
+    // and delivery into a Team Chat channel as the agent.
+    templateVersion: 4,
     requiredDependencies: [
       LeadFlowAutomationDependency.SchedulerRuntime,
       LeadFlowAutomationDependency.EventFanOut,
     ],
-    name: 'Resumo diário de oportunidades',
+    name: 'Resumo de oportunidades',
     description:
-      'Envia aos responsáveis um resumo real das oportunidades do dia.',
+      'Entrega um resumo real das oportunidades para a equipe, na frequência escolhida.',
     category: LeadFlowAutomationCategory.Reporting,
     tier: 'optional',
     trigger: 'schedule.daily',
     primaryAction: 'generate_summary_placeholder',
-    whenLabel: 'Uma vez por dia, no horário configurado.',
-    limitsLabel: 'Somente notificação interna; nenhum contato com o lead.',
+    whenLabel: 'Na frequência e no horário configurados.',
+    limitsLabel: 'Somente comunicação interna; nenhum contato com o lead.',
     conditionConfig: {
       businessHoursOnly: false,
       stopIfReplied: false,
       stopIfHandoff: false,
     },
-    actionConfig: { targetUserRef: null },
+    actionConfig: {
+      targetUserRef: null,
+      notificationChannels: ['in_app'],
+      deliverToTeamChat: false,
+      teamChatChannelId: null,
+    },
     schedulePolicy: {
       respectBusinessHours: false,
       timezone: 'America/Sao_Paulo',
+      frequency: 'daily',
       dailyTime: '08:00',
+      weekday: null,
+      dayOfMonth: null,
     },
   },
   {
@@ -688,7 +698,15 @@ export const LEADFLOW_TAG_RULE_OPERATORS = [
 export const NOTIFICATION_CHANNEL_RECIPE_KEYS: readonly string[] = [
   'hot_lead_notification',
   'lead_distribution',
+  'daily_opportunity_summary',
 ];
+
+/**
+ * The recipe that reports the operation back to the operation. Its cadence, its
+ * readiness rules and its Team Chat delivery all key off this name: it is the
+ * only recipe whose effect is addressed to the agency rather than to a lead.
+ */
+export const DAILY_OPPORTUNITY_SUMMARY_RECIPE_KEY = 'daily_opportunity_summary';
 
 const OFFICIAL_BUSINESS_MODES = new Set<string>(
   Object.values(LeadFlowBusinessMode),

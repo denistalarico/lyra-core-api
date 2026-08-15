@@ -3,12 +3,14 @@ import {
   buildConfigSchema,
   getSectionSchema,
   LEADFLOW_AUTOMATION_CONFIG_SECTIONS,
+  type LeadFlowAutomationConfigAudience,
   type LeadFlowAutomationConfigSchema,
   type LeadFlowAutomationConfigSection,
   type LeadFlowAutomationFieldSpec,
 } from '../catalog/automation-config-schemas.catalog';
 import {
   AUTOMATIC_TAGGING_RECIPE_KEY,
+  DAILY_OPPORTUNITY_SUMMARY_RECIPE_KEY,
   FOLLOWUP_IDLE_LEAD_RECIPE_KEY,
   LEADFLOW_TAG_RULE_OPERATORS,
   NOTIFICATION_CHANNEL_RECIPE_KEYS,
@@ -56,19 +58,25 @@ type Section = LeadFlowAutomationConfigSection;
 export class LeadFlowAutomationConfigSchemaService {
   buildSchema(
     recipe: LeadFlowAutomationRecipeCatalogItem,
+    audience: LeadFlowAutomationConfigAudience = 'agency',
   ): LeadFlowAutomationConfigSchema {
-    return buildConfigSchema(recipe);
+    return buildConfigSchema(recipe, audience);
   }
 
   /**
    * Validates one section against the recipe schema.
    * `defaults` supplies the authoritative value for read-only fields.
+   *
+   * The audience narrows the schema before validation, so a field the caller's
+   * context is not allowed to see is refused as `unknown_field` — the same
+   * answer an invented key gets, and for the same reason.
    */
   validateSection(
     recipe: LeadFlowAutomationRecipeCatalogItem,
     section: Section,
     value: unknown,
     defaults: Record<string, unknown>,
+    audience: LeadFlowAutomationConfigAudience = 'agency',
   ): LeadFlowAutomationConfigValidation {
     const errors: LeadFlowAutomationConfigError[] = [];
 
@@ -85,7 +93,7 @@ export class LeadFlowAutomationConfigSchemaService {
       };
     }
 
-    const specs = getSectionSchema(recipe, section);
+    const specs = getSectionSchema(recipe, section, audience);
     const specByKey = new Map(specs.map((spec) => [spec.key, spec]));
 
     for (const [key, raw] of Object.entries(value)) {
@@ -121,11 +129,12 @@ export class LeadFlowAutomationConfigSchemaService {
   findMissingRequiredFields(
     recipe: LeadFlowAutomationRecipeCatalogItem,
     config: Partial<Record<Section, Record<string, unknown>>>,
+    audience: LeadFlowAutomationConfigAudience = 'agency',
   ): string[] {
     const missing: string[] = [];
 
     for (const section of LEADFLOW_AUTOMATION_CONFIG_SECTIONS) {
-      const specs = getSectionSchema(recipe, section);
+      const specs = getSectionSchema(recipe, section, audience);
       const values = config[section] ?? {};
 
       for (const spec of specs) {
@@ -203,6 +212,40 @@ export class LeadFlowAutomationConfigSchemaService {
       missing.push('message.baseMessage');
     }
 
+    // Cadence asks for a weekday or a day of the month only inside the answer
+    // that needs one. Neither field can be `required` in the dictionary: a daily
+    // summary with both empty is completely configured.
+    if (recipe.key === DAILY_OPPORTUNITY_SUMMARY_RECIPE_KEY) {
+      const schedule = config.schedulePolicy ?? {};
+      if (
+        schedule.frequency === 'weekly' &&
+        this.isEmpty(schedule.weekday) &&
+        !missing.includes('schedulePolicy.weekday')
+      ) {
+        missing.push('schedulePolicy.weekday');
+      }
+      if (
+        schedule.frequency === 'monthly' &&
+        this.isEmpty(schedule.dayOfMonth) &&
+        !missing.includes('schedulePolicy.dayOfMonth')
+      ) {
+        missing.push('schedulePolicy.dayOfMonth');
+      }
+
+      // Turning the Team Chat delivery on without picking a channel is a
+      // destination that does not exist. The pair only reaches readiness
+      // together, and only where the agency is the audience.
+      const actions = config.actions ?? {};
+      if (
+        audience === 'agency' &&
+        actions.deliverToTeamChat === true &&
+        this.isEmpty(actions.teamChatChannelId) &&
+        !missing.includes('actions.teamChatChannelId')
+      ) {
+        missing.push('actions.teamChatChannelId');
+      }
+    }
+
     return missing;
   }
 
@@ -239,6 +282,9 @@ export class LeadFlowAutomationConfigSchemaService {
       case 'number': {
         if (typeof raw !== 'number' || !Number.isFinite(raw)) {
           return [this.typeError(path, spec, 'um número')];
+        }
+        if (spec.key === 'dayOfMonth' && !Number.isInteger(raw)) {
+          return [this.typeError(path, spec, 'um dia inteiro do mês')];
         }
         if (
           (spec.min !== undefined && raw < spec.min) ||

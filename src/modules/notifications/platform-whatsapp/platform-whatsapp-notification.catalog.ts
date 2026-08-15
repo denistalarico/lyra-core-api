@@ -12,6 +12,14 @@ export const LEADFLOW_HANDOFF_TEMPLATE_KEY = 'leadflow.handoff.requested';
 export const LEADFLOW_HOT_LEAD_TEMPLATE_KEY = 'leadflow.hot_lead.detected';
 export const LEADFLOW_LEAD_DISTRIBUTED_TEMPLATE_KEY =
   'leadflow.lead_distributed';
+/**
+ * Declared, deliberately unregistered: the opportunity digest has no approved
+ * template yet. Naming it here is what lets the channel picker say *why*
+ * WhatsApp is unavailable for this automation instead of offering a channel
+ * that would refuse at send time.
+ */
+export const LEADFLOW_OPPORTUNITY_SUMMARY_TEMPLATE_KEY =
+  'leadflow.opportunity_summary.ready';
 
 /**
  * Body variables of the handoff alert, as an explicit named contract rather than

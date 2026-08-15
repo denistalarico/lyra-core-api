@@ -48,6 +48,10 @@ import { LeadFlowAutomationService } from './services/leadflow-automation.servic
 import { LeadFlowAutomationCrmActionService } from './services/leadflow-automation-crm-action.service';
 import { LeadFlowWorkspaceBusinessHoursService } from './services/leadflow-workspace-business-hours.service';
 import type { BusinessHoursSchedule } from './services/business-hours-schedule';
+import {
+  LeadFlowTeamChatDeliveryService,
+  type LeadFlowTeamChatDeliveryOptions,
+} from './services/leadflow-team-chat-delivery.service';
 
 @Controller('leadflow/automations')
 @UseGuards(JwtAuthGuard, PermissionsGuard)
@@ -57,6 +61,7 @@ export class LeadFlowAutomationsController {
     private readonly automationService: LeadFlowAutomationService,
     private readonly crmActionService: LeadFlowAutomationCrmActionService,
     private readonly workspaceBusinessHours: LeadFlowWorkspaceBusinessHoursService,
+    private readonly teamChatDelivery: LeadFlowTeamChatDeliveryService,
   ) {}
 
   @Get('recipes')
@@ -146,6 +151,19 @@ export class LeadFlowAutomationsController {
     @RequestContextData() ctx: RequestContext,
   ): Promise<{ schedule: BusinessHoursSchedule | null }> {
     return { schedule: await this.workspaceBusinessHours.getSchedule(ctx) };
+  }
+
+  /**
+   * The channels the opportunity digest may be published into, plus the agent
+   * whose name will sign it. Guarded by `configure` rather than `view`: it only
+   * exists to answer a question the operator is about to save.
+   */
+  @Get('team-chat-channels')
+  @RequirePermission(LEADFLOW_AUTOMATIONS_PERMISSIONS.configure)
+  getTeamChatDeliveryOptions(
+    @RequestContextData() ctx: RequestContext,
+  ): Promise<LeadFlowTeamChatDeliveryOptions> {
+    return this.teamChatDelivery.getOptions(ctx);
   }
 
   @Get(':id')

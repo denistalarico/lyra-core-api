@@ -630,4 +630,135 @@ describe('LeadFlowAutomationConfigSchemaService', () => {
       expect(zone.valid).toBe(false);
     });
   });
+
+  describe('opportunity summary cadence', () => {
+    it('accepts each cadence with the field that answer needs', () => {
+      const weekly = service.validateSection(
+        dailySummary,
+        'schedulePolicy',
+        { frequency: 'weekly', weekday: 'monday', dailyTime: '08:00' },
+        dailySummary.defaultSchedulePolicy,
+      );
+      const monthly = service.validateSection(
+        dailySummary,
+        'schedulePolicy',
+        { frequency: 'monthly', dayOfMonth: 5, dailyTime: '08:00' },
+        dailySummary.defaultSchedulePolicy,
+      );
+
+      expect(weekly.valid).toBe(true);
+      expect(monthly.valid).toBe(true);
+    });
+
+    it('rejects a cadence, a weekday or a day of month it cannot honour', () => {
+      const frequency = service.validateSection(
+        dailySummary,
+        'schedulePolicy',
+        { frequency: 'yearly' },
+        dailySummary.defaultSchedulePolicy,
+      );
+      const weekday = service.validateSection(
+        dailySummary,
+        'schedulePolicy',
+        { weekday: 'segunda' },
+        dailySummary.defaultSchedulePolicy,
+      );
+      const dayOfMonth = service.validateSection(
+        dailySummary,
+        'schedulePolicy',
+        { dayOfMonth: 32 },
+        dailySummary.defaultSchedulePolicy,
+      );
+
+      expect(frequency.valid).toBe(false);
+      expect(weekday.valid).toBe(false);
+      expect(dayOfMonth.valid).toBe(false);
+    });
+
+    it('asks for the weekday only when the cadence is weekly', () => {
+      const weekly = service.findMissingRequiredFields(dailySummary, {
+        actions: dailySummary.defaultActionConfig,
+        schedulePolicy: { frequency: 'weekly', dailyTime: '08:00' },
+      });
+      const daily = service.findMissingRequiredFields(dailySummary, {
+        actions: dailySummary.defaultActionConfig,
+        schedulePolicy: { frequency: 'daily', dailyTime: '08:00' },
+      });
+
+      expect(weekly).toContain('schedulePolicy.weekday');
+      expect(daily).not.toContain('schedulePolicy.weekday');
+    });
+
+    it('asks for the day of the month only when the cadence is monthly', () => {
+      const missing = service.findMissingRequiredFields(dailySummary, {
+        actions: dailySummary.defaultActionConfig,
+        schedulePolicy: { frequency: 'monthly', dailyTime: '08:00' },
+      });
+
+      expect(missing).toContain('schedulePolicy.dayOfMonth');
+    });
+  });
+
+  describe('team chat delivery is an agency decision', () => {
+    const schedulePolicy = { frequency: 'daily', dailyTime: '08:00' };
+
+    it('declares the fields for the agency and hides them from a client', () => {
+      const agency = service.buildSchema(dailySummary, 'agency');
+      const client = service.buildSchema(dailySummary, 'client');
+
+      const keys = (schema: typeof agency) =>
+        schema.actions.map((spec) => spec.key);
+      expect(keys(agency)).toEqual(
+        expect.arrayContaining(['deliverToTeamChat', 'teamChatChannelId']),
+      );
+      expect(keys(client)).not.toContain('teamChatChannelId');
+      // Everything else about the recipe is the same conversation.
+      expect(keys(client)).toContain('notificationChannels');
+    });
+
+    it('refuses the write from a client context for the same reason', () => {
+      const agency = service.validateSection(
+        dailySummary,
+        'actions',
+        { teamChatChannelId: 'channel-1' },
+        dailySummary.defaultActionConfig,
+        'agency',
+      );
+      const client = service.validateSection(
+        dailySummary,
+        'actions',
+        { teamChatChannelId: 'channel-1' },
+        dailySummary.defaultActionConfig,
+        'client',
+      );
+
+      expect(agency.valid).toBe(true);
+      expect(client.valid).toBe(false);
+      expect(client.errors[0]).toMatchObject({
+        path: 'actions.teamChatChannelId',
+        code: 'unknown_field',
+      });
+    });
+
+    it('needs a channel once the delivery is switched on', () => {
+      const missing = service.findMissingRequiredFields(dailySummary, {
+        actions: {
+          ...dailySummary.defaultActionConfig,
+          deliverToTeamChat: true,
+        },
+        schedulePolicy,
+      });
+      const configured = service.findMissingRequiredFields(dailySummary, {
+        actions: {
+          ...dailySummary.defaultActionConfig,
+          deliverToTeamChat: true,
+          teamChatChannelId: 'channel-1',
+        },
+        schedulePolicy,
+      });
+
+      expect(missing).toContain('actions.teamChatChannelId');
+      expect(configured).not.toContain('actions.teamChatChannelId');
+    });
+  });
 });

@@ -656,20 +656,31 @@ export const LEADFLOW_EVENT_CATALOG: LeadFlowEventCatalogItem[] = [
   buildEvent({
     eventName: 'leadflow.automations.schedule.daily',
     description:
-      'Janela diária de uma automação atingida pelo SchedulerRuntime durável.',
+      'Ocorrência agendada de uma automação atingida pelo SchedulerRuntime durável (diária, semanal ou mensal).',
     requiredContext: ['automationId'],
     payloadSchema: {
       scheduledFor: field(
         'string',
         true,
-        'ISO do instante diário que originou a execução.',
+        'ISO do instante agendado que originou a execução.',
       ),
-      localDate: field(
+      localDate: field('string', true, 'Data local YYYY-MM-DD da ocorrência.'),
+      timezone: field('string', true, 'Fuso IANA da rotina.'),
+      frequency: field(
         'string',
-        true,
-        'Data local YYYY-MM-DD usada para a janela do resumo.',
+        false,
+        'Cadência da rotina: daily, weekly ou monthly.',
       ),
-      timezone: field('string', true, 'Fuso IANA da rotina diária.'),
+      periodStart: field(
+        'string',
+        false,
+        'ISO de início do período coberto (ocorrência anterior).',
+      ),
+      periodEnd: field(
+        'string',
+        false,
+        'ISO de fim do período coberto (esta ocorrência).',
+      ),
     },
     emittedBy: 'system.scheduler',
   }),

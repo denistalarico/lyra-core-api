@@ -74,6 +74,9 @@ import { LeadFlowCsatExpiryTimerConsumer } from './services/leadflow-csat-expiry
 import { LeadFlowDailySummaryTimerConsumer } from './services/leadflow-daily-summary-timer.consumer';
 import { LeadFlowDailySummarySchedulerService } from './services/leadflow-daily-summary-scheduler.service';
 import { AppointmentsModule } from '../appointments/appointments.module';
+import { TeamChatModule } from '../team-chat/team-chat.module';
+import { LeadFlowSummaryAgentResolver } from './services/leadflow-summary-agent.resolver';
+import { LeadFlowTeamChatDeliveryService } from './services/leadflow-team-chat-delivery.service';
 import { LeadFlowAppointmentLifecycleSchedulerService } from './services/leadflow-appointment-lifecycle-scheduler.service';
 
 @Module({
@@ -84,6 +87,7 @@ import { LeadFlowAppointmentLifecycleSchedulerService } from './services/leadflo
     NotificationsModule,
     LeadFlowAnalyticsModule,
     AppointmentsModule,
+    TeamChatModule,
     PlatformWhatsAppNotificationModule,
     TypeOrmModule.forFeature(
       [
@@ -146,6 +150,8 @@ import { LeadFlowAppointmentLifecycleSchedulerService } from './services/leadflo
     LeadFlowCsatExpiryTimerConsumer,
     LeadFlowDailySummaryTimerConsumer,
     LeadFlowDailySummarySchedulerService,
+    LeadFlowSummaryAgentResolver,
+    LeadFlowTeamChatDeliveryService,
     LeadFlowFollowupIdleDetectorService,
     LeadFlowBusinessHoursClosedDetectorService,
     LeadFlowWorkspaceBusinessHoursService,
