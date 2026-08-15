@@ -471,32 +471,11 @@ export class LeadFlowAutomationExecutionService {
     }
 
     if (actionKey === 'add_tag') {
-      const actions = automation.actionConfig ?? {};
-      const conditions = automation.conditionConfig ?? {};
-      const crmPolicy = automation.crmPolicy ?? {};
-      const configured =
-        Array.isArray(actions.addTags) && actions.addTags.length > 0
-          ? actions.addTags
-          : Array.isArray(crmPolicy.addTags)
-            ? crmPolicy.addTags
-            : [];
       return {
         policyPrefix: 'tag',
         payload: {
           opportunityId: subject.opportunityId,
-          tagIds: configured,
-          ruleField:
-            typeof conditions.ruleField === 'string'
-              ? conditions.ruleField
-              : 'source',
-          ruleOperator:
-            typeof conditions.ruleOperator === 'string'
-              ? conditions.ruleOperator
-              : 'is_present',
-          ruleValue:
-            typeof conditions.ruleValue === 'string'
-              ? conditions.ruleValue
-              : null,
+          rules: this.tagRules(automation),
         },
       };
     }
@@ -515,7 +494,8 @@ export class LeadFlowAutomationExecutionService {
     // stage that those rules no longer propose — which is what legacy instances
     // still carry, from when this screen asked for one. Withholding both values
     // is what puts the executor on the CRM-managed path.
-    const crmManaged = automation.recipeKey === GOVERNED_STAGE_ADVANCE_RECIPE_KEY;
+    const crmManaged =
+      automation.recipeKey === GOVERNED_STAGE_ADVANCE_RECIPE_KEY;
     return {
       policyPrefix: 'stage_transition',
       payload: {
@@ -533,6 +513,50 @@ export class LeadFlowAutomationExecutionService {
   }
 
   /** The lead-distribution effect's input, read from the automation config. */
+  /**
+   * The tagging rules, as the executor consumes them.
+   *
+   * An instance provisioned before the rules became a list carries a single
+   * field/operator/value in `conditions` and its tags in `actions.addTags` (or,
+   * older still, in `crmPolicy.addTags`). Migration 1789800000000 rewrites those
+   * rows, but reading them here too is what keeps a database that has not run it
+   * yet — a staging copy, another environment — tagging exactly as before
+   * instead of silently refusing every run as unconfigured.
+   */
+  private tagRules(automation: LeadFlowAutomationEntity): LeadFlowJsonObject[] {
+    const conditions = automation.conditionConfig ?? {};
+    if (Array.isArray(conditions.tagRules)) {
+      return conditions.tagRules as LeadFlowJsonObject[];
+    }
+
+    const actions = automation.actionConfig ?? {};
+    const crmPolicy = automation.crmPolicy ?? {};
+    const legacyTags =
+      Array.isArray(actions.addTags) && actions.addTags.length > 0
+        ? actions.addTags
+        : Array.isArray(crmPolicy.addTags)
+          ? crmPolicy.addTags
+          : [];
+    if (typeof conditions.ruleField !== 'string' || legacyTags.length === 0) {
+      return [];
+    }
+
+    return [
+      {
+        field: conditions.ruleField,
+        operator:
+          typeof conditions.ruleOperator === 'string'
+            ? conditions.ruleOperator
+            : 'is_present',
+        value:
+          typeof conditions.ruleValue === 'string'
+            ? conditions.ruleValue
+            : null,
+        tagIds: legacyTags,
+      },
+    ];
+  }
+
   private distributionPayload(
     automation: LeadFlowAutomationEntity,
     opportunityId: string | null,
@@ -668,7 +692,8 @@ export class LeadFlowAutomationExecutionService {
         schedule.respectBusinessHours !== false,
       // The zone the quiet-hours envelope is read in. Null lets the consumer
       // fall back to the workspace's own business-hours zone.
-      timezone: typeof schedule.timezone === 'string' ? schedule.timezone : null,
+      timezone:
+        typeof schedule.timezone === 'string' ? schedule.timezone : null,
       text:
         typeof message.baseMessage === 'string' ? message.baseMessage : null,
       templateRef:

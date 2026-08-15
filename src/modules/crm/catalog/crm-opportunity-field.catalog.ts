@@ -47,6 +47,12 @@ export type CrmOpportunityFieldGroup =
   | 'outcome'
   | 'system';
 
+/** One value a field is known to take, named for an operator. */
+export interface CrmOpportunityFieldOption {
+  value: string;
+  label: string;
+}
+
 export interface CrmOpportunityFieldSpec {
   /** Path used by policy: a column name, or `businessContext.<key>`. */
   key: string;
@@ -55,6 +61,17 @@ export interface CrmOpportunityFieldSpec {
   type: CrmOpportunityFieldType;
   origin: CrmOpportunityFieldOrigin;
   group: CrmOpportunityFieldGroup;
+  /**
+   * Values this field is known to hold, so a rule can be built by picking
+   * instead of by typing. Most of these columns are open `varchar`s rather than
+   * database enums: the list is what the platform itself writes and what the
+   * CRM offers, not a closed set. A consumer must therefore keep a stored value
+   * that is no longer listed instead of discarding it.
+   *
+   * Absent for genuinely free text (a name, a title, a description) and for
+   * Business Mode qualification answers, which declare no vocabulary.
+   */
+  options?: readonly CrmOpportunityFieldOption[];
   /**
    * Identifiers and internal plumbing. Usable in policy, but hidden from the
    * ordinary picker: an operator asked to require "contactId" is being asked a
@@ -76,6 +93,51 @@ export const CRM_BUSINESS_CONTEXT_PREFIX = 'businessContext.';
 export const CRM_BUSINESS_CONTEXT_KEY_PATTERN = /^[A-Za-z0-9_-]{1,80}$/;
 
 /**
+ * The origins the platform writes, in the CRM's own wording.
+ *
+ * LeadFlow sets `whatsapp` or the conversation's own channel when it projects an
+ * opportunity out of the Inbox; the rest are what the opportunity form offers.
+ */
+const SOURCE_OPTIONS: readonly CrmOpportunityFieldOption[] = [
+  { value: 'manual', label: 'Manual' },
+  { value: 'inbox', label: 'Inbox' },
+  { value: 'webchat', label: 'Webchat' },
+  { value: 'whatsapp', label: 'WhatsApp' },
+  { value: 'instagram', label: 'Instagram' },
+  { value: 'facebook', label: 'Facebook' },
+  { value: 'email', label: 'E-mail' },
+  { value: 'referral', label: 'Indicação' },
+  { value: 'import', label: 'Importação' },
+  { value: 'other', label: 'Outro' },
+];
+
+const PRIORITY_OPTIONS: readonly CrmOpportunityFieldOption[] = [
+  { value: 'low', label: 'Baixa' },
+  { value: 'normal', label: 'Normal' },
+  { value: 'high', label: 'Alta' },
+  { value: 'urgent', label: 'Urgente' },
+];
+
+const CURRENCY_OPTIONS: readonly CrmOpportunityFieldOption[] = [
+  { value: 'BRL', label: 'Real (BRL)' },
+  { value: 'USD', label: 'Dólar (USD)' },
+  { value: 'EUR', label: 'Euro (EUR)' },
+  { value: 'GBP', label: 'Libra (GBP)' },
+];
+
+/**
+ * Written by the Inbox, not by hand: the operational status is the projection
+ * of the conversation's ownership state onto the opportunity.
+ */
+const OPERATIONAL_STATUS_OPTIONS: readonly CrmOpportunityFieldOption[] = [
+  { value: 'ai_active', label: 'Atendimento com o agente' },
+  { value: 'handoff_requested', label: 'Handoff solicitado' },
+  { value: 'human_active', label: 'Atendimento humano' },
+  { value: 'paused', label: 'Pausado' },
+  { value: 'closed', label: 'Encerrado' },
+];
+
+/**
  * Columns of the opportunity that policy may reference.
  *
  * Every entry corresponds to a real column on `crm_opportunities`; a label here
@@ -89,15 +151,22 @@ export const CRM_CORE_OPPORTUNITY_FIELDS: readonly CrmOpportunityFieldSpec[] = [
   field('title', 'Título da oportunidade', 'text', 'deal'),
   field('description', 'Descrição', 'longText', 'deal'),
   field('valueAmount', 'Valor', 'money', 'deal'),
-  field('currency', 'Moeda', 'enum', 'deal'),
-  field('priority', 'Prioridade', 'enum', 'deal'),
-  field('source', 'Origem', 'text', 'deal'),
+  field('currency', 'Moeda', 'enum', 'deal', false, CURRENCY_OPTIONS),
+  field('priority', 'Prioridade', 'enum', 'deal', false, PRIORITY_OPTIONS),
+  field('source', 'Origem', 'text', 'deal', false, SOURCE_OPTIONS),
   field('assignedUserId', 'Responsável', 'reference', 'deal', true),
   field('expectedCloseDate', 'Data prevista de fechamento', 'date', 'schedule'),
   field('nextFollowUpAt', 'Próximo follow-up', 'date', 'schedule'),
   field('lastActivityAt', 'Última atividade', 'date', 'schedule'),
   field('lostReason', 'Motivo da perda', 'text', 'outcome'),
-  field('operationalStatus', 'Status operacional', 'enum', 'outcome'),
+  field(
+    'operationalStatus',
+    'Status operacional',
+    'enum',
+    'outcome',
+    false,
+    OPERATIONAL_STATUS_OPTIONS,
+  ),
   field('businessMode', 'Business Mode', 'enum', 'system', true),
 ];
 
@@ -105,6 +174,15 @@ const CORE_KEYS = new Set(CRM_CORE_OPPORTUNITY_FIELDS.map((spec) => spec.key));
 
 /** Bands the Lead Score resolves to, coldest first. Stable across versions. */
 export const CRM_LEAD_SCORE_BAND_VALUES = ['cold', 'warm', 'hot'] as const;
+
+const LEAD_SCORE_BAND_LABELS: Record<
+  (typeof CRM_LEAD_SCORE_BAND_VALUES)[number],
+  string
+> = {
+  cold: 'Frio',
+  warm: 'Morno',
+  hot: 'Quente',
+};
 
 /**
  * Virtual fields projecting the deterministic Lead Score into policy.
@@ -126,6 +204,13 @@ export const CRM_LEAD_SCORE_FIELDS: readonly CrmOpportunityFieldSpec[] = [
     group: 'system',
     developerOnly: false,
     essential: false,
+    // The one genuinely closed vocabulary here: bands never move between policy
+    // versions, which is what makes a published gate keep its meaning. Derived
+    // from the band values themselves so a new band cannot go unnamed.
+    options: CRM_LEAD_SCORE_BAND_VALUES.map((value) => ({
+      value,
+      label: LEAD_SCORE_BAND_LABELS[value],
+    })),
   },
   {
     key: 'leadScore.score',
@@ -228,6 +313,7 @@ function field(
   type: CrmOpportunityFieldType,
   group: CrmOpportunityFieldGroup,
   developerOnly = false,
+  options?: readonly CrmOpportunityFieldOption[],
 ): CrmOpportunityFieldSpec {
   return {
     key,
@@ -237,5 +323,6 @@ function field(
     group,
     developerOnly,
     essential: false,
+    ...(options ? { options } : {}),
   };
 }

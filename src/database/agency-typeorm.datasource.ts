@@ -155,6 +155,7 @@ import { AddUserProfileWhatsapp1789400000000 } from './migrations/1789400000000-
 import { BackfillLeadDistributionNotificationChannels1789500000000 } from './migrations/1789500000000-backfill-lead-distribution-notification-channels';
 import { BackfillOpportunityFollowMode1789600000000 } from './migrations/1789600000000-backfill-opportunity-follow-mode';
 import { RemoveRetiredAutomationRecipes1789700000000 } from './migrations/1789700000000-remove-retired-automation-recipes';
+import { TagRulesForAutomaticTagging1789800000000 } from './migrations/1789800000000-tag-rules-for-automatic-tagging';
 
 export const AgencyDataSource = new DataSource({
   type: 'postgres',
@@ -320,5 +321,6 @@ export const AgencyDataSource = new DataSource({
     BackfillLeadDistributionNotificationChannels1789500000000,
     BackfillOpportunityFollowMode1789600000000,
     RemoveRetiredAutomationRecipes1789700000000,
+    TagRulesForAutomaticTagging1789800000000,
   ],
 });

@@ -24,7 +24,8 @@ export type LeadFlowAutomationFieldType =
   | 'string[]'
   | 'enum'
   | 'offset[]'
-  | 'followup_step[]';
+  | 'followup_step[]'
+  | 'tag_rule[]';
 
 /**
  * Which surface a field belongs to. Consumed by the configuration UI so the
@@ -211,29 +212,18 @@ const FIELD_SPECS: Record<string, LeadFlowAutomationFieldSpec> = {
     maxItems: 20,
     maxLength: 60,
   },
-  'conditions.ruleField': {
-    key: 'ruleField',
-    type: 'string',
-    label: 'Campo da oportunidade',
+  // One field, one operator and one value used to be three separate keys, which
+  // could only ever describe a single rule — and a single rule is not how
+  // tagging is used: an operator wants "veio do WhatsApp" and "é urgente" to
+  // apply different tags. The rule is therefore one value, and the tags it
+  // applies belong to it rather than to the automation.
+  'conditions.tagRules': {
+    key: 'tagRules',
+    type: 'tag_rule[]',
+    label: 'Regras de tag',
     surface: 'essential',
     required: true,
-    maxLength: 80,
-  },
-  'conditions.ruleOperator': {
-    key: 'ruleOperator',
-    type: 'enum',
-    label: 'Operador',
-    surface: 'essential',
-    required: true,
-    values: ['equals', 'not_equals', 'contains', 'is_present'],
-  },
-  'conditions.ruleValue': {
-    key: 'ruleValue',
-    type: 'string',
-    label: 'Valor esperado',
-    surface: 'essential',
-    nullable: true,
-    maxLength: 180,
+    maxItems: 10,
   },
 
   // ---------------------------------------------------------------- actions
@@ -320,15 +310,6 @@ const FIELD_SPECS: Record<string, LeadFlowAutomationFieldSpec> = {
     required: true,
     maxLength: 20,
     values: ['least_volume', 'round_robin', 'by_channel'],
-  },
-  'actions.addTags': {
-    key: 'addTags',
-    type: 'string[]',
-    label: 'Tags a aplicar',
-    surface: 'essential',
-    required: true,
-    maxItems: 20,
-    maxLength: 60,
   },
   'actions.requireHumanApproval': {
     key: 'requireHumanApproval',

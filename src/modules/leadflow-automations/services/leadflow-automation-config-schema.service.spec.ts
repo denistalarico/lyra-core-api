@@ -146,12 +146,59 @@ describe('LeadFlowAutomationConfigSchemaService', () => {
     it('enforces list item limits', () => {
       const result = service.validateSection(
         automaticTagging,
-        'actions',
-        { addTags: Array.from({ length: 40 }, (_, i) => `tag-${i}`) },
-        automaticTagging.defaultActionConfig,
+        'conditions',
+        {
+          tagRules: Array.from({ length: 40 }, (_, index) => ({
+            field: 'source',
+            operator: 'is_present',
+            value: null,
+            tagIds: [`tag-${index}`],
+          })),
+        },
+        automaticTagging.defaultConditionConfig,
       );
 
       expect(result.errors[0].code).toBe('too_many_items');
+    });
+
+    it('refuses a tag rule with an operator nobody evaluates', () => {
+      const result = service.validateSection(
+        automaticTagging,
+        'conditions',
+        {
+          tagRules: [
+            {
+              field: 'source',
+              operator: 'starts_with',
+              value: 'whats',
+              tagIds: ['tag-1'],
+            },
+          ],
+        },
+        automaticTagging.defaultConditionConfig,
+      );
+
+      expect(result.errors[0]).toMatchObject({
+        path: 'conditions.tagRules',
+        code: 'invalid_type',
+      });
+    });
+
+    it('accepts a half-written rule, which readiness reports instead', () => {
+      // Rejecting the save would cost the operator the rules they had already
+      // written next to it.
+      const result = service.validateSection(
+        automaticTagging,
+        'conditions',
+        {
+          tagRules: [
+            { field: '', operator: 'equals', value: null, tagIds: [] },
+          ],
+        },
+        automaticTagging.defaultConditionConfig,
+      );
+
+      expect(result.valid).toBe(true);
     });
 
     it('accepts null as a reset for an inheritable field', () => {
@@ -330,8 +377,8 @@ describe('LeadFlowAutomationConfigSchemaService', () => {
     });
 
     it('reports an empty required list as missing', () => {
-      // `addTags` ships as `[]`, so this recipe is genuinely not ready until the
-      // operator fills it — the old readiness check missed this.
+      // `tagRules` ships as `[]`, so this recipe is genuinely not ready until
+      // the operator writes one — the old readiness check missed this.
       const missing = service.findMissingRequiredFields(automaticTagging, {
         trigger: automaticTagging.defaultTriggerConfig,
         conditions: automaticTagging.defaultConditionConfig,
@@ -341,17 +388,24 @@ describe('LeadFlowAutomationConfigSchemaService', () => {
         schedulePolicy: automaticTagging.defaultSchedulePolicy,
       });
 
-      expect(missing).toContain('actions.addTags');
+      expect(missing).toContain('conditions.tagRules');
     });
 
     it('reports nothing once required fields are filled', () => {
       const missing = service.findMissingRequiredFields(automaticTagging, {
         trigger: automaticTagging.defaultTriggerConfig,
-        conditions: automaticTagging.defaultConditionConfig,
-        actions: {
-          ...automaticTagging.defaultActionConfig,
-          addTags: ['origem-instagram'],
+        conditions: {
+          ...automaticTagging.defaultConditionConfig,
+          tagRules: [
+            {
+              field: 'source',
+              operator: 'equals',
+              value: 'instagram',
+              tagIds: ['origem-instagram'],
+            },
+          ],
         },
+        actions: automaticTagging.defaultActionConfig,
         message: automaticTagging.defaultMessageConfig,
         crmPolicy: automaticTagging.defaultCrmPolicy,
         schedulePolicy: automaticTagging.defaultSchedulePolicy,
@@ -362,14 +416,56 @@ describe('LeadFlowAutomationConfigSchemaService', () => {
 
     it('treats a blank string as missing', () => {
       const missing = service.findMissingRequiredFields(automaticTagging, {
-        conditions: { ...automaticTagging.defaultConditionConfig, ruleField: '   ' },
-        actions: {
-          ...automaticTagging.defaultActionConfig,
-          addTags: ['origem-instagram'],
+        conditions: {
+          ...automaticTagging.defaultConditionConfig,
+          tagRules: [
+            {
+              field: '   ',
+              operator: 'is_present',
+              value: null,
+              tagIds: ['origem-instagram'],
+            },
+          ],
         },
       });
 
-      expect(missing).toContain('conditions.ruleField');
+      expect(missing).toContain('conditions.tagRules');
+    });
+
+    it('reports a rule with tags but nothing to compare against', () => {
+      const missing = service.findMissingRequiredFields(automaticTagging, {
+        conditions: {
+          ...automaticTagging.defaultConditionConfig,
+          tagRules: [
+            {
+              field: 'source',
+              operator: 'equals',
+              value: null,
+              tagIds: ['origem-instagram'],
+            },
+          ],
+        },
+      });
+
+      expect(missing).toContain('conditions.tagRules');
+    });
+
+    it('reports a rule that names no tag, which would apply nothing', () => {
+      const missing = service.findMissingRequiredFields(automaticTagging, {
+        conditions: {
+          ...automaticTagging.defaultConditionConfig,
+          tagRules: [
+            {
+              field: 'source',
+              operator: 'is_present',
+              value: null,
+              tagIds: [],
+            },
+          ],
+        },
+      });
+
+      expect(missing).toContain('conditions.tagRules');
     });
 
     it('accepts the approved platform WhatsApp channel in the closed schema', () => {
@@ -388,24 +484,46 @@ describe('LeadFlowAutomationConfigSchemaService', () => {
       expect(missing).not.toContain('actions.notificationChannels');
     });
 
-    it('requires a comparison value for automatic tagging except is_present', () => {
+    it('needs no comparison value when the rule only asks if the field is filled', () => {
       const missing = service.findMissingRequiredFields(automaticTagging, {
         trigger: automaticTagging.defaultTriggerConfig,
         conditions: {
           ...automaticTagging.defaultConditionConfig,
-          ruleOperator: 'equals',
-          ruleValue: null,
+          tagRules: [
+            {
+              field: 'source',
+              operator: 'is_present',
+              value: null,
+              tagIds: ['tag-1'],
+            },
+          ],
         },
-        actions: {
-          ...automaticTagging.defaultActionConfig,
-          addTags: ['tag-1'],
-        },
+        actions: automaticTagging.defaultActionConfig,
         message: automaticTagging.defaultMessageConfig,
         crmPolicy: automaticTagging.defaultCrmPolicy,
         schedulePolicy: automaticTagging.defaultSchedulePolicy,
       });
 
-      expect(missing).toContain('conditions.ruleValue');
+      expect(missing).toEqual([]);
+    });
+
+    it('reports every rule, so one unfinished rule blocks the automation', () => {
+      const missing = service.findMissingRequiredFields(automaticTagging, {
+        conditions: {
+          ...automaticTagging.defaultConditionConfig,
+          tagRules: [
+            {
+              field: 'source',
+              operator: 'equals',
+              value: 'whatsapp',
+              tagIds: ['tag-1'],
+            },
+            { field: 'priority', operator: 'equals', value: '', tagIds: [] },
+          ],
+        },
+      });
+
+      expect(missing).toContain('conditions.tagRules');
     });
   });
 });

@@ -84,12 +84,16 @@ describe('automation config schemas catalog', () => {
     for (const [section, key] of [
       ['message', 'channel'],
       ['actions', 'distributionStrategy'],
-      ['conditions', 'ruleOperator'],
     ] as const) {
       const spec = getFieldSpec(section, key);
       expect(spec?.type).toBe('enum');
       expect(spec?.values?.length).toBeGreaterThan(0);
     }
+
+    // The tagging comparison is a closed set too, but it belongs to one entry of
+    // a list rather than to a field of its own — its own type is what tells the
+    // form to hand the whole thing to the rule editor.
+    expect(getFieldSpec('conditions', 'tagRules')?.type).toBe('tag_rule[]');
   });
 
   it('keeps effects no recipe performs off the operator surfaces', () => {

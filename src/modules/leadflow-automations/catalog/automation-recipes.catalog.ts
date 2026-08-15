@@ -506,7 +506,9 @@ const OPTIONAL_SEEDS: RecipeSeed[] = [
   },
   {
     key: 'automatic_tagging',
-    templateVersion: 3,
+    // v4: the single field/operator/value rule became a list of rules, each
+    // carrying the tags it applies. See `conditions.tagRules`.
+    templateVersion: 4,
     requiredDependencies: [LeadFlowAutomationDependency.EventFanOut],
     name: 'Tag automática',
     description:
@@ -520,13 +522,8 @@ const OPTIONAL_SEEDS: RecipeSeed[] = [
     conditionConfig: {
       businessHoursOnly: false,
       stopIfReplied: false,
-      keywords: [],
-      ruleField: 'source',
-      ruleOperator: 'is_present',
-      ruleValue: null,
+      tagRules: [],
     },
-    actionConfig: { primaryAction: 'add_tag', addTags: [] },
-    crmPolicy: { addTags: [] },
   },
   {
     key: 'post_service_csat',
@@ -645,6 +642,21 @@ export const GOVERNED_STAGE_ADVANCE_RECIPE_KEY = 'governed_stage_advance';
  * instead of listing the several follow-up recipes that used to exist.
  */
 export const FOLLOWUP_IDLE_LEAD_RECIPE_KEY = 'followup_idle_lead';
+
+/**
+ * The recipe that owns `conditions.tagRules`. Readiness, the payload builder and
+ * the dedicated editor all key off this name, because a tag rule is the only
+ * configuration shaped like a list of independent decisions.
+ */
+export const AUTOMATIC_TAGGING_RECIPE_KEY = 'automatic_tagging';
+
+/** Comparisons a tag rule may make against an opportunity field. */
+export const LEADFLOW_TAG_RULE_OPERATORS = [
+  'equals',
+  'not_equals',
+  'contains',
+  'is_present',
+] as const;
 
 /**
  * The recipes whose effect includes telling a colleague, over the channels the

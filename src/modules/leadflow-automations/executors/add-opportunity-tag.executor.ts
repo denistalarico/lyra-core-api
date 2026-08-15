@@ -17,11 +17,23 @@ import type {
 
 type TagRuleOperator = 'equals' | 'not_equals' | 'contains' | 'is_present';
 
+interface TagRule {
+  field: string;
+  operator: TagRuleOperator;
+  value: string | null;
+  tagIds: string[];
+}
+
 /**
  * Applies existing CRM tags to an opportunity through the canonical CRM
- * service. The rule is re-evaluated against the current opportunity immediately
- * before any write, every tag is prevalidated in the same tenant/workspace, and
- * the CRM association itself is idempotent.
+ * service. Every rule is re-evaluated against the current opportunity
+ * immediately before any write, every tag is prevalidated in the same
+ * tenant/workspace, and the CRM association itself is idempotent.
+ *
+ * The rules are independent: each one contributes its own tags, and one that no
+ * longer matches contributes none. Only when *no* rule matches is the whole
+ * effect refused, because that is the case where the opportunity has moved away
+ * from everything the operator configured.
  */
 @Injectable()
 export class AddOpportunityTagExecutor implements AutomationExecutor {
@@ -40,12 +52,9 @@ export class AddOpportunityTagExecutor implements AutomationExecutor {
     request: AutomationEffectRequest,
   ): Promise<AutomationEffectResult> {
     const opportunityId = stringField(request.payload.opportunityId);
-    const tagIds = stringList(request.payload.tagIds);
-    const ruleField = stringField(request.payload.ruleField);
-    const ruleOperator = operatorField(request.payload.ruleOperator);
-    const ruleValue = stringField(request.payload.ruleValue);
+    const rules = ruleList(request.payload.rules);
 
-    if (!opportunityId || tagIds.length === 0 || !ruleField || !ruleOperator) {
+    if (!opportunityId || rules.length === 0) {
       return refusal(
         'tag_rule_unconfigured',
         'A tag automática exige oportunidade, regra e pelo menos uma tag do CRM.',
@@ -53,12 +62,15 @@ export class AddOpportunityTagExecutor implements AutomationExecutor {
     }
 
     if (
-      !this.fields.isAddressable(ruleField) ||
-      ruleField.startsWith('leadScore.')
+      rules.some(
+        (rule) =>
+          !this.fields.isAddressable(rule.field) ||
+          rule.field.startsWith('leadScore.'),
+      )
     ) {
       return refusal(
         'tag_rule_field_invalid',
-        'O campo configurado não pode ser usado por esta regra de tag.',
+        'Um dos campos configurados não pode ser usado por uma regra de tag.',
       );
     }
 
@@ -69,16 +81,24 @@ export class AddOpportunityTagExecutor implements AutomationExecutor {
 
     try {
       const opportunity = await this.crm.getOpportunity(ctx, opportunityId);
-      const currentValue = readOpportunityField(
-        opportunity as unknown as Record<string, unknown>,
-        ruleField,
+      const record = opportunity as unknown as Record<string, unknown>;
+      const matched = rules.filter((rule) =>
+        matchesRule(
+          readOpportunityField(record, rule.field),
+          rule.operator,
+          rule.value,
+        ),
       );
-      if (!matchesRule(currentValue, ruleOperator, ruleValue)) {
+      if (matched.length === 0) {
         return refusal(
           'tag_rule_not_matched',
-          'A oportunidade não atende mais à regra configurada para esta tag.',
+          'A oportunidade não atende mais a nenhuma das regras configuradas.',
         );
       }
+
+      // Two rules may name the same tag; applying it once keeps the run's own
+      // record of what it did honest.
+      const tagIds = [...new Set(matched.flatMap((rule) => rule.tagIds))];
 
       // Validate the whole batch before assigning the first tag. A stale or
       // cross-workspace tag therefore cannot leave a partially applied rule.
@@ -101,8 +121,8 @@ export class AddOpportunityTagExecutor implements AutomationExecutor {
         reference: opportunityId,
         details: {
           appliedTagIds: tagIds,
-          ruleField,
-          ruleOperator,
+          matchedFields: matched.map((rule) => rule.field),
+          evaluatedRules: rules.length,
         },
       };
     } catch (error) {
@@ -158,6 +178,29 @@ function operatorField(value: unknown): TagRuleOperator | null {
   )
     ? (value as TagRuleOperator)
     : null;
+}
+
+/**
+ * The rules the payload actually carries. A malformed or unfinished rule is
+ * dropped rather than failing the run: the operator's other rules are still
+ * decisions the automation was asked to carry out.
+ */
+function ruleList(value: unknown): TagRule[] {
+  if (!Array.isArray(value)) return [];
+
+  const rules: TagRule[] = [];
+  for (const entry of value) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue;
+    const raw = entry as Record<string, unknown>;
+    const field = stringField(raw.field);
+    const operator = operatorField(raw.operator);
+    const tagIds = stringList(raw.tagIds);
+    const ruleValue = stringField(raw.value);
+    if (!field || !operator || tagIds.length === 0) continue;
+    if (operator !== 'is_present' && !ruleValue) continue;
+    rules.push({ field, operator, value: ruleValue, tagIds });
+  }
+  return rules;
 }
 
 function readOpportunityField(

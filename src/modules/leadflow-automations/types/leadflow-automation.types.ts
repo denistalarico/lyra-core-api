@@ -83,12 +83,34 @@ export interface LeadFlowAutomationConditionConfig {
   intents?: string[];
   keywords?: string[];
   requiredFields?: string[];
-  /** Canonical CRM opportunity field evaluated by automatic tagging. */
-  ruleField?: string;
-  ruleOperator?: 'equals' | 'not_equals' | 'contains' | 'is_present';
-  ruleValue?: string | null;
+  /** Independent tag rules evaluated by automatic tagging. */
+  tagRules?: LeadFlowTagRuleConfig[];
   [key: string]: LeadFlowJsonValue | undefined;
 }
+
+export type LeadFlowTagRuleOperator =
+  | 'equals'
+  | 'not_equals'
+  | 'contains'
+  | 'is_present';
+
+/**
+ * One tagging decision: a comparison against a canonical CRM opportunity field,
+ * and the tags it applies when the comparison holds.
+ *
+ * The tags belong to the rule rather than to the automation because the rules
+ * are independent — two rules that matched apply their own tags, and a rule
+ * that did not match applies none.
+ */
+export type LeadFlowTagRuleConfig = LeadFlowJsonObject & {
+  /** Canonical opportunity field path, as declared by the CRM field catalog. */
+  field: string;
+  operator: LeadFlowTagRuleOperator;
+  /** Compared value; always `null` for `is_present`. */
+  value?: string | null;
+  /** CRM tag ids, revalidated in the workspace before any is applied. */
+  tagIds: string[];
+};
 
 export interface LeadFlowAutomationActionConfig {
   primaryAction?: LeadFlowAutomationAction;
@@ -100,7 +122,6 @@ export interface LeadFlowAutomationActionConfig {
   notifyPipelineParticipants?: boolean;
   specificRecipientUserRefs?: string[];
   notificationChannels?: LeadFlowHotLeadNotificationChannel[];
-  addTags?: string[];
   requireHumanApproval?: boolean;
   /** Rule the lead-distribution action uses to pick a participant. */
   distributionStrategy?: 'least_volume' | 'round_robin' | 'by_channel';

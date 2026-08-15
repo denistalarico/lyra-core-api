@@ -38,10 +38,14 @@ const request = (overrides: Record<string, unknown> = {}) =>
     correlationId: 'correlation-1',
     payload: {
       opportunityId: 'opportunity-1',
-      tagIds: ['tag-1', 'tag-2'],
-      ruleField: 'source',
-      ruleOperator: 'equals',
-      ruleValue: 'whatsapp',
+      rules: [
+        {
+          field: 'source',
+          operator: 'equals',
+          value: 'whatsapp',
+          tagIds: ['tag-1', 'tag-2'],
+        },
+      ],
       ...overrides,
     },
   }) as never;
@@ -81,6 +85,102 @@ describe('AddOpportunityTagExecutor', () => {
     expect(result).toMatchObject({
       status: 'refused',
       errorCode: 'tag_rule_not_matched',
+    });
+    expect(assignOpportunityTag).not.toHaveBeenCalled();
+  });
+
+  it('applies each matching rule and ignores the ones that do not match', async () => {
+    // The rules are independent decisions: the operator asked for a WhatsApp
+    // tag and an urgency tag, and only one of them is true of this deal.
+    const { executor, assignOpportunityTag } = build({
+      opportunity: {
+        id: 'opportunity-1',
+        source: 'whatsapp',
+        priority: 'normal',
+      },
+    });
+
+    const result = await executor.execute(
+      request({
+        rules: [
+          {
+            field: 'source',
+            operator: 'equals',
+            value: 'whatsapp',
+            tagIds: ['tag-whatsapp'],
+          },
+          {
+            field: 'priority',
+            operator: 'equals',
+            value: 'urgent',
+            tagIds: ['tag-urgente'],
+          },
+        ],
+      }),
+    );
+
+    expect(result).toMatchObject({
+      status: 'confirmed',
+      details: { appliedTagIds: ['tag-whatsapp'], evaluatedRules: 2 },
+    });
+    expect(assignOpportunityTag).toHaveBeenCalledTimes(1);
+  });
+
+  it('applies a tag named by two matching rules only once', async () => {
+    const { executor, assignOpportunityTag } = build({
+      opportunity: {
+        id: 'opportunity-1',
+        source: 'whatsapp',
+        priority: 'high',
+      },
+    });
+
+    const result = await executor.execute(
+      request({
+        rules: [
+          {
+            field: 'source',
+            operator: 'contains',
+            value: 'whats',
+            tagIds: ['tag-1'],
+          },
+          {
+            field: 'priority',
+            operator: 'is_present',
+            value: null,
+            tagIds: ['tag-1', 'tag-2'],
+          },
+        ],
+      }),
+    );
+
+    expect(result).toMatchObject({
+      status: 'confirmed',
+      details: { appliedTagIds: ['tag-1', 'tag-2'] },
+    });
+    expect(assignOpportunityTag).toHaveBeenCalledTimes(2);
+  });
+
+  it('refuses a configuration with no usable rule', async () => {
+    const { executor, assignOpportunityTag } = build();
+
+    // A rule with no tag applies nothing, so it is not a rule at all.
+    const result = await executor.execute(
+      request({
+        rules: [
+          {
+            field: 'source',
+            operator: 'equals',
+            value: 'whatsapp',
+            tagIds: [],
+          },
+        ],
+      }),
+    );
+
+    expect(result).toMatchObject({
+      status: 'refused',
+      errorCode: 'tag_rule_unconfigured',
     });
     expect(assignOpportunityTag).not.toHaveBeenCalled();
   });

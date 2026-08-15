@@ -8,7 +8,9 @@ import {
   type LeadFlowAutomationFieldSpec,
 } from '../catalog/automation-config-schemas.catalog';
 import {
+  AUTOMATIC_TAGGING_RECIPE_KEY,
   FOLLOWUP_IDLE_LEAD_RECIPE_KEY,
+  LEADFLOW_TAG_RULE_OPERATORS,
   NOTIFICATION_CHANNEL_RECIPE_KEYS,
   type LeadFlowAutomationRecipeCatalogItem,
 } from '../catalog/automation-recipes.catalog';
@@ -170,13 +172,18 @@ export class LeadFlowAutomationConfigSchemaService {
       }
     }
 
+    // A rule nobody finished is a rule that never applies a tag. Counting it as
+    // configured would leave the automation running and doing nothing for the
+    // decision the operator thought they had made.
     if (
-      recipe.key === 'automatic_tagging' &&
-      config.conditions?.ruleOperator !== 'is_present' &&
-      this.isEmpty(config.conditions?.ruleValue) &&
-      !missing.includes('conditions.ruleValue')
+      recipe.key === AUTOMATIC_TAGGING_RECIPE_KEY &&
+      Array.isArray(config.conditions?.tagRules) &&
+      config.conditions.tagRules.some(
+        (rule) => !this.isCompleteTagRule(rule),
+      ) &&
+      !missing.includes('conditions.tagRules')
     ) {
-      missing.push('conditions.ruleValue');
+      missing.push('conditions.tagRules');
     }
 
     return missing;
@@ -357,9 +364,88 @@ export class LeadFlowAutomationConfigSchemaService {
       case 'followup_step[]':
         return this.validateFollowupSteps(path, spec, raw);
 
+      case 'tag_rule[]':
+        return this.validateTagRules(path, spec, raw);
+
       default:
         return [];
     }
+  }
+
+  /**
+   * Shape of the tagging rules. Only structure is enforced here: a rule that is
+   * well-formed but not yet decided — no field, no tags, or a comparison with
+   * nothing to compare against — is an *incomplete* configuration, reported by
+   * `findMissingRequiredFields` so the operator sees it on the automation
+   * instead of losing a half-written rule to a rejected save.
+   */
+  private validateTagRules(
+    path: string,
+    spec: LeadFlowAutomationFieldSpec,
+    raw: unknown,
+  ): LeadFlowAutomationConfigError[] {
+    if (!Array.isArray(raw)) {
+      return [this.typeError(path, spec, 'uma lista de regras')];
+    }
+    if (spec.maxItems !== undefined && raw.length > spec.maxItems) {
+      return [
+        {
+          path,
+          code: 'too_many_items',
+          message: `"${spec.label}" aceita no máximo ${spec.maxItems} regras.`,
+        },
+      ];
+    }
+
+    for (const rule of raw) {
+      if (
+        !this.isPlainObject(rule) ||
+        !this.hasOnlyKeys(rule, ['field', 'operator', 'value', 'tagIds']) ||
+        typeof rule.field !== 'string' ||
+        rule.field.length > 80 ||
+        typeof rule.operator !== 'string' ||
+        !LEADFLOW_TAG_RULE_OPERATORS.includes(
+          rule.operator as (typeof LEADFLOW_TAG_RULE_OPERATORS)[number],
+        ) ||
+        (rule.value !== undefined &&
+          rule.value !== null &&
+          (typeof rule.value !== 'string' || rule.value.length > 180)) ||
+        !Array.isArray(rule.tagIds)
+      ) {
+        return [
+          {
+            path,
+            code: 'invalid_type',
+            message:
+              'Cada regra precisa ter um campo, um operador conhecido e a lista de tags.',
+          },
+        ];
+      }
+
+      if (rule.tagIds.length > 20) {
+        return [
+          {
+            path,
+            code: 'too_many_items',
+            message: 'Uma regra aceita no máximo 20 tags.',
+          },
+        ];
+      }
+
+      for (const tagId of rule.tagIds) {
+        if (typeof tagId !== 'string' || !tagId.trim() || tagId.length > 64) {
+          return [
+            {
+              path,
+              code: 'invalid_type',
+              message: 'As tags de uma regra precisam ser referências do CRM.',
+            },
+          ];
+        }
+      }
+    }
+
+    return [];
   }
 
   private validateFollowupSteps(
@@ -536,6 +622,19 @@ export class LeadFlowAutomationConfigSchemaService {
       }
     }
     return [];
+  }
+
+  /**
+   * A rule the runtime can actually evaluate: something to look at, something
+   * to compare against unless the comparison is "is it filled in", and at least
+   * one tag to apply.
+   */
+  private isCompleteTagRule(rule: unknown): boolean {
+    if (!this.isPlainObject(rule)) return false;
+    if (typeof rule.field !== 'string' || !rule.field.trim()) return false;
+    if (!Array.isArray(rule.tagIds) || rule.tagIds.length === 0) return false;
+    if (rule.operator === 'is_present') return true;
+    return typeof rule.value === 'string' && rule.value.trim().length > 0;
   }
 
   private typeError(
