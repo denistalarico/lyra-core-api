@@ -156,6 +156,7 @@ import { BackfillLeadDistributionNotificationChannels1789500000000 } from './mig
 import { BackfillOpportunityFollowMode1789600000000 } from './migrations/1789600000000-backfill-opportunity-follow-mode';
 import { RemoveRetiredAutomationRecipes1789700000000 } from './migrations/1789700000000-remove-retired-automation-recipes';
 import { TagRulesForAutomaticTagging1789800000000 } from './migrations/1789800000000-tag-rules-for-automatic-tagging';
+import { OutsideHoursAnswersDuringHandoff1789900000000 } from './migrations/1789900000000-outside-hours-answers-during-handoff';
 
 export const AgencyDataSource = new DataSource({
   type: 'postgres',
@@ -322,5 +323,6 @@ export const AgencyDataSource = new DataSource({
     BackfillOpportunityFollowMode1789600000000,
     RemoveRetiredAutomationRecipes1789700000000,
     TagRulesForAutomaticTagging1789800000000,
+    OutsideHoursAnswersDuringHandoff1789900000000,
   ],
 });

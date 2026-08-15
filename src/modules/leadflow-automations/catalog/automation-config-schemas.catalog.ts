@@ -25,7 +25,8 @@ export type LeadFlowAutomationFieldType =
   | 'enum'
   | 'offset[]'
   | 'followup_step[]'
-  | 'tag_rule[]';
+  | 'tag_rule[]'
+  | 'business_hours';
 
 /**
  * Which surface a field belongs to. Consumed by the configuration UI so the
@@ -520,6 +521,18 @@ const FIELD_SPECS: Record<string, LeadFlowAutomationFieldSpec> = {
     label: 'Antecedências dos lembretes',
     surface: 'advanced',
     maxItems: 10,
+  },
+  // The one automation whose whole subject is the clock needs to be able to
+  // disagree with the workspace: the hours the Inbox considers open are the
+  // hours a human is expected to be there, and an operator may want the
+  // out-of-hours reply to start earlier than that. Null inherits the workspace
+  // schedule, which is what every instance does until someone says otherwise.
+  'schedulePolicy.businessHours': {
+    key: 'businessHours',
+    type: 'business_hours',
+    label: 'Horário de atendimento desta automação',
+    surface: 'essential',
+    nullable: true,
   },
   'schedulePolicy.cooldownHours': {
     key: 'cooldownHours',

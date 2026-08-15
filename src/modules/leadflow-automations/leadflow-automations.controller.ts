@@ -46,6 +46,8 @@ import { LEADFLOW_AUTOMATIONS_PERMISSIONS } from './leadflow-automations.permiss
 import type { LeadFlowAutomationGlobalDefaultsSnapshot } from './types/leadflow-automation.types';
 import { LeadFlowAutomationService } from './services/leadflow-automation.service';
 import { LeadFlowAutomationCrmActionService } from './services/leadflow-automation-crm-action.service';
+import { LeadFlowWorkspaceBusinessHoursService } from './services/leadflow-workspace-business-hours.service';
+import type { BusinessHoursSchedule } from './services/business-hours-schedule';
 
 @Controller('leadflow/automations')
 @UseGuards(JwtAuthGuard, PermissionsGuard)
@@ -54,6 +56,7 @@ export class LeadFlowAutomationsController {
   constructor(
     private readonly automationService: LeadFlowAutomationService,
     private readonly crmActionService: LeadFlowAutomationCrmActionService,
+    private readonly workspaceBusinessHours: LeadFlowWorkspaceBusinessHoursService,
   ) {}
 
   @Get('recipes')
@@ -127,6 +130,22 @@ export class LeadFlowAutomationsController {
     @Body() dto: UpdateLeadFlowAutomationGlobalConfigDto,
   ): Promise<LeadFlowAutomationGlobalDefaultsSnapshot> {
     return this.automationService.updateGlobalDefaults(ctx, dto);
+  }
+
+  /**
+   * The workspace's opening hours, as the runtime reads them.
+   *
+   * The out-of-hours automation may carry a schedule of its own, and a screen
+   * that offered a custom one without showing what it replaces would be asking
+   * the operator to configure the same thing twice. Read-only here: these hours
+   * belong to the Inbox settings, not to an automation.
+   */
+  @Get('business-hours')
+  @RequirePermission(LEADFLOW_AUTOMATIONS_PERMISSIONS.view)
+  async getWorkspaceBusinessHours(
+    @RequestContextData() ctx: RequestContext,
+  ): Promise<{ schedule: BusinessHoursSchedule | null }> {
+    return { schedule: await this.workspaceBusinessHours.getSchedule(ctx) };
   }
 
   @Get(':id')

@@ -1,4 +1,5 @@
 import { FOLLOWUP_QUIET_HOURS } from '../catalog/followup-plan.catalog';
+import { zonedParts, zonedTimeToUtc } from './zoned-time';
 
 /**
  * When a follow-up attempt may actually reach the lead.
@@ -45,8 +46,10 @@ export function resolveFollowupSendAt(input: FollowupSendWindowInput): Date {
 
 export function isInsideQuietWindow(date: Date, timeZone: string): boolean {
   const { hour } = zonedParts(date, timeZone);
-  return hour >= FOLLOWUP_QUIET_HOURS.startHour &&
-    hour < FOLLOWUP_QUIET_HOURS.endHour;
+  return (
+    hour >= FOLLOWUP_QUIET_HOURS.startHour &&
+    hour < FOLLOWUP_QUIET_HOURS.endHour
+  );
 }
 
 /** The most recent window close (20:00 local) at or before `date`. */
@@ -83,81 +86,6 @@ function nextWindowOpen(date: Date, timeZone: string): Date {
     { ...next, hour: FOLLOWUP_QUIET_HOURS.startHour, minute: 0 },
     timeZone,
   );
-}
-
-interface ZonedParts {
-  year: number;
-  month: number;
-  day: number;
-  hour: number;
-  minute: number;
-}
-
-function zonedParts(date: Date, timeZone: string): ZonedParts {
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: safeTimeZone(timeZone),
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  }).formatToParts(date);
-  const read = (type: string) =>
-    Number(parts.find((part) => part.type === type)?.value ?? '0');
-  // Intl renders midnight as hour 24 in some ICU versions.
-  const hour = read('hour') % 24;
-  return {
-    year: read('year'),
-    month: read('month'),
-    day: read('day'),
-    hour,
-    minute: read('minute'),
-  };
-}
-
-/**
- * The instant at which the given wall-clock time happens in `timeZone`.
- *
- * Two passes: the first guesses with the offset in force at the reference
- * instant, the second corrects it if that guess crossed a DST boundary.
- */
-function zonedTimeToUtc(parts: ZonedParts, timeZone: string): Date {
-  const wallClock = Date.UTC(
-    parts.year,
-    parts.month - 1,
-    parts.day,
-    parts.hour,
-    parts.minute,
-  );
-  let guess = new Date(wallClock - offsetMs(new Date(wallClock), timeZone));
-  guess = new Date(wallClock - offsetMs(guess, timeZone));
-  return guess;
-}
-
-function offsetMs(date: Date, timeZone: string): number {
-  const parts = zonedParts(date, timeZone);
-  return (
-    Date.UTC(
-      parts.year,
-      parts.month - 1,
-      parts.day,
-      parts.hour,
-      parts.minute,
-    ) -
-    // Seconds and milliseconds are irrelevant to a whole-hour boundary and are
-    // dropped on both sides, so the difference is a clean zone offset.
-    Math.floor(date.getTime() / 60_000) * 60_000
-  );
-}
-
-function safeTimeZone(timeZone: string): string {
-  try {
-    new Intl.DateTimeFormat('en-US', { timeZone }).format(new Date());
-    return timeZone;
-  } catch {
-    return 'UTC';
-  }
 }
 
 function laterOf(a: Date, b: Date): Date {

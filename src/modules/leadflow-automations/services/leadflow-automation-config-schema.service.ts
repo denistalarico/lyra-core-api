@@ -12,9 +12,14 @@ import {
   FOLLOWUP_IDLE_LEAD_RECIPE_KEY,
   LEADFLOW_TAG_RULE_OPERATORS,
   NOTIFICATION_CHANNEL_RECIPE_KEYS,
+  OUTSIDE_BUSINESS_HOURS_RECIPE_KEY,
   type LeadFlowAutomationRecipeCatalogItem,
 } from '../catalog/automation-recipes.catalog';
 import { enabledFollowupSteps } from '../catalog/followup-plan.catalog';
+import {
+  BUSINESS_HOURS_WEEKDAYS,
+  isBusinessHoursTime,
+} from './business-hours-schedule';
 
 export interface LeadFlowAutomationConfigError {
   /** `section.key`, or just `section` for a malformed section. */
@@ -184,6 +189,18 @@ export class LeadFlowAutomationConfigSchemaService {
       !missing.includes('conditions.tagRules')
     ) {
       missing.push('conditions.tagRules');
+    }
+
+    // The out-of-hours reply *is* its message. `message.baseMessage` is not
+    // required in general — most recipes only use it as guidance for the agent
+    // — but here the executor sends this text verbatim, so an empty one is an
+    // automation that would run and refuse at the last step.
+    if (
+      recipe.key === OUTSIDE_BUSINESS_HOURS_RECIPE_KEY &&
+      this.isEmpty(config.message?.baseMessage) &&
+      !missing.includes('message.baseMessage')
+    ) {
+      missing.push('message.baseMessage');
     }
 
     return missing;
@@ -367,9 +384,94 @@ export class LeadFlowAutomationConfigSchemaService {
       case 'tag_rule[]':
         return this.validateTagRules(path, spec, raw);
 
+      case 'business_hours':
+        return this.validateBusinessHours(path, spec, raw);
+
       default:
         return [];
     }
+  }
+
+  /**
+   * Shape of a weekly schedule: the days of the week, each either closed or
+   * carrying an `HH:MM` window, in a real time zone.
+   *
+   * A day that is open with no hours is rejected rather than ignored — it is
+   * the one mistake that silently changes when the business is considered
+   * closed, and the operator would have no way of seeing it on the screen.
+   */
+  private validateBusinessHours(
+    path: string,
+    spec: LeadFlowAutomationFieldSpec,
+    raw: unknown,
+  ): LeadFlowAutomationConfigError[] {
+    if (!this.isPlainObject(raw)) {
+      return [this.typeError(path, spec, 'um horário semanal')];
+    }
+    if (
+      !this.hasOnlyKeys(raw, ['enabled', 'timezone', 'days']) ||
+      (raw.enabled !== undefined && typeof raw.enabled !== 'boolean') ||
+      typeof raw.timezone !== 'string' ||
+      !Array.isArray(raw.days)
+    ) {
+      return [this.typeError(path, spec, 'um horário semanal')];
+    }
+    try {
+      new Intl.DateTimeFormat('pt-BR', { timeZone: raw.timezone }).format();
+    } catch {
+      return [
+        {
+          path,
+          code: 'invalid_type',
+          message: `"${spec.label}" precisa usar um fuso IANA válido.`,
+        },
+      ];
+    }
+    if (raw.days.length > BUSINESS_HOURS_WEEKDAYS.length) {
+      return [
+        {
+          path,
+          code: 'too_many_items',
+          message: `"${spec.label}" tem no máximo um período por dia da semana.`,
+        },
+      ];
+    }
+
+    const seen = new Set<string>();
+    for (const entry of raw.days) {
+      if (
+        !this.isPlainObject(entry) ||
+        !this.hasOnlyKeys(entry, ['day', 'enabled', 'start', 'end']) ||
+        typeof entry.day !== 'string' ||
+        !BUSINESS_HOURS_WEEKDAYS.includes(entry.day as never) ||
+        typeof entry.enabled !== 'boolean' ||
+        typeof entry.start !== 'string' ||
+        typeof entry.end !== 'string' ||
+        (entry.enabled &&
+          (!isBusinessHoursTime(entry.start) ||
+            !isBusinessHoursTime(entry.end)))
+      ) {
+        return [
+          {
+            path,
+            code: 'invalid_type',
+            message: `Cada dia de "${spec.label}" precisa dizer se atende e, se atende, das quantas às quantas.`,
+          },
+        ];
+      }
+      if (seen.has(entry.day)) {
+        return [
+          {
+            path,
+            code: 'invalid_type',
+            message: `"${spec.label}" repete um dia da semana.`,
+          },
+        ];
+      }
+      seen.add(entry.day);
+    }
+
+    return [];
   }
 
   /**

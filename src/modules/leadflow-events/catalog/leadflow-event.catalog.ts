@@ -160,13 +160,18 @@ export const LEADFLOW_EVENT_CATALOG: LeadFlowEventCatalogItem[] = [
   buildEvent({
     eventName: 'leadflow.inbox.business_hours.closed',
     description:
-      'Handoff solicitado fora do horário comercial oficial do workspace. Evento derivado apenas do contexto de handoff.',
+      'Ninguém pode atender a conversa fora do horário: handoff solicitado, ou mensagem recebida sem agente atendendo. Evento derivado.',
     requiredContext: ['conversationId'],
     payloadSchema: {
-      handoffEventId: field(
+      reason: field(
         'string',
         true,
-        'Evento canônico de handoff que originou a derivação.',
+        'O que deixou a conversa sem resposta: handoff ou unattended.',
+      ),
+      handoffEventId: field(
+        'string',
+        false,
+        'Evento canônico de handoff que originou a derivação, quando houve um.',
       ),
       timezone: field(
         'string',

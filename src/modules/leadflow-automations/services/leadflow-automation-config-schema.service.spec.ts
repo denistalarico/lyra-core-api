@@ -18,6 +18,9 @@ describe('LeadFlowAutomationConfigSchemaService', () => {
   const dailySummary = getRecipeByKey(
     'daily_opportunity_summary',
   ) as LeadFlowAutomationRecipeCatalogItem;
+  const outsideHours = getRecipeByKey(
+    'outside_business_hours',
+  ) as LeadFlowAutomationRecipeCatalogItem;
 
   describe('validateSection', () => {
     it('accepts the recipe defaults unchanged', () => {
@@ -524,6 +527,107 @@ describe('LeadFlowAutomationConfigSchemaService', () => {
       });
 
       expect(missing).toContain('conditions.tagRules');
+    });
+
+    it('needs the out-of-hours reply to actually say something', () => {
+      // The executor sends this text verbatim; an empty one is an automation
+      // that runs and refuses at the last step.
+      expect(
+        service.findMissingRequiredFields(outsideHours, {
+          message: { baseMessage: '   ' },
+        }),
+      ).toContain('message.baseMessage');
+      expect(
+        service.findMissingRequiredFields(outsideHours, {
+          message: outsideHours.defaultMessageConfig,
+        }),
+      ).not.toContain('message.baseMessage');
+    });
+  });
+
+  describe('business hours', () => {
+    it('accepts a weekly schedule of the automation’s own', () => {
+      const result = service.validateSection(
+        outsideHours,
+        'schedulePolicy',
+        {
+          businessHours: {
+            enabled: true,
+            timezone: 'America/Sao_Paulo',
+            days: [
+              { day: 'monday', enabled: true, start: '08:00', end: '18:00' },
+              { day: 'sunday', enabled: false, start: '', end: '' },
+            ],
+          },
+        },
+        outsideHours.defaultSchedulePolicy,
+      );
+
+      expect(result.valid).toBe(true);
+    });
+
+    it('inherits the workspace schedule when it is null', () => {
+      const result = service.validateSection(
+        outsideHours,
+        'schedulePolicy',
+        { businessHours: null },
+        outsideHours.defaultSchedulePolicy,
+      );
+
+      expect(result.valid).toBe(true);
+    });
+
+    it('rejects a day that is open without saying when', () => {
+      // The one mistake that silently moves the boundary the automation acts on.
+      const result = service.validateSection(
+        outsideHours,
+        'schedulePolicy',
+        {
+          businessHours: {
+            enabled: true,
+            timezone: 'UTC',
+            days: [{ day: 'monday', enabled: true, start: '', end: '' }],
+          },
+        },
+        outsideHours.defaultSchedulePolicy,
+      );
+
+      expect(result.valid).toBe(false);
+      expect(result.errors[0].path).toBe('schedulePolicy.businessHours');
+    });
+
+    it('rejects a weekday nobody recognises and a zone nobody can read', () => {
+      const day = service.validateSection(
+        outsideHours,
+        'schedulePolicy',
+        {
+          businessHours: {
+            enabled: true,
+            timezone: 'UTC',
+            days: [
+              { day: 'segunda', enabled: true, start: '08:00', end: '18:00' },
+            ],
+          },
+        },
+        outsideHours.defaultSchedulePolicy,
+      );
+      const zone = service.validateSection(
+        outsideHours,
+        'schedulePolicy',
+        {
+          businessHours: {
+            enabled: true,
+            timezone: 'Mars/Olympus',
+            days: [
+              { day: 'monday', enabled: true, start: '08:00', end: '18:00' },
+            ],
+          },
+        },
+        outsideHours.defaultSchedulePolicy,
+      );
+
+      expect(day.valid).toBe(false);
+      expect(zone.valid).toBe(false);
     });
   });
 });

@@ -57,6 +57,7 @@ import { LeadFlowFollowupTimerConsumer } from './services/leadflow-followup-time
 import { LeadFlowAppointmentTimerConsumer } from './services/leadflow-appointment-timer.consumer';
 import { LeadFlowFollowupIdleDetectorService } from './services/leadflow-followup-idle-detector.service';
 import { LeadFlowBusinessHoursClosedDetectorService } from './services/leadflow-business-hours-closed-detector.service';
+import { LeadFlowWorkspaceBusinessHoursService } from './services/leadflow-workspace-business-hours.service';
 import { InboxSettingsEntity } from '../inbox/entities/inbox-settings.entity';
 import {
   AgencyUserProfileEntity,
@@ -147,6 +148,7 @@ import { LeadFlowAppointmentLifecycleSchedulerService } from './services/leadflo
     LeadFlowDailySummarySchedulerService,
     LeadFlowFollowupIdleDetectorService,
     LeadFlowBusinessHoursClosedDetectorService,
+    LeadFlowWorkspaceBusinessHoursService,
     LeadFlowAutomationNotificationPublisher,
     LeadFlowAutomationEventIngressService,
     LeadFlowAutomationRunService,

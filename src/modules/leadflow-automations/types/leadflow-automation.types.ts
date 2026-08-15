@@ -287,8 +287,27 @@ export interface LeadFlowAutomationSchedulePolicy {
   /** Array of `{ label, minutesBefore }` objects (see {@link LeadFlowAutomationScheduleOffset}). */
   offsets?: LeadFlowJsonObject[];
   cooldownHours?: number;
+  /**
+   * A weekly schedule of this automation's own, in the same shape the Inbox
+   * settings persist. Null inherits the workspace's.
+   */
+  businessHours?: LeadFlowBusinessHoursScheduleConfig | null;
   [key: string]: LeadFlowJsonValue | undefined;
 }
+
+export type LeadFlowBusinessHoursDayConfig = LeadFlowJsonObject & {
+  day: string;
+  enabled: boolean;
+  /** `HH:MM`, local to the schedule's time zone. */
+  start: string;
+  end: string;
+};
+
+export type LeadFlowBusinessHoursScheduleConfig = LeadFlowJsonObject & {
+  enabled: boolean;
+  timezone: string;
+  days: LeadFlowBusinessHoursDayConfig[];
+};
 
 export interface LeadFlowAutomationDeveloperConfig {
   enabled?: boolean;

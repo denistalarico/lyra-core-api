@@ -395,28 +395,42 @@ const ESSENTIAL_SEEDS: RecipeSeed[] = [
   },
   {
     key: 'outside_business_hours',
-    templateVersion: 3,
+    // v4: the recipe carries its own schedule, so the operator can answer
+    // earlier than the hours the Inbox considers open.
+    templateVersion: 4,
     requiredDependencies: [
       LeadFlowAutomationDependency.EventFanOut,
       LeadFlowAutomationDependency.MessageGeneration,
     ],
     name: 'Fora do horário',
     description:
-      'Responde automaticamente quando o lead escreve fora do horário comercial.',
+      'Responde automaticamente quando ninguém pode atender: o lead escreve num canal sem agente, ou pede um humano fora do horário de atendimento.',
     category: LeadFlowAutomationCategory.Availability,
     tier: 'essential',
     trigger: 'business_hours.closed',
     primaryAction: 'send_message',
-    whenLabel: 'Quando chega mensagem fora do horário comercial configurado.',
+    whenLabel:
+      'Fora do horário, quando nenhum agente está atendendo o canal ou o lead pediu um humano.',
     limitsLabel:
-      'Informa o próximo horário de retorno; pode criar tarefa/follow.',
-    conditionConfig: { businessHoursOnly: false, stopIfReplied: false },
+      'Uma resposta por conversa em cada período fechado; se o agente estiver atendendo, quem responde é ele.',
+    // `stopIfHandoff` defaults to true for every recipe, and for this one it is
+    // backwards: a handoff request outside hours is the very moment this
+    // automation exists for, so inheriting "cancel while a handoff is open"
+    // made it cancel itself. The same goes for a reply — the lead writing again
+    // at midnight is what there is to answer.
+    conditionConfig: {
+      businessHoursOnly: false,
+      stopIfReplied: false,
+      stopIfHandoff: false,
+    },
     actionConfig: { primaryAction: 'send_message' },
     messageConfig: {
       baseMessage:
         'No momento estamos fora do horário de atendimento. Assim que retornarmos, vamos responder por aqui.',
     },
-    schedulePolicy: { respectBusinessHours: false },
+    // Null inherits the workspace schedule configured for the Inbox — the same
+    // one the rest of LeadFlow reads — until an operator sets a custom one.
+    schedulePolicy: { respectBusinessHours: false, businessHours: null },
   },
   {
     key: 'governed_stage_advance',
@@ -649,6 +663,13 @@ export const FOLLOWUP_IDLE_LEAD_RECIPE_KEY = 'followup_idle_lead';
  * configuration shaped like a list of independent decisions.
  */
 export const AUTOMATIC_TAGGING_RECIPE_KEY = 'automatic_tagging';
+
+/**
+ * The recipe that answers when nobody can. The detector that derives its
+ * trigger, its readiness rule and its dedicated editor all key off this name,
+ * because it is the only recipe that carries a schedule of its own.
+ */
+export const OUTSIDE_BUSINESS_HOURS_RECIPE_KEY = 'outside_business_hours';
 
 /** Comparisons a tag rule may make against an opportunity field. */
 export const LEADFLOW_TAG_RULE_OPERATORS = [
