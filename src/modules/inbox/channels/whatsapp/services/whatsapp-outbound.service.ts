@@ -53,6 +53,14 @@ export type SendWhatsAppAutomationMessageInput = {
   text?: string | null;
   templateRef?: string | null;
   templateLanguage?: string | null;
+  /**
+   * Body parameters for `{{1}}…{{n}}`, in order.
+   *
+   * Meta matches template variables by position, never by name, and rejects a
+   * send whose parameter count differs from the approved template's. Empty means
+   * a template with no variables — the only kind the platform could send before.
+   */
+  templateParameters?: readonly string[];
   connectionRef?: string | null;
 };
 
@@ -262,6 +270,7 @@ export class WhatsAppOutboundService {
       conversation,
       templateRef,
       language: input.templateLanguage?.trim() || 'pt_BR',
+      parameters: input.templateParameters ?? [],
       automationId: input.automationId,
       idempotencyKey: input.idempotencyKey,
     });
@@ -1034,6 +1043,7 @@ export class WhatsAppOutboundService {
     conversation: InboxConversationEntity;
     templateRef: string;
     language: string;
+    parameters: readonly string[];
     automationId: string;
     idempotencyKey: string;
   }) {
@@ -1103,7 +1113,11 @@ export class WhatsAppOutboundService {
       externalMessageId: null,
       idempotencyKey: input.idempotencyKey,
       messageType: 'template',
-      content: `[template:${input.templateRef}]`,
+      // The parameters go in the thread's own record too: without them the
+      // Inbox shows `[template:x]` for a message the lead read as a sentence.
+      content: input.parameters.length
+        ? `[template:${input.templateRef}] ${input.parameters.join(' · ')}`
+        : `[template:${input.templateRef}]`,
       status: 'pending',
       attachments: [],
       metadata: {
@@ -1112,6 +1126,7 @@ export class WhatsAppOutboundService {
         automationId: input.automationId,
         templateRef: input.templateRef,
         templateLanguage: input.language,
+        templateParameters: [...input.parameters],
       },
       sentAt: null,
       deliveredAt: null,
@@ -1153,6 +1168,7 @@ export class WhatsAppOutboundService {
         expectedTo: input.conversation.externalThreadId as string,
         templateRef: input.templateRef,
         language: input.language,
+        parameters: input.parameters,
       });
       await this.metaLedger.succeeded(
         ledger,
@@ -1235,6 +1251,7 @@ export class WhatsAppOutboundService {
     expectedTo: string;
     templateRef: string;
     language: string;
+    parameters?: readonly string[];
   }): Promise<MetaSendMessageResponse> {
     const authorized = this.outboundPolicy.authorize(
       input.to,
@@ -1242,6 +1259,18 @@ export class WhatsAppOutboundService {
     );
     const graphVersion = process.env.META_GRAPH_API_VERSION ?? 'v24.0';
     const url = `https://graph.facebook.com/${graphVersion}/${input.phoneNumberId}/messages`;
+    // A template with no variables must keep sending exactly the body it sent
+    // before: Meta rejects an empty `components` array as readily as a missing
+    // parameter, so the key only appears when there is something to fill.
+    const parameters = input.parameters ?? [];
+    const components = parameters.length
+      ? [
+          {
+            type: 'body',
+            parameters: parameters.map((text) => ({ type: 'text', text })),
+          },
+        ]
+      : undefined;
     const response = await fetch(url, {
       method: 'POST',
       headers: {
@@ -1256,6 +1285,7 @@ export class WhatsAppOutboundService {
         template: {
           name: input.templateRef,
           language: { code: input.language },
+          ...(components ? { components } : {}),
         },
       }),
       redirect: 'error',

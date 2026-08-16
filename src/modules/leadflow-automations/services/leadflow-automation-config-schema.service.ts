@@ -15,6 +15,7 @@ import {
   LEADFLOW_TAG_RULE_OPERATORS,
   NOTIFICATION_CHANNEL_RECIPE_KEYS,
   OUTSIDE_BUSINESS_HOURS_RECIPE_KEY,
+  isAppointmentMessageRecipe,
   type LeadFlowAutomationRecipeCatalogItem,
 } from '../catalog/automation-recipes.catalog';
 import { enabledFollowupSteps } from '../catalog/followup-plan.catalog';
@@ -243,6 +244,29 @@ export class LeadFlowAutomationConfigSchemaService {
         !missing.includes('actions.teamChatChannelId')
       ) {
         missing.push('actions.teamChatChannelId');
+      }
+    }
+
+    // An agenda message almost always leaves outside the 24-hour customer
+    // service window — a reminder 24 hours before a commitment booked last week
+    // has no recent inbound to ride on. WhatsApp only accepts an approved
+    // template there, so an agenda automation without one is not a working
+    // automation, however complete the rest of it looks. Both fields are
+    // required together because `templateRef` alone says nothing about which
+    // transport is expected to carry it.
+    if (isAppointmentMessageRecipe(recipe.key)) {
+      const message = config.message ?? {};
+      if (this.isEmpty(message.baseMessage)) {
+        if (!missing.includes('message.baseMessage')) {
+          missing.push('message.baseMessage');
+        }
+      }
+      if (
+        message.channel === 'whatsapp' &&
+        this.isEmpty(message.templateRef) &&
+        !missing.includes('message.templateRef')
+      ) {
+        missing.push('message.templateRef');
       }
     }
 

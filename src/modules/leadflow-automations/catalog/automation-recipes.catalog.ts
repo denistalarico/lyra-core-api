@@ -134,7 +134,15 @@ const BASE_SAFETY_RULES = [
   'never_invent_prices_or_availability',
 ];
 
-/** Modes that run an appointment-style agenda (used by reminder/confirmation/no-show). */
+/**
+ * Modes that run an appointment-style agenda (used by reminder/confirmation/no-show).
+ *
+ * `AgencyServices` is here because the mode's own template says so: its primary
+ * conversion goal is "agendar diagnostico" and `appointments` is among its
+ * recommended apps (`business-mode-templates.catalog.ts`). Leaving it out meant
+ * an agency could book a meeting and then have no way to remind anyone of it.
+ * Retail and light e-commerce stay out — they sell without an agenda.
+ */
 const AGENDA_MODES: LeadFlowBusinessMode[] = [
   ClinicsEsthetics,
   RestaurantsFood,
@@ -145,6 +153,7 @@ const AGENDA_MODES: LeadFlowBusinessMode[] = [
   LegalAccounting,
   FitnessWellness,
   EventsTourism,
+  AgencyServices,
 ];
 
 interface RecipeSeed {
@@ -270,7 +279,7 @@ const ESSENTIAL_SEEDS: RecipeSeed[] = [
   },
   {
     key: 'appointment_reminder',
-    templateVersion: 3,
+    templateVersion: 4,
     requiredDependencies: [
       LeadFlowAutomationDependency.AgendaDomain,
       LeadFlowAutomationDependency.SchedulerRuntime,
@@ -292,9 +301,15 @@ const ESSENTIAL_SEEDS: RecipeSeed[] = [
     // likewise irrelevant — being reminded is not a conversation to abandon
     // because the lead once wrote to us.
     conditionConfig: { businessHoursOnly: false, stopIfReplied: false },
+    // The niche copy replaces this at provisioning time; what stays here is the
+    // fallback for a mode with no entry in the copy catalog. `channel` and
+    // `templateLanguage` are declared so the agenda panel can edit them — a key
+    // absent from the recipe defaults is rejected by the validator.
     messageConfig: {
+      channel: 'whatsapp',
+      templateLanguage: 'pt_BR',
       baseMessage:
-        'Olá! Passando para lembrar do seu compromisso. Se precisar remarcar, é só responder por aqui.',
+        'Oi {{contact.firstName}}! Passando para lembrar do seu compromisso: {{appointment.title}}, {{appointment.weekday}} ({{appointment.date}}) às {{appointment.time}}. Se precisar remarcar, é só responder por aqui.',
     },
     schedulePolicy: {
       respectBusinessHours: false,
@@ -307,7 +322,7 @@ const ESSENTIAL_SEEDS: RecipeSeed[] = [
   },
   {
     key: 'appointment_confirmation',
-    templateVersion: 3,
+    templateVersion: 4,
     requiredDependencies: [
       LeadFlowAutomationDependency.AgendaDomain,
       LeadFlowAutomationDependency.SchedulerRuntime,
@@ -330,14 +345,16 @@ const ESSENTIAL_SEEDS: RecipeSeed[] = [
     conditionConfig: { businessHoursOnly: false, stopIfReplied: false },
     triggerConfig: { confirmationHoursBefore: 24 },
     messageConfig: {
+      channel: 'whatsapp',
+      templateLanguage: 'pt_BR',
       baseMessage:
-        'Podemos confirmar seu compromisso? Responda Confirmar, Reagendar ou Cancelar.',
+        'Oi {{contact.firstName}}! Podemos confirmar seu compromisso de {{appointment.title}}, {{appointment.weekday}} ({{appointment.date}}) às {{appointment.time}}? Responda Confirmar, Reagendar ou Cancelar.',
       quickReplies: ['Confirmar', 'Reagendar', 'Cancelar'],
     },
   },
   {
     key: 'appointment_no_show_recovery',
-    templateVersion: 3,
+    templateVersion: 4,
     requiredDependencies: [
       LeadFlowAutomationDependency.AgendaDomain,
       LeadFlowAutomationDependency.SchedulerRuntime,
@@ -359,8 +376,10 @@ const ESSENTIAL_SEEDS: RecipeSeed[] = [
     triggerConfig: { delayHours: 1, noShowGraceMinutes: 30 },
     actionConfig: { maxAttempts: 2, moveToStageRef: null },
     messageConfig: {
+      channel: 'whatsapp',
+      templateLanguage: 'pt_BR',
       baseMessage:
-        'Sentimos sua falta no horário combinado. Quer remarcar? Responda por aqui que eu ajudo.',
+        'Oi {{contact.firstName}}! Sentimos sua falta no seu compromisso de {{appointment.title}}, {{appointment.weekday}} às {{appointment.time}}. Quer remarcar? Responda por aqui que eu ajudo.',
     },
     schedulePolicy: { cooldownHours: 24 },
     crmPolicy: { moveStageOnComplete: null },
@@ -707,6 +726,24 @@ export const NOTIFICATION_CHANNEL_RECIPE_KEYS: readonly string[] = [
  * only recipe whose effect is addressed to the agency rather than to a lead.
  */
 export const DAILY_OPPORTUNITY_SUMMARY_RECIPE_KEY = 'daily_opportunity_summary';
+
+/**
+ * The three recipes that speak to a lead *about a commitment*.
+ *
+ * They share everything that matters here: the same variable vocabulary, the
+ * same "which channel carries it" question, and the same WhatsApp template rule.
+ * Readiness, the config surface and the dedicated editor all key off this list
+ * instead of repeating the names.
+ */
+export const APPOINTMENT_MESSAGE_RECIPE_KEYS: readonly string[] = [
+  'appointment_reminder',
+  'appointment_confirmation',
+  'appointment_no_show_recovery',
+];
+
+export function isAppointmentMessageRecipe(recipeKey: string): boolean {
+  return APPOINTMENT_MESSAGE_RECIPE_KEYS.includes(recipeKey);
+}
 
 const OFFICIAL_BUSINESS_MODES = new Set<string>(
   Object.values(LeadFlowBusinessMode),

@@ -192,7 +192,11 @@ export class LeadFlowAppointmentTimerConsumer
         `appointment_reminder:${automation.publishedVersionId}`,
       payload: {
         conversationId,
-        channel: 'whatsapp',
+        // The commitment travels with the send so the executor can resolve the
+        // message variables against it as it is now, not as it was when the
+        // timer was written.
+        appointmentId,
+        channel: stringField(envelope.payload.channel) ?? 'whatsapp',
         text: stringField(envelope.payload.text),
         templateRef: stringField(envelope.payload.templateRef),
         templateLanguage:

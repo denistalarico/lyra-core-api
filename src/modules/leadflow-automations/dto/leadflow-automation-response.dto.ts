@@ -34,11 +34,19 @@ export function maskWebhookConfig(
     return null;
   }
 
+  const events = Array.isArray(config.events)
+    ? config.events.filter(
+        (event): event is string =>
+          typeof event === 'string' && event.length > 0,
+      )
+    : [];
+
   const hasContent =
     config.enabled === true ||
     Boolean(config.direction) ||
     Boolean(config.url) ||
     Boolean(config.secret) ||
+    events.length > 0 ||
     (config.headers && Object.keys(config.headers).length > 0);
 
   if (!hasContent) {
@@ -58,6 +66,9 @@ export function maskWebhookConfig(
     method: config.method ?? null,
     headers: (config.headers as LeadFlowJsonObject) ?? {},
     payloadMapping: (config.payloadMapping as LeadFlowJsonObject) ?? {},
+    events,
+    payloadFields: (config.payloadFields as LeadFlowJsonObject) ?? {},
+    expectJsonResponse: config.expectJsonResponse === true,
     hasSecret: Boolean(secret),
     secretMasked,
     retryPolicy: {
@@ -92,6 +103,15 @@ export interface LeadFlowAutomationSummaryResponse {
   readiness: LeadFlowAutomationReadiness;
   publishedVersionId: string | null;
   updatedAt: string;
+  /**
+   * Masked webhook configuration, for the recipes that have one.
+   *
+   * Present on the summary because webhooks are listed as endpoints: the list
+   * has to show the URL and how many events each carries, which are the two
+   * things that tell one endpoint from another. The secret is masked here by
+   * the same function the detail uses.
+   */
+  webhook?: LeadFlowAutomationWebhookPublic | null;
   /**
    * Effective state. Attached by the service, which owns the business-mode and
    * dependency context the mappers do not have.
@@ -194,6 +214,7 @@ export function mapAutomationSummary(
     readiness: automation.readiness ?? {},
     publishedVersionId: automation.publishedVersionId,
     updatedAt: automation.updatedAt.toISOString(),
+    webhook: maskWebhookConfig(automation.webhookConfig),
   };
 }
 

@@ -761,4 +761,48 @@ describe('LeadFlowAutomationConfigSchemaService', () => {
       expect(configured).not.toContain('actions.teamChatChannelId');
     });
   });
+
+  describe('agenda messages need a template to leave the window', () => {
+    const reminder = getRecipeByKey(
+      'appointment_reminder',
+    ) as LeadFlowAutomationRecipeCatalogItem;
+
+    it('asks for the approved template while the channel is WhatsApp', () => {
+      // A reminder 24 hours before a commitment booked last week has no recent
+      // inbound to ride on, so free text is not an option there.
+      const missing = service.findMissingRequiredFields(reminder, {
+        message: { ...reminder.defaultMessageConfig },
+      });
+      expect(missing).toContain('message.templateRef');
+
+      const configured = service.findMissingRequiredFields(reminder, {
+        message: {
+          ...reminder.defaultMessageConfig,
+          templateRef: 'lembrete_v1',
+        },
+      });
+      expect(configured).not.toContain('message.templateRef');
+    });
+
+    it('does not ask for one when the message has no text at all', () => {
+      // An empty message is the earlier problem, and reporting both at once
+      // would make the screen look twice as broken as it is.
+      const missing = service.findMissingRequiredFields(reminder, {
+        message: { ...reminder.defaultMessageConfig, baseMessage: '   ' },
+      });
+      expect(missing).toContain('message.baseMessage');
+    });
+
+    it('accepts the recipe defaults as a valid patch', () => {
+      // `channel` and `templateLanguage` are only editable because the recipe
+      // declares them; a key absent from the defaults is refused outright.
+      const result = service.validateSection(
+        reminder,
+        'message',
+        { channel: 'whatsapp', templateLanguage: 'pt_BR' },
+        reminder.defaultMessageConfig,
+      );
+      expect(result.valid).toBe(true);
+    });
+  });
 });

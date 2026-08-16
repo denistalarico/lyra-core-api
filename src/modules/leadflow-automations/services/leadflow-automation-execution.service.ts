@@ -322,6 +322,7 @@ export class LeadFlowAutomationExecutionService {
           timezone: appointment?.timezone ?? null,
           serviceRef: appointment?.serviceRef ?? null,
           offsets: Array.isArray(schedule.offsets) ? schedule.offsets : [],
+          channel: typeof message.channel === 'string' ? message.channel : null,
           text:
             typeof message.baseMessage === 'string'
               ? message.baseMessage
@@ -401,6 +402,10 @@ export class LeadFlowAutomationExecutionService {
         policyPrefix: 'message',
         payload: {
           conversationId: subject.conversationId,
+          // Present only on an agenda delivery, and it is what lets the executor
+          // resolve `{{appointment.date}}` and friends at send time.
+          appointmentId: subject.appointmentId ?? null,
+          channel: typeof message.channel === 'string' ? message.channel : null,
           text:
             typeof message.baseMessage === 'string'
               ? message.baseMessage
@@ -703,6 +708,9 @@ export class LeadFlowAutomationExecutionService {
       baselineAt: safeBaseline.toISOString(),
       fireAt: fireAt.toISOString(),
       attemptOffsetsHours: offsets,
+      // Carried so the no-show recovery renders the same commitment variables
+      // the reminder and the confirmation do. Null on every other follow-up.
+      appointmentId: fromAppointment ? subject.appointmentId : null,
       // The two flags answer different questions and must not be conflated. As
       // an entry condition, "did the lead reply" is about the whole
       // conversation, and an agenda recipe deliberately ignores it — a lead who

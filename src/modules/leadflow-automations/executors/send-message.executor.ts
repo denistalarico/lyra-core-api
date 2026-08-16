@@ -7,6 +7,10 @@ import {
 import { WhatsAppOutboundService } from '../../inbox/channels/whatsapp/services/whatsapp-outbound.service';
 import { WhatsAppAutomationTemplateError } from '../../inbox/channels/whatsapp/services/whatsapp-outbound.service';
 import { LeadFlowAutomationErrorClass } from '../enums/leadflow-automation-run.enums';
+import {
+  LeadFlowAppointmentMessageService,
+  type RenderedAppointmentMessage,
+} from '../services/leadflow-appointment-message.service';
 import { executorAvailability } from './automation-executors.registry';
 import type {
   AutomationEffectRequest,
@@ -15,12 +19,23 @@ import type {
   AutomationExecutorAvailability,
 } from './automation-executor.types';
 
-/** Governed adapter from Automations to the Inbox's canonical outbound command. */
+/**
+ * Governed adapter from Automations to the Inbox's canonical outbound command.
+ *
+ * All three agenda paths converge here — the reminder timer, the confirmation
+ * event and the no-show follow-up — which is why the message variables are
+ * resolved at this point and nowhere else. Resolving here also means resolving
+ * at send time: a reminder scheduled days in advance quotes the commitment as it
+ * is when the message leaves, not as it was when it was booked.
+ */
 @Injectable()
 export class SendMessageExecutor implements AutomationExecutor {
   readonly actionKey = 'send_message';
 
-  constructor(private readonly outbound: WhatsAppOutboundService) {}
+  constructor(
+    private readonly outbound: WhatsAppOutboundService,
+    private readonly appointmentMessage: LeadFlowAppointmentMessageService,
+  ) {}
 
   availability(): AutomationExecutorAvailability {
     return executorAvailability(this.actionKey);
@@ -31,13 +46,45 @@ export class SendMessageExecutor implements AutomationExecutor {
   ): Promise<AutomationEffectResult> {
     const conversationId = stringField(request.payload.conversationId);
     if (!conversationId) return refused('message_conversation_required');
-    const text = nullableString(request.payload.text);
+    const configuredText = nullableString(request.payload.text);
     const templateRef = nullableString(request.payload.templateRef);
-    if (!text && !templateRef) return refused('message_content_required');
+    if (!configuredText && !templateRef) {
+      return refused('message_content_required');
+    }
     const channel = nullableString(request.payload.channel) ?? 'whatsapp';
     if (channel !== 'whatsapp') {
       return refused('followup_channel_transport_unavailable');
     }
+
+    const appointmentId = stringField(request.payload.appointmentId);
+    let rendered: RenderedAppointmentMessage | null = null;
+    if (appointmentId) {
+      try {
+        rendered = await this.appointmentMessage.render(
+          {
+            tenantId: request.tenantId,
+            workspaceId: request.workspaceId,
+            appointmentId,
+            automationId: request.automationId,
+          },
+          configuredText,
+        );
+      } catch {
+        // Sending the text with its variables collapsed would put a mangled
+        // sentence in front of the lead, and no retry can take it back. A read
+        // that failed is transient by nature, so the timer tries again.
+        return {
+          status: 'failed',
+          effectConfirmed: false,
+          errorClass: LeadFlowAutomationErrorClass.Transient,
+          errorCode: 'message_variables_unavailable',
+          errorMessage:
+            'Os dados do compromisso não puderam ser lidos para montar a mensagem.',
+          reference: null,
+        };
+      }
+    }
+    const text = rendered ? rendered.text : configuredText;
 
     try {
       const result = await this.outbound.sendAutomationMessage({
@@ -50,6 +97,10 @@ export class SendMessageExecutor implements AutomationExecutor {
         templateRef,
         templateLanguage:
           nullableString(request.payload.templateLanguage) ?? 'pt_BR',
+        // The order the variables appear in the operator's own text is the
+        // order the template was built in — that is what the guide on the
+        // configuration screen tells them to do.
+        templateParameters: rendered?.templateParameters ?? [],
         connectionRef: nullableString(request.payload.connectionRef),
       });
       return {

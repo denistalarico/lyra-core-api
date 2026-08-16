@@ -52,6 +52,11 @@ import {
   LeadFlowTeamChatDeliveryService,
   type LeadFlowTeamChatDeliveryOptions,
 } from './services/leadflow-team-chat-delivery.service';
+import {
+  LeadFlowWebhookAdminService,
+  type LeadFlowWebhookDeliveriesResponse,
+  type LeadFlowWebhookTestResponse,
+} from './webhooks/leadflow-webhook-admin.service';
 
 @Controller('leadflow/automations')
 @UseGuards(JwtAuthGuard, PermissionsGuard)
@@ -62,6 +67,7 @@ export class LeadFlowAutomationsController {
     private readonly crmActionService: LeadFlowAutomationCrmActionService,
     private readonly workspaceBusinessHours: LeadFlowWorkspaceBusinessHoursService,
     private readonly teamChatDelivery: LeadFlowTeamChatDeliveryService,
+    private readonly webhookAdmin: LeadFlowWebhookAdminService,
   ) {}
 
   @Get('recipes')
@@ -164,6 +170,30 @@ export class LeadFlowAutomationsController {
     @RequestContextData() ctx: RequestContext,
   ): Promise<LeadFlowTeamChatDeliveryOptions> {
     return this.teamChatDelivery.getOptions(ctx);
+  }
+
+  /**
+   * The delivery log of one endpoint, and whether this environment is allowed
+   * to send at all — a log that is empty because dispatch is off reads as a
+   * broken webhook unless the screen can say which it is.
+   */
+  @Get(':id/webhook-deliveries')
+  @RequirePermission(LEADFLOW_AUTOMATIONS_PERMISSIONS.developerManage)
+  listWebhookDeliveries(
+    @RequestContextData() ctx: RequestContext,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query('limit') limit?: string,
+  ): Promise<LeadFlowWebhookDeliveriesResponse> {
+    return this.webhookAdmin.list(ctx, id, parsePositiveInteger(limit) ?? 25);
+  }
+
+  @Post(':id/webhook-test')
+  @RequirePermission(LEADFLOW_AUTOMATIONS_PERMISSIONS.developerManage)
+  testWebhook(
+    @RequestContextData() ctx: RequestContext,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<LeadFlowWebhookTestResponse> {
+    return this.webhookAdmin.test(ctx, id);
   }
 
   @Get(':id')

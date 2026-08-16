@@ -293,9 +293,9 @@ export class LeadFlowFollowupTimerConsumer
         )
       : [];
     const currentKey = canonical
-      ? (isFollowupStepKey(envelope.payload.stepKey)
-          ? envelope.payload.stepKey
-          : (plan[attemptIndex]?.stepKey ?? null))
+      ? isFollowupStepKey(envelope.payload.stepKey)
+        ? envelope.payload.stepKey
+        : (plan[attemptIndex]?.stepKey ?? null)
       : null;
     const step = canonical
       ? (plan.find((item) => item.stepKey === currentKey) ?? null)
@@ -395,7 +395,12 @@ export class LeadFlowFollowupTimerConsumer
 
       if (optedOut) {
         channelResult = 'skipped_contact_opt_out';
-      } else if (canonical && step && isInConversationStep(step.stepKey) && !text) {
+      } else if (
+        canonical &&
+        step &&
+        isInConversationStep(step.stepKey) &&
+        !text
+      ) {
         // Manual mode with nothing written yet: there is no message to send,
         // and the default copy is not this card's voice to borrow.
         channelResult = 'skipped_message_unavailable';
@@ -458,6 +463,9 @@ export class LeadFlowFollowupTimerConsumer
             `followup:${automation.publishedVersionId ?? automation.id}`,
           payload: {
             conversationId,
+            // Only the no-show recovery carries one, and it is what lets the
+            // recovery message name the commitment it is recovering.
+            appointmentId: stringField(envelope.payload.appointmentId),
             channel: channelConfig.channel,
             connectionRef: channelConfig.connectionRef ?? null,
             text,
@@ -589,7 +597,8 @@ export class LeadFlowFollowupTimerConsumer
         0,
         180,
       ),
-      dedupeScope: stringField(envelope.payload.automationId) ?? envelope.timerId,
+      dedupeScope:
+        stringField(envelope.payload.automationId) ?? envelope.timerId,
       fireAt: sendAt.toISOString(),
       purpose: envelope.purpose,
       consumerKey: this.consumerKey,

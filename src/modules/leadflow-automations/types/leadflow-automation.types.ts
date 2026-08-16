@@ -336,6 +336,21 @@ export interface LeadFlowAutomationWebhookConfig {
   method?: LeadFlowAutomationWebhookMethod;
   headers?: LeadFlowJsonObject;
   payloadMapping?: LeadFlowJsonObject;
+  /**
+   * Event names from the LeadFlow event catalog this endpoint subscribes to.
+   *
+   * The subscription lives here rather than in the recipe's `trigger` because
+   * one endpoint listens to many events — which is what every webhook product
+   * does, and what the single-trigger field cannot express.
+   */
+  events?: string[];
+  /**
+   * Payload fields to send, per event name. `['*']` — or an absent entry —
+   * means the whole payload, so a contract that grows later keeps flowing.
+   */
+  payloadFields?: LeadFlowJsonObject;
+  /** Read and record the endpoint's JSON answer instead of only its status. */
+  expectJsonResponse?: boolean;
   /** Raw secret/token. Persisted, never serialized to a response. */
   secret?: string | null;
   /** `{ maxRetries, backoffSeconds }` stored as a plain JSON object. */
@@ -351,6 +366,9 @@ export interface LeadFlowAutomationWebhookPublic {
   method: LeadFlowAutomationWebhookMethod | null;
   headers: LeadFlowJsonObject;
   payloadMapping: LeadFlowJsonObject;
+  events: string[];
+  payloadFields: LeadFlowJsonObject;
+  expectJsonResponse: boolean;
   hasSecret: boolean;
   secretMasked: string | null;
   retryPolicy: {

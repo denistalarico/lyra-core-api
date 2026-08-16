@@ -26,6 +26,7 @@ import {
 import { LeadFlowSettingsContextType } from '../../leadflow-settings/enums/leadflow-settings-context-type.enum';
 import { PlatformPermissionService } from '../../permissions';
 import type { PermissionContext } from '../../permissions';
+import { appointmentMessageCopy } from '../catalog/appointment-message-copy.catalog';
 import {
   FOLLOWUP_IDLE_LEAD_RECIPE_KEY,
   GOVERNED_STAGE_ADVANCE_RECIPE_KEY,
@@ -835,9 +836,18 @@ export class LeadFlowAutomationService {
       'actions',
       recipe.defaultActionConfig,
     );
+    // The niche writes the first draft. It is a default and nothing more: the
+    // text lands on the instance and the operator owns it from there, so
+    // changing the copy catalog never rewrites an automation already in use.
+    const nicheCopy = appointmentMessageCopy(
+      recipe.key,
+      automation.businessModeKey,
+    );
     automation.messageConfig = clearInheritedConfigFields(
       'message',
-      recipe.defaultMessageConfig,
+      nicheCopy
+        ? { ...recipe.defaultMessageConfig, baseMessage: nicheCopy }
+        : recipe.defaultMessageConfig,
     );
     automation.crmPolicy = { ...recipe.defaultCrmPolicy };
     automation.schedulePolicy = clearInheritedConfigFields(
@@ -846,7 +856,15 @@ export class LeadFlowAutomationService {
     );
     automation.developerConfig = { enabled: false, dryRunEnabled: false };
     automation.webhookConfig = recipe.isDeveloperOnly
-      ? { enabled: false, direction: 'outgoing', method: 'POST' }
+      ? {
+          enabled: false,
+          direction: 'outgoing',
+          method: 'POST',
+          events: [],
+          payloadFields: {},
+          expectJsonResponse: false,
+          retryPolicy: { maxRetries: 3, backoffSeconds: 30 },
+        }
       : {};
     automation.templateVersion = recipe.templateVersion;
     automation.metadata = {
@@ -1408,9 +1426,14 @@ export class LeadFlowAutomationService {
     let state = LeadFlowAutomationReadinessState.Ready;
 
     if (recipe.isDeveloperOnly) {
+      // An endpoint with no subscription is not half-configured, it is silent:
+      // it would sit "active" forever and never receive anything.
+      const events = automation.webhookConfig?.events;
       const webhookReady =
         Boolean(automation.webhookConfig?.url) &&
-        automation.webhookConfig?.enabled === true;
+        automation.webhookConfig?.enabled === true &&
+        Array.isArray(events) &&
+        events.length > 0;
       if (!webhookReady) {
         missing.push('webhook');
         state = LeadFlowAutomationReadinessState.DeveloperRequired;

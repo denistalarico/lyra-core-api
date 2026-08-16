@@ -257,4 +257,106 @@ describe('WhatsAppOutboundService automation window', () => {
       'whatsapp_template_required_outside_customer_service_window',
     );
   });
+
+  it('carries the ordered parameters through to the template send', async () => {
+    const service = build(new Date(Date.now() - 25 * 60 * 60 * 1_000));
+    const sendTemplate = jest
+      .spyOn(service as never, 'sendAutomationTemplate' as never)
+      .mockResolvedValue({
+        message: { id: 'message-template', status: 'sent' },
+      } as never);
+
+    await service.sendAutomationMessage({
+      tenantId: 'tenant',
+      workspaceId: 'workspace',
+      conversationId: 'conversation',
+      automationId: 'automation',
+      idempotencyKey: 'reminder-1',
+      text: 'Texto livre bloqueado',
+      templateRef: 'lembrete_v1',
+      templateParameters: ['Marina', '14:30'],
+    });
+
+    expect(sendTemplate).toHaveBeenCalledWith(
+      expect.objectContaining({ parameters: ['Marina', '14:30'] }),
+    );
+  });
+});
+
+describe('WhatsAppOutboundService template components', () => {
+  afterEach(() => jest.restoreAllMocks());
+
+  function callMeta(parameters?: readonly string[]) {
+    const service = new WhatsAppOutboundService(
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {
+        authorize: jest
+          .fn()
+          .mockReturnValue({ transportRecipient: '5511999999999' }),
+      } as never,
+      {} as never,
+    );
+    const fetchMock = jest.spyOn(global, 'fetch' as never).mockResolvedValue({
+      ok: true,
+      json: async () => ({ messages: [{ id: 'wamid.1' }] }),
+    } as never);
+
+    return {
+      fetchMock,
+      send: () =>
+        (
+          service as unknown as {
+            sendTemplateToMeta: (input: unknown) => Promise<unknown>;
+          }
+        ).sendTemplateToMeta({
+          phoneNumberId: 'phone-1',
+          accessToken: 'token',
+          to: '5511999999999',
+          expectedTo: '5511999999999',
+          templateRef: 'lembrete_v1',
+          language: 'pt_BR',
+          parameters,
+        }),
+    };
+  }
+
+  it('sends the body parameters Meta matches by position', async () => {
+    const { fetchMock, send } = callMeta(['Marina', '14:30']);
+
+    await send();
+
+    const body = JSON.parse(
+      (fetchMock.mock.calls[0][1] as { body: string }).body,
+    );
+    expect(body.template.components).toEqual([
+      {
+        type: 'body',
+        parameters: [
+          { type: 'text', text: 'Marina' },
+          { type: 'text', text: '14:30' },
+        ],
+      },
+    ]);
+  });
+
+  it('omits components entirely for a template with no variables', async () => {
+    // Meta rejects an empty `components` array as readily as a missing
+    // parameter, so the body of a variable-free template must not change.
+    const { fetchMock, send } = callMeta([]);
+
+    await send();
+
+    const body = JSON.parse(
+      (fetchMock.mock.calls[0][1] as { body: string }).body,
+    );
+    expect(body.template).toEqual({
+      name: 'lembrete_v1',
+      language: { code: 'pt_BR' },
+    });
+  });
 });

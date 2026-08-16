@@ -1,7 +1,10 @@
 import { LeadFlowBusinessMode } from '../../leadflow-settings/enums/leadflow-business-mode.enum';
 import { LeadFlowAutomationCategory } from '../enums/leadflow-automation-category.enum';
 import { LeadFlowAutomationDependency } from '../enums/leadflow-automation-dependency.enum';
+import { appointmentMessageCopy } from './appointment-message-copy.catalog';
+import { appointmentVariablesUsed } from './appointment-message-variables.catalog';
 import {
+  APPOINTMENT_MESSAGE_RECIPE_KEYS,
   getRecipeByKey,
   isRecipeCompatible,
   LEADFLOW_AUTOMATION_RECIPES,
@@ -101,6 +104,61 @@ describe('automation recipes catalog', () => {
     expect(
       isRecipeCompatible(reminder, LeadFlowBusinessMode.EcommerceLight),
     ).toBe(false);
+  });
+
+  it('offers the agenda to an agency, which books meetings like anyone else', () => {
+    // The mode's own template makes "agendar diagnostico" its primary goal and
+    // lists `appointments` among the recommended apps; excluding it meant an
+    // agency could book a meeting and never remind anyone of it.
+    for (const key of APPOINTMENT_MESSAGE_RECIPE_KEYS) {
+      expect(
+        isRecipeCompatible(
+          getRecipeByKey(key)!,
+          LeadFlowBusinessMode.AgencyServices,
+        ),
+      ).toBe(true);
+    }
+  });
+
+  it('gives every agenda recipe a channel and copy that names the commitment', () => {
+    for (const key of APPOINTMENT_MESSAGE_RECIPE_KEYS) {
+      const recipe = getRecipeByKey(key)!;
+      // WhatsApp is the only transport that can carry an agenda message today,
+      // so it is the default rather than an empty box.
+      expect(recipe.defaultMessageConfig.channel).toBe('whatsapp');
+      expect(recipe.defaultMessageConfig.templateLanguage).toBe('pt_BR');
+      const message = String(recipe.defaultMessageConfig.baseMessage ?? '');
+      expect(appointmentVariablesUsed(message).length).toBeGreaterThan(0);
+    }
+  });
+
+  it('writes the first draft in the vocabulary of the niche', () => {
+    const clinic = appointmentMessageCopy(
+      'appointment_reminder',
+      LeadFlowBusinessMode.ClinicsEsthetics,
+    );
+    const restaurant = appointmentMessageCopy(
+      'appointment_reminder',
+      LeadFlowBusinessMode.RestaurantsFood,
+    );
+    expect(clinic).toContain('consulta');
+    expect(restaurant).toContain('reserva');
+    // Same variables either way: only the noun changes between niches.
+    expect(appointmentVariablesUsed(clinic!)).toEqual(
+      appointmentVariablesUsed(restaurant!),
+    );
+  });
+
+  it('falls back to the recipe copy for a mode with no agenda vocabulary', () => {
+    expect(
+      appointmentMessageCopy(
+        'appointment_reminder',
+        LeadFlowBusinessMode.EcommerceLight,
+      ),
+    ).toBeNull();
+    expect(
+      appointmentMessageCopy('hot_lead_notification', 'clinics_esthetics'),
+    ).toBeNull();
   });
 
   describe('versioning and dependencies', () => {

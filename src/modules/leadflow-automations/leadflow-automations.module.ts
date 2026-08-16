@@ -16,7 +16,12 @@ import {
   LeadFlowAutomationRunEntity,
   LeadFlowScheduledTimerEntity,
   LeadFlowAutomationVersionEntity,
+  LeadFlowWebhookDeliveryEntity,
 } from './entities';
+import { LeadFlowWebhookAdminService } from './webhooks/leadflow-webhook-admin.service';
+import { LeadFlowWebhookDispatcherService } from './webhooks/leadflow-webhook-dispatcher.service';
+import { LeadFlowWebhookEventIngressService } from './webhooks/leadflow-webhook-event-ingress.service';
+import { LeadFlowWebhookGate } from './webhooks/leadflow-webhook-gate.service';
 import { LeadFlowAutomationsController } from './leadflow-automations.controller';
 import { LeadFlowAutomationConfigSchemaService } from './services/leadflow-automation-config-schema.service';
 import { LeadFlowAutomationCrmActionService } from './services/leadflow-automation-crm-action.service';
@@ -75,6 +80,7 @@ import { LeadFlowDailySummaryTimerConsumer } from './services/leadflow-daily-sum
 import { LeadFlowDailySummarySchedulerService } from './services/leadflow-daily-summary-scheduler.service';
 import { AppointmentsModule } from '../appointments/appointments.module';
 import { TeamChatModule } from '../team-chat/team-chat.module';
+import { LeadFlowAppointmentMessageService } from './services/leadflow-appointment-message.service';
 import { LeadFlowSummaryAgentResolver } from './services/leadflow-summary-agent.resolver';
 import { LeadFlowTeamChatDeliveryService } from './services/leadflow-team-chat-delivery.service';
 import { LeadFlowAppointmentLifecycleSchedulerService } from './services/leadflow-appointment-lifecycle-scheduler.service';
@@ -99,6 +105,7 @@ import { LeadFlowAppointmentLifecycleSchedulerService } from './services/leadflo
         LeadFlowClientSettingsEntity,
         LeadFlowEventDeliveryEntity,
         LeadFlowScheduledTimerEntity,
+        LeadFlowWebhookDeliveryEntity,
         InboxDomainOutboxEntity,
         InboxSettingsEntity,
         CrmPipelineEntity,
@@ -150,6 +157,7 @@ import { LeadFlowAppointmentLifecycleSchedulerService } from './services/leadflo
     LeadFlowCsatExpiryTimerConsumer,
     LeadFlowDailySummaryTimerConsumer,
     LeadFlowDailySummarySchedulerService,
+    LeadFlowAppointmentMessageService,
     LeadFlowSummaryAgentResolver,
     LeadFlowTeamChatDeliveryService,
     LeadFlowFollowupIdleDetectorService,
@@ -161,6 +169,10 @@ import { LeadFlowAppointmentLifecycleSchedulerService } from './services/leadflo
     LeadFlowAutomationShadowEvaluatorService,
     LeadFlowAutomationTriggerMatcherService,
     LeadFlowAutomationCrmActionService,
+    LeadFlowWebhookGate,
+    LeadFlowWebhookDispatcherService,
+    LeadFlowWebhookEventIngressService,
+    LeadFlowWebhookAdminService,
   ],
   exports: [
     LeadFlowAutomationService,

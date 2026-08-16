@@ -5,11 +5,18 @@ import type { AutomationEffectRequest } from './automation-executor.types';
 
 describe('SendMessageExecutor', () => {
   const sendAutomationMessage = jest.fn();
-  const executor = new SendMessageExecutor({
-    sendAutomationMessage,
-  } as never);
+  const render = jest.fn();
+  const executor = new SendMessageExecutor(
+    { sendAutomationMessage } as never,
+    {
+      render,
+    } as never,
+  );
 
-  beforeEach(() => sendAutomationMessage.mockReset());
+  beforeEach(() => {
+    sendAutomationMessage.mockReset();
+    render.mockReset();
+  });
 
   it('delegates to the canonical Inbox command', async () => {
     sendAutomationMessage.mockResolvedValue({ message: { id: 'message-1' } });
@@ -78,6 +85,52 @@ describe('SendMessageExecutor', () => {
       errorCode: 'followup_channel_transport_unavailable',
     });
     expect(sendAutomationMessage).not.toHaveBeenCalled();
+  });
+
+  it('resolves the commitment variables when the send is about one', async () => {
+    sendAutomationMessage.mockResolvedValue({ message: { id: 'message-2' } });
+    render.mockResolvedValue({
+      text: 'Oi Marina! Sua consulta é às 14:30.',
+      templateParameters: ['Marina', '14:30'],
+      values: {},
+    });
+
+    await executor.execute(
+      request({
+        appointmentId: 'appointment-1',
+        text: 'Oi {{contact.firstName}}! Sua consulta é às {{appointment.time}}.',
+      }),
+    );
+
+    expect(render).toHaveBeenCalledWith(
+      expect.objectContaining({
+        appointmentId: 'appointment-1',
+        automationId: 'automation-1',
+      }),
+      'Oi {{contact.firstName}}! Sua consulta é às {{appointment.time}}.',
+    );
+    expect(sendAutomationMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: 'Oi Marina! Sua consulta é às 14:30.',
+        // The order the variables appear in is the order the template was
+        // approved in — Meta matches by position, never by name.
+        templateParameters: ['Marina', '14:30'],
+      }),
+    );
+  });
+
+  it('leaves a message that is not about a commitment untouched', async () => {
+    sendAutomationMessage.mockResolvedValue({ message: { id: 'message-3' } });
+
+    await executor.execute(request());
+
+    expect(render).not.toHaveBeenCalled();
+    expect(sendAutomationMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: 'Podemos continuar?',
+        templateParameters: [],
+      }),
+    );
   });
 });
 
