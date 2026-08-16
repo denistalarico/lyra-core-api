@@ -1,19 +1,23 @@
 import { UnauthorizedException } from '@nestjs/common';
 import { createHmac } from 'crypto';
+import { MetaChannelUnavailableError } from './services/meta-channel-resolver.service';
 import { MetaWebhookController } from './meta-webhook.controller';
 
-describe('MetaWebhookController signature validation', () => {
+describe('MetaWebhookController', () => {
   const previousSecret = process.env.META_APP_SECRET;
-  const rawBody = Buffer.from('{"object":"whatsapp_business_account"}');
-  const adapter = {
+  const whatsappAdapter = {
     normalize: jest.fn().mockResolvedValue({ messages: [] }),
     normalizeStatuses: jest.fn().mockResolvedValue({ statuses: [] }),
+  };
+  const instagramAdapter = {
+    normalize: jest.fn().mockResolvedValue({ messages: [] }),
   };
   const ingestion = { ingest: jest.fn() };
   const webhookLog = { create: jest.fn().mockResolvedValue(undefined) };
   const statusSync = { applyStatusUpdate: jest.fn() };
   const controller = new MetaWebhookController(
-    adapter as never,
+    whatsappAdapter as never,
+    instagramAdapter as never,
     ingestion as never,
     webhookLog as never,
     statusSync as never,
@@ -22,31 +26,218 @@ describe('MetaWebhookController signature validation', () => {
   beforeEach(() => {
     process.env.META_APP_SECRET = 'test-secret';
     jest.clearAllMocks();
+    whatsappAdapter.normalize.mockResolvedValue({ messages: [] });
+    whatsappAdapter.normalizeStatuses.mockResolvedValue({ statuses: [] });
+    instagramAdapter.normalize.mockResolvedValue({ messages: [] });
   });
+
   afterAll(() => {
     if (previousSecret === undefined) delete process.env.META_APP_SECRET;
     else process.env.META_APP_SECRET = previousSecret;
   });
 
-  it('accepts a valid HMAC and processes the sanitized envelope', async () => {
-    const signature = `sha256=${createHmac('sha256', 'test-secret').update(rawBody).digest('hex')}`;
+  function signedRequest(payload: object) {
+    const rawBody = Buffer.from(JSON.stringify(payload));
+    const signature = `sha256=${createHmac('sha256', 'test-secret')
+      .update(rawBody)
+      .digest('hex')}`;
+    return { rawBody, signature };
+  }
+
+  it('keeps WhatsApp routed through the existing adapter and status pipeline', async () => {
+    const payload = {
+      object: 'whatsapp_business_account',
+      entry: [
+        {
+          id: 'waba-1',
+          changes: [
+            {
+              field: 'messages',
+              value: { metadata: { phone_number_id: 'phone-1' } },
+            },
+          ],
+        },
+      ],
+    };
+    const request = signedRequest(payload);
+
     await expect(
-      controller.receiveWebhook(signature, { rawBody } as never, {
-        object: 'whatsapp_business_account',
-      }),
+      controller.receiveWebhook(
+        request.signature,
+        { rawBody: request.rawBody } as never,
+        payload,
+      ),
     ).resolves.toMatchObject({ ok: true, signatureReceived: true });
-    expect(webhookLog.create).toHaveBeenCalledWith(
-      expect.objectContaining({ payload: {} }),
-    );
+
+    expect(whatsappAdapter.normalize).toHaveBeenCalledWith(payload);
+    expect(whatsappAdapter.normalizeStatuses).toHaveBeenCalledWith(payload);
+    expect(instagramAdapter.normalize).not.toHaveBeenCalled();
+  });
+
+  it('routes Instagram messages to its adapter and canonical ingestion pipeline', async () => {
+    const payload = {
+      object: 'instagram',
+      entry: [
+        {
+          id: 'ig-account-1',
+          messaging: [
+            {
+              sender: { id: 'ig-user-1' },
+              recipient: { id: 'ig-account-1' },
+              message: { mid: 'ig-mid-1', text: 'Ola' },
+            },
+          ],
+        },
+      ],
+    };
+    const normalizedMessage = {
+      tenantId: 'tenant-1',
+      workspaceId: 'workspace-1',
+      channelId: 'channel-1',
+      channelType: 'instagram' as const,
+      provider: 'meta',
+      externalThreadId: 'instagram:ig-account-1:ig-user-1',
+      externalMessageId: 'ig-mid-1',
+      sender: { externalId: 'ig-user-1' },
+      messageType: 'text' as const,
+      content: 'Ola',
+    };
+    instagramAdapter.normalize.mockResolvedValue({
+      messages: [normalizedMessage],
+    });
+    ingestion.ingest.mockResolvedValue({
+      conversation: { id: 'conversation-1' },
+      message: { id: 'message-1' },
+    });
+    const request = signedRequest(payload);
+
+    await expect(
+      controller.receiveWebhook(
+        request.signature,
+        { rawBody: request.rawBody } as never,
+        payload,
+      ),
+    ).resolves.toMatchObject({
+      ok: true,
+      provider: 'meta',
+      messagesProcessed: 1,
+      statusesProcessed: 0,
+    });
+
+    expect(instagramAdapter.normalize).toHaveBeenCalledWith(payload);
+    expect(ingestion.ingest).toHaveBeenCalledWith(normalizedMessage);
+    expect(whatsappAdapter.normalize).not.toHaveBeenCalled();
+    expect(whatsappAdapter.normalizeStatuses).not.toHaveBeenCalled();
+    expect(statusSync.applyStatusUpdate).not.toHaveBeenCalled();
+    expect(webhookLog.create).toHaveBeenCalledWith({
+      tenantId: 'tenant-1',
+      workspaceId: 'workspace-1',
+      channelId: 'channel-1',
+      provider: 'meta',
+      eventType: 'message',
+      status: 'processed',
+      externalAccountId: 'ig-account-1',
+      externalPhoneNumberId: null,
+      externalMessageId: 'ig-mid-1',
+      signatureReceived: true,
+      messagesProcessed: 1,
+      statusesProcessed: 0,
+      payload: {},
+      metadata: {
+        workload: 'instagram',
+        results: [
+          {
+            conversationId: 'conversation-1',
+            messageId: 'message-1',
+            externalMessageId: 'ig-mid-1',
+          },
+        ],
+      },
+    });
   });
 
   it.each([undefined, 'sha256=deadbeef'])(
     'rejects an absent or invalid signature',
     async (signature) => {
+      const rawBody = Buffer.from('{}');
+
       await expect(
         controller.receiveWebhook(signature, { rawBody } as never, {}),
       ).rejects.toBeInstanceOf(UnauthorizedException);
-      expect(adapter.normalize).not.toHaveBeenCalled();
+      expect(whatsappAdapter.normalize).not.toHaveBeenCalled();
+      expect(instagramAdapter.normalize).not.toHaveBeenCalled();
     },
   );
+
+  it('ignores an unknown signed workload without treating it as WhatsApp', async () => {
+    const payload = { object: 'page', entry: [{ id: 'page-1' }] };
+    const request = signedRequest(payload);
+
+    await expect(
+      controller.receiveWebhook(
+        request.signature,
+        { rawBody: request.rawBody } as never,
+        payload,
+      ),
+    ).resolves.toEqual({
+      ok: true,
+      ignored: true,
+      reason: 'unsupported_meta_payload',
+    });
+    expect(whatsappAdapter.normalize).not.toHaveBeenCalled();
+    expect(instagramAdapter.normalize).not.toHaveBeenCalled();
+    expect(webhookLog.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'ignored',
+        externalPhoneNumberId: null,
+        metadata: { reason: 'unsupported_meta_payload' },
+      }),
+    );
+  });
+
+  it('accepts and logs an unavailable Instagram channel as ignored', async () => {
+    const payload = {
+      object: 'instagram',
+      entry: [{ id: 'ig-account-1', messaging: [] }],
+    };
+    const channel = {
+      id: 'channel-1',
+      tenantId: 'tenant-1',
+      workspaceId: 'workspace-1',
+      connectionStatus: 'suspended',
+    };
+    instagramAdapter.normalize.mockRejectedValue(
+      new MetaChannelUnavailableError(channel as never),
+    );
+    const request = signedRequest(payload);
+
+    await expect(
+      controller.receiveWebhook(
+        request.signature,
+        { rawBody: request.rawBody } as never,
+        payload,
+      ),
+    ).resolves.toEqual({
+      ok: true,
+      ignored: true,
+      reason: 'meta_channel_unavailable',
+    });
+    expect(ingestion.ingest).not.toHaveBeenCalled();
+    expect(webhookLog.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tenantId: 'tenant-1',
+        workspaceId: 'workspace-1',
+        channelId: 'channel-1',
+        provider: 'meta',
+        status: 'ignored',
+        externalAccountId: 'ig-account-1',
+        externalPhoneNumberId: null,
+        errorMessage: 'meta_channel_unavailable',
+        metadata: {
+          workload: 'instagram',
+          connectionStatus: 'suspended',
+        },
+      }),
+    );
+  });
 });

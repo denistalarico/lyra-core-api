@@ -53,6 +53,46 @@ export class MetaChannelResolverService {
 
     return channels[0];
   }
+
+  async findInstagramChannelByAccountId(accountId: string) {
+    const channels = await this.channelsRepository.find({
+      where: {
+        type: 'instagram',
+        provider: 'meta',
+        externalAccountId: accountId,
+        status: 'active',
+        connectionStatus: 'connected',
+        deletedAt: IsNull(),
+      },
+      take: 2,
+    });
+
+    if (channels.length === 0) {
+      const unavailable = await this.channelsRepository.find({
+        where: {
+          type: 'instagram',
+          provider: 'meta',
+          externalAccountId: accountId,
+          deletedAt: IsNull(),
+        },
+        take: 2,
+      });
+      if (unavailable.length === 1) {
+        throw new MetaChannelUnavailableError(unavailable[0]);
+      }
+      throw new NotFoundException(
+        'Instagram channel not found for the supplied provider key.',
+      );
+    }
+
+    if (channels.length !== 1) {
+      throw new ConflictException(
+        'Ambiguous Instagram channel provider key; webhook was not processed.',
+      );
+    }
+
+    return channels[0];
+  }
 }
 
 export class MetaChannelUnavailableError extends Error {

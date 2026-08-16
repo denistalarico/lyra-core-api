@@ -4,6 +4,7 @@ import { createHmac } from 'crypto';
 import request from 'supertest';
 import { MetaWebhookController } from './meta-webhook.controller';
 import { WhatsAppMetaAdapter } from './adapters/whatsapp-meta.adapter';
+import { InstagramMetaAdapter } from './adapters/instagram-meta.adapter';
 import { InboundMessageIngestionService } from '../services/inbound-message-ingestion.service';
 import { WebhookLogService } from '../services/webhook-log.service';
 import { MessageStatusSyncService } from '../services/message-status-sync.service';
@@ -22,6 +23,12 @@ describe('MetaWebhookController raw body integration', () => {
           useValue: {
             normalize: jest.fn().mockResolvedValue({ messages: [] }),
             normalizeStatuses: jest.fn().mockResolvedValue({ statuses: [] }),
+          },
+        },
+        {
+          provide: InstagramMetaAdapter,
+          useValue: {
+            normalize: jest.fn().mockResolvedValue({ messages: [] }),
           },
         },
         {
