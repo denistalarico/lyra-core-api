@@ -56,25 +56,16 @@ export class MetaChannelResolverService {
 
   async findInstagramChannelByAccountId(accountId: string) {
     const channels = await this.channelsRepository.find({
-      where: {
-        type: 'instagram',
-        provider: 'meta',
-        externalAccountId: accountId,
+      where: this.instagramAccountWhere(accountId, {
         status: 'active',
         connectionStatus: 'connected',
-        deletedAt: IsNull(),
-      },
+      }),
       take: 2,
     });
 
     if (channels.length === 0) {
       const unavailable = await this.channelsRepository.find({
-        where: {
-          type: 'instagram',
-          provider: 'meta',
-          externalAccountId: accountId,
-          deletedAt: IsNull(),
-        },
+        where: this.instagramAccountWhere(accountId),
         take: 2,
       });
       if (unavailable.length === 1) {
@@ -92,6 +83,24 @@ export class MetaChannelResolverService {
     }
 
     return channels[0];
+  }
+
+  private instagramAccountWhere(
+    accountId: string,
+    availability: Partial<
+      Pick<InboxChannelEntity, 'status' | 'connectionStatus'>
+    > = {},
+  ) {
+    const base = {
+      type: 'instagram' as const,
+      provider: 'meta',
+      ...availability,
+      deletedAt: IsNull(),
+    };
+    return [
+      { ...base, externalAccountId: accountId },
+      { ...base, externalId: accountId },
+    ];
   }
 }
 

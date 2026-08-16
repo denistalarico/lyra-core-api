@@ -79,6 +79,7 @@ type InstagramLongLivedTokenResponse = {
 };
 
 type InstagramIdentityPayload = {
+  id?: string | number;
   user_id?: string | number;
   username?: string;
 };
@@ -212,7 +213,7 @@ export class MetaGraphService {
 
   async getInstagramAuthorizedAccount(accessToken: string) {
     const url = new URL(`https://graph.instagram.com/${this.graphVersion}/me`);
-    url.searchParams.set('fields', 'user_id,username');
+    url.searchParams.set('fields', 'id,user_id,username');
     url.searchParams.set('access_token', accessToken);
 
     const response = await this.fetchInstagram(url, { method: 'GET' });
@@ -222,14 +223,18 @@ export class MetaGraphService {
     if (
       !response.ok ||
       data.error ||
-      identity.user_id === undefined ||
-      identity.user_id === null
+      ((identity.id === undefined || identity.id === null) &&
+        (identity.user_id === undefined || identity.user_id === null))
     ) {
       throw new BadRequestException('Instagram identity lookup failed.');
     }
 
     return {
-      accountId: String(identity.user_id),
+      accountId: String(identity.user_id ?? identity.id),
+      scopedId:
+        identity.id === undefined || identity.id === null
+          ? null
+          : String(identity.id),
       username: identity.username?.trim() || null,
     };
   }

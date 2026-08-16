@@ -43,6 +43,25 @@ describe('InstagramChannelHealthService', () => {
     expect(harness.repository.save).not.toHaveBeenCalled();
   });
 
+  it('accepts the additional scoped identifier when resolving channel identity', async () => {
+    const harness = createHarness({
+      externalAccountId: 'different-primary-id',
+    });
+
+    const result = await harness.service.runHealthCheck(scopedInput);
+
+    expect(result).toMatchObject({
+      ok: true,
+      status: 'healthy',
+      tokenValid: true,
+      accountIdMatches: true,
+      webhookSubscriptionHealthy: true,
+      diagnosis: null,
+      requiresReconnect: false,
+    });
+    expect(harness.repository.save).not.toHaveBeenCalled();
+  });
+
   it('returns an unhealthy reconnect diagnosis when the app is not subscribed', async () => {
     const harness = createHarness();
     harness.meta.getInstagramAccountWebhookSubscriptions.mockResolvedValue({
@@ -120,6 +139,7 @@ describe('InstagramChannelHealthService', () => {
     const harness = createHarness();
     harness.meta.getInstagramAuthorizedAccount.mockResolvedValue({
       accountId: 'different-account-id',
+      scopedId: 'different-scoped-id',
       username: 'other-account',
     });
 
@@ -222,6 +242,7 @@ function createHarness(overrides: Partial<InboxChannelEntity> | null = {}) {
           status: 'active',
           connectionStatus: 'connected',
           externalAccountId: '17841400000000000',
+          externalId: '27561859610089550',
           accessTokenEncrypted: 'encrypted-secret',
           deletedAt: null,
           ...overrides,
@@ -237,6 +258,7 @@ function createHarness(overrides: Partial<InboxChannelEntity> | null = {}) {
     getInstagramAuthorizedAccount: jest.fn(() =>
       Promise.resolve({
         accountId: '17841400000000000',
+        scopedId: '27561859610089550',
         username: 'talaricolabs',
       }),
     ),

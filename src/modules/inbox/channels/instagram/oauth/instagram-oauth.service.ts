@@ -244,10 +244,14 @@ export class InstagramOAuthService {
 
       let channel: InboxChannelEntity;
       try {
-        await this.lockInstagramAccount(manager, session, identity.accountId);
+        await this.lockInstagramAccount(manager, session, [
+          identity.accountId,
+          ...(identity.scopedId ? [identity.scopedId] : []),
+        ]);
         channel = await this.upsertChannel(manager, {
           session,
           accountId: identity.accountId,
+          scopedId: identity.scopedId,
           username: identity.username,
           accessToken: longLived.accessToken,
           tokenType: longLived.tokenType,
@@ -272,6 +276,7 @@ export class InstagramOAuthService {
         completedAt: session.completedAt.toISOString(),
         channelId: channel.id,
         externalAccountId: identity.accountId,
+        instagramScopedId: identity.scopedId,
         username: identity.username,
       };
       await sessions.save(session);
@@ -285,6 +290,7 @@ export class InstagramOAuthService {
     input: {
       session: InboxChannelConnectionSessionEntity;
       accountId: string;
+      scopedId: string | null;
       username: string | null;
       accessToken: string;
       tokenType: string | null;
@@ -293,15 +299,20 @@ export class InstagramOAuthService {
     },
   ) {
     const channels = manager.getRepository(InboxChannelEntity);
+    const providerAccountIds = [input.accountId, input.scopedId]
+      .filter((value): value is string => Boolean(value))
+      .filter((value, index, values) => values.indexOf(value) === index);
     const existing = await channels.findOne({
-      where: {
-        tenantId: input.session.tenantId,
-        workspaceId: input.session.workspaceId,
-        type: 'instagram',
-        provider: 'meta',
-        externalAccountId: input.accountId,
-        deletedAt: IsNull(),
-      },
+      where: providerAccountIds.flatMap((providerAccountId) =>
+        (['externalAccountId', 'externalId'] as const).map((property) => ({
+          tenantId: input.session.tenantId,
+          workspaceId: input.session.workspaceId,
+          type: 'instagram' as const,
+          provider: 'meta',
+          [property]: providerAccountId,
+          deletedAt: IsNull(),
+        })),
+      ),
       lock: { mode: 'pessimistic_write' },
     });
     const wasDisconnected = Boolean(
@@ -339,6 +350,7 @@ export class InstagramOAuthService {
     channel.type = 'instagram';
     channel.provider = 'meta';
     channel.externalAccountId = input.accountId;
+    channel.externalId = input.scopedId;
     channel.status = 'active';
     channel.connectionStatus = 'connected';
     channel.accessTokenEncrypted = encryptedToken;
@@ -359,6 +371,7 @@ export class InstagramOAuthService {
       ...(existing?.metadata ?? {}),
       authorizationMethod: 'instagram_login',
       username: input.username,
+      instagramScopedId: input.scopedId,
       connectionSessionId: input.session.id,
       connectedAt: connectedAt.toISOString(),
       tokenType: input.tokenType,
@@ -372,15 +385,18 @@ export class InstagramOAuthService {
   private async lockInstagramAccount(
     manager: EntityManager,
     session: InboxChannelConnectionSessionEntity,
-    accountId: string,
+    accountIds: readonly string[],
   ) {
-    await manager.query(
-      'SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))',
-      [
-        `${session.tenantId}:${session.workspaceId}`,
-        `instagram:meta:${accountId}`,
-      ],
-    );
+    const providerAccountIds = [...new Set(accountIds)].sort();
+    for (const accountId of providerAccountIds) {
+      await manager.query(
+        'SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))',
+        [
+          `${session.tenantId}:${session.workspaceId}`,
+          `instagram:meta:${accountId}`,
+        ],
+      );
+    }
   }
 
   private async finishSessionWithError(

@@ -38,14 +38,24 @@ describe('MetaChannelResolverService', () => {
         service.findInstagramChannelByAccountId('ig-account'),
       ).resolves.toBe(channel);
       expect(repository.find).toHaveBeenCalledWith({
-        where: {
-          type: 'instagram',
-          provider: 'meta',
-          externalAccountId: 'ig-account',
-          status: 'active',
-          connectionStatus: 'connected',
-          deletedAt: IsNull(),
-        },
+        where: [
+          {
+            type: 'instagram',
+            provider: 'meta',
+            externalAccountId: 'ig-account',
+            status: 'active',
+            connectionStatus: 'connected',
+            deletedAt: IsNull(),
+          },
+          {
+            type: 'instagram',
+            provider: 'meta',
+            externalId: 'ig-account',
+            status: 'active',
+            connectionStatus: 'connected',
+            deletedAt: IsNull(),
+          },
+        ],
         take: 2,
       });
     });

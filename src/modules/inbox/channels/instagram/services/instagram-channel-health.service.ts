@@ -84,7 +84,15 @@ export class InstagramChannelHealthService {
       );
     }
 
-    if (identity.accountId !== channel.externalAccountId) {
+    const providerAccountIds = new Set(
+      [identity.accountId, identity.scopedId].filter((value): value is string =>
+        Boolean(value),
+      ),
+    );
+    const accountIdMatches = [channel.externalAccountId, channel.externalId]
+      .filter((value): value is string => Boolean(value))
+      .some((value) => providerAccountIds.has(value));
+    if (!accountIdMatches) {
       throw new ConflictException(
         'Instagram account identity does not match this channel.',
       );

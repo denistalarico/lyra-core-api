@@ -125,9 +125,15 @@ describe('InstagramOAuthService', () => {
         lock: { mode: 'pessimistic_write' },
       }),
     );
-    expect(harness.manager.query).toHaveBeenCalledWith(
+    expect(harness.manager.query).toHaveBeenNthCalledWith(
+      1,
       expect.stringContaining('pg_advisory_xact_lock'),
       ['tenant-id:workspace-id', 'instagram:meta:17841400000000000'],
+    );
+    expect(harness.manager.query).toHaveBeenNthCalledWith(
+      2,
+      expect.stringContaining('pg_advisory_xact_lock'),
+      ['tenant-id:workspace-id', 'instagram:meta:27561859610089550'],
     );
 
     const savedChannel = harness.channels.save.mock.calls[0][0];
@@ -139,6 +145,7 @@ describe('InstagramOAuthService', () => {
       type: 'instagram',
       provider: 'meta',
       externalAccountId: '17841400000000000',
+      externalId: '27561859610089550',
       status: 'active',
       connectionStatus: 'connected',
       credentialVersion: 1,
@@ -151,6 +158,7 @@ describe('InstagramOAuthService', () => {
       credentialRemovedAt: null,
       metadata: expect.objectContaining({
         authorizationMethod: 'instagram_login',
+        instagramScopedId: '27561859610089550',
         username: 'talaricolabs',
       }),
     });
@@ -197,6 +205,8 @@ describe('InstagramOAuthService', () => {
     expect(existing).toMatchObject({
       id: 'existing-channel-id',
       name: 'Nome personalizado',
+      externalAccountId: '17841400000000000',
+      externalId: '27561859610089550',
       credentialVersion: 8,
       lifecycleVersion: 4,
       status: 'active',
@@ -214,6 +224,7 @@ describe('InstagramOAuthService', () => {
       metadata: expect.objectContaining({
         customMetadata: 'keep-me',
         authorizationMethod: 'instagram_login',
+        instagramScopedId: '27561859610089550',
         username: 'talaricolabs',
       }),
       disconnectedAt: null,
@@ -337,10 +348,18 @@ describe('InstagramOAuthService', () => {
 
     expect(harness.channels.findOne).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: expect.objectContaining({
-          tenantId: harness.session.tenantId,
-          workspaceId: harness.session.workspaceId,
-        }),
+        where: expect.arrayContaining([
+          expect.objectContaining({
+            tenantId: harness.session.tenantId,
+            workspaceId: harness.session.workspaceId,
+            externalAccountId: '17841400000000000',
+          }),
+          expect.objectContaining({
+            tenantId: harness.session.tenantId,
+            workspaceId: harness.session.workspaceId,
+            externalId: '27561859610089550',
+          }),
+        ]),
       }),
     );
   });
@@ -399,6 +418,7 @@ function createHarness(
     })),
     getInstagramAuthorizedAccount: jest.fn(async () => ({
       accountId: '17841400000000000',
+      scopedId: '27561859610089550',
       username: 'talaricolabs',
     })),
     subscribeInstagramAccountToWebhooks: jest.fn(async () => ({

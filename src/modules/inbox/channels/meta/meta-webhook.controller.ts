@@ -62,8 +62,8 @@ export class MetaWebhookController {
     @Body()
     payload: MetaWhatsAppWebhookPayload | MetaInstagramWebhookPayload,
   ) {
-    this.assertValidSignature(signature, request.rawBody);
     const workload = this.identifyWorkload(payload);
+    this.assertValidSignature(signature, request.rawBody, workload);
     const phoneNumberId =
       workload === 'whatsapp'
         ? this.extractPhoneNumberId(payload as MetaWhatsAppWebhookPayload)
@@ -220,9 +220,10 @@ export class MetaWebhookController {
   private assertValidSignature(
     signature: string | undefined,
     rawBody?: Buffer,
+    workload: 'whatsapp' | 'instagram' | 'unknown' = 'unknown',
   ) {
-    const secret = process.env.META_APP_SECRET;
-    if (!secret) {
+    const secrets = this.getWebhookSigningSecrets(workload);
+    if (secrets.length === 0) {
       throw new ServiceUnavailableException(
         'Meta webhook signature validation is not configured.',
       );
@@ -230,17 +231,41 @@ export class MetaWebhookController {
     if (!signature || !rawBody || !signature.startsWith('sha256=')) {
       throw new UnauthorizedException('Invalid Meta webhook signature.');
     }
-    const expected = `sha256=${createHmac('sha256', secret)
-      .update(rawBody)
-      .digest('hex')}`;
     const receivedBuffer = Buffer.from(signature);
-    const expectedBuffer = Buffer.from(expected);
-    if (
-      receivedBuffer.length !== expectedBuffer.length ||
-      !timingSafeEqual(receivedBuffer, expectedBuffer)
-    ) {
+    const valid = secrets.some((secret) => {
+      const expected = `sha256=${createHmac('sha256', secret)
+        .update(rawBody)
+        .digest('hex')}`;
+      const expectedBuffer = Buffer.from(expected);
+
+      return (
+        receivedBuffer.length === expectedBuffer.length &&
+        timingSafeEqual(receivedBuffer, expectedBuffer)
+      );
+    });
+
+    if (!valid) {
       throw new UnauthorizedException('Invalid Meta webhook signature.');
     }
+  }
+
+  private getWebhookSigningSecrets(
+    workload: 'whatsapp' | 'instagram' | 'unknown',
+  ) {
+    const metaSecret = process.env.META_APP_SECRET?.trim();
+    const instagramSecret =
+      process.env.META_INSTAGRAM_APP_SECRET?.trim() || metaSecret;
+
+    if (workload === 'instagram') {
+      return instagramSecret ? [instagramSecret] : [];
+    }
+    if (workload === 'whatsapp') {
+      return metaSecret ? [metaSecret] : [];
+    }
+
+    return [
+      ...new Set([metaSecret, instagramSecret].filter(Boolean)),
+    ] as string[];
   }
 
   private extractPhoneNumberId(payload: MetaWhatsAppWebhookPayload) {

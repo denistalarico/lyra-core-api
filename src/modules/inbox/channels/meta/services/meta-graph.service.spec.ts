@@ -95,7 +95,13 @@ describe('MetaGraphService Instagram Login', () => {
   it('loads the professional account identity from graph.instagram.com', async () => {
     fetchMock.mockResolvedValue(
       response({
-        data: [{ user_id: '17841400000000000', username: 'talaricolabs' }],
+        data: [
+          {
+            id: '27561859610089550',
+            user_id: '17841400000000000',
+            username: 'talaricolabs',
+          },
+        ],
       }),
     );
 
@@ -103,6 +109,7 @@ describe('MetaGraphService Instagram Login', () => {
       service.getInstagramAuthorizedAccount('long-lived-secret'),
     ).resolves.toEqual({
       accountId: '17841400000000000',
+      scopedId: '27561859610089550',
       username: 'talaricolabs',
     });
 
@@ -110,7 +117,7 @@ describe('MetaGraphService Instagram Login', () => {
     expect(`${url.origin}${url.pathname}`).toBe(
       'https://graph.instagram.com/v26.0/me',
     );
-    expect(url.searchParams.get('fields')).toBe('user_id,username');
+    expect(url.searchParams.get('fields')).toBe('id,user_id,username');
   });
 
   it('subscribes the Instagram account to only the requested webhook fields', async () => {

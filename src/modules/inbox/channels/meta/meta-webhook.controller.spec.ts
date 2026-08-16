@@ -5,6 +5,7 @@ import { MetaWebhookController } from './meta-webhook.controller';
 
 describe('MetaWebhookController', () => {
   const previousSecret = process.env.META_APP_SECRET;
+  const previousInstagramSecret = process.env.META_INSTAGRAM_APP_SECRET;
   const whatsappAdapter = {
     normalize: jest.fn().mockResolvedValue({ messages: [] }),
     normalizeStatuses: jest.fn().mockResolvedValue({ statuses: [] }),
@@ -24,7 +25,8 @@ describe('MetaWebhookController', () => {
   );
 
   beforeEach(() => {
-    process.env.META_APP_SECRET = 'test-secret';
+    process.env.META_APP_SECRET = 'whatsapp-secret';
+    process.env.META_INSTAGRAM_APP_SECRET = 'instagram-secret';
     jest.clearAllMocks();
     whatsappAdapter.normalize.mockResolvedValue({ messages: [] });
     whatsappAdapter.normalizeStatuses.mockResolvedValue({ statuses: [] });
@@ -34,11 +36,19 @@ describe('MetaWebhookController', () => {
   afterAll(() => {
     if (previousSecret === undefined) delete process.env.META_APP_SECRET;
     else process.env.META_APP_SECRET = previousSecret;
+    if (previousInstagramSecret === undefined) {
+      delete process.env.META_INSTAGRAM_APP_SECRET;
+    } else {
+      process.env.META_INSTAGRAM_APP_SECRET = previousInstagramSecret;
+    }
   });
 
-  function signedRequest(payload: object) {
+  function signedRequest(payload: { object?: string }, secret?: string) {
     const rawBody = Buffer.from(JSON.stringify(payload));
-    const signature = `sha256=${createHmac('sha256', 'test-secret')
+    const signingSecret =
+      secret ??
+      (payload.object === 'instagram' ? 'instagram-secret' : 'whatsapp-secret');
+    const signature = `sha256=${createHmac('sha256', signingSecret)
       .update(rawBody)
       .digest('hex')}`;
     return { rawBody, signature };
@@ -168,6 +178,34 @@ describe('MetaWebhookController', () => {
       expect(instagramAdapter.normalize).not.toHaveBeenCalled();
     },
   );
+
+  it('rejects an Instagram webhook signed with the WhatsApp app secret', async () => {
+    const payload = { object: 'instagram', entry: [] };
+    const request = signedRequest(payload, 'whatsapp-secret');
+
+    await expect(
+      controller.receiveWebhook(
+        request.signature,
+        { rawBody: request.rawBody } as never,
+        payload,
+      ),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
+    expect(instagramAdapter.normalize).not.toHaveBeenCalled();
+  });
+
+  it('falls back to META_APP_SECRET when no Instagram-specific secret exists', async () => {
+    delete process.env.META_INSTAGRAM_APP_SECRET;
+    const payload = { object: 'instagram', entry: [] };
+    const request = signedRequest(payload, 'whatsapp-secret');
+
+    await expect(
+      controller.receiveWebhook(
+        request.signature,
+        { rawBody: request.rawBody } as never,
+        payload,
+      ),
+    ).resolves.toMatchObject({ ok: true, signatureReceived: true });
+  });
 
   it('ignores an unknown signed workload without treating it as WhatsApp', async () => {
     const payload = { object: 'page', entry: [{ id: 'page-1' }] };
