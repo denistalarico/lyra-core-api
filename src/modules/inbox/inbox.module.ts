@@ -84,6 +84,8 @@ import { InboxAutonomyAdminController } from './inbox-autonomy-admin.controller'
 import { ConversationPlaybookStateService } from './runtime/conversation-playbook-state.service';
 import { CrmModule } from '../crm/crm.module';
 import { CrmPipelineEntity } from '../crm/entities/crm-pipeline.entity';
+import { InstagramOAuthController } from './channels/instagram/oauth/instagram-oauth.controller';
+import { InstagramOAuthService } from './channels/instagram/oauth/instagram-oauth.service';
 
 @Module({
   imports: [
@@ -135,6 +137,7 @@ import { CrmPipelineEntity } from '../crm/entities/crm-pipeline.entity';
     InboxMediaController,
     InboxOutboxAdminController,
     InboxAutonomyAdminController,
+    InstagramOAuthController,
   ],
   providers: [
     InboxService,
@@ -176,6 +179,7 @@ import { CrmPipelineEntity } from '../crm/entities/crm-pipeline.entity';
     InboxGovernedActionWorker,
     InboxAutonomyAdminService,
     ConversationPlaybookStateService,
+    InstagramOAuthService,
   ],
   exports: [
     InboxService,

@@ -52,6 +52,42 @@ type WhatsAppPhoneNumberResponse = {
   };
 };
 
+type InstagramApiError = {
+  message?: string;
+  type?: string;
+  code?: number;
+  error_subcode?: number;
+  fbtrace_id?: string;
+};
+
+type InstagramShortLivedTokenPayload = {
+  access_token?: string;
+  user_id?: string | number;
+  permissions?: string | string[];
+};
+
+type InstagramShortLivedTokenResponse = InstagramShortLivedTokenPayload & {
+  data?: InstagramShortLivedTokenPayload[];
+  error?: InstagramApiError;
+};
+
+type InstagramLongLivedTokenResponse = {
+  access_token?: string;
+  token_type?: string;
+  expires_in?: number;
+  error?: InstagramApiError;
+};
+
+type InstagramIdentityPayload = {
+  user_id?: string | number;
+  username?: string;
+};
+
+type InstagramIdentityResponse = InstagramIdentityPayload & {
+  data?: InstagramIdentityPayload[];
+  error?: InstagramApiError;
+};
+
 @Injectable()
 export class MetaGraphService {
   private get graphVersion() {
@@ -64,6 +100,117 @@ export class MetaGraphService {
 
   private get appSecret() {
     return process.env.META_APP_SECRET;
+  }
+
+  private get instagramAppId() {
+    return process.env.META_INSTAGRAM_APP_ID?.trim() || this.appId?.trim();
+  }
+
+  private get instagramAppSecret() {
+    return (
+      process.env.META_INSTAGRAM_APP_SECRET?.trim() || this.appSecret?.trim()
+    );
+  }
+
+  getInstagramLoginAppId() {
+    if (!this.instagramAppId) {
+      throw new BadRequestException(
+        'Instagram Login app ID is not configured.',
+      );
+    }
+
+    return this.instagramAppId;
+  }
+
+  getInstagramLoginConfig() {
+    const appId = this.getInstagramLoginAppId();
+    this.requireInstagramAppSecret();
+    return { appId };
+  }
+
+  async exchangeInstagramCode(input: { code: string; redirectUri: string }) {
+    const appId = this.getInstagramLoginAppId();
+    const appSecret = this.requireInstagramAppSecret();
+    const body = new FormData();
+    body.set('client_id', appId);
+    body.set('client_secret', appSecret);
+    body.set('grant_type', 'authorization_code');
+    body.set('redirect_uri', input.redirectUri);
+    body.set('code', input.code);
+
+    const response = await this.fetchInstagram(
+      'https://api.instagram.com/oauth/access_token',
+      {
+        method: 'POST',
+        body,
+      },
+    );
+    const data = (await this.readJson(
+      response,
+    )) as InstagramShortLivedTokenResponse;
+    const token = data.data?.[0] ?? data;
+
+    if (!response.ok || data.error || !token.access_token) {
+      throw new BadRequestException('Instagram token exchange failed.');
+    }
+
+    return {
+      accessToken: token.access_token,
+      userId:
+        token.user_id === undefined || token.user_id === null
+          ? null
+          : String(token.user_id),
+      permissions: this.normalizePermissions(token.permissions),
+    };
+  }
+
+  async exchangeInstagramLongLivedToken(shortLivedAccessToken: string) {
+    const appSecret = this.requireInstagramAppSecret();
+    const url = new URL('https://graph.instagram.com/access_token');
+    url.searchParams.set('grant_type', 'ig_exchange_token');
+    url.searchParams.set('client_secret', appSecret);
+    url.searchParams.set('access_token', shortLivedAccessToken);
+
+    const response = await this.fetchInstagram(url, { method: 'GET' });
+    const data = (await this.readJson(
+      response,
+    )) as InstagramLongLivedTokenResponse;
+
+    if (!response.ok || data.error || !data.access_token) {
+      throw new BadRequestException(
+        'Instagram long-lived token exchange failed.',
+      );
+    }
+
+    return {
+      accessToken: data.access_token,
+      tokenType: data.token_type ?? null,
+      expiresIn: data.expires_in ?? null,
+    };
+  }
+
+  async getInstagramAuthorizedAccount(accessToken: string) {
+    const url = new URL(`https://graph.instagram.com/${this.graphVersion}/me`);
+    url.searchParams.set('fields', 'user_id,username');
+    url.searchParams.set('access_token', accessToken);
+
+    const response = await this.fetchInstagram(url, { method: 'GET' });
+    const data = (await this.readJson(response)) as InstagramIdentityResponse;
+    const identity = data.data?.[0] ?? data;
+
+    if (
+      !response.ok ||
+      data.error ||
+      identity.user_id === undefined ||
+      identity.user_id === null
+    ) {
+      throw new BadRequestException('Instagram identity lookup failed.');
+    }
+
+    return {
+      accountId: String(identity.user_id),
+      username: identity.username?.trim() || null,
+    };
   }
 
   async exchangeCodeForBusinessToken(code: string) {
@@ -192,5 +339,42 @@ export class MetaGraphService {
     }
 
     return data;
+  }
+
+  private requireInstagramAppSecret() {
+    if (!this.instagramAppSecret) {
+      throw new BadRequestException(
+        'Instagram Login app secret is not configured.',
+      );
+    }
+
+    return this.instagramAppSecret;
+  }
+
+  private normalizePermissions(value: string | string[] | undefined) {
+    if (Array.isArray(value)) {
+      return value.map((permission) => permission.trim()).filter(Boolean);
+    }
+
+    return (value ?? '')
+      .split(',')
+      .map((permission) => permission.trim())
+      .filter(Boolean);
+  }
+
+  private async fetchInstagram(url: string | URL, init: RequestInit) {
+    try {
+      return await fetch(url, init);
+    } catch {
+      throw new BadRequestException('Instagram API request failed.');
+    }
+  }
+
+  private async readJson(response: Response): Promise<unknown> {
+    try {
+      return await response.json();
+    } catch {
+      return {};
+    }
   }
 }
