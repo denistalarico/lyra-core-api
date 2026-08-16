@@ -381,7 +381,10 @@ export class InstagramOAuthService {
   }
 
   private buildFrontendRedirect(outcome: CallbackOutcome) {
-    const redirect = new URL('/settings/channels', this.requireFrontendUrl());
+    const redirect = new URL(
+      '/leadflow/inbox/settings',
+      this.requireFrontendUrl(),
+    );
 
     if (outcome.ok) {
       redirect.searchParams.set('instagram', 'connected');

@@ -86,7 +86,7 @@ describe('InstagramOAuthService', () => {
     });
 
     expect(redirect).toBe(
-      'https://leadflow.example.com/settings/channels?instagram=connected',
+      'https://leadflow.example.com/leadflow/inbox/settings?instagram=connected',
     );
     expect(harness.meta.exchangeInstagramCode).toHaveBeenCalledWith({
       code: 'authorization-code',
@@ -215,6 +215,8 @@ describe('InstagramOAuthService', () => {
     });
 
     expect(errorReason(redirect)).toBe('invalid_state');
+    expect(new URL(redirect).pathname).toBe('/leadflow/inbox/settings');
+    expect(new URL(redirect).searchParams.get('instagram')).toBe('error');
     expect(harness.meta.exchangeInstagramCode).not.toHaveBeenCalled();
   });
 
