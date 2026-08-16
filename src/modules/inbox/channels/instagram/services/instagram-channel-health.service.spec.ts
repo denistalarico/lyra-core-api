@@ -21,16 +21,75 @@ describe('InstagramChannelHealthService', () => {
     expect(harness.meta.getInstagramAuthorizedAccount).toHaveBeenCalledWith(
       'decrypted-secret',
     );
+    expect(
+      harness.meta.getInstagramAccountWebhookSubscriptions,
+    ).toHaveBeenCalledWith({
+      igUserId: '17841400000000000',
+      accessToken: 'decrypted-secret',
+    });
     expect(result).toMatchObject({
       ok: true,
       channelId: 'instagram-channel-id',
       status: 'healthy',
+      tokenValid: true,
       accountIdMatches: true,
+      webhookSubscriptionHealthy: true,
+      diagnosis: null,
+      requiresReconnect: false,
+      missingWebhookFields: [],
       username: 'talaricolabs',
     });
     expect(JSON.stringify(result)).not.toContain('secret');
     expect(harness.repository.save).not.toHaveBeenCalled();
   });
+
+  it('returns an unhealthy reconnect diagnosis when the app is not subscribed', async () => {
+    const harness = createHarness();
+    harness.meta.getInstagramAccountWebhookSubscriptions.mockResolvedValue({
+      appSubscribed: false,
+      subscribedFields: [],
+    });
+
+    const result = await harness.service.runHealthCheck(scopedInput);
+
+    expect(result).toMatchObject({
+      ok: false,
+      status: 'unhealthy',
+      tokenValid: true,
+      accountIdMatches: true,
+      webhookSubscriptionHealthy: false,
+      diagnosis: 'webhook_subscription_missing',
+      requiresReconnect: true,
+      missingWebhookFields: ['messages', 'messaging_postbacks'],
+    });
+    expect(harness.repository.save).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['messages', ['messaging_postbacks']],
+    ['messaging_postbacks', ['messages']],
+  ] as const)(
+    'returns unhealthy when the %s webhook field is missing',
+    async (missingField, subscribedFields) => {
+      const harness = createHarness();
+      harness.meta.getInstagramAccountWebhookSubscriptions.mockResolvedValue({
+        appSubscribed: true,
+        subscribedFields: [...subscribedFields],
+      });
+
+      const result = await harness.service.runHealthCheck(scopedInput);
+
+      expect(result).toMatchObject({
+        ok: false,
+        status: 'unhealthy',
+        webhookSubscriptionHealthy: false,
+        diagnosis: 'webhook_subscription_incomplete',
+        requiresReconnect: true,
+        missingWebhookFields: [missingField],
+      });
+      expect(harness.repository.save).not.toHaveBeenCalled();
+    },
+  );
 
   it('requires a credential without calling Meta', async () => {
     const harness = createHarness({ accessTokenEncrypted: null });
@@ -89,6 +148,24 @@ describe('InstagramChannelHealthService', () => {
     expect(String((error as Error).message)).toBe(
       'Instagram did not accept the saved credential.',
     );
+  });
+
+  it('sanitizes webhook subscription lookup failures', async () => {
+    const harness = createHarness();
+    harness.meta.getInstagramAccountWebhookSubscriptions.mockRejectedValue(
+      new Error('provider response included decrypted-secret'),
+    );
+
+    const error = await harness.service
+      .runHealthCheck(scopedInput)
+      .catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(BadGatewayException);
+    expect(String((error as Error).message)).toBe(
+      'Instagram webhook subscription could not be verified.',
+    );
+    expect(JSON.stringify(error)).not.toContain('decrypted-secret');
+    expect(harness.repository.save).not.toHaveBeenCalled();
   });
 
   it('sanitizes credential decryption failures', async () => {
@@ -161,6 +238,12 @@ function createHarness(overrides: Partial<InboxChannelEntity> | null = {}) {
       Promise.resolve({
         accountId: '17841400000000000',
         username: 'talaricolabs',
+      }),
+    ),
+    getInstagramAccountWebhookSubscriptions: jest.fn(() =>
+      Promise.resolve({
+        appSubscribed: true,
+        subscribedFields: ['messages', 'messaging_postbacks'],
       }),
     ),
   };

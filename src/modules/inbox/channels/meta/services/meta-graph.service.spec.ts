@@ -113,6 +113,94 @@ describe('MetaGraphService Instagram Login', () => {
     expect(url.searchParams.get('fields')).toBe('user_id,username');
   });
 
+  it('subscribes the Instagram account to only the requested webhook fields', async () => {
+    fetchMock.mockResolvedValue(response({ success: true }));
+
+    await expect(
+      service.subscribeInstagramAccountToWebhooks({
+        igUserId: '17841400000000000',
+        accessToken: 'long-lived-secret',
+        subscribedFields: ['messages', 'messaging_postbacks'],
+      }),
+    ).resolves.toEqual({ success: true });
+
+    const url = new URL(String(fetchMock.mock.calls[0][0]));
+    expect(`${url.origin}${url.pathname}`).toBe(
+      'https://graph.instagram.com/v26.0/17841400000000000/subscribed_apps',
+    );
+    expect(url.searchParams.get('subscribed_fields')).toBe(
+      'messages,messaging_postbacks',
+    );
+    expect(url.searchParams.has('access_token')).toBe(false);
+    expect(fetchMock.mock.calls[0][1]).toEqual({
+      method: 'POST',
+      headers: { Authorization: 'Bearer long-lived-secret' },
+    });
+  });
+
+  it('sanitizes Instagram webhook subscription provider errors', async () => {
+    fetchMock.mockResolvedValue(
+      response(
+        {
+          error: {
+            message: 'Rejected long-lived-secret',
+            fbtrace_id: 'private-trace',
+          },
+        },
+        false,
+      ),
+    );
+
+    const error = await service
+      .subscribeInstagramAccountToWebhooks({
+        igUserId: '17841400000000000',
+        accessToken: 'long-lived-secret',
+        subscribedFields: ['messages', 'messaging_postbacks'],
+      })
+      .catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(BadRequestException);
+    expect(String((error as Error).message)).toBe(
+      'Instagram webhook subscription failed.',
+    );
+    expect(JSON.stringify(error)).not.toContain('long-lived-secret');
+    expect(JSON.stringify(error)).not.toContain('private-trace');
+  });
+
+  it('returns a typed and sanitized Instagram webhook subscription summary', async () => {
+    fetchMock.mockResolvedValue(
+      response({
+        data: [
+          {
+            id: 'private-app-id',
+            subscribed_fields: ['messages', 'messaging_postbacks', 'messages'],
+          },
+        ],
+      }),
+    );
+
+    const result = await service.getInstagramAccountWebhookSubscriptions({
+      igUserId: '17841400000000000',
+      accessToken: 'long-lived-secret',
+    });
+
+    expect(result).toEqual({
+      appSubscribed: true,
+      subscribedFields: ['messages', 'messaging_postbacks'],
+    });
+    expect(JSON.stringify(result)).not.toContain('private-app-id');
+    expect(JSON.stringify(result)).not.toContain('long-lived-secret');
+    const url = new URL(String(fetchMock.mock.calls[0][0]));
+    expect(`${url.origin}${url.pathname}`).toBe(
+      'https://graph.instagram.com/v26.0/17841400000000000/subscribed_apps',
+    );
+    expect(url.searchParams.has('access_token')).toBe(false);
+    expect(fetchMock.mock.calls[0][1]).toEqual({
+      method: 'GET',
+      headers: { Authorization: 'Bearer long-lived-secret' },
+    });
+  });
+
   it('sanitizes external token exchange errors', async () => {
     fetchMock.mockResolvedValue(
       response(

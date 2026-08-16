@@ -98,6 +98,23 @@ describe('InstagramOAuthService', () => {
     expect(harness.meta.getInstagramAuthorizedAccount).toHaveBeenCalledWith(
       'long-lived-secret',
     );
+    expect(
+      harness.meta.subscribeInstagramAccountToWebhooks,
+    ).toHaveBeenCalledWith({
+      igUserId: '17841400000000000',
+      accessToken: 'long-lived-secret',
+      subscribedFields: ['messages', 'messaging_postbacks'],
+    });
+    expect(
+      harness.meta.getInstagramAuthorizedAccount.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      harness.meta.subscribeInstagramAccountToWebhooks.mock
+        .invocationCallOrder[0],
+    );
+    expect(
+      harness.meta.subscribeInstagramAccountToWebhooks.mock
+        .invocationCallOrder[0],
+    ).toBeLessThan(harness.channels.save.mock.invocationCallOrder[0]);
     expect(harness.transactionSessions.findOne).toHaveBeenCalledWith(
       expect.objectContaining({
         where: {
@@ -287,6 +304,29 @@ describe('InstagramOAuthService', () => {
     expect(harness.session.errorMessage).toBe(reason);
   });
 
+  it('does not create or update a channel when webhook subscription fails', async () => {
+    const harness = createHarness();
+    harness.meta.subscribeInstagramAccountToWebhooks.mockRejectedValue(
+      new BadRequestException(
+        'provider response included long-lived-secret and private trace',
+      ),
+    );
+
+    const redirect = await harness.service.handleCallback({
+      state: 'valid-state',
+      code: 'authorization-code',
+    });
+
+    expect(errorReason(redirect)).toBe('webhook_subscription_failed');
+    expect(redirect).not.toContain('long-lived-secret');
+    expect(harness.session.status).toBe('failed');
+    expect(harness.session.errorMessage).toBe('webhook_subscription_failed');
+    expect(harness.channels.findOne).not.toHaveBeenCalled();
+    expect(harness.channels.create).not.toHaveBeenCalled();
+    expect(harness.channels.save).not.toHaveBeenCalled();
+    expect(harness.crypto.encrypt).not.toHaveBeenCalled();
+  });
+
   it('never derives tenant or workspace from callback query values', async () => {
     const harness = createHarness();
 
@@ -360,6 +400,9 @@ function createHarness(
     getInstagramAuthorizedAccount: jest.fn(async () => ({
       accountId: '17841400000000000',
       username: 'talaricolabs',
+    })),
+    subscribeInstagramAccountToWebhooks: jest.fn(async () => ({
+      success: true as const,
     })),
   };
   const crypto = {

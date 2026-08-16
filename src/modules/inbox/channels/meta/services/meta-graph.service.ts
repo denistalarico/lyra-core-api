@@ -88,6 +88,27 @@ type InstagramIdentityResponse = InstagramIdentityPayload & {
   error?: InstagramApiError;
 };
 
+type InstagramWebhookSubscriptionResponse = {
+  success?: boolean;
+  error?: InstagramApiError;
+};
+
+type InstagramWebhookSubscriptionsResponse = {
+  data?: Array<{
+    id?: string;
+    subscribed_fields?: unknown;
+  }>;
+  error?: InstagramApiError;
+};
+
+export const INSTAGRAM_MESSAGING_WEBHOOK_FIELDS = [
+  'messages',
+  'messaging_postbacks',
+] as const;
+
+export type InstagramMessagingWebhookField =
+  (typeof INSTAGRAM_MESSAGING_WEBHOOK_FIELDS)[number];
+
 @Injectable()
 export class MetaGraphService {
   private get graphVersion() {
@@ -210,6 +231,74 @@ export class MetaGraphService {
     return {
       accountId: String(identity.user_id),
       username: identity.username?.trim() || null,
+    };
+  }
+
+  async subscribeInstagramAccountToWebhooks(input: {
+    igUserId: string;
+    accessToken: string;
+    subscribedFields: readonly InstagramMessagingWebhookField[];
+  }) {
+    const url = new URL(
+      `https://graph.instagram.com/${this.graphVersion}/${input.igUserId}/subscribed_apps`,
+    );
+    url.searchParams.set('subscribed_fields', input.subscribedFields.join(','));
+
+    const response = await this.fetchInstagram(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${input.accessToken}`,
+      },
+    });
+    const data = (await this.readJson(
+      response,
+    )) as InstagramWebhookSubscriptionResponse;
+
+    if (!response.ok || data.error || data.success !== true) {
+      throw new BadRequestException('Instagram webhook subscription failed.');
+    }
+
+    return { success: true as const };
+  }
+
+  async getInstagramAccountWebhookSubscriptions(input: {
+    igUserId: string;
+    accessToken: string;
+  }) {
+    const url = new URL(
+      `https://graph.instagram.com/${this.graphVersion}/${input.igUserId}/subscribed_apps`,
+    );
+    const response = await this.fetchInstagram(url, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${input.accessToken}`,
+      },
+    });
+    const data = (await this.readJson(
+      response,
+    )) as InstagramWebhookSubscriptionsResponse;
+
+    if (!response.ok || data.error || !Array.isArray(data.data)) {
+      throw new BadRequestException(
+        'Instagram webhook subscriptions lookup failed.',
+      );
+    }
+
+    const subscribedFields = [
+      ...new Set(
+        data.data.flatMap((subscription) =>
+          Array.isArray(subscription.subscribed_fields)
+            ? subscription.subscribed_fields.filter(
+                (field): field is string => typeof field === 'string',
+              )
+            : [],
+        ),
+      ),
+    ];
+
+    return {
+      appSubscribed: data.data.length > 0,
+      subscribedFields,
     };
   }
 

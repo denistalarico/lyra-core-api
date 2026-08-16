@@ -5,7 +5,10 @@ import { DataSource, EntityManager, IsNull, Repository } from 'typeorm';
 import { SettingsCryptoService } from '../../../../../common/crypto/settings-crypto.service';
 import { InboxChannelConnectionSessionEntity } from '../../../entities/inbox-channel-connection-session.entity';
 import { InboxChannelEntity } from '../../../entities/inbox-channel.entity';
-import { MetaGraphService } from '../../meta/services/meta-graph.service';
+import {
+  INSTAGRAM_MESSAGING_WEBHOOK_FIELDS,
+  MetaGraphService,
+} from '../../meta/services/meta-graph.service';
 
 const INSTAGRAM_OAUTH_SCOPES = [
   'instagram_business_basic',
@@ -221,6 +224,22 @@ export class InstagramOAuthService {
           'identity_lookup_failed',
         );
         return { ok: false, reason: 'identity_lookup_failed' };
+      }
+
+      try {
+        await this.metaGraphService.subscribeInstagramAccountToWebhooks({
+          igUserId: identity.accountId,
+          accessToken: longLived.accessToken,
+          subscribedFields: INSTAGRAM_MESSAGING_WEBHOOK_FIELDS,
+        });
+      } catch {
+        await this.finishSessionWithError(
+          sessions,
+          session,
+          'failed',
+          'webhook_subscription_failed',
+        );
+        return { ok: false, reason: 'webhook_subscription_failed' };
       }
 
       let channel: InboxChannelEntity;

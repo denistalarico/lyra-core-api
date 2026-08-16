@@ -9,7 +9,10 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { IsNull, Repository } from 'typeorm';
 import { SettingsCryptoService } from '../../../../../common/crypto/settings-crypto.service';
 import { InboxChannelEntity } from '../../../entities/inbox-channel.entity';
-import { MetaGraphService } from '../../meta/services/meta-graph.service';
+import {
+  INSTAGRAM_MESSAGING_WEBHOOK_FIELDS,
+  MetaGraphService,
+} from '../../meta/services/meta-graph.service';
 
 @Injectable()
 export class InstagramChannelHealthService {
@@ -87,11 +90,43 @@ export class InstagramChannelHealthService {
       );
     }
 
+    let subscriptions: Awaited<
+      ReturnType<MetaGraphService['getInstagramAccountWebhookSubscriptions']>
+    >;
+    try {
+      subscriptions =
+        await this.metaGraphService.getInstagramAccountWebhookSubscriptions({
+          igUserId: identity.accountId,
+          accessToken,
+        });
+    } catch {
+      throw new BadGatewayException(
+        'Instagram webhook subscription could not be verified.',
+      );
+    }
+
+    const missingWebhookFields = INSTAGRAM_MESSAGING_WEBHOOK_FIELDS.filter(
+      (field) => !subscriptions.subscribedFields.includes(field),
+    );
+    const webhookSubscriptionHealthy =
+      subscriptions.appSubscribed && missingWebhookFields.length === 0;
+
     return {
-      ok: true as const,
+      ok: webhookSubscriptionHealthy,
       channelId: channel.id,
-      status: 'healthy' as const,
+      status: webhookSubscriptionHealthy
+        ? ('healthy' as const)
+        : ('unhealthy' as const),
+      tokenValid: true as const,
       accountIdMatches: true as const,
+      webhookSubscriptionHealthy,
+      diagnosis: webhookSubscriptionHealthy
+        ? null
+        : subscriptions.appSubscribed
+          ? ('webhook_subscription_incomplete' as const)
+          : ('webhook_subscription_missing' as const),
+      requiresReconnect: !webhookSubscriptionHealthy,
+      missingWebhookFields,
       username: identity.username,
       checkedAt: new Date().toISOString(),
     };
