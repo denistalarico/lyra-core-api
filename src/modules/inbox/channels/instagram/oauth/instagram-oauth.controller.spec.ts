@@ -57,7 +57,7 @@ describe('InstagramOAuthController', () => {
 
   it('redirects the public callback to the service safe URL', async () => {
     oauthService.handleCallback.mockResolvedValue(
-      'https://leadflow.example.com/leadflow/inbox/settings?instagram=connected',
+      'https://leadflow.example.com/leadflow/inbox/settings/oauth/instagram?status=connected',
     );
     const response = { redirect: jest.fn() };
 
@@ -79,7 +79,7 @@ describe('InstagramOAuthController', () => {
     });
     expect(response.redirect).toHaveBeenCalledWith(
       302,
-      'https://leadflow.example.com/leadflow/inbox/settings?instagram=connected',
+      'https://leadflow.example.com/leadflow/inbox/settings/oauth/instagram?status=connected',
     );
   });
 });

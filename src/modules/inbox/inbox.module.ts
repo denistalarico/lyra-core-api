@@ -86,6 +86,8 @@ import { CrmModule } from '../crm/crm.module';
 import { CrmPipelineEntity } from '../crm/entities/crm-pipeline.entity';
 import { InstagramOAuthController } from './channels/instagram/oauth/instagram-oauth.controller';
 import { InstagramOAuthService } from './channels/instagram/oauth/instagram-oauth.service';
+import { InstagramChannelHealthController } from './channels/instagram/instagram-channel-health.controller';
+import { InstagramChannelHealthService } from './channels/instagram/services/instagram-channel-health.service';
 
 @Module({
   imports: [
@@ -138,6 +140,7 @@ import { InstagramOAuthService } from './channels/instagram/oauth/instagram-oaut
     InboxOutboxAdminController,
     InboxAutonomyAdminController,
     InstagramOAuthController,
+    InstagramChannelHealthController,
   ],
   providers: [
     InboxService,
@@ -180,6 +183,7 @@ import { InstagramOAuthService } from './channels/instagram/oauth/instagram-oaut
     InboxAutonomyAdminService,
     ConversationPlaybookStateService,
     InstagramOAuthService,
+    InstagramChannelHealthService,
   ],
   exports: [
     InboxService,

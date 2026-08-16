@@ -382,14 +382,14 @@ export class InstagramOAuthService {
 
   private buildFrontendRedirect(outcome: CallbackOutcome) {
     const redirect = new URL(
-      '/leadflow/inbox/settings',
+      '/leadflow/inbox/settings/oauth/instagram',
       this.requireFrontendUrl(),
     );
 
     if (outcome.ok) {
-      redirect.searchParams.set('instagram', 'connected');
+      redirect.searchParams.set('status', 'connected');
     } else {
-      redirect.searchParams.set('instagram', 'error');
+      redirect.searchParams.set('status', 'error');
       redirect.searchParams.set('reason', outcome.reason);
     }
 
