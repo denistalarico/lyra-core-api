@@ -44,6 +44,11 @@ export class CreateLeadFlowContactDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(255)
+  instagramUsername?: string;
+
+  @IsOptional()
+  @IsString()
   @MaxLength(80)
   phoneLabel?: string;
 

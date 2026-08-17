@@ -660,6 +660,15 @@ export class AgencyContactsService {
         isPrimary: true,
       });
     }
+    if (dto.instagramUsername?.trim()) {
+      const username = dto.instagramUsername.trim().replace(/^@/, '');
+      methods.push({
+        type: 'instagram',
+        value: username,
+        label: 'Instagram',
+        isPrimary: !dto.email?.trim() && !dto.phone?.trim(),
+      });
+    }
     if (dto.website?.trim()) {
       methods.push({ type: 'website', value: dto.website.trim() });
     }

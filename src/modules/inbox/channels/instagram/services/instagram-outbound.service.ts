@@ -16,6 +16,7 @@ import { InboxConversationEventEntity } from '../../../entities/inbox-conversati
 import { InboxDomainOutboxEntity } from '../../../entities/inbox-domain-outbox.entity';
 import { InboxMessageEntity } from '../../../entities/inbox-message.entity';
 import { InboxMetaOperationLedgerService } from '../../whatsapp/services/inbox-meta-operation-ledger.service';
+import { InstagramAudioNormalizerService } from './instagram-audio-normalizer.service';
 
 type SendInstagramTextInput = {
   ctx: RequestContext;
@@ -76,6 +77,7 @@ export class InstagramOutboundService {
     private readonly cryptoService: SettingsCryptoService,
     private readonly filesService: FilesService,
     private readonly metaLedger: InboxMetaOperationLedgerService,
+    private readonly audioNormalizer: InstagramAudioNormalizerService,
   ) {}
 
   async sendText(input: SendInstagramTextInput) {
@@ -246,10 +248,13 @@ export class InstagramOutboundService {
       return { conversation, message: existing, meta: {} };
     }
 
-    const ext =
-      input.file.originalname.split('.').pop()?.toLowerCase() ?? 'bin';
+    const mediaFile =
+      mediaType === 'audio'
+        ? await this.audioNormalizer.normalize(input.file)
+        : input.file;
+    const ext = mediaFile.originalname.split('.').pop()?.toLowerCase() ?? 'bin';
     const stored = await this.filesService.uploadRawFile({
-      file: input.file,
+      file: mediaFile,
       path: `tenants/${channel.tenantId}/workspaces/${channel.workspaceId}/inbox/attachments/${Date.now()}-${randomUUID()}.${ext}`,
       maxBytes: 10 * 1024 * 1024,
     });
@@ -276,9 +281,9 @@ export class InstagramOutboundService {
           {
             url: stored.url,
             path: stored.path,
-            name: input.file.originalname,
-            mimeType: input.file.mimetype,
-            size: input.file.size,
+            name: mediaFile.originalname,
+            mimeType: mediaFile.mimetype,
+            size: mediaFile.size,
             kind: mediaType,
           },
         ],
@@ -287,9 +292,9 @@ export class InstagramOutboundService {
           channelType: 'instagram',
           mediaUrl: stored.url,
           attachmentUrl: stored.url,
-          mimeType: input.file.mimetype,
-          fileName: input.file.originalname,
-          fileSize: input.file.size,
+          mimeType: mediaFile.mimetype,
+          fileName: mediaFile.originalname,
+          fileSize: mediaFile.size,
         },
         sentAt: null,
         deliveredAt: null,

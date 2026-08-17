@@ -123,6 +123,79 @@ describe('InstagramOutboundService', () => {
       }),
     ).rejects.toBeInstanceOf(NotFoundException);
   });
+
+  it('normalizes browser audio before exposing it to the Instagram Send API', async () => {
+    const harness = createHarness();
+    process.env.API_PUBLIC_URL = 'https://api.example.com';
+    global.fetch = jest.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          recipient_id: 'ig-scoped-user',
+          message_id: 'ig-audio-1',
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+    const browserFile = {
+      originalname: 'audio.webm',
+      mimetype: 'audio/webm;codecs=opus',
+      buffer: Buffer.from('browser-audio'),
+      size: 13,
+    } as Express.Multer.File;
+
+    try {
+      const result = await harness.service.sendMedia({
+        ctx: {
+          tenantId: 'tenant-1',
+          workspaceId: 'workspace-1',
+          userId: 'user-1',
+        },
+        channelId: 'channel-1',
+        conversationId: 'conversation-1',
+        to: 'ig-scoped-user',
+        file: browserFile,
+        idempotencyKey: 'instagram-audio-1',
+      });
+
+      expect(harness.audioNormalizer.normalize).toHaveBeenCalledWith(
+        browserFile,
+      );
+      expect(harness.filesService.uploadRawFile).toHaveBeenCalledWith(
+        expect.objectContaining({
+          file: expect.objectContaining({
+            originalname: 'audio.m4a',
+            mimetype: 'audio/mp4',
+          }),
+        }),
+      );
+      expect(global.fetch).toHaveBeenCalledWith(
+        expect.stringContaining('/ig-professional-account/messages'),
+        expect.any(Object),
+      );
+      const request = (global.fetch as jest.Mock).mock
+        .calls[0][1] as RequestInit;
+      expect(JSON.parse(String(request.body))).toEqual({
+        recipient: { id: 'ig-scoped-user' },
+        message: {
+          attachment: {
+            type: 'audio',
+            payload: {
+              url: 'https://api.example.com/api/assets/audio/audio.m4a',
+            },
+          },
+        },
+      });
+      expect(result.message.attachments).toEqual([
+        expect.objectContaining({
+          name: 'audio.m4a',
+          mimeType: 'audio/mp4',
+          kind: 'audio',
+        }),
+      ]);
+    } finally {
+      delete process.env.API_PUBLIC_URL;
+    }
+  });
 });
 
 function createHarness(channelOverrides: Partial<InboxChannelEntity> = {}) {
@@ -183,15 +256,41 @@ function createHarness(channelOverrides: Partial<InboxChannelEntity> = {}) {
     failed: jest.fn().mockResolvedValue(undefined),
     replay: jest.fn().mockResolvedValue(undefined),
   };
+  const normalizedAudio = {
+    originalname: 'audio.m4a',
+    mimetype: 'audio/mp4',
+    buffer: Buffer.from('normalized-audio'),
+    size: 16,
+  } as Express.Multer.File;
+  const audioNormalizer = {
+    normalize: jest.fn().mockResolvedValue(normalizedAudio),
+  };
+  const filesService = {
+    uploadRawFile: jest.fn().mockImplementation(({ file }) =>
+      Promise.resolve({
+        path: `audio/${file.originalname}`,
+        url: `/api/assets/audio/${file.originalname}`,
+      }),
+    ),
+  };
   const service = new InstagramOutboundService(
     dataSource as never,
     channelsRepository as never,
     conversationsRepository as never,
     messagesRepository as never,
     { decrypt: jest.fn().mockReturnValue('decrypted-token') } as never,
-    { uploadRawFile: jest.fn() } as never,
+    filesService as never,
     metaLedger as never,
+    audioNormalizer as never,
   );
 
-  return { service, channel, conversation, messagesRepository, metaLedger };
+  return {
+    service,
+    channel,
+    conversation,
+    messagesRepository,
+    metaLedger,
+    audioNormalizer,
+    filesService,
+  };
 }

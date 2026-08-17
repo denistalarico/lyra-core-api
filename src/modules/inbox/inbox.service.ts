@@ -460,7 +460,39 @@ export class InboxService {
       .take(100)
       .getManyAndCount();
 
-    return { items, total };
+    if (!items.length) return { items, total };
+
+    // “Favoritas” no Inbox inclui tanto conversas favoritadas quanto conversas
+    // que contêm ao menos uma mensagem favoritada. Projetamos esse segundo
+    // estado na resposta sem duplicar a fonte de verdade que vive na mensagem.
+    const favoriteMessageConversations = await this.messagesRepository
+      .createQueryBuilder('message')
+      .select('message.conversationId', 'conversationId')
+      .distinct(true)
+      .where('message.tenant_id = :tenantId', { tenantId: ctx.tenantId })
+      .andWhere('message.workspace_id = :workspaceId', {
+        workspaceId: this.getWorkspaceId(ctx),
+      })
+      .andWhere('message.conversation_id IN (:...conversationIds)', {
+        conversationIds: items.map((item) => item.id),
+      })
+      .andWhere("message.metadata ->> 'favorite' = 'true'")
+      .andWhere("COALESCE(message.metadata ->> 'hiddenAt', '') = ''")
+      .getRawMany<{ conversationId: string }>();
+    const favoriteConversationIds = new Set(
+      favoriteMessageConversations.map((item) => item.conversationId),
+    );
+
+    return {
+      items: items.map((item) => ({
+        ...item,
+        metadata: {
+          ...(item.metadata ?? {}),
+          hasFavoriteMessages: favoriteConversationIds.has(item.id),
+        },
+      })),
+      total,
+    };
   }
 
   async createConversation(

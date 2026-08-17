@@ -90,6 +90,7 @@ import { InstagramChannelHealthController } from './channels/instagram/instagram
 import { InstagramChannelHealthService } from './channels/instagram/services/instagram-channel-health.service';
 import { InstagramOutboundController } from './channels/instagram/instagram-outbound.controller';
 import { InstagramOutboundService } from './channels/instagram/services/instagram-outbound.service';
+import { InstagramAudioNormalizerService } from './channels/instagram/services/instagram-audio-normalizer.service';
 
 @Module({
   imports: [
@@ -187,6 +188,7 @@ import { InstagramOutboundService } from './channels/instagram/services/instagra
     ConversationPlaybookStateService,
     InstagramOAuthService,
     InstagramChannelHealthService,
+    InstagramAudioNormalizerService,
     InstagramOutboundService,
   ],
   exports: [
