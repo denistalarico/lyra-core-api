@@ -1,4 +1,11 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
+import {
+  FacebookPageGraphAsset,
+  FacebookPageInstagramAccountAsset,
+} from '../types/meta-assets.types';
+
+const META_GRAPH_ORIGIN = 'https://graph.facebook.com';
+const MAX_FACEBOOK_PAGE_RESULT_PAGES = 100;
 
 type ExchangeCodeResponse = {
   access_token?: string;
@@ -346,6 +353,98 @@ export class MetaGraphService {
     };
   }
 
+  async listFacebookPages(
+    userAccessToken: string,
+  ): Promise<FacebookPageGraphAsset[]> {
+    const pages: FacebookPageGraphAsset[] = [];
+    const seenCursors = new Set<string>();
+    let nextUrl: URL | null = this.createFacebookPagesUrl();
+
+    for (
+      let pageNumber = 0;
+      nextUrl && pageNumber < MAX_FACEBOOK_PAGE_RESULT_PAGES;
+      pageNumber += 1
+    ) {
+      const response = await this.fetchMeta(nextUrl, {
+        method: 'GET',
+        headers: { Authorization: `Bearer ${userAccessToken}` },
+      });
+      const data = await this.readJson(response);
+
+      if (!response.ok || !this.isRecord(data) || data.error) {
+        throw new BadRequestException('Facebook Pages lookup failed.');
+      }
+
+      if (!Array.isArray(data.data)) {
+        throw new BadRequestException(
+          'Facebook Pages lookup returned an invalid response.',
+        );
+      }
+
+      pages.push(...data.data.map((page) => this.parseFacebookPage(page)));
+      nextUrl = this.getNextFacebookPagesUrl(data.paging, seenCursors);
+    }
+
+    if (nextUrl) {
+      throw new BadRequestException(
+        'Facebook Pages pagination exceeded the safe limit.',
+      );
+    }
+
+    return pages;
+  }
+
+  async getFacebookPageInstagramAccount(input: {
+    pageId: string;
+    pageAccessToken: string;
+  }): Promise<FacebookPageInstagramAccountAsset | null> {
+    const url = new URL(
+      `${META_GRAPH_ORIGIN}/${this.graphVersion}/${encodeURIComponent(input.pageId)}`,
+    );
+    url.searchParams.set('fields', 'instagram_business_account{id,username}');
+
+    const response = await this.fetchMeta(url, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${input.pageAccessToken}` },
+    });
+    const data = await this.readJson(response);
+
+    if (!response.ok || !this.isRecord(data) || data.error) {
+      throw new BadRequestException(
+        'Facebook Page Instagram account lookup failed.',
+      );
+    }
+
+    const account = data.instagram_business_account;
+    if (account === undefined || account === null) {
+      return null;
+    }
+
+    if (!this.isRecord(account) || !this.isNonEmptyString(account.id)) {
+      throw new BadRequestException(
+        'Facebook Page Instagram account lookup returned an invalid response.',
+      );
+    }
+
+    if (
+      account.username !== undefined &&
+      account.username !== null &&
+      typeof account.username !== 'string'
+    ) {
+      throw new BadRequestException(
+        'Facebook Page Instagram account lookup returned an invalid response.',
+      );
+    }
+
+    return {
+      accountId: account.id.trim(),
+      username:
+        typeof account.username === 'string'
+          ? account.username.trim() || null
+          : null,
+    };
+  }
+
   async exchangeCodeForBusinessToken(code: string) {
     if (!this.appId || !this.appSecret) {
       throw new BadRequestException(
@@ -501,6 +600,110 @@ export class MetaGraphService {
     } catch {
       throw new BadRequestException('Instagram API request failed.');
     }
+  }
+
+  private createFacebookPagesUrl(after?: string) {
+    const url = new URL(
+      `${META_GRAPH_ORIGIN}/${this.graphVersion}/me/accounts`,
+    );
+    url.searchParams.set('fields', 'id,name,access_token');
+    if (after) {
+      url.searchParams.set('after', after);
+    }
+    return url;
+  }
+
+  private getNextFacebookPagesUrl(
+    paging: unknown,
+    seenCursors: Set<string>,
+  ): URL | null {
+    if (paging === undefined) {
+      return null;
+    }
+
+    if (!this.isRecord(paging)) {
+      throw new BadRequestException(
+        'Facebook Pages pagination returned an invalid response.',
+      );
+    }
+
+    const next = paging.next;
+    if (next === undefined) {
+      return null;
+    }
+
+    if (typeof next !== 'string') {
+      throw new BadRequestException(
+        'Facebook Pages pagination returned an invalid response.',
+      );
+    }
+
+    let parsedNext: URL;
+    try {
+      parsedNext = new URL(next);
+    } catch {
+      throw new BadRequestException(
+        'Facebook Pages pagination returned an invalid response.',
+      );
+    }
+
+    const expectedPathPrefix = `/${this.graphVersion}/`;
+    if (
+      parsedNext.origin !== META_GRAPH_ORIGIN ||
+      !parsedNext.pathname.startsWith(expectedPathPrefix) ||
+      parsedNext.username ||
+      parsedNext.password ||
+      parsedNext.hash
+    ) {
+      throw new BadRequestException(
+        'Facebook Pages pagination returned an invalid response.',
+      );
+    }
+
+    const after = parsedNext.searchParams.get('after')?.trim();
+    if (!after || seenCursors.has(after)) {
+      throw new BadRequestException(
+        'Facebook Pages pagination returned an invalid response.',
+      );
+    }
+
+    seenCursors.add(after);
+    return this.createFacebookPagesUrl(after);
+  }
+
+  private parseFacebookPage(value: unknown): FacebookPageGraphAsset {
+    if (
+      !this.isRecord(value) ||
+      !this.isNonEmptyString(value.id) ||
+      !this.isNonEmptyString(value.name) ||
+      !this.isNonEmptyString(value.access_token)
+    ) {
+      throw new BadRequestException(
+        'Facebook Pages lookup returned an invalid response.',
+      );
+    }
+
+    return {
+      pageId: value.id.trim(),
+      pageName: value.name.trim(),
+      pageAccessToken: value.access_token.trim(),
+    };
+  }
+
+  private async fetchMeta(url: URL, init: RequestInit) {
+    try {
+      return await fetch(url, init);
+    } catch {
+      throw new BadRequestException('Meta Graph API request failed.');
+    }
+  }
+
+  private isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
+  }
+
+  private isNonEmptyString(value: unknown): value is string {
+    return typeof value === 'string' && value.trim().length > 0;
   }
 
   private async readJson(response: Response): Promise<unknown> {

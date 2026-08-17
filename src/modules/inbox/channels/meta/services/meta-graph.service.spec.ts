@@ -266,6 +266,213 @@ describe('MetaGraphService Instagram Login', () => {
   });
 });
 
+describe('MetaGraphService Facebook assets', () => {
+  const originalEnv = process.env;
+  const originalFetch = global.fetch;
+  let service: MetaGraphService;
+  let fetchMock: jest.Mock;
+
+  beforeEach(() => {
+    process.env = {
+      ...originalEnv,
+      META_GRAPH_API_VERSION: 'v26.0',
+    };
+    fetchMock = jest.fn();
+    global.fetch = fetchMock as typeof fetch;
+    service = new MetaGraphService();
+  });
+
+  afterAll(() => {
+    process.env = originalEnv;
+    global.fetch = originalFetch;
+  });
+
+  it('lists a Facebook Page with its Page Access Token', async () => {
+    fetchMock.mockResolvedValue(
+      response({
+        data: [
+          {
+            id: 'page-1',
+            name: 'Page One',
+            access_token: 'page-secret-1',
+          },
+        ],
+      }),
+    );
+
+    await expect(service.listFacebookPages('user-secret')).resolves.toEqual([
+      {
+        pageId: 'page-1',
+        pageName: 'Page One',
+        pageAccessToken: 'page-secret-1',
+      },
+    ]);
+
+    const url = new URL(String(fetchMock.mock.calls[0][0]));
+    expect(`${url.origin}${url.pathname}`).toBe(
+      'https://graph.facebook.com/v26.0/me/accounts',
+    );
+    expect(url.searchParams.get('fields')).toBe('id,name,access_token');
+    expect(url.searchParams.has('access_token')).toBe(false);
+    expect(fetchMock.mock.calls[0][1]).toEqual({
+      method: 'GET',
+      headers: { Authorization: 'Bearer user-secret' },
+    });
+  });
+
+  it('loads all Facebook Pages across pagination without copying tokens from next URLs', async () => {
+    fetchMock
+      .mockResolvedValueOnce(
+        response({
+          data: [
+            {
+              id: 'page-1',
+              name: 'Page One',
+              access_token: 'page-secret-1',
+            },
+          ],
+          paging: {
+            next: 'https://graph.facebook.com/v26.0/123456/accounts?after=cursor-2&access_token=provider-echoed-secret',
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        response({
+          data: [
+            {
+              id: 'page-2',
+              name: 'Page Two',
+              access_token: 'page-secret-2',
+            },
+          ],
+        }),
+      );
+
+    await expect(
+      service.listFacebookPages('user-secret'),
+    ).resolves.toHaveLength(2);
+
+    const secondUrl = new URL(String(fetchMock.mock.calls[1][0]));
+    expect(secondUrl.searchParams.get('after')).toBe('cursor-2');
+    expect(secondUrl.searchParams.has('access_token')).toBe(false);
+    expect(String(fetchMock.mock.calls[1][1].headers.Authorization)).toBe(
+      'Bearer user-secret',
+    );
+  });
+
+  it('identifies the Instagram professional account linked to a Page', async () => {
+    fetchMock.mockResolvedValue(
+      response({
+        instagram_business_account: {
+          id: 'instagram-1',
+          username: 'page.one',
+        },
+      }),
+    );
+
+    await expect(
+      service.getFacebookPageInstagramAccount({
+        pageId: 'page-1',
+        pageAccessToken: 'page-secret-1',
+      }),
+    ).resolves.toEqual({
+      accountId: 'instagram-1',
+      username: 'page.one',
+    });
+
+    const url = new URL(String(fetchMock.mock.calls[0][0]));
+    expect(`${url.origin}${url.pathname}`).toBe(
+      'https://graph.facebook.com/v26.0/page-1',
+    );
+    expect(url.searchParams.get('fields')).toBe(
+      'instagram_business_account{id,username}',
+    );
+    expect(url.searchParams.has('access_token')).toBe(false);
+  });
+
+  it.each([{}, { instagram_business_account: null }])(
+    'does not invent an Instagram account when none is linked',
+    async (body) => {
+      fetchMock.mockResolvedValue(response(body));
+
+      await expect(
+        service.getFacebookPageInstagramAccount({
+          pageId: 'page-1',
+          pageAccessToken: 'page-secret-1',
+        }),
+      ).resolves.toBeNull();
+    },
+  );
+
+  it('rejects malformed Facebook Page responses', async () => {
+    fetchMock.mockResolvedValue(
+      response({ data: [{ id: 'page-1', name: 'Page One' }] }),
+    );
+
+    await expect(service.listFacebookPages('user-secret')).rejects.toThrow(
+      'Facebook Pages lookup returned an invalid response.',
+    );
+  });
+
+  it('sanitizes Meta Graph API failures and does not expose tokens', async () => {
+    fetchMock.mockResolvedValue(
+      response(
+        {
+          error: {
+            message: 'Rejected user-secret and page-secret-1',
+            fbtrace_id: 'private-trace',
+          },
+        },
+        false,
+      ),
+    );
+
+    const error = await service
+      .listFacebookPages('user-secret')
+      .catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(BadRequestException);
+    expect(String((error as Error).message)).toBe(
+      'Facebook Pages lookup failed.',
+    );
+    expect(JSON.stringify(error)).not.toContain('user-secret');
+    expect(JSON.stringify(error)).not.toContain('page-secret-1');
+    expect(JSON.stringify(error)).not.toContain('private-trace');
+  });
+
+  it('rejects arbitrary pagination URLs without fetching them', async () => {
+    fetchMock.mockResolvedValue(
+      response({
+        data: [],
+        paging: {
+          next: 'https://attacker.example/collect?after=cursor-2',
+        },
+      }),
+    );
+
+    await expect(service.listFacebookPages('user-secret')).rejects.toThrow(
+      'Facebook Pages pagination returned an invalid response.',
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('stops repeated pagination cursors instead of looping', async () => {
+    fetchMock.mockResolvedValue(
+      response({
+        data: [],
+        paging: {
+          next: 'https://graph.facebook.com/v26.0/me/accounts?after=repeated-cursor',
+        },
+      }),
+    );
+
+    await expect(service.listFacebookPages('user-secret')).rejects.toThrow(
+      'Facebook Pages pagination returned an invalid response.',
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+});
+
 function response(body: unknown, ok = true): Response {
   return {
     ok,

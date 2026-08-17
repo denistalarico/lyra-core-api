@@ -32,6 +32,7 @@ import { InboxChannelConnectionSessionEntity } from './entities/inbox-channel-co
 import { WhatsAppEmbeddedSignupController } from './channels/whatsapp/embedded-signup/whatsapp-embedded-signup.controller';
 import { WhatsAppEmbeddedSignupService } from './channels/whatsapp/embedded-signup/whatsapp-embedded-signup.service';
 import { MetaGraphService } from './channels/meta/services/meta-graph.service';
+import { MetaAssetDiscoveryService } from './channels/meta/services/meta-asset-discovery.service';
 import { WhatsAppChannelHealthController } from './channels/whatsapp/whatsapp-channel-health.controller';
 import { WhatsAppChannelHealthService } from './channels/whatsapp/services/whatsapp-channel-health.service';
 import { PermissionsModule } from '../permissions';
@@ -160,6 +161,7 @@ import { InstagramAudioNormalizerService } from './channels/instagram/services/i
     WhatsAppOutboundService,
     WhatsAppEmbeddedSignupService,
     MetaGraphService,
+    MetaAssetDiscoveryService,
     WhatsAppChannelHealthService,
     InboxMediaService,
     MetaMediaIngestionWorker,
@@ -201,6 +203,7 @@ import { InstagramAudioNormalizerService } from './channels/instagram/services/i
     InstagramOutboundService,
     WhatsAppEmbeddedSignupService,
     MetaGraphService,
+    MetaAssetDiscoveryService,
     WhatsAppChannelHealthService,
     ConversationOwnershipService,
   ],
