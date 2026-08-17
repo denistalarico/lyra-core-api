@@ -20,6 +20,19 @@ type ExchangeCodeResponse = {
   };
 };
 
+type FacebookUserAccessTokenResponse = {
+  access_token?: string;
+  token_type?: string;
+  expires_in?: number;
+  error?: {
+    message?: string;
+    type?: string;
+    code?: number;
+    error_subcode?: number;
+    fbtrace_id?: string;
+  };
+};
+
 type SubscribeWabaResponse = {
   success?: boolean;
   error?: {
@@ -141,6 +154,10 @@ export class MetaGraphService {
     return process.env.META_APP_SECRET;
   }
 
+  private get facebookLoginConfigId() {
+    return process.env.META_FACEBOOK_LOGIN_CONFIG_ID?.trim();
+  }
+
   private get instagramAppId() {
     return process.env.META_INSTAGRAM_APP_ID?.trim() || this.appId?.trim();
   }
@@ -165,6 +182,60 @@ export class MetaGraphService {
     const appId = this.getInstagramLoginAppId();
     this.requireInstagramAppSecret();
     return { appId };
+  }
+
+  getFacebookLoginConfig() {
+    const appId = this.requireMetaAppId();
+    this.requireMetaAppSecret();
+
+    if (!this.facebookLoginConfigId) {
+      throw new BadRequestException(
+        'Facebook Login for Business configuration ID is not configured.',
+      );
+    }
+
+    return {
+      appId,
+      configId: this.facebookLoginConfigId,
+      authorizationEndpoint: `https://www.facebook.com/${this.graphVersion}/dialog/oauth`,
+    };
+  }
+
+  async exchangeFacebookOAuthCode(input: {
+    code: string;
+    redirectUri: string;
+  }) {
+    const appId = this.requireMetaAppId();
+    const appSecret = this.requireMetaAppSecret();
+    const url = new URL(
+      `${META_GRAPH_ORIGIN}/${this.graphVersion}/oauth/access_token`,
+    );
+    const body = new URLSearchParams({
+      client_id: appId,
+      client_secret: appSecret,
+      grant_type: 'authorization_code',
+      redirect_uri: input.redirectUri,
+      code: input.code,
+    });
+
+    const response = await this.fetchMeta(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body,
+    });
+    const data = (await this.readJson(
+      response,
+    )) as FacebookUserAccessTokenResponse;
+
+    if (!response.ok || data.error || !data.access_token) {
+      throw new BadRequestException('Facebook OAuth token exchange failed.');
+    }
+
+    return {
+      accessToken: data.access_token,
+      tokenType: data.token_type ?? null,
+      expiresIn: data.expires_in ?? null,
+    };
   }
 
   async exchangeInstagramCode(input: { code: string; redirectUri: string }) {
@@ -581,6 +652,24 @@ export class MetaGraphService {
     }
 
     return this.instagramAppSecret;
+  }
+
+  private requireMetaAppId() {
+    const appId = this.appId?.trim();
+    if (!appId) {
+      throw new BadRequestException('META_APP_ID is required.');
+    }
+
+    return appId;
+  }
+
+  private requireMetaAppSecret() {
+    const appSecret = this.appSecret?.trim();
+    if (!appSecret) {
+      throw new BadRequestException('META_APP_SECRET is required.');
+    }
+
+    return appSecret;
   }
 
   private normalizePermissions(value: string | string[] | undefined) {

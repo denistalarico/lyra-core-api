@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-member-access -- Jest records fetch mock calls as dynamic tuples in this focused HTTP contract test. */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access -- Jest records fetch mock calls as dynamic tuples in this focused HTTP contract test. */
 import { BadRequestException } from '@nestjs/common';
 import { MetaGraphService } from './meta-graph.service';
 
@@ -275,6 +275,9 @@ describe('MetaGraphService Facebook assets', () => {
   beforeEach(() => {
     process.env = {
       ...originalEnv,
+      META_APP_ID: 'meta-app-id',
+      META_APP_SECRET: 'meta-app-secret',
+      META_FACEBOOK_LOGIN_CONFIG_ID: 'business-config-id',
       META_GRAPH_API_VERSION: 'v26.0',
     };
     fetchMock = jest.fn();
@@ -285,6 +288,97 @@ describe('MetaGraphService Facebook assets', () => {
   afterAll(() => {
     process.env = originalEnv;
     global.fetch = originalFetch;
+  });
+
+  it('exposes the Facebook Login for Business public configuration only', () => {
+    expect(service.getFacebookLoginConfig()).toEqual({
+      appId: 'meta-app-id',
+      configId: 'business-config-id',
+      authorizationEndpoint: 'https://www.facebook.com/v26.0/dialog/oauth',
+    });
+    expect(JSON.stringify(service.getFacebookLoginConfig())).not.toContain(
+      'meta-app-secret',
+    );
+  });
+
+  it('requires an explicit Facebook Login for Business configuration ID', () => {
+    delete process.env.META_FACEBOOK_LOGIN_CONFIG_ID;
+
+    expect(() => service.getFacebookLoginConfig()).toThrow(
+      'Facebook Login for Business configuration ID is not configured.',
+    );
+  });
+
+  it('exchanges a Facebook authorization code without putting secrets in the URL', async () => {
+    fetchMock.mockResolvedValue(
+      response({
+        access_token: 'user-secret-token',
+        token_type: 'bearer',
+        expires_in: 3_600,
+      }),
+    );
+
+    await expect(
+      service.exchangeFacebookOAuthCode({
+        code: 'authorization-code',
+        redirectUri: 'https://api.example.com/facebook/callback',
+      }),
+    ).resolves.toEqual({
+      accessToken: 'user-secret-token',
+      tokenType: 'bearer',
+      expiresIn: 3_600,
+    });
+
+    const url = new URL(String(fetchMock.mock.calls[0][0]));
+    expect(`${url.origin}${url.pathname}`).toBe(
+      'https://graph.facebook.com/v26.0/oauth/access_token',
+    );
+    expect([...url.searchParams]).toEqual([]);
+    expect(fetchMock.mock.calls[0][1]).toEqual({
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: expect.any(URLSearchParams),
+    });
+    expect(
+      Object.fromEntries(
+        (fetchMock.mock.calls[0][1].body as URLSearchParams).entries(),
+      ),
+    ).toEqual({
+      client_id: 'meta-app-id',
+      client_secret: 'meta-app-secret',
+      grant_type: 'authorization_code',
+      redirect_uri: 'https://api.example.com/facebook/callback',
+      code: 'authorization-code',
+    });
+  });
+
+  it('sanitizes Facebook token exchange failures', async () => {
+    fetchMock.mockResolvedValue(
+      response(
+        {
+          error: {
+            message: 'Rejected authorization-code with meta-app-secret',
+            fbtrace_id: 'private-trace',
+          },
+        },
+        false,
+      ),
+    );
+
+    const error = await service
+      .exchangeFacebookOAuthCode({
+        code: 'authorization-code',
+        redirectUri: 'https://api.example.com/facebook/callback',
+      })
+      .catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(BadRequestException);
+    expect(String((error as Error).message)).toBe(
+      'Facebook OAuth token exchange failed.',
+    );
+    expect(JSON.stringify(error)).not.toContain('authorization-code');
+    expect(JSON.stringify(error)).not.toContain('meta-app-secret');
+    expect(JSON.stringify(error)).not.toContain('private-trace');
   });
 
   it('lists a Facebook Page with its Page Access Token', async () => {

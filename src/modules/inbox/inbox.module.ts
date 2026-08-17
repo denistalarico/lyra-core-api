@@ -87,6 +87,8 @@ import { CrmModule } from '../crm/crm.module';
 import { CrmPipelineEntity } from '../crm/entities/crm-pipeline.entity';
 import { InstagramOAuthController } from './channels/instagram/oauth/instagram-oauth.controller';
 import { InstagramOAuthService } from './channels/instagram/oauth/instagram-oauth.service';
+import { FacebookInstagramOAuthController } from './channels/instagram/oauth/facebook/facebook-instagram-oauth.controller';
+import { FacebookInstagramOAuthService } from './channels/instagram/oauth/facebook/facebook-instagram-oauth.service';
 import { InstagramChannelHealthController } from './channels/instagram/instagram-channel-health.controller';
 import { InstagramChannelHealthService } from './channels/instagram/services/instagram-channel-health.service';
 import { InstagramOutboundController } from './channels/instagram/instagram-outbound.controller';
@@ -144,6 +146,7 @@ import { InstagramAudioNormalizerService } from './channels/instagram/services/i
     InboxOutboxAdminController,
     InboxAutonomyAdminController,
     InstagramOAuthController,
+    FacebookInstagramOAuthController,
     InstagramChannelHealthController,
     InstagramOutboundController,
   ],
@@ -189,6 +192,7 @@ import { InstagramAudioNormalizerService } from './channels/instagram/services/i
     InboxAutonomyAdminService,
     ConversationPlaybookStateService,
     InstagramOAuthService,
+    FacebookInstagramOAuthService,
     InstagramChannelHealthService,
     InstagramAudioNormalizerService,
     InstagramOutboundService,
