@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access -- Jest records fetch mock calls as dynamic tuples in this focused HTTP contract test. */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access -- Jest records fetch mock calls as dynamic tuples in this focused HTTP contract test. */
 import { BadRequestException } from '@nestjs/common';
 import { MetaGraphService } from './meta-graph.service';
 
@@ -309,7 +309,7 @@ describe('MetaGraphService Facebook assets', () => {
     );
   });
 
-  it('exchanges a Facebook authorization code without putting secrets in the URL', async () => {
+  it('exchanges a Facebook authorization code using the documented GET contract', async () => {
     fetchMock.mockResolvedValue(
       response({
         access_token: 'user-secret-token',
@@ -333,23 +333,14 @@ describe('MetaGraphService Facebook assets', () => {
     expect(`${url.origin}${url.pathname}`).toBe(
       'https://graph.facebook.com/v26.0/oauth/access_token',
     );
-    expect([...url.searchParams]).toEqual([]);
-    expect(fetchMock.mock.calls[0][1]).toEqual({
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: expect.any(URLSearchParams),
-    });
-    expect(
-      Object.fromEntries(
-        (fetchMock.mock.calls[0][1].body as URLSearchParams).entries(),
-      ),
-    ).toEqual({
-      client_id: 'meta-app-id',
-      client_secret: 'meta-app-secret',
-      grant_type: 'authorization_code',
-      redirect_uri: 'https://api.example.com/facebook/callback',
-      code: 'authorization-code',
-    });
+    expect(url.searchParams.get('client_id')).toBe('meta-app-id');
+    expect(url.searchParams.get('redirect_uri')).toBe(
+      'https://api.example.com/facebook/callback',
+    );
+    expect(url.searchParams.get('client_secret')).toBe('meta-app-secret');
+    expect(url.searchParams.get('code')).toBe('authorization-code');
+    expect(url.searchParams.has('grant_type')).toBe(false);
+    expect(fetchMock.mock.calls[0][1]).toEqual({ method: 'GET' });
   });
 
   it('sanitizes Facebook token exchange failures', async () => {

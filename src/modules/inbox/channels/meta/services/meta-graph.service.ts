@@ -210,19 +210,12 @@ export class MetaGraphService {
     const url = new URL(
       `${META_GRAPH_ORIGIN}/${this.graphVersion}/oauth/access_token`,
     );
-    const body = new URLSearchParams({
-      client_id: appId,
-      client_secret: appSecret,
-      grant_type: 'authorization_code',
-      redirect_uri: input.redirectUri,
-      code: input.code,
-    });
+    url.searchParams.set('client_id', appId);
+    url.searchParams.set('redirect_uri', input.redirectUri);
+    url.searchParams.set('client_secret', appSecret);
+    url.searchParams.set('code', input.code);
 
-    const response = await this.fetchMeta(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body,
-    });
+    const response = await this.fetchMeta(url, { method: 'GET' });
     const data = (await this.readJson(
       response,
     )) as FacebookUserAccessTokenResponse;
