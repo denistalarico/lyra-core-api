@@ -102,9 +102,19 @@ type InstagramWebhookSubscriptionsResponse = {
   error?: InstagramApiError;
 };
 
+type InstagramUserProfileResponse = {
+  id?: string | number;
+  name?: string | null;
+  username?: string | null;
+  profile_pic?: string | null;
+  error?: InstagramApiError;
+};
+
 export const INSTAGRAM_MESSAGING_WEBHOOK_FIELDS = [
   'messages',
   'messaging_postbacks',
+  'message_reactions',
+  'messaging_seen',
 ] as const;
 
 export type InstagramMessagingWebhookField =
@@ -236,6 +246,35 @@ export class MetaGraphService {
           ? null
           : String(identity.id),
       username: identity.username?.trim() || null,
+    };
+  }
+
+  async getInstagramUserProfile(input: {
+    scopedUserId: string;
+    accessToken: string;
+  }) {
+    const url = new URL(
+      `https://graph.instagram.com/${this.graphVersion}/${input.scopedUserId}`,
+    );
+    url.searchParams.set('fields', 'id,name,username,profile_pic');
+
+    const response = await this.fetchInstagram(url, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${input.accessToken}` },
+    });
+    const data = (await this.readJson(
+      response,
+    )) as InstagramUserProfileResponse;
+
+    if (!response.ok || data.error) {
+      throw new BadRequestException('Instagram user profile lookup failed.');
+    }
+
+    return {
+      id: data.id == null ? input.scopedUserId : String(data.id),
+      name: data.name?.trim() || null,
+      username: data.username?.trim() || null,
+      profilePictureUrl: data.profile_pic?.trim() || null,
     };
   }
 

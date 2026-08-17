@@ -103,7 +103,12 @@ describe('InstagramOAuthService', () => {
     ).toHaveBeenCalledWith({
       igUserId: '17841400000000000',
       accessToken: 'long-lived-secret',
-      subscribedFields: ['messages', 'messaging_postbacks'],
+      subscribedFields: [
+        'messages',
+        'messaging_postbacks',
+        'message_reactions',
+        'messaging_seen',
+      ],
     });
     expect(
       harness.meta.getInstagramAuthorizedAccount.mock.invocationCallOrder[0],

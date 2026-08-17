@@ -120,6 +120,40 @@ describe('MetaGraphService Instagram Login', () => {
     expect(url.searchParams.get('fields')).toBe('id,user_id,username');
   });
 
+  it('loads a messaging participant profile without exposing the token in the URL', async () => {
+    fetchMock.mockResolvedValue(
+      response({
+        id: 'ig-user-1',
+        name: 'Maria Silva',
+        username: 'maria.silva',
+        profile_pic: 'https://cdn.example.com/avatar.jpg',
+      }),
+    );
+
+    await expect(
+      service.getInstagramUserProfile({
+        scopedUserId: 'ig-user-1',
+        accessToken: 'long-lived-secret',
+      }),
+    ).resolves.toEqual({
+      id: 'ig-user-1',
+      name: 'Maria Silva',
+      username: 'maria.silva',
+      profilePictureUrl: 'https://cdn.example.com/avatar.jpg',
+    });
+
+    const url = new URL(String(fetchMock.mock.calls[0][0]));
+    expect(`${url.origin}${url.pathname}`).toBe(
+      'https://graph.instagram.com/v26.0/ig-user-1',
+    );
+    expect(url.searchParams.get('fields')).toBe('id,name,username,profile_pic');
+    expect(url.searchParams.has('access_token')).toBe(false);
+    expect(fetchMock.mock.calls[0][1]).toEqual({
+      method: 'GET',
+      headers: { Authorization: 'Bearer long-lived-secret' },
+    });
+  });
+
   it('subscribes the Instagram account to only the requested webhook fields', async () => {
     fetchMock.mockResolvedValue(response({ success: true }));
 

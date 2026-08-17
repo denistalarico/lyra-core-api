@@ -92,6 +92,75 @@ export class MessageStatusSyncService {
     return message;
   }
 
+  async applyInstagramReaction(input: {
+    tenantId: string;
+    workspaceId: string;
+    channelId: string;
+    externalMessageId: string;
+    senderId: string | null;
+    action: 'react' | 'unreact';
+    emoji: string | null;
+    occurredAt: Date;
+  }) {
+    const message = await this.messagesRepository.findOne({
+      where: {
+        tenantId: input.tenantId,
+        workspaceId: input.workspaceId,
+        channelId: input.channelId,
+        externalMessageId: input.externalMessageId,
+      },
+    });
+    if (!message) {
+      throw new NotFoundException(
+        'Inbox message not found for the provider reaction update.',
+      );
+    }
+    const metadata = message.metadata ?? {};
+    const reactions = Array.isArray(metadata.reactions)
+      ? metadata.reactions.filter((item): item is Record<string, unknown> =>
+          Boolean(item && typeof item === 'object'),
+        )
+      : [];
+    const actorKey = `instagram:${input.senderId ?? 'contact'}`;
+    const next = reactions.filter((item) => item.actorKey !== actorKey);
+    if (input.action === 'react' && input.emoji) {
+      next.push({
+        actorKey,
+        actorType: 'contact',
+        emoji: input.emoji,
+        reactedAt: input.occurredAt.toISOString(),
+      });
+    }
+    message.metadata = {
+      ...metadata,
+      reaction: next.at(-1) ?? null,
+      reactions: next,
+      reactionDelivery: 'received',
+    };
+    await this.messagesRepository.save(message);
+    await this.eventsRepository.save(
+      this.eventsRepository.create({
+        tenantId: input.tenantId,
+        workspaceId: input.workspaceId,
+        conversationId: message.conversationId,
+        eventType:
+          input.action === 'unreact'
+            ? 'message_reaction_removed'
+            : 'message_reacted',
+        actorType: 'contact',
+        actorUserId: null,
+        payload: {
+          messageId: message.id,
+          externalMessageId: input.externalMessageId,
+          emoji: input.emoji,
+          provider: 'meta',
+          channelType: 'instagram',
+        },
+      }),
+    );
+    return message;
+  }
+
   private mapInboxMessageStatus(status: NormalizedMessageDeliveryStatus) {
     switch (status) {
       case 'sent':

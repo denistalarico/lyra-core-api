@@ -540,6 +540,7 @@ export class WhatsAppOutboundService {
 
       conversation.lastMessagePreview = input.text.trim().slice(0, 260);
       conversation.lastMessageAt = message.sentAt;
+      if (conversation.status === 'new') conversation.status = 'open';
       await manager.getRepository(InboxConversationEntity).save(conversation);
 
       await manager.getRepository(InboxConversationEventEntity).save({
@@ -844,6 +845,7 @@ export class WhatsAppOutboundService {
 
       conversation.lastMessagePreview = preview.slice(0, 260);
       conversation.lastMessageAt = message.sentAt;
+      if (conversation.status === 'new') conversation.status = 'open';
       await manager.getRepository(InboxConversationEntity).save(conversation);
 
       await manager.getRepository(InboxConversationEventEntity).save({
@@ -1196,6 +1198,9 @@ export class WhatsAppOutboundService {
 
       input.conversation.lastMessagePreview = '[modelo de mensagem]';
       input.conversation.lastMessageAt = sentAt;
+      if (input.conversation.status === 'new') {
+        input.conversation.status = 'open';
+      }
       await manager
         .getRepository(InboxConversationEntity)
         .save(input.conversation);

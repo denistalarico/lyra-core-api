@@ -60,6 +60,7 @@ describe('InboxGovernedActionWorker kill switches', () => {
         autoHandoffEnabled: false,
       } as never,
       outbound as never,
+      { sendAgentText: jest.fn() } as never,
       { transition: jest.fn() } as never,
     );
 
@@ -82,6 +83,7 @@ describe('InboxGovernedActionWorker kill switches', () => {
           callback: (manager: { query: typeof query }) => unknown,
         ) => Promise.resolve(callback({ query })),
       } as never,
+      {} as never,
       {} as never,
       {} as never,
       {} as never,
@@ -193,6 +195,7 @@ describe('InboxGovernedActionWorker kill switches', () => {
       {} as never,
       {} as never,
       {} as never,
+      {} as never,
       { moveStageWithinTransaction } as never,
     );
     // This focused test intentionally reaches the private transaction boundary.
@@ -278,6 +281,7 @@ describe('InboxGovernedActionWorker kill switches', () => {
           return agentRepository;
         }),
       } as never,
+      {} as never,
       {} as never,
       {} as never,
       {} as never,

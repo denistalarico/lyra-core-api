@@ -1,4 +1,6 @@
 import { Injectable } from '@nestjs/common';
+import { createHash } from 'crypto';
+import { SettingsCryptoService } from '../../../../../common/crypto/settings-crypto.service';
 import type { ChannelAdapterResult } from '../../types/channel-adapter';
 import type {
   NormalizedInboundAttachment,
@@ -6,6 +8,8 @@ import type {
   NormalizedInboundMessageType,
 } from '../../types/normalized-inbound-message';
 import { MetaChannelResolverService } from '../services/meta-channel-resolver.service';
+import { MetaGraphService } from '../services/meta-graph.service';
+import type { NormalizedMessageStatusUpdate } from '../../types/normalized-message-status-update';
 import type {
   MetaInstagramAttachment,
   MetaInstagramEntry,
@@ -18,7 +22,11 @@ import type {
 export class InstagramMetaAdapter {
   readonly provider = 'meta';
 
-  constructor(private readonly channelResolver: MetaChannelResolverService) {}
+  constructor(
+    private readonly channelResolver: MetaChannelResolverService,
+    private readonly metaGraphService: MetaGraphService,
+    private readonly cryptoService: SettingsCryptoService,
+  ) {}
 
   async normalize(
     payload: MetaInstagramWebhookPayload,
@@ -38,6 +46,7 @@ export class InstagramMetaAdapter {
         const channel =
           await this.channelResolver.findInstagramChannelByAccountId(accountId);
 
+        const profile = await this.loadProfile(channel, senderId);
         messages.push(
           this.normalizeMessage({
             tenantId: channel.tenantId,
@@ -47,12 +56,78 @@ export class InstagramMetaAdapter {
             entry,
             event,
             message: event.message,
+            profile,
           }),
         );
       }
     }
 
     return { messages };
+  }
+
+  async normalizeStatuses(
+    payload: MetaInstagramWebhookPayload,
+  ): Promise<{ statuses: NormalizedMessageStatusUpdate[] }> {
+    const statuses: NormalizedMessageStatusUpdate[] = [];
+
+    for (const entry of payload.entry ?? []) {
+      for (const event of entry.messaging ?? []) {
+        const accountId = entry.id ?? event.sender?.id;
+        const externalMessageId = event.read?.mid;
+        if (!accountId || !externalMessageId) continue;
+        const channel =
+          await this.channelResolver.findInstagramChannelByAccountId(accountId);
+        statuses.push({
+          tenantId: channel.tenantId,
+          workspaceId: channel.workspaceId,
+          channelId: channel.id,
+          provider: this.provider,
+          channelType: 'instagram',
+          externalMessageId,
+          status: 'read',
+          recipientId: event.sender?.id ?? null,
+          occurredAt: this.parseTimestamp(event.timestamp ?? entry.time),
+          metadata: { instagramAccountId: accountId },
+        });
+      }
+    }
+
+    return { statuses };
+  }
+
+  async normalizeReactions(payload: MetaInstagramWebhookPayload) {
+    const reactions: Array<{
+      tenantId: string;
+      workspaceId: string;
+      channelId: string;
+      externalMessageId: string;
+      senderId: string | null;
+      action: 'react' | 'unreact';
+      emoji: string | null;
+      occurredAt: Date;
+    }> = [];
+
+    for (const entry of payload.entry ?? []) {
+      for (const event of entry.messaging ?? []) {
+        if (!event.reaction?.mid) continue;
+        const accountId = entry.id ?? event.recipient?.id;
+        if (!accountId) continue;
+        const channel =
+          await this.channelResolver.findInstagramChannelByAccountId(accountId);
+        reactions.push({
+          tenantId: channel.tenantId,
+          workspaceId: channel.workspaceId,
+          channelId: channel.id,
+          externalMessageId: event.reaction.mid,
+          senderId: event.sender?.id ?? null,
+          action: event.reaction.action === 'unreact' ? 'unreact' : 'react',
+          emoji: event.reaction.emoji?.trim() || null,
+          occurredAt: this.parseTimestamp(event.timestamp ?? entry.time),
+        });
+      }
+    }
+
+    return { reactions };
   }
 
   private isInboundMessage(
@@ -82,6 +157,11 @@ export class InstagramMetaAdapter {
     entry: MetaInstagramEntry;
     event: MetaInstagramMessagingEvent;
     message: MetaInstagramMessage;
+    profile: {
+      name: string | null;
+      username: string | null;
+      profilePictureUrl: string | null;
+    } | null;
   }): NormalizedInboundMessage {
     const {
       tenantId,
@@ -91,9 +171,13 @@ export class InstagramMetaAdapter {
       entry,
       event,
       message,
+      profile,
     } = input;
     const senderId = event.sender?.id as string;
-    const attachments = this.extractAttachments(message.attachments);
+    const attachments = this.extractAttachments(
+      message.attachments,
+      message.mid ?? null,
+    );
 
     return {
       tenantId,
@@ -108,9 +192,11 @@ export class InstagramMetaAdapter {
       externalMessageId: message.mid ?? null,
       sender: {
         externalId: senderId,
-        username: event.sender?.username ?? null,
+        name: profile?.name ?? null,
+        username: profile?.username ?? event.sender?.username ?? null,
         metadata: {
           instagramScopedId: senderId,
+          avatarUrl: profile?.profilePictureUrl ?? null,
         },
       },
       messageType: this.mapMessageType(message, attachments),
@@ -124,6 +210,24 @@ export class InstagramMetaAdapter {
         replyToMessageId: message.reply_to?.mid ?? null,
       },
     };
+  }
+
+  private async loadProfile(
+    channel: { accessTokenEncrypted?: string | null },
+    scopedUserId: string,
+  ) {
+    try {
+      const accessToken = this.cryptoService.decrypt(
+        channel.accessTokenEncrypted ?? null,
+      );
+      if (!accessToken) return null;
+      return await this.metaGraphService.getInstagramUserProfile({
+        scopedUserId,
+        accessToken,
+      });
+    } catch {
+      return null;
+    }
   }
 
   private mapMessageType(
@@ -160,20 +264,25 @@ export class InstagramMetaAdapter {
 
   private extractAttachments(
     attachments: MetaInstagramAttachment[] | undefined,
+    messageId: string | null,
   ): NormalizedInboundAttachment[] {
-    return (attachments ?? []).flatMap((attachment) => {
+    return (attachments ?? []).flatMap((attachment, index) => {
       const type = this.mapAttachmentType(attachment.type);
-      if (!type) return [];
+      const url = attachment.payload?.url ?? null;
+      if (!type || !url) return [];
+      const urlHash = createHash('sha256')
+        .update(url)
+        .digest('hex')
+        .slice(0, 32);
 
       return [
         {
           type,
-          url: attachment.payload?.url ?? null,
-          // URL-only Instagram media remains normalized, but intentionally does
-          // not enqueue the existing media ingestion worker during IG-1.
-          externalId: null,
+          url,
+          externalId: `instagram:${messageId ?? urlHash}:${index}`,
           metadata: {
             instagramAttachmentType: attachment.type ?? null,
+            directUrl: url,
           },
         },
       ];

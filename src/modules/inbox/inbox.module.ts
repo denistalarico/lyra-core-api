@@ -88,6 +88,8 @@ import { InstagramOAuthController } from './channels/instagram/oauth/instagram-o
 import { InstagramOAuthService } from './channels/instagram/oauth/instagram-oauth.service';
 import { InstagramChannelHealthController } from './channels/instagram/instagram-channel-health.controller';
 import { InstagramChannelHealthService } from './channels/instagram/services/instagram-channel-health.service';
+import { InstagramOutboundController } from './channels/instagram/instagram-outbound.controller';
+import { InstagramOutboundService } from './channels/instagram/services/instagram-outbound.service';
 
 @Module({
   imports: [
@@ -141,6 +143,7 @@ import { InstagramChannelHealthService } from './channels/instagram/services/ins
     InboxAutonomyAdminController,
     InstagramOAuthController,
     InstagramChannelHealthController,
+    InstagramOutboundController,
   ],
   providers: [
     InboxService,
@@ -184,6 +187,7 @@ import { InstagramChannelHealthService } from './channels/instagram/services/ins
     ConversationPlaybookStateService,
     InstagramOAuthService,
     InstagramChannelHealthService,
+    InstagramOutboundService,
   ],
   exports: [
     InboxService,
@@ -192,6 +196,7 @@ import { InstagramChannelHealthService } from './channels/instagram/services/ins
     WebhookLogService,
     MessageStatusSyncService,
     WhatsAppOutboundService,
+    InstagramOutboundService,
     WhatsAppEmbeddedSignupService,
     MetaGraphService,
     WhatsAppChannelHealthService,

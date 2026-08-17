@@ -19,7 +19,7 @@ const validDecision = {
   schema_version: 1 as const,
   reply: 'Revisar',
   follow_text: null,
-    follow_text_next_day: null,
+  follow_text_next_day: null,
   stage_key: null,
   stage_name: null,
   tags: [],
@@ -1068,6 +1068,7 @@ run('Inbox Runtime PostgreSQL concurrency', () => {
           autoHandoffEnabled: false,
         } as never,
         { sendAgentText: jest.fn() } as never,
+        { sendAgentText: jest.fn() } as never,
         { transition: jest.fn() } as never,
       );
     await Promise.all([
@@ -1261,6 +1262,7 @@ function makeGovernedCrmWorker() {
       autoCrmEnabled: true,
       autoHandoffEnabled: false,
     } as never,
+    { sendAgentText: jest.fn() } as never,
     { sendAgentText: jest.fn() } as never,
     { transition: jest.fn() } as never,
   );

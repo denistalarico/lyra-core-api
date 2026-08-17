@@ -30,6 +30,7 @@ import {
 } from './mappers/inbox-channel.mapper';
 import { ConversationOwnershipService } from './services/conversation-ownership.service';
 import { WhatsAppOutboundService } from './channels/whatsapp/services/whatsapp-outbound.service';
+import { InstagramOutboundService } from './channels/instagram/services/instagram-outbound.service';
 import { CrmPipelineEntity } from '../crm/entities/crm-pipeline.entity';
 
 export type InboxConversationFilters = {
@@ -71,6 +72,7 @@ export class InboxService {
     private readonly filesService: FilesService,
     private readonly ownershipService: ConversationOwnershipService,
     private readonly whatsappOutboundService: WhatsAppOutboundService,
+    private readonly instagramOutboundService: InstagramOutboundService,
   ) {}
 
   async uploadAttachment(ctx: RequestContext, file: Express.Multer.File) {
@@ -1007,7 +1009,11 @@ export class InboxService {
     let reactionDelivery: 'sent' | 'local' | 'failed' = 'local';
 
     try {
-      const delivered = await this.whatsappOutboundService.deliverReaction({
+      const outbound =
+        conversation.source === 'instagram'
+          ? this.instagramOutboundService
+          : this.whatsappOutboundService;
+      const delivered = await outbound.deliverReaction({
         conversation,
         message,
         emoji: shouldRemoveReaction ? '' : normalizedEmoji.slice(0, 16),

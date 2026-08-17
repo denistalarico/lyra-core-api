@@ -26,6 +26,7 @@ import { InboxDomainOutboxEntity } from '../entities/inbox-domain-outbox.entity'
 import { InboxProcessingBatchEntity } from '../entities/inbox-processing-batch.entity';
 import { InboxNotificationPublisher } from './inbox-notification.publisher';
 import { InboxHandoffWhatsAppNotifier } from './inbox-handoff-whatsapp.notifier';
+import { hasLeadFlowOutboundOptOut } from './leadflow-contact-opt-out';
 
 export type ConversationOwnershipAction =
   | 'request_handoff'
@@ -197,11 +198,24 @@ export class ConversationOwnershipService {
       }
       if (
         action === 'return_ai' &&
-        conversation.qualificationStatus !== 'qualified'
+        (conversation.qualificationStatus === 'internal' ||
+          hasLeadFlowOutboundOptOut(conversation))
       ) {
         throw new ConflictException(
-          'Only a qualified conversation can be returned to AI.',
+          'This conversation is not eligible for automatic replies.',
         );
+      }
+
+      // A human activation is an explicit qualification signal. This also
+      // unlocks conversations created before Instagram became a lead-eligible
+      // channel, while the internal-contact and opt-out guards above remain
+      // authoritative.
+      if (
+        action === 'return_ai' &&
+        conversation.qualificationStatus !== 'qualified'
+      ) {
+        conversation.qualificationStatus = 'qualified';
+        conversation.qualificationReason = 'manual_ai_activation';
       }
 
       const previousVersion = conversation.ownershipVersion;

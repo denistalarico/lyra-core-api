@@ -143,3 +143,98 @@ describe('ConversationOwnershipService coordinated handoff transfer', () => {
     });
   });
 });
+
+describe('ConversationOwnershipService manual AI activation', () => {
+  function activationHarness(
+    conversationOverrides: Partial<InboxConversationEntity> = {},
+  ) {
+    const conversation = {
+      id: 'conversation-ai',
+      tenantId: 'tenant',
+      workspaceId: 'workspace',
+      channelId: 'instagram-channel',
+      opportunityId: null,
+      status: 'open',
+      ownershipState: 'paused',
+      ownershipVersion: 1,
+      ownershipReason: null,
+      ownershipChangedAt: new Date(),
+      assignedUserId: 'user',
+      assignedAgentId: null,
+      aiEnabled: false,
+      qualificationStatus: 'disqualified',
+      qualificationReason: 'no_matching_rule',
+      metadata: {},
+      ...conversationOverrides,
+    } as unknown as InboxConversationEntity;
+    const repositories = new Map<
+      unknown,
+      { findOne?: jest.Mock; save: jest.Mock }
+    >([
+      [
+        InboxConversationEntity,
+        {
+          findOne: jest.fn().mockResolvedValue(conversation),
+          save: jest.fn((value) => Promise.resolve(value)),
+        },
+      ],
+      [InboxConversationEventEntity, { save: jest.fn() }],
+      [InboxDomainOutboxEntity, { save: jest.fn() }],
+    ]);
+    const queryBuilder = {
+      update: jest.fn().mockReturnThis(),
+      set: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      execute: jest.fn().mockResolvedValue(undefined),
+    };
+    const manager = {
+      getRepository: jest.fn((entity) => repositories.get(entity)),
+      createQueryBuilder: jest.fn(() => queryBuilder),
+    };
+    const dataSource = {
+      transaction: jest.fn((callback) => callback(manager)),
+    };
+    return {
+      conversation,
+      service: new ConversationOwnershipService(dataSource as never),
+    };
+  }
+
+  it('treats an explicit human activation as qualification for a legacy conversation', async () => {
+    const harness = activationHarness();
+
+    await expect(
+      harness.service.transition(
+        { tenantId: 'tenant', workspaceId: 'workspace', userId: 'user' },
+        'conversation-ai',
+        'return_ai',
+      ),
+    ).resolves.toMatchObject({
+      ownershipState: 'ai_active',
+      aiEnabled: true,
+      qualificationStatus: 'qualified',
+      qualificationReason: 'manual_ai_activation',
+    });
+  });
+
+  it('keeps an explicit communication opt-out ineligible for AI', async () => {
+    const harness = activationHarness({
+      metadata: {
+        leadflowOutboundOptOut: {
+          status: 'opted_out',
+          recordedAt: '2026-08-16T12:00:00.000Z',
+          source: 'inbound_keyword',
+          sourceMessageId: 'message-opt-out',
+        },
+      },
+    });
+
+    await expect(
+      harness.service.transition(
+        { tenantId: 'tenant', workspaceId: 'workspace', userId: 'user' },
+        'conversation-ai',
+        'return_ai',
+      ),
+    ).rejects.toThrow('not eligible for automatic replies');
+  });
+});

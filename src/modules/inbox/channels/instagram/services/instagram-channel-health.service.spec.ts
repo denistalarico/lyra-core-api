@@ -11,6 +11,13 @@ import { InboxChannelEntity } from '../../../entities/inbox-channel.entity';
 import type { MetaGraphService } from '../../meta/services/meta-graph.service';
 import { InstagramChannelHealthService } from './instagram-channel-health.service';
 
+const REQUIRED_WEBHOOK_FIELDS = [
+  'messages',
+  'messaging_postbacks',
+  'message_reactions',
+  'messaging_seen',
+];
+
 describe('InstagramChannelHealthService', () => {
   it('verifies the saved identity and returns only a sanitized result', async () => {
     const harness = createHarness();
@@ -79,21 +86,20 @@ describe('InstagramChannelHealthService', () => {
       webhookSubscriptionHealthy: false,
       diagnosis: 'webhook_subscription_missing',
       requiresReconnect: true,
-      missingWebhookFields: ['messages', 'messaging_postbacks'],
+      missingWebhookFields: REQUIRED_WEBHOOK_FIELDS,
     });
     expect(harness.repository.save).not.toHaveBeenCalled();
   });
 
-  it.each([
-    ['messages', ['messaging_postbacks']],
-    ['messaging_postbacks', ['messages']],
-  ] as const)(
+  it.each(REQUIRED_WEBHOOK_FIELDS)(
     'returns unhealthy when the %s webhook field is missing',
-    async (missingField, subscribedFields) => {
+    async (missingField) => {
       const harness = createHarness();
       harness.meta.getInstagramAccountWebhookSubscriptions.mockResolvedValue({
         appSubscribed: true,
-        subscribedFields: [...subscribedFields],
+        subscribedFields: REQUIRED_WEBHOOK_FIELDS.filter(
+          (field) => field !== missingField,
+        ),
       });
 
       const result = await harness.service.runHealthCheck(scopedInput);
@@ -265,7 +271,7 @@ function createHarness(overrides: Partial<InboxChannelEntity> | null = {}) {
     getInstagramAccountWebhookSubscriptions: jest.fn(() =>
       Promise.resolve({
         appSubscribed: true,
-        subscribedFields: ['messages', 'messaging_postbacks'],
+        subscribedFields: REQUIRED_WEBHOOK_FIELDS,
       }),
     ),
   };

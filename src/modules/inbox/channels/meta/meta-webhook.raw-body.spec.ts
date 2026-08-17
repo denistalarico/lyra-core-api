@@ -31,6 +31,8 @@ describe('MetaWebhookController raw body integration', () => {
           provide: InstagramMetaAdapter,
           useValue: {
             normalize: jest.fn().mockResolvedValue({ messages: [] }),
+            normalizeStatuses: jest.fn().mockResolvedValue({ statuses: [] }),
+            normalizeReactions: jest.fn().mockResolvedValue({ reactions: [] }),
           },
         },
         {
@@ -43,7 +45,10 @@ describe('MetaWebhookController raw body integration', () => {
         },
         {
           provide: MessageStatusSyncService,
-          useValue: { applyStatusUpdate: jest.fn() },
+          useValue: {
+            applyStatusUpdate: jest.fn(),
+            applyInstagramReaction: jest.fn(),
+          },
         },
       ],
     }).compile();

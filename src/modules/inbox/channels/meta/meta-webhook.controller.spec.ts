@@ -12,10 +12,15 @@ describe('MetaWebhookController', () => {
   };
   const instagramAdapter = {
     normalize: jest.fn().mockResolvedValue({ messages: [] }),
+    normalizeStatuses: jest.fn().mockResolvedValue({ statuses: [] }),
+    normalizeReactions: jest.fn().mockResolvedValue({ reactions: [] }),
   };
   const ingestion = { ingest: jest.fn() };
   const webhookLog = { create: jest.fn().mockResolvedValue(undefined) };
-  const statusSync = { applyStatusUpdate: jest.fn() };
+  const statusSync = {
+    applyStatusUpdate: jest.fn(),
+    applyInstagramReaction: jest.fn(),
+  };
   const controller = new MetaWebhookController(
     whatsappAdapter as never,
     instagramAdapter as never,
@@ -31,6 +36,8 @@ describe('MetaWebhookController', () => {
     whatsappAdapter.normalize.mockResolvedValue({ messages: [] });
     whatsappAdapter.normalizeStatuses.mockResolvedValue({ statuses: [] });
     instagramAdapter.normalize.mockResolvedValue({ messages: [] });
+    instagramAdapter.normalizeStatuses.mockResolvedValue({ statuses: [] });
+    instagramAdapter.normalizeReactions.mockResolvedValue({ reactions: [] });
   });
 
   afterAll(() => {
@@ -162,8 +169,70 @@ describe('MetaWebhookController', () => {
             externalMessageId: 'ig-mid-1',
           },
         ],
+        statusResults: [],
+        reactionResults: [],
       },
     });
+  });
+
+  it('routes Instagram reaction webhooks to the native reaction sync', async () => {
+    const payload = {
+      object: 'instagram',
+      entry: [
+        {
+          id: 'ig-account-1',
+          messaging: [
+            {
+              sender: { id: 'ig-user-1' },
+              recipient: { id: 'ig-account-1' },
+              reaction: {
+                mid: 'ig-mid-1',
+                action: 'react',
+                emoji: '❤',
+              },
+            },
+          ],
+        },
+      ],
+    };
+    const normalizedReaction = {
+      tenantId: 'tenant-1',
+      workspaceId: 'workspace-1',
+      channelId: 'channel-1',
+      externalMessageId: 'ig-mid-1',
+      senderId: 'ig-user-1',
+      action: 'react' as const,
+      emoji: '❤',
+      occurredAt: new Date('2026-08-16T12:00:00.000Z'),
+    };
+    instagramAdapter.normalizeReactions.mockResolvedValue({
+      reactions: [normalizedReaction],
+    });
+    statusSync.applyInstagramReaction.mockResolvedValue({ id: 'message-1' });
+    const request = signedRequest(payload);
+
+    await expect(
+      controller.receiveWebhook(
+        request.signature,
+        { rawBody: request.rawBody } as never,
+        payload,
+      ),
+    ).resolves.toMatchObject({
+      ok: true,
+      messagesProcessed: 0,
+      reactionsProcessed: 1,
+    });
+    expect(statusSync.applyInstagramReaction).toHaveBeenCalledWith(
+      normalizedReaction,
+    );
+    expect(webhookLog.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tenantId: 'tenant-1',
+        workspaceId: 'workspace-1',
+        channelId: 'channel-1',
+        eventType: 'message_reaction',
+      }),
+    );
   });
 
   it.each([undefined, 'sha256=deadbeef'])(

@@ -25,6 +25,7 @@ import { InboxAutonomyControlEntity } from '../entities/inbox-autonomy-control.e
 import { InboxRuntimeConfigService } from '../runtime/inbox-runtime-config.service';
 import { resolveRoutedCrmTarget } from '../runtime/inbox-crm-target-resolver';
 import { WhatsAppOutboundService } from '../channels/whatsapp/services/whatsapp-outbound.service';
+import { InstagramOutboundService } from '../channels/instagram/services/instagram-outbound.service';
 import { ConversationOwnershipService } from './conversation-ownership.service';
 import { CrmOpportunityCommandService } from '../../crm/services/crm-opportunity-command.service';
 import { CrmStageTransitionPolicyEntity } from '../../crm/entities/crm-stage-transition-policy.entity';
@@ -43,6 +44,7 @@ export class InboxGovernedActionWorker
     @InjectDataSource('agency') private readonly dataSource: DataSource,
     private readonly config: InboxRuntimeConfigService,
     private readonly outbound: WhatsAppOutboundService,
+    private readonly instagramOutbound: InstagramOutboundService,
     private readonly ownership: ConversationOwnershipService,
     @Optional()
     private readonly opportunityCommands?: CrmOpportunityCommandService,
@@ -108,7 +110,18 @@ export class InboxGovernedActionWorker
           await this.finish(action, 'invalid', 'reply_payload_invalid', {});
           return action;
         }
-        const sent = await this.outbound.sendAgentText({
+        const channel = await this.dataSource
+          .getRepository(InboxChannelEntity)
+          .findOneBy({
+            id: conversation.channelId,
+            tenantId: action.tenantId,
+            workspaceId: action.workspaceId,
+          });
+        const outbound =
+          channel?.type === 'instagram'
+            ? this.instagramOutbound
+            : this.outbound;
+        const sent = await outbound.sendAgentText({
           ctx: {
             tenantId: action.tenantId,
             workspaceId: action.workspaceId,

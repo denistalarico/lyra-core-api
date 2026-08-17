@@ -15,11 +15,13 @@ const ALLOWED_MIME = new Set([
   'image/jpeg',
   'image/png',
   'image/webp',
+  'image/gif',
   'audio/ogg',
   'audio/mpeg',
   'audio/mp4',
   'audio/aac',
   'audio/amr',
+  'video/mp4',
 ]);
 const MAX_MEDIA_BYTES = 15 * 1024 * 1024;
 
@@ -91,16 +93,21 @@ export class MetaMediaIngestionWorker {
         });
       const token = this.cryptoService.decrypt(channel.accessTokenEncrypted);
       if (!token) throw new Error('missing_channel_token');
-      const metadata = await this.fetchMediaMetadata(
-        asset.externalMediaId,
-        token,
-      );
-      const mimeType = (metadata.mime_type ?? asset.mimeType)
+      const directUrl = this.readString(asset.metadata?.directUrl);
+      const metadata = directUrl
+        ? { url: directUrl, mime_type: asset.mimeType, sha256: undefined }
+        : await this.fetchMediaMetadata(asset.externalMediaId, token);
+      const downloaded = await this.fetchMediaBody(metadata.url, token);
+      const mimeType = (
+        metadata.mime_type ??
+        asset.mimeType ??
+        downloaded.contentType
+      )
         ?.split(';')[0]
         .trim();
       if (!mimeType || !ALLOWED_MIME.has(mimeType))
         throw new Error('unsupported_mime');
-      const body = await this.fetchMediaBody(metadata.url, token);
+      const body = downloaded.body;
       if (body.length > MAX_MEDIA_BYTES) throw new Error('media_too_large');
       this.assertMagicBytes(body, mimeType);
       const digest = createHash('sha256').update(body).digest();
@@ -200,7 +207,13 @@ export class MetaMediaIngestionWorker {
   }
   private async fetchMediaBody(url: string, token: string) {
     const parsed = new URL(url);
-    const trustedDomains = ['facebook.com', 'fbcdn.net', 'fbsbx.com'];
+    const trustedDomains = [
+      'facebook.com',
+      'fbcdn.net',
+      'fbsbx.com',
+      'instagram.com',
+      'cdninstagram.com',
+    ];
     const trustedHost = trustedDomains.some(
       (domain) =>
         parsed.hostname === domain || parsed.hostname.endsWith(`.${domain}`),
@@ -215,22 +228,30 @@ export class MetaMediaIngestionWorker {
     const size = Number(response.headers.get('content-length') ?? 0);
     if (!response.ok) throw new Error('media_download_failed');
     if (size > MAX_MEDIA_BYTES) throw new Error('media_too_large');
-    return Buffer.from(await response.arrayBuffer());
+    return {
+      body: Buffer.from(await response.arrayBuffer()),
+      contentType: response.headers.get('content-type'),
+    };
   }
   private assertMagicBytes(body: Buffer, mime: string) {
     const valid =
       (mime === 'image/jpeg' && body[0] === 0xff && body[1] === 0xd8) ||
       (mime === 'image/png' && body.subarray(1, 4).toString() === 'PNG') ||
       (mime === 'image/webp' && body.subarray(8, 12).toString() === 'WEBP') ||
+      (mime === 'image/gif' && body.subarray(0, 3).toString() === 'GIF') ||
       (mime === 'audio/ogg' && body.subarray(0, 4).toString() === 'OggS') ||
       (mime === 'audio/mpeg' &&
         (body.subarray(0, 3).toString() === 'ID3' || body[0] === 0xff)) ||
-      (mime.startsWith('audio/') && body.length > 8);
+      (mime.startsWith('audio/') && body.length > 8) ||
+      (mime === 'video/mp4' && body.subarray(4, 8).toString() === 'ftyp');
     if (!valid) throw new Error('mime_signature_mismatch');
   }
   private sanitizeError(error: unknown) {
     const code =
       error instanceof Error ? error.message : 'media_ingestion_failed';
     return /^[a-z0-9_]{1,80}$/.test(code) ? code : 'media_ingestion_failed';
+  }
+  private readString(value: unknown) {
+    return typeof value === 'string' && value.trim() ? value.trim() : null;
   }
 }

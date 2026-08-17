@@ -104,10 +104,18 @@ export class MetaWebhookController {
             );
       const normalizedStatuses =
         workload === 'instagram'
-          ? { statuses: [] }
+          ? await this.instagramMetaAdapter.normalizeStatuses(
+              payload as MetaInstagramWebhookPayload,
+            )
           : await this.whatsappMetaAdapter.normalizeStatuses(
               payload as MetaWhatsAppWebhookPayload,
             );
+      const normalizedReactions =
+        workload === 'instagram'
+          ? await this.instagramMetaAdapter.normalizeReactions(
+              payload as MetaInstagramWebhookPayload,
+            )
+          : { reactions: [] };
 
       const results: Array<{
         conversationId: string;
@@ -119,6 +127,11 @@ export class MetaWebhookController {
         messageId: string;
         externalMessageId: string;
         status: string;
+      }> = [];
+      const reactionResults: Array<{
+        messageId: string;
+        externalMessageId: string;
+        action: string;
       }> = [];
 
       for (const message of normalized.messages) {
@@ -139,11 +152,26 @@ export class MetaWebhookController {
           status: statusUpdate.status,
         });
       }
+      for (const reactionUpdate of normalizedReactions.reactions) {
+        const updatedMessage =
+          await this.messageStatusSyncService.applyInstagramReaction(
+            reactionUpdate,
+          );
+        reactionResults.push({
+          messageId: updatedMessage.id,
+          externalMessageId: reactionUpdate.externalMessageId,
+          action: reactionUpdate.action,
+        });
+      }
 
+      const normalizedScope =
+        normalized.messages[0] ??
+        normalizedStatuses.statuses[0] ??
+        normalizedReactions.reactions[0];
       await this.webhookLogService.create({
-        tenantId: normalized.messages[0]?.tenantId ?? null,
-        workspaceId: normalized.messages[0]?.workspaceId ?? null,
-        channelId: normalized.messages[0]?.channelId ?? null,
+        tenantId: normalizedScope?.tenantId ?? null,
+        workspaceId: normalizedScope?.workspaceId ?? null,
+        channelId: normalizedScope?.channelId ?? null,
         provider: 'meta',
         eventType,
         status: 'processed',
@@ -156,7 +184,7 @@ export class MetaWebhookController {
         payload: {},
         metadata:
           workload === 'instagram'
-            ? { workload, results }
+            ? { workload, results, statusResults, reactionResults }
             : { results, statusResults },
       });
 
@@ -166,8 +194,10 @@ export class MetaWebhookController {
         signatureReceived: true,
         messagesProcessed: results.length,
         statusesProcessed: statusResults.length,
+        reactionsProcessed: reactionResults.length,
         results,
         statusResults,
+        reactionResults,
       };
     } catch (error) {
       if (error instanceof MetaChannelUnavailableError) {
@@ -294,6 +324,9 @@ export class MetaWebhookController {
   private extractInstagramEventType(payload: MetaInstagramWebhookPayload) {
     const events =
       payload.entry?.flatMap((entry) => entry.messaging ?? []) ?? [];
-    return events.some((event) => event.message) ? 'message' : 'unknown';
+    if (events.some((event) => event.message)) return 'message';
+    if (events.some((event) => event.reaction)) return 'message_reaction';
+    if (events.some((event) => event.read)) return 'message_read';
+    return 'unknown';
   }
 }

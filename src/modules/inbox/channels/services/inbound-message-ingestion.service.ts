@@ -164,6 +164,7 @@ export class InboundMessageIngestionService {
           metadata: {
             provider: input.provider ?? null,
             channelType: input.channelType,
+            ...this.createConversationIdentityMetadata(input),
           },
         });
         conversation = await manager
@@ -197,6 +198,15 @@ export class InboundMessageIngestionService {
         }
       }
 
+      const enrichedIdentity = this.createConversationIdentityMetadata(input);
+      conversation.metadata = {
+        ...(conversation.metadata ?? {}),
+        ...enrichedIdentity,
+      };
+      if (this.shouldReplaceConversationTitle(conversation.title, input)) {
+        conversation.title = this.createConversationTitle(input);
+      }
+
       const message = await manager.getRepository(InboxMessageEntity).save(
         manager.getRepository(InboxMessageEntity).create({
           tenantId: input.tenantId,
@@ -217,6 +227,9 @@ export class InboundMessageIngestionService {
             provider: input.provider ?? null,
             channelType: input.channelType,
             senderExternalId: input.sender.externalId,
+            senderName: input.sender.name ?? null,
+            senderUsername: input.sender.username ?? null,
+            senderAvatarUrl: this.readString(input.sender.metadata?.avatarUrl),
           },
           sentAt: occurredAt,
           deliveredAt: null,
@@ -392,8 +405,14 @@ export class InboundMessageIngestionService {
         rule.enabled !== false && channel.toLowerCase() === input.channelType
       );
     });
-    if (channelRules.length === 0 && input.channelType === 'whatsapp') {
-      return { status: 'qualified' as const, reason: 'whatsapp_default' };
+    if (
+      channelRules.length === 0 &&
+      (input.channelType === 'whatsapp' || input.channelType === 'instagram')
+    ) {
+      return {
+        status: 'qualified' as const,
+        reason: `${input.channelType}_default`,
+      };
     }
     const text = input.content.toLocaleLowerCase('pt-BR');
     for (const rule of channelRules) {
@@ -455,7 +474,7 @@ export class InboundMessageIngestionService {
             nextAttemptAt: new Date(),
             availableAt: null,
             errorCode: null,
-            metadata: {},
+            metadata: attachment.metadata ?? {},
           }),
         ),
       );
@@ -573,13 +592,55 @@ export class InboundMessageIngestionService {
     return content.trim().slice(0, 260);
   }
   private createConversationTitle(input: NormalizedInboundMessage) {
+    const username = input.sender.username?.trim();
     return (
-      input.sender.name ||
-      input.sender.phone ||
-      input.sender.email ||
-      input.sender.username ||
-      input.sender.externalId ||
-      'Nova conversa'
+      input.sender.name?.trim() ||
+      input.sender.phone?.trim() ||
+      (username
+        ? username.startsWith('@')
+          ? username
+          : `@${username}`
+        : '') ||
+      input.sender.email?.trim() ||
+      (input.channelType === 'instagram'
+        ? 'Lead do Instagram'
+        : input.channelType === 'whatsapp'
+          ? 'Lead do WhatsApp'
+          : 'Nova conversa')
     ).slice(0, 180);
+  }
+
+  private createConversationIdentityMetadata(input: NormalizedInboundMessage) {
+    return Object.fromEntries(
+      Object.entries({
+        contactName: input.sender.name?.trim() || null,
+        contactPhone: input.sender.phone?.trim() || null,
+        contactEmail: input.sender.email?.trim() || null,
+        username: input.sender.username?.trim() || null,
+        avatarUrl: this.readString(input.sender.metadata?.avatarUrl),
+        externalParticipantId: input.sender.externalId,
+      }).filter(([, value]) => Boolean(value)),
+    );
+  }
+
+  private shouldReplaceConversationTitle(
+    title: string | null,
+    input: NormalizedInboundMessage,
+  ) {
+    const normalized = title?.trim() ?? '';
+    if (!normalized) return true;
+    if (
+      normalized === input.sender.externalId ||
+      normalized === input.externalThreadId
+    ) {
+      return true;
+    }
+    return (
+      /^\d{8,}$/.test(normalized) ||
+      /^instagram:/i.test(normalized) ||
+      ['Nova conversa', 'Conversa sem título', 'Lead do Instagram'].includes(
+        normalized,
+      )
+    );
   }
 }

@@ -14,6 +14,15 @@ export type MetaInstagramMessagingEvent = {
   recipient?: MetaInstagramParticipant;
   timestamp?: number;
   message?: MetaInstagramMessage;
+  reaction?: {
+    mid?: string;
+    action?: string;
+    reaction?: string;
+    emoji?: string;
+  };
+  read?: {
+    mid?: string;
+  };
 };
 
 export type MetaInstagramParticipant = {
