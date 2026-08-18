@@ -14,6 +14,7 @@ describe('FacebookInstagramOAuthController', () => {
   const oauthService = {
     start: jest.fn(),
     handleCallback: jest.fn(),
+    select: jest.fn(),
   };
   const controller = new FacebookInstagramOAuthController(
     oauthService as unknown as FacebookInstagramOAuthService,
@@ -21,25 +22,22 @@ describe('FacebookInstagramOAuthController', () => {
 
   beforeEach(() => jest.clearAllMocks());
 
-  it('protects start and keeps the callback public', () => {
-    expect(
-      Reflect.getMetadata(
-        GUARDS_METADATA,
-        FacebookInstagramOAuthController.prototype.start,
-      ),
-    ).toEqual([JwtAuthGuard, PermissionsGuard]);
-    expect(
-      Reflect.getMetadata(
-        PRODUCT_ENTITLEMENT_METADATA,
-        FacebookInstagramOAuthController.prototype.start,
-      ),
-    ).toBe('leadflow');
-    expect(
-      Reflect.getMetadata(
-        PERMISSION_KEY_METADATA,
-        FacebookInstagramOAuthController.prototype.start,
-      ),
-    ).toBe('leadflow.channels.channel.create.admin');
+  it('protects start and select with authentication, entitlement, and permission', () => {
+    for (const handler of [
+      FacebookInstagramOAuthController.prototype.start,
+      FacebookInstagramOAuthController.prototype.select,
+    ]) {
+      expect(Reflect.getMetadata(GUARDS_METADATA, handler)).toEqual([
+        JwtAuthGuard,
+        PermissionsGuard,
+      ]);
+      expect(Reflect.getMetadata(PRODUCT_ENTITLEMENT_METADATA, handler)).toBe(
+        'leadflow',
+      );
+      expect(Reflect.getMetadata(PERMISSION_KEY_METADATA, handler)).toBe(
+        'leadflow.channels.channel.create.admin',
+      );
+    }
     expect(
       Reflect.getMetadata(
         GUARDS_METADATA,
@@ -53,6 +51,35 @@ describe('FacebookInstagramOAuthController', () => {
       BadRequestException,
     );
     expect(oauthService.start).not.toHaveBeenCalled();
+  });
+
+  it('requires tenant and workspace context on selection', () => {
+    expect(() =>
+      controller.select(
+        { tenantId: 'tenant-id', userId: 'user-id' },
+        { sessionId: 'session-id', pageId: '123' },
+      ),
+    ).toThrow(BadRequestException);
+    expect(oauthService.select).not.toHaveBeenCalled();
+  });
+
+  it('selects only with authenticated request context ownership', () => {
+    void controller.select(
+      {
+        tenantId: 'tenant-id',
+        workspaceId: 'workspace-id',
+        userId: 'user-id',
+      },
+      { sessionId: 'session-id', pageId: '123' },
+    );
+
+    expect(oauthService.select).toHaveBeenCalledWith({
+      tenantId: 'tenant-id',
+      workspaceId: 'workspace-id',
+      userId: 'user-id',
+      sessionId: 'session-id',
+      pageId: '123',
+    });
   });
 
   it('uses only authenticated request context and preserves managed metadata', () => {

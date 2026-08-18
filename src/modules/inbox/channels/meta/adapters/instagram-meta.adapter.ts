@@ -213,7 +213,10 @@ export class InstagramMetaAdapter {
   }
 
   private async loadProfile(
-    channel: { accessTokenEncrypted?: string | null },
+    channel: {
+      accessTokenEncrypted?: string | null;
+      metadata?: Record<string, unknown>;
+    },
     scopedUserId: string,
   ) {
     try {
@@ -221,6 +224,12 @@ export class InstagramMetaAdapter {
         channel.accessTokenEncrypted ?? null,
       );
       if (!accessToken) return null;
+      if (channel.metadata?.authorizationMethod === 'facebook_login') {
+        return await this.metaGraphService.getFacebookInstagramUserProfile({
+          scopedUserId,
+          pageAccessToken: accessToken,
+        });
+      }
       return await this.metaGraphService.getInstagramUserProfile({
         scopedUserId,
         accessToken,

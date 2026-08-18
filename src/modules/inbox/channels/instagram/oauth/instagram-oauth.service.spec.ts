@@ -6,6 +6,7 @@ import type { SettingsCryptoService } from '../../../../../common/crypto/setting
 import { InboxChannelConnectionSessionEntity } from '../../../entities/inbox-channel-connection-session.entity';
 import { InboxChannelEntity } from '../../../entities/inbox-channel.entity';
 import type { MetaGraphService } from '../../meta/services/meta-graph.service';
+import { InstagramChannelConnectionService } from './instagram-channel-connection.service';
 import { InstagramOAuthService } from './instagram-oauth.service';
 
 describe('InstagramOAuthService', () => {
@@ -437,7 +438,9 @@ function createHarness(
     startSessions as unknown as Repository<InboxChannelConnectionSessionEntity>,
     dataSource as unknown as DataSource,
     meta as unknown as MetaGraphService,
-    crypto as unknown as SettingsCryptoService,
+    new InstagramChannelConnectionService(
+      crypto as unknown as SettingsCryptoService,
+    ),
   );
 
   return {

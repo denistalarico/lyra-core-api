@@ -1,11 +1,13 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-return, @typescript-eslint/require-await -- Jest/TypeORM test doubles intentionally expose partial dynamic repository shapes. */
+/* eslint-disable @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-return, @typescript-eslint/require-await, @typescript-eslint/unbound-method -- Jest/TypeORM test doubles intentionally expose partial dynamic repository shapes. */
 import { BadRequestException } from '@nestjs/common';
 import { createHash } from 'crypto';
 import type { DataSource, Repository } from 'typeorm';
 import { SettingsCryptoService } from '../../../../../../common/crypto/settings-crypto.service';
 import { InboxChannelConnectionSessionEntity } from '../../../../entities/inbox-channel-connection-session.entity';
+import { InboxChannelEntity } from '../../../../entities/inbox-channel.entity';
 import type { MetaAssetDiscoveryService } from '../../../meta/services/meta-asset-discovery.service';
 import type { MetaGraphService } from '../../../meta/services/meta-graph.service';
+import { InstagramChannelConnectionService } from '../instagram-channel-connection.service';
 import { FacebookInstagramOAuthService } from './facebook-instagram-oauth.service';
 
 describe('FacebookInstagramOAuthService', () => {
@@ -287,11 +289,341 @@ describe('FacebookInstagramOAuthService', () => {
     expect(JSON.stringify(harness.session)).not.toContain('user-secret-token');
     expect(JSON.stringify(harness.session)).not.toContain('page-secret-1');
   });
+
+  it('selects a revalidated asset, connects one Instagram channel, and completes the session', async () => {
+    const harness = createHarness({ session: selectionSessionFixture() });
+
+    const result = await harness.service.select(selectionInput());
+
+    expect(result).toEqual({ channelId: 'new-channel-id' });
+    expect(harness.transactionSessions.findOne).toHaveBeenCalledWith({
+      where: {
+        id: 'session-id',
+        tenantId: 'tenant-id',
+        workspaceId: 'workspace-id',
+        provider: 'meta',
+        channelType: 'instagram',
+      },
+      lock: { mode: 'pessimistic_write' },
+    });
+    expect(harness.meta.getFacebookPageInstagramAccount).toHaveBeenCalledWith({
+      pageId: '123',
+      pageAccessToken: 'page-selection-secret',
+    });
+    expect(
+      harness.meta.subscribeFacebookPageToInstagramWebhooks,
+    ).toHaveBeenCalledWith({
+      pageId: '123',
+      pageAccessToken: 'page-selection-secret',
+      subscribedFields: [
+        'messages',
+        'messaging_postbacks',
+        'message_reactions',
+        'messaging_seen',
+      ],
+    });
+    expect(harness.manager.query).toHaveBeenCalledWith(
+      'SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))',
+      ['tenant-id:workspace-id', 'instagram:meta:instagram-123'],
+    );
+    expect(harness.channels.create).toHaveBeenCalledTimes(1);
+    expect(harness.channels.save).toHaveBeenCalledTimes(1);
+    expect(harness.channels.save.mock.calls[0][0]).toMatchObject({
+      type: 'instagram',
+      provider: 'meta',
+      externalAccountId: 'instagram-123',
+      externalPageId: '123',
+      credentialVersion: 1,
+      lifecycleVersion: 1,
+      settings: { connectionHealth: 'ok' },
+      metadata: expect.objectContaining({
+        authorizationMethod: 'facebook_login',
+        facebookPageId: '123',
+        connectionSessionId: 'session-id',
+        username: 'current.username',
+      }),
+    });
+    const savedChannel = harness.channels.save.mock.calls[0][0];
+    expect(harness.crypto.decrypt(savedChannel.accessTokenEncrypted)).toBe(
+      'page-selection-secret',
+    );
+    expect(harness.session).toMatchObject({
+      status: 'completed',
+      errorMessage: null,
+      completedAt: expect.any(Date),
+      metadata: expect.objectContaining({
+        stage: 'completed',
+        channelId: 'new-channel-id',
+        selectedPageId: '123',
+        selectedInstagramAccountId: 'instagram-123',
+      }),
+    });
+    expect(harness.session.payload).toEqual({
+      selectableAssets: [
+        {
+          pageId: '123',
+          pageName: 'Selected Page',
+          instagramAccountId: 'instagram-123',
+          instagramUsername: 'discovered.username',
+        },
+      ],
+    });
+    expect(JSON.stringify(harness.session)).not.toContain(
+      'page-selection-secret',
+    );
+    expect(JSON.stringify(harness.session)).not.toContain(
+      'user-selection-secret',
+    );
+  });
+
+  it.each([
+    ['tenant', { tenantId: 'other-tenant' }],
+    ['workspace', { workspaceId: 'other-workspace' }],
+  ] as const)('rejects a session from another %s', async (_scope, override) => {
+    const harness = createHarness({ session: selectionSessionFixture() });
+
+    const exception = await selectionFailure(harness, {
+      ...selectionInput(),
+      ...override,
+    });
+
+    expect(exception.message).toBe('invalid_session');
+    expect(harness.meta.getFacebookPageInstagramAccount).not.toHaveBeenCalled();
+  });
+
+  it('rejects incompatible user ownership', async () => {
+    const harness = createHarness({ session: selectionSessionFixture() });
+    const exception = await selectionFailure(harness, {
+      ...selectionInput(),
+      userId: 'other-user',
+    });
+    expect(exception.message).toBe('invalid_session');
+  });
+
+  it('rejects a missing request user when the session has an owner', async () => {
+    const harness = createHarness({ session: selectionSessionFixture() });
+    const exception = await selectionFailure(harness, {
+      ...selectionInput(),
+      userId: null,
+    });
+
+    expect(exception.message).toBe('invalid_session');
+    expect(harness.meta.getFacebookPageInstagramAccount).not.toHaveBeenCalled();
+  });
+
+  it('preserves nullable session ownership behavior', async () => {
+    const nullableOwnership = createHarness({
+      session: selectionSessionFixture({ userId: null }),
+    });
+    await expect(
+      nullableOwnership.service.select(selectionInput()),
+    ).resolves.toEqual({ channelId: 'new-channel-id' });
+  });
+
+  it.each([
+    ['session_expired', { expiresAt: new Date(Date.now() - 1) }],
+    [
+      'invalid_session',
+      {
+        metadata: {
+          authorizationMethod: 'facebook_login',
+          stage: 'oauth_started',
+        },
+      },
+    ],
+    ['session_consumed', { status: 'completed' as const }],
+  ])('rejects invalid session lifecycle as %s', async (code, override) => {
+    const harness = createHarness({
+      session: selectionSessionFixture(
+        override as Partial<InboxChannelConnectionSessionEntity>,
+      ),
+    });
+
+    const exception = await selectionFailure(harness);
+
+    expect(exception.message).toBe(code);
+    expect(harness.channels.save).not.toHaveBeenCalled();
+  });
+
+  it('rejects a Page that was not offered in selectableAssets', async () => {
+    const harness = createHarness({ session: selectionSessionFixture() });
+
+    const exception = await selectionFailure(harness, {
+      ...selectionInput(),
+      pageId: '999',
+    });
+
+    expect(exception.message).toBe('asset_not_available');
+    expect(harness.crypto.decrypt).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['missing encrypted credentials', undefined, 'invalid_credential_payload'],
+    ['malformed JSON', 'not-json', 'invalid_credential_payload'],
+    [
+      'malformed payload',
+      JSON.stringify({ userAccessToken: 'user-selection-secret' }),
+      'invalid_credential_payload',
+    ],
+    [
+      'missing selected Page credential',
+      JSON.stringify({
+        userAccessToken: 'user-selection-secret',
+        pageCredentials: [
+          { pageId: '999', pageAccessToken: 'other-page-secret' },
+        ],
+      }),
+      'invalid_credential_payload',
+    ],
+  ])('rejects %s defensively', async (_case, plaintext, code) => {
+    const session = selectionSessionFixture();
+    session.payload = {
+      ...session.payload,
+      ...(plaintext === undefined
+        ? {}
+        : {
+            credentialsEncrypted: new SettingsCryptoService().encrypt(
+              plaintext,
+            ),
+          }),
+    };
+    if (plaintext === undefined) delete session.payload.credentialsEncrypted;
+    const harness = createHarness({ session });
+
+    const exception = await selectionFailure(harness);
+
+    expect(exception.message).toBe(code);
+    expect(harness.channels.save).not.toHaveBeenCalled();
+  });
+
+  it('rejects credential decryption failure without leaking ciphertext details', async () => {
+    const harness = createHarness({ session: selectionSessionFixture() });
+    jest.spyOn(harness.crypto, 'decrypt').mockImplementation(() => {
+      throw new Error('decrypt failed with page-selection-secret');
+    });
+
+    const exception = await selectionFailure(harness);
+
+    expect(exception.message).toBe('credential_decryption_failed');
+    expect(exception.message).not.toContain('page-selection-secret');
+    expect(harness.channels.save).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['selected_page_has_no_instagram', null],
+    [
+      'instagram_asset_changed',
+      { accountId: 'changed-instagram-id', username: 'changed' },
+    ],
+  ] as const)(
+    'rejects revalidated asset drift as %s',
+    async (code, account) => {
+      const harness = createHarness({ session: selectionSessionFixture() });
+      harness.meta.getFacebookPageInstagramAccount.mockResolvedValue(
+        account as never,
+      );
+
+      const exception = await selectionFailure(harness);
+
+      expect(exception.message).toBe(code);
+      expect(
+        harness.meta.subscribeFacebookPageToInstagramWebhooks,
+      ).not.toHaveBeenCalled();
+      expect(harness.channels.save).not.toHaveBeenCalled();
+    },
+  );
+
+  it('sanitizes revalidation and webhook failures and never persists a partial channel', async () => {
+    const revalidation = createHarness({ session: selectionSessionFixture() });
+    revalidation.meta.getFacebookPageInstagramAccount.mockRejectedValue(
+      new Error('provider leaked page-selection-secret'),
+    );
+    const revalidationException = await selectionFailure(revalidation);
+    expect(revalidationException.message).toBe('asset_revalidation_failed');
+    expect(revalidationException.message).not.toContain(
+      'page-selection-secret',
+    );
+
+    const webhook = createHarness({ session: selectionSessionFixture() });
+    webhook.meta.subscribeFacebookPageToInstagramWebhooks.mockRejectedValue(
+      new Error(
+        'provider leaked page-selection-secret and user-selection-secret',
+      ),
+    );
+    const webhookException = await selectionFailure(webhook);
+    expect(webhookException.message).toBe('webhook_subscription_failed');
+    expect(webhookException.message).not.toContain('page-selection-secret');
+    expect(webhookException.message).not.toContain('user-selection-secret');
+    expect(webhook.channels.create).not.toHaveBeenCalled();
+    expect(webhook.channels.save).not.toHaveBeenCalled();
+    expect(webhook.session.status).toBe('pending');
+  });
+
+  it('rolls back selection with a sanitized persistence failure', async () => {
+    const harness = createHarness({ session: selectionSessionFixture() });
+    harness.channels.save.mockRejectedValue(
+      new Error(
+        'database failure included page-selection-secret and user-selection-secret',
+      ),
+    );
+
+    const exception = await selectionFailure(harness);
+
+    expect(exception.message).toBe('channel_persistence_failed');
+    expect(exception.message).not.toContain('page-selection-secret');
+    expect(exception.message).not.toContain('user-selection-secret');
+    expect(harness.session.status).toBe('pending');
+    expect(harness.session.completedAt).toBeNull();
+  });
+
+  it('reuses a direct-login channel without duplication and preserves configuration', async () => {
+    const existing = channelFixture({
+      credentialVersion: 7,
+      lifecycleVersion: 3,
+      externalId: 'direct-scoped-id',
+      externalPageId: null,
+      settings: { routing: 'preserved', connectionHealth: 'stale' },
+      metadata: {
+        authorizationMethod: 'instagram_login',
+        unrelatedAudit: 'preserved',
+      },
+    });
+    const harness = createHarness({
+      session: selectionSessionFixture(),
+      existingChannel: existing,
+    });
+
+    const result = await harness.service.select(selectionInput());
+
+    expect(result).toEqual({ channelId: 'channel-id' });
+    expect(harness.channels.create).not.toHaveBeenCalled();
+    expect(harness.channels.save).toHaveBeenCalledWith(existing);
+    expect(existing).toMatchObject({
+      externalAccountId: 'instagram-123',
+      externalId: 'direct-scoped-id',
+      externalPageId: '123',
+      credentialVersion: 8,
+      lifecycleVersion: 3,
+      settings: {
+        routing: 'preserved',
+        connectionHealth: 'ok',
+      },
+      metadata: expect.objectContaining({
+        authorizationMethod: 'facebook_login',
+        unrelatedAudit: 'preserved',
+        facebookPageId: '123',
+      }),
+    });
+    expect(harness.crypto.decrypt(existing.accessTokenEncrypted)).toBe(
+      'page-selection-secret',
+    );
+  });
 });
 
 function createHarness(
   options: {
     session?: InboxChannelConnectionSessionEntity | null;
+    existingChannel?: InboxChannelEntity | null;
     assets?: Array<{
       pageId: string;
       pageName: string;
@@ -307,11 +639,33 @@ function createHarness(
     save: jest.fn(async (value) => value),
   };
   const transactionSessions = {
-    findOne: jest.fn(async () => session),
+    findOne: jest.fn(async (query?: { where?: Record<string, unknown> }) => {
+      if (!session) return null;
+      const where = query?.where ?? {};
+      return Object.entries(where).every(
+        ([property, value]) =>
+          (session as unknown as Record<string, unknown>)[property] === value,
+      )
+        ? session
+        : null;
+    }),
     save: jest.fn(async (value) => value),
   };
+  const channels = {
+    findOne: jest.fn(async () => options.existingChannel ?? null),
+    create: jest.fn((value) => ({ ...value })),
+    save: jest.fn(async (value) => {
+      if (!value.id) value.id = 'new-channel-id';
+      return value;
+    }),
+  };
   const manager = {
-    getRepository: jest.fn(() => transactionSessions),
+    getRepository: jest.fn((entity) =>
+      entity === InboxChannelConnectionSessionEntity
+        ? transactionSessions
+        : channels,
+    ),
+    query: jest.fn(async () => undefined),
   };
   const dataSource = {
     transaction: jest.fn(async (work) => work(manager)),
@@ -326,6 +680,13 @@ function createHarness(
       accessToken: 'user-secret-token',
       tokenType: 'bearer',
       expiresIn: 3_600,
+    })),
+    getFacebookPageInstagramAccount: jest.fn(async () => ({
+      accountId: 'instagram-123',
+      username: 'current.username',
+    })),
+    subscribeFacebookPageToInstagramWebhooks: jest.fn(async () => ({
+      success: true as const,
     })),
   };
   const discovery = {
@@ -358,6 +719,7 @@ function createHarness(
     meta as unknown as MetaGraphService,
     discovery as unknown as MetaAssetDiscoveryService,
     crypto,
+    new InstagramChannelConnectionService(crypto),
   );
 
   return {
@@ -365,11 +727,72 @@ function createHarness(
     session: session as InboxChannelConnectionSessionEntity,
     startSessions,
     transactionSessions,
+    channels,
+    manager,
     meta,
     discovery,
     crypto,
     decryptSpy,
   };
+}
+
+function selectionSessionFixture(
+  overrides: Partial<InboxChannelConnectionSessionEntity> = {},
+) {
+  const crypto = new SettingsCryptoService();
+  return sessionFixture({
+    payload: {
+      credentialsEncrypted: crypto.encrypt(
+        JSON.stringify({
+          userAccessToken: 'user-selection-secret',
+          pageCredentials: [
+            {
+              pageId: '123',
+              pageAccessToken: 'page-selection-secret',
+            },
+          ],
+        }),
+      ),
+      selectableAssets: [
+        {
+          pageId: '123',
+          pageName: 'Selected Page',
+          instagramAccountId: 'instagram-123',
+          instagramUsername: 'discovered.username',
+        },
+      ],
+    },
+    metadata: {
+      authorizationMethod: 'facebook_login',
+      stage: 'asset_selection',
+      auditContext: 'preserved',
+    },
+    ...overrides,
+  });
+}
+
+function selectionInput(): Parameters<
+  FacebookInstagramOAuthService['select']
+>[0] {
+  return {
+    tenantId: 'tenant-id',
+    workspaceId: 'workspace-id',
+    userId: 'user-id',
+    sessionId: 'session-id',
+    pageId: '123',
+  };
+}
+
+async function selectionFailure(
+  harness: ReturnType<typeof createHarness>,
+  input = selectionInput(),
+) {
+  try {
+    await harness.service.select(input);
+    throw new Error('Expected Facebook Instagram selection to fail.');
+  } catch (error) {
+    return error as BadRequestException;
+  }
 }
 
 function sessionFixture(
@@ -405,6 +828,45 @@ function sessionFixture(
 
 function hash(value: string) {
   return createHash('sha256').update(value).digest('hex');
+}
+
+function channelFixture(
+  overrides: Partial<InboxChannelEntity> = {},
+): InboxChannelEntity {
+  return {
+    id: 'channel-id',
+    tenantId: 'tenant-id',
+    workspaceId: 'workspace-id',
+    name: 'Instagram',
+    type: 'instagram',
+    status: 'active',
+    connectionStatus: 'connected',
+    lifecycleVersion: 1,
+    credentialVersion: 1,
+    provider: 'meta',
+    externalId: null,
+    externalAccountId: 'instagram-123',
+    externalPhoneNumberId: null,
+    externalPageId: null,
+    accessTokenEncrypted: 'encrypted-token',
+    verifyToken: null,
+    webhookSecret: null,
+    defaultAssignedUserId: null,
+    defaultAgentId: null,
+    defaultPipelineId: null,
+    aiEnabled: false,
+    settings: {},
+    metadata: {},
+    suspendedAt: null,
+    disconnectedAt: null,
+    disconnectedBy: null,
+    disconnectReason: null,
+    credentialRemovedAt: null,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    deletedAt: null,
+    ...overrides,
+  };
 }
 
 function errorReason(redirect: string) {

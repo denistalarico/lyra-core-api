@@ -9,7 +9,10 @@ describe('InstagramMetaAdapter', () => {
   const resolver = {
     findInstagramChannelByAccountId: jest.fn().mockResolvedValue(channel),
   };
-  const metaGraph = { getInstagramUserProfile: jest.fn() };
+  const metaGraph = {
+    getInstagramUserProfile: jest.fn(),
+    getFacebookInstagramUserProfile: jest.fn(),
+  };
   const crypto = { decrypt: jest.fn().mockReturnValue(null) };
   const adapter = new InstagramMetaAdapter(
     resolver as never,
@@ -21,6 +24,7 @@ describe('InstagramMetaAdapter', () => {
     jest.clearAllMocks();
     crypto.decrypt.mockReturnValue(null);
     metaGraph.getInstagramUserProfile.mockReset();
+    metaGraph.getFacebookInstagramUserProfile.mockReset();
   });
 
   it('normalizes an inbound text message with channel ownership from the resolver', async () => {
@@ -138,6 +142,42 @@ describe('InstagramMetaAdapter', () => {
         avatarUrl: 'https://cdninstagram.com/profile.jpg',
       },
     });
+  });
+
+  it('uses the Facebook Graph profile API for Facebook Login channels', async () => {
+    resolver.findInstagramChannelByAccountId.mockResolvedValueOnce({
+      ...channel,
+      accessTokenEncrypted: 'encrypted-page-token',
+      metadata: { authorizationMethod: 'facebook_login' },
+    });
+    crypto.decrypt.mockReturnValue('page-access-token');
+    metaGraph.getFacebookInstagramUserProfile.mockResolvedValue({
+      name: 'Maria Silva',
+      username: 'maria.silva',
+      profilePictureUrl: 'https://cdninstagram.com/profile.jpg',
+    });
+
+    await adapter.normalize({
+      object: 'instagram',
+      entry: [
+        {
+          id: 'ig-account-1',
+          messaging: [
+            {
+              sender: { id: 'ig-user-1' },
+              recipient: { id: 'ig-account-1' },
+              message: { mid: 'ig-mid-facebook-profile', text: 'Oi' },
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(metaGraph.getFacebookInstagramUserProfile).toHaveBeenCalledWith({
+      scopedUserId: 'ig-user-1',
+      pageAccessToken: 'page-access-token',
+    });
+    expect(metaGraph.getInstagramUserProfile).not.toHaveBeenCalled();
   });
 
   it('normalizes Instagram reactions and seen receipts', async () => {

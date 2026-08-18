@@ -489,6 +489,127 @@ describe('MetaGraphService Facebook assets', () => {
     },
   );
 
+  it('subscribes the selected Facebook Page to Instagram messaging webhooks', async () => {
+    fetchMock.mockResolvedValue(response({ success: true }));
+
+    await expect(
+      service.subscribeFacebookPageToInstagramWebhooks({
+        pageId: 'page-1',
+        pageAccessToken: 'page-secret-1',
+        subscribedFields: ['messages', 'messaging_postbacks'],
+      }),
+    ).resolves.toEqual({ success: true });
+
+    const url = new URL(String(fetchMock.mock.calls[0][0]));
+    expect(`${url.origin}${url.pathname}`).toBe(
+      'https://graph.facebook.com/v26.0/page-1/subscribed_apps',
+    );
+    expect(url.searchParams.get('subscribed_fields')).toBe(
+      'messages,messaging_postbacks',
+    );
+    expect(url.searchParams.has('access_token')).toBe(false);
+    expect(fetchMock.mock.calls[0][1]).toEqual({
+      method: 'POST',
+      headers: { Authorization: 'Bearer page-secret-1' },
+    });
+  });
+
+  it('returns sanitized Facebook Page webhook subscriptions', async () => {
+    fetchMock.mockResolvedValue(
+      response({
+        data: [
+          {
+            id: 'private-app-id',
+            subscribed_fields: ['messages', 'messaging_postbacks', 'messages'],
+          },
+        ],
+      }),
+    );
+
+    await expect(
+      service.getFacebookPageWebhookSubscriptions({
+        pageId: 'page-1',
+        pageAccessToken: 'page-secret-1',
+      }),
+    ).resolves.toEqual({
+      appSubscribed: true,
+      subscribedFields: ['messages', 'messaging_postbacks'],
+    });
+
+    const url = new URL(String(fetchMock.mock.calls[0][0]));
+    expect(`${url.origin}${url.pathname}`).toBe(
+      'https://graph.facebook.com/v26.0/page-1/subscribed_apps',
+    );
+    expect(url.searchParams.has('access_token')).toBe(false);
+    expect(fetchMock.mock.calls[0][1]).toEqual({
+      method: 'GET',
+      headers: { Authorization: 'Bearer page-secret-1' },
+    });
+  });
+
+  it('loads an Instagram messaging profile through Facebook Graph with a Page token', async () => {
+    fetchMock.mockResolvedValue(
+      response({
+        id: 'ig-scoped-user',
+        name: 'Maria Silva',
+        username: 'maria.silva',
+        profile_pic: 'https://cdn.example.com/avatar.jpg',
+      }),
+    );
+
+    await expect(
+      service.getFacebookInstagramUserProfile({
+        scopedUserId: 'ig-scoped-user',
+        pageAccessToken: 'page-secret-1',
+      }),
+    ).resolves.toEqual({
+      id: 'ig-scoped-user',
+      name: 'Maria Silva',
+      username: 'maria.silva',
+      profilePictureUrl: 'https://cdn.example.com/avatar.jpg',
+    });
+
+    const url = new URL(String(fetchMock.mock.calls[0][0]));
+    expect(`${url.origin}${url.pathname}`).toBe(
+      'https://graph.facebook.com/v26.0/ig-scoped-user',
+    );
+    expect(url.searchParams.get('fields')).toBe('id,name,username,profile_pic');
+    expect(url.searchParams.has('access_token')).toBe(false);
+    expect(fetchMock.mock.calls[0][1]).toEqual({
+      method: 'GET',
+      headers: { Authorization: 'Bearer page-secret-1' },
+    });
+  });
+
+  it('sanitizes Facebook Page subscription failures', async () => {
+    fetchMock.mockResolvedValue(
+      response(
+        {
+          error: {
+            message: 'Rejected page-secret-1',
+            fbtrace_id: 'private-trace',
+          },
+        },
+        false,
+      ),
+    );
+
+    const error = await service
+      .subscribeFacebookPageToInstagramWebhooks({
+        pageId: 'page-1',
+        pageAccessToken: 'page-secret-1',
+        subscribedFields: ['messages'],
+      })
+      .catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(BadRequestException);
+    expect((error as Error).message).toBe(
+      'Facebook Page webhook subscription failed.',
+    );
+    expect(JSON.stringify(error)).not.toContain('page-secret-1');
+    expect(JSON.stringify(error)).not.toContain('private-trace');
+  });
+
   it('rejects malformed Facebook Page responses', async () => {
     fetchMock.mockResolvedValue(
       response({ data: [{ id: 'page-1', name: 'Page One' }] }),

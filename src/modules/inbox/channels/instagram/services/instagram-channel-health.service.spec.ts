@@ -50,6 +50,34 @@ describe('InstagramChannelHealthService', () => {
     expect(harness.repository.save).not.toHaveBeenCalled();
   });
 
+  it('checks Facebook Login identity and webhooks through the selected Page', async () => {
+    const harness = createHarness({
+      externalPageId: 'facebook-page-id',
+      metadata: { authorizationMethod: 'facebook_login' },
+    });
+
+    const result = await harness.service.runHealthCheck(scopedInput);
+
+    expect(harness.meta.getFacebookPageInstagramAccount).toHaveBeenCalledWith({
+      pageId: 'facebook-page-id',
+      pageAccessToken: 'decrypted-secret',
+    });
+    expect(
+      harness.meta.getFacebookPageWebhookSubscriptions,
+    ).toHaveBeenCalledWith({
+      pageId: 'facebook-page-id',
+      pageAccessToken: 'decrypted-secret',
+    });
+    expect(harness.meta.getInstagramAuthorizedAccount).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      ok: true,
+      accountIdMatches: true,
+      webhookSubscriptionHealthy: true,
+      username: 'talaricolabs',
+    });
+    expect(JSON.stringify(result)).not.toContain('decrypted-secret');
+  });
+
   it('accepts the additional scoped identifier when resolving channel identity', async () => {
     const harness = createHarness({
       externalAccountId: 'different-primary-id',
@@ -269,6 +297,18 @@ function createHarness(overrides: Partial<InboxChannelEntity> | null = {}) {
       }),
     ),
     getInstagramAccountWebhookSubscriptions: jest.fn(() =>
+      Promise.resolve({
+        appSubscribed: true,
+        subscribedFields: REQUIRED_WEBHOOK_FIELDS,
+      }),
+    ),
+    getFacebookPageInstagramAccount: jest.fn(() =>
+      Promise.resolve({
+        accountId: '17841400000000000',
+        username: 'talaricolabs',
+      }),
+    ),
+    getFacebookPageWebhookSubscriptions: jest.fn(() =>
       Promise.resolve({
         appSubscribed: true,
         subscribedFields: REQUIRED_WEBHOOK_FIELDS,

@@ -72,45 +72,90 @@ export class InstagramChannelHealthService {
       );
     }
 
-    let identity: Awaited<
-      ReturnType<MetaGraphService['getInstagramAuthorizedAccount']>
-    >;
-    try {
-      identity =
-        await this.metaGraphService.getInstagramAuthorizedAccount(accessToken);
-    } catch {
-      throw new BadGatewayException(
-        'Instagram did not accept the saved credential.',
-      );
-    }
+    const usesFacebookLogin =
+      channel.metadata?.authorizationMethod === 'facebook_login';
+    let username: string | null;
+    let subscriptions: {
+      appSubscribed: boolean;
+      subscribedFields: string[];
+    };
 
-    const providerAccountIds = new Set(
-      [identity.accountId, identity.scopedId].filter((value): value is string =>
-        Boolean(value),
-      ),
-    );
-    const accountIdMatches = [channel.externalAccountId, channel.externalId]
-      .filter((value): value is string => Boolean(value))
-      .some((value) => providerAccountIds.has(value));
-    if (!accountIdMatches) {
-      throw new ConflictException(
-        'Instagram account identity does not match this channel.',
-      );
-    }
-
-    let subscriptions: Awaited<
-      ReturnType<MetaGraphService['getInstagramAccountWebhookSubscriptions']>
-    >;
-    try {
-      subscriptions =
-        await this.metaGraphService.getInstagramAccountWebhookSubscriptions({
-          igUserId: identity.accountId,
-          accessToken,
+    if (usesFacebookLogin) {
+      if (!channel.externalPageId) {
+        throw new BadRequestException(
+          'Instagram channel Facebook Page identity is missing.',
+        );
+      }
+      let identity: Awaited<
+        ReturnType<MetaGraphService['getFacebookPageInstagramAccount']>
+      >;
+      try {
+        identity = await this.metaGraphService.getFacebookPageInstagramAccount({
+          pageId: channel.externalPageId,
+          pageAccessToken: accessToken,
         });
-    } catch {
-      throw new BadGatewayException(
-        'Instagram webhook subscription could not be verified.',
+      } catch {
+        throw new BadGatewayException(
+          'Instagram did not accept the saved credential.',
+        );
+      }
+      if (!identity || identity.accountId !== channel.externalAccountId) {
+        throw new ConflictException(
+          'Instagram account identity does not match this channel.',
+        );
+      }
+      username = identity.username;
+      try {
+        subscriptions =
+          await this.metaGraphService.getFacebookPageWebhookSubscriptions({
+            pageId: channel.externalPageId,
+            pageAccessToken: accessToken,
+          });
+      } catch {
+        throw new BadGatewayException(
+          'Instagram webhook subscription could not be verified.',
+        );
+      }
+    } else {
+      let identity: Awaited<
+        ReturnType<MetaGraphService['getInstagramAuthorizedAccount']>
+      >;
+      try {
+        identity =
+          await this.metaGraphService.getInstagramAuthorizedAccount(
+            accessToken,
+          );
+      } catch {
+        throw new BadGatewayException(
+          'Instagram did not accept the saved credential.',
+        );
+      }
+
+      const providerAccountIds = new Set(
+        [identity.accountId, identity.scopedId].filter(
+          (value): value is string => Boolean(value),
+        ),
       );
+      const accountIdMatches = [channel.externalAccountId, channel.externalId]
+        .filter((value): value is string => Boolean(value))
+        .some((value) => providerAccountIds.has(value));
+      if (!accountIdMatches) {
+        throw new ConflictException(
+          'Instagram account identity does not match this channel.',
+        );
+      }
+      username = identity.username;
+      try {
+        subscriptions =
+          await this.metaGraphService.getInstagramAccountWebhookSubscriptions({
+            igUserId: identity.accountId,
+            accessToken,
+          });
+      } catch {
+        throw new BadGatewayException(
+          'Instagram webhook subscription could not be verified.',
+        );
+      }
     }
 
     const missingWebhookFields = INSTAGRAM_MESSAGING_WEBHOOK_FIELDS.filter(
@@ -135,7 +180,7 @@ export class InstagramChannelHealthService {
           : ('webhook_subscription_missing' as const),
       requiresReconnect: !webhookSubscriptionHealthy,
       missingWebhookFields,
-      username: identity.username,
+      username,
       checkedAt: new Date().toISOString(),
     };
   }

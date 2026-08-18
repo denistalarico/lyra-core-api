@@ -122,6 +122,19 @@ type InstagramWebhookSubscriptionsResponse = {
   error?: InstagramApiError;
 };
 
+type FacebookPageWebhookSubscriptionResponse = {
+  success?: boolean;
+  error?: InstagramApiError;
+};
+
+type FacebookPageWebhookSubscriptionsResponse = {
+  data?: Array<{
+    id?: string;
+    subscribed_fields?: unknown;
+  }>;
+  error?: InstagramApiError;
+};
+
 type InstagramUserProfileResponse = {
   id?: string | number;
   name?: string | null;
@@ -506,6 +519,103 @@ export class MetaGraphService {
         typeof account.username === 'string'
           ? account.username.trim() || null
           : null,
+    };
+  }
+
+  async subscribeFacebookPageToInstagramWebhooks(input: {
+    pageId: string;
+    pageAccessToken: string;
+    subscribedFields: readonly InstagramMessagingWebhookField[];
+  }) {
+    const url = new URL(
+      `${META_GRAPH_ORIGIN}/${this.graphVersion}/${encodeURIComponent(input.pageId)}/subscribed_apps`,
+    );
+    url.searchParams.set('subscribed_fields', input.subscribedFields.join(','));
+
+    const response = await this.fetchMeta(url, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${input.pageAccessToken}` },
+    });
+    const data = (await this.readJson(
+      response,
+    )) as FacebookPageWebhookSubscriptionResponse;
+
+    if (!response.ok || data.error || data.success !== true) {
+      throw new BadRequestException(
+        'Facebook Page webhook subscription failed.',
+      );
+    }
+
+    return { success: true as const };
+  }
+
+  async getFacebookPageWebhookSubscriptions(input: {
+    pageId: string;
+    pageAccessToken: string;
+  }) {
+    const url = new URL(
+      `${META_GRAPH_ORIGIN}/${this.graphVersion}/${encodeURIComponent(input.pageId)}/subscribed_apps`,
+    );
+    const response = await this.fetchMeta(url, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${input.pageAccessToken}` },
+    });
+    const data = (await this.readJson(
+      response,
+    )) as FacebookPageWebhookSubscriptionsResponse;
+
+    if (!response.ok || data.error || !Array.isArray(data.data)) {
+      throw new BadRequestException(
+        'Facebook Page webhook subscriptions lookup failed.',
+      );
+    }
+
+    const subscribedFields = [
+      ...new Set(
+        data.data.flatMap((subscription) =>
+          Array.isArray(subscription.subscribed_fields)
+            ? subscription.subscribed_fields.filter(
+                (field): field is string => typeof field === 'string',
+              )
+            : [],
+        ),
+      ),
+    ];
+
+    return {
+      appSubscribed: data.data.length > 0,
+      subscribedFields,
+    };
+  }
+
+  async getFacebookInstagramUserProfile(input: {
+    scopedUserId: string;
+    pageAccessToken: string;
+  }) {
+    const url = new URL(
+      `${META_GRAPH_ORIGIN}/${this.graphVersion}/${encodeURIComponent(input.scopedUserId)}`,
+    );
+    url.searchParams.set('fields', 'id,name,username,profile_pic');
+
+    const response = await this.fetchMeta(url, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${input.pageAccessToken}` },
+    });
+    const data = (await this.readJson(
+      response,
+    )) as InstagramUserProfileResponse;
+
+    if (!response.ok || data.error) {
+      throw new BadRequestException(
+        'Facebook Instagram user profile lookup failed.',
+      );
+    }
+
+    return {
+      id: data.id == null ? input.scopedUserId : String(data.id),
+      name: data.name?.trim() || null,
+      username: data.username?.trim() || null,
+      profilePictureUrl: data.profile_pic?.trim() || null,
     };
   }
 

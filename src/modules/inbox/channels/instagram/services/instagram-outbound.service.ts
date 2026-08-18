@@ -543,8 +543,21 @@ export class InstagramOutboundService {
     body: Record<string, unknown>,
   ) {
     const version = process.env.META_GRAPH_API_VERSION ?? 'v24.0';
+    const usesFacebookLogin =
+      channel.metadata?.authorizationMethod === 'facebook_login';
+    const senderId = usesFacebookLogin
+      ? channel.externalPageId
+      : channel.externalAccountId;
+    if (!senderId) {
+      throw new BadRequestException(
+        'Instagram provider identity is not configured.',
+      );
+    }
+    const graphOrigin = usesFacebookLogin
+      ? 'https://graph.facebook.com'
+      : 'https://graph.instagram.com';
     const response = await fetch(
-      `https://graph.instagram.com/${version}/${channel.externalAccountId}/messages`,
+      `${graphOrigin}/${version}/${senderId}/messages`,
       {
         method: 'POST',
         headers: {

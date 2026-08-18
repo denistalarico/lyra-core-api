@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-base-to-string, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-return -- focused service/repository doubles expose dynamic Jest values */
 import { NotFoundException } from '@nestjs/common';
 import { InboxChannelEntity } from '../../../entities/inbox-channel.entity';
 import { InboxConversationEntity } from '../../../entities/inbox-conversation.entity';
@@ -60,6 +61,45 @@ describe('InstagramOutboundService', () => {
       status: 'open',
       lastMessagePreview: 'Olá pelo Instagram',
     });
+  });
+
+  it('routes Facebook Login channels through the Page Messages API', async () => {
+    const harness = createHarness({
+      externalPageId: 'facebook-page-id',
+      metadata: { authorizationMethod: 'facebook_login' },
+    });
+    const fetchMock = jest.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          recipient_id: 'ig-scoped-user',
+          message_id: 'ig-message-facebook-1',
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+    global.fetch = fetchMock;
+
+    await harness.service.sendText({
+      ctx: {
+        tenantId: 'tenant-1',
+        workspaceId: 'workspace-1',
+        userId: 'user-1',
+      },
+      channelId: 'channel-1',
+      conversationId: 'conversation-1',
+      to: harness.conversation.externalThreadId!,
+      text: 'Olá via Facebook Login',
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://graph.facebook.com/v24.0/facebook-page-id/messages',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          Authorization: 'Bearer decrypted-token',
+        }),
+      }),
+    );
   });
 
   it('uses the Meta-documented love reaction payload', async () => {

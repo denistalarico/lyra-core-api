@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  Body,
   Controller,
   Get,
   Post,
@@ -16,6 +17,7 @@ import {
   RequirePermission,
   RequireProductEntitlement,
 } from '../../../../../permissions';
+import { SelectFacebookInstagramAssetDto } from './dto/select-facebook-instagram-asset.dto';
 import { FacebookInstagramOAuthService } from './facebook-instagram-oauth.service';
 
 @Controller('inbox/channels/instagram/oauth/facebook')
@@ -40,6 +42,29 @@ export class FacebookInstagramOAuthController {
       workspaceId: ctx.workspaceId,
       userId: ctx.userId ?? null,
       metadata: this.metadataFromContext(ctx),
+    });
+  }
+
+  @Post('select')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireProductEntitlement('leadflow')
+  @RequirePermission('leadflow.channels.channel.create.admin')
+  select(
+    @RequestContextData() ctx: RequestContext,
+    @Body() dto: SelectFacebookInstagramAssetDto,
+  ) {
+    if (!ctx.tenantId || !ctx.workspaceId) {
+      throw new BadRequestException(
+        'Tenant and workspace context are required.',
+      );
+    }
+
+    return this.facebookInstagramOAuthService.select({
+      tenantId: ctx.tenantId,
+      workspaceId: ctx.workspaceId,
+      userId: ctx.userId ?? null,
+      sessionId: dto.sessionId,
+      pageId: dto.pageId,
     });
   }
 
