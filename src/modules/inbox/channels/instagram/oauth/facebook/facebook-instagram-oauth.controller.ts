@@ -3,6 +3,7 @@ import {
   Body,
   Controller,
   Get,
+  Param,
   Post,
   Query,
   Res,
@@ -65,6 +66,28 @@ export class FacebookInstagramOAuthController {
       userId: ctx.userId ?? null,
       sessionId: dto.sessionId,
       pageId: dto.pageId,
+    });
+  }
+
+  @Get('session/:sessionId/assets')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireProductEntitlement('leadflow')
+  @RequirePermission('leadflow.channels.channel.create.admin')
+  getSessionAssets(
+    @RequestContextData() ctx: RequestContext,
+    @Param('sessionId') sessionId: string,
+  ) {
+    if (!ctx.tenantId || !ctx.workspaceId) {
+      throw new BadRequestException(
+        'Tenant and workspace context are required.',
+      );
+    }
+
+    return this.facebookInstagramOAuthService.getSessionAssets({
+      tenantId: ctx.tenantId,
+      workspaceId: ctx.workspaceId,
+      userId: ctx.userId ?? null,
+      sessionId,
     });
   }
 

@@ -290,6 +290,245 @@ describe('FacebookInstagramOAuthService', () => {
     expect(JSON.stringify(harness.session)).not.toContain('page-secret-1');
   });
 
+  it('returns a strict projection of every selectable Page without reading credentials', async () => {
+    const session = selectionSessionFixture({
+      code: 'oauth-authorization-code',
+      metadata: {
+        authorizationMethod: 'facebook_login',
+        stage: 'asset_selection',
+        providerDetail: 'metadata-must-not-leak',
+      },
+      payload: {
+        credentialsEncrypted: 'encrypted-user-and-page-tokens',
+        userAccessToken: 'future-user-access-token',
+        pageAccessToken: 'future-page-access-token',
+        selectableAssets: [
+          {
+            pageId: '123',
+            pageName: 'Page with Instagram',
+            instagramAccountId: 'instagram-123',
+            instagramUsername: 'page.with.instagram',
+            futureSecret: 'must-not-leak',
+          },
+          {
+            pageId: '456',
+            pageName: 'Page without Instagram',
+            instagramAccountId: null,
+            instagramUsername: null,
+          },
+        ],
+      },
+    });
+    const harness = createHarness({ session });
+
+    const result = await harness.service.getSessionAssets(assetsInput());
+
+    expect(harness.startSessions.findOne).toHaveBeenCalledWith({
+      where: {
+        id: 'session-id',
+        tenantId: 'tenant-id',
+        workspaceId: 'workspace-id',
+        provider: 'meta',
+        channelType: 'instagram',
+      },
+    });
+    expect(result).toEqual({
+      sessionId: 'session-id',
+      assets: [
+        {
+          pageId: '123',
+          pageName: 'Page with Instagram',
+          instagramAccountId: 'instagram-123',
+          instagramUsername: 'page.with.instagram',
+        },
+        {
+          pageId: '456',
+          pageName: 'Page without Instagram',
+          instagramAccountId: null,
+          instagramUsername: null,
+        },
+      ],
+    });
+    const responseJson = JSON.stringify(result);
+    expect(responseJson).not.toContain('credentialsEncrypted');
+    expect(responseJson).not.toContain('encrypted-user-and-page-tokens');
+    expect(responseJson).not.toContain('future-user-access-token');
+    expect(responseJson).not.toContain('future-page-access-token');
+    expect(responseJson).not.toContain('must-not-leak');
+    expect(responseJson).not.toContain('metadata-must-not-leak');
+    expect(responseJson).not.toContain('oauth-authorization-code');
+    expect(harness.decryptSpy).not.toHaveBeenCalled();
+    expect(harness.dataSource.transaction).not.toHaveBeenCalled();
+    expect(harness.meta.exchangeFacebookOAuthCode).not.toHaveBeenCalled();
+    expect(harness.meta.getFacebookPageInstagramAccount).not.toHaveBeenCalled();
+    expect(
+      harness.meta.subscribeFacebookPageToInstagramWebhooks,
+    ).not.toHaveBeenCalled();
+    expect(harness.discovery.discoverFacebookPageAssets).not.toHaveBeenCalled();
+    expect(harness.channels.create).not.toHaveBeenCalled();
+    expect(harness.channels.save).not.toHaveBeenCalled();
+    expect(harness.startSessions.save).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['tenant', { tenantId: 'other-tenant' }],
+    ['workspace', { workspaceId: 'other-workspace' }],
+  ] as const)(
+    'does not authorize a known session id from another %s',
+    async (_scope, override) => {
+      const harness = createHarness({ session: selectionSessionFixture() });
+
+      const exception = await assetsFailure(harness, {
+        ...assetsInput(),
+        ...override,
+      });
+
+      expect(exception.message).toBe('invalid_session');
+      expect(harness.decryptSpy).not.toHaveBeenCalled();
+      expect(
+        harness.meta.getFacebookPageInstagramAccount,
+      ).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    ['another owner', 'other-user'],
+    ['no request user', null],
+  ] as const)('rejects session assets for %s', async (_case, userId) => {
+    const harness = createHarness({ session: selectionSessionFixture() });
+
+    const exception = await assetsFailure(harness, {
+      ...assetsInput(),
+      userId,
+    });
+
+    expect(exception.message).toBe('invalid_session');
+    expect(harness.decryptSpy).not.toHaveBeenCalled();
+  });
+
+  it('allows a valid session without an owner', async () => {
+    const harness = createHarness({
+      session: selectionSessionFixture({ userId: null }),
+    });
+
+    await expect(
+      harness.service.getSessionAssets({ ...assetsInput(), userId: null }),
+    ).resolves.toMatchObject({ sessionId: 'session-id' });
+  });
+
+  it.each([
+    ['session_consumed', { status: 'completed' as const }],
+    ['session_expired', { status: 'expired' as const }],
+    [
+      'invalid_session',
+      {
+        metadata: {
+          authorizationMethod: 'facebook_login',
+          stage: 'oauth_started',
+        },
+      },
+    ],
+    [
+      'invalid_session',
+      {
+        metadata: {
+          authorizationMethod: 'instagram_login',
+          stage: 'asset_selection',
+        },
+      },
+    ],
+  ])('rejects invalid assets lifecycle as %s', async (code, override) => {
+    const harness = createHarness({
+      session: selectionSessionFixture(
+        override as Partial<InboxChannelConnectionSessionEntity>,
+      ),
+    });
+
+    const exception = await assetsFailure(harness);
+
+    expect(exception.message).toBe(code);
+    expect(harness.startSessions.save).not.toHaveBeenCalled();
+  });
+
+  it('reports an elapsed TTL without mutating the session', async () => {
+    const session = selectionSessionFixture({
+      expiresAt: new Date(Date.now() - 1),
+    });
+    const harness = createHarness({ session });
+
+    const exception = await assetsFailure(harness);
+
+    expect(exception.message).toBe('session_expired');
+    expect(session.status).toBe('pending');
+    expect(session.errorMessage).toBeNull();
+    expect(harness.startSessions.save).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['missing array', undefined],
+    ['non-array value', { pageId: '123' }],
+    ['non-object asset', [null]],
+    [
+      'empty page id',
+      [
+        {
+          pageId: '  ',
+          pageName: 'Page',
+          instagramAccountId: null,
+          instagramUsername: null,
+        },
+      ],
+    ],
+    [
+      'invalid page name',
+      [
+        {
+          pageId: '123',
+          pageName: 123,
+          instagramAccountId: null,
+          instagramUsername: null,
+        },
+      ],
+    ],
+    [
+      'invalid Instagram account id',
+      [
+        {
+          pageId: '123',
+          pageName: 'Page',
+          instagramAccountId: undefined,
+          instagramUsername: null,
+        },
+      ],
+    ],
+    [
+      'invalid Instagram username',
+      [
+        {
+          pageId: '123',
+          pageName: 'Page',
+          instagramAccountId: null,
+          instagramUsername: undefined,
+        },
+      ],
+    ],
+  ])('rejects %s as invalid_asset_payload', async (_case, selectableAssets) => {
+    const session = selectionSessionFixture();
+    session.payload = {
+      credentialsEncrypted: 'ciphertext-must-not-leak',
+      ...(selectableAssets === undefined ? {} : { selectableAssets }),
+    };
+    const harness = createHarness({ session });
+
+    const exception = await assetsFailure(harness);
+
+    expect(exception.message).toBe('invalid_asset_payload');
+    expect(exception.message).not.toContain('ciphertext-must-not-leak');
+    expect(harness.decryptSpy).not.toHaveBeenCalled();
+    expect(harness.meta.getFacebookPageInstagramAccount).not.toHaveBeenCalled();
+    expect(harness.channels.save).not.toHaveBeenCalled();
+  });
+
   it('selects a revalidated asset, connects one Instagram channel, and completes the session', async () => {
     const harness = createHarness({ session: selectionSessionFixture() });
 
@@ -636,6 +875,16 @@ function createHarness(
     options.session === undefined ? sessionFixture() : options.session;
   const startSessions = {
     create: jest.fn((value) => ({ id: 'start-session-id', ...value })),
+    findOne: jest.fn(async (query?: { where?: Record<string, unknown> }) => {
+      if (!session) return null;
+      const where = query?.where ?? {};
+      return Object.entries(where).every(
+        ([property, value]) =>
+          (session as unknown as Record<string, unknown>)[property] === value,
+      )
+        ? session
+        : null;
+    }),
     save: jest.fn(async (value) => value),
   };
   const transactionSessions = {
@@ -727,6 +976,7 @@ function createHarness(
     session: session as InboxChannelConnectionSessionEntity,
     startSessions,
     transactionSessions,
+    dataSource,
     channels,
     manager,
     meta,
@@ -781,6 +1031,29 @@ function selectionInput(): Parameters<
     sessionId: 'session-id',
     pageId: '123',
   };
+}
+
+function assetsInput(): Parameters<
+  FacebookInstagramOAuthService['getSessionAssets']
+>[0] {
+  return {
+    tenantId: 'tenant-id',
+    workspaceId: 'workspace-id',
+    userId: 'user-id',
+    sessionId: 'session-id',
+  };
+}
+
+async function assetsFailure(
+  harness: ReturnType<typeof createHarness>,
+  input = assetsInput(),
+) {
+  try {
+    await harness.service.getSessionAssets(input);
+    throw new Error('Expected Facebook Instagram session assets to fail.');
+  } catch (error) {
+    return error as BadRequestException;
+  }
 }
 
 async function selectionFailure(

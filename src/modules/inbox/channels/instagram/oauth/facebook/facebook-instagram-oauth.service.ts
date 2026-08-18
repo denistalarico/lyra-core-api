@@ -50,6 +50,11 @@ type SelectFacebookInstagramAssetInput = {
   pageId: string;
 };
 
+type GetFacebookInstagramSessionAssetsInput = Omit<
+  SelectFacebookInstagramAssetInput,
+  'pageId'
+>;
+
 type SelectableFacebookAsset = {
   pageId: string;
   pageName: string;
@@ -84,6 +89,56 @@ export class FacebookInstagramOAuthService {
     private readonly cryptoService: SettingsCryptoService,
     private readonly channelConnectionService: InstagramChannelConnectionService,
   ) {}
+
+  async getSessionAssets(input: GetFacebookInstagramSessionAssetsInput) {
+    let session: InboxChannelConnectionSessionEntity | null;
+    try {
+      session = await this.sessionsRepository.findOne({
+        where: {
+          id: input.sessionId,
+          tenantId: input.tenantId,
+          workspaceId: input.workspaceId,
+          provider: 'meta',
+          channelType: 'instagram',
+        },
+      });
+    } catch {
+      throw new BadRequestException('invalid_session');
+    }
+
+    if (!session) {
+      throw new BadRequestException('invalid_session');
+    }
+    if (session.status === 'expired') {
+      throw new BadRequestException('session_expired');
+    }
+    if (session.status !== 'pending') {
+      throw new BadRequestException('session_consumed');
+    }
+    if (session.expiresAt.getTime() <= Date.now()) {
+      throw new BadRequestException('session_expired');
+    }
+    if (
+      session.metadata?.authorizationMethod !== 'facebook_login' ||
+      session.metadata?.stage !== ASSET_SELECTION_STAGE
+    ) {
+      throw new BadRequestException('invalid_session');
+    }
+    if (session.userId !== null && session.userId !== input.userId) {
+      throw new BadRequestException('invalid_session');
+    }
+
+    const payload = this.isRecord(session.payload) ? session.payload : {};
+    const assets = this.parseSelectableAssets(payload.selectableAssets);
+    if (!assets) {
+      throw new BadRequestException('invalid_asset_payload');
+    }
+
+    return {
+      sessionId: session.id,
+      assets,
+    };
+  }
 
   async select(input: SelectFacebookInstagramAssetInput) {
     let result: SelectionResult;
@@ -540,10 +595,22 @@ export class FacebookInstagramOAuthService {
     value: unknown,
     pageId: string,
   ): SelectableFacebookAsset | null {
+    const assets = this.parseSelectableAssets(value);
+    if (!assets) return null;
+
+    return assets.find((asset) => asset.pageId === pageId) ?? null;
+  }
+
+  private parseSelectableAssets(
+    value: unknown,
+  ): SelectableFacebookAsset[] | null {
     if (!Array.isArray(value)) return null;
+
+    const assets: SelectableFacebookAsset[] = [];
     for (const candidate of value as unknown[]) {
-      if (!this.isRecord(candidate) || candidate.pageId !== pageId) continue;
       if (
+        !this.isRecord(candidate) ||
+        !this.isNonEmptyString(candidate.pageId) ||
         typeof candidate.pageName !== 'string' ||
         (candidate.instagramAccountId !== null &&
           typeof candidate.instagramAccountId !== 'string') ||
@@ -553,14 +620,15 @@ export class FacebookInstagramOAuthService {
         return null;
       }
 
-      return {
-        pageId,
+      assets.push({
+        pageId: candidate.pageId,
         pageName: candidate.pageName,
         instagramAccountId: candidate.instagramAccountId,
         instagramUsername: candidate.instagramUsername,
-      };
+      });
     }
-    return null;
+
+    return assets;
   }
 
   private parseEncryptedCredentials(
