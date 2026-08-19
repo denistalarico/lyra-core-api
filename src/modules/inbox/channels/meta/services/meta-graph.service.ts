@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import {
   FacebookPageGraphAsset,
   FacebookPageInstagramAccountAsset,
@@ -123,8 +123,9 @@ type InstagramWebhookSubscriptionsResponse = {
 };
 
 type FacebookPageWebhookSubscriptionResponse = {
-  success?: boolean;
-  error?: InstagramApiError;
+  success?: unknown;
+  error?: unknown;
+  error_subcode?: unknown;
 };
 
 type FacebookPageWebhookSubscriptionsResponse = {
@@ -155,6 +156,8 @@ export type InstagramMessagingWebhookField =
 
 @Injectable()
 export class MetaGraphService {
+  private readonly logger = new Logger(MetaGraphService.name);
+
   private get graphVersion() {
     return process.env.META_GRAPH_API_VERSION ?? 'v24.0';
   }
@@ -536,11 +539,36 @@ export class MetaGraphService {
       method: 'POST',
       headers: { Authorization: `Bearer ${input.pageAccessToken}` },
     });
-    const data = (await this.readJson(
-      response,
-    )) as FacebookPageWebhookSubscriptionResponse;
+    const responsePayload = await this.readJson(response);
+    const data: FacebookPageWebhookSubscriptionResponse = this.isRecord(
+      responsePayload,
+    )
+      ? responsePayload
+      : {};
 
     if (!response.ok || data.error || data.success !== true) {
+      const graphError = this.isRecord(data.error) ? data.error : null;
+      const nestedSubcode = graphError?.error_subcode;
+      const topLevelSubcode = data.error_subcode;
+
+      this.logger.error('Meta webhook subscription failed', {
+        operation: 'subscribeFacebookPageToInstagramWebhooks',
+        status: response.status,
+        type: typeof graphError?.type === 'string' ? graphError.type : null,
+        code: typeof graphError?.code === 'number' ? graphError.code : null,
+        subcode:
+          typeof nestedSubcode === 'number'
+            ? nestedSubcode
+            : typeof topLevelSubcode === 'number'
+              ? topLevelSubcode
+              : null,
+        message: this.sanitizeMetaErrorMessage(graphError?.message, [
+          input.pageAccessToken,
+          this.appSecret,
+          this.instagramAppSecret,
+        ]),
+      });
+
       throw new BadRequestException(
         'Facebook Page webhook subscription failed.',
       );
@@ -896,6 +924,32 @@ export class MetaGraphService {
 
   private isNonEmptyString(value: unknown): value is string {
     return typeof value === 'string' && value.trim().length > 0;
+  }
+
+  private sanitizeMetaErrorMessage(
+    value: unknown,
+    knownSecrets: ReadonlyArray<string | undefined>,
+  ): string | null {
+    if (typeof value !== 'string') return null;
+
+    let sanitized = value.replace(/https?:\/\/\S+/gi, '[REDACTED_URL]');
+    sanitized = sanitized.replace(
+      /\b(?:authorization|(?:page[\s_-]*|user[\s_-]*)?access[\s_-]*token|app[\s_-]*secret|client[\s_-]*secret|oauth[\s_-]*code|authorization[\s_-]*code|credentialsEncrypted)\s*(?::|=|\s)\s*(?:Bearer\s+)?(?:"[^"]*"|'[^']*'|[^\s,;]+)[,;]?/gi,
+      '[REDACTED]',
+    );
+    sanitized = sanitized.replace(
+      /\bBearer\s+[A-Za-z0-9._~+/-]+=*/gi,
+      '[REDACTED]',
+    );
+
+    for (const secret of knownSecrets) {
+      const normalizedSecret = secret?.trim();
+      if (normalizedSecret) {
+        sanitized = sanitized.split(normalizedSecret).join('[REDACTED]');
+      }
+    }
+
+    return sanitized.replace(/\s+/g, ' ').trim().slice(0, 500);
   }
 
   private async readJson(response: Response): Promise<unknown> {

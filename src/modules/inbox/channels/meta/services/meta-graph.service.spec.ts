@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-unsafe-member-access -- Jest records fetch mock calls as dynamic tuples in this focused HTTP contract test. */
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, Logger } from '@nestjs/common';
 import { MetaGraphService } from './meta-graph.service';
 
 describe('MetaGraphService Instagram Login', () => {
@@ -271,6 +271,7 @@ describe('MetaGraphService Facebook assets', () => {
   const originalFetch = global.fetch;
   let service: MetaGraphService;
   let fetchMock: jest.Mock;
+  let loggerErrorSpy: jest.SpyInstance;
 
   beforeEach(() => {
     process.env = {
@@ -282,7 +283,14 @@ describe('MetaGraphService Facebook assets', () => {
     };
     fetchMock = jest.fn();
     global.fetch = fetchMock as typeof fetch;
+    loggerErrorSpy = jest
+      .spyOn(Logger.prototype, 'error')
+      .mockImplementation(() => undefined);
     service = new MetaGraphService();
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
   });
 
   afterAll(() => {
@@ -512,6 +520,7 @@ describe('MetaGraphService Facebook assets', () => {
       method: 'POST',
       headers: { Authorization: 'Bearer page-secret-1' },
     });
+    expect(loggerErrorSpy).not.toHaveBeenCalled();
   });
 
   it('returns sanitized Facebook Page webhook subscriptions', async () => {
@@ -586,7 +595,11 @@ describe('MetaGraphService Facebook assets', () => {
       response(
         {
           error: {
-            message: 'Rejected page-secret-1',
+            message:
+              'Permission denied. Authorization: Bearer page-secret-1; app_secret=instagram-app-secret; client_secret=meta-app-secret; oauth_code=private-oauth-code; credentialsEncrypted=private-encrypted-credentials; https://graph.facebook.com/page-1/subscribed_apps?access_token=user-secret',
+            type: 'OAuthException',
+            code: 100,
+            error_subcode: 33,
             fbtrace_id: 'private-trace',
           },
         },
@@ -608,6 +621,29 @@ describe('MetaGraphService Facebook assets', () => {
     );
     expect(JSON.stringify(error)).not.toContain('page-secret-1');
     expect(JSON.stringify(error)).not.toContain('private-trace');
+
+    expect(loggerErrorSpy).toHaveBeenCalledWith(
+      'Meta webhook subscription failed',
+      {
+        operation: 'subscribeFacebookPageToInstagramWebhooks',
+        status: 400,
+        type: 'OAuthException',
+        code: 100,
+        subcode: 33,
+        message:
+          'Permission denied. [REDACTED] [REDACTED] [REDACTED] [REDACTED] [REDACTED] [REDACTED_URL]',
+      },
+    );
+
+    const serializedLog = JSON.stringify(loggerErrorSpy.mock.calls);
+    expect(serializedLog).not.toContain('page-secret-1');
+    expect(serializedLog).not.toContain('user-secret');
+    expect(serializedLog).not.toContain('Authorization');
+    expect(serializedLog).not.toContain('instagram-app-secret');
+    expect(serializedLog).not.toContain('meta-app-secret');
+    expect(serializedLog).not.toContain('private-oauth-code');
+    expect(serializedLog).not.toContain('private-encrypted-credentials');
+    expect(serializedLog).not.toContain('private-trace');
   });
 
   it('rejects malformed Facebook Page responses', async () => {
