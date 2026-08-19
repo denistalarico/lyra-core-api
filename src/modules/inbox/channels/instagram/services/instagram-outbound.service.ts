@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
@@ -61,11 +62,14 @@ type SendInstagramMediaInput = {
 type InstagramSendResponse = {
   recipient_id?: string;
   message_id?: string;
-  error?: { message?: string; code?: number; error_subcode?: number };
+  error?: unknown;
+  error_subcode?: unknown;
 };
 
 @Injectable()
 export class InstagramOutboundService {
+  private readonly logger = new Logger(InstagramOutboundService.name);
+
   constructor(
     @InjectDataSource('agency') private readonly dataSource: DataSource,
     @InjectRepository(InboxChannelEntity, 'agency')
@@ -569,15 +573,77 @@ export class InstagramOutboundService {
         signal: AbortSignal.timeout(15_000),
       },
     );
-    const data = (await response
-      .json()
-      .catch(() => ({}))) as InstagramSendResponse;
+    const responsePayload: unknown = await response.json().catch(() => ({}));
+    const data: InstagramSendResponse = this.isRecord(responsePayload)
+      ? responsePayload
+      : {};
     if (!response.ok || data.error) {
+      if (usesFacebookLogin) {
+        const graphError = this.isRecord(data.error) ? data.error : null;
+        const nestedSubcode = graphError?.error_subcode;
+        const topLevelSubcode = data.error_subcode;
+
+        this.logger.error('Meta Instagram outbound failed', {
+          operation: 'sendInstagramMessageViaFacebookLogin',
+          status: response.status,
+          type: typeof graphError?.type === 'string' ? graphError.type : null,
+          code: typeof graphError?.code === 'number' ? graphError.code : null,
+          subcode:
+            typeof nestedSubcode === 'number'
+              ? nestedSubcode
+              : typeof topLevelSubcode === 'number'
+                ? topLevelSubcode
+                : null,
+          message: this.sanitizeMetaOutboundErrorMessage(graphError?.message, [
+            accessToken,
+            senderId,
+            this.readRecipientId(body),
+            process.env.META_APP_SECRET,
+            process.env.META_INSTAGRAM_APP_SECRET,
+          ]),
+        });
+      }
+
       throw new BadRequestException(
         'Não foi possível enviar pelo canal Instagram.',
       );
     }
     return data;
+  }
+
+  private readRecipientId(body: Record<string, unknown>) {
+    const recipient = this.isRecord(body.recipient) ? body.recipient : null;
+    return typeof recipient?.id === 'string' ? recipient.id : undefined;
+  }
+
+  private sanitizeMetaOutboundErrorMessage(
+    value: unknown,
+    sensitiveValues: ReadonlyArray<string | undefined>,
+  ): string | null {
+    if (typeof value !== 'string') return null;
+
+    let sanitized = value.replace(/https?:\/\/\S+/gi, '[REDACTED_URL]');
+    sanitized = sanitized.replace(
+      /\b(?:authorization|(?:page[\s_-]*|instagram[\s_-]*|user[\s_-]*)?access[\s_-]*token|app[\s_-]*secret|client[\s_-]*secret|oauth[\s_-]*code|authorization[\s_-]*code|credentialsEncrypted|recipient(?:[\s_-]*id)?|channel[\s_-]*id|conversation[\s_-]*id|fbtrace[\s_-]*id)\s*(?::|=|\s)\s*(?:Bearer\s+)?(?:"[^"]*"|'[^']*'|[^\s,;]+)[,;]?/gi,
+      '[REDACTED]',
+    );
+    sanitized = sanitized.replace(
+      /\bBearer\s+[A-Za-z0-9._~+/-]+=*/gi,
+      '[REDACTED]',
+    );
+
+    for (const sensitiveValue of sensitiveValues) {
+      const normalizedValue = sensitiveValue?.trim();
+      if (normalizedValue) {
+        sanitized = sanitized.split(normalizedValue).join('[REDACTED]');
+      }
+    }
+
+    return sanitized.replace(/\s+/g, ' ').trim().slice(0, 500);
+  }
+
+  private isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
   }
 
   private async completeMessage(input: {

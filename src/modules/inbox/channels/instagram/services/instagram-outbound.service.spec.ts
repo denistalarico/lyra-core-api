@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-base-to-string, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-return -- focused service/repository doubles expose dynamic Jest values */
-import { NotFoundException } from '@nestjs/common';
+import { BadRequestException, Logger, NotFoundException } from '@nestjs/common';
 import { InboxChannelEntity } from '../../../entities/inbox-channel.entity';
 import { InboxConversationEntity } from '../../../entities/inbox-conversation.entity';
 import { InboxMessageEntity } from '../../../entities/inbox-message.entity';
@@ -15,6 +15,9 @@ describe('InstagramOutboundService', () => {
 
   it('delivers text through the Instagram Messages API and persists the Meta id', async () => {
     const harness = createHarness();
+    const loggerErrorSpy = jest
+      .spyOn(Logger.prototype, 'error')
+      .mockImplementation(() => undefined);
     const fetchMock = jest.fn().mockResolvedValue(
       new Response(
         JSON.stringify({
@@ -61,6 +64,7 @@ describe('InstagramOutboundService', () => {
       status: 'open',
       lastMessagePreview: 'Olá pelo Instagram',
     });
+    expect(loggerErrorSpy).not.toHaveBeenCalled();
   });
 
   it('routes Facebook Login channels through the Page Messages API', async () => {
@@ -68,6 +72,9 @@ describe('InstagramOutboundService', () => {
       externalPageId: 'facebook-page-id',
       metadata: { authorizationMethod: 'facebook_login' },
     });
+    const loggerErrorSpy = jest
+      .spyOn(Logger.prototype, 'error')
+      .mockImplementation(() => undefined);
     const fetchMock = jest.fn().mockResolvedValue(
       new Response(
         JSON.stringify({
@@ -98,8 +105,90 @@ describe('InstagramOutboundService', () => {
         headers: expect.objectContaining({
           Authorization: 'Bearer decrypted-token',
         }),
+        body: JSON.stringify({
+          recipient: { id: 'ig-scoped-user' },
+          message: { text: 'Olá via Facebook Login' },
+        }),
       }),
     );
+    expect(loggerErrorSpy).not.toHaveBeenCalled();
+  });
+
+  it('logs only sanitized Meta diagnostics for Facebook Login failures', async () => {
+    const harness = createHarness({
+      externalPageId: 'facebook-page-id',
+      metadata: { authorizationMethod: 'facebook_login' },
+    });
+    const loggerErrorSpy = jest
+      .spyOn(Logger.prototype, 'error')
+      .mockImplementation(() => undefined);
+    global.fetch = jest.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          error: {
+            message:
+              'Permission denied. Authorization: Bearer decrypted-token; recipient=ig-scoped-user; app_secret=meta-app-secret; oauth_code=private-oauth-code; credentialsEncrypted=encrypted-token; channelId=channel-1; conversationId=conversation-1; https://graph.facebook.com/v24.0/facebook-page-id/messages?access_token=decrypted-token',
+            type: 'OAuthException',
+            code: 100,
+            error_subcode: 2018001,
+            fbtrace_id: 'private-trace',
+          },
+        }),
+        { status: 400, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+
+    const error = await harness.service
+      .sendText({
+        ctx: {
+          tenantId: 'tenant-1',
+          workspaceId: 'workspace-1',
+          userId: 'user-1',
+        },
+        channelId: 'channel-1',
+        conversationId: 'conversation-1',
+        to: harness.conversation.externalThreadId!,
+        text: 'Olá via Facebook Login',
+      })
+      .catch((caught: unknown) => caught);
+
+    expect(error).toEqual(
+      new BadRequestException('Não foi possível enviar pelo canal Instagram.'),
+    );
+    expect(loggerErrorSpy).toHaveBeenCalledWith(
+      'Meta Instagram outbound failed',
+      expect.objectContaining({
+        operation: 'sendInstagramMessageViaFacebookLogin',
+        status: 400,
+        type: 'OAuthException',
+        code: 100,
+        subcode: 2018001,
+        message: expect.stringContaining('Permission denied.'),
+      }),
+    );
+
+    const diagnostic = loggerErrorSpy.mock.calls[0][1] as Record<
+      string,
+      unknown
+    >;
+    expect(Object.keys(diagnostic).sort()).toEqual(
+      ['operation', 'status', 'type', 'code', 'subcode', 'message'].sort(),
+    );
+    const serializedLog = JSON.stringify(loggerErrorSpy.mock.calls);
+    for (const sensitiveValue of [
+      'decrypted-token',
+      'ig-scoped-user',
+      'Authorization',
+      'meta-app-secret',
+      'private-oauth-code',
+      'encrypted-token',
+      'channel-1',
+      'conversation-1',
+      'facebook-page-id',
+      'private-trace',
+    ]) {
+      expect(serializedLog).not.toContain(sensitiveValue);
+    }
   });
 
   it('uses the Meta-documented love reaction payload', async () => {
