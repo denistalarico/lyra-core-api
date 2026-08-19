@@ -23,6 +23,12 @@ import { WebhookLogService } from '../services/webhook-log.service';
 import { MessageStatusSyncService } from '../services/message-status-sync.service';
 import { MetaChannelUnavailableError } from './services/meta-channel-resolver.service';
 
+type MetaWebhookPayload =
+  | MetaWhatsAppWebhookPayload
+  | MetaInstagramWebhookPayload;
+type MetaWebhookWorkload = 'whatsapp' | 'instagram' | 'unknown';
+type SupportedMetaWebhookWorkload = Exclude<MetaWebhookWorkload, 'unknown'>;
+
 @Controller('inbox/channels/meta/webhook')
 export class MetaWebhookController {
   constructor(
@@ -60,24 +66,14 @@ export class MetaWebhookController {
     @Headers('x-hub-signature-256') signature: string | undefined,
     @Req() request: RawBodyRequest<Request>,
     @Body()
-    payload: MetaWhatsAppWebhookPayload | MetaInstagramWebhookPayload,
+    payload: MetaWebhookPayload,
   ) {
     const workload = this.identifyWorkload(payload);
     this.assertValidSignature(signature, request.rawBody, workload);
-    const phoneNumberId =
-      workload === 'whatsapp'
-        ? this.extractPhoneNumberId(payload as MetaWhatsAppWebhookPayload)
-        : null;
-    const accountId =
-      workload === 'instagram'
-        ? this.extractInstagramAccountId(payload as MetaInstagramWebhookPayload)
-        : (payload.entry?.[0]?.id ?? null);
-    const eventType =
-      workload === 'instagram'
-        ? this.extractInstagramEventType(payload as MetaInstagramWebhookPayload)
-        : workload === 'whatsapp'
-          ? this.extractWhatsAppEventType(payload as MetaWhatsAppWebhookPayload)
-          : 'unknown';
+    const { phoneNumberId, accountId, eventType } = this.extractWebhookContext(
+      workload,
+      payload,
+    );
 
     if (workload === 'unknown') {
       await this.webhookLogService.create({
@@ -94,28 +90,8 @@ export class MetaWebhookController {
     }
 
     try {
-      const normalized =
-        workload === 'instagram'
-          ? await this.instagramMetaAdapter.normalize(
-              payload as MetaInstagramWebhookPayload,
-            )
-          : await this.whatsappMetaAdapter.normalize(
-              payload as MetaWhatsAppWebhookPayload,
-            );
-      const normalizedStatuses =
-        workload === 'instagram'
-          ? await this.instagramMetaAdapter.normalizeStatuses(
-              payload as MetaInstagramWebhookPayload,
-            )
-          : await this.whatsappMetaAdapter.normalizeStatuses(
-              payload as MetaWhatsAppWebhookPayload,
-            );
-      const normalizedReactions =
-        workload === 'instagram'
-          ? await this.instagramMetaAdapter.normalizeReactions(
-              payload as MetaInstagramWebhookPayload,
-            )
-          : { reactions: [] };
+      const { normalized, normalizedStatuses, normalizedReactions } =
+        await this.normalizeSupportedWorkload(workload, payload);
 
       const results: Array<{
         conversationId: string;
@@ -168,6 +144,15 @@ export class MetaWebhookController {
         normalized.messages[0] ??
         normalizedStatuses.statuses[0] ??
         normalizedReactions.reactions[0];
+      let metadata;
+      switch (workload) {
+        case 'whatsapp':
+          metadata = { results, statusResults };
+          break;
+        case 'instagram':
+          metadata = { workload, results, statusResults, reactionResults };
+          break;
+      }
       await this.webhookLogService.create({
         tenantId: normalizedScope?.tenantId ?? null,
         workspaceId: normalizedScope?.workspaceId ?? null,
@@ -182,10 +167,7 @@ export class MetaWebhookController {
         messagesProcessed: results.length,
         statusesProcessed: statusResults.length,
         payload: {},
-        metadata:
-          workload === 'instagram'
-            ? { workload, results, statusResults, reactionResults }
-            : { results, statusResults },
+        metadata,
       });
 
       return {
@@ -201,6 +183,20 @@ export class MetaWebhookController {
       };
     } catch (error) {
       if (error instanceof MetaChannelUnavailableError) {
+        let metadata;
+        switch (workload) {
+          case 'whatsapp':
+            metadata = {
+              connectionStatus: error.channel.connectionStatus,
+            };
+            break;
+          case 'instagram':
+            metadata = {
+              workload,
+              connectionStatus: error.channel.connectionStatus,
+            };
+            break;
+        }
         await this.webhookLogService.create({
           tenantId: error.channel.tenantId,
           workspaceId: error.channel.workspaceId,
@@ -213,13 +209,7 @@ export class MetaWebhookController {
           signatureReceived: Boolean(signature),
           errorMessage: error.code,
           payload: {},
-          metadata:
-            workload === 'instagram'
-              ? {
-                  workload,
-                  connectionStatus: error.channel.connectionStatus,
-                }
-              : { connectionStatus: error.channel.connectionStatus },
+          metadata,
         });
         return { ok: true, ignored: true, reason: error.code };
       }
@@ -239,9 +229,7 @@ export class MetaWebhookController {
     }
   }
 
-  private identifyWorkload(
-    payload: MetaWhatsAppWebhookPayload | MetaInstagramWebhookPayload,
-  ): 'whatsapp' | 'instagram' | 'unknown' {
+  private identifyWorkload(payload: MetaWebhookPayload): MetaWebhookWorkload {
     if (payload.object === 'whatsapp_business_account') return 'whatsapp';
     if (payload.object === 'instagram') return 'instagram';
     return 'unknown';
@@ -250,7 +238,7 @@ export class MetaWebhookController {
   private assertValidSignature(
     signature: string | undefined,
     rawBody?: Buffer,
-    workload: 'whatsapp' | 'instagram' | 'unknown' = 'unknown',
+    workload: MetaWebhookWorkload = 'unknown',
   ) {
     const secrets = this.getWebhookSigningSecrets(workload);
     if (secrets.length === 0) {
@@ -279,23 +267,81 @@ export class MetaWebhookController {
     }
   }
 
-  private getWebhookSigningSecrets(
-    workload: 'whatsapp' | 'instagram' | 'unknown',
-  ) {
+  private getWebhookSigningSecrets(workload: MetaWebhookWorkload) {
     const metaSecret = process.env.META_APP_SECRET?.trim();
     const instagramSecret =
       process.env.META_INSTAGRAM_APP_SECRET?.trim() || metaSecret;
 
-    if (workload === 'instagram') {
-      return instagramSecret ? [instagramSecret] : [];
+    switch (workload) {
+      case 'whatsapp':
+        return metaSecret ? [metaSecret] : [];
+      case 'instagram':
+        return instagramSecret ? [instagramSecret] : [];
+      case 'unknown':
+        return [
+          ...new Set([metaSecret, instagramSecret].filter(Boolean)),
+        ] as string[];
     }
-    if (workload === 'whatsapp') {
-      return metaSecret ? [metaSecret] : [];
-    }
+  }
 
-    return [
-      ...new Set([metaSecret, instagramSecret].filter(Boolean)),
-    ] as string[];
+  private extractWebhookContext(
+    workload: MetaWebhookWorkload,
+    payload: MetaWebhookPayload,
+  ) {
+    switch (workload) {
+      case 'whatsapp': {
+        const whatsappPayload = payload as MetaWhatsAppWebhookPayload;
+        return {
+          phoneNumberId: this.extractPhoneNumberId(whatsappPayload),
+          accountId: whatsappPayload.entry?.[0]?.id ?? null,
+          eventType: this.extractWhatsAppEventType(whatsappPayload),
+        };
+      }
+      case 'instagram': {
+        const instagramPayload = payload as MetaInstagramWebhookPayload;
+        return {
+          phoneNumberId: null,
+          accountId: this.extractInstagramAccountId(instagramPayload),
+          eventType: this.extractInstagramEventType(instagramPayload),
+        };
+      }
+      case 'unknown':
+        return {
+          phoneNumberId: null,
+          accountId: payload.entry?.[0]?.id ?? null,
+          eventType: 'unknown',
+        };
+    }
+  }
+
+  private async normalizeSupportedWorkload(
+    workload: SupportedMetaWebhookWorkload,
+    payload: MetaWebhookPayload,
+  ) {
+    switch (workload) {
+      case 'whatsapp': {
+        const whatsappPayload = payload as MetaWhatsAppWebhookPayload;
+        return {
+          normalized: await this.whatsappMetaAdapter.normalize(whatsappPayload),
+          normalizedStatuses:
+            await this.whatsappMetaAdapter.normalizeStatuses(whatsappPayload),
+          normalizedReactions: { reactions: [] },
+        };
+      }
+      case 'instagram': {
+        const instagramPayload = payload as MetaInstagramWebhookPayload;
+        return {
+          normalized:
+            await this.instagramMetaAdapter.normalize(instagramPayload),
+          normalizedStatuses:
+            await this.instagramMetaAdapter.normalizeStatuses(instagramPayload),
+          normalizedReactions:
+            await this.instagramMetaAdapter.normalizeReactions(
+              instagramPayload,
+            ),
+        };
+      }
+    }
   }
 
   private extractPhoneNumberId(payload: MetaWhatsAppWebhookPayload) {

@@ -292,7 +292,10 @@ describe('MetaWebhookController', () => {
       reason: 'unsupported_meta_payload',
     });
     expect(whatsappAdapter.normalize).not.toHaveBeenCalled();
+    expect(whatsappAdapter.normalizeStatuses).not.toHaveBeenCalled();
     expect(instagramAdapter.normalize).not.toHaveBeenCalled();
+    expect(instagramAdapter.normalizeStatuses).not.toHaveBeenCalled();
+    expect(instagramAdapter.normalizeReactions).not.toHaveBeenCalled();
     expect(webhookLog.create).toHaveBeenCalledWith(
       expect.objectContaining({
         status: 'ignored',
@@ -300,6 +303,28 @@ describe('MetaWebhookController', () => {
         metadata: { reason: 'unsupported_meta_payload' },
       }),
     );
+  });
+
+  it('does not dispatch an unsupported payload to any adapter', async () => {
+    const payload = { object: 'unsupported', entry: [] };
+    const request = signedRequest(payload);
+
+    await expect(
+      controller.receiveWebhook(
+        request.signature,
+        { rawBody: request.rawBody } as never,
+        payload,
+      ),
+    ).resolves.toEqual({
+      ok: true,
+      ignored: true,
+      reason: 'unsupported_meta_payload',
+    });
+    expect(whatsappAdapter.normalize).not.toHaveBeenCalled();
+    expect(whatsappAdapter.normalizeStatuses).not.toHaveBeenCalled();
+    expect(instagramAdapter.normalize).not.toHaveBeenCalled();
+    expect(instagramAdapter.normalizeStatuses).not.toHaveBeenCalled();
+    expect(instagramAdapter.normalizeReactions).not.toHaveBeenCalled();
   });
 
   it('accepts and logs an unavailable Instagram channel as ignored', async () => {

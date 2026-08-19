@@ -9,11 +9,13 @@ describe('MetaAssetDiscoveryService', () => {
           pageId: 'page-1',
           pageName: 'Page One',
           pageAccessToken: 'page-secret-1',
+          tasks: ['MESSAGING'],
         },
         {
           pageId: 'page-2',
           pageName: 'Page Two',
           pageAccessToken: 'page-secret-2',
+          tasks: [],
         },
       ]),
       getFacebookPageInstagramAccount: jest
@@ -33,6 +35,7 @@ describe('MetaAssetDiscoveryService', () => {
         pageId: 'page-1',
         pageName: 'Page One',
         pageAccessToken: 'page-secret-1',
+        tasks: ['MESSAGING'],
         instagramAccount: {
           accountId: 'instagram-1',
           username: 'page.one',
@@ -42,6 +45,7 @@ describe('MetaAssetDiscoveryService', () => {
         pageId: 'page-2',
         pageName: 'Page Two',
         pageAccessToken: 'page-secret-2',
+        tasks: [],
         instagramAccount: null,
       },
     ]);

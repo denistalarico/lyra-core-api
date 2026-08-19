@@ -7,6 +7,7 @@ export type FacebookPageAsset = {
   pageId: string;
   pageName: string;
   pageAccessToken: string;
+  tasks: string[];
   instagramAccount: FacebookPageInstagramAccountAsset | null;
 };
 

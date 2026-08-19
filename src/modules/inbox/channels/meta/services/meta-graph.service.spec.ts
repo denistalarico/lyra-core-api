@@ -391,6 +391,7 @@ describe('MetaGraphService Facebook assets', () => {
             id: 'page-1',
             name: 'Page One',
             access_token: 'page-secret-1',
+            tasks: [' MESSAGING ', '', '  ', 'CREATE_CONTENT'],
           },
         ],
       }),
@@ -401,6 +402,7 @@ describe('MetaGraphService Facebook assets', () => {
         pageId: 'page-1',
         pageName: 'Page One',
         pageAccessToken: 'page-secret-1',
+        tasks: ['MESSAGING', 'CREATE_CONTENT'],
       },
     ]);
 
@@ -408,7 +410,7 @@ describe('MetaGraphService Facebook assets', () => {
     expect(`${url.origin}${url.pathname}`).toBe(
       'https://graph.facebook.com/v26.0/me/accounts',
     );
-    expect(url.searchParams.get('fields')).toBe('id,name,access_token');
+    expect(url.searchParams.get('fields')).toBe('id,name,access_token,tasks');
     expect(url.searchParams.has('access_token')).toBe(false);
     expect(fetchMock.mock.calls[0][1]).toEqual({
       method: 'GET',
@@ -425,6 +427,7 @@ describe('MetaGraphService Facebook assets', () => {
               id: 'page-1',
               name: 'Page One',
               access_token: 'page-secret-1',
+              tasks: [],
             },
           ],
           paging: {
@@ -439,6 +442,7 @@ describe('MetaGraphService Facebook assets', () => {
               id: 'page-2',
               name: 'Page Two',
               access_token: 'page-secret-2',
+              tasks: [],
             },
           ],
         }),
@@ -653,6 +657,25 @@ describe('MetaGraphService Facebook assets', () => {
   it('rejects malformed Facebook Page responses', async () => {
     fetchMock.mockResolvedValue(
       response({ data: [{ id: 'page-1', name: 'Page One' }] }),
+    );
+
+    await expect(service.listFacebookPages('user-secret')).rejects.toThrow(
+      'Facebook Pages lookup returned an invalid response.',
+    );
+  });
+
+  it('rejects Facebook Page responses with invalid tasks', async () => {
+    fetchMock.mockResolvedValue(
+      response({
+        data: [
+          {
+            id: 'page-1',
+            name: 'Page One',
+            access_token: 'page-secret-1',
+            tasks: ['MESSAGING', 123],
+          },
+        ],
+      }),
     );
 
     await expect(service.listFacebookPages('user-secret')).rejects.toThrow(

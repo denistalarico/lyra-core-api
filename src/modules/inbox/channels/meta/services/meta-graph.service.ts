@@ -834,7 +834,7 @@ export class MetaGraphService {
     const url = new URL(
       `${META_GRAPH_ORIGIN}/${this.graphVersion}/me/accounts`,
     );
-    url.searchParams.set('fields', 'id,name,access_token');
+    url.searchParams.set('fields', 'id,name,access_token,tasks');
     if (after) {
       url.searchParams.set('after', after);
     }
@@ -904,7 +904,9 @@ export class MetaGraphService {
       !this.isRecord(value) ||
       !this.isNonEmptyString(value.id) ||
       !this.isNonEmptyString(value.name) ||
-      !this.isNonEmptyString(value.access_token)
+      !this.isNonEmptyString(value.access_token) ||
+      !Array.isArray(value.tasks) ||
+      !value.tasks.every((task) => typeof task === 'string')
     ) {
       throw new BadRequestException(
         'Facebook Pages lookup returned an invalid response.',
@@ -915,6 +917,7 @@ export class MetaGraphService {
       pageId: value.id.trim(),
       pageName: value.name.trim(),
       pageAccessToken: value.access_token.trim(),
+      tasks: value.tasks.map((task) => task.trim()).filter(Boolean),
     };
   }
 
