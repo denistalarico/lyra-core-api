@@ -10,7 +10,7 @@ import { IsNull, Repository } from 'typeorm';
 import { SettingsCryptoService } from '../../../../../common/crypto/settings-crypto.service';
 import { InboxChannelEntity } from '../../../entities/inbox-channel.entity';
 import {
-  INSTAGRAM_MESSAGING_WEBHOOK_FIELDS,
+  INSTAGRAM_LOGIN_WEBHOOK_FIELDS,
   MetaGraphService,
 } from '../../meta/services/meta-graph.service';
 
@@ -158,7 +158,7 @@ export class InstagramChannelHealthService {
       }
     }
 
-    const missingWebhookFields = INSTAGRAM_MESSAGING_WEBHOOK_FIELDS.filter(
+    const missingWebhookFields = INSTAGRAM_LOGIN_WEBHOOK_FIELDS.filter(
       (field) => !subscriptions.subscribedFields.includes(field),
     );
     const webhookSubscriptionHealthy =

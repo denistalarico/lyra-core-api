@@ -144,15 +144,21 @@ type InstagramUserProfileResponse = {
   error?: InstagramApiError;
 };
 
-export const INSTAGRAM_MESSAGING_WEBHOOK_FIELDS = [
+export const INSTAGRAM_LOGIN_WEBHOOK_FIELDS = [
   'messages',
   'messaging_postbacks',
   'message_reactions',
   'messaging_seen',
 ] as const;
 
-export type InstagramMessagingWebhookField =
-  (typeof INSTAGRAM_MESSAGING_WEBHOOK_FIELDS)[number];
+export const FACEBOOK_PAGE_INSTAGRAM_WEBHOOK_FIELDS = [
+  'messages',
+  'messaging_postbacks',
+  'message_reactions',
+] as const;
+
+export type InstagramLoginWebhookField =
+  (typeof INSTAGRAM_LOGIN_WEBHOOK_FIELDS)[number];
 
 @Injectable()
 export class MetaGraphService {
@@ -368,7 +374,7 @@ export class MetaGraphService {
   async subscribeInstagramAccountToWebhooks(input: {
     igUserId: string;
     accessToken: string;
-    subscribedFields: readonly InstagramMessagingWebhookField[];
+    subscribedFields: readonly InstagramLoginWebhookField[];
   }) {
     const url = new URL(
       `https://graph.instagram.com/${this.graphVersion}/${input.igUserId}/subscribed_apps`,
@@ -528,12 +534,14 @@ export class MetaGraphService {
   async subscribeFacebookPageToInstagramWebhooks(input: {
     pageId: string;
     pageAccessToken: string;
-    subscribedFields: readonly InstagramMessagingWebhookField[];
   }) {
     const url = new URL(
       `${META_GRAPH_ORIGIN}/${this.graphVersion}/${encodeURIComponent(input.pageId)}/subscribed_apps`,
     );
-    url.searchParams.set('subscribed_fields', input.subscribedFields.join(','));
+    url.searchParams.set(
+      'subscribed_fields',
+      FACEBOOK_PAGE_INSTAGRAM_WEBHOOK_FIELDS.join(','),
+    );
 
     const response = await this.fetchMeta(url, {
       method: 'POST',

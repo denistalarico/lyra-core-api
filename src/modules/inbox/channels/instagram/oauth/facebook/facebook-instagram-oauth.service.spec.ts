@@ -554,12 +554,6 @@ describe('FacebookInstagramOAuthService', () => {
     ).toHaveBeenCalledWith({
       pageId: '123',
       pageAccessToken: 'page-selection-secret',
-      subscribedFields: [
-        'messages',
-        'messaging_postbacks',
-        'message_reactions',
-        'messaging_seen',
-      ],
     });
     expect(harness.manager.query).toHaveBeenCalledWith(
       'SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))',

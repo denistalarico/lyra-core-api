@@ -5,10 +5,7 @@ import { DataSource, Repository } from 'typeorm';
 import { SettingsCryptoService } from '../../../../../../common/crypto/settings-crypto.service';
 import { InboxChannelConnectionSessionEntity } from '../../../../entities/inbox-channel-connection-session.entity';
 import { MetaAssetDiscoveryService } from '../../../meta/services/meta-asset-discovery.service';
-import {
-  INSTAGRAM_MESSAGING_WEBHOOK_FIELDS,
-  MetaGraphService,
-} from '../../../meta/services/meta-graph.service';
+import { MetaGraphService } from '../../../meta/services/meta-graph.service';
 import { InstagramChannelConnectionService } from '../instagram-channel-connection.service';
 
 const SESSION_TTL_MS = 15 * 60 * 1000;
@@ -241,7 +238,6 @@ export class FacebookInstagramOAuthService {
           await this.metaGraphService.subscribeFacebookPageToInstagramWebhooks({
             pageId: input.pageId,
             pageAccessToken: pageCredential.pageAccessToken,
-            subscribedFields: INSTAGRAM_MESSAGING_WEBHOOK_FIELDS,
           });
         } catch {
           return { ok: false, code: 'webhook_subscription_failed' };

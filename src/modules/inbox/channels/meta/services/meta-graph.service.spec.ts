@@ -1,6 +1,9 @@
 /* eslint-disable @typescript-eslint/no-unsafe-member-access -- Jest records fetch mock calls as dynamic tuples in this focused HTTP contract test. */
 import { BadRequestException, Logger } from '@nestjs/common';
-import { MetaGraphService } from './meta-graph.service';
+import {
+  INSTAGRAM_LOGIN_WEBHOOK_FIELDS,
+  MetaGraphService,
+} from './meta-graph.service';
 
 describe('MetaGraphService Instagram Login', () => {
   const originalEnv = process.env;
@@ -161,7 +164,7 @@ describe('MetaGraphService Instagram Login', () => {
       service.subscribeInstagramAccountToWebhooks({
         igUserId: '17841400000000000',
         accessToken: 'long-lived-secret',
-        subscribedFields: ['messages', 'messaging_postbacks'],
+        subscribedFields: INSTAGRAM_LOGIN_WEBHOOK_FIELDS,
       }),
     ).resolves.toEqual({ success: true });
 
@@ -170,7 +173,7 @@ describe('MetaGraphService Instagram Login', () => {
       'https://graph.instagram.com/v26.0/17841400000000000/subscribed_apps',
     );
     expect(url.searchParams.get('subscribed_fields')).toBe(
-      'messages,messaging_postbacks',
+      'messages,messaging_postbacks,message_reactions,messaging_seen',
     );
     expect(url.searchParams.has('access_token')).toBe(false);
     expect(fetchMock.mock.calls[0][1]).toEqual({
@@ -504,7 +507,6 @@ describe('MetaGraphService Facebook assets', () => {
       service.subscribeFacebookPageToInstagramWebhooks({
         pageId: 'page-1',
         pageAccessToken: 'page-secret-1',
-        subscribedFields: ['messages', 'messaging_postbacks'],
       }),
     ).resolves.toEqual({ success: true });
 
@@ -513,7 +515,10 @@ describe('MetaGraphService Facebook assets', () => {
       'https://graph.facebook.com/v26.0/page-1/subscribed_apps',
     );
     expect(url.searchParams.get('subscribed_fields')).toBe(
-      'messages,messaging_postbacks',
+      'messages,messaging_postbacks,message_reactions',
+    );
+    expect(url.searchParams.get('subscribed_fields')).not.toContain(
+      'messaging_seen',
     );
     expect(url.searchParams.has('access_token')).toBe(false);
     expect(fetchMock.mock.calls[0][1]).toEqual({
@@ -611,7 +616,6 @@ describe('MetaGraphService Facebook assets', () => {
       .subscribeFacebookPageToInstagramWebhooks({
         pageId: 'page-1',
         pageAccessToken: 'page-secret-1',
-        subscribedFields: ['messages'],
       })
       .catch((caught: unknown) => caught);
 

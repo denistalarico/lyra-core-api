@@ -5,7 +5,7 @@ import { DataSource, Repository } from 'typeorm';
 import { InboxChannelConnectionSessionEntity } from '../../../entities/inbox-channel-connection-session.entity';
 import { InboxChannelEntity } from '../../../entities/inbox-channel.entity';
 import {
-  INSTAGRAM_MESSAGING_WEBHOOK_FIELDS,
+  INSTAGRAM_LOGIN_WEBHOOK_FIELDS,
   MetaGraphService,
 } from '../../meta/services/meta-graph.service';
 import { InstagramChannelConnectionService } from './instagram-channel-connection.service';
@@ -230,7 +230,7 @@ export class InstagramOAuthService {
         await this.metaGraphService.subscribeInstagramAccountToWebhooks({
           igUserId: identity.accountId,
           accessToken: longLived.accessToken,
-          subscribedFields: INSTAGRAM_MESSAGING_WEBHOOK_FIELDS,
+          subscribedFields: INSTAGRAM_LOGIN_WEBHOOK_FIELDS,
         });
       } catch {
         await this.finishSessionWithError(
