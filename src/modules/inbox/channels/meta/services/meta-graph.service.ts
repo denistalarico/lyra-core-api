@@ -144,6 +144,14 @@ type InstagramUserProfileResponse = {
   error?: InstagramApiError;
 };
 
+type FacebookMessengerUserProfileResponse = {
+  id?: string | number;
+  first_name?: string | null;
+  last_name?: string | null;
+  profile_pic?: string | null;
+  error?: InstagramApiError;
+};
+
 export const INSTAGRAM_LOGIN_WEBHOOK_FIELDS = [
   'messages',
   'messaging_postbacks',
@@ -679,6 +687,65 @@ export class MetaGraphService {
       id: data.id == null ? input.scopedUserId : String(data.id),
       name: data.name?.trim() || null,
       username: data.username?.trim() || null,
+      profilePictureUrl: data.profile_pic?.trim() || null,
+    };
+  }
+
+  /**
+   * Messenger identifies contacts by Page-scoped ID, and that node exposes no
+   * username: only the name parts and the picture are available. The display
+   * name is derived from `first_name`/`last_name` because those two fields are
+   * the ones every Graph version guarantees for a PSID, and asking for an
+   * unsupported field would fail the whole lookup.
+   */
+  async getFacebookMessengerUserProfile(input: {
+    pageScopedUserId: string;
+    pageAccessToken: string;
+  }) {
+    const url = new URL(
+      `${META_GRAPH_ORIGIN}/${this.graphVersion}/${encodeURIComponent(input.pageScopedUserId)}`,
+    );
+    url.searchParams.set('fields', 'id,first_name,last_name,profile_pic');
+
+    const response = await this.fetchMeta(url, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${input.pageAccessToken}` },
+    });
+    const data = (await this.readJson(
+      response,
+    )) as FacebookMessengerUserProfileResponse;
+
+    if (!response.ok || data.error) {
+      this.logger.warn('Meta user profile lookup failed', {
+        operation: 'getFacebookMessengerUserProfile',
+        status: response.status,
+        type: typeof data.error?.type === 'string' ? data.error.type : null,
+        code: typeof data.error?.code === 'number' ? data.error.code : null,
+        subcode:
+          typeof data.error?.error_subcode === 'number'
+            ? data.error.error_subcode
+            : null,
+        message: this.sanitizeMetaErrorMessage(data.error?.message, [
+          input.pageAccessToken,
+          this.appSecret,
+          this.instagramAppSecret,
+        ]),
+      });
+
+      throw new BadRequestException(
+        'Facebook Messenger user profile lookup failed.',
+      );
+    }
+
+    const name = [data.first_name, data.last_name]
+      .filter((part): part is string => this.isNonEmptyString(part))
+      .map((part) => part.trim())
+      .join(' ')
+      .trim();
+
+    return {
+      id: data.id == null ? input.pageScopedUserId : String(data.id),
+      name: name || null,
       profilePictureUrl: data.profile_pic?.trim() || null,
     };
   }

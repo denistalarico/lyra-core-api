@@ -275,6 +275,7 @@ describe('MetaGraphService Facebook assets', () => {
   let service: MetaGraphService;
   let fetchMock: jest.Mock;
   let loggerErrorSpy: jest.SpyInstance;
+  let loggerWarnSpy: jest.SpyInstance;
 
   beforeEach(() => {
     process.env = {
@@ -288,6 +289,9 @@ describe('MetaGraphService Facebook assets', () => {
     global.fetch = fetchMock as typeof fetch;
     loggerErrorSpy = jest
       .spyOn(Logger.prototype, 'error')
+      .mockImplementation(() => undefined);
+    loggerWarnSpy = jest
+      .spyOn(Logger.prototype, 'warn')
       .mockImplementation(() => undefined);
     service = new MetaGraphService();
   });
@@ -638,6 +642,109 @@ describe('MetaGraphService Facebook assets', () => {
       method: 'GET',
       headers: { Authorization: 'Bearer page-secret-1' },
     });
+  });
+
+  it('loads a Messenger sender profile with the Page token and derives the display name', async () => {
+    fetchMock.mockResolvedValue(
+      response({
+        id: 'psid-1',
+        first_name: 'Maria',
+        last_name: 'Silva',
+        profile_pic: 'https://cdn.example.com/avatar.jpg',
+      }),
+    );
+
+    await expect(
+      service.getFacebookMessengerUserProfile({
+        pageScopedUserId: 'psid-1',
+        pageAccessToken: 'page-secret-1',
+      }),
+    ).resolves.toEqual({
+      id: 'psid-1',
+      name: 'Maria Silva',
+      profilePictureUrl: 'https://cdn.example.com/avatar.jpg',
+    });
+
+    const url = new URL(String(fetchMock.mock.calls[0][0]));
+    expect(`${url.origin}${url.pathname}`).toBe(
+      'https://graph.facebook.com/v26.0/psid-1',
+    );
+    expect(url.searchParams.get('fields')).toBe(
+      'id,first_name,last_name,profile_pic',
+    );
+    expect(url.searchParams.get('fields')).not.toContain('username');
+    expect(url.searchParams.has('access_token')).toBe(false);
+    expect(fetchMock.mock.calls[0][1]).toEqual({
+      method: 'GET',
+      headers: { Authorization: 'Bearer page-secret-1' },
+    });
+    expect(loggerWarnSpy).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [{ id: 'psid-1', first_name: 'Maria' }, 'Maria'],
+    [{ id: 'psid-1', last_name: 'Silva' }, 'Silva'],
+    [{ id: 'psid-1', first_name: '  ', last_name: '' }, null],
+    [{ id: 'psid-1' }, null],
+  ])('derives the Messenger display name from %p', async (body, expected) => {
+    fetchMock.mockResolvedValue(response(body));
+
+    await expect(
+      service.getFacebookMessengerUserProfile({
+        pageScopedUserId: 'psid-1',
+        pageAccessToken: 'page-secret-1',
+      }),
+    ).resolves.toEqual({
+      id: 'psid-1',
+      name: expected,
+      profilePictureUrl: null,
+    });
+  });
+
+  it('sanitizes Messenger profile lookup failures', async () => {
+    fetchMock.mockResolvedValue(
+      response(
+        {
+          error: {
+            message:
+              'Permission denied. Authorization: Bearer page-secret-1; client_secret=meta-app-secret; https://graph.facebook.com/psid-1?access_token=page-secret-1',
+            type: 'OAuthException',
+            code: 100,
+            error_subcode: 2018001,
+            fbtrace_id: 'private-trace',
+          },
+        },
+        false,
+      ),
+    );
+
+    const error = await service
+      .getFacebookMessengerUserProfile({
+        pageScopedUserId: 'psid-1',
+        pageAccessToken: 'page-secret-1',
+      })
+      .catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(BadRequestException);
+    expect((error as Error).message).toBe(
+      'Facebook Messenger user profile lookup failed.',
+    );
+    expect(loggerWarnSpy).toHaveBeenCalledWith(
+      'Meta user profile lookup failed',
+      expect.objectContaining({
+        operation: 'getFacebookMessengerUserProfile',
+        status: 400,
+        type: 'OAuthException',
+        code: 100,
+        subcode: 2018001,
+      }),
+    );
+    const serializedLog = JSON.stringify(loggerWarnSpy.mock.calls);
+    expect(serializedLog).not.toContain('page-secret-1');
+    expect(serializedLog).not.toContain('meta-app-secret');
+    expect(serializedLog).not.toContain('private-trace');
+    expect(serializedLog).not.toContain('Authorization');
+    expect(serializedLog).not.toContain('graph.facebook.com');
   });
 
   it('loads an Instagram messaging profile through Facebook Graph with a Page token', async () => {
