@@ -85,6 +85,49 @@ export class MetaChannelResolverService {
     return channels[0];
   }
 
+  async findFacebookMessengerChannelByPageId(pageId: string) {
+    const where = {
+      type: 'facebook_messenger' as const,
+      provider: 'meta',
+      externalAccountId: pageId,
+      deletedAt: IsNull(),
+    };
+    const channels = await this.channelsRepository.find({
+      where: {
+        ...where,
+        status: 'active',
+        connectionStatus: 'connected',
+      },
+      take: 2,
+    });
+
+    if (channels.length === 0) {
+      const unavailable = await this.channelsRepository.find({
+        where,
+        take: 2,
+      });
+      if (unavailable.length === 1) {
+        throw new MetaChannelUnavailableError(unavailable[0]);
+      }
+      if (unavailable.length > 1) {
+        throw new ConflictException(
+          'Ambiguous Messenger channel provider key; webhook was not processed.',
+        );
+      }
+      throw new NotFoundException(
+        'Messenger channel not found for the supplied provider key.',
+      );
+    }
+
+    if (channels.length !== 1) {
+      throw new ConflictException(
+        'Ambiguous Messenger channel provider key; webhook was not processed.',
+      );
+    }
+
+    return channels[0];
+  }
+
   private instagramAccountWhere(
     accountId: string,
     availability: Partial<

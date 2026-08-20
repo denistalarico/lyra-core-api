@@ -23,6 +23,7 @@ import { MetaWebhookController } from './channels/meta/meta-webhook.controller';
 import { MetaChannelResolverService } from './channels/meta/services/meta-channel-resolver.service';
 import { WhatsAppMetaAdapter } from './channels/meta/adapters/whatsapp-meta.adapter';
 import { InstagramMetaAdapter } from './channels/meta/adapters/instagram-meta.adapter';
+import { MessengerMetaAdapter } from './channels/meta/adapters/messenger-meta.adapter';
 import { InboxWebhookLogEntity } from './entities/inbox-webhook-log.entity';
 import { WebhookLogService } from './channels/services/webhook-log.service';
 import { MessageStatusSyncService } from './channels/services/message-status-sync.service';
@@ -160,6 +161,7 @@ import { InstagramChannelConnectionService } from './channels/instagram/oauth/in
     MetaChannelResolverService,
     WhatsAppMetaAdapter,
     InstagramMetaAdapter,
+    MessengerMetaAdapter,
     WebhookLogService,
     MessageStatusSyncService,
     WhatsAppOutboundService,

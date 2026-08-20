@@ -16,8 +16,10 @@ import { createHmac, timingSafeEqual } from 'crypto';
 import type { Request } from 'express';
 import { InboundMessageIngestionService } from '../services/inbound-message-ingestion.service';
 import { InstagramMetaAdapter } from './adapters/instagram-meta.adapter';
+import { MessengerMetaAdapter } from './adapters/messenger-meta.adapter';
 import { WhatsAppMetaAdapter } from './adapters/whatsapp-meta.adapter';
 import type { MetaInstagramWebhookPayload } from './types/meta-instagram-webhook.types';
+import type { MetaMessengerWebhookPayload } from './types/meta-messenger-webhook.types';
 import type { MetaWhatsAppWebhookPayload } from './types/meta-whatsapp-webhook.types';
 import { WebhookLogService } from '../services/webhook-log.service';
 import { MessageStatusSyncService } from '../services/message-status-sync.service';
@@ -25,8 +27,9 @@ import { MetaChannelUnavailableError } from './services/meta-channel-resolver.se
 
 type MetaWebhookPayload =
   | MetaWhatsAppWebhookPayload
-  | MetaInstagramWebhookPayload;
-type MetaWebhookWorkload = 'whatsapp' | 'instagram' | 'unknown';
+  | MetaInstagramWebhookPayload
+  | MetaMessengerWebhookPayload;
+type MetaWebhookWorkload = 'whatsapp' | 'instagram' | 'messenger' | 'unknown';
 type SupportedMetaWebhookWorkload = Exclude<MetaWebhookWorkload, 'unknown'>;
 
 @Controller('inbox/channels/meta/webhook')
@@ -34,6 +37,7 @@ export class MetaWebhookController {
   constructor(
     private readonly whatsappMetaAdapter: WhatsAppMetaAdapter,
     private readonly instagramMetaAdapter: InstagramMetaAdapter,
+    private readonly messengerMetaAdapter: MessengerMetaAdapter,
     private readonly inboundIngestionService: InboundMessageIngestionService,
     private readonly webhookLogService: WebhookLogService,
     private readonly messageStatusSyncService: MessageStatusSyncService,
@@ -144,13 +148,16 @@ export class MetaWebhookController {
         normalized.messages[0] ??
         normalizedStatuses.statuses[0] ??
         normalizedReactions.reactions[0];
-      let metadata;
+      let metadata: Record<string, unknown>;
       switch (workload) {
         case 'whatsapp':
           metadata = { results, statusResults };
           break;
         case 'instagram':
           metadata = { workload, results, statusResults, reactionResults };
+          break;
+        case 'messenger':
+          metadata = { workload, results };
           break;
       }
       await this.webhookLogService.create({
@@ -183,7 +190,7 @@ export class MetaWebhookController {
       };
     } catch (error) {
       if (error instanceof MetaChannelUnavailableError) {
-        let metadata;
+        let metadata: Record<string, unknown>;
         switch (workload) {
           case 'whatsapp':
             metadata = {
@@ -191,6 +198,12 @@ export class MetaWebhookController {
             };
             break;
           case 'instagram':
+            metadata = {
+              workload,
+              connectionStatus: error.channel.connectionStatus,
+            };
+            break;
+          case 'messenger':
             metadata = {
               workload,
               connectionStatus: error.channel.connectionStatus,
@@ -232,6 +245,7 @@ export class MetaWebhookController {
   private identifyWorkload(payload: MetaWebhookPayload): MetaWebhookWorkload {
     if (payload.object === 'whatsapp_business_account') return 'whatsapp';
     if (payload.object === 'instagram') return 'instagram';
+    if (payload.object === 'page') return 'messenger';
     return 'unknown';
   }
 
@@ -277,6 +291,8 @@ export class MetaWebhookController {
         return metaSecret ? [metaSecret] : [];
       case 'instagram':
         return instagramSecret ? [instagramSecret] : [];
+      case 'messenger':
+        return metaSecret ? [metaSecret] : [];
       case 'unknown':
         return [
           ...new Set([metaSecret, instagramSecret].filter(Boolean)),
@@ -303,6 +319,14 @@ export class MetaWebhookController {
           phoneNumberId: null,
           accountId: this.extractInstagramAccountId(instagramPayload),
           eventType: this.extractInstagramEventType(instagramPayload),
+        };
+      }
+      case 'messenger': {
+        const messengerPayload = payload as MetaMessengerWebhookPayload;
+        return {
+          phoneNumberId: null,
+          accountId: messengerPayload.entry?.[0]?.id ?? null,
+          eventType: this.extractMessengerEventType(messengerPayload),
         };
       }
       case 'unknown':
@@ -341,6 +365,15 @@ export class MetaWebhookController {
             ),
         };
       }
+      case 'messenger': {
+        const messengerPayload = payload as MetaMessengerWebhookPayload;
+        return {
+          normalized:
+            await this.messengerMetaAdapter.normalize(messengerPayload),
+          normalizedStatuses: { statuses: [] },
+          normalizedReactions: { reactions: [] },
+        };
+      }
     }
   }
 
@@ -374,5 +407,11 @@ export class MetaWebhookController {
     if (events.some((event) => event.reaction)) return 'message_reaction';
     if (events.some((event) => event.read)) return 'message_read';
     return 'unknown';
+  }
+
+  private extractMessengerEventType(payload: MetaMessengerWebhookPayload) {
+    const events =
+      payload.entry?.flatMap((entry) => entry?.messaging ?? []) ?? [];
+    return events.some((event) => event.message) ? 'message' : 'unknown';
   }
 }

@@ -5,6 +5,7 @@ import request from 'supertest';
 import { MetaWebhookController } from './meta-webhook.controller';
 import { WhatsAppMetaAdapter } from './adapters/whatsapp-meta.adapter';
 import { InstagramMetaAdapter } from './adapters/instagram-meta.adapter';
+import { MessengerMetaAdapter } from './adapters/messenger-meta.adapter';
 import { InboundMessageIngestionService } from '../services/inbound-message-ingestion.service';
 import { WebhookLogService } from '../services/webhook-log.service';
 import { MessageStatusSyncService } from '../services/message-status-sync.service';
@@ -33,6 +34,12 @@ describe('MetaWebhookController raw body integration', () => {
             normalize: jest.fn().mockResolvedValue({ messages: [] }),
             normalizeStatuses: jest.fn().mockResolvedValue({ statuses: [] }),
             normalizeReactions: jest.fn().mockResolvedValue({ reactions: [] }),
+          },
+        },
+        {
+          provide: MessengerMetaAdapter,
+          useValue: {
+            normalize: jest.fn().mockResolvedValue({ messages: [] }),
           },
         },
         {
@@ -100,6 +107,27 @@ describe('MetaWebhookController raw body integration', () => {
   it('uses the Instagram app secret without changing the raw JSON bytes', async () => {
     const body = JSON.stringify({ object: 'instagram', entry: [] });
     const signature = `sha256=${createHmac('sha256', 'instagram-secret')
+      .update(body)
+      .digest('hex')}`;
+
+    await request(app.getHttpServer())
+      .post('/api/inbox/channels/meta/webhook')
+      .set('content-type', 'application/json')
+      .set('x-hub-signature-256', signature)
+      .send(body)
+      .expect(200)
+      .expect(({ body: responseBody }) => {
+        expect(responseBody).toMatchObject({
+          ok: true,
+          signatureReceived: true,
+          messagesProcessed: 0,
+        });
+      });
+  });
+
+  it('validates Messenger page payloads with the Meta app secret', async () => {
+    const body = JSON.stringify({ object: 'page', entry: [] });
+    const signature = `sha256=${createHmac('sha256', 'whatsapp-secret')
       .update(body)
       .digest('hex')}`;
 

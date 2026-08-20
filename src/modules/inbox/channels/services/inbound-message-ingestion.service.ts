@@ -407,7 +407,9 @@ export class InboundMessageIngestionService {
     });
     if (
       channelRules.length === 0 &&
-      (input.channelType === 'whatsapp' || input.channelType === 'instagram')
+      ['whatsapp', 'instagram', 'facebook_messenger'].includes(
+        input.channelType,
+      )
     ) {
       return {
         status: 'qualified' as const,
@@ -606,7 +608,9 @@ export class InboundMessageIngestionService {
         ? 'Lead do Instagram'
         : input.channelType === 'whatsapp'
           ? 'Lead do WhatsApp'
-          : 'Nova conversa')
+          : input.channelType === 'facebook_messenger'
+            ? 'Lead do Messenger'
+            : 'Nova conversa')
     ).slice(0, 180);
   }
 
@@ -638,9 +642,12 @@ export class InboundMessageIngestionService {
     return (
       /^\d{8,}$/.test(normalized) ||
       /^instagram:/i.test(normalized) ||
-      ['Nova conversa', 'Conversa sem título', 'Lead do Instagram'].includes(
-        normalized,
-      )
+      [
+        'Nova conversa',
+        'Conversa sem título',
+        'Lead do Instagram',
+        'Lead do Messenger',
+      ].includes(normalized)
     );
   }
 }
