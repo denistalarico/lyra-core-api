@@ -11,26 +11,34 @@ import {
   FACEBOOK_LOGIN_SESSION_TTL_MS,
   hashFacebookOAuthState,
   isAcceptableFacebookOAuthState,
+  isNonEmptyString,
+  isRecord,
   requireFacebookLoginCallbackUrl,
   requireLeadFlowFrontendUrl,
   type FacebookLoginCallbackInput,
 } from '../../../meta/oauth/facebook-login-oauth.support';
 import { MetaAssetDiscoveryService } from '../../../meta/services/meta-asset-discovery.service';
-import { MetaGraphService } from '../../../meta/services/meta-graph.service';
-import { InstagramChannelConnectionService } from '../instagram-channel-connection.service';
+import {
+  FACEBOOK_PAGE_MESSENGER_WEBHOOK_FIELDS,
+  MetaGraphService,
+} from '../../../meta/services/meta-graph.service';
+import { FacebookMessengerChannelConnectionService } from '../facebook-messenger-channel-connection.service';
 
-const SESSION_TTL_MS = FACEBOOK_LOGIN_SESSION_TTL_MS;
-const OAUTH_STARTED_STAGE = FACEBOOK_LOGIN_OAUTH_STARTED_STAGE;
-const ASSET_SELECTION_STAGE = FACEBOOK_LOGIN_ASSET_SELECTION_STAGE;
+const MESSENGER_SESSION_CHANNEL_TYPE = 'facebook_messenger' as const;
 
-type StartFacebookInstagramOAuthInput = {
+/**
+ * Page task required to read and answer Messenger threads. Meta returns it on
+ * the `/me/accounts` `tasks` edge; anything else the Page happens to grant
+ * (ANALYZE, CREATE_CONTENT, ...) is irrelevant for messaging.
+ */
+export const MESSENGER_REQUIRED_PAGE_TASK = 'MESSAGING';
+
+type StartFacebookMessengerOAuthInput = {
   tenantId: string;
   workspaceId: string;
   userId: string | null;
   metadata?: Record<string, unknown>;
 };
-
-type FacebookInstagramOAuthCallbackInput = FacebookLoginCallbackInput;
 
 type CallbackOutcome =
   | { ok: true; sessionId: string }
@@ -44,7 +52,7 @@ type EncryptedFacebookCredentials = {
   }>;
 };
 
-type SelectFacebookInstagramAssetInput = {
+type SelectFacebookMessengerPageInput = {
   tenantId: string;
   workspaceId: string;
   userId: string | null;
@@ -52,16 +60,15 @@ type SelectFacebookInstagramAssetInput = {
   pageId: string;
 };
 
-type GetFacebookInstagramSessionAssetsInput = Omit<
-  SelectFacebookInstagramAssetInput,
+type GetFacebookMessengerSessionAssetsInput = Omit<
+  SelectFacebookMessengerPageInput,
   'pageId'
 >;
 
-type SelectableFacebookAsset = {
+type SelectableMessengerPage = {
   pageId: string;
   pageName: string;
-  instagramAccountId: string | null;
-  instagramUsername: string | null;
+  tasks: string[];
 };
 
 type SelectionErrorCode =
@@ -71,9 +78,7 @@ type SelectionErrorCode =
   | 'asset_not_available'
   | 'credential_decryption_failed'
   | 'invalid_credential_payload'
-  | 'asset_revalidation_failed'
-  | 'selected_page_has_no_instagram'
-  | 'instagram_asset_changed'
+  | 'page_missing_messaging_access'
   | 'webhook_subscription_failed';
 
 type SelectionResult =
@@ -81,7 +86,7 @@ type SelectionResult =
   | { ok: false; code: SelectionErrorCode };
 
 @Injectable()
-export class FacebookInstagramOAuthService {
+export class FacebookMessengerOAuthService {
   constructor(
     @InjectRepository(InboxChannelConnectionSessionEntity, 'agency')
     private readonly sessionsRepository: Repository<InboxChannelConnectionSessionEntity>,
@@ -89,10 +94,64 @@ export class FacebookInstagramOAuthService {
     private readonly metaGraphService: MetaGraphService,
     private readonly assetDiscoveryService: MetaAssetDiscoveryService,
     private readonly cryptoService: SettingsCryptoService,
-    private readonly channelConnectionService: InstagramChannelConnectionService,
+    private readonly channelConnectionService: FacebookMessengerChannelConnectionService,
   ) {}
 
-  async getSessionAssets(input: GetFacebookInstagramSessionAssetsInput) {
+  async start(input: StartFacebookMessengerOAuthInput) {
+    const callbackUrl = requireFacebookLoginCallbackUrl();
+    requireLeadFlowFrontendUrl();
+    const loginConfig = this.metaGraphService.getFacebookLoginConfig();
+    const state = randomBytes(32).toString('base64url');
+    const expiresAt = new Date(Date.now() + FACEBOOK_LOGIN_SESSION_TTL_MS);
+    const session = this.sessionsRepository.create({
+      tenantId: input.tenantId,
+      workspaceId: input.workspaceId,
+      userId: input.userId,
+      provider: 'meta',
+      channelType: MESSENGER_SESSION_CHANNEL_TYPE,
+      status: 'pending',
+      state: hashFacebookOAuthState(state),
+      code: null,
+      payload: {},
+      metadata: {
+        ...(input.metadata ?? {}),
+        authorizationMethod: 'facebook_login',
+        stage: FACEBOOK_LOGIN_OAUTH_STARTED_STAGE,
+        stateStorage: 'sha256',
+        permissionSource: 'meta_dashboard_config',
+        startedAt: new Date().toISOString(),
+      },
+      expiresAt,
+      completedAt: null,
+    });
+
+    await this.sessionsRepository.save(session);
+
+    const authorizationUrl = buildFacebookLoginAuthorizationUrl({
+      loginConfig,
+      callbackUrl,
+      state,
+    });
+
+    return {
+      authorizationUrl: authorizationUrl.toString(),
+      expiresAt,
+    };
+  }
+
+  async handleCallback(input: FacebookLoginCallbackInput) {
+    let outcome: CallbackOutcome;
+
+    try {
+      outcome = await this.complete(input);
+    } catch {
+      outcome = { ok: false, reason: 'session_persistence_failed' };
+    }
+
+    return this.buildFrontendRedirect(outcome);
+  }
+
+  async getSessionAssets(input: GetFacebookMessengerSessionAssetsInput) {
     let session: InboxChannelConnectionSessionEntity | null;
     try {
       session = await this.sessionsRepository.findOne({
@@ -101,7 +160,7 @@ export class FacebookInstagramOAuthService {
           tenantId: input.tenantId,
           workspaceId: input.workspaceId,
           provider: 'meta',
-          channelType: 'instagram',
+          channelType: MESSENGER_SESSION_CHANNEL_TYPE,
         },
       });
     } catch {
@@ -122,7 +181,7 @@ export class FacebookInstagramOAuthService {
     }
     if (
       session.metadata?.authorizationMethod !== 'facebook_login' ||
-      session.metadata?.stage !== ASSET_SELECTION_STAGE
+      session.metadata?.stage !== FACEBOOK_LOGIN_ASSET_SELECTION_STAGE
     ) {
       throw new BadRequestException('invalid_session');
     }
@@ -130,19 +189,24 @@ export class FacebookInstagramOAuthService {
       throw new BadRequestException('invalid_session');
     }
 
-    const payload = this.isRecord(session.payload) ? session.payload : {};
-    const assets = this.parseSelectableAssets(payload.selectableAssets);
+    const payload = isRecord(session.payload) ? session.payload : {};
+    const assets = this.parseSelectablePages(payload.selectableAssets);
     if (!assets) {
       throw new BadRequestException('invalid_asset_payload');
     }
 
     return {
       sessionId: session.id,
-      assets,
+      assets: assets.map((asset) => ({
+        pageId: asset.pageId,
+        pageName: asset.pageName,
+        tasks: asset.tasks,
+        messagingEligible: this.hasMessagingAccess(asset),
+      })),
     };
   }
 
-  async select(input: SelectFacebookInstagramAssetInput) {
+  async select(input: SelectFacebookMessengerPageInput) {
     let result: SelectionResult;
     try {
       result = await this.dataSource.transaction(async (manager) => {
@@ -155,7 +219,7 @@ export class FacebookInstagramOAuthService {
             tenantId: input.tenantId,
             workspaceId: input.workspaceId,
             provider: 'meta',
-            channelType: 'instagram',
+            channelType: MESSENGER_SESSION_CHANNEL_TYPE,
           },
           lock: { mode: 'pessimistic_write' },
         });
@@ -177,7 +241,7 @@ export class FacebookInstagramOAuthService {
         }
         if (
           session.metadata?.authorizationMethod !== 'facebook_login' ||
-          session.metadata?.stage !== ASSET_SELECTION_STAGE
+          session.metadata?.stage !== FACEBOOK_LOGIN_ASSET_SELECTION_STAGE
         ) {
           return { ok: false, code: 'invalid_session' };
         }
@@ -185,13 +249,16 @@ export class FacebookInstagramOAuthService {
           return { ok: false, code: 'invalid_session' };
         }
 
-        const payload = this.isRecord(session.payload) ? session.payload : {};
-        const selectedAsset = this.findSelectableAsset(
+        const payload = isRecord(session.payload) ? session.payload : {};
+        const selectedAsset = this.findSelectablePage(
           payload.selectableAssets,
           input.pageId,
         );
         if (!selectedAsset) {
           return { ok: false, code: 'asset_not_available' };
+        }
+        if (!this.hasMessagingAccess(selectedAsset)) {
+          return { ok: false, code: 'page_missing_messaging_access' };
         }
 
         const credentialsEncrypted = payload.credentialsEncrypted;
@@ -220,27 +287,11 @@ export class FacebookInstagramOAuthService {
           return { ok: false, code: 'invalid_credential_payload' };
         }
 
-        let currentAccount: Awaited<
-          ReturnType<MetaGraphService['getFacebookPageInstagramAccount']>
-        >;
+        // The subscription call is the live revalidation: it only succeeds when
+        // the Page Access Token from this session still grants messaging on
+        // exactly this Page. A failure must never leave a connected channel.
         try {
-          currentAccount =
-            await this.metaGraphService.getFacebookPageInstagramAccount({
-              pageId: input.pageId,
-              pageAccessToken: pageCredential.pageAccessToken,
-            });
-        } catch {
-          return { ok: false, code: 'asset_revalidation_failed' };
-        }
-        if (!currentAccount) {
-          return { ok: false, code: 'selected_page_has_no_instagram' };
-        }
-        if (currentAccount.accountId !== selectedAsset.instagramAccountId) {
-          return { ok: false, code: 'instagram_asset_changed' };
-        }
-
-        try {
-          await this.metaGraphService.subscribeFacebookPageToInstagramWebhooks({
+          await this.metaGraphService.subscribeFacebookPageToMessengerWebhooks({
             pageId: input.pageId,
             pageAccessToken: pageCredential.pageAccessToken,
           });
@@ -250,15 +301,12 @@ export class FacebookInstagramOAuthService {
 
         const channel = await this.channelConnectionService.connect(manager, {
           session,
-          accountId: currentAccount.accountId,
-          scopedId: null,
-          username: currentAccount.username,
-          accessToken: pageCredential.pageAccessToken,
-          tokenType: 'page_access_token',
-          tokenExpiresIn: null,
-          permissions: [],
+          pageId: input.pageId,
+          pageName: selectedAsset.pageName || null,
+          pageTasks: selectedAsset.tasks,
+          pageAccessToken: pageCredential.pageAccessToken,
+          subscribedFields: FACEBOOK_PAGE_MESSENGER_WEBHOOK_FIELDS,
           authorizationMethod: 'facebook_login',
-          facebookPageId: input.pageId,
         });
 
         session.status = 'completed';
@@ -273,7 +321,6 @@ export class FacebookInstagramOAuthService {
           channelId: channel.id,
           completedAt: session.completedAt.toISOString(),
           selectedPageId: input.pageId,
-          selectedInstagramAccountId: currentAccount.accountId,
         };
         await sessions.save(session);
 
@@ -289,62 +336,8 @@ export class FacebookInstagramOAuthService {
     return { channelId: result.channelId };
   }
 
-  async start(input: StartFacebookInstagramOAuthInput) {
-    const callbackUrl = requireFacebookLoginCallbackUrl();
-    requireLeadFlowFrontendUrl();
-    const loginConfig = this.metaGraphService.getFacebookLoginConfig();
-    const state = randomBytes(32).toString('base64url');
-    const expiresAt = new Date(Date.now() + SESSION_TTL_MS);
-    const session = this.sessionsRepository.create({
-      tenantId: input.tenantId,
-      workspaceId: input.workspaceId,
-      userId: input.userId,
-      provider: 'meta',
-      channelType: 'instagram',
-      status: 'pending',
-      state: hashFacebookOAuthState(state),
-      code: null,
-      payload: {},
-      metadata: {
-        ...(input.metadata ?? {}),
-        authorizationMethod: 'facebook_login',
-        stage: OAUTH_STARTED_STAGE,
-        stateStorage: 'sha256',
-        permissionSource: 'meta_dashboard_config',
-        startedAt: new Date().toISOString(),
-      },
-      expiresAt,
-      completedAt: null,
-    });
-
-    await this.sessionsRepository.save(session);
-
-    const authorizationUrl = buildFacebookLoginAuthorizationUrl({
-      loginConfig,
-      callbackUrl,
-      state,
-    });
-
-    return {
-      authorizationUrl: authorizationUrl.toString(),
-      expiresAt,
-    };
-  }
-
-  async handleCallback(input: FacebookInstagramOAuthCallbackInput) {
-    let outcome: CallbackOutcome;
-
-    try {
-      outcome = await this.complete(input);
-    } catch {
-      outcome = { ok: false, reason: 'session_persistence_failed' };
-    }
-
-    return this.buildFrontendRedirect(outcome);
-  }
-
   private async complete(
-    input: FacebookInstagramOAuthCallbackInput,
+    input: FacebookLoginCallbackInput,
   ): Promise<CallbackOutcome> {
     if (!isAcceptableFacebookOAuthState(input.state)) {
       return { ok: false, reason: 'invalid_state' };
@@ -360,7 +353,7 @@ export class FacebookInstagramOAuthService {
         where: {
           state: stateHash,
           provider: 'meta',
-          channelType: 'instagram',
+          channelType: MESSENGER_SESSION_CHANNEL_TYPE,
         },
         lock: { mode: 'pessimistic_write' },
       });
@@ -372,7 +365,7 @@ export class FacebookInstagramOAuthService {
       if (
         session.status !== 'pending' ||
         session.metadata?.authorizationMethod !== 'facebook_login' ||
-        session.metadata?.stage !== OAUTH_STARTED_STAGE
+        session.metadata?.stage !== FACEBOOK_LOGIN_OAUTH_STARTED_STAGE
       ) {
         return { ok: false, reason: 'session_consumed' };
       }
@@ -444,6 +437,8 @@ export class FacebookInstagramOAuthService {
         return { ok: false, reason: 'asset_discovery_failed' };
       }
 
+      // Messenger works on any Page: a missing Instagram Professional Account
+      // must not filter the Page out of the selection snapshot.
       if (assets.length === 0) {
         await this.finishSessionWithError(
           sessions,
@@ -454,12 +449,13 @@ export class FacebookInstagramOAuthService {
         return { ok: false, reason: 'no_assets_available' };
       }
 
-      const selectableAssets = assets.map((asset) => ({
-        pageId: asset.pageId,
-        pageName: asset.pageName,
-        instagramAccountId: asset.instagramAccount?.accountId ?? null,
-        instagramUsername: asset.instagramAccount?.username ?? null,
-      }));
+      const selectableAssets: SelectableMessengerPage[] = assets.map(
+        (asset) => ({
+          pageId: asset.pageId,
+          pageName: asset.pageName,
+          tasks: asset.tasks,
+        }),
+      );
       const credentials: EncryptedFacebookCredentials = {
         userAccessToken: token.accessToken,
         pageCredentials: assets.map((asset) => ({
@@ -484,11 +480,11 @@ export class FacebookInstagramOAuthService {
         };
         session.metadata = {
           ...(session.metadata ?? {}),
-          stage: ASSET_SELECTION_STAGE,
+          stage: FACEBOOK_LOGIN_ASSET_SELECTION_STAGE,
           discoveredAt: new Date().toISOString(),
           selectableAssetCount: selectableAssets.length,
-          instagramAssetCount: selectableAssets.filter(
-            (asset) => asset.instagramAccountId !== null,
+          messagingEligibleAssetCount: selectableAssets.filter((asset) =>
+            this.hasMessagingAccess(asset),
           ).length,
         };
         session.status = 'pending';
@@ -533,7 +529,7 @@ export class FacebookInstagramOAuthService {
 
   private buildFrontendRedirect(outcome: CallbackOutcome) {
     const redirect = new URL(
-      '/leadflow/inbox/settings/oauth/instagram',
+      '/leadflow/inbox/settings/oauth/facebook-messenger',
       requireLeadFlowFrontendUrl(),
     );
 
@@ -548,31 +544,35 @@ export class FacebookInstagramOAuthService {
     return redirect.toString();
   }
 
-  private findSelectableAsset(
+  private hasMessagingAccess(asset: SelectableMessengerPage) {
+    return asset.tasks.some(
+      (task) => task.trim().toUpperCase() === MESSENGER_REQUIRED_PAGE_TASK,
+    );
+  }
+
+  private findSelectablePage(
     value: unknown,
     pageId: string,
-  ): SelectableFacebookAsset | null {
-    const assets = this.parseSelectableAssets(value);
+  ): SelectableMessengerPage | null {
+    const assets = this.parseSelectablePages(value);
     if (!assets) return null;
 
     return assets.find((asset) => asset.pageId === pageId) ?? null;
   }
 
-  private parseSelectableAssets(
+  private parseSelectablePages(
     value: unknown,
-  ): SelectableFacebookAsset[] | null {
+  ): SelectableMessengerPage[] | null {
     if (!Array.isArray(value)) return null;
 
-    const assets: SelectableFacebookAsset[] = [];
+    const assets: SelectableMessengerPage[] = [];
     for (const candidate of value as unknown[]) {
       if (
-        !this.isRecord(candidate) ||
-        !this.isNonEmptyString(candidate.pageId) ||
+        !isRecord(candidate) ||
+        !isNonEmptyString(candidate.pageId) ||
         typeof candidate.pageName !== 'string' ||
-        (candidate.instagramAccountId !== null &&
-          typeof candidate.instagramAccountId !== 'string') ||
-        (candidate.instagramUsername !== null &&
-          typeof candidate.instagramUsername !== 'string')
+        !Array.isArray(candidate.tasks) ||
+        !candidate.tasks.every((task) => typeof task === 'string')
       ) {
         return null;
       }
@@ -580,8 +580,7 @@ export class FacebookInstagramOAuthService {
       assets.push({
         pageId: candidate.pageId,
         pageName: candidate.pageName,
-        instagramAccountId: candidate.instagramAccountId,
-        instagramUsername: candidate.instagramUsername,
+        tasks: candidate.tasks,
       });
     }
 
@@ -598,8 +597,8 @@ export class FacebookInstagramOAuthService {
       return null;
     }
     if (
-      !this.isRecord(parsed) ||
-      !this.isNonEmptyString(parsed.userAccessToken) ||
+      !isRecord(parsed) ||
+      !isNonEmptyString(parsed.userAccessToken) ||
       !Array.isArray(parsed.pageCredentials)
     ) {
       return null;
@@ -609,9 +608,9 @@ export class FacebookInstagramOAuthService {
     const pageIds = new Set<string>();
     for (const candidate of parsed.pageCredentials) {
       if (
-        !this.isRecord(candidate) ||
-        !this.isNonEmptyString(candidate.pageId) ||
-        !this.isNonEmptyString(candidate.pageAccessToken) ||
+        !isRecord(candidate) ||
+        !isNonEmptyString(candidate.pageId) ||
+        !isNonEmptyString(candidate.pageAccessToken) ||
         pageIds.has(candidate.pageId)
       ) {
         return null;
@@ -627,13 +626,5 @@ export class FacebookInstagramOAuthService {
       userAccessToken: parsed.userAccessToken,
       pageCredentials,
     };
-  }
-
-  private isRecord(value: unknown): value is Record<string, unknown> {
-    return typeof value === 'object' && value !== null && !Array.isArray(value);
-  }
-
-  private isNonEmptyString(value: unknown): value is string {
-    return typeof value === 'string' && value.trim().length > 0;
   }
 }

@@ -5,11 +5,8 @@ import {
   Get,
   Param,
   Post,
-  Query,
-  Res,
   UseGuards,
 } from '@nestjs/common';
-import type { Response } from 'express';
 import { RequestContextData } from '../../../../../../common/context/request-context.decorator';
 import type { RequestContext } from '../../../../../../common/context/request-context.interface';
 import { JwtAuthGuard } from '../../../../../auth/guards/jwt-auth.guard';
@@ -18,15 +15,19 @@ import {
   RequirePermission,
   RequireProductEntitlement,
 } from '../../../../../permissions';
-import { FacebookLoginCallbackRouterService } from '../../../meta/oauth/facebook-login-callback-router.service';
-import { SelectFacebookInstagramAssetDto } from './dto/select-facebook-instagram-asset.dto';
-import { FacebookInstagramOAuthService } from './facebook-instagram-oauth.service';
+import { SelectFacebookMessengerPageDto } from './dto/select-facebook-messenger-page.dto';
+import { FacebookMessengerOAuthService } from './facebook-messenger-oauth.service';
 
-@Controller('inbox/channels/instagram/oauth/facebook')
-export class FacebookInstagramOAuthController {
+/**
+ * The OAuth callback is not declared here on purpose: Facebook Login for
+ * Business redirects every Meta channel back to the single whitelisted
+ * META_FACEBOOK_OAUTH_CALLBACK_URL, which is routed per session channel type
+ * by FacebookLoginCallbackRouterService.
+ */
+@Controller('inbox/channels/facebook-messenger/oauth/facebook')
+export class FacebookMessengerOAuthController {
   constructor(
-    private readonly facebookInstagramOAuthService: FacebookInstagramOAuthService,
-    private readonly facebookLoginCallbackRouter: FacebookLoginCallbackRouterService,
+    private readonly facebookMessengerOAuthService: FacebookMessengerOAuthService,
   ) {}
 
   @Post('start')
@@ -40,7 +41,7 @@ export class FacebookInstagramOAuthController {
       );
     }
 
-    return this.facebookInstagramOAuthService.start({
+    return this.facebookMessengerOAuthService.start({
       tenantId: ctx.tenantId,
       workspaceId: ctx.workspaceId,
       userId: ctx.userId ?? null,
@@ -54,7 +55,7 @@ export class FacebookInstagramOAuthController {
   @RequirePermission('leadflow.channels.channel.create.admin')
   select(
     @RequestContextData() ctx: RequestContext,
-    @Body() dto: SelectFacebookInstagramAssetDto,
+    @Body() dto: SelectFacebookMessengerPageDto,
   ) {
     if (!ctx.tenantId || !ctx.workspaceId) {
       throw new BadRequestException(
@@ -62,7 +63,7 @@ export class FacebookInstagramOAuthController {
       );
     }
 
-    return this.facebookInstagramOAuthService.select({
+    return this.facebookMessengerOAuthService.select({
       tenantId: ctx.tenantId,
       workspaceId: ctx.workspaceId,
       userId: ctx.userId ?? null,
@@ -85,36 +86,12 @@ export class FacebookInstagramOAuthController {
       );
     }
 
-    return this.facebookInstagramOAuthService.getSessionAssets({
+    return this.facebookMessengerOAuthService.getSessionAssets({
       tenantId: ctx.tenantId,
       workspaceId: ctx.workspaceId,
       userId: ctx.userId ?? null,
       sessionId,
     });
-  }
-
-  /**
-   * Single whitelisted Facebook Login redirect URI: the router resolves which
-   * Meta channel flow owns the returned state before delegating.
-   */
-  @Get('callback')
-  async callback(
-    @Query('code') code: string | undefined,
-    @Query('state') state: string | undefined,
-    @Query('error') error: string | undefined,
-    @Query('error_reason') errorReason: string | undefined,
-    @Query('error_description') errorDescription: string | undefined,
-    @Res() response: Response,
-  ) {
-    const redirectUrl = await this.facebookLoginCallbackRouter.handleCallback({
-      code,
-      state,
-      error,
-      errorReason,
-      errorDescription,
-    });
-
-    return response.redirect(302, redirectUrl);
   }
 
   private metadataFromContext(ctx: RequestContext) {

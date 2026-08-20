@@ -532,6 +532,81 @@ describe('MetaGraphService Facebook assets', () => {
     expect(loggerErrorSpy).not.toHaveBeenCalled();
   });
 
+  it('subscribes the selected Facebook Page to Messenger-only webhook fields', async () => {
+    fetchMock.mockResolvedValue(response({ success: true }));
+
+    await expect(
+      service.subscribeFacebookPageToMessengerWebhooks({
+        pageId: 'page-1',
+        pageAccessToken: 'page-secret-1',
+      }),
+    ).resolves.toEqual({ success: true });
+
+    const url = new URL(String(fetchMock.mock.calls[0][0]));
+    expect(`${url.origin}${url.pathname}`).toBe(
+      'https://graph.facebook.com/v26.0/page-1/subscribed_apps',
+    );
+    expect(url.searchParams.get('subscribed_fields')).toBe('messages');
+    expect(url.searchParams.get('subscribed_fields')).not.toContain(
+      'messaging_postbacks',
+    );
+    expect(url.searchParams.get('subscribed_fields')).not.toContain(
+      'message_reactions',
+    );
+    expect(url.searchParams.get('subscribed_fields')).not.toContain(
+      'messaging_seen',
+    );
+    expect(url.searchParams.has('access_token')).toBe(false);
+    expect(fetchMock.mock.calls[0][1]).toEqual({
+      method: 'POST',
+      headers: { Authorization: 'Bearer page-secret-1' },
+    });
+    expect(loggerErrorSpy).not.toHaveBeenCalled();
+  });
+
+  it('sanitizes Messenger subscription failures under its own operation label', async () => {
+    fetchMock.mockResolvedValue(
+      response(
+        {
+          error: {
+            message: 'Permission denied. Authorization: Bearer page-secret-1',
+            type: 'OAuthException',
+            code: 200,
+            error_subcode: 33,
+            fbtrace_id: 'private-trace',
+          },
+        },
+        false,
+      ),
+    );
+
+    const error = await service
+      .subscribeFacebookPageToMessengerWebhooks({
+        pageId: 'page-1',
+        pageAccessToken: 'page-secret-1',
+      })
+      .catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(BadRequestException);
+    expect((error as Error).message).toBe(
+      'Facebook Page webhook subscription failed.',
+    );
+    expect(loggerErrorSpy).toHaveBeenCalledWith(
+      'Meta webhook subscription failed',
+      expect.objectContaining({
+        operation: 'subscribeFacebookPageToMessengerWebhooks',
+        status: 400,
+        type: 'OAuthException',
+        code: 200,
+        subcode: 33,
+      }),
+    );
+    const serializedLog = JSON.stringify(loggerErrorSpy.mock.calls);
+    expect(serializedLog).not.toContain('page-secret-1');
+    expect(serializedLog).not.toContain('private-trace');
+    expect(serializedLog).not.toContain('Authorization');
+  });
+
   it('returns sanitized Facebook Page webhook subscriptions', async () => {
     fetchMock.mockResolvedValue(
       response({

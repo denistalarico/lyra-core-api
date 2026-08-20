@@ -96,6 +96,10 @@ import { InstagramOutboundController } from './channels/instagram/instagram-outb
 import { InstagramOutboundService } from './channels/instagram/services/instagram-outbound.service';
 import { InstagramAudioNormalizerService } from './channels/instagram/services/instagram-audio-normalizer.service';
 import { InstagramChannelConnectionService } from './channels/instagram/oauth/instagram-channel-connection.service';
+import { FacebookLoginCallbackRouterService } from './channels/meta/oauth/facebook-login-callback-router.service';
+import { FacebookMessengerOAuthController } from './channels/facebook-messenger/oauth/facebook/facebook-messenger-oauth.controller';
+import { FacebookMessengerOAuthService } from './channels/facebook-messenger/oauth/facebook/facebook-messenger-oauth.service';
+import { FacebookMessengerChannelConnectionService } from './channels/facebook-messenger/oauth/facebook-messenger-channel-connection.service';
 
 @Module({
   imports: [
@@ -149,6 +153,7 @@ import { InstagramChannelConnectionService } from './channels/instagram/oauth/in
     InboxAutonomyAdminController,
     InstagramOAuthController,
     FacebookInstagramOAuthController,
+    FacebookMessengerOAuthController,
     InstagramChannelHealthController,
     InstagramOutboundController,
   ],
@@ -197,6 +202,9 @@ import { InstagramChannelConnectionService } from './channels/instagram/oauth/in
     InstagramOAuthService,
     InstagramChannelConnectionService,
     FacebookInstagramOAuthService,
+    FacebookLoginCallbackRouterService,
+    FacebookMessengerOAuthService,
+    FacebookMessengerChannelConnectionService,
     InstagramChannelHealthService,
     InstagramAudioNormalizerService,
     InstagramOutboundService,

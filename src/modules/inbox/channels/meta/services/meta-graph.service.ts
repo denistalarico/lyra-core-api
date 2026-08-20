@@ -157,6 +157,13 @@ export const FACEBOOK_PAGE_INSTAGRAM_WEBHOOK_FIELDS = [
   'message_reactions',
 ] as const;
 
+/**
+ * Messenger keeps its own field list on purpose: only inbound text is handled
+ * today, so nothing beyond `messages` is subscribed. Postbacks, reactions and
+ * delivery/read receipts stay unsubscribed until a handler exists for them.
+ */
+export const FACEBOOK_PAGE_MESSENGER_WEBHOOK_FIELDS = ['messages'] as const;
+
 export type InstagramLoginWebhookField =
   (typeof INSTAGRAM_LOGIN_WEBHOOK_FIELDS)[number];
 
@@ -535,13 +542,34 @@ export class MetaGraphService {
     pageId: string;
     pageAccessToken: string;
   }) {
+    return this.subscribeFacebookPage({
+      ...input,
+      operation: 'subscribeFacebookPageToInstagramWebhooks',
+      subscribedFields: FACEBOOK_PAGE_INSTAGRAM_WEBHOOK_FIELDS,
+    });
+  }
+
+  async subscribeFacebookPageToMessengerWebhooks(input: {
+    pageId: string;
+    pageAccessToken: string;
+  }) {
+    return this.subscribeFacebookPage({
+      ...input,
+      operation: 'subscribeFacebookPageToMessengerWebhooks',
+      subscribedFields: FACEBOOK_PAGE_MESSENGER_WEBHOOK_FIELDS,
+    });
+  }
+
+  private async subscribeFacebookPage(input: {
+    pageId: string;
+    pageAccessToken: string;
+    operation: string;
+    subscribedFields: readonly string[];
+  }) {
     const url = new URL(
       `${META_GRAPH_ORIGIN}/${this.graphVersion}/${encodeURIComponent(input.pageId)}/subscribed_apps`,
     );
-    url.searchParams.set(
-      'subscribed_fields',
-      FACEBOOK_PAGE_INSTAGRAM_WEBHOOK_FIELDS.join(','),
-    );
+    url.searchParams.set('subscribed_fields', input.subscribedFields.join(','));
 
     const response = await this.fetchMeta(url, {
       method: 'POST',
@@ -560,7 +588,7 @@ export class MetaGraphService {
       const topLevelSubcode = data.error_subcode;
 
       this.logger.error('Meta webhook subscription failed', {
-        operation: 'subscribeFacebookPageToInstagramWebhooks',
+        operation: input.operation,
         status: response.status,
         type: typeof graphError?.type === 'string' ? graphError.type : null,
         code: typeof graphError?.code === 'number' ? graphError.code : null,

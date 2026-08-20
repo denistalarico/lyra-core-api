@@ -11,6 +11,7 @@ import {
   PRODUCT_ENTITLEMENT_METADATA,
 } from '../../../../../permissions/decorators/permissions.decorators';
 import { PermissionsGuard } from '../../../../../permissions/guards/permissions.guard';
+import type { FacebookLoginCallbackRouterService } from '../../../meta/oauth/facebook-login-callback-router.service';
 import { FacebookInstagramOAuthController } from './facebook-instagram-oauth.controller';
 import type { FacebookInstagramOAuthService } from './facebook-instagram-oauth.service';
 
@@ -21,8 +22,12 @@ describe('FacebookInstagramOAuthController', () => {
     select: jest.fn(),
     getSessionAssets: jest.fn(),
   };
+  const callbackRouter = {
+    handleCallback: jest.fn(),
+  };
   const controller = new FacebookInstagramOAuthController(
     oauthService as unknown as FacebookInstagramOAuthService,
+    callbackRouter as unknown as FacebookLoginCallbackRouterService,
   );
 
   beforeEach(() => jest.clearAllMocks());
@@ -158,8 +163,8 @@ describe('FacebookInstagramOAuthController', () => {
     });
   });
 
-  it('redirects the public callback to the service safe URL', async () => {
-    oauthService.handleCallback.mockResolvedValue(
+  it('redirects the public callback to the routed safe URL', async () => {
+    callbackRouter.handleCallback.mockResolvedValue(
       'https://leadflow.example.com/leadflow/inbox/settings/oauth/instagram?status=select_asset&session=session-id',
     );
     const response = { redirect: jest.fn() };
@@ -173,7 +178,8 @@ describe('FacebookInstagramOAuthController', () => {
       response as never,
     );
 
-    expect(oauthService.handleCallback).toHaveBeenCalledWith({
+    expect(oauthService.handleCallback).not.toHaveBeenCalled();
+    expect(callbackRouter.handleCallback).toHaveBeenCalledWith({
       code: 'code',
       state: 'state',
       error: undefined,
