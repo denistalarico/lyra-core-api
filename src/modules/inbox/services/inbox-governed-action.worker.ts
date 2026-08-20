@@ -26,6 +26,7 @@ import { InboxRuntimeConfigService } from '../runtime/inbox-runtime-config.servi
 import { resolveRoutedCrmTarget } from '../runtime/inbox-crm-target-resolver';
 import { WhatsAppOutboundService } from '../channels/whatsapp/services/whatsapp-outbound.service';
 import { InstagramOutboundService } from '../channels/instagram/services/instagram-outbound.service';
+import { FacebookMessengerOutboundService } from '../channels/facebook-messenger/services/facebook-messenger-outbound.service';
 import { ConversationOwnershipService } from './conversation-ownership.service';
 import { CrmOpportunityCommandService } from '../../crm/services/crm-opportunity-command.service';
 import { CrmStageTransitionPolicyEntity } from '../../crm/entities/crm-stage-transition-policy.entity';
@@ -45,6 +46,7 @@ export class InboxGovernedActionWorker
     private readonly config: InboxRuntimeConfigService,
     private readonly outbound: WhatsAppOutboundService,
     private readonly instagramOutbound: InstagramOutboundService,
+    private readonly facebookMessengerOutbound: FacebookMessengerOutboundService,
     private readonly ownership: ConversationOwnershipService,
     @Optional()
     private readonly opportunityCommands?: CrmOpportunityCommandService,
@@ -117,10 +119,13 @@ export class InboxGovernedActionWorker
             tenantId: action.tenantId,
             workspaceId: action.workspaceId,
           });
-        const outbound =
-          channel?.type === 'instagram'
-            ? this.instagramOutbound
-            : this.outbound;
+        // Explicit per-channel dispatch: an unknown channel type must fail the
+        // action instead of silently sending through WhatsApp.
+        const outbound = this.outboundForChannelType(channel?.type);
+        if (!outbound) {
+          await this.finish(action, 'invalid', 'channel_type_unsupported', {});
+          return action;
+        }
         const sent = await outbound.sendAgentText({
           ctx: {
             tenantId: action.tenantId,
@@ -1178,6 +1183,20 @@ export class InboxGovernedActionWorker
         ? decision.actionPlan.find((item) => item.key === actionKey)
         : null) ?? null
     );
+  }
+
+  /**
+   * Governed replies are routed by the channel's own type. Every supported
+   * provider is named here, so adding a channel without an outbound service is
+   * a rejected action rather than a message delivered through the wrong API.
+   */
+  private outboundForChannelType(channelType: string | undefined) {
+    if (channelType === 'whatsapp') return this.outbound;
+    if (channelType === 'instagram') return this.instagramOutbound;
+    if (channelType === 'facebook_messenger') {
+      return this.facebookMessengerOutbound;
+    }
+    return null;
   }
 
   private async finish(

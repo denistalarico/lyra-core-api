@@ -100,6 +100,8 @@ import { FacebookLoginCallbackRouterService } from './channels/meta/oauth/facebo
 import { FacebookMessengerOAuthController } from './channels/facebook-messenger/oauth/facebook/facebook-messenger-oauth.controller';
 import { FacebookMessengerOAuthService } from './channels/facebook-messenger/oauth/facebook/facebook-messenger-oauth.service';
 import { FacebookMessengerChannelConnectionService } from './channels/facebook-messenger/oauth/facebook-messenger-channel-connection.service';
+import { FacebookMessengerOutboundController } from './channels/facebook-messenger/facebook-messenger-outbound.controller';
+import { FacebookMessengerOutboundService } from './channels/facebook-messenger/services/facebook-messenger-outbound.service';
 
 @Module({
   imports: [
@@ -156,6 +158,7 @@ import { FacebookMessengerChannelConnectionService } from './channels/facebook-m
     FacebookMessengerOAuthController,
     InstagramChannelHealthController,
     InstagramOutboundController,
+    FacebookMessengerOutboundController,
   ],
   providers: [
     InboxService,
@@ -208,6 +211,7 @@ import { FacebookMessengerChannelConnectionService } from './channels/facebook-m
     InstagramChannelHealthService,
     InstagramAudioNormalizerService,
     InstagramOutboundService,
+    FacebookMessengerOutboundService,
   ],
   exports: [
     InboxService,
@@ -217,6 +221,7 @@ import { FacebookMessengerChannelConnectionService } from './channels/facebook-m
     MessageStatusSyncService,
     WhatsAppOutboundService,
     InstagramOutboundService,
+    FacebookMessengerOutboundService,
     WhatsAppEmbeddedSignupService,
     MetaGraphService,
     MetaAssetDiscoveryService,

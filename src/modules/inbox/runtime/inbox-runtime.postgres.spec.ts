@@ -1069,6 +1069,7 @@ run('Inbox Runtime PostgreSQL concurrency', () => {
         } as never,
         { sendAgentText: jest.fn() } as never,
         { sendAgentText: jest.fn() } as never,
+        { sendAgentText: jest.fn() } as never,
         { transition: jest.fn() } as never,
       );
     await Promise.all([
@@ -1262,6 +1263,7 @@ function makeGovernedCrmWorker() {
       autoCrmEnabled: true,
       autoHandoffEnabled: false,
     } as never,
+    { sendAgentText: jest.fn() } as never,
     { sendAgentText: jest.fn() } as never,
     { sendAgentText: jest.fn() } as never,
     { transition: jest.fn() } as never,

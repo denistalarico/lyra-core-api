@@ -31,6 +31,7 @@ import {
 import { ConversationOwnershipService } from './services/conversation-ownership.service';
 import { WhatsAppOutboundService } from './channels/whatsapp/services/whatsapp-outbound.service';
 import { InstagramOutboundService } from './channels/instagram/services/instagram-outbound.service';
+import { FacebookMessengerOutboundService } from './channels/facebook-messenger/services/facebook-messenger-outbound.service';
 import { CrmPipelineEntity } from '../crm/entities/crm-pipeline.entity';
 
 export type InboxConversationFilters = {
@@ -73,7 +74,23 @@ export class InboxService {
     private readonly ownershipService: ConversationOwnershipService,
     private readonly whatsappOutboundService: WhatsAppOutboundService,
     private readonly instagramOutboundService: InstagramOutboundService,
+    private readonly facebookMessengerOutboundService: FacebookMessengerOutboundService,
   ) {}
+
+  /**
+   * Native reaction delivery is dispatched by channel type, never by
+   * elimination: a channel with no outbound reaction contract must fall
+   * through to a local-only reaction instead of borrowing another provider's
+   * payload.
+   */
+  private reactionOutboundForChannelType(channelType: string) {
+    if (channelType === 'whatsapp') return this.whatsappOutboundService;
+    if (channelType === 'instagram') return this.instagramOutboundService;
+    if (channelType === 'facebook_messenger') {
+      return this.facebookMessengerOutboundService;
+    }
+    return null;
+  }
 
   async uploadAttachment(ctx: RequestContext, file: Express.Multer.File) {
     if (!file) {
@@ -1041,11 +1058,8 @@ export class InboxService {
     let reactionDelivery: 'sent' | 'local' | 'failed' = 'local';
 
     try {
-      const outbound =
-        conversation.source === 'instagram'
-          ? this.instagramOutboundService
-          : this.whatsappOutboundService;
-      const delivered = await outbound.deliverReaction({
+      const outbound = this.reactionOutboundForChannelType(conversation.source);
+      const delivered = await outbound?.deliverReaction({
         conversation,
         message,
         emoji: shouldRemoveReaction ? '' : normalizedEmoji.slice(0, 16),
