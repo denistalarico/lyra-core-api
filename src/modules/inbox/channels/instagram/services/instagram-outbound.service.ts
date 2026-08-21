@@ -19,6 +19,16 @@ import { InboxMessageEntity } from '../../../entities/inbox-message.entity';
 import { InboxMetaOperationLedgerService } from '../../whatsapp/services/inbox-meta-operation-ledger.service';
 import { InstagramAudioNormalizerService } from './instagram-audio-normalizer.service';
 
+/**
+ * Instagram's standard messaging window. Self-messaging is a provider-side
+ * exception; normal contact conversations may only receive replies for 24h
+ * after the latest inbound message.
+ */
+const STANDARD_INSTAGRAM_MESSAGING_WINDOW_MS = 24 * 60 * 60 * 1_000;
+
+export const INSTAGRAM_MESSAGING_WINDOW_CLOSED =
+  'instagram_outside_standard_messaging_window';
+
 type SendInstagramTextInput = {
   ctx: RequestContext;
   channelId: string;
@@ -108,6 +118,7 @@ export class InstagramOutboundService {
     if (actor.type === 'agent') {
       await this.assertGovernedReply(channel, conversation, input, actor);
     }
+    await this.assertStandardMessagingWindow(channel, conversation);
 
     const idempotencyKey = input.idempotencyKey?.trim() || randomUUID();
     const existing = await this.findIdempotentMessage(
@@ -231,6 +242,7 @@ export class InstagramOutboundService {
     const { channel, conversation, accessToken, recipient } =
       await this.resolveSendContext(input);
     this.assertActorCanSend(conversation, { type: 'user' });
+    await this.assertStandardMessagingWindow(channel, conversation);
 
     const idempotencyKey = input.idempotencyKey?.trim() || randomUUID();
     const existing = await this.findIdempotentMessage(
@@ -375,6 +387,7 @@ export class InstagramOutboundService {
       },
     });
     if (!channel) return false;
+    await this.assertStandardMessagingWindow(channel, input.conversation);
     const accessToken = this.cryptoService.decrypt(
       channel.accessTokenEncrypted,
     );
@@ -498,6 +511,30 @@ export class InstagramOutboundService {
       throw new ConflictException(
         'AI send blocked by current conversation ownership.',
       );
+    }
+  }
+
+  private async assertStandardMessagingWindow(
+    channel: InboxChannelEntity,
+    conversation: InboxConversationEntity,
+  ) {
+    const lastInbound = await this.messagesRepository.findOne({
+      where: {
+        tenantId: channel.tenantId,
+        workspaceId: channel.workspaceId,
+        conversationId: conversation.id,
+        direction: 'inbound',
+      },
+      select: { id: true, occurredAt: true },
+      order: { occurredAt: 'DESC' },
+    });
+    const insideWindow =
+      lastInbound !== null &&
+      Date.now() - lastInbound.occurredAt.getTime() <
+        STANDARD_INSTAGRAM_MESSAGING_WINDOW_MS;
+
+    if (!insideWindow) {
+      throw new ConflictException(INSTAGRAM_MESSAGING_WINDOW_CLOSED);
     }
   }
 

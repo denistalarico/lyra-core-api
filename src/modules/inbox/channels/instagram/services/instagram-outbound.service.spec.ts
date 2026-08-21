@@ -3,7 +3,10 @@ import { BadRequestException, Logger, NotFoundException } from '@nestjs/common';
 import { InboxChannelEntity } from '../../../entities/inbox-channel.entity';
 import { InboxConversationEntity } from '../../../entities/inbox-conversation.entity';
 import { InboxMessageEntity } from '../../../entities/inbox-message.entity';
-import { InstagramOutboundService } from './instagram-outbound.service';
+import {
+  INSTAGRAM_MESSAGING_WINDOW_CLOSED,
+  InstagramOutboundService,
+} from './instagram-outbound.service';
 
 describe('InstagramOutboundService', () => {
   const originalFetch = global.fetch;
@@ -286,6 +289,93 @@ describe('InstagramOutboundService', () => {
     ).rejects.toBeInstanceOf(NotFoundException);
   });
 
+  describe('standard messaging window', () => {
+    it('blocks text when the latest inbound message is older than 24 hours', async () => {
+      const harness = createHarness();
+      harness.messagesRepository.findOne.mockImplementation(
+        ({ where }: { where: Record<string, unknown> }) =>
+          Promise.resolve(
+            where.direction === 'inbound'
+              ? lastInboundMessage(Date.now() - 25 * 60 * 60 * 1_000)
+              : null,
+          ),
+      );
+      global.fetch = jest.fn();
+
+      await expect(
+        harness.service.sendText({
+          ctx: {
+            tenantId: 'tenant-1',
+            workspaceId: 'workspace-1',
+            userId: 'user-1',
+          },
+          channelId: 'channel-1',
+          conversationId: 'conversation-1',
+          to: 'ig-scoped-user',
+          text: 'fora da janela',
+        }),
+      ).rejects.toThrow(INSTAGRAM_MESSAGING_WINDOW_CLOSED);
+      expect(global.fetch).not.toHaveBeenCalled();
+    });
+
+    it('blocks media when the contact never opened the window', async () => {
+      const harness = createHarness();
+      harness.messagesRepository.findOne.mockResolvedValue(null);
+      global.fetch = jest.fn();
+
+      await expect(
+        harness.service.sendMedia({
+          ctx: {
+            tenantId: 'tenant-1',
+            workspaceId: 'workspace-1',
+            userId: 'user-1',
+          },
+          channelId: 'channel-1',
+          conversationId: 'conversation-1',
+          to: 'ig-scoped-user',
+          file: {
+            originalname: 'foto.jpg',
+            mimetype: 'image/jpeg',
+            buffer: Buffer.from('image'),
+            size: 5,
+          } as Express.Multer.File,
+        }),
+      ).rejects.toThrow(INSTAGRAM_MESSAGING_WINDOW_CLOSED);
+      expect(harness.filesService.uploadRawFile).not.toHaveBeenCalled();
+      expect(global.fetch).not.toHaveBeenCalled();
+    });
+
+    it('allows the send inside the rolling 24-hour window', async () => {
+      const harness = createHarness();
+      global.fetch = jest.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            recipient_id: 'ig-scoped-user',
+            message_id: 'ig-message-window-open',
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+      );
+
+      await expect(
+        harness.service.sendText({
+          ctx: {
+            tenantId: 'tenant-1',
+            workspaceId: 'workspace-1',
+            userId: 'user-1',
+          },
+          channelId: 'channel-1',
+          conversationId: 'conversation-1',
+          to: 'ig-scoped-user',
+          text: 'dentro da janela',
+        }),
+      ).resolves.toMatchObject({
+        message: { status: 'sent' },
+      });
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+    });
+  });
+
   it('normalizes browser audio before exposing it to the Instagram Send API', async () => {
     const harness = createHarness();
     process.env.API_PUBLIC_URL = 'https://api.example.com';
@@ -395,7 +485,13 @@ function createHarness(channelOverrides: Partial<InboxChannelEntity> = {}) {
   };
   let messageSequence = 0;
   const messagesRepository = {
-    findOne: jest.fn().mockResolvedValue(null),
+    findOne: jest
+      .fn()
+      .mockImplementation(({ where }) =>
+        Promise.resolve(
+          where.direction === 'inbound' ? lastInboundMessage() : null,
+        ),
+      ),
     create: jest.fn((value) => value),
     save: jest.fn((value) => {
       if (!value.id) value.id = `message-${++messageSequence}`;
@@ -457,4 +553,11 @@ function createHarness(channelOverrides: Partial<InboxChannelEntity> = {}) {
     audioNormalizer,
     filesService,
   };
+}
+
+function lastInboundMessage(occurredAtMs = Date.now() - 60_000) {
+  return {
+    id: 'inbound-1',
+    occurredAt: new Date(occurredAtMs),
+  } as InboxMessageEntity;
 }

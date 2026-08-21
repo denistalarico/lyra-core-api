@@ -32,6 +32,7 @@ import { ConversationOwnershipService } from './services/conversation-ownership.
 import { WhatsAppOutboundService } from './channels/whatsapp/services/whatsapp-outbound.service';
 import { InstagramOutboundService } from './channels/instagram/services/instagram-outbound.service';
 import { FacebookMessengerOutboundService } from './channels/facebook-messenger/services/facebook-messenger-outbound.service';
+import { FacebookMessengerContactEnrichmentService } from './channels/facebook-messenger/services/facebook-messenger-contact-enrichment.service';
 import { CrmPipelineEntity } from '../crm/entities/crm-pipeline.entity';
 
 export type InboxConversationFilters = {
@@ -75,6 +76,7 @@ export class InboxService {
     private readonly whatsappOutboundService: WhatsAppOutboundService,
     private readonly instagramOutboundService: InstagramOutboundService,
     private readonly facebookMessengerOutboundService: FacebookMessengerOutboundService,
+    private readonly facebookMessengerContactEnrichmentService: FacebookMessengerContactEnrichmentService,
   ) {}
 
   /**
@@ -479,6 +481,10 @@ export class InboxService {
 
     if (!items.length) return { items, total };
 
+    await this.facebookMessengerContactEnrichmentService.enrichMissingProfiles(
+      items,
+    );
+
     // “Favoritas” no Inbox inclui tanto conversas favoritadas quanto conversas
     // que contêm ao menos uma mensagem favoritada. Projetamos esse segundo
     // estado na resposta sem duplicar a fonte de verdade que vive na mensagem.
@@ -586,6 +592,10 @@ export class InboxService {
     if (!conversation) {
       throw new NotFoundException('Inbox conversation not found.');
     }
+
+    await this.facebookMessengerContactEnrichmentService.enrichMissingProfiles([
+      conversation,
+    ]);
 
     return conversation;
   }

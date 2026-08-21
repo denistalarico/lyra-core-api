@@ -698,7 +698,7 @@ describe('MetaGraphService Facebook assets', () => {
       'https://graph.facebook.com/v26.0/psid-1',
     );
     expect(url.searchParams.get('fields')).toBe(
-      'id,first_name,last_name,profile_pic',
+      'id,name,first_name,last_name,profile_pic',
     );
     expect(url.searchParams.get('fields')).not.toContain('username');
     expect(url.searchParams.has('access_token')).toBe(false);
@@ -710,6 +710,8 @@ describe('MetaGraphService Facebook assets', () => {
   });
 
   it.each([
+    [{ id: 'psid-1', name: 'Maria Souza' }, 'Maria Souza'],
+    [{ id: 'psid-1', name: 'Maria Souza', first_name: 'Outro' }, 'Maria Souza'],
     [{ id: 'psid-1', first_name: 'Maria' }, 'Maria'],
     [{ id: 'psid-1', last_name: 'Silva' }, 'Silva'],
     [{ id: 'psid-1', first_name: '  ', last_name: '' }, null],

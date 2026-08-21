@@ -147,6 +147,7 @@ type InstagramUserProfileResponse = {
 
 type FacebookMessengerUserProfileResponse = {
   id?: string | number;
+  name?: string | null;
   first_name?: string | null;
   last_name?: string | null;
   profile_pic?: string | null;
@@ -741,10 +742,9 @@ export class MetaGraphService {
 
   /**
    * Messenger identifies contacts by Page-scoped ID, and that node exposes no
-   * username: only the name parts and the picture are available. The display
-   * name is derived from `first_name`/`last_name` because those two fields are
-   * the ones every Graph version guarantees for a PSID, and asking for an
-   * unsupported field would fail the whole lookup.
+   * username: only the display name/name parts and picture are available. We
+   * request both the canonical `name` and its parts so older and newer Graph
+   * responses can both enrich the conversation.
    */
   async getFacebookMessengerUserProfile(input: {
     pageScopedUserId: string;
@@ -753,7 +753,7 @@ export class MetaGraphService {
     const url = new URL(
       `${META_GRAPH_ORIGIN}/${this.graphVersion}/${encodeURIComponent(input.pageScopedUserId)}`,
     );
-    url.searchParams.set('fields', 'id,first_name,last_name,profile_pic');
+    url.searchParams.set('fields', 'id,name,first_name,last_name,profile_pic');
 
     const response = await this.fetchMeta(url, {
       method: 'GET',
@@ -785,15 +785,16 @@ export class MetaGraphService {
       );
     }
 
-    const name = [data.first_name, data.last_name]
+    const nameParts = [data.first_name, data.last_name]
       .filter((part): part is string => this.isNonEmptyString(part))
       .map((part) => part.trim())
       .join(' ')
       .trim();
+    const name = data.name?.trim() || nameParts || null;
 
     return {
       id: data.id == null ? input.pageScopedUserId : String(data.id),
-      name: name || null,
+      name,
       profilePictureUrl: data.profile_pic?.trim() || null,
     };
   }
