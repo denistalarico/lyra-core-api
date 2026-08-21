@@ -22,6 +22,7 @@ import type { MetaInstagramWebhookPayload } from './types/meta-instagram-webhook
 import type { MetaMessengerWebhookPayload } from './types/meta-messenger-webhook.types';
 import type { MetaWhatsAppWebhookPayload } from './types/meta-whatsapp-webhook.types';
 import type { NormalizedMessageStatusWatermarkUpdate } from '../types/normalized-message-status-update';
+import type { NormalizedInboundMessage } from '../types/normalized-inbound-message';
 import { WebhookLogService } from '../services/webhook-log.service';
 import { MessageStatusSyncService } from '../services/message-status-sync.service';
 import { MetaChannelUnavailableError } from './services/meta-channel-resolver.service';
@@ -95,13 +96,23 @@ export class MetaWebhookController {
     }
 
     try {
-      const { normalized, normalizedStatuses, normalizedReactions } =
-        await this.normalizeSupportedWorkload(workload, payload);
+      const {
+        normalized,
+        normalizedStatuses,
+        normalizedReactions,
+        normalizedEchoes,
+      } = await this.normalizeSupportedWorkload(workload, payload);
 
       const results: Array<{
         conversationId: string;
         messageId: string;
         externalMessageId: string | null | undefined;
+      }> = [];
+      const echoResults: Array<{
+        conversationId: string;
+        messageId: string;
+        externalMessageId: string | null | undefined;
+        deduplicated: boolean;
       }> = [];
 
       const statusResults: Array<{
@@ -126,6 +137,19 @@ export class MetaWebhookController {
           conversationId: result.conversation.id,
           messageId: result.message.id,
           externalMessageId: message.externalMessageId,
+        });
+      }
+      for (const echo of normalizedEchoes.messages) {
+        // No conversation for the thread yet: an echo carries no
+        // qualification signal, so ingestEcho() returns null rather than
+        // fabricating one — silently skip it.
+        const result = await this.inboundIngestionService.ingestEcho(echo);
+        if (!result) continue;
+        echoResults.push({
+          conversationId: result.conversation.id,
+          messageId: result.message.id,
+          externalMessageId: echo.externalMessageId,
+          deduplicated: result.deduplicated,
         });
       }
       for (const statusUpdate of normalizedStatuses.statuses) {
@@ -161,12 +185,14 @@ export class MetaWebhookController {
 
       const normalizedScope =
         normalized.messages[0] ??
+        normalizedEchoes.messages[0] ??
         normalizedStatuses.statuses[0] ??
         normalizedReactions.reactions[0] ??
         normalizedStatuses.statusWatermarks[0];
       const metadata: Record<string, unknown> = {
         workload,
         results,
+        echoResults,
         statusResults,
         reactionResults,
         statusWatermarkResults,
@@ -180,9 +206,10 @@ export class MetaWebhookController {
         status: 'processed',
         externalAccountId: accountId,
         externalPhoneNumberId: phoneNumberId,
-        externalMessageId: results[0]?.externalMessageId ?? null,
+        externalMessageId:
+          results[0]?.externalMessageId ?? echoResults[0]?.externalMessageId ?? null,
         signatureReceived: Boolean(signature),
-        messagesProcessed: results.length,
+        messagesProcessed: results.length + echoResults.length,
         statusesProcessed: statusResults.length + statusWatermarkResults.length,
         payload: {},
         metadata,
@@ -193,9 +220,11 @@ export class MetaWebhookController {
         provider: 'meta',
         signatureReceived: true,
         messagesProcessed: results.length,
+        echoesProcessed: echoResults.length,
         statusesProcessed: statusResults.length + statusWatermarkResults.length,
         reactionsProcessed: reactionResults.length,
         results,
+        echoResults,
         statusResults,
         reactionResults,
         statusWatermarkResults,
@@ -353,6 +382,7 @@ export class MetaWebhookController {
             await this.whatsappMetaAdapter.normalizeReactions(
               whatsappPayload,
             ),
+          normalizedEchoes: { messages: [] as NormalizedInboundMessage[] },
         };
       }
       case 'instagram': {
@@ -370,6 +400,7 @@ export class MetaWebhookController {
             await this.instagramMetaAdapter.normalizeReactions(
               instagramPayload,
             ),
+          normalizedEchoes: { messages: [] as NormalizedInboundMessage[] },
         };
       }
       case 'messenger': {
@@ -385,6 +416,8 @@ export class MetaWebhookController {
             await this.messengerMetaAdapter.normalizeReactions(
               messengerPayload,
             ),
+          normalizedEchoes:
+            await this.messengerMetaAdapter.normalizeEchoes(messengerPayload),
         };
       }
     }

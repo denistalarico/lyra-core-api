@@ -45,11 +45,12 @@ describe('MetaWebhookController raw body integration', () => {
               .fn()
               .mockResolvedValue({ statuses: [], statusWatermarks: [] }),
             normalizeReactions: jest.fn().mockResolvedValue({ reactions: [] }),
+            normalizeEchoes: jest.fn().mockResolvedValue({ messages: [] }),
           },
         },
         {
           provide: InboundMessageIngestionService,
-          useValue: { ingest: jest.fn() },
+          useValue: { ingest: jest.fn(), ingestEcho: jest.fn() },
         },
         {
           provide: WebhookLogService,

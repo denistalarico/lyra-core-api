@@ -25,4 +25,12 @@ export interface ChannelAdapter<TPayload = unknown> {
   normalizeReactions?(
     payload: TPayload,
   ): Promise<{ reactions: NormalizedMessageReactionUpdate[] }>;
+
+  // Echoes are the business's own outbound activity captured via webhook
+  // (e.g. an operator replying from Meta's native inbox). Only Messenger
+  // declares this today; routes through InboundMessageIngestionService's
+  // dedicated ingestEcho() path, never the inbound ingest() path.
+  normalizeEchoes?(
+    payload: TPayload,
+  ): Promise<{ messages: NormalizedInboundMessage[] }>;
 }

@@ -1,7 +1,12 @@
 import { Injectable } from '@nestjs/common';
+import { createHash } from 'crypto';
 import { SettingsCryptoService } from '../../../../../common/crypto/settings-crypto.service';
 import type { ChannelAdapterResult } from '../../types/channel-adapter';
-import type { NormalizedInboundMessage } from '../../types/normalized-inbound-message';
+import type {
+  NormalizedInboundAttachment,
+  NormalizedInboundMessage,
+  NormalizedInboundMessageType,
+} from '../../types/normalized-inbound-message';
 import type { NormalizedMessageReactionUpdate } from '../../types/normalized-message-reaction-update';
 import type {
   NormalizedMessageStatusUpdate,
@@ -9,7 +14,10 @@ import type {
 } from '../../types/normalized-message-status-update';
 import { MetaChannelResolverService } from '../services/meta-channel-resolver.service';
 import { MetaGraphService } from '../services/meta-graph.service';
-import type { MetaMessengerWebhookPayload } from '../types/meta-messenger-webhook.types';
+import type {
+  MetaMessengerAttachment,
+  MetaMessengerWebhookPayload,
+} from '../types/meta-messenger-webhook.types';
 
 type MessengerSenderProfile = {
   name: string | null;
@@ -45,14 +53,19 @@ export class MessengerMetaAdapter {
       for (const event of entry.messaging) {
         const senderId = event?.sender?.id;
         const messageId = event?.message?.mid;
-        const text = event?.message?.text;
+        const rawText = event?.message?.text;
+        const text =
+          typeof rawText === 'string' && rawText.trim() ? rawText : null;
+        const attachments = this.extractAttachments(
+          event?.message?.attachments,
+          messageId ?? null,
+        );
 
         if (
           event?.message?.is_echo === true ||
           !senderId ||
           !messageId ||
-          typeof text !== 'string' ||
-          !text.trim()
+          (!text && attachments.length === 0)
         ) {
           continue;
         }
@@ -89,9 +102,9 @@ export class MessengerMetaAdapter {
               avatarUrl: profile?.profilePictureUrl ?? null,
             },
           },
-          messageType: 'text',
-          content: text,
-          attachments: [],
+          messageType: this.mapMessageType(text, attachments),
+          content: this.extractContent(text, attachments),
+          attachments,
           occurredAt: this.parseTimestamp(event.timestamp ?? entry.time),
           metadata: {
             metaObject: 'page',
@@ -203,11 +216,11 @@ export class MessengerMetaAdapter {
    * Extracts is_echo events into the same normalized shape as normalize(),
    * for InboundMessageIngestionService.ingestEcho() — which fixes direction
    * to 'outbound' instead of misattributing the send to the contact.
-   * normalize() keeps discarding is_echo events as it does today: this
-   * method is not wired into the webhook controller yet, and the Messenger
-   * webhook subscription does not request `message_echoes`, so no echo
-   * events reach either path in production. It exists so a future sprint
-   * can wire live echo handling onto an already-race-safe foundation.
+   * normalize() keeps discarding is_echo events as it does today (they are
+   * routed here instead, never through the inbound path). Wired into
+   * MetaWebhookController and requires `message_echoes` to be enabled for
+   * this app in the Meta App Dashboard's webhook product config, in addition
+   * to being requested by FACEBOOK_PAGE_MESSENGER_WEBHOOK_FIELDS.
    */
   async normalizeEchoes(
     payload: MetaMessengerWebhookPayload,
@@ -320,5 +333,79 @@ export class MessengerMetaAdapter {
     }
 
     return new Date(timestamp);
+  }
+
+  private mapMessageType(
+    text: string | null,
+    attachments: NormalizedInboundAttachment[],
+  ): NormalizedInboundMessageType {
+    if (text) return 'text';
+
+    const type = attachments[0]?.type;
+    if (type === 'image' || type === 'audio' || type === 'video') return type;
+    if (type === 'file') return 'file';
+    return 'unknown';
+  }
+
+  private extractContent(
+    text: string | null,
+    attachments: NormalizedInboundAttachment[],
+  ) {
+    if (text) return text;
+
+    switch (attachments[0]?.type) {
+      case 'image':
+        return '[Imagem recebida]';
+      case 'audio':
+        return '[Áudio recebido]';
+      case 'video':
+        return '[Vídeo recebido]';
+      case 'file':
+        return '[Arquivo recebido]';
+      default:
+        return '[Mensagem recebida]';
+    }
+  }
+
+  private extractAttachments(
+    attachments: MetaMessengerAttachment[] | undefined,
+    messageId: string | null,
+  ): NormalizedInboundAttachment[] {
+    return (attachments ?? []).flatMap((attachment, index) => {
+      const type = this.mapAttachmentType(attachment.type);
+      const url = attachment.payload?.url ?? null;
+      if (!type || !url) return [];
+      const urlHash = createHash('sha256')
+        .update(url)
+        .digest('hex')
+        .slice(0, 32);
+
+      return [
+        {
+          type,
+          url,
+          externalId: `facebook_messenger:${messageId ?? urlHash}:${index}`,
+          metadata: {
+            facebookAttachmentType: attachment.type ?? null,
+            directUrl: url,
+          },
+        },
+      ];
+    });
+  }
+
+  private mapAttachmentType(type: string | undefined) {
+    switch (type) {
+      case 'image':
+        return 'image';
+      case 'audio':
+        return 'audio';
+      case 'video':
+        return 'video';
+      case 'file':
+        return 'file';
+      default:
+        return null;
+    }
   }
 }

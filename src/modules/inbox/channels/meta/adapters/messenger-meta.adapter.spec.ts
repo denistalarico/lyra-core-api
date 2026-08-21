@@ -289,6 +289,174 @@ describe('MessengerMetaAdapter', () => {
     ).resolves.toEqual({ messages: [] });
   });
 
+  describe('normalize — attachments', () => {
+    it('normalizes an image attachment with no text into a single-attachment message', async () => {
+      const result = await adapter.normalize({
+        object: 'page',
+        entry: [
+          {
+            id: 'page-1',
+            messaging: [
+              {
+                sender: { id: 'psid-1' },
+                message: {
+                  mid: 'mid-image-1',
+                  attachments: [
+                    {
+                      type: 'image',
+                      payload: { url: 'https://fbcdn.net/media/image-1.jpg' },
+                    },
+                  ],
+                },
+              },
+            ],
+          },
+        ],
+      });
+
+      expect(result.messages).toEqual([
+        expect.objectContaining({
+          externalMessageId: 'mid-image-1',
+          messageType: 'image',
+          content: '[Imagem recebida]',
+          attachments: [
+            {
+              type: 'image',
+              url: 'https://fbcdn.net/media/image-1.jpg',
+              externalId: 'facebook_messenger:mid-image-1:0',
+              metadata: {
+                facebookAttachmentType: 'image',
+                directUrl: 'https://fbcdn.net/media/image-1.jpg',
+              },
+            },
+          ],
+        }),
+      ]);
+    });
+
+    it('keeps the text as content when both text and an attachment are present', async () => {
+      const result = await adapter.normalize({
+        object: 'page',
+        entry: [
+          {
+            id: 'page-1',
+            messaging: [
+              {
+                sender: { id: 'psid-1' },
+                message: {
+                  mid: 'mid-mixed-1',
+                  text: 'Olha essa foto',
+                  attachments: [
+                    {
+                      type: 'image',
+                      payload: { url: 'https://fbcdn.net/media/image-2.jpg' },
+                    },
+                  ],
+                },
+              },
+            ],
+          },
+        ],
+      });
+
+      expect(result.messages[0]).toMatchObject({
+        messageType: 'text',
+        content: 'Olha essa foto',
+        attachments: [
+          expect.objectContaining({
+            type: 'image',
+            url: 'https://fbcdn.net/media/image-2.jpg',
+          }),
+        ],
+      });
+    });
+
+    it.each(['audio', 'video', 'file'])(
+      'normalizes a %s attachment',
+      async (type) => {
+        const result = await adapter.normalize({
+          object: 'page',
+          entry: [
+            {
+              id: 'page-1',
+              messaging: [
+                {
+                  sender: { id: 'psid-1' },
+                  message: {
+                    mid: `mid-${type}-1`,
+                    attachments: [
+                      { type, payload: { url: `https://fbcdn.net/media/${type}.bin` } },
+                    ],
+                  },
+                },
+              ],
+            },
+          ],
+        });
+
+        expect(result.messages[0]).toMatchObject({ messageType: type });
+      },
+    );
+
+    it('drops an attachment with no usable type or url instead of dropping the whole message', async () => {
+      const result = await adapter.normalize({
+        object: 'page',
+        entry: [
+          {
+            id: 'page-1',
+            messaging: [
+              {
+                sender: { id: 'psid-1' },
+                message: {
+                  mid: 'mid-fallback-1',
+                  attachments: [
+                    { type: 'fallback', payload: { url: 'https://example.com/link' } },
+                    {
+                      type: 'image',
+                      payload: { url: 'https://fbcdn.net/media/image-3.jpg' },
+                    },
+                  ],
+                },
+              },
+            ],
+          },
+        ],
+      });
+
+      expect(result.messages[0].attachments).toEqual([
+        expect.objectContaining({ type: 'image' }),
+      ]);
+    });
+
+    it('ignores an echo carrying only an attachment, same as a text echo', async () => {
+      const result = await adapter.normalize({
+        object: 'page',
+        entry: [
+          {
+            id: 'page-1',
+            messaging: [
+              {
+                sender: { id: 'page-1' },
+                message: {
+                  mid: 'mid-echo-attachment',
+                  is_echo: true,
+                  attachments: [
+                    {
+                      type: 'image',
+                      payload: { url: 'https://fbcdn.net/media/image-4.jpg' },
+                    },
+                  ],
+                },
+              },
+            ],
+          },
+        ],
+      });
+
+      expect(result.messages).toEqual([]);
+    });
+  });
+
   describe('normalizeReactions', () => {
     it('normalizes a react event with its emoji', async () => {
       const result = await adapter.normalizeReactions({

@@ -27,6 +27,14 @@ export type MetaMessengerMessage = {
   mid?: string;
   text?: string;
   is_echo?: boolean;
+  attachments?: MetaMessengerAttachment[];
+};
+
+export type MetaMessengerAttachment = {
+  type?: string;
+  payload?: {
+    url?: string;
+  };
 };
 
 // `mids` is optional by Meta's own design (a delivery receipt can arrive with

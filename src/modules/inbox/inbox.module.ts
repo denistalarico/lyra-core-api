@@ -102,6 +102,8 @@ import { FacebookMessengerOAuthService } from './channels/facebook-messenger/oau
 import { FacebookMessengerChannelConnectionService } from './channels/facebook-messenger/oauth/facebook-messenger-channel-connection.service';
 import { FacebookMessengerOutboundController } from './channels/facebook-messenger/facebook-messenger-outbound.controller';
 import { FacebookMessengerOutboundService } from './channels/facebook-messenger/services/facebook-messenger-outbound.service';
+import { FacebookMessengerChannelHealthController } from './channels/facebook-messenger/facebook-messenger-channel-health.controller';
+import { FacebookMessengerChannelHealthService } from './channels/facebook-messenger/services/facebook-messenger-channel-health.service';
 
 @Module({
   imports: [
@@ -159,6 +161,7 @@ import { FacebookMessengerOutboundService } from './channels/facebook-messenger/
     InstagramChannelHealthController,
     InstagramOutboundController,
     FacebookMessengerOutboundController,
+    FacebookMessengerChannelHealthController,
   ],
   providers: [
     InboxService,
@@ -212,6 +215,7 @@ import { FacebookMessengerOutboundService } from './channels/facebook-messenger/
     InstagramAudioNormalizerService,
     InstagramOutboundService,
     FacebookMessengerOutboundService,
+    FacebookMessengerChannelHealthService,
   ],
   exports: [
     InboxService,

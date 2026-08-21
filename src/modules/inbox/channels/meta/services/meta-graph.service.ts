@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import {
   FacebookPageGraphAsset,
+  FacebookPageIdentityAsset,
   FacebookPageInstagramAccountAsset,
 } from '../types/meta-assets.types';
 
@@ -168,18 +169,19 @@ export const FACEBOOK_PAGE_INSTAGRAM_WEBHOOK_FIELDS = [
 
 /**
  * Messenger keeps its own field list on purpose: inbound text, delivery,
- * read and reactions are handled; postbacks and attachments stay
+ * read, reactions and echoes are handled; postbacks and attachments stay
  * unsubscribed until a handler exists for them. message_deliveries/
- * message_reads/message_reactions must all be enabled for this app in the
- * Meta App Dashboard's webhook product config before this subscription
- * request will succeed — the field list here does not grant the capability
- * by itself.
+ * message_reads/message_reactions/message_echoes must all be enabled for
+ * this app in the Meta App Dashboard's webhook product config before this
+ * subscription request will succeed — the field list here does not grant
+ * the capability by itself.
  */
 export const FACEBOOK_PAGE_MESSENGER_WEBHOOK_FIELDS = [
   'messages',
   'message_deliveries',
   'message_reads',
   'message_reactions',
+  'message_echoes',
 ] as const;
 
 export type InstagramLoginWebhookField =
@@ -553,6 +555,42 @@ export class MetaGraphService {
         typeof account.username === 'string'
           ? account.username.trim() || null
           : null,
+    };
+  }
+
+  /**
+   * Unlike Instagram (where the Page is only a proxy to a connected IG
+   * account), a Messenger channel's identity IS the Page itself. `/me` with
+   * the stored Page Access Token is the only way to independently confirm
+   * that token still resolves to the Page we have on file, mirroring how
+   * getInstagramAuthorizedAccount verifies a direct-login token via its own
+   * `/me` call.
+   */
+  async getFacebookPageIdentity(input: {
+    pageAccessToken: string;
+  }): Promise<FacebookPageIdentityAsset> {
+    const url = new URL(`${META_GRAPH_ORIGIN}/${this.graphVersion}/me`);
+    url.searchParams.set('fields', 'id,name');
+
+    const response = await this.fetchMeta(url, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${input.pageAccessToken}` },
+    });
+    const data = await this.readJson(response);
+
+    if (
+      !response.ok ||
+      !this.isRecord(data) ||
+      data.error ||
+      !this.isNonEmptyString(data.id)
+    ) {
+      throw new BadRequestException('Facebook Page identity lookup failed.');
+    }
+
+    return {
+      pageId: data.id.trim(),
+      pageName:
+        typeof data.name === 'string' ? data.name.trim() || null : null,
     };
   }
 

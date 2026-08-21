@@ -508,6 +508,38 @@ describe('MetaGraphService Facebook assets', () => {
     },
   );
 
+  it('resolves the Page identity behind a Page Access Token via /me', async () => {
+    fetchMock.mockResolvedValue(response({ id: 'page-1', name: 'Loja Centro' }));
+
+    await expect(
+      service.getFacebookPageIdentity({ pageAccessToken: 'page-secret-1' }),
+    ).resolves.toEqual({
+      pageId: 'page-1',
+      pageName: 'Loja Centro',
+    });
+
+    const url = new URL(String(fetchMock.mock.calls[0][0]));
+    expect(`${url.origin}${url.pathname}`).toBe(
+      'https://graph.facebook.com/v26.0/me',
+    );
+    expect(url.searchParams.get('fields')).toBe('id,name');
+    expect(url.searchParams.has('access_token')).toBe(false);
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({
+      method: 'GET',
+      headers: { Authorization: 'Bearer page-secret-1' },
+    });
+  });
+
+  it('rejects a Page identity lookup when the token is no longer valid', async () => {
+    fetchMock.mockResolvedValue(
+      response({ error: { message: 'Invalid OAuth access token' } }, false),
+    );
+
+    await expect(
+      service.getFacebookPageIdentity({ pageAccessToken: 'page-secret-1' }),
+    ).rejects.toThrow(BadRequestException);
+  });
+
   it('subscribes the selected Facebook Page to Instagram messaging webhooks', async () => {
     fetchMock.mockResolvedValue(response({ success: true }));
 
@@ -548,7 +580,7 @@ describe('MetaGraphService Facebook assets', () => {
       'https://graph.facebook.com/v26.0/page-1/subscribed_apps',
     );
     expect(url.searchParams.get('subscribed_fields')).toBe(
-      'messages,message_deliveries,message_reads,message_reactions',
+      'messages,message_deliveries,message_reads,message_reactions,message_echoes',
     );
     expect(url.searchParams.get('subscribed_fields')).not.toContain(
       'messaging_postbacks',

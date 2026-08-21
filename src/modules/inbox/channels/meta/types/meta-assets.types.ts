@@ -15,3 +15,8 @@ export type FacebookPageGraphAsset = Omit<
   FacebookPageAsset,
   'instagramAccount'
 >;
+
+export type FacebookPageIdentityAsset = {
+  pageId: string;
+  pageName: string | null;
+};

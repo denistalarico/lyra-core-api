@@ -22,8 +22,9 @@ describe('MetaWebhookController', () => {
       .fn()
       .mockResolvedValue({ statuses: [], statusWatermarks: [] }),
     normalizeReactions: jest.fn().mockResolvedValue({ reactions: [] }),
+    normalizeEchoes: jest.fn().mockResolvedValue({ messages: [] }),
   };
-  const ingestion = { ingest: jest.fn() };
+  const ingestion = { ingest: jest.fn(), ingestEcho: jest.fn() };
   const webhookLog = { create: jest.fn().mockResolvedValue(undefined) };
   const statusSync = {
     applyStatusUpdate: jest.fn(),
@@ -55,6 +56,7 @@ describe('MetaWebhookController', () => {
       statusWatermarks: [],
     });
     messengerAdapter.normalizeReactions.mockResolvedValue({ reactions: [] });
+    messengerAdapter.normalizeEchoes.mockResolvedValue({ messages: [] });
   });
 
   afterAll(() => {
@@ -188,6 +190,7 @@ describe('MetaWebhookController', () => {
             externalMessageId: 'ig-mid-1',
           },
         ],
+        echoResults: [],
         statusResults: [],
         reactionResults: [],
         statusWatermarkResults: [],
@@ -472,6 +475,7 @@ describe('MetaWebhookController', () => {
             externalMessageId: 'mid-1',
           },
         ],
+        echoResults: [],
         statusResults: [],
         reactionResults: [],
         statusWatermarkResults: [],
