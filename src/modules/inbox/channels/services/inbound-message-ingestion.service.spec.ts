@@ -183,3 +183,62 @@ describe('InboundMessageIngestionService durable invariants', () => {
     expect(harness.state.batches[1].generation).toBe(2);
   });
 });
+
+describe('InboundMessageIngestionService.ingestEcho', () => {
+  it('records an echo as outbound/external instead of routing it through ingest()', async () => {
+    const harness = createHarness();
+    harness.state.conversation = {
+      id: 'conversation-1',
+      tenantId: 'tenant',
+      workspaceId: 'workspace',
+      contactId: 'contact-1',
+      lastMessagePreview: '',
+      lastMessageAt: null,
+    };
+
+    const result = await harness.service.ingestEcho(message('mid-echo-1'));
+
+    expect(result?.deduplicated).toBe(false);
+    expect(result?.message).toMatchObject({
+      direction: 'outbound',
+      senderType: 'external',
+      externalMessageId: 'mid-echo-1',
+      status: 'sent',
+    });
+    expect(harness.state.conversation.lastMessagePreview).toBe(
+      'message mid-echo-1',
+    );
+    expect(harness.notification.publishInboundMessage).not.toHaveBeenCalled();
+  });
+
+  it('deduplicates against a message that already carries the same externalMessageId', async () => {
+    const harness = createHarness();
+    harness.state.conversation = {
+      id: 'conversation-1',
+      tenantId: 'tenant',
+      workspaceId: 'workspace',
+      contactId: 'contact-1',
+    };
+    harness.state.messages.push({
+      id: 'existing-message',
+      conversationId: 'conversation-1',
+      externalMessageId: 'mid-echo-2',
+      direction: 'outbound',
+    });
+
+    const result = await harness.service.ingestEcho(message('mid-echo-2'));
+
+    expect(result?.deduplicated).toBe(true);
+    expect(result?.message.id).toBe('existing-message');
+  });
+
+  it('does not fabricate a conversation when none exists for the thread', async () => {
+    const harness = createHarness();
+    harness.state.conversation = null;
+
+    const result = await harness.service.ingestEcho(message('mid-echo-3'));
+
+    expect(result).toBeNull();
+    expect(harness.state.messages).toHaveLength(0);
+  });
+});

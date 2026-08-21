@@ -523,10 +523,7 @@ describe('MetaGraphService Facebook assets', () => {
       'https://graph.facebook.com/v26.0/page-1/subscribed_apps',
     );
     expect(url.searchParams.get('subscribed_fields')).toBe(
-      'messages,messaging_postbacks,message_reactions',
-    );
-    expect(url.searchParams.get('subscribed_fields')).not.toContain(
-      'messaging_seen',
+      'messages,messaging_postbacks,message_reactions,messaging_seen',
     );
     expect(url.searchParams.has('access_token')).toBe(false);
     expect(fetchMock.mock.calls[0][1]).toEqual({
@@ -550,12 +547,11 @@ describe('MetaGraphService Facebook assets', () => {
     expect(`${url.origin}${url.pathname}`).toBe(
       'https://graph.facebook.com/v26.0/page-1/subscribed_apps',
     );
-    expect(url.searchParams.get('subscribed_fields')).toBe('messages');
-    expect(url.searchParams.get('subscribed_fields')).not.toContain(
-      'messaging_postbacks',
+    expect(url.searchParams.get('subscribed_fields')).toBe(
+      'messages,message_deliveries,message_reads,message_reactions',
     );
     expect(url.searchParams.get('subscribed_fields')).not.toContain(
-      'message_reactions',
+      'messaging_postbacks',
     );
     expect(url.searchParams.get('subscribed_fields')).not.toContain(
       'messaging_seen',

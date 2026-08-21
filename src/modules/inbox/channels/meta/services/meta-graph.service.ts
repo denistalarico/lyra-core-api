@@ -163,14 +163,24 @@ export const FACEBOOK_PAGE_INSTAGRAM_WEBHOOK_FIELDS = [
   'messages',
   'messaging_postbacks',
   'message_reactions',
+  'messaging_seen',
 ] as const;
 
 /**
- * Messenger keeps its own field list on purpose: only inbound text is handled
- * today, so nothing beyond `messages` is subscribed. Postbacks, reactions and
- * delivery/read receipts stay unsubscribed until a handler exists for them.
+ * Messenger keeps its own field list on purpose: inbound text, delivery,
+ * read and reactions are handled; postbacks and attachments stay
+ * unsubscribed until a handler exists for them. message_deliveries/
+ * message_reads/message_reactions must all be enabled for this app in the
+ * Meta App Dashboard's webhook product config before this subscription
+ * request will succeed — the field list here does not grant the capability
+ * by itself.
  */
-export const FACEBOOK_PAGE_MESSENGER_WEBHOOK_FIELDS = ['messages'] as const;
+export const FACEBOOK_PAGE_MESSENGER_WEBHOOK_FIELDS = [
+  'messages',
+  'message_deliveries',
+  'message_reads',
+  'message_reactions',
+] as const;
 
 export type InstagramLoginWebhookField =
   (typeof INSTAGRAM_LOGIN_WEBHOOK_FIELDS)[number];
@@ -800,11 +810,25 @@ export class MetaGraphService {
     const data = (await response.json()) as SubscribeWabaResponse;
 
     if (!response.ok || data.error) {
-      throw new BadRequestException({
-        message: 'Failed to subscribe app to customer WABA webhooks.',
+      this.logger.error('Meta webhook subscription failed', {
+        operation: 'subscribeAppToWaba',
         status: response.status,
-        error: data.error ?? data,
+        type: typeof data.error?.type === 'string' ? data.error.type : null,
+        code: typeof data.error?.code === 'number' ? data.error.code : null,
+        subcode:
+          typeof data.error?.error_subcode === 'number'
+            ? data.error.error_subcode
+            : null,
+        message: this.sanitizeMetaErrorMessage(data.error?.message, [
+          input.accessToken,
+          this.appSecret,
+          this.instagramAppSecret,
+        ]),
       });
+
+      throw new BadRequestException(
+        'Failed to subscribe app to customer WABA webhooks.',
+      );
     }
 
     return data;

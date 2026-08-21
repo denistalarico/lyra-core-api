@@ -10,6 +10,7 @@ import type {
   MetaWhatsAppMessage,
   MetaWhatsAppWebhookPayload,
 } from '../types/meta-whatsapp-webhook.types';
+import type { NormalizedMessageReactionUpdate } from '../../types/normalized-message-reaction-update';
 import type { NormalizedMessageStatusUpdate } from '../../types/normalized-message-status-update';
 
 @Injectable()
@@ -38,6 +39,11 @@ export class WhatsAppMetaAdapter {
           );
 
         for (const rawMessage of value.messages) {
+          // Reactions arrive in the same `messages` array as regular
+          // messages, tagged with type "reaction" — they resolve through
+          // normalizeReactions instead, never as an inbound message.
+          if (rawMessage.type === 'reaction') continue;
+
           messages.push(
             this.normalizeMessage({
               tenantId: channel.tenantId,
@@ -96,6 +102,49 @@ export class WhatsAppMetaAdapter {
     }
 
     return { statuses };
+  }
+
+  async normalizeReactions(
+    payload: MetaWhatsAppWebhookPayload,
+  ): Promise<{ reactions: NormalizedMessageReactionUpdate[] }> {
+    const reactions: NormalizedMessageReactionUpdate[] = [];
+
+    for (const entry of payload.entry ?? []) {
+      for (const change of entry.changes ?? []) {
+        if (change.field !== 'messages') continue;
+
+        const value = change.value;
+        const phoneNumberId = value?.metadata?.phone_number_id;
+
+        if (!value || !phoneNumberId || !value.messages?.length) continue;
+
+        const channel =
+          await this.channelResolver.findWhatsAppChannelByPhoneNumberId(
+            phoneNumberId,
+          );
+
+        for (const rawMessage of value.messages) {
+          const externalMessageId = rawMessage.reaction?.message_id;
+          if (rawMessage.type !== 'reaction' || !externalMessageId) continue;
+
+          reactions.push({
+            tenantId: channel.tenantId,
+            workspaceId: channel.workspaceId,
+            channelId: channel.id,
+            provider: this.provider,
+            channelType: 'whatsapp',
+            externalMessageId,
+            senderId: rawMessage.from ?? null,
+            action: rawMessage.reaction?.emoji ? 'react' : 'unreact',
+            emoji: rawMessage.reaction?.emoji?.trim() || null,
+            occurredAt: this.parseTimestamp(rawMessage.timestamp),
+            metadata: { phoneNumberId },
+          });
+        }
+      }
+    }
+
+    return { reactions };
   }
 
   private mapDeliveryStatus(status: string | undefined) {

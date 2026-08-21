@@ -358,6 +358,139 @@ export class InboundMessageIngestionService {
     return result;
   }
 
+  /**
+   * A dedicated path for messages the business itself sent through a
+   * channel-native surface outside this system (e.g. an operator replying
+   * from Meta's own Page Inbox) or for reconciling our own outbound send
+   * against a fast echo. Never routes through ingest(): that method fixes
+   * direction to 'inbound', which would misattribute either case as a
+   * message from the contact. Takes the same per-thread advisory lock as
+   * ingest() and the same lock now held by the outbound services while they
+   * write externalMessageId, so the two can never race on the same mid.
+   * Requires an existing conversation — an echo carries no qualification or
+   * ownership signal, so one is never fabricated here.
+   */
+  async ingestEcho(input: NormalizedInboundMessage) {
+    return this.dataSource.transaction(async (manager) => {
+      await manager.query(
+        `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`,
+        [
+          `${input.tenantId}:${input.workspaceId}:${input.channelId}:${input.externalThreadId}`,
+        ],
+      );
+
+      if (input.externalMessageId) {
+        const duplicate = await manager
+          .getRepository(InboxMessageEntity)
+          .findOne({
+            where: {
+              tenantId: input.tenantId,
+              workspaceId: input.workspaceId,
+              channelId: input.channelId,
+              externalMessageId: input.externalMessageId,
+            },
+          });
+        if (duplicate) {
+          const conversation = await manager
+            .getRepository(InboxConversationEntity)
+            .findOneByOrFail({
+              id: duplicate.conversationId,
+              tenantId: input.tenantId,
+              workspaceId: input.workspaceId,
+            });
+          return { conversation, message: duplicate, deduplicated: true };
+        }
+      }
+
+      const conversation = await manager
+        .getRepository(InboxConversationEntity)
+        .findOne({
+          where: {
+            tenantId: input.tenantId,
+            workspaceId: input.workspaceId,
+            channelId: input.channelId,
+            externalThreadId: input.externalThreadId,
+          },
+        });
+      if (!conversation) return null;
+
+      const occurredAt = input.occurredAt ?? new Date();
+      const message = await manager.getRepository(InboxMessageEntity).save(
+        manager.getRepository(InboxMessageEntity).create({
+          tenantId: input.tenantId,
+          workspaceId: input.workspaceId,
+          conversationId: conversation.id,
+          channelId: input.channelId,
+          contactId: conversation.contactId,
+          direction: 'outbound',
+          senderType: 'external',
+          senderUserId: null,
+          senderAgentId: null,
+          externalMessageId: input.externalMessageId ?? null,
+          messageType: this.toPersistedMessageType(input.messageType),
+          content: input.content,
+          status: 'sent',
+          attachments: [],
+          metadata: {
+            provider: input.provider ?? null,
+            channelType: input.channelType,
+            senderExternalId: input.sender.externalId,
+            externalSend: true,
+          },
+          sentAt: occurredAt,
+          deliveredAt: null,
+          readAt: null,
+          occurredAt,
+          providerSequence: this.readProviderSequence(input.metadata),
+        }),
+      );
+
+      conversation.lastMessagePreview = this.createPreview(input.content);
+      conversation.lastMessageAt = occurredAt;
+      await manager.getRepository(InboxConversationEntity).save(conversation);
+
+      await manager.getRepository(InboxConversationEventEntity).save(
+        manager.getRepository(InboxConversationEventEntity).create({
+          tenantId: input.tenantId,
+          workspaceId: input.workspaceId,
+          conversationId: conversation.id,
+          eventType: 'message_sent',
+          actorType: 'system',
+          actorUserId: null,
+          payload: {
+            messageId: message.id,
+            externalMessageId: input.externalMessageId ?? null,
+            channelId: input.channelId,
+            channelType: input.channelType,
+            provider: input.provider ?? null,
+            externalSend: true,
+          },
+        }),
+      );
+      await manager.getRepository(InboxDomainOutboxEntity).save(
+        manager.getRepository(InboxDomainOutboxEntity).create({
+          tenantId: input.tenantId,
+          workspaceId: input.workspaceId,
+          aggregateType: 'inbox_conversation',
+          aggregateId: conversation.id,
+          eventName: 'leadflow.inbox.conversation.message.sent',
+          eventVersion: 1,
+          idempotencyKey: `message.sent:${message.id}`,
+          payload: {
+            conversationId: conversation.id,
+            contactId: conversation.contactId,
+            messageId: message.id,
+            messageType: input.messageType,
+            authorType: 'external',
+          },
+          publishedAt: null,
+        }),
+      );
+
+      return { conversation, message, deduplicated: false };
+    });
+  }
+
   private async findInternalContact(
     manager: EntityManager,
     input: NormalizedInboundMessage,

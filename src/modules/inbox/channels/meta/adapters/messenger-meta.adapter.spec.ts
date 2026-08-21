@@ -289,6 +289,163 @@ describe('MessengerMetaAdapter', () => {
     ).resolves.toEqual({ messages: [] });
   });
 
+  describe('normalizeReactions', () => {
+    it('normalizes a react event with its emoji', async () => {
+      const result = await adapter.normalizeReactions({
+        object: 'page',
+        entry: [
+          {
+            id: 'page-1',
+            time: 1_720_000_000_000,
+            messaging: [
+              {
+                sender: { id: 'psid-1' },
+                recipient: { id: 'page-1' },
+                timestamp: 1_720_000_001_000,
+                reaction: {
+                  mid: 'mid-1',
+                  action: 'react',
+                  reaction: 'love',
+                  emoji: '😍',
+                },
+              },
+            ],
+          },
+        ],
+      });
+
+      expect(
+        resolver.findFacebookMessengerChannelByPageId,
+      ).toHaveBeenCalledWith('page-1');
+      expect(result.reactions).toEqual([
+        expect.objectContaining({
+          tenantId: 'tenant-1',
+          workspaceId: 'workspace-1',
+          channelId: 'messenger-channel-1',
+          provider: 'meta',
+          channelType: 'facebook_messenger',
+          externalMessageId: 'mid-1',
+          senderId: 'psid-1',
+          action: 'react',
+          emoji: '😍',
+          occurredAt: new Date(1_720_000_001_000),
+        }),
+      ]);
+    });
+
+    it('normalizes an unreact event', async () => {
+      const result = await adapter.normalizeReactions({
+        object: 'page',
+        entry: [
+          {
+            id: 'page-1',
+            messaging: [
+              {
+                sender: { id: 'psid-1' },
+                reaction: { mid: 'mid-1', action: 'unreact' },
+              },
+            ],
+          },
+        ],
+      });
+
+      expect(result.reactions).toEqual([
+        expect.objectContaining({ action: 'unreact', emoji: null }),
+      ]);
+    });
+
+    it('ignores events without a reaction or a target message id', async () => {
+      const result = await adapter.normalizeReactions({
+        object: 'page',
+        entry: [
+          {
+            id: 'page-1',
+            messaging: [
+              { sender: { id: 'psid-1' }, message: { mid: 'mid-1' } },
+              { sender: { id: 'psid-1' }, reaction: {} },
+            ],
+          },
+        ],
+      });
+
+      expect(result.reactions).toEqual([]);
+    });
+
+    it('tolerates incomplete payload structures', async () => {
+      await expect(
+        adapter.normalizeReactions({ object: 'page' }),
+      ).resolves.toEqual({ reactions: [] });
+    });
+  });
+
+  describe('normalizeEchoes', () => {
+    it('normalizes an is_echo event as a message pointed at the contact thread', async () => {
+      const result = await adapter.normalizeEchoes({
+        object: 'page',
+        entry: [
+          {
+            id: 'page-1',
+            time: 1_720_000_000_000,
+            messaging: [
+              {
+                sender: { id: 'page-1' },
+                recipient: { id: 'psid-1' },
+                timestamp: 1_720_000_001_000,
+                message: { mid: 'mid-echo-1', text: 'Olá', is_echo: true },
+              },
+            ],
+          },
+        ],
+      });
+
+      expect(
+        resolver.findFacebookMessengerChannelByPageId,
+      ).toHaveBeenCalledWith('page-1');
+      expect(result.messages).toEqual([
+        expect.objectContaining({
+          tenantId: 'tenant-1',
+          workspaceId: 'workspace-1',
+          channelId: 'messenger-channel-1',
+          channelType: 'facebook_messenger',
+          provider: 'meta',
+          externalThreadId: 'facebook_messenger:page-1:psid-1',
+          externalMessageId: 'mid-echo-1',
+          content: 'Olá',
+          occurredAt: new Date(1_720_000_001_000),
+        }),
+      ]);
+    });
+
+    it('ignores non-echo messages', async () => {
+      const result = await adapter.normalizeEchoes({
+        object: 'page',
+        entry: [
+          {
+            id: 'page-1',
+            messaging: [
+              {
+                sender: { id: 'psid-1' },
+                recipient: { id: 'page-1' },
+                message: { mid: 'mid-1', text: 'Olá' },
+              },
+            ],
+          },
+        ],
+      });
+
+      expect(result.messages).toEqual([]);
+      expect(
+        resolver.findFacebookMessengerChannelByPageId,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('tolerates incomplete payload structures', async () => {
+      await expect(
+        adapter.normalizeEchoes({ object: 'page' }),
+      ).resolves.toEqual({ messages: [] });
+    });
+  });
+
   it('preserves MetaChannelUnavailableError from the resolver', async () => {
     const unavailableChannel = {
       ...channel,

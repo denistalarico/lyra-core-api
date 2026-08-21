@@ -53,6 +53,7 @@ export type MetaWhatsAppMessage = {
     payload?: string;
   };
   interactive?: unknown;
+  reaction?: MetaWhatsAppReaction;
   referral?: {
     source_id?: string;
     source_type?: string;
@@ -72,6 +73,13 @@ export type MetaWhatsAppMedia = {
 
 export type MetaWhatsAppDocument = MetaWhatsAppMedia & {
   filename?: string;
+};
+
+// Removing a reaction resends this same shape with `emoji` empty/absent —
+// there is no separate "unreact" message type.
+export type MetaWhatsAppReaction = {
+  message_id?: string;
+  emoji?: string;
 };
 
 export type MetaWhatsAppStatus = {

@@ -21,6 +21,7 @@ import { WhatsAppMetaAdapter } from './adapters/whatsapp-meta.adapter';
 import type { MetaInstagramWebhookPayload } from './types/meta-instagram-webhook.types';
 import type { MetaMessengerWebhookPayload } from './types/meta-messenger-webhook.types';
 import type { MetaWhatsAppWebhookPayload } from './types/meta-whatsapp-webhook.types';
+import type { NormalizedMessageStatusWatermarkUpdate } from '../types/normalized-message-status-update';
 import { WebhookLogService } from '../services/webhook-log.service';
 import { MessageStatusSyncService } from '../services/message-status-sync.service';
 import { MetaChannelUnavailableError } from './services/meta-channel-resolver.service';
@@ -113,6 +114,11 @@ export class MetaWebhookController {
         externalMessageId: string;
         action: string;
       }> = [];
+      const statusWatermarkResults: Array<{
+        conversationId: string;
+        status: string;
+        updatedMessageIds: string[];
+      }> = [];
 
       for (const message of normalized.messages) {
         const result = await this.inboundIngestionService.ingest(message);
@@ -134,32 +140,37 @@ export class MetaWebhookController {
       }
       for (const reactionUpdate of normalizedReactions.reactions) {
         const updatedMessage =
-          await this.messageStatusSyncService.applyInstagramReaction(
-            reactionUpdate,
-          );
+          await this.messageStatusSyncService.applyReaction(reactionUpdate);
         reactionResults.push({
           messageId: updatedMessage.id,
           externalMessageId: reactionUpdate.externalMessageId,
           action: reactionUpdate.action,
         });
       }
+      for (const watermarkUpdate of normalizedStatuses.statusWatermarks) {
+        const result =
+          await this.messageStatusSyncService.applyStatusWatermark(
+            watermarkUpdate,
+          );
+        statusWatermarkResults.push({
+          conversationId: result.conversationId,
+          status: watermarkUpdate.status,
+          updatedMessageIds: result.updatedMessageIds,
+        });
+      }
 
       const normalizedScope =
         normalized.messages[0] ??
         normalizedStatuses.statuses[0] ??
-        normalizedReactions.reactions[0];
-      let metadata: Record<string, unknown>;
-      switch (workload) {
-        case 'whatsapp':
-          metadata = { results, statusResults };
-          break;
-        case 'instagram':
-          metadata = { workload, results, statusResults, reactionResults };
-          break;
-        case 'messenger':
-          metadata = { workload, results };
-          break;
-      }
+        normalizedReactions.reactions[0] ??
+        normalizedStatuses.statusWatermarks[0];
+      const metadata: Record<string, unknown> = {
+        workload,
+        results,
+        statusResults,
+        reactionResults,
+        statusWatermarkResults,
+      };
       await this.webhookLogService.create({
         tenantId: normalizedScope?.tenantId ?? null,
         workspaceId: normalizedScope?.workspaceId ?? null,
@@ -172,7 +183,7 @@ export class MetaWebhookController {
         externalMessageId: results[0]?.externalMessageId ?? null,
         signatureReceived: Boolean(signature),
         messagesProcessed: results.length,
-        statusesProcessed: statusResults.length,
+        statusesProcessed: statusResults.length + statusWatermarkResults.length,
         payload: {},
         metadata,
       });
@@ -182,34 +193,19 @@ export class MetaWebhookController {
         provider: 'meta',
         signatureReceived: true,
         messagesProcessed: results.length,
-        statusesProcessed: statusResults.length,
+        statusesProcessed: statusResults.length + statusWatermarkResults.length,
         reactionsProcessed: reactionResults.length,
         results,
         statusResults,
         reactionResults,
+        statusWatermarkResults,
       };
     } catch (error) {
       if (error instanceof MetaChannelUnavailableError) {
-        let metadata: Record<string, unknown>;
-        switch (workload) {
-          case 'whatsapp':
-            metadata = {
-              connectionStatus: error.channel.connectionStatus,
-            };
-            break;
-          case 'instagram':
-            metadata = {
-              workload,
-              connectionStatus: error.channel.connectionStatus,
-            };
-            break;
-          case 'messenger':
-            metadata = {
-              workload,
-              connectionStatus: error.channel.connectionStatus,
-            };
-            break;
-        }
+        const metadata: Record<string, unknown> = {
+          workload,
+          connectionStatus: error.channel.connectionStatus,
+        };
         await this.webhookLogService.create({
           tenantId: error.channel.tenantId,
           workspaceId: error.channel.workspaceId,
@@ -347,9 +343,16 @@ export class MetaWebhookController {
         const whatsappPayload = payload as MetaWhatsAppWebhookPayload;
         return {
           normalized: await this.whatsappMetaAdapter.normalize(whatsappPayload),
-          normalizedStatuses:
-            await this.whatsappMetaAdapter.normalizeStatuses(whatsappPayload),
-          normalizedReactions: { reactions: [] },
+          normalizedStatuses: {
+            ...(await this.whatsappMetaAdapter.normalizeStatuses(
+              whatsappPayload,
+            )),
+            statusWatermarks: [] as NormalizedMessageStatusWatermarkUpdate[],
+          },
+          normalizedReactions:
+            await this.whatsappMetaAdapter.normalizeReactions(
+              whatsappPayload,
+            ),
         };
       }
       case 'instagram': {
@@ -357,8 +360,12 @@ export class MetaWebhookController {
         return {
           normalized:
             await this.instagramMetaAdapter.normalize(instagramPayload),
-          normalizedStatuses:
-            await this.instagramMetaAdapter.normalizeStatuses(instagramPayload),
+          normalizedStatuses: {
+            ...(await this.instagramMetaAdapter.normalizeStatuses(
+              instagramPayload,
+            )),
+            statusWatermarks: [] as NormalizedMessageStatusWatermarkUpdate[],
+          },
           normalizedReactions:
             await this.instagramMetaAdapter.normalizeReactions(
               instagramPayload,
@@ -370,8 +377,14 @@ export class MetaWebhookController {
         return {
           normalized:
             await this.messengerMetaAdapter.normalize(messengerPayload),
-          normalizedStatuses: { statuses: [] },
-          normalizedReactions: { reactions: [] },
+          normalizedStatuses:
+            await this.messengerMetaAdapter.normalizeStatuses(
+              messengerPayload,
+            ),
+          normalizedReactions:
+            await this.messengerMetaAdapter.normalizeReactions(
+              messengerPayload,
+            ),
         };
       }
     }

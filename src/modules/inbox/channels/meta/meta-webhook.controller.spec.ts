@@ -9,6 +9,7 @@ describe('MetaWebhookController', () => {
   const whatsappAdapter = {
     normalize: jest.fn().mockResolvedValue({ messages: [] }),
     normalizeStatuses: jest.fn().mockResolvedValue({ statuses: [] }),
+    normalizeReactions: jest.fn().mockResolvedValue({ reactions: [] }),
   };
   const instagramAdapter = {
     normalize: jest.fn().mockResolvedValue({ messages: [] }),
@@ -17,12 +18,17 @@ describe('MetaWebhookController', () => {
   };
   const messengerAdapter = {
     normalize: jest.fn().mockResolvedValue({ messages: [] }),
+    normalizeStatuses: jest
+      .fn()
+      .mockResolvedValue({ statuses: [], statusWatermarks: [] }),
+    normalizeReactions: jest.fn().mockResolvedValue({ reactions: [] }),
   };
   const ingestion = { ingest: jest.fn() };
   const webhookLog = { create: jest.fn().mockResolvedValue(undefined) };
   const statusSync = {
     applyStatusUpdate: jest.fn(),
-    applyInstagramReaction: jest.fn(),
+    applyReaction: jest.fn(),
+    applyStatusWatermark: jest.fn(),
   };
   const controller = new MetaWebhookController(
     whatsappAdapter as never,
@@ -39,10 +45,16 @@ describe('MetaWebhookController', () => {
     jest.clearAllMocks();
     whatsappAdapter.normalize.mockResolvedValue({ messages: [] });
     whatsappAdapter.normalizeStatuses.mockResolvedValue({ statuses: [] });
+    whatsappAdapter.normalizeReactions.mockResolvedValue({ reactions: [] });
     instagramAdapter.normalize.mockResolvedValue({ messages: [] });
     instagramAdapter.normalizeStatuses.mockResolvedValue({ statuses: [] });
     instagramAdapter.normalizeReactions.mockResolvedValue({ reactions: [] });
     messengerAdapter.normalize.mockResolvedValue({ messages: [] });
+    messengerAdapter.normalizeStatuses.mockResolvedValue({
+      statuses: [],
+      statusWatermarks: [],
+    });
+    messengerAdapter.normalizeReactions.mockResolvedValue({ reactions: [] });
   });
 
   afterAll(() => {
@@ -178,6 +190,7 @@ describe('MetaWebhookController', () => {
         ],
         statusResults: [],
         reactionResults: [],
+        statusWatermarkResults: [],
       },
     });
   });
@@ -215,7 +228,7 @@ describe('MetaWebhookController', () => {
     instagramAdapter.normalizeReactions.mockResolvedValue({
       reactions: [normalizedReaction],
     });
-    statusSync.applyInstagramReaction.mockResolvedValue({ id: 'message-1' });
+    statusSync.applyReaction.mockResolvedValue({ id: 'message-1' });
     const request = signedRequest(payload);
 
     await expect(
@@ -229,9 +242,7 @@ describe('MetaWebhookController', () => {
       messagesProcessed: 0,
       reactionsProcessed: 1,
     });
-    expect(statusSync.applyInstagramReaction).toHaveBeenCalledWith(
-      normalizedReaction,
-    );
+    expect(statusSync.applyReaction).toHaveBeenCalledWith(normalizedReaction);
     expect(webhookLog.create).toHaveBeenCalledWith(
       expect.objectContaining({
         tenantId: 'tenant-1',
@@ -240,6 +251,103 @@ describe('MetaWebhookController', () => {
         eventType: 'message_reaction',
       }),
     );
+  });
+
+  it('routes WhatsApp reaction webhooks to the shared reaction sync', async () => {
+    const payload = {
+      object: 'whatsapp_business_account',
+      entry: [
+        {
+          id: 'waba-1',
+          changes: [
+            {
+              field: 'messages',
+              value: { metadata: { phone_number_id: 'phone-1' } },
+            },
+          ],
+        },
+      ],
+    };
+    const normalizedReaction = {
+      tenantId: 'tenant-1',
+      workspaceId: 'workspace-1',
+      channelId: 'whatsapp-channel-1',
+      provider: 'meta',
+      channelType: 'whatsapp' as const,
+      externalMessageId: 'wamid-1',
+      senderId: '5511999990000',
+      action: 'react' as const,
+      emoji: '🔥',
+      occurredAt: new Date('2026-08-16T12:00:00.000Z'),
+    };
+    whatsappAdapter.normalizeReactions.mockResolvedValue({
+      reactions: [normalizedReaction],
+    });
+    statusSync.applyReaction.mockResolvedValue({ id: 'message-1' });
+    const request = signedRequest(payload);
+
+    await expect(
+      controller.receiveWebhook(
+        request.signature,
+        { rawBody: request.rawBody } as never,
+        payload,
+      ),
+    ).resolves.toMatchObject({
+      ok: true,
+      messagesProcessed: 0,
+      reactionsProcessed: 1,
+    });
+    expect(whatsappAdapter.normalizeReactions).toHaveBeenCalledWith(payload);
+    expect(statusSync.applyReaction).toHaveBeenCalledWith(normalizedReaction);
+  });
+
+  it('routes Messenger reaction webhooks to the shared reaction sync', async () => {
+    const payload = {
+      object: 'page' as const,
+      entry: [
+        {
+          id: 'page-1',
+          messaging: [
+            {
+              sender: { id: 'psid-1' },
+              recipient: { id: 'page-1' },
+              reaction: { mid: 'mid-1', action: 'react', emoji: '😍' },
+            },
+          ],
+        },
+      ],
+    };
+    const normalizedReaction = {
+      tenantId: 'tenant-1',
+      workspaceId: 'workspace-1',
+      channelId: 'messenger-channel-1',
+      provider: 'meta',
+      channelType: 'facebook_messenger' as const,
+      externalMessageId: 'mid-1',
+      senderId: 'psid-1',
+      action: 'react' as const,
+      emoji: '😍',
+      occurredAt: new Date('2026-08-16T12:00:00.000Z'),
+    };
+    messengerAdapter.normalizeReactions.mockResolvedValue({
+      reactions: [normalizedReaction],
+    });
+    statusSync.applyReaction.mockResolvedValue({ id: 'message-1' });
+    const request = signedRequest(payload);
+
+    await expect(
+      controller.receiveWebhook(
+        request.signature,
+        { rawBody: request.rawBody } as never,
+        payload,
+      ),
+    ).resolves.toMatchObject({
+      ok: true,
+      messagesProcessed: 0,
+      reactionsProcessed: 1,
+    });
+    expect(messengerAdapter.normalizeReactions).toHaveBeenCalledWith(payload);
+    expect(statusSync.applyReaction).toHaveBeenCalledWith(normalizedReaction);
   });
 
   it.each([undefined, 'sha256=deadbeef'])(
@@ -340,7 +448,7 @@ describe('MetaWebhookController', () => {
     expect(instagramAdapter.normalizeStatuses).not.toHaveBeenCalled();
     expect(instagramAdapter.normalizeReactions).not.toHaveBeenCalled();
     expect(statusSync.applyStatusUpdate).not.toHaveBeenCalled();
-    expect(statusSync.applyInstagramReaction).not.toHaveBeenCalled();
+    expect(statusSync.applyReaction).not.toHaveBeenCalled();
     expect(webhookLog.create).toHaveBeenCalledWith({
       tenantId: 'tenant-1',
       workspaceId: 'workspace-1',
@@ -364,8 +472,79 @@ describe('MetaWebhookController', () => {
             externalMessageId: 'mid-1',
           },
         ],
+        statusResults: [],
+        reactionResults: [],
+        statusWatermarkResults: [],
       },
     });
+  });
+
+  it('routes Messenger delivery/read watermarks to the shared status sync', async () => {
+    const payload = {
+      object: 'page' as const,
+      entry: [
+        {
+          id: 'page-1',
+          messaging: [
+            {
+              sender: { id: 'psid-1' },
+              recipient: { id: 'page-1' },
+              read: { watermark: 1_720_000_000_000 },
+            },
+          ],
+        },
+      ],
+    };
+    const normalizedWatermark = {
+      tenantId: 'tenant-1',
+      workspaceId: 'workspace-1',
+      channelId: 'messenger-channel-1',
+      provider: 'meta',
+      channelType: 'facebook_messenger' as const,
+      externalThreadId: 'facebook_messenger:page-1:psid-1',
+      status: 'read' as const,
+      watermark: new Date(1_720_000_000_000),
+      recipientId: 'psid-1',
+    };
+    messengerAdapter.normalizeStatuses.mockResolvedValue({
+      statuses: [],
+      statusWatermarks: [normalizedWatermark],
+    });
+    statusSync.applyStatusWatermark.mockResolvedValue({
+      conversationId: 'conversation-1',
+      updatedMessageIds: ['message-1', 'message-2'],
+    });
+    const request = signedRequest(payload);
+
+    await expect(
+      controller.receiveWebhook(
+        request.signature,
+        { rawBody: request.rawBody } as never,
+        payload,
+      ),
+    ).resolves.toMatchObject({
+      ok: true,
+      messagesProcessed: 0,
+      statusesProcessed: 1,
+      statusWatermarkResults: [
+        {
+          conversationId: 'conversation-1',
+          status: 'read',
+          updatedMessageIds: ['message-1', 'message-2'],
+        },
+      ],
+    });
+    expect(statusSync.applyStatusWatermark).toHaveBeenCalledWith(
+      normalizedWatermark,
+    );
+    expect(webhookLog.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tenantId: 'tenant-1',
+        workspaceId: 'workspace-1',
+        channelId: 'messenger-channel-1',
+        statusesProcessed: 1,
+      }),
+    );
   });
 
   it('rejects a Messenger webhook with an invalid signature before dispatch', async () => {

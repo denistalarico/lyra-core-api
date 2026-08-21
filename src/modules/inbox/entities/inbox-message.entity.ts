@@ -11,7 +11,12 @@ export type InboxMessageDirection =
   | 'outbound'
   | 'internal'
   | 'system';
-export type InboxMessageSenderType = 'contact' | 'user' | 'agent' | 'system';
+export type InboxMessageSenderType =
+  | 'contact'
+  | 'user'
+  | 'agent'
+  | 'system'
+  | 'external';
 export type InboxMessageType = 'text' | 'note' | 'media' | 'event' | 'template';
 export type InboxMessageStatus =
   | 'draft'

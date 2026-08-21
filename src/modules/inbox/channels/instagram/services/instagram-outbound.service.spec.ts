@@ -67,6 +67,39 @@ describe('InstagramOutboundService', () => {
     expect(loggerErrorSpy).not.toHaveBeenCalled();
   });
 
+  it('takes the thread advisory lock before recording the Meta message id', async () => {
+    const harness = createHarness();
+    global.fetch = jest.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          recipient_id: 'ig-scoped-user',
+          message_id: 'ig-message-1',
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+
+    await harness.service.sendText({
+      ctx: {
+        tenantId: 'tenant-1',
+        workspaceId: 'workspace-1',
+        userId: 'user-1',
+      },
+      channelId: 'channel-1',
+      conversationId: 'conversation-1',
+      to: harness.conversation.externalThreadId!,
+      text: 'Olá pelo Instagram',
+      idempotencyKey: 'instagram-text-lock',
+    });
+
+    expect(harness.manager.query).toHaveBeenCalledWith(
+      expect.stringContaining('pg_advisory_xact_lock'),
+      [
+        'tenant-1:workspace-1:channel-1:instagram:ig-professional-account:ig-scoped-user',
+      ],
+    );
+  });
+
   it('routes Facebook Login channels through the Page Messages API', async () => {
     const harness = createHarness({
       externalPageId: 'facebook-page-id',
@@ -370,6 +403,7 @@ function createHarness(channelOverrides: Partial<InboxChannelEntity> = {}) {
     }),
   };
   const manager = {
+    query: jest.fn().mockResolvedValue([]),
     getRepository: jest.fn(() => ({
       save: jest.fn((value) => Promise.resolve(value)),
     })),
@@ -418,6 +452,7 @@ function createHarness(channelOverrides: Partial<InboxChannelEntity> = {}) {
     channel,
     conversation,
     messagesRepository,
+    manager,
     metaLedger,
     audioNormalizer,
     filesService,

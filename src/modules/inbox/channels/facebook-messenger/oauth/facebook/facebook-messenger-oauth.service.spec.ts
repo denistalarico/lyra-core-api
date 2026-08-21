@@ -472,7 +472,12 @@ describe('FacebookMessengerOAuthService', () => {
           pageTasks: ['MESSAGING', 'ANALYZE'],
           tokenType: 'page_access_token',
           tokenExpiresAt: null,
-          webhookSubscribedFields: ['messages'],
+          webhookSubscribedFields: [
+            'messages',
+            'message_deliveries',
+            'message_reads',
+            'message_reactions',
+          ],
           connectionSessionId: 'session-id',
         }),
       });

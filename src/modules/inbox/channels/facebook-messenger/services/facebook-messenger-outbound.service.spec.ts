@@ -76,6 +76,33 @@ describe('FacebookMessengerOutboundService', () => {
       expect(loggerErrorSpy).not.toHaveBeenCalled();
     });
 
+    it('takes the thread advisory lock before recording the Meta message id', async () => {
+      const harness = createHarness();
+      global.fetch = jest
+        .fn()
+        .mockResolvedValue(
+          okResponse({ recipient_id: 'psid-1', message_id: 'mid-out-1' }),
+        );
+
+      await harness.service.sendText({
+        ctx: {
+          tenantId: 'tenant-1',
+          workspaceId: 'workspace-1',
+          userId: 'user-1',
+        },
+        channelId: 'channel-1',
+        conversationId: 'conversation-1',
+        to: 'psid-1',
+        text: 'Olá pelo Messenger',
+        idempotencyKey: 'messenger-text-lock',
+      });
+
+      expect(harness.manager.query).toHaveBeenCalledWith(
+        expect.stringContaining('pg_advisory_xact_lock'),
+        ['tenant-1:workspace-1:channel-1:facebook_messenger:page-1:psid-1'],
+      );
+    });
+
     it('marks the message failed and keeps the Meta diagnostics sanitized', async () => {
       const harness = createHarness();
       const loggerErrorSpy = jest
@@ -841,6 +868,7 @@ function createHarness(
     }),
   };
   const manager = {
+    query: jest.fn().mockResolvedValue([]),
     getRepository: jest.fn(() => ({
       save: jest.fn((value) => Promise.resolve(value)),
     })),
@@ -894,6 +922,7 @@ function createHarness(
     messagesRepository,
     savedMessages,
     dataSource,
+    manager,
     metaLedger,
     audioNormalizer,
     filesService,

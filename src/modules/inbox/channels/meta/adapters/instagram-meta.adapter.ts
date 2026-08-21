@@ -9,6 +9,7 @@ import type {
 } from '../../types/normalized-inbound-message';
 import { MetaChannelResolverService } from '../services/meta-channel-resolver.service';
 import { MetaGraphService } from '../services/meta-graph.service';
+import type { NormalizedMessageReactionUpdate } from '../../types/normalized-message-reaction-update';
 import type { NormalizedMessageStatusUpdate } from '../../types/normalized-message-status-update';
 import type {
   MetaInstagramAttachment,
@@ -95,17 +96,10 @@ export class InstagramMetaAdapter {
     return { statuses };
   }
 
-  async normalizeReactions(payload: MetaInstagramWebhookPayload) {
-    const reactions: Array<{
-      tenantId: string;
-      workspaceId: string;
-      channelId: string;
-      externalMessageId: string;
-      senderId: string | null;
-      action: 'react' | 'unreact';
-      emoji: string | null;
-      occurredAt: Date;
-    }> = [];
+  async normalizeReactions(
+    payload: MetaInstagramWebhookPayload,
+  ): Promise<{ reactions: NormalizedMessageReactionUpdate[] }> {
+    const reactions: NormalizedMessageReactionUpdate[] = [];
 
     for (const entry of payload.entry ?? []) {
       for (const event of entry.messaging ?? []) {
@@ -118,6 +112,8 @@ export class InstagramMetaAdapter {
           tenantId: channel.tenantId,
           workspaceId: channel.workspaceId,
           channelId: channel.id,
+          provider: this.provider,
+          channelType: 'instagram',
           externalMessageId: event.reaction.mid,
           senderId: event.sender?.id ?? null,
           action: event.reaction.action === 'unreact' ? 'unreact' : 'react',

@@ -78,6 +78,32 @@ describe('InstagramChannelHealthService', () => {
     expect(JSON.stringify(result)).not.toContain('decrypted-secret');
   });
 
+  it('flags a Facebook Login page that has not subscribed messaging_seen, instead of comparing against the direct-login field list', async () => {
+    const harness = createHarness({
+      externalPageId: 'facebook-page-id',
+      metadata: { authorizationMethod: 'facebook_login' },
+    });
+    harness.meta.getFacebookPageWebhookSubscriptions.mockResolvedValue({
+      appSubscribed: true,
+      subscribedFields: [
+        'messages',
+        'messaging_postbacks',
+        'message_reactions',
+      ],
+    });
+
+    const result = await harness.service.runHealthCheck(scopedInput);
+
+    expect(result).toMatchObject({
+      ok: false,
+      status: 'unhealthy',
+      webhookSubscriptionHealthy: false,
+      diagnosis: 'webhook_subscription_incomplete',
+      requiresReconnect: true,
+      missingWebhookFields: ['messaging_seen'],
+    });
+  });
+
   it('accepts the additional scoped identifier when resolving channel identity', async () => {
     const harness = createHarness({
       externalAccountId: 'different-primary-id',

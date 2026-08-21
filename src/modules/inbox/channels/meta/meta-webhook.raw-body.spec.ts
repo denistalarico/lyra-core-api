@@ -26,6 +26,7 @@ describe('MetaWebhookController raw body integration', () => {
           useValue: {
             normalize: jest.fn().mockResolvedValue({ messages: [] }),
             normalizeStatuses: jest.fn().mockResolvedValue({ statuses: [] }),
+            normalizeReactions: jest.fn().mockResolvedValue({ reactions: [] }),
           },
         },
         {
@@ -40,6 +41,10 @@ describe('MetaWebhookController raw body integration', () => {
           provide: MessengerMetaAdapter,
           useValue: {
             normalize: jest.fn().mockResolvedValue({ messages: [] }),
+            normalizeStatuses: jest
+              .fn()
+              .mockResolvedValue({ statuses: [], statusWatermarks: [] }),
+            normalizeReactions: jest.fn().mockResolvedValue({ reactions: [] }),
           },
         },
         {
@@ -54,7 +59,8 @@ describe('MetaWebhookController raw body integration', () => {
           provide: MessageStatusSyncService,
           useValue: {
             applyStatusUpdate: jest.fn(),
-            applyInstagramReaction: jest.fn(),
+            applyReaction: jest.fn(),
+            applyStatusWatermark: jest.fn(),
           },
         },
       ],

@@ -738,6 +738,16 @@ export class FacebookMessengerOutboundService {
   }) {
     const sentAt = new Date();
     await this.dataSource.transaction(async (manager) => {
+      // Same lock key as InboundMessageIngestionService.ingest()/ingestEcho():
+      // serializes this mid write against any concurrent inbound/echo
+      // processing for the thread, so a fast echo can never be dedup-checked
+      // before our own send finishes recording its externalMessageId.
+      await manager.query(
+        `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`,
+        [
+          `${input.channel.tenantId}:${input.channel.workspaceId}:${input.channel.id}:${input.conversation.externalThreadId}`,
+        ],
+      );
       input.message.externalMessageId = input.externalMessageId;
       input.message.status = 'sent';
       input.message.sentAt = sentAt;
