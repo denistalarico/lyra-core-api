@@ -867,9 +867,18 @@ export class InboxAgentRuntimeService {
             latestInbound.id === contextInbound.id,
           ),
           latestInbound,
-          recipientAllowed: (
-            this.pilotOutboundPolicy ?? new InboxPilotOutboundPolicyService()
-          ).isAuthorized(lockedConversation.externalThreadId),
+          // The E.164 recipient check only applies to WhatsApp — Instagram and
+          // Messenger thread ids (`instagram:...`, `facebook_messenger:...`)
+          // are never phone numbers, so isAuthorized() would reject them by
+          // format alone. There is no equivalent recipient restriction for
+          // those channels, so they are simply not subject to this check.
+          recipientAllowed:
+            channel.type === 'whatsapp'
+              ? (
+                  this.pilotOutboundPolicy ??
+                  new InboxPilotOutboundPolicyService()
+                ).isAuthorized(lockedConversation.externalThreadId)
+              : true,
           humanRouteConfigured: Boolean(
             channel.defaultAssignedUserId ||
             (settings?.handoffOverrides &&

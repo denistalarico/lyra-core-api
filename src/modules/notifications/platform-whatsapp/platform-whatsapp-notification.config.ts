@@ -24,12 +24,6 @@ export interface PlatformWhatsAppNotificationConfig {
   apiVersion: string;
   /** Default template language, e.g. `pt_BR`. */
   defaultLanguageCode: string;
-  /**
-   * Recipient E.164 numbers allowed during the test phase. Empty means the
-   * provider is fail-closed on recipients (no send) until either this is set or
-   * a future policy verifies numbers — never an implicit "allow all".
-   */
-  testRecipientAllowList: readonly string[];
 }
 
 /** Injection token for the config provider port. */
@@ -72,20 +66,10 @@ export class EnvPlatformWhatsAppNotificationConfigProvider
       defaultLanguageCode: (
         env.PLATFORM_WHATSAPP_NOTIFICATIONS_DEFAULT_LANGUAGE ?? 'pt_BR'
       ).trim(),
-      testRecipientAllowList: parseAllowList(
-        env.PLATFORM_WHATSAPP_NOTIFICATIONS_TEST_RECIPIENTS,
-      ),
     };
   }
 
   get(): PlatformWhatsAppNotificationConfig {
     return this.config;
   }
-}
-
-function parseAllowList(raw: string | undefined): readonly string[] {
-  return (raw ?? '')
-    .split(',')
-    .map((entry) => entry.trim())
-    .filter((entry) => entry !== '');
 }

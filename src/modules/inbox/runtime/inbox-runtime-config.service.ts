@@ -57,35 +57,38 @@ export class InboxRuntimeConfigService implements OnModuleInit {
   );
   readonly imageDetail = imageDetail();
   readonly maxAttempts = boundedNumber('INBOX_PROVIDER_MAX_ATTEMPTS', 2, 1, 3);
+  // Ceilings raised well past the pilot-phase defaults now that the product
+  // is out of the restricted test window — still bounded (never truly
+  // unlimited) so a runaway loop stays a finite bill, not an open tap.
   readonly budgetUsd = boundedDecimal(
     'INBOX_PROVIDER_BUDGET_USD',
     10,
     0.01,
-    100,
+    1_000_000,
   );
   readonly maxDecisionCalls = boundedNumber(
     'INBOX_MAX_DECISION_CALLS',
     200,
     1,
-    10_000,
+    10_000_000,
   );
   readonly maxTranscriptionCalls = boundedNumber(
     'INBOX_MAX_TRANSCRIPTION_CALLS',
     50,
     1,
-    10_000,
+    10_000_000,
   );
   readonly maxVisionCalls = boundedNumber(
     'INBOX_MAX_VISION_CALLS',
     50,
     0,
-    10_000,
+    10_000_000,
   );
   readonly maxImageInputs = boundedNumber(
     'INBOX_MAX_IMAGE_INPUTS',
     50,
     0,
-    10_000,
+    10_000_000,
   );
   readonly decisionReserveUsd = boundedDecimal(
     'INBOX_DECISION_RESERVE_USD',

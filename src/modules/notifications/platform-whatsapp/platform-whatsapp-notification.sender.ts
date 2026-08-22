@@ -22,17 +22,13 @@ export interface PlatformWhatsAppSendInput {
 export type PlatformWhatsAppSendOutcome =
   /** Meta accepted the message. */
   | { status: 'sent'; providerMessageId: string }
-  /**
-   * Deliberately not attempted — provider off, no approved template, or the
-   * recipient is not permitted by the current (test) policy. Not a fault.
-   */
+  /** Deliberately not attempted — provider off or no approved template. Not a fault. */
   | {
       status: 'skipped';
       reasonCode:
         | 'provider_disabled'
         | 'template_unavailable'
-        | 'invalid_recipient'
-        | 'recipient_not_allowlisted';
+        | 'invalid_recipient';
     }
   /** Attempted and rejected by Meta or the transport. Message is sanitized. */
   | { status: 'failed'; providerCode: string | null; message: string };
@@ -75,15 +71,6 @@ export class PlatformWhatsAppNotificationSender {
     const recipient = normalizeRecipient(input.toPhoneE164);
     if (!recipient) {
       return { status: 'skipped', reasonCode: 'invalid_recipient' };
-    }
-
-    // Fail-closed on recipients: with no allow-list configured, nobody is
-    // permitted — the provider never sends to an unlisted number during testing.
-    if (
-      config.testRecipientAllowList.length === 0 ||
-      !config.testRecipientAllowList.map(normalizeRecipient).includes(recipient)
-    ) {
-      return { status: 'skipped', reasonCode: 'recipient_not_allowlisted' };
     }
 
     const template = resolvePlatformWhatsAppTemplate(

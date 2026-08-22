@@ -1,4 +1,4 @@
-import { ForbiddenException, Injectable, OnModuleInit } from '@nestjs/common';
+import { ForbiddenException, Injectable } from '@nestjs/common';
 import { createHash } from 'crypto';
 
 const E164 = /^\+[1-9]\d{7,14}$/;
@@ -10,17 +10,14 @@ export type PilotOutboundAuthorization = {
   recipientMasked: string;
 };
 
+/**
+ * Normalizes and validates a WhatsApp recipient to E.164 for outbound send.
+ * The pilot-phase recipient allowlist that used to gate this has been
+ * retired — the product is out of the restricted test phase, so any
+ * well-formed number is accepted.
+ */
 @Injectable()
-export class InboxPilotOutboundPolicyService implements OnModuleInit {
-  readonly pilotMode = process.env.INBOX_PILOT_MODE === 'true';
-  private readonly allowed = this.readAllowlist();
-
-  onModuleInit(): void {
-    if (this.pilotMode && this.allowed.size === 0) {
-      throw new Error('inbox_pilot_allowlist_missing');
-    }
-  }
-
+export class InboxPilotOutboundPolicyService {
   authorize(
     recipient: string,
     expectedRecipient?: string | null,
@@ -31,9 +28,6 @@ export class InboxPilotOutboundPolicyService implements OnModuleInit {
       if (canonicalE164 !== expected) {
         throw new ForbiddenException('outbound_recipient_changed');
       }
-    }
-    if (this.pilotMode && !this.allowed.has(canonicalE164)) {
-      throw new ForbiddenException('outbound_recipient_not_allowlisted');
     }
     return {
       canonicalE164,
@@ -51,22 +45,6 @@ export class InboxPilotOutboundPolicyService implements OnModuleInit {
     } catch {
       return false;
     }
-  }
-
-  private readAllowlist(): Set<string> {
-    if (!this.pilotMode) return new Set();
-    const primary = process.env.INBOX_PILOT_ALLOWED_SENDERS_E164?.trim();
-    const legacy = process.env.INBOX_TEST_ALLOWED_SENDER_E164?.trim();
-    const raw = primary || legacy || '';
-    if (!raw) return new Set();
-    const values = raw
-      .split(',')
-      .map((item) => item.trim())
-      .filter(Boolean);
-    if (values.some((item) => !E164.test(item))) {
-      throw new Error('inbox_pilot_allowlist_invalid');
-    }
-    return new Set(values);
   }
 }
 

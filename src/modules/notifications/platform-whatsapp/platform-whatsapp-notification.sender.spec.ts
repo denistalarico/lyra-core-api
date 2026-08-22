@@ -19,7 +19,6 @@ function config(
     phoneNumberId: '111222',
     apiVersion: 'v24.0',
     defaultLanguageCode: 'pt_BR',
-    testRecipientAllowList: ['+5511999998888'],
     ...overrides,
   };
 }
@@ -75,19 +74,6 @@ describe('PlatformWhatsAppNotificationSender', () => {
     const outcome = await sender.sendTemplate(input({ toPhoneE164: 'abc' }));
 
     expect(outcome).toEqual({ status: 'skipped', reasonCode: 'invalid_recipient' });
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
-  it('fails closed on recipients not in the allow-list', async () => {
-    const fetchMock = mockFetch(jest.fn());
-    const sender = build(config({ testRecipientAllowList: [] }));
-
-    const outcome = await sender.sendTemplate(input());
-
-    expect(outcome).toEqual({
-      status: 'skipped',
-      reasonCode: 'recipient_not_allowlisted',
-    });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 

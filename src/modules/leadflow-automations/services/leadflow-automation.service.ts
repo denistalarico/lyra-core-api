@@ -1289,17 +1289,12 @@ export class LeadFlowAutomationService {
     const templateApproved = Boolean(
       resolvePlatformWhatsAppTemplate(whatsappTemplateKey),
     );
-    const platformWhatsAppAvailable =
-      templateApproved &&
-      platformWhatsApp.enabled &&
-      platformWhatsApp.testRecipientAllowList.length > 0;
+    const platformWhatsAppAvailable = templateApproved && platformWhatsApp.enabled;
     const platformWhatsAppReason = !templateApproved
       ? `${WHATSAPP_TEMPLATE_LABELS[whatsappTemplateKey] ?? 'Template'} ainda não aprovado pela Meta.`
       : !platformWhatsApp.enabled
         ? 'WhatsApp não configurado para notificações da plataforma.'
-        : platformWhatsApp.testRecipientAllowList.length === 0
-          ? 'Nenhum destinatário de teste autorizado para o WhatsApp da plataforma.'
-          : null;
+        : null;
 
     return {
       in_app: { available: true, reason: null },

@@ -10,7 +10,6 @@ describe('EnvPlatformWhatsAppNotificationConfigProvider', () => {
     expect(config.enabled).toBe(false);
     expect(config.defaultLanguageCode).toBe('pt_BR');
     expect(config.apiVersion).toBe('v24.0');
-    expect(config.testRecipientAllowList).toEqual([]);
   });
 
   it('stays disabled when the switch is on but a credential is missing', () => {
@@ -33,16 +32,8 @@ describe('EnvPlatformWhatsAppNotificationConfigProvider', () => {
     expect(config.phoneNumberId).toBe('123456');
   });
 
-  it('reuses META_GRAPH_API_VERSION and parses the test recipient allow-list', () => {
-    const config = provider({
-      META_GRAPH_API_VERSION: 'v25.0',
-      PLATFORM_WHATSAPP_NOTIFICATIONS_TEST_RECIPIENTS:
-        '+5511999998888, +5521888887777 ,',
-    });
+  it('reuses META_GRAPH_API_VERSION', () => {
+    const config = provider({ META_GRAPH_API_VERSION: 'v25.0' });
     expect(config.apiVersion).toBe('v25.0');
-    expect(config.testRecipientAllowList).toEqual([
-      '+5511999998888',
-      '+5521888887777',
-    ]);
   });
 });
