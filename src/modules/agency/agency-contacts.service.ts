@@ -669,6 +669,20 @@ export class AgencyContactsService {
         isPrimary: !dto.email?.trim() && !dto.phone?.trim(),
       });
     }
+    if (dto.facebookProfile?.trim()) {
+      methods.push({
+        type: 'facebook',
+        value: dto.facebookProfile.trim(),
+        label: 'Facebook',
+      });
+    }
+    if (dto.tiktokUsername?.trim()) {
+      methods.push({
+        type: 'tiktok',
+        value: dto.tiktokUsername.trim().replace(/^@/, ''),
+        label: 'TikTok',
+      });
+    }
     if (dto.website?.trim()) {
       methods.push({ type: 'website', value: dto.website.trim() });
     }

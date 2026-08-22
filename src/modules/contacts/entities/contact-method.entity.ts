@@ -12,6 +12,8 @@ export type ContactMethodType =
   | 'phone'
   | 'whatsapp'
   | 'instagram'
+  | 'facebook'
+  | 'tiktok'
   | 'website'
   | 'other';
 

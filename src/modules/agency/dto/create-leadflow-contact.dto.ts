@@ -49,6 +49,16 @@ export class CreateLeadFlowContactDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(255)
+  facebookProfile?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  tiktokUsername?: string;
+
+  @IsOptional()
+  @IsString()
   @MaxLength(80)
   phoneLabel?: string;
 

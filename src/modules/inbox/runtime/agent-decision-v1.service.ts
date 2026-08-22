@@ -40,9 +40,16 @@ export type CommercialActionPlanItem = {
 
 @Injectable()
 export class AgentDecisionV1Service {
+  /**
+   * Each branch throws its own reason (`decision_schema_invalid_<field>`)
+   * instead of one generic message. The caller in InboxAgentRuntimeService
+   * surfaces this both in a log line and in the batch's errorCode, so a
+   * validation failure is diagnosable from the field name alone — no raw
+   * LLM output needs to be logged (it can carry real conversation content).
+   */
   assert(value: unknown): asserts value is AgentDecisionV1 {
     if (!value || typeof value !== 'object' || Array.isArray(value))
-      throw new Error('decision_schema_invalid');
+      throw new Error('decision_schema_invalid_root');
     const item = value as Record<string, unknown>;
     const nullableStrings = [
       'reply',
@@ -54,33 +61,35 @@ export class AgentDecisionV1Service {
       'service',
       'close_reason',
     ];
+    if (item.schema_version !== 1)
+      throw new Error('decision_schema_invalid_schema_version');
     if (
-      item.schema_version !== 1 ||
       nullableStrings.some(
         (key) => item[key] !== null && typeof item[key] !== 'string',
       )
     )
-      throw new Error('decision_schema_invalid');
+      throw new Error('decision_schema_invalid_nullable_string');
     if (
       !Array.isArray(item.tags) ||
       item.tags.length > 20 ||
       item.tags.some((tag) => typeof tag !== 'string' || tag.length > 80)
     )
-      throw new Error('decision_schema_invalid');
+      throw new Error('decision_schema_invalid_tags');
+    if (typeof item.handoff !== 'boolean')
+      throw new Error('decision_schema_invalid_handoff');
     if (
-      typeof item.handoff !== 'boolean' ||
       typeof item.agent_summary !== 'string' ||
       item.agent_summary.length > 4_000
     )
-      throw new Error('decision_schema_invalid');
+      throw new Error('decision_schema_invalid_agent_summary');
     if (!['low', 'normal', 'high', 'urgent'].includes(String(item.urgency)))
-      throw new Error('decision_schema_invalid');
+      throw new Error('decision_schema_invalid_urgency');
     if (
       typeof item.confidence !== 'number' ||
       item.confidence < 0 ||
       item.confidence > 1
     )
-      throw new Error('decision_schema_invalid');
+      throw new Error('decision_schema_invalid_confidence');
     if (
       !Array.isArray(item.evidence_refs) ||
       item.evidence_refs.length > 30 ||
@@ -88,32 +97,32 @@ export class AgentDecisionV1Service {
         (ref) => typeof ref !== 'string' || ref.length > 180,
       )
     )
-      throw new Error('decision_schema_invalid');
+      throw new Error('decision_schema_invalid_evidence_refs');
     if (
       !Array.isArray(item.extracted_facts) ||
       item.extracted_facts.length > 30 ||
       item.extracted_facts.some((fact) => !validFact(fact))
     )
-      throw new Error('decision_schema_invalid');
+      throw new Error('decision_schema_invalid_extracted_facts');
     if (item.recommended_cta !== null && !validCta(item.recommended_cta))
-      throw new Error('decision_schema_invalid');
+      throw new Error('decision_schema_invalid_recommended_cta');
     if (
       item.proposed_phase !== null &&
       (typeof item.proposed_phase !== 'string' ||
         item.proposed_phase.length > 80)
     )
-      throw new Error('decision_schema_invalid');
+      throw new Error('decision_schema_invalid_proposed_phase');
     if (
       !Array.isArray(item.proposed_actions) ||
       item.proposed_actions.length > 30 ||
       item.proposed_actions.some((action) => !validAction(action))
     )
-      throw new Error('decision_schema_invalid');
+      throw new Error('decision_schema_invalid_proposed_actions');
     if (
       item.stage_transition !== null &&
       !validStageTransition(item.stage_transition)
     )
-      throw new Error('decision_schema_invalid');
+      throw new Error('decision_schema_invalid_stage_transition');
   }
 
   assertEvidenceRefs(decision: AgentDecisionV1, allowedRefs: string[]): void {

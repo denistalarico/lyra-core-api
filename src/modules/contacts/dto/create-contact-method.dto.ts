@@ -8,7 +8,16 @@ import {
 import type { ContactMethodType } from '../entities/contact-method.entity';
 
 export class CreateContactMethodDto {
-  @IsIn(['email', 'phone', 'whatsapp', 'instagram', 'website', 'other'])
+  @IsIn([
+    'email',
+    'phone',
+    'whatsapp',
+    'instagram',
+    'facebook',
+    'tiktok',
+    'website',
+    'other',
+  ])
   type!: ContactMethodType;
 
   @IsString()

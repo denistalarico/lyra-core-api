@@ -491,13 +491,51 @@ export class InboundMessageIngestionService {
     });
   }
 
+  /**
+   * Matches an inbound sender against a contact explicitly marked
+   * `lifecycle_stage = 'internal'` — the only signal that suppresses agent
+   * activation regardless of qualification (see ContactRelationship.InternalUser).
+   *
+   * Only channels with a stable, user-enterable identifier are wired: phone
+   * for WhatsApp/SMS, username for Instagram. Facebook Messenger has no
+   * username at all (only an opaque PSID), so a "Facebook" contact method
+   * exists for reference but is never matched here — the rule simply does
+   * not apply on that channel. TikTok isn't a live Inbox channel yet, so its
+   * contact method is stored but unused until then.
+   */
   private async findInternalContact(
     manager: EntityManager,
     input: NormalizedInboundMessage,
   ) {
-    if (input.channelType !== 'whatsapp' || !input.sender.phone) return null;
-    const normalized = input.sender.phone.replace(/\D/g, '');
-    if (!normalized) return null;
+    if (input.channelType === 'whatsapp' && input.sender.phone) {
+      const normalized = input.sender.phone.replace(/\D/g, '');
+      if (!normalized) return null;
+      return this.internalContactQuery(manager, input)
+        .andWhere("method.type IN ('phone', 'whatsapp')")
+        .andWhere(
+          "regexp_replace(method.value, '\\D', '', 'g') = :normalized",
+          { normalized },
+        )
+        .getOne();
+    }
+    if (input.channelType === 'instagram' && input.sender.username) {
+      const normalized = input.sender.username.trim().replace(/^@/, '').toLowerCase();
+      if (!normalized) return null;
+      return this.internalContactQuery(manager, input)
+        .andWhere("method.type = 'instagram'")
+        .andWhere(
+          "lower(regexp_replace(method.value, '^@', '')) = :normalized",
+          { normalized },
+        )
+        .getOne();
+    }
+    return null;
+  }
+
+  private internalContactQuery(
+    manager: EntityManager,
+    input: NormalizedInboundMessage,
+  ) {
     return manager
       .getRepository(ContactEntity)
       .createQueryBuilder('contact')
@@ -516,12 +554,7 @@ export class InboundMessageIngestionService {
       })
       .andWhere(
         "(contact.lifecycle_stage = 'internal' OR 'internal' = ANY(contact.lifecycle_stages))",
-      )
-      .andWhere("method.type IN ('phone', 'whatsapp')")
-      .andWhere("regexp_replace(method.value, '\\D', '', 'g') = :normalized", {
-        normalized,
-      })
-      .getOne();
+      );
   }
 
   private async qualify(

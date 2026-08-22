@@ -697,9 +697,22 @@ export class InboxAgentRuntimeService {
             }
             proposal = providerResult.decision;
             break;
-          } catch {
+          } catch (validationError) {
+            // The reason names the specific field that failed (e.g.
+            // decision_schema_invalid_urgency) instead of a generic
+            // "invalid" — logged and surfaced as the batch's errorCode so a
+            // failure is diagnosable without ever logging the raw decision,
+            // which can carry real conversation content.
+            const reason =
+              validationError instanceof Error &&
+              /^[a-z0-9_]{1,80}$/.test(validationError.message)
+                ? validationError.message
+                : 'decision_schema_invalid';
+            this.logger.warn(
+              `Agent decision failed validation (${reason}) on batch ${batch.id}, repair attempt ${repairAttempt}.`,
+            );
             if (repairAttempt === 1)
-              throw new InboxProviderError('decision_schema_invalid', false);
+              throw new InboxProviderError(reason, false);
           }
         }
       } catch (error) {
@@ -1236,8 +1249,11 @@ export class InboxAgentRuntimeService {
               ? this.config.autoHandoffEnabled
               : this.config.autoCrmEnabled,
         recipientAllowed: input.recipientAllowed,
+        // Not WhatsApp-specific: any connected, AI-enabled channel qualifies.
+        // A hardcoded `type === 'whatsapp'` here used to block every other
+        // channel outright, regardless of aiEnabled/binding — the same class
+        // of bug as the old recipient-allowlist check.
         channelEligible:
-          input.channel.type === 'whatsapp' &&
           input.channel.status === 'active' &&
           input.channel.connectionStatus === 'connected' &&
           input.channel.aiEnabled,
