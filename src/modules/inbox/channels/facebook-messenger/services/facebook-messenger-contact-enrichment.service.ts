@@ -8,6 +8,7 @@ import { MetaGraphService } from '../../meta/services/meta-graph.service';
 
 const PROFILE_RETRY_INTERVAL_MS = 6 * 60 * 60 * 1_000;
 const MAX_PROFILES_PER_REQUEST = 12;
+const PROFILE_STRATEGY_VERSION = 2;
 
 /**
  * Backfills Messenger identity for conversations created before profile
@@ -81,6 +82,7 @@ export class FacebookMessengerContactEnrichmentService {
     const metadata: Record<string, unknown> = {
       ...(conversation.metadata ?? {}),
       messengerProfileLookupAttemptedAt: attemptedAt,
+      messengerProfileStrategyVersion: PROFILE_STRATEGY_VERSION,
     };
     const pageScopedUserId = this.resolvePageScopedUserId(conversation);
 
@@ -93,6 +95,7 @@ export class FacebookMessengerContactEnrichmentService {
           await this.metaGraphService.getFacebookMessengerUserProfile({
             pageScopedUserId,
             pageAccessToken,
+            pageId: this.resolvePageId(conversation, channel) ?? undefined,
           });
         if (profile.name) metadata.contactName = profile.name;
         if (profile.profilePictureUrl) {
@@ -141,6 +144,9 @@ export class FacebookMessengerContactEnrichmentService {
     ) {
       return false;
     }
+    if (metadata.messengerProfileStrategyVersion !== PROFILE_STRATEGY_VERSION) {
+      return true;
+    }
 
     const lastAttempt = Date.parse(
       this.readString(metadata.messengerProfileLookupAttemptedAt) ?? '',
@@ -161,6 +167,19 @@ export class FacebookMessengerContactEnrichmentService {
       ? (threadId.split(':').at(-1) ?? null)
       : null;
     const value = fromMetadata?.trim() || fromThread?.trim() || '';
+    return /^[A-Za-z0-9_-]{1,180}$/.test(value) ? value : null;
+  }
+
+  private resolvePageId(
+    conversation: InboxConversationEntity,
+    channel: InboxChannelEntity,
+  ) {
+    const threadParts = conversation.externalThreadId?.split(':') ?? [];
+    const fromThread =
+      threadParts[0] === 'facebook_messenger' && threadParts.length >= 3
+        ? threadParts[1]
+        : null;
+    const value = channel.externalPageId?.trim() || fromThread?.trim() || '';
     return /^[A-Za-z0-9_-]{1,180}$/.test(value) ? value : null;
   }
 

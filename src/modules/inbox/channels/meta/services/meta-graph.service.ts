@@ -154,6 +154,19 @@ type FacebookMessengerUserProfileResponse = {
   error?: InstagramApiError;
 };
 
+type FacebookMessengerConversationsResponse = {
+  data?: Array<{
+    id?: string | number;
+    participants?: {
+      data?: Array<{
+        id?: string | number;
+        name?: string | null;
+      }>;
+    };
+  }>;
+  error?: InstagramApiError;
+};
+
 export const INSTAGRAM_LOGIN_WEBHOOK_FIELDS = [
   'messages',
   'messaging_postbacks',
@@ -749,6 +762,7 @@ export class MetaGraphService {
   async getFacebookMessengerUserProfile(input: {
     pageScopedUserId: string;
     pageAccessToken: string;
+    pageId?: string;
   }) {
     const url = new URL(
       `${META_GRAPH_ORIGIN}/${this.graphVersion}/${encodeURIComponent(input.pageScopedUserId)}`,
@@ -764,6 +778,17 @@ export class MetaGraphService {
     )) as FacebookMessengerUserProfileResponse;
 
     if (!response.ok || data.error) {
+      const conversationParticipant = input.pageId
+        ? await this.getFacebookMessengerConversationParticipant({
+            pageId: input.pageId,
+            pageScopedUserId: input.pageScopedUserId,
+            pageAccessToken: input.pageAccessToken,
+          })
+        : null;
+      if (conversationParticipant) {
+        return conversationParticipant;
+      }
+
       this.logger.warn('Meta user profile lookup failed', {
         operation: 'getFacebookMessengerUserProfile',
         status: response.status,
@@ -796,6 +821,53 @@ export class MetaGraphService {
       id: data.id == null ? input.pageScopedUserId : String(data.id),
       name,
       profilePictureUrl: data.profile_pic?.trim() || null,
+    };
+  }
+
+  /**
+   * Some Messenger participants are visible on the Page conversation but
+   * cannot be loaded as a standalone PSID node (Graph error 100/33). The
+   * Conversations edge remains the authoritative fallback for their name.
+   * Meta does not expose a picture on this edge, so the Inbox renders initials
+   * unless the primary profile endpoint supplied `profile_pic`.
+   */
+  private async getFacebookMessengerConversationParticipant(input: {
+    pageId: string;
+    pageScopedUserId: string;
+    pageAccessToken: string;
+  }) {
+    const url = new URL(
+      `${META_GRAPH_ORIGIN}/${this.graphVersion}/${encodeURIComponent(input.pageId)}/conversations`,
+    );
+    url.searchParams.set('platform', 'messenger');
+    url.searchParams.set('user_id', input.pageScopedUserId);
+    url.searchParams.set('fields', 'participants');
+    url.searchParams.set('limit', '1');
+
+    const response = await this.fetchMeta(url, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${input.pageAccessToken}` },
+    });
+    const data = (await this.readJson(
+      response,
+    )) as FacebookMessengerConversationsResponse;
+
+    if (!response.ok || data.error) return null;
+
+    const participant = data.data
+      ?.flatMap((conversation) => conversation.participants?.data ?? [])
+      .find(
+        (candidate) =>
+          candidate.id != null &&
+          String(candidate.id) === input.pageScopedUserId,
+      );
+    const name = participant?.name?.trim() || null;
+    if (!participant || !name) return null;
+
+    return {
+      id: input.pageScopedUserId,
+      name,
+      profilePictureUrl: null,
     };
   }
 

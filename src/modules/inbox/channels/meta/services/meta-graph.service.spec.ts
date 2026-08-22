@@ -731,6 +731,64 @@ describe('MetaGraphService Facebook assets', () => {
     });
   });
 
+  it('falls back to the Page conversation participant when the PSID node is unavailable', async () => {
+    fetchMock
+      .mockResolvedValueOnce(
+        response(
+          {
+            error: {
+              message: 'Unsupported get request.',
+              type: 'GraphMethodException',
+              code: 100,
+              error_subcode: 33,
+            },
+          },
+          false,
+        ),
+      )
+      .mockResolvedValueOnce(
+        response({
+          data: [
+            {
+              id: 'conversation-1',
+              participants: {
+                data: [
+                  { id: 'psid-1', name: 'Maria Silva' },
+                  { id: 'page-1', name: 'Empresa' },
+                ],
+              },
+            },
+          ],
+        }),
+      );
+
+    await expect(
+      service.getFacebookMessengerUserProfile({
+        pageScopedUserId: 'psid-1',
+        pageAccessToken: 'page-secret-1',
+        pageId: 'page-1',
+      }),
+    ).resolves.toEqual({
+      id: 'psid-1',
+      name: 'Maria Silva',
+      profilePictureUrl: null,
+    });
+
+    const fallbackUrl = new URL(String(fetchMock.mock.calls[1][0]));
+    expect(`${fallbackUrl.origin}${fallbackUrl.pathname}`).toBe(
+      'https://graph.facebook.com/v26.0/page-1/conversations',
+    );
+    expect(fallbackUrl.searchParams.get('platform')).toBe('messenger');
+    expect(fallbackUrl.searchParams.get('user_id')).toBe('psid-1');
+    expect(fallbackUrl.searchParams.get('fields')).toBe('participants');
+    expect(fallbackUrl.searchParams.get('limit')).toBe('1');
+    expect(fetchMock.mock.calls[1][1]).toEqual({
+      method: 'GET',
+      headers: { Authorization: 'Bearer page-secret-1' },
+    });
+    expect(loggerWarnSpy).not.toHaveBeenCalled();
+  });
+
   it('sanitizes Messenger profile lookup failures', async () => {
     fetchMock.mockResolvedValue(
       response(

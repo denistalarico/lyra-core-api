@@ -93,6 +93,7 @@ describe('MessengerMetaAdapter', () => {
     ).toHaveBeenCalledWith({
       pageScopedUserId: 'psid-1',
       pageAccessToken: 'page-secret-1',
+      pageId: 'page-1',
     });
     expect(JSON.stringify(result.messages)).not.toContain('page-secret-1');
     expect(JSON.stringify(result.messages)).not.toContain(

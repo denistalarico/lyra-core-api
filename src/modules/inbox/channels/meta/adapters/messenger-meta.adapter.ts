@@ -295,13 +295,14 @@ export class MessengerMetaAdapter {
     const cached = cache.get(cacheKey);
     if (cached !== undefined) return cached;
 
-    const profile = await this.loadProfile(channel, pageScopedUserId);
+    const profile = await this.loadProfile(channel, pageId, pageScopedUserId);
     cache.set(cacheKey, profile);
     return profile;
   }
 
   private async loadProfile(
     channel: { accessTokenEncrypted?: string | null },
+    pageId: string,
     pageScopedUserId: string,
   ): Promise<MessengerSenderProfile | null> {
     try {
@@ -314,6 +315,7 @@ export class MessengerMetaAdapter {
         await this.metaGraphService.getFacebookMessengerUserProfile({
           pageScopedUserId,
           pageAccessToken,
+          pageId,
         });
 
       return {

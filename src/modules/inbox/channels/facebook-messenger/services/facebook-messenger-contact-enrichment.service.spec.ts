@@ -18,7 +18,12 @@ describe('FacebookMessengerContactEnrichmentService', () => {
       source: 'facebook_messenger',
       externalThreadId: 'facebook_messenger:page-1:psid-1',
       title: 'Lead do Messenger',
-      metadata: { externalParticipantId: 'psid-1' },
+      metadata: {
+        externalParticipantId: 'psid-1',
+        // A recent attempt from strategy v1 must not delay the new
+        // Conversations fallback after deployment.
+        messengerProfileLookupAttemptedAt: new Date().toISOString(),
+      },
     } as unknown as InboxConversationEntity;
     const channelsRepository = {
       find: jest.fn().mockResolvedValue([channel]),
@@ -47,6 +52,7 @@ describe('FacebookMessengerContactEnrichmentService', () => {
     ).toHaveBeenCalledWith({
       pageScopedUserId: 'psid-1',
       pageAccessToken: 'page-access-token',
+      pageId: 'page-1',
     });
     expect(conversationsRepository.update).toHaveBeenCalledWith(
       {
@@ -60,6 +66,7 @@ describe('FacebookMessengerContactEnrichmentService', () => {
           contactName: 'Maria Silva',
           avatarUrl: 'https://cdn.example.com/maria.jpg',
           messengerProfileLookupAttemptedAt: expect.any(String),
+          messengerProfileStrategyVersion: 2,
           messengerProfileSyncedAt: expect.any(String),
         }),
       }),
@@ -81,6 +88,7 @@ describe('FacebookMessengerContactEnrichmentService', () => {
       title: 'Lead do Messenger',
       metadata: {
         messengerProfileLookupAttemptedAt: new Date().toISOString(),
+        messengerProfileStrategyVersion: 2,
       },
     } as unknown as InboxConversationEntity;
     const channelsRepository = { find: jest.fn() };
