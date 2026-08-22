@@ -80,7 +80,7 @@ run('LeadFlow default binding reconciliation PostgreSQL', () => {
     return channelId;
   }
 
-  it('reconciles whether the agent or channel was created first without enabling AI', async () => {
+  it('reconciles whether the agent or channel was created first, enabling AI on the channel', async () => {
     const agentId = await insertAgent();
     const channelId = await insertChannel();
     const [result] = await service.reconcile(ctx, {
@@ -90,7 +90,7 @@ run('LeadFlow default binding reconciliation PostgreSQL', () => {
     expect(result).toMatchObject({
       status: 'active',
       defaultAgentId: agentId,
-      aiEnabled: false,
+      aiEnabled: true,
       changed: true,
     });
     const [channel] = await AgencyDataSource.query<
@@ -98,7 +98,7 @@ run('LeadFlow default binding reconciliation PostgreSQL', () => {
     >('SELECT default_agent_id,ai_enabled FROM inbox_channels WHERE id=$1', [
       channelId,
     ]);
-    expect(channel).toEqual({ default_agent_id: agentId, ai_enabled: false });
+    expect(channel).toEqual({ default_agent_id: agentId, ai_enabled: true });
   });
 
   it('keeps a binding pending while the channel is paused', async () => {

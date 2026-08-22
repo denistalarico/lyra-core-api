@@ -196,6 +196,10 @@ export class LeadFlowAgentBindingReconcilerService {
     };
     await bindings.save(binding);
     channel.defaultAgentId = selected.id;
+    // Selecting a channel for an agent IS the activation: there is no
+    // separate "turn the channel on" step. A gate that only a one-off DB
+    // write could flip was a latent bug, not a deliberate safeguard.
+    channel.aiEnabled = true;
     await manager.getRepository(InboxChannelEntity).save(channel);
 
     const changed =
@@ -253,6 +257,7 @@ export class LeadFlowAgentBindingReconcilerService {
       .andWhere("COALESCE(config->>'isDefault', 'false') = 'true'")
       .execute();
     channel.defaultAgentId = null;
+    channel.aiEnabled = false;
     await manager.getRepository(InboxChannelEntity).save(channel);
     const changed = priorAgentId !== null || (result.affected ?? 0) > 0;
     if (changed) {
