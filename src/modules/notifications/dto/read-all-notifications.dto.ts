@@ -9,4 +9,8 @@ export class ReadAllNotificationsDto {
   @IsOptional()
   @IsString()
   moduleKey?: string;
+
+  @IsOptional()
+  @IsString()
+  excludeModuleKey?: string;
 }

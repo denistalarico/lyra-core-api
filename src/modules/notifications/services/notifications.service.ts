@@ -103,20 +103,33 @@ export class NotificationsService {
 
   async unreadCount(
     context: NotificationsContext,
+    filters?: { moduleKey?: string; excludeModuleKey?: string },
   ): Promise<NotificationUnreadCountResponse> {
     this.validateContext(context);
 
-    const rows = await this.createUserQuery(context)
+    const query = this.createUserQuery(context)
       .leftJoin('recipient.notification', 'notification')
       .select('notification.productKey', 'productKey')
       .addSelect('COUNT(recipient.id)', 'count')
       .andWhere('recipient.readAt IS NULL')
-      .andWhere('recipient.archivedAt IS NULL')
-      .groupBy('notification.productKey')
-      .getRawMany<{
-        productKey: NotificationProductKey;
-        count: string;
-      }>();
+      .andWhere('recipient.archivedAt IS NULL');
+
+    if (filters?.moduleKey) {
+      query.andWhere('notification.moduleKey = :countModuleKey', {
+        countModuleKey: filters.moduleKey,
+      });
+    }
+
+    if (filters?.excludeModuleKey) {
+      query.andWhere('notification.moduleKey != :excludedCountModuleKey', {
+        excludedCountModuleKey: filters.excludeModuleKey,
+      });
+    }
+
+    const rows = await query.groupBy('notification.productKey').getRawMany<{
+      productKey: NotificationProductKey;
+      count: string;
+    }>();
 
     const byProduct: Partial<Record<NotificationProductKey, number>> = {};
 
@@ -181,6 +194,7 @@ export class NotificationsService {
     filters?: {
       productKey?: NotificationProductKey;
       moduleKey?: string;
+      excludeModuleKey?: string;
     },
   ): Promise<{ updated: number }> {
     this.validateContext(context);
@@ -235,6 +249,19 @@ export class NotificationsService {
         )`,
         {
           moduleKey: filters.moduleKey,
+        },
+      );
+    }
+
+    if (filters?.excludeModuleKey) {
+      qb.andWhere(
+        `notification_id IN (
+          SELECT id
+          FROM notifications
+          WHERE module_key != :excludeModuleKey
+        )`,
+        {
+          excludeModuleKey: filters.excludeModuleKey,
         },
       );
     }
@@ -328,6 +355,12 @@ export class NotificationsService {
     if (query.moduleKey) {
       qb.andWhere('notification.moduleKey = :moduleKey', {
         moduleKey: query.moduleKey,
+      });
+    }
+
+    if (query.excludeModuleKey) {
+      qb.andWhere('notification.moduleKey != :excludeModuleKey', {
+        excludeModuleKey: query.excludeModuleKey,
       });
     }
 

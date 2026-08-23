@@ -10,10 +10,7 @@ import {
   Max,
   Min,
 } from 'class-validator';
-import {
-  NotificationPriority,
-  NotificationProductKey,
-} from '../enums';
+import { NotificationPriority, NotificationProductKey } from '../enums';
 
 export class ListNotificationsQueryDto {
   @IsOptional()
@@ -27,6 +24,10 @@ export class ListNotificationsQueryDto {
   @IsOptional()
   @IsString()
   moduleKey?: string;
+
+  @IsOptional()
+  @IsString()
+  excludeModuleKey?: string;
 
   @IsOptional()
   @IsEnum(NotificationPriority)

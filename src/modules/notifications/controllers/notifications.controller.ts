@@ -72,9 +72,13 @@ export class NotificationsController {
   }
 
   @Get('unread-count')
-  unreadCount(@RequestContextData() context: RequestContext) {
+  unreadCount(
+    @RequestContextData() context: RequestContext,
+    @Query() query: ListNotificationsQueryDto,
+  ) {
     return this.notificationsService.unreadCount(
       this.toNotificationsContext(context),
+      query,
     );
   }
 
