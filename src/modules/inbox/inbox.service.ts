@@ -868,13 +868,38 @@ export class InboxService {
       (message) => !message.metadata?.hiddenAt,
     );
     if (!messages.length) return messages;
-    const media = await this.mediaRepository.find({
-      where: {
-        ...this.scope(ctx),
-        messageId: In(messages.map((message) => message.id)),
-      },
-      order: { createdAt: 'ASC' },
-    });
+    const senderUserIds = [
+      ...new Set(
+        messages
+          .filter(
+            (message) =>
+              message.senderType === 'user' && Boolean(message.senderUserId),
+          )
+          .map((message) => message.senderUserId as string),
+      ),
+    ];
+    const [media, senderUsers] = await Promise.all([
+      this.mediaRepository.find({
+        where: {
+          ...this.scope(ctx),
+          messageId: In(messages.map((message) => message.id)),
+        },
+        order: { createdAt: 'ASC' },
+      }),
+      senderUserIds.length
+        ? this.workspaceUsersRepository.find({
+            where: {
+              ...this.scope(ctx),
+              userId: In(senderUserIds),
+            },
+          })
+        : Promise.resolve([]),
+    ]);
+    const senderUserNames = new Map(
+      senderUsers
+        .filter((sender) => Boolean(sender.userId))
+        .map((sender) => [sender.userId as string, sender.name]),
+    );
     const derivatives = media.length
       ? await this.mediaDerivativesRepository.find({
           where: {
@@ -893,6 +918,9 @@ export class InboxService {
     }
     return messages.map((message) => ({
       ...message,
+      senderUserName: message.senderUserId
+        ? (senderUserNames.get(message.senderUserId) ?? null)
+        : null,
       // Mensagens outbound guardam o anexo como descriptor no próprio JSON
       // (não geram media asset). Sem este fallback o anexo sumia na leitura.
       attachments: !byMessage.has(message.id)
