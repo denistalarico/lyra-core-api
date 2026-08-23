@@ -67,6 +67,8 @@ import { CrmActivityEntity } from '../modules/crm/entities/crm-activity.entity';
 import { CrmTagEntity } from '../modules/crm/entities/crm-tag.entity';
 import { CrmOpportunityTagEntity } from '../modules/crm/entities/crm-opportunity-tag.entity';
 import { CrmOpportunityEventEntity } from '../modules/crm/entities/crm-opportunity-event.entity';
+import { CrmLeadScoreStateEntity } from '../modules/crm/lead-score/entities/crm-lead-score-state.entity';
+import { CrmLeadScoreSnapshotEntity } from '../modules/crm/lead-score/entities/crm-lead-score-snapshot.entity';
 
 import {
   AgencyEmailTwoFactorCodeEntity,
@@ -389,6 +391,8 @@ export const agencyEntities = [
   CrmTagEntity,
   CrmOpportunityTagEntity,
   CrmOpportunityEventEntity,
+  CrmLeadScoreStateEntity,
+  CrmLeadScoreSnapshotEntity,
   AgencySalesItemEntity,
   AgencySalesPipelineEntity,
   AgencySalesStageEntity,

@@ -100,11 +100,27 @@ export class AddOpportunityTagExecutor implements AutomationExecutor {
       // record of what it did honest.
       const tagIds = [...new Set(matched.flatMap((rule) => rule.tagIds))];
 
-      // Validate the whole batch before assigning the first tag. A stale or
-      // cross-workspace tag therefore cannot leave a partially applied rule.
-      await Promise.all(tagIds.map((tagId) => this.crm.getTag(ctx, tagId)));
+      // Each tag is checked on its own, not as an all-or-nothing batch: an
+      // operator who deleted one tag from the CRM catalog after configuring
+      // the rule should not silently lose the others it still names.
+      const tagChecks = await Promise.allSettled(
+        tagIds.map((tagId) => this.crm.getTag(ctx, tagId)),
+      );
+      const availableTagIds = tagIds.filter(
+        (_, index) => tagChecks[index].status === 'fulfilled',
+      );
+      const missingTagIds = tagIds.filter(
+        (_, index) => tagChecks[index].status !== 'fulfilled',
+      );
 
-      for (const tagId of tagIds) {
+      if (availableTagIds.length === 0) {
+        return refusal(
+          'tag_assignment_refused',
+          'Nenhuma das tags configuradas está disponível neste workspace.',
+        );
+      }
+
+      for (const tagId of availableTagIds) {
         await this.crm.assignOpportunityTag(ctx, opportunityId, {
           tagId,
           assignedByType: 'automation',
@@ -120,9 +136,10 @@ export class AddOpportunityTagExecutor implements AutomationExecutor {
         effectConfirmed: true,
         reference: opportunityId,
         details: {
-          appliedTagIds: tagIds,
+          appliedTagIds: availableTagIds,
           matchedFields: matched.map((rule) => rule.field),
           evaluatedRules: rules.length,
+          ...(missingTagIds.length > 0 ? { missingTagIds } : {}),
         },
       };
     } catch (error) {

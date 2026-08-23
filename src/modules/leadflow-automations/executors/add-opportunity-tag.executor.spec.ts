@@ -185,11 +185,29 @@ describe('AddOpportunityTagExecutor', () => {
     expect(assignOpportunityTag).not.toHaveBeenCalled();
   });
 
-  it('prevalidates the complete tag batch before the first assignment', async () => {
+  it('applies the tags that still exist and skips a deleted one instead of refusing the whole rule', async () => {
     const getTag = jest
       .fn()
       .mockResolvedValueOnce({ id: 'tag-1' })
       .mockRejectedValueOnce(new NotFoundException());
+    const { executor, assignOpportunityTag } = build({ getTag });
+
+    const result = await executor.execute(request());
+
+    expect(result).toMatchObject({
+      status: 'confirmed',
+      details: { appliedTagIds: ['tag-1'], missingTagIds: ['tag-2'] },
+    });
+    expect(assignOpportunityTag).toHaveBeenCalledTimes(1);
+    expect(assignOpportunityTag).toHaveBeenCalledWith(
+      expect.anything(),
+      'opportunity-1',
+      expect.objectContaining({ tagId: 'tag-1' }),
+    );
+  });
+
+  it('refuses when every tag named by the matched rules is unavailable', async () => {
+    const getTag = jest.fn().mockRejectedValue(new NotFoundException());
     const { executor, assignOpportunityTag } = build({ getTag });
 
     const result = await executor.execute(request());
