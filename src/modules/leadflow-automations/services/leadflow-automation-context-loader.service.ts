@@ -592,7 +592,10 @@ export function evaluateBusinessHours(
     weekday: 'long',
     hour: '2-digit',
     minute: '2-digit',
-    hour12: false,
+    // Not `hour12: false` — in this locale that leaves the hour cycle to ICU,
+    // which renders midnight as "24" rather than "00" and makes every window
+    // starting at 00:00 look closed for its own first hour.
+    hourCycle: 'h23',
   }).formatToParts(now);
 
   const weekday = parts
