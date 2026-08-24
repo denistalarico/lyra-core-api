@@ -245,8 +245,14 @@ export class LeadFlowFollowupTimerConsumer
     if (
       booleanField(envelope.payload.stopIfHandoff, true) &&
       isHandoff(conversation)
-    )
+    ) {
+      // Handoff already stops the send below; this only retracts the "próximo
+      // follow" the card shows. The ownership transition itself clears it the
+      // instant handoff happens — this is the fallback for a timer armed
+      // before that fix, or one that outlives a retry.
+      if (opportunityId) await this.clearNextFollowUp(envelope, opportunityId);
       return;
+    }
     if (booleanField(envelope.payload.stopIfReplied, true)) {
       const replied = await this.messages.exist({
         where: {

@@ -440,6 +440,16 @@ export class ConversationOwnershipService {
     manager: EntityManager,
     conversation: InboxConversationEntity,
   ) {
+    // Handoff (and a human already active) both block the follow-up timer
+    // consumer from sending — `isHandoff` in the LeadFlow followup consumer
+    // checks the very same two states. What it does not do is retract the
+    // "próximo follow" the card already shows: the armed timer only notices
+    // the handoff at its own fire instant, which can be hours away. Clearing
+    // it here, in the same transaction as the ownership change, is what makes
+    // the card stop claiming a follow-up that will not go out.
+    const stopsFollowUp =
+      conversation.ownershipState === 'handoff_requested' ||
+      conversation.ownershipState === 'human_active';
     await manager
       .createQueryBuilder()
       .update(CrmOpportunityEntity)
@@ -449,6 +459,7 @@ export class ConversationOwnershipService {
           conversation.ownershipState === 'human_active'
             ? conversation.assignedUserId
             : undefined,
+        nextFollowUpAt: stopsFollowUp ? null : undefined,
         metadata: () =>
           `COALESCE(metadata, '{}'::jsonb) || jsonb_build_object('inboxOwnershipVersion', ${conversation.ownershipVersion})`,
       })
