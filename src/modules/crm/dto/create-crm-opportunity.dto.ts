@@ -65,7 +65,7 @@ export class CreateCrmOpportunityDto {
   status?: string;
 
   @IsOptional()
-  @IsIn(['low', 'normal', 'high', 'urgent'])
+  @IsIn(['none', 'low', 'normal', 'high', 'urgent'])
   priority?: string;
 
   @IsOptional()
