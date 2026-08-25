@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { SettingsCryptoService } from '../../common/crypto/settings-crypto.service';
 import { PermissionsModule } from '../permissions';
+import { SocialAdCredentialResolver } from './credentials/social-ad-credential.resolver';
 import { SocialAdAccountConnectionEntity } from './entities';
 import { SocialInternalAccessService } from './internal/social-internal-access.service';
 import { MetaAdsGraphService } from './services/meta-ads-graph.service';
@@ -29,9 +30,14 @@ import { SocialIntegrationsController } from './social-integrations.controller';
     MetaAdsOAuthService,
     MetaAdsSystemUserService,
     SocialAdConnectionService,
+    SocialAdCredentialResolver,
     SocialInternalAccessService,
     SettingsCryptoService,
   ],
-  exports: [SocialAdConnectionService],
+  // The resolver is exported with no consumer yet on purpose: it is the
+  // boundary the read model will import, and having it already be the module's
+  // public way to reach a credential is what keeps the next module from
+  // reaching for the connection repository instead.
+  exports: [SocialAdConnectionService, SocialAdCredentialResolver],
 })
 export class SocialIntegrationsModule {}

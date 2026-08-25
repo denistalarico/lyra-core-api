@@ -8,12 +8,43 @@ import {
   isNonEmptyString,
   isRecord,
 } from '../oauth/meta-ads-oauth.support';
+import {
+  EMPTY_META_GRAPH_USAGE,
+  MetaGraphError,
+  MetaGraphUsage,
+  classifyGraphResponse,
+  classifyGraphTransportFailure,
+  parseMetaGraphUsage,
+} from './meta-graph-error';
 
 const META_GRAPH_ORIGIN = 'https://graph.facebook.com';
+
+/**
+ * Ceiling on how long a single Graph call may take.
+ *
+ * `fetch` has no default timeout, so without this a provider that accepts the
+ * connection and then stops answering holds the caller open indefinitely. That
+ * is survivable for a settings screen, where a person eventually gives up, and
+ * is not survivable for a worker that will hold a claimed job while it waits.
+ */
+export const META_GRAPH_TIMEOUT_MS = 30_000;
 
 /** Hard ceiling on pagination, so a hostile or looping response cannot hang a request. */
 const MAX_AD_ACCOUNT_PAGES = 10;
 const AD_ACCOUNT_PAGE_SIZE = 50;
+
+/** A completed Graph call: the response, its body, and what the headers said. */
+type GraphRequestResult = {
+  response: Response;
+  data: unknown;
+  usage: MetaGraphUsage;
+};
+
+/** Rows from a paged edge, plus the usage reading from the last page fetched. */
+export type MetaGraphPage<T> = {
+  rows: T[];
+  usage: MetaGraphUsage;
+};
 
 export type MetaAdAccount = {
   externalAccountId: string;
@@ -25,7 +56,13 @@ export type MetaAdAccount = {
   businessName: string | null;
 };
 
-type GraphError = { message?: unknown; code?: unknown; type?: unknown };
+type GraphError = {
+  message?: unknown;
+  code?: unknown;
+  /** Meta's second-level code: 463 is "expired", 467 is "invalid". */
+  error_subcode?: unknown;
+  type?: unknown;
+};
 
 /**
  * Read-only Meta Marketing API client for Lyra Social.
@@ -94,13 +131,20 @@ export class MetaAdsGraphService {
     url.searchParams.set('client_secret', appSecret);
     url.searchParams.set('code', input.code);
 
-    const response = await this.fetchGraph(url);
-    const data = await this.readJson(response);
+    const { response, data, usage } = await this.requestGraph(url);
 
     const accessToken = isRecord(data) ? data.access_token : undefined;
 
     if (!response.ok || !isNonEmptyString(accessToken)) {
-      throw new BadRequestException('Meta Ads OAuth token exchange failed.');
+      // The provider message is dropped rather than sanitized here: a failed
+      // code exchange echoes back the code and frequently the secret, and no
+      // caller of this method renders anything but the fixed string.
+      throw this.toGraphError({
+        response,
+        data,
+        usage,
+        safeMessage: 'Meta Ads OAuth token exchange failed.',
+      });
     }
 
     return {
@@ -129,8 +173,7 @@ export class MetaAdsGraphService {
     url.searchParams.set('client_secret', appSecret);
     url.searchParams.set('fb_exchange_token', accessToken);
 
-    const response = await this.fetchGraph(url);
-    const data = await this.readJson(response);
+    const { response, data } = await this.requestGraph(url);
     const longLivedToken = isRecord(data) ? data.access_token : undefined;
 
     if (!response.ok || !isNonEmptyString(longLivedToken)) {
@@ -145,32 +188,91 @@ export class MetaAdsGraphService {
 
   /** Ad accounts the authorizing user can read. Read-only edge. */
   async listAdAccounts(accessToken: string): Promise<MetaAdAccount[]> {
+    const { rows } = await this.listAdAccountsWithUsage(accessToken);
+
+    return rows;
+  }
+
+  /**
+   * The same read, with the rate-limit headers it produced.
+   *
+   * Separate from `listAdAccounts` so S1's callers keep the return type they
+   * were written against. A sync pipeline needs to know it is at 90% of the
+   * business use-case quota before it starts the next account; a settings
+   * screen does not, and should not have to unwrap a tuple to ignore it.
+   */
+  async listAdAccountsWithUsage(
+    accessToken: string,
+  ): Promise<MetaGraphPage<MetaAdAccount>> {
+    const page = await this.fetchPagedRows({
+      buildUrl: (after) => this.buildAdAccountsUrl(accessToken, after),
+      maxPages: MAX_AD_ACCOUNT_PAGES,
+      failureMessage: 'Meta Ads account lookup failed.',
+    });
+
     const accounts: MetaAdAccount[] = [];
-    const seenCursors = new Set<string>();
 
-    let url: URL | null = this.buildAdAccountsUrl(accessToken, null);
-
-    for (let page = 0; page < MAX_AD_ACCOUNT_PAGES && url; page += 1) {
-      const response = await this.fetchGraph(url);
-      const data = await this.readJson(response);
-
-      if (!response.ok || !isRecord(data) || !Array.isArray(data.data)) {
-        throw new BadRequestException(
-          this.describeGraphError(data) ?? 'Meta Ads account lookup failed.',
-        );
+    for (const candidate of page.rows) {
+      const account = this.parseAdAccount(candidate);
+      if (account) {
+        accounts.push(account);
       }
-
-      for (const candidate of data.data) {
-        const account = this.parseAdAccount(candidate);
-        if (account) {
-          accounts.push(account);
-        }
-      }
-
-      url = this.nextAdAccountsUrl(accessToken, data.paging, seenCursors);
     }
 
-    return accounts;
+    return { rows: accounts, usage: page.usage };
+  }
+
+  /**
+   * Walks a cursor-paginated Graph edge.
+   *
+   * Generalized from the ad-accounts loop it replaces, unchanged in what it
+   * guarantees: the URL is always rebuilt from `buildUrl` with our own
+   * credentials, so `paging.next` contributes a cursor and nothing else. A
+   * `next` that points somewhere other than the same Graph path cannot redirect
+   * this client at another host, and a repeated cursor ends the walk instead of
+   * looping until the page ceiling.
+   *
+   * The cursor is deliberately not returned. Persisting a resume point is an
+   * S2.2 decision, and offering one here would invite a caller to store a value
+   * that expires without saying so.
+   */
+  private async fetchPagedRows(input: {
+    buildUrl: (after: string | null) => URL;
+    maxPages: number;
+    failureMessage: string;
+  }): Promise<MetaGraphPage<unknown>> {
+    const rows: unknown[] = [];
+    const seenCursors = new Set<string>();
+
+    let usage: MetaGraphUsage = EMPTY_META_GRAPH_USAGE;
+    let after: string | null = null;
+
+    for (let page = 0; page < input.maxPages; page += 1) {
+      const url = input.buildUrl(after);
+      const result = await this.requestGraph(url);
+
+      usage = result.usage;
+
+      const data = result.data;
+
+      if (!result.response.ok || !isRecord(data) || !Array.isArray(data.data)) {
+        throw this.toGraphError({
+          response: result.response,
+          data,
+          usage,
+          safeMessage: input.failureMessage,
+          allowProviderMessage: true,
+        });
+      }
+
+      rows.push(...(data.data as unknown[]));
+
+      after = this.nextCursor(data.paging, url.pathname, seenCursors);
+
+      if (!after) break;
+    }
+
+    return { rows, usage };
   }
 
   /**
@@ -226,15 +328,20 @@ export class MetaAdsGraphService {
   }
 
   /**
-   * Follows `paging.next` only when it points back at the Graph origin and at
-   * a cursor not seen before — a redirect-shaped response must not turn this
-   * client into an open fetcher, and a repeated cursor must not loop.
+   * Reads the next cursor out of `paging.next`, or null to stop.
+   *
+   * Accepts a cursor only when `next` points back at the Graph origin, at the
+   * expected API version, and at the very same path we asked for — a
+   * redirect-shaped response must not turn this client into an open fetcher,
+   * and a `next` that jumps to a different edge is not pagination. Credentials
+   * embedded in a `next` URL are never honoured either: `username`/`password`
+   * disqualify it outright, and the token always comes from `buildUrl`.
    */
-  private nextAdAccountsUrl(
-    accessToken: string,
+  private nextCursor(
     paging: unknown,
+    expectedPath: string,
     seenCursors: Set<string>,
-  ): URL | null {
+  ): string | null {
     if (!isRecord(paging)) return null;
 
     const next = paging.next;
@@ -250,6 +357,7 @@ export class MetaAdsGraphService {
     if (
       parsedNext.origin !== META_GRAPH_ORIGIN ||
       !parsedNext.pathname.startsWith(`/${this.graphVersion}/`) ||
+      parsedNext.pathname !== expectedPath ||
       parsedNext.username ||
       parsedNext.password
     ) {
@@ -263,7 +371,7 @@ export class MetaAdsGraphService {
 
     seenCursors.add(after);
 
-    return this.buildAdAccountsUrl(accessToken, after);
+    return after;
   }
 
   private parseAdAccount(value: unknown): MetaAdAccount | null {
@@ -307,12 +415,44 @@ export class MetaAdsGraphService {
     };
   }
 
-  private describeGraphError(data: unknown) {
-    if (!isRecord(data)) return null;
+  /**
+   * Turns a failed Graph response into a classified, safe-to-store error.
+   *
+   * The provider message is only used when the caller says it is renderable,
+   * and only after sanitizing. Some edges — the token exchange above — must
+   * never surface it at all, because what they echo back is the credential
+   * that failed.
+   */
+  private toGraphError(input: {
+    response: Response;
+    data: unknown;
+    usage: MetaGraphUsage;
+    safeMessage: string;
+    allowProviderMessage?: boolean;
+  }): MetaGraphError {
+    const error =
+      isRecord(input.data) && isRecord(input.data.error)
+        ? (input.data.error as GraphError)
+        : null;
 
-    const error = isRecord(data.error) ? (data.error as GraphError) : null;
+    const metaCode = this.readNumber(error?.code);
+    const metaSubcode = this.readNumber(
+      isRecord(error) ? error.error_subcode : undefined,
+    );
+    const httpStatus = this.readNumber(input.response.status);
 
-    return this.sanitizeMetaErrorMessage(error?.message);
+    const providerMessage = input.allowProviderMessage
+      ? this.sanitizeMetaErrorMessage(error?.message)
+      : null;
+
+    return new MetaGraphError({
+      kind: classifyGraphResponse({ httpStatus, metaCode, metaSubcode }),
+      safeMessage: providerMessage ?? input.safeMessage,
+      httpStatus,
+      metaCode,
+      metaSubcode,
+      usage: input.usage,
+    });
   }
 
   private requireAppId() {
@@ -341,12 +481,47 @@ export class MetaAdsGraphService {
     return Number.isFinite(parsed) ? parsed : null;
   }
 
-  private async fetchGraph(url: URL) {
+  /**
+   * One Graph call: bounded in time, and never re-throwing the provider's own
+   * error object.
+   *
+   * A transport failure stringifies to things like
+   * `ECONNRESET at https://graph.facebook.com/...?access_token=EAAG…`, so the
+   * message is always ours; only the *kind* is taken from the failure.
+   */
+  private async requestGraph(url: URL): Promise<GraphRequestResult> {
+    let response: Response;
+
     try {
-      return await fetch(url, { method: 'GET' });
-    } catch {
-      throw new BadRequestException('Meta Graph API request failed.');
+      response = await fetch(url, {
+        method: 'GET',
+        signal: this.requestTimeoutSignal(),
+      });
+    } catch (error) {
+      const classified = classifyGraphTransportFailure(error);
+
+      throw new MetaGraphError({
+        kind: classified.kind,
+        safeMessage: classified.safeMessage,
+      });
     }
+
+    return {
+      response,
+      data: await this.readJson(response),
+      usage: parseMetaGraphUsage(response.headers),
+    };
+  }
+
+  /**
+   * Guarded rather than called directly: a runtime without `AbortSignal.timeout`
+   * should still make the request, not fail on a missing platform API.
+   */
+  private requestTimeoutSignal(): AbortSignal | undefined {
+    return typeof AbortSignal !== 'undefined' &&
+      typeof AbortSignal.timeout === 'function'
+      ? AbortSignal.timeout(META_GRAPH_TIMEOUT_MS)
+      : undefined;
   }
 
   private async readJson(response: Response): Promise<unknown> {

@@ -1,5 +1,6 @@
 import { BadRequestException } from '@nestjs/common';
 import { MetaAdsGraphService } from './meta-ads-graph.service';
+import { MetaGraphError } from './meta-graph-error';
 
 function jsonResponse(body: unknown, ok = true) {
   return {
@@ -408,6 +409,230 @@ describe('MetaAdsGraphService', () => {
 
     it('returns null for a non-string', () => {
       expect(service.sanitizeMetaErrorMessage({ message: 'x' })).toBeNull();
+    });
+  });
+
+  describe('hardening', () => {
+    /** Like `jsonResponse`, but able to carry a status and rate-limit headers. */
+    function graphResponse(
+      body: unknown,
+      init: {
+        ok?: boolean;
+        status?: number;
+        headers?: Record<string, string>;
+      } = {},
+    ) {
+      const values = init.headers ?? {};
+
+      return {
+        ok: init.ok ?? true,
+        status: init.status ?? (init.ok === false ? 400 : 200),
+        headers: { get: (name: string) => values[name.toLowerCase()] ?? null },
+        json: () => Promise.resolve(body),
+      } as unknown as Response;
+    }
+
+    function errorResponse(
+      code: number,
+      init: { status?: number; subcode?: number } = {},
+    ) {
+      return graphResponse(
+        {
+          error: {
+            message: 'provider said something',
+            code,
+            error_subcode: init.subcode,
+          },
+        },
+        { ok: false, status: init.status ?? 400 },
+      );
+    }
+
+    async function kindOf(response: Response) {
+      global.fetch = jest.fn(() => response) as never;
+
+      return service
+        .listAdAccounts('token')
+        .then(() => null)
+        .catch((error: MetaGraphError) => error.kind);
+    }
+
+    it('bounds every request with a timeout', async () => {
+      const init: RequestInit[] = [];
+      global.fetch = ((_url: URL, options: RequestInit) => {
+        init.push(options);
+        return graphResponse({ data: [] });
+      }) as never;
+
+      await service.listAdAccounts('token');
+
+      // Without this, a provider that accepts the connection and then stops
+      // answering holds a worker open on a claimed job indefinitely.
+      expect(init[0].signal).toBeInstanceOf(AbortSignal);
+    });
+
+    it('classifies a rate limit as rate_limited', async () => {
+      await expect(kindOf(errorResponse(80000))).resolves.toBe('rate_limited');
+    });
+
+    it('classifies an invalid token as auth', async () => {
+      await expect(kindOf(errorResponse(190, { subcode: 463 }))).resolves.toBe(
+        'auth',
+      );
+    });
+
+    it('carries why the credential was refused, not just that it was', async () => {
+      // Both are `auth`, and a scheduler must act differently on each: 190/463
+      // is a dead token, 200 is a live token missing a role. Asserted through
+      // the service so the subcode is really read off the response body.
+      const reasonOf = (response: Response) => {
+        global.fetch = jest.fn(() => response) as never;
+
+        return service
+          .listAdAccounts('token')
+          .then(() => null)
+          .catch((error: MetaGraphError) => error.authReason);
+      };
+
+      await expect(
+        reasonOf(errorResponse(190, { subcode: 463 })),
+      ).resolves.toBe('credential_invalid');
+      await expect(reasonOf(errorResponse(200))).resolves.toBe(
+        'permission_denied',
+      );
+    });
+
+    it('classifies a provider outage as transient', async () => {
+      await expect(
+        kindOf(graphResponse({}, { ok: false, status: 503 })),
+      ).resolves.toBe('transient');
+    });
+
+    it('classifies a bad request as permanent', async () => {
+      await expect(kindOf(errorResponse(100))).resolves.toBe('permanent');
+    });
+
+    it('classifies a timeout as transient without echoing the URL', async () => {
+      global.fetch = jest.fn(() => {
+        const error = new Error(
+          'timed out https://graph.facebook.com/v25.0/me?access_token=EAAG',
+        );
+        error.name = 'TimeoutError';
+        throw error;
+      }) as never;
+
+      const error = await service
+        .listAdAccounts('token')
+        .catch((thrown: MetaGraphError) => thrown);
+
+      expect(error).toBeInstanceOf(MetaGraphError);
+      expect((error as MetaGraphError).kind).toBe('transient');
+      expect((error as MetaGraphError).message).toBe(
+        'Meta Graph API request timed out.',
+      );
+      expect((error as MetaGraphError).message).not.toContain('EAAG');
+    });
+
+    it('carries the rate-limit headers on the failure', async () => {
+      global.fetch = jest.fn(() =>
+        graphResponse(
+          { error: { message: 'slow down', code: 80000 } },
+          {
+            ok: false,
+            headers: {
+              'x-business-use-case-usage': JSON.stringify({
+                biz: [{ call_count: 100, estimated_time_to_regain_access: 4 }],
+              }),
+              'retry-after': '90',
+            },
+          },
+        ),
+      ) as never;
+
+      const error = await service
+        .listAdAccounts('token')
+        .catch((thrown: MetaGraphError) => thrown);
+
+      expect((error as MetaGraphError).usage.businessUseCasePercent).toBe(100);
+      expect((error as MetaGraphError).retryAfterMs).toBe(90_000);
+    });
+
+    it('reports usage from a successful read', async () => {
+      global.fetch = jest.fn(() =>
+        graphResponse(
+          { data: [{ id: 'act_1' }] },
+          {
+            headers: {
+              'x-business-use-case-usage': JSON.stringify({
+                biz: [{ call_count: 42 }],
+              }),
+            },
+          },
+        ),
+      ) as never;
+
+      const page = await service.listAdAccountsWithUsage('token');
+
+      expect(page.rows).toHaveLength(1);
+      expect(page.usage.businessUseCasePercent).toBe(42);
+      // Meta did not send the ad-account header here, as observed in
+      // production on the insights edge. Absent is not zero.
+      expect(page.usage.adAccountPercent).toBeNull();
+    });
+
+    it('survives a response with no headers', async () => {
+      // Every S1 test builds a response without them; usage parsing must not
+      // be the thing that breaks the connection flow.
+      global.fetch = jest.fn(() =>
+        jsonResponse({ data: [{ id: 'act_1' }] }),
+      ) as never;
+
+      await expect(service.listAdAccounts('token')).resolves.toHaveLength(1);
+    });
+
+    it('refuses a paging.next that points at a different edge', async () => {
+      const fetchMock = jest
+        .fn()
+        .mockResolvedValueOnce(
+          graphResponse({
+            data: [{ id: 'act_1' }],
+            paging: {
+              // Same origin, same version, another edge: not pagination.
+              next: 'https://graph.facebook.com/v25.0/me/accounts?after=abc',
+            },
+          }),
+        )
+        .mockResolvedValue(graphResponse({ data: [] }));
+      global.fetch = fetchMock as never;
+
+      await service.listAdAccounts('token');
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('follows a cursor without reusing the provider URL', async () => {
+      const requested: URL[] = [];
+      const fetchMock = jest.fn((url: URL) => {
+        requested.push(url);
+
+        return requested.length === 1
+          ? graphResponse({
+              data: [{ id: 'act_1' }],
+              paging: {
+                next: `https://graph.facebook.com/v25.0/me/adaccounts?after=cursor-2&access_token=${'stolen'}`,
+              },
+            })
+          : graphResponse({ data: [{ id: 'act_2' }] });
+      });
+      global.fetch = fetchMock as never;
+
+      const accounts = await service.listAdAccounts('token');
+
+      expect(accounts).toHaveLength(2);
+      // The cursor is taken; the URL is rebuilt with our own credentials, so a
+      // token planted in `next` is never sent anywhere.
+      expect(requested[1].searchParams.get('after')).toBe('cursor-2');
+      expect(requested[1].searchParams.get('access_token')).toBe('token');
     });
   });
 });
