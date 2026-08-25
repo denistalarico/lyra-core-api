@@ -61,11 +61,17 @@ function createHarness(result: {
     getOne: jest.fn(async () => result.one ?? null),
   };
 
+  const deleted: Array<Record<string, unknown>> = [];
+
   const repository = {
     createQueryBuilder: jest.fn(() => builder),
     save: jest.fn(async (row: SocialAdAccountConnectionEntity) => {
       saved.push(row);
       return row;
+    }),
+    delete: jest.fn(async (criteria: Record<string, unknown>) => {
+      deleted.push(criteria);
+      return { affected: 1, raw: [] };
     }),
   };
 
@@ -73,7 +79,7 @@ function createHarness(result: {
     repository as unknown as Repository<SocialAdAccountConnectionEntity>,
   );
 
-  return { service, whereCalls, saved, repository };
+  return { service, whereCalls, saved, deleted, repository };
 }
 
 function clauses(whereCalls: WhereCall[]) {
@@ -208,6 +214,73 @@ describe('SocialAdConnectionService.disconnect', () => {
     expect(row.metadata.selectableAccounts).toBeUndefined();
   });
 
+  it('removes an attempt that never bound an account instead of keeping it', async () => {
+    // Regression: disconnecting an in-flight attempt used to leave a row with
+    // no account and a nulled oauth deadline, which `list()` then showed
+    // forever as "Desconectado" with no account and no action able to clear it.
+    const row = buildRow({
+      externalAccountId: null,
+      connectionStatus: 'pending',
+      oauthStateHash: 'state-hash',
+      oauthExpiresAt: new Date('2026-08-25T23:00:00.000Z'),
+      accessTokenEncrypted: null,
+    });
+    const harness = createHarness({ one: row });
+
+    const view = await harness.service.disconnect({
+      tenantId: 'tenant-a',
+      workspaceId: 'workspace-a',
+      agencyClientId: null,
+      connectionId: 'connection-a',
+    });
+
+    expect(harness.repository.delete).toHaveBeenCalledTimes(1);
+    expect(harness.deleted).toEqual([{ id: 'connection-a' }]);
+    expect(harness.repository.save).not.toHaveBeenCalled();
+    expect(view.state).toBe('disconnected');
+    expect(view.hasCredential).toBe(false);
+  });
+
+  it('makes a discarded attempt unusable before removing it', async () => {
+    // The state hash is what a replayed callback matches on. Clearing it is
+    // what stops the abandoned authorization from being completable, and it
+    // must happen whether or not the row is then removed.
+    const row = buildRow({
+      externalAccountId: null,
+      connectionStatus: 'awaiting_selection',
+      oauthStateHash: 'state-hash',
+      oauthExpiresAt: new Date('2026-08-25T23:00:00.000Z'),
+      accessTokenEncrypted: 'ENCRYPTED-TOKEN',
+    });
+    const harness = createHarness({ one: row });
+
+    await harness.service.disconnect({
+      tenantId: 'tenant-a',
+      workspaceId: 'workspace-a',
+      agencyClientId: null,
+      connectionId: 'connection-a',
+    });
+
+    expect(row.oauthStateHash).toBeNull();
+    expect(row.oauthExpiresAt).toBeNull();
+    expect(row.accessTokenEncrypted).toBeNull();
+    expect(harness.repository.delete).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the audit row when an account was bound', async () => {
+    const harness = createHarness({ one: buildRow() });
+
+    await harness.service.disconnect({
+      tenantId: 'tenant-a',
+      workspaceId: 'workspace-a',
+      agencyClientId: null,
+      connectionId: 'connection-a',
+    });
+
+    expect(harness.repository.delete).not.toHaveBeenCalled();
+    expect(harness.repository.save).toHaveBeenCalledTimes(1);
+  });
+
   it('reports an out-of-scope id as not found, never as forbidden', async () => {
     // Answering "forbidden" would confirm the id exists and turn the endpoint
     // into an enumeration oracle across tenants.
@@ -223,6 +296,7 @@ describe('SocialAdConnectionService.disconnect', () => {
     ).rejects.toBeInstanceOf(NotFoundException);
 
     expect(harness.repository.save).not.toHaveBeenCalled();
+    expect(harness.repository.delete).not.toHaveBeenCalled();
   });
 
   it('applies the same scope predicates on a single-row lookup', async () => {

@@ -1,6 +1,8 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import {
   MetaAdsLoginConfig,
+  SOCIAL_META_ADS_APP_ID_ENV,
+  SOCIAL_META_ADS_APP_SECRET_ENV,
   SOCIAL_META_ADS_LOGIN_CONFIG_ID_ENV,
   isNonEmptyString,
   isRecord,
@@ -33,8 +35,11 @@ type GraphError = { message?: unknown; code?: unknown; type?: unknown };
  * against being called by a channel. Two small clients with narrow contracts
  * are cheaper to reason about than one client that serves two products.
  *
- * The app credentials are shared (`META_APP_ID` / `META_APP_SECRET`) because
- * they belong to the platform's Meta App, not to a product.
+ * The app credentials are the Social app's own
+ * (`SOCIAL_META_ADS_APP_ID` / `SOCIAL_META_ADS_APP_SECRET`). They are not
+ * shared with the Inbox: a `config_id` belongs to the app that defines it, so
+ * the client id, the client secret and the login config have to come from the
+ * same app or Meta refuses the authorization.
  */
 @Injectable()
 export class MetaAdsGraphService {
@@ -42,12 +47,17 @@ export class MetaAdsGraphService {
     return process.env.META_GRAPH_API_VERSION ?? 'v24.0';
   }
 
+  // Read from the Social variables only. There is deliberately no `??
+  // process.env.META_APP_ID` here: a fallback would silently authorize against
+  // the messaging app, which cannot resolve the Social login config, and the
+  // failure would surface as an opaque "URL bloqueada" from Meta instead of as
+  // a missing-configuration error from us.
   private get appId() {
-    return process.env.META_APP_ID?.trim();
+    return process.env[SOCIAL_META_ADS_APP_ID_ENV]?.trim();
   }
 
   private get appSecret() {
-    return process.env.META_APP_SECRET?.trim();
+    return process.env[SOCIAL_META_ADS_APP_SECRET_ENV]?.trim();
   }
 
   private get loginConfigId() {
@@ -306,7 +316,9 @@ export class MetaAdsGraphService {
 
   private requireAppId() {
     if (!this.appId) {
-      throw new BadRequestException('META_APP_ID is not configured.');
+      throw new BadRequestException(
+        `${SOCIAL_META_ADS_APP_ID_ENV} is not configured.`,
+      );
     }
 
     return this.appId;
@@ -314,7 +326,9 @@ export class MetaAdsGraphService {
 
   private requireAppSecret() {
     if (!this.appSecret) {
-      throw new BadRequestException('META_APP_SECRET is not configured.');
+      throw new BadRequestException(
+        `${SOCIAL_META_ADS_APP_SECRET_ENV} is not configured.`,
+      );
     }
 
     return this.appSecret;

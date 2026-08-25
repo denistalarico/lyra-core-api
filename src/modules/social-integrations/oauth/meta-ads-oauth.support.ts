@@ -33,6 +33,21 @@ export const SOCIAL_META_ADS_CALLBACK_URL_ENV =
 export const SOCIAL_META_ADS_LOGIN_CONFIG_ID_ENV =
   'SOCIAL_META_ADS_LOGIN_CONFIG_ID';
 
+/**
+ * Lyra Social authorizes against its own Meta App, not the platform's
+ * messaging app.
+ *
+ * The login configuration named by `SOCIAL_META_ADS_LOGIN_CONFIG_ID` lives
+ * inside the Social app, and Meta resolves a `config_id` only against the
+ * `client_id` that owns it. Sending the Inbox app id with a Social config id
+ * is the mismatch that makes the authorization dialog refuse the request, so
+ * these two are read from their own variables and never fall back to
+ * `META_APP_ID` / `META_APP_SECRET`.
+ */
+export const SOCIAL_META_ADS_APP_ID_ENV = 'SOCIAL_META_ADS_APP_ID';
+
+export const SOCIAL_META_ADS_APP_SECRET_ENV = 'SOCIAL_META_ADS_APP_SECRET';
+
 export const MAX_OAUTH_STATE_LENGTH = 512;
 
 /**

@@ -142,7 +142,7 @@ function createHarness(
 
   const graph = {
     getLoginConfig: jest.fn(() => ({
-      appId: 'meta-app-id',
+      appId: 'social-ads-app-id',
       configId: 'social-ads-config-id',
       authorizationEndpoint: 'https://www.facebook.com/v25.0/dialog/oauth',
     })),
@@ -212,7 +212,9 @@ describe('MetaAdsOAuthService', () => {
       expect(`${url.origin}${url.pathname}`).toBe(
         'https://www.facebook.com/v25.0/dialog/oauth',
       );
-      expect(url.searchParams.get('client_id')).toBe('meta-app-id');
+      // The client id is whatever the graph service resolved from the Social
+      // app variables — the authorization URL never picks an app of its own.
+      expect(url.searchParams.get('client_id')).toBe('social-ads-app-id');
       expect(url.searchParams.get('config_id')).toBe('social-ads-config-id');
       expect(url.searchParams.get('redirect_uri')).toBe(CALLBACK_URL);
       expect(url.searchParams.has('client_secret')).toBe(false);

@@ -64,6 +64,9 @@ export class SocialAdConnectionService {
    * The row survives on purpose: the account binding, the client it belonged
    * to and when it was revoked are the audit trail of a credential that once
    * existed. What must not survive is the credential itself.
+   *
+   * An authorization that never reached an account is the exception — see
+   * below.
    */
   async disconnect(
     input: DisconnectSocialAdConnectionInput,
@@ -83,6 +86,19 @@ export class SocialAdConnectionService {
       selectableAccounts: undefined,
       disconnectedAt: connection.credentialRemovedAt.toISOString(),
     };
+
+    // An attempt that never bound an account has nothing to audit: no account,
+    // no client binding, and no credential that was ever used to read anything.
+    // Keeping it would leave a card no action can clear — `list()` hides an
+    // abandoned attempt by its oauth deadline, and the clearing above nulls
+    // exactly that deadline, so the row would become permanently visible as
+    // "Desconectado" with no account. Removing it also makes the discarded
+    // state unreachable by construction rather than by having been nulled.
+    if (!connection.externalAccountId) {
+      await this.connectionsRepository.delete({ id: connection.id });
+
+      return toSocialAdConnectionView(connection);
+    }
 
     await this.connectionsRepository.save(connection);
 

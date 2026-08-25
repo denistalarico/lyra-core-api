@@ -8,6 +8,27 @@ function jsonResponse(body: unknown, ok = true) {
   } as unknown as Response;
 }
 
+/** Records the URLs the service actually calls, so the credentials it sends can be asserted. */
+function captureFetch(body: unknown, ok = true) {
+  const requested: URL[] = [];
+
+  global.fetch = ((url: URL) => {
+    requested.push(url);
+    return jsonResponse(body, ok);
+  }) as never;
+
+  return requested;
+}
+
+const SOCIAL_APP_ID = 'social-ads-app-id';
+const SOCIAL_APP_SECRET = 'social-ads-app-secret';
+
+// The Inbox credentials are present in every test on purpose: the guarantee is
+// not "Social works when only Social is configured", it is "Social never
+// reaches for the messaging app even when the messaging app is right there".
+const INBOX_APP_ID = 'inbox-messaging-app-id';
+const INBOX_APP_SECRET = 'inbox-messaging-app-secret';
+
 describe('MetaAdsGraphService', () => {
   const originalEnv = process.env;
   const originalFetch = global.fetch;
@@ -16,9 +37,11 @@ describe('MetaAdsGraphService', () => {
   beforeEach(() => {
     process.env = {
       ...originalEnv,
-      META_APP_ID: 'meta-app-id',
-      META_APP_SECRET: 'meta-app-secret',
+      META_APP_ID: INBOX_APP_ID,
+      META_APP_SECRET: INBOX_APP_SECRET,
       META_GRAPH_API_VERSION: 'v25.0',
+      SOCIAL_META_ADS_APP_ID: SOCIAL_APP_ID,
+      SOCIAL_META_ADS_APP_SECRET: SOCIAL_APP_SECRET,
       SOCIAL_META_ADS_LOGIN_CONFIG_ID: 'social-ads-config-id',
     };
     service = new MetaAdsGraphService();
@@ -35,10 +58,39 @@ describe('MetaAdsGraphService', () => {
   describe('getLoginConfig', () => {
     it('returns the Social Ads login configuration', () => {
       expect(service.getLoginConfig()).toEqual({
-        appId: 'meta-app-id',
+        appId: SOCIAL_APP_ID,
         configId: 'social-ads-config-id',
         authorizationEndpoint: 'https://www.facebook.com/v25.0/dialog/oauth',
       });
+    });
+
+    it('authorizes as the Social app, never as the Inbox app', () => {
+      // A login config resolves only against the app that owns it. Sending the
+      // messaging app id with the Social config id is what makes Meta answer
+      // "URL bloqueada" instead of showing the dialog.
+      const config = service.getLoginConfig();
+
+      expect(config.appId).toBe(SOCIAL_APP_ID);
+      expect(config.appId).not.toBe(INBOX_APP_ID);
+      expect(config.appId).not.toBe(process.env.META_APP_ID);
+    });
+
+    it('fails explicitly when the Social app id is missing', () => {
+      delete process.env.SOCIAL_META_ADS_APP_ID;
+
+      // Naming the variable is the point: the alternative is Meta refusing the
+      // dialog for reasons the operator cannot see from our side.
+      expect(() => new MetaAdsGraphService().getLoginConfig()).toThrow(
+        'SOCIAL_META_ADS_APP_ID is not configured.',
+      );
+    });
+
+    it('fails explicitly when the Social app id is present but empty', () => {
+      process.env.SOCIAL_META_ADS_APP_ID = '   ';
+
+      expect(() => new MetaAdsGraphService().getLoginConfig()).toThrow(
+        BadRequestException,
+      );
     });
 
     it('refuses to build a URL without its own config id', () => {
@@ -51,11 +103,30 @@ describe('MetaAdsGraphService', () => {
       );
     });
 
-    it('requires the app secret even though it never returns it', () => {
-      delete process.env.META_APP_SECRET;
+    it('fails explicitly when the Social app secret is missing', () => {
+      // Validated here, not at exchange time: a connection that cannot be
+      // completed should never send the operator to Meta in the first place.
+      delete process.env.SOCIAL_META_ADS_APP_SECRET;
 
       expect(() => new MetaAdsGraphService().getLoginConfig()).toThrow(
+        'SOCIAL_META_ADS_APP_SECRET is not configured.',
+      );
+    });
+
+    it('does not accept the Inbox credentials as a substitute', () => {
+      delete process.env.SOCIAL_META_ADS_APP_ID;
+      delete process.env.SOCIAL_META_ADS_APP_SECRET;
+
+      // META_APP_ID and META_APP_SECRET are still set. Silently using them
+      // would produce a working-looking URL that Meta then rejects.
+      expect(() => new MetaAdsGraphService().getLoginConfig()).toThrow(
         BadRequestException,
+      );
+    });
+
+    it('never returns the app secret it just validated', () => {
+      expect(JSON.stringify(service.getLoginConfig())).not.toContain(
+        SOCIAL_APP_SECRET,
       );
     });
   });
@@ -87,10 +158,56 @@ describe('MetaAdsGraphService', () => {
       ).rejects.toBeInstanceOf(BadRequestException);
     });
 
+    it('trades the code with the Social app credentials', async () => {
+      const requested = captureFetch({ access_token: 'token-value' });
+
+      await service.exchangeOAuthCode({
+        code: 'code-value',
+        redirectUri: 'https://api.example.com/cb',
+      });
+
+      const params = requested[0].searchParams;
+
+      expect(params.get('client_id')).toBe(SOCIAL_APP_ID);
+      expect(params.get('client_secret')).toBe(SOCIAL_APP_SECRET);
+      // The redirect URI has to match the one the dialog was opened with,
+      // byte for byte, or Meta rejects the exchange.
+      expect(params.get('redirect_uri')).toBe('https://api.example.com/cb');
+    });
+
+    it('never sends the Inbox app credentials', async () => {
+      const requested = captureFetch({ access_token: 'token-value' });
+
+      await service.exchangeOAuthCode({
+        code: 'code-value',
+        redirectUri: 'https://api.example.com/cb',
+      });
+
+      const sent = requested[0].toString();
+
+      expect(sent).not.toContain(INBOX_APP_ID);
+      expect(sent).not.toContain(INBOX_APP_SECRET);
+    });
+
+    it('fails explicitly when the Social app secret is missing', async () => {
+      delete process.env.SOCIAL_META_ADS_APP_SECRET;
+      const requested = captureFetch({ access_token: 'token-value' });
+
+      await expect(
+        new MetaAdsGraphService().exchangeOAuthCode({
+          code: 'code-value',
+          redirectUri: 'https://api.example.com/cb',
+        }),
+      ).rejects.toThrow('SOCIAL_META_ADS_APP_SECRET is not configured.');
+
+      // It must fail before the request, not authorize as somebody else.
+      expect(requested).toHaveLength(0);
+    });
+
     it('does not leak the app secret in the failure', async () => {
       global.fetch = jest.fn(() =>
         jsonResponse(
-          { error: { message: 'meta-app-secret is invalid' } },
+          { error: { message: `${SOCIAL_APP_SECRET} is invalid` } },
           false,
         ),
       ) as never;
@@ -105,6 +222,18 @@ describe('MetaAdsGraphService', () => {
   });
 
   describe('exchangeLongLivedToken', () => {
+    it('extends the token with the Social app credentials', async () => {
+      const requested = captureFetch({ access_token: 'long-lived' });
+
+      await service.exchangeLongLivedToken('short-lived');
+
+      const params = requested[0].searchParams;
+
+      expect(params.get('client_id')).toBe(SOCIAL_APP_ID);
+      expect(params.get('client_secret')).toBe(SOCIAL_APP_SECRET);
+      expect(requested[0].toString()).not.toContain(INBOX_APP_SECRET);
+    });
+
     it('returns null instead of throwing when Meta refuses', async () => {
       global.fetch = jest.fn(() =>
         jsonResponse({ error: { message: 'nope' } }, false),
@@ -249,8 +378,18 @@ describe('MetaAdsGraphService', () => {
 
     it('redacts the app secret even when it is not labelled', () => {
       expect(
-        service.sanitizeMetaErrorMessage('failed for meta-app-secret'),
+        service.sanitizeMetaErrorMessage(`failed for ${SOCIAL_APP_SECRET}`),
       ).toBe('failed for [REDACTED]');
+    });
+
+    it('redacts the Social secret, which is the one this client sends', () => {
+      // `last_sync_error` is rendered by the settings screen. A provider that
+      // echoes the secret back must not turn that column into a credential.
+      const sanitized = service.sanitizeMetaErrorMessage(
+        `Invalid client_secret ${SOCIAL_APP_SECRET} for app`,
+      );
+
+      expect(sanitized).not.toContain(SOCIAL_APP_SECRET);
     });
 
     it('redacts URLs, which routinely carry the token in a query string', () => {
