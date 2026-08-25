@@ -316,8 +316,10 @@ import {
   PlatformAdminTwoFactorCodeEntity,
   PlatformInternalAdminEntity,
 } from '../modules/admin/entities';
+import { SocialAdAccountConnectionEntity } from '../modules/social-integrations/entities';
 
 export const agencyEntities = [
+  SocialAdAccountConnectionEntity,
   PlatformInternalAdminEntity,
   PlatformAdminAuditEventEntity,
   PlatformAdminIdentityEntity,

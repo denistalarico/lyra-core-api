@@ -159,6 +159,7 @@ import { TagRulesForAutomaticTagging1789800000000 } from './migrations/178980000
 import { OutsideHoursAnswersDuringHandoff1789900000000 } from './migrations/1789900000000-outside-hours-answers-during-handoff';
 import { CreateLeadflowWebhookDeliveries1790000000000 } from './migrations/1790000000000-create-leadflow-webhook-deliveries';
 import { FanoutLeadflowWebhooksConsumer1790100000000 } from './migrations/1790100000000-fanout-leadflow-webhooks-consumer';
+import { CreateSocialAdAccountConnections1790200000000 } from './migrations/1790200000000-create-social-ad-account-connections';
 
 export const AgencyDataSource = new DataSource({
   type: 'postgres',
@@ -328,5 +329,6 @@ export const AgencyDataSource = new DataSource({
     OutsideHoursAnswersDuringHandoff1789900000000,
     CreateLeadflowWebhookDeliveries1790000000000,
     FanoutLeadflowWebhooksConsumer1790100000000,
+    CreateSocialAdAccountConnections1790200000000,
   ],
 });
