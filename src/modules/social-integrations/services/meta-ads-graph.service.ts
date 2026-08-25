@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
+import { normalizeAdAccountId } from '../meta-ad-account-id';
 import {
   MetaAdsLoginConfig,
   SOCIAL_META_ADS_APP_ID_ENV,
@@ -268,13 +269,13 @@ export class MetaAdsGraphService {
   private parseAdAccount(value: unknown): MetaAdAccount | null {
     if (!isRecord(value)) return null;
 
-    // `id` arrives as `act_<account_id>`; it is the handle every other
-    // Marketing API edge expects, so it is the one worth persisting.
-    const externalAccountId = isNonEmptyString(value.id)
-      ? value.id.trim()
-      : isNonEmptyString(value.account_id)
-        ? `act_${value.account_id.trim()}`
-        : null;
+    // Meta sends both spellings: `id` as `act_<digits>` and `account_id` as
+    // the bare number. Either normalizes to the canonical handle, which is the
+    // one every other Marketing API edge expects and the one worth persisting.
+    // A row that matches neither is dropped rather than stored — it could not
+    // be selected afterwards anyway, since the select DTOs demand this shape.
+    const externalAccountId =
+      normalizeAdAccountId(value.id) ?? normalizeAdAccountId(value.account_id);
 
     if (!externalAccountId) return null;
 

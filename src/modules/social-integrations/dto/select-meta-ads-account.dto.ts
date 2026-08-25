@@ -1,4 +1,5 @@
 import { IsString, Matches, MaxLength } from 'class-validator';
+import { CANONICAL_AD_ACCOUNT_ID_PATTERN } from '../meta-ad-account-id';
 
 export class SelectMetaAdsAccountDto {
   @IsString()
@@ -14,7 +15,7 @@ export class SelectMetaAdsAccountDto {
    */
   @IsString()
   @MaxLength(180)
-  @Matches(/^act_[0-9]{1,32}$/, {
+  @Matches(CANONICAL_AD_ACCOUNT_ID_PATTERN, {
     message: 'externalAccountId must be a Meta ad account id.',
   })
   externalAccountId!: string;

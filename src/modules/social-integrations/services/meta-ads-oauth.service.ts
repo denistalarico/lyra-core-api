@@ -93,6 +93,10 @@ export class MetaAdsOAuthService {
       workspaceId: input.workspaceId,
       agencyClientId: input.agencyClientId,
       provider: PROVIDER,
+      // Stated rather than left to the column default: this row is the product
+      // of Facebook Login, and nothing about it should depend on what the
+      // database happens to fill in.
+      authorizationMethod: 'business_login',
       externalAccountId: null,
       connectionStatus: 'pending',
       credentialVersion: 1,
@@ -245,6 +249,10 @@ export class MetaAdsOAuthService {
       const target = existing ?? pending;
 
       target.agencyClientId = pending.agencyClientId;
+      // `existing` may be a disconnected row that was once authorized some
+      // other way. Promoting it must re-state the method, or a reconnection
+      // through OAuth would inherit a claim it did not earn.
+      target.authorizationMethod = 'business_login';
       target.externalAccountId = account.externalAccountId;
       target.externalBusinessId = this.readSelectedBusinessId(
         pending.metadata,

@@ -551,6 +551,32 @@ describe('MetaAdsOAuthService', () => {
       expect(view.state).toBe('connected');
     });
 
+    it('ignores the internal account guardrail entirely', async () => {
+      // The guardrail bounds the System User exception. If it ever reached
+      // this path, every tenant's OAuth would be pinned to one agency's ad
+      // account — so the configuration is set here, to a different account,
+      // and the selection must go through untouched.
+      process.env.SOCIAL_META_ADS_INTERNAL_TENANT_ID = 'tenant-a';
+      process.env.SOCIAL_META_ADS_INTERNAL_ACCOUNT_ID = 'act_1111111111';
+      process.env.SOCIAL_META_ADS_SYSTEM_USER_TOKEN = 'system-user-token';
+
+      const crypto = new SettingsCryptoService();
+      const row = awaitingRow(crypto);
+      const harness = createHarness({ queryResults: [row, null] });
+
+      const view = await harness.service.select({
+        tenantId: 'tenant-a',
+        workspaceId: 'workspace-a',
+        userId: 'user-a',
+        connectionId: 'connection-id',
+        externalAccountId: 'act_2222222222',
+      });
+
+      expect(row.externalAccountId).toBe('act_2222222222');
+      expect(row.authorizationMethod).toBe('business_login');
+      expect(view.authorizationMethod).toBe('business_login');
+    });
+
     it('clears the selectable accounts from the persisted metadata', async () => {
       const crypto = new SettingsCryptoService();
       const row = awaitingRow(crypto);

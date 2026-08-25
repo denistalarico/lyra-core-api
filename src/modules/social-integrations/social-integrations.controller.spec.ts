@@ -7,6 +7,7 @@ import {
   PRODUCT_ENTITLEMENT_METADATA,
 } from '../permissions/decorators/permissions.decorators';
 import type { MetaAdsOAuthService } from './services/meta-ads-oauth.service';
+import type { MetaAdsSystemUserService } from './services/meta-ads-system-user.service';
 import type { SocialAdConnectionService } from './services/social-ad-connection.service';
 import { SocialIntegrationsController } from './social-integrations.controller';
 
@@ -15,10 +16,17 @@ const GUARDED_HANDLERS = [
   'selectMetaAdsAccount',
   'listConnections',
   'disconnect',
+  // The internal routes are not a side door: they carry the same entitlement
+  // and the same admin permission as everything else on this controller.
+  'internalAvailability',
+  'listInternalAdAccounts',
+  'selectInternalAdAccount',
+  'internalHealth',
 ] as const;
 
-function createHarness() {
+function createHarness(options: { internalAvailable?: boolean } = {}) {
   const selectInputs: Record<string, unknown>[] = [];
+  const internalInputs: Record<string, unknown>[] = [];
 
   const oauth = {
     start: jest.fn(async () => ({
@@ -40,12 +48,36 @@ function createHarness() {
     disconnect: jest.fn(async () => ({ id: 'connection-id' })),
   };
 
+  const systemUser = {
+    isAvailable: jest.fn(() => options.internalAvailable ?? false),
+    listAdAccounts: jest.fn((input: Record<string, unknown>) => {
+      internalInputs.push(input);
+      return Promise.resolve([{ externalAccountId: 'act_1' }]);
+    }),
+    select: jest.fn((input: Record<string, unknown>) => {
+      internalInputs.push(input);
+      return Promise.resolve({ id: 'connection-id' });
+    }),
+    health: jest.fn((input: Record<string, unknown>) => {
+      internalInputs.push(input);
+      return Promise.resolve({ connectionId: 'connection-id' });
+    }),
+  };
+
   const controller = new SocialIntegrationsController(
     oauth as unknown as MetaAdsOAuthService,
     connections as unknown as SocialAdConnectionService,
+    systemUser as unknown as MetaAdsSystemUserService,
   );
 
-  return { controller, oauth, connections, selectInputs };
+  return {
+    controller,
+    oauth,
+    connections,
+    systemUser,
+    selectInputs,
+    internalInputs,
+  };
 }
 
 function context(overrides: Partial<RequestContext> = {}): RequestContext {
@@ -187,6 +219,53 @@ describe('SocialIntegrationsController scope resolution', () => {
         }),
       ),
     ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('never offers the internal method in client mode', () => {
+    const harness = createHarness({ internalAvailable: true });
+
+    harness.controller.internalAvailability(
+      context({
+        managedContext: {
+          productKey: 'social',
+          operatingMode: 'client',
+          clientId: 'client-a',
+          managedTenantId: 'managed-a',
+        },
+      }),
+    );
+
+    // The gate is asked with the resolved client, so a managed client inside
+    // the internal tenant is still a third party to the System User.
+    expect(harness.systemUser.isAvailable).toHaveBeenCalledWith(
+      expect.objectContaining({ agencyClientId: 'client-a' }),
+    );
+  });
+
+  it('reports the internal method as unavailable rather than failing', () => {
+    const harness = createHarness({ internalAvailable: false });
+
+    expect(harness.controller.internalAvailability(context())).toEqual({
+      available: false,
+    });
+  });
+
+  it('passes the server-resolved scope to every internal route', async () => {
+    const harness = createHarness({ internalAvailable: true });
+
+    await harness.controller.selectInternalAdAccount(context(), {
+      externalAccountId: 'act_1234567890',
+      // Not declared by the DTO; the ValidationPipe strips it in production
+      // and nothing reads it here either.
+      tenantId: 'tenant-b',
+    } as never);
+
+    const call = harness.internalInputs[0];
+
+    expect(call.tenantId).toBe('tenant-a');
+    expect(call.workspaceId).toBe('workspace-a');
+    expect(call.agencyClientId).toBeNull();
+    expect(call.externalAccountId).toBe('act_1234567890');
   });
 
   it('passes the caller scope to the disconnect lookup', async () => {

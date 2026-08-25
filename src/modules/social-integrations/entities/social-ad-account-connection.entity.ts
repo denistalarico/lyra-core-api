@@ -41,6 +41,25 @@ export type SocialAdConnectionStatus =
   | 'error'
   | 'disconnected';
 
+/**
+ * How the credential behind a connection was obtained.
+ *
+ * This is a column rather than a metadata key because it decides real
+ * behaviour: a `business_login` row reads its token from
+ * `access_token_encrypted`, while an `internal_system_user` row has no stored
+ * token at all and reads it from server configuration. Anything that resolves
+ * a credential has to branch on this, and a branch that depends on an
+ * unconstrained JSON key is one typo away from silently taking the wrong
+ * path.
+ *
+ * `internal_system_user` is an exception for the tenant that owns the Meta App
+ * itself — an app's owner cannot select its own Business Manager through
+ * Facebook Login for Business. Every other tenant uses `business_login`.
+ */
+export type SocialAdAuthorizationMethod =
+  | 'business_login'
+  | 'internal_system_user';
+
 @Entity('social_ad_account_connections')
 // NULL external_account_id is distinct in Postgres, so in-flight rows never
 // collide with each other — the constraint only binds once an account is
@@ -73,6 +92,19 @@ export class SocialAdAccountConnectionEntity {
 
   @Column({ type: 'varchar', length: 40 })
   provider!: SocialAdProvider;
+
+  /**
+   * Defaults to `business_login` so every existing row keeps the meaning it
+   * already had, and so a row created without naming a method can never
+   * accidentally claim the internal one.
+   */
+  @Column({
+    name: 'authorization_method',
+    type: 'varchar',
+    length: 40,
+    default: 'business_login',
+  })
+  authorizationMethod!: SocialAdAuthorizationMethod;
 
   /** Provider-side ad account id. NULL only while the connection is in flight. */
   @Column({

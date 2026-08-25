@@ -10,6 +10,7 @@
 
 import type {
   SocialAdAccountConnectionEntity,
+  SocialAdAuthorizationMethod,
   SocialAdConnectionStatus,
   SocialAdProvider,
 } from '../entities/social-ad-account-connection.entity';
@@ -46,6 +47,12 @@ export interface SocialAdConnectionView {
   provider: SocialAdProvider;
   state: SocialAdConnectionState;
   status: SocialAdConnectionStatus;
+  /**
+   * How this connection was authorized. Safe to expose: it names a mechanism,
+   * not a credential, and the settings screen has to label a connection that
+   * no operator can re-authorize through the normal flow.
+   */
+  authorizationMethod: SocialAdAuthorizationMethod;
   agencyClientId: string | null;
   /** Masked. The full account id is an addressable provider resource. */
   maskedAccountId: string | null;
@@ -159,6 +166,9 @@ export function toSocialAdConnectionView(
     provider: connection.provider,
     state,
     status: connection.connectionStatus,
+    // A row written before this column existed reads as the only method that
+    // existed then, never as the internal one.
+    authorizationMethod: connection.authorizationMethod ?? 'business_login',
     agencyClientId: connection.agencyClientId,
     maskedAccountId: maskExternalAccountId(connection.externalAccountId),
     accountName: connection.accountName,

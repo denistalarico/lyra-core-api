@@ -20,8 +20,10 @@ import {
   RequirePermission,
   RequireProductEntitlement,
 } from '../permissions';
+import { SelectInternalAdAccountDto } from './dto/select-internal-ad-account.dto';
 import { SelectMetaAdsAccountDto } from './dto/select-meta-ads-account.dto';
 import { MetaAdsOAuthService } from './services/meta-ads-oauth.service';
+import { MetaAdsSystemUserService } from './services/meta-ads-system-user.service';
 import { SocialAdConnectionService } from './services/social-ad-connection.service';
 
 /**
@@ -40,6 +42,7 @@ export class SocialIntegrationsController {
   constructor(
     private readonly metaAdsOAuthService: MetaAdsOAuthService,
     private readonly connectionService: SocialAdConnectionService,
+    private readonly systemUserService: MetaAdsSystemUserService,
   ) {}
 
   @Post('meta-ads/connect')
@@ -102,6 +105,80 @@ export class SocialIntegrationsController {
       userId: ctx.userId ?? null,
       connectionId: dto.connectionId,
       externalAccountId: dto.externalAccountId,
+    });
+  }
+
+  /**
+   * Whether this scope may connect with the platform's own System User.
+   *
+   * Answers `false` rather than 404 for everybody else: this is the question
+   * the settings screen asks on every load to decide whether to render the
+   * option, and a scope that simply has no such option is not an error. The
+   * routes that actually touch the token are the ones that 404.
+   *
+   * Config-only — no provider call, so it costs nothing to ask.
+   */
+  @Get('meta-ads/internal/availability')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireProductEntitlement('social')
+  @RequirePermission(SOCIAL_INTEGRATIONS_PERMISSION)
+  internalAvailability(@RequestContextData() ctx: RequestContext) {
+    const scope = this.requireScope(ctx);
+
+    return {
+      available: this.systemUserService.isAvailable({
+        ...scope,
+        userId: ctx.userId ?? null,
+      }),
+    };
+  }
+
+  @Get('meta-ads/internal/accounts')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireProductEntitlement('social')
+  @RequirePermission(SOCIAL_INTEGRATIONS_PERMISSION)
+  async listInternalAdAccounts(@RequestContextData() ctx: RequestContext) {
+    const scope = this.requireScope(ctx);
+
+    const items = await this.systemUserService.listAdAccounts({
+      ...scope,
+      userId: ctx.userId ?? null,
+    });
+
+    return { items, total: items.length };
+  }
+
+  @Post('meta-ads/internal/select')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireProductEntitlement('social')
+  @RequirePermission(SOCIAL_INTEGRATIONS_PERMISSION)
+  selectInternalAdAccount(
+    @RequestContextData() ctx: RequestContext,
+    @Body() dto: SelectInternalAdAccountDto,
+  ) {
+    const scope = this.requireScope(ctx);
+
+    return this.systemUserService.select({
+      ...scope,
+      userId: ctx.userId ?? null,
+      externalAccountId: dto.externalAccountId,
+    });
+  }
+
+  @Get('meta-ads/internal/health/:connectionId')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireProductEntitlement('social')
+  @RequirePermission(SOCIAL_INTEGRATIONS_PERMISSION)
+  internalHealth(
+    @RequestContextData() ctx: RequestContext,
+    @Param('connectionId', ParseUUIDPipe) connectionId: string,
+  ) {
+    const scope = this.requireScope(ctx);
+
+    return this.systemUserService.health({
+      ...scope,
+      userId: ctx.userId ?? null,
+      connectionId,
     });
   }
 

@@ -3,8 +3,10 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { SettingsCryptoService } from '../../common/crypto/settings-crypto.service';
 import { PermissionsModule } from '../permissions';
 import { SocialAdAccountConnectionEntity } from './entities';
+import { SocialInternalAccessService } from './internal/social-internal-access.service';
 import { MetaAdsGraphService } from './services/meta-ads-graph.service';
 import { MetaAdsOAuthService } from './services/meta-ads-oauth.service';
+import { MetaAdsSystemUserService } from './services/meta-ads-system-user.service';
 import { SocialAdConnectionService } from './services/social-ad-connection.service';
 import { SocialIntegrationsController } from './social-integrations.controller';
 
@@ -25,7 +27,9 @@ import { SocialIntegrationsController } from './social-integrations.controller';
   providers: [
     MetaAdsGraphService,
     MetaAdsOAuthService,
+    MetaAdsSystemUserService,
     SocialAdConnectionService,
+    SocialInternalAccessService,
     SettingsCryptoService,
   ],
   exports: [SocialAdConnectionService],
