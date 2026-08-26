@@ -22,10 +22,12 @@ import {
 } from '../permissions';
 import { SelectInternalAdAccountDto } from './dto/select-internal-ad-account.dto';
 import { SelectMetaAdsAccountDto } from './dto/select-meta-ads-account.dto';
+import { SyncInsightsDto } from './dto/sync-insights.dto';
 import { MetaAdsOAuthService } from './services/meta-ads-oauth.service';
 import { MetaAdsSystemUserService } from './services/meta-ads-system-user.service';
 import { SocialAdConnectionService } from './services/social-ad-connection.service';
 import { SocialAdHierarchySyncService } from './services/social-ad-hierarchy-sync.service';
+import { SocialAdInsightsSyncService } from './services/social-ad-insights-sync.service';
 import { mapSocialAdSyncError } from './sync/social-ad-sync.http-error';
 
 /**
@@ -46,6 +48,7 @@ export class SocialIntegrationsController {
     private readonly connectionService: SocialAdConnectionService,
     private readonly systemUserService: MetaAdsSystemUserService,
     private readonly hierarchySyncService: SocialAdHierarchySyncService,
+    private readonly insightsSyncService: SocialAdInsightsSyncService,
   ) {}
 
   @Post('meta-ads/connect')
@@ -252,6 +255,43 @@ export class SocialIntegrationsController {
     } catch (error) {
       // Credential codes and Graph kinds become statuses here and nowhere else;
       // an unrecognized error travels on unchanged and becomes a 500.
+      throw mapSocialAdSyncError(error);
+    }
+  }
+
+  /**
+   * Ingests daily Meta Ads facts for one connection over an explicit window.
+   *
+   * The body carries the window and nothing else. Tenant, workspace and managed
+   * client come from the authenticated context and are then re-read from the
+   * connection row itself; the connection id is a path parameter. A body field
+   * that could name a scope would let an authenticated agency member ingest
+   * somebody else's ad spend into their own workspace.
+   *
+   * Synchronous, like the hierarchy sync, and for the same reason: the run
+   * table has no worker yet.
+   */
+  @Post('connections/:connectionId/sync/insights')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireProductEntitlement('social')
+  @RequirePermission(SOCIAL_INTEGRATIONS_PERMISSION)
+  async syncConnectionInsights(
+    @RequestContextData() ctx: RequestContext,
+    @Param('connectionId', ParseUUIDPipe) connectionId: string,
+    @Body() dto: SyncInsightsDto,
+  ) {
+    const scope = this.requireScope(ctx);
+
+    try {
+      return await this.insightsSyncService.syncInsights({
+        tenantId: scope.tenantId,
+        workspaceId: scope.workspaceId,
+        agencyClientId: scope.agencyClientId,
+        connectionId,
+        since: dto.since,
+        until: dto.until,
+      });
+    } catch (error) {
       throw mapSocialAdSyncError(error);
     }
   }

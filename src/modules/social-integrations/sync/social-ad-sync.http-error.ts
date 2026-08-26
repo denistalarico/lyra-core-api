@@ -2,6 +2,10 @@ import { HttpException, HttpStatus } from '@nestjs/common';
 import { SocialAdCredentialError } from '../credentials/social-ad-credential.error';
 import type { SocialAdCredentialErrorCode } from '../credentials/social-ad-credential.error';
 import { MetaGraphError } from '../services/meta-graph-error';
+import {
+  SocialAdInsightsTruncatedError,
+  SocialAdInsightsWindowNotClosedError,
+} from './social-ad-insights.error';
 
 /**
  * Turns a sync failure into an HTTP answer that says something true.
@@ -87,36 +91,96 @@ const GRAPH_STATUS: Record<MetaGraphError['kind'], HttpStatus> = {
   permanent: HttpStatus.BAD_GATEWAY,
 };
 
-export function mapSocialAdSyncError(error: unknown): unknown {
+/** A failure reduced to what may be shown: a stable code and a fixed message. */
+export type SocialAdSyncFailure = {
+  status: HttpStatus;
+  code: string;
+  message: string;
+  reason?: string;
+  retryAfterMs?: number;
+  /** Latest settled day, on a window that reached into an unfinished one. */
+  maxUntil?: string;
+  /** The ad account's zone, which decided the day above. */
+  timezone?: string;
+};
+
+/**
+ * Describes a failure without deciding what to do about it.
+ *
+ * Split out from the mapper below because a failure has two destinations now.
+ * A run that wrote nothing throws, and this becomes the HTTP error. A run that
+ * already wrote real facts must not throw — that would report "failed" for
+ * days that are now stored — so the same description travels inside the summary
+ * instead, naming the level that did not complete.
+ */
+export function describeSocialAdSyncFailure(
+  error: unknown,
+): SocialAdSyncFailure {
   if (error instanceof SocialAdCredentialError) {
-    return new HttpException(
-      {
-        statusCode: CREDENTIAL_STATUS[error.code],
-        code: error.code,
-        message: CREDENTIAL_MESSAGE[error.code],
-      },
-      CREDENTIAL_STATUS[error.code],
-    );
+    return {
+      status: CREDENTIAL_STATUS[error.code],
+      code: error.code,
+      message: CREDENTIAL_MESSAGE[error.code],
+    };
+  }
+
+  if (error instanceof SocialAdInsightsTruncatedError) {
+    return {
+      status: HttpStatus.CONFLICT,
+      code: 'insights_window_truncated',
+      // The repair is the caller's, and it is a smaller window — not a retry,
+      // which would truncate at exactly the same place.
+      message: 'This window returned too many rows. Request a shorter range.',
+    };
+  }
+
+  if (error instanceof SocialAdInsightsWindowNotClosedError) {
+    return {
+      status: HttpStatus.CONFLICT,
+      code: 'insights_window_not_closed',
+      // The boundary is the answer, not a hint: it depends on the account's own
+      // clock, which the caller cannot derive from anything in the request.
+      message: `This window includes a day the ad account has not finished. Request up to ${error.maxUntil}.`,
+      maxUntil: error.maxUntil,
+      timezone: error.timezone,
+    };
   }
 
   if (error instanceof MetaGraphError) {
-    const status = GRAPH_STATUS[error.kind];
+    return {
+      status: GRAPH_STATUS[error.kind],
+      code: `meta_${error.kind}`,
+      // Already sanitized upstream: either a fixed string of ours or a provider
+      // message with URLs, tokens and secrets redacted.
+      message: error.message,
+      // Only for auth, where it separates "re-authorize" from "grant a role in
+      // Business Manager" — two very different repairs.
+      ...(error.authReason ? { reason: error.authReason } : {}),
+      // Meta's own advice about when to come back, when it gave any.
+      ...(error.retryAfterMs ? { retryAfterMs: error.retryAfterMs } : {}),
+    };
+  }
 
-    return new HttpException(
-      {
-        statusCode: status,
-        code: `meta_${error.kind}`,
-        // Already sanitized upstream: either a fixed string of ours or a
-        // provider message with URLs, tokens and secrets redacted.
-        message: error.message,
-        // Only for auth, where it separates "re-authorize" from "grant a role
-        // in Business Manager" — two very different repairs.
-        ...(error.authReason ? { reason: error.authReason } : {}),
-        // Meta's own advice about when to come back, when it gave any.
-        ...(error.retryAfterMs ? { retryAfterMs: error.retryAfterMs } : {}),
-      },
-      status,
-    );
+  // An unclassified error is a bug. It gets a code that says so rather than a
+  // reassuring one, and the message stays generic because its own text has been
+  // through no sanitizer.
+  return {
+    status: HttpStatus.INTERNAL_SERVER_ERROR,
+    code: 'internal_error',
+    message: 'The sync failed.',
+  };
+}
+
+export function mapSocialAdSyncError(error: unknown): unknown {
+  if (
+    error instanceof SocialAdCredentialError ||
+    error instanceof SocialAdInsightsTruncatedError ||
+    error instanceof SocialAdInsightsWindowNotClosedError ||
+    error instanceof MetaGraphError
+  ) {
+    const { status, ...body } = describeSocialAdSyncFailure(error);
+
+    return new HttpException({ statusCode: status, ...body }, status);
   }
 
   // Anything else is a bug rather than a known failure, and dressing it up as a

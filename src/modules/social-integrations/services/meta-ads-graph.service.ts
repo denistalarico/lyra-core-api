@@ -78,7 +78,34 @@ export type MetaGraphEdgeRequest = {
   limit: number;
   maxPages: number;
   failureMessage: string;
+  /**
+   * Extra query parameters for edges that need more than a field list.
+   *
+   * Insights is the reason: its answer is defined by `level`, `time_range`,
+   * `time_increment` and the attribution flag as much as by its fields. They
+   * are passed here rather than baked into a second URL builder, so the token,
+   * the version and the origin keep being attached in exactly one place.
+   */
+  params?: Readonly<Record<string, string>>;
 };
+
+/**
+ * Query parameters `buildGraphUrl` owns and a caller may not supply.
+ *
+ * `access_token` above all: a caller-supplied one would silently replace the
+ * credential this client was given. The other three are set from the typed
+ * fields of the request, and letting a loose map override them would mean two
+ * sources of truth for the same value.
+ */
+const RESERVED_GRAPH_PARAMS = new Set([
+  'access_token',
+  'fields',
+  'limit',
+  'after',
+]);
+
+/** Graph parameter names are lowercase words; anything else is a bug. */
+const GRAPH_PARAM_PATTERN = /^[a-z_]+$/;
 
 export type MetaAdAccount = {
   externalAccountId: string;
@@ -308,6 +335,7 @@ export class MetaAdsGraphService {
           fields: input.fields,
           limit: input.limit,
           after,
+          params: input.params,
         }),
       maxPages: input.maxPages,
       failureMessage: input.failureMessage,
@@ -385,6 +413,7 @@ export class MetaAdsGraphService {
     fields: string;
     limit?: number;
     after?: string | null;
+    params?: Readonly<Record<string, string>>;
   }): URL {
     if (!GRAPH_PATH_PATTERN.test(input.path)) {
       // A caller built this string, so a bad one is a programming error rather
@@ -395,6 +424,17 @@ export class MetaAdsGraphService {
     const url = new URL(
       `${META_GRAPH_ORIGIN}/${this.graphVersion}/${input.path}`,
     );
+
+    // Written before the owned parameters below, so a caller cannot shadow one
+    // even if the guard were ever relaxed.
+    for (const [key, value] of Object.entries(input.params ?? {})) {
+      if (!GRAPH_PARAM_PATTERN.test(key) || RESERVED_GRAPH_PARAMS.has(key)) {
+        throw new BadRequestException('Invalid Meta Graph parameter.');
+      }
+
+      url.searchParams.set(key, value);
+    }
+
     url.searchParams.set('fields', input.fields);
 
     if (input.limit) {

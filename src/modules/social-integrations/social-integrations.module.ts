@@ -3,15 +3,22 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { SettingsCryptoService } from '../../common/crypto/settings-crypto.service';
 import { PermissionsModule } from '../permissions';
 import { SocialAdCredentialResolver } from './credentials/social-ad-credential.resolver';
-import { SocialAdAccountConnectionEntity, SocialAdEntity } from './entities';
+import {
+  SocialAdAccountConnectionEntity,
+  SocialAdEntity,
+  SocialAdMetricDailyEntity,
+} from './entities';
 import { SocialInternalAccessService } from './internal/social-internal-access.service';
 import { MetaAdsEntityReaderService } from './services/meta-ads-entity-reader.service';
 import { MetaAdsGraphService } from './services/meta-ads-graph.service';
+import { MetaAdsInsightsReaderService } from './services/meta-ads-insights-reader.service';
 import { MetaAdsOAuthService } from './services/meta-ads-oauth.service';
 import { MetaAdsSystemUserService } from './services/meta-ads-system-user.service';
 import { SocialAdConnectionService } from './services/social-ad-connection.service';
 import { SocialAdEntityWriterService } from './services/social-ad-entity-writer.service';
 import { SocialAdHierarchySyncService } from './services/social-ad-hierarchy-sync.service';
+import { SocialAdInsightsSyncService } from './services/social-ad-insights-sync.service';
+import { SocialAdMetricsWriterService } from './services/social-ad-metrics-writer.service';
 import { SocialIntegrationsController } from './social-integrations.controller';
 
 /**
@@ -25,12 +32,17 @@ import { SocialIntegrationsController } from './social-integrations.controller';
 @Module({
   imports: [
     PermissionsModule,
-    // `SocialAdEntity` joins now that the writer consumes it. The metrics and
-    // sync-run tables stay out until something reads or writes them — a
-    // repository registered ahead of its consumer is an invitation to reach for
-    // it from outside the pipeline that owns it.
+    // `SocialAdMetricDailyEntity` joins now that the metrics writer consumes
+    // it. `SocialAdSyncRunEntity` stays out until something reads or writes it
+    // — a repository registered ahead of its consumer is an invitation to reach
+    // for it from outside the pipeline that owns it, and the run table's owner
+    // is the worker that does not exist yet.
     TypeOrmModule.forFeature(
-      [SocialAdAccountConnectionEntity, SocialAdEntity],
+      [
+        SocialAdAccountConnectionEntity,
+        SocialAdEntity,
+        SocialAdMetricDailyEntity,
+      ],
       'agency',
     ),
   ],
@@ -45,6 +57,9 @@ import { SocialIntegrationsController } from './social-integrations.controller';
     MetaAdsEntityReaderService,
     SocialAdEntityWriterService,
     SocialAdHierarchySyncService,
+    MetaAdsInsightsReaderService,
+    SocialAdMetricsWriterService,
+    SocialAdInsightsSyncService,
     SettingsCryptoService,
   ],
   // The resolver is exported with no consumer yet on purpose: it is the

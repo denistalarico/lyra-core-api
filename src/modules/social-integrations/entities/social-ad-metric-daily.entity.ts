@@ -254,9 +254,21 @@ export class SocialAdMetricDailyEntity {
   videoViews!: string;
 
   /**
-   * The full action breakdown as reported, keyed by action type. The promoted
-   * columns above are the handful the product asks about by name; this keeps
-   * the rest addressable without a migration per objective.
+   * The full action breakdown as reported, plus the rules that read it:
+   * `{ mappingVersion, counts, values }`, the two maps keyed by Meta's own
+   * action type.
+   *
+   * Both halves, because the promoted columns above are derived from both and
+   * the point of keeping this is that a mapping change never requires asking
+   * Meta for the window again. `leads`, `conversions` and `conversion_value`
+   * are all re-derivable from these two maps — which matters, because Meta
+   * reports the same lead under up to seven type names and the rule for picking
+   * one among them is the part most likely to need revising.
+   *
+   * `mappingVersion` is what makes that revision safe: it says which definition
+   * of `leads` a stored row follows, so rows written before and after a change
+   * can be told apart instead of being summed into one total that means two
+   * different things.
    */
   @Column({ type: 'jsonb', default: () => "'{}'::jsonb" })
   actions!: Record<string, unknown>;
