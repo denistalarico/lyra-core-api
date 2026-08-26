@@ -25,6 +25,8 @@ import { SelectMetaAdsAccountDto } from './dto/select-meta-ads-account.dto';
 import { MetaAdsOAuthService } from './services/meta-ads-oauth.service';
 import { MetaAdsSystemUserService } from './services/meta-ads-system-user.service';
 import { SocialAdConnectionService } from './services/social-ad-connection.service';
+import { SocialAdHierarchySyncService } from './services/social-ad-hierarchy-sync.service';
+import { mapSocialAdSyncError } from './sync/social-ad-sync.http-error';
 
 /**
  * Permission for every integration operation on this controller.
@@ -43,6 +45,7 @@ export class SocialIntegrationsController {
     private readonly metaAdsOAuthService: MetaAdsOAuthService,
     private readonly connectionService: SocialAdConnectionService,
     private readonly systemUserService: MetaAdsSystemUserService,
+    private readonly hierarchySyncService: SocialAdHierarchySyncService,
   ) {}
 
   @Post('meta-ads/connect')
@@ -214,6 +217,43 @@ export class SocialIntegrationsController {
       agencyClientId: scope.agencyClientId,
       connectionId,
     });
+  }
+
+  /**
+   * Mirrors the ad hierarchy of one connection into `social_ad_entities`.
+   *
+   * The connection id is the only thing the request contributes, and it is a
+   * path parameter rather than a body field. Tenant, workspace and managed
+   * client come from the authenticated context and are then re-read from the
+   * connection row itself — a body that could name a scope would let an
+   * authenticated agency member sync somebody else's ad account into their own
+   * workspace.
+   *
+   * Synchronous: `social_ad_sync_runs` exists but has no worker yet, so a
+   * queued response would be a promise nothing keeps.
+   */
+  @Post('connections/:connectionId/sync/entities')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireProductEntitlement('social')
+  @RequirePermission(SOCIAL_INTEGRATIONS_PERMISSION)
+  async syncConnectionEntities(
+    @RequestContextData() ctx: RequestContext,
+    @Param('connectionId', ParseUUIDPipe) connectionId: string,
+  ) {
+    const scope = this.requireScope(ctx);
+
+    try {
+      return await this.hierarchySyncService.syncHierarchy({
+        tenantId: scope.tenantId,
+        workspaceId: scope.workspaceId,
+        agencyClientId: scope.agencyClientId,
+        connectionId,
+      });
+    } catch (error) {
+      // Credential codes and Graph kinds become statuses here and nowhere else;
+      // an unrecognized error travels on unchanged and becomes a 500.
+      throw mapSocialAdSyncError(error);
+    }
   }
 
   /**

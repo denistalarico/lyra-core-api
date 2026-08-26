@@ -33,6 +33,19 @@ export const META_GRAPH_TIMEOUT_MS = 30_000;
 const MAX_AD_ACCOUNT_PAGES = 10;
 const AD_ACCOUNT_PAGE_SIZE = 50;
 
+/**
+ * What a caller may address on the Graph: `act_123`, or `act_123/campaigns`.
+ *
+ * The path is assembled by callers, so it is validated rather than trusted. A
+ * value carrying `..`, a query string or a second host would otherwise turn
+ * this client into a general-purpose fetcher pointed at Meta with our token
+ * attached.
+ */
+const GRAPH_PATH_PATTERN = /^[A-Za-z0-9_]+(?:\/[a-z_]+)?$/;
+
+/** A Graph path always opens with its API version: `/v25.0/…`. */
+const GRAPH_VERSION_PREFIX = /^\/v\d+\.\d+\//;
+
 /** A completed Graph call: the response, its body, and what the headers said. */
 type GraphRequestResult = {
   response: Response;
@@ -44,6 +57,27 @@ type GraphRequestResult = {
 export type MetaGraphPage<T> = {
   rows: T[];
   usage: MetaGraphUsage;
+  /**
+   * The walk stopped at the page ceiling with more pages still on offer.
+   *
+   * Reported rather than swallowed because the difference matters to anything
+   * that reasons about absence: a truncated read looks exactly like a complete
+   * one from the row list alone, and treating it as complete is how a sync
+   * concludes that ten thousand objects "disappeared" and archives them.
+   */
+  truncated: boolean;
+};
+
+/** One paginated edge read, addressed by path and field list. */
+export type MetaGraphEdgeRequest = {
+  accessToken: string;
+  /** Graph path below the version, e.g. `act_123/campaigns`. */
+  path: string;
+  /** Comma-separated Graph field list. */
+  fields: string;
+  limit: number;
+  maxPages: number;
+  failureMessage: string;
 };
 
 export type MetaAdAccount = {
@@ -219,7 +253,65 @@ export class MetaAdsGraphService {
       }
     }
 
-    return { rows: accounts, usage: page.usage };
+    return { rows: accounts, usage: page.usage, truncated: page.truncated };
+  }
+
+  /**
+   * Reads one Graph node — an ad account, a campaign — with no pagination.
+   *
+   * Separate from `readEdge` because a node has no `data` array to walk, and
+   * making the paginator tolerate a bodiless shape would weaken the one check
+   * that catches an edge answering with an error object instead of rows.
+   */
+  async readNode(input: {
+    accessToken: string;
+    path: string;
+    fields: string;
+    failureMessage: string;
+  }): Promise<Record<string, unknown>> {
+    const url = this.buildGraphUrl({
+      path: input.path,
+      accessToken: input.accessToken,
+      fields: input.fields,
+    });
+
+    const { response, data, usage } = await this.requestGraph(url);
+
+    if (!response.ok || !isRecord(data)) {
+      throw this.toGraphError({
+        response,
+        data,
+        usage,
+        safeMessage: input.failureMessage,
+        allowProviderMessage: true,
+      });
+    }
+
+    return data;
+  }
+
+  /**
+   * Reads a paginated Graph edge through the S2.1 walker.
+   *
+   * The only way for a reader to page a Meta edge. Everything the walker
+   * guarantees — the URL rebuilt from our own credentials on every page, a
+   * `next` that must point at the same path on the same origin, a repeated
+   * cursor ending the walk — is a property of *that* loop, and a second
+   * pagination implementation elsewhere would have none of it.
+   */
+  async readEdge(input: MetaGraphEdgeRequest): Promise<MetaGraphPage<unknown>> {
+    return this.fetchPagedRows({
+      buildUrl: (after) =>
+        this.buildGraphUrl({
+          path: input.path,
+          accessToken: input.accessToken,
+          fields: input.fields,
+          limit: input.limit,
+          after,
+        }),
+      maxPages: input.maxPages,
+      failureMessage: input.failureMessage,
+    });
   }
 
   /**
@@ -246,6 +338,7 @@ export class MetaAdsGraphService {
 
     let usage: MetaGraphUsage = EMPTY_META_GRAPH_USAGE;
     let after: string | null = null;
+    let truncated = false;
 
     for (let page = 0; page < input.maxPages; page += 1) {
       const url = input.buildUrl(after);
@@ -270,9 +363,51 @@ export class MetaAdsGraphService {
       after = this.nextCursor(data.paging, url.pathname, seenCursors);
 
       if (!after) break;
+
+      // Meta still has more and the ceiling is reached: the row list is a
+      // prefix, not the edge.
+      truncated = page === input.maxPages - 1;
     }
 
-    return { rows, usage };
+    return { rows, usage, truncated };
+  }
+
+  /**
+   * Builds a Graph URL for a validated path, always with our own credentials.
+   *
+   * Single builder for nodes and edges so the token, the version and the origin
+   * are attached in exactly one place — a second builder is how a call ends up
+   * on an unversioned path or, worse, with a caller-supplied token.
+   */
+  private buildGraphUrl(input: {
+    path: string;
+    accessToken: string;
+    fields: string;
+    limit?: number;
+    after?: string | null;
+  }): URL {
+    if (!GRAPH_PATH_PATTERN.test(input.path)) {
+      // A caller built this string, so a bad one is a programming error rather
+      // than a provider failure — and must not become a request.
+      throw new BadRequestException('Invalid Meta Graph path.');
+    }
+
+    const url = new URL(
+      `${META_GRAPH_ORIGIN}/${this.graphVersion}/${input.path}`,
+    );
+    url.searchParams.set('fields', input.fields);
+
+    if (input.limit) {
+      url.searchParams.set('limit', String(input.limit));
+    }
+
+    if (input.after) {
+      url.searchParams.set('after', input.after);
+    }
+
+    url.searchParams.set('access_token', input.accessToken);
+
+    return url;
   }
 
   /**
@@ -330,12 +465,22 @@ export class MetaAdsGraphService {
   /**
    * Reads the next cursor out of `paging.next`, or null to stop.
    *
-   * Accepts a cursor only when `next` points back at the Graph origin, at the
-   * expected API version, and at the very same path we asked for — a
+   * Accepts a cursor only when `next` points back at the Graph origin, at a
+   * versioned Graph path, and at the very same edge we asked for — a
    * redirect-shaped response must not turn this client into an open fetcher,
    * and a `next` that jumps to a different edge is not pagination. Credentials
    * embedded in a `next` URL are never honoured either: `username`/`password`
    * disqualify it outright, and the token always comes from `buildUrl`.
+   *
+   * The version segment is compared as "some version", not as "our version".
+   * Meta rolls `paging.next` forward on its own — a request against v25.0
+   * answers with a `next` on v26.0 — and demanding equality made every walk
+   * stop after its first page while reporting nothing wrong. That is the worst
+   * possible shape for this failure: the caller receives a prefix that looks
+   * exactly like a complete edge, and a sync built on it concludes that
+   * everything past page one has been deleted. The cursor is still the only
+   * thing taken from that URL, so nothing is loosened by accepting a newer
+   * version of the same path.
    */
   private nextCursor(
     paging: unknown,
@@ -356,8 +501,9 @@ export class MetaAdsGraphService {
 
     if (
       parsedNext.origin !== META_GRAPH_ORIGIN ||
-      !parsedNext.pathname.startsWith(`/${this.graphVersion}/`) ||
-      parsedNext.pathname !== expectedPath ||
+      !GRAPH_VERSION_PREFIX.test(parsedNext.pathname) ||
+      this.withoutVersion(parsedNext.pathname) !==
+        this.withoutVersion(expectedPath) ||
       parsedNext.username ||
       parsedNext.password
     ) {
@@ -372,6 +518,11 @@ export class MetaAdsGraphService {
     seenCursors.add(after);
 
     return after;
+  }
+
+  /** `/v26.0/act_1/ads` → `/act_1/ads`, so two versions of one edge compare equal. */
+  private withoutVersion(pathname: string): string {
+    return pathname.replace(GRAPH_VERSION_PREFIX, '/');
   }
 
   private parseAdAccount(value: unknown): MetaAdAccount | null {

@@ -635,4 +635,191 @@ describe('MetaAdsGraphService', () => {
       expect(requested[1].searchParams.get('access_token')).toBe('token');
     });
   });
+
+  describe('readNode and readEdge', () => {
+    it('addresses a node under the configured Graph version', async () => {
+      const requested = captureFetch({ id: 'act_1234567890', currency: 'BRL' });
+
+      await service.readNode({
+        accessToken: 'token',
+        path: 'act_1234567890',
+        fields: 'id,currency',
+        failureMessage: 'Meta Ads account read failed.',
+      });
+
+      expect(requested[0].pathname).toBe('/v25.0/act_1234567890');
+      expect(requested[0].searchParams.get('fields')).toBe('id,currency');
+      expect(requested[0].searchParams.get('access_token')).toBe('token');
+    });
+
+    it('pages an edge with the same walker the account list uses', async () => {
+      const requested: URL[] = [];
+      global.fetch = ((url: URL) => {
+        requested.push(url);
+
+        return requested.length === 1
+          ? jsonResponse({
+              data: [{ id: '1' }, { id: '2' }],
+              paging: {
+                next: 'https://graph.facebook.com/v25.0/act_1/campaigns?after=cursor-2&access_token=stolen',
+              },
+            })
+          : jsonResponse({ data: [{ id: '3' }] });
+      }) as never;
+
+      const page = await service.readEdge({
+        accessToken: 'token',
+        path: 'act_1/campaigns',
+        fields: 'id',
+        limit: 200,
+        maxPages: 5,
+        failureMessage: 'Meta Ads campaigns read failed.',
+      });
+
+      expect(page.rows).toHaveLength(3);
+      expect(page.truncated).toBe(false);
+      // The cursor is taken and the URL rebuilt with our own credentials, so a
+      // token planted in `next` never leaves this process.
+      expect(requested[1].searchParams.get('after')).toBe('cursor-2');
+      expect(requested[1].searchParams.get('access_token')).toBe('token');
+    });
+
+    it('reports truncation instead of presenting a prefix as the edge', async () => {
+      // The distinction the sync depends on: a truncated read and a complete
+      // one look identical from the row list, and treating the first as
+      // complete is how ten thousand objects get archived as "disappeared".
+      let calls = 0;
+      global.fetch = (() => {
+        calls += 1;
+
+        return jsonResponse({
+          data: [{ id: String(calls) }],
+          paging: {
+            next: `https://graph.facebook.com/v25.0/act_1/ads?after=cursor-${calls + 1}`,
+          },
+        });
+      }) as never;
+
+      const page = await service.readEdge({
+        accessToken: 'token',
+        path: 'act_1/ads',
+        fields: 'id',
+        limit: 200,
+        maxPages: 3,
+        failureMessage: 'Meta Ads ads read failed.',
+      });
+
+      expect(calls).toBe(3);
+      expect(page.rows).toHaveLength(3);
+      expect(page.truncated).toBe(true);
+    });
+
+    it('refuses a path that is not a Graph node or edge', async () => {
+      const requested = captureFetch({ data: [] });
+
+      // The path is assembled by callers, so it is validated rather than
+      // trusted: a value carrying a second host or a query string would turn
+      // this client into a fetcher with our token attached.
+      for (const path of [
+        '../me',
+        'act_1/campaigns?access_token=x',
+        'https://evil.example.com/x',
+        'act_1/campaigns/extra',
+      ]) {
+        await expect(
+          service.readEdge({
+            accessToken: 'token',
+            path,
+            fields: 'id',
+            limit: 10,
+            maxPages: 1,
+            failureMessage: 'nope',
+          }),
+        ).rejects.toBeInstanceOf(BadRequestException);
+      }
+
+      expect(requested).toHaveLength(0);
+    });
+
+    it('follows a cursor Meta rolled forward to a newer API version', async () => {
+      // Observed in production: a request against v25.0 answers with
+      // `paging.next` on v26.0. Demanding our exact version made every walk
+      // stop after page one *and* report nothing wrong — a prefix that looks
+      // like a complete edge, which is what makes a sync archive everything
+      // past it as deleted.
+      const requested: URL[] = [];
+      global.fetch = ((url: URL) => {
+        requested.push(url);
+
+        return requested.length === 1
+          ? jsonResponse({
+              data: [{ id: '1' }],
+              paging: {
+                next: 'https://graph.facebook.com/v26.0/act_1/ads?after=cursor-2&limit=200',
+              },
+            })
+          : jsonResponse({ data: [{ id: '2' }] });
+      }) as never;
+
+      const page = await service.readEdge({
+        accessToken: 'token',
+        path: 'act_1/ads',
+        fields: 'id',
+        limit: 200,
+        maxPages: 5,
+        failureMessage: 'Meta Ads ads read failed.',
+      });
+
+      expect(page.rows).toHaveLength(2);
+      // Still our own version and our own token on the wire: only the cursor
+      // was taken from that URL.
+      expect(requested[1].pathname).toBe('/v25.0/act_1/ads');
+      expect(requested[1].searchParams.get('access_token')).toBe('token');
+    });
+
+    it('still refuses another edge, whatever version it claims', async () => {
+      const fetchMock = jest
+        .fn()
+        .mockResolvedValueOnce(
+          jsonResponse({
+            data: [{ id: '1' }],
+            paging: {
+              next: 'https://graph.facebook.com/v26.0/act_1/campaigns?after=abc',
+            },
+          }),
+        )
+        .mockResolvedValue(jsonResponse({ data: [] }));
+      global.fetch = fetchMock as never;
+
+      await service.readEdge({
+        accessToken: 'token',
+        path: 'act_1/ads',
+        fields: 'id',
+        limit: 200,
+        maxPages: 5,
+        failureMessage: 'Meta Ads ads read failed.',
+      });
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('classifies an edge failure like every other Graph call', async () => {
+      global.fetch = (() =>
+        jsonResponse(
+          { error: { message: 'slow down', code: 17 } },
+          false,
+        )) as never;
+
+      await expect(
+        service.readEdge({
+          accessToken: 'token',
+          path: 'act_1/campaigns',
+          fields: 'id',
+          limit: 10,
+          maxPages: 1,
+          failureMessage: 'Meta Ads campaigns read failed.',
+        }),
+      ).rejects.toMatchObject({ kind: 'rate_limited' });
+    });
+  });
 });
