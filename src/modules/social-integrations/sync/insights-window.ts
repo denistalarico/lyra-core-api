@@ -98,7 +98,7 @@ export function assertClosedInsightsWindow(
  * hand. The zone is the one the credential resolver already refused to default:
  * an unknown zone stops a read long before this line.
  */
-function currentDayIn(timezone: string, now: Date): string {
+export function currentDayIn(timezone: string, now: Date = new Date()): string {
   return new Intl.DateTimeFormat('en-CA', {
     timeZone: timezone,
     year: 'numeric',
@@ -107,13 +107,45 @@ function currentDayIn(timezone: string, now: Date): string {
   }).format(now);
 }
 
-/** The calendar day before, computed on the date alone — no zone involved. */
-function previousDay(day: string): string {
+/**
+ * The hour of day in an IANA zone, 0–23.
+ *
+ * Exists for the scheduler, which waits until an account's own morning before
+ * asking for its previous day. `hourCycle: 'h23'` because `en-CA` would
+ * otherwise render midnight as 24.
+ */
+export function currentHourIn(
+  timezone: string,
+  now: Date = new Date(),
+): number {
+  return Number(
+    new Intl.DateTimeFormat('en-CA', {
+      timeZone: timezone,
+      hour: '2-digit',
+      hourCycle: 'h23',
+    }).format(now),
+  );
+}
+
+/**
+ * A calendar day moved by whole days, computed on the date alone.
+ *
+ * No zone is involved and none may be: the input is already a day in the
+ * account's own zone, and re-expressing it as an instant to do arithmetic is
+ * exactly the conversion this module exists to avoid. UTC is used only as a
+ * calendar with no daylight saving in it — the offsets cancel.
+ */
+export function shiftDay(day: string, days: number): string {
   const [year, month, date] = day.split('-').map(Number);
 
-  return new Date(Date.UTC(year, month - 1, date) - MS_PER_DAY)
+  return new Date(Date.UTC(year, month - 1, date) + days * MS_PER_DAY)
     .toISOString()
     .slice(0, 10);
+}
+
+/** The calendar day before. */
+function previousDay(day: string): string {
+  return shiftDay(day, -1);
 }
 
 /**

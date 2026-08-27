@@ -91,4 +91,6 @@ export type NormalizedAdMetricPage = {
   truncated: boolean;
   /** Rows dropped as unreadable. Counted, never coerced into zeros. */
   skipped: number;
+  /** Graph requests this level actually cost. */
+  apiCalls: number;
 };

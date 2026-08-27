@@ -20,6 +20,7 @@ import {
   RequirePermission,
   RequireProductEntitlement,
 } from '../permissions';
+import { EnqueueSyncDto } from './dto/enqueue-sync.dto';
 import { SelectInternalAdAccountDto } from './dto/select-internal-ad-account.dto';
 import { SelectMetaAdsAccountDto } from './dto/select-meta-ads-account.dto';
 import { SyncInsightsDto } from './dto/sync-insights.dto';
@@ -28,6 +29,7 @@ import { MetaAdsSystemUserService } from './services/meta-ads-system-user.servic
 import { SocialAdConnectionService } from './services/social-ad-connection.service';
 import { SocialAdHierarchySyncService } from './services/social-ad-hierarchy-sync.service';
 import { SocialAdInsightsSyncService } from './services/social-ad-insights-sync.service';
+import { SocialAdSyncRunService } from './services/social-ad-sync-run.service';
 import { mapSocialAdSyncError } from './sync/social-ad-sync.http-error';
 
 /**
@@ -49,6 +51,7 @@ export class SocialIntegrationsController {
     private readonly systemUserService: MetaAdsSystemUserService,
     private readonly hierarchySyncService: SocialAdHierarchySyncService,
     private readonly insightsSyncService: SocialAdInsightsSyncService,
+    private readonly syncRunService: SocialAdSyncRunService,
   ) {}
 
   @Post('meta-ads/connect')
@@ -294,6 +297,82 @@ export class SocialIntegrationsController {
     } catch (error) {
       throw mapSocialAdSyncError(error);
     }
+  }
+
+  /**
+   * Queues a sync for one connection and answers with the run.
+   *
+   * The one endpoint that does not touch Meta. It validates — scope, connection,
+   * and the window's closed-day rule — and then writes a row; the worker does
+   * the reading. That is what makes it usable for a 90-day window: a request
+   * that walked the provider inline would hold an HTTP connection open for the
+   * length of a paginated read and lose everything it had done if the client
+   * gave up halfway.
+   *
+   * With `since` and `until` it enqueues the full pipeline (hierarchy, then
+   * account and campaign insights). Without them it enqueues a hierarchy
+   * refresh, which is the only part of the pipeline that has no date dimension.
+   *
+   * A second identical request while the first is still queued or running
+   * answers with that same run rather than creating another — the caller sees
+   * one run because there is one piece of work.
+   */
+  @Post('connections/:connectionId/sync')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireProductEntitlement('social')
+  @RequirePermission(SOCIAL_INTEGRATIONS_PERMISSION)
+  async enqueueConnectionSync(
+    @RequestContextData() ctx: RequestContext,
+    @Param('connectionId', ParseUUIDPipe) connectionId: string,
+    @Body() dto: EnqueueSyncDto,
+  ) {
+    const scope = this.requireScope(ctx);
+
+    try {
+      return await this.syncRunService.request({
+        tenantId: scope.tenantId,
+        workspaceId: scope.workspaceId,
+        agencyClientId: scope.agencyClientId,
+        connectionId,
+        since: dto.since,
+        until: dto.until,
+        requestedById: ctx.userId ?? null,
+      });
+    } catch (error) {
+      throw mapSocialAdSyncError(error);
+    }
+  }
+
+  /**
+   * The recent history of one connection's syncs.
+   *
+   * The answer to "why is yesterday missing?", which is the only question
+   * anyone asks about a sync. Runs are returned sanitized: no lock holder, no
+   * cursor state, no scope columns, and every error already reduced to a code
+   * where it was recorded.
+   *
+   * A connection outside the caller's scope produces an empty list — the same
+   * answer as a connection with no history, so nothing here confirms whether an
+   * id exists.
+   */
+  @Get('connections/:connectionId/sync-runs')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireProductEntitlement('social')
+  @RequirePermission(SOCIAL_INTEGRATIONS_PERMISSION)
+  async listConnectionSyncRuns(
+    @RequestContextData() ctx: RequestContext,
+    @Param('connectionId', ParseUUIDPipe) connectionId: string,
+  ) {
+    const scope = this.requireScope(ctx);
+
+    const items = await this.syncRunService.listRecent({
+      tenantId: scope.tenantId,
+      workspaceId: scope.workspaceId,
+      agencyClientId: scope.agencyClientId,
+      connectionId,
+    });
+
+    return { items, total: items.length };
   }
 
   /**

@@ -163,7 +163,7 @@ export class MetaAdsEntityReaderService {
   }
 
   private collect(
-    page: { rows: unknown[]; truncated: boolean },
+    page: { rows: unknown[]; truncated: boolean; apiCalls: number },
     normalize: (row: unknown) => NormalizedAdEntity | null,
   ): NormalizedAdEntityPage {
     const rows: NormalizedAdEntity[] = [];
@@ -183,6 +183,11 @@ export class MetaAdsEntityReaderService {
       }
     }
 
-    return { rows, truncated: page.truncated, skipped };
+    return {
+      rows,
+      truncated: page.truncated,
+      skipped,
+      apiCalls: page.apiCalls,
+    };
   }
 }

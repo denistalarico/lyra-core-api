@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import type { ResolvedAdCredential } from '../credentials/resolved-ad-credential';
 import {
   SocialAdCredentialResolver,
   type SocialAdCredentialScope,
@@ -29,6 +30,8 @@ export type SocialAdHierarchyLevelSummary = {
   skipped: number;
   /** The read hit the page ceiling, so stale archiving was skipped. */
   truncated: boolean;
+  /** Graph requests this level cost. */
+  apiCalls: number;
 };
 
 /**
@@ -50,6 +53,8 @@ export type SocialAdHierarchySyncSummary = {
   adsCount: number;
   entitiesWritten: number;
   entitiesArchived: number;
+  /** Graph requests the whole sweep cost. */
+  apiCalls: number;
   /**
    * True when at least one level was truncated. The mirror is usable, but it is
    * not a complete snapshot and nothing was archived at that level.
@@ -88,12 +93,32 @@ export class SocialAdHierarchySyncService {
   async syncHierarchy(
     input: SyncAdHierarchyInput,
   ): Promise<SocialAdHierarchySyncSummary> {
-    const startedAt = new Date();
-
     // Scope is part of the lookup, not a check afterwards: a connection from
     // another tenant, workspace or managed client is simply not found here, and
     // the caller never learns whether the id exists.
     const credential = await this.credentialResolver.resolve(input);
+
+    return this.syncHierarchyWith(credential);
+  }
+
+  /**
+   * The same sweep, for a caller that already holds the credential.
+   *
+   * Split out for the worker, which runs the hierarchy as one segment of a
+   * larger run and then reads insights with the *same* credential. Resolving
+   * once per segment would decrypt the same token three times per run and, more
+   * to the point, would let a run execute its segments against three separately
+   * resolved credentials — three chances for the connection to change underneath
+   * a single unit of work.
+   *
+   * Deliberately takes a `ResolvedAdCredential` rather than a scope: it cannot
+   * resolve one itself, so this is not a second door into the credential
+   * boundary.
+   */
+  async syncHierarchyWith(
+    credential: ResolvedAdCredential,
+  ): Promise<SocialAdHierarchySyncSummary> {
+    const startedAt = new Date();
 
     // Written from the resolved row, not from the request. They are equal by
     // construction, and taking the stored truth is what keeps a future queued
@@ -125,7 +150,9 @@ export class SocialAdHierarchySyncService {
         scope,
         seenAt,
         level: 'account',
-        page: { rows: accountRows, truncated: false, skipped: 0 },
+        // The account node is a single un-paginated read, so its cost is one
+        // request whether or not it produced a row.
+        page: { rows: accountRows, truncated: false, skipped: 0, apiCalls: 1 },
       }),
     );
 
@@ -170,6 +197,7 @@ export class SocialAdHierarchySyncService {
       adsCount: this.countOf(levels, 'ad'),
       entitiesWritten: levels.reduce((total, row) => total + row.written, 0),
       entitiesArchived: levels.reduce((total, row) => total + row.archived, 0),
+      apiCalls: levels.reduce((total, row) => total + row.apiCalls, 0),
       partial: levels.some((level) => level.truncated),
       startedAt: startedAt.toISOString(),
       finishedAt: finishedAt.toISOString(),
@@ -233,6 +261,7 @@ export class SocialAdHierarchySyncService {
       archived,
       skipped: input.page.skipped,
       truncated: input.page.truncated,
+      apiCalls: input.page.apiCalls,
     };
   }
 

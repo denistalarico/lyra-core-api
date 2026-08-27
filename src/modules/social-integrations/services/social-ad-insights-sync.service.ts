@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import type { ResolvedAdCredential } from '../credentials/resolved-ad-credential';
 import {
   SocialAdCredentialResolver,
   type SocialAdCredentialScope,
@@ -7,6 +8,7 @@ import type { SocialAdInsightsLevel } from '../sync/meta-ads-insights.contract';
 import {
   assertClosedInsightsWindow,
   parseInsightsWindow,
+  type InsightsWindow,
 } from '../sync/insights-window';
 import { SocialAdInsightsTruncatedError } from '../sync/social-ad-insights.error';
 import { describeSocialAdSyncFailure } from '../sync/social-ad-sync.http-error';
@@ -38,6 +40,8 @@ export type SocialAdInsightsLevelSummary = {
   written: number;
   /** Rows dropped as unreadable. Normally zero. */
   skipped: number;
+  /** Graph requests this level cost. */
+  apiCalls: number;
   /** Present only on a failed level: a stable code and a fixed message. */
   code?: string;
   message?: string;
@@ -69,6 +73,7 @@ export type SocialAdInsightsSyncSummary = {
   status: 'completed' | 'partial';
   levels: SocialAdInsightsLevelSummary[];
   rowsWritten: number;
+  apiCalls: number;
   startedAt: string;
   finishedAt: string;
   durationMs: number;
@@ -145,31 +150,15 @@ export class SocialAdInsightsSyncService {
 
     for (const level of INGEST_LEVELS) {
       try {
-        const page = await this.reader.read({
+        const summary = await this.ingestLevel({
           credential,
           level,
           window,
           syncedAt,
         });
 
-        // Checked before the write, so a truncated level stores nothing at all.
-        // A half-written window is worse than an unwritten one: the days that
-        // did land look complete, and nothing distinguishes the missing ones
-        // from days with no delivery.
-        if (page.truncated) {
-          throw new SocialAdInsightsTruncatedError(level);
-        }
-
-        const written = await this.writer.upsert(page.rows);
-        rowsWritten += written;
-
-        levels.push({
-          level,
-          status: 'completed',
-          read: page.rows.length,
-          written,
-          skipped: page.skipped,
-        });
+        rowsWritten += summary.written;
+        levels.push(summary);
       } catch (error) {
         /**
          * Nothing stored yet: the failure is the whole outcome, so it travels
@@ -193,6 +182,10 @@ export class SocialAdInsightsSyncService {
           read: 0,
           written: 0,
           skipped: 0,
+          // Unknown: the read may have spent requests before it failed, and the
+          // page that would have reported them is the one that never returned.
+          // A zero here understates rather than invents.
+          apiCalls: 0,
           code: failure.code,
           message: failure.message,
         });
@@ -218,6 +211,7 @@ export class SocialAdInsightsSyncService {
         : 'completed',
       levels,
       rowsWritten,
+      apiCalls: levels.reduce((total, level) => total + level.apiCalls, 0),
       startedAt: startedAt.toISOString(),
       finishedAt: finishedAt.toISOString(),
       durationMs: finishedAt.getTime() - startedAt.getTime(),
@@ -237,5 +231,51 @@ export class SocialAdInsightsSyncService {
     );
 
     return summary;
+  }
+
+  /**
+   * One level of a closed window: read, refuse if truncated, write.
+   *
+   * The unit both callers need. `syncInsights` loops over it for the two levels
+   * of a manual request; the worker calls it once per insights segment, so a
+   * rate limit that lands on the campaign read is recorded against
+   * `campaign_insights` and retried as that segment alone.
+   *
+   * Takes a credential rather than a scope, like the hierarchy's segment entry
+   * point, and for the same reason: a run resolves once, and a method that
+   * could resolve its own credential would be a second door into a boundary
+   * that exists to have exactly one.
+   *
+   * Throws on failure. There is no partial level — a level either wrote its
+   * window or did not — and the decision about what a failure means for the
+   * *run* belongs to the caller, which is the only one that knows what already
+   * landed.
+   */
+  async ingestLevel(input: {
+    credential: ResolvedAdCredential;
+    level: SocialAdInsightsLevel;
+    window: InsightsWindow;
+    syncedAt: Date;
+  }): Promise<SocialAdInsightsLevelSummary> {
+    const page = await this.reader.read(input);
+
+    // Checked before the write, so a truncated level stores nothing at all. A
+    // half-written window is worse than an unwritten one: the days that did
+    // land look complete, and nothing distinguishes the missing ones from days
+    // with no delivery.
+    if (page.truncated) {
+      throw new SocialAdInsightsTruncatedError(input.level);
+    }
+
+    const written = await this.writer.upsert(page.rows);
+
+    return {
+      level: input.level,
+      status: 'completed',
+      read: page.rows.length,
+      written,
+      skipped: page.skipped,
+      apiCalls: page.apiCalls,
+    };
   }
 }

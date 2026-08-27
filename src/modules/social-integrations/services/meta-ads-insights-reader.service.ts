@@ -135,6 +135,11 @@ export class MetaAdsInsightsReaderService {
       }
     }
 
-    return { rows, truncated: page.truncated, skipped };
+    return {
+      rows,
+      truncated: page.truncated,
+      skipped,
+      apiCalls: page.apiCalls,
+    };
   }
 }

@@ -66,6 +66,16 @@ export type MetaGraphPage<T> = {
    * concludes that ten thousand objects "disappeared" and archives them.
    */
   truncated: boolean;
+  /**
+   * Requests actually issued to reach these rows.
+   *
+   * Counted rather than inferred from the row count: pagination makes the two
+   * unrelated. The Marketing API meters against a business-wide quota, so this
+   * is how a run that quietly costs ten times its neighbours becomes visible
+   * before it starves them — and it is a real count, not an estimate a reader
+   * derived from what it happened to receive.
+   */
+  apiCalls: number;
 };
 
 /** One paginated edge read, addressed by path and field list. */
@@ -280,7 +290,12 @@ export class MetaAdsGraphService {
       }
     }
 
-    return { rows: accounts, usage: page.usage, truncated: page.truncated };
+    return {
+      rows: accounts,
+      usage: page.usage,
+      truncated: page.truncated,
+      apiCalls: page.apiCalls,
+    };
   }
 
   /**
@@ -367,11 +382,16 @@ export class MetaAdsGraphService {
     let usage: MetaGraphUsage = EMPTY_META_GRAPH_USAGE;
     let after: string | null = null;
     let truncated = false;
+    let apiCalls = 0;
 
     for (let page = 0; page < input.maxPages; page += 1) {
       const url = input.buildUrl(after);
       const result = await this.requestGraph(url);
 
+      // Counted before the response is judged: a request that came back an
+      // error still spent quota, and a count that only tallied successes would
+      // understate exactly the runs that are burning through the budget.
+      apiCalls += 1;
       usage = result.usage;
 
       const data = result.data;
@@ -397,7 +417,7 @@ export class MetaAdsGraphService {
       truncated = page === input.maxPages - 1;
     }
 
-    return { rows, usage, truncated };
+    return { rows, usage, truncated, apiCalls };
   }
 
   /**

@@ -6,6 +6,7 @@ import {
   SocialAdInsightsTruncatedError,
   SocialAdInsightsWindowNotClosedError,
 } from './social-ad-insights.error';
+import { SocialAdSyncDisabledError } from './social-ad-sync-run.error';
 
 /**
  * Turns a sync failure into an HTTP answer that says something true.
@@ -146,6 +147,16 @@ export function describeSocialAdSyncFailure(
     };
   }
 
+  if (error instanceof SocialAdSyncDisabledError) {
+    return {
+      // 503, not 403: nothing about the caller or the connection is wrong, and
+      // the condition is temporary by design — an operator turns it back on.
+      status: HttpStatus.SERVICE_UNAVAILABLE,
+      code: 'sync_disabled',
+      message: 'Ad syncing is currently turned off on this server.',
+    };
+  }
+
   if (error instanceof MetaGraphError) {
     return {
       status: GRAPH_STATUS[error.kind],
@@ -176,6 +187,7 @@ export function mapSocialAdSyncError(error: unknown): unknown {
     error instanceof SocialAdCredentialError ||
     error instanceof SocialAdInsightsTruncatedError ||
     error instanceof SocialAdInsightsWindowNotClosedError ||
+    error instanceof SocialAdSyncDisabledError ||
     error instanceof MetaGraphError
   ) {
     const { status, ...body } = describeSocialAdSyncFailure(error);

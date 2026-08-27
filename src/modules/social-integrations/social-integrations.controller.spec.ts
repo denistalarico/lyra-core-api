@@ -17,6 +17,8 @@ import type { MetaAdsSystemUserService } from './services/meta-ads-system-user.s
 import type { SocialAdConnectionService } from './services/social-ad-connection.service';
 import type { SocialAdHierarchySyncService } from './services/social-ad-hierarchy-sync.service';
 import type { SocialAdInsightsSyncService } from './services/social-ad-insights-sync.service';
+import type { SocialAdSyncRunService } from './services/social-ad-sync-run.service';
+import { SocialAdSyncDisabledError } from './sync/social-ad-sync-run.error';
 import { SocialIntegrationsController } from './social-integrations.controller';
 
 const GUARDED_HANDLERS = [
@@ -34,6 +36,10 @@ const GUARDED_HANDLERS = [
   // entitlement, same admin permission as the routes that bind one.
   'syncConnectionEntities',
   'syncConnectionInsights',
+  // Queueing a sync and reading the run history are the same act as running
+  // one: both name a connection whose credential reads somebody's ad spend.
+  'enqueueConnectionSync',
+  'listConnectionSyncRuns',
 ] as const;
 
 function createHarness(
@@ -41,12 +47,14 @@ function createHarness(
     internalAvailable?: boolean;
     syncFailure?: Error;
     insightsFailure?: Error;
+    enqueueFailure?: Error;
   } = {},
 ) {
   const selectInputs: Record<string, unknown>[] = [];
   const internalInputs: Record<string, unknown>[] = [];
   const syncInputs: Record<string, unknown>[] = [];
   const insightsInputs: Record<string, unknown>[] = [];
+  const runInputs: Record<string, unknown>[] = [];
 
   const oauth = {
     start: jest.fn(async () => ({
@@ -112,12 +120,33 @@ function createHarness(
     }),
   };
 
+  const syncRuns = {
+    request: jest.fn((input: Record<string, unknown>) => {
+      runInputs.push(input);
+
+      if (options.enqueueFailure) {
+        return Promise.reject(options.enqueueFailure);
+      }
+
+      return Promise.resolve({
+        run: { id: 'run-a', status: 'queued' },
+        deduplicated: false,
+      });
+    }),
+    listRecent: jest.fn((input: Record<string, unknown>) => {
+      runInputs.push(input);
+
+      return Promise.resolve([{ id: 'run-a', status: 'succeeded' }]);
+    }),
+  };
+
   const controller = new SocialIntegrationsController(
     oauth as unknown as MetaAdsOAuthService,
     connections as unknown as SocialAdConnectionService,
     systemUser as unknown as MetaAdsSystemUserService,
     hierarchySync as unknown as SocialAdHierarchySyncService,
     insightsSync as unknown as SocialAdInsightsSyncService,
+    syncRuns as unknown as SocialAdSyncRunService,
   );
 
   return {
@@ -127,10 +156,12 @@ function createHarness(
     systemUser,
     hierarchySync,
     insightsSync,
+    syncRuns,
     selectInputs,
     internalInputs,
     syncInputs,
     insightsInputs,
+    runInputs,
   };
 }
 
@@ -488,6 +519,129 @@ describe('SocialIntegrationsController scope resolution', () => {
       // anything it sent.
       maxUntil: '2026-08-25',
       timezone: 'America/Sao_Paulo',
+    });
+  });
+
+  it('enqueues under the resolved scope, taking only the window from the body', async () => {
+    const harness = createHarness();
+    const connectionId = '11111111-1111-4111-8111-111111111111';
+
+    await harness.controller.enqueueConnectionSync(
+      context({
+        managedContext: {
+          productKey: 'social',
+          operatingMode: 'client',
+          clientId: 'client-a',
+          managedTenantId: 'managed-a',
+        },
+      }),
+      connectionId,
+      {
+        since: '2026-08-01',
+        until: '2026-08-25',
+        // Not declared by the DTO; the ValidationPipe rejects it in production
+        // and nothing reads it here either. It matters more on this endpoint
+        // than on a synchronous one: a run is a stored instruction a worker
+        // executes later, with no request context left to check it against.
+        tenantId: 'tenant-b',
+        workspaceId: 'workspace-b',
+        agencyClientId: 'client-b',
+      } as never,
+    );
+
+    expect(harness.runInputs[0]).toEqual({
+      tenantId: 'tenant-a',
+      workspaceId: 'workspace-a',
+      agencyClientId: 'client-a',
+      connectionId,
+      since: '2026-08-01',
+      until: '2026-08-25',
+      requestedById: 'user-a',
+    });
+  });
+
+  it('enqueues a hierarchy refresh when no window is given', async () => {
+    const harness = createHarness();
+
+    await harness.controller.enqueueConnectionSync(
+      context(),
+      '11111111-1111-4111-8111-111111111111',
+      {},
+    );
+
+    expect(harness.runInputs[0]).toMatchObject({
+      since: undefined,
+      until: undefined,
+    });
+  });
+
+  it('answers 503 rather than queueing when the runtime is off', async () => {
+    const harness = createHarness({
+      enqueueFailure: new SocialAdSyncDisabledError(),
+    });
+
+    // The alternative is a 202 for work nothing will do: the list fills with
+    // runs that never start, which looks exactly like a wedged worker.
+    const failure = await harness.controller
+      .enqueueConnectionSync(
+        context(),
+        '11111111-1111-4111-8111-111111111111',
+        {
+          since: '2026-08-01',
+          until: '2026-08-25',
+        },
+      )
+      .catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(HttpException);
+    expect((failure as HttpException).getStatus()).toBe(503);
+    expect((failure as HttpException).getResponse()).toMatchObject({
+      code: 'sync_disabled',
+    });
+  });
+
+  it('answers 404 for an enqueue against a connection outside the scope', async () => {
+    const harness = createHarness({
+      enqueueFailure: new SocialAdCredentialError('connection_not_found'),
+    });
+
+    await expect(
+      harness.controller.enqueueConnectionSync(
+        context(),
+        '11111111-1111-4111-8111-111111111111',
+        { since: '2026-08-01', until: '2026-08-25' },
+      ),
+    ).rejects.toMatchObject({
+      status: 404,
+      response: { code: 'connection_not_found' },
+    });
+  });
+
+  it('lists runs under the resolved scope', async () => {
+    const harness = createHarness();
+    const connectionId = '11111111-1111-4111-8111-111111111111';
+
+    const result = await harness.controller.listConnectionSyncRuns(
+      context({
+        managedContext: {
+          productKey: 'social',
+          operatingMode: 'client',
+          clientId: 'client-a',
+          managedTenantId: 'managed-a',
+        },
+      }),
+      connectionId,
+    );
+
+    expect(harness.runInputs[0]).toEqual({
+      tenantId: 'tenant-a',
+      workspaceId: 'workspace-a',
+      agencyClientId: 'client-a',
+      connectionId,
+    });
+    expect(result).toEqual({
+      items: [{ id: 'run-a', status: 'succeeded' }],
+      total: 1,
     });
   });
 

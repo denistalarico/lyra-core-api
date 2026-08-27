@@ -76,4 +76,6 @@ export type NormalizedAdEntityPage = {
   truncated: boolean;
   /** Rows dropped for having no usable id. */
   skipped: number;
+  /** Graph requests this level actually cost. */
+  apiCalls: number;
 };

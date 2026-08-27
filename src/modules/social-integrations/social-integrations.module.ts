@@ -7,6 +7,7 @@ import {
   SocialAdAccountConnectionEntity,
   SocialAdEntity,
   SocialAdMetricDailyEntity,
+  SocialAdSyncRunEntity,
 } from './entities';
 import { SocialInternalAccessService } from './internal/social-internal-access.service';
 import { MetaAdsEntityReaderService } from './services/meta-ads-entity-reader.service';
@@ -19,6 +20,10 @@ import { SocialAdEntityWriterService } from './services/social-ad-entity-writer.
 import { SocialAdHierarchySyncService } from './services/social-ad-hierarchy-sync.service';
 import { SocialAdInsightsSyncService } from './services/social-ad-insights-sync.service';
 import { SocialAdMetricsWriterService } from './services/social-ad-metrics-writer.service';
+import { SocialAdSyncConfigService } from './services/social-ad-sync-config.service';
+import { SocialAdSyncRunService } from './services/social-ad-sync-run.service';
+import { SocialAdSyncScheduler } from './services/social-ad-sync.scheduler';
+import { SocialAdSyncWorker } from './services/social-ad-sync.worker';
 import { SocialIntegrationsController } from './social-integrations.controller';
 
 /**
@@ -32,16 +37,16 @@ import { SocialIntegrationsController } from './social-integrations.controller';
 @Module({
   imports: [
     PermissionsModule,
-    // `SocialAdMetricDailyEntity` joins now that the metrics writer consumes
-    // it. `SocialAdSyncRunEntity` stays out until something reads or writes it
-    // — a repository registered ahead of its consumer is an invitation to reach
-    // for it from outside the pipeline that owns it, and the run table's owner
-    // is the worker that does not exist yet.
+    // `SocialAdSyncRunEntity` joins now that it has an owner:
+    // `SocialAdSyncRunService` is the only thing that reads or writes it, and
+    // the worker reaches the table through that service rather than through a
+    // repository of its own.
     TypeOrmModule.forFeature(
       [
         SocialAdAccountConnectionEntity,
         SocialAdEntity,
         SocialAdMetricDailyEntity,
+        SocialAdSyncRunEntity,
       ],
       'agency',
     ),
@@ -60,6 +65,10 @@ import { SocialIntegrationsController } from './social-integrations.controller';
     MetaAdsInsightsReaderService,
     SocialAdMetricsWriterService,
     SocialAdInsightsSyncService,
+    SocialAdSyncConfigService,
+    SocialAdSyncRunService,
+    SocialAdSyncWorker,
+    SocialAdSyncScheduler,
     SettingsCryptoService,
   ],
   // The resolver is exported with no consumer yet on purpose: it is the
