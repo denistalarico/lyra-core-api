@@ -32,15 +32,25 @@ import { InboxConversationEntity } from '../../inbox/entities/inbox-conversation
 import { InboxMessageEntity } from '../../inbox/entities/inbox-message.entity';
 import { InboxSettingsEntity } from '../../inbox/entities/inbox-settings.entity';
 import { LeadFlowBusinessModeTemplateEntity } from '../../leadflow-settings/entities';
+import { describePostgresIntegration } from '../../../testing/postgres-integration';
+import { deleteFixtureTenant } from '../../../testing/fixture-tenant';
 
-const run =
-  process.env.INBOX_PG_INTEGRATION === 'true' ? describe : describe.skip;
+const run = describePostgresIntegration();
 
 run('LeadFlow Automations shadow runtime PostgreSQL', () => {
   const tenantId = randomUUID();
   const workspaceId = randomUUID();
   let ingress: LeadFlowAutomationEventIngressService;
   let shadowEvaluator: LeadFlowAutomationShadowEvaluatorService;
+
+  const resetFixtures = () =>
+    deleteFixtureTenant(AgencyDataSource, tenantId, [
+      'leadflow_automation_run_attempts',
+      'leadflow_automation_runs',
+      'leadflow_event_deliveries',
+      'leadflow_automation_versions',
+      'leadflow_automations',
+    ]);
 
   beforeAll(async () => {
     if (!AgencyDataSource.isInitialized) await AgencyDataSource.initialize();
@@ -87,16 +97,13 @@ run('LeadFlow Automations shadow runtime PostgreSQL', () => {
   });
 
   afterAll(async () => {
-    if (AgencyDataSource.isInitialized) await AgencyDataSource.destroy();
+    if (AgencyDataSource.isInitialized) {
+      await resetFixtures();
+      await AgencyDataSource.destroy();
+    }
   });
 
-  beforeEach(async () => {
-    await AgencyDataSource.query(
-      `TRUNCATE leadflow_automation_run_attempts, leadflow_automation_runs,
-       leadflow_event_deliveries, leadflow_automation_versions,
-       leadflow_automations RESTART IDENTITY CASCADE`,
-    );
-  });
+  beforeEach(resetFixtures);
 
   it('persists one no-effect run pinned to the published snapshot before acknowledging', async () => {
     const { automationId, versionId } = await insertPublishedAutomation();

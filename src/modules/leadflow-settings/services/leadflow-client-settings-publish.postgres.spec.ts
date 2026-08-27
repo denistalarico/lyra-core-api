@@ -22,9 +22,9 @@ import { LeadFlowBriefingSourceService } from '../../leadflow-briefing/services/
 import { LeadFlowBriefingExtractionJobService } from '../../leadflow-briefing/services/leadflow-briefing-extraction-job.service';
 import { LeadFlowBriefingJobStateMachine } from '../../leadflow-briefing/services/leadflow-briefing-job-state-machine';
 import { LeadFlowBriefingSuggestionService } from '../../leadflow-briefing/services/leadflow-briefing-suggestion.service';
+import { describePostgresIntegration } from '../../../testing/postgres-integration';
 
-const run =
-  process.env.INBOX_PG_INTEGRATION === 'true' ? describe : describe.skip;
+const run = describePostgresIntegration();
 
 run('LeadFlowClientSettingsService publish PostgreSQL round trip', () => {
   const tenantId = randomUUID();

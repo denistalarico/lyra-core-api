@@ -1,9 +1,10 @@
 import { randomUUID } from 'crypto';
 import { AgencyDataSource } from '../../../database/agency-typeorm.datasource';
 import { LeadFlowAgentBindingReconcilerService } from './leadflow-agent-binding-reconciler.service';
+import { describePostgresIntegration } from '../../../testing/postgres-integration';
+import { deleteFixtureTenant } from '../../../testing/fixture-tenant';
 
-const run =
-  process.env.INBOX_PG_INTEGRATION === 'true' ? describe : describe.skip;
+const run = describePostgresIntegration();
 
 run('LeadFlow default binding reconciliation PostgreSQL', () => {
   const tenantId = randomUUID();
@@ -11,20 +12,28 @@ run('LeadFlow default binding reconciliation PostgreSQL', () => {
   const ctx = { tenantId, workspaceId, userId: randomUUID() };
   let service: LeadFlowAgentBindingReconcilerService;
 
+  const resetFixtures = () =>
+    deleteFixtureTenant(AgencyDataSource, tenantId, [
+      'inbox_domain_outbox',
+      'leadflow_event_deliveries',
+      'platform_permission_audit_events',
+      'leadflow_agent_channel_bindings',
+      'leadflow_agent_versions',
+      'leadflow_agents',
+      'inbox_channels',
+    ]);
+
   beforeAll(async () => {
     if (!AgencyDataSource.isInitialized) await AgencyDataSource.initialize();
     service = new LeadFlowAgentBindingReconcilerService(AgencyDataSource);
   });
   afterAll(async () => {
-    if (AgencyDataSource.isInitialized) await AgencyDataSource.destroy();
+    if (AgencyDataSource.isInitialized) {
+      await resetFixtures();
+      await AgencyDataSource.destroy();
+    }
   });
-  beforeEach(async () => {
-    await AgencyDataSource.query(
-      `TRUNCATE inbox_domain_outbox, platform_permission_audit_events,
-       leadflow_agent_channel_bindings, leadflow_agent_versions,
-       leadflow_agents, inbox_channels RESTART IDENTITY CASCADE`,
-    );
-  });
+  beforeEach(resetFixtures);
 
   async function insertAgent(targetWorkspace = workspaceId) {
     const agentId = randomUUID();

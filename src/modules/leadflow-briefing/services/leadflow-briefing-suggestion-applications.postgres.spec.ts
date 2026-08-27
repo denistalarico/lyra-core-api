@@ -18,9 +18,9 @@ import { LeadFlowBriefingExtractionJobService } from './leadflow-briefing-extrac
 import { LeadFlowBriefingJobStateMachine } from './leadflow-briefing-job-state-machine';
 import { LeadFlowBriefingSourceService } from './leadflow-briefing-source.service';
 import { LeadFlowBriefingSuggestionService } from './leadflow-briefing-suggestion.service';
+import { describePostgresIntegration } from '../../../testing/postgres-integration';
 
-const run =
-  process.env.INBOX_PG_INTEGRATION === 'true' ? describe : describe.skip;
+const run = describePostgresIntegration();
 
 run('LeadFlow Briefing suggestion applications PostgreSQL', () => {
   const tenantId = randomUUID();

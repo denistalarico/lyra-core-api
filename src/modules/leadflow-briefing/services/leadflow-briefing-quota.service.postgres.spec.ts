@@ -7,8 +7,9 @@ import { LeadFlowBriefingSourceEntity, LeadFlowBriefingSourceVersionEntity } fro
 import { LeadFlowBriefingSourceKind } from '../enums/leadflow-briefing-source-kind.enum';
 import { LeadFlowBriefingSourceVersionStatus } from '../enums/leadflow-briefing-source-version-status.enum';
 import { LeadFlowBriefingQuotaService } from './leadflow-briefing-quota.service';
+import { describePostgresIntegration } from '../../../testing/postgres-integration';
 
-const run = process.env.INBOX_PG_INTEGRATION === 'true' ? describe : describe.skip;
+const run = describePostgresIntegration();
 
 function fakeConfig(ceiling: number) {
   return {

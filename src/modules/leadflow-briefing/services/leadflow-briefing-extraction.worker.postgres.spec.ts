@@ -19,8 +19,9 @@ import { LeadFlowBriefingExtractionWorker } from './leadflow-briefing-extraction
 import { LeadFlowBriefingJobStateMachine } from './leadflow-briefing-job-state-machine';
 import { LeadFlowBriefingSourceService } from './leadflow-briefing-source.service';
 import { LeadFlowBriefingSuggestionService } from './leadflow-briefing-suggestion.service';
+import { describePostgresIntegration } from '../../../testing/postgres-integration';
 
-const run = process.env.INBOX_PG_INTEGRATION === 'true' ? describe : describe.skip;
+const run = describePostgresIntegration();
 
 function fakeExtractionConfig(overrides: Record<string, unknown> = {}) {
   return {

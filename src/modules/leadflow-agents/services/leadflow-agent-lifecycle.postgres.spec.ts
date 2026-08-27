@@ -18,9 +18,10 @@ import { LeadFlowAgentStatus } from '../enums/leadflow-agent-status.enum';
 import { LeadFlowAgentBindingReconcilerService } from './leadflow-agent-binding-reconciler.service';
 import { LeadFlowAgentPresetService } from './leadflow-agent-preset.service';
 import { LeadFlowAgentService } from './leadflow-agent.service';
+import { describePostgresIntegration } from '../../../testing/postgres-integration';
+import { deleteFixtureTenant } from '../../../testing/fixture-tenant';
 
-const run =
-  process.env.INBOX_PG_INTEGRATION === 'true' ? describe : describe.skip;
+const run = describePostgresIntegration();
 
 run('LeadFlow agent archive/soft-delete lifecycle PostgreSQL', () => {
   const tenantId = randomUUID();
@@ -28,6 +29,18 @@ run('LeadFlow agent archive/soft-delete lifecycle PostgreSQL', () => {
   const ctx = { tenantId, workspaceId, userId: randomUUID() };
   let service: LeadFlowAgentService;
   let settingsId: string;
+
+  const resetFixtures = () =>
+    deleteFixtureTenant(AgencyDataSource, tenantId, [
+      'inbox_domain_outbox',
+      'leadflow_event_deliveries',
+      'platform_permission_audit_events',
+      'inbox_conversations',
+      'leadflow_agent_channel_bindings',
+      'leadflow_agent_versions',
+      'leadflow_agents',
+      'inbox_channels',
+    ]);
 
   beforeAll(async () => {
     if (!AgencyDataSource.isInitialized) await AgencyDataSource.initialize();
@@ -59,20 +72,14 @@ run('LeadFlow agent archive/soft-delete lifecycle PostgreSQL', () => {
   });
 
   afterAll(async () => {
+    await resetFixtures();
     await AgencyDataSource.getRepository(LeadFlowClientSettingsEntity).delete({
       id: settingsId,
     });
     if (AgencyDataSource.isInitialized) await AgencyDataSource.destroy();
   });
 
-  beforeEach(async () => {
-    await AgencyDataSource.query(
-      `TRUNCATE inbox_domain_outbox, platform_permission_audit_events,
-       inbox_conversations, leadflow_agent_channel_bindings,
-       leadflow_agent_versions, leadflow_agents, inbox_channels
-       RESTART IDENTITY CASCADE`,
-    );
-  });
+  beforeEach(resetFixtures);
 
   async function insertAgent(
     overrides: { status?: string; isProtected?: boolean } = {},

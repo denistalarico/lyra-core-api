@@ -6,9 +6,9 @@ import { LeadFlowSettingsContextType } from '../../leadflow-settings/enums/leadf
 import { LeadFlowBriefingSourceEntity, LeadFlowBriefingSourceVersionEntity } from '../entities';
 import { LeadFlowBriefingSourceKind } from '../enums/leadflow-briefing-source-kind.enum';
 import { LeadFlowBriefingSourceService } from './leadflow-briefing-source.service';
+import { describePostgresIntegration } from '../../../testing/postgres-integration';
 
-const run =
-  process.env.INBOX_PG_INTEGRATION === 'true' ? describe : describe.skip;
+const run = describePostgresIntegration();
 
 run('LeadFlow Briefing sources PostgreSQL', () => {
   const tenantId = randomUUID();

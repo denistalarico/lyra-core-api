@@ -17,15 +17,29 @@ import {
   AgencyContactSourceEntity,
 } from './entities/agency-contact-details.entities';
 import { AgencyContactsService } from './agency-contacts.service';
+import { describePostgresIntegration } from '../../testing/postgres-integration';
+import { deleteFixtureTenant } from '../../testing/fixture-tenant';
 
-const run =
-  process.env.INBOX_PG_INTEGRATION === 'true' ? describe : describe.skip;
+const run = describePostgresIntegration();
 
 run('AgencyContactsService permanent deletion PostgreSQL', () => {
   const tenantId = randomUUID();
   const workspaceId = randomUUID();
   const ctx = { tenantId, workspaceId, userId: randomUUID() };
   let service: AgencyContactsService;
+
+  const resetFixtures = () =>
+    deleteFixtureTenant(AgencyDataSource, tenantId, [
+      'inbox_domain_outbox',
+      'leadflow_event_deliveries',
+      'platform_permission_audit_events',
+      'inbox_messages',
+      'inbox_conversations',
+      'crm_opportunities',
+      'crm_stages',
+      'crm_pipelines',
+      'contacts',
+    ]);
 
   beforeAll(async () => {
     if (!AgencyDataSource.isInitialized) await AgencyDataSource.initialize();
@@ -50,16 +64,13 @@ run('AgencyContactsService permanent deletion PostgreSQL', () => {
   });
 
   afterAll(async () => {
-    if (AgencyDataSource.isInitialized) await AgencyDataSource.destroy();
+    if (AgencyDataSource.isInitialized) {
+      await resetFixtures();
+      await AgencyDataSource.destroy();
+    }
   });
 
-  beforeEach(async () => {
-    await AgencyDataSource.query(
-      `TRUNCATE inbox_domain_outbox, platform_permission_audit_events,
-        inbox_messages, inbox_conversations, crm_opportunities, crm_stages,
-        crm_pipelines, contacts RESTART IDENTITY CASCADE`,
-    );
-  });
+  beforeEach(resetFixtures);
 
   async function insertContact(targetWorkspace = workspaceId) {
     const id = randomUUID();

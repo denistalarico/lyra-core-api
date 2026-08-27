@@ -7,6 +7,7 @@ import {
   SocialAdEntityWriterService,
   type SocialAdEntityWriteScope,
 } from './social-ad-entity-writer.service';
+import { describePostgresIntegration } from '../../../testing/postgres-integration';
 
 /**
  * The writer against a real PostgreSQL, inside one transaction that is rolled
@@ -22,8 +23,7 @@ import {
  * Gated behind the same flag as the other PostgreSQL specs: it needs a
  * database, and CI without one must skip rather than fail.
  */
-const run =
-  process.env.INBOX_PG_INTEGRATION === 'true' ? describe : describe.skip;
+const run = describePostgresIntegration();
 
 run('SocialAdEntityWriterService against PostgreSQL', () => {
   let queryRunner: QueryRunner;

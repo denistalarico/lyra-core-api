@@ -12,9 +12,10 @@ import { InboxAgentRuntimeService } from '../services/inbox-agent-runtime.servic
 import { InboxOutboxRelayService } from '../services/inbox-outbox-relay.service';
 import { InboxProviderBudgetService } from './inbox-provider-budget.service';
 import { InboxGovernedActionWorker } from '../services/inbox-governed-action.worker';
+import { describePostgresIntegration } from '../../../testing/postgres-integration';
+import { deleteFixtureTenant } from '../../../testing/fixture-tenant';
 
-const run =
-  process.env.INBOX_PG_INTEGRATION === 'true' ? describe : describe.skip;
+const run = describePostgresIntegration();
 const validDecision = {
   schema_version: 1 as const,
   reply: 'Revisar',
@@ -42,22 +43,45 @@ run('Inbox Runtime PostgreSQL concurrency', () => {
   const tenantId = randomUUID();
   const workspaceId = randomUUID();
 
+  // Wider than the TRUNCATE list it replaces: this suite also inserts into
+  // contacts and the CRM tables, which the old cleanup never named. Those rows
+  // survived every run and were only ever removed by an unrelated spec
+  // truncating the same tables.
+  const resetFixtures = () =>
+    deleteFixtureTenant(AgencyDataSource, tenantId, [
+      'inbox_governed_actions',
+      'inbox_channel_contact_identities',
+      'inbox_meta_operations',
+      'inbox_provider_usage_ledger',
+      'inbox_domain_outbox',
+      'leadflow_event_deliveries',
+      'inbox_agent_decisions',
+      'inbox_processing_batches',
+      'inbox_media_derivatives',
+      'inbox_media_assets',
+      'inbox_messages',
+      'inbox_conversation_events',
+      'inbox_conversations',
+      'leadflow_agent_channel_bindings',
+      'leadflow_agent_versions',
+      'leadflow_agents',
+      'inbox_channels',
+      'crm_opportunities',
+      'crm_stages',
+      'crm_pipelines',
+      'contacts',
+    ]);
+
   beforeAll(async () => {
     await AgencyDataSource.initialize();
   });
   afterAll(async () => {
-    if (AgencyDataSource.isInitialized) await AgencyDataSource.destroy();
+    if (AgencyDataSource.isInitialized) {
+      await resetFixtures();
+      await AgencyDataSource.destroy();
+    }
   });
-  beforeEach(async () => {
-    await AgencyDataSource.query(
-      `TRUNCATE inbox_governed_actions, inbox_channel_contact_identities,
-       inbox_meta_operations, inbox_provider_usage_ledger, inbox_domain_outbox, inbox_agent_decisions,
-       inbox_processing_batches, inbox_media_derivatives, inbox_media_assets,
-       inbox_messages, inbox_conversation_events, inbox_conversations,
-       leadflow_agent_channel_bindings, leadflow_agent_versions, leadflow_agents,
-       inbox_channels RESTART IDENTITY CASCADE`,
-    );
-  });
+  beforeEach(resetFixtures);
 
   it('persists the budget across calls and never reserves the same logical charge twice', async () => {
     const budget = new InboxProviderBudgetService(AgencyDataSource, {

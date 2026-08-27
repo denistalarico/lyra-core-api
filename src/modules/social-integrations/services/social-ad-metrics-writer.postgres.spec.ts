@@ -5,6 +5,7 @@ import { SocialAdMetricDailyEntity } from '../entities/social-ad-metric-daily.en
 import { META_ACTION_MAPPING_VERSION } from '../sync/meta-action-mapping';
 import type { NormalizedAdMetricDaily } from '../sync/meta-ads-insights.contract';
 import { SocialAdMetricsWriterService } from './social-ad-metrics-writer.service';
+import { describePostgresIntegration } from '../../../testing/postgres-integration';
 
 /**
  * The metrics writer against a real PostgreSQL, inside one rolled-back
@@ -17,8 +18,7 @@ import { SocialAdMetricsWriterService } from './social-ad-metrics-writer.service
  *
  * Gated behind the same flag as the other PostgreSQL specs.
  */
-const run =
-  process.env.INBOX_PG_INTEGRATION === 'true' ? describe : describe.skip;
+const run = describePostgresIntegration();
 
 run('SocialAdMetricsWriterService against PostgreSQL', () => {
   let queryRunner: QueryRunner;

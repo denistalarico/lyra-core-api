@@ -9,9 +9,10 @@ import { InboxDomainOutboxEntity } from '../entities/inbox-domain-outbox.entity'
 import { InboxMessageEntity } from '../entities/inbox-message.entity';
 import { InboxProcessingBatchEntity } from '../entities/inbox-processing-batch.entity';
 import { InboxChannelLifecycleService } from './inbox-channel-lifecycle.service';
+import { describePostgresIntegration } from '../../../testing/postgres-integration';
+import { deleteFixtureTenant } from '../../../testing/fixture-tenant';
 
-const run =
-  process.env.INBOX_PG_INTEGRATION === 'true' ? describe : describe.skip;
+const run = describePostgresIntegration();
 
 run('InboxChannelLifecycleService PostgreSQL isolation', () => {
   const tenantId = randomUUID();
@@ -19,21 +20,30 @@ run('InboxChannelLifecycleService PostgreSQL isolation', () => {
   const actorUserId = randomUUID();
   const service = new InboxChannelLifecycleService(AgencyDataSource);
 
+  const resetFixtures = () =>
+    deleteFixtureTenant(AgencyDataSource, tenantId, [
+      'inbox_channel_lifecycle_requests',
+      'inbox_domain_outbox',
+      'leadflow_event_deliveries',
+      'inbox_agent_decisions',
+      'inbox_processing_batches',
+      'inbox_messages',
+      'inbox_conversations',
+      'inbox_channels',
+    ]);
+
   beforeAll(async () => {
     await AgencyDataSource.initialize();
   });
 
   afterAll(async () => {
-    if (AgencyDataSource.isInitialized) await AgencyDataSource.destroy();
+    if (AgencyDataSource.isInitialized) {
+      await resetFixtures();
+      await AgencyDataSource.destroy();
+    }
   });
 
-  beforeEach(async () => {
-    await AgencyDataSource.query(
-      `TRUNCATE inbox_channel_lifecycle_requests, inbox_domain_outbox,
-       inbox_agent_decisions, inbox_processing_batches, inbox_messages,
-       inbox_conversations, inbox_channels RESTART IDENTITY CASCADE`,
-    );
-  });
+  beforeEach(resetFixtures);
 
   it('serializes concurrent disconnects and atomically preserves history while cancelling work', async () => {
     const channel = await AgencyDataSource.getRepository(

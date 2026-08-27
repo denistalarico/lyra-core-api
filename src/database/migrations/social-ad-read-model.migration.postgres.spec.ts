@@ -2,25 +2,50 @@ import { randomUUID } from 'node:crypto';
 import type { QueryRunner } from 'typeorm';
 import { AgencyDataSource } from '../agency-typeorm.datasource';
 import { CreateSocialAdReadModel1790400000000 } from './1790400000000-create-social-ad-read-model';
+import { describePostgresIntegration } from '../../testing/postgres-integration';
 
 /**
- * The migration run for real, then rolled back.
+ * The migration run for real, in a schema of its own, then rolled back.
  *
  * Postgres makes DDL transactional, so `up()` and `down()` can be exercised
- * against the live schema without leaving anything behind — which is the only
- * way to find out whether a constraint the string-level spec merely *contains*
- * is one the database will actually accept. A CHECK that Postgres rejects
- * (a non-immutable expression, a typo in a column reference) passes every
- * assertion about SQL text and fails the first time it is deployed.
+ * for real without leaving anything behind — which is the only way to find out
+ * whether a constraint the string-level spec merely *contains* is one the
+ * database will actually accept. A CHECK that Postgres rejects (a non-immutable
+ * expression, a typo in a column reference) passes every assertion about SQL
+ * text and fails the first time it is deployed.
+ *
+ * **Why a throwaway schema and not just `public`.** This file used to run
+ * against `public`, which worked exactly once: before the migration was
+ * deployed. Afterwards the tables were already there, every `CREATE TABLE IF
+ * NOT EXISTS` in `up()` became a no-op, and the assertions below quietly
+ * stopped describing this migration and started describing whatever shape
+ * production happened to be in. The guard test caught it — and the answer to a
+ * guard test failing is not to delete the guard.
+ *
+ * So the migration is applied to a schema created for this run and dropped with
+ * the transaction. `search_path` puts that schema first, so every unqualified
+ * name in the migration — and every name in the assertions below — resolves
+ * there. `public` stays on the path only so `gen_random_uuid()` resolves; no
+ * statement here reads or writes a production row, and the queries against the
+ * catalog are filtered by schema so they cannot see the deployed twins.
  *
  * Gated behind the same flag as the other PostgreSQL specs: it needs a
  * database, and CI without one must skip rather than fail.
  */
-const run =
-  process.env.INBOX_PG_INTEGRATION === 'true' ? describe : describe.skip;
+const run = describePostgresIntegration();
 
 run('social ad read model migration against PostgreSQL', () => {
   let queryRunner: QueryRunner;
+
+  /**
+   * The schema the migration is applied to.
+   *
+   * Named from a UUID so two runs of this file — or this file and anything
+   * else — cannot collide, and lowercase alphanumeric so it needs no quoting
+   * when it is interpolated into `to_regclass` and the catalog filters below.
+   */
+  const schema = `migration_probe_${randomUUID().replace(/-/g, '')}`;
+
   const connectionId = randomUUID();
   const tenantId = randomUUID();
   const workspaceId = randomUUID();
@@ -42,7 +67,14 @@ run('social ad read model migration against PostgreSQL', () => {
     }
   }
 
+  /** Existence in the throwaway schema, never in `public`. */
   const tableExists = (name: string) =>
+    query<{ reg: string | null }>(
+      `SELECT to_regclass('${schema}.${name}') AS reg`,
+    ).then((rows) => rows[0].reg !== null);
+
+  /** Existence in the deployed schema, for proving this file did not touch it. */
+  const deployedTableExists = (name: string) =>
     query<{ reg: string | null }>(
       `SELECT to_regclass('public.${name}') AS reg`,
     ).then((rows) => rows[0].reg !== null);
@@ -78,8 +110,30 @@ run('social ad read model migration against PostgreSQL', () => {
     await queryRunner.connect();
     await queryRunner.startTransaction();
 
-    // A connection row to hang the foreign keys on, created inside the same
-    // transaction so it disappears with everything else.
+    await queryRunner.query(`CREATE SCHEMA "${schema}"`);
+
+    // `SET LOCAL`, so it belongs to this transaction and reverts with it. The
+    // throwaway schema comes first: unqualified `CREATE TABLE` lands there, and
+    // so does every unqualified lookup. `public` stays behind it because
+    // `gen_random_uuid()` lives there.
+    await queryRunner.query(`SET LOCAL search_path TO "${schema}", public`);
+
+    /**
+     * The table the migration's foreign keys point at, copied structurally.
+     *
+     * `LIKE ... INCLUDING ALL` brings the columns, defaults, checks and the
+     * primary key the references need, and deliberately not the rows — so the
+     * cascade test below deletes a connection that never existed outside this
+     * transaction. Without this copy the foreign keys would resolve to
+     * `public`'s real table and this file would be writing to production rows
+     * for the length of the transaction.
+     */
+    await queryRunner.query(`
+      CREATE TABLE "${schema}"."social_ad_account_connections"
+        (LIKE "public"."social_ad_account_connections" INCLUDING ALL)
+    `);
+
+    // A connection row to hang the foreign keys on, in the copy.
     await queryRunner.query(`
       INSERT INTO "social_ad_account_connections"
         ("id", "tenant_id", "workspace_id", "provider", "external_account_id")
@@ -88,7 +142,8 @@ run('social ad read model migration against PostgreSQL', () => {
   });
 
   afterAll(async () => {
-    // Nothing above is meant to survive: the transaction is the cleanup.
+    // Nothing above is meant to survive: the transaction is the cleanup, and it
+    // takes the schema with it — `CREATE SCHEMA` is transactional too.
     if (queryRunner?.isTransactionActive)
       await queryRunner.rollbackTransaction();
     await queryRunner?.release();
@@ -96,8 +151,9 @@ run('social ad read model migration against PostgreSQL', () => {
   });
 
   it('starts from a schema that does not have these tables yet', async () => {
-    // If this fails, the migration was already applied and every assertion
-    // below would be testing the deployed schema instead of this file.
+    // The guard that keeps this file honest: if it fails, `up()` below is a
+    // no-op and every assertion after it describes the deployed schema rather
+    // than this migration. A fresh schema is what makes it true again.
     for (const table of [
       'social_ad_entities',
       'social_ad_sync_runs',
@@ -123,7 +179,8 @@ run('social ad read model migration against PostgreSQL', () => {
     const columns = await query<{ column_name: string; is_nullable: string }>(`
         SELECT "column_name", "is_nullable"
         FROM information_schema.columns
-        WHERE "table_name" = 'social_ad_metrics_daily'
+        WHERE "table_schema" = '${schema}'
+          AND "table_name" = 'social_ad_metrics_daily'
           AND "column_name" IN ('source', 'attribution_setting', 'account_timezone', 'metric_date')
       `);
 
@@ -138,7 +195,9 @@ run('social ad read model migration against PostgreSQL', () => {
       SELECT pg_get_indexdef(i.indexrelid) AS def
       FROM pg_index i
       JOIN pg_class c ON c.oid = i.indexrelid
+      JOIN pg_namespace n ON n.oid = c.relnamespace
       WHERE c.relname = 'UQ_social_ad_metrics_daily_fact'
+        AND n.nspname = '${schema}'
     `);
 
     expect(index.def).toContain('UNIQUE');
@@ -291,5 +350,20 @@ run('social ad read model migration against PostgreSQL', () => {
     }
     // And S1's table, which this migration does not own, is untouched.
     expect(await tableExists('social_ad_account_connections')).toBe(true);
+  });
+
+  it('leaves the deployed schema exactly as it found it', async () => {
+    // The other half of the isolation claim. `down()` just dropped three tables
+    // by unqualified name; if the search path had not put the throwaway schema
+    // first, it would have dropped production's instead — and the only reason
+    // that was survivable before was the rollback.
+    for (const table of [
+      'social_ad_account_connections',
+      'social_ad_entities',
+      'social_ad_sync_runs',
+      'social_ad_metrics_daily',
+    ]) {
+      expect(await deployedTableExists(table)).toBe(true);
+    }
   });
 });

@@ -10,8 +10,9 @@ import type { MalwareScanResult, MalwareScannerAdapter } from './malware-scanner
 import { LeadFlowBriefingIngestionService } from './leadflow-briefing-ingestion.service';
 import { LeadFlowBriefingQuotaService } from './leadflow-briefing-quota.service';
 import { LeadFlowBriefingSourceService } from './leadflow-briefing-source.service';
+import { describePostgresIntegration } from '../../../testing/postgres-integration';
 
-const run = process.env.INBOX_PG_INTEGRATION === 'true' ? describe : describe.skip;
+const run = describePostgresIntegration();
 
 const PDF_BYTES = Buffer.concat([Buffer.from('%PDF-1.7\n'), Buffer.alloc(20, 0x20)]);
 
