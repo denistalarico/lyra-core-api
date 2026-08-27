@@ -43,3 +43,27 @@ export class SocialAdInsightsWindowNotClosedError extends Error {
     this.name = 'SocialAdInsightsWindowNotClosedError';
   }
 }
+
+/**
+ * An intraday read was asked for a window that is not the ad account's today.
+ *
+ * A distinct failure from the closed-window one, not its opposite sign. That
+ * error means "you asked for too much"; this one means "this run is the wrong
+ * instrument for this window" — the repair for the first is a shorter range,
+ * and for the second it is a `daily` or `manual` run, which writes the same
+ * days as final instead of provisional.
+ *
+ * It carries the account's current day and the zone that decided it, because a
+ * caller elsewhere in the world cannot derive either. The most common way to
+ * see it is not a bad request at all: a run enqueued just before the account's
+ * midnight and executed just after, whose premise expired while it waited.
+ */
+export class SocialAdInsightsWindowNotIntradayError extends Error {
+  constructor(
+    readonly today: string,
+    readonly timezone: string,
+  ) {
+    super(`An intraday read covers only ${today}, the ad account's own day.`);
+    this.name = 'SocialAdInsightsWindowNotIntradayError';
+  }
+}

@@ -1,5 +1,9 @@
 import { SocialAdCredentialError } from '../credentials/social-ad-credential.error';
 import { MetaGraphError } from '../services/meta-graph-error';
+import {
+  SocialAdInsightsWindowNotClosedError,
+  SocialAdInsightsWindowNotIntradayError,
+} from './social-ad-insights.error';
 import { SocialAdSyncRunPlanError } from './social-ad-sync-run.error';
 import { describeSocialAdSyncFailure } from './social-ad-sync.http-error';
 
@@ -109,6 +113,27 @@ export function classifySocialAdSyncRetry(
   // points at the row instead of at the provider.
   if (error instanceof SocialAdSyncRunPlanError) {
     return { action: 'stop', code: error.code, retryAfterMs: null };
+  }
+
+  /**
+   * A run whose window does not match the mode it was created for.
+   *
+   * Terminal, and it has to be said explicitly: neither error belongs to the
+   * two vocabularies above, so without this both fall through to the
+   * unclassified branch and retry five times under the code `internal_error` —
+   * five identical failures in the log, and a cause named after a bug rather
+   * than after the window.
+   *
+   * Retrying cannot help either one. A closed-window violation only gets worse
+   * as the clock moves; an intraday run whose day has turned over is asking
+   * for a date that will never be *today* again. The right repair is a new run
+   * of the right kind, which the scheduler produces on its next eligible tick.
+   */
+  if (
+    error instanceof SocialAdInsightsWindowNotClosedError ||
+    error instanceof SocialAdInsightsWindowNotIntradayError
+  ) {
+    return { action: 'stop', code, retryAfterMs: null };
   }
 
   /**

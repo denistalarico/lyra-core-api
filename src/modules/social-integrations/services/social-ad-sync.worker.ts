@@ -6,11 +6,13 @@ import { SocialAdCredentialResolver } from '../credentials/social-ad-credential.
 import type { SocialAdSyncRunEntity } from '../entities/social-ad-sync-run.entity';
 import {
   assertClosedInsightsWindow,
+  assertIntradayInsightsWindow,
   parseInsightsWindow,
   type InsightsWindow,
 } from '../sync/insights-window';
 import {
   SYNC_SEGMENTS_BY_KIND,
+  isIntradayRunKind,
   type SocialAdSyncFailedSegment,
   type SocialAdSyncRunKind,
   type SocialAdSyncSegment,
@@ -20,6 +22,10 @@ import {
   classifySocialAdSyncRetry,
   nextAvailableAt,
 } from '../sync/social-ad-sync-retry';
+import {
+  SocialAdBackfillPlannerService,
+  advancesBackfillChain,
+} from './social-ad-backfill-planner.service';
 import { SocialAdConnectionService } from './social-ad-connection.service';
 import { SocialAdHierarchySyncService } from './social-ad-hierarchy-sync.service';
 import { SocialAdInsightsSyncService } from './social-ad-insights-sync.service';
@@ -83,6 +89,7 @@ export class SocialAdSyncWorker {
     private readonly hierarchySync: SocialAdHierarchySyncService,
     private readonly insightsSync: SocialAdInsightsSyncService,
     private readonly connectionService: SocialAdConnectionService,
+    private readonly backfillPlanner: SocialAdBackfillPlannerService,
   ) {}
 
   @Interval(TICK_MS)
@@ -152,9 +159,12 @@ export class SocialAdSyncWorker {
         connectionId: run.connectionId,
       });
     } catch (error) {
-      // Nothing ran, so every planned segment is outstanding.
+      // Nothing ran, so every planned segment is outstanding. No credential
+      // either, which is what tells `settle` it cannot advance a backfill
+      // chain from here — the scheduler's next tick does that instead.
       await this.settle({
         run,
+        credential: null,
         counters,
         completed,
         plan,
@@ -193,6 +203,7 @@ export class SocialAdSyncWorker {
          */
         await this.settle({
           run,
+          credential,
           counters,
           completed,
           plan,
@@ -206,6 +217,7 @@ export class SocialAdSyncWorker {
 
     await this.settle({
       run,
+      credential,
       counters,
       completed,
       plan,
@@ -281,20 +293,43 @@ export class SocialAdSyncWorker {
     const window = this.requireWindow(input.run);
 
     /**
+     * The run's mode, decided once and used for both halves of the contract.
+     *
+     * Which assertion guards the window and what `is_partial` is written as are
+     * the same decision, so they read the same boolean. Deriving them
+     * separately — say, checking the window against today for one and the run
+     * kind for the other — is how a run gets validated as closed and stored as
+     * open.
+     */
+    const intraday = isIntradayRunKind(input.run.runKind);
+
+    /**
      * Re-checked here, not only at enqueue.
      *
      * A queued run can execute much later than it was created, and the check is
-     * what guarantees no open day is ever written with `is_partial = false`.
-     * Time only ever makes a closed window more closed, so this never turns a
-     * valid run invalid — it is the guard against a row whose window was not
-     * written by the enqueue path at all.
+     * what guarantees no open day is ever written with `is_partial = false` and
+     * no settled day with `is_partial = true`.
+     *
+     * The two directions age differently. Time only makes a closed window more
+     * closed, so that check never turns a valid run invalid — it is the guard
+     * against a row whose window was not written by the enqueue path at all. An
+     * intraday window, by contrast, *expires*: a run queued at 23:59 and
+     * claimed after the account's midnight is asking for a day that has since
+     * settled, and refusing is the only answer that does not write yesterday as
+     * provisional. It is classified as terminal, so it fails once instead of
+     * retrying into a day that will never be today again.
      */
-    assertClosedInsightsWindow(window, input.credential.timezone);
+    if (intraday) {
+      assertIntradayInsightsWindow(window, input.credential.timezone);
+    } else {
+      assertClosedInsightsWindow(window, input.credential.timezone);
+    }
 
     const summary = await this.insightsSync.ingestLevel({
       credential: input.credential,
       level: input.segment === 'account_insights' ? 'account' : 'campaign',
       window,
+      isPartial: intraday,
       syncedAt: input.syncedAt,
     });
 
@@ -361,6 +396,7 @@ export class SocialAdSyncWorker {
    */
   private async settle(input: {
     run: SocialAdSyncRunEntity;
+    credential: ResolvedAdCredential | null;
     counters: SocialAdSyncRunCounters;
     completed: readonly SocialAdSyncSegment[];
     plan: readonly SocialAdSyncSegment[];
@@ -386,6 +422,7 @@ export class SocialAdSyncWorker {
       });
 
       this.log(run, 'succeeded', counters, null);
+      await this.advanceBackfill(run, input.credential);
 
       return;
     }
@@ -433,6 +470,57 @@ export class SocialAdSyncWorker {
 
     await this.recordFreshness(run, wrote, policy.code);
     this.log(run, 'stopped', counters, policy.code);
+
+    // Only from a terminal state. A run that went back to `queued` above has
+    // not finished, and enqueueing the next chunk beside a retry that is still
+    // coming would put two of this connection's backfill runs in the queue —
+    // the exact thing one-at-a-time exists to prevent.
+    await this.advanceBackfill(run, input.credential);
+  }
+
+  /**
+   * Hands the backfill chain to its next piece, if this run was part of one.
+   *
+   * Called after a run settles, never before: the planner refuses while
+   * anything of the chain is in flight, so calling it mid-run would do nothing
+   * and calling it after a reschedule would be a lie about the run being over.
+   *
+   * A terminal failure advances the chain too, and that is deliberate. The
+   * chunk that failed is recorded as attempted, the chain moves to the next
+   * week, and the ninety days end up with one hole and a failure in the history
+   * naming it. The alternative — stopping the chain at the first bad week —
+   * would throw away eighty-three days of history over one.
+   *
+   * Failures here are swallowed on purpose. The run has already been settled
+   * and its outcome written; a planner that cannot enqueue must not turn a
+   * finished run into a worker-level error, and the scheduler asks the same
+   * question again within the hour.
+   */
+  private async advanceBackfill(
+    run: SocialAdSyncRunEntity,
+    credential: ResolvedAdCredential | null,
+  ): Promise<void> {
+    if (!credential || !advancesBackfillChain(run.runKind)) return;
+
+    try {
+      await this.backfillPlanner.planNext({
+        connectionId: run.connectionId,
+        tenantId: run.tenantId,
+        workspaceId: run.workspaceId,
+        agencyClientId: run.agencyClientId,
+        provider: run.provider,
+        // From the credential rather than from the run, which has no timezone
+        // column. It is the ad account's own zone, already validated by the
+        // resolver, and it is only consulted when a chain has to be anchored.
+        timezone: credential.timezone,
+      });
+    } catch (error) {
+      this.logger.error(
+        `Social ad backfill planning failed for ${run.connectionId}: ${
+          error instanceof Error ? error.name : 'unknown'
+        }`,
+      );
+    }
   }
 
   /**

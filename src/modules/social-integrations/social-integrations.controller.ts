@@ -27,6 +27,7 @@ import { SyncInsightsDto } from './dto/sync-insights.dto';
 import { MetaAdsOAuthService } from './services/meta-ads-oauth.service';
 import { MetaAdsSystemUserService } from './services/meta-ads-system-user.service';
 import { SocialAdConnectionService } from './services/social-ad-connection.service';
+import { SocialAdBackfillResumeService } from './services/social-ad-backfill-resume.service';
 import { SocialAdHierarchySyncService } from './services/social-ad-hierarchy-sync.service';
 import { SocialAdInsightsSyncService } from './services/social-ad-insights-sync.service';
 import { SocialAdSyncRunService } from './services/social-ad-sync-run.service';
@@ -52,6 +53,7 @@ export class SocialIntegrationsController {
     private readonly hierarchySyncService: SocialAdHierarchySyncService,
     private readonly insightsSyncService: SocialAdInsightsSyncService,
     private readonly syncRunService: SocialAdSyncRunService,
+    private readonly backfillResumeService: SocialAdBackfillResumeService,
   ) {}
 
   @Post('meta-ads/connect')
@@ -336,6 +338,42 @@ export class SocialIntegrationsController {
         connectionId,
         since: dto.since,
         until: dto.until,
+        requestedById: ctx.userId ?? null,
+      });
+    } catch (error) {
+      throw mapSocialAdSyncError(error);
+    }
+  }
+
+  /**
+   * Retries the one window a stalled backfill is stuck on.
+   *
+   * No body: the window is not the caller's to choose. It is the first chunk of
+   * the connection's existing plan that has no succeeded run, and letting a
+   * request name dates instead would create a run whose boundaries belong to no
+   * chunk — which the chain would then never recognize as covering anything.
+   *
+   * Refuses with a 409 and a distinct code when there is nothing to resume: no
+   * chain, a complete one, or a chain merely waiting its turn. It queues a row
+   * and returns it; the worker reads Meta, under the retry policy every other
+   * run uses.
+   */
+  @Post('connections/:connectionId/backfill/resume')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireProductEntitlement('social')
+  @RequirePermission(SOCIAL_INTEGRATIONS_PERMISSION)
+  async resumeConnectionBackfill(
+    @RequestContextData() ctx: RequestContext,
+    @Param('connectionId', ParseUUIDPipe) connectionId: string,
+  ) {
+    const scope = this.requireScope(ctx);
+
+    try {
+      return await this.backfillResumeService.resume({
+        tenantId: scope.tenantId,
+        workspaceId: scope.workspaceId,
+        agencyClientId: scope.agencyClientId,
+        connectionId,
         requestedById: ctx.userId ?? null,
       });
     } catch (error) {

@@ -12,13 +12,17 @@ import {
   SocialAdInsightsTruncatedError,
   SocialAdInsightsWindowNotClosedError,
 } from './sync/social-ad-insights.error';
+import type { SocialAdBackfillResumeService } from './services/social-ad-backfill-resume.service';
 import type { MetaAdsOAuthService } from './services/meta-ads-oauth.service';
 import type { MetaAdsSystemUserService } from './services/meta-ads-system-user.service';
 import type { SocialAdConnectionService } from './services/social-ad-connection.service';
 import type { SocialAdHierarchySyncService } from './services/social-ad-hierarchy-sync.service';
 import type { SocialAdInsightsSyncService } from './services/social-ad-insights-sync.service';
 import type { SocialAdSyncRunService } from './services/social-ad-sync-run.service';
-import { SocialAdSyncDisabledError } from './sync/social-ad-sync-run.error';
+import {
+  SocialAdBackfillResumeError,
+  SocialAdSyncDisabledError,
+} from './sync/social-ad-sync-run.error';
 import { SocialIntegrationsController } from './social-integrations.controller';
 
 const GUARDED_HANDLERS = [
@@ -40,6 +44,9 @@ const GUARDED_HANDLERS = [
   // one: both name a connection whose credential reads somebody's ad spend.
   'enqueueConnectionSync',
   'listConnectionSyncRuns',
+  // Resuming a stalled backfill queues a read of the same ad account, so it
+  // carries the same entitlement and permission as queueing any other sync.
+  'resumeConnectionBackfill',
 ] as const;
 
 function createHarness(
@@ -140,6 +147,17 @@ function createHarness(
     }),
   };
 
+  const backfillResume = {
+    resume: jest.fn((input: Record<string, unknown>) => {
+      runInputs.push(input);
+
+      return Promise.resolve({
+        run: { id: 'run-resume', status: 'queued' },
+        deduplicated: false,
+      });
+    }),
+  };
+
   const controller = new SocialIntegrationsController(
     oauth as unknown as MetaAdsOAuthService,
     connections as unknown as SocialAdConnectionService,
@@ -147,6 +165,7 @@ function createHarness(
     hierarchySync as unknown as SocialAdHierarchySyncService,
     insightsSync as unknown as SocialAdInsightsSyncService,
     syncRuns as unknown as SocialAdSyncRunService,
+    backfillResume as unknown as SocialAdBackfillResumeService,
   );
 
   return {
@@ -157,6 +176,7 @@ function createHarness(
     hierarchySync,
     insightsSync,
     syncRuns,
+    backfillResume,
     selectInputs,
     internalInputs,
     syncInputs,
@@ -610,6 +630,73 @@ describe('SocialIntegrationsController scope resolution', () => {
         context(),
         '11111111-1111-4111-8111-111111111111',
         { since: '2026-08-01', until: '2026-08-25' },
+      ),
+    ).rejects.toMatchObject({
+      status: 404,
+      response: { code: 'connection_not_found' },
+    });
+  });
+
+  it('resumes a backfill under the resolved scope, with no window from the caller', async () => {
+    const harness = createHarness();
+    const connectionId = '11111111-1111-4111-8111-111111111111';
+
+    const result = await harness.controller.resumeConnectionBackfill(
+      context({
+        managedContext: {
+          productKey: 'social',
+          operatingMode: 'client',
+          clientId: 'client-a',
+          managedTenantId: 'managed-a',
+        },
+      }),
+      connectionId,
+    );
+
+    // No dates cross this boundary: the window is a chunk of the connection's
+    // existing plan, and a caller-named one would belong to no chunk.
+    expect(harness.runInputs[0]).toEqual({
+      tenantId: 'tenant-a',
+      workspaceId: 'workspace-a',
+      agencyClientId: 'client-a',
+      connectionId,
+      requestedById: 'user-a',
+    });
+    expect(result).toMatchObject({ run: { id: 'run-resume' } });
+  });
+
+  it('maps a refusal to resume onto a 409 with its own code', async () => {
+    const harness = createHarness();
+
+    harness.backfillResume.resume.mockRejectedValueOnce(
+      new SocialAdBackfillResumeError('backfill_chain_complete'),
+    );
+
+    const failure = await harness.controller
+      .resumeConnectionBackfill(
+        context(),
+        '11111111-1111-4111-8111-111111111111',
+      )
+      .catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(HttpException);
+    expect((failure as HttpException).getStatus()).toBe(409);
+    expect((failure as HttpException).getResponse()).toMatchObject({
+      code: 'backfill_chain_complete',
+    });
+  });
+
+  it('answers 404 for a resume against a connection outside the scope', async () => {
+    const harness = createHarness();
+
+    harness.backfillResume.resume.mockRejectedValueOnce(
+      new SocialAdCredentialError('connection_not_found'),
+    );
+
+    await expect(
+      harness.controller.resumeConnectionBackfill(
+        context(),
+        '11111111-1111-4111-8111-111111111111',
       ),
     ).rejects.toMatchObject({
       status: 404,

@@ -10,6 +10,8 @@ import {
   SocialAdSyncRunEntity,
 } from './entities';
 import { SocialInternalAccessService } from './internal/social-internal-access.service';
+import { SocialAdBackfillPlannerService } from './services/social-ad-backfill-planner.service';
+import { SocialAdBackfillResumeService } from './services/social-ad-backfill-resume.service';
 import { MetaAdsEntityReaderService } from './services/meta-ads-entity-reader.service';
 import { MetaAdsGraphService } from './services/meta-ads-graph.service';
 import { MetaAdsInsightsReaderService } from './services/meta-ads-insights-reader.service';
@@ -67,6 +69,8 @@ import { SocialIntegrationsController } from './social-integrations.controller';
     SocialAdInsightsSyncService,
     SocialAdSyncConfigService,
     SocialAdSyncRunService,
+    SocialAdBackfillPlannerService,
+    SocialAdBackfillResumeService,
     SocialAdSyncWorker,
     SocialAdSyncScheduler,
     SettingsCryptoService,

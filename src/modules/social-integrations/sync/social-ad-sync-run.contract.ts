@@ -3,23 +3,57 @@ import type { SocialAdEntityLevel } from '../entities/social-ad-entity.entity';
 /**
  * What a run is for.
  *
- * Three kinds, and the distinction each one earns:
+ * Five kinds, and the distinction each one earns:
  *
- * - `entities` — the ad hierarchy alone. No date window, because objects have
+ * - `entities`  — the ad hierarchy alone. No date window, because objects have
  *   no date dimension; a caller who only needs the mirror refreshed should not
  *   pay for a 90-day insights read.
- * - `manual`   — a person asked for this window, now. Hierarchy first, then
+ * - `manual`    — a person asked for this window, now. Hierarchy first, then
  *   insights, because a campaign that appears in today's facts and not in the
  *   mirror shows up in the UI as an id.
- * - `daily`    — the scheduler asked for it, on the account's own morning.
+ * - `daily`     — the scheduler asked for it, on the account's own morning.
+ * - `backfill`  — one chunk of the initial history sweep. Closed days, like
+ *   `daily`, and deliberately a separate value: a connection's first ninety
+ *   days arrive as a dozen runs, and filing them under `daily` would make the
+ *   morning's own run impossible to find in the list it shares with them.
+ * - `intraday`  — today, while today is still running. The only kind that
+ *   writes `is_partial = true`, and the only one whose window is *not* closed.
  *
  * `manual` and `daily` execute the identical pipeline and are still separate
  * values: the run table is the log anyone reads to answer "why is yesterday
  * missing?", and a scheduled run filed under `manual` makes that question
  * unanswerable. `requested_by_id` is not a substitute — it is NULL for both a
  * scheduled run and a run enqueued by a system caller.
+ *
+ * The column is a plain `varchar(40)` with no CHECK — S2.2 left the vocabulary
+ * to the runtime on purpose — so adding these two cost no migration. This type
+ * is the vocabulary; the worker's plan lookup is what refuses anything else.
  */
-export type SocialAdSyncRunKind = 'entities' | 'manual' | 'daily';
+export type SocialAdSyncRunKind =
+  | 'entities'
+  | 'manual'
+  | 'daily'
+  | 'backfill'
+  | 'intraday';
+
+/**
+ * The kinds whose window is a day the ad account has already finished.
+ *
+ * Everything except `intraday`. Membership decides two things that must never
+ * disagree: which assertion guards the window at execution, and what
+ * `is_partial` is written as. Deriving both from one list is what keeps a run
+ * from being validated as closed and then stored as open, or the reverse.
+ */
+export const CLOSED_WINDOW_RUN_KINDS: readonly SocialAdSyncRunKind[] = [
+  'manual',
+  'daily',
+  'backfill',
+];
+
+/** Whether a run of this kind writes facts for a day still in progress. */
+export function isIntradayRunKind(runKind: string): boolean {
+  return runKind === 'intraday';
+}
 
 /**
  * One unit of work inside a run, and the unit a retry resumes from.
@@ -49,21 +83,53 @@ export const SYNC_SEGMENTS_BY_KIND: Record<
   entities: ['hierarchy'],
   manual: ['hierarchy', 'account_insights', 'campaign_insights'],
   daily: ['hierarchy', 'account_insights', 'campaign_insights'],
+  /**
+   * No hierarchy, on both of the kinds the scheduler repeats.
+   *
+   * A backfill is thirteen chunks of one account's history, and the hierarchy
+   * is the same tree for all thirteen — sweeping it per chunk would read the
+   * account's 450-odd objects thirteen times to learn nothing new after the
+   * first. The chain enqueues one `entities` run ahead of the chunks instead,
+   * which also gives that sweep its own row, its own retry and its own line in
+   * the history.
+   *
+   * Intraday leaves it out for the same reason from the other direction: it
+   * runs up to six times a day, and the hierarchy has no intraday dimension.
+   * A campaign created this morning still gets its spend recorded — the facts
+   * table has no foreign key to the mirror precisely so that it can — and the
+   * account's own daily run adds it to the mirror the next morning.
+   */
+  backfill: ['account_insights', 'campaign_insights'],
+  intraday: ['account_insights', 'campaign_insights'],
 };
 
 /**
  * The hierarchy levels a run touches.
  *
- * All four for every kind, because every kind starts with the hierarchy sweep,
- * which reads all four. Insights cover a subset (account and campaign) and do
- * not widen this list — the column names what the run *covers*, and a level
- * listed twice for two different reasons would not be more true.
+ * All four for the kinds that start with a hierarchy sweep, which reads all
+ * four. Insights cover a subset and do not widen this list — the column names
+ * what the run *covers*, and a level listed twice for two different reasons
+ * would not be more true.
  */
 export const SYNC_ENTITY_LEVELS: readonly SocialAdEntityLevel[] = [
   'account',
   'campaign',
   'adset',
   'ad',
+];
+
+/**
+ * What an insights-only run covers.
+ *
+ * The two levels S2.4 ingests, and the honest answer for a `backfill` chunk or
+ * an `intraday` pass: neither reads the hierarchy, so claiming `adset` and `ad`
+ * would describe work the run does not do. It is also part of their idempotency
+ * key, which is why it is a constant rather than an argument — a caller that
+ * could pass a different list would produce a second key for one intent.
+ */
+export const INSIGHTS_ENTITY_LEVELS: readonly SocialAdEntityLevel[] = [
+  'account',
+  'campaign',
 ];
 
 /** Default retry ceiling, matching the column's own default. */
@@ -114,6 +180,15 @@ export type SocialAdSyncFailedSegment = {
  * The connection id is included even though the index already keys on it. The
  * key travels into logs and into the runs list, where a value that identifies
  * itself is worth more than four saved characters.
+ *
+ * `bucket` is the one dimension that is not part of *what would be read*, and
+ * it exists for the single case where that is not enough. Every intraday pass
+ * of one day asks for the identical window — `since = until = today` — so
+ * without it the 09:00 snapshot and the 12:00 snapshot are one intent, and the
+ * second is deduplicated against a run that has already settled. It is a
+ * derived label for a period of the account's own day, never a clock reading:
+ * a timestamp here would deduplicate nothing, which is the failure this whole
+ * function exists to prevent.
  */
 export function buildSyncIdempotencyKey(input: {
   connectionId: string;
@@ -121,6 +196,7 @@ export function buildSyncIdempotencyKey(input: {
   windowStart: string | null;
   windowEnd: string | null;
   entityLevels: readonly SocialAdEntityLevel[];
+  bucket?: string | null;
 }): string {
   // Sorted so two callers listing the same levels in different orders produce
   // one key. An unsorted list would make ["account","campaign"] and
@@ -133,5 +209,10 @@ export function buildSyncIdempotencyKey(input: {
     input.windowStart ?? '-',
     input.windowEnd ?? '-',
     levels,
+    // Omitted entirely when absent rather than joined as a placeholder: every
+    // key written before this parameter existed must keep its exact spelling,
+    // or the scheduler's "has today's run already settled?" question would
+    // stop matching yesterday's rows the day this ships.
+    ...(input.bucket ? [input.bucket] : []),
   ].join(':');
 }

@@ -6,6 +6,7 @@ import { SocialInternalAccessService } from '../internal/social-internal-access.
 import { findForbiddenSocialIntegrationFields } from '../views/social-ad-connection.view';
 import type { MetaAdsGraphService } from './meta-ads-graph.service';
 import { MetaAdsSystemUserService } from './meta-ads-system-user.service';
+import type { SocialAdBackfillPlannerService } from './social-ad-backfill-planner.service';
 
 const INTERNAL_TENANT = '3fcf6e35-9881-4713-b704-795956eec0c8';
 const OTHER_TENANT = '8a2c1d44-0000-4000-8000-0000000000ff';
@@ -134,14 +135,19 @@ function createHarness(
 
   const graph = { listAdAccounts };
 
+  const backfillPlanner = {
+    planForConnectedAccount: jest.fn(async () => undefined),
+  };
+
   const service = new MetaAdsSystemUserService(
     repository as unknown as Repository<SocialAdAccountConnectionEntity>,
     dataSource as unknown as DataSource,
     graph as unknown as MetaAdsGraphService,
     new SocialInternalAccessService(),
+    backfillPlanner as unknown as SocialAdBackfillPlannerService,
   );
 
-  return { service, repository, saved, graph, graphTokens };
+  return { service, repository, saved, graph, graphTokens, backfillPlanner };
 }
 
 describe('MetaAdsSystemUserService', () => {

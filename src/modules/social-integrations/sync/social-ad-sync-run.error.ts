@@ -30,3 +30,32 @@ export class SocialAdSyncRunPlanError extends Error {
     this.name = 'SocialAdSyncRunPlanError';
   }
 }
+
+/**
+ * A backfill chain cannot be resumed in the state it is in.
+ *
+ * Every case is a refusal rather than a silent no-op, because resume is a
+ * deliberate act taken in response to a stall, and the four ways it can be
+ * inapplicable mean genuinely different things to the person asking:
+ *
+ * - `backfill_chain_missing` — this connection has never had a backfill. There
+ *   is nothing to resume; the scheduler starts one on its own.
+ * - `backfill_chain_complete` — every chunk already has a succeeded run.
+ * - `backfill_chain_not_stalled` — the first uncovered chunk has never been
+ *   attempted, so the chain is simply waiting its turn, and forcing a run here
+ *   would jump the queue the scheduler is holding it in.
+ * - `backfill_chain_disabled` — the horizon is configured to zero, so the plan
+ *   has no chunks to resume.
+ */
+export class SocialAdBackfillResumeError extends Error {
+  constructor(
+    readonly code:
+      | 'backfill_chain_missing'
+      | 'backfill_chain_complete'
+      | 'backfill_chain_not_stalled'
+      | 'backfill_chain_disabled',
+  ) {
+    super('This backfill chain cannot be resumed.');
+    this.name = 'SocialAdBackfillResumeError';
+  }
+}

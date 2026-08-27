@@ -5,8 +5,29 @@ import { MetaGraphError } from '../services/meta-graph-error';
 import {
   SocialAdInsightsTruncatedError,
   SocialAdInsightsWindowNotClosedError,
+  SocialAdInsightsWindowNotIntradayError,
 } from './social-ad-insights.error';
-import { SocialAdSyncDisabledError } from './social-ad-sync-run.error';
+import {
+  SocialAdBackfillResumeError,
+  SocialAdSyncDisabledError,
+} from './social-ad-sync-run.error';
+
+/**
+ * What each refusal to resume a backfill means to the person who asked.
+ *
+ * Four distinct sentences rather than one, because the repair differs: two of
+ * these mean "nothing is wrong", one means "wait", and one means "change the
+ * configuration".
+ */
+const RESUME_MESSAGES: Record<SocialAdBackfillResumeError['code'], string> = {
+  backfill_chain_missing:
+    'This connection has no backfill to resume. One is queued automatically once the account is ready.',
+  backfill_chain_complete:
+    'This backfill is already complete. Every window in the plan has been read.',
+  backfill_chain_not_stalled:
+    'This backfill is not stalled. The next window has not been attempted yet and is still queued in turn.',
+  backfill_chain_disabled: 'Backfill is turned off on this server.',
+};
 
 /**
  * Turns a sync failure into an HTTP answer that says something true.
@@ -147,6 +168,19 @@ export function describeSocialAdSyncFailure(
     };
   }
 
+  if (error instanceof SocialAdInsightsWindowNotIntradayError) {
+    return {
+      status: HttpStatus.CONFLICT,
+      code: 'insights_window_not_intraday',
+      message: `An intraday read covers only the ad account's current day, ${error.today}.`,
+      // Reported under the same field name the closed-window refusal uses: both
+      // answer "which day may this run cover?", and a second name for one
+      // question would make a caller parse two shapes to learn one thing.
+      maxUntil: error.today,
+      timezone: error.timezone,
+    };
+  }
+
   if (error instanceof SocialAdSyncDisabledError) {
     return {
       // 503, not 403: nothing about the caller or the connection is wrong, and
@@ -154,6 +188,16 @@ export function describeSocialAdSyncFailure(
       status: HttpStatus.SERVICE_UNAVAILABLE,
       code: 'sync_disabled',
       message: 'Ad syncing is currently turned off on this server.',
+    };
+  }
+
+  if (error instanceof SocialAdBackfillResumeError) {
+    return {
+      // 409: the request is well-formed and the caller is entitled to it — the
+      // chain is simply not in a state that has anything to resume.
+      status: HttpStatus.CONFLICT,
+      code: error.code,
+      message: RESUME_MESSAGES[error.code],
     };
   }
 
@@ -187,7 +231,9 @@ export function mapSocialAdSyncError(error: unknown): unknown {
     error instanceof SocialAdCredentialError ||
     error instanceof SocialAdInsightsTruncatedError ||
     error instanceof SocialAdInsightsWindowNotClosedError ||
+    error instanceof SocialAdInsightsWindowNotIntradayError ||
     error instanceof SocialAdSyncDisabledError ||
+    error instanceof SocialAdBackfillResumeError ||
     error instanceof MetaGraphError
   ) {
     const { status, ...body } = describeSocialAdSyncFailure(error);

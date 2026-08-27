@@ -42,6 +42,12 @@ const SETTLED: readonly SocialAdSyncRunStatus[] = [
   'cancelled',
 ];
 
+/** How one backfill chunk ended, keyed by the day its window closes on. */
+export type SocialAdBackfillChunkOutcome = {
+  until: string;
+  status: SocialAdSyncRunStatus;
+};
+
 export type EnqueueSyncRunInput = {
   tenantId: string;
   workspaceId: string;
@@ -53,6 +59,13 @@ export type EnqueueSyncRunInput = {
   windowStart: string | null;
   windowEnd: string | null;
   entityLevels?: readonly SocialAdEntityLevel[];
+  /**
+   * Extra dimension of the intent, for a kind whose window does not identify
+   * it. Only intraday uses one — every pass of a day asks for that same day —
+   * and it must be a derived label such as a bucket of the account's own
+   * clock, never a timestamp.
+   */
+  bucket?: string | null;
   /** NULL for a scheduled run; set when a person asked for it. */
   requestedById: string | null;
 };
@@ -274,6 +287,91 @@ export class SocialAdSyncRunService {
   }
 
   /**
+   * Whether this connection has a run of any of these kinds still going.
+   *
+   * The backfill chain's throttle. The in-flight unique index already stops the
+   * *same* chunk from being enqueued twice; this is the different question of
+   * whether the chain should produce its *next* piece of work at all, and the
+   * answer is no while the previous piece is queued or running. One chunk in
+   * flight per connection is what keeps a thirteen-week sweep from filling the
+   * queue ahead of every other account's morning.
+   */
+  async hasInFlightRun(
+    connectionId: string,
+    runKinds: readonly SocialAdSyncRunKind[],
+  ): Promise<boolean> {
+    if (runKinds.length === 0) return false;
+
+    const count = await this.runsRepository.count({
+      where: IN_FLIGHT.flatMap((status) =>
+        runKinds.map((runKind) => ({ connectionId, runKind, status })),
+      ),
+    });
+
+    return count > 0;
+  }
+
+  /**
+   * Every backfill chunk this connection has ever had, with how it ended.
+   *
+   * The chain's whole memory, and it lives here rather than in a flag on the
+   * connection because a flag would be a second copy of this that disagrees the
+   * first time a run is retried, cancelled, or made by hand.
+   *
+   * Three questions come out of one read, and they need *different* answers per
+   * status, which is why this returns outcomes rather than a list of days:
+   *
+   * - *Where is the plan anchored?* The newest window end, whatever its status.
+   *   The anchor is the first chunk the chain ever produced and must not move
+   *   when a chunk fails.
+   * - *Which chunks are covered?* Only `succeeded`. A chunk that ended
+   *   `partial`, `failed`, `dead_letter` or `cancelled` fetched some or none of
+   *   its week, and calling that covered is how a quarter of a client's spend
+   *   ends up with a hole nothing will ever fill.
+   * - *Which chunks are unresolved?* Everything else. The chain stops at the
+   *   oldest of these rather than stepping over it, so an operator sees a
+   *   stalled backfill instead of a complete-looking one with a missing week.
+   *
+   * Returned as text, from Postgres' own formatting: a `date` read back through
+   * a driver that decides to hand out a `Date` would be re-expressed in the
+   * server's timezone, and this value is compared against days computed in the
+   * ad account's.
+   */
+  async listBackfillChunkOutcomes(
+    connectionId: string,
+  ): Promise<SocialAdBackfillChunkOutcome[]> {
+    const rows = await this.runsRepository
+      .createQueryBuilder('run')
+      .select(`to_char(run.window_end, 'YYYY-MM-DD')`, 'until')
+      .addSelect('run.status', 'status')
+      .where('run.connection_id = :connectionId', { connectionId })
+      .andWhere(`run.run_kind = 'backfill'`)
+      .andWhere('run.window_end IS NOT NULL')
+      /**
+       * A total order, and every part of it is load-bearing.
+       *
+       * `window_end DESC` puts the plan's anchor first. On its own that is not
+       * deterministic: a window can hold several runs — a resumed chunk is a
+       * second run of the same window by construction — and Postgres is free to
+       * return ties in whatever order the plan produces, which changes with the
+       * table's physical layout, the statistics, and the plan the optimizer
+       * happens to choose. The anchor is `[0].until`, so an undefined tie order
+       * would be an anchor that is *usually* right.
+       *
+       * `created_at` then `id` break the tie the same way every time: oldest
+       * attempt first within a window, and `id` as the final discriminator for
+       * two runs created inside the same clock tick. Nothing here depends on
+       * insertion order or on natural order.
+       */
+      .orderBy('run.window_end', 'DESC')
+      .addOrderBy('run.created_at', 'ASC')
+      .addOrderBy('run.id', 'ASC')
+      .getRawMany<{ until: string; status: SocialAdSyncRunStatus }>();
+
+    return rows.map((row) => ({ until: row.until, status: row.status }));
+  }
+
+  /**
    * Records an intent to sync, or hands back the one already in flight.
    *
    * The deduplication is done by the database, not by a read-then-write. A
@@ -295,6 +393,7 @@ export class SocialAdSyncRunService {
       windowStart: input.windowStart,
       windowEnd: input.windowEnd,
       entityLevels,
+      bucket: input.bucket ?? null,
     });
 
     try {

@@ -7,6 +7,7 @@ import { SocialAdAccountConnectionEntity } from '../entities/social-ad-account-c
 import { requireSocialFrontendUrl } from '../oauth/meta-ads-oauth.support';
 import type { MetaAdsGraphService } from './meta-ads-graph.service';
 import { MetaAdsOAuthService } from './meta-ads-oauth.service';
+import type { SocialAdBackfillPlannerService } from './social-ad-backfill-planner.service';
 
 const CALLBACK_URL =
   'https://api.example.com/api/social/integrations/meta-ads/callback';
@@ -160,17 +161,26 @@ function createHarness(
 
   const crypto = new SettingsCryptoService();
 
+  // Records what a completed selection hands to the backfill chain. The
+  // planner's own decisions are covered by its own spec; what matters here is
+  // that binding an account reaches it at all, and with the bound row.
+  const backfillPlanner = {
+    planForConnectedAccount: jest.fn(async () => undefined),
+  };
+
   const service = new MetaAdsOAuthService(
     connectionsRepository as unknown as Repository<SocialAdAccountConnectionEntity>,
     dataSource as unknown as DataSource,
     graph as unknown as MetaAdsGraphService,
     crypto,
+    backfillPlanner as unknown as SocialAdBackfillPlannerService,
   );
 
   return {
     service,
     crypto,
     graph,
+    backfillPlanner,
     builder,
     saved,
     deleted,

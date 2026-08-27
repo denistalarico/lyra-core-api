@@ -2,9 +2,13 @@ import { BadRequestException } from '@nestjs/common';
 import {
   MAX_INSIGHTS_WINDOW_DAYS,
   assertClosedInsightsWindow,
+  assertIntradayInsightsWindow,
   parseInsightsWindow,
 } from './insights-window';
-import { SocialAdInsightsWindowNotClosedError } from './social-ad-insights.error';
+import {
+  SocialAdInsightsWindowNotClosedError,
+  SocialAdInsightsWindowNotIntradayError,
+} from './social-ad-insights.error';
 
 describe('parseInsightsWindow', () => {
   it('counts the window inclusively', () => {
@@ -211,5 +215,126 @@ describe('assertClosedInsightsWindow', () => {
         ),
       ).toThrow(SocialAdInsightsWindowNotClosedError);
     });
+  });
+});
+
+describe('assertIntradayInsightsWindow', () => {
+  const window = (since: string, until: string) =>
+    parseInsightsWindow({ since, until });
+
+  /** 15:00 in São Paulo, 06:00 the next day in Auckland. */
+  const NOW = new Date('2026-08-26T18:00:00Z');
+
+  it('accepts exactly the account current day', () => {
+    expect(() =>
+      assertIntradayInsightsWindow(
+        window('2026-08-26', '2026-08-26'),
+        'America/Sao_Paulo',
+        NOW,
+      ),
+    ).not.toThrow();
+  });
+
+  it('refuses the day the daily run owns', () => {
+    // D-1 is settled, and a settled day written with `is_partial = true` would
+    // advertise a final number as provisional — and invite every later reader
+    // to keep re-fetching it.
+    expect(() =>
+      assertIntradayInsightsWindow(
+        window('2026-08-25', '2026-08-25'),
+        'America/Sao_Paulo',
+        NOW,
+      ),
+    ).toThrow(SocialAdInsightsWindowNotIntradayError);
+  });
+
+  it('refuses a day that has not started anywhere', () => {
+    expect(() =>
+      assertIntradayInsightsWindow(
+        window('2026-08-27', '2026-08-27'),
+        'America/Sao_Paulo',
+        NOW,
+      ),
+    ).toThrow(SocialAdInsightsWindowNotIntradayError);
+  });
+
+  it('refuses a range that merely contains today', () => {
+    // The dangerous shape: it would drag four settled days into a partial
+    // write, and each of them would then be re-read forever by anything that
+    // trusts the flag.
+    expect(() =>
+      assertIntradayInsightsWindow(
+        window('2026-08-23', '2026-08-26'),
+        'America/Sao_Paulo',
+        NOW,
+      ),
+    ).toThrow(SocialAdInsightsWindowNotIntradayError);
+  });
+
+  it('reads today in the account timezone, not the server one', () => {
+    // The same instant is the 26th in São Paulo and the 27th in Auckland. Each
+    // account's own day is the only one that is intraday for it.
+    expect(() =>
+      assertIntradayInsightsWindow(
+        window('2026-08-27', '2026-08-27'),
+        'Pacific/Auckland',
+        NOW,
+      ),
+    ).not.toThrow();
+
+    expect(() =>
+      assertIntradayInsightsWindow(
+        window('2026-08-26', '2026-08-26'),
+        'Pacific/Auckland',
+        NOW,
+      ),
+    ).toThrow(SocialAdInsightsWindowNotIntradayError);
+  });
+
+  it('follows the account across its own midnight, not UTC midnight', () => {
+    // 22:00 in São Paulo on the 26th — still the 27th in UTC, and still the
+    // 26th for this account. A run keyed to UTC would ask for tomorrow.
+    const beforeLocalMidnight = new Date('2026-08-27T01:00:00Z');
+
+    expect(() =>
+      assertIntradayInsightsWindow(
+        window('2026-08-26', '2026-08-26'),
+        'America/Sao_Paulo',
+        beforeLocalMidnight,
+      ),
+    ).not.toThrow();
+
+    // 00:30 in São Paulo on the 27th. The window that was valid ninety minutes
+    // ago has expired, which is exactly what the worker re-checks for.
+    const afterLocalMidnight = new Date('2026-08-27T03:30:00Z');
+
+    expect(() =>
+      assertIntradayInsightsWindow(
+        window('2026-08-26', '2026-08-26'),
+        'America/Sao_Paulo',
+        afterLocalMidnight,
+      ),
+    ).toThrow(SocialAdInsightsWindowNotIntradayError);
+  });
+
+  it('names the day it would have accepted', () => {
+    // The refusal has to be actionable: a caller elsewhere in the world cannot
+    // derive the account's current day from anything in its own request.
+    try {
+      assertIntradayInsightsWindow(
+        window('2026-08-25', '2026-08-25'),
+        'Pacific/Auckland',
+        NOW,
+      );
+      throw new Error('expected a refusal');
+    } catch (error) {
+      expect(error).toBeInstanceOf(SocialAdInsightsWindowNotIntradayError);
+      expect((error as SocialAdInsightsWindowNotIntradayError).today).toBe(
+        '2026-08-27',
+      );
+      expect((error as SocialAdInsightsWindowNotIntradayError).timezone).toBe(
+        'Pacific/Auckland',
+      );
+    }
   });
 });

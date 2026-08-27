@@ -19,6 +19,7 @@ function context(
     accountExternalId: 'act_415877197389621',
     accountTimezone: 'America/Sao_Paulo',
     currency: 'BRL',
+    isPartial: false,
     syncedAt: SYNCED_AT,
     ...overrides,
   };
@@ -253,5 +254,29 @@ describe('normalizeMetricRow — absence and invalidity', () => {
   it('skips anything that is not an object', () => {
     expect(normalizeMetricRow(null, context())).toBeNull();
     expect(normalizeMetricRow('row', context())).toBeNull();
+  });
+});
+
+describe('normalizeMetricRow — provisional rows', () => {
+  it('takes is_partial from the run, not from the date', () => {
+    const row = normalizeMetricRow(ACCOUNT_ROW, context({ isPartial: true }));
+
+    expect(row?.isPartial).toBe(true);
+    // The same payload, the same date, the opposite flag. Only the coordinator
+    // knows whether the day was still running when it was read; inferring it
+    // here would be wrong in both directions around the account's midnight.
+    expect(normalizeMetricRow(ACCOUNT_ROW, context())?.isPartial).toBe(false);
+  });
+
+  it('keeps the mapping version and the action payload on a provisional row', () => {
+    const row = normalizeMetricRow(ACCOUNT_ROW, context({ isPartial: true }));
+
+    // Backfill and intraday use the same mapper as every other read. A second
+    // shape here would make two rows of one campaign incomparable.
+    expect(row?.actions).toMatchObject({
+      mappingVersion: META_ACTION_MAPPING_VERSION,
+      counts: expect.any(Object) as Record<string, string>,
+      values: expect.any(Object) as Record<string, string>,
+    });
   });
 });

@@ -19,6 +19,7 @@ import {
   toSocialAdConnectionView,
 } from '../views/social-ad-connection.view';
 import { MetaAdsGraphService } from './meta-ads-graph.service';
+import { SocialAdBackfillPlannerService } from './social-ad-backfill-planner.service';
 
 const PROVIDER = 'meta_ads' as const;
 
@@ -74,6 +75,7 @@ export class MetaAdsOAuthService {
     @InjectDataSource('agency') private readonly dataSource: DataSource,
     private readonly graphService: MetaAdsGraphService,
     private readonly cryptoService: SettingsCryptoService,
+    private readonly backfillPlanner: SocialAdBackfillPlannerService,
   ) {}
 
   async start(input: StartMetaAdsConnectionInput) {
@@ -295,6 +297,16 @@ export class MetaAdsOAuthService {
     if (!result.ok) {
       throw new BadRequestException(result.code satisfies SelectionErrorCode);
     }
+
+    /**
+     * The account is bound; this is the first moment a backfill can be planned.
+     *
+     * Outside the transaction above, deliberately. The run row it may create is
+     * work for another process, and enrolling it in the transaction that binds
+     * the account would mean a queue write could roll back the connection —
+     * inverting which of the two matters.
+     */
+    await this.backfillPlanner.planForConnectedAccount(result.connection);
 
     return toSocialAdConnectionView(result.connection);
   }

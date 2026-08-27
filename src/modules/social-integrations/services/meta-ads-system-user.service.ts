@@ -12,6 +12,7 @@ import { SOCIAL_META_ADS_SCOPES } from '../oauth/meta-ads-oauth.support';
 import type { SocialAdAccountOptionView } from '../views/social-ad-connection.view';
 import { toSocialAdConnectionView } from '../views/social-ad-connection.view';
 import { MetaAdsGraphService } from './meta-ads-graph.service';
+import { SocialAdBackfillPlannerService } from './social-ad-backfill-planner.service';
 
 const PROVIDER = 'meta_ads' as const;
 const METHOD = 'internal_system_user' as const;
@@ -68,6 +69,7 @@ export class MetaAdsSystemUserService {
     @InjectDataSource('agency') private readonly dataSource: DataSource,
     private readonly graphService: MetaAdsGraphService,
     private readonly accessService: SocialInternalAccessService,
+    private readonly backfillPlanner: SocialAdBackfillPlannerService,
   ) {}
 
   /** Whether the settings screen should offer this method. No provider call. */
@@ -236,6 +238,11 @@ export class MetaAdsSystemUserService {
     if (!result.ok) {
       throw new BadRequestException(result.code);
     }
+
+    // The same hand-off as the business-login path, through the same planner:
+    // the two flows differ in how a token is obtained and in nothing about what
+    // a connected account owes. Outside the transaction, for the same reason.
+    await this.backfillPlanner.planForConnectedAccount(result.connection);
 
     return toSocialAdConnectionView(result.connection);
   }

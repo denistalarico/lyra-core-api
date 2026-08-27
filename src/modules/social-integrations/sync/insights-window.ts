@@ -1,5 +1,8 @@
 import { BadRequestException } from '@nestjs/common';
-import { SocialAdInsightsWindowNotClosedError } from './social-ad-insights.error';
+import {
+  SocialAdInsightsWindowNotIntradayError,
+  SocialAdInsightsWindowNotClosedError,
+} from './social-ad-insights.error';
 
 /**
  * How many days one manual call may ask for.
@@ -88,6 +91,40 @@ export function assertClosedInsightsWindow(
   // settled `until` guarantees a settled window.
   if (window.until > maxUntil) {
     throw new SocialAdInsightsWindowNotClosedError(maxUntil, timezone);
+  }
+}
+
+/**
+ * Refuses a window that is anything other than the ad account's today.
+ *
+ * The mirror image of `assertClosedInsightsWindow`, and the reason both exist
+ * rather than one relaxed check: the two modes are not points on a scale, they
+ * are opposite claims about the same table. A closed run writes
+ * `is_partial = false` and must never touch an unfinished day; an intraday run
+ * writes `is_partial = true` and must never touch a finished one — a settled
+ * day stamped as still open would be re-read forever by anything that trusts
+ * the flag, and worse, would advertise a final number as provisional.
+ *
+ * So exactly one day passes: `since = until = D0` in the account's own zone.
+ * Not D-1, which is closed and belongs to the daily run that writes it as
+ * final. Not a range, because a range that included D0 would drag settled days
+ * into a partial write. Not tomorrow, which does not exist yet anywhere.
+ *
+ * Re-checked at execution as well as at enqueue, and the gap between them is
+ * real: a run queued at 23:59 that executes after the account's midnight is
+ * asking for yesterday, and yesterday is now a closed day. Refusing is right —
+ * the next bucket's run covers the new day, and the daily run closes the old
+ * one.
+ */
+export function assertIntradayInsightsWindow(
+  window: InsightsWindow,
+  timezone: string,
+  now: Date = new Date(),
+): void {
+  const today = currentDayIn(timezone, now);
+
+  if (window.since !== today || window.until !== today) {
+    throw new SocialAdInsightsWindowNotIntradayError(today, timezone);
   }
 }
 

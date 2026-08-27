@@ -58,7 +58,14 @@ export class MetaAdsInsightsReaderService {
   constructor(private readonly graphService: MetaAdsGraphService) {}
 
   /**
-   * Reads one level of a closed window as daily rows.
+   * Reads one level of a window as daily rows.
+   *
+   * The request is identical whether the window is closed or is today: Meta
+   * answers for the days it was asked about, and an unfinished day comes back
+   * as the numbers so far. Nothing here decides which it is — `isPartial`
+   * arrives from the caller and is carried to the row unchanged, because the
+   * only component that knows whether the day is still running is the one that
+   * chose the window.
    *
    * Three request parameters carry the whole measurement contract:
    *
@@ -78,6 +85,8 @@ export class MetaAdsInsightsReaderService {
     credential: ResolvedAdCredential;
     level: SocialAdInsightsLevel;
     window: InsightsWindow;
+    /** True only for a window that is the account's own, unfinished day. */
+    isPartial: boolean;
     syncedAt: Date;
   }): Promise<NormalizedAdMetricPage> {
     const { credential, level } = input;
@@ -122,6 +131,7 @@ export class MetaAdsInsightsReaderService {
         // the following date, permanently and only near midnight.
         accountTimezone: credential.timezone,
         currency: credential.currency,
+        isPartial: input.isPartial,
         syncedAt: input.syncedAt,
       });
 

@@ -74,6 +74,7 @@ describe('MetaAdsInsightsReaderService — the request', () => {
       credential: credential(),
       level: 'account',
       window: WINDOW,
+      isPartial: false,
       syncedAt: SYNCED_AT,
     });
 
@@ -97,6 +98,7 @@ describe('MetaAdsInsightsReaderService — the request', () => {
       credential: credential(),
       level: 'account',
       window: WINDOW,
+      isPartial: false,
       syncedAt: SYNCED_AT,
     });
 
@@ -115,12 +117,14 @@ describe('MetaAdsInsightsReaderService — the request', () => {
       credential: resolved,
       level: 'account',
       window: WINDOW,
+      isPartial: false,
       syncedAt: SYNCED_AT,
     });
     await harness.reader.read({
       credential: resolved,
       level: 'campaign',
       window: WINDOW,
+      isPartial: false,
       syncedAt: SYNCED_AT,
     });
 
@@ -135,6 +139,7 @@ describe('MetaAdsInsightsReaderService — the request', () => {
       credential: credential(),
       level: 'campaign',
       window: WINDOW,
+      isPartial: false,
       syncedAt: SYNCED_AT,
     });
 
@@ -163,6 +168,7 @@ describe('MetaAdsInsightsReaderService — the request', () => {
       credential: credential(),
       level: 'account',
       window: WINDOW,
+      isPartial: false,
       syncedAt: SYNCED_AT,
     });
 
@@ -176,6 +182,7 @@ describe('MetaAdsInsightsReaderService — the request', () => {
       credential: credential(),
       level: 'account',
       window: WINDOW,
+      isPartial: false,
       syncedAt: SYNCED_AT,
     });
 
@@ -202,6 +209,7 @@ describe('MetaAdsInsightsReaderService — the answer', () => {
       credential: credential(),
       level: 'account',
       window: WINDOW,
+      isPartial: false,
       syncedAt: SYNCED_AT,
     });
 
@@ -216,6 +224,7 @@ describe('MetaAdsInsightsReaderService — the answer', () => {
       credential: credential(),
       level: 'account',
       window: WINDOW,
+      isPartial: false,
       syncedAt: SYNCED_AT,
     });
 
@@ -240,6 +249,7 @@ describe('MetaAdsInsightsReaderService — the answer', () => {
       credential: credential(),
       level: 'campaign',
       window: WINDOW,
+      isPartial: false,
       syncedAt: SYNCED_AT,
     });
 
@@ -254,6 +264,7 @@ describe('MetaAdsInsightsReaderService — the answer', () => {
       credential: credential({ authorizationMethod: 'business_login' }),
       level: 'account',
       window: WINDOW,
+      isPartial: false,
       syncedAt: SYNCED_AT,
     });
     const second = await internal.reader.read({
@@ -263,6 +274,7 @@ describe('MetaAdsInsightsReaderService — the answer', () => {
       }),
       level: 'account',
       window: WINDOW,
+      isPartial: false,
       syncedAt: SYNCED_AT,
     });
 

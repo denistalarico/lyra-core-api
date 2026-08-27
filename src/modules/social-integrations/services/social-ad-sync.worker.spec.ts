@@ -9,6 +9,8 @@ import type { SocialAdHierarchySyncService } from './social-ad-hierarchy-sync.se
 import type { SocialAdInsightsSyncService } from './social-ad-insights-sync.service';
 import type { SocialAdSyncConfigService } from './social-ad-sync-config.service';
 import type { SocialAdSyncRunService } from './social-ad-sync-run.service';
+import type { SocialAdBackfillPlannerService } from './social-ad-backfill-planner.service';
+import { currentDayIn } from '../sync/insights-window';
 import { SocialAdSyncWorker } from './social-ad-sync.worker';
 
 const CREDENTIAL = {
@@ -138,6 +140,10 @@ function createHarness(options: HarnessOptions = {}) {
     recordSyncOutcome: jest.fn(async () => undefined),
   };
 
+  const backfillPlanner = {
+    planNext: jest.fn(async () => ({ action: 'skipped', reason: 'complete' })),
+  };
+
   const worker = new SocialAdSyncWorker(
     config,
     runService as unknown as SocialAdSyncRunService,
@@ -145,6 +151,7 @@ function createHarness(options: HarnessOptions = {}) {
     hierarchySync as unknown as SocialAdHierarchySyncService,
     insightsSync as unknown as SocialAdInsightsSyncService,
     connectionService as unknown as SocialAdConnectionService,
+    backfillPlanner as unknown as SocialAdBackfillPlannerService,
   );
 
   return {
@@ -154,6 +161,7 @@ function createHarness(options: HarnessOptions = {}) {
     hierarchySync,
     insightsSync,
     connectionService,
+    backfillPlanner,
     levels,
     order,
   };
@@ -764,5 +772,207 @@ describe('SocialAdSyncWorker — the tick', () => {
     // set would stop the worker permanently.
     await harness.worker.tick();
     expect(harness.runService.claim).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('SocialAdSyncWorker — closed windows and today', () => {
+  /** The account's own current day, whenever this suite happens to run. */
+  const today = () => currentDayIn('America/Sao_Paulo');
+
+  it('stores a closed window as final', async () => {
+    const harness = createHarness({ runs: [run({ runKind: 'daily' })] });
+
+    await harness.worker.processDue();
+
+    expect(
+      firstCall<{ isPartial: boolean }>(harness.insightsSync.ingestLevel),
+    ).toMatchObject({ isPartial: false });
+  });
+
+  it('stores a backfill chunk as final, like any other closed window', async () => {
+    const harness = createHarness({
+      runs: [
+        run({
+          runKind: 'backfill',
+          windowStart: '2026-05-01',
+          windowEnd: '2026-05-07',
+        }),
+      ],
+    });
+
+    await harness.worker.processDue();
+
+    // A backfill reads history, and history is settled. Nothing about a run
+    // being automatic makes its days provisional.
+    expect(
+      firstCall<{ isPartial: boolean }>(harness.insightsSync.ingestLevel),
+    ).toMatchObject({ isPartial: false });
+  });
+
+  it('reads only insights for a backfill chunk, never the hierarchy again', async () => {
+    const harness = createHarness({
+      runs: [
+        run({
+          runKind: 'backfill',
+          windowStart: '2026-05-01',
+          windowEnd: '2026-05-07',
+        }),
+      ],
+    });
+
+    await harness.worker.processDue();
+
+    // The chain sweeps the tree once, ahead of the chunks. Thirteen chunks each
+    // re-reading 450 objects would learn nothing after the first.
+    expect(harness.hierarchySync.syncHierarchyWith).not.toHaveBeenCalled();
+    expect(harness.order).toEqual(['account_insights', 'campaign_insights']);
+  });
+
+  it('stores an intraday window as provisional', async () => {
+    const day = today();
+    const harness = createHarness({
+      runs: [run({ runKind: 'intraday', windowStart: day, windowEnd: day })],
+    });
+
+    await harness.worker.processDue();
+
+    expect(
+      firstCall<{ isPartial: boolean }>(harness.insightsSync.ingestLevel),
+    ).toMatchObject({ isPartial: true, window: { since: day, until: day } });
+    expect(harness.runService.markSucceeded).toHaveBeenCalled();
+  });
+
+  it('refuses an intraday run whose day turned over while it waited', async () => {
+    // Queued at 23:59, claimed after the account's midnight. The window it was
+    // created for is now a settled day, and writing it as provisional would
+    // advertise a final number as still moving.
+    const harness = createHarness({
+      runs: [
+        run({
+          runKind: 'intraday',
+          windowStart: '2026-07-18',
+          windowEnd: '2026-07-18',
+          attempts: 1,
+        }),
+      ],
+    });
+
+    await harness.worker.processDue();
+
+    expect(harness.insightsSync.ingestLevel).not.toHaveBeenCalled();
+    // Terminal, not retried: the date will never be today again, and five
+    // attempts would write five identical failures into the log.
+    expect(harness.runService.reschedule).not.toHaveBeenCalled();
+    expect(harness.runService.markFailed).toHaveBeenCalledWith(
+      expect.objectContaining({ lastError: 'insights_window_not_intraday' }),
+    );
+  });
+
+  it('refuses a closed run that reaches into an unfinished day', async () => {
+    const day = today();
+    const harness = createHarness({
+      runs: [run({ runKind: 'daily', windowStart: day, windowEnd: day })],
+    });
+
+    await harness.worker.processDue();
+
+    expect(harness.insightsSync.ingestLevel).not.toHaveBeenCalled();
+    // `partial` rather than `failed`: a daily run reads the hierarchy first,
+    // and that segment landed. The refusal is terminal either way — no retry
+    // makes an unfinished day finished any sooner than the clock does.
+    expect(harness.runService.reschedule).not.toHaveBeenCalled();
+    expect(harness.runService.markPartial).toHaveBeenCalledWith(
+      expect.objectContaining({ lastError: 'insights_window_not_closed' }),
+    );
+  });
+});
+
+describe('SocialAdSyncWorker — the backfill chain', () => {
+  const chunk = (overrides: Partial<SocialAdSyncRunEntity> = {}) =>
+    run({
+      runKind: 'backfill',
+      windowStart: '2026-05-01',
+      windowEnd: '2026-05-07',
+      ...overrides,
+    });
+
+  it('hands over to the next chunk as soon as one succeeds', async () => {
+    const harness = createHarness({ runs: [chunk()] });
+
+    await harness.worker.processDue();
+
+    // Seconds rather than the hour the scheduler would take. The planner is
+    // what refuses to queue two at once, so this cannot outrun itself.
+    expect(harness.backfillPlanner.planNext).toHaveBeenCalledWith(
+      expect.objectContaining({
+        connectionId: 'connection-a',
+        timezone: 'America/Sao_Paulo',
+      }),
+    );
+  });
+
+  it('hands over after a chunk gives up, so one bad week is not the end', async () => {
+    const harness = createHarness({
+      runs: [chunk({ attempts: 5 })],
+      insightsErrorFor: 'account',
+      insightsError: new MetaGraphError({
+        kind: 'permanent',
+        safeMessage: 'Unsupported request.',
+      }),
+    });
+
+    await harness.worker.processDue();
+
+    expect(harness.runService.markFailed).toHaveBeenCalled();
+    expect(harness.backfillPlanner.planNext).toHaveBeenCalled();
+  });
+
+  it('does not hand over while a retry is still coming', async () => {
+    const harness = createHarness({
+      runs: [chunk()],
+      insightsErrorFor: 'account',
+      insightsError: new MetaGraphError({
+        kind: 'transient',
+        safeMessage: 'Please retry.',
+      }),
+    });
+
+    await harness.worker.processDue();
+
+    // The run is back in the queue. Queueing the next chunk beside it would put
+    // two of this connection's backfill runs in flight at once.
+    expect(harness.runService.reschedule).toHaveBeenCalled();
+    expect(harness.backfillPlanner.planNext).not.toHaveBeenCalled();
+  });
+
+  it('cannot hand over when the credential never resolved', async () => {
+    const harness = createHarness({
+      runs: [chunk()],
+      resolveError: new SocialAdCredentialError('token_missing'),
+    });
+
+    await harness.worker.processDue();
+
+    // There is no timezone to anchor a plan with. The scheduler's hourly tick
+    // is the recovery path.
+    expect(harness.backfillPlanner.planNext).not.toHaveBeenCalled();
+  });
+
+  it('leaves the cadences alone', async () => {
+    const harness = createHarness({ runs: [run({ runKind: 'daily' })] });
+
+    await harness.worker.processDue();
+
+    expect(harness.backfillPlanner.planNext).not.toHaveBeenCalled();
+  });
+
+  it('does not let a planning failure disturb a settled run', async () => {
+    const harness = createHarness({ runs: [chunk()] });
+    harness.backfillPlanner.planNext.mockRejectedValueOnce(
+      new Error('queue unavailable'),
+    );
+
+    await expect(harness.worker.processDue()).resolves.toBe(1);
+    expect(harness.runService.markSucceeded).toHaveBeenCalled();
   });
 });

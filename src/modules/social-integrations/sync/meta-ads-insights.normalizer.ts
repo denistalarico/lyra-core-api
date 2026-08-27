@@ -32,6 +32,19 @@ export type InsightsNormalizeContext = {
   accountExternalId: string;
   accountTimezone: string;
   currency: string | null;
+  /**
+   * Whether the day this row describes was still running when it was read.
+   *
+   * Stated by the coordinator, never inferred here from the date. The
+   * temptation is obvious — compare `date_start` to today in the account's zone
+   * — and it is wrong in both directions at the only moment it matters. A
+   * backfill of a settled day executed at 00:02 local would see its own window
+   * as "recent" and mark ninety final days provisional; an intraday pass that
+   * started at 23:59 and returned at 00:01 would see today as yesterday and
+   * stamp an unfinished day as final. The run knows which mode it is, the row
+   * does not, and only one of them can be right.
+   */
+  isPartial: boolean;
   syncedAt: Date;
 };
 
@@ -122,7 +135,7 @@ export function normalizeMetricRow(
       counts,
       values,
     },
-    isPartial: false,
+    isPartial: context.isPartial,
     syncedAt: context.syncedAt,
   };
 }

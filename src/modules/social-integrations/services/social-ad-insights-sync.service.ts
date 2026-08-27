@@ -154,6 +154,9 @@ export class SocialAdInsightsSyncService {
           credential,
           level,
           window,
+          // The endpoint accepts closed windows only — `assertClosedInsightsWindow`
+          // above is what makes this a fact rather than an assumption.
+          isPartial: false,
           syncedAt,
         });
 
@@ -255,6 +258,16 @@ export class SocialAdInsightsSyncService {
     credential: ResolvedAdCredential;
     level: SocialAdInsightsLevel;
     window: InsightsWindow;
+    /**
+     * What to stamp on every fact this level writes.
+     *
+     * Required rather than defaulted to `false`. A default would be a decision
+     * about data made by whichever caller forgot to state one, and the caller
+     * that forgets is the one adding a new mode — exactly the case where the
+     * answer is `true` and the cost of guessing is a day of open numbers
+     * indistinguishable from final ones.
+     */
+    isPartial: boolean;
     syncedAt: Date;
   }): Promise<SocialAdInsightsLevelSummary> {
     const page = await this.reader.read(input);

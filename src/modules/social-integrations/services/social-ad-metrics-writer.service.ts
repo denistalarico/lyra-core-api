@@ -78,7 +78,11 @@ export const METRIC_IDENTITY_COLUMNS = [
  * Writes daily ad facts.
  *
  * The only component that touches `social_ad_metrics_daily`, and it does one
- * thing: upsert normalized rows on their identity. There is no delete and no
+ * thing to it: upsert normalized rows on their identity. The one read it also
+ * owns asks whether history exists, and it lives here rather than in the
+ * planner that needs it so that the table keeps a single owner — a second
+ * component holding this repository is how a second, differently-shaped write
+ * eventually appears. There is no delete and no
  * archive here — unlike the hierarchy, a fact that stops being reported is not
  * evidence of anything, because Meta returns no row at all for a day with no
  * delivery. Absence in a window means "nothing happened", and overwriting a

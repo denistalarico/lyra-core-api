@@ -1,6 +1,10 @@
 import { SocialAdCredentialError } from '../credentials/social-ad-credential.error';
 import { MetaGraphError } from '../services/meta-graph-error';
-import { SocialAdInsightsTruncatedError } from './social-ad-insights.error';
+import {
+  SocialAdInsightsTruncatedError,
+  SocialAdInsightsWindowNotClosedError,
+  SocialAdInsightsWindowNotIntradayError,
+} from './social-ad-insights.error';
 import { SocialAdSyncRunPlanError } from './social-ad-sync-run.error';
 import {
   classifySocialAdSyncRetry,
@@ -203,5 +207,55 @@ describe('nextAvailableAt', () => {
         now: NOW,
       }).getTime(),
     );
+  });
+});
+
+describe('classifySocialAdSyncRetry — window mismatches', () => {
+  it('stops a closed run that reached into an unfinished day', () => {
+    // Without this branch the error falls through to the unclassified one:
+    // five retries, five identical entries in the log, and a cause named
+    // `internal_error` rather than after the window that caused it.
+    expect(
+      classifySocialAdSyncRetry(
+        new SocialAdInsightsWindowNotClosedError(
+          '2026-08-25',
+          'America/Sao_Paulo',
+        ),
+      ),
+    ).toEqual({
+      action: 'stop',
+      code: 'insights_window_not_closed',
+      retryAfterMs: null,
+    });
+  });
+
+  it('stops an intraday run whose day has turned over', () => {
+    // Retrying cannot help: the date it was created for will never be today
+    // again. The next bucket's run covers the new day.
+    expect(
+      classifySocialAdSyncRetry(
+        new SocialAdInsightsWindowNotIntradayError(
+          '2026-08-27',
+          'America/Sao_Paulo',
+        ),
+      ),
+    ).toEqual({
+      action: 'stop',
+      code: 'insights_window_not_intraday',
+      retryAfterMs: null,
+    });
+  });
+
+  it('still retries a rate limit on the ladder S2.5 established', () => {
+    // The new branches must not have moved anything else. A backfill chunk and
+    // an intraday pass reach the identical policy a manual run does.
+    expect(classifySocialAdSyncRetry(graphError('rate_limited'))).toMatchObject(
+      {
+        action: 'rate_limit',
+      },
+    );
+    expect(classifySocialAdSyncRetry(graphError('transient'))).toMatchObject({
+      action: 'backoff',
+    });
   });
 });
