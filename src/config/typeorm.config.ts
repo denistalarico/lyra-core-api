@@ -290,6 +290,7 @@ import {
   LeadFlowAutomationRunEntity,
   LeadFlowScheduledTimerEntity,
   LeadFlowAutomationVersionEntity,
+  LeadFlowWebhookDeliveryEntity,
 } from '../modules/leadflow-automations/entities';
 import { LeadFlowEventDeliveryEntity } from '../modules/leadflow-events/entities';
 import {
@@ -539,6 +540,7 @@ export const agencyEntities = [
   LeadFlowAutomationRunEntity,
   LeadFlowAutomationRunAttemptEntity,
   LeadFlowScheduledTimerEntity,
+  LeadFlowWebhookDeliveryEntity,
   LeadFlowEventDeliveryEntity,
   LeadFlowCsatResponseEntity,
   LeadFlowIntelligenceRecommendationEntity,

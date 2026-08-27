@@ -67,7 +67,14 @@ export class LeadFlowWebhookEventIngressService implements OnApplicationShutdown
       await this.processPending(25);
       this.metrics.retried += await this.dispatcher.retryDue(20);
     } catch (error) {
-      this.logger.error(`Webhook event ingress failed: ${code(error)}`);
+      // code() exists to keep `last_error` short and safe for the column; a log
+      // line has neither constraint. Dropping the original message here is what
+      // hid a loop that failed on every tick for ten days, so the stack goes to
+      // the log while the sanitised code stays the message.
+      this.logger.error(
+        `Webhook event ingress failed: ${code(error)}`,
+        error instanceof Error ? error.stack : undefined,
+      );
     } finally {
       this.running = false;
     }
