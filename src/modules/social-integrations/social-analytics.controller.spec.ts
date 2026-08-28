@@ -14,6 +14,20 @@ const GUARDED_HANDLERS = [
   'timeseries',
   'campaigns',
   'freshness',
+  'connections',
+] as const;
+
+/**
+ * The handlers that take a connection id and a period.
+ *
+ * `connections` is excluded because it takes no query at all — it is the call a
+ * client makes *before* it has an id to send.
+ */
+const CONNECTION_SCOPED_HANDLERS = [
+  'overview',
+  'timeseries',
+  'campaigns',
+  'freshness',
 ] as const;
 
 function createHarness() {
@@ -28,11 +42,17 @@ function createHarness() {
       return Promise.resolve({ connectionId: input.connectionId });
     };
 
+  const connectionInputs: Record<string, unknown>[] = [];
+
   const analytics = {
     overview: jest.fn(record(overviewInputs)),
     timeseries: jest.fn(record(seriesInputs)),
     campaigns: jest.fn(record(campaignInputs)),
     freshness: jest.fn(record(freshnessInputs)),
+    listConnections: jest.fn((input: Record<string, unknown>) => {
+      connectionInputs.push(input);
+      return Promise.resolve([]);
+    }),
   };
 
   return {
@@ -40,6 +60,7 @@ function createHarness() {
     seriesInputs,
     campaignInputs,
     freshnessInputs,
+    connectionInputs,
     analytics,
     controller: new SocialAnalyticsController(
       analytics as unknown as SocialAnalyticsReadService,
@@ -158,7 +179,7 @@ describe('SocialAnalyticsController scope resolution', () => {
     expect(harness.analytics.overview).not.toHaveBeenCalled();
   });
 
-  it.each(GUARDED_HANDLERS)(
+  it.each(CONNECTION_SCOPED_HANDLERS)(
     '%s resolves scope from the context rather than the query',
     async (handler) => {
       const harness = createHarness();
@@ -192,23 +213,62 @@ describe('SocialAnalyticsController scope resolution', () => {
 
   it.each(GUARDED_HANDLERS)(
     '%s refuses a context with no tenant before reading anything',
-    (handler) => {
+    async (handler) => {
       const harness = createHarness();
       const handlers = harness.controller as unknown as Record<
         string,
         (ctx: RequestContext, query: unknown) => unknown
       >;
 
-      expect(() =>
-        handlers[handler](
-          context({ tenantId: undefined } as Partial<RequestContext>),
-          query,
-        ),
-      ).toThrow(BadRequestException);
+      // `connections` is declared `async`, so its rejection arrives as a
+      // promise while the other four throw synchronously. Awaiting the call
+      // inside the assertion covers both without asserting which one a given
+      // handler is — that is an implementation detail, and a future `async`
+      // added to any of them should not fail this test.
+      await expect(
+        (async () =>
+          handlers[handler](
+            context({ tenantId: undefined } as Partial<RequestContext>),
+            query,
+          ))(),
+      ).rejects.toThrow(BadRequestException);
 
-      expect(harness.analytics[handler]).not.toHaveBeenCalled();
+      // `connections` reads through a differently named service method; the
+      // rest share their handler's name.
+      const reads =
+        handler === 'connections'
+          ? harness.analytics.listConnections
+          : harness.analytics[handler];
+
+      expect(reads).not.toHaveBeenCalled();
     },
   );
+
+  it('lists connections for the resolved scope and asks for nothing else', async () => {
+    const harness = createHarness();
+
+    await harness.controller.connections(
+      context({
+        managedContext: { operatingMode: 'client', clientId: 'client-a' },
+      } as Partial<RequestContext>),
+    );
+
+    // Exactly the scope, with no connection id and no period: this is the call
+    // a client makes before it has an id to send.
+    expect(harness.connectionInputs[0]).toEqual({
+      tenantId: 'tenant-a',
+      workspaceId: 'workspace-a',
+      agencyClientId: 'client-a',
+    });
+  });
+
+  it('lists the agency own connections when not in client mode', async () => {
+    const harness = createHarness();
+
+    await harness.controller.connections(context());
+
+    expect(harness.connectionInputs[0].agencyClientId).toBeNull();
+  });
 
   it('passes the sort and direction through to the campaigns read', async () => {
     const harness = createHarness();

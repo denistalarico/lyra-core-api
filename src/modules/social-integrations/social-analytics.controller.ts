@@ -53,6 +53,31 @@ export class SocialAnalyticsController {
   ) {}
 
   /**
+   * The ad accounts this caller may report on.
+   *
+   * The dashboard needs a `connectionId` before it can ask anything else, and
+   * the settings screen's connection list is admin-guarded — so a manager with
+   * only the operational read permission had no way to obtain one. This closes
+   * that gap without touching the settings guard: the payload is a strict subset
+   * (no credential state, no token expiry, no scopes, no raw account id), under
+   * the permission that already governs reading these numbers.
+   *
+   * Takes no query parameters at all. The scope is the authenticated context,
+   * and there is nothing else to ask.
+   */
+  @Get('connections')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireProductEntitlement('social')
+  @RequirePermission(SOCIAL_ANALYTICS_READ_PERMISSION)
+  async connections(@RequestContextData() ctx: RequestContext) {
+    const scope = this.requireScope(ctx);
+
+    const items = await this.analyticsReadService.listConnections(scope);
+
+    return { items, total: items.length };
+  }
+
+  /**
    * Totals, derived KPIs and period-over-period movement for one connection.
    *
    * The connection id is a query parameter and the scope is not: tenant,

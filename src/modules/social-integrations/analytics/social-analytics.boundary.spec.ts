@@ -32,6 +32,7 @@ const ANALYTICS_SOURCES = [
   'views/social-ad-analytics-series.view.ts',
   'views/social-ad-analytics-campaigns.view.ts',
   'views/social-ad-analytics-freshness.view.ts',
+  'views/social-ad-analytics-connection.view.ts',
 ];
 
 /**
@@ -135,5 +136,35 @@ describe('Social analytics provider boundary', () => {
     // parsing, no `Number(`.
     expect(source).not.toContain('parseFloat');
     expect(source).not.toContain('Number(');
+  });
+
+  /**
+   * The analytics connection picker must stay narrower than the settings list.
+   *
+   * It exists precisely so the settings screen's admin permission did not have
+   * to be weakened to feed a dashboard. If credential fields drift back into it
+   * over time, that trade quietly reverses: the weaker permission would then
+   * reach the surface the stronger one was protecting.
+   */
+  it('keeps credential state out of the analytics connection view', () => {
+    const source = readSource('views/social-ad-analytics-connection.view.ts');
+
+    for (const field of [
+      'accessToken',
+      'refreshToken',
+      'hasCredential',
+      'tokenExpiresAt',
+      'credentialVersion',
+      'oauthStateHash',
+      'scopes',
+    ]) {
+      expect(source).not.toContain(field);
+    }
+
+    // The raw `act_…` id is an addressable Graph resource, so it is masked by
+    // the same helper the settings view uses rather than a second one that
+    // could mask differently.
+    expect(source).toContain('maskExternalAccountId');
+    expect(source).not.toMatch(/externalAccountId:/);
   });
 });

@@ -1018,5 +1018,101 @@ run('Social analytics read against PostgreSQL', () => {
       expect(result.connectionStatus).toBe('disconnected');
       expect(result.metrics.latestMetricDate).toBe('2026-07-10');
     });
+
+    it('still appears in the picker, labelled as no longer updating', async () => {
+      const items = await service.listConnections(scope);
+      const row = items.find((item) => item.id === disconnectedId);
+
+      // Hiding it would make its history unreachable from the dashboard, which
+      // is the opposite of why the read path tolerates a dead credential.
+      expect(row).toBeDefined();
+      expect(row?.connectionStatus).toBe('disconnected');
+    });
+  });
+
+  describe('the analytics connection picker', () => {
+    it('lists the connections of the caller scope', async () => {
+      const items = await service.listConnections(scope);
+      const ids = items.map((item) => item.id);
+
+      expect(ids).toContain(connectionId);
+      expect(ids).toContain(twinConnectionId);
+    });
+
+    it('never lists a connection from another tenant', async () => {
+      const items = await service.listConnections(scope);
+
+      expect(items.map((item) => item.id)).not.toContain(
+        otherTenantConnectionId,
+      );
+    });
+
+    it('never lists a client connection while in agency context', async () => {
+      const items = await service.listConnections(scope);
+
+      // The agency scope passes `agencyClientId: null`, which must match only
+      // rows where the column IS NULL rather than every client's row.
+      expect(items.map((item) => item.id)).not.toContain(clientConnectionId);
+    });
+
+    it('lists the client connection only under that client scope', async () => {
+      const items = await service.listConnections({
+        tenantId,
+        workspaceId,
+        agencyClientId,
+      });
+
+      expect(items.map((item) => item.id)).toEqual([clientConnectionId]);
+    });
+
+    it('masks the ad account id and exposes no credential state', async () => {
+      const items = await service.listConnections(scope);
+      const row = items.find((item) => item.id === connectionId);
+
+      // `act_probe_main` is short enough that masking keeps the last four
+      // characters — what matters is that the raw value never appears.
+      expect(row?.maskedAccountId).not.toBe('act_probe_main');
+      expect(row?.maskedAccountId).toContain('•');
+
+      for (const field of [
+        'accessTokenEncrypted',
+        'hasCredential',
+        'tokenExpiresAt',
+        'scopes',
+        'externalAccountId',
+      ]) {
+        expect(row).not.toHaveProperty(field);
+      }
+    });
+
+    it('omits a connection that never reached an ad account', async () => {
+      const abandonedId = randomUUID();
+
+      // An OAuth attempt the operator abandoned: stored, in scope, and with no
+      // `external_account_id` it will never acquire. It cannot hold a single
+      // fact, so listing it would offer an unnamed account that reports zeros
+      // forever.
+      await queryRunner.query(`
+        INSERT INTO "social_ad_account_connections"
+          ("id", "tenant_id", "workspace_id", "provider", "connection_status")
+        VALUES
+          ('${abandonedId}', '${tenantId}', '${workspaceId}', 'meta_ads', 'error')
+      `);
+
+      const items = await service.listConnections(scope);
+
+      expect(items.map((item) => item.id)).not.toContain(abandonedId);
+      // The settings screen still shows it — resolving a failed attempt is
+      // that screen's job, and this filter must not be read as hiding it.
+      expect(items.length).toBeGreaterThan(0);
+    });
+
+    it('carries the currency and timezone the dashboard formats with', async () => {
+      const items = await service.listConnections(scope);
+      const row = items.find((item) => item.id === connectionId);
+
+      expect(row?.currency).toBe('BRL');
+      expect(row?.timezone).toBe('America/Sao_Paulo');
+    });
   });
 });

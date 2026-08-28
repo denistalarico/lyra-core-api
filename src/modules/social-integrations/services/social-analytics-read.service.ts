@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { IsNull, Repository } from 'typeorm';
+import { IsNull, Not, Repository } from 'typeorm';
 import {
   SocialAdKpiInputs,
   deriveChange,
@@ -23,6 +23,10 @@ import type {
   SocialAdAnalyticsOverviewView,
   SocialAdAnalyticsTotals,
 } from '../views/social-ad-analytics-overview.view';
+import {
+  toSocialAdAnalyticsConnectionView,
+  type SocialAdAnalyticsConnectionView,
+} from '../views/social-ad-analytics-connection.view';
 import type {
   SocialAdAnalyticsCampaignsView,
   SocialAdCampaignRow,
@@ -161,6 +165,67 @@ export class SocialAnalyticsReadService {
      */
     private readonly config: SocialAdSyncConfigService,
   ) {}
+
+  /**
+   * The ad accounts this caller may report on, for the dashboard's picker.
+   *
+   * Exists because the settings screen's `GET /social/integrations/connections`
+   * is guarded by `social.settings.integrations.manage.admin`. A manager holding
+   * only the operational analytics permission would be refused by it and land on
+   * a dashboard with nothing to select — so the choice was to weaken that guard
+   * or to add this. Weakening it would have made every analytics reader able to
+   * see the credential surface, which is the wrong trade: this returns strictly
+   * less, under the permission that already governs reading these numbers.
+   *
+   * Every connection in scope is returned, including disconnected ones, for the
+   * same reason the rest of this service reads them — their stored history is
+   * still real, and a picker that hid them would make that history unreachable.
+   * `connectionStatus` travels so the UI can say the account is no longer being
+   * updated instead of implying the numbers are current.
+   */
+  async listConnections(
+    input: SocialAdAnalyticsScope,
+  ): Promise<SocialAdAnalyticsConnectionView[]> {
+    const connections = await this.connectionsRepository.find({
+      where: {
+        tenantId: input.tenantId,
+        workspaceId: input.workspaceId,
+        // `IsNull()`, not `null` — see `findInScope`. A literal null here reads
+        // as "no filter" and would list every managed client's ad accounts.
+        agencyClientId: input.agencyClientId ?? IsNull(),
+        // Only rows that reached an ad account.
+        //
+        // A connection abandoned mid-OAuth — the operator closed the Meta
+        // window, or the exchange failed — is stored with no
+        // `external_account_id` and never acquires one. It cannot have a single
+        // fact, so offering it in a picker gives the reader an unnamed option
+        // that reports zeros forever. This is a reporting surface, and the only
+        // accounts worth listing are the ones that can be reported on; the
+        // settings screen still shows every row, because resolving that failed
+        // attempt is its job.
+        externalAccountId: Not(IsNull()),
+      },
+      // Named columns rather than the whole row: the entity carries
+      // `access_token_encrypted` and `oauth_state_hash`, and neither should be
+      // loaded into a process that is about to serialize a response.
+      select: [
+        'id',
+        'provider',
+        'connectionStatus',
+        'accountName',
+        'externalAccountId',
+        'currency',
+        'timezone',
+        'lastSyncedAt',
+      ],
+      // Named accounts first, then oldest — a stable order, so the auto-select
+      // of a single account and the default of a list do not depend on
+      // Postgres's physical row order.
+      order: { accountName: 'ASC', createdAt: 'ASC' },
+    });
+
+    return connections.map(toSocialAdAnalyticsConnectionView);
+  }
 
   /**
    * Totals, KPIs and period-over-period movement for one connection.
