@@ -26,6 +26,8 @@ import { SocialAdSyncConfigService } from './services/social-ad-sync-config.serv
 import { SocialAdSyncRunService } from './services/social-ad-sync-run.service';
 import { SocialAdSyncScheduler } from './services/social-ad-sync.scheduler';
 import { SocialAdSyncWorker } from './services/social-ad-sync.worker';
+import { SocialAnalyticsReadService } from './services/social-analytics-read.service';
+import { SocialAnalyticsController } from './social-analytics.controller';
 import { SocialIntegrationsController } from './social-integrations.controller';
 
 /**
@@ -53,7 +55,7 @@ import { SocialIntegrationsController } from './social-integrations.controller';
       'agency',
     ),
   ],
-  controllers: [SocialIntegrationsController],
+  controllers: [SocialIntegrationsController, SocialAnalyticsController],
   providers: [
     MetaAdsGraphService,
     MetaAdsOAuthService,
@@ -73,6 +75,10 @@ import { SocialIntegrationsController } from './social-integrations.controller';
     SocialAdBackfillResumeService,
     SocialAdSyncWorker,
     SocialAdSyncScheduler,
+    // Reads the same tables the sync services write, and nothing else. It is
+    // deliberately not given the credential resolver: the read path has no
+    // token to use and must not fail when one expires.
+    SocialAnalyticsReadService,
     SettingsCryptoService,
   ],
   // The resolver is exported with no consumer yet on purpose: it is the
