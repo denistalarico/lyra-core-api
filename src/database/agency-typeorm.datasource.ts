@@ -162,6 +162,7 @@ import { FanoutLeadflowWebhooksConsumer1790100000000 } from './migrations/179010
 import { CreateSocialAdAccountConnections1790200000000 } from './migrations/1790200000000-create-social-ad-account-connections';
 import { AddSocialAdAuthorizationMethod1790300000000 } from './migrations/1790300000000-add-social-ad-authorization-method';
 import { CreateSocialAdReadModel1790400000000 } from './migrations/1790400000000-create-social-ad-read-model';
+import { CreateInboxAttributionObservations1790500000000 } from './migrations/1790500000000-create-inbox-attribution-observations';
 
 export const AgencyDataSource = new DataSource({
   type: 'postgres',
@@ -334,5 +335,6 @@ export const AgencyDataSource = new DataSource({
     CreateSocialAdAccountConnections1790200000000,
     AddSocialAdAuthorizationMethod1790300000000,
     CreateSocialAdReadModel1790400000000,
+    CreateInboxAttributionObservations1790500000000,
   ],
 });

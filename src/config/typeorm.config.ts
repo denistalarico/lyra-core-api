@@ -47,6 +47,7 @@ import { InboxMessageEntity } from '../modules/inbox/entities/inbox-message.enti
 import { InboxSettingsEntity } from '../modules/inbox/entities/inbox-settings.entity';
 import { InboxConversationParticipantEntity } from '../modules/inbox/entities/inbox-conversation-participant.entity';
 import { InboxConversationEventEntity } from '../modules/inbox/entities/inbox-conversation-event.entity';
+import { InboxAttributionObservationEntity } from '../modules/inbox/entities/inbox-attribution-observation.entity';
 import { InboxWebhookLogEntity } from '../modules/inbox/entities/inbox-webhook-log.entity';
 import { InboxChannelConnectionSessionEntity } from '../modules/inbox/entities/inbox-channel-connection-session.entity';
 import { InboxMediaAssetEntity } from '../modules/inbox/entities/inbox-media-asset.entity';
@@ -384,6 +385,7 @@ export const agencyEntities = [
   InboxSettingsEntity,
   InboxConversationParticipantEntity,
   InboxConversationEventEntity,
+  InboxAttributionObservationEntity,
   InboxWebhookLogEntity,
   InboxChannelConnectionSessionEntity,
   InboxMediaAssetEntity,

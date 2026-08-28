@@ -45,6 +45,7 @@ export const FIXTURE_DELETE_ORDER: readonly string[] = [
   'inbox_processing_batches',
   'inbox_conversation_events',
   'inbox_conversation_participants',
+  'inbox_attribution_observations',
   'inbox_messages',
   'inbox_conversations',
   'inbox_domain_outbox',

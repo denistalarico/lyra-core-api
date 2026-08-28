@@ -4,6 +4,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { InboxChannelEntity } from './entities/inbox-channel.entity';
 import { InboxConversationEntity } from './entities/inbox-conversation.entity';
 import { InboxConversationEventEntity } from './entities/inbox-conversation-event.entity';
+import { InboxAttributionObservationEntity } from './entities/inbox-attribution-observation.entity';
 import { InboxConversationParticipantEntity } from './entities/inbox-conversation-participant.entity';
 import { InboxMessageEntity } from './entities/inbox-message.entity';
 import { InboxSettingsEntity } from './entities/inbox-settings.entity';
@@ -123,6 +124,7 @@ import { FacebookMessengerContactEnrichmentService } from './channels/facebook-m
         InboxSettingsEntity,
         InboxConversationParticipantEntity,
         InboxConversationEventEntity,
+        InboxAttributionObservationEntity,
         AgencyWorkspaceUserEntity,
         AgencyUserProfileEntity,
         AgencyUserSessionEntity,

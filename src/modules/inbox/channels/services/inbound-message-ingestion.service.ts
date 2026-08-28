@@ -3,6 +3,7 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, EntityManager } from 'typeorm';
 import { ContactEntity } from '../../../contacts/entities/contact.entity';
 import { ContactMethodEntity } from '../../../contacts/entities/contact-method.entity';
+import { InboxAttributionObservationEntity } from '../../entities/inbox-attribution-observation.entity';
 import { InboxChannelEntity } from '../../entities/inbox-channel.entity';
 import { InboxConversationEntity } from '../../entities/inbox-conversation.entity';
 import { InboxConversationEventEntity } from '../../entities/inbox-conversation-event.entity';
@@ -19,6 +20,7 @@ import type {
   NormalizedInboundAttachment,
   NormalizedInboundMessage,
 } from '../types/normalized-inbound-message';
+import { readAttributionObservation } from '../types/inbound-attribution-observation';
 import { AgentActivationPolicyService } from '../../services/agent-activation-policy.service';
 import { ContactRelationshipResolver } from '../../services/contact-relationship.resolver';
 import { InboxRuntimeConfigService } from '../../runtime/inbox-runtime-config.service';
@@ -272,6 +274,15 @@ export class InboundMessageIngestionService {
         }));
         await manager.getRepository(InboxMessageEntity).save(message);
       }
+
+      await this.recordAttributionObservation(
+        manager,
+        input,
+        channel,
+        conversation,
+        message,
+        occurredAt,
+      );
 
       conversation.lastMessagePreview = this.createPreview(input.content);
       conversation.lastMessageAt = occurredAt;
@@ -702,6 +713,66 @@ export class InboundMessageIngestionService {
         errorCode: null,
       }),
     );
+  }
+
+  /**
+   * Records how this message arrived, when the provider said so.
+   *
+   * Only ever called from `ingest()`, which is the inbound path. Echoes go
+   * through `ingestEcho()` and outbound sends never touch this service at all:
+   * a referral is something a contact's click produced, and attaching one to a
+   * message the business sent would invent a click that never happened.
+   *
+   * Writes nothing when the provider sent nothing. The absence of a row is the
+   * representation of "we did not observe an origin" — there is no `unknown`
+   * row, because a row asserts an observation and this is the case where none
+   * was made. Conversations that predate this table are in exactly that state
+   * and stay there; Meta does not expose the referral of a past message, so
+   * there is no backfill to run.
+   *
+   * `ON CONFLICT DO NOTHING` against the per-message unique key rather than a
+   * read-then-write: two deliveries of the same webhook can be in flight
+   * concurrently, and the first observation is the one that stands.
+   */
+  private async recordAttributionObservation(
+    manager: EntityManager,
+    input: NormalizedInboundMessage,
+    channel: InboxChannelEntity,
+    conversation: InboxConversationEntity,
+    message: InboxMessageEntity,
+    occurredAt: Date,
+  ) {
+    const observation = readAttributionObservation(input.metadata);
+    if (!observation) return;
+
+    const repository = manager.getRepository(
+      InboxAttributionObservationEntity,
+    );
+
+    await repository
+      .createQueryBuilder()
+      .insert()
+      .values({
+        tenantId: input.tenantId,
+        workspaceId: input.workspaceId,
+        // Resolved from the channel here and then frozen on the row. The
+        // Inbox derives the client binding from the channel on every read,
+        // which is right for a conversation and wrong for a fact: this row
+        // states what was true when the message arrived, and re-pointing the
+        // channel later must not re-attribute historical spend.
+        agencyClientId: this.readString(channel.metadata?.clientId),
+        conversationId: conversation.id,
+        messageId: message.id,
+        channelId: input.channelId,
+        provider: input.provider ?? 'unknown',
+        channelType: input.channelType,
+        adId: observation.adId ?? null,
+        clickId: observation.clickId ?? null,
+        sourceType: observation.sourceType ?? null,
+        observedAt: occurredAt,
+      })
+      .orIgnore()
+      .execute();
   }
 
   private async writeOutbox(
