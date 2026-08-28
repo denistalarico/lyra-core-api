@@ -25,6 +25,29 @@ import type { SocialAdEntityLevel } from './social-ad-entity.entity';
 export type SocialAdMetricSource = 'paid';
 
 /**
+ * ## What does *not* belong in this table
+ *
+ * The `source` dimension makes room for an organic *delivery* fact about an ad
+ * object — the same grain, measured differently. It is not an invitation to
+ * store organic social analytics here, and the distinction is worth stating
+ * because the column makes it look otherwise.
+ *
+ * Followers, follower growth, content performance, engagement rate, best
+ * posting windows and top posts are a different grain with a different key.
+ * Followers are a stock measured at an instant, not a sum over a day; a post is
+ * not an ad object and has no `entity_level` in this hierarchy; a posting window
+ * is a derived recommendation rather than a fact. Forcing them in would mean
+ * nullable columns that are meaningless for most rows, an `entity_level` union
+ * carrying values the ad hierarchy does not have, and a unique key that no
+ * longer identifies anything. That is schema pollution, and it is paid for on
+ * every read of the largest table in the module.
+ *
+ * When organic social arrives it gets its own read model, and a future
+ * Intelligence layer is what normalizes across the two. Nothing here should be
+ * generalized in advance of it.
+ */
+
+/**
  * The attribution configuration a fact was measured under.
  *
  * `account_default` is the canonical value for rows collected with

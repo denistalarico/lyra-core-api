@@ -22,6 +22,9 @@ import { SocialAdEntityWriterService } from './services/social-ad-entity-writer.
 import { SocialAdHierarchySyncService } from './services/social-ad-hierarchy-sync.service';
 import { SocialAdInsightsSyncService } from './services/social-ad-insights-sync.service';
 import { SocialAdMetricsWriterService } from './services/social-ad-metrics-writer.service';
+import { SocialAdRetentionConfigService } from './services/social-ad-retention-config.service';
+import { SocialAdRetentionService } from './services/social-ad-retention.service';
+import { SocialAdRetentionScheduler } from './services/social-ad-retention.scheduler';
 import { SocialAdSyncConfigService } from './services/social-ad-sync-config.service';
 import { SocialAdSyncRunService } from './services/social-ad-sync-run.service';
 import { SocialAdSyncScheduler } from './services/social-ad-sync.scheduler';
@@ -75,6 +78,12 @@ import { SocialIntegrationsController } from './social-integrations.controller';
     SocialAdBackfillResumeService,
     SocialAdSyncWorker,
     SocialAdSyncScheduler,
+    // Housekeeping over the run log, on its own switch and its own daily
+    // schedule. It shares no state with the sync services above and reaches no
+    // credential — it deletes rows from one table by age.
+    SocialAdRetentionConfigService,
+    SocialAdRetentionService,
+    SocialAdRetentionScheduler,
     // Reads the same tables the sync services write, and nothing else. It is
     // deliberately not given the credential resolver: the read path has no
     // token to use and must not fail when one expires.
