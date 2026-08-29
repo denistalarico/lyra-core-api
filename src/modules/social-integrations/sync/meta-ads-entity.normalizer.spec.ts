@@ -117,7 +117,8 @@ describe('campaign normalization', () => {
 });
 
 describe('ad set normalization', () => {
-  const context = { currency: 'BRL' };
+  const OBSERVED_AT = new Date('2026-08-28T12:00:00.000Z');
+  const context = { currency: 'BRL', observedAt: OBSERVED_AT };
 
   it('parents the ad set to its campaign and denormalizes it', () => {
     const adSet = normalizeAdSet(
@@ -226,7 +227,7 @@ describe('budgets', () => {
   it('carries budgets and currency together down the tree', () => {
     const adSet = normalizeAdSet(
       { id: ADSET_ID, lifetime_budget: '250000', budget_remaining: '125000' },
-      { currency: 'BRL' },
+      { currency: 'BRL', observedAt: new Date() },
     );
 
     // Meta reports currency only on the account node; a minor-unit amount

@@ -75,7 +75,10 @@ describe('MetaAdsEntityReaderService', () => {
     const resolved = credential();
 
     await harness.reader.readCampaigns(resolved, { currency: 'BRL' });
-    await harness.reader.readAdSets(resolved, { currency: 'BRL' });
+    await harness.reader.readAdSets(resolved, {
+      currency: 'BRL',
+      observedAt: new Date(),
+    });
     await harness.reader.readAds(resolved, {
       currency: 'BRL',
       campaignByAdSetId: new Map(),
@@ -105,6 +108,104 @@ describe('MetaAdsEntityReaderService', () => {
 
     expect(String(adSets.fields)).toContain('campaign_id');
     expect(String(ads.fields)).toContain('adset_id');
+  });
+
+  describe('paid media destination', () => {
+    /**
+     * The cost argument for this whole slice: the destination arrives in the
+     * ad-set list that was already being fetched. One extra field name in a
+     * request that already exists, and no new request at any level.
+     */
+    it('asks for the destination in the ad set list it already fetches', async () => {
+      const harness = createReader();
+
+      await harness.reader.readAdSets(credential(), {
+        currency: 'BRL',
+        observedAt: new Date(),
+      });
+
+      expect(harness.edgeRequests).toHaveLength(1);
+      expect(String(harness.edgeRequests[0].fields)).toContain(
+        'destination_type',
+      );
+    });
+
+    /**
+     * Meta drops `destination_type` from the campaigns and ads edges rather
+     * than answering null, so asking for it there spends quota on a field that
+     * cannot come back.
+     */
+    it('does not ask the levels that cannot answer', async () => {
+      const harness = createReader();
+
+      await harness.reader.readCampaigns(credential(), { currency: 'BRL' });
+      await harness.reader.readAds(credential(), {
+        currency: 'BRL',
+        campaignByAdSetId: new Map(),
+      });
+
+      for (const request of harness.edgeRequests) {
+        expect(String(request.fields)).not.toContain('destination_type');
+      }
+    });
+
+    it('carries the resolved destination through to the normalized row', async () => {
+      const observedAt = new Date('2026-08-28T10:00:00.000Z');
+      const harness = createReader({
+        adsets: {
+          rows: [
+            { id: 'adset-wa', destination_type: 'WHATSAPP' },
+            { id: 'adset-ig', destination_type: 'INSTAGRAM_DIRECT' },
+            // Meta answered, but with nothing usable.
+            { id: 'adset-none', optimization_goal: 'CONVERSATIONS' },
+          ],
+        },
+      });
+
+      const page = await harness.reader.readAdSets(credential(), {
+        currency: 'BRL',
+        observedAt,
+      });
+
+      expect(page.rows.map((row) => row.destinationType)).toEqual([
+        'whatsapp',
+        'instagram_direct',
+        'unknown',
+      ]);
+      expect(page.rows.map((row) => row.destinationRaw)).toEqual([
+        'WHATSAPP',
+        'INSTAGRAM_DIRECT',
+        null,
+      ]);
+      // Stamped even when the destination is unknown: "asked and got nothing"
+      // is a different fact from "never asked".
+      for (const row of page.rows) {
+        expect(row.destinationObservedAt).toEqual(observedAt);
+      }
+    });
+
+    it('leaves ads and campaigns without a destination of their own', async () => {
+      const harness = createReader({
+        campaigns: { rows: [{ id: 'campaign-1' }] },
+        ads: { rows: [{ id: 'ad-1', adset_id: 'adset-wa' }] },
+      });
+
+      const campaigns = await harness.reader.readCampaigns(credential(), {
+        currency: 'BRL',
+      });
+      const ads = await harness.reader.readAds(credential(), {
+        currency: 'BRL',
+        campaignByAdSetId: new Map(),
+      });
+
+      // An ad's destination is its ad set's. Copying it down would create a
+      // second value that drifts the moment the ad set is repointed.
+      for (const row of [...campaigns.rows, ...ads.rows]) {
+        expect(row.destinationType).toBeNull();
+        expect(row.destinationRaw).toBeNull();
+        expect(row.destinationObservedAt).toBeNull();
+      }
+    });
   });
 
   it('pages through the walker rather than a parallel implementation', async () => {
@@ -159,6 +260,7 @@ describe('MetaAdsEntityReaderService', () => {
 
     const adSets = await harness.reader.readAdSets(credential(), {
       currency: 'BRL',
+      observedAt: new Date(),
     });
     const map = MetaAdsEntityReaderService.campaignByAdSetId(adSets.rows);
 

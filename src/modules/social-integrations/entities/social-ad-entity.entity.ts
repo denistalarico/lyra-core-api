@@ -171,6 +171,77 @@ export class SocialAdEntity {
   billingEvent!: string | null;
 
   /**
+   * Where the click or conversation actually lands, in Lyra's vocabulary.
+   *
+   * A column rather than a `metadata` key because this is a grouping dimension:
+   * "spend and leads by destination" scans the whole account and groups on it,
+   * and a jsonb extraction cannot be indexed the way a varchar can if it ever
+   * needs to be.
+   *
+   * Distinct from `objective` and `optimization_goal`, which sit right above it
+   * and are routinely mistaken for it. Those say what the campaign is for and
+   * what delivery bids toward; only this says where the person ends up. In a
+   * real account `optimization_goal = CONVERSATIONS` covers WhatsApp, Messenger,
+   * Instagram Direct and multi-app ad sets at once.
+   *
+   * Meaningful at ad-set level only, because that is the only level at which
+   * Meta states it — the campaigns and ads edges silently drop the field rather
+   * than returning null. Rows at other levels keep NULL rather than inheriting
+   * a parent's value: an inherited destination is a derivation, and freezing a
+   * derivation into a column is how it later disagrees with its own source.
+   */
+  @Column({
+    name: 'destination_type',
+    type: 'varchar',
+    length: 40,
+    nullable: true,
+  })
+  destinationType!: string | null;
+
+  /**
+   * The provider's own destination string, kept verbatim.
+   *
+   * The mapping from this to `destination_type` is the part most likely to be
+   * incomplete — Meta adds destinations without notice, and an unmapped one
+   * stores `unknown` above. With the raw value here, a corrected mapping can be
+   * re-derived from rows already on disk instead of by re-syncing every
+   * account, and "Meta said UNDEFINED" stays distinguishable from "Meta sent no
+   * field at all", which are different provider behaviours.
+   */
+  @Column({
+    name: 'destination_raw',
+    type: 'varchar',
+    length: 60,
+    nullable: true,
+  })
+  destinationRaw!: string | null;
+
+  /**
+   * When the destination above was last observed from the provider.
+   *
+   * The provenance stamp, and the honest boundary of what this column can
+   * answer. `social_ad_entities` is a current-state mirror: an ad set edited
+   * from WhatsApp to Instagram Direct in August has its row rewritten, and
+   * July's spend would then be grouped under the new destination. Roughly a
+   * quarter of the ad sets in the account this was built against have been
+   * edited after creation, so that is a real risk rather than a theoretical
+   * one.
+   *
+   * This stamp does not fix that — it makes it detectable. A reader can see
+   * that the classification was observed after the period it is being applied
+   * to, and refuse to present it as historical truth. A destination *history*
+   * is the actual fix, and it is deliberately not built here: no edit that
+   * changed a destination has been observed yet, and building a temporal model
+   * on a hypothesis would be inventing evidence.
+   */
+  @Column({
+    name: 'destination_observed_at',
+    type: 'timestamptz',
+    nullable: true,
+  })
+  destinationObservedAt!: Date | null;
+
+  /**
    * Budgets in the currency's minor unit (cents), which is how Meta reports
    * them. Stored as given rather than converted: a float division here would
    * be a rounding error that then propagates into every derived KPI.

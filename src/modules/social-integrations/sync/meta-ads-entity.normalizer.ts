@@ -1,6 +1,7 @@
 import { normalizeAdAccountId } from '../meta-ad-account-id';
 import { isNonEmptyString, isRecord } from '../oauth/meta-ads-oauth.support';
 import type { NormalizedAdEntity } from './meta-ads-entity.contract';
+import { resolvePaidMediaDestination } from './paid-media-destination';
 
 /**
  * Turns Meta payloads into `NormalizedAdEntity` rows.
@@ -107,6 +108,11 @@ function base(
     objective: text(payload.objective, MAX_LONG_ENUM),
     optimizationGoal: text(payload.optimization_goal, MAX_LONG_ENUM),
     billingEvent: text(payload.billing_event, MAX_LONG_ENUM),
+    // Null for every level by default. Only the ad set overrides these, because
+    // it is the only level whose payload carries `destination_type` at all.
+    destinationType: null,
+    destinationRaw: null,
+    destinationObservedAt: null,
     dailyBudgetMinor: parseMinorUnits(payload.daily_budget),
     lifetimeBudgetMinor: parseMinorUnits(payload.lifetime_budget),
     budgetRemainingMinor: parseMinorUnits(payload.budget_remaining),
@@ -212,10 +218,14 @@ export function normalizeCampaign(
  * name attached to nothing is still better than spend attached to nothing. The
  * table deliberately does not constrain this (only an account may not have a
  * parent).
+ *
+ * The only level that resolves a destination, because it is the only level Meta
+ * states one for — asking the campaigns or ads edge for `destination_type`
+ * returns rows without the field rather than rows with a null.
  */
 export function normalizeAdSet(
   payload: unknown,
-  context: { currency: string | null },
+  context: { currency: string | null; observedAt: Date },
 ): NormalizedAdEntity | null {
   if (!isRecord(payload)) return null;
 
@@ -224,6 +234,7 @@ export function normalizeAdSet(
   if (!externalId) return null;
 
   const campaignExternalId = parseExternalId(payload.campaign_id);
+  const destination = resolvePaidMediaDestination(payload);
 
   return {
     ...base(payload, context.currency),
@@ -231,6 +242,17 @@ export function normalizeAdSet(
     externalId,
     parentExternalId: campaignExternalId,
     campaignExternalId,
+    destinationType: destination.canonical,
+    destinationRaw: destination.providerValue,
+    /**
+     * Stamped whenever the ad set was read, including when the destination came
+     * back unknown.
+     *
+     * "Meta was asked at time T and had nothing to say" is itself a fact worth
+     * keeping: without the stamp, an unknown destination is indistinguishable
+     * from an ad set that predates this feature and was never asked at all.
+     */
+    destinationObservedAt: context.observedAt,
   };
 }
 

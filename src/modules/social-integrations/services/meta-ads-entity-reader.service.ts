@@ -29,10 +29,20 @@ const CAMPAIGN_FIELDS =
   'id,name,status,effective_status,objective,daily_budget,lifetime_budget,' +
   'budget_remaining,start_time,stop_time,created_time,updated_time';
 
+/**
+ * `destination_type` rides along here rather than in a request of its own.
+ *
+ * It is the field that says whether a "conversations" ad set ends in WhatsApp,
+ * Instagram Direct or Messenger, and it is the reason the ad-set list is worth
+ * one more column: adding it to this list costs zero additional Graph calls,
+ * whereas resolving the same fact per-object would cost one call per ad set —
+ * on a real account, over a hundred, against a shared business quota that the
+ * insights reader draws from next.
+ */
 const ADSET_FIELDS =
   'id,name,campaign_id,status,effective_status,optimization_goal,billing_event,' +
-  'daily_budget,lifetime_budget,budget_remaining,start_time,end_time,' +
-  'created_time,updated_time';
+  'destination_type,daily_budget,lifetime_budget,budget_remaining,start_time,' +
+  'end_time,created_time,updated_time';
 
 const AD_FIELDS =
   'id,name,adset_id,campaign_id,status,effective_status,created_time,updated_time';
@@ -102,9 +112,14 @@ export class MetaAdsEntityReaderService {
     );
   }
 
+  /**
+   * `observedAt` is supplied by the caller, not read from the clock here, so
+   * every ad set of one run carries the same destination observation instant —
+   * the same discipline `seenAt` already follows on the write side.
+   */
   async readAdSets(
     credential: ResolvedAdCredential,
-    context: { currency: string | null },
+    context: { currency: string | null; observedAt: Date },
   ): Promise<NormalizedAdEntityPage> {
     const page = await this.readLevel(credential, 'adsets', ADSET_FIELDS);
 

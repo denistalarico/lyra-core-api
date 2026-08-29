@@ -62,6 +62,25 @@ export const REFRESHED_COLUMNS = [
   'objective',
   'optimization_goal',
   'billing_event',
+  /**
+   * Refreshed like any other provider attribute, and deliberately so.
+   *
+   * The absent-vs-null distinction is already settled before this list is
+   * reached: an ad set that Meta answered without a `destination_type` produces
+   * `unknown` plus a fresh `destination_observed_at`, not a NULL that would
+   * quietly erase a previously known value on the next sync. And a level that
+   * cannot carry a destination at all (account, campaign, ad) writes NULL on
+   * every run, so refreshing it changes nothing.
+   *
+   * What this does mean is that an ad set repointed in Ads Manager has its
+   * classification rewritten in place — which is correct for "where does this
+   * ad set send people now" and is exactly the historical hazard documented on
+   * the entity. `destination_observed_at` is refreshed alongside so a reader can
+   * always tell how current the classification is.
+   */
+  'destination_type',
+  'destination_raw',
+  'destination_observed_at',
   'daily_budget_minor',
   'lifetime_budget_minor',
   'budget_remaining_minor',
@@ -143,6 +162,9 @@ export class SocialAdEntityWriterService {
             objective: row.objective,
             optimizationGoal: row.optimizationGoal,
             billingEvent: row.billingEvent,
+            destinationType: row.destinationType,
+            destinationRaw: row.destinationRaw,
+            destinationObservedAt: row.destinationObservedAt,
             dailyBudgetMinor: row.dailyBudgetMinor,
             lifetimeBudgetMinor: row.lifetimeBudgetMinor,
             budgetRemainingMinor: row.budgetRemainingMinor,

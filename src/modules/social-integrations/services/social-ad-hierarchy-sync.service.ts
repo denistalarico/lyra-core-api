@@ -170,7 +170,13 @@ export class SocialAdHierarchySyncService {
       }),
     );
 
-    const adSets = await this.reader.readAdSets(credential, { currency });
+    // The same instant the rest of the run uses, so a destination observation
+    // is timestamped with when the run saw it rather than with when this line
+    // happened to execute.
+    const adSets = await this.reader.readAdSets(credential, {
+      currency,
+      observedAt: seenAt,
+    });
     levels.push(
       await this.persistLevel({ scope, seenAt, level: 'adset', page: adSets }),
     );

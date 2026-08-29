@@ -58,6 +58,10 @@ run('SocialAdEntityWriterService against PostgreSQL', () => {
       objective: 'OUTCOME_LEADS',
       optimizationGoal: null,
       billingEvent: null,
+      // A campaign has no destination: Meta states it at ad-set level only.
+      destinationType: null,
+      destinationRaw: null,
+      destinationObservedAt: null,
       dailyBudgetMinor: '5000',
       lifetimeBudgetMinor: null,
       budgetRemainingMinor: '0',

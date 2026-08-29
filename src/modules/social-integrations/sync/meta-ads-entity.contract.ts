@@ -31,6 +31,18 @@ export type NormalizedAdEntity = {
   optimizationGoal: string | null;
   billingEvent: string | null;
   /**
+   * Where the click or conversation lands, canonical and provider-verbatim.
+   *
+   * `null` at every level except ad set, because the ad set is the only level
+   * where Meta states it. Not inherited downward to ads: the ad's destination
+   * *is* its ad set's, so a reader joins rather than reads a copy that can
+   * drift. `observedAt` is the sync instant, and it is what lets a reader tell
+   * a classification observed in August from one that was true in July.
+   */
+  destinationType: string | null;
+  destinationRaw: string | null;
+  destinationObservedAt: Date | null;
+  /**
    * Budgets in the currency's minor unit, as decimal strings.
    *
    * Strings rather than numbers on purpose: the column is `bigint`, TypeORM
