@@ -48,6 +48,7 @@ import { LeadFlowAnalyticsModule } from './modules/leadflow-analytics/leadflow-a
 import { LeadFlowPrivacyModule } from './modules/leadflow-privacy';
 import { LeadFlowAgendaModule } from './modules/leadflow-agenda/leadflow-agenda.module';
 import { AdminModule } from './modules/admin';
+import { IntelligenceAnalyticsModule } from './modules/intelligence-analytics/intelligence-analytics.module';
 import { SocialIntegrationsModule } from './modules/social-integrations';
 
 @Module({
@@ -103,6 +104,7 @@ import { SocialIntegrationsModule } from './modules/social-integrations';
     LeadFlowPrivacyModule,
     LeadFlowAgendaModule,
     SocialIntegrationsModule,
+    IntelligenceAnalyticsModule,
     AdminModule,
   ],
 })

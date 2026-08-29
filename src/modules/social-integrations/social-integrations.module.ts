@@ -104,6 +104,13 @@ import { SocialIntegrationsController } from './social-integrations.controller';
     SocialAdConnectionService,
     SocialAdCredentialResolver,
     SocialPaidMediaIntelligenceAdapter,
+    // Exported for the cross-domain cohort view, which needs the ad account's
+    // timezone to cut both domains' days on the same boundary. It goes through
+    // this service rather than the connection repository because this is where
+    // "which connections may this scope see?" is decided — a second answer to
+    // that question is how one client's account id becomes readable from
+    // another's context.
+    SocialAnalyticsReadService,
   ],
 })
 export class SocialIntegrationsModule {}

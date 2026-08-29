@@ -103,12 +103,13 @@ export class LeadFlowIntelligenceAdapter implements IntelligenceFactSource {
     }
 
     const { scope, window } = query;
+    const timezone = query.dayBucketTimezone ?? null;
 
     const [conversations, inbound, created, won] = await Promise.all([
-      this.countConversationsStarted(scope, window, query.grain),
-      this.countInboundMessages(scope, window, query.grain),
-      this.countOpportunitiesCreated(scope, window, query.grain),
-      this.sumOpportunitiesWon(scope, window, query.grain),
+      this.countConversationsStarted(scope, window, query.grain, timezone),
+      this.countInboundMessages(scope, window, query.grain, timezone),
+      this.countOpportunitiesCreated(scope, window, query.grain, timezone),
+      this.sumOpportunitiesWon(scope, window, query.grain, timezone),
     ]);
 
     const currencies = new Set(
@@ -256,6 +257,7 @@ export class LeadFlowIntelligenceAdapter implements IntelligenceFactSource {
     scope: IntelligenceScope,
     window: IntelligenceWindow,
     grain: IntelligenceGrain,
+    timezone: string | null,
   ): Promise<CountRow[]> {
     return this.dataSource.query<CountRow[]>(
       `
@@ -270,12 +272,12 @@ export class LeadFlowIntelligenceAdapter implements IntelligenceFactSource {
          AND channel.deleted_at IS NULL
         WHERE conversation.tenant_id = $1
           AND conversation.workspace_id = $2
-          AND conversation.created_at >= $5::date
-          AND conversation.created_at < ($6::date + INTERVAL '1 day')
+          AND conversation.created_at >= ${WINDOW_START}
+          AND conversation.created_at < ${WINDOW_END}
           AND ${LEADFLOW_SCOPE_SQL.CHANNEL}
         GROUP BY 1
       `,
-      params(scope, window),
+      params(scope, window, timezone),
     );
   }
 
@@ -283,6 +285,7 @@ export class LeadFlowIntelligenceAdapter implements IntelligenceFactSource {
     scope: IntelligenceScope,
     window: IntelligenceWindow,
     grain: IntelligenceGrain,
+    timezone: string | null,
   ): Promise<CountRow[]> {
     return this.dataSource.query<CountRow[]>(
       `
@@ -302,12 +305,12 @@ export class LeadFlowIntelligenceAdapter implements IntelligenceFactSource {
         WHERE message.tenant_id = $1
           AND message.workspace_id = $2
           AND message.direction = 'inbound'
-          AND message.occurred_at >= $5::date
-          AND message.occurred_at < ($6::date + INTERVAL '1 day')
+          AND message.occurred_at >= ${WINDOW_START}
+          AND message.occurred_at < ${WINDOW_END}
           AND ${LEADFLOW_SCOPE_SQL.CHANNEL}
         GROUP BY 1
       `,
-      params(scope, window),
+      params(scope, window, timezone),
     );
   }
 
@@ -315,6 +318,7 @@ export class LeadFlowIntelligenceAdapter implements IntelligenceFactSource {
     scope: IntelligenceScope,
     window: IntelligenceWindow,
     grain: IntelligenceGrain,
+    timezone: string | null,
   ): Promise<CountRow[]> {
     return this.dataSource.query<CountRow[]>(
       `
@@ -324,12 +328,12 @@ export class LeadFlowIntelligenceAdapter implements IntelligenceFactSource {
         FROM crm_opportunities opportunity
         WHERE opportunity.tenant_id = $1
           AND opportunity.workspace_id = $2
-          AND opportunity.created_at >= $5::date
-          AND opportunity.created_at < ($6::date + INTERVAL '1 day')
+          AND opportunity.created_at >= ${WINDOW_START}
+          AND opportunity.created_at < ${WINDOW_END}
           AND ${LEADFLOW_SCOPE_SQL.OPPORTUNITY}
         GROUP BY 1
       `,
-      params(scope, window),
+      params(scope, window, timezone),
     );
   }
 
@@ -348,6 +352,7 @@ export class LeadFlowIntelligenceAdapter implements IntelligenceFactSource {
     scope: IntelligenceScope,
     window: IntelligenceWindow,
     grain: IntelligenceGrain,
+    timezone: string | null,
   ): Promise<WonRow[]> {
     return this.dataSource.query<WonRow[]>(
       `
@@ -361,12 +366,12 @@ export class LeadFlowIntelligenceAdapter implements IntelligenceFactSource {
           AND opportunity.workspace_id = $2
           AND opportunity.status = 'won'
           AND opportunity.won_at IS NOT NULL
-          AND opportunity.won_at >= $5::date
-          AND opportunity.won_at < ($6::date + INTERVAL '1 day')
+          AND opportunity.won_at >= ${WINDOW_START}
+          AND opportunity.won_at < ${WINDOW_END}
           AND ${LEADFLOW_SCOPE_SQL.OPPORTUNITY}
         GROUP BY 1, 2
       `,
-      params(scope, window),
+      params(scope, window, timezone),
     );
   }
 }
@@ -387,22 +392,43 @@ type WonRow = CountRow & { currency: string | null; value: string | null };
  * The cast to `date` is what makes a day here mean the same thing as a day in
  * the window — both are calendar days in the database's zone, and the window's
  * bounds were widened to instants by the same `::date` cast in the WHERE clause.
+ *
+ * When the caller named a timezone (`$7`), the instant is converted into that
+ * zone *before* the cast, so a day means the same calendar day the ad account
+ * reports in. The zone is a **bound parameter**, never interpolated: it is the
+ * one value in this file that originates outside it, and `AT TIME ZONE` takes a
+ * string operand precisely so it does not have to be spliced into SQL. An
+ * invalid zone raises a Postgres error rather than silently falling back — a
+ * silent fallback would produce numbers that are quietly cut on the wrong day.
  */
 function bucket(grain: IntelligenceGrain, column: string): string {
-  return grain === 'day'
-    ? `to_char(${column}::date, 'YYYY-MM-DD')`
-    : `'${PERIOD_BUCKET}'`;
+  if (grain !== 'day') return `'${PERIOD_BUCKET}'`;
+
+  return `to_char(
+    (CASE WHEN $7::text IS NULL THEN ${column}
+          ELSE ${column} AT TIME ZONE $7::text END)::date,
+    'YYYY-MM-DD'
+  )`;
 }
 
 /**
- * The six positional parameters every query here binds.
+ * The seven positional parameters every query here binds.
  *
  * `$1`–`$4` come from `leadFlowScopeParameters`, which is the contract
  * `LEADFLOW_SCOPE_SQL` reads — so the window bounds start at `$5` rather than
  * `$4`. Getting that order from the shared helper instead of assembling it here
  * is the point: the predicates and their parameters cannot drift apart.
+ *
+ * `$7` is the day-bucket timezone, or null. It is bound on every query whether
+ * or not the grain uses it, so the parameter list has one shape — a list whose
+ * length depended on the grain is how `$7` eventually becomes `$6` in one query
+ * and shifts the window bounds under the others.
  */
-function params(scope: IntelligenceScope, window: IntelligenceWindow) {
+function params(
+  scope: IntelligenceScope,
+  window: IntelligenceWindow,
+  timezone: string | null,
+) {
   return [
     ...leadFlowScopeParameters({
       tenantId: scope.tenantId,
@@ -412,8 +438,28 @@ function params(scope: IntelligenceScope, window: IntelligenceWindow) {
     }),
     window.since,
     window.until,
+    timezone,
   ];
 }
+
+/**
+ * The window's lower bound as an instant, in the caller's day-bucket zone.
+ *
+ * `$5::date` alone means midnight in the *database's* zone. If days are being
+ * cut in São Paulo, the window has to start at São Paulo's midnight too —
+ * otherwise the first three hours of the first day are excluded from the range
+ * while the bucket expression happily assigns them to it, and the earliest day
+ * silently under-reports.
+ *
+ * `AT TIME ZONE` on a bare `timestamp` reads it *as* that zone and returns an
+ * instant, which is the direction needed here.
+ */
+const WINDOW_START = `(CASE WHEN $7::text IS NULL THEN $5::timestamptz
+       ELSE $5::timestamp AT TIME ZONE $7::text END)`;
+
+/** The exclusive upper bound: the same rule, one day past `until`. */
+const WINDOW_END = `(CASE WHEN $7::text IS NULL THEN ($6::date + INTERVAL '1 day')::timestamptz
+       ELSE ($6::date + INTERVAL '1 day')::timestamp AT TIME ZONE $7::text END)`;
 
 function indexByDay<T extends CountRow>(rows: T[]): Map<string, T> {
   const indexed = new Map<string, T>();

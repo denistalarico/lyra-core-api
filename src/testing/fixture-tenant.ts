@@ -67,6 +67,14 @@ export const FIXTURE_DELETE_ORDER: readonly string[] = [
   'crm_stages',
   'crm_pipelines',
   'contacts',
+  // Social Ads. The three child tables carry `ON DELETE CASCADE` foreign keys
+  // to `social_ad_account_connections`, so the connection has to go last —
+  // deleting it first would cascade rows away that a cross-domain fixture may
+  // still be asserting against.
+  'social_ad_metrics_daily',
+  'social_ad_entities',
+  'social_ad_sync_runs',
+  'social_ad_account_connections',
 ];
 
 /**

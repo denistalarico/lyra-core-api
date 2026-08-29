@@ -26,6 +26,26 @@ export type IntelligenceFactQuery = {
   grain: IntelligenceGrain;
   /** Required where the domain has more than one subject per scope. */
   subjectId?: string;
+  /**
+   * The IANA timezone whose calendar days the `date` dimension should mean.
+   *
+   * The minimal extension I3 needed, and it exists because "a day" is not one
+   * thing across domains. Paid media is reported in the **ad account's**
+   * timezone: Meta closes 2026-07-14 for an `America/Sao_Paulo` account at
+   * 03:00 UTC on the 15th, and stores that day's spend under the 14th. LeadFlow
+   * timestamps are instants, and casting them to `date` resolves in the
+   * database session's zone — UTC on this deployment. A conversation at 21:00
+   * in São Paulo therefore lands on the *next* UTC day, while the spend that
+   * preceded it stays on the current one, and a cohort that lined the two up
+   * by day would compare a Monday of spend against a Monday that started three
+   * hours late.
+   *
+   * Undefined keeps each domain's own default, which is what every I2 caller
+   * gets and why this is additive rather than a behaviour change. A domain that
+   * reports in a fixed provider timezone — paid media — ignores it, because
+   * shifting those buckets would misstate what the provider actually reported.
+   */
+  dayBucketTimezone?: string;
 };
 
 /**
