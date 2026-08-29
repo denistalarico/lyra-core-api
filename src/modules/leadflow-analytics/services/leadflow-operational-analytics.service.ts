@@ -10,6 +10,7 @@ import type {
   OperationalAnalyticsRunFact,
   OperationalAnalyticsScoreFact,
 } from '../types/operational-analytics.types';
+import { LEADFLOW_SCOPE_SQL } from '../scope/leadflow-analytics-scope.sql';
 import { projectOperationalAnalytics } from './operational-analytics-projector';
 
 const MAX_PERIOD_DAYS = 366;
@@ -104,14 +105,7 @@ export class LeadFlowOperationalAnalyticsService {
         WHERE channel.tenant_id = $1
           AND channel.workspace_id = $2
           AND channel.deleted_at IS NULL
-          AND (
-            ($3 = 'client' AND channel.metadata->>'clientId' = $4)
-            OR
-            ($3 = 'agency' AND (
-              channel.metadata->>'clientId' IS NULL
-              OR channel.metadata->>'operatingMode' = 'agency'
-            ))
-          )
+          AND ${LEADFLOW_SCOPE_SQL.CHANNEL_ONLY}
         ORDER BY channel.name ASC, channel.id ASC
       `,
       scopeParameters(scope),
@@ -152,15 +146,7 @@ export class LeadFlowOperationalAnalyticsService {
            AND channel.deleted_at IS NULL
           WHERE conversation.tenant_id = $1
             AND conversation.workspace_id = $2
-            AND (
-              ($3 = 'client' AND channel.metadata->>'clientId' = $4)
-              OR
-              ($3 = 'agency' AND (
-                conversation.channel_id IS NULL
-                OR channel.metadata->>'clientId' IS NULL
-                OR channel.metadata->>'operatingMode' = 'agency'
-              ))
-            )
+            AND ${LEADFLOW_SCOPE_SQL.CHANNEL}
 
           UNION
 
@@ -168,14 +154,7 @@ export class LeadFlowOperationalAnalyticsService {
           FROM crm_opportunities opportunity
           WHERE opportunity.tenant_id = $1
             AND opportunity.workspace_id = $2
-            AND (
-              ($3 = 'client' AND opportunity.metadata->>'clientId' = $4)
-              OR
-              ($3 = 'agency' AND (
-                opportunity.metadata->>'clientId' IS NULL
-                OR opportunity.metadata->>'operatingMode' = 'agency'
-              ))
-            )
+            AND ${LEADFLOW_SCOPE_SQL.OPPORTUNITY}
 
           UNION
 
@@ -216,15 +195,7 @@ export class LeadFlowOperationalAnalyticsService {
       'message.workspace_id = $2',
       "message.direction IN ('inbound', 'outbound')",
       'message.occurred_at BETWEEN $5::timestamptz AND $6::timestamptz',
-      `(
-        ($3 = 'client' AND channel.metadata->>'clientId' = $4)
-        OR
-        ($3 = 'agency' AND (
-          conversation.channel_id IS NULL
-          OR channel.metadata->>'clientId' IS NULL
-          OR channel.metadata->>'operatingMode' = 'agency'
-        ))
-      )`,
+      LEADFLOW_SCOPE_SQL.CHANNEL,
     ];
     if (filters.channelId) {
       clauses.push(
@@ -314,14 +285,7 @@ export class LeadFlowOperationalAnalyticsService {
       'snapshot.tenant_id = $1',
       'snapshot.workspace_id = $2',
       'snapshot.calculated_at BETWEEN $5::timestamptz AND $6::timestamptz',
-      `(
-        ($3 = 'client' AND opportunity.metadata->>'clientId' = $4)
-        OR
-        ($3 = 'agency' AND (
-          opportunity.metadata->>'clientId' IS NULL
-          OR opportunity.metadata->>'operatingMode' = 'agency'
-        ))
-      )`,
+      LEADFLOW_SCOPE_SQL.OPPORTUNITY,
     ];
     if (filters.channelId) {
       clauses.push(

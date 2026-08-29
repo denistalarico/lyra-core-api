@@ -22,6 +22,7 @@ import {
   LeadFlowIntelligenceResultEntity,
   LeadFlowAnalyticsViewEntity,
 } from './entities';
+import { LeadFlowIntelligenceAdapter } from './intelligence/leadflow-intelligence.adapter';
 import { LeadFlowAnalyticsController } from './leadflow-analytics.controller';
 import { LeadFlowAnalyticsEventIngressService } from './services/leadflow-analytics-event-ingress.service';
 import { LeadFlowAnalyticsReportService } from './services/leadflow-analytics-report.service';
@@ -68,6 +69,10 @@ import { LeadFlowAnalyticsViewsService } from './services/leadflow-analytics-vie
     LeadFlowCsatService,
     LeadFlowIntelligenceService,
     LeadFlowAnalyticsViewsService,
+    // The shared-contract face of this module. It adds a narrow, countable view
+    // alongside the rich projections above rather than replacing them — see the
+    // class doc for why the existing services were left untouched.
+    LeadFlowIntelligenceAdapter,
   ],
   exports: [
     LeadFlowAnalyticsService,
@@ -76,6 +81,7 @@ import { LeadFlowAnalyticsViewsService } from './services/leadflow-analytics-vie
     LeadFlowAnalyticsReportService,
     LeadFlowCsatService,
     LeadFlowIntelligenceService,
+    LeadFlowIntelligenceAdapter,
   ],
 })
 export class LeadFlowAnalyticsModule {}

@@ -9,6 +9,7 @@ import {
   SocialAdMetricDailyEntity,
   SocialAdSyncRunEntity,
 } from './entities';
+import { SocialPaidMediaIntelligenceAdapter } from './intelligence/social-paid-media-intelligence.adapter';
 import { SocialInternalAccessService } from './internal/social-internal-access.service';
 import { SocialAdBackfillPlannerService } from './services/social-ad-backfill-planner.service';
 import { SocialAdBackfillResumeService } from './services/social-ad-backfill-resume.service';
@@ -88,12 +89,21 @@ import { SocialIntegrationsController } from './social-integrations.controller';
     // deliberately not given the credential resolver: the read path has no
     // token to use and must not fail when one expires.
     SocialAnalyticsReadService,
+    // The shared-contract face of the read service. Built on it rather than
+    // beside it: the four filters that make these numbers correct
+    // (`entity_level`, `source`, `attribution_setting`, reach) have one
+    // implementation, and a second one would drift silently.
+    SocialPaidMediaIntelligenceAdapter,
     SettingsCryptoService,
   ],
   // The resolver is exported with no consumer yet on purpose: it is the
   // boundary the read model will import, and having it already be the module's
   // public way to reach a credential is what keeps the next module from
   // reaching for the connection repository instead.
-  exports: [SocialAdConnectionService, SocialAdCredentialResolver],
+  exports: [
+    SocialAdConnectionService,
+    SocialAdCredentialResolver,
+    SocialPaidMediaIntelligenceAdapter,
+  ],
 })
 export class SocialIntegrationsModule {}
