@@ -169,7 +169,7 @@ describe('ConversationOwnershipService manual AI activation', () => {
     } as unknown as InboxConversationEntity;
     const repositories = new Map<
       unknown,
-      { findOne?: jest.Mock; save: jest.Mock }
+      { findOne?: jest.Mock; create?: jest.Mock; save: jest.Mock }
     >([
       [
         InboxConversationEntity,
@@ -178,7 +178,13 @@ describe('ConversationOwnershipService manual AI activation', () => {
           save: jest.fn((value) => Promise.resolve(value)),
         },
       ],
-      [InboxConversationEventEntity, { save: jest.fn() }],
+      [
+        InboxConversationEventEntity,
+        // `create` as well as `save`: the qualification transition recorder
+        // builds the entity before saving it, the way the rest of this domain
+        // writes conversation events.
+        { create: jest.fn((value: unknown) => value), save: jest.fn() },
+      ],
       [InboxDomainOutboxEntity, { save: jest.fn() }],
     ]);
     const queryBuilder = {
@@ -192,10 +198,17 @@ describe('ConversationOwnershipService manual AI activation', () => {
       createQueryBuilder: jest.fn(() => queryBuilder),
     };
     const dataSource = {
-      transaction: jest.fn((callback) => callback(manager)),
+      transaction: jest.fn((callback: (value: typeof manager) => unknown) =>
+        callback(manager),
+      ),
+    };
+    const events = repositories.get(InboxConversationEventEntity) as {
+      create: jest.Mock;
+      save: jest.Mock;
     };
     return {
       conversation,
+      events,
       service: new ConversationOwnershipService(dataSource as never),
     };
   }
@@ -214,6 +227,37 @@ describe('ConversationOwnershipService manual AI activation', () => {
       aiEnabled: true,
       qualificationStatus: 'qualified',
       qualificationReason: 'manual_ai_activation',
+    });
+  });
+
+  it('records the operator behind a manual activation in the history', async () => {
+    const harness = activationHarness();
+
+    await harness.service.transition(
+      { tenantId: 'tenant', workspaceId: 'workspace', userId: 'user' },
+      'conversation-ai',
+      'return_ai',
+    );
+
+    // The operator is knowable here, so the history says who it was rather
+    // than falling back to `system`.
+    const [event] = harness.events.create.mock.calls[0] as [
+      {
+        eventType: string;
+        actorType: string;
+        actorUserId: string | null;
+        payload: Record<string, unknown>;
+      },
+    ];
+    expect(event).toMatchObject({
+      eventType: 'qualification_status_changed',
+      actorType: 'user',
+      actorUserId: 'user',
+    });
+    expect(event.payload).toMatchObject({
+      previousStatus: 'disqualified',
+      newStatus: 'qualified',
+      reason: 'manual_ai_activation',
     });
   });
 

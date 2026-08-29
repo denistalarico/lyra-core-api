@@ -22,6 +22,7 @@ import {
   InboxConversationOwnershipState,
 } from '../entities/inbox-conversation.entity';
 import { InboxConversationEventEntity } from '../entities/inbox-conversation-event.entity';
+import { recordQualificationTransition } from './qualification-transition.recorder';
 import { InboxDomainOutboxEntity } from '../entities/inbox-domain-outbox.entity';
 import { InboxProcessingBatchEntity } from '../entities/inbox-processing-batch.entity';
 import { InboxNotificationPublisher } from './inbox-notification.publisher';
@@ -214,8 +215,17 @@ export class ConversationOwnershipService {
         action === 'return_ai' &&
         conversation.qualificationStatus !== 'qualified'
       ) {
+        const previousQualification = conversation.qualificationStatus;
         conversation.qualificationStatus = 'qualified';
         conversation.qualificationReason = 'manual_ai_activation';
+        await recordQualificationTransition(manager, {
+          conversation,
+          previousStatus: previousQualification,
+          newStatus: 'qualified',
+          reason: 'manual_ai_activation',
+          actor: { type: 'user', userId: ctx.userId ?? null },
+          occurredAt: new Date(),
+        });
       }
 
       const previousVersion = conversation.ownershipVersion;

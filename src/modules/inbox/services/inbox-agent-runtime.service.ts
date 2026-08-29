@@ -44,6 +44,7 @@ import type { InboxAgentDecisionReviewOutcome } from '../entities/inbox-agent-de
 import { InboxChannelEntity } from '../entities/inbox-channel.entity';
 import { InboxConversationEntity } from '../entities/inbox-conversation.entity';
 import { InboxConversationEventEntity } from '../entities/inbox-conversation-event.entity';
+import { recordQualificationTransition } from './qualification-transition.recorder';
 import { InboxMediaAssetEntity } from '../entities/inbox-media-asset.entity';
 import { InboxMediaDerivativeEntity } from '../entities/inbox-media-derivative.entity';
 import { InboxMessageEntity } from '../entities/inbox-message.entity';
@@ -1849,6 +1850,17 @@ export class InboxAgentRuntimeService {
           urgency: action.value,
         };
       } else if (type === 'close' && typeof action.value === 'string') {
+        // An approved agent decision closed this conversation. The actor is the
+        // operator who approved it, not the agent that proposed it — the write
+        // only happens because a human said yes.
+        await recordQualificationTransition(manager, {
+          conversation,
+          previousStatus: conversation.qualificationStatus,
+          newStatus: 'disqualified',
+          reason: action.value,
+          actor: { type: 'user', userId: ctx.userId ?? null },
+          occurredAt: new Date(),
+        });
         conversation.qualificationStatus = 'disqualified';
         conversation.qualificationReason = action.value;
         conversation.status =

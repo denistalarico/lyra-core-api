@@ -7,6 +7,7 @@ import { InboxAttributionObservationEntity } from '../../entities/inbox-attribut
 import { InboxChannelEntity } from '../../entities/inbox-channel.entity';
 import { InboxConversationEntity } from '../../entities/inbox-conversation.entity';
 import { InboxConversationEventEntity } from '../../entities/inbox-conversation-event.entity';
+import { recordQualificationTransition } from '../../services/qualification-transition.recorder';
 import { InboxDomainOutboxEntity } from '../../entities/inbox-domain-outbox.entity';
 import {
   InboxMediaAssetEntity,
@@ -172,8 +173,30 @@ export class InboundMessageIngestionService {
         conversation = await manager
           .getRepository(InboxConversationEntity)
           .save(conversation);
+        // A conversation can be born qualified: the inbound rules run before
+        // the row exists, so for WhatsApp/Instagram/Messenger the common case
+        // is created-and-qualified in one step. Recording it as a transition
+        // from the column's own default is what makes the first qualification
+        // observable at all — skip it and the history would only ever contain
+        // the rarer later promotions, and a July count would be mostly zero.
+        await recordQualificationTransition(manager, {
+          conversation,
+          previousStatus: 'pending',
+          newStatus: qualification.status,
+          reason: qualification.reason,
+          actor: { type: 'system' },
+          occurredAt,
+        });
       } else if (internalContact) {
         conversation.contactId = internalContact.id;
+        await recordQualificationTransition(manager, {
+          conversation,
+          previousStatus: conversation.qualificationStatus,
+          newStatus: 'internal',
+          reason: 'workspace_internal_contact',
+          actor: { type: 'system' },
+          occurredAt,
+        });
         conversation.qualificationStatus = 'internal';
         conversation.qualificationReason = 'workspace_internal_contact';
         if (conversation.ownershipState === 'ai_active') {
@@ -186,6 +209,14 @@ export class InboundMessageIngestionService {
         conversation.qualificationStatus !== 'qualified' &&
         qualification.status === 'qualified'
       ) {
+        await recordQualificationTransition(manager, {
+          conversation,
+          previousStatus: conversation.qualificationStatus,
+          newStatus: 'qualified',
+          reason: qualification.reason,
+          actor: { type: 'system' },
+          occurredAt,
+        });
         conversation.qualificationStatus = 'qualified';
         conversation.qualificationReason = qualification.reason;
         if (
@@ -530,7 +561,10 @@ export class InboundMessageIngestionService {
         .getOne();
     }
     if (input.channelType === 'instagram' && input.sender.username) {
-      const normalized = input.sender.username.trim().replace(/^@/, '').toLowerCase();
+      const normalized = input.sender.username
+        .trim()
+        .replace(/^@/, '')
+        .toLowerCase();
       if (!normalized) return null;
       return this.internalContactQuery(manager, input)
         .andWhere("method.type = 'instagram'")
@@ -745,9 +779,7 @@ export class InboundMessageIngestionService {
     const observation = readAttributionObservation(input.metadata);
     if (!observation) return;
 
-    const repository = manager.getRepository(
-      InboxAttributionObservationEntity,
-    );
+    const repository = manager.getRepository(InboxAttributionObservationEntity);
 
     await repository
       .createQueryBuilder()
