@@ -20,6 +20,7 @@ import { MetaAdsInsightsReaderService } from './services/meta-ads-insights-reade
 import { MetaAdsOAuthService } from './services/meta-ads-oauth.service';
 import { MetaAdsSystemUserService } from './services/meta-ads-system-user.service';
 import { SocialAdConnectionService } from './services/social-ad-connection.service';
+import { SocialAdDestinationHistoryReadService } from './services/social-ad-destination-history.read.service';
 import { SocialAdDestinationObserverService } from './services/social-ad-destination-observer.service';
 import { SocialAdEntityWriterService } from './services/social-ad-entity-writer.service';
 import { SocialAdHierarchySyncService } from './services/social-ad-hierarchy-sync.service';
@@ -72,6 +73,7 @@ import { SocialIntegrationsController } from './social-integrations.controller';
     SocialInternalAccessService,
     MetaAdsEntityReaderService,
     SocialAdDestinationObserverService,
+    SocialAdDestinationHistoryReadService,
     SocialAdEntityWriterService,
     SocialAdHierarchySyncService,
     MetaAdsInsightsReaderService,
@@ -115,6 +117,12 @@ import { SocialIntegrationsController } from './social-integrations.controller';
     // that question is how one client's account id becomes readable from
     // another's context.
     SocialAnalyticsReadService,
+    // Exported for the same consumer, and kept a separate service rather than
+    // folded into the one above: that service's every method is governed by
+    // the four rules that make paid-media metrics correct, and destination
+    // history obeys none of them — it is per ad set, has no attribution
+    // setting, and is evidence about configuration rather than delivery.
+    SocialAdDestinationHistoryReadService,
   ],
 })
 export class SocialIntegrationsModule {}

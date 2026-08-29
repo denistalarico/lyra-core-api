@@ -69,16 +69,21 @@ export function resolveInboxChannel(
  *
  * A Meta click-to-message campaign lands the person in WhatsApp, Instagram
  * Direct or Messenger, and which one is decided by the ad set's
- * `destination_type` (and its `promoted_object`). Neither field is synced:
- * `social_ad_metrics_daily` has no destination column, and a check of every
- * `social_ad_entities.raw` payload in production found zero occurrences of
- * either key. The information is not in this database.
+ * `destination_type`.
  *
- * What *is* available is `objective` (`OUTCOME_ENGAGEMENT`) and
- * `optimization_goal` (`CONVERSATIONS`). Those say a campaign optimised for
- * conversations. They do not say which inbox those conversations were sent to,
- * and an account running WhatsApp and Instagram Direct campaigns side by side —
- * the normal case — is indistinguishable under them.
+ * **The reason has changed since this was first written, and the conclusion has
+ * not.** I3.2 syncs `destination_type` onto the ad set and I3.2a records its
+ * history, so the destination *is* now in this database. What is still missing
+ * is a metric to attach to it: insights are ingested at account and campaign
+ * level only — `SocialAdInsightsLevel` excludes ad set at the type level and
+ * `INGEST_LEVELS` is `['account', 'campaign']` — so there is no per-ad-set
+ * spend, and a campaign may hold ad sets pointing at different destinations.
+ *
+ * Splitting a campaign's spend across the destinations of its ad sets would
+ * require a weighting nobody measured. Proportional allocation by ad set count,
+ * by impressions, by anything else, produces a number that looks per-destination
+ * and is a guess; it would be wrong in exactly the case the feature exists for,
+ * an account testing WhatsApp against Instagram Direct within one campaign.
  *
  * The remaining temptation is the campaign name. Reading "WPP" or "Direct" out
  * of a name a human typed would produce a number that is right for the accounts
@@ -87,11 +92,69 @@ export function resolveInboxChannel(
  * done, and the cohort is declared at the level the data actually supports:
  * all Meta paid media against all Meta inbound.
  *
- * Closing this gap means syncing `destination_type` on the ad set — an S2
- * change, not a cohort-view change.
+ * Closing this gap means ingesting ad-set-level insights — an S2 change, not a
+ * cohort-view change. The temporal destination resolution this release *does*
+ * ship (`social-ad-destination-timeline`) is the half that was missing on the
+ * other side, and it is reported as coverage so the gap is visible.
  */
 export function resolvePaidMediaChannel(): CanonicalAcquisitionChannel {
   return 'unknown';
+}
+
+/**
+ * Which LeadFlow channel a paid-media destination corresponds to.
+ *
+ * Explicit, and small enough to read at a glance — the point of writing it out
+ * is that the correspondence is *not* obvious in either direction:
+ * `instagram_direct` on the paid side is `instagram` on the LeadFlow side, and
+ * `messenger` on the paid side is `facebook_messenger` in
+ * `inbox_channels.type`. A heuristic would get both wrong.
+ *
+ * `null` means "this destination does not identify a single LeadFlow channel",
+ * and it is a real answer rather than a gap. Three kinds of destination map to
+ * it:
+ *
+ * - **`messaging_multi`** — the advertiser offered several inboxes and Meta
+ *   reports the *offer*, not which one each person chose. Splitting its spend
+ *   across WhatsApp, Instagram and Messenger in proportion to conversations
+ *   would invent per-person routing that nobody measured. Resolving individual
+ *   conversations is what I4 is for; until then this bucket has a paid side and
+ *   no funnel side.
+ * - **`website`, `lead_form`, `app`, `phone`, `profile`, `on_post`** — real
+ *   destinations that simply do not land in an Inbox at all. A conversation
+ *   count of zero would be the wrong shape: there is no LeadFlow population to
+ *   count, rather than an empty one.
+ * - **`unknown`** — no evidence.
+ */
+const DESTINATION_TO_INBOX_CHANNEL: Record<
+  string,
+  CanonicalAcquisitionChannel | null
+> = {
+  whatsapp: 'whatsapp',
+  instagram_direct: 'instagram',
+  messenger: 'messenger',
+  messaging_multi: null,
+  website: null,
+  lead_form: null,
+  app: null,
+  phone: null,
+  profile: null,
+  on_post: null,
+  unknown: null,
+};
+
+/**
+ * The LeadFlow channel a paid destination corresponds to, or null.
+ *
+ * Null is never a licence to fall back to a default bucket — a caller that
+ * receives it must report the paid side alone and say why, which is what the
+ * `messaging_multi` limitation does.
+ */
+export function inboxChannelForDestination(
+  destination: string | null | undefined,
+): CanonicalAcquisitionChannel | null {
+  if (!destination) return null;
+  return DESTINATION_TO_INBOX_CHANNEL[destination] ?? null;
 }
 
 /**
@@ -104,6 +167,15 @@ export function resolvePaidMediaChannel(): CanonicalAcquisitionChannel {
 export type ChannelResolution =
   /** Both sides named the same channel. Not reachable until destination syncs. */
   | 'exact'
+  /**
+   * The bucket came from destination evidence observed at the ad set.
+   *
+   * Distinct from `exact`: it says the *paid* side was resolved from what was
+   * observed, which is a claim about Lyra's evidence rather than about the
+   * advertiser's configuration at that moment. Not produced while ad-set-level
+   * metrics are unavailable — see `resolvePaidMediaChannel`.
+   */
+  | 'observed_destination'
   /**
    * Paid media could not be resolved to a channel, so the cohort is the whole
    * Meta surface on both sides. The only value this release produces.

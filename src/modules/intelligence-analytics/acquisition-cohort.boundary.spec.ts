@@ -205,4 +205,89 @@ describe('acquisition cohort boundary', () => {
       expect(service).not.toContain(heuristic);
     }
   });
+
+  /**
+   * Qualification is read from history, never from the current column.
+   *
+   * The regression this guards is subtle and would look like a fix: a later
+   * author, seeing `qualified_leads` return 0 for an old window, reaches for
+   * `inbox_conversations.qualification_status` because it "has the answer". It
+   * does — today's answer, reported as last month's.
+   */
+  it('never reads current qualification state as history', () => {
+    const service = readCode('acquisition-cohort.service.ts');
+
+    for (const currentState of [
+      'qualification_status',
+      'qualificationStatus',
+      'updated_at',
+      'lead_score',
+      'hot_band',
+    ]) {
+      expect(service).not.toContain(currentState);
+    }
+  });
+
+  /**
+   * The destination vocabulary, enforced in the consumer as well as the
+   * producer.
+   *
+   * I3.2a's own boundary spec already forbids `effective_at`/`changed_at` in
+   * the write path. The same claim must not reappear on the read side, where
+   * an interval is most tempting to describe as the period a destination was
+   * "in effect" — which is exactly what Meta does not tell us.
+   */
+  it('claims observation, never effect, about destinations', () => {
+    const sources = [
+      readCode('acquisition-cohort.service.ts'),
+      readCode('acquisition-cohort.contract.ts'),
+      readCode('acquisition-channel.ts'),
+    ].join('\n');
+
+    expect(sources).toContain('observed_destination');
+
+    for (const overclaim of [
+      'effectiveAt',
+      'effectiveFrom',
+      'effective_at',
+      'changedAt',
+      'changed_at',
+      'destinationChangedAt',
+    ]) {
+      expect(sources).not.toContain(overclaim);
+    }
+  });
+
+  /**
+   * No individual attribution, stated as an import rule rather than a promise.
+   *
+   * `inbox_attribution_observations` is I1.1's per-conversation evidence and is
+   * what I4 will use. Reaching it from here would turn a cohort correlation
+   * into per-lead attribution while every label in the payload still said
+   * otherwise.
+   */
+  it('never imports the individual attribution evidence', () => {
+    for (const file of SOURCES) {
+      const source = readCode(file);
+
+      expect(source).not.toContain('inbox_attribution_observations');
+      expect(source).not.toContain('InboxAttributionObservation');
+    }
+  });
+
+  /**
+   * A ratio whose two sides come from different cohorts is not computed.
+   *
+   * Asserted on the source because the failure is silent: the numbers exist,
+   * the quotient is well-formed, and only the semantics are wrong. A later
+   * author restoring one of these would produce a plausible number with no
+   * test failing — unless this one does.
+   */
+  it('leaves the stage-to-stage rates unset', () => {
+    const service = readCode('acquisition-cohort.service.ts');
+
+    expect(service).toContain('conversationToQualifiedRate: null');
+    expect(service).toContain('qualifiedToOpportunityRate: null');
+    expect(service).toContain('opportunityToWonRate: null');
+  });
 });

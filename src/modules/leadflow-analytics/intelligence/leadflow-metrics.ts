@@ -40,6 +40,36 @@ export const LEADFLOW_CONVERSATION_METRICS: readonly IntelligenceMetricDescripto
     },
   ];
 
+/**
+ * Qualification, counted from history rather than from current state.
+ *
+ * Separate from `LEADFLOW_CONVERSATION_METRICS` because it is the one metric
+ * here whose availability is *conditional*: it can only speak for the period
+ * since I3.1 began appending transitions, and a consumer needs to know that a
+ * zero before that date means "not recorded" rather than "nobody qualified".
+ * The adapter therefore publishes it alongside a coverage statement, and the
+ * cohort view refuses to derive rates from a window it does not fully cover.
+ */
+export const LEADFLOW_QUALIFICATION_METRICS: readonly IntelligenceMetricDescriptor[] =
+  [
+    {
+      key: 'qualified_leads',
+      unit: 'count',
+      additivity: 'sum',
+      derived: false,
+      source: "inbox_conversation_events.event_type = 'qualification_status_changed'",
+      formula:
+        'COUNT(DISTINCT conversation_id) whose FIRST observed transition to ' +
+        "newStatus = 'qualified' has occurredAt inside the window.",
+      limitation:
+        'Counts the first observed qualification only: a conversation that is ' +
+        'disqualified and later re-qualified is not counted twice. History ' +
+        'begins when transition recording was deployed, so a conversation ' +
+        'qualified before that date has no transition and cannot be counted — ' +
+        'see the fact set’s coverage, which reports where history starts.',
+    },
+  ];
+
 export const LEADFLOW_COMMERCIAL_METRICS: readonly IntelligenceMetricDescriptor[] =
   [
     {
@@ -85,12 +115,12 @@ export const LEADFLOW_COMMERCIAL_METRICS: readonly IntelligenceMetricDescriptor[
  * Recorded here rather than omitted silently, because the next person to look
  * will assume they were forgotten.
  *
- * - **`qualified_leads`** — `inbox_conversations.qualification_status` exists and
- *   holds `pending | …`, but nothing records *when* a conversation became
- *   qualified. Counting current status against a past window would report
- *   today's state as last month's result, and the number would change every time
- *   it was asked without any new event having occurred. It becomes exposable the
- *   day qualification is timestamped or emits an event; not before.
+ * - **`qualified_leads`** — no longer deferred. I3.1 began appending a
+ *   `qualification_status_changed` event on every observed transition, which is
+ *   the timestamped evidence this note said the metric was waiting for. It now
+ *   lives in `LEADFLOW_QUALIFICATION_METRICS` above, counted from the first
+ *   observed transition rather than from the current column — which remains
+ *   unread by this adapter.
  *
  * - **`hot_leads`** — `crm_lead_score_snapshots` is append-only and does carry
  *   `calculated_at`, so a cohort is expressible. It is still cut, because the
@@ -109,7 +139,6 @@ export const LEADFLOW_COMMERCIAL_METRICS: readonly IntelligenceMetricDescriptor[
  *   shipping the first metric that walks into it would be a poor start.
  */
 export const LEADFLOW_METRICS_DEFERRED = [
-  'qualified_leads',
   'hot_leads',
   'first_response_time',
 ] as const;

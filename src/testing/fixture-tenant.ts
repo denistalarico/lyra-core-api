@@ -71,6 +71,9 @@ export const FIXTURE_DELETE_ORDER: readonly string[] = [
   // to `social_ad_account_connections`, so the connection has to go last —
   // deleting it first would cascade rows away that a cross-domain fixture may
   // still be asserting against.
+  // Before the three tables it references: observations carry foreign keys to
+  // the ad entity, the connection and the sync run.
+  'social_ad_destination_observations',
   'social_ad_metrics_daily',
   'social_ad_entities',
   'social_ad_sync_runs',

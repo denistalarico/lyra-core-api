@@ -61,9 +61,11 @@ export type CohortSocialFacts = {
 /**
  * The funnel side of the cohort, from LeadFlow and CRM.
  *
- * `qualifiedLeads` is `string | null` and is null in this release — see the
- * data-quality block, which names why rather than leaving the reader to wonder
- * whether it is a bug or a zero.
+ * `qualifiedLeads` is now a real count, from the transition history I3.1
+ * appends — the first observed qualification per conversation, counted once.
+ * It is still `string | null`, and it is null when this scope has no history at
+ * all: a `0` there would claim nobody qualified, when the truth is that nothing
+ * was recorded. `dataQuality.qualificationHistory` carries the rest.
  */
 export type CohortLeadFlowFacts = {
   conversationsReceived: string | null;
@@ -116,6 +118,67 @@ export type CohortDerivedMetrics = {
  * travels with the payload so a future UI cannot render the numbers without
  * also having received the caveats.
  */
+/**
+ * What the qualification count can and cannot speak for.
+ *
+ * Additive to the payload, and required reading before any rate derived from
+ * `qualifiedLeads` is trusted. The count itself is always a real count of
+ * observed first-qualifications; this block says how much of the window that
+ * count could have seen.
+ */
+export type CohortQualificationHistory = {
+  /**
+   * Conversations whose first observed qualification fell in the window.
+   *
+   * Named `observed` rather than `qualified` deliberately: it is a count of
+   * evidence, and for a window predating the history it is a floor.
+   */
+  observedQualified: string | null;
+  /**
+   * The earliest qualification transition on record for this scope, ISO, or
+   * null when there is none.
+   *
+   * Derived from the data, not from a deploy date — so it stays true across
+   * environments and across a restore from an older backup.
+   */
+  coverageStart: string | null;
+  /**
+   * True when the window opens before the evidence does.
+   *
+   * The flag that makes a pre-history window legible: conversations qualified
+   * then are unclassifiable, not zero, and no rate computed over that window is
+   * trustworthy.
+   */
+  legacyUnknown: boolean;
+};
+
+/**
+ * What the destination evidence covers, and how precisely it can be read.
+ *
+ * Present even though this release produces a single `provider_bucket` cohort:
+ * the coverage is what tells a reader whether destination-resolved reporting is
+ * close or far away, and hiding it until the day it is used would mean nobody
+ * could see it accumulating.
+ */
+export type CohortDestinationHistory = {
+  /** How the destination was arrived at. `observed_destination` once resolvable. */
+  destinationResolution: 'observed_destination' | 'unavailable';
+  expectedDays: number;
+  /** Days on which some ad set had an observation in force. */
+  coveredDays: number;
+  unknownDays: number;
+  firstObservedAt: string | null;
+  lastObservedAt: string | null;
+  /**
+   * The uncertainty floor, in hours.
+   *
+   * The hierarchy sweep is daily, so a destination change is located to within
+   * a day at best. Carried as data so a UI cannot render an observation
+   * timestamp as though its hour were meaningful.
+   */
+  observationCadenceHours: number;
+};
+
 export type CohortDataQuality = {
   /** Always true here. The numbers are correlated by period and channel. */
   cohortCorrelation: true;
@@ -131,6 +194,10 @@ export type CohortDataQuality = {
   partialData: boolean;
   /** Human-readable, ordered, and meant to be rendered verbatim. */
   limitations: string[];
+  /** Coverage of the qualification evidence behind `leadflow.qualifiedLeads`. */
+  qualificationHistory: CohortQualificationHistory;
+  /** Coverage of the destination evidence behind the channel bucket. */
+  destinationHistory: CohortDestinationHistory;
   /**
    * Metric keys the view asked for and could not obtain, with the reason.
    *
@@ -204,3 +271,58 @@ export type AcquisitionCohortView = {
 export const COHORT_CORRELATION_LIMITATION =
   'Os dados de mídia e funil foram comparados por período e canal. ' +
   'Esta vista não representa atribuição individual de leads.';
+
+/**
+ * Why the two funnel rates stay null.
+ *
+ * The semantics this view has always used is an **event window**: each metric
+ * counts the events that occurred inside the period, cohorted on its own date —
+ * conversations on `created_at`, qualifications on the transition instant, won
+ * deals on `won_at`. That is what makes each number individually correct, and it
+ * is exactly what makes a ratio between two of them wrong: a conversation
+ * received on 31/08 and qualified on 02/09 is in August's numerator of nothing
+ * and September's numerator of qualifications, so
+ * `qualified ÷ conversations` divides two populations that only partly overlap.
+ *
+ * The number would look like a conversion rate, sit next to real ones, and be
+ * off by however much the funnel lags the window — which is largest for short
+ * windows, where readers look hardest. An entry-cohort funnel (follow the
+ * conversations that *entered* the window wherever they later go) would answer
+ * it correctly and is a different view with a different shape; it is not
+ * something to approximate here.
+ */
+export const COHORT_EVENT_WINDOW_LIMITATION =
+  'As métricas são contadas por evento ocorrido no período: conversas pela ' +
+  'data de abertura, qualificações pela data da transição e negócios pela ' +
+  'data de fechamento. Por isso as taxas de conversão entre etapas não são ' +
+  'calculadas — uma conversa aberta no fim do período pode qualificar no ' +
+  'período seguinte, e a razão entre as duas contagens compararia grupos ' +
+  'diferentes.';
+
+/** Stated whenever the window opens before qualification history does. */
+export const COHORT_QUALIFICATION_LEGACY_LIMITATION =
+  'O histórico de qualificação começa em uma data posterior ao início do ' +
+  'período solicitado. Conversas qualificadas antes dessa data não possuem ' +
+  'registro de transição e não podem ser contadas: o número apresentado é um ' +
+  'piso, não o total.';
+
+/** Stated on every response, because the destination cohort is not yet built. */
+export const COHORT_DESTINATION_GRAIN_LIMITATION =
+  'O destino da campanha (WhatsApp, Instagram Direct ou Messenger) é ' +
+  'registrado por conjunto de anúncios, mas as métricas de mídia são ' +
+  'coletadas apenas nos níveis de conta e campanha. Como uma campanha pode ' +
+  'conter conjuntos com destinos diferentes, o investimento não pode ser ' +
+  'separado por destino sem rateio estimado — que não é feito.';
+
+/** Stated whenever destination evidence exists but does not cover the window. */
+export const COHORT_DESTINATION_OBSERVATION_LIMITATION =
+  'O destino é conhecido por observação: a sincronização diária registra o ' +
+  'que o provedor respondeu naquele momento. Uma mudança detectada em uma ' +
+  'data ocorreu em algum ponto desde a observação anterior, não naquela data.';
+
+/** Stated on every response: multi-destination ad sets name no single inbox. */
+export const COHORT_MESSAGING_MULTI_LIMITATION =
+  'Conjuntos de anúncios com destino múltiplo (messaging_multi) oferecem ' +
+  'mais de uma caixa de entrada e o provedor não informa qual delas cada ' +
+  'pessoa escolheu. Esse volume não é distribuído entre WhatsApp, Instagram ' +
+  'e Messenger.';

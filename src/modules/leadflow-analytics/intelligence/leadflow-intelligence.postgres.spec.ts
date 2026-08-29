@@ -12,8 +12,25 @@ import {
   leadFlowScopeParameters,
 } from '../scope/leadflow-analytics-scope.sql';
 import { LeadFlowIntelligenceAdapter } from './leadflow-intelligence.adapter';
+import {
+  LEADFLOW_COMMERCIAL_METRICS,
+  LEADFLOW_CONVERSATION_METRICS,
+  LEADFLOW_QUALIFICATION_METRICS,
+} from './leadflow-metrics';
 
 const run = describePostgresIntegration();
+
+/**
+ * How many facts one bucket holds, derived rather than written down.
+ *
+ * A literal here would have to be found and edited every time the domain
+ * publishes a metric, and the failure it produces — an off-by-one on a length
+ * assertion — says nothing about what changed.
+ */
+const LEADFLOW_METRIC_COUNT =
+  LEADFLOW_CONVERSATION_METRICS.length +
+  LEADFLOW_QUALIFICATION_METRICS.length +
+  LEADFLOW_COMMERCIAL_METRICS.length;
 
 /**
  * The LeadFlow adapter against a real database.
@@ -145,6 +162,46 @@ run('LeadFlow intelligence adapter', () => {
         options.conversationId,
         options.direction ?? 'inbound',
         options.occurredAt,
+      ],
+    );
+  };
+
+  /**
+   * One qualification transition, shaped exactly as I3.1's recorder writes it.
+   *
+   * `occurredAt` goes in the payload rather than being implied by `created_at`,
+   * because that is what the recorder does and what the adapter reads: a
+   * fixture that put the instant only in `created_at` would pass against a
+   * reader that used the wrong column.
+   */
+  const createQualificationTransition = async (options: {
+    conversationId: string;
+    occurredAt: string;
+    previousStatus?: string;
+    newStatus?: string;
+    tenant?: string;
+    workspace?: string;
+    /** Written to `created_at`, deliberately different from `occurredAt`. */
+    recordedAt?: string;
+  }) => {
+    await AgencyDataSource.query(
+      `INSERT INTO inbox_conversation_events
+         (id, tenant_id, workspace_id, conversation_id, event_type, actor_type,
+          payload, created_at)
+       VALUES ($1, $2, $3, $4, 'qualification_status_changed', 'system',
+               $5::jsonb, $6::timestamptz)`,
+      [
+        randomUUID(),
+        options.tenant ?? tenantId,
+        options.workspace ?? workspaceId,
+        options.conversationId,
+        JSON.stringify({
+          previousStatus: options.previousStatus ?? 'pending',
+          newStatus: options.newStatus ?? 'qualified',
+          reason: null,
+          occurredAt: options.occurredAt,
+        }),
+        options.recordedAt ?? options.occurredAt,
       ],
     );
   };
@@ -404,7 +461,7 @@ run('LeadFlow intelligence adapter', () => {
       until: '2026-08-03',
     });
 
-    expect(set.facts).toHaveLength(15); // 5 metrics × 3 days
+    expect(set.facts).toHaveLength(LEADFLOW_METRIC_COUNT * 3);
     expect(valueOf(set, 'conversations_started', '2026-08-01')).toBe('2');
     // A day with nothing is a genuine zero, not an absence — the source is
     // written live, so there is no "not yet synced" state to confuse it with.
@@ -843,6 +900,228 @@ run('LeadFlow intelligence adapter', () => {
    * indexed tenant/workspace prefix. The point is to know the cost before anyone
    * proposes materialising anything — nothing is materialised here.
    */
+  describe('qualification history', () => {
+    /**
+     * A conversation counts once, on the day of its *first* observed
+     * qualification. The evidence is the transition, never the current column.
+     */
+    it('counts the first observed qualification', async () => {
+      const channelId = await createChannel({ client: clientId });
+      const conversationId = await createConversation({
+        channelId,
+        createdAt: '2026-08-05T12:00:00Z',
+      });
+      await createQualificationTransition({
+        conversationId,
+        occurredAt: '2026-08-10T12:00:00Z',
+      });
+
+      const set = await fetch();
+
+      expect(valueOf(set, 'qualified_leads')).toBe('1');
+    });
+
+    /**
+     * The requalification case, and the reason the query finds the first
+     * transition across all time before filtering by the window.
+     *
+     * qualified → disqualified → qualified is three real transitions and one
+     * qualification. A query that took the earliest transition *within* the
+     * window would count the August re-qualification as a new one.
+     */
+    it('does not count a requalification twice', async () => {
+      const channelId = await createChannel({ client: clientId });
+      const conversationId = await createConversation({
+        channelId,
+        createdAt: '2026-07-01T12:00:00Z',
+      });
+      await createQualificationTransition({
+        conversationId,
+        occurredAt: '2026-07-10T12:00:00Z',
+      });
+      await createQualificationTransition({
+        conversationId,
+        occurredAt: '2026-07-20T12:00:00Z',
+        previousStatus: 'qualified',
+        newStatus: 'disqualified',
+      });
+      await createQualificationTransition({
+        conversationId,
+        occurredAt: '2026-08-15T12:00:00Z',
+        previousStatus: 'disqualified',
+        newStatus: 'qualified',
+      });
+
+      // August holds a transition to qualified, but not the first one.
+      expect(valueOf(await fetch(), 'qualified_leads')).toBe('0');
+
+      // July, where it actually happened, holds it.
+      const july = await fetch({ since: '2026-07-01', until: '2026-07-31' });
+      expect(valueOf(july, 'qualified_leads')).toBe('1');
+    });
+
+    /**
+     * A conversation qualified before I3.1 has no transition, so it cannot be
+     * counted — and the fact set says where history begins rather than letting
+     * the zero read as "nobody qualified".
+     */
+    it('cannot classify a conversation qualified before history began', async () => {
+      const channelId = await createChannel({ client: clientId });
+      // Qualified in the current column, with no transition to prove when.
+      const conversationId = await createConversation({
+        channelId,
+        createdAt: '2026-08-05T12:00:00Z',
+      });
+      await AgencyDataSource.query(
+        `UPDATE inbox_conversations SET qualification_status = 'qualified'
+         WHERE id = $1`,
+        [conversationId],
+      );
+
+      const set = await fetch();
+
+      expect(valueOf(set, 'qualified_leads')).toBe('0');
+      expect(set.provenance.notes?.qualificationHistoryStartsAt).toBe('never');
+    });
+
+    it('reports where history starts and whether the window precedes it', async () => {
+      const channelId = await createChannel({ client: clientId });
+      const conversationId = await createConversation({
+        channelId,
+        createdAt: '2026-08-10T12:00:00Z',
+      });
+      await createQualificationTransition({
+        conversationId,
+        occurredAt: '2026-08-20T12:00:00Z',
+      });
+
+      const covering = await fetch({ since: '2026-08-25', until: '2026-08-31' });
+      expect(covering.provenance.notes?.qualificationHistoryStartsAt).toContain(
+        '2026-08-20',
+      );
+      expect(
+        covering.provenance.notes?.qualificationWindowPrecedesHistory,
+      ).toBe('false');
+
+      const preceding = await fetch({ since: '2026-08-01', until: '2026-08-31' });
+      expect(
+        preceding.provenance.notes?.qualificationWindowPrecedesHistory,
+      ).toBe('true');
+    });
+
+    /**
+     * Cohorted on the payload's `occurredAt`, not on when Lyra wrote the row.
+     * The recorder accepts a provider instant precisely so a delayed write does
+     * not move a qualification into the wrong period.
+     */
+    it('cohorts on the occurrence instant, not the insert time', async () => {
+      const channelId = await createChannel({ client: clientId });
+      const conversationId = await createConversation({
+        channelId,
+        createdAt: '2026-08-05T12:00:00Z',
+      });
+      await createQualificationTransition({
+        conversationId,
+        occurredAt: '2026-08-10T12:00:00Z',
+        // Written a month later — a backfill, or a delayed webhook.
+        recordedAt: '2026-09-15T12:00:00Z',
+      });
+
+      expect(valueOf(await fetch(), 'qualified_leads')).toBe('1');
+    });
+
+    /**
+     * A transition into any other status is not a qualification. Reading the
+     * event type alone would count disqualifications as qualifications.
+     */
+    it('ignores transitions into other statuses', async () => {
+      const channelId = await createChannel({ client: clientId });
+      const conversationId = await createConversation({
+        channelId,
+        createdAt: '2026-08-05T12:00:00Z',
+      });
+      await createQualificationTransition({
+        conversationId,
+        occurredAt: '2026-08-10T12:00:00Z',
+        newStatus: 'disqualified',
+      });
+
+      expect(valueOf(await fetch(), 'qualified_leads')).toBe('0');
+    });
+
+    /**
+     * A malformed event with no `occurredAt` must be skipped, not counted at a
+     * default date — an event with no instant has no period.
+     */
+    it('skips an event with no occurrence instant', async () => {
+      const channelId = await createChannel({ client: clientId });
+      const conversationId = await createConversation({
+        channelId,
+        createdAt: '2026-08-05T12:00:00Z',
+      });
+      await AgencyDataSource.query(
+        `INSERT INTO inbox_conversation_events
+           (id, tenant_id, workspace_id, conversation_id, event_type,
+            actor_type, payload)
+         VALUES ($1, $2, $3, $4, 'qualification_status_changed', 'system',
+                 '{"newStatus":"qualified"}'::jsonb)`,
+        [randomUUID(), tenantId, workspaceId, conversationId],
+      );
+
+      expect(valueOf(await fetch(), 'qualified_leads')).toBe('0');
+    });
+
+    it('isolates one client from another', async () => {
+      const mine = await createChannel({ client: clientId });
+      const theirs = await createChannel({ client: otherClientId });
+
+      for (const channelId of [mine, theirs]) {
+        const conversationId = await createConversation({
+          channelId,
+          createdAt: '2026-08-05T12:00:00Z',
+        });
+        await createQualificationTransition({
+          conversationId,
+          occurredAt: '2026-08-10T12:00:00Z',
+        });
+      }
+
+      expect(valueOf(await fetch({ client: clientId }), 'qualified_leads')).toBe(
+        '1',
+      );
+      expect(
+        valueOf(await fetch({ client: otherClientId }), 'qualified_leads'),
+      ).toBe('1');
+    });
+
+    it('cuts the day in the caller’s timezone', async () => {
+      const channelId = await createChannel({ client: clientId });
+      const conversationId = await createConversation({
+        channelId,
+        createdAt: '2026-08-01T12:00:00Z',
+      });
+      // 21:00 in São Paulo on the 10th; 00:00 UTC on the 11th.
+      await createQualificationTransition({
+        conversationId,
+        occurredAt: '2026-08-11T00:00:00Z',
+      });
+
+      const set = await adapter.fetch({
+        scope: requireIntelligenceScope({
+          tenantId,
+          workspaceId,
+          agencyClientId: clientId,
+        }),
+        window: { since: '2026-08-01', until: '2026-08-31' },
+        grain: 'day',
+        dayBucketTimezone: 'America/Sao_Paulo',
+      });
+
+      expect(valueOf(set, 'qualified_leads', '2026-08-10')).toBe('1');
+      expect(valueOf(set, 'qualified_leads', '2026-08-11')).toBe('0');
+    });
+  });
+
   describe('performance', () => {
     // Seeded per test rather than once: `afterEach` resets the tenant, so a
     // `beforeAll` here would leave every test after the first measuring an
@@ -889,7 +1168,7 @@ run('LeadFlow intelligence adapter', () => {
       const set = await fetch({ since, until });
       const elapsed = Date.now() - started;
 
-      expect(set.facts).toHaveLength(5);
+      expect(set.facts).toHaveLength(LEADFLOW_METRIC_COUNT);
       expect(valueOf(set, 'conversations_started')).not.toBe('0');
 
       console.log(`[perf] leadflow period ${label}: ${elapsed}ms`);
@@ -904,7 +1183,7 @@ run('LeadFlow intelligence adapter', () => {
       const set = await fetch({ grain: 'day', since, until });
       const elapsed = Date.now() - started;
 
-      expect(set.facts).toHaveLength(days * 5);
+      expect(set.facts).toHaveLength(days * LEADFLOW_METRIC_COUNT);
       // Proves the measurement ran against seeded rows, not an empty table.
       expect(valueOf(set, 'conversations_started', since)).toBe('1');
 

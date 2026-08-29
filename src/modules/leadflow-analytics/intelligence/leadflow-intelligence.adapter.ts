@@ -22,7 +22,47 @@ import {
 import {
   LEADFLOW_COMMERCIAL_METRICS,
   LEADFLOW_CONVERSATION_METRICS,
+  LEADFLOW_QUALIFICATION_METRICS,
 } from './leadflow-metrics';
+
+/**
+ * The event type I3.1 appends on every observed qualification change.
+ *
+ * Spelled here rather than imported from the Inbox recorder to keep the
+ * analytics layer from depending on a write path — but it is the same literal,
+ * and `leadflow-intelligence.boundary.spec` asserts the two agree so a rename
+ * on either side fails a test instead of silently zeroing the metric.
+ */
+const QUALIFICATION_EVENT = 'qualification_status_changed';
+
+/**
+ * What this adapter can say about qualification history, travelling with facts.
+ *
+ * `qualified_leads` is the only metric here that cannot speak for all time: the
+ * evidence begins when I3.1 was deployed, and a window that predates it holds
+ * conversations that were qualified with no transition to prove it. A bare `0`
+ * would be indistinguishable from "nobody qualified", so the count is always
+ * accompanied by where history actually starts.
+ */
+export type LeadFlowQualificationCoverage = {
+  /**
+   * The earliest qualification transition this scope has ever recorded, or null
+   * when it has none at all.
+   *
+   * Derived from the data rather than from a deploy constant: a hardcoded date
+   * would be wrong for every environment that deployed on a different day, and
+   * would keep claiming coverage after a database restore that predates it.
+   */
+  historyStartsAt: string | null;
+  /**
+   * True when the requested window opens before the evidence does.
+   *
+   * The flag the consumer branches on. When set, the count is a floor — real
+   * qualifications happened that this system cannot see — and no rate derived
+   * from it is trustworthy.
+   */
+  windowPrecedesHistory: boolean;
+};
 
 /**
  * LeadFlow's own numbers, through the same port paid media uses.
@@ -105,12 +145,23 @@ export class LeadFlowIntelligenceAdapter implements IntelligenceFactSource {
     const { scope, window } = query;
     const timezone = query.dayBucketTimezone ?? null;
 
-    const [conversations, inbound, created, won] = await Promise.all([
-      this.countConversationsStarted(scope, window, query.grain, timezone),
-      this.countInboundMessages(scope, window, query.grain, timezone),
-      this.countOpportunitiesCreated(scope, window, query.grain, timezone),
-      this.sumOpportunitiesWon(scope, window, query.grain, timezone),
-    ]);
+    const [conversations, inbound, created, won, qualified, historyStartsAt] =
+      await Promise.all([
+        this.countConversationsStarted(scope, window, query.grain, timezone),
+        this.countInboundMessages(scope, window, query.grain, timezone),
+        this.countOpportunitiesCreated(scope, window, query.grain, timezone),
+        this.sumOpportunitiesWon(scope, window, query.grain, timezone),
+        this.countFirstQualifications(scope, window, query.grain, timezone),
+        this.qualificationHistoryStart(scope),
+      ]);
+
+    const qualificationCoverage: LeadFlowQualificationCoverage = {
+      historyStartsAt,
+      // No history at all also counts as "the window precedes it": every
+      // qualification in the window is invisible, which is the same warning.
+      windowPrecedesHistory:
+        historyStartsAt === null || historyStartsAt.slice(0, 10) > window.since,
+    };
 
     const currencies = new Set(
       won.filter((row) => row.currency).map((row) => row.currency as string),
@@ -146,17 +197,33 @@ export class LeadFlowIntelligenceAdapter implements IntelligenceFactSource {
       descriptors: this.descriptors(),
       facts: this.toFacts(
         query,
-        { conversations, inbound, created, won },
+        { conversations, inbound, created, won, qualified },
         canTotal,
       ),
       provenance: {
         canonicalSource:
-          'inbox_conversations, inbox_messages, crm_opportunities',
+          'inbox_conversations, inbox_messages, inbox_conversation_events, ' +
+          'crm_opportunities',
         // LeadFlow has no attribution model. Null is the honest answer, and
         // inventing one so the field is populated would make two fact sets look
         // comparable in a way they are not.
         attributionBasis: null,
         ingestionMode: 'live',
+        /**
+         * Where qualification history begins, carried as provenance.
+         *
+         * `notes` is `Record<string, string>`, so the two values are stringified
+         * rather than nested. That constraint is the contract's, and it is met
+         * here rather than widened: adding a LeadFlow-shaped field to
+         * `IntelligenceFactSet` would put one domain's conditional metric into a
+         * type every domain implements.
+         */
+        notes: {
+          qualificationHistoryStartsAt: historyStartsAt ?? 'never',
+          qualificationWindowPrecedesHistory: String(
+            qualificationCoverage.windowPrecedesHistory,
+          ),
+        },
       },
       freshness: {
         // The query instant, because that is genuinely when these numbers were
@@ -181,7 +248,11 @@ export class LeadFlowIntelligenceAdapter implements IntelligenceFactSource {
   }
 
   private descriptors(): IntelligenceMetricDescriptor[] {
-    return [...LEADFLOW_CONVERSATION_METRICS, ...LEADFLOW_COMMERCIAL_METRICS];
+    return [
+      ...LEADFLOW_CONVERSATION_METRICS,
+      ...LEADFLOW_QUALIFICATION_METRICS,
+      ...LEADFLOW_COMMERCIAL_METRICS,
+    ];
   }
 
   private toFacts(
@@ -191,6 +262,7 @@ export class LeadFlowIntelligenceAdapter implements IntelligenceFactSource {
       inbound: CountRow[];
       created: CountRow[];
       won: WonRow[];
+      qualified: CountRow[];
     },
     canTotal: boolean,
   ): IntelligenceFact[] {
@@ -201,6 +273,7 @@ export class LeadFlowIntelligenceAdapter implements IntelligenceFactSource {
     const inbound = indexByDay(counts.inbound);
     const created = indexByDay(counts.created);
     const won = indexByDay(counts.won);
+    const qualified = indexByDay(counts.qualified);
 
     const facts: IntelligenceFact[] = [];
 
@@ -218,6 +291,16 @@ export class LeadFlowIntelligenceAdapter implements IntelligenceFactSource {
         {
           metricKey: 'inbound_messages',
           value: readCount(inbound.get(key)),
+          dimensions,
+        },
+        {
+          // A genuine count of first qualifications observed in the bucket. It
+          // is a floor when the window predates the evidence, which the fact
+          // set's provenance states — the value itself stays a real count
+          // rather than becoming null, because the qualifications it does see
+          // did happen.
+          metricKey: 'qualified_leads',
+          value: readCount(qualified.get(key)),
           dimensions,
         },
         {
@@ -312,6 +395,115 @@ export class LeadFlowIntelligenceAdapter implements IntelligenceFactSource {
       `,
       params(scope, window, timezone),
     );
+  }
+
+  /**
+   * Conversations whose **first** observed qualification lands in the window.
+   *
+   * The shape matters more than the SQL. The inner query finds, per
+   * conversation, the earliest transition into `qualified` across *all time* —
+   * not within the window — and only then does the outer query keep the ones
+   * that fall inside it. Filtering by the window first would find the earliest
+   * qualification *in the window*, which for a conversation qualified in June,
+   * disqualified in July and re-qualified in August would report a new
+   * qualification in August. That is the double count the brief forbids, and it
+   * is invisible in any test whose fixtures do not span the window boundary.
+   *
+   * `occurredAt` from the payload, not `created_at`: the recorder takes a
+   * caller-supplied instant so a provider timestamp can be honoured, and the row
+   * insert time is merely when Lyra got around to writing it.
+   *
+   * The status is read from the payload rather than joined against the
+   * conversation's current column — that column is exactly the current-state
+   * fallback this step exists to stop using.
+   */
+  private countFirstQualifications(
+    scope: IntelligenceScope,
+    window: IntelligenceWindow,
+    grain: IntelligenceGrain,
+    timezone: string | null,
+  ): Promise<CountRow[]> {
+    return this.dataSource.query<CountRow[]>(
+      `
+        /* leadflow-intelligence:first-qualifications */
+        SELECT ${bucket(grain, 'first_qualification.occurred_at')} AS "day",
+               COUNT(*)::text AS "count"
+        FROM (
+          SELECT DISTINCT ON (event.conversation_id)
+                 event.conversation_id,
+                 (event.payload->>'occurredAt')::timestamptz AS occurred_at
+          FROM inbox_conversation_events event
+          INNER JOIN inbox_conversations conversation
+            ON conversation.id = event.conversation_id
+           AND conversation.tenant_id = event.tenant_id
+           AND conversation.workspace_id = event.workspace_id
+          LEFT JOIN inbox_channels channel
+            ON channel.id = conversation.channel_id
+           AND channel.tenant_id = conversation.tenant_id
+           AND channel.workspace_id = conversation.workspace_id
+           AND channel.deleted_at IS NULL
+          WHERE event.tenant_id = $1
+            AND event.workspace_id = $2
+            AND event.event_type = '${QUALIFICATION_EVENT}'
+            AND event.payload->>'newStatus' = 'qualified'
+            AND event.payload->>'occurredAt' IS NOT NULL
+            AND ${LEADFLOW_SCOPE_SQL.CHANNEL}
+          ORDER BY event.conversation_id,
+                   (event.payload->>'occurredAt')::timestamptz ASC,
+                   event.created_at ASC
+        ) first_qualification
+        WHERE first_qualification.occurred_at >= ${WINDOW_START}
+          AND first_qualification.occurred_at < ${WINDOW_END}
+        GROUP BY 1
+      `,
+      params(scope, window, timezone),
+    );
+  }
+
+  /**
+   * The earliest qualification transition this scope has on record.
+   *
+   * Answers "where does history begin" from the evidence itself rather than
+   * from a deploy date constant, so it stays correct across environments that
+   * deployed on different days and across a database restored from a backup
+   * that predates the feature.
+   *
+   * Unscoped by window on purpose — that is the question.
+   */
+  private async qualificationHistoryStart(
+    scope: IntelligenceScope,
+  ): Promise<string | null> {
+    const rows = await this.dataSource.query<Array<{ startsAt: Date | null }>>(
+      `
+        /* leadflow-intelligence:qualification-history-start */
+        SELECT MIN((event.payload->>'occurredAt')::timestamptz) AS "startsAt"
+        FROM inbox_conversation_events event
+        INNER JOIN inbox_conversations conversation
+          ON conversation.id = event.conversation_id
+         AND conversation.tenant_id = event.tenant_id
+         AND conversation.workspace_id = event.workspace_id
+        LEFT JOIN inbox_channels channel
+          ON channel.id = conversation.channel_id
+         AND channel.tenant_id = conversation.tenant_id
+         AND channel.workspace_id = conversation.workspace_id
+         AND channel.deleted_at IS NULL
+        WHERE event.tenant_id = $1
+          AND event.workspace_id = $2
+          AND event.event_type = '${QUALIFICATION_EVENT}'
+          AND event.payload->>'occurredAt' IS NOT NULL
+          AND ${LEADFLOW_SCOPE_SQL.CHANNEL}
+      `,
+      leadFlowScopeParameters({
+        tenantId: scope.tenantId,
+        workspaceId: scope.workspaceId,
+        contextType: scope.agencyClientId ? 'client' : 'agency',
+        clientId: scope.agencyClientId,
+      }),
+    );
+
+    const startsAt = rows[0]?.startsAt ?? null;
+
+    return startsAt ? new Date(startsAt).toISOString() : null;
   }
 
   private countOpportunitiesCreated(

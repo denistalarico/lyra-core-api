@@ -5,10 +5,12 @@ import { deleteFixtureTenant } from '../../testing/fixture-tenant';
 import { describePostgresIntegration } from '../../testing/postgres-integration';
 import { LeadFlowIntelligenceAdapter } from '../leadflow-analytics/intelligence/leadflow-intelligence.adapter';
 import { SocialAdAccountConnectionEntity } from '../social-integrations/entities/social-ad-account-connection.entity';
+import { SocialAdDestinationObservationEntity } from '../social-integrations/entities/social-ad-destination-observation.entity';
 import { SocialAdEntity } from '../social-integrations/entities/social-ad-entity.entity';
 import { SocialAdMetricDailyEntity } from '../social-integrations/entities/social-ad-metric-daily.entity';
 import { SocialAdSyncRunEntity } from '../social-integrations/entities/social-ad-sync-run.entity';
 import { SocialPaidMediaIntelligenceAdapter } from '../social-integrations/intelligence/social-paid-media-intelligence.adapter';
+import { SocialAdDestinationHistoryReadService } from '../social-integrations/services/social-ad-destination-history.read.service';
 import { SocialAdSyncConfigService } from '../social-integrations/services/social-ad-sync-config.service';
 import { SocialAnalyticsReadService } from '../social-integrations/services/social-analytics-read.service';
 import { AcquisitionCohortService } from './acquisition-cohort.service';
@@ -43,6 +45,7 @@ run('Acquisition cohort against PostgreSQL', () => {
   const WINDOW = { since: '2026-08-01', until: '2026-08-31' };
 
   const tables = [
+    'social_ad_destination_observations',
     'social_ad_metrics_daily',
     'social_ad_entities',
     'social_ad_sync_runs',
@@ -79,6 +82,9 @@ run('Acquisition cohort against PostgreSQL', () => {
       new SocialPaidMediaIntelligenceAdapter(reads),
       new LeadFlowIntelligenceAdapter(AgencyDataSource),
       reads,
+      new SocialAdDestinationHistoryReadService(
+        AgencyDataSource.getRepository(SocialAdDestinationObservationEntity),
+      ),
     );
   });
 
@@ -385,14 +391,25 @@ run('Acquisition cohort against PostgreSQL', () => {
       expect(view.derived.costPerWonOpportunity).toBe('1000.000000');
     });
 
-    it('derives the funnel rate it can and nulls the ones it cannot', async () => {
+    /**
+     * The costs are derived; none of the stage-to-stage rates are.
+     *
+     * Each metric is cohorted on its own event date — conversations on
+     * `created_at`, deals on `won_at` — so a quotient of two of them compares
+     * populations that only partly overlap. The deals won in this window were
+     * largely opened before it, which is why `opportunityToWonRate` is null
+     * here even though both operands are present and the quotient would look
+     * entirely reasonable.
+     */
+    it('nulls every stage-to-stage rate under event-window semantics', async () => {
       const view = await cohort();
 
-      // 1 won / 3 created
-      expect(view.derived.opportunityToWonRate).toBe('0.333333');
-      // Both depend on qualified leads, which are not countable.
+      expect(view.derived.opportunityToWonRate).toBeNull();
       expect(view.derived.conversationToQualifiedRate).toBeNull();
       expect(view.derived.qualifiedToOpportunityRate).toBeNull();
+
+      // The costs, which are valid period statistics, still resolve.
+      expect(view.derived.costPerOpportunity).toBe('333.333333');
     });
 
     it('states the claim and the limitation', async () => {
@@ -678,6 +695,176 @@ run('Acquisition cohort against PostgreSQL', () => {
     });
   });
 
+  /**
+   * The two temporal facts I3.3 consumes, end to end through the real
+   * projector: a qualification counted from its transition, and a destination
+   * resolved from its observations.
+   */
+  describe('temporal facts', () => {
+    const qualify = async (conversationId: string, occurredAt: string) =>
+      AgencyDataSource.query(
+        `INSERT INTO inbox_conversation_events
+           (id, tenant_id, workspace_id, conversation_id, event_type,
+            actor_type, payload)
+         VALUES ($1, $2, $3, $4, 'qualification_status_changed', 'system',
+                 $5::jsonb)`,
+        [
+          randomUUID(),
+          tenantId,
+          workspaceId,
+          conversationId,
+          JSON.stringify({
+            previousStatus: 'pending',
+            newStatus: 'qualified',
+            reason: null,
+            occurredAt,
+          }),
+        ],
+      );
+
+    const observeDestination = async (options: {
+      externalId: string;
+      destination: string;
+      observedAt: string;
+      connection?: string;
+    }) => {
+      const [entity] = (await AgencyDataSource.query(
+        `INSERT INTO social_ad_entities
+           (tenant_id, workspace_id, connection_id, provider, entity_level,
+            external_id)
+         VALUES ($1, $2, $3, 'meta_ads', 'adset', $4)
+         RETURNING id`,
+        [
+          tenantId,
+          workspaceId,
+          options.connection ?? connectionId,
+          options.externalId,
+        ],
+      )) as Array<{ id: string }>;
+
+      await AgencyDataSource.query(
+        `INSERT INTO social_ad_destination_observations
+           (tenant_id, workspace_id, connection_id, ad_entity_id, provider,
+            destination_type, destination_raw, observed_at)
+         VALUES ($1, $2, $3, $4, 'meta_ads', $5, $6, $7::timestamptz)`,
+        [
+          tenantId,
+          workspaceId,
+          options.connection ?? connectionId,
+          entity.id,
+          options.destination,
+          options.destination.toUpperCase(),
+          options.observedAt,
+        ],
+      );
+
+      return entity.id;
+    };
+
+    beforeAll(async () => {
+      await reset();
+      await createConnection({ id: connectionId });
+
+      const channelId = await createChannel({ client: null });
+      const conversationId = await createConversation({
+        channelId,
+        createdAt: '2026-08-02T12:00:00Z',
+      });
+      await qualify(conversationId, '2026-08-05T12:00:00Z');
+
+      // A second conversation, qualified twice — counted once.
+      const repeat = await createConversation({
+        channelId,
+        createdAt: '2026-08-03T12:00:00Z',
+      });
+      await qualify(repeat, '2026-08-06T12:00:00Z');
+      await qualify(repeat, '2026-08-20T12:00:00Z');
+
+      await observeDestination({
+        externalId: `adset-${randomUUID()}`,
+        destination: 'whatsapp',
+        observedAt: '2026-08-15T09:00:00Z',
+      });
+    });
+
+    afterAll(reset);
+
+    it('counts each conversation’s first qualification once', async () => {
+      const view = await cohort();
+
+      expect(view.leadflow.qualifiedLeads).toBe('2');
+      expect(view.dataQuality.qualificationHistory.observedQualified).toBe('2');
+    });
+
+    it('reports where qualification history begins', async () => {
+      const view = await cohort();
+
+      expect(view.dataQuality.qualificationHistory.coverageStart).toContain(
+        '2026-08-05',
+      );
+      // The window opens on 2026-08-01, before the first transition.
+      expect(view.dataQuality.qualificationHistory.legacyUnknown).toBe(true);
+    });
+
+    it('derives cost per qualified lead from the observed count', async () => {
+      const view = await cohort();
+
+      // A cost is a valid period statistic; the stage rates are not.
+      expect(view.derived.costPerQualifiedLead).not.toBeNull();
+      expect(view.derived.conversationToQualifiedRate).toBeNull();
+      expect(view.derived.qualifiedToOpportunityRate).toBeNull();
+    });
+
+    it('reports destination coverage without claiming a resolved bucket', async () => {
+      const view = await cohort();
+
+      const history = view.dataQuality.destinationHistory;
+      expect(history.firstObservedAt).toContain('2026-08-15');
+      expect(history.coveredDays).toBeGreaterThan(0);
+      expect(history.unknownDays).toBeGreaterThan(0);
+      // Evidence exists; nothing in this response was resolved by it.
+      expect(history.destinationResolution).toBe('unavailable');
+      expect(view.dataQuality.channelResolution).toBe('provider_bucket');
+    });
+
+    /**
+     * The legacy-period case §29 asks for explicitly: a window entirely before
+     * both histories still answers, with the gaps stated rather than filled.
+     */
+    it('answers a window that predates both histories', async () => {
+      const legacy = await service.cohort(
+        requireIntelligenceScope({
+          tenantId,
+          workspaceId,
+          agencyClientId: null,
+        }),
+        { since: '2026-06-01', until: '2026-06-30' },
+        connectionId,
+      );
+
+      expect(legacy.kind).toBe('cohort_correlation');
+      expect(legacy.leadflow.qualifiedLeads).toBe('0');
+      expect(legacy.dataQuality.qualificationHistory.legacyUnknown).toBe(true);
+      expect(legacy.dataQuality.destinationHistory.coveredDays).toBe(0);
+      expect(legacy.dataQuality.destinationHistory.unknownDays).toBe(30);
+      expect(legacy.dataQuality.partialData).toBe(true);
+    });
+
+    /**
+     * Destination evidence belongs to a connection. Another connection's
+     * observations must not appear in this one's coverage.
+     */
+    it('does not read another connection’s destination evidence', async () => {
+      const isolated = randomUUID();
+      await createConnection({ id: isolated });
+
+      const view = await cohort({ connection: isolated });
+
+      expect(view.dataQuality.destinationHistory.firstObservedAt).toBeNull();
+      expect(view.dataQuality.destinationHistory.coveredDays).toBe(0);
+    });
+  });
+
   describe('performance', () => {
     const perfTenant = randomUUID();
     const perfConnection = randomUUID();
@@ -714,11 +901,37 @@ run('Acquisition cohort against PostgreSQL', () => {
         const stamp = new Date(
           Date.UTC(2026, 4, 1, 12) + day * 86_400_000,
         ).toISOString();
-        await createConversation({
+        const conversationId = await createConversation({
           channelId: channel,
           createdAt: stamp,
           tenant: perfTenant,
         });
+        /**
+         * A qualification per conversation, so the first-qualification query is
+         * actually exercised.
+         *
+         * Without these the measurement would time a `DISTINCT ON` over an
+         * empty table and prove nothing about the query this step added.
+         */
+        await AgencyDataSource.query(
+          `INSERT INTO inbox_conversation_events
+             (id, tenant_id, workspace_id, conversation_id, event_type,
+              actor_type, payload)
+           VALUES ($1, $2, $3, $4, 'qualification_status_changed', 'system',
+                   $5::jsonb)`,
+          [
+            randomUUID(),
+            perfTenant,
+            workspaceId,
+            conversationId,
+            JSON.stringify({
+              previousStatus: 'pending',
+              newStatus: 'qualified',
+              reason: null,
+              occurredAt: stamp,
+            }),
+          ],
+        );
         await createOpportunity({
           pipelineId,
           stageId,
@@ -726,7 +939,48 @@ run('Acquisition cohort against PostgreSQL', () => {
           createdAt: stamp,
         });
       }
-    }, 120_000);
+
+      /**
+       * Ad sets with destination history, at a shape close to production: the
+       * live account holds 126 ad sets, and the observer appends only first
+       * sightings and changes, so a handful of rows each.
+       */
+      for (let index = 0; index < 126; index += 1) {
+        const [entity] = (await AgencyDataSource.query(
+          `INSERT INTO social_ad_entities
+             (tenant_id, workspace_id, connection_id, provider, entity_level,
+              external_id)
+           VALUES ($1, $2, $3, 'meta_ads', 'adset', $4)
+           RETURNING id`,
+          [perfTenant, workspaceId, perfConnection, `perf-adset-${index}`],
+        )) as Array<{ id: string }>;
+
+        // Three observations each: a first sighting and two observed changes.
+        for (const [offset, destination] of [
+          [0, 'whatsapp'],
+          [40, 'instagram_direct'],
+          [80, 'whatsapp'],
+        ] as const) {
+          await AgencyDataSource.query(
+            `INSERT INTO social_ad_destination_observations
+               (tenant_id, workspace_id, connection_id, ad_entity_id, provider,
+                destination_type, destination_raw, observed_at)
+             VALUES ($1, $2, $3, $4, 'meta_ads', $5, $6, $7::timestamptz)`,
+            [
+              perfTenant,
+              workspaceId,
+              perfConnection,
+              entity.id,
+              destination,
+              destination.toUpperCase(),
+              new Date(
+                Date.UTC(2026, 4, 1, 9) + offset * 86_400_000,
+              ).toISOString(),
+            ],
+          );
+        }
+      }
+    }, 180_000);
 
     afterAll(async () => {
       await deleteFixtureTenant(AgencyDataSource, perfTenant, tables);
@@ -751,6 +1005,12 @@ run('Acquisition cohort against PostgreSQL', () => {
       // table — the failure mode that makes a performance test meaningless.
       expect(view.social.spend).not.toBe('0.000000');
       expect(view.leadflow.conversationsReceived).not.toBe('0');
+      // And that the two temporal reads had evidence to work over, so the
+      // timing covers them rather than two empty-table scans.
+      expect(view.leadflow.qualifiedLeads).not.toBe('0');
+      expect(
+        view.dataQuality.destinationHistory.firstObservedAt,
+      ).not.toBeNull();
 
       return elapsed;
     };

@@ -2,9 +2,17 @@ import type {
   IntelligenceFactSet,
   IntelligenceScope,
 } from '../../common/intelligence';
+import type { DestinationHistory } from '../social-integrations/services/social-ad-destination-history.read.service';
 import { AcquisitionCohortService } from './acquisition-cohort.service';
-import { COHORT_CORRELATION_LIMITATION } from './acquisition-cohort.contract';
 import {
+  COHORT_CORRELATION_LIMITATION,
+  COHORT_DESTINATION_OBSERVATION_LIMITATION,
+  COHORT_EVENT_WINDOW_LIMITATION,
+  COHORT_MESSAGING_MULTI_LIMITATION,
+  COHORT_QUALIFICATION_LEGACY_LIMITATION,
+} from './acquisition-cohort.contract';
+import {
+  inboxChannelForDestination,
   resolveInboxChannel,
   resolvePaidMediaChannel,
 } from './acquisition-channel';
@@ -82,6 +90,7 @@ function leadflowSet(
   const keys = [
     'conversations_started',
     'inbound_messages',
+    'qualified_leads',
     'opportunities_created',
     'opportunities_won',
     'won_value',
@@ -121,9 +130,29 @@ function leadflowSet(
   };
 }
 
+/**
+ * Destination history with no observations, which is the default for these
+ * tests: they are about metric composition, and a scope that has never been
+ * swept is the state most of them should hold.
+ */
+function emptyDestinationHistory(days: number): DestinationHistory {
+  return {
+    intervals: [],
+    coverage: {
+      expectedDays: days,
+      coveredDays: 0,
+      unknownDays: days,
+      firstObservedAt: null,
+      lastObservedAt: null,
+      observationCadenceHours: 24,
+    },
+  };
+}
+
 function buildService(
   social: IntelligenceFactSet,
   leadflow: IntelligenceFactSet,
+  destination: DestinationHistory = emptyDestinationHistory(31),
 ) {
   const socialAdapter = { fetch: jest.fn().mockResolvedValue(social) };
   const leadflowAdapter = { fetch: jest.fn().mockResolvedValue(leadflow) };
@@ -132,14 +161,24 @@ function buildService(
       .fn()
       .mockResolvedValue([{ id: CONNECTION, timezone: 'America/Sao_Paulo' }]),
   };
+  const destinationHistory = {
+    history: jest.fn().mockResolvedValue(destination),
+  };
 
   const service = new AcquisitionCohortService(
     socialAdapter as never,
     leadflowAdapter as never,
     reads as never,
+    destinationHistory as never,
   );
 
-  return { service, socialAdapter, leadflowAdapter, reads };
+  return {
+    service,
+    socialAdapter,
+    leadflowAdapter,
+    reads,
+    destinationHistory,
+  };
 }
 
 describe('AcquisitionCohortService', () => {
@@ -210,11 +249,21 @@ describe('AcquisitionCohortService', () => {
       expect(view.derived.costPerWonOpportunity).toBe('200.000000');
     });
 
-    it('computes funnel rates as quotients of the totals', async () => {
+    /**
+     * The event-window rule, asserted on the case where the numbers are all
+     * present and the quotient would look perfectly reasonable.
+     *
+     * Every stage is cohorted on its own event date, so a ratio between two of
+     * them divides populations that only partly overlap: the deals won in
+     * August were largely opened before it. Producing `0.25` here would put a
+     * plausible, quotable and wrong conversion rate beside real metrics.
+     */
+    it('refuses stage-to-stage rates under event-window semantics', async () => {
       const { service } = buildService(
         socialSet({}),
         leadflowSet({
           conversations_started: '40',
+          qualified_leads: '30',
           opportunities_created: '20',
           opportunities_won: '5',
         }),
@@ -222,8 +271,19 @@ describe('AcquisitionCohortService', () => {
 
       const view = await service.cohort(SCOPE, WINDOW, CONNECTION);
 
-      // 5 / 20
-      expect(view.derived.opportunityToWonRate).toBe('0.250000');
+      expect(view.derived.conversationToQualifiedRate).toBeNull();
+      expect(view.derived.qualifiedToOpportunityRate).toBeNull();
+      expect(view.derived.opportunityToWonRate).toBeNull();
+    });
+
+    it('explains in the limitations why the rates are absent', async () => {
+      const { service } = buildService(socialSet({}), leadflowSet({}));
+
+      const view = await service.cohort(SCOPE, WINDOW, CONNECTION);
+
+      expect(view.dataQuality.limitations).toContain(
+        COHORT_EVENT_WINDOW_LIMITATION,
+      );
     });
 
     /**
@@ -315,35 +375,192 @@ describe('AcquisitionCohortService', () => {
   });
 
   describe('qualified leads', () => {
+    /** A fact set whose provenance says history exists and covers the window. */
+    const withHistory = (values: Record<string, string>) =>
+      leadflowSet(values, {
+        provenance: {
+          canonicalSource: 'inbox_conversation_events',
+          attributionBasis: null,
+          ingestionMode: 'live' as const,
+          notes: {
+            qualificationHistoryStartsAt: '2026-07-01T00:00:00.000Z',
+            qualificationWindowPrecedesHistory: 'false',
+          },
+        },
+      });
+
+    it('counts observed first qualifications', async () => {
+      const { service } = buildService(
+        socialSet({}),
+        withHistory({ qualified_leads: '12' }),
+      );
+
+      const view = await service.cohort(SCOPE, WINDOW, CONNECTION);
+
+      expect(view.leadflow.qualifiedLeads).toBe('12');
+      expect(view.dataQuality.qualificationHistory.observedQualified).toBe('12');
+      expect(view.dataQuality.qualificationHistory.coverageStart).toBe(
+        '2026-07-01T00:00:00.000Z',
+      );
+      expect(view.dataQuality.qualificationHistory.legacyUnknown).toBe(false);
+    });
+
+    it('enables cost per qualified lead once the count is real', async () => {
+      const { service } = buildService(
+        socialSet({ spend: '1000.000000' }),
+        withHistory({ qualified_leads: '20' }),
+      );
+
+      const view = await service.cohort(SCOPE, WINDOW, CONNECTION);
+
+      // 1000 / 20. A cost is money in the window over events in the window,
+      // which is a valid period statistic even though the stage rates are not.
+      expect(view.derived.costPerQualifiedLead).toBe('50.000000');
+    });
+
     /**
-     * Null with a stated reason, not zero. The distinction is the difference
-     * between "nobody qualified" and "this platform cannot yet tell you".
+     * The legacy case the brief singles out. A window opening before the
+     * evidence does cannot be classified historically, and the count that comes
+     * back is a floor — so it is flagged rather than presented as a total.
      */
-    it('reports null and names the reason', async () => {
+    it('flags a window that opens before qualification history', async () => {
+      const { service } = buildService(
+        socialSet({}),
+        leadflowSet(
+          { qualified_leads: '3' },
+          {
+            provenance: {
+              canonicalSource: 'inbox_conversation_events',
+              attributionBasis: null,
+              ingestionMode: 'live' as const,
+              notes: {
+                qualificationHistoryStartsAt: '2026-08-20T00:00:00.000Z',
+                qualificationWindowPrecedesHistory: 'true',
+              },
+            },
+          },
+        ),
+      );
+
+      const view = await service.cohort(SCOPE, WINDOW, CONNECTION);
+
+      expect(view.dataQuality.qualificationHistory.legacyUnknown).toBe(true);
+      expect(view.dataQuality.limitations).toContain(
+        COHORT_QUALIFICATION_LEGACY_LIMITATION,
+      );
+      // Still a real count of what was observed, not silently zeroed.
+      expect(view.leadflow.qualifiedLeads).toBe('3');
+    });
+
+    /**
+     * No history at all is the one case that must not report zero: a `0` would
+     * claim nobody qualified, when nothing was being recorded.
+     */
+    it('reports null rather than zero when no history exists', async () => {
+      const { service } = buildService(
+        socialSet({}),
+        leadflowSet({ qualified_leads: '0' }),
+      );
+
+      const view = await service.cohort(SCOPE, WINDOW, CONNECTION);
+
+      expect(view.dataQuality.qualificationHistory.observedQualified).toBeNull();
+      expect(view.dataQuality.qualificationHistory.coverageStart).toBeNull();
+      expect(
+        view.dataQuality.limitations.some((line) =>
+          line.includes('Nenhuma transição de qualificação'),
+        ),
+      ).toBe(true);
+    });
+
+    it('never derives a stage rate from the count', async () => {
+      const { service } = buildService(
+        socialSet({ spend: '1000.000000' }),
+        withHistory({ conversations_started: '40', qualified_leads: '10' }),
+      );
+
+      const view = await service.cohort(SCOPE, WINDOW, CONNECTION);
+
+      expect(view.derived.conversationToQualifiedRate).toBeNull();
+      expect(view.derived.qualifiedToOpportunityRate).toBeNull();
+    });
+  });
+
+  describe('destination history', () => {
+    it('reports coverage even though no bucket is resolved', async () => {
+      const { service } = buildService(socialSet({}), leadflowSet({}), {
+        intervals: [
+          {
+            adEntityId: 'adset-1',
+            observedDestination: 'whatsapp',
+            observedRaw: 'WHATSAPP',
+            observedFrom: '2026-08-10',
+            observedUntil: null,
+          },
+        ],
+        coverage: {
+          expectedDays: 31,
+          coveredDays: 22,
+          unknownDays: 9,
+          firstObservedAt: '2026-08-10T09:00:00.000Z',
+          lastObservedAt: '2026-08-28T09:00:00.000Z',
+          observationCadenceHours: 24,
+        },
+      });
+
+      const view = await service.cohort(SCOPE, WINDOW, CONNECTION);
+
+      const history = view.dataQuality.destinationHistory;
+      expect(history.coveredDays).toBe(22);
+      expect(history.unknownDays).toBe(9);
+      expect(history.observationCadenceHours).toBe(24);
+      // The claim stays `unavailable`: evidence exists, but nothing in this
+      // response was resolved by it while metrics stop at campaign level.
+      expect(history.destinationResolution).toBe('unavailable');
+    });
+
+    /**
+     * Incomplete destination evidence makes the view partial even when both
+     * fact sets are complete — the point of §22.
+     */
+    it('marks the view partial when destination coverage is incomplete', async () => {
       const { service } = buildService(socialSet({}), leadflowSet({}));
 
       const view = await service.cohort(SCOPE, WINDOW, CONNECTION);
 
-      expect(view.leadflow.qualifiedLeads).toBeNull();
-
-      const missing = view.dataQuality.missingFacts.find(
-        (item) => item.metricKey === 'qualified_leads',
-      );
-      expect(missing).toBeDefined();
-      expect(missing?.reason).toContain('sem data registrada');
+      expect(view.social.spend).not.toBeNull();
+      expect(view.dataQuality.partialData).toBe(true);
     });
 
-    it('leaves every metric derived from it null', async () => {
-      const { service } = buildService(
-        socialSet({ spend: '1000.000000' }),
-        leadflowSet({ conversations_started: '40' }),
-      );
+    it('states that a change is observation-timed, not effective-timed', async () => {
+      const { service } = buildService(socialSet({}), leadflowSet({}), {
+        intervals: [],
+        coverage: {
+          expectedDays: 31,
+          coveredDays: 31,
+          unknownDays: 0,
+          firstObservedAt: '2026-08-01T09:00:00.000Z',
+          lastObservedAt: '2026-08-28T09:00:00.000Z',
+          observationCadenceHours: 24,
+        },
+      });
 
       const view = await service.cohort(SCOPE, WINDOW, CONNECTION);
 
-      expect(view.derived.costPerQualifiedLead).toBeNull();
-      expect(view.derived.conversationToQualifiedRate).toBeNull();
-      expect(view.derived.qualifiedToOpportunityRate).toBeNull();
+      expect(view.dataQuality.limitations).toContain(
+        COHORT_DESTINATION_OBSERVATION_LIMITATION,
+      );
+    });
+
+    it('keeps messaging_multi undistributed and says so', async () => {
+      const { service } = buildService(socialSet({}), leadflowSet({}));
+
+      const view = await service.cohort(SCOPE, WINDOW, CONNECTION);
+
+      expect(view.dataQuality.limitations).toContain(
+        COHORT_MESSAGING_MULTI_LIMITATION,
+      );
+      expect(inboxChannelForDestination('messaging_multi')).toBeNull();
     });
   });
 

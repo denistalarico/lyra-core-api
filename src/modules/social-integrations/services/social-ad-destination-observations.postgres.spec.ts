@@ -1,6 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import type { QueryRunner } from 'typeorm';
 import { AgencyDataSource } from '../../../database/agency-typeorm.datasource';
+import {
+  DESTINATION_INTERVALS_SQL,
+  summarizeDestinationCoverage,
+} from '../analytics/social-ad-destination-timeline';
 import { SocialAdDestinationObservationEntity } from '../entities/social-ad-destination-observation.entity';
 import { SocialAdDestinationObserverService } from './social-ad-destination-observer.service';
 import type { SocialAdEntityWriteScope } from './social-ad-entity-writer.service';
@@ -573,6 +577,180 @@ run('Destination observations against PostgreSQL', () => {
       );
 
       expect(after[0].count).toBe(before[0].count);
+    });
+  });
+
+  /**
+   * The read side, against the same database that stores the evidence.
+   *
+   * The interval query is a window function over real rows, and its two
+   * failure modes are invisible to a unit test: `LEAD()` partitioned wrongly
+   * would leak one ad set's next observation into another's interval, and the
+   * timezone conversion happens in Postgres, not in TypeScript.
+   */
+  describe('temporal resolution', () => {
+    const intervalsFor = (timezone: string | null) =>
+      select<{
+        adEntityId: string;
+        observedDestination: string;
+        observedFrom: string;
+        observedUntil: string | null;
+      }>(DESTINATION_INTERVALS_SQL, [
+        tenantId,
+        workspaceId,
+        connectionId,
+        timezone,
+      ]);
+
+    it('closes each interval at the next observation', async () => {
+      const adSet = await createAdSet(`adset-intervals-${randomUUID()}`);
+
+      await observe(adSet, 'whatsapp', 'WHATSAPP', '2026-08-01T10:00:00Z', null);
+      await observe(
+        adSet,
+        'instagram_direct',
+        'INSTAGRAM_DIRECT',
+        '2026-08-15T10:00:00Z',
+        null,
+      );
+
+      const intervals = (await intervalsFor(null)).filter(
+        (row) => row.adEntityId === adSet,
+      );
+
+      expect(intervals).toHaveLength(2);
+      expect(intervals[0]).toMatchObject({
+        observedDestination: 'whatsapp',
+        observedFrom: '2026-08-01',
+        observedUntil: '2026-08-15',
+      });
+      // The newest interval stays open: it is what we last saw, still.
+      expect(intervals[1]).toMatchObject({
+        observedDestination: 'instagram_direct',
+        observedFrom: '2026-08-15',
+        observedUntil: null,
+      });
+    });
+
+    /**
+     * The partition, asserted with two ad sets interleaved in time.
+     *
+     * A `LEAD()` without `PARTITION BY` would close the first ad set's interval
+     * at the second ad set's observation — plausible-looking output, entirely
+     * wrong, and impossible to see with a single-ad-set fixture.
+     */
+    it('never closes one ad set’s interval with another’s observation', async () => {
+      const first = await createAdSet(`adset-a-${randomUUID()}`);
+      const second = await createAdSet(`adset-b-${randomUUID()}`);
+
+      await observe(first, 'whatsapp', 'WHATSAPP', '2026-08-01T10:00:00Z', null);
+      await observe(
+        second,
+        'messenger',
+        'MESSENGER',
+        '2026-08-05T10:00:00Z',
+        null,
+      );
+
+      const intervals = await intervalsFor(null);
+      const firstIntervals = intervals.filter((row) => row.adEntityId === first);
+
+      expect(firstIntervals).toHaveLength(1);
+      expect(firstIntervals[0].observedUntil).toBeNull();
+    });
+
+    /**
+     * The day boundary is the ad account's, not UTC.
+     *
+     * An observation at 00:30 UTC on the 11th is 21:30 on the 10th in São
+     * Paulo. Cut in UTC it would open an interval a day late and misclassify a
+     * day of spend.
+     */
+    it('cuts interval days in the account timezone', async () => {
+      const adSet = await createAdSet(`adset-tz-${randomUUID()}`);
+
+      await observe(adSet, 'whatsapp', 'WHATSAPP', '2026-08-11T00:30:00Z', null);
+
+      const [utc] = (await intervalsFor(null)).filter(
+        (row) => row.adEntityId === adSet,
+      );
+      const [local] = (await intervalsFor('America/Sao_Paulo')).filter(
+        (row) => row.adEntityId === adSet,
+      );
+
+      expect(utc.observedFrom).toBe('2026-08-11');
+      expect(local.observedFrom).toBe('2026-08-10');
+    });
+
+    /**
+     * A return to a previous destination produces three intervals, not two.
+     * The middle one must close — this is the case a uniqueness rule keyed on
+     * `(entity, destination)` would have destroyed at write time.
+     */
+    it('resolves a return to a previous destination as its own interval', async () => {
+      const adSet = await createAdSet(`adset-return-${randomUUID()}`);
+
+      await observe(adSet, 'whatsapp', 'WHATSAPP', '2026-08-01T10:00:00Z', null);
+      await observe(
+        adSet,
+        'instagram_direct',
+        'INSTAGRAM_DIRECT',
+        '2026-08-10T10:00:00Z',
+        null,
+      );
+      await observe(adSet, 'whatsapp', 'WHATSAPP', '2026-08-20T10:00:00Z', null);
+
+      const intervals = (await intervalsFor(null)).filter(
+        (row) => row.adEntityId === adSet,
+      );
+
+      expect(intervals.map((row) => row.observedDestination)).toEqual([
+        'whatsapp',
+        'instagram_direct',
+        'whatsapp',
+      ]);
+      expect(intervals[1].observedUntil).toBe('2026-08-20');
+      expect(intervals[2].observedUntil).toBeNull();
+    });
+
+    it('returns nothing for a connection with no observations', async () => {
+      const intervals = await select<{ adEntityId: string }>(
+        DESTINATION_INTERVALS_SQL,
+        [tenantId, workspaceId, otherConnectionId, null],
+      );
+
+      expect(intervals).toHaveLength(0);
+    });
+
+    /**
+     * Coverage is computed from the intervals, so a window that opens before
+     * the first observation reports the gap rather than hiding it.
+     */
+    it('reports the days no observation can speak for', async () => {
+      const adSet = await createAdSet(`adset-coverage-${randomUUID()}`);
+
+      await observe(adSet, 'whatsapp', 'WHATSAPP', '2026-08-03T10:00:00Z', null);
+
+      const intervals = (await intervalsFor(null)).filter(
+        (row) => row.adEntityId === adSet,
+      );
+
+      const coverage = summarizeDestinationCoverage({
+        intervals: intervals.map((row) => ({
+          adEntityId: row.adEntityId,
+          observedDestination: row.observedDestination,
+          observedRaw: null,
+          observedFrom: row.observedFrom,
+          observedUntil: row.observedUntil,
+        })),
+        days: ['2026-08-01', '2026-08-02', '2026-08-03', '2026-08-04'],
+        firstObservedAt: '2026-08-03T10:00:00.000Z',
+        lastObservedAt: '2026-08-03T10:00:00.000Z',
+      });
+
+      expect(coverage.coveredDays).toBe(2);
+      expect(coverage.unknownDays).toBe(2);
+      expect(coverage.observationCadenceHours).toBe(24);
     });
   });
 });

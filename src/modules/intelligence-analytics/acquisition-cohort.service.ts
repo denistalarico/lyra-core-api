@@ -18,11 +18,21 @@ import {
   resolvePaidMediaChannel,
   type ChannelResolution,
 } from './acquisition-channel';
+import { SocialAdDestinationHistoryReadService } from '../social-integrations/services/social-ad-destination-history.read.service';
+import type { DestinationCoverage } from '../social-integrations/analytics/social-ad-destination-timeline';
+import { listWindowDays } from '../../common/intelligence';
 import {
   COHORT_CORRELATION_LIMITATION,
+  COHORT_DESTINATION_GRAIN_LIMITATION,
+  COHORT_DESTINATION_OBSERVATION_LIMITATION,
+  COHORT_EVENT_WINDOW_LIMITATION,
+  COHORT_MESSAGING_MULTI_LIMITATION,
+  COHORT_QUALIFICATION_LEGACY_LIMITATION,
   type AcquisitionCohortView,
   type CohortDerivedMetrics,
+  type CohortDestinationHistory,
   type CohortLeadFlowFacts,
+  type CohortQualificationHistory,
   type CohortSocialFacts,
 } from './acquisition-cohort.contract';
 
@@ -57,6 +67,7 @@ export class AcquisitionCohortService {
     private readonly social: SocialPaidMediaIntelligenceAdapter,
     private readonly leadflow: LeadFlowIntelligenceAdapter,
     private readonly socialReads: SocialAnalyticsReadService,
+    private readonly destinationHistory: SocialAdDestinationHistoryReadService,
   ) {}
 
   /**
@@ -92,7 +103,7 @@ export class AcquisitionCohortService {
      */
     const timezone = await this.resolveAccountTimezone(scope, connectionId);
 
-    const [socialSet, leadflowSet] = await Promise.all([
+    const [socialSet, leadflowSet, destination] = await Promise.all([
       this.social.fetch({
         scope,
         window,
@@ -107,6 +118,21 @@ export class AcquisitionCohortService {
         // own default, which is the pre-I3 behaviour rather than a guess.
         dayBucketTimezone: timezone ?? undefined,
       }),
+      /**
+       * Destination evidence, read in the *same* timezone as everything else.
+       *
+       * Cut with the account's zone rather than UTC for the same reason the two
+       * fact sets are: an observation made at 21:00 São Paulo time belongs to
+       * that day locally and to the next one in UTC, and an interval boundary
+       * off by a day would misclassify a day of spend.
+       */
+      this.destinationHistory.history({
+        tenantId: scope.tenantId,
+        workspaceId: scope.workspaceId,
+        connectionId,
+        timezone,
+        days: listWindowDays(window),
+      }),
     ]);
 
     const socialFacts = this.readSocialFacts(socialSet);
@@ -118,6 +144,8 @@ export class AcquisitionCohortService {
      */
     const channel = resolvePaidMediaChannel();
     const channelResolution: ChannelResolution = 'provider_bucket';
+
+    const qualification = this.qualificationQuality(leadflowSet, leadflowFacts);
 
     return {
       kind: 'cohort_correlation',
@@ -156,14 +184,29 @@ export class AcquisitionCohortService {
         cohortCorrelation: true,
         individualAttribution: false,
         channelResolution,
+        /**
+         * Partial when *either* side is, and now also when the destination
+         * evidence does not cover the window.
+         *
+         * Social metrics being complete says nothing about whether the ad sets
+         * that produced them had been observed yet, and a reader told the data
+         * is complete while a third of the period has no destination evidence
+         * would over-trust any classification built on it.
+         */
         partialData:
-          socialSet.freshness.isPartial || leadflowSet.freshness.isPartial,
+          socialSet.freshness.isPartial ||
+          leadflowSet.freshness.isPartial ||
+          destination.coverage.unknownDays > 0,
         limitations: this.limitations(
           socialSet,
           leadflowSet,
           channelResolution,
+          qualification,
+          destination.coverage,
         ),
         missingFacts: this.missingFacts(leadflowSet.descriptors),
+        qualificationHistory: qualification,
+        destinationHistory: this.destinationQuality(destination.coverage),
       },
     };
   }
@@ -216,16 +259,18 @@ export class AcquisitionCohortService {
       conversationsReceived: read('conversations_started'),
       inboundMessages: read('inbound_messages'),
       /**
-       * Null, and named in `missingFacts` rather than reported as zero.
+       * A real count now, from I3.1's transition history.
        *
-       * `inbox_conversations.qualification_status` holds a current state with
-       * no timestamp anywhere in the schema — verified against the live table,
-       * not assumed. Counting it against a past window would report today's
-       * state as last month's result, and the number would change every time
-       * the report was run without anything having happened. A zero would be a
-       * lie; a null with a stated reason is the honest answer.
+       * Read through the same descriptor-guarded path as every other metric,
+       * which is what makes it degrade rather than break: LeadFlow publishing
+       * the descriptor is what turns this on, so there is no flag here and no
+       * second definition of when qualification became countable.
+       *
+       * Still never `inbox_conversations.qualification_status`. That column
+       * holds a current state, and counting it against a past window would
+       * report today's answer as last month's result.
        */
-      qualifiedLeads: null,
+      qualifiedLeads: read('qualified_leads'),
       opportunitiesCreated: read('opportunities_created'),
       wonOpportunities: read('opportunities_won'),
       wonOpportunityValue: read('won_value'),
@@ -279,38 +324,109 @@ export class AcquisitionCohortService {
       return formatDerived(divideScaled(spend, scaledCount));
     };
 
-    /** Count ÷ count, as a bare quotient. */
-    const rate = (
-      numerator: string | null,
-      denominator: string | null,
-    ): string | null => {
-      const top = parseScaledAmount(numerator);
-      const bottom = parseScaledAmount(denominator);
-      if (top === null || bottom === null) return null;
-      return formatDerived(divideScaled(top, bottom));
-    };
-
     return {
       providerCpl: costPer(social.providerLeads),
       costPerConversation: costPer(leadflow.conversationsReceived),
-      // Null for as long as qualified leads are not countable — the cost is
-      // undefined, not zero, and it follows the metric rather than being
-      // special-cased.
+      /**
+       * Enabled, and the reason it is safe while the rates below are not.
+       *
+       * A cost is money spent in the window divided by events observed in the
+       * window. Both sides are event-window quantities and the quotient is a
+       * period statistic — "we spent this much per qualification we saw" —
+       * which is true regardless of which conversation each qualification came
+       * from. It is not a claim that this spend produced these qualifications;
+       * `kind: 'cohort_correlation'` already says it is not.
+       */
       costPerQualifiedLead: costPer(leadflow.qualifiedLeads),
       costPerOpportunity: costPer(leadflow.opportunitiesCreated),
       costPerWonOpportunity: costPer(leadflow.wonOpportunities),
-      conversationToQualifiedRate: rate(
-        leadflow.qualifiedLeads,
-        leadflow.conversationsReceived,
-      ),
-      qualifiedToOpportunityRate: rate(
-        leadflow.opportunitiesCreated,
-        leadflow.qualifiedLeads,
-      ),
-      opportunityToWonRate: rate(
-        leadflow.wonOpportunities,
-        leadflow.opportunitiesCreated,
-      ),
+      /**
+       * The two funnel rates stay null, deliberately, now that both operands
+       * exist.
+       *
+       * This is the one place where having the numbers makes the wrong answer
+       * available for the first time, so the reasoning is here rather than in
+       * the contract alone. Under the event-window semantics this view uses,
+       * `qualified ÷ conversations` divides a numerator and a denominator drawn
+       * from populations that only partly overlap: a conversation opened on
+       * 31/08 and qualified on 02/09 contributes to August's denominator and
+       * September's numerator. The quotient would look like a conversion rate,
+       * would sit beside real ones, and would be wrong by however much the
+       * funnel lags — worst on short windows, which is where people look.
+       *
+       * Answering it correctly needs an entry-cohort view: take the
+       * conversations that entered the window and follow them forward wherever
+       * they qualify. That is a different query, a different shape and a
+       * different response; approximating it here would be the mistake.
+       *
+       * `opportunityToWonRate` is now null for exactly the same reason, and
+       * this is a **behaviour change**: it was previously computed. It divides
+       * deals closed in the window by deals opened in the window, and
+       * `opportunities_won`'s own descriptor already warned that "dividing one
+       * by the other would compare two different cohorts". A sales cycle longer
+       * than the window makes it arbitrary, and it can exceed 1 whenever a
+       * quiet month closes deals opened in a busy one. Keeping it while
+       * suppressing the two above on identical grounds would have left the one
+       * rate a reader is most likely to quote as the one that is wrong.
+       */
+      conversationToQualifiedRate: null,
+      qualifiedToOpportunityRate: null,
+      opportunityToWonRate: null,
+    };
+  }
+
+  /**
+   * How far the qualification evidence reaches, read from provenance.
+   *
+   * The two values come back through `provenance.notes`, which is
+   * `Record<string, string>` — so they are parsed here rather than typed
+   * through the port. That constraint was accepted rather than worked around:
+   * widening `IntelligenceFactSet` for one domain's conditional metric would
+   * put LeadFlow's shape into a type every domain implements.
+   */
+  private qualificationQuality(
+    leadflow: IntelligenceFactSet,
+    facts: CohortLeadFlowFacts,
+  ): CohortQualificationHistory {
+    const notes = leadflow.provenance.notes ?? {};
+    const startsAt = notes.qualificationHistoryStartsAt;
+    const coverageStart = startsAt && startsAt !== 'never' ? startsAt : null;
+
+    return {
+      /**
+       * Null rather than `0` when nothing was ever recorded.
+       *
+       * The distinction the brief insists on: with no history at all, a zero
+       * would claim nobody qualified, when the truth is that qualification was
+       * not being observed. Once history exists, a zero is a real measurement
+       * and is reported as one.
+       */
+      observedQualified: coverageStart === null ? null : facts.qualifiedLeads,
+      coverageStart,
+      legacyUnknown: notes.qualificationWindowPrecedesHistory === 'true',
+    };
+  }
+
+  /**
+   * The destination coverage block, and the resolution claim that goes with it.
+   *
+   * `destinationResolution` is `unavailable` for as long as media metrics stop
+   * at campaign level: evidence about ad sets exists and is reported here, but
+   * nothing in this response was *resolved* by it. Claiming
+   * `observed_destination` while the numbers are still whole-account totals
+   * would be the overstatement the whole block exists to prevent.
+   */
+  private destinationQuality(
+    coverage: DestinationCoverage,
+  ): CohortDestinationHistory {
+    return {
+      destinationResolution: 'unavailable',
+      expectedDays: coverage.expectedDays,
+      coveredDays: coverage.coveredDays,
+      unknownDays: coverage.unknownDays,
+      firstObservedAt: coverage.firstObservedAt,
+      lastObservedAt: coverage.lastObservedAt,
+      observationCadenceHours: coverage.observationCadenceHours,
     };
   }
 
@@ -324,16 +440,45 @@ export class AcquisitionCohortService {
     social: IntelligenceFactSet,
     leadflow: IntelligenceFactSet,
     channelResolution: ChannelResolution,
+    qualification: CohortQualificationHistory,
+    destination: DestinationCoverage,
   ): string[] {
-    const limitations = [COHORT_CORRELATION_LIMITATION];
+    const limitations = [
+      COHORT_CORRELATION_LIMITATION,
+      // Second, because it is the one that governs how every ratio below may
+      // be read, and the reason two of them are absent.
+      COHORT_EVENT_WINDOW_LIMITATION,
+    ];
 
     if (channelResolution === 'provider_bucket') {
+      // The grain limitation replaces the old "the provider does not tell us"
+      // text, which stopped being true when I3.2 shipped. The gap is now on
+      // the metrics side, and saying so accurately is what lets a reader judge
+      // when it will close.
+      limitations.push(COHORT_DESTINATION_GRAIN_LIMITATION);
+      limitations.push(COHORT_MESSAGING_MULTI_LIMITATION);
+    }
+
+    if (destination.firstObservedAt) {
+      limitations.push(COHORT_DESTINATION_OBSERVATION_LIMITATION);
+    }
+
+    if (destination.unknownDays > 0) {
       limitations.push(
-        'O destino da campanha (WhatsApp, Instagram Direct ou Messenger) não é ' +
-          'informado pelo provedor no modelo de dados atual, portanto a ' +
-          'comparação é feita entre toda a mídia paga Meta e todas as ' +
-          'conversas recebidas nos canais Meta.',
+        `O histórico de destino cobre ${destination.coveredDays} de ` +
+          `${destination.expectedDays} dias do período solicitado; nos demais ` +
+          'o destino é desconhecido.',
       );
+    }
+
+    if (qualification.coverageStart === null) {
+      limitations.push(
+        'Nenhuma transição de qualificação foi registrada neste contexto, ' +
+          'portanto a contagem de leads qualificados não está disponível para ' +
+          'nenhum período.',
+      );
+    } else if (qualification.legacyUnknown) {
+      limitations.push(COHORT_QUALIFICATION_LEGACY_LIMITATION);
     }
 
     limitations.push(
@@ -395,10 +540,26 @@ export class AcquisitionCohortService {
       missing.push({
         metricKey: 'qualified_leads',
         reason:
-          'A qualificação da conversa é um estado atual sem data registrada, ' +
-          'portanto não pode ser contada dentro de um período passado.',
+          'O domínio não publica a contagem de qualificações neste momento.',
       });
     }
+
+    /**
+     * Named as missing rather than silently absent.
+     *
+     * These are facts this view *wants* and cannot obtain — not because a
+     * domain failed, but because media metrics are collected at account and
+     * campaign level while destination is a property of the ad set. A consumer
+     * that sees no destination breakdown deserves to find the reason in the
+     * same place it finds every other gap.
+     */
+    missing.push({
+      metricKey: 'spend_by_destination',
+      reason:
+        'As métricas de mídia são coletadas nos níveis de conta e campanha, ' +
+        'e o destino é definido por conjunto de anúncios. Separar o ' +
+        'investimento por destino exigiria rateio estimado.',
+    });
 
     return missing;
   }
