@@ -197,6 +197,45 @@ export class SocialAdEntityWriterService {
   }
 
   /**
+   * Internal ids for the ad sets this run just wrote, by provider id.
+   *
+   * A separate read rather than a `RETURNING` clause on the upsert: that path
+   * is a bulk write with `updateEntity(false)` precisely so TypeORM does not
+   * reconcile rows back onto objects, and turning it into a returning query
+   * would slow every sync to serve a caller that only sometimes needs the ids.
+   * This is one indexed lookup on the identity index instead.
+   *
+   * Scoped by connection because the same external id under a different
+   * connection is a different object — potentially a different Business
+   * entirely.
+   */
+  async adSetIdsByExternalId(input: {
+    scope: SocialAdEntityWriteScope;
+    externalIds: readonly string[];
+  }): Promise<ReadonlyMap<string, string>> {
+    if (!input.externalIds.length) return new Map();
+
+    const rows = await this.entitiesRepository
+      .createQueryBuilder('entity')
+      .select('entity.id', 'id')
+      .addSelect('entity.external_id', 'externalId')
+      .where('entity.tenant_id = :tenantId', { tenantId: input.scope.tenantId })
+      .andWhere('entity.workspace_id = :workspaceId', {
+        workspaceId: input.scope.workspaceId,
+      })
+      .andWhere('entity.connection_id = :connectionId', {
+        connectionId: input.scope.connectionId,
+      })
+      .andWhere("entity.entity_level = 'adset'")
+      .andWhere('entity.external_id IN (:...externalIds)', {
+        externalIds: [...input.externalIds],
+      })
+      .getRawMany<{ id: string; externalId: string }>();
+
+    return new Map(rows.map((row) => [row.externalId, row.id]));
+  }
+
+  /**
    * Archives the rows of one level that this sync did not see.
    *
    * **Only ever called after a complete snapshot of that level.** Absence is

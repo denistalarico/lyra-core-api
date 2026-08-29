@@ -5,6 +5,7 @@ import { PermissionsModule } from '../permissions';
 import { SocialAdCredentialResolver } from './credentials/social-ad-credential.resolver';
 import {
   SocialAdAccountConnectionEntity,
+  SocialAdDestinationObservationEntity,
   SocialAdEntity,
   SocialAdMetricDailyEntity,
   SocialAdSyncRunEntity,
@@ -19,6 +20,7 @@ import { MetaAdsInsightsReaderService } from './services/meta-ads-insights-reade
 import { MetaAdsOAuthService } from './services/meta-ads-oauth.service';
 import { MetaAdsSystemUserService } from './services/meta-ads-system-user.service';
 import { SocialAdConnectionService } from './services/social-ad-connection.service';
+import { SocialAdDestinationObserverService } from './services/social-ad-destination-observer.service';
 import { SocialAdEntityWriterService } from './services/social-ad-entity-writer.service';
 import { SocialAdHierarchySyncService } from './services/social-ad-hierarchy-sync.service';
 import { SocialAdInsightsSyncService } from './services/social-ad-insights-sync.service';
@@ -52,6 +54,7 @@ import { SocialIntegrationsController } from './social-integrations.controller';
     TypeOrmModule.forFeature(
       [
         SocialAdAccountConnectionEntity,
+        SocialAdDestinationObservationEntity,
         SocialAdEntity,
         SocialAdMetricDailyEntity,
         SocialAdSyncRunEntity,
@@ -68,6 +71,7 @@ import { SocialIntegrationsController } from './social-integrations.controller';
     SocialAdCredentialResolver,
     SocialInternalAccessService,
     MetaAdsEntityReaderService,
+    SocialAdDestinationObserverService,
     SocialAdEntityWriterService,
     SocialAdHierarchySyncService,
     MetaAdsInsightsReaderService,

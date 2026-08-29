@@ -62,6 +62,7 @@ run('SocialAdEntityWriterService against PostgreSQL', () => {
       destinationType: null,
       destinationRaw: null,
       destinationObservedAt: null,
+      destinationObserved: false,
       dailyBudgetMinor: '5000',
       lifetimeBudgetMinor: null,
       budgetRemainingMinor: '0',

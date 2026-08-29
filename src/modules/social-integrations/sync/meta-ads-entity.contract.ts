@@ -43,6 +43,18 @@ export type NormalizedAdEntity = {
   destinationRaw: string | null;
   destinationObservedAt: Date | null;
   /**
+   * Whether the provider actually answered about the destination.
+   *
+   * Separate from the value because "Meta said `UNDEFINED`" and "Meta sent no
+   * field" both resolve to `unknown`, and only the first is evidence. The
+   * historical log appends on evidence alone: treating provider silence as an
+   * observed move to `unknown` would let one degraded response close a known
+   * period and make an ad set look like it stopped pointing anywhere.
+   *
+   * `false` at every level that cannot carry a destination at all.
+   */
+  destinationObserved: boolean;
+  /**
    * Budgets in the currency's minor unit, as decimal strings.
    *
    * Strings rather than numbers on purpose: the column is `bigint`, TypeORM

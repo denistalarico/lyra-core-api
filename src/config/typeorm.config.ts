@@ -320,6 +320,7 @@ import {
 } from '../modules/admin/entities';
 import {
   SocialAdAccountConnectionEntity,
+  SocialAdDestinationObservationEntity,
   SocialAdEntity,
   SocialAdMetricDailyEntity,
   SocialAdSyncRunEntity,
@@ -327,6 +328,7 @@ import {
 
 export const agencyEntities = [
   SocialAdAccountConnectionEntity,
+  SocialAdDestinationObservationEntity,
   SocialAdEntity,
   SocialAdMetricDailyEntity,
   SocialAdSyncRunEntity,

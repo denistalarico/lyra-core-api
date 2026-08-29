@@ -113,6 +113,7 @@ function base(
     destinationType: null,
     destinationRaw: null,
     destinationObservedAt: null,
+    destinationObserved: false,
     dailyBudgetMinor: parseMinorUnits(payload.daily_budget),
     lifetimeBudgetMinor: parseMinorUnits(payload.lifetime_budget),
     budgetRemainingMinor: parseMinorUnits(payload.budget_remaining),
@@ -244,6 +245,15 @@ export function normalizeAdSet(
     campaignExternalId,
     destinationType: destination.canonical,
     destinationRaw: destination.providerValue,
+    /**
+     * The provider said something about the destination.
+     *
+     * A non-null `providerValue` is exactly that test, and it deliberately
+     * includes Meta's explicit `UNDEFINED` — an advertiser who configured no
+     * destination is a real, observed state — while excluding an absent field,
+     * which is provider silence and no evidence at all.
+     */
+    destinationObserved: destination.providerValue !== null,
     /**
      * Stamped whenever the ad set was read, including when the destination came
      * back unknown.

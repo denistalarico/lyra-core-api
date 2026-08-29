@@ -275,6 +275,8 @@ export class SocialAdSyncWorker {
     if (input.segment === 'hierarchy') {
       const summary = await this.hierarchySync.syncHierarchyWith(
         input.credential,
+        // Provenance for the destination observations this sweep may append.
+        input.run.id,
       );
 
       counters.entitiesWritten += summary.entitiesWritten;

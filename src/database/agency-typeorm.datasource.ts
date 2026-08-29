@@ -164,6 +164,7 @@ import { AddSocialAdAuthorizationMethod1790300000000 } from './migrations/179030
 import { CreateSocialAdReadModel1790400000000 } from './migrations/1790400000000-create-social-ad-read-model';
 import { CreateInboxAttributionObservations1790500000000 } from './migrations/1790500000000-create-inbox-attribution-observations';
 import { AddSocialAdDestination1790600000000 } from './migrations/1790600000000-add-social-ad-destination';
+import { CreateSocialAdDestinationObservations1790700000000 } from './migrations/1790700000000-create-social-ad-destination-observations';
 
 export const AgencyDataSource = new DataSource({
   type: 'postgres',
@@ -338,5 +339,6 @@ export const AgencyDataSource = new DataSource({
     CreateSocialAdReadModel1790400000000,
     CreateInboxAttributionObservations1790500000000,
     AddSocialAdDestination1790600000000,
+    CreateSocialAdDestinationObservations1790700000000,
   ],
 });

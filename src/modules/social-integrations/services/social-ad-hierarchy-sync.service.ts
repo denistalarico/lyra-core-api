@@ -10,6 +10,7 @@ import type {
   NormalizedAdEntityPage,
 } from '../sync/meta-ads-entity.contract';
 import { MetaAdsEntityReaderService } from './meta-ads-entity-reader.service';
+import { SocialAdDestinationObserverService } from './social-ad-destination-observer.service';
 import {
   SocialAdEntityWriterService,
   type SocialAdEntityWriteScope,
@@ -56,6 +57,13 @@ export type SocialAdHierarchySyncSummary = {
   /** Graph requests the whole sweep cost. */
   apiCalls: number;
   /**
+   * Destination observations appended by this sweep.
+   *
+   * Normally 0 on a steady account: evidence is recorded on the first sighting
+   * and on observed changes, not once per sync.
+   */
+  destinationsObserved: number;
+  /**
    * True when at least one level was truncated. The mirror is usable, but it is
    * not a complete snapshot and nothing was archived at that level.
    */
@@ -88,17 +96,19 @@ export class SocialAdHierarchySyncService {
     private readonly credentialResolver: SocialAdCredentialResolver,
     private readonly reader: MetaAdsEntityReaderService,
     private readonly writer: SocialAdEntityWriterService,
+    private readonly destinationObserver: SocialAdDestinationObserverService,
   ) {}
 
   async syncHierarchy(
     input: SyncAdHierarchyInput,
+    syncRunId: string | null = null,
   ): Promise<SocialAdHierarchySyncSummary> {
     // Scope is part of the lookup, not a check afterwards: a connection from
     // another tenant, workspace or managed client is simply not found here, and
     // the caller never learns whether the id exists.
     const credential = await this.credentialResolver.resolve(input);
 
-    return this.syncHierarchyWith(credential);
+    return this.syncHierarchyWith(credential, syncRunId);
   }
 
   /**
@@ -117,6 +127,14 @@ export class SocialAdHierarchySyncService {
    */
   async syncHierarchyWith(
     credential: ResolvedAdCredential,
+    /**
+     * The queued run this sweep belongs to, for provenance on the observations.
+     *
+     * Optional because a manual sweep has no run, and nullable all the way into
+     * the column: the observation must survive the run being deleted by
+     * retention, so the run can never be the only thing identifying it.
+     */
+    syncRunId: string | null = null,
   ): Promise<SocialAdHierarchySyncSummary> {
     const startedAt = new Date();
 
@@ -181,6 +199,16 @@ export class SocialAdHierarchySyncService {
       await this.persistLevel({ scope, seenAt, level: 'adset', page: adSets }),
     );
 
+    // After the ad sets are persisted, never before: an observation points at
+    // `social_ad_entities.id`, which does not exist for a new ad set until the
+    // upsert above has run.
+    const destinationsRecorded = await this.recordDestinations({
+      scope,
+      rows: adSets.rows,
+      observedAt: seenAt,
+      syncRunId,
+    });
+
     const ads = await this.reader.readAds(credential, {
       currency,
       campaignByAdSetId: MetaAdsEntityReaderService.campaignByAdSetId(
@@ -204,6 +232,7 @@ export class SocialAdHierarchySyncService {
       entitiesWritten: levels.reduce((total, row) => total + row.written, 0),
       entitiesArchived: levels.reduce((total, row) => total + row.archived, 0),
       apiCalls: levels.reduce((total, row) => total + row.apiCalls, 0),
+      destinationsObserved: destinationsRecorded,
       partial: levels.some((level) => level.truncated),
       startedAt: startedAt.toISOString(),
       finishedAt: finishedAt.toISOString(),
@@ -238,6 +267,70 @@ export class SocialAdHierarchySyncService {
    * rows and no error, so it *would* reach here — and archiving then would
    * declare every object past the ceiling deleted. Hence the explicit check.
    */
+  /**
+   * Appends destination evidence for the ad sets this sweep just saw.
+   *
+   * Only ad sets reach here, and only those the provider actually answered
+   * about: `destinationObserved` is false both for a level that cannot carry a
+   * destination and for an ad set whose payload omitted the field, and neither
+   * is evidence of anything.
+   *
+   * Failure is contained. This is supplementary evidence, and losing a day of
+   * it is a gap in a history that is already best-effort; letting it abort the
+   * sweep would mean the current mirror — which every screen reads — stops
+   * updating because an append-only log had a bad day.
+   */
+  private async recordDestinations(input: {
+    scope: SocialAdEntityWriteScope;
+    rows: readonly NormalizedAdEntity[];
+    observedAt: Date;
+    syncRunId: string | null;
+  }): Promise<number> {
+    const observable = input.rows.filter((row) => row.destinationObserved);
+
+    if (!observable.length) return 0;
+
+    try {
+      const idByExternalId = await this.writer.adSetIdsByExternalId({
+        scope: input.scope,
+        externalIds: observable.map((row) => row.externalId),
+      });
+
+      const observations = observable.flatMap((row) => {
+        const adEntityId = idByExternalId.get(row.externalId);
+
+        // An ad set that is not in the mirror cannot be pointed at. In practice
+        // the upsert just wrote it; skipping is the safe branch rather than
+        // inventing an id.
+        if (!adEntityId || !row.destinationType) return [];
+
+        return [
+          {
+            adEntityId,
+            destinationType: row.destinationType,
+            destinationRaw: row.destinationRaw,
+            hasEvidence: true,
+          },
+        ];
+      });
+
+      return await this.destinationObserver.record({
+        scope: input.scope,
+        observations,
+        observedAt: input.observedAt,
+        syncRunId: input.syncRunId,
+      });
+    } catch (error) {
+      this.logger.error(
+        `Meta Ads destination observation failed: ${
+          error instanceof Error ? error.name : 'unknown'
+        }`,
+      );
+
+      return 0;
+    }
+  }
+
   private async persistLevel(input: {
     scope: SocialAdEntityWriteScope;
     seenAt: Date;

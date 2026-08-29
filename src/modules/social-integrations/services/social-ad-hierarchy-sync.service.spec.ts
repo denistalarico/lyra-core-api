@@ -9,6 +9,7 @@ import type { SocialAdEntityLevel } from '../entities/social-ad-entity.entity';
 import type { NormalizedAdEntity } from '../sync/meta-ads-entity.contract';
 import { MetaGraphError } from './meta-graph-error';
 import type { MetaAdsEntityReaderService } from './meta-ads-entity-reader.service';
+import type { SocialAdDestinationObserverService } from './social-ad-destination-observer.service';
 import type { SocialAdEntityWriterService } from './social-ad-entity-writer.service';
 import { SocialAdHierarchySyncService } from './social-ad-hierarchy-sync.service';
 
@@ -34,6 +35,7 @@ function entity(
     destinationType: null,
     destinationRaw: null,
     destinationObservedAt: null,
+    destinationObserved: false,
     dailyBudgetMinor: null,
     lifetimeBudgetMinor: null,
     budgetRemainingMinor: null,
@@ -56,6 +58,7 @@ type Harness = {
   archived: SocialAdEntityLevel[];
   upserted: { level: SocialAdEntityLevel; count: number; seenAt: Date }[];
   resolve: jest.Mock;
+  observer: { record: jest.Mock };
 };
 
 function createHarness(
@@ -65,6 +68,7 @@ function createHarness(
     truncated?: 'campaigns' | 'adsets' | 'ads';
     accessToken?: string;
     authorizationMethod?: 'business_login' | 'internal_system_user';
+    adSetDestination?: Partial<NormalizedAdEntity>;
   } = {},
 ): Harness {
   const archived: SocialAdEntityLevel[] = [];
@@ -120,6 +124,7 @@ function createHarness(
         entity('adset', 'adset-1', {
           parentExternalId: 'campaign-1',
           campaignExternalId: 'campaign-1',
+          ...options.adSetDestination,
         }),
       ]),
     ),
@@ -154,6 +159,15 @@ function createHarness(
       archived.push(input.entityLevel);
       return Promise.resolve(1);
     }),
+    adSetIdsByExternalId: jest.fn((input: { externalIds: string[] }) =>
+      Promise.resolve(
+        new Map(input.externalIds.map((id) => [id, `entity-${id}`])),
+      ),
+    ),
+  };
+
+  const observer = {
+    record: jest.fn(() => Promise.resolve(0)),
   };
 
   return {
@@ -161,10 +175,12 @@ function createHarness(
       { resolve } as unknown as SocialAdCredentialResolver,
       reader as unknown as MetaAdsEntityReaderService,
       writer as unknown as SocialAdEntityWriterService,
+      observer as unknown as SocialAdDestinationObserverService,
     ),
     archived,
     upserted,
     resolve,
+    observer,
   };
 }
 
@@ -324,5 +340,103 @@ describe('SocialAdHierarchySyncService', () => {
     // able to tell them apart.
     expect(systemUser.levels).toEqual(businessLogin.levels);
     expect(systemUser.entitiesWritten).toBe(businessLogin.entitiesWritten);
+  });
+
+  describe('destination history', () => {
+    const observedAdSet = {
+      destinationType: 'whatsapp',
+      destinationRaw: 'WHATSAPP',
+      destinationObserved: true,
+    };
+
+    it('records evidence for the ad sets the provider answered about', async () => {
+      const harness = createHarness({ adSetDestination: observedAdSet });
+
+      await harness.service.syncHierarchy(scope, 'run-1');
+
+      expect(harness.observer.record).toHaveBeenCalledTimes(1);
+      const [call] = harness.observer.record.mock.calls as [
+        [
+          {
+            observations: { adEntityId: string; destinationType: string }[];
+            syncRunId: string | null;
+          },
+        ],
+      ];
+
+      expect(call[0].observations).toEqual([
+        {
+          adEntityId: 'entity-adset-1',
+          destinationType: 'whatsapp',
+          destinationRaw: 'WHATSAPP',
+          hasEvidence: true,
+        },
+      ]);
+      // Provenance travels with the sweep.
+      expect(call[0].syncRunId).toBe('run-1');
+    });
+
+    it('observes only ad sets, never campaigns or ads', async () => {
+      const harness = createHarness({ adSetDestination: observedAdSet });
+
+      await harness.service.syncHierarchy(scope);
+
+      const [call] = harness.observer.record.mock.calls as [
+        [{ observations: { adEntityId: string }[] }],
+      ];
+
+      // The account, campaign and ad levels all ran, and none of them
+      // contributed an observation: Meta states a destination at ad-set level
+      // only, and an ad's destination is its ad set's.
+      expect(call[0].observations).toHaveLength(1);
+      expect(call[0].observations[0].adEntityId).toBe('entity-adset-1');
+    });
+
+    it('records nothing when the provider did not answer', async () => {
+      // The default fixture leaves `destinationObserved` false, which is
+      // provider silence rather than a move to unknown.
+      const harness = createHarness();
+
+      await harness.service.syncHierarchy(scope);
+
+      expect(harness.observer.record).not.toHaveBeenCalled();
+    });
+
+    it('stamps the observation with the same instant as the sweep', async () => {
+      const harness = createHarness({ adSetDestination: observedAdSet });
+
+      await harness.service.syncHierarchy(scope);
+
+      const [call] = harness.observer.record.mock.calls as [
+        [{ observedAt: Date }],
+      ];
+
+      expect(call[0].observedAt.getTime()).toBe(
+        harness.upserted[0].seenAt.getTime(),
+      );
+    });
+
+    it('keeps writing the current mirror when the history write fails', async () => {
+      const harness = createHarness({ adSetDestination: observedAdSet });
+      harness.observer.record.mockRejectedValueOnce(new Error('history down'));
+      jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+
+      const summary = await harness.service.syncHierarchy(scope);
+
+      // Supplementary evidence must never take down the mirror every screen
+      // reads. The sweep completes and reports zero observations.
+      expect(summary.entitiesWritten).toBe(4);
+      expect(summary.destinationsObserved).toBe(0);
+      jest.restoreAllMocks();
+    });
+
+    it('reports how many observations it appended', async () => {
+      const harness = createHarness({ adSetDestination: observedAdSet });
+      harness.observer.record.mockResolvedValueOnce(1);
+
+      const summary = await harness.service.syncHierarchy(scope);
+
+      expect(summary.destinationsObserved).toBe(1);
+    });
   });
 });

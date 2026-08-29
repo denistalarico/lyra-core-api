@@ -215,6 +215,9 @@ describe('SocialAdSyncWorker — a run that works', () => {
 
     expect(harness.hierarchySync.syncHierarchyWith).toHaveBeenCalledWith(
       CREDENTIAL,
+      // The run id travels with the sweep so any destination observation it
+      // appends can name the run that made it.
+      'run-a',
     );
     expect(harness.insightsSync.ingestLevel).toHaveBeenCalledWith(
       expect.objectContaining({
