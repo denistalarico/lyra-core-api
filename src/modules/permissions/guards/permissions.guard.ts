@@ -112,21 +112,30 @@ export class PermissionsGuard implements CanActivate {
     });
 
     const managedContext = request.managedContext;
+    let clientProductAccessSatisfied = false;
 
-    // The client id/managedTenantId in `managedContext` come straight from a
-    // client-controlled header (x-lyra-client-id / x-client-id). The resolver
-    // only checks that the client belongs to the tenant and is active — it
-    // does not know whether *this user* is allowed into *this* client's
-    // product. Every client-mode LeadFlow/Social request must additionally
-    // pass the same entitlement + explicit access check used by
-    // canAccessClientProduct, or an authenticated agency member could switch
-    // into any client's context via headers alone.
+    // The client id in `managedContext` was requested through a browser header;
+    // the managed tenant was resolved from the agency's client directory. The
+    // resolver proves that the client belongs to this tenant/workspace and is
+    // active, but it does not know whether *this user* may operate this product.
+    // Every client-mode LeadFlow/Social request must additionally pass the same
+    // entitlement + explicit access check used by canAccessClientProduct.
     if (
       managedContext &&
       managedContext.operatingMode === 'client' &&
       managedContext.clientId &&
       CLIENT_PRODUCT_HEADER_KEYS.has(managedContext.productKey)
     ) {
+      // A product header is a request, not authority. It must name the same
+      // product as the guarded route; otherwise a LeadFlow entitlement could
+      // be used to enter a Social handler (or vice versa) while preserving the
+      // selected client's id in the resolved context.
+      if (productKey && managedContext.productKey !== productKey) {
+        throw new ForbiddenException(
+          `The requested context does not belong to the "${productKey}" product.`,
+        );
+      }
+
       const allowedManagedContext =
         await this.permissionService.canAccessClientProduct({
           ...context,
@@ -150,6 +159,8 @@ export class PermissionsGuard implements CanActivate {
           `You do not have access to the "${managedContext.productKey}" product for this client.`,
         );
       }
+
+      clientProductAccessSatisfied = true;
     }
 
     const scopeRequest = {
@@ -161,10 +172,14 @@ export class PermissionsGuard implements CanActivate {
     };
 
     if (productKey) {
-      const allowed = await this.permissionService.canAccessProduct(
-        context,
-        productKey,
-      );
+      // Agency and managed-client subscriptions are deliberately independent.
+      // In client mode the check above proved the selected managed tenant owns
+      // this product; requiring the agency tenant to own it as well would make
+      // a client-only Social/LeadFlow subscription unusable. Agency mode still
+      // uses the agency tenant entitlement exactly as before.
+      const allowed = clientProductAccessSatisfied
+        ? true
+        : await this.permissionService.canAccessProduct(context, productKey);
 
       if (!allowed) {
         throw new ForbiddenException(
