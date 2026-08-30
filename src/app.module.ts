@@ -38,6 +38,7 @@ import { NotificationsModule } from './modules/notifications';
 import { PlatformWhatsAppNotificationModule } from './modules/notifications/platform-whatsapp/platform-whatsapp-notification.module';
 import { PermissionsModule } from './modules/permissions';
 import { LeadFlowSettingsModule } from './modules/leadflow-settings';
+import { PlatformSettingsModule } from './modules/platform-settings/platform-settings.module';
 import { LeadFlowAgentsModule } from './modules/leadflow-agents/leadflow-agents.module';
 import { LeadFlowAutomationsModule } from './modules/leadflow-automations/leadflow-automations.module';
 import { LeadFlowEventsModule } from './modules/leadflow-events/leadflow-events.module';
@@ -96,6 +97,7 @@ import { SocialIntegrationsModule } from './modules/social-integrations';
     PlatformWhatsAppNotificationModule,
     PermissionsModule,
     LeadFlowSettingsModule,
+    PlatformSettingsModule,
     LeadFlowAgentsModule,
     LeadFlowAutomationsModule,
     LeadFlowEventsModule,
