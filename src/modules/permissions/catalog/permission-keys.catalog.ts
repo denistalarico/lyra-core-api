@@ -403,6 +403,8 @@ const RAW_PERMISSIONS: RawPermission[] = [
   ['social.settings.general.update.admin', ADMIN_UP],
   ['social.settings.integrations.manage.admin', ADMIN_UP],
   ['social.settings.permissions.manage.admin', ADMIN_UP],
+  ['social.settings.telemetry.view.admin', ADMIN_UP],
+  ['social.settings.telemetry.manage.owner_only', OWNER_ONLY, true],
   ['social.settings.danger_zone.manage.owner_only', OWNER_ONLY, true],
 ];
 
