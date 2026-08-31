@@ -57,13 +57,27 @@ describe('PlatformBusinessProfileService', () => {
 
   function setup() {
     const leadFlowService = {
-      getSettings: jest.fn(),
-      getAgencySettings: jest.fn(),
-      updateSettings: jest.fn(),
-      updateAgencySettings: jest.fn(),
-    } as unknown as jest.Mocked<LeadFlowClientSettingsService>;
+      getSettings: jest.fn<
+        ReturnType<LeadFlowClientSettingsService['getSettings']>,
+        Parameters<LeadFlowClientSettingsService['getSettings']>
+      >(),
+      getAgencySettings: jest.fn<
+        ReturnType<LeadFlowClientSettingsService['getAgencySettings']>,
+        Parameters<LeadFlowClientSettingsService['getAgencySettings']>
+      >(),
+      updateSettings: jest.fn<
+        ReturnType<LeadFlowClientSettingsService['updateSettings']>,
+        Parameters<LeadFlowClientSettingsService['updateSettings']>
+      >(),
+      updateAgencySettings: jest.fn<
+        ReturnType<LeadFlowClientSettingsService['updateAgencySettings']>,
+        Parameters<LeadFlowClientSettingsService['updateAgencySettings']>
+      >(),
+    };
 
-    const service = new PlatformBusinessProfileService(leadFlowService);
+    const service = new PlatformBusinessProfileService(
+      leadFlowService as unknown as LeadFlowClientSettingsService,
+    );
 
     return { service, leadFlowService };
   }
@@ -212,6 +226,47 @@ describe('PlatformBusinessProfileService', () => {
         },
       },
     );
+  });
+
+  it('a partial contact PATCH preserves contact siblings and LeadFlow-only subtrees', async () => {
+    const { service, leadFlowService } = setup();
+    leadFlowService.getAgencySettings.mockResolvedValue(
+      buildResponse({
+        companyContextDraft: {
+          contact: {
+            website: 'https://old.example.com',
+            phone: '123',
+            socialProfiles: [{ network: 'instagram', handle: '@acme' }],
+            address: { city: 'São Paulo', stateRegion: 'SP', country: 'BR' },
+          },
+          qualification: { conversionGoal: 'book_meeting' },
+          service: { businessHours: 'Mon-Fri', handoffRules: 'transfer' },
+        },
+      }),
+    );
+    leadFlowService.updateAgencySettings.mockResolvedValue(buildResponse());
+
+    await service.updateBusinessProfile(ctx, null, {
+      companyContextDraft: {
+        contact: {
+          website: 'https://new.example.com',
+          address: { city: 'Campinas' },
+        },
+      },
+    });
+
+    expect(leadFlowService.updateAgencySettings).toHaveBeenCalledWith(ctx, {
+      companyContextDraft: {
+        contact: {
+          website: 'https://new.example.com',
+          phone: '123',
+          socialProfiles: [{ network: 'instagram', handle: '@acme' }],
+          address: { city: 'Campinas', stateRegion: 'SP', country: 'BR' },
+        },
+        qualification: { conversionGoal: 'book_meeting' },
+        service: { businessHours: 'Mon-Fri', handoffRules: 'transfer' },
+      },
+    });
   });
 
   it('does not read the current row when the PATCH has no companyContextDraft', async () => {

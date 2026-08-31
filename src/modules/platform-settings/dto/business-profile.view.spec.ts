@@ -72,6 +72,14 @@ function buildFullLeadFlowResponse(): LeadFlowClientSettingsResponse {
         conversionGoal: 'book_meeting',
         preferredCta: 'Schedule a call',
       },
+      contact: {
+        website: 'https://example.com',
+        phone: '123',
+        socialProfiles: [
+          { network: 'instagram', url: 'https://instagram.com/acme' },
+        ],
+        address: { city: 'São Paulo', country: 'BR' },
+      },
       offers: ['Consulting'],
       policies: 'no refunds',
       faq: ['Q1?'],
@@ -85,6 +93,10 @@ function buildFullLeadFlowResponse(): LeadFlowClientSettingsResponse {
         handoffRules: 'transfer if angry',
       },
       qualification: { conversionGoal: 'book_meeting' },
+      contact: {
+        website: 'https://published.example.com',
+        address: { country: 'BR' },
+      },
     },
     companyContextPublishedVersion: 2,
     companyContextPublishedHash: 'abc123',
@@ -193,5 +205,22 @@ describe('mapBusinessProfileResponse boundary', () => {
     expect(view.companyContextDraft.policies).toBe('no refunds');
     expect(view.companyContextDraft.faq).toEqual(['Q1?']);
     expect(view.companyContextDraft.links).toEqual(['https://example.com']);
+  });
+
+  it('exposes contact in draft and published GET projections', () => {
+    const view = mapBusinessProfileResponse(buildFullLeadFlowResponse());
+
+    expect(view.companyContextDraft.contact).toEqual({
+      website: 'https://example.com',
+      phone: '123',
+      socialProfiles: [
+        { network: 'instagram', url: 'https://instagram.com/acme' },
+      ],
+      address: { city: 'São Paulo', country: 'BR' },
+    });
+    expect(view.companyContextPublished.contact).toEqual({
+      website: 'https://published.example.com',
+      address: { country: 'BR' },
+    });
   });
 });

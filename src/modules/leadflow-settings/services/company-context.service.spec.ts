@@ -1,7 +1,9 @@
 import { BadRequestException } from '@nestjs/common';
 import {
   CompanyContextService,
+  getCompanyContextFieldCatalog,
   getCompanyContextRootKeys,
+  getCompanyContextScalarFieldPaths,
   isForbiddenCompanyContextKey,
 } from './company-context.service';
 
@@ -13,6 +15,7 @@ describe('CompanyContextService', () => {
     expect(keys).toEqual(
       expect.arrayContaining([
         'identity',
+        'contact',
         'offers',
         'service',
         'qualification',
@@ -23,6 +26,27 @@ describe('CompanyContextService', () => {
       ]),
     );
     expect(keys).not.toContain('schemaVersion');
+  });
+
+  it('catalogs the scalar contact fields used by briefing gap detection', () => {
+    const paths = getCompanyContextScalarFieldPaths();
+    const catalog = getCompanyContextFieldCatalog();
+    const contactPaths = [
+      'contact.website',
+      'contact.phone',
+      'contact.whatsapp',
+      'contact.email',
+      'contact.address.city',
+      'contact.address.stateRegion',
+      'contact.address.country',
+    ];
+
+    expect(paths).toEqual(expect.arrayContaining(contactPaths));
+    for (const fieldPath of contactPaths) {
+      const entry = catalog.find((item) => item.fieldPath === fieldPath);
+      expect(entry?.description).toEqual(expect.any(String));
+      expect(entry?.description.length).toBeGreaterThan(0);
+    }
   });
 
   it('flags secret-like field names as forbidden', () => {
@@ -77,6 +101,130 @@ describe('CompanyContextService', () => {
     });
   });
 
+  it('keeps documents without contact valid and on schemaVersion 1', () => {
+    expect(
+      service.normalize({ identity: { publicName: 'Empresa existente' } }),
+    ).toEqual({
+      identity: { publicName: 'Empresa existente' },
+      schemaVersion: 1,
+    });
+  });
+
+  it('normalizes and round-trips a valid contact while remaining permissive below the root', () => {
+    const contact = {
+      website: ' https://example.com ',
+      phone: ' 11 3333-4444 ',
+      whatsapp: ' 11 99999-8888 ',
+      email: ' contato@example.com ',
+      socialProfiles: [
+        {
+          network: 'instagram',
+          handle: ' @empresa ',
+          url: ' https://instagram.com/empresa ',
+        },
+        {
+          network: 'other',
+          label: ' Behance ',
+          url: 'https://behance.net/empresa',
+        },
+      ],
+      address: {
+        hasPhysicalLocation: true,
+        line1: ' Avenida Central, 10 ',
+        city: ' São Paulo ',
+        stateRegion: ' SP ',
+        postalCode: ' 01000-000 ',
+        country: ' BR ',
+      },
+      futureSharedField: ' permitido ',
+    };
+
+    const normalized = service.normalize({ contact });
+    const persisted = service.normalizePersisted(normalized);
+
+    expect(persisted).toEqual({
+      schemaVersion: 1,
+      contact: {
+        website: 'https://example.com',
+        phone: '11 3333-4444',
+        whatsapp: '11 99999-8888',
+        email: 'contato@example.com',
+        socialProfiles: [
+          {
+            network: 'instagram',
+            handle: '@empresa',
+            url: 'https://instagram.com/empresa',
+          },
+          {
+            network: 'other',
+            label: 'Behance',
+            url: 'https://behance.net/empresa',
+          },
+        ],
+        address: {
+          hasPhysicalLocation: true,
+          line1: 'Avenida Central, 10',
+          city: 'São Paulo',
+          stateRegion: 'SP',
+          postalCode: '01000-000',
+          country: 'BR',
+        },
+        futureSharedField: 'permitido',
+      },
+    });
+  });
+
+  it.each(['http://example.com', 'https://example.com/path?source=social'])(
+    'accepts an http(s) contact.website URL: %s',
+    (website) => {
+      expect(() => service.normalize({ contact: { website } })).not.toThrow();
+    },
+  );
+
+  it('rejects contact.website without http(s)', () => {
+    expect(() =>
+      service.normalize({ contact: { website: 'example.com' } }),
+    ).toThrow(BadRequestException);
+  });
+
+  it('accepts http(s) socialProfiles URLs and rejects other protocols', () => {
+    expect(() =>
+      service.normalize({
+        contact: {
+          socialProfiles: [
+            { network: 'instagram', url: 'https://instagram.com/empresa' },
+            { network: 'facebook', url: 'http://facebook.com/empresa' },
+          ],
+        },
+      }),
+    ).not.toThrow();
+
+    expect(() =>
+      service.normalize({
+        contact: {
+          socialProfiles: [{ network: 'other', url: 'javascript:alert(1)' }],
+        },
+      }),
+    ).toThrow(BadRequestException);
+  });
+
+  it('rejects secret-like keys anywhere inside contact', () => {
+    expect(() =>
+      service.normalize({
+        contact: { socialProfiles: [{ network: 'other', accessToken: 'x' }] },
+      }),
+    ).toThrow(BadRequestException);
+  });
+
+  it.each([
+    { contact: 'not-an-object' },
+    { contact: { socialProfiles: 'not-a-list' } },
+    { contact: { address: 'not-an-object' } },
+    { contact: { address: [] } },
+  ])('rejects an invalid contact shape %#', (value) => {
+    expect(() => service.normalize(value)).toThrow(BadRequestException);
+  });
+
   it.each([
     { links: [{ url: 'javascript:alert(1)' }] },
     { links: ['javascript:alert(1)'] },
@@ -104,6 +252,21 @@ describe('CompanyContextService', () => {
     });
     expect(service.hash(left)).toBe(service.hash(right));
     expect(service.preview(left).estimatedTokens).toBeGreaterThan(0);
+  });
+
+  it('includes contact in the stable hash deterministically', () => {
+    const before = service.normalize({
+      contact: { website: 'https://old.example.com', phone: '123' },
+    });
+    const after = service.normalize({
+      contact: { website: 'https://new.example.com', phone: '123' },
+    });
+    const reordered = service.normalize({
+      contact: { phone: '123', website: 'https://new.example.com' },
+    });
+
+    expect(service.hash(after)).not.toBe(service.hash(before));
+    expect(service.hash(after)).toBe(service.hash(reordered));
   });
 });
 

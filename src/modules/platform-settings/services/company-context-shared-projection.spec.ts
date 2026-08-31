@@ -58,6 +58,27 @@ describe('pickSharedCompanyContext', () => {
     });
   });
 
+  it('exposes contact unchanged without reopening LeadFlow-only roots', () => {
+    const contact = {
+      website: 'https://example.com',
+      phone: '123',
+      socialProfiles: [
+        { network: 'instagram', url: 'https://instagram.com/acme' },
+      ],
+      address: { city: 'São Paulo', country: 'BR' },
+    };
+
+    const projected = pickSharedCompanyContext({
+      contact,
+      qualification: { conversionGoal: 'book_meeting' },
+      service: { handoffRules: 'transfer' },
+    });
+
+    expect(projected.contact).toEqual(contact);
+    expect(projected.qualification).toBeUndefined();
+    expect(projected.service).toEqual({});
+  });
+
   it('drops legacyTone — no shared classification for it', () => {
     const projected = pickSharedCompanyContext({ legacyTone: 'friendly' });
 
@@ -186,5 +207,78 @@ describe('mergeSharedCompanyContext', () => {
 
     expect(merged.offers).toEqual(['A', 'B']);
     expect(merged.policies).toBe('no refunds');
+  });
+
+  it('partially updates contact without losing its omitted fields or LeadFlow-only data', () => {
+    const existing = {
+      identity: { publicName: 'Acme' },
+      contact: {
+        website: 'https://old.example.com',
+        phone: '123',
+        socialProfiles: [
+          { network: 'instagram', url: 'https://instagram.com/acme' },
+        ],
+        address: {
+          line1: 'Rua Antiga, 1',
+          city: 'São Paulo',
+          stateRegion: 'SP',
+          country: 'BR',
+        },
+      },
+      qualification: { conversionGoal: 'book_meeting' },
+      service: {
+        businessHours: 'Mon-Fri',
+        handoffRules: 'transfer',
+        serviceLevel: '24h',
+        emergencyRules: 'call',
+        unsupportedRequests: 'refunds',
+      },
+    };
+
+    const merged = mergeSharedCompanyContext(existing, {
+      contact: {
+        website: 'https://new.example.com',
+        address: { city: 'Campinas' },
+      },
+    });
+
+    expect(merged.contact).toEqual({
+      website: 'https://new.example.com',
+      phone: '123',
+      socialProfiles: [
+        { network: 'instagram', url: 'https://instagram.com/acme' },
+      ],
+      address: {
+        line1: 'Rua Antiga, 1',
+        city: 'Campinas',
+        stateRegion: 'SP',
+        country: 'BR',
+      },
+    });
+    expect(merged.qualification).toEqual({ conversionGoal: 'book_meeting' });
+    expect(merged.service).toEqual(existing.service);
+  });
+
+  it('replaces socialProfiles as a list when it is explicitly patched', () => {
+    const merged = mergeSharedCompanyContext(
+      {
+        contact: {
+          phone: '123',
+          socialProfiles: [{ network: 'instagram', handle: '@old' }],
+        },
+      },
+      {
+        contact: {
+          socialProfiles: [
+            { network: 'linkedin', url: 'https://linkedin.com' },
+          ],
+        },
+      },
+    );
+
+    expect(merged.contact).toEqual({
+      phone: '123',
+      socialProfiles: [{ network: 'linkedin', url: 'https://linkedin.com' }],
+    });
   });
 });

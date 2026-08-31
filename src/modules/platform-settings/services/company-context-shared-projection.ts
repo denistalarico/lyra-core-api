@@ -7,11 +7,8 @@
 // or write. See docs/architecture/social/social-settings-architecture.md §1
 // and §3.A — `qualification.*` and `service.{handoffRules,serviceLevel,
 // emergencyRules,unsupportedRequests}` are LeadFlow-only; everything else
-// under `identity` (except `legalName`), plus `offers`, `service.
+// under `identity` (except `legalName`), plus `contact`, `offers`, `service.
 // businessHours`, `policies`, `faq` and `links`, is shared.
-//
-// `contact.*` (S1.4.2) is not part of this projection yet — `CompanyContextService`
-// does not accept that root key until that phase ships.
 
 import type { LeadFlowJsonObject } from '../../leadflow-settings/types/leadflow-settings.types';
 
@@ -58,6 +55,24 @@ function pickFields(
   return picked;
 }
 
+function mergeSharedObject(
+  existing: LeadFlowJsonObject,
+  incoming: LeadFlowJsonObject,
+): LeadFlowJsonObject {
+  const merged: LeadFlowJsonObject = { ...existing };
+
+  for (const [field, value] of Object.entries(incoming)) {
+    const existingValue = existing[field];
+    if (isPlainObject(value) && isPlainObject(existingValue)) {
+      merged[field] = mergeSharedObject(existingValue, value);
+    } else {
+      merged[field] = value;
+    }
+  }
+
+  return merged;
+}
+
 /**
  * Projects a full company context document down to the fields a non-LeadFlow
  * caller may see. Used for both `companyContextDraft` and
@@ -75,6 +90,8 @@ export function pickSharedCompanyContext(
   if (isPlainObject(source.service)) {
     projected.service = pickFields(source.service, SHARED_SERVICE_FIELDS);
   }
+
+  if (source.contact !== undefined) projected.contact = source.contact;
 
   for (const root of SHARED_LIST_OR_SCALAR_ROOTS) {
     if (source[root] !== undefined) projected[root] = source[root];
@@ -131,6 +148,20 @@ export function mergeSharedCompanyContext(
         ...existingService,
         ...pickFields(incomingSharedFields.service, SHARED_SERVICE_FIELDS),
       };
+    }
+  }
+
+  if (incomingSharedFields.contact !== undefined) {
+    if (!isPlainObject(incomingSharedFields.contact)) {
+      merged.contact = incomingSharedFields.contact;
+    } else {
+      const existingContact = isPlainObject(existing.contact)
+        ? existing.contact
+        : {};
+      merged.contact = mergeSharedObject(
+        existingContact,
+        incomingSharedFields.contact,
+      );
     }
   }
 

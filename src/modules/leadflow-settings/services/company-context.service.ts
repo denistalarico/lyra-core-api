@@ -5,6 +5,7 @@ import type { LeadFlowJsonObject } from '../types/leadflow-settings.types';
 const ROOT_KEYS = new Set([
   'schemaVersion',
   'identity',
+  'contact',
   'offers',
   'service',
   'qualification',
@@ -40,6 +41,13 @@ const SCALAR_FIELD_PATHS = [
   'identity.languages',
   'identity.timezone',
   'identity.regionsServed',
+  'contact.website',
+  'contact.phone',
+  'contact.whatsapp',
+  'contact.email',
+  'contact.address.city',
+  'contact.address.stateRegion',
+  'contact.address.country',
   'service.businessHours',
   'service.handoffRules',
   'service.serviceLevel',
@@ -74,6 +82,13 @@ const FIELD_DESCRIPTIONS: Record<string, string> = {
   'identity.languages': 'idiomas de atendimento',
   'identity.timezone': 'fuso horário de operação',
   'identity.regionsServed': 'regiões ou cidades atendidas',
+  'contact.website': 'site oficial do negócio',
+  'contact.phone': 'telefone principal de contato',
+  'contact.whatsapp': 'número de WhatsApp do negócio',
+  'contact.email': 'e-mail principal de contato',
+  'contact.address.city': 'cidade do endereço físico',
+  'contact.address.stateRegion': 'estado ou região do endereço físico',
+  'contact.address.country': 'país do endereço físico',
   'service.businessHours': 'horários de atendimento',
   'service.handoffRules': 'quando transferir a conversa para um humano',
   'service.serviceLevel': 'prazo/SLA de resposta prometido',
@@ -86,7 +101,8 @@ const FIELD_DESCRIPTIONS: Record<string, string> = {
   'qualification.disqualificationCriteria': 'o que desqualifica um contato',
   'qualification.priorityServices': 'serviços ou produtos prioritários',
   'qualification.urgencySignals': 'sinais de urgência do contato',
-  policies: 'políticas de pagamento, entrega, cancelamento, garantia e privacidade',
+  policies:
+    'políticas de pagamento, entrega, cancelamento, garantia e privacidade',
 };
 
 /**
@@ -127,7 +143,7 @@ export class CompanyContextService {
         'Unsupported company context schema version.',
       );
     }
-    for (const key of ['identity', 'service', 'qualification']) {
+    for (const key of ['identity', 'contact', 'service', 'qualification']) {
       const section = value[key];
       if (
         section !== undefined &&
@@ -135,6 +151,25 @@ export class CompanyContextService {
       ) {
         throw new BadRequestException(
           `Company context section ${key} must be an object.`,
+        );
+      }
+    }
+    const contact = value.contact;
+    if (this.isPlainObject(contact)) {
+      if (
+        contact.socialProfiles !== undefined &&
+        !Array.isArray(contact.socialProfiles)
+      ) {
+        throw new BadRequestException(
+          'Company context section contact.socialProfiles must be a list.',
+        );
+      }
+      if (
+        contact.address !== undefined &&
+        !this.isPlainObject(contact.address)
+      ) {
+        throw new BadRequestException(
+          'Company context section contact.address must be an object.',
         );
       }
     }
@@ -169,8 +204,9 @@ export class CompanyContextService {
     for (const [section, sectionDefaults] of Object.entries(defaults)) {
       if (!this.isPlainObject(sectionDefaults)) continue;
 
-      const current = this.isPlainObject(merged[section])
-        ? { ...(merged[section] as LeadFlowJsonObject) }
+      const currentValue = merged[section];
+      const current = this.isPlainObject(currentValue)
+        ? { ...currentValue }
         : {};
 
       for (const [field, fallback] of Object.entries(sectionDefaults)) {

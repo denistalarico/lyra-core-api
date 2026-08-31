@@ -295,6 +295,18 @@ run(
           conversionGoal: 'book_meeting',
           preferredCta: 'Schedule a call',
         },
+        contact: {
+          website: 'https://old.example.com',
+          phone: '123',
+          socialProfiles: [
+            { network: 'instagram', url: 'https://instagram.com/acme' },
+          ],
+          address: {
+            city: 'São Paulo',
+            stateRegion: 'SP',
+            country: 'BR',
+          },
+        },
         offers: ['Consulting'],
         policies: 'no refunds',
       });
@@ -353,6 +365,27 @@ run(
         expect(service.emergencyRules).toBeUndefined();
         expect(service.unsupportedRequests).toBeUndefined();
         expect(service.businessHours).toBe('Mon-Fri 9-18');
+      });
+
+      it('GET returns contact through the Platform projection', async () => {
+        const profile = await platformService.getBusinessProfile(
+          ctx(),
+          clientId,
+        );
+
+        expect(profile.companyContextDraft.contact).toEqual({
+          website: 'https://old.example.com',
+          phone: '123',
+          socialProfiles: [
+            { network: 'instagram', url: 'https://instagram.com/acme' },
+          ],
+          address: {
+            city: 'São Paulo',
+            stateRegion: 'SP',
+            country: 'BR',
+          },
+        });
+        expect(profile.companyContextDraft.qualification).toBeUndefined();
       });
 
       it('PATCH cannot modify qualification via the Platform path', async () => {
@@ -444,6 +477,45 @@ run(
         expect(service.unsupportedRequests).toBe('refunds after 90 days');
       });
 
+      it('a partial PATCH of contact preserves its siblings and all LeadFlow-only fields', async () => {
+        await platformService.updateBusinessProfile(ctx(), clientId, {
+          companyContextDraft: {
+            contact: {
+              website: 'https://new.example.com',
+              address: { city: 'Campinas' },
+            },
+          },
+        });
+
+        const persisted = await AgencyDataSource.getRepository(
+          LeadFlowClientSettingsEntity,
+        ).findOneOrFail({ where: { id: settingsId } });
+
+        expect(persisted.companyContextDraft.contact).toEqual({
+          website: 'https://new.example.com',
+          phone: '123',
+          socialProfiles: [
+            { network: 'instagram', url: 'https://instagram.com/acme' },
+          ],
+          address: {
+            city: 'Campinas',
+            stateRegion: 'SP',
+            country: 'BR',
+          },
+        });
+        expect(persisted.companyContextDraft.qualification).toEqual({
+          conversionGoal: 'book_meeting',
+          preferredCta: 'Schedule a call',
+        });
+        expect(persisted.companyContextDraft.service).toEqual({
+          businessHours: 'Mon-Sat 8-20',
+          handoffRules: 'transfer if angry',
+          serviceLevel: '24h SLA',
+          emergencyRules: 'call the on-call line',
+          unsupportedRequests: 'refunds after 90 days',
+        });
+      });
+
       it('the LeadFlow endpoint still sees every field intact after Platform-made changes', async () => {
         const leadflowView = await settingsService.getSettings(ctx(), clientId);
 
@@ -464,6 +536,18 @@ run(
           qualification: {
             conversionGoal: 'book_meeting',
             preferredCta: 'Schedule a call',
+          },
+          contact: {
+            website: 'https://new.example.com',
+            phone: '123',
+            socialProfiles: [
+              { network: 'instagram', url: 'https://instagram.com/acme' },
+            ],
+            address: {
+              city: 'Campinas',
+              stateRegion: 'SP',
+              country: 'BR',
+            },
           },
           offers: ['Consulting'],
           policies: 'no refunds',

@@ -31,6 +31,8 @@ describe('field-path.util', () => {
     it('accepts a path rooted at a known company-context section', () => {
       expect(isValidFieldPath('identity.publicName')).toBe(true);
       expect(isValidFieldPath('offers[0].title')).toBe(true);
+      expect(isValidFieldPath('contact.website')).toBe(true);
+      expect(isValidFieldPath('contact.socialProfiles[0].url')).toBe(true);
     });
 
     it('rejects a path outside the canonical root schema', () => {
