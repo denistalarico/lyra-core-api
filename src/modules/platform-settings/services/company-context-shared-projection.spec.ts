@@ -1,4 +1,5 @@
 import {
+  buildSharedSurfacePublishDocument,
   mergeSharedCompanyContext,
   pickSharedCompanyContext,
 } from './company-context-shared-projection';
@@ -280,5 +281,63 @@ describe('mergeSharedCompanyContext', () => {
       phone: '123',
       socialProfiles: [{ network: 'linkedin', url: 'https://linkedin.com' }],
     });
+  });
+});
+
+describe('buildSharedSurfacePublishDocument (S1.4.3d)', () => {
+  it('publishes the draft shared fields while carrying every hidden field over from the base', () => {
+    const document = buildSharedSurfacePublishDocument(
+      {
+        identity: { publicName: 'B' },
+        qualification: { conversionGoal: 'NEW' },
+        service: { businessHours: 'NEW', handoffRules: 'NEW' },
+      },
+      {
+        identity: { publicName: 'A' },
+        qualification: { conversionGoal: 'OLD' },
+        service: { businessHours: 'OLD', handoffRules: 'OLD' },
+      },
+    );
+
+    expect(document).toEqual({
+      identity: { publicName: 'B' },
+      qualification: { conversionGoal: 'OLD' },
+      service: { businessHours: 'NEW', handoffRules: 'OLD' },
+    });
+  });
+
+  it('never lets a hidden draft field reach the published document, even when the base has no such field at all', () => {
+    const document = buildSharedSurfacePublishDocument(
+      {
+        identity: { publicName: 'Acme', legalName: 'Acme Ltda' },
+        qualification: { conversionGoal: 'NEW' },
+      },
+      { identity: { publicName: 'Old' } },
+    );
+
+    expect(document.qualification).toBeUndefined();
+    expect(
+      (document.identity as Record<string, unknown>).legalName,
+    ).toBeUndefined();
+    expect((document.identity as Record<string, unknown>).publicName).toBe(
+      'Acme',
+    );
+  });
+
+  it('is a pure projection of the draft — it never mutates the inputs', () => {
+    const draft = {
+      identity: { publicName: 'B' },
+      qualification: { conversionGoal: 'NEW' },
+    };
+    const base = {
+      identity: { publicName: 'A' },
+      qualification: { conversionGoal: 'OLD' },
+    };
+
+    buildSharedSurfacePublishDocument(draft, base);
+
+    expect(draft.qualification.conversionGoal).toBe('NEW');
+    expect(base.identity.publicName).toBe('A');
+    expect(base.qualification.conversionGoal).toBe('OLD');
   });
 });

@@ -118,7 +118,10 @@ function buildFullLeadFlowResponse(): LeadFlowClientSettingsResponse {
 
 describe('mapBusinessProfileResponse boundary', () => {
   it('never exposes LeadFlow-only fields', () => {
-    const view = mapBusinessProfileResponse(buildFullLeadFlowResponse());
+    const view = mapBusinessProfileResponse(
+      buildFullLeadFlowResponse(),
+      'draft-hash-1',
+    );
     const viewKeys = Object.keys(view);
 
     for (const forbiddenField of LEADFLOW_ONLY_FIELDS) {
@@ -127,7 +130,10 @@ describe('mapBusinessProfileResponse boundary', () => {
   });
 
   it('exposes exactly the documented shared fields', () => {
-    const view = mapBusinessProfileResponse(buildFullLeadFlowResponse());
+    const view = mapBusinessProfileResponse(
+      buildFullLeadFlowResponse(),
+      'draft-hash-1',
+    );
 
     expect(Object.keys(view).sort()).toEqual(
       [
@@ -137,6 +143,7 @@ describe('mapBusinessProfileResponse boundary', () => {
         'companyContextDraft',
         'companyContextPublished',
         'companyContextSchemaVersion',
+        'companyContextDraftHash',
         'companyContextPublishedVersion',
         'companyContextPublishedHash',
         'companyContextPublishedAt',
@@ -144,9 +151,21 @@ describe('mapBusinessProfileResponse boundary', () => {
     );
   });
 
+  it('exposes the caller-supplied draft hash verbatim, never a recomputed or published hash', () => {
+    const view = mapBusinessProfileResponse(
+      buildFullLeadFlowResponse(),
+      'draft-hash-1',
+    );
+
+    expect(view.companyContextDraftHash).toBe('draft-hash-1');
+    expect(view.companyContextDraftHash).not.toBe(
+      view.companyContextPublishedHash,
+    );
+  });
+
   it('is not built by spreading the source object', () => {
     const source = buildFullLeadFlowResponse();
-    const view = mapBusinessProfileResponse(source);
+    const view = mapBusinessProfileResponse(source, 'draft-hash-1');
 
     expect(view).not.toBe(source as unknown);
     expect(
@@ -155,14 +174,20 @@ describe('mapBusinessProfileResponse boundary', () => {
   });
 
   it('never exposes qualification.* inside companyContextDraft or companyContextPublished', () => {
-    const view = mapBusinessProfileResponse(buildFullLeadFlowResponse());
+    const view = mapBusinessProfileResponse(
+      buildFullLeadFlowResponse(),
+      'draft-hash-1',
+    );
 
     expect(view.companyContextDraft.qualification).toBeUndefined();
     expect(view.companyContextPublished.qualification).toBeUndefined();
   });
 
   it('never exposes LeadFlow-only service subfields inside company context', () => {
-    const view = mapBusinessProfileResponse(buildFullLeadFlowResponse());
+    const view = mapBusinessProfileResponse(
+      buildFullLeadFlowResponse(),
+      'draft-hash-1',
+    );
     const draftService = view.companyContextDraft.service as Record<
       string,
       unknown
@@ -188,7 +213,10 @@ describe('mapBusinessProfileResponse boundary', () => {
   });
 
   it('never exposes identity.legalName (LeadFlow-only within a shared root)', () => {
-    const view = mapBusinessProfileResponse(buildFullLeadFlowResponse());
+    const view = mapBusinessProfileResponse(
+      buildFullLeadFlowResponse(),
+      'draft-hash-1',
+    );
     const draftIdentity = view.companyContextDraft.identity as Record<
       string,
       unknown
@@ -199,7 +227,10 @@ describe('mapBusinessProfileResponse boundary', () => {
   });
 
   it('still exposes the shared roots untouched', () => {
-    const view = mapBusinessProfileResponse(buildFullLeadFlowResponse());
+    const view = mapBusinessProfileResponse(
+      buildFullLeadFlowResponse(),
+      'draft-hash-1',
+    );
 
     expect(view.companyContextDraft.offers).toEqual(['Consulting']);
     expect(view.companyContextDraft.policies).toBe('no refunds');
@@ -208,7 +239,10 @@ describe('mapBusinessProfileResponse boundary', () => {
   });
 
   it('exposes contact in draft and published GET projections', () => {
-    const view = mapBusinessProfileResponse(buildFullLeadFlowResponse());
+    const view = mapBusinessProfileResponse(
+      buildFullLeadFlowResponse(),
+      'draft-hash-1',
+    );
 
     expect(view.companyContextDraft.contact).toEqual({
       website: 'https://example.com',

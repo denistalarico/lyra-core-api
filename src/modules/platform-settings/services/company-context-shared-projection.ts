@@ -173,3 +173,47 @@ export function mergeSharedCompanyContext(
 
   return merged;
 }
+
+/**
+ * The document a Platform-surface publish writes to
+ * `companyContextPublished` (S1.4.3d).
+ *
+ * `LeadFlowClientSettingsService.publishCompanyContext` publishes the *full*
+ * stored draft by default, LeadFlow-only subtrees included. That is correct
+ * for `/leadflow/*`, which shows the operator the whole document. It is not
+ * safe for `/platform/business-profile`, which only ever showed the operator
+ * the shared projection: a LeadFlow-only edit sitting unpublished on the
+ * draft would be shipped to the shared consumers without anyone on the
+ * Platform side ever having reviewed it.
+ *
+ * So the Platform path publishes only its own surface, by overlaying the
+ * shared projection of the draft onto a base that supplies every domain
+ * Platform does not control:
+ *
+ *   - `base` = the current full published document, when one exists. Hidden
+ *     subtrees stay exactly as they were last published; a pending hidden
+ *     draft edit is simply not promoted (and stays in the draft, for LeadFlow
+ *     to publish later).
+ *   - `base` = the current Business Mode's canonical context defaults, on a
+ *     first publish. There is no baseline to carry over and — per S1.4.3c —
+ *     no trustworthy way to reconstruct one, so the domains Platform does not
+ *     control take the defaults the mode ships today. This is an explicit
+ *     semantic, not a reconstruction of history.
+ *
+ * Both cases reuse `pickSharedCompanyContext`/`mergeSharedCompanyContext` —
+ * the same boundary the read and write paths already enforce — so there is no
+ * second, divergence-prone notion of which fields are shared.
+ *
+ * Callers are expected to hand in documents already normalized by
+ * `CompanyContextService.normalizePersisted`; the publish path normalizes the
+ * result again before hashing and persisting it.
+ */
+export function buildSharedSurfacePublishDocument(
+  normalizedFullDraft: LeadFlowJsonObject,
+  normalizedBase: LeadFlowJsonObject,
+): LeadFlowJsonObject {
+  return mergeSharedCompanyContext(
+    normalizedBase,
+    pickSharedCompanyContext(normalizedFullDraft),
+  );
+}

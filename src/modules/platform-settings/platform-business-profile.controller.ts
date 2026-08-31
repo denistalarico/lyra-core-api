@@ -28,7 +28,7 @@
 // `PlatformPermissionService.assertCan` the guard itself uses for
 // `@RequirePermission`. See platform-settings-permission.helper.ts.
 
-import { Body, Controller, Get, Patch, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Patch, Post, UseGuards } from '@nestjs/common';
 import { RequestContextData } from '../../common/context/request-context.decorator';
 import type { RequestContext } from '../../common/context/request-context.interface';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -43,6 +43,7 @@ import {
   mapBusinessModeSummaryResponse,
 } from './dto/business-mode-summary.view';
 import { UpdateBusinessProfileDto } from './dto/update-business-profile.dto';
+import { PublishCompanyContextDto } from '../leadflow-settings/dto/publish-company-context.dto';
 import { PlatformBusinessProfileService } from './services/platform-business-profile.service';
 import { LeadFlowBusinessModeTemplateService } from '../leadflow-settings/services/leadflow-business-mode-template.service';
 import {
@@ -93,6 +94,33 @@ export class PlatformBusinessProfileController {
       ctx,
       ctx.managedContext?.clientId ?? null,
       dto,
+    );
+  }
+
+  /**
+   * Publishes the shared company context draft — the same document
+   * `/leadflow/agency/settings/company-context/publish` and
+   * `/leadflow/clients/:id/settings/company-context/publish` publish,
+   * through the same `LeadFlowClientSettingsService.publishCompanyContext`
+   * (S1.4.3a). `expectedDraftHash` carries the same optimistic-concurrency
+   * meaning as on those two routes: omitted, publish always succeeds
+   * against whatever draft is currently stored; supplied, it must match the
+   * current draft's hash or the publish is rejected — protecting a stale
+   * tab, a concurrent edit, or a context switch from silently publishing a
+   * draft the caller never saw.
+   */
+  @Post('business-profile/company-context/publish')
+  @RequireAnyPermission(...UPDATE_PERMISSIONS)
+  async publishBusinessProfileCompanyContext(
+    @RequestContextData() ctx: RequestContext,
+    @Body() dto: PublishCompanyContextDto,
+  ): Promise<BusinessProfileResponse> {
+    await this.assertProductPermission(ctx, 'update');
+
+    return this.businessProfileService.publishCompanyContext(
+      ctx,
+      ctx.managedContext?.clientId ?? null,
+      dto?.expectedDraftHash,
     );
   }
 

@@ -55,6 +55,39 @@ import {
 import { LeadFlowBusinessModeTemplateService } from './leadflow-business-mode-template.service';
 import { CompanyContextService } from './company-context.service';
 import { InboxDomainOutboxEntity } from '../../inbox/entities/inbox-domain-outbox.entity';
+
+/**
+ * State handed to a publish-document resolver, read inside the publish
+ * transaction under the pessimistic row lock (S1.4.3d).
+ */
+export interface CompanyContextPublishState {
+  /** The full current draft, normalized. */
+  normalizedDraft: LeadFlowJsonObject;
+  /** The full currently-published document, normalized (`{}` if never published). */
+  normalizedPublished: LeadFlowJsonObject;
+  /** False when this is the very first publish for this settings row. */
+  hasPublishedBaseline: boolean;
+  /** The Business Mode currently saved on the settings row. */
+  businessModeKey: string;
+}
+
+/**
+ * Decides which document a publish actually writes to
+ * `companyContextPublished`.
+ *
+ * Omitting it keeps the historical LeadFlow semantics — publish the full
+ * draft — which is what both `/leadflow/*` controllers rely on and what this
+ * service does by default. `PlatformBusinessProfileService` supplies one to
+ * publish only the shared surface, so a LeadFlow-only edit sitting in the
+ * draft is never promoted by a caller that could not see it (S1.4.3d).
+ *
+ * The resolver runs inside the same transaction and lock as the write, so
+ * every invariant (`normalize`, hash, version, `publishedAt`, snapshot,
+ * outbox) applies identically to whichever document it returns.
+ */
+export type CompanyContextPublishDocumentResolver = (
+  state: CompanyContextPublishState,
+) => LeadFlowJsonObject | Promise<LeadFlowJsonObject>;
 import {
   LeadFlowBriefingContextSnapshotEntity,
   LeadFlowBriefingExtractionJobEntity,
@@ -484,6 +517,7 @@ export class LeadFlowClientSettingsService {
     ctx: RequestContext,
     agencyClientId?: string,
     expectedDraftHash?: string,
+    resolvePublishedDocument?: CompanyContextPublishDocumentResolver,
   ) {
     const settings = agencyClientId
       ? await this.findSettings(ctx, agencyClientId)
@@ -501,15 +535,37 @@ export class LeadFlowClientSettingsService {
           lock: { mode: 'pessimistic_write' },
         });
       if (!locked) throw new NotFoundException('LeadFlow settings not found.');
-      const published = this.companyContextService.normalizePersisted(
+      const normalizedDraft = this.companyContextService.normalizePersisted(
         locked.companyContextDraft ?? {},
       );
-      const hash = this.companyContextService.hash(published);
-      if (expectedDraftHash && expectedDraftHash !== hash) {
+      // Optimistic locking is always checked against the FULL draft's hash,
+      // regardless of which document ends up published. A caller that only
+      // publishes part of the draft (see `resolvePublishedDocument`) still
+      // must not proceed if *any* part of the draft moved since it read the
+      // hash it is presenting here.
+      const draftHash = this.companyContextService.hash(normalizedDraft);
+      if (expectedDraftHash && expectedDraftHash !== draftHash) {
         throw new ConflictException(
           'O rascunho mudou desde a pré-visualização. Atualize a pré-visualização antes de publicar.',
         );
       }
+      const normalizedPublished = this.companyContextService.normalizePersisted(
+        locked.companyContextPublished ?? {},
+      );
+      const published = resolvePublishedDocument
+        ? this.companyContextService.normalizePersisted(
+            await resolvePublishedDocument({
+              normalizedDraft,
+              normalizedPublished,
+              hasPublishedBaseline: locked.companyContextPublishedAt !== null,
+              businessModeKey: locked.businessModeKey,
+            }),
+          )
+        : normalizedDraft;
+      // The published document's own hash — for the default (LeadFlow) path
+      // this is by construction the same value as `draftHash`, preserving the
+      // pre-existing contract exactly.
+      const hash = this.companyContextService.hash(published);
       locked.companyContextPublished = published;
       locked.companyContextPublishedVersion =
         (locked.companyContextPublishedVersion || 0) + 1;
@@ -1268,10 +1324,48 @@ export class LeadFlowClientSettingsService {
       ? this.companyContextService.normalize(dto.companyContextDraft)
       : this.companyContextService.fromLegacy(dto.clientPromptConfig ?? {});
 
+    return this.applyBusinessModeContextDefaults(draft, template);
+  }
+
+  /**
+   * The one place a Business Mode template's shipped copy is layered onto a
+   * company context document. Extracted from `buildInitialCompanyContextDraft`
+   * (S1.4.3d) so the first Platform publish can seed the domains it does not
+   * control from the same canonical defaults a freshly-created draft gets,
+   * rather than reading `metadata.contextDefaults` a second time on its own.
+   */
+  private applyBusinessModeContextDefaults(
+    document: LeadFlowJsonObject,
+    template: LeadFlowBusinessModeTemplateEntity,
+  ): LeadFlowJsonObject {
     return this.companyContextService.withDefaults(
-      draft,
+      document,
       readContextDefaults(template.metadata),
     );
+  }
+
+  /**
+   * The canonical company context a given Business Mode ships today — the
+   * exact document a brand-new configuration would start from with no caller
+   * input at all.
+   *
+   * Used by the Platform publish path as the base for a *first* publish, where
+   * no published baseline exists to carry LeadFlow-only fields over from
+   * (S1.4.3d §3). This is deliberately the *current* mode's defaults, not an
+   * attempt to reconstruct history: S1.4.3c proved no trustworthy historical
+   * baseline exists, and `businessModeTemplateId` is reassigned on mode
+   * changes without reseeding the draft, so it is not a valid history anchor.
+   */
+  async getBusinessModeContextDefaults(
+    ctx: RequestContext,
+    businessModeKey: string,
+  ): Promise<LeadFlowJsonObject> {
+    const template = await this.resolveBusinessModeTemplate(
+      ctx,
+      businessModeKey,
+    );
+
+    return this.applyBusinessModeContextDefaults({}, template);
   }
 
   private assertValidSettingsPayload(

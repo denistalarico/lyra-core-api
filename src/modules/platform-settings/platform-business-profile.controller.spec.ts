@@ -20,6 +20,7 @@ describe('PlatformBusinessProfileController RBAC binding', () => {
     const businessProfileService = {
       getBusinessProfile: jest.fn().mockResolvedValue({}),
       updateBusinessProfile: jest.fn().mockResolvedValue({}),
+      publishCompanyContext: jest.fn().mockResolvedValue({}),
     } as unknown as jest.Mocked<PlatformBusinessProfileService>;
 
     const businessModeTemplateService = {
@@ -172,6 +173,100 @@ describe('PlatformBusinessProfileController RBAC binding', () => {
       expect.anything(),
       'leadflow.settings.general.view.admin',
     );
+  });
+
+  /**
+   * S1.4.3a: publish binds to the same product-scoped update permission as
+   * PATCH — not a separate "publish" permission, and not the view key.
+   */
+  describe('publishBusinessProfileCompanyContext', () => {
+    it('social context checks the social update key, not the leadflow one', async () => {
+      const { controller, permissionService } = setup();
+
+      await controller.publishBusinessProfileCompanyContext(
+        ctxFor('social'),
+        {},
+      );
+
+      expect(permissionService.assertCan).toHaveBeenCalledWith(
+        expect.anything(),
+        'social.settings.general.update.admin',
+      );
+      expect(permissionService.assertCan).not.toHaveBeenCalledWith(
+        expect.anything(),
+        'leadflow.settings.general.update.admin',
+      );
+    });
+
+    it('leadflow context checks the leadflow update key, not the social one', async () => {
+      const { controller, permissionService } = setup();
+
+      await controller.publishBusinessProfileCompanyContext(
+        ctxFor('leadflow'),
+        {},
+      );
+
+      expect(permissionService.assertCan).toHaveBeenCalledWith(
+        expect.anything(),
+        'leadflow.settings.general.update.admin',
+      );
+      expect(permissionService.assertCan).not.toHaveBeenCalledWith(
+        expect.anything(),
+        'social.settings.general.update.admin',
+      );
+    });
+
+    it('social context + only leadflow permission → 403', async () => {
+      const { controller, permissionService } = setup();
+      permissionService.assertCan.mockRejectedValue(
+        new ForbiddenException('missing social.settings.general.update.admin'),
+      );
+
+      await expect(
+        controller.publishBusinessProfileCompanyContext(ctxFor('social'), {}),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it("productKey: 'agency' is rejected before any permission is checked", async () => {
+      const { controller, permissionService } = setup();
+
+      await expect(
+        controller.publishBusinessProfileCompanyContext(
+          ctxFor('agency', 'agency'),
+          {},
+        ),
+      ).rejects.toThrow(ForbiddenException);
+
+      expect(permissionService.assertCan).not.toHaveBeenCalled();
+    });
+
+    it('forwards expectedDraftHash and the resolved client id to the service, untouched', async () => {
+      const { controller, businessProfileService } = setup();
+      const ctx = ctxFor('social', 'client');
+
+      await controller.publishBusinessProfileCompanyContext(ctx, {
+        expectedDraftHash: 'hash-1',
+      });
+
+      expect(businessProfileService.publishCompanyContext).toHaveBeenCalledWith(
+        ctx,
+        'client-a',
+        'hash-1',
+      );
+    });
+
+    it('resolves the agency row (clientId null) when operatingMode is agency', async () => {
+      const { controller, businessProfileService } = setup();
+      const ctx = ctxFor('social', 'agency');
+
+      await controller.publishBusinessProfileCompanyContext(ctx, {});
+
+      expect(businessProfileService.publishCompanyContext).toHaveBeenCalledWith(
+        ctx,
+        null,
+        undefined,
+      );
+    });
   });
 
   /**
