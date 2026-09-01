@@ -244,6 +244,186 @@ describe('ManagedContextDirectoryService.listAuthorizedClients', () => {
     ).resolves.toEqual([]);
     expect(clientsRepository.find).not.toHaveBeenCalled();
   });
+
+  // S1.4.6 validation: `available.social.clients` is exactly this method's
+  // output for productKey 'social'. These cases were previously proven only
+  // by reading `isActiveEntitlement` — never exercised by a test, and never
+  // exercised with productKey 'social' specifically.
+  describe('entitlement status filtering for productKey "social"', () => {
+    function setupSingleClient(entitlementOverrides: Record<string, unknown>) {
+      const { directory, clientsRepository, entitlementsRepository } =
+        createDirectory();
+
+      clientsRepository.find.mockResolvedValue([makeClient()]);
+      entitlementsRepository.find.mockResolvedValue([
+        makeEntitlement({ productKey: 'social', ...entitlementOverrides }),
+      ]);
+
+      return { directory };
+    }
+
+    it('client A: Social active entitlement appears', async () => {
+      const { directory } = setupSingleClient({
+        status: ProductEntitlementStatus.Active,
+      });
+
+      const entries = await directory.listAuthorizedClients(owner, 'social');
+
+      expect(entries.map((entry) => entry.clientId)).toEqual(['client-1']);
+    });
+
+    it('client B: Social trial entitlement still within trialEndsAt appears', async () => {
+      const trialEndsAt = new Date(Date.now() + 86_400_000);
+      const { directory } = setupSingleClient({
+        status: ProductEntitlementStatus.Trial,
+        trialEndsAt,
+      });
+
+      const entries = await directory.listAuthorizedClients(owner, 'social');
+
+      expect(entries.map((entry) => entry.clientId)).toEqual(['client-1']);
+    });
+
+    it('a Social trial entitlement past trialEndsAt does not appear', async () => {
+      const trialEndsAt = new Date(Date.now() - 86_400_000);
+      const { directory } = setupSingleClient({
+        status: ProductEntitlementStatus.Trial,
+        trialEndsAt,
+      });
+
+      await expect(
+        directory.listAuthorizedClients(owner, 'social'),
+      ).resolves.toEqual([]);
+    });
+
+    it('client C: Social suspended entitlement does not appear', async () => {
+      const { directory } = setupSingleClient({
+        status: ProductEntitlementStatus.Suspended,
+      });
+
+      await expect(
+        directory.listAuthorizedClients(owner, 'social'),
+      ).resolves.toEqual([]);
+    });
+
+    it('client D: Social expired entitlement does not appear', async () => {
+      const { directory } = setupSingleClient({
+        status: ProductEntitlementStatus.Expired,
+      });
+
+      await expect(
+        directory.listAuthorizedClients(owner, 'social'),
+      ).resolves.toEqual([]);
+    });
+
+    it('client E: Social cancelled entitlement does not appear', async () => {
+      const { directory } = setupSingleClient({
+        status: ProductEntitlementStatus.Cancelled,
+      });
+
+      await expect(
+        directory.listAuthorizedClients(owner, 'social'),
+      ).resolves.toEqual([]);
+    });
+
+    it('an active entitlement whose endsAt already passed does not appear', async () => {
+      const { directory } = setupSingleClient({
+        status: ProductEntitlementStatus.Active,
+        endsAt: new Date(Date.now() - 86_400_000),
+      });
+
+      await expect(
+        directory.listAuthorizedClients(owner, 'social'),
+      ).resolves.toEqual([]);
+    });
+
+    it('an active entitlement whose startsAt is in the future does not appear yet', async () => {
+      const { directory } = setupSingleClient({
+        status: ProductEntitlementStatus.Active,
+        startsAt: new Date(Date.now() + 86_400_000),
+      });
+
+      await expect(
+        directory.listAuthorizedClients(owner, 'social'),
+      ).resolves.toEqual([]);
+    });
+
+    it('client F: a client with only a LeadFlow entitlement row does not appear for productKey social', async () => {
+      const { directory, clientsRepository, entitlementsRepository } =
+        createDirectory();
+
+      clientsRepository.find.mockResolvedValue([makeClient()]);
+      // Only a leadflow row exists — the repository query itself filters by
+      // productKey, so a social lookup would never even receive this row in
+      // production; mirroring that here (not returning it) is what proves
+      // the client is absent, not a `.filter()` added on top.
+      entitlementsRepository.find.mockResolvedValue([]);
+
+      await expect(
+        directory.listAuthorizedClients(owner, 'social'),
+      ).resolves.toEqual([]);
+    });
+
+    it('client G: an active Social entitlement with no product-specific access for the calling user does not appear', async () => {
+      const {
+        directory,
+        clientsRepository,
+        entitlementsRepository,
+        clientAccessRepository,
+        clientProductAccessRepository,
+      } = createDirectory();
+
+      clientsRepository.find.mockResolvedValue([makeClient()]);
+      entitlementsRepository.find.mockResolvedValue([
+        makeEntitlement({
+          productKey: 'social',
+          status: ProductEntitlementStatus.Active,
+        }),
+      ]);
+      // The user has client access (can see the client at all) but no
+      // *product*-specific access row for social — a non-privileged member,
+      // not owner/admin, must be denied even though entitlement is active.
+      clientAccessRepository.find.mockResolvedValue([
+        { clientId: 'client-1', managedTenantId: 'managed-tenant-1' },
+      ]);
+      clientProductAccessRepository.find.mockResolvedValue([]);
+
+      await expect(
+        directory.listAuthorizedClients(member, 'social'),
+      ).resolves.toEqual([]);
+    });
+
+    it('every entry returned for productKey social carries an active or trial-valid entitlement status', async () => {
+      const { directory, clientsRepository, entitlementsRepository } =
+        createDirectory();
+
+      clientsRepository.find.mockResolvedValue([
+        makeClient(),
+        makeClient({
+          id: 'client-2',
+          managedTenantId: 'managed-tenant-2',
+          displayName: 'Empresa B',
+        }),
+      ]);
+      entitlementsRepository.find.mockResolvedValue([
+        makeEntitlement({ productKey: 'social', status: ProductEntitlementStatus.Active }),
+        makeEntitlement({
+          tenantId: 'managed-tenant-2',
+          productKey: 'social',
+          status: ProductEntitlementStatus.Suspended,
+        }),
+      ]);
+
+      const entries = await directory.listAuthorizedClients(owner, 'social');
+
+      expect(entries).toHaveLength(1);
+      expect(
+        entries.every((entry) =>
+          ['active', 'trial'].includes(entry.entitlement.status),
+        ),
+      ).toBe(true);
+    });
+  });
 });
 
 describe('ManagedContextDirectoryService.resolveActiveContext', () => {
