@@ -346,7 +346,7 @@ describe('MetaAdsOAuthService', () => {
       expect((row.metadata.selectableAccounts as unknown[]).length).toBe(2);
 
       const url = new URL(redirect);
-      expect(url.pathname).toBe('/social/settings');
+      expect(url.pathname).toBe('/social/channels/metaads');
       expect(url.searchParams.get('status')).toBe('select_account');
       expect(url.searchParams.get('connection')).toBe('connection-id');
     });

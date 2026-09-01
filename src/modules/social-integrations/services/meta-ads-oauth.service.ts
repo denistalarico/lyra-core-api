@@ -23,8 +23,17 @@ import { SocialAdBackfillPlannerService } from './social-ad-backfill-planner.ser
 
 const PROVIDER = 'meta_ads' as const;
 
-/** Where the browser is sent back to after the provider redirect. */
-const SOCIAL_SETTINGS_PATH = '/social/settings';
+/**
+ * Where the browser is sent back to after the provider redirect.
+ *
+ * This is the frontend landing path, not the OAuth redirect URI registered
+ * with Meta (that one is `requireSocialMetaAdsCallbackUrl()`, a separate,
+ * whitelisted backend URL untouched by this constant). It must match wherever
+ * `SocialMetaAdsPanel` — the only consumer of the `integration`/`status`/
+ * `reason` query params this redirect carries — is actually rendered. As of
+ * S1.4.5 that is its own channel page, not the settings shell.
+ */
+const SOCIAL_META_ADS_CHANNEL_PATH = '/social/channels/metaads';
 
 export type StartMetaAdsConnectionInput = {
   tenantId: string;
@@ -510,7 +519,10 @@ export class MetaAdsOAuthService {
   }
 
   private buildFrontendRedirect(outcome: CallbackOutcome) {
-    const redirect = new URL(SOCIAL_SETTINGS_PATH, requireSocialFrontendUrl());
+    const redirect = new URL(
+      SOCIAL_META_ADS_CHANNEL_PATH,
+      requireSocialFrontendUrl(),
+    );
     redirect.searchParams.set('integration', 'meta-ads');
 
     if (outcome.ok) {
