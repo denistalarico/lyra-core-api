@@ -46,6 +46,7 @@ function createService() {
     rolePermissionsRepository as never,
     userPermissionsRepository as never,
     clientAccessRepository as never,
+    clientProductAccessRepository as never,
     auditRepository as never,
     platformContextService as never,
     scopeEvaluator as never,
@@ -507,6 +508,68 @@ describe('PlatformPermissionService', () => {
       );
 
       expect(result).toEqual([expect.objectContaining({ clientId: 'client-1' })]);
+    });
+  });
+
+  describe('listClientProductAccess', () => {
+    it('returns userId/roleKey pairs scoped to the given tenant, client and product', async () => {
+      const { service, clientProductAccessRepository } = createService();
+      clientProductAccessRepository.find.mockResolvedValue([
+        {
+          userId: 'user-1',
+          roleKey: ClientProductRoleKey.Admin,
+          tenantId: 'tenant-1',
+          clientId: 'client-1',
+          productKey: 'social',
+        },
+        {
+          userId: 'user-2',
+          roleKey: ClientProductRoleKey.Viewer,
+          tenantId: 'tenant-1',
+          clientId: 'client-1',
+          productKey: 'social',
+        },
+      ]);
+
+      await expect(
+        service.listClientProductAccess('tenant-1', 'client-1', 'social'),
+      ).resolves.toEqual([
+        { userId: 'user-1', roleKey: ClientProductRoleKey.Admin },
+        { userId: 'user-2', roleKey: ClientProductRoleKey.Viewer },
+      ]);
+
+      expect(clientProductAccessRepository.find).toHaveBeenCalledWith({
+        where: { tenantId: 'tenant-1', clientId: 'client-1', productKey: 'social' },
+        order: { createdAt: 'ASC' },
+      });
+    });
+
+    it('does not leak a LeadFlow-only grant when asked for Social access on the same client (product isolation)', async () => {
+      const { service, clientProductAccessRepository } = createService();
+      // The repository mock always resolves whatever `find` was called with;
+      // this test proves the query itself is scoped by productKey, the same
+      // way `listAuthorizedClients`'s entitlement lookup is (D-15) — a
+      // LeadFlow-only row is never fetched when querying for 'social'.
+      clientProductAccessRepository.find.mockImplementation(({ where }) =>
+        Promise.resolve(
+          where.productKey === 'social'
+            ? [{ userId: 'user-1', roleKey: ClientProductRoleKey.Admin }]
+            : [],
+        ),
+      );
+
+      await expect(
+        service.listClientProductAccess('tenant-1', 'client-1', 'leadflow'),
+      ).resolves.toEqual([]);
+    });
+
+    it('returns an empty list when no user has been explicitly granted access', async () => {
+      const { service, clientProductAccessRepository } = createService();
+      clientProductAccessRepository.find.mockResolvedValue([]);
+
+      await expect(
+        service.listClientProductAccess('tenant-1', 'client-1', 'social'),
+      ).resolves.toEqual([]);
     });
   });
 });

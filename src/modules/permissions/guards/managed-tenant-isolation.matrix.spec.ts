@@ -188,6 +188,7 @@ function createFixture() {
     createFakeRepository([]) as never,
     createFakeRepository([]) as never,
     clientAccessRepository as never,
+    clientProductAccessRepository as never,
     auditRepository as never,
     platformContextService,
     { assertScope: jest.fn().mockResolvedValue(undefined) } as never,

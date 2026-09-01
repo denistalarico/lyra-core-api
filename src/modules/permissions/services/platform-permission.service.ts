@@ -13,10 +13,12 @@ import {
 import { isOwnerOnlyPermissionKey } from '../catalog/permission-groups.catalog';
 import {
   CLIENT_ACCESS_LEVEL_ORDER,
+  ClientProductRoleKey,
   PlatformRoleKey,
 } from '../enums/permission.enums';
 import { ManagedContextDirectoryService } from '../../../common/context/managed-context-directory.service';
 import { AgencyClientAccessEntity } from '../entities/agency-client-access.entity';
+import { AgencyClientProductAccessEntity } from '../entities/agency-client-product-access.entity';
 import { PlatformPermissionAuditEventEntity } from '../entities/platform-permission-audit-event.entity';
 import { PlatformRoleEntity } from '../entities/platform-role.entity';
 import { PlatformRolePermissionEntity } from '../entities/platform-role-permission.entity';
@@ -53,6 +55,8 @@ export class PlatformPermissionService {
     private readonly userPermissionsRepository: Repository<PlatformUserPermissionEntity>,
     @InjectRepository(AgencyClientAccessEntity, AGENCY_CONNECTION)
     private readonly clientAccessRepository: Repository<AgencyClientAccessEntity>,
+    @InjectRepository(AgencyClientProductAccessEntity, AGENCY_CONNECTION)
+    private readonly clientProductAccessRepository: Repository<AgencyClientProductAccessEntity>,
     @InjectRepository(PlatformPermissionAuditEventEntity, AGENCY_CONNECTION)
     private readonly auditRepository: Repository<PlatformPermissionAuditEventEntity>,
     private readonly platformContextService: PlatformContextService,
@@ -282,6 +286,35 @@ export class PlatformPermissionService {
     );
 
     return entries as AuthorizedManagedClientEntry[];
+  }
+
+  /**
+   * Lists the users explicitly granted access to a product (LeadFlow,
+   * Social, ...) for one managed client, from `agency_client_product_access`
+   * (blueprint sections 8.3 and 12.6). This is a read of the same rows
+   * `canAccessClientProduct` checks — it grants no access itself and does
+   * not resolve display data (name/avatar), which the caller cross-references
+   * against `/agency/settings/users` (Social Settings decision D-5).
+   *
+   * The caller's own authorization for this client + product must already
+   * be verified by the controller before calling this method; it performs
+   * no access check of its own.
+   */
+  async listClientProductAccess(
+    tenantId: string,
+    clientId: string,
+    productKey: string,
+  ): Promise<Array<{ userId: string; roleKey: ClientProductRoleKey }>> {
+    const rows = await this.clientProductAccessRepository.find({
+      where: {
+        tenantId,
+        clientId,
+        productKey: productKey as AgencyClientProductAccessEntity['productKey'],
+      },
+      order: { createdAt: 'ASC' },
+    });
+
+    return rows.map((row) => ({ userId: row.userId, roleKey: row.roleKey }));
   }
 
   isDangerousAction(permissionKey: string): boolean {
