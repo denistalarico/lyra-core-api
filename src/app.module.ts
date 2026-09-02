@@ -48,6 +48,7 @@ import { ContextModule } from './common/context/context.module';
 import { LeadFlowAnalyticsModule } from './modules/leadflow-analytics/leadflow-analytics.module';
 import { LeadFlowPrivacyModule } from './modules/leadflow-privacy';
 import { PlatformPrivacyModule } from './modules/platform-privacy/platform-privacy.module';
+import { BrandKitModule } from './modules/brand-kit/brand-kit.module';
 import { LeadFlowAgendaModule } from './modules/leadflow-agenda/leadflow-agenda.module';
 import { AdminModule } from './modules/admin';
 import { IntelligenceAnalyticsModule } from './modules/intelligence-analytics/intelligence-analytics.module';
@@ -106,6 +107,7 @@ import { SocialIntegrationsModule } from './modules/social-integrations';
     LeadFlowAnalyticsModule,
     LeadFlowPrivacyModule,
     PlatformPrivacyModule,
+    BrandKitModule,
     LeadFlowAgendaModule,
     SocialIntegrationsModule,
     IntelligenceAnalyticsModule,

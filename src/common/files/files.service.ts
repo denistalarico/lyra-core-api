@@ -7,6 +7,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import {
   CreateBucketCommand,
+  DeleteObjectCommand,
   GetObjectCommand,
   HeadBucketCommand,
   PutBucketPolicyCommand,
@@ -227,6 +228,39 @@ export class FilesService {
       }
       throw error;
     }
+  }
+
+  /**
+   * Removes an object from the private bucket (audit gap S-4).
+   *
+   * Without this, "deleting" a private asset only drops the metadata row and
+   * the binary survives in storage forever — a client logo that the customer
+   * believes they removed would still be readable by anyone who reached the
+   * bucket. Additive: no existing caller changes behaviour.
+   *
+   * Idempotent by S3 semantics — deleting a key that is already gone
+   * succeeds — so a retried delete after a partial failure converges instead
+   * of erroring. Only the private bucket is exposed here: the public bucket
+   * backs avatars and workspace logos served by `<img>` across two frontends,
+   * and giving this method a public branch would be an invitation to break
+   * them (D-11 item 9).
+   */
+  async deleteObject(input: {
+    bucket: 'private';
+    path: string;
+  }): Promise<void> {
+    if (input.bucket !== 'private') {
+      throw new BadRequestException('Only private assets can be deleted.');
+    }
+
+    const normalizedPath = this.normalizeAssetPath(input.path);
+    await this.ensurePrivateBucket();
+    await this.client.send(
+      new DeleteObjectCommand({
+        Bucket: this.privateBucket,
+        Key: normalizedPath,
+      }),
+    );
   }
 
   private assertValidImage(file?: Express.Multer.File) {

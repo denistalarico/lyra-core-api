@@ -325,8 +325,14 @@ import {
   SocialAdMetricDailyEntity,
   SocialAdSyncRunEntity,
 } from '../modules/social-integrations/entities';
+import {
+  BrandKitAssetEntity,
+  BrandKitEntity,
+} from '../modules/brand-kit/entities';
 
 export const agencyEntities = [
+  BrandKitEntity,
+  BrandKitAssetEntity,
   SocialAdAccountConnectionEntity,
   SocialAdDestinationObservationEntity,
   SocialAdEntity,
