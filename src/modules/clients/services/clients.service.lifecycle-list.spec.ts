@@ -2,6 +2,7 @@ import { Repository } from 'typeorm';
 import { AgencyActivity } from '../../activities/entities';
 import { AgencyProject, AgencyTask } from '../../projects/entities';
 import { AgencyClient, ClientLifecycleProcess } from '../entities';
+import { TenantProductEntitlementEntity } from '../../platform/entities/tenant-product-entitlement.entity';
 import {
   AgencyClientHealthStatus,
   AgencyClientLifecycleStage,
@@ -51,12 +52,16 @@ describe('ClientsService lifecycle list status', () => {
         },
       ]),
     };
+    const entitlementsRepository = {
+      find: jest.fn().mockResolvedValue([]),
+    };
     const service = new ClientsService(
       clientsRepository as unknown as Repository<AgencyClient>,
       lifecycleProcessesRepository as unknown as Repository<ClientLifecycleProcess>,
       {} as Repository<AgencyProject>,
       {} as Repository<AgencyTask>,
       {} as Repository<AgencyActivity>,
+      entitlementsRepository as unknown as Repository<TenantProductEntitlementEntity>,
       {} as ClientsProfitabilityService,
       {} as ClientNotificationPublisher,
       {} as ClientCostCenterService,
@@ -80,5 +85,6 @@ describe('ClientsService lifecycle list status', () => {
       },
     ]);
     expect(lifecycleProcessesRepository.find).toHaveBeenCalledTimes(1);
+    expect(entitlementsRepository.find).not.toHaveBeenCalled();
   });
 });

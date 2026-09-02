@@ -15,6 +15,7 @@ import {
   CreateClientDto,
   ListClientsQueryDto,
   UpdateClientDto,
+  UpdateClientProductDto,
 } from '../dto';
 import { ClientsProfitabilityService } from '../services/clients-profitability.service';
 import { ClientsService } from '../services/clients.service';
@@ -24,6 +25,8 @@ import {
   RequirePermission,
 } from '../../permissions';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
+import { AuthenticatedUser } from '../../auth/decorators/authenticated-user.decorator';
+import type { AuthTokenPayload } from '../../auth/types/auth-token-payload.type';
 
 type RequestContext = {
   tenantId: string;
@@ -41,6 +44,14 @@ function getContextFromHeaders(
   };
 }
 
+function getContextFromUser(user: AuthTokenPayload): RequestContext {
+  return {
+    tenantId: user.tenantId,
+    workspaceId: user.workspaceId,
+    userId: user.sub,
+  };
+}
+
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 @Controller('agency/clients')
 export class ClientsController {
@@ -54,10 +65,10 @@ export class ClientsController {
   @Get()
   @RequirePermission('agency.clients.profile.view.basic.assigned')
   list(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthenticatedUser() user: AuthTokenPayload,
     @Query() query: ListClientsQueryDto,
   ) {
-    return this.clientsService.list(getContextFromHeaders(headers), query);
+    return this.clientsService.list(getContextFromUser(user), query);
   }
 
   @Get('summary')
@@ -122,23 +133,39 @@ export class ClientsController {
   @Get(':clientId')
   @RequirePermission('agency.clients.profile.view.basic.assigned')
   findOne(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthenticatedUser() user: AuthTokenPayload,
     @Param('clientId') clientId: string,
   ) {
-    return this.clientsService.findOne(
-      getContextFromHeaders(headers),
+    return this.clientsService.findOneWithProducts(
+      getContextFromUser(user),
       clientId,
+    );
+  }
+
+  @Patch(':clientId/products/:productKey')
+  @RequirePermission('agency.clients.products.manage.admin')
+  updateProduct(
+    @AuthenticatedUser() user: AuthTokenPayload,
+    @Param('clientId') clientId: string,
+    @Param('productKey') productKey: string,
+    @Body() dto: UpdateClientProductDto,
+  ) {
+    return this.clientsService.updateProduct(
+      getContextFromUser(user),
+      clientId,
+      productKey,
+      dto,
     );
   }
 
   @Get(':clientId/overview')
   @RequirePermission('agency.clients.profitability.view.owner_or_finance')
   getOverview(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthenticatedUser() user: AuthTokenPayload,
     @Param('clientId') clientId: string,
   ) {
     return this.clientsService.getOverview(
-      getContextFromHeaders(headers),
+      getContextFromUser(user),
       clientId,
     );
   }

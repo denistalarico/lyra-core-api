@@ -15,10 +15,7 @@ import {
 // barrel re-exports `PlatformModule`, whose provider now depends on this
 // service, which would close a runtime import cycle.
 import { TenantProductEntitlementEntity } from '../../modules/platform/entities/tenant-product-entitlement.entity';
-import {
-  PlatformProductKey,
-  ProductEntitlementStatus,
-} from '../../modules/platform/enums/platform-product.enums';
+import { PlatformProductKey } from '../../modules/platform/enums/platform-product.enums';
 import {
   ActiveManagedContextResolution,
   AuthorizedManagedClient,
@@ -28,17 +25,13 @@ import {
   ManagedContextRejectionCode,
   RequestedManagedContext,
 } from './managed-context.contract';
+import { isActiveProductEntitlement } from './product-entitlement-availability';
 
 const AGENCY_CONNECTION = 'agency';
 
 const CLIENT_PRODUCT_KEYS = new Set<string>([
   PlatformProductKey.LeadFlow,
   PlatformProductKey.Social,
-]);
-
-const ACTIVE_ENTITLEMENT_STATUSES = new Set<string>([
-  ProductEntitlementStatus.Active,
-  ProductEntitlementStatus.Trial,
 ]);
 
 function normalizeRole(role: string): PlatformRoleKey {
@@ -127,7 +120,7 @@ export class ManagedContextDirectoryService {
       },
     });
 
-    if (!this.isActiveEntitlement(entitlement)) {
+    if (!isActiveProductEntitlement(entitlement)) {
       return false;
     }
 
@@ -279,7 +272,7 @@ export class ManagedContextDirectoryService {
       const entitlement =
         entitlementByManagedTenantId.get(client.managedTenantId) ?? null;
 
-      if (!this.isActiveEntitlement(entitlement)) continue;
+      if (!isActiveProductEntitlement(entitlement)) continue;
 
       if (!isPrivileged) {
         const access = accessByClientId?.get(client.id);
@@ -412,33 +405,5 @@ export class ManagedContextDirectoryService {
 
   private toIsoStringOrNull(value: Date | null): string | null {
     return value ? value.toISOString() : null;
-  }
-
-  private isActiveEntitlement(
-    entitlement: TenantProductEntitlementEntity | null,
-  ): boolean {
-    if (!entitlement || !ACTIVE_ENTITLEMENT_STATUSES.has(entitlement.status)) {
-      return false;
-    }
-
-    const now = new Date();
-
-    if (entitlement.startsAt && entitlement.startsAt > now) {
-      return false;
-    }
-
-    if (entitlement.endsAt && entitlement.endsAt <= now) {
-      return false;
-    }
-
-    if (
-      entitlement.status === ProductEntitlementStatus.Trial &&
-      entitlement.trialEndsAt &&
-      entitlement.trialEndsAt <= now
-    ) {
-      return false;
-    }
-
-    return true;
   }
 }

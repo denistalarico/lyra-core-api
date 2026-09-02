@@ -2,6 +2,7 @@ import { Repository } from 'typeorm';
 import { AgencyActivity } from '../../activities/entities';
 import { AgencyProject, AgencyTask } from '../../projects/entities';
 import { AgencyClient, ClientLifecycleProcess } from '../entities';
+import { TenantProductEntitlementEntity } from '../../platform/entities/tenant-product-entitlement.entity';
 import {
   AgencyClientHealthStatus,
   AgencyClientLifecycleStage,
@@ -156,6 +157,7 @@ function makeService(options: { client?: AgencyClient } = {}) {
     {} as Repository<AgencyProject>,
     {} as Repository<AgencyTask>,
     {} as Repository<AgencyActivity>,
+    {} as Repository<TenantProductEntitlementEntity>,
     {} as ClientsProfitabilityService,
     publisher,
     clientCostCenterService as unknown as ClientCostCenterService,

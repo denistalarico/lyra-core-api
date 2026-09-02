@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Brackets, In, IsNull, Repository } from 'typeorm';
+import { isActiveProductEntitlement } from '../../../common/context/product-entitlement-availability';
 import {
   AgencyActivity,
   AgencyActivityLink,
@@ -12,7 +13,12 @@ import {
 import { ActivityEntityType, ActivityStatus } from '../../activities/enums';
 import { AgencyProject, AgencyTask } from '../../projects/entities';
 import { ProjectStatus, TaskStatus } from '../../projects/enums';
-import { CreateClientDto, ListClientsQueryDto, UpdateClientDto } from '../dto';
+import {
+  CreateClientDto,
+  ListClientsQueryDto,
+  UpdateClientDto,
+  UpdateClientProductDto,
+} from '../dto';
 import { AgencyClient, ClientLifecycleProcess } from '../entities';
 import {
   AgencyClientLifecycleStage,
@@ -22,6 +28,12 @@ import {
 import { ClientCostCenterService } from './client-cost-center.service';
 import { ClientNotificationPublisher } from './client-notification.publisher';
 import { ClientsProfitabilityService } from './clients-profitability.service';
+import { TenantProductEntitlementEntity } from '../../platform/entities/tenant-product-entitlement.entity';
+import {
+  PlatformProductKey,
+  ProductEntitlementSource,
+  ProductEntitlementStatus,
+} from '../../platform/enums/platform-product.enums';
 
 type RequestContext = {
   tenantId: string;
@@ -32,6 +44,23 @@ type RequestContext = {
 const AGENCY_CONNECTION = 'agency';
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
+
+const MANAGEABLE_CLIENT_PRODUCTS = [
+  PlatformProductKey.LeadFlow,
+  PlatformProductKey.Social,
+] as const;
+
+type ManageableClientProductKey = (typeof MANAGEABLE_CLIENT_PRODUCTS)[number];
+
+export type ClientProductSummary = {
+  productKey: ManageableClientProductKey;
+  status: ProductEntitlementStatus | 'not_configured';
+  available: boolean;
+  planKey: string | null;
+  startsAt: string | null;
+  endsAt: string | null;
+  trialEndsAt: string | null;
+};
 
 @Injectable()
 export class ClientsService {
@@ -46,6 +75,8 @@ export class ClientsService {
     private readonly tasksRepository: Repository<AgencyTask>,
     @InjectRepository(AgencyActivity, AGENCY_CONNECTION)
     private readonly activitiesRepository: Repository<AgencyActivity>,
+    @InjectRepository(TenantProductEntitlementEntity, AGENCY_CONNECTION)
+    private readonly entitlementsRepository: Repository<TenantProductEntitlementEntity>,
     private readonly clientsProfitabilityService: ClientsProfitabilityService,
     private readonly clientNotificationPublisher: ClientNotificationPublisher,
     private readonly clientCostCenterService: ClientCostCenterService,
@@ -109,6 +140,8 @@ export class ClientsService {
       .skip(offset)
       .getManyAndCount();
 
+    const productsByClientId = await this.loadProductsForClients(items);
+
     const clientIds = items.map((client) => client.id);
     const lifecycleProcesses =
       clientIds.length > 0
@@ -146,6 +179,8 @@ export class ClientsService {
     return {
       items: items.map((client) => ({
         ...client,
+        productsProvisioned: Boolean(client.managedTenantId),
+        products: productsByClientId.get(client.id) ?? this.emptyProductSummaries(),
         activeLifecycleProcesses: processesByClient.get(client.id) ?? [],
       })),
       total,
@@ -306,6 +341,72 @@ export class ClientsService {
     return client;
   }
 
+  async findOneWithProducts(context: RequestContext, clientId: string) {
+    const client = await this.findOne(context, clientId);
+    const productsByClientId = await this.loadProductsForClients([client]);
+
+    return {
+      ...client,
+      productsProvisioned: Boolean(client.managedTenantId),
+      products: productsByClientId.get(client.id) ?? this.emptyProductSummaries(),
+    };
+  }
+
+  async updateProduct(
+    context: RequestContext,
+    clientId: string,
+    productKey: string,
+    dto: UpdateClientProductDto,
+  ): Promise<ClientProductSummary> {
+    const client = await this.findOne(context, clientId);
+    const manageableProductKey = this.assertManageableProductKey(productKey);
+
+    if (!client.managedTenantId) {
+      throw new BadRequestException(
+        'Client products cannot be changed until the managed tenant is provisioned',
+      );
+    }
+
+    let entitlement = await this.entitlementsRepository.findOne({
+      where: {
+        tenantId: client.managedTenantId,
+        productKey: manageableProductKey,
+      },
+    });
+
+    if (dto.action === 'suspend') {
+      if (!entitlement) {
+        throw new BadRequestException('Product entitlement is not configured');
+      }
+      entitlement.status = ProductEntitlementStatus.Suspended;
+    } else if (entitlement) {
+      // Reactivation reuses the unique tenant/product row. Plan, source,
+      // settings, startsAt and trial history stay intact. A still-valid
+      // contractual end is also preserved; only an already-ended window,
+      // which would keep the new "active" status unavailable, is cleared.
+      const now = new Date();
+      entitlement.status = ProductEntitlementStatus.Active;
+      if (entitlement.endsAt && entitlement.endsAt <= now) {
+        entitlement.endsAt = null;
+      }
+    } else {
+      entitlement = this.entitlementsRepository.create({
+        tenantId: client.managedTenantId,
+        productKey: manageableProductKey,
+        status: ProductEntitlementStatus.Active,
+        source: ProductEntitlementSource.Manual,
+        planKey: null,
+        startsAt: new Date(),
+        endsAt: null,
+        trialEndsAt: null,
+        settings: {},
+      });
+    }
+
+    const saved = await this.entitlementsRepository.save(entitlement);
+    return this.toProductSummary(manageableProductKey, saved);
+  }
+
   async update(context: RequestContext, clientId: string, dto: UpdateClientDto) {
     const client = await this.findOne(context, clientId);
     const previousOwnerId = client.accountOwnerId;
@@ -434,7 +535,7 @@ export class ClientsService {
 
   async getOverview(context: RequestContext, clientId: string) {
     const [client, profitability, counters, costCenter] = await Promise.all([
-      this.findOne(context, clientId),
+      this.findOneWithProducts(context, clientId),
       this.clientsProfitabilityService.getClientProfitability(
         context,
         clientId,
@@ -453,6 +554,76 @@ export class ClientsService {
       costCenter,
       recent: null,
     };
+  }
+
+  private async loadProductsForClients(clients: AgencyClient[]) {
+    const managedTenantIds = Array.from(
+      new Set(
+        clients
+          .map((client) => client.managedTenantId)
+          .filter((tenantId): tenantId is string => Boolean(tenantId)),
+      ),
+    );
+
+    const entitlements = managedTenantIds.length > 0
+      ? await this.entitlementsRepository.find({
+          where: {
+            tenantId: In(managedTenantIds),
+            productKey: In([...MANAGEABLE_CLIENT_PRODUCTS]),
+          },
+        })
+      : [];
+
+    const entitlementByTenantAndProduct = new Map(
+      entitlements.map((entitlement) => [
+        `${entitlement.tenantId}:${entitlement.productKey}`,
+        entitlement,
+      ]),
+    );
+
+    return new Map(
+      clients.map((client) => [
+        client.id,
+        MANAGEABLE_CLIENT_PRODUCTS.map((productKey) =>
+          this.toProductSummary(
+            productKey,
+            client.managedTenantId
+              ? entitlementByTenantAndProduct.get(
+                  `${client.managedTenantId}:${productKey}`,
+                ) ?? null
+              : null,
+          ),
+        ),
+      ]),
+    );
+  }
+
+  private emptyProductSummaries(): ClientProductSummary[] {
+    return MANAGEABLE_CLIENT_PRODUCTS.map((productKey) =>
+      this.toProductSummary(productKey, null),
+    );
+  }
+
+  private toProductSummary(
+    productKey: ManageableClientProductKey,
+    entitlement: TenantProductEntitlementEntity | null,
+  ): ClientProductSummary {
+    return {
+      productKey,
+      status: entitlement?.status ?? 'not_configured',
+      available: isActiveProductEntitlement(entitlement),
+      planKey: entitlement?.planKey ?? null,
+      startsAt: entitlement?.startsAt?.toISOString() ?? null,
+      endsAt: entitlement?.endsAt?.toISOString() ?? null,
+      trialEndsAt: entitlement?.trialEndsAt?.toISOString() ?? null,
+    };
+  }
+
+  private assertManageableProductKey(productKey: string): ManageableClientProductKey {
+    if (!(MANAGEABLE_CLIENT_PRODUCTS as readonly string[]).includes(productKey)) {
+      throw new BadRequestException('Unsupported managed client product');
+    }
+    return productKey as ManageableClientProductKey;
   }
 
   private async getCounters(context: RequestContext, clientId: string) {

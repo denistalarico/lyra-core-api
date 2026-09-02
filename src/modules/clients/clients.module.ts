@@ -5,6 +5,7 @@ import { FinanceModule } from '../finance';
 import { FinanceCostCenter } from '../finance/entities';
 import { NotificationsModule } from '../notifications';
 import { PermissionsModule } from '../permissions';
+import { TenantProductEntitlementEntity } from '../platform/entities/tenant-product-entitlement.entity';
 import { AgencyProject, AgencyTask } from '../projects/entities';
 import { TeamConfigOption } from '../team/entities';
 import { ClientLifecycleController } from './controllers/client-lifecycle.controller';
@@ -34,6 +35,7 @@ const AGENCY_CONNECTION = 'agency';
         ClientLifecycleProcess,
         ClientLifecycleStep,
         FinanceCostCenter,
+        TenantProductEntitlementEntity,
       ],
       AGENCY_CONNECTION,
     ),
