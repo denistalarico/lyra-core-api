@@ -47,6 +47,7 @@ import { HealthModule } from './modules/health/health.module';
 import { ContextModule } from './common/context/context.module';
 import { LeadFlowAnalyticsModule } from './modules/leadflow-analytics/leadflow-analytics.module';
 import { LeadFlowPrivacyModule } from './modules/leadflow-privacy';
+import { PlatformPrivacyModule } from './modules/platform-privacy/platform-privacy.module';
 import { LeadFlowAgendaModule } from './modules/leadflow-agenda/leadflow-agenda.module';
 import { AdminModule } from './modules/admin';
 import { IntelligenceAnalyticsModule } from './modules/intelligence-analytics/intelligence-analytics.module';
@@ -104,6 +105,7 @@ import { SocialIntegrationsModule } from './modules/social-integrations';
     LeadFlowBriefingModule,
     LeadFlowAnalyticsModule,
     LeadFlowPrivacyModule,
+    PlatformPrivacyModule,
     LeadFlowAgendaModule,
     SocialIntegrationsModule,
     IntelligenceAnalyticsModule,

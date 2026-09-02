@@ -52,6 +52,48 @@ type AutomationRunCountRow = {
 
 const PURPOSE_DESCRIPTION =
   'Melhorar confiabilidade e desempenho do LeadFlow usando somente contagens operacionais estruturadas e agregadas.';
+
+/**
+ * The purpose a call operates on (Lyra Social S1.4.8).
+ *
+ * Every public method below takes this explicitly instead of assuming the
+ * LeadFlow one, because the consent tables discriminate by `purpose_key`,
+ * not by product. The LeadFlow routes keep passing the LeadFlow purpose and
+ * behave exactly as before; the neutral `/platform/privacy/telemetry*`
+ * routes pass the platform purpose.
+ *
+ * The critical invariant this type enables: consent lookups are filtered by
+ * `purposeKey`. Without that filter, a legacy `leadflow_product_improvement_v1`
+ * row would be returned as "the latest consent" for the neutral purpose —
+ * silently promoting an old acceptance to a scope it never covered, which
+ * D-4 / architecture §8.1 explicitly forbid.
+ */
+export type TelemetryPurpose = {
+  key: string;
+  description: string;
+  /**
+   * When true, a new opt-in is refused unless the notice carries
+   * `legal_review_status = 'approved'` (S1.4.8 pointed correction).
+   *
+   * This is opt-in per purpose rather than a blanket rule because the legacy
+   * LeadFlow notice is seeded as `'pending'` by migration 1788200000000 and
+   * has been accepted in that state — turning the gate on globally would
+   * retroactively break the LeadFlow opt-in that works today. The neutral
+   * purpose has no such history, so it starts gated.
+   *
+   * Collection is unaffected by this flag: `collectSnapshot` already refuses
+   * to collect for ANY purpose whose notice is not approved, and that
+   * fail-closed behaviour predates this change.
+   */
+  requiresApprovedNoticeToOptIn?: boolean;
+};
+
+export const LEADFLOW_TELEMETRY_PURPOSE: TelemetryPurpose = {
+  key: LEADFLOW_PRODUCT_TELEMETRY_PURPOSE,
+  description: PURPOSE_DESCRIPTION,
+  // Unchanged legacy behaviour — see the field docs above.
+  requiresApprovedNoticeToOptIn: false,
+};
 const DEFAULT_RETENTION_DAYS = 90;
 const MINIMUM_K_ANONYMITY = 5;
 const MAX_COLLECTION_DAYS = 31;
@@ -79,11 +121,12 @@ export class LeadFlowTelemetryPrivacyService {
 
   async getStatus(
     ctx: RequestContext,
+    purpose: TelemetryPurpose = LEADFLOW_TELEMETRY_PURPOSE,
   ): Promise<LeadFlowTelemetryStatusResponse> {
     const scope = this.resolveScope(ctx);
     const [notice, consent, identity, recentAudit] = await Promise.all([
-      this.getCurrentNotice(),
-      this.findLatestConsent(this.consents, scope),
+      this.getCurrentNotice(purpose.key),
+      this.findLatestConsent(this.consents, scope, purpose.key),
       this.identities.findOne({ where: this.identityWhere(scope) }),
       this.auditEvents.find({
         where: this.scopeWhere(scope),
@@ -109,8 +152,8 @@ export class LeadFlowTelemetryPrivacyService {
 
     return {
       purpose: {
-        key: LEADFLOW_PRODUCT_TELEMETRY_PURPOSE,
-        description: PURPOSE_DESCRIPTION,
+        key: purpose.key,
+        description: purpose.description,
       },
       notice: notice
         ? {
@@ -164,13 +207,17 @@ export class LeadFlowTelemetryPrivacyService {
   async optIn(
     ctx: RequestContext,
     dto: OptInLeadFlowTelemetryDto,
+    purpose: TelemetryPurpose = LEADFLOW_TELEMETRY_PURPOSE,
   ): Promise<LeadFlowTelemetryStatusResponse> {
     const scope = this.resolveScope(ctx);
     const notice = await this.notices.findOne({ where: { id: dto.noticeId } });
+    // The notice must belong to the purpose being consented to. This is what
+    // stops a caller from opting in to the neutral purpose by pointing at the
+    // legacy LeadFlow notice (or vice versa).
     if (
       !notice ||
       notice.status !== 'active' ||
-      notice.purposeKey !== LEADFLOW_PRODUCT_TELEMETRY_PURPOSE
+      notice.purposeKey !== purpose.key
     ) {
       throw new NotFoundException(
         'O texto de consentimento selecionado não está ativo.',
@@ -184,12 +231,29 @@ export class LeadFlowTelemetryPrivacyService {
         'O texto de consentimento mudou. Recarregue a página e revise a versão atual.',
       );
     }
+    // Legal-review gate (S1.4.8 pointed correction). A notice that has not
+    // been cleared for use must not accumulate NEW acceptances — hiding the
+    // button is not enough, since the endpoint is reachable directly. Only
+    // opt-in is gated: opt-out and erasure stay available so a legal status
+    // can never trap someone in a consent they want to withdraw.
+    if (
+      purpose.requiresApprovedNoticeToOptIn &&
+      notice.legalReviewStatus !== 'approved'
+    ) {
+      throw new ConflictException(
+        'Este texto de consentimento ainda não está liberado para uso. Nenhuma nova autorização pode ser registrada até a conclusão da revisão.',
+      );
+    }
 
     await this.dataSource.transaction(async (manager) => {
       const consentRepository = manager.getRepository(
         LeadFlowTelemetryConsentEntity,
       );
-      const current = await this.findLatestConsent(consentRepository, scope);
+      const current = await this.findLatestConsent(
+        consentRepository,
+        scope,
+        purpose.key,
+      );
       if (
         current?.status === 'opted_in' &&
         current.noticeId === notice.id &&
@@ -235,26 +299,34 @@ export class LeadFlowTelemetryPrivacyService {
       );
     });
 
-    return this.getStatus(ctx);
+    return this.getStatus(ctx, purpose);
   }
 
   async optOut(
     ctx: RequestContext,
     dto: OptOutLeadFlowTelemetryDto,
+    purpose: TelemetryPurpose = LEADFLOW_TELEMETRY_PURPOSE,
   ): Promise<LeadFlowTelemetryStatusResponse> {
     const scope = this.resolveScope(ctx);
     await this.dataSource.transaction(async (manager) => {
       const consentRepository = manager.getRepository(
         LeadFlowTelemetryConsentEntity,
       );
-      const current = await this.findLatestConsent(consentRepository, scope);
+      const current = await this.findLatestConsent(
+        consentRepository,
+        scope,
+        purpose.key,
+      );
       if (current?.status === 'opted_out') return;
       const now = new Date();
+      // Append-only: the opt-out is a NEW row carrying the same purpose.
+      // The prior acceptance stays on disk as history (D-4: nenhuma linha
+      // gravada é reescrita).
       await consentRepository.save(
         consentRepository.create({
           ...scope,
           noticeId: current?.noticeId ?? null,
-          purposeKey: LEADFLOW_PRODUCT_TELEMETRY_PURPOSE,
+          purposeKey: purpose.key,
           status: 'opted_out',
           actorUserId: ctx.userId ?? null,
           reasonCode: dto.reasonCode,
@@ -285,19 +357,24 @@ export class LeadFlowTelemetryPrivacyService {
       );
     });
 
-    return this.getStatus(ctx);
+    return this.getStatus(ctx, purpose);
   }
 
   async eraseContribution(
     ctx: RequestContext,
     dto: TelemetryErasureDto,
+    purpose: TelemetryPurpose = LEADFLOW_TELEMETRY_PURPOSE,
   ): Promise<LeadFlowTelemetryStatusResponse> {
     const scope = this.resolveScope(ctx);
     await this.dataSource.transaction(async (manager) => {
       const consentRepository = manager.getRepository(
         LeadFlowTelemetryConsentEntity,
       );
-      const current = await this.findLatestConsent(consentRepository, scope);
+      const current = await this.findLatestConsent(
+        consentRepository,
+        scope,
+        purpose.key,
+      );
       const identityRepository = manager.getRepository(
         LeadFlowTelemetryIdentityLinkEntity,
       );
@@ -321,7 +398,7 @@ export class LeadFlowTelemetryPrivacyService {
         consentRepository.create({
           ...scope,
           noticeId: current?.noticeId ?? null,
-          purposeKey: LEADFLOW_PRODUCT_TELEMETRY_PURPOSE,
+          purposeKey: purpose.key,
           status: 'erased',
           actorUserId: ctx.userId ?? null,
           reasonCode: dto.reasonCode,
@@ -342,12 +419,13 @@ export class LeadFlowTelemetryPrivacyService {
       );
     });
 
-    return this.getStatus(ctx);
+    return this.getStatus(ctx, purpose);
   }
 
   async collectSnapshot(
     ctx: RequestContext,
     dto: CollectLeadFlowTelemetryDto,
+    purpose: TelemetryPurpose = LEADFLOW_TELEMETRY_PURPOSE,
   ): Promise<LeadFlowTelemetryCollectionResponse> {
     if (!this.isCollectionEnabled()) {
       throw new ConflictException(
@@ -356,8 +434,12 @@ export class LeadFlowTelemetryPrivacyService {
     }
     const scope = this.resolveScope(ctx);
     const period = this.parseCollectionPeriod(dto);
-    const notice = await this.getCurrentNotice();
-    const consent = await this.findLatestConsent(this.consents, scope);
+    const notice = await this.getCurrentNotice(purpose.key);
+    const consent = await this.findLatestConsent(
+      this.consents,
+      scope,
+      purpose.key,
+    );
     if (
       !notice ||
       consent?.status !== 'opted_in' ||
@@ -562,10 +644,10 @@ export class LeadFlowTelemetryPrivacyService {
     }
   }
 
-  private async getCurrentNotice() {
+  private async getCurrentNotice(purposeKey: string) {
     return this.notices.findOne({
       where: {
-        purposeKey: LEADFLOW_PRODUCT_TELEMETRY_PURPOSE,
+        purposeKey,
         locale: 'pt-BR',
         status: 'active',
       },
@@ -573,14 +655,60 @@ export class LeadFlowTelemetryPrivacyService {
     });
   }
 
+  /**
+   * Latest consent for this scope AND this purpose.
+   *
+   * The `purposeKey` filter is load-bearing, not defensive: the consent table
+   * has no product column, so without it the newest row for the scope wins
+   * regardless of which notice it documents. A scope holding only a legacy
+   * `leadflow_product_improvement_v1` acceptance would then be reported as
+   * consented for `platform_product_improvement_v1` — the silent promotion
+   * D-4 and architecture §8.1 forbid. Each purpose keeps an independent
+   * append-only history over the same rows.
+   */
   private async findLatestConsent(
     repository: Repository<LeadFlowTelemetryConsentEntity>,
     scope: TelemetryScope,
+    purposeKey: string,
   ) {
     return repository.findOne({
-      where: this.scopeWhere(scope),
+      where: { ...this.scopeWhere(scope), purposeKey },
       order: { occurredAt: 'DESC', createdAt: 'DESC' },
     });
+  }
+
+  /**
+   * Read-only lookup of a *different* purpose's latest consent for the same
+   * scope, used only so a product surface can honestly tell the user "there
+   * is a previous acceptance of the LeadFlow notice" while still treating
+   * the neutral purpose as not consented. It never feeds an authorization or
+   * eligibility decision — see `getStatus`, where the neutral state is
+   * derived exclusively from the neutral purpose's own rows.
+   */
+  async findRelatedPurposeConsent(
+    ctx: RequestContext,
+    purposeKey: string,
+  ): Promise<{
+    purposeKey: string;
+    state: 'opted_in' | 'opted_out' | 'erased';
+    occurredAt: string;
+    noticeVersion: number | null;
+  } | null> {
+    const scope = this.resolveScope(ctx);
+    const consent = await this.findLatestConsent(
+      this.consents,
+      scope,
+      purposeKey,
+    );
+
+    if (!consent) return null;
+
+    return {
+      purposeKey: consent.purposeKey,
+      state: consent.status,
+      occurredAt: consent.occurredAt.toISOString(),
+      noticeVersion: consent.noticeVersion,
+    };
   }
 
   private async appendAudit(
