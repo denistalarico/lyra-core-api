@@ -125,17 +125,18 @@ function createHarness(
 }
 
 describe('SocialAdInsightsSyncService — the happy path', () => {
-  it('ingests account and campaign, in that order', async () => {
+  it('ingests account, campaign and ad set, coarsest first', async () => {
     const harness = createHarness();
 
     const summary = await harness.service.syncInsights(INPUT);
 
-    expect(harness.reads).toEqual(['account', 'campaign']);
+    expect(harness.reads).toEqual(['account', 'campaign', 'adset']);
     expect(summary.status).toBe('completed');
-    expect(summary.rowsWritten).toBe(2);
+    expect(summary.rowsWritten).toBe(3);
     expect(summary.levels.map((level) => level.level)).toEqual([
       'account',
       'campaign',
+      'adset',
     ]);
   });
 
@@ -144,12 +145,24 @@ describe('SocialAdInsightsSyncService — the happy path', () => {
 
     await harness.service.syncInsights({
       ...INPUT,
-      // Not part of the input type; ad set and ad insights multiply the row
-      // count and that volume decision has not been made yet.
-      levels: ['adset', 'ad'],
+      // Not part of the input type. `ad` is the level this pipeline does not
+      // ingest, and a caller-supplied list would also decide what a run's
+      // `entity_levels` recorded — which is what later certifies coverage.
+      levels: ['ad'],
     } as never);
 
-    expect(harness.reads).toEqual(['account', 'campaign']);
+    expect(harness.reads).toEqual(['account', 'campaign', 'adset']);
+  });
+
+  it('never reads the ad level, which is the one grain left out', async () => {
+    // §5: the smallest grain that resolves destination, and no smaller. `ad`
+    // multiplies the row count again — 254 ads against 126 ad sets on the
+    // production account — for a question nobody asks yet.
+    const harness = createHarness();
+
+    await harness.service.syncInsights(INPUT);
+
+    expect(harness.reads).not.toContain('ad');
   });
 
   it('stamps every row of the run with one synced_at', async () => {

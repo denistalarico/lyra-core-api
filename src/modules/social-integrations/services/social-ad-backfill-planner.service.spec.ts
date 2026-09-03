@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/require-await -- planner test doubles expose partial service shapes. */
+import { INSIGHTS_ENTITY_LEVELS } from '../sync/social-ad-sync-run.contract';
 import {
   SocialAdBackfillPlannerService,
   advancesBackfillChain,
@@ -35,7 +36,11 @@ function createHarness(
      * a chunk that succeeded, which is the common case in these tests; the
      * object form is for the outcomes that must *not* count as coverage.
      */
-    attempted?: (string | SocialAdBackfillChunkOutcome)[];
+    attempted?: (
+      | string
+      | (Omit<SocialAdBackfillChunkOutcome, 'entityLevels'> &
+          Partial<Pick<SocialAdBackfillChunkOutcome, 'entityLevels'>>)
+    )[];
     settledHierarchy?: boolean;
   } = {},
 ) {
@@ -53,10 +58,25 @@ function createHarness(
     },
   } as SocialAdSyncConfigService;
 
+  /**
+   * A bare `until` string means "succeeded, having read every level we ingest".
+   *
+   * Defaulting to full coverage keeps every test written before I3.4 meaning
+   * what it meant: those cases are about status precedence and chain fairness,
+   * not about levels, and making them all restate the level list would bury the
+   * thing each one is actually asserting. The tests that *are* about coverage
+   * pass an explicit `entityLevels`.
+   */
   const outcomes: SocialAdBackfillChunkOutcome[] = (
     options.attempted ?? []
   ).map((entry) =>
-    typeof entry === 'string' ? { until: entry, status: 'succeeded' } : entry,
+    typeof entry === 'string'
+      ? {
+          until: entry,
+          status: 'succeeded',
+          entityLevels: [...INSIGHTS_ENTITY_LEVELS],
+        }
+      : { entityLevels: [...INSIGHTS_ENTITY_LEVELS], ...entry },
   );
 
   const runService = {
@@ -148,11 +168,124 @@ describe('SocialAdBackfillPlannerService — starting a chain', () => {
 
     await harness.planner.planNext(CONNECTION, NOW);
 
-    // Account and campaign. The chunk carries no hierarchy segment, so listing
-    // ad sets and ads would describe work it does not do.
+    // The three levels the insights pipeline ingests. `ad` is absent because
+    // nothing reads it, and the hierarchy's own levels are absent because the
+    // chunk carries no hierarchy segment — listing either would describe work
+    // this run does not do, and the column is what later certifies coverage.
     expect(harness.enqueued[0]).toMatchObject({
-      entityLevels: ['account', 'campaign'],
+      entityLevels: ['account', 'campaign', 'adset'],
     });
+    expect(harness.enqueued[0].entityLevels).not.toContain('ad');
+  });
+});
+
+/**
+ * §24: a connection certified complete before ad-set insights existed.
+ *
+ * This is the migration case the whole level-aware coverage design exists for,
+ * and it is asserted end to end through the planner rather than only through
+ * `resolveChunkState`, because the failure that matters is behavioural: does
+ * the chain actually fetch the missing history, at the original boundaries,
+ * without re-reading what it already has?
+ */
+describe('SocialAdBackfillPlannerService — a connection backfilled before ad set', () => {
+  /** All thirteen chunks succeeded, every one of them at the old level set. */
+  const preAdsetChain = FULL_PLAN_ENDS.map((until) => ({
+    until,
+    status: 'succeeded' as const,
+    entityLevels: ['account', 'campaign'],
+  }));
+
+  it('does not report the chain as complete', async () => {
+    const harness = createHarness({ attempted: preAdsetChain });
+
+    const decision = await harness.planner.planNext(CONNECTION, NOW);
+
+    // The bug this prevents: 13/13 succeeded runs certifying ad-set history
+    // that was never requested, so every per-destination number would silently
+    // cover only the days a manual sync happened to touch.
+    expect(decision).not.toMatchObject({ reason: 'complete' });
+  });
+
+  it('enqueues the missing coverage rather than stalling for an operator', async () => {
+    const harness = createHarness({ attempted: preAdsetChain });
+
+    const decision = await harness.planner.planNext(CONNECTION, NOW);
+
+    expect(decision).toMatchObject({ action: 'enqueued', runKind: 'backfill' });
+    expect(harness.enqueued).toHaveLength(1);
+  });
+
+  it('re-fetches at the original boundaries, never a plan cut from today', async () => {
+    const harness = createHarness({ attempted: preAdsetChain });
+
+    await harness.planner.planNext(CONNECTION, NOW);
+
+    // The anchor still comes from the existing runs — narrow ones included —
+    // so the new chunk is chunk 0 of the *same* plan. An anchor filtered to
+    // fully-covering runs would have found none, re-anchored at yesterday, and
+    // written a second set of windows overlapping the first.
+    expect(harness.enqueued[0]).toMatchObject({
+      windowEnd: FULL_PLAN_ENDS[0],
+      entityLevels: ['account', 'campaign', 'adset'],
+    });
+  });
+
+  it('does not re-read the hierarchy it already mirrored', async () => {
+    const harness = createHarness({ attempted: preAdsetChain });
+
+    await harness.planner.planNext(CONNECTION, NOW);
+
+    // A hierarchy run is the chain's *first* step, enqueued only when the
+    // connection has no backfill runs at all. This one has thirteen.
+    expect(
+      harness.enqueued.filter((input) => input.runKind === 'entities'),
+    ).toHaveLength(0);
+  });
+
+  it('one chunk at a time, exactly as a fresh chain', async () => {
+    const harness = createHarness({
+      attempted: preAdsetChain,
+      inFlight: true,
+    });
+
+    const decision = await harness.planner.planNext(CONNECTION, NOW);
+
+    expect(decision).toEqual({ action: 'skipped', reason: 'chain_busy' });
+  });
+
+  it('reports complete once every chunk has been re-read at the new levels', async () => {
+    // The narrow runs stay in the log — nothing deletes history — and the wide
+    // ones are what certify. Coverage is per window, not per connection.
+    const harness = createHarness({
+      attempted: [
+        ...preAdsetChain,
+        ...FULL_PLAN_ENDS.map((until) => ({
+          until,
+          status: 'succeeded' as const,
+          entityLevels: [...INSIGHTS_ENTITY_LEVELS],
+        })),
+      ],
+    });
+
+    const decision = await harness.planner.planNext(CONNECTION, NOW);
+
+    expect(decision).toEqual({ action: 'skipped', reason: 'complete' });
+  });
+
+  it('still stalls on a window that genuinely failed', async () => {
+    const harness = createHarness({
+      attempted: [
+        ...preAdsetChain,
+        { until: FULL_PLAN_ENDS[0], status: 'dead_letter' as const },
+      ],
+    });
+
+    const decision = await harness.planner.planNext(CONNECTION, NOW);
+
+    // A level-widening must not launder a dead-lettered window into fresh
+    // work: that would re-enqueue it hourly, forever.
+    expect(decision).toEqual({ action: 'skipped', reason: 'chain_stalled' });
   });
 });
 
@@ -615,8 +748,14 @@ describe('SocialAdBackfillPlannerService — connecting an account', () => {
 });
 
 describe('resolveChunkState', () => {
-  const attempt = (status: string) =>
-    ({ until: ANCHOR, status }) as SocialAdBackfillChunkOutcome;
+  const attempt = (
+    status: string,
+    entityLevels: unknown = [...INSIGHTS_ENTITY_LEVELS],
+  ) =>
+    ({ until: ANCHOR, status, entityLevels }) as SocialAdBackfillChunkOutcome;
+
+  /** A chunk from before ad-set insights existed: succeeded, narrower levels. */
+  const preAdsetAttempt = () => attempt('succeeded', ['account', 'campaign']);
 
   it('reads an untouched window as not started', () => {
     expect(resolveChunkState([])).toBe('not_started');
@@ -661,6 +800,56 @@ describe('resolveChunkState', () => {
     expect(resolveChunkState([attempt('failed'), attempt('dead_letter')])).toBe(
       'stalled',
     );
+  });
+
+  describe('coverage, not just status', () => {
+    it('does not certify a window read before ad-set insights existed', () => {
+      // The exact shape of the thirteen chunks on the existing production
+      // connection. They succeeded — at a narrower set of levels — so the
+      // window still needs fetching.
+      expect(resolveChunkState([preAdsetAttempt()])).toBe('not_started');
+    });
+
+    it('reads a narrower success as not started, never as stalled', () => {
+      // The distinction that decides whether an operator is involved. Nothing
+      // failed here, so the chain must fetch it on its own rather than waiting
+      // for thirteen manual resumes.
+      expect(resolveChunkState([preAdsetAttempt()])).not.toBe('stalled');
+    });
+
+    it('lets a wider later run cover a window an earlier narrower one did not', () => {
+      expect(resolveChunkState([preAdsetAttempt(), attempt('succeeded')])).toBe(
+        'covered',
+      );
+    });
+
+    it('keeps a genuinely failed window stalled even beside a narrow success', () => {
+      // A real failure must not be laundered into `not_started` by a
+      // level-widening: that would re-enqueue a dead-lettered window hourly,
+      // forever, which is what the stall exists to prevent.
+      expect(
+        resolveChunkState([preAdsetAttempt(), attempt('dead_letter')]),
+      ).toBe('stalled');
+    });
+
+    it('fails closed when the stored levels are not readable', () => {
+      // `entity_levels` is jsonb. Treating a value it cannot parse as full
+      // coverage would certify history nobody ever read.
+      expect(resolveChunkState([attempt('succeeded', null)])).toBe(
+        'not_started',
+      );
+      expect(resolveChunkState([attempt('succeeded', 'account')])).toBe(
+        'not_started',
+      );
+    });
+
+    it('accepts a run that recorded more levels than are required', () => {
+      expect(
+        resolveChunkState([
+          attempt('succeeded', ['account', 'campaign', 'adset', 'ad']),
+        ]),
+      ).toBe('covered');
+    });
   });
 });
 

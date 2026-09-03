@@ -1,4 +1,5 @@
 import type { SocialAdEntityLevel } from '../entities/social-ad-entity.entity';
+import type { SocialAdInsightsLevel } from './meta-ads-insights.contract';
 
 /**
  * What a run is for.
@@ -66,23 +67,62 @@ export function isIntradayRunKind(runKind: string): boolean {
 export type SocialAdSyncSegment =
   | 'hierarchy'
   | 'account_insights'
-  | 'campaign_insights';
+  | 'campaign_insights'
+  | 'adset_insights';
+
+/**
+ * The insights level each insights segment reads.
+ *
+ * A total map rather than a conditional at the call site. The worker used to
+ * decide this with `segment === 'account_insights' ? 'account' : 'campaign'`,
+ * which was correct while there were exactly two insights segments and became
+ * wrong the moment a third existed — it would have read `adset_insights` at
+ * campaign level and written campaign rows under an ad set segment's name. A
+ * map keyed by the union makes the compiler, rather than a reviewer, the thing
+ * that notices the next one.
+ */
+export const INSIGHTS_LEVEL_BY_SEGMENT = {
+  account_insights: 'account',
+  campaign_insights: 'campaign',
+  adset_insights: 'adset',
+} as const satisfies Record<
+  Exclude<SocialAdSyncSegment, 'hierarchy'>,
+  SocialAdInsightsLevel
+>;
+
+/** Whether a segment is an insights read, narrowing it for the map above. */
+export function isInsightsSegment(
+  segment: SocialAdSyncSegment,
+): segment is Exclude<SocialAdSyncSegment, 'hierarchy'> {
+  return segment !== 'hierarchy';
+}
 
 /**
  * What each kind executes, in order.
  *
  * Ordered, not a set: hierarchy before insights so facts land against a mirror
- * that already knows the campaign, and account insights before campaign
- * insights because the account totals are the cheapest read and the ones every
- * campaign sum is checked against.
+ * that already knows the campaign, and the insights levels from cheapest and
+ * coarsest downward — the account totals are the ones every finer sum is
+ * checked against, and ad set is both the largest read and the one whose
+ * failure costs the least, because the coarser levels have already landed.
  */
 export const SYNC_SEGMENTS_BY_KIND: Record<
   SocialAdSyncRunKind,
   readonly SocialAdSyncSegment[]
 > = {
   entities: ['hierarchy'],
-  manual: ['hierarchy', 'account_insights', 'campaign_insights'],
-  daily: ['hierarchy', 'account_insights', 'campaign_insights'],
+  manual: [
+    'hierarchy',
+    'account_insights',
+    'campaign_insights',
+    'adset_insights',
+  ],
+  daily: [
+    'hierarchy',
+    'account_insights',
+    'campaign_insights',
+    'adset_insights',
+  ],
   /**
    * No hierarchy, on both of the kinds the scheduler repeats.
    *
@@ -99,8 +139,25 @@ export const SYNC_SEGMENTS_BY_KIND: Record<
    * table has no foreign key to the mirror precisely so that it can — and the
    * account's own daily run adds it to the mirror the next morning.
    */
-  backfill: ['account_insights', 'campaign_insights'],
-  intraday: ['account_insights', 'campaign_insights'],
+  backfill: ['account_insights', 'campaign_insights', 'adset_insights'],
+  /**
+   * Intraday reads all three levels, and the cost was measured before it did.
+   *
+   * An intraday pass is one day, so each level is a single Graph request
+   * regardless of how many objects delivered — the ad-set read of this
+   * account's busiest week returned one page, and a day is a seventh of that.
+   * The pass goes from two requests to three: an hourly-bucketed schedule at
+   * the default 3-hour interval spends six more requests per connection per day
+   * against a quota measured in CPU-seconds, which the account-level probe
+   * showed this account barely registers on.
+   *
+   * The alternative — ad set on `daily` only — was rejected on what it would do
+   * to the product rather than on cost: destination is an ad-set property, so
+   * excluding ad set here would make every per-destination number blind to
+   * today, and "spend by WhatsApp" would silently stop at yesterday while the
+   * account-level total beside it included this morning.
+   */
+  intraday: ['account_insights', 'campaign_insights', 'adset_insights'],
 };
 
 /**
@@ -121,16 +178,65 @@ export const SYNC_ENTITY_LEVELS: readonly SocialAdEntityLevel[] = [
 /**
  * What an insights-only run covers.
  *
- * The two levels S2.4 ingests, and the honest answer for a `backfill` chunk or
- * an `intraday` pass: neither reads the hierarchy, so claiming `adset` and `ad`
- * would describe work the run does not do. It is also part of their idempotency
- * key, which is why it is a constant rather than an argument — a caller that
- * could pass a different list would produce a second key for one intent.
+ * The levels the insights pipeline ingests, and the honest answer for a
+ * `backfill` chunk or an `intraday` pass: neither reads the hierarchy, so
+ * claiming `ad` would describe work the run does not do. It is also part of
+ * their idempotency key, which is why it is a constant rather than an argument
+ * — a caller that could pass a different list would produce a second key for
+ * one intent.
+ *
+ * ## This constant is the coverage record
+ *
+ * I3.4 added `adset` here, and that single edit is what makes every backfill
+ * run written before I3.4 read as *not* covering ad set — because those rows
+ * stored `["account","campaign"]` in `entity_levels`, which is exactly what
+ * they did. The planner compares a chunk's stored levels against this list, so
+ * a connection whose thirteen chunks all succeeded under the old list is
+ * correctly seen as needing ad-set history, and a connection backfilled after
+ * I3.4 is correctly seen as needing nothing.
+ *
+ * That is why no new `run_kind`, no `coverage_version` column and no migration
+ * were introduced: the durable, per-run record of "which levels did this run
+ * actually read" already existed and was already written on every row. It was
+ * simply never read back. Adding a version number beside it would be a second
+ * answer to a question this column already answers, and the two would disagree
+ * the first time one of them was updated alone.
  */
 export const INSIGHTS_ENTITY_LEVELS: readonly SocialAdEntityLevel[] = [
   'account',
   'campaign',
+  'adset',
 ];
+
+/**
+ * Whether a settled run actually covered every insights level we now ingest.
+ *
+ * The whole of I3.4's coverage logic, in one predicate, and it answers a
+ * question that has exactly one honest source: what the run *recorded that it
+ * read*. Not what facts exist — a connection can hold ad-set rows for eighty of
+ * ninety days because somebody ran a manual sync last week, and the other ten
+ * days are indistinguishable from ten days nothing delivered, because Meta
+ * returns no row for either. That is the same argument the planner already makes
+ * about facts in general, and widening the levels does not weaken it.
+ *
+ * `entity_levels` is a `jsonb` column, so it is whatever was written to it: a
+ * value that is not an array of known levels is treated as covering nothing,
+ * which fails closed. A run that read *more* than the current list still counts
+ * — the test is coverage, not equality — so shrinking the list later would not
+ * retroactively invalidate history.
+ */
+export function coversInsightsLevels(
+  entityLevels: unknown,
+  required: readonly SocialAdEntityLevel[] = INSIGHTS_ENTITY_LEVELS,
+): boolean {
+  if (!Array.isArray(entityLevels)) return false;
+
+  const covered = new Set(
+    entityLevels.filter((level): level is string => typeof level === 'string'),
+  );
+
+  return required.every((level) => covered.has(level));
+}
 
 /** Default retry ceiling, matching the column's own default. */
 export const SOCIAL_AD_SYNC_MAX_ATTEMPTS = 5;

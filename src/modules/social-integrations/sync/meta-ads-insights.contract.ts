@@ -5,10 +5,25 @@ import type {
   SocialAdMetricSource,
 } from '../entities/social-ad-metric-daily.entity';
 
-/** The levels this slice reads. Ad set and ad insights are a later decision. */
+/**
+ * The levels this pipeline reads.
+ *
+ * Ad set joined in I3.4 and `ad` deliberately did not. The rule that decided it
+ * is *the smallest grain that answers a question we actually have*: paid media
+ * destination — WhatsApp, Instagram Direct, Messenger, a website — is a property
+ * of the **ad set** (`destination_type`), so without ad-set insights the only
+ * way to report spend per destination is to apportion a campaign's money across
+ * ad sets that may not share a destination. That is not a measurement, it is an
+ * estimate presented as one, and it is why this type was widened rather than a
+ * ratio being invented downstream.
+ *
+ * `ad` stays out because nothing needs it. It multiplies the row count again —
+ * this account carries 254 ads against 126 ad sets — for a grain no current
+ * question is asked at, and the honest time to add it is when one is.
+ */
 export type SocialAdInsightsLevel = Extract<
   SocialAdEntityLevel,
-  'account' | 'campaign'
+  'account' | 'campaign' | 'adset'
 >;
 
 /**
@@ -35,8 +50,19 @@ export type NormalizedAdMetricDaily = {
   provider: SocialAdProvider;
   source: SocialAdMetricSource;
   entityLevel: SocialAdInsightsLevel;
-  /** `act_<digits>` at account level, the campaign id at campaign level. */
+  /**
+   * `act_<digits>` at account level, the campaign id at campaign level, the ad
+   * set id at ad set level. Always the id of the object the row *is about*.
+   */
   entityExternalId: string;
+  /**
+   * The campaign this row rolls up into, or null at account level.
+   *
+   * At ad set level it is the parent campaign rather than the row's own object,
+   * which is what makes `IDX_social_ad_metrics_daily_campaign` able to answer
+   * "this campaign's ad sets" without a join. It is never the identity — that
+   * is `entityExternalId` — and the two differ at exactly this level.
+   */
   campaignExternalId: string | null;
   /**
    * `date_start` verbatim, as a calendar day.

@@ -3,8 +3,13 @@ import type { Repository } from 'typeorm';
 import { AgencyDataSource } from '../../../database/agency-typeorm.datasource';
 import type { ResolvedAdCredential } from '../credentials/resolved-ad-credential';
 import type { SocialAdCredentialResolver } from '../credentials/social-ad-credential.resolver';
+import type { SocialAdEntityLevel } from '../entities/social-ad-entity.entity';
 import { SocialAdSyncRunEntity } from '../entities/social-ad-sync-run.entity';
-import { buildSyncIdempotencyKey } from '../sync/social-ad-sync-run.contract';
+import {
+  INSIGHTS_ENTITY_LEVELS,
+  buildSyncIdempotencyKey,
+  coversInsightsLevels,
+} from '../sync/social-ad-sync-run.contract';
 import type { SocialAdSyncConfigService } from './social-ad-sync-config.service';
 import { SocialAdSyncRunService } from './social-ad-sync-run.service';
 import { describePostgresIntegration } from '../../../testing/postgres-integration';
@@ -217,14 +222,24 @@ run('Backfill and intraday runs against PostgreSQL', () => {
   });
 
   describe('reading a chain back out of the log', () => {
-    const chunk = (until: string) =>
+    const chunk = (
+      until: string,
+      entityLevels: readonly SocialAdEntityLevel[] = INSIGHTS_ENTITY_LEVELS,
+    ) =>
       service.enqueue({
         ...base,
         runKind: 'backfill',
         windowStart: until,
         windowEnd: until,
-        entityLevels: ['account', 'campaign'],
+        entityLevels,
       });
+
+    /** What a chunk of this shape reads back as. */
+    const outcome = (until: string, status: string) => ({
+      until,
+      status,
+      entityLevels: [...INSIGHTS_ENTITY_LEVELS],
+    });
 
     it('returns every chunk with how it ended, newest first', async () => {
       const first = await chunk('2026-08-25');
@@ -239,9 +254,9 @@ run('Backfill and intraday runs against PostgreSQL', () => {
       // the newest window end is the plan's anchor whatever became of it, but
       // only `succeeded` counts as a week that was actually fetched.
       expect(await service.listBackfillChunkOutcomes(connectionId)).toEqual([
-        { until: '2026-08-25', status: 'succeeded' },
-        { until: '2026-08-18', status: 'dead_letter' },
-        { until: '2026-08-11', status: 'queued' },
+        outcome('2026-08-25', 'succeeded'),
+        outcome('2026-08-18', 'dead_letter'),
+        outcome('2026-08-11', 'queued'),
       ]);
     });
 
@@ -283,7 +298,7 @@ run('Backfill and intraday runs against PostgreSQL', () => {
       });
 
       expect(await service.listBackfillChunkOutcomes(connectionId)).toEqual([
-        { until: '2026-08-25', status: 'dead_letter' },
+        outcome('2026-08-25', 'dead_letter'),
       ]);
     });
 
@@ -297,9 +312,50 @@ run('Backfill and intraday runs against PostgreSQL', () => {
       await settle(second.run.id, 'succeeded');
 
       expect(await service.listBackfillChunkOutcomes(connectionId)).toEqual([
-        { until: '2026-08-25', status: 'dead_letter' },
-        { until: '2026-08-25', status: 'succeeded' },
+        outcome('2026-08-25', 'dead_letter'),
+        outcome('2026-08-25', 'succeeded'),
       ]);
+    });
+
+    /**
+     * §24 — coverage has to survive the round trip, or it certifies nothing.
+     *
+     * `entity_levels` is the durable record the planner reads back to decide
+     * whether a window still needs fetching. Asserted here rather than only in
+     * a unit test because the value passes through jsonb: an array that came
+     * back as a string, or under the raw column alias, would read as "covers
+     * nothing" and quietly re-fetch every chunk forever.
+     */
+    it('carries back the levels each chunk recorded that it read', async () => {
+      const legacy = await chunk('2026-08-25', ['account', 'campaign']);
+      await settle(legacy.run.id, 'succeeded');
+
+      const [stored] = await service.listBackfillChunkOutcomes(connectionId);
+
+      expect(stored.entityLevels).toEqual(['account', 'campaign']);
+      expect(coversInsightsLevels(stored.entityLevels)).toBe(false);
+    });
+
+    it('certifies a chunk that recorded the full level set', async () => {
+      const current = await chunk('2026-08-25');
+      await settle(current.run.id, 'succeeded');
+
+      const [stored] = await service.listBackfillChunkOutcomes(connectionId);
+
+      expect(coversInsightsLevels(stored.entityLevels)).toBe(true);
+    });
+
+    it('keeps a narrow and a wide attempt at one window as two runs', async () => {
+      // The levels are part of the idempotency key, so re-reading a window at
+      // a wider level set is a different intent — not a duplicate the unique
+      // index would collapse, which is what lets the chain do the work at all.
+      const legacy = await chunk('2026-08-25', ['account', 'campaign']);
+      await settle(legacy.run.id, 'succeeded');
+
+      const wide = await chunk('2026-08-25');
+
+      expect(wide.deduplicated).toBe(false);
+      expect(wide.run.id).not.toBe(legacy.run.id);
     });
 
     it('puts the anchor first by an order Postgres cannot vary', async () => {

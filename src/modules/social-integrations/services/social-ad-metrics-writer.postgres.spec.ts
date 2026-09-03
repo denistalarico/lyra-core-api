@@ -70,6 +70,7 @@ run('SocialAdMetricsWriterService against PostgreSQL', () => {
       `SELECT "spend", "impressions", "reach", "leads", "conversions",
               "conversion_value", "video_views", "actions", "metric_date",
               "account_timezone", "currency", "is_partial",
+              "entity_external_id", "campaign_external_id",
               "created_at", "synced_at", "raw", "sync_run_id"
        FROM "social_ad_metrics_daily"
        WHERE "connection_id" = '${connectionId}'
@@ -89,6 +90,8 @@ run('SocialAdMetricsWriterService against PostgreSQL', () => {
         account_timezone: string;
         currency: string;
         is_partial: boolean;
+        entity_external_id: string;
+        campaign_external_id: string | null;
         created_at: Date;
         synced_at: Date;
         raw: unknown;
@@ -261,5 +264,155 @@ run('SocialAdMetricsWriterService against PostgreSQL', () => {
     const [row] = await factsOf('2026-07-12');
 
     expect(row.reach).toBeNull();
+  });
+
+  /**
+   * §6 and §8 — ad set as a legitimate value of `entity_level`.
+   *
+   * These are the assertions the schema audit could only argue for: the CHECK
+   * constraint lists `adset`, the column is a `varchar`, and `entity_level` is
+   * the fifth column of `UQ_social_ad_metrics_daily_fact`. Whether all three
+   * hold together is a question for Postgres, not for a reviewer, which is why
+   * it is asked here rather than in a unit test — and why I3.4 needed no
+   * migration.
+   */
+  describe('ad set facts', () => {
+    const adsetFact = (overrides: Partial<NormalizedAdMetricDaily> = {}) =>
+      fact({
+        entityLevel: 'adset',
+        entityExternalId: '120244382526760411',
+        campaignExternalId: '120244382299410411',
+        metricDate: '2026-07-20',
+        ...overrides,
+      });
+
+    it('accepts adset as an entity level, with no migration', async () => {
+      // The CHECK constraint has listed all four levels since S2.2. If it did
+      // not, this insert would fail with a constraint violation rather than a
+      // type error, which is exactly the failure a schema audit can miss.
+      const written = await writer.upsert([adsetFact()]);
+
+      expect(written).toBe(1);
+      expect(await factsOf('2026-07-20', 'adset')).toHaveLength(1);
+    });
+
+    it('stores the ad set as the identity and the campaign as the parent', async () => {
+      const [row] = await factsOf('2026-07-20', 'adset');
+
+      expect(row.entity_external_id).toBe('120244382526760411');
+      expect(row.campaign_external_id).toBe('120244382299410411');
+    });
+
+    it('keeps two ad sets of one campaign as two rows for the same day', async () => {
+      await writer.upsert([
+        adsetFact({ entityExternalId: '120244382526760412' }),
+      ]);
+
+      const rows = await factsOf('2026-07-20', 'adset');
+
+      expect(rows).toHaveLength(2);
+      // Same parent on both: a campaign roll-up still finds them.
+      expect(new Set(rows.map((row) => row.campaign_external_id))).toEqual(
+        new Set(['120244382299410411']),
+      );
+    });
+
+    it('re-runs an ad set window without duplicating a row', async () => {
+      const before = await countRows();
+
+      // Two separate upserts, as two runs of the same window would be. One
+      // batch holding the same fact twice is a different question — Postgres
+      // rejects it outright ("cannot affect row a second time") — and the
+      // reader cannot produce it, because Meta returns one row per object
+      // per day.
+      await writer.upsert([adsetFact()]);
+      await writer.upsert([adsetFact()]);
+
+      expect(await countRows()).toBe(before);
+    });
+
+    it('restates an ad set day in place, as Meta restates it', async () => {
+      await writer.upsert([adsetFact({ spend: '99.990000', leads: '7' })]);
+
+      const [row] = (await factsOf('2026-07-20', 'adset')).filter(
+        (candidate) => candidate.entity_external_id === '120244382526760411',
+      );
+
+      expect(row.spend).toBe('99.990000');
+      expect(row.leads).toBe('7');
+    });
+
+    it('does not collide with a campaign that happens to share the id', async () => {
+      // §8, stated as a stored fact rather than as a reading of the index
+      // definition. Meta ids are unique per object *type*, not across types, so
+      // a unique key without `entity_level` would let an ad set silently
+      // overwrite a campaign's day — one number replacing another that means
+      // something else entirely.
+      const sharedId = '120244000000000999';
+
+      await writer.upsert([
+        fact({
+          entityLevel: 'campaign',
+          entityExternalId: sharedId,
+          campaignExternalId: sharedId,
+          metricDate: '2026-07-21',
+          spend: '10.000000',
+        }),
+        fact({
+          entityLevel: 'adset',
+          entityExternalId: sharedId,
+          campaignExternalId: '120244382299410411',
+          metricDate: '2026-07-21',
+          spend: '20.000000',
+        }),
+      ]);
+
+      const campaignRows = (await factsOf('2026-07-21', 'campaign')).filter(
+        (row) => row.entity_external_id === sharedId,
+      );
+      const adsetRows = (await factsOf('2026-07-21', 'adset')).filter(
+        (row) => row.entity_external_id === sharedId,
+      );
+
+      expect(campaignRows).toHaveLength(1);
+      expect(adsetRows).toHaveLength(1);
+      expect(campaignRows[0].spend).toBe('10.000000');
+      expect(adsetRows[0].spend).toBe('20.000000');
+    });
+
+    it('accepts a null reach on an ad set row too', async () => {
+      // Reach is non-additive at every grain, and ad set is the level most
+      // likely to be summed into a per-destination total.
+      await writer.upsert([
+        adsetFact({ metricDate: '2026-07-22', reach: null }),
+      ]);
+
+      const [row] = await factsOf('2026-07-22', 'adset');
+
+      expect(row.reach).toBeNull();
+    });
+
+    it('stores no ratio column for an ad set fact either', async () => {
+      // §9: facts, never quotients. The columns simply do not exist, which is
+      // the only way to guarantee nobody sums two of them.
+      const columns = (await queryRunner.query(
+        `SELECT column_name FROM information_schema.columns
+         WHERE table_name = 'social_ad_metrics_daily'`,
+      )) as { column_name: string }[];
+
+      const names = columns.map((column) => column.column_name);
+
+      for (const ratio of [
+        'ctr',
+        'cpc',
+        'cpm',
+        'cpl',
+        'cpa',
+        'roas',
+        'frequency',
+      ]) {
+        expect(names).not.toContain(ratio);
+      }
+    });
   });
 });

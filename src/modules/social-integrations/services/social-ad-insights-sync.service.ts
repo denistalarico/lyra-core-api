@@ -18,13 +18,21 @@ import { SocialAdMetricsWriterService } from './social-ad-metrics-writer.service
 /**
  * The levels this slice ingests, in order.
  *
- * Fixed internally rather than accepted from the request. Ad set and ad
- * insights multiply the row count by roughly the number of objects at that
- * level, and letting a caller ask for them would ship the volume decision
- * before anyone has measured it. Account first because it is the cheapest read
- * and the one whose totals every later level is checked against.
+ * Fixed internally rather than accepted from the request. A caller that could
+ * name levels would be a caller that could ask for `ad` — the level this
+ * pipeline deliberately does not ingest — and the list is also what a run's
+ * `entity_levels` records, so a request-supplied list would produce runs whose
+ * stored coverage described whatever that request happened to ask for.
+ *
+ * Coarsest first: the account totals are the cheapest read and the ones every
+ * finer sum is checked against, and ad set last so that a failure at the
+ * largest level leaves the two coarser windows already written.
  */
-const INGEST_LEVELS: readonly SocialAdInsightsLevel[] = ['account', 'campaign'];
+const INGEST_LEVELS: readonly SocialAdInsightsLevel[] = [
+  'account',
+  'campaign',
+  'adset',
+];
 
 export type SyncAdInsightsInput = SocialAdCredentialScope & {
   connectionId: string;
@@ -239,10 +247,11 @@ export class SocialAdInsightsSyncService {
   /**
    * One level of a closed window: read, refuse if truncated, write.
    *
-   * The unit both callers need. `syncInsights` loops over it for the two levels
-   * of a manual request; the worker calls it once per insights segment, so a
-   * rate limit that lands on the campaign read is recorded against
-   * `campaign_insights` and retried as that segment alone.
+   * The unit both callers need. `syncInsights` loops over it for the levels of
+   * a manual request; the worker calls it once per insights segment, so a rate
+   * limit that lands on the ad-set read is recorded against `adset_insights`
+   * and retried as that segment alone, rather than re-reading the account and
+   * campaign windows that already landed.
    *
    * Takes a credential rather than a scope, like the hierarchy's segment entry
    * point, and for the same reason: a run resolves once, and a method that

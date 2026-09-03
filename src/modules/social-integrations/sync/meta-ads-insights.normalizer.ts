@@ -148,11 +148,26 @@ export function normalizeMetricRow(
  * taking it from the response would let a redirected read write facts under an
  * id nobody checked.
  *
- * At campaign level the id has to come from Meta, and a row without one cannot
- * be attributed at all. A campaign that has no matching row in
+ * Below the account the id has to come from Meta, and a row without a readable
+ * one cannot be attributed at all. An object that has no matching row in
  * `social_ad_entities` is fine and expected: the facts table carries no foreign
- * key precisely so that a campaign created since the last hierarchy sync still
+ * key precisely so that an ad set created since the last hierarchy sync still
  * gets its spend recorded.
+ *
+ * Ad set is the level where identity and parent stop being the same value, and
+ * the distinction is load-bearing in both directions. `entityExternalId` is the
+ * ad set — it is what the unique key identifies and what a destination join
+ * matches on — while `campaignExternalId` is the campaign above it, which is
+ * what lets a campaign's ad sets be found without a join. Returning the
+ * campaign id as the identity would collapse every ad set of one campaign onto
+ * a single row per day and silently overwrite them in turn; returning the ad
+ * set id as the parent would make the campaign index point at objects that are
+ * not campaigns.
+ *
+ * A row that names an ad set but no campaign is refused rather than stored with
+ * a null parent. Meta returns both together at this level, so one without the
+ * other is a payload this code does not understand, and a skip is counted where
+ * a half-attributed fact would not be.
  */
 function readIdentity(
   row: Record<string, unknown>,
@@ -165,13 +180,26 @@ function readIdentity(
     };
   }
 
-  const campaignId = row.campaign_id;
+  const campaignId = readObjectId(row.campaign_id);
 
-  if (typeof campaignId !== 'string' || !OBJECT_ID_PATTERN.test(campaignId)) {
-    return null;
+  if (!campaignId) return null;
+
+  if (context.entityLevel === 'campaign') {
+    return { entityExternalId: campaignId, campaignExternalId: campaignId };
   }
 
-  return { entityExternalId: campaignId, campaignExternalId: campaignId };
+  const adsetId = readObjectId(row.adset_id);
+
+  if (!adsetId) return null;
+
+  return { entityExternalId: adsetId, campaignExternalId: campaignId };
+}
+
+/** A Meta object id below the account level: bare digits, or nothing. */
+function readObjectId(value: unknown): string | null {
+  return typeof value === 'string' && OBJECT_ID_PATTERN.test(value)
+    ? value
+    : null;
 }
 
 /** `date_start` as it arrived, or nothing. No parsing, no conversion. */

@@ -42,10 +42,20 @@ const SETTLED: readonly SocialAdSyncRunStatus[] = [
   'cancelled',
 ];
 
-/** How one backfill chunk ended, keyed by the day its window closes on. */
+/**
+ * How one backfill chunk ended, keyed by the day its window closes on.
+ *
+ * `entityLevels` is what that run recorded it read, carried alongside the
+ * status because a window is only covered when *both* are right: a run that
+ * succeeded at account and campaign level did not fetch the ad-set history a
+ * later reader will ask for, and status alone cannot tell the two apart. It is
+ * read back exactly as stored — a `jsonb` array — and interpreted by
+ * `coversInsightsLevels`, which fails closed on anything it does not recognize.
+ */
 export type SocialAdBackfillChunkOutcome = {
   until: string;
   status: SocialAdSyncRunStatus;
+  entityLevels: unknown;
 };
 
 export type EnqueueSyncRunInput = {
@@ -344,6 +354,9 @@ export class SocialAdSyncRunService {
       .createQueryBuilder('run')
       .select(`to_char(run.window_end, 'YYYY-MM-DD')`, 'until')
       .addSelect('run.status', 'status')
+      // What this run recorded that it read. The planner needs it to tell a
+      // chunk covered before ad-set insights existed from one covered after.
+      .addSelect('run.entity_levels', 'entity_levels')
       .where('run.connection_id = :connectionId', { connectionId })
       .andWhere(`run.run_kind = 'backfill'`)
       .andWhere('run.window_end IS NOT NULL')
@@ -366,9 +379,17 @@ export class SocialAdSyncRunService {
       .orderBy('run.window_end', 'DESC')
       .addOrderBy('run.created_at', 'ASC')
       .addOrderBy('run.id', 'ASC')
-      .getRawMany<{ until: string; status: SocialAdSyncRunStatus }>();
+      .getRawMany<{
+        until: string;
+        status: SocialAdSyncRunStatus;
+        entity_levels: unknown;
+      }>();
 
-    return rows.map((row) => ({ until: row.until, status: row.status }));
+    return rows.map((row) => ({
+      until: row.until,
+      status: row.status,
+      entityLevels: row.entity_levels,
+    }));
   }
 
   /**

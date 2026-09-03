@@ -294,7 +294,7 @@ describe('SocialAdSyncScheduler — intraday', () => {
         // into a partial write.
         windowStart: '2026-08-26',
         windowEnd: '2026-08-26',
-        entityLevels: ['account', 'campaign'],
+        entityLevels: ['account', 'campaign', 'adset'],
         bucket: 'h09',
         requestedById: null,
       }),

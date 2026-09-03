@@ -605,7 +605,13 @@ run('Destination observations against PostgreSQL', () => {
     it('closes each interval at the next observation', async () => {
       const adSet = await createAdSet(`adset-intervals-${randomUUID()}`);
 
-      await observe(adSet, 'whatsapp', 'WHATSAPP', '2026-08-01T10:00:00Z', null);
+      await observe(
+        adSet,
+        'whatsapp',
+        'WHATSAPP',
+        '2026-08-01T10:00:00Z',
+        null,
+      );
       await observe(
         adSet,
         'instagram_direct',
@@ -643,7 +649,13 @@ run('Destination observations against PostgreSQL', () => {
       const first = await createAdSet(`adset-a-${randomUUID()}`);
       const second = await createAdSet(`adset-b-${randomUUID()}`);
 
-      await observe(first, 'whatsapp', 'WHATSAPP', '2026-08-01T10:00:00Z', null);
+      await observe(
+        first,
+        'whatsapp',
+        'WHATSAPP',
+        '2026-08-01T10:00:00Z',
+        null,
+      );
       await observe(
         second,
         'messenger',
@@ -653,7 +665,9 @@ run('Destination observations against PostgreSQL', () => {
       );
 
       const intervals = await intervalsFor(null);
-      const firstIntervals = intervals.filter((row) => row.adEntityId === first);
+      const firstIntervals = intervals.filter(
+        (row) => row.adEntityId === first,
+      );
 
       expect(firstIntervals).toHaveLength(1);
       expect(firstIntervals[0].observedUntil).toBeNull();
@@ -669,7 +683,13 @@ run('Destination observations against PostgreSQL', () => {
     it('cuts interval days in the account timezone', async () => {
       const adSet = await createAdSet(`adset-tz-${randomUUID()}`);
 
-      await observe(adSet, 'whatsapp', 'WHATSAPP', '2026-08-11T00:30:00Z', null);
+      await observe(
+        adSet,
+        'whatsapp',
+        'WHATSAPP',
+        '2026-08-11T00:30:00Z',
+        null,
+      );
 
       const [utc] = (await intervalsFor(null)).filter(
         (row) => row.adEntityId === adSet,
@@ -690,7 +710,13 @@ run('Destination observations against PostgreSQL', () => {
     it('resolves a return to a previous destination as its own interval', async () => {
       const adSet = await createAdSet(`adset-return-${randomUUID()}`);
 
-      await observe(adSet, 'whatsapp', 'WHATSAPP', '2026-08-01T10:00:00Z', null);
+      await observe(
+        adSet,
+        'whatsapp',
+        'WHATSAPP',
+        '2026-08-01T10:00:00Z',
+        null,
+      );
       await observe(
         adSet,
         'instagram_direct',
@@ -698,7 +724,13 @@ run('Destination observations against PostgreSQL', () => {
         '2026-08-10T10:00:00Z',
         null,
       );
-      await observe(adSet, 'whatsapp', 'WHATSAPP', '2026-08-20T10:00:00Z', null);
+      await observe(
+        adSet,
+        'whatsapp',
+        'WHATSAPP',
+        '2026-08-20T10:00:00Z',
+        null,
+      );
 
       const intervals = (await intervalsFor(null)).filter(
         (row) => row.adEntityId === adSet,
@@ -729,7 +761,13 @@ run('Destination observations against PostgreSQL', () => {
     it('reports the days no observation can speak for', async () => {
       const adSet = await createAdSet(`adset-coverage-${randomUUID()}`);
 
-      await observe(adSet, 'whatsapp', 'WHATSAPP', '2026-08-03T10:00:00Z', null);
+      await observe(
+        adSet,
+        'whatsapp',
+        'WHATSAPP',
+        '2026-08-03T10:00:00Z',
+        null,
+      );
 
       const intervals = (await intervalsFor(null)).filter(
         (row) => row.adEntityId === adSet,
@@ -751,6 +789,247 @@ run('Destination observations against PostgreSQL', () => {
       expect(coverage.coveredDays).toBe(2);
       expect(coverage.unknownDays).toBe(2);
       expect(coverage.observationCadenceHours).toBe(24);
+    });
+  });
+
+  /**
+   * §21 — the join I3.4 makes possible, proved and deliberately not shipped.
+   *
+   * The task asks only that spend-by-destination *become* expressible. So this
+   * runs the query rather than adding it to a service: the point is that the
+   * three tables now line up — an ad-set metric row, the ad-set entity it
+   * describes, and that ad set's destination as of the metric's own day — and
+   * that the numbers come out per-destination without anything being
+   * apportioned.
+   *
+   * Before I3.4 this query could not be written at all: `social_ad_metrics_daily`
+   * held no `entity_level = 'adset'` row to join from, and the only alternative
+   * was to split a campaign's money across its ad sets by a weight nobody
+   * measured. Nothing here is wired into a read path, and no dashboard number
+   * changes.
+   */
+  describe('what ad-set metrics now make expressible', () => {
+    const spendByDestination = (since: string, until: string) =>
+      select<{ destination_type: string | null; spend: string; leads: string }>(
+        `SELECT resolved."destination_type",
+                SUM(fact."spend")::text AS spend,
+                SUM(fact."leads")::text AS leads
+           FROM "social_ad_metrics_daily" fact
+           JOIN "social_ad_entities" entity
+             ON entity."tenant_id" = fact."tenant_id"
+            AND entity."workspace_id" = fact."workspace_id"
+            AND entity."connection_id" = fact."connection_id"
+            AND entity."entity_level" = 'adset'
+            AND entity."external_id" = fact."entity_external_id"
+           -- The destination as of the metric's own day: the newest observation
+           -- at or before it, per ad set. Never the current value — that would
+           -- retroject today's configuration onto last month's spend.
+           LEFT JOIN LATERAL (
+             SELECT observation."destination_type"
+               FROM "social_ad_destination_observations" observation
+              WHERE observation."ad_entity_id" = entity."id"
+                AND observation."observed_at" <= (fact."metric_date" + 1)
+              ORDER BY observation."observed_at" DESC
+              LIMIT 1
+           ) resolved ON TRUE
+          WHERE fact."tenant_id" = $1
+            AND fact."workspace_id" = $2
+            AND fact."connection_id" = $3
+            -- The filter that makes this honest rather than tripled: without
+            -- it the account and campaign rows for the same days join in too.
+            AND fact."entity_level" = 'adset'
+            AND fact."source" = 'paid'
+            AND fact."attribution_setting" = 'account_default'
+            AND fact."metric_date" BETWEEN $4::date AND $5::date
+          GROUP BY resolved."destination_type"
+          ORDER BY resolved."destination_type" NULLS LAST`,
+        [tenantId, workspaceId, connectionId, since, until],
+      );
+
+    const insertAdsetFact = (input: {
+      adsetExternalId: string;
+      metricDate: string;
+      spend: string;
+      leads: string;
+      entityLevel?: string;
+    }) =>
+      select(
+        `INSERT INTO "social_ad_metrics_daily"
+           ("tenant_id", "workspace_id", "connection_id", "provider", "source",
+            "entity_level", "entity_external_id", "campaign_external_id",
+            "metric_date", "account_timezone", "currency",
+            "attribution_setting", "spend", "impressions", "clicks",
+            "link_clicks", "leads", "conversions", "conversion_value",
+            "video_views")
+         VALUES ($1, $2, $3, 'meta_ads', 'paid', $4, $5, 'campaign-x', $6,
+                 'America/Sao_Paulo', 'BRL', 'account_default', $7, 100, 10, 5,
+                 $8, 0, 0, 0)`,
+        [
+          tenantId,
+          workspaceId,
+          connectionId,
+          input.entityLevel ?? 'adset',
+          input.adsetExternalId,
+          input.metricDate,
+          input.spend,
+          input.leads,
+        ],
+      );
+
+    it('splits spend and leads by destination, with nothing apportioned', async () => {
+      const external = `adset-dest-${randomUUID()}`;
+      const otherExternal = `adset-dest-${randomUUID()}`;
+
+      const whatsappAdSet = await createAdSet(external);
+      const directAdSet = await createAdSet(otherExternal);
+
+      await observe(
+        whatsappAdSet,
+        'whatsapp',
+        'WHATSAPP',
+        '2026-08-01T10:00:00Z',
+        null,
+      );
+      await observe(
+        directAdSet,
+        'instagram_direct',
+        'INSTAGRAM_DIRECT',
+        '2026-08-01T10:00:00Z',
+        null,
+      );
+
+      await insertAdsetFact({
+        adsetExternalId: external,
+        metricDate: '2026-08-10',
+        spend: '60.000000',
+        leads: '6',
+      });
+      await insertAdsetFact({
+        adsetExternalId: otherExternal,
+        metricDate: '2026-08-10',
+        spend: '40.000000',
+        leads: '4',
+      });
+
+      const rows = await spendByDestination('2026-08-10', '2026-08-10');
+      const byDestination = new Map(
+        rows.map((row) => [row.destination_type, row]),
+      );
+
+      // Each ad set's own money under its own destination. No campaign total
+      // was divided by anything.
+      expect(byDestination.get('whatsapp')?.spend).toBe('60.000000');
+      expect(byDestination.get('whatsapp')?.leads).toBe('6');
+      expect(byDestination.get('instagram_direct')?.spend).toBe('40.000000');
+      expect(byDestination.get('instagram_direct')?.leads).toBe('4');
+    });
+
+    it('uses the destination of the day, not the destination of today', async () => {
+      const external = `adset-switch-${randomUUID()}`;
+      const adSet = await createAdSet(external);
+
+      await observe(
+        adSet,
+        'whatsapp',
+        'WHATSAPP',
+        '2026-09-01T10:00:00Z',
+        null,
+      );
+      await observe(
+        adSet,
+        'instagram_direct',
+        'INSTAGRAM_DIRECT',
+        '2026-09-20T10:00:00Z',
+        null,
+      );
+
+      await insertAdsetFact({
+        adsetExternalId: external,
+        metricDate: '2026-09-10',
+        spend: '25.000000',
+        leads: '1',
+      });
+
+      const rows = (
+        await spendByDestination('2026-09-10', '2026-09-10')
+      ).filter((row) => row.spend === '25.000000');
+
+      // The ad set points at Instagram Direct *now*; on 10/09 it pointed at
+      // WhatsApp. Reading the entity's current column instead of its history
+      // would file this spend under the wrong channel.
+      expect(rows[0]?.destination_type).toBe('whatsapp');
+    });
+
+    it('reports spend before the first observation as unknown, never guessed', async () => {
+      const external = `adset-before-${randomUUID()}`;
+      const adSet = await createAdSet(external);
+
+      await observe(
+        adSet,
+        'whatsapp',
+        'WHATSAPP',
+        '2026-10-15T10:00:00Z',
+        null,
+      );
+
+      await insertAdsetFact({
+        adsetExternalId: external,
+        metricDate: '2026-10-01',
+        spend: '33.000000',
+        leads: '3',
+      });
+
+      const rows = (
+        await spendByDestination('2026-10-01', '2026-10-01')
+      ).filter((row) => row.spend === '33.000000');
+
+      // Null, not back-projected. Meta gives no timestamp for a destination
+      // change, so what the ad set pointed at two weeks before we first looked
+      // is genuinely unknown.
+      expect(rows[0]?.destination_type).toBeNull();
+    });
+
+    it('does not double count when the coarser levels hold the same days', async () => {
+      const external = `adset-nodouble-${randomUUID()}`;
+      const adSet = await createAdSet(external);
+
+      await observe(
+        adSet,
+        'messenger',
+        'MESSENGER',
+        '2026-11-01T10:00:00Z',
+        null,
+      );
+
+      await insertAdsetFact({
+        adsetExternalId: external,
+        metricDate: '2026-11-05',
+        spend: '15.000000',
+        leads: '2',
+      });
+      // The same day's money as the account and campaign see it. These rows are
+      // real and correct; they simply are not ad sets.
+      await insertAdsetFact({
+        adsetExternalId: external,
+        metricDate: '2026-11-05',
+        spend: '15.000000',
+        leads: '2',
+        entityLevel: 'campaign',
+      });
+      await insertAdsetFact({
+        adsetExternalId: external,
+        metricDate: '2026-11-05',
+        spend: '15.000000',
+        leads: '2',
+        entityLevel: 'account',
+      });
+
+      const rows = await spendByDestination('2026-11-05', '2026-11-05');
+      const messenger = rows.find(
+        (row) => row.destination_type === 'messenger',
+      );
+
+      expect(messenger?.spend).toBe('15.000000');
     });
   });
 });

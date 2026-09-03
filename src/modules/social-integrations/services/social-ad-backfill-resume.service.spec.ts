@@ -2,6 +2,7 @@
 import type { ResolvedAdCredential } from '../credentials/resolved-ad-credential';
 import { SocialAdCredentialError } from '../credentials/social-ad-credential.error';
 import type { SocialAdCredentialResolver } from '../credentials/social-ad-credential.resolver';
+import { INSIGHTS_ENTITY_LEVELS } from '../sync/social-ad-sync-run.contract';
 import {
   SocialAdBackfillResumeError,
   SocialAdSyncDisabledError,
@@ -28,7 +29,11 @@ function createHarness(
   options: {
     enabled?: boolean;
     backfillDays?: number;
-    outcomes?: (string | SocialAdBackfillChunkOutcome)[];
+    outcomes?: (
+      | string
+      | (Omit<SocialAdBackfillChunkOutcome, 'entityLevels'> &
+          Partial<Pick<SocialAdBackfillChunkOutcome, 'entityLevels'>>)
+    )[];
     resolveError?: Error;
   } = {},
 ) {
@@ -46,9 +51,17 @@ function createHarness(
     },
   } as SocialAdSyncConfigService;
 
+  // As in the planner spec: a bare `until` is a chunk that succeeded having
+  // read every level currently ingested, so pre-I3.4 cases keep their meaning.
   const outcomes: SocialAdBackfillChunkOutcome[] = (options.outcomes ?? []).map(
     (entry) =>
-      typeof entry === 'string' ? { until: entry, status: 'succeeded' } : entry,
+      typeof entry === 'string'
+        ? {
+            until: entry,
+            status: 'succeeded',
+            entityLevels: [...INSIGHTS_ENTITY_LEVELS],
+          }
+        : { entityLevels: [...INSIGHTS_ENTITY_LEVELS], ...entry },
   );
 
   const runService = {
@@ -103,7 +116,7 @@ describe('SocialAdBackfillResumeService', () => {
       runKind: 'backfill',
       windowStart: '2026-08-12',
       windowEnd: shift(ANCHOR, -7),
-      entityLevels: ['account', 'campaign'],
+      entityLevels: ['account', 'campaign', 'adset'],
     });
   });
 

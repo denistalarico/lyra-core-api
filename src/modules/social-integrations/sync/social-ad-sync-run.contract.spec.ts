@@ -1,6 +1,9 @@
 import {
+  INSIGHTS_LEVEL_BY_SEGMENT,
   SYNC_SEGMENTS_BY_KIND,
   buildSyncIdempotencyKey,
+  coversInsightsLevels,
+  isInsightsSegment,
 } from './social-ad-sync-run.contract';
 
 const BASE = {
@@ -89,11 +92,98 @@ describe('SYNC_SEGMENTS_BY_KIND', () => {
         'hierarchy',
         'account_insights',
         'campaign_insights',
+        'adset_insights',
       ]);
     }
   });
 
   it('gives a hierarchy run nothing that needs a window', () => {
     expect(SYNC_SEGMENTS_BY_KIND.entities).toEqual(['hierarchy']);
+  });
+
+  it('reads insights coarsest first, so a failure costs the finest level', () => {
+    // Ad set is the largest read and the last one. When it fails, the account
+    // and campaign facts for the window have already landed — which is what
+    // makes an ad-set rate limit a `partial` run rather than a lost window.
+    for (const kind of ['manual', 'daily', 'backfill', 'intraday'] as const) {
+      const insights = SYNC_SEGMENTS_BY_KIND[kind].filter(isInsightsSegment);
+
+      expect(insights).toEqual([
+        'account_insights',
+        'campaign_insights',
+        'adset_insights',
+      ]);
+    }
+  });
+
+  it('ingests ad set on every insights kind, intraday included', () => {
+    // Destination lives on the ad set, so a kind that skipped this level would
+    // make per-destination numbers blind to the period it covers. Intraday is
+    // the one that would have been tempting to leave out.
+    for (const kind of ['manual', 'daily', 'backfill', 'intraday'] as const) {
+      expect(SYNC_SEGMENTS_BY_KIND[kind]).toContain('adset_insights');
+    }
+  });
+});
+
+describe('INSIGHTS_LEVEL_BY_SEGMENT', () => {
+  it('maps each insights segment to the level it reads', () => {
+    expect(INSIGHTS_LEVEL_BY_SEGMENT).toEqual({
+      account_insights: 'account',
+      campaign_insights: 'campaign',
+      adset_insights: 'adset',
+    });
+  });
+
+  it('covers every insights segment, so no segment falls through a default', () => {
+    // The worker used to pick the level with
+    // `segment === 'account_insights' ? 'account' : 'campaign'`. That silently
+    // read a third segment at the wrong level; this map is total, so the
+    // compiler catches the fourth.
+    const insightsSegments = new Set(
+      Object.values(SYNC_SEGMENTS_BY_KIND).flat().filter(isInsightsSegment),
+    );
+
+    for (const segment of insightsSegments) {
+      expect(INSIGHTS_LEVEL_BY_SEGMENT[segment]).toBeDefined();
+    }
+  });
+
+  it('does not treat the hierarchy as an insights segment', () => {
+    expect(isInsightsSegment('hierarchy')).toBe(false);
+  });
+});
+
+describe('coversInsightsLevels', () => {
+  it('accepts a run that recorded every level currently ingested', () => {
+    expect(coversInsightsLevels(['account', 'campaign', 'adset'])).toBe(true);
+  });
+
+  it('rejects a run written before ad set insights existed', () => {
+    // The exact shape of every backfill run on the existing production
+    // connection: thirteen chunks, all `succeeded`, all `["account","campaign"]`.
+    // They fetched what they claimed; they simply never asked for ad set.
+    expect(coversInsightsLevels(['account', 'campaign'])).toBe(false);
+  });
+
+  it('accepts a run that read more levels than are required', () => {
+    // Coverage, not equality. A `daily` run records all four hierarchy levels.
+    expect(coversInsightsLevels(['account', 'campaign', 'adset', 'ad'])).toBe(
+      true,
+    );
+  });
+
+  it('fails closed on anything that is not a list of levels', () => {
+    // `entity_levels` is jsonb: it holds whatever was written to it. Treating
+    // an unreadable value as full coverage would certify history nobody read.
+    for (const value of [null, undefined, {}, 'account', 42, [1, 2]]) {
+      expect(coversInsightsLevels(value)).toBe(false);
+    }
+  });
+
+  it('honours an explicit requirement, so a narrower question can be asked', () => {
+    expect(coversInsightsLevels(['account', 'campaign'], ['account'])).toBe(
+      true,
+    );
   });
 });

@@ -132,6 +132,100 @@ describe('MetaAdsInsightsReaderService — the request', () => {
     expect(String(harness.requests[1].fields)).toContain('campaign_id');
   });
 
+  describe('ad set level', () => {
+    async function readAdset() {
+      const harness = createReader();
+
+      await harness.reader.read({
+        credential: credential(),
+        level: 'adset',
+        window: WINDOW,
+        isPartial: false,
+        syncedAt: SYNCED_AT,
+      });
+
+      return harness;
+    }
+
+    it('names level=adset explicitly', async () => {
+      const harness = await readAdset();
+
+      expect((harness.requests[0].params as Record<string, string>).level).toBe(
+        'adset',
+      );
+    });
+
+    it('asks for both ids, so a fact knows itself and its parent', async () => {
+      const harness = await readAdset();
+
+      expect(String(harness.requests[0].fields)).toContain('adset_id');
+      expect(String(harness.requests[0].fields)).toContain('campaign_id');
+    });
+
+    it('asks for adset_id at no other level', async () => {
+      const harness = createReader();
+      const resolved = credential();
+
+      for (const level of ['account', 'campaign'] as const) {
+        await harness.reader.read({
+          credential: resolved,
+          level,
+          window: WINDOW,
+          isPartial: false,
+          syncedAt: SYNCED_AT,
+        });
+      }
+
+      for (const request of harness.requests) {
+        expect(String(request.fields)).not.toContain('adset_id');
+      }
+    });
+
+    it('keeps the same measurement contract as the coarser levels', async () => {
+      // §12: no new parameter for this level. The same attribution setting and
+      // the same daily increment, so ad-set rows are comparable with the
+      // account totals rather than measured a second way.
+      const harness = await readAdset();
+
+      expect(harness.requests[0]).toMatchObject({
+        path: `${ACCOUNT_ID}/insights`,
+        params: {
+          time_increment: '1',
+          time_range: '{"since":"2026-07-06","until":"2026-07-22"}',
+          use_account_attribution_setting: 'true',
+        },
+      });
+    });
+
+    it('asks for no name and no ratio at ad set level either', async () => {
+      const harness = await readAdset();
+      const fields = String(harness.requests[0].fields);
+
+      for (const forbidden of [
+        'adset_name',
+        'campaign_name',
+        'ctr',
+        'cpc',
+        'cpm',
+        'frequency',
+        'cost_per_action_type',
+      ]) {
+        expect(fields).not.toContain(forbidden);
+      }
+    });
+
+    it('reads the whole level in one paginated call, never one per ad set', async () => {
+      // §3 and §21: ad-set insights come from the *account's* insights edge
+      // with `level=adset`. A loop over ad sets would be 126 requests against a
+      // CPU-metered quota to learn what this one request already returns.
+      const harness = await readAdset();
+
+      expect(harness.graph.readEdge).toHaveBeenCalledTimes(1);
+      expect(harness.requests[0].path).toBe(`${ACCOUNT_ID}/insights`);
+      expect(String(harness.requests[0].path)).not.toContain('/adsets');
+    });
+  });
+
   it('asks for no ratio and no campaign name', async () => {
     const harness = createReader();
 

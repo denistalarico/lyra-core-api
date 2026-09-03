@@ -8,6 +8,7 @@ import {
   INSIGHTS_ENTITY_LEVELS,
   SYNC_ENTITY_LEVELS,
   buildSyncIdempotencyKey,
+  coversInsightsLevels,
   type SocialAdSyncRunKind,
 } from '../sync/social-ad-sync-run.contract';
 import type { SocialAdSchedulableConnection } from './social-ad-connection.service';
@@ -56,12 +57,23 @@ export function advancesBackfillChain(runKind: string): boolean {
  *
  * The order below is the precedence, and it is not arbitrary:
  *
- * - `covered` first. *Any* succeeded run settles the window forever — that is
- *   what makes a retry able to unstick a chain.
+ * - `covered` first. *Any* succeeded run **that read every level we now ingest**
+ *   settles the window forever — that is what makes a retry able to unstick a
+ *   chain.
  * - `in_flight` next, so a resumed chunk reads as busy rather than as the
  *   failure it is being retried for.
  * - `stalled` only when every attempt has settled without succeeding.
- * - `not_started` when the log has nothing for this window at all.
+ * - `not_started` when the log has nothing for this window at all — **or when
+ *   everything it has succeeded at a narrower set of levels.**
+ *
+ * That last clause is I3.4's whole migration story, and it is worth stating
+ * plainly. A chunk whose only run succeeded under `["account","campaign"]` is
+ * `not_started`, not `stalled`: nothing about it failed, and nothing about it
+ * needs an operator. It simply has not been asked the question the plan now
+ * asks, so the chain enqueues it exactly as it would a window nobody had ever
+ * requested. Calling it `stalled` instead would be worse in the way that
+ * matters — the chain would refuse to move and would wait for a human to resume
+ * thirteen windows by hand.
  */
 export type SocialAdBackfillChunkState =
   | 'covered'
@@ -95,7 +107,16 @@ export function resolveChunkState(
 ): SocialAdBackfillChunkState {
   if (!outcomes.length) return 'not_started';
 
-  if (outcomes.some((outcome) => outcome.status === 'succeeded')) {
+  // Both halves, and in this order. A succeeded run that read a narrower set of
+  // levels than we now ingest did its job completely — it is simply not an
+  // answer to the question being asked.
+  if (
+    outcomes.some(
+      (outcome) =>
+        outcome.status === 'succeeded' &&
+        coversInsightsLevels(outcome.entityLevels),
+    )
+  ) {
     return 'covered';
   }
 
@@ -103,7 +124,23 @@ export function resolveChunkState(
     return 'in_flight';
   }
 
-  return 'stalled';
+  /**
+   * Everything settled, nothing covered. Which of the two reasons is it?
+   *
+   * A window whose attempts *failed* is stalled: something went wrong, retries
+   * are spent, and an operator has to decide. A window that only ever succeeded
+   * at a narrower level set has nothing wrong with it — it predates the level —
+   * so it reads as `not_started` and the chain fetches it on its own.
+   *
+   * Mixing the two would be a real regression in both directions: a genuinely
+   * dead-lettered week would quietly re-enqueue forever, or an entire existing
+   * connection would need thirteen manual resumes to gain ad-set history.
+   */
+  const everySettledRunSucceeded = outcomes.every(
+    (outcome) => outcome.status === 'succeeded',
+  );
+
+  return everySettledRunSucceeded ? 'not_started' : 'stalled';
 }
 
 const IN_FLIGHT_STATUSES: readonly string[] = ['queued', 'processing'];
@@ -178,7 +215,13 @@ export function groupOutcomesByWindow(
  * window end among its own backfill runs:
  *
  * > every chunk in that plan has at least one `backfill` run that ended
- * > `succeeded`.
+ * > `succeeded` **and recorded every insights level currently ingested**.
+ *
+ * The second clause arrived with I3.4, and it is the reason a connection that
+ * was certified 13/13 before ad-set insights existed is not silently treated as
+ * holding ad-set history it never fetched. Coverage is a claim about *what was
+ * read*, so widening what we read necessarily narrows what an old run certifies.
+ * See `coversInsightsLevels` and `INSIGHTS_ENTITY_LEVELS`.
  *
  * Nothing weaker counts. A chunk whose every attempt ended `partial`, `failed`,
  * `dead_letter` or `cancelled` fetched some or none of its week, so a plan
@@ -203,7 +246,11 @@ export function groupOutcomesByWindow(
  * - **No backfill runs at all** → a chain starts. That is the only condition
  *   that starts one, whatever facts the connection already holds.
  * - **Backfill runs exist** → continue the existing plan from its own anchor,
- *   which never moves, so a finished plan cannot renew itself.
+ *   which never moves, so a finished plan cannot renew itself. A plan whose
+ *   chunks succeeded at a narrower level set is *not* finished: those windows
+ *   read as `not_started` and the chain re-fetches them, one at a time, at the
+ *   same boundaries, writing the levels that were missing. It renews once per
+ *   widening of `INSIGHTS_ENTITY_LEVELS` and never on its own.
  * - **The first uncovered chunk is `stalled`** → stop and report
  *   `chain_stalled`. No new work while a week is unaccounted for, and no
  *   automatic re-attempt of a window that has already exhausted its retries.
@@ -295,6 +342,17 @@ export class SocialAdBackfillPlannerService {
      * Every status feeds the anchor, failures included: the anchor records
      * where the plan *started*, which does not change because a week later
      * failed. Only coverage cares how a chunk ended.
+     *
+     * Every *level set* feeds it too, and that is what makes I3.4's ad-set
+     * sweep land on the same thirteen windows as the original chain rather than
+     * on thirteen new ones cut from today. The runs that covered only account
+     * and campaign still anchor the plan; they merely no longer certify it. Had
+     * the anchor been filtered to fully-covering runs, a connection whose old
+     * chunks all predate ad set would have found no anchor at all, re-anchored
+     * at yesterday, and written a second, offset set of windows overlapping the
+     * first — the exact sliding-plan failure `planBackfillChunks` exists to
+     * prevent, and it would have been invisible because every day would still
+     * have had facts.
      *
      * A chain that does not exist yet anchors at the account's last settled
      * day, which is the newest day a closed window may legally cover.

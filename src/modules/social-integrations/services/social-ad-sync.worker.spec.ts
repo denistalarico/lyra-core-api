@@ -67,7 +67,7 @@ type HarnessOptions = {
   runs?: SocialAdSyncRunEntity[];
   resolveError?: Error;
   hierarchyError?: Error;
-  insightsErrorFor?: 'account' | 'campaign';
+  insightsErrorFor?: 'account' | 'campaign' | 'adset';
   insightsError?: Error;
 };
 
@@ -117,23 +117,25 @@ function createHarness(options: HarnessOptions = {}) {
   };
 
   const insightsSync = {
-    ingestLevel: jest.fn(async (input: { level: 'account' | 'campaign' }) => {
-      order.push(`${input.level}_insights`);
-      levels.push(input.level);
+    ingestLevel: jest.fn(
+      async (input: { level: 'account' | 'campaign' | 'adset' }) => {
+        order.push(`${input.level}_insights`);
+        levels.push(input.level);
 
-      if (options.insightsError && options.insightsErrorFor === input.level) {
-        throw options.insightsError;
-      }
+        if (options.insightsError && options.insightsErrorFor === input.level) {
+          throw options.insightsError;
+        }
 
-      return {
-        level: input.level,
-        status: 'completed',
-        read: 5,
-        written: 5,
-        skipped: 0,
-        apiCalls: 1,
-      };
-    }),
+        return {
+          level: input.level,
+          status: 'completed',
+          read: 5,
+          written: 5,
+          skipped: 0,
+          apiCalls: 1,
+        };
+      },
+    ),
   };
 
   const connectionService = {
@@ -188,7 +190,24 @@ describe('SocialAdSyncWorker — a run that works', () => {
       'hierarchy',
       'account_insights',
       'campaign_insights',
+      'adset_insights',
     ]);
+  });
+
+  it('reads each insights segment at its own level', async () => {
+    // The worker used to derive the level with a ternary that sent anything
+    // other than `account_insights` to `campaign`. With three segments that
+    // would have written campaign rows for the ad-set segment — the same
+    // numbers under the wrong grain, which no later read could detect.
+    const harness = createHarness();
+
+    await harness.worker.processDue();
+
+    const levels = harness.insightsSync.ingestLevel.mock.calls.map(
+      ([input]: [{ level: string }]) => input.level,
+    );
+
+    expect(levels).toEqual(['account', 'campaign', 'adset']);
   });
 
   it('resolves the credential once for the whole run', async () => {
@@ -248,12 +267,14 @@ describe('SocialAdSyncWorker — a run that works', () => {
       expect.objectContaining({
         runId: 'run-a',
         counters: {
-          rowsWritten: 10,
+          // Three insights segments now, not two: the harness returns five
+          // rows and one API call per level.
+          rowsWritten: 15,
           // One unkeyable hierarchy row: the column counts everything the
           // pipeline saw and could not store, whichever level produced it.
           rowsSkipped: 1,
           entitiesWritten: 12,
-          apiCalls: 6,
+          apiCalls: 7,
         },
         failedSegments: [],
         lastError: null,
@@ -305,8 +326,11 @@ describe('SocialAdSyncWorker — a run that works', () => {
   });
 
   it('falls back to the full plan when the stored one names nothing real', async () => {
+    // `ad_insights` is deliberately not a segment: `ad` is the one level this
+    // pipeline does not ingest. The value this test used to use for "not a real
+    // segment" was `adset_insights`, which I3.4 made real.
     const harness = createHarness({
-      runs: [run({ failedSegments: [{ segment: 'adset_insights' }] })],
+      runs: [run({ failedSegments: [{ segment: 'ad_insights' }] })],
     });
 
     await harness.worker.processDue();
@@ -315,6 +339,7 @@ describe('SocialAdSyncWorker — a run that works', () => {
       'hierarchy',
       'account_insights',
       'campaign_insights',
+      'adset_insights',
     ]);
   });
 });
@@ -342,10 +367,39 @@ describe('SocialAdSyncWorker — a run that partly works', () => {
             segment: 'campaign_insights',
             errorCode: 'meta_permission_denied',
           },
+          // Never reached: the run stops at the first failure rather than
+          // spending another request discovering the same permission problem.
+          { segment: 'adset_insights', errorCode: 'not_attempted' },
         ],
       }),
     );
     expect(harness.runService.markFailed).not.toHaveBeenCalled();
+  });
+
+  it('keeps the account facts when only the ad set level fails', async () => {
+    // The reason ad set is read last. A failure at the largest level leaves
+    // the account and campaign windows already written, so the run is partial
+    // with one hole rather than a lost window.
+    const harness = createHarness({
+      insightsErrorFor: 'adset',
+      insightsError: authFailure,
+    });
+
+    await harness.worker.processDue();
+
+    expect(harness.order).toEqual([
+      'hierarchy',
+      'account_insights',
+      'campaign_insights',
+      'adset_insights',
+    ]);
+    expect(harness.runService.markPartial).toHaveBeenCalledWith(
+      expect.objectContaining({
+        failedSegments: [
+          { segment: 'adset_insights', errorCode: 'meta_permission_denied' },
+        ],
+      }),
+    );
   });
 
   it('still advances the connection timestamp, and still shows the error', async () => {
@@ -398,6 +452,7 @@ describe('SocialAdSyncWorker — a run that partly works', () => {
       failedSegments: [
         { segment: 'account_insights', errorCode: 'meta_credential_invalid' },
         { segment: 'campaign_insights', errorCode: 'not_attempted' },
+        { segment: 'adset_insights', errorCode: 'not_attempted' },
       ],
     });
   });
@@ -612,6 +667,7 @@ describe('SocialAdSyncWorker — the state machine', () => {
     expect(call.failedSegments).toEqual([
       { segment: 'account_insights', errorCode: 'meta_transient' },
       { segment: 'campaign_insights', errorCode: 'not_attempted' },
+      { segment: 'adset_insights', errorCode: 'not_attempted' },
     ]);
 
     // Terminal states are what this must not be. `partial` in the history of a
@@ -642,7 +698,11 @@ describe('SocialAdSyncWorker — the state machine', () => {
 
     // The hierarchy is not read again: it already landed, and re-reading it
     // would spend four more requests to write the same rows.
-    expect(second.order).toEqual(['account_insights', 'campaign_insights']);
+    expect(second.order).toEqual([
+      'account_insights',
+      'campaign_insights',
+      'adset_insights',
+    ]);
     expect(second.runService.markSucceeded).toHaveBeenCalled();
   });
 
@@ -664,6 +724,7 @@ describe('SocialAdSyncWorker — the state machine', () => {
     expect(call.counters.rowsWritten).toBe(5);
     expect(call.failedSegments).toEqual([
       { segment: 'campaign_insights', errorCode: 'meta_permanent' },
+      { segment: 'adset_insights', errorCode: 'not_attempted' },
     ]);
 
     // Nothing will claim it again: no backoff was scheduled.
@@ -708,6 +769,68 @@ describe('SocialAdSyncWorker — the state machine', () => {
     // in the table saying otherwise.
     expect(harness.runService.markPartial).toHaveBeenCalled();
     expect(harness.runService.markDeadLetter).not.toHaveBeenCalled();
+  });
+
+  /**
+   * §26 — a backfill chunk whose ad-set level failed must not certify coverage.
+   *
+   * This is the seam where "the run wrote some facts" could quietly become
+   * "this window is covered". It cannot, and the reason is structural rather
+   * than a check somewhere: coverage is `status = 'succeeded'` AND the recorded
+   * levels, and a run that lost a segment never reaches `succeeded`.
+   */
+  it('does not mark a backfill chunk succeeded when only ad set failed', async () => {
+    const harness = createHarness({
+      runs: [
+        run({
+          runKind: 'backfill',
+          attempts: 5,
+          maxAttempts: 5,
+          entityLevels: ['account', 'campaign', 'adset'],
+        }),
+      ],
+      insightsErrorFor: 'adset',
+      insightsError: new MetaGraphError({
+        kind: 'auth',
+        safeMessage: 'read failed',
+        metaCode: 200,
+      }),
+    });
+
+    await harness.worker.processDue();
+
+    // Partial, not succeeded. The account and campaign facts it wrote stay
+    // written — they are correct facts about the days they cover — but the
+    // window is not certified, so the planner will not step past it.
+    expect(harness.runService.markSucceeded).not.toHaveBeenCalled();
+    expect(harness.runService.markPartial).toHaveBeenCalledWith(
+      expect.objectContaining({
+        failedSegments: [
+          { segment: 'adset_insights', errorCode: 'meta_permission_denied' },
+        ],
+      }),
+    );
+  });
+
+  it('retries only the ad-set segment on the next attempt', async () => {
+    // The account and campaign windows already landed; re-reading them would
+    // pay Meta again for days that are already in the table.
+    const harness = createHarness({
+      runs: [
+        run({
+          runKind: 'backfill',
+          attempts: 2,
+          failedSegments: [
+            { segment: 'adset_insights', errorCode: 'meta_rate_limited' },
+          ],
+        }),
+      ],
+    });
+
+    await harness.worker.processDue();
+
+    expect(harness.order).toEqual(['adset_insights']);
+    expect(harness.levels).toEqual(['adset']);
   });
 
   it('spends exactly the attempts it was given', async () => {
@@ -828,7 +951,11 @@ describe('SocialAdSyncWorker — closed windows and today', () => {
     // The chain sweeps the tree once, ahead of the chunks. Thirteen chunks each
     // re-reading 450 objects would learn nothing after the first.
     expect(harness.hierarchySync.syncHierarchyWith).not.toHaveBeenCalled();
-    expect(harness.order).toEqual(['account_insights', 'campaign_insights']);
+    expect(harness.order).toEqual([
+      'account_insights',
+      'campaign_insights',
+      'adset_insights',
+    ]);
   });
 
   it('stores an intraday window as provisional', async () => {

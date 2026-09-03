@@ -48,7 +48,12 @@ describe('toSocialAdSyncRunView', () => {
       status: 'succeeded',
       since: '2026-08-01',
       until: '2026-08-25',
-      segments: ['hierarchy', 'account_insights', 'campaign_insights'],
+      segments: [
+        'hierarchy',
+        'account_insights',
+        'campaign_insights',
+        'adset_insights',
+      ],
       attempts: 1,
       maxAttempts: 5,
       rowsWritten: 34,
@@ -118,6 +123,28 @@ describe('toSocialAdSyncRunView', () => {
     expect(view.failedSegments).toEqual([
       { segment: 'hierarchy', errorCode: 'meta_transient' },
     ]);
+  });
+
+  it('names the ad-set segment when it is the one that did not finish', () => {
+    // §17 and §26: a run must be able to say *which* level is missing. An
+    // ad-set failure beside two succeeded levels is what makes a run `partial`
+    // rather than failed, and hiding the level would make the hole invisible.
+    const view = toSocialAdSyncRunView(
+      run({
+        status: 'partial',
+        failedSegments: [
+          { segment: 'adset_insights', errorCode: 'meta_rate_limited' },
+        ],
+      }),
+    );
+
+    expect(view.status).toBe('partial');
+    expect(view.failedSegments).toEqual([
+      { segment: 'adset_insights', errorCode: 'meta_rate_limited' },
+    ]);
+    // And the run still publishes the full plan, so a reader can see that the
+    // ad-set segment was part of what this run was meant to do.
+    expect(view.segments).toContain('adset_insights');
   });
 
   it('survives a column that is not an array', () => {

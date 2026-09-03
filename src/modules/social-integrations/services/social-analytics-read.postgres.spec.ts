@@ -9,6 +9,7 @@ import { SocialAdEntity } from '../entities/social-ad-entity.entity';
 import { SocialAdMetricDailyEntity } from '../entities/social-ad-metric-daily.entity';
 import { SocialAdSyncRunEntity } from '../entities/social-ad-sync-run.entity';
 import { shiftDay } from '../sync/insights-window';
+import { INSIGHTS_ENTITY_LEVELS } from '../sync/social-ad-sync-run.contract';
 import type {
   SocialAdCampaignSort,
   SocialAdSortDirection,
@@ -137,6 +138,43 @@ run('Social analytics read against PostgreSQL', () => {
     `);
   }
 
+  /**
+   * One ad-set fact, keyed by the ad set and parented to its campaign.
+   *
+   * Separate from `insertCampaignFact` because the two differ in exactly the
+   * way that matters: here `entity_external_id` and `campaign_external_id` are
+   * *different* objects, which is what lets a level-blind query mistake an ad
+   * set's money for more of its campaign's.
+   */
+  function insertAdsetFact(input: {
+    connectionId?: string;
+    adsetExternalId: string;
+    campaignExternalId: string;
+    metricDate: string;
+    spend?: string;
+    clicks?: string;
+    leads?: string;
+    isPartial?: boolean;
+  }) {
+    return queryRunner.query(`
+      INSERT INTO "social_ad_metrics_daily"
+        ("tenant_id", "workspace_id", "connection_id", "provider", "source",
+         "entity_level", "entity_external_id", "campaign_external_id",
+         "metric_date", "account_timezone", "currency", "attribution_setting",
+         "spend", "impressions", "reach", "clicks", "link_clicks", "leads",
+         "conversions", "conversion_value", "video_views", "is_partial")
+      VALUES (
+        '${tenantId}', '${workspaceId}',
+        '${input.connectionId ?? connectionId}', 'meta_ads', 'paid',
+        'adset', '${input.adsetExternalId}', '${input.campaignExternalId}',
+        '${input.metricDate}', 'America/Sao_Paulo', 'BRL', 'account_default',
+        ${input.spend ?? '10.000000'}, 1000, 300,
+        ${input.clicks ?? '20'}, 15, ${input.leads ?? '2'},
+        1.000000, 50.000000, 100, ${input.isPartial ?? false}
+      )
+    `);
+  }
+
   /** A mirrored campaign, under the full five-part identity. */
   function insertCampaignEntity(input: {
     connectionId?: string;
@@ -164,6 +202,22 @@ run('Social analytics read against PostgreSQL', () => {
   }
 
   /** A settled sync run, for the freshness and backfill chain assertions. */
+  /** A bare connection in the caller's scope, for a chain-shape fixture. */
+  let connectionSeq = 0;
+
+  function insertConnection(id: string) {
+    connectionSeq += 1;
+
+    return queryRunner.query(`
+      INSERT INTO "social_ad_account_connections"
+        ("id", "tenant_id", "workspace_id", "provider", "external_account_id",
+         "timezone", "currency")
+      VALUES
+        ('${id}', '${tenantId}', '${workspaceId}', 'meta_ads',
+         'act_chain_extra_${connectionSeq}', 'America/Sao_Paulo', 'BRL')
+    `);
+  }
+
   function insertRun(input: {
     connectionId: string;
     runKind: string;
@@ -171,20 +225,29 @@ run('Social analytics read against PostgreSQL', () => {
     windowStart?: string | null;
     windowEnd?: string | null;
     finishedAt?: string | null;
+    /**
+     * What the run recorded that it read.
+     *
+     * Defaults to every level the insights pipeline currently ingests, so a
+     * fixture that is not about coverage keeps meaning what it meant. Tests
+     * that *are* about coverage pass the narrower list a pre-I3.4 run stored.
+     */
+    entityLevels?: readonly string[];
   }) {
     const start = input.windowStart ? `'${input.windowStart}'` : 'NULL';
     const end = input.windowEnd ? `'${input.windowEnd}'` : 'NULL';
     const finished = input.finishedAt ? `'${input.finishedAt}'` : 'NULL';
+    const levels = JSON.stringify(input.entityLevels ?? INSIGHTS_ENTITY_LEVELS);
 
     return queryRunner.query(`
       INSERT INTO "social_ad_sync_runs"
         ("tenant_id", "workspace_id", "connection_id", "provider", "run_kind",
          "status", "window_start", "window_end", "idempotency_key",
-         "finished_at")
+         "entity_levels", "finished_at")
       VALUES (
         '${tenantId}', '${workspaceId}', '${input.connectionId}', 'meta_ads',
         '${input.runKind}', '${input.status}', ${start}, ${end},
-        '${randomUUID()}', ${finished}
+        '${randomUUID()}', '${levels}'::jsonb, ${finished}
       )
     `);
   }
@@ -307,12 +370,23 @@ run('Social analytics read against PostgreSQL', () => {
         entityLevel: 'campaign',
         spend: '10.500000',
       });
+
+      // And an ad-set row for that same day and that same money. I3.4 began
+      // ingesting this level, so from now on the table holds three rows
+      // describing one day's spend at three grains. A read that forgot its
+      // `entity_level` filter would now *triple* rather than double — a
+      // regression that would look like a real increase in client spend.
+      await insertFact({
+        metricDate: '2026-08-21',
+        entityLevel: 'adset',
+        spend: '10.500000',
+      });
     });
 
-    it('sums only the account level, never account plus campaign', async () => {
+    it('sums only the account level, never account plus campaign plus ad set', async () => {
       const result = await overview('2026-08-21', '2026-08-23');
 
-      // 10.5 + 20.25 + 30 — the campaign row must not appear.
+      // 10.5 + 20.25 + 30 — neither the campaign nor the ad-set row appears.
       expect(result.current.spend).toBe('60.750000');
       expect(result.current.impressions).toBe('3000');
     });
@@ -532,6 +606,18 @@ run('Social analytics read against PostgreSQL', () => {
       expect(point.impressions).toBe('1000');
     });
 
+    it('charts one point per day, not one per level', async () => {
+      // §19 for the chart. 2026-08-21 carries an account row, a campaign row
+      // and (since I3.4) an ad-set row, all with the same 10.50. A series that
+      // lost its `entity_level` filter would plot 31.50 for that day and, worse,
+      // would still look like a plausible chart.
+      const result = await timeseries('2026-08-21', '2026-08-21');
+
+      expect(result.points).toHaveLength(1);
+      expect(result.points[0].spend).toBe('10.500000');
+      expect(result.points[0].impressions).toBe('1000');
+    });
+
     it('returns the real daily reach, the one grain where it is honest', async () => {
       const result = await timeseries('2026-08-22', '2026-08-22');
 
@@ -637,6 +723,34 @@ run('Social analytics read against PostgreSQL', () => {
         metricDate: '2026-10-15',
         spend: '999.000000',
       });
+
+      /**
+       * Two ad-set rows belonging to `camp-big`, carrying that campaign's own
+       * money broken down.
+       *
+       * This is what the table actually looks like after I3.4, and it is the
+       * shape that makes the campaign table's `entity_level = 'campaign'`
+       * filter load-bearing rather than incidental: these rows share the
+       * campaign's `campaign_external_id`, so a query that grouped by that
+       * column without pinning the level would add each campaign's spend to
+       * its own ad sets' — reporting 300 where the truth is 150.
+       */
+      await insertAdsetFact({
+        adsetExternalId: 'adset-big-a',
+        campaignExternalId: 'camp-big',
+        metricDate: '2026-09-01',
+        spend: '60.000000',
+        clicks: '30',
+        leads: '6',
+      });
+      await insertAdsetFact({
+        adsetExternalId: 'adset-big-b',
+        campaignExternalId: 'camp-big',
+        metricDate: '2026-09-01',
+        spend: '40.000000',
+        clicks: '20',
+        leads: '4',
+      });
     });
 
     it('aggregates each campaign across the period', async () => {
@@ -648,6 +762,26 @@ run('Social analytics read against PostgreSQL', () => {
       expect(big?.leads).toBe('15');
       // 150 / 15
       expect(big?.cpl).toBe('10.000000');
+    });
+
+    it('ignores the ad-set rows that roll up into the same campaign', async () => {
+      // §19, stated directly. The ad sets of `camp-big` hold 100.00 between
+      // them on 2026-09-01; the campaign table must still report the campaign's
+      // own 150.00 for the period, not 250.00.
+      const result = await campaigns('2026-09-01', '2026-09-02');
+      const big = result.items.find((item) => item.externalId === 'camp-big');
+
+      expect(big?.spend).toBe('150.000000');
+    });
+
+    it('does not list an ad set as though it were a campaign', async () => {
+      // The rows exist and share a `campaign_external_id`; nothing about them
+      // should reach a table whose grain is the campaign.
+      const result = await campaigns('2026-09-01', '2026-09-02');
+
+      expect(result.items.map((item) => item.externalId)).not.toContain(
+        'adset-big-a',
+      );
     });
 
     it('carries name, status, effective status and objective', async () => {
@@ -898,6 +1032,91 @@ run('Social analytics read against PostgreSQL', () => {
       expect(result.backfill.complete).toBe(true);
       expect(result.backfill.chunksSucceeded).toBe(13);
       expect(result.backfill.anchor).toBe(anchor);
+    });
+
+    /**
+     * §24, from the read side.
+     *
+     * The planner's own answer is asserted in its unit spec. This is the other
+     * half: the freshness card computes chain state through the *same*
+     * `resolveChunkState`, over its own query, and the two must not disagree.
+     * A card reading "complete" while the planner was still fetching ad-set
+     * history is precisely the silent hole this design exists to prevent.
+     */
+    it('does not report a pre-ad-set chain as complete', async () => {
+      const legacyId = randomUUID();
+
+      await insertConnection(legacyId);
+
+      const anchor = '2026-08-19';
+      let until = anchor;
+
+      for (let index = 0; index < 13; index += 1) {
+        const days = index === 12 ? 6 : 7;
+        const since = shiftDay(until, -(days - 1));
+
+        await insertRun({
+          connectionId: legacyId,
+          runKind: 'backfill',
+          status: 'succeeded',
+          windowStart: since,
+          windowEnd: until,
+          // The exact shape production holds: thirteen succeeded chunks,
+          // every one of them recorded before ad-set insights existed.
+          entityLevels: ['account', 'campaign'],
+        });
+
+        until = shiftDay(since, -1);
+      }
+
+      const result = await freshness(legacyId);
+
+      expect(result.backfill.status).toBe('in_progress');
+      expect(result.backfill.complete).toBe(false);
+      // Nothing is covered: every chunk needs re-reading at the new level.
+      expect(result.backfill.chunksSucceeded).toBe(0);
+      // The anchor still comes from those runs, so the re-read lands on the
+      // original boundaries rather than a plan cut from today.
+      expect(result.backfill.anchor).toBe(anchor);
+    });
+
+    it('reports complete once the narrow chain has been re-read wider', async () => {
+      const upgradedId = randomUUID();
+
+      await insertConnection(upgradedId);
+
+      const anchor = '2026-08-19';
+      let until = anchor;
+
+      for (let index = 0; index < 13; index += 1) {
+        const days = index === 12 ? 6 : 7;
+        const since = shiftDay(until, -(days - 1));
+
+        // The original narrow run stays in the log — nothing deletes history —
+        // and the wider one is what certifies the window.
+        await insertRun({
+          connectionId: upgradedId,
+          runKind: 'backfill',
+          status: 'succeeded',
+          windowStart: since,
+          windowEnd: until,
+          entityLevels: ['account', 'campaign'],
+        });
+        await insertRun({
+          connectionId: upgradedId,
+          runKind: 'backfill',
+          status: 'succeeded',
+          windowStart: since,
+          windowEnd: until,
+        });
+
+        until = shiftDay(since, -1);
+      }
+
+      const result = await freshness(upgradedId);
+
+      expect(result.backfill.status).toBe('complete');
+      expect(result.backfill.chunksSucceeded).toBe(13);
     });
 
     it('reports the newest closed and partial days separately', async () => {

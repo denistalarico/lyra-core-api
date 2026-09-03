@@ -141,6 +141,12 @@ export class SocialAdBackfillResumeService {
      * waiting its turn behind the piece in front of it, and forcing that window
      * now would put two chunks in the queue at once, which is the fairness rule
      * this feature is built on.
+     *
+     * A window whose only runs succeeded at a narrower level set — the shape
+     * every pre-I3.4 chunk has — reads as `not_started` too, and refusing it
+     * here is the right answer rather than an oversight. Nothing about it is
+     * stuck: the chain re-fetches it on its own, one chunk at a time, and an
+     * operator resuming thirteen such windows by hand would only race it.
      */
     if (state !== 'stalled') {
       throw new SocialAdBackfillResumeError('backfill_chain_not_stalled');

@@ -163,6 +163,158 @@ describe('normalizeMetricRow — campaign level', () => {
   });
 });
 
+/**
+ * Ad set level — the grain that makes paid media destination measurable.
+ *
+ * `ADSET_ROW` carries both ids because Meta returns both at this level: the
+ * shape is taken from a real `level=adset` read of the production account,
+ * where every row had a numeric `adset_id` and its parent `campaign_id`.
+ */
+describe('normalizeMetricRow — ad set level', () => {
+  const ADSET_ROW = {
+    ...ACCOUNT_ROW,
+    adset_id: '120244382526760411',
+    campaign_id: '120244382299410411',
+  };
+
+  const adsetContext = () => context({ entityLevel: 'adset' });
+
+  it('keys the row by the ad set, not by its campaign', () => {
+    // The distinction the whole level exists for. Keying on the campaign would
+    // collapse every ad set of one campaign onto a single row per day and
+    // overwrite them in turn, under a unique key that would never complain.
+    const row = normalizeMetricRow(ADSET_ROW, adsetContext());
+
+    expect(row).toMatchObject({
+      entityLevel: 'adset',
+      entityExternalId: '120244382526760411',
+      campaignExternalId: '120244382299410411',
+    });
+  });
+
+  it('keeps two ad sets of one campaign as two distinct facts', () => {
+    const first = normalizeMetricRow(ADSET_ROW, adsetContext());
+    const second = normalizeMetricRow(
+      { ...ADSET_ROW, adset_id: '120244382526760412' },
+      adsetContext(),
+    );
+
+    expect(first?.entityExternalId).not.toBe(second?.entityExternalId);
+    // Same parent, so a campaign roll-up still finds both.
+    expect(first?.campaignExternalId).toBe(second?.campaignExternalId);
+  });
+
+  it('normalizes an ad set that has no row in the hierarchy mirror', () => {
+    // Same tolerance the campaign level has, and for the same reason: an ad set
+    // created since the last hierarchy sweep must still get its spend recorded.
+    const row = normalizeMetricRow(
+      { ...ADSET_ROW, adset_id: '999999999999999' },
+      adsetContext(),
+    );
+
+    expect(row?.entityExternalId).toBe('999999999999999');
+  });
+
+  it('skips an ad set row with no usable ad set id', () => {
+    for (const adsetId of [undefined, '', 'act_1', 'abc', null, 12345]) {
+      expect(
+        normalizeMetricRow({ ...ADSET_ROW, adset_id: adsetId }, adsetContext()),
+      ).toBeNull();
+    }
+  });
+
+  it('skips an ad set row that names no campaign', () => {
+    // Meta returns both together at this level, so one without the other is a
+    // payload this code does not understand. A skip is counted where a
+    // half-attributed fact would not be.
+    expect(
+      normalizeMetricRow(
+        { ...ADSET_ROW, campaign_id: undefined },
+        adsetContext(),
+      ),
+    ).toBeNull();
+  });
+
+  it('ignores adset_id at the levels that are not about an ad set', () => {
+    // A stray field must never change what a row is keyed by.
+    expect(
+      normalizeMetricRow(ADSET_ROW, context({ entityLevel: 'account' })),
+    ).toMatchObject({
+      entityExternalId: 'act_415877197389621',
+      campaignExternalId: null,
+    });
+
+    expect(
+      normalizeMetricRow(ADSET_ROW, context({ entityLevel: 'campaign' })),
+    ).toMatchObject({
+      entityExternalId: '120244382299410411',
+      campaignExternalId: '120244382299410411',
+    });
+  });
+
+  it('measures an ad set row exactly as it measures the coarser levels', () => {
+    // §11: one mapping, one version, three levels. The probe against the real
+    // account confirmed the provider agrees — identical spend and identical
+    // lead counts at account, campaign and ad set for the same window.
+    const account = normalizeMetricRow(ACCOUNT_ROW, context());
+    const adset = normalizeMetricRow(ADSET_ROW, adsetContext());
+
+    for (const field of [
+      'spend',
+      'impressions',
+      'reach',
+      'clicks',
+      'linkClicks',
+      'leads',
+      'conversions',
+      'conversionValue',
+      'videoViews',
+    ] as const) {
+      expect(adset?.[field]).toEqual(account?.[field]);
+    }
+
+    expect(adset?.actions).toEqual(account?.actions);
+    expect((adset?.actions as { mappingVersion: number }).mappingVersion).toBe(
+      META_ACTION_MAPPING_VERSION,
+    );
+  });
+
+  it('keeps reach nullable rather than zero at ad set level too', () => {
+    // §10: reach is non-additive at every grain. A zero would be summed by
+    // anyone who did not know that, and ad set is the level most likely to be
+    // summed into a per-destination total.
+    const row = normalizeMetricRow(
+      { ...ADSET_ROW, reach: undefined },
+      adsetContext(),
+    );
+
+    expect(row?.reach).toBeNull();
+  });
+
+  it('carries the run scope and attribution onto an ad set fact', () => {
+    const row = normalizeMetricRow(ADSET_ROW, adsetContext());
+
+    expect(row).toMatchObject({
+      tenantId: 'tenant-a',
+      workspaceId: 'workspace-a',
+      connectionId: 'connection-a',
+      source: 'paid',
+      attributionSetting: 'account_default',
+      accountTimezone: 'America/Sao_Paulo',
+      isPartial: false,
+    });
+  });
+
+  it('takes is_partial from the run at ad set level, not from the date', () => {
+    const row = normalizeMetricRow(
+      ADSET_ROW,
+      context({ entityLevel: 'adset', isPartial: true }),
+    );
+
+    expect(row?.isPartial).toBe(true);
+  });
+});
+
 describe('normalizeMetricRow — absence and invalidity', () => {
   it('reads an omitted metric as zero, because Meta omits what is zero', () => {
     const row = normalizeMetricRow(

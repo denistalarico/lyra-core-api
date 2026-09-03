@@ -34,13 +34,36 @@ const INSIGHTS_FIELDS =
 const CAMPAIGN_FIELDS = `${INSIGHTS_FIELDS},campaign_id`;
 
 /**
+ * Ad set rows carry both ids: their own, and the campaign they roll up into.
+ *
+ * `adset_name` and `campaign_name` are deliberately absent, here as everywhere
+ * else in this module. A name is mutable on Meta's side and would be a copy
+ * going stale from the moment it was stored; the mirror in `social_ad_entities`
+ * is where a display name comes from, keyed on the id that does not change.
+ */
+const ADSET_FIELDS = `${INSIGHTS_FIELDS},adset_id,campaign_id`;
+
+/** The field list each level needs, by that level. */
+const FIELDS_BY_LEVEL: Record<SocialAdInsightsLevel, string> = {
+  account: INSIGHTS_FIELDS,
+  campaign: CAMPAIGN_FIELDS,
+  adset: ADSET_FIELDS,
+};
+
+/**
  * Rows per page and pages per read.
  *
  * A daily row is small, so the page size is generous; the ceiling exists so a
  * looping response cannot hold a synchronous request open. 500 × 60 is 30 000
- * daily rows — a 90-day campaign-level read of an account with 300 active
- * campaigns. Beyond that the answer is Meta's async job API, not a bigger loop,
- * and hitting the ceiling fails the run rather than truncating it.
+ * daily rows — at the backfill's 7-day chunk that is 4 200 delivering ad sets
+ * in one week, and at a 90-day window still 333. Beyond that the answer is
+ * Meta's async job API, not a bigger loop, and hitting the ceiling fails the
+ * run rather than truncating it.
+ *
+ * Ad set is the level that will reach this first, and the arithmetic is why the
+ * ceiling was left alone rather than raised in advance: Meta returns no row for
+ * an object with no delivery on a day, so the count follows *active* ad sets,
+ * not the mirror's total.
  */
 const PAGE_SIZE = 500;
 const MAX_PAGES = 60;
@@ -77,9 +100,16 @@ export class MetaAdsInsightsReaderService {
    *   they see in Ads Manager. It is why every row is stored under
    *   `attribution_setting = 'account_default'` — a name for their setting, not
    *   a copy of it.
-   * - `level` is explicit at both levels, including `account`. Relying on the
+   * - `level` is explicit at every level, including `account`. Relying on the
    *   edge's default would make the account read depend on a value Meta could
    *   change without us noticing.
+   *
+   * One request per level per window, at every level. Ad set insights are read
+   * from the *account's* `/insights` edge with `level=adset` — not by walking
+   * ad sets — so adding the level costs one more paginated read, not one read
+   * per ad set. A per-object loop over this account's 126 ad sets would be 126
+   * requests against a CPU-metered business quota to learn what one request
+   * already returns.
    */
   async read(input: {
     credential: ResolvedAdCredential;
@@ -94,7 +124,7 @@ export class MetaAdsInsightsReaderService {
     const page = await this.graphService.readEdge({
       accessToken: credential.accessToken,
       path: `${credential.externalAccountId}/insights`,
-      fields: level === 'campaign' ? CAMPAIGN_FIELDS : INSIGHTS_FIELDS,
+      fields: FIELDS_BY_LEVEL[level],
       limit: PAGE_SIZE,
       maxPages: MAX_PAGES,
       failureMessage: `Meta Ads ${level} insights read failed.`,

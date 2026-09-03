@@ -604,17 +604,37 @@ export class SocialAnalyticsReadService {
   private async listBackfillChunkOutcomes(
     connectionId: string,
   ): Promise<SocialAdBackfillChunkOutcome[]> {
-    return this.runsRepository
+    const rows = await this.runsRepository
       .createQueryBuilder('run')
       .select(`to_char(run.window_end, 'YYYY-MM-DD')`, 'until')
       .addSelect('run.status', 'status')
+      // Part of the chunk's state since I3.4: a run that succeeded at a
+      // narrower set of levels did not cover the window this plan now asks
+      // about. Omitting it here would make the freshness card report a chain
+      // complete while the planner was still fetching it.
+      .addSelect('run.entity_levels', 'entity_levels')
       .where('run.connection_id = :connectionId', { connectionId })
       .andWhere(`run.run_kind = 'backfill'`)
       .andWhere('run.window_end IS NOT NULL')
       .orderBy('run.window_end', 'DESC')
       .addOrderBy('run.created_at', 'ASC')
       .addOrderBy('run.id', 'ASC')
-      .getRawMany<SocialAdBackfillChunkOutcome>();
+      .getRawMany<{
+        until: string;
+        status: SocialAdBackfillChunkOutcome['status'];
+        entity_levels: unknown;
+      }>();
+
+    // Mapped rather than cast. `getRawMany<T>` is an assertion, not a
+    // conversion: the raw row is keyed by the SQL alias, so a cast to the
+    // camel-cased type left `entityLevels` quietly `undefined` — which
+    // `coversInsightsLevels` reads as "covers nothing". It failed closed, which
+    // is the right direction, but it reported every chain as incomplete.
+    return rows.map((row) => ({
+      until: row.until,
+      status: row.status,
+      entityLevels: row.entity_levels,
+    }));
   }
 
   private async findLatestSuccessfulRun(

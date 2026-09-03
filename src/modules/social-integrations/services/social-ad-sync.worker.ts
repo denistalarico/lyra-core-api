@@ -11,7 +11,9 @@ import {
   type InsightsWindow,
 } from '../sync/insights-window';
 import {
+  INSIGHTS_LEVEL_BY_SEGMENT,
   SYNC_SEGMENTS_BY_KIND,
+  isInsightsSegment,
   isIntradayRunKind,
   type SocialAdSyncFailedSegment,
   type SocialAdSyncRunKind,
@@ -272,7 +274,7 @@ export class SocialAdSyncWorker {
   }): Promise<void> {
     const { counters } = input;
 
-    if (input.segment === 'hierarchy') {
+    if (!isInsightsSegment(input.segment)) {
       const summary = await this.hierarchySync.syncHierarchyWith(
         input.credential,
         // Provenance for the destination observations this sweep may append.
@@ -329,7 +331,10 @@ export class SocialAdSyncWorker {
 
     const summary = await this.insightsSync.ingestLevel({
       credential: input.credential,
-      level: input.segment === 'account_insights' ? 'account' : 'campaign',
+      // From the total map rather than a conditional: a segment that is not an
+      // insights read never reaches this line (the hierarchy branch returned
+      // above), and every one that does has exactly one level.
+      level: INSIGHTS_LEVEL_BY_SEGMENT[input.segment],
       window,
       isPartial: intraday,
       syncedAt: input.syncedAt,
