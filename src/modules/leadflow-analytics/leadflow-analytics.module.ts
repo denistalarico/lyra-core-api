@@ -22,6 +22,8 @@ import {
   LeadFlowIntelligenceResultEntity,
   LeadFlowAnalyticsViewEntity,
 } from './entities';
+import { LeadFlowAttributionCohortAdapter } from './intelligence/leadflow-attribution-cohort.adapter';
+import { LeadFlowAttributionAdapter } from './intelligence/leadflow-attribution.adapter';
 import { LeadFlowIntelligenceAdapter } from './intelligence/leadflow-intelligence.adapter';
 import { LeadFlowAnalyticsController } from './leadflow-analytics.controller';
 import { LeadFlowAnalyticsEventIngressService } from './services/leadflow-analytics-event-ingress.service';
@@ -73,6 +75,15 @@ import { LeadFlowAnalyticsViewsService } from './services/leadflow-analytics-vie
     // alongside the rich projections above rather than replacing them — see the
     // class doc for why the existing services were left untouched.
     LeadFlowIntelligenceAdapter,
+    // I4's individual-fact face. Separate from the fact source above because
+    // it answers about one conversation rather than about a period — see the
+    // class doc.
+    LeadFlowAttributionAdapter,
+    // I4.2's cohort face. A third adapter rather than more methods on either of
+    // the two above: this one is selected by a window and answers about a set,
+    // which is neither the fact source's day-bucket shape nor the individual
+    // port's windowless one.
+    LeadFlowAttributionCohortAdapter,
   ],
   exports: [
     LeadFlowAnalyticsService,
@@ -82,6 +93,8 @@ import { LeadFlowAnalyticsViewsService } from './services/leadflow-analytics-vie
     LeadFlowCsatService,
     LeadFlowIntelligenceService,
     LeadFlowIntelligenceAdapter,
+    LeadFlowAttributionAdapter,
+    LeadFlowAttributionCohortAdapter,
   ],
 })
 export class LeadFlowAnalyticsModule {}

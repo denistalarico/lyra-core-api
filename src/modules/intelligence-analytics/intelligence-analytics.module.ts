@@ -4,6 +4,10 @@ import { PermissionsModule } from '../permissions';
 import { SocialIntegrationsModule } from '../social-integrations/social-integrations.module';
 import { AcquisitionCohortController } from './acquisition-cohort.controller';
 import { AcquisitionCohortService } from './acquisition-cohort.service';
+import { ObservedAttributionSummaryController } from './observed-attribution-summary.controller';
+import { ObservedAttributionSummaryService } from './observed-attribution-summary.service';
+import { ObservedAttributionController } from './observed-attribution.controller';
+import { ObservedAttributionService } from './observed-attribution.service';
 
 /**
  * Where cross-domain reads live.
@@ -25,8 +29,20 @@ import { AcquisitionCohortService } from './acquisition-cohort.service';
     LeadFlowAnalyticsModule,
     PermissionsModule,
   ],
-  controllers: [AcquisitionCohortController],
-  providers: [AcquisitionCohortService],
-  exports: [AcquisitionCohortService],
+  controllers: [
+    AcquisitionCohortController,
+    ObservedAttributionController,
+    ObservedAttributionSummaryController,
+  ],
+  providers: [
+    AcquisitionCohortService,
+    ObservedAttributionService,
+    ObservedAttributionSummaryService,
+  ],
+  exports: [
+    AcquisitionCohortService,
+    ObservedAttributionService,
+    ObservedAttributionSummaryService,
+  ],
 })
 export class IntelligenceAnalyticsModule {}
