@@ -290,4 +290,88 @@ describe('acquisition cohort boundary', () => {
     expect(service).toContain('qualifiedToOpportunityRate: null');
     expect(service).toContain('opportunityToWonRate: null');
   });
+
+  /**
+   * The destination breakdown must not become an apportionment.
+   *
+   * The specific regression: an author wanting a fuller-looking breakdown takes
+   * a campaign's or the account's spend and divides it across destinations by
+   * ad set count, impressions or conversations. Every one of those produces a
+   * number that looks measured, and every one is wrong for exactly the account
+   * this feature exists to serve — one testing two destinations inside one
+   * campaign.
+   *
+   * Asserted on the source rather than the output because the failure has no
+   * failing shape: the buckets would still be well-formed, still sum to the
+   * total, and be silently fictional.
+   */
+  it('apportions nothing across destinations', () => {
+    const service = readCode('acquisition-cohort.service.ts');
+
+    for (const forbidden of [
+      'allocate',
+      'apportion',
+      'prorate',
+      'proRata',
+      'weight',
+      'share *',
+      'distribute',
+    ]) {
+      expect(service).not.toContain(forbidden);
+    }
+  });
+
+  /**
+   * A destination without an inbox counterpart gets null, never a sum.
+   *
+   * `messaging_multi` is the one that invites the mistake: the ad set offered
+   * WhatsApp *and* Instagram *and* Messenger, so adding those three channels'
+   * conversations produces a number that lines up beside the spend and asserts
+   * routing nobody observed. The contract makes the refusal a type — `support`
+   * is not `mapped` — and this asserts the type is actually consulted.
+   */
+  it('never sums channels to manufacture a multi-destination funnel', () => {
+    const service = readCode('acquisition-cohort.service.ts');
+
+    expect(service).toContain('multi_destination');
+    expect(service).toContain('no_inbox_equivalent');
+    // The support value decides the funnel side; a bucket is never given counts
+    // by falling through to a default channel.
+    expect(service).toContain("support === 'mapped'");
+  });
+
+  /**
+   * Totals are not rebuilt from buckets.
+   *
+   * The `social` block must keep coming from the account-level fact set. Summing
+   * the destination buckets into it would change every number this endpoint has
+   * ever returned — the account row includes delivery belonging to no mirrored
+   * ad set, and days the ad-set backfill has not reached would silently vanish
+   * from the total.
+   */
+  it('derives the period totals from the fact sets, not the breakdown', () => {
+    const service = readCode('acquisition-cohort.service.ts');
+
+    expect(service).toContain('this.readSocialFacts(socialSet)');
+    expect(service).toContain('this.derive(socialFacts, leadflowFacts)');
+  });
+
+  /**
+   * The CRM is not broken down by destination, and the refusal is permanent.
+   *
+   * Unlike the ad-set gap this one does not close by waiting: no opportunity
+   * carries the ad set that produced it. The bucket type has no
+   * `opportunitiesCreated` field at all — absent rather than present-and-null —
+   * so a future author has to change the contract to make the mistake.
+   */
+  it('offers no per-destination CRM outcome', () => {
+    const contract = readCode('acquisition-cohort.contract.ts');
+    const bucketBlock = contract.slice(
+      contract.indexOf('CohortDestinationLeadFlowFacts = {'),
+      contract.indexOf('CohortDestinationDerived'),
+    );
+
+    expect(bucketBlock).not.toContain('opportunities');
+    expect(bucketBlock).not.toContain('wonOpportunity');
+  });
 });

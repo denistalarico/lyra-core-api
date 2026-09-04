@@ -15,22 +15,47 @@ import { parseScaledAmount } from '../social-integrations/sync/metric-number';
 import { SocialPaidMediaIntelligenceAdapter } from '../social-integrations/intelligence/social-paid-media-intelligence.adapter';
 import { SocialAnalyticsReadService } from '../social-integrations/services/social-analytics-read.service';
 import {
+  inboxChannelForDestination,
+  resolveInboxChannel,
   resolvePaidMediaChannel,
+  type CanonicalAcquisitionChannel,
   type ChannelResolution,
 } from './acquisition-channel';
 import { SocialAdDestinationHistoryReadService } from '../social-integrations/services/social-ad-destination-history.read.service';
-import type { DestinationCoverage } from '../social-integrations/analytics/social-ad-destination-timeline';
-import { listWindowDays } from '../../common/intelligence';
+import { SocialAdDestinationBreakdownReadService } from '../social-integrations/services/social-ad-destination-breakdown.read.service';
 import {
+  DESTINATION_BREAKDOWN_PROVENANCE,
+  sortDestinationBuckets,
+  type SocialAdDestinationBreakdown,
+  type SocialAdDestinationBucket,
+} from '../social-integrations/analytics/social-ad-destination-breakdown';
+import type { DestinationCoverage } from '../social-integrations/analytics/social-ad-destination-timeline';
+import {
+  LEADFLOW_CHANNEL_PROVENANCE,
+  type LeadFlowChannelBreakdown,
+} from '../leadflow-analytics/intelligence/leadflow-intelligence.adapter';
+import { countWindowDays, listWindowDays } from '../../common/intelligence';
+import {
+  COHORT_BUCKET_CORRELATION_LIMITATION,
+  COHORT_BUCKET_MESSAGING_MULTI_LIMITATION,
+  COHORT_BUCKET_NO_INBOX_LIMITATION,
+  COHORT_BUCKET_UNKNOWN_LIMITATION,
   COHORT_CORRELATION_LIMITATION,
   COHORT_DESTINATION_GRAIN_LIMITATION,
+  COHORT_DESTINATION_NOT_A_PARTITION_LIMITATION,
   COHORT_DESTINATION_OBSERVATION_LIMITATION,
+  COHORT_DESTINATION_PARTIAL_INGEST_LIMITATION,
+  COHORT_DESTINATION_UNINGESTED_LIMITATION,
   COHORT_EVENT_WINDOW_LIMITATION,
   COHORT_MESSAGING_MULTI_LIMITATION,
   COHORT_QUALIFICATION_LEGACY_LIMITATION,
   type AcquisitionCohortView,
+  type CohortBucketLeadFlowSupport,
   type CohortDerivedMetrics,
+  type CohortDestinationBreakdown,
+  type CohortDestinationBucket,
   type CohortDestinationHistory,
+  type CohortDestinationLeadFlowFacts,
   type CohortLeadFlowFacts,
   type CohortQualificationHistory,
   type CohortSocialFacts,
@@ -68,6 +93,7 @@ export class AcquisitionCohortService {
     private readonly leadflow: LeadFlowIntelligenceAdapter,
     private readonly socialReads: SocialAnalyticsReadService,
     private readonly destinationHistory: SocialAdDestinationHistoryReadService,
+    private readonly destinationBreakdown: SocialAdDestinationBreakdownReadService,
   ) {}
 
   /**
@@ -103,49 +129,87 @@ export class AcquisitionCohortService {
      */
     const timezone = await this.resolveAccountTimezone(scope, connectionId);
 
-    const [socialSet, leadflowSet, destination] = await Promise.all([
-      this.social.fetch({
-        scope,
-        window,
-        grain: 'period',
-        subjectId: connectionId,
-      }),
-      this.leadflow.fetch({
-        scope,
-        window,
-        grain: 'period',
-        // Undefined when the account has no zone: each domain then keeps its
-        // own default, which is the pre-I3 behaviour rather than a guess.
-        dayBucketTimezone: timezone ?? undefined,
-      }),
-      /**
-       * Destination evidence, read in the *same* timezone as everything else.
-       *
-       * Cut with the account's zone rather than UTC for the same reason the two
-       * fact sets are: an observation made at 21:00 São Paulo time belongs to
-       * that day locally and to the next one in UTC, and an interval boundary
-       * off by a day would misclassify a day of spend.
-       */
-      this.destinationHistory.history({
-        tenantId: scope.tenantId,
-        workspaceId: scope.workspaceId,
-        connectionId,
-        timezone,
-        days: listWindowDays(window),
-      }),
-    ]);
+    const [socialSet, leadflowSet, destination, breakdown, channelCounts] =
+      await Promise.all([
+        this.social.fetch({
+          scope,
+          window,
+          grain: 'period',
+          subjectId: connectionId,
+        }),
+        this.leadflow.fetch({
+          scope,
+          window,
+          grain: 'period',
+          // Undefined when the account has no zone: each domain then keeps its
+          // own default, which is the pre-I3 behaviour rather than a guess.
+          dayBucketTimezone: timezone ?? undefined,
+        }),
+        /**
+         * Destination evidence, read in the *same* timezone as everything else.
+         *
+         * Cut with the account's zone rather than UTC for the same reason the
+         * two fact sets are: an observation made at 21:00 São Paulo time belongs
+         * to that day locally and to the next one in UTC, and an interval
+         * boundary off by a day would misclassify a day of spend.
+         */
+        this.destinationHistory.history({
+          tenantId: scope.tenantId,
+          workspaceId: scope.workspaceId,
+          connectionId,
+          timezone,
+          days: listWindowDays(window),
+        }),
+        /**
+         * Ad-set spend grouped by the destination observed on each day.
+         *
+         * The read I3.4 unblocked. It is a *fifth* query rather than a
+         * refinement of the first: `social.fetch` returns account-level totals
+         * and must keep doing so, because those are the figures that reconcile
+         * with Ads Manager and with every number this endpoint returned before
+         * today. Deriving the totals from these buckets instead would change
+         * every existing number for the sake of a new one.
+         */
+        this.destinationBreakdown.breakdown({
+          tenantId: scope.tenantId,
+          workspaceId: scope.workspaceId,
+          connectionId,
+          since: window.since,
+          until: window.until,
+          timezone,
+          expectedDays: countWindowDays(window),
+        }),
+        /**
+         * The funnel side, split by Inbox channel.
+         *
+         * Through the LeadFlow adapter, not a query here: the client-binding
+         * predicate is a JSONB condition with exactly one definition, and a
+         * second copy in this module would eventually disagree with the screens.
+         * Same window bounds and same day-bucket zone as the totals, so a
+         * bucket's conversations are a genuine subset of the period's.
+         */
+        this.leadflow.channelBreakdown(scope, window, timezone),
+      ]);
 
     const socialFacts = this.readSocialFacts(socialSet);
     const leadflowFacts = this.readLeadFlowFacts(leadflowSet);
 
     /**
-     * Paid media cannot name its channel, so the cohort is the whole Meta
-     * surface on both sides. See `resolvePaidMediaChannel` for the evidence.
+     * The *response-level* channel stays `unknown`, and that is unchanged by
+     * I3.5.
+     *
+     * This field describes the top-level cohort, which is still all Meta paid
+     * media against all Meta inbound — the account-level totals beside it have
+     * no single destination, and naming one would mislabel them. What I3.5 adds
+     * is a per-destination breakdown *below* this, where each bucket carries its
+     * own resolution. Promoting one of those to the response level would require
+     * picking a destination for a total that spans all of them.
      */
     const channel = resolvePaidMediaChannel();
     const channelResolution: ChannelResolution = 'provider_bucket';
 
     const qualification = this.qualificationQuality(leadflowSet, leadflowFacts);
+    const destinations = this.destinations(breakdown, channelCounts);
 
     return {
       kind: 'cohort_correlation',
@@ -161,6 +225,7 @@ export class AcquisitionCohortService {
       social: socialFacts,
       leadflow: leadflowFacts,
       derived: this.derive(socialFacts, leadflowFacts),
+      destinations,
       provenance: {
         social: socialSet.provenance,
         leadflow: leadflowSet.provenance,
@@ -196,17 +261,31 @@ export class AcquisitionCohortService {
         partialData:
           socialSet.freshness.isPartial ||
           leadflowSet.freshness.isPartial ||
-          destination.coverage.unknownDays > 0,
+          destination.coverage.unknownDays > 0 ||
+          /**
+           * And now also when the ad-set level is behind the account level.
+           *
+           * A window whose account facts are complete can still hold no ad-set
+           * facts, because I3.4 widened what a backfill must cover and the
+           * re-read works backwards. Reporting such a response as complete would
+           * let a reader treat an empty or short breakdown as a finding.
+           */
+          destinations.coveredDays < destinations.expectedDays ||
+          destinations.buckets.some((bucket) => bucket.dataQuality.partialData),
         limitations: this.limitations(
           socialSet,
           leadflowSet,
           channelResolution,
           qualification,
           destination.coverage,
+          destinations,
         ),
-        missingFacts: this.missingFacts(leadflowSet.descriptors),
+        missingFacts: this.missingFacts(leadflowSet.descriptors, destinations),
         qualificationHistory: qualification,
-        destinationHistory: this.destinationQuality(destination.coverage),
+        destinationHistory: this.destinationQuality(
+          destination.coverage,
+          destinations,
+        ),
       },
     };
   }
@@ -376,6 +455,173 @@ export class AcquisitionCohortService {
   }
 
   /**
+   * The destination breakdown: paid media split by where it sent people.
+   *
+   * The composition I3.5 exists for, and the place where the two domains are
+   * lined up per bucket rather than per response. Three rules govern it, and all
+   * three are refusals:
+   *
+   * 1. **Nothing is apportioned.** Every bucket's money is the sum of its own ad
+   *    sets' daily rows. No campaign total is divided by anything.
+   * 2. **Nothing is summed to make a match.** `messaging_multi` gets no funnel
+   *    side, because adding WhatsApp, Instagram and Messenger conversations to
+   *    stand beside it would invent per-person routing nobody measured.
+   * 3. **Nothing unmapped becomes `unknown`.** A website or lead-form bucket has
+   *    a real destination and no Inbox counterpart; folding it into `unknown`
+   *    would lose the destination we *do* know.
+   */
+  private destinations(
+    breakdown: SocialAdDestinationBreakdown,
+    channels: LeadFlowChannelBreakdown,
+  ): CohortDestinationBreakdown {
+    /**
+     * Conversation counts per canonical channel, folded from Inbox types.
+     *
+     * Several Inbox channel types can map to one canonical channel — a workspace
+     * may run two WhatsApp numbers, and `messenger` and `facebook_messenger`
+     * both mean Messenger — so the fold sums them. Reading the first match
+     * instead would report one number of a client's two WhatsApp channels.
+     */
+    const byChannel = new Map<
+      CanonicalAcquisitionChannel,
+      { conversations: string; inbound: string; qualified: string }
+    >();
+
+    for (const [channelType, counts] of channels.channels) {
+      const canonical = resolveInboxChannelType(channelType);
+      const existing = byChannel.get(canonical);
+
+      byChannel.set(canonical, {
+        conversations: addCount(
+          existing?.conversations,
+          counts.conversationsReceived,
+        ),
+        inbound: addCount(existing?.inbound, counts.inboundMessages),
+        qualified: addCount(existing?.qualified, counts.qualifiedLeads),
+      });
+    }
+
+    /**
+     * Sorted here as well as in the read service, and deliberately not only
+     * there.
+     *
+     * The order is part of *this* response's contract — a UI renders the array
+     * as it arrives — so the guarantee has to hold whatever a fact source
+     * returns. Relying on the producer would make the endpoint's ordering an
+     * accident of which service happened to answer.
+     */
+    const buckets = sortDestinationBuckets(breakdown.buckets).map((bucket) =>
+      this.destinationBucket(bucket, byChannel),
+    );
+
+    return {
+      available: breakdown.hasAdsetFacts,
+      coveredDays: breakdown.coveredDays,
+      expectedDays: breakdown.expectedDays,
+      buckets,
+    };
+  }
+
+  /** One destination's two sides, its costs and its caveats. */
+  private destinationBucket(
+    bucket: SocialAdDestinationBucket,
+    byChannel: Map<
+      CanonicalAcquisitionChannel,
+      { conversations: string; inbound: string; qualified: string }
+    >,
+  ): CohortDestinationBucket {
+    const channel = inboxChannelForDestination(bucket.destination);
+    const support = resolveSupport(bucket.destination, channel);
+    const counts = channel ? byChannel.get(channel) : undefined;
+
+    /**
+     * The funnel side, or the reason there is none.
+     *
+     * When a channel is named but the map holds nothing for it, the counts are
+     * `'0'` rather than null: the channel exists and nobody wrote in, which is a
+     * measurement. Null is reserved for the cases where no comparison exists at
+     * all, and conflating the two is precisely what
+     * `CohortBucketLeadFlowSupport` was added to prevent.
+     */
+    const leadflow: CohortDestinationLeadFlowFacts =
+      support === 'mapped'
+        ? {
+            support,
+            channel,
+            conversationsReceived: counts?.conversations ?? '0',
+            inboundMessages: counts?.inbound ?? '0',
+            qualifiedLeads: counts?.qualified ?? '0',
+          }
+        : {
+            support,
+            channel: null,
+            conversationsReceived: null,
+            inboundMessages: null,
+            qualifiedLeads: null,
+          };
+
+    const spend = parseScaledAmount(bucket.spend);
+    const costPer = (count: string | null): string | null => {
+      const scaledCount = parseScaledAmount(count);
+      if (spend === null || scaledCount === null) return null;
+      return formatDerived(divideScaled(spend, scaledCount));
+    };
+
+    return {
+      destination: bucket.destination,
+      social: {
+        spend: bucket.spend,
+        impressions: bucket.impressions,
+        clicks: bucket.clicks,
+        linkClicks: bucket.linkClicks,
+        providerLeads: bucket.providerLeads,
+        conversions: bucket.conversions,
+        conversionValue: bucket.conversionValue,
+        videoViews: bucket.videoViews,
+      },
+      leadflow,
+      derived: {
+        /**
+         * The provider's own denominator, available on every bucket.
+         *
+         * Both sides come from the same ad-set rows, so it is well defined even
+         * where no LeadFlow comparison exists — a lead-form bucket has a real
+         * cost per lead and no conversations at all.
+         */
+        providerCpl: costPer(bucket.providerLeads),
+        // Null by construction where `leadflow` is null: `costPer` returns null
+        // for a null count, so an unmapped bucket cannot produce a cost.
+        costPerConversation: costPer(leadflow.conversationsReceived),
+        costPerQualifiedLead: costPer(leadflow.qualifiedLeads),
+      },
+      dataQuality: {
+        resolution:
+          bucket.destination === 'unknown'
+            ? 'unavailable'
+            : 'observed_destination',
+        individualAttribution: false,
+        leadflowSupport: support,
+        partialData: bucket.partialDays > 0,
+        factDays: bucket.factDays,
+        temporalUnknownSpend: bucket.temporalUnknownSpend,
+        limitations: bucketLimitations(support),
+      },
+      /**
+       * Three layers, named by the domains that own them.
+       *
+       * The strings are imported rather than written here: this module is
+       * forbidden from naming another domain's tables, and importing the name
+       * keeps it accurate when a table is renamed by the team that owns it.
+       */
+      provenance: {
+        socialMetrics: DESTINATION_BREAKDOWN_PROVENANCE.socialMetrics,
+        destination: DESTINATION_BREAKDOWN_PROVENANCE.destination,
+        leadflow: support === 'mapped' ? LEADFLOW_CHANNEL_PROVENANCE : null,
+      },
+    };
+  }
+
+  /**
    * How far the qualification evidence reaches, read from provenance.
    *
    * The two values come back through `provenance.notes`, which is
@@ -410,17 +656,23 @@ export class AcquisitionCohortService {
   /**
    * The destination coverage block, and the resolution claim that goes with it.
    *
-   * `destinationResolution` is `unavailable` for as long as media metrics stop
-   * at campaign level: evidence about ad sets exists and is reported here, but
-   * nothing in this response was *resolved* by it. Claiming
-   * `observed_destination` while the numbers are still whole-account totals
-   * would be the overstatement the whole block exists to prevent.
+   * `destinationResolution` was `unavailable` through I3.3, when evidence about
+   * ad sets existed but nothing in the response had been resolved by it. I3.5
+   * makes it conditional on the one thing that decides the difference: whether
+   * this window has ad-set facts to resolve. With them, the buckets below are
+   * genuinely observation-derived and the claim is earned; without them — a
+   * window the ad-set backfill has not reached — the evidence is still only
+   * evidence, and claiming otherwise would overstate a response whose numbers
+   * are all still whole-account totals.
    */
   private destinationQuality(
     coverage: DestinationCoverage,
+    destinations: CohortDestinationBreakdown,
   ): CohortDestinationHistory {
     return {
-      destinationResolution: 'unavailable',
+      destinationResolution: destinations.available
+        ? 'observed_destination'
+        : 'unavailable',
       expectedDays: coverage.expectedDays,
       coveredDays: coverage.coveredDays,
       unknownDays: coverage.unknownDays,
@@ -442,6 +694,7 @@ export class AcquisitionCohortService {
     channelResolution: ChannelResolution,
     qualification: CohortQualificationHistory,
     destination: DestinationCoverage,
+    destinations: CohortDestinationBreakdown,
   ): string[] {
     const limitations = [
       COHORT_CORRELATION_LIMITATION,
@@ -451,12 +704,33 @@ export class AcquisitionCohortService {
     ];
 
     if (channelResolution === 'provider_bucket') {
-      // The grain limitation replaces the old "the provider does not tell us"
-      // text, which stopped being true when I3.2 shipped. The gap is now on
-      // the metrics side, and saying so accurately is what lets a reader judge
-      // when it will close.
-      limitations.push(COHORT_DESTINATION_GRAIN_LIMITATION);
+      /**
+       * The grain limitation is now conditional on the window rather than
+       * stated always.
+       *
+       * Through I3.3 it was true of the platform: media metrics stopped at
+       * campaign level, so no destination split was possible anywhere. I3.4
+       * changed that, and repeating the sentence on a response that *does*
+       * carry a breakdown would tell a reader the numbers beside it cannot
+       * exist. It survives for the windows where it is still true — those the
+       * ad-set backfill has not reached.
+       */
+      if (!destinations.available) {
+        limitations.push(COHORT_DESTINATION_GRAIN_LIMITATION);
+        limitations.push(COHORT_DESTINATION_UNINGESTED_LIMITATION);
+      }
+
       limitations.push(COHORT_MESSAGING_MULTI_LIMITATION);
+    }
+
+    if (destinations.available) {
+      // The property a reader checks first and would otherwise assume: the
+      // buckets do not necessarily add up to the account-level total.
+      limitations.push(COHORT_DESTINATION_NOT_A_PARTITION_LIMITATION);
+
+      if (destinations.coveredDays < destinations.expectedDays) {
+        limitations.push(COHORT_DESTINATION_PARTIAL_INGEST_LIMITATION);
+      }
     }
 
     if (destination.firstObservedAt) {
@@ -532,6 +806,7 @@ export class AcquisitionCohortService {
    */
   private missingFacts(
     descriptors: IntelligenceMetricDescriptor[],
+    destinations: CohortDestinationBreakdown,
   ): Array<{ metricKey: string; reason: string }> {
     const published = new Set(descriptors.map((item) => item.key));
     const missing: Array<{ metricKey: string; reason: string }> = [];
@@ -545,22 +820,107 @@ export class AcquisitionCohortService {
     }
 
     /**
-     * Named as missing rather than silently absent.
+     * Named as missing only while it genuinely is.
      *
-     * These are facts this view *wants* and cannot obtain — not because a
-     * domain failed, but because media metrics are collected at account and
-     * campaign level while destination is a property of the ad set. A consumer
-     * that sees no destination breakdown deserves to find the reason in the
-     * same place it finds every other gap.
+     * This entry was unconditional through I3.3, when media metrics stopped at
+     * campaign level and no destination split could be produced at all. It is
+     * now a statement about the *window*: a connection certified before ad set
+     * existed still holds old windows the re-read has not reached, and for those
+     * the breakdown really is unavailable for this reason. Leaving it on a
+     * response that carries a populated breakdown would be a stale apology
+     * contradicting the data beside it.
+     */
+    if (!destinations.available) {
+      missing.push({
+        metricKey: 'spend_by_destination',
+        reason:
+          'As métricas por conjunto de anúncios ainda não foram coletadas ' +
+          'para este período, e o destino é definido nesse nível. A ' +
+          'separação por destino estará disponível quando a coleta ' +
+          'histórica alcançar o período.',
+      });
+    }
+
+    /**
+     * The CRM gap, stated permanently and deliberately.
+     *
+     * Unlike the one above this will not close by waiting: no opportunity or
+     * won deal carries the ad set that produced it, so there is no destination
+     * to group them by. Naming it here is what stops a future author reading
+     * the populated destination buckets as licence to distribute
+     * `opportunitiesCreated` across them by same-day, same-channel coincidence —
+     * which would be individual attribution asserted from a cohort, in a payload
+     * that says `individualAttribution: false`.
      */
     missing.push({
-      metricKey: 'spend_by_destination',
+      metricKey: 'opportunities_by_destination',
       reason:
-        'As métricas de mídia são coletadas nos níveis de conta e campanha, ' +
-        'e o destino é definido por conjunto de anúncios. Separar o ' +
-        'investimento por destino exigiria rateio estimado.',
+        'As oportunidades e os negócios ganhos não registram o conjunto de ' +
+        'anúncios de origem, portanto não podem ser separados por destino. ' +
+        'Os totais permanecem no nível do período.',
     });
 
     return missing;
+  }
+}
+
+/**
+ * The canonical channel for one `inbox_channels.type`, including the null case.
+ *
+ * A thin wrapper over `resolveInboxChannel` so the null key — a conversation
+ * with no channel row, reachable in agency context — takes the same path as an
+ * unrecognised type instead of needing a branch at each call site. Both become
+ * `unknown`, which is the bucket no paid destination maps to, so such
+ * conversations can never be counted against a destination's spend.
+ */
+function resolveInboxChannelType(
+  channelType: string | null,
+): CanonicalAcquisitionChannel {
+  return resolveInboxChannel(channelType);
+}
+
+/** Adds two count strings in `BigInt`. Never a float, never a Number. */
+function addCount(left: string | undefined, right: string): string {
+  return left === undefined ? right : (BigInt(left) + BigInt(right)).toString();
+}
+
+/**
+ * Why a bucket does or does not have a funnel side.
+ *
+ * Reads the destination first and the channel second, because the two "no
+ * channel" cases are not the same fact. `messaging_multi` has a known
+ * destination that names several inboxes; `unknown` has no destination at all;
+ * the rest have a destination that names none. A single `channel === null`
+ * test would collapse all three into one apology.
+ */
+function resolveSupport(
+  destination: string,
+  channel: CanonicalAcquisitionChannel | null,
+): CohortBucketLeadFlowSupport {
+  if (channel) return 'mapped';
+  if (destination === 'messaging_multi') return 'multi_destination';
+  if (destination === 'unknown') return 'destination_unknown';
+
+  return 'no_inbox_equivalent';
+}
+
+/**
+ * The caveats that belong on the bucket rather than on the response.
+ *
+ * Attached per bucket because that is the unit a UI renders: a card reading
+ * "R$ 1.240 · 38 conversas" is taken as a per-ad result unless the caveat sits
+ * on the card. A response-level footnote is one scroll away from the number it
+ * qualifies, and screenshots crop.
+ */
+function bucketLimitations(support: CohortBucketLeadFlowSupport): string[] {
+  switch (support) {
+    case 'mapped':
+      return [COHORT_BUCKET_CORRELATION_LIMITATION];
+    case 'multi_destination':
+      return [COHORT_BUCKET_MESSAGING_MULTI_LIMITATION];
+    case 'no_inbox_equivalent':
+      return [COHORT_BUCKET_NO_INBOX_LIMITATION];
+    case 'destination_unknown':
+      return [COHORT_BUCKET_UNKNOWN_LIMITATION];
   }
 }

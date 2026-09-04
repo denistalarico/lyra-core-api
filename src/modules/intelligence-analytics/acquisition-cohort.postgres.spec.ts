@@ -10,10 +10,12 @@ import { SocialAdEntity } from '../social-integrations/entities/social-ad-entity
 import { SocialAdMetricDailyEntity } from '../social-integrations/entities/social-ad-metric-daily.entity';
 import { SocialAdSyncRunEntity } from '../social-integrations/entities/social-ad-sync-run.entity';
 import { SocialPaidMediaIntelligenceAdapter } from '../social-integrations/intelligence/social-paid-media-intelligence.adapter';
+import { SocialAdDestinationBreakdownReadService } from '../social-integrations/services/social-ad-destination-breakdown.read.service';
 import { SocialAdDestinationHistoryReadService } from '../social-integrations/services/social-ad-destination-history.read.service';
 import { SocialAdSyncConfigService } from '../social-integrations/services/social-ad-sync-config.service';
 import { SocialAnalyticsReadService } from '../social-integrations/services/social-analytics-read.service';
 import { AcquisitionCohortService } from './acquisition-cohort.service';
+import { COHORT_DESTINATION_NOT_A_PARTITION_LIMITATION } from './acquisition-cohort.contract';
 
 const run = describePostgresIntegration();
 
@@ -85,6 +87,9 @@ run('Acquisition cohort against PostgreSQL', () => {
       new SocialAdDestinationHistoryReadService(
         AgencyDataSource.getRepository(SocialAdDestinationObservationEntity),
       ),
+      new SocialAdDestinationBreakdownReadService(
+        AgencyDataSource.getRepository(SocialAdMetricDailyEntity),
+      ),
     );
   });
 
@@ -125,6 +130,14 @@ run('Acquisition cohort against PostgreSQL', () => {
     client?: string | null;
     metricDate: string;
     entityLevel?: string;
+    /**
+     * The object this row is about.
+     *
+     * Defaulted from the level for every pre-I3.5 caller, which only ever needed
+     * one row per level. Ad-set rows must name their own ad set, because the
+     * destination join matches on it.
+     */
+    externalId?: string;
     spend?: string;
     leads?: string;
     clicks?: string;
@@ -147,7 +160,7 @@ run('Acquisition cohort against PostgreSQL', () => {
         options.client ?? null,
         options.connection ?? connectionId,
         options.entityLevel ?? 'account',
-        `ext_${options.entityLevel ?? 'account'}`,
+        options.externalId ?? `ext_${options.entityLevel ?? 'account'}`,
         options.metricDate,
         options.spend ?? '100.000000',
         options.impressions ?? '1000',
@@ -161,6 +174,8 @@ run('Acquisition cohort against PostgreSQL', () => {
     tenant?: string;
     workspace?: string;
     client?: string | null;
+    /** `inbox_channels.type`; the destination breakdown needs all three. */
+    type?: string;
   }) => {
     const id = randomUUID();
     await AgencyDataSource.query(
@@ -168,13 +183,14 @@ run('Acquisition cohort against PostgreSQL', () => {
          (id, tenant_id, workspace_id, name, type, provider, status,
           connection_status, lifecycle_version, credential_version,
           ai_enabled, settings, metadata)
-       VALUES ($1, $2, $3, 'WhatsApp', 'whatsapp', 'meta', 'active',
+       VALUES ($1, $2, $3, 'Canal', $5, 'meta', 'active',
                'connected', 1, 1, false, '{}'::jsonb, $4::jsonb)`,
       [
         id,
         options.tenant ?? tenantId,
         options.workspace ?? workspaceId,
         JSON.stringify(options.client ? { clientId: options.client } : {}),
+        options.type ?? 'whatsapp',
       ],
     );
     return id;
@@ -728,7 +744,7 @@ run('Acquisition cohort against PostgreSQL', () => {
       observedAt: string;
       connection?: string;
     }) => {
-      const [entity] = (await AgencyDataSource.query(
+      const [entity] = await AgencyDataSource.query(
         `INSERT INTO social_ad_entities
            (tenant_id, workspace_id, connection_id, provider, entity_level,
             external_id)
@@ -740,7 +756,7 @@ run('Acquisition cohort against PostgreSQL', () => {
           options.connection ?? connectionId,
           options.externalId,
         ],
-      )) as Array<{ id: string }>;
+      );
 
       await AgencyDataSource.query(
         `INSERT INTO social_ad_destination_observations
@@ -946,14 +962,14 @@ run('Acquisition cohort against PostgreSQL', () => {
        * sightings and changes, so a handful of rows each.
        */
       for (let index = 0; index < 126; index += 1) {
-        const [entity] = (await AgencyDataSource.query(
+        const [entity] = await AgencyDataSource.query<Array<{ id: string }>>(
           `INSERT INTO social_ad_entities
              (tenant_id, workspace_id, connection_id, provider, entity_level,
               external_id)
            VALUES ($1, $2, $3, 'meta_ads', 'adset', $4)
            RETURNING id`,
           [perfTenant, workspaceId, perfConnection, `perf-adset-${index}`],
-        )) as Array<{ id: string }>;
+        );
 
         // Three observations each: a first sighting and two observed changes.
         for (const [offset, destination] of [
@@ -979,6 +995,41 @@ run('Acquisition cohort against PostgreSQL', () => {
             ],
           );
         }
+      }
+
+      /**
+       * Ad-set facts at production shape, which is what makes this a
+       * measurement of I3.5 rather than of I3.3.
+       *
+       * 126 ad sets × 120 days = 15,120 rows against 120 account rows: the
+       * breakdown reads roughly two orders of magnitude more rows than the
+       * overview beside it, joins each to the entity mirror, and runs a
+       * `LATERAL` per row against 378 observations. Seeding fewer would time a
+       * query that never touches an index.
+       *
+       * Inserted in one statement per day rather than one per row: 15,120
+       * round trips is minutes of fixture setup, and the timing that matters is
+       * the read.
+       */
+      for (let day = 0; day < 120; day += 1) {
+        const date = new Date(Date.UTC(2026, 4, 1) + day * 86_400_000)
+          .toISOString()
+          .slice(0, 10);
+
+        await AgencyDataSource.query(
+          `INSERT INTO social_ad_metrics_daily
+             (tenant_id, workspace_id, connection_id, provider, source,
+              entity_level, entity_external_id, campaign_external_id,
+              metric_date, account_timezone, currency, attribution_setting,
+              spend, impressions, clicks, link_clicks, leads, conversions,
+              conversion_value, video_views)
+           SELECT $1, $2, $3, 'meta_ads', 'paid', 'adset',
+                  'perf-adset-' || generated, 'perf-campaign', $4::date,
+                  'America/Sao_Paulo', 'BRL', 'account_default',
+                  1.500000, 80, 4, 2, 1, 0, 0, 0
+             FROM generate_series(0, 125) AS generated`,
+          [perfTenant, workspaceId, perfConnection, date],
+        );
       }
     }, 180_000);
 
@@ -1011,6 +1062,15 @@ run('Acquisition cohort against PostgreSQL', () => {
       expect(
         view.dataQuality.destinationHistory.firstObservedAt,
       ).not.toBeNull();
+      /**
+       * And that the breakdown was actually produced.
+       *
+       * Without this the timing would silently become a measurement of I3.3
+       * again the day a filter regression emptied the buckets — the fastest
+       * possible answer, and the wrong one.
+       */
+      expect(view.destinations.available).toBe(true);
+      expect(view.destinations.buckets.length).toBeGreaterThan(0);
 
       return elapsed;
     };
@@ -1023,6 +1083,383 @@ run('Acquisition cohort against PostgreSQL', () => {
     it('answers a 90-day window', async () => {
       const elapsed = await measure('2026-05-01', '2026-07-29', '90d');
       expect(elapsed).toBeLessThan(5_000);
+    });
+
+    /**
+     * The breakdown's own cost, separated from the four reads around it.
+     *
+     * The endpoint issues five reads in parallel, so a wall-clock total hides
+     * which one grew. This times the new query alone and prints its plan, which
+     * is the evidence any future index decision has to be made from — and the
+     * evidence for *not* adding one now.
+     */
+    it('plans the destination breakdown without a sequential scan', async () => {
+      const plan = await AgencyDataSource.query<
+        Array<{ 'QUERY PLAN': Array<{ 'Execution Time': number }> }>
+      >(
+        `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)
+         SELECT resolved.destination_type,
+                SUM(fact.spend) AS spend,
+                COUNT(DISTINCT fact.metric_date) AS fact_days
+           FROM social_ad_metrics_daily fact
+           JOIN social_ad_entities entity
+             ON entity.tenant_id = fact.tenant_id
+            AND entity.workspace_id = fact.workspace_id
+            AND entity.connection_id = fact.connection_id
+            AND entity.entity_level = 'adset'
+            AND entity.external_id = fact.entity_external_id
+           LEFT JOIN LATERAL (
+             SELECT observation.destination_type
+               FROM social_ad_destination_observations observation
+              WHERE observation.ad_entity_id = entity.id
+                AND (observation.observed_at
+                     AT TIME ZONE 'America/Sao_Paulo')::date <= fact.metric_date
+              ORDER BY observation.observed_at DESC,
+                       observation.created_at DESC
+              LIMIT 1
+           ) resolved ON TRUE
+          WHERE fact.tenant_id = $1
+            AND fact.workspace_id = $2
+            AND fact.connection_id = $3
+            AND fact.entity_level = 'adset'
+            AND fact.source = 'paid'
+            AND fact.attribution_setting = 'account_default'
+            AND fact.metric_date BETWEEN $4::date AND $5::date
+          GROUP BY 1`,
+        [perfTenant, workspaceId, perfConnection, '2026-05-01', '2026-07-29'],
+      );
+
+      const executionTime = plan[0]['QUERY PLAN'][0]['Execution Time'];
+      const rendered = JSON.stringify(plan[0]['QUERY PLAN']);
+
+      console.log(
+        `[perf] destination breakdown 90d: ${executionTime.toFixed(1)}ms`,
+      );
+
+      /**
+       * The property that decides whether this query scales, asserted without
+       * naming an index.
+       *
+       * The two tables that grow with usage are the fact table — 15,120 ad-set
+       * rows here against 120 account rows — and the observations, which the
+       * `LATERAL` visits once per fact row. Neither may be read sequentially.
+       * *Which* index the planner picks is its business and genuinely varies
+       * with the statistics: this measurement has been observed choosing both
+       * `IDX_social_ad_metrics_daily_read` and `..._campaign`, at the same ~6ms.
+       * Pinning a name would make this a test of the planner that fails on a
+       * healthy plan.
+       *
+       * `social_ad_entities` is deliberately exempt. The planner sometimes reads
+       * it sequentially because the whole mirror is 64 rows in one page, which
+       * is genuinely cheaper than a lookup — production's is 451 rows, still one
+       * or two pages. `UQ_social_ad_entities_identity` already covers exactly
+       * this join's columns, so the planner switches on its own once the table
+       * is large enough to be worth it. Creating an index to satisfy an
+       * assertion, with no measurement showing that scan is the bottleneck, is
+       * the thing this step must not do.
+       */
+      expect(rendered).toContain('"Relation Name":"social_ad_metrics_daily"');
+
+      const scannedSequentially = [
+        ...rendered.matchAll(
+          /"Node Type":"Seq Scan"[^}]*?"Relation Name":"([^"]+)"/g,
+        ),
+      ].map((match) => match[1]);
+
+      expect(scannedSequentially).not.toContain('social_ad_metrics_daily');
+      expect(scannedSequentially).not.toContain(
+        'social_ad_destination_observations',
+      );
+
+      expect(executionTime).toBeLessThan(2_000);
+    });
+  });
+
+  /**
+   * The destination breakdown, end to end through both domains.
+   *
+   * The unit spec proves the composition rules; this proves the whole path — ad
+   * set rows joined to observation history on one side, channel-scoped
+   * conversation counts on the other, lined up by a projector that never queries
+   * either table itself.
+   */
+  describe('destination breakdown', () => {
+    const breakdownConnection = randomUUID();
+
+    /** An ad set in the mirror, returning its internal id. */
+    const createAdSet = async (externalId: string): Promise<string> => {
+      const rows = await AgencyDataSource.query<Array<{ id: string }>>(
+        `INSERT INTO social_ad_entities
+           (tenant_id, workspace_id, connection_id, provider, entity_level,
+            external_id)
+         VALUES ($1, $2, $3, 'meta_ads', 'adset', $4)
+         RETURNING id`,
+        [tenantId, workspaceId, breakdownConnection, externalId],
+      );
+
+      return rows[0].id;
+    };
+
+    const observe = (
+      adEntityId: string,
+      destinationType: string,
+      observedAt: string,
+    ) =>
+      AgencyDataSource.query(
+        `INSERT INTO social_ad_destination_observations
+           (tenant_id, workspace_id, connection_id, provider, ad_entity_id,
+            destination_type, destination_raw, observed_at)
+         VALUES ($1, $2, $3, 'meta_ads', $4, $5, $6, $7::timestamptz)`,
+        [
+          tenantId,
+          workspaceId,
+          breakdownConnection,
+          adEntityId,
+          destinationType,
+          destinationType.toUpperCase(),
+          observedAt,
+        ],
+      );
+
+    const insertAdsetSpend = (options: {
+      externalId: string;
+      metricDate: string;
+      spend: string;
+      leads?: string;
+    }) =>
+      insertSpend({
+        connection: breakdownConnection,
+        metricDate: options.metricDate,
+        entityLevel: 'adset',
+        externalId: options.externalId,
+        spend: options.spend,
+        leads: options.leads ?? '0',
+      });
+
+    beforeAll(async () => {
+      await createConnection({ id: breakdownConnection });
+
+      // Account-level facts, which the response totals must keep using.
+      await insertSpend({
+        connection: breakdownConnection,
+        metricDate: '2026-08-10',
+        spend: '1000.000000',
+        leads: '50',
+      });
+
+      const whatsappAdSet = await createAdSet('adset-wa');
+      const directAdSet = await createAdSet('adset-ig');
+      const multiAdSet = await createAdSet('adset-multi');
+      const siteAdSet = await createAdSet('adset-site');
+      const lateAdSet = await createAdSet('adset-late');
+
+      await observe(whatsappAdSet, 'whatsapp', '2026-08-01T09:00:00-03:00');
+      await observe(
+        directAdSet,
+        'instagram_direct',
+        '2026-08-01T09:00:00-03:00',
+      );
+      await observe(multiAdSet, 'messaging_multi', '2026-08-01T09:00:00-03:00');
+      await observe(siteAdSet, 'website', '2026-08-01T09:00:00-03:00');
+      // Observed only near the end: its earlier spend has no destination.
+      await observe(lateAdSet, 'whatsapp', '2026-08-25T09:00:00-03:00');
+
+      await insertAdsetSpend({
+        externalId: 'adset-wa',
+        metricDate: '2026-08-10',
+        spend: '600.000000',
+        leads: '30',
+      });
+      await insertAdsetSpend({
+        externalId: 'adset-ig',
+        metricDate: '2026-08-10',
+        spend: '200.000000',
+        leads: '10',
+      });
+      await insertAdsetSpend({
+        externalId: 'adset-multi',
+        metricDate: '2026-08-10',
+        spend: '100.000000',
+        leads: '5',
+      });
+      await insertAdsetSpend({
+        externalId: 'adset-site',
+        metricDate: '2026-08-10',
+        spend: '50.000000',
+        leads: '4',
+      });
+      await insertAdsetSpend({
+        externalId: 'adset-late',
+        metricDate: '2026-08-10',
+        spend: '40.000000',
+        leads: '2',
+      });
+
+      // The funnel side: three channels, each with its own conversations.
+      const whatsappChannel = await createChannel({});
+      const instagramChannel = await createChannel({ type: 'instagram' });
+
+      for (const day of ['2026-08-05', '2026-08-06', '2026-08-07']) {
+        await createConversation({
+          channelId: whatsappChannel,
+          createdAt: `${day}T12:00:00Z`,
+        });
+      }
+      await createConversation({
+        channelId: instagramChannel,
+        createdAt: '2026-08-08T12:00:00Z',
+      });
+    });
+
+    const breakdownOf = async () => {
+      const view = await cohort({ connection: breakdownConnection });
+
+      return {
+        view,
+        byDestination: new Map(
+          view.destinations.buckets.map((item) => [item.destination, item]),
+        ),
+      };
+    };
+
+    it('splits spend by observed destination without apportioning', async () => {
+      const { byDestination } = await breakdownOf();
+
+      expect(byDestination.get('whatsapp')?.social.spend).toBe('600.000000');
+      expect(byDestination.get('instagram_direct')?.social.spend).toBe(
+        '200.000000',
+      );
+      expect(byDestination.get('messaging_multi')?.social.spend).toBe(
+        '100.000000',
+      );
+      expect(byDestination.get('website')?.social.spend).toBe('50.000000');
+      // Spend before its ad set was first observed.
+      expect(byDestination.get('unknown')?.social.spend).toBe('40.000000');
+    });
+
+    /**
+     * The account total is not the sum of the buckets, and stays the account
+     * total.
+     *
+     * 600 + 200 + 100 + 50 + 40 = 990, against an account row of 1000. The
+     * response reports 1000, because that is the figure that reconciles with Ads
+     * Manager and with every number this endpoint returned before I3.5.
+     */
+    it('leaves the period totals measured at account level', async () => {
+      const { view } = await breakdownOf();
+
+      expect(view.social.spend).toBe('1000.000000');
+      expect(view.social.providerLeads).toBe('50');
+      expect(view.dataQuality.limitations).toContain(
+        COHORT_DESTINATION_NOT_A_PARTITION_LIMITATION,
+      );
+    });
+
+    it('lines each inbox destination up with its own channel', async () => {
+      const { byDestination } = await breakdownOf();
+      const whatsapp = byDestination.get('whatsapp');
+      const direct = byDestination.get('instagram_direct');
+
+      expect(whatsapp?.leadflow.support).toBe('mapped');
+      expect(whatsapp?.leadflow.channel).toBe('whatsapp');
+      expect(whatsapp?.leadflow.conversationsReceived).toBe('3');
+
+      expect(direct?.leadflow.channel).toBe('instagram');
+      expect(direct?.leadflow.conversationsReceived).toBe('1');
+    });
+
+    /** The four conversations are never redistributed to cover the ad spend. */
+    it('gives messaging_multi and website no funnel side at all', async () => {
+      const { byDestination } = await breakdownOf();
+      const multi = byDestination.get('messaging_multi');
+      const website = byDestination.get('website');
+
+      expect(multi?.leadflow.support).toBe('multi_destination');
+      expect(multi?.leadflow.conversationsReceived).toBeNull();
+      expect(multi?.derived.costPerConversation).toBeNull();
+      // The paid side is still real, and so is its own CPL.
+      expect(multi?.derived.providerCpl).toBe('20.000000');
+
+      expect(website?.leadflow.support).toBe('no_inbox_equivalent');
+      expect(website?.leadflow.conversationsReceived).toBeNull();
+      expect(website?.derived.providerCpl).toBe('12.500000');
+    });
+
+    it('derives the mapped costs from the bucket and its channel', async () => {
+      const { byDestination } = await breakdownOf();
+      const whatsapp = byDestination.get('whatsapp');
+
+      // 600 ÷ 30 provider leads, 600 ÷ 3 conversations.
+      expect(whatsapp?.derived.providerCpl).toBe('20.000000');
+      expect(whatsapp?.derived.costPerConversation).toBe('200.000000');
+    });
+
+    it('keeps unknown as a bucket and says why it is unknown', async () => {
+      const { byDestination } = await breakdownOf();
+      const unknown = byDestination.get('unknown');
+
+      expect(unknown?.dataQuality.resolution).toBe('unavailable');
+      expect(unknown?.dataQuality.temporalUnknownSpend).toBe('40.000000');
+      expect(unknown?.leadflow.support).toBe('destination_unknown');
+    });
+
+    it('still reports the CRM only at period level', async () => {
+      const { view, byDestination } = await breakdownOf();
+
+      expect(view.leadflow).toHaveProperty('opportunitiesCreated');
+      for (const bucket of byDestination.values()) {
+        expect(bucket.leadflow).not.toHaveProperty('opportunitiesCreated');
+      }
+      expect(
+        view.dataQuality.missingFacts.map((item) => item.metricKey),
+      ).toContain('opportunities_by_destination');
+    });
+
+    it('keeps the stage rates null and the claim unchanged', async () => {
+      const { view } = await breakdownOf();
+
+      expect(view.kind).toBe('cohort_correlation');
+      expect(view.joinBasis).toBe('date_channel_bucket');
+      expect(view.derived.conversationToQualifiedRate).toBeNull();
+      expect(view.derived.qualifiedToOpportunityRate).toBeNull();
+      expect(view.derived.opportunityToWonRate).toBeNull();
+    });
+
+    it('claims observed destination resolution once ad-set facts exist', async () => {
+      const { view } = await breakdownOf();
+
+      expect(view.destinations.available).toBe(true);
+      expect(view.dataQuality.destinationHistory.destinationResolution).toBe(
+        'observed_destination',
+      );
+    });
+
+    /**
+     * §27: a connection certified before ad set existed still answers fully.
+     *
+     * Its own connection, with account-level facts only — which is the state
+     * production is genuinely in today for every window the I3.4 backfill has
+     * not reached. The totals must be complete and only the breakdown absent.
+     */
+    it('answers fully for a connection with no ad-set facts', async () => {
+      const accountOnly = randomUUID();
+      await createConnection({ id: accountOnly });
+      await insertSpend({
+        connection: accountOnly,
+        metricDate: '2026-08-12',
+        spend: '250.000000',
+        leads: '5',
+      });
+
+      const view = await cohort({ connection: accountOnly });
+
+      expect(view.social.spend).toBe('250.000000');
+      expect(view.derived.providerCpl).toBe('50.000000');
+      expect(view.destinations.available).toBe(false);
+      expect(view.destinations.buckets).toEqual([]);
+      expect(view.dataQuality.destinationHistory.destinationResolution).toBe(
+        'unavailable',
+      );
     });
   });
 });

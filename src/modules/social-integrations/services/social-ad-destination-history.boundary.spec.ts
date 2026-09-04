@@ -12,6 +12,11 @@ import { join } from 'path';
 const SOURCES = [
   join(__dirname, 'social-ad-destination-history.read.service.ts'),
   join(__dirname, '..', 'analytics', 'social-ad-destination-timeline.ts'),
+  // I3.5's breakdown joins the same evidence to ad-set metrics, so it inherits
+  // both rules: no provider access, and no vocabulary that claims a destination
+  // was *in effect* rather than observed.
+  join(__dirname, 'social-ad-destination-breakdown.read.service.ts'),
+  join(__dirname, '..', 'analytics', 'social-ad-destination-breakdown.ts'),
 ];
 
 function readCode(file: string): string {
@@ -97,10 +102,41 @@ describe('destination history boundary', () => {
    * Substituting `social_ad_entities.destination_type` for a day before the
    * first observation would reintroduce exactly the current-state-as-history
    * error the observations table exists to remove.
+   *
+   * The rule is about that *column*, not the table. Through I3.4 the two were
+   * the same test, because nothing on this path had a reason to read
+   * `social_ad_entities` at all. I3.5's breakdown does: it joins the mirror to
+   * turn a fact's `entity_external_id` into the ad set's internal id, which is
+   * what the observations are keyed by — identity, never destination. So the
+   * assertion now names the columns a current-state fallback would have to
+   * touch, which is the thing that was actually meant.
    */
   it('never falls back to the current destination column', () => {
     for (const file of SOURCES) {
-      expect(readCode(file)).not.toContain('social_ad_entities');
+      const source = readCode(file);
+
+      expect(source).not.toContain('entity.destination_type');
+      expect(source).not.toContain('entity.destination_raw');
+      expect(source).not.toContain('entity.destination_observed_at');
+      expect(source).not.toContain('destinationType');
+      expect(source).not.toContain('destinationObservedAt');
     }
+  });
+
+  /**
+   * And where the mirror *is* joined, it is joined for identity alone.
+   *
+   * The breakdown's join exists to match a fact's external id to the ad set row
+   * whose internal id the observations reference. Asserting the join predicate
+   * pins that: a later edit that started selecting a destination from `entity`
+   * would have to change this line as well as the query.
+   */
+  it('joins the entity mirror only to resolve an ad set identity', () => {
+    const breakdown = readCode(SOURCES[2]);
+
+    expect(breakdown).toContain('entity.external_id = fact.entity_external_id');
+    expect(breakdown).toContain('observation.ad_entity_id = entity.id');
+    // The destination always comes from the observations, never the mirror.
+    expect(breakdown).toContain('SELECT observation.destination_type');
   });
 });

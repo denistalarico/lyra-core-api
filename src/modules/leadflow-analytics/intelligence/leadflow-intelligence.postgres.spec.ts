@@ -91,6 +91,13 @@ run('LeadFlow intelligence adapter', () => {
     workspace?: string;
     client?: string | null;
     operatingMode?: string;
+    /**
+     * `inbox_channels.type`, defaulting to the value every pre-existing test
+     * assumed. Parameterised for the per-channel breakdown, where the whole
+     * point is that `instagram` and `facebook_messenger` land in their own
+     * buckets rather than in WhatsApp's.
+     */
+    type?: string;
   }) => {
     const id = randomUUID();
     await AgencyDataSource.query(
@@ -98,7 +105,7 @@ run('LeadFlow intelligence adapter', () => {
          (id, tenant_id, workspace_id, name, type, provider, status,
           connection_status, lifecycle_version, credential_version,
           ai_enabled, settings, metadata)
-       VALUES ($1, $2, $3, 'WhatsApp', 'whatsapp', 'meta', 'active',
+       VALUES ($1, $2, $3, 'Canal', $5, 'meta', 'active',
                'connected', 1, 1, false, '{}'::jsonb, $4::jsonb)`,
       [
         id,
@@ -110,6 +117,7 @@ run('LeadFlow intelligence adapter', () => {
             ? { operatingMode: options.operatingMode }
             : {}),
         }),
+        options.type ?? 'whatsapp',
       ],
     );
     return id;
@@ -995,7 +1003,10 @@ run('LeadFlow intelligence adapter', () => {
         occurredAt: '2026-08-20T12:00:00Z',
       });
 
-      const covering = await fetch({ since: '2026-08-25', until: '2026-08-31' });
+      const covering = await fetch({
+        since: '2026-08-25',
+        until: '2026-08-31',
+      });
       expect(covering.provenance.notes?.qualificationHistoryStartsAt).toContain(
         '2026-08-20',
       );
@@ -1003,7 +1014,10 @@ run('LeadFlow intelligence adapter', () => {
         covering.provenance.notes?.qualificationWindowPrecedesHistory,
       ).toBe('false');
 
-      const preceding = await fetch({ since: '2026-08-01', until: '2026-08-31' });
+      const preceding = await fetch({
+        since: '2026-08-01',
+        until: '2026-08-31',
+      });
       expect(
         preceding.provenance.notes?.qualificationWindowPrecedesHistory,
       ).toBe('true');
@@ -1086,9 +1100,9 @@ run('LeadFlow intelligence adapter', () => {
         });
       }
 
-      expect(valueOf(await fetch({ client: clientId }), 'qualified_leads')).toBe(
-        '1',
-      );
+      expect(
+        valueOf(await fetch({ client: clientId }), 'qualified_leads'),
+      ).toBe('1');
       expect(
         valueOf(await fetch({ client: otherClientId }), 'qualified_leads'),
       ).toBe('1');
@@ -1189,6 +1203,307 @@ run('LeadFlow intelligence adapter', () => {
 
       console.log(`[perf] leadflow day ${label}: ${elapsed}ms`);
       expect(elapsed).toBeLessThan(5_000);
+    });
+  });
+
+  /**
+   * The per-channel counts the cross-domain destination breakdown reads.
+   *
+   * The rule these prove is that a bucket's funnel side is genuinely *that
+   * channel's* — a WhatsApp destination must never be credited with Instagram
+   * conversations. Against a real database because the channel join, the client
+   * predicate and the first-qualification shape all live in SQL.
+   */
+  describe('channel breakdown', () => {
+    const channelBreakdown = (
+      overrides: {
+        client?: string | null;
+        since?: string;
+        until?: string;
+        timezone?: string | null;
+      } = {},
+    ) =>
+      adapter.channelBreakdown(
+        requireIntelligenceScope({
+          tenantId,
+          workspaceId,
+          agencyClientId:
+            overrides.client === undefined ? clientId : overrides.client,
+        }),
+        {
+          since: overrides.since ?? '2026-08-01',
+          until: overrides.until ?? '2026-08-31',
+        },
+        overrides.timezone ?? null,
+      );
+
+    it('counts conversations under their own channel type', async () => {
+      const whatsapp = await createChannel({ client: clientId });
+      const instagram = await createChannel({
+        client: clientId,
+        type: 'instagram',
+      });
+      const messenger = await createChannel({
+        client: clientId,
+        type: 'facebook_messenger',
+      });
+
+      await createConversation({
+        channelId: whatsapp,
+        createdAt: '2026-08-10T12:00:00Z',
+      });
+      await createConversation({
+        channelId: whatsapp,
+        createdAt: '2026-08-11T12:00:00Z',
+      });
+      await createConversation({
+        channelId: instagram,
+        createdAt: '2026-08-12T12:00:00Z',
+      });
+      await createConversation({
+        channelId: messenger,
+        createdAt: '2026-08-13T12:00:00Z',
+      });
+
+      const result = await channelBreakdown();
+
+      expect(result.channels.get('whatsapp')?.conversationsReceived).toBe('2');
+      expect(result.channels.get('instagram')?.conversationsReceived).toBe('1');
+      expect(
+        result.channels.get('facebook_messenger')?.conversationsReceived,
+      ).toBe('1');
+    });
+
+    it('counts inbound messages under the conversation channel', async () => {
+      const whatsapp = await createChannel({ client: clientId });
+      const instagram = await createChannel({
+        client: clientId,
+        type: 'instagram',
+      });
+
+      const first = await createConversation({
+        channelId: whatsapp,
+        createdAt: '2026-08-10T12:00:00Z',
+      });
+      const second = await createConversation({
+        channelId: instagram,
+        createdAt: '2026-08-10T12:00:00Z',
+      });
+
+      await createInboundMessage({
+        conversationId: first,
+        occurredAt: '2026-08-10T12:05:00Z',
+      });
+      await createInboundMessage({
+        conversationId: first,
+        occurredAt: '2026-08-10T12:06:00Z',
+      });
+      await createInboundMessage({
+        conversationId: second,
+        occurredAt: '2026-08-10T12:07:00Z',
+      });
+      // Outbound must not be counted on either side.
+      await createInboundMessage({
+        conversationId: second,
+        occurredAt: '2026-08-10T12:08:00Z',
+        direction: 'outbound',
+      });
+
+      const result = await channelBreakdown();
+
+      expect(result.channels.get('whatsapp')?.inboundMessages).toBe('2');
+      expect(result.channels.get('instagram')?.inboundMessages).toBe('1');
+    });
+
+    it('counts first qualifications under their conversation channel', async () => {
+      const whatsapp = await createChannel({ client: clientId });
+      const instagram = await createChannel({
+        client: clientId,
+        type: 'instagram',
+      });
+
+      const first = await createConversation({
+        channelId: whatsapp,
+        createdAt: '2026-08-02T12:00:00Z',
+      });
+      const second = await createConversation({
+        channelId: instagram,
+        createdAt: '2026-08-02T12:00:00Z',
+      });
+
+      await createQualificationTransition({
+        conversationId: first,
+        occurredAt: '2026-08-05T12:00:00Z',
+      });
+      await createQualificationTransition({
+        conversationId: second,
+        occurredAt: '2026-08-06T12:00:00Z',
+      });
+
+      const result = await channelBreakdown();
+
+      expect(result.channels.get('whatsapp')?.qualifiedLeads).toBe('1');
+      expect(result.channels.get('instagram')?.qualifiedLeads).toBe('1');
+    });
+
+    /**
+     * A re-qualification is not a second qualification, and the channel
+     * dimension must not turn one conversation into two.
+     *
+     * The inner query finds the earliest transition across *all time* and only
+     * then filters to the window. Filtering first would report the August
+     * re-qualification of a June-qualified conversation as new.
+     */
+    it('never counts a requalification as a second lead', async () => {
+      const whatsapp = await createChannel({ client: clientId });
+      const conversation = await createConversation({
+        channelId: whatsapp,
+        createdAt: '2026-06-01T12:00:00Z',
+      });
+
+      await createQualificationTransition({
+        conversationId: conversation,
+        occurredAt: '2026-06-10T12:00:00Z',
+      });
+      await createQualificationTransition({
+        conversationId: conversation,
+        occurredAt: '2026-07-01T12:00:00Z',
+        newStatus: 'disqualified',
+      });
+      await createQualificationTransition({
+        conversationId: conversation,
+        occurredAt: '2026-08-15T12:00:00Z',
+      });
+
+      const result = await channelBreakdown();
+
+      // The first qualification was in June, outside the window. August's
+      // re-qualification is not a new lead.
+      expect(result.channels.get('whatsapp')?.qualifiedLeads ?? '0').toBe('0');
+    });
+
+    /**
+     * The per-channel counts sum to the window totals.
+     *
+     * The property that makes the breakdown trustworthy beside the totals: a
+     * reader who finds them disagreeing distrusts both. It holds because both
+     * queries use the same predicate, window bounds and zone.
+     */
+    it('sums to the same totals the fact set reports', async () => {
+      const whatsapp = await createChannel({ client: clientId });
+      const instagram = await createChannel({
+        client: clientId,
+        type: 'instagram',
+      });
+
+      for (const day of ['2026-08-05', '2026-08-06', '2026-08-07']) {
+        await createConversation({
+          channelId: whatsapp,
+          createdAt: `${day}T12:00:00Z`,
+        });
+      }
+      await createConversation({
+        channelId: instagram,
+        createdAt: '2026-08-08T12:00:00Z',
+      });
+
+      const [set, result] = await Promise.all([
+        fetch({ grain: 'period' }),
+        channelBreakdown(),
+      ]);
+
+      const total = set.facts.find(
+        (fact) => fact.metricKey === 'conversations_started',
+      )?.value;
+      const summed = [...result.channels.values()].reduce(
+        (accumulator, counts) =>
+          accumulator + BigInt(counts.conversationsReceived),
+        0n,
+      );
+
+      expect(summed.toString()).toBe(total);
+    });
+
+    /** Another client's conversations are invisible, exactly as in the totals. */
+    it('applies the same client predicate as every other read', async () => {
+      const mine = await createChannel({ client: clientId });
+      const theirs = await createChannel({ client: otherClientId });
+
+      await createConversation({
+        channelId: mine,
+        createdAt: '2026-08-10T12:00:00Z',
+      });
+      await createConversation({
+        channelId: theirs,
+        createdAt: '2026-08-10T12:00:00Z',
+      });
+
+      const result = await channelBreakdown();
+
+      expect(result.channels.get('whatsapp')?.conversationsReceived).toBe('1');
+    });
+
+    /**
+     * A conversation with no channel keys on null rather than joining a bucket.
+     *
+     * Reachable in agency context, and such a conversation has no channel to
+     * compare a destination against — folding it into a named one would credit
+     * it to spend it has no relationship with.
+     */
+    it('keys a channel-less conversation under null', async () => {
+      await createConversation({
+        channelId: null,
+        createdAt: '2026-08-10T12:00:00Z',
+      });
+
+      const result = await channelBreakdown({ client: null });
+
+      expect(result.channels.get(null)?.conversationsReceived).toBe('1');
+    });
+
+    /** Events outside the window contribute to no channel. */
+    it('bounds every count by the requested window', async () => {
+      const whatsapp = await createChannel({ client: clientId });
+
+      await createConversation({
+        channelId: whatsapp,
+        createdAt: '2026-07-31T12:00:00Z',
+      });
+      await createConversation({
+        channelId: whatsapp,
+        createdAt: '2026-09-01T12:00:00Z',
+      });
+
+      const result = await channelBreakdown();
+
+      expect(
+        result.channels.get('whatsapp')?.conversationsReceived ?? '0',
+      ).toBe('0');
+    });
+
+    /**
+     * The day boundary is the ad account's, not the database's.
+     *
+     * A conversation at 21:00 São Paulo time on the last day of the window is
+     * 00:00 UTC on the next. With the account's zone bound, it counts; without
+     * it, the last evening of every window is silently lost.
+     */
+    it('cuts the window on the supplied timezone', async () => {
+      const whatsapp = await createChannel({ client: clientId });
+
+      // 2026-08-31 21:00 BRT = 2026-09-01 00:00 UTC.
+      await createConversation({
+        channelId: whatsapp,
+        createdAt: '2026-09-01T00:00:00Z',
+      });
+
+      const utc = await channelBreakdown();
+      const local = await channelBreakdown({ timezone: 'America/Sao_Paulo' });
+
+      expect(utc.channels.get('whatsapp')?.conversationsReceived ?? '0').toBe(
+        '0',
+      );
+      expect(local.channels.get('whatsapp')?.conversationsReceived).toBe('1');
     });
   });
 });

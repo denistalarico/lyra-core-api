@@ -64,6 +64,37 @@ export type LeadFlowQualificationCoverage = {
   windowPrecedesHistory: boolean;
 };
 
+/** The three conversation counts, for one channel. */
+export type LeadFlowChannelCounts = {
+  conversationsReceived: string;
+  inboundMessages: string;
+  qualifiedLeads: string;
+};
+
+/**
+ * Conversation counts split by `inbox_channels.type`.
+ *
+ * Keyed by the column's own value, `null` for a conversation with no channel.
+ * Canonicalising the key here would put a second copy of the channel vocabulary
+ * in this file; `acquisition-channel.ts` owns that mapping and this reports what
+ * the database holds.
+ */
+export type LeadFlowChannelBreakdown = {
+  channels: Map<string | null, LeadFlowChannelCounts>;
+};
+
+/**
+ * What the per-channel counts are derived from, named by the domain that owns
+ * the tables.
+ *
+ * Exported for the same reason Social exports its own: the cross-domain module
+ * must publish provenance without naming another domain's tables in its source,
+ * which its boundary spec forbids — a module that spells `inbox_conversations`
+ * is one edit from querying it and making a second copy of the client predicate.
+ */
+export const LEADFLOW_CHANNEL_PROVENANCE =
+  'inbox_conversations, inbox_messages, inbox_conversation_events';
+
 /**
  * LeadFlow's own numbers, through the same port paid media uses.
  *
@@ -329,6 +360,192 @@ export class LeadFlowIntelligenceAdapter implements IntelligenceFactSource {
   }
 
   /**
+   * The same three conversation counts, split by the channel they arrived on.
+   *
+   * Added for the cross-domain destination breakdown: paid media resolves to a
+   * *destination* (WhatsApp, Instagram Direct, Messenger) and the only honest
+   * counterpart on this side is the Inbox channel of the same kind. Producing it
+   * here, rather than in the projector, is the point — the client-binding
+   * predicate is a JSONB condition that already has one definition in
+   * `LEADFLOW_SCOPE_SQL`, and a cross-domain module writing its own channel query
+   * would be the second place that decides which conversations belong to a
+   * client. The two would eventually disagree, and the disagreement would surface
+   * as one client's conversations counted under another's spend.
+   *
+   * Returned keyed by `inbox_channels.type` verbatim, not by a canonical name.
+   * The mapping from a provider channel type onto the shared vocabulary lives in
+   * `acquisition-channel.ts` and stays there: this adapter reports what the
+   * column holds, and a channel type added after this was written comes back as
+   * itself rather than being silently folded into a bucket.
+   *
+   * A conversation with no channel row contributes to the `null` key. That is
+   * reachable in agency context — the scope predicate admits `channel_id IS
+   * NULL` — and such a conversation has no channel to compare a destination
+   * against, so it must not be folded into any named one.
+   */
+  async channelBreakdown(
+    scope: IntelligenceScope,
+    window: IntelligenceWindow,
+    timezone: string | null,
+  ): Promise<LeadFlowChannelBreakdown> {
+    const [conversations, inbound, qualified] = await Promise.all([
+      this.countConversationsByChannel(scope, window, timezone),
+      this.countInboundMessagesByChannel(scope, window, timezone),
+      this.countFirstQualificationsByChannel(scope, window, timezone),
+    ]);
+
+    const channels = new Map<string | null, LeadFlowChannelCounts>();
+
+    const merge = (
+      rows: ChannelCountRow[],
+      field: keyof LeadFlowChannelCounts,
+    ) => {
+      for (const row of rows) {
+        const existing = channels.get(row.channelType) ?? {
+          conversationsReceived: '0',
+          inboundMessages: '0',
+          qualifiedLeads: '0',
+        };
+
+        channels.set(row.channelType, {
+          ...existing,
+          [field]: (BigInt(existing[field]) + BigInt(row.count)).toString(),
+        });
+      }
+    };
+
+    merge(conversations, 'conversationsReceived');
+    merge(inbound, 'inboundMessages');
+    merge(qualified, 'qualifiedLeads');
+
+    return { channels };
+  }
+
+  /**
+   * Conversations opened in the window, per channel type.
+   *
+   * The same predicate, window bounds and timezone handling as
+   * `countConversationsStarted` — deliberately, so the per-channel counts sum to
+   * the total rather than nearly to it. A reader who finds the breakdown
+   * disagreeing with the total distrusts both.
+   */
+  private countConversationsByChannel(
+    scope: IntelligenceScope,
+    window: IntelligenceWindow,
+    timezone: string | null,
+  ): Promise<ChannelCountRow[]> {
+    return this.dataSource.query<ChannelCountRow[]>(
+      `
+        /* leadflow-intelligence:conversations-by-channel */
+        SELECT channel.type AS "channelType",
+               COUNT(*)::text AS "count"
+        FROM inbox_conversations conversation
+        LEFT JOIN inbox_channels channel
+          ON channel.id = conversation.channel_id
+         AND channel.tenant_id = conversation.tenant_id
+         AND channel.workspace_id = conversation.workspace_id
+         AND channel.deleted_at IS NULL
+        WHERE conversation.tenant_id = $1
+          AND conversation.workspace_id = $2
+          AND conversation.created_at >= ${WINDOW_START}
+          AND conversation.created_at < ${WINDOW_END}
+          AND ${LEADFLOW_SCOPE_SQL.CHANNEL}
+        GROUP BY 1
+      `,
+      params(scope, window, timezone),
+    );
+  }
+
+  private countInboundMessagesByChannel(
+    scope: IntelligenceScope,
+    window: IntelligenceWindow,
+    timezone: string | null,
+  ): Promise<ChannelCountRow[]> {
+    return this.dataSource.query<ChannelCountRow[]>(
+      `
+        /* leadflow-intelligence:inbound-messages-by-channel */
+        SELECT channel.type AS "channelType",
+               COUNT(*)::text AS "count"
+        FROM inbox_messages message
+        INNER JOIN inbox_conversations conversation
+          ON conversation.id = message.conversation_id
+         AND conversation.tenant_id = message.tenant_id
+         AND conversation.workspace_id = message.workspace_id
+        LEFT JOIN inbox_channels channel
+          ON channel.id = conversation.channel_id
+         AND channel.tenant_id = conversation.tenant_id
+         AND channel.workspace_id = conversation.workspace_id
+         AND channel.deleted_at IS NULL
+        WHERE message.tenant_id = $1
+          AND message.workspace_id = $2
+          AND message.direction = 'inbound'
+          AND message.occurred_at >= ${WINDOW_START}
+          AND message.occurred_at < ${WINDOW_END}
+          AND ${LEADFLOW_SCOPE_SQL.CHANNEL}
+        GROUP BY 1
+      `,
+      params(scope, window, timezone),
+    );
+  }
+
+  /**
+   * First qualifications in the window, per channel type.
+   *
+   * The inner query is `countFirstQualifications`' verbatim, including the part
+   * that matters most: it finds each conversation's earliest qualification
+   * across *all time* and only then keeps the ones inside the window. Filtering
+   * by the window first would report a re-qualification in August as a new
+   * qualification, and adding a channel dimension to the wrong shape would spread
+   * that double count across the buckets rather than remove it.
+   *
+   * The channel is the conversation's, joined once in the inner query and carried
+   * out — a conversation belongs to one channel, so grouping by it outside cannot
+   * split a single qualification across two buckets.
+   */
+  private countFirstQualificationsByChannel(
+    scope: IntelligenceScope,
+    window: IntelligenceWindow,
+    timezone: string | null,
+  ): Promise<ChannelCountRow[]> {
+    return this.dataSource.query<ChannelCountRow[]>(
+      `
+        /* leadflow-intelligence:first-qualifications-by-channel */
+        SELECT first_qualification.channel_type AS "channelType",
+               COUNT(*)::text AS "count"
+        FROM (
+          SELECT DISTINCT ON (event.conversation_id)
+                 event.conversation_id,
+                 channel.type AS channel_type,
+                 (event.payload->>'occurredAt')::timestamptz AS occurred_at
+          FROM inbox_conversation_events event
+          INNER JOIN inbox_conversations conversation
+            ON conversation.id = event.conversation_id
+           AND conversation.tenant_id = event.tenant_id
+           AND conversation.workspace_id = event.workspace_id
+          LEFT JOIN inbox_channels channel
+            ON channel.id = conversation.channel_id
+           AND channel.tenant_id = conversation.tenant_id
+           AND channel.workspace_id = conversation.workspace_id
+           AND channel.deleted_at IS NULL
+          WHERE event.tenant_id = $1
+            AND event.workspace_id = $2
+            AND event.event_type = '${QUALIFICATION_EVENT}'
+            AND event.payload->>'newStatus' = 'qualified'
+            AND event.payload->>'occurredAt' IS NOT NULL
+            AND ${LEADFLOW_SCOPE_SQL.CHANNEL}
+          ORDER BY event.conversation_id,
+                   (event.payload->>'occurredAt')::timestamptz ASC,
+                   event.created_at ASC
+        ) first_qualification
+        WHERE first_qualification.occurred_at >= ${WINDOW_START}
+          AND first_qualification.occurred_at < ${WINDOW_END}
+        GROUP BY 1
+      `,
+      params(scope, window, timezone),
+    );
+  }
+
+  /**
    * Conversations opened in the window.
    *
    * The client predicate is the operational service's, verbatim in meaning: in
@@ -572,6 +789,8 @@ export class LeadFlowIntelligenceAdapter implements IntelligenceFactSource {
 const PERIOD_BUCKET = '__period__';
 
 type CountRow = { day: string | null; count: string };
+/** One channel's count. `channelType` is null for a conversation with none. */
+type ChannelCountRow = { channelType: string | null; count: string };
 type WonRow = CountRow & { currency: string | null; value: string | null };
 
 /**

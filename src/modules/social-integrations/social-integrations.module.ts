@@ -20,6 +20,7 @@ import { MetaAdsInsightsReaderService } from './services/meta-ads-insights-reade
 import { MetaAdsOAuthService } from './services/meta-ads-oauth.service';
 import { MetaAdsSystemUserService } from './services/meta-ads-system-user.service';
 import { SocialAdConnectionService } from './services/social-ad-connection.service';
+import { SocialAdDestinationBreakdownReadService } from './services/social-ad-destination-breakdown.read.service';
 import { SocialAdDestinationHistoryReadService } from './services/social-ad-destination-history.read.service';
 import { SocialAdDestinationObserverService } from './services/social-ad-destination-observer.service';
 import { SocialAdEntityWriterService } from './services/social-ad-entity-writer.service';
@@ -74,6 +75,7 @@ import { SocialIntegrationsController } from './social-integrations.controller';
     MetaAdsEntityReaderService,
     SocialAdDestinationObserverService,
     SocialAdDestinationHistoryReadService,
+    SocialAdDestinationBreakdownReadService,
     SocialAdEntityWriterService,
     SocialAdHierarchySyncService,
     MetaAdsInsightsReaderService,
@@ -123,6 +125,7 @@ import { SocialIntegrationsController } from './social-integrations.controller';
     // history obeys none of them — it is per ad set, has no attribution
     // setting, and is evidence about configuration rather than delivery.
     SocialAdDestinationHistoryReadService,
+    SocialAdDestinationBreakdownReadService,
   ],
 })
 export class SocialIntegrationsModule {}

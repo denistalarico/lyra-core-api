@@ -71,36 +71,35 @@ export function resolveInboxChannel(
  * Direct or Messenger, and which one is decided by the ad set's
  * `destination_type`.
  *
- * **The reason has changed twice, and the conclusion has not changed yet.** I3.2
- * syncs `destination_type` onto the ad set and I3.2a records its history, so the
- * destination is in this database. I3.4 then began ingesting insights at ad-set
- * level, so the *metric* to attach to it exists too: `SocialAdInsightsLevel`
- * includes `adset` and `social_ad_metrics_daily` holds per-ad-set spend.
+ * **This describes the response-level cohort, and I3.5 did not change it.**
+ * I3.2 syncs `destination_type` onto the ad set, I3.2a records its history, and
+ * I3.4 ingests insights at ad-set level — so I3.5 does now produce a genuine
+ * per-destination breakdown, in `AcquisitionCohortView.destinations`, where each
+ * bucket carries its own `observed_destination` resolution.
  *
- * What is missing now is only this function's own wiring. Grouping paid media by
- * destination is a deliberate next step, not a side effect of the ingest, and it
- * is left undone here so that I3.4 changes no number any dashboard currently
- * shows. Until it is taken, this stays `unknown`.
+ * What stays `unknown` is the *top-level* channel, and that is correct rather
+ * than left over. The response's `social`, `leadflow` and `derived` blocks are
+ * account-level totals spanning every destination at once; there is no single
+ * channel they are about. Promoting one bucket's destination to that field would
+ * label a whole-account total with one of the several destinations inside it —
+ * a mislabelling worse than the honest `unknown` it replaced. A response-level
+ * channel becomes meaningful only if this endpoint ever returns one row *per*
+ * destination instead of one row with a breakdown, which is a different shape.
  *
- * The rule that must survive that step: a campaign may hold ad sets pointing at
- * different destinations, so the split has to come from ad-set rows joined to
- * ad-set destination history. Apportioning a *campaign's* spend across those
- * destinations would require a weighting nobody measured — by ad set count, by
- * impressions, by anything else — and would produce a number that looks
- * per-destination and is a guess, wrong in exactly the case the feature exists
- * for: an account testing WhatsApp against Instagram Direct within one campaign.
+ * The rule that governs the breakdown, and must survive any later edit: a
+ * campaign may hold ad sets pointing at different destinations, so the split
+ * comes from ad-set rows joined to ad-set destination history and from nothing
+ * else. Apportioning a *campaign's* spend across those destinations would
+ * require a weighting nobody measured — by ad set count, by impressions, by
+ * anything — and would produce a number that looks per-destination and is a
+ * guess, wrong in exactly the case the feature exists for: an account testing
+ * WhatsApp against Instagram Direct within one campaign.
  *
  * The remaining temptation is the campaign name. Reading "WPP" or "Direct" out
  * of a name a human typed would produce a number that is right for the accounts
  * whose naming convention happened to match and silently wrong for the rest,
  * with no way for the reader to tell which they are looking at. So it is not
- * done, and the cohort is declared at the level the data actually supports:
- * all Meta paid media against all Meta inbound.
- *
- * Closing this gap is now a cohort-view change alone: both halves it needed —
- * the temporal destination resolution in `social-ad-destination-timeline` and
- * the ad-set metrics from I3.4 — are in the database. Until that view is
- * written, the gap stays reported as coverage rather than papered over.
+ * done.
  */
 export function resolvePaidMediaChannel(): CanonicalAcquisitionChannel {
   return 'unknown';

@@ -2,6 +2,7 @@ import type {
   IntelligenceFreshness,
   IntelligenceProvenance,
 } from '../../common/intelligence';
+import type { CanonicalPaidMediaDestination } from '../social-integrations/sync/paid-media-destination';
 import type {
   CanonicalAcquisitionChannel,
   ChannelResolution,
@@ -242,6 +243,180 @@ export type CohortFreshness = {
   overallPartial: boolean;
 };
 
+/**
+ * Why a destination bucket's LeadFlow side is absent.
+ *
+ * Three genuinely different reasons, kept apart because a UI must render them
+ * differently. `null` on its own cannot distinguish "nobody wrote in" from "this
+ * comparison does not exist", and a reader shown an empty cell assumes the first.
+ */
+export type CohortBucketLeadFlowSupport =
+  /** The destination names one Inbox channel and its counts are real. */
+  | 'mapped'
+  /**
+   * The ad set offered several inboxes and Meta reports the offer, not the
+   * choice. Summing WhatsApp, Instagram and Messenger to match it would invent
+   * per-person routing nobody measured.
+   */
+  | 'multi_destination'
+  /**
+   * The destination does not land in an Inbox at all — a website, a lead form,
+   * an app, a phone call, a profile visit, an on-post interaction. There is no
+   * LeadFlow population to count, rather than an empty one.
+   */
+  | 'no_inbox_equivalent'
+  /** The destination itself is unknown, so no channel can be named. */
+  | 'destination_unknown';
+
+/**
+ * One destination's paid-media side.
+ *
+ * Every field is additive over ad sets and days, which is what makes summing
+ * them legitimate. `reach` is absent by the same rule that keeps it out of
+ * `CohortSocialFacts`: Meta de-duplicates it per object per day, and no
+ * arithmetic recovers a period reach per destination from daily per-ad-set
+ * figures. A field that would be null on every request is a field that teaches
+ * consumers to ignore nulls.
+ */
+export type CohortDestinationSocialFacts = {
+  spend: string | null;
+  impressions: string | null;
+  clicks: string | null;
+  linkClicks: string | null;
+  /** Leads **as Meta counted them**, never mixed with a LeadFlow count. */
+  providerLeads: string | null;
+  conversions: string | null;
+  conversionValue: string | null;
+  videoViews: string | null;
+};
+
+/**
+ * One destination's funnel side, or the reason there is none.
+ *
+ * All three counts are null unless `support` is `mapped`. That is not a data
+ * gap: for `messaging_multi` and the non-inbox destinations there is no
+ * conversation population that corresponds to the spend, and a `0` would assert
+ * that nobody arrived when the truth is that arrival is not observable at this
+ * grain.
+ */
+export type CohortDestinationLeadFlowFacts = {
+  support: CohortBucketLeadFlowSupport;
+  /** The Inbox channel these counts came from, when one was named. */
+  channel: CanonicalAcquisitionChannel | null;
+  conversationsReceived: string | null;
+  inboundMessages: string | null;
+  qualifiedLeads: string | null;
+};
+
+/**
+ * The costs a destination bucket can support.
+ *
+ * Three, not eight. `costPerOpportunity` and `costPerWonOpportunity` are absent
+ * from this level entirely rather than present-and-null, because the CRM holds
+ * no destination breakdown and never will at this join basis — offering the
+ * fields would invite a future author to fill them by correlating same-day,
+ * same-channel opportunities with spend, which is attribution by another name.
+ *
+ * The stage-to-stage rates are absent for the reason stated in
+ * `COHORT_EVENT_WINDOW_LIMITATION`, unchanged by the existence of buckets.
+ */
+export type CohortDestinationDerived = {
+  /** Spend ÷ provider-reported leads, from this destination's own ad sets. */
+  providerCpl: string | null;
+  /** Null unless the destination maps to a channel. */
+  costPerConversation: string | null;
+  /** Null unless the destination maps to a channel. */
+  costPerQualifiedLead: string | null;
+};
+
+/** What is and is not knowable about one bucket. */
+export type CohortDestinationDataQuality = {
+  /**
+   * How this bucket's destination was arrived at.
+   *
+   * `observed_destination` for every bucket built from an observation; the
+   * `unknown` bucket carries `unavailable`, because no observation named it.
+   */
+  resolution: 'observed_destination' | 'unavailable';
+  /** Always false. No number in a bucket identifies an individual. */
+  individualAttribution: false;
+  /** Whether a LeadFlow comparison exists, and why not when it does not. */
+  leadflowSupport: CohortBucketLeadFlowSupport;
+  /** True when any day contributing to this bucket was still being written. */
+  partialData: boolean;
+  /** Days in the window this bucket holds ad-set facts for. */
+  factDays: number;
+  /**
+   * Spend in this bucket that predates its ad sets' first observation.
+   *
+   * Only ever non-null on `unknown`, and it is what splits that bucket's two
+   * populations: money from days no observation can speak for (which the sync
+   * will resolve as it catches up) against money whose observed provider string
+   * this pipeline does not map (which needs a mapping entry). Reported as data
+   * rather than two buckets, so the canonical destination set stays closed.
+   */
+  temporalUnknownSpend: string | null;
+  /** Bucket-specific caveats, additional to the response-level ones. */
+  limitations: string[];
+};
+
+/**
+ * One paid-media destination, with both sides of it.
+ *
+ * Purely additive to the response: `AcquisitionCohortView` keeps every field it
+ * had, computed the way it was, and this array sits beside them. A consumer
+ * written against I3.3 continues to work and simply does not read it.
+ */
+export type CohortDestinationBucket = {
+  destination: CanonicalPaidMediaDestination;
+  social: CohortDestinationSocialFacts;
+  leadflow: CohortDestinationLeadFlowFacts;
+  derived: CohortDestinationDerived;
+  dataQuality: CohortDestinationDataQuality;
+  provenance: CohortDestinationProvenance;
+};
+
+/**
+ * Where one bucket's numbers came from, per layer.
+ *
+ * Not flattened, and not inherited from the response-level provenance, because
+ * a bucket's three layers have genuinely different sources: the money is a
+ * synced fact at a level the response-level provenance does not name, the
+ * destination is observational evidence, and the conversation counts are live
+ * rows. Somebody re-deriving a figure they distrust needs all three.
+ */
+export type CohortDestinationProvenance = {
+  /** `social_ad_metrics_daily` at ad-set level. */
+  socialMetrics: string;
+  /** `social_ad_destination_observations`. */
+  destination: string;
+  /** The Inbox source, or null when no channel was mapped. */
+  leadflow: string | null;
+};
+
+/**
+ * The destination breakdown, with the coverage needed to read it.
+ *
+ * A block rather than a bare array, because an empty array has two meanings and
+ * the difference decides whether a UI shows "no spend" or "still ingesting".
+ */
+export type CohortDestinationBreakdown = {
+  /**
+   * Whether ad-set facts exist for this window at all.
+   *
+   * False while I3.4's ad-set backfill has not reached this window, which is a
+   * real and expected state for a connection whose account-level chain was
+   * certified before ad set existed. The response is still complete —
+   * `totals` are unaffected — and this flag is what stops a reader taking an
+   * empty breakdown for a period of no delivery.
+   */
+  available: boolean;
+  /** Days of the window that carry an ad-set fact. */
+  coveredDays: number;
+  expectedDays: number;
+  buckets: CohortDestinationBucket[];
+};
+
 /** One cohort row: a period, a channel bucket, and the two sides of it. */
 export type AcquisitionCohortView = {
   kind: CohortAnalysisKind;
@@ -257,6 +432,18 @@ export type AcquisitionCohortView = {
   social: CohortSocialFacts;
   leadflow: CohortLeadFlowFacts;
   derived: CohortDerivedMetrics;
+  /**
+   * Paid media split by where it sent people, added in I3.5.
+   *
+   * Additive to everything above it. `totals`, `social`, `leadflow` and `derived`
+   * are still computed exactly as I3.3 computed them — from account-level facts
+   * and window-level counts — and are *not* rebuilt by summing these buckets.
+   * That is deliberate: the account row includes delivery belonging to no ad set
+   * the hierarchy has mirrored, the `unknown` bucket would fold into the total
+   * silently, and reach could not survive the trip. A breakdown that does not
+   * reconstruct its own parent is the honest shape here.
+   */
+  destinations: CohortDestinationBreakdown;
   provenance: CohortProvenance;
   freshness: CohortFreshness;
   dataQuality: CohortDataQuality;
@@ -306,7 +493,16 @@ export const COHORT_QUALIFICATION_LEGACY_LIMITATION =
   'registro de transição e não podem ser contadas: o número apresentado é um ' +
   'piso, não o total.';
 
-/** Stated on every response, because the destination cohort is not yet built. */
+/**
+ * Stated only while ad-set facts are missing for the requested window.
+ *
+ * It was on every response through I3.3, when media metrics genuinely stopped at
+ * campaign level. I3.4 ingests ad-set insights, so the sentence is now true of a
+ * *window* rather than of the platform: a connection certified before ad set
+ * existed still has old windows with no ad-set rows, and for those the
+ * breakdown cannot be produced for exactly this reason. Once the backfill
+ * reaches a window, the limitation stops being emitted for it.
+ */
 export const COHORT_DESTINATION_GRAIN_LIMITATION =
   'O destino da campanha (WhatsApp, Instagram Direct ou Messenger) é ' +
   'registrado por conjunto de anúncios, mas as métricas de mídia são ' +
@@ -326,3 +522,60 @@ export const COHORT_MESSAGING_MULTI_LIMITATION =
   'mais de uma caixa de entrada e o provedor não informa qual delas cada ' +
   'pessoa escolheu. Esse volume não é distribuído entre WhatsApp, Instagram ' +
   'e Messenger.';
+
+/**
+ * Carried on every destination bucket that has a LeadFlow side.
+ *
+ * The bucket is where this warning belongs rather than only the response, and the
+ * reason is the shape a UI will render: a card showing "R$ 1.240 · 38 conversas ·
+ * R$ 32,63 por conversa" reads as a per-ad result unless the caveat is attached
+ * to that card. A response-level footnote is one scroll away from the number it
+ * qualifies.
+ */
+export const COHORT_BUCKET_CORRELATION_LIMITATION =
+  'O investimento deste destino e as conversas deste canal foram comparados ' +
+  'por período. Não representa atribuição individual entre anúncio e conversa.';
+
+/** Carried on the `messaging_multi` bucket, which has no funnel side. */
+export const COHORT_BUCKET_MESSAGING_MULTI_LIMITATION =
+  'O conjunto de anúncios permitia múltiplos destinos; o destino final de ' +
+  'cada conversa não é identificável por dados agregados.';
+
+/** Carried on every bucket that does not land in an Inbox. */
+export const COHORT_BUCKET_NO_INBOX_LIMITATION =
+  'Este destino não termina em uma caixa de entrada do LeadFlow, portanto ' +
+  'não há conversas correspondentes para comparar — a ausência não significa ' +
+  'volume zero.';
+
+/** Carried on the `unknown` bucket. */
+export const COHORT_BUCKET_UNKNOWN_LIMITATION =
+  'O destino destes conjuntos de anúncios não é conhecido: ou o período é ' +
+  'anterior à primeira observação, ou o provedor informou um destino que ' +
+  'ainda não é reconhecido. O investimento é real e não foi redistribuído ' +
+  'entre os demais destinos.';
+
+/** Stated when the window has no ad-set facts at all. */
+export const COHORT_DESTINATION_UNINGESTED_LIMITATION =
+  'As métricas por conjunto de anúncios ainda não foram coletadas para este ' +
+  'período, portanto a separação por destino não está disponível. Os totais ' +
+  'do período não são afetados.';
+
+/** Stated when only part of the window has ad-set facts. */
+export const COHORT_DESTINATION_PARTIAL_INGEST_LIMITATION =
+  'A separação por destino cobre apenas parte do período: os dias sem ' +
+  'métricas por conjunto de anúncios não aparecem em nenhum destino, e a ' +
+  'soma dos destinos é menor que o total do período.';
+
+/**
+ * Stated on every response that carries a breakdown.
+ *
+ * The property a reader will otherwise assume and be wrong about. The buckets do
+ * not add up to `social.spend`: the account-level total includes delivery
+ * belonging to no mirrored ad set, and days without ad-set facts contribute to
+ * the total and to no bucket. Presenting a breakdown that silently fails to
+ * reconcile is worse than presenting none.
+ */
+export const COHORT_DESTINATION_NOT_A_PARTITION_LIMITATION =
+  'A soma dos destinos pode ser menor que o total do período: o total é ' +
+  'medido no nível da conta e inclui entregas sem conjunto de anúncios ' +
+  'espelhado, além de dias ainda não coletados nesse nível.';
