@@ -72,6 +72,20 @@ export const FIXTURE_DELETE_ORDER: readonly string[] = [
   // agency_client_id` carries a foreign key to `agency_clients`, so a fixture
   // that creates managed-client contexts has to unwind in this order.
   'agency_clients',
+  // Telemetry consent and audit. Both are tenant-scoped, so the delete below
+  // reaches them normally.
+  //
+  // `leadflow_telemetry_identity_links` is the last row holding a scope's
+  // pseudonym, so it must be deleted AFTER a spec has used that pseudonym to
+  // clear its own `leadflow_product_telemetry_daily` rows. That fact table is
+  // deliberately absent from this list and cannot be added to it: it has no
+  // `tenant_id` column at all — separating the facts from the identity is the
+  // whole point of the pseudonym — so a tenant-scoped delete has nothing to
+  // match on. A spec that writes contributions cleans them up by pseudonym
+  // itself, which is exactly the shape `eraseContribution` uses in production.
+  'leadflow_telemetry_consents',
+  'leadflow_telemetry_audit_events',
+  'leadflow_telemetry_identity_links',
   'platform_permission_audit_events',
   'crm_opportunity_tags',
   'crm_opportunity_events',

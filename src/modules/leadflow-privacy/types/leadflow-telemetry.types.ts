@@ -1,3 +1,22 @@
+/**
+ * The consent scope, as a contributing domain sees it.
+ *
+ * Structurally identical to `IntelligenceScope` and deliberately declared here
+ * rather than imported from it: this is the *consent* grain — the four columns
+ * every consent, identity link and audit row is keyed by — and it must not drift
+ * to follow an analytics type. `contextType` is omitted because it is derived
+ * from `agencyClientId` and duplicating it would allow the two to disagree.
+ *
+ * No `userId` and no `role`. Consent belongs to the context, never to the person
+ * who happened to accept the notice.
+ */
+export type TelemetryContributionScope = {
+  tenantId: string;
+  workspaceId: string;
+  /** `null` means the agency's own context, never "any client". */
+  agencyClientId: string | null;
+};
+
 export type LeadFlowTelemetryConsentState =
   | 'not_configured'
   | 'opted_in'
@@ -59,6 +78,17 @@ export type LeadFlowTelemetryCollectionResponse = {
   factsWritten: number;
   terminalRuns: number;
   failedRuns: number;
+  /**
+   * What each registered contributing domain produced, by source key.
+   *
+   * Reported so that "Social contributed nothing" is visible as a zero rather
+   * than as an absence indistinguishable from Social not being wired at all —
+   * the two have very different causes and only one is a bug.
+   */
+  contributionsBySource: Array<{
+    sourceKey: string;
+    factsWritten: number;
+  }>;
 };
 
 export type LeadFlowProductTelemetryAggregate = {

@@ -10,6 +10,7 @@ import {
 import { PermissionsModule } from '../permissions';
 import { LeadFlowPrivacyController } from './leadflow-privacy.controller';
 import { LeadFlowTelemetryPrivacyService } from './services/leadflow-telemetry-privacy.service';
+import { TelemetryContributionRegistry } from './services/telemetry-contribution.port';
 
 @Module({
   imports: [
@@ -26,7 +27,9 @@ import { LeadFlowTelemetryPrivacyService } from './services/leadflow-telemetry-p
     ),
   ],
   controllers: [LeadFlowPrivacyController],
-  providers: [LeadFlowTelemetryPrivacyService],
-  exports: [LeadFlowTelemetryPrivacyService],
+  providers: [LeadFlowTelemetryPrivacyService, TelemetryContributionRegistry],
+  // The registry is exported so a contributing domain can import this module
+  // and register itself. The arrow points into privacy, never out of it.
+  exports: [LeadFlowTelemetryPrivacyService, TelemetryContributionRegistry],
 })
 export class LeadFlowPrivacyModule {}

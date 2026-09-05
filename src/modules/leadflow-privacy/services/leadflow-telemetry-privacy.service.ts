@@ -4,6 +4,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { Interval } from '@nestjs/schedule';
 import { randomUUID } from 'node:crypto';
@@ -35,7 +36,12 @@ import type {
   LeadFlowProductTelemetryAggregate,
   LeadFlowTelemetryCollectionResponse,
   LeadFlowTelemetryStatusResponse,
+  TelemetryContributionScope,
 } from '../types/leadflow-telemetry.types';
+import {
+  TelemetryContributionRegistry,
+  type TelemetryContribution,
+} from './telemetry-contribution.port';
 
 type TelemetryScope = {
   tenantId: string;
@@ -117,6 +123,15 @@ export class LeadFlowTelemetryPrivacyService {
     private readonly dailyFacts: Repository<LeadFlowProductTelemetryDailyEntity>,
     @InjectRepository(LeadFlowTelemetryAuditEventEntity, 'agency')
     private readonly auditEvents: Repository<LeadFlowTelemetryAuditEventEntity>,
+    /**
+     * The domains that have registered themselves as contributors.
+     *
+     * `@Optional` so this service stays constructible from a plain `new` in a
+     * unit test that does not care about contribution — an absent registry
+     * means no contributors, which is the pre-I6.1 behaviour exactly.
+     */
+    @Optional()
+    private readonly contributionRegistry?: TelemetryContributionRegistry,
   ) {}
 
   async getStatus(
@@ -511,6 +526,33 @@ export class LeadFlowTelemetryPrivacyService {
         sourcePeriodTo: period.to,
       }),
     ]);
+
+    // The registered domains contribute here and nowhere else: after the gate,
+    // the notice, the consent and the opt-out check, and under the pseudonym
+    // this scope already had. A source that fails takes only itself out.
+    const contributed = await this.gatherContributions(scope, period);
+
+    for (const { contributions } of contributed) {
+      for (const contribution of contributions) {
+        facts.push(
+          this.dailyFacts.create({
+            scopePseudonym: identity.scopePseudonym,
+            observedOn: contribution.observedOn,
+            metricKey: contribution.metricKey,
+            dimensionKey: contribution.dimensionKey,
+            metricValue: contribution.metricValue,
+            // The count of source days this value covers. One, always: a
+            // contribution is a single completed day, and the field means
+            // "how many observations produced this number", not "how large
+            // the number is".
+            sampleSize: 1,
+            sourcePeriodFrom: period.from,
+            sourcePeriodTo: period.to,
+          }),
+        );
+      }
+    }
+
     if (facts.length) {
       await this.dailyFacts.upsert(facts, {
         conflictPaths: [
@@ -544,6 +586,15 @@ export class LeadFlowTelemetryPrivacyService {
           factsWritten: facts.length,
           terminalRuns,
           failedRuns,
+          // Flattened into the details object because the column stores a map
+          // of scalars. Named per source so the audit trail shows which domain
+          // contributed what, without a shape change.
+          ...Object.fromEntries(
+            contributed.map(({ sourceKey, contributions }) => [
+              `contributed_${sourceKey}`,
+              contributions.length,
+            ]),
+          ),
         },
         occurredAt: new Date(),
       }),
@@ -556,7 +607,105 @@ export class LeadFlowTelemetryPrivacyService {
       factsWritten: facts.length,
       terminalRuns,
       failedRuns,
+      contributionsBySource: contributed.map(
+        ({ sourceKey, contributions }) => ({
+          sourceKey,
+          factsWritten: contributions.length,
+        }),
+      ),
     };
+  }
+
+  /**
+   * Asks every registered domain for its rows, and survives any of them failing.
+   *
+   * ## Why a failure is swallowed rather than propagated
+   *
+   * The alternative is that one domain's broken query discards a snapshot the
+   * other domains built correctly — and, worse, does so for every consenting
+   * context at once. Telemetry is the *optional* part of the platform; it must
+   * never be the reason an operation fails. The error is logged with its source
+   * key so a silent zero is diagnosable, and the response reports the zero.
+   *
+   * ## Why the window is re-derived here and not taken from the caller
+   *
+   * `period` is the caller's requested range and may extend into today. The
+   * benchmark reads only completed days (`trailing_30_completed_days_v1`), so a
+   * partial day contributed here would enter a distribution of full days as a
+   * value that looks like collapsed performance. Clamping is done once, in one
+   * place, rather than trusted to each implementer.
+   */
+  private async gatherContributions(
+    scope: TelemetryScope,
+    period: { from: Date; to: Date },
+  ): Promise<
+    Array<{ sourceKey: string; contributions: TelemetryContribution[] }>
+  > {
+    const sources = this.contributionRegistry?.all() ?? [];
+
+    if (!sources.length) return [];
+
+    const window = this.completedDayWindow(period);
+
+    if (!window) return [];
+
+    const contributionScope: TelemetryContributionScope = {
+      tenantId: scope.tenantId,
+      workspaceId: scope.workspaceId,
+      agencyClientId: scope.agencyClientId,
+    };
+
+    return Promise.all(
+      sources.map(async (source) => {
+        try {
+          return {
+            sourceKey: source.contributionSourceKey,
+            contributions: await source.buildContributions({
+              scope: contributionScope,
+              since: window.since,
+              until: window.until,
+            }),
+          };
+        } catch (error) {
+          this.logger.warn(
+            `Telemetry contribution source ${source.contributionSourceKey} failed: ${
+              error instanceof Error ? error.message : 'unknown_error'
+            }`,
+          );
+          return { sourceKey: source.contributionSourceKey, contributions: [] };
+        }
+      }),
+    );
+  }
+
+  /**
+   * The requested period, narrowed to whole days that have finished.
+   *
+   * `period.to` is exclusive for the automation-run query above, so the last
+   * candidate day is the one before it; today is then excluded on top of that,
+   * in UTC, to match the benchmark window's timezone exactly. A period that
+   * contains no completed day at all — "collect today" — yields nothing rather
+   * than yielding today partially.
+   */
+  private completedDayWindow(period: {
+    from: Date;
+    to: Date;
+  }): { since: string; until: string } | null {
+    const dayKey = (date: Date) => date.toISOString().slice(0, 10);
+
+    const yesterday = new Date();
+    yesterday.setUTCDate(yesterday.getUTCDate() - 1);
+
+    // `to` is exclusive: step back one millisecond to land on the last day the
+    // caller actually asked for, then take whichever of that and yesterday is
+    // earlier.
+    const lastRequested = new Date(period.to.getTime() - 1);
+    const until = dayKey(
+      lastRequested.getTime() < yesterday.getTime() ? lastRequested : yesterday,
+    );
+    const since = dayKey(period.from);
+
+    return since <= until ? { since, until } : null;
   }
 
   /**
