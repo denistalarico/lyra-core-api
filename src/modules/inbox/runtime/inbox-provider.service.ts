@@ -239,7 +239,7 @@ export class InboxProviderService
                 json_schema: {
                   name: 'agent_decision_v1',
                   strict: true,
-                  schema: decisionSchema,
+                  schema: decisionSchema(input.allowedEvidenceRefs),
                 },
               },
             }),
@@ -383,161 +383,167 @@ export class InboxProviderService
   }
 }
 
-const decisionSchema = {
-  type: 'object',
-  additionalProperties: false,
-  required: [
-    'schema_version',
-    'reply',
-    'follow_text',
-    'follow_text_next_day',
-    'stage_key',
-    'stage_name',
-    'tags',
-    'handoff',
-    'handoff_reason',
-    'agent_summary',
-    'service',
-    'urgency',
-    'close_reason',
-    'confidence',
-    'evidence_refs',
-    'extracted_facts',
-    'recommended_cta',
-    'proposed_phase',
-    'stage_transition',
-    'proposed_actions',
-  ],
-  properties: {
-    schema_version: { type: 'integer', enum: [1] },
-    reply: { type: ['string', 'null'] },
-    follow_text: { type: ['string', 'null'] },
-    follow_text_next_day: { type: ['string', 'null'] },
-    stage_key: { type: ['string', 'null'] },
-    stage_name: { type: ['string', 'null'] },
-    tags: { type: 'array', items: { type: 'string' }, maxItems: 20 },
-    handoff: { type: 'boolean' },
-    handoff_reason: { type: ['string', 'null'] },
-    agent_summary: { type: 'string' },
-    service: { type: ['string', 'null'] },
-    urgency: { enum: ['low', 'normal', 'high', 'urgent'] },
-    close_reason: { type: ['string', 'null'] },
-    confidence: { type: 'number', minimum: 0, maximum: 1 },
-    evidence_refs: { type: 'array', items: { type: 'string' }, maxItems: 30 },
-    extracted_facts: {
-      type: 'array',
-      maxItems: 30,
-      items: {
-        type: 'object',
-        additionalProperties: false,
-        required: [
-          'field_key',
-          'proposed_target',
-          'value',
-          'evidence_refs',
-          'confidence',
-          'requires_confirmation',
-          'update_intent',
-        ],
-        properties: {
-          field_key: { type: 'string' },
-          proposed_target: { type: ['string', 'null'] },
-          value: { type: ['string', 'number', 'boolean', 'null'] },
-          evidence_refs: {
-            type: 'array',
-            items: { type: 'string' },
-            maxItems: 10,
-          },
-          confidence: { type: 'number', minimum: 0, maximum: 1 },
-          requires_confirmation: { type: 'boolean' },
-          update_intent: { enum: ['observe', 'enrich', 'correct'] },
-        },
-      },
-    },
-    recommended_cta: {
-      anyOf: [
-        { type: 'null' },
-        {
-          type: 'object',
-          additionalProperties: false,
-          required: ['key', 'status', 'evidence_refs'],
-          properties: {
-            key: { type: 'string' },
-            status: {
-              enum: ['pending', 'presented', 'accepted', 'refused'],
-            },
-            evidence_refs: {
-              type: 'array',
-              items: { type: 'string' },
-              maxItems: 10,
-            },
-          },
-        },
-      ],
-    },
-    proposed_phase: { type: ['string', 'null'] },
-    stage_transition: {
-      anyOf: [
-        { type: 'null' },
-        {
+function evidenceRefArraySchema(
+  allowedEvidenceRefs: string[],
+  maxItems: number,
+  required = false,
+) {
+  const refs = [...new Set(allowedEvidenceRefs)].sort();
+  return {
+    type: 'array',
+    items: refs.length ? { type: 'string', enum: refs } : { type: 'string' },
+    ...(required && refs.length ? { minItems: 1 } : {}),
+    maxItems: refs.length ? Math.min(maxItems, refs.length) : 0,
+  };
+}
+
+function decisionSchema(allowedEvidenceRefs: string[]) {
+  const evidenceRefs = [...new Set(allowedEvidenceRefs)].sort();
+  return {
+    type: 'object',
+    additionalProperties: false,
+    required: [
+      'schema_version',
+      'reply',
+      'follow_text',
+      'follow_text_next_day',
+      'stage_key',
+      'stage_name',
+      'tags',
+      'handoff',
+      'handoff_reason',
+      'agent_summary',
+      'service',
+      'urgency',
+      'close_reason',
+      'confidence',
+      'evidence_refs',
+      'extracted_facts',
+      'recommended_cta',
+      'proposed_phase',
+      'stage_transition',
+      'proposed_actions',
+    ],
+    properties: {
+      schema_version: { type: 'integer', enum: [1] },
+      reply: { type: ['string', 'null'] },
+      follow_text: { type: ['string', 'null'] },
+      follow_text_next_day: { type: ['string', 'null'] },
+      stage_key: { type: ['string', 'null'] },
+      stage_name: { type: ['string', 'null'] },
+      tags: { type: 'array', items: { type: 'string' }, maxItems: 20 },
+      handoff: { type: 'boolean' },
+      handoff_reason: { type: ['string', 'null'] },
+      agent_summary: { type: 'string' },
+      service: { type: ['string', 'null'] },
+      urgency: { enum: ['low', 'normal', 'high', 'urgent'] },
+      close_reason: { type: ['string', 'null'] },
+      confidence: { type: 'number', minimum: 0, maximum: 1 },
+      evidence_refs: evidenceRefArraySchema(evidenceRefs, 30),
+      extracted_facts: {
+        type: 'array',
+        maxItems: 30,
+        items: {
           type: 'object',
           additionalProperties: false,
           required: [
-            'opportunityId',
-            'fromStageId',
-            'toStageId',
-            'reasonCode',
-            'evidenceRefs',
+            'field_key',
+            'proposed_target',
+            'value',
+            'evidence_refs',
             'confidence',
-            'playbookPhase',
-            'playbookVersion',
-            'transitionPolicyVersion',
+            'requires_confirmation',
+            'update_intent',
           ],
           properties: {
-            opportunityId: { type: 'string' },
-            fromStageId: { type: 'string' },
-            toStageId: { type: 'string' },
-            reasonCode: { type: 'string' },
-            evidenceRefs: {
-              type: 'array',
-              items: { type: 'string' },
-              minItems: 1,
-              maxItems: 20,
-            },
+            field_key: { type: 'string' },
+            proposed_target: { type: ['string', 'null'] },
+            value: { type: ['string', 'number', 'boolean', 'null'] },
+            evidence_refs: evidenceRefArraySchema(evidenceRefs, 10),
             confidence: { type: 'number', minimum: 0, maximum: 1 },
-            playbookPhase: { type: ['string', 'null'] },
-            playbookVersion: { type: ['integer', 'null'], minimum: 1 },
-            transitionPolicyVersion: { type: 'integer', minimum: 1 },
+            requires_confirmation: { type: 'boolean' },
+            update_intent: { enum: ['observe', 'enrich', 'correct'] },
           },
         },
-      ],
-    },
-    proposed_actions: {
-      type: 'array',
-      maxItems: 30,
-      items: {
-        type: 'object',
-        additionalProperties: false,
-        required: ['type', 'value'],
-        properties: {
-          type: {
-            enum: [
-              'set_stage',
-              'add_tag',
-              'set_summary',
-              'set_service',
-              'set_urgency',
-              'set_fact',
-              'close',
-              'handoff',
-            ],
+      },
+      recommended_cta: {
+        anyOf: [
+          { type: 'null' },
+          {
+            type: 'object',
+            additionalProperties: false,
+            required: ['key', 'status', 'evidence_refs'],
+            properties: {
+              key: { type: 'string' },
+              status: {
+                enum: ['pending', 'presented', 'accepted', 'refused'],
+              },
+              evidence_refs: evidenceRefArraySchema(evidenceRefs, 10),
+            },
           },
-          value: { type: ['string', 'null'] },
+        ],
+      },
+      proposed_phase: { type: ['string', 'null'] },
+      stage_transition: evidenceRefs.length
+        ? {
+            anyOf: [
+              { type: 'null' },
+              {
+                type: 'object',
+                additionalProperties: false,
+                required: [
+                  'opportunityId',
+                  'fromStageId',
+                  'toStageId',
+                  'reasonCode',
+                  'evidenceRefs',
+                  'confidence',
+                  'playbookPhase',
+                  'playbookVersion',
+                  'transitionPolicyVersion',
+                ],
+                properties: {
+                  opportunityId: { type: 'string' },
+                  fromStageId: { type: 'string' },
+                  toStageId: { type: 'string' },
+                  reasonCode: { type: 'string' },
+                  evidenceRefs: evidenceRefArraySchema(evidenceRefs, 20, true),
+                  confidence: { type: 'number', minimum: 0, maximum: 1 },
+                  playbookPhase: { type: ['string', 'null'] },
+                  playbookVersion: { type: ['integer', 'null'], minimum: 1 },
+                  transitionPolicyVersion: { type: 'integer', minimum: 1 },
+                },
+              },
+            ],
+          }
+        : { type: 'null' },
+      proposed_actions: {
+        type: 'array',
+        maxItems: 30,
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['type', 'value'],
+          properties: {
+            type: {
+              enum: [
+                'set_stage',
+                'add_tag',
+                'set_summary',
+                'set_service',
+                'set_urgency',
+                'set_fact',
+                'close',
+                'handoff',
+              ],
+            },
+            value: { type: ['string', 'null'] },
+          },
         },
       },
     },
-  },
-};
+  };
+}
 
 function mockDecision() {
   return {

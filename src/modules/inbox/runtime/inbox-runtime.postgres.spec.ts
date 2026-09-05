@@ -12,8 +12,10 @@ import { InboxAgentRuntimeService } from '../services/inbox-agent-runtime.servic
 import { InboxOutboxRelayService } from '../services/inbox-outbox-relay.service';
 import { InboxProviderBudgetService } from './inbox-provider-budget.service';
 import { InboxGovernedActionWorker } from '../services/inbox-governed-action.worker';
+import { CrmOpportunityCommandService } from '../../crm/services/crm-opportunity-command.service';
 import { describePostgresIntegration } from '../../../testing/postgres-integration';
 import { deleteFixtureTenant } from '../../../testing/fixture-tenant';
+import type { AgentDecisionInput } from './inbox-runtime.contracts';
 
 const run = describePostgresIntegration();
 const validDecision = {
@@ -66,6 +68,7 @@ run('Inbox Runtime PostgreSQL concurrency', () => {
       'leadflow_agent_versions',
       'leadflow_agents',
       'inbox_channels',
+      'crm_opportunity_events',
       'crm_opportunities',
       'crm_stages',
       'crm_pipelines',
@@ -393,7 +396,7 @@ run('Inbox Runtime PostgreSQL concurrency', () => {
     expect(provider.decide).toHaveBeenCalledTimes(1);
   });
 
-  it('repairs invalid structured output at most once and executes no action', async () => {
+  it('repairs invalid structured output once, then audits and requests handoff', async () => {
     const conversationId = await insertConversation(
       tenantId,
       workspaceId,
@@ -401,9 +404,10 @@ run('Inbox Runtime PostgreSQL concurrency', () => {
     );
     const channelId = await channelIdForConversation(conversationId);
     const batchId = randomUUID();
+    const messageId = randomUUID();
     await AgencyDataSource.query(
-      `INSERT INTO inbox_messages (tenant_id,workspace_id,conversation_id,direction,sender_type,content,status,occurred_at) VALUES ($1,$2,$3,'inbound','contact','fixture','received',now())`,
-      [tenantId, workspaceId, conversationId],
+      `INSERT INTO inbox_messages (id,tenant_id,workspace_id,conversation_id,direction,sender_type,content,status,occurred_at) VALUES ($1,$2,$3,$4,'inbound','contact','fixture','received',now())`,
+      [messageId, tenantId, workspaceId, conversationId],
     );
     await AgencyDataSource.query(
       `INSERT INTO inbox_processing_batches (id,tenant_id,workspace_id,conversation_id,channel_id,status,due_at) VALUES ($1,$2,$3,$4,$5,'pending',now()-interval '1 second')`,
@@ -431,9 +435,25 @@ run('Inbox Runtime PostgreSQL concurrency', () => {
       new AgentDecisionPromptBuilder(),
       new AgentDecisionV1Service(),
       new BusinessModeActionPlanner(AgencyDataSource),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      new ConversationOwnershipService(AgencyDataSource),
     );
     await runtime.claimAndProcess('repair-worker');
     expect(provider.decide).toHaveBeenCalledTimes(2);
+    const decisionCalls = provider.decide.mock.calls as unknown as Array<
+      [AgentDecisionInput]
+    >;
+    expect(decisionCalls[0][0]).toMatchObject({
+      allowedEvidenceRefs: [`message:${messageId}`],
+    });
+    expect(decisionCalls[1][0].systemPolicy).toContain(
+      'REPAIR_ERROR: decision_schema_invalid_schema_version',
+    );
     const [decisionCount] = await AgencyDataSource.query<
       Array<{ count: string }>
     >(
@@ -448,7 +468,32 @@ run('Inbox Runtime PostgreSQL concurrency', () => {
     expect(decisionCount.count).toBe('0');
     expect(batch).toMatchObject({
       status: 'failed',
-      error_code: 'decision_schema_invalid',
+      error_code: 'decision_schema_invalid_schema_version',
+    });
+    const [conversation] = await AgencyDataSource.query<
+      Array<{ ownership_state: string; ai_enabled: boolean }>
+    >(
+      `SELECT ownership_state,ai_enabled FROM inbox_conversations WHERE id=$1`,
+      [conversationId],
+    );
+    expect(conversation).toMatchObject({
+      ownership_state: 'handoff_requested',
+      ai_enabled: false,
+    });
+    const [failureEvent] = await AgencyDataSource.query<
+      Array<{ event_type: string; payload: Record<string, unknown> }>
+    >(
+      `SELECT event_type,payload FROM inbox_conversation_events
+       WHERE conversation_id=$1 AND event_type='agent_decision_failed'`,
+      [conversationId],
+    );
+    expect(failureEvent).toMatchObject({
+      event_type: 'agent_decision_failed',
+      payload: {
+        batchId,
+        errorCode: 'decision_schema_invalid_schema_version',
+        fallback: 'handoff_requested',
+      },
     });
   });
 
@@ -854,7 +899,10 @@ run('Inbox Runtime PostgreSQL concurrency', () => {
         { notify } as never,
         { realtimeGatewayEnabled: true } as never,
       );
-    await Promise.all([make().processPending(1), make().processPending(1)]);
+    await Promise.all([
+      make().processPending(1, { tenantId, workspaceId }),
+      make().processPending(1, { tenantId, workspaceId }),
+    ]);
     expect(notify).toHaveBeenCalledTimes(1);
     const [row] = await AgencyDataSource.query<
       Array<{ status: string; attempts: number }>
@@ -891,7 +939,7 @@ run('Inbox Runtime PostgreSQL concurrency', () => {
       { notify } as never,
       { realtimeGatewayEnabled: false } as never,
     );
-    await relay.processPending(10);
+    await relay.processPending(10, { tenantId, workspaceId });
     expect(notify).not.toHaveBeenCalled();
     const [row] = await AgencyDataSource.query<
       Array<{ status: string; skip_reason: string; retain_until: Date }>
@@ -952,7 +1000,9 @@ run('Inbox Runtime PostgreSQL concurrency', () => {
       conversationId,
     ]);
     const [outbox] = await AgencyDataSource.query<Array<{ count: string }>>(
-      `SELECT count(*)::text count FROM inbox_domain_outbox`,
+      `SELECT count(*)::text count FROM inbox_domain_outbox
+        WHERE tenant_id=$1 AND workspace_id=$2`,
+      [tenantId, workspaceId],
     );
     expect(conversation.ownership_reason).toBe('fixture');
     expect(outbox.count).toBe('0');
@@ -1037,9 +1087,13 @@ run('Inbox Runtime PostgreSQL concurrency', () => {
     );
     await AgencyDataSource.query(
       `INSERT INTO crm_stages
-        (id,tenant_id,workspace_id,pipeline_id,name,type,sort_order)
-       VALUES ($1,$2,$3,$4,'Synthetic Initial','open',10)`,
+        (id,tenant_id,workspace_id,pipeline_id,name,type,sort_order,is_initial_stage)
+       VALUES ($1,$2,$3,$4,'Synthetic Initial','open',10,true)`,
       [stageId, tenantId, workspaceId, pipelineId],
+    );
+    await AgencyDataSource.query(
+      `UPDATE inbox_channels SET default_pipeline_id=$1 WHERE id=$2`,
+      [pipelineId, channelId],
     );
     for (const [index, suffix] of ['a', 'b'].entries()) {
       const batchId = randomUUID();
@@ -1195,9 +1249,14 @@ run('Inbox Runtime PostgreSQL concurrency', () => {
       );
       await AgencyDataSource.query(
         `INSERT INTO crm_stages
-          (id,tenant_id,workspace_id,pipeline_id,name,type,sort_order)
-         VALUES ($1,$2,$3,$4,'Initial','open',10)`,
+          (id,tenant_id,workspace_id,pipeline_id,name,type,sort_order,is_initial_stage)
+         VALUES ($1,$2,$3,$4,'Initial','open',10,true)`,
         [stageId, tenantId, isolatedWorkspace, pipelineId],
+      );
+      await AgencyDataSource.query(
+        `UPDATE inbox_channels SET default_pipeline_id=$1
+          WHERE id=(SELECT channel_id FROM inbox_conversations WHERE id=$2)`,
+        [pipelineId, conversationId],
       );
       await AgencyDataSource.query(
         `INSERT INTO crm_opportunities
@@ -1280,6 +1339,11 @@ run('Inbox Runtime PostgreSQL concurrency', () => {
 });
 
 function makeGovernedCrmWorker() {
+  const opportunityCommands = new CrmOpportunityCommandService(
+    AgencyDataSource,
+    {} as never,
+    {} as never,
+  );
   return new InboxGovernedActionWorker(
     AgencyDataSource,
     {
@@ -1291,6 +1355,7 @@ function makeGovernedCrmWorker() {
     { sendAgentText: jest.fn() } as never,
     { sendAgentText: jest.fn() } as never,
     { transition: jest.fn() } as never,
+    opportunityCommands,
   );
 }
 

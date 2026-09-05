@@ -59,13 +59,25 @@ export class InboxOutboxRelayService
     }
   }
 
-  async processPending(limit = 10): Promise<number> {
+  async processPending(
+    limit = 10,
+    scope?: { tenantId: string; workspaceId: string },
+  ): Promise<number> {
     const ids = await this.dataSource.transaction(async (manager) => {
+      const params: Array<string | number> = [];
+      const scopeClause = scope
+        ? (() => {
+            params.push(scope.tenantId, scope.workspaceId);
+            return 'tenant_id = $1 AND workspace_id = $2 AND';
+          })()
+        : '';
+      params.push(limit);
       const rows = await manager.query<Array<{ id: string }>>(
         `SELECT id FROM inbox_domain_outbox
-         WHERE ((status = 'pending' AND available_at <= now()) OR (status = 'processing' AND locked_at < now() - interval '1 minute'))
-         ORDER BY created_at, id FOR UPDATE SKIP LOCKED LIMIT $1`,
-        [limit],
+         WHERE ${scopeClause}
+           ((status = 'pending' AND available_at <= now()) OR (status = 'processing' AND locked_at < now() - interval '1 minute'))
+         ORDER BY created_at, id FOR UPDATE SKIP LOCKED LIMIT $${params.length}`,
+        params,
       );
       if (rows.length)
         await manager

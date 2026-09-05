@@ -141,6 +141,12 @@ export type AgentDecisionInput = {
   opportunity: Record<string, unknown> | null;
   ownership: { state: string; version: number };
   allowedActions: string[];
+  /**
+   * Canonical evidence identifiers present in the scoped conversation input.
+   * The provider uses this list to constrain Structured Outputs; the runtime
+   * still validates the returned identifiers independently before persisting.
+   */
+  allowedEvidenceRefs: string[];
   systemPolicy: string;
   untrustedData: string;
   promptVersion: string;

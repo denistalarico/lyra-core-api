@@ -70,6 +70,7 @@ import {
   INBOX_AUTONOMY_POLICY_VERSION,
 } from '../runtime/inbox-governed-autonomy-policy.service';
 import { InboxPilotOutboundPolicyService } from '../channels/whatsapp/services/inbox-pilot-outbound-policy.service';
+import { ConversationOwnershipService } from './conversation-ownership.service';
 import {
   type CanonicalConversationFact,
   ConversationPlaybookStateService,
@@ -127,6 +128,18 @@ export function sameReviewActionKeys(
     normalizedLeft.length === normalizedRight.length &&
     normalizedLeft.every((key, index) => key === normalizedRight[index])
   );
+}
+
+export function decisionRepairInstruction(
+  reason: string,
+  allowedEvidenceRefs: string[],
+) {
+  const refs = [...new Set(allowedEvidenceRefs)].sort();
+  return [
+    `REPAIR_ERROR: ${reason}`,
+    `ALLOWED_EVIDENCE_REFS: ${JSON.stringify(refs)}`,
+    'Corrija somente a saída estruturada. Em todos os campos evidence_refs/evidenceRefs, use exclusivamente valores de ALLOWED_EVIDENCE_REFS; remova qualquer outro valor. Devolva apenas JSON válido.',
+  ].join('\n');
 }
 
 export function orderContextMessages(messages: InboxMessageEntity[]) {
@@ -244,6 +257,8 @@ export class InboxAgentRuntimeService {
     private readonly opportunityCommands?: CrmOpportunityCommandService,
     @Optional()
     private readonly transitionPolicies?: CrmStageTransitionPolicyService,
+    @Optional()
+    private readonly ownership?: ConversationOwnershipService,
   ) {}
 
   async claimAndProcess(workerId: string) {
@@ -636,6 +651,14 @@ export class InboxAgentRuntimeService {
       const correlationId = randomUUID();
       let providerResult: AgentDecisionResult | null = null;
       let proposal: AgentDecisionV1 | null = null;
+      let repairReason: string | null = null;
+      const allowedEvidenceRefs = [
+        ...messageProjection.map((item) => item.evidenceRef),
+        ...transcriptionProjection
+          .map((item) => item.evidenceRef)
+          .filter((item): item is string => typeof item === 'string'),
+        ...images.map((item) => item.evidenceRef),
+      ];
       try {
         for (let repairAttempt = 0; repairAttempt < 2; repairAttempt += 1) {
           providerResult = await this.provider.decide({
@@ -667,7 +690,13 @@ export class InboxAgentRuntimeService {
               version: conversation.ownershipVersion,
             },
             allowedActions,
-            systemPolicy: `${prompt.systemPolicy}${repairAttempt ? '\nREPAIR: a saída anterior violou o schema; devolva apenas JSON válido.' : ''}`,
+            allowedEvidenceRefs,
+            systemPolicy: repairReason
+              ? `${prompt.systemPolicy}\n${decisionRepairInstruction(
+                  repairReason,
+                  allowedEvidenceRefs,
+                )}`
+              : prompt.systemPolicy,
             untrustedData: prompt.untrustedData,
             promptVersion: prompt.promptVersion,
             promptHash: prompt.promptHash,
@@ -676,13 +705,10 @@ export class InboxAgentRuntimeService {
           });
           try {
             this.schema.assert(providerResult.decision);
-            this.schema.assertEvidenceRefs(providerResult.decision, [
-              ...messageProjection.map((item) => item.evidenceRef),
-              ...transcriptionProjection
-                .map((item) => item.evidenceRef)
-                .filter((item): item is string => typeof item === 'string'),
-              ...images.map((item) => item.evidenceRef),
-            ]);
+            this.schema.assertEvidenceRefs(
+              providerResult.decision,
+              allowedEvidenceRefs,
+            );
             if (conversationPlaybook) {
               progressReader.assertDecision({
                 previous: currentProgress,
@@ -712,6 +738,7 @@ export class InboxAgentRuntimeService {
             this.logger.warn(
               `Agent decision failed validation (${reason}) on batch ${batch.id}, repair attempt ${repairAttempt}.`,
             );
+            repairReason = reason;
             if (repairAttempt === 1)
               throw new InboxProviderError(reason, false);
           }
@@ -958,13 +985,7 @@ export class InboxAgentRuntimeService {
                 kind,
                 status,
               })),
-              allowedEvidenceRefs: [
-                ...messageProjection.map((item) => item.evidenceRef),
-                ...transcriptionProjection
-                  .map((item) => item.evidenceRef)
-                  .filter((item): item is string => typeof item === 'string'),
-                ...images.map((item) => item.evidenceRef),
-              ],
+              allowedEvidenceRefs,
               stageTransitionCatalog: this.transitionCatalogSnapshot(
                 stageTransitionCatalog,
               ),
@@ -2047,24 +2068,86 @@ export class InboxAgentRuntimeService {
   ) {
     const code = providerErrorCode(error);
     const retryable = error instanceof InboxProviderError && error.retryable;
-    await this.dataSource.getRepository(InboxProcessingBatchEntity).update(
-      {
-        id: batch.id,
+    if (retryable && batch.attemptCount < 3) {
+      await this.dataSource.getRepository(InboxProcessingBatchEntity).update(
+        {
+          id: batch.id,
+          tenantId: batch.tenantId,
+          workspaceId: batch.workspaceId,
+        },
+        {
+          status: 'pending',
+          dueAt: new Date(
+            Date.now() + 15_000 * 2 ** Math.max(0, batch.attemptCount - 1),
+          ),
+          claimedAt: null,
+          claimedBy: null,
+          errorCode: code,
+        },
+      );
+      return;
+    }
+
+    await this.dataSource.transaction(async (manager) => {
+      await manager.getRepository(InboxProcessingBatchEntity).update(
+        {
+          id: batch.id,
+          tenantId: batch.tenantId,
+          workspaceId: batch.workspaceId,
+        },
+        { status: 'failed', completedAt: new Date(), errorCode: code },
+      );
+      await manager.getRepository(InboxConversationEventEntity).save({
         tenantId: batch.tenantId,
         workspaceId: batch.workspaceId,
-      },
-      retryable && batch.attemptCount < 3
-        ? {
-            status: 'pending',
-            dueAt: new Date(
-              Date.now() + 15_000 * 2 ** Math.max(0, batch.attemptCount - 1),
-            ),
-            claimedAt: null,
-            claimedBy: null,
-            errorCode: code,
-          }
-        : { status: 'failed', completedAt: new Date(), errorCode: code },
-    );
+        conversationId: batch.conversationId,
+        eventType: 'agent_decision_failed',
+        actorType: 'system',
+        actorUserId: null,
+        payload: {
+          batchId: batch.id,
+          errorCode: code,
+          attempts: batch.attemptCount,
+          fallback: 'handoff_requested',
+        },
+      });
+      await manager.getRepository(InboxDomainOutboxEntity).save({
+        tenantId: batch.tenantId,
+        workspaceId: batch.workspaceId,
+        aggregateType: 'inbox_conversation',
+        aggregateId: batch.conversationId,
+        eventName: 'leadflow.inbox.agent_decision.failed',
+        eventVersion: 1,
+        idempotencyKey: `agent-decision-failed:${batch.id}`,
+        payload: {
+          conversationId: batch.conversationId,
+          batchId: batch.id,
+          errorCode: code,
+          requiresAttention: true,
+        },
+        publishedAt: null,
+        status: 'pending',
+        attempts: 0,
+        availableAt: new Date(),
+        lockedAt: null,
+        lockedBy: null,
+        lastError: null,
+        deadLetteredAt: null,
+        updatedAt: new Date(),
+      });
+    });
+
+    try {
+      await this.ownership?.requestHandoffIfAiOwner(
+        { tenantId: batch.tenantId, workspaceId: batch.workspaceId },
+        batch.conversationId,
+        `agent_decision_failed:${code}`,
+      );
+    } catch (handoffError) {
+      this.logger.error(
+        `Failed to request handoff after terminal decision failure on batch ${batch.id}: ${providerErrorCode(handoffError)}`,
+      );
+    }
   }
   private mediaPolicy(
     media: InboxMediaAssetEntity[],

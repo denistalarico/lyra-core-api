@@ -133,11 +133,31 @@ export class ConversationOwnershipService {
     }
   }
 
+  /**
+   * Failure fallback for the autonomous runtime. The expected-state guard is
+   * checked while holding the conversation lock, so a concurrent human
+   * takeover can never be overwritten by a late provider failure.
+   */
+  async requestHandoffIfAiOwner(
+    ctx: RequestContext,
+    conversationId: string,
+    reason: string,
+  ): Promise<InboxConversationEntity> {
+    return this.transition(
+      ctx,
+      conversationId,
+      'request_handoff',
+      reason,
+      'ai_active',
+    );
+  }
+
   async transition(
     ctx: RequestContext,
     conversationId: string,
     action: ConversationOwnershipAction,
     reason?: string,
+    expectedOwnershipState?: InboxConversationOwnershipState,
   ) {
     if (!ctx.workspaceId)
       throw new BadRequestException('Workspace context is required.');
@@ -164,6 +184,18 @@ export class ConversationOwnershipService {
       if (!conversation)
         throw new NotFoundException('Inbox conversation not found.');
       await this.assertManagedContext(manager, ctx, conversation);
+
+      if (
+        expectedOwnershipState &&
+        conversation.ownershipState !== expectedOwnershipState
+      ) {
+        return {
+          conversation,
+          handoffRecipientUserIds: [] as string[],
+          channelClientId: null as string | null,
+          publishHandoffNotification: false,
+        };
+      }
 
       if (
         action === 'request_handoff' &&

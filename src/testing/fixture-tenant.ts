@@ -1,4 +1,5 @@
 import type { DataSource } from 'typeorm';
+import { assertSafePostgresTarget } from './postgres-integration-guard';
 
 /**
  * Scoped cleanup for specs that need real commits.
@@ -60,6 +61,17 @@ export const FIXTURE_DELETE_ORDER: readonly string[] = [
   'leadflow_automations',
   'leadflow_automation_versions',
   'leadflow_event_deliveries',
+  // Settings before templates: `leadflow_client_settings.business_mode_template_id`
+  // references `leadflow_business_mode_templates`. Both are tenant-scoped for a
+  // fixture's purposes — the system templates that ship with the platform have
+  // `tenant_id IS NULL` and are therefore untouchable by a tenant-scoped delete,
+  // which is what keeps a spec from removing the shared catalog.
+  'leadflow_client_settings',
+  'leadflow_business_mode_templates',
+  // After the settings that reference it: `leadflow_client_settings.
+  // agency_client_id` carries a foreign key to `agency_clients`, so a fixture
+  // that creates managed-client contexts has to unwind in this order.
+  'agency_clients',
   'platform_permission_audit_events',
   'crm_opportunity_tags',
   'crm_opportunity_events',
@@ -113,6 +125,20 @@ export async function deleteFixtureTenant(
 
   await dataSource.transaction(async (manager) => {
     for (const table of ordered) {
+      if (table === 'crm_opportunity_events') {
+        // This table deliberately rejects UPDATE and DELETE. Integration
+        // fixtures still need to remove their own tenant-scoped history, but
+        // bypassing that trigger is acceptable only after proving that both
+        // configured databases are disposable test/development targets.
+        assertSafePostgresTarget();
+        await manager.query(`SET LOCAL session_replication_role = 'replica'`);
+        await manager.query(`DELETE FROM ${table} WHERE tenant_id = $1`, [
+          tenantId,
+        ]);
+        await manager.query(`SET LOCAL session_replication_role = 'origin'`);
+        continue;
+      }
+
       await manager.query(`DELETE FROM ${table} WHERE tenant_id = $1`, [
         tenantId,
       ]);

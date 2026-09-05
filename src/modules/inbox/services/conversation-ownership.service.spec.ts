@@ -209,9 +209,32 @@ describe('ConversationOwnershipService manual AI activation', () => {
     return {
       conversation,
       events,
+      saveConversation: repositories.get(InboxConversationEntity)?.save,
       service: new ConversationOwnershipService(dataSource as never),
     };
   }
+
+  it('does not overwrite a concurrent human takeover with a failure handoff', async () => {
+    const harness = activationHarness({
+      ownershipState: 'human_active',
+      aiEnabled: false,
+      assignedUserId: 'human-owner',
+    });
+
+    await expect(
+      harness.service.requestHandoffIfAiOwner(
+        { tenantId: 'tenant', workspaceId: 'workspace' },
+        'conversation-ai',
+        'agent_decision_failed:decision_evidence_invalid',
+      ),
+    ).resolves.toMatchObject({
+      ownershipState: 'human_active',
+      aiEnabled: false,
+      assignedUserId: 'human-owner',
+    });
+    expect(harness.saveConversation).not.toHaveBeenCalled();
+    expect(harness.events.save).not.toHaveBeenCalled();
+  });
 
   it('treats an explicit human activation as qualification for a legacy conversation', async () => {
     const harness = activationHarness();

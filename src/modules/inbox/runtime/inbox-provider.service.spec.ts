@@ -72,6 +72,7 @@ describe('InboxProviderService', () => {
       opportunity: null,
       ownership: { state: 'ai_active', version: 1 },
       allowedActions: [],
+      allowedEvidenceRefs: ['message:message', 'image:image'],
       systemPolicy: 'policy',
       untrustedData: 'data',
       promptVersion: 'v1',
@@ -315,6 +316,15 @@ describe('InboxProviderService', () => {
         additionalProperties: false,
         required: ['type', 'value'],
       });
+      const evidenceItems = (
+        schema.properties as {
+          evidence_refs: { items: Record<string, unknown> };
+        }
+      ).evidence_refs.items;
+      expect(evidenceItems).toEqual({
+        type: 'string',
+        enum: ['image:image', 'message:message'],
+      });
       expect(result.usage).toMatchObject({ cachedInputTokens: 20, images: 1 });
     },
   );
@@ -426,6 +436,7 @@ function decisionInput() {
     opportunity: null,
     ownership: { state: 'ai_active', version: 1 },
     allowedActions: [],
+    allowedEvidenceRefs: ['message:message', 'image:image'],
     systemPolicy: 'policy',
     untrustedData: 'data',
     promptVersion: 'v1',

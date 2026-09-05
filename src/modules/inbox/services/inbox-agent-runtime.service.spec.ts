@@ -1,6 +1,7 @@
 import { ConflictException } from '@nestjs/common';
 import {
   canonicalConversationFacts,
+  decisionRepairInstruction,
   InboxAgentRuntimeService,
   factualReplyIsSupported,
   isAppointmentHandoffMode,
@@ -46,6 +47,18 @@ describe('InboxAgentRuntimeService safety contracts', () => {
     ).toEqual({});
   });
 
+  it('tells a repair attempt the exact validation error and allowed evidence', () => {
+    expect(
+      decisionRepairInstruction('decision_evidence_invalid', [
+        'message:2',
+        'message:1',
+        'message:2',
+      ]),
+    ).toContain(
+      'REPAIR_ERROR: decision_evidence_invalid\nALLOWED_EVIDENCE_REFS: ["message:1","message:2"]',
+    );
+  });
+
   it('claims due batches with transactional SKIP LOCKED', async () => {
     const query = jest.fn().mockResolvedValue([]);
     const dataSource = {
@@ -71,7 +84,7 @@ describe('InboxAgentRuntimeService safety contracts', () => {
         schema_version: 1,
         reply: null,
         follow_text: null,
-    follow_text_next_day: null,
+        follow_text_next_day: null,
         stage_name: null,
         tags: [],
         handoff: false,
