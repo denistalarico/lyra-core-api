@@ -194,6 +194,97 @@ export class SocialAdDestinationHistoryReadService {
 
     return resolved;
   }
+
+  /**
+   * The same point-in-time question, asked for many ad sets at once.
+   *
+   * ## Why this exists rather than a loop over `destinationAt`
+   *
+   * I4.3 resolves destinations for a whole cohort, and the individual method is
+   * keyed to one ad set. Calling it per ad set is one round trip each — with a
+   * couple of hundred ad sets in a quarter's cohort that is a couple of hundred
+   * sequential queries, and the shape gets worse exactly as an account grows.
+   * §30 rules it out by name.
+   *
+   * The pairs are unnested as two parallel arrays rather than a composite type
+   * so the planner sees ordinary `uuid[]` and `timestamptz[]` parameters, and
+   * the lateral probe below is the identical shape `destinationAt` uses —
+   * `IDX_social_ad_destination_obs_entity` serves both, driving from the small
+   * side (the asked pairs) into the ad set's history.
+   *
+   * ## Why the answer is keyed by pair and not by ad set
+   *
+   * Two conversations on the same ad set with different instants can legitimately
+   * resolve to different destinations — that is the whole temporal point. A map
+   * keyed by ad set would have to pick one of them, which is the collapse I4.1
+   * exists to prevent.
+   */
+  async destinationAtMany(query: {
+    tenantId: string;
+    workspaceId: string;
+    /** `(social_ad_entities.id, ISO instant)` pairs, in any order. */
+    pairs: readonly { adEntityId: string; instant: string }[];
+  }): Promise<Map<string, SocialAdDestinationAt>> {
+    const resolved = new Map<string, SocialAdDestinationAt>();
+    if (!query.pairs.length) return resolved;
+
+    // De-duplicated across the whole cohort, not per ad set: a hundred
+    // conversations that clicked the same ad at the same second is one question.
+    const seen = new Map<string, { adEntityId: string; instant: string }>();
+    for (const pair of query.pairs) {
+      seen.set(destinationPairKey(pair.adEntityId, pair.instant), pair);
+    }
+
+    const pairs = [...seen.values()];
+
+    const rows = await this.observations.query<DestinationPairRow[]>(
+      DESTINATION_AT_MANY_SQL,
+      [
+        query.tenantId,
+        query.workspaceId,
+        pairs.map((pair) => pair.adEntityId),
+        pairs.map((pair) => pair.instant),
+      ],
+    );
+
+    for (const row of rows) {
+      // Keyed back through the ordinal for the reason `destinationAt` uses one:
+      // Postgres echoes `2026-09-01T10:00:00.000Z` as `2026-09-01 10:00:00+00`,
+      // so matching the returned timestamp as text would miss every row.
+      const asked = pairs[Number(row.ordinal) - 1];
+      if (asked === undefined) continue;
+
+      resolved.set(destinationPairKey(asked.adEntityId, asked.instant), {
+        value: row.destination_type as CanonicalPaidMediaDestination,
+        resolution: 'observed_destination',
+        observedAt: new Date(row.observed_at).toISOString(),
+        raw: row.destination_raw,
+      });
+    }
+
+    // Explicit unavailable rather than absence, identically to `destinationAt`:
+    // a caller must never have to tell "nothing found" from "never asked".
+    for (const pair of pairs) {
+      const key = destinationPairKey(pair.adEntityId, pair.instant);
+      if (!resolved.has(key)) resolved.set(key, DESTINATION_UNAVAILABLE);
+    }
+
+    return resolved;
+  }
+}
+
+/**
+ * The key both the batch method and its callers use.
+ *
+ * Exported so a consumer cannot invent a second encoding: a projector that
+ * built `${id}${instant}` while this built `${id}|${instant}` would silently
+ * miss every lookup and report a fully-observed cohort as unavailable.
+ */
+export function destinationPairKey(
+  adEntityId: string,
+  instant: string,
+): string {
+  return `${adEntityId}|${instant}`;
 }
 
 /** One resolved instant as Postgres returns it. */
@@ -204,6 +295,9 @@ type DestinationAtRow = {
   destination_raw: string | null;
   observed_at: Date | string;
 };
+
+/** One resolved `(ad set, instant)` pair. */
+type DestinationPairRow = DestinationAtRow;
 
 /**
  * The last observation at or before each requested instant.
@@ -237,6 +331,45 @@ const DESTINATION_AT_SQL = `
     WHERE observation.tenant_id = $1
       AND observation.workspace_id = $2
       AND observation.ad_entity_id = $3
+      AND observation.observed_at <= asked.instant
+    ORDER BY observation.observed_at DESC, observation.created_at DESC
+    LIMIT 1
+  ) resolved ON TRUE
+`;
+
+/**
+ * The last observation at or before each `(ad set, instant)` pair.
+ *
+ * Structurally identical to `DESTINATION_AT_SQL` — the same `<=` boundary, the
+ * same `observed_at DESC, created_at DESC` tie-break, the same lateral probe —
+ * and that identity is the point: the batch and the single lookup must not be
+ * able to answer the same question differently. The only difference is that the
+ * ad set comes from the unnested pair instead of a scalar parameter, so the
+ * scope predicate binds tenant and workspace and the pair supplies the entity.
+ *
+ * `unnest(a, b)` walks two arrays in lockstep, which is what makes the ordinal
+ * a valid key back into the caller's own pair list.
+ *
+ * The tenant and workspace filters stay even though `ad_entity_id` already
+ * encodes them through the row the hierarchy walk resolved: this table decides
+ * what an ad is credited with, and defence in depth on it is cheap.
+ */
+const DESTINATION_AT_MANY_SQL = `
+  /* social-ad-destination:at-instant-many */
+  SELECT asked.ordinal::text AS "ordinal",
+         resolved.destination_type AS "destination_type",
+         resolved.destination_raw AS "destination_raw",
+         resolved.observed_at AS "observed_at"
+  FROM unnest($3::uuid[], $4::timestamptz[])
+       WITH ORDINALITY AS asked(ad_entity_id, instant, ordinal)
+  JOIN LATERAL (
+    SELECT observation.destination_type,
+           observation.destination_raw,
+           observation.observed_at
+    FROM social_ad_destination_observations observation
+    WHERE observation.tenant_id = $1
+      AND observation.workspace_id = $2
+      AND observation.ad_entity_id = asked.ad_entity_id
       AND observation.observed_at <= asked.instant
     ORDER BY observation.observed_at DESC, observation.created_at DESC
     LIMIT 1

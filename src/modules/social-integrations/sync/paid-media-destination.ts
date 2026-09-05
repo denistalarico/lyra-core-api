@@ -36,6 +36,29 @@ export type CanonicalPaidMediaDestination =
  */
 export type PaidMediaDestinationResolution = 'observed' | 'unavailable';
 
+/**
+ * The destinations that land a person in a messaging thread.
+ *
+ * Lives with the vocabulary rather than at a call site, because it is a fact
+ * about the canonical set and a second copy elsewhere would drift the moment a
+ * new messaging destination is added.
+ *
+ * `messaging_multi` is a member: the advertiser offered a choice of apps, so the
+ * person did land in a thread — this set says *messaging*, not *which app*, and
+ * nothing may read it as the latter.
+ *
+ * `unknown` is not a member. An unknown destination is not evidence of a
+ * non-messaging one; treating it as either would turn absence of information
+ * into a claim.
+ */
+export const MESSAGING_PAID_MEDIA_DESTINATIONS: ReadonlySet<CanonicalPaidMediaDestination> =
+  new Set<CanonicalPaidMediaDestination>([
+    'whatsapp',
+    'instagram_direct',
+    'messenger',
+    'messaging_multi',
+  ]);
+
 export type ResolvedPaidMediaDestination = {
   canonical: CanonicalPaidMediaDestination;
   /**

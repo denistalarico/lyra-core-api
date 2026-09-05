@@ -83,6 +83,10 @@ export class LeadFlowAttributionCohortAdapter {
                  MIN(observation.observed_at)                   AS entered_at,
                  COUNT(*)                                       AS observations_count,
                  ARRAY_AGG(DISTINCT observation.ad_id)          AS ad_ids,
+                 -- I4.3: the instants themselves, not just their count. Each is
+                 -- a question for the destination timeline; DISTINCT because two
+                 -- observations at the same instant resolve to the same answer.
+                 ARRAY_AGG(DISTINCT observation.observed_at)    AS observed_ats,
                  MIN(observation.channel_type)                  AS channel_type,
                  MIN(observation.provider)                      AS provider
           FROM inbox_attribution_observations observation
@@ -105,6 +109,7 @@ export class LeadFlowAttributionCohortAdapter {
                entered.entered_at            AS "enteredAt",
                entered.observations_count    AS "observationsCount",
                entered.ad_ids                AS "adIds",
+               entered.observed_ats          AS "observedAts",
                entered.channel_type          AS "channelType",
                entered.provider              AS "provider",
                qualification.occurred_at     AS "firstQualifiedAt"
@@ -143,6 +148,15 @@ export class LeadFlowAttributionCohortAdapter {
         .filter((value): value is string => value !== null)
         .sort(),
       observationsCount: Number(row.observationsCount),
+      // Ascending, so the projector's "latest reading wins" tie-break reads the
+      // freshest evidence without re-sorting. `ARRAY_AGG(DISTINCT ...)` already
+      // orders by the aggregated value, but the sort is restated rather than
+      // relied upon: the ordering is a documented consequence of DISTINCT, not
+      // a guarantee of ARRAY_AGG, and the projector's semantics depend on it.
+      attributionInstants: (row.observedAts ?? [])
+        .filter((value): value is Date | string => value !== null)
+        .map((value) => toIso(value) as string)
+        .sort(),
       channelType: row.channelType,
       provider: row.provider,
       firstQualifiedAt: toIso(row.firstQualifiedAt),
@@ -268,6 +282,7 @@ type CohortConversationRow = {
   enteredAt: Date | string;
   observationsCount: string | number;
   adIds: Array<string | null> | null;
+  observedAts: Array<Date | string | null> | null;
   channelType: string;
   provider: string;
   firstQualifiedAt: Date | string | null;

@@ -2,20 +2,24 @@ import { IsIn, IsString, IsUUID, Matches } from 'class-validator';
 import type { ObservedAttributionGroupBy } from '../observed-attribution-summary.contract';
 
 /**
- * The four levels a summary may be grouped by.
+ * The axes a summary may be grouped by.
  *
  * Declared as a runtime array because `@IsIn` needs values, not a type. The
- * cast at the end of the class keeps the compiler checking that the two agree,
- * so adding a level to the contract without adding it here fails to build.
+ * annotation on `groupBy` keeps the compiler checking that the two agree, so
+ * adding a level to the contract without adding it here fails to build.
  *
- * `destination` is deliberately not offered — see
- * `OBSERVED_ATTRIBUTION_SUMMARY_DESTINATION_LIMITATION`.
+ * The first four are Meta's hierarchy and partition the matched cohort.
+ * `destination` (I4.3) is an orthogonal axis and does not: a conversation whose
+ * ad set was re-pointed between two of its own clicks belongs to no single
+ * destination and is reported in `destinationCoverage` instead of being placed
+ * in a bucket.
  */
 export const OBSERVED_ATTRIBUTION_GROUP_BY = [
   'account',
   'campaign',
   'adset',
   'ad',
+  'destination',
 ] as const;
 
 /**
@@ -59,7 +63,7 @@ export class ObservedAttributionSummaryQueryDto {
   })
   until!: string;
 
-  /** Which hierarchy level the groups name. */
+  /** Which axis the groups name — a hierarchy level, or the destination. */
   @IsIn(OBSERVED_ATTRIBUTION_GROUP_BY)
   groupBy!: ObservedAttributionGroupBy;
 }

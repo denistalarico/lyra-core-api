@@ -329,6 +329,14 @@ import {
   BrandKitAssetEntity,
   BrandKitEntity,
 } from '../modules/brand-kit/entities';
+import {
+  SocialContentDestinationEntity,
+  SocialContentItemEntity,
+  SocialContentRevisionEntity,
+  SocialPlannerSettingsEntity,
+  SocialPlanEntity,
+  SocialPublishingCadenceEntity,
+} from '../modules/social-planner/entities';
 
 export const agencyEntities = [
   BrandKitEntity,
@@ -566,6 +574,13 @@ export const agencyEntities = [
   ScheduledItemEntity,
   ScheduledItemParticipantEntity,
   ScheduledItemReminderEntity,
+
+  SocialPlanEntity,
+  SocialContentItemEntity,
+  SocialContentDestinationEntity,
+  SocialContentRevisionEntity,
+  SocialPlannerSettingsEntity,
+  SocialPublishingCadenceEntity,
 ];
 
 export function getTypeOrmConfig(): TypeOrmModuleOptions {

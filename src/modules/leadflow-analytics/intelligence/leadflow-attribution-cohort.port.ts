@@ -45,6 +45,23 @@ export type LeadFlowCohortConversation = {
   /** Observations carrying an ad id. Reported, never used as a count of one. */
   observationsCount: number;
   /**
+   * Every instant at which this conversation was observed carrying an ad id,
+   * ascending and de-duplicated.
+   *
+   * Carried for I4.3, and it is the field that makes destination grouping
+   * possible without a second query per conversation. Destination is resolved
+   * *per observation* — the ad set's destination when that click happened — so
+   * a single `enteredAt` is not enough: a conversation whose ad set was
+   * re-pointed between two clicks is precisely the case §6 says must not be
+   * bucketed, and it is invisible unless both instants are known.
+   *
+   * `observationsCount` is deliberately *not* `attributionInstants.length`. Two
+   * observations at the same instant are two observations and one question to
+   * ask the destination timeline, and conflating them would either inflate the
+   * evidence count or ask Postgres the same thing twice.
+   */
+  attributionInstants: string[];
+  /**
    * The conversation's channel type, from the observation.
    *
    * Carried so the projector can state provider coverage without a second read
