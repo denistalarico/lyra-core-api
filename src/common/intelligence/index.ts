@@ -6,6 +6,7 @@
  * and it is what lets `social-integrations` and `leadflow-analytics` both depend
  * on this without depending on each other.
  */
+export * from './intelligence-business-mode';
 export * from './intelligence-fact';
 export * from './intelligence-fact-source';
 export * from './intelligence-metric';

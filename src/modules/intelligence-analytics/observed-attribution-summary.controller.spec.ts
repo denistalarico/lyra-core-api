@@ -237,4 +237,153 @@ describe('ObservedAttributionSummaryController', () => {
       ).rejects.toBeInstanceOf(BadRequestException);
     });
   });
+
+  /**
+   * I4.3 §2/§25: the new axis is the same route under the same authorization.
+   */
+  describe('the destination axis', () => {
+    it('accepts groupBy=destination', async () => {
+      const { controller, summaryService } = build();
+
+      await controller.observedSummary(
+        context(),
+        query({ groupBy: 'destination' }),
+      );
+
+      expect(summaryService.summary).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.anything(),
+        CONNECTION_ID,
+        'destination',
+      );
+    });
+
+    it.each(['account', 'campaign', 'adset', 'ad'] as const)(
+      'still accepts groupBy=%s',
+      async (groupBy) => {
+        const { controller, summaryService } = build();
+
+        await controller.observedSummary(context(), query({ groupBy }));
+
+        expect(summaryService.summary).toHaveBeenCalledWith(
+          expect.anything(),
+          expect.anything(),
+          CONNECTION_ID,
+          groupBy,
+        );
+      },
+    );
+
+    /**
+     * Destination changes nothing about who may read this. The commercial
+     * figures are in every group at every axis, so the CRM permission is
+     * required here exactly as it is elsewhere.
+     */
+    it('requires the CRM permission on the destination axis too', async () => {
+      const { controller, summaryService } = build({
+        deniedPermission: 'leadflow.crm.records.view.client',
+      });
+
+      await expect(
+        controller.observedSummary(
+          context(),
+          query({ groupBy: 'destination' }),
+        ),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(summaryService.summary).not.toHaveBeenCalled();
+    });
+
+    it.each(['social', 'leadflow'])(
+      'requires the %s entitlement on the destination axis',
+      async (missing) => {
+        const { controller } = build({
+          allowedProducts: ['social', 'leadflow'].filter((p) => p !== missing),
+        });
+
+        await expect(
+          controller.observedSummary(
+            context(),
+            query({ groupBy: 'destination' }),
+          ),
+        ).rejects.toBeInstanceOf(ForbiddenException);
+      },
+    );
+
+    /** The caller still cannot name a client on the new axis. */
+    it('reads the client from context on the destination axis', async () => {
+      const { controller, summaryService } = build();
+
+      await controller.observedSummary(
+        context({
+          managedContext: { operatingMode: 'client', clientId: 'client-9' },
+        } as Partial<RequestContext>),
+        query({ groupBy: 'destination' }),
+      );
+
+      expect(summaryService.summary).toHaveBeenCalledWith(
+        expect.objectContaining({ agencyClientId: 'client-9' }),
+        expect.anything(),
+        CONNECTION_ID,
+        'destination',
+      );
+    });
+  });
+  /**
+   * I5 §18/§19 — the dimension changes nothing about authorization.
+   *
+   * The claim being defended is narrow and easy to break by accident: reading a
+   * Business Mode must not add a requirement, and must not remove one either. A
+   * future author "fixing" the Social-only case by making LeadFlow optional
+   * here would open the funnel numbers to a caller who never earned them, and
+   * an author making the mode mandatory would lock a Social-only tenant out of
+   * its own paid-media analytics.
+   */
+  describe('business mode does not affect authorization (I5)', () => {
+    it('still requires both products', async () => {
+      const { controller, permissionService } = build();
+
+      await controller.observedSummary(context(), query());
+
+      expect(permissionService.canAccessProduct).toHaveBeenCalledWith(
+        expect.anything(),
+        'social',
+      );
+      expect(permissionService.canAccessProduct).toHaveBeenCalledWith(
+        expect.anything(),
+        'leadflow',
+      );
+    });
+
+    it('still requires the CRM records permission', async () => {
+      const { controller, permissionService } = build();
+
+      await controller.observedSummary(context(), query());
+
+      expect(permissionService.assertCan).toHaveBeenCalledWith(
+        expect.anything(),
+        'leadflow.crm.records.view.client',
+      );
+    });
+
+    /**
+     * No new permission was introduced for the dimension.
+     *
+     * Asserted on the exact set rather than on the absence of one name, so an
+     * added key of any spelling fails here and has to be defended on purpose.
+     */
+    it('asks for no permission beyond the three the endpoint already required', async () => {
+      const { controller, permissionService } = build();
+
+      await controller.observedSummary(context(), query());
+
+      const asked = permissionService.assertCan.mock.calls.map(
+        (call: unknown[]) => call[1],
+      );
+
+      expect(asked).toEqual([
+        'leadflow.analytics.reports.view.operational',
+        'leadflow.crm.records.view.client',
+      ]);
+    });
+  });
 });

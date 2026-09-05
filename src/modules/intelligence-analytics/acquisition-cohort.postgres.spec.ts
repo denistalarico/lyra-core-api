@@ -1,8 +1,12 @@
 import { randomUUID } from 'crypto';
-import { requireIntelligenceScope } from '../../common/intelligence';
+import {
+  BUSINESS_MODE_CURRENT_ONLY_LIMITATION,
+  requireIntelligenceScope,
+} from '../../common/intelligence';
 import { AgencyDataSource } from '../../database/agency-typeorm.datasource';
 import { deleteFixtureTenant } from '../../testing/fixture-tenant';
 import { describePostgresIntegration } from '../../testing/postgres-integration';
+import { BusinessModeDimensionAdapter } from '../leadflow-analytics/intelligence/business-mode-dimension.adapter';
 import { LeadFlowIntelligenceAdapter } from '../leadflow-analytics/intelligence/leadflow-intelligence.adapter';
 import { SocialAdAccountConnectionEntity } from '../social-integrations/entities/social-ad-account-connection.entity';
 import { SocialAdDestinationObservationEntity } from '../social-integrations/entities/social-ad-destination-observation.entity';
@@ -47,6 +51,9 @@ run('Acquisition cohort against PostgreSQL', () => {
   const WINDOW = { since: '2026-08-01', until: '2026-08-31' };
 
   const tables = [
+    // I5: the dimension's storage, reset with the rest so a mode left by one
+    // test cannot decide another test's response.
+    'leadflow_client_settings',
     'social_ad_destination_observations',
     'social_ad_metrics_daily',
     'social_ad_entities',
@@ -90,6 +97,9 @@ run('Acquisition cohort against PostgreSQL', () => {
       new SocialAdDestinationBreakdownReadService(
         AgencyDataSource.getRepository(SocialAdMetricDailyEntity),
       ),
+      // The real dimension adapter (I5), so this suite exercises the same SQL
+      // the endpoint runs rather than a fiction of it.
+      new BusinessModeDimensionAdapter(AgencyDataSource),
     );
   });
 
@@ -1459,6 +1469,88 @@ run('Acquisition cohort against PostgreSQL', () => {
       expect(view.destinations.buckets).toEqual([]);
       expect(view.dataQuality.destinationHistory.destinationResolution).toBe(
         'unavailable',
+      );
+    });
+  });
+  /**
+   * I5 against real rows, at the endpoint level (§30.14, §30.15).
+   *
+   * §24's requirement in its strongest form: a *historical* window must still
+   * answer, must carry the current mode, and must say in the payload that the
+   * label is current rather than a snapshot of that period.
+   */
+  describe('business mode dimension (I5)', () => {
+    beforeAll(async () => {
+      await createConnection({ id: connectionId });
+    });
+
+    afterEach(async () => {
+      await AgencyDataSource.query(
+        `DELETE FROM leadflow_client_settings WHERE tenant_id = $1`,
+        [tenantId],
+      );
+    });
+
+    it('reports a configured mode with current-context semantics', async () => {
+      await AgencyDataSource.query(
+        `INSERT INTO leadflow_client_settings
+           (id, tenant_id, workspace_id, context_type, agency_client_id,
+            business_mode_key, status)
+         VALUES ($1, $2, $3, 'agency', NULL, 'clinics_esthetics', 'draft')`,
+        [randomUUID(), tenantId, workspaceId],
+      );
+
+      const view = await cohort();
+
+      expect(view.businessMode).toBe('clinics_esthetics');
+      expect(view.businessModeDimension.resolution).toBe('configured');
+      expect(view.businessModeDimension.temporalSemantics).toBe(
+        'current_context_dimension',
+      );
+      expect(view.businessModeDimension.source).toBe(
+        'leadflow_client_settings',
+      );
+    });
+
+    /**
+     * §24: a historical query is answered, never blocked — and it says so.
+     *
+     * The window here is months before the row was written, which is exactly
+     * the case the limitation describes. Nothing about the query fails; the
+     * caveat is data in the response rather than a reason to refuse.
+     */
+    it('answers a historical window and states the caveat', async () => {
+      await AgencyDataSource.query(
+        `INSERT INTO leadflow_client_settings
+           (id, tenant_id, workspace_id, context_type, agency_client_id,
+            business_mode_key, status)
+         VALUES ($1, $2, $3, 'agency', NULL, 'real_estate', 'draft')`,
+        [randomUUID(), tenantId, workspaceId],
+      );
+
+      const view = await service.cohort(
+        requireIntelligenceScope({
+          tenantId,
+          workspaceId,
+          agencyClientId: null,
+        }),
+        { since: '2026-01-01', until: '2026-01-31' },
+        connectionId,
+      );
+
+      expect(view.businessMode).toBe('real_estate');
+      expect(view.dataQuality.limitations).toContain(
+        BUSINESS_MODE_CURRENT_ONLY_LIMITATION,
+      );
+    });
+
+    it('reports null for a context with no LeadFlow settings row', async () => {
+      const view = await cohort();
+
+      expect(view.businessMode).toBeNull();
+      expect(view.businessModeDimension.resolution).toBe('unconfigured');
+      expect(view.dataQuality.limitations).not.toContain(
+        BUSINESS_MODE_CURRENT_ONLY_LIMITATION,
       );
     });
   });

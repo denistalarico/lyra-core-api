@@ -1,11 +1,16 @@
 import { Injectable } from '@nestjs/common';
 import {
   assertAggregable,
+  BUSINESS_MODE_CURRENT_ONLY_LIMITATION,
+  BUSINESS_MODE_UNKNOWN_KEY_LIMITATION,
+  businessModeQuality,
+  type BusinessModeDimension,
   type IntelligenceFactSet,
   type IntelligenceMetricDescriptor,
   type IntelligenceScope,
   type IntelligenceWindow,
 } from '../../common/intelligence';
+import { BusinessModeDimensionAdapter } from '../leadflow-analytics/intelligence/business-mode-dimension.adapter';
 import { LeadFlowIntelligenceAdapter } from '../leadflow-analytics/intelligence/leadflow-intelligence.adapter';
 import {
   divideScaled,
@@ -94,6 +99,16 @@ export class AcquisitionCohortService {
     private readonly socialReads: SocialAnalyticsReadService,
     private readonly destinationHistory: SocialAdDestinationHistoryReadService,
     private readonly destinationBreakdown: SocialAdDestinationBreakdownReadService,
+    /**
+     * I5's context dimension.
+     *
+     * Injected by its concrete class — TypeScript interfaces do not survive to
+     * runtime, so an interface-only parameter has no DI token — but the class
+     * implements `BusinessModeDimensionPort` and only the port's single method
+     * is used here. That is what keeps the direction right: this module asks
+     * for a business mode and never learns that LeadFlow stores it.
+     */
+    private readonly businessMode: BusinessModeDimensionAdapter,
   ) {}
 
   /**
@@ -129,67 +144,84 @@ export class AcquisitionCohortService {
      */
     const timezone = await this.resolveAccountTimezone(scope, connectionId);
 
-    const [socialSet, leadflowSet, destination, breakdown, channelCounts] =
-      await Promise.all([
-        this.social.fetch({
-          scope,
-          window,
-          grain: 'period',
-          subjectId: connectionId,
-        }),
-        this.leadflow.fetch({
-          scope,
-          window,
-          grain: 'period',
-          // Undefined when the account has no zone: each domain then keeps its
-          // own default, which is the pre-I3 behaviour rather than a guess.
-          dayBucketTimezone: timezone ?? undefined,
-        }),
-        /**
-         * Destination evidence, read in the *same* timezone as everything else.
-         *
-         * Cut with the account's zone rather than UTC for the same reason the
-         * two fact sets are: an observation made at 21:00 São Paulo time belongs
-         * to that day locally and to the next one in UTC, and an interval
-         * boundary off by a day would misclassify a day of spend.
-         */
-        this.destinationHistory.history({
-          tenantId: scope.tenantId,
-          workspaceId: scope.workspaceId,
-          connectionId,
-          timezone,
-          days: listWindowDays(window),
-        }),
-        /**
-         * Ad-set spend grouped by the destination observed on each day.
-         *
-         * The read I3.4 unblocked. It is a *fifth* query rather than a
-         * refinement of the first: `social.fetch` returns account-level totals
-         * and must keep doing so, because those are the figures that reconcile
-         * with Ads Manager and with every number this endpoint returned before
-         * today. Deriving the totals from these buckets instead would change
-         * every existing number for the sake of a new one.
-         */
-        this.destinationBreakdown.breakdown({
-          tenantId: scope.tenantId,
-          workspaceId: scope.workspaceId,
-          connectionId,
-          since: window.since,
-          until: window.until,
-          timezone,
-          expectedDays: countWindowDays(window),
-        }),
-        /**
-         * The funnel side, split by Inbox channel.
-         *
-         * Through the LeadFlow adapter, not a query here: the client-binding
-         * predicate is a JSONB condition with exactly one definition, and a
-         * second copy in this module would eventually disagree with the screens.
-         * Same window bounds and same day-bucket zone as the totals, so a
-         * bucket's conversations are a genuine subset of the period's.
-         */
-        this.leadflow.channelBreakdown(scope, window, timezone),
-      ]);
+    const [
+      socialSet,
+      leadflowSet,
+      destination,
+      breakdown,
+      channelCounts,
+      businessMode,
+    ] = await Promise.all([
+      this.social.fetch({
+        scope,
+        window,
+        grain: 'period',
+        subjectId: connectionId,
+      }),
+      this.leadflow.fetch({
+        scope,
+        window,
+        grain: 'period',
+        // Undefined when the account has no zone: each domain then keeps its
+        // own default, which is the pre-I3 behaviour rather than a guess.
+        dayBucketTimezone: timezone ?? undefined,
+      }),
+      /**
+       * Destination evidence, read in the *same* timezone as everything else.
+       *
+       * Cut with the account's zone rather than UTC for the same reason the
+       * two fact sets are: an observation made at 21:00 São Paulo time belongs
+       * to that day locally and to the next one in UTC, and an interval
+       * boundary off by a day would misclassify a day of spend.
+       */
+      this.destinationHistory.history({
+        tenantId: scope.tenantId,
+        workspaceId: scope.workspaceId,
+        connectionId,
+        timezone,
+        days: listWindowDays(window),
+      }),
+      /**
+       * Ad-set spend grouped by the destination observed on each day.
+       *
+       * The read I3.4 unblocked. It is a *fifth* query rather than a
+       * refinement of the first: `social.fetch` returns account-level totals
+       * and must keep doing so, because those are the figures that reconcile
+       * with Ads Manager and with every number this endpoint returned before
+       * today. Deriving the totals from these buckets instead would change
+       * every existing number for the sake of a new one.
+       */
+      this.destinationBreakdown.breakdown({
+        tenantId: scope.tenantId,
+        workspaceId: scope.workspaceId,
+        connectionId,
+        since: window.since,
+        until: window.until,
+        timezone,
+        expectedDays: countWindowDays(window),
+      }),
+      /**
+       * The funnel side, split by Inbox channel.
+       *
+       * Through the LeadFlow adapter, not a query here: the client-binding
+       * predicate is a JSONB condition with exactly one definition, and a
+       * second copy in this module would eventually disagree with the screens.
+       * Same window bounds and same day-bucket zone as the totals, so a
+       * bucket's conversations are a genuine subset of the period's.
+       */
+      this.leadflow.channelBreakdown(scope, window, timezone),
+      /**
+       * The context's current business mode (I5).
+       *
+       * In the same `Promise.all` as everything else rather than awaited
+       * before or after it: it is one indexed row and it depends on nothing
+       * the other reads produce, so serialising it would add its latency to
+       * the response for no ordering benefit. It is asked once per request —
+       * the mode belongs to the context, not to a row — which is what §28's
+       * "no repeated query in a loop" comes down to here.
+       */
+      this.businessMode.businessMode(scope),
+    ]);
 
     const socialFacts = this.readSocialFacts(socialSet);
     const leadflowFacts = this.readLeadFlowFacts(leadflowSet);
@@ -221,7 +253,18 @@ export class AcquisitionCohortService {
       // reported in its own currency and the two are *not* assumed equal —
       // `wonValueCurrencyMismatch` below is what says so when they differ.
       currency: socialSet.currency,
-      businessMode: leadflowSet.businessMode,
+      /**
+       * From the dimension, not from `leadflowSet.businessMode` (I5 §11).
+       *
+       * The fact source still reports null there and is right to: a fact set
+       * spans many conversations whose contexts could differ, so it has no
+       * single mode to name. The dimension asks the *context* instead, which is
+       * the thing that actually has one. Reading both would be two answers to
+       * one question, and the flat field is kept in lockstep with the dimension
+       * precisely so no reader can find them disagreeing.
+       */
+      businessMode: businessMode.key,
+      businessModeDimension: businessMode,
       social: socialFacts,
       leadflow: leadflowFacts,
       derived: this.derive(socialFacts, leadflowFacts),
@@ -279,6 +322,7 @@ export class AcquisitionCohortService {
           qualification,
           destination.coverage,
           destinations,
+          businessMode,
         ),
         missingFacts: this.missingFacts(leadflowSet.descriptors, destinations),
         qualificationHistory: qualification,
@@ -286,6 +330,7 @@ export class AcquisitionCohortService {
           destination.coverage,
           destinations,
         ),
+        businessMode: businessModeQuality(businessMode),
       },
     };
   }
@@ -695,6 +740,7 @@ export class AcquisitionCohortService {
     qualification: CohortQualificationHistory,
     destination: DestinationCoverage,
     destinations: CohortDestinationBreakdown,
+    businessMode: BusinessModeDimension,
   ): string[] {
     const limitations = [
       COHORT_CORRELATION_LIMITATION,
@@ -753,6 +799,23 @@ export class AcquisitionCohortService {
       );
     } else if (qualification.legacyUnknown) {
       limitations.push(COHORT_QUALIFICATION_LEGACY_LIMITATION);
+    }
+
+    /**
+     * Stated only when a mode was actually resolved (I5 §24).
+     *
+     * Conditional rather than unconditional, and the condition is what makes it
+     * meaningful: the sentence warns that a label may not describe the queried
+     * period, and on a context with no label there is nothing for a reader to
+     * misdate. Printing it against `unconfigured` would add noise to every
+     * Social-only response and train readers to skip the list.
+     */
+    if (businessMode.resolution !== 'unconfigured') {
+      limitations.push(BUSINESS_MODE_CURRENT_ONLY_LIMITATION);
+    }
+
+    if (businessMode.resolution === 'unknown_key') {
+      limitations.push(BUSINESS_MODE_UNKNOWN_KEY_LIMITATION);
     }
 
     limitations.push(

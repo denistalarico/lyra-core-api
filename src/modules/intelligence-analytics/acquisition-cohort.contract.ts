@@ -1,4 +1,6 @@
 import type {
+  BusinessModeDimension,
+  BusinessModeTemporalSemantics,
   IntelligenceFreshness,
   IntelligenceProvenance,
 } from '../../common/intelligence';
@@ -180,6 +182,27 @@ export type CohortDestinationHistory = {
   observationCadenceHours: number;
 };
 
+/**
+ * The two independent questions a consumer has about the mode label (I5 §22).
+ *
+ * Two booleans rather than one, because they fail separately and call for
+ * different responses. `configured: false` is an ordinary state — a Social-only
+ * context — and the right response is to omit mode from the analysis.
+ * `configured: true, recognized: false` is a defect: something is stored that
+ * the catalog does not know, and the right response is to investigate it rather
+ * than to segment on it.
+ *
+ * `temporalSemantics` is restated here, next to the flags a consumer reads
+ * before deciding to group by mode, because that decision is exactly where the
+ * current-versus-historical distinction matters and a reader who never looks at
+ * the value object would otherwise miss it.
+ */
+export type CohortBusinessModeQuality = {
+  configured: boolean;
+  recognized: boolean;
+  temporalSemantics: BusinessModeTemporalSemantics;
+};
+
 export type CohortDataQuality = {
   /** Always true here. The numbers are correlated by period and channel. */
   cohortCorrelation: true;
@@ -199,6 +222,16 @@ export type CohortDataQuality = {
   qualificationHistory: CohortQualificationHistory;
   /** Coverage of the destination evidence behind the channel bucket. */
   destinationHistory: CohortDestinationHistory;
+  /**
+   * Whether the context's Business Mode is usable, and under what time semantics
+   * (I5).
+   *
+   * In `dataQuality` rather than only beside the value, because "is this label
+   * trustworthy" is the same class of question as "is this coverage complete" —
+   * and a consumer deciding whether it may segment by mode reads this object,
+   * not the value.
+   */
+  businessMode: CohortBusinessModeQuality;
   /**
    * Metric keys the view asked for and could not obtain, with the reason.
    *
@@ -426,9 +459,26 @@ export type AcquisitionCohortView = {
   currency: string | null;
   /**
    * Informative only, and null unless LeadFlow resolved one. I3 never requires
-   * it and never filters on it — Business Mode is I5.
+   * it and never filters on it.
+   *
+   * Kept as a bare key for backward compatibility: it shipped in I3 and every
+   * existing reader expects a string or null in this position. I5 fills it in
+   * from the canonical dimension below rather than replacing it — the two are
+   * always the same value, and `businessModeDimension.key` is the one to read
+   * for anything that needs to know whether the key is *usable*.
    */
   businessMode: string | null;
+  /**
+   * The same mode, with the provenance needed to interpret it (I5).
+   *
+   * A sibling rather than a replacement, and a single object at the response
+   * level rather than a field repeated inside every row: the mode belongs to
+   * the *context* the query ran for, and every row in the response shares that
+   * context. Repeating it per row would present a context property as though it
+   * varied with the period or channel, which is exactly the misreading
+   * `temporalSemantics` exists to prevent.
+   */
+  businessModeDimension: BusinessModeDimension;
   social: CohortSocialFacts;
   leadflow: CohortLeadFlowFacts;
   derived: CohortDerivedMetrics;

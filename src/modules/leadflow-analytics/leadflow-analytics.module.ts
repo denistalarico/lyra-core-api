@@ -23,6 +23,7 @@ import {
   LeadFlowAnalyticsViewEntity,
 } from './entities';
 import { LeadFlowAttributionCohortAdapter } from './intelligence/leadflow-attribution-cohort.adapter';
+import { BusinessModeDimensionAdapter } from './intelligence/business-mode-dimension.adapter';
 import { LeadFlowAttributionAdapter } from './intelligence/leadflow-attribution.adapter';
 import { LeadFlowIntelligenceAdapter } from './intelligence/leadflow-intelligence.adapter';
 import { LeadFlowAnalyticsController } from './leadflow-analytics.controller';
@@ -84,6 +85,11 @@ import { LeadFlowAnalyticsViewsService } from './services/leadflow-analytics-vie
     // which is neither the fact source's day-bucket shape nor the individual
     // port's windowless one.
     LeadFlowAttributionCohortAdapter,
+    // I5's context dimension. Not a fact source: it answers about the context
+    // rather than about a period, has no window or grain anywhere in its shape,
+    // and exists so that Intelligence can read a LeadFlow-stored label without
+    // naming a LeadFlow table — see the port doc.
+    BusinessModeDimensionAdapter,
   ],
   exports: [
     LeadFlowAnalyticsService,
@@ -95,6 +101,7 @@ import { LeadFlowAnalyticsViewsService } from './services/leadflow-analytics-vie
     LeadFlowIntelligenceAdapter,
     LeadFlowAttributionAdapter,
     LeadFlowAttributionCohortAdapter,
+    BusinessModeDimensionAdapter,
   ],
 })
 export class LeadFlowAnalyticsModule {}

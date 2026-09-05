@@ -1,3 +1,8 @@
+import type {
+  BusinessModeDimension,
+  BusinessModeTemporalSemantics,
+} from '../../common/intelligence';
+
 /**
  * The shape of an aggregate over individually-observed attributions.
  *
@@ -13,15 +18,25 @@ export type ObservedAttributionSummaryKind = 'observed_attribution_summary';
 /**
  * The level a group key names.
  *
- * The four levels of Meta's hierarchy, and nothing else. `destination` is
- * deliberately absent from this slice — see
- * `OBSERVED_ATTRIBUTION_SUMMARY_DESTINATION_LIMITATION`.
+ * Four of them are Meta's hierarchy. `destination` (I4.3) is not a fifth level
+ * of it — it is an orthogonal axis, and the difference matters when reading the
+ * numbers:
+ *
+ * - The hierarchy levels *partition* the matched conversations. Every matched
+ *   conversation lands in exactly one account, one campaign, one ad set and one
+ *   ad, so those groups always sum back to `matchedConversations`.
+ * - `destination` does **not** partition them. A conversation whose ad set was
+ *   re-pointed between two observed clicks has no single destination and is
+ *   deliberately placed in no group (§6), so the destination groups sum to
+ *   `destinationResolvedConversations` instead — which is why that figure is
+ *   reported rather than left to be inferred from a subtraction.
  */
 export type ObservedAttributionGroupBy =
   | 'account'
   | 'campaign'
   | 'adset'
-  | 'ad';
+  | 'ad'
+  | 'destination';
 
 /**
  * How the window selects conversations.
@@ -108,12 +123,86 @@ export type ObservedAttributionSummaryCoverage = {
   observedCoverage: number | null;
 };
 
+/**
+ * How much of the *matched* cohort could be placed at a destination.
+ *
+ * §17 insists these are two different measurements and they are reported as two
+ * objects rather than merged fields, because merging them produces a number
+ * nobody can act on:
+ *
+ * - **Attribution coverage** (`ObservedAttributionSummaryCoverage`) asks how
+ *   many eligible conversations carried provider evidence at all. A low figure
+ *   is about referral capture.
+ * - **Destination coverage** (this) asks, of the ones that did, how many could
+ *   be placed at a single destination. A low figure is about how long the
+ *   destination observer has been running and how often ad sets are re-pointed.
+ *
+ * The denominator here is `matchedConversations`, never `eligibleConversations`
+ * — a conversation with no attribution has no ad set whose destination could
+ * even be asked about, and counting it as a destination failure would blame this
+ * enrichment for a gap in the layer beneath it.
+ */
+export type ObservedAttributionDestinationCoverage = {
+  /** The denominator: conversations with a resolved single ad. */
+  matchedConversations: number;
+  /** Placed at exactly one destination, and therefore in a group. */
+  destinationResolvedConversations: number;
+  /**
+   * Matched, but the destination observer had seen nothing about the ad set
+   * before the click.
+   *
+   * §7's first cause, and kept apart from `unknown` for the whole slice's
+   * reason: this says *we had not looked yet*, which is a fact about Lyra's
+   * observation history and is fixed by time passing. It is not a statement
+   * about the ad.
+   */
+  destinationUnavailableConversations: number;
+  /**
+   * Matched and consistently attributed, but the ad set pointed somewhere else
+   * between two of the conversation's own observations.
+   *
+   * §6 requires this be its own counter rather than folded into a generic
+   * unresolved bucket: the destination evidence here is *present and good*, and
+   * there are simply two true answers. Hiding it would make a real and
+   * interesting fact about the account look like missing data.
+   */
+  destinationTemporalVariationConversations: number;
+  /**
+   * Matched, but the ad's ad set never resolved in the mirror.
+   *
+   * Destination is an ad-set property in Meta's model, so an ad whose parent
+   * did not sync has nothing to carry destination evidence about. Distinct from
+   * `unavailable`, which *has* an ad set and no observation of it yet.
+   */
+  destinationAdsetUnresolvedConversations: number;
+  /**
+   * `destinationResolved / matched`, or null on a zero denominator.
+   *
+   * Null rather than zero for the same reason `observedCoverage` is: a ratio
+   * over nothing is undefined, and rendering 0% would tell a client whose
+   * cohort is empty that destination enrichment is broken.
+   */
+  destinationCoverage: number | null;
+};
+
 /** One hierarchy node's attributed funnel. */
 export type ObservedAttributionSummaryGroup = {
-  /** The provider-side id at `level`. */
+  /**
+   * The provider-side id at `level` — or, when `level` is `destination`, the
+   * canonical destination itself (`whatsapp`, `messaging_multi`, `unknown`, …).
+   *
+   * The destination keys come from the existing canonical vocabulary rather
+   * than a catalogue of this view's own (§8): a second enum would let the same
+   * ad set read as `whatsapp` here and `WHATSAPP` in the per-conversation view.
+   */
   key: string;
   level: ObservedAttributionGroupBy;
-  /** Provider-authored name, display only — never a join key. */
+  /**
+   * Provider-authored name, display only — never a join key.
+   *
+   * Always null for a destination group: the key *is* the human-readable value,
+   * and a translated label here would become the thing a consumer matches on.
+   */
   name: string | null;
   /**
    * Conversations attributed to this node, counted once each.
@@ -145,6 +234,18 @@ export type ObservedAttributionSummaryProvenance = {
   observation: string;
   conversation: string;
   paidMedia: string;
+  /**
+   * Where destination evidence came from — its own layer, never folded into
+   * `paidMedia` (§19).
+   *
+   * The hierarchy and the destination timeline are different kinds of claim
+   * about the same ad set: one is current structure, the other is an append-only
+   * record of what was observed when. Flattening them would let a reader believe
+   * the destination was resolved by the same mechanism that resolved the
+   * campaign, which is exactly the current-state-as-history error the
+   * observations table was built to remove.
+   */
+  destination: string;
   qualification: string;
   opportunity: string;
   projector: string;
@@ -178,6 +279,34 @@ export type ObservedAttributionSummaryDataQuality = {
   immatureCohort: boolean;
   /** Whether every group could state a single-currency total. */
   currencyCompatibility: 'single' | 'mixed' | 'none';
+  /**
+   * Destination enrichment quality, reported at every `groupBy` and not only at
+   * `destination`.
+   *
+   * Deliberate: a reader comparing campaigns should be able to see that only
+   * 40% of the cohort has resolvable destinations *before* they switch axes and
+   * draw a conclusion from partial groups.
+   *
+   * `individualAttributionOnly` stays `true` regardless (§18). Destination is an
+   * enrichment of an attribution that was already individually observed — it
+   * adds a property to a matched conversation and never creates, infers or
+   * widens the match itself.
+   */
+  destinationCoverage: number | null;
+  destinationUnavailable: number;
+  destinationTemporalVariation: number;
+  /**
+   * Whether the context's Business Mode is usable, and under what time
+   * semantics (I5 §22).
+   *
+   * The same shape I3 reports, from the same helper, so a consumer reading both
+   * endpoints does not have to learn two encodings of one idea.
+   */
+  businessMode: {
+    configured: boolean;
+    recognized: boolean;
+    temporalSemantics: BusinessModeTemporalSemantics;
+  };
   limitations: string[];
 };
 
@@ -186,6 +315,31 @@ export type ObservedAttributionSummaryView = {
   cohort: ObservedAttributionSummaryCohort;
   groupBy: ObservedAttributionGroupBy;
   coverage: ObservedAttributionSummaryCoverage;
+  /**
+   * Destination enrichment coverage — a sibling of `coverage`, not a field
+   * inside it (§17).
+   *
+   * Additive: a consumer written against I4.2 reads `coverage` exactly as
+   * before and ignores this, which is what makes `groupBy=destination` a
+   * backward-compatible addition rather than a new endpoint.
+   */
+  destinationCoverage: ObservedAttributionDestinationCoverage;
+  /**
+   * The context's current Business Mode (I5).
+   *
+   * At the response level and **not** inside each group, which §12 requires and
+   * which is also the only shape that is true: the mode belongs to the tenant /
+   * workspace / client this query ran for, and every group in the response was
+   * produced under that same one. Repeating it per group would present a
+   * context property as though it varied by campaign or destination, and would
+   * invite exactly the reading — "this campaign's mode" — that no storage here
+   * supports.
+   *
+   * Additive and inert. It changes no grouping, no matching and no count; §12
+   * is explicit that attribution must not become mode-aware, and nothing in the
+   * projector reads this value back.
+   */
+  businessMode: BusinessModeDimension;
   groups: ObservedAttributionSummaryGroup[];
   provenance: ObservedAttributionSummaryProvenance;
   dataQuality: ObservedAttributionSummaryDataQuality;
@@ -257,10 +411,49 @@ export const OBSERVED_ATTRIBUTION_SUMMARY_UNRESOLVED_LIMITATION =
   'pertence a outra conta.';
 
 export const OBSERVED_ATTRIBUTION_SUMMARY_DESTINATION_LIMITATION =
-  'Este resumo não agrupa por destino. O destino é temporal e resolvido por ' +
-  'observação individual (I4.1): uma conversa cujo conjunto mudou de destino ' +
-  'entre dois cliques não pertence a um destino único, e colapsá-la em um ' +
-  'bucket apagaria exatamente a variação que a evidência registra.';
+  'O destino é enriquecimento temporal observado, não parte da atribuição. Ele ' +
+  'diz para onde o conjunto apontava no instante de cada clique, segundo o que ' +
+  'a Lyra tinha observado até ali — a Meta não informa quando a configuração ' +
+  'mudou, apenas como ela está quando perguntamos.';
+
+export const OBSERVED_ATTRIBUTION_SUMMARY_DESTINATION_UNAVAILABLE_LIMITATION =
+  'Parte das conversas atribuídas não tem destino porque a observação de ' +
+  'destino começou depois do clique. Não é destino desconhecido: é ausência de ' +
+  'observação anterior, e projetar o destino atual para trás transformaria ' +
+  'configuração de hoje em histórico.';
+
+export const OBSERVED_ATTRIBUTION_SUMMARY_DESTINATION_VARIATION_LIMITATION =
+  'Conversas cujo conjunto mudou de destino entre duas observações da mesma ' +
+  'conversa ficam fora de todos os grupos de destino. A atribuição continua ' +
+  'válida e elas seguem contadas na cobertura; escolher um dos destinos ' +
+  'apagaria a variação que a evidência registra.';
+
+export const OBSERVED_ATTRIBUTION_SUMMARY_MESSAGING_MULTI_LIMITATION =
+  'messaging_multi é um destino real, não um destino indefinido: o anunciante ' +
+  'ofereceu mais de um aplicativo e a Meta roteia para o escolhido. Este ' +
+  'agrupamento não identifica qual aplicativo recebeu a pessoa, e deduzi-lo do ' +
+  'canal de entrada seria inferir o destino a partir da chegada.';
+
+export const OBSERVED_ATTRIBUTION_SUMMARY_DESTINATION_NOT_ATTRIBUTION_LIMITATION =
+  'Destino não cria atribuição. Só entram aqui conversas que já tinham ' +
+  'identificador de anúncio observado; o destino apenas descreve para onde esse ' +
+  'anúncio apontava, e nenhuma conversa passa a ser atribuída por causa dele.';
+
+/**
+ * When a destination and the channel the conversation actually arrived on do
+ * not obviously correspond.
+ *
+ * §9 is explicit that this is *not* an error and the conversation is not
+ * discarded: a conversation attributed to an ad whose ad set pointed at a
+ * website is a possible fact — the person may have clicked through and messaged
+ * separately, or the ad set may have been re-pointed since. Reporting it as a
+ * limitation says "look at this" without asserting which reading is right.
+ */
+export const OBSERVED_ATTRIBUTION_SUMMARY_DESTINATION_UNUSUAL_LIMITATION =
+  'Há conversas atribuídas a anúncios cujo destino observado não é um ' +
+  'aplicativo de mensagens. Isso é possível e não foi descartado: pode ser ' +
+  'conversa iniciada depois do clique, ou conjunto reapontado desde então. Os ' +
+  'dados são exibidos como observados, sem inferir erro.';
 
 /** Named here so the projector can state its own layer without a literal. */
 export const OBSERVED_ATTRIBUTION_SUMMARY_PROJECTOR =

@@ -4,9 +4,15 @@ import { AgencyDataSource } from '../../database/agency-typeorm.datasource';
 import { deleteFixtureTenant } from '../../testing/fixture-tenant';
 import { describePostgresIntegration } from '../../testing/postgres-integration';
 import { LeadFlowAttributionCohortAdapter } from '../leadflow-analytics/intelligence/leadflow-attribution-cohort.adapter';
+import { SocialAdDestinationObservationEntity } from '../social-integrations/entities/social-ad-destination-observation.entity';
 import { SocialAdEntity } from '../social-integrations/entities/social-ad-entity.entity';
+import { SocialAdDestinationHistoryReadService } from '../social-integrations/services/social-ad-destination-history.read.service';
 import { SocialAdHierarchyLookupReadService } from '../social-integrations/services/social-ad-hierarchy-lookup.read.service';
-import type { ObservedAttributionGroupBy } from './observed-attribution-summary.contract';
+import {
+  OBSERVED_ATTRIBUTION_SUMMARY_DESTINATION_UNUSUAL_LIMITATION,
+  type ObservedAttributionGroupBy,
+} from './observed-attribution-summary.contract';
+import { BusinessModeDimensionAdapter } from '../leadflow-analytics/intelligence/business-mode-dimension.adapter';
 import { ObservedAttributionSummaryService } from './observed-attribution-summary.service';
 
 const run = describePostgresIntegration();
@@ -34,8 +40,14 @@ run('Observed attribution summary against PostgreSQL', () => {
   let service: ObservedAttributionSummaryService;
   let cohort: LeadFlowAttributionCohortAdapter;
   let hierarchy: SocialAdHierarchyLookupReadService;
+  let destinations: SocialAdDestinationHistoryReadService;
+  let businessModes: BusinessModeDimensionAdapter;
 
   const tables = [
+    // I5: the dimension's own storage, reset with everything else so a mode
+    // left behind by one test cannot decide another test's response.
+    'leadflow_client_settings',
+    'social_ad_destination_observations',
     'inbox_attribution_observations',
     'inbox_conversation_events',
     'inbox_messages',
@@ -78,10 +90,24 @@ run('Observed attribution summary against PostgreSQL', () => {
       ]),
     };
 
+    // The real destination reader, against the real table: I4.3's whole claim
+    // is that the aggregate resolves destinations the same way the individual
+    // endpoint does, and a stub here would test the projector against a fiction.
+    destinations = new SocialAdDestinationHistoryReadService(
+      AgencyDataSource.getRepository(SocialAdDestinationObservationEntity),
+    );
+
+    // The real dimension adapter against the real tables (I5): the point of
+    // the gated suite is that the SQL resolves a mode, its label and its
+    // scoping for real, which a stub would assert nothing about.
+    businessModes = new BusinessModeDimensionAdapter(AgencyDataSource);
+
     service = new ObservedAttributionSummaryService(
       cohort,
       hierarchy,
       socialReads as never,
+      destinations,
+      businessModes,
     );
   });
 
@@ -349,6 +375,60 @@ run('Observed attribution summary against PostgreSQL', () => {
       ],
     );
     return id;
+  };
+
+  /**
+   * Appends one destination observation for an ad set.
+   *
+   * The ad set is named by its *external* id and resolved to its internal row
+   * here, because that is the join the production code makes: the observations
+   * table references `social_ad_entities.id`, which is what makes an external id
+   * shared across two connections unable to reach the wrong history.
+   */
+  const observeDestination = async (options: {
+    connection?: string;
+    adsetExternalId: string;
+    destination: string;
+    raw?: string | null;
+    observedAt: string;
+    tenant?: string;
+    client?: string | null;
+  }) => {
+    const tenant = options.tenant ?? tenantId;
+    const connection = options.connection ?? connectionId;
+
+    const [entity] = await AgencyDataSource.query<Array<{ id: string }>>(
+      `SELECT id FROM social_ad_entities
+       WHERE tenant_id = $1 AND workspace_id = $2 AND connection_id = $3
+         AND entity_level = 'adset' AND external_id = $4`,
+      [tenant, workspaceId, connection, options.adsetExternalId],
+    );
+
+    if (!entity) {
+      throw new Error(`no adset row for ${options.adsetExternalId}`);
+    }
+
+    await AgencyDataSource.query(
+      `INSERT INTO social_ad_destination_observations
+         (id, tenant_id, workspace_id, agency_client_id, connection_id,
+          ad_entity_id, provider, destination_type, destination_raw,
+          observed_at, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, 'meta_ads', $7, $8, $9::timestamptz,
+               now())`,
+      [
+        randomUUID(),
+        tenant,
+        workspaceId,
+        options.client ?? null,
+        connection,
+        entity.id,
+        options.destination,
+        options.raw ?? options.destination.toUpperCase(),
+        options.observedAt,
+      ],
+    );
+
+    return entity.id;
   };
 
   const summary = (
@@ -1097,5 +1177,496 @@ run('Observed attribution summary against PostgreSQL', () => {
       // per-conversation query, which is the regression worth catching.
       expect(elapsed).toBeLessThan(5000);
     }, 120_000);
+  });
+
+  // ------------------------------------------------------------------- I4.3
+
+  /**
+   * Destination grouping against the real observation timeline.
+   *
+   * The unit spec proves the folding against a mocked reader. This proves the
+   * part a mock cannot: that the `<=` boundary, the ordering and the ad-set
+   * scoping in `destinationAtMany` really do pick the observation in force when
+   * each click happened.
+   */
+  describe('the destination axis', () => {
+    let channelId: string;
+
+    beforeAll(async () => {
+      await reset();
+      await createConnection({ id: connectionId });
+      channelId = await createChannel({});
+    });
+
+    afterAll(async () => {
+      await reset();
+    });
+
+    /**
+     * The exact temporal boundary, and the two transitions around it.
+     *
+     * A destination observed at the *same instant* as the click describes that
+     * click — the boundary is inclusive. An observation made after the click
+     * does not, and this is the assertion that would fail if someone
+     * "simplified" the lateral probe to the latest row.
+     */
+    it('resolves at the instant of the click, not the latest known', async () => {
+      const adId = 'ad-boundary';
+      const tree = await createAdTree({ connection: connectionId, adId });
+
+      // The state before, the state at the click, and a later change that must
+      // not be applied retroactively.
+      await observeDestination({
+        adsetExternalId: tree.adsetId,
+        destination: 'website',
+        observedAt: '2026-09-01T00:00:00Z',
+      });
+      await observeDestination({
+        adsetExternalId: tree.adsetId,
+        destination: 'whatsapp',
+        observedAt: '2026-09-05T10:00:00Z',
+      });
+      await observeDestination({
+        adsetExternalId: tree.adsetId,
+        destination: 'messenger',
+        observedAt: '2026-09-20T10:00:00Z',
+      });
+
+      const conversationId = await createConversation({ channelId });
+      await observe({
+        conversationId,
+        adId,
+        observedAt: '2026-09-05T10:00:00Z',
+      });
+
+      const view = await summary({ groupBy: 'destination' });
+
+      // Inclusive boundary: the observation at the same instant wins, and the
+      // later change is not projected backwards.
+      expect(view.groups).toHaveLength(1);
+      expect(view.groups[0].key).toBe('whatsapp');
+      expect(view.destinationCoverage.destinationResolvedConversations).toBe(1);
+    });
+
+    /**
+     * The temporal-variation refusal, over rows rather than mocks.
+     *
+     * Same ad, two clicks, and the ad set was re-pointed between them. The
+     * attribution is consistent; the destination is not, and the conversation
+     * enters no group at all.
+     */
+    it('excludes a conversation whose ad set moved between its clicks', async () => {
+      await reset();
+      await createConnection({ id: connectionId });
+      channelId = await createChannel({});
+
+      const adId = 'ad-variation';
+      const tree = await createAdTree({ connection: connectionId, adId });
+
+      await observeDestination({
+        adsetExternalId: tree.adsetId,
+        destination: 'whatsapp',
+        observedAt: '2026-09-01T00:00:00Z',
+      });
+      await observeDestination({
+        adsetExternalId: tree.adsetId,
+        destination: 'instagram_direct',
+        observedAt: '2026-09-10T00:00:00Z',
+      });
+
+      const conversationId = await createConversation({ channelId });
+      await observe({
+        conversationId,
+        adId,
+        observedAt: '2026-09-05T10:00:00Z',
+      });
+      await observe({
+        conversationId,
+        adId,
+        observedAt: '2026-09-15T10:00:00Z',
+      });
+
+      const byDestination = await summary({ groupBy: 'destination' });
+      const byCampaign = await summary({ groupBy: 'campaign' });
+
+      expect(byDestination.groups).toHaveLength(0);
+      expect(
+        byDestination.destinationCoverage
+          .destinationTemporalVariationConversations,
+      ).toBe(1);
+
+      // Attribution is untouched: still matched, still one campaign group.
+      expect(byDestination.coverage.matchedConversations).toBe(1);
+      expect(byCampaign.groups).toHaveLength(1);
+      expect(byCampaign.groups[0].attributedConversations).toBe(1);
+      expect(byCampaign.groups[0].observationsCount).toBe(2);
+    });
+
+    /**
+     * §7 over real rows: `UNDEFINED` is a stated destination, an empty history
+     * is not.
+     *
+     * Production has 11 `UNDEFINED` rows today, so this is the real shape of the
+     * data rather than a constructed edge case.
+     */
+    it('separates a provider UNDEFINED from an unobserved ad set', async () => {
+      await reset();
+      await createConnection({ id: connectionId });
+      channelId = await createChannel({});
+
+      const stated = await createAdTree({
+        connection: connectionId,
+        adId: 'ad-undefined',
+      });
+      await createAdTree({ connection: connectionId, adId: 'ad-unseen' });
+
+      await observeDestination({
+        adsetExternalId: stated.adsetId,
+        destination: 'unknown',
+        raw: 'UNDEFINED',
+        observedAt: '2026-09-01T00:00:00Z',
+      });
+
+      const withStated = await createConversation({ channelId });
+      await observe({ conversationId: withStated, adId: 'ad-undefined' });
+
+      const withNothing = await createConversation({ channelId });
+      await observe({ conversationId: withNothing, adId: 'ad-unseen' });
+
+      const view = await summary({ groupBy: 'destination' });
+
+      expect(view.groups).toHaveLength(1);
+      expect(view.groups[0].key).toBe('unknown');
+      expect(view.groups[0].attributedConversations).toBe(1);
+
+      expect(view.destinationCoverage.destinationUnavailableConversations).toBe(
+        1,
+      );
+      expect(view.destinationCoverage.destinationResolvedConversations).toBe(1);
+      expect(view.destinationCoverage.destinationCoverage).toBe(0.5);
+    });
+
+    /**
+     * Connection isolation (§23), the reason the join goes through the internal
+     * entity id.
+     *
+     * Two connections hold the same external ad set id — legal, because Meta ids
+     * are unique per Business — and each has its own destination history. The
+     * summary must read only the history belonging to the connection whose ad
+     * the hierarchy matched.
+     */
+    it('reads destination history only from the matched connection', async () => {
+      await reset();
+      await createConnection({ id: connectionId });
+      await createConnection({ id: otherConnectionId });
+      channelId = await createChannel({});
+
+      // Same suffix on both connections: identical external ids, different rows.
+      const mine = await createAdTree({
+        connection: connectionId,
+        adId: 'ad-shared',
+        suffix: 'shared',
+      });
+      const theirs = await createAdTree({
+        connection: otherConnectionId,
+        adId: 'ad-shared',
+        suffix: 'shared',
+      });
+
+      expect(theirs.adsetId).toBe(mine.adsetId);
+
+      await observeDestination({
+        connection: connectionId,
+        adsetExternalId: mine.adsetId,
+        destination: 'whatsapp',
+        observedAt: '2026-09-01T00:00:00Z',
+      });
+      await observeDestination({
+        connection: otherConnectionId,
+        adsetExternalId: theirs.adsetId,
+        destination: 'website',
+        observedAt: '2026-09-02T00:00:00Z',
+      });
+
+      const conversationId = await createConversation({ channelId });
+      await observe({ conversationId, adId: 'ad-shared' });
+
+      const view = await summary({
+        groupBy: 'destination',
+        connection: connectionId,
+      });
+
+      // The other connection's newer `website` row must not win.
+      expect(view.groups).toHaveLength(1);
+      expect(view.groups[0].key).toBe('whatsapp');
+    });
+
+    /** Tenant isolation on the destination read specifically. */
+    it('never reads another tenant destination history', async () => {
+      await reset();
+      await createConnection({ id: connectionId });
+      channelId = await createChannel({});
+
+      const tree = await createAdTree({
+        connection: connectionId,
+        adId: 'ad-tenant',
+      });
+      await observeDestination({
+        adsetExternalId: tree.adsetId,
+        destination: 'whatsapp',
+        observedAt: '2026-09-01T00:00:00Z',
+      });
+
+      const conversationId = await createConversation({ channelId });
+      await observe({ conversationId, adId: 'ad-tenant' });
+
+      const mine = await summary({ groupBy: 'destination' });
+      expect(mine.groups[0].key).toBe('whatsapp');
+
+      // The other tenant sees nothing at all, not a shared destination.
+      const theirs = await service.summary(
+        requireIntelligenceScope({
+          tenantId: otherTenantId,
+          workspaceId,
+          agencyClientId: null,
+        }),
+        { since: '2026-09-01', until: '2026-09-30' },
+        connectionId,
+        'destination',
+      );
+
+      expect(theirs.groups).toEqual([]);
+      expect(theirs.destinationCoverage.destinationCoverage).toBeNull();
+    });
+
+    /**
+     * The whole funnel, per destination, over real CRM rows.
+     *
+     * Two destinations, one won deal each side, and the counts must not leak
+     * between buckets.
+     */
+    it('carries qualification and won outcomes into destination groups', async () => {
+      await reset();
+      await createConnection({ id: connectionId });
+      channelId = await createChannel({});
+
+      const whatsapp = await createAdTree({
+        connection: connectionId,
+        adId: 'ad-wa',
+      });
+      const site = await createAdTree({
+        connection: connectionId,
+        adId: 'ad-site',
+      });
+
+      await observeDestination({
+        adsetExternalId: whatsapp.adsetId,
+        destination: 'whatsapp',
+        observedAt: '2026-09-01T00:00:00Z',
+      });
+      await observeDestination({
+        adsetExternalId: site.adsetId,
+        destination: 'website',
+        observedAt: '2026-09-01T00:00:00Z',
+      });
+
+      const { pipelineId, stageId } = await createPipeline();
+
+      const waConversation = await createConversation({ channelId });
+      await observe({ conversationId: waConversation, adId: 'ad-wa' });
+      await createOpportunity({
+        pipelineId,
+        stageId,
+        conversationId: waConversation,
+        status: 'won',
+        // Deliberately after the window: entry-cohort outcomes are followed
+        // forward, and adding a destination axis must not clip them.
+        wonAt: '2026-10-20T00:00:00Z',
+        value: '2500.00',
+      });
+
+      const siteConversation = await createConversation({ channelId });
+      await observe({ conversationId: siteConversation, adId: 'ad-site' });
+
+      const view = await summary({ groupBy: 'destination' });
+      const groups = Object.fromEntries(
+        view.groups.map((group) => [group.key, group]),
+      );
+
+      expect(groups.whatsapp.attributedConversations).toBe(1);
+      expect(groups.whatsapp.wonOpportunities).toBe(1);
+      expect(groups.whatsapp.wonOpportunityValue).toBe('2500.00');
+
+      expect(groups.website.attributedConversations).toBe(1);
+      expect(groups.website.wonOpportunities).toBe(0);
+
+      // §9: kept, and flagged rather than treated as an error.
+      expect(view.dataQuality.limitations).toContain(
+        OBSERVED_ATTRIBUTION_SUMMARY_DESTINATION_UNUSUAL_LIMITATION,
+      );
+    });
+
+    /**
+     * §30: the batched resolution over a realistic cohort.
+     *
+     * The regression this catches is a per-conversation or per-ad-set lookup
+     * sneaking back in — which would still be *correct*, and would take minutes
+     * instead of milliseconds on a real account.
+     */
+    it('resolves a large cohort without a per-conversation lookup', async () => {
+      await reset();
+      await createConnection({ id: connectionId });
+      channelId = await createChannel({});
+
+      const adSets: string[] = [];
+      for (let index = 0; index < 20; index += 1) {
+        const adId = `ad-perf-${index}`;
+        const tree = await createAdTree({ connection: connectionId, adId });
+        adSets.push(tree.adsetId);
+
+        // Two observations each, so half the cohort has a real transition to
+        // fold rather than a single trivial reading.
+        await observeDestination({
+          adsetExternalId: tree.adsetId,
+          destination: index % 2 === 0 ? 'whatsapp' : 'website',
+          observedAt: '2026-08-01T00:00:00Z',
+        });
+        await observeDestination({
+          adsetExternalId: tree.adsetId,
+          destination: index % 2 === 0 ? 'messaging_multi' : 'website',
+          observedAt: '2026-09-15T00:00:00Z',
+        });
+      }
+
+      for (let index = 0; index < 600; index += 1) {
+        const conversationId = await createConversation({ channelId });
+        const adId = `ad-perf-${index % 20}`;
+        await observe({
+          conversationId,
+          adId,
+          observedAt: `2026-09-0${(index % 9) + 1}T10:00:00Z`,
+        });
+      }
+
+      const started = Date.now();
+      const view = await summary({ groupBy: 'destination' });
+      const elapsed = Date.now() - started;
+
+      // Even-numbered ad sets moved whatsapp → messaging_multi *after* every
+      // click in the window, so they resolve to whatsapp; odd ones never moved.
+      expect(view.coverage.matchedConversations).toBe(600);
+      expect(
+        view.groups.reduce(
+          (total, group) => total + group.attributedConversations,
+          0,
+        ),
+      ).toBe(600);
+      expect(view.destinationCoverage.destinationCoverage).toBe(1);
+
+      // Generous, and still orders of magnitude under a per-conversation loop.
+      expect(elapsed).toBeLessThan(5000);
+    }, 120_000);
+    /**
+     * I5 against the real tables, at the endpoint level.
+     *
+     * The adapter's own gated spec proves the SQL. These prove the wiring: that a
+     * mode configured for this context actually reaches this response, and that a
+     * context with no LeadFlow settings row still gets every attribution number —
+     * the Social-only promise, and the one that would fail loudly in production if
+     * the dimension had been made mandatory anywhere along the path.
+     */
+    describe('business mode dimension (I5)', () => {
+      let channelId: string;
+
+      /**
+       * Its own connection id, because the suite's shared `connectionId` has
+       * already been created by an earlier block and the fixture helper inserts
+       * rather than upserts.
+       */
+      const modeConnectionId = randomUUID();
+
+      beforeAll(async () => {
+        await createConnection({ id: modeConnectionId });
+        await createAdTree({ connection: modeConnectionId, adId: 'ad-mode' });
+        channelId = await createChannel({});
+
+        const conversationId = await createConversation({ channelId });
+        await observe({
+          conversationId,
+          adId: 'ad-mode',
+          channelId,
+          observedAt: '2026-09-05T10:00:00Z',
+        });
+      });
+
+      afterEach(async () => {
+        await AgencyDataSource.query(
+          `DELETE FROM leadflow_client_settings WHERE tenant_id = $1`,
+          [tenantId],
+        );
+      });
+
+      /**
+       * The Social-only shape, and it is the default state of this fixture: no
+       * settings row was ever created for this tenant.
+       */
+      it('summarises a context with no LeadFlow settings row', async () => {
+        const view = await summary({ connection: modeConnectionId });
+
+        expect(view.businessMode.resolution).toBe('unconfigured');
+        expect(view.businessMode.key).toBeNull();
+        expect(view.dataQuality.businessMode).toEqual({
+          configured: false,
+          recognized: false,
+          temporalSemantics: 'current_context_dimension',
+        });
+        // The attribution numbers survive intact — the whole point of §3.
+        expect(view.coverage.matchedConversations).toBeGreaterThan(0);
+        expect(view.groups.length).toBeGreaterThan(0);
+      });
+
+      it('projects a configured mode with its catalog label', async () => {
+        await AgencyDataSource.query(
+          `INSERT INTO leadflow_client_settings
+           (id, tenant_id, workspace_id, context_type, agency_client_id,
+            business_mode_key, status)
+         VALUES ($1, $2, $3, 'agency', NULL, 'clinics_esthetics', 'draft')`,
+          [randomUUID(), tenantId, workspaceId],
+        );
+
+        const view = await summary({ connection: modeConnectionId });
+
+        expect(view.businessMode.key).toBe('clinics_esthetics');
+        expect(view.businessMode.resolution).toBe('configured');
+        expect(view.businessMode.label).toBeTruthy();
+        expect(view.dataQuality.businessMode.recognized).toBe(true);
+      });
+
+      /**
+       * §12 over real rows: the same query, twice, under two different modes.
+       *
+       * Whatever the mode says, the attribution is identical — which is the claim
+       * that a boundary spec can only approximate by looking for keywords.
+       */
+      it('changes no attribution figure', async () => {
+        const unconfigured = await summary({ connection: modeConnectionId });
+
+        await AgencyDataSource.query(
+          `INSERT INTO leadflow_client_settings
+           (id, tenant_id, workspace_id, context_type, agency_client_id,
+            business_mode_key, status)
+         VALUES ($1, $2, $3, 'agency', NULL, 'real_estate', 'draft')`,
+          [randomUUID(), tenantId, workspaceId],
+        );
+
+        const configured = await summary({ connection: modeConnectionId });
+
+        expect(configured.groups).toEqual(unconfigured.groups);
+        expect(configured.coverage).toEqual(unconfigured.coverage);
+        expect(configured.destinationCoverage).toEqual(
+          unconfigured.destinationCoverage,
+        );
+      });
+    });
   });
 });

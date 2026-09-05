@@ -1,6 +1,9 @@
-import type {
-  IntelligenceFactSet,
-  IntelligenceScope,
+import {
+  BUSINESS_MODE_CURRENT_ONLY_LIMITATION,
+  BUSINESS_MODE_UNKNOWN_KEY_LIMITATION,
+  UNCONFIGURED_BUSINESS_MODE,
+  type IntelligenceFactSet,
+  type IntelligenceScope,
 } from '../../common/intelligence';
 import type { DestinationHistory } from '../social-integrations/services/social-ad-destination-history.read.service';
 import type {
@@ -246,6 +249,22 @@ function buildService(
   const destinationBreakdown = {
     breakdown: jest.fn().mockResolvedValue(breakdown),
   };
+  /**
+   * I5's dimension, defaulting to a configured, recognised mode.
+   *
+   * A real mode rather than `unconfigured` is the right default here: it is what
+   * every LeadFlow context looks like, and it means the tests that care about
+   * the *absence* of a mode have to say so explicitly instead of inheriting it.
+   */
+  const businessModes = {
+    businessMode: jest.fn().mockResolvedValue({
+      key: 'clinics_esthetics',
+      label: 'Clínicas e Estética',
+      resolution: 'configured',
+      source: 'leadflow_client_settings',
+      temporalSemantics: 'current_context_dimension',
+    }),
+  };
 
   const service = new AcquisitionCohortService(
     socialAdapter as never,
@@ -253,12 +272,14 @@ function buildService(
     reads as never,
     destinationHistory as never,
     destinationBreakdown as never,
+    businessModes as never,
   );
 
   return {
     service,
     socialAdapter,
     leadflowAdapter,
+    businessModes,
     reads,
     destinationHistory,
     destinationBreakdown,
@@ -826,15 +847,15 @@ describe('AcquisitionCohortService', () => {
       );
     });
 
-    it('works with businessMode null on both sides', async () => {
-      const { service } = buildService(socialSet({}), leadflowSet({}));
-
-      const view = await service.cohort(SCOPE, WINDOW, CONNECTION);
-
-      expect(view.businessMode).toBeNull();
-    });
-
-    it('carries a business mode through when LeadFlow resolves one', async () => {
+    /**
+     * I5 §11 rewrote these two.
+     *
+     * They used to prove the value flowed from `leadflowSet.businessMode` — the
+     * field the fact source hardcodes to null. It now comes from the dimension,
+     * and the pair below proves the *old* path is dead: a fact set carrying a
+     * mode must not be able to put one in the response.
+     */
+    it('takes the mode from the dimension, not from the fact set', async () => {
       const { service } = buildService(
         socialSet({}),
         leadflowSet({}, { businessMode: 'high_ticket' }),
@@ -842,7 +863,190 @@ describe('AcquisitionCohortService', () => {
 
       const view = await service.cohort(SCOPE, WINDOW, CONNECTION);
 
-      expect(view.businessMode).toBe('high_ticket');
+      expect(view.businessMode).toBe('clinics_esthetics');
+      expect(view.businessModeDimension.key).toBe('clinics_esthetics');
+    });
+
+    it('reports null when the context has no mode configured', async () => {
+      const { service, businessModes } = buildService(
+        socialSet({}),
+        leadflowSet({}),
+      );
+      businessModes.businessMode.mockResolvedValue(UNCONFIGURED_BUSINESS_MODE);
+
+      const view = await service.cohort(SCOPE, WINDOW, CONNECTION);
+
+      expect(view.businessMode).toBeNull();
+      expect(view.businessModeDimension.resolution).toBe('unconfigured');
+      expect(view.dataQuality.businessMode).toEqual({
+        configured: false,
+        recognized: false,
+        temporalSemantics: 'current_context_dimension',
+      });
+    });
+  });
+
+  /**
+   * I5 — the dimension as it appears in an I3 response.
+   *
+   * Grouped rather than scattered because every assertion here is about the
+   * same claim: the label is a property of the *context*, reported with enough
+   * provenance that nobody mistakes it for a property of the period.
+   */
+  describe('business mode dimension (I5)', () => {
+    it('reports a configured mode with its catalog label and source', async () => {
+      const { service } = buildService(socialSet({}), leadflowSet({}));
+
+      const view = await service.cohort(SCOPE, WINDOW, CONNECTION);
+
+      expect(view.businessModeDimension).toEqual({
+        key: 'clinics_esthetics',
+        label: 'Clínicas e Estética',
+        resolution: 'configured',
+        source: 'leadflow_client_settings',
+        temporalSemantics: 'current_context_dimension',
+      });
+    });
+
+    it('keeps the flat field and the dimension in lockstep', async () => {
+      const { service, businessModes } = buildService(
+        socialSet({}),
+        leadflowSet({}),
+      );
+      businessModes.businessMode.mockResolvedValue({
+        key: 'real_estate',
+        label: 'Imobiliária',
+        resolution: 'configured',
+        source: 'leadflow_client_settings',
+        temporalSemantics: 'current_context_dimension',
+      });
+
+      const view = await service.cohort(SCOPE, WINDOW, CONNECTION);
+
+      // The whole point of keeping `businessMode` around is backward
+      // compatibility; two values that could differ would be worse than one.
+      expect(view.businessMode).toBe(view.businessModeDimension.key);
+    });
+
+    /**
+     * §21: a stored key the catalog does not know is a quality problem, not an
+     * absence — and the two must not look alike.
+     */
+    it('distinguishes an unrecognised key from an unconfigured one', async () => {
+      const { service, businessModes } = buildService(
+        socialSet({}),
+        leadflowSet({}),
+      );
+      businessModes.businessMode.mockResolvedValue({
+        key: 'retired_custom_mode',
+        label: null,
+        resolution: 'unknown_key',
+        source: 'leadflow_client_settings',
+        temporalSemantics: 'current_context_dimension',
+      });
+
+      const view = await service.cohort(SCOPE, WINDOW, CONNECTION);
+
+      // Reported verbatim, never nulled: the key is the only evidence of the
+      // inconsistency and nulling it would hide a broken context.
+      expect(view.businessMode).toBe('retired_custom_mode');
+      expect(view.dataQuality.businessMode).toEqual({
+        configured: true,
+        recognized: false,
+        temporalSemantics: 'current_context_dimension',
+      });
+      expect(view.dataQuality.limitations).toContain(
+        BUSINESS_MODE_UNKNOWN_KEY_LIMITATION,
+      );
+    });
+
+    /**
+     * §24: the historical caveat, stated on every response that carries a mode.
+     */
+    it('states the current-configuration limitation whenever a mode is present', async () => {
+      const { service } = buildService(socialSet({}), leadflowSet({}));
+
+      const view = await service.cohort(SCOPE, WINDOW, CONNECTION);
+
+      expect(view.dataQuality.limitations).toContain(
+        BUSINESS_MODE_CURRENT_ONLY_LIMITATION,
+      );
+    });
+
+    it('omits the historical caveat when there is no mode to misdate', async () => {
+      const { service, businessModes } = buildService(
+        socialSet({}),
+        leadflowSet({}),
+      );
+      businessModes.businessMode.mockResolvedValue(UNCONFIGURED_BUSINESS_MODE);
+
+      const view = await service.cohort(SCOPE, WINDOW, CONNECTION);
+
+      expect(view.dataQuality.limitations).not.toContain(
+        BUSINESS_MODE_CURRENT_ONLY_LIMITATION,
+      );
+    });
+
+    /**
+     * §13: the dimension is asked about the same scope as the facts.
+     *
+     * The failure this prevents is the one §13 names outright — a mode read for
+     * the Social context while the funnel came from a different client's
+     * LeadFlow context. One `RequestContext`, one scope, one question.
+     */
+    it('asks for the mode with the same scope the facts were read under', async () => {
+      const { service, businessModes } = buildService(
+        socialSet({}),
+        leadflowSet({}),
+      );
+
+      await service.cohort(SCOPE, WINDOW, CONNECTION);
+
+      expect(businessModes.businessMode).toHaveBeenCalledTimes(1);
+      expect(businessModes.businessMode).toHaveBeenCalledWith(SCOPE);
+    });
+
+    /**
+     * §28: one lookup per request, regardless of how much the response holds.
+     */
+    it('reads the mode once per request, not once per limitation or bucket', async () => {
+      const { service, businessModes } = buildService(
+        socialSet({}),
+        leadflowSet({}),
+      );
+
+      const view = await service.cohort(SCOPE, WINDOW, CONNECTION);
+
+      // A response with real content — several limitations, a full funnel — so
+      // "called once" is a statement about a populated projection rather than
+      // about an empty one.
+      expect(view.dataQuality.limitations.length).toBeGreaterThan(1);
+      expect(businessModes.businessMode).toHaveBeenCalledTimes(1);
+    });
+
+    /**
+     * §12's I3 analogue: the mode changes no number.
+     *
+     * Two runs of the same window under two different modes must produce
+     * byte-identical figures. If a mode ever reached a predicate, this is the
+     * test that would catch it — and it checks the numbers rather than the
+     * absence of a keyword, so it holds however the mistake is spelled.
+     */
+    it('changes no figure in the response', async () => {
+      const { service, businessModes } = buildService(
+        socialSet({}),
+        leadflowSet({}),
+      );
+
+      const configured = await service.cohort(SCOPE, WINDOW, CONNECTION);
+
+      businessModes.businessMode.mockResolvedValue(UNCONFIGURED_BUSINESS_MODE);
+      const unconfigured = await service.cohort(SCOPE, WINDOW, CONNECTION);
+
+      expect(unconfigured.social).toEqual(configured.social);
+      expect(unconfigured.leadflow).toEqual(configured.leadflow);
+      expect(unconfigured.derived).toEqual(configured.derived);
+      expect(unconfigured.destinations).toEqual(configured.destinations);
     });
   });
 

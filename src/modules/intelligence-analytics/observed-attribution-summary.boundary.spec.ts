@@ -329,22 +329,105 @@ describe('observed attribution summary boundary', () => {
   });
 
   /**
-   * §15: destination is not a grouping level in this slice.
+   * I4.3 §2: destination joins the existing axis rather than forking the API.
    *
-   * A conversation whose ad set was re-pointed between two clicks belongs to no
-   * single destination, and bucketing it would erase the variation I4.1 exists
-   * to record.
+   * The replacement for I4.2's "offers no destination grouping" guard. That test
+   * did its job — it failed the moment the level was added, which is what forced
+   * this deliberate change rather than a silent one. What it protected is still
+   * protected, by the tests below: a conversation with no single destination
+   * must still enter no group.
    */
-  it('offers no destination grouping', () => {
+  it('offers destination as an axis of the same endpoint', () => {
     const contract = readCode('observed-attribution-summary.contract.ts');
     const dto = readCode(
       'observed-attribution-summary.query.dto.ts',
       join(MODULE_DIR, 'dto'),
     );
+    const controller = readCode('observed-attribution-summary.controller.ts');
 
     expect(contract).toContain("| 'ad'");
-    expect(contract).not.toContain("| 'destination'");
-    expect(dto).not.toContain("'destination'");
+    expect(contract).toContain("| 'destination'");
+    expect(dto).toContain("'destination'");
+
+    // One route, not a parallel destination endpoint.
+    expect(controller.match(/@Get\(/g) ?? []).toHaveLength(1);
+  });
+
+  /**
+   * §5/§6: the temporal-variation refusal is structural, not a comment.
+   *
+   * The projector must place a conversation only when its destination state is
+   * `resolved`. Selecting on anything weaker — "not unavailable", say — would
+   * silently admit `temporal_variation` into a bucket, which is the one thing
+   * this whole slice is built to refuse.
+   */
+  it('groups only conversations with a single resolved destination', () => {
+    const service = readCode('observed-attribution-summary.service.ts');
+    const builder = service.split('function buildDestinationGroups')[1];
+
+    expect(builder).toBeDefined();
+    expect(builder).toContain("state !== 'resolved'");
+
+    // No "pick one" of any kind inside the destination builder.
+    for (const forbidden of ['[0]', 'sort(', 'find(', 'Math.max']) {
+      expect(
+        builder.split('function summariseDestinationCoverage')[0],
+      ).not.toContain(forbidden);
+    }
+  });
+
+  /**
+   * §10/§36: the destination is never inferred from where the conversation
+   * arrived.
+   *
+   * The tempting bug is to see a `messaging_multi` ad set and a WhatsApp
+   * conversation and conclude the destination was WhatsApp. That reads the
+   * inbound channel as evidence about the ad set, which is backwards: it would
+   * answer the very question the comparison exists to ask.
+   */
+  it('never derives a destination from the inbound channel', () => {
+    const service = readCode('observed-attribution-summary.service.ts');
+    const builder = service.split('function buildDestinationGroups')[1];
+
+    // The builder reads the resolved destination and nothing about the channel.
+    expect(builder).not.toContain('channelType');
+    expect(builder).not.toContain('provider');
+
+    // And messaging_multi is never rewritten to a single app anywhere.
+    expect(service).not.toContain("=== 'messaging_multi' ? 'whatsapp'");
+    expect(service).not.toContain("'messaging_multi' ?");
+  });
+
+  /**
+   * §3: destination comes from the observation timeline, never from the
+   * mirror's current column.
+   *
+   * `social_ad_entities.destination_type` is what the ad set points at *now*.
+   * Reading it as history is the exact error the observations table was built
+   * to remove, and it would look correct on any account that never changed an
+   * ad set.
+   */
+  it('reads destination only from the observation timeline', () => {
+    const service = readCode('observed-attribution-summary.service.ts');
+
+    expect(service).toContain('destinationAtMany');
+    expect(service).not.toContain('destination_type');
+    expect(service).not.toContain('social_ad_entities');
+  });
+
+  /**
+   * §19: destination provenance is its own layer.
+   *
+   * Folding it into `paidMedia` would tell a reader the destination was
+   * resolved by the same mechanism that resolved the campaign — current
+   * structure — when it was resolved from an append-only record of observations.
+   */
+  it('states destination provenance separately from the hierarchy', () => {
+    const contract = readCode('observed-attribution-summary.contract.ts');
+    const service = readCode('observed-attribution-summary.service.ts');
+
+    expect(contract).toContain('destination: string');
+    expect(service).toContain('destination: DESTINATION_AT_PROVENANCE');
   });
 
   /**
@@ -488,5 +571,85 @@ describe('observed attribution summary boundary', () => {
     // And the batch is pinned to one connection, which is what removes
     // ambiguity rather than resolving it by guessing.
     expect(lookup).toContain('ad.connection_id = $7');
+  });
+
+  /**
+   * I5 §12: Business Mode is carried, never consulted.
+   *
+   * The dimension is now in the response, which is the moment it becomes
+   * tempting to use — filter a cohort to one mode, or default a threshold by
+   * it. Either would make attribution mode-aware, and the resulting numbers
+   * would silently depend on a *mutable current* setting that says nothing
+   * about the period being attributed.
+   *
+   * The assertion is that the value flows one way. It is fetched once, placed
+   * on the response and handed to the limitation builder, and it appears in no
+   * predicate, comparison or branch that decides what is counted.
+   */
+  it('carries business mode without letting it affect attribution', () => {
+    const service = readCode('observed-attribution-summary.service.ts');
+
+    // Present: fetched once and surfaced.
+    expect(service).toContain('businessModes.businessMode(scope)');
+
+    /**
+     * Absent: any comparison of the key against a literal.
+     *
+     * That is the shape every misuse takes — `=== 'real_estate'`,
+     * `.key === mode`, an `includes` over a list of modes. Comparing the
+     * *resolution* is legitimate and unaffected, which is why this looks for
+     * `.key` specifically rather than banning the word.
+     */
+    expect(service).not.toMatch(/businessMode\.key\s*[=!]==/);
+    expect(service).not.toMatch(/\.key\s*[=!]==\s*['"]/);
+
+    // And nothing groups, filters or sorts by it.
+    for (const forbidden of [
+      "groupBy === 'businessMode'",
+      "groupBy === 'business_mode'",
+      'buildBusinessModeGroups',
+      'filterByBusinessMode',
+    ]) {
+      expect(service).not.toContain(forbidden);
+    }
+  });
+
+  /**
+   * The mode sits at the response level, not inside each group (§12).
+   *
+   * A per-group copy would be the first step toward reading it as "this
+   * campaign's mode", which nothing in the storage supports — there is one mode
+   * per context and every group in the response shares it.
+   */
+  it('places business mode outside the group shape', () => {
+    const contract = readCode('observed-attribution-summary.contract.ts');
+
+    const [, group] = contract.split(
+      'export type ObservedAttributionSummaryGroup = {',
+    );
+
+    expect(group).toBeDefined();
+    expect(group.split('};')[0]).not.toContain('businessMode');
+  });
+
+  /**
+   * The projector reads the dimension through the port and never the table.
+   *
+   * The generic `names no domain table` rule above already forbids arbitrary
+   * table names, but it lists the tables that existed when it was written.
+   * Naming this one explicitly means a regression reports *which* boundary
+   * broke, and keeps the storage of Business Mode a LeadFlow detail even as the
+   * value becomes visible in two Intelligence responses.
+   */
+  it.each(SOURCES)('%s names no business mode storage', (file) => {
+    const source = readCode(file);
+
+    for (const table of [
+      'leadflow_client_settings',
+      'leadflow_business_mode_templates',
+      'business_mode_key',
+    ]) {
+      expect(source).not.toContain(table);
+    }
   });
 });

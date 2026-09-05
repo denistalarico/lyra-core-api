@@ -374,4 +374,57 @@ describe('acquisition cohort boundary', () => {
     expect(bucketBlock).not.toContain('opportunities');
     expect(bucketBlock).not.toContain('wonOpportunity');
   });
+
+  /**
+   * I5: the Business Mode value is read through the port, never from storage.
+   *
+   * The generic query rules above already forbid this module a repository, so
+   * the only way to reach `leadflow_client_settings` from here is by inventing
+   * one. Naming the two tables explicitly makes a regression say which boundary
+   * broke, and states in the test file that Business Mode's storage is a
+   * LeadFlow detail even though its *value* now appears in this response.
+   */
+  it.each(SOURCES)('%s names no business mode storage', (file) => {
+    const source = readCode(file);
+
+    for (const table of [
+      'leadflow_client_settings',
+      'leadflow_business_mode_templates',
+      'business_mode_key',
+    ]) {
+      expect(source).not.toContain(table);
+    }
+  });
+
+  /**
+   * The mode is read from the dimension, and from nowhere else (§11).
+   *
+   * Before I5 this module took `businessMode` from `leadflowSet.businessMode` —
+   * a field the fact source hardcodes to null. Leaving that read in place beside
+   * the new one would give the response two sources for one value, free to
+   * disagree the day the fact source starts populating it. The old read is gone
+   * and this asserts it stays gone.
+   */
+  it('resolves business mode only through the dimension', () => {
+    const service = readCode('acquisition-cohort.service.ts');
+
+    expect(service).toContain('this.businessMode.businessMode(scope)');
+    expect(service).not.toContain('leadflowSet.businessMode');
+    expect(service).not.toContain('socialSet.businessMode');
+  });
+
+  /**
+   * The dimension does not become a filter or an axis (§12's I3 analogue).
+   *
+   * I3 correlates by period and channel. Adding a mode predicate would make the
+   * correlation depend on a mutable current setting, and — because that setting
+   * has no history — would silently change which rows a past period contains
+   * whenever somebody edits their settings screen.
+   */
+  it('never filters or groups by business mode', () => {
+    const service = readCode('acquisition-cohort.service.ts');
+
+    expect(service).not.toMatch(/businessMode\.key\s*[=!]==/);
+    expect(service).not.toMatch(/\.key\s*[=!]==\s*['"]/);
+  });
 });

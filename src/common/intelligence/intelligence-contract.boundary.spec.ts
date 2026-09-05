@@ -128,6 +128,66 @@ describe('shared intelligence contract boundary', () => {
   });
 
   /**
+   * I5: the Business Mode dimension describes a value LeadFlow stores, and it
+   * must remain a *description*.
+   *
+   * The specific failure this guards is subtle and would look like a
+   * convenience. `BusinessModeDimension` has a `source` field naming a LeadFlow
+   * table as a string, which couples nothing — but the next person needing a
+   * label, an enum member or a default may reach for `LeadFlowBusinessMode` or
+   * the settings entity, which are right there and would invert the whole
+   * arrow: `common/intelligence` would depend on LeadFlow, and Social would
+   * acquire a transitive dependency on it through the shared contract.
+   *
+   * The one legal spelling is `'leadflow_client_settings'` — the storage name
+   * inside a string union — and the assertions below allow exactly that while
+   * forbidding every type, service and enum that would make it real code. The
+   * `leadflow-settings` path check is the one that actually binds: it is the
+   * module the value lives in, and it is not covered by the domain list above,
+   * which names only the two *analytics* modules.
+   */
+  it.each(NAME_CHECKED)('%s imports nothing from LeadFlow settings', (file) => {
+    const source = readCode(file);
+
+    for (const forbidden of [
+      'leadflow-settings',
+      'LeadFlowBusinessMode',
+      'LeadFlowClientSettings',
+      'BusinessModeDimensionAdapter',
+      'BusinessModeDimensionPort',
+    ]) {
+      expect(source).not.toContain(forbidden);
+    }
+  });
+
+  /**
+   * The catalog is not duplicated here (§1, §20).
+   *
+   * `leadflow_business_mode_templates` is the single source of business-mode
+   * keys and labels, and it is tenant-extensible: a tenant can add its own
+   * template, so any list written into this file would be wrong for that tenant
+   * from the moment it was typed. The dimension therefore carries whatever key
+   * is stored and asks the catalog for the label — it never enumerates modes.
+   *
+   * Checked by the keys themselves rather than by a type name, because the way
+   * a second catalog appears is somebody pasting the twelve strings in to give
+   * `key` a narrower type than `string`.
+   */
+  it.each(NAME_CHECKED)('%s enumerates no business mode key', (file) => {
+    const source = readCode(file);
+
+    for (const key of [
+      'agency_services',
+      'clinics_esthetics',
+      'real_estate',
+      'restaurants_food',
+      'ecommerce_light',
+    ]) {
+      expect(source).not.toContain(key);
+    }
+  });
+
+  /**
    * Implementation only, and stricter than the rule above: a production source
    * may import from nowhere but this directory — not even a Node builtin, since
    * the contract is types and pure functions.

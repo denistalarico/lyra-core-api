@@ -1,8 +1,13 @@
 import { Injectable } from '@nestjs/common';
-import type {
-  IntelligenceScope,
-  IntelligenceWindow,
+import {
+  BUSINESS_MODE_CURRENT_ONLY_LIMITATION,
+  BUSINESS_MODE_UNKNOWN_KEY_LIMITATION,
+  businessModeQuality,
+  type BusinessModeDimension,
+  type IntelligenceScope,
+  type IntelligenceWindow,
 } from '../../common/intelligence';
+import { BusinessModeDimensionAdapter } from '../leadflow-analytics/intelligence/business-mode-dimension.adapter';
 import { LeadFlowAttributionCohortAdapter } from '../leadflow-analytics/intelligence/leadflow-attribution-cohort.adapter';
 import {
   LEADFLOW_COHORT_PROVENANCE,
@@ -11,12 +16,16 @@ import {
   type LeadFlowCohortConversation,
   type LeadFlowCohortOpportunity,
 } from '../leadflow-analytics/intelligence/leadflow-attribution-cohort.port';
+import { DESTINATION_AT_PROVENANCE } from '../social-integrations/analytics/social-ad-destination-at';
 import {
   SOCIAL_AD_HIERARCHY_PROVENANCE,
   type SocialAdHierarchyPath,
 } from '../social-integrations/analytics/social-ad-hierarchy-lookup';
+import { SocialAdDestinationHistoryReadService } from '../social-integrations/services/social-ad-destination-history.read.service';
+import { destinationPairKey } from '../social-integrations/services/social-ad-destination-history.read.service';
 import { SocialAdHierarchyLookupReadService } from '../social-integrations/services/social-ad-hierarchy-lookup.read.service';
 import { SocialAnalyticsReadService } from '../social-integrations/services/social-analytics-read.service';
+import { MESSAGING_PAID_MEDIA_DESTINATIONS } from '../social-integrations/sync/paid-media-destination';
 import {
   OBSERVED_ATTRIBUTION_IMMATURE_COHORT_HOURS,
   OBSERVED_ATTRIBUTION_SUMMARY_ABSENCE_LIMITATION,
@@ -24,7 +33,12 @@ import {
   OBSERVED_ATTRIBUTION_SUMMARY_CONFLICT_LIMITATION,
   OBSERVED_ATTRIBUTION_SUMMARY_CURRENCY_LIMITATION,
   OBSERVED_ATTRIBUTION_SUMMARY_DESTINATION_LIMITATION,
+  OBSERVED_ATTRIBUTION_SUMMARY_DESTINATION_NOT_ATTRIBUTION_LIMITATION,
+  OBSERVED_ATTRIBUTION_SUMMARY_DESTINATION_UNAVAILABLE_LIMITATION,
+  OBSERVED_ATTRIBUTION_SUMMARY_DESTINATION_UNUSUAL_LIMITATION,
+  OBSERVED_ATTRIBUTION_SUMMARY_DESTINATION_VARIATION_LIMITATION,
   OBSERVED_ATTRIBUTION_SUMMARY_IMMATURE_LIMITATION,
+  OBSERVED_ATTRIBUTION_SUMMARY_MESSAGING_MULTI_LIMITATION,
   OBSERVED_ATTRIBUTION_SUMMARY_OBSERVED_ONLY_LIMITATION,
   OBSERVED_ATTRIBUTION_SUMMARY_OPPORTUNITY_LIMITATION,
   OBSERVED_ATTRIBUTION_SUMMARY_PROJECTOR,
@@ -32,6 +46,7 @@ import {
   OBSERVED_ATTRIBUTION_SUMMARY_SPEND_LIMITATION,
   OBSERVED_ATTRIBUTION_SUMMARY_UNRESOLVED_LIMITATION,
   OBSERVED_ATTRIBUTION_SUMMARY_VALUE_LIMITATION,
+  type ObservedAttributionDestinationCoverage,
   type ObservedAttributionGroupBy,
   type ObservedAttributionSummaryDataQuality,
   type ObservedAttributionSummaryGroup,
@@ -60,9 +75,21 @@ import {
  * No spend, no ROAS, no CPA (§21) — those come from period-grained media facts
  * whose semantics are not this cohort's. No `social_ad_metrics_daily` read at
  * all (§22), so the summary works on a deployment where no backfill has run.
- * And no destination grouping (§15): destination is temporal and per
- * observation, and bucketing a conversation whose ad set was re-pointed between
- * two clicks would erase exactly the variation I4.1 exists to record.
+ *
+ * ## I4.3: destination is an axis, not a level
+ *
+ * `groupBy=destination` groups the same matched conversations by where their ad
+ * set pointed *at the moment of each click*, read from I4.1's observation
+ * timeline. Two consequences follow and both are visible in the response:
+ *
+ * - The destination groups do not sum to `matchedConversations`. A conversation
+ *   whose ad set was re-pointed between two of its own clicks has no single
+ *   destination and enters no group — it is counted in
+ *   `destinationTemporalVariationConversations` instead. Collapsing it would
+ *   erase exactly the variation I4.1 exists to record.
+ * - Destination never creates or widens an attribution. Every conversation here
+ *   was already matched by its own observed ad id; the destination only
+ *   describes where that ad pointed.
  */
 @Injectable()
 export class ObservedAttributionSummaryService {
@@ -72,6 +99,15 @@ export class ObservedAttributionSummaryService {
     // Only to resolve the connection's timezone, through the service that
     // already scopes connection lookups. No metric is read from it.
     private readonly socialReads: SocialAnalyticsReadService,
+    // I4.1's destination timeline, read in batch. The same service the
+    // per-conversation endpoint uses, so the two cannot disagree about what an
+    // ad set pointed at when.
+    private readonly destinations: SocialAdDestinationHistoryReadService,
+    // I5's context dimension. Injected by class because an interface has no DI
+    // token; only `BusinessModeDimensionPort`'s single method is used, and
+    // nothing in this projector reads the value back — §12 forbids attribution
+    // from becoming mode-aware.
+    private readonly businessModes: BusinessModeDimensionAdapter,
   ) {}
 
   async summary(
@@ -135,12 +171,30 @@ export class ObservedAttributionSummaryService {
     );
     const unresolved = attributable.length - matched.length;
 
-    const opportunities = await this.cohort.cohortOpportunities(
-      leadflowScope,
-      matched.map((row) => row.conversationId),
-    );
+    /**
+     * Destination resolution and opportunities are independent reads over the
+     * same matched set, so they go in parallel rather than in sequence.
+     */
+    const [opportunities, destinations, businessMode] = await Promise.all([
+      this.cohort.cohortOpportunities(
+        leadflowScope,
+        matched.map((row) => row.conversationId),
+      ),
+      this.resolveDestinations(scope, matched, paths),
+      // One row, once per request, for the whole response — the mode belongs to
+      // the context and not to any conversation in it.
+      this.businessModes.businessMode(scope),
+    ]);
 
-    const groups = buildGroups(matched, paths, opportunities, groupBy);
+    const groups =
+      groupBy === 'destination'
+        ? buildDestinationGroups(matched, destinations, opportunities)
+        : buildGroups(matched, paths, opportunities, groupBy);
+
+    const destinationCoverage = summariseDestinationCoverage(
+      matched.length,
+      destinations,
+    );
     const dataAsOf = new Date().toISOString();
     const latestAttributionAt = matched.length
       ? matched[matched.length - 1].enteredAt
@@ -178,11 +232,15 @@ export class ObservedAttributionSummaryService {
           ? matched.length / eligibility.eligibleConversations
           : null,
       },
+      destinationCoverage,
+      businessMode,
       groups,
       provenance: {
         observation: LEADFLOW_COHORT_PROVENANCE.observation,
         conversation: LEADFLOW_COHORT_PROVENANCE.conversation,
         paidMedia: SOCIAL_AD_HIERARCHY_PROVENANCE,
+        // §19: its own layer, never folded into `paidMedia`.
+        destination: DESTINATION_AT_PROVENANCE,
         qualification: LEADFLOW_COHORT_PROVENANCE.qualification,
         opportunity: LEADFLOW_COHORT_PROVENANCE.opportunity,
         projector: OBSERVED_ATTRIBUTION_SUMMARY_PROJECTOR,
@@ -197,15 +255,102 @@ export class ObservedAttributionSummaryService {
         unresolved,
         immatureCohort,
         currencyCompatibility,
+        // §18: stated at every groupBy, so a reader comparing campaigns can see
+        // how much of the cohort has resolvable destinations *before* switching
+        // axes and reading partial groups as complete ones.
+        destinationCoverage: destinationCoverage.destinationCoverage,
+        destinationUnavailable:
+          destinationCoverage.destinationUnavailableConversations,
+        destinationTemporalVariation:
+          destinationCoverage.destinationTemporalVariationConversations,
+        businessMode: businessModeQuality(businessMode),
         limitations: limitationsFor({
           conflicting,
           unresolved,
           immatureCohort,
           currencyCompatibility,
           groups,
+          destinationCoverage,
+          destinations,
+          businessMode,
         }),
       },
     };
+  }
+
+  /**
+   * Every matched conversation's destination, resolved in one query.
+   *
+   * ## Why the pairs are flattened before asking
+   *
+   * Destination is per *observation*, so the question is really
+   * `(ad set, instant)` — and a cohort of 50,000 conversations over 200 ad sets
+   * asks that question 50,000 times about 200 rows of history. §30 forbids
+   * issuing one query per conversation, and one query per ad set is still 200
+   * round trips that grow with the account.
+   *
+   * So every conversation's instants are flattened into one pair list, the
+   * batch method de-duplicates it (a hundred conversations that clicked the same
+   * ad in the same second is one question), and a single query answers all of
+   * them. The per-conversation folding then happens in memory over a map.
+   *
+   * ## Why a conversation with no ad set is not an error
+   *
+   * `destination_type` is an ad-set property in Meta's model. An ad whose parent
+   * ad set never synced has nothing that could carry destination evidence, which
+   * is a different state from "the ad set exists and we had not looked yet" —
+   * and the coverage breakdown reports them separately for exactly that reason.
+   */
+  private async resolveDestinations(
+    scope: IntelligenceScope,
+    matched: LeadFlowCohortConversation[],
+    paths: Map<string, SocialAdHierarchyPath>,
+  ): Promise<Map<string, ConversationDestination>> {
+    const resolved = new Map<string, ConversationDestination>();
+    const pairs: { adEntityId: string; instant: string }[] = [];
+
+    for (const conversation of matched) {
+      const adsetEntityId = paths.get(
+        conversation.distinctAdIds[0],
+      )?.adsetEntityId;
+
+      if (!adsetEntityId) continue;
+
+      for (const instant of conversation.attributionInstants) {
+        pairs.push({ adEntityId: adsetEntityId, instant });
+      }
+    }
+
+    const readings = await this.destinations.destinationAtMany({
+      tenantId: scope.tenantId,
+      workspaceId: scope.workspaceId,
+      pairs,
+    });
+
+    for (const conversation of matched) {
+      const adsetEntityId = paths.get(
+        conversation.distinctAdIds[0],
+      )?.adsetEntityId;
+
+      if (!adsetEntityId) {
+        resolved.set(conversation.conversationId, {
+          state: 'adset_unresolved',
+          value: null,
+        });
+        continue;
+      }
+
+      resolved.set(
+        conversation.conversationId,
+        foldDestination(
+          conversation.attributionInstants.map((instant) =>
+            readings.get(destinationPairKey(adsetEntityId, instant)),
+          ),
+        ),
+      );
+    }
+
+    return resolved;
   }
 
   /**
@@ -243,14 +388,7 @@ function buildGroups(
   opportunities: LeadFlowCohortOpportunity[],
   groupBy: ObservedAttributionGroupBy,
 ): ObservedAttributionSummaryGroup[] {
-  const byConversation = new Map<string, LeadFlowCohortOpportunity[]>();
-
-  for (const opportunity of opportunities) {
-    const list = byConversation.get(opportunity.conversationId) ?? [];
-    list.push(opportunity);
-    byConversation.set(opportunity.conversationId, list);
-  }
-
+  const byConversation = groupOpportunities(opportunities);
   const accumulators = new Map<string, GroupAccumulator>();
 
   for (const conversation of conversations) {
@@ -263,50 +401,98 @@ function buildGroups(
     // row would be read as a real campaign that happens to be unnamed.
     if (!key) continue;
 
-    const accumulator = accumulators.get(key) ?? {
-      key,
-      name: groupName(path, groupBy),
-      attributedConversations: 0,
-      observationsCount: 0,
-      qualifiedConversations: 0,
-      opportunities: 0,
-      wonOpportunities: 0,
-      wonCents: 0n,
-      currencies: new Set<string>(),
-      valueParseable: true,
-    };
+    const accumulator =
+      accumulators.get(key) ?? newAccumulator(key, groupName(path, groupBy));
 
-    accumulator.attributedConversations += 1;
-    accumulator.observationsCount += conversation.observationsCount;
-
-    // §19/§20 of I4.2's test list: the *first* transition, and a conversation
-    // qualified twice still counts once — `firstQualifiedAt` is a single
-    // instant by construction, so re-qualification cannot double it.
-    if (conversation.firstQualifiedAt !== null) {
-      accumulator.qualifiedConversations += 1;
-    }
-
-    for (const opportunity of byConversation.get(conversation.conversationId) ??
-      []) {
-      accumulator.opportunities += 1;
-
-      if (!opportunity.isWon) continue;
-
-      accumulator.wonOpportunities += 1;
-      if (opportunity.currency)
-        accumulator.currencies.add(opportunity.currency);
-
-      const cents = toCents(opportunity.valueAmount);
-      if (cents === null) {
-        accumulator.valueParseable = false;
-      } else {
-        accumulator.wonCents += cents;
-      }
-    }
-
+    accumulate(accumulator, conversation, byConversation);
     accumulators.set(key, accumulator);
   }
 
+  return finaliseGroups(accumulators, groupBy);
+}
+
+/**
+ * Opportunities indexed by the conversation they are explicitly linked to.
+ *
+ * Shared by both builders rather than written twice: the index is where §14's
+ * "only `inbox_conversation_id`" rule becomes a lookup, and two copies is how a
+ * later fallback gets added to one of them.
+ */
+function groupOpportunities(
+  opportunities: LeadFlowCohortOpportunity[],
+): Map<string, LeadFlowCohortOpportunity[]> {
+  const byConversation = new Map<string, LeadFlowCohortOpportunity[]>();
+
+  for (const opportunity of opportunities) {
+    const list = byConversation.get(opportunity.conversationId) ?? [];
+    list.push(opportunity);
+    byConversation.set(opportunity.conversationId, list);
+  }
+
+  return byConversation;
+}
+
+function newAccumulator(key: string, name: string | null): GroupAccumulator {
+  return {
+    key,
+    name,
+    attributedConversations: 0,
+    observationsCount: 0,
+    qualifiedConversations: 0,
+    opportunities: 0,
+    wonOpportunities: 0,
+    wonCents: 0n,
+    currencies: new Set<string>(),
+    valueParseable: true,
+  };
+}
+
+/**
+ * Adds one conversation to a group.
+ *
+ * Shared by the hierarchy and destination builders precisely so §11 holds: the
+ * two axes must produce the *same* metrics with the same semantics, and the only
+ * way to guarantee that is for both to run this code. A destination-specific
+ * copy would be free to drift on won semantics or qualification counting, which
+ * is the divergence §1 forbids.
+ */
+function accumulate(
+  accumulator: GroupAccumulator,
+  conversation: LeadFlowCohortConversation,
+  byConversation: Map<string, LeadFlowCohortOpportunity[]>,
+): void {
+  accumulator.attributedConversations += 1;
+  accumulator.observationsCount += conversation.observationsCount;
+
+  // The *first* transition, and a conversation qualified twice still counts
+  // once — `firstQualifiedAt` is a single instant by construction, so
+  // re-qualification cannot double it.
+  if (conversation.firstQualifiedAt !== null) {
+    accumulator.qualifiedConversations += 1;
+  }
+
+  for (const opportunity of byConversation.get(conversation.conversationId) ??
+    []) {
+    accumulator.opportunities += 1;
+
+    if (!opportunity.isWon) continue;
+
+    accumulator.wonOpportunities += 1;
+    if (opportunity.currency) accumulator.currencies.add(opportunity.currency);
+
+    const cents = toCents(opportunity.valueAmount);
+    if (cents === null) {
+      accumulator.valueParseable = false;
+    } else {
+      accumulator.wonCents += cents;
+    }
+  }
+}
+
+function finaliseGroups(
+  accumulators: Map<string, GroupAccumulator>,
+  level: ObservedAttributionGroupBy,
+): ObservedAttributionSummaryGroup[] {
   return [...accumulators.values()]
     .map((accumulator) => {
       const multiCurrency = accumulator.currencies.size > 1;
@@ -314,14 +500,14 @@ function buildGroups(
 
       return {
         key: accumulator.key,
-        level: groupBy,
+        level,
         name: accumulator.name,
         attributedConversations: accumulator.attributedConversations,
         observationsCount: accumulator.observationsCount,
         qualifiedConversations: accumulator.qualifiedConversations,
         opportunities: accumulator.opportunities,
         wonOpportunities: accumulator.wonOpportunities,
-        // §14: unlike units are never added. Null is the honest answer, and it
+        // §16: unlike units are never added. Null is the honest answer, and it
         // is more useful than a number that looks authoritative and is not.
         wonOpportunityValue: canTotal
           ? formatCents(accumulator.wonCents)
@@ -340,6 +526,145 @@ function buildGroups(
     );
 }
 
+/**
+ * What one conversation's destination evidence adds up to.
+ *
+ * Four states, and they are four rather than "resolved or not" because each has
+ * a different cause, a different remedy and a different honest thing to say
+ * about it:
+ *
+ * - `resolved` — every reading that resolved agrees. The conversation joins that
+ *   destination's group. `unknown` is a legitimate value here: Meta was asked
+ *   and answered `UNDEFINED`, which is a real property of the ad set (§7's
+ *   second cause, and 11 of 126 rows in production today).
+ * - `temporal_variation` — the readings resolved to *different* destinations.
+ *   §6: the attribution is fine, the evidence is good, and there are simply two
+ *   true answers. No group, its own counter.
+ * - `unavailable` — nothing resolved, because the destination observer had seen
+ *   nothing about this ad set before the click (§7's first cause). Fixed by time
+ *   passing, not by data quality work.
+ * - `adset_unresolved` — the ad matched but its ad set never synced, so there is
+ *   nothing that could carry destination evidence at all.
+ */
+type ConversationDestination = {
+  state: 'resolved' | 'temporal_variation' | 'unavailable' | 'adset_unresolved';
+  value: string | null;
+};
+
+/**
+ * Folds one conversation's readings into its single answer.
+ *
+ * The branch order *is* the semantics, and it mirrors I4.1's `summariseDestination`
+ * deliberately — the aggregate must not fold differently from the per-conversation
+ * view, or the same conversation would read as `whatsapp` in one and
+ * `temporal_variation` in the other.
+ *
+ * A partial resolve — some instants before the observer began, some after —
+ * decides on the *resolved* readings alone. An unresolved instant is an absence
+ * of evidence, not evidence of a different destination, and treating it as
+ * variation would manufacture a conflict out of a gap.
+ */
+function foldDestination(
+  readings: ReadonlyArray<{ value: string; resolution: string } | undefined>,
+): ConversationDestination {
+  const observed = readings.filter(
+    (reading): reading is { value: string; resolution: string } =>
+      reading !== undefined && reading.resolution === 'observed_destination',
+  );
+
+  if (!observed.length) return { state: 'unavailable', value: null };
+
+  const distinct = [...new Set(observed.map((reading) => reading.value))];
+
+  if (distinct.length > 1) {
+    return { state: 'temporal_variation', value: null };
+  }
+
+  return { state: 'resolved', value: distinct[0] };
+}
+
+/**
+ * Folds matched conversations into one row per canonical destination.
+ *
+ * Same counting rule as `buildGroups` and the same loop shape enforcing it: the
+ * iteration is over conversations, so each contributes one to
+ * `attributedConversations` no matter how many observations or opportunities it
+ * carries (§12).
+ *
+ * The one structural difference from the hierarchy builder is what gets skipped.
+ * There, a missing key means the upper level never synced. Here, a skipped
+ * conversation is a *semantic* refusal: `temporal_variation` has perfectly good
+ * evidence and is deliberately placed nowhere, because placing it would require
+ * choosing between two readings that are both true.
+ */
+function buildDestinationGroups(
+  conversations: LeadFlowCohortConversation[],
+  destinations: Map<string, ConversationDestination>,
+  opportunities: LeadFlowCohortOpportunity[],
+): ObservedAttributionSummaryGroup[] {
+  const byConversation = groupOpportunities(opportunities);
+  const accumulators = new Map<string, GroupAccumulator>();
+
+  for (const conversation of conversations) {
+    const destination = destinations.get(conversation.conversationId);
+
+    // Only a conversation with one destination true across all its evidence
+    // enters a group. The other three states are counted in coverage, never
+    // distributed across buckets (§5).
+    if (destination?.state !== 'resolved' || destination.value === null) {
+      continue;
+    }
+
+    const accumulator =
+      accumulators.get(destination.value) ??
+      // `name` is null: for a destination the key already *is* the readable
+      // value, and a label here would become a second thing to match on.
+      newAccumulator(destination.value, null);
+
+    accumulate(accumulator, conversation, byConversation);
+    accumulators.set(destination.value, accumulator);
+  }
+
+  return finaliseGroups(accumulators, 'destination');
+}
+
+/**
+ * The destination enrichment breakdown (§17).
+ *
+ * Every matched conversation lands in exactly one of the four states, so the
+ * parts sum back to `matchedConversations` — which is what makes the figure
+ * auditable rather than a bare percentage a reader has to trust.
+ */
+function summariseDestinationCoverage(
+  matchedConversations: number,
+  destinations: Map<string, ConversationDestination>,
+): ObservedAttributionDestinationCoverage {
+  let resolved = 0;
+  let unavailable = 0;
+  let variation = 0;
+  let adsetUnresolved = 0;
+
+  for (const destination of destinations.values()) {
+    if (destination.state === 'resolved') resolved += 1;
+    else if (destination.state === 'temporal_variation') variation += 1;
+    else if (destination.state === 'unavailable') unavailable += 1;
+    else adsetUnresolved += 1;
+  }
+
+  return {
+    matchedConversations,
+    destinationResolvedConversations: resolved,
+    destinationUnavailableConversations: unavailable,
+    destinationTemporalVariationConversations: variation,
+    destinationAdsetUnresolvedConversations: adsetUnresolved,
+    // Undefined rather than zero on an empty cohort, identically to
+    // `observedCoverage` — nothing to enrich is not failed enrichment.
+    destinationCoverage: matchedConversations
+      ? resolved / matchedConversations
+      : null,
+  };
+}
+
 type GroupAccumulator = {
   key: string;
   name: string | null;
@@ -353,6 +678,14 @@ type GroupAccumulator = {
   valueParseable: boolean;
 };
 
+/**
+ * The hierarchy key at a level.
+ *
+ * `destination` never reaches here — it is dispatched to its own builder before
+ * this is called, because its key comes from the destination timeline rather
+ * than from the ad's path. Returning null for it keeps the function total
+ * without inventing a hierarchy answer for an axis that has none.
+ */
 function groupKey(
   path: SocialAdHierarchyPath,
   groupBy: ObservedAttributionGroupBy,
@@ -360,7 +693,9 @@ function groupKey(
   if (groupBy === 'ad') return path.adId;
   if (groupBy === 'adset') return path.adsetId;
   if (groupBy === 'campaign') return path.campaignId;
-  return path.accountId;
+  if (groupBy === 'account') return path.accountId;
+
+  return null;
 }
 
 function groupName(
@@ -543,6 +878,9 @@ function limitationsFor(input: {
   immatureCohort: boolean;
   currencyCompatibility: ObservedAttributionSummaryDataQuality['currencyCompatibility'];
   groups: ObservedAttributionSummaryGroup[];
+  destinationCoverage: ObservedAttributionDestinationCoverage;
+  destinations: Map<string, ConversationDestination>;
+  businessMode: BusinessModeDimension;
 }): string[] {
   const limitations = [
     OBSERVED_ATTRIBUTION_SUMMARY_OBSERVED_ONLY_LIMITATION,
@@ -551,7 +889,11 @@ function limitationsFor(input: {
     OBSERVED_ATTRIBUTION_SUMMARY_CAUSALITY_LIMITATION,
     OBSERVED_ATTRIBUTION_SUMMARY_OPPORTUNITY_LIMITATION,
     OBSERVED_ATTRIBUTION_SUMMARY_SPEND_LIMITATION,
+    // Both unconditional: they describe what a destination figure *is* and what
+    // it is not, and a reader needs that before the first number — not only
+    // once some threshold of odd data has been crossed.
     OBSERVED_ATTRIBUTION_SUMMARY_DESTINATION_LIMITATION,
+    OBSERVED_ATTRIBUTION_SUMMARY_DESTINATION_NOT_ATTRIBUTION_LIMITATION,
   ];
 
   if (input.conflicting > 0) {
@@ -572,6 +914,61 @@ function limitationsFor(input: {
 
   if (input.currencyCompatibility === 'mixed') {
     limitations.push(OBSERVED_ATTRIBUTION_SUMMARY_CURRENCY_LIMITATION);
+  }
+
+  if (
+    input.destinationCoverage.destinationUnavailableConversations > 0 ||
+    input.destinationCoverage.destinationAdsetUnresolvedConversations > 0
+  ) {
+    limitations.push(
+      OBSERVED_ATTRIBUTION_SUMMARY_DESTINATION_UNAVAILABLE_LIMITATION,
+    );
+  }
+
+  if (input.destinationCoverage.destinationTemporalVariationConversations > 0) {
+    limitations.push(
+      OBSERVED_ATTRIBUTION_SUMMARY_DESTINATION_VARIATION_LIMITATION,
+    );
+  }
+
+  const values = [...input.destinations.values()];
+
+  // §10: stated whenever the bucket is actually populated, because that is when
+  // a reader is about to interpret it — and the thing they will otherwise
+  // assume is that these conversations are WhatsApp's, since that is where they
+  // arrived.
+  if (values.some((destination) => destination.value === 'messaging_multi')) {
+    limitations.push(OBSERVED_ATTRIBUTION_SUMMARY_MESSAGING_MULTI_LIMITATION);
+  }
+
+  // §9: flagged, never discarded and never called an error. A conversation
+  // attributed to an ad whose ad set pointed at a website is a possible fact.
+  if (
+    values.some(
+      (destination) =>
+        destination.state === 'resolved' &&
+        destination.value !== null &&
+        destination.value !== 'unknown' &&
+        !MESSAGING_PAID_MEDIA_DESTINATIONS.has(
+          destination.value as Parameters<
+            typeof MESSAGING_PAID_MEDIA_DESTINATIONS.has
+          >[0],
+        ),
+    )
+  ) {
+    limitations.push(
+      OBSERVED_ATTRIBUTION_SUMMARY_DESTINATION_UNUSUAL_LIMITATION,
+    );
+  }
+
+  // I5 §24, on the same condition I3 uses: the sentence warns that a label may
+  // not describe the queried period, and an absent label cannot be misdated.
+  if (input.businessMode.resolution !== 'unconfigured') {
+    limitations.push(BUSINESS_MODE_CURRENT_ONLY_LIMITATION);
+  }
+
+  if (input.businessMode.resolution === 'unknown_key') {
+    limitations.push(BUSINESS_MODE_UNKNOWN_KEY_LIMITATION);
   }
 
   return limitations;
