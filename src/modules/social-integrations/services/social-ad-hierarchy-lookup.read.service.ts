@@ -73,7 +73,7 @@ type HierarchyRow = {
 @Injectable()
 export class SocialAdHierarchyLookupReadService {
   constructor(
-    @InjectRepository(SocialAdEntity)
+    @InjectRepository(SocialAdEntity, 'agency')
     private readonly entities: Repository<SocialAdEntity>,
   ) {}
 

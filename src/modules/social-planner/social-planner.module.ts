@@ -6,6 +6,8 @@ import {
   SocialContentItemEntity,
   SocialPlanEntity,
   SocialContentRevisionEntity,
+  SocialPlannerSettingsEntity,
+  SocialPublishingCadenceEntity,
 } from './entities';
 import { SocialPlannerController } from './social-planner.controller';
 import { SocialPlannerService } from './services/social-planner.service';
@@ -21,6 +23,8 @@ import { SocialPublishingCadenceService } from './services/social-publishing-cad
         SocialContentItemEntity,
         SocialContentDestinationEntity,
         SocialContentRevisionEntity,
+        SocialPlannerSettingsEntity,
+        SocialPublishingCadenceEntity,
       ],
       'agency',
     ),

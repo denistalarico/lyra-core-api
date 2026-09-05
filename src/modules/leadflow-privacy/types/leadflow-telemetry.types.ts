@@ -38,7 +38,7 @@ export type LeadFlowTelemetryStatusResponse = {
     categories: string[];
     retentionDays: number;
     kAnonymityThreshold: number;
-    legalReviewStatus: 'pending' | 'approved' | 'rejected';
+    legalReviewStatus: 'pending' | 'provisional' | 'approved' | 'rejected';
     effectiveAt: string;
   } | null;
   consent: {

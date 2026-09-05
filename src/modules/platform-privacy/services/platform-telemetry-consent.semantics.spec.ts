@@ -177,8 +177,16 @@ function plainRepositoryMock() {
 function createFixture(
   initialConsents: ConsentRow[] = [],
   options: {
-    neutralLegalReviewStatus?: 'pending' | 'approved' | 'rejected';
-    legacyLegalReviewStatus?: 'pending' | 'approved' | 'rejected';
+    neutralLegalReviewStatus?:
+      | 'pending'
+      | 'provisional'
+      | 'approved'
+      | 'rejected';
+    legacyLegalReviewStatus?:
+      | 'pending'
+      | 'provisional'
+      | 'approved'
+      | 'rejected';
   } = {},
 ) {
   const consents = consentStore(initialConsents);
@@ -651,6 +659,110 @@ describe('S1.4.8 — legacy vs. neutral telemetry consent', () => {
       );
 
       expect(result.consent.state).toBe('opted_out');
+    });
+
+    /**
+     * I6.2: `provisional` clears the gate exactly like `approved`.
+     *
+     * These mirror the `'5/6'` and `'7'` approved-notice tests above, with the
+     * one substitution the whole slice is about — `neutralLegalReviewStatus:
+     * 'provisional'` — to prove `isNoticeClearedForConsent` really is used at
+     * both call sites rather than only in one.
+     */
+    it('I6.2/a: a provisional notice accepts a NEW opt-in, exactly like approved', async () => {
+      const fixture = createFixture([], {
+        neutralLegalReviewStatus: 'provisional',
+      });
+
+      await fixture.service.optIn(
+        contextFor('social'),
+        {
+          noticeId: neutralNoticeId,
+          contentHash: neutralHash,
+          purposeKey: PLATFORM_PRODUCT_TELEMETRY_PURPOSE,
+        },
+        PLATFORM_PURPOSE,
+      );
+
+      expect(fixture.consents.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          purposeKey: PLATFORM_PRODUCT_TELEMETRY_PURPOSE,
+          status: 'opted_in',
+        }),
+      );
+    });
+
+    it('I6.2/b: a provisional notice allows opt-out, same as any other', async () => {
+      const fixture = createFixture([neutralConsentRow()], {
+        neutralLegalReviewStatus: 'provisional',
+      });
+
+      const result = await fixture.service.optOut(
+        contextFor('social'),
+        { reasonCode: 'preference_changed' },
+        PLATFORM_PURPOSE,
+      );
+
+      expect(result.consent.state).toBe('opted_out');
+    });
+
+    /**
+     * I6.2's actual product decision: a provisional consent, with the
+     * platform gate ON, really collects — the gate (which stays off in
+     * production) is the fence, not formal legal sign-off. This is the one
+     * assertion that would fail if `collectSnapshot` still hard-required
+     * `'approved'` while `optIn` had been loosened.
+     */
+    it('I6.2/c: with the gate on, a provisional consent lets collectSnapshot actually collect', async () => {
+      const previousGate = process.env.LEADFLOW_PRODUCT_TELEMETRY_ENABLED;
+      process.env.LEADFLOW_PRODUCT_TELEMETRY_ENABLED = 'true';
+
+      const fixture = createFixture([neutralConsentRow()], {
+        neutralLegalReviewStatus: 'provisional',
+      });
+
+      const status = await fixture.service.getStatus(
+        contextFor('social'),
+        PLATFORM_PURPOSE,
+      );
+      expect(status.collection.eligible).toBe(true);
+
+      await expect(
+        fixture.service.collectSnapshot(
+          contextFor('social'),
+          { from: '2026-08-01T00:00:00.000Z', to: '2026-08-10T00:00:00.000Z' },
+          PLATFORM_PURPOSE,
+        ),
+      ).resolves.toBeDefined();
+
+      if (previousGate === undefined) {
+        delete process.env.LEADFLOW_PRODUCT_TELEMETRY_ENABLED;
+      } else {
+        process.env.LEADFLOW_PRODUCT_TELEMETRY_ENABLED = previousGate;
+      }
+    });
+
+    /** §10: with the gate OFF, a provisional opt-in still collects nothing. */
+    it('I6.2/d: gate off + provisional consent opted in → collectSnapshot still refuses', async () => {
+      const fixture = createFixture([neutralConsentRow()], {
+        neutralLegalReviewStatus: 'provisional',
+      });
+
+      const status = await fixture.service.getStatus(
+        contextFor('social'),
+        PLATFORM_PURPOSE,
+      );
+      expect(status.consent.state).toBe('opted_in');
+      expect(status.collection.eligible).toBe(false);
+      expect(status.collection.platformGateEnabled).toBe(false);
+
+      await expect(
+        fixture.service.collectSnapshot(
+          contextFor('social'),
+          { from: '2026-08-01T00:00:00.000Z', to: '2026-08-10T00:00:00.000Z' },
+          PLATFORM_PURPOSE,
+        ),
+      ).rejects.toBeInstanceOf(ConflictException);
     });
 
     it('11: the legacy purpose is NOT subject to the new gate — its notice is pending by design', async () => {

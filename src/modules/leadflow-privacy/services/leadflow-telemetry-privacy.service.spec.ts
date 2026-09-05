@@ -145,7 +145,7 @@ describe('LeadFlowTelemetryPrivacyService', () => {
     expect(fixture.dataSource.query).not.toHaveBeenCalled();
   });
 
-  it('keeps collection blocked while the notice awaits legal review', async () => {
+  it('keeps collection blocked while the notice is not cleared for consent', async () => {
     process.env.LEADFLOW_PRODUCT_TELEMETRY_ENABLED = 'true';
     const fixture = createFixture();
     fixture.notices.findOne.mockResolvedValue(notice);
@@ -160,7 +160,7 @@ describe('LeadFlowTelemetryPrivacyService', () => {
         from: '2026-07-29T00:00:00.000Z',
         to: '2026-07-30T00:00:00.000Z',
       }),
-    ).rejects.toThrow('aprovação jurídica');
+    ).rejects.toThrow('bloqueada até que o texto vigente seja liberado');
     expect(fixture.dataSource.query).not.toHaveBeenCalled();
   });
 

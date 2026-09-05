@@ -49,7 +49,7 @@ export class LeadFlowTelemetryConsentNoticeEntity {
     length: 32,
     default: 'pending',
   })
-  legalReviewStatus!: 'pending' | 'approved' | 'rejected';
+  legalReviewStatus!: 'pending' | 'provisional' | 'approved' | 'rejected';
 
   @Column({ type: 'varchar', length: 24, default: 'active' })
   status!: 'active' | 'retired';

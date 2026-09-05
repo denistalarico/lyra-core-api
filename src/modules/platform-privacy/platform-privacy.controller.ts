@@ -65,9 +65,10 @@ import {
 const PLATFORM_PURPOSE: TelemetryPurpose = {
   key: PLATFORM_PRODUCT_TELEMETRY_PURPOSE,
   description: PLATFORM_TELEMETRY_PURPOSE_DESCRIPTION,
-  // The neutral notice ships as `legal_review_status = 'pending'`, so no new
-  // acceptance may be recorded against it until it is approved (S1.4.8
-  // pointed correction). Opt-out and erasure are deliberately NOT gated.
+  // No new acceptance may be recorded until the notice is cleared for consent
+  // — `legal_review_status` of `'provisional'` or `'approved'` (S1.4.8
+  // pointed correction, widened by I6.2). Opt-out and erasure are
+  // deliberately NOT gated.
   requiresApprovedNoticeToOptIn: true,
 };
 

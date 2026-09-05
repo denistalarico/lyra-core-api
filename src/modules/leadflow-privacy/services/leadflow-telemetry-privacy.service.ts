@@ -60,6 +60,28 @@ const PURPOSE_DESCRIPTION =
   'Melhorar confiabilidade e desempenho do LeadFlow usando somente contagens operacionais estruturadas e agregadas.';
 
 /**
+ * Whether a notice's legal status is cleared enough to accept a NEW opt-in and
+ * to actually collect (Lyra Social I6.2).
+ *
+ * `'approved'` is formal legal sign-off and never changes meaning here.
+ * `'provisional'` is a deliberate second value the schema now allows
+ * (migration 1791300000000): a text live enough for a user to give or
+ * withdraw explicit consent — so the product can be exercised end to end —
+ * while remaining honestly unreviewed. I6.2's decision treats the two
+ * identically for both gates: the platform gate
+ * (`LEADFLOW_PRODUCT_TELEMETRY_ENABLED`), which stays off until legal signs
+ * off, is what actually keeps production from collecting before formal
+ * approval — not this column. A single function is what keeps `optIn` and
+ * `collectSnapshot` from silently drifting into two different rules for the
+ * same question.
+ */
+function isNoticeClearedForConsent(
+  status: 'pending' | 'provisional' | 'approved' | 'rejected',
+): boolean {
+  return status === 'provisional' || status === 'approved';
+}
+
+/**
  * The purpose a call operates on (Lyra Social S1.4.8).
  *
  * Every public method below takes this explicitly instead of assuming the
@@ -78,8 +100,9 @@ export type TelemetryPurpose = {
   key: string;
   description: string;
   /**
-   * When true, a new opt-in is refused unless the notice carries
-   * `legal_review_status = 'approved'` (S1.4.8 pointed correction).
+   * When true, a new opt-in is refused unless the notice is cleared for
+   * consent — `legal_review_status` of `'provisional'` or `'approved'`, per
+   * `isNoticeClearedForConsent` (S1.4.8 pointed correction, widened by I6.2).
    *
    * This is opt-in per purpose rather than a blanket rule because the legacy
    * LeadFlow notice is seeded as `'pending'` by migration 1788200000000 and
@@ -88,7 +111,7 @@ export type TelemetryPurpose = {
    * purpose has no such history, so it starts gated.
    *
    * Collection is unaffected by this flag: `collectSnapshot` already refuses
-   * to collect for ANY purpose whose notice is not approved, and that
+   * to collect for ANY purpose whose notice is not cleared, and that
    * fail-closed behaviour predates this change.
    */
   requiresApprovedNoticeToOptIn?: boolean;
@@ -163,7 +186,8 @@ export class LeadFlowTelemetryPrivacyService {
       this.isCollectionEnabled() &&
       consent?.status === 'opted_in' &&
       !requiresRenewal &&
-      notice?.legalReviewStatus === 'approved';
+      !!notice &&
+      isNoticeClearedForConsent(notice.legalReviewStatus);
 
     return {
       purpose: {
@@ -246,14 +270,14 @@ export class LeadFlowTelemetryPrivacyService {
         'O texto de consentimento mudou. Recarregue a página e revise a versão atual.',
       );
     }
-    // Legal-review gate (S1.4.8 pointed correction). A notice that has not
-    // been cleared for use must not accumulate NEW acceptances — hiding the
-    // button is not enough, since the endpoint is reachable directly. Only
-    // opt-in is gated: opt-out and erasure stay available so a legal status
-    // can never trap someone in a consent they want to withdraw.
+    // Legal-review gate (S1.4.8 pointed correction, widened by I6.2). A notice
+    // that has not been cleared for use must not accumulate NEW acceptances —
+    // hiding the button is not enough, since the endpoint is reachable
+    // directly. Only opt-in is gated: opt-out and erasure stay available so a
+    // legal status can never trap someone in a consent they want to withdraw.
     if (
       purpose.requiresApprovedNoticeToOptIn &&
-      notice.legalReviewStatus !== 'approved'
+      !isNoticeClearedForConsent(notice.legalReviewStatus)
     ) {
       throw new ConflictException(
         'Este texto de consentimento ainda não está liberado para uso. Nenhuma nova autorização pode ser registrada até a conclusão da revisão.',
@@ -465,9 +489,9 @@ export class LeadFlowTelemetryPrivacyService {
         'É necessário aceitar explicitamente a versão atual do consentimento antes da coleta.',
       );
     }
-    if (notice.legalReviewStatus !== 'approved') {
+    if (!isNoticeClearedForConsent(notice.legalReviewStatus)) {
       throw new ConflictException(
-        'A coleta permanece bloqueada até a aprovação jurídica do texto vigente.',
+        'A coleta permanece bloqueada até que o texto vigente seja liberado para uso.',
       );
     }
 

@@ -45,49 +45,86 @@ export const PLATFORM_TELEMETRY_PURPOSE_DESCRIPTION =
   'Melhorar a confiabilidade e o desempenho dos produtos da plataforma Lyra usando somente contagens operacionais estruturadas e agregadas.';
 
 export const PLATFORM_TELEMETRY_NOTICE_LOCALE = 'pt-BR';
-export const PLATFORM_TELEMETRY_NOTICE_VERSION = 1;
-
-export const PLATFORM_TELEMETRY_NOTICE_TITLE =
-  'Telemetria agregada para melhoria dos produtos Lyra';
 
 /**
- * The neutral notice body. It states the platform-wide scope explicitly —
- * this is the text whose acceptance authorizes both LeadFlow and Social, and
- * the reason a legacy LeadFlow acceptance cannot stand in for it.
- *
- * Every factual claim here is one the code actually enforces:
- *  - only structured counts are written (`leadflow_product_telemetry_daily`
- *    stores `metric_key` + integer `metric_value`, never free text);
- *  - the scope identifier is separated from the facts by a random pseudonym
- *    (`leadflow_telemetry_identity_links.scope_pseudonym`);
- *  - product-facing aggregates suppress groups below the k-anonymity floor
- *    (`getProductAggregates` HAVING COUNT(DISTINCT scope_pseudonym) >= k);
- *  - retention is enforced by `enforceRetention()`;
- *  - opt-out stops new collection and erasure deletes the contribution.
- *
- * Changing this text changes `contentHash`, which by design invalidates
- * existing acceptances of version 1 (they surface as `requiresRenewal`).
- * A wording change must therefore ship as a NEW version, never as an edit
- * to version 1.
+ * Version 1: the original neutral text, seeded `legal_review_status:
+ * 'pending'` and never accepted by anyone (S1.4.8). Its constants stay
+ * exactly as shipped — D-4 forbids rewriting a version in place — and the
+ * seed service never advances past it on its own; `PLATFORM_TELEMETRY_NOTICE_VERSION`
+ * below is what a caller resolves against, and I6.2 moves it forward.
  */
-export const PLATFORM_TELEMETRY_NOTICE_BODY =
+export const PLATFORM_TELEMETRY_NOTICE_V1_TITLE =
+  'Telemetria agregada para melhoria dos produtos Lyra';
+
+export const PLATFORM_TELEMETRY_NOTICE_V1_BODY =
   'Finalidade técnica: permitir que a Lyra use métricas operacionais estruturadas para melhorar a confiabilidade e o desempenho dos produtos da plataforma Lyra que você utiliza, incluindo o LeadFlow e o Lyra Social. A contribuição inclui somente contagens diárias agregadas de eventos operacionais. Não inclui conteúdo de mensagens, dados de contatos, anexos, prompts, credenciais, criativos nem payloads de provedores. Os identificadores do contexto ficam separados dos fatos por um pseudônimo aleatório. Resultados de produto só são disponibilizados em grupos com pelo menos 5 contextos. A retenção técnica inicial dos fatos é de 90 dias. Você pode desativar novas coletas a qualquer momento e solicitar a exclusão da contribuição pseudonimizada. Esta escolha é opcional: recusar não altera nenhuma funcionalidade contratada. Este texto técnico requer revisão jurídica antes do rollout de produção.';
 
-export const PLATFORM_TELEMETRY_NOTICE_CATEGORIES = [
+export const PLATFORM_TELEMETRY_NOTICE_V1_CATEGORIES = [
   'automation_live_terminal_runs',
   'automation_live_failed_runs',
+];
+
+/**
+ * Version 2: the I6.2 provisional Anonymous Benchmark notice.
+ *
+ * Seeded `legal_review_status: 'provisional'` rather than `'pending'` —
+ * `isNoticeClearedForConsent` treats that the same as `'approved'` for both
+ * `optIn` and `collectSnapshot` (I6.2 decision), so this text is what a user
+ * can actually accept today. It is not a substitute for formal legal
+ * clearance; the closing paragraph says so, and flipping to `'approved'`
+ * remains the separate, non-code legal decision it always was.
+ *
+ * Every categories entry below is a real `BenchmarkMetricKey` from
+ * `common/intelligence/intelligence-benchmark.ts` plus the Business Mode
+ * dimension — checked against the I6/I6.1 contribution code before this text
+ * was written, not assumed from the product description. What the body says
+ * is NOT contributed (message content, contact data, phone/email, campaign or
+ * ad names, raw tenant/account/campaign/ad-set/ad identifiers) matches the
+ * forbidden-identifier list in `benchmark.boundary.spec` and
+ * `paid-media-contribution.adapter.ts` exactly.
+ */
+export const PLATFORM_TELEMETRY_NOTICE_VERSION = 2;
+
+export const PLATFORM_TELEMETRY_NOTICE_TITLE =
+  'Contribuição anônima para melhorar o Lyra';
+
+export const PLATFORM_TELEMETRY_NOTICE_BODY =
+  'O Lyra pode usar dados estatísticos e agregados da operação para melhorar análises, benchmarks e recursos de inteligência da plataforma.\n\nQuando esta opção estiver ativada, podemos processar métricas operacionais como investimento em mídia, impressões, cliques, leads reportados pelas plataformas de anúncios e informações gerais sobre o tipo de negócio configurado.\n\nAntes de qualquer contribuição ser utilizada para aprendizado agregado, o contexto da empresa é substituído por um identificador aleatório. Os dados enviados para essa camada não incluem nomes de clientes, contatos, conteúdo de mensagens, telefones, e-mails, nomes de campanhas ou anúncios, nem os identificadores originais da empresa, contas de anúncios, campanhas, conjuntos de anúncios ou anúncios.\n\nOs benchmarks somente são disponibilizados quando existe uma quantidade mínima de empresas participantes suficiente para preservar o anonimato. Atualmente, o Lyra exige pelo menos 5 contextos independentes em uma mesma comparação.\n\nOs resultados são apresentados apenas de forma agregada, como medianas, faixas percentuais e quantidade de participantes elegíveis. O Lyra não revela quais empresas participaram de uma comparação.\n\nEsta contribuição é opcional. Não aceitar não limita o funcionamento do Lyra, do LeadFlow, do Social ou das análises operacionais da sua própria empresa.\n\nVocê pode retirar este consentimento posteriormente. Após a revogação, novas contribuições deixam de ser realizadas, e os dados associados à contribuição podem ser removidos conforme as políticas de retenção e exclusão da plataforma.\n\nEste consentimento se aplica somente à empresa ou contexto atualmente selecionado. Caso você tenha acesso a mais de uma empresa, cada uma possui seu próprio consentimento.\n\nEste texto é provisório e poderá ser atualizado antes do lançamento comercial do Lyra. Quando houver alteração relevante no conteúdo do consentimento, uma nova aceitação poderá ser solicitada.';
+
+export const PLATFORM_TELEMETRY_NOTICE_CTA =
+  'Li e concordo · Contribuir anonimamente para melhorar o Lyra';
+
+export const PLATFORM_TELEMETRY_NOTICE_SUPPORTING_COPY =
+  'Opcional. Sua decisão não interfere no uso dos produtos contratados.';
+
+export const PLATFORM_TELEMETRY_NOTICE_CATEGORIES = [
+  'paid_spend_minor_units',
+  'paid_impressions',
+  'paid_clicks',
+  'paid_link_clicks',
+  'paid_provider_leads',
+  'business_mode_dimension',
 ];
 
 export const PLATFORM_TELEMETRY_NOTICE_RETENTION_DAYS = 90;
 export const PLATFORM_TELEMETRY_NOTICE_K_ANONYMITY = 5;
 
 /**
- * The same hash the migration computes for the legacy notice: sha256 of the
- * body. The consent row stores it so that any later edit of the text is
- * detectable rather than silently inherited.
+ * sha256 of a notice body — the same function used for every version,
+ * including v1's already-seeded row. Never a hardcoded literal (S1.4.8 §21):
+ * the hash must always be a function of the exact text, so an accidental
+ * whitespace edit is caught rather than silently shipped as an unchanged hash.
  */
+function contentHashOf(body: string): string {
+  return createHash('sha256').update(body).digest('hex');
+}
+
+/** The hash of the seeded, unmodifiable version 1 body. */
+export function platformTelemetryNoticeV1ContentHash(): string {
+  return contentHashOf(PLATFORM_TELEMETRY_NOTICE_V1_BODY);
+}
+
+/** The hash of the current version's body — what a new seed writes. */
 export function platformTelemetryNoticeContentHash(): string {
-  return createHash('sha256')
-    .update(PLATFORM_TELEMETRY_NOTICE_BODY)
-    .digest('hex');
+  return contentHashOf(PLATFORM_TELEMETRY_NOTICE_BODY);
 }
