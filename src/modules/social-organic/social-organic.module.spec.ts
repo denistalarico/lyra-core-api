@@ -1,11 +1,20 @@
 jest.mock('@nestjs/typeorm', () => ({
+  InjectDataSource: jest.fn(() => jest.fn()),
+  InjectRepository: jest.fn(() => jest.fn()),
   TypeOrmModule: {
     forFeature: jest.fn(() => class AgencySocialOrganicTypeOrmFeatureModule {}),
   },
 }));
 
-import { Test } from '@nestjs/testing';
+import { MODULE_METADATA } from '@nestjs/common/constants';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { SettingsCryptoService } from '../../common/crypto/settings-crypto.service';
+import {
+  SocialOrganicConnectionService,
+  SocialOrganicOAuthProviderRegistry,
+  SocialOrganicOAuthService,
+} from './connections';
+import { SocialOrganicCredentialResolver } from './credentials';
 import {
   SocialOrganicAssetEntity,
   SocialOrganicConnectionEntity,
@@ -13,19 +22,27 @@ import {
 import { SocialOrganicModule } from './social-organic.module';
 
 describe('SocialOrganicModule', () => {
-  it('boots with both repositories bound to the agency datasource', async () => {
-    const moduleRef = await Test.createTestingModule({
-      imports: [SocialOrganicModule],
-    }).compile();
-
+  it('binds repositories and the credential boundary to the agency module', () => {
     expect((TypeOrmModule.forFeature as jest.Mock).mock.calls).toContainEqual([
       [SocialOrganicConnectionEntity, SocialOrganicAssetEntity],
       'agency',
     ]);
-    expect(moduleRef.get(SocialOrganicModule)).toBeInstanceOf(
-      SocialOrganicModule,
-    );
-
-    await moduleRef.close();
+    expect(
+      Reflect.getMetadata(MODULE_METADATA.PROVIDERS, SocialOrganicModule),
+    ).toEqual([
+      SocialOrganicCredentialResolver,
+      SocialOrganicOAuthProviderRegistry,
+      SocialOrganicOAuthService,
+      SocialOrganicConnectionService,
+      SettingsCryptoService,
+    ]);
+    expect(
+      Reflect.getMetadata(MODULE_METADATA.EXPORTS, SocialOrganicModule),
+    ).toEqual([
+      SocialOrganicCredentialResolver,
+      SocialOrganicOAuthProviderRegistry,
+      SocialOrganicOAuthService,
+      SocialOrganicConnectionService,
+    ]);
   });
 });

@@ -406,6 +406,20 @@ const RAW_PERMISSIONS: RawPermission[] = [
   ['social.settings.telemetry.view.admin', ADMIN_UP],
   ['social.settings.telemetry.manage.owner_only', OWNER_ONLY, true],
   ['social.settings.danger_zone.manage.owner_only', OWNER_ONLY, true],
+
+  // 11.5 Social - Publishing
+  ['social.publishing.publication.view.assigned', ALL_ROLES],
+  ['social.publishing.publication.create.manager', MANAGER_UP],
+  ['social.publishing.publication.publish_now.manager', MANAGER_UP],
+  ['social.publishing.publication.cancel.manager', MANAGER_UP],
+  [
+    'social.publishing.publication.delete_external.admin_or_explicit',
+    ADMIN_UP,
+    true,
+  ],
+
+  // 11.5 Social - Organic Analytics
+  ['social.analytics.organic.view.operational', MANAGER_UP],
 ];
 
 export const PERMISSION_DEFINITIONS: PermissionDefinition[] =
