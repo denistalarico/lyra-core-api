@@ -14,9 +14,13 @@ import {
   MAX_PRESIGNED_GET_TTL_SECONDS,
 } from './files.service';
 
-const getSignedUrlMock = jest.fn(
-  (): Promise<string> => Promise.resolve('https://signed.example.com/object'),
-);
+type GetSignedUrlMockArgs = [
+  client: unknown,
+  command: GetObjectCommand,
+  options: { expiresIn: number },
+];
+
+const getSignedUrlMock = jest.fn<Promise<string>, GetSignedUrlMockArgs>();
 
 jest.mock('@aws-sdk/s3-request-presigner', () => ({
   getSignedUrl: (
