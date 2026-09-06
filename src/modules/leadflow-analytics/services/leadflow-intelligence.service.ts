@@ -30,6 +30,7 @@ import type {
 import {
   AUTOMATION_FAILURE_POLICY,
   buildAutomationFailureRecommendationCandidate,
+  resolveAutomationFailurePolicy,
 } from './intelligence-recommendation.policy';
 
 const AGENCY_CONNECTION = 'agency';
@@ -104,6 +105,10 @@ export class LeadFlowIntelligenceService {
   ): Promise<LeadFlowIntelligenceRecommendationsResponse> {
     const scope = this.resolveScope(ctx);
     const { from, to } = this.resolvePeriod(query);
+    // Resolved once for the whole run, so every recommendation in a single
+    // generation is judged and stamped by the same version even if the registry
+    // were to change mid-run.
+    const policyDefinition = resolveAutomationFailurePolicy();
     const rows = await this.automationFailureSamples(
       scope,
       from,
@@ -120,11 +125,21 @@ export class LeadFlowIntelligenceService {
         businessModeKey: row.businessModeKey,
         succeededRuns: Number(row.succeededRuns),
         failedRuns: Number(row.failedRuns),
+        // The same period the counting query ran over, so each evidence item
+        // states the window it speaks for rather than leaving a reader to infer
+        // it from the recommendation's own period — which is equal today and
+        // would not be for any comparative claim.
+        window: { from: from.toISOString(), to: to.toISOString() },
       });
       if (!candidate) continue;
 
+      // Built from the definition's declared prefix rather than the envelope's
+      // `key`. They are the same literal today; the prefix is where that string
+      // is pinned as an idempotency contract, so a future rename of the
+      // published key cannot silently make stored keys unmatchable and
+      // regenerate recommendations that were already decided on.
       const generationKey = [
-        AUTOMATION_FAILURE_POLICY.key,
+        policyDefinition.generationKeyPrefix,
         row.automationId,
         from.toISOString(),
         to.toISOString(),
@@ -138,6 +153,12 @@ export class LeadFlowIntelligenceService {
         ...scope,
         businessModeKey: row.businessModeKey,
         generationKey,
+        // The stamp comes from the candidate, which is the code that actually
+        // applied the thresholds — so the recorded parameters cannot disagree
+        // with the ones that selected this row.
+        policyKey: candidate.policy.key,
+        policyVersion: candidate.policy.version,
+        policySnapshot: candidate.policy.parameters,
         kind: 'pause_automation_high_failure_rate',
         status: 'pending',
         targetType: 'automation',
@@ -582,6 +603,14 @@ export class LeadFlowIntelligenceService {
       return {
         id: recommendation.id,
         kind: recommendation.kind,
+        // Straight off the stored row. Reaching for the current definition here
+        // would be the defect R2.1 closes: it would report today's thresholds
+        // as though they were the ones this recommendation was judged against.
+        policy: {
+          key: recommendation.policyKey,
+          version: recommendation.policyVersion,
+          parameters: recommendation.policySnapshot ?? {},
+        },
         status: recommendation.status,
         title: recommendation.title,
         rationale: recommendation.rationale,

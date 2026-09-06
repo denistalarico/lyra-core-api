@@ -15,5 +15,7 @@ export * from './intelligence-percentiles';
 export * from './intelligence-fact-source';
 export * from './intelligence-metric';
 export * from './intelligence-ratio';
+export * from './intelligence-recommendation-evidence';
+export * from './intelligence-recommendation-policy';
 export * from './intelligence-scope';
 export * from './intelligence-window';

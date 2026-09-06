@@ -6,6 +6,7 @@ import {
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
+import type { IntelligenceRecommendationPolicySnapshot } from '../../../common/intelligence';
 import { LeadFlowSettingsContextType } from '../../leadflow-settings/enums/leadflow-settings-context-type.enum';
 import type {
   LeadFlowIntelligenceEvidence,
@@ -55,6 +56,34 @@ export class LeadFlowIntelligenceRecommendationEntity {
 
   @Column({ name: 'generation_key', type: 'varchar', length: 240 })
   generationKey!: string;
+
+  /**
+   * Which policy decided this, and which revision of it.
+   *
+   * Nullable because rows written before R2.1 exist as a possibility in any
+   * environment that ran the previous code, and a NOT NULL column would have
+   * required inventing a value for them. Null is the honest reading: the row
+   * predates the record and its thresholds are genuinely unknown, which is
+   * different from claiming it used v1's.
+   */
+  @Column({ name: 'policy_key', type: 'varchar', length: 80, nullable: true })
+  policyKey!: string | null;
+
+  @Column({ name: 'policy_version', type: 'integer', nullable: true })
+  policyVersion!: number | null;
+
+  /**
+   * The thresholds actually applied, frozen at generation.
+   *
+   * The field that makes a stored recommendation self-describing. Read this,
+   * never the current policy constant, when serialising a historical row.
+   */
+  @Column({
+    name: 'policy_snapshot',
+    type: 'jsonb',
+    default: () => "'{}'::jsonb",
+  })
+  policySnapshot!: IntelligenceRecommendationPolicySnapshot;
 
   @Column({ type: 'varchar', length: 80 })
   kind!: LeadFlowIntelligenceRecommendationKind;
