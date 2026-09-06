@@ -1,29 +1,46 @@
 import { BadRequestException } from '@nestjs/common';
-import { createHash } from 'crypto';
+import {
+  buildFacebookLoginAuthorizationUrl,
+  FacebookLoginConfig,
+  hashOAuthState,
+  isAcceptableOAuthState,
+  MAX_OAUTH_STATE_LENGTH,
+  parseHttpUrl,
+  requireConfiguredUrl,
+} from '../../../common/meta/meta-oauth.support';
 
 /**
  * Facebook Login for Business primitives used by the Social Ads connection.
  *
- * ── EXTRACTION CANDIDATE ──────────────────────────────────────────────────
+ * ── EXTRACTION DONE (Task F1) ─────────────────────────────────────────────
  * `hashOAuthState`, `isAcceptableOAuthState`, `parseHttpUrl`,
- * `requireConfiguredUrl` and `buildFacebookLoginAuthorizationUrl` are
+ * `requireConfiguredUrl` and `buildFacebookLoginAuthorizationUrl` were
  * byte-for-byte equivalent to their counterparts in
- * `modules/inbox/channels/meta/oauth/facebook-login-oauth.support.ts`. They
- * are genuinely provider-generic: nothing in them knows about messaging or
- * about ads.
+ * `modules/inbox/channels/meta/oauth/facebook-login-oauth.support.ts`, and
+ * organic Social (planned) became the third consumer the original comment
+ * named as the extraction trigger. They now live in
+ * `common/meta/meta-oauth.support.ts`, re-exported here so every existing
+ * import path in this module keeps working unchanged.
  *
- * They are duplicated here rather than imported because importing would make
- * Lyra Social depend on the Inbox module — the coupling this slice exists to
- * avoid. The right destination is a shared `common/meta/` module owned by
- * neither product, but moving them now means editing three live Meta channels
- * (Instagram, Messenger, WhatsApp) that are in production use, for a refactor
- * that buys nothing until a third consumer exists.
+ * Inbox's copy in `facebook-login-oauth.support.ts` was deliberately left in
+ * place: repointing three live, production Meta channels (Instagram,
+ * Messenger, WhatsApp) at the shared module is a separate, separately-tested
+ * step, not part of this extraction.
  *
- * Extract when: a third consumer appears, or one of these functions needs a
- * behavior change. Until then the duplication is ~40 lines of pure functions
- * with full test coverage on both sides.
+ * Ads-specific things — `SOCIAL_META_ADS_*` env names, the read-only ads
+ * scopes, and the Ads callback/frontend URL helpers — stay local to this
+ * file, since none of them are provider-generic.
  * ──────────────────────────────────────────────────────────────────────────
  */
+
+export {
+  buildFacebookLoginAuthorizationUrl,
+  hashOAuthState,
+  isAcceptableOAuthState,
+  MAX_OAUTH_STATE_LENGTH,
+  parseHttpUrl,
+  requireConfiguredUrl,
+};
 
 export const SOCIAL_ADS_OAUTH_SESSION_TTL_MS = 15 * 60 * 1000;
 
@@ -48,8 +65,6 @@ export const SOCIAL_META_ADS_APP_ID_ENV = 'SOCIAL_META_ADS_APP_ID';
 
 export const SOCIAL_META_ADS_APP_SECRET_ENV = 'SOCIAL_META_ADS_APP_SECRET';
 
-export const MAX_OAUTH_STATE_LENGTH = 512;
-
 /**
  * Read-only scopes. `ads_management` is deliberately absent: nothing in Lyra
  * Social writes to a campaign, and requesting write access "for later" would
@@ -58,11 +73,7 @@ export const MAX_OAUTH_STATE_LENGTH = 512;
  */
 export const SOCIAL_META_ADS_SCOPES = ['ads_read', 'business_management'];
 
-export type MetaAdsLoginConfig = {
-  appId: string;
-  configId: string;
-  authorizationEndpoint: string;
-};
+export type MetaAdsLoginConfig = FacebookLoginConfig;
 
 export type MetaAdsCallbackInput = {
   code?: string;
@@ -71,40 +82,6 @@ export type MetaAdsCallbackInput = {
   errorReason?: string;
   errorDescription?: string;
 };
-
-export function hashOAuthState(state: string) {
-  return createHash('sha256').update(state).digest('hex');
-}
-
-export function isAcceptableOAuthState(
-  state: string | undefined,
-): state is string {
-  return Boolean(state) && (state as string).length <= MAX_OAUTH_STATE_LENGTH;
-}
-
-export function parseHttpUrl(value: string, label: string) {
-  let url: URL;
-  try {
-    url = new URL(value);
-  } catch {
-    throw new BadRequestException(`${label} must be a valid URL.`);
-  }
-
-  if (url.protocol !== 'https:' && url.protocol !== 'http:') {
-    throw new BadRequestException(`${label} must use HTTP or HTTPS.`);
-  }
-
-  return url;
-}
-
-export function requireConfiguredUrl(name: string) {
-  const value = process.env[name];
-  if (!value) {
-    throw new BadRequestException(`${name} is not configured.`);
-  }
-
-  return parseHttpUrl(value, name);
-}
 
 /**
  * The Social Ads callback is its own whitelisted redirect URI, separate from
@@ -134,25 +111,6 @@ export function requireSocialFrontendUrl() {
   }
 
   return parseHttpUrl(value, 'Social frontend URL');
-}
-
-export function buildFacebookLoginAuthorizationUrl(input: {
-  loginConfig: MetaAdsLoginConfig;
-  callbackUrl: URL;
-  state: string;
-}) {
-  const authorizationUrl = new URL(input.loginConfig.authorizationEndpoint);
-  authorizationUrl.searchParams.set('client_id', input.loginConfig.appId);
-  authorizationUrl.searchParams.set(
-    'redirect_uri',
-    input.callbackUrl.toString(),
-  );
-  authorizationUrl.searchParams.set('response_type', 'code');
-  authorizationUrl.searchParams.set('override_default_response_type', 'true');
-  authorizationUrl.searchParams.set('config_id', input.loginConfig.configId);
-  authorizationUrl.searchParams.set('state', input.state);
-
-  return authorizationUrl;
 }
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
