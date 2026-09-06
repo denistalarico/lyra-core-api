@@ -53,6 +53,7 @@ import { LeadFlowAgendaModule } from './modules/leadflow-agenda/leadflow-agenda.
 import { AdminModule } from './modules/admin';
 import { IntelligenceAnalyticsModule } from './modules/intelligence-analytics/intelligence-analytics.module';
 import { SocialIntegrationsModule } from './modules/social-integrations';
+import { SocialOrganicModule } from './modules/social-organic';
 import { SocialPlannerModule } from './modules/social-planner';
 
 @Module({
@@ -113,9 +114,8 @@ import { SocialPlannerModule } from './modules/social-planner';
     SocialIntegrationsModule,
     IntelligenceAnalyticsModule,
     AdminModule,
-    SocialIntegrationsModule,
     SocialPlannerModule,
-    IntelligenceAnalyticsModule,
+    SocialOrganicModule,
   ],
 })
 export class AppModule {}
