@@ -171,6 +171,7 @@ import { CreateSocialContentRevisions1791000000000 } from './migrations/17910000
 import { CreateSocialPlannerSettings1791100000000 } from './migrations/1791100000000-create-social-planner-settings';
 import { CreateSocialPublishingCadences1791200000000 } from './migrations/1791200000000-create-social-publishing-cadences';
 import { AddProvisionalLegalReviewStatus1791300000000 } from './migrations/1791300000000-add-provisional-legal-review-status';
+import { CreateSocialOrganicConnections1791500000000 } from './migrations/1791500000000-create-social-organic-connections';
 
 export const AgencyDataSource = new DataSource({
   type: 'postgres',
@@ -352,5 +353,6 @@ export const AgencyDataSource = new DataSource({
     CreateSocialPlannerSettings1791100000000,
     CreateSocialPublishingCadences1791200000000,
     AddProvisionalLegalReviewStatus1791300000000,
+    CreateSocialOrganicConnections1791500000000,
   ],
 });

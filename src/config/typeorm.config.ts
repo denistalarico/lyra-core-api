@@ -326,6 +326,10 @@ import {
   SocialAdSyncRunEntity,
 } from '../modules/social-integrations/entities';
 import {
+  SocialOrganicAssetEntity,
+  SocialOrganicConnectionEntity,
+} from '../modules/social-organic/entities';
+import {
   BrandKitAssetEntity,
   BrandKitEntity,
 } from '../modules/brand-kit/entities';
@@ -346,6 +350,8 @@ export const agencyEntities = [
   SocialAdEntity,
   SocialAdMetricDailyEntity,
   SocialAdSyncRunEntity,
+  SocialOrganicConnectionEntity,
+  SocialOrganicAssetEntity,
   PlatformInternalAdminEntity,
   PlatformAdminAuditEventEntity,
   PlatformAdminIdentityEntity,
