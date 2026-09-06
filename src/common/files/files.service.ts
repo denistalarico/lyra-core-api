@@ -14,10 +14,14 @@ import {
   PutObjectCommand,
   S3Client,
 } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { Readable } from 'stream';
 import sharp from 'sharp';
 
 export const MAX_IMAGE_UPLOAD_BYTES = 5 * 1024 * 1024;
+
+export const DEFAULT_PRESIGNED_GET_TTL_SECONDS = 5 * 60;
+export const MAX_PRESIGNED_GET_TTL_SECONDS = 30 * 60;
 
 const ALLOWED_IMAGE_MIME_TYPES = new Set([
   'image/jpeg',
@@ -261,6 +265,61 @@ export class FilesService {
         Key: normalizedPath,
       }),
     );
+  }
+
+  /**
+   * Short-TTL presigned GET for a private object (Task F4).
+   *
+   * Some publishing providers ingest media by fetching a URL rather than
+   * accepting a direct upload. Without this, the only way to hand them a
+   * private asset would be making the bucket public — turning every client
+   * asset into a permanent, unauthenticated URL for the sake of one fetch.
+   * A presigned GET expires instead: the provider gets a bearer URL, and the
+   * capability revokes itself.
+   *
+   * Private bucket only, mirroring `deleteObject` (D-11 item 9) — the public
+   * bucket backs `<img>` across two frontends and presigning it would be
+   * pointless (it is already unauthenticated). The TTL is a bounded caller
+   * parameter, not a caller-supplied unbounded one: it is clamped to
+   * `MAX_PRESIGNED_GET_TTL_SECONDS` so a misconfigured or malicious caller
+   * cannot mint a long-lived bearer link to tenant media.
+   */
+  async getPresignedGetUrl(input: {
+    bucket: 'private';
+    path: string;
+    ttlSeconds?: number;
+  }): Promise<{ url: string; expiresInSeconds: number }> {
+    if (input.bucket !== 'private') {
+      throw new BadRequestException('Only private assets can be presigned.');
+    }
+
+    const normalizedPath = this.normalizeAssetPath(input.path);
+    const expiresInSeconds = this.clampPresignedTtl(input.ttlSeconds);
+
+    await this.ensurePrivateBucket();
+
+    const url = await getSignedUrl(
+      this.client,
+      new GetObjectCommand({
+        Bucket: this.privateBucket,
+        Key: normalizedPath,
+      }),
+      { expiresIn: expiresInSeconds },
+    );
+
+    return { url, expiresInSeconds };
+  }
+
+  private clampPresignedTtl(ttlSeconds?: number): number {
+    if (ttlSeconds === undefined) {
+      return DEFAULT_PRESIGNED_GET_TTL_SECONDS;
+    }
+
+    if (!Number.isFinite(ttlSeconds) || ttlSeconds <= 0) {
+      throw new BadRequestException('ttlSeconds must be a positive number.');
+    }
+
+    return Math.min(Math.floor(ttlSeconds), MAX_PRESIGNED_GET_TTL_SECONDS);
   }
 
   private assertValidImage(file?: Express.Multer.File) {
