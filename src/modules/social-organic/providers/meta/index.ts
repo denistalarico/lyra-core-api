@@ -1,3 +1,4 @@
+export * from './meta-capabilities';
 export * from './meta-organic-asset-discovery.service';
 export * from './meta-organic-graph.error';
 export * from './meta-organic-graph.service';

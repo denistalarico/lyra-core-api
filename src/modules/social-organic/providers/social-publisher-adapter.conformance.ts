@@ -43,8 +43,19 @@ export function describeSocialPublisherAdapterConformance(
       expect(capabilities.provider).toBe(adapter.provider);
       expect(capabilities.assetType).toBe(fixtures.assetType);
       expect(Array.isArray(capabilities.placements)).toBe(true);
-      expect(typeof capabilities.media.maxBytes).toBe('number');
-      expect(Array.isArray(capabilities.media.acceptedMimeTypes)).toBe(true);
+    });
+
+    it('declares a media block for every placement it lists, and only for those (MA2.1)', () => {
+      const adapter = fixtures.createAdapter();
+      const capabilities = adapter.capabilities(fixtures.assetType);
+
+      expect(capabilities.placements.length).toBeGreaterThan(0);
+      for (const placement of capabilities.placements) {
+        const media = capabilities.media[placement];
+        expect(media).toBeDefined();
+        expect(typeof media.maxBytes).toBe('number');
+        expect(Array.isArray(media.acceptedMimeTypes)).toBe(true);
+      }
     });
 
     it('capabilities() advertises requiresReconciliation consistently with reconcile()', () => {

@@ -74,7 +74,7 @@ describe('MetaOrganicOAuthProvider', () => {
     expect(url.searchParams.has('scope')).toBe(false);
   });
 
-  it('declares Facebook Login for Business and only MA1 scopes', () => {
+  it('declares Facebook Login for Business and exactly the MA1 + MA1.1 scopes', () => {
     const { provider } = harness();
     expect(provider.configuration.provider).toBe('meta');
     expect(provider.configuration.authorizationMethod).toBe('oauth_business');
@@ -83,9 +83,78 @@ describe('MetaOrganicOAuthProvider', () => {
       'pages_show_list',
       'pages_read_engagement',
       'instagram_basic',
+      'pages_manage_posts',
+      'instagram_content_publish',
     ]);
-    expect(SOCIAL_META_ORGANIC_SCOPES).not.toContain('ads_management');
-    expect(SOCIAL_META_ORGANIC_SCOPES).not.toContain('ads_read');
+  });
+
+  it('the persisted scope contract (config_id-applied, not a URL param) contains exactly the 6 expected scopes', () => {
+    expect(SOCIAL_META_ORGANIC_SCOPES).toHaveLength(6);
+    expect([...SOCIAL_META_ORGANIC_SCOPES].sort()).toEqual(
+      [
+        'business_management',
+        'pages_show_list',
+        'pages_read_engagement',
+        'instagram_basic',
+        'pages_manage_posts',
+        'instagram_content_publish',
+      ].sort(),
+    );
+  });
+
+  it('includes both MA1.1 publishing scopes', () => {
+    expect(SOCIAL_META_ORGANIC_SCOPES).toContain('pages_manage_posts');
+    expect(SOCIAL_META_ORGANIC_SCOPES).toContain('instagram_content_publish');
+  });
+
+  it('never requests Ads scopes', () => {
+    for (const forbidden of [
+      'ads_management',
+      'ads_read',
+      'pages_manage_ads',
+      'catalog_management',
+    ]) {
+      expect(SOCIAL_META_ORGANIC_SCOPES).not.toContain(forbidden);
+    }
+  });
+
+  it('never requests Messaging/Inbox scopes', () => {
+    for (const forbidden of [
+      'pages_messaging',
+      'pages_messaging_subscriptions',
+      'whatsapp_business_management',
+      'whatsapp_business_messaging',
+    ]) {
+      expect(SOCIAL_META_ORGANIC_SCOPES).not.toContain(forbidden);
+    }
+  });
+
+  it('never requests comments/insights/admin scopes reserved for future capability work', () => {
+    for (const forbidden of [
+      'pages_manage_engagement',
+      'pages_manage_metadata',
+      'pages_read_user_content',
+      'read_insights',
+      'instagram_manage_comments',
+      'instagram_manage_contents',
+      'instagram_manage_engagement',
+      'instagram_manage_insights',
+    ]) {
+      expect(SOCIAL_META_ORGANIC_SCOPES).not.toContain(forbidden);
+    }
+  });
+
+  it('does not serialize scopes into the authorization URL — Facebook Login for Business applies them via config_id', () => {
+    const { provider } = harness();
+    const config = provider.configuration;
+    const url = provider.buildAuthorizationUrl({
+      loginConfig: config.loginConfig,
+      callbackUrl: config.callbackUrl,
+      state: 'single-use-state',
+    });
+
+    expect(url.searchParams.has('scope')).toBe(false);
+    expect(url.searchParams.get('config_id')).toBe('1072508992158703');
   });
 
   it('normalizes the long-lived exchange', async () => {

@@ -1,0 +1,116 @@
+// Jest Snapshot v1, https://jestjs.io/docs/snapshot-testing
+
+exports[`Meta capability declaration (MA2.1 — per placement) matches the committed snapshot for facebook_page — a change here must be deliberate 1`] = `
+{
+  "assetType": "facebook_page",
+  "media": {
+    "feed": {
+      "acceptedMimeTypes": [
+        "image/jpeg",
+        "image/bmp",
+        "image/png",
+        "image/gif",
+        "image/tiff",
+      ],
+      "maxBytes": 4194304,
+    },
+    "reel": {
+      "acceptedMimeTypes": [
+        "video/mp4",
+      ],
+      "aspectRatios": [
+        "9:16",
+      ],
+      "maxBytes": 314572800,
+      "maxDurationSeconds": 90,
+      "minDurationSeconds": 3,
+    },
+    "story": {
+      "acceptedMimeTypes": [
+        "image/jpeg",
+        "image/bmp",
+        "image/png",
+        "image/gif",
+        "image/tiff",
+        "video/mp4",
+      ],
+      "maxBytes": 10485760,
+      "maxDurationSeconds": 60,
+    },
+  },
+  "placements": [
+    "feed",
+    "story",
+    "reel",
+  ],
+  "provider": "meta",
+  "requiresReconciliation": false,
+  "supportsCaption": true,
+  "supportsFirstComment": false,
+  "supportsHashtags": false,
+  "supportsRemoval": true,
+  "supportsScheduling": true,
+}
+`;
+
+exports[`Meta capability declaration (MA2.1 — per placement) matches the committed snapshot for instagram_professional — a change here must be deliberate 1`] = `
+{
+  "assetType": "instagram_professional",
+  "media": {
+    "carousel": {
+      "acceptedMimeTypes": [
+        "image/jpeg",
+      ],
+      "aspectRatios": [
+        "4:5",
+        "1:1",
+        "1.91:1",
+      ],
+      "maxBytes": 8388608,
+      "maxItemsPerPost": 10,
+    },
+    "feed": {
+      "acceptedMimeTypes": [
+        "image/jpeg",
+      ],
+      "aspectRatios": [
+        "4:5",
+        "1:1",
+        "1.91:1",
+      ],
+      "maxBytes": 8388608,
+    },
+    "reel": {
+      "acceptedMimeTypes": [
+        "video/mp4",
+      ],
+      "aspectRatios": [
+        "9:16",
+        "1:1",
+        "4:5",
+      ],
+      "maxBytes": 314572800,
+    },
+    "story": {
+      "acceptedMimeTypes": [
+        "image/jpeg",
+        "video/mp4",
+      ],
+      "maxBytes": 104857600,
+    },
+  },
+  "placements": [
+    "feed",
+    "story",
+    "reel",
+    "carousel",
+  ],
+  "provider": "meta",
+  "requiresReconciliation": false,
+  "supportsCaption": true,
+  "supportsFirstComment": false,
+  "supportsHashtags": false,
+  "supportsRemoval": false,
+  "supportsScheduling": false,
+}
+`;

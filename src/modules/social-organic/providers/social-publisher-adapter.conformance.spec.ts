@@ -43,7 +43,7 @@ function buildFakeAdapter(): SocialPublisherAdapter {
       provider: 'fake',
       assetType,
       placements: ['feed'],
-      media: { acceptedMimeTypes: ['image/jpeg'], maxBytes: 1_000 },
+      media: { feed: { acceptedMimeTypes: ['image/jpeg'], maxBytes: 1_000 } },
       supportsScheduling: true,
       supportsCaption: true,
       supportsFirstComment: false,

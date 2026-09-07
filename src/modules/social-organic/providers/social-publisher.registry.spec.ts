@@ -13,7 +13,7 @@ function fakeAdapter(provider: string): SocialPublisherAdapter {
       provider,
       assetType: 'facebook_page',
       placements: ['feed'],
-      media: { acceptedMimeTypes: ['image/jpeg'], maxBytes: 1 },
+      media: { feed: { acceptedMimeTypes: ['image/jpeg'], maxBytes: 1 } },
       supportsScheduling: true,
       supportsCaption: true,
       supportsFirstComment: false,

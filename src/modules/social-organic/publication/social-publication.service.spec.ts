@@ -42,9 +42,11 @@ const IMAGE_CAPABILITIES: PublisherCapabilities = {
   assetType: 'facebook_page',
   placements: ['feed'],
   media: {
-    acceptedMimeTypes: ['image/jpeg'],
-    maxBytes: 10_000_000,
-    aspectRatios: ['1:1'],
+    feed: {
+      acceptedMimeTypes: ['image/jpeg'],
+      maxBytes: 10_000_000,
+      aspectRatios: ['1:1'],
+    },
   },
   supportsScheduling: true,
   supportsCaption: true,
@@ -307,11 +309,13 @@ describe('SocialPublicationService', () => {
         capabilities: jest.fn(() => ({
           ...IMAGE_CAPABILITIES,
           media: {
-            acceptedMimeTypes: ['video/mp4'],
-            maxBytes: 50_000_000,
-            minDurationSeconds: 3,
-            maxDurationSeconds: 60,
-            aspectRatios: ['9:16'],
+            feed: {
+              acceptedMimeTypes: ['video/mp4'],
+              maxBytes: 50_000_000,
+              minDurationSeconds: 3,
+              maxDurationSeconds: 60,
+              aspectRatios: ['9:16'],
+            },
           },
         })),
       });

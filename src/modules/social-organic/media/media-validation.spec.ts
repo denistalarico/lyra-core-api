@@ -1,11 +1,14 @@
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import type { PublisherCapabilities } from '../providers/provider-capabilities';
+import type {
+  PublisherCapabilities,
+  PublisherMediaCapabilities,
+} from '../providers/provider-capabilities';
 import type { ExtractedMediaMetadata } from './media-metadata.service';
 import { validateMediaAgainstCapabilities } from './media-validation';
 
 function capabilities(
-  overrides: Partial<PublisherCapabilities['media']> = {},
+  overrides: Partial<PublisherMediaCapabilities> = {},
   placements: readonly string[] = ['feed'],
 ): PublisherCapabilities {
   return {
@@ -13,9 +16,11 @@ function capabilities(
     assetType: 'facebook_page',
     placements,
     media: {
-      acceptedMimeTypes: ['image/jpeg', 'image/png', 'video/mp4'],
-      maxBytes: 10_000_000,
-      ...overrides,
+      feed: {
+        acceptedMimeTypes: ['image/jpeg', 'image/png', 'video/mp4'],
+        maxBytes: 10_000_000,
+        ...overrides,
+      },
     },
     supportsScheduling: true,
     supportsCaption: true,
@@ -73,7 +78,7 @@ describe('validateMediaAgainstCapabilities', () => {
     const cases: Array<{
       readonly name: string;
       readonly metadata: ExtractedMediaMetadata;
-      readonly media: Partial<PublisherCapabilities['media']>;
+      readonly media: Partial<PublisherMediaCapabilities>;
       readonly placement?: string;
       readonly expectValid: boolean;
       readonly expectedField?: string;

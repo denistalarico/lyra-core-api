@@ -22,9 +22,11 @@ const IMAGE_CAPABILITIES: PublisherCapabilities = {
   assetType: 'facebook_page',
   placements: ['feed'],
   media: {
-    acceptedMimeTypes: ['image/jpeg'],
-    maxBytes: 10_000_000,
-    aspectRatios: ['1:1'],
+    feed: {
+      acceptedMimeTypes: ['image/jpeg'],
+      maxBytes: 10_000_000,
+      aspectRatios: ['1:1'],
+    },
   },
   supportsScheduling: true,
   supportsCaption: true,

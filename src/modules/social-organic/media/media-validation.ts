@@ -31,7 +31,7 @@ export function validateMediaAgainstCapabilities(
   }
 
   const issues: ValidationIssue[] = [];
-  const media = requirements.capabilities.media;
+  const media = requirements.media;
 
   if (!media.acceptedMimeTypes.includes(metadata.mimeType)) {
     issues.push({
