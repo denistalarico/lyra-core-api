@@ -15,6 +15,8 @@ import { PermissionsModule } from '../permissions';
 import { SocialContentDestinationEntity } from '../social-planner/entities/social-content-destination.entity';
 import { SocialContentItemEntity } from '../social-planner/entities/social-content-item.entity';
 import {
+  SOCIAL_ORGANIC_OAUTH_PROVIDERS,
+  SocialOrganicController,
   SocialOrganicConnectionService,
   SocialOrganicOAuthProviderRegistry,
   SocialOrganicOAuthService,
@@ -36,8 +38,16 @@ import {
 } from './publication';
 import { SocialPublicationExecutorService } from './publication/social-publication.executor';
 import { SOCIAL_PUBLICATION_EXECUTOR } from './publication/social-publication.worker';
-import { SocialPublisherRegistry } from './providers';
-import { SocialOrganicModule } from './social-organic.module';
+import {
+  MetaOrganicAssetDiscoveryService,
+  MetaOrganicGraphService,
+  MetaOrganicOAuthProvider,
+  SocialPublisherRegistry,
+} from './providers';
+import {
+  createMetaOrganicOAuthProviders,
+  SocialOrganicModule,
+} from './social-organic.module';
 
 describe('SocialOrganicModule', () => {
   it('binds repositories and the credential boundary to the agency module', () => {
@@ -62,10 +72,18 @@ describe('SocialOrganicModule', () => {
     ).toContain(MediaAssetsModule);
     expect(
       Reflect.getMetadata(MODULE_METADATA.CONTROLLERS, SocialOrganicModule),
-    ).toEqual([SocialPublicationController]);
+    ).toEqual([SocialOrganicController, SocialPublicationController]);
     expect(
       Reflect.getMetadata(MODULE_METADATA.PROVIDERS, SocialOrganicModule),
     ).toEqual([
+      MetaOrganicGraphService,
+      MetaOrganicAssetDiscoveryService,
+      MetaOrganicOAuthProvider,
+      {
+        provide: SOCIAL_ORGANIC_OAUTH_PROVIDERS,
+        useFactory: createMetaOrganicOAuthProviders,
+        inject: [MetaOrganicOAuthProvider],
+      },
       SocialOrganicCredentialResolver,
       SocialOrganicOAuthProviderRegistry,
       SocialOrganicOAuthService,

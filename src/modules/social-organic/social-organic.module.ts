@@ -7,6 +7,8 @@ import { PermissionsModule } from '../permissions';
 import { SocialContentDestinationEntity } from '../social-planner/entities/social-content-destination.entity';
 import { SocialContentItemEntity } from '../social-planner/entities/social-content-item.entity';
 import {
+  SOCIAL_ORGANIC_OAUTH_PROVIDERS,
+  SocialOrganicController,
   SocialOrganicConnectionService,
   SocialOrganicOAuthProviderRegistry,
   SocialOrganicOAuthService,
@@ -28,7 +30,18 @@ import {
 } from './publication';
 import { SocialPublicationExecutorService } from './publication/social-publication.executor';
 import { SOCIAL_PUBLICATION_EXECUTOR } from './publication/social-publication.worker';
-import { SocialPublisherRegistry } from './providers';
+import {
+  MetaOrganicAssetDiscoveryService,
+  MetaOrganicGraphService,
+  MetaOrganicOAuthProvider,
+  SocialPublisherRegistry,
+} from './providers';
+
+export function createMetaOrganicOAuthProviders(
+  meta: MetaOrganicOAuthProvider,
+) {
+  return [meta];
+}
 
 @Module({
   imports: [
@@ -46,8 +59,16 @@ import { SocialPublisherRegistry } from './providers';
       'agency',
     ),
   ],
-  controllers: [SocialPublicationController],
+  controllers: [SocialOrganicController, SocialPublicationController],
   providers: [
+    MetaOrganicGraphService,
+    MetaOrganicAssetDiscoveryService,
+    MetaOrganicOAuthProvider,
+    {
+      provide: SOCIAL_ORGANIC_OAUTH_PROVIDERS,
+      useFactory: createMetaOrganicOAuthProviders,
+      inject: [MetaOrganicOAuthProvider],
+    },
     SocialOrganicCredentialResolver,
     SocialOrganicOAuthProviderRegistry,
     SocialOrganicOAuthService,
