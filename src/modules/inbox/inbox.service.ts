@@ -33,7 +33,9 @@ import { WhatsAppOutboundService } from './channels/whatsapp/services/whatsapp-o
 import { InstagramOutboundService } from './channels/instagram/services/instagram-outbound.service';
 import { FacebookMessengerOutboundService } from './channels/facebook-messenger/services/facebook-messenger-outbound.service';
 import { FacebookMessengerContactEnrichmentService } from './channels/facebook-messenger/services/facebook-messenger-contact-enrichment.service';
+import { InstagramContactEnrichmentService } from './channels/instagram/services/instagram-contact-enrichment.service';
 import { CrmPipelineEntity } from '../crm/entities/crm-pipeline.entity';
+import { NotificationsService } from '../notifications';
 
 export type InboxConversationFilters = {
   status?: string;
@@ -77,6 +79,8 @@ export class InboxService {
     private readonly instagramOutboundService: InstagramOutboundService,
     private readonly facebookMessengerOutboundService: FacebookMessengerOutboundService,
     private readonly facebookMessengerContactEnrichmentService: FacebookMessengerContactEnrichmentService,
+    private readonly instagramContactEnrichmentService: InstagramContactEnrichmentService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   /**
@@ -484,6 +488,7 @@ export class InboxService {
     await this.facebookMessengerContactEnrichmentService.enrichMissingProfiles(
       items,
     );
+    await this.instagramContactEnrichmentService.refreshProfiles(items);
 
     // “Favoritas” no Inbox inclui tanto conversas favoritadas quanto conversas
     // que contêm ao menos uma mensagem favoritada. Projetamos esse segundo
@@ -596,6 +601,9 @@ export class InboxService {
     await this.facebookMessengerContactEnrichmentService.enrichMissingProfiles([
       conversation,
     ]);
+    await this.instagramContactEnrichmentService.refreshProfiles([
+      conversation,
+    ]);
 
     return conversation;
   }
@@ -699,6 +707,21 @@ export class InboxService {
     conversation.unreadCount = 0;
 
     const saved = await this.conversationsRepository.save(conversation);
+
+    if (ctx.userId) {
+      await this.notificationsService.markReadByResource(
+        {
+          tenantId: ctx.tenantId,
+          workspaceId: this.getWorkspaceId(ctx),
+          userId: ctx.userId,
+        },
+        {
+          moduleKey: 'inbox',
+          resourceType: 'inbox_conversation',
+          resourceId: saved.id,
+        },
+      );
+    }
 
     await this.eventsRepository.save(
       this.eventsRepository.create({

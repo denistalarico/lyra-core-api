@@ -106,6 +106,7 @@ import { FacebookMessengerOutboundService } from './channels/facebook-messenger/
 import { FacebookMessengerChannelHealthController } from './channels/facebook-messenger/facebook-messenger-channel-health.controller';
 import { FacebookMessengerChannelHealthService } from './channels/facebook-messenger/services/facebook-messenger-channel-health.service';
 import { FacebookMessengerContactEnrichmentService } from './channels/facebook-messenger/services/facebook-messenger-contact-enrichment.service';
+import { InstagramContactEnrichmentService } from './channels/instagram/services/instagram-contact-enrichment.service';
 
 @Module({
   imports: [
@@ -220,6 +221,7 @@ import { FacebookMessengerContactEnrichmentService } from './channels/facebook-m
     FacebookMessengerOutboundService,
     FacebookMessengerChannelHealthService,
     FacebookMessengerContactEnrichmentService,
+    InstagramContactEnrichmentService,
   ],
   exports: [
     InboxService,

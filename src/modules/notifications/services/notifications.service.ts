@@ -189,6 +189,55 @@ export class NotificationsService {
     return mapNotificationRecipientToListItem(recipient);
   }
 
+  async markReadByResource(
+    context: NotificationsContext,
+    resource: {
+      resourceType: string;
+      resourceId: string;
+      moduleKey?: string;
+    },
+  ): Promise<{ updated: number }> {
+    this.validateContext(context);
+
+    const qb = this.recipientRepo
+      .createQueryBuilder()
+      .update(NotificationRecipientEntity)
+      .set({
+        seenAt: () => 'COALESCE(seen_at, now())',
+        readAt: () => 'COALESCE(read_at, now())',
+      })
+      .where('user_id = :userId', { userId: context.userId })
+      .andWhere('read_at IS NULL')
+      .andWhere('archived_at IS NULL')
+      .andWhere(
+        `notification_id IN (
+          SELECT id
+          FROM notifications
+          WHERE tenant_id = :tenantId
+          AND (
+            workspace_id IS NULL
+            OR workspace_id = :workspaceId
+          )
+          AND resource_type = :resourceType
+          AND resource_id = :resourceId
+          ${resource.moduleKey ? 'AND module_key = :resourceModuleKey' : ''}
+        )`,
+        {
+          tenantId: context.tenantId,
+          workspaceId: context.workspaceId ?? null,
+          resourceType: resource.resourceType,
+          resourceId: resource.resourceId,
+          ...(resource.moduleKey
+            ? { resourceModuleKey: resource.moduleKey }
+            : {}),
+        },
+      );
+
+    const result = await qb.execute();
+
+    return { updated: result.affected ?? 0 };
+  }
+
   async markAllRead(
     context: NotificationsContext,
     filters?: {
