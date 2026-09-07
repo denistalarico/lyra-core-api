@@ -59,6 +59,43 @@ describe('InboxAgentRuntimeService safety contracts', () => {
     );
   });
 
+  it('turns playbook context and CTA failures into actionable repair rules', () => {
+    const missingContext = decisionRepairInstruction(
+      'decision_playbook_cta_context_missing',
+      ['message:current'],
+      {
+        allowedCtas: ['schedule_diagnostic'],
+        requiredContextFields: ['lead_name', 'niche', 'paid_ads_experience'],
+        missingContextFields: ['paid_ads_experience'],
+        priorAgentReplies: 4,
+        maxAgentRepliesWithoutCta: 3,
+      },
+    );
+    expect(missingContext).toContain(
+      'MISSING_CONTEXT_FIELDS: ["paid_ads_experience"]',
+    );
+    expect(missingContext).toContain(
+      'registre-o em extracted_facts com evidence_refs válidas',
+    );
+    expect(missingContext).toContain(
+      'inclua também recommended_cta na mesma decisão',
+    );
+
+    const requiredCta = decisionRepairInstruction(
+      'decision_playbook_cta_required',
+      ['message:current'],
+      {
+        allowedCtas: ['schedule_diagnostic', 'talk_to_specialist'],
+        priorAgentReplies: 4,
+        maxAgentRepliesWithoutCta: 3,
+      },
+    );
+    expect(requiredCta).toContain('limite de respostas foi atingido (4/3)');
+    expect(requiredCta).toContain(
+      'ALLOWED_CTAS: ["schedule_diagnostic","talk_to_specialist"]',
+    );
+  });
+
   it('claims due batches with transactional SKIP LOCKED', async () => {
     const query = jest.fn().mockResolvedValue([]);
     const dataSource = {

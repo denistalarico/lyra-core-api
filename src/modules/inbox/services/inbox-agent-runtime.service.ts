@@ -73,6 +73,8 @@ import { InboxPilotOutboundPolicyService } from '../channels/whatsapp/services/i
 import { ConversationOwnershipService } from './conversation-ownership.service';
 import {
   type CanonicalConversationFact,
+  ConversationPlaybookDecisionError,
+  type ConversationPlaybookDecisionErrorDetails,
   ConversationPlaybookStateService,
   PLAYBOOK_PROGRESS_METADATA_KEY,
 } from '../runtime/conversation-playbook-state.service';
@@ -133,13 +135,59 @@ export function sameReviewActionKeys(
 export function decisionRepairInstruction(
   reason: string,
   allowedEvidenceRefs: string[],
+  playbookDetails: ConversationPlaybookDecisionErrorDetails = {},
 ) {
   const refs = [...new Set(allowedEvidenceRefs)].sort();
-  return [
+  const instruction = [
     `REPAIR_ERROR: ${reason}`,
     `ALLOWED_EVIDENCE_REFS: ${JSON.stringify(refs)}`,
-    'Corrija somente a saída estruturada. Em todos os campos evidence_refs/evidenceRefs, use exclusivamente valores de ALLOWED_EVIDENCE_REFS; remova qualquer outro valor. Devolva apenas JSON válido.',
-  ].join('\n');
+    'Corrija a decisão estruturada inteira e devolva somente JSON válido. Em evidence_refs/evidenceRefs, use exclusivamente valores de ALLOWED_EVIDENCE_REFS.',
+  ];
+
+  switch (reason) {
+    case 'decision_playbook_too_many_questions':
+      instruction.push(
+        `REPAIR_RULE: reply deve conter no máximo ${playbookDetails.maxQuestions ?? 2} perguntas. Una ou remova as perguntas excedentes.`,
+      );
+      break;
+    case 'decision_playbook_phase_invalid':
+      instruction.push(
+        `REPAIR_RULE: proposed_phase deve ser null ou um valor de ALLOWED_PHASES: ${JSON.stringify(playbookDetails.allowedPhases ?? [])}.`,
+      );
+      break;
+    case 'decision_playbook_cta_invalid':
+      instruction.push(
+        `REPAIR_RULE: recommended_cta deve ser null ou usar uma chave de ALLOWED_CTAS: ${JSON.stringify(playbookDetails.allowedCtas ?? [])}.`,
+      );
+      break;
+    case 'decision_playbook_cta_context_missing':
+      instruction.push(
+        `REPAIR_RULE: não apresente nem aceite CTA enquanto faltar contexto obrigatório. MISSING_CONTEXT_FIELDS: ${JSON.stringify(playbookDetails.missingContextFields ?? [])}. REQUIRED_CONTEXT_FIELDS: ${JSON.stringify(playbookDetails.requiredContextFields ?? [])}.`,
+        'Se as mensagens atuais comprovarem um campo ausente, registre-o em extracted_facts com evidence_refs válidas, confidence >= 0.65 e requires_confirmation=false. Caso contrário, use recommended_cta=null (ou status=pending) e pergunte apenas pelo próximo campo ausente.',
+      );
+      if (
+        playbookDetails.priorAgentReplies !== undefined &&
+        playbookDetails.maxAgentRepliesWithoutCta !== undefined &&
+        playbookDetails.priorAgentReplies >=
+          playbookDetails.maxAgentRepliesWithoutCta
+      ) {
+        instruction.push(
+          `REPAIR_RULE: ao registrar todos os campos ausentes comprovados, inclua também recommended_cta na mesma decisão porque o limite de respostas já foi atingido (${playbookDetails.priorAgentReplies}/${playbookDetails.maxAgentRepliesWithoutCta}). Use uma chave de ALLOWED_CTAS: ${JSON.stringify(playbookDetails.allowedCtas ?? [])}.`,
+        );
+      }
+      break;
+    case 'decision_playbook_cta_required':
+      instruction.push(
+        `REPAIR_RULE: o contexto já está pronto e o limite de respostas foi atingido (${playbookDetails.priorAgentReplies ?? 0}/${playbookDetails.maxAgentRepliesWithoutCta ?? 0}). Inclua recommended_cta com status diferente de pending e uma chave de ALLOWED_CTAS: ${JSON.stringify(playbookDetails.allowedCtas ?? [])}.`,
+      );
+      break;
+    default:
+      instruction.push(
+        'REPAIR_RULE: preserve somente campos válidos do schema e remova qualquer valor que não possa ser sustentado pelas evidências permitidas.',
+      );
+  }
+
+  return instruction.join('\n');
 }
 
 export function orderContextMessages(messages: InboxMessageEntity[]) {
@@ -652,6 +700,7 @@ export class InboxAgentRuntimeService {
       let providerResult: AgentDecisionResult | null = null;
       let proposal: AgentDecisionV1 | null = null;
       let repairReason: string | null = null;
+      let repairPlaybookDetails: ConversationPlaybookDecisionErrorDetails = {};
       const allowedEvidenceRefs = [
         ...messageProjection.map((item) => item.evidenceRef),
         ...transcriptionProjection
@@ -695,6 +744,7 @@ export class InboxAgentRuntimeService {
               ? `${prompt.systemPolicy}\n${decisionRepairInstruction(
                   repairReason,
                   allowedEvidenceRefs,
+                  repairPlaybookDetails,
                 )}`
               : prompt.systemPolicy,
             untrustedData: prompt.untrustedData,
@@ -739,6 +789,10 @@ export class InboxAgentRuntimeService {
               `Agent decision failed validation (${reason}) on batch ${batch.id}, repair attempt ${repairAttempt}.`,
             );
             repairReason = reason;
+            repairPlaybookDetails =
+              validationError instanceof ConversationPlaybookDecisionError
+                ? validationError.details
+                : {};
             if (repairAttempt === 1)
               throw new InboxProviderError(reason, false);
           }

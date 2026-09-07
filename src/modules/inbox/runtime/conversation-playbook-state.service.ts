@@ -42,6 +42,49 @@ export type ConversationPlaybookProgress = {
   updatedAt: string;
 };
 
+export type ConversationPlaybookDecisionErrorCode =
+  | 'decision_playbook_too_many_questions'
+  | 'decision_playbook_phase_invalid'
+  | 'decision_playbook_cta_invalid'
+  | 'decision_playbook_cta_context_missing'
+  | 'decision_playbook_cta_required';
+
+/**
+ * Safe diagnostic context for repairing a rejected decision. It intentionally
+ * contains only playbook keys and counts, never the reply or lead-provided
+ * values, so callers can use it in logs/prompts without leaking conversation
+ * content.
+ */
+export type ConversationPlaybookDecisionErrorDetails = {
+  maxQuestions?: number;
+  actualQuestions?: number;
+  allowedPhases?: string[];
+  allowedCtas?: string[];
+  requiredContextFields?: string[];
+  missingContextFields?: string[];
+  minimumContextFields?: number;
+  availableContextFieldCount?: number;
+  priorAgentReplies?: number;
+  maxAgentRepliesWithoutCta?: number;
+};
+
+export class ConversationPlaybookDecisionError extends Error {
+  constructor(
+    readonly code: ConversationPlaybookDecisionErrorCode,
+    readonly details: ConversationPlaybookDecisionErrorDetails,
+  ) {
+    super(code);
+    this.name = 'ConversationPlaybookDecisionError';
+  }
+}
+
+function rejectDecision(
+  code: ConversationPlaybookDecisionErrorCode,
+  details: ConversationPlaybookDecisionErrorDetails,
+): never {
+  throw new ConversationPlaybookDecisionError(code, details);
+}
+
 @Injectable()
 export class ConversationPlaybookStateService {
   read(metadata: Record<string, unknown>): ConversationPlaybookProgress | null {
@@ -60,14 +103,21 @@ export class ConversationPlaybookStateService {
     canonicalFacts?: Record<string, CanonicalConversationFact>;
   }) {
     const questions = input.decision.reply?.match(/\?/g)?.length ?? 0;
-    if (questions > 2) throw new Error('decision_playbook_invalid');
+    if (questions > 2) {
+      rejectDecision('decision_playbook_too_many_questions', {
+        maxQuestions: 2,
+        actualQuestions: questions,
+      });
+    }
     if (
       input.decision.proposed_phase &&
       !input.playbook.phases.some(
         (phase) => phase.key === input.decision.proposed_phase,
       )
     ) {
-      throw new Error('decision_playbook_invalid');
+      rejectDecision('decision_playbook_phase_invalid', {
+        allowedPhases: input.playbook.phases.map((phase) => phase.key),
+      });
     }
     if (
       input.decision.recommended_cta &&
@@ -75,7 +125,9 @@ export class ConversationPlaybookStateService {
         input.decision.recommended_cta.key,
       )
     ) {
-      throw new Error('decision_playbook_invalid');
+      rejectDecision('decision_playbook_cta_invalid', {
+        allowedCtas: input.playbook.ctaPolicy.allowed,
+      });
     }
     const alreadyAddressed =
       input.previous?.cta && input.previous.cta.status !== 'pending';
@@ -106,14 +158,24 @@ export class ConversationPlaybookStateService {
     }
     const requiredContextFields =
       input.playbook.ctaPolicy.requiredContextFields ?? [];
-    const hasRequiredContext = requiredContextFields.every((key) =>
-      availableFacts.has(key),
+    const missingContextFields = requiredContextFields.filter(
+      (key) => !availableFacts.has(key),
     );
+    const hasRequiredContext = missingContextFields.length === 0;
     const hasMinimumContext =
       availableFacts.size >= input.playbook.ctaPolicy.minimumContextFields;
     const contextReady = hasRequiredContext && hasMinimumContext;
     if (addressesNow && !contextReady) {
-      throw new Error('decision_playbook_invalid');
+      rejectDecision('decision_playbook_cta_context_missing', {
+        allowedCtas: input.playbook.ctaPolicy.allowed,
+        requiredContextFields,
+        missingContextFields,
+        minimumContextFields: input.playbook.ctaPolicy.minimumContextFields,
+        availableContextFieldCount: availableFacts.size,
+        priorAgentReplies: input.priorAgentReplies,
+        maxAgentRepliesWithoutCta:
+          input.playbook.ctaPolicy.maxAgentRepliesWithoutCta,
+      });
     }
     if (
       input.priorAgentReplies >=
@@ -122,7 +184,12 @@ export class ConversationPlaybookStateService {
       !alreadyAddressed &&
       !addressesNow
     ) {
-      throw new Error('decision_playbook_invalid');
+      rejectDecision('decision_playbook_cta_required', {
+        allowedCtas: input.playbook.ctaPolicy.allowed,
+        priorAgentReplies: input.priorAgentReplies,
+        maxAgentRepliesWithoutCta:
+          input.playbook.ctaPolicy.maxAgentRepliesWithoutCta,
+      });
     }
   }
 

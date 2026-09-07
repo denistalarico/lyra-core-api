@@ -127,7 +127,7 @@ describe('ConversationPlaybookStateService', () => {
           },
         },
       }),
-    ).toThrow('decision_playbook_invalid');
+    ).toThrow('decision_playbook_cta_required');
     expect(() =>
       service.assertDecision({
         previous: null,
@@ -144,7 +144,7 @@ describe('ConversationPlaybookStateService', () => {
           },
         },
       }),
-    ).toThrow('decision_playbook_invalid');
+    ).toThrow('decision_playbook_too_many_questions');
   });
 
   it('rejects an agency CTA until name, niche and paid ads history are known', () => {
@@ -164,7 +164,7 @@ describe('ConversationPlaybookStateService', () => {
           },
         },
       }),
-    ).toThrow('decision_playbook_invalid');
+    ).toThrow('decision_playbook_cta_context_missing');
 
     expect(() =>
       service.assertDecision({
@@ -175,5 +175,106 @@ describe('ConversationPlaybookStateService', () => {
         canonicalFacts: {},
       }),
     ).not.toThrow();
+  });
+
+  it('distinguishes invalid phases and CTAs for an actionable repair', () => {
+    const service = new ConversationPlaybookStateService();
+
+    expect(() =>
+      service.assertDecision({
+        previous: null,
+        playbook,
+        decision: decision({ proposed_phase: 'invented_phase' }),
+        priorAgentReplies: 0,
+        canonicalFacts: {},
+      }),
+    ).toThrow('decision_playbook_phase_invalid');
+
+    expect(() =>
+      service.assertDecision({
+        previous: null,
+        playbook,
+        decision: decision({
+          recommended_cta: {
+            key: 'invented_cta',
+            status: 'presented',
+            evidence_refs: ['message:1'],
+          },
+        }),
+        priorAgentReplies: 0,
+        canonicalFacts: {},
+      }),
+    ).toThrow('decision_playbook_cta_invalid');
+  });
+
+  it('accepts the observed turn only when it extracts paid ads history and presents the CTA together', () => {
+    const service = new ConversationPlaybookStateService();
+    const previous = {
+      cta: null,
+      facts: {
+        lead_name: {
+          value: 'Lead Sintético',
+          evidenceRefs: ['channel:profile_name'],
+          confidence: 1,
+          requiresConfirmation: false,
+        },
+        niche: {
+          value: 'infoprodutos',
+          evidenceRefs: ['message:niche'],
+          confidence: 0.98,
+          requiresConfirmation: false,
+        },
+      },
+    } as never;
+    const paidAdsFact = {
+      field_key: 'paid_ads_experience',
+      proposed_target: null,
+      value: false,
+      evidence_refs: ['message:current'],
+      confidence: 0.98,
+      requires_confirmation: false,
+      update_intent: 'enrich' as const,
+    };
+
+    expect(() =>
+      service.assertDecision({
+        previous,
+        playbook,
+        decision: decision({
+          evidence_refs: ['message:current'],
+          extracted_facts: [paidAdsFact],
+          recommended_cta: {
+            key: 'schedule_diagnostic',
+            status: 'presented',
+            evidence_refs: ['message:current'],
+          },
+        }),
+        priorAgentReplies: 4,
+        canonicalFacts: {},
+      }),
+    ).not.toThrow();
+
+    expect(() =>
+      service.assertDecision({
+        previous,
+        playbook,
+        decision: decision({ extracted_facts: [] }),
+        priorAgentReplies: 4,
+        canonicalFacts: {},
+      }),
+    ).toThrow('decision_playbook_cta_context_missing');
+
+    expect(() =>
+      service.assertDecision({
+        previous,
+        playbook,
+        decision: decision({
+          extracted_facts: [paidAdsFact],
+          recommended_cta: null,
+        }),
+        priorAgentReplies: 4,
+        canonicalFacts: {},
+      }),
+    ).toThrow('decision_playbook_cta_required');
   });
 });
