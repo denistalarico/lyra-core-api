@@ -4,7 +4,7 @@ import { Repository } from 'typeorm';
 import { MediaAssetResolverService } from '../../../common/media-assets';
 import { SocialOrganicCredentialResolver } from '../credentials/social-organic-credential.resolver';
 import { SocialOrganicAssetEntity } from '../entities/social-organic-asset.entity';
-import { validateMediaAgainstCapabilities } from '../media/media-validation';
+import { checkMediaAssetCapability } from '../media/media-capability-check';
 import { MediaPreparationService } from '../media/media-preparation.service';
 import type {
   PublicationExecutionInput,
@@ -44,6 +44,11 @@ type PayloadSnapshotShape = {
  *
  * `mediaAssetId == null` short-circuits steps 2-5: `preparedMedia` stays
  * `null` and a text-only publication executes exactly as before this task.
+ *
+ * Step 3's resolve+capability check is shared with `SocialPublicationService`
+ * (`P3.1` schedule-time validation) via `checkMediaAssetCapability` — this
+ * remains defense in depth, since capabilities/assets can change between
+ * schedule time and execution time.
  */
 @Injectable()
 export class SocialPublicationExecutorService implements SocialPublicationExecutor {
@@ -180,36 +185,9 @@ export class SocialPublicationExecutorService implements SocialPublicationExecut
       agencyClientId: publication.agencyClientId,
     });
 
-    if (resolvedMedia.width === null && resolvedMedia.height === null) {
-      // No usable dimensions and no image/video track parsed for this asset:
-      // capability validation cannot be trusted to a guess.
-      throw new SocialPublicationExecutionError(
-        'media_rejected',
-        'media_metadata_incomplete',
-      );
-    }
-
     const capabilities = adapter.capabilities(payload.assetType);
-    const byteSize = Number(resolvedMedia.byteSize);
-    const durationSeconds =
-      resolvedMedia.durationMs === null
-        ? null
-        : Number(resolvedMedia.durationMs) / 1000;
-
-    const capabilityCheck = validateMediaAgainstCapabilities(
-      {
-        mimeType: resolvedMedia.mimeType,
-        bytes: Number.isFinite(byteSize) ? byteSize : Number.MAX_SAFE_INTEGER,
-        kind: resolvedMedia.durationMs === null ? 'image' : 'video',
-        width: resolvedMedia.width ?? 0,
-        height: resolvedMedia.height ?? 0,
-        durationSeconds,
-        codec: resolvedMedia.codec ?? '',
-        aspectRatio:
-          resolvedMedia.width && resolvedMedia.height
-            ? resolvedMedia.width / resolvedMedia.height
-            : 0,
-      },
+    const capabilityCheck = checkMediaAssetCapability(
+      resolvedMedia,
       capabilities,
       payload.placement,
     );
@@ -221,6 +199,7 @@ export class SocialPublicationExecutorService implements SocialPublicationExecut
       );
     }
 
+    const byteSize = Number(resolvedMedia.byteSize);
     const prepared = await this.mediaPreparationService.prepare({
       media: {
         storagePath: resolvedMedia.storagePath,

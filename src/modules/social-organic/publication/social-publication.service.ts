@@ -1,5 +1,6 @@
 import { randomUUID, createHash } from 'node:crypto';
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   NotFoundException,
@@ -7,9 +8,11 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { IsNull, type FindOptionsWhere, Repository } from 'typeorm';
 import { MediaAssetResolverService } from '../../../common/media-assets';
+import { checkMediaAssetCapability } from '../media/media-capability-check';
 import { SocialContentDestinationEntity } from '../../social-planner/entities/social-content-destination.entity';
 import { SocialContentItemEntity } from '../../social-planner/entities/social-content-item.entity';
 import { SocialOrganicAssetEntity } from '../entities/social-organic-asset.entity';
+import { SocialPublisherRegistry } from '../providers/social-publisher.registry';
 import type { CreateSocialPublicationDto } from './dto/create-social-publication.dto';
 import type { ListSocialPublicationsQueryDto } from './dto/list-social-publications.query.dto';
 import { SocialPublicationEntity } from './entities/social-publication.entity';
@@ -40,6 +43,8 @@ export class SocialPublicationService {
     private readonly assetsRepository: Repository<SocialOrganicAssetEntity>,
 
     private readonly mediaAssetResolver: MediaAssetResolverService,
+
+    private readonly publisherRegistry: SocialPublisherRegistry,
   ) {}
 
   async list(
@@ -85,13 +90,16 @@ export class SocialPublicationService {
     const mediaAssetId = dto.mediaAssetId ?? null;
 
     if (mediaAssetId) {
-      // Resolved for existence/scope validation only — the storage location
-      // itself never enters payload_snapshot or any other persisted column.
-      await this.mediaAssetResolver.resolve({
-        tenantId: scope.tenantId,
-        workspaceId: scope.workspaceId,
-        agencyClientId: scope.agencyClientId,
+      // Schedule-time (P3.1): resolves scope and validates the asset against
+      // the destination provider's declared capabilities *before* persisting
+      // anything. The storage location itself never enters payload_snapshot
+      // or any other persisted column — only the validated reference does.
+      await this.validateMediaAssetOrThrow({
+        scope,
         mediaAssetId,
+        provider: asset.provider,
+        assetType: asset.assetType,
+        placement: destination.placement,
       });
     }
 
@@ -206,6 +214,20 @@ export class SocialPublicationService {
       );
     }
 
+    if (original.mediaAssetId) {
+      // A new attempt row re-validates media at schedule time too (P3.1):
+      // the asset or the provider's declared capabilities may have changed
+      // since the original attempt was created or since it failed.
+      const asset = await this.requirePublishableAsset(scope, original.assetId);
+      await this.validateMediaAssetOrThrow({
+        scope,
+        mediaAssetId: original.mediaAssetId,
+        provider: asset.provider,
+        assetType: asset.assetType,
+        placement: this.extractPlacement(original.payloadSnapshot),
+      });
+    }
+
     const scheduledAt = new Date();
     const retryPublication = this.publicationsRepository.create({
       tenantId: original.tenantId,
@@ -240,6 +262,60 @@ export class SocialPublicationService {
     });
 
     return this.publicationsRepository.save(retryPublication);
+  }
+
+  /**
+   * Schedule-time media validation (P3.1): resolves the `mediaAssetId`
+   * against trusted scope, resolves the destination provider's adapter and
+   * declared capabilities for the asset type, and runs M1
+   * (`checkMediaAssetCapability`) — the same check
+   * `SocialPublicationExecutorService` runs at execution time. Rejects
+   * before any row is persisted; never generates a presigned URL, never
+   * calls M3 or the adapter's `prepareMedia`/`publish`.
+   *
+   * Throws `NotFoundException` for an out-of-scope/deleted asset (existence
+   * is never revealed) and `BadRequestException('media_rejected')` for a
+   * capability mismatch, incomplete metadata, or an unregistered provider —
+   * the same closed `SocialPublicationFailureReason` vocabulary the executor
+   * uses, never a raw M1 issue list or provider/registry detail.
+   */
+  private async validateMediaAssetOrThrow(input: {
+    scope: SocialPublicationScope;
+    mediaAssetId: string;
+    provider: string;
+    assetType: string;
+    placement: string;
+  }): Promise<void> {
+    const resolvedMedia = await this.mediaAssetResolver.resolve({
+      tenantId: input.scope.tenantId,
+      workspaceId: input.scope.workspaceId,
+      agencyClientId: input.scope.agencyClientId,
+      mediaAssetId: input.mediaAssetId,
+    });
+
+    if (!this.publisherRegistry.has(input.provider)) {
+      // Fail closed rather than let an unregistered-provider error escape
+      // as an unmapped 500 (T-rule: stable, safe error surface).
+      throw new BadRequestException('media_rejected');
+    }
+
+    const adapter = this.publisherRegistry.resolve(input.provider);
+    const capabilities = adapter.capabilities(input.assetType);
+
+    const capabilityCheck = checkMediaAssetCapability(
+      resolvedMedia,
+      capabilities,
+      input.placement,
+    );
+
+    if (!capabilityCheck.valid) {
+      throw new BadRequestException('media_rejected');
+    }
+  }
+
+  private extractPlacement(payloadSnapshot: unknown): string {
+    const snapshot = payloadSnapshot as { placement?: unknown } | null;
+    return typeof snapshot?.placement === 'string' ? snapshot.placement : '';
   }
 
   private buildPayloadSnapshot(

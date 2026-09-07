@@ -1,9 +1,20 @@
-import { ConflictException, NotFoundException } from '@nestjs/common';
+/* eslint-disable @typescript-eslint/unbound-method -- Jest mock methods asserted via expect(x.method).toHaveBeenCalledWith(...) are never invoked unbound. */
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
 import type { Repository } from 'typeorm';
 import type { MediaAssetResolverService } from '../../../common/media-assets';
 import { SocialContentDestinationEntity } from '../../social-planner/entities/social-content-destination.entity';
 import { SocialContentItemEntity } from '../../social-planner/entities/social-content-item.entity';
 import { SocialOrganicAssetEntity } from '../entities/social-organic-asset.entity';
+import type { PublisherCapabilities } from '../providers/provider-capabilities';
+import type {
+  SocialPublisherAdapter,
+  ValidationResult,
+} from '../providers/social-publisher.adapter';
+import type { SocialPublisherRegistry } from '../providers/social-publisher.registry';
 import { SocialPublicationEntity } from './entities/social-publication.entity';
 import {
   SocialPublicationService,
@@ -26,6 +37,57 @@ function createRepositoryMock(): RepositoryMock {
   };
 }
 
+const IMAGE_CAPABILITIES: PublisherCapabilities = {
+  provider: 'meta',
+  assetType: 'facebook_page',
+  placements: ['feed'],
+  media: {
+    acceptedMimeTypes: ['image/jpeg'],
+    maxBytes: 10_000_000,
+    aspectRatios: ['1:1'],
+  },
+  supportsScheduling: true,
+  supportsCaption: true,
+  supportsFirstComment: true,
+  supportsHashtags: true,
+  requiresReconciliation: false,
+  supportsRemoval: false,
+};
+
+function buildAdapter(
+  overrides: Partial<SocialPublisherAdapter> = {},
+): SocialPublisherAdapter {
+  return {
+    provider: 'meta',
+    capabilities: jest.fn(() => IMAGE_CAPABILITIES),
+    validate: jest.fn((): ValidationResult => ({ valid: true })),
+    prepareMedia: jest.fn(() =>
+      Promise.resolve({ providerMediaRef: 'ref-1', expiresAt: null }),
+    ),
+    publish: jest.fn(() =>
+      Promise.resolve({
+        outcome: 'published' as const,
+        externalPublicationId: 'ext-1',
+        externalPermalink: null,
+        publishedAt: new Date('2026-09-07T12:00:00Z'),
+        providerMetadata: {},
+      }),
+    ),
+    ...overrides,
+  };
+}
+
+const VALID_RESOLVED_MEDIA = {
+  id: 'media-asset-1',
+  storagePath: 'tenant-1/workspace-1/media/asset.jpg',
+  mimeType: 'image/jpeg',
+  byteSize: '1000',
+  width: 1080,
+  height: 1080,
+  durationMs: null,
+  codec: null,
+};
+
 describe('SocialPublicationService', () => {
   let service: SocialPublicationService;
 
@@ -34,6 +96,8 @@ describe('SocialPublicationService', () => {
   let destinationsRepository: RepositoryMock;
   let assetsRepository: RepositoryMock;
   let mediaAssetResolver: { resolve: jest.Mock };
+  let publisherRegistry: { resolve: jest.Mock; has: jest.Mock };
+  let adapter: SocialPublisherAdapter;
 
   const agencyScope: SocialPublicationScope = {
     tenantId: '11111111-1111-4111-8111-111111111111',
@@ -71,6 +135,7 @@ describe('SocialPublicationService', () => {
   const asset: Partial<SocialOrganicAssetEntity> = {
     id: assetId,
     provider: 'meta',
+    assetType: 'facebook_page',
     connectionId: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
     externalAssetId: 'external-asset-1',
     status: 'active',
@@ -84,7 +149,14 @@ describe('SocialPublicationService', () => {
     contentRepository = createRepositoryMock();
     destinationsRepository = createRepositoryMock();
     assetsRepository = createRepositoryMock();
-    mediaAssetResolver = { resolve: jest.fn().mockResolvedValue({}) };
+    mediaAssetResolver = {
+      resolve: jest.fn().mockResolvedValue(VALID_RESOLVED_MEDIA),
+    };
+    adapter = buildAdapter();
+    publisherRegistry = {
+      resolve: jest.fn(() => adapter),
+      has: jest.fn(() => true),
+    };
 
     service = new SocialPublicationService(
       publicationsRepository as unknown as Repository<SocialPublicationEntity>,
@@ -92,6 +164,7 @@ describe('SocialPublicationService', () => {
       destinationsRepository as unknown as Repository<SocialContentDestinationEntity>,
       assetsRepository as unknown as Repository<SocialOrganicAssetEntity>,
       mediaAssetResolver as unknown as MediaAssetResolverService,
+      publisherRegistry as unknown as SocialPublisherRegistry,
     );
 
     contentRepository.findOne.mockResolvedValue(contentItem);
@@ -100,7 +173,7 @@ describe('SocialPublicationService', () => {
   });
 
   describe('create', () => {
-    it('builds payload_snapshot from the content item, never from the request body', async () => {
+    it('builds payload_snapshot from the content item, never from the request body (text-only)', async () => {
       const result = await service.create(agencyScope, actorUserId, {
         contentItemId,
         destinationId,
@@ -135,9 +208,10 @@ describe('SocialPublicationService', () => {
       expect(typeof result.payloadHash).toBe('string');
       expect(result.idempotencyKey).toBeTruthy();
       expect(mediaAssetResolver.resolve).not.toHaveBeenCalled();
+      expect(publisherRegistry.resolve).not.toHaveBeenCalled();
     });
 
-    it('resolves a scoped mediaAssetId and persists the reference, not storage details', async () => {
+    it('resolves and validates a scoped mediaAssetId, persisting only the reference', async () => {
       const result = await service.create(agencyScope, actorUserId, {
         contentItemId,
         destinationId,
@@ -151,6 +225,8 @@ describe('SocialPublicationService', () => {
         agencyClientId: agencyScope.agencyClientId,
         mediaAssetId,
       });
+      expect(publisherRegistry.resolve).toHaveBeenCalledWith('meta');
+      expect(adapter.capabilities).toHaveBeenCalledWith('facebook_page');
       expect(publicationsRepository.create).toHaveBeenCalledWith(
         expect.objectContaining({
           mediaAssetId,
@@ -158,6 +234,18 @@ describe('SocialPublicationService', () => {
         }),
       );
       expect(result.mediaAssetId).toBe(mediaAssetId);
+    });
+
+    it('never generates a presigned URL and never calls prepareMedia/publish at schedule time', async () => {
+      await service.create(agencyScope, actorUserId, {
+        contentItemId,
+        destinationId,
+        assetId,
+        mediaAssetId,
+      });
+
+      expect(adapter.prepareMedia).not.toHaveBeenCalled();
+      expect(adapter.publish).not.toHaveBeenCalled();
     });
 
     it('propagates not-found when mediaAssetId is out of scope (wrong tenant/workspace/client, or deleted)', async () => {
@@ -173,6 +261,113 @@ describe('SocialPublicationService', () => {
           mediaAssetId,
         }),
       ).rejects.toThrow(NotFoundException);
+      expect(publicationsRepository.save).not.toHaveBeenCalled();
+    });
+
+    it('rejects a MIME type incompatible with the destination capabilities before saving', async () => {
+      mediaAssetResolver.resolve.mockResolvedValue({
+        ...VALID_RESOLVED_MEDIA,
+        mimeType: 'image/png',
+      });
+
+      await expect(
+        service.create(agencyScope, actorUserId, {
+          contentItemId,
+          destinationId,
+          assetId,
+          mediaAssetId,
+        }),
+      ).rejects.toThrow(BadRequestException);
+      expect(publicationsRepository.save).not.toHaveBeenCalled();
+      expect(publicationsRepository.create).not.toHaveBeenCalled();
+      expect(adapter.prepareMedia).not.toHaveBeenCalled();
+      expect(adapter.publish).not.toHaveBeenCalled();
+    });
+
+    it('rejects an incompatible aspect ratio before saving', async () => {
+      mediaAssetResolver.resolve.mockResolvedValue({
+        ...VALID_RESOLVED_MEDIA,
+        width: 1920,
+        height: 1080,
+      });
+
+      await expect(
+        service.create(agencyScope, actorUserId, {
+          contentItemId,
+          destinationId,
+          assetId,
+          mediaAssetId,
+        }),
+      ).rejects.toThrow(BadRequestException);
+      expect(publicationsRepository.save).not.toHaveBeenCalled();
+    });
+
+    it('rejects an incompatible video (duration/mime) before saving', async () => {
+      const videoAdapter = buildAdapter({
+        capabilities: jest.fn(() => ({
+          ...IMAGE_CAPABILITIES,
+          media: {
+            acceptedMimeTypes: ['video/mp4'],
+            maxBytes: 50_000_000,
+            minDurationSeconds: 3,
+            maxDurationSeconds: 60,
+            aspectRatios: ['9:16'],
+          },
+        })),
+      });
+      publisherRegistry.resolve.mockReturnValue(videoAdapter);
+      mediaAssetResolver.resolve.mockResolvedValue({
+        ...VALID_RESOLVED_MEDIA,
+        mimeType: 'video/mp4',
+        durationMs: '120000',
+        width: 1080,
+        height: 1080,
+      });
+
+      await expect(
+        service.create(agencyScope, actorUserId, {
+          contentItemId,
+          destinationId,
+          assetId,
+          mediaAssetId,
+        }),
+      ).rejects.toThrow(BadRequestException);
+      expect(publicationsRepository.save).not.toHaveBeenCalled();
+      expect(videoAdapter.prepareMedia).not.toHaveBeenCalled();
+      expect(videoAdapter.publish).not.toHaveBeenCalled();
+    });
+
+    it('fails safe when metadata (dimensions) is missing rather than assuming defaults', async () => {
+      mediaAssetResolver.resolve.mockResolvedValue({
+        ...VALID_RESOLVED_MEDIA,
+        width: null,
+        height: null,
+      });
+
+      await expect(
+        service.create(agencyScope, actorUserId, {
+          contentItemId,
+          destinationId,
+          assetId,
+          mediaAssetId,
+        }),
+      ).rejects.toThrow(BadRequestException);
+      expect(publicationsRepository.save).not.toHaveBeenCalled();
+    });
+
+    it('rejects when the destination provider has no registered adapter', async () => {
+      publisherRegistry.has.mockReturnValue(false);
+
+      await expect(
+        service.create(agencyScope, actorUserId, {
+          contentItemId,
+          destinationId,
+          assetId,
+          mediaAssetId,
+        }),
+      ).rejects.toThrow(BadRequestException);
+      expect(publisherRegistry.resolve).not.toHaveBeenCalled();
+      expect(publicationsRepository.save).not.toHaveBeenCalled();
     });
 
     it('defaults scheduledAt to now when omitted', async () => {
@@ -214,6 +409,26 @@ describe('SocialPublicationService', () => {
           assetId,
         }),
       ).rejects.toThrow(ConflictException);
+    });
+
+    it('resolves mediaAssetId under the caller scope, not a cross-tenant/workspace/client one', async () => {
+      mediaAssetResolver.resolve.mockRejectedValue(
+        new NotFoundException('Media asset not found.'),
+      );
+
+      await expect(
+        service.create(otherTenantScope, actorUserId, {
+          contentItemId,
+          destinationId,
+          assetId,
+          mediaAssetId,
+        }),
+      ).rejects.toThrow(NotFoundException);
+      expect(mediaAssetResolver.resolve).toHaveBeenCalledWith(
+        expect.objectContaining({
+          tenantId: otherTenantScope.tenantId,
+        }),
+      );
     });
   });
 
@@ -293,26 +508,30 @@ describe('SocialPublicationService', () => {
   });
 
   describe('retry', () => {
-    it('creates a new attempt row for a failed publication instead of reopening it', async () => {
-      const original = {
-        id: 'pub-1',
-        tenantId: agencyScope.tenantId,
-        workspaceId: agencyScope.workspaceId,
-        agencyClientId: null,
-        contentItemId,
-        destinationId,
-        provider: 'meta',
-        connectionId: asset.connectionId,
-        assetId,
-        externalAssetId: 'external-asset-1',
-        mediaAssetId,
-        status: 'failed',
-        payloadSnapshot: { placement: 'feed', mediaAssetId },
-        payloadHash: 'hash-1',
-        idempotencyKey: 'original-key',
-        maxAttempts: 5,
-      };
-      publicationsRepository.findOne.mockResolvedValue(original);
+    const original = {
+      id: 'pub-1',
+      tenantId: agencyScope.tenantId,
+      workspaceId: agencyScope.workspaceId,
+      agencyClientId: null,
+      contentItemId,
+      destinationId,
+      provider: 'meta',
+      connectionId: asset.connectionId,
+      assetId,
+      externalAssetId: 'external-asset-1',
+      mediaAssetId: null as string | null,
+      status: 'failed',
+      payloadSnapshot: {
+        placement: 'feed',
+        mediaAssetId: null as string | null,
+      },
+      payloadHash: 'hash-1',
+      idempotencyKey: 'original-key',
+      maxAttempts: 5,
+    };
+
+    it('creates a new attempt row for a failed publication instead of reopening it (text-only)', async () => {
+      publicationsRepository.findOne.mockResolvedValue({ ...original });
 
       const result = await service.retry(agencyScope, actorUserId, 'pub-1');
 
@@ -320,7 +539,44 @@ describe('SocialPublicationService', () => {
       expect(result.attempts).toBe(0);
       expect(result.idempotencyKey).not.toBe('original-key');
       expect(result.payloadSnapshot).toEqual(original.payloadSnapshot);
+      expect(result.mediaAssetId).toBe(null);
+      expect(mediaAssetResolver.resolve).not.toHaveBeenCalled();
+    });
+
+    it('re-validates a still-compatible mediaAssetId and creates the new attempt row', async () => {
+      publicationsRepository.findOne.mockResolvedValue({
+        ...original,
+        mediaAssetId,
+        payloadSnapshot: { placement: 'feed', mediaAssetId },
+      });
+
+      const result = await service.retry(agencyScope, actorUserId, 'pub-1');
+
+      expect(mediaAssetResolver.resolve).toHaveBeenCalledWith({
+        tenantId: agencyScope.tenantId,
+        workspaceId: agencyScope.workspaceId,
+        agencyClientId: agencyScope.agencyClientId,
+        mediaAssetId,
+      });
+      expect(result.status).toBe('scheduled');
       expect(result.mediaAssetId).toBe(mediaAssetId);
+    });
+
+    it('rejects retry when the media is now incompatible with declared capabilities', async () => {
+      publicationsRepository.findOne.mockResolvedValue({
+        ...original,
+        mediaAssetId,
+        payloadSnapshot: { placement: 'feed', mediaAssetId },
+      });
+      mediaAssetResolver.resolve.mockResolvedValue({
+        ...VALID_RESOLVED_MEDIA,
+        mimeType: 'image/png',
+      });
+
+      await expect(
+        service.retry(agencyScope, actorUserId, 'pub-1'),
+      ).rejects.toThrow(BadRequestException);
+      expect(publicationsRepository.save).not.toHaveBeenCalled();
     });
 
     it('refuses to retry a publication that has not failed', async () => {
