@@ -123,14 +123,17 @@ describe('social ad credential boundary', () => {
     ).toEqual([...CREDENTIAL_COLUMN_READERS].sort());
   });
 
-  it('branches on the authorization method in exactly one file', () => {
+  it('branches on the ad authorization method in exactly one file', () => {
     // The literal appears in the entity (declaring the union), the migration
     // (the column default) and the S1 writer (binding the row). Only the
-    // resolver may *dispatch* on it.
-    expect(filesContaining(/case\s+['"]internal_system_user['"]/)).toEqual([
+    // ad resolver may *dispatch* on it. The organic module has its own
+    // authorization-method union and enforces its boundary in its own spec.
+    expect(
+      filesContaining(/case\s+['"]internal_system_user['"]/, SOCIAL),
+    ).toEqual([
       'modules/social-integrations/credentials/social-ad-credential.resolver.ts',
     ]);
-    expect(filesContaining(/case\s+['"]business_login['"]/)).toEqual([
+    expect(filesContaining(/case\s+['"]business_login['"]/, SOCIAL)).toEqual([
       'modules/social-integrations/credentials/social-ad-credential.resolver.ts',
     ]);
   });
