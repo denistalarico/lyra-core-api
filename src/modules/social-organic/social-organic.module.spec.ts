@@ -9,6 +9,7 @@ jest.mock('@nestjs/typeorm', () => ({
 import { MODULE_METADATA } from '@nestjs/common/constants';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { SettingsCryptoService } from '../../common/crypto/settings-crypto.service';
+import { FilesModule } from '../../common/files/files.module';
 import { MediaAssetsModule } from '../../common/media-assets';
 import { PermissionsModule } from '../permissions';
 import { SocialContentDestinationEntity } from '../social-planner/entities/social-content-destination.entity';
@@ -53,6 +54,9 @@ describe('SocialOrganicModule', () => {
     expect(
       Reflect.getMetadata(MODULE_METADATA.IMPORTS, SocialOrganicModule),
     ).toContain(PermissionsModule);
+    expect(
+      Reflect.getMetadata(MODULE_METADATA.IMPORTS, SocialOrganicModule),
+    ).toContain(FilesModule);
     expect(
       Reflect.getMetadata(MODULE_METADATA.IMPORTS, SocialOrganicModule),
     ).toContain(MediaAssetsModule);

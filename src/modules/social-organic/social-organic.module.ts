@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { SettingsCryptoService } from '../../common/crypto/settings-crypto.service';
+import { FilesModule } from '../../common/files/files.module';
 import { MediaAssetsModule } from '../../common/media-assets';
 import { PermissionsModule } from '../permissions';
 import { SocialContentDestinationEntity } from '../social-planner/entities/social-content-destination.entity';
@@ -32,6 +33,7 @@ import { SocialPublisherRegistry } from './providers';
 @Module({
   imports: [
     PermissionsModule,
+    FilesModule,
     MediaAssetsModule,
     TypeOrmModule.forFeature(
       [
