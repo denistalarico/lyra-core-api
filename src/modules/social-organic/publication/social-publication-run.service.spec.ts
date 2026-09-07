@@ -69,6 +69,28 @@ describe('SocialPublicationRunService', () => {
     expect(dataSource.query.mock.calls[0][0]).toContain('locked_by = $2');
   });
 
+  it('persists an asynchronous container identity under the current lease and releases it for polling', async () => {
+    const { service, dataSource } = harness({
+      queryResults: [[[{ id: 'publication-a' }], 1]],
+    });
+
+    await expect(
+      service.markProcessing({
+        publicationId: 'publication-a',
+        lockedBy: 'worker-a',
+        externalPublicationId: 'ig-container:container-1',
+        providerMetadata: { phase: 'container_processing' },
+        availableAt: NOW,
+      }),
+    ).resolves.toBe(true);
+
+    const [sql, params] = dataSource.query.mock.calls[0];
+    expect(sql).toContain("status = 'processing'");
+    expect(sql).toContain('external_publication_id = $3');
+    expect(sql).toContain('locked_by = NULL');
+    expect(params).toContain('ig-container:container-1');
+  });
+
   it('runs the existence check before requeueing a stale lease', async () => {
     const row = publication();
     const { service, dataSource } = harness({

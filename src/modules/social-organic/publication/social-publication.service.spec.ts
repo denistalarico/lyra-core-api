@@ -61,6 +61,8 @@ function buildAdapter(
 ): SocialPublisherAdapter {
   return {
     provider: 'meta',
+    assetTypes: ['facebook_page'],
+    retrySafety: 'provider_idempotency_key',
     capabilities: jest.fn(() => IMAGE_CAPABILITIES),
     validate: jest.fn((): ValidationResult => ({ valid: true })),
     prepareMedia: jest.fn(() =>
@@ -227,7 +229,10 @@ describe('SocialPublicationService', () => {
         agencyClientId: agencyScope.agencyClientId,
         mediaAssetId,
       });
-      expect(publisherRegistry.resolve).toHaveBeenCalledWith('meta');
+      expect(publisherRegistry.resolve).toHaveBeenCalledWith(
+        'meta',
+        'facebook_page',
+      );
       expect(adapter.capabilities).toHaveBeenCalledWith('facebook_page');
       expect(publicationsRepository.create).toHaveBeenCalledWith(
         expect.objectContaining({

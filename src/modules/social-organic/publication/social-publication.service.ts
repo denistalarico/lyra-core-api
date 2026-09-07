@@ -293,13 +293,16 @@ export class SocialPublicationService {
       mediaAssetId: input.mediaAssetId,
     });
 
-    if (!this.publisherRegistry.has(input.provider)) {
+    if (!this.publisherRegistry.has(input.provider, input.assetType)) {
       // Fail closed rather than let an unregistered-provider error escape
       // as an unmapped 500 (T-rule: stable, safe error surface).
       throw new BadRequestException('media_rejected');
     }
 
-    const adapter = this.publisherRegistry.resolve(input.provider);
+    const adapter = this.publisherRegistry.resolve(
+      input.provider,
+      input.assetType,
+    );
     const capabilities = adapter.capabilities(input.assetType);
 
     const capabilityCheck = checkMediaAssetCapability(

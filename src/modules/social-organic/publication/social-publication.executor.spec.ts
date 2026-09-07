@@ -14,6 +14,7 @@ import type {
 import type { PublisherCapabilities } from '../providers/provider-capabilities';
 import type { SocialPublisherRegistry } from '../providers/social-publisher.registry';
 import type { SocialPublicationEntity } from './entities/social-publication.entity';
+import type { SocialPublicationConfigService } from './social-publication-config.service';
 import { SocialPublicationExecutionError } from './social-publication.worker';
 import { SocialPublicationExecutorService } from './social-publication.executor';
 
@@ -41,6 +42,8 @@ function buildAdapter(
 ): SocialPublisherAdapter {
   return {
     provider: 'meta',
+    assetTypes: ['facebook_page'],
+    retrySafety: 'provider_idempotency_key',
     capabilities: jest.fn(() => IMAGE_CAPABILITIES),
     validate: jest.fn((): ValidationResult => ({ valid: true })),
     prepareMedia: jest.fn(() =>
@@ -105,6 +108,7 @@ describe('SocialPublicationExecutorService', () => {
   let credentialResolver: { resolve: jest.Mock };
   let mediaAssetResolver: { resolve: jest.Mock };
   let mediaPreparationService: { prepare: jest.Mock };
+  let config: { isProviderEnabled: jest.Mock };
   let executor: SocialPublicationExecutorService;
 
   beforeEach(() => {
@@ -130,6 +134,7 @@ describe('SocialPublicationExecutorService', () => {
         }),
       ),
     };
+    config = { isProviderEnabled: jest.fn(() => true) };
 
     executor = new SocialPublicationExecutorService(
       assetsRepository as unknown as Repository<SocialOrganicAssetEntity>,
@@ -137,6 +142,7 @@ describe('SocialPublicationExecutorService', () => {
       credentialResolver as unknown as SocialOrganicCredentialResolver,
       mediaAssetResolver as unknown as MediaAssetResolverService,
       mediaPreparationService as unknown as MediaPreparationService,
+      config as unknown as SocialPublicationConfigService,
     );
   });
 
@@ -373,6 +379,69 @@ describe('SocialPublicationExecutorService', () => {
   });
 
   describe('provider publish outcomes', () => {
+    it('returns processing with the provider container identity instead of marking it published', async () => {
+      const adapter = buildAdapter({
+        publish: jest.fn(() =>
+          Promise.resolve({
+            outcome: 'processing' as const,
+            externalPublicationId: 'ig-container:container-1',
+            providerMetadata: { phase: 'container_processing' },
+          }),
+        ),
+        reconcile: jest.fn(),
+      });
+      registry.resolve.mockReturnValue(adapter);
+
+      await expect(executor.publish(buildPublication())).resolves.toEqual({
+        outcome: 'processing',
+        externalPublicationId: 'ig-container:container-1',
+        providerMetadata: { phase: 'container_processing' },
+      });
+    });
+
+    it('reconciles a persisted processing identity without creating or publishing another container', async () => {
+      const adapter = buildAdapter({
+        reconcile: jest.fn(() =>
+          Promise.resolve({
+            outcome: 'published' as const,
+            externalPublicationId: 'media-1',
+            externalPermalink: null,
+            publishedAt: new Date('2026-09-07T12:00:00Z'),
+            providerMetadata: {},
+          }),
+        ),
+      });
+      registry.resolve.mockReturnValue(adapter);
+
+      await expect(
+        executor.publish(
+          buildPublication({
+            status: 'processing',
+            externalPublicationId: 'ig-container:container-1',
+          }),
+        ),
+      ).resolves.toMatchObject({ externalPublicationId: 'media-1' });
+      expect(adapter.reconcile).toHaveBeenCalledWith({
+        credential: CREDENTIAL,
+        externalPublicationId: 'ig-container:container-1',
+      });
+      expect(adapter.prepareMedia).not.toHaveBeenCalled();
+      expect(adapter.publish).not.toHaveBeenCalled();
+    });
+
+    it('honours the per-provider kill switch before validation or any external effect', async () => {
+      const adapter = buildAdapter();
+      registry.resolve.mockReturnValue(adapter);
+      config.isProviderEnabled.mockReturnValue(false);
+
+      await expect(executor.publish(buildPublication())).rejects.toMatchObject({
+        code: 'provider_publication_disabled',
+      });
+      expect(adapter.validate).not.toHaveBeenCalled();
+      expect(adapter.prepareMedia).not.toHaveBeenCalled();
+      expect(adapter.publish).not.toHaveBeenCalled();
+    });
+
     it('translates a failed PublicationResult into SocialPublicationExecutionError with the provider-declared reason', async () => {
       const adapter = buildAdapter({
         publish: jest.fn(
@@ -395,6 +464,29 @@ describe('SocialPublicationExecutorService', () => {
           'rate_limited',
         );
       }
+    });
+  });
+
+  describe('retry safety checks', () => {
+    it('treats an unavailable reconciliation read as unsafe, never as proof that the post is absent', async () => {
+      const adapter = buildAdapter({
+        reconcile: jest.fn(() =>
+          Promise.resolve({
+            outcome: 'failed' as const,
+            reason: 'provider_unavailable' as const,
+            code: 'meta_network_error',
+          }),
+        ),
+      });
+      registry.resolve.mockReturnValue(adapter);
+
+      await expect(
+        executor.checkExisting(
+          buildPublication({
+            externalPublicationId: 'ig-container:container-1',
+          }),
+        ),
+      ).resolves.toEqual({ outcome: 'unsafe_to_retry' });
     });
   });
 });

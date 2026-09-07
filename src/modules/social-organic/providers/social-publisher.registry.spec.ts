@@ -9,6 +9,8 @@ import type { PublisherCapabilities } from './provider-capabilities';
 function fakeAdapter(provider: string): SocialPublisherAdapter {
   return {
     provider,
+    assetTypes: ['facebook_page'],
+    retrySafety: 'provider_idempotency_key',
     capabilities: (): PublisherCapabilities => ({
       provider,
       assetType: 'facebook_page',
@@ -40,13 +42,13 @@ describe('SocialPublisherRegistry', () => {
     expect(registry.registeredProviders).toEqual([]);
   });
 
-  it('resolves an adapter registered by provider key', () => {
+  it('resolves an adapter registered by provider and asset type', () => {
     const registry = new SocialPublisherRegistry();
     const meta = fakeAdapter('meta');
     registry.register(meta);
 
-    expect(registry.resolve('meta')).toBe(meta);
-    expect(registry.has('meta')).toBe(true);
+    expect(registry.resolve('meta', 'facebook_page')).toBe(meta);
+    expect(registry.has('meta', 'facebook_page')).toBe(true);
     expect(registry.registeredProviders).toEqual(['meta']);
   });
 
@@ -54,10 +56,10 @@ describe('SocialPublisherRegistry', () => {
     const registry = new SocialPublisherRegistry();
     registry.register(fakeAdapter('meta'));
 
-    expect(() => registry.resolve('tiktok')).toThrow(
+    expect(() => registry.resolve('tiktok', 'profile')).toThrow(
       UnregisteredSocialPublisherError,
     );
-    expect(registry.has('tiktok')).toBe(false);
+    expect(registry.has('tiktok', 'profile')).toBe(false);
   });
 
   it('register() adds an adapter after construction', () => {
@@ -66,7 +68,7 @@ describe('SocialPublisherRegistry', () => {
 
     registry.register(youtube);
 
-    expect(registry.resolve('youtube')).toBe(youtube);
+    expect(registry.resolve('youtube', 'facebook_page')).toBe(youtube);
   });
 
   it('a later registration for the same provider key replaces the earlier one', () => {
@@ -77,7 +79,23 @@ describe('SocialPublisherRegistry', () => {
     registry.register(first);
     registry.register(second);
 
-    expect(registry.resolve('meta')).toBe(second);
+    expect(registry.resolve('meta', 'facebook_page')).toBe(second);
+    expect(registry.registeredProviders).toEqual(['meta']);
+  });
+
+  it('keeps two asset-specific adapters under one provider key', () => {
+    const registry = new SocialPublisherRegistry();
+    const facebook = fakeAdapter('meta');
+    const instagram = {
+      ...fakeAdapter('meta'),
+      assetTypes: ['instagram_professional'],
+    };
+
+    registry.register(facebook);
+    registry.register(instagram);
+
+    expect(registry.resolve('meta', 'facebook_page')).toBe(facebook);
+    expect(registry.resolve('meta', 'instagram_professional')).toBe(instagram);
     expect(registry.registeredProviders).toEqual(['meta']);
   });
 });

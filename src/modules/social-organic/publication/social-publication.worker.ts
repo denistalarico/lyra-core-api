@@ -9,6 +9,7 @@ import { SocialPublicationRunService } from './social-publication-run.service';
 import type {
   SocialPublicationExistenceCheckResult,
   SocialPublicationExistenceChecker,
+  SocialPublicationProcessingIdentity,
   SocialPublicationExternalIdentity,
 } from './social-publication-run.service';
 import {
@@ -19,6 +20,8 @@ import { SocialPublicationConfigService } from './social-publication-config.serv
 
 const TICK_MS = 5_000;
 const CLAIM_LIMIT = 1;
+const RECONCILIATION_POLL_BASE_MS = 60_000;
+const RECONCILIATION_POLL_MAX_MS = 15 * 60_000;
 
 export const SOCIAL_PUBLICATION_EXECUTOR = Symbol(
   'SOCIAL_PUBLICATION_EXECUTOR',
@@ -27,7 +30,9 @@ export const SOCIAL_PUBLICATION_EXECUTOR = Symbol(
 export interface SocialPublicationExecutor extends SocialPublicationExistenceChecker {
   publish(
     publication: SocialPublicationEntity,
-  ): Promise<SocialPublicationExternalIdentity>;
+  ): Promise<
+    SocialPublicationExternalIdentity | SocialPublicationProcessingIdentity
+  >;
 }
 
 /** Carries only closed failure taxonomy and safe storage code across the port. */
@@ -95,6 +100,26 @@ export class SocialPublicationWorker {
 
     try {
       const identity = await this.executor.publish(publication);
+      if (isProcessingIdentity(identity)) {
+        if (publication.attempts >= publication.maxAttempts) {
+          await this.runService.markFailed({
+            publicationId: publication.id,
+            lockedBy: this.workerId,
+            reason: 'unknown',
+            errorCode: 'reconciliation_attempts_exhausted',
+          });
+          return;
+        }
+
+        await this.runService.markProcessing({
+          publicationId: publication.id,
+          lockedBy: this.workerId,
+          externalPublicationId: identity.externalPublicationId,
+          providerMetadata: identity.providerMetadata,
+          availableAt: nextReconciliationAvailableAt(publication.attempts),
+        });
+        return;
+      }
       await this.runService.markPublished({
         publicationId: publication.id,
         lockedBy: this.workerId,
@@ -119,6 +144,27 @@ export class SocialPublicationWorker {
             'unknown',
             'publication_execution_failed',
           );
+
+    if (failure.code === 'provider_publication_disabled') {
+      const availableAt = nextReconciliationAvailableAt(publication.attempts);
+      if (publication.externalPublicationId) {
+        await this.runService.markProcessing({
+          publicationId: publication.id,
+          lockedBy: this.workerId,
+          externalPublicationId: publication.externalPublicationId,
+          availableAt,
+        });
+      } else {
+        await this.runService.reschedule({
+          publicationId: publication.id,
+          lockedBy: this.workerId,
+          reason: 'provider_unavailable',
+          errorCode: failure.code,
+          availableAt,
+        });
+      }
+      return;
+    }
     const retry = shouldRetryPublication({
       reason: failure.reason,
       attempts: publication.attempts,
@@ -176,4 +222,25 @@ export class SocialPublicationWorker {
       }),
     });
   }
+}
+
+/** Exponential reconciliation polling, bounded so long provider jobs stay observable. */
+export function nextReconciliationAvailableAt(
+  attempts: number,
+  now = new Date(),
+): Date {
+  const exponent = Math.max(0, Math.trunc(attempts) - 1);
+  const delayMs = Math.min(
+    RECONCILIATION_POLL_MAX_MS,
+    RECONCILIATION_POLL_BASE_MS * 2 ** exponent,
+  );
+  return new Date(now.getTime() + delayMs);
+}
+
+function isProcessingIdentity(
+  value:
+    | SocialPublicationExternalIdentity
+    | SocialPublicationProcessingIdentity,
+): value is SocialPublicationProcessingIdentity {
+  return 'outcome' in value && value.outcome === 'processing';
 }

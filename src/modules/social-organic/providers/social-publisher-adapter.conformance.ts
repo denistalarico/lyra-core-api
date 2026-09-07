@@ -34,6 +34,12 @@ export function describeSocialPublisherAdapterConformance(
       const adapter = fixtures.createAdapter();
       expect(typeof adapter.provider).toBe('string');
       expect(adapter.provider.length).toBeGreaterThan(0);
+      expect(adapter.assetTypes).toContain(fixtures.assetType);
+      expect([
+        'provider_idempotency_key',
+        'pre_retry_existence_check',
+        'non_retryable_after_send',
+      ]).toContain(adapter.retrySafety);
     });
 
     it('capabilities() returns a declaration scoped to the requested asset type', () => {

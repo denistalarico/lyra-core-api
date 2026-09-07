@@ -19,8 +19,7 @@ export class SocialPublicationConfigService {
 
   /**
    * The provider key stays open-ended, matching SocialPublication.provider.
-   * For example, `meta-facebook` reads
-   * `SOCIAL_PUBLICATION_META_FACEBOOK_ENABLED`.
+   * For example, provider `meta` reads `SOCIAL_PUBLICATION_META_ENABLED`.
    */
   isProviderEnabled(provider: string): boolean {
     return this.readEnabled(this.providerEnabledEnv(provider));

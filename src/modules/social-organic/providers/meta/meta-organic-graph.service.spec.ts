@@ -219,6 +219,129 @@ describe('MetaOrganicGraphService', () => {
     ).resolves.toBeNull();
   });
 
+  it('publishes a Page feed post with form data and the token only in the Authorization header', async () => {
+    const calls: Array<{ url: URL; init: RequestInit }> = [];
+    global.fetch = jest.fn(async (url: URL, init: RequestInit) => {
+      calls.push({ url, init });
+      return response({ id: 'page-1_post-1' });
+    }) as never;
+
+    await expect(
+      service.publishFacebookFeed({
+        pageId: 'page-1',
+        pageAccessToken: 'page-token',
+        message: 'Hello',
+        photoId: 'photo-1',
+      }),
+    ).resolves.toEqual({ id: 'page-1_post-1' });
+
+    expect(calls[0].url.pathname).toBe('/v24.0/page-1/feed');
+    expect(calls[0].url.searchParams.has('access_token')).toBe(false);
+    expect(calls[0].init.headers).toEqual(
+      expect.objectContaining({ Authorization: 'Bearer page-token' }),
+    );
+    const body = calls[0].init.body as URLSearchParams;
+    expect(body.get('message')).toBe('Hello');
+    expect(body.get('attached_media[0]')).toBe(
+      JSON.stringify({ media_fbid: 'photo-1' }),
+    );
+  });
+
+  it('refuses a provider-supplied video upload URL outside rupload.facebook.com', async () => {
+    global.fetch = jest.fn(async () =>
+      response({
+        video_id: 'video-1',
+        upload_url: 'https://evil.example/collect',
+      }),
+    ) as never;
+
+    await expect(
+      service.startFacebookVideoUpload({
+        pageId: 'page-1',
+        pageAccessToken: 'page-token',
+        edge: 'video_reels',
+      }),
+    ).rejects.toMatchObject({ code: 'meta_invalid_response' });
+  });
+
+  it('treats Facebook video finish as accepted and waits for status confirmation', async () => {
+    global.fetch = jest
+      .fn()
+      .mockResolvedValueOnce(response({ success: true }))
+      .mockResolvedValueOnce(
+        response({
+          status: {
+            video_status: 'ready',
+            publishing_phase: {
+              status: 'complete',
+              publish_status: 'published',
+            },
+          },
+        }),
+      );
+
+    await expect(
+      service.finishFacebookVideoUpload({
+        pageId: 'page-1',
+        pageAccessToken: 'page-token',
+        edge: 'video_reels',
+        videoId: 'video-1',
+      }),
+    ).resolves.toEqual({ id: 'video-1' });
+    await expect(
+      service.getFacebookVideoStatus({
+        videoId: 'video-1',
+        pageAccessToken: 'page-token',
+      }),
+    ).resolves.toBe('PUBLISHED');
+  });
+
+  it('creates, checks and publishes an Instagram container on the pinned Graph version', async () => {
+    const calls: Array<{ url: URL; init: RequestInit }> = [];
+    global.fetch = jest.fn(async (url: URL, init: RequestInit) => {
+      calls.push({ url, init });
+      if (url.pathname.endsWith('/media'))
+        return response({ id: 'container-1' });
+      if (url.pathname.endsWith('/media_publish')) {
+        return response({ id: 'ig-media-1' });
+      }
+      return response({ status_code: 'FINISHED' });
+    }) as never;
+
+    await expect(
+      service.createInstagramContainer({
+        accountId: 'ig-1',
+        pageAccessToken: 'page-token',
+        sourceUrl: 'https://signed.test/reel.mp4',
+        mediaKind: 'video',
+        placement: 'reel',
+        caption: 'Caption',
+      }),
+    ).resolves.toEqual({ id: 'container-1' });
+    await expect(
+      service.getInstagramContainerStatus({
+        containerId: 'container-1',
+        pageAccessToken: 'page-token',
+      }),
+    ).resolves.toBe('FINISHED');
+    await expect(
+      service.publishInstagramContainer({
+        accountId: 'ig-1',
+        pageAccessToken: 'page-token',
+        containerId: 'container-1',
+      }),
+    ).resolves.toEqual({ id: 'ig-media-1' });
+
+    expect(calls.map(({ url }) => url.pathname)).toEqual([
+      '/v24.0/ig-1/media',
+      '/v24.0/container-1',
+      '/v24.0/ig-1/media_publish',
+    ]);
+    expect(
+      calls.every(({ url }) => !url.searchParams.has('access_token')),
+    ).toBe(true);
+  });
+
   it('rejects malformed provider responses', async () => {
     global.fetch = jest.fn(async () => response({ data: [{}] })) as never;
     await expect(service.listFacebookPages('token')).rejects.toMatchObject({

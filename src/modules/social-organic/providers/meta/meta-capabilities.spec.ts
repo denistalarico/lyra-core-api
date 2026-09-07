@@ -140,10 +140,10 @@ describe('Meta capability declaration (MA2.1 — per placement)', () => {
       expect(media.story.maxBytes).toBe(100 * 1024 * 1024);
     });
 
-    it('carousel resolves its own limits (image only, max 10 items)', () => {
-      const { media } = META_INSTAGRAM_PROFESSIONAL_CAPABILITIES;
-      expect(media.carousel.acceptedMimeTypes).toEqual(['image/jpeg']);
-      expect(media.carousel.maxItemsPerPost).toBe(10);
+    it('does not advertise carousel while Publication persists only one mediaAssetId', () => {
+      const { media, placements } = META_INSTAGRAM_PROFESSIONAL_CAPABILITIES;
+      expect(placements).not.toContain('carousel');
+      expect(media.carousel).toBeUndefined();
     });
   });
 

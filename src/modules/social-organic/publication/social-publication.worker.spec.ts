@@ -4,6 +4,7 @@ import {
   SocialPublicationExecutionError,
   SocialPublicationExecutor,
   SocialPublicationWorker,
+  nextReconciliationAvailableAt,
 } from './social-publication.worker';
 import type { SocialPublicationConfigService } from './social-publication-config.service';
 
@@ -21,6 +22,7 @@ function createHarness(input: {
   const runService = {
     claim: jest.fn(() => Promise.resolve([row])),
     markPublished: jest.fn(() => Promise.resolve(true)),
+    markProcessing: jest.fn(() => Promise.resolve(true)),
     markFailed: jest.fn(() => Promise.resolve(true)),
     reschedule: jest.fn(() => Promise.resolve(true)),
     recoverStale: jest.fn(() => Promise.resolve({})),
@@ -54,6 +56,20 @@ function createHarness(input: {
 }
 
 describe('SocialPublicationWorker', () => {
+  it('backs off reconciliation polls exponentially with a bounded ceiling', () => {
+    const now = new Date('2026-09-07T12:00:00.000Z');
+
+    expect(nextReconciliationAvailableAt(1, now).getTime()).toBe(
+      now.getTime() + 60_000,
+    );
+    expect(nextReconciliationAvailableAt(3, now).getTime()).toBe(
+      now.getTime() + 4 * 60_000,
+    );
+    expect(nextReconciliationAvailableAt(99, now).getTime()).toBe(
+      now.getTime() + 15 * 60_000,
+    );
+  });
+
   it('does not requeue a non-retryable failure', async () => {
     const { worker, runService, executor } = createHarness({
       error: new SocialPublicationExecutionError(
@@ -68,6 +84,64 @@ describe('SocialPublicationWorker', () => {
       expect.objectContaining({ reason: 'payload_invalid' }),
     );
     expect(runService.reschedule).not.toHaveBeenCalled();
+    expect(executor.checkExisting).not.toHaveBeenCalled();
+  });
+
+  it('persists an asynchronous provider identity and schedules reconciliation without marking published', async () => {
+    const row = {
+      id: 'publication-a',
+      attempts: 1,
+      maxAttempts: 5,
+    } as SocialPublicationEntity;
+    const runService = {
+      claim: jest.fn(() => Promise.resolve([row])),
+      markPublished: jest.fn(),
+      markProcessing: jest.fn(() => Promise.resolve(true)),
+      markFailed: jest.fn(),
+      reschedule: jest.fn(),
+    };
+    const executor = {
+      publish: jest.fn(() =>
+        Promise.resolve({
+          outcome: 'processing' as const,
+          externalPublicationId: 'ig-container:container-1',
+          providerMetadata: { phase: 'container_processing' },
+        }),
+      ),
+      checkExisting: jest.fn(),
+    };
+    const worker = new SocialPublicationWorker(
+      runService as unknown as SocialPublicationRunService,
+      executor,
+      { enabled: true } as SocialPublicationConfigService,
+    );
+
+    await worker.processDue();
+
+    expect(runService.markProcessing).toHaveBeenCalledWith(
+      expect.objectContaining({
+        externalPublicationId: 'ig-container:container-1',
+      }),
+    );
+    expect(runService.markPublished).not.toHaveBeenCalled();
+    expect(runService.markFailed).not.toHaveBeenCalled();
+  });
+
+  it('reschedules a provider-disabled row without an existence check or external retry', async () => {
+    const { worker, runService, executor } = createHarness({
+      error: new SocialPublicationExecutionError(
+        'provider_unavailable',
+        'provider_publication_disabled',
+      ),
+    });
+
+    await worker.processDue();
+
+    expect(runService.reschedule).toHaveBeenCalledWith(
+      expect.objectContaining({
+        errorCode: 'provider_publication_disabled',
+      }),
+    );
     expect(executor.checkExisting).not.toHaveBeenCalled();
   });
 

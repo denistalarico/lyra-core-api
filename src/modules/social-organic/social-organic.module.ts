@@ -31,9 +31,12 @@ import {
 import { SocialPublicationExecutorService } from './publication/social-publication.executor';
 import { SOCIAL_PUBLICATION_EXECUTOR } from './publication/social-publication.worker';
 import {
+  FacebookPublisherAdapter,
+  InstagramPublisherAdapter,
   MetaOrganicAssetDiscoveryService,
   MetaOrganicGraphService,
   MetaOrganicOAuthProvider,
+  MetaPublisherRegistration,
   SocialPublisherRegistry,
 } from './providers';
 
@@ -79,6 +82,9 @@ export function createMetaOrganicOAuthProviders(
     SocialPublicationWorker,
     SocialPublicationConfigService,
     SocialPublisherRegistry,
+    FacebookPublisherAdapter,
+    InstagramPublisherAdapter,
+    MetaPublisherRegistration,
     SettingsCryptoService,
     MediaPreparationService,
     SocialPublicationExecutorService,

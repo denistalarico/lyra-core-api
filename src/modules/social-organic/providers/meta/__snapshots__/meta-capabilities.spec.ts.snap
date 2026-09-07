@@ -44,7 +44,7 @@ exports[`Meta capability declaration (MA2.1 — per placement) matches the commi
     "reel",
   ],
   "provider": "meta",
-  "requiresReconciliation": false,
+  "requiresReconciliation": true,
   "supportsCaption": true,
   "supportsFirstComment": false,
   "supportsHashtags": false,
@@ -57,18 +57,6 @@ exports[`Meta capability declaration (MA2.1 — per placement) matches the commi
 {
   "assetType": "instagram_professional",
   "media": {
-    "carousel": {
-      "acceptedMimeTypes": [
-        "image/jpeg",
-      ],
-      "aspectRatios": [
-        "4:5",
-        "1:1",
-        "1.91:1",
-      ],
-      "maxBytes": 8388608,
-      "maxItemsPerPost": 10,
-    },
     "feed": {
       "acceptedMimeTypes": [
         "image/jpeg",
@@ -103,10 +91,9 @@ exports[`Meta capability declaration (MA2.1 — per placement) matches the commi
     "feed",
     "story",
     "reel",
-    "carousel",
   ],
   "provider": "meta",
-  "requiresReconciliation": false,
+  "requiresReconciliation": true,
   "supportsCaption": true,
   "supportsFirstComment": false,
   "supportsHashtags": false,

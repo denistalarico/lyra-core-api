@@ -137,15 +137,14 @@ export const META_FACEBOOK_PAGE_CAPABILITIES: PublisherCapabilities = {
   supportsCaption: true,
   supportsFirstComment: false,
   supportsHashtags: false,
-  requiresReconciliation: false,
+  requiresReconciliation: true,
   supportsRemoval: true,
 };
 
 /**
  * Instagram Professional (`instagram_professional`).
  *
- * Declared placements (MVP): `feed` (image only), `story`, `reel`,
- * `carousel`.
+ * Declared placements (MVP): `feed` (image only), `story`, `reel`.
  *
  * Not declared:
  *   - Feed video: the ig-user/media reference documents `media_type=REELS`
@@ -153,19 +152,13 @@ export const META_FACEBOOK_PAGE_CAPABILITIES: PublisherCapabilities = {
  *     folds "video in feed" into Reels. `feed` here stays image-only to
  *     match that, consistent with blueprint §17.2's "Video / Reels" row
  *     being one combined entry, not two.
- *   - Carousel item-level video: the Content Publishing guide documents
- *     carousels as up to 10 images/videos/mixed, cropped to the first
- *     item's ratio, but does not give per-item-type size/duration bounds
- *     distinct from the single-item flows. `carousel` below reuses `feed`'s
- *     (image) bounds only — a video carousel item is out of MVP scope here,
- *     not silently accepted with guessed limits.
+ *   - Carousel as a whole: Meta supports it, but Lyra's current publication
+ *     contract persists one `mediaAssetId`. Advertising carousel support here
+ *     would let schedule-time validation pass a payload the adapter cannot
+ *     represent. MA3 therefore keeps it undeclared until a dedicated
+ *     multi-media schema/contract task lands.
  */
-const INSTAGRAM_PROFESSIONAL_PLACEMENTS = [
-  'feed',
-  'story',
-  'reel',
-  'carousel',
-] as const;
+const INSTAGRAM_PROFESSIONAL_PLACEMENTS = ['feed', 'story', 'reel'] as const;
 
 export const META_INSTAGRAM_PROFESSIONAL_CAPABILITIES: PublisherCapabilities = {
   provider: 'meta',
@@ -219,28 +212,12 @@ export const META_INSTAGRAM_PROFESSIONAL_CAPABILITIES: PublisherCapabilities = {
       maxBytes: 300 * 1024 * 1024,
       aspectRatios: ['9:16', '1:1', '4:5'],
     },
-    /**
-     * `media_type=CAROUSEL`, max 10 items. All items cropped to the
-     * first item's aspect ratio (default 1:1). Item-level size/type
-     * bounds distinct from single-item flows are not documented — this
-     * MVP declares carousel as image-only, reusing `feed`'s image
-     * bounds, and leaves carousel video out of scope (see file-level
-     * comment) rather than guessing a per-item video limit.
-     * [Content Publishing guide]
-     * (https://developers.facebook.com/docs/instagram-platform/content-publishing)
-     */
-    carousel: {
-      acceptedMimeTypes: ['image/jpeg'],
-      maxBytes: 8 * 1024 * 1024,
-      aspectRatios: ['4:5', '1:1', '1.91:1'],
-      maxItemsPerPost: 10,
-    },
   },
   supportsScheduling: false,
   supportsCaption: true,
   supportsFirstComment: false,
   supportsHashtags: false,
-  requiresReconciliation: false,
+  requiresReconciliation: true,
   supportsRemoval: false,
 };
 

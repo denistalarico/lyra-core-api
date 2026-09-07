@@ -24,6 +24,17 @@ export type ValidationResult =
   | { readonly valid: true }
   | { readonly valid: false; readonly issues: readonly ValidationIssue[] };
 
+/** Safe provider-operation failure for adapter stages that cannot return a result. */
+export class SocialPublisherOperationError extends Error {
+  constructor(
+    readonly reason: SocialPublicationFailureReason,
+    readonly code: string,
+  ) {
+    super(code);
+    this.name = 'SocialPublisherOperationError';
+  }
+}
+
 export type MediaPreparationInput = {
   readonly credential: ResolvedOrganicCredential;
   readonly payload: PublicationPayload;
@@ -88,6 +99,13 @@ export type RemovalInput = {
  */
 export interface SocialPublisherAdapter {
   readonly provider: string;
+  /** Asset types owned by this adapter under the provider key. */
+  readonly assetTypes: readonly string[];
+  /** Blueprint §20.1 Layer 2 contract for a lost publish response. */
+  readonly retrySafety:
+    | 'provider_idempotency_key'
+    | 'pre_retry_existence_check'
+    | 'non_retryable_after_send';
 
   capabilities(assetType: string): PublisherCapabilities;
 

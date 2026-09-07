@@ -39,6 +39,8 @@ function buildTestPayload(): PublicationPayload {
 function buildFakeAdapter(): SocialPublisherAdapter {
   return {
     provider: 'fake',
+    assetTypes: ['facebook_page'],
+    retrySafety: 'provider_idempotency_key',
     capabilities: (assetType: string): PublisherCapabilities => ({
       provider: 'fake',
       assetType,

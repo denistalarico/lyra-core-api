@@ -17,6 +17,12 @@ export type SocialPublicationExternalIdentity = {
   providerMetadata?: Record<string, unknown>;
 };
 
+export type SocialPublicationProcessingIdentity = {
+  outcome: 'processing';
+  externalPublicationId: string;
+  providerMetadata?: Record<string, unknown>;
+};
+
 export type SocialPublicationExistenceCheckResult =
   | ({ outcome: 'published' } & SocialPublicationExternalIdentity)
   | { outcome: 'absent' }
@@ -106,7 +112,8 @@ export class SocialPublicationRunService {
       const rows = await manager.query<{ id: string }[]>(
         `SELECT id
            FROM social_publications
-          WHERE status = 'queued'
+          WHERE (status = 'queued'
+                 OR (status = 'processing' AND locked_by IS NULL))
             AND available_at <= $1
           ORDER BY available_at, created_at
           FOR UPDATE SKIP LOCKED
@@ -124,7 +131,8 @@ export class SocialPublicationRunService {
                 attempts = attempts + 1,
                 updated_at = now()
           WHERE id = ANY($1::uuid[])
-            AND status = 'queued'
+            AND (status = 'queued'
+                 OR (status = 'processing' AND locked_by IS NULL))
           RETURNING id`,
         [rows.map((row) => row.id), now, input.workerId],
       );
@@ -167,6 +175,41 @@ export class SocialPublicationRunService {
         input.identity.externalPublicationId,
         input.identity.externalPermalink,
         JSON.stringify(input.identity.providerMetadata ?? {}),
+      ],
+    );
+
+    return returnedRows(result).length > 0;
+  }
+
+  /** Persists a provider container and releases it for a later reconcile poll. */
+  async markProcessing(input: {
+    publicationId: string;
+    lockedBy: string;
+    externalPublicationId: string;
+    providerMetadata?: Record<string, unknown>;
+    availableAt: Date;
+  }): Promise<boolean> {
+    const result: unknown = await this.dataSource.query(
+      `UPDATE social_publications
+          SET status = 'processing',
+              external_publication_id = $3,
+              provider_metadata = $4::jsonb,
+              available_at = $5,
+              last_error_code = NULL,
+              failure_reason = NULL,
+              locked_at = NULL,
+              locked_by = NULL,
+              updated_at = now()
+        WHERE id = $1
+          AND status = 'processing'
+          AND locked_by = $2
+        RETURNING id`,
+      [
+        input.publicationId,
+        input.lockedBy,
+        input.externalPublicationId,
+        JSON.stringify(input.providerMetadata ?? {}),
+        input.availableAt,
       ],
     );
 

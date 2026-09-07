@@ -47,6 +47,27 @@ export type MetaOrganicInstagramAccount = {
   avatarUrl: string | null;
 };
 
+export type MetaOrganicPublishedObject = {
+  id: string;
+};
+
+export type MetaOrganicVideoUpload = {
+  videoId: string;
+  uploadUrl: URL;
+};
+
+export type MetaOrganicInstagramContainerStatus =
+  | 'EXPIRED'
+  | 'ERROR'
+  | 'FINISHED'
+  | 'IN_PROGRESS'
+  | 'PUBLISHED';
+
+export type MetaOrganicFacebookVideoStatus =
+  | 'ERROR'
+  | 'PROCESSING'
+  | 'PUBLISHED';
+
 @Injectable()
 export class MetaOrganicGraphService {
   getLoginConfig(): MetaOrganicLoginConfig {
@@ -169,6 +190,253 @@ export class MetaOrganicGraphService {
     }
   }
 
+  async uploadFacebookPhoto(input: {
+    pageId: string;
+    pageAccessToken: string;
+    sourceUrl: string;
+  }): Promise<MetaOrganicPublishedObject> {
+    return this.readPublishedObject(
+      await this.requestForm(
+        this.graphUrl(`${encodeURIComponent(input.pageId)}/photos`),
+        input.pageAccessToken,
+        { url: input.sourceUrl, published: 'false' },
+      ),
+    );
+  }
+
+  async publishFacebookFeed(input: {
+    pageId: string;
+    pageAccessToken: string;
+    message: string | null;
+    photoId?: string;
+  }): Promise<MetaOrganicPublishedObject> {
+    const fields: Record<string, string> = {};
+    if (input.message) fields.message = input.message;
+    if (input.photoId) {
+      fields['attached_media[0]'] = JSON.stringify({
+        media_fbid: input.photoId,
+      });
+    }
+
+    return this.readPublishedObject(
+      await this.requestForm(
+        this.graphUrl(`${encodeURIComponent(input.pageId)}/feed`),
+        input.pageAccessToken,
+        fields,
+      ),
+    );
+  }
+
+  async publishFacebookPhotoStory(input: {
+    pageId: string;
+    pageAccessToken: string;
+    photoId: string;
+  }): Promise<MetaOrganicPublishedObject> {
+    return this.readPublishedObject(
+      await this.requestForm(
+        this.graphUrl(`${encodeURIComponent(input.pageId)}/photo_stories`),
+        input.pageAccessToken,
+        { photo_id: input.photoId },
+      ),
+      ['post_id'],
+    );
+  }
+
+  async startFacebookVideoUpload(input: {
+    pageId: string;
+    pageAccessToken: string;
+    edge: 'video_reels' | 'video_stories';
+  }): Promise<MetaOrganicVideoUpload> {
+    const data = await this.requestForm(
+      this.graphUrl(
+        `${encodeURIComponent(input.pageId)}/${encodeURIComponent(input.edge)}`,
+      ),
+      input.pageAccessToken,
+      { upload_phase: 'start' },
+    );
+    if (!isRecord(data)) throw this.invalidResponse();
+
+    const videoId = readRequiredString(data.video_id);
+    const uploadUrlValue = readRequiredString(data.upload_url);
+    if (!videoId || !uploadUrlValue) throw this.invalidResponse();
+
+    const uploadUrl = this.requireMetaUploadUrl(uploadUrlValue);
+    return { videoId, uploadUrl };
+  }
+
+  async uploadFacebookVideoByUrl(input: {
+    uploadUrl: URL;
+    pageAccessToken: string;
+    sourceUrl: string;
+  }): Promise<void> {
+    const uploadUrl = this.requireMetaUploadUrl(input.uploadUrl.toString());
+    const data = await this.requestJson(uploadUrl, {
+      method: 'POST',
+      headers: {
+        Authorization: `OAuth ${input.pageAccessToken}`,
+        file_url: input.sourceUrl,
+      },
+    });
+
+    if (
+      !isRecord(data) ||
+      (data.success !== true &&
+        typeof data.h !== 'string' &&
+        !isRecord(data.status))
+    ) {
+      throw this.invalidResponse();
+    }
+  }
+
+  async finishFacebookVideoUpload(input: {
+    pageId: string;
+    pageAccessToken: string;
+    edge: 'video_reels' | 'video_stories';
+    videoId: string;
+    description?: string | null;
+  }): Promise<MetaOrganicPublishedObject> {
+    const fields: Record<string, string> = {
+      upload_phase: 'finish',
+      video_id: input.videoId,
+      video_state: 'PUBLISHED',
+    };
+    if (input.description) fields.description = input.description;
+
+    const data = await this.requestForm(
+      this.graphUrl(
+        `${encodeURIComponent(input.pageId)}/${encodeURIComponent(input.edge)}`,
+      ),
+      input.pageAccessToken,
+      fields,
+    );
+    if (!isRecord(data) || data.success !== true) {
+      throw this.invalidResponse();
+    }
+
+    return {
+      id:
+        readRequiredString(data.post_id) ??
+        readRequiredString(data.video_id) ??
+        input.videoId,
+    };
+  }
+
+  async getFacebookVideoStatus(input: {
+    videoId: string;
+    pageAccessToken: string;
+  }): Promise<MetaOrganicFacebookVideoStatus> {
+    const url = this.graphUrl(encodeURIComponent(input.videoId));
+    url.searchParams.set('fields', 'status');
+    const data = await this.requestJson(
+      url,
+      this.authorized(input.pageAccessToken),
+    );
+    if (!isRecord(data) || !isRecord(data.status)) {
+      throw this.invalidResponse();
+    }
+
+    const status = data.status;
+    const publishingStatus = readNestedStatus(status.publishing_phase);
+    const values = [
+      readStatus(status.video_status),
+      readNestedStatus(status.uploading_phase),
+      readNestedStatus(status.processing_phase),
+      publishingStatus,
+      readNestedPublishStatus(status.publishing_phase),
+    ].filter((value): value is string => value !== null);
+
+    if (values.some((value) => value === 'ERROR' || value === 'FAILED')) {
+      return 'ERROR';
+    }
+    if (
+      values.includes('PUBLISHED') ||
+      (publishingStatus === 'COMPLETE' && !values.includes('IN_PROGRESS'))
+    ) {
+      return 'PUBLISHED';
+    }
+    return 'PROCESSING';
+  }
+
+  async createInstagramContainer(input: {
+    accountId: string;
+    pageAccessToken: string;
+    sourceUrl: string;
+    mediaKind: 'image' | 'video';
+    placement: 'feed' | 'reel' | 'story';
+    caption: string | null;
+  }): Promise<MetaOrganicPublishedObject> {
+    const fields: Record<string, string> = {};
+    fields[input.mediaKind === 'video' ? 'video_url' : 'image_url'] =
+      input.sourceUrl;
+    if (input.caption) fields.caption = input.caption;
+    if (input.placement === 'reel') {
+      fields.media_type = 'REELS';
+      fields.share_to_feed = 'true';
+    } else if (input.placement === 'story') {
+      fields.media_type = 'STORIES';
+    }
+
+    return this.readPublishedObject(
+      await this.requestForm(
+        this.graphUrl(`${encodeURIComponent(input.accountId)}/media`),
+        input.pageAccessToken,
+        fields,
+      ),
+    );
+  }
+
+  async getInstagramContainerStatus(input: {
+    containerId: string;
+    pageAccessToken: string;
+  }): Promise<MetaOrganicInstagramContainerStatus> {
+    const url = this.graphUrl(encodeURIComponent(input.containerId));
+    url.searchParams.set('fields', 'status_code');
+    const data = await this.requestJson(
+      url,
+      this.authorized(input.pageAccessToken),
+    );
+    if (!isRecord(data)) throw this.invalidResponse();
+
+    const status = readRequiredString(data.status_code);
+    if (
+      status !== 'EXPIRED' &&
+      status !== 'ERROR' &&
+      status !== 'FINISHED' &&
+      status !== 'IN_PROGRESS' &&
+      status !== 'PUBLISHED'
+    ) {
+      throw this.invalidResponse();
+    }
+    return status;
+  }
+
+  async publishInstagramContainer(input: {
+    accountId: string;
+    pageAccessToken: string;
+    containerId: string;
+  }): Promise<MetaOrganicPublishedObject> {
+    return this.readPublishedObject(
+      await this.requestForm(
+        this.graphUrl(`${encodeURIComponent(input.accountId)}/media_publish`),
+        input.pageAccessToken,
+        { creation_id: input.containerId },
+      ),
+    );
+  }
+
+  async deletePublishedObject(input: {
+    objectId: string;
+    accessToken: string;
+  }): Promise<void> {
+    const data = await this.requestJson(
+      this.graphUrl(encodeURIComponent(input.objectId)),
+      this.authorized(input.accessToken, 'DELETE'),
+    );
+    if (!isRecord(data) || data.success !== true) {
+      throw this.invalidResponse();
+    }
+  }
+
   private oauthTokenUrl(): URL {
     return new URL(
       `${META_ORGANIC_GRAPH_ORIGIN}/${META_ORGANIC_GRAPH_API_VERSION}/oauth/access_token`,
@@ -186,6 +454,53 @@ export class MetaOrganicGraphService {
       method,
       headers: { Authorization: `Bearer ${accessToken}` },
     };
+  }
+
+  private requestForm(
+    url: URL,
+    accessToken: string,
+    fields: Record<string, string>,
+  ): Promise<unknown> {
+    return this.requestJson(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: new URLSearchParams(fields),
+    });
+  }
+
+  private readPublishedObject(
+    data: unknown,
+    preferredFields: readonly string[] = ['id'],
+  ): MetaOrganicPublishedObject {
+    if (!isRecord(data)) throw this.invalidResponse();
+
+    for (const field of preferredFields) {
+      const id = readRequiredString(data[field]);
+      if (id) return { id };
+    }
+    throw this.invalidResponse();
+  }
+
+  private requireMetaUploadUrl(value: string): URL {
+    let parsed: URL;
+    try {
+      parsed = new URL(value);
+    } catch {
+      throw this.invalidResponse();
+    }
+    if (
+      parsed.protocol !== 'https:' ||
+      parsed.hostname !== 'rupload.facebook.com' ||
+      parsed.username ||
+      parsed.password ||
+      parsed.hash
+    ) {
+      throw this.invalidResponse();
+    }
+    return parsed;
   }
 
   private async requestJson(url: URL, init: RequestInit): Promise<unknown> {
@@ -385,4 +700,18 @@ function readFiniteNumber(value: unknown): number | null {
   if (value === undefined || value === null || value === '') return null;
   const parsed = typeof value === 'number' ? value : Number(value);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function readStatus(value: unknown): string | null {
+  return typeof value === 'string' && value.trim()
+    ? value.trim().toUpperCase()
+    : null;
+}
+
+function readNestedStatus(value: unknown): string | null {
+  return isRecord(value) ? readStatus(value.status) : null;
+}
+
+function readNestedPublishStatus(value: unknown): string | null {
+  return isRecord(value) ? readStatus(value.publish_status) : null;
 }

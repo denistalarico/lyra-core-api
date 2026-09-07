@@ -10,8 +10,10 @@ import type {
   PublicationExecutionInput,
   PublicationPayload,
 } from '../providers/social-publisher.adapter';
+import { SocialPublisherOperationError } from '../providers/social-publisher.adapter';
 import { SocialPublisherRegistry } from '../providers/social-publisher.registry';
 import { SocialPublicationEntity } from './entities/social-publication.entity';
+import { SocialPublicationConfigService } from './social-publication-config.service';
 import {
   SocialPublicationExecutionError,
   type SocialPublicationExecutor,
@@ -19,6 +21,7 @@ import {
 import type {
   SocialPublicationExistenceCheckResult,
   SocialPublicationExternalIdentity,
+  SocialPublicationProcessingIdentity,
 } from './social-publication-run.service';
 
 type PayloadSnapshotShape = {
@@ -59,13 +62,43 @@ export class SocialPublicationExecutorService implements SocialPublicationExecut
     private readonly credentialResolver: SocialOrganicCredentialResolver,
     private readonly mediaAssetResolver: MediaAssetResolverService,
     private readonly mediaPreparationService: MediaPreparationService,
+    private readonly config: SocialPublicationConfigService,
   ) {}
 
   async publish(
     publication: SocialPublicationEntity,
-  ): Promise<SocialPublicationExternalIdentity> {
-    const adapter = this.registry.resolve(publication.provider);
+  ): Promise<
+    SocialPublicationExternalIdentity | SocialPublicationProcessingIdentity
+  > {
     const asset = await this.requireAsset(publication);
+    const adapter = this.registry.resolve(
+      publication.provider,
+      asset.assetType,
+    );
+
+    if (!this.config.isProviderEnabled(publication.provider)) {
+      throw new SocialPublicationExecutionError(
+        'provider_unavailable',
+        'provider_publication_disabled',
+      );
+    }
+
+    if (publication.externalPublicationId) {
+      if (!adapter.reconcile) {
+        throw new SocialPublicationExecutionError(
+          'unknown',
+          'publication_reconciliation_unavailable',
+        );
+      }
+      const credential = await this.resolveCredential(publication);
+      return this.normalizeResult(
+        await adapter.reconcile({
+          credential,
+          externalPublicationId: publication.externalPublicationId,
+        }),
+      );
+    }
+
     const payload = this.buildPayload(publication, asset.assetType);
 
     const providerValidation = adapter.validate(payload);
@@ -76,12 +109,7 @@ export class SocialPublicationExecutorService implements SocialPublicationExecut
       );
     }
 
-    const credential = await this.credentialResolver.resolve({
-      assetId: publication.assetId,
-      tenantId: publication.tenantId,
-      workspaceId: publication.workspaceId,
-      agencyClientId: publication.agencyClientId,
-    });
+    const credential = await this.resolveCredential(publication);
 
     const preparedMedia =
       payload.mediaAssetId === null
@@ -101,48 +129,30 @@ export class SocialPublicationExecutorService implements SocialPublicationExecut
       idempotencyKey: publication.idempotencyKey,
     };
 
-    const result = await adapter.publish(executionInput);
-
-    if (result.outcome === 'failed') {
-      throw new SocialPublicationExecutionError(result.reason, result.code);
-    }
-
-    if (result.outcome === 'processing') {
-      // Async providers confirm via reconcile(); the worker only records
-      // terminal identities, so treat "accepted" as not-yet-publishable here.
-      throw new SocialPublicationExecutionError(
-        'provider_unavailable',
-        'publication_processing_requires_reconciliation',
-      );
-    }
-
-    return {
-      publishedAt: result.publishedAt,
-      externalPublicationId: result.externalPublicationId,
-      externalPermalink: result.externalPermalink,
-      providerMetadata: result.providerMetadata,
-    };
+    return this.normalizeResult(await adapter.publish(executionInput));
   }
 
   async checkExisting(
     publication: SocialPublicationEntity,
   ): Promise<SocialPublicationExistenceCheckResult> {
-    if (!this.registry.has(publication.provider)) {
+    if (!this.config.isProviderEnabled(publication.provider)) {
+      return { outcome: 'unsafe_to_retry' };
+    }
+    const asset = await this.requireAsset(publication).catch(() => null);
+    if (!asset || !this.registry.has(publication.provider, asset.assetType)) {
       return { outcome: 'unsafe_to_retry' };
     }
 
-    const adapter = this.registry.resolve(publication.provider);
+    const adapter = this.registry.resolve(
+      publication.provider,
+      asset.assetType,
+    );
     if (!adapter.reconcile || !publication.externalPublicationId) {
       return { outcome: 'unsafe_to_retry' };
     }
 
     try {
-      const credential = await this.credentialResolver.resolve({
-        assetId: publication.assetId,
-        tenantId: publication.tenantId,
-        workspaceId: publication.workspaceId,
-        agencyClientId: publication.agencyClientId,
-      });
+      const credential = await this.resolveCredential(publication);
 
       const result = await adapter.reconcile({
         credential,
@@ -163,10 +173,40 @@ export class SocialPublicationExecutorService implements SocialPublicationExecut
         return { outcome: 'unsafe_to_retry' };
       }
 
-      return { outcome: 'absent' };
+      return result.reason === 'media_rejected' ||
+        result.reason === 'payload_invalid'
+        ? { outcome: 'absent' }
+        : { outcome: 'unsafe_to_retry' };
     } catch {
       return { outcome: 'unsafe_to_retry' };
     }
+  }
+
+  private normalizeResult(
+    result: Awaited<
+      ReturnType<ReturnType<SocialPublisherRegistry['resolve']>['publish']>
+    >,
+  ): SocialPublicationExternalIdentity | SocialPublicationProcessingIdentity {
+    if (result.outcome === 'failed') {
+      throw new SocialPublicationExecutionError(result.reason, result.code);
+    }
+    if (result.outcome === 'processing') return result;
+
+    return {
+      publishedAt: result.publishedAt,
+      externalPublicationId: result.externalPublicationId,
+      externalPermalink: result.externalPermalink,
+      providerMetadata: result.providerMetadata,
+    };
+  }
+
+  private resolveCredential(publication: SocialPublicationEntity) {
+    return this.credentialResolver.resolve({
+      assetId: publication.assetId,
+      tenantId: publication.tenantId,
+      workspaceId: publication.workspaceId,
+      agencyClientId: publication.agencyClientId,
+    });
   }
 
   private async prepareMedia(input: {
@@ -210,11 +250,18 @@ export class SocialPublicationExecutorService implements SocialPublicationExecut
       placement: payload.placement,
     });
 
-    return adapter.prepareMedia({
-      credential,
-      payload,
-      ...prepared,
-    });
+    try {
+      return await adapter.prepareMedia({
+        credential,
+        payload,
+        ...prepared,
+      });
+    } catch (error) {
+      if (error instanceof SocialPublisherOperationError) {
+        throw new SocialPublicationExecutionError(error.reason, error.code);
+      }
+      throw error;
+    }
   }
 
   private buildPayload(
