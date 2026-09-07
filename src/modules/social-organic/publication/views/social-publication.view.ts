@@ -14,6 +14,7 @@ export function toSocialPublicationView(publication: SocialPublicationEntity) {
     connectionId: publication.connectionId,
     assetId: publication.assetId,
     externalAssetId: publication.externalAssetId,
+    mediaAssetId: publication.mediaAssetId,
     status: publication.status,
     scheduledAt: publication.scheduledAt,
     publishedAt: publication.publishedAt,

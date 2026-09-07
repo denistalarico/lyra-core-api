@@ -9,6 +9,7 @@ import {
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
+import { MediaAssetEntity } from '../../../../common/media-assets';
 import { SocialContentDestinationEntity } from '../../../social-planner/entities/social-content-destination.entity';
 import { SocialContentItemEntity } from '../../../social-planner/entities/social-content-item.entity';
 import { SocialOrganicAssetEntity } from '../../entities/social-organic-asset.entity';
@@ -117,6 +118,25 @@ export class SocialPublicationEntity {
   /** Denormalized so the audit trail survives asset archival. */
   @Column({ name: 'external_asset_id', type: 'varchar', length: 180 })
   externalAssetId!: string;
+
+  /**
+   * The private-bucket media this publication publishes, distinct from
+   * `assetId` (the destination account). NULL for text-only publications.
+   * FK is RESTRICT: a MediaAsset behind a historical publication can never be
+   * deleted out from under it.
+   */
+  @Column({ name: 'media_asset_id', type: 'uuid', nullable: true })
+  mediaAssetId!: string | null;
+
+  @ManyToOne(() => MediaAssetEntity, {
+    nullable: true,
+    onDelete: 'RESTRICT',
+  })
+  @JoinColumn({
+    name: 'media_asset_id',
+    foreignKeyConstraintName: 'FK_social_publications_media_asset',
+  })
+  mediaAsset!: MediaAssetEntity | null;
 
   @Column({ type: 'varchar', length: 24 })
   status!: SocialPublicationStatus;

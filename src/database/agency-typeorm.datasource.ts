@@ -174,6 +174,8 @@ import { AddProvisionalLegalReviewStatus1791300000000 } from './migrations/17913
 import { AddIntelligenceRecommendationPolicyIdentity1791400000000 } from './migrations/1791400000000-add-intelligence-recommendation-policy-identity';
 import { CreateSocialOrganicConnections1791500000000 } from './migrations/1791500000000-create-social-organic-connections';
 import { CreateSocialPublications1791600000000 } from './migrations/1791600000000-create-social-publications';
+import { CreateMediaAssets1791700000000 } from './migrations/1791700000000-create-media-assets';
+import { AddSocialPublicationMediaAsset1791800000000 } from './migrations/1791800000000-add-social-publication-media-asset';
 
 export const AgencyDataSource = new DataSource({
   type: 'postgres',
@@ -358,5 +360,7 @@ export const AgencyDataSource = new DataSource({
     AddIntelligenceRecommendationPolicyIdentity1791400000000,
     CreateSocialOrganicConnections1791500000000,
     CreateSocialPublications1791600000000,
+    CreateMediaAssets1791700000000,
+    AddSocialPublicationMediaAsset1791800000000,
   ],
 });

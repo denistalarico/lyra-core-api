@@ -7,6 +7,12 @@ import { IsISO8601, IsOptional, IsUUID } from 'class-validator';
  * a channel (e.g. "instagram") is editorial intent, not a concrete connected
  * account, and a workspace may have more than one connected asset for the
  * same channel.
+ *
+ * `mediaAssetId` is a different identity than `assetId`: it points at the
+ * private-bucket media (M3.1A `MediaAsset`) to publish, not at the
+ * destination account. It is resolved server-side against the caller's
+ * scope — the request never carries storage details (path, bucket, mime
+ * type) directly.
  */
 export class CreateSocialPublicationDto {
   @IsUUID()
@@ -17,6 +23,10 @@ export class CreateSocialPublicationDto {
 
   @IsUUID()
   assetId!: string;
+
+  @IsOptional()
+  @IsUUID()
+  mediaAssetId?: string | null;
 
   /**
    * Lyra's authoritative desired publish time (ADR-015 — no provider-side

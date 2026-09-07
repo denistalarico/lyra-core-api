@@ -1,5 +1,6 @@
 import { ConflictException, NotFoundException } from '@nestjs/common';
 import type { Repository } from 'typeorm';
+import type { MediaAssetResolverService } from '../../../common/media-assets';
 import { SocialContentDestinationEntity } from '../../social-planner/entities/social-content-destination.entity';
 import { SocialContentItemEntity } from '../../social-planner/entities/social-content-item.entity';
 import { SocialOrganicAssetEntity } from '../entities/social-organic-asset.entity';
@@ -32,6 +33,7 @@ describe('SocialPublicationService', () => {
   let contentRepository: RepositoryMock;
   let destinationsRepository: RepositoryMock;
   let assetsRepository: RepositoryMock;
+  let mediaAssetResolver: { resolve: jest.Mock };
 
   const agencyScope: SocialPublicationScope = {
     tenantId: '11111111-1111-4111-8111-111111111111',
@@ -75,17 +77,21 @@ describe('SocialPublicationService', () => {
     isPublishEnabled: true,
   };
 
+  const mediaAssetId = 'ffffffff-ffff-4fff-8fff-ffffffffffff';
+
   beforeEach(() => {
     publicationsRepository = createRepositoryMock();
     contentRepository = createRepositoryMock();
     destinationsRepository = createRepositoryMock();
     assetsRepository = createRepositoryMock();
+    mediaAssetResolver = { resolve: jest.fn().mockResolvedValue({}) };
 
     service = new SocialPublicationService(
       publicationsRepository as unknown as Repository<SocialPublicationEntity>,
       contentRepository as unknown as Repository<SocialContentItemEntity>,
       destinationsRepository as unknown as Repository<SocialContentDestinationEntity>,
       assetsRepository as unknown as Repository<SocialOrganicAssetEntity>,
+      mediaAssetResolver as unknown as MediaAssetResolverService,
     );
 
     contentRepository.findOne.mockResolvedValue(contentItem);
@@ -113,6 +119,7 @@ describe('SocialPublicationService', () => {
           assetId,
           externalAssetId: 'external-asset-1',
           status: 'scheduled',
+          mediaAssetId: null,
           payloadSnapshot: {
             placement: 'feed',
             caption: 'caption text',
@@ -120,12 +127,52 @@ describe('SocialPublicationService', () => {
             cta: 'Saiba mais',
             hashtags: ['#lyra'],
             firstComment: null,
+            mediaAssetId: null,
           },
           createdById: actorUserId,
         }),
       );
       expect(typeof result.payloadHash).toBe('string');
       expect(result.idempotencyKey).toBeTruthy();
+      expect(mediaAssetResolver.resolve).not.toHaveBeenCalled();
+    });
+
+    it('resolves a scoped mediaAssetId and persists the reference, not storage details', async () => {
+      const result = await service.create(agencyScope, actorUserId, {
+        contentItemId,
+        destinationId,
+        assetId,
+        mediaAssetId,
+      });
+
+      expect(mediaAssetResolver.resolve).toHaveBeenCalledWith({
+        tenantId: agencyScope.tenantId,
+        workspaceId: agencyScope.workspaceId,
+        agencyClientId: agencyScope.agencyClientId,
+        mediaAssetId,
+      });
+      expect(publicationsRepository.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          mediaAssetId,
+          payloadSnapshot: expect.objectContaining({ mediaAssetId }),
+        }),
+      );
+      expect(result.mediaAssetId).toBe(mediaAssetId);
+    });
+
+    it('propagates not-found when mediaAssetId is out of scope (wrong tenant/workspace/client, or deleted)', async () => {
+      mediaAssetResolver.resolve.mockRejectedValue(
+        new NotFoundException('Media asset not found.'),
+      );
+
+      await expect(
+        service.create(agencyScope, actorUserId, {
+          contentItemId,
+          destinationId,
+          assetId,
+          mediaAssetId,
+        }),
+      ).rejects.toThrow(NotFoundException);
     });
 
     it('defaults scheduledAt to now when omitted', async () => {
@@ -258,8 +305,9 @@ describe('SocialPublicationService', () => {
         connectionId: asset.connectionId,
         assetId,
         externalAssetId: 'external-asset-1',
+        mediaAssetId,
         status: 'failed',
-        payloadSnapshot: { placement: 'feed' },
+        payloadSnapshot: { placement: 'feed', mediaAssetId },
         payloadHash: 'hash-1',
         idempotencyKey: 'original-key',
         maxAttempts: 5,
@@ -272,6 +320,7 @@ describe('SocialPublicationService', () => {
       expect(result.attempts).toBe(0);
       expect(result.idempotencyKey).not.toBe('original-key');
       expect(result.payloadSnapshot).toEqual(original.payloadSnapshot);
+      expect(result.mediaAssetId).toBe(mediaAssetId);
     });
 
     it('refuses to retry a publication that has not failed', async () => {

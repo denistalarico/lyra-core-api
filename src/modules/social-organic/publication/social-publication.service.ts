@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { IsNull, type FindOptionsWhere, Repository } from 'typeorm';
+import { MediaAssetResolverService } from '../../../common/media-assets';
 import { SocialContentDestinationEntity } from '../../social-planner/entities/social-content-destination.entity';
 import { SocialContentItemEntity } from '../../social-planner/entities/social-content-item.entity';
 import { SocialOrganicAssetEntity } from '../entities/social-organic-asset.entity';
@@ -37,6 +38,8 @@ export class SocialPublicationService {
 
     @InjectRepository(SocialOrganicAssetEntity, 'agency')
     private readonly assetsRepository: Repository<SocialOrganicAssetEntity>,
+
+    private readonly mediaAssetResolver: MediaAssetResolverService,
   ) {}
 
   async list(
@@ -79,11 +82,27 @@ export class SocialPublicationService {
       contentItem.id,
     );
     const asset = await this.requirePublishableAsset(scope, dto.assetId);
+    const mediaAssetId = dto.mediaAssetId ?? null;
+
+    if (mediaAssetId) {
+      // Resolved for existence/scope validation only — the storage location
+      // itself never enters payload_snapshot or any other persisted column.
+      await this.mediaAssetResolver.resolve({
+        tenantId: scope.tenantId,
+        workspaceId: scope.workspaceId,
+        agencyClientId: scope.agencyClientId,
+        mediaAssetId,
+      });
+    }
 
     const scheduledAt = dto.scheduledAt
       ? new Date(dto.scheduledAt)
       : new Date();
-    const payloadSnapshot = this.buildPayloadSnapshot(contentItem, destination);
+    const payloadSnapshot = this.buildPayloadSnapshot(
+      contentItem,
+      destination,
+      mediaAssetId,
+    );
     const payloadHash = this.hashPayload(payloadSnapshot);
     const idempotencyKey = randomUUID();
 
@@ -97,6 +116,7 @@ export class SocialPublicationService {
       connectionId: asset.connectionId,
       assetId: asset.id,
       externalAssetId: asset.externalAssetId,
+      mediaAssetId,
       status: 'scheduled',
       scheduledAt,
       publishedAt: null,
@@ -197,6 +217,7 @@ export class SocialPublicationService {
       connectionId: original.connectionId,
       assetId: original.assetId,
       externalAssetId: original.externalAssetId,
+      mediaAssetId: original.mediaAssetId,
       status: 'scheduled',
       scheduledAt,
       publishedAt: null,
@@ -224,6 +245,7 @@ export class SocialPublicationService {
   private buildPayloadSnapshot(
     contentItem: SocialContentItemEntity,
     destination: SocialContentDestinationEntity,
+    mediaAssetId: string | null,
   ): Record<string, unknown> {
     return {
       placement: destination.placement,
@@ -232,6 +254,8 @@ export class SocialPublicationService {
       cta: contentItem.cta,
       hashtags: contentItem.hashtags,
       firstComment: contentItem.firstComment,
+      // Reference only — never storagePath or a presigned URL (§7 rule 2).
+      mediaAssetId,
     };
   }
 

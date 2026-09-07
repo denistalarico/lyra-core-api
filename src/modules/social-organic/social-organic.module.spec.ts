@@ -9,6 +9,7 @@ jest.mock('@nestjs/typeorm', () => ({
 import { MODULE_METADATA } from '@nestjs/common/constants';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { SettingsCryptoService } from '../../common/crypto/settings-crypto.service';
+import { MediaAssetsModule } from '../../common/media-assets';
 import { PermissionsModule } from '../permissions';
 import { SocialContentDestinationEntity } from '../social-planner/entities/social-content-destination.entity';
 import { SocialContentItemEntity } from '../social-planner/entities/social-content-item.entity';
@@ -22,6 +23,7 @@ import {
   SocialOrganicAssetEntity,
   SocialOrganicConnectionEntity,
 } from './entities';
+import { MediaPreparationService } from './media/media-preparation.service';
 import {
   SocialPublicationController,
   SocialPublicationEntity,
@@ -31,6 +33,8 @@ import {
   SocialPublicationService,
   SocialPublicationWorker,
 } from './publication';
+import { SocialPublicationExecutorService } from './publication/social-publication.executor';
+import { SOCIAL_PUBLICATION_EXECUTOR } from './publication/social-publication.worker';
 import { SocialPublisherRegistry } from './providers';
 import { SocialOrganicModule } from './social-organic.module';
 
@@ -50,6 +54,9 @@ describe('SocialOrganicModule', () => {
       Reflect.getMetadata(MODULE_METADATA.IMPORTS, SocialOrganicModule),
     ).toContain(PermissionsModule);
     expect(
+      Reflect.getMetadata(MODULE_METADATA.IMPORTS, SocialOrganicModule),
+    ).toContain(MediaAssetsModule);
+    expect(
       Reflect.getMetadata(MODULE_METADATA.CONTROLLERS, SocialOrganicModule),
     ).toEqual([SocialPublicationController]);
     expect(
@@ -66,6 +73,12 @@ describe('SocialOrganicModule', () => {
       SocialPublicationConfigService,
       SocialPublisherRegistry,
       SettingsCryptoService,
+      MediaPreparationService,
+      SocialPublicationExecutorService,
+      {
+        provide: SOCIAL_PUBLICATION_EXECUTOR,
+        useExisting: SocialPublicationExecutorService,
+      },
     ]);
     expect(
       Reflect.getMetadata(MODULE_METADATA.EXPORTS, SocialOrganicModule),
