@@ -64,6 +64,7 @@ function asset(
     avatarUrl: null,
     assetTokenEncrypted: null,
     assetTokenExpiresAt: null,
+    assetTimezone: null,
     isPublishEnabled: true,
     capabilitiesSnapshot: {},
     status: 'active',
@@ -382,5 +383,78 @@ describe('SocialOrganicCredentialResolver', () => {
     expect(inspect(credential, { showHidden: true })).not.toContain(
       'secret-token',
     );
+  });
+
+  describe('analytics purpose', () => {
+    it.each([
+      ['facebook_page', 'read_insights'],
+      ['instagram_professional', 'instagram_manage_insights'],
+    ] as const)(
+      'resolves eligible %s without requiring publishing enablement',
+      async (assetType, scopeName) => {
+        const resolved = createResolver(
+          asset({
+            assetType,
+            assetTimezone: 'America/Sao_Paulo',
+            isPublishEnabled: false,
+            connection: connection({ scopes: [scopeName] }),
+          }),
+          { connectionToken: crypto.encrypt('analytics-token') },
+        );
+
+        await expect(
+          resolved.resolver.resolveForAnalytics(scope),
+        ).resolves.toMatchObject({
+          assetTimezone: 'America/Sao_Paulo',
+          credential: { assetType, scopes: [scopeName] },
+        });
+      },
+    );
+
+    it.each([
+      ['asset_timezone_unresolved', { assetTimezone: null }],
+      ['asset_timezone_invalid', { assetTimezone: '-03:00' }],
+      ['asset_unhealthy', { lastHealthStatus: 'unhealthy' }],
+    ] as const)('fails closed with %s', async (code, overrides) => {
+      await expectCode(
+        createResolver(
+          asset({
+            assetTimezone: 'America/Sao_Paulo',
+            connection: connection({ scopes: ['read_insights'] }),
+            ...overrides,
+          }),
+          { connectionToken: crypto.encrypt('token') },
+        ).resolver.resolveForAnalytics(scope),
+        code,
+      );
+    });
+
+    it('refuses a missing asset-type analytics scope', async () => {
+      await expectCode(
+        createResolver(
+          asset({
+            assetTimezone: 'America/Sao_Paulo',
+            connection: connection({ scopes: ['pages_read_engagement'] }),
+          }),
+        ).resolver.resolveForAnalytics(scope),
+        'analytics_scope_missing',
+      );
+    });
+
+    it('allows degraded and unknown health because neither proves the credential unusable', async () => {
+      for (const lastHealthStatus of ['degraded', null] as const) {
+        const resolved = createResolver(
+          asset({
+            assetTimezone: 'America/Sao_Paulo',
+            lastHealthStatus,
+            connection: connection({ scopes: ['read_insights'] }),
+          }),
+          { connectionToken: crypto.encrypt('token') },
+        );
+        await expect(
+          resolved.resolver.resolveForAnalytics(scope),
+        ).resolves.toBeDefined();
+      }
+    });
   });
 });

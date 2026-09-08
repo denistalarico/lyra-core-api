@@ -6,6 +6,7 @@ import {
   SocialOrganicAssetEntity,
   SocialOrganicConnectionEntity,
 } from '../entities';
+import { normalizeIanaTimeZone } from '../connections/social-organic-asset-timezone';
 import {
   ResolvedOrganicCredential,
   createResolvedOrganicCredential,
@@ -29,6 +30,11 @@ export type SocialOrganicLifecycleConnectionCredential = {
   refreshToken: string | null;
 };
 
+export type ResolvedOrganicAnalyticsCredential = {
+  credential: ResolvedOrganicCredential;
+  assetTimezone: string;
+};
+
 /** The only boundary that turns an organic asset row into a usable token. */
 @Injectable()
 export class SocialOrganicCredentialResolver {
@@ -43,6 +49,24 @@ export class SocialOrganicCredentialResolver {
   async resolve(
     input: ResolveOrganicCredentialInput,
   ): Promise<ResolvedOrganicCredential> {
+    const resolved = await this.resolveInternal(input, 'publishing');
+    return resolved.credential;
+  }
+
+  /**
+   * The same decryption boundary for analytics, with analytics-specific
+   * eligibility. Publishing enablement is deliberately irrelevant here.
+   */
+  async resolveForAnalytics(
+    input: ResolveOrganicCredentialInput,
+  ): Promise<ResolvedOrganicAnalyticsCredential> {
+    return this.resolveInternal(input, 'analytics');
+  }
+
+  private async resolveInternal(
+    input: ResolveOrganicCredentialInput,
+    purpose: 'publishing' | 'analytics',
+  ): Promise<ResolvedOrganicAnalyticsCredential> {
     const asset = await this.findInScope(input);
 
     if (!asset) {
@@ -63,12 +87,37 @@ export class SocialOrganicCredentialResolver {
       throw new SocialOrganicCredentialError('asset_not_active');
     }
 
-    if (!asset.isPublishEnabled) {
+    if (purpose === 'publishing' && !asset.isPublishEnabled) {
       throw new SocialOrganicCredentialError('publishing_not_enabled');
     }
 
     if (asset.provider !== connection.provider) {
       throw new SocialOrganicCredentialError('asset_provider_mismatch');
+    }
+
+    let assetTimezone = '';
+    if (purpose === 'analytics') {
+      if (asset.lastHealthStatus === 'unhealthy') {
+        throw new SocialOrganicCredentialError('asset_unhealthy');
+      }
+
+      const requiredScope = this.analyticsScopeFor(asset.assetType);
+      if (!connection.scopes.includes(requiredScope)) {
+        throw new SocialOrganicCredentialError('analytics_scope_missing');
+      }
+
+      if (!asset.assetTimezone) {
+        throw new SocialOrganicCredentialError('asset_timezone_unresolved');
+      }
+
+      try {
+        assetTimezone = normalizeIanaTimeZone(asset.assetTimezone) ?? '';
+      } catch {
+        throw new SocialOrganicCredentialError('asset_timezone_invalid');
+      }
+      if (!assetTimezone) {
+        throw new SocialOrganicCredentialError('asset_timezone_unresolved');
+      }
     }
 
     // Rebuilt from persisted truth. Token queries below never reuse caller data.
@@ -97,7 +146,7 @@ export class SocialOrganicCredentialResolver {
         );
     }
 
-    return createResolvedOrganicCredential({
+    const credential = createResolvedOrganicCredential({
       assetId: asset.id,
       connectionId: connection.id,
       tenantId: scope.tenantId,
@@ -110,6 +159,8 @@ export class SocialOrganicCredentialResolver {
       credentialVersion: connection.credentialVersion,
       accessToken,
     });
+
+    return { credential, assetTimezone };
   }
 
   /**
@@ -254,5 +305,18 @@ export class SocialOrganicCredentialResolver {
         },
       },
     });
+  }
+
+  private analyticsScopeFor(assetType: string): string {
+    switch (assetType) {
+      case 'facebook_page':
+        return 'read_insights';
+      case 'instagram_professional':
+        return 'instagram_manage_insights';
+      default:
+        throw new SocialOrganicCredentialError(
+          'unsupported_analytics_asset_type',
+        );
+    }
   }
 }

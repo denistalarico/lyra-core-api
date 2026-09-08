@@ -119,6 +119,25 @@ describe('MetaOrganicAssetDiscoveryService', () => {
     ).resolves.toEqual({
       accessToken: 'page-token-secret',
       tokenExpiresAt: null,
+      assetTimezone: null,
+      metadata: { pageId: 'page-1' },
+    });
+  });
+
+  it('does not invent a timezone for a linked Instagram asset', async () => {
+    const { service } = harness();
+
+    await expect(
+      service.prepare({
+        userAccessToken: 'user-token',
+        asset: {
+          externalAssetId: 'ig-1',
+          assetType: 'instagram_professional',
+          selectionData: { pageId: 'page-1' },
+        },
+      }),
+    ).resolves.toMatchObject({
+      assetTimezone: null,
       metadata: { pageId: 'page-1' },
     });
   });

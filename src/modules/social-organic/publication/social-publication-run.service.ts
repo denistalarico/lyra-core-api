@@ -99,7 +99,15 @@ export class SocialPublicationRunService {
     return returnedRows(result).length;
   }
 
-  /** Claims due rows in disjoint batches across workers. */
+  /**
+   * Claims due rows in disjoint batches across workers.
+   *
+   * `MA4` hold: a row whose asset is `last_health_status = 'unhealthy'` is
+   * never claimed here — it stays `queued`/`processing` untouched rather
+   * than moving to `failed`, so the hold is naturally reversible the moment
+   * a later health check reports `healthy`/`degraded` again. `NULL` (never
+   * checked yet) does not block; only an observed `unhealthy` does.
+   */
   async claim(input: {
     workerId: string;
     limit: number;
@@ -110,13 +118,17 @@ export class SocialPublicationRunService {
 
     const ids = await this.dataSource.transaction(async (manager) => {
       const rows = await manager.query<{ id: string }[]>(
-        `SELECT id
-           FROM social_publications
-          WHERE (status = 'queued'
-                 OR (status = 'processing' AND locked_by IS NULL))
-            AND available_at <= $1
-          ORDER BY available_at, created_at
-          FOR UPDATE SKIP LOCKED
+        `SELECT publication.id
+           FROM social_publications AS publication
+           JOIN social_organic_assets AS asset
+             ON asset.id = publication.asset_id
+          WHERE (publication.status = 'queued'
+                 OR (publication.status = 'processing' AND publication.locked_by IS NULL))
+            AND publication.available_at <= $1
+            AND (asset.last_health_status IS NULL
+                 OR asset.last_health_status <> 'unhealthy')
+          ORDER BY publication.available_at, publication.created_at
+          FOR UPDATE OF publication SKIP LOCKED
           LIMIT $2`,
         [now, limit],
       );

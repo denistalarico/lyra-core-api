@@ -27,7 +27,7 @@ describe('MetaOrganicGraphService', () => {
       SOCIAL_META_ORGANIC_LOGIN_CONFIG_ID: '1072508992158703',
       META_APP_ID: 'messaging-app',
       META_APP_SECRET: 'messaging-secret',
-      META_GRAPH_API_VERSION: 'latest',
+      META_GRAPH_API_VERSION: 'v26.0',
     };
     service = new MetaOrganicGraphService();
   });
@@ -44,7 +44,7 @@ describe('MetaOrganicGraphService', () => {
     expect(service.getLoginConfig()).toEqual({
       appId: 'social-app',
       configId: '1072508992158703',
-      authorizationEndpoint: 'https://www.facebook.com/v24.0/dialog/oauth',
+      authorizationEndpoint: 'https://www.facebook.com/v26.0/dialog/oauth',
     });
   });
 
@@ -88,7 +88,7 @@ describe('MetaOrganicGraphService', () => {
       }),
     ).resolves.toEqual({ accessToken: 'user-token', expiresIn: 3600 });
 
-    expect(requested[0].pathname).toBe('/v24.0/oauth/access_token');
+    expect(requested[0].pathname).toBe('/v26.0/oauth/access_token');
     expect(requested[0].searchParams.get('client_id')).toBe('social-app');
     expect(requested[0].toString()).not.toContain('messaging-secret');
   });
@@ -179,7 +179,7 @@ describe('MetaOrganicGraphService', () => {
       service.listFacebookPages('right-token'),
     ).resolves.toHaveLength(1);
     const secondUrl = requested[1];
-    expect(secondUrl.pathname).toBe('/v24.0/me/accounts');
+    expect(secondUrl.pathname).toBe('/v26.0/me/accounts');
     expect(secondUrl.searchParams.get('after')).toBe('cursor-2');
     expect(secondUrl.searchParams.has('access_token')).toBe(false);
   });
@@ -235,7 +235,7 @@ describe('MetaOrganicGraphService', () => {
       }),
     ).resolves.toEqual({ id: 'page-1_post-1' });
 
-    expect(calls[0].url.pathname).toBe('/v24.0/page-1/feed');
+    expect(calls[0].url.pathname).toBe('/v26.0/page-1/feed');
     expect(calls[0].url.searchParams.has('access_token')).toBe(false);
     expect(calls[0].init.headers).toEqual(
       expect.objectContaining({ Authorization: 'Bearer page-token' }),
@@ -333,13 +333,76 @@ describe('MetaOrganicGraphService', () => {
     ).resolves.toEqual({ id: 'ig-media-1' });
 
     expect(calls.map(({ url }) => url.pathname)).toEqual([
-      '/v24.0/ig-1/media',
-      '/v24.0/container-1',
-      '/v24.0/ig-1/media_publish',
+      '/v26.0/ig-1/media',
+      '/v26.0/container-1',
+      '/v26.0/ig-1/media_publish',
     ]);
     expect(
       calls.every(({ url }) => !url.searchParams.has('access_token')),
     ).toBe(true);
+  });
+
+  it('reads v26 organic insights with bounded documented parameters and header auth', async () => {
+    const calls: Array<{ url: URL; init: RequestInit }> = [];
+    global.fetch = jest.fn(async (url: URL, init: RequestInit) => {
+      calls.push({ url, init });
+      return response({ data: [{ name: 'page_media_view', values: [] }] });
+    }) as never;
+
+    await expect(
+      service.getOrganicInsights({
+        objectId: 'page-1',
+        accessToken: 'page-token',
+        metrics: ['page_media_view'],
+        period: 'day',
+        breakdown: 'is_from_ads',
+        since: 1_789_000_000,
+        until: 1_789_086_399,
+      }),
+    ).resolves.toEqual({
+      data: [{ name: 'page_media_view', values: [] }],
+      apiCalls: 1,
+    });
+
+    expect(calls[0].url.pathname).toBe('/v26.0/page-1/insights');
+    expect(calls[0].url.searchParams.get('metric')).toBe('page_media_view');
+    expect(calls[0].url.searchParams.get('period')).toBe('day');
+    expect(calls[0].url.searchParams.get('breakdown')).toBe('is_from_ads');
+    expect(calls[0].url.searchParams.has('access_token')).toBe(false);
+    expect(calls[0].init.headers).toEqual({
+      Authorization: 'Bearer page-token',
+    });
+  });
+
+  it('fails closed before fetch for a non-allow-list metric name', async () => {
+    global.fetch = jest.fn();
+
+    await expect(
+      service.getOrganicInsights({
+        objectId: 'page-1',
+        accessToken: 'page-token',
+        metrics: ['spend,access_token'],
+      }),
+    ).rejects.toMatchObject({ code: 'meta_invalid_response' });
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it('reads the current follower stock without putting the token in the URL', async () => {
+    const requested: URL[] = [];
+    global.fetch = jest.fn(async (url: URL) => {
+      requested.push(url);
+      return response({ followers_count: '9007199254740993' });
+    }) as never;
+
+    await expect(
+      service.getProfileFollowersCount({
+        objectId: 'page-1',
+        accessToken: 'page-token',
+      }),
+    ).resolves.toBe('9007199254740993');
+    expect(requested[0].pathname).toBe('/v26.0/page-1');
+    expect(requested[0].searchParams.get('fields')).toBe('followers_count');
+    expect(requested[0].searchParams.has('access_token')).toBe(false);
   });
 
   it('rejects malformed provider responses', async () => {

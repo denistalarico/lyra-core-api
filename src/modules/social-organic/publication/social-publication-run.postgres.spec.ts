@@ -24,6 +24,8 @@ run('SocialPublicationRunService against PostgreSQL', () => {
 
   async function insertPublication(overrides: Record<string, unknown> = {}) {
     const id = randomUUID();
+    const publicationAssetId =
+      (overrides.assetId as string | undefined) ?? assetId;
 
     await AgencyDataSource.query(
       `INSERT INTO social_publications
@@ -40,8 +42,8 @@ run('SocialPublicationRunService against PostgreSQL', () => {
         workspaceId,
         contentItemId,
         connectionId,
-        assetId,
-        `external-${assetId}`,
+        publicationAssetId,
+        `external-${publicationAssetId}`,
         overrides.status ?? 'queued',
         overrides.scheduledAt ?? new Date(),
         'a'.repeat(64),
@@ -136,7 +138,16 @@ run('SocialPublicationRunService against PostgreSQL', () => {
     }
   });
 
-  beforeEach(clearPublications);
+  const setAssetHealth = (status: string | null) =>
+    AgencyDataSource.query(
+      `UPDATE social_organic_assets SET last_health_status = $2 WHERE id = $1`,
+      [assetId, status],
+    );
+
+  beforeEach(async () => {
+    await clearPublications();
+    await setAssetHealth(null);
+  });
 
   it('lets exactly one of two workers claim one row', async () => {
     const id = await insertPublication();
@@ -149,6 +160,104 @@ run('SocialPublicationRunService against PostgreSQL', () => {
 
     expect(claimed.map((row) => row.id)).toEqual([id]);
     expect((await rowOf(id)).attempts).toBe(1);
+  });
+
+  it('23/24. MA4 — a queued publication for an unhealthy asset is not leased', async () => {
+    await setAssetHealth('unhealthy');
+    const id = await insertPublication({ status: 'queued' });
+
+    const claimed = await service.claim({ workerId: 'worker-a', limit: 5 });
+
+    expect(claimed).toEqual([]);
+    expect((await rowOf(id)).status).toBe('queued');
+  });
+
+  it('25. a healthy asset publication is leased', async () => {
+    await setAssetHealth('healthy');
+    const id = await insertPublication({ status: 'queued' });
+
+    const claimed = await service.claim({ workerId: 'worker-a', limit: 5 });
+
+    expect(claimed.map((row) => row.id)).toEqual([id]);
+  });
+
+  it('26. a degraded asset publication is leased', async () => {
+    await setAssetHealth('degraded');
+    const id = await insertPublication({ status: 'queued' });
+
+    const claimed = await service.claim({ workerId: 'worker-a', limit: 5 });
+
+    expect(claimed.map((row) => row.id)).toEqual([id]);
+  });
+
+  it('27. NULL/unobserved health does not block leasing', async () => {
+    await setAssetHealth(null);
+    const id = await insertPublication({ status: 'queued' });
+
+    const claimed = await service.claim({ workerId: 'worker-a', limit: 5 });
+
+    expect(claimed.map((row) => row.id)).toEqual([id]);
+  });
+
+  it('29. recovery to healthy makes an existing queued publication claimable again', async () => {
+    await setAssetHealth('unhealthy');
+    const id = await insertPublication({ status: 'queued' });
+
+    expect(await service.claim({ workerId: 'worker-a', limit: 5 })).toEqual([]);
+
+    await setAssetHealth('healthy');
+
+    const claimed = await service.claim({ workerId: 'worker-a', limit: 5 });
+    expect(claimed.map((row) => row.id)).toEqual([id]);
+  });
+
+  it('28. an unhealthy asset A does not block a healthy asset B', async () => {
+    const otherAssetId = randomUUID();
+    await AgencyDataSource.query(
+      `INSERT INTO social_organic_assets
+         (id, tenant_id, workspace_id, connection_id, provider, asset_type,
+          external_asset_id, last_health_status)
+       VALUES ($1, $2, $3, $4, 'meta', 'facebook_page', $5, 'healthy')`,
+      [
+        otherAssetId,
+        tenantId,
+        workspaceId,
+        connectionId,
+        `external-${otherAssetId}`,
+      ],
+    );
+
+    try {
+      await setAssetHealth('unhealthy');
+      await insertPublication({ status: 'queued' });
+      const healthyId = await insertPublication({
+        status: 'queued',
+        assetId: otherAssetId,
+      });
+
+      const claimed = await service.claim({ workerId: 'worker-a', limit: 5 });
+
+      expect(claimed.map((row) => row.id)).toEqual([healthyId]);
+    } finally {
+      await clearPublications();
+      await AgencyDataSource.query(
+        `DELETE FROM social_organic_assets WHERE id = $1`,
+        [otherAssetId],
+      );
+    }
+  });
+
+  it('30. FOR UPDATE SKIP LOCKED / disjoint-claim semantics are preserved with the health join', async () => {
+    await setAssetHealth('healthy');
+    const id = await insertPublication({ status: 'queued' });
+
+    const [mine, theirs] = await Promise.all([
+      service.claim({ workerId: 'worker-a', limit: 1 }),
+      other.claim({ workerId: 'worker-b', limit: 1 }),
+    ]);
+    const claimed = [...mine, ...theirs];
+
+    expect(claimed.map((row) => row.id)).toEqual([id]);
   });
 
   it('rejects the original worker write after lease recovery and re-claim', async () => {

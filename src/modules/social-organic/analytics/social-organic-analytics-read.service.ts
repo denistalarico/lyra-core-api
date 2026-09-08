@@ -1,0 +1,479 @@
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { IsNull, Repository } from 'typeorm';
+import { SocialOrganicAssetEntity } from '../entities/social-organic-asset.entity';
+import { SocialOrganicAccountMetricDailyEntity } from './entities/social-organic-account-metric-daily.entity';
+import { SocialOrganicSyncRunEntity } from './entities/social-organic-sync-run.entity';
+import {
+  parseOrganicAnalyticsPeriod,
+  shiftCalendarDay,
+} from './social-organic-analytics-time';
+import type { SocialOrganicAnalyticsAssetView } from './views/social-organic-analytics-asset.view';
+import type {
+  SocialOrganicAnalyticsOverviewView,
+  SocialOrganicAnalyticsTotals,
+} from './views/social-organic-analytics-overview.view';
+import {
+  emptyOrganicSeriesPoint,
+  type SocialOrganicAnalyticsSeriesView,
+  type SocialOrganicSeriesPoint,
+} from './views/social-organic-analytics-series.view';
+import type { SocialOrganicAnalyticsFreshnessView } from './views/social-organic-analytics-freshness.view';
+
+export type SocialOrganicAnalyticsScope = {
+  tenantId: string;
+  workspaceId: string;
+  /** NULL means agency context: the agency's own assets. */
+  agencyClientId: string | null;
+};
+
+export type SocialOrganicAnalyticsOverviewInput =
+  SocialOrganicAnalyticsScope & {
+    assetId: string;
+    since: string;
+    until: string;
+  };
+
+export type SocialOrganicAnalyticsFreshnessInput =
+  SocialOrganicAnalyticsScope & {
+    assetId: string;
+  };
+
+/** The raw shape one aggregation query returns, all columns as text. */
+type AggregateRow = {
+  impressions: string | null;
+  reach: string | null;
+  reach_days: string | null;
+  fact_days: string | null;
+  partial_days: string | null;
+  followers_gained: string | null;
+  followers_lost: string | null;
+  profile_views: string | null;
+};
+
+/**
+ * Every read the organic analytics dashboard makes.
+ *
+ * Mirrors `SocialAnalyticsReadService` (the paid module's read service)
+ * closely: it never speaks to a provider, reads only
+ * `social_organic_account_metrics_daily`/`social_organic_sync_runs`/
+ * `social_organic_assets`, and is deliberately not built on
+ * `SocialOrganicCredentialResolver` or `SocialOrganicSyncRunService` — both
+ * are credential-capable or mutate state, and a stale/disconnected asset's
+ * stored history is still real and still worth reading.
+ */
+@Injectable()
+export class SocialOrganicAnalyticsReadService {
+  constructor(
+    @InjectRepository(SocialOrganicAssetEntity, 'agency')
+    private readonly assetsRepository: Repository<SocialOrganicAssetEntity>,
+    @InjectRepository(SocialOrganicAccountMetricDailyEntity, 'agency')
+    private readonly metricsRepository: Repository<SocialOrganicAccountMetricDailyEntity>,
+    @InjectRepository(SocialOrganicSyncRunEntity, 'agency')
+    private readonly runsRepository: Repository<SocialOrganicSyncRunEntity>,
+  ) {}
+
+  /**
+   * The organic assets this caller may report on, for the dashboard's picker.
+   *
+   * `social/organic/connections` is admin-gated
+   * (`social.settings.integrations.manage.admin`), so an operational-tier
+   * reader needs its own, strictly-narrower read — same reasoning
+   * `SocialAnalyticsReadService.listConnections` documents for paid. No
+   * status filter: a revoked asset's stored history is still real.
+   */
+  async listAssets(
+    input: SocialOrganicAnalyticsScope,
+  ): Promise<SocialOrganicAnalyticsAssetView[]> {
+    const assets = await this.assetsRepository.find({
+      where: {
+        tenantId: input.tenantId,
+        workspaceId: input.workspaceId,
+        agencyClientId: input.agencyClientId ?? IsNull(),
+      },
+      select: [
+        'id',
+        'provider',
+        'assetType',
+        'displayName',
+        'username',
+        'avatarUrl',
+        'status',
+        'assetTimezone',
+      ],
+      order: { displayName: 'ASC', createdAt: 'ASC' },
+    });
+
+    return assets.map((asset) => ({
+      id: asset.id,
+      provider: asset.provider,
+      assetType: asset.assetType,
+      displayName: asset.displayName,
+      username: asset.username,
+      avatarUrl: asset.avatarUrl,
+      status: asset.status,
+      assetTimezone: asset.assetTimezone,
+    }));
+  }
+
+  /**
+   * Totals for one organic asset and period. No comparison period, no KPI
+   * derivation beyond what `SocialOrganicAnalyticsTotals` documents — this
+   * first pass of A3 reads only the account grain, which has no
+   * engagement-rate inputs (see the view's docblock).
+   */
+  async overview(
+    input: SocialOrganicAnalyticsOverviewInput,
+  ): Promise<SocialOrganicAnalyticsOverviewView> {
+    const period = this.parsePeriod(input);
+    const asset = await this.findAssetInScope(input);
+
+    const [aggregate, followersCount, lastFactDate] = await Promise.all([
+      this.aggregate(asset.id, period.since, period.until),
+      this.readFollowersCountStock(asset.id, period.since, period.until),
+      this.findLastFactDate(asset.id),
+    ]);
+
+    return {
+      assetId: asset.id,
+      timezone: asset.assetTimezone ?? '',
+      period: { since: period.since, until: period.until },
+      totals: this.toTotals(aggregate, followersCount),
+      hasPartialData: toCount(aggregate.partial_days) > 0n,
+      lastFactDate,
+    };
+  }
+
+  /**
+   * One point per calendar day of the period, ascending, continuous — a day
+   * the read model never observed carries `hasData: false` with nulls,
+   * mirroring paid's `timeseries` exactly for the same reason: a chart cannot
+   * otherwise tell "no delivery" from "never synced".
+   */
+  async timeseries(
+    input: SocialOrganicAnalyticsOverviewInput,
+  ): Promise<SocialOrganicAnalyticsSeriesView> {
+    const period = this.parsePeriod(input);
+    const asset = await this.findAssetInScope(input);
+
+    const rows = await this.metricsRepository
+      .createQueryBuilder('fact')
+      .select(`to_char(fact.metric_date, 'YYYY-MM-DD')`, 'metric_date')
+      .addSelect('SUM(fact.impressions)', 'impressions')
+      .addSelect('SUM(fact.reach)', 'reach')
+      .addSelect('COUNT(fact.reach)', 'reach_days')
+      .addSelect('MAX(fact.followers_count)', 'followers_count')
+      .addSelect('SUM(fact.followers_gained)', 'followers_gained')
+      .addSelect('SUM(fact.followers_lost)', 'followers_lost')
+      .addSelect('SUM(fact.profile_views)', 'profile_views')
+      .addSelect('bool_or(fact.is_partial)', 'is_partial')
+      .where('fact.asset_id = :assetId', { assetId: asset.id })
+      .andWhere('fact.metric_date BETWEEN :since AND :until', {
+        since: period.since,
+        until: period.until,
+      })
+      .groupBy('fact.metric_date')
+      .orderBy('fact.metric_date', 'ASC')
+      .getRawMany<{
+        metric_date: string;
+        impressions: string | null;
+        reach: string | null;
+        reach_days: string | null;
+        followers_count: string | null;
+        followers_gained: string | null;
+        followers_lost: string | null;
+        profile_views: string | null;
+        is_partial: boolean;
+      }>();
+
+    const byDate = new Map(rows.map((row) => [row.metric_date, row]));
+    const points: SocialOrganicSeriesPoint[] = [];
+
+    for (
+      let day = period.since;
+      day <= period.until;
+      day = shiftCalendarDay(day, 1)
+    ) {
+      const row = byDate.get(day);
+
+      if (!row) {
+        points.push(emptyOrganicSeriesPoint(day));
+        continue;
+      }
+
+      points.push({
+        date: day,
+        hasData: true,
+        impressions: toCount(row.impressions).toString(),
+        // This day's own reach, never a sum across days — see the entity
+        // docblock. Safe to return directly here because the grain is one
+        // day, which is the grain Meta reported it at.
+        reach:
+          toCount(row.reach_days) > 0n ? toCount(row.reach).toString() : null,
+        followersCount:
+          row.followers_count === null
+            ? null
+            : toCount(row.followers_count).toString(),
+        followersGained: toCount(row.followers_gained).toString(),
+        followersLost: toCount(row.followers_lost).toString(),
+        profileViews: toCount(row.profile_views).toString(),
+        isPartial: row.is_partial === true,
+      });
+    }
+
+    return {
+      assetId: asset.id,
+      timezone: asset.assetTimezone ?? '',
+      period: { since: period.since, until: period.until },
+      seriesMode: 'continuous',
+      points,
+      observedDays: rows.length,
+      hasPartialData: rows.some((row) => row.is_partial),
+    };
+  }
+
+  /**
+   * How current this asset's read model is.
+   *
+   * Queries `SocialOrganicSyncRunEntity` directly, never through
+   * `SocialOrganicSyncRunService` — same reasoning as paid's freshness read:
+   * a read endpoint must not hold a credential-capable dependency, and must
+   * enqueue nothing. `runs` is split by `run_kind` ('manual' | 'scheduled'),
+   * organic's actual vocabulary — not a copy of paid's `daily`/`intraday`
+   * shape, which describes a different pipeline. No `backfill` section:
+   * organic has no chunked-backfill planner.
+   */
+  async freshness(
+    input: SocialOrganicAnalyticsFreshnessInput,
+  ): Promise<SocialOrganicAnalyticsFreshnessView> {
+    const asset = await this.findAssetInScope(input);
+
+    const [metrics, scheduledRun, manualRun] = await Promise.all([
+      this.readMetricsFreshness(asset.id),
+      this.findLatestSuccessfulRun(asset.id, 'scheduled'),
+      this.findLatestSuccessfulRun(asset.id, 'manual'),
+    ]);
+
+    return {
+      assetId: asset.id,
+      timezone: asset.assetTimezone ?? '',
+      metrics,
+      runs: {
+        latestSuccessfulScheduledRun: scheduledRun,
+        latestSuccessfulManualRun: manualRun,
+      },
+      hasPartialData: metrics.latestPartialMetricDate !== null,
+    };
+  }
+
+  private parsePeriod(input: { since: string; until: string }) {
+    try {
+      return parseOrganicAnalyticsPeriod(input);
+    } catch (error) {
+      throw new BadRequestException(
+        error instanceof Error ? error.message : 'Invalid analytics period.',
+      );
+    }
+  }
+
+  /**
+   * Scope resolution and existence check are the same query, mirroring
+   * `SocialAnalyticsReadService.findInScope` exactly: an asset in another
+   * tenant, workspace or managed client is "not found" — the same answer as
+   * an id that never existed. `ForbiddenException` would confirm the id is
+   * real and make this endpoint an enumeration oracle.
+   */
+  private async findAssetInScope(
+    input: SocialOrganicAnalyticsScope & { assetId: string },
+  ): Promise<SocialOrganicAssetEntity> {
+    const asset = await this.assetsRepository.findOne({
+      where: {
+        id: input.assetId,
+        tenantId: input.tenantId,
+        workspaceId: input.workspaceId,
+        // `IsNull()`, not `null` — a literal null reads as "no filter" and
+        // would silently widen the lookup to every managed client's assets.
+        agencyClientId: input.agencyClientId ?? IsNull(),
+      },
+      select: ['id', 'tenantId', 'workspaceId', 'assetTimezone'],
+    });
+
+    if (!asset) {
+      throw new NotFoundException('Asset not found.');
+    }
+
+    return asset;
+  }
+
+  /**
+   * One period's additive totals, summed in Postgres — `SUM` over `bigint`
+   * stays exact and comes back as text, so no value in this path is ever a
+   * JS number.
+   */
+  private async aggregate(
+    assetId: string,
+    since: string,
+    until: string,
+  ): Promise<AggregateRow> {
+    const row = await this.metricsRepository
+      .createQueryBuilder('fact')
+      .select('SUM(fact.impressions)', 'impressions')
+      .addSelect('SUM(fact.reach)', 'reach')
+      .addSelect('COUNT(fact.reach)', 'reach_days')
+      .addSelect('COUNT(DISTINCT fact.metric_date)', 'fact_days')
+      .addSelect(
+        'COUNT(DISTINCT fact.metric_date) FILTER (WHERE fact.is_partial)',
+        'partial_days',
+      )
+      .addSelect('SUM(fact.followers_gained)', 'followers_gained')
+      .addSelect('SUM(fact.followers_lost)', 'followers_lost')
+      .addSelect('SUM(fact.profile_views)', 'profile_views')
+      .where('fact.asset_id = :assetId', { assetId })
+      .andWhere('fact.metric_date BETWEEN :since AND :until', {
+        since,
+        until,
+      })
+      .getRawOne<AggregateRow>();
+
+    return row ?? ({} as AggregateRow);
+  }
+
+  /**
+   * `followersCount` stock rule: the latest observed value inside the
+   * period, never summed. Query builder, not raw SQL — `.andWhere` filters
+   * out NULL observations and `.orderBy('metricDate', 'DESC').limit(1)`
+   * takes the newest one. `null` if no observation exists in the window.
+   */
+  private async readFollowersCountStock(
+    assetId: string,
+    since: string,
+    until: string,
+  ): Promise<string | null> {
+    const row = await this.metricsRepository
+      .createQueryBuilder('fact')
+      .select('fact.followersCount', 'followers_count')
+      .where('fact.assetId = :assetId', { assetId })
+      .andWhere('fact.metricDate BETWEEN :since AND :until', { since, until })
+      .andWhere('fact.followersCount IS NOT NULL')
+      .orderBy('fact.metricDate', 'DESC')
+      .limit(1)
+      .getRawOne<{ followers_count: string | null }>();
+
+    return row?.followers_count ?? null;
+  }
+
+  private async readMetricsFreshness(
+    assetId: string,
+  ): Promise<SocialOrganicAnalyticsFreshnessView['metrics']> {
+    const row = await this.metricsRepository
+      .createQueryBuilder('fact')
+      .select(`to_char(MAX(fact.metric_date), 'YYYY-MM-DD')`, 'latest')
+      .addSelect(
+        `to_char(MAX(fact.metric_date) FILTER (WHERE NOT fact.is_partial), 'YYYY-MM-DD')`,
+        'latest_closed',
+      )
+      .addSelect(
+        `to_char(MAX(fact.metric_date) FILTER (WHERE fact.is_partial), 'YYYY-MM-DD')`,
+        'latest_partial',
+      )
+      .addSelect('MAX(fact.synced_at)', 'latest_synced_at')
+      .where('fact.asset_id = :assetId', { assetId })
+      .getRawOne<{
+        latest: string | null;
+        latest_closed: string | null;
+        latest_partial: string | null;
+        latest_synced_at: Date | string | null;
+      }>();
+
+    return {
+      latestMetricDate: row?.latest ?? null,
+      latestClosedMetricDate: row?.latest_closed ?? null,
+      latestPartialMetricDate: row?.latest_partial ?? null,
+      latestMetricsSyncedAt: readInstant(row?.latest_synced_at ?? null),
+    };
+  }
+
+  private async findLatestSuccessfulRun(
+    assetId: string,
+    runKind: string,
+  ): Promise<string | null> {
+    const row = await this.runsRepository
+      .createQueryBuilder('run')
+      .select('MAX(run.finishedAt)', 'finished_at')
+      .where('run.assetId = :assetId', { assetId })
+      .andWhere('run.runKind = :runKind', { runKind })
+      .andWhere(`run.status = 'succeeded'`)
+      .getRawOne<{ finished_at: Date | string | null }>();
+
+    return readInstant(row?.finished_at ?? null);
+  }
+
+  /**
+   * The newest day this asset has any fact for, unbounded by the requested
+   * period — it answers "how current is the read model?", which a
+   * period-bounded version could only ever answer with the period's own end.
+   */
+  private async findLastFactDate(assetId: string): Promise<string | null> {
+    const row = await this.metricsRepository
+      .createQueryBuilder('fact')
+      .select(`to_char(MAX(fact.metric_date), 'YYYY-MM-DD')`, 'last')
+      .where('fact.asset_id = :assetId', { assetId })
+      .getRawOne<{ last: string | null }>();
+
+    return row?.last ?? null;
+  }
+
+  private toTotals(
+    row: AggregateRow,
+    followersCount: string | null,
+  ): SocialOrganicAnalyticsTotals {
+    return {
+      impressions: toCount(row.impressions).toString(),
+      reach: readReach(row),
+      reachGranularity: 'daily',
+      followersCount,
+      followersGained: toCount(row.followers_gained).toString(),
+      followersLost: toCount(row.followers_lost).toString(),
+      profileViews: toCount(row.profile_views).toString(),
+    };
+  }
+}
+
+/** A timestamp column, whatever shape the driver returned it in. */
+function readInstant(value: Date | string | null): string | null {
+  if (value === null || value === undefined) return null;
+
+  return value instanceof Date
+    ? value.toISOString()
+    : new Date(value).toISOString();
+}
+
+/**
+ * Reach, or null — never a sum. Only returned when the period is exactly one
+ * day and that day reported it; see paid's `readReach` for the full
+ * rationale, reimplemented here rather than imported.
+ */
+function readReach(row: AggregateRow): string | null {
+  const days = toCount(row.fact_days);
+  const reachDays = toCount(row.reach_days);
+
+  if (days === 0n || days !== 1n) return null;
+  if (reachDays !== days) return null;
+
+  return row.reach === null || row.reach === undefined
+    ? null
+    : toCount(row.reach).toString();
+}
+
+/** A `SUM(bigint)` result as an exact integer, with NULL meaning zero. */
+function toCount(value: string | null | undefined): bigint {
+  if (value === null || value === undefined) return 0n;
+
+  const text = String(value).split('.')[0];
+
+  return text.length && /^-?\d+$/.test(text) ? BigInt(text) : 0n;
+}

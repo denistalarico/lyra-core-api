@@ -22,6 +22,7 @@ export type SocialOrganicAssetView = {
   avatarUrl: string | null;
   status: string;
   isPublishEnabled: boolean;
+  assetTimezone: string | null;
 };
 
 export type SocialOrganicAvailableAssetView = {
@@ -95,7 +96,7 @@ export function toSocialOrganicConnectionView(
   };
 }
 
-function toSocialOrganicAssetView(
+export function toSocialOrganicAssetView(
   asset: SocialOrganicAssetEntity,
 ): SocialOrganicAssetView {
   return {
@@ -107,6 +108,7 @@ function toSocialOrganicAssetView(
     avatarUrl: asset.avatarUrl,
     status: asset.status,
     isPublishEnabled: asset.isPublishEnabled,
+    assetTimezone: asset.assetTimezone,
   };
 }
 

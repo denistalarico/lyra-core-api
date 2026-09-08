@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Inject,
   Injectable,
   Logger,
@@ -7,15 +8,18 @@ import {
 } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import type { EntityManager } from 'typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, IsNull, Repository } from 'typeorm';
 import { SocialOrganicCredentialResolver } from '../credentials';
 import {
   SocialOrganicAssetEntity,
   SocialOrganicConnectionEntity,
 } from '../entities';
+import { normalizeIanaTimeZone } from './social-organic-asset-timezone';
 import { SocialOrganicOAuthProviderRegistry } from './social-organic-oauth.provider';
 import {
+  SocialOrganicAssetView,
   SocialOrganicConnectionView,
+  toSocialOrganicAssetView,
   toSocialOrganicConnectionView,
 } from './views/social-organic-connection.view';
 
@@ -32,6 +36,12 @@ export type SocialOrganicConnectionScope = {
 export type DisconnectSocialOrganicConnectionInput =
   SocialOrganicConnectionScope & {
     connectionId: string;
+  };
+
+export type UpdateSocialOrganicAssetTimezoneInput =
+  SocialOrganicConnectionScope & {
+    assetId: string;
+    timezone: string | null;
   };
 
 /** P1 implements this contract without making F6 depend on publication code. */
@@ -51,6 +61,8 @@ export class SocialOrganicConnectionService {
   constructor(
     @InjectRepository(SocialOrganicConnectionEntity, 'agency')
     private readonly connectionsRepository: Repository<SocialOrganicConnectionEntity>,
+    @InjectRepository(SocialOrganicAssetEntity, 'agency')
+    private readonly assetsRepository: Repository<SocialOrganicAssetEntity>,
     @InjectDataSource('agency') private readonly dataSource: DataSource,
     private readonly credentialResolver: SocialOrganicCredentialResolver,
     private readonly providers: SocialOrganicOAuthProviderRegistry,
@@ -201,6 +213,38 @@ export class SocialOrganicConnectionService {
       connection.assets = boundAssets;
       return toSocialOrganicConnectionView(connection);
     });
+  }
+
+  /**
+   * The only writer of `asset_timezone`. Never inherits a server, tenant,
+   * workspace or Planner timezone — the caller must supply a validated IANA
+   * zone or explicit `null`, and only that column plus `updated_at` change.
+   */
+  async updateAssetTimezone(
+    input: UpdateSocialOrganicAssetTimezoneInput,
+  ): Promise<SocialOrganicAssetView> {
+    let normalized: string | null;
+    try {
+      normalized = normalizeIanaTimeZone(input.timezone);
+    } catch {
+      throw new BadRequestException('invalid_asset_timezone');
+    }
+
+    const asset = await this.assetsRepository.findOne({
+      where: {
+        id: input.assetId,
+        tenantId: input.tenantId,
+        workspaceId: input.workspaceId,
+        agencyClientId: input.agencyClientId ?? IsNull(),
+      },
+    });
+
+    if (!asset) throw new NotFoundException('Social organic asset not found.');
+
+    asset.assetTimezone = normalized;
+    await this.assetsRepository.save(asset);
+
+    return toSocialOrganicAssetView(asset);
   }
 
   private applyClientScope(

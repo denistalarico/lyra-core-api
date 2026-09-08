@@ -17,12 +17,25 @@ export const SOCIAL_META_ORGANIC_CALLBACK_URL_ENV =
   'SOCIAL_META_ORGANIC_OAUTH_CALLBACK_URL';
 
 /**
- * Explicitly pinned for the Organic client. It must not inherit the Messaging
- * app's META_GRAPH_API_VERSION or accept an unversioned/"latest" endpoint.
+ * One protocol version across the Meta clients, configured once at process
+ * boot. Sharing this value does not share app identity, credentials, OAuth
+ * configuration, callbacks or storage between Messaging, Ads and Organic.
+ *
+ * The fallback is deliberately a concrete version: an unversioned/"latest"
+ * endpoint can change its response contract without a deploy. A malformed
+ * configured value fails boot instead of silently producing unversioned URLs.
  */
-export const META_ORGANIC_GRAPH_API_VERSION = 'v24.0';
+export const META_ORGANIC_GRAPH_API_VERSION = readMetaGraphApiVersion();
 export const META_ORGANIC_GRAPH_ORIGIN = 'https://graph.facebook.com';
 export const META_ORGANIC_AUTHORIZATION_ORIGIN = 'https://www.facebook.com';
+
+function readMetaGraphApiVersion(): string {
+  const value = process.env.META_GRAPH_API_VERSION?.trim() || 'v26.0';
+  if (!/^v\d+\.\d+$/.test(value)) {
+    throw new Error('META_GRAPH_API_VERSION must be a pinned version.');
+  }
+  return value;
+}
 
 /**
  * This persisted provider key identifies the Facebook Login Organic surface.
@@ -33,13 +46,11 @@ export const META_ORGANIC_AUTHORIZATION_ORIGIN = 'https://www.facebook.com';
 export const META_ORGANIC_PROVIDER = 'meta';
 
 /**
- * `MA1` requested only discovery scopes. `MA1.1` adds the two v1 publishing
- * scopes already configured on the App/Login Config externally
- * (`EXT-META-1`) — `pages_manage_posts` and `instagram_content_publish` —
- * so the persisted grant actually covers what `MA3`'s adapters will need to
- * call. Moderation/comments/insights/ads/messaging scopes are deliberately
- * NOT requested here; they belong to later, separately-scoped capability
- * work, never added "just in case" (`meta-organic.boundary.spec.ts` and
+ * `MA1` requested discovery scopes and `MA1.1` added the two v1 publishing
+ * scopes. Organic Analytics prerequisite `A1.1` adds exactly the two read
+ * scopes needed by the forthcoming ingest: `read_insights` and
+ * `instagram_manage_insights`. Moderation, comments, Ads, Messaging and admin
+ * scopes remain deliberately excluded (`meta-organic.boundary.spec.ts` and
  * `meta-organic-oauth.provider.spec.ts` assert a closed list against this
  * exact array). Facebook Login for Business applies these permissions
  * through `config_id`, not a `scope` URL parameter — this array is the
@@ -47,11 +58,9 @@ export const META_ORGANIC_PROVIDER = 'meta';
  * and stamped onto every `exchangeCode()` result, not something serialized
  * into `buildMetaOrganicAuthorizationUrl`'s query string.
  *
- * A token persisted before this change carries only the four discovery
- * scopes and does NOT include the two publishing scopes below — it must be
- * re-authorized (a fresh OAuth round-trip) before any `MA3` publish call,
- * or Meta will reject the call for a missing permission. Nothing here
- * upgrades an already-persisted connection automatically.
+ * A token persisted before this change does NOT acquire the analytics scopes
+ * automatically. It must be re-authorized through the existing `config_id`
+ * flow before A2 may use it.
  */
 export const SOCIAL_META_ORGANIC_SCOPES = [
   'business_management',
@@ -60,6 +69,8 @@ export const SOCIAL_META_ORGANIC_SCOPES = [
   'instagram_basic',
   'pages_manage_posts',
   'instagram_content_publish',
+  'read_insights',
+  'instagram_manage_insights',
 ] as const;
 
 export type MetaOrganicLoginConfig = FacebookLoginConfig;

@@ -80,6 +80,10 @@ export class MetaOrganicAssetDiscoveryService {
       return {
         accessToken: page.pageAccessToken,
         tokenExpiresAt: null,
+        // The current official Page object reference exposes no canonical
+        // IANA timezone field. Its nested targeting `timezones` list is
+        // numeric targeting data, not the Page's timezone.
+        assetTimezone: null,
         metadata: { pageId: page.pageId },
       };
     }
@@ -97,6 +101,10 @@ export class MetaOrganicAssetDiscoveryService {
       return {
         accessToken: page.pageAccessToken,
         tokenExpiresAt: null,
+        // IG User exposes no timezone field. A linked Page is an authorization
+        // relationship, not evidence that it defines IG analytics day
+        // boundaries, so A1.1 deliberately does not inherit one.
+        assetTimezone: null,
         metadata: { pageId: page.pageId },
       };
     }

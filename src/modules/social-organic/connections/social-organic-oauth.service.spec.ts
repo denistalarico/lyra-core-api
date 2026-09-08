@@ -456,6 +456,7 @@ describe('SocialOrganicOAuthService', () => {
     expect(row.connectionStatus).toBe('connected');
     expect(harness.savedAssets).toHaveLength(1);
     expect(harness.savedAssets[0].isPublishEnabled).toBe(true);
+    expect(harness.savedAssets[0].assetTimezone).toBeNull();
     const preparationCall = (
       harness.hooks.prepareAsset as jest.MockedFunction<
         SocialOrganicOAuthProviderHooks['prepareAsset']
@@ -468,6 +469,129 @@ describe('SocialOrganicOAuthService', () => {
     });
     expect(JSON.stringify(view)).not.toContain('connection-token');
     expect(view.assets[0].maskedExternalAssetId).not.toBe('asset-external-1');
+  });
+
+  it('persists a canonical provider-confirmed timezone without leaking provider metadata', async () => {
+    const crypto = new SettingsCryptoService();
+    const row = connectionRow({
+      connectionStatus: 'awaiting_selection',
+      oauthStateHash: null,
+      accessTokenEncrypted: crypto.encrypt('connection-token'),
+      metadata: {
+        selectableAssets: [
+          {
+            externalAssetId: 'asset-external-1',
+            assetType: 'profile',
+            selectionData: { providerReference: 'safe-reference' },
+          },
+        ],
+      },
+    });
+    const hooks = providerHooks({
+      prepareAsset: jest.fn(async () => ({
+        assetTimezone: ' America/Sao_Paulo ',
+        metadata: { timezone: 'provider-raw-must-not-be-used' },
+      })),
+    });
+    const harness = createHarness({
+      connectionResults: [row],
+      assetResults: [[]],
+      hooks,
+      crypto,
+    });
+
+    const view = await harness.service.select({
+      tenantId: 'tenant-a',
+      workspaceId: 'workspace-a',
+      agencyClientId: 'client-a',
+      userId: 'user-a',
+      provider: PROVIDER,
+      connectionId: row.id,
+      externalAssetIds: ['asset-external-1'],
+    });
+
+    expect(harness.savedAssets[0].assetTimezone).toBe('America/Sao_Paulo');
+    expect(JSON.stringify(view)).not.toContain('provider-raw-must-not-be-used');
+    // A1.2: assetTimezone is not a secret and the safe view exposes it.
+    expect(view.assets[0].assetTimezone).toBe('America/Sao_Paulo');
+  });
+
+  it('rejects an invalid provider timezone before persisting any asset', async () => {
+    const crypto = new SettingsCryptoService();
+    const row = connectionRow({
+      connectionStatus: 'awaiting_selection',
+      oauthStateHash: null,
+      accessTokenEncrypted: crypto.encrypt('connection-token'),
+      metadata: {
+        selectableAssets: [
+          {
+            externalAssetId: 'asset-external-1',
+            assetType: 'profile',
+          },
+        ],
+      },
+    });
+    const harness = createHarness({
+      connectionResults: [row],
+      assetResults: [[]],
+      hooks: providerHooks({
+        prepareAsset: jest.fn(async () => ({ assetTimezone: '-03:00' })),
+      }),
+      crypto,
+    });
+
+    await expect(
+      harness.service.select({
+        tenantId: 'tenant-a',
+        workspaceId: 'workspace-a',
+        agencyClientId: 'client-a',
+        userId: 'user-a',
+        provider: PROVIDER,
+        connectionId: row.id,
+        externalAssetIds: ['asset-external-1'],
+      }),
+    ).rejects.toThrow('asset_preparation_failed');
+
+    expect(harness.savedAssets).toHaveLength(0);
+  });
+
+  it('never treats provider metadata as a timezone source', async () => {
+    const crypto = new SettingsCryptoService();
+    const row = connectionRow({
+      connectionStatus: 'awaiting_selection',
+      oauthStateHash: null,
+      accessTokenEncrypted: crypto.encrypt('connection-token'),
+      metadata: {
+        selectableAssets: [
+          {
+            externalAssetId: 'asset-external-1',
+            assetType: 'profile',
+          },
+        ],
+      },
+    });
+    const harness = createHarness({
+      connectionResults: [row],
+      assetResults: [[]],
+      hooks: providerHooks({
+        prepareAsset: jest.fn(async () => ({
+          metadata: { timezone: 'America/New_York' },
+        })),
+      }),
+      crypto,
+    });
+
+    await harness.service.select({
+      tenantId: 'tenant-a',
+      workspaceId: 'workspace-a',
+      agencyClientId: 'client-a',
+      userId: 'user-a',
+      provider: PROVIDER,
+      connectionId: row.id,
+      externalAssetIds: ['asset-external-1'],
+    });
+
+    expect(harness.savedAssets[0].assetTimezone).toBeNull();
   });
 
   it('refuses cross-tenant asset selection as an invalid connection', async () => {

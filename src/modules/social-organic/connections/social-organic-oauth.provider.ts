@@ -52,6 +52,8 @@ export type SocialOrganicDiscoveredAsset = {
 export type SocialOrganicPreparedAsset = {
   accessToken?: string | null;
   tokenExpiresAt?: Date | null;
+  /** Provider-confirmed IANA timezone only; never inferred from metadata. */
+  assetTimezone?: string | null;
   metadata?: Record<string, unknown>;
 };
 

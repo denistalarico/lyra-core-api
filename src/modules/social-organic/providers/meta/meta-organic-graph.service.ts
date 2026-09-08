@@ -179,6 +179,103 @@ export class MetaOrganicGraphService {
     };
   }
 
+  /**
+   * Lowest-privilege, lowest-cost reachability read for `MA4` health checks:
+   * one field, no side effect. Works for both a Page and an IG Business
+   * Account, since both are plain Graph nodes. Returns the confirmed id so a
+   * caller can also prove the token still resolves to the *same* asset.
+   */
+  async getObjectId(input: {
+    objectId: string;
+    accessToken: string;
+  }): Promise<string> {
+    const url = this.graphUrl(encodeURIComponent(input.objectId));
+    url.searchParams.set('fields', 'id');
+
+    const data = await this.requestJson(
+      url,
+      this.authorized(input.accessToken),
+    );
+    if (!isRecord(data)) throw this.invalidResponse();
+
+    const id = readRequiredString(data.id);
+    if (!id) throw this.invalidResponse();
+
+    return id;
+  }
+
+  /** Current follower stock. Historical values are never synthesized from it. */
+  async getProfileFollowersCount(input: {
+    objectId: string;
+    accessToken: string;
+  }): Promise<unknown> {
+    const url = this.graphUrl(encodeURIComponent(input.objectId));
+    url.searchParams.set('fields', 'followers_count');
+    const data = await this.requestJson(
+      url,
+      this.authorized(input.accessToken),
+    );
+    if (!isRecord(data) || !Object.hasOwn(data, 'followers_count')) {
+      throw this.invalidResponse();
+    }
+    return data.followers_count;
+  }
+
+  /**
+   * Provider-owned Insights GET. Metric names come from A2's documented
+   * allow-list; this method validates their shape and centralizes version,
+   * timeout, auth header and safe error normalization.
+   */
+  async getOrganicInsights(input: {
+    objectId: string;
+    accessToken: string;
+    metrics: readonly string[];
+    /**
+     * `'lifetime'` is a post/media-level cumulative snapshot read (A2 §1):
+     * Meta's lifetime post/media insights calls take no `since`/`until`/
+     * `metric_type`/`breakdown`, so callers omit those fields themselves —
+     * this method's existing "only append if present" behavior already
+     * handles that without a structural change.
+     */
+    period?: 'day' | 'lifetime';
+    since?: number;
+    until?: number;
+    metricType?: 'total_value';
+    breakdown?: 'media_product_type' | 'follow_type' | 'is_from_ads';
+  }): Promise<{ data: unknown[]; apiCalls: 1 }> {
+    if (
+      input.metrics.length === 0 ||
+      input.metrics.some((metric) => !/^[a-z][a-z0-9_]*$/.test(metric))
+    ) {
+      throw this.invalidResponse();
+    }
+
+    const url = this.graphUrl(`${encodeURIComponent(input.objectId)}/insights`);
+    url.searchParams.set('metric', input.metrics.join(','));
+    if (input.period) url.searchParams.set('period', input.period);
+    if (input.since !== undefined) {
+      url.searchParams.set('since', String(input.since));
+    }
+    if (input.until !== undefined) {
+      url.searchParams.set('until', String(input.until));
+    }
+    if (input.metricType) {
+      url.searchParams.set('metric_type', input.metricType);
+    }
+    if (input.breakdown) {
+      url.searchParams.set('breakdown', input.breakdown);
+    }
+
+    const response = await this.requestJson(
+      url,
+      this.authorized(input.accessToken),
+    );
+    if (!isRecord(response) || !Array.isArray(response.data)) {
+      throw this.invalidResponse();
+    }
+    return { data: response.data, apiCalls: 1 };
+  }
+
   async revokePermissions(accessToken: string): Promise<void> {
     const data = await this.requestJson(
       this.graphUrl('me/permissions'),

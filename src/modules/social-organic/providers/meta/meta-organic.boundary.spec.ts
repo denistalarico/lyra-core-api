@@ -41,22 +41,20 @@ describe('Meta Organic boundaries', () => {
       'pages_messaging_subscriptions',
       'whatsapp_business_management',
       'whatsapp_business_messaging',
-      // Reserved for future, separately-scoped capability work — MA1.1
-      // adds only the two v1 publishing scopes, never these "just in case"
+      // Capability extras that A1.1 still does not request "just in case".
       'pages_manage_engagement',
       'pages_manage_metadata',
       'pages_read_user_content',
-      'read_insights',
       'instagram_manage_comments',
       'instagram_manage_contents',
       'instagram_manage_engagement',
-      'instagram_manage_insights',
+      'instagram_manage_messages',
     ]) {
       expect(SOCIAL_META_ORGANIC_SCOPES).not.toContain(forbidden);
     }
   });
 
-  it('declares exactly the MA1 discovery scopes plus the MA1.1 publishing scopes — a single source of truth', () => {
+  it('declares exactly discovery, publishing and the two A1.1 analytics scopes — a single source of truth', () => {
     expect([...SOCIAL_META_ORGANIC_SCOPES].sort()).toEqual(
       [
         'business_management',
@@ -65,6 +63,8 @@ describe('Meta Organic boundaries', () => {
         'instagram_basic',
         'pages_manage_posts',
         'instagram_content_publish',
+        'read_insights',
+        'instagram_manage_insights',
       ].sort(),
     );
   });

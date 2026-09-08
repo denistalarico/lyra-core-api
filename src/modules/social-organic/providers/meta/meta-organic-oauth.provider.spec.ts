@@ -28,7 +28,7 @@ describe('MetaOrganicOAuthProvider', () => {
       getLoginConfig: jest.fn(() => ({
         appId: 'social-app',
         configId: '1072508992158703',
-        authorizationEndpoint: 'https://www.facebook.com/v24.0/dialog/oauth',
+        authorizationEndpoint: 'https://www.facebook.com/v26.0/dialog/oauth',
       })),
       exchangeOAuthCode: jest.fn(async () => ({
         accessToken: 'short-token',
@@ -74,7 +74,7 @@ describe('MetaOrganicOAuthProvider', () => {
     expect(url.searchParams.has('scope')).toBe(false);
   });
 
-  it('declares Facebook Login for Business and exactly the MA1 + MA1.1 scopes', () => {
+  it('declares Facebook Login for Business and exactly the Organic scopes', () => {
     const { provider } = harness();
     expect(provider.configuration.provider).toBe('meta');
     expect(provider.configuration.authorizationMethod).toBe('oauth_business');
@@ -85,11 +85,13 @@ describe('MetaOrganicOAuthProvider', () => {
       'instagram_basic',
       'pages_manage_posts',
       'instagram_content_publish',
+      'read_insights',
+      'instagram_manage_insights',
     ]);
   });
 
-  it('the persisted scope contract (config_id-applied, not a URL param) contains exactly the 6 expected scopes', () => {
-    expect(SOCIAL_META_ORGANIC_SCOPES).toHaveLength(6);
+  it('the persisted scope contract (config_id-applied, not a URL param) contains exactly the 8 expected scopes', () => {
+    expect(SOCIAL_META_ORGANIC_SCOPES).toHaveLength(8);
     expect([...SOCIAL_META_ORGANIC_SCOPES].sort()).toEqual(
       [
         'business_management',
@@ -98,6 +100,8 @@ describe('MetaOrganicOAuthProvider', () => {
         'instagram_basic',
         'pages_manage_posts',
         'instagram_content_publish',
+        'read_insights',
+        'instagram_manage_insights',
       ].sort(),
     );
   });
@@ -105,6 +109,11 @@ describe('MetaOrganicOAuthProvider', () => {
   it('includes both MA1.1 publishing scopes', () => {
     expect(SOCIAL_META_ORGANIC_SCOPES).toContain('pages_manage_posts');
     expect(SOCIAL_META_ORGANIC_SCOPES).toContain('instagram_content_publish');
+  });
+
+  it('includes only the two A1.1 analytics scopes', () => {
+    expect(SOCIAL_META_ORGANIC_SCOPES).toContain('read_insights');
+    expect(SOCIAL_META_ORGANIC_SCOPES).toContain('instagram_manage_insights');
   });
 
   it('never requests Ads scopes', () => {
@@ -129,16 +138,15 @@ describe('MetaOrganicOAuthProvider', () => {
     }
   });
 
-  it('never requests comments/insights/admin scopes reserved for future capability work', () => {
+  it('never requests comments/admin extras', () => {
     for (const forbidden of [
       'pages_manage_engagement',
       'pages_manage_metadata',
       'pages_read_user_content',
-      'read_insights',
       'instagram_manage_comments',
       'instagram_manage_contents',
       'instagram_manage_engagement',
-      'instagram_manage_insights',
+      'instagram_manage_messages',
     ]) {
       expect(SOCIAL_META_ORGANIC_SCOPES).not.toContain(forbidden);
     }

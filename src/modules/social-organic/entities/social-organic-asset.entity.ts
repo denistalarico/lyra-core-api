@@ -99,6 +99,21 @@ export class SocialOrganicAssetEntity {
   })
   assetTokenExpiresAt!: Date | null;
 
+  /**
+   * Provider-confirmed IANA timezone used for analytics day boundaries.
+   *
+   * Nullable for assets created before A1.1 and providers that expose no
+   * canonical timezone. Analytics must fail closed while this is NULL; it must
+   * never fall back to the server, tenant, workspace or an offset.
+   */
+  @Column({
+    name: 'asset_timezone',
+    type: 'varchar',
+    length: 64,
+    nullable: true,
+  })
+  assetTimezone!: string | null;
+
   @Column({ name: 'is_publish_enabled', type: 'boolean', default: false })
   isPublishEnabled!: boolean;
 

@@ -6,6 +6,7 @@ import {
   Get,
   Param,
   ParseUUIDPipe,
+  Patch,
   Post,
   Query,
   Res,
@@ -21,17 +22,25 @@ import {
   RequireProductEntitlement,
 } from '../../permissions';
 import { SelectSocialOrganicAssetsDto } from './dto/select-social-organic-assets.dto';
+import { UpdateSocialOrganicAssetTimezoneDto } from './dto/update-social-organic-asset-timezone.dto';
 import { SocialOrganicConnectionService } from './social-organic-connection.service';
 import { SocialOrganicOAuthService } from './social-organic-oauth.service';
+import { MetaOrganicHealthService } from '../providers/meta/meta-organic-health.service';
+import { RequestSocialOrganicSyncDto } from '../analytics/dto/request-social-organic-sync.dto';
+import { SocialOrganicSyncRunService } from '../analytics/social-organic-sync-run.service';
 
 const SOCIAL_INTEGRATIONS_PERMISSION =
   'social.settings.integrations.manage.admin';
+const SOCIAL_ORGANIC_ANALYTICS_PERMISSION =
+  'social.analytics.organic.view.operational';
 
 @Controller('social/organic')
 export class SocialOrganicController {
   constructor(
     private readonly oauth: SocialOrganicOAuthService,
     private readonly connections: SocialOrganicConnectionService,
+    private readonly health: MetaOrganicHealthService,
+    private readonly analyticsRuns: SocialOrganicSyncRunService,
   ) {}
 
   @Get('connections')
@@ -112,6 +121,60 @@ export class SocialOrganicController {
       ...this.requireScope(ctx),
       connectionId,
     });
+  }
+
+  @Patch('assets/:assetId/timezone')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireProductEntitlement('social')
+  @RequirePermission(SOCIAL_INTEGRATIONS_PERMISSION)
+  updateAssetTimezone(
+    @RequestContextData() ctx: RequestContext,
+    @Param('assetId', ParseUUIDPipe) assetId: string,
+    @Body() dto: UpdateSocialOrganicAssetTimezoneDto,
+  ) {
+    return this.connections.updateAssetTimezone({
+      ...this.requireScope(ctx),
+      assetId,
+      timezone: dto.timezone,
+    });
+  }
+
+  @Post('assets/:assetId/analytics/sync')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireProductEntitlement('social')
+  @RequirePermission(SOCIAL_ORGANIC_ANALYTICS_PERMISSION)
+  requestAnalyticsSync(
+    @RequestContextData() ctx: RequestContext,
+    @Param('assetId', ParseUUIDPipe) assetId: string,
+    @Body() dto: RequestSocialOrganicSyncDto,
+  ) {
+    return this.analyticsRuns.request({
+      ...this.requireScope(ctx),
+      assetId,
+      fromDate: dto.fromDate,
+      toDate: dto.toDate,
+    });
+  }
+
+  @Post('assets/:assetId/health')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireProductEntitlement('social')
+  @RequirePermission(SOCIAL_INTEGRATIONS_PERMISSION)
+  async checkAssetHealth(
+    @RequestContextData() ctx: RequestContext,
+    @Param('assetId', ParseUUIDPipe) assetId: string,
+  ) {
+    const result = await this.health.checkAsset({
+      ...this.requireScope(ctx),
+      assetId,
+    });
+
+    return {
+      assetId: result.assetId,
+      status: result.status,
+      reason: result.reason,
+      checkedAt: result.checkedAt.toISOString(),
+    };
   }
 
   private requireScope(ctx: RequestContext) {

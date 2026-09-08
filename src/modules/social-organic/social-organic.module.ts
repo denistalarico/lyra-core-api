@@ -4,9 +4,13 @@ import { SettingsCryptoService } from '../../common/crypto/settings-crypto.servi
 import { FilesModule } from '../../common/files/files.module';
 import { MediaAssetsModule } from '../../common/media-assets';
 import { PermissionsModule } from '../permissions';
+import { SocialIntegrationsModule } from '../social-integrations/social-integrations.module';
 import {
   MetaOrganicInsightsService,
+  SocialConsolidatedAnalyticsService,
   SocialOrganicAccountMetricDailyEntity,
+  SocialOrganicAnalyticsController,
+  SocialOrganicAnalyticsReadService,
   SocialOrganicMetricsWriterService,
   SocialOrganicPostMetricDailyEntity,
   SocialOrganicSyncRunEntity,
@@ -72,6 +76,12 @@ export function createMetaOrganicOAuthProviders(
     PermissionsModule,
     FilesModule,
     MediaAssetsModule,
+    // A4 injects `SocialAnalyticsReadService` for the consolidated
+    // paid+organic view. `SocialIntegrationsModule` imports nothing from
+    // this module (confirmed before wiring), so this is a one-directional
+    // dependency — mirrors `intelligence-analytics.module.ts`'s own import
+    // of `SocialIntegrationsModule` for the same service.
+    SocialIntegrationsModule,
     TypeOrmModule.forFeature(
       [
         SocialOrganicConnectionEntity,
@@ -92,6 +102,7 @@ export function createMetaOrganicOAuthProviders(
     SocialOrganicController,
     SocialPublicationController,
     MetaOrganicWebhookController,
+    SocialOrganicAnalyticsController,
   ],
   providers: [
     MetaOrganicGraphService,
@@ -122,6 +133,8 @@ export function createMetaOrganicOAuthProviders(
     SocialOrganicSyncRunService,
     SocialOrganicSyncScheduler,
     SocialOrganicSyncWorker,
+    SocialOrganicAnalyticsReadService,
+    SocialConsolidatedAnalyticsService,
     MetaOrganicWebhookSignatureService,
     SocialOrganicWebhookService,
     SocialOrganicInteractionService,
@@ -143,6 +156,7 @@ export function createMetaOrganicOAuthProviders(
     SocialPublicationService,
     SocialPublisherRegistry,
     SocialOrganicSyncRunService,
+    SocialOrganicAnalyticsReadService,
   ],
 })
 export class SocialOrganicModule {}

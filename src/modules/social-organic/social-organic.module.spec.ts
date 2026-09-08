@@ -12,9 +12,13 @@ import { SettingsCryptoService } from '../../common/crypto/settings-crypto.servi
 import { FilesModule } from '../../common/files/files.module';
 import { MediaAssetsModule } from '../../common/media-assets';
 import { PermissionsModule } from '../permissions';
+import { SocialIntegrationsModule } from '../social-integrations/social-integrations.module';
 import {
   MetaOrganicInsightsService,
+  SocialConsolidatedAnalyticsService,
   SocialOrganicAccountMetricDailyEntity,
+  SocialOrganicAnalyticsController,
+  SocialOrganicAnalyticsReadService,
   SocialOrganicMetricsWriterService,
   SocialOrganicPostMetricDailyEntity,
   SocialOrganicSyncRunEntity,
@@ -100,11 +104,15 @@ describe('SocialOrganicModule', () => {
       Reflect.getMetadata(MODULE_METADATA.IMPORTS, SocialOrganicModule),
     ).toContain(MediaAssetsModule);
     expect(
+      Reflect.getMetadata(MODULE_METADATA.IMPORTS, SocialOrganicModule),
+    ).toContain(SocialIntegrationsModule);
+    expect(
       Reflect.getMetadata(MODULE_METADATA.CONTROLLERS, SocialOrganicModule),
     ).toEqual([
       SocialOrganicController,
       SocialPublicationController,
       MetaOrganicWebhookController,
+      SocialOrganicAnalyticsController,
     ]);
     expect(
       Reflect.getMetadata(MODULE_METADATA.PROVIDERS, SocialOrganicModule),
@@ -137,6 +145,8 @@ describe('SocialOrganicModule', () => {
       SocialOrganicSyncRunService,
       SocialOrganicSyncScheduler,
       SocialOrganicSyncWorker,
+      SocialOrganicAnalyticsReadService,
+      SocialConsolidatedAnalyticsService,
       MetaOrganicWebhookSignatureService,
       SocialOrganicWebhookService,
       SocialOrganicInteractionService,
@@ -160,6 +170,7 @@ describe('SocialOrganicModule', () => {
       SocialPublicationService,
       SocialPublisherRegistry,
       SocialOrganicSyncRunService,
+      SocialOrganicAnalyticsReadService,
     ]);
   });
 });

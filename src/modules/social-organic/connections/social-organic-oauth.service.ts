@@ -24,6 +24,7 @@ import {
   SocialOrganicOAuthProviderRegistry,
   SocialOrganicOAuthTokenGrant,
 } from './social-organic-oauth.provider';
+import { normalizeIanaTimeZone } from './social-organic-asset-timezone';
 
 export const SOCIAL_ORGANIC_OAUTH_SESSION_TTL_MS = 15 * 60 * 1000;
 
@@ -325,6 +326,14 @@ export class SocialOrganicOAuthService {
 
           asset.assetTokenEncrypted = encryptedAssetToken;
           asset.assetTokenExpiresAt = prepared.tokenExpiresAt ?? null;
+          const preparedTimezone = normalizeIanaTimeZone(
+            prepared.assetTimezone,
+          );
+          // An absent provider value is not permission to erase a previously
+          // configured, validated timezone during re-authorization. New rows
+          // remain NULL. Metadata is deliberately never inspected here.
+          asset.assetTimezone =
+            preparedTimezone ?? current?.assetTimezone ?? null;
           asset.isPublishEnabled = true;
           asset.capabilitiesSnapshot = discovered.capabilities ?? {};
           asset.status = 'active';

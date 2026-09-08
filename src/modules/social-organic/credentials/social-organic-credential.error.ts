@@ -4,6 +4,11 @@ export type SocialOrganicCredentialErrorCode =
   | 'credential_removed'
   | 'asset_not_active'
   | 'publishing_not_enabled'
+  | 'analytics_scope_missing'
+  | 'asset_timezone_unresolved'
+  | 'asset_timezone_invalid'
+  | 'asset_unhealthy'
+  | 'unsupported_analytics_asset_type'
   | 'asset_provider_mismatch'
   | 'unsupported_authorization_method';
 

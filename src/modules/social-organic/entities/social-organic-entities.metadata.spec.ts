@@ -43,4 +43,13 @@ describe('social organic entity credential metadata', () => {
     expect(assetType.default).toBeUndefined();
     expect(assetType.enum).toBeUndefined();
   });
+
+  it('keeps asset timezone nullable and without a default', () => {
+    const timezone = columnOptions(SocialOrganicAssetEntity, 'assetTimezone');
+
+    expect(timezone.type).toBe('varchar');
+    expect(timezone.length).toBe(64);
+    expect(timezone.nullable).toBe(true);
+    expect(timezone.default).toBeUndefined();
+  });
 });
