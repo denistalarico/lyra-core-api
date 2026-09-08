@@ -176,6 +176,11 @@ import { CreateSocialOrganicConnections1791500000000 } from './migrations/179150
 import { CreateSocialPublications1791600000000 } from './migrations/1791600000000-create-social-publications';
 import { CreateMediaAssets1791700000000 } from './migrations/1791700000000-create-media-assets';
 import { AddSocialPublicationMediaAsset1791800000000 } from './migrations/1791800000000-add-social-publication-media-asset';
+import { CreateSocialOrganicReadModel1791900000000 } from './migrations/1791900000000-create-social-organic-read-model';
+import { AddSocialOrganicAssetTimezone1792000000000 } from './migrations/1792000000000-add-social-organic-asset-timezone';
+import { MakeSocialOrganicMetricsNullable1792100000000 } from './migrations/1792100000000-make-social-organic-metrics-nullable';
+import { CreateSocialOrganicWebhookEvents1792200000000 } from './migrations/1792200000000-create-social-organic-webhook-events';
+import { CreateSocialOrganicInteractions1792300000000 } from './migrations/1792300000000-create-social-organic-interactions';
 
 export const AgencyDataSource = new DataSource({
   type: 'postgres',
@@ -362,5 +367,10 @@ export const AgencyDataSource = new DataSource({
     CreateSocialPublications1791600000000,
     CreateMediaAssets1791700000000,
     AddSocialPublicationMediaAsset1791800000000,
+    CreateSocialOrganicReadModel1791900000000,
+    AddSocialOrganicAssetTimezone1792000000000,
+    MakeSocialOrganicMetricsNullable1792100000000,
+    CreateSocialOrganicWebhookEvents1792200000000,
+    CreateSocialOrganicInteractions1792300000000,
   ],
 });

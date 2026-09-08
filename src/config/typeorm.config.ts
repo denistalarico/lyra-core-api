@@ -331,6 +331,15 @@ import {
   SocialOrganicAssetEntity,
   SocialOrganicConnectionEntity,
 } from '../modules/social-organic/entities';
+import {
+  SocialOrganicAccountMetricDailyEntity,
+  SocialOrganicPostMetricDailyEntity,
+  SocialOrganicSyncRunEntity,
+} from '../modules/social-organic/analytics/entities';
+import {
+  SocialOrganicInteractionEntity,
+  SocialOrganicWebhookEventEntity,
+} from '../modules/social-organic/webhooks/entities';
 import { SocialPublicationEntity } from '../modules/social-organic/publication/entities/social-publication.entity';
 import {
   BrandKitAssetEntity,
@@ -356,6 +365,11 @@ export const agencyEntities = [
   SocialAdSyncRunEntity,
   SocialOrganicConnectionEntity,
   SocialOrganicAssetEntity,
+  SocialOrganicPostMetricDailyEntity,
+  SocialOrganicAccountMetricDailyEntity,
+  SocialOrganicSyncRunEntity,
+  SocialOrganicWebhookEventEntity,
+  SocialOrganicInteractionEntity,
   SocialPublicationEntity,
   PlatformInternalAdminEntity,
   PlatformAdminAuditEventEntity,

@@ -12,12 +12,23 @@ import { SettingsCryptoService } from '../../common/crypto/settings-crypto.servi
 import { FilesModule } from '../../common/files/files.module';
 import { MediaAssetsModule } from '../../common/media-assets';
 import { PermissionsModule } from '../permissions';
+import {
+  MetaOrganicInsightsService,
+  SocialOrganicAccountMetricDailyEntity,
+  SocialOrganicMetricsWriterService,
+  SocialOrganicPostMetricDailyEntity,
+  SocialOrganicSyncRunEntity,
+  SocialOrganicSyncRunService,
+  SocialOrganicSyncScheduler,
+  SocialOrganicSyncWorker,
+} from './analytics';
 import { SocialContentDestinationEntity } from '../social-planner/entities/social-content-destination.entity';
 import { SocialContentItemEntity } from '../social-planner/entities/social-content-item.entity';
 import {
   SOCIAL_ORGANIC_OAUTH_PROVIDERS,
   SocialOrganicController,
   SocialOrganicConnectionService,
+  SocialOrganicHealthScheduler,
   SocialOrganicOAuthProviderRegistry,
   SocialOrganicOAuthService,
 } from './connections';
@@ -43,10 +54,20 @@ import {
   InstagramPublisherAdapter,
   MetaOrganicAssetDiscoveryService,
   MetaOrganicGraphService,
+  MetaOrganicHealthService,
   MetaOrganicOAuthProvider,
   MetaPublisherRegistration,
   SocialPublisherRegistry,
 } from './providers';
+import {
+  MetaOrganicWebhookController,
+  MetaOrganicWebhookSignatureService,
+  SocialOrganicInteractionEntity,
+  SocialOrganicInteractionService,
+  SocialOrganicWebhookEventEntity,
+  SocialOrganicWebhookService,
+  SocialOrganicWebhookWorker,
+} from './webhooks';
 import {
   createMetaOrganicOAuthProviders,
   SocialOrganicModule,
@@ -61,6 +82,11 @@ describe('SocialOrganicModule', () => {
         SocialPublicationEntity,
         SocialContentItemEntity,
         SocialContentDestinationEntity,
+        SocialOrganicPostMetricDailyEntity,
+        SocialOrganicAccountMetricDailyEntity,
+        SocialOrganicSyncRunEntity,
+        SocialOrganicWebhookEventEntity,
+        SocialOrganicInteractionEntity,
       ],
       'agency',
     ]);
@@ -75,7 +101,11 @@ describe('SocialOrganicModule', () => {
     ).toContain(MediaAssetsModule);
     expect(
       Reflect.getMetadata(MODULE_METADATA.CONTROLLERS, SocialOrganicModule),
-    ).toEqual([SocialOrganicController, SocialPublicationController]);
+    ).toEqual([
+      SocialOrganicController,
+      SocialPublicationController,
+      MetaOrganicWebhookController,
+    ]);
     expect(
       Reflect.getMetadata(MODULE_METADATA.PROVIDERS, SocialOrganicModule),
     ).toEqual([
@@ -100,6 +130,17 @@ describe('SocialOrganicModule', () => {
       FacebookPublisherAdapter,
       InstagramPublisherAdapter,
       MetaPublisherRegistration,
+      MetaOrganicHealthService,
+      SocialOrganicHealthScheduler,
+      MetaOrganicInsightsService,
+      SocialOrganicMetricsWriterService,
+      SocialOrganicSyncRunService,
+      SocialOrganicSyncScheduler,
+      SocialOrganicSyncWorker,
+      MetaOrganicWebhookSignatureService,
+      SocialOrganicWebhookService,
+      SocialOrganicInteractionService,
+      SocialOrganicWebhookWorker,
       SettingsCryptoService,
       MediaPreparationService,
       SocialPublicationExecutorService,
@@ -118,6 +159,7 @@ describe('SocialOrganicModule', () => {
       SocialPublicationRunService,
       SocialPublicationService,
       SocialPublisherRegistry,
+      SocialOrganicSyncRunService,
     ]);
   });
 });
