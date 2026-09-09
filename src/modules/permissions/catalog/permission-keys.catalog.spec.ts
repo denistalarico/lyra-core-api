@@ -38,6 +38,11 @@ describe('social publishing and organic analytics permission keys', () => {
       [Manager, Admin, Owner],
       false,
     ],
+    // Media reads sit at the same floor as reading a publication, and media
+    // writes at the same floor as creating one — whoever may schedule a post
+    // may supply its media, and no lower role gains a write by this addition.
+    ['social.publishing.media.view.assigned', [Member, Manager, Admin, Owner], false],
+    ['social.publishing.media.upload.manager', [Manager, Admin, Owner], false],
   ])('%s has the specified role floor', (key, roles, isDangerous) => {
     expect(isKnownPermissionKey(key)).toBe(true);
     expect(getPermissionDefinition(key)).toMatchObject({

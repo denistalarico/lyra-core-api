@@ -4,6 +4,7 @@ import {
   PERMISSION_KEY_METADATA,
   PRODUCT_ENTITLEMENT_METADATA,
 } from '../../permissions/decorators/permissions.decorators';
+import type { SocialPublisherRegistry } from '../providers';
 import { SocialPublicationController } from './social-publication.controller';
 import type { SocialPublicationService } from './social-publication.service';
 
@@ -17,6 +18,7 @@ describe('SocialPublicationController', () => {
     publishNow: jest.fn(),
     cancel: jest.fn(),
     retry: jest.fn(),
+    listPublishTargets: jest.fn(),
   };
 
   const agencyCtx: RequestContext = {
@@ -47,10 +49,22 @@ describe('SocialPublicationController', () => {
     assetId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
   };
 
+  /**
+   * A registry double rather than the real class: this spec is about the
+   * controller's contract, and the registry's own behaviour has its own spec.
+   * The shape mirrors what `capabilities()` actually calls.
+   */
+  const registry = {
+    registeredPairs: [] as { provider: string; assetType: string }[],
+    resolve: jest.fn(),
+  };
+
   beforeEach(() => {
     jest.clearAllMocks();
+    registry.registeredPairs = [];
     controller = new SocialPublicationController(
       service as unknown as SocialPublicationService,
+      registry as unknown as SocialPublisherRegistry,
     );
   });
 
@@ -223,6 +237,146 @@ describe('SocialPublicationController', () => {
       agencyCtx.userId,
       'pub-1',
     );
+  });
+
+  describe('capabilities', () => {
+    const facebookCapabilities = {
+      provider: 'meta',
+      assetType: 'facebook_page',
+      placements: ['feed', 'reel', 'carousel'],
+      media: {
+        feed: { acceptedMimeTypes: ['image/jpeg'], maxBytes: 4 },
+        reel: {
+          acceptedMimeTypes: ['video/mp4'],
+          maxBytes: 300,
+          minDurationSeconds: 3,
+          maxDurationSeconds: 90,
+          aspectRatios: ['9:16'],
+        },
+        // `carousel` is declared as a placement but has no media block —
+        // exactly the disagreement `resolveMediaRequirements` fails closed on.
+      },
+      supportsScheduling: true,
+      supportsCaption: true,
+      supportsFirstComment: false,
+      supportsHashtags: false,
+      requiresReconciliation: true,
+      supportsRemoval: true,
+    };
+
+    it('requires only view permission, so a reader can render the composer', () => {
+      expect(
+        Reflect.getMetadata(
+          PERMISSION_KEY_METADATA,
+          SocialPublicationController.prototype.capabilities,
+        ),
+      ).toBe('social.publishing.publication.view.assigned');
+    });
+
+    it('reads every registered pair through the registry', () => {
+      registry.registeredPairs = [
+        { provider: 'meta', assetType: 'facebook_page' },
+      ];
+      registry.resolve.mockReturnValue({
+        capabilities: () => facebookCapabilities,
+      });
+
+      const result = controller.capabilities();
+
+      expect(registry.resolve).toHaveBeenCalledWith('meta', 'facebook_page');
+      expect(result.total).toBe(1);
+      expect(result.items[0].provider).toBe('meta');
+      expect(result.items[0].assetType).toBe('facebook_page');
+    });
+
+    it('drops a placement that has no declared media block', () => {
+      registry.registeredPairs = [
+        { provider: 'meta', assetType: 'facebook_page' },
+      ];
+      registry.resolve.mockReturnValue({
+        capabilities: () => facebookCapabilities,
+      });
+
+      const placements = controller
+        .capabilities()
+        .items[0].placements.map((entry) => entry.placement);
+
+      expect(placements).toEqual(['feed', 'reel']);
+      expect(placements).not.toContain('carousel');
+    });
+
+    it('preserves the difference between an absent and an empty aspect-ratio list', () => {
+      registry.registeredPairs = [
+        { provider: 'meta', assetType: 'facebook_page' },
+      ];
+      registry.resolve.mockReturnValue({
+        capabilities: () => facebookCapabilities,
+      });
+
+      const [feed, reel] = controller.capabilities().items[0].placements;
+
+      // Absent means "no constraint", and must not arrive as [] — which a
+      // client would read as "no ratio is acceptable".
+      expect(feed.aspectRatios).toBeNull();
+      expect(reel.aspectRatios).toEqual(['9:16']);
+    });
+
+    it('answers an empty matrix when nothing is registered', () => {
+      registry.registeredPairs = [];
+
+      expect(controller.capabilities()).toEqual({ items: [], total: 0 });
+      expect(registry.resolve).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('targets', () => {
+    it('requires only view permission, not the integrations admin key', () => {
+      // The composer must work for someone who publishes without
+      // administering integrations.
+      expect(
+        Reflect.getMetadata(
+          PERMISSION_KEY_METADATA,
+          SocialPublicationController.prototype.targets,
+        ),
+      ).toBe('social.publishing.publication.view.assigned');
+    });
+
+    it('lists using only the server-resolved scope', async () => {
+      service.listPublishTargets.mockResolvedValue([]);
+
+      await controller.targets(clientCtx);
+
+      expect(service.listPublishTargets).toHaveBeenCalledWith({
+        tenantId: clientCtx.tenantId,
+        workspaceId: clientCtx.workspaceId,
+        agencyClientId: '33333333-3333-4333-8333-333333333333',
+      });
+    });
+
+    it('masks the provider account id and keeps the timezone unfabricated', async () => {
+      service.listPublishTargets.mockResolvedValue([
+        {
+          id: 'asset-1',
+          provider: 'meta',
+          assetType: 'instagram_professional',
+          externalAssetId: '17841400000000000',
+          displayName: 'Marca',
+          username: 'marca',
+          avatarUrl: null,
+          assetTimezone: null,
+        },
+      ]);
+
+      const result = await controller.targets(agencyCtx);
+
+      expect(result.items[0].maskedExternalAssetId).not.toContain(
+        '17841400000000000',
+      );
+      expect(result.items[0].maskedExternalAssetId).toContain('0000');
+      // Null, never a silent UTC stand-in.
+      expect(result.items[0].assetTimezone).toBeNull();
+      expect(JSON.stringify(result)).not.toContain('17841400000000000');
+    });
   });
 
   it('publishes now using only the server-resolved scope', async () => {

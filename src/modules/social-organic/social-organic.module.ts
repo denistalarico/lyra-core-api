@@ -2,7 +2,12 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { SettingsCryptoService } from '../../common/crypto/settings-crypto.service';
 import { FilesModule } from '../../common/files/files.module';
-import { MediaAssetsModule } from '../../common/media-assets';
+import {
+  MEDIA_ASSET_METADATA_READER,
+  MediaAssetController,
+  MediaAssetUploadService,
+  MediaAssetsModule,
+} from '../../common/media-assets';
 import { PermissionsModule } from '../permissions';
 import { SocialIntegrationsModule } from '../social-integrations/social-integrations.module';
 import {
@@ -33,6 +38,7 @@ import {
   SocialOrganicAssetEntity,
   SocialOrganicConnectionEntity,
 } from './entities';
+import { MediaMetadataService } from './media/media-metadata.service';
 import { MediaPreparationService } from './media/media-preparation.service';
 import {
   SocialPublicationController,
@@ -101,6 +107,10 @@ export function createMetaOrganicOAuthProviders(
   controllers: [
     SocialOrganicController,
     SocialPublicationController,
+    // Mounted here rather than in `MediaAssetsModule`: the endpoint's
+    // authorization is Social's (see the controller's own docblock), so the
+    // shared boundary must not force it on every importer.
+    MediaAssetController,
     MetaOrganicWebhookController,
     SocialOrganicAnalyticsController,
   ],
@@ -141,6 +151,15 @@ export function createMetaOrganicOAuthProviders(
     SocialOrganicWebhookWorker,
     SettingsCryptoService,
     MediaPreparationService,
+    MediaMetadataService,
+    MediaAssetUploadService,
+    // Binds M2's extractor to the port `common/media-assets` declares, so the
+    // shared boundary reads media metadata without importing a product module.
+    // The arrow stays social-organic → common, never the reverse.
+    {
+      provide: MEDIA_ASSET_METADATA_READER,
+      useExisting: MediaMetadataService,
+    },
     SocialPublicationExecutorService,
     {
       provide: SOCIAL_PUBLICATION_EXECUTOR,

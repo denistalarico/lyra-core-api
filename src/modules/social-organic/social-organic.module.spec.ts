@@ -10,7 +10,12 @@ import { MODULE_METADATA } from '@nestjs/common/constants';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { SettingsCryptoService } from '../../common/crypto/settings-crypto.service';
 import { FilesModule } from '../../common/files/files.module';
-import { MediaAssetsModule } from '../../common/media-assets';
+import {
+  MEDIA_ASSET_METADATA_READER,
+  MediaAssetController,
+  MediaAssetUploadService,
+  MediaAssetsModule,
+} from '../../common/media-assets';
 import { PermissionsModule } from '../permissions';
 import { SocialIntegrationsModule } from '../social-integrations/social-integrations.module';
 import {
@@ -41,6 +46,7 @@ import {
   SocialOrganicAssetEntity,
   SocialOrganicConnectionEntity,
 } from './entities';
+import { MediaMetadataService } from './media/media-metadata.service';
 import { MediaPreparationService } from './media/media-preparation.service';
 import {
   SocialPublicationController,
@@ -111,6 +117,7 @@ describe('SocialOrganicModule', () => {
     ).toEqual([
       SocialOrganicController,
       SocialPublicationController,
+      MediaAssetController,
       MetaOrganicWebhookController,
       SocialOrganicAnalyticsController,
     ]);
@@ -153,6 +160,14 @@ describe('SocialOrganicModule', () => {
       SocialOrganicWebhookWorker,
       SettingsCryptoService,
       MediaPreparationService,
+      MediaMetadataService,
+      MediaAssetUploadService,
+      // The port binding that lets `common/media-assets` read media metadata
+      // without importing this product module.
+      {
+        provide: MEDIA_ASSET_METADATA_READER,
+        useExisting: MediaMetadataService,
+      },
       SocialPublicationExecutorService,
       {
         provide: SOCIAL_PUBLICATION_EXECUTOR,

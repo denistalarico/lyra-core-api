@@ -357,6 +357,32 @@ export class SocialPublicationService {
     return item;
   }
 
+  /**
+   * The connected accounts this scope may actually publish to (E3).
+   *
+   * The composer needs `provider` and `assetType` to resolve which capability
+   * applies, and those live on the connected asset, not on the editorial
+   * destination — a destination's `channel` is intent ("instagram"), while a
+   * workspace may have several connected Instagram accounts.
+   *
+   * Filtered by exactly the rule `requirePublishableAsset` enforces at
+   * schedule time: `status === 'active'` and `isPublishEnabled`. If this
+   * listed anything looser, the composer would offer a destination that
+   * `create()` then refuses with a 409 the operator cannot act on.
+   */
+  async listPublishTargets(
+    scope: SocialPublicationScope,
+  ): Promise<SocialOrganicAssetEntity[]> {
+    return this.assetsRepository.find({
+      where: {
+        ...this.assetScopeWhere(scope),
+        status: 'active',
+        isPublishEnabled: true,
+      },
+      order: { createdAt: 'ASC' },
+    });
+  }
+
   private async requireDestination(
     scope: SocialPublicationScope,
     destinationId: string,

@@ -52,6 +52,33 @@ export class SocialPublisherRegistry {
     ];
   }
 
+  /**
+   * Every registered `(provider, assetType)` pair.
+   *
+   * Exists so the capability read endpoint (E3) can answer "what may this
+   * workspace even attempt" from the registry rather than importing a
+   * provider's static declaration directly. Reading Meta's constants would
+   * make the UI's list of formats and the validator's list of formats two
+   * different things the day a provider is added or an adapter is unregistered
+   * behind a flag — and the UI's copy would be the one that lies.
+   *
+   * Pairs, not adapters: one adapter may serve several asset types, and a
+   * caller enumerating capabilities needs each pair separately because
+   * `capabilities()` takes an asset type.
+   *
+   * Derived from the adapters themselves rather than by splitting the map key
+   * — the key's separator is an implementation detail of `key()` and parsing
+   * it back would silently break if that ever changed.
+   */
+  get registeredPairs(): readonly { provider: string; assetType: string }[] {
+    return [...new Set(this.adapters.values())].flatMap((adapter) =>
+      adapter.assetTypes.map((assetType) => ({
+        provider: adapter.provider,
+        assetType,
+      })),
+    );
+  }
+
   private key(provider: string, assetType: string): string {
     return `${provider}\u0000${assetType}`;
   }

@@ -417,6 +417,13 @@ const RAW_PERMISSIONS: RawPermission[] = [
     ADMIN_UP,
     true,
   ],
+  // Media is scoped to Publishing rather than to Settings: uploading a file to
+  // compose a post is an operator's daily work, while `social.settings.*` is
+  // administration. Reading is `ALL_ROLES` so a viewer can see the media on a
+  // publication they may already read; writing is `MANAGER_UP`, matching
+  // `publication.create` — whoever may schedule a post may supply its media.
+  ['social.publishing.media.view.assigned', ALL_ROLES],
+  ['social.publishing.media.upload.manager', MANAGER_UP],
 
   // 11.5 Social - Organic Analytics
   ['social.analytics.organic.view.operational', MANAGER_UP],
