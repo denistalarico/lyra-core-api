@@ -3,9 +3,11 @@ import {
   IsInt,
   IsOptional,
   IsString,
+  IsUUID,
   Matches,
   MaxLength,
   Min,
+  ValidateIf,
 } from 'class-validator';
 import type { SocialContentPlanningStatus } from '../entities';
 
@@ -69,4 +71,18 @@ export class UpdateSocialContentItemDto {
   @IsInt()
   @Min(0)
   sortOrder?: number;
+
+  /**
+   * `ValidateIf` rather than `IsOptional` because an explicit null is the way
+   * to UNLINK a campaign or a pillar, and `IsOptional` would skip validation
+   * for null and undefined alike — making "unlink" indistinguishable from
+   * "not sent" is exactly the PATCH trap this repository has hit before.
+   */
+  @ValidateIf((_, value) => value !== null && value !== undefined)
+  @IsUUID()
+  campaignInstanceId?: string | null;
+
+  @ValidateIf((_, value) => value !== null && value !== undefined)
+  @IsUUID()
+  editorialPillarId?: string | null;
 }

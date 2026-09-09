@@ -3,9 +3,11 @@ import {
   IsInt,
   IsOptional,
   IsString,
+  IsUUID,
   Matches,
   MaxLength,
   Min,
+  ValidateIf,
 } from 'class-validator';
 import type { SocialContentPlanningStatus } from '../entities';
 
@@ -68,4 +70,13 @@ export class CreateSocialContentItemDto {
   @IsInt()
   @Min(0)
   sortOrder?: number;
+
+  /** Both are validated against the caller's own scope by the service. */
+  @ValidateIf((_, value) => value !== null && value !== undefined)
+  @IsUUID()
+  campaignInstanceId?: string | null;
+
+  @ValidateIf((_, value) => value !== null && value !== undefined)
+  @IsUUID()
+  editorialPillarId?: string | null;
 }

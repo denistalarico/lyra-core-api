@@ -24,6 +24,7 @@ import {
   toSocialPlanView,
   toSocialContentRevisionView,
 } from '../views/social-planner.view';
+import { SocialCampaignService } from './social-campaign.service';
 
 export interface SocialPlannerScope {
   tenantId: string;
@@ -45,6 +46,13 @@ export class SocialPlannerService {
 
     @InjectRepository(SocialContentRevisionEntity, 'agency')
     private readonly revisionsRepository: Repository<SocialContentRevisionEntity>,
+
+    /**
+     * Used only to prove that a campaign or pillar named by a write belongs to
+     * the caller's own scope. The dependency points one way — the campaign
+     * service knows nothing about plans, content or revisions.
+     */
+    private readonly campaignService: SocialCampaignService,
   ) {}
 
   async listPlans(scope: SocialPlannerScope) {
@@ -192,6 +200,11 @@ export class SocialPlannerService {
   ) {
     await this.requirePlan(scope, planId);
 
+    await this.campaignService.assertOptionalLinks(scope, {
+      campaignInstanceId: dto.campaignInstanceId ?? null,
+      pillarId: dto.editorialPillarId ?? null,
+    });
+
     const item = this.contentRepository.create({
       tenantId: scope.tenantId,
       workspaceId: scope.workspaceId,
@@ -218,6 +231,9 @@ export class SocialPlannerService {
       planningStatus: dto.planningStatus ?? 'planned',
       plannedDate: dto.plannedDate ?? null,
       sortOrder: dto.sortOrder ?? 0,
+
+      campaignInstanceId: dto.campaignInstanceId ?? null,
+      editorialPillarId: dto.editorialPillarId ?? null,
 
       createdById: actorUserId,
       updatedById: actorUserId,
@@ -251,6 +267,11 @@ export class SocialPlannerService {
     dto: UpdateSocialContentItemDto,
   ) {
     const item = await this.requireContent(scope, contentId);
+
+    await this.campaignService.assertOptionalLinks(scope, {
+      campaignInstanceId: dto.campaignInstanceId ?? null,
+      pillarId: dto.editorialPillarId ?? null,
+    });
 
     if (dto.title !== undefined) {
       item.title = dto.title.trim();
@@ -294,6 +315,19 @@ export class SocialPlannerService {
 
     if (dto.sortOrder !== undefined) {
       item.sortOrder = dto.sortOrder;
+    }
+
+    /**
+     * `undefined` means the field was not sent and must not be touched;
+     * an explicit `null` means unlink. Collapsing the two would clear a
+     * campaign every time an operator saved an unrelated field.
+     */
+    if (dto.campaignInstanceId !== undefined) {
+      item.campaignInstanceId = dto.campaignInstanceId;
+    }
+
+    if (dto.editorialPillarId !== undefined) {
+      item.editorialPillarId = dto.editorialPillarId;
     }
 
     item.updatedById = actorUserId;

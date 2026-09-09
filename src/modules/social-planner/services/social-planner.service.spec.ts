@@ -10,6 +10,7 @@ import {
   SocialPlannerService,
   type SocialPlannerScope,
 } from './social-planner.service';
+import type { SocialCampaignService } from './social-campaign.service';
 
 type RepositoryMock<T> = {
   find: jest.Mock;
@@ -43,6 +44,13 @@ describe('SocialPlannerService', () => {
   let destinationsRepository: RepositoryMock<SocialContentDestinationEntity>;
   let revisionsRepository: RepositoryMock<SocialContentRevisionEntity>;
 
+  /**
+   * Only the link check is exercised through the planner service. The campaign
+   * service has its own suite; a double here keeps a content test from
+   * silently depending on campaign query behaviour.
+   */
+  let campaignService: { assertOptionalLinks: jest.Mock };
+
   const agencyScope: SocialPlannerScope = {
     tenantId: '11111111-1111-4111-8111-111111111111',
     workspaceId: '22222222-2222-4222-8222-222222222222',
@@ -59,12 +67,14 @@ describe('SocialPlannerService', () => {
     contentRepository = createRepositoryMock();
     destinationsRepository = createRepositoryMock();
     revisionsRepository = createRepositoryMock();
+    campaignService = { assertOptionalLinks: jest.fn() };
 
     service = new SocialPlannerService(
       plansRepository as unknown as Repository<SocialPlanEntity>,
       contentRepository as unknown as Repository<SocialContentItemEntity>,
       destinationsRepository as unknown as Repository<SocialContentDestinationEntity>,
       revisionsRepository as unknown as Repository<SocialContentRevisionEntity>,
+      campaignService as unknown as SocialCampaignService,
     );
   });
 
@@ -245,6 +255,8 @@ describe('SocialPlannerService', () => {
       planningStatus: 'planned',
       plannedDate: null,
       sortOrder: 0,
+      campaignInstanceId: null,
+      editorialPillarId: null,
       createdById: null,
       updatedById: null,
       createdAt: new Date(),
@@ -356,6 +368,8 @@ describe('SocialPlannerService', () => {
       planningStatus: 'planned',
       plannedDate: null,
       sortOrder: 0,
+      campaignInstanceId: null,
+      editorialPillarId: null,
       createdById: null,
       updatedById: null,
       createdAt: new Date(),

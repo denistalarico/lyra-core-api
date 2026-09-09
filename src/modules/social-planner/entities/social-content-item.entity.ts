@@ -153,6 +153,20 @@ export class SocialContentItemEntity {
   @Column({ name: 'sort_order', type: 'integer', default: 0 })
   sortOrder!: number;
 
+  /**
+   * Optional classification. Both are nullable and both are set to NULL by the
+   * database when the campaign or pillar is deleted: losing a taxonomy entry
+   * unclassifies content, it never deletes it.
+   *
+   * The campaign is not derived from the plan. A campaign spans plans, so a
+   * content item names its campaign directly.
+   */
+  @Column({ name: 'campaign_instance_id', type: 'uuid', nullable: true })
+  campaignInstanceId!: string | null;
+
+  @Column({ name: 'editorial_pillar_id', type: 'uuid', nullable: true })
+  editorialPillarId!: string | null;
+
   @Column({ name: 'created_by_id', type: 'uuid', nullable: true })
   createdById!: string | null;
 

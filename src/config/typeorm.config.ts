@@ -346,9 +346,13 @@ import {
   BrandKitEntity,
 } from '../modules/brand-kit/entities';
 import {
+  SocialCampaignInstanceEntity,
+  SocialCampaignTemplateEntity,
   SocialContentDestinationEntity,
+  SocialContentIdeaEntity,
   SocialContentItemEntity,
   SocialContentRevisionEntity,
+  SocialEditorialPillarEntity,
   SocialPlannerSettingsEntity,
   SocialPlanEntity,
   SocialPublishingCadenceEntity,
@@ -606,6 +610,10 @@ export const agencyEntities = [
   SocialContentRevisionEntity,
   SocialPlannerSettingsEntity,
   SocialPublishingCadenceEntity,
+  SocialCampaignTemplateEntity,
+  SocialCampaignInstanceEntity,
+  SocialEditorialPillarEntity,
+  SocialContentIdeaEntity,
 ];
 
 export function getTypeOrmConfig(): TypeOrmModuleOptions {

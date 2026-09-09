@@ -4,3 +4,7 @@ export * from './social-content-destination.entity';
 export * from './social-content-revision.entity';
 export * from './social-planner-settings.entity';
 export * from './social-publishing-cadence.entity';
+export * from './social-campaign-template.entity';
+export * from './social-campaign-instance.entity';
+export * from './social-editorial-pillar.entity';
+export * from './social-content-idea.entity';

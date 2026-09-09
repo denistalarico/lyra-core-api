@@ -8,6 +8,7 @@ import { SocialPlannerController } from './social-planner.controller';
 import type { SocialPlannerService } from './services/social-planner.service';
 import type { SocialPlannerSettingsService } from './services/social-planner-settings.service';
 import type { SocialPublishingCadenceService } from './services/social-publishing-cadence.service';
+import type { SocialCampaignService } from './services/social-campaign.service';
 
 describe('SocialPlannerController', () => {
   let controller: SocialPlannerController;
@@ -38,6 +39,24 @@ describe('SocialPlannerController', () => {
     updateCadence: jest.fn(),
   };
 
+  const campaignService = {
+    listCampaignTemplates: jest.fn(),
+    createCampaignTemplate: jest.fn(),
+    updateCampaignTemplate: jest.fn(),
+    listCampaigns: jest.fn(),
+    createCampaign: jest.fn(),
+    updateCampaign: jest.fn(),
+    listPillars: jest.fn(),
+    createPillar: jest.fn(),
+    updatePillar: jest.fn(),
+    getPillarCoverage: jest.fn(),
+    listIdeas: jest.fn(),
+    createIdea: jest.fn(),
+    updateIdea: jest.fn(),
+    discardIdea: jest.fn(),
+    convertIdea: jest.fn(),
+  };
+
   beforeEach(() => {
     jest.clearAllMocks();
 
@@ -45,6 +64,7 @@ describe('SocialPlannerController', () => {
       service as unknown as SocialPlannerService,
       settingsService as unknown as SocialPlannerSettingsService,
       cadenceService as unknown as SocialPublishingCadenceService,
+      campaignService as unknown as SocialCampaignService,
     );
   });
 

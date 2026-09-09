@@ -58,6 +58,8 @@ export function toSocialContentItemView(
     planningStatus: item.planningStatus,
     plannedDate: item.plannedDate,
     sortOrder: item.sortOrder,
+    campaignInstanceId: item.campaignInstanceId,
+    editorialPillarId: item.editorialPillarId,
     destinations: destinations.map(toSocialDestinationView),
     createdAt: item.createdAt,
     updatedAt: item.updatedAt,
