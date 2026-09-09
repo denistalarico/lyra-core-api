@@ -116,6 +116,9 @@
     ],
     "rootDir": "src",
     "globalSetup": "<rootDir>/testing/jest-global-setup.ts",
+    "setupFiles": [
+      "<rootDir>/testing/jest-setup-reflect-metadata.ts"
+    ],
     "testRegex": ".*\\.spec\\.ts$",
     "transform": {
       "^.+\\.(t|j)s$": "ts-jest"
