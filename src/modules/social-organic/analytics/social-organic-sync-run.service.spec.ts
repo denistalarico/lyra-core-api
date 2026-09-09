@@ -20,6 +20,8 @@ const credential = {
   toJSON: () => ({ accessToken: '[REDACTED]' }),
 };
 
+const FIXED_AVAILABLE_AT = new Date('2026-09-08T15:00:00.000Z');
+
 function runRow(overrides: Partial<SocialOrganicSyncRunEntity> = {}) {
   return {
     id: 'run-1',
@@ -35,7 +37,7 @@ function runRow(overrides: Partial<SocialOrganicSyncRunEntity> = {}) {
     idempotencyKey: 'key',
     attempts: 0,
     maxAttempts: 5,
-    availableAt: new Date(),
+    availableAt: FIXED_AVAILABLE_AT,
     lockedAt: null,
     lockedBy: null,
     startedAt: null,
