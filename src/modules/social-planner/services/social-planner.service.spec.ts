@@ -1,4 +1,5 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { validate } from 'class-validator';
 import type { Repository } from 'typeorm';
 import {
   SocialContentDestinationEntity,
@@ -11,6 +12,7 @@ import {
   type SocialPlannerScope,
 } from './social-planner.service';
 import type { SocialCampaignService } from './social-campaign.service';
+import { CreateSocialContentItemDto } from '../dto/create-social-content-item.dto';
 
 type RepositoryMock<T> = {
   find: jest.Mock;
@@ -198,6 +200,26 @@ describe('SocialPlannerService', () => {
   });
 
   describe('createContent', () => {
+    it('requires the strategic fields of the short content creation contract', async () => {
+      const dto = Object.assign(new CreateSocialContentItemDto(), {
+        title: 'Post 1',
+      });
+
+      const errors = await validate(dto);
+      const invalidFields = errors.map((error) => error.property);
+
+      expect(invalidFields).toEqual(
+        expect.arrayContaining([
+          'theme',
+          'plannedDate',
+          'planningStatus',
+          'funnelStage',
+          'contentType',
+          'creativeFormat',
+        ]),
+      );
+    });
+
     it('refuses content creation when the parent plan is outside scope', async () => {
       plansRepository.findOne.mockResolvedValue(null);
 
@@ -208,6 +230,12 @@ describe('SocialPlannerService', () => {
           null,
           {
             title: 'Post 1',
+            theme: 'Tema',
+            plannedDate: '2026-09-10',
+            planningStatus: 'planned',
+            funnelStage: 'discovery',
+            contentType: 'post',
+            creativeFormat: 'image',
           },
         ),
       ).rejects.toBeInstanceOf(NotFoundException);

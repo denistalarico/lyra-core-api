@@ -1,6 +1,7 @@
 import {
   IsIn,
   IsInt,
+  IsNotEmpty,
   IsOptional,
   IsString,
   IsUUID,
@@ -15,12 +16,13 @@ const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 export class CreateSocialContentItemDto {
   @IsString()
+  @IsNotEmpty()
   @MaxLength(240)
   title!: string;
 
-  @IsOptional()
   @IsString()
-  theme?: string | null;
+  @IsNotEmpty()
+  theme!: string;
 
   @IsOptional()
   @IsString()
@@ -30,27 +32,26 @@ export class CreateSocialContentItemDto {
   @IsString()
   keyMessage?: string | null;
 
-  @IsOptional()
   @IsString()
+  @IsNotEmpty()
   @MaxLength(80)
-  funnelStage?: string | null;
+  funnelStage!: string;
 
-  @IsOptional()
   @IsString()
+  @IsNotEmpty()
   @MaxLength(80)
-  contentType?: string | null;
+  contentType!: string;
 
   @IsOptional()
   @IsString()
   @MaxLength(120)
   objective?: string | null;
 
-  @IsOptional()
   @IsString()
+  @IsNotEmpty()
   @MaxLength(80)
-  creativeFormat?: string | null;
+  creativeFormat!: string;
 
-  @IsOptional()
   @IsIn([
     'idea',
     'planned',
@@ -60,11 +61,10 @@ export class CreateSocialContentItemDto {
     'creative_ready',
     'ready',
   ] satisfies SocialContentPlanningStatus[])
-  planningStatus?: SocialContentPlanningStatus;
+  planningStatus!: SocialContentPlanningStatus;
 
-  @IsOptional()
   @Matches(ISO_DATE)
-  plannedDate?: string | null;
+  plannedDate!: string;
 
   @IsOptional()
   @IsInt()
