@@ -32,6 +32,7 @@ import {
   SocialOrganicSyncWorker,
 } from './analytics';
 import { SocialContentDestinationEntity } from '../social-planner/entities/social-content-destination.entity';
+import { SocialDestinationCreativeEntity } from '../social-planner/entities/social-destination-creative.entity';
 import { SocialContentItemEntity } from '../social-planner/entities/social-content-item.entity';
 import {
   SOCIAL_ORGANIC_OAUTH_PROVIDERS,
@@ -49,6 +50,8 @@ import {
 import { MediaMetadataService } from './media/media-metadata.service';
 import { MediaPreparationService } from './media/media-preparation.service';
 import {
+  DestinationCreativeController,
+  DestinationCreativeService,
   SocialPublicationController,
   SocialPublicationEntity,
   SocialPublicationConfigService,
@@ -92,6 +95,7 @@ describe('SocialOrganicModule', () => {
         SocialPublicationEntity,
         SocialContentItemEntity,
         SocialContentDestinationEntity,
+        SocialDestinationCreativeEntity,
         SocialOrganicPostMetricDailyEntity,
         SocialOrganicAccountMetricDailyEntity,
         SocialOrganicSyncRunEntity,
@@ -117,6 +121,7 @@ describe('SocialOrganicModule', () => {
     ).toEqual([
       SocialOrganicController,
       SocialPublicationController,
+      DestinationCreativeController,
       MediaAssetController,
       MetaOrganicWebhookController,
       SocialOrganicAnalyticsController,
@@ -141,6 +146,7 @@ describe('SocialOrganicModule', () => {
       SocialPublicationService,
       SocialPublicationWorker,
       SocialPublicationConfigService,
+      DestinationCreativeService,
       SocialPublisherRegistry,
       FacebookPublisherAdapter,
       InstagramPublisherAdapter,

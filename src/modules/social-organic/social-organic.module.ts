@@ -25,6 +25,7 @@ import {
 } from './analytics';
 import { SocialContentDestinationEntity } from '../social-planner/entities/social-content-destination.entity';
 import { SocialContentItemEntity } from '../social-planner/entities/social-content-item.entity';
+import { SocialDestinationCreativeEntity } from '../social-planner/entities/social-destination-creative.entity';
 import {
   SOCIAL_ORGANIC_OAUTH_PROVIDERS,
   SocialOrganicController,
@@ -41,6 +42,8 @@ import {
 import { MediaMetadataService } from './media/media-metadata.service';
 import { MediaPreparationService } from './media/media-preparation.service';
 import {
+  DestinationCreativeController,
+  DestinationCreativeService,
   SocialPublicationController,
   SocialPublicationEntity,
   SocialPublicationConfigService,
@@ -95,6 +98,7 @@ export function createMetaOrganicOAuthProviders(
         SocialPublicationEntity,
         SocialContentItemEntity,
         SocialContentDestinationEntity,
+        SocialDestinationCreativeEntity,
         SocialOrganicPostMetricDailyEntity,
         SocialOrganicAccountMetricDailyEntity,
         SocialOrganicSyncRunEntity,
@@ -107,6 +111,11 @@ export function createMetaOrganicOAuthProviders(
   controllers: [
     SocialOrganicController,
     SocialPublicationController,
+    // Serves `/social/planner/...` paths from this module because choosing a
+    // creative must be validated against the provider registry, which lives
+    // here. The module arrow social-organic → social-planner already exists
+    // and is never inverted; see the controller's own docblock.
+    DestinationCreativeController,
     // Mounted here rather than in `MediaAssetsModule`: the endpoint's
     // authorization is Social's (see the controller's own docblock), so the
     // shared boundary must not force it on every importer.
@@ -132,6 +141,7 @@ export function createMetaOrganicOAuthProviders(
     SocialPublicationService,
     SocialPublicationWorker,
     SocialPublicationConfigService,
+    DestinationCreativeService,
     SocialPublisherRegistry,
     FacebookPublisherAdapter,
     InstagramPublisherAdapter,

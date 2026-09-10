@@ -183,6 +183,7 @@ import { CreateSocialOrganicWebhookEvents1792200000000 } from './migrations/1792
 import { CreateSocialOrganicInteractions1792300000000 } from './migrations/1792300000000-create-social-organic-interactions';
 import { AddSocialOrganicPostLifetimeSnapshots1792400000000 } from './migrations/1792400000000-add-social-organic-post-lifetime-snapshots';
 import { CreateSocialCampaignsPillarsIdeas1792500000000 } from './migrations/1792500000000-create-social-campaigns-pillars-ideas';
+import { CreateSocialDestinationCreatives1792600000000 } from './migrations/1792600000000-create-social-destination-creatives';
 
 export const AgencyDataSource = new DataSource({
   type: 'postgres',
@@ -376,5 +377,6 @@ export const AgencyDataSource = new DataSource({
     CreateSocialOrganicInteractions1792300000000,
     AddSocialOrganicPostLifetimeSnapshots1792400000000,
     CreateSocialCampaignsPillarsIdeas1792500000000,
+    CreateSocialDestinationCreatives1792600000000,
   ],
 });

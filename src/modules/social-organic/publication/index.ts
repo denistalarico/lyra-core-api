@@ -1,3 +1,5 @@
+export * from './destination-creative.controller';
+export * from './destination-creative.service';
 export * from './dto';
 export * from './entities/social-publication.entity';
 export * from './social-publication-config.service';
