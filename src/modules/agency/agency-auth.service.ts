@@ -30,6 +30,7 @@ import {
   AgencyWorkspaceUserEntity,
   AgencyWorkspaceUserPermissionEntity,
 } from './entities/agency-settings.entities';
+import { isDevOnlyAgencyLoginBlocked } from './dev-agency-login.policy';
 
 const AGENCY_CONNECTION = 'agency';
 
@@ -76,6 +77,11 @@ export class AgencyAuthService {
 
   async login(dto: LoginDto, req: Request) {
     const email = dto.email.trim().toLowerCase();
+
+    if (isDevOnlyAgencyLoginBlocked(email)) {
+      throw new UnauthorizedException('Invalid credentials');
+    }
+
     const loginContext = await this.findLoginContext(email, dto.password);
 
     if (!loginContext) {
