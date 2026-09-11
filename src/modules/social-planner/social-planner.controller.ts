@@ -26,6 +26,7 @@ import {
   RequireProductEntitlement,
 } from '../permissions';
 import {
+  AcceptSocialCopyProposalsDto,
   ConvertSocialContentIdeaDto,
   CreateSocialCampaignDto,
   CreateSocialCampaignTemplateDto,
@@ -35,6 +36,9 @@ import {
   CreateSocialPlanDto,
   ListSocialContentIdeasQueryDto,
   ListSocialPlanContentQueryDto,
+  RejectSocialCopyProposalsDto,
+  RequestSocialCopyGenerationBatchDto,
+  RequestSocialCopyGenerationDto,
   SocialContentBatchDto,
   UpdateSocialCampaignDto,
   UpdateSocialCampaignTemplateDto,
@@ -53,6 +57,7 @@ import {
 } from './services/social-planner.service';
 import { SocialCampaignService } from './services/social-campaign.service';
 import { SocialContentLifecycleService } from './services/social-content-lifecycle.service';
+import { SocialCopyGenerationService } from './services/social-copy-generation.service';
 import { SocialPlannerSettingsService } from './services/social-planner-settings.service';
 import { SocialPublishingCadenceService } from './services/social-publishing-cadence.service';
 
@@ -97,6 +102,7 @@ export class SocialPlannerController {
     private readonly socialPlannerSettingsService: SocialPlannerSettingsService,
     private readonly socialPublishingCadenceService: SocialPublishingCadenceService,
     private readonly socialCampaignService: SocialCampaignService,
+    private readonly socialCopyGenerationService: SocialCopyGenerationService,
   ) {}
 
   @Get('plans')
@@ -431,6 +437,139 @@ export class SocialPlannerController {
       contentId,
       revisionId,
       ctx.userId ?? null,
+    );
+  }
+
+  // ------------------------------------------------------- copy generation
+
+  /**
+   * Generation requests are writes, so they answer to the update permission
+   * rather than a new AI-specific key: the effect an operator is authorized for
+   * is "change the editorial text of this content", and generation is one way to
+   * propose that. Adding a key would also mean a permission migration and a role
+   * matrix change for no distinct capability.
+   *
+   * Reading runs and proposals answers to the view permission, like every other
+   * read in this controller.
+   */
+  @Get('content/:contentId/copy-generation')
+  @RequirePermission(SOCIAL_PLANNER_VIEW_PERMISSION)
+  listCopyGeneration(
+    @RequestContextData() ctx: RequestContext,
+    @Param('contentId', ParseUUIDPipe) contentId: string,
+  ) {
+    return this.socialCopyGenerationService.listForContent(
+      this.requireScope(ctx),
+      contentId,
+    );
+  }
+
+  @Post('content/:contentId/copy-generation')
+  @RequirePermission(SOCIAL_PLANNER_UPDATE_PERMISSION)
+  requestCopyGeneration(
+    @RequestContextData() ctx: RequestContext,
+    @Param('contentId', ParseUUIDPipe) contentId: string,
+    @Body() dto: RequestSocialCopyGenerationDto,
+  ) {
+    return this.socialCopyGenerationService.requestForContent(
+      this.requireScope(ctx),
+      contentId,
+      ctx.userId ?? null,
+      dto,
+    );
+  }
+
+  /**
+   * Accepting is what actually changes content, so it is its own route and its
+   * own explicit call. E8 forbids overwriting copy without confirmation, and a
+   * contract where generation and application were the same request could not
+   * express that.
+   */
+  @Post('content/:contentId/copy-generation/accept')
+  @RequirePermission(SOCIAL_PLANNER_UPDATE_PERMISSION)
+  acceptCopyProposals(
+    @RequestContextData() ctx: RequestContext,
+    @Param('contentId', ParseUUIDPipe) contentId: string,
+    @Body() dto: AcceptSocialCopyProposalsDto,
+  ) {
+    return this.socialCopyGenerationService.acceptProposals(
+      this.requireScope(ctx),
+      contentId,
+      ctx.userId ?? null,
+      dto,
+    );
+  }
+
+  @Post('content/:contentId/copy-generation/reject')
+  @RequirePermission(SOCIAL_PLANNER_UPDATE_PERMISSION)
+  rejectCopyProposals(
+    @RequestContextData() ctx: RequestContext,
+    @Param('contentId', ParseUUIDPipe) contentId: string,
+    @Body() dto: RejectSocialCopyProposalsDto,
+  ) {
+    return this.socialCopyGenerationService.rejectProposals(
+      this.requireScope(ctx),
+      contentId,
+      ctx.userId ?? null,
+      dto.proposalIds,
+    );
+  }
+
+  @Get('copy-generation/:runId')
+  @RequirePermission(SOCIAL_PLANNER_VIEW_PERMISSION)
+  getCopyGenerationRun(
+    @RequestContextData() ctx: RequestContext,
+    @Param('runId', ParseUUIDPipe) runId: string,
+  ) {
+    return this.socialCopyGenerationService.getRun(
+      this.requireScope(ctx),
+      runId,
+    );
+  }
+
+  @Post('copy-generation/:runId/cancel')
+  @RequirePermission(SOCIAL_PLANNER_UPDATE_PERMISSION)
+  cancelCopyGenerationRun(
+    @RequestContextData() ctx: RequestContext,
+    @Param('runId', ParseUUIDPipe) runId: string,
+  ) {
+    return this.socialCopyGenerationService.cancelRun(
+      this.requireScope(ctx),
+      runId,
+    );
+  }
+
+  /**
+   * The two fan-out entry points E8 asks for: the selection menu and the
+   * plan-wide toolbar action. Both return the per-item partial result rather
+   * than a single status, so a request where four of twenty items were already
+   * running reports exactly that.
+   */
+  @Post('content/batch/copy-generation')
+  @RequirePermission(SOCIAL_PLANNER_UPDATE_PERMISSION)
+  requestCopyGenerationForSelection(
+    @RequestContextData() ctx: RequestContext,
+    @Body() dto: RequestSocialCopyGenerationBatchDto,
+  ) {
+    return this.socialCopyGenerationService.requestForSelection(
+      this.requireScope(ctx),
+      ctx.userId ?? null,
+      dto,
+    );
+  }
+
+  @Post('plans/:planId/copy-generation')
+  @RequirePermission(SOCIAL_PLANNER_UPDATE_PERMISSION)
+  requestCopyGenerationForPlan(
+    @RequestContextData() ctx: RequestContext,
+    @Param('planId', ParseUUIDPipe) planId: string,
+    @Body() dto: RequestSocialCopyGenerationDto,
+  ) {
+    return this.socialCopyGenerationService.requestForPlan(
+      this.requireScope(ctx),
+      planId,
+      ctx.userId ?? null,
+      dto,
     );
   }
 

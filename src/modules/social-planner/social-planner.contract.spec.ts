@@ -16,6 +16,8 @@ import {
   SocialContentIdeaEntity,
   SocialContentItemEntity,
   SocialContentRevisionEntity,
+  SocialCopyGenerationProposalEntity,
+  SocialCopyGenerationRunEntity,
   SocialEditorialPillarEntity,
   SocialPlanEntity,
   SocialPlannerSettingsEntity,
@@ -63,6 +65,8 @@ describe('Social Planner contract', () => {
       SocialCampaignInstanceEntity,
       SocialEditorialPillarEntity,
       SocialContentIdeaEntity,
+      SocialCopyGenerationRunEntity,
+      SocialCopyGenerationProposalEntity,
     ]) {
       expect(agencyEntities).toContain(entity);
     }
@@ -94,6 +98,19 @@ describe('Social Planner contract', () => {
     ).toBe(true);
   });
 
+  it('registers the E8 copy generation migration in the agency datasource', () => {
+    const registered = (AgencyDataSource.options.migrations ?? []) as Array<{
+      name?: string;
+    }>;
+
+    expect(
+      registered.some(
+        (migration) =>
+          migration?.name === 'CreateSocialCopyGeneration1792800000000',
+      ),
+    ).toBe(true);
+  });
+
   it('binds Planner routes to the Social entitlement', () => {
     expect(
       Reflect.getMetadata(
@@ -110,6 +127,13 @@ describe('Social Planner contract', () => {
       SocialPlannerController.prototype.listContent,
       SocialPlannerController.prototype.getContent,
       SocialPlannerController.prototype.listRevisions,
+      /**
+       * E8: reading runs and their staged proposals is a read. Pinned so a later
+       * change cannot quietly put generation provenance behind a write key (or,
+       * worse, behind no key at all).
+       */
+      SocialPlannerController.prototype.listCopyGeneration,
+      SocialPlannerController.prototype.getCopyGenerationRun,
       SocialPlannerController.prototype.getSettings,
       SocialPlannerController.prototype.getCadence,
     ];
@@ -154,6 +178,19 @@ describe('Social Planner contract', () => {
       SocialPlannerController.prototype.restoreContent,
       SocialPlannerController.prototype.archiveContentBatch,
       SocialPlannerController.prototype.restoreContentBatch,
+      /**
+       * E8: requesting a generation and accepting or rejecting its proposals are
+       * all ways of changing this content's editorial text, so they answer to the
+       * same key as any other content edit rather than to a new AI-specific one.
+       * Accept is the one that actually writes; pinning it here is what stops it
+       * from drifting below the key that protects a manual edit.
+       */
+      SocialPlannerController.prototype.requestCopyGeneration,
+      SocialPlannerController.prototype.requestCopyGenerationForSelection,
+      SocialPlannerController.prototype.requestCopyGenerationForPlan,
+      SocialPlannerController.prototype.acceptCopyProposals,
+      SocialPlannerController.prototype.rejectCopyProposals,
+      SocialPlannerController.prototype.cancelCopyGenerationRun,
     ];
 
     for (const handler of updateHandlers) {

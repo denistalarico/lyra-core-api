@@ -10,6 +10,7 @@ import type { SocialContentLifecycleService } from './services/social-content-li
 import type { SocialPlannerSettingsService } from './services/social-planner-settings.service';
 import type { SocialPublishingCadenceService } from './services/social-publishing-cadence.service';
 import type { SocialCampaignService } from './services/social-campaign.service';
+import type { SocialCopyGenerationService } from './services/social-copy-generation.service';
 
 describe('SocialPlannerController', () => {
   let controller: SocialPlannerController;
@@ -69,6 +70,17 @@ describe('SocialPlannerController', () => {
     convertIdea: jest.fn(),
   };
 
+  const copyGenerationService = {
+    listForContent: jest.fn(),
+    requestForContent: jest.fn(),
+    requestForSelection: jest.fn(),
+    requestForPlan: jest.fn(),
+    acceptProposals: jest.fn(),
+    rejectProposals: jest.fn(),
+    getRun: jest.fn(),
+    cancelRun: jest.fn(),
+  };
+
   beforeEach(() => {
     jest.clearAllMocks();
 
@@ -78,6 +90,7 @@ describe('SocialPlannerController', () => {
       settingsService as unknown as SocialPlannerSettingsService,
       cadenceService as unknown as SocialPublishingCadenceService,
       campaignService as unknown as SocialCampaignService,
+      copyGenerationService as unknown as SocialCopyGenerationService,
     );
   });
 

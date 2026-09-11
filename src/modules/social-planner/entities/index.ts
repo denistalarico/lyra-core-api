@@ -3,6 +3,8 @@ export * from './social-content-item.entity';
 export * from './social-content-destination.entity';
 export * from './social-destination-creative.entity';
 export * from './social-content-revision.entity';
+export * from './social-copy-generation-run.entity';
+export * from './social-copy-generation-proposal.entity';
 export * from './social-planner-settings.entity';
 export * from './social-publishing-cadence.entity';
 export * from './social-campaign-template.entity';
