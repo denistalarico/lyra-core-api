@@ -4,7 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, IsNull, type FindOptionsWhere, Repository } from 'typeorm';
+import { In, IsNull, Not, type FindOptionsWhere, Repository } from 'typeorm';
 import {
   CreateSocialContentItemDto,
   CreateSocialPlanDto,
@@ -161,13 +161,28 @@ export class SocialPlannerService {
     return toSocialPlanView(saved);
   }
 
-  async listContent(scope: SocialPlannerScope, planId: string) {
+  /**
+   * The plan's content.
+   *
+   * `archived` selects which rows are visible (E6): `exclude` is the default
+   * listing, `only` is the restore view, `include` is everything still alive.
+   * Soft-deleted rows appear in none of them — that filter lives in
+   * `contentScopeWhere` and has no opt-out, because a deleted item has no view
+   * that should show it.
+   */
+  async listContent(
+    scope: SocialPlannerScope,
+    planId: string,
+    archived: 'exclude' | 'include' | 'only' = 'exclude',
+  ) {
     await this.requirePlan(scope, planId);
 
     const items = await this.contentRepository.find({
       where: {
         ...this.contentScopeWhere(scope),
         planId,
+        ...(archived === 'exclude' ? { archivedAt: IsNull() } : {}),
+        ...(archived === 'only' ? { archivedAt: Not(IsNull()) } : {}),
       },
       order: {
         plannedDate: 'ASC',
@@ -698,6 +713,20 @@ export class SocialPlannerService {
     };
   }
 
+  /**
+   * Scope AND visibility, in one place on purpose (E6).
+   *
+   * `deletedAt IS NULL` belongs here rather than at each call site because
+   * every method in this service reaches content through this helper, and a
+   * soft-deleted item must be invisible to all of them — read, update, revise
+   * and restore alike. Adding the condition per query would make forgetting it
+   * in the next method the default failure, and that failure is silent: a
+   * deleted item would simply reappear.
+   *
+   * Archived items are NOT filtered here. They are hidden from the default
+   * listing only, by `listContent`, because archiving hides a row from a list
+   * while leaving it fully editable by anything holding its id.
+   */
   private contentScopeWhere(
     scope: SocialPlannerScope,
   ): FindOptionsWhere<SocialContentItemEntity> {
@@ -706,6 +735,7 @@ export class SocialPlannerService {
       workspaceId: scope.workspaceId,
       agencyClientId:
         scope.agencyClientId === null ? IsNull() : scope.agencyClientId,
+      deletedAt: IsNull(),
     };
   }
 

@@ -9,3 +9,5 @@ export * from './update-social-publishing-cadence.dto';
 export * from './social-campaign.dto';
 export * from './social-editorial-pillar.dto';
 export * from './social-content-idea.dto';
+export * from './social-content-action.dto';
+export * from './list-social-plan-content.query.dto';

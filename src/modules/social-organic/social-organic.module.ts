@@ -26,6 +26,7 @@ import {
 import { SocialContentDestinationEntity } from '../social-planner/entities/social-content-destination.entity';
 import { SocialContentItemEntity } from '../social-planner/entities/social-content-item.entity';
 import { SocialDestinationCreativeEntity } from '../social-planner/entities/social-destination-creative.entity';
+import { SocialPlannerModule } from '../social-planner/social-planner.module';
 import {
   SOCIAL_ORGANIC_OAUTH_PROVIDERS,
   SocialOrganicController,
@@ -46,6 +47,7 @@ import {
   DestinationCreativeService,
   SocialPublicationController,
   SocialPublicationEntity,
+  SocialContentPublicationSourceService,
   SocialPublicationConfigService,
   SocialPublicationRunService,
   SocialPublicationScheduler,
@@ -91,6 +93,17 @@ export function createMetaOrganicOAuthProviders(
     // dependency — mirrors `intelligence-analytics.module.ts`'s own import
     // of `SocialIntegrationsModule` for the same service.
     SocialIntegrationsModule,
+    /**
+     * Imported for `SocialContentPublicationGuard` (E6), which the Planner owns
+     * and this module registers into on init so the Planner can refuse to
+     * delete content that still has live publications.
+     *
+     * This is the arrow that already existed, now made explicit at the module
+     * level: `social-organic` depends on `social-planner`, never the reverse.
+     * `SocialPlannerModule` imports only `PermissionsModule` and TypeORM, so
+     * there is no cycle to break here.
+     */
+    SocialPlannerModule,
     TypeOrmModule.forFeature(
       [
         SocialOrganicConnectionEntity,
@@ -142,6 +155,11 @@ export function createMetaOrganicOAuthProviders(
     SocialPublicationWorker,
     SocialPublicationConfigService,
     DestinationCreativeService,
+    /**
+     * Registers itself into the Planner's guard on init, so deleting content
+     * can be refused when a live publication would be stranded (E6).
+     */
+    SocialContentPublicationSourceService,
     SocialPublisherRegistry,
     FacebookPublisherAdapter,
     InstagramPublisherAdapter,

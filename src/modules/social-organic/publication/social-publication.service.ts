@@ -174,6 +174,89 @@ export class SocialPublicationService {
     return this.publicationsRepository.save(publication);
   }
 
+  /**
+   * Moves a publication that has not started running (E6).
+   *
+   * WHY ONLY `scheduled`
+   * --------------------
+   * `queued` and `processing` mean the scheduler has already released the row
+   * and a worker may hold, or be about to hold, a lease on it. Changing
+   * `available_at` under a lease is how the same post gets published twice. The
+   * later states are terminal. So `scheduled` is the only status where moving
+   * the time is meaningful, and anything else is a 409 telling the operator to
+   * cancel and create a new publication instead.
+   *
+   * WHY A CONDITIONAL UPDATE AND NOT A SAVE
+   * ---------------------------------------
+   * Read-then-save loses the race it is trying to win: between the read and the
+   * write, the scheduler can move the row to `queued` and the save would
+   * happily overwrite it. The `update` below carries the whole precondition —
+   * status still `scheduled`, no lease held — into the WHERE clause, so
+   * PostgreSQL decides the winner and an affected-row count of zero is the
+   * concurrent-loss signal. That is the same lease discipline the sync queue
+   * already uses, applied to the one operator action that can collide with it.
+   *
+   * `availableAt` moves with `scheduledAt` because they mean the same thing for
+   * a row that has not run yet: the earliest instant it may be picked up. They
+   * are separate columns only so that a retry can back a row off without
+   * rewriting the operator's intended time, which is not what is happening
+   * here.
+   *
+   * `payloadSnapshot`, `payloadHash` and `idempotencyKey` are deliberately
+   * untouched. The payload did not change, and rotating the idempotency key
+   * would discard the protection that stops a provider retry from posting
+   * twice — a reschedule moves when the same post goes out, not what it is.
+   *
+   * A TIME IN THE PAST IS ACCEPTED
+   * ------------------------------
+   * The scheduler releases on `scheduled_at <= now`, so a past instant means
+   * "at the next tick" — the same outcome as `publishNow`. It is not rejected,
+   * because the alternative punishes the honest case: an operator moving a post
+   * to a minute from now would lose to their own clock skew and see a
+   * validation error for a request that was correct when they sent it. The UI
+   * is the right place to warn that a past time publishes immediately.
+   */
+  async reschedule(
+    scope: SocialPublicationScope,
+    publicationId: string,
+    scheduledAt: Date,
+  ): Promise<SocialPublicationEntity> {
+    const publication = await this.requirePublication(scope, publicationId);
+
+    if (publication.status !== 'scheduled') {
+      throw new ConflictException(
+        `Only a scheduled publication can be rescheduled (current status "${publication.status}").`,
+      );
+    }
+
+    const result = await this.publicationsRepository.update(
+      {
+        id: publication.id,
+        ...this.scopeWhere(scope),
+        status: 'scheduled',
+        lockedAt: IsNull(),
+        lockedBy: IsNull(),
+      },
+      {
+        scheduledAt,
+        availableAt: scheduledAt,
+      },
+    );
+
+    if (!result.affected) {
+      /**
+       * Someone else won. The row moved out of `scheduled` or acquired a lease
+       * between the read above and this write, which is exactly the case E6
+       * asks to answer with a conflict rather than a silent overwrite.
+       */
+      throw new ConflictException(
+        'Publication changed state while being rescheduled.',
+      );
+    }
+
+    return this.requirePublication(scope, publication.id);
+  }
+
   /** Cancels a publication still waiting to run. Legality is the state machine's call, not this method's. */
   async cancel(
     scope: SocialPublicationScope,
@@ -448,6 +531,15 @@ export class SocialPublicationService {
     };
   }
 
+  /**
+   * `deletedAt IS NULL` (E6): a content item removed from the Planner cannot
+   * become the source of a NEW publication.
+   *
+   * This deliberately says nothing about publications that already exist. Those
+   * rows are execution evidence and keep their `content_item_id` intact
+   * whatever happens to the editorial item — which is also why the Planner
+   * refuses to delete an item that has live ones in the first place.
+   */
   private contentScopeWhere(
     scope: SocialPublicationScope,
   ): FindOptionsWhere<SocialContentItemEntity> {
@@ -456,6 +548,7 @@ export class SocialPublicationService {
       workspaceId: scope.workspaceId,
       agencyClientId:
         scope.agencyClientId === null ? IsNull() : scope.agencyClientId,
+      deletedAt: IsNull(),
     };
   }
 

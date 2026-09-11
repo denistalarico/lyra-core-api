@@ -18,6 +18,7 @@ import {
 } from '../../common/media-assets';
 import { PermissionsModule } from '../permissions';
 import { SocialIntegrationsModule } from '../social-integrations/social-integrations.module';
+import { SocialPlannerModule } from '../social-planner/social-planner.module';
 import {
   MetaOrganicInsightsService,
   SocialConsolidatedAnalyticsService,
@@ -52,6 +53,7 @@ import { MediaPreparationService } from './media/media-preparation.service';
 import {
   DestinationCreativeController,
   DestinationCreativeService,
+  SocialContentPublicationSourceService,
   SocialPublicationController,
   SocialPublicationEntity,
   SocialPublicationConfigService,
@@ -116,6 +118,15 @@ describe('SocialOrganicModule', () => {
     expect(
       Reflect.getMetadata(MODULE_METADATA.IMPORTS, SocialOrganicModule),
     ).toContain(SocialIntegrationsModule);
+    /**
+     * The E6 delete guard: Organic imports the Planner to register its
+     * publication source into the guard the Planner owns. Asserted here so a
+     * future edit cannot quietly invert the arrow by moving the guard into
+     * this module instead.
+     */
+    expect(
+      Reflect.getMetadata(MODULE_METADATA.IMPORTS, SocialOrganicModule),
+    ).toContain(SocialPlannerModule);
     expect(
       Reflect.getMetadata(MODULE_METADATA.CONTROLLERS, SocialOrganicModule),
     ).toEqual([
@@ -147,6 +158,7 @@ describe('SocialOrganicModule', () => {
       SocialPublicationWorker,
       SocialPublicationConfigService,
       DestinationCreativeService,
+      SocialContentPublicationSourceService,
       SocialPublisherRegistry,
       FacebookPublisherAdapter,
       InstagramPublisherAdapter,

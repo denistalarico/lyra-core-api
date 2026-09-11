@@ -5,6 +5,7 @@ import {
   Get,
   Param,
   ParseUUIDPipe,
+  Patch,
   Post,
   Query,
   UseGuards,
@@ -20,6 +21,7 @@ import {
 import {
   CreateSocialPublicationDto,
   ListSocialPublicationsQueryDto,
+  RescheduleSocialPublicationDto,
 } from './dto';
 import { SocialPublisherRegistry } from '../providers';
 import {
@@ -157,6 +159,36 @@ export class SocialPublicationController {
     const publication = await this.publicationService.publishNow(
       this.requireScope(ctx),
       publicationId,
+    );
+
+    return toSocialPublicationView(publication);
+  }
+
+  /**
+   * Moves a scheduled publication (E6).
+   *
+   * `PATCH` on a sub-resource rather than a `POST` action, because this is a
+   * partial update of the row's own timing, not a command with side effects
+   * elsewhere — unlike `publish-now`, `cancel` and `retry`, which each change
+   * what the publication IS.
+   *
+   * It answers to the publish-now permission, not the create one. Both move a
+   * publication's due time on a row that already exists; whoever may pull a
+   * post forward to right now is exactly whoever may push it to Thursday.
+   * Requiring the create permission would let someone schedule new posts but
+   * not fix the time of the one they just scheduled.
+   */
+  @Patch(':publicationId/schedule')
+  @RequirePermission(PUBLISH_NOW_PERMISSION)
+  async reschedule(
+    @RequestContextData() ctx: RequestContext,
+    @Param('publicationId', ParseUUIDPipe) publicationId: string,
+    @Body() dto: RescheduleSocialPublicationDto,
+  ) {
+    const publication = await this.publicationService.reschedule(
+      this.requireScope(ctx),
+      publicationId,
+      new Date(dto.scheduledAt),
     );
 
     return toSocialPublicationView(publication);

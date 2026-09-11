@@ -61,6 +61,17 @@ export function toSocialContentItemView(
     campaignInstanceId: item.campaignInstanceId,
     editorialPillarId: item.editorialPillarId,
     destinations: destinations.map(toSocialDestinationView),
+    /**
+     * Archive state crosses the boundary so the UI can label an archived row
+     * and offer Restore instead of Archive (E6).
+     *
+     * `archivedById` does not, and neither does anything about deletion. The
+     * actor is an internal user id the Planner has no screen for, and a
+     * soft-deleted item never reaches a view at all — every read filters it
+     * out, so exposing `deletedAt` would only ever describe rows the caller
+     * cannot see.
+     */
+    archivedAt: item.archivedAt,
     createdAt: item.createdAt,
     updatedAt: item.updatedAt,
   };

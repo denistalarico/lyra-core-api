@@ -372,6 +372,17 @@ export class SocialCampaignService {
         where: {
           ...this.scopeWhere<SocialContentItemEntity>(scope),
           planId: plan.id,
+          /**
+           * Deleted items are not coverage (E6). The generic `scopeWhere` is
+           * shared with entities that have no lifecycle columns, so this
+           * condition is stated here rather than folded into it.
+           *
+           * Archived items ARE counted: archiving hides a row from the working
+           * list, it does not retract the editorial decision that the pillar
+           * was addressed. Excluding them would make coverage drop every time
+           * someone tidied up a finished month.
+           */
+          deletedAt: IsNull(),
         },
         select: { id: true, editorialPillarId: true },
       }),

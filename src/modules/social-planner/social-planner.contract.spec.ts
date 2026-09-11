@@ -1,8 +1,11 @@
+import { readFileSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
 import { Test } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { agencyEntities } from '../../config/typeorm.config';
 import { AgencyDataSource } from '../../database/agency-typeorm.datasource';
 import {
+  DANGEROUS_ACTION_METADATA,
   PERMISSION_KEY_METADATA,
   PRODUCT_ENTITLEMENT_METADATA,
 } from '../permissions/decorators/permissions.decorators';
@@ -27,9 +30,7 @@ import { SocialPublishingCadenceService } from './services/social-publishing-cad
 describe('Social Planner contract', () => {
   it('keeps every Planner repository on the agency datasource', () => {
     expect(getRepositoryToken(SocialPlanEntity, 'agency')).toBeDefined();
-    expect(
-      getRepositoryToken(SocialContentItemEntity, 'agency'),
-    ).toBeDefined();
+    expect(getRepositoryToken(SocialContentItemEntity, 'agency')).toBeDefined();
     expect(
       getRepositoryToken(SocialContentDestinationEntity, 'agency'),
     ).toBeDefined();
@@ -68,14 +69,27 @@ describe('Social Planner contract', () => {
   });
 
   it('registers the E5 migration in the agency datasource', () => {
-    const registered = (
-      AgencyDataSource.options.migrations ?? []
-    ) as Array<{ name?: string }>;
+    const registered = (AgencyDataSource.options.migrations ?? []) as Array<{
+      name?: string;
+    }>;
 
     expect(
       registered.some(
         (migration) =>
           migration?.name === 'CreateSocialCampaignsPillarsIdeas1792500000000',
+      ),
+    ).toBe(true);
+  });
+
+  it('registers the E6 lifecycle migration in the agency datasource', () => {
+    const registered = (AgencyDataSource.options.migrations ?? []) as Array<{
+      name?: string;
+    }>;
+
+    expect(
+      registered.some(
+        (migration) =>
+          migration?.name === 'AddSocialContentItemLifecycle1792700000000',
       ),
     ).toBe(true);
   });
@@ -101,12 +115,9 @@ describe('Social Planner contract', () => {
     ];
 
     for (const handler of handlers) {
-      expect(
-        Reflect.getMetadata(
-          PERMISSION_KEY_METADATA,
-          handler,
-        ),
-      ).toBe('social.planner.calendar.view.client');
+      expect(Reflect.getMetadata(PERMISSION_KEY_METADATA, handler)).toBe(
+        'social.planner.calendar.view.client',
+      );
     }
   });
 
@@ -114,15 +125,14 @@ describe('Social Planner contract', () => {
     const createHandlers = [
       SocialPlannerController.prototype.createPlan,
       SocialPlannerController.prototype.createContent,
+      /** Duplicating produces a new content item, so it is a create. */
+      SocialPlannerController.prototype.duplicateContent,
     ];
 
     for (const handler of createHandlers) {
-      expect(
-        Reflect.getMetadata(
-          PERMISSION_KEY_METADATA,
-          handler,
-        ),
-      ).toBe('social.planner.calendar.create.manager');
+      expect(Reflect.getMetadata(PERMISSION_KEY_METADATA, handler)).toBe(
+        'social.planner.calendar.create.manager',
+      );
     }
 
     const updateHandlers = [
@@ -134,16 +144,104 @@ describe('Social Planner contract', () => {
       SocialPlannerController.prototype.restoreRevision,
       SocialPlannerController.prototype.updateSettings,
       SocialPlannerController.prototype.updateCadence,
+      /**
+       * E6: archive and restore are reversible housekeeping, so they answer to
+       * the same key as any other content edit. Pinning them here is what stops
+       * a later change from quietly promoting them to the owner-only delete key
+       * (which would block managers) or demoting delete to this one.
+       */
+      SocialPlannerController.prototype.archiveContent,
+      SocialPlannerController.prototype.restoreContent,
+      SocialPlannerController.prototype.archiveContentBatch,
+      SocialPlannerController.prototype.restoreContentBatch,
     ];
 
     for (const handler of updateHandlers) {
-      expect(
-        Reflect.getMetadata(
-          PERMISSION_KEY_METADATA,
-          handler,
-        ),
-      ).toBe('social.planner.calendar.update.manager');
+      expect(Reflect.getMetadata(PERMISSION_KEY_METADATA, handler)).toBe(
+        'social.planner.calendar.update.manager',
+      );
     }
+  });
+
+  /**
+   * E6 deletes content. The key it uses already existed in the catalog as
+   * owner-only and explicit, which is the whole reason this etapa ships no
+   * permission migration — so the binding is pinned rather than left to a
+   * reviewer to notice.
+   */
+  it('keeps deleting Planner content on the pre-existing owner-only key', () => {
+    for (const handler of [
+      SocialPlannerController.prototype.removeContent,
+      SocialPlannerController.prototype.removeContentBatch,
+    ]) {
+      expect(Reflect.getMetadata(PERMISSION_KEY_METADATA, handler)).toBe(
+        'social.planner.calendar.delete.owner_or_admin_explicit',
+      );
+
+      /** Both delete paths are audited on every execution, not just on denial. */
+      expect(Reflect.getMetadata(DANGEROUS_ACTION_METADATA, handler)).toBe(
+        true,
+      );
+    }
+  });
+
+  /**
+   * The CSV export shows the same columns the Planning table already shows to
+   * the same reader, so it stays on the view key. What protects it is the
+   * serializer, not a stricter permission.
+   */
+  it('keeps the CSV export on the Planner view permission', () => {
+    expect(
+      Reflect.getMetadata(
+        PERMISSION_KEY_METADATA,
+        SocialPlannerController.prototype.exportPlanContent,
+      ),
+    ).toBe('social.planner.calendar.view.client');
+  });
+
+  /**
+   * The invariant the whole E6 delete design rests on.
+   *
+   * `social-organic` imports this module; nothing here may import it back, or
+   * Nest gets a module cycle and the Planner stops booting without the very
+   * module it is supposed to be independent of. That is why the delete guard is
+   * a port the Planner declares and Organic implements, rather than a
+   * publication repository injected here.
+   *
+   * Import specifiers are checked with comments stripped, so the docblocks that
+   * explain the rule cannot satisfy the test that enforces it.
+   */
+  it('never imports social-organic from anywhere in the Planner module', () => {
+    const plannerRoot = join(__dirname);
+
+    const offenders: string[] = [];
+
+    const walk = (directory: string): void => {
+      for (const entry of readdirSync(directory, { withFileTypes: true })) {
+        const fullPath = join(directory, entry.name);
+
+        if (entry.isDirectory()) {
+          walk(fullPath);
+          continue;
+        }
+
+        if (!entry.name.endsWith('.ts') || entry.name.endsWith('.spec.ts')) {
+          continue;
+        }
+
+        const source = readFileSync(fullPath, 'utf8')
+          .replace(/\/\*[\s\S]*?\*\//g, '')
+          .replace(/\/\/.*$/gm, '');
+
+        if (/from\s+['"][^'"]*social-organic[^'"]*['"]/.test(source)) {
+          offenders.push(fullPath);
+        }
+      }
+    };
+
+    walk(plannerRoot);
+
+    expect(offenders).toEqual([]);
   });
 
   it('does not require Social Integrations in the Planner application services', async () => {
@@ -155,93 +253,63 @@ describe('Social Planner contract', () => {
         SocialCampaignService,
 
         {
-          provide: getRepositoryToken(
-            SocialCampaignTemplateEntity,
-            'agency',
-          ),
+          provide: getRepositoryToken(SocialCampaignTemplateEntity, 'agency'),
           useValue: {},
         },
         {
-          provide: getRepositoryToken(
-            SocialCampaignInstanceEntity,
-            'agency',
-          ),
+          provide: getRepositoryToken(SocialCampaignInstanceEntity, 'agency'),
           useValue: {},
         },
         {
-          provide: getRepositoryToken(
-            SocialEditorialPillarEntity,
-            'agency',
-          ),
+          provide: getRepositoryToken(SocialEditorialPillarEntity, 'agency'),
           useValue: {},
         },
         {
-          provide: getRepositoryToken(
-            SocialContentIdeaEntity,
-            'agency',
-          ),
+          provide: getRepositoryToken(SocialContentIdeaEntity, 'agency'),
           useValue: {},
         },
         {
-          provide: getRepositoryToken(
-            SocialPlanEntity,
-            'agency',
-          ),
+          provide: getRepositoryToken(SocialPlanEntity, 'agency'),
           useValue: {},
         },
         {
-          provide: getRepositoryToken(
-            SocialContentItemEntity,
-            'agency',
-          ),
+          provide: getRepositoryToken(SocialContentItemEntity, 'agency'),
           useValue: {},
         },
         {
-          provide: getRepositoryToken(
-            SocialContentDestinationEntity,
-            'agency',
-          ),
+          provide: getRepositoryToken(SocialContentDestinationEntity, 'agency'),
           useValue: {},
         },
         {
-          provide: getRepositoryToken(
-            SocialContentRevisionEntity,
-            'agency',
-          ),
+          provide: getRepositoryToken(SocialContentRevisionEntity, 'agency'),
           useValue: {},
         },
         {
-          provide: getRepositoryToken(
-            SocialPlannerSettingsEntity,
-            'agency',
-          ),
+          provide: getRepositoryToken(SocialPlannerSettingsEntity, 'agency'),
           useValue: {},
         },
         {
-          provide: getRepositoryToken(
-            SocialPublishingCadenceEntity,
-            'agency',
-          ),
+          provide: getRepositoryToken(SocialPublishingCadenceEntity, 'agency'),
           useValue: {},
         },
       ],
     }).compile();
 
-    expect(
-      moduleRef.get(SocialPlannerService),
-    ).toBeInstanceOf(SocialPlannerService);
+    expect(moduleRef.get(SocialPlannerService)).toBeInstanceOf(
+      SocialPlannerService,
+    );
 
-    expect(
-      moduleRef.get(SocialPlannerSettingsService),
-    ).toBeInstanceOf(SocialPlannerSettingsService);
+    expect(moduleRef.get(SocialPlannerSettingsService)).toBeInstanceOf(
+      SocialPlannerSettingsService,
+    );
 
-    expect(
-      moduleRef.get(SocialPublishingCadenceService),
-    ).toBeInstanceOf(SocialPublishingCadenceService);
+    expect(moduleRef.get(SocialPublishingCadenceService)).toBeInstanceOf(
+      SocialPublishingCadenceService,
+    );
 
-    expect(
-      moduleRef.get(SocialCampaignService),
-    ).toBeInstanceOf(SocialCampaignService);
+    expect(moduleRef.get(SocialCampaignService)).toBeInstanceOf(
+      SocialCampaignService,
+    );
   });
 
   it('governs campaigns with the social.campaigns keys, not the Planner ones', () => {

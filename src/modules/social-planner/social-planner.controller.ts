@@ -2,19 +2,25 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
+  HttpCode,
+  HttpStatus,
   Param,
   ParseUUIDPipe,
   Patch,
   Post,
   Put,
   Query,
+  Res,
   UseGuards,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { RequestContextData } from '../../common/context/request-context.decorator';
 import type { RequestContext } from '../../common/context/request-context.interface';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import {
+  DangerousAction,
   PermissionsGuard,
   RequirePermission,
   RequireProductEntitlement,
@@ -28,6 +34,8 @@ import {
   CreateSocialEditorialPillarDto,
   CreateSocialPlanDto,
   ListSocialContentIdeasQueryDto,
+  ListSocialPlanContentQueryDto,
+  SocialContentBatchDto,
   UpdateSocialCampaignDto,
   UpdateSocialCampaignTemplateDto,
   UpdateSocialContentIdeaDto,
@@ -44,6 +52,7 @@ import {
   type SocialPlannerScope,
 } from './services/social-planner.service';
 import { SocialCampaignService } from './services/social-campaign.service';
+import { SocialContentLifecycleService } from './services/social-content-lifecycle.service';
 import { SocialPlannerSettingsService } from './services/social-planner-settings.service';
 import { SocialPublishingCadenceService } from './services/social-publishing-cadence.service';
 
@@ -54,6 +63,13 @@ const SOCIAL_PLANNER_CREATE_PERMISSION =
 
 const SOCIAL_PLANNER_UPDATE_PERMISSION =
   'social.planner.calendar.update.manager';
+
+/**
+ * Owner-only and explicit, already in the catalog before this etapa — so E6
+ * introduces no permission and needs no permission migration.
+ */
+const SOCIAL_PLANNER_DELETE_PERMISSION =
+  'social.planner.calendar.delete.owner_or_admin_explicit';
 
 /**
  * Campaigns answer to `social.campaigns.*`, not to `social.planner.*`.
@@ -77,6 +93,7 @@ const SOCIAL_CAMPAIGN_UPDATE_PERMISSION =
 export class SocialPlannerController {
   constructor(
     private readonly socialPlannerService: SocialPlannerService,
+    private readonly socialContentLifecycleService: SocialContentLifecycleService,
     private readonly socialPlannerSettingsService: SocialPlannerSettingsService,
     private readonly socialPublishingCadenceService: SocialPublishingCadenceService,
     private readonly socialCampaignService: SocialCampaignService,
@@ -143,10 +160,16 @@ export class SocialPlannerController {
   listContent(
     @RequestContextData() ctx: RequestContext,
     @Param('planId', ParseUUIDPipe) planId: string,
+    @Query() query: ListSocialPlanContentQueryDto,
   ) {
     return this.socialPlannerService.listContent(
       this.requireScope(ctx),
       planId,
+      /**
+       * Defaulting here rather than in the service keeps the omitted-parameter
+       * behaviour identical to what every existing caller already sees.
+       */
+      query.archived ?? 'exclude',
     );
   }
 
@@ -204,6 +227,169 @@ export class SocialPlannerController {
       contentId,
       dto,
     );
+  }
+
+  // ------------------------------------------------- lifecycle actions (E6)
+
+  /**
+   * Duplicating creates content, so it answers to the CREATE permission — the
+   * same reasoning that governs converting an idea.
+   */
+  @Post('content/:contentId/duplicate')
+  @RequirePermission(SOCIAL_PLANNER_CREATE_PERMISSION)
+  duplicateContent(
+    @RequestContextData() ctx: RequestContext,
+    @Param('contentId', ParseUUIDPipe) contentId: string,
+  ) {
+    return this.socialContentLifecycleService.duplicate(
+      this.requireScope(ctx),
+      contentId,
+      ctx.userId ?? null,
+    );
+  }
+
+  /**
+   * Archive and restore are the UPDATE permission, not the delete one.
+   *
+   * Both are fully reversible and destroy nothing: an archived item keeps every
+   * field, every destination and every revision, and any manager who may edit
+   * content may tidy it away and bring it back. Charging them to the owner-only
+   * delete key would make routine housekeeping need an owner.
+   */
+  @Post('content/:contentId/archive')
+  @RequirePermission(SOCIAL_PLANNER_UPDATE_PERMISSION)
+  archiveContent(
+    @RequestContextData() ctx: RequestContext,
+    @Param('contentId', ParseUUIDPipe) contentId: string,
+  ) {
+    return this.socialContentLifecycleService.archive(
+      this.requireScope(ctx),
+      contentId,
+      ctx.userId ?? null,
+    );
+  }
+
+  @Post('content/:contentId/restore')
+  @RequirePermission(SOCIAL_PLANNER_UPDATE_PERMISSION)
+  restoreContent(
+    @RequestContextData() ctx: RequestContext,
+    @Param('contentId', ParseUUIDPipe) contentId: string,
+  ) {
+    return this.socialContentLifecycleService.restore(
+      this.requireScope(ctx),
+      contentId,
+      ctx.userId ?? null,
+    );
+  }
+
+  /**
+   * Delete answers to `social.planner.calendar.delete.owner_or_admin_explicit`,
+   * which already existed in the catalog as owner-only and explicit — so this
+   * etapa adds no permission and no permission migration.
+   *
+   * 204 with no body: there is no post-delete state worth returning, and
+   * echoing the soft-deleted row would invite a caller to keep using it.
+   */
+  @Delete('content/:contentId')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @RequirePermission(SOCIAL_PLANNER_DELETE_PERMISSION)
+  @DangerousAction()
+  async removeContent(
+    @RequestContextData() ctx: RequestContext,
+    @Param('contentId', ParseUUIDPipe) contentId: string,
+  ): Promise<void> {
+    await this.socialContentLifecycleService.remove(
+      this.requireScope(ctx),
+      contentId,
+      ctx.userId ?? null,
+    );
+  }
+
+  // ----------------------------------------------------- batch actions (E6)
+
+  /**
+   * Batch endpoints take the ids in a body and always answer 200 with a
+   * per-item verdict, including when every item failed.
+   *
+   * A batch is not an all-or-nothing operation, so an HTTP status cannot
+   * describe it: 207-style reporting in the body is the only honest answer
+   * when nine items succeeded and three were refused. The alternative — one
+   * request per item — is what E6 explicitly rules out, because it gives the
+   * caller no control over what happened in between.
+   *
+   * `POST` for delete-many rather than `DELETE`: a request body on DELETE is
+   * legal but is dropped by enough proxies and clients that the selection would
+   * silently arrive empty.
+   */
+  @Post('content/batch/archive')
+  @RequirePermission(SOCIAL_PLANNER_UPDATE_PERMISSION)
+  archiveContentBatch(
+    @RequestContextData() ctx: RequestContext,
+    @Body() dto: SocialContentBatchDto,
+  ) {
+    return this.socialContentLifecycleService.archiveMany(
+      this.requireScope(ctx),
+      dto.contentIds,
+      ctx.userId ?? null,
+    );
+  }
+
+  @Post('content/batch/restore')
+  @RequirePermission(SOCIAL_PLANNER_UPDATE_PERMISSION)
+  restoreContentBatch(
+    @RequestContextData() ctx: RequestContext,
+    @Body() dto: SocialContentBatchDto,
+  ) {
+    return this.socialContentLifecycleService.restoreMany(
+      this.requireScope(ctx),
+      dto.contentIds,
+      ctx.userId ?? null,
+    );
+  }
+
+  @Post('content/batch/delete')
+  @RequirePermission(SOCIAL_PLANNER_DELETE_PERMISSION)
+  @DangerousAction()
+  removeContentBatch(
+    @RequestContextData() ctx: RequestContext,
+    @Body() dto: SocialContentBatchDto,
+  ) {
+    return this.socialContentLifecycleService.removeMany(
+      this.requireScope(ctx),
+      dto.contentIds,
+      ctx.userId ?? null,
+    );
+  }
+
+  /**
+   * The plan's content as CSV.
+   *
+   * `VIEW` permission: the export contains exactly the columns the Planning
+   * table already shows to the same reader, so requiring more than reading
+   * would be theatre. What keeps it safe is what the serializer leaves out and
+   * neutralizes, not a stricter key.
+   */
+  @Get('plans/:planId/content/export')
+  @RequirePermission(SOCIAL_PLANNER_VIEW_PERMISSION)
+  async exportPlanContent(
+    @RequestContextData() ctx: RequestContext,
+    @Param('planId', ParseUUIDPipe) planId: string,
+    @Query() query: ListSocialPlanContentQueryDto,
+    @Res({ passthrough: true }) response: Response,
+  ): Promise<string> {
+    const csv = await this.socialContentLifecycleService.exportPlanContentCsv(
+      this.requireScope(ctx),
+      planId,
+      query.archived ?? 'exclude',
+    );
+
+    response.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    response.setHeader(
+      'Content-Disposition',
+      `attachment; filename="social-planner-content-${planId}.csv"`,
+    );
+
+    return csv;
   }
 
   @Get('content/:contentId/revisions')

@@ -2,6 +2,7 @@ export * from './destination-creative.controller';
 export * from './destination-creative.service';
 export * from './dto';
 export * from './entities/social-publication.entity';
+export * from './social-content-publication.source';
 export * from './social-publication-config.service';
 export * from './social-publication-retry';
 export * from './social-publication-run.service';

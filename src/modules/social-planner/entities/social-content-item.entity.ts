@@ -167,6 +167,31 @@ export class SocialContentItemEntity {
   @Column({ name: 'editorial_pillar_id', type: 'uuid', nullable: true })
   editorialPillarId!: string | null;
 
+  /**
+   * Lifecycle state, deliberately kept out of `planningStatus` (E6).
+   *
+   * `planningStatus` says how far the editorial work got; these two say whether
+   * the row should be listed at all. Both are nullable timestamps rather than
+   * booleans because "when" is the part an operator asks about after the fact,
+   * and both are kept separate from each other so a restore knows which of the
+   * two actions it is undoing.
+   *
+   * `deletedAt` is a soft delete: `social_publications.content_item_id` is
+   * RESTRICT and publication rows are immutable evidence, so a published item
+   * can never actually leave the table.
+   */
+  @Column({ name: 'archived_at', type: 'timestamptz', nullable: true })
+  archivedAt!: Date | null;
+
+  @Column({ name: 'archived_by_id', type: 'uuid', nullable: true })
+  archivedById!: string | null;
+
+  @Column({ name: 'deleted_at', type: 'timestamptz', nullable: true })
+  deletedAt!: Date | null;
+
+  @Column({ name: 'deleted_by_id', type: 'uuid', nullable: true })
+  deletedById!: string | null;
+
   @Column({ name: 'created_by_id', type: 'uuid', nullable: true })
   createdById!: string | null;
 

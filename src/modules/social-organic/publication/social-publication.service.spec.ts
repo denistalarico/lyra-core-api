@@ -4,7 +4,7 @@ import {
   ConflictException,
   NotFoundException,
 } from '@nestjs/common';
-import type { Repository } from 'typeorm';
+import { IsNull, type Repository } from 'typeorm';
 import type { MediaAssetResolverService } from '../../../common/media-assets';
 import { SocialContentDestinationEntity } from '../../social-planner/entities/social-content-destination.entity';
 import { SocialContentItemEntity } from '../../social-planner/entities/social-content-item.entity';
@@ -26,6 +26,7 @@ type RepositoryMock = {
   findOne: jest.Mock;
   create: jest.Mock;
   save: jest.Mock;
+  update: jest.Mock;
 };
 
 function createRepositoryMock(): RepositoryMock {
@@ -34,6 +35,7 @@ function createRepositoryMock(): RepositoryMock {
     findOne: jest.fn(),
     create: jest.fn((value) => value),
     save: jest.fn((value) => Promise.resolve(value)),
+    update: jest.fn(() => Promise.resolve({ affected: 1 })),
   };
 }
 
@@ -513,6 +515,130 @@ describe('SocialPublicationService', () => {
       await expect(service.publishNow(agencyScope, 'pub-1')).rejects.toThrow(
         ConflictException,
       );
+    });
+  });
+
+  describe('reschedule', () => {
+    const TARGET = new Date('2026-10-01T18:00:00.000Z');
+
+    function scheduledPublication(overrides: Record<string, unknown> = {}) {
+      return {
+        id: 'pub-1',
+        status: 'scheduled',
+        scheduledAt: new Date('2026-09-20T10:00:00.000Z'),
+        availableAt: new Date('2026-09-20T10:00:00.000Z'),
+        idempotencyKey: 'key-1',
+        payloadHash: 'hash-1',
+        tenantId: agencyScope.tenantId,
+        workspaceId: agencyScope.workspaceId,
+        agencyClientId: null,
+        ...overrides,
+      };
+    }
+
+    it('moves scheduledAt and availableAt together', async () => {
+      publicationsRepository.findOne.mockResolvedValue(scheduledPublication());
+
+      await service.reschedule(agencyScope, 'pub-1', TARGET);
+
+      const [, values] = publicationsRepository.update.mock.calls[0] as [
+        unknown,
+        { scheduledAt: Date; availableAt: Date },
+      ];
+
+      expect(values.scheduledAt).toEqual(TARGET);
+      expect(values.availableAt).toEqual(TARGET);
+    });
+
+    /**
+     * Rotating the idempotency key would throw away the protection that stops
+     * a provider retry from posting the same content twice. A reschedule moves
+     * when the same post goes out, so the key and the payload must not change.
+     */
+    it('does not touch the payload, its hash or the idempotency key', async () => {
+      publicationsRepository.findOne.mockResolvedValue(scheduledPublication());
+
+      await service.reschedule(agencyScope, 'pub-1', TARGET);
+
+      const [, values] = publicationsRepository.update.mock.calls[0] as [
+        unknown,
+        Record<string, unknown>,
+      ];
+
+      expect(values).not.toHaveProperty('idempotencyKey');
+      expect(values).not.toHaveProperty('payloadHash');
+      expect(values).not.toHaveProperty('payloadSnapshot');
+      expect(values).not.toHaveProperty('status');
+    });
+
+    /**
+     * The precondition travels in the WHERE clause, so PostgreSQL — not this
+     * process — decides who wins against the scheduler.
+     */
+    it('carries scope, status and the absence of a lease into the update', async () => {
+      publicationsRepository.findOne.mockResolvedValue(scheduledPublication());
+
+      await service.reschedule(agencyScope, 'pub-1', TARGET);
+
+      const [where] = publicationsRepository.update.mock.calls[0] as [
+        Record<string, unknown>,
+        unknown,
+      ];
+
+      expect(where.id).toBe('pub-1');
+      expect(where.status).toBe('scheduled');
+      expect(where.tenantId).toBe(agencyScope.tenantId);
+      expect(where.agencyClientId).toEqual(IsNull());
+      expect(where.lockedAt).toEqual(IsNull());
+      expect(where.lockedBy).toEqual(IsNull());
+    });
+
+    it('reports a conflict when the scheduler wins the race', async () => {
+      publicationsRepository.findOne.mockResolvedValue(scheduledPublication());
+      publicationsRepository.update.mockResolvedValue({ affected: 0 });
+
+      await expect(
+        service.reschedule(agencyScope, 'pub-1', TARGET),
+      ).rejects.toThrow(ConflictException);
+    });
+
+    it.each(['queued', 'processing', 'published', 'failed', 'cancelled'])(
+      'refuses to reschedule a %s publication',
+      async (status) => {
+        publicationsRepository.findOne.mockResolvedValue(
+          scheduledPublication({ status }),
+        );
+
+        await expect(
+          service.reschedule(agencyScope, 'pub-1', TARGET),
+        ).rejects.toThrow(ConflictException);
+
+        expect(publicationsRepository.update).not.toHaveBeenCalled();
+      },
+    );
+
+    it('answers not found for a publication in another scope', async () => {
+      publicationsRepository.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.reschedule(agencyScope, 'pub-1', TARGET),
+      ).rejects.toThrow(NotFoundException);
+
+      expect(publicationsRepository.update).not.toHaveBeenCalled();
+    });
+
+    /**
+     * A past instant means "at the next scheduler tick". Rejecting it would
+     * punish an operator moving a post to a minute from now, who would lose to
+     * their own clock skew.
+     */
+    it('accepts a time in the past', async () => {
+      publicationsRepository.findOne.mockResolvedValue(scheduledPublication());
+      const past = new Date(Date.now() - 60_000);
+
+      await expect(
+        service.reschedule(agencyScope, 'pub-1', past),
+      ).resolves.toBeDefined();
     });
   });
 

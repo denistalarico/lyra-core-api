@@ -394,6 +394,11 @@ export class DestinationCreativeService {
     };
   }
 
+  /**
+   * `deletedAt IS NULL` (E6): creatives are reached through their content item,
+   * so a soft-deleted item hides its creatives from reads and refuses new
+   * bindings without needing a stamp of its own on every creative row.
+   */
   private contentScopeWhere(
     scope: DestinationCreativeScope,
   ): FindOptionsWhere<SocialContentItemEntity> {
@@ -402,6 +407,7 @@ export class DestinationCreativeService {
       workspaceId: scope.workspaceId,
       agencyClientId:
         scope.agencyClientId === null ? IsNull() : scope.agencyClientId,
+      deletedAt: IsNull(),
     };
   }
 

@@ -6,6 +6,7 @@ import {
 import type { RequestContext } from '../../common/context/request-context.interface';
 import { SocialPlannerController } from './social-planner.controller';
 import type { SocialPlannerService } from './services/social-planner.service';
+import type { SocialContentLifecycleService } from './services/social-content-lifecycle.service';
 import type { SocialPlannerSettingsService } from './services/social-planner-settings.service';
 import type { SocialPublishingCadenceService } from './services/social-publishing-cadence.service';
 import type { SocialCampaignService } from './services/social-campaign.service';
@@ -27,6 +28,17 @@ describe('SocialPlannerController', () => {
     listRevisions: jest.fn(),
     createRevision: jest.fn(),
     restoreRevision: jest.fn(),
+  };
+
+  const lifecycleService = {
+    duplicate: jest.fn(),
+    archive: jest.fn(),
+    restore: jest.fn(),
+    remove: jest.fn(),
+    archiveMany: jest.fn(),
+    restoreMany: jest.fn(),
+    removeMany: jest.fn(),
+    exportPlanContentCsv: jest.fn(),
   };
 
   const settingsService = {
@@ -62,6 +74,7 @@ describe('SocialPlannerController', () => {
 
     controller = new SocialPlannerController(
       service as unknown as SocialPlannerService,
+      lifecycleService as unknown as SocialContentLifecycleService,
       settingsService as unknown as SocialPlannerSettingsService,
       cadenceService as unknown as SocialPublishingCadenceService,
       campaignService as unknown as SocialCampaignService,
