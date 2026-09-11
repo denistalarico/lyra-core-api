@@ -80,6 +80,19 @@ function required(
 }
 
 export const AGENCY_NOTIFICATION_CATALOG: readonly NotificationDefinition[] = [
+  // Social publishing
+  required(
+    'social.publishing.publication_failed',
+    'social',
+    NotificationCategory.RISK,
+    NotificationRecipientStrategy.EXPLICIT_USERS,
+    {
+      productKey: NotificationProductKey.SOCIAL,
+      defaultPriority: NotificationPriority.CRITICAL,
+      selfNotificationPolicy: NotificationSelfPolicy.ALLOW_ACTOR,
+    },
+  ),
+
   // Inbox (LeadFlow)
   standard(
     'inbox.message_received',

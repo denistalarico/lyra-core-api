@@ -5,6 +5,7 @@ import {
   SocialPublicationEntity,
   SocialPublicationFailureReason,
 } from './entities/social-publication.entity';
+import { SocialPublicationNotificationPublisher } from './social-publication-notification.publisher';
 
 const AGENCY_CONNECTION = 'agency';
 
@@ -64,6 +65,7 @@ export class SocialPublicationRunService {
     private readonly publicationsRepository: Repository<SocialPublicationEntity>,
     @InjectDataSource(AGENCY_CONNECTION)
     private readonly dataSource: DataSource,
+    private readonly notificationPublisher?: SocialPublicationNotificationPublisher,
   ) {}
 
   /** Moves due Lyra-owned schedules into the worker queue. */
@@ -446,7 +448,12 @@ export class SocialPublicationRunService {
           AND status = 'processing'
           AND locked_by = $2
           ${input.expectedLockedAt ? 'AND locked_at = $5' : ''}
-        RETURNING id`,
+        RETURNING id,
+                  tenant_id AS "tenantId",
+                  workspace_id AS "workspaceId",
+                  agency_client_id AS "agencyClientId",
+                  content_item_id AS "contentItemId",
+                  failure_reason AS "failureReason"`,
       [
         input.publicationId,
         input.lockedBy,
@@ -456,6 +463,14 @@ export class SocialPublicationRunService {
       ],
     );
 
-    return returnedRows(result).length > 0;
+    const failed = returnedRows<Pick<
+      SocialPublicationEntity,
+      'id' | 'tenantId' | 'workspaceId' | 'agencyClientId' | 'contentItemId' | 'failureReason'
+    >>(result)[0] ?? null;
+    if (failed) {
+      await this.notificationPublisher?.publishFailure(failed);
+      return true;
+    }
+    return false;
   }
 }

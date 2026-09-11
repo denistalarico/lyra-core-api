@@ -9,6 +9,8 @@ import {
   MediaAssetsModule,
 } from '../../common/media-assets';
 import { PermissionsModule } from '../permissions';
+import { NotificationsModule } from '../notifications';
+import { AgencyWorkspaceUserEntity } from '../agency/entities/agency-settings.entities';
 import { SocialIntegrationsModule } from '../social-integrations/social-integrations.module';
 import {
   MetaOrganicInsightsService,
@@ -52,6 +54,7 @@ import {
   SocialPublicationRunService,
   SocialPublicationScheduler,
   SocialPublicationService,
+  SocialPublicationNotificationPublisher,
   SocialPublicationWorker,
 } from './publication';
 import { SocialPublicationExecutorService } from './publication/social-publication.executor';
@@ -85,6 +88,7 @@ export function createMetaOrganicOAuthProviders(
 @Module({
   imports: [
     PermissionsModule,
+    NotificationsModule,
     FilesModule,
     MediaAssetsModule,
     // A4 injects `SocialAnalyticsReadService` for the consolidated
@@ -109,6 +113,7 @@ export function createMetaOrganicOAuthProviders(
         SocialOrganicConnectionEntity,
         SocialOrganicAssetEntity,
         SocialPublicationEntity,
+        AgencyWorkspaceUserEntity,
         SocialContentItemEntity,
         SocialContentDestinationEntity,
         SocialDestinationCreativeEntity,
@@ -150,6 +155,7 @@ export function createMetaOrganicOAuthProviders(
     SocialOrganicOAuthService,
     SocialOrganicConnectionService,
     SocialPublicationRunService,
+    SocialPublicationNotificationPublisher,
     SocialPublicationScheduler,
     SocialPublicationService,
     SocialPublicationWorker,

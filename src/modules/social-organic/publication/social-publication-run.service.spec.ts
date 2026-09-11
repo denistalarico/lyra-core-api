@@ -23,6 +23,7 @@ function harness(
   input: {
     queryResults?: unknown[];
     found?: SocialPublicationEntity[];
+    notificationPublisher?: { publishFailure: jest.Mock };
   } = {},
 ) {
   const results = [...(input.queryResults ?? [])];
@@ -39,6 +40,7 @@ function harness(
   const service = new SocialPublicationRunService(
     repository as unknown as Repository<SocialPublicationEntity>,
     dataSource as unknown as DataSource,
+    input.notificationPublisher as never,
   );
 
   return { service, repository, dataSource };
@@ -182,4 +184,39 @@ describe('SocialPublicationRunService', () => {
       expect(dataSource.query.mock.calls[0][0]).toContain('locked_by = $2');
     },
   );
+
+  it('notifies with the returned tenant scope only after a terminal failure is persisted', async () => {
+    const notificationPublisher = { publishFailure: jest.fn() };
+    const { service, dataSource } = harness({
+      notificationPublisher,
+      queryResults: [[[
+        {
+          id: 'publication-a',
+          tenantId: 'tenant-a',
+          workspaceId: 'workspace-a',
+          agencyClientId: 'client-a',
+          contentItemId: 'content-a',
+          failureReason: 'payload_invalid',
+        },
+      ], 1]],
+    });
+
+    await expect(
+      service.markFailed({
+        publicationId: 'publication-a',
+        lockedBy: 'worker-a',
+        reason: 'payload_invalid',
+        errorCode: 'invalid_caption',
+      }),
+    ).resolves.toBe(true);
+
+    expect(dataSource.query.mock.calls[0][0]).toContain('tenant_id AS "tenantId"');
+    expect(notificationPublisher.publishFailure).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tenantId: 'tenant-a',
+        workspaceId: 'workspace-a',
+        agencyClientId: 'client-a',
+      }),
+    );
+  });
 });

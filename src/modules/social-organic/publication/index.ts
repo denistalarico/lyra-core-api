@@ -6,6 +6,7 @@ export * from './social-content-publication.source';
 export * from './social-publication-config.service';
 export * from './social-publication-retry';
 export * from './social-publication-run.service';
+export * from './social-publication-notification.publisher';
 export * from './social-publication.controller';
 export * from './social-publication.scheduler';
 export * from './social-publication.service';
