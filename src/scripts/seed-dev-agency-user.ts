@@ -19,7 +19,7 @@ import {
 const DEV_CORE_DATABASE = 'lyra_core_dev';
 const DEV_AGENCY_DATABASE = 'lyra_agency_dev';
 const DEFAULT_DEV_EMAIL = 'social-dev@example.test';
-const DEFAULT_DEV_PASSWORD = 'admin';
+const DEFAULT_DEV_PASSWORD = 'admin123';
 
 function loadLocalEnvFile() {
   const envPath = resolve(process.cwd(), '.env');
@@ -114,13 +114,15 @@ async function run() {
         order: { updatedAt: 'DESC' },
       });
 
-      if (sourceMemberships.length !== 1 || !sourceMemberships[0].userId) {
+      const [source] = sourceMemberships;
+
+      if (sourceMemberships.length !== 1 || !source?.userId) {
         throw new Error(
           'DEV_AGENCY_SOURCE_USER_EMAIL must identify exactly one active Agency workspace user.',
         );
       }
 
-      const source = sourceMemberships[0];
+      const sourceUserId: string = source.userId;
       const existingMembership = await workspaceUsers.findOne({
         where: {
           tenantId: source.tenantId,
@@ -206,7 +208,7 @@ async function run() {
         where: {
           tenantId: source.tenantId,
           workspaceId: source.workspaceId,
-          userId: source.userId,
+          userId: sourceUserId,
         },
       });
       await clientAccess.delete({
