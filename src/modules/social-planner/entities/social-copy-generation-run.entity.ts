@@ -32,7 +32,12 @@ export type SocialCopyGenerationRunStatus =
 export type SocialCopyGenerationRunKind =
   | 'content_copy'
   | 'plan_copy'
-  | 'selection_copy';
+  | 'selection_copy'
+  /**
+   * Builds a plan's editorial grid instead of writing text. The only kind with
+   * no content item, because it is the kind that creates them.
+   */
+  | 'plan_grid';
 
 /**
  * The Generation Run the Planner blueprint (§8.5) asks for, and the concrete
@@ -98,8 +103,12 @@ export class SocialCopyGenerationRunEntity {
   @Column({ name: 'plan_id', type: 'uuid' })
   planId!: string;
 
-  @Column({ name: 'content_item_id', type: 'uuid' })
-  contentItemId!: string;
+  /**
+   * NULL only for `plan_grid` runs, which generate the content items rather
+   * than describing one. A database CHECK keeps every other kind required.
+   */
+  @Column({ name: 'content_item_id', type: 'uuid', nullable: true })
+  contentItemId!: string | null;
 
   @Column({
     name: 'run_kind',
@@ -221,12 +230,28 @@ export class SocialCopyGenerationRunEntity {
   requestedFields!: string[] | null;
 
   /**
+   * How many content items a `plan_grid` run was asked to produce. NULL for
+   * every copy run, which is measured in fields rather than items.
+   */
+  @Column({ name: 'requested_items', type: 'int', nullable: true })
+  requestedItems!: number | null;
+
+  /**
+   * Commemorative date keys the operator ticked for a `plan_grid` run. Recorded
+   * because the resolved dates depend on the catalog's rules, and a later
+   * catalog change would otherwise make an old plan's seasonal slots
+   * inexplicable.
+   */
+  @Column({ name: 'commemorative_date_keys', type: 'jsonb', nullable: true })
+  commemorativeDateKeys!: string[] | null;
+
+  /**
    * The operator's free-text steer. Persisted because the worker builds the
    * prompt minutes later in a different process, and it is the one input only
    * the requester could supply. Length-capped by the DTO so it cannot become a
    * channel for smuggling a large payload into a prompt.
    */
-  @Column({ type: 'varchar', length: 500, nullable: true })
+  @Column({ type: 'varchar', length: 2_000, nullable: true })
   instruction!: string | null;
 
   @Column({ name: 'requested_by_id', type: 'uuid', nullable: true })

@@ -47,6 +47,8 @@ function buildWork(
     contextVersion: 'planner-context-v1',
     fields: [{ field: 'caption', currentValue: 'legenda atual' }],
     instruction: null,
+    format: 'image',
+    longFormCaption: false,
     ...overrides,
   };
 }

@@ -153,6 +153,8 @@ export class SocialCopyGenerationWorker {
         context: work.context,
         fields: work.fields,
         instruction: work.instruction,
+        format: work.format,
+        longFormCaption: work.longFormCaption,
       });
 
       if (result.proposals.length === 0)

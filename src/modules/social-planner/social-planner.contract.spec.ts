@@ -111,6 +111,19 @@ describe('Social Planner contract', () => {
     ).toBe(true);
   });
 
+  it('registers the plan generation migration in the agency datasource', () => {
+    const registered = (AgencyDataSource.options.migrations ?? []) as Array<{
+      name?: string;
+    }>;
+
+    expect(
+      registered.some(
+        (migration) =>
+          migration?.name === 'AddSocialPlanGeneration1793000000000',
+      ),
+    ).toBe(true);
+  });
+
   it('binds Planner routes to the Social entitlement', () => {
     expect(
       Reflect.getMetadata(
@@ -136,6 +149,12 @@ describe('Social Planner contract', () => {
       SocialPlannerController.prototype.getCopyGenerationRun,
       SocialPlannerController.prototype.getSettings,
       SocialPlannerController.prototype.getCadence,
+      /**
+       * The commemorative date picker reads a code catalog and the scope's own
+       * configuration. Pinned as a read so it cannot drift behind a write key,
+       * which would stop planners from opening the Novo plano modal.
+       */
+      SocialPlannerController.prototype.listCommemorativeDates,
     ];
 
     for (const handler of handlers) {
@@ -151,6 +170,11 @@ describe('Social Planner contract', () => {
       SocialPlannerController.prototype.createContent,
       /** Duplicating produces a new content item, so it is a create. */
       SocialPlannerController.prototype.duplicateContent,
+      /**
+       * Generating a plan writes content items, so it answers to the create
+       * key rather than the update one — the same reasoning as duplicate.
+       */
+      SocialPlannerController.prototype.generatePlan,
     ];
 
     for (const handler of createHandlers) {

@@ -12,3 +12,4 @@ export * from './social-content-idea.dto';
 export * from './social-content-action.dto';
 export * from './list-social-plan-content.query.dto';
 export * from './social-copy-generation.dto';
+export * from './social-plan-generation.dto';

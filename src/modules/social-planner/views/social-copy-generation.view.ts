@@ -35,7 +35,8 @@ import type {
 export type SocialCopyGenerationRunView = {
   id: string;
   planId: string;
-  contentItemId: string;
+  /** NULL for `plan_grid` runs, which create content items rather than editing one. */
+  contentItemId: string | null;
   runKind: SocialCopyGenerationRunKind;
   status: SocialCopyGenerationRunStatus;
   attempts: number;

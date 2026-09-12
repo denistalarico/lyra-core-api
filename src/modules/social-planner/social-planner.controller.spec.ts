@@ -11,6 +11,7 @@ import type { SocialPlannerSettingsService } from './services/social-planner-set
 import type { SocialPublishingCadenceService } from './services/social-publishing-cadence.service';
 import type { SocialCampaignService } from './services/social-campaign.service';
 import type { SocialCopyGenerationService } from './services/social-copy-generation.service';
+import type { SocialPlanGenerationService } from './services/social-plan-generation.service';
 
 describe('SocialPlannerController', () => {
   let controller: SocialPlannerController;
@@ -81,6 +82,11 @@ describe('SocialPlannerController', () => {
     cancelRun: jest.fn(),
   };
 
+  const planGenerationService = {
+    listCommemorativeDates: jest.fn(),
+    generatePlan: jest.fn(),
+  };
+
   beforeEach(() => {
     jest.clearAllMocks();
 
@@ -91,6 +97,7 @@ describe('SocialPlannerController', () => {
       cadenceService as unknown as SocialPublishingCadenceService,
       campaignService as unknown as SocialCampaignService,
       copyGenerationService as unknown as SocialCopyGenerationService,
+      planGenerationService as unknown as SocialPlanGenerationService,
     );
   });
 

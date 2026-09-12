@@ -1,4 +1,5 @@
 import type { SocialPlannerSettings } from '../contracts';
+import { resolveCopyFormat } from './social-copy-format';
 import type {
   SocialContentDestinationEntity,
   SocialContentItemEntity,
@@ -153,46 +154,26 @@ export function defaultFieldsFor(
 ): SocialCopyGenerationField[] {
   const fields: SocialCopyGenerationField[] = ['copy'];
 
-  const placements = destinations.map((destination) =>
-    destination.placement.toLowerCase(),
-  );
-  const hasDestinations = destinations.length > 0;
-  const everyDestinationIsStory =
-    hasDestinations && placements.every((placement) => placement === 'story');
+  /**
+   * Story detection lives in `resolveCopyFormat`, which the prompt also reads.
+   * Two independent answers to "is this a Story" would eventually disagree, and
+   * the failure would be a caption offered for a piece that cannot show one.
+   */
+  const format = resolveCopyFormat(item, destinations);
+  const isStory = format === 'story';
 
   // Story carries no caption. Asking for one when every destination is a Story
   // would stage a proposal the content page deliberately disables.
-  if (!everyDestinationIsStory) fields.push('caption');
+  if (!isStory) fields.push('caption');
 
-  if (isVideoFormat(item.creativeFormat, placements)) fields.push('script');
+  if (format === 'reel') fields.push('script');
 
   fields.push('cta', 'hashtags');
 
-  if (settings.firstCommentDefaults.enabled && !everyDestinationIsStory)
+  if (settings.firstCommentDefaults.enabled && !isStory)
     fields.push('firstComment');
 
   return fields;
-}
-
-/**
- * Video vocabulary is checked against the canonical singular values E4
- * normalized to (`reel`, `story`), with the plural legacy spellings accepted
- * because older rows were written before that normalization and must not
- * silently lose their script.
- */
-function isVideoFormat(
-  creativeFormat: string | null,
-  placements: string[],
-): boolean {
-  const candidates = [creativeFormat ?? '', ...placements].map((value) =>
-    value.toLowerCase(),
-  );
-
-  return candidates.some((value) =>
-    ['reel', 'reels', 'video', 'vídeo', 'short', 'shorts', 'tiktok'].includes(
-      value,
-    ),
-  );
 }
 
 function labelFor(

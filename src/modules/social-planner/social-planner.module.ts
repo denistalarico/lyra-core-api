@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { PermissionsModule } from '../permissions';
+import { LeadFlowClientSettingsEntity } from '../leadflow-settings/entities/leadflow-client-settings.entity';
 import {
   SocialCampaignInstanceEntity,
   SocialCampaignTemplateEntity,
@@ -25,6 +26,9 @@ import { SocialCopyGenerationProvider } from './services/social-copy-generation-
 import { SocialCopyGenerationStateMachine } from './services/social-copy-generation-state-machine';
 import { SocialCopyGenerationService } from './services/social-copy-generation.service';
 import { SocialCopyGenerationWorker } from './services/social-copy-generation.worker';
+import { SocialBrandContextPort } from './services/social-brand-context.port';
+import { SocialPlanGenerationProvider } from './services/social-plan-generation-provider';
+import { SocialPlanGenerationService } from './services/social-plan-generation.service';
 import { SocialPlannerService } from './services/social-planner.service';
 import { SocialPlannerSettingsService } from './services/social-planner-settings.service';
 import { SocialPublishingCadenceService } from './services/social-publishing-cadence.service';
@@ -59,6 +63,16 @@ import { SocialPublishingCadenceService } from './services/social-publishing-cad
         SocialCampaignInstanceEntity,
         SocialEditorialPillarEntity,
         SocialContentIdeaEntity,
+        /**
+         * Read-only, through `SocialBrandContextPort`. Plan generation grounds
+         * its prompt in the brand facts the agency already declared once in
+         * /social/settings#brand-kit, and the commemorative date picker filters
+         * by the country and business mode stored on the same row. Registered
+         * here rather than importing LeadFlowSettingsModule because the Planner
+         * needs the row without the request-scoped permission checks that
+         * module's read methods perform — see the port's doc comment.
+         */
+        LeadFlowClientSettingsEntity,
       ],
       'agency',
     ),
@@ -74,6 +88,15 @@ import { SocialPublishingCadenceService } from './services/social-publishing-cad
     SocialCopyGenerationStateMachine,
     SocialCopyGenerationProvider,
     SocialCopyGenerationService,
+    /**
+     * Plan generation (the "Criar com IA" button). Shares the copy generation
+     * config — one deployment decision configures the provider for both — but
+     * keeps its own prompt, schema and provider class, because the two calls
+     * state opposite goals.
+     */
+    SocialBrandContextPort,
+    SocialPlanGenerationProvider,
+    SocialPlanGenerationService,
     /**
      * The only provider here that runs on a timer. It is inert unless
      * `SOCIAL_COPY_GENERATION_PROVIDER_MODE` is set away from its `disabled`
@@ -94,6 +117,7 @@ import { SocialPublishingCadenceService } from './services/social-publishing-cad
     SocialPublishingCadenceService,
     SocialCampaignService,
     SocialCopyGenerationService,
+    SocialPlanGenerationService,
     SocialContentPublicationGuard,
   ],
 })

@@ -46,6 +46,11 @@ import {
   defaultFieldsFor,
   SOCIAL_COPY_CONTEXT_VERSION,
 } from './social-copy-generation-context';
+import {
+  resolveCopyFormat,
+  wantsLongFormCaption,
+  type SocialCopyFormat,
+} from './social-copy-format';
 import { SocialCopyGenerationStateMachine } from './social-copy-generation-state-machine';
 import { SocialCopyGenerationError } from './social-copy-generation.errors';
 import { SocialPlannerSettingsService } from './social-planner-settings.service';
@@ -91,6 +96,10 @@ export interface ResolvedGenerationWork {
     currentValue: string | string[] | null;
   }>;
   instruction: string | null;
+  /** Editorial shape of the piece, so the prompt can write a script vs. slides. */
+  format: SocialCopyFormat;
+  /** Whether the caption should be a mini-article, with the matching CTA. */
+  longFormCaption: boolean;
 }
 
 /**
@@ -712,6 +721,16 @@ export class SocialCopyGenerationService {
       agencyClientId: run.agencyClientId,
     };
 
+    /**
+     * Only `plan_grid` runs carry a NULL content item, and those are executed
+     * by the plan generation service, never here. Reaching this with NULL means
+     * a run was written with the wrong kind, so it fails as unavailable rather
+     * than querying for `id: null` — which would match nothing in TypeORM but
+     * read as a mysterious empty result instead of a contract violation.
+     */
+    if (!run.contentItemId)
+      throw new SocialCopyGenerationError('content_not_available');
+
     const item = await this.contentRepository.findOne({
       where: { id: run.contentItemId, ...this.contentScopeWhere(scope) },
     });
@@ -768,6 +787,8 @@ export class SocialCopyGenerationService {
         ? requested
         : defaultFieldsFor(item, destinations, settings);
 
+    const format = resolveCopyFormat(item, destinations);
+
     return {
       run,
       context: buildCopyGenerationContext(
@@ -787,6 +808,8 @@ export class SocialCopyGenerationService {
         currentValue: this.currentValueOf(item, field),
       })),
       instruction: run.instruction,
+      format,
+      longFormCaption: wantsLongFormCaption(item, format),
     };
   }
 
@@ -809,6 +832,15 @@ export class SocialCopyGenerationService {
   ): Promise<void> {
     if (proposals.length === 0) return;
 
+    /**
+     * A proposal is an offer to change one content item's field, so it cannot
+     * exist without one. `plan_grid` runs never reach this method — they create
+     * content rather than proposing edits to it.
+     */
+    const contentItemId = run.contentItemId;
+    if (!contentItemId)
+      throw new SocialCopyGenerationError('content_not_available');
+
     const repository = manager.getRepository(
       SocialCopyGenerationProposalEntity,
     );
@@ -820,9 +852,7 @@ export class SocialCopyGenerationService {
       .createQueryBuilder()
       .update(SocialCopyGenerationProposalEntity)
       .set({ status: 'superseded' })
-      .where('content_item_id = :contentItemId', {
-        contentItemId: run.contentItemId,
-      })
+      .where('content_item_id = :contentItemId', { contentItemId })
       .andWhere('tenant_id = :tenantId', { tenantId: run.tenantId })
       .andWhere('workspace_id = :workspaceId', { workspaceId: run.workspaceId })
       .andWhere('status = :status', { status: 'pending' })
@@ -836,7 +866,7 @@ export class SocialCopyGenerationService {
           workspaceId: run.workspaceId,
           agencyClientId: run.agencyClientId,
           runId: run.id,
-          contentItemId: run.contentItemId,
+          contentItemId,
           field: toColumnField(proposal.field),
           value: proposal.value,
           baseValue: proposal.baseValue,

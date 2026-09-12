@@ -29,6 +29,8 @@ import {
   AcceptSocialCopyProposalsDto,
   ConvertSocialContentIdeaDto,
   CreateSocialCampaignDto,
+  ListCommemorativeDatesQueryDto,
+  RequestSocialPlanGenerationDto,
   CreateSocialCampaignTemplateDto,
   CreateSocialContentIdeaDto,
   CreateSocialContentItemDto,
@@ -58,6 +60,7 @@ import {
 import { SocialCampaignService } from './services/social-campaign.service';
 import { SocialContentLifecycleService } from './services/social-content-lifecycle.service';
 import { SocialCopyGenerationService } from './services/social-copy-generation.service';
+import { SocialPlanGenerationService } from './services/social-plan-generation.service';
 import { SocialPlannerSettingsService } from './services/social-planner-settings.service';
 import { SocialPublishingCadenceService } from './services/social-publishing-cadence.service';
 
@@ -103,6 +106,7 @@ export class SocialPlannerController {
     private readonly socialPublishingCadenceService: SocialPublishingCadenceService,
     private readonly socialCampaignService: SocialCampaignService,
     private readonly socialCopyGenerationService: SocialCopyGenerationService,
+    private readonly socialPlanGenerationService: SocialPlanGenerationService,
   ) {}
 
   @Get('plans')
@@ -566,6 +570,51 @@ export class SocialPlannerController {
     @Body() dto: RequestSocialCopyGenerationDto,
   ) {
     return this.socialCopyGenerationService.requestForPlan(
+      this.requireScope(ctx),
+      planId,
+      ctx.userId ?? null,
+      dto,
+    );
+  }
+
+  // --------------------------------------------------------- plan generation
+
+  /**
+   * The commemorative dates offered by the "Novo plano" modal.
+   *
+   * A GET with the period as query parameters, because a rule-based catalog has
+   * no dates until it is given one: "Carnaval" is a rule about a year, not a
+   * date. Country and business mode default to what the Brand Kit and the
+   * client's LeadFlow settings already declare.
+   */
+  @Get('commemorative-dates')
+  @RequirePermission(SOCIAL_PLANNER_VIEW_PERMISSION)
+  listCommemorativeDates(
+    @RequestContextData() ctx: RequestContext,
+    @Query() query: ListCommemorativeDatesQueryDto,
+  ) {
+    return this.socialPlanGenerationService.listCommemorativeDates(
+      this.requireScope(ctx),
+      query,
+    );
+  }
+
+  /**
+   * Builds the plan's editorial grid with the model.
+   *
+   * Answers on the create permission, not the update one: this creates content
+   * items. It is also the only generation endpoint that returns its result
+   * directly rather than a run id — one provider call the operator waits for,
+   * not a queue. See `SocialPlanGenerationService` for why.
+   */
+  @Post('plans/:planId/generate')
+  @RequirePermission(SOCIAL_PLANNER_CREATE_PERMISSION)
+  generatePlan(
+    @RequestContextData() ctx: RequestContext,
+    @Param('planId', ParseUUIDPipe) planId: string,
+    @Body() dto: RequestSocialPlanGenerationDto,
+  ) {
+    return this.socialPlanGenerationService.generatePlan(
       this.requireScope(ctx),
       planId,
       ctx.userId ?? null,
