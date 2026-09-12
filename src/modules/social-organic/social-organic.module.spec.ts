@@ -17,6 +17,8 @@ import {
   MediaAssetsModule,
 } from '../../common/media-assets';
 import { PermissionsModule } from '../permissions';
+import { NotificationsModule } from '../notifications';
+import { AgencyWorkspaceUserEntity } from '../agency/entities/agency-settings.entities';
 import { SocialIntegrationsModule } from '../social-integrations/social-integrations.module';
 import { SocialPlannerModule } from '../social-planner/social-planner.module';
 import {
@@ -57,6 +59,7 @@ import {
   SocialPublicationController,
   SocialPublicationEntity,
   SocialPublicationConfigService,
+  SocialPublicationNotificationPublisher,
   SocialPublicationRunService,
   SocialPublicationScheduler,
   SocialPublicationService,
@@ -95,6 +98,7 @@ describe('SocialOrganicModule', () => {
         SocialOrganicConnectionEntity,
         SocialOrganicAssetEntity,
         SocialPublicationEntity,
+        AgencyWorkspaceUserEntity,
         SocialContentItemEntity,
         SocialContentDestinationEntity,
         SocialDestinationCreativeEntity,
@@ -109,6 +113,9 @@ describe('SocialOrganicModule', () => {
     expect(
       Reflect.getMetadata(MODULE_METADATA.IMPORTS, SocialOrganicModule),
     ).toContain(PermissionsModule);
+    expect(
+      Reflect.getMetadata(MODULE_METADATA.IMPORTS, SocialOrganicModule),
+    ).toContain(NotificationsModule);
     expect(
       Reflect.getMetadata(MODULE_METADATA.IMPORTS, SocialOrganicModule),
     ).toContain(FilesModule);
@@ -153,6 +160,7 @@ describe('SocialOrganicModule', () => {
       SocialOrganicOAuthService,
       SocialOrganicConnectionService,
       SocialPublicationRunService,
+      SocialPublicationNotificationPublisher,
       SocialPublicationScheduler,
       SocialPublicationService,
       SocialPublicationWorker,
