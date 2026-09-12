@@ -1,4 +1,4 @@
-import { IsISO8601, IsOptional, IsUUID } from 'class-validator';
+import { ArrayMaxSize, ArrayMinSize, IsArray, IsISO8601, IsOptional, IsUUID } from 'class-validator';
 
 /**
  * Schedules a publication for a Planner destination.
@@ -27,6 +27,13 @@ export class CreateSocialPublicationDto {
   @IsOptional()
   @IsUUID()
   mediaAssetId?: string | null;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(10)
+  @IsUUID('4', { each: true })
+  mediaAssetIds?: string[];
 
   /**
    * Lyra's authoritative desired publish time (ADR-015 — no provider-side

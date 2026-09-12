@@ -47,15 +47,10 @@ export class InstagramPublisherAdapter implements SocialPublisherAdapter {
     if (input.assetType !== INSTAGRAM_ASSET_TYPE) {
       issues.push({ field: 'assetType', reason: 'unsupported_asset_type' });
     }
-    if (
-      input.placement !== 'carousel' &&
-      !META_INSTAGRAM_PROFESSIONAL_CAPABILITIES.placements.includes(
-        input.placement,
-      )
-    ) {
+    if (!META_INSTAGRAM_PROFESSIONAL_CAPABILITIES.placements.includes(input.placement)) {
       issues.push({ field: 'placement', reason: 'unsupported_placement' });
     }
-    if (!input.mediaAssetId) {
+    if (!input.mediaAssetIds.length) {
       issues.push({ field: 'mediaAssetId', reason: 'media_required' });
     }
     if (input.firstComment) {
@@ -73,13 +68,11 @@ export class InstagramPublisherAdapter implements SocialPublisherAdapter {
     if (input.placement === 'story' && input.caption) {
       issues.push({ field: 'caption', reason: 'unsupported_story_caption' });
     }
-    if (input.placement === 'carousel') {
-      // MA3 cannot truthfully publish a carousel from the current singular
-      // Publication.mediaAssetId. Reject before creating any Meta container.
-      issues.push({
-        field: 'mediaAssetId',
-        reason: 'multiple_media_assets_required',
-      });
+    if (input.mediaAssetIds.length > 10) {
+      issues.push({ field: 'mediaAssetIds', reason: 'too_many_media_assets' });
+    }
+    if (input.mediaAssetIds.length > 1 && input.placement !== 'feed') {
+      issues.push({ field: 'mediaAssetIds', reason: 'carousel_feed_only' });
     }
 
     return issues.length === 0 ? { valid: true } : { valid: false, issues };
@@ -114,7 +107,8 @@ export class InstagramPublisherAdapter implements SocialPublisherAdapter {
         mediaKind: input.mimeType.startsWith('video/') ? 'video' : 'image',
         placement: input.payload.placement,
         caption:
-          input.payload.placement === 'story' ? null : input.payload.caption,
+          input.mediaCount > 1 || input.payload.placement === 'story' ? null : input.payload.caption,
+        carouselItem: input.mediaCount > 1,
       });
 
       return {
@@ -143,18 +137,30 @@ export class InstagramPublisherAdapter implements SocialPublisherAdapter {
       };
     }
 
-    const media = input.preparedMedia
-      ? decodeMetaPreparedMediaRef(input.preparedMedia.providerMediaRef)
-      : null;
-    if (media?.kind !== 'instagram_container') {
+    const decodedMedia = input.preparedMedia.map((entry) => decodeMetaPreparedMediaRef(entry.providerMediaRef));
+    if (!decodedMedia.length || decodedMedia.some((entry) => entry?.kind !== 'instagram_container')) {
       return {
         outcome: 'failed',
         reason: 'media_rejected',
         code: 'instagram_prepared_media_invalid',
       };
     }
+    const media = decodedMedia.filter((entry): entry is NonNullable<typeof entry> => entry !== null);
 
-    return this.progressContainer(input.credential, media.id);
+    if (media.length > 1) {
+      try {
+        const parent = await this.graph.createInstagramCarouselContainer({
+          accountId: input.credential.externalAssetId,
+          pageAccessToken: input.credential.accessToken,
+          childContainerIds: media.map((entry) => entry.id),
+          caption: input.payload.caption,
+        });
+        return this.progressContainer(input.credential, parent.id);
+      } catch (error) {
+        return metaPublicationFailure(error);
+      }
+    }
+    return this.progressContainer(input.credential, media[0]!.id);
   }
 
   async reconcile(input: ReconciliationInput): Promise<PublicationResult> {

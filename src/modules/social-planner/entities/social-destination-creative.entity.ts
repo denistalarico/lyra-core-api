@@ -35,14 +35,11 @@ import {
  * two are deliberately separate, exactly as `destination.plannedAt` is
  * separate from `publication.scheduledAt`.
  *
- * ONE MEDIA PER DESTINATION (this campaign)
- * -----------------------------------------
- * `role` and `sort_order` exist so a carousel can be expressed later without a
- * migration, but the unique index below allows exactly one `primary` row per
- * destination. Carousel is explicitly out of scope: the publication contract
- * persists a single `media_asset_id` and no declared capability accepts
- * multi-media, so admitting a second row today would let the Planner record an
- * intent no adapter can execute.
+ * ORDERED MEDIA PER DESTINATION
+ * -----------------------------
+ * A single creative uses `primary`; a carousel uses ordered `slide` rows. The
+ * partial unique index still protects the legacy primary slot while allowing
+ * up to ten slides through the collection contract.
  */
 @Entity('social_destination_creatives')
 @Index('IDX_social_destination_creatives_scope', [
@@ -94,8 +91,8 @@ export class SocialDestinationCreativeEntity {
   organicAssetId!: string;
 
   /**
-   * Open vocabulary: `primary` today, `cover`/`slide` reserved for a future
-   * multi-media contract. A varchar rather than an enum so adding a role never
+   * Open vocabulary: `primary` and `slide` today, with `cover` available for
+   * future formats. A varchar rather than an enum so adding a role never
    * requires a migration (same reasoning as `MediaAsset.source`).
    */
   @Column({ type: 'varchar', length: 40, default: 'primary' })

@@ -16,6 +16,7 @@ import type {
 } from '../providers/social-publisher.adapter';
 import type { SocialPublisherRegistry } from '../providers/social-publisher.registry';
 import { SocialPublicationEntity } from './entities/social-publication.entity';
+import { SocialPublicationMediaEntity } from './entities/social-publication-media.entity';
 import {
   SocialPublicationService,
   type SocialPublicationScope,
@@ -27,6 +28,7 @@ type RepositoryMock = {
   create: jest.Mock;
   save: jest.Mock;
   update: jest.Mock;
+  manager: { transaction: jest.Mock };
 };
 
 function createRepositoryMock(): RepositoryMock {
@@ -36,6 +38,7 @@ function createRepositoryMock(): RepositoryMock {
     create: jest.fn((value) => value),
     save: jest.fn((value) => Promise.resolve(value)),
     update: jest.fn(() => Promise.resolve({ affected: 1 })),
+    manager: { transaction: jest.fn() },
   };
 }
 
@@ -98,6 +101,7 @@ describe('SocialPublicationService', () => {
   let service: SocialPublicationService;
 
   let publicationsRepository: RepositoryMock;
+  let publicationMediaRepository: RepositoryMock;
   let contentRepository: RepositoryMock;
   let destinationsRepository: RepositoryMock;
   let assetsRepository: RepositoryMock;
@@ -152,6 +156,11 @@ describe('SocialPublicationService', () => {
 
   beforeEach(() => {
     publicationsRepository = createRepositoryMock();
+    publicationMediaRepository = createRepositoryMock();
+    publicationsRepository.save.mockImplementation((value: object) => Promise.resolve({ id: '99999999-9999-4999-8999-999999999999', ...value }));
+    publicationsRepository.manager.transaction.mockImplementation((callback: (manager: { getRepository: (entity: unknown) => RepositoryMock }) => unknown) => callback({
+      getRepository: (entity: unknown) => entity === SocialPublicationEntity ? publicationsRepository : publicationMediaRepository,
+    }));
     contentRepository = createRepositoryMock();
     destinationsRepository = createRepositoryMock();
     assetsRepository = createRepositoryMock();
@@ -207,6 +216,7 @@ describe('SocialPublicationService', () => {
             hashtags: ['#lyra'],
             firstComment: null,
             mediaAssetId: null,
+            mediaAssetIds: [],
           },
           createdById: actorUserId,
         }),
@@ -243,6 +253,30 @@ describe('SocialPublicationService', () => {
         }),
       );
       expect(result.mediaAssetId).toBe(mediaAssetId);
+    });
+
+    it('persists ordered media evidence for a carousel publication', async () => {
+      const secondMediaAssetId = 'abababab-abab-4bab-8bab-abababababab';
+      await service.create(agencyScope, actorUserId, {
+        contentItemId,
+        destinationId,
+        assetId,
+        mediaAssetIds: [mediaAssetId, secondMediaAssetId],
+      });
+
+      expect(mediaAssetResolver.resolve).toHaveBeenCalledTimes(2);
+      expect(publicationsRepository.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          mediaAssetId,
+          payloadSnapshot: expect.objectContaining({
+            mediaAssetIds: [mediaAssetId, secondMediaAssetId],
+          }),
+        }),
+      );
+      expect(publicationMediaRepository.save).toHaveBeenCalledWith([
+        expect.objectContaining({ mediaAssetId, role: 'slide', sortOrder: 0 }),
+        expect.objectContaining({ mediaAssetId: secondMediaAssetId, role: 'slide', sortOrder: 1 }),
+      ]);
     });
 
     it('never generates a presigned URL and never calls prepareMedia/publish at schedule time', async () => {

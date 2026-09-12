@@ -63,12 +63,18 @@ export class FacebookPublisherAdapter implements SocialPublisherAdapter {
     if (input.hashtags.length > 0) {
       issues.push({ field: 'hashtags', reason: 'unsupported_hashtags' });
     }
-    if (input.placement === 'feed' && !input.caption && !input.mediaAssetId) {
+    if (input.mediaAssetIds.length > 10) {
+      issues.push({ field: 'mediaAssetIds', reason: 'too_many_media_assets' });
+    }
+    if (input.mediaAssetIds.length > 1 && input.placement !== 'feed') {
+      issues.push({ field: 'mediaAssetIds', reason: 'carousel_feed_only' });
+    }
+    if (input.placement === 'feed' && !input.caption && !input.mediaAssetIds.length) {
       issues.push({ field: 'caption', reason: 'content_required' });
     }
     if (
       (input.placement === 'story' || input.placement === 'reel') &&
-      !input.mediaAssetId
+      !input.mediaAssetIds.length
     ) {
       issues.push({ field: 'mediaAssetId', reason: 'media_required' });
     }
@@ -140,39 +146,39 @@ export class FacebookPublisherAdapter implements SocialPublisherAdapter {
         };
       }
 
-      const media = input.preparedMedia
-        ? decodeMetaPreparedMediaRef(input.preparedMedia.providerMediaRef)
-        : null;
+      const decodedMedia = input.preparedMedia.map((entry) => decodeMetaPreparedMediaRef(entry.providerMediaRef));
+      if (decodedMedia.some((entry) => entry === null)) return this.invalidPreparedMedia();
+      const media = decodedMedia.filter((entry): entry is NonNullable<typeof entry> => entry !== null);
       const pageId = input.credential.externalAssetId;
       const pageAccessToken = input.credential.accessToken;
       let published: { id: string };
 
       switch (input.payload.placement) {
         case 'feed':
-          if (input.preparedMedia && media?.kind !== 'facebook_photo') {
+          if (media.some((entry) => entry.kind !== 'facebook_photo')) {
             return this.invalidPreparedMedia();
           }
           published = await this.graph.publishFacebookFeed({
             pageId,
             pageAccessToken,
             message: input.payload.caption,
-            photoId: media?.id,
+            photoIds: media.map((entry) => entry.id),
           });
           break;
 
         case 'story':
-          if (media?.kind === 'facebook_photo') {
+          if (media[0]?.kind === 'facebook_photo') {
             published = await this.graph.publishFacebookPhotoStory({
               pageId,
               pageAccessToken,
-              photoId: media.id,
+              photoId: media[0].id,
             });
-          } else if (media?.kind === 'facebook_story_video') {
+          } else if (media[0]?.kind === 'facebook_story_video') {
             published = await this.graph.finishFacebookVideoUpload({
               pageId,
               pageAccessToken,
               edge: 'video_stories',
-              videoId: media.id,
+              videoId: media[0].id,
             });
             return this.processingVideo(published.id);
           } else {
@@ -181,14 +187,14 @@ export class FacebookPublisherAdapter implements SocialPublisherAdapter {
           break;
 
         case 'reel':
-          if (media?.kind !== 'facebook_reel') {
+          if (media[0]?.kind !== 'facebook_reel') {
             return this.invalidPreparedMedia();
           }
           published = await this.graph.finishFacebookVideoUpload({
             pageId,
             pageAccessToken,
             edge: 'video_reels',
-            videoId: media.id,
+            videoId: media[0].id,
             description: input.payload.caption,
           });
           return this.processingVideo(published.id);

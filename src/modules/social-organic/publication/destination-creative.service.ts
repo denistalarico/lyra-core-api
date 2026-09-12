@@ -16,7 +16,10 @@ import {
 import { SocialOrganicAssetEntity } from '../entities/social-organic-asset.entity';
 import { checkMediaAssetCapability } from '../media/media-capability-check';
 import { SocialPublisherRegistry } from '../providers/social-publisher.registry';
-import type { ReplaceDestinationCreativeDto } from './dto/replace-destination-creative.dto';
+import type {
+  ReplaceDestinationCreativeDto,
+  ReplaceDestinationCreativesDto,
+} from './dto/replace-destination-creative.dto';
 
 export interface DestinationCreativeScope {
   tenantId: string;
@@ -24,7 +27,7 @@ export interface DestinationCreativeScope {
   agencyClientId: string | null;
 }
 
-/** The only role this campaign's publication contract can actually execute. */
+/** The singular compatibility endpoint continues to address the primary slot. */
 const PRIMARY_ROLE = 'primary';
 
 /**
@@ -208,6 +211,75 @@ export class DestinationCreativeService {
     );
 
     return toSocialDestinationCreativeView(saved, mediaAsset);
+  }
+
+  /**
+   * Atomically replaces an ordered creative collection. A single item remains
+   * the legacy `primary`; two or more items become carousel `slide`s.
+   */
+  async replaceCollectionForDestination(
+    scope: DestinationCreativeScope,
+    destinationId: string,
+    actorUserId: string | null,
+    dto: ReplaceDestinationCreativesDto,
+  ): Promise<{ items: SocialDestinationCreativeView[]; total: number }> {
+    const destination = await this.requireDestination(scope, destinationId);
+    const organicAsset = await this.requirePublishableAsset(
+      scope,
+      dto.organicAssetId,
+    );
+    const mediaAssets = await Promise.all(
+      dto.items.map((item) => this.requireMediaAsset(scope, item.mediaAssetId)),
+    );
+
+    for (const mediaAsset of mediaAssets) {
+      this.assertCapabilityOrThrow({
+        mediaAsset,
+        organicAsset,
+        placement: destination.placement,
+      });
+    }
+
+    const saved = await this.creativesRepository.manager.transaction(
+      async (manager) => {
+        const repository = manager.getRepository(
+          SocialDestinationCreativeEntity,
+        );
+        await repository.delete({
+          ...this.creativeScopeWhere(scope),
+          destinationId: destination.id,
+        });
+        const role = mediaAssets.length === 1 ? PRIMARY_ROLE : 'slide';
+        return repository.save(
+          mediaAssets.map((mediaAsset, index) =>
+            repository.create({
+              tenantId: scope.tenantId,
+              workspaceId: scope.workspaceId,
+              agencyClientId: scope.agencyClientId,
+              destinationId: destination.id,
+              contentItemId: destination.contentItemId,
+              mediaAssetId: mediaAsset.id,
+              organicAssetId: organicAsset.id,
+              role,
+              sortOrder: index,
+              source: dto.items[index]?.source ?? 'manual',
+              createdById: actorUserId,
+            }),
+          ),
+        );
+      },
+    );
+
+    const mediaById = new Map(mediaAssets.map((asset) => [asset.id, asset]));
+    return {
+      items: saved.map((creative) =>
+        toSocialDestinationCreativeView(
+          creative,
+          mediaById.get(creative.mediaAssetId) ?? null,
+        ),
+      ),
+      total: saved.length,
+    };
   }
 
   /** Clears a destination's creative. Never touches publication evidence. */

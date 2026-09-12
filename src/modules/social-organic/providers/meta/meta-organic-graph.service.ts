@@ -306,14 +306,14 @@ export class MetaOrganicGraphService {
     pageAccessToken: string;
     message: string | null;
     photoId?: string;
+    photoIds?: readonly string[];
   }): Promise<MetaOrganicPublishedObject> {
     const fields: Record<string, string> = {};
     if (input.message) fields.message = input.message;
-    if (input.photoId) {
-      fields['attached_media[0]'] = JSON.stringify({
-        media_fbid: input.photoId,
-      });
-    }
+    const photoIds = input.photoIds?.length ? input.photoIds : input.photoId ? [input.photoId] : [];
+    photoIds.forEach((photoId, index) => {
+      fields[`attached_media[${index}]`] = JSON.stringify({ media_fbid: photoId });
+    });
 
     return this.readPublishedObject(
       await this.requestForm(
@@ -461,11 +461,13 @@ export class MetaOrganicGraphService {
     mediaKind: 'image' | 'video';
     placement: 'feed' | 'reel' | 'story';
     caption: string | null;
+    carouselItem?: boolean;
   }): Promise<MetaOrganicPublishedObject> {
     const fields: Record<string, string> = {};
     fields[input.mediaKind === 'video' ? 'video_url' : 'image_url'] =
       input.sourceUrl;
     if (input.caption) fields.caption = input.caption;
+    if (input.carouselItem) fields.is_carousel_item = 'true';
     if (input.placement === 'reel') {
       fields.media_type = 'REELS';
       fields.share_to_feed = 'true';
@@ -480,6 +482,24 @@ export class MetaOrganicGraphService {
         fields,
       ),
     );
+  }
+
+  async createInstagramCarouselContainer(input: {
+    accountId: string;
+    pageAccessToken: string;
+    childContainerIds: readonly string[];
+    caption: string | null;
+  }): Promise<MetaOrganicPublishedObject> {
+    const fields: Record<string, string> = {
+      media_type: 'CAROUSEL',
+      children: input.childContainerIds.join(','),
+    };
+    if (input.caption) fields.caption = input.caption;
+    return this.readPublishedObject(await this.requestForm(
+      this.graphUrl(`${encodeURIComponent(input.accountId)}/media`),
+      input.pageAccessToken,
+      fields,
+    ));
   }
 
   async getInstagramContainerStatus(input: {

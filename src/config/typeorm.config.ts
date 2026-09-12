@@ -341,6 +341,7 @@ import {
   SocialOrganicWebhookEventEntity,
 } from '../modules/social-organic/webhooks/entities';
 import { SocialPublicationEntity } from '../modules/social-organic/publication/entities/social-publication.entity';
+import { SocialPublicationMediaEntity } from '../modules/social-organic/publication/entities/social-publication-media.entity';
 import {
   BrandKitAssetEntity,
   BrandKitEntity,
@@ -378,6 +379,7 @@ export const agencyEntities = [
   SocialOrganicWebhookEventEntity,
   SocialOrganicInteractionEntity,
   SocialPublicationEntity,
+  SocialPublicationMediaEntity,
   PlatformInternalAdminEntity,
   PlatformAdminAuditEventEntity,
   PlatformAdminIdentityEntity,

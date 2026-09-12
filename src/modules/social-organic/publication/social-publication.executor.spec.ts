@@ -159,7 +159,7 @@ describe('SocialPublicationExecutorService', () => {
       expect(adapter.prepareMedia).not.toHaveBeenCalled();
       expect(adapter.publish).toHaveBeenCalledWith(
         expect.objectContaining({
-          preparedMedia: null,
+          preparedMedia: [],
           idempotencyKey: 'idem-1',
         }),
       );
@@ -297,7 +297,7 @@ describe('SocialPublicationExecutorService', () => {
 
       expect(adapter.publish).toHaveBeenCalledWith(
         expect.objectContaining({
-          preparedMedia: { providerMediaRef: 'ref-1', expiresAt: null },
+          preparedMedia: [{ providerMediaRef: 'ref-1', expiresAt: null }],
         }),
       );
     });

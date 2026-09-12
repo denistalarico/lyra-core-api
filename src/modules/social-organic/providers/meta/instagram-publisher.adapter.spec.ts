@@ -13,6 +13,9 @@ function graphMock() {
     publishInstagramContainer: jest.fn(() =>
       Promise.resolve({ id: 'media-1' }),
     ),
+    createInstagramCarouselContainer: jest.fn(() =>
+      Promise.resolve({ id: 'carousel-container-1' }),
+    ),
   };
 }
 
@@ -33,7 +36,7 @@ const CREDENTIAL = createResolvedOrganicCredential({
 function payload(
   overrides: Partial<PublicationPayload> = {},
 ): PublicationPayload {
-  return {
+  const result = {
     assetType: 'instagram_professional',
     placement: 'feed',
     caption: 'Hello Instagram',
@@ -41,9 +44,11 @@ function payload(
     hashtags: [],
     cta: null,
     mediaAssetId: 'media-asset-1',
+    mediaAssetIds: ['media-asset-1'],
     scheduledAt: new Date('2026-09-07T12:00:00Z'),
     ...overrides,
   };
+  return { ...result, mediaAssetIds: overrides.mediaAssetIds ?? (result.mediaAssetId ? [result.mediaAssetId] : []) };
 }
 
 function adapterWithMock() {
@@ -83,6 +88,8 @@ describe('InstagramPublisherAdapter', () => {
         sourceUrl: 'https://signed.test/media',
         mimeType,
         bytes: 100,
+        mediaIndex: 0,
+        mediaCount: 1,
       });
 
       expect(graph.createInstagramContainer).toHaveBeenCalledWith(
@@ -100,10 +107,10 @@ describe('InstagramPublisherAdapter', () => {
       adapter.publish({
         credential: CREDENTIAL,
         payload: payload(),
-        preparedMedia: {
+        preparedMedia: [{
           providerMediaRef: '{"kind":"instagram_container","id":"container-1"}',
           expiresAt: null,
-        },
+        }],
         idempotencyKey: 'idem-1',
       }),
     ).resolves.toEqual({
@@ -169,18 +176,36 @@ describe('InstagramPublisherAdapter', () => {
     },
   );
 
-  it('rejects carousel before any container is created because Publication has only one mediaAssetId', () => {
+  it('creates child containers and a parent container for an ordered carousel', async () => {
     const { adapter, graph } = adapterWithMock();
-
-    expect(adapter.validate(payload({ placement: 'carousel' }))).toEqual({
-      valid: false,
-      issues: [
-        {
-          field: 'mediaAssetId',
-          reason: 'multiple_media_assets_required',
-        },
-      ],
+    graph.createInstagramContainer
+      .mockResolvedValueOnce({ id: 'child-1' })
+      .mockResolvedValueOnce({ id: 'child-2' });
+    const carouselPayload = payload({
+      mediaAssetId: 'media-asset-1',
+      mediaAssetIds: ['media-asset-1', 'media-asset-2'],
     });
-    expect(graph.createInstagramContainer).not.toHaveBeenCalled();
+    expect(adapter.validate(carouselPayload)).toEqual({ valid: true });
+    const prepared = await Promise.all([0, 1].map((mediaIndex) => adapter.prepareMedia({
+      credential: CREDENTIAL,
+      payload: carouselPayload,
+      sourceUrl: `https://signed.test/media-${mediaIndex}.jpg`,
+      mimeType: 'image/jpeg',
+      bytes: 100,
+      mediaIndex,
+      mediaCount: 2,
+    })));
+
+    await adapter.publish({
+      credential: CREDENTIAL,
+      payload: carouselPayload,
+      preparedMedia: prepared,
+      idempotencyKey: 'carousel-1',
+    });
+
+    expect(graph.createInstagramContainer).toHaveBeenCalledTimes(2);
+    expect(graph.createInstagramCarouselContainer).toHaveBeenCalledWith(
+      expect.objectContaining({ childContainerIds: ['child-1', 'child-2'] }),
+    );
   });
 });

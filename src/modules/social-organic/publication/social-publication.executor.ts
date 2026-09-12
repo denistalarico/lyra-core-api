@@ -30,6 +30,7 @@ type PayloadSnapshotShape = {
   readonly cta?: unknown;
   readonly hashtags?: unknown;
   readonly firstComment?: unknown;
+  readonly mediaAssetIds?: unknown;
 };
 
 /**
@@ -111,16 +112,19 @@ export class SocialPublicationExecutorService implements SocialPublicationExecut
 
     const credential = await this.resolveCredential(publication);
 
-    const preparedMedia =
-      payload.mediaAssetId === null
-        ? null
-        : await this.prepareMedia({
-            mediaAssetId: payload.mediaAssetId,
-            publication,
-            payload,
-            credential,
-            adapter,
-          });
+    const preparedMedia = await Promise.all(
+      payload.mediaAssetIds.map((mediaAssetId, mediaIndex) =>
+        this.prepareMedia({
+          mediaAssetId,
+          mediaIndex,
+          mediaCount: payload.mediaAssetIds.length,
+          publication,
+          payload,
+          credential,
+          adapter,
+        }),
+      ),
+    );
 
     const executionInput: PublicationExecutionInput = {
       credential,
@@ -211,6 +215,8 @@ export class SocialPublicationExecutorService implements SocialPublicationExecut
 
   private async prepareMedia(input: {
     mediaAssetId: string;
+    mediaIndex: number;
+    mediaCount: number;
     publication: SocialPublicationEntity;
     payload: PublicationPayload;
     credential: Awaited<ReturnType<SocialOrganicCredentialResolver['resolve']>>;
@@ -254,6 +260,8 @@ export class SocialPublicationExecutorService implements SocialPublicationExecut
       return await adapter.prepareMedia({
         credential,
         payload,
+        mediaIndex: input.mediaIndex,
+        mediaCount: input.mediaCount,
         ...prepared,
       });
     } catch (error) {
@@ -270,6 +278,14 @@ export class SocialPublicationExecutorService implements SocialPublicationExecut
   ): PublicationPayload {
     const snapshot = publication.payloadSnapshot as PayloadSnapshotShape;
 
+    const snapshotMediaIds = Array.isArray(snapshot.mediaAssetIds)
+      ? snapshot.mediaAssetIds.filter((entry): entry is string => typeof entry === 'string')
+      : [];
+    const mediaAssetIds = snapshotMediaIds.length
+      ? snapshotMediaIds
+      : publication.mediaAssetId
+        ? [publication.mediaAssetId]
+        : [];
     return {
       assetType,
       placement:
@@ -286,6 +302,7 @@ export class SocialPublicationExecutorService implements SocialPublicationExecut
         : [],
       cta: typeof snapshot.cta === 'string' ? snapshot.cta : null,
       mediaAssetId: publication.mediaAssetId,
+      mediaAssetIds,
       scheduledAt: publication.scheduledAt,
     };
   }

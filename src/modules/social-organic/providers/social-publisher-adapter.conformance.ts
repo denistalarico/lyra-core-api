@@ -101,7 +101,7 @@ export function describeSocialPublisherAdapterConformance(
       const input: PublicationExecutionInput = {
         credential: fixtures.credential,
         payload: fixtures.payload,
-        preparedMedia: null,
+        preparedMedia: [],
         idempotencyKey: 'conformance-idempotency-key',
       };
 

@@ -16,6 +16,7 @@ import { SocialPublisherRegistry } from '../providers/social-publisher.registry'
 import type { CreateSocialPublicationDto } from './dto/create-social-publication.dto';
 import type { ListSocialPublicationsQueryDto } from './dto/list-social-publications.query.dto';
 import { SocialPublicationEntity } from './entities/social-publication.entity';
+import { SocialPublicationMediaEntity } from './entities/social-publication-media.entity';
 import { canTransition } from './social-publication.state';
 
 export interface SocialPublicationScope {
@@ -87,16 +88,30 @@ export class SocialPublicationService {
       contentItem.id,
     );
     const asset = await this.requirePublishableAsset(scope, dto.assetId);
-    const mediaAssetId = dto.mediaAssetId ?? null;
+    if (dto.mediaAssetId && dto.mediaAssetIds?.length) {
+      throw new BadRequestException('Choose mediaAssetId or mediaAssetIds, not both.');
+    }
+    const mediaAssetIds = dto.mediaAssetIds?.length
+      ? [...new Set(dto.mediaAssetIds)]
+      : dto.mediaAssetId
+        ? [dto.mediaAssetId]
+        : [];
+    if (mediaAssetIds.length > 10) {
+      throw new BadRequestException('A publication supports at most 10 media assets.');
+    }
+    if (mediaAssetIds.length !== (dto.mediaAssetIds?.length ?? mediaAssetIds.length)) {
+      throw new BadRequestException('Duplicate media assets are not supported.');
+    }
+    const mediaAssetId = mediaAssetIds[0] ?? null;
 
-    if (mediaAssetId) {
+    for (const candidateMediaAssetId of mediaAssetIds) {
       // Schedule-time (P3.1): resolves scope and validates the asset against
       // the destination provider's declared capabilities *before* persisting
       // anything. The storage location itself never enters payload_snapshot
       // or any other persisted column — only the validated reference does.
       await this.validateMediaAssetOrThrow({
         scope,
-        mediaAssetId,
+        mediaAssetId: candidateMediaAssetId,
         provider: asset.provider,
         assetType: asset.assetType,
         placement: destination.placement,
@@ -109,7 +124,7 @@ export class SocialPublicationService {
     const payloadSnapshot = this.buildPayloadSnapshot(
       contentItem,
       destination,
-      mediaAssetId,
+      mediaAssetIds,
     );
     const payloadHash = this.hashPayload(payloadSnapshot);
     const idempotencyKey = randomUUID();
@@ -146,7 +161,7 @@ export class SocialPublicationService {
       cancelledAt: null,
     });
 
-    return this.publicationsRepository.save(publication);
+    return this.saveWithMedia(publication, mediaAssetIds);
   }
 
   /**
@@ -297,18 +312,24 @@ export class SocialPublicationService {
       );
     }
 
-    if (original.mediaAssetId) {
+    const originalMediaAssetIds = this.extractMediaAssetIds(
+      original.payloadSnapshot,
+      original.mediaAssetId,
+    );
+    if (originalMediaAssetIds.length) {
       // A new attempt row re-validates media at schedule time too (P3.1):
       // the asset or the provider's declared capabilities may have changed
       // since the original attempt was created or since it failed.
       const asset = await this.requirePublishableAsset(scope, original.assetId);
-      await this.validateMediaAssetOrThrow({
-        scope,
-        mediaAssetId: original.mediaAssetId,
-        provider: asset.provider,
-        assetType: asset.assetType,
-        placement: this.extractPlacement(original.payloadSnapshot),
-      });
+      for (const mediaAssetId of originalMediaAssetIds) {
+        await this.validateMediaAssetOrThrow({
+          scope,
+          mediaAssetId,
+          provider: asset.provider,
+          assetType: asset.assetType,
+          placement: this.extractPlacement(original.payloadSnapshot),
+        });
+      }
     }
 
     const scheduledAt = new Date();
@@ -344,7 +365,7 @@ export class SocialPublicationService {
       cancelledAt: null,
     });
 
-    return this.publicationsRepository.save(retryPublication);
+    return this.saveWithMedia(retryPublication, originalMediaAssetIds);
   }
 
   /**
@@ -404,10 +425,37 @@ export class SocialPublicationService {
     return typeof snapshot?.placement === 'string' ? snapshot.placement : '';
   }
 
+  private extractMediaAssetIds(snapshotValue: unknown, fallback: string | null): string[] {
+    const snapshot = snapshotValue as { mediaAssetIds?: unknown } | null;
+    const ids = Array.isArray(snapshot?.mediaAssetIds)
+      ? snapshot.mediaAssetIds.filter((value): value is string => typeof value === 'string')
+      : [];
+    return ids.length ? ids : fallback ? [fallback] : [];
+  }
+
+  private saveWithMedia(
+    publication: SocialPublicationEntity,
+    mediaAssetIds: string[],
+  ): Promise<SocialPublicationEntity> {
+    return this.publicationsRepository.manager.transaction(async (manager) => {
+      const saved = await manager.getRepository(SocialPublicationEntity).save(publication);
+      if (mediaAssetIds.length) {
+        const mediaRepository = manager.getRepository(SocialPublicationMediaEntity);
+        await mediaRepository.save(mediaAssetIds.map((mediaAssetId, index) => mediaRepository.create({
+          publicationId: saved.id,
+          mediaAssetId,
+          role: mediaAssetIds.length > 1 ? 'slide' : 'primary',
+          sortOrder: index,
+        })));
+      }
+      return saved;
+    });
+  }
+
   private buildPayloadSnapshot(
     contentItem: SocialContentItemEntity,
     destination: SocialContentDestinationEntity,
-    mediaAssetId: string | null,
+    mediaAssetIds: string[],
   ): Record<string, unknown> {
     return {
       placement: destination.placement,
@@ -417,7 +465,8 @@ export class SocialPublicationService {
       hashtags: contentItem.hashtags,
       firstComment: contentItem.firstComment,
       // Reference only — never storagePath or a presigned URL (§7 rule 2).
-      mediaAssetId,
+      mediaAssetId: mediaAssetIds[0] ?? null,
+      mediaAssetIds,
     };
   }
 

@@ -43,10 +43,8 @@ import type { PublisherCapabilities } from '../provider-capabilities';
  *     Resumable Upload API reference page, which was not retrieved. Rather
  *     than reuse Reels' or Stories' numbers for a different endpoint family,
  *     feed stays image-only until that page is fetched.
- *   - Carousel: no `attached_media`-style parameter found on the fetched
- *     `/feed` edge reference — concluded unsupported by absence, not an
- *     explicit statement. Blueprint §17.1 flags this as needing one more
- *     targeted check before being relied on.
+ *   - Multi-photo feed posts reuse the feed placement and its image rules;
+ *     `maxItemsPerPost` bounds the ordered `attached_media` collection.
  */
 const FACEBOOK_PAGE_PLACEMENTS = ['feed', 'story', 'reel'] as const;
 
@@ -74,6 +72,7 @@ export const META_FACEBOOK_PAGE_CAPABILITIES: PublisherCapabilities = {
         'image/tiff',
       ],
       maxBytes: 4 * 1024 * 1024,
+      maxItemsPerPost: 10,
     },
     /**
      * `POST /{page-id}/photo_stories` / `video_stories`, scope
@@ -152,11 +151,9 @@ export const META_FACEBOOK_PAGE_CAPABILITIES: PublisherCapabilities = {
  *     folds "video in feed" into Reels. `feed` here stays image-only to
  *     match that, consistent with blueprint §17.2's "Video / Reels" row
  *     being one combined entry, not two.
- *   - Carousel as a whole: Meta supports it, but Lyra's current publication
- *     contract persists one `mediaAssetId`. Advertising carousel support here
- *     would let schedule-time validation pass a payload the adapter cannot
- *     represent. MA3 therefore keeps it undeclared until a dedicated
- *     multi-media schema/contract task lands.
+ *   - Carousel reuses the feed placement and its image rules. The publication
+ *     contract carries an ordered media collection and the adapter creates
+ *     child containers plus the parent CAROUSEL container.
  */
 const INSTAGRAM_PROFESSIONAL_PLACEMENTS = ['feed', 'story', 'reel'] as const;
 
@@ -179,6 +176,7 @@ export const META_INSTAGRAM_PROFESSIONAL_CAPABILITIES: PublisherCapabilities = {
     feed: {
       acceptedMimeTypes: ['image/jpeg'],
       maxBytes: 8 * 1024 * 1024,
+      maxItemsPerPost: 10,
       aspectRatios: ['4:5', '1:1', '1.91:1'],
     },
     /**

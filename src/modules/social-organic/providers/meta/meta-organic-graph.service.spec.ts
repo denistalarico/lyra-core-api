@@ -247,6 +247,24 @@ describe('MetaOrganicGraphService', () => {
     );
   });
 
+  it('serializes every ordered photo as attached_media for a Page carousel', async () => {
+    let body: URLSearchParams | null = null;
+    global.fetch = jest.fn(async (_url: URL, init: RequestInit) => {
+      body = init.body as URLSearchParams;
+      return response({ id: 'page-1_post-1' });
+    }) as never;
+
+    await service.publishFacebookFeed({
+      pageId: 'page-1',
+      pageAccessToken: 'page-token',
+      message: 'Carousel',
+      photoIds: ['photo-1', 'photo-2'],
+    });
+
+    expect(body!.get('attached_media[0]')).toBe(JSON.stringify({ media_fbid: 'photo-1' }));
+    expect(body!.get('attached_media[1]')).toBe(JSON.stringify({ media_fbid: 'photo-2' }));
+  });
+
   it('refuses a provider-supplied video upload URL outside rupload.facebook.com', async () => {
     global.fetch = jest.fn(async () =>
       response({
@@ -340,6 +358,25 @@ describe('MetaOrganicGraphService', () => {
     expect(
       calls.every(({ url }) => !url.searchParams.has('access_token')),
     ).toBe(true);
+  });
+
+  it('creates an Instagram parent carousel from ordered child containers', async () => {
+    let body: URLSearchParams | null = null;
+    global.fetch = jest.fn(async (_url: URL, init: RequestInit) => {
+      body = init.body as URLSearchParams;
+      return response({ id: 'parent-1' });
+    }) as never;
+
+    await service.createInstagramCarouselContainer({
+      accountId: 'ig-1',
+      pageAccessToken: 'page-token',
+      childContainerIds: ['child-1', 'child-2'],
+      caption: 'Caption',
+    });
+
+    expect(body!.get('media_type')).toBe('CAROUSEL');
+    expect(body!.get('children')).toBe('child-1,child-2');
+    expect(body!.get('caption')).toBe('Caption');
   });
 
   it('reads v26 organic insights with bounded documented parameters and header auth', async () => {

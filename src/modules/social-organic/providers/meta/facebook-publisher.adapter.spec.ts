@@ -44,7 +44,7 @@ const CREDENTIAL = createResolvedOrganicCredential({
 function payload(
   overrides: Partial<PublicationPayload> = {},
 ): PublicationPayload {
-  return {
+  const result = {
     assetType: 'facebook_page',
     placement: 'feed',
     caption: 'Hello Page',
@@ -52,9 +52,11 @@ function payload(
     hashtags: [],
     cta: null,
     mediaAssetId: null,
+    mediaAssetIds: [],
     scheduledAt: new Date('2026-09-07T12:00:00Z'),
     ...overrides,
   };
+  return { ...result, mediaAssetIds: overrides.mediaAssetIds ?? (result.mediaAssetId ? [result.mediaAssetId] : []) };
 }
 
 function adapterWithMock() {
@@ -82,7 +84,7 @@ describe('FacebookPublisherAdapter', () => {
       adapter.publish({
         credential: CREDENTIAL,
         payload: payload(),
-        preparedMedia: null,
+        preparedMedia: [],
         idempotencyKey: 'idem-1',
       }),
     ).resolves.toMatchObject({
@@ -93,7 +95,7 @@ describe('FacebookPublisherAdapter', () => {
       pageId: 'page-1',
       pageAccessToken: 'page-token',
       message: 'Hello Page',
-      photoId: undefined,
+      photoIds: [],
     });
   });
 
@@ -106,21 +108,43 @@ describe('FacebookPublisherAdapter', () => {
       sourceUrl: 'https://signed.test/image.jpg',
       mimeType: 'image/jpeg',
       bytes: 100,
+      mediaIndex: 0,
+      mediaCount: 1,
     });
 
     const result = await adapter.publish({
       credential: CREDENTIAL,
       payload: imagePayload,
-      preparedMedia: prepared,
+      preparedMedia: [prepared],
       idempotencyKey: 'idem-2',
     });
 
     expect(graph.uploadFacebookPhoto).toHaveBeenCalledTimes(1);
     expect(graph.publishFacebookFeed).toHaveBeenCalledWith(
-      expect.objectContaining({ photoId: 'photo-1' }),
+      expect.objectContaining({ photoIds: ['photo-1'] }),
     );
     expect(result.outcome).toBe('published');
     expect(prepared.providerMediaRef).not.toContain('signed.test');
+  });
+
+  it('publishes an ordered multi-photo Page feed post', async () => {
+    const { adapter, graph } = adapterWithMock();
+    await adapter.publish({
+      credential: CREDENTIAL,
+      payload: payload({
+        mediaAssetId: 'media-1',
+        mediaAssetIds: ['media-1', 'media-2'],
+      }),
+      preparedMedia: [
+        { providerMediaRef: '{"kind":"facebook_photo","id":"photo-1"}', expiresAt: null },
+        { providerMediaRef: '{"kind":"facebook_photo","id":"photo-2"}', expiresAt: null },
+      ],
+      idempotencyKey: 'carousel-1',
+    });
+
+    expect(graph.publishFacebookFeed).toHaveBeenCalledWith(
+      expect.objectContaining({ photoIds: ['photo-1', 'photo-2'] }),
+    );
   });
 
   it.each([
@@ -141,13 +165,15 @@ describe('FacebookPublisherAdapter', () => {
         sourceUrl: 'https://signed.test/video.mp4',
         mimeType: 'video/mp4',
         bytes: 1_000,
+        mediaIndex: 0,
+        mediaCount: 1,
       });
 
       await expect(
         adapter.publish({
           credential: CREDENTIAL,
           payload: videoPayload,
-          preparedMedia: prepared,
+          preparedMedia: [prepared],
           idempotencyKey: `idem-${placement}`,
         }),
       ).resolves.toMatchObject({
@@ -205,7 +231,7 @@ describe('FacebookPublisherAdapter', () => {
       adapter.publish({
         credential: CREDENTIAL,
         payload: payload(),
-        preparedMedia: null,
+        preparedMedia: [],
         idempotencyKey: 'idem-lost',
       }),
     ).resolves.toEqual({

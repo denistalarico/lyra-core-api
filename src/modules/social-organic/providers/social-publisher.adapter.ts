@@ -11,6 +11,7 @@ export type PublicationPayload = {
   readonly hashtags: readonly string[];
   readonly cta: string | null;
   readonly mediaAssetId: string | null;
+  readonly mediaAssetIds: readonly string[];
   /** Lyra-owned desired publish time; never a provider-side schedule (ADR-015). */
   readonly scheduledAt: Date;
 };
@@ -42,6 +43,8 @@ export type MediaPreparationInput = {
   readonly sourceUrl: string;
   readonly mimeType: string;
   readonly bytes: number;
+  readonly mediaIndex: number;
+  readonly mediaCount: number;
 };
 
 /** What the provider needs at `publish()` time to attach the already-prepared media. */
@@ -53,7 +56,7 @@ export type PreparedMedia = {
 export type PublicationExecutionInput = {
   readonly credential: ResolvedOrganicCredential;
   readonly payload: PublicationPayload;
-  readonly preparedMedia: PreparedMedia | null;
+  readonly preparedMedia: readonly PreparedMedia[];
   /** Caller-owned key; adapters MUST make `publish` idempotent w.r.t. this value. */
   readonly idempotencyKey: string;
 };

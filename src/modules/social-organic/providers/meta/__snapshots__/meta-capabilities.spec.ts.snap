@@ -13,6 +13,7 @@ exports[`Meta capability declaration (MA2.1 — per placement) matches the commi
         "image/tiff",
       ],
       "maxBytes": 4194304,
+      "maxItemsPerPost": 10,
     },
     "reel": {
       "acceptedMimeTypes": [
@@ -67,6 +68,7 @@ exports[`Meta capability declaration (MA2.1 — per placement) matches the commi
         "1.91:1",
       ],
       "maxBytes": 8388608,
+      "maxItemsPerPost": 10,
     },
     "reel": {
       "acceptedMimeTypes": [

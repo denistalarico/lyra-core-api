@@ -378,6 +378,46 @@ describe('DestinationCreativeService', () => {
     });
   });
 
+  describe('replaceCollectionForDestination', () => {
+    it('stores up to ten creatives as an ordered slide collection in one transaction', async () => {
+      const secondMediaId = 'ffffffff-ffff-4fff-8fff-ffffffffffff';
+      destinationsRepository.findOne.mockResolvedValue(buildDestination());
+      organicAssetsRepository.findOne.mockResolvedValue(buildOrganicAsset());
+      mediaAssetsRepository.findOne.mockImplementation(({ where }: { where: { id: string } }) =>
+        Promise.resolve(buildSquareJpeg({ id: where.id })),
+      );
+      creativesRepository.save.mockImplementation((values: unknown[]) =>
+        Promise.resolve(values.map((value, index) => ({
+          id: `eeeeeeee-eeee-4eee-8eee-eeeeeeeeeee${index}`,
+          ...(value as object),
+          createdAt: new Date('2026-09-10T12:00:00Z'),
+          updatedAt: new Date('2026-09-10T12:00:00Z'),
+        }))),
+      );
+
+      const result = await service.replaceCollectionForDestination(
+        agencyScope,
+        DESTINATION_ID,
+        'user-1',
+        {
+          organicAssetId: ORGANIC_ASSET_ID,
+          items: [
+            { mediaAssetId: MEDIA_ASSET_ID },
+            { mediaAssetId: secondMediaId },
+          ],
+        },
+      );
+
+      expect(result.total).toBe(2);
+      expect(result.items.map((item) => item.role)).toEqual(['slide', 'slide']);
+      expect(result.items.map((item) => item.sortOrder)).toEqual([0, 1]);
+      expect(creativesRepository.delete).toHaveBeenCalledWith(
+        expect.objectContaining({ destinationId: DESTINATION_ID }),
+      );
+      expect(creativesRepository.manager.transaction).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe('listForContent', () => {
     it('proves the content belongs to the scope before reading creatives', async () => {
       contentRepository.findOne.mockResolvedValue(null);

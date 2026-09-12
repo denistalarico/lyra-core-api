@@ -1,4 +1,7 @@
 import {
+  ArrayMaxSize,
+  ArrayMinSize,
+  IsArray,
   IsInt,
   IsOptional,
   IsString,
@@ -6,7 +9,9 @@ import {
   Matches,
   MaxLength,
   Min,
+  ValidateNested,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 
 const CANONICAL_KEY = /^[a-z0-9][a-z0-9_-]*$/;
 
@@ -58,4 +63,28 @@ export class ReplaceDestinationCreativeDto {
   @MaxLength(40)
   @Matches(CANONICAL_KEY)
   source?: string;
+}
+
+export class DestinationCreativeItemDto {
+  @IsUUID()
+  mediaAssetId!: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  @Matches(CANONICAL_KEY)
+  source?: string;
+}
+
+/** Replaces the complete, ordered creative set of one destination. */
+export class ReplaceDestinationCreativesDto {
+  @IsUUID()
+  organicAssetId!: string;
+
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(10)
+  @ValidateNested({ each: true })
+  @Type(() => DestinationCreativeItemDto)
+  items!: DestinationCreativeItemDto[];
 }

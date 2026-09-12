@@ -23,7 +23,10 @@ import {
   DestinationCreativeService,
   type DestinationCreativeScope,
 } from './destination-creative.service';
-import { ReplaceDestinationCreativeDto } from './dto/replace-destination-creative.dto';
+import {
+  ReplaceDestinationCreativeDto,
+  ReplaceDestinationCreativesDto,
+} from './dto/replace-destination-creative.dto';
 
 /**
  * Choosing which creative each destination publishes (Planner E5).
@@ -87,6 +90,21 @@ export class DestinationCreativeController {
     @Body() dto: ReplaceDestinationCreativeDto,
   ) {
     return this.destinationCreativeService.replaceForDestination(
+      this.requireScope(ctx),
+      destinationId,
+      ctx.userId ?? null,
+      dto,
+    );
+  }
+
+  @Put('destinations/:destinationId/creatives')
+  @RequirePermission(UPDATE_PERMISSION)
+  replaceCollection(
+    @RequestContextData() ctx: RequestContext,
+    @Param('destinationId', ParseUUIDPipe) destinationId: string,
+    @Body() dto: ReplaceDestinationCreativesDto,
+  ) {
+    return this.destinationCreativeService.replaceCollectionForDestination(
       this.requireScope(ctx),
       destinationId,
       ctx.userId ?? null,

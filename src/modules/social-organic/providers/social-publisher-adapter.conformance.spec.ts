@@ -32,6 +32,7 @@ function buildTestPayload(): PublicationPayload {
     hashtags: [],
     cta: null,
     mediaAssetId: null,
+    mediaAssetIds: [],
     scheduledAt: new Date('2026-09-06T12:00:00Z'),
   };
 }
