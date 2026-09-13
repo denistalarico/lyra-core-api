@@ -158,6 +158,15 @@ export class SocialCopyGenerationService {
   ) {}
 
   /**
+   * Answers whether generation may be offered before a plan has any content.
+   * This deliberately has no content id: creating a plan with AI must be able
+   * to check the deployment state before it creates an otherwise empty plan.
+   */
+  availability(): { providerEnabled: boolean } {
+    return { providerEnabled: this.config.mode !== 'disabled' };
+  }
+
+  /**
    * Enqueues one run for one content item.
    *
    * Throws rather than returning an outcome, because a single-item request has
@@ -433,7 +442,7 @@ export class SocialCopyGenerationService {
        * Lets the UI disable the action with an explanation instead of offering a
        * button that always fails — which is what the E4 registro anticipated.
        */
-      providerEnabled: this.config.mode !== 'disabled',
+      providerEnabled: this.availability().providerEnabled,
     };
   }
 

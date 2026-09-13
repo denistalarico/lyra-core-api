@@ -73,6 +73,7 @@ describe('SocialPlannerController', () => {
   };
 
   const copyGenerationService = {
+    availability: jest.fn(),
     listForContent: jest.fn(),
     requestForContent: jest.fn(),
     requestForSelection: jest.fn(),
@@ -100,6 +101,16 @@ describe('SocialPlannerController', () => {
       copyGenerationService as unknown as SocialCopyGenerationService,
       planGenerationService as unknown as SocialPlanGenerationService,
     );
+  });
+
+  it('returns generation availability without requiring an existing content item', () => {
+    copyGenerationService.availability.mockReturnValue({ providerEnabled: true });
+
+    expect(controller.copyGenerationAvailability()).toEqual({
+      providerEnabled: true,
+    });
+    expect(copyGenerationService.availability).toHaveBeenCalledTimes(1);
+    expect(copyGenerationService.listForContent).not.toHaveBeenCalled();
   });
 
   it('binds the controller to the Social entitlement', () => {

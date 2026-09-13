@@ -229,6 +229,14 @@ describe('SocialCopyGenerationService', () => {
     );
   }
 
+  it('reports provider availability without loading a content item', () => {
+    build('disabled');
+    expect(service.availability()).toEqual({ providerEnabled: false });
+
+    build('live');
+    expect(service.availability()).toEqual({ providerEnabled: true });
+  });
+
   beforeEach(() => {
     jest.clearAllMocks();
 

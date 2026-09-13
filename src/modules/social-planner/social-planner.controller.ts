@@ -473,6 +473,16 @@ export class SocialPlannerController {
   // ------------------------------------------------------- copy generation
 
   /**
+   * Availability does not depend on an existing content item. The plan-create
+   * dialog calls this before offering a paid generation path.
+   */
+  @Get('generation-availability')
+  @RequirePermission(SOCIAL_PLANNER_VIEW_PERMISSION)
+  copyGenerationAvailability() {
+    return this.socialCopyGenerationService.availability();
+  }
+
+  /**
    * Generation requests are writes, so they answer to the update permission
    * rather than a new AI-specific key: the effect an operator is authorized for
    * is "change the editorial text of this content", and generation is one way to
