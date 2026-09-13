@@ -144,7 +144,8 @@ export function toBrandContext(
  * The address country is a free-text field that predates the ISO selector, so
  * historical rows hold "Brasil", "brazil" or an empty string. Only a clean
  * alpha-2 code is treated as a country; anything else resolves to NULL, which
- * the date picker reads as "offer everything" rather than as a wrong country.
+ * the commemorative-date resolver reads as its default country rather than as a
+ * wrong one.
  */
 function isoCountry(value: unknown): string | null {
   const parsed = text(value);

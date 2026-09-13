@@ -123,6 +123,27 @@ describe('commemorative dates resolver', () => {
     expect(dates.map((entry) => entry.key)).not.toContain('br_architect_day');
   });
 
+  /**
+   * The Brand Kit country is free text for historical rows, so it very often
+   * arrives as NULL. Offering every country's dates in that case put US
+   * national dates in a Brazilian operator's plan picker.
+   */
+  it('falls back to the default country instead of offering every country', () => {
+    const dates = resolveCommemorativeDates({
+      periodStart: '2026-11-01',
+      periodEnd: '2026-11-30',
+      country: null,
+      businessMode: null,
+    });
+
+    const keys = dates.map((entry) => entry.key);
+    expect(keys).not.toContain('us_thanksgiving');
+    expect(keys).not.toContain('us_veterans_day');
+    // The default country's own dates, and GLOBAL ones, still come through.
+    expect(keys).toContain('br_republic');
+    expect(keys).toContain('black_friday');
+  });
+
   it('narrows sector dates by business mode but keeps untagged ones', () => {
     const dates = resolveCommemorativeDates({
       periodStart: '2026-10-01',

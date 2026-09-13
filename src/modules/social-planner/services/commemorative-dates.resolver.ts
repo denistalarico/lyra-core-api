@@ -36,7 +36,10 @@ export interface ResolveCommemorativeDatesInput {
   periodStart: string;
   /** Inclusive, `YYYY-MM-DD`. */
   periodEnd: string;
-  /** ISO 3166-1 alpha-2. GLOBAL dates are always included. */
+  /**
+   * ISO 3166-1 alpha-2. GLOBAL dates are always included; NULL falls back to
+   * `DEFAULT_COUNTRY` rather than offering every country's national dates.
+   */
   country: string | null;
   /** NULL includes every date; a mode narrows to the ones tagged for it. */
   businessMode: SocialBusinessModeKey | null;
@@ -215,17 +218,27 @@ function normalizeCountry(country: string | null): string | null {
 }
 
 /**
- * GLOBAL dates are observed everywhere, so they survive any country filter. A
- * NULL country means the operator has not configured one yet — everything is
- * offered rather than nothing, because an empty picker reads as a broken
- * feature while a long one reads as an unfiltered one.
+ * The country assumed when the Brand Kit has not declared one.
+ *
+ * A NULL country used to mean "offer everything", which put US national dates
+ * — Thanksgiving, the 4th of July — in front of Brazilian operators planning a
+ * Brazilian month. That is worse than a narrow list: a wrong date that looks
+ * authoritative gets picked, and the generated plan carries it. The product's
+ * primary market is Brazil, so an unconfigured Brand Kit resolves there and an
+ * operator elsewhere sets the country once to correct it.
+ */
+const DEFAULT_COUNTRY = 'BR';
+
+/**
+ * GLOBAL dates are observed everywhere, so they survive any country filter.
+ * Everything else belongs to exactly one country.
  */
 function matchesCountry(
   item: CommemorativeDateCatalogItem,
   country: string | null,
 ): boolean {
   if (item.country === 'GLOBAL') return true;
-  return country === null ? true : item.country === country;
+  return item.country === (country ?? DEFAULT_COUNTRY);
 }
 
 function matchesBusinessMode(
