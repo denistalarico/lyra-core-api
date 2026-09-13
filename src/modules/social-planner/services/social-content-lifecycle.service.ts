@@ -18,6 +18,7 @@ import {
   SocialContentDestinationEntity,
   SocialContentItemEntity,
   SocialDestinationCreativeEntity,
+  SocialPlanEntity,
 } from '../entities';
 import { toSocialContentItemView } from '../views/social-planner.view';
 import {
@@ -94,6 +95,14 @@ export class SocialContentLifecycleService {
   constructor(
     @InjectRepository(SocialContentItemEntity, 'agency')
     private readonly contentRepository: Repository<SocialContentItemEntity>,
+
+    /**
+     * Deleting a plan is the same lifecycle question as deleting an item —
+     * same guard, same soft-delete rule — so it lives here rather than in
+     * `SocialPlannerService`, which would otherwise need the guard too.
+     */
+    @InjectRepository(SocialPlanEntity, 'agency')
+    private readonly plansRepository: Repository<SocialPlanEntity>,
 
     @InjectRepository(SocialContentDestinationEntity, 'agency')
     private readonly destinationsRepository: Repository<SocialContentDestinationEntity>,
@@ -401,6 +410,122 @@ export class SocialContentLifecycleService {
     return this.runBatch(contentIds, (contentId) =>
       this.removeOne(scope, contentId, actorUserId, check),
     );
+  }
+
+  /**
+   * Soft-deletes a whole plan, with its content.
+   *
+   * WHY THE PLAN'S CONTENT IS CHECKED AND NOT JUST THE PLAN
+   * ------------------------------------------------------
+   * A plan owns nothing that publishes; its content items do. Deleting the
+   * plan while any of them holds a live publication would hide the editorial
+   * side of a post that a provider is still going to send, or already sent, and
+   * leave the publication pointing at something no screen can reach. So the
+   * same guard that protects a single delete is asked about every live item in
+   * the plan, and one blocked item refuses the whole operation.
+   *
+   * ALL OR NOTHING, UNLIKE A CONTENT BATCH
+   * --------------------------------------
+   * `removeMany` reports a partial result because the operator picked those
+   * items one by one and can act on the ones that were refused. Nobody picks
+   * the contents of a plan — they picked the plan. A partial outcome there
+   * would leave a deleted plan with some of its content still live and
+   * reachable from the calendar, which is a state no screen in the Planner
+   * knows how to show.
+   *
+   * The plan and its items are stamped in one transaction for the same reason:
+   * a half-applied delete is exactly that unshowable state.
+   */
+  async removePlan(
+    scope: SocialPlannerScope,
+    planId: string,
+    actorUserId: string | null,
+  ): Promise<void> {
+    const plan = await this.plansRepository.findOne({
+      where: {
+        id: planId,
+        ...this.planScopeWhere(scope),
+      },
+    });
+
+    if (!plan) {
+      throw new NotFoundException('Social plan not found.');
+    }
+
+    /**
+     * Live items only — archived ones included. An archived item is still the
+     * plan's content and must go with it, while an already soft-deleted one
+     * needs neither a guard question nor a second stamp.
+     */
+    const items = await this.contentRepository.find({
+      where: {
+        ...this.contentScopeWhere(scope),
+        deletedAt: IsNull(),
+        planId: plan.id,
+      },
+      select: { id: true },
+    });
+
+    const contentIds = items.map((item) => item.id);
+    const check = await this.checkPublications(scope, contentIds);
+
+    if (!check.available) {
+      throw new ServiceUnavailableException(
+        'Publication state cannot be verified right now.',
+      );
+    }
+
+    const blockingStatuses = new Set<string>();
+
+    for (const contentId of contentIds) {
+      const blocker = check.blockers.get(contentId);
+
+      if (blocker) {
+        for (const status of blocker.statuses) {
+          blockingStatuses.add(status);
+        }
+      }
+    }
+
+    if (blockingStatuses.size > 0) {
+      throw new ConflictException({
+        message:
+          'Plan has content with publications and cannot be deleted from the Planner.',
+        reason: 'has_publications',
+        blockingStatuses: [...blockingStatuses].sort(),
+      });
+    }
+
+    const deletedAt = new Date();
+
+    await this.contentRepository.manager.transaction(async (manager) => {
+      if (contentIds.length > 0) {
+        await manager.getRepository(SocialContentItemEntity).update(
+          {
+            id: In(contentIds),
+            ...this.contentScopeWhere(scope),
+            deletedAt: IsNull(),
+          },
+          {
+            deletedAt,
+            deletedById: actorUserId,
+            updatedById: actorUserId,
+          },
+        );
+      }
+
+      await manager.getRepository(SocialPlanEntity).update(
+        {
+          id: plan.id,
+          ...this.planScopeWhere(scope),
+        },
+        {
+          deletedAt,
+          deletedById: actorUserId,
+          updatedById: actorUserId,
+        },
+      );
+    });
   }
 
   // -------------------------------------------------------- single actions
@@ -827,6 +952,24 @@ export class SocialContentLifecycleService {
       workspaceId: scope.workspaceId,
       agencyClientId:
         scope.agencyClientId === null ? IsNull() : scope.agencyClientId,
+    };
+  }
+
+  /**
+   * Carries `deletedAt IS NULL` — unlike `contentScopeWhere` above, whose call
+   * sites choose their own visibility because restore and the archived listing
+   * legitimately need to reach hidden rows. Nothing restores a plan, so there
+   * is no read here that should ever see a deleted one.
+   */
+  private planScopeWhere(
+    scope: SocialPlannerScope,
+  ): FindOptionsWhere<SocialPlanEntity> {
+    return {
+      tenantId: scope.tenantId,
+      workspaceId: scope.workspaceId,
+      agencyClientId:
+        scope.agencyClientId === null ? IsNull() : scope.agencyClientId,
+      deletedAt: IsNull(),
     };
   }
 

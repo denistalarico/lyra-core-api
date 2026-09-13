@@ -7,6 +7,7 @@ import { IsNull, Not, type Repository } from 'typeorm';
 import { SocialContentDestinationEntity } from '../entities/social-content-destination.entity';
 import { SocialContentItemEntity } from '../entities/social-content-item.entity';
 import { SocialDestinationCreativeEntity } from '../entities/social-destination-creative.entity';
+import { SocialPlanEntity } from '../entities/social-plan.entity';
 import {
   SocialContentPublicationGuard,
   type SocialContentPublicationSource,
@@ -112,6 +113,7 @@ function firstCallArg<T>(mock: jest.Mock): T {
 
 describe('SocialContentLifecycleService', () => {
   let contentRepository: RepositoryMock;
+  let plansRepository: RepositoryMock;
   let destinationsRepository: RepositoryMock;
   let creativesRepository: RepositoryMock;
   let guard: SocialContentPublicationGuard;
@@ -146,12 +148,14 @@ describe('SocialContentLifecycleService', () => {
     jest.clearAllMocks();
 
     contentRepository = createRepositoryMock();
+    plansRepository = createRepositoryMock();
     destinationsRepository = createRepositoryMock();
     creativesRepository = createRepositoryMock();
     guard = new SocialContentPublicationGuard();
 
     service = new SocialContentLifecycleService(
       contentRepository as unknown as Repository<SocialContentItemEntity>,
+      plansRepository as unknown as Repository<SocialPlanEntity>,
       destinationsRepository as unknown as Repository<SocialContentDestinationEntity>,
       creativesRepository as unknown as Repository<SocialDestinationCreativeEntity>,
       guard,
@@ -537,6 +541,127 @@ describe('SocialContentLifecycleService', () => {
       ).rejects.toBeInstanceOf(NotFoundException);
 
       expect(contentRepository.update).not.toHaveBeenCalled();
+    });
+  });
+
+  // ----------------------------------------------------------- delete plan
+
+  describe('removePlan', () => {
+    /** Runs the transaction callback against the same repository mocks. */
+    function runPlanTransaction(): void {
+      contentRepository.manager.transaction.mockImplementation(
+        async (callback: (manager: unknown) => Promise<unknown>) =>
+          callback({
+            getRepository: (entity: unknown) =>
+              entity === SocialPlanEntity ? plansRepository : contentRepository,
+          }),
+      );
+    }
+
+    function livePlan() {
+      return { id: PLAN_ID, deletedAt: null } as SocialPlanEntity;
+    }
+
+    it('stamps the plan and its content instead of deleting rows', async () => {
+      registerPermissiveSource();
+      plansRepository.findOne.mockResolvedValue(livePlan());
+      contentRepository.find.mockResolvedValue([{ id: CONTENT_ID }]);
+      runPlanTransaction();
+
+      await service.removePlan(clientScope, PLAN_ID, 'actor-1');
+
+      expect(plansRepository.delete).not.toHaveBeenCalled();
+      expect(contentRepository.delete).not.toHaveBeenCalled();
+
+      const [, contentValues] = contentRepository.update.mock.calls[0] as [
+        unknown,
+        { deletedAt: Date; deletedById: string },
+      ];
+      const [, planValues] = plansRepository.update.mock.calls[0] as [
+        unknown,
+        { deletedAt: Date; deletedById: string },
+      ];
+
+      expect(contentValues.deletedById).toBe('actor-1');
+      expect(planValues.deletedById).toBe('actor-1');
+      /** One stamp for the whole operation, so the two can never disagree. */
+      expect(planValues.deletedAt).toEqual(contentValues.deletedAt);
+    });
+
+    /**
+     * The plan-level counterpart of the single most important test above: a
+     * guard that cannot answer is not a guard that said yes.
+     */
+    it('refuses when no publication source is registered', async () => {
+      plansRepository.findOne.mockResolvedValue(livePlan());
+      contentRepository.find.mockResolvedValue([{ id: CONTENT_ID }]);
+
+      await expect(
+        service.removePlan(clientScope, PLAN_ID, 'actor-1'),
+      ).rejects.toBeInstanceOf(ServiceUnavailableException);
+
+      expect(plansRepository.update).not.toHaveBeenCalled();
+      expect(contentRepository.update).not.toHaveBeenCalled();
+    });
+
+    /**
+     * One blocked item stops the whole plan. A partial delete would leave a
+     * removed plan owning live content that the calendar still shows.
+     */
+    it('refuses the whole plan when any item has a live publication', async () => {
+      registerBlockingSource(['published']);
+      plansRepository.findOne.mockResolvedValue(livePlan());
+      contentRepository.find.mockResolvedValue([
+        { id: CONTENT_ID },
+        { id: OTHER_CONTENT_ID },
+      ]);
+
+      await expect(
+        service.removePlan(clientScope, PLAN_ID, 'actor-1'),
+      ).rejects.toBeInstanceOf(ConflictException);
+
+      expect(plansRepository.update).not.toHaveBeenCalled();
+      expect(contentRepository.update).not.toHaveBeenCalled();
+    });
+
+    it('deletes an empty plan without asking about any content', async () => {
+      const findBlocking = registerPermissiveSource();
+      plansRepository.findOne.mockResolvedValue(livePlan());
+      contentRepository.find.mockResolvedValue([]);
+      runPlanTransaction();
+
+      await service.removePlan(clientScope, PLAN_ID, 'actor-1');
+
+      expect(findBlocking).not.toHaveBeenCalled();
+      expect(contentRepository.update).not.toHaveBeenCalled();
+      expect(plansRepository.update).toHaveBeenCalled();
+    });
+
+    it('answers not found for a plan in another scope, without deleting', async () => {
+      registerPermissiveSource();
+      plansRepository.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.removePlan(clientScope, PLAN_ID, 'actor-1'),
+      ).rejects.toBeInstanceOf(NotFoundException);
+
+      expect(plansRepository.update).not.toHaveBeenCalled();
+    });
+
+    it('reads only live content, so an already deleted item is not restamped', async () => {
+      registerPermissiveSource();
+      plansRepository.findOne.mockResolvedValue(livePlan());
+      contentRepository.find.mockResolvedValue([{ id: CONTENT_ID }]);
+      runPlanTransaction();
+
+      await service.removePlan(clientScope, PLAN_ID, 'actor-1');
+
+      const [{ where }] = contentRepository.find.mock.calls[0] as [
+        { where: { deletedAt: unknown; planId: string } },
+      ];
+
+      expect(where.planId).toBe(PLAN_ID);
+      expect(where.deletedAt).toEqual(IsNull());
     });
   });
 

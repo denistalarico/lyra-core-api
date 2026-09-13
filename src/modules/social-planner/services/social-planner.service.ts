@@ -702,6 +702,14 @@ export class SocialPlannerService {
     return byContentId;
   }
 
+  /**
+   * Scope AND visibility, for the same reason `contentScopeWhere` below carries
+   * both: every plan read in this service goes through this helper, so a
+   * soft-deleted plan is invisible to all of them at once. Leaving the filter
+   * to each call site would make omitting it the silent default, and the
+   * symptom — a deleted plan reappearing in the picker — reads as data
+   * corruption rather than a missing condition.
+   */
   private planScopeWhere(
     scope: SocialPlannerScope,
   ): FindOptionsWhere<SocialPlanEntity> {
@@ -710,6 +718,7 @@ export class SocialPlannerService {
       workspaceId: scope.workspaceId,
       agencyClientId:
         scope.agencyClientId === null ? IsNull() : scope.agencyClientId,
+      deletedAt: IsNull(),
     };
   }
 

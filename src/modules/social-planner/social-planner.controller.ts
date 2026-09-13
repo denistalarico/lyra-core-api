@@ -165,6 +165,32 @@ export class SocialPlannerController {
     );
   }
 
+  /**
+   * Deletes a plan and the content under it.
+   *
+   * Same owner-only key and same audit stamp as deleting a single content item:
+   * this removes strictly more than that endpoint does, so it cannot answer to
+   * anything weaker. It is refused outright when any of the plan's content has
+   * a live publication — see `SocialContentLifecycleService.removePlan`.
+   *
+   * 204 with no body, for the reason `removeContent` gives: there is no
+   * post-delete state worth returning.
+   */
+  @Delete('plans/:planId')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @RequirePermission(SOCIAL_PLANNER_DELETE_PERMISSION)
+  @DangerousAction()
+  async removePlan(
+    @RequestContextData() ctx: RequestContext,
+    @Param('planId', ParseUUIDPipe) planId: string,
+  ): Promise<void> {
+    await this.socialContentLifecycleService.removePlan(
+      this.requireScope(ctx),
+      planId,
+      ctx.userId ?? null,
+    );
+  }
+
   @Get('plans/:planId/content')
   @RequirePermission(SOCIAL_PLANNER_VIEW_PERMISSION)
   listContent(

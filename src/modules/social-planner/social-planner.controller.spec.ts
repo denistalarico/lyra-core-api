@@ -40,6 +40,7 @@ describe('SocialPlannerController', () => {
     archiveMany: jest.fn(),
     restoreMany: jest.fn(),
     removeMany: jest.fn(),
+    removePlan: jest.fn(),
     exportPlanContentCsv: jest.fn(),
   };
 

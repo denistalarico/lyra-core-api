@@ -90,6 +90,18 @@ export class SocialPlanEntity {
   @Column({ type: 'text', nullable: true })
   summary!: string | null;
 
+  /**
+   * Soft delete. A plan is stamped rather than removed because its content
+   * cascades from it while publications restrict from that content — see
+   * `AddSocialPlanSoftDelete1793100000000`. Every read filters on this being
+   * null; there is no listing that shows a deleted plan.
+   */
+  @Column({ name: 'deleted_at', type: 'timestamptz', nullable: true })
+  deletedAt!: Date | null;
+
+  @Column({ name: 'deleted_by_id', type: 'uuid', nullable: true })
+  deletedById!: string | null;
+
   @Column({ name: 'created_by_id', type: 'uuid', nullable: true })
   createdById!: string | null;
 

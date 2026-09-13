@@ -124,6 +124,19 @@ describe('Social Planner contract', () => {
     ).toBe(true);
   });
 
+  it('registers the plan soft-delete migration in the agency datasource', () => {
+    const registered = (AgencyDataSource.options.migrations ?? []) as Array<{
+      name?: string;
+    }>;
+
+    expect(
+      registered.some(
+        (migration) =>
+          migration?.name === 'AddSocialPlanSoftDelete1793100000000',
+      ),
+    ).toBe(true);
+  });
+
   it('binds Planner routes to the Social entitlement', () => {
     expect(
       Reflect.getMetadata(
@@ -234,6 +247,12 @@ describe('Social Planner contract', () => {
     for (const handler of [
       SocialPlannerController.prototype.removeContent,
       SocialPlannerController.prototype.removeContentBatch,
+      /**
+       * Deleting a plan removes strictly more than deleting one item does, so
+       * it is pinned to the same key rather than left free to drift down to
+       * the manager-level update key that archive uses.
+       */
+      SocialPlannerController.prototype.removePlan,
     ]) {
       expect(Reflect.getMetadata(PERMISSION_KEY_METADATA, handler)).toBe(
         'social.planner.calendar.delete.owner_or_admin_explicit',
