@@ -189,6 +189,7 @@ import { CreateSocialCopyGeneration1792800000000 } from './migrations/1792800000
 import { CreateSocialPublicationMedia1792900000000 } from './migrations/1792900000000-create-social-publication-media';
 import { AddSocialPlanGeneration1793000000000 } from './migrations/1793000000000-add-social-plan-generation';
 import { AddSocialPlanSoftDelete1793100000000 } from './migrations/1793100000000-add-social-plan-soft-delete';
+import { CreateSocialBoostTemplates1793200000000 } from './migrations/1793200000000-create-social-boost-templates';
 
 export const AgencyDataSource = new DataSource({
   type: 'postgres',
@@ -388,5 +389,6 @@ export const AgencyDataSource = new DataSource({
     CreateSocialPublicationMedia1792900000000,
     AddSocialPlanGeneration1793000000000,
     AddSocialPlanSoftDelete1793100000000,
+    CreateSocialBoostTemplates1793200000000,
   ],
 });

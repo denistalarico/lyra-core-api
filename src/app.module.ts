@@ -55,6 +55,7 @@ import { IntelligenceAnalyticsModule } from './modules/intelligence-analytics/in
 import { SocialIntegrationsModule } from './modules/social-integrations';
 import { SocialOrganicModule } from './modules/social-organic';
 import { SocialPlannerModule } from './modules/social-planner';
+import { SocialCampaignsModule } from './modules/social-campaigns';
 
 @Module({
   imports: [
@@ -115,6 +116,7 @@ import { SocialPlannerModule } from './modules/social-planner';
     IntelligenceAnalyticsModule,
     AdminModule,
     SocialPlannerModule,
+    SocialCampaignsModule,
     SocialOrganicModule,
   ],
 })
