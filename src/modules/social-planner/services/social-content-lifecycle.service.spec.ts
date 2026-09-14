@@ -453,6 +453,36 @@ describe('SocialContentLifecycleService', () => {
   // ---------------------------------------------------------------- delete
 
   describe('remove', () => {
+    it('hard deletes an unscheduled Calendar draft after the publication guard approves', async () => {
+      registerPermissiveSource();
+      contentRepository.findOne.mockResolvedValue(buildContentItem());
+      contentRepository.delete.mockResolvedValue({ affected: 1 });
+
+      await service.discard(clientScope, CONTENT_ID);
+
+      expect(contentRepository.update).not.toHaveBeenCalled();
+      expect(contentRepository.delete).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: CONTENT_ID,
+          tenantId: TENANT_ID,
+          workspaceId: WORKSPACE_ID,
+          agencyClientId: CLIENT_ID,
+          deletedAt: IsNull(),
+        }),
+      );
+    });
+
+    it('never hard deletes a Calendar draft once publication evidence exists', async () => {
+      registerBlockingSource(['scheduled']);
+      contentRepository.findOne.mockResolvedValue(buildContentItem());
+
+      await expect(
+        service.discard(clientScope, CONTENT_ID),
+      ).rejects.toBeInstanceOf(ConflictException);
+
+      expect(contentRepository.delete).not.toHaveBeenCalled();
+    });
+
     it('soft deletes rather than deleting the row', async () => {
       registerPermissiveSource();
       contentRepository.findOne.mockResolvedValue(buildContentItem());

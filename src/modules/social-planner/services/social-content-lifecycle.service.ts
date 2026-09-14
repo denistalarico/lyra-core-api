@@ -393,6 +393,60 @@ export class SocialContentLifecycleService {
   }
 
   /**
+   * Permanently discards an unscheduled calendar draft.
+   *
+   * This is deliberately separate from `remove`: ordinary Planner deletion is
+   * a soft delete because a publication is execution evidence. A Calendar
+   * draft that never produced a publication has no such evidence, and keeping
+   * it as a hidden row after the operator presses Cancel only creates an
+   * orphan. The same publication guard is still mandatory, both to protect a
+   * race with scheduling and to make this endpoint safe if it is called twice.
+   */
+  async discard(
+    scope: SocialPlannerScope,
+    contentId: string,
+  ): Promise<void> {
+    const check = await this.checkPublications(scope, [contentId]);
+    if (!check.available) {
+      this.throwForSingleOutcome({
+        contentId,
+        status: 'failed',
+        reason: 'guard_unavailable',
+      });
+    }
+
+    const item = await this.findLiveContent(scope, contentId);
+    if (!item) {
+      this.throwForSingleOutcome({
+        contentId,
+        status: 'failed',
+        reason: 'not_found',
+      });
+    }
+
+    const blocker = check.blockers.get(contentId);
+    if (blocker) {
+      this.throwForSingleOutcome({
+        contentId,
+        status: 'failed',
+        reason: 'has_publications',
+        blockingStatuses: blocker.statuses,
+      });
+    }
+
+    /**
+     * The database cascades only Planner-owned draft relationships (revisions,
+     * destinations, creatives and pending generation rows). A publication
+     * uses ON DELETE RESTRICT and has already been ruled out above.
+     */
+    await this.contentRepository.delete({
+      id: contentId,
+      ...this.contentScopeWhere(scope),
+      deletedAt: IsNull(),
+    });
+  }
+
+  /**
    * Deletes a batch, asking the publication guard exactly once.
    *
    * One guard call for the whole batch, not one per item: the question is the

@@ -341,6 +341,27 @@ export class SocialPlannerController {
     );
   }
 
+  /**
+   * The Calendar creates a real content id before opening the editorial
+   * screen. If the operator cancels before scheduling, discard that transient
+   * draft instead of leaving a soft-deleted row behind. This route cannot
+   * remove a publication: the lifecycle service requires its guard to report
+   * no publication before the hard delete is attempted.
+   */
+  @Delete('content/:contentId/discard')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @RequirePermission(SOCIAL_PLANNER_DELETE_PERMISSION)
+  @DangerousAction()
+  async discardContent(
+    @RequestContextData() ctx: RequestContext,
+    @Param('contentId', ParseUUIDPipe) contentId: string,
+  ): Promise<void> {
+    await this.socialContentLifecycleService.discard(
+      this.requireScope(ctx),
+      contentId,
+    );
+  }
+
   // ----------------------------------------------------- batch actions (E6)
 
   /**

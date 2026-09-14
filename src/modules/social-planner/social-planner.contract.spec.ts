@@ -246,6 +246,7 @@ describe('Social Planner contract', () => {
   it('keeps deleting Planner content on the pre-existing owner-only key', () => {
     for (const handler of [
       SocialPlannerController.prototype.removeContent,
+      SocialPlannerController.prototype.discardContent,
       SocialPlannerController.prototype.removeContentBatch,
       /**
        * Deleting a plan removes strictly more than deleting one item does, so
