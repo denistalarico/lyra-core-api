@@ -413,6 +413,7 @@ export class SocialContentLifecycleService {
         status: 'failed',
         reason: 'guard_unavailable',
       });
+      return;
     }
 
     const item = await this.findLiveContent(scope, contentId);
