@@ -111,7 +111,7 @@ export class SocialCampaignRecommendationService {
     const evidenceHash = createHash('sha256')
       .update(JSON.stringify(evidence))
       .digest('hex');
-    const confidenceCeiling = confidenceCeiling(overview, campaigns, freshness);
+    const confidenceCeiling = calculateConfidenceCeiling(overview, campaigns, freshness);
     const run = await this.reserveRun(scope, userId, dto, evidence, evidenceHash);
 
     try {
@@ -395,7 +395,7 @@ function buildEvidencePacket(
   };
 }
 
-function confidenceCeiling(
+function calculateConfidenceCeiling(
   overview: Awaited<ReturnType<SocialAnalyticsReadService['overview']>>,
   campaigns: Awaited<ReturnType<SocialAnalyticsReadService['campaigns']>>,
   freshness: Awaited<ReturnType<SocialAnalyticsReadService['freshness']>>,
