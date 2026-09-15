@@ -22,21 +22,13 @@ import {
   SocialBoostTemplateEntity,
   type SocialBoostAudience,
 } from '../entities';
+import { isSocialBoostCombinationSupported } from '../social-boost-template-options';
 import { toSocialBoostTemplateView } from '../views/social-boost-template.view';
 
 export type SocialCampaignsScope = {
   tenantId: string;
   workspaceId: string;
   agencyClientId: string | null;
-};
-
-const EMPTY_AUDIENCE: SocialBoostAudience = {
-  countries: [],
-  ageMin: null,
-  ageMax: null,
-  genders: [],
-  interests: [],
-  savedAudienceExternalId: null,
 };
 
 @Injectable()
@@ -69,6 +61,13 @@ export class SocialBoostTemplateService {
 
     const audience = this.normalizeAudience(dto.audience);
     this.assertAudience(dto.audienceMode, audience);
+    this.assertCampaignConfiguration(
+      dto.objective,
+      dto.performanceGoal,
+      dto.conversionLocation,
+      dto.conversionEvent,
+      dto.destinationUrl,
+    );
 
     return this.dataSource.transaction(async (manager) => {
       const repository = manager.getRepository(SocialBoostTemplateEntity);
@@ -90,6 +89,9 @@ export class SocialBoostTemplateService {
         name,
         provider: dto.provider,
         objective: dto.objective,
+        performanceGoal: dto.performanceGoal,
+        conversionLocation: dto.conversionLocation,
+        conversionEvent: this.normalizeNullable(dto.conversionEvent),
         budgetType: dto.budgetType,
         budgetAmountMinor: String(dto.budgetAmountMinor),
         currency: dto.currency.trim().toUpperCase(),
@@ -117,7 +119,8 @@ export class SocialBoostTemplateService {
     dto: UpdateSocialBoostTemplateDto,
   ) {
     const current = await this.requireOne(scope, templateId);
-    const name = dto.name === undefined ? current.name : this.requireText(dto.name);
+    const name =
+      dto.name === undefined ? current.name : this.requireText(dto.name);
 
     if (name !== current.name) {
       await this.assertNameAvailable(scope, name, current.id);
@@ -129,6 +132,25 @@ export class SocialBoostTemplateService {
         : this.normalizeAudience(dto.audience);
     const audienceMode = dto.audienceMode ?? current.audienceMode;
     this.assertAudience(audienceMode, audience);
+    const objective = dto.objective ?? current.objective;
+    const performanceGoal = dto.performanceGoal ?? current.performanceGoal;
+    const conversionLocation =
+      dto.conversionLocation ?? current.conversionLocation;
+    const conversionEvent =
+      dto.conversionEvent === undefined
+        ? current.conversionEvent
+        : this.normalizeNullable(dto.conversionEvent);
+    const destinationUrl =
+      dto.destinationUrl === undefined
+        ? current.destinationUrl
+        : this.normalizeNullable(dto.destinationUrl);
+    this.assertCampaignConfiguration(
+      objective,
+      performanceGoal,
+      conversionLocation,
+      conversionEvent,
+      destinationUrl,
+    );
 
     return this.dataSource.transaction(async (manager) => {
       const repository = manager.getRepository(SocialBoostTemplateEntity);
@@ -142,13 +164,20 @@ export class SocialBoostTemplateService {
       const nextDefault = nextActive && (dto.isDefault ?? row.isDefault);
       if (nextDefault) {
         await repository.update(
-          { ...this.scopeWhere(scope), provider: row.provider, id: Not(row.id) },
+          {
+            ...this.scopeWhere(scope),
+            provider: row.provider,
+            id: Not(row.id),
+          },
           { isDefault: false },
         );
       }
 
       row.name = name;
-      row.objective = dto.objective ?? row.objective;
+      row.objective = objective;
+      row.performanceGoal = performanceGoal;
+      row.conversionLocation = conversionLocation;
+      row.conversionEvent = conversionEvent;
       row.budgetType = dto.budgetType ?? row.budgetType;
       row.budgetAmountMinor =
         dto.budgetAmountMinor === undefined
@@ -170,10 +199,7 @@ export class SocialBoostTemplateService {
         dto.callToAction === undefined
           ? row.callToAction
           : this.normalizeNullable(dto.callToAction);
-      row.destinationUrl =
-        dto.destinationUrl === undefined
-          ? row.destinationUrl
-          : this.normalizeNullable(dto.destinationUrl);
+      row.destinationUrl = destinationUrl;
       row.isDefault = nextDefault;
       row.isActive = nextActive;
       row.updatedById = actorUserId;
@@ -183,12 +209,14 @@ export class SocialBoostTemplateService {
   }
 
   private requireOne(scope: SocialCampaignsScope, id: string) {
-    return this.repository.findOne({
-      where: { ...this.scopeWhere(scope), id },
-    }).then((row) => {
-      if (!row) throw new NotFoundException('Boost template not found.');
-      return row;
-    });
+    return this.repository
+      .findOne({
+        where: { ...this.scopeWhere(scope), id },
+      })
+      .then((row) => {
+        if (!row) throw new NotFoundException('Boost template not found.');
+        return row;
+      });
   }
 
   private async assertNameAvailable(
@@ -229,9 +257,13 @@ export class SocialBoostTemplateService {
       countries: this.normalizeStrings(input?.countries ?? []).map((item) =>
         item.toUpperCase(),
       ),
+      regions: this.normalizeStrings(input?.regions ?? []),
+      cities: this.normalizeStrings(input?.cities ?? []),
+      postalCodes: this.normalizeStrings(input?.postalCodes ?? []),
       ageMin: input?.ageMin ?? null,
       ageMax: input?.ageMax ?? null,
       genders: this.normalizeStrings(input?.genders ?? []),
+      languages: this.normalizeStrings(input?.languages ?? []),
       interests: this.normalizeStrings(input?.interests ?? []),
       savedAudienceExternalId:
         this.normalizeNullable(input?.savedAudienceExternalId) ?? null,
@@ -255,11 +287,52 @@ export class SocialBoostTemplateService {
       );
     }
 
-    if (mode === 'custom' && audience.countries.length === 0) {
+    if (
+      mode !== 'saved' &&
+      audience.countries.length === 0 &&
+      audience.regions.length === 0 &&
+      audience.cities.length === 0 &&
+      audience.postalCodes.length === 0
+    ) {
       throw new BadRequestException(
-        'At least one country is required for a custom audience.',
+        'At least one audience location is required.',
       );
     }
+  }
+
+  private assertCampaignConfiguration(
+    objective: SocialBoostTemplateEntity['objective'],
+    performanceGoal: SocialBoostTemplateEntity['performanceGoal'],
+    conversionLocation: SocialBoostTemplateEntity['conversionLocation'],
+    conversionEvent: string | null | undefined,
+    destinationUrl: string | null | undefined,
+  ) {
+    if (
+      !isSocialBoostCombinationSupported(
+        objective,
+        performanceGoal,
+        conversionLocation,
+      )
+    ) {
+      throw new BadRequestException(
+        'Campaign type, performance goal and conversion location are incompatible.',
+      );
+    }
+
+    if (
+      (performanceGoal === 'conversions' ||
+        performanceGoal === 'value' ||
+        performanceGoal === 'website_leads') &&
+      !this.normalizeNullable(conversionEvent)
+    ) {
+      throw new BadRequestException(
+        'A conversion event is required for this performance goal.',
+      );
+    }
+
+    // URL may be inherited from the approved publication. The C7 execution
+    // preflight must require an effective URL for website/shop destinations.
+    void destinationUrl;
   }
 
   private requireText(value: string) {

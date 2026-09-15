@@ -24,8 +24,9 @@ function buildService() {
     update: jest.fn(),
   };
   const dataSource = {
-    transaction: jest.fn((run: (manager: { getRepository: () => typeof repository }) => unknown) =>
-      run({ getRepository: () => repository }),
+    transaction: jest.fn(
+      (run: (manager: { getRepository: () => typeof repository }) => unknown) =>
+        run({ getRepository: () => repository }),
     ),
   };
 
@@ -43,6 +44,8 @@ const validDto = {
   name: 'Engajamento local',
   provider: 'meta' as const,
   objective: 'engagement' as const,
+  performanceGoal: 'post_engagement' as const,
+  conversionLocation: 'on_ad' as const,
   budgetType: 'lifetime' as const,
   budgetAmountMinor: 5000,
   currency: 'BRL',
@@ -67,7 +70,7 @@ describe('SocialBoostTemplateService', () => {
     expect(result.audience.countries).toEqual(['BR']);
   });
 
-  it('rejects a custom audience without a country', async () => {
+  it('rejects a custom audience without any location', async () => {
     const { repository, dataSource, service } = buildService();
     repository.findOne.mockResolvedValue(null);
 
@@ -79,6 +82,51 @@ describe('SocialBoostTemplateService', () => {
       }),
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(dataSource.transaction).not.toHaveBeenCalled();
+  });
+
+  it('accepts cities and regions as reusable geography', async () => {
+    const { repository, service } = buildService();
+    repository.findOne.mockResolvedValue(null);
+    repository.count.mockResolvedValue(0);
+    repository.update.mockResolvedValue({ affected: 0 });
+
+    const result = await service.create(scope, null, {
+      ...validDto,
+      audienceMode: 'custom',
+      audience: { countries: [], regions: ['São Paulo'], cities: ['Campinas'] },
+    });
+
+    expect(result.audience.regions).toEqual(['São Paulo']);
+    expect(result.audience.cities).toEqual(['Campinas']);
+  });
+
+  it('rejects an incompatible objective, goal and conversion location', async () => {
+    const { repository, dataSource, service } = buildService();
+    repository.findOne.mockResolvedValue(null);
+
+    await expect(
+      service.create(scope, null, {
+        ...validDto,
+        objective: 'sales',
+        performanceGoal: 'reach',
+        conversionLocation: 'website',
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(dataSource.transaction).not.toHaveBeenCalled();
+  });
+
+  it('requires an event for website conversion goals', async () => {
+    const { repository, service } = buildService();
+    repository.findOne.mockResolvedValue(null);
+
+    await expect(
+      service.create(scope, null, {
+        ...validDto,
+        objective: 'sales',
+        performanceGoal: 'conversions',
+        conversionLocation: 'website',
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
   });
 
   it('does not reveal a template outside the resolved context', async () => {

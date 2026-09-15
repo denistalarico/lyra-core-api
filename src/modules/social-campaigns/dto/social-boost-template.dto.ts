@@ -18,21 +18,24 @@ import {
 import type {
   SocialBoostAudienceMode,
   SocialBoostBudgetType,
+  SocialBoostConversionLocation,
+  SocialBoostObjective,
+  SocialBoostPerformanceGoal,
 } from '../entities';
+import {
+  SOCIAL_BOOST_CONVERSION_LOCATIONS,
+  SOCIAL_BOOST_OBJECTIVES,
+  SOCIAL_BOOST_PERFORMANCE_GOALS,
+} from '../social-boost-template-options';
 
 const CURRENT_PROVIDERS = ['meta'] as const;
-const OBJECTIVES = [
-  'awareness',
-  'traffic',
-  'engagement',
-  'leads',
-  'sales',
-] as const;
 const BUDGET_TYPES = ['daily', 'lifetime'] satisfies SocialBoostBudgetType[];
 const AUDIENCE_MODES = [
   'automatic',
   'custom',
   'saved',
+  'followers',
+  'engagers',
 ] satisfies SocialBoostAudienceMode[];
 const SPECIAL_AD_CATEGORIES = [
   'CREDIT',
@@ -48,6 +51,27 @@ export class SocialBoostAudienceDto {
   @IsString({ each: true })
   @Matches(/^[A-Za-z]{2}$/, { each: true })
   countries?: string[];
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(50)
+  @IsString({ each: true })
+  @MaxLength(120, { each: true })
+  regions?: string[];
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(50)
+  @IsString({ each: true })
+  @MaxLength(120, { each: true })
+  cities?: string[];
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(50)
+  @IsString({ each: true })
+  @MaxLength(24, { each: true })
+  postalCodes?: string[];
 
   @IsOptional()
   @IsInt()
@@ -67,6 +91,13 @@ export class SocialBoostAudienceDto {
   @IsString({ each: true })
   @MaxLength(24, { each: true })
   genders?: string[];
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(25)
+  @IsString({ each: true })
+  @MaxLength(80, { each: true })
+  languages?: string[];
 
   @IsOptional()
   @IsArray()
@@ -90,8 +121,20 @@ export class CreateSocialBoostTemplateDto {
   @IsIn(CURRENT_PROVIDERS)
   provider!: 'meta';
 
-  @IsIn(OBJECTIVES)
-  objective!: (typeof OBJECTIVES)[number];
+  @IsIn(SOCIAL_BOOST_OBJECTIVES)
+  objective!: SocialBoostObjective;
+
+  @IsIn(SOCIAL_BOOST_PERFORMANCE_GOALS)
+  performanceGoal!: SocialBoostPerformanceGoal;
+
+  @IsIn(SOCIAL_BOOST_CONVERSION_LOCATIONS)
+  conversionLocation!: SocialBoostConversionLocation;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(60)
+  @Matches(/^[A-Za-z0-9_ -]+$/)
+  conversionEvent?: string | null;
 
   @IsIn(BUDGET_TYPES)
   budgetType!: SocialBoostBudgetType;
@@ -157,8 +200,22 @@ export class UpdateSocialBoostTemplateDto {
   name?: string;
 
   @IsOptional()
-  @IsIn(OBJECTIVES)
-  objective?: (typeof OBJECTIVES)[number];
+  @IsIn(SOCIAL_BOOST_OBJECTIVES)
+  objective?: SocialBoostObjective;
+
+  @IsOptional()
+  @IsIn(SOCIAL_BOOST_PERFORMANCE_GOALS)
+  performanceGoal?: SocialBoostPerformanceGoal;
+
+  @IsOptional()
+  @IsIn(SOCIAL_BOOST_CONVERSION_LOCATIONS)
+  conversionLocation?: SocialBoostConversionLocation;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(60)
+  @Matches(/^[A-Za-z0-9_ -]+$/)
+  conversionEvent?: string | null;
 
   @IsOptional()
   @IsIn(BUDGET_TYPES)

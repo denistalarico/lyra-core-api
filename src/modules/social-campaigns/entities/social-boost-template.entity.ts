@@ -10,13 +10,52 @@ import {
 
 export type SocialAdsProvider = 'meta' | 'google' | 'tiktok';
 export type SocialBoostBudgetType = 'daily' | 'lifetime';
-export type SocialBoostAudienceMode = 'automatic' | 'custom' | 'saved';
+export type SocialBoostAudienceMode =
+  | 'automatic'
+  | 'custom'
+  | 'saved'
+  | 'followers'
+  | 'engagers';
+export type SocialBoostObjective =
+  | 'awareness'
+  | 'traffic'
+  | 'engagement'
+  | 'leads'
+  | 'sales'
+  | 'followers';
+export type SocialBoostPerformanceGoal =
+  | 'reach'
+  | 'impressions'
+  | 'link_clicks'
+  | 'landing_page_views'
+  | 'post_engagement'
+  | 'thruplay'
+  | 'two_second_video_views'
+  | 'messaging_conversations_started'
+  | 'instant_form_leads'
+  | 'website_leads'
+  | 'conversions'
+  | 'value'
+  | 'profile_visits'
+  | 'page_likes';
+export type SocialBoostConversionLocation =
+  | 'on_ad'
+  | 'website'
+  | 'messaging_apps'
+  | 'instant_forms'
+  | 'instagram_profile'
+  | 'facebook_page'
+  | 'shop';
 
 export type SocialBoostAudience = {
   countries: string[];
+  regions: string[];
+  cities: string[];
+  postalCodes: string[];
   ageMin: number | null;
   ageMax: number | null;
   genders: string[];
+  languages: string[];
   interests: string[];
   savedAudienceExternalId: string | null;
 };
@@ -44,8 +83,20 @@ export type SocialBoostAudience = {
   `"budget_type" IN ('daily', 'lifetime')`,
 )
 @Check(
+  'CK_social_boost_templates_objective',
+  `"objective" IN ('awareness', 'traffic', 'engagement', 'leads', 'sales', 'followers')`,
+)
+@Check(
+  'CK_social_boost_templates_performance_goal',
+  `"performance_goal" IN ('reach', 'impressions', 'link_clicks', 'landing_page_views', 'post_engagement', 'thruplay', 'two_second_video_views', 'messaging_conversations_started', 'instant_form_leads', 'website_leads', 'conversions', 'value', 'profile_visits', 'page_likes')`,
+)
+@Check(
+  'CK_social_boost_templates_conversion_location',
+  `"conversion_location" IN ('on_ad', 'website', 'messaging_apps', 'instant_forms', 'instagram_profile', 'facebook_page', 'shop')`,
+)
+@Check(
   'CK_social_boost_templates_audience_mode',
-  `"audience_mode" IN ('automatic', 'custom', 'saved')`,
+  `"audience_mode" IN ('automatic', 'custom', 'saved', 'followers', 'engagers')`,
 )
 @Check('CK_social_boost_templates_budget', '"budget_amount_minor" > 0')
 @Check(
@@ -86,7 +137,23 @@ export class SocialBoostTemplateEntity {
 
   /** Lyra vocabulary. Provider mapping belongs to the future execution port. */
   @Column({ type: 'varchar', length: 40 })
-  objective!: string;
+  objective!: SocialBoostObjective;
+
+  /** Lyra canonical goal. Mapping to Meta optimization_goal is execution work. */
+  @Column({ name: 'performance_goal', type: 'varchar', length: 60 })
+  performanceGoal!: SocialBoostPerformanceGoal;
+
+  @Column({ name: 'conversion_location', type: 'varchar', length: 40 })
+  conversionLocation!: SocialBoostConversionLocation;
+
+  /** Optional semantic event such as PURCHASE or LEAD; never a Pixel id. */
+  @Column({
+    name: 'conversion_event',
+    type: 'varchar',
+    length: 60,
+    nullable: true,
+  })
+  conversionEvent!: string | null;
 
   @Column({ name: 'budget_type', type: 'varchar', length: 20 })
   budgetType!: SocialBoostBudgetType;
@@ -121,7 +188,12 @@ export class SocialBoostTemplateEntity {
   })
   specialAdCategories!: string[];
 
-  @Column({ name: 'call_to_action', type: 'varchar', length: 60, nullable: true })
+  @Column({
+    name: 'call_to_action',
+    type: 'varchar',
+    length: 60,
+    nullable: true,
+  })
   callToAction!: string | null;
 
   @Column({ name: 'destination_url', type: 'text', nullable: true })
