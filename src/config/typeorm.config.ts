@@ -328,6 +328,8 @@ import {
   SocialAdSyncRunEntity,
 } from '../modules/social-integrations/entities';
 import {
+  SocialAdActionPolicyEntity,
+  SocialAdGovernedActionEntity,
   SocialBoostTemplateEntity,
   SocialCampaignAlertEntity,
   SocialCampaignMonitorPolicyEntity,
@@ -377,6 +379,8 @@ export const agencyEntities = [
   SocialAdEntity,
   SocialAdMetricDailyEntity,
   SocialAdSyncRunEntity,
+  SocialAdActionPolicyEntity,
+  SocialAdGovernedActionEntity,
   SocialBoostTemplateEntity,
   SocialCampaignMonitorPolicyEntity,
   SocialCampaignAlertEntity,

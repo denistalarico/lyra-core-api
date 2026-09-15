@@ -9,6 +9,8 @@ import {
 } from '../social-integrations/entities';
 import {
   SocialBoostTemplateEntity,
+  SocialAdActionPolicyEntity,
+  SocialAdGovernedActionEntity,
   SocialCampaignAlertEntity,
   SocialCampaignMonitorPolicyEntity,
   SocialCampaignRecommendationEntity,
@@ -20,6 +22,9 @@ import { SocialCampaignRecommendationConfigService } from './services/social-cam
 import { SocialCampaignRecommendationProvider } from './services/social-campaign-recommendation.provider';
 import { SocialCampaignRecommendationService } from './services/social-campaign-recommendation.service';
 import { SocialBoostTemplateService } from './services/social-boost-template.service';
+import { MetaAdsManualActionAdapter } from './services/meta-ads-manual-action.adapter';
+import { SocialAdActionsConfigService } from './services/social-ad-actions-config.service';
+import { SocialAdManualActionService } from './services/social-ad-manual-action.service';
 import { SocialCampaignsController } from './social-campaigns.controller';
 
 @Module({
@@ -29,6 +34,8 @@ import { SocialCampaignsController } from './social-campaigns.controller';
     TypeOrmModule.forFeature(
       [
         SocialBoostTemplateEntity,
+        SocialAdActionPolicyEntity,
+        SocialAdGovernedActionEntity,
         SocialCampaignMonitorPolicyEntity,
         SocialCampaignAlertEntity,
         SocialCampaignRecommendationEntity,
@@ -48,12 +55,16 @@ import { SocialCampaignsController } from './social-campaigns.controller';
     SocialCampaignRecommendationConfigService,
     SocialCampaignRecommendationProvider,
     SocialCampaignRecommendationService,
+    MetaAdsManualActionAdapter,
+    SocialAdActionsConfigService,
+    SocialAdManualActionService,
   ],
   exports: [
     SocialBoostTemplateService,
     MetaCampaignHierarchyReadService,
     SocialCampaignMonitorService,
     SocialCampaignRecommendationService,
+    SocialAdManualActionService,
   ],
 })
 export class SocialCampaignsModule {}

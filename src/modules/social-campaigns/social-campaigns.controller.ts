@@ -14,6 +14,7 @@ import { RequestContextData } from '../../common/context/request-context.decorat
 import type { RequestContext } from '../../common/context/request-context.interface';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import {
+  DangerousAction,
   PermissionsGuard,
   RequirePermission,
   RequireProductEntitlement,
@@ -21,9 +22,14 @@ import {
 import {
   CreateSocialBoostTemplateDto,
   GenerateSocialCampaignRecommendationDto,
+  ConfirmSocialAdActionDto,
   MetaCampaignHierarchyQueryDto,
   SocialCampaignMonitorQueryDto,
   SocialCampaignRecommendationListQueryDto,
+  SocialAdActionHistoryQueryDto,
+  SocialAdActionPolicyQueryDto,
+  SocialAdActionPreflightDto,
+  UpdateSocialAdActionPolicyDto,
   UpdateSocialCampaignMonitorPolicyDto,
   UpdateSocialBoostTemplateDto,
 } from './dto';
@@ -31,10 +37,18 @@ import { MetaCampaignHierarchyReadService } from './services/meta-campaign-hiera
 import { SocialCampaignMonitorService } from './services/social-campaign-monitor.service';
 import { SocialCampaignRecommendationService } from './services/social-campaign-recommendation.service';
 import { SocialBoostTemplateService } from './services/social-boost-template.service';
+import { SocialAdManualActionService } from './services/social-ad-manual-action.service';
 
 const SOCIAL_ADS_VIEW_PERMISSION = 'social.ads.campaign.view.client';
 const SOCIAL_ADS_MANAGE_PERMISSION =
   'social.ads.campaign.manage.admin_or_explicit';
+const ACTION_POLICY_PERMISSION =
+  'social.ads.actions.policy.manage.admin_or_explicit';
+const STATUS_ACTION_PERMISSION = 'social.ads.status.execute.admin_or_explicit';
+const BUDGET_ACTION_PERMISSION = 'social.ads.budget.execute.admin_or_explicit';
+const SCHEDULE_ACTION_PERMISSION =
+  'social.ads.schedule.execute.admin_or_explicit';
+const DELETE_ACTION_PERMISSION = 'social.ads.delete.execute.owner_only';
 
 @Controller('social/campaigns')
 export class SocialCampaignsController {
@@ -43,7 +57,201 @@ export class SocialCampaignsController {
     private readonly hierarchy: MetaCampaignHierarchyReadService,
     private readonly monitor: SocialCampaignMonitorService,
     private readonly recommendations: SocialCampaignRecommendationService,
+    private readonly manualActions: SocialAdManualActionService,
   ) {}
+
+  @Get('meta/actions/availability')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireProductEntitlement('social')
+  @RequirePermission(SOCIAL_ADS_VIEW_PERMISSION)
+  actionAvailability() {
+    return this.manualActions.availability();
+  }
+
+  @Get('meta/actions/policy')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireProductEntitlement('social')
+  @RequirePermission(SOCIAL_ADS_VIEW_PERMISSION)
+  actionPolicy(
+    @RequestContextData() ctx: RequestContext,
+    @Query() query: SocialAdActionPolicyQueryDto,
+  ) {
+    return this.manualActions.getPolicy(
+      this.requireScope(ctx),
+      query.connectionId,
+    );
+  }
+
+  @Patch('meta/actions/policy')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireProductEntitlement('social')
+  @RequirePermission(ACTION_POLICY_PERMISSION)
+  updateActionPolicy(
+    @RequestContextData() ctx: RequestContext,
+    @Body() dto: UpdateSocialAdActionPolicyDto,
+  ) {
+    return this.manualActions.updatePolicy(
+      this.requireScope(ctx),
+      ctx.userId ?? null,
+      dto,
+    );
+  }
+
+  @Get('meta/actions/history')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireProductEntitlement('social')
+  @RequirePermission(SOCIAL_ADS_VIEW_PERMISSION)
+  actionHistory(
+    @RequestContextData() ctx: RequestContext,
+    @Query() query: SocialAdActionHistoryQueryDto,
+  ) {
+    return this.manualActions.history(
+      this.requireScope(ctx),
+      query.connectionId,
+      query.limit,
+    );
+  }
+
+  @Post('meta/actions/status/preflight')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireProductEntitlement('social')
+  @RequirePermission(STATUS_ACTION_PERMISSION)
+  preflightStatus(
+    @RequestContextData() ctx: RequestContext,
+    @Body() dto: SocialAdActionPreflightDto,
+  ) {
+    return this.manualActions.preflight(
+      this.requireScope(ctx),
+      ctx.userId ?? null,
+      'set_status',
+      dto,
+    );
+  }
+
+  @Post('meta/actions/status/:actionId/confirm')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireProductEntitlement('social')
+  @RequirePermission(STATUS_ACTION_PERMISSION)
+  confirmStatus(
+    @RequestContextData() ctx: RequestContext,
+    @Param('actionId', ParseUUIDPipe) actionId: string,
+    @Body() dto: ConfirmSocialAdActionDto,
+  ) {
+    return this.manualActions.confirm(
+      this.requireScope(ctx),
+      ctx.userId ?? null,
+      'set_status',
+      actionId,
+      dto.confirmationRequestId,
+      dto.confirmationText,
+    );
+  }
+
+  @Post('meta/actions/budget/preflight')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireProductEntitlement('social')
+  @RequirePermission(BUDGET_ACTION_PERMISSION)
+  preflightBudget(
+    @RequestContextData() ctx: RequestContext,
+    @Body() dto: SocialAdActionPreflightDto,
+  ) {
+    return this.manualActions.preflight(
+      this.requireScope(ctx),
+      ctx.userId ?? null,
+      'set_budget',
+      dto,
+    );
+  }
+
+  @Post('meta/actions/budget/:actionId/confirm')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireProductEntitlement('social')
+  @RequirePermission(BUDGET_ACTION_PERMISSION)
+  confirmBudget(
+    @RequestContextData() ctx: RequestContext,
+    @Param('actionId', ParseUUIDPipe) actionId: string,
+    @Body() dto: ConfirmSocialAdActionDto,
+  ) {
+    return this.manualActions.confirm(
+      this.requireScope(ctx),
+      ctx.userId ?? null,
+      'set_budget',
+      actionId,
+      dto.confirmationRequestId,
+      dto.confirmationText,
+    );
+  }
+
+  @Post('meta/actions/schedule/preflight')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireProductEntitlement('social')
+  @RequirePermission(SCHEDULE_ACTION_PERMISSION)
+  preflightSchedule(
+    @RequestContextData() ctx: RequestContext,
+    @Body() dto: SocialAdActionPreflightDto,
+  ) {
+    return this.manualActions.preflight(
+      this.requireScope(ctx),
+      ctx.userId ?? null,
+      'set_end_time',
+      dto,
+    );
+  }
+
+  @Post('meta/actions/schedule/:actionId/confirm')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireProductEntitlement('social')
+  @RequirePermission(SCHEDULE_ACTION_PERMISSION)
+  confirmSchedule(
+    @RequestContextData() ctx: RequestContext,
+    @Param('actionId', ParseUUIDPipe) actionId: string,
+    @Body() dto: ConfirmSocialAdActionDto,
+  ) {
+    return this.manualActions.confirm(
+      this.requireScope(ctx),
+      ctx.userId ?? null,
+      'set_end_time',
+      actionId,
+      dto.confirmationRequestId,
+      dto.confirmationText,
+    );
+  }
+
+  @Post('meta/actions/delete/preflight')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireProductEntitlement('social')
+  @RequirePermission(DELETE_ACTION_PERMISSION)
+  preflightDelete(
+    @RequestContextData() ctx: RequestContext,
+    @Body() dto: SocialAdActionPreflightDto,
+  ) {
+    return this.manualActions.preflight(
+      this.requireScope(ctx),
+      ctx.userId ?? null,
+      'delete',
+      dto,
+    );
+  }
+
+  @Post('meta/actions/delete/:actionId/confirm')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireProductEntitlement('social')
+  @RequirePermission(DELETE_ACTION_PERMISSION)
+  @DangerousAction()
+  confirmDelete(
+    @RequestContextData() ctx: RequestContext,
+    @Param('actionId', ParseUUIDPipe) actionId: string,
+    @Body() dto: ConfirmSocialAdActionDto,
+  ) {
+    return this.manualActions.confirm(
+      this.requireScope(ctx),
+      ctx.userId ?? null,
+      'delete',
+      actionId,
+      dto.confirmationRequestId,
+      dto.confirmationText,
+    );
+  }
 
   @Get('meta/recommendations/availability')
   @UseGuards(JwtAuthGuard, PermissionsGuard)
@@ -102,7 +310,11 @@ export class SocialCampaignsController {
     @RequestContextData() ctx: RequestContext,
     @Body() dto: UpdateSocialCampaignMonitorPolicyDto,
   ) {
-    return this.monitor.updatePolicy(this.requireScope(ctx), ctx.userId ?? null, dto);
+    return this.monitor.updatePolicy(
+      this.requireScope(ctx),
+      ctx.userId ?? null,
+      dto,
+    );
   }
 
   /** Evaluates the local mirror now. It never calls or mutates Meta. */
@@ -174,7 +386,11 @@ export class SocialCampaignsController {
     @RequestContextData() ctx: RequestContext,
     @Body() dto: CreateSocialBoostTemplateDto,
   ) {
-    return this.templates.create(this.requireScope(ctx), ctx.userId ?? null, dto);
+    return this.templates.create(
+      this.requireScope(ctx),
+      ctx.userId ?? null,
+      dto,
+    );
   }
 
   @Patch('boost-templates/:templateId')
@@ -197,7 +413,9 @@ export class SocialCampaignsController {
   /** Scope is server-resolved; no DTO accepts tenant, workspace or client. */
   private requireScope(ctx: RequestContext) {
     if (!ctx.tenantId || !ctx.workspaceId) {
-      throw new BadRequestException('Tenant and workspace context are required.');
+      throw new BadRequestException(
+        'Tenant and workspace context are required.',
+      );
     }
 
     const managedContext = ctx.managedContext;
@@ -210,6 +428,10 @@ export class SocialCampaignsController {
       throw new BadRequestException('Client context is required.');
     }
 
-    return { tenantId: ctx.tenantId, workspaceId: ctx.workspaceId, agencyClientId };
+    return {
+      tenantId: ctx.tenantId,
+      workspaceId: ctx.workspaceId,
+      agencyClientId,
+    };
   }
 }

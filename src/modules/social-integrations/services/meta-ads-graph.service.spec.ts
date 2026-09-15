@@ -368,6 +368,53 @@ describe('MetaAdsGraphService', () => {
     });
   });
 
+  describe('mutateNode', () => {
+    it('keeps the access token out of the URL and sends it in a form body', async () => {
+      const fetchMock = jest.fn(() => jsonResponse({ success: true }));
+      global.fetch = fetchMock as never;
+
+      await service.mutateNode({
+        accessToken: 'write-token',
+        path: '123456789',
+        method: 'POST',
+        params: { status: 'PAUSED' },
+        failureMessage: 'write failed',
+      });
+
+      const [url, init] = fetchMock.mock.calls[0] as unknown as [
+        URL,
+        RequestInit,
+      ];
+      expect(url.toString()).toBe('https://graph.facebook.com/v25.0/123456789');
+      expect(url.toString()).not.toContain('write-token');
+      expect(init.method).toBe('POST');
+      expect(new URLSearchParams(String(init.body)).get('access_token')).toBe(
+        'write-token',
+      );
+      expect(new URLSearchParams(String(init.body)).get('status')).toBe(
+        'PAUSED',
+      );
+    });
+
+    it('supports explicit DELETE and rejects nested mutation paths', async () => {
+      global.fetch = jest.fn(() => jsonResponse({ success: true })) as never;
+      await service.mutateNode({
+        accessToken: 'token',
+        path: '123456789',
+        method: 'DELETE',
+        failureMessage: 'delete failed',
+      });
+      await expect(
+        service.mutateNode({
+          accessToken: 'token',
+          path: '123/campaigns',
+          method: 'POST',
+          failureMessage: 'write failed',
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+  });
+
   describe('sanitizeMetaErrorMessage', () => {
     it('redacts a token echoed back by the provider', () => {
       expect(

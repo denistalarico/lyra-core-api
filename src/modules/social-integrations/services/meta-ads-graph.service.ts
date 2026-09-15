@@ -99,6 +99,14 @@ export type MetaGraphEdgeRequest = {
   params?: Readonly<Record<string, string>>;
 };
 
+export type MetaGraphMutationRequest = {
+  accessToken: string;
+  path: string;
+  method: 'POST' | 'DELETE';
+  params?: Readonly<Record<string, string>>;
+  failureMessage: string;
+};
+
 /**
  * Query parameters `buildGraphUrl` owns and a caller may not supply.
  *
@@ -136,7 +144,7 @@ type GraphError = {
 };
 
 /**
- * Read-only Meta Marketing API client for Lyra Social.
+ * Narrow Meta Marketing API client for Lyra Social reads and governed writes.
  *
  * A sibling of `MetaGraphService`, not an extension of it. That service's
  * contract is messaging — pages, webhook subscriptions, phone numbers,
@@ -358,6 +366,44 @@ export class MetaAdsGraphService {
   }
 
   /**
+   * Writes one already-authorized node. The token travels in the form body,
+   * never in a URL, and callers cannot override owned or malformed parameters.
+   * Business rules, scope and human confirmation live above this transport.
+   */
+  async mutateNode(
+    input: MetaGraphMutationRequest,
+  ): Promise<Record<string, unknown>> {
+    const url = this.buildGraphMutationUrl(input.path);
+    const body = new URLSearchParams();
+
+    for (const [key, value] of Object.entries(input.params ?? {})) {
+      if (!GRAPH_PARAM_PATTERN.test(key) || RESERVED_GRAPH_PARAMS.has(key)) {
+        throw new BadRequestException('Invalid Meta Graph mutation parameter.');
+      }
+      body.set(key, value);
+    }
+    body.set('access_token', input.accessToken);
+
+    const { response, data, usage } = await this.requestGraph(url, {
+      method: input.method,
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: body.toString(),
+    });
+
+    if (!response.ok || !isRecord(data)) {
+      throw this.toGraphError({
+        response,
+        data,
+        usage,
+        safeMessage: input.failureMessage,
+        allowProviderMessage: false,
+      });
+    }
+
+    return data;
+  }
+
+  /**
    * Walks a cursor-paginated Graph edge.
    *
    * Generalized from the ad-accounts loop it replaces, unchanged in what it
@@ -468,6 +514,13 @@ export class MetaAdsGraphService {
     url.searchParams.set('access_token', input.accessToken);
 
     return url;
+  }
+
+  private buildGraphMutationUrl(path: string): URL {
+    if (!GRAPH_PATH_PATTERN.test(path) || path.includes('/')) {
+      throw new BadRequestException('Invalid Meta Graph mutation path.');
+    }
+    return new URL(`${META_GRAPH_ORIGIN}/${this.graphVersion}/${path}`);
   }
 
   /**
@@ -700,12 +753,16 @@ export class MetaAdsGraphService {
    * `ECONNRESET at https://graph.facebook.com/...?access_token=EAAG…`, so the
    * message is always ours; only the *kind* is taken from the failure.
    */
-  private async requestGraph(url: URL): Promise<GraphRequestResult> {
+  private async requestGraph(
+    url: URL,
+    init: Omit<RequestInit, 'signal'> = {},
+  ): Promise<GraphRequestResult> {
     let response: Response;
 
     try {
       response = await fetch(url, {
         method: 'GET',
+        ...init,
         signal: this.requestTimeoutSignal(),
       });
     } catch (error) {

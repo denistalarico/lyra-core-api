@@ -374,6 +374,11 @@ const RAW_PERMISSIONS: RawPermission[] = [
   ],
   ['social.ads.campaign.view.client', MANAGER_UP],
   ['social.ads.campaign.manage.admin_or_explicit', ADMIN_UP],
+  ['social.ads.actions.policy.manage.admin_or_explicit', ADMIN_UP],
+  ['social.ads.status.execute.admin_or_explicit', ADMIN_UP],
+  ['social.ads.budget.execute.admin_or_explicit', ADMIN_UP],
+  ['social.ads.schedule.execute.admin_or_explicit', ADMIN_UP],
+  ['social.ads.delete.execute.owner_only', OWNER_ONLY, true],
 
   // 11.5 Social - Approvals
   ['social.approvals.review.view.assigned', ALL_ROLES],

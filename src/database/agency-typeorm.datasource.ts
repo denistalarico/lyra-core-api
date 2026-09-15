@@ -192,6 +192,7 @@ import { AddSocialPlanSoftDelete1793100000000 } from './migrations/1793100000000
 import { CreateSocialBoostTemplates1793200000000 } from './migrations/1793200000000-create-social-boost-templates';
 import { CreateSocialCampaignMonitor1793300000000 } from './migrations/1793300000000-create-social-campaign-monitor';
 import { CreateSocialCampaignRecommendations1793400000000 } from './migrations/1793400000000-create-social-campaign-recommendations';
+import { CreateSocialAdGovernedActions1793500000000 } from './migrations/1793500000000-create-social-ad-governed-actions';
 
 export const AgencyDataSource = new DataSource({
   type: 'postgres',
@@ -394,5 +395,6 @@ export const AgencyDataSource = new DataSource({
     CreateSocialBoostTemplates1793200000000,
     CreateSocialCampaignMonitor1793300000000,
     CreateSocialCampaignRecommendations1793400000000,
+    CreateSocialAdGovernedActions1793500000000,
   ],
 });
