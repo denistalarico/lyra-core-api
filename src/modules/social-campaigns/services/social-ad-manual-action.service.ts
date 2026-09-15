@@ -80,6 +80,7 @@ export class SocialAdManualActionService {
     row.allowBudget = dto.allowBudget;
     row.allowSchedule = dto.allowSchedule;
     row.allowDelete = dto.allowDelete;
+    row.allowBoost = dto.allowBoost;
     row.maxBudgetMinor =
       dto.maxBudgetMinor === null || dto.maxBudgetMinor === undefined
         ? null
@@ -444,6 +445,7 @@ export class SocialAdManualActionService {
       allowBudget: row?.allowBudget ?? false,
       allowSchedule: row?.allowSchedule ?? false,
       allowDelete: row?.allowDelete ?? false,
+      allowBoost: row?.allowBoost ?? false,
       maxBudgetMinor: row?.maxBudgetMinor ?? null,
       maxBudgetIncreasePercent: row?.maxBudgetIncreasePercent ?? 25,
       confirmationTtlMinutes: row?.confirmationTtlMinutes ?? 10,

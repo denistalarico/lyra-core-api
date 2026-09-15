@@ -107,6 +107,8 @@ export type MetaGraphMutationRequest = {
   failureMessage: string;
 };
 
+export type MetaGraphCreationRequest = Omit<MetaGraphMutationRequest, 'method'>;
+
 /**
  * Query parameters `buildGraphUrl` owns and a caller may not supply.
  *
@@ -400,6 +402,45 @@ export class MetaAdsGraphService {
       });
     }
 
+    return data;
+  }
+
+  /**
+   * Creates a child on one allow-listed Marketing API edge. Kept separate from
+   * node mutation so callers cannot accidentally turn a manual edit into a
+   * creation request merely by adding a slash to its path.
+   */
+  async createOnEdge(
+    input: MetaGraphCreationRequest,
+  ): Promise<Record<string, unknown>> {
+    if (!/^act_\d+\/(campaigns|adsets|adcreatives|ads)$/.test(input.path)) {
+      throw new BadRequestException('Invalid Meta Graph creation edge.');
+    }
+    const url = new URL(
+      `${META_GRAPH_ORIGIN}/${this.graphVersion}/${input.path}`,
+    );
+    const body = new URLSearchParams();
+    for (const [key, value] of Object.entries(input.params ?? {})) {
+      if (!GRAPH_PARAM_PATTERN.test(key) || RESERVED_GRAPH_PARAMS.has(key)) {
+        throw new BadRequestException('Invalid Meta Graph mutation parameter.');
+      }
+      body.set(key, value);
+    }
+    body.set('access_token', input.accessToken);
+    const { response, data, usage } = await this.requestGraph(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: body.toString(),
+    });
+    if (!response.ok || !isRecord(data)) {
+      throw this.toGraphError({
+        response,
+        data,
+        usage,
+        safeMessage: input.failureMessage,
+        allowProviderMessage: false,
+      });
+    }
     return data;
   }
 

@@ -53,6 +53,9 @@ export class SocialAdActionPolicyEntity {
   @Column({ name: 'allow_delete', type: 'boolean', default: false })
   allowDelete!: boolean;
 
+  @Column({ name: 'allow_boost', type: 'boolean', default: false })
+  allowBoost!: boolean;
+
   @Column({ name: 'max_budget_minor', type: 'bigint', nullable: true })
   maxBudgetMinor!: string | null;
 

@@ -415,6 +415,36 @@ describe('MetaAdsGraphService', () => {
     });
   });
 
+  describe('createOnEdge', () => {
+    it('allows only the four Boost creation edges and keeps the token in the body', async () => {
+      const fetchMock = jest.fn(() => jsonResponse({ id: '987654321' }));
+      global.fetch = fetchMock as never;
+
+      await service.createOnEdge({
+        accessToken: 'boost-token',
+        path: 'act_123456/campaigns',
+        params: { name: 'Lyra Boost', status: 'PAUSED' },
+        failureMessage: 'create failed',
+      });
+
+      const [url, init] = fetchMock.mock.calls[0] as unknown as [URL, RequestInit];
+      expect(url.toString()).toBe(
+        'https://graph.facebook.com/v25.0/act_123456/campaigns',
+      );
+      expect(url.toString()).not.toContain('boost-token');
+      expect(new URLSearchParams(String(init.body)).get('access_token')).toBe(
+        'boost-token',
+      );
+      await expect(
+        service.createOnEdge({
+          accessToken: 'token',
+          path: '123456/insights',
+          failureMessage: 'create failed',
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+  });
+
   describe('sanitizeMetaErrorMessage', () => {
     it('redacts a token echoed back by the provider', () => {
       expect(

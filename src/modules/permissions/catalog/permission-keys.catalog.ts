@@ -378,6 +378,7 @@ const RAW_PERMISSIONS: RawPermission[] = [
   ['social.ads.status.execute.admin_or_explicit', ADMIN_UP],
   ['social.ads.budget.execute.admin_or_explicit', ADMIN_UP],
   ['social.ads.schedule.execute.admin_or_explicit', ADMIN_UP],
+  ['social.ads.boost.execute.admin_or_explicit', ADMIN_UP, true],
   ['social.ads.delete.execute.owner_only', OWNER_ONLY, true],
 
   // 11.5 Social - Approvals

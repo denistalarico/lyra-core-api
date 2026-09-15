@@ -32,12 +32,15 @@ import {
   UpdateSocialAdActionPolicyDto,
   UpdateSocialCampaignMonitorPolicyDto,
   UpdateSocialBoostTemplateDto,
+  SocialBoostPreflightDto,
+  ConfirmSocialBoostDto,
 } from './dto';
 import { MetaCampaignHierarchyReadService } from './services/meta-campaign-hierarchy-read.service';
 import { SocialCampaignMonitorService } from './services/social-campaign-monitor.service';
 import { SocialCampaignRecommendationService } from './services/social-campaign-recommendation.service';
 import { SocialBoostTemplateService } from './services/social-boost-template.service';
 import { SocialAdManualActionService } from './services/social-ad-manual-action.service';
+import { SocialBoostRequestService } from './services/social-boost-request.service';
 
 const SOCIAL_ADS_VIEW_PERMISSION = 'social.ads.campaign.view.client';
 const SOCIAL_ADS_MANAGE_PERMISSION =
@@ -49,6 +52,7 @@ const BUDGET_ACTION_PERMISSION = 'social.ads.budget.execute.admin_or_explicit';
 const SCHEDULE_ACTION_PERMISSION =
   'social.ads.schedule.execute.admin_or_explicit';
 const DELETE_ACTION_PERMISSION = 'social.ads.delete.execute.owner_only';
+const BOOST_ACTION_PERMISSION = 'social.ads.boost.execute.admin_or_explicit';
 
 @Controller('social/campaigns')
 export class SocialCampaignsController {
@@ -58,7 +62,41 @@ export class SocialCampaignsController {
     private readonly monitor: SocialCampaignMonitorService,
     private readonly recommendations: SocialCampaignRecommendationService,
     private readonly manualActions: SocialAdManualActionService,
+    private readonly boostRequests: SocialBoostRequestService,
   ) {}
+
+  @Post('meta/boost/preflight')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireProductEntitlement('social')
+  @RequirePermission(BOOST_ACTION_PERMISSION)
+  preflightBoost(
+    @RequestContextData() ctx: RequestContext,
+    @Body() dto: SocialBoostPreflightDto,
+  ) {
+    return this.boostRequests.preflight(
+      this.requireScope(ctx),
+      ctx.userId ?? null,
+      dto,
+    );
+  }
+
+  @Post('meta/boost/:boostRequestId/confirm')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireProductEntitlement('social')
+  @RequirePermission(BOOST_ACTION_PERMISSION)
+  @DangerousAction()
+  confirmBoost(
+    @RequestContextData() ctx: RequestContext,
+    @Param('boostRequestId', ParseUUIDPipe) boostRequestId: string,
+    @Body() dto: ConfirmSocialBoostDto,
+  ) {
+    return this.boostRequests.confirm(
+      this.requireScope(ctx),
+      ctx.userId ?? null,
+      boostRequestId,
+      dto.confirmationRequestId,
+    );
+  }
 
   @Get('meta/actions/availability')
   @UseGuards(JwtAuthGuard, PermissionsGuard)

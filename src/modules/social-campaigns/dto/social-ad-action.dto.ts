@@ -39,6 +39,9 @@ export class UpdateSocialAdActionPolicyDto {
   @IsBoolean()
   allowDelete!: boolean;
 
+  @IsBoolean()
+  allowBoost!: boolean;
+
   @IsOptional()
   @Type(() => Number)
   @IsInt()
