@@ -331,6 +331,7 @@ import {
   SocialBoostTemplateEntity,
   SocialCampaignAlertEntity,
   SocialCampaignMonitorPolicyEntity,
+  SocialCampaignRecommendationEntity,
 } from '../modules/social-campaigns/entities';
 import {
   SocialOrganicAssetEntity,
@@ -379,6 +380,7 @@ export const agencyEntities = [
   SocialBoostTemplateEntity,
   SocialCampaignMonitorPolicyEntity,
   SocialCampaignAlertEntity,
+  SocialCampaignRecommendationEntity,
   SocialOrganicConnectionEntity,
   SocialOrganicAssetEntity,
   SocialOrganicPostMetricDailyEntity,

@@ -20,13 +20,16 @@ import {
 } from '../permissions';
 import {
   CreateSocialBoostTemplateDto,
+  GenerateSocialCampaignRecommendationDto,
   MetaCampaignHierarchyQueryDto,
   SocialCampaignMonitorQueryDto,
+  SocialCampaignRecommendationListQueryDto,
   UpdateSocialCampaignMonitorPolicyDto,
   UpdateSocialBoostTemplateDto,
 } from './dto';
 import { MetaCampaignHierarchyReadService } from './services/meta-campaign-hierarchy-read.service';
 import { SocialCampaignMonitorService } from './services/social-campaign-monitor.service';
+import { SocialCampaignRecommendationService } from './services/social-campaign-recommendation.service';
 import { SocialBoostTemplateService } from './services/social-boost-template.service';
 
 const SOCIAL_ADS_VIEW_PERMISSION = 'social.ads.campaign.view.client';
@@ -39,7 +42,46 @@ export class SocialCampaignsController {
     private readonly templates: SocialBoostTemplateService,
     private readonly hierarchy: MetaCampaignHierarchyReadService,
     private readonly monitor: SocialCampaignMonitorService,
+    private readonly recommendations: SocialCampaignRecommendationService,
   ) {}
+
+  @Get('meta/recommendations/availability')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireProductEntitlement('social')
+  @RequirePermission(SOCIAL_ADS_VIEW_PERMISSION)
+  recommendationAvailability() {
+    return this.recommendations.availability();
+  }
+
+  @Get('meta/recommendations')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireProductEntitlement('social')
+  @RequirePermission(SOCIAL_ADS_VIEW_PERMISSION)
+  listRecommendations(
+    @RequestContextData() ctx: RequestContext,
+    @Query() query: SocialCampaignRecommendationListQueryDto,
+  ) {
+    return this.recommendations.list(
+      this.requireScope(ctx),
+      query.connectionId,
+      query.limit,
+    );
+  }
+
+  @Post('meta/recommendations/generate')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireProductEntitlement('social')
+  @RequirePermission(SOCIAL_ADS_MANAGE_PERMISSION)
+  generateRecommendations(
+    @RequestContextData() ctx: RequestContext,
+    @Body() dto: GenerateSocialCampaignRecommendationDto,
+  ) {
+    return this.recommendations.generate(
+      this.requireScope(ctx),
+      ctx.userId ?? null,
+      dto,
+    );
+  }
 
   @Get('meta/monitor')
   @UseGuards(JwtAuthGuard, PermissionsGuard)
