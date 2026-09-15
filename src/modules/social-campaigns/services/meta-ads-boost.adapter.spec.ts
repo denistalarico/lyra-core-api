@@ -34,7 +34,7 @@ describe('MetaAdsBoostAdapter', () => {
           countries: ['BR'], regions: [], cities: [], postalCodes: [], ageMin: 18,
           ageMax: 65, genders: [], languages: [], interests: [], savedAudienceExternalId: null,
         },
-      } as SocialBoostTemplateEntity,
+      } as unknown as SocialBoostTemplateEntity,
       publication: {
         provider: 'facebook', externalPublicationId: '55_66',
         externalAssetId: '55', assetType: 'facebook_page', assetMetadata: {},
@@ -71,7 +71,7 @@ describe('MetaAdsBoostAdapter', () => {
           countries: ['BR'], regions: [], cities: [], postalCodes: [], ageMin: null,
           ageMax: null, genders: [], languages: [], interests: [], savedAudienceExternalId: null,
         },
-      } as SocialBoostTemplateEntity,
+      } as unknown as SocialBoostTemplateEntity,
       publication: {
         provider: 'facebook', externalPublicationId: '55_66',
         externalAssetId: '55', assetType: 'facebook_page', assetMetadata: {},

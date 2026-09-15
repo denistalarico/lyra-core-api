@@ -19,7 +19,7 @@ const template = {
     interests: [],
     savedAudienceExternalId: null,
   },
-} as SocialBoostTemplateEntity;
+} as unknown as SocialBoostTemplateEntity;
 
 describe('C7 Boost execution policy', () => {
   it('allows a resolved existing Facebook post', () => {
