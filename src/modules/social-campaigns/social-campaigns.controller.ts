@@ -20,8 +20,10 @@ import {
 } from '../permissions';
 import {
   CreateSocialBoostTemplateDto,
+  MetaCampaignHierarchyQueryDto,
   UpdateSocialBoostTemplateDto,
 } from './dto';
+import { MetaCampaignHierarchyReadService } from './services/meta-campaign-hierarchy-read.service';
 import { SocialBoostTemplateService } from './services/social-boost-template.service';
 
 const SOCIAL_ADS_VIEW_PERMISSION = 'social.ads.campaign.view.client';
@@ -30,7 +32,30 @@ const SOCIAL_ADS_MANAGE_PERMISSION =
 
 @Controller('social/campaigns')
 export class SocialCampaignsController {
-  constructor(private readonly templates: SocialBoostTemplateService) {}
+  constructor(
+    private readonly templates: SocialBoostTemplateService,
+    private readonly hierarchy: MetaCampaignHierarchyReadService,
+  ) {}
+
+  @Get('meta/hierarchy')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireProductEntitlement('social')
+  @RequirePermission(SOCIAL_ADS_VIEW_PERMISSION)
+  metaHierarchy(
+    @RequestContextData() ctx: RequestContext,
+    @Query() query: MetaCampaignHierarchyQueryDto,
+  ) {
+    return this.hierarchy.read({
+      ...this.requireScope(ctx),
+      connectionId: query.connectionId,
+      since: query.since,
+      until: query.until,
+      status: query.status,
+      search: query.search,
+      page: query.page,
+      limit: query.limit,
+    });
+  }
 
   @Get('boost-templates')
   @UseGuards(JwtAuthGuard, PermissionsGuard)
