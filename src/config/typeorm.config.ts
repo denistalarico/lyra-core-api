@@ -327,7 +327,11 @@ import {
   SocialAdMetricDailyEntity,
   SocialAdSyncRunEntity,
 } from '../modules/social-integrations/entities';
-import { SocialBoostTemplateEntity } from '../modules/social-campaigns/entities';
+import {
+  SocialBoostTemplateEntity,
+  SocialCampaignAlertEntity,
+  SocialCampaignMonitorPolicyEntity,
+} from '../modules/social-campaigns/entities';
 import {
   SocialOrganicAssetEntity,
   SocialOrganicConnectionEntity,
@@ -373,6 +377,8 @@ export const agencyEntities = [
   SocialAdMetricDailyEntity,
   SocialAdSyncRunEntity,
   SocialBoostTemplateEntity,
+  SocialCampaignMonitorPolicyEntity,
+  SocialCampaignAlertEntity,
   SocialOrganicConnectionEntity,
   SocialOrganicAssetEntity,
   SocialOrganicPostMetricDailyEntity,

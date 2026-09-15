@@ -21,9 +21,12 @@ import {
 import {
   CreateSocialBoostTemplateDto,
   MetaCampaignHierarchyQueryDto,
+  SocialCampaignMonitorQueryDto,
+  UpdateSocialCampaignMonitorPolicyDto,
   UpdateSocialBoostTemplateDto,
 } from './dto';
 import { MetaCampaignHierarchyReadService } from './services/meta-campaign-hierarchy-read.service';
+import { SocialCampaignMonitorService } from './services/social-campaign-monitor.service';
 import { SocialBoostTemplateService } from './services/social-boost-template.service';
 
 const SOCIAL_ADS_VIEW_PERMISSION = 'social.ads.campaign.view.client';
@@ -35,7 +38,57 @@ export class SocialCampaignsController {
   constructor(
     private readonly templates: SocialBoostTemplateService,
     private readonly hierarchy: MetaCampaignHierarchyReadService,
+    private readonly monitor: SocialCampaignMonitorService,
   ) {}
+
+  @Get('meta/monitor')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireProductEntitlement('social')
+  @RequirePermission(SOCIAL_ADS_VIEW_PERMISSION)
+  monitorOverview(
+    @RequestContextData() ctx: RequestContext,
+    @Query() query: SocialCampaignMonitorQueryDto,
+  ) {
+    return this.monitor.overview(this.requireScope(ctx), query.connectionId);
+  }
+
+  @Patch('meta/monitor/policy')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireProductEntitlement('social')
+  @RequirePermission(SOCIAL_ADS_MANAGE_PERMISSION)
+  updateMonitorPolicy(
+    @RequestContextData() ctx: RequestContext,
+    @Body() dto: UpdateSocialCampaignMonitorPolicyDto,
+  ) {
+    return this.monitor.updatePolicy(this.requireScope(ctx), ctx.userId ?? null, dto);
+  }
+
+  /** Evaluates the local mirror now. It never calls or mutates Meta. */
+  @Post('meta/monitor/evaluate')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireProductEntitlement('social')
+  @RequirePermission(SOCIAL_ADS_MANAGE_PERMISSION)
+  evaluateMonitor(
+    @RequestContextData() ctx: RequestContext,
+    @Body() dto: SocialCampaignMonitorQueryDto,
+  ) {
+    return this.monitor.evaluate(this.requireScope(ctx), dto.connectionId);
+  }
+
+  @Patch('meta/alerts/:alertId/acknowledge')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireProductEntitlement('social')
+  @RequirePermission(SOCIAL_ADS_MANAGE_PERMISSION)
+  acknowledgeAlert(
+    @RequestContextData() ctx: RequestContext,
+    @Param('alertId', ParseUUIDPipe) alertId: string,
+  ) {
+    return this.monitor.acknowledge(
+      this.requireScope(ctx),
+      alertId,
+      ctx.userId ?? null,
+    );
+  }
 
   @Get('meta/hierarchy')
   @UseGuards(JwtAuthGuard, PermissionsGuard)
