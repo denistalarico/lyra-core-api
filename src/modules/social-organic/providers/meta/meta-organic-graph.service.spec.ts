@@ -48,13 +48,15 @@ describe('MetaOrganicGraphService', () => {
     });
   });
 
-  it('uses only the old Social names as a temporary fallback', () => {
+  it('never falls back to Ads credentials for an Organic login', () => {
     delete process.env.SOCIAL_META_APP_ID;
     delete process.env.SOCIAL_META_APP_SECRET;
     process.env.SOCIAL_META_ADS_APP_ID = 'legacy-social-app';
     process.env.SOCIAL_META_ADS_APP_SECRET = 'legacy-social-secret';
 
-    expect(service.getLoginConfig().appId).toBe('legacy-social-app');
+    expect(() => service.getLoginConfig()).toThrow(
+      'SOCIAL_META_APP_ID is not configured.',
+    );
   });
 
   it('never falls back to the Messaging app identity', () => {

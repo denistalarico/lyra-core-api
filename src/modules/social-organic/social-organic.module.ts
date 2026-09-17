@@ -62,6 +62,9 @@ import { SocialPublicationExecutorService } from './publication/social-publicati
 import { SOCIAL_PUBLICATION_EXECUTOR } from './publication/social-publication.worker';
 import {
   FacebookPublisherAdapter,
+  DirectInstagramPublisherAdapter,
+  MetaInstagramAssetDiscoveryService,
+  MetaInstagramOAuthProvider,
   InstagramPublisherAdapter,
   MetaOrganicAssetDiscoveryService,
   MetaOrganicGraphService,
@@ -82,8 +85,9 @@ import {
 
 export function createMetaOrganicOAuthProviders(
   meta: MetaOrganicOAuthProvider,
+  instagram: MetaInstagramOAuthProvider,
 ) {
-  return [meta];
+  return [meta, instagram];
 }
 
 @Module({
@@ -147,10 +151,12 @@ export function createMetaOrganicOAuthProviders(
     MetaOrganicGraphService,
     MetaOrganicAssetDiscoveryService,
     MetaOrganicOAuthProvider,
+    MetaInstagramAssetDiscoveryService,
+    MetaInstagramOAuthProvider,
     {
       provide: SOCIAL_ORGANIC_OAUTH_PROVIDERS,
       useFactory: createMetaOrganicOAuthProviders,
-      inject: [MetaOrganicOAuthProvider],
+      inject: [MetaOrganicOAuthProvider, MetaInstagramOAuthProvider],
     },
     SocialOrganicCredentialResolver,
     SocialOrganicOAuthProviderRegistry,
@@ -171,6 +177,7 @@ export function createMetaOrganicOAuthProviders(
     SocialPublisherRegistry,
     FacebookPublisherAdapter,
     InstagramPublisherAdapter,
+    DirectInstagramPublisherAdapter,
     MetaPublisherRegistration,
     MetaOrganicHealthService,
     SocialOrganicHealthScheduler,

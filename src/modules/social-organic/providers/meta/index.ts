@@ -1,5 +1,7 @@
 export * from './facebook-publisher.adapter';
 export * from './instagram-publisher.adapter';
+export * from './meta-instagram-asset-discovery.service';
+export * from './meta-instagram-oauth.provider';
 export * from './meta-capabilities';
 export * from './meta-organic-asset-discovery.service';
 export * from './meta-organic-graph.error';

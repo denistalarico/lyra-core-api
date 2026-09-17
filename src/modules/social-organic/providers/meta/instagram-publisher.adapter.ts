@@ -27,11 +27,15 @@ const INSTAGRAM_CONTAINER_TTL_MS = 23 * 60 * 60_000;
 /** Instagram Professional container-then-publish adapter. */
 @Injectable()
 export class InstagramPublisherAdapter implements SocialPublisherAdapter {
-  readonly provider = 'meta';
+  readonly provider: string = 'meta';
   readonly assetTypes = [INSTAGRAM_ASSET_TYPE] as const;
   readonly retrySafety = 'non_retryable_after_send' as const;
 
-  constructor(private readonly graph: MetaOrganicGraphService) {}
+  constructor(protected readonly graph: MetaOrganicGraphService) {}
+
+  protected get instagramApiHost(): 'facebook' | 'instagram' {
+    return this.provider === 'instagram' ? 'instagram' : 'facebook';
+  }
 
   capabilities(assetType: string): PublisherCapabilities {
     if (assetType !== INSTAGRAM_ASSET_TYPE) {
@@ -109,6 +113,7 @@ export class InstagramPublisherAdapter implements SocialPublisherAdapter {
         caption:
           input.mediaCount > 1 || input.payload.placement === 'story' ? null : input.payload.caption,
         carouselItem: input.mediaCount > 1,
+        apiHost: this.instagramApiHost,
       });
 
       return {
@@ -154,6 +159,7 @@ export class InstagramPublisherAdapter implements SocialPublisherAdapter {
           pageAccessToken: input.credential.accessToken,
           childContainerIds: media.map((entry) => entry.id),
           caption: input.payload.caption,
+          apiHost: this.instagramApiHost,
         });
         return this.progressContainer(input.credential, parent.id);
       } catch (error) {
@@ -200,6 +206,7 @@ export class InstagramPublisherAdapter implements SocialPublisherAdapter {
       const status = await this.graph.getInstagramContainerStatus({
         containerId,
         pageAccessToken: credential.accessToken,
+        apiHost: this.instagramApiHost,
       });
 
       if (status === 'IN_PROGRESS') {
@@ -235,6 +242,7 @@ export class InstagramPublisherAdapter implements SocialPublisherAdapter {
         accountId: credential.externalAssetId,
         pageAccessToken: credential.accessToken,
         containerId,
+        apiHost: this.instagramApiHost,
       });
       return {
         outcome: 'published',
@@ -247,4 +255,15 @@ export class InstagramPublisherAdapter implements SocialPublisherAdapter {
       return metaPublicationFailure(error);
     }
   }
+}
+
+/**
+ * Instagram Login issues a token for graph.instagram.com and is intentionally
+ * registered under a distinct provider key. The publication semantics are the
+ * same container workflow, but it must never be resolved as a Facebook Login
+ * asset by accident.
+ */
+@Injectable()
+export class DirectInstagramPublisherAdapter extends InstagramPublisherAdapter {
+  override readonly provider = 'instagram';
 }

@@ -84,6 +84,9 @@ export class SocialOrganicConnectionService {
       });
 
     this.applyClientScope(query, input.agencyClientId);
+    // A disconnected row is retained for publication audit integrity, but it
+    // is never a reconnect card. New OAuth state replaces the visible flow.
+    query.andWhere('connection.credentialRemovedAt IS NULL');
     query.andWhere(
       "(connection.connectionStatus NOT IN ('pending', 'awaiting_selection') OR connection.oauthExpiresAt > :now)",
       { now },

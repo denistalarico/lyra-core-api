@@ -25,6 +25,7 @@ import {
   SocialOrganicOAuthTokenGrant,
 } from './social-organic-oauth.provider';
 import { normalizeIanaTimeZone } from './social-organic-asset-timezone';
+import type { SocialOrganicConnectionMode } from './dto/start-social-organic-connection.dto';
 
 export const SOCIAL_ORGANIC_OAUTH_SESSION_TTL_MS = 15 * 60 * 1000;
 
@@ -34,6 +35,8 @@ export type StartSocialOrganicConnectionInput = {
   agencyClientId: string | null;
   userId: string | null;
   provider: string;
+  connectionMode?: SocialOrganicConnectionMode;
+  allowedAssetTypes?: readonly string[];
 };
 
 export type HandleSocialOrganicCallbackInput =
@@ -128,7 +131,13 @@ export class SocialOrganicOAuthService {
       oauthExpiresAt: expiresAt,
       createdById: input.userId,
       lastError: null,
-      metadata: { startedAt: new Date().toISOString() },
+      metadata: {
+        startedAt: new Date().toISOString(),
+        ...(input.connectionMode ? { connectionMode: input.connectionMode } : {}),
+        ...(input.allowedAssetTypes?.length
+          ? { allowedAssetTypes: [...input.allowedAssetTypes] }
+          : {}),
+      },
       credentialRemovedAt: null,
     });
 
@@ -145,7 +154,7 @@ export class SocialOrganicOAuthService {
   async handleCallback(
     input: HandleSocialOrganicCallbackInput,
   ): Promise<string> {
-    const hooks = this.providers.find(input.provider);
+    const hooks = await this.resolveCallbackProvider(input);
 
     if (!hooks) {
       return this.buildFallbackRedirect('provider_not_configured');
@@ -455,7 +464,12 @@ export class SocialOrganicOAuthService {
         return { ok: false, reason: 'asset_discovery_failed' };
       }
 
-      const selectable = this.normalizeDiscoveredAssets(discovered);
+      const allowedAssetTypes = this.readAllowedAssetTypes(connection.metadata);
+      const selectable = this.normalizeDiscoveredAssets(discovered).filter(
+        (asset) =>
+          allowedAssetTypes.length === 0 ||
+          allowedAssetTypes.includes(asset.assetType),
+      );
 
       if (selectable.length === 0) {
         await this.failConnection(
@@ -539,13 +553,76 @@ export class SocialOrganicOAuthService {
   private async discardInFlightConnections(
     input: StartSocialOrganicConnectionInput,
   ): Promise<void> {
-    await this.connectionsRepository.delete({
-      tenantId: input.tenantId,
-      workspaceId: input.workspaceId,
-      agencyClientId: input.agencyClientId ?? IsNull(),
-      provider: input.provider,
-      connectionStatus: In(['pending', 'awaiting_selection', 'error']),
+    // Compatibility path for lifecycle callers created before connector modes.
+    // Browser requests always carry a mode and use the narrower query below.
+    if (!input.connectionMode) {
+      await this.connectionsRepository.delete({
+        tenantId: input.tenantId,
+        workspaceId: input.workspaceId,
+        agencyClientId: input.agencyClientId ?? IsNull(),
+        provider: input.provider,
+        connectionStatus: In(['pending', 'awaiting_selection', 'error']),
+      });
+      return;
+    }
+
+    const query = this.connectionsRepository
+      .createQueryBuilder()
+      .delete()
+      .where('tenant_id = :tenantId', { tenantId: input.tenantId })
+      .andWhere('workspace_id = :workspaceId', { workspaceId: input.workspaceId })
+      .andWhere('provider = :provider', { provider: input.provider })
+      .andWhere("connection_status IN ('pending', 'awaiting_selection', 'error')");
+
+    if (input.connectionMode) {
+      query.andWhere("metadata ->> 'connectionMode' = :connectionMode", {
+        connectionMode: input.connectionMode,
+      });
+    }
+
+    if (input.agencyClientId) {
+      query.andWhere('agency_client_id = :agencyClientId', {
+        agencyClientId: input.agencyClientId,
+      });
+    } else {
+      query.andWhere('agency_client_id IS NULL');
+    }
+
+    await query.execute();
+  }
+
+  private async resolveCallbackProvider(
+    input: HandleSocialOrganicCallbackInput,
+  ): Promise<SocialOrganicOAuthProviderHooks | undefined> {
+    const hinted = this.providers.find(input.provider);
+    if (!isAcceptableOAuthState(input.state)) {
+      return hinted;
+    }
+
+    // Both Meta products may be registered with the same Organic callback
+    // URL. Only the `/meta/callback` alias needs state-based resolution; a
+    // dedicated `/instagram/callback` remains a direct registry lookup.
+    if (input.provider !== 'meta' || !hinted) {
+      return hinted;
+    }
+
+    const connection = await this.connectionsRepository.findOne({
+      select: { provider: true },
+      where: { oauthStateHash: hashOAuthState(input.state) },
     });
+
+    return connection
+      ? this.providers.find(connection.provider)
+      : hinted;
+  }
+
+  private readAllowedAssetTypes(metadata: Record<string, unknown>): string[] {
+    const raw = metadata.allowedAssetTypes;
+    if (!Array.isArray(raw)) return [];
+    return raw.filter(
+      (assetType): assetType is string =>
+        typeof assetType === 'string' && assetType.trim().length > 0,
+    );
   }
 
   private async failConnection(

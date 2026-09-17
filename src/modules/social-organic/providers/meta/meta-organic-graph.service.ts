@@ -3,9 +3,15 @@ import {
   META_ORGANIC_AUTHORIZATION_ORIGIN,
   META_ORGANIC_GRAPH_API_VERSION,
   META_ORGANIC_GRAPH_ORIGIN,
+  META_INSTAGRAM_AUTHORIZATION_ORIGIN,
+  META_INSTAGRAM_GRAPH_ORIGIN,
+  META_INSTAGRAM_TOKEN_ORIGIN,
   requireSocialMetaAppId,
   requireSocialMetaAppSecret,
+  requireSocialMetaInstagramAppId,
+  requireSocialMetaInstagramAppSecret,
   requireSocialMetaOrganicLoginConfigId,
+  type MetaInstagramLoginConfig,
   type MetaOrganicLoginConfig,
 } from './meta-organic-oauth.support';
 import {
@@ -46,6 +52,15 @@ export type MetaOrganicInstagramAccount = {
   username: string | null;
   avatarUrl: string | null;
 };
+
+export type MetaOrganicDirectInstagramAccount = {
+  accountId: string;
+  name: string | null;
+  username: string | null;
+  avatarUrl: string | null;
+};
+
+export type MetaInstagramApiHost = 'facebook' | 'instagram';
 
 export type MetaOrganicPublishedObject = {
   id: string;
@@ -102,6 +117,60 @@ export class MetaOrganicGraphService {
     url.searchParams.set('fb_exchange_token', accessToken);
 
     return this.readToken(await this.requestJson(url, { method: 'GET' }));
+  }
+
+  getInstagramLoginConfig(): MetaInstagramLoginConfig {
+    requireSocialMetaInstagramAppSecret();
+    return {
+      appId: requireSocialMetaInstagramAppId(),
+      authorizationEndpoint: `${META_INSTAGRAM_AUTHORIZATION_ORIGIN}/oauth/authorize`,
+    };
+  }
+
+  async exchangeInstagramOAuthCode(input: {
+    code: string;
+    redirectUri: string;
+  }): Promise<MetaOrganicToken> {
+    const url = new URL(`${META_INSTAGRAM_TOKEN_ORIGIN}/oauth/access_token`);
+    const data = await this.requestJson(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id: requireSocialMetaInstagramAppId(),
+        client_secret: requireSocialMetaInstagramAppSecret(),
+        grant_type: 'authorization_code',
+        redirect_uri: input.redirectUri,
+        code: input.code,
+      }),
+    });
+    return this.readToken(data);
+  }
+
+  async exchangeInstagramLongLivedToken(
+    accessToken: string,
+  ): Promise<MetaOrganicToken> {
+    const url = new URL(`${META_INSTAGRAM_GRAPH_ORIGIN}/access_token`);
+    url.searchParams.set('grant_type', 'ig_exchange_token');
+    url.searchParams.set('client_secret', requireSocialMetaInstagramAppSecret());
+    url.searchParams.set('access_token', accessToken);
+    return this.readToken(await this.requestJson(url, { method: 'GET' }));
+  }
+
+  async getDirectInstagramAccount(
+    accessToken: string,
+  ): Promise<MetaOrganicDirectInstagramAccount> {
+    const url = this.graphUrl('me', 'instagram');
+    url.searchParams.set('fields', 'id,name,username,profile_picture_url');
+    const data = await this.requestJson(url, this.authorized(accessToken));
+    if (!isRecord(data)) throw this.invalidResponse();
+    const accountId = readRequiredString(data.id);
+    if (!accountId) throw this.invalidResponse();
+    return {
+      accountId,
+      name: readOptionalString(data.name),
+      username: readOptionalString(data.username),
+      avatarUrl: readOptionalString(data.profile_picture_url),
+    };
   }
 
   async listFacebookPages(
@@ -462,6 +531,7 @@ export class MetaOrganicGraphService {
     placement: 'feed' | 'reel' | 'story';
     caption: string | null;
     carouselItem?: boolean;
+    apiHost?: MetaInstagramApiHost;
   }): Promise<MetaOrganicPublishedObject> {
     const fields: Record<string, string> = {};
     fields[input.mediaKind === 'video' ? 'video_url' : 'image_url'] =
@@ -477,7 +547,10 @@ export class MetaOrganicGraphService {
 
     return this.readPublishedObject(
       await this.requestForm(
-        this.graphUrl(`${encodeURIComponent(input.accountId)}/media`),
+        this.graphUrl(
+          `${encodeURIComponent(input.accountId)}/media`,
+          input.apiHost,
+        ),
         input.pageAccessToken,
         fields,
       ),
@@ -489,6 +562,7 @@ export class MetaOrganicGraphService {
     pageAccessToken: string;
     childContainerIds: readonly string[];
     caption: string | null;
+    apiHost?: MetaInstagramApiHost;
   }): Promise<MetaOrganicPublishedObject> {
     const fields: Record<string, string> = {
       media_type: 'CAROUSEL',
@@ -496,7 +570,10 @@ export class MetaOrganicGraphService {
     };
     if (input.caption) fields.caption = input.caption;
     return this.readPublishedObject(await this.requestForm(
-      this.graphUrl(`${encodeURIComponent(input.accountId)}/media`),
+      this.graphUrl(
+        `${encodeURIComponent(input.accountId)}/media`,
+        input.apiHost,
+      ),
       input.pageAccessToken,
       fields,
     ));
@@ -505,8 +582,9 @@ export class MetaOrganicGraphService {
   async getInstagramContainerStatus(input: {
     containerId: string;
     pageAccessToken: string;
+    apiHost?: MetaInstagramApiHost;
   }): Promise<MetaOrganicInstagramContainerStatus> {
-    const url = this.graphUrl(encodeURIComponent(input.containerId));
+    const url = this.graphUrl(encodeURIComponent(input.containerId), input.apiHost);
     url.searchParams.set('fields', 'status_code');
     const data = await this.requestJson(
       url,
@@ -531,10 +609,14 @@ export class MetaOrganicGraphService {
     accountId: string;
     pageAccessToken: string;
     containerId: string;
+    apiHost?: MetaInstagramApiHost;
   }): Promise<MetaOrganicPublishedObject> {
     return this.readPublishedObject(
       await this.requestForm(
-        this.graphUrl(`${encodeURIComponent(input.accountId)}/media_publish`),
+        this.graphUrl(
+          `${encodeURIComponent(input.accountId)}/media_publish`,
+          input.apiHost,
+        ),
         input.pageAccessToken,
         { creation_id: input.containerId },
       ),
@@ -560,9 +642,13 @@ export class MetaOrganicGraphService {
     );
   }
 
-  private graphUrl(path: string): URL {
+  private graphUrl(path: string, apiHost: MetaInstagramApiHost = 'facebook'): URL {
+    const origin =
+      apiHost === 'instagram'
+        ? META_INSTAGRAM_GRAPH_ORIGIN
+        : META_ORGANIC_GRAPH_ORIGIN;
     return new URL(
-      `${META_ORGANIC_GRAPH_ORIGIN}/${META_ORGANIC_GRAPH_API_VERSION}/${path}`,
+      `${origin}/${META_ORGANIC_GRAPH_API_VERSION}/${path}`,
     );
   }
 

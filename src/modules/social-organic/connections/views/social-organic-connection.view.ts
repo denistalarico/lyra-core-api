@@ -5,6 +5,7 @@ import type {
   SocialOrganicConnectionStatus,
 } from '../../entities';
 import type { SocialOrganicDiscoveredAsset } from '../social-organic-oauth.provider';
+import type { SocialOrganicConnectionMode } from '../dto/start-social-organic-connection.dto';
 
 export type SocialOrganicConnectionState =
   | 'connecting'
@@ -36,6 +37,7 @@ export type SocialOrganicAvailableAssetView = {
 export type SocialOrganicConnectionView = {
   id: string;
   provider: string;
+  connectionMode: SocialOrganicConnectionMode | null;
   state: SocialOrganicConnectionState;
   status: SocialOrganicConnectionStatus;
   authorizationMethod: SocialOrganicAuthorizationMethod;
@@ -77,6 +79,7 @@ export function toSocialOrganicConnectionView(
   return {
     id: connection.id,
     provider: connection.provider,
+    connectionMode: readConnectionMode(connection.metadata),
     state,
     status: connection.connectionStatus,
     authorizationMethod: connection.authorizationMethod,
@@ -94,6 +97,17 @@ export function toSocialOrganicConnectionView(
     createdAt: connection.createdAt.toISOString(),
     updatedAt: connection.updatedAt.toISOString(),
   };
+}
+
+function readConnectionMode(
+  metadata: Record<string, unknown> | null | undefined,
+): SocialOrganicConnectionMode | null {
+  const value = metadata?.connectionMode;
+  return value === 'facebook' ||
+    value === 'instagram_facebook' ||
+    value === 'instagram_direct'
+    ? value
+    : null;
 }
 
 export function toSocialOrganicAssetView(

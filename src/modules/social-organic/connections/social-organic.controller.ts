@@ -22,6 +22,10 @@ import {
   RequireProductEntitlement,
 } from '../../permissions';
 import { SelectSocialOrganicAssetsDto } from './dto/select-social-organic-assets.dto';
+import {
+  StartSocialOrganicConnectionDto,
+  type SocialOrganicConnectionMode,
+} from './dto/start-social-organic-connection.dto';
 import { UpdateSocialOrganicAssetTimezoneDto } from './dto/update-social-organic-asset-timezone.dto';
 import { SocialOrganicConnectionService } from './social-organic-connection.service';
 import { SocialOrganicOAuthService } from './social-organic-oauth.service';
@@ -33,6 +37,21 @@ const SOCIAL_INTEGRATIONS_PERMISSION =
   'social.settings.integrations.manage.admin';
 const SOCIAL_ORGANIC_ANALYTICS_PERMISSION =
   'social.analytics.organic.view.operational';
+
+const CONNECTION_MODES: Record<
+  SocialOrganicConnectionMode,
+  { provider: string; allowedAssetTypes: string[] }
+> = {
+  facebook: { provider: 'meta', allowedAssetTypes: ['facebook_page'] },
+  instagram_facebook: {
+    provider: 'meta',
+    allowedAssetTypes: ['instagram_professional'],
+  },
+  instagram_direct: {
+    provider: 'instagram',
+    allowedAssetTypes: ['instagram_professional'],
+  },
+};
 
 @Controller('social/organic')
 export class SocialOrganicController {
@@ -59,12 +78,19 @@ export class SocialOrganicController {
   connect(
     @RequestContextData() ctx: RequestContext,
     @Param('provider') provider: string,
+    @Body() dto: StartSocialOrganicConnectionDto = { mode: 'facebook' },
   ) {
     const scope = this.requireScope(ctx);
+    const connector = CONNECTION_MODES[dto.mode];
+    if (!connector || connector.provider !== provider) {
+      throw new BadRequestException('invalid_connection');
+    }
     return this.oauth.start({
       ...scope,
       userId: ctx.userId ?? null,
       provider,
+      connectionMode: dto.mode,
+      allowedAssetTypes: connector.allowedAssetTypes,
     });
   }
 
