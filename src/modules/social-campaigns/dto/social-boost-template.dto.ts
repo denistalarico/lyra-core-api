@@ -19,6 +19,7 @@ import type {
   SocialBoostAudienceMode,
   SocialBoostBudgetType,
   SocialBoostConversionLocation,
+  SocialBoostMessageDestination,
   SocialBoostObjective,
   SocialBoostPerformanceGoal,
 } from '../entities';
@@ -43,6 +44,11 @@ const SPECIAL_AD_CATEGORIES = [
   'HOUSING',
   'ISSUES_ELECTIONS_POLITICS',
 ] as const;
+const MESSAGE_DESTINATIONS = [
+  'messenger',
+  'instagram',
+  'whatsapp',
+] satisfies SocialBoostMessageDestination[];
 
 export class SocialBoostAudienceDto {
   @IsOptional()
@@ -110,6 +116,19 @@ export class SocialBoostAudienceDto {
   @IsString()
   @MaxLength(180)
   savedAudienceExternalId?: string | null;
+}
+
+export class SocialBoostMessageDestinationsDto {
+  @IsArray()
+  @ArrayMaxSize(3)
+  @IsString({ each: true })
+  @IsIn(MESSAGE_DESTINATIONS, { each: true })
+  destinations!: SocialBoostMessageDestination[];
+
+  @IsOptional()
+  @IsString()
+  @Matches(/^\+[1-9]\d{7,14}$/)
+  whatsappPhoneNumber?: string | null;
 }
 
 export class CreateSocialBoostTemplateDto {
@@ -183,6 +202,11 @@ export class CreateSocialBoostTemplateDto {
   @ValidateIf((_, value) => value !== null && value !== '')
   @IsUrl({ require_protocol: true })
   destinationUrl?: string | null;
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => SocialBoostMessageDestinationsDto)
+  messageDestinations?: SocialBoostMessageDestinationsDto;
 
   @IsOptional()
   @IsBoolean()
@@ -270,6 +294,11 @@ export class UpdateSocialBoostTemplateDto {
   @ValidateIf((_, value) => value !== null && value !== '')
   @IsUrl({ require_protocol: true })
   destinationUrl?: string | null;
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => SocialBoostMessageDestinationsDto)
+  messageDestinations?: SocialBoostMessageDestinationsDto;
 
   @IsOptional()
   @IsBoolean()

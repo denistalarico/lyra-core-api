@@ -47,6 +47,20 @@ export type SocialBoostConversionLocation =
   | 'facebook_page'
   | 'shop';
 
+export type SocialBoostMessageDestination =
+  | 'messenger'
+  | 'instagram'
+  | 'whatsapp';
+
+/**
+ * Local intent for an ad optimized for conversations. The WhatsApp value is
+ * an E.164 number; preflight resolves it to a provider asset before execution.
+ */
+export type SocialBoostMessageDestinationConfig = {
+  destinations: SocialBoostMessageDestination[];
+  whatsappPhoneNumber: string | null;
+};
+
 export type SocialBoostAudience = {
   countries: string[];
   regions: string[];
@@ -198,6 +212,13 @@ export class SocialBoostTemplateEntity {
 
   @Column({ name: 'destination_url', type: 'text', nullable: true })
   destinationUrl!: string | null;
+
+  @Column({
+    name: 'message_destinations',
+    type: 'jsonb',
+    default: () => "'{\"destinations\":[],\"whatsappPhoneNumber\":null}'::jsonb",
+  })
+  messageDestinations!: SocialBoostMessageDestinationConfig;
 
   @Column({ name: 'is_default', type: 'boolean', default: false })
   isDefault!: boolean;

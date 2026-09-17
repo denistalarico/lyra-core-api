@@ -129,6 +129,73 @@ describe('SocialBoostTemplateService', () => {
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
+  it('persists the selected message destinations and WhatsApp number', async () => {
+    const { repository, service } = buildService();
+    repository.findOne.mockResolvedValue(null);
+    repository.count.mockResolvedValue(0);
+    repository.update.mockResolvedValue({ affected: 0 });
+
+    const result = await service.create(scope, null, {
+      ...validDto,
+      performanceGoal: 'messaging_conversations_started',
+      conversionLocation: 'messaging_apps',
+      messageDestinations: {
+        destinations: ['messenger', 'whatsapp'],
+        whatsappPhoneNumber: '+5511999999999',
+      },
+    });
+
+    expect(result.messageDestinations).toEqual({
+      destinations: ['messenger', 'whatsapp'],
+      whatsappPhoneNumber: '+5511999999999',
+    });
+  });
+
+  it('requires a channel and a number whenever WhatsApp is selected', async () => {
+    const { repository, dataSource, service } = buildService();
+    repository.findOne.mockResolvedValue(null);
+
+    await expect(
+      service.create(scope, null, {
+        ...validDto,
+        performanceGoal: 'messaging_conversations_started',
+        conversionLocation: 'messaging_apps',
+        messageDestinations: { destinations: [], whatsappPhoneNumber: null },
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    await expect(
+      service.create(scope, null, {
+        ...validDto,
+        performanceGoal: 'messaging_conversations_started',
+        conversionLocation: 'messaging_apps',
+        messageDestinations: { destinations: ['whatsapp'], whatsappPhoneNumber: null },
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(dataSource.transaction).not.toHaveBeenCalled();
+  });
+
+  it('keeps legacy message templates operable until their next configuration edit', async () => {
+    const { repository, service } = buildService();
+    repository.findOne.mockResolvedValue({
+      ...validDto,
+      id: '00000000-0000-4000-8000-000000000010',
+      performanceGoal: 'messaging_conversations_started',
+      conversionLocation: 'messaging_apps',
+      messageDestinations: { destinations: [], whatsappPhoneNumber: null },
+      isActive: true,
+      isDefault: false,
+    });
+
+    await expect(
+      service.update(
+        scope,
+        '00000000-0000-4000-8000-000000000010',
+        null,
+        { isActive: false },
+      ),
+    ).resolves.toMatchObject({ isActive: false });
+  });
+
   it('does not reveal a template outside the resolved context', async () => {
     const { repository, service } = buildService();
     repository.findOne.mockResolvedValue(null);

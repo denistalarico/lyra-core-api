@@ -20,6 +20,7 @@ export function toSocialBoostTemplateView(row: SocialBoostTemplateEntity) {
     specialAdCategories: row.specialAdCategories,
     callToAction: row.callToAction,
     destinationUrl: row.destinationUrl,
+    messageDestinations: row.messageDestinations,
     isDefault: row.isDefault,
     isActive: row.isActive,
     createdAt: row.createdAt,

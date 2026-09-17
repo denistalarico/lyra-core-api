@@ -21,6 +21,7 @@ import type {
 import {
   SocialBoostTemplateEntity,
   type SocialBoostAudience,
+  type SocialBoostMessageDestinationConfig,
 } from '../entities';
 import { isSocialBoostCombinationSupported } from '../social-boost-template-options';
 import { toSocialBoostTemplateView } from '../views/social-boost-template.view';
@@ -68,6 +69,14 @@ export class SocialBoostTemplateService {
       dto.conversionEvent,
       dto.destinationUrl,
     );
+    const messageDestinations = this.normalizeMessageDestinations(
+      dto.messageDestinations,
+    );
+    this.assertMessageDestinations(
+      dto.conversionLocation,
+      messageDestinations,
+      true,
+    );
 
     return this.dataSource.transaction(async (manager) => {
       const repository = manager.getRepository(SocialBoostTemplateEntity);
@@ -102,6 +111,7 @@ export class SocialBoostTemplateService {
         specialAdCategories: this.normalizeStrings(dto.specialAdCategories),
         callToAction: this.normalizeNullable(dto.callToAction),
         destinationUrl: this.normalizeNullable(dto.destinationUrl),
+        messageDestinations,
         isDefault,
         isActive,
         createdById: actorUserId,
@@ -144,12 +154,23 @@ export class SocialBoostTemplateService {
       dto.destinationUrl === undefined
         ? current.destinationUrl
         : this.normalizeNullable(dto.destinationUrl);
+    const messageDestinations =
+      dto.messageDestinations === undefined
+        ? current.messageDestinations
+        : this.normalizeMessageDestinations(dto.messageDestinations);
     this.assertCampaignConfiguration(
       objective,
       performanceGoal,
       conversionLocation,
       conversionEvent,
       destinationUrl,
+    );
+    this.assertMessageDestinations(
+      conversionLocation,
+      messageDestinations,
+      dto.messageDestinations !== undefined ||
+        (dto.conversionLocation !== undefined &&
+          conversionLocation === 'messaging_apps'),
     );
 
     return this.dataSource.transaction(async (manager) => {
@@ -200,6 +221,7 @@ export class SocialBoostTemplateService {
           ? row.callToAction
           : this.normalizeNullable(dto.callToAction);
       row.destinationUrl = destinationUrl;
+      row.messageDestinations = messageDestinations;
       row.isDefault = nextDefault;
       row.isActive = nextActive;
       row.updatedById = actorUserId;
@@ -333,6 +355,41 @@ export class SocialBoostTemplateService {
     // URL may be inherited from the approved publication. The C7 execution
     // preflight must require an effective URL for website/shop destinations.
     void destinationUrl;
+  }
+
+  private normalizeMessageDestinations(
+    input: CreateSocialBoostTemplateDto['messageDestinations'] | undefined,
+  ): SocialBoostMessageDestinationConfig {
+    const destinations = [...new Set(input?.destinations ?? [])];
+    const whatsappPhoneNumber = this.normalizeNullable(
+      input?.whatsappPhoneNumber,
+    );
+    return { destinations, whatsappPhoneNumber };
+  }
+
+  private assertMessageDestinations(
+    conversionLocation: SocialBoostTemplateEntity['conversionLocation'],
+    config: SocialBoostMessageDestinationConfig,
+    shouldValidate: boolean,
+  ) {
+    if (!shouldValidate || conversionLocation !== 'messaging_apps') return;
+
+    if (config.destinations.length === 0) {
+      throw new BadRequestException(
+        'At least one message destination is required for messaging apps.',
+      );
+    }
+    const usesWhatsApp = config.destinations.includes('whatsapp');
+    if (usesWhatsApp && !config.whatsappPhoneNumber) {
+      throw new BadRequestException(
+        'A WhatsApp phone number is required when WhatsApp is selected.',
+      );
+    }
+    if (!usesWhatsApp && config.whatsappPhoneNumber) {
+      throw new BadRequestException(
+        'A WhatsApp phone number is only allowed when WhatsApp is selected.',
+      );
+    }
   }
 
   private requireText(value: string) {
