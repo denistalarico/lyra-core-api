@@ -264,9 +264,10 @@ describe('MetaAdsOAuthService', () => {
 
       expect(harness.saved[0].scopes).toEqual([
         'ads_read',
+        'ads_management',
         'business_management',
       ]);
-      expect(harness.saved[0].scopes).not.toContain('ads_management');
+      expect(harness.saved[0].scopes).toContain('ads_management');
     });
 
     it('issues a distinct state per attempt', async () => {

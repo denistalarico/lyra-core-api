@@ -66,12 +66,19 @@ export const SOCIAL_META_ADS_APP_ID_ENV = 'SOCIAL_META_ADS_APP_ID';
 export const SOCIAL_META_ADS_APP_SECRET_ENV = 'SOCIAL_META_ADS_APP_SECRET';
 
 /**
- * Read-only scopes. `ads_management` is deliberately absent: nothing in Lyra
- * Social writes to a campaign, and requesting write access "for later" would
- * hand the platform a capability no code path is governed to use
- * (campaigns-ads-blueprint.md §5).
+ * The governed Boost flow creates a fully paused Meta hierarchy only after
+ * preflight and explicit human confirmation. It therefore needs
+ * `ads_management` in addition to the read and Business Manager scopes.
+ *
+ * Facebook Login for Business resolves the effective grants from its Meta
+ * Login configuration; this list records the expected grant on the local
+ * connection and is refreshed on every reconnect.
  */
-export const SOCIAL_META_ADS_SCOPES = ['ads_read', 'business_management'];
+export const SOCIAL_META_ADS_SCOPES = [
+  'ads_read',
+  'ads_management',
+  'business_management',
+];
 
 export type MetaAdsLoginConfig = FacebookLoginConfig;
 
