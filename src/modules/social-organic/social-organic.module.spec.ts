@@ -70,7 +70,10 @@ import { SocialPublicationExecutorService } from './publication/social-publicati
 import { SOCIAL_PUBLICATION_EXECUTOR } from './publication/social-publication.worker';
 import {
   FacebookPublisherAdapter,
+  DirectInstagramPublisherAdapter,
   InstagramPublisherAdapter,
+  MetaInstagramAssetDiscoveryService,
+  MetaInstagramOAuthProvider,
   MetaOrganicAssetDiscoveryService,
   MetaOrganicGraphService,
   MetaOrganicHealthService,
@@ -152,10 +155,12 @@ describe('SocialOrganicModule', () => {
       MetaOrganicGraphService,
       MetaOrganicAssetDiscoveryService,
       MetaOrganicOAuthProvider,
+      MetaInstagramAssetDiscoveryService,
+      MetaInstagramOAuthProvider,
       {
         provide: SOCIAL_ORGANIC_OAUTH_PROVIDERS,
         useFactory: createMetaOrganicOAuthProviders,
-        inject: [MetaOrganicOAuthProvider],
+        inject: [MetaOrganicOAuthProvider, MetaInstagramOAuthProvider],
       },
       SocialOrganicCredentialResolver,
       SocialOrganicOAuthProviderRegistry,
@@ -172,6 +177,7 @@ describe('SocialOrganicModule', () => {
       SocialPublisherRegistry,
       FacebookPublisherAdapter,
       InstagramPublisherAdapter,
+      DirectInstagramPublisherAdapter,
       MetaPublisherRegistration,
       MetaOrganicHealthService,
       SocialOrganicHealthScheduler,

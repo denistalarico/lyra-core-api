@@ -25,7 +25,6 @@ import {
   SocialOrganicOAuthTokenGrant,
 } from './social-organic-oauth.provider';
 import { normalizeIanaTimeZone } from './social-organic-asset-timezone';
-import type { SocialOrganicConnectionMode } from './dto/start-social-organic-connection.dto';
 
 export const SOCIAL_ORGANIC_OAUTH_SESSION_TTL_MS = 15 * 60 * 1000;
 
@@ -35,7 +34,7 @@ export type StartSocialOrganicConnectionInput = {
   agencyClientId: string | null;
   userId: string | null;
   provider: string;
-  connectionMode?: SocialOrganicConnectionMode;
+  connectionMode?: string;
   allowedAssetTypes?: readonly string[];
 };
 
@@ -599,9 +598,9 @@ export class SocialOrganicOAuthService {
       return hinted;
     }
 
-    // Both Meta products may be registered with the same Organic callback
-    // URL. Only the `/meta/callback` alias needs state-based resolution; a
-    // dedicated `/instagram/callback` remains a direct registry lookup.
+    // Multiple OAuth products may share one callback URL. The shared alias
+    // resolves its hook from the single-use state; a dedicated callback keeps
+    // the route's registry lookup.
     if (input.provider !== 'meta' || !hinted) {
       return hinted;
     }

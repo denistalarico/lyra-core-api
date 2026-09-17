@@ -33,8 +33,10 @@ export class InstagramPublisherAdapter implements SocialPublisherAdapter {
 
   constructor(protected readonly graph: MetaOrganicGraphService) {}
 
-  protected get instagramApiHost(): 'facebook' | 'instagram' {
-    return this.provider === 'instagram' ? 'instagram' : 'facebook';
+  protected get instagramRequestOptions():
+    | { apiHost: 'instagram' }
+    | Record<string, never> {
+    return this.provider === 'instagram' ? { apiHost: 'instagram' } : {};
   }
 
   capabilities(assetType: string): PublisherCapabilities {
@@ -113,7 +115,7 @@ export class InstagramPublisherAdapter implements SocialPublisherAdapter {
         caption:
           input.mediaCount > 1 || input.payload.placement === 'story' ? null : input.payload.caption,
         carouselItem: input.mediaCount > 1,
-        apiHost: this.instagramApiHost,
+        ...this.instagramRequestOptions,
       });
 
       return {
@@ -159,7 +161,7 @@ export class InstagramPublisherAdapter implements SocialPublisherAdapter {
           pageAccessToken: input.credential.accessToken,
           childContainerIds: media.map((entry) => entry.id),
           caption: input.payload.caption,
-          apiHost: this.instagramApiHost,
+          ...this.instagramRequestOptions,
         });
         return this.progressContainer(input.credential, parent.id);
       } catch (error) {
@@ -206,7 +208,7 @@ export class InstagramPublisherAdapter implements SocialPublisherAdapter {
       const status = await this.graph.getInstagramContainerStatus({
         containerId,
         pageAccessToken: credential.accessToken,
-        apiHost: this.instagramApiHost,
+        ...this.instagramRequestOptions,
       });
 
       if (status === 'IN_PROGRESS') {
@@ -242,7 +244,7 @@ export class InstagramPublisherAdapter implements SocialPublisherAdapter {
         accountId: credential.externalAssetId,
         pageAccessToken: credential.accessToken,
         containerId,
-        apiHost: this.instagramApiHost,
+        ...this.instagramRequestOptions,
       });
       return {
         outcome: 'published',
