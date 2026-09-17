@@ -27,12 +27,14 @@ describe('MetaOrganicWebhookSignatureService', () => {
 
   const previous = {
     social: process.env.SOCIAL_META_APP_SECRET,
-    legacy: process.env.SOCIAL_META_ADS_APP_SECRET,
+    ads: process.env.SOCIAL_META_ADS_APP_SECRET,
+    instagram: process.env.SOCIAL_META_ORGANIC_INSTAGRAM_APP_SECRET,
     messaging: process.env.META_APP_SECRET,
   };
 
   beforeEach(() => {
     process.env.SOCIAL_META_APP_SECRET = SOCIAL_SECRET;
+    delete process.env.SOCIAL_META_ORGANIC_INSTAGRAM_APP_SECRET;
     delete process.env.SOCIAL_META_ADS_APP_SECRET;
     delete process.env.META_APP_SECRET;
   });
@@ -40,7 +42,8 @@ describe('MetaOrganicWebhookSignatureService', () => {
   afterAll(() => {
     for (const [key, value] of [
       ['SOCIAL_META_APP_SECRET', previous.social],
-      ['SOCIAL_META_ADS_APP_SECRET', previous.legacy],
+      ['SOCIAL_META_ADS_APP_SECRET', previous.ads],
+      ['SOCIAL_META_ORGANIC_INSTAGRAM_APP_SECRET', previous.instagram],
       ['META_APP_SECRET', previous.messaging],
     ] as const) {
       if (value === undefined) delete process.env[key];
@@ -172,14 +175,25 @@ describe('MetaOrganicWebhookSignatureService', () => {
     expect(service.isConfigured()).toBe(false);
   });
 
-  it('accepts the legacy Social Ads-named secret during the rename window', () => {
+  it('accepts a direct Instagram Login webhook signature', () => {
     delete process.env.SOCIAL_META_APP_SECRET;
-    process.env.SOCIAL_META_ADS_APP_SECRET = SOCIAL_SECRET;
+    process.env.SOCIAL_META_ORGANIC_INSTAGRAM_APP_SECRET = SOCIAL_SECRET;
 
     expect(service.isConfigured()).toBe(true);
     expect(() =>
       service.verify({ signatureHeader: sign(body), rawBody }),
     ).not.toThrow();
+  });
+
+  it('never accepts the Meta Ads secret as an Organic webhook signer', () => {
+    delete process.env.SOCIAL_META_APP_SECRET;
+    process.env.SOCIAL_META_ADS_APP_SECRET = SOCIAL_SECRET;
+
+    expect(service.isConfigured()).toBe(false);
+    expectFailure(
+      () => service.verify({ signatureHeader: sign(body), rawBody }),
+      'signature_secret_not_configured',
+    );
   });
 
   it('never throws a length error out of the timing-safe comparison', () => {

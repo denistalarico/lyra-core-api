@@ -1,6 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import { requireSocialMetaAppSecret } from '../providers/meta/meta-organic-oauth.support';
+import {
+  requireSocialMetaAppSecret,
+  requireSocialMetaInstagramAppSecret,
+} from '../providers/meta/meta-organic-oauth.support';
 
 export const META_SIGNATURE_HEADER = 'x-hub-signature-256';
 const SIGNATURE_PREFIX = 'sha256=';
@@ -60,8 +63,8 @@ export class MetaOrganicWebhookSignatureService {
    * @throws MetaOrganicWebhookSignatureError with a safe internal code.
    */
   verify(input: { signatureHeader?: string; rawBody?: Buffer }): void {
-    const secret = this.readSecret();
-    if (!secret) {
+    const secrets = this.readSecrets();
+    if (secrets.length === 0) {
       throw new MetaOrganicWebhookSignatureError(
         'signature_secret_not_configured',
       );
@@ -75,25 +78,23 @@ export class MetaOrganicWebhookSignatureService {
     }
 
     const received = this.parseSignature(input.signatureHeader);
-    const expected = Buffer.from(
-      createHmac('sha256', secret).update(rawBody).digest('hex'),
-      'hex',
-    );
-
-    // Both buffers are 32 bytes: `expected` by construction, `received` because
-    // parseSignature() admitted exactly 64 hex characters. The guard stays as
-    // defence against a future change to either side.
-    if (
-      received.length !== expected.length ||
-      !timingSafeEqual(received, expected)
-    ) {
+    const matches = secrets.some((secret) => {
+      const expected = Buffer.from(
+        createHmac('sha256', secret).update(rawBody).digest('hex'),
+        'hex',
+      );
+      return (
+        received.length === expected.length && timingSafeEqual(received, expected)
+      );
+    });
+    if (!matches) {
       throw new MetaOrganicWebhookSignatureError('signature_mismatch');
     }
   }
 
-  /** `true` when the app secret is configured; never returns the value. */
+  /** `true` when an accepted app secret is configured; never returns it. */
   isConfigured(): boolean {
-    return this.readSecret() !== null;
+    return this.readSecrets().length > 0;
   }
 
   private parseSignature(header: string | undefined): Buffer {
@@ -118,9 +119,17 @@ export class MetaOrganicWebhookSignatureService {
    * is an operational state this service reports as a code rather than letting
    * an OAuth-shaped exception escape from a webhook path.
    */
-  private readSecret(): string | null {
+  private readSecrets(): string[] {
+    const secrets = [
+      this.readSecret(requireSocialMetaAppSecret),
+      this.readSecret(requireSocialMetaInstagramAppSecret),
+    ].filter((secret): secret is string => Boolean(secret));
+    return [...new Set(secrets)];
+  }
+
+  private readSecret(read: () => string): string | null {
     try {
-      return requireSocialMetaAppSecret();
+      return read();
     } catch {
       return null;
     }
