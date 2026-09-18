@@ -1,4 +1,5 @@
 import {
+  IsBoolean,
   IsIn,
   IsInt,
   IsNotEmpty,
@@ -62,6 +63,10 @@ export class CreateSocialContentItemDto {
     'ready',
   ] satisfies SocialContentPlanningStatus[])
   planningStatus!: SocialContentPlanningStatus;
+
+  @IsOptional()
+  @IsBoolean()
+  calendarOnly?: boolean;
 
   @Matches(ISO_DATE)
   plannedDate!: string;

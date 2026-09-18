@@ -244,6 +244,7 @@ export class SocialPlannerService {
       creativeFormat: this.normalizeNullable(dto.creativeFormat),
 
       planningStatus: dto.planningStatus ?? 'planned',
+      calendarOnly: dto.calendarOnly === true,
       plannedDate: dto.plannedDate ?? null,
       sortOrder: dto.sortOrder ?? 0,
 

@@ -143,6 +143,10 @@ export class SocialContentItemEntity {
   })
   planningStatus!: SocialContentPlanningStatus;
 
+  /** Calendar quick-add entries publish normally but are not editorial-plan rows. */
+  @Column({ name: 'calendar_only', type: 'boolean', default: false })
+  calendarOnly!: boolean;
+
   /**
    * Editorial day only. The exact channel/time belongs to a destination and
    * the actual provider schedule will later belong to SocialPublication.

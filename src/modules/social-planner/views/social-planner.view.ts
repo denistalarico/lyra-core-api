@@ -56,6 +56,7 @@ export function toSocialContentItemView(
     objective: item.objective,
     creativeFormat: item.creativeFormat,
     planningStatus: item.planningStatus,
+    calendarOnly: item.calendarOnly,
     plannedDate: item.plannedDate,
     sortOrder: item.sortOrder,
     campaignInstanceId: item.campaignInstanceId,
