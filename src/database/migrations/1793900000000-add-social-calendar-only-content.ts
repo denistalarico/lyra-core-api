@@ -6,10 +6,10 @@ import type { MigrationInterface, QueryRunner } from 'typeorm';
  * in the editorial plan. Keep that distinction as persisted state instead of
  * overloading an editable content-type catalog value.
  */
-export class AddSocialCalendarOnlyContent1793500000000
+export class AddSocialCalendarOnlyContent1793900000000
   implements MigrationInterface
 {
-  name = 'AddSocialCalendarOnlyContent1793500000000';
+  name = 'AddSocialCalendarOnlyContent1793900000000';
 
   async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`
