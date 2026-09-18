@@ -42,17 +42,7 @@ export class MetaAdsBoostTargetingService {
           maxPages: 1,
           failureMessage: 'Meta saved audiences could not be loaded.',
         })
-      : await this.graph.readEdge({
-          accessToken: credential.accessToken,
-          // Targeting Search is a Graph search node, not an edge of the ad
-          // account. The connection still supplies the scoped Ads credential.
-          path: 'search',
-          fields: 'id,key,name,type,country_code,region',
-          params: { type: this.providerType(dto.kind), q: query },
-          limit: 25,
-          maxPages: 1,
-          failureMessage: 'Meta targeting options could not be loaded.',
-        });
+      : await this.searchTargeting(credential, dto.kind, query);
 
     return {
       items: page.rows
@@ -65,6 +55,36 @@ export class MetaAdsBoostTargetingService {
 
   private providerType(kind: Exclude<TargetingKind, 'saved_audience'>) {
     return kind === 'location' ? 'adgeolocation' : kind === 'interest' ? 'adinterest' : 'adlocale';
+  }
+
+  private async searchTargeting(
+    credential: { accessToken: string; externalAccountId: string },
+    kind: Exclude<TargetingKind, 'saved_audience'>,
+    query: string,
+  ) {
+    const input = {
+      accessToken: credential.accessToken,
+      fields: 'id,key,name,type,country_code,region',
+      params: { type: this.providerType(kind), q: query },
+      limit: 25,
+      maxPages: 1,
+      failureMessage: 'Meta targeting options could not be loaded.',
+    } as const;
+
+    // Meta accepts different search routes depending on the Marketing API
+    // version and account capability. Prefer the global Search node, then
+    // retry the account-scoped compatibility route without surfacing either
+    // provider error to the browser.
+    try {
+      const global = await this.graph.readEdge({ ...input, path: 'search' });
+      if (global.rows.length) return global;
+    } catch {
+      // Retry below with the account-scoped route.
+    }
+    return this.graph.readEdge({
+      ...input,
+      path: `${credential.externalAccountId}/targetingsearch`,
+    });
   }
 
   private toOption(kind: TargetingKind, row: ProviderRow): SocialBoostTargetingOption | null {
