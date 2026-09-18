@@ -520,7 +520,7 @@ export class MetaAdsGraphService {
   private buildGraphUrl(input: {
     path: string;
     accessToken: string;
-    fields: string;
+    fields?: string;
     limit?: number;
     after?: string | null;
     params?: Readonly<Record<string, string>>;
