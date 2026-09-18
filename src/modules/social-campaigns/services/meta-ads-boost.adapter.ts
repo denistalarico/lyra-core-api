@@ -126,6 +126,13 @@ export class MetaAdsBoostAdapter {
     const targeting: Record<string, unknown> = {
       geo_locations: { countries: template.audience.countries },
     };
+    const geoLocations = targeting.geo_locations as Record<string, unknown>;
+    if (template.audience.regions.length)
+      geoLocations.regions = template.audience.regions.map((key) => ({ key }));
+    if (template.audience.cities.length)
+      geoLocations.cities = template.audience.cities.map((key) => ({ key }));
+    if (template.audience.postalCodes.length)
+      geoLocations.zips = template.audience.postalCodes.map((key) => ({ key }));
     if (template.audience.ageMin !== null)
       targeting.age_min = template.audience.ageMin;
     if (template.audience.ageMax !== null)
@@ -136,6 +143,11 @@ export class MetaAdsBoostAdapter {
         .filter(Boolean);
     if (template.audience.languages.length)
       targeting.locales = template.audience.languages;
+    if (template.audience.interests.length) {
+      targeting.flexible_spec = [
+        { interests: template.audience.interests.map((id) => ({ id })) },
+      ];
+    }
     const placement = template.placements[0];
     if (placement === 'instagram')
       targeting.publisher_platforms = ['instagram'];

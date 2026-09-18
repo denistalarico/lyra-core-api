@@ -34,6 +34,7 @@ import {
   UpdateSocialBoostTemplateDto,
   SocialBoostPreflightDto,
   ConfirmSocialBoostDto,
+  SocialBoostTargetingQueryDto,
 } from './dto';
 import { MetaCampaignHierarchyReadService } from './services/meta-campaign-hierarchy-read.service';
 import { SocialCampaignMonitorService } from './services/social-campaign-monitor.service';
@@ -41,6 +42,7 @@ import { SocialCampaignRecommendationService } from './services/social-campaign-
 import { SocialBoostTemplateService } from './services/social-boost-template.service';
 import { SocialAdManualActionService } from './services/social-ad-manual-action.service';
 import { SocialBoostRequestService } from './services/social-boost-request.service';
+import { MetaAdsBoostTargetingService } from './services/meta-ads-boost-targeting.service';
 
 const SOCIAL_ADS_VIEW_PERMISSION = 'social.ads.campaign.view.client';
 const SOCIAL_ADS_MANAGE_PERMISSION =
@@ -63,6 +65,7 @@ export class SocialCampaignsController {
     private readonly recommendations: SocialCampaignRecommendationService,
     private readonly manualActions: SocialAdManualActionService,
     private readonly boostRequests: SocialBoostRequestService,
+    private readonly boostTargeting: MetaAdsBoostTargetingService,
   ) {}
 
   @Post('meta/boost/preflight')
@@ -78,6 +81,17 @@ export class SocialCampaignsController {
       ctx.userId ?? null,
       dto,
     );
+  }
+
+  @Get('meta/boost/targeting')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireProductEntitlement('social')
+  @RequirePermission(SOCIAL_ADS_MANAGE_PERMISSION)
+  searchBoostTargeting(
+    @RequestContextData() ctx: RequestContext,
+    @Query() query: SocialBoostTargetingQueryDto,
+  ) {
+    return this.boostTargeting.search(this.requireScope(ctx), query);
   }
 
   @Post('meta/boost/:boostRequestId/confirm')

@@ -4,3 +4,4 @@ export * from './meta-campaign-hierarchy.query.dto';
 export * from './social-campaign-monitor.dto';
 export * from './social-campaign-recommendation.dto';
 export * from './social-ad-action.dto';
+export * from './social-boost-targeting.query.dto';

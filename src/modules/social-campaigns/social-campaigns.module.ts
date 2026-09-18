@@ -28,6 +28,7 @@ import { SocialAdActionsConfigService } from './services/social-ad-actions-confi
 import { SocialAdManualActionService } from './services/social-ad-manual-action.service';
 import { MetaAdsBoostAdapter } from './services/meta-ads-boost.adapter';
 import { SocialBoostRequestService } from './services/social-boost-request.service';
+import { MetaAdsBoostTargetingService } from './services/meta-ads-boost-targeting.service';
 import { SocialCampaignsController } from './social-campaigns.controller';
 
 @Module({
@@ -64,6 +65,7 @@ import { SocialCampaignsController } from './social-campaigns.controller';
     SocialAdManualActionService,
     MetaAdsBoostAdapter,
     SocialBoostRequestService,
+    MetaAdsBoostTargetingService,
   ],
   exports: [
     SocialBoostTemplateService,

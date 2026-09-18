@@ -29,11 +29,13 @@ export function boostExecutionBlockCode(
   if (['followers', 'engagers'].includes(template.audienceMode))
     return 'source_audience_not_resolved';
   if (
-    template.audience.regions.length ||
-    template.audience.cities.length ||
-    template.audience.postalCodes.length ||
-    template.audience.interests.length ||
-    template.audience.savedAudienceExternalId
+    [
+      ...template.audience.regions,
+      ...template.audience.cities,
+      ...template.audience.postalCodes,
+      ...template.audience.languages,
+      ...template.audience.interests,
+    ].some((value) => !/^\d+$/.test(value))
   )
     return 'targeting_not_resolved';
   if (!template.audience.countries.length) return 'country_required';
