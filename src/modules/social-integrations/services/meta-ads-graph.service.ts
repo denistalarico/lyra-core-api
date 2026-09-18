@@ -83,8 +83,11 @@ export type MetaGraphEdgeRequest = {
   accessToken: string;
   /** Graph path below the version, e.g. `act_123/campaigns`. */
   path: string;
-  /** Comma-separated Graph field list. */
-  fields: string;
+  /**
+   * Comma-separated Graph field list. Graph Search endpoints define their own
+   * response shape and reject an explicit `fields` parameter in some versions.
+   */
+  fields?: string;
   limit: number;
   maxPages: number;
   failureMessage: string;
@@ -318,7 +321,7 @@ export class MetaAdsGraphService {
   async readNode(input: {
     accessToken: string;
     path: string;
-    fields: string;
+    fields?: string;
     failureMessage: string;
   }): Promise<Record<string, unknown>> {
     const url = this.buildGraphUrl({
@@ -542,7 +545,7 @@ export class MetaAdsGraphService {
       url.searchParams.set(key, value);
     }
 
-    url.searchParams.set('fields', input.fields);
+    if (input.fields) url.searchParams.set('fields', input.fields);
 
     if (input.limit) {
       url.searchParams.set('limit', String(input.limit));

@@ -64,7 +64,6 @@ export class MetaAdsBoostTargetingService {
   ) {
     const input = {
       accessToken: credential.accessToken,
-      fields: 'id,key,name,type,country_code,region',
       params: { type: this.providerType(kind), q: query },
       limit: 25,
       maxPages: 1,
