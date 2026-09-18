@@ -7,6 +7,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { IsNull, Repository } from 'typeorm';
 import { SocialOrganicAssetEntity } from '../entities/social-organic-asset.entity';
 import { SocialOrganicAccountMetricDailyEntity } from './entities/social-organic-account-metric-daily.entity';
+import { SocialOrganicPostMetricDailyEntity } from './entities/social-organic-post-metric-daily.entity';
 import { SocialOrganicSyncRunEntity } from './entities/social-organic-sync-run.entity';
 import {
   parseOrganicAnalyticsPeriod,
@@ -23,6 +24,10 @@ import {
   type SocialOrganicSeriesPoint,
 } from './views/social-organic-analytics-series.view';
 import type { SocialOrganicAnalyticsFreshnessView } from './views/social-organic-analytics-freshness.view';
+import {
+  toSocialOrganicPublicationMetricsView,
+  type SocialOrganicPublicationMetricsView,
+} from './views/social-organic-publication-metrics.view';
 
 export type SocialOrganicAnalyticsScope = {
   tenantId: string;
@@ -41,6 +46,11 @@ export type SocialOrganicAnalyticsOverviewInput =
 export type SocialOrganicAnalyticsFreshnessInput =
   SocialOrganicAnalyticsScope & {
     assetId: string;
+  };
+
+export type SocialOrganicPublicationMetricsInput =
+  SocialOrganicAnalyticsScope & {
+    publicationIds: string[];
   };
 
 /** The raw shape one aggregation query returns, all columns as text. */
@@ -73,6 +83,8 @@ export class SocialOrganicAnalyticsReadService {
     private readonly assetsRepository: Repository<SocialOrganicAssetEntity>,
     @InjectRepository(SocialOrganicAccountMetricDailyEntity, 'agency')
     private readonly metricsRepository: Repository<SocialOrganicAccountMetricDailyEntity>,
+    @InjectRepository(SocialOrganicPostMetricDailyEntity, 'agency')
+    private readonly postMetricsRepository: Repository<SocialOrganicPostMetricDailyEntity>,
     @InjectRepository(SocialOrganicSyncRunEntity, 'agency')
     private readonly runsRepository: Repository<SocialOrganicSyncRunEntity>,
   ) {}
@@ -268,6 +280,48 @@ export class SocialOrganicAnalyticsReadService {
       },
       hasPartialData: metrics.latestPartialMetricDate !== null,
     };
+  }
+
+  /**
+   * Latest observation for each requested local publication in the caller's
+   * exact scope. A missing id intentionally looks the same as an out-of-scope
+   * id: returning no item avoids turning this route into an enumeration oracle.
+   *
+   * This query takes one newest fact, never aggregates post rows. In
+   * particular, the entity's provider lifetime snapshots must never be added
+   * across sync days and reach is non-additive across days.
+   */
+  async publicationMetrics(
+    input: SocialOrganicPublicationMetricsInput,
+  ): Promise<SocialOrganicPublicationMetricsView[]> {
+    const publicationIds = [...new Set(input.publicationIds)];
+    if (!publicationIds.length) return [];
+
+    const facts = await this.postMetricsRepository
+      .createQueryBuilder('fact')
+      .distinctOn(['fact.publicationId'])
+      .where('fact.tenantId = :tenantId', { tenantId: input.tenantId })
+      .andWhere('fact.workspaceId = :workspaceId', {
+        workspaceId: input.workspaceId,
+      })
+      .andWhere('fact.publicationId IN (:...publicationIds)', {
+        publicationIds,
+      })
+      .andWhere('fact.publicationId IS NOT NULL')
+      .andWhere(
+        input.agencyClientId === null
+          ? 'fact.agencyClientId IS NULL'
+          : 'fact.agencyClientId = :agencyClientId',
+        input.agencyClientId === null
+          ? {}
+          : { agencyClientId: input.agencyClientId },
+      )
+      .orderBy('fact.publicationId', 'ASC')
+      .addOrderBy('fact.metricDate', 'DESC')
+      .addOrderBy('fact.syncedAt', 'DESC')
+      .getMany();
+
+    return facts.map(toSocialOrganicPublicationMetricsView);
   }
 
   private parsePeriod(input: { since: string; until: string }) {

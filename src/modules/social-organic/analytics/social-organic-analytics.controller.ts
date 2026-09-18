@@ -16,6 +16,7 @@ import {
 import { AnalyticsFreshnessQueryDto } from './dto/analytics-freshness.query.dto';
 import { AnalyticsOverviewQueryDto } from './dto/analytics-overview.query.dto';
 import { ConsolidatedOverviewQueryDto } from './dto/consolidated-overview.query.dto';
+import { PublicationMetricsQueryDto } from './dto/publication-metrics.query.dto';
 import { SocialConsolidatedAnalyticsService } from './social-consolidated-analytics.service';
 import { SocialOrganicAnalyticsReadService } from './social-organic-analytics-read.service';
 
@@ -123,6 +124,28 @@ export class SocialOrganicAnalyticsController {
       agencyClientId: scope.agencyClientId,
       assetId: query.assetId,
     });
+  }
+
+  /**
+   * Latest local organic metrics for one or more Lyra publications. This is a
+   * read over the persisted model only: it does not call Meta or trigger a
+   * sync, so historical data remains readable after a credential disconnect.
+   */
+  @Get('publications')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireProductEntitlement('social')
+  @RequirePermission(SOCIAL_ORGANIC_ANALYTICS_PERMISSION)
+  async publicationMetrics(
+    @RequestContextData() ctx: RequestContext,
+    @Query() query: PublicationMetricsQueryDto,
+  ) {
+    const scope = this.requireScope(ctx);
+    const items = await this.analyticsReadService.publicationMetrics({
+      ...scope,
+      publicationIds: query.publicationIds,
+    });
+
+    return { items, total: items.length };
   }
 
   /**

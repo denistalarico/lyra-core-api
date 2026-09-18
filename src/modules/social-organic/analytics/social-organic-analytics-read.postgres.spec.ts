@@ -5,6 +5,7 @@ import { AgencyDataSource } from '../../../database/agency-typeorm.datasource';
 import { CreateSocialOrganicConnections1791500000000 } from '../../../database/migrations/1791500000000-create-social-organic-connections';
 import { CreateSocialOrganicReadModel1791900000000 } from '../../../database/migrations/1791900000000-create-social-organic-read-model';
 import { MakeSocialOrganicMetricsNullable1792100000000 } from '../../../database/migrations/1792100000000-make-social-organic-metrics-nullable';
+import { AddSocialOrganicPostLifetimeSnapshots1792400000000 } from '../../../database/migrations/1792400000000-add-social-organic-post-lifetime-snapshots';
 import { describePostgresIntegration } from '../../../testing/postgres-integration';
 import { SocialOrganicAnalyticsReadService } from './social-organic-analytics-read.service';
 
@@ -116,6 +117,48 @@ run('SocialOrganicAnalyticsReadService against PostgreSQL', () => {
     `);
   }
 
+  function insertPostFact(input: {
+    publicationId: string;
+    metricDate: string;
+    externalPublicationId?: string;
+    assetId?: string;
+    agencyClientId?: string | null;
+    reach?: string | null;
+    shares?: string | null;
+    likesLifetime?: string | null;
+    videoViewsLifetime?: string | null;
+    isPartial?: boolean;
+    syncedAt?: string;
+  }) {
+    const nullable = (value: string | null | undefined) =>
+      value === null ? 'NULL' : (value === undefined ? 'NULL' : value);
+    const observedAt = input.syncedAt ?? `${input.metricDate}T12:00:00.000Z`;
+    const clientId = input.agencyClientId
+      ? `'${input.agencyClientId}'`
+      : 'NULL';
+
+    return queryRunner.query(`
+      INSERT INTO "social_organic_post_metrics_daily"
+        ("tenant_id", "workspace_id", "agency_client_id", "asset_id",
+         "provider", "source", "external_publication_id", "publication_id",
+         "metric_date", "asset_timezone", "reach", "shares",
+         "likes_lifetime", "likes_lifetime_observed_at",
+         "video_views_lifetime", "video_views_lifetime_observed_at",
+         "is_partial", "synced_at")
+      VALUES (
+        '${tenantId}', '${workspaceId}', ${clientId}, '${input.assetId ?? assetId}',
+        'meta', 'organic', '${input.externalPublicationId ?? `external-${input.publicationId}`}',
+        '${input.publicationId}', '${input.metricDate}', 'America/Sao_Paulo',
+        ${nullable(input.reach)}, ${nullable(input.shares)},
+        ${nullable(input.likesLifetime)},
+        ${input.likesLifetime === null || input.likesLifetime === undefined ? 'NULL' : `'${observedAt}'`},
+        ${nullable(input.videoViewsLifetime)},
+        ${input.videoViewsLifetime === null || input.videoViewsLifetime === undefined ? 'NULL' : `'${observedAt}'`},
+        ${input.isPartial ?? false}, '${observedAt}'
+      )
+    `);
+  }
+
   const overview = (since: string, until: string, id = assetId) =>
     service.overview({ ...scope, assetId: id, since, until });
 
@@ -131,6 +174,7 @@ run('SocialOrganicAnalyticsReadService against PostgreSQL', () => {
       await new CreateSocialOrganicConnections1791500000000().up(setup);
       await new CreateSocialOrganicReadModel1791900000000().up(setup);
       await new MakeSocialOrganicMetricsNullable1792100000000().up(setup);
+      await new AddSocialOrganicPostLifetimeSnapshots1792400000000().up(setup);
     } finally {
       await setup.release();
     }
@@ -154,6 +198,7 @@ run('SocialOrganicAnalyticsReadService against PostgreSQL', () => {
     service = new SocialOrganicAnalyticsReadService(
       manager.getRepository('SocialOrganicAssetEntity') as never,
       manager.getRepository('SocialOrganicAccountMetricDailyEntity') as never,
+      manager.getRepository('SocialOrganicPostMetricDailyEntity') as never,
       manager.getRepository('SocialOrganicSyncRunEntity') as never,
     );
   });
@@ -360,6 +405,66 @@ run('SocialOrganicAnalyticsReadService against PostgreSQL', () => {
       for (const item of items) {
         expect(item).not.toHaveProperty('assetTokenEncrypted');
       }
+    });
+  });
+
+  describe('publicationMetrics', () => {
+    it('takes only the latest observation and keeps snapshots separate from daily values', async () => {
+      const publicationId = randomUUID();
+      await insertPostFact({
+        publicationId,
+        metricDate: '2026-09-01',
+        reach: '80',
+        shares: '2',
+        likesLifetime: '10',
+        videoViewsLifetime: '100',
+        syncedAt: '2026-09-01T12:00:00.000Z',
+      });
+      await insertPostFact({
+        publicationId,
+        metricDate: '2026-09-02',
+        reach: '90',
+        shares: '3',
+        likesLifetime: '12',
+        videoViewsLifetime: '130',
+        isPartial: true,
+        syncedAt: '2026-09-02T12:00:00.000Z',
+      });
+
+      const items = await service.publicationMetrics({
+        ...scope,
+        publicationIds: [publicationId],
+      });
+
+      expect(items).toEqual([
+        expect.objectContaining({
+          publicationId,
+          metricDate: '2026-09-02',
+          views: '130',
+          viewsGranularity: 'lifetime',
+          likes: '12',
+          likesGranularity: 'lifetime',
+          reach: '90',
+          reachGranularity: 'daily',
+          shares: '3',
+          sharesGranularity: 'daily',
+          isPartial: true,
+        }),
+      ]);
+    });
+
+    it('does not return another managed client publication', async () => {
+      const publicationId = randomUUID();
+      await insertPostFact({
+        publicationId,
+        assetId: clientAssetId,
+        agencyClientId,
+        metricDate: '2026-09-01',
+      });
+
+      await expect(
+        service.publicationMetrics({ ...scope, publicationIds: [publicationId] }),
+      ).resolves.toEqual([]);
     });
   });
 

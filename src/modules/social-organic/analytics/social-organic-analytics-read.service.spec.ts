@@ -3,6 +3,7 @@ import { BadRequestException, NotFoundException } from '@nestjs/common';
 import type { Repository } from 'typeorm';
 import type { SocialOrganicAssetEntity } from '../entities/social-organic-asset.entity';
 import type { SocialOrganicAccountMetricDailyEntity } from './entities/social-organic-account-metric-daily.entity';
+import type { SocialOrganicPostMetricDailyEntity } from './entities/social-organic-post-metric-daily.entity';
 import type { SocialOrganicSyncRunEntity } from './entities/social-organic-sync-run.entity';
 import { SocialOrganicAnalyticsReadService } from './social-organic-analytics-read.service';
 
@@ -26,6 +27,8 @@ describe('SocialOrganicAnalyticsReadService (scope + validation)', () => {
     } as unknown as Repository<SocialOrganicAssetEntity>;
     const metricsRepository =
       {} as Repository<SocialOrganicAccountMetricDailyEntity>;
+    const postMetricsRepository =
+      {} as Repository<SocialOrganicPostMetricDailyEntity>;
     const runsRepository = {} as Repository<SocialOrganicSyncRunEntity>;
 
     return {
@@ -33,6 +36,7 @@ describe('SocialOrganicAnalyticsReadService (scope + validation)', () => {
       service: new SocialOrganicAnalyticsReadService(
         assetsRepository,
         metricsRepository,
+        postMetricsRepository,
         runsRepository,
       ),
     };

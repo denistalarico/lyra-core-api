@@ -15,6 +15,7 @@ const GUARDED_HANDLERS = [
   'overview',
   'timeseries',
   'freshness',
+  'publicationMetrics',
   'consolidated',
 ] as const;
 
@@ -25,6 +26,7 @@ function createHarness() {
   const seriesInputs: Record<string, unknown>[] = [];
   const freshnessInputs: Record<string, unknown>[] = [];
   const listInputs: Record<string, unknown>[] = [];
+  const publicationMetricsInputs: Record<string, unknown>[] = [];
   const consolidatedInputs: Record<string, unknown>[] = [];
 
   const record =
@@ -41,6 +43,10 @@ function createHarness() {
     overview: jest.fn(record(overviewInputs)),
     timeseries: jest.fn(record(seriesInputs)),
     freshness: jest.fn(record(freshnessInputs)),
+    publicationMetrics: jest.fn((input: Record<string, unknown>) => {
+      publicationMetricsInputs.push(input);
+      return Promise.resolve([]);
+    }),
   };
 
   const consolidatedReadService = {
@@ -55,6 +61,7 @@ function createHarness() {
     seriesInputs,
     freshnessInputs,
     listInputs,
+    publicationMetricsInputs,
     consolidatedInputs,
     analyticsReadService,
     consolidatedReadService,
@@ -226,6 +233,28 @@ describe('SocialOrganicAnalyticsController scope resolution', () => {
       tenantId: 'tenant-a',
       workspaceId: 'workspace-a',
       agencyClientId: 'client-a',
+    });
+  });
+
+  it('binds publication metric reads to the authenticated client scope', async () => {
+    const harness = createHarness();
+    const publicationIds = [
+      '33333333-3333-4333-8333-333333333333',
+      '44444444-4444-4444-8444-444444444444',
+    ];
+
+    await harness.controller.publicationMetrics(
+      context({
+        managedContext: { operatingMode: 'client', clientId: 'client-a' },
+      } as Partial<RequestContext>),
+      { publicationIds },
+    );
+
+    expect(harness.publicationMetricsInputs[0]).toEqual({
+      tenantId: 'tenant-a',
+      workspaceId: 'workspace-a',
+      agencyClientId: 'client-a',
+      publicationIds,
     });
   });
 
