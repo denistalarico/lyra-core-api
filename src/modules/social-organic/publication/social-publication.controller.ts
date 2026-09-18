@@ -2,12 +2,14 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   ParseUUIDPipe,
   Patch,
   Post,
   Query,
+  HttpCode,
   UseGuards,
 } from '@nestjs/common';
 import { RequestContextData } from '../../../common/context/request-context.decorator';
@@ -37,6 +39,8 @@ const CREATE_PERMISSION = 'social.publishing.publication.create.manager';
 const PUBLISH_NOW_PERMISSION =
   'social.publishing.publication.publish_now.manager';
 const CANCEL_PERMISSION = 'social.publishing.publication.cancel.manager';
+const DELETE_FAILED_PERMISSION =
+  'social.publishing.publication.delete_external.admin_or_explicit';
 
 @Controller('social/publishing/publications')
 @UseGuards(JwtAuthGuard, PermissionsGuard)
@@ -222,6 +226,24 @@ export class SocialPublicationController {
     );
 
     return toSocialPublicationView(publication);
+  }
+
+  /**
+   * A failed, never-published local attempt has no provider evidence to
+   * preserve. This route is intentionally narrower than an external deletion:
+   * the service rejects every other state and any row with an external id.
+   */
+  @Delete(':publicationId')
+  @HttpCode(204)
+  @RequirePermission(DELETE_FAILED_PERMISSION)
+  async deleteFailed(
+    @RequestContextData() ctx: RequestContext,
+    @Param('publicationId', ParseUUIDPipe) publicationId: string,
+  ): Promise<void> {
+    await this.publicationService.deleteFailed(
+      this.requireScope(ctx),
+      publicationId,
+    );
   }
 
   /**

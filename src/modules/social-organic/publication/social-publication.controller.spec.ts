@@ -18,6 +18,7 @@ describe('SocialPublicationController', () => {
     publishNow: jest.fn(),
     cancel: jest.fn(),
     retry: jest.fn(),
+    deleteFailed: jest.fn(),
     listPublishTargets: jest.fn(),
   };
 
@@ -131,6 +132,15 @@ describe('SocialPublicationController', () => {
     ).toBe('social.publishing.publication.create.manager');
   });
 
+  it('requires explicit delete permission for removing a failed local attempt', () => {
+    expect(
+      Reflect.getMetadata(
+        PERMISSION_KEY_METADATA,
+        SocialPublicationController.prototype.deleteFailed,
+      ),
+    ).toBe('social.publishing.publication.delete_external.admin_or_explicit');
+  });
+
   it('lists using only server-resolved scope', async () => {
     service.list.mockResolvedValue({ items: [], total: 0 });
 
@@ -235,6 +245,21 @@ describe('SocialPublicationController', () => {
         agencyClientId: null,
       },
       agencyCtx.userId,
+      'pub-1',
+    );
+  });
+
+  it('deletes failed attempts only through the server-resolved scope', async () => {
+    service.deleteFailed.mockResolvedValue(undefined);
+
+    await controller.deleteFailed(agencyCtx, 'pub-1');
+
+    expect(service.deleteFailed).toHaveBeenCalledWith(
+      {
+        tenantId: agencyCtx.tenantId,
+        workspaceId: agencyCtx.workspaceId,
+        agencyClientId: null,
+      },
       'pub-1',
     );
   });

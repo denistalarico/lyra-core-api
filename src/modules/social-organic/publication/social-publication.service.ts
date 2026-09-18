@@ -369,6 +369,36 @@ export class SocialPublicationService {
   }
 
   /**
+   * Removes only a failed local attempt that never reached the provider.
+   *
+   * A `failed` status alone is insufficient: a provider may have accepted a
+   * post before a later step failed, so an external identifier is a permanent
+   * execution record. The conditional delete carries all safety preconditions
+   * to SQL and prevents a stale UI from widening the operation.
+   */
+  async deleteFailed(
+    scope: SocialPublicationScope,
+    publicationId: string,
+  ): Promise<void> {
+    const publication = await this.requirePublication(scope, publicationId);
+    if (publication.status !== 'failed' || publication.externalPublicationId) {
+      throw new ConflictException(
+        'Only a failed publication without an external publication can be deleted.',
+      );
+    }
+
+    const result = await this.publicationsRepository.delete({
+      id: publication.id,
+      ...this.scopeWhere(scope),
+      status: 'failed',
+      externalPublicationId: IsNull(),
+    });
+    if (!result.affected) {
+      throw new ConflictException('Publication changed before it was deleted.');
+    }
+  }
+
+  /**
    * Schedule-time media validation (P3.1): resolves the `mediaAssetId`
    * against trusted scope, resolves the destination provider's adapter and
    * declared capabilities for the asset type, and runs M1

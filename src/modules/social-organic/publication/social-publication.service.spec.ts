@@ -28,6 +28,7 @@ type RepositoryMock = {
   create: jest.Mock;
   save: jest.Mock;
   update: jest.Mock;
+  delete: jest.Mock;
   manager: { transaction: jest.Mock };
 };
 
@@ -38,6 +39,7 @@ function createRepositoryMock(): RepositoryMock {
     create: jest.fn((value) => value),
     save: jest.fn((value) => Promise.resolve(value)),
     update: jest.fn(() => Promise.resolve({ affected: 1 })),
+    delete: jest.fn(() => Promise.resolve({ affected: 1 })),
     manager: { transaction: jest.fn() },
   };
 }
@@ -759,6 +761,59 @@ describe('SocialPublicationService', () => {
 
       await expect(
         service.retry(agencyScope, actorUserId, 'pub-1'),
+      ).rejects.toThrow(ConflictException);
+    });
+  });
+
+  describe('deleteFailed', () => {
+    it('deletes only a failed attempt without an external publication', async () => {
+      publicationsRepository.findOne.mockResolvedValue({
+        id: 'pub-1',
+        status: 'failed',
+        externalPublicationId: null,
+      });
+
+      await expect(
+        service.deleteFailed(agencyScope, 'pub-1'),
+      ).resolves.toBeUndefined();
+
+      expect(publicationsRepository.delete).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: 'pub-1',
+          status: 'failed',
+          tenantId: agencyScope.tenantId,
+          agencyClientId: IsNull(),
+          externalPublicationId: IsNull(),
+        }),
+      );
+    });
+
+    it.each([
+      { status: 'published', externalPublicationId: 'provider-post-1' },
+      { status: 'failed', externalPublicationId: 'provider-post-1' },
+      { status: 'cancelled', externalPublicationId: null },
+    ])('never deletes execution evidence (%o)', async (publication) => {
+      publicationsRepository.findOne.mockResolvedValue({
+        id: 'pub-1',
+        ...publication,
+      });
+
+      await expect(
+        service.deleteFailed(agencyScope, 'pub-1'),
+      ).rejects.toThrow(ConflictException);
+      expect(publicationsRepository.delete).not.toHaveBeenCalled();
+    });
+
+    it('reports a conflict if the row changes before its conditional delete', async () => {
+      publicationsRepository.findOne.mockResolvedValue({
+        id: 'pub-1',
+        status: 'failed',
+        externalPublicationId: null,
+      });
+      publicationsRepository.delete.mockResolvedValue({ affected: 0 });
+
+      await expect(
+        service.deleteFailed(agencyScope, 'pub-1'),
       ).rejects.toThrow(ConflictException);
     });
   });
