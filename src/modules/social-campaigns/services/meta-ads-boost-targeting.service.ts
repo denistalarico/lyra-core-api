@@ -44,7 +44,9 @@ export class MetaAdsBoostTargetingService {
         })
       : await this.graph.readEdge({
           accessToken: credential.accessToken,
-          path: `${credential.externalAccountId}/targetingsearch`,
+          // Targeting Search is a Graph search node, not an edge of the ad
+          // account. The connection still supplies the scoped Ads credential.
+          path: 'search',
           fields: 'id,key,name,type,country_code,region',
           params: { type: this.providerType(dto.kind), q: query },
           limit: 25,
@@ -71,7 +73,8 @@ export class MetaAdsBoostTargetingService {
     if (!id || !label || !/^\d+$/.test(id)) return null;
     if (kind === 'location') {
       const providerType = this.string(row.type)?.toLowerCase();
-      const optionKind = providerType === 'region' ? 'region' : providerType === 'zip' || providerType === 'postal_code' ? 'postal_code' : 'city';
+      const optionKind = providerType === 'region' ? 'region' : providerType === 'city' ? 'city' : null;
+      if (!optionKind) return null;
       const detail = [this.string(row.region), this.string(row.country_code)].filter(Boolean).join(' · ') || null;
       return { id, label, kind: optionKind, detail };
     }
