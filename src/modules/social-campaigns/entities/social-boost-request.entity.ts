@@ -11,6 +11,7 @@ import {
 export type SocialBoostRequestStatus =
   | 'pending_confirmation'
   | 'executing'
+  | 'created_active'
   | 'created_paused'
   | 'blocked'
   | 'failed'
@@ -25,7 +26,7 @@ export type SocialBoostRequestStatus =
 ])
 @Check(
   'CK_social_boost_requests_status',
-  `"status" IN ('pending_confirmation', 'executing', 'created_paused', 'blocked', 'failed', 'expired')`,
+  `"status" IN ('pending_confirmation', 'executing', 'created_active', 'created_paused', 'blocked', 'failed', 'expired')`,
 )
 export class SocialBoostRequestEntity {
   @PrimaryGeneratedColumn('uuid')

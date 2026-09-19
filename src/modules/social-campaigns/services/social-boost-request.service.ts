@@ -166,12 +166,13 @@ export class SocialBoostRequestService {
       });
       claimed.providerResult = result;
       claimed.executedAt = new Date();
-      claimed.status = result.providerAccepted ? 'created_paused' : 'failed';
+      claimed.status = result.providerAccepted ? 'created_active' : 'failed';
       claimed.errorCode = result.providerAccepted
         ? null
-        : result.stage === 'campaign'
-          ? 'provider_create_failed'
-          : 'provider_partial_creation_requires_review';
+        : result.errorCode ??
+          (result.stage === 'campaign'
+            ? 'provider_create_failed'
+            : 'provider_partial_creation_requires_review');
     } catch {
       claimed.status = 'failed';
       claimed.errorCode = 'provider_create_failed';
@@ -266,6 +267,7 @@ export class SocialBoostRequestService {
       providerAccepted?: boolean;
       stage?: string;
       created?: Record<string, string>;
+      errorCode?: string;
     } | null;
     return {
       id: row.id,
@@ -281,7 +283,8 @@ export class SocialBoostRequestService {
             providerAccepted: provider.providerAccepted === true,
             stoppedAt: provider.stage ?? null,
             createdLevels: Object.keys(provider.created ?? {}),
-            allObjectsPaused: provider.providerAccepted === true,
+            allObjectsPaused: false,
+            allObjectsActive: provider.providerAccepted === true,
           }
         : null,
       createdAt: row.createdAt?.toISOString() ?? new Date().toISOString(),

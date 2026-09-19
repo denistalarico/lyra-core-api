@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { SocialAdCredentialResolver } from '../../social-integrations';
 import { MetaAdsGraphService } from '../../social-integrations/services/meta-ads-graph.service';
+import { MetaGraphError } from '../../social-integrations/services/meta-graph-error';
 import type { SocialBoostTemplateEntity } from '../entities';
 import {
   facebookPageId,
@@ -19,7 +20,7 @@ type Input = SocialCampaignsScope & {
 
 type Level = 'campaign' | 'adset' | 'creative' | 'ad';
 
-/** The only C7 port allowed to create Meta; every delivery-capable level is paused. */
+/** The only C7 port allowed to create and activate a confirmed Meta Boost. */
 @Injectable()
 export class MetaAdsBoostAdapter {
   constructor(
@@ -91,8 +92,15 @@ export class MetaAdsBoostAdapter {
         creative: JSON.stringify({ creative_id: created.creative }),
         status: 'PAUSED',
       });
-      return { providerAccepted: true, stage: 'ad' as const, created };
-    } catch {
+      // Build paused first so a partial hierarchy can never spend. Only after
+      // every object exists does the explicit confirmation activate delivery.
+      // Activating child-to-parent preserves that invariant if an activation
+      // request itself fails midway.
+      await this.activate(account, credential.accessToken, created.ad!);
+      await this.activate(account, credential.accessToken, created.adset!);
+      await this.activate(account, credential.accessToken, created.campaign!);
+      return { providerAccepted: true, stage: 'campaign' as const, created };
+    } catch (error) {
       const stage: Level = created.creative
         ? 'ad'
         : created.adset
@@ -100,8 +108,37 @@ export class MetaAdsBoostAdapter {
           : created.campaign
             ? 'adset'
             : 'campaign';
-      return { providerAccepted: false, stage, created };
+      return {
+        providerAccepted: false,
+        stage,
+        created,
+        errorCode: this.errorCode(error),
+      };
     }
+  }
+
+  private async activate(account: string, accessToken: string, id: string) {
+    const result = await this.graph.mutateNode({
+      accessToken,
+      path: id,
+      method: 'POST',
+      params: { status: 'ACTIVE' },
+      failureMessage: 'Meta Ads Boost activation failed.',
+    });
+    if (result.success !== true) throw new Error('activation_not_accepted');
+  }
+
+  private errorCode(error: unknown) {
+    if (error instanceof MetaGraphError) {
+      if (error.kind === 'rate_limited') return 'provider_rate_limited';
+      if (error.kind === 'transient') return 'provider_temporary_error';
+      if (error.kind === 'auth')
+        return error.authReason === 'permission_denied'
+          ? 'provider_permission_denied'
+          : 'provider_credentials_invalid';
+      return 'provider_account_or_billing_issue';
+    }
+    return 'provider_create_failed';
   }
 
   private async create(
