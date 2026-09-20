@@ -3,7 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
+import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, IsNull, Repository } from 'typeorm';
 import type { MediaAssetScope } from '../../common/media-assets';
 import {
@@ -37,7 +37,7 @@ export class CreativeAssetService {
     private readonly versions: Repository<CreativeAssetVersionEntity>,
     @InjectRepository(CreativeFolderEntity, 'agency')
     private readonly folders: Repository<CreativeFolderEntity>,
-    private readonly dataSource: DataSource,
+    @InjectDataSource('agency') private readonly dataSource: DataSource,
     private readonly mediaUpload: MediaAssetUploadService,
     private readonly mediaResolver: MediaAssetResolverService,
     private readonly thumbnails: CreativeThumbnailService,

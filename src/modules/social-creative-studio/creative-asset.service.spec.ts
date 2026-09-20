@@ -1,4 +1,6 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { SELF_DECLARED_DEPS_METADATA } from '@nestjs/common/constants';
+import { getDataSourceToken } from '@nestjs/typeorm';
 import { FindOperator, IsNull, Repository } from 'typeorm';
 import type { MediaAssetScope } from '../../common/media-assets';
 import {
@@ -386,6 +388,16 @@ function file(
 }
 
 describe('Creative Studio asset service', () => {
+  it('uses the agency data source for transactional asset writes', () => {
+    expect(
+      Reflect.getMetadata(SELF_DECLARED_DEPS_METADATA, CreativeAssetService),
+    ).toEqual(
+      expect.arrayContaining([
+        { index: 3, param: getDataSourceToken('agency') },
+      ]),
+    );
+  });
+
   it.each([
     ['PNG', PNG, 'image/png'],
     ['JPEG', JPEG, 'image/jpeg'],
