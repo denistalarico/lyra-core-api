@@ -211,6 +211,12 @@ describe('SocialOrganicModule', () => {
     expect(
       Reflect.getMetadata(MODULE_METADATA.EXPORTS, SocialOrganicModule),
     ).toEqual([
+      // Re-exported so `SocialCreativeStudioModule`, which imports this
+      // module, resolves the shared upload service and the metadata port
+      // bound here. Without them the Creative Studio's providers cannot be
+      // constructed.
+      MediaAssetUploadService,
+      MEDIA_ASSET_METADATA_READER,
       SocialOrganicCredentialResolver,
       SocialOrganicOAuthProviderRegistry,
       SocialOrganicOAuthService,
