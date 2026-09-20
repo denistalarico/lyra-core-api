@@ -13,11 +13,16 @@ import { NotificationsModule } from '../notifications';
 import { AgencyWorkspaceUserEntity } from '../agency/entities/agency-settings.entities';
 import { SocialIntegrationsModule } from '../social-integrations/social-integrations.module';
 import {
+  MetaOrganicAudienceService,
   MetaOrganicInsightsService,
   SocialConsolidatedAnalyticsService,
   SocialOrganicAccountMetricDailyEntity,
   SocialOrganicAnalyticsController,
   SocialOrganicAnalyticsReadService,
+  SocialOrganicAudienceConfigService,
+  SocialOrganicAudienceDailyEntity,
+  SocialOrganicAudienceReadService,
+  SocialOrganicAudienceWriterService,
   SocialOrganicMetricsWriterService,
   SocialOrganicPostMetricDailyEntity,
   SocialOrganicSyncRunEntity,
@@ -125,6 +130,7 @@ export function createMetaOrganicOAuthProviders(
         SocialDestinationCreativeEntity,
         SocialOrganicPostMetricDailyEntity,
         SocialOrganicAccountMetricDailyEntity,
+        SocialOrganicAudienceDailyEntity,
         SocialOrganicSyncRunEntity,
         SocialOrganicWebhookEventEntity,
         SocialOrganicInteractionEntity,
@@ -183,6 +189,13 @@ export function createMetaOrganicOAuthProviders(
     SocialOrganicHealthScheduler,
     MetaOrganicInsightsService,
     SocialOrganicMetricsWriterService,
+    // Audience snapshots: a gate that is off by default, a reader that measures
+    // a stock once rather than iterating days, a writer that owns one table, and
+    // the read that takes the newest snapshot and never a range.
+    SocialOrganicAudienceConfigService,
+    MetaOrganicAudienceService,
+    SocialOrganicAudienceWriterService,
+    SocialOrganicAudienceReadService,
     SocialOrganicSyncRunService,
     SocialOrganicSyncScheduler,
     SocialOrganicSyncWorker,

@@ -1,4 +1,5 @@
 export * from './social-ad-account-connection.entity';
+export * from './social-ad-breakdown-daily.entity';
 export * from './social-ad-destination-observation.entity';
 export * from './social-ad-entity.entity';
 export * from './social-ad-metric-daily.entity';

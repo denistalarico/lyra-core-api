@@ -310,7 +310,21 @@ export class MetaOrganicGraphService {
     since?: number;
     until?: number;
     metricType?: 'total_value';
-    breakdown?: 'media_product_type' | 'follow_type' | 'is_from_ads';
+    /**
+     * The four audience dimensions join the existing three.
+     *
+     * Meta accepts exactly one `breakdown` per request on
+     * `follower_demographics`, so a dimension is a request — the same shape the
+     * paid Insights edge imposes, arrived at independently.
+     */
+    breakdown?:
+      | 'media_product_type'
+      | 'follow_type'
+      | 'is_from_ads'
+      | 'age'
+      | 'gender'
+      | 'city'
+      | 'country';
   }): Promise<{ data: unknown[]; apiCalls: 1 }> {
     if (
       input.metrics.length === 0 ||

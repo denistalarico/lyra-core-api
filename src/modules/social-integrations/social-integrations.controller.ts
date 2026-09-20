@@ -28,6 +28,7 @@ import { MetaAdsOAuthService } from './services/meta-ads-oauth.service';
 import { MetaAdsSystemUserService } from './services/meta-ads-system-user.service';
 import { SocialAdConnectionService } from './services/social-ad-connection.service';
 import { SocialAdBackfillResumeService } from './services/social-ad-backfill-resume.service';
+import { SocialAdBreakdownSyncService } from './services/social-ad-breakdown-sync.service';
 import { SocialAdHierarchySyncService } from './services/social-ad-hierarchy-sync.service';
 import { SocialAdInsightsSyncService } from './services/social-ad-insights-sync.service';
 import { SocialAdSyncRunService } from './services/social-ad-sync-run.service';
@@ -52,6 +53,7 @@ export class SocialIntegrationsController {
     private readonly systemUserService: MetaAdsSystemUserService,
     private readonly hierarchySyncService: SocialAdHierarchySyncService,
     private readonly insightsSyncService: SocialAdInsightsSyncService,
+    private readonly breakdownSyncService: SocialAdBreakdownSyncService,
     private readonly syncRunService: SocialAdSyncRunService,
     private readonly backfillResumeService: SocialAdBackfillResumeService,
   ) {}
@@ -289,6 +291,50 @@ export class SocialIntegrationsController {
 
     try {
       return await this.insightsSyncService.syncInsights({
+        tenantId: scope.tenantId,
+        workspaceId: scope.workspaceId,
+        agencyClientId: scope.agencyClientId,
+        connectionId,
+        since: dto.since,
+        until: dto.until,
+      });
+    } catch (error) {
+      throw mapSocialAdSyncError(error);
+    }
+  }
+
+  /**
+   * Ingests Meta Ads breakdown facts for one connection over an explicit window.
+   *
+   * Separate from the insights ingest above rather than folded into it, and the
+   * separation is the point: breakdowns cost three extra paginated reads per
+   * window against a CPU-metered business quota shared with every other account
+   * under the same business. Attaching them to the existing ingest would make
+   * every caller of that endpoint spend that quota, including the daily sync.
+   *
+   * Gated off by default (`SOCIAL_ADS_BREAKDOWNS_ENABLED`). With the gate closed
+   * this answers 503 with a stated reason rather than a summary reporting zero
+   * rows written, which would be indistinguishable from an account with no
+   * delivery.
+   *
+   * Synchronous, like its neighbours, and for the same reason: breakdowns are
+   * deliberately not a `SocialAdSyncSegment`, because that union is the run
+   * log's stored contract and widening it would change what every historical
+   * run's recorded coverage means.
+   */
+  @Post('connections/:connectionId/sync/breakdowns')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireProductEntitlement('social')
+  @RequirePermission(SOCIAL_INTEGRATIONS_PERMISSION)
+  async syncConnectionBreakdowns(
+    @RequestContextData() ctx: RequestContext,
+    @Param('connectionId', ParseUUIDPipe) connectionId: string,
+    @Body() dto: SyncInsightsDto,
+  ) {
+    const scope = this.requireScope(ctx);
+
+    try {
+      return await this.breakdownSyncService.syncBreakdowns({
         tenantId: scope.tenantId,
         workspaceId: scope.workspaceId,
         agencyClientId: scope.agencyClientId,

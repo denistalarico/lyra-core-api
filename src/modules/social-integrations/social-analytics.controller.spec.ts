@@ -5,6 +5,7 @@ import {
   PERMISSION_KEY_METADATA,
   PRODUCT_ENTITLEMENT_METADATA,
 } from '../permissions/decorators/permissions.decorators';
+import type { SocialAdBreakdownReadService } from './services/social-ad-breakdown.read.service';
 import type { SocialAnalyticsReadService } from './services/social-analytics-read.service';
 import { SocialAnalyticsController } from './social-analytics.controller';
 
@@ -13,6 +14,7 @@ const GUARDED_HANDLERS = [
   'overview',
   'timeseries',
   'campaigns',
+  'breakdown',
   'freshness',
   'connections',
 ] as const;
@@ -27,6 +29,7 @@ const CONNECTION_SCOPED_HANDLERS = [
   'overview',
   'timeseries',
   'campaigns',
+  'breakdown',
   'freshness',
 ] as const;
 
@@ -55,15 +58,24 @@ function createHarness() {
     }),
   };
 
+  const breakdownInputs: Record<string, unknown>[] = [];
+
+  const breakdowns = {
+    breakdown: jest.fn(record(breakdownInputs)),
+  };
+
   return {
     overviewInputs,
     seriesInputs,
     campaignInputs,
     freshnessInputs,
     connectionInputs,
+    breakdownInputs,
     analytics,
+    breakdowns,
     controller: new SocialAnalyticsController(
       analytics as unknown as SocialAnalyticsReadService,
+      breakdowns as unknown as SocialAdBreakdownReadService,
     ),
   };
 }
@@ -77,8 +89,18 @@ function context(overrides: Partial<RequestContext> = {}): RequestContext {
   } as RequestContext;
 }
 
+/**
+ * One query shape for every handler.
+ *
+ * `kind` is only read by `breakdown`, and `sort`/`direction` only by
+ * `campaigns`; the rest ignore what they were not given. Sharing one object
+ * keeps these tests about scope resolution and guards — the two things every
+ * handler must get right — rather than about each handler's own DTO, which its
+ * validator already covers.
+ */
 const query = {
   connectionId: '11111111-1111-4111-8111-111111111111',
+  kind: 'age_gender',
   since: '2026-08-01',
   until: '2026-08-27',
 };
@@ -199,6 +221,7 @@ describe('SocialAnalyticsController scope resolution', () => {
         overview: harness.overviewInputs,
         timeseries: harness.seriesInputs,
         campaigns: harness.campaignInputs,
+        breakdown: harness.breakdownInputs,
         freshness: harness.freshnessInputs,
       };
 
@@ -233,12 +256,15 @@ describe('SocialAnalyticsController scope resolution', () => {
           ))(),
       ).rejects.toThrow(BadRequestException);
 
-      // `connections` reads through a differently named service method; the
-      // rest share their handler's name.
+      // `connections` reads through a differently named service method and
+      // `breakdown` through a different service altogether; the rest share
+      // their handler's name on the analytics read service.
       const reads =
         handler === 'connections'
           ? harness.analytics.listConnections
-          : harness.analytics[handler];
+          : handler === 'breakdown'
+            ? harness.breakdowns.breakdown
+            : harness.analytics[handler];
 
       expect(reads).not.toHaveBeenCalled();
     },

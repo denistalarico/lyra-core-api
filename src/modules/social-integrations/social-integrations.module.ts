@@ -5,6 +5,7 @@ import { PermissionsModule } from '../permissions';
 import { SocialAdCredentialResolver } from './credentials/social-ad-credential.resolver';
 import {
   SocialAdAccountConnectionEntity,
+  SocialAdBreakdownDailyEntity,
   SocialAdDestinationObservationEntity,
   SocialAdEntity,
   SocialAdMetricDailyEntity,
@@ -14,11 +15,16 @@ import { SocialPaidMediaIntelligenceAdapter } from './intelligence/social-paid-m
 import { SocialInternalAccessService } from './internal/social-internal-access.service';
 import { SocialAdBackfillPlannerService } from './services/social-ad-backfill-planner.service';
 import { SocialAdBackfillResumeService } from './services/social-ad-backfill-resume.service';
+import { MetaAdsBreakdownReaderService } from './services/meta-ads-breakdown-reader.service';
 import { MetaAdsEntityReaderService } from './services/meta-ads-entity-reader.service';
 import { MetaAdsGraphService } from './services/meta-ads-graph.service';
 import { MetaAdsInsightsReaderService } from './services/meta-ads-insights-reader.service';
 import { MetaAdsOAuthService } from './services/meta-ads-oauth.service';
 import { MetaAdsSystemUserService } from './services/meta-ads-system-user.service';
+import { SocialAdBreakdownConfigService } from './services/social-ad-breakdown-config.service';
+import { SocialAdBreakdownReadService } from './services/social-ad-breakdown.read.service';
+import { SocialAdBreakdownSyncService } from './services/social-ad-breakdown-sync.service';
+import { SocialAdBreakdownWriterService } from './services/social-ad-breakdown-writer.service';
 import { SocialAdConnectionService } from './services/social-ad-connection.service';
 import { SocialAdDestinationBreakdownReadService } from './services/social-ad-destination-breakdown.read.service';
 import { SocialAdHierarchyLookupReadService } from './services/social-ad-hierarchy-lookup.read.service';
@@ -57,6 +63,7 @@ import { SocialIntegrationsController } from './social-integrations.controller';
     TypeOrmModule.forFeature(
       [
         SocialAdAccountConnectionEntity,
+        SocialAdBreakdownDailyEntity,
         SocialAdDestinationObservationEntity,
         SocialAdEntity,
         SocialAdMetricDailyEntity,
@@ -83,6 +90,15 @@ import { SocialIntegrationsController } from './social-integrations.controller';
     MetaAdsInsightsReaderService,
     SocialAdMetricsWriterService,
     SocialAdInsightsSyncService,
+    // Breakdown ingestion and its read, in four pieces for the same reason the
+    // insights path is in four: a reader that cannot write, a writer that owns
+    // one table, a coordinator that resolves the credential once, and a gate
+    // that is off by default because this ingest multiplies quota consumption.
+    SocialAdBreakdownConfigService,
+    MetaAdsBreakdownReaderService,
+    SocialAdBreakdownWriterService,
+    SocialAdBreakdownSyncService,
+    SocialAdBreakdownReadService,
     SocialAdSyncConfigService,
     SocialAdSyncRunService,
     SocialAdBackfillPlannerService,

@@ -3,6 +3,10 @@ import { SocialAdCredentialError } from '../credentials/social-ad-credential.err
 import type { SocialAdCredentialErrorCode } from '../credentials/social-ad-credential.error';
 import { MetaGraphError } from '../services/meta-graph-error';
 import {
+  SocialAdBreakdownDisabledError,
+  SocialAdBreakdownTruncatedError,
+} from './social-ad-breakdown.error';
+import {
   SocialAdInsightsTruncatedError,
   SocialAdInsightsWindowNotClosedError,
   SocialAdInsightsWindowNotIntradayError,
@@ -156,6 +160,27 @@ export function describeSocialAdSyncFailure(
     };
   }
 
+  if (error instanceof SocialAdBreakdownTruncatedError) {
+    return {
+      status: HttpStatus.CONFLICT,
+      code: 'breakdown_window_truncated',
+      // Named apart from `insights_window_truncated` because the repair is not
+      // quite the same one: a shorter range helps, but so does a coarser level,
+      // and the dimension in the message is what says which read grew.
+      message: `The ${error.kind} breakdown returned too many rows for this window. Request a shorter range.`,
+    };
+  }
+
+  if (error instanceof SocialAdBreakdownDisabledError) {
+    return {
+      // 503 for the same reason `sync_disabled` is: nothing about the caller or
+      // the connection is wrong, and an operator turns it back on.
+      status: HttpStatus.SERVICE_UNAVAILABLE,
+      code: 'breakdown_ingest_disabled',
+      message: 'Breakdown ingestion is currently turned off on this server.',
+    };
+  }
+
   if (error instanceof SocialAdInsightsWindowNotClosedError) {
     return {
       status: HttpStatus.CONFLICT,
@@ -230,6 +255,8 @@ export function mapSocialAdSyncError(error: unknown): unknown {
   if (
     error instanceof SocialAdCredentialError ||
     error instanceof SocialAdInsightsTruncatedError ||
+    error instanceof SocialAdBreakdownTruncatedError ||
+    error instanceof SocialAdBreakdownDisabledError ||
     error instanceof SocialAdInsightsWindowNotClosedError ||
     error instanceof SocialAdInsightsWindowNotIntradayError ||
     error instanceof SocialAdSyncDisabledError ||

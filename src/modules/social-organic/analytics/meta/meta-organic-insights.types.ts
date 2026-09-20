@@ -234,6 +234,56 @@ export const INSTAGRAM_MEDIA_LIFETIME_METRICS = [
 ] as const;
 
 /**
+ * The audience-demographics metric each asset type exposes.
+ *
+ * Two names for one concept, because the two providers genuinely differ.
+ * Instagram reports `follower_demographics` as a `total_value` metric taking one
+ * `breakdown` at a time; a Facebook Page reports `page_fans_gender_age` and
+ * `page_fans_city` as lifetime metrics whose value is a bucket map with no
+ * breakdown parameter at all. Neither can be expressed in the other's shape,
+ * which is why the reader has one normalizer per shape rather than one with a
+ * flag.
+ *
+ * Every one of these is a **lifetime stock**, never a daily flow. They are
+ * written only to `social_organic_audience_daily`, whose whole contract is that
+ * its values are never summed across days — the same rule the `*_lifetime`
+ * snapshot columns already enforce on the post table, made structural by living
+ * in a table that has no flow column at all.
+ */
+export const INSTAGRAM_AUDIENCE_METRIC = 'follower_demographics';
+
+/**
+ * The dimensions asked of `follower_demographics`, one request each.
+ *
+ * `age` and `gender` as separate marginals rather than a cross: Instagram's
+ * `follower_demographics` takes one breakdown per call, so the cross is not on
+ * offer here. Deriving one from the two would be arithmetic on suppressed data —
+ * Meta withholds small buckets — and would produce a cross that does not sum to
+ * either marginal.
+ */
+export const INSTAGRAM_AUDIENCE_BREAKDOWNS = [
+  'age',
+  'gender',
+  'city',
+  'country',
+] as const;
+
+/**
+ * The Page metrics that carry the same information, with their dimension.
+ *
+ * `page_fans_gender_age` is one metric holding the cross, which is why the
+ * Facebook side records `age_gender` where the Instagram side records two
+ * marginals. Both spellings exist in `SocialOrganicAudienceKind` precisely so
+ * that neither provider's answer has to be reshaped into the other's before it
+ * is stored.
+ */
+export const FACEBOOK_AUDIENCE_METRICS = [
+  { metric: 'page_fans_gender_age', kind: 'age_gender' },
+  { metric: 'page_fans_city', kind: 'city' },
+  { metric: 'page_fans_country', kind: 'country' },
+] as const;
+
+/**
  * Documented candidates that are intentionally absent from the *daily-flow*
  * runtime. Still correct after A2 §1: these metrics are still never written
  * as a daily flow value — they are written only as `*_lifetime` snapshots,

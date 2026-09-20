@@ -17,6 +17,7 @@ import type { MetaAdsOAuthService } from './services/meta-ads-oauth.service';
 import type { MetaAdsSystemUserService } from './services/meta-ads-system-user.service';
 import type { SocialAdConnectionService } from './services/social-ad-connection.service';
 import type { SocialAdHierarchySyncService } from './services/social-ad-hierarchy-sync.service';
+import type { SocialAdBreakdownSyncService } from './services/social-ad-breakdown-sync.service';
 import type { SocialAdInsightsSyncService } from './services/social-ad-insights-sync.service';
 import type { SocialAdSyncRunService } from './services/social-ad-sync-run.service';
 import {
@@ -40,6 +41,9 @@ const GUARDED_HANDLERS = [
   // entitlement, same admin permission as the routes that bind one.
   'syncConnectionEntities',
   'syncConnectionInsights',
+  // Breakdowns read the same ad account through the same credential, so the
+  // extra dimension changes nothing about who may ask for it.
+  'syncConnectionBreakdowns',
   // Queueing a sync and reading the run history are the same act as running
   // one: both name a connection whose credential reads somebody's ad spend.
   'enqueueConnectionSync',
@@ -147,6 +151,19 @@ function createHarness(
     }),
   };
 
+  const breakdownInputs: Record<string, unknown>[] = [];
+
+  const breakdownSync = {
+    syncBreakdowns: jest.fn((input: Record<string, unknown>) => {
+      breakdownInputs.push(input);
+
+      return Promise.resolve({
+        connectionId: input.connectionId,
+        rowsWritten: 24,
+      });
+    }),
+  };
+
   const backfillResume = {
     resume: jest.fn((input: Record<string, unknown>) => {
       runInputs.push(input);
@@ -164,6 +181,7 @@ function createHarness(
     systemUser as unknown as MetaAdsSystemUserService,
     hierarchySync as unknown as SocialAdHierarchySyncService,
     insightsSync as unknown as SocialAdInsightsSyncService,
+    breakdownSync as unknown as SocialAdBreakdownSyncService,
     syncRuns as unknown as SocialAdSyncRunService,
     backfillResume as unknown as SocialAdBackfillResumeService,
   );
@@ -175,12 +193,14 @@ function createHarness(
     systemUser,
     hierarchySync,
     insightsSync,
+    breakdownSync,
     syncRuns,
     backfillResume,
     selectInputs,
     internalInputs,
     syncInputs,
     insightsInputs,
+    breakdownInputs,
     runInputs,
   };
 }

@@ -8,6 +8,7 @@ import {
 import type { SocialConsolidatedAnalyticsService } from './social-consolidated-analytics.service';
 import { SocialOrganicAnalyticsController } from './social-organic-analytics.controller';
 import type { SocialOrganicAnalyticsReadService } from './social-organic-analytics-read.service';
+import type { SocialOrganicAudienceReadService } from './social-organic-audience-read.service';
 
 /** Every handler on this controller carries the same guards. */
 const GUARDED_HANDLERS = [
@@ -17,9 +18,11 @@ const GUARDED_HANDLERS = [
   'freshness',
   'publicationMetrics',
   'consolidated',
+  // Follower demographics are the same asset read, split a different way.
+  'audience',
 ] as const;
 
-const ASSET_SCOPED_HANDLERS = ['overview', 'timeseries'] as const;
+const ASSET_SCOPED_HANDLERS = ['overview', 'timeseries', 'audience'] as const;
 
 function createHarness() {
   const overviewInputs: Record<string, unknown>[] = [];
@@ -56,6 +59,16 @@ function createHarness() {
     }),
   };
 
+  const audienceInputs: Record<string, unknown>[] = [];
+
+  const audienceReadService = {
+    audience: jest.fn((input: Record<string, unknown>) => {
+      audienceInputs.push(input);
+
+      return Promise.resolve({ kind: input.kind, buckets: [] });
+    }),
+  };
+
   return {
     overviewInputs,
     seriesInputs,
@@ -63,11 +76,14 @@ function createHarness() {
     listInputs,
     publicationMetricsInputs,
     consolidatedInputs,
+    audienceInputs,
     analyticsReadService,
     consolidatedReadService,
+    audienceReadService,
     controller: new SocialOrganicAnalyticsController(
       analyticsReadService as unknown as SocialOrganicAnalyticsReadService,
       consolidatedReadService as unknown as SocialConsolidatedAnalyticsService,
+      audienceReadService as unknown as SocialOrganicAudienceReadService,
     ),
   };
 }
@@ -81,8 +97,17 @@ function context(overrides: Partial<RequestContext> = {}): RequestContext {
   } as RequestContext;
 }
 
+/**
+ * One query shape for every asset-scoped handler.
+ *
+ * `kind` is only read by `audience`, which in turn ignores `since`/`until` —
+ * deliberately, since follower demographics are a lifetime stock with no period.
+ * Sharing one object keeps these tests about scope resolution and guards rather
+ * than about each handler's own DTO, which its validator already covers.
+ */
 const query = {
   assetId: '11111111-1111-4111-8111-111111111111',
+  kind: 'gender',
   since: '2026-08-01',
   until: '2026-08-27',
 };
@@ -200,6 +225,7 @@ describe('SocialOrganicAnalyticsController scope resolution', () => {
       const sinks: Record<string, Record<string, unknown>[]> = {
         overview: harness.overviewInputs,
         timeseries: harness.seriesInputs,
+        audience: harness.audienceInputs,
       };
 
       expect(sinks[handler][0]).toMatchObject({

@@ -13,12 +13,14 @@ import {
   RequirePermission,
   RequireProductEntitlement,
 } from '../../permissions';
+import { AnalyticsAudienceQueryDto } from './dto/analytics-audience.query.dto';
 import { AnalyticsFreshnessQueryDto } from './dto/analytics-freshness.query.dto';
 import { AnalyticsOverviewQueryDto } from './dto/analytics-overview.query.dto';
 import { ConsolidatedOverviewQueryDto } from './dto/consolidated-overview.query.dto';
 import { PublicationMetricsQueryDto } from './dto/publication-metrics.query.dto';
 import { SocialConsolidatedAnalyticsService } from './social-consolidated-analytics.service';
 import { SocialOrganicAnalyticsReadService } from './social-organic-analytics-read.service';
+import { SocialOrganicAudienceReadService } from './social-organic-audience-read.service';
 
 /**
  * Reused verbatim from A2's on-demand sync endpoint
@@ -54,6 +56,7 @@ export class SocialOrganicAnalyticsController {
   constructor(
     private readonly analyticsReadService: SocialOrganicAnalyticsReadService,
     private readonly consolidatedReadService: SocialConsolidatedAnalyticsService,
+    private readonly audienceReadService: SocialOrganicAudienceReadService,
   ) {}
 
   @Get('assets')
@@ -123,6 +126,38 @@ export class SocialOrganicAnalyticsController {
       workspaceId: scope.workspaceId,
       agencyClientId: scope.agencyClientId,
       assetId: query.assetId,
+    });
+  }
+
+  /**
+   * Follower demographics for one asset and one dimension, as of the newest
+   * snapshot.
+   *
+   * Takes no period, and that is the contract rather than an omission: these are
+   * lifetime stocks, so a window aggregate would count the same followers once
+   * per day in it. `asOf` says which day the answer comes from, and `hasData`
+   * separates "not ingested" — the default, since ingestion is gated off — from
+   * "no followers".
+   *
+   * Same permission as every other read here: it is the same act on the same
+   * asset, split a different way.
+   */
+  @Get('audience')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireProductEntitlement('social')
+  @RequirePermission(SOCIAL_ORGANIC_ANALYTICS_PERMISSION)
+  audience(
+    @RequestContextData() ctx: RequestContext,
+    @Query() query: AnalyticsAudienceQueryDto,
+  ) {
+    const scope = this.requireScope(ctx);
+
+    return this.audienceReadService.audience({
+      tenantId: scope.tenantId,
+      workspaceId: scope.workspaceId,
+      agencyClientId: scope.agencyClientId,
+      assetId: query.assetId,
+      kind: query.kind,
     });
   }
 

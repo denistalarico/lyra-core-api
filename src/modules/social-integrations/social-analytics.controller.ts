@@ -13,9 +13,11 @@ import {
   RequirePermission,
   RequireProductEntitlement,
 } from '../permissions';
+import { AnalyticsBreakdownQueryDto } from './dto/analytics-breakdown.query.dto';
 import { AnalyticsCampaignsQueryDto } from './dto/analytics-campaigns.query.dto';
 import { AnalyticsFreshnessQueryDto } from './dto/analytics-freshness.query.dto';
 import { AnalyticsOverviewQueryDto } from './dto/analytics-overview.query.dto';
+import { SocialAdBreakdownReadService } from './services/social-ad-breakdown.read.service';
 import { SocialAnalyticsReadService } from './services/social-analytics-read.service';
 
 /**
@@ -50,6 +52,7 @@ const SOCIAL_ANALYTICS_READ_PERMISSION =
 export class SocialAnalyticsController {
   constructor(
     private readonly analyticsReadService: SocialAnalyticsReadService,
+    private readonly breakdownReadService: SocialAdBreakdownReadService,
   ) {}
 
   /**
@@ -164,6 +167,41 @@ export class SocialAnalyticsController {
       until: query.until,
       sort: query.sort,
       direction: query.direction,
+    });
+  }
+
+  /**
+   * One dimension's distribution over the period: age/gender, device, platform.
+   *
+   * Same permission as every other read here — it is the same act on the same
+   * facts, split a different way, and a separate key would mean a manager could
+   * see an account's spend but not which age group it reached.
+   *
+   * The response carries `hasData` and `coveredDays` because an empty
+   * distribution has two causes that a caller must be able to tell apart:
+   * nothing was delivered, or breakdown ingestion has not run for this window.
+   * The second is the *expected* state — the ingest is gated off by default —
+   * so a UI that read emptiness as "no audience" would be wrong on most
+   * deployments.
+   */
+  @Get('breakdown')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireProductEntitlement('social')
+  @RequirePermission(SOCIAL_ANALYTICS_READ_PERMISSION)
+  breakdown(
+    @RequestContextData() ctx: RequestContext,
+    @Query() query: AnalyticsBreakdownQueryDto,
+  ) {
+    const scope = this.requireScope(ctx);
+
+    return this.breakdownReadService.breakdown({
+      tenantId: scope.tenantId,
+      workspaceId: scope.workspaceId,
+      agencyClientId: scope.agencyClientId,
+      connectionId: query.connectionId,
+      kind: query.kind,
+      since: query.since,
+      until: query.until,
     });
   }
 
