@@ -79,6 +79,7 @@ type AssetRow = {
   workspaceId: string;
   agencyClientId: string | null;
   kind: string;
+  usage: string;
   variant: string | null;
   theme: string | null;
   storagePath: string;
@@ -167,12 +168,14 @@ function createFixture(
         withDeleted?: boolean;
       }) => Promise.resolve(visible(assetRows, where, withDeleted)[0] ?? null),
     ),
-    create: jest.fn((value: AssetRow) => ({
+    create: jest.fn((value: Partial<AssetRow>) => ({
       ...value,
+      usage:
+        value.usage ?? (value.kind === 'reference' ? 'reference' : 'asset'),
       deletedAt: null,
       createdAt: new Date(),
       updatedAt: new Date(),
-    })),
+    }) as AssetRow),
     save: jest.fn((row: AssetRow) => {
       if (options.failAssetSave) {
         return Promise.reject(new Error('db write failed'));
@@ -446,6 +449,41 @@ describe('BrandKitService', () => {
 
       expect(asset.variant).toBeNull();
       expect(asset.theme).toBeNull();
+      expect(asset.usage).toBe('reference');
+    });
+
+    it('uploads every real-material category as an asset and stores its optional label', async () => {
+      const kinds = [
+        'product',
+        'person',
+        'environment',
+        'graphic_element',
+        'texture',
+        'background',
+        'photo',
+      ] as const;
+
+      for (const kind of kinds) {
+        const fixture = createFixture();
+        const asset = await fixture.service.uploadAsset(contextFor(), CLIENT_A, {
+          file: {
+            buffer: pngBuffer(),
+            originalname: `${kind}.png`,
+            mimetype: 'image/png',
+          },
+          kind,
+          label: ' Material real ',
+        });
+
+        expect(asset).toMatchObject({
+          kind,
+          usage: 'asset',
+          label: 'Material real',
+        });
+        expect(fixture.assetRows[0].metadata).toEqual({
+          label: 'Material real',
+        });
+      }
     });
 
     it('a DB failure after the object was written cleans the object up', async () => {
@@ -598,6 +636,19 @@ describe('BrandKitService', () => {
         fixture.service.getAssetContent(
           contextFor('social', OTHER_TENANT_ID),
           null,
+          asset.id,
+        ),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('another workspace in the same tenant cannot read the asset', async () => {
+      const fixture = createFixture();
+      const asset = await seedAsset(fixture, CLIENT_A);
+
+      await expect(
+        fixture.service.getAssetContent(
+          { ...contextFor(), workspaceId: 'another-workspace' },
+          CLIENT_A,
           asset.id,
         ),
       ).rejects.toThrow(NotFoundException);

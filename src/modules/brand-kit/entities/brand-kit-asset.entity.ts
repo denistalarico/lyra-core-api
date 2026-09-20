@@ -12,8 +12,8 @@ import {
 import { BrandKitEntity } from './brand-kit.entity';
 
 /**
- * One binary belonging to a Brand Kit — a logo variant or a creative
- * reference (Lyra Social S1.4.9).
+ * One binary belonging to a Brand Kit — either a reusable brand asset or a
+ * visual reference (Creative Studio CS2A).
  *
  * The bytes live in the PRIVATE bucket; this row holds only metadata plus the
  * storage key. `storage_path` never leaves the backend: the API projection
@@ -26,8 +26,21 @@ import { BrandKitEntity } from './brand-kit.entity';
  * most security-critical query the most expensive one.
  */
 
-export const BRAND_KIT_ASSET_KINDS = ['logo', 'reference'] as const;
+export const BRAND_KIT_ASSET_KINDS = [
+  'logo',
+  'product',
+  'person',
+  'environment',
+  'graphic_element',
+  'texture',
+  'background',
+  'photo',
+  'reference',
+] as const;
 export type BrandKitAssetKind = (typeof BRAND_KIT_ASSET_KINDS)[number];
+
+export const BRAND_KIT_ASSET_USAGES = ['asset', 'reference'] as const;
+export type BrandKitAssetUsage = (typeof BRAND_KIT_ASSET_USAGES)[number];
 
 /**
  * Logo shape. Two columns (`variant` × `theme`) rather than five booleans:
@@ -73,6 +86,9 @@ export class BrandKitAssetEntity {
 
   @Column({ type: 'varchar', length: 24 })
   kind!: BrandKitAssetKind;
+
+  @Column({ type: 'varchar', length: 16 })
+  usage!: BrandKitAssetUsage;
 
   @Column({ type: 'varchar', length: 24, nullable: true })
   variant!: BrandKitAssetVariant | null;

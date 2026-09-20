@@ -199,6 +199,7 @@ import { AddSocialBoostMessageDestinations1793800000000 } from './migrations/179
 import { AddSocialCalendarOnlyContent1793900000000 } from './migrations/1793900000000-add-social-calendar-only-content';
 import { ActivateConfirmedSocialBoosts1794000000000 } from './migrations/1794000000000-activate-confirmed-social-boosts';
 import { CreateSocialCreativeStudio1794100000000 } from './migrations/1794100000000-create-social-creative-studio';
+import { ExpandBrandKitAssetContext1794200000000 } from './migrations/1794200000000-expand-brand-kit-asset-context';
 
 export const AgencyDataSource = new DataSource({
   type: 'postgres',
@@ -408,5 +409,6 @@ export const AgencyDataSource = new DataSource({
     AddSocialCalendarOnlyContent1793900000000,
     ActivateConfirmedSocialBoosts1794000000000,
     CreateSocialCreativeStudio1794100000000,
+    ExpandBrandKitAssetContext1794200000000,
   ],
 });

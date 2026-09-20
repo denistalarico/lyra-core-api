@@ -154,6 +154,7 @@ export class BrandKitService {
     input: {
       file: BrandKitAssetUpload;
       kind: BrandKitAssetKind;
+      label?: string;
       variant?: BrandKitAssetVariant | null;
       theme?: BrandKitAssetTheme | null;
     },
@@ -203,6 +204,7 @@ export class BrandKitService {
           workspaceId: scope.workspaceId,
           agencyClientId: scope.agencyClientId,
           kind: input.kind,
+          usage: input.kind === 'reference' ? 'reference' : 'asset',
           variant,
           theme,
           storagePath: objectKey,
@@ -212,7 +214,9 @@ export class BrandKitService {
           height: null,
           originalFilename: sanitizeBrandKitFilename(file.originalname),
           checksum: createHash('sha256').update(file.buffer).digest('hex'),
-          metadata: {},
+          metadata: input.label?.trim()
+            ? { label: input.label.trim().slice(0, 100) }
+            : {},
           createdById: ctx.userId ?? null,
         }),
       );

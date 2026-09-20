@@ -15,6 +15,7 @@ import { PermissionsModule } from '../permissions';
 import { BrandKitController } from './brand-kit.controller';
 import { BrandKitAssetEntity, BrandKitEntity } from './entities';
 import { BrandKitService } from './services/brand-kit.service';
+import { SocialBrandKitContextPort } from './services/social-brand-kit-context.port';
 
 @Module({
   imports: [
@@ -23,10 +24,10 @@ import { BrandKitService } from './services/brand-kit.service';
     TypeOrmModule.forFeature([BrandKitEntity, BrandKitAssetEntity], 'agency'),
   ],
   controllers: [BrandKitController],
-  providers: [BrandKitService],
+  providers: [BrandKitService, SocialBrandKitContextPort],
   // Exported for the future consumers the architecture names (Creative
   // Studio, Pletor): they must read Brand Kit through this service, never by
   // building a storage URL by hand.
-  exports: [BrandKitService],
+  exports: [BrandKitService, SocialBrandKitContextPort],
 })
 export class BrandKitModule {}

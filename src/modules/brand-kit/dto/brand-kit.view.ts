@@ -10,10 +10,13 @@ import type {
   BrandKitPaletteEntry,
   BrandKitTypographyEntry,
 } from '../entities';
+import { projectBrandKitAssetMetadata } from '../brand-kit-asset-metadata';
 
 export type BrandKitAssetResponse = {
   id: string;
-  kind: string;
+  kind: BrandKitAssetEntity['kind'];
+  usage: BrandKitAssetEntity['usage'];
+  label: string | null;
   variant: string | null;
   theme: string | null;
   originalFilename: string;
@@ -21,6 +24,7 @@ export type BrandKitAssetResponse = {
   sizeBytes: number;
   width: number | null;
   height: number | null;
+  metadata: Record<string, unknown>;
   createdAt: string;
   /**
    * The authenticated endpoint that streams the bytes. A path, not a URL and
@@ -56,6 +60,11 @@ export function mapBrandKitAssetResponse(
   return {
     id: asset.id,
     kind: asset.kind,
+    usage: asset.usage,
+    label:
+      typeof asset.metadata?.label === 'string' && asset.metadata.label.trim()
+        ? asset.metadata.label.trim()
+        : null,
     variant: asset.variant,
     theme: asset.theme,
     originalFilename: asset.originalFilename,
@@ -64,6 +73,7 @@ export function mapBrandKitAssetResponse(
     sizeBytes: Number(asset.byteSize),
     width: asset.width,
     height: asset.height,
+    metadata: projectBrandKitAssetMetadata(asset.metadata),
     createdAt: asset.createdAt.toISOString(),
     contentPath: buildBrandKitAssetContentPath(asset.id),
   };

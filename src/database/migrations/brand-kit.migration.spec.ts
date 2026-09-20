@@ -212,7 +212,11 @@ describe('brand kit migration', () => {
       for (const column of columnsOf(BrandKitEntity)) {
         expect(joined).toContain(`"${column}"`);
       }
-      for (const column of columnsOf(BrandKitAssetEntity)) {
+      // `usage` is added by the CS2A follow-up migration, not by this
+      // historical creation migration.
+      for (const column of columnsOf(BrandKitAssetEntity).filter(
+        (column) => column !== 'usage',
+      )) {
         expect(joined).toContain(`"${column}"`);
       }
     });

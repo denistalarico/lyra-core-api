@@ -125,6 +125,7 @@ export class BrandKitController {
     return this.brandKitService.uploadAsset(ctx, this.activeClientId(ctx), {
       file,
       kind: dto.kind,
+      label: dto.label,
       variant: dto.variant ?? null,
       theme: dto.theme ?? null,
     });
