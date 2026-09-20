@@ -56,6 +56,7 @@ import { SocialIntegrationsModule } from './modules/social-integrations';
 import { SocialOrganicModule } from './modules/social-organic';
 import { SocialPlannerModule } from './modules/social-planner';
 import { SocialCampaignsModule } from './modules/social-campaigns';
+import { SocialCreativeStudioModule } from './modules/social-creative-studio/social-creative-studio.module';
 
 @Module({
   imports: [
@@ -117,6 +118,7 @@ import { SocialCampaignsModule } from './modules/social-campaigns';
     AdminModule,
     SocialPlannerModule,
     SocialCampaignsModule,
+    SocialCreativeStudioModule,
     SocialOrganicModule,
   ],
 })

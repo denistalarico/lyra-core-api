@@ -210,6 +210,8 @@ export function createMetaOrganicOAuthProviders(
     },
   ],
   exports: [
+    MediaAssetUploadService,
+    MEDIA_ASSET_METADATA_READER,
     SocialOrganicCredentialResolver,
     SocialOrganicOAuthProviderRegistry,
     SocialOrganicOAuthService,

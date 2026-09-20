@@ -202,6 +202,28 @@ export class MediaAssetUploadService {
   }
 
   /**
+   * Compensating action for a caller whose own transaction fails after a media
+   * row was created. This is intentionally not a user-facing delete API: it
+   * is only safe before the asset has been exposed or referenced elsewhere.
+   */
+  async removeAfterFailedConsumerOperation(
+    scope: MediaAssetScope,
+    mediaAssetId: string,
+  ): Promise<void> {
+    const asset = await this.mediaAssets.findOne({
+      where: {
+        id: mediaAssetId,
+        tenantId: scope.tenantId,
+        workspaceId: scope.workspaceId,
+        agencyClientId: scope.agencyClientId === null ? IsNull() : scope.agencyClientId,
+      },
+    });
+    if (!asset) return;
+    await this.mediaAssets.remove(asset);
+    await this.bestEffortRemoveObject(asset.storagePath);
+  }
+
+  /**
    * Rollback cleanup only. A failure here is swallowed on purpose: the caller
    * is already throwing the error that matters, and replacing it with a
    * storage error would hide why the upload actually failed.

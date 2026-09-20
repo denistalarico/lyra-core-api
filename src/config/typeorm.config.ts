@@ -1,6 +1,7 @@
 import { TypeOrmModuleOptions } from '@nestjs/typeorm';
 
 import { MediaAssetEntity } from '../common/media-assets';
+import { CreativeAssetEntity, CreativeAssetVersionEntity, CreativeFolderEntity } from '../modules/social-creative-studio/entities';
 
 import { UserPreferencesEntity } from '../modules/settings/entities/user-preferences.entity';
 import { WorkspaceSettingsAiEntity } from '../modules/settings/entities/workspace-settings-ai.entity';
@@ -373,6 +374,9 @@ import {
 
 export const agencyEntities = [
   MediaAssetEntity,
+  CreativeAssetEntity,
+  CreativeAssetVersionEntity,
+  CreativeFolderEntity,
   BrandKitEntity,
   BrandKitAssetEntity,
   SocialAdAccountConnectionEntity,
