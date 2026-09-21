@@ -63,6 +63,9 @@ describe('WhatsAppChannelHealthController', () => {
     expect(healthService.listStatus).toHaveBeenCalledWith({
       tenantId: 'tenant-id',
       workspaceId: 'workspace-id',
+      agencyClientId: null,
+      companyContextId: null,
+      scopeKind: 'agency',
     });
   });
 
@@ -84,6 +87,9 @@ describe('WhatsAppChannelHealthController', () => {
     expect(healthService.getHealth).toHaveBeenCalledWith({
       tenantId: 'tenant-id',
       workspaceId: 'workspace-id',
+      agencyClientId: null,
+      companyContextId: null,
+      scopeKind: 'agency',
       channelId: 'channel-id',
     });
   });
@@ -106,6 +112,9 @@ describe('WhatsAppChannelHealthController', () => {
     expect(healthService.runHealthCheck).toHaveBeenCalledWith({
       tenantId: 'tenant-id',
       workspaceId: 'workspace-id',
+      agencyClientId: null,
+      companyContextId: null,
+      scopeKind: 'agency',
       channelId: 'channel-id',
     });
   });

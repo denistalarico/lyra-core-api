@@ -1,6 +1,6 @@
 import { Injectable, Optional } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
-import { DataSource, EntityManager } from 'typeorm';
+import { DataSource, EntityManager, IsNull } from 'typeorm';
 import { ContactEntity } from '../../../contacts/entities/contact.entity';
 import { ContactMethodEntity } from '../../../contacts/entities/contact-method.entity';
 import { InboxAttributionObservationEntity } from '../../entities/inbox-attribution-observation.entity';
@@ -71,6 +71,22 @@ export class InboundMessageIngestionService {
               tenantId: input.tenantId,
               workspaceId: input.workspaceId,
             });
+          const channel = await manager
+            .getRepository(InboxChannelEntity)
+            .findOneByOrFail({
+              id: input.channelId,
+              tenantId: input.tenantId,
+              workspaceId: input.workspaceId,
+            });
+          if (
+            conversation.agencyClientId !== channel.agencyClientId ||
+            conversation.companyContextId !== channel.companyContextId ||
+            conversation.scopeKind !== channel.scopeKind
+          ) {
+            throw new Error(
+              'inbox_channel_conversation_company_scope_mismatch',
+            );
+          }
           return { conversation, message: duplicate, deduplicated: true };
         }
       }
@@ -87,7 +103,7 @@ export class InboundMessageIngestionService {
       const explicitOptOut = isExplicitLeadFlowOptOut(input.content);
       const qualification = internalContact
         ? { status: 'internal' as const, reason: 'workspace_internal_contact' }
-        : await this.qualify(manager, input);
+        : await this.qualify(manager, input, channel);
 
       let conversation = await manager
         .getRepository(InboxConversationEntity)
@@ -99,6 +115,14 @@ export class InboundMessageIngestionService {
             externalThreadId: input.externalThreadId,
           },
         });
+      if (
+        conversation &&
+        (conversation.agencyClientId !== channel.agencyClientId ||
+          conversation.companyContextId !== channel.companyContextId ||
+          conversation.scopeKind !== channel.scopeKind)
+      ) {
+        throw new Error('inbox_channel_conversation_company_scope_mismatch');
+      }
       const contactRelationship = this.contactRelationshipResolver
         ? await this.contactRelationshipResolver.resolve(manager, {
             tenantId: input.tenantId,
@@ -141,6 +165,9 @@ export class InboundMessageIngestionService {
         conversation = manager.getRepository(InboxConversationEntity).create({
           tenantId: input.tenantId,
           workspaceId: input.workspaceId,
+          agencyClientId: channel.agencyClientId,
+          companyContextId: channel.companyContextId,
+          scopeKind: channel.scopeKind,
           channelId: input.channelId,
           contactId: internalContact?.id ?? null,
           opportunityId: null,
@@ -440,6 +467,22 @@ export class InboundMessageIngestionService {
               tenantId: input.tenantId,
               workspaceId: input.workspaceId,
             });
+          const channel = await manager
+            .getRepository(InboxChannelEntity)
+            .findOneByOrFail({
+              id: input.channelId,
+              tenantId: input.tenantId,
+              workspaceId: input.workspaceId,
+            });
+          if (
+            conversation.agencyClientId !== channel.agencyClientId ||
+            conversation.companyContextId !== channel.companyContextId ||
+            conversation.scopeKind !== channel.scopeKind
+          ) {
+            throw new Error(
+              'inbox_channel_conversation_company_scope_mismatch',
+            );
+          }
           return { conversation, message: duplicate, deduplicated: true };
         }
       }
@@ -455,6 +498,19 @@ export class InboundMessageIngestionService {
           },
         });
       if (!conversation) return null;
+      const channel = await manager.getRepository(InboxChannelEntity).findOneBy({
+        id: input.channelId,
+        tenantId: input.tenantId,
+        workspaceId: input.workspaceId,
+      });
+      if (
+        !channel ||
+        conversation.agencyClientId !== channel.agencyClientId ||
+        conversation.companyContextId !== channel.companyContextId ||
+        conversation.scopeKind !== channel.scopeKind
+      ) {
+        throw new Error('inbox_channel_conversation_company_scope_mismatch');
+      }
 
       const occurredAt = input.occurredAt ?? new Date();
       const message = await manager.getRepository(InboxMessageEntity).save(
@@ -605,9 +661,16 @@ export class InboundMessageIngestionService {
   private async qualify(
     manager: EntityManager,
     input: NormalizedInboundMessage,
+    channel: InboxChannelEntity,
   ) {
     const settings = await manager.getRepository(InboxSettingsEntity).findOne({
-      where: { tenantId: input.tenantId, workspaceId: input.workspaceId },
+      where: {
+        tenantId: input.tenantId,
+        workspaceId: input.workspaceId,
+        agencyClientId: channel.agencyClientId ?? IsNull(),
+        companyContextId: channel.companyContextId ?? IsNull(),
+        scopeKind: channel.scopeKind,
+      },
     });
     const rules = settings?.leadRules ?? [];
     const channelRules = rules.filter((rule) => {
@@ -792,7 +855,7 @@ export class InboundMessageIngestionService {
         // which is right for a conversation and wrong for a fact: this row
         // states what was true when the message arrived, and re-pointing the
         // channel later must not re-attribute historical spend.
-        agencyClientId: this.readString(channel.metadata?.clientId),
+        agencyClientId: channel.agencyClientId,
         conversationId: conversation.id,
         messageId: message.id,
         channelId: input.channelId,

@@ -107,6 +107,7 @@ import { FacebookMessengerChannelHealthController } from './channels/facebook-me
 import { FacebookMessengerChannelHealthService } from './channels/facebook-messenger/services/facebook-messenger-channel-health.service';
 import { FacebookMessengerContactEnrichmentService } from './channels/facebook-messenger/services/facebook-messenger-contact-enrichment.service';
 import { InstagramContactEnrichmentService } from './channels/instagram/services/instagram-contact-enrichment.service';
+import { AgencyClientCompanyContext } from '../clients/entities/agency-client-company-context.entity';
 
 @Module({
   imports: [
@@ -144,6 +145,7 @@ import { InstagramContactEnrichmentService } from './channels/instagram/services
         LeadFlowAgentChannelBindingEntity,
         LeadFlowAgentEntity,
         CrmPipelineEntity,
+        AgencyClientCompanyContext,
       ],
       'agency',
     ),

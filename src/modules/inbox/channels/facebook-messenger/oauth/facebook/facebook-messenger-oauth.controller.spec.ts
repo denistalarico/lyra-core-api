@@ -97,11 +97,15 @@ describe('FacebookMessengerOAuthController', () => {
     void controller.start({
       tenantId: 'tenant-id',
       workspaceId: 'workspace-id',
+      agencyClientId: null,
+      companyContextId: null,
+      scopeKind: 'agency',
       userId: 'user-id',
       managedContext: {
         productKey: 'leadflow',
         operatingMode: 'managed',
         clientId: 'client-id',
+        companyContextId: null,
         clientName: 'Client Name',
         managedTenantId: 'managed-tenant-id',
       },
@@ -110,12 +114,16 @@ describe('FacebookMessengerOAuthController', () => {
     expect(oauthService.start).toHaveBeenCalledWith({
       tenantId: 'tenant-id',
       workspaceId: 'workspace-id',
+      agencyClientId: null,
+      companyContextId: null,
+      scopeKind: 'agency',
       userId: 'user-id',
       metadata: {
         setupSource: 'facebook_login',
         productKey: 'leadflow',
         operatingMode: 'managed',
         clientId: 'client-id',
+        companyContextId: null,
         clientName: 'Client Name',
         managedTenantId: 'managed-tenant-id',
       },
@@ -126,6 +134,9 @@ describe('FacebookMessengerOAuthController', () => {
     const ctx = {
       tenantId: 'tenant-id',
       workspaceId: 'workspace-id',
+      agencyClientId: null,
+      companyContextId: null,
+      scopeKind: 'agency',
       userId: 'user-id',
     } as never;
 
@@ -135,6 +146,9 @@ describe('FacebookMessengerOAuthController', () => {
     expect(oauthService.select).toHaveBeenCalledWith({
       tenantId: 'tenant-id',
       workspaceId: 'workspace-id',
+      agencyClientId: null,
+      companyContextId: null,
+      scopeKind: 'agency',
       userId: 'user-id',
       sessionId: 'session-id',
       pageId: '123',
@@ -142,6 +156,9 @@ describe('FacebookMessengerOAuthController', () => {
     expect(oauthService.getSessionAssets).toHaveBeenCalledWith({
       tenantId: 'tenant-id',
       workspaceId: 'workspace-id',
+      agencyClientId: null,
+      companyContextId: null,
+      scopeKind: 'agency',
       userId: 'user-id',
       sessionId: 'session-id',
     });

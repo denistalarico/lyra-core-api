@@ -15,6 +15,7 @@ import {
   RequireProductEntitlement,
 } from '../../../permissions';
 import { WhatsAppChannelHealthService } from './services/whatsapp-channel-health.service';
+import { resolveInboxCompanyScope } from '../../inbox-company-scope';
 
 @Controller('inbox/channels/whatsapp')
 @UseGuards(JwtAuthGuard, PermissionsGuard)
@@ -37,10 +38,9 @@ export class WhatsAppChannelHealthController {
       );
     }
 
-    return this.whatsappChannelHealthService.listStatus({
-      tenantId,
-      workspaceId,
-    });
+    return this.whatsappChannelHealthService.listStatus(
+      resolveInboxCompanyScope(ctx),
+    );
   }
 
   @Get(':channelId/health')
@@ -58,8 +58,7 @@ export class WhatsAppChannelHealthController {
     }
 
     return this.whatsappChannelHealthService.getHealth({
-      tenantId,
-      workspaceId,
+      ...resolveInboxCompanyScope(ctx),
       channelId,
     });
   }
@@ -79,8 +78,7 @@ export class WhatsAppChannelHealthController {
     }
 
     return this.whatsappChannelHealthService.runHealthCheck({
-      tenantId,
-      workspaceId,
+      ...resolveInboxCompanyScope(ctx),
       channelId,
     });
   }

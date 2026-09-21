@@ -9,6 +9,9 @@ import { Client, Notification } from 'pg';
 import { EventEmitter } from 'node:events';
 import { DataSource } from 'typeorm';
 import { InboxDomainOutboxEntity } from '../entities/inbox-domain-outbox.entity';
+import { InboxConversationEntity } from '../entities/inbox-conversation.entity';
+import { InboxChannelEntity } from '../entities/inbox-channel.entity';
+import type { InboxScopeKind } from '../inbox-company-scope';
 import { InboxRuntimeConfigService } from '../runtime/inbox-runtime-config.service';
 import { INBOX_PG_CHANNEL } from './inbox-realtime.constants';
 
@@ -19,6 +22,9 @@ export type InboxRealtimeEvent = {
   eventVersion: number;
   tenantId: string;
   workspaceId: string;
+  agencyClientId: string | null;
+  companyContextId: string | null;
+  scopeKind: Exclude<InboxScopeKind, 'legacy_unassigned'>;
   aggregateId: string;
   occurredAt: string;
   projection: Record<string, unknown>;
@@ -125,6 +131,8 @@ export class InboxRealtimeEventBusService
       .getRepository(InboxDomainOutboxEntity)
       .findOneBy({ id: notification.payload });
     if (!row) return;
+    const scope = await this.resolveEventScope(row);
+    if (!scope || scope.scopeKind === 'legacy_unassigned') return;
     this.emitter.emit('event', {
       eventId: row.id,
       idempotencyKey: row.idempotencyKey,
@@ -132,10 +140,64 @@ export class InboxRealtimeEventBusService
       eventVersion: row.eventVersion,
       tenantId: row.tenantId,
       workspaceId: row.workspaceId,
+      agencyClientId: scope.agencyClientId,
+      companyContextId: scope.companyContextId,
+      scopeKind: scope.scopeKind,
       aggregateId: row.aggregateId,
       occurredAt: row.createdAt.toISOString(),
       projection: safeProjection(row.payload),
     } satisfies InboxRealtimeEvent);
+  }
+
+  private async resolveEventScope(row: InboxDomainOutboxEntity) {
+    const payloadConversationId = row.payload?.conversationId;
+    const conversationId =
+      typeof payloadConversationId === 'string'
+        ? payloadConversationId
+        : row.aggregateType === 'inbox_conversation' ||
+            row.aggregateType === 'conversation'
+          ? row.aggregateId
+          : null;
+
+    if (conversationId) {
+      const conversation = await this.dataSource
+        .getRepository(InboxConversationEntity)
+        .findOne({
+          select: {
+            agencyClientId: true,
+            companyContextId: true,
+            scopeKind: true,
+          },
+          where: {
+            id: conversationId,
+            tenantId: row.tenantId,
+            workspaceId: row.workspaceId,
+          },
+        });
+      if (conversation) return conversation;
+    }
+
+    const payloadChannelId = row.payload?.channelId;
+    const channelId =
+      typeof payloadChannelId === 'string'
+        ? payloadChannelId
+        : row.aggregateType === 'inbox_channel'
+          ? row.aggregateId
+          : null;
+
+    if (!channelId) return null;
+    return this.dataSource.getRepository(InboxChannelEntity).findOne({
+      select: {
+        agencyClientId: true,
+        companyContextId: true,
+        scopeKind: true,
+      },
+      where: {
+        id: channelId,
+        tenantId: row.tenantId,
+        workspaceId: row.workspaceId,
+      },
+    });
   }
 }
 

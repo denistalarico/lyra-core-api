@@ -179,6 +179,9 @@ function sessionFixture(): InboxChannelConnectionSessionEntity {
     id: 'session-id',
     tenantId: 'tenant-id',
     workspaceId: 'workspace-id',
+    agencyClientId: 'client-id',
+    companyContextId: 'company-id',
+    scopeKind: 'company',
   } as InboxChannelConnectionSessionEntity;
 }
 
@@ -189,6 +192,9 @@ function channelFixture(
     id: 'channel-id',
     tenantId: 'tenant-id',
     workspaceId: 'workspace-id',
+    agencyClientId: 'client-id',
+    companyContextId: 'company-id',
+    scopeKind: 'company',
     name: 'Instagram',
     type: 'instagram',
     status: 'active',

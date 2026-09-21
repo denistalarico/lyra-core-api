@@ -9,6 +9,7 @@ import { FindOptionsWhere, Raw, Repository } from 'typeorm';
 import { FilesService } from '../../common/files/files.service';
 import { InboxService } from '../inbox/inbox.service';
 import { InboxSettingsService } from '../inbox/inbox-settings.service';
+import type { InboxCompanyScope } from '../inbox/inbox-company-scope';
 import { ContactsService } from '../contacts/contacts.service';
 import type { RequestContext } from '../../common/context/request-context.interface';
 import { CreatePublicWebchatConversationDto } from './dto/create-public-webchat-conversation.dto';
@@ -185,6 +186,7 @@ export class WebchatService {
     });
 
     await this.inboxService.retireWebchatChannel({
+      ...this.inboxScopeFromWidget(widget),
       tenantId: widget.tenantId,
       workspaceId: widget.workspaceId,
       widgetId: widget.id,
@@ -200,6 +202,7 @@ export class WebchatService {
    */
   private async syncInboxChannel(widget: WebchatWidgetEntity) {
     await this.inboxService.syncWebchatChannel({
+      ...this.inboxScopeFromWidget(widget),
       tenantId: widget.tenantId,
       workspaceId: widget.workspaceId,
       widgetId: widget.id,
@@ -304,6 +307,7 @@ export class WebchatService {
   ) {
     const userId = this.requireUserId(ctx);
     const conversation = await this.findConversationOrFail(ctx, conversationId);
+    const widget = await this.findWidgetOrFail(ctx, conversation.widgetId);
 
     const message = this.messagesRepository.create({
       tenantId: conversation.tenantId,
@@ -332,6 +336,7 @@ export class WebchatService {
     const savedMessage = await this.messagesRepository.save(message);
 
     await this.inboxService.createMessageFromWebchat({
+      ...this.inboxScopeFromWidget(widget),
       tenantId: savedMessage.tenantId,
       workspaceId: savedMessage.workspaceId,
       widgetId: savedMessage.widgetId,
@@ -446,6 +451,7 @@ export class WebchatService {
       await this.conversationsRepository.save(conversation);
 
     await this.inboxService.upsertConversationFromWebchat({
+      ...this.inboxScopeFromWidget(widget),
       tenantId: savedConversation.tenantId,
       workspaceId: savedConversation.workspaceId,
       widgetId: savedConversation.widgetId,
@@ -497,6 +503,7 @@ export class WebchatService {
         await this.messagesRepository.save(systemMessage);
 
       await this.inboxService.createMessageFromWebchat({
+        ...this.inboxScopeFromWidget(widget),
         tenantId: savedSystemMessage.tenantId,
         workspaceId: savedSystemMessage.workspaceId,
         widgetId: savedSystemMessage.widgetId,
@@ -592,10 +599,7 @@ export class WebchatService {
     });
 
     const leadEvaluation = await this.inboxSettingsService.evaluateLeadRules(
-      {
-        tenantId: conversation.tenantId,
-        workspaceId: conversation.workspaceId,
-      },
+      this.requestContextFromWidget(widget),
       {
         channelType: 'webchat',
         text: savedMessage.content,
@@ -658,6 +662,7 @@ export class WebchatService {
     }
 
     await this.inboxService.createMessageFromWebchat({
+      ...this.inboxScopeFromWidget(widget),
       tenantId: savedMessage.tenantId,
       workspaceId: savedMessage.workspaceId,
       widgetId: savedMessage.widgetId,
@@ -764,6 +769,8 @@ export class WebchatService {
     if (!conversation) {
       throw new NotFoundException('Webchat conversation not found.');
     }
+
+    await this.findWidgetOrFail(ctx, conversation.widgetId);
 
     return conversation;
   }
@@ -952,13 +959,17 @@ export class WebchatService {
 
     if (managed?.operatingMode === 'client') {
       scoped.metadata = Raw(
-        (column) => `${column} ->> 'clientId' = :lfClientId`,
-        { lfClientId: managed.clientId },
+        (column) =>
+          `(${column} ->> 'operatingMode' = 'client' AND ${column} ->> 'clientId' = :lfClientId AND ${column} ->> 'companyContextId' = :lfCompanyContextId)`,
+        {
+          lfClientId: managed.clientId,
+          lfCompanyContextId: managed.companyContextId,
+        },
       );
     } else {
       scoped.metadata = Raw(
         (column) =>
-          `(${column} ->> 'clientId' IS NULL OR ${column} ->> 'operatingMode' = 'agency')`,
+          `(${column} ->> 'operatingMode' = 'agency' AND ${column} ->> 'clientId' IS NULL AND ${column} ->> 'companyContextId' IS NULL)`,
       );
     }
 
@@ -983,6 +994,7 @@ export class WebchatService {
       productKey: managed.productKey,
       operatingMode: managed.operatingMode,
       clientId: managed.clientId,
+      companyContextId: managed.companyContextId ?? null,
       managedTenantId: managed.managedTenantId,
     };
 
@@ -991,6 +1003,71 @@ export class WebchatService {
     }
 
     return next;
+  }
+
+  private inboxScopeFromWidget(widget: WebchatWidgetEntity): InboxCompanyScope {
+    const operatingMode = widget.metadata?.operatingMode;
+    const clientId = widget.metadata?.clientId;
+    const companyContextId = widget.metadata?.companyContextId;
+
+    if (
+      operatingMode === 'client' &&
+      typeof clientId === 'string' &&
+      clientId &&
+      typeof companyContextId === 'string' &&
+      companyContextId
+    ) {
+      return {
+        tenantId: widget.tenantId,
+        workspaceId: widget.workspaceId,
+        agencyClientId: clientId,
+        companyContextId,
+        scopeKind: 'company',
+      };
+    }
+
+    if (
+      operatingMode === 'agency' &&
+      (clientId === null || clientId === undefined) &&
+      (companyContextId === null || companyContextId === undefined)
+    ) {
+      return {
+        tenantId: widget.tenantId,
+        workspaceId: widget.workspaceId,
+        agencyClientId: null,
+        companyContextId: null,
+        scopeKind: 'agency',
+      };
+    }
+
+    throw new BadRequestException(
+      'Webchat widget has no valid operational company context.',
+    );
+  }
+
+  private requestContextFromWidget(widget: WebchatWidgetEntity): RequestContext {
+    const scope = this.inboxScopeFromWidget(widget);
+
+    return {
+      tenantId: scope.tenantId,
+      workspaceId: scope.workspaceId,
+      managedContext:
+        scope.scopeKind === 'company'
+          ? {
+              productKey: 'leadflow',
+              operatingMode: 'client',
+              clientId: scope.agencyClientId,
+              companyContextId: scope.companyContextId,
+              managedTenantId: null,
+            }
+          : {
+              productKey: 'leadflow',
+              operatingMode: 'agency',
+              clientId: null,
+              companyContextId: null,
+              managedTenantId: null,
+            },
+    };
   }
 
   private requireWorkspaceId(ctx: RequestContext) {

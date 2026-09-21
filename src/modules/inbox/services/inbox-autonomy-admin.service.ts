@@ -1,7 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
+import { IsNull } from 'typeorm';
 import { InboxRuntimeConfigService } from '../runtime/inbox-runtime-config.service';
+import type { RequestContext } from '../../../common/context/request-context.interface';
+import { resolveInboxCompanyScope } from '../inbox-company-scope';
+import { InboxAutonomyControlEntity } from '../entities/inbox-autonomy-control.entity';
 
 @Injectable()
 export class InboxAutonomyAdminService {
@@ -10,7 +14,10 @@ export class InboxAutonomyAdminService {
     private readonly config: InboxRuntimeConfigService,
   ) {}
 
-  async inspect(tenantId: string, workspaceId: string) {
+  async inspect(ctx: RequestContext) {
+    const scope = resolveInboxCompanyScope(ctx);
+    const { tenantId, workspaceId, agencyClientId, companyContextId, scopeKind } =
+      scope;
     const [controlRows, actions, decisions, queues, providers, meta, created] =
       await Promise.all([
         this.dataSource.query<
@@ -24,8 +31,11 @@ export class InboxAutonomyAdminService {
         >(
           `SELECT reply_enabled,crm_enabled,handoff_enabled,paused_at,reason_code
              FROM inbox_autonomy_controls
-            WHERE tenant_id=$1 AND workspace_id=$2`,
-          [tenantId, workspaceId],
+            WHERE tenant_id=$1 AND workspace_id=$2
+              AND scope_kind=$3
+              AND agency_client_id IS NOT DISTINCT FROM $4::uuid
+              AND company_context_id IS NOT DISTINCT FROM $5::uuid`,
+          [tenantId, workspaceId, scopeKind, agencyClientId, companyContextId],
         ),
         this.dataSource.query<
           Array<{
@@ -35,52 +45,83 @@ export class InboxAutonomyAdminService {
             count: number;
           }>
         >(
-          `SELECT policy_outcome outcome,status,reason_code,count(*)::int count
-             FROM inbox_governed_actions
-            WHERE tenant_id=$1 AND workspace_id=$2
-            GROUP BY policy_outcome,status,reason_code
-            ORDER BY policy_outcome,status,reason_code`,
-          [tenantId, workspaceId],
+          `SELECT action.policy_outcome outcome,action.status,action.reason_code,count(*)::int count
+             FROM inbox_governed_actions action
+             JOIN inbox_conversations conversation
+               ON conversation.id = action.conversation_id
+              AND conversation.tenant_id = action.tenant_id
+              AND conversation.workspace_id = action.workspace_id
+            WHERE action.tenant_id=$1 AND action.workspace_id=$2
+              AND conversation.scope_kind=$3
+              AND conversation.agency_client_id IS NOT DISTINCT FROM $4::uuid
+              AND conversation.company_context_id IS NOT DISTINCT FROM $5::uuid
+            GROUP BY action.policy_outcome,action.status,action.reason_code
+            ORDER BY action.policy_outcome,action.status,action.reason_code`,
+          [tenantId, workspaceId, scopeKind, agencyClientId, companyContextId],
         ),
         this.dataSource.query<Array<{ status: string; count: number }>>(
-          `SELECT status,count(*)::int count FROM inbox_agent_decisions
-            WHERE tenant_id=$1 AND workspace_id=$2 GROUP BY status ORDER BY status`,
-          [tenantId, workspaceId],
+          `SELECT decision.status,count(*)::int count FROM inbox_agent_decisions decision
+             JOIN inbox_conversations conversation
+               ON conversation.id = decision.conversation_id
+              AND conversation.tenant_id = decision.tenant_id
+              AND conversation.workspace_id = decision.workspace_id
+            WHERE decision.tenant_id=$1 AND decision.workspace_id=$2
+              AND conversation.scope_kind=$3
+              AND conversation.agency_client_id IS NOT DISTINCT FROM $4::uuid
+              AND conversation.company_context_id IS NOT DISTINCT FROM $5::uuid
+            GROUP BY decision.status ORDER BY decision.status`,
+          [tenantId, workspaceId, scopeKind, agencyClientId, companyContextId],
         ),
         this.dataSource.query<
           Array<{ queue: string; status: string; count: number }>
         >(
-          `SELECT 'batch' queue,status,count(*)::int count
-             FROM inbox_processing_batches WHERE tenant_id=$1 AND workspace_id=$2
-            GROUP BY status
+          `SELECT 'batch' queue,batch.status,count(*)::int count
+             FROM inbox_processing_batches batch
+             JOIN inbox_conversations conversation
+               ON conversation.id = batch.conversation_id
+              AND conversation.tenant_id = batch.tenant_id
+              AND conversation.workspace_id = batch.workspace_id
+            WHERE batch.tenant_id=$1 AND batch.workspace_id=$2
+              AND conversation.scope_kind=$3
+              AND conversation.agency_client_id IS NOT DISTINCT FROM $4::uuid
+              AND conversation.company_context_id IS NOT DISTINCT FROM $5::uuid
+            GROUP BY batch.status
            UNION ALL
-           SELECT 'outbox',status,count(*)::int count
-             FROM inbox_domain_outbox WHERE tenant_id=$1 AND workspace_id=$2
-            GROUP BY status
-           UNION ALL
-           SELECT 'media',status,count(*)::int count
-             FROM inbox_media_assets WHERE tenant_id=$1 AND workspace_id=$2
-            GROUP BY status`,
-          [tenantId, workspaceId],
+           SELECT 'media',media.status,count(*)::int count
+             FROM inbox_media_assets media
+             JOIN inbox_conversations conversation
+               ON conversation.id = media.conversation_id
+              AND conversation.tenant_id = media.tenant_id
+              AND conversation.workspace_id = media.workspace_id
+            WHERE media.tenant_id=$1 AND media.workspace_id=$2
+              AND conversation.scope_kind=$3
+              AND conversation.agency_client_id IS NOT DISTINCT FROM $4::uuid
+              AND conversation.company_context_id IS NOT DISTINCT FROM $5::uuid
+            GROUP BY media.status`,
+          [tenantId, workspaceId, scopeKind, agencyClientId, companyContextId],
         ),
-        this.dataSource.query<
-          Array<{
-            operation: string;
-            status: string;
-            count: number;
-            estimated_cost_usd: string;
-            average_latency_ms: number | null;
-          }>
-        >(
-          `SELECT operation,status,count(*)::int count,
-                  COALESCE(sum(estimated_cost_usd),0)::text estimated_cost_usd,
-                  round(avg(latency_ms))::int average_latency_ms
-             FROM inbox_provider_usage_ledger
-            WHERE tenant_id=$1 AND workspace_id=$2
-              AND created_at >= date_trunc('day',now())
-            GROUP BY operation,status ORDER BY operation,status`,
-          [tenantId, workspaceId],
-        ),
+        // Provider usage has no durable conversation/channel parent yet.
+        // Do not reinterpret a workspace aggregate as company-owned data.
+        scopeKind === 'agency'
+          ? this.dataSource.query<
+              Array<{
+                operation: string;
+                status: string;
+                count: number;
+                estimated_cost_usd: string;
+                average_latency_ms: number | null;
+              }>
+            >(
+              `SELECT operation,status,count(*)::int count,
+                      COALESCE(sum(estimated_cost_usd),0)::text estimated_cost_usd,
+                      round(avg(latency_ms))::int average_latency_ms
+                 FROM inbox_provider_usage_ledger
+                WHERE tenant_id=$1 AND workspace_id=$2
+                  AND created_at >= date_trunc('day',now())
+                GROUP BY operation,status ORDER BY operation,status`,
+              [tenantId, workspaceId],
+            )
+          : Promise.resolve([]),
         this.dataSource.query<
           Array<{
             operation: string;
@@ -90,24 +131,34 @@ export class InboxAutonomyAdminService {
             average_latency_ms: number | null;
           }>
         >(
-          `SELECT operation,state,delivery_status,count(*)::int count,
-                  round(avg(latency_ms))::int average_latency_ms
-             FROM inbox_meta_operations
-            WHERE tenant_id=$1 AND workspace_id=$2
-            GROUP BY operation,state,delivery_status
-            ORDER BY operation,state,delivery_status`,
-          [tenantId, workspaceId],
+          `SELECT operation.operation,operation.state,operation.delivery_status,count(*)::int count,
+                  round(avg(operation.latency_ms))::int average_latency_ms
+             FROM inbox_meta_operations operation
+             JOIN inbox_conversations conversation
+               ON conversation.id = operation.conversation_id
+              AND conversation.tenant_id = operation.tenant_id
+              AND conversation.workspace_id = operation.workspace_id
+            WHERE operation.tenant_id=$1 AND operation.workspace_id=$2
+              AND conversation.scope_kind=$3
+              AND conversation.agency_client_id IS NOT DISTINCT FROM $4::uuid
+              AND conversation.company_context_id IS NOT DISTINCT FROM $5::uuid
+            GROUP BY operation.operation,operation.state,operation.delivery_status
+            ORDER BY operation.operation,operation.state,operation.delivery_status`,
+          [tenantId, workspaceId, scopeKind, agencyClientId, companyContextId],
         ),
-        this.dataSource.query<Array<{ entity_type: string; count: number }>>(
-          `SELECT 'contact' entity_type,count(*)::int count
-             FROM contacts WHERE tenant_id=$1 AND workspace_id=$2
-              AND source='leadflow_whatsapp'
-           UNION ALL
-           SELECT 'opportunity',count(*)::int count
-             FROM crm_opportunities WHERE tenant_id=$1 AND workspace_id=$2
-              AND source='leadflow' AND deleted_at IS NULL`,
-          [tenantId, workspaceId],
-        ),
+        // Contacts are shared identities and CRM is outside this slice.
+        scopeKind === 'agency'
+          ? this.dataSource.query<Array<{ entity_type: string; count: number }>>(
+              `SELECT 'contact' entity_type,count(*)::int count
+                 FROM contacts WHERE tenant_id=$1 AND workspace_id=$2
+                  AND source='leadflow_whatsapp'
+               UNION ALL
+               SELECT 'opportunity',count(*)::int count
+                 FROM crm_opportunities WHERE tenant_id=$1 AND workspace_id=$2
+                  AND source='leadflow' AND deleted_at IS NULL`,
+              [tenantId, workspaceId],
+            )
+          : Promise.resolve([]),
       ]);
     const control = controlRows[0];
     return {
@@ -139,34 +190,36 @@ export class InboxAutonomyAdminService {
     };
   }
 
-  async setEffects(
-    tenantId: string,
-    workspaceId: string,
-    enabled: boolean,
-    actorUserId?: string,
-  ) {
+  async setEffects(ctx: RequestContext, enabled: boolean) {
+    const scope = resolveInboxCompanyScope(ctx);
+    const { tenantId, workspaceId, agencyClientId, companyContextId, scopeKind } =
+      scope;
     return this.dataSource.transaction(async (manager) => {
-      await manager.query(
-        `INSERT INTO inbox_autonomy_controls
-          (tenant_id,workspace_id,reply_enabled,crm_enabled,handoff_enabled,
-           paused_at,paused_by,reason_code)
-         VALUES ($1,$2,$3,$3,$3,$4,$5,$6)
-         ON CONFLICT (tenant_id,workspace_id) DO UPDATE SET
-           reply_enabled=EXCLUDED.reply_enabled,
-           crm_enabled=EXCLUDED.crm_enabled,
-           handoff_enabled=EXCLUDED.handoff_enabled,
-           paused_at=EXCLUDED.paused_at,
-           paused_by=EXCLUDED.paused_by,
-           reason_code=EXCLUDED.reason_code,
-           updated_at=now()`,
-        [
+      const repository = manager.getRepository(InboxAutonomyControlEntity);
+      const existing = await repository.findOne({
+        where: {
           tenantId,
           workspaceId,
-          enabled,
-          enabled ? null : new Date(),
-          actorUserId ?? null,
-          enabled ? null : 'operator_kill_switch',
-        ],
+          agencyClientId: agencyClientId ?? IsNull(),
+          companyContextId: companyContextId ?? IsNull(),
+          scopeKind,
+        },
+      });
+      await repository.save(
+        repository.create({
+          ...(existing ?? {}),
+          tenantId,
+          workspaceId,
+          agencyClientId,
+          companyContextId,
+          scopeKind,
+          replyEnabled: enabled,
+          crmEnabled: enabled,
+          handoffEnabled: enabled,
+          pausedAt: enabled ? null : new Date(),
+          pausedBy: ctx.userId ?? null,
+          reasonCode: enabled ? null : 'operator_kill_switch',
+        }),
       );
       await manager.query(
         `INSERT INTO platform_permission_audit_events
@@ -176,10 +229,14 @@ export class InboxAutonomyAdminService {
         [
           tenantId,
           workspaceId,
-          actorUserId ?? null,
+          ctx.userId ?? null,
           enabled ? 'inbox.autonomy.resumed' : 'inbox.autonomy.paused',
           enabled ? 'high' : 'critical',
-          JSON.stringify({ effectsEnabled: enabled }),
+          JSON.stringify({
+            effectsEnabled: enabled,
+            agencyClientId,
+            companyContextId,
+          }),
         ],
       );
       return { effectsEnabled: enabled };

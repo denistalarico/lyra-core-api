@@ -13,6 +13,7 @@ import { InboxChannelLifecycleRequestEntity } from '../entities/inbox-channel-li
 import { InboxDomainOutboxEntity } from '../entities/inbox-domain-outbox.entity';
 import { mapInboxChannel } from '../mappers/inbox-channel.mapper';
 import { LeadFlowAgentBindingReconcilerService } from '../../leadflow-agents/services/leadflow-agent-binding-reconciler.service';
+import { inboxEntityMatchesScope } from '../inbox-company-scope';
 
 type Operation = 'pause' | 'resume' | 'disconnect';
 
@@ -262,12 +263,7 @@ export class InboxChannelLifecycleService {
       where: { id, tenantId: ctx.tenantId, workspaceId },
       lock: { mode: 'pessimistic_write' },
     });
-    const clientId = channel?.metadata?.clientId;
-    if (
-      !channel ||
-      (ctx.managedContext?.operatingMode === 'client' &&
-        clientId !== ctx.managedContext.clientId)
-    ) {
+    if (!channel || !inboxEntityMatchesScope(ctx, channel)) {
       throw new NotFoundException('Inbox channel not found.');
     }
     return channel;

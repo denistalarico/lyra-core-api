@@ -108,6 +108,9 @@ describe('FacebookInstagramOAuthController', () => {
     expect(oauthService.select).toHaveBeenCalledWith({
       tenantId: 'tenant-id',
       workspaceId: 'workspace-id',
+      agencyClientId: null,
+      companyContextId: null,
+      scopeKind: 'agency',
       userId: 'user-id',
       sessionId: 'session-id',
       pageId: '123',
@@ -127,6 +130,9 @@ describe('FacebookInstagramOAuthController', () => {
     expect(oauthService.getSessionAssets).toHaveBeenCalledWith({
       tenantId: 'tenant-id',
       workspaceId: 'workspace-id',
+      agencyClientId: null,
+      companyContextId: null,
+      scopeKind: 'agency',
       userId: 'user-id',
       sessionId: 'session-id',
     });
@@ -136,11 +142,15 @@ describe('FacebookInstagramOAuthController', () => {
     const ctx = {
       tenantId: 'tenant-id',
       workspaceId: 'workspace-id',
+      agencyClientId: null,
+      companyContextId: null,
+      scopeKind: 'agency',
       userId: 'user-id',
       managedContext: {
         productKey: 'leadflow',
         operatingMode: 'managed',
         clientId: 'client-id',
+        companyContextId: null,
         clientName: 'Client Name',
         managedTenantId: 'managed-tenant-id',
       },
@@ -151,12 +161,16 @@ describe('FacebookInstagramOAuthController', () => {
     expect(oauthService.start).toHaveBeenCalledWith({
       tenantId: 'tenant-id',
       workspaceId: 'workspace-id',
+      agencyClientId: null,
+      companyContextId: null,
+      scopeKind: 'agency',
       userId: 'user-id',
       metadata: {
         setupSource: 'facebook_login',
         productKey: 'leadflow',
         operatingMode: 'managed',
         clientId: 'client-id',
+        companyContextId: null,
         clientName: 'Client Name',
         managedTenantId: 'managed-tenant-id',
       },

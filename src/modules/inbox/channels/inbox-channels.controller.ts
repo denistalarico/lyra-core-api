@@ -19,6 +19,7 @@ import { SimulateAgentActivationDto } from '../dto/simulate-agent-activation.dto
 import { AgentActivationPolicyService } from '../services/agent-activation-policy.service';
 import { LeadFlowAgentBindingReconcilerService } from '../../leadflow-agents/services/leadflow-agent-binding-reconciler.service';
 import { ReconcileDefaultBindingDto } from './dto/reconcile-default-binding.dto';
+import { InboxService } from '../inbox.service';
 
 @Controller('inbox/channels')
 @UseGuards(JwtAuthGuard, PermissionsGuard)
@@ -28,14 +29,18 @@ export class InboxChannelsController {
     private readonly inboundIngestionService: InboundMessageIngestionService,
     private readonly activationPolicyService: AgentActivationPolicyService,
     private readonly bindingReconciler: LeadFlowAgentBindingReconcilerService,
+    private readonly inboxService: InboxService,
   ) {}
 
   @Post('bindings/reconcile')
   @RequirePermission('leadflow.channels.channel.update.admin')
-  reconcileDefaultBinding(
+  async reconcileDefaultBinding(
     @RequestContextData() ctx: RequestContext,
     @Body() dto: ReconcileDefaultBindingDto,
   ) {
+    if (dto.channelId) {
+      await this.inboxService.assertChannelInContext(ctx, dto.channelId);
+    }
     return this.bindingReconciler.reconcile(ctx, {
       channelId: dto.channelId,
       preferredAgentId: dto.defaultAgentId ?? undefined,
@@ -59,6 +64,8 @@ export class InboxChannelsController {
         'Tenant and workspace context are required.',
       );
     }
+
+    await this.inboxService.assertChannelInContext(ctx, dto.channelId);
 
     const result = await this.inboundIngestionService.ingest({
       tenantId,
@@ -94,6 +101,7 @@ export class InboxChannelsController {
   ) {
     if (!ctx.workspaceId)
       throw new BadRequestException('Workspace context is required.');
+    await this.inboxService.assertChannelInContext(ctx, dto.channelId);
     return this.activationPolicyService.evaluate({
       tenantId: ctx.tenantId,
       workspaceId: ctx.workspaceId,

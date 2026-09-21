@@ -5,15 +5,25 @@ import {
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
+import type { InboxScopeKind } from '../inbox-company-scope';
 
 @Entity('inbox_autonomy_controls')
-@Index('uq_inbox_autonomy_control_scope', ['tenantId', 'workspaceId'], {
-  unique: true,
-})
+@Index('idx_inbox_autonomy_control_scope', [
+  'tenantId',
+  'workspaceId',
+  'agencyClientId',
+  'companyContextId',
+])
 export class InboxAutonomyControlEntity {
   @PrimaryGeneratedColumn('uuid') id!: string;
   @Column({ name: 'tenant_id', type: 'uuid' }) tenantId!: string;
   @Column({ name: 'workspace_id', type: 'uuid' }) workspaceId!: string;
+  @Column({ name: 'agency_client_id', type: 'uuid', nullable: true })
+  agencyClientId!: string | null;
+  @Column({ name: 'company_context_id', type: 'uuid', nullable: true })
+  companyContextId!: string | null;
+  @Column({ name: 'scope_kind', type: 'varchar', length: 24 })
+  scopeKind!: InboxScopeKind;
   @Column({ name: 'reply_enabled', type: 'boolean', default: true })
   replyEnabled!: boolean;
   @Column({ name: 'crm_enabled', type: 'boolean', default: true })

@@ -16,6 +16,8 @@ import { AgencyWorkspaceUserEntity } from '../../agency/entities/agency-settings
 import type { AuthTokenPayload } from '../../auth/types/auth-token-payload.type';
 import { PlatformPermissionService } from '../../permissions';
 import { PlatformProductKey } from '../../platform';
+import { AgencyClientCompanyContext } from '../../clients/entities/agency-client-company-context.entity';
+import type { InboxCompanyScope } from '../inbox-company-scope';
 import { InboxRealtimeEventBusService } from './inbox-realtime-event-bus.service';
 import {
   INBOX_REALTIME_EVENT,
@@ -58,11 +60,19 @@ export class InboxGateway
     private readonly sessions: Repository<AgencyUserSessionEntity>,
     @InjectRepository(AgencyWorkspaceUserEntity, 'agency')
     private readonly memberships: Repository<AgencyWorkspaceUserEntity>,
+    @InjectRepository(AgencyClientCompanyContext, 'agency')
+    private readonly companyContexts: Repository<AgencyClientCompanyContext>,
   ) {}
   afterInit(): void {
     this.offEvent = this.bus.onEvent((event) =>
       this.server
-        .to(inboxRoom(event.tenantId, event.workspaceId))
+        .to(
+          inboxRoom(event.tenantId, event.workspaceId, {
+            scopeKind: event.scopeKind,
+            agencyClientId: event.agencyClientId,
+            companyContextId: event.companyContextId,
+          } as Parameters<typeof inboxRoom>[2]),
+        )
         .emit(INBOX_REALTIME_EVENT, event),
     );
     this.offResync = this.bus.onResync(() =>
@@ -74,13 +84,16 @@ export class InboxGateway
   async handleConnection(client: Socket): Promise<void> {
     try {
       if (!this.bus.isReady()) throw new Error('realtime_unavailable');
-      const payload = await this.verify(client);
-      await client.join(inboxRoom(payload.tenantId, payload.workspaceId));
+      const { payload, scope } = await this.verify(client);
+      await client.join(inboxRoom(payload.tenantId, payload.workspaceId, scope));
       const clientData = client.data as Record<string, unknown>;
       clientData.scope = {
         tenantId: payload.tenantId,
         workspaceId: payload.workspaceId,
         userId: payload.sub,
+        agencyClientId: scope.agencyClientId,
+        companyContextId: scope.companyContextId,
+        scopeKind: scope.scopeKind,
       };
       client.emit(INBOX_REALTIME_READY, { contractVersion: 1 });
     } catch {
@@ -96,7 +109,12 @@ export class InboxGateway
     this.offResync?.();
     this.server?.disconnectSockets(true);
   }
-  private async verify(client: Socket): Promise<AuthTokenPayload> {
+  private async verify(
+    client: Socket,
+  ): Promise<{
+    payload: AuthTokenPayload;
+    scope: InboxCompanyScope;
+  }> {
     const raw =
       typeof client.handshake.auth?.token === 'string'
         ? client.handshake.auth.token
@@ -145,8 +163,18 @@ export class InboxGateway
       userId: payload.sub,
       role: payload.role,
     };
+    const scope = await this.resolveHandshakeScope(client, payload);
     const [entitled, ...views] = await Promise.all([
-      this.permissions.canAccessProduct(context, PlatformProductKey.LeadFlow),
+      scope.scopeKind === 'company'
+        ? this.permissions.canAccessClientProduct({
+            ...context,
+            clientId: scope.agencyClientId,
+            productKey: PlatformProductKey.LeadFlow,
+          })
+        : this.permissions.canAccessProduct(
+            context,
+            PlatformProductKey.LeadFlow,
+          ),
       this.permissions.can(
         context,
         'leadflow.inbox.conversation.view.assigned',
@@ -156,7 +184,62 @@ export class InboxGateway
     ]);
     if (!entitled || !views.some(Boolean))
       throw new Error('inbox_realtime_forbidden');
-    return payload;
+    return { payload, scope };
+  }
+
+  private async resolveHandshakeScope(
+    client: Socket,
+    payload: AuthTokenPayload,
+  ): Promise<InboxCompanyScope> {
+    const operatingMode = client.handshake.auth?.operatingMode;
+    const clientId = client.handshake.auth?.clientId;
+    const companyContextId = client.handshake.auth?.companyContextId;
+
+    if (
+      operatingMode === 'agency' &&
+      (clientId === null || clientId === undefined) &&
+      (companyContextId === null || companyContextId === undefined)
+    ) {
+      return {
+        tenantId: payload.tenantId,
+        workspaceId: payload.workspaceId,
+        agencyClientId: null,
+        companyContextId: null,
+        scopeKind: 'agency',
+      };
+    }
+
+    if (
+      operatingMode !== 'client' ||
+      typeof clientId !== 'string' ||
+      !clientId ||
+      typeof companyContextId !== 'string' ||
+      !companyContextId
+    ) {
+      throw new Error('invalid_operational_context');
+    }
+
+    const companyContext = await this.companyContexts.findOneBy({
+      id: companyContextId,
+      tenantId: payload.tenantId,
+      workspaceId: payload.workspaceId,
+      agencyClientId: clientId,
+      status: 'active',
+    });
+    if (!companyContext || companyContext.archivedAt) {
+      throw new Error('invalid_company_context');
+    }
+
+    // Authorization is completed in verify() with the same client-product
+    // check used by HTTP guards. Keeping the validated company lookup here
+    // prevents a browser-supplied room name from becoming authority.
+    return {
+      tenantId: payload.tenantId,
+      workspaceId: payload.workspaceId,
+      agencyClientId: clientId,
+      companyContextId,
+      scopeKind: 'company',
+    };
   }
 }
 

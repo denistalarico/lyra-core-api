@@ -50,6 +50,9 @@ describe('FacebookMessengerChannelHealthController', () => {
     expect(healthService.runHealthCheck).toHaveBeenCalledWith({
       tenantId: 'tenant-id',
       workspaceId: 'workspace-id',
+      agencyClientId: null,
+      companyContextId: null,
+      scopeKind: 'agency',
       channelId: 'channel-id',
     });
   });

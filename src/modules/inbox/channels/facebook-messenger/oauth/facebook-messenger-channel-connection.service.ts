@@ -37,6 +37,15 @@ export class FacebookMessengerChannelConnectionService {
       where: {
         tenantId: input.session.tenantId,
         workspaceId: input.session.workspaceId,
+        agencyClientId:
+          input.session.agencyClientId === null
+            ? IsNull()
+            : input.session.agencyClientId,
+        companyContextId:
+          input.session.companyContextId === null
+            ? IsNull()
+            : input.session.companyContextId,
+        scopeKind: input.session.scopeKind,
         type: 'facebook_messenger',
         provider: 'meta',
         externalAccountId: input.pageId,
@@ -63,6 +72,9 @@ export class FacebookMessengerChannelConnectionService {
       channels.create({
         tenantId: input.session.tenantId,
         workspaceId: input.session.workspaceId,
+        agencyClientId: input.session.agencyClientId,
+        companyContextId: input.session.companyContextId,
+        scopeKind: input.session.scopeKind,
         name: input.pageName ?? `Messenger ${input.pageId}`,
         type: 'facebook_messenger',
         provider: 'meta',

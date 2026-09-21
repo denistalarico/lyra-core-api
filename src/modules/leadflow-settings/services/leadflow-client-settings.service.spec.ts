@@ -1,5 +1,4 @@
 import { ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
-import { Not } from 'typeorm';
 import type { DataSource, EntityManager, Repository } from 'typeorm';
 import type { RequestContext } from '../../../common/context/request-context.interface';
 import type { AgencyClient } from '../../clients/entities';
@@ -21,6 +20,19 @@ import {
 } from '../../leadflow-briefing/entities';
 import { LeadFlowBriefingSnapshotKind } from '../../leadflow-briefing/enums/leadflow-briefing-snapshot-kind.enum';
 
+function countQueryBuilder(count: jest.Mock) {
+  const queryBuilder = {
+    select: jest.fn(),
+    where: jest.fn(),
+    andWhere: jest.fn(),
+    getRawOne: jest.fn(async () => ({ count: String(await count()) })),
+  };
+  queryBuilder.select.mockReturnValue(queryBuilder);
+  queryBuilder.where.mockReturnValue(queryBuilder);
+  queryBuilder.andWhere.mockReturnValue(queryBuilder);
+  return queryBuilder;
+}
+
 describe('LeadFlowClientSettingsService tenant/workspace isolation', () => {
   const ctx: RequestContext = {
     tenantId: 'tenant-a',
@@ -34,8 +46,12 @@ describe('LeadFlowClientSettingsService tenant/workspace isolation', () => {
     } as unknown as Repository<AgencyClient>;
     const settingsRepository = {
       findOne: jest.fn(),
-      count: jest.fn(),
+      count: jest.fn().mockResolvedValue(0),
+      createQueryBuilder: jest.fn(),
     } as unknown as Repository<LeadFlowClientSettingsEntity>;
+    (settingsRepository.createQueryBuilder as unknown as jest.Mock).mockReturnValue(
+      countQueryBuilder(settingsRepository.count as unknown as jest.Mock),
+    );
     const entitlementsRepository = {
       findOne: jest.fn(),
     } as unknown as Repository<TenantProductEntitlementEntity>;
@@ -80,6 +96,7 @@ describe('LeadFlowClientSettingsService tenant/workspace isolation', () => {
         workspaceId: 'workspace-a',
         contextType: LeadFlowSettingsContextType.Client,
         agencyClientId: 'client-a',
+        companyContextId: expect.anything(),
       },
     });
   });
@@ -107,6 +124,13 @@ describe('LeadFlowClientSettingsService company capacity', () => {
     tenantId: 'tenant-a',
     workspaceId: 'workspace-a',
     userId: 'user-a',
+    managedContext: {
+      productKey: 'leadflow',
+      operatingMode: 'client',
+      clientId: 'client-a',
+      companyContextId: 'company-a',
+      managedTenantId: null,
+    },
   };
 
   const template = {
@@ -152,9 +176,13 @@ describe('LeadFlowClientSettingsService company capacity', () => {
     } as unknown as Repository<AgencyClient>;
     const settingsRepository = {
       findOne: jest.fn().mockResolvedValue(null),
-      count: jest.fn(),
+      count: jest.fn().mockResolvedValue(0),
+      createQueryBuilder: jest.fn(),
       save: jest.fn(async (entity: unknown) => entity),
     } as unknown as Repository<LeadFlowClientSettingsEntity>;
+    (settingsRepository.createQueryBuilder as unknown as jest.Mock).mockReturnValue(
+      countQueryBuilder(settingsRepository.count as unknown as jest.Mock),
+    );
     const entitlementsRepository = {
       findOne: jest.fn(),
     } as unknown as Repository<TenantProductEntitlementEntity>;
@@ -164,10 +192,14 @@ describe('LeadFlowClientSettingsService company capacity', () => {
 
     const managerEntitlementRepo = { findOne: jest.fn() };
     const managerSettingsRepo = {
-      count: jest.fn(),
+      count: jest.fn().mockResolvedValue(0),
+      createQueryBuilder: jest.fn(),
       create: jest.fn((data: unknown) => data),
       save: jest.fn(async (entity: unknown) => entity),
     };
+    managerSettingsRepo.createQueryBuilder.mockReturnValue(
+      countQueryBuilder(managerSettingsRepo.count),
+    );
     const dataSource = {
       transaction: jest.fn(async (cb: (manager: EntityManager) => unknown) =>
         cb({
@@ -273,14 +305,9 @@ describe('LeadFlowClientSettingsService company capacity', () => {
     expect(capacity.limit).toBe(3);
     expect(capacity.activeCompanies).toBe(1);
     expect(capacity.availableSlots).toBe(2);
-    expect(settingsRepository.count).toHaveBeenCalledWith({
-      where: {
-        tenantId: 'tenant-a',
-        workspaceId: 'workspace-a',
-        contextType: LeadFlowSettingsContextType.Client,
-        status: Not(LeadFlowSettingsStatus.Archived),
-      },
-    });
+    expect(settingsRepository.createQueryBuilder).toHaveBeenCalledWith(
+      'settings',
+    );
   });
 
   it('reports zero available slots when active companies already match a zero limit', async () => {

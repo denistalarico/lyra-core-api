@@ -17,6 +17,7 @@ import {
   RequireProductEntitlement,
 } from '../../../../permissions';
 import { InstagramOAuthService } from './instagram-oauth.service';
+import { resolveInboxCompanyScope } from '../../../inbox-company-scope';
 
 @Controller('inbox/channels/instagram/oauth')
 export class InstagramOAuthController {
@@ -34,8 +35,7 @@ export class InstagramOAuthController {
     }
 
     return this.instagramOAuthService.start({
-      tenantId: ctx.tenantId,
-      workspaceId: ctx.workspaceId,
+      ...resolveInboxCompanyScope(ctx),
       userId: ctx.userId ?? null,
       metadata: this.metadataFromContext(ctx),
     });
@@ -73,6 +73,7 @@ export class InstagramOAuthController {
       productKey: managedContext.productKey,
       operatingMode: managedContext.operatingMode,
       clientId: managedContext.clientId,
+      companyContextId: managedContext.companyContextId ?? null,
       clientName: managedContext.clientName ?? null,
       managedTenantId: managedContext.managedTenantId,
     };

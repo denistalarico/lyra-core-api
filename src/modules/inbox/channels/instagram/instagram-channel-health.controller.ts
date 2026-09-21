@@ -14,6 +14,7 @@ import {
   RequireProductEntitlement,
 } from '../../../permissions';
 import { InstagramChannelHealthService } from './services/instagram-channel-health.service';
+import { resolveInboxCompanyScope } from '../../inbox-company-scope';
 
 @Controller('inbox/channels/instagram')
 @UseGuards(JwtAuthGuard, PermissionsGuard)
@@ -36,8 +37,7 @@ export class InstagramChannelHealthController {
     }
 
     return this.instagramChannelHealthService.runHealthCheck({
-      tenantId: ctx.tenantId,
-      workspaceId: ctx.workspaceId,
+      ...resolveInboxCompanyScope(ctx),
       channelId,
     });
   }

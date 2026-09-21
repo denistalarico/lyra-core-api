@@ -9,6 +9,7 @@ import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { createHash, randomUUID } from 'crypto';
 import { DataSource, IsNull, Repository } from 'typeorm';
 import type { RequestContext } from '../../../../../common/context/request-context.interface';
+import { inboxEntityMatchesScope } from '../../../inbox-company-scope';
 import { SettingsCryptoService } from '../../../../../common/crypto/settings-crypto.service';
 import { FilesService } from '../../../../../common/files/files.service';
 import { InboxChannelEntity } from '../../../entities/inbox-channel.entity';
@@ -890,11 +891,6 @@ export class FacebookMessengerOutboundService {
     ctx: RequestContext,
     channel: InboxChannelEntity,
   ) {
-    const managedContext = ctx.managedContext;
-    const metadata = channel.metadata ?? {};
-    if (managedContext?.operatingMode === 'client') {
-      return metadata.clientId === managedContext.clientId;
-    }
-    return metadata.clientId == null || metadata.operatingMode === 'agency';
+    return inboxEntityMatchesScope(ctx, channel);
   }
 }

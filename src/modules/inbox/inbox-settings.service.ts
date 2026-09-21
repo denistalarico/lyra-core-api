@@ -1,9 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { IsNull, Repository } from 'typeorm';
 import type { RequestContext } from '../../common/context/request-context.interface';
 import { PatchInboxSettingsDto } from './dto/patch-inbox-settings.dto';
 import { InboxSettingsEntity } from './entities/inbox-settings.entity';
+import { resolveInboxCompanyScope } from './inbox-company-scope';
 
 export type EvaluateInboxLeadRulesInput = {
   channelType: string;
@@ -326,10 +327,14 @@ export class InboxSettingsService {
   }
 
   private async ensureSettings(ctx: RequestContext) {
+    const scope = resolveInboxCompanyScope(ctx);
     let settings = await this.settingsRepository.findOne({
       where: {
-        tenantId: ctx.tenantId,
-        workspaceId: ctx.workspaceId,
+        tenantId: scope.tenantId,
+        workspaceId: scope.workspaceId,
+        agencyClientId: scope.agencyClientId ?? IsNull(),
+        companyContextId: scope.companyContextId ?? IsNull(),
+        scopeKind: scope.scopeKind,
       },
     });
 
@@ -347,8 +352,7 @@ export class InboxSettingsService {
     }
 
     settings = this.settingsRepository.create({
-      tenantId: ctx.tenantId,
-      workspaceId: ctx.workspaceId,
+      ...scope,
       ...defaultInboxSettings,
     });
 

@@ -6,11 +6,15 @@ import {
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
+import type { InboxScopeKind } from '../inbox-company-scope';
 
 @Entity('inbox_settings')
-@Index('idx_inbox_settings_tenant_workspace', ['tenantId', 'workspaceId'], {
-  unique: true,
-})
+@Index('idx_inbox_settings_scope', [
+  'tenantId',
+  'workspaceId',
+  'agencyClientId',
+  'companyContextId',
+])
 export class InboxSettingsEntity {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
@@ -20,6 +24,15 @@ export class InboxSettingsEntity {
 
   @Column({ name: 'workspace_id', type: 'uuid' })
   workspaceId!: string;
+
+  @Column({ name: 'agency_client_id', type: 'uuid', nullable: true })
+  agencyClientId!: string | null;
+
+  @Column({ name: 'company_context_id', type: 'uuid', nullable: true })
+  companyContextId!: string | null;
+
+  @Column({ name: 'scope_kind', type: 'varchar', length: 24 })
+  scopeKind!: InboxScopeKind;
 
   @Column({ type: 'jsonb', default: () => "'[]'::jsonb" })
   tags!: Array<Record<string, unknown>>;

@@ -28,6 +28,7 @@ import { InboxProcessingBatchEntity } from '../entities/inbox-processing-batch.e
 import { InboxNotificationPublisher } from './inbox-notification.publisher';
 import { InboxHandoffWhatsAppNotifier } from './inbox-handoff-whatsapp.notifier';
 import { hasLeadFlowOutboundOptOut } from './leadflow-contact-opt-out';
+import { resolveInboxCompanyScope } from '../inbox-company-scope';
 
 export type ConversationOwnershipAction =
   | 'request_handoff'
@@ -380,21 +381,15 @@ export class ConversationOwnershipService {
     )[action];
   }
   private async assertManagedContext(
-    manager: EntityManager,
+    _manager: EntityManager,
     ctx: RequestContext,
     conversation: InboxConversationEntity,
   ) {
-    if (ctx.managedContext?.operatingMode !== 'client') return;
-    if (!conversation.channelId)
-      throw new NotFoundException('Inbox conversation not found.');
-    const channel = await manager.getRepository(InboxChannelEntity).findOneBy({
-      id: conversation.channelId,
-      tenantId: ctx.tenantId,
-      workspaceId: ctx.workspaceId!,
-    });
+    const scope = resolveInboxCompanyScope(ctx);
     if (
-      !channel ||
-      channel.metadata?.clientId !== ctx.managedContext.clientId
+      conversation.scopeKind !== scope.scopeKind ||
+      conversation.agencyClientId !== scope.agencyClientId ||
+      conversation.companyContextId !== scope.companyContextId
     ) {
       throw new NotFoundException('Inbox conversation not found.');
     }

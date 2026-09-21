@@ -13,6 +13,7 @@ export type LeadFlowClientSettingsResponse = {
   workspaceId: string;
   contextType: LeadFlowSettingsContextType;
   agencyClientId: string | null;
+  companyContextId: string | null;
   managedTenantId: string | null;
   businessModeKey: string;
   businessModeTemplateId: string | null;
@@ -54,6 +55,7 @@ export function mapLeadFlowClientSettingsResponse(
     workspaceId: entity.workspaceId,
     contextType: entity.contextType,
     agencyClientId: entity.agencyClientId,
+    companyContextId: entity.companyContextId,
     managedTenantId: entity.managedTenantId,
     businessModeKey: entity.businessModeKey,
     businessModeTemplateId: entity.businessModeTemplateId,

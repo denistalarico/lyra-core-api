@@ -1,7 +1,7 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { randomBytes } from 'crypto';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, IsNull, Repository } from 'typeorm';
 import { SettingsCryptoService } from '../../../../../../common/crypto/settings-crypto.service';
 import { InboxChannelConnectionSessionEntity } from '../../../../entities/inbox-channel-connection-session.entity';
 import {
@@ -23,6 +23,7 @@ import {
   MetaGraphService,
 } from '../../../meta/services/meta-graph.service';
 import { FacebookMessengerChannelConnectionService } from '../facebook-messenger-channel-connection.service';
+import type { InboxScopeKind } from '../../../../inbox-company-scope';
 
 const MESSENGER_SESSION_CHANNEL_TYPE = 'facebook_messenger' as const;
 
@@ -36,6 +37,9 @@ export const MESSENGER_REQUIRED_PAGE_TASK = 'MESSAGING';
 type StartFacebookMessengerOAuthInput = {
   tenantId: string;
   workspaceId: string;
+  agencyClientId: string | null;
+  companyContextId: string | null;
+  scopeKind: Exclude<InboxScopeKind, 'legacy_unassigned'>;
   userId: string | null;
   metadata?: Record<string, unknown>;
 };
@@ -55,6 +59,9 @@ type EncryptedFacebookCredentials = {
 type SelectFacebookMessengerPageInput = {
   tenantId: string;
   workspaceId: string;
+  agencyClientId: string | null;
+  companyContextId: string | null;
+  scopeKind: Exclude<InboxScopeKind, 'legacy_unassigned'>;
   userId: string | null;
   sessionId: string;
   pageId: string;
@@ -106,6 +113,9 @@ export class FacebookMessengerOAuthService {
     const session = this.sessionsRepository.create({
       tenantId: input.tenantId,
       workspaceId: input.workspaceId,
+      agencyClientId: input.agencyClientId,
+      companyContextId: input.companyContextId,
+      scopeKind: input.scopeKind,
       userId: input.userId,
       provider: 'meta',
       channelType: MESSENGER_SESSION_CHANNEL_TYPE,
@@ -159,6 +169,15 @@ export class FacebookMessengerOAuthService {
           id: input.sessionId,
           tenantId: input.tenantId,
           workspaceId: input.workspaceId,
+          agencyClientId:
+            input.agencyClientId === null
+              ? IsNull()
+              : input.agencyClientId,
+          companyContextId:
+            input.companyContextId === null
+              ? IsNull()
+              : input.companyContextId,
+          scopeKind: input.scopeKind,
           provider: 'meta',
           channelType: MESSENGER_SESSION_CHANNEL_TYPE,
         },
@@ -218,6 +237,15 @@ export class FacebookMessengerOAuthService {
             id: input.sessionId,
             tenantId: input.tenantId,
             workspaceId: input.workspaceId,
+            agencyClientId:
+              input.agencyClientId === null
+                ? IsNull()
+                : input.agencyClientId,
+            companyContextId:
+              input.companyContextId === null
+                ? IsNull()
+                : input.companyContextId,
+            scopeKind: input.scopeKind,
             provider: 'meta',
             channelType: MESSENGER_SESSION_CHANNEL_TYPE,
           },

@@ -8,6 +8,15 @@ import { IsNull, Repository } from 'typeorm';
 import { SettingsCryptoService } from '../../../../../common/crypto/settings-crypto.service';
 import { InboxChannelEntity } from '../../../entities/inbox-channel.entity';
 import { MetaGraphService } from '../../meta/services/meta-graph.service';
+import type { InboxScopeKind } from '../../../inbox-company-scope';
+
+type ChannelHealthScope = {
+  tenantId: string;
+  workspaceId: string;
+  agencyClientId: string | null;
+  companyContextId: string | null;
+  scopeKind: Exclude<InboxScopeKind, 'legacy_unassigned'>;
+};
 
 type WhatsAppConnectionState =
   | 'not_connected'
@@ -25,11 +34,27 @@ export class WhatsAppChannelHealthService {
     private readonly metaGraphService: MetaGraphService,
   ) {}
 
-  async listStatus(input: { tenantId: string; workspaceId: string }) {
+  async listStatus(
+    input:
+      | ChannelHealthScope
+      | Pick<ChannelHealthScope, 'tenantId' | 'workspaceId'>,
+  ) {
+    const scope: ChannelHealthScope =
+      'scopeKind' in input
+        ? input
+        : {
+            ...input,
+            agencyClientId: null,
+            companyContextId: null,
+            scopeKind: 'agency',
+          };
     const channels = await this.channelsRepository.find({
       where: {
-        tenantId: input.tenantId,
-        workspaceId: input.workspaceId,
+        tenantId: scope.tenantId,
+        workspaceId: scope.workspaceId,
+        agencyClientId: scope.agencyClientId ?? IsNull(),
+        companyContextId: scope.companyContextId ?? IsNull(),
+        scopeKind: scope.scopeKind,
         type: 'whatsapp',
         provider: 'meta',
         deletedAt: IsNull(),
@@ -57,21 +82,13 @@ export class WhatsAppChannelHealthService {
     };
   }
 
-  async getHealth(input: {
-    tenantId: string;
-    workspaceId: string;
-    channelId: string;
-  }) {
+  async getHealth(input: ChannelHealthScope & { channelId: string }) {
     const channel = await this.findChannel(input);
 
     return this.mapChannelStatus(channel);
   }
 
-  async runHealthCheck(input: {
-    tenantId: string;
-    workspaceId: string;
-    channelId: string;
-  }) {
+  async runHealthCheck(input: ChannelHealthScope & { channelId: string }) {
     const channel = await this.findChannel(input);
 
     const missing: string[] = [];
@@ -183,16 +200,15 @@ export class WhatsAppChannelHealthService {
     }
   }
 
-  private async findChannel(input: {
-    tenantId: string;
-    workspaceId: string;
-    channelId: string;
-  }) {
+  private async findChannel(input: ChannelHealthScope & { channelId: string }) {
     const channel = await this.channelsRepository.findOne({
       where: {
         id: input.channelId,
         tenantId: input.tenantId,
         workspaceId: input.workspaceId,
+        agencyClientId: input.agencyClientId ?? IsNull(),
+        companyContextId: input.companyContextId ?? IsNull(),
+        scopeKind: input.scopeKind,
         type: 'whatsapp',
         provider: 'meta',
         deletedAt: IsNull(),

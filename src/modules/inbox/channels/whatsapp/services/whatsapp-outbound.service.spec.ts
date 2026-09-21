@@ -8,6 +8,9 @@ describe('WhatsAppOutboundService idempotency', () => {
       id: 'channel',
       tenantId: 'tenant',
       workspaceId: 'workspace',
+      agencyClientId: null,
+      companyContextId: null,
+      scopeKind: 'agency',
       type: 'whatsapp',
       provider: 'meta',
       status: 'active',
@@ -19,6 +22,9 @@ describe('WhatsAppOutboundService idempotency', () => {
       id: 'conversation',
       tenantId: 'tenant',
       workspaceId: 'workspace',
+      agencyClientId: null,
+      companyContextId: null,
+      scopeKind: 'agency',
       channelId: 'channel',
       contactId: null,
       ownershipState: 'human_active',
@@ -28,6 +34,18 @@ describe('WhatsAppOutboundService idempotency', () => {
     let storedMessage: Record<string, unknown> | null = null;
     const messagesRepository = {
       findOne: jest.fn().mockImplementation(() => storedMessage),
+      createQueryBuilder: jest.fn(() => {
+        const queryBuilder = {
+          innerJoin: jest.fn(),
+          where: jest.fn(),
+          andWhere: jest.fn(),
+          getOne: jest.fn(() => Promise.resolve(storedMessage)),
+        };
+        queryBuilder.innerJoin.mockReturnValue(queryBuilder);
+        queryBuilder.where.mockReturnValue(queryBuilder);
+        queryBuilder.andWhere.mockReturnValue(queryBuilder);
+        return queryBuilder;
+      }),
       create: jest.fn((value: Record<string, unknown>) => ({
         id: 'message',
         ...value,

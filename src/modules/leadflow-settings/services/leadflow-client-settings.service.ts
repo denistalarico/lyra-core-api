@@ -17,6 +17,7 @@ import {
 } from 'typeorm';
 import { randomUUID } from 'crypto';
 import type { RequestContext } from '../../../common/context/request-context.interface';
+import { resolveCompanyAwareScope } from '../../../common/context/company-aware-scope';
 import { AgencyClient } from '../../clients/entities';
 import { PlatformProductKey, TenantProductEntitlementEntity } from '../../platform';
 import {
@@ -160,11 +161,19 @@ export class LeadFlowClientSettingsService {
           'settings.workspace_id = client.workspace_id',
           'settings.agency_client_id = client.id',
           "settings.context_type = 'client'",
+          ctx.managedContext?.operatingMode === 'client'
+            ? 'settings.company_context_id = :companyContextId'
+            : 'settings.company_context_id IS NULL',
         ].join(' AND '),
       )
       .where('client.tenant_id = :tenantId', { tenantId: ctx.tenantId })
       .andWhere('client.workspace_id = :workspaceId', { workspaceId })
       .andWhere('client.archived_at IS NULL');
+
+    if (ctx.managedContext?.operatingMode === 'client') {
+      const scope = resolveCompanyAwareScope(ctx);
+      qb.setParameter('companyContextId', scope.companyContextId);
+    }
 
     if (filters.search) {
       qb.andWhere(
@@ -205,6 +214,9 @@ export class LeadFlowClientSettingsService {
       ctx.tenantId,
       workspaceId,
       clients.map((client) => client.id),
+      ctx.managedContext?.operatingMode === 'client'
+        ? resolveCompanyAwareScope(ctx).companyContextId
+        : null,
     );
 
     return {
@@ -270,6 +282,10 @@ export class LeadFlowClientSettingsService {
     dto: CreateLeadFlowClientSettingsDto,
   ): Promise<LeadFlowClientSettingsResponse> {
     const agencyClient = await this.assertAgencyClient(ctx, agencyClientId);
+    const companyContextId = this.requireClientCompanyContext(
+      ctx,
+      agencyClientId,
+    );
     const existing = await this.findSettings(ctx, agencyClientId);
 
     if (existing) {
@@ -297,6 +313,7 @@ export class LeadFlowClientSettingsService {
         workspaceId,
         contextType: LeadFlowSettingsContextType.Client,
         agencyClientId,
+        companyContextId,
         managedTenantId: agencyClient.managedTenantId,
         businessModeKey: template.key,
         businessModeTemplateId: template.id,
@@ -458,6 +475,7 @@ export class LeadFlowClientSettingsService {
       workspaceId,
       contextType: LeadFlowSettingsContextType.Agency,
       agencyClientId: null,
+      companyContextId: null,
       managedTenantId: null,
       businessModeKey: template.key,
       businessModeTemplateId: template.id,
@@ -920,12 +938,18 @@ export class LeadFlowClientSettingsService {
   ): Promise<LeadFlowClientSettingsEntity | null> {
     const workspaceId = this.requireWorkspaceId(ctx);
 
+    const companyContextId =
+      ctx.managedContext?.operatingMode === 'client'
+        ? this.requireClientCompanyContext(ctx, agencyClientId)
+        : null;
+
     return this.settingsRepository.findOne({
       where: {
         tenantId: ctx.tenantId,
         workspaceId,
         contextType: LeadFlowSettingsContextType.Client,
         agencyClientId,
+        companyContextId: companyContextId ?? IsNull(),
       },
     });
   }
@@ -941,6 +965,7 @@ export class LeadFlowClientSettingsService {
         workspaceId,
         contextType: LeadFlowSettingsContextType.Agency,
         agencyClientId: IsNull(),
+        companyContextId: IsNull(),
       },
     });
   }
@@ -992,14 +1017,19 @@ export class LeadFlowClientSettingsService {
     tenantId: string,
     workspaceId: string,
   ): Promise<number> {
-    return settingsRepository.count({
-      where: {
-        tenantId,
-        workspaceId,
+    return settingsRepository
+      .createQueryBuilder('settings')
+      .select('COUNT(DISTINCT settings.agency_client_id)', 'count')
+      .where('settings.tenant_id = :tenantId', { tenantId })
+      .andWhere('settings.workspace_id = :workspaceId', { workspaceId })
+      .andWhere('settings.context_type = :contextType', {
         contextType: LeadFlowSettingsContextType.Client,
-        status: Not(LeadFlowSettingsStatus.Archived),
-      },
-    });
+      })
+      .andWhere('settings.status <> :archived', {
+        archived: LeadFlowSettingsStatus.Archived,
+      })
+      .getRawOne<{ count: string }>()
+      .then((row) => Number(row?.count ?? 0));
   }
 
   /**
@@ -1048,6 +1078,7 @@ export class LeadFlowClientSettingsService {
     tenantId: string,
     workspaceId: string,
     agencyClientIds: string[],
+    companyContextId: string | null,
   ): Promise<Map<string, LeadFlowClientSettingsEntity>> {
     if (!agencyClientIds.length) {
       return new Map();
@@ -1059,6 +1090,7 @@ export class LeadFlowClientSettingsService {
         workspaceId,
         contextType: LeadFlowSettingsContextType.Client,
         agencyClientId: In(agencyClientIds),
+        companyContextId: companyContextId ?? IsNull(),
       },
     });
 
@@ -1559,6 +1591,20 @@ export class LeadFlowClientSettingsService {
     }
 
     return workspaceId;
+  }
+
+  private requireClientCompanyContext(
+    ctx: RequestContext,
+    agencyClientId: string,
+  ): string {
+    const scope = resolveCompanyAwareScope(ctx);
+    if (
+      scope.agencyClientId !== agencyClientId ||
+      !scope.companyContextId
+    ) {
+      throw new NotFoundException('LeadFlow settings not found.');
+    }
+    return scope.companyContextId;
   }
 
   private getWorkspaceId(ctx: RequestContext): string | null {

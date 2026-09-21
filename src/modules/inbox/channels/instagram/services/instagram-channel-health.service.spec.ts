@@ -285,6 +285,9 @@ describe('InstagramChannelHealthService', () => {
 const scopedInput = {
   tenantId: 'tenant-id',
   workspaceId: 'workspace-id',
+  agencyClientId: 'client-id',
+  companyContextId: 'company-id',
+  scopeKind: 'company' as const,
   channelId: 'instagram-channel-id',
 };
 

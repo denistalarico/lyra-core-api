@@ -37,6 +37,7 @@ function buildFullLeadFlowResponse(): LeadFlowClientSettingsResponse {
     workspaceId: 'workspace-1',
     contextType: LeadFlowSettingsContextType.Client,
     agencyClientId: 'client-1',
+    companyContextId: 'company-1',
     managedTenantId: 'managed-tenant-1',
     businessModeKey: 'agency_services',
     businessModeTemplateId: 'template-1',

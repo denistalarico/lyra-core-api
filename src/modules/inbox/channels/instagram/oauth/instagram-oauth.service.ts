@@ -9,6 +9,7 @@ import {
   MetaGraphService,
 } from '../../meta/services/meta-graph.service';
 import { InstagramChannelConnectionService } from './instagram-channel-connection.service';
+import type { InboxScopeKind } from '../../../inbox-company-scope';
 
 const INSTAGRAM_OAUTH_SCOPES = [
   'instagram_business_basic',
@@ -19,6 +20,9 @@ const SESSION_TTL_MS = 15 * 60 * 1000;
 type StartInstagramOAuthInput = {
   tenantId: string;
   workspaceId: string;
+  agencyClientId: string | null;
+  companyContextId: string | null;
+  scopeKind: Exclude<InboxScopeKind, 'legacy_unassigned'>;
   userId: string | null;
   metadata?: Record<string, unknown>;
 };
@@ -57,6 +61,9 @@ export class InstagramOAuthService {
     const session = this.sessionsRepository.create({
       tenantId: input.tenantId,
       workspaceId: input.workspaceId,
+      agencyClientId: input.agencyClientId,
+      companyContextId: input.companyContextId,
+      scopeKind: input.scopeKind,
       userId: input.userId,
       provider: 'meta',
       channelType: 'instagram',

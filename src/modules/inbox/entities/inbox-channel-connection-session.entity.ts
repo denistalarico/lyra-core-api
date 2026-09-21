@@ -6,6 +6,7 @@ import {
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
+import type { InboxScopeKind } from '../inbox-company-scope';
 
 export type InboxChannelConnectionProvider = 'meta' | 'google' | 'microsoft' | 'other';
 
@@ -34,6 +35,12 @@ export type InboxChannelConnectionStatus =
   'provider',
   'channelType',
 ])
+@Index('idx_inbox_channel_connection_sessions_company_scope', [
+  'tenantId',
+  'workspaceId',
+  'agencyClientId',
+  'companyContextId',
+])
 export class InboxChannelConnectionSessionEntity {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
@@ -43,6 +50,15 @@ export class InboxChannelConnectionSessionEntity {
 
   @Column({ name: 'workspace_id', type: 'uuid' })
   workspaceId!: string;
+
+  @Column({ name: 'agency_client_id', type: 'uuid', nullable: true })
+  agencyClientId!: string | null;
+
+  @Column({ name: 'company_context_id', type: 'uuid', nullable: true })
+  companyContextId!: string | null;
+
+  @Column({ name: 'scope_kind', type: 'varchar', length: 24 })
+  scopeKind!: InboxScopeKind;
 
   @Column({ name: 'user_id', type: 'uuid', nullable: true })
   userId!: string | null;

@@ -28,7 +28,13 @@ describe('InboundMessageIngestionService Messenger defaults', () => {
       }),
     };
 
-    await expect(service['qualify'](manager as never, input)).resolves.toEqual({
+    await expect(
+      service['qualify'](manager as never, input, {
+        agencyClientId: 'client-1',
+        companyContextId: 'company-1',
+        scopeKind: 'company',
+      } as never),
+    ).resolves.toEqual({
       status: 'qualified',
       reason: 'facebook_messenger_default',
     });

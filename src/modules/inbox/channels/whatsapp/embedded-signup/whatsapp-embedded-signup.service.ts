@@ -12,10 +12,14 @@ import { InboxDomainOutboxEntity } from '../../../entities/inbox-domain-outbox.e
 import { SettingsCryptoService } from '../../../../../common/crypto/settings-crypto.service';
 import { MetaGraphService } from '../../meta/services/meta-graph.service';
 import { LeadFlowAgentBindingReconcilerService } from '../../../../leadflow-agents/services/leadflow-agent-binding-reconciler.service';
+import type { InboxScopeKind } from '../../../inbox-company-scope';
 
 type StartInput = {
   tenantId: string;
   workspaceId: string;
+  agencyClientId: string | null;
+  companyContextId: string | null;
+  scopeKind: Exclude<InboxScopeKind, 'legacy_unassigned'>;
   userId?: string | null;
   acceptedRules?: boolean;
   metadata?: Record<string, unknown>;
@@ -24,6 +28,9 @@ type StartInput = {
 type CompleteInput = {
   tenantId: string;
   workspaceId: string;
+  agencyClientId: string | null;
+  companyContextId: string | null;
+  scopeKind: Exclude<InboxScopeKind, 'legacy_unassigned'>;
   sessionId: string;
   state: string;
   code: string;
@@ -63,6 +70,9 @@ export class WhatsAppEmbeddedSignupService {
       this.sessionsRepository.create({
         tenantId: input.tenantId,
         workspaceId: input.workspaceId,
+        agencyClientId: input.agencyClientId,
+        companyContextId: input.companyContextId,
+        scopeKind: input.scopeKind,
         userId: input.userId ?? null,
         provider: 'meta',
         channelType: 'whatsapp',
@@ -92,12 +102,15 @@ export class WhatsAppEmbeddedSignupService {
     };
   }
 
-  async getStatus(sessionId: string, tenantId?: string, workspaceId?: string) {
+  async getStatus(input: Pick<CompleteInput, 'sessionId' | 'tenantId' | 'workspaceId' | 'agencyClientId' | 'companyContextId' | 'scopeKind'>) {
     const session = await this.sessionsRepository.findOne({
       where: {
-        id: sessionId,
-        ...(tenantId ? { tenantId } : {}),
-        ...(workspaceId ? { workspaceId } : {}),
+        id: input.sessionId,
+        tenantId: input.tenantId,
+        workspaceId: input.workspaceId,
+        agencyClientId: input.agencyClientId ?? IsNull(),
+        companyContextId: input.companyContextId ?? IsNull(),
+        scopeKind: input.scopeKind,
       },
     });
 
@@ -141,6 +154,9 @@ export class WhatsAppEmbeddedSignupService {
         id: input.sessionId,
         tenantId: input.tenantId,
         workspaceId: input.workspaceId,
+        agencyClientId: input.agencyClientId ?? IsNull(),
+        companyContextId: input.companyContextId ?? IsNull(),
+        scopeKind: input.scopeKind,
       },
     });
 
@@ -407,11 +423,17 @@ export class WhatsAppEmbeddedSignupService {
     );
 
     return {
-      ...(await this.getStatus(
-        session.id,
-        session.tenantId,
-        session.workspaceId,
-      )),
+      ...(await this.getStatus({
+        sessionId: session.id,
+        tenantId: session.tenantId,
+        workspaceId: session.workspaceId,
+        agencyClientId: session.agencyClientId,
+        companyContextId: session.companyContextId,
+        scopeKind:
+          session.scopeKind === 'legacy_unassigned'
+            ? 'agency'
+            : session.scopeKind,
+      })),
       channelId: channel.id,
       channelStatus: channel.status,
       setupStep:
@@ -461,6 +483,9 @@ export class WhatsAppEmbeddedSignupService {
       this.channelsRepository.create({
         tenantId: session.tenantId,
         workspaceId: session.workspaceId,
+        agencyClientId: session.agencyClientId,
+        companyContextId: session.companyContextId,
+        scopeKind: session.scopeKind,
         name: displayName,
         type: 'whatsapp',
         provider: 'meta',
@@ -493,6 +518,9 @@ export class WhatsAppEmbeddedSignupService {
         where: {
           tenantId: session.tenantId,
           workspaceId: session.workspaceId,
+          agencyClientId: session.agencyClientId ?? IsNull(),
+          companyContextId: session.companyContextId ?? IsNull(),
+          scopeKind: session.scopeKind,
           type: 'whatsapp',
           provider: 'meta',
           externalPhoneNumberId: session.phoneNumberId,
@@ -508,6 +536,9 @@ export class WhatsAppEmbeddedSignupService {
         where: {
           tenantId: session.tenantId,
           workspaceId: session.workspaceId,
+          agencyClientId: session.agencyClientId ?? IsNull(),
+          companyContextId: session.companyContextId ?? IsNull(),
+          scopeKind: session.scopeKind,
           type: 'whatsapp',
           provider: 'meta',
           externalAccountId: session.wabaId,

@@ -18,6 +18,7 @@ import {
 import { CompleteWhatsAppEmbeddedSignupDto } from './dto/complete-whatsapp-embedded-signup.dto';
 import { StartWhatsAppEmbeddedSignupDto } from './dto/start-whatsapp-embedded-signup.dto';
 import { WhatsAppEmbeddedSignupService } from './whatsapp-embedded-signup.service';
+import { resolveInboxCompanyScope } from '../../../inbox-company-scope';
 
 @Controller('inbox/channels/whatsapp/embedded-signup')
 @UseGuards(JwtAuthGuard, PermissionsGuard)
@@ -42,8 +43,7 @@ export class WhatsAppEmbeddedSignupController {
     }
 
     return this.whatsappEmbeddedSignupService.start({
-      tenantId,
-      workspaceId,
+      ...resolveInboxCompanyScope(ctx),
       userId: userId ?? null,
       acceptedRules: dto.acceptedRules,
       metadata: this.metadataFromContext(ctx),
@@ -58,11 +58,10 @@ export class WhatsAppEmbeddedSignupController {
   ) {
     if (!ctx.workspaceId)
       throw new BadRequestException('Workspace context is required.');
-    return this.whatsappEmbeddedSignupService.getStatus(
+    return this.whatsappEmbeddedSignupService.getStatus({
+      ...resolveInboxCompanyScope(ctx),
       sessionId,
-      ctx.tenantId,
-      ctx.workspaceId,
-    );
+    });
   }
 
   @Post('complete')
@@ -74,8 +73,7 @@ export class WhatsAppEmbeddedSignupController {
     if (!ctx.workspaceId)
       throw new BadRequestException('Workspace context is required.');
     return this.whatsappEmbeddedSignupService.complete({
-      tenantId: ctx.tenantId,
-      workspaceId: ctx.workspaceId,
+      ...resolveInboxCompanyScope(ctx),
       sessionId: dto.sessionId,
       state: dto.state,
       code: dto.code,
@@ -103,6 +101,7 @@ export class WhatsAppEmbeddedSignupController {
       productKey: managedContext.productKey,
       operatingMode: managedContext.operatingMode,
       clientId: managedContext.clientId,
+      companyContextId: managedContext.companyContextId ?? null,
       clientName: managedContext.clientName ?? null,
       managedTenantId: managedContext.managedTenantId,
     };

@@ -34,12 +34,18 @@ describe('FacebookMessengerOAuthService', () => {
       const first = await harness.service.start({
         tenantId: 'tenant-id',
         workspaceId: 'workspace-id',
+        agencyClientId: 'client-id',
+        companyContextId: 'company-id',
+        scopeKind: 'company',
         userId: 'user-id',
         metadata: { clientId: 'client-id' },
       });
       const second = await harness.service.start({
         tenantId: 'tenant-id',
         workspaceId: 'workspace-id',
+        agencyClientId: 'client-id',
+        companyContextId: 'company-id',
+        scopeKind: 'company',
         userId: 'user-id',
       });
 
@@ -315,6 +321,9 @@ describe('FacebookMessengerOAuthService', () => {
           id: 'session-id',
           tenantId: 'tenant-id',
           workspaceId: 'workspace-id',
+          agencyClientId: 'client-id',
+          companyContextId: 'company-id',
+          scopeKind: 'company',
           provider: 'meta',
           channelType: 'facebook_messenger',
         },
@@ -434,6 +443,9 @@ describe('FacebookMessengerOAuthService', () => {
           id: 'session-id',
           tenantId: 'tenant-id',
           workspaceId: 'workspace-id',
+          agencyClientId: 'client-id',
+          companyContextId: 'company-id',
+          scopeKind: 'company',
           provider: 'meta',
           channelType: 'facebook_messenger',
         },
@@ -933,6 +945,9 @@ function sessionFixture(
     id: 'session-id',
     tenantId: 'tenant-id',
     workspaceId: 'workspace-id',
+    agencyClientId: 'client-id',
+    companyContextId: 'company-id',
+    scopeKind: 'company',
     userId: 'user-id',
     provider: 'meta',
     channelType: 'facebook_messenger',
@@ -1001,6 +1016,9 @@ function messengerChannelFixture(
     id: 'existing-messenger-channel-id',
     tenantId: 'tenant-id',
     workspaceId: 'workspace-id',
+    agencyClientId: 'client-id',
+    companyContextId: 'company-id',
+    scopeKind: 'company',
     name: 'Messenger',
     type: 'facebook_messenger',
     status: 'active',
@@ -1039,6 +1057,9 @@ function selectionInput(): Parameters<
   return {
     tenantId: 'tenant-id',
     workspaceId: 'workspace-id',
+    agencyClientId: 'client-id',
+    companyContextId: 'company-id',
+    scopeKind: 'company',
     userId: 'user-id',
     sessionId: 'session-id',
     pageId: '123',
@@ -1051,6 +1072,9 @@ function assetsInput(): Parameters<
   return {
     tenantId: 'tenant-id',
     workspaceId: 'workspace-id',
+    agencyClientId: 'client-id',
+    companyContextId: 'company-id',
+    scopeKind: 'company',
     userId: 'user-id',
     sessionId: 'session-id',
   };

@@ -14,6 +14,7 @@ import {
   INSTAGRAM_LOGIN_WEBHOOK_FIELDS,
   MetaGraphService,
 } from '../../meta/services/meta-graph.service';
+import type { InboxScopeKind } from '../../../inbox-company-scope';
 
 @Injectable()
 export class InstagramChannelHealthService {
@@ -27,6 +28,9 @@ export class InstagramChannelHealthService {
   async runHealthCheck(input: {
     tenantId: string;
     workspaceId: string;
+    agencyClientId: string | null;
+    companyContextId: string | null;
+    scopeKind: Exclude<InboxScopeKind, 'legacy_unassigned'>;
     channelId: string;
   }) {
     const channel = await this.channelsRepository.findOne({
@@ -34,6 +38,9 @@ export class InstagramChannelHealthService {
         id: input.channelId,
         tenantId: input.tenantId,
         workspaceId: input.workspaceId,
+        agencyClientId: input.agencyClientId ?? IsNull(),
+        companyContextId: input.companyContextId ?? IsNull(),
+        scopeKind: input.scopeKind,
         type: 'instagram',
         provider: 'meta',
         deletedAt: IsNull(),

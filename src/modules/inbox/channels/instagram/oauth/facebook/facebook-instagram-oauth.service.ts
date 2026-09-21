@@ -1,7 +1,7 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { randomBytes } from 'crypto';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, IsNull, Repository } from 'typeorm';
 import { SettingsCryptoService } from '../../../../../../common/crypto/settings-crypto.service';
 import { InboxChannelConnectionSessionEntity } from '../../../../entities/inbox-channel-connection-session.entity';
 import {
@@ -18,6 +18,7 @@ import {
 import { MetaAssetDiscoveryService } from '../../../meta/services/meta-asset-discovery.service';
 import { MetaGraphService } from '../../../meta/services/meta-graph.service';
 import { InstagramChannelConnectionService } from '../instagram-channel-connection.service';
+import type { InboxScopeKind } from '../../../../inbox-company-scope';
 
 const SESSION_TTL_MS = FACEBOOK_LOGIN_SESSION_TTL_MS;
 const OAUTH_STARTED_STAGE = FACEBOOK_LOGIN_OAUTH_STARTED_STAGE;
@@ -26,6 +27,9 @@ const ASSET_SELECTION_STAGE = FACEBOOK_LOGIN_ASSET_SELECTION_STAGE;
 type StartFacebookInstagramOAuthInput = {
   tenantId: string;
   workspaceId: string;
+  agencyClientId: string | null;
+  companyContextId: string | null;
+  scopeKind: Exclude<InboxScopeKind, 'legacy_unassigned'>;
   userId: string | null;
   metadata?: Record<string, unknown>;
 };
@@ -47,6 +51,9 @@ type EncryptedFacebookCredentials = {
 type SelectFacebookInstagramAssetInput = {
   tenantId: string;
   workspaceId: string;
+  agencyClientId: string | null;
+  companyContextId: string | null;
+  scopeKind: Exclude<InboxScopeKind, 'legacy_unassigned'>;
   userId: string | null;
   sessionId: string;
   pageId: string;
@@ -100,6 +107,9 @@ export class FacebookInstagramOAuthService {
           id: input.sessionId,
           tenantId: input.tenantId,
           workspaceId: input.workspaceId,
+          agencyClientId: input.agencyClientId ?? IsNull(),
+          companyContextId: input.companyContextId ?? IsNull(),
+          scopeKind: input.scopeKind,
           provider: 'meta',
           channelType: 'instagram',
         },
@@ -154,6 +164,9 @@ export class FacebookInstagramOAuthService {
             id: input.sessionId,
             tenantId: input.tenantId,
             workspaceId: input.workspaceId,
+            agencyClientId: input.agencyClientId ?? IsNull(),
+            companyContextId: input.companyContextId ?? IsNull(),
+            scopeKind: input.scopeKind,
             provider: 'meta',
             channelType: 'instagram',
           },
@@ -298,6 +311,9 @@ export class FacebookInstagramOAuthService {
     const session = this.sessionsRepository.create({
       tenantId: input.tenantId,
       workspaceId: input.workspaceId,
+      agencyClientId: input.agencyClientId,
+      companyContextId: input.companyContextId,
+      scopeKind: input.scopeKind,
       userId: input.userId,
       provider: 'meta',
       channelType: 'instagram',

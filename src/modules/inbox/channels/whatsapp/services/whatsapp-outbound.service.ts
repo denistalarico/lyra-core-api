@@ -17,6 +17,7 @@ import ffmpegStatic from 'ffmpeg-static';
 import { SettingsCryptoService } from '../../../../../common/crypto/settings-crypto.service';
 import { FilesService } from '../../../../../common/files/files.service';
 import type { RequestContext } from '../../../../../common/context/request-context.interface';
+import { inboxEntityMatchesScope } from '../../../inbox-company-scope';
 import { InboxChannelEntity } from '../../../entities/inbox-channel.entity';
 import { InboxConversationEntity } from '../../../entities/inbox-conversation.entity';
 import { InboxConversationEventEntity } from '../../../entities/inbox-conversation-event.entity';
@@ -395,13 +396,36 @@ export class WhatsAppOutboundService {
     );
 
     const idempotencyKey = input.idempotencyKey?.trim() || randomUUID();
-    const existing = await this.messagesRepository.findOne({
-      where: {
-        tenantId: channel.tenantId,
+    const existing = await this.messagesRepository
+      .createQueryBuilder('message')
+      .innerJoin('message.conversation', 'conversation')
+      .where('message.tenant_id = :tenantId', { tenantId: channel.tenantId })
+      .andWhere('message.workspace_id = :workspaceId', {
         workspaceId: channel.workspaceId,
+      })
+      .andWhere('message.idempotency_key = :idempotencyKey', {
         idempotencyKey,
-      },
-    });
+      })
+      .andWhere('conversation.scope_kind = :scopeKind', {
+        scopeKind: channel.scopeKind,
+      })
+      .andWhere(
+        channel.agencyClientId === null
+          ? 'conversation.agency_client_id IS NULL'
+          : 'conversation.agency_client_id = :agencyClientId',
+        channel.agencyClientId === null
+          ? {}
+          : { agencyClientId: channel.agencyClientId },
+      )
+      .andWhere(
+        channel.companyContextId === null
+          ? 'conversation.company_context_id IS NULL'
+          : 'conversation.company_context_id = :companyContextId',
+        channel.companyContextId === null
+          ? {}
+          : { companyContextId: channel.companyContextId },
+      )
+      .getOne();
     if (existing) {
       if (
         existing.channelId !== channel.id ||
@@ -966,20 +990,7 @@ export class WhatsAppOutboundService {
     ctx: RequestContext,
     channel: InboxChannelEntity,
   ) {
-    const managedContext = ctx.managedContext;
-    const metadata = channel.metadata ?? {};
-    const clientId =
-      typeof metadata.clientId === 'string' ? metadata.clientId : null;
-    const operatingMode =
-      typeof metadata.operatingMode === 'string'
-        ? metadata.operatingMode
-        : null;
-
-    if (managedContext?.operatingMode === 'client') {
-      return clientId === managedContext.clientId;
-    }
-
-    return !clientId || operatingMode === 'agency';
+    return inboxEntityMatchesScope(ctx, channel);
   }
 
   private requireWorkspaceId(ctx: RequestContext) {

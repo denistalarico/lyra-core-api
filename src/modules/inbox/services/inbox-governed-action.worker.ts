@@ -1256,11 +1256,22 @@ export class InboxGovernedActionWorker
   }
 
   private async effectEnabled(action: InboxGovernedActionEntity) {
+    const conversation = await this.dataSource
+      .getRepository(InboxConversationEntity)
+      .findOneBy({
+        id: action.conversationId,
+        tenantId: action.tenantId,
+        workspaceId: action.workspaceId,
+      });
+    if (!conversation) return false;
     const control = await this.dataSource
       .getRepository(InboxAutonomyControlEntity)
       .findOneBy({
         tenantId: action.tenantId,
         workspaceId: action.workspaceId,
+        agencyClientId: conversation.agencyClientId ?? IsNull(),
+        companyContextId: conversation.companyContextId ?? IsNull(),
+        scopeKind: conversation.scopeKind,
       });
     if (action.actionType === 'reply')
       return this.config.autoReplyEnabled && (control?.replyEnabled ?? true);

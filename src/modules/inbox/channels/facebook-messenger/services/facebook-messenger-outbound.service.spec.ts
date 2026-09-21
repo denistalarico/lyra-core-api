@@ -443,7 +443,9 @@ describe('FacebookMessengerOutboundService', () => {
 
     it('does not expose a channel from another managed client context', async () => {
       const harness = createHarness({
-        metadata: { operatingMode: 'client', clientId: 'client-a' },
+        agencyClientId: 'client-a',
+        companyContextId: 'company-a',
+        scopeKind: 'company',
       });
 
       await expect(
@@ -456,6 +458,7 @@ describe('FacebookMessengerOutboundService', () => {
               productKey: 'leadflow',
               operatingMode: 'client',
               clientId: 'client-b',
+              companyContextId: 'company-b',
               managedTenantId: null,
             },
           },
@@ -818,6 +821,9 @@ function createHarness(
     id: 'channel-1',
     tenantId: 'tenant-1',
     workspaceId: 'workspace-1',
+    agencyClientId: null,
+    companyContextId: null,
+    scopeKind: 'agency',
     type: 'facebook_messenger',
     provider: 'meta',
     status: 'active',
@@ -832,6 +838,9 @@ function createHarness(
     id: 'conversation-1',
     tenantId: 'tenant-1',
     workspaceId: 'workspace-1',
+    agencyClientId: null,
+    companyContextId: null,
+    scopeKind: 'agency',
     channelId: 'channel-1',
     contactId: null,
     source: 'facebook_messenger',

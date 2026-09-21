@@ -25,10 +25,10 @@ import type {
 )
 @Index(
   'IDX_lf_client_settings_unique_client_context',
-  ['tenantId', 'workspaceId', 'agencyClientId'],
+  ['tenantId', 'workspaceId', 'agencyClientId', 'companyContextId'],
   {
     unique: true,
-    where: "context_type = 'client'",
+    where: "context_type = 'client' AND company_context_id IS NOT NULL",
   },
 )
 @Index('IDX_lf_client_settings_context_type', ['contextType'])
@@ -58,6 +58,9 @@ export class LeadFlowClientSettingsEntity {
 
   @Column({ name: 'agency_client_id', type: 'uuid', nullable: true })
   agencyClientId!: string | null;
+
+  @Column({ name: 'company_context_id', type: 'uuid', nullable: true })
+  companyContextId!: string | null;
 
   @Column({ name: 'managed_tenant_id', type: 'uuid', nullable: true })
   managedTenantId!: string | null;

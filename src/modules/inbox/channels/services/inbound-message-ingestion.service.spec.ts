@@ -84,9 +84,22 @@ function createHarness(internalContact = false) {
         return {
           findOneByOrFail: jest.fn().mockResolvedValue({
             id: 'channel',
+            tenantId: 'tenant',
+            workspaceId: 'workspace',
+            agencyClientId: null,
+            companyContextId: null,
+            scopeKind: 'agency',
             aiEnabled: true,
             defaultAgentId: 'agent',
             settings: {},
+          }),
+          findOneBy: jest.fn().mockResolvedValue({
+            id: 'channel',
+            tenantId: 'tenant',
+            workspaceId: 'workspace',
+            agencyClientId: null,
+            companyContextId: null,
+            scopeKind: 'agency',
           }),
         };
       if (entity === InboxSettingsEntity)
@@ -191,6 +204,9 @@ describe('InboundMessageIngestionService.ingestEcho', () => {
       id: 'conversation-1',
       tenantId: 'tenant',
       workspaceId: 'workspace',
+      agencyClientId: null,
+      companyContextId: null,
+      scopeKind: 'agency',
       contactId: 'contact-1',
       lastMessagePreview: '',
       lastMessageAt: null,
@@ -217,6 +233,9 @@ describe('InboundMessageIngestionService.ingestEcho', () => {
       id: 'conversation-1',
       tenantId: 'tenant',
       workspaceId: 'workspace',
+      agencyClientId: null,
+      companyContextId: null,
+      scopeKind: 'agency',
       contactId: 'contact-1',
     };
     harness.state.messages.push({

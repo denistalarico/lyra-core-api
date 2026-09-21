@@ -27,6 +27,8 @@ export type InboxChannelResponse = {
   id: string;
   tenantId: string;
   workspaceId: string;
+  agencyClientId: string | null;
+  companyContextId: string | null;
   name: string;
   type: InboxChannelType;
   status: InboxChannelStatus;
@@ -63,6 +65,8 @@ export function mapInboxChannel(
     id: channel.id,
     tenantId: channel.tenantId,
     workspaceId: channel.workspaceId,
+    agencyClientId: channel.agencyClientId,
+    companyContextId: channel.companyContextId,
     name: getInboxChannelDisplayName(channel),
     type: channel.type,
     status: channel.status,

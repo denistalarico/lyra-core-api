@@ -6,6 +6,7 @@ import {
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
+import type { InboxScopeKind } from '../inbox-company-scope';
 
 export type InboxConversationStatus =
   | 'new'
@@ -40,6 +41,12 @@ export type InboxConversationOwnershipState =
   'workspaceId',
   'lastMessageAt',
 ])
+@Index('idx_inbox_conversations_company_scope', [
+  'tenantId',
+  'workspaceId',
+  'agencyClientId',
+  'companyContextId',
+])
 export class InboxConversationEntity {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
@@ -49,6 +56,15 @@ export class InboxConversationEntity {
 
   @Column({ name: 'workspace_id', type: 'uuid' })
   workspaceId!: string;
+
+  @Column({ name: 'agency_client_id', type: 'uuid', nullable: true })
+  agencyClientId!: string | null;
+
+  @Column({ name: 'company_context_id', type: 'uuid', nullable: true })
+  companyContextId!: string | null;
+
+  @Column({ name: 'scope_kind', type: 'varchar', length: 24 })
+  scopeKind!: InboxScopeKind;
 
   @Column({ name: 'channel_id', type: 'uuid', nullable: true })
   channelId!: string | null;

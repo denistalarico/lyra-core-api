@@ -38,6 +38,15 @@ export class InstagramChannelConnectionService {
         (['externalAccountId', 'externalId'] as const).map((property) => ({
           tenantId: input.session.tenantId,
           workspaceId: input.session.workspaceId,
+          agencyClientId:
+            input.session.agencyClientId === null
+              ? IsNull()
+              : input.session.agencyClientId,
+          companyContextId:
+            input.session.companyContextId === null
+              ? IsNull()
+              : input.session.companyContextId,
+          scopeKind: input.session.scopeKind,
           type: 'instagram' as const,
           provider: 'meta',
           [property]: providerAccountId,
@@ -66,6 +75,9 @@ export class InstagramChannelConnectionService {
       channels.create({
         tenantId: input.session.tenantId,
         workspaceId: input.session.workspaceId,
+        agencyClientId: input.session.agencyClientId,
+        companyContextId: input.session.companyContextId,
+        scopeKind: input.session.scopeKind,
         name: input.username ?? `Instagram ${input.accountId}`,
         type: 'instagram',
         provider: 'meta',

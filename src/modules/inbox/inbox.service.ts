@@ -36,6 +36,10 @@ import { FacebookMessengerContactEnrichmentService } from './channels/facebook-m
 import { InstagramContactEnrichmentService } from './channels/instagram/services/instagram-contact-enrichment.service';
 import { CrmPipelineEntity } from '../crm/entities/crm-pipeline.entity';
 import { NotificationsService } from '../notifications';
+import {
+  resolveInboxCompanyScope,
+  type InboxScopeKind,
+} from './inbox-company-scope';
 
 export type InboxConversationFilters = {
   status?: string;
@@ -142,13 +146,11 @@ export class InboxService {
     qb: SelectQueryBuilder<InboxChannelEntity>,
     alias = 'channel',
   ) {
-    qb.andWhere(
-      new Brackets((scopeQb) => {
-        scopeQb
-          .where(`${alias}.metadata->>'clientId' IS NULL`)
-          .orWhere(`${alias}.metadata->>'operatingMode' = 'agency'`);
-      }),
-    );
+    qb.andWhere(`${alias}.scope_kind = :agencyScopeKind`, {
+      agencyScopeKind: 'agency',
+    });
+    qb.andWhere(`${alias}.agency_client_id IS NULL`);
+    qb.andWhere(`${alias}.company_context_id IS NULL`);
   }
 
   private applyContextualChannelScope(
@@ -159,8 +161,15 @@ export class InboxService {
     const managedContext = ctx.managedContext;
 
     if (managedContext?.operatingMode === 'client') {
-      qb.andWhere(`${alias}.metadata->>'clientId' = :managedClientId`, {
-        managedClientId: managedContext.clientId,
+      const scope = resolveInboxCompanyScope(ctx);
+      qb.andWhere(`${alias}.scope_kind = :companyScopeKind`, {
+        companyScopeKind: 'company',
+      });
+      qb.andWhere(`${alias}.agency_client_id = :managedClientId`, {
+        managedClientId: scope.agencyClientId,
+      });
+      qb.andWhere(`${alias}.company_context_id = :companyContextId`, {
+        companyContextId: scope.companyContextId,
       });
       return;
     }
@@ -172,35 +181,27 @@ export class InboxService {
     qb: SelectQueryBuilder<InboxConversationEntity>,
     ctx: RequestContext,
   ) {
-    qb.leftJoin(
-      InboxChannelEntity,
-      'channel',
-      [
-        'channel.id = conversation.channel_id',
-        'channel.tenant_id = conversation.tenant_id',
-        'channel.workspace_id = conversation.workspace_id',
-        'channel.deleted_at IS NULL',
-      ].join(' AND '),
-    );
-
     const managedContext = ctx.managedContext;
 
     if (managedContext?.operatingMode === 'client') {
-      qb.andWhere('channel.id IS NOT NULL');
-      qb.andWhere("channel.metadata->>'clientId' = :managedClientId", {
-        managedClientId: managedContext.clientId,
+      const scope = resolveInboxCompanyScope(ctx);
+      qb.andWhere('conversation.scope_kind = :companyScopeKind', {
+        companyScopeKind: 'company',
+      });
+      qb.andWhere('conversation.agency_client_id = :managedClientId', {
+        managedClientId: scope.agencyClientId,
+      });
+      qb.andWhere('conversation.company_context_id = :companyContextId', {
+        companyContextId: scope.companyContextId,
       });
       return;
     }
 
-    qb.andWhere(
-      new Brackets((scopeQb) => {
-        scopeQb
-          .where('conversation.channel_id IS NULL')
-          .orWhere("channel.metadata->>'clientId' IS NULL")
-          .orWhere("channel.metadata->>'operatingMode' = 'agency'");
-      }),
-    );
+    qb.andWhere('conversation.scope_kind = :agencyScopeKind', {
+      agencyScopeKind: 'agency',
+    });
+    qb.andWhere('conversation.agency_client_id IS NULL');
+    qb.andWhere('conversation.company_context_id IS NULL');
   }
 
   private channelMetadataForContext(
@@ -217,6 +218,7 @@ export class InboxService {
     nextMetadata.productKey = managedContext.productKey;
     nextMetadata.operatingMode = managedContext.operatingMode;
     nextMetadata.clientId = managedContext.clientId;
+    nextMetadata.companyContextId = managedContext.companyContextId ?? null;
     nextMetadata.managedTenantId = managedContext.managedTenantId;
 
     if (managedContext.clientName !== undefined) {
@@ -245,6 +247,10 @@ export class InboxService {
     }
 
     return channel;
+  }
+
+  async assertChannelInContext(ctx: RequestContext, id: string) {
+    return this.findChannelForContext(ctx, id);
   }
 
   private async createEvent(
@@ -322,11 +328,12 @@ export class InboxService {
   }
 
   async createChannel(ctx: RequestContext, dto: CreateInboxChannelDto) {
+    const companyScope = resolveInboxCompanyScope(ctx);
     if (dto.defaultPipelineId) {
       await this.requireActivePipelineForChannel(ctx, dto.defaultPipelineId);
     }
     const channel = this.channelsRepository.create({
-      ...this.scope(ctx),
+      ...companyScope,
       name: dto.name.trim(),
       type: dto.type ?? 'internal',
       status: dto.status ?? 'active',
@@ -528,19 +535,15 @@ export class InboxService {
     dto: CreateInboxConversationDto,
   ) {
     const now = new Date();
-    const managedContext = ctx.managedContext;
+    const companyScope = resolveInboxCompanyScope(ctx);
 
     if (dto.channelId) {
       await this.findChannelForContext(ctx, dto.channelId);
-    } else if (managedContext?.operatingMode === 'client') {
-      throw new BadRequestException(
-        'channelId is required when operating in client context.',
-      );
     }
 
     const conversation = await this.conversationsRepository.save(
       this.conversationsRepository.create({
-        ...this.scope(ctx),
+        ...companyScope,
         channelId: dto.channelId ?? null,
         contactId: dto.contactId ?? null,
         opportunityId: null,
@@ -1265,6 +1268,9 @@ export class InboxService {
   async upsertConversationFromWebchat(input: {
     tenantId: string;
     workspaceId: string;
+    agencyClientId: string | null;
+    companyContextId: string | null;
+    scopeKind: Exclude<InboxScopeKind, 'legacy_unassigned'>;
     widgetId: string;
     visitorId: string;
     conversationId: string;
@@ -1289,6 +1295,9 @@ export class InboxService {
       where: {
         tenantId: input.tenantId,
         workspaceId: input.workspaceId,
+        agencyClientId: input.agencyClientId ?? IsNull(),
+        companyContextId: input.companyContextId ?? IsNull(),
+        scopeKind: input.scopeKind,
         externalThreadId: input.conversationId,
         source: 'webchat',
       },
@@ -1337,6 +1346,9 @@ export class InboxService {
       this.conversationsRepository.create({
         tenantId: input.tenantId,
         workspaceId: input.workspaceId,
+        agencyClientId: input.agencyClientId,
+        companyContextId: input.companyContextId,
+        scopeKind: input.scopeKind,
         channelId: channel.id,
         contactId: input.contactId ?? null,
         opportunityId: null,
@@ -1385,6 +1397,9 @@ export class InboxService {
   async createMessageFromWebchat(input: {
     tenantId: string;
     workspaceId: string;
+    agencyClientId: string | null;
+    companyContextId: string | null;
+    scopeKind: Exclude<InboxScopeKind, 'legacy_unassigned'>;
     widgetId: string;
     visitorId?: string | null;
     conversationId: string;
@@ -1414,6 +1429,9 @@ export class InboxService {
     const conversation = await this.upsertConversationFromWebchat({
       tenantId: input.tenantId,
       workspaceId: input.workspaceId,
+      agencyClientId: input.agencyClientId,
+      companyContextId: input.companyContextId,
+      scopeKind: input.scopeKind,
       widgetId: input.widgetId,
       visitorId: input.visitorId ?? '',
       conversationId: input.conversationId,
@@ -1507,6 +1525,9 @@ export class InboxService {
   async syncWebchatChannel(input: {
     tenantId: string;
     workspaceId: string;
+    agencyClientId: string | null;
+    companyContextId: string | null;
+    scopeKind: Exclude<InboxScopeKind, 'legacy_unassigned'>;
     widgetId: string;
     widgetName?: string;
     active: boolean;
@@ -1542,12 +1563,18 @@ export class InboxService {
   async retireWebchatChannel(input: {
     tenantId: string;
     workspaceId: string;
+    agencyClientId: string | null;
+    companyContextId: string | null;
+    scopeKind: Exclude<InboxScopeKind, 'legacy_unassigned'>;
     widgetId: string;
   }) {
     await this.channelsRepository.update(
       {
         tenantId: input.tenantId,
         workspaceId: input.workspaceId,
+        agencyClientId: input.agencyClientId ?? IsNull(),
+        companyContextId: input.companyContextId ?? IsNull(),
+        scopeKind: input.scopeKind,
         type: 'webchat',
         provider: 'lyra_webchat',
         externalId: input.widgetId,
@@ -1560,12 +1587,18 @@ export class InboxService {
   private async ensureWebchatChannel(input: {
     tenantId: string;
     workspaceId: string;
+    agencyClientId: string | null;
+    companyContextId: string | null;
+    scopeKind: Exclude<InboxScopeKind, 'legacy_unassigned'>;
     widgetId: string;
   }) {
     const existing = await this.channelsRepository.findOne({
       where: {
         tenantId: input.tenantId,
         workspaceId: input.workspaceId,
+        agencyClientId: input.agencyClientId ?? IsNull(),
+        companyContextId: input.companyContextId ?? IsNull(),
+        scopeKind: input.scopeKind,
         type: 'webchat',
         provider: 'lyra_webchat',
         externalId: input.widgetId,
@@ -1581,6 +1614,9 @@ export class InboxService {
       this.channelsRepository.create({
         tenantId: input.tenantId,
         workspaceId: input.workspaceId,
+        agencyClientId: input.agencyClientId,
+        companyContextId: input.companyContextId,
+        scopeKind: input.scopeKind,
         name: 'Webchat',
         type: 'webchat',
         status: 'active',

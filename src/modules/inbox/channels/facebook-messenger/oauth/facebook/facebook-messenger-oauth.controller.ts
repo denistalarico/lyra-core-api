@@ -17,6 +17,7 @@ import {
 } from '../../../../../permissions';
 import { SelectFacebookMessengerPageDto } from './dto/select-facebook-messenger-page.dto';
 import { FacebookMessengerOAuthService } from './facebook-messenger-oauth.service';
+import { resolveInboxCompanyScope } from '../../../../inbox-company-scope';
 
 /**
  * The OAuth callback is not declared here on purpose: Facebook Login for
@@ -42,8 +43,7 @@ export class FacebookMessengerOAuthController {
     }
 
     return this.facebookMessengerOAuthService.start({
-      tenantId: ctx.tenantId,
-      workspaceId: ctx.workspaceId,
+      ...resolveInboxCompanyScope(ctx),
       userId: ctx.userId ?? null,
       metadata: this.metadataFromContext(ctx),
     });
@@ -64,8 +64,7 @@ export class FacebookMessengerOAuthController {
     }
 
     return this.facebookMessengerOAuthService.select({
-      tenantId: ctx.tenantId,
-      workspaceId: ctx.workspaceId,
+      ...resolveInboxCompanyScope(ctx),
       userId: ctx.userId ?? null,
       sessionId: dto.sessionId,
       pageId: dto.pageId,
@@ -87,8 +86,7 @@ export class FacebookMessengerOAuthController {
     }
 
     return this.facebookMessengerOAuthService.getSessionAssets({
-      tenantId: ctx.tenantId,
-      workspaceId: ctx.workspaceId,
+      ...resolveInboxCompanyScope(ctx),
       userId: ctx.userId ?? null,
       sessionId,
     });
@@ -106,6 +104,7 @@ export class FacebookMessengerOAuthController {
       productKey: managedContext.productKey,
       operatingMode: managedContext.operatingMode,
       clientId: managedContext.clientId,
+      companyContextId: managedContext.companyContextId ?? null,
       clientName: managedContext.clientName ?? null,
       managedTenantId: managedContext.managedTenantId,
     };

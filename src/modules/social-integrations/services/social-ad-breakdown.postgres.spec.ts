@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import type { QueryRunner } from 'typeorm';
 import { AgencyDataSource } from '../../../database/agency-typeorm.datasource';
 import { describePostgresIntegration } from '../../../testing/postgres-integration';
 import { SocialAdAccountConnectionEntity } from '../entities/social-ad-account-connection.entity';
@@ -24,6 +25,7 @@ import { SocialAdBreakdownWriterService } from './social-ad-breakdown-writer.ser
 const run = describePostgresIntegration();
 
 run('Social ad breakdowns against PostgreSQL', () => {
+  let queryRunner: QueryRunner;
   let writer: SocialAdBreakdownWriterService;
   let reader: SocialAdBreakdownReadService;
 
@@ -36,8 +38,21 @@ run('Social ad breakdowns against PostgreSQL', () => {
 
   const SYNCED_AT = new Date('2026-09-20T12:00:00.000Z');
 
+  /**
+   * Every statement goes through the suite's own `QueryRunner`, never through
+   * `AgencyDataSource.query`.
+   *
+   * The DataSource hands each call an arbitrary connection from the pool, so a
+   * bare `query('BEGIN')` opens a transaction on one connection while the
+   * repositories write on others. The transaction then wraps nothing: the
+   * `ROLLBACK` in `afterAll` rolled back an empty one and the rows this suite
+   * wrote stayed committed in `lyra_agency_test` (twelve leftover connection
+   * rows were still there when this was found). A `QueryRunner` pins one
+   * connection, and `queryRunner.manager.getRepository` puts the services on it
+   * too, which is what makes the rollback real.
+   */
   const query = <T>(sql: string, params: unknown[] = []): Promise<T[]> =>
-    AgencyDataSource.query<T[]>(sql, params);
+    queryRunner.query(sql, params) as Promise<T[]>;
 
   const fact = (
     overrides: Partial<NormalizedAdBreakdownDaily> = {},
@@ -83,7 +98,9 @@ run('Social ad breakdowns against PostgreSQL', () => {
   beforeAll(async () => {
     if (!AgencyDataSource.isInitialized) await AgencyDataSource.initialize();
 
-    await AgencyDataSource.query('BEGIN');
+    queryRunner = AgencyDataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
 
     for (const [id, tenant, workspace] of [
       [connectionId, tenantId, workspaceId],
@@ -98,19 +115,19 @@ run('Social ad breakdowns against PostgreSQL', () => {
     }
 
     writer = new SocialAdBreakdownWriterService(
-      AgencyDataSource.getRepository(SocialAdBreakdownDailyEntity),
+      queryRunner.manager.getRepository(SocialAdBreakdownDailyEntity),
     );
     reader = new SocialAdBreakdownReadService(
-      AgencyDataSource.getRepository(SocialAdAccountConnectionEntity),
-      AgencyDataSource.getRepository(SocialAdBreakdownDailyEntity),
+      queryRunner.manager.getRepository(SocialAdAccountConnectionEntity),
+      queryRunner.manager.getRepository(SocialAdBreakdownDailyEntity),
     );
   });
 
   afterAll(async () => {
-    if (AgencyDataSource.isInitialized) {
-      await AgencyDataSource.query('ROLLBACK');
-      await AgencyDataSource.destroy();
-    }
+    if (queryRunner?.isTransactionActive)
+      await queryRunner.rollbackTransaction();
+    await queryRunner?.release();
+    if (AgencyDataSource.isInitialized) await AgencyDataSource.destroy();
   });
 
   describe('idempotency', () => {
@@ -201,6 +218,15 @@ run('Social ad breakdowns against PostgreSQL', () => {
     });
 
     it('refuses a negative spend at the database, not only in the parser', async () => {
+      /**
+       * Inside a savepoint: the suite shares one transaction, and a constraint
+       * violation aborts it. Without this the expected failure would poison
+       * every test that runs afterwards. Same remedy, for the same reason, as
+       * the duplicate-observation case in
+       * `social-ad-destination-observations.postgres.spec.ts`.
+       */
+      await queryRunner.query('SAVEPOINT negative_spend_attempt');
+
       await expect(
         writer.upsert([
           fact({
@@ -209,6 +235,8 @@ run('Social ad breakdowns against PostgreSQL', () => {
           }),
         ]),
       ).rejects.toThrow();
+
+      await queryRunner.query('ROLLBACK TO SAVEPOINT negative_spend_attempt');
     });
   });
 

@@ -21,6 +21,7 @@ import {
 import { FacebookLoginCallbackRouterService } from '../../../meta/oauth/facebook-login-callback-router.service';
 import { SelectFacebookInstagramAssetDto } from './dto/select-facebook-instagram-asset.dto';
 import { FacebookInstagramOAuthService } from './facebook-instagram-oauth.service';
+import { resolveInboxCompanyScope } from '../../../../inbox-company-scope';
 
 @Controller('inbox/channels/instagram/oauth/facebook')
 export class FacebookInstagramOAuthController {
@@ -41,8 +42,7 @@ export class FacebookInstagramOAuthController {
     }
 
     return this.facebookInstagramOAuthService.start({
-      tenantId: ctx.tenantId,
-      workspaceId: ctx.workspaceId,
+      ...resolveInboxCompanyScope(ctx),
       userId: ctx.userId ?? null,
       metadata: this.metadataFromContext(ctx),
     });
@@ -63,8 +63,7 @@ export class FacebookInstagramOAuthController {
     }
 
     return this.facebookInstagramOAuthService.select({
-      tenantId: ctx.tenantId,
-      workspaceId: ctx.workspaceId,
+      ...resolveInboxCompanyScope(ctx),
       userId: ctx.userId ?? null,
       sessionId: dto.sessionId,
       pageId: dto.pageId,
@@ -86,8 +85,7 @@ export class FacebookInstagramOAuthController {
     }
 
     return this.facebookInstagramOAuthService.getSessionAssets({
-      tenantId: ctx.tenantId,
-      workspaceId: ctx.workspaceId,
+      ...resolveInboxCompanyScope(ctx),
       userId: ctx.userId ?? null,
       sessionId,
     });
@@ -129,6 +127,7 @@ export class FacebookInstagramOAuthController {
       productKey: managedContext.productKey,
       operatingMode: managedContext.operatingMode,
       clientId: managedContext.clientId,
+      companyContextId: managedContext.companyContextId ?? null,
       clientName: managedContext.clientName ?? null,
       managedTenantId: managedContext.managedTenantId,
     };

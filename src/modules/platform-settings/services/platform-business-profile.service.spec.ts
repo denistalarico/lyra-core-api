@@ -15,6 +15,7 @@ function buildResponse(
     workspaceId: 'workspace-1',
     contextType: LeadFlowSettingsContextType.Agency,
     agencyClientId: null,
+    companyContextId: null,
     managedTenantId: null,
     businessModeKey: 'agency_services',
     businessModeTemplateId: 'template-1',

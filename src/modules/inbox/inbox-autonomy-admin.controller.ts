@@ -26,30 +26,20 @@ export class InboxAutonomyAdminController {
   inspect(@RequestContextData() ctx: RequestContext) {
     if (!ctx.workspaceId)
       throw new BadRequestException('Workspace context is required.');
-    return this.service.inspect(ctx.tenantId, ctx.workspaceId);
+    return this.service.inspect(ctx);
   }
 
   @Post('pause')
   pause(@RequestContextData() ctx: RequestContext) {
     if (!ctx.workspaceId)
       throw new BadRequestException('Workspace context is required.');
-    return this.service.setEffects(
-      ctx.tenantId,
-      ctx.workspaceId,
-      false,
-      ctx.userId,
-    );
+    return this.service.setEffects(ctx, false);
   }
 
   @Post('resume')
   resume(@RequestContextData() ctx: RequestContext) {
     if (!ctx.workspaceId)
       throw new BadRequestException('Workspace context is required.');
-    return this.service.setEffects(
-      ctx.tenantId,
-      ctx.workspaceId,
-      true,
-      ctx.userId,
-    );
+    return this.service.setEffects(ctx, true);
   }
 }

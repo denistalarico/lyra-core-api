@@ -13,6 +13,7 @@ import {
   FACEBOOK_PAGE_MESSENGER_WEBHOOK_FIELDS,
   MetaGraphService,
 } from '../../meta/services/meta-graph.service';
+import type { InboxScopeKind } from '../../../inbox-company-scope';
 
 @Injectable()
 export class FacebookMessengerChannelHealthService {
@@ -26,6 +27,9 @@ export class FacebookMessengerChannelHealthService {
   async runHealthCheck(input: {
     tenantId: string;
     workspaceId: string;
+    agencyClientId: string | null;
+    companyContextId: string | null;
+    scopeKind: Exclude<InboxScopeKind, 'legacy_unassigned'>;
     channelId: string;
   }) {
     const channel = await this.channelsRepository.findOne({
@@ -33,6 +37,9 @@ export class FacebookMessengerChannelHealthService {
         id: input.channelId,
         tenantId: input.tenantId,
         workspaceId: input.workspaceId,
+        agencyClientId: input.agencyClientId ?? IsNull(),
+        companyContextId: input.companyContextId ?? IsNull(),
+        scopeKind: input.scopeKind,
         type: 'facebook_messenger',
         provider: 'meta',
         deletedAt: IsNull(),

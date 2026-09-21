@@ -122,6 +122,9 @@ describe('WhatsAppChannelHealthService', () => {
       const result = await harness.service.listStatus({
         tenantId: 'tenant-id',
         workspaceId: 'workspace-id',
+        agencyClientId: 'client-id',
+        companyContextId: 'company-id',
+        scopeKind: 'company',
       });
 
       expect(result).toEqual({
@@ -150,6 +153,9 @@ describe('WhatsAppChannelHealthService', () => {
       const result = await harness.service.listStatus({
         tenantId: 'tenant-id',
         workspaceId: 'workspace-id',
+        agencyClientId: 'client-id',
+        companyContextId: 'company-id',
+        scopeKind: 'company',
       });
 
       expect(result.state).toBe('connected');
@@ -170,6 +176,9 @@ describe('WhatsAppChannelHealthService', () => {
       const result = await harness.service.listStatus({
         tenantId: 'tenant-id',
         workspaceId: 'workspace-id',
+        agencyClientId: 'client-id',
+        companyContextId: 'company-id',
+        scopeKind: 'company',
       });
 
       expect(result.state).toBe('failed');
@@ -181,6 +190,9 @@ describe('WhatsAppChannelHealthService', () => {
 const scopedInput = {
   tenantId: 'tenant-id',
   workspaceId: 'workspace-id',
+  agencyClientId: 'client-id',
+  companyContextId: 'company-id',
+  scopeKind: 'company' as const,
   channelId: 'whatsapp-channel-id',
 };
 

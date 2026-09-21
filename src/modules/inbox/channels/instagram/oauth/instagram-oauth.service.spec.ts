@@ -31,12 +31,18 @@ describe('InstagramOAuthService', () => {
     const first = await harness.service.start({
       tenantId: 'tenant-id',
       workspaceId: 'workspace-id',
+      agencyClientId: 'client-id',
+      companyContextId: 'company-id',
+      scopeKind: 'company',
       userId: 'user-id',
       metadata: { clientId: 'client-id' },
     });
     const second = await harness.service.start({
       tenantId: 'tenant-id',
       workspaceId: 'workspace-id',
+      agencyClientId: 'client-id',
+      companyContextId: 'company-id',
+      scopeKind: 'company',
       userId: 'user-id',
     });
 
@@ -464,6 +470,9 @@ function sessionFixture(
     id: 'session-id',
     tenantId: 'tenant-id',
     workspaceId: 'workspace-id',
+    agencyClientId: 'client-id',
+    companyContextId: 'company-id',
+    scopeKind: 'company',
     userId: 'user-id',
     provider: 'meta',
     channelType: 'instagram',
@@ -492,6 +501,9 @@ function channelFixture(
     id: 'channel-id',
     tenantId: 'tenant-id',
     workspaceId: 'workspace-id',
+    agencyClientId: 'client-id',
+    companyContextId: 'company-id',
+    scopeKind: 'company',
     name: 'Instagram',
     type: 'instagram',
     status: 'active',

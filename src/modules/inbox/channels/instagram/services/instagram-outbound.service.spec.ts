@@ -265,7 +265,9 @@ describe('InstagramOutboundService', () => {
 
   it('does not expose a channel from another managed client context', async () => {
     const harness = createHarness({
-      metadata: { operatingMode: 'client', clientId: 'client-a' },
+      agencyClientId: 'client-a',
+      companyContextId: 'company-a',
+      scopeKind: 'company',
     });
 
     await expect(
@@ -278,6 +280,7 @@ describe('InstagramOutboundService', () => {
             productKey: 'leadflow',
             operatingMode: 'client',
             clientId: 'client-b',
+            companyContextId: 'company-b',
             managedTenantId: null,
           },
         },
@@ -455,6 +458,9 @@ function createHarness(channelOverrides: Partial<InboxChannelEntity> = {}) {
     id: 'channel-1',
     tenantId: 'tenant-1',
     workspaceId: 'workspace-1',
+    agencyClientId: null,
+    companyContextId: null,
+    scopeKind: 'agency',
     type: 'instagram',
     provider: 'meta',
     status: 'active',
@@ -468,6 +474,9 @@ function createHarness(channelOverrides: Partial<InboxChannelEntity> = {}) {
     id: 'conversation-1',
     tenantId: 'tenant-1',
     workspaceId: 'workspace-1',
+    agencyClientId: null,
+    companyContextId: null,
+    scopeKind: 'agency',
     channelId: 'channel-1',
     contactId: null,
     externalThreadId: 'instagram:ig-professional-account:ig-scoped-user',
