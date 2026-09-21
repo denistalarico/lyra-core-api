@@ -125,14 +125,11 @@ export class LeadFlowAppointmentTimerConsumer
     );
     if (!automation) return;
 
-    const appointment = await this.appointments.findOne({
-      where: {
-        id: appointmentId,
-        tenantId: envelope.tenantId,
-        workspaceId: envelope.workspaceId,
-        deletedAt: IsNull(),
-      },
-    });
+    const appointment = await this.findAppointment(
+      envelope,
+      appointmentId,
+      automation,
+    );
     if (!appointment) return;
     if (TERMINAL_LIFECYCLE.has(lifecycleStatus(appointment))) return;
 
@@ -152,6 +149,8 @@ export class LeadFlowAppointmentTimerConsumer
         id: conversationId,
         tenantId: envelope.tenantId,
         workspaceId: envelope.workspaceId,
+        agencyClientId: automation.agencyClientId ?? IsNull(),
+        companyContextId: automation.companyContextId ?? IsNull(),
       },
     });
     if (!conversation || isConversationTerminal(conversation)) return;
@@ -246,17 +245,16 @@ export class LeadFlowAppointmentTimerConsumer
     ) {
       throw new Error('appointment_confirmation_payload_invalid');
     }
-    if (
-      !(await this.activeAutomation(
+    const automation = await this.activeAutomation(
         envelope,
         automationId,
         'appointment_confirmation',
-      ))
-    ) {
+      );
+    if (!automation) {
       return;
     }
 
-    const appointment = await this.findAppointment(envelope, appointmentId);
+    const appointment = await this.findAppointment(envelope, appointmentId, automation);
     if (!appointment || lifecycleStatus(appointment) !== 'pending') return;
     const startsAt = appointment.startAt ?? appointment.dueAt;
     if (!startsAt || startsAt.toISOString() !== expectedStartsAt) return;
@@ -303,17 +301,16 @@ export class LeadFlowAppointmentTimerConsumer
     ) {
       throw new Error('appointment_no_show_payload_invalid');
     }
-    if (
-      !(await this.activeAutomation(
+    const automation = await this.activeAutomation(
         envelope,
         automationId,
         'appointment_no_show_recovery',
-      ))
-    ) {
+      );
+    if (!automation) {
       return;
     }
 
-    const appointment = await this.findAppointment(envelope, appointmentId);
+    const appointment = await this.findAppointment(envelope, appointmentId, automation);
     if (!appointment) return;
     const startsAt = appointment.startAt ?? appointment.dueAt;
     if (
@@ -439,12 +436,15 @@ export class LeadFlowAppointmentTimerConsumer
   private findAppointment(
     envelope: TimerFireEnvelope,
     appointmentId: string,
+    automation: LeadFlowAutomationEntity,
   ): Promise<ScheduledItemEntity | null> {
     return this.appointments.findOne({
       where: {
         id: appointmentId,
         tenantId: envelope.tenantId,
         workspaceId: envelope.workspaceId,
+        agencyClientId: automation.agencyClientId ?? IsNull(),
+        companyContextId: automation.companyContextId ?? IsNull(),
         deletedAt: IsNull(),
       },
     });

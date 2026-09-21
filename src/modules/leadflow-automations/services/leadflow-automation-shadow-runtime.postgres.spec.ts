@@ -57,6 +57,9 @@ run('LeadFlow Automations shadow runtime PostgreSQL', () => {
     const matcher = new LeadFlowAutomationTriggerMatcherService(
       AgencyDataSource.getRepository(LeadFlowAutomationEntity),
       AgencyDataSource.getRepository(LeadFlowAutomationVersionEntity),
+      AgencyDataSource.getRepository(CrmOpportunityEntity),
+      AgencyDataSource.getRepository(InboxConversationEntity),
+      AgencyDataSource.getRepository(ScheduledItemEntity),
     );
     const runService = new LeadFlowAutomationRunService(
       AgencyDataSource.getRepository(LeadFlowAutomationRunEntity),

@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, IsNull, Not, Repository } from 'typeorm';
 import { LEADFLOW_AUTOMATION_TRIGGER_EVENT_MAPPINGS } from '../../leadflow-events/catalog/leadflow-event.catalog';
@@ -9,6 +9,10 @@ import {
 import { LeadFlowAutomationStatus } from '../enums/leadflow-automation-status.enum';
 import { LeadFlowAutomationVersionStatus } from '../enums/leadflow-automation-version-status.enum';
 import type { LeadFlowAutomationRuntimeContract } from '../types/leadflow-automation.types';
+import type { LeadFlowEventDeliveryEntity } from '../../leadflow-events/entities/leadflow-event-delivery.entity';
+import { CrmOpportunityEntity } from '../../crm/entities/crm-opportunity.entity';
+import { InboxConversationEntity } from '../../inbox/entities/inbox-conversation.entity';
+import { ScheduledItemEntity } from '../../appointments/entities/scheduled-item.entity';
 
 const AGENCY_CONNECTION = 'agency';
 
@@ -35,7 +39,69 @@ export class LeadFlowAutomationTriggerMatcherService {
     private readonly automationsRepository: Repository<LeadFlowAutomationEntity>,
     @InjectRepository(LeadFlowAutomationVersionEntity, AGENCY_CONNECTION)
     private readonly versionsRepository: Repository<LeadFlowAutomationVersionEntity>,
+    @Optional()
+    @InjectRepository(CrmOpportunityEntity, AGENCY_CONNECTION)
+    private readonly opportunities?: Repository<CrmOpportunityEntity>,
+    @Optional()
+    @InjectRepository(InboxConversationEntity, AGENCY_CONNECTION)
+    private readonly conversations?: Repository<InboxConversationEntity>,
+    @Optional()
+    @InjectRepository(ScheduledItemEntity, AGENCY_CONNECTION)
+    private readonly scheduledItems?: Repository<ScheduledItemEntity>,
   ) {}
+
+  /** Resolve the event's persisted root before matching company-owned automations. */
+  async findMatchingDelivery(
+    delivery: LeadFlowEventDeliveryEntity,
+  ): Promise<LeadFlowAutomationTriggerMatch[]> {
+    const where = {
+      id: delivery.aggregateId,
+      tenantId: delivery.tenantId,
+      workspaceId: delivery.workspaceId,
+    };
+    let root: {
+      agencyClientId?: string | null;
+      companyContextId?: string | null;
+      scopeKind?: string | null;
+      contextType?: string | null;
+    } | null = null;
+
+    if (delivery.aggregateType === 'crm_opportunity') {
+      root = await this.opportunities?.findOne({ where }) ?? null;
+    } else if (delivery.aggregateType === 'inbox_conversation') {
+      root = await this.conversations?.findOne({ where }) ?? null;
+    } else if (delivery.aggregateType === 'scheduled_item') {
+      root = await this.scheduledItems?.findOne({ where }) ?? null;
+    } else if (delivery.aggregateType === 'leadflow_automation') {
+      root = await this.automationsRepository.findOne({ where });
+    }
+
+    // Workspace-only and legacy records never select a company automation.
+    // Unknown roots fail closed because event payload fields are not authority.
+    if (!root || root.scopeKind === 'legacy_unassigned') return [];
+    const scopeKind = root.scopeKind
+      ?? (root.contextType === 'agency'
+        ? 'agency'
+        : root.companyContextId
+          ? 'company'
+          : 'legacy_unassigned');
+    if (scopeKind !== 'company' && scopeKind !== 'agency') return [];
+
+    const matches = await this.findMatching(
+      delivery.tenantId,
+      delivery.workspaceId,
+      delivery.eventName,
+    );
+    return matches.filter(({ source }) =>
+      scopeKind === 'company'
+        ? source.contextType === 'client'
+          && source.agencyClientId === root?.agencyClientId
+          && source.companyContextId === root?.companyContextId
+        : source.contextType === 'agency'
+          && source.agencyClientId == null
+          && source.companyContextId == null,
+    );
+  }
 
   /** Trigger keys published as `mapped` for this event name. */
   triggersForEvent(eventName: string): string[] {

@@ -13,6 +13,8 @@ import {
 } from '@nestjs/common';
 import { RequestContextData } from '../../common/context/request-context.decorator';
 import type { RequestContext } from '../../common/context/request-context.interface';
+import { resolveCompanyAwareScope } from '../../common/context/company-aware-scope';
+import type { OperationsRoomScope } from './realtime/operations-room-realtime.constants';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import {
   PermissionsGuard,
@@ -83,7 +85,7 @@ export class LeadFlowAgentsController {
     @Query('afterRoomVersion') afterRoomVersion = '0',
     @Query('limit') rawLimit = '100',
   ) {
-    await this.agentService.list(ctx);
+    const listed = await this.agentService.list(ctx);
     if (!ctx.workspaceId) {
       throw new BadRequestException('Workspace context is required.');
     }
@@ -98,6 +100,8 @@ export class LeadFlowAgentsController {
       ctx.tenantId,
       ctx.workspaceId,
       afterRoomVersion,
+      listed.items.map((agent) => agent.id),
+      roomScopeFor(ctx),
       limit,
     );
   }
@@ -253,4 +257,15 @@ export class LeadFlowAgentsController {
   ): Promise<LeadFlowAgentRuntimeConfigResponse> {
     return this.agentService.getAgentRuntimeConfig(ctx, id);
   }
+}
+
+function roomScopeFor(ctx: RequestContext): OperationsRoomScope {
+  const scope = resolveCompanyAwareScope(ctx);
+  return scope.agencyClientId && scope.companyContextId
+    ? {
+        scopeKind: 'company',
+        agencyClientId: scope.agencyClientId,
+        companyContextId: scope.companyContextId,
+      }
+    : { scopeKind: 'agency', agencyClientId: null, companyContextId: null };
 }

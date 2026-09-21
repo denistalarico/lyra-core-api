@@ -1,7 +1,7 @@
 import { Inject, Injectable, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { createHash } from 'node:crypto';
-import { MoreThan, Repository } from 'typeorm';
+import { IsNull, MoreThan, Repository } from 'typeorm';
 import { CrmOpportunityEntity } from '../../crm/entities/crm-opportunity.entity';
 import {
   readOpportunityFollowUp,
@@ -127,6 +127,7 @@ export class LeadFlowFollowupTimerConsumer
         id: conversationId,
         tenantId: envelope.tenantId,
         workspaceId: envelope.workspaceId,
+        ...companyScopeWhere(automation),
       },
     });
     if (!conversation || isConversationTerminal(conversation)) return;
@@ -211,6 +212,7 @@ export class LeadFlowFollowupTimerConsumer
           id: opportunityId,
           tenantId: envelope.tenantId,
           workspaceId: envelope.workspaceId,
+          ...companyScopeWhere(automation),
         },
       });
       if (
@@ -239,6 +241,7 @@ export class LeadFlowFollowupTimerConsumer
         id: conversationId,
         tenantId: envelope.tenantId,
         workspaceId: envelope.workspaceId,
+        ...companyScopeWhere(automation),
       },
     });
     if (!conversation || isConversationTerminal(conversation)) return;
@@ -768,6 +771,7 @@ export class LeadFlowFollowupTimerConsumer
     });
     if (
       !automation ||
+      (automation.contextType === 'client' && !automation.companyContextId) ||
       !automation.publishedVersionId ||
       (recipeKey && automation.recipeKey !== recipeKey)
     ) {
@@ -775,6 +779,23 @@ export class LeadFlowFollowupTimerConsumer
     }
     return automation;
   }
+}
+
+function companyScopeWhere(automation: LeadFlowAutomationEntity): {
+  agencyClientId: string | ReturnType<typeof IsNull>;
+  companyContextId: string | ReturnType<typeof IsNull>;
+  scopeKind: 'company' | 'agency' | 'legacy_unassigned';
+} {
+  const agency = automation.contextType === 'agency';
+  return {
+    agencyClientId: automation.agencyClientId ?? IsNull(),
+    companyContextId: automation.companyContextId ?? IsNull(),
+    scopeKind: automation.companyContextId
+      ? 'company'
+      : agency
+        ? 'agency'
+        : 'legacy_unassigned',
+  };
 }
 
 /** The next enabled attempt after `currentKey`, in cadence order. */

@@ -18,6 +18,7 @@ import type {
   'workspaceId',
   'contextType',
   'agencyClientId',
+  'companyContextId',
   'userId',
 ])
 @Entity('leadflow_analytics_views')
@@ -36,6 +37,9 @@ export class LeadFlowAnalyticsViewEntity {
 
   @Column({ name: 'agency_client_id', type: 'uuid', nullable: true })
   agencyClientId!: string | null;
+
+  @Column({ name: 'company_context_id', type: 'uuid', nullable: true })
+  companyContextId?: string | null;
 
   @Column({ name: 'user_id', type: 'uuid' })
   userId!: string;

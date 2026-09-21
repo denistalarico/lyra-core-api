@@ -129,9 +129,9 @@ describe('LeadFlowAutomationShadowEvaluatorService', () => {
       reason: 'execution_disabled',
     }),
   ) {
-    const findMatching = jest.fn().mockResolvedValue(matches);
+    const findMatchingDelivery = jest.fn().mockResolvedValue(matches);
     const matcher = {
-      findMatching,
+      findMatchingDelivery,
     } as unknown as LeadFlowAutomationTriggerMatcherService;
     const runService = {
       recordShadowRun,
@@ -156,7 +156,7 @@ describe('LeadFlowAutomationShadowEvaluatorService', () => {
       executionService,
     );
 
-    return { service, findMatching, recordShadowRun, execute };
+    return { service, findMatchingDelivery, recordShadowRun, execute };
   }
 
   it('records nothing when no automation matches the event', async () => {
@@ -207,7 +207,7 @@ describe('LeadFlowAutomationShadowEvaluatorService', () => {
 
   it('scopes the match to the delivery tenant and workspace', async () => {
     // Scope must come from the delivery, never from the payload.
-    const { service, findMatching } = build([]);
+    const { service, findMatchingDelivery } = build([]);
 
     await service.evaluateDelivery(
       buildDelivery({
@@ -215,10 +215,8 @@ describe('LeadFlowAutomationShadowEvaluatorService', () => {
       }),
     );
 
-    expect(findMatching).toHaveBeenCalledWith(
-      'tenant-1',
-      'workspace-1',
-      'leadflow.crm.opportunity.created',
+    expect(findMatchingDelivery).toHaveBeenCalledWith(
+      expect.objectContaining({ tenantId: 'tenant-1', workspaceId: 'workspace-1' }),
     );
   });
 

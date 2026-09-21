@@ -9,8 +9,10 @@ import { Client, Notification } from 'pg';
 import { DataSource, Repository } from 'typeorm';
 import { EventEmitter } from 'node:events';
 import { OperationsRoomOutboxEntity } from '../entities';
+import { LeadFlowAgentEntity } from '../entities/leadflow-agent.entity';
 import type { OperationsRoomEventEnvelope } from '../types/operations-room.types';
 import { mapOperationsRoomOutboxEvent } from './operations-room-event.mapper';
+import { resolveOperationsRoomAgentScope } from './operations-room-agent-scope';
 import {
   OPERATIONS_ROOM_PG_CHANNEL,
   operationsRoomRealtimeEnabled,
@@ -41,6 +43,8 @@ export class OperationsRoomEventBusService
     private readonly dataSource: DataSource,
     @InjectRepository(OperationsRoomOutboxEntity, AGENCY_CONNECTION)
     private readonly outboxRepository: Repository<OperationsRoomOutboxEntity>,
+    @InjectRepository(LeadFlowAgentEntity, AGENCY_CONNECTION)
+    private readonly agentsRepository: Repository<LeadFlowAgentEntity>,
   ) {}
 
   async onApplicationBootstrap(): Promise<void> {
@@ -77,11 +81,11 @@ export class OperationsRoomEventBusService
     return () => this.emitter.off('resync', listener);
   }
 
-  async publish(event: OperationsRoomEventEnvelope): Promise<void> {
+  async publish(eventId: string): Promise<void> {
     if (!this.isEnabled()) throw errorWithCode('realtime_disabled');
     await this.dataSource.query('SELECT pg_notify($1, $2)', [
       OPERATIONS_ROOM_PG_CHANNEL,
-      event.eventId,
+      eventId,
     ]);
   }
 
@@ -146,7 +150,19 @@ export class OperationsRoomEventBusService
     const row = await this.outboxRepository.findOneBy({
       eventId: notification.payload,
     });
-    if (row) this.emitter.emit('event', mapOperationsRoomOutboxEvent(row));
+    if (!row) return;
+    // Room ownership is derived from the persisted Agent, never from the
+    // outbox payload. An agent that no longer exists, or that carries an
+    // inconsistent (legacy) client/company pair, is dropped here instead of
+    // broadcasting to a guessed or workspace-wide room.
+    const scope = await resolveOperationsRoomAgentScope(
+      this.agentsRepository,
+      row.tenantId,
+      row.workspaceId,
+      row.agentId,
+    );
+    if (!scope) return;
+    this.emitter.emit('event', mapOperationsRoomOutboxEvent(row, scope));
   }
 }
 

@@ -14,6 +14,7 @@ import {
   Repository,
 } from 'typeorm';
 import { RequestContext } from '../../common/context/request-context.interface';
+import { resolveCompanyAwareScope } from '../../common/context/company-aware-scope';
 import { ContactEntity } from '../contacts/entities/contact.entity';
 import { CreateCrmOpportunityDto } from './dto/create-crm-opportunity.dto';
 import { CreateCrmPipelineDto } from './dto/create-crm-pipeline.dto';
@@ -106,7 +107,7 @@ export class CrmService {
     const workspaceId = this.requireWorkspaceId(ctx);
 
     return this.pipelinesRepository.find({
-      where: this.withClientScope(ctx, {
+      where: this.withCompanyScope(ctx, {
         tenantId,
         workspaceId,
         deletedAt: IsNull(),
@@ -125,6 +126,7 @@ export class CrmService {
     const pipeline = this.pipelinesRepository.create({
       tenantId,
       workspaceId,
+      ...this.companyScope(ctx),
       name: dto.name,
       description: dto.description ?? null,
       businessMode: dto.businessMode ?? 'general',
@@ -150,7 +152,7 @@ export class CrmService {
     const workspaceId = this.requireWorkspaceId(ctx);
 
     const pipeline = await this.pipelinesRepository.findOne({
-      where: this.withClientScope(ctx, {
+      where: this.withCompanyScope(ctx, {
         id,
         tenantId,
         workspaceId,
@@ -206,18 +208,20 @@ export class CrmService {
     const tenantId = this.requireTenantId(ctx);
     const workspaceId = this.requireWorkspaceId(ctx);
 
-    const where: FindOptionsWhere<CrmStageEntity> = {
-      tenantId,
-      workspaceId,
-      deletedAt: IsNull(),
-    };
-
-    if (pipelineId) where.pipelineId = pipelineId;
-
-    return this.stagesRepository.find({
-      where: this.withClientScope(ctx, where),
-      order: { sortOrder: 'ASC', createdAt: 'ASC' },
-    });
+    if (pipelineId) await this.getPipeline(ctx, pipelineId);
+    const scope = this.companyScope(ctx);
+    return this.stagesRepository
+      .createQueryBuilder('stage')
+      .innerJoin(CrmPipelineEntity, 'pipeline', 'pipeline.id = stage.pipeline_id')
+      .where('stage.tenant_id = :tenantId', { tenantId })
+      .andWhere('stage.workspace_id = :workspaceId', { workspaceId })
+      .andWhere('stage.deleted_at IS NULL')
+      .andWhere('pipeline.agency_client_id IS NOT DISTINCT FROM :agencyClientId', scope)
+      .andWhere('pipeline.company_context_id IS NOT DISTINCT FROM :companyContextId', scope)
+      .andWhere(pipelineId ? 'stage.pipeline_id = :pipelineId' : '1=1', { pipelineId })
+      .orderBy('stage.sort_order', 'ASC')
+      .addOrderBy('stage.created_at', 'ASC')
+      .getMany();
   }
 
   async createStage(
@@ -290,15 +294,17 @@ export class CrmService {
     const workspaceId = this.requireWorkspaceId(ctx);
 
     const stage = await this.stagesRepository.findOne({
-      where: this.withClientScope(ctx, {
+      where: {
         id,
         tenantId,
         workspaceId,
         deletedAt: IsNull(),
-      }),
+      },
     });
 
     if (!stage) throw new NotFoundException('CRM stage not found.');
+
+    await this.getPipeline(ctx, stage.pipelineId);
 
     return stage;
   }
@@ -418,7 +424,7 @@ export class CrmService {
     if (filters.search) where.title = ILike(`%${filters.search}%`);
 
     return this.opportunitiesRepository.find({
-      where: this.withClientScope(ctx, where),
+      where: this.withCompanyScope(ctx, where),
       order: {
         sortOrder: 'ASC',
         nextFollowUpAt: 'ASC',
@@ -466,6 +472,7 @@ export class CrmService {
     const opportunity = this.opportunitiesRepository.create({
       tenantId,
       workspaceId,
+      ...this.companyScope(ctx),
       pipelineId: pipeline.id,
       stageId: stage.id,
       contactId: dto.contactId ?? null,
@@ -535,7 +542,7 @@ export class CrmService {
     const workspaceId = this.requireWorkspaceId(ctx);
 
     const opportunity = await this.opportunitiesRepository.findOne({
-      where: this.withClientScope(ctx, {
+      where: this.withCompanyScope(ctx, {
         id,
         tenantId,
         workspaceId,
@@ -826,7 +833,7 @@ export class CrmService {
     const workspaceId = this.requireWorkspaceId(ctx);
 
     return this.tagsRepository.find({
-      where: this.withClientScope(ctx, {
+      where: this.withCompanyScope(ctx, {
         tenantId,
         workspaceId,
         deletedAt: IsNull(),
@@ -849,6 +856,7 @@ export class CrmService {
     const tag = this.tagsRepository.create({
       tenantId,
       workspaceId,
+      ...this.companyScope(ctx),
       name,
       slug,
       color: dto.color ?? null,
@@ -870,7 +878,7 @@ export class CrmService {
     const workspaceId = this.requireWorkspaceId(ctx);
 
     const tag = await this.tagsRepository.findOne({
-      where: this.withClientScope(ctx, {
+      where: this.withCompanyScope(ctx, {
         id,
         tenantId,
         workspaceId,
@@ -1187,7 +1195,7 @@ export class CrmService {
       throw new BadRequestException('CRM tag name must contain letters or numbers.');
     }
     const existing = await this.tagsRepository.findOne({
-      where: this.withClientScope(ctx, {
+      where: this.withCompanyScope(ctx, {
         tenantId: this.requireTenantId(ctx),
         workspaceId: this.requireWorkspaceId(ctx),
         slug,
@@ -1239,7 +1247,7 @@ export class CrmService {
     const tenantId = this.requireTenantId(ctx);
     const workspaceId = this.requireWorkspaceId(ctx);
     const lastOpportunity = await this.opportunitiesRepository.findOne({
-      where: this.withClientScope(ctx, {
+      where: this.withCompanyScope(ctx, {
         tenantId,
         workspaceId,
         pipelineId,
@@ -1259,7 +1267,7 @@ export class CrmService {
     const workspaceId = this.requireWorkspaceId(ctx);
 
     const existing = await this.pipelinesRepository.findOne({
-      where: this.withClientScope(ctx, {
+      where: this.withCompanyScope(ctx, {
         tenantId,
         workspaceId,
         isDefault: true,
@@ -1283,6 +1291,7 @@ export class CrmService {
       this.pipelinesRepository.create({
         tenantId,
         workspaceId,
+        ...this.companyScope(ctx),
         name: 'Pipeline Comercial',
         description: 'Pipeline padrão criado automaticamente para o CRM.',
         businessMode: 'general',
@@ -1359,7 +1368,7 @@ export class CrmService {
     const workspaceId = this.requireWorkspaceId(ctx);
 
     const stages = await this.stagesRepository.find({
-      where: this.withClientScope(ctx, {
+      where: {
         tenantId,
         workspaceId,
         pipelineId,
@@ -1368,7 +1377,7 @@ export class CrmService {
         isWonStage: false,
         isLostStage: false,
         deletedAt: IsNull(),
-      }),
+      },
       take: 2,
     });
 
@@ -1456,15 +1465,16 @@ export class CrmService {
     lock = false,
   ): Promise<CrmStageEntity> {
     const stage = await manager.getRepository(CrmStageEntity).findOne({
-      where: this.withClientScope(ctx, {
+      where: {
         id,
         tenantId: this.requireTenantId(ctx),
         workspaceId: this.requireWorkspaceId(ctx),
         deletedAt: IsNull(),
-      }),
+      },
       lock: lock ? { mode: 'pessimistic_write' } : undefined,
     });
     if (!stage) throw new NotFoundException('CRM stage not found.');
+    await this.getPipelineWithManager(manager, ctx, stage.pipelineId, lock);
     return stage;
   }
 
@@ -1475,7 +1485,7 @@ export class CrmService {
     lock = false,
   ): Promise<CrmPipelineEntity> {
     const pipeline = await manager.getRepository(CrmPipelineEntity).findOne({
-      where: this.withClientScope(ctx, {
+      where: this.withCompanyScope(ctx, {
         id,
         tenantId: this.requireTenantId(ctx),
         workspaceId: this.requireWorkspaceId(ctx),
@@ -1593,15 +1603,7 @@ export class CrmService {
     return date;
   }
 
-  /**
-   * Restricts a query to the LeadFlow operating context of the request.
-   *
-   * In client mode we only match records stamped with the selected client's id.
-   * In agency mode (or when no managed context is present) we match records that
-   * are agency-owned or were created before client scoping existed (legacy rows
-   * carry no `clientId`). Mirrors the Inbox module scoping so CRM data stays
-   * isolated per managed client without a schema change.
-   */
+  /** Temporary child compatibility filter; roots use persisted scope below. */
   private withClientScope<T>(
     ctx: RequestContext,
     where: FindOptionsWhere<T>,
@@ -1622,6 +1624,25 @@ export class CrmService {
     }
 
     return scoped as FindOptionsWhere<T>;
+  }
+
+  /** Direct persisted scope for CC2F roots. Stages and child rows inherit it. */
+  private companyScope(ctx: RequestContext) {
+    const scope = resolveCompanyAwareScope(ctx);
+    return {
+      agencyClientId: scope.agencyClientId,
+      companyContextId: scope.companyContextId,
+      scopeKind: scope.companyContextId
+        ? ('company' as const)
+        : ('agency' as const),
+    };
+  }
+
+  private withCompanyScope<T>(
+    ctx: RequestContext,
+    where: FindOptionsWhere<T>,
+  ): FindOptionsWhere<T> {
+    return { ...where, ...this.companyScope(ctx) } as FindOptionsWhere<T>;
   }
 
   /**

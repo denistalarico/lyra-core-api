@@ -61,7 +61,7 @@ describe('OperationsRoomOutboxWorker', () => {
 
     await privateWorker(worker).publish(row);
 
-    expect(bus.publish).toHaveBeenCalledTimes(1);
+    expect(bus.publish).toHaveBeenCalledWith(row.eventId);
     expect(update).toHaveBeenCalledWith(
       expect.objectContaining({
         eventId: row.eventId,

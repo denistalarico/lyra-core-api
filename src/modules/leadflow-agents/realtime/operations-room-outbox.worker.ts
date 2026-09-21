@@ -9,7 +9,6 @@ import { DataSource, In, Repository } from 'typeorm';
 import { randomUUID } from 'node:crypto';
 import { OperationsRoomOutboxEntity } from '../entities';
 import { RoomOutboxDeliveryState } from '../enums/room-operational.enums';
-import { mapOperationsRoomOutboxEvent } from './operations-room-event.mapper';
 import { OperationsRoomEventBusService } from './operations-room-event-bus.service';
 import { OperationsRoomRealtimeMetrics } from './operations-room-realtime.metrics';
 import { operationsRoomRealtimeEnabled } from './operations-room-realtime.constants';
@@ -136,7 +135,7 @@ export class OperationsRoomOutboxWorker
 
   private async publish(row: OperationsRoomOutboxEntity): Promise<void> {
     try {
-      await this.bus.publish(mapOperationsRoomOutboxEvent(row));
+      await this.bus.publish(row.eventId);
       const publishedAt = new Date();
       await this.outboxRepository.update(
         {

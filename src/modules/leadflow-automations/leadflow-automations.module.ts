@@ -73,6 +73,9 @@ import {
   AgencyWorkspaceUserPermissionEntity,
 } from '../agency/entities/agency-settings.entities';
 import { CrmPipelineEntity } from '../crm/entities/crm-pipeline.entity';
+import { CrmOpportunityEntity } from '../crm/entities/crm-opportunity.entity';
+import { InboxConversationEntity } from '../inbox/entities/inbox-conversation.entity';
+import { ScheduledItemEntity } from '../appointments/entities/scheduled-item.entity';
 import { NotificationRecipientEntity } from '../notifications/entities';
 import { PlatformWhatsAppNotificationModule } from '../notifications/platform-whatsapp/platform-whatsapp-notification.module';
 import { LeadFlowCsatExpiryTimerConsumer } from './services/leadflow-csat-expiry-timer.consumer';
@@ -109,6 +112,9 @@ import { LeadFlowAppointmentLifecycleSchedulerService } from './services/leadflo
         InboxDomainOutboxEntity,
         InboxSettingsEntity,
         CrmPipelineEntity,
+        CrmOpportunityEntity,
+        InboxConversationEntity,
+        ScheduledItemEntity,
         AgencyWorkspaceUserEntity,
         AgencyWorkspaceUserPermissionEntity,
         AgencyUserProfileEntity,

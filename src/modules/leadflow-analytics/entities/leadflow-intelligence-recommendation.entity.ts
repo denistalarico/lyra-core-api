@@ -21,6 +21,7 @@ import type {
   'workspaceId',
   'contextType',
   'agencyClientId',
+  'companyContextId',
   'status',
 ])
 @Index('IDX_lf_intelligence_recommendations_target', [
@@ -31,7 +32,7 @@ import type {
 ])
 @Index(
   'UQ_lf_intelligence_recommendations_generation',
-  ['tenantId', 'workspaceId', 'contextType', 'agencyClientId', 'generationKey'],
+  ['tenantId', 'workspaceId', 'contextType', 'agencyClientId', 'companyContextId', 'generationKey'],
   { unique: true },
 )
 @Entity('leadflow_intelligence_recommendations')
@@ -50,6 +51,9 @@ export class LeadFlowIntelligenceRecommendationEntity {
 
   @Column({ name: 'agency_client_id', type: 'uuid', nullable: true })
   agencyClientId!: string | null;
+
+  @Column({ name: 'company_context_id', type: 'uuid', nullable: true })
+  companyContextId?: string | null;
 
   @Column({ name: 'business_mode_key', type: 'varchar', length: 80 })
   businessModeKey!: string;

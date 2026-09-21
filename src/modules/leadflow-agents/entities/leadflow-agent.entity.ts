@@ -25,7 +25,7 @@ import type {
 @Index('IDX_lf_agents_settings_id', ['settingsId'])
 @Index('IDX_lf_agents_business_mode_key', ['businessModeKey'])
 @Index('IDX_lf_agents_status', ['status'])
-@Index('IDX_lf_agents_context', ['tenantId', 'workspaceId', 'contextType', 'agencyClientId'])
+@Index('IDX_lf_agents_context', ['tenantId', 'workspaceId', 'contextType', 'agencyClientId', 'companyContextId'])
 @Entity('leadflow_agents')
 export class LeadFlowAgentEntity {
   @PrimaryGeneratedColumn('uuid')
@@ -50,6 +50,9 @@ export class LeadFlowAgentEntity {
 
   @Column({ name: 'agency_client_id', type: 'uuid', nullable: true })
   agencyClientId!: string | null;
+
+  @Column({ name: 'company_context_id', type: 'uuid', nullable: true })
+  companyContextId?: string | null;
 
   /** Snapshot of the active Business Mode inherited from LeadFlow Settings. */
   @Column({ name: 'business_mode_key', type: 'varchar', length: 80 })

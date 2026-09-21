@@ -65,6 +65,7 @@ describe('LeadFlowAnalyticsViewsService', () => {
         productKey: 'leadflow',
         operatingMode: 'client',
         clientId: '62d2eb20-8b90-4a2b-9958-5a32b4f7dc90',
+        companyContextId: 'ee02ed36-19da-4ef8-9ef3-c4ab3c39d877',
         managedTenantId: null,
       },
     });
@@ -74,8 +75,51 @@ describe('LeadFlowAnalyticsViewsService', () => {
         where: expect.objectContaining({
           contextType: 'client',
           agencyClientId: '62d2eb20-8b90-4a2b-9958-5a32b4f7dc90',
+          companyContextId: 'ee02ed36-19da-4ef8-9ef3-c4ab3c39d877',
         }),
       }),
+    );
+  });
+
+  it('keeps views and same-name uniqueness separate between Company A and B', async () => {
+    const companyA = {
+      ...ctx,
+      managedContext: {
+        productKey: 'leadflow',
+        operatingMode: 'client',
+        clientId: '62d2eb20-8b90-4a2b-9958-5a32b4f7dc90',
+        companyContextId: 'ee02ed36-19da-4ef8-9ef3-c4ab3c39d877',
+      managedTenantId: null,
+      },
+    } as const;
+    const companyB = {
+      ...companyA,
+      managedContext: {
+        ...companyA.managedContext,
+        companyContextId: 'c0b8f4fa-334c-45dc-b918-613fe6dd5e75',
+      },
+    };
+    const a = buildService();
+    const b = buildService();
+
+    await a.service.list(companyA);
+    await b.service.list(companyB);
+    expect(a.repository.find).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ companyContextId: companyA.managedContext.companyContextId }),
+    }));
+    expect(b.repository.find).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ companyContextId: companyB.managedContext.companyContextId }),
+    }));
+
+    await a.service.create(companyA, view);
+    await b.service.create(companyB, view);
+    expect(a.query.andWhere).toHaveBeenCalledWith(
+      'view.agency_client_id = :agencyClientId AND view.company_context_id = :companyContextId',
+      expect.objectContaining({ companyContextId: companyA.managedContext.companyContextId }),
+    );
+    expect(b.query.andWhere).toHaveBeenCalledWith(
+      'view.agency_client_id = :agencyClientId AND view.company_context_id = :companyContextId',
+      expect.objectContaining({ companyContextId: companyB.managedContext.companyContextId }),
     );
   });
 

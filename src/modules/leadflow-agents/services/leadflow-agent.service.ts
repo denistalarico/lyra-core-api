@@ -10,7 +10,9 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { In, IsNull, Not, Repository } from 'typeorm';
 import { randomUUID } from 'node:crypto';
 import type { RequestContext } from '../../../common/context/request-context.interface';
+import { resolveCompanyAwareScope } from '../../../common/context/company-aware-scope';
 import { InboxConversationEntity } from '../../inbox/entities/inbox-conversation.entity';
+import { InboxChannelEntity } from '../../inbox/entities/inbox-channel.entity';
 import {
   AgencyUserProfileEntity,
   AgencyWorkspaceUserEntity,
@@ -87,6 +89,7 @@ interface ActiveContext {
   settings: LeadFlowClientSettingsEntity;
   contextType: LeadFlowSettingsContextType;
   agencyClientId: string | null;
+  companyContextId: string | null;
   businessModeKey: string;
   isCustomBusinessMode: boolean;
 }
@@ -115,6 +118,8 @@ export class LeadFlowAgentService {
     private readonly permissionService: PlatformPermissionService,
     private readonly bindingReconciler: LeadFlowAgentBindingReconcilerService,
     private readonly operationsRoomState: OperationsRoomStateService,
+    @InjectRepository(InboxChannelEntity, AGENCY_CONNECTION)
+    private readonly channelsRepository?: Repository<InboxChannelEntity>,
   ) {}
 
   async list(ctx: RequestContext): Promise<LeadFlowAgentListResponse> {
@@ -210,6 +215,7 @@ export class LeadFlowAgentService {
       settingsId: active.settings.id,
       contextType: active.contextType,
       agencyClientId: active.agencyClientId,
+      companyContextId: active.companyContextId,
       businessModeKey: active.businessModeKey,
       status: LeadFlowAgentStatus.Draft,
       createdById: ctx.userId ?? null,
@@ -264,6 +270,7 @@ export class LeadFlowAgentService {
         defaultChannel: null,
         activationPolicy: this.safeActivationPolicy(),
       };
+      await this.assertChannelPoliciesInScope(agent.channelPolicy, active);
       agent.avatarConfig = dto.avatarConfig ?? { preset: 'avatar-custom' };
       agent.metadata = {
         allowedActions: ['send_message', 'request_handoff'],
@@ -790,20 +797,16 @@ export class LeadFlowAgentService {
       workspaceId: this.requireWorkspaceId(ctx),
       contextType: active.contextType,
       agencyClientId: active.agencyClientId ?? IsNull(),
+      companyContextId: active.companyContextId ?? IsNull(),
     };
   }
 
   private async resolveActiveContext(
     ctx: RequestContext,
   ): Promise<ActiveContext> {
-    const workspaceId = this.requireWorkspaceId(ctx);
-    const managed = ctx.managedContext;
-    const managedClientId =
-      managed?.operatingMode === 'client' &&
-      typeof managed.clientId === 'string' &&
-      managed.clientId
-        ? managed.clientId
-        : null;
+    const scope = resolveCompanyAwareScope(ctx);
+    const workspaceId = scope.workspaceId;
+    const managedClientId = scope.agencyClientId;
 
     const settings = managedClientId
       ? await this.settingsRepository.findOne({
@@ -812,6 +815,7 @@ export class LeadFlowAgentService {
             workspaceId,
             contextType: LeadFlowSettingsContextType.Client,
             agencyClientId: managedClientId,
+            companyContextId: scope.companyContextId ?? IsNull(),
           },
         })
       : await this.settingsRepository.findOne({
@@ -820,6 +824,7 @@ export class LeadFlowAgentService {
             workspaceId,
             contextType: LeadFlowSettingsContextType.Agency,
             agencyClientId: IsNull(),
+            companyContextId: IsNull(),
           },
         });
 
@@ -833,6 +838,7 @@ export class LeadFlowAgentService {
       settings,
       contextType: settings.contextType,
       agencyClientId: settings.agencyClientId,
+      companyContextId: settings.companyContextId,
       businessModeKey: settings.businessModeKey,
       isCustomBusinessMode: this.presetService.isCustomBusinessMode(
         settings.businessModeKey,
@@ -1079,6 +1085,30 @@ export class LeadFlowAgentService {
     }
 
     return result;
+  }
+
+  /** Channel ids are configuration only; ownership is still proved server-side. */
+  private async assertChannelPoliciesInScope(
+    policy: LeadFlowAgentChannelPolicy,
+    active: ActiveContext,
+  ): Promise<void> {
+    const ids = Object.keys(policy.channelActivationPolicies ?? {});
+    if (!ids.length) return;
+    if (!this.channelsRepository) {
+      throw new BadRequestException('Channel activation policies are invalid.');
+    }
+    const channels = await this.channelsRepository.find({
+      where: {
+        id: In(ids),
+        tenantId: active.settings.tenantId,
+        workspaceId: active.settings.workspaceId,
+        agencyClientId: active.agencyClientId ?? IsNull(),
+        companyContextId: active.companyContextId ?? IsNull(),
+      },
+    });
+    if (channels.length !== ids.length) {
+      throw new BadRequestException('Channel activation policies are invalid.');
+    }
   }
 
   private validateActivationPolicy(

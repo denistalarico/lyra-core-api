@@ -71,7 +71,14 @@ describe('OperationsRoomStateService contract rules', () => {
     );
 
     await expect(
-      service.listRoomEventsAfter('tenant-a', 'workspace-a', '3', 100),
+      service.listRoomEventsAfter(
+        'tenant-a',
+        'workspace-a',
+        '3',
+        ['agent-a'],
+        { scopeKind: 'agency', agencyClientId: null, companyContextId: null },
+        100,
+      ),
     ).resolves.toEqual({
       kind: 'snapshot_required',
       events: [],
@@ -92,8 +99,80 @@ describe('OperationsRoomStateService contract rules', () => {
         {} as never,
       );
       await expect(
-        service.listRoomEventsAfter('tenant-a', 'workspace-a', cursor, 100),
+        service.listRoomEventsAfter(
+          'tenant-a',
+          'workspace-a',
+          cursor,
+          ['agent-a'],
+          { scopeKind: 'agency', agencyClientId: null, companyContextId: null },
+          100,
+        ),
       ).rejects.toThrow('Cursor de roomVersion inválido.');
     },
   );
+
+  it('returns no events for a legacy client with no visible agents, instead of the whole workspace replay', async () => {
+    const query = jest
+      .fn()
+      .mockResolvedValue([{ current_version: '5', earliest_version: '1' }]);
+    const service = new OperationsRoomStateService(
+      { query } as never,
+      {} as never,
+      {} as never,
+    );
+
+    const page = await service.listRoomEventsAfter(
+      'tenant-a',
+      'workspace-a',
+      '0',
+      [],
+      { scopeKind: 'agency', agencyClientId: null, companyContextId: null },
+      100,
+    );
+
+    expect(page).toEqual({ kind: 'events', events: [], nextRoomVersion: null });
+  });
+
+  it('scopes replay to the visible-agent set (Company A never receives Company B events)', async () => {
+    const query = jest
+      .fn()
+      .mockResolvedValue([{ current_version: '5', earliest_version: '1' }]);
+    const whereMocks = {
+      andWhere: jest.fn(),
+      orderBy: jest.fn(),
+      take: jest.fn(),
+      getMany: jest.fn().mockResolvedValue([]),
+    };
+    whereMocks.andWhere.mockReturnValue(whereMocks);
+    whereMocks.orderBy.mockReturnValue(whereMocks);
+    whereMocks.take.mockReturnValue(whereMocks);
+    const outboxRepository = {
+      createQueryBuilder: jest.fn().mockReturnValue({
+        where: jest.fn().mockReturnValue(whereMocks),
+      }),
+    };
+    const service = new OperationsRoomStateService(
+      { query } as never,
+      {} as never,
+      outboxRepository as never,
+    );
+
+    await service.listRoomEventsAfter(
+      'tenant-a',
+      'workspace-a',
+      '0',
+      ['agent-a'],
+      {
+        scopeKind: 'company',
+        agencyClientId: 'client-x',
+        companyContextId: 'company-a',
+      },
+      100,
+    );
+
+    expect(whereMocks.andWhere).toHaveBeenCalledWith(
+      'event.agent_id IN (:...visibleAgentIds)',
+      { visibleAgentIds: ['agent-a'] },
+    );
+  });
 });

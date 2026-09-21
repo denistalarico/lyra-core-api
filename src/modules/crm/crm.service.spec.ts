@@ -157,10 +157,144 @@ function mockOpportunity(overrides: Record<string, unknown> = {}) {
 }
 
 describe('CrmService agency validation', () => {
+  const companyCtx = (companyContextId: string) => ({
+    ...ctx,
+    managedContext: {
+      productKey: 'leadflow',
+      operatingMode: 'client',
+      clientId: '10000000-0000-4000-8000-000000000010',
+      companyContextId,
+      managedTenantId: null,
+    },
+  } as const);
+
+  it('isolates pipeline, stage, opportunity, and tag reads to Company A', async () => {
+    const scopeA = companyCtx('20000000-0000-4000-8000-000000000010');
+    const {
+      service,
+      pipelinesRepository,
+      stagesRepository,
+      opportunitiesRepository,
+      tagsRepository,
+    } = createService();
+
+    pipelinesRepository.find.mockResolvedValue([mockPipeline('pipeline-a')]);
+    await expect(service.listPipelines(scopeA)).resolves.toEqual([
+      expect.objectContaining({ id: 'pipeline-a' }),
+    ]);
+    expect(pipelinesRepository.find).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          agencyClientId: scopeA.managedContext.clientId,
+          companyContextId: scopeA.managedContext.companyContextId,
+        }),
+      }),
+    );
+
+    pipelinesRepository.findOne.mockResolvedValue(null);
+    await expect(service.getPipeline(scopeA, 'pipeline-b')).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+    expect(pipelinesRepository.findOne).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: 'pipeline-b',
+          companyContextId: scopeA.managedContext.companyContextId,
+        }),
+      }),
+    );
+
+    stagesRepository.findOne.mockResolvedValue(
+      mockStage('stage-b', 'pipeline-b'),
+    );
+    await expect(service.getStage(scopeA, 'stage-b')).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+    expect(pipelinesRepository.findOne).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: 'pipeline-b',
+          companyContextId: scopeA.managedContext.companyContextId,
+        }),
+      }),
+    );
+
+    opportunitiesRepository.find.mockResolvedValue([
+      mockOpportunity({ id: 'opportunity-a', companyContextId: scopeA.managedContext.companyContextId }),
+    ]);
+    await expect(service.listOpportunities(scopeA, {} as never)).resolves.toEqual([
+      expect.objectContaining({ id: 'opportunity-a' }),
+    ]);
+    expect(opportunitiesRepository.find).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          agencyClientId: scopeA.managedContext.clientId,
+          companyContextId: scopeA.managedContext.companyContextId,
+        }),
+      }),
+    );
+
+    tagsRepository.find.mockResolvedValue([{ id: 'tag-a' }]);
+    await service.listTags(scopeA);
+    expect(tagsRepository.find).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          companyContextId: scopeA.managedContext.companyContextId,
+        }),
+      }),
+    );
+  });
+
+  it('rejects cross-company opportunity mutation and tag assignment before writing', async () => {
+    const scopeA = companyCtx('20000000-0000-4000-8000-000000000010');
+    const { service, opportunitiesRepository, opportunityCommands, tagsRepository, opportunityTagsRepository } = createService();
+    opportunitiesRepository.findOne.mockResolvedValue(null);
+
+    await expect(service.getOpportunity(scopeA, 'opportunity-b')).rejects.toBeInstanceOf(NotFoundException);
+    await expect(service.patchOpportunity(scopeA, 'opportunity-b', { title: 'A editou' })).rejects.toBeInstanceOf(NotFoundException);
+    await expect(service.patchOpportunityStage(scopeA, 'opportunity-b', { stageId: 'stage-a', reasonCode: 'manual_stage_move' })).rejects.toBeInstanceOf(NotFoundException);
+    await expect(service.assignOpportunityTag(scopeA, 'opportunity-b', { tagId: 'tag-a' })).rejects.toBeInstanceOf(NotFoundException);
+    expect(opportunityCommands.updateOpportunity).not.toHaveBeenCalled();
+    expect(opportunityCommands.moveStage).not.toHaveBeenCalled();
+    expect(opportunityTagsRepository.save).not.toHaveBeenCalled();
+
+    opportunitiesRepository.findOne.mockResolvedValue(mockOpportunity({ companyContextId: scopeA.managedContext.companyContextId }));
+    tagsRepository.findOne.mockResolvedValue(null);
+    await expect(service.assignOpportunityTag(scopeA, 'opportunity-a', { tagId: 'tag-b' })).rejects.toBeInstanceOf(NotFoundException);
+    expect(opportunityTagsRepository.save).not.toHaveBeenCalled();
+  });
+
+  it('allows one shared Contact on opportunities in Company A and Company B', async () => {
+    const { service, pipelinesRepository, stagesRepository, contactsRepository, opportunityCommands } = createService();
+    pipelinesRepository.findOne.mockImplementation(async ({ where }: { where: { id: string } }) => mockPipeline(where.id));
+    stagesRepository.findOne.mockImplementation(async ({ where }: { where: { id: string } }) => mockStage(where.id, where.id.endsWith('-a') ? 'pipeline-a' : 'pipeline-b'));
+    contactsRepository.findOne.mockResolvedValue({ id: 'shared-contact' });
+
+    const createForCompany = (companyContextId: string, pipelineId: string, stageId: string) =>
+      service.createOpportunity(companyCtx(companyContextId), {
+        pipelineId,
+        stageId,
+        contactId: 'shared-contact',
+        title: 'Mesmo contato',
+      });
+
+    await createForCompany('20000000-0000-4000-8000-000000000010', 'pipeline-a', 'stage-a');
+    await createForCompany('20000000-0000-4000-8000-000000000020', 'pipeline-b', 'stage-b');
+
+    expect(opportunityCommands.createOpportunity).toHaveBeenCalledTimes(2);
+    expect(opportunityCommands.createOpportunity.mock.calls.map((call) => call[1])).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ contactId: 'shared-contact', companyContextId: '20000000-0000-4000-8000-000000000010' }),
+        expect.objectContaining({ contactId: 'shared-contact', companyContextId: '20000000-0000-4000-8000-000000000020' }),
+      ]),
+    );
+  });
+
   it('keeps a stage that is still used by an opportunity', async () => {
-    const { service, stagesRepository, opportunitiesRepository } =
+    const { service, stagesRepository, opportunitiesRepository, pipelinesRepository } =
       createService();
     stagesRepository.findOne.mockResolvedValue(mockStage('stage-a'));
+    pipelinesRepository.findOne.mockResolvedValue(mockPipeline('pipeline-a'));
     opportunitiesRepository.count.mockResolvedValue(1);
 
     await expect(service.deleteStage(ctx, 'stage-a')).rejects.toMatchObject({
@@ -391,7 +525,7 @@ describe('CrmService agency validation', () => {
   });
 
   it('rejects moving opportunity to a stage from another pipeline', async () => {
-    const { service, stagesRepository, opportunitiesRepository } =
+    const { service, stagesRepository, opportunitiesRepository, pipelinesRepository } =
       createService();
     opportunitiesRepository.findOne.mockResolvedValue(
       mockOpportunity({ pipelineId: 'pipeline-a', stageId: 'stage-a' }),
@@ -399,6 +533,7 @@ describe('CrmService agency validation', () => {
     stagesRepository.findOne.mockResolvedValue(
       mockStage('stage-b', 'pipeline-b'),
     );
+    pipelinesRepository.findOne.mockResolvedValue(mockPipeline('pipeline-b'));
 
     await expect(
       service.patchOpportunityStage(ctx, 'opportunity-a', {

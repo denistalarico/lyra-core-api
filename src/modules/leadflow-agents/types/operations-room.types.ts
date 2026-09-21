@@ -2,6 +2,7 @@ import type {
   RoomAgentOperationalStatus,
   RoomOperationalSource,
 } from '../enums/room-operational.enums';
+import type { OperationsRoomScope } from '../realtime/operations-room-realtime.constants';
 
 export interface RecordAgentOperationalTransitionCommand {
   tenantId: string;
@@ -45,6 +46,15 @@ export interface OperationsRoomEventEnvelope {
   occurredAt: string;
   tenantId: string;
   workspaceId: string;
+  /**
+   * Room scope resolved from the persisted Agent at fan-out time (never from
+   * payload). Absent only for events whose Agent could not be resolved to a
+   * live scope; such events are dropped before reaching this type — see
+   * `resolveOperationsRoomAgentScope`.
+   */
+  scopeKind: OperationsRoomScope['scopeKind'];
+  agencyClientId: string | null;
+  companyContextId: string | null;
   roomVersion: string;
   agentRevision: string;
   correlationId: string | null;

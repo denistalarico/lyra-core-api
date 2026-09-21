@@ -20,6 +20,9 @@ function source(
     id: automationId,
     tenantId,
     workspaceId,
+    contextType: 'client' as never,
+    agencyClientId: 'client-a',
+    companyContextId: 'company-a',
     publishedVersionId: versionId,
     status: LeadFlowAutomationStatus.Active,
     recipeKey: 'lead_distribution',
@@ -105,6 +108,7 @@ function version(
 function build(
   automations: LeadFlowAutomationEntity[],
   versions: LeadFlowAutomationVersionEntity[],
+  aggregateRoot: Record<string, unknown> | null = null,
 ) {
   const automationsRepository = {
     find: jest.fn().mockResolvedValue(automations),
@@ -112,13 +116,20 @@ function build(
   const versionsRepository = {
     find: jest.fn().mockResolvedValue(versions),
   } as unknown as Repository<LeadFlowAutomationVersionEntity>;
+  const aggregateRepository = {
+    findOne: jest.fn().mockResolvedValue(aggregateRoot),
+  };
   return {
     service: new LeadFlowAutomationTriggerMatcherService(
       automationsRepository,
       versionsRepository,
+      aggregateRepository as never,
+      aggregateRepository as never,
+      aggregateRepository as never,
     ),
     automationsRepository,
     versionsRepository,
+    aggregateRepository,
   };
 }
 
@@ -218,5 +229,62 @@ describe('LeadFlowAutomationTriggerMatcherService', () => {
     ).resolves.toEqual([]);
     expect(automationsRepository.find).not.toHaveBeenCalled();
     expect(versionsRepository.find).not.toHaveBeenCalled();
+  });
+
+  it('matches only the automation owned by the persisted Company A event root', async () => {
+    const automationBId = '50000000-0000-4000-8000-000000000005';
+    const versionBId = '60000000-0000-4000-8000-000000000006';
+    const companyA = source();
+    const companyB = source({
+      id: automationBId,
+      publishedVersionId: versionBId,
+      companyContextId: 'company-b',
+    });
+    const { service, aggregateRepository } = build(
+      [companyA, companyB],
+      [
+        version(),
+        version({
+          id: versionBId,
+          automationId: automationBId,
+          snapshot: snapshot({ automationId: automationBId }),
+        }),
+      ],
+      {
+        agencyClientId: 'client-a',
+        companyContextId: 'company-a',
+        scopeKind: 'company',
+      },
+    );
+
+    const matches = await service.findMatchingDelivery({
+      tenantId,
+      workspaceId,
+      aggregateId: 'opportunity-a',
+      aggregateType: 'crm_opportunity',
+      eventName: 'leadflow.crm.opportunity.created',
+    } as never);
+
+    expect(matches.map(({ source: matched }) => matched.id)).toEqual([automationId]);
+    expect(aggregateRepository.findOne).toHaveBeenCalledWith({
+      where: { id: 'opportunity-a', tenantId, workspaceId },
+    });
+  });
+
+  it('does not match company automations for a legacy workspace-only event root', async () => {
+    const { service, automationsRepository } = build(
+      [source()],
+      [version()],
+      { scopeKind: 'legacy_unassigned', agencyClientId: null, companyContextId: null },
+    );
+
+    await expect(service.findMatchingDelivery({
+      tenantId,
+      workspaceId,
+      aggregateId: 'legacy-opportunity',
+      aggregateType: 'crm_opportunity',
+      eventName: 'leadflow.crm.opportunity.created',
+    } as never)).resolves.toEqual([]);
+    expect(automationsRepository.find).not.toHaveBeenCalled();
   });
 });

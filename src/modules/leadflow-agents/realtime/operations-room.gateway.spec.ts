@@ -1,4 +1,4 @@
-import { operationsRoomContextRoom } from './operations-room-realtime.constants';
+import { operationsRoomKey } from './operations-room-realtime.constants';
 import { OperationsRoomGateway } from './operations-room.gateway';
 
 describe('OperationsRoomGateway security boundary', () => {
@@ -11,6 +11,10 @@ describe('OperationsRoomGateway security boundary', () => {
     exp: Math.floor(Date.now() / 1_000) + 300,
   };
 
+  const companyA = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  const companyB = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+  const agencyClientX = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+
   beforeEach(() => {
     process.env.OPERATIONS_ROOM_REALTIME_ENABLED = 'true';
   });
@@ -19,7 +23,7 @@ describe('OperationsRoomGateway security boundary', () => {
     delete process.env.OPERATIONS_ROOM_REALTIME_ENABLED;
   });
 
-  it('derives the only room from the signed context and ignores forged client context', async () => {
+  it('derives the only room from the signed context and ignores forged client context in agency mode', async () => {
     const { gateway, client } = makeGateway({ payload: authenticated });
     client.handshake.auth = {
       token: 'valid',
@@ -31,14 +35,136 @@ describe('OperationsRoomGateway security boundary', () => {
     await gateway.handleConnection(client as never);
 
     expect(client.join).toHaveBeenCalledWith(
-      operationsRoomContextRoom(
-        authenticated.tenantId,
-        authenticated.workspaceId,
-      ),
+      operationsRoomKey(authenticated.tenantId, authenticated.workspaceId, {
+        scopeKind: 'agency',
+        agencyClientId: null,
+        companyContextId: null,
+      }),
     );
     expect(client.join).toHaveBeenCalledTimes(1);
     expect(client.disconnect).not.toHaveBeenCalled();
     gateway.handleDisconnect(client as never);
+  });
+
+  it('joins the Company A room and never the tenant/workspace-wide room in client mode', async () => {
+    const permission = {
+      canAccessProduct: jest.fn().mockResolvedValue(true),
+      canAccessClientProduct: jest.fn().mockResolvedValue(true),
+      can: jest.fn().mockResolvedValue(true),
+    };
+    const { gateway, client } = makeGateway({
+      payload: authenticated,
+      permission,
+    });
+    client.handshake.auth = {
+      token: 'valid',
+      operatingMode: 'client',
+      clientId: agencyClientX,
+      companyContextId: companyA,
+    };
+
+    await gateway.handleConnection(client as never);
+
+    expect(client.join).toHaveBeenCalledWith(
+      operationsRoomKey(authenticated.tenantId, authenticated.workspaceId, {
+        scopeKind: 'company',
+        agencyClientId: agencyClientX,
+        companyContextId: companyA,
+      }),
+    );
+    expect(permission.canAccessClientProduct).toHaveBeenCalledWith(
+      expect.objectContaining({ clientId: agencyClientX }),
+    );
+    expect(client.disconnect).not.toHaveBeenCalled();
+  });
+
+  it('rejects a company id not found for the requested AgencyClient (Company B forged under company A ownership)', async () => {
+    const companyContexts = {
+      findOneBy: jest.fn().mockResolvedValue(null),
+    };
+    const { gateway, client } = makeGateway({
+      payload: authenticated,
+      companyContexts,
+    });
+    client.handshake.auth = {
+      token: 'valid',
+      operatingMode: 'client',
+      clientId: agencyClientX,
+      companyContextId: companyB,
+    };
+
+    await gateway.handleConnection(client as never);
+
+    expect(companyContexts.findOneBy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: companyB,
+        agencyClientId: agencyClientX,
+        status: 'active',
+      }),
+    );
+    expect(client.join).not.toHaveBeenCalled();
+    expect(client.disconnect).toHaveBeenCalledWith(true);
+  });
+
+  it('rejects an archived company context', async () => {
+    const companyContexts = {
+      findOneBy: jest
+        .fn()
+        .mockResolvedValue({ archivedAt: new Date(), status: 'active' }),
+    };
+    const { gateway, client } = makeGateway({
+      payload: authenticated,
+      companyContexts,
+    });
+    client.handshake.auth = {
+      token: 'valid',
+      operatingMode: 'client',
+      clientId: agencyClientX,
+      companyContextId: companyA,
+    };
+
+    await gateway.handleConnection(client as never);
+
+    expect(client.join).not.toHaveBeenCalled();
+    expect(client.disconnect).toHaveBeenCalledWith(true);
+  });
+
+  it('rejects client mode without an authorized client-product grant', async () => {
+    const permission = {
+      canAccessProduct: jest.fn().mockResolvedValue(true),
+      canAccessClientProduct: jest.fn().mockResolvedValue(false),
+      can: jest.fn().mockResolvedValue(true),
+    };
+    const { gateway, client } = makeGateway({
+      payload: authenticated,
+      permission,
+    });
+    client.handshake.auth = {
+      token: 'valid',
+      operatingMode: 'client',
+      clientId: agencyClientX,
+      companyContextId: companyA,
+    };
+
+    await gateway.handleConnection(client as never);
+
+    expect(client.join).not.toHaveBeenCalled();
+    expect(client.disconnect).toHaveBeenCalledWith(true);
+  });
+
+  it('rejects an inconsistent client-mode handshake (clientId without companyContextId)', async () => {
+    const { gateway, client } = makeGateway({ payload: authenticated });
+    client.handshake.auth = {
+      token: 'valid',
+      operatingMode: 'client',
+      clientId: agencyClientX,
+      companyContextId: null,
+    };
+
+    await gateway.handleConnection(client as never);
+
+    expect(client.join).not.toHaveBeenCalled();
+    expect(client.disconnect).toHaveBeenCalledWith(true);
   });
 
   it.each([
@@ -108,14 +234,22 @@ function makeGateway(options: Record<string, unknown> = {}) {
     ? jest.fn().mockRejectedValue(options.verifyError)
     : jest.fn().mockResolvedValue(options.payload);
   const jwt = { verifyAsync };
-  const permission = {
+  const permission = (options.permission as Record<string, jest.Mock>) ?? {
     canAccessProduct: jest.fn().mockResolvedValue(options.entitled ?? true),
+    canAccessClientProduct: jest
+      .fn()
+      .mockResolvedValue(options.entitled ?? true),
     can: jest.fn().mockResolvedValue(options.permitted ?? true),
   };
   const sessions = options.sessionRepository ?? {
     findOne: jest
       .fn()
       .mockResolvedValue(options.session === null ? null : activeSession()),
+  };
+  const companyContexts = options.companyContexts ?? {
+    findOneBy: jest
+      .fn()
+      .mockResolvedValue({ archivedAt: null, status: 'active' }),
   };
   const gateway = new OperationsRoomGateway(
     jwt as never,
@@ -136,6 +270,7 @@ function makeGateway(options: Record<string, unknown> = {}) {
           options.workspaceUser === null ? null : { status: 'active' },
         ),
     } as never,
+    companyContexts as never,
   );
   const client: {
     id: string;

@@ -4,9 +4,11 @@ import {
   RoomOperationalSource,
 } from '../enums/room-operational.enums';
 import type { OperationsRoomEventEnvelope } from '../types/operations-room.types';
+import type { OperationsRoomScope } from './operations-room-realtime.constants';
 
 export function mapOperationsRoomOutboxEvent(
   event: OperationsRoomOutboxEntity,
+  scope: OperationsRoomScope,
 ): OperationsRoomEventEnvelope {
   const payload = event.payload as Record<string, unknown>;
   return {
@@ -16,6 +18,9 @@ export function mapOperationsRoomOutboxEvent(
     occurredAt: event.occurredAt.toISOString(),
     tenantId: event.tenantId,
     workspaceId: event.workspaceId,
+    scopeKind: scope.scopeKind,
+    agencyClientId: scope.agencyClientId,
+    companyContextId: scope.companyContextId,
     roomVersion: event.roomVersion,
     agentRevision: event.agentRevision ?? '0',
     correlationId: event.correlationId,

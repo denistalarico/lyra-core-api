@@ -38,6 +38,9 @@ describe('LeadFlowFollowupTimerConsumer', () => {
     jest.clearAllMocks();
     automationsFindOne.mockResolvedValue({
       id: 'automation-1',
+      contextType: 'client',
+      agencyClientId: 'client-1',
+      companyContextId: 'company-a',
       recipeKey: 'followup_idle_lead',
       status: LeadFlowAutomationStatus.Active,
       publishedVersionId: 'version-1',
@@ -46,6 +49,10 @@ describe('LeadFlowFollowupTimerConsumer', () => {
       id: 'conversation-1',
       tenantId: 'tenant-1',
       workspaceId: 'workspace-1',
+      contextType: 'client',
+      agencyClientId: 'client-1',
+      companyContextId: 'company-a',
+      scopeKind: 'company',
       opportunityId: 'opportunity-1',
       status: 'open',
       ownershipState: 'ai_active',
@@ -78,6 +85,13 @@ describe('LeadFlowFollowupTimerConsumer', () => {
       occurredAt: new Date('2026-07-26T12:00:00.000Z'),
     });
     await consumer.handleTimer(idleEnvelope());
+    expect(conversationsFindOne).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        agencyClientId: 'client-1',
+        companyContextId: 'company-a',
+        scopeKind: 'company',
+      }),
+    }));
     expect(outboxInsert).toHaveBeenCalledWith(
       expect.objectContaining({
         eventName: 'leadflow.inbox.conversation.idle',
@@ -121,6 +135,9 @@ describe('LeadFlowFollowupTimerConsumer', () => {
   it('stops a conversation follow-up when its linked opportunity is manual', async () => {
     opportunitiesFindOne.mockResolvedValue({
       id: 'opportunity-1',
+      agencyClientId: 'client-1',
+      companyContextId: 'company-a',
+      scopeKind: 'company',
       status: 'open',
       autonomyMode: 'manual',
       stageId: 'stage-1',
@@ -133,6 +150,13 @@ describe('LeadFlowFollowupTimerConsumer', () => {
     envelope.payload.opportunityId = 'opportunity-1';
 
     await consumer.handleTimer(envelope as never);
+    expect(opportunitiesFindOne).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        agencyClientId: 'client-1',
+        companyContextId: 'company-a',
+        scopeKind: 'company',
+      }),
+    }));
     expect(send).not.toHaveBeenCalled();
     expect(schedule).not.toHaveBeenCalled();
   });
@@ -349,6 +373,9 @@ describe('LeadFlowFollowupTimerConsumer', () => {
         id: 'conversation-1',
         tenantId: 'tenant-1',
         workspaceId: 'workspace-1',
+        agencyClientId: 'client-1',
+        companyContextId: 'company-a',
+        scopeKind: 'company',
         opportunityId: 'opportunity-1',
         channelId: 'channel-1',
         status: 'open',

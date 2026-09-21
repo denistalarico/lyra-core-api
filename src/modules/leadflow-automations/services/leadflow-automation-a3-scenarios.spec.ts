@@ -178,7 +178,7 @@ function build(
     .fn()
     .mockResolvedValue({ run: { id: 'run-1' }, attempts: [] });
   const matcher = {
-    findMatching: jest.fn().mockResolvedValue(matches),
+    findMatchingDelivery: jest.fn().mockResolvedValue(matches),
   } as unknown as LeadFlowAutomationTriggerMatcherService;
 
   const service = new LeadFlowAutomationShadowEvaluatorService(

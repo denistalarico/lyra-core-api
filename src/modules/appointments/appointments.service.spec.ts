@@ -1,4 +1,5 @@
 import type { DataSource, EntityManager, Repository } from 'typeorm';
+import { NotFoundException } from '@nestjs/common';
 import { InboxDomainOutboxEntity } from '../inbox/entities/inbox-domain-outbox.entity';
 import type { TeamChatMeetingsService } from '../team-chat/services/team-chat-meetings.service';
 import { AppointmentsService } from './appointments.service';
@@ -43,6 +44,7 @@ describe('AppointmentsService', () => {
   let reminders: ScheduledItemReminderEntity[];
   let outbox: InboxDomainOutboxEntity[];
   let service: AppointmentsService;
+  let itemRepository: Repository<ScheduledItemEntity>;
   let meetings: jest.Mocked<
     Pick<
       TeamChatMeetingsService,
@@ -57,7 +59,7 @@ describe('AppointmentsService', () => {
     participants = [];
     reminders = [];
     outbox = [];
-    const itemRepository = createRepository(items);
+    itemRepository = createRepository(items);
     const participantRepository = createRepository(participants);
     const reminderRepository = createRepository(reminders);
     const outboxRepository = createRepository(outbox);
@@ -141,6 +143,64 @@ describe('AppointmentsService', () => {
     } finally {
       jest.useRealTimers();
     }
+  });
+
+  it('isolates agenda roots to Company A while allowing a shared Contact participant', async () => {
+    const companyAContext = {
+      ...ctx,
+      managedContext: {
+        productKey: 'leadflow',
+        operatingMode: 'client',
+        clientId: '60000000-0000-4000-8000-000000000006',
+        companyContextId: '70000000-0000-4000-8000-000000000007',
+        managedTenantId: null,
+      },
+    } as const;
+    const stored = await service.createScheduledItem(companyAContext, {
+      type: 'task',
+      title: 'Retorno',
+      contactId: '80000000-0000-4000-8000-000000000008',
+    });
+    expect(stored).toMatchObject({
+      agencyClientId: companyAContext.managedContext.clientId,
+      companyContextId: companyAContext.managedContext.companyContextId,
+      scopeKind: 'company',
+      contactId: '80000000-0000-4000-8000-000000000008',
+    });
+    await service.addParticipant(companyAContext, stored.id, {
+      participantType: 'contact',
+      contactId: '80000000-0000-4000-8000-000000000008',
+    } as never);
+    expect(participants).toContainEqual(expect.objectContaining({
+      scheduledItemId: stored.id,
+      contactId: '80000000-0000-4000-8000-000000000008',
+    }));
+
+    const repository = itemRepository as unknown as {
+      find: jest.Mock;
+      findOne: jest.Mock;
+    };
+    await service.listScheduledItems(companyAContext);
+    expect(repository.find).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        agencyClientId: companyAContext.managedContext.clientId,
+        companyContextId: companyAContext.managedContext.companyContextId,
+        scopeKind: 'company',
+      }),
+    }));
+
+    repository.findOne.mockResolvedValue(null);
+    await expect(service.getScheduledItem(companyAContext, 'item-b')).rejects.toBeInstanceOf(NotFoundException);
+    await expect(service.patchScheduledItem(companyAContext, 'item-b', { title: 'Editado' })).rejects.toBeInstanceOf(NotFoundException);
+    await expect(service.deleteScheduledItem(companyAContext, 'item-b')).rejects.toBeInstanceOf(NotFoundException);
+    expect(repository.findOne).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        id: 'item-b',
+        agencyClientId: companyAContext.managedContext.clientId,
+        companyContextId: companyAContext.managedContext.companyContextId,
+        scopeKind: 'company',
+      }),
+    }));
   });
 
   it('publishes confirmation_pending immediately when the declared window is already due', async () => {

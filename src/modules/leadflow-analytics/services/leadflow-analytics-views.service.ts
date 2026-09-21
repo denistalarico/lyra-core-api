@@ -7,6 +7,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { IsNull, Repository } from 'typeorm';
 import type { RequestContext } from '../../../common/context/request-context.interface';
+import { resolveCompanyAwareScope } from '../../../common/context/company-aware-scope';
 import { LeadFlowSettingsContextType } from '../../leadflow-settings/enums/leadflow-settings-context-type.enum';
 import {
   LEADFLOW_ANALYTICS_CHART_IDS,
@@ -46,6 +47,7 @@ type AnalyticsViewScope = {
   userId: string;
   contextType: LeadFlowSettingsContextType;
   agencyClientId: string | null;
+  companyContextId: string | null;
 };
 
 @Injectable()
@@ -75,8 +77,8 @@ export class LeadFlowAnalyticsViewsService {
       .andWhere('view.context_type = :contextType', scope)
       .andWhere(
         scope.agencyClientId
-          ? 'view.agency_client_id = :agencyClientId'
-          : 'view.agency_client_id IS NULL',
+          ? 'view.agency_client_id = :agencyClientId AND view.company_context_id = :companyContextId'
+          : 'view.agency_client_id IS NULL AND view.company_context_id IS NULL',
         scope,
       )
       .andWhere('LOWER(view.name) = LOWER(:name)', { name: value.name })
@@ -120,8 +122,8 @@ export class LeadFlowAnalyticsViewsService {
       .andWhere('view.context_type = :contextType', scope)
       .andWhere(
         scope.agencyClientId
-          ? 'view.agency_client_id = :agencyClientId'
-          : 'view.agency_client_id IS NULL',
+          ? 'view.agency_client_id = :agencyClientId AND view.company_context_id = :companyContextId'
+          : 'view.agency_client_id IS NULL AND view.company_context_id IS NULL',
         scope,
       )
       .andWhere('LOWER(view.name) = LOWER(:name)', { name: value.name })
@@ -163,13 +165,8 @@ export class LeadFlowAnalyticsViewsService {
         'Tenant, workspace and user context are required.',
       );
     }
-    const agencyClientId =
-      ctx.managedContext?.operatingMode === 'client'
-        ? ctx.managedContext.clientId
-        : null;
-    if (ctx.managedContext?.operatingMode === 'client' && !agencyClientId) {
-      throw new BadRequestException('Managed client context is required.');
-    }
+    const companyScope = resolveCompanyAwareScope(ctx);
+    const agencyClientId = companyScope.agencyClientId;
     return {
       tenantId: ctx.tenantId,
       workspaceId: ctx.workspaceId,
@@ -178,6 +175,7 @@ export class LeadFlowAnalyticsViewsService {
         ? LeadFlowSettingsContextType.Client
         : LeadFlowSettingsContextType.Agency,
       agencyClientId,
+      companyContextId: companyScope.companyContextId,
     };
   }
 
@@ -188,6 +186,7 @@ export class LeadFlowAnalyticsViewsService {
       userId: scope.userId,
       contextType: scope.contextType,
       agencyClientId: scope.agencyClientId ?? IsNull(),
+      companyContextId: scope.companyContextId ?? IsNull(),
     };
   }
 

@@ -10,6 +10,7 @@ import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, IsNull, Repository } from 'typeorm';
 import type { RequestContext } from '../../../common/context/request-context.interface';
+import { resolveCompanyAwareScope } from '../../../common/context/company-aware-scope';
 import { LeadFlowClientSettingsEntity } from '../../leadflow-settings/entities';
 import { InboxChannelEntity } from '../../inbox/entities/inbox-channel.entity';
 import { AgencyWorkspaceEmailSettingsEntity } from '../../agency/entities/agency-settings.entities';
@@ -149,6 +150,7 @@ interface ActiveContext {
   settings: LeadFlowClientSettingsEntity;
   contextType: LeadFlowSettingsContextType;
   agencyClientId: string | null;
+  companyContextId: string | null;
   businessModeKey: string;
   isCustomBusinessMode: boolean;
 }
@@ -339,6 +341,7 @@ export class LeadFlowAutomationService {
       settingsId: active.settings.id,
       contextType: active.contextType,
       agencyClientId: active.agencyClientId,
+      companyContextId: active.companyContextId,
       businessModeKey: active.businessModeKey,
       status: LeadFlowAutomationStatus.Draft,
       createdById: ctx.userId ?? null,
@@ -1342,16 +1345,16 @@ export class LeadFlowAutomationService {
       workspaceId: this.requireWorkspaceId(ctx),
       contextType: active.contextType,
       agencyClientId: active.agencyClientId ?? IsNull(),
+      companyContextId: active.companyContextId ?? IsNull(),
     };
   }
 
   private async resolveActiveContext(
     ctx: RequestContext,
   ): Promise<ActiveContext> {
-    const workspaceId = this.requireWorkspaceId(ctx);
-    const managed = ctx.managedContext;
-    const managedClientId =
-      managed?.operatingMode === 'client' ? managed.clientId : null;
+    const scope = resolveCompanyAwareScope(ctx);
+    const workspaceId = scope.workspaceId;
+    const managedClientId = scope.agencyClientId;
 
     // Branch on the value itself, not on a derived boolean, so the client id
     // narrows to `string` here instead of needing an assertion.
@@ -1362,6 +1365,7 @@ export class LeadFlowAutomationService {
             workspaceId,
             contextType: LeadFlowSettingsContextType.Client,
             agencyClientId: managedClientId,
+            companyContextId: scope.companyContextId ?? IsNull(),
           },
         })
       : await this.settingsRepository.findOne({
@@ -1370,6 +1374,7 @@ export class LeadFlowAutomationService {
             workspaceId,
             contextType: LeadFlowSettingsContextType.Agency,
             agencyClientId: IsNull(),
+            companyContextId: IsNull(),
           },
         });
 
@@ -1383,6 +1388,7 @@ export class LeadFlowAutomationService {
       settings,
       contextType: settings.contextType,
       agencyClientId: settings.agencyClientId,
+      companyContextId: settings.companyContextId,
       businessModeKey: settings.businessModeKey,
       isCustomBusinessMode: this.recipeService.isCustomBusinessMode(
         settings.businessModeKey,

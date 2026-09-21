@@ -13,6 +13,7 @@ import {
   Repository,
 } from 'typeorm';
 import { RequestContext } from '../../common/context/request-context.interface';
+import { resolveCompanyAwareScope } from '../../common/context/company-aware-scope';
 import { InboxDomainOutboxEntity } from '../inbox/entities/inbox-domain-outbox.entity';
 import { TeamChatMeetingsService } from '../team-chat/services/team-chat-meetings.service';
 import type { LeadFlowEventName } from '../leadflow-events/types/leadflow-event.types';
@@ -98,7 +99,7 @@ export class AppointmentsService {
     }
 
     return this.scheduledItemsRepository.find({
-      where,
+      where: { ...where, ...this.companyScopeWhere(ctx) },
       order: {
         startAt: 'ASC',
         dueAt: 'ASC',
@@ -121,6 +122,7 @@ export class AppointmentsService {
         id: randomUUID(),
         tenantId,
         workspaceId,
+        ...this.companyScope(ctx),
         type: dto.type,
         status: dto.status ?? 'scheduled',
         priority: dto.priority ?? 'medium',
@@ -191,6 +193,7 @@ export class AppointmentsService {
         id,
         tenantId,
         workspaceId,
+        ...this.companyScopeWhere(ctx),
         deletedAt: IsNull(),
       },
     });
@@ -632,6 +635,7 @@ export class AppointmentsService {
         id,
         tenantId: this.requireTenantId(ctx),
         workspaceId: this.requireWorkspaceId(ctx),
+        ...this.companyScopeWhere(ctx),
         deletedAt: IsNull(),
       },
       lock: { mode: 'pessimistic_write' },
@@ -902,6 +906,28 @@ export class AppointmentsService {
         retainUntil: null,
       }),
     );
+  }
+
+  private companyScope(ctx: RequestContext) {
+    const scope = resolveCompanyAwareScope(ctx);
+    return {
+      agencyClientId: scope.agencyClientId,
+      companyContextId: scope.companyContextId,
+      scopeKind: scope.companyContextId
+        ? ('company' as const)
+        : ('agency' as const),
+    };
+  }
+
+  private companyScopeWhere(ctx: RequestContext) {
+    const scope = this.companyScope(ctx);
+    return {
+      agencyClientId: scope.agencyClientId ?? IsNull(),
+      companyContextId: scope.companyContextId ?? IsNull(),
+      scopeKind: scope.companyContextId
+        ? ('company' as const)
+        : ('agency' as const),
+    };
   }
 
   private requireTenantId(ctx: RequestContext): string {

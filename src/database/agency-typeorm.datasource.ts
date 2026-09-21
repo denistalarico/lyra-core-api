@@ -213,6 +213,7 @@ import { ScopeSocialBoostTemplatesByCompany1794720000000 } from './migrations/17
 import { ScopeLeadflowInboxSettingsByCompany1794800000000 } from './migrations/1794800000000-scope-leadflow-inbox-settings-by-company';
 import { ScopeInboxChannelsByCompany1794810000000 } from './migrations/1794810000000-scope-inbox-channels-by-company';
 import { ScopeInboxConversationsByCompany1794820000000 } from './migrations/1794820000000-scope-inbox-conversations-by-company';
+import { ScopeLeadflowCrmOperationsByCompany1794900000000 } from './migrations/1794900000000-scope-leadflow-crm-operations-by-company';
 
 export const AgencyDataSource = new DataSource({
   type: 'postgres',
@@ -436,5 +437,6 @@ export const AgencyDataSource = new DataSource({
     ScopeLeadflowInboxSettingsByCompany1794800000000,
     ScopeInboxChannelsByCompany1794810000000,
     ScopeInboxConversationsByCompany1794820000000,
+    ScopeLeadflowCrmOperationsByCompany1794900000000,
   ],
 });

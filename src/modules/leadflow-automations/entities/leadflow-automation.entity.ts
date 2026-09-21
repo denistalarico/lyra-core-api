@@ -38,6 +38,7 @@ import type {
   'workspaceId',
   'contextType',
   'agencyClientId',
+  'companyContextId',
 ])
 @Entity('leadflow_automations')
 export class LeadFlowAutomationEntity {
@@ -63,6 +64,9 @@ export class LeadFlowAutomationEntity {
 
   @Column({ name: 'agency_client_id', type: 'uuid', nullable: true })
   agencyClientId!: string | null;
+
+  @Column({ name: 'company_context_id', type: 'uuid', nullable: true })
+  companyContextId?: string | null;
 
   /** Snapshot of the active Business Mode inherited from LeadFlow Settings. */
   @Column({ name: 'business_mode_key', type: 'varchar', length: 80 })

@@ -16,6 +16,7 @@ import {
 @Index('idx_scheduled_items_workspace_due_at', ['workspaceId', 'dueAt'])
 @Index('idx_scheduled_items_assigned_user_id', ['assignedUserId'])
 @Index('idx_scheduled_items_contact_id', ['contactId'])
+@Index('IDX_scheduled_items_company_scope', ['tenantId', 'workspaceId', 'agencyClientId', 'companyContextId'])
 export class ScheduledItemEntity {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
@@ -25,6 +26,15 @@ export class ScheduledItemEntity {
 
   @Column({ name: 'workspace_id', type: 'uuid' })
   workspaceId!: string;
+
+  @Column({ name: 'agency_client_id', type: 'uuid', nullable: true })
+  agencyClientId?: string | null;
+
+  @Column({ name: 'company_context_id', type: 'uuid', nullable: true })
+  companyContextId?: string | null;
+
+  @Column({ name: 'scope_kind', type: 'varchar', length: 24, nullable: true })
+  scopeKind?: 'agency' | 'company' | 'legacy_unassigned';
 
   @Column({ type: 'varchar', length: 32 })
   type!: string;

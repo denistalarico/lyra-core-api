@@ -3,11 +3,13 @@ import {
   CreateDateColumn,
   DeleteDateColumn,
   Entity,
+  Index,
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
 
 @Entity('crm_pipelines')
+@Index('IDX_crm_pipelines_company_scope', ['tenantId', 'workspaceId', 'agencyClientId', 'companyContextId'])
 export class CrmPipelineEntity {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
@@ -17,6 +19,15 @@ export class CrmPipelineEntity {
 
   @Column({ name: 'workspace_id', type: 'uuid' })
   workspaceId!: string;
+
+  @Column({ name: 'agency_client_id', type: 'uuid', nullable: true })
+  agencyClientId?: string | null;
+
+  @Column({ name: 'company_context_id', type: 'uuid', nullable: true })
+  companyContextId?: string | null;
+
+  @Column({ name: 'scope_kind', type: 'varchar', length: 24, nullable: true })
+  scopeKind?: 'agency' | 'company' | 'legacy_unassigned';
 
   @Column({ type: 'varchar', length: 140 })
   name!: string;

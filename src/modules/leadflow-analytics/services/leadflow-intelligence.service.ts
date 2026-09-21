@@ -7,6 +7,7 @@ import {
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, FindOptionsWhere, In, IsNull, Repository } from 'typeorm';
 import type { RequestContext } from '../../../common/context/request-context.interface';
+import { resolveCompanyAwareScope } from '../../../common/context/company-aware-scope';
 import { LeadFlowAutomationEntity } from '../../leadflow-automations/entities';
 import { LeadFlowAutomationStatus } from '../../leadflow-automations/enums/leadflow-automation-status.enum';
 import { LEADFLOW_AUTOMATIONS_PERMISSIONS } from '../../leadflow-automations/leadflow-automations.permissions';
@@ -43,6 +44,7 @@ interface IntelligenceScope {
   workspaceId: string;
   contextType: LeadFlowSettingsContextType;
   agencyClientId: string | null;
+  companyContextId: string | null;
 }
 
 interface AutomationFailureRow {
@@ -701,12 +703,13 @@ export class LeadFlowIntelligenceService {
           AND automation.workspace_id = $2
           AND automation.context_type = $3
           AND automation.agency_client_id IS NOT DISTINCT FROM $4::uuid
+          AND automation.company_context_id IS NOT DISTINCT FROM $5::uuid
           AND automation.status = 'active'
-          AND ($5::varchar IS NULL OR automation.business_mode_key = $5)
+          AND ($6::varchar IS NULL OR automation.business_mode_key = $6)
           AND run.mode = 'live'
           AND run.status IN ('succeeded', 'failed')
-          AND run.created_at >= $6
-          AND run.created_at <= $7
+          AND run.created_at >= $7
+          AND run.created_at <= $8
         GROUP BY
           automation.id,
           automation.name,
@@ -719,6 +722,7 @@ export class LeadFlowIntelligenceService {
         scope.workspaceId,
         scope.contextType,
         scope.agencyClientId,
+        scope.companyContextId,
         businessMode,
         from,
         to,
@@ -813,6 +817,7 @@ export class LeadFlowIntelligenceService {
       recommendation.workspaceId !== scope.workspaceId ||
       recommendation.contextType !== scope.contextType ||
       recommendation.agencyClientId !== scope.agencyClientId
+      || (recommendation.companyContextId ?? null) !== scope.companyContextId
     ) {
       throw new NotFoundException(
         'Recomendação não encontrada neste contexto.',
@@ -830,6 +835,7 @@ export class LeadFlowIntelligenceService {
       automation.workspaceId !== scope.workspaceId ||
       automation.contextType !== scope.contextType ||
       automation.agencyClientId !== scope.agencyClientId
+      || (automation.companyContextId ?? null) !== scope.companyContextId
     ) {
       throw new NotFoundException(
         'Automação alvo não encontrada neste contexto.',
@@ -844,13 +850,8 @@ export class LeadFlowIntelligenceService {
     if (!ctx.workspaceId) {
       throw new BadRequestException('Workspace context is required.');
     }
-    const agencyClientId =
-      ctx.managedContext?.operatingMode === 'client'
-        ? ctx.managedContext.clientId
-        : null;
-    if (ctx.managedContext?.operatingMode === 'client' && !agencyClientId) {
-      throw new BadRequestException('Managed client context is required.');
-    }
+    const companyScope = resolveCompanyAwareScope(ctx);
+    const agencyClientId = companyScope.agencyClientId;
     return {
       tenantId: ctx.tenantId,
       workspaceId: ctx.workspaceId,
@@ -858,6 +859,7 @@ export class LeadFlowIntelligenceService {
         ? LeadFlowSettingsContextType.Client
         : LeadFlowSettingsContextType.Agency,
       agencyClientId,
+      companyContextId: companyScope.companyContextId,
     };
   }
 
@@ -869,6 +871,7 @@ export class LeadFlowIntelligenceService {
       workspaceId: scope.workspaceId,
       contextType: scope.contextType,
       agencyClientId: scope.agencyClientId ?? IsNull(),
+      companyContextId: scope.companyContextId ?? IsNull(),
     };
   }
 

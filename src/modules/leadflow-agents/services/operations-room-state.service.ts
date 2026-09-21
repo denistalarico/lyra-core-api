@@ -21,6 +21,7 @@ import type {
 import { randomUUID } from 'node:crypto';
 import { OperationsRoomEventBusService } from '../realtime/operations-room-event-bus.service';
 import { mapOperationsRoomOutboxEvent } from '../realtime/operations-room-event.mapper';
+import type { OperationsRoomScope } from '../realtime/operations-room-realtime.constants';
 
 const AGENCY_CONNECTION = 'agency';
 const MAX_REPLAY_LIMIT = 500;
@@ -236,6 +237,8 @@ export class OperationsRoomStateService {
     tenantId: string,
     workspaceId: string,
     roomVersion: string,
+    visibleAgentIds: readonly string[],
+    scope: OperationsRoomScope,
     limit = 100,
   ): Promise<RoomEventPage> {
     if (!tenantId || !workspaceId)
@@ -273,17 +276,27 @@ export class OperationsRoomStateService {
     ) {
       return { kind: 'snapshot_required', events: [], nextRoomVersion: null };
     }
+    // Replay is bounded by the same visible-agent set the caller already
+    // proved company-scoped access to (CC2F `agentService.list`); an event
+    // for an agent outside that set — including another Company Context of
+    // the same AgencyClient — never reaches the response.
+    if (!visibleAgentIds.length) {
+      return { kind: 'events', events: [], nextRoomVersion: null };
+    }
     const events = await this.outboxRepository
       .createQueryBuilder('event')
       .where('event.tenant_id = :tenantId', { tenantId })
       .andWhere('event.workspace_id = :workspaceId', { workspaceId })
       .andWhere('event.room_version > :roomVersion', { roomVersion })
+      .andWhere('event.agent_id IN (:...visibleAgentIds)', {
+        visibleAgentIds: [...visibleAgentIds],
+      })
       .orderBy('event.room_version', 'ASC')
       .take(safeLimit)
       .getMany();
     return {
       kind: 'events',
-      events: events.map(mapOperationsRoomOutboxEvent),
+      events: events.map((event) => mapOperationsRoomOutboxEvent(event, scope)),
       nextRoomVersion: events.at(-1)?.roomVersion ?? null,
     };
   }

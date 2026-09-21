@@ -65,13 +65,9 @@ export class LeadFlowAutomationShadowEvaluatorService {
   async evaluateDelivery(
     delivery: LeadFlowEventDeliveryEntity,
   ): Promise<ShadowEvaluationSummary[]> {
-    // Envelope-only filtering first: tenant, workspace and trigger decide
-    // relevance before any context work is even considered.
-    let matches = await this.matcher.findMatching(
-      delivery.tenantId,
-      delivery.workspaceId,
-      delivery.eventName,
-    );
+    // Resolve the persisted aggregate before matching automations so a
+    // Company A event cannot even produce a Company B run.
+    let matches = await this.matcher.findMatchingDelivery(delivery);
     const detectorAutomationId =
       typeof delivery.payload?.automationId === 'string'
         ? delivery.payload.automationId

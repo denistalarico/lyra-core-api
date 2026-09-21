@@ -13,6 +13,7 @@ import { DataSource, Repository } from 'typeorm';
 import { Namespace, Socket } from 'socket.io';
 import { AgencyUserSessionEntity } from '../../agency/entities/agency-auth.entities';
 import { AgencyWorkspaceUserEntity } from '../../agency/entities/agency-settings.entities';
+import { AgencyClientCompanyContext } from '../../clients/entities/agency-client-company-context.entity';
 import type { AuthTokenPayload } from '../../auth/types/auth-token-payload.type';
 import { PlatformPermissionService } from '../../permissions';
 import { PlatformProductKey } from '../../platform';
@@ -23,8 +24,9 @@ import {
   OPERATIONS_ROOM_READY_EVENT,
   OPERATIONS_ROOM_RESYNC_EVENT,
   OPERATIONS_ROOM_SOCKET_EVENT,
-  operationsRoomContextRoom,
+  operationsRoomKey,
   operationsRoomRealtimeEnabled,
+  type OperationsRoomScope,
 } from './operations-room-realtime.constants';
 import { OperationsRoomRealtimeMetrics } from './operations-room-realtime.metrics';
 
@@ -80,11 +82,25 @@ export class OperationsRoomGateway
     private readonly sessions: Repository<AgencyUserSessionEntity>,
     @InjectRepository(AgencyWorkspaceUserEntity, AGENCY_CONNECTION)
     private readonly workspaceUsers: Repository<AgencyWorkspaceUserEntity>,
+    @InjectRepository(AgencyClientCompanyContext, AGENCY_CONNECTION)
+    private readonly companyContexts: Repository<AgencyClientCompanyContext>,
   ) {}
 
   afterInit(): void {
     this.unsubscribeEvent = this.eventBus.onEvent((event) => {
-      const room = operationsRoomContextRoom(event.tenantId, event.workspaceId);
+      const scope: OperationsRoomScope =
+        event.scopeKind === 'company'
+          ? {
+              scopeKind: 'company',
+              agencyClientId: event.agencyClientId as string,
+              companyContextId: event.companyContextId as string,
+            }
+          : {
+              scopeKind: 'agency',
+              agencyClientId: null,
+              companyContextId: null,
+            };
+      const room = operationsRoomKey(event.tenantId, event.workspaceId, scope);
       const delivered = this.server.adapter.rooms.get(room)?.size ?? 0;
       this.server.to(room).emit(OPERATIONS_ROOM_SOCKET_EVENT, event);
       this.metrics.delivered(delivered);
@@ -104,10 +120,12 @@ export class OperationsRoomGateway
       }
       this.enforceHandshakeLimits(client);
       const payload = await this.verifyClient(client);
-      await this.authorize(payload);
-      const room = operationsRoomContextRoom(
+      const scope = await this.resolveHandshakeScope(client, payload);
+      await this.authorize(payload, scope);
+      const room = operationsRoomKey(
         payload.tenantId,
         payload.workspaceId,
+        scope,
       );
       this.authenticatedClients.set(client, payload);
       await client.join(room);
@@ -191,7 +209,10 @@ export class OperationsRoomGateway
     return payload;
   }
 
-  private async authorize(payload: VerifiedToken): Promise<void> {
+  private async authorize(
+    payload: VerifiedToken,
+    scope: OperationsRoomScope,
+  ): Promise<void> {
     const context = {
       tenantId: payload.tenantId,
       workspaceId: payload.workspaceId,
@@ -199,14 +220,77 @@ export class OperationsRoomGateway
       role: payload.role,
     };
     const [entitled, permitted] = await Promise.all([
-      this.permissionService.canAccessProduct(
-        context,
-        PlatformProductKey.LeadFlow,
-      ),
+      scope.scopeKind === 'company'
+        ? this.permissionService.canAccessClientProduct({
+            ...context,
+            clientId: scope.agencyClientId,
+            productKey: PlatformProductKey.LeadFlow,
+          })
+        : this.permissionService.canAccessProduct(
+            context,
+            PlatformProductKey.LeadFlow,
+          ),
       this.permissionService.can(context, LEADFLOW_AGENTS_PERMISSIONS.view),
     ]);
     if (!entitled) throw new Error('leadflow_entitlement_denied');
     if (!permitted) throw new Error('agents_permission_denied');
+  }
+
+  /**
+   * Resolves the room the socket may join from the handshake's requested
+   * operating context, the same shape the HTTP boundary reads from headers.
+   * A browser-supplied clientId/companyContextId never becomes authority by
+   * itself: company mode is re-validated against the persisted, active
+   * Company Context before a room name is ever built (mirrors the Inbox
+   * gateway from CC2E).
+   */
+  private async resolveHandshakeScope(
+    client: Socket,
+    payload: VerifiedToken,
+  ): Promise<OperationsRoomScope> {
+    const auth = client.handshake.auth as Record<string, unknown>;
+    const operatingMode = auth?.operatingMode;
+    const clientId = auth?.clientId;
+    const companyContextId = auth?.companyContextId;
+
+    if (
+      operatingMode === undefined ||
+      operatingMode === 'agency' ||
+      (clientId === null && companyContextId === null)
+    ) {
+      return {
+        scopeKind: 'agency',
+        agencyClientId: null,
+        companyContextId: null,
+      };
+    }
+
+    if (
+      operatingMode !== 'client' ||
+      typeof clientId !== 'string' ||
+      !clientId ||
+      typeof companyContextId !== 'string' ||
+      !companyContextId
+    ) {
+      throw new Error('invalid_operational_context');
+    }
+
+    const companyContext = await this.companyContexts.findOneBy({
+      id: companyContextId,
+      tenantId: payload.tenantId,
+      workspaceId: payload.workspaceId,
+      agencyClientId: clientId,
+      status: 'active',
+    });
+    if (!companyContext || companyContext.archivedAt) {
+      throw new Error('invalid_company_context');
+    }
+
+    return {
+      scopeKind: 'company',
+      agencyClientId: clientId,
+      companyContextId,
+    };
   }
 
   private async assertSessionActive(payload: VerifiedToken): Promise<void> {
