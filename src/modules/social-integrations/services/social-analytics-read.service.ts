@@ -33,6 +33,11 @@ import type {
   SocialAdCampaignSort,
   SocialAdSortDirection,
 } from '../views/social-ad-analytics-campaigns.view';
+import type {
+  SocialAdAdSetRow,
+  SocialAdAdSetSort,
+  SocialAdAnalyticsAdSetsView,
+} from '../views/social-ad-analytics-ad-sets.view';
 import {
   toBackfillChainStatus,
   type SocialAdAnalyticsFreshnessView,
@@ -87,6 +92,9 @@ const ANALYTICS_ATTRIBUTION = 'account_default';
 /** Campaign facts, for the per-campaign breakdown. */
 const CAMPAIGN_ENTITY_LEVEL = 'campaign';
 
+/** Ad-set facts, for the per-ad-set breakdown. */
+const ADSET_ENTITY_LEVEL = 'adset';
+
 export type SocialAdAnalyticsScope = {
   tenantId: string;
   workspaceId: string;
@@ -102,6 +110,11 @@ export type SocialAdAnalyticsOverviewInput = SocialAdAnalyticsScope & {
 
 export type SocialAdAnalyticsCampaignsInput = SocialAdAnalyticsOverviewInput & {
   sort?: SocialAdCampaignSort;
+  direction?: SocialAdSortDirection;
+};
+
+export type SocialAdAnalyticsAdSetsInput = SocialAdAnalyticsOverviewInput & {
+  sort?: SocialAdAdSetSort;
   direction?: SocialAdSortDirection;
 };
 
@@ -490,6 +503,103 @@ export class SocialAnalyticsReadService {
   }
 
   /**
+   * Per-ad-set totals for the period, ranked.
+   *
+   * Same two-step shape as `campaigns()`: facts are aggregated by
+   * `entity_external_id` first (the generic identity column at every level
+   * below account), and the hierarchy is looked up separately and merged in
+   * memory, for the same reason — an unmirrored ad set must not vanish from an
+   * inner join, and the five-part identity condition must not be duplicated
+   * across branches.
+   *
+   * `campaign_external_id` is carried through from the fact row (denormalised
+   * onto every ad-set fact already) so a caller can group ad sets under their
+   * campaign without a second round trip.
+   *
+   * Only ad sets with at least one fact in the period appear.
+   */
+  async adSets(
+    input: SocialAdAnalyticsAdSetsInput,
+  ): Promise<SocialAdAnalyticsAdSetsView> {
+    const period = parseAnalyticsPeriod({
+      since: input.since,
+      until: input.until,
+    });
+    const sort = input.sort ?? 'spend';
+    const direction = input.direction ?? 'desc';
+
+    const connection = await this.findInScope(input);
+
+    const rows = await this.metricsRepository
+      .createQueryBuilder('fact')
+      .select('fact.entity_external_id', 'entity_external_id')
+      .addSelect('MAX(fact.campaign_external_id)', 'campaign_external_id')
+      .addSelect('SUM(fact.spend)', 'spend')
+      .addSelect('SUM(fact.impressions)', 'impressions')
+      .addSelect('SUM(fact.clicks)', 'clicks')
+      .addSelect('SUM(fact.link_clicks)', 'link_clicks')
+      .addSelect('SUM(fact.leads)', 'leads')
+      .addSelect('SUM(fact.conversions)', 'conversions')
+      .addSelect('SUM(fact.conversion_value)', 'conversion_value')
+      .addSelect('SUM(fact.video_views)', 'video_views')
+      .addSelect('SUM(fact.reach)', 'reach')
+      .addSelect('COUNT(fact.reach)', 'reach_days')
+      .addSelect('COUNT(DISTINCT fact.metric_date)', 'fact_days')
+      .addSelect(
+        'COUNT(DISTINCT fact.metric_date) FILTER (WHERE fact.is_partial)',
+        'partial_days',
+      )
+      .addSelect('MAX(fact.currency)', 'currency')
+      .where('fact.connection_id = :connectionId', {
+        connectionId: connection.id,
+      })
+      .andWhere('fact.entity_level = :level', { level: ADSET_ENTITY_LEVEL })
+      .andWhere('fact.source = :source', { source: OVERVIEW_SOURCE })
+      .andWhere('fact.attribution_setting = :attribution', {
+        attribution: ANALYTICS_ATTRIBUTION,
+      })
+      .andWhere('fact.metric_date BETWEEN :since AND :until', {
+        since: period.since,
+        until: period.until,
+      })
+      .groupBy('fact.entity_external_id')
+      // The sort is a lookup into a closed map, never the caller's string. See
+      // `ADSET_SORT_SQL`.
+      .orderBy(
+        ADSET_SORT_SQL[sort],
+        direction === 'asc' ? 'ASC' : 'DESC',
+        'NULLS LAST',
+      )
+      // A stable tiebreak, so two ad sets with identical spend do not swap
+      // places between requests and make a table appear to flicker.
+      .addOrderBy('fact.entity_external_id', 'ASC')
+      .getRawMany<
+        AggregateRow & {
+          entity_external_id: string;
+          campaign_external_id: string | null;
+        }
+      >();
+
+    const identities = await this.findAdSetIdentities(
+      connection,
+      rows.map((row) => row.entity_external_id),
+    );
+
+    return {
+      connectionId: connection.id,
+      timezone: connection.timezone ?? '',
+      currency: rows[0]?.currency ?? connection.currency ?? null,
+      period: { since: period.since, until: period.until },
+      sort,
+      direction,
+      items: rows.map((row) =>
+        this.toAdSetRow(row, identities.get(row.entity_external_id)),
+      ),
+      total: rows.length,
+    };
+  }
+
+  /**
    * How current this connection's read model is, and where its backfill stands.
    *
    * Pure: it derives the chain's state from the run log using the very functions
@@ -739,6 +849,71 @@ export class SocialAnalyticsReadService {
       status: entity?.status ?? null,
       effectiveStatus: entity?.effectiveStatus ?? null,
       objective: entity?.objective ?? null,
+      archived: entity?.archivedAt != null,
+      spend: formatAmountText(row.spend),
+      impressions: toCount(row.impressions).toString(),
+      clicks: toCount(row.clicks).toString(),
+      linkClicks: toCount(row.link_clicks).toString(),
+      leads: toCount(row.leads).toString(),
+      conversions: formatAmountText(row.conversions),
+      conversionValue: formatAmountText(row.conversion_value),
+      videoViews: toCount(row.video_views).toString(),
+      reach: readReach(row),
+      hasPartialData: toCount(row.partial_days) > 0n,
+      ...deriveSocialAdKpis(toKpiInputs(row)),
+    };
+  }
+
+  /**
+   * Ad-set names and statuses, looked up under the full identity.
+   *
+   * Same rationale as `findCampaignIdentities`: `social_ad_entities` is unique
+   * on `(tenant, workspace, connection, level, external_id)`, and Meta's ad-set
+   * ids are unique per Business rather than globally, so every one of the five
+   * scope columns is bound here.
+   */
+  private async findAdSetIdentities(
+    connection: SocialAdAccountConnectionEntity,
+    externalIds: readonly string[],
+  ): Promise<Map<string, SocialAdEntity>> {
+    if (externalIds.length === 0) return new Map();
+
+    const entities = await this.entitiesRepository
+      .createQueryBuilder('entity')
+      .where('entity.tenant_id = :tenantId', { tenantId: connection.tenantId })
+      .andWhere('entity.workspace_id = :workspaceId', {
+        workspaceId: connection.workspaceId,
+      })
+      .andWhere('entity.connection_id = :connectionId', {
+        connectionId: connection.id,
+      })
+      .andWhere('entity.entity_level = :level', {
+        level: ADSET_ENTITY_LEVEL,
+      })
+      .andWhere('entity.external_id IN (:...externalIds)', { externalIds })
+      .getMany();
+
+    return new Map(entities.map((entity) => [entity.externalId, entity]));
+  }
+
+  private toAdSetRow(
+    row: AggregateRow & {
+      entity_external_id: string;
+      campaign_external_id: string | null;
+    },
+    entity: SocialAdEntity | undefined,
+  ): SocialAdAdSetRow {
+    return {
+      externalId: row.entity_external_id,
+      campaignExternalId:
+        entity?.campaignExternalId ?? row.campaign_external_id,
+      // Null rather than the id as a stand-in — see `toCampaignRow`.
+      name: entity?.name ?? null,
+      status: entity?.status ?? null,
+      effectiveStatus: entity?.effectiveStatus ?? null,
+      optimizationGoal: entity?.optimizationGoal ?? null,
+      billingEvent: entity?.billingEvent ?? null,
+      destinationType: entity?.destinationType ?? null,
       archived: entity?.archivedAt != null,
       spend: formatAmountText(row.spend),
       impressions: toCount(row.impressions).toString(),
@@ -1015,6 +1190,20 @@ const CAMPAIGN_SORT_SQL: Record<SocialAdCampaignSort, string> = {
   // documents that `name` orders by campaign identity, which is stable even
   // when the hierarchy has not been mirrored.
   name: 'fact.campaign_external_id',
+};
+
+/** Same closed-lookup discipline as `CAMPAIGN_SORT_SQL`, grouped by ad set. */
+const ADSET_SORT_SQL: Record<SocialAdAdSetSort, string> = {
+  spend: 'SUM(fact.spend)',
+  impressions: 'SUM(fact.impressions)',
+  clicks: 'SUM(fact.clicks)',
+  leads: 'SUM(fact.leads)',
+  conversions: 'SUM(fact.conversions)',
+  ctr: 'SUM(fact.clicks)::numeric / NULLIF(SUM(fact.impressions), 0)',
+  cpc: 'SUM(fact.spend) / NULLIF(SUM(fact.clicks), 0)',
+  cpl: 'SUM(fact.spend) / NULLIF(SUM(fact.leads), 0)',
+  roas: 'SUM(fact.conversion_value) / NULLIF(SUM(fact.spend), 0)',
+  name: 'fact.entity_external_id',
 };
 
 /** Decimal places of the `numeric(18,6)` fact columns. */

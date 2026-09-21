@@ -13,6 +13,7 @@ import {
   RequirePermission,
   RequireProductEntitlement,
 } from '../permissions';
+import { AnalyticsAdSetsQueryDto } from './dto/analytics-ad-sets.query.dto';
 import { AnalyticsBreakdownQueryDto } from './dto/analytics-breakdown.query.dto';
 import { AnalyticsCampaignsQueryDto } from './dto/analytics-campaigns.query.dto';
 import { AnalyticsFreshnessQueryDto } from './dto/analytics-freshness.query.dto';
@@ -159,6 +160,37 @@ export class SocialAnalyticsController {
     const scope = this.requireScope(ctx);
 
     return this.analyticsReadService.campaigns({
+      tenantId: scope.tenantId,
+      workspaceId: scope.workspaceId,
+      agencyClientId: scope.agencyClientId,
+      connectionId: query.connectionId,
+      since: query.since,
+      until: query.until,
+      sort: query.sort,
+      direction: query.direction,
+    });
+  }
+
+  /**
+   * Per-ad-set totals for the period, ranked.
+   *
+   * Same shape and guarantees as `campaigns()`: `sort` is validated against a
+   * closed list by the DTO and mapped through a closed lookup in the service,
+   * and only ad sets with delivery inside the period appear. Each row carries
+   * its parent campaign's external id, so a caller can group without a second
+   * request.
+   */
+  @Get('ad-sets')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireProductEntitlement('social')
+  @RequirePermission(SOCIAL_ANALYTICS_READ_PERMISSION)
+  adSets(
+    @RequestContextData() ctx: RequestContext,
+    @Query() query: AnalyticsAdSetsQueryDto,
+  ) {
+    const scope = this.requireScope(ctx);
+
+    return this.analyticsReadService.adSets({
       tenantId: scope.tenantId,
       workspaceId: scope.workspaceId,
       agencyClientId: scope.agencyClientId,

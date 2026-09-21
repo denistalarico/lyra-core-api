@@ -14,6 +14,7 @@ const GUARDED_HANDLERS = [
   'overview',
   'timeseries',
   'campaigns',
+  'adSets',
   'breakdown',
   'freshness',
   'connections',
@@ -29,6 +30,7 @@ const CONNECTION_SCOPED_HANDLERS = [
   'overview',
   'timeseries',
   'campaigns',
+  'adSets',
   'breakdown',
   'freshness',
 ] as const;
@@ -37,6 +39,7 @@ function createHarness() {
   const overviewInputs: Record<string, unknown>[] = [];
   const seriesInputs: Record<string, unknown>[] = [];
   const campaignInputs: Record<string, unknown>[] = [];
+  const adSetInputs: Record<string, unknown>[] = [];
   const freshnessInputs: Record<string, unknown>[] = [];
 
   const record =
@@ -51,6 +54,7 @@ function createHarness() {
     overview: jest.fn(record(overviewInputs)),
     timeseries: jest.fn(record(seriesInputs)),
     campaigns: jest.fn(record(campaignInputs)),
+    adSets: jest.fn(record(adSetInputs)),
     freshness: jest.fn(record(freshnessInputs)),
     listConnections: jest.fn((input: Record<string, unknown>) => {
       connectionInputs.push(input);
@@ -68,6 +72,7 @@ function createHarness() {
     overviewInputs,
     seriesInputs,
     campaignInputs,
+    adSetInputs,
     freshnessInputs,
     connectionInputs,
     breakdownInputs,
@@ -221,6 +226,7 @@ describe('SocialAnalyticsController scope resolution', () => {
         overview: harness.overviewInputs,
         timeseries: harness.seriesInputs,
         campaigns: harness.campaignInputs,
+        adSets: harness.adSetInputs,
         breakdown: harness.breakdownInputs,
         freshness: harness.freshnessInputs,
       };
@@ -320,6 +326,30 @@ describe('SocialAnalyticsController scope resolution', () => {
     // here, where it could drift from what the response reports.
     expect(harness.campaignInputs[0].sort).toBeUndefined();
     expect(harness.campaignInputs[0].direction).toBeUndefined();
+  });
+
+  it('passes the sort and direction through to the ad-sets read', async () => {
+    const harness = createHarness();
+
+    await harness.controller.adSets(context(), {
+      ...query,
+      sort: 'cpc',
+      direction: 'asc',
+    });
+
+    expect(harness.adSetInputs[0]).toMatchObject({
+      sort: 'cpc',
+      direction: 'asc',
+    });
+  });
+
+  it('leaves the ad-sets sort and direction undefined so the service picks the default', async () => {
+    const harness = createHarness();
+
+    await harness.controller.adSets(context(), query);
+
+    expect(harness.adSetInputs[0].sort).toBeUndefined();
+    expect(harness.adSetInputs[0].direction).toBeUndefined();
   });
 
   it('asks freshness for a connection and nothing else', async () => {

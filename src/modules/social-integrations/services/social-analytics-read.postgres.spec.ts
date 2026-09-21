@@ -15,6 +15,7 @@ import type {
   SocialAdCampaignSort,
   SocialAdSortDirection,
 } from '../views/social-ad-analytics-campaigns.view';
+import type { SocialAdAdSetSort } from '../views/social-ad-analytics-ad-sets.view';
 import { SocialAdReachPeriodReadService } from './social-ad-reach-period.read.service';
 import { SocialAdSyncConfigService } from './social-ad-sync-config.service';
 import { SocialAnalyticsReadService } from './social-analytics-read.service';
@@ -203,6 +204,39 @@ run('Social analytics read against PostgreSQL', () => {
     `);
   }
 
+  /** A mirrored ad set, under the full five-part identity. */
+  function insertAdsetEntity(input: {
+    connectionId?: string;
+    externalId: string;
+    campaignExternalId: string;
+    name: string;
+    status?: string;
+    effectiveStatus?: string;
+    optimizationGoal?: string;
+    billingEvent?: string;
+    destinationType?: string;
+    archived?: boolean;
+  }) {
+    return queryRunner.query(`
+      INSERT INTO "social_ad_entities"
+        ("tenant_id", "workspace_id", "connection_id", "provider",
+         "entity_level", "external_id", "campaign_external_id", "name",
+         "status", "effective_status", "optimization_goal", "billing_event",
+         "destination_type", "archived_at")
+      VALUES (
+        '${tenantId}', '${workspaceId}',
+        '${input.connectionId ?? connectionId}', 'meta_ads',
+        'adset', '${input.externalId}', '${input.campaignExternalId}',
+        '${input.name}',
+        '${input.status ?? 'ACTIVE'}', '${input.effectiveStatus ?? 'ACTIVE'}',
+        '${input.optimizationGoal ?? 'LEAD_GENERATION'}',
+        '${input.billingEvent ?? 'IMPRESSIONS'}',
+        '${input.destinationType ?? 'website'}',
+        ${input.archived ? 'now()' : 'NULL'}
+      )
+    `);
+  }
+
   /** A settled sync run, for the freshness and backfill chain assertions. */
   /** A bare connection in the caller's scope, for a chain-shape fixture. */
   let connectionSeq = 0;
@@ -270,6 +304,24 @@ run('Social analytics read against PostgreSQL', () => {
     } = {},
   ) =>
     service.campaigns({
+      ...scope,
+      connectionId: options.id ?? connectionId,
+      since,
+      until,
+      sort: options.sort,
+      direction: options.direction,
+    });
+
+  const adSets = (
+    since: string,
+    until: string,
+    options: {
+      id?: string;
+      sort?: SocialAdAdSetSort;
+      direction?: SocialAdSortDirection;
+    } = {},
+  ) =>
+    service.adSets({
       ...scope,
       connectionId: options.id ?? connectionId,
       since,
@@ -928,6 +980,256 @@ run('Social analytics read against PostgreSQL', () => {
     it('refuses a connection outside the caller scope', async () => {
       await expect(
         campaigns('2026-09-01', '2026-09-02', { id: otherTenantConnectionId }),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+  });
+
+  describe('adSets', () => {
+    beforeAll(async () => {
+      await insertAdsetEntity({
+        externalId: 'adset-big',
+        campaignExternalId: 'camp-big',
+        name: 'Big spender adset',
+        optimizationGoal: 'OFFSITE_CONVERSIONS',
+        destinationType: 'website',
+      });
+      await insertAdsetEntity({
+        externalId: 'adset-small',
+        campaignExternalId: 'camp-small',
+        name: 'Small spender adset',
+        status: 'PAUSED',
+        effectiveStatus: 'ADSET_PAUSED',
+      });
+      await insertAdsetEntity({
+        externalId: 'adset-old',
+        campaignExternalId: 'camp-old',
+        name: 'Archived adset',
+        archived: true,
+      });
+
+      // The same external id under a different connection, with a different
+      // name: if the identity join were by external_id alone, this name could
+      // surface for the main connection's spend.
+      await insertAdsetEntity({
+        connectionId: twinConnectionId,
+        externalId: 'adset-big',
+        campaignExternalId: 'camp-big',
+        name: 'Another tenant adset',
+      });
+
+      await insertAdsetFact({
+        adsetExternalId: 'adset-big',
+        campaignExternalId: 'camp-big',
+        metricDate: '2026-09-11',
+        spend: '100.000000',
+        clicks: '50',
+        leads: '10',
+      });
+      await insertAdsetFact({
+        adsetExternalId: 'adset-big',
+        campaignExternalId: 'camp-big',
+        metricDate: '2026-09-12',
+        spend: '50.000000',
+        clicks: '25',
+        leads: '5',
+      });
+      await insertAdsetFact({
+        adsetExternalId: 'adset-small',
+        campaignExternalId: 'camp-small',
+        metricDate: '2026-09-11',
+        spend: '10.000000',
+        clicks: '40',
+        leads: '1',
+      });
+      await insertAdsetFact({
+        adsetExternalId: 'adset-old',
+        campaignExternalId: 'camp-old',
+        metricDate: '2026-09-11',
+        spend: '30.000000',
+        clicks: '5',
+        leads: '0',
+      });
+      // An ad set with facts only outside the tested window.
+      await insertAdsetFact({
+        adsetExternalId: 'adset-absent',
+        campaignExternalId: 'camp-absent',
+        metricDate: '2026-10-16',
+        spend: '999.000000',
+      });
+
+      /**
+       * A campaign-level fact for `camp-big` over the same window, sharing that
+       * campaign's id. This is what makes `entity_level = 'adset'` load-bearing
+       * here rather than incidental: a query that grouped by
+       * `campaign_external_id` without pinning the level would add the
+       * campaign's own row into `adset-big`'s total.
+       */
+      await insertCampaignFact({
+        campaignExternalId: 'camp-big',
+        metricDate: '2026-09-11',
+        spend: '500.000000',
+        clicks: '5',
+        leads: '5',
+      });
+    });
+
+    it('aggregates each ad set across the period', async () => {
+      const result = await adSets('2026-09-11', '2026-09-12');
+      const big = result.items.find((item) => item.externalId === 'adset-big');
+
+      expect(big?.spend).toBe('150.000000');
+      expect(big?.clicks).toBe('75');
+      expect(big?.leads).toBe('15');
+      // 150 / 15
+      expect(big?.cpl).toBe('10.000000');
+    });
+
+    it('ignores the campaign-level row that shares the same campaign id', async () => {
+      // The campaign fact holds 500.00 on 2026-09-11 under `camp-big`; the
+      // ad-set table must still report `adset-big`'s own 150.00 for the
+      // period, not 650.00.
+      const result = await adSets('2026-09-11', '2026-09-12');
+      const big = result.items.find((item) => item.externalId === 'adset-big');
+
+      expect(big?.spend).toBe('150.000000');
+    });
+
+    it('does not list a campaign as though it were an ad set', async () => {
+      const result = await adSets('2026-09-11', '2026-09-12');
+
+      expect(result.items.map((item) => item.externalId)).not.toContain(
+        'camp-big',
+      );
+    });
+
+    it('carries the parent campaign id', async () => {
+      const result = await adSets('2026-09-11', '2026-09-12');
+      const big = result.items.find((item) => item.externalId === 'adset-big');
+
+      expect(big?.campaignExternalId).toBe('camp-big');
+    });
+
+    it('carries name, status, effective status and the ad-set-only fields', async () => {
+      const result = await adSets('2026-09-11', '2026-09-12');
+      const small = result.items.find(
+        (item) => item.externalId === 'adset-small',
+      );
+
+      expect(small?.name).toBe('Small spender adset');
+      expect(small?.status).toBe('PAUSED');
+      expect(small?.effectiveStatus).toBe('ADSET_PAUSED');
+      expect(small?.optimizationGoal).toBe('LEAD_GENERATION');
+      expect(small?.billingEvent).toBe('IMPRESSIONS');
+      expect(small?.destinationType).toBe('website');
+    });
+
+    it('includes an archived ad set that spent in the period', async () => {
+      const result = await adSets('2026-09-11', '2026-09-12');
+      const archived = result.items.find(
+        (item) => item.externalId === 'adset-old',
+      );
+
+      expect(archived?.archived).toBe(true);
+      expect(archived?.spend).toBe('30.000000');
+    });
+
+    it('never takes a name from another connection with the same id', async () => {
+      const result = await adSets('2026-09-11', '2026-09-12');
+      const big = result.items.find((item) => item.externalId === 'adset-big');
+
+      expect(big?.name).toBe('Big spender adset');
+      expect(big?.name).not.toBe('Another tenant adset');
+    });
+
+    it('keeps an ad set whose hierarchy row was never mirrored', async () => {
+      const result = await adSets('2026-10-16', '2026-10-16');
+      const absent = result.items.find(
+        (item) => item.externalId === 'adset-absent',
+      );
+
+      expect(absent).toBeDefined();
+      expect(absent?.name).toBeNull();
+      expect(absent?.campaignExternalId).toBe('camp-absent');
+      expect(absent?.spend).toBe('999.000000');
+    });
+
+    it('omits an ad set with no delivery in the period', async () => {
+      const result = await adSets('2026-09-11', '2026-09-12');
+
+      expect(
+        result.items.some((item) => item.externalId === 'adset-absent'),
+      ).toBe(false);
+    });
+
+    it('defaults to spend descending', async () => {
+      const result = await adSets('2026-09-11', '2026-09-12');
+
+      expect(result.sort).toBe('spend');
+      expect(result.direction).toBe('desc');
+      expect(result.items.map((item) => item.externalId)).toEqual([
+        'adset-big',
+        'adset-old',
+        'adset-small',
+      ]);
+    });
+
+    it('sorts by a derived KPI in SQL, agreeing with the reported value', async () => {
+      const result = await adSets('2026-09-11', '2026-09-12', {
+        sort: 'cpc',
+        direction: 'asc',
+      });
+
+      // adset-small: 10/40 = 0.25; adset-big: 150/75 = 2; adset-old: 30/5 = 6.
+      expect(result.items.map((item) => item.externalId)).toEqual([
+        'adset-small',
+        'adset-big',
+        'adset-old',
+      ]);
+      expect(result.items[0].cpc).toBe('0.250000');
+    });
+
+    it('sorts ascending when asked', async () => {
+      const result = await adSets('2026-09-11', '2026-09-12', {
+        sort: 'spend',
+        direction: 'asc',
+      });
+
+      expect(result.items[0].externalId).toBe('adset-small');
+    });
+
+    it('returns null reach for a multi-day period', async () => {
+      const result = await adSets('2026-09-11', '2026-09-12');
+      const big = result.items.find((item) => item.externalId === 'adset-big');
+
+      expect(big?.reach).toBeNull();
+    });
+
+    it('returns the daily reach for a single-day period', async () => {
+      const result = await adSets('2026-09-11', '2026-09-11');
+      const big = result.items.find((item) => item.externalId === 'adset-big');
+
+      expect(big?.reach).toBe('300');
+    });
+
+    it('flags an ad set whose period contains a provisional day', async () => {
+      await insertAdsetFact({
+        adsetExternalId: 'adset-live',
+        campaignExternalId: 'camp-live',
+        metricDate: '2026-09-13',
+        isPartial: true,
+      });
+
+      const result = await adSets('2026-09-13', '2026-09-13');
+      const live = result.items.find(
+        (item) => item.externalId === 'adset-live',
+      );
+
+      expect(live?.hasPartialData).toBe(true);
+    });
+
+    it('refuses a connection outside the caller scope', async () => {
+      await expect(
+        adSets('2026-09-11', '2026-09-12', { id: otherTenantConnectionId }),
       ).rejects.toBeInstanceOf(NotFoundException);
     });
   });
