@@ -207,6 +207,9 @@ import { ScopeSocialEditorialByCompany1794500000000 } from './migrations/1794500
 import { ScopeBrandKitByCompany1794510000000 } from './migrations/1794510000000-scope-brand-kit-by-company';
 import { ScopeCreativeStudioByCompany1794520000000 } from './migrations/1794520000000-scope-creative-studio-by-company';
 import { CreateSocialAnalyticsDashboards1794600000000 } from './migrations/1794600000000-create-social-analytics-dashboards';
+import { ScopeSocialOrganicAssetsByCompany1794700000000 } from './migrations/1794700000000-scope-social-organic-assets-by-company';
+import { ScopeSocialAdConnectionsByCompany1794710000000 } from './migrations/1794710000000-scope-social-ad-connections-by-company';
+import { ScopeSocialBoostTemplatesByCompany1794720000000 } from './migrations/1794720000000-scope-social-boost-templates-by-company';
 
 export const AgencyDataSource = new DataSource({
   type: 'postgres',
@@ -424,5 +427,8 @@ export const AgencyDataSource = new DataSource({
     ScopeBrandKitByCompany1794510000000,
     ScopeCreativeStudioByCompany1794520000000,
     CreateSocialAnalyticsDashboards1794600000000,
+    ScopeSocialOrganicAssetsByCompany1794700000000,
+    ScopeSocialAdConnectionsByCompany1794710000000,
+    ScopeSocialBoostTemplatesByCompany1794720000000,
   ],
 });

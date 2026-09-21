@@ -403,6 +403,9 @@ const RAW_PERMISSIONS: RawPermission[] = [
   ['social.analytics.reports.view.operational', MANAGER_UP],
   ['social.analytics.reports.view.full', ADMIN_UP],
   ['social.analytics.reports.export.admin', ADMIN_UP],
+  // Creating or reshaping a dashboard changes what the whole context sees, so
+  // it sits above the operational read key that governs looking at the numbers.
+  ['social.analytics.dashboards.manage.admin_or_explicit', ADMIN_UP],
 
   // 11.5 Social - Settings
   ['social.settings.general.view.admin', ADMIN_UP],

@@ -6,6 +6,10 @@ import {
   CreativeAssetVersionEntity,
   CreativeFolderEntity,
 } from '../modules/social-creative-studio/entities';
+import {
+  SocialAnalyticsDashboardEntity,
+  SocialAnalyticsReportEntity,
+} from '../modules/social-analytics-dashboards/entities';
 
 import { UserPreferencesEntity } from '../modules/settings/entities/user-preferences.entity';
 import { WorkspaceSettingsAiEntity } from '../modules/settings/entities/workspace-settings-ai.entity';
@@ -384,6 +388,8 @@ export const agencyEntities = [
   CreativeAssetEntity,
   CreativeAssetVersionEntity,
   CreativeFolderEntity,
+  SocialAnalyticsDashboardEntity,
+  SocialAnalyticsReportEntity,
   BrandKitEntity,
   BrandKitAssetEntity,
   SocialAdAccountConnectionEntity,
