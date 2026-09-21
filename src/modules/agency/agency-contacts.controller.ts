@@ -30,6 +30,7 @@ import { PatchContactListDto } from '../contacts/dto/patch-contact-list.dto';
 import { CreateContactDto } from '../contacts/dto/create-contact.dto';
 import { CreateLeadFlowContactDto } from './dto/create-leadflow-contact.dto';
 import { PatchContactDto } from '../contacts/dto/patch-contact.dto';
+import { UpdateContactCompanyLinkDto } from '../contacts/dto/contact-company-link.dto';
 import {
   CreateAgencyBankDto,
   CreateAgencyContactBankAccountDto,
@@ -517,11 +518,38 @@ export class AgencyContactsController {
     @RequestContextData() ctx: RequestContext,
     @Param('contactId') contactId: string,
     @Param('companyContactId') companyContactId: string,
+    @Body() dto: UpdateContactCompanyLinkDto,
   ) {
     return this.agencyContactsService.addCompanyLink(
       ctx,
       contactId,
       companyContactId,
+      dto,
+    );
+  }
+
+  @Get(':contactId/companies')
+  @RequireAnyPermission(...CONTACT_VIEW_PERMISSIONS)
+  listCompanyLinks(
+    @RequestContextData() ctx: RequestContext,
+    @Param('contactId') contactId: string,
+  ) {
+    return this.agencyContactsService.listCompanyLinks(ctx, contactId);
+  }
+
+  @Patch(':contactId/companies/:companyContactId')
+  @RequireAnyPermission(...CONTACT_UPDATE_PERMISSIONS)
+  patchCompanyLink(
+    @RequestContextData() ctx: RequestContext,
+    @Param('contactId') contactId: string,
+    @Param('companyContactId') companyContactId: string,
+    @Body() dto: UpdateContactCompanyLinkDto,
+  ) {
+    return this.agencyContactsService.patchCompanyLink(
+      ctx,
+      contactId,
+      companyContactId,
+      dto,
     );
   }
 

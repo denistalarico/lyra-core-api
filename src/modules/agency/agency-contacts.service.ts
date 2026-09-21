@@ -48,6 +48,7 @@ import { CreateContactTagDto } from '../contacts/dto/create-contact-tag.dto';
 import { PatchContactTagDto } from '../contacts/dto/patch-contact-tag.dto';
 import { CreateContactSegmentDto } from '../contacts/dto/create-contact-segment.dto';
 import { PatchContactSegmentDto } from '../contacts/dto/patch-contact-segment.dto';
+import { UpdateContactCompanyLinkDto } from '../contacts/dto/contact-company-link.dto';
 
 const AGENCY_CONNECTION = 'agency';
 
@@ -290,7 +291,10 @@ export class AgencyContactsService {
     });
   }
 
-  async createContactSource(ctx: RequestContext, dto: CreateAgencyContactSourceDto) {
+  async createContactSource(
+    ctx: RequestContext,
+    dto: CreateAgencyContactSourceDto,
+  ) {
     const workspaceId = this.requireWorkspaceId(ctx);
 
     const code = this.normalizeCode(dto.code);
@@ -453,6 +457,33 @@ export class AgencyContactsService {
     await this.findContactOrFail(ctx, contactId);
   }
 
+  private async assertPersonCompanyPair(
+    ctx: RequestContext,
+    personContactId: string,
+    companyContactId: string,
+  ) {
+    if (personContactId === companyContactId) {
+      throw new BadRequestException('A contact cannot be its own company.');
+    }
+
+    const [person, company] = await Promise.all([
+      this.findContactOrFail(ctx, personContactId),
+      this.findContactOrFail(ctx, companyContactId),
+    ]);
+    if (person.type !== 'person') {
+      throw new BadRequestException(
+        'The person side of a company relationship must be a person contact.',
+      );
+    }
+    if (company.type !== 'organization') {
+      throw new BadRequestException(
+        'The company side of a company relationship must be an organization contact.',
+      );
+    }
+
+    return { person, company };
+  }
+
   private normalizeLimit(value?: string) {
     const parsed = Number(value ?? 50);
     if (!Number.isFinite(parsed)) return 50;
@@ -555,10 +586,9 @@ export class AgencyContactsService {
       return existing;
     }
 
-    const baseName = (clientName?.trim() || `Cliente ${clientId.slice(0, 8)}`).slice(
-      0,
-      120,
-    );
+    const baseName = (
+      clientName?.trim() || `Cliente ${clientId.slice(0, 8)}`
+    ).slice(0, 120);
 
     const buildList = (name: string) =>
       this.listsRepo.create({
@@ -743,7 +773,17 @@ export class AgencyContactsService {
     const workspaceId = this.requireWorkspaceId(ctx);
 
     if (dto.companyContactId) {
-      await this.ensureContactExists(ctx, dto.companyContactId);
+      if (dto.type !== 'person') {
+        throw new BadRequestException(
+          'Only a person contact can be linked to a company.',
+        );
+      }
+      const company = await this.findContactOrFail(ctx, dto.companyContactId);
+      if (company.type !== 'organization') {
+        throw new BadRequestException(
+          'Company relationships require an organization contact.',
+        );
+      }
     }
 
     const source = dto.source ?? 'manual';
@@ -785,6 +825,9 @@ export class AgencyContactsService {
           workspaceId,
           personContactId: saved.id,
           companyContactId: dto.companyContactId,
+          role: null,
+          isPrimary: true,
+          status: 'active',
         }),
       );
     }
@@ -828,16 +871,26 @@ export class AgencyContactsService {
         where: { tenantId: ctx.tenantId, workspaceId, contactId },
       }),
       this.companyLinksRepo.find({
-        where: { tenantId: ctx.tenantId, workspaceId, companyContactId: contactId },
+        where: {
+          tenantId: ctx.tenantId,
+          workspaceId,
+          companyContactId: contactId,
+        },
         order: { createdAt: 'ASC' },
       }),
       this.companyLinksRepo.find({
-        where: { tenantId: ctx.tenantId, workspaceId, personContactId: contactId },
+        where: {
+          tenantId: ctx.tenantId,
+          workspaceId,
+          personContactId: contactId,
+        },
         order: { createdAt: 'ASC' },
       }),
     ]);
 
-    const relatedContactIds = companyLinksAsCompany.map((link) => link.personContactId);
+    const relatedContactIds = companyLinksAsCompany.map(
+      (link) => link.personContactId,
+    );
 
     const relatedContacts =
       relatedContactIds.length > 0
@@ -851,7 +904,9 @@ export class AgencyContactsService {
           })
         : [];
 
-    const relatedCompanyIds = companyLinksAsPerson.map((link) => link.companyContactId);
+    const relatedCompanyIds = companyLinksAsPerson.map(
+      (link) => link.companyContactId,
+    );
 
     const relatedCompanies =
       relatedCompanyIds.length > 0
@@ -982,13 +1037,15 @@ export class AgencyContactsService {
     dto: PatchContactDto,
   ) {
     const contact = await this.findContactOrFail(ctx, contactId);
+    const previousCompanyContactId = contact.companyContactId;
 
     if (dto.companyContactId !== undefined && dto.companyContactId !== null) {
-      if (dto.companyContactId === contactId) {
-        throw new BadRequestException('A contact cannot be its own company.');
+      if ((dto.type ?? contact.type) !== 'person') {
+        throw new BadRequestException(
+          'Only a person contact can be linked to a company.',
+        );
       }
-
-      await this.ensureContactExists(ctx, dto.companyContactId);
+      await this.assertPersonCompanyPair(ctx, contactId, dto.companyContactId);
       contact.companyContactId = dto.companyContactId;
     }
 
@@ -1024,7 +1081,10 @@ export class AgencyContactsService {
     }
     if (dto.businessMode !== undefined) contact.businessMode = dto.businessMode;
     if (dto.lifecycleStages !== undefined) {
-      const stages = dto.lifecycleStages.length > 0 ? dto.lifecycleStages : ['lead' as const];
+      const stages =
+        dto.lifecycleStages.length > 0
+          ? dto.lifecycleStages
+          : ['lead' as const];
       contact.lifecycleStages = stages;
       contact.lifecycleStage = stages[0];
     } else if (dto.lifecycleStage !== undefined) {
@@ -1037,7 +1097,38 @@ export class AgencyContactsService {
       contact.notes = this.nullableString(dto.notes);
     }
 
-    return this.contactsRepo.save(contact);
+    const saved = await this.contactsRepo.save(contact);
+
+    if (
+      dto.companyContactId !== undefined &&
+      dto.companyContactId !== previousCompanyContactId
+    ) {
+      if (previousCompanyContactId) {
+        await this.removeCompanyLink(ctx, contactId, previousCompanyContactId);
+      }
+      if (dto.companyContactId) {
+        const existing = await this.companyLinksRepo.findOne({
+          where: {
+            tenantId: ctx.tenantId,
+            workspaceId: this.requireWorkspaceId(ctx),
+            personContactId: contactId,
+            companyContactId: dto.companyContactId,
+          },
+        });
+        if (existing) {
+          await this.patchCompanyLink(ctx, contactId, dto.companyContactId, {
+            isPrimary: true,
+            status: 'active',
+          });
+        } else {
+          await this.addCompanyLink(ctx, contactId, dto.companyContactId, {
+            isPrimary: true,
+          });
+        }
+      }
+    }
+
+    return saved;
   }
 
   async deleteContact(ctx: RequestContext, contactId: string) {
@@ -1336,7 +1427,9 @@ export class AgencyContactsService {
       }),
     ]);
 
-    const tagIds = [...new Set(tagAssignments.map((assignment) => assignment.tagId))];
+    const tagIds = [
+      ...new Set(tagAssignments.map((assignment) => assignment.tagId)),
+    ];
     const tags =
       tagIds.length > 0
         ? await this.tagsRepo.find({
@@ -2247,9 +2340,22 @@ export class AgencyContactsService {
     const workspaceId = this.requireWorkspaceId(ctx);
 
     const remainingLinks = await this.companyLinksRepo.find({
-      where: { tenantId: ctx.tenantId, workspaceId, personContactId },
-      order: { createdAt: 'ASC' },
+      where: {
+        tenantId: ctx.tenantId,
+        workspaceId,
+        personContactId,
+        status: 'active',
+      },
+      order: { isPrimary: 'DESC', createdAt: 'ASC' },
     });
+
+    if (
+      remainingLinks.length > 0 &&
+      !remainingLinks.some((link) => link.isPrimary)
+    ) {
+      remainingLinks[0].isPrimary = true;
+      await this.companyLinksRepo.save(remainingLinks[0]);
+    }
 
     await this.contactsRepo.update(
       { id: personContactId, tenantId: ctx.tenantId, workspaceId },
@@ -2261,15 +2367,10 @@ export class AgencyContactsService {
     ctx: RequestContext,
     personContactId: string,
     companyContactId: string,
+    dto: UpdateContactCompanyLinkDto = {},
   ) {
     const workspaceId = this.requireWorkspaceId(ctx);
-
-    if (personContactId === companyContactId) {
-      throw new BadRequestException('A contact cannot be its own company.');
-    }
-
-    await this.findContactOrFail(ctx, personContactId);
-    await this.findContactOrFail(ctx, companyContactId);
+    await this.assertPersonCompanyPair(ctx, personContactId, companyContactId);
 
     const existing = await this.companyLinksRepo.findOne({
       where: {
@@ -2280,20 +2381,122 @@ export class AgencyContactsService {
       },
     });
 
-    if (!existing) {
-      await this.companyLinksRepo.save(
-        this.companyLinksRepo.create({
+    if (existing) {
+      throw new ConflictException('This person/company link already exists.');
+    }
+
+    const activeLinks = await this.companyLinksRepo.find({
+      where: {
+        tenantId: ctx.tenantId,
+        workspaceId,
+        personContactId,
+        status: 'active',
+      },
+    });
+    const nextStatus = dto.status ?? 'active';
+    const isPrimary =
+      nextStatus === 'active' &&
+      (activeLinks.length === 0 || dto.isPrimary === true);
+    if (isPrimary && activeLinks.length > 0) {
+      await this.companyLinksRepo.update(
+        {
           tenantId: ctx.tenantId,
           workspaceId,
           personContactId,
-          companyContactId,
-        }),
+          isPrimary: true,
+        },
+        { isPrimary: false },
       );
-
-      await this.syncPrimaryCompany(ctx, personContactId);
     }
 
-    return { linked: true };
+    const saved = await this.companyLinksRepo.save(
+      this.companyLinksRepo.create({
+        tenantId: ctx.tenantId,
+        workspaceId,
+        personContactId,
+        companyContactId,
+        role: dto.role ?? null,
+        isPrimary,
+        status: nextStatus,
+      }),
+    );
+
+    await this.syncPrimaryCompany(ctx, personContactId);
+    return saved;
+  }
+
+  async listCompanyLinks(ctx: RequestContext, personContactId: string) {
+    const workspaceId = this.requireWorkspaceId(ctx);
+    const person = await this.findContactOrFail(ctx, personContactId);
+    if (person.type !== 'person') {
+      throw new BadRequestException(
+        'Company relationships can only be listed for a person contact.',
+      );
+    }
+
+    const links = await this.companyLinksRepo.find({
+      where: { tenantId: ctx.tenantId, workspaceId, personContactId },
+      order: { isPrimary: 'DESC', createdAt: 'ASC' },
+    });
+    const companies = links.length
+      ? await this.contactsRepo.find({
+          where: {
+            tenantId: ctx.tenantId,
+            workspaceId,
+            id: In(links.map((link) => link.companyContactId)),
+          },
+        })
+      : [];
+    const byId = new Map(companies.map((company) => [company.id, company]));
+
+    return links.flatMap((link) => {
+      const company = byId.get(link.companyContactId);
+      return company ? [{ ...link, company }] : [];
+    });
+  }
+
+  async patchCompanyLink(
+    ctx: RequestContext,
+    personContactId: string,
+    companyContactId: string,
+    dto: UpdateContactCompanyLinkDto,
+  ) {
+    const workspaceId = this.requireWorkspaceId(ctx);
+    await this.assertPersonCompanyPair(ctx, personContactId, companyContactId);
+    const link = await this.companyLinksRepo.findOne({
+      where: {
+        tenantId: ctx.tenantId,
+        workspaceId,
+        personContactId,
+        companyContactId,
+      },
+    });
+    if (!link) throw new NotFoundException('Person/company link not found.');
+
+    if (dto.isPrimary === true) {
+      await this.companyLinksRepo.update(
+        {
+          tenantId: ctx.tenantId,
+          workspaceId,
+          personContactId,
+          isPrimary: true,
+        },
+        { isPrimary: false },
+      );
+      link.isPrimary = true;
+      link.status = 'active';
+    } else if (dto.isPrimary === false) {
+      link.isPrimary = false;
+    }
+    if (dto.role !== undefined) link.role = dto.role;
+    if (dto.status !== undefined) {
+      link.status = dto.status;
+      if (dto.status !== 'active') link.isPrimary = false;
+    }
+
+    const saved = await this.companyLinksRepo.save(link);
+    await this.syncPrimaryCompany(ctx, personContactId);
+    return saved;
   }
 
   async removeCompanyLink(

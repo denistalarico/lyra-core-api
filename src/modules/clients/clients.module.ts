@@ -6,11 +6,20 @@ import { FinanceCostCenter } from '../finance/entities';
 import { NotificationsModule } from '../notifications';
 import { PermissionsModule } from '../permissions';
 import { TenantProductEntitlementEntity } from '../platform/entities/tenant-product-entitlement.entity';
+import { ContactCompanyLinkEntity } from '../contacts/entities/contact-company-link.entity';
+import { ContactEntity } from '../contacts/entities/contact.entity';
 import { AgencyProject, AgencyTask } from '../projects/entities';
 import { TeamConfigOption } from '../team/entities';
 import { ClientLifecycleController } from './controllers/client-lifecycle.controller';
+import { ClientCompaniesController } from './controllers/client-companies.controller';
 import { ClientsController } from './controllers/clients.controller';
-import { AgencyClient, ClientLifecycleProcess, ClientLifecycleStep } from './entities';
+import {
+  AgencyClient,
+  AgencyClientCompanyContext,
+  ClientLifecycleProcess,
+  ClientLifecycleStep,
+} from './entities';
+import { AgencyClientCompanyContextService } from './services/agency-client-company-context.service';
 import { ClientCostCenterService } from './services/client-cost-center.service';
 import { ClientLifecycleService } from './services/client-lifecycle.service';
 import { ClientNotificationPublisher } from './services/client-notification.publisher';
@@ -27,6 +36,9 @@ const AGENCY_CONNECTION = 'agency';
     TypeOrmModule.forFeature(
       [
         AgencyClient,
+        AgencyClientCompanyContext,
+        ContactEntity,
+        ContactCompanyLinkEntity,
         AgencyProject,
         AgencyTask,
         AgencyActivity,
@@ -40,14 +52,23 @@ const AGENCY_CONNECTION = 'agency';
       AGENCY_CONNECTION,
     ),
   ],
-  controllers: [ClientsController, ClientLifecycleController],
+  controllers: [
+    ClientsController,
+    ClientCompaniesController,
+    ClientLifecycleController,
+  ],
   providers: [
     ClientsService,
+    AgencyClientCompanyContextService,
     ClientsProfitabilityService,
     ClientNotificationPublisher,
     ClientLifecycleService,
     ClientCostCenterService,
   ],
-  exports: [ClientsService, ClientsProfitabilityService, ClientCostCenterService],
+  exports: [
+    ClientsService,
+    ClientsProfitabilityService,
+    ClientCostCenterService,
+  ],
 })
 export class ClientsModule {}
