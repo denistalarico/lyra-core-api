@@ -22,11 +22,13 @@ export type SocialPlanStatus =
   'tenantId',
   'workspaceId',
   'agencyClientId',
+  'companyContextId',
 ])
 @Index('IDX_social_plans_period', [
   'tenantId',
   'workspaceId',
   'agencyClientId',
+  'companyContextId',
   'periodStart',
   'periodEnd',
 ])
@@ -54,6 +56,9 @@ export class SocialPlanEntity {
    */
   @Column({ name: 'agency_client_id', type: 'uuid', nullable: true })
   agencyClientId!: string | null;
+
+  @Column({ name: 'company_context_id', type: 'uuid', nullable: true })
+  companyContextId!: string | null;
 
   @Column({ type: 'varchar', length: 240 })
   title!: string;

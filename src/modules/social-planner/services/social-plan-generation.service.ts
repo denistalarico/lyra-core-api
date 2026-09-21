@@ -491,6 +491,8 @@ export class SocialPlanGenerationService {
         workspaceId: scope.workspaceId,
         agencyClientId:
           scope.agencyClientId === null ? IsNull() : scope.agencyClientId,
+        companyContextId:
+          scope.companyContextId === null ? IsNull() : scope.companyContextId,
       },
     });
 

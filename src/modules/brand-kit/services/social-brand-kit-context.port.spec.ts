@@ -37,15 +37,13 @@ describe('SocialBrandKitContextPort', () => {
   it('returns normalized visual context without storage capabilities', async () => {
     const kits = { findOne: jest.fn().mockResolvedValue(kit) };
     const assets = { find: jest.fn().mockResolvedValue([asset]) };
-    const port = new SocialBrandKitContextPort(
-      kits as never,
-      assets as never,
-    );
+    const port = new SocialBrandKitContextPort(kits as never, assets as never);
 
     const result = await port.load({
       tenantId: 'tenant-a',
       workspaceId: 'workspace-a',
       agencyClientId: null,
+      companyContextId: null,
     });
 
     expect(result).toMatchObject({
@@ -76,15 +74,13 @@ describe('SocialBrandKitContextPort', () => {
   it('scopes agency and client reads by tenant, workspace and nullable client id', async () => {
     const kits = { findOne: jest.fn().mockResolvedValue(kit) };
     const assets = { find: jest.fn().mockResolvedValue([]) };
-    const port = new SocialBrandKitContextPort(
-      kits as never,
-      assets as never,
-    );
+    const port = new SocialBrandKitContextPort(kits as never, assets as never);
 
     await port.load({
       tenantId: 'tenant-a',
       workspaceId: 'workspace-a',
       agencyClientId: null,
+      companyContextId: null,
     });
     expect(kits.findOne.mock.calls[0][0].where).toMatchObject({
       tenantId: 'tenant-a',
@@ -96,11 +92,13 @@ describe('SocialBrandKitContextPort', () => {
       tenantId: 'tenant-b',
       workspaceId: 'workspace-b',
       agencyClientId: 'client-b',
+      companyContextId: 'company-b',
     });
     expect(kits.findOne.mock.calls[1][0].where).toEqual({
       tenantId: 'tenant-b',
       workspaceId: 'workspace-b',
       agencyClientId: 'client-b',
+      companyContextId: 'company-b',
     });
     expect(assets.find.mock.calls[1][0].where).toMatchObject({
       tenantId: 'tenant-b',
@@ -111,23 +109,25 @@ describe('SocialBrandKitContextPort', () => {
   });
 
   it('applies typed kind and usage filters and returns empty defaults without a kit', async () => {
-    const kits = { findOne: jest.fn().mockResolvedValueOnce(kit).mockResolvedValueOnce(null) };
+    const kits = {
+      findOne: jest.fn().mockResolvedValueOnce(kit).mockResolvedValueOnce(null),
+    };
     const assets = { find: jest.fn().mockResolvedValue([]) };
-    const port = new SocialBrandKitContextPort(
-      kits as never,
-      assets as never,
-    );
+    const port = new SocialBrandKitContextPort(kits as never, assets as never);
     const scope = {
       tenantId: 'tenant-a',
       workspaceId: 'workspace-a',
       agencyClientId: null,
+      companyContextId: null,
     };
 
     await port.load(scope, { kind: ['product', 'person'], usage: 'asset' });
     expect(assets.find.mock.calls[0][0].where.kind._type).toBe('in');
     expect(assets.find.mock.calls[0][0].where.usage).toBe('asset');
 
-    await expect(port.load(scope, { kind: 'reference', usage: 'reference' })).resolves.toEqual({
+    await expect(
+      port.load(scope, { kind: 'reference', usage: 'reference' }),
+    ).resolves.toEqual({
       brandKitId: null,
       palette: [],
       typography: [],

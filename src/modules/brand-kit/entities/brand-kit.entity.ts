@@ -49,10 +49,24 @@ import {
   where: 'agency_client_id IS NULL',
 })
 @Index(
-  'UQ_brand_kits_client_scope',
-  ['tenantId', 'workspaceId', 'agencyClientId'],
-  { unique: true, where: 'agency_client_id IS NOT NULL' },
+  'UQ_brand_kits_company_scope',
+  ['tenantId', 'workspaceId', 'agencyClientId', 'companyContextId'],
+  { unique: true, where: 'company_context_id IS NOT NULL' },
 )
+@Index(
+  'UQ_brand_kits_legacy_scope',
+  ['tenantId', 'workspaceId', 'agencyClientId'],
+  {
+    unique: true,
+    where: 'agency_client_id IS NOT NULL AND company_context_id IS NULL',
+  },
+)
+@Index('IDX_brand_kits_scope', [
+  'tenantId',
+  'workspaceId',
+  'agencyClientId',
+  'companyContextId',
+])
 @Entity('brand_kits')
 export class BrandKitEntity {
   @PrimaryGeneratedColumn('uuid')
@@ -67,6 +81,9 @@ export class BrandKitEntity {
   /** `NULL` = the agency's own Brand Kit; otherwise a managed client's. */
   @Column({ name: 'agency_client_id', type: 'uuid', nullable: true })
   agencyClientId!: string | null;
+
+  @Column({ name: 'company_context_id', type: 'uuid', nullable: true })
+  companyContextId!: string | null;
 
   /**
    * `[{ role, hex, label }]`. Structured rather than free text so a future

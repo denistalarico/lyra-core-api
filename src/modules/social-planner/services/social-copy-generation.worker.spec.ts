@@ -4,7 +4,7 @@
  * being checked: the exact status, lease and cost the worker writes.
  */
 import type { DataSource } from 'typeorm';
-import type { SocialCopyGenerationRunEntity } from '../entities';
+import { SocialCopyGenerationRunEntity, SocialPlanEntity } from '../entities';
 import type { SocialCopyGenerationConfigService } from './social-copy-generation-config.service';
 import type { SocialCopyGenerationProvider } from './social-copy-generation-provider';
 import type {
@@ -61,6 +61,7 @@ describe('SocialCopyGenerationWorker', () => {
     save: jest.Mock;
   };
   let transactionRepository: { findOne: jest.Mock; save: jest.Mock };
+  let plansRepository: { findOne: jest.Mock };
   let claimQuery: jest.Mock;
   let claimUpdate: jest.Mock;
   let dataSource: DataSource;
@@ -104,6 +105,14 @@ describe('SocialCopyGenerationWorker', () => {
       findOne: jest.fn(() => Promise.resolve(null)),
       save: jest.fn((value: unknown) => Promise.resolve(value)),
     };
+    plansRepository = {
+      findOne: jest.fn(() =>
+        Promise.resolve({
+          id: '44444444-4444-4444-8444-444444444444',
+          companyContextId: null,
+        }),
+      ),
+    };
 
     /**
      * The claim runs raw SQL and a query-builder update on the transaction
@@ -120,7 +129,9 @@ describe('SocialCopyGenerationWorker', () => {
     claimUpdate = updateBuilder.set as jest.Mock;
 
     dataSource = {
-      getRepository: jest.fn(() => runsRepository),
+      getRepository: jest.fn((entity: unknown) =>
+        entity === SocialPlanEntity ? plansRepository : runsRepository,
+      ),
       transaction: jest.fn(async (callback: (manager: unknown) => unknown) =>
         callback({
           getRepository: () => transactionRepository,

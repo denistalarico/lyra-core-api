@@ -51,12 +51,14 @@ const agencyScope: SocialPlannerScope = {
   tenantId: TENANT_ID,
   workspaceId: WORKSPACE_ID,
   agencyClientId: null,
+  companyContextId: null,
 };
 
 const clientScope: SocialPlannerScope = {
   tenantId: TENANT_ID,
   workspaceId: WORKSPACE_ID,
   agencyClientId: CLIENT_ID,
+  companyContextId: '44444444-4444-4444-8444-444444444444',
 };
 
 function buildContentItem(
@@ -149,6 +151,14 @@ describe('SocialContentLifecycleService', () => {
 
     contentRepository = createRepositoryMock();
     plansRepository = createRepositoryMock();
+    plansRepository.findOne.mockResolvedValue({
+      id: PLAN_ID,
+      tenantId: TENANT_ID,
+      workspaceId: WORKSPACE_ID,
+      agencyClientId: CLIENT_ID,
+      companyContextId: clientScope.companyContextId,
+      deletedAt: null,
+    });
     destinationsRepository = createRepositoryMock();
     creativesRepository = createRepositoryMock();
     guard = new SocialContentPublicationGuard();

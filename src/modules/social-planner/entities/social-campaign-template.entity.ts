@@ -20,6 +20,7 @@ import {
   'tenantId',
   'workspaceId',
   'agencyClientId',
+  'companyContextId',
 ])
 @Check(
   'CK_social_campaign_templates_pillars_array',
@@ -45,6 +46,9 @@ export class SocialCampaignTemplateEntity {
    */
   @Column({ name: 'agency_client_id', type: 'uuid', nullable: true })
   agencyClientId!: string | null;
+
+  @Column({ name: 'company_context_id', type: 'uuid', nullable: true })
+  companyContextId!: string | null;
 
   @Column({ type: 'varchar', length: 240 })
   name!: string;

@@ -18,6 +18,7 @@ import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { createHash, randomUUID } from 'node:crypto';
 import { DataSource, IsNull, Repository } from 'typeorm';
 import type { RequestContext } from '../../../common/context/request-context.interface';
+import { resolveCompanyAwareScope } from '../../../common/context/company-aware-scope';
 import { FilesService } from '../../../common/files/files.service';
 import { BrandKitAssetEntity, BrandKitEntity } from '../entities';
 import type {
@@ -45,6 +46,7 @@ type BrandKitScope = {
   tenantId: string;
   workspaceId: string;
   agencyClientId: string | null;
+  companyContextId: string | null;
 };
 
 export type BrandKitAssetUpload = {
@@ -77,23 +79,19 @@ export class BrandKitService {
    * A missing kit is reported as empty defaults with `id: null`, which the
    * editor renders as a blank state.
    */
-  async getBrandKit(
-    ctx: RequestContext,
-    agencyClientId: string | null,
-  ): Promise<BrandKitResponse> {
-    const scope = this.resolveScope(ctx, agencyClientId);
+  async getBrandKit(ctx: RequestContext): Promise<BrandKitResponse> {
+    const scope = this.resolveScope(ctx);
     const kit = await this.findKit(scope);
     const assets = kit ? await this.listKitAssets(kit.id, scope) : [];
 
-    return mapBrandKitResponse(kit, assets, agencyClientId);
+    return mapBrandKitResponse(kit, assets, scope.agencyClientId);
   }
 
   async updateBrandKit(
     ctx: RequestContext,
-    agencyClientId: string | null,
     dto: UpdateBrandKitDto,
   ): Promise<BrandKitResponse> {
-    const scope = this.resolveScope(ctx, agencyClientId);
+    const scope = this.resolveScope(ctx);
     const kit = await this.ensureKit(scope, ctx.userId ?? null);
 
     // Only keys actually present are written. Assigning the whole DTO would
@@ -122,14 +120,11 @@ export class BrandKitService {
     const saved = await this.kits.save(kit);
     const assets = await this.listKitAssets(saved.id, scope);
 
-    return mapBrandKitResponse(saved, assets, agencyClientId);
+    return mapBrandKitResponse(saved, assets, scope.agencyClientId);
   }
 
-  async listAssets(
-    ctx: RequestContext,
-    agencyClientId: string | null,
-  ): Promise<BrandKitAssetResponse[]> {
-    const scope = this.resolveScope(ctx, agencyClientId);
+  async listAssets(ctx: RequestContext): Promise<BrandKitAssetResponse[]> {
+    const scope = this.resolveScope(ctx);
     const kit = await this.findKit(scope);
     if (!kit) return [];
 
@@ -150,7 +145,6 @@ export class BrandKitService {
    */
   async uploadAsset(
     ctx: RequestContext,
-    agencyClientId: string | null,
     input: {
       file: BrandKitAssetUpload;
       kind: BrandKitAssetKind;
@@ -159,7 +153,7 @@ export class BrandKitService {
       theme?: BrandKitAssetTheme | null;
     },
   ): Promise<BrandKitAssetResponse> {
-    const scope = this.resolveScope(ctx, agencyClientId);
+    const scope = this.resolveScope(ctx);
     const file = input.file;
 
     if (!file?.buffer?.length) {
@@ -237,12 +231,8 @@ export class BrandKitService {
    * id that never existed, so the endpoint never confirms that someone
    * else's asset is real (§13/§26).
    */
-  async getAssetContent(
-    ctx: RequestContext,
-    agencyClientId: string | null,
-    assetId: string,
-  ) {
-    const asset = await this.findScopedAsset(ctx, agencyClientId, assetId);
+  async getAssetContent(ctx: RequestContext, assetId: string) {
+    const asset = await this.findScopedAsset(ctx, assetId);
     const file = await this.filesService.getPrivateAsset(asset.storagePath);
 
     return { asset, file };
@@ -272,14 +262,10 @@ export class BrandKitService {
    * same DELETE resumes from the tombstone (see `findScopedAsset`'s
    * `includeDeleted`).
    */
-  async deleteAsset(
-    ctx: RequestContext,
-    agencyClientId: string | null,
-    assetId: string,
-  ): Promise<void> {
+  async deleteAsset(ctx: RequestContext, assetId: string): Promise<void> {
     // A retry must find the asset it already tombstoned, so deleted rows are
     // in scope *here only* — every other read path excludes them.
-    const asset = await this.findScopedAsset(ctx, agencyClientId, assetId, {
+    const asset = await this.findScopedAsset(ctx, assetId, {
       includeDeleted: true,
     });
 
@@ -312,20 +298,25 @@ export class BrandKitService {
    */
   private async findScopedAsset(
     ctx: RequestContext,
-    agencyClientId: string | null,
     assetId: string,
     options: { includeDeleted?: boolean } = {},
   ): Promise<BrandKitAssetEntity> {
-    const scope = this.resolveScope(ctx, agencyClientId);
+    const scope = this.resolveScope(ctx);
 
     // Guards against a malformed id reaching the driver as a cast error.
     if (!UUID_PATTERN.test(assetId)) {
       throw new NotFoundException('Asset not found.');
     }
 
+    const kit = await this.findKit(scope);
+    if (!kit) {
+      throw new NotFoundException('Asset not found.');
+    }
+
     const asset = await this.assets.findOne({
       where: {
         id: assetId,
+        brandKitId: kit.id,
         tenantId: scope.tenantId,
         workspaceId: scope.workspaceId,
         agencyClientId: scope.agencyClientId ?? IsNull(),
@@ -366,6 +357,7 @@ export class BrandKitService {
         tenantId: scope.tenantId,
         workspaceId: scope.workspaceId,
         agencyClientId: scope.agencyClientId,
+        companyContextId: scope.companyContextId,
         palette: [],
         typography: [],
         guidelines: null,
@@ -393,6 +385,7 @@ export class BrandKitService {
         tenantId: scope.tenantId,
         workspaceId: scope.workspaceId,
         agencyClientId: scope.agencyClientId ?? IsNull(),
+        companyContextId: scope.companyContextId ?? IsNull(),
       },
     });
   }
@@ -420,22 +413,8 @@ export class BrandKitService {
     });
   }
 
-  private resolveScope(
-    ctx: RequestContext,
-    agencyClientId: string | null,
-  ): BrandKitScope {
-    if (!ctx.tenantId) {
-      throw new BadRequestException('Tenant context is required.');
-    }
-    if (!ctx.workspaceId) {
-      throw new BadRequestException('Workspace context is required.');
-    }
-
-    return {
-      tenantId: ctx.tenantId,
-      workspaceId: ctx.workspaceId,
-      agencyClientId,
-    };
+  private resolveScope(ctx: RequestContext): BrandKitScope {
+    return resolveCompanyAwareScope(ctx);
   }
 
   /**

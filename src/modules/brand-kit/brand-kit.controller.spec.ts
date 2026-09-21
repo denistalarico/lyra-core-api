@@ -20,6 +20,7 @@ const WORKSPACE_ID = '00000000-0000-4000-8000-000000000002';
 const USER_ID = '00000000-0000-4000-8000-000000000003';
 const CLIENT_ID = '00000000-0000-4000-8000-000000000004';
 const ASSET_ID = '00000000-0000-4000-8000-000000000005';
+const COMPANY_CONTEXT_ID = '00000000-0000-4000-8000-000000000006';
 
 const VIEW = 'social.brandkit.asset.view.client';
 const MANAGE = 'social.brandkit.assets.manage.manager_or_admin';
@@ -79,6 +80,7 @@ describe('/brand-kit — product-bound authorization', () => {
           productKey,
           operatingMode: clientId ? 'client' : 'agency',
           clientId,
+          companyContextId: clientId ? COMPANY_CONTEXT_ID : null,
           managedTenantId: null,
         };
         return true;
@@ -267,7 +269,7 @@ describe('/brand-kit — product-bound authorization', () => {
   });
 
   describe('scope comes from the resolved context', () => {
-    it('agency mode passes a null client id', async () => {
+    it('agency mode passes the resolved agency context only', async () => {
       assertCan.mockImplementation(assertCanHolding(VIEW));
       app = await buildApp('social', null);
 
@@ -275,10 +277,17 @@ describe('/brand-kit — product-bound authorization', () => {
         .get('/brand-kit')
         .expect(200);
 
-      expect(getBrandKit).toHaveBeenCalledWith(expect.anything(), null);
+      expect(getBrandKit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          managedContext: expect.objectContaining({
+            clientId: null,
+            companyContextId: null,
+          }),
+        }),
+      );
     });
 
-    it('client mode passes exactly the client the guard resolved', async () => {
+    it('client mode passes exactly the client/company pair the guard resolved', async () => {
       assertCan.mockImplementation(assertCanHolding(VIEW));
       app = await buildApp('social', CLIENT_ID);
 
@@ -286,7 +295,14 @@ describe('/brand-kit — product-bound authorization', () => {
         .get('/brand-kit')
         .expect(200);
 
-      expect(getBrandKit).toHaveBeenCalledWith(expect.anything(), CLIENT_ID);
+      expect(getBrandKit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          managedContext: expect.objectContaining({
+            clientId: CLIENT_ID,
+            companyContextId: COMPANY_CONTEXT_ID,
+          }),
+        }),
+      );
     });
 
     it('a client id in the body is rejected outright — scope is never taken from the payload', async () => {
@@ -314,8 +330,12 @@ describe('/brand-kit — product-bound authorization', () => {
         .expect(200);
 
       expect(updateBrandKit).toHaveBeenCalledWith(
-        expect.anything(),
-        CLIENT_ID,
+        expect.objectContaining({
+          managedContext: expect.objectContaining({
+            clientId: CLIENT_ID,
+            companyContextId: COMPANY_CONTEXT_ID,
+          }),
+        }),
         { guidelines: 'x' },
       );
     });

@@ -30,6 +30,7 @@ export interface SocialPlannerScope {
   tenantId: string;
   workspaceId: string;
   agencyClientId: string | null;
+  companyContextId: string | null;
 }
 
 @Injectable()
@@ -81,6 +82,7 @@ export class SocialPlannerService {
       tenantId: scope.tenantId,
       workspaceId: scope.workspaceId,
       agencyClientId: scope.agencyClientId,
+      companyContextId: scope.companyContextId,
       title: dto.title.trim(),
       periodStart: dto.periodStart,
       periodEnd: dto.periodEnd,
@@ -452,6 +454,7 @@ export class SocialPlannerService {
       if (!item) {
         throw new NotFoundException('Social content item not found.');
       }
+      await this.requirePlan(scope, item.planId);
 
       const latestRevision = await revisionsRepository.findOne({
         where: {
@@ -562,6 +565,7 @@ export class SocialPlannerService {
       if (!item) {
         throw new NotFoundException('Social content item not found.');
       }
+      await this.requirePlan(scope, item.planId);
 
       const sourceRevision = await revisionsRepository.findOne({
         where: {
@@ -670,6 +674,8 @@ export class SocialPlannerService {
       throw new NotFoundException('Social content item not found.');
     }
 
+    await this.requirePlan(scope, item.planId);
+
     return item;
   }
 
@@ -719,6 +725,8 @@ export class SocialPlannerService {
       workspaceId: scope.workspaceId,
       agencyClientId:
         scope.agencyClientId === null ? IsNull() : scope.agencyClientId,
+      companyContextId:
+        scope.companyContextId === null ? IsNull() : scope.companyContextId,
       deletedAt: IsNull(),
     };
   }

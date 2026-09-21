@@ -13,6 +13,8 @@ const WORKSPACE_ID = 'b9c311c3-96e9-4bc4-b2a4-f02763063b1b';
 const USER_ID = 'c821ac23-bf9f-46aa-87b9-fe1b34351941';
 const CLIENT_A = '2f0f1f4a-8f77-4a2f-9a6a-0f6f0b1c2d3e';
 const CLIENT_B = '7b8c9d0e-1f2a-4b3c-8d4e-5f6a7b8c9d0e';
+const COMPANY_A = '8a111111-1111-4111-8111-111111111111';
+const COMPANY_B = '8b222222-2222-4222-8222-222222222222';
 const ASSET_ID = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
 
 /** A buffer of exactly `size` bytes that really starts with the PNG signature. */
@@ -63,6 +65,7 @@ type KitRow = {
   tenantId: string;
   workspaceId: string;
   agencyClientId: string | null;
+  companyContextId: string | null;
   palette: unknown[];
   typography: unknown[];
   guidelines: string | null;
@@ -168,14 +171,17 @@ function createFixture(
         withDeleted?: boolean;
       }) => Promise.resolve(visible(assetRows, where, withDeleted)[0] ?? null),
     ),
-    create: jest.fn((value: Partial<AssetRow>) => ({
-      ...value,
-      usage:
-        value.usage ?? (value.kind === 'reference' ? 'reference' : 'asset'),
-      deletedAt: null,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    }) as AssetRow),
+    create: jest.fn(
+      (value: Partial<AssetRow>) =>
+        ({
+          ...value,
+          usage:
+            value.usage ?? (value.kind === 'reference' ? 'reference' : 'asset'),
+          deletedAt: null,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        }) as AssetRow,
+    ),
     save: jest.fn((row: AssetRow) => {
       if (options.failAssetSave) {
         return Promise.reject(new Error('db write failed'));
@@ -225,7 +231,8 @@ function createFixture(
         (row) =>
           row.tenantId === value.tenantId &&
           row.workspaceId === value.workspaceId &&
-          row.agencyClientId === (value.agencyClientId ?? null),
+          row.agencyClientId === (value.agencyClientId ?? null) &&
+          row.companyContextId === (value.companyContextId ?? null),
       );
       if (!conflict) {
         kitRows.push({
@@ -233,6 +240,7 @@ function createFixture(
           tenantId: value.tenantId!,
           workspaceId: value.workspaceId!,
           agencyClientId: value.agencyClientId ?? null,
+          companyContextId: value.companyContextId ?? null,
           palette: [],
           typography: [],
           guidelines: null,
@@ -264,6 +272,8 @@ function createFixture(
 function contextFor(
   productKey: 'social' | 'leadflow' = 'social',
   tenantId = TENANT_ID,
+  clientId: string | null = null,
+  companyContextId?: string | null,
 ) {
   return {
     tenantId,
@@ -272,9 +282,17 @@ function contextFor(
     role: 'owner',
     managedContext: {
       productKey,
-      operatingMode: 'agency' as const,
-      clientId: null,
-      managedTenantId: null,
+      operatingMode: clientId ? ('client' as const) : ('agency' as const),
+      clientId,
+      companyContextId:
+        companyContextId === undefined
+          ? clientId === CLIENT_A
+            ? COMPANY_A
+            : clientId === CLIENT_B
+              ? COMPANY_B
+              : null
+          : companyContextId,
+      managedTenantId: clientId ? 'managed-tenant' : null,
     },
   };
 }
@@ -286,7 +304,7 @@ describe('BrandKitService', () => {
     it('returns empty defaults for a scope that has no Brand Kit, and writes nothing', async () => {
       const fixture = createFixture();
 
-      const result = await fixture.service.getBrandKit(contextFor(), null);
+      const result = await fixture.service.getBrandKit(contextFor());
 
       expect(result.id).toBeNull();
       expect(result.palette).toEqual([]);
@@ -297,7 +315,7 @@ describe('BrandKitService', () => {
 
     it('never exposes the storage path in a response', async () => {
       const fixture = createFixture();
-      await fixture.service.uploadAsset(contextFor(), null, {
+      await fixture.service.uploadAsset(contextFor(), {
         file: {
           buffer: pngBuffer(),
           originalname: 'logo.png',
@@ -306,7 +324,7 @@ describe('BrandKitService', () => {
         kind: 'logo',
       });
 
-      const result = await fixture.service.getBrandKit(contextFor(), null);
+      const result = await fixture.service.getBrandKit(contextFor());
       const serialized = JSON.stringify(result);
 
       // The stored key must not leak. `contentPath` legitimately starts with
@@ -327,7 +345,7 @@ describe('BrandKitService', () => {
     it('PATCH creates the kit when absent', async () => {
       const fixture = createFixture();
 
-      const result = await fixture.service.updateBrandKit(contextFor(), null, {
+      const result = await fixture.service.updateBrandKit(contextFor(), {
         guidelines: 'Nunca distorcer a marca.',
       });
 
@@ -340,8 +358,8 @@ describe('BrandKitService', () => {
       const fixture = createFixture();
 
       await Promise.all([
-        fixture.service.updateBrandKit(contextFor(), null, { guidelines: 'a' }),
-        fixture.service.updateBrandKit(contextFor(), null, { guidelines: 'b' }),
+        fixture.service.updateBrandKit(contextFor(), { guidelines: 'a' }),
+        fixture.service.updateBrandKit(contextFor(), { guidelines: 'b' }),
       ]);
 
       expect(fixture.kitRows).toHaveLength(1);
@@ -350,31 +368,58 @@ describe('BrandKitService', () => {
     it('agency and client kits are separate rows in the same tenant', async () => {
       const fixture = createFixture();
 
-      await fixture.service.updateBrandKit(contextFor(), null, {
+      await fixture.service.updateBrandKit(contextFor(), {
         guidelines: 'agency',
       });
-      await fixture.service.updateBrandKit(contextFor(), CLIENT_A, {
-        guidelines: 'client a',
-      });
-      await fixture.service.updateBrandKit(contextFor(), CLIENT_B, {
-        guidelines: 'client b',
-      });
+      await fixture.service.updateBrandKit(
+        contextFor('social', TENANT_ID, CLIENT_A),
+        {
+          guidelines: 'client a',
+        },
+      );
+      await fixture.service.updateBrandKit(
+        contextFor('social', TENANT_ID, CLIENT_B),
+        {
+          guidelines: 'client b',
+        },
+      );
 
       expect(fixture.kitRows).toHaveLength(3);
       expect(
         fixture.kitRows.filter((row) => row.agencyClientId === null),
       ).toHaveLength(1);
     });
+
+    it('keeps two companies of the same managed client in separate kits', async () => {
+      const fixture = createFixture();
+      const companyA = contextFor('social', TENANT_ID, CLIENT_A, COMPANY_A);
+      const companyB = contextFor('social', TENANT_ID, CLIENT_A, COMPANY_B);
+
+      await fixture.service.updateBrandKit(companyA, {
+        guidelines: 'company a',
+      });
+      await fixture.service.updateBrandKit(companyB, {
+        guidelines: 'company b',
+      });
+
+      expect(fixture.kitRows).toHaveLength(2);
+      expect((await fixture.service.getBrandKit(companyA)).guidelines).toBe(
+        'company a',
+      );
+      expect((await fixture.service.getBrandKit(companyB)).guidelines).toBe(
+        'company b',
+      );
+    });
   });
 
   describe('partial update never blanks an omitted field', () => {
     it('a palette-only PATCH keeps the stored guidelines', async () => {
       const fixture = createFixture();
-      await fixture.service.updateBrandKit(contextFor(), null, {
+      await fixture.service.updateBrandKit(contextFor(), {
         guidelines: 'texto original',
       });
 
-      const result = await fixture.service.updateBrandKit(contextFor(), null, {
+      const result = await fixture.service.updateBrandKit(contextFor(), {
         palette: [{ role: 'primary', hex: '#112233' }],
       });
 
@@ -389,7 +434,7 @@ describe('BrandKitService', () => {
     it('writes the binary to the private bucket under a server-built key', async () => {
       const fixture = createFixture();
 
-      const asset = await fixture.service.uploadAsset(contextFor(), null, {
+      const asset = await fixture.service.uploadAsset(contextFor(), {
         file: {
           buffer: pngBuffer(),
           originalname: '../../evil name.png',
@@ -414,14 +459,17 @@ describe('BrandKitService', () => {
     it('persists the metadata row alongside the object', async () => {
       const fixture = createFixture();
 
-      await fixture.service.uploadAsset(contextFor(), CLIENT_A, {
-        file: {
-          buffer: pngBuffer(64),
-          originalname: 'logo.png',
-          mimetype: 'image/png',
+      await fixture.service.uploadAsset(
+        contextFor('social', TENANT_ID, CLIENT_A),
+        {
+          file: {
+            buffer: pngBuffer(64),
+            originalname: 'logo.png',
+            mimetype: 'image/png',
+          },
+          kind: 'logo',
         },
-        kind: 'logo',
-      });
+      );
 
       expect(fixture.assetRows).toHaveLength(1);
       expect(fixture.assetRows[0]).toMatchObject({
@@ -436,7 +484,7 @@ describe('BrandKitService', () => {
     it('drops variant/theme on a reference — they describe a logo only', async () => {
       const fixture = createFixture();
 
-      const asset = await fixture.service.uploadAsset(contextFor(), null, {
+      const asset = await fixture.service.uploadAsset(contextFor(), {
         file: {
           buffer: pngBuffer(),
           originalname: 'ref.png',
@@ -465,15 +513,18 @@ describe('BrandKitService', () => {
 
       for (const kind of kinds) {
         const fixture = createFixture();
-        const asset = await fixture.service.uploadAsset(contextFor(), CLIENT_A, {
-          file: {
-            buffer: pngBuffer(),
-            originalname: `${kind}.png`,
-            mimetype: 'image/png',
+        const asset = await fixture.service.uploadAsset(
+          contextFor('social', TENANT_ID, CLIENT_A),
+          {
+            file: {
+              buffer: pngBuffer(),
+              originalname: `${kind}.png`,
+              mimetype: 'image/png',
+            },
+            kind,
+            label: ' Material real ',
           },
-          kind,
-          label: ' Material real ',
-        });
+        );
 
         expect(asset).toMatchObject({
           kind,
@@ -490,7 +541,7 @@ describe('BrandKitService', () => {
       const fixture = createFixture({ failAssetSave: true });
 
       await expect(
-        fixture.service.uploadAsset(contextFor(), null, {
+        fixture.service.uploadAsset(contextFor(), {
           file: {
             buffer: pngBuffer(),
             originalname: 'logo.png',
@@ -515,7 +566,7 @@ describe('BrandKitService', () => {
       );
 
       await expect(
-        fixture.service.uploadAsset(contextFor(), null, {
+        fixture.service.uploadAsset(contextFor(), {
           file: {
             buffer: pngBuffer(),
             originalname: 'logo.png',
@@ -532,7 +583,7 @@ describe('BrandKitService', () => {
       const fixture = createFixture();
 
       await expect(
-        fixture.service.uploadAsset(contextFor(), null, {
+        fixture.service.uploadAsset(contextFor(), {
           file: {
             buffer: pngBuffer(),
             originalname: 'logo.png',
@@ -550,7 +601,7 @@ describe('BrandKitService', () => {
       const fixture = createFixture();
 
       await expect(
-        fixture.service.uploadAsset(contextFor(), null, {
+        fixture.service.uploadAsset(contextFor(), {
           file: {
             buffer: Buffer.from('%PDF-1.7'),
             originalname: 'doc.pdf',
@@ -568,7 +619,7 @@ describe('BrandKitService', () => {
       const fixture = createFixture();
 
       await expect(
-        fixture.service.uploadAsset(contextFor(), null, {
+        fixture.service.uploadAsset(contextFor(), {
           file: { buffer: Buffer.alloc(0), originalname: 'x.png' },
           kind: 'logo',
         }),
@@ -583,8 +634,7 @@ describe('BrandKitService', () => {
       tenantId = TENANT_ID,
     ) {
       return fixture.service.uploadAsset(
-        contextFor('social', tenantId),
-        clientId,
+        contextFor('social', tenantId, clientId),
         {
           file: {
             buffer: pngBuffer(),
@@ -602,7 +652,6 @@ describe('BrandKitService', () => {
 
       const { file, asset: row } = await fixture.service.getAssetContent(
         contextFor(),
-        null,
         asset.id,
       );
 
@@ -615,8 +664,30 @@ describe('BrandKitService', () => {
       const asset = await seedAsset(fixture, CLIENT_A);
 
       await expect(
-        fixture.service.getAssetContent(contextFor(), CLIENT_B, asset.id),
+        fixture.service.getAssetContent(
+          contextFor('social', TENANT_ID, CLIENT_B),
+          asset.id,
+        ),
       ).rejects.toThrow(NotFoundException);
+    });
+
+    it('another company of the same managed client cannot read the asset via its parent kit', async () => {
+      const fixture = createFixture();
+      const companyA = contextFor('social', TENANT_ID, CLIENT_A, COMPANY_A);
+      const companyB = contextFor('social', TENANT_ID, CLIENT_A, COMPANY_B);
+      const asset = await fixture.service.uploadAsset(companyA, {
+        file: {
+          buffer: pngBuffer(),
+          originalname: 'company-a.png',
+          mimetype: 'image/png',
+        },
+        kind: 'logo',
+      });
+
+      await expect(
+        fixture.service.getAssetContent(companyB, asset.id),
+      ).rejects.toThrow(NotFoundException);
+      expect(await fixture.service.listAssets(companyB)).toEqual([]);
     });
 
     it("a client context cannot read the agency's asset", async () => {
@@ -624,7 +695,10 @@ describe('BrandKitService', () => {
       const asset = await seedAsset(fixture, null);
 
       await expect(
-        fixture.service.getAssetContent(contextFor(), CLIENT_A, asset.id),
+        fixture.service.getAssetContent(
+          contextFor('social', TENANT_ID, CLIENT_A),
+          asset.id,
+        ),
       ).rejects.toThrow(NotFoundException);
     });
 
@@ -635,7 +709,6 @@ describe('BrandKitService', () => {
       await expect(
         fixture.service.getAssetContent(
           contextFor('social', OTHER_TENANT_ID),
-          null,
           asset.id,
         ),
       ).rejects.toThrow(NotFoundException);
@@ -647,8 +720,10 @@ describe('BrandKitService', () => {
 
       await expect(
         fixture.service.getAssetContent(
-          { ...contextFor(), workspaceId: 'another-workspace' },
-          CLIENT_A,
+          {
+            ...contextFor('social', TENANT_ID, CLIENT_A),
+            workspaceId: 'another-workspace',
+          },
           asset.id,
         ),
       ).rejects.toThrow(NotFoundException);
@@ -658,10 +733,10 @@ describe('BrandKitService', () => {
       const fixture = createFixture();
 
       await expect(
-        fixture.service.getAssetContent(contextFor(), null, ASSET_ID),
+        fixture.service.getAssetContent(contextFor(), ASSET_ID),
       ).rejects.toThrow(NotFoundException);
       await expect(
-        fixture.service.getAssetContent(contextFor(), null, 'not-a-uuid'),
+        fixture.service.getAssetContent(contextFor(), 'not-a-uuid'),
       ).rejects.toThrow(NotFoundException);
     });
 
@@ -671,8 +746,10 @@ describe('BrandKitService', () => {
       await seedAsset(fixture, CLIENT_B);
       await seedAsset(fixture, null);
 
-      const clientA = await fixture.service.listAssets(contextFor(), CLIENT_A);
-      const agency = await fixture.service.listAssets(contextFor(), null);
+      const clientA = await fixture.service.listAssets(
+        contextFor('social', TENANT_ID, CLIENT_A),
+      );
+      const agency = await fixture.service.listAssets(contextFor());
 
       expect(clientA).toHaveLength(1);
       expect(agency).toHaveLength(1);
@@ -685,14 +762,17 @@ describe('BrandKitService', () => {
       fixture: ReturnType<typeof createFixture>,
       clientId: string | null = null,
     ) {
-      return fixture.service.uploadAsset(contextFor(), clientId, {
-        file: {
-          buffer: pngBuffer(),
-          originalname: 'logo.png',
-          mimetype: 'image/png',
+      return fixture.service.uploadAsset(
+        contextFor('social', TENANT_ID, clientId),
+        {
+          file: {
+            buffer: pngBuffer(),
+            originalname: 'logo.png',
+            mimetype: 'image/png',
+          },
+          kind: 'logo',
         },
-        kind: 'logo',
-      });
+      );
     }
 
     it('1: the happy path tombstones, removes the binary, then drops the row', async () => {
@@ -700,7 +780,7 @@ describe('BrandKitService', () => {
       const asset = await seedForDelete(fixture);
       expect(fixture.storage.objects.size).toBe(1);
 
-      await fixture.service.deleteAsset(contextFor(), null, asset.id);
+      await fixture.service.deleteAsset(contextFor(), asset.id);
 
       expect(fixture.assetRows).toHaveLength(0);
       expect(fixture.storage.objects.size).toBe(0);
@@ -720,7 +800,7 @@ describe('BrandKitService', () => {
       const asset = await seedForDelete(fixture);
 
       await expect(
-        fixture.service.deleteAsset(contextFor(), null, asset.id),
+        fixture.service.deleteAsset(contextFor(), asset.id),
       ).rejects.toThrow('tombstone write failed');
 
       // Nothing was removed: a delete that could not be recorded must not
@@ -740,7 +820,7 @@ describe('BrandKitService', () => {
       );
 
       await expect(
-        fixture.service.deleteAsset(contextFor(), null, asset.id),
+        fixture.service.deleteAsset(contextFor(), asset.id),
       ).rejects.toThrow('bucket unreachable');
 
       // Everything a reconciler needs survives.
@@ -759,18 +839,18 @@ describe('BrandKitService', () => {
         new Error('bucket unreachable'),
       );
       await expect(
-        fixture.service.deleteAsset(contextFor(), null, asset.id),
+        fixture.service.deleteAsset(contextFor(), asset.id),
       ).rejects.toThrow();
 
       // The bytes may still be in the bucket, but the user's intent stands.
       expect(fixture.storage.objects.size).toBe(1);
+      await expect(fixture.service.listAssets(contextFor())).resolves.toEqual(
+        [],
+      );
       await expect(
-        fixture.service.listAssets(contextFor(), null),
-      ).resolves.toEqual([]);
-      await expect(
-        fixture.service.getAssetContent(contextFor(), null, asset.id),
+        fixture.service.getAssetContent(contextFor(), asset.id),
       ).rejects.toThrow(NotFoundException);
-      const kit = await fixture.service.getBrandKit(contextFor(), null);
+      const kit = await fixture.service.getBrandKit(contextFor());
       expect(kit.assets).toEqual([]);
     });
 
@@ -782,11 +862,11 @@ describe('BrandKitService', () => {
         new Error('bucket unreachable'),
       );
       await expect(
-        fixture.service.deleteAsset(contextFor(), null, asset.id),
+        fixture.service.deleteAsset(contextFor(), asset.id),
       ).rejects.toThrow();
 
       await expect(
-        fixture.service.deleteAsset(contextFor(), null, asset.id),
+        fixture.service.deleteAsset(contextFor(), asset.id),
       ).resolves.toBeUndefined();
 
       // The same object was retried, and the row is finally gone.
@@ -808,7 +888,7 @@ describe('BrandKitService', () => {
       );
 
       await expect(
-        fixture.service.deleteAsset(contextFor(), null, asset.id),
+        fixture.service.deleteAsset(contextFor(), asset.id),
       ).resolves.toBeUndefined();
 
       expect(fixture.assetRows).toHaveLength(0);
@@ -826,7 +906,7 @@ describe('BrandKitService', () => {
         fixture.storage.deleteObject.mockRejectedValueOnce(storageError);
 
         await expect(
-          fixture.service.deleteAsset(contextFor(), null, asset.id),
+          fixture.service.deleteAsset(contextFor(), asset.id),
         ).resolves.toBeUndefined();
         expect(fixture.assetRows).toHaveLength(0);
       }
@@ -837,7 +917,7 @@ describe('BrandKitService', () => {
       const asset = await seedForDelete(fixture);
 
       await expect(
-        fixture.service.deleteAsset(contextFor(), null, asset.id),
+        fixture.service.deleteAsset(contextFor(), asset.id),
       ).rejects.toThrow('final delete failed');
 
       // The bytes are gone; the row must NOT be active, or it would serve a
@@ -845,9 +925,9 @@ describe('BrandKitService', () => {
       expect(fixture.storage.objects.size).toBe(0);
       expect(fixture.assetRows).toHaveLength(1);
       expect(fixture.assetRows[0].deletedAt).toBeInstanceOf(Date);
-      await expect(
-        fixture.service.listAssets(contextFor(), null),
-      ).resolves.toEqual([]);
+      await expect(fixture.service.listAssets(contextFor())).resolves.toEqual(
+        [],
+      );
 
       // The retry finalizes without needing the object back.
       fixture.assets.delete.mockImplementationOnce(
@@ -861,7 +941,7 @@ describe('BrandKitService', () => {
         },
       );
       await expect(
-        fixture.service.deleteAsset(contextFor(), null, asset.id),
+        fixture.service.deleteAsset(contextFor(), asset.id),
       ).resolves.toBeUndefined();
       expect(fixture.assetRows).toHaveLength(0);
       expect(fixture.storage.objects.size).toBe(0);
@@ -874,21 +954,29 @@ describe('BrandKitService', () => {
         new Error('bucket unreachable'),
       );
       await expect(
-        fixture.service.deleteAsset(contextFor(), CLIENT_A, asset.id),
+        fixture.service.deleteAsset(
+          contextFor('social', TENANT_ID, CLIENT_A),
+          asset.id,
+        ),
       ).rejects.toThrow();
 
       // Same answer as a nonexistent id — the tombstone leaks nothing, and a
       // delete retry from the wrong scope cannot finish someone else's.
       await expect(
-        fixture.service.getAssetContent(contextFor(), CLIENT_B, asset.id),
-      ).rejects.toThrow(NotFoundException);
-      await expect(
-        fixture.service.deleteAsset(contextFor(), CLIENT_B, asset.id),
+        fixture.service.getAssetContent(
+          contextFor('social', TENANT_ID, CLIENT_B),
+          asset.id,
+        ),
       ).rejects.toThrow(NotFoundException);
       await expect(
         fixture.service.deleteAsset(
-          contextFor('social', OTHER_TENANT_ID),
-          CLIENT_A,
+          contextFor('social', TENANT_ID, CLIENT_B),
+          asset.id,
+        ),
+      ).rejects.toThrow(NotFoundException);
+      await expect(
+        fixture.service.deleteAsset(
+          contextFor('social', OTHER_TENANT_ID, CLIENT_A),
           asset.id,
         ),
       ).rejects.toThrow(NotFoundException);
@@ -902,7 +990,10 @@ describe('BrandKitService', () => {
       const asset = await seedForDelete(fixture, CLIENT_A);
 
       await expect(
-        fixture.service.deleteAsset(contextFor(), CLIENT_B, asset.id),
+        fixture.service.deleteAsset(
+          contextFor('social', TENANT_ID, CLIENT_B),
+          asset.id,
+        ),
       ).rejects.toThrow(NotFoundException);
 
       expect(fixture.assetRows).toHaveLength(1);
@@ -915,20 +1006,14 @@ describe('BrandKitService', () => {
       const asset = await seedForDelete(fixture);
       const storedKey = [...fixture.storage.objects.keys()][0];
 
-      const beforeDelete = await fixture.service.getBrandKit(
-        contextFor(),
-        null,
-      );
+      const beforeDelete = await fixture.service.getBrandKit(contextFor());
       fixture.storage.deleteObject.mockRejectedValueOnce(
         new Error('bucket unreachable'),
       );
       await expect(
-        fixture.service.deleteAsset(contextFor(), null, asset.id),
+        fixture.service.deleteAsset(contextFor(), asset.id),
       ).rejects.toThrow();
-      const afterFailedDelete = await fixture.service.getBrandKit(
-        contextFor(),
-        null,
-      );
+      const afterFailedDelete = await fixture.service.getBrandKit(contextFor());
 
       for (const projection of [beforeDelete, afterFailedDelete]) {
         const serialized = JSON.stringify(projection);
@@ -942,7 +1027,7 @@ describe('BrandKitService', () => {
     it('multiple assets of the same kind coexist — no undocumented singleton rule', async () => {
       const fixture = createFixture();
 
-      await fixture.service.uploadAsset(contextFor(), null, {
+      await fixture.service.uploadAsset(contextFor(), {
         file: {
           buffer: pngBuffer(),
           originalname: 'a.png',
@@ -952,7 +1037,7 @@ describe('BrandKitService', () => {
         variant: 'horizontal',
         theme: 'light',
       });
-      await fixture.service.uploadAsset(contextFor(), null, {
+      await fixture.service.uploadAsset(contextFor(), {
         file: {
           buffer: pngBuffer(),
           originalname: 'b.png',
@@ -972,10 +1057,10 @@ describe('BrandKitService', () => {
       const fixture = createFixture();
 
       await expect(
-        fixture.service.getBrandKit(
-          { tenantId: TENANT_ID, userId: USER_ID } as never,
-          null,
-        ),
+        fixture.service.getBrandKit({
+          tenantId: TENANT_ID,
+          userId: USER_ID,
+        } as never),
       ).rejects.toThrow(BadRequestException);
     });
   });

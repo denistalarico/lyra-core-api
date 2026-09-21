@@ -16,6 +16,7 @@ export type SocialBrandKitScope = {
   workspaceId: string;
   /** NULL identifies the agency context; a client id identifies that client. */
   agencyClientId: string | null;
+  companyContextId: string | null;
 };
 
 export type SocialBrandKitAssetFilter = {
@@ -61,13 +62,15 @@ export class SocialBrandKitContextPort {
     scope: SocialBrandKitScope,
     filter: SocialBrandKitAssetFilter = {},
   ): Promise<SocialBrandKitContext> {
-    const scopedWhere = {
+    const kitWhere = {
       tenantId: scope.tenantId,
       workspaceId: scope.workspaceId,
       agencyClientId:
         scope.agencyClientId === null ? IsNull() : scope.agencyClientId,
+      companyContextId:
+        scope.companyContextId === null ? IsNull() : scope.companyContextId,
     };
-    const kit = await this.kits.findOne({ where: scopedWhere });
+    const kit = await this.kits.findOne({ where: kitWhere });
 
     if (!kit) {
       return {
@@ -87,7 +90,10 @@ export class SocialBrandKitContextPort {
           : undefined;
     const assets = await this.assets.find({
       where: {
-        ...scopedWhere,
+        tenantId: scope.tenantId,
+        workspaceId: scope.workspaceId,
+        agencyClientId:
+          scope.agencyClientId === null ? IsNull() : scope.agencyClientId,
         brandKitId: kit.id,
         ...(kind ? { kind } : {}),
         ...(filter.usage ? { usage: filter.usage } : {}),

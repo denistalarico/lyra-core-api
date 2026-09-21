@@ -1,13 +1,6 @@
-import {
-  BadRequestException,
-  Injectable,
-} from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import {
-  IsNull,
-  type FindOptionsWhere,
-  Repository,
-} from 'typeorm';
+import { IsNull, type FindOptionsWhere, Repository } from 'typeorm';
 import type { SocialPlannerSettings } from '../contracts';
 import { UpdateSocialPlannerSettingsDto } from '../dto';
 import { SocialPlannerSettingsEntity } from '../entities';
@@ -57,10 +50,7 @@ export class SocialPlannerSettingsService {
     }
 
     if (dto.creativeFormats !== undefined) {
-      this.assertUniqueCatalogKeys(
-        'creativeFormats',
-        dto.creativeFormats,
-      );
+      this.assertUniqueCatalogKeys('creativeFormats', dto.creativeFormats);
     }
 
     if (dto.ctaDefaults !== undefined) {
@@ -79,45 +69,29 @@ export class SocialPlannerSettingsService {
 
     const next: SocialPlannerSettings = {
       monthlyContentVolume:
-        dto.monthlyContentVolume ??
-        current.monthlyContentVolume,
+        dto.monthlyContentVolume ?? current.monthlyContentVolume,
 
-      funnelDistribution:
-        dto.funnelDistribution ??
-        current.funnelDistribution,
+      funnelDistribution: dto.funnelDistribution ?? current.funnelDistribution,
 
-      contentTypes:
-        dto.contentTypes ??
-        current.contentTypes,
+      contentTypes: dto.contentTypes ?? current.contentTypes,
 
-      objectives:
-        dto.objectives ??
-        current.objectives,
+      objectives: dto.objectives ?? current.objectives,
 
-      creativeFormats:
-        dto.creativeFormats ??
-        current.creativeFormats,
+      creativeFormats: dto.creativeFormats ?? current.creativeFormats,
 
-      ctaDefaults:
-        dto.ctaDefaults ??
-        current.ctaDefaults,
+      ctaDefaults: dto.ctaDefaults ?? current.ctaDefaults,
 
-      hashtagDefaults:
-        dto.hashtagDefaults ??
-        current.hashtagDefaults,
+      hashtagDefaults: dto.hashtagDefaults ?? current.hashtagDefaults,
 
       firstCommentDefaults:
-        dto.firstCommentDefaults ??
-        current.firstCommentDefaults,
+        dto.firstCommentDefaults ?? current.firstCommentDefaults,
 
       hookLibrary:
         dto.hookLibrary !== undefined
           ? this.normalizeStrings(dto.hookLibrary)
           : current.hookLibrary,
 
-      milestones:
-        dto.milestones ??
-        current.milestones,
+      milestones: dto.milestones ?? current.milestones,
     };
 
     const row =
@@ -126,6 +100,7 @@ export class SocialPlannerSettingsService {
         tenantId: scope.tenantId,
         workspaceId: scope.workspaceId,
         agencyClientId: scope.agencyClientId,
+        companyContextId: scope.companyContextId,
         createdById: actorUserId,
       });
 
@@ -164,15 +139,13 @@ export class SocialPlannerSettingsService {
       tenantId: scope.tenantId,
       workspaceId: scope.workspaceId,
       agencyClientId:
-        scope.agencyClientId === null
-          ? IsNull()
-          : scope.agencyClientId,
+        scope.agencyClientId === null ? IsNull() : scope.agencyClientId,
+      companyContextId:
+        scope.companyContextId === null ? IsNull() : scope.companyContextId,
     };
   }
 
-  private toSettings(
-    row: SocialPlannerSettingsEntity,
-  ): SocialPlannerSettings {
+  private toSettings(row: SocialPlannerSettingsEntity): SocialPlannerSettings {
     return {
       monthlyContentVolume: row.monthlyContentVolume,
       funnelDistribution: row.funnelDistribution,
@@ -191,14 +164,12 @@ export class SocialPlannerSettingsService {
     return structuredClone(DEFAULT_SOCIAL_PLANNER_SETTINGS);
   }
 
-  private assertFunnelDistribution(
-    distribution: {
-      discovery: number;
-      recognition: number;
-      consideration: number;
-      decision: number;
-    },
-  ): void {
+  private assertFunnelDistribution(distribution: {
+    discovery: number;
+    recognition: number;
+    consideration: number;
+    decision: number;
+  }): void {
     const total =
       distribution.discovery +
       distribution.recognition +
@@ -206,9 +177,7 @@ export class SocialPlannerSettingsService {
       distribution.decision;
 
     if (Math.abs(total - 100) > 0.001) {
-      throw new BadRequestException(
-        'Funnel distribution must total 100%.',
-      );
+      throw new BadRequestException('Funnel distribution must total 100%.');
     }
   }
 
@@ -219,15 +188,11 @@ export class SocialPlannerSettingsService {
     const keys = items.map((item) => item.key);
 
     if (new Set(keys).size !== keys.length) {
-      throw new BadRequestException(
-        `${field} contains duplicate keys.`,
-      );
+      throw new BadRequestException(`${field} contains duplicate keys.`);
     }
   }
 
-  private assertCtaDefaults(
-    defaults: Record<string, string[]>,
-  ): void {
+  private assertCtaDefaults(defaults: Record<string, string[]>): void {
     for (const [objectiveKey, values] of Object.entries(defaults)) {
       if (!/^[a-z0-9][a-z0-9_-]*$/.test(objectiveKey)) {
         throw new BadRequestException(
@@ -256,9 +221,7 @@ export class SocialPlannerSettingsService {
   }
 
   private normalizeStrings(values: string[]): string[] {
-    const normalized = values
-      .map((value) => value.trim())
-      .filter(Boolean);
+    const normalized = values.map((value) => value.trim()).filter(Boolean);
 
     return [...new Set(normalized)];
   }

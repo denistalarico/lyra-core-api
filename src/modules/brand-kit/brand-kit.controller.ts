@@ -86,7 +86,7 @@ export class BrandKitController {
   async getBrandKit(@RequestContextData() ctx: RequestContext) {
     await this.assertProductPermission(ctx, 'view');
 
-    return this.brandKitService.getBrandKit(ctx, this.activeClientId(ctx));
+    return this.brandKitService.getBrandKit(ctx);
   }
 
   @Patch()
@@ -97,11 +97,7 @@ export class BrandKitController {
   ) {
     await this.assertProductPermission(ctx, 'update');
 
-    return this.brandKitService.updateBrandKit(
-      ctx,
-      this.activeClientId(ctx),
-      dto,
-    );
+    return this.brandKitService.updateBrandKit(ctx, dto);
   }
 
   @Get('assets')
@@ -109,7 +105,7 @@ export class BrandKitController {
   async listAssets(@RequestContextData() ctx: RequestContext) {
     await this.assertProductPermission(ctx, 'view');
 
-    return this.brandKitService.listAssets(ctx, this.activeClientId(ctx));
+    return this.brandKitService.listAssets(ctx);
   }
 
   @Post('assets')
@@ -122,7 +118,7 @@ export class BrandKitController {
   ) {
     await this.assertProductPermission(ctx, 'update');
 
-    return this.brandKitService.uploadAsset(ctx, this.activeClientId(ctx), {
+    return this.brandKitService.uploadAsset(ctx, {
       file,
       kind: dto.kind,
       label: dto.label,
@@ -157,7 +153,6 @@ export class BrandKitController {
 
     const { asset, file } = await this.brandKitService.getAssetContent(
       ctx,
-      this.activeClientId(ctx),
       assetId,
     );
 
@@ -181,19 +176,7 @@ export class BrandKitController {
   ): Promise<void> {
     await this.assertProductPermission(ctx, 'delete');
 
-    await this.brandKitService.deleteAsset(
-      ctx,
-      this.activeClientId(ctx),
-      assetId,
-    );
-  }
-
-  /**
-   * The managed client the guard already authorized for the calling product;
-   * `null` means the agency's own context.
-   */
-  private activeClientId(ctx: RequestContext): string | null {
-    return ctx.managedContext?.clientId ?? null;
+    await this.brandKitService.deleteAsset(ctx, assetId);
   }
 
   private async assertProductPermission(

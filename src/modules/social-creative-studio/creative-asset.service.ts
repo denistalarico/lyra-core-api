@@ -5,7 +5,6 @@ import {
 } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, IsNull, Repository } from 'typeorm';
-import type { MediaAssetScope } from '../../common/media-assets';
 import {
   detectMediaAssetMimeType,
   MediaAssetResolverService,
@@ -17,6 +16,11 @@ import {
   CreativeFolderEntity,
 } from './entities';
 import { CreativeThumbnailService } from './creative-thumbnail.service';
+import type { CreativeStudioScope } from './creative-studio.scope';
+import {
+  SocialContentItemEntity,
+  SocialPlanEntity,
+} from '../social-planner/entities';
 
 const IMAGE_MAX = 20 * 1024 * 1024;
 const VIDEO_MAX = 300 * 1024 * 1024;
@@ -37,28 +41,35 @@ export class CreativeAssetService {
     private readonly versions: Repository<CreativeAssetVersionEntity>,
     @InjectRepository(CreativeFolderEntity, 'agency')
     private readonly folders: Repository<CreativeFolderEntity>,
+    @InjectRepository(SocialContentItemEntity, 'agency')
+    private readonly contentItems: Repository<SocialContentItemEntity>,
+    @InjectRepository(SocialPlanEntity, 'agency')
+    private readonly plans: Repository<SocialPlanEntity>,
     @InjectDataSource('agency') private readonly dataSource: DataSource,
     private readonly mediaUpload: MediaAssetUploadService,
     private readonly mediaResolver: MediaAssetResolverService,
     private readonly thumbnails: CreativeThumbnailService,
   ) {}
-  private scopeWhere(scope: MediaAssetScope) {
+  private scopeWhere(scope: CreativeStudioScope) {
     return {
       tenantId: scope.tenantId,
       workspaceId: scope.workspaceId,
       agencyClientId:
         scope.agencyClientId === null ? IsNull() : scope.agencyClientId,
+      companyContextId:
+        scope.companyContextId === null ? IsNull() : scope.companyContextId,
     };
   }
-  private scopeValues(scope: MediaAssetScope) {
+  private scopeValues(scope: CreativeStudioScope) {
     return {
       tenantId: scope.tenantId,
       workspaceId: scope.workspaceId,
       agencyClientId: scope.agencyClientId,
+      companyContextId: scope.companyContextId,
     };
   }
   private async assertFolder(
-    scope: MediaAssetScope,
+    scope: CreativeStudioScope,
     folderId: string | undefined,
   ) {
     if (!folderId) return;
@@ -66,6 +77,35 @@ export class CreativeAssetService {
       where: { ...this.scopeWhere(scope), id: folderId },
     });
     if (!exists) throw new BadRequestException('Pasta não encontrada.');
+  }
+  private async assertContentItem(
+    scope: CreativeStudioScope,
+    contentItemId: string | undefined,
+  ) {
+    if (!contentItemId) return;
+    const item = await this.contentItems.findOne({
+      where: {
+        id: contentItemId,
+        tenantId: scope.tenantId,
+        workspaceId: scope.workspaceId,
+        agencyClientId:
+          scope.agencyClientId === null ? IsNull() : scope.agencyClientId,
+      },
+      select: { id: true, planId: true },
+    });
+    if (!item) throw new BadRequestException('Conteúdo não encontrado.');
+    const planExists = await this.plans.exists({
+      where: {
+        id: item.planId,
+        tenantId: scope.tenantId,
+        workspaceId: scope.workspaceId,
+        agencyClientId:
+          scope.agencyClientId === null ? IsNull() : scope.agencyClientId,
+        companyContextId:
+          scope.companyContextId === null ? IsNull() : scope.companyContextId,
+      },
+    });
+    if (!planExists) throw new BadRequestException('Conteúdo não encontrado.');
   }
   private kind(file: UploadFile | undefined): 'image' | 'video' {
     if (!file?.buffer?.length)
@@ -85,7 +125,7 @@ export class CreativeAssetService {
       );
   }
   async upload(
-    scope: MediaAssetScope,
+    scope: CreativeStudioScope,
     actor: string | null,
     input: {
       file: UploadFile;
@@ -97,6 +137,7 @@ export class CreativeAssetService {
     const assetType = this.kind(input.file);
     this.assertDomainLimit(input.file, assetType);
     await this.assertFolder(scope, input.folderId);
+    await this.assertContentItem(scope, input.contentItemId);
     const original = await this.mediaUpload.upload(scope, actor, {
       file: input.file,
       source: 'creative_studio',
@@ -155,7 +196,7 @@ export class CreativeAssetService {
     }
   }
   async createVersion(
-    scope: MediaAssetScope,
+    scope: CreativeStudioScope,
     actor: string | null,
     assetId: string,
     file: UploadFile,
@@ -210,7 +251,7 @@ export class CreativeAssetService {
     }
   }
   async list(
-    scope: MediaAssetScope,
+    scope: CreativeStudioScope,
     query: {
       assetType?: string;
       folderId?: string;
@@ -244,6 +285,14 @@ export class CreativeAssetService {
         scope.agencyClientId === null
           ? {}
           : { agencyClientId: scope.agencyClientId },
+      )
+      .andWhere(
+        scope.companyContextId === null
+          ? 'asset.companyContextId IS NULL'
+          : 'asset.companyContextId = :companyContextId',
+        scope.companyContextId === null
+          ? {}
+          : { companyContextId: scope.companyContextId },
       );
     if (query.assetType)
       qb.andWhere('asset.assetType = :assetType', {
@@ -301,7 +350,7 @@ export class CreativeAssetService {
       nextCursor: next,
     };
   }
-  async detail(scope: MediaAssetScope, id: string) {
+  async detail(scope: CreativeStudioScope, id: string) {
     const asset = await this.find(scope, id);
     const versions = await this.versions.find({
       where: { creativeAssetId: id },
@@ -316,7 +365,7 @@ export class CreativeAssetService {
     };
   }
   async update(
-    scope: MediaAssetScope,
+    scope: CreativeStudioScope,
     id: string,
     input: { name?: string; folderId?: string | null },
   ) {
@@ -327,14 +376,14 @@ export class CreativeAssetService {
     if (input.folderId !== undefined) asset.folderId = input.folderId;
     return this.assets.save(asset);
   }
-  async archive(scope: MediaAssetScope, id: string) {
+  async archive(scope: CreativeStudioScope, id: string) {
     const asset = await this.find(scope, id);
     asset.status = 'archived';
     asset.archivedAt = new Date();
     return this.assets.save(asset);
   }
   async content(
-    scope: MediaAssetScope,
+    scope: CreativeStudioScope,
     id: string,
     thumbnail = false,
     versionId?: string,
@@ -365,7 +414,7 @@ export class CreativeAssetService {
       );
     return this.mediaResolver.resolve({ ...scope, mediaAssetId });
   }
-  async versionsFor(scope: MediaAssetScope, id: string) {
+  async versionsFor(scope: CreativeStudioScope, id: string) {
     await this.find(scope, id);
     return (
       await this.versions.find({
@@ -374,7 +423,7 @@ export class CreativeAssetService {
       })
     ).map((v) => this.versionView(v));
   }
-  private async find(scope: MediaAssetScope, id: string) {
+  private async find(scope: CreativeStudioScope, id: string) {
     const asset = await this.assets.findOne({
       where: { ...this.scopeWhere(scope), id },
     });

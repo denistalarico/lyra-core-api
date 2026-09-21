@@ -20,11 +20,9 @@ import {
   'tenantId',
   'workspaceId',
   'agencyClientId',
+  'companyContextId',
 ])
-@Check(
-  'CK_social_editorial_pillars_key',
-  `"key" ~ '^[a-z0-9][a-z0-9_-]*$'`,
-)
+@Check('CK_social_editorial_pillars_key', `"key" ~ '^[a-z0-9][a-z0-9_-]*$'`)
 @Check(
   'CK_social_editorial_pillars_target',
   '"target_percentage" IS NULL OR ("target_percentage" >= 0 AND "target_percentage" <= 100)',
@@ -42,6 +40,9 @@ export class SocialEditorialPillarEntity {
 
   @Column({ name: 'agency_client_id', type: 'uuid', nullable: true })
   agencyClientId!: string | null;
+
+  @Column({ name: 'company_context_id', type: 'uuid', nullable: true })
+  companyContextId!: string | null;
 
   /**
    * Stable machine key. Content references the pillar by id, but reporting

@@ -66,6 +66,7 @@ function createRepositoryMock(): RepositoryMock {
 /** A query builder that answers a single SUM, for the budget query. */
 function sumQueryBuilder(total: string) {
   const builder = {
+    innerJoin: jest.fn(() => builder),
     select: jest.fn(() => builder),
     where: jest.fn(() => builder),
     andWhere: jest.fn(() => builder),
@@ -78,12 +79,14 @@ const agencyScope: SocialPlannerScope = {
   tenantId: TENANT_ID,
   workspaceId: WORKSPACE_ID,
   agencyClientId: null,
+  companyContextId: null,
 };
 
 const clientScope: SocialPlannerScope = {
   tenantId: TENANT_ID,
   workspaceId: WORKSPACE_ID,
   agencyClientId: CLIENT_ID,
+  companyContextId: '44444444-4444-4444-8444-444444444444',
 };
 
 function buildItem(
@@ -245,6 +248,13 @@ describe('SocialCopyGenerationService', () => {
     content = createRepositoryMock();
     destinations = createRepositoryMock();
     plans = createRepositoryMock();
+    plans.findOne.mockResolvedValue({
+      id: PLAN_ID,
+      tenantId: TENANT_ID,
+      workspaceId: WORKSPACE_ID,
+      agencyClientId: CLIENT_ID,
+      companyContextId: clientScope.companyContextId,
+    });
     campaigns = createRepositoryMock();
     pillars = createRepositoryMock();
     settingsService = { getSettings: jest.fn() };

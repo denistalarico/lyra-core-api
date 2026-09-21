@@ -27,11 +27,13 @@ export type SocialContentIdeaStatus = 'open' | 'converted' | 'discarded';
   'tenantId',
   'workspaceId',
   'agencyClientId',
+  'companyContextId',
 ])
 @Index('IDX_social_content_ideas_backlog', [
   'tenantId',
   'workspaceId',
   'agencyClientId',
+  'companyContextId',
   'status',
   'priority',
 ])
@@ -56,6 +58,9 @@ export class SocialContentIdeaEntity {
 
   @Column({ name: 'agency_client_id', type: 'uuid', nullable: true })
   agencyClientId!: string | null;
+
+  @Column({ name: 'company_context_id', type: 'uuid', nullable: true })
+  companyContextId!: string | null;
 
   @Column({ type: 'varchar', length: 240 })
   title!: string;

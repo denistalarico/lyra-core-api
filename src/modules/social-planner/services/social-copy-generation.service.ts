@@ -185,6 +185,7 @@ export class SocialCopyGenerationService {
       where: { id: contentId, ...this.contentScopeWhere(scope) },
     });
     if (!item) throw new NotFoundException('Social content item not found.');
+    await this.assertContentPlanScope(scope, item);
 
     if (item.archivedAt)
       throw new ConflictException(
@@ -309,6 +310,11 @@ export class SocialCopyGenerationService {
         continue;
       }
 
+      if (!(await this.contentPlanIsInScope(scope, item))) {
+        outcomes.push({ contentId, status: 'failed', reason: 'not_found' });
+        continue;
+      }
+
       if (item.archivedAt) {
         outcomes.push({ contentId, status: 'failed', reason: 'archived' });
         continue;
@@ -424,6 +430,7 @@ export class SocialCopyGenerationService {
       where: { id: contentId, ...this.contentScopeWhere(scope) },
     });
     if (!item) throw new NotFoundException('Social content item not found.');
+    await this.assertContentPlanScope(scope, item);
 
     const runs = await this.runsRepository.find({
       where: { contentItemId: item.id, ...this.runScopeWhere(scope) },
@@ -457,6 +464,7 @@ export class SocialCopyGenerationService {
       where: { id: runId, ...this.runScopeWhere(scope) },
     });
     if (!run) throw new NotFoundException('Generation run not found.');
+    await this.assertRunPlanScope(scope, run);
 
     const proposals = await this.proposalsRepository.find({
       where: { runId: run.id, ...this.proposalScopeWhere(scope) },
@@ -490,6 +498,7 @@ export class SocialCopyGenerationService {
         lock: { mode: 'pessimistic_write' },
       });
       if (!run) throw new NotFoundException('Generation run not found.');
+      await this.assertRunPlanScope(scope, run);
 
       if (this.stateMachine.isTerminal(run.status))
         throw new ConflictException(
@@ -544,6 +553,7 @@ export class SocialCopyGenerationService {
         lock: { mode: 'pessimistic_write' },
       });
       if (!item) throw new NotFoundException('Social content item not found.');
+      await this.assertContentPlanScope(scope, item);
 
       const proposals = await proposalsRepository.find({
         where: {
@@ -693,6 +703,7 @@ export class SocialCopyGenerationService {
       where: { id: contentId, ...this.contentScopeWhere(scope) },
     });
     if (!item) throw new NotFoundException('Social content item not found.');
+    await this.assertContentPlanScope(scope, item);
 
     const proposals = await this.proposalsRepository.find({
       where: {
@@ -724,10 +735,22 @@ export class SocialCopyGenerationService {
   async resolveWork(
     run: SocialCopyGenerationRunEntity,
   ): Promise<ResolvedGenerationWork> {
+    const plan = await this.plansRepository.findOne({
+      where: {
+        id: run.planId,
+        tenantId: run.tenantId,
+        workspaceId: run.workspaceId,
+        agencyClientId:
+          run.agencyClientId === null ? IsNull() : run.agencyClientId,
+      },
+    });
+    if (!plan) throw new SocialCopyGenerationError('plan_not_available');
+
     const scope: SocialPlannerScope = {
       tenantId: run.tenantId,
       workspaceId: run.workspaceId,
       agencyClientId: run.agencyClientId,
+      companyContextId: plan.companyContextId,
     };
 
     /**
@@ -741,14 +764,13 @@ export class SocialCopyGenerationService {
       throw new SocialCopyGenerationError('content_not_available');
 
     const item = await this.contentRepository.findOne({
-      where: { id: run.contentItemId, ...this.contentScopeWhere(scope) },
+      where: {
+        id: run.contentItemId,
+        planId: plan.id,
+        ...this.contentScopeWhere(scope),
+      },
     });
     if (!item) throw new SocialCopyGenerationError('content_not_available');
-
-    const plan = await this.plansRepository.findOne({
-      where: { id: item.planId, ...this.planScopeWhere(scope) },
-    });
-    if (!plan) throw new SocialCopyGenerationError('plan_not_available');
 
     const destinations = await this.destinationsRepository.find({
       where: {
@@ -899,11 +921,32 @@ export class SocialCopyGenerationService {
 
     const raw = await this.runsRepository
       .createQueryBuilder('run')
+      .innerJoin(
+        SocialPlanEntity,
+        'plan',
+        'plan.id = run.planId AND plan.tenantId = run.tenantId AND plan.workspaceId = run.workspaceId',
+      )
       .select('COALESCE(SUM(run.costCents), 0)', 'total')
       .where('run.tenantId = :tenantId', { tenantId: scope.tenantId })
       .andWhere('run.workspaceId = :workspaceId', {
         workspaceId: scope.workspaceId,
       })
+      .andWhere(
+        scope.agencyClientId === null
+          ? 'plan.agencyClientId IS NULL'
+          : 'plan.agencyClientId = :agencyClientId',
+        scope.agencyClientId === null
+          ? {}
+          : { agencyClientId: scope.agencyClientId },
+      )
+      .andWhere(
+        scope.companyContextId === null
+          ? 'plan.companyContextId IS NULL'
+          : 'plan.companyContextId = :companyContextId',
+        scope.companyContextId === null
+          ? {}
+          : { companyContextId: scope.companyContextId },
+      )
       .andWhere('run.createdAt >= :since', { since })
       .getRawOne<{ total: string }>();
 
@@ -1058,6 +1101,8 @@ export class SocialCopyGenerationService {
       workspaceId: scope.workspaceId,
       agencyClientId:
         scope.agencyClientId === null ? IsNull() : scope.agencyClientId,
+      companyContextId:
+        scope.companyContextId === null ? IsNull() : scope.companyContextId,
     };
   }
 
@@ -1080,6 +1125,8 @@ export class SocialCopyGenerationService {
       workspaceId: scope.workspaceId,
       agencyClientId:
         scope.agencyClientId === null ? IsNull() : scope.agencyClientId,
+      companyContextId:
+        scope.companyContextId === null ? IsNull() : scope.companyContextId,
     };
   }
 
@@ -1091,6 +1138,8 @@ export class SocialCopyGenerationService {
       workspaceId: scope.workspaceId,
       agencyClientId:
         scope.agencyClientId === null ? IsNull() : scope.agencyClientId,
+      companyContextId:
+        scope.companyContextId === null ? IsNull() : scope.companyContextId,
     };
   }
 
@@ -1103,5 +1152,37 @@ export class SocialCopyGenerationService {
       agencyClientId:
         scope.agencyClientId === null ? IsNull() : scope.agencyClientId,
     };
+  }
+
+  private async contentPlanIsInScope(
+    scope: SocialPlannerScope,
+    item: SocialContentItemEntity,
+  ): Promise<boolean> {
+    return Boolean(
+      await this.plansRepository.findOne({
+        where: { id: item.planId, ...this.planScopeWhere(scope) },
+        select: { id: true },
+      }),
+    );
+  }
+
+  private async assertContentPlanScope(
+    scope: SocialPlannerScope,
+    item: SocialContentItemEntity,
+  ): Promise<void> {
+    if (!(await this.contentPlanIsInScope(scope, item))) {
+      throw new NotFoundException('Social content item not found.');
+    }
+  }
+
+  private async assertRunPlanScope(
+    scope: SocialPlannerScope,
+    run: SocialCopyGenerationRunEntity,
+  ): Promise<void> {
+    const exists = await this.plansRepository.findOne({
+      where: { id: run.planId, ...this.planScopeWhere(scope) },
+      select: { id: true },
+    });
+    if (!exists) throw new NotFoundException('Generation run not found.');
   }
 }

@@ -2,9 +2,10 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Interval } from '@nestjs/schedule';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { hostname } from 'node:os';
-import { DataSource } from 'typeorm';
+import { DataSource, IsNull } from 'typeorm';
 import {
   SocialCopyGenerationRunEntity,
+  SocialPlanEntity,
   type SocialCopyGenerationRunStatus,
 } from '../entities';
 import { SocialCopyGenerationConfigService } from './social-copy-generation-config.service';
@@ -120,10 +121,26 @@ export class SocialCopyGenerationWorker {
     });
     if (!run) return;
 
+    const plan = await this.dataSource.getRepository(SocialPlanEntity).findOne({
+      where: {
+        id: run.planId,
+        tenantId: run.tenantId,
+        workspaceId: run.workspaceId,
+        agencyClientId:
+          run.agencyClientId === null ? IsNull() : run.agencyClientId,
+      },
+      select: { id: true, companyContextId: true },
+    });
+    if (!plan) {
+      await this.fail(run, 'plan_not_available', undefined);
+      return;
+    }
+
     const scope = {
       tenantId: run.tenantId,
       workspaceId: run.workspaceId,
       agencyClientId: run.agencyClientId,
+      companyContextId: plan.companyContextId,
     };
 
     let reservedCents: number | undefined;

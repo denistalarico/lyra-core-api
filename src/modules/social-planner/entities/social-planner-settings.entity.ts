@@ -29,6 +29,7 @@ import {
   'tenantId',
   'workspaceId',
   'agencyClientId',
+  'companyContextId',
 ])
 @Check(
   'CK_social_planner_settings_monthly_volume',
@@ -83,6 +84,9 @@ export class SocialPlannerSettingsEntity {
   /** NULL = agency Social context; non-null = managed client. */
   @Column({ name: 'agency_client_id', type: 'uuid', nullable: true })
   agencyClientId!: string | null;
+
+  @Column({ name: 'company_context_id', type: 'uuid', nullable: true })
+  companyContextId!: string | null;
 
   @Column({
     name: 'monthly_content_volume',

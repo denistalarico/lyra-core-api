@@ -95,6 +95,7 @@ export class SocialCampaignService {
       tenantId: scope.tenantId,
       workspaceId: scope.workspaceId,
       agencyClientId: scope.agencyClientId,
+      companyContextId: scope.companyContextId,
       name,
       description: this.normalizeNullable(dto.description),
       objective: this.normalizeNullable(dto.objective),
@@ -186,10 +187,13 @@ export class SocialCampaignService {
       tenantId: scope.tenantId,
       workspaceId: scope.workspaceId,
       agencyClientId: scope.agencyClientId,
+      companyContextId: scope.companyContextId,
       templateId: template?.id ?? null,
       name,
       description:
-        this.normalizeNullable(dto.description) ?? template?.description ?? null,
+        this.normalizeNullable(dto.description) ??
+        template?.description ??
+        null,
       objective:
         this.normalizeNullable(dto.objective) ?? template?.objective ?? null,
       startsOn: dto.startsOn ?? null,
@@ -292,6 +296,7 @@ export class SocialCampaignService {
       tenantId: scope.tenantId,
       workspaceId: scope.workspaceId,
       agencyClientId: scope.agencyClientId,
+      companyContextId: scope.companyContextId,
       key,
       label: this.requireText(dto.label, 'Pillar label'),
       description: this.normalizeNullable(dto.description),
@@ -474,6 +479,7 @@ export class SocialCampaignService {
       tenantId: scope.tenantId,
       workspaceId: scope.workspaceId,
       agencyClientId: scope.agencyClientId,
+      companyContextId: scope.companyContextId,
       title: this.requireText(dto.title, 'Idea title'),
       notes: this.normalizeNullable(dto.notes),
       pillarId: dto.pillarId ?? null,
@@ -822,6 +828,8 @@ export class SocialCampaignService {
       workspaceId: scope.workspaceId,
       agencyClientId:
         scope.agencyClientId === null ? IsNull() : scope.agencyClientId,
+      companyContextId:
+        scope.companyContextId === null ? IsNull() : scope.companyContextId,
     } as unknown as FindOptionsWhere<Entity>;
   }
 

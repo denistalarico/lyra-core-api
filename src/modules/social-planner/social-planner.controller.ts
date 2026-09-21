@@ -1,5 +1,4 @@
 import {
-  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -15,6 +14,7 @@ import {
   Res,
   UseGuards,
 } from '@nestjs/common';
+import { resolveCompanyAwareScope } from '../../common/context/company-aware-scope';
 import type { Response } from 'express';
 import { RequestContextData } from '../../common/context/request-context.decorator';
 import type { RequestContext } from '../../common/context/request-context.interface';
@@ -883,28 +883,7 @@ export class SocialPlannerController {
    * The request body cannot select tenant/workspace/client ownership.
    */
   private requireScope(ctx: RequestContext): SocialPlannerScope {
-    if (!ctx.tenantId || !ctx.workspaceId) {
-      throw new BadRequestException(
-        'Tenant and workspace context are required.',
-      );
-    }
-
-    const managedContext = ctx.managedContext;
-
-    const agencyClientId =
-      managedContext?.operatingMode === 'client'
-        ? (managedContext.clientId ?? null)
-        : null;
-
-    if (managedContext?.operatingMode === 'client' && !agencyClientId) {
-      throw new BadRequestException('Client context is required.');
-    }
-
-    return {
-      tenantId: ctx.tenantId,
-      workspaceId: ctx.workspaceId,
-      agencyClientId,
-    };
+    return resolveCompanyAwareScope(ctx);
   }
 
   @Get('settings')

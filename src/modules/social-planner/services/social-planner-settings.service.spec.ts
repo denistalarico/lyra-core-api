@@ -10,6 +10,7 @@ describe('SocialPlannerSettingsService', () => {
     tenantId: '11111111-1111-4111-8111-111111111111',
     workspaceId: '22222222-2222-4222-8222-222222222222',
     agencyClientId: null,
+    companyContextId: null,
   };
 
   const repository = {
@@ -39,9 +40,7 @@ describe('SocialPlannerSettingsService', () => {
     const result = await service.getSettings(scope);
 
     expect(result.persisted).toBe(false);
-    expect(result.settings).toEqual(
-      DEFAULT_SOCIAL_PLANNER_SETTINGS,
-    );
+    expect(result.settings).toEqual(DEFAULT_SOCIAL_PLANNER_SETTINGS);
 
     expect(repository.create).not.toHaveBeenCalled();
     expect(repository.save).not.toHaveBeenCalled();
@@ -78,23 +77,16 @@ describe('SocialPlannerSettingsService', () => {
   it('preserves sections omitted from a partial update', async () => {
     repository.findOne.mockResolvedValue(null);
 
-    await service.updateSettings(
-      scope,
-      null,
-      {
-        monthlyContentVolume: 20,
-      },
-    );
+    await service.updateSettings(scope, null, {
+      monthlyContentVolume: 20,
+    });
 
     expect(repository.save).toHaveBeenCalledWith(
       expect.objectContaining({
         monthlyContentVolume: 20,
-        funnelDistribution:
-          DEFAULT_SOCIAL_PLANNER_SETTINGS.funnelDistribution,
-        contentTypes:
-          DEFAULT_SOCIAL_PLANNER_SETTINGS.contentTypes,
-        milestones:
-          DEFAULT_SOCIAL_PLANNER_SETTINGS.milestones,
+        funnelDistribution: DEFAULT_SOCIAL_PLANNER_SETTINGS.funnelDistribution,
+        contentTypes: DEFAULT_SOCIAL_PLANNER_SETTINGS.contentTypes,
+        milestones: DEFAULT_SOCIAL_PLANNER_SETTINGS.milestones,
       }),
     );
   });

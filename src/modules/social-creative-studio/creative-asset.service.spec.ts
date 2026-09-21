@@ -2,7 +2,7 @@ import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { SELF_DECLARED_DEPS_METADATA } from '@nestjs/common/constants';
 import { getDataSourceToken } from '@nestjs/typeorm';
 import { FindOperator, IsNull, Repository } from 'typeorm';
-import type { MediaAssetScope } from '../../common/media-assets';
+import type { CreativeStudioScope } from './creative-studio.scope';
 import {
   CreativeAssetEntity,
   CreativeAssetVersionEntity,
@@ -12,24 +12,27 @@ import { CreativeAssetService } from './creative-asset.service';
 import { CreativeFolderService } from './creative-folder.service';
 import { CreativeThumbnailService } from './creative-thumbnail.service';
 
-const agency: MediaAssetScope = {
+const agency: CreativeStudioScope = {
   tenantId: '10000000-0000-4000-8000-000000000001',
   workspaceId: '20000000-0000-4000-8000-000000000001',
   agencyClientId: null,
+  companyContextId: null,
 };
-const clientA: MediaAssetScope = {
+const clientA: CreativeStudioScope = {
   ...agency,
   agencyClientId: '30000000-0000-4000-8000-000000000001',
+  companyContextId: '31000000-0000-4000-8000-000000000001',
 };
-const clientB: MediaAssetScope = {
+const clientB: CreativeStudioScope = {
   ...agency,
-  agencyClientId: '30000000-0000-4000-8000-000000000002',
+  agencyClientId: '30000000-0000-4000-8000-000000000001',
+  companyContextId: '31000000-0000-4000-8000-000000000002',
 };
-const anotherTenant: MediaAssetScope = {
+const anotherTenant: CreativeStudioScope = {
   ...clientA,
   tenantId: '10000000-0000-4000-8000-000000000002',
 };
-const anotherWorkspace: MediaAssetScope = {
+const anotherWorkspace: CreativeStudioScope = {
   ...clientA,
   workspaceId: '20000000-0000-4000-8000-000000000002',
 };
@@ -59,7 +62,7 @@ function rowMatches(row: Row, where: Row = {}) {
 }
 
 function makeAsset(
-  scope: MediaAssetScope,
+  scope: CreativeStudioScope,
   overrides: Partial<CreativeAssetEntity> = {},
 ) {
   const now = new Date('2026-09-20T12:00:00.000Z');
@@ -182,7 +185,14 @@ function makeHarness() {
                 String(filter.sql).includes('agencyClientId IS NULL'),
               )
                 ? asset.agencyClientId === null
-                : asset.agencyClientId === scope.agencyClientId),
+                : asset.agencyClientId === scope.agencyClientId) &&
+              (filters.some((filter) =>
+                String(filter.sql).includes('companyContextId IS NULL'),
+              )
+                ? asset.companyContextId === null
+                : asset.companyContextId ===
+                  filters.find((filter) => filter.companyContextId)
+                    ?.companyContextId),
           );
           const filtered = inScope.filter((asset) =>
             filters.every((filter) => {
@@ -305,7 +315,7 @@ function makeHarness() {
   const mediaUpload = {
     upload: jest.fn(
       async (
-        _scope: MediaAssetScope,
+        _scope: CreativeStudioScope,
         _actor: string | null,
         input: { file: { originalname: string } },
       ) => ({
@@ -352,6 +362,8 @@ function makeHarness() {
       },
     ),
   };
+  const contentItems = { findOne: jest.fn().mockResolvedValue(null) };
+  const plans = { exists: jest.fn().mockResolvedValue(false) };
 
   return {
     state,
@@ -362,10 +374,14 @@ function makeHarness() {
     mediaResolver,
     thumbnails,
     dataSource,
+    contentItems,
+    plans,
     assetService: new CreativeAssetService(
       assets as unknown as Repository<CreativeAssetEntity>,
       versions as unknown as Repository<CreativeAssetVersionEntity>,
       folders as unknown as Repository<CreativeFolderEntity>,
+      contentItems as never,
+      plans as never,
       dataSource as never,
       mediaUpload as never,
       mediaResolver as never,
@@ -393,7 +409,7 @@ describe('Creative Studio asset service', () => {
       Reflect.getMetadata(SELF_DECLARED_DEPS_METADATA, CreativeAssetService),
     ).toEqual(
       expect.arrayContaining([
-        { index: 3, param: getDataSourceToken('agency') },
+        { index: 5, param: getDataSourceToken('agency') },
       ]),
     );
   });
@@ -649,6 +665,30 @@ describe('Creative Studio asset service', () => {
     expect(h.state.assets[0].status).toBe('ready');
     expect(h.state.versions).toHaveLength(1);
     expect(h.mediaResolver.resolve).not.toHaveBeenCalled();
+    expect(h.mediaUpload.upload).not.toHaveBeenCalled();
+  });
+
+  it('rejects an editorial content link whose parent plan belongs to another company', async () => {
+    const h = makeHarness();
+    const contentItemId = id(70);
+    const planId = id(71);
+    h.contentItems.findOne.mockResolvedValue({ id: contentItemId, planId });
+    h.plans.exists.mockResolvedValue(false);
+
+    await expect(
+      h.assetService.upload(clientA, 'user-a', {
+        file: file(PNG),
+        contentItemId,
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(h.plans.exists).toHaveBeenCalledWith({
+      where: expect.objectContaining({
+        id: planId,
+        agencyClientId: clientA.agencyClientId,
+        companyContextId: clientA.companyContextId,
+      }),
+    });
     expect(h.mediaUpload.upload).not.toHaveBeenCalled();
   });
 

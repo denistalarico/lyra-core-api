@@ -203,6 +203,10 @@ import { ExpandBrandKitAssetContext1794200000000 } from './migrations/1794200000
 import { CreateSocialAdReachPeriods1794210000000 } from './migrations/1794210000000-create-social-ad-reach-periods';
 import { CreateSocialBreakdownFacts1794300000000 } from './migrations/1794300000000-create-social-breakdown-facts';
 import { CreateAgencyClientCompanyContexts1794400000000 } from './migrations/1794400000000-create-agency-client-company-contexts';
+import { ScopeSocialEditorialByCompany1794500000000 } from './migrations/1794500000000-scope-social-editorial-by-company';
+import { ScopeBrandKitByCompany1794510000000 } from './migrations/1794510000000-scope-brand-kit-by-company';
+import { ScopeCreativeStudioByCompany1794520000000 } from './migrations/1794520000000-scope-creative-studio-by-company';
+import { CreateSocialAnalyticsDashboards1794600000000 } from './migrations/1794600000000-create-social-analytics-dashboards';
 
 export const AgencyDataSource = new DataSource({
   type: 'postgres',
@@ -416,5 +420,9 @@ export const AgencyDataSource = new DataSource({
     CreateSocialAdReachPeriods1794210000000,
     CreateSocialBreakdownFacts1794300000000,
     CreateAgencyClientCompanyContexts1794400000000,
+    ScopeSocialEditorialByCompany1794500000000,
+    ScopeBrandKitByCompany1794510000000,
+    ScopeCreativeStudioByCompany1794520000000,
+    CreateSocialAnalyticsDashboards1794600000000,
   ],
 });

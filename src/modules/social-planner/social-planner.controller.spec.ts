@@ -104,7 +104,9 @@ describe('SocialPlannerController', () => {
   });
 
   it('returns generation availability without requiring an existing content item', () => {
-    copyGenerationService.availability.mockReturnValue({ providerEnabled: true });
+    copyGenerationService.availability.mockReturnValue({
+      providerEnabled: true,
+    });
 
     expect(controller.copyGenerationAvailability()).toEqual({
       providerEnabled: true,
@@ -170,6 +172,7 @@ describe('SocialPlannerController', () => {
       tenantId: ctx.tenantId,
       workspaceId: ctx.workspaceId,
       agencyClientId: null,
+      companyContextId: null,
     });
   });
 
@@ -184,6 +187,7 @@ describe('SocialPlannerController', () => {
         productKey: 'social',
         operatingMode: 'client',
         clientId: '33333333-3333-4333-8333-333333333333',
+        companyContextId: '44444444-4444-4444-8444-444444444444',
         managedTenantId: '88888888-8888-4888-8888-888888888888',
       },
     };
@@ -194,7 +198,26 @@ describe('SocialPlannerController', () => {
       tenantId: ctx.tenantId,
       workspaceId: ctx.workspaceId,
       agencyClientId: '33333333-3333-4333-8333-333333333333',
+      companyContextId: '44444444-4444-4444-8444-444444444444',
     });
+  });
+
+  it('rejects client mode without a resolved company context', () => {
+    const ctx: RequestContext = {
+      tenantId: '11111111-1111-4111-8111-111111111111',
+      workspaceId: '22222222-2222-4222-8222-222222222222',
+      userId: '55555555-5555-4555-8555-555555555555',
+      managedContext: {
+        productKey: 'social',
+        operatingMode: 'client',
+        clientId: '33333333-3333-4333-8333-333333333333',
+        companyContextId: null,
+        managedTenantId: '88888888-8888-4888-8888-888888888888',
+      },
+    };
+
+    expect(() => controller.listPlans(ctx)).toThrow(BadRequestException);
+    expect(service.listPlans).not.toHaveBeenCalled();
   });
 
   it('rejects requests without workspace context', async () => {

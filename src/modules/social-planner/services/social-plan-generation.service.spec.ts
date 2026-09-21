@@ -22,6 +22,7 @@ const scope: SocialPlannerScope = {
   tenantId: 'tenant-1',
   workspaceId: 'workspace-1',
   agencyClientId: null,
+  companyContextId: null,
 };
 
 const plan = {
@@ -57,7 +58,11 @@ function generatedItem(overrides: Record<string, unknown> = {}) {
 
 describe('SocialPlanGenerationService', () => {
   let plansRepository: { findOne: jest.Mock };
-  let contentRepository: { count: jest.Mock; create: jest.Mock; save: jest.Mock };
+  let contentRepository: {
+    count: jest.Mock;
+    create: jest.Mock;
+    save: jest.Mock;
+  };
   let destinationsRepository: { create: jest.Mock; save: jest.Mock };
   let runsRepository: { create: jest.Mock; save: jest.Mock; update: jest.Mock };
   let provider: { generate: jest.Mock };
@@ -68,7 +73,9 @@ describe('SocialPlanGenerationService', () => {
   let config: SocialCopyGenerationConfigService;
   let service: SocialPlanGenerationService;
 
-  function build(configOverrides: Partial<SocialCopyGenerationConfigService> = {}) {
+  function build(
+    configOverrides: Partial<SocialCopyGenerationConfigService> = {},
+  ) {
     config = {
       mode: 'live',
       reserveCents: 5,
@@ -325,7 +332,9 @@ describe('SocialPlanGenerationService', () => {
   });
 
   it('marks the run failed and keeps the reserve when the provider fails', async () => {
-    provider.generate.mockRejectedValue(new Error('generation_provider_timeout'));
+    provider.generate.mockRejectedValue(
+      new Error('generation_provider_timeout'),
+    );
 
     await expect(
       service.generatePlan(scope, 'plan-1', 'user-1', {}),

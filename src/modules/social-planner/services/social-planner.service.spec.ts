@@ -57,11 +57,18 @@ describe('SocialPlannerService', () => {
     tenantId: '11111111-1111-4111-8111-111111111111',
     workspaceId: '22222222-2222-4222-8222-222222222222',
     agencyClientId: null,
+    companyContextId: null,
   };
 
   const clientScope: SocialPlannerScope = {
     ...agencyScope,
     agencyClientId: '33333333-3333-4333-8333-333333333333',
+    companyContextId: '44444444-4444-4444-8444-444444444444',
+  };
+
+  const secondCompanyScope: SocialPlannerScope = {
+    ...clientScope,
+    companyContextId: '55555555-5555-4555-8555-555555555555',
   };
 
   beforeEach(() => {
@@ -69,6 +76,16 @@ describe('SocialPlannerService', () => {
     contentRepository = createRepositoryMock();
     destinationsRepository = createRepositoryMock();
     revisionsRepository = createRepositoryMock();
+    plansRepository.findOne.mockImplementation(({ where }) =>
+      Promise.resolve({
+        id: where.id,
+        tenantId: clientScope.tenantId,
+        workspaceId: clientScope.workspaceId,
+        agencyClientId: clientScope.agencyClientId,
+        companyContextId: clientScope.companyContextId,
+        deletedAt: null,
+      }),
+    );
     campaignService = { assertOptionalLinks: jest.fn() };
 
     service = new SocialPlannerService(
@@ -196,6 +213,99 @@ describe('SocialPlannerService', () => {
       await expect(
         service.getPlan(clientScope, '99999999-9999-4999-8999-999999999999'),
       ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('does not expose a plan from another company of the same managed client', async () => {
+      plansRepository.findOne.mockImplementation(({ where }) =>
+        Promise.resolve(
+          where.companyContextId === secondCompanyScope.companyContextId
+            ? {
+                id: where.id,
+                tenantId: secondCompanyScope.tenantId,
+                workspaceId: secondCompanyScope.workspaceId,
+                agencyClientId: secondCompanyScope.agencyClientId,
+                companyContextId: secondCompanyScope.companyContextId,
+                deletedAt: null,
+              }
+            : null,
+        ),
+      );
+
+      await expect(
+        service.getPlan(clientScope, '99999999-9999-4999-8999-999999999999'),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      await expect(
+        service.getPlan(
+          secondCompanyScope,
+          '99999999-9999-4999-8999-999999999999',
+        ),
+      ).resolves.toBeDefined();
+    });
+
+    it('applies the same-company boundary to list, open, update and child creation', async () => {
+      const planB = {
+        id: '99999999-9999-4999-8999-999999999999',
+        tenantId: secondCompanyScope.tenantId,
+        workspaceId: secondCompanyScope.workspaceId,
+        agencyClientId: secondCompanyScope.agencyClientId,
+        companyContextId: secondCompanyScope.companyContextId,
+        title: 'Company B plan',
+        periodStart: '2026-09-01',
+        periodEnd: '2026-09-30',
+        status: 'draft',
+        primaryObjective: null,
+        strategyMode: null,
+        summary: null,
+        createdById: null,
+        updatedById: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        deletedAt: null,
+      } as SocialPlanEntity;
+      plansRepository.find.mockImplementation(({ where }) =>
+        Promise.resolve(
+          where.companyContextId === secondCompanyScope.companyContextId
+            ? [planB]
+            : [],
+        ),
+      );
+      plansRepository.findOne.mockImplementation(({ where }) =>
+        Promise.resolve(
+          where.id === planB.id &&
+            where.companyContextId === secondCompanyScope.companyContextId
+            ? planB
+            : null,
+        ),
+      );
+
+      await expect(service.listPlans(clientScope)).resolves.toEqual({
+        items: [],
+        total: 0,
+      });
+      await expect(
+        service.getPlan(clientScope, planB.id),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      await expect(
+        service.updatePlan(clientScope, planB.id, null, { title: 'stolen' }),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      await expect(
+        service.createContent(clientScope, planB.id, null, {
+          title: 'Post 1',
+          theme: 'Tema',
+          plannedDate: '2026-09-10',
+          planningStatus: 'planned',
+          funnelStage: 'discovery',
+          contentType: 'post',
+          creativeFormat: 'image',
+        }),
+      ).rejects.toBeInstanceOf(NotFoundException);
+
+      expect(plansRepository.save).not.toHaveBeenCalled();
+      expect(contentRepository.save).not.toHaveBeenCalled();
+      await expect(service.listPlans(secondCompanyScope)).resolves.toEqual({
+        items: [expect.objectContaining({ id: planB.id })],
+        total: 1,
+      });
     });
   });
 

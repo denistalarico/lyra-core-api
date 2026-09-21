@@ -1,13 +1,6 @@
-import {
-  BadRequestException,
-  Injectable,
-} from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import {
-  IsNull,
-  type FindOptionsWhere,
-  Repository,
-} from 'typeorm';
+import { IsNull, type FindOptionsWhere, Repository } from 'typeorm';
 import type {
   SocialPublishingCadence,
   SocialPublishingCadenceChannel,
@@ -33,9 +26,7 @@ export class SocialPublishingCadenceService {
       this.plannerSettingsService.getSettings(scope),
     ]);
 
-    const cadence = row
-      ? this.toCadence(row)
-      : this.cloneDefaults();
+    const cadence = row ? this.toCadence(row) : this.cloneDefaults();
 
     return {
       cadence,
@@ -73,13 +64,10 @@ export class SocialPublishingCadenceService {
 
     const next: SocialPublishingCadence = {
       timezone:
-        dto.timezone !== undefined
-          ? dto.timezone.trim()
-          : current.timezone,
+        dto.timezone !== undefined ? dto.timezone.trim() : current.timezone,
 
       autoDistributionEnabled:
-        dto.autoDistributionEnabled ??
-        current.autoDistributionEnabled,
+        dto.autoDistributionEnabled ?? current.autoDistributionEnabled,
 
       channels:
         dto.channels !== undefined
@@ -96,12 +84,12 @@ export class SocialPublishingCadenceService {
         tenantId: scope.tenantId,
         workspaceId: scope.workspaceId,
         agencyClientId: scope.agencyClientId,
+        companyContextId: scope.companyContextId,
         createdById: actorUserId,
       });
 
     row.timezone = next.timezone;
-    row.autoDistributionEnabled =
-      next.autoDistributionEnabled;
+    row.autoDistributionEnabled = next.autoDistributionEnabled;
     row.channels = next.channels;
     row.updatedById = actorUserId;
 
@@ -140,9 +128,9 @@ export class SocialPublishingCadenceService {
       tenantId: scope.tenantId,
       workspaceId: scope.workspaceId,
       agencyClientId:
-        scope.agencyClientId === null
-          ? IsNull()
-          : scope.agencyClientId,
+        scope.agencyClientId === null ? IsNull() : scope.agencyClientId,
+      companyContextId:
+        scope.companyContextId === null ? IsNull() : scope.companyContextId,
     };
   }
 
@@ -151,16 +139,13 @@ export class SocialPublishingCadenceService {
   ): SocialPublishingCadence {
     return {
       timezone: row.timezone,
-      autoDistributionEnabled:
-        row.autoDistributionEnabled,
+      autoDistributionEnabled: row.autoDistributionEnabled,
       channels: row.channels,
     };
   }
 
   private cloneDefaults(): SocialPublishingCadence {
-    return structuredClone(
-      DEFAULT_SOCIAL_PUBLISHING_CADENCE,
-    );
+    return structuredClone(DEFAULT_SOCIAL_PUBLISHING_CADENCE);
   }
 
   private toEffectiveChannel(
@@ -170,10 +155,8 @@ export class SocialPublishingCadenceService {
     return {
       ...channel,
       effectiveFrequencyPerMonth:
-        channel.frequencyPerMonth ??
-        inheritedMonthlyContentVolume,
-      frequencyInherited:
-        channel.frequencyPerMonth === null,
+        channel.frequencyPerMonth ?? inheritedMonthlyContentVolume,
+      frequencyInherited: channel.frequencyPerMonth === null,
     };
   }
 
@@ -212,16 +195,13 @@ export class SocialPublishingCadenceService {
           );
         }
 
-        if (
-          !/^([01]\d|2[0-3]):[0-5]\d$/.test(slot.time)
-        ) {
+        if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(slot.time)) {
           throw new BadRequestException(
             `Invalid time "${slot.time}" for channel "${channel.channel}".`,
           );
         }
 
-        const slotKey =
-          `${slot.dayOfWeek}:${slot.time}`;
+        const slotKey = `${slot.dayOfWeek}:${slot.time}`;
 
         if (slotKeys.has(slotKey)) {
           throw new BadRequestException(
@@ -248,17 +228,14 @@ export class SocialPublishingCadenceService {
     return channels.map((channel) => ({
       channel: channel.channel.trim(),
       enabled: channel.enabled,
-      frequencyPerMonth:
-        channel.frequencyPerMonth ?? null,
+      frequencyPerMonth: channel.frequencyPerMonth ?? null,
       slots: channel.slots
         .map((slot) => ({
           dayOfWeek: slot.dayOfWeek,
           time: slot.time,
         }))
         .sort(
-          (a, b) =>
-            a.dayOfWeek - b.dayOfWeek ||
-            a.time.localeCompare(b.time),
+          (a, b) => a.dayOfWeek - b.dayOfWeek || a.time.localeCompare(b.time),
         ),
     }));
   }
@@ -267,9 +244,7 @@ export class SocialPublishingCadenceService {
     const normalized = timezone.trim();
 
     if (!normalized) {
-      throw new BadRequestException(
-        'Publishing cadence timezone is required.',
-      );
+      throw new BadRequestException('Publishing cadence timezone is required.');
     }
 
     try {
@@ -277,9 +252,7 @@ export class SocialPublishingCadenceService {
         timeZone: normalized,
       }).format();
     } catch {
-      throw new BadRequestException(
-        `Invalid IANA timezone "${timezone}".`,
-      );
+      throw new BadRequestException(`Invalid IANA timezone "${timezone}".`);
     }
   }
 }

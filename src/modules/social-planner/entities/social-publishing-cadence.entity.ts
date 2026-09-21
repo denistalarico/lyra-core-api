@@ -7,15 +7,14 @@ import {
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
-import type {
-  SocialPublishingCadenceChannel,
-} from '../contracts';
+import type { SocialPublishingCadenceChannel } from '../contracts';
 
 @Entity('social_publishing_cadences')
 @Index('IDX_social_publishing_cadences_scope', [
   'tenantId',
   'workspaceId',
   'agencyClientId',
+  'companyContextId',
 ])
 @Check(
   'CK_social_publishing_cadences_channels_array',
@@ -37,6 +36,9 @@ export class SocialPublishingCadenceEntity {
     nullable: true,
   })
   agencyClientId!: string | null;
+
+  @Column({ name: 'company_context_id', type: 'uuid', nullable: true })
+  companyContextId!: string | null;
 
   /**
    * IANA timezone identifier, e.g. America/Sao_Paulo.

@@ -402,10 +402,7 @@ export class SocialContentLifecycleService {
    * orphan. The same publication guard is still mandatory, both to protect a
    * race with scheduling and to make this endpoint safe if it is called twice.
    */
-  async discard(
-    scope: SocialPlannerScope,
-    contentId: string,
-  ): Promise<void> {
+  async discard(scope: SocialPlannerScope, contentId: string): Promise<void> {
     const check = await this.checkPublications(scope, [contentId]);
     if (!check.available) {
       this.throwForSingleOutcome({
@@ -744,11 +741,18 @@ export class SocialContentLifecycleService {
     planId: string,
     archived: 'exclude' | 'include' | 'only' = 'exclude',
   ): Promise<string> {
+    const plan = await this.plansRepository.findOne({
+      where: { id: planId, ...this.planScopeWhere(scope) },
+    });
+    if (!plan) {
+      throw new NotFoundException('Social plan not found.');
+    }
+
     const items = await this.contentRepository.find({
       where: {
         ...this.contentScopeWhere(scope),
         deletedAt: IsNull(),
-        planId,
+        planId: plan.id,
         ...(archived === 'exclude' ? { archivedAt: IsNull() } : {}),
         ...(archived === 'only' ? { archivedAt: Not(IsNull()) } : {}),
       },
@@ -957,13 +961,22 @@ export class SocialContentLifecycleService {
     scope: SocialPlannerScope,
     contentId: string,
   ): Promise<SocialContentItemEntity | null> {
-    return this.contentRepository.findOne({
+    const item = await this.contentRepository.findOne({
       where: {
         id: contentId,
         ...this.contentScopeWhere(scope),
         deletedAt: IsNull(),
       },
     });
+
+    if (!item) return null;
+
+    const plan = await this.plansRepository.findOne({
+      where: { id: item.planId, ...this.planScopeWhere(scope) },
+      select: { id: true },
+    });
+
+    return plan ? item : null;
   }
 
   private async requireVisibleContent(
@@ -1024,6 +1037,8 @@ export class SocialContentLifecycleService {
       workspaceId: scope.workspaceId,
       agencyClientId:
         scope.agencyClientId === null ? IsNull() : scope.agencyClientId,
+      companyContextId:
+        scope.companyContextId === null ? IsNull() : scope.companyContextId,
       deletedAt: IsNull(),
     };
   }
