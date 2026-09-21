@@ -70,7 +70,7 @@ export class SocialOrganicSyncWorker {
       }
 
       // Scope is re-read from the durable row and re-validated by the resolver.
-      const resolved = await this.credentials.resolveForAnalytics({
+      const resolved = await this.credentials.resolvePersistedForAnalytics({
         tenantId: run.tenantId,
         workspaceId: run.workspaceId,
         agencyClientId: run.agencyClientId,

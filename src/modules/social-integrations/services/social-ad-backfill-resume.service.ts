@@ -59,6 +59,7 @@ export class SocialAdBackfillResumeService {
     tenantId: string;
     workspaceId: string;
     agencyClientId: string | null;
+    companyContextId?: string | null;
     connectionId: string;
     requestedById: string | null;
   }): Promise<EnqueueSyncRunResult> {
@@ -89,6 +90,7 @@ export class SocialAdBackfillResumeService {
       tenantId: input.tenantId,
       workspaceId: input.workspaceId,
       agencyClientId: input.agencyClientId,
+      companyContextId: input.companyContextId ?? null,
       connectionId: input.connectionId,
     });
 

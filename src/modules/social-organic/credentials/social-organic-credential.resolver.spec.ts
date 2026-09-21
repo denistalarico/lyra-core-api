@@ -21,6 +21,7 @@ function connection(
     tenantId: TENANT,
     workspaceId: WORKSPACE,
     agencyClientId: null,
+    companyContextId: null,
     provider: 'meta',
     connectionStatus: 'connected',
     authorizationMethod: 'oauth_user',
@@ -54,6 +55,7 @@ function asset(
     tenantId: TENANT,
     workspaceId: WORKSPACE,
     agencyClientId: null,
+    companyContextId: null,
     connectionId: linkedConnection.id,
     connection: linkedConnection,
     provider: 'meta',
@@ -105,10 +107,12 @@ type FindOptionsDouble = {
     tenantId?: string;
     workspaceId?: string;
     agencyClientId?: unknown;
+    companyContextId?: unknown;
     connection?: {
       tenantId?: string;
       workspaceId?: string;
       agencyClientId?: unknown;
+      companyContextId?: unknown;
     };
   };
 };
@@ -195,6 +199,7 @@ const scope = {
   tenantId: TENANT,
   workspaceId: WORKSPACE,
   agencyClientId: null,
+  companyContextId: null,
   assetId: 'asset-id',
 };
 
@@ -227,6 +232,30 @@ describe('SocialOrganicCredentialResolver', () => {
       'connection.accessTokenEncrypted',
     ]);
     expect(resolved.assets.getOne).not.toHaveBeenCalled();
+    expect(resolved.assets.findOne).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ companyContextId: expect.anything() }),
+      }),
+    );
+  });
+
+  it('carries the company selected on the durable asset root', async () => {
+    const companyContextId = '55555555-5555-4555-8555-555555555555';
+    const resolved = createResolver(asset({ companyContextId }), {
+      connectionToken: crypto.encrypt('connection-token'),
+    });
+
+    const credential = await resolved.resolver.resolve({
+      ...scope,
+      companyContextId,
+    });
+
+    expect(credential.companyContextId).toBe(companyContextId);
+    expect(resolved.assets.findOne).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ companyContextId }),
+      }),
+    );
   });
 
   it.each(['oauth_business', 'internal_system_user'] as const)(

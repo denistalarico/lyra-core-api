@@ -14,6 +14,7 @@ import {
 } from '@nestjs/common';
 import { RequestContextData } from '../../../common/context/request-context.decorator';
 import type { RequestContext } from '../../../common/context/request-context.interface';
+import { resolveCompanyAwareScope } from '../../../common/context/company-aware-scope';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import {
   PermissionsGuard,
@@ -251,26 +252,6 @@ export class SocialPublicationController {
    * The request body cannot select tenant/workspace/client ownership.
    */
   private requireScope(ctx: RequestContext): SocialPublicationScope {
-    if (!ctx.tenantId || !ctx.workspaceId) {
-      throw new BadRequestException(
-        'Tenant and workspace context are required.',
-      );
-    }
-
-    const managedContext = ctx.managedContext;
-    const agencyClientId =
-      managedContext?.operatingMode === 'client'
-        ? (managedContext.clientId ?? null)
-        : null;
-
-    if (managedContext?.operatingMode === 'client' && !agencyClientId) {
-      throw new BadRequestException('Client context is required.');
-    }
-
-    return {
-      tenantId: ctx.tenantId,
-      workspaceId: ctx.workspaceId,
-      agencyClientId,
-    };
+    return resolveCompanyAwareScope(ctx);
   }
 }

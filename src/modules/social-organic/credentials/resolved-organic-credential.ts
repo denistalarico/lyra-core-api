@@ -7,6 +7,7 @@ export type ResolvedOrganicCredential = {
   readonly tenantId: string;
   readonly workspaceId: string;
   readonly agencyClientId: string | null;
+  readonly companyContextId?: string | null;
   readonly provider: string;
   readonly assetType: string;
   readonly externalAssetId: string;
@@ -34,6 +35,7 @@ export function createResolvedOrganicCredential(
     tenantId: input.tenantId,
     workspaceId: input.workspaceId,
     agencyClientId: input.agencyClientId,
+    companyContextId: input.companyContextId,
     provider: input.provider,
     assetType: input.assetType,
     externalAssetId: input.externalAssetId,
@@ -74,6 +76,7 @@ export function summarizeOrganicCredential(
     tenantId: credential.tenantId,
     workspaceId: credential.workspaceId,
     agencyClientId: credential.agencyClientId,
+    companyContextId: credential.companyContextId,
     provider: credential.provider,
     assetType: credential.assetType,
     externalAssetId: credential.externalAssetId,

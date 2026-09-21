@@ -128,6 +128,7 @@ export type ListSyncRunsInput = {
   tenantId: string;
   workspaceId: string;
   agencyClientId: string | null;
+  companyContextId?: string | null;
   connectionId: string;
   limit?: number;
 };
@@ -207,6 +208,7 @@ export class SocialAdSyncRunService {
     tenantId: string;
     workspaceId: string;
     agencyClientId: string | null;
+    companyContextId?: string | null;
     connectionId: string;
     /** Both or neither: a window turns the run from `entities` into `manual`. */
     since?: string;
@@ -240,6 +242,7 @@ export class SocialAdSyncRunService {
       tenantId: input.tenantId,
       workspaceId: input.workspaceId,
       agencyClientId: input.agencyClientId,
+      companyContextId: input.companyContextId ?? null,
       connectionId: input.connectionId,
     });
 
@@ -683,6 +686,16 @@ export class SocialAdSyncRunService {
    * endpoint confirms nothing about whether the id exists.
    */
   async listRecent(input: ListSyncRunsInput): Promise<SocialAdSyncRunView[]> {
+    const connectionInScope = await this.credentialResolver.hasConnectionInScope({
+      tenantId: input.tenantId,
+      workspaceId: input.workspaceId,
+      agencyClientId: input.agencyClientId,
+      companyContextId: input.companyContextId ?? null,
+      connectionId: input.connectionId,
+    });
+
+    if (!connectionInScope) return [];
+
     const take = Math.min(
       MAX_LIST_LIMIT,
       Math.max(1, Math.trunc(input.limit ?? DEFAULT_LIST_LIMIT)),

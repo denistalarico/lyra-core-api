@@ -370,7 +370,7 @@ export class SocialAdManualActionService {
     const row = await this.connections.findOne({
       where: {
         id: connectionId,
-        ...this.scopeWhere(scope),
+        ...this.connectionScope(scope),
         provider: PROVIDER,
       },
     });
@@ -411,6 +411,14 @@ export class SocialAdManualActionService {
       workspaceId: scope.workspaceId,
       agencyClientId:
         scope.agencyClientId === null ? IsNull() : scope.agencyClientId,
+    };
+  }
+
+  private connectionScope(scope: SocialCampaignsScope) {
+    return {
+      ...this.scopeWhere(scope),
+      companyContextId:
+        scope.companyContextId == null ? IsNull() : scope.companyContextId,
     };
   }
 

@@ -32,6 +32,7 @@ export type StartSocialOrganicConnectionInput = {
   tenantId: string;
   workspaceId: string;
   agencyClientId: string | null;
+  companyContextId?: string | null;
   userId: string | null;
   provider: string;
   connectionMode?: string;
@@ -47,6 +48,7 @@ export type SelectSocialOrganicAssetsInput = {
   tenantId: string;
   workspaceId: string;
   agencyClientId: string | null;
+  companyContextId?: string | null;
   userId: string | null;
   provider: string;
   connectionId: string;
@@ -94,6 +96,7 @@ export class SocialOrganicOAuthService {
   ) {}
 
   async start(input: StartSocialOrganicConnectionInput) {
+    const companyContextId = input.companyContextId ?? null;
     if (!input.userId) {
       throw new BadRequestException('creator_required');
     }
@@ -132,6 +135,7 @@ export class SocialOrganicOAuthService {
       lastError: null,
       metadata: {
         startedAt: new Date().toISOString(),
+        companyContextId,
         ...(input.connectionMode ? { connectionMode: input.connectionMode } : {}),
         ...(input.allowedAssetTypes?.length
           ? { allowedAssetTypes: [...input.allowedAssetTypes] }
@@ -187,6 +191,7 @@ export class SocialOrganicOAuthService {
   async select(
     input: SelectSocialOrganicAssetsInput,
   ): Promise<SocialOrganicConnectionView> {
+    const companyContextId = input.companyContextId ?? null;
     const hooks = this.providers.get(input.provider);
     const requestedIds = [...new Set(input.externalAssetIds)];
 
@@ -224,6 +229,13 @@ export class SocialOrganicOAuthService {
         .getOne();
 
       if (!connection) {
+        return { ok: false as const, reason: 'invalid_connection' as const };
+      }
+
+      if (
+        (connection.metadata.companyContextId ?? null) !==
+        companyContextId
+      ) {
         return { ok: false as const, reason: 'invalid_connection' as const };
       }
 
@@ -286,6 +298,7 @@ export class SocialOrganicOAuthService {
         existing.some(
           (asset) =>
             asset.agencyClientId !== input.agencyClientId ||
+            asset.companyContextId !== companyContextId ||
             (asset.connectionId !== connection.id &&
               asset.status !== 'revoked' &&
               asset.status !== 'archived'),
@@ -314,11 +327,13 @@ export class SocialOrganicOAuthService {
               tenantId: connection.tenantId,
               workspaceId: connection.workspaceId,
               agencyClientId: connection.agencyClientId,
+              companyContextId,
               provider: connection.provider,
               externalAssetId: discovered.externalAssetId,
             });
 
           asset.connectionId = connection.id;
+          asset.companyContextId = companyContextId;
           asset.connection = connection;
           asset.assetType = discovered.assetType;
           asset.displayName = discovered.displayName ?? null;
@@ -578,6 +593,11 @@ export class SocialOrganicOAuthService {
         connectionMode: input.connectionMode,
       });
     }
+
+    query.andWhere(
+      "COALESCE(metadata ->> 'companyContextId', '') = :companyContextId",
+      { companyContextId: input.companyContextId ?? '' },
+    );
 
     if (input.agencyClientId) {
       query.andWhere('agency_client_id = :agencyClientId', {

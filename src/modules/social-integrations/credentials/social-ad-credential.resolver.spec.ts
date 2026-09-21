@@ -21,6 +21,7 @@ function connection(
     tenantId: INTERNAL_TENANT,
     workspaceId: WORKSPACE,
     agencyClientId: null,
+    companyContextId: null,
     provider: 'meta_ads',
     authorizationMethod: 'business_login',
     externalAccountId: 'act_1234567890',
@@ -151,10 +152,12 @@ describe('SocialAdCredentialResolver', () => {
 
     it('carries the scope the row was stored under', async () => {
       const crypto = new SettingsCryptoService();
+      const companyContextId = '55555555-5555-4555-8555-555555555555';
       const { resolver } = createResolver(
         connection({
           tenantId: OTHER_TENANT,
           agencyClientId: MANAGED_CLIENT,
+          companyContextId,
           accessTokenEncrypted: crypto.encrypt('client-token'),
         }),
       );
@@ -166,10 +169,12 @@ describe('SocialAdCredentialResolver', () => {
         ...agencyScope,
         tenantId: OTHER_TENANT,
         agencyClientId: MANAGED_CLIENT,
+        companyContextId,
       });
 
       expect(credential.tenantId).toBe(OTHER_TENANT);
       expect(credential.agencyClientId).toBe(MANAGED_CLIENT);
+      expect(credential.companyContextId).toBe(companyContextId);
     });
 
     it('refuses when the row holds no token', async () => {

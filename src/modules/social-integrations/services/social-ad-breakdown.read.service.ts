@@ -30,6 +30,7 @@ export type SocialAdBreakdownReadInput = {
   tenantId: string;
   workspaceId: string;
   agencyClientId: string | null;
+  companyContextId?: string | null;
   connectionId: string;
   kind: SocialAdBreakdownKind;
   since: string;
@@ -170,6 +171,7 @@ export class SocialAdBreakdownReadService {
         // column is NULL, and TypeORM reads a literal null as "no filter" —
         // which would silently widen the lookup to every client.
         agencyClientId: input.agencyClientId ?? IsNull(),
+        companyContextId: input.companyContextId ?? IsNull(),
       },
       // The stored scope travels with the row: the aggregate binds tenant and
       // workspace, and it must bind what is stored rather than what the caller

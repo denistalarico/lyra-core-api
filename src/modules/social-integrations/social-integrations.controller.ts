@@ -14,6 +14,7 @@ import {
 import type { Response } from 'express';
 import { RequestContextData } from '../../common/context/request-context.decorator';
 import type { RequestContext } from '../../common/context/request-context.interface';
+import { resolveCompanyAwareScope } from '../../common/context/company-aware-scope';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import {
   PermissionsGuard,
@@ -68,10 +69,8 @@ export class SocialIntegrationsController {
     const scope = this.requireScope(ctx);
 
     return this.metaAdsOAuthService.start({
-      tenantId: scope.tenantId,
-      workspaceId: scope.workspaceId,
+      ...scope,
       userId: ctx.userId ?? null,
-      agencyClientId: scope.agencyClientId,
     });
   }
 
@@ -115,8 +114,7 @@ export class SocialIntegrationsController {
     const scope = this.requireScope(ctx);
 
     return this.metaAdsOAuthService.select({
-      tenantId: scope.tenantId,
-      workspaceId: scope.workspaceId,
+      ...scope,
       userId: ctx.userId ?? null,
       connectionId: dto.connectionId,
       externalAccountId: dto.externalAccountId,
@@ -205,9 +203,7 @@ export class SocialIntegrationsController {
     const scope = this.requireScope(ctx);
 
     const items = await this.connectionService.list({
-      tenantId: scope.tenantId,
-      workspaceId: scope.workspaceId,
-      agencyClientId: scope.agencyClientId,
+      ...scope,
     });
 
     return { items, total: items.length };
@@ -224,9 +220,7 @@ export class SocialIntegrationsController {
     const scope = this.requireScope(ctx);
 
     return this.connectionService.disconnect({
-      tenantId: scope.tenantId,
-      workspaceId: scope.workspaceId,
-      agencyClientId: scope.agencyClientId,
+      ...scope,
       connectionId,
     });
   }
@@ -259,6 +253,7 @@ export class SocialIntegrationsController {
         tenantId: scope.tenantId,
         workspaceId: scope.workspaceId,
         agencyClientId: scope.agencyClientId,
+        companyContextId: scope.companyContextId,
         connectionId,
       });
     } catch (error) {
@@ -296,6 +291,7 @@ export class SocialIntegrationsController {
         tenantId: scope.tenantId,
         workspaceId: scope.workspaceId,
         agencyClientId: scope.agencyClientId,
+        companyContextId: scope.companyContextId,
         connectionId,
         since: dto.since,
         until: dto.until,
@@ -340,6 +336,7 @@ export class SocialIntegrationsController {
         tenantId: scope.tenantId,
         workspaceId: scope.workspaceId,
         agencyClientId: scope.agencyClientId,
+        companyContextId: scope.companyContextId,
         connectionId,
         since: dto.since,
         until: dto.until,
@@ -385,6 +382,7 @@ export class SocialIntegrationsController {
         tenantId: scope.tenantId,
         workspaceId: scope.workspaceId,
         agencyClientId: scope.agencyClientId,
+        companyContextId: scope.companyContextId,
         connectionId,
         since: dto.since,
         until: dto.until,
@@ -428,6 +426,7 @@ export class SocialIntegrationsController {
         tenantId: scope.tenantId,
         workspaceId: scope.workspaceId,
         agencyClientId: scope.agencyClientId,
+        companyContextId: scope.companyContextId,
         connectionId,
         since: dto.since,
         until: dto.until,
@@ -466,6 +465,7 @@ export class SocialIntegrationsController {
         tenantId: scope.tenantId,
         workspaceId: scope.workspaceId,
         agencyClientId: scope.agencyClientId,
+        companyContextId: scope.companyContextId,
         connectionId,
         requestedById: ctx.userId ?? null,
       });
@@ -500,6 +500,7 @@ export class SocialIntegrationsController {
       tenantId: scope.tenantId,
       workspaceId: scope.workspaceId,
       agencyClientId: scope.agencyClientId,
+      companyContextId: scope.companyContextId,
       connectionId,
     });
 
@@ -515,26 +516,6 @@ export class SocialIntegrationsController {
    * `social` product for this client before the handler runs.
    */
   private requireScope(ctx: RequestContext) {
-    if (!ctx.tenantId || !ctx.workspaceId) {
-      throw new BadRequestException(
-        'Tenant and workspace context are required.',
-      );
-    }
-
-    const managedContext = ctx.managedContext;
-    const agencyClientId =
-      managedContext?.operatingMode === 'client'
-        ? (managedContext.clientId ?? null)
-        : null;
-
-    if (managedContext?.operatingMode === 'client' && !agencyClientId) {
-      throw new BadRequestException('Client context is required.');
-    }
-
-    return {
-      tenantId: ctx.tenantId,
-      workspaceId: ctx.workspaceId,
-      agencyClientId,
-    };
+    return resolveCompanyAwareScope(ctx);
   }
 }

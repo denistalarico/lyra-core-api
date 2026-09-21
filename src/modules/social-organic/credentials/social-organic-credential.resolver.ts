@@ -19,11 +19,14 @@ export type SocialOrganicCredentialScope = {
   tenantId: string;
   workspaceId: string;
   agencyClientId: string | null;
+  companyContextId?: string | null;
 };
 
 export type ResolveOrganicCredentialInput = SocialOrganicCredentialScope & {
   assetId: string;
 };
+
+type ResolvePersistedOrganicCredentialInput = ResolveOrganicCredentialInput;
 
 export type SocialOrganicLifecycleConnectionCredential = {
   accessToken: string | null;
@@ -63,8 +66,30 @@ export class SocialOrganicCredentialResolver {
     return this.resolveInternal(input, 'analytics');
   }
 
+  /** Background jobs derive Company Context from the persisted asset itself. */
+  async resolvePersistedForAnalytics(
+    input: ResolvePersistedOrganicCredentialInput,
+  ): Promise<ResolvedOrganicAnalyticsCredential> {
+    const asset = await this.assetsRepository.findOne({
+      where: {
+        id: input.assetId,
+        tenantId: input.tenantId,
+        workspaceId: input.workspaceId,
+        agencyClientId: input.agencyClientId ?? IsNull(),
+      },
+      select: ['companyContextId'],
+    });
+    if (!asset) throw new SocialOrganicCredentialError('asset_not_found');
+    return this.resolveInternal(
+      { ...input, companyContextId: asset.companyContextId },
+      'analytics',
+    );
+  }
+
   private async resolveInternal(
-    input: ResolveOrganicCredentialInput,
+    input:
+      | ResolveOrganicCredentialInput
+      | ResolvePersistedOrganicCredentialInput,
     purpose: 'publishing' | 'analytics',
   ): Promise<ResolvedOrganicAnalyticsCredential> {
     const asset = await this.findInScope(input);
@@ -125,6 +150,7 @@ export class SocialOrganicCredentialResolver {
       tenantId: asset.tenantId,
       workspaceId: asset.workspaceId,
       agencyClientId: asset.agencyClientId,
+      companyContextId: asset.companyContextId,
     };
 
     let accessToken: string;
@@ -132,7 +158,11 @@ export class SocialOrganicCredentialResolver {
     // The only runtime branch on authorization_method in the organic module.
     switch (connection.authorizationMethod) {
       case 'oauth_user':
-        accessToken = await this.resolveConnectionToken(connection, scope);
+        accessToken = await this.resolveConnectionToken(
+          connection,
+          asset.id,
+          scope,
+        );
         break;
 
       case 'oauth_business':
@@ -152,6 +182,7 @@ export class SocialOrganicCredentialResolver {
       tenantId: scope.tenantId,
       workspaceId: scope.workspaceId,
       agencyClientId: scope.agencyClientId,
+      companyContextId: scope.companyContextId,
       provider: asset.provider,
       assetType: asset.assetType,
       externalAssetId: asset.externalAssetId,
@@ -198,6 +229,7 @@ export class SocialOrganicCredentialResolver {
 
   private async resolveConnectionToken(
     connection: SocialOrganicConnectionEntity,
+    assetId: string,
     scope: SocialOrganicCredentialScope,
   ): Promise<string> {
     this.assertUsableExpiry(connection.tokenExpiresAt);
@@ -219,6 +251,17 @@ export class SocialOrganicCredentialResolver {
         scope.agencyClientId === null
           ? {}
           : { agencyClientId: scope.agencyClientId },
+      )
+      .andWhere(
+        scope.companyContextId === null
+          ? 'connection.id IN (SELECT scoped_asset.connection_id FROM social_organic_assets scoped_asset WHERE scoped_asset.company_context_id IS NULL AND scoped_asset.id = :assetId)'
+          : 'connection.id IN (SELECT scoped_asset.connection_id FROM social_organic_assets scoped_asset WHERE scoped_asset.company_context_id = :companyContextId AND scoped_asset.id = :assetId)',
+        scope.companyContextId === null
+          ? { assetId }
+          : {
+              companyContextId: scope.companyContextId,
+              assetId,
+            },
       )
       .getOne();
 
@@ -246,6 +289,14 @@ export class SocialOrganicCredentialResolver {
         scope.agencyClientId === null
           ? {}
           : { agencyClientId: scope.agencyClientId },
+      )
+      .andWhere(
+        scope.companyContextId === null
+          ? 'asset.companyContextId IS NULL'
+          : 'asset.companyContextId = :companyContextId',
+        scope.companyContextId === null
+          ? {}
+          : { companyContextId: scope.companyContextId },
       )
       .getOne();
 
@@ -287,7 +338,9 @@ export class SocialOrganicCredentialResolver {
     }
   }
 
-  private findInScope(input: ResolveOrganicCredentialInput) {
+  private findInScope(
+    input: ResolveOrganicCredentialInput | ResolvePersistedOrganicCredentialInput,
+  ) {
     const agencyClientId = input.agencyClientId ?? IsNull();
 
     return this.assetsRepository.findOne({
@@ -297,6 +350,8 @@ export class SocialOrganicCredentialResolver {
         tenantId: input.tenantId,
         workspaceId: input.workspaceId,
         agencyClientId,
+        companyContextId:
+          input.companyContextId == null ? IsNull() : input.companyContextId,
         // The FK alone does not guarantee that both rows carry the same scope.
         connection: {
           tenantId: input.tenantId,

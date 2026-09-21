@@ -373,6 +373,7 @@ describe('DestinationCreativeService', () => {
           tenantId: agencyScope.tenantId,
           workspaceId: agencyScope.workspaceId,
           agencyClientId: IsNull(),
+          contentItemId: expect.anything(),
         },
       });
     });

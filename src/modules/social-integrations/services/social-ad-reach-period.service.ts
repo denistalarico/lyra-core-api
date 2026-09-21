@@ -197,6 +197,7 @@ export class SocialAdReachPeriodService {
       tenantId: input.tenantId,
       workspaceId: input.workspaceId,
       agencyClientId: input.agencyClientId,
+      companyContextId: input.companyContextId ?? null,
       connectionId: input.connectionId,
     });
 
@@ -252,6 +253,7 @@ export class SocialAdReachPeriodService {
       tenantId: input.tenantId,
       workspaceId: input.workspaceId,
       agencyClientId: input.agencyClientId,
+      companyContextId: input.companyContextId ?? null,
       connectionId: input.connectionId,
     });
 

@@ -33,6 +33,7 @@ export class MetaAdsBoostAdapter {
       tenantId: input.tenantId,
       workspaceId: input.workspaceId,
       agencyClientId: input.agencyClientId,
+      companyContextId: input.companyContextId ?? null,
       connectionId: input.connectionId,
     });
     const created: Partial<Record<Level, string>> = {};

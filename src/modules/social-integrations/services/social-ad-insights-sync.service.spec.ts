@@ -188,6 +188,7 @@ describe('SocialAdInsightsSyncService — the happy path', () => {
       tenantId: 'tenant-a',
       workspaceId: 'workspace-a',
       agencyClientId: null,
+      companyContextId: null,
       connectionId: 'connection-id',
     });
   });

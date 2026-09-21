@@ -58,7 +58,7 @@ export class SocialBoostRequestService {
       where: { requestId: dto.requestId },
     });
     if (existing) {
-      this.assertScope(existing, scope);
+      await this.assertScope(existing, scope);
       return this.view(existing);
     }
 
@@ -83,7 +83,9 @@ export class SocialBoostRequestService {
     errorCode ??= boostExecutionBlockCode(template, snapshot);
     const ttl = policy?.confirmationTtlMinutes ?? 10;
     const row = this.requests.create({
-      ...scope,
+      tenantId: scope.tenantId,
+      workspaceId: scope.workspaceId,
+      agencyClientId: scope.agencyClientId,
       connectionId: dto.connectionId,
       publicationId: publication.id,
       contentItemId: publication.content_item_id,
@@ -123,7 +125,7 @@ export class SocialBoostRequestService {
         .where('boost.id = :requestId', { requestId })
         .getOne();
       if (!row) throw new NotFoundException('Boost request not found.');
-      this.assertScope(row, scope);
+      await this.assertScope(row, scope);
       if (row.confirmationRequestId === confirmationRequestId)
         return { row, shouldExecute: false };
       if (row.confirmationRequestId)
@@ -191,10 +193,20 @@ export class SocialBoostRequestService {
          FROM social_publications p
          JOIN social_organic_assets a ON a.id = p.asset_id
          JOIN social_organic_connections c ON c.id = p.connection_id
+         JOIN social_content_items item ON item.id = p.content_item_id
+         JOIN social_plans plan ON plan.id = item.plan_id
         WHERE p.id = $1 AND p.tenant_id = $2 AND p.workspace_id = $3
           AND p.agency_client_id IS NOT DISTINCT FROM $4::uuid
+          AND a.company_context_id IS NOT DISTINCT FROM $5::uuid
+          AND plan.company_context_id IS NOT DISTINCT FROM $5::uuid
           AND p.status = 'published' AND p.external_publication_id IS NOT NULL`,
-      [id, scope.tenantId, scope.workspaceId, scope.agencyClientId],
+      [
+        id,
+        scope.tenantId,
+        scope.workspaceId,
+        scope.agencyClientId,
+        scope.companyContextId,
+      ],
     );
     if (!rows[0])
       throw new NotFoundException('Published Social publication not found.');
@@ -217,7 +229,7 @@ export class SocialBoostRequestService {
   private async requireConnection(scope: SocialCampaignsScope, id: string) {
     const row = await this.connections.findOne({
       where: {
-        ...this.scopeWhere(scope),
+        ...this.connectionScopeWhere(scope),
         id,
         provider: 'meta_ads',
         connectionStatus: 'connected',
@@ -229,7 +241,7 @@ export class SocialBoostRequestService {
 
   private async requireTemplate(scope: SocialCampaignsScope, id: string) {
     const row = await this.templates.findOne({
-      where: { ...this.scopeWhere(scope), id },
+      where: { ...this.templateScopeWhere(scope), id },
     });
     if (!row) throw new NotFoundException('Boost template not found.');
     return row;
@@ -237,11 +249,11 @@ export class SocialBoostRequestService {
 
   private findPolicy(scope: SocialCampaignsScope, connectionId: string) {
     return this.policies.findOne({
-      where: { ...this.scopeWhere(scope), connectionId },
+      where: { ...this.baseScopeWhere(scope), connectionId },
     });
   }
 
-  private scopeWhere(scope: SocialCampaignsScope) {
+  private baseScopeWhere(scope: SocialCampaignsScope) {
     return {
       tenantId: scope.tenantId,
       workspaceId: scope.workspaceId,
@@ -250,16 +262,34 @@ export class SocialBoostRequestService {
     };
   }
 
-  private assertScope(
+  private connectionScopeWhere(scope: SocialCampaignsScope) {
+    return {
+      ...this.baseScopeWhere(scope),
+      companyContextId:
+        scope.companyContextId == null ? IsNull() : scope.companyContextId,
+    };
+  }
+
+  private templateScopeWhere(scope: SocialCampaignsScope) {
+    return this.connectionScopeWhere(scope);
+  }
+
+  private async assertScope(
     row: SocialBoostRequestEntity,
     scope: SocialCampaignsScope,
-  ) {
+  ): Promise<void> {
     if (
       row.tenantId !== scope.tenantId ||
       row.workspaceId !== scope.workspaceId ||
       row.agencyClientId !== scope.agencyClientId
-    )
+    ) {
       throw new NotFoundException('Boost request not found.');
+    }
+    await Promise.all([
+      this.requireConnection(scope, row.connectionId),
+      this.requireTemplate(scope, row.boostTemplateId),
+      this.requirePublication(scope, row.publicationId),
+    ]);
   }
 
   private view(row: SocialBoostRequestEntity) {

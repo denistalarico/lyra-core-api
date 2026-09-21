@@ -6,7 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { IsNull, type FindOptionsWhere, Repository } from 'typeorm';
+import { IsNull, Raw, type FindOptionsWhere, Repository } from 'typeorm';
 import { MediaAssetResolverService } from '../../../common/media-assets';
 import { checkMediaAssetCapability } from '../media/media-capability-check';
 import { SocialContentDestinationEntity } from '../../social-planner/entities/social-content-destination.entity';
@@ -23,6 +23,7 @@ export interface SocialPublicationScope {
   tenantId: string;
   workspaceId: string;
   agencyClientId: string | null;
+  companyContextId?: string | null;
 }
 
 const DEFAULT_MAX_ATTEMPTS = 5;
@@ -52,14 +53,12 @@ export class SocialPublicationService {
     scope: SocialPublicationScope,
     query: ListSocialPublicationsQueryDto,
   ) {
-    const where: FindOptionsWhere<SocialPublicationEntity> = {
-      ...this.scopeWhere(scope),
-      ...(query.contentItemId ? { contentItemId: query.contentItemId } : {}),
-      ...(query.status ? { status: query.status } : {}),
-    };
-
     const items = await this.publicationsRepository.find({
-      where,
+      where: {
+        ...this.companyScopedPublicationWhere(scope),
+        ...(query.contentItemId ? { contentItemId: query.contentItemId } : {}),
+        ...(query.status ? { status: query.status } : {}),
+      },
       order: { scheduledAt: 'DESC', createdAt: 'DESC' },
     });
 
@@ -509,7 +508,15 @@ export class SocialPublicationService {
     contentItemId: string,
   ): Promise<SocialContentItemEntity> {
     const item = await this.contentRepository.findOne({
-      where: { id: contentItemId, ...this.contentScopeWhere(scope) },
+      where: {
+        id: contentItemId,
+        tenantId: scope.tenantId,
+        workspaceId: scope.workspaceId,
+        agencyClientId:
+          scope.agencyClientId === null ? IsNull() : scope.agencyClientId,
+        deletedAt: IsNull(),
+        planId: this.companyScopedPlanId(scope),
+      },
     });
 
     if (!item) {
@@ -553,8 +560,22 @@ export class SocialPublicationService {
     const destination = await this.destinationsRepository.findOne({
       where: {
         id: destinationId,
-        contentItemId,
-        ...this.destinationScopeWhere(scope),
+        tenantId: scope.tenantId,
+        workspaceId: scope.workspaceId,
+        agencyClientId:
+          scope.agencyClientId === null ? IsNull() : scope.agencyClientId,
+        contentItemId: Raw(
+          (alias) =>
+            `${alias} = :contentItemId AND EXISTS (` +
+            `SELECT 1 FROM social_content_items item ` +
+            `JOIN social_plans plan ON plan.id = item.plan_id ` +
+            `WHERE item.id = ${alias} ` +
+            `AND plan.company_context_id IS NOT DISTINCT FROM :companyContextId)`,
+          {
+            contentItemId,
+            companyContextId: scope.companyContextId ?? null,
+          },
+        ),
       },
     });
 
@@ -589,7 +610,10 @@ export class SocialPublicationService {
     publicationId: string,
   ): Promise<SocialPublicationEntity> {
     const publication = await this.publicationsRepository.findOne({
-      where: { id: publicationId, ...this.scopeWhere(scope) },
+      where: {
+        id: publicationId,
+        ...this.companyScopedPublicationWhere(scope),
+      },
     });
 
     if (!publication) {
@@ -610,38 +634,6 @@ export class SocialPublicationService {
     };
   }
 
-  /**
-   * `deletedAt IS NULL` (E6): a content item removed from the Planner cannot
-   * become the source of a NEW publication.
-   *
-   * This deliberately says nothing about publications that already exist. Those
-   * rows are execution evidence and keep their `content_item_id` intact
-   * whatever happens to the editorial item — which is also why the Planner
-   * refuses to delete an item that has live ones in the first place.
-   */
-  private contentScopeWhere(
-    scope: SocialPublicationScope,
-  ): FindOptionsWhere<SocialContentItemEntity> {
-    return {
-      tenantId: scope.tenantId,
-      workspaceId: scope.workspaceId,
-      agencyClientId:
-        scope.agencyClientId === null ? IsNull() : scope.agencyClientId,
-      deletedAt: IsNull(),
-    };
-  }
-
-  private destinationScopeWhere(
-    scope: SocialPublicationScope,
-  ): FindOptionsWhere<SocialContentDestinationEntity> {
-    return {
-      tenantId: scope.tenantId,
-      workspaceId: scope.workspaceId,
-      agencyClientId:
-        scope.agencyClientId === null ? IsNull() : scope.agencyClientId,
-    };
-  }
-
   private assetScopeWhere(
     scope: SocialPublicationScope,
   ): FindOptionsWhere<SocialOrganicAssetEntity> {
@@ -650,6 +642,31 @@ export class SocialPublicationService {
       workspaceId: scope.workspaceId,
       agencyClientId:
         scope.agencyClientId === null ? IsNull() : scope.agencyClientId,
+      companyContextId:
+        scope.companyContextId == null ? IsNull() : scope.companyContextId,
     };
+  }
+
+  private companyScopedPublicationWhere(
+    scope: SocialPublicationScope,
+  ): FindOptionsWhere<SocialPublicationEntity> {
+    return {
+      ...this.scopeWhere(scope),
+      asset: {
+        companyContextId:
+          scope.companyContextId == null ? IsNull() : scope.companyContextId,
+      },
+      contentItem: { planId: this.companyScopedPlanId(scope) },
+    };
+  }
+
+  private companyScopedPlanId(scope: SocialPublicationScope) {
+    return Raw(
+      (alias) =>
+        `EXISTS (SELECT 1 FROM social_plans plan ` +
+        `WHERE plan.id = ${alias} ` +
+        `AND plan.company_context_id IS NOT DISTINCT FROM :companyContextId)`,
+      { companyContextId: scope.companyContextId ?? null },
+    );
   }
 }

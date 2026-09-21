@@ -30,6 +30,7 @@ export type SocialCampaignsScope = {
   tenantId: string;
   workspaceId: string;
   agencyClientId: string | null;
+  companyContextId?: string | null;
 };
 
 @Injectable()
@@ -269,6 +270,8 @@ export class SocialBoostTemplateService {
       workspaceId: scope.workspaceId,
       agencyClientId:
         scope.agencyClientId === null ? IsNull() : scope.agencyClientId,
+      companyContextId:
+        scope.companyContextId == null ? IsNull() : scope.companyContextId,
     };
   }
 

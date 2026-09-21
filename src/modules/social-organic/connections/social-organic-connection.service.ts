@@ -31,6 +31,7 @@ export type SocialOrganicConnectionScope = {
   tenantId: string;
   workspaceId: string;
   agencyClientId: string | null;
+  companyContextId?: string | null;
 };
 
 export type DisconnectSocialOrganicConnectionInput =
@@ -75,15 +76,32 @@ export class SocialOrganicConnectionService {
     input: SocialOrganicConnectionScope,
   ): Promise<SocialOrganicConnectionView[]> {
     const now = new Date();
+    const companyContextId = input.companyContextId ?? null;
     const query = this.connectionsRepository
       .createQueryBuilder('connection')
-      .leftJoinAndSelect('connection.assets', 'asset')
+      .leftJoinAndSelect(
+        'connection.assets',
+        'asset',
+        companyContextId === null
+          ? 'asset.companyContextId IS NULL'
+          : 'asset.companyContextId = :companyContextId',
+        companyContextId === null
+          ? {}
+          : { companyContextId },
+      )
       .where('connection.tenantId = :tenantId', { tenantId: input.tenantId })
       .andWhere('connection.workspaceId = :workspaceId', {
         workspaceId: input.workspaceId,
       });
 
     this.applyClientScope(query, input.agencyClientId);
+    query.andWhere(
+      `(
+        asset.id IS NOT NULL OR
+        COALESCE(connection.metadata ->> 'companyContextId', '') = :companyContextId
+      )`,
+      { companyContextId: input.companyContextId ?? '' },
+    );
     // A disconnected row is retained for publication audit integrity, but it
     // is never a reconnect card. New OAuth state replaces the visible flow.
     query.andWhere('connection.credentialRemovedAt IS NULL');
@@ -107,6 +125,7 @@ export class SocialOrganicConnectionService {
   async disconnect(
     input: DisconnectSocialOrganicConnectionInput,
   ): Promise<SocialOrganicConnectionView> {
+    const companyContextId = input.companyContextId ?? null;
     return this.dataSource.transaction(async (manager) => {
       const connections = manager.getRepository(SocialOrganicConnectionEntity);
       const assets = manager.getRepository(SocialOrganicAssetEntity);
@@ -143,9 +162,23 @@ export class SocialOrganicConnectionService {
         });
 
       this.applyAssetClientScope(assetQuery, input.agencyClientId);
-      const boundAssets = await assetQuery
+      const allBoundAssets = await assetQuery
         .setLock('pessimistic_write')
         .getMany();
+      const intentCompanyContextId =
+        typeof connection.metadata.companyContextId === 'string'
+          ? connection.metadata.companyContextId
+          : null;
+      if (
+        allBoundAssets.some(
+          (asset) => (asset.companyContextId ?? null) !== companyContextId,
+        ) ||
+        (allBoundAssets.length === 0 &&
+          intentCompanyContextId !== companyContextId)
+      ) {
+        throw new NotFoundException('Connection not found.');
+      }
+      const boundAssets = allBoundAssets;
 
       const hooks = this.providers.find(connection.provider);
 
@@ -207,6 +240,7 @@ export class SocialOrganicConnectionService {
             tenantId: connection.tenantId,
             workspaceId: connection.workspaceId,
             agencyClientId: connection.agencyClientId,
+            companyContextId,
           },
           assetIds: boundAssets.map((asset) => asset.id),
           reason: 'connection_disconnected',
@@ -239,6 +273,7 @@ export class SocialOrganicConnectionService {
         tenantId: input.tenantId,
         workspaceId: input.workspaceId,
         agencyClientId: input.agencyClientId ?? IsNull(),
+        companyContextId: input.companyContextId ?? IsNull(),
       },
     });
 

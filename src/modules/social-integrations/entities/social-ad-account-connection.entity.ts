@@ -4,7 +4,6 @@ import {
   Entity,
   Index,
   PrimaryGeneratedColumn,
-  Unique,
   UpdateDateColumn,
 } from 'typeorm';
 
@@ -64,16 +63,41 @@ export type SocialAdAuthorizationMethod =
 // NULL external_account_id is distinct in Postgres, so in-flight rows never
 // collide with each other — the constraint only binds once an account is
 // actually chosen, which is exactly when duplication becomes meaningful.
-@Unique('UQ_social_ad_account_connections_account', [
+@Index('UQ_social_ad_account_connections_company_account', [
+  'tenantId',
+  'workspaceId',
+  'agencyClientId',
+  'companyContextId',
+  'provider',
+  'externalAccountId',
+], {
+  unique: true,
+  where: '"company_context_id" IS NOT NULL AND "external_account_id" IS NOT NULL',
+})
+@Index('UQ_social_ad_account_connections_legacy_account', [
+  'tenantId',
+  'workspaceId',
+  'agencyClientId',
+  'provider',
+  'externalAccountId',
+], {
+  unique: true,
+  where: '"agency_client_id" IS NOT NULL AND "company_context_id" IS NULL AND "external_account_id" IS NOT NULL',
+})
+@Index('UQ_social_ad_account_connections_agency_account', [
   'tenantId',
   'workspaceId',
   'provider',
   'externalAccountId',
-])
+], {
+  unique: true,
+  where: '"agency_client_id" IS NULL AND "company_context_id" IS NULL AND "external_account_id" IS NOT NULL',
+})
 @Index('IDX_social_ad_account_connections_context', [
   'tenantId',
   'workspaceId',
   'agencyClientId',
+  'companyContextId',
 ])
 @Index('IDX_social_ad_account_connections_oauth_state', ['oauthStateHash'])
 export class SocialAdAccountConnectionEntity {
@@ -89,6 +113,10 @@ export class SocialAdAccountConnectionEntity {
   /** Managed client this account belongs to. NULL means the agency's own account. */
   @Column({ name: 'agency_client_id', type: 'uuid', nullable: true })
   agencyClientId!: string | null;
+
+  /** Selected external account owner. NULL is agency or legacy-unassigned. */
+  @Column({ name: 'company_context_id', type: 'uuid', nullable: true })
+  companyContextId!: string | null;
 
   @Column({ type: 'varchar', length: 40 })
   provider!: SocialAdProvider;

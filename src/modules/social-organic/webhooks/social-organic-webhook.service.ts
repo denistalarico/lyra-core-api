@@ -31,6 +31,7 @@ export type ResolvedWebhookScope = {
   tenantId: string | null;
   workspaceId: string | null;
   agencyClientId: string | null;
+  companyContextId: string | null;
   assetId: string | null;
 };
 
@@ -140,6 +141,7 @@ export class SocialOrganicWebhookService {
       tenantId: null,
       workspaceId: null,
       agencyClientId: null,
+      companyContextId: null,
       assetId: null,
     });
 
@@ -158,6 +160,7 @@ export class SocialOrganicWebhookService {
         tenantId: true,
         workspaceId: true,
         agencyClientId: true,
+        companyContextId: true,
       },
       take: 2,
     });
@@ -171,6 +174,7 @@ export class SocialOrganicWebhookService {
       tenantId: asset.tenantId,
       workspaceId: asset.workspaceId,
       agencyClientId: asset.agencyClientId,
+      companyContextId: asset.companyContextId,
       assetId: asset.id,
     };
   }

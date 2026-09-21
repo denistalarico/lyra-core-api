@@ -12,6 +12,7 @@ export type ListSocialAdConnectionsInput = {
   workspaceId: string;
   /** NULL means agency context: only the agency's own connections. */
   agencyClientId: string | null;
+  companyContextId?: string | null;
 };
 
 /** The minimum a scheduler needs to queue a run, and nothing more. */
@@ -20,6 +21,7 @@ export type SocialAdSchedulableConnection = {
   tenantId: string;
   workspaceId: string;
   agencyClientId: string | null;
+  companyContextId?: string | null;
   provider: string;
   /** Validated at bind time; the account's own zone decides its day. */
   timezone: string;
@@ -29,6 +31,7 @@ export type DisconnectSocialAdConnectionInput = {
   tenantId: string;
   workspaceId: string;
   agencyClientId: string | null;
+  companyContextId?: string | null;
   connectionId: string;
 };
 
@@ -52,6 +55,7 @@ export class SocialAdConnectionService {
       });
 
     this.applyClientScope(query, input.agencyClientId);
+    this.applyCompanyScope(query, input.companyContextId);
 
     // An abandoned authorization is scaffolding, not a connection. Showing it
     // would leave a permanent "connecting…" card that no action can clear.
@@ -142,6 +146,7 @@ export class SocialAdConnectionService {
         'tenantId',
         'workspaceId',
         'agencyClientId',
+        'companyContextId',
         'provider',
         'timezone',
         'externalAccountId',
@@ -157,6 +162,7 @@ export class SocialAdConnectionService {
         tenantId: connection.tenantId,
         workspaceId: connection.workspaceId,
         agencyClientId: connection.agencyClientId,
+        companyContextId: connection.companyContextId,
         provider: connection.provider,
         timezone: connection.timezone as string,
       }));
@@ -217,6 +223,7 @@ export class SocialAdConnectionService {
       });
 
     this.applyClientScope(query, input.agencyClientId);
+    this.applyCompanyScope(query, input.companyContextId);
 
     const connection = await query.getOne();
 
@@ -244,6 +251,21 @@ export class SocialAdConnectionService {
       });
     } else {
       query.andWhere('connection.agencyClientId IS NULL');
+    }
+  }
+
+  private applyCompanyScope(
+    query: ReturnType<
+      Repository<SocialAdAccountConnectionEntity>['createQueryBuilder']
+    >,
+    companyContextId?: string | null,
+  ) {
+    if (companyContextId) {
+      query.andWhere('connection.companyContextId = :companyContextId', {
+        companyContextId,
+      });
+    } else {
+      query.andWhere('connection.companyContextId IS NULL');
     }
   }
 }

@@ -100,6 +100,7 @@ export type SocialAdAnalyticsScope = {
   workspaceId: string;
   /** NULL means agency context: the agency's own connections. */
   agencyClientId: string | null;
+  companyContextId?: string | null;
 };
 
 export type SocialAdAnalyticsOverviewInput = SocialAdAnalyticsScope & {
@@ -227,6 +228,7 @@ export class SocialAnalyticsReadService {
         // `IsNull()`, not `null` — see `findInScope`. A literal null here reads
         // as "no filter" and would list every managed client's ad accounts.
         agencyClientId: input.agencyClientId ?? IsNull(),
+        companyContextId: input.companyContextId ?? IsNull(),
         // Only rows that reached an ad account.
         //
         // A connection abandoned mid-OAuth — the operator closed the Meta
@@ -1146,6 +1148,7 @@ export class SocialAnalyticsReadService {
         // column is NULL, and TypeORM reads a literal null as "no filter" —
         // which would silently widen the lookup to every client.
         agencyClientId: input.agencyClientId ?? IsNull(),
+        companyContextId: input.companyContextId ?? IsNull(),
       },
       // `tenant_id` and `workspace_id` always travel: the campaign identity
       // lookup binds them, and it must bind the *stored* values rather than what

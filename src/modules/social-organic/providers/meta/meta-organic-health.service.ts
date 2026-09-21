@@ -20,6 +20,7 @@ export type MetaOrganicHealthScope = {
   tenantId: string;
   workspaceId: string;
   agencyClientId: string | null;
+  companyContextId?: string | null;
 };
 
 export type MetaOrganicHealthCheckInput = MetaOrganicHealthScope & {
@@ -136,6 +137,7 @@ export class MetaOrganicHealthService {
         tenantId: asset.tenantId,
         workspaceId: asset.workspaceId,
         agencyClientId: asset.agencyClientId,
+        companyContextId: asset.companyContextId,
         assetId: asset.id,
       });
     } catch (error) {
@@ -281,6 +283,8 @@ export class MetaOrganicHealthService {
         tenantId: input.tenantId,
         workspaceId: input.workspaceId,
         agencyClientId,
+        companyContextId:
+          input.companyContextId == null ? IsNull() : input.companyContextId,
         connection: {
           tenantId: input.tenantId,
           workspaceId: input.workspaceId,

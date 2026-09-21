@@ -70,12 +70,21 @@ function harness() {
 }
 
 function context(overrides: Partial<RequestContext> = {}): RequestContext {
+  const managedContext = overrides.managedContext;
   return {
     tenantId: 'tenant-1',
     workspaceId: 'workspace-1',
     userId: 'user-1',
     ...overrides,
-  };
+    ...(managedContext?.operatingMode === 'client' && managedContext.clientId
+      ? {
+          managedContext: {
+            ...managedContext,
+            companyContextId: managedContext.companyContextId ?? 'company-1',
+          },
+        }
+      : {}),
+  } as RequestContext;
 }
 
 describe('SocialOrganicController', () => {
@@ -151,6 +160,7 @@ describe('SocialOrganicController', () => {
       tenantId: 'tenant-1',
       workspaceId: 'workspace-1',
       agencyClientId: 'client-1',
+      companyContextId: 'company-1',
       assetId: 'asset-1',
       fromDate: '2026-09-07',
       toDate: '2026-09-08',
@@ -191,6 +201,7 @@ describe('SocialOrganicController', () => {
       tenantId: 'tenant-1',
       workspaceId: 'workspace-1',
       agencyClientId: 'client-1',
+      companyContextId: 'company-1',
       userId: 'user-1',
       provider: 'meta',
       connectionId: 'connection-1',
@@ -245,6 +256,7 @@ describe('SocialOrganicController', () => {
       tenantId: 'tenant-1',
       workspaceId: 'workspace-1',
       agencyClientId: 'client-1',
+      companyContextId: 'company-1',
       assetId: 'asset-1',
     });
   });
@@ -306,6 +318,7 @@ describe('SocialOrganicController', () => {
       tenantId: 'tenant-1',
       workspaceId: 'workspace-1',
       agencyClientId: 'client-1',
+      companyContextId: 'company-1',
       assetId: 'asset-1',
       timezone: 'America/Sao_Paulo',
     });

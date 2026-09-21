@@ -86,6 +86,7 @@ export type SocialBoostAudience = {
   'tenantId',
   'workspaceId',
   'agencyClientId',
+  'companyContextId',
   'provider',
 ])
 @Check(
@@ -142,6 +143,10 @@ export class SocialBoostTemplateEntity {
   /** NULL means the agency's own Social context. */
   @Column({ name: 'agency_client_id', type: 'uuid', nullable: true })
   agencyClientId!: string | null;
+
+  /** NULL is agency or legacy-unassigned; company writes always set both ids. */
+  @Column({ name: 'company_context_id', type: 'uuid', nullable: true })
+  companyContextId!: string | null;
 
   @Column({ type: 'varchar', length: 160 })
   name!: string;

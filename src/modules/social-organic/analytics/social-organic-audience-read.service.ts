@@ -15,6 +15,7 @@ export type SocialOrganicAudienceReadInput = {
   tenantId: string;
   workspaceId: string;
   agencyClientId: string | null;
+  companyContextId?: string | null;
   assetId: string;
   kind: SocialOrganicAudienceKind;
 };
@@ -103,6 +104,7 @@ export class SocialOrganicAudienceReadService {
         // column is NULL, and TypeORM reads a literal null as "no filter" —
         // which would silently widen the lookup to every client.
         agencyClientId: input.agencyClientId ?? IsNull(),
+        companyContextId: input.companyContextId ?? IsNull(),
       },
       select: ['id', 'assetTimezone', 'tenantId', 'workspaceId'],
     });

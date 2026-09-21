@@ -26,6 +26,7 @@ export type ResolvedAdCredential = {
   readonly tenantId: string;
   readonly workspaceId: string;
   readonly agencyClientId: string | null;
+  readonly companyContextId?: string | null;
   readonly provider: SocialAdProvider;
   readonly authorizationMethod: SocialAdAuthorizationMethod;
   /** Canonical `act_<digits>`, already validated. */
@@ -81,6 +82,7 @@ export function createResolvedAdCredential(
     tenantId: input.tenantId,
     workspaceId: input.workspaceId,
     agencyClientId: input.agencyClientId,
+    companyContextId: input.companyContextId,
     provider: input.provider,
     authorizationMethod: input.authorizationMethod,
     externalAccountId: input.externalAccountId,
@@ -133,6 +135,7 @@ export function summarizeCredential(
     tenantId: credential.tenantId,
     workspaceId: credential.workspaceId,
     agencyClientId: credential.agencyClientId,
+    companyContextId: credential.companyContextId,
     provider: credential.provider,
     authorizationMethod: credential.authorizationMethod,
     externalAccountId: credential.externalAccountId,

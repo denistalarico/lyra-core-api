@@ -8,6 +8,7 @@ export type SocialConsolidatedAnalyticsScope = {
   tenantId: string;
   workspaceId: string;
   agencyClientId: string | null;
+  companyContextId?: string | null;
 };
 
 export type SocialConsolidatedOverviewInput =
@@ -70,6 +71,7 @@ export class SocialConsolidatedAnalyticsService {
       tenantId: input.tenantId,
       workspaceId: input.workspaceId,
       agencyClientId: input.agencyClientId,
+      companyContextId: input.companyContextId,
     };
 
     const [paid, organic] = await Promise.all([

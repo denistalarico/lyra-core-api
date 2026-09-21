@@ -21,6 +21,7 @@ export type SocialInternalScopeInput = {
   tenantId: string;
   workspaceId: string;
   agencyClientId: string | null;
+  companyContextId: string | null;
   userId: string | null;
 };
 
@@ -173,6 +174,8 @@ export class MetaAdsSystemUserService {
           workspaceId: input.workspaceId,
         })
         .andWhere('connection.provider = :provider', { provider: PROVIDER })
+        .andWhere('connection.agencyClientId IS NULL')
+        .andWhere('connection.companyContextId IS NULL')
         // The id Meta returned, not the one the request sent: the row is
         // looked up under the same canonical spelling it is written under, so
         // a request in the other spelling cannot miss the existing row and
@@ -198,11 +201,13 @@ export class MetaAdsSystemUserService {
           tenantId: input.tenantId,
           workspaceId: input.workspaceId,
           agencyClientId: null,
+          companyContextId: null,
           provider: PROVIDER,
           credentialVersion: 1,
         });
 
       target.agencyClientId = null;
+      target.companyContextId = null;
       target.authorizationMethod = METHOD;
       target.externalAccountId = account.externalAccountId;
       target.externalBusinessId = account.businessId;
@@ -266,6 +271,7 @@ export class MetaAdsSystemUserService {
         workspaceId: input.workspaceId,
       })
       .andWhere('connection.agencyClientId IS NULL')
+      .andWhere('connection.companyContextId IS NULL')
       .andWhere('connection.provider = :provider', { provider: PROVIDER })
       .getOne();
 

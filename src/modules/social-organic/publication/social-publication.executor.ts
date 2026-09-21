@@ -91,7 +91,7 @@ export class SocialPublicationExecutorService implements SocialPublicationExecut
           'publication_reconciliation_unavailable',
         );
       }
-      const credential = await this.resolveCredential(publication);
+      const credential = await this.resolveCredential(publication, asset);
       return this.normalizeResult(
         await adapter.reconcile({
           credential,
@@ -110,7 +110,7 @@ export class SocialPublicationExecutorService implements SocialPublicationExecut
       );
     }
 
-    const credential = await this.resolveCredential(publication);
+    const credential = await this.resolveCredential(publication, asset);
 
     const preparedMedia = await Promise.all(
       payload.mediaAssetIds.map((mediaAssetId, mediaIndex) =>
@@ -156,7 +156,7 @@ export class SocialPublicationExecutorService implements SocialPublicationExecut
     }
 
     try {
-      const credential = await this.resolveCredential(publication);
+      const credential = await this.resolveCredential(publication, asset);
 
       const result = await adapter.reconcile({
         credential,
@@ -204,12 +204,16 @@ export class SocialPublicationExecutorService implements SocialPublicationExecut
     };
   }
 
-  private resolveCredential(publication: SocialPublicationEntity) {
+  private resolveCredential(
+    publication: SocialPublicationEntity,
+    asset: SocialOrganicAssetEntity,
+  ) {
     return this.credentialResolver.resolve({
       assetId: publication.assetId,
       tenantId: publication.tenantId,
       workspaceId: publication.workspaceId,
       agencyClientId: publication.agencyClientId,
+      companyContextId: asset.companyContextId,
     });
   }
 

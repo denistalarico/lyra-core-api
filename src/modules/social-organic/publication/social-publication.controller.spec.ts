@@ -40,6 +40,7 @@ describe('SocialPublicationController', () => {
       productKey: 'social',
       operatingMode: 'client',
       clientId: '33333333-3333-4333-8333-333333333333',
+      companyContextId: '99999999-9999-4999-8999-999999999999',
       managedTenantId: '88888888-8888-4888-8888-888888888888',
     },
   };
@@ -151,6 +152,7 @@ describe('SocialPublicationController', () => {
         tenantId: agencyCtx.tenantId,
         workspaceId: agencyCtx.workspaceId,
         agencyClientId: null,
+        companyContextId: null,
       },
       {},
     );
@@ -166,6 +168,7 @@ describe('SocialPublicationController', () => {
         tenantId: clientCtx.tenantId,
         workspaceId: clientCtx.workspaceId,
         agencyClientId: '33333333-3333-4333-8333-333333333333',
+        companyContextId: '99999999-9999-4999-8999-999999999999',
       },
       {},
     );
@@ -186,6 +189,7 @@ describe('SocialPublicationController', () => {
         tenantId: agencyCtx.tenantId,
         workspaceId: agencyCtx.workspaceId,
         agencyClientId: null,
+        companyContextId: null,
       },
       agencyCtx.userId,
       dtoWithForeignScope,
@@ -227,6 +231,7 @@ describe('SocialPublicationController', () => {
         tenantId: agencyCtx.tenantId,
         workspaceId: agencyCtx.workspaceId,
         agencyClientId: null,
+        companyContextId: null,
       },
       agencyCtx.userId,
       'pub-1',
@@ -243,6 +248,7 @@ describe('SocialPublicationController', () => {
         tenantId: agencyCtx.tenantId,
         workspaceId: agencyCtx.workspaceId,
         agencyClientId: null,
+        companyContextId: null,
       },
       agencyCtx.userId,
       'pub-1',
@@ -259,6 +265,7 @@ describe('SocialPublicationController', () => {
         tenantId: agencyCtx.tenantId,
         workspaceId: agencyCtx.workspaceId,
         agencyClientId: null,
+        companyContextId: null,
       },
       'pub-1',
     );
@@ -375,6 +382,7 @@ describe('SocialPublicationController', () => {
         tenantId: clientCtx.tenantId,
         workspaceId: clientCtx.workspaceId,
         agencyClientId: '33333333-3333-4333-8333-333333333333',
+        companyContextId: '99999999-9999-4999-8999-999999999999',
       });
     });
 
@@ -414,6 +422,7 @@ describe('SocialPublicationController', () => {
         tenantId: agencyCtx.tenantId,
         workspaceId: agencyCtx.workspaceId,
         agencyClientId: null,
+        companyContextId: null,
       },
       'pub-1',
     );

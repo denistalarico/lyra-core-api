@@ -179,6 +179,7 @@ describe('SocialAdBackfillResumeService', () => {
       tenantId: 'tenant-a',
       workspaceId: 'workspace-a',
       agencyClientId: null,
+      companyContextId: null,
       connectionId: CONNECTION_ID,
     });
     expect(harness.enqueued[0]).toMatchObject({

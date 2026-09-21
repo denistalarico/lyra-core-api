@@ -473,6 +473,7 @@ export class SocialAdBackfillPlannerService {
     tenantId: string;
     workspaceId: string;
     agencyClientId: string | null;
+    companyContextId?: string | null;
     provider: string;
     connectionStatus: string;
     externalAccountId: string | null;
@@ -492,6 +493,7 @@ export class SocialAdBackfillPlannerService {
         tenantId: connection.tenantId,
         workspaceId: connection.workspaceId,
         agencyClientId: connection.agencyClientId,
+        companyContextId: connection.companyContextId,
         provider: connection.provider,
         timezone: connection.timezone,
       });

@@ -183,6 +183,7 @@ describe('SocialOrganicConnectionService', () => {
         tenantId: 'tenant-a',
         workspaceId: 'workspace-a',
         agencyClientId: null,
+        companyContextId: null,
       },
       assetIds: ['asset-id'],
       reason: 'connection_disconnected',
@@ -368,6 +369,7 @@ describe('SocialOrganicConnectionService', () => {
           tenantId: 'tenant-hostile',
           workspaceId: 'workspace-a',
           agencyClientId: IsNull(),
+          companyContextId: IsNull(),
         },
       });
     });

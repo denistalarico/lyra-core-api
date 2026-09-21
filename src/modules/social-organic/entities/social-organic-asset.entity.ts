@@ -29,6 +29,7 @@ export type SocialOrganicAssetStatus =
   'tenantId',
   'workspaceId',
   'agencyClientId',
+  'companyContextId',
 ])
 @Index('IDX_social_organic_assets_connection', ['connectionId'])
 export class SocialOrganicAssetEntity {
@@ -44,6 +45,10 @@ export class SocialOrganicAssetEntity {
   /** NULL means the agency's own context; otherwise this is a managed client. */
   @Column({ name: 'agency_client_id', type: 'uuid', nullable: true })
   agencyClientId!: string | null;
+
+  /** Publishable identity owner. NULL is agency or legacy-unassigned scope. */
+  @Column({ name: 'company_context_id', type: 'uuid', nullable: true })
+  companyContextId!: string | null;
 
   @Column({ name: 'connection_id', type: 'uuid' })
   connectionId!: string;

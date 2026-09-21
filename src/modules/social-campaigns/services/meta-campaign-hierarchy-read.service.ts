@@ -188,6 +188,10 @@ export class MetaCampaignHierarchyReadService {
           workspaceId: input.workspaceId,
           agencyClientId:
             input.agencyClientId === null ? IsNull() : input.agencyClientId,
+          companyContextId:
+            input.companyContextId == null
+              ? IsNull()
+              : input.companyContextId,
           provider: META_PROVIDER,
         },
       })

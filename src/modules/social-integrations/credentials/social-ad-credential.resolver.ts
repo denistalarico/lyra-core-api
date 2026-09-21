@@ -25,11 +25,14 @@ export type SocialAdCredentialScope = {
   tenantId: string;
   workspaceId: string;
   agencyClientId: string | null;
+  companyContextId?: string | null;
 };
 
 export type ResolveAdCredentialInput = SocialAdCredentialScope & {
   connectionId: string;
 };
+
+type ResolvePersistedAdCredentialInput = ResolveAdCredentialInput;
 
 /**
  * The one place that turns a connection row into a usable credential.
@@ -111,6 +114,7 @@ export class SocialAdCredentialResolver {
       tenantId: connection.tenantId,
       workspaceId: connection.workspaceId,
       agencyClientId: connection.agencyClientId,
+      companyContextId: connection.companyContextId,
     };
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -142,6 +146,33 @@ export class SocialAdCredentialResolver {
         // branch would mean guessing where a credential lives.
         throw new SocialAdCredentialError('unsupported_authorization_method');
     }
+  }
+
+  /** Read-only parent proof for child/log endpoints; it never loads a token. */
+  async hasConnectionInScope(input: ResolveAdCredentialInput): Promise<boolean> {
+    return (await this.findInScope(input)) !== null;
+  }
+
+  /** Queue workers derive Company Context from the durable connection root. */
+  async resolvePersisted(
+    input: ResolvePersistedAdCredentialInput,
+  ): Promise<ResolvedAdCredential> {
+    const connection = await this.connectionsRepository.findOne({
+      where: {
+        id: input.connectionId,
+        tenantId: input.tenantId,
+        workspaceId: input.workspaceId,
+        agencyClientId: input.agencyClientId ?? IsNull(),
+      },
+      select: ['companyContextId'],
+    });
+    if (!connection) {
+      throw new SocialAdCredentialError('connection_not_found');
+    }
+    return this.resolve({
+      ...input,
+      companyContextId: connection.companyContextId,
+    });
   }
 
   /**
@@ -289,6 +320,7 @@ export class SocialAdCredentialResolver {
       tenantId: connection.tenantId,
       workspaceId: connection.workspaceId,
       agencyClientId: connection.agencyClientId,
+      companyContextId: connection.companyContextId,
       provider: connection.provider,
       authorizationMethod: connection.authorizationMethod,
       externalAccountId,
@@ -307,6 +339,8 @@ export class SocialAdCredentialResolver {
         // `IsNull()` rather than `null`: agency scope has to match rows where
         // the column is NULL, and TypeORM reads a literal null as "no filter".
         agencyClientId: input.agencyClientId ?? IsNull(),
+        companyContextId:
+          input.companyContextId == null ? IsNull() : input.companyContextId,
       },
     });
   }

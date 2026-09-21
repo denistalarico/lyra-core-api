@@ -145,7 +145,7 @@ export class SocialCampaignMonitorService {
         const connection = await this.connections.findOne({
           where: {
             id: policy.connectionId,
-            ...this.connectionScope(scope),
+            ...this.baseScope(scope),
             provider: META_PROVIDER,
             connectionStatus: 'connected',
           },
@@ -415,6 +415,14 @@ export class SocialCampaignMonitorService {
 
   private connectionScope(scope: SocialCampaignsScope) {
     return {
+      ...this.baseScope(scope),
+      companyContextId:
+        scope.companyContextId == null ? IsNull() : scope.companyContextId,
+    };
+  }
+
+  private baseScope(scope: SocialCampaignsScope) {
+    return {
       tenantId: scope.tenantId,
       workspaceId: scope.workspaceId,
       agencyClientId: scope.agencyClientId === null ? IsNull() : scope.agencyClientId,
@@ -422,7 +430,7 @@ export class SocialCampaignMonitorService {
   }
 
   private alertScope(scope: SocialCampaignsScope) {
-    return this.connectionScope(scope);
+    return this.baseScope(scope);
   }
 
   private scopeWhere(scope: SocialCampaignsScope, connectionId: string) {

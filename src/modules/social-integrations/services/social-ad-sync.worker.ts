@@ -154,7 +154,7 @@ export class SocialAdSyncWorker {
        * than reading an account it no longer covers. A worker holding a
        * connection id is not a worker holding permission.
        */
-      credential = await this.credentialResolver.resolve({
+      credential = await this.credentialResolver.resolvePersisted({
         tenantId: run.tenantId,
         workspaceId: run.workspaceId,
         agencyClientId: run.agencyClientId,
@@ -515,6 +515,7 @@ export class SocialAdSyncWorker {
         tenantId: run.tenantId,
         workspaceId: run.workspaceId,
         agencyClientId: run.agencyClientId,
+        companyContextId: credential.companyContextId ?? null,
         provider: run.provider,
         // From the credential rather than from the run, which has no timezone
         // column. It is the ad account's own zone, already validated by the

@@ -57,6 +57,20 @@ const validDto = {
 };
 
 describe('SocialBoostTemplateService', () => {
+  it('lists templates only inside the selected company context', async () => {
+    const { repository, service } = buildService();
+    const companyContextId = '00000000-0000-4000-8000-000000000003';
+    repository.find.mockResolvedValue([]);
+
+    await service.list({ ...scope, companyContextId });
+
+    expect(repository.find).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ companyContextId }),
+      }),
+    );
+  });
+
   it('makes the first active template the context default', async () => {
     const { repository, service } = buildService();
     repository.findOne.mockResolvedValue(null);

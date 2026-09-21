@@ -35,7 +35,7 @@ function harness() {
     credential: { assetId: 'asset-1' },
   };
   const credentials = {
-    resolveForAnalytics: jest.fn(async () => resolved),
+    resolvePersistedForAnalytics: jest.fn(async () => resolved),
   };
   const insights = {
     sync: jest.fn(async () => ({
@@ -65,7 +65,7 @@ describe('SocialOrganicSyncWorker', () => {
 
     await expect(worker.processDue(1)).resolves.toBe(1);
 
-    expect(credentials.resolveForAnalytics).toHaveBeenCalledWith({
+    expect(credentials.resolvePersistedForAnalytics).toHaveBeenCalledWith({
       tenantId: 'tenant-1',
       workspaceId: 'workspace-1',
       agencyClientId: null,
@@ -91,7 +91,7 @@ describe('SocialOrganicSyncWorker', () => {
 
     await expect(worker.processDue(1)).resolves.toBe(1);
 
-    expect(credentials.resolveForAnalytics).not.toHaveBeenCalled();
+    expect(credentials.resolvePersistedForAnalytics).not.toHaveBeenCalled();
     expect(insights.sync).not.toHaveBeenCalled();
     expect(runs.markFailed).toHaveBeenCalledWith(
       expect.objectContaining({

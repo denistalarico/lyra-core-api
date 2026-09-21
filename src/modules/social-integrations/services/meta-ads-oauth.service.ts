@@ -39,12 +39,15 @@ export type StartMetaAdsConnectionInput = {
   tenantId: string;
   workspaceId: string;
   userId: string | null;
-  agencyClientId: string | null;
+  agencyClientId?: string | null;
+  companyContextId?: string | null;
 };
 
 export type SelectMetaAdsAccountInput = {
   tenantId: string;
   workspaceId: string;
+  agencyClientId?: string | null;
+  companyContextId?: string | null;
   userId: string | null;
   connectionId: string;
   externalAccountId: string;
@@ -88,6 +91,7 @@ export class MetaAdsOAuthService {
   ) {}
 
   async start(input: StartMetaAdsConnectionInput) {
+    const companyContextId = input.companyContextId ?? null;
     // Resolve configuration before writing anything: a misconfigured callback
     // should fail the request, not leave an orphan row behind.
     const loginConfig = this.graphService.getLoginConfig();
@@ -103,6 +107,7 @@ export class MetaAdsOAuthService {
       tenantId: input.tenantId,
       workspaceId: input.workspaceId,
       agencyClientId: input.agencyClientId,
+      companyContextId,
       provider: PROVIDER,
       // Stated rather than left to the column default: this row is the product
       // of Facebook Login, and nothing about it should depend on what the
@@ -160,6 +165,8 @@ export class MetaAdsOAuthService {
   }
 
   async select(input: SelectMetaAdsAccountInput) {
+    const agencyClientId = input.agencyClientId ?? null;
+    const companyContextId = input.companyContextId ?? null;
     const result = await this.dataSource.transaction(async (manager) => {
       const connections = manager.getRepository(
         SocialAdAccountConnectionEntity,
@@ -176,6 +183,14 @@ export class MetaAdsOAuthService {
           workspaceId: input.workspaceId,
         })
         .andWhere('connection.provider = :provider', { provider: PROVIDER })
+        .andWhere(
+          'connection.agencyClientId IS NOT DISTINCT FROM :agencyClientId',
+          { agencyClientId },
+        )
+        .andWhere(
+          'connection.companyContextId IS NOT DISTINCT FROM :companyContextId',
+          { companyContextId },
+        )
         .setLock('pessimistic_write')
         .getOne();
 
@@ -244,6 +259,14 @@ export class MetaAdsOAuthService {
         .andWhere('connection.externalAccountId = :externalAccountId', {
           externalAccountId: input.externalAccountId,
         })
+        .andWhere(
+          'connection.agencyClientId IS NOT DISTINCT FROM :agencyClientId',
+          { agencyClientId },
+        )
+        .andWhere(
+          'connection.companyContextId IS NOT DISTINCT FROM :companyContextId',
+          { companyContextId },
+        )
         .setLock('pessimistic_write')
         .getOne();
 
@@ -260,6 +283,7 @@ export class MetaAdsOAuthService {
       const target = existing ?? pending;
 
       target.agencyClientId = pending.agencyClientId;
+      target.companyContextId = pending.companyContextId;
       // `existing` may be a disconnected row that was once authorized some
       // other way. Promoting it must re-state the method, or a reconnection
       // through OAuth would inherit a claim it did not earn.
@@ -473,6 +497,7 @@ export class MetaAdsOAuthService {
       provider: PROVIDER,
       externalAccountId: IsNull(),
       agencyClientId: input.agencyClientId ?? IsNull(),
+      companyContextId: input.companyContextId ?? IsNull(),
     });
   }
 

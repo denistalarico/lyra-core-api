@@ -15,6 +15,7 @@ describe('SocialOrganicWebhookService', () => {
   const tenantId = '11111111-1111-4111-8111-111111111111';
   const workspaceId = '22222222-2222-4222-8222-222222222222';
   const assetRowId = '33333333-3333-4333-8333-333333333333';
+  const companyContextId = '44444444-4444-4444-8444-444444444444';
 
   let saved: Saved[];
   let events: {
@@ -40,6 +41,7 @@ describe('SocialOrganicWebhookService', () => {
     tenantId,
     workspaceId,
     agencyClientId: null,
+    companyContextId,
   };
 
   beforeEach(() => {
@@ -70,6 +72,10 @@ describe('SocialOrganicWebhookService', () => {
       const result = await service.ingest(ingestInput);
 
       expect(result.scopeResolution).toBe('resolved');
+      await expect(service.resolveScope(ingestInput)).resolves.toMatchObject({
+        companyContextId,
+        assetId: assetRowId,
+      });
       expect(saved[0]).toMatchObject({
         tenantId,
         workspaceId,
@@ -96,6 +102,7 @@ describe('SocialOrganicWebhookService', () => {
       expect(assets.find).toHaveBeenCalledWith(
         expect.objectContaining({
           where: { provider: 'meta', externalAssetId: 'page-1' },
+          select: expect.objectContaining({ companyContextId: true }),
           take: 2,
         }),
       );

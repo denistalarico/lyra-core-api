@@ -131,6 +131,7 @@ export class SocialAdInsightsSyncService {
       tenantId: input.tenantId,
       workspaceId: input.workspaceId,
       agencyClientId: input.agencyClientId,
+      companyContextId: input.companyContextId ?? null,
       connectionId: input.connectionId,
     });
 

@@ -89,11 +89,20 @@ function createHarness() {
 }
 
 function context(overrides: Partial<RequestContext> = {}): RequestContext {
+  const managedContext = overrides.managedContext;
   return {
     tenantId: 'tenant-a',
     workspaceId: 'workspace-a',
     userId: 'user-a',
     ...overrides,
+    ...(managedContext?.operatingMode === 'client' && managedContext.clientId
+      ? {
+          managedContext: {
+            ...managedContext,
+            companyContextId: managedContext.companyContextId ?? 'company-a',
+          },
+        }
+      : {}),
   } as RequestContext;
 }
 
@@ -259,6 +268,7 @@ describe('SocialOrganicAnalyticsController scope resolution', () => {
       tenantId: 'tenant-a',
       workspaceId: 'workspace-a',
       agencyClientId: 'client-a',
+      companyContextId: 'company-a',
     });
   });
 
@@ -280,6 +290,7 @@ describe('SocialOrganicAnalyticsController scope resolution', () => {
       tenantId: 'tenant-a',
       workspaceId: 'workspace-a',
       agencyClientId: 'client-a',
+      companyContextId: 'company-a',
       publicationIds,
     });
   });

@@ -233,12 +233,21 @@ function createHarness(
 }
 
 function context(overrides: Partial<RequestContext> = {}): RequestContext {
+  const managedContext = overrides.managedContext;
   return {
     tenantId: 'tenant-a',
     workspaceId: 'workspace-a',
     userId: 'user-a',
     ...overrides,
-  };
+    ...(managedContext?.operatingMode === 'client' && managedContext.clientId
+      ? {
+          managedContext: {
+            ...managedContext,
+            companyContextId: managedContext.companyContextId ?? 'company-a',
+          },
+        }
+      : {}),
+  } as RequestContext;
 }
 
 describe('SocialIntegrationsController metadata', () => {
@@ -298,6 +307,7 @@ describe('SocialIntegrationsController scope resolution', () => {
         tenantId: 'tenant-a',
         workspaceId: 'workspace-a',
         agencyClientId: 'client-a',
+        companyContextId: 'company-a',
       }),
     );
   });
@@ -344,7 +354,10 @@ describe('SocialIntegrationsController scope resolution', () => {
 
     const call = harness.selectInputs[0];
 
-    expect(call).not.toHaveProperty('agencyClientId');
+    expect(call).toMatchObject({
+      agencyClientId: 'client-a',
+      companyContextId: 'company-a',
+    });
     expect(call.tenantId).toBe('tenant-a');
   });
 
@@ -390,7 +403,10 @@ describe('SocialIntegrationsController scope resolution', () => {
     // The gate is asked with the resolved client, so a managed client inside
     // the internal tenant is still a third party to the System User.
     expect(harness.systemUser.isAvailable).toHaveBeenCalledWith(
-      expect.objectContaining({ agencyClientId: 'client-a' }),
+      expect.objectContaining({
+        agencyClientId: 'client-a',
+        companyContextId: 'company-a',
+      }),
     );
   });
 
@@ -443,6 +459,7 @@ describe('SocialIntegrationsController scope resolution', () => {
       tenantId: 'tenant-a',
       workspaceId: 'workspace-a',
       agencyClientId: 'client-a',
+      companyContextId: 'company-a',
       connectionId,
     });
   });
@@ -515,6 +532,7 @@ describe('SocialIntegrationsController scope resolution', () => {
       tenantId: 'tenant-a',
       workspaceId: 'workspace-a',
       agencyClientId: 'client-a',
+      companyContextId: 'company-a',
       connectionId,
       since: '2026-06-01',
       until: '2026-08-25',
@@ -617,6 +635,7 @@ describe('SocialIntegrationsController scope resolution', () => {
       tenantId: 'tenant-a',
       workspaceId: 'workspace-a',
       agencyClientId: 'client-a',
+      companyContextId: 'company-a',
       connectionId,
       since: '2026-08-01',
       until: '2026-08-31',
@@ -676,6 +695,7 @@ describe('SocialIntegrationsController scope resolution', () => {
       tenantId: 'tenant-a',
       workspaceId: 'workspace-a',
       agencyClientId: 'client-a',
+      companyContextId: 'company-a',
       connectionId,
       since: '2026-08-01',
       until: '2026-08-25',
@@ -762,6 +782,7 @@ describe('SocialIntegrationsController scope resolution', () => {
       tenantId: 'tenant-a',
       workspaceId: 'workspace-a',
       agencyClientId: 'client-a',
+      companyContextId: 'company-a',
       connectionId,
       requestedById: 'user-a',
     });
@@ -827,6 +848,7 @@ describe('SocialIntegrationsController scope resolution', () => {
       tenantId: 'tenant-a',
       workspaceId: 'workspace-a',
       agencyClientId: 'client-a',
+      companyContextId: 'company-a',
       connectionId,
     });
     expect(result).toEqual({
@@ -854,6 +876,7 @@ describe('SocialIntegrationsController scope resolution', () => {
       tenantId: 'tenant-a',
       workspaceId: 'workspace-a',
       agencyClientId: 'client-a',
+      companyContextId: 'company-a',
       connectionId: '11111111-1111-4111-8111-111111111111',
     });
   });

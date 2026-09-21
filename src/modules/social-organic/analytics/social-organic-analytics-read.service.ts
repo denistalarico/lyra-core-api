@@ -34,6 +34,7 @@ export type SocialOrganicAnalyticsScope = {
   workspaceId: string;
   /** NULL means agency context: the agency's own assets. */
   agencyClientId: string | null;
+  companyContextId?: string | null;
 };
 
 export type SocialOrganicAnalyticsOverviewInput =
@@ -106,6 +107,7 @@ export class SocialOrganicAnalyticsReadService {
         tenantId: input.tenantId,
         workspaceId: input.workspaceId,
         agencyClientId: input.agencyClientId ?? IsNull(),
+        companyContextId: input.companyContextId ?? IsNull(),
       },
       select: [
         'id',
@@ -299,6 +301,7 @@ export class SocialOrganicAnalyticsReadService {
 
     const facts = await this.postMetricsRepository
       .createQueryBuilder('fact')
+      .innerJoin('social_organic_assets', 'asset', 'asset.id = fact.asset_id')
       .distinctOn(['fact.publicationId'])
       .where('fact.tenantId = :tenantId', { tenantId: input.tenantId })
       .andWhere('fact.workspaceId = :workspaceId', {
@@ -315,6 +318,10 @@ export class SocialOrganicAnalyticsReadService {
         input.agencyClientId === null
           ? {}
           : { agencyClientId: input.agencyClientId },
+      )
+      .andWhere(
+        'asset.company_context_id IS NOT DISTINCT FROM :companyContextId',
+        { companyContextId: input.companyContextId },
       )
       .orderBy('fact.publicationId', 'ASC')
       .addOrderBy('fact.metricDate', 'DESC')
@@ -352,6 +359,7 @@ export class SocialOrganicAnalyticsReadService {
         // `IsNull()`, not `null` — a literal null reads as "no filter" and
         // would silently widen the lookup to every managed client's assets.
         agencyClientId: input.agencyClientId ?? IsNull(),
+        companyContextId: input.companyContextId ?? IsNull(),
       },
       select: ['id', 'tenantId', 'workspaceId', 'assetTimezone'],
     });

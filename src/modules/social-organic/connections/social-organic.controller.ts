@@ -13,6 +13,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import type { Response } from 'express';
+import { resolveCompanyAwareScope } from '../../../common/context/company-aware-scope';
 import { RequestContextData } from '../../../common/context/request-context.decorator';
 import type { RequestContext } from '../../../common/context/request-context.interface';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
@@ -204,26 +205,6 @@ export class SocialOrganicController {
   }
 
   private requireScope(ctx: RequestContext) {
-    if (!ctx.tenantId || !ctx.workspaceId) {
-      throw new BadRequestException(
-        'Tenant and workspace context are required.',
-      );
-    }
-
-    const managedContext = ctx.managedContext;
-    const agencyClientId =
-      managedContext?.operatingMode === 'client'
-        ? (managedContext.clientId ?? null)
-        : null;
-
-    if (managedContext?.operatingMode === 'client' && !agencyClientId) {
-      throw new BadRequestException('Client context is required.');
-    }
-
-    return {
-      tenantId: ctx.tenantId,
-      workspaceId: ctx.workspaceId,
-      agencyClientId,
-    };
+    return resolveCompanyAwareScope(ctx);
   }
 }

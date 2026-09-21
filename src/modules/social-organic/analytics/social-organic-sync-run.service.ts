@@ -29,6 +29,7 @@ export type SocialOrganicSyncCandidate = {
   tenantId: string;
   workspaceId: string;
   agencyClientId: string | null;
+  companyContextId?: string | null;
 };
 
 export type SocialOrganicSyncRunCounters = {
@@ -118,6 +119,7 @@ export class SocialOrganicSyncRunService {
       tenantId: asset.tenantId,
       workspaceId: asset.workspaceId,
       agencyClientId: asset.agencyClientId,
+      companyContextId: asset.companyContextId,
     }));
   }
 

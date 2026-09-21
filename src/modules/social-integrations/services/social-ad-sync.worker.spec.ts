@@ -92,7 +92,7 @@ function createHarness(options: HarnessOptions = {}) {
   };
 
   const credentialResolver = {
-    resolve: jest.fn(async () => {
+    resolvePersisted: jest.fn(async () => {
       if (options.resolveError) throw options.resolveError;
 
       return CREDENTIAL;
@@ -218,8 +218,8 @@ describe('SocialAdSyncWorker — a run that works', () => {
     // Three segments, one credential. Resolving per segment would decrypt the
     // same token three times and let one unit of work execute against three
     // separately resolved credentials.
-    expect(harness.credentialResolver.resolve).toHaveBeenCalledTimes(1);
-    expect(harness.credentialResolver.resolve).toHaveBeenCalledWith({
+    expect(harness.credentialResolver.resolvePersisted).toHaveBeenCalledTimes(1);
+    expect(harness.credentialResolver.resolvePersisted).toHaveBeenCalledWith({
       tenantId: 'tenant-a',
       workspaceId: 'workspace-a',
       agencyClientId: null,

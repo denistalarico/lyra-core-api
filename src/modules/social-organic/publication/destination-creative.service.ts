@@ -4,7 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, IsNull, type FindOptionsWhere, Repository } from 'typeorm';
+import { In, IsNull, Raw, type FindOptionsWhere, Repository } from 'typeorm';
 import { MediaAssetEntity } from '../../../common/media-assets';
 import { SocialContentDestinationEntity } from '../../social-planner/entities/social-content-destination.entity';
 import { SocialContentItemEntity } from '../../social-planner/entities/social-content-item.entity';
@@ -25,6 +25,7 @@ export interface DestinationCreativeScope {
   tenantId: string;
   workspaceId: string;
   agencyClientId: string | null;
+  companyContextId?: string | null;
 }
 
 /** The singular compatibility endpoint continues to address the primary slot. */
@@ -355,7 +356,15 @@ export class DestinationCreativeService {
     contentId: string,
   ): Promise<SocialContentItemEntity> {
     const item = await this.contentRepository.findOne({
-      where: { id: contentId, ...this.contentScopeWhere(scope) },
+      where: {
+        id: contentId,
+        tenantId: scope.tenantId,
+        workspaceId: scope.workspaceId,
+        agencyClientId:
+          scope.agencyClientId === null ? IsNull() : scope.agencyClientId,
+        deletedAt: IsNull(),
+        planId: this.companyScopedPlanId(scope),
+      },
     });
 
     if (!item) {
@@ -370,7 +379,21 @@ export class DestinationCreativeService {
     destinationId: string,
   ): Promise<SocialContentDestinationEntity> {
     const destination = await this.destinationsRepository.findOne({
-      where: { id: destinationId, ...this.destinationScopeWhere(scope) },
+      where: {
+        id: destinationId,
+        tenantId: scope.tenantId,
+        workspaceId: scope.workspaceId,
+        agencyClientId:
+          scope.agencyClientId === null ? IsNull() : scope.agencyClientId,
+        contentItemId: Raw(
+          (alias) =>
+            `EXISTS (SELECT 1 FROM social_content_items item ` +
+            `JOIN social_plans plan ON plan.id = item.plan_id ` +
+            `WHERE item.id = ${alias} ` +
+            `AND plan.company_context_id IS NOT DISTINCT FROM :companyContextId)`,
+          { companyContextId: scope.companyContextId ?? null },
+        ),
+      },
     });
 
     if (!destination) {
@@ -400,6 +423,16 @@ export class DestinationCreativeService {
     }
 
     return asset;
+  }
+
+  private companyScopedPlanId(scope: DestinationCreativeScope) {
+    return Raw(
+      (alias) =>
+        `EXISTS (SELECT 1 FROM social_plans plan ` +
+        `WHERE plan.id = ${alias} ` +
+        `AND plan.company_context_id IS NOT DISTINCT FROM :companyContextId)`,
+      { companyContextId: scope.companyContextId ?? null },
+    );
   }
 
   /**
@@ -455,34 +488,6 @@ export class DestinationCreativeService {
     };
   }
 
-  private destinationScopeWhere(
-    scope: DestinationCreativeScope,
-  ): FindOptionsWhere<SocialContentDestinationEntity> {
-    return {
-      tenantId: scope.tenantId,
-      workspaceId: scope.workspaceId,
-      agencyClientId:
-        scope.agencyClientId === null ? IsNull() : scope.agencyClientId,
-    };
-  }
-
-  /**
-   * `deletedAt IS NULL` (E6): creatives are reached through their content item,
-   * so a soft-deleted item hides its creatives from reads and refuses new
-   * bindings without needing a stamp of its own on every creative row.
-   */
-  private contentScopeWhere(
-    scope: DestinationCreativeScope,
-  ): FindOptionsWhere<SocialContentItemEntity> {
-    return {
-      tenantId: scope.tenantId,
-      workspaceId: scope.workspaceId,
-      agencyClientId:
-        scope.agencyClientId === null ? IsNull() : scope.agencyClientId,
-      deletedAt: IsNull(),
-    };
-  }
-
   private mediaScopeWhere(
     scope: DestinationCreativeScope,
   ): FindOptionsWhere<MediaAssetEntity> {
@@ -502,6 +507,8 @@ export class DestinationCreativeService {
       workspaceId: scope.workspaceId,
       agencyClientId:
         scope.agencyClientId === null ? IsNull() : scope.agencyClientId,
+      companyContextId:
+        scope.companyContextId == null ? IsNull() : scope.companyContextId,
     };
   }
 }

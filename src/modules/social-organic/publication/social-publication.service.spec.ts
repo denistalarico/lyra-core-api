@@ -829,6 +829,12 @@ describe('SocialPublicationService', () => {
           where: expect.objectContaining({
             tenantId: agencyScope.tenantId,
             workspaceId: agencyScope.workspaceId,
+            asset: expect.objectContaining({
+              companyContextId: expect.anything(),
+            }),
+            contentItem: expect.objectContaining({
+              planId: expect.anything(),
+            }),
           }),
         }),
       );

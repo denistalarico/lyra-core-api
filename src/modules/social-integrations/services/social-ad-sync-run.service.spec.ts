@@ -107,6 +107,7 @@ function createHarness(
   const dataSource = { query: jest.fn(async () => []) };
 
   const credentialResolver = {
+    hasConnectionInScope: jest.fn(async () => true),
     resolve: jest.fn(async () => {
       if (options.resolveError) throw options.resolveError;
 

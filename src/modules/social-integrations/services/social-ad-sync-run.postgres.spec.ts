@@ -59,6 +59,7 @@ run('SocialAdSyncRunService against PostgreSQL', () => {
       repository,
       AgencyDataSource,
       {
+        hasConnectionInScope: () => Promise.resolve(true),
         resolve: () => Promise.resolve(credential),
       } as unknown as SocialAdCredentialResolver,
       { enabled: true } as SocialAdSyncConfigService,
