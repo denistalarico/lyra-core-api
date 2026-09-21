@@ -45,6 +45,10 @@ import {
   groupOutcomesByWindow,
   resolveChunkState,
 } from './social-ad-backfill-planner.service';
+import {
+  SocialAdReachPeriodReadService,
+  type SocialAdPeriodReach,
+} from './social-ad-reach-period.read.service';
 import { SocialAdSyncConfigService } from './social-ad-sync-config.service';
 import type { SocialAdBackfillChunkOutcome } from './social-ad-sync-run.service';
 
@@ -164,6 +168,23 @@ export class SocialAnalyticsReadService {
      * — rather than reached through a class that can decrypt a credential.
      */
     private readonly config: SocialAdSyncConfigService,
+    /**
+     * The period reach cache, read-only.
+     *
+     * The one dependency here that reaches a table this service does not own,
+     * and it is a service rather than a repository on purpose: the two rules that
+     * make `social_ad_reach_periods` correct — equality on both period endpoints,
+     * and never a sum — live in that class, and a repository injected here would
+     * be a second place where a `BETWEEN` could be written.
+     *
+     * Notably *not* `SocialAdReachPeriodService`, the one that measures. That
+     * class holds a credential resolver and a Graph reader, and injecting it
+     * would put a token-capable dependency behind a dashboard load — the exact
+     * failure the boundary spec beside this file exists to prevent. A range
+     * nobody has measured yet reports `periodReach: null`; it is never measured
+     * inline.
+     */
+    private readonly reachPeriods: SocialAdReachPeriodReadService,
   ) {}
 
   /**
@@ -245,13 +266,30 @@ export class SocialAnalyticsReadService {
     });
     const comparison = previousAnalyticsPeriod(period);
 
-    const connection = await this.findInScope(input);
-
-    const [current, previous, lastFactDate] = await Promise.all([
-      this.aggregate(connection.id, period),
-      this.aggregate(connection.id, comparison),
-      this.findLastFactDate(connection.id),
+    // `externalAccountId` joins the fact aggregates to the reach cache, whose
+    // rows are keyed by the ad account rather than by the connection: a
+    // measurement is about an account, and the same account re-connected after a
+    // credential was replaced is the same audience.
+    const connection = await this.findInScope(input, [
+      'id',
+      'timezone',
+      'currency',
+      'externalAccountId',
     ]);
+
+    const [current, previous, lastFactDate, currentReach, previousReach] =
+      await Promise.all([
+        this.aggregate(connection.id, period),
+        this.aggregate(connection.id, comparison),
+        this.findLastFactDate(connection.id),
+        this.findPeriodReach(connection, period),
+        // Looked up for the comparison window too, and usually null: only the
+        // presets are pre-measured, and the window immediately preceding a preset
+        // is not one of them. A null there is the honest answer — the alternative
+        // would be a period-over-period reach comparison where one side is a
+        // measurement and the other a sum.
+        this.findPeriodReach(connection, comparison),
+      ]);
 
     return {
       connectionId: connection.id,
@@ -262,8 +300,8 @@ export class SocialAnalyticsReadService {
       currency: current.currency ?? connection.currency ?? null,
       period: { since: period.since, until: period.until },
       comparisonPeriod: { since: comparison.since, until: comparison.until },
-      current: this.toTotals(current),
-      previous: this.toTotals(previous),
+      current: this.toTotals(current, currentReach),
+      previous: this.toTotals(previous, previousReach),
       change: this.toChange(current, previous),
       hasPartialData: toCount(current.partial_days) > 0n,
       lastFactDate,
@@ -800,7 +838,46 @@ export class SocialAnalyticsReadService {
     return row?.last ?? null;
   }
 
-  private toTotals(row: AggregateRow): SocialAdAnalyticsTotals {
+  /**
+   * The cached period reach of one range, or null.
+   *
+   * Null for three distinct reasons, and the response cannot tell them apart —
+   * deliberately, because the consumer's behaviour is the same for all three:
+   * measurement is gated off for this deployment, the connection has no ad
+   * account bound, or nobody has measured this particular range yet. In every
+   * case the honest UI is "alcance do período ainda não medido", never a sum of
+   * the daily figures.
+   *
+   * Nothing is measured here. This service reaches no provider, so a range with
+   * no row stays without one until the sync's prewarm pass or an explicit
+   * measurement request fills it.
+   */
+  private async findPeriodReach(
+    connection: { id: string; externalAccountId?: string | null } & {
+      tenantId: string;
+      workspaceId: string;
+    },
+    period: SocialAdAnalyticsPeriod,
+  ): Promise<SocialAdPeriodReach | null> {
+    if (!connection.externalAccountId) return null;
+
+    return this.reachPeriods.find({
+      // The stored scope, not the caller's claim — the row was found by the
+      // claim, and binding the stored values is what keeps a lookup honest even
+      // if the scope resolution above ever changed shape.
+      tenantId: connection.tenantId,
+      workspaceId: connection.workspaceId,
+      connectionId: connection.id,
+      externalAccountId: connection.externalAccountId,
+      since: period.since,
+      until: period.until,
+    });
+  }
+
+  private toTotals(
+    row: AggregateRow,
+    periodReach: SocialAdPeriodReach | null,
+  ): SocialAdAnalyticsTotals {
     const inputs = toKpiInputs(row);
 
     return {
@@ -814,6 +891,19 @@ export class SocialAnalyticsReadService {
       videoViews: toCount(row.video_views).toString(),
       reach: readReach(row),
       reachGranularity: 'daily',
+      // From the measurement cache, never from `row`. There is no expression
+      // over the daily aggregate that could produce this: `SUM` double-counts
+      // people across days and `MAX` reports one day's reach as the period's.
+      // A range with no measurement is null, and null is the expected value.
+      periodReach: periodReach?.reach ?? null,
+      // Paired with the number above rather than with the row's existence: a
+      // measurement that came back without a reach has nothing for this to
+      // qualify, and a timestamp beside a null figure would read as "measured as
+      // zero" — the one thing the nullable reach column exists to avoid saying.
+      periodReachMeasuredAt:
+        periodReach?.reach === null || periodReach === null
+          ? null
+          : periodReach.measuredAt.toISOString(),
       ...deriveSocialAdKpis(inputs),
     };
   }

@@ -11,6 +11,7 @@ import {
   SocialAdInsightsWindowNotClosedError,
   SocialAdInsightsWindowNotIntradayError,
 } from './social-ad-insights.error';
+import { SocialAdReachMeasurementDisabledError } from './social-ad-reach-period.error';
 import {
   SocialAdBackfillResumeError,
   SocialAdSyncDisabledError,
@@ -181,6 +182,17 @@ export function describeSocialAdSyncFailure(
     };
   }
 
+  if (error instanceof SocialAdReachMeasurementDisabledError) {
+    return {
+      // 503 for the same reason `breakdown_ingest_disabled` is: nothing about the
+      // caller or the connection is wrong, and an operator turns it back on.
+      status: HttpStatus.SERVICE_UNAVAILABLE,
+      code: 'period_reach_measurement_disabled',
+      message:
+        'Period reach measurement is currently turned off on this server.',
+    };
+  }
+
   if (error instanceof SocialAdInsightsWindowNotClosedError) {
     return {
       status: HttpStatus.CONFLICT,
@@ -257,6 +269,7 @@ export function mapSocialAdSyncError(error: unknown): unknown {
     error instanceof SocialAdInsightsTruncatedError ||
     error instanceof SocialAdBreakdownTruncatedError ||
     error instanceof SocialAdBreakdownDisabledError ||
+    error instanceof SocialAdReachMeasurementDisabledError ||
     error instanceof SocialAdInsightsWindowNotClosedError ||
     error instanceof SocialAdInsightsWindowNotIntradayError ||
     error instanceof SocialAdSyncDisabledError ||

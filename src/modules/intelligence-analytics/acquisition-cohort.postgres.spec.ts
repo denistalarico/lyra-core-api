@@ -12,10 +12,12 @@ import { SocialAdAccountConnectionEntity } from '../social-integrations/entities
 import { SocialAdDestinationObservationEntity } from '../social-integrations/entities/social-ad-destination-observation.entity';
 import { SocialAdEntity } from '../social-integrations/entities/social-ad-entity.entity';
 import { SocialAdMetricDailyEntity } from '../social-integrations/entities/social-ad-metric-daily.entity';
+import { SocialAdReachPeriodEntity } from '../social-integrations/entities/social-ad-reach-period.entity';
 import { SocialAdSyncRunEntity } from '../social-integrations/entities/social-ad-sync-run.entity';
 import { SocialPaidMediaIntelligenceAdapter } from '../social-integrations/intelligence/social-paid-media-intelligence.adapter';
 import { SocialAdDestinationBreakdownReadService } from '../social-integrations/services/social-ad-destination-breakdown.read.service';
 import { SocialAdDestinationHistoryReadService } from '../social-integrations/services/social-ad-destination-history.read.service';
+import { SocialAdReachPeriodReadService } from '../social-integrations/services/social-ad-reach-period.read.service';
 import { SocialAdSyncConfigService } from '../social-integrations/services/social-ad-sync-config.service';
 import { SocialAnalyticsReadService } from '../social-integrations/services/social-analytics-read.service';
 import { AcquisitionCohortService } from './acquisition-cohort.service';
@@ -85,6 +87,12 @@ run('Acquisition cohort against PostgreSQL', () => {
       AgencyDataSource.getRepository(SocialAdEntity),
       AgencyDataSource.getRepository(SocialAdSyncRunEntity),
       new SocialAdSyncConfigService(),
+      // The reach cache read, which these cohort assertions never populate: the
+      // period reach they report is null, which is the correct state for a range
+      // nobody measured.
+      new SocialAdReachPeriodReadService(
+        AgencyDataSource.getRepository(SocialAdReachPeriodEntity),
+      ),
     );
 
     service = new AcquisitionCohortService(

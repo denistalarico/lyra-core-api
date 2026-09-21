@@ -200,7 +200,9 @@ import { AddSocialCalendarOnlyContent1793900000000 } from './migrations/17939000
 import { ActivateConfirmedSocialBoosts1794000000000 } from './migrations/1794000000000-activate-confirmed-social-boosts';
 import { CreateSocialCreativeStudio1794100000000 } from './migrations/1794100000000-create-social-creative-studio';
 import { ExpandBrandKitAssetContext1794200000000 } from './migrations/1794200000000-expand-brand-kit-asset-context';
+import { CreateSocialAdReachPeriods1794210000000 } from './migrations/1794210000000-create-social-ad-reach-periods';
 import { CreateSocialBreakdownFacts1794300000000 } from './migrations/1794300000000-create-social-breakdown-facts';
+import { CreateAgencyClientCompanyContexts1794400000000 } from './migrations/1794400000000-create-agency-client-company-contexts';
 
 export const AgencyDataSource = new DataSource({
   type: 'postgres',
@@ -411,6 +413,8 @@ export const AgencyDataSource = new DataSource({
     ActivateConfirmedSocialBoosts1794000000000,
     CreateSocialCreativeStudio1794100000000,
     ExpandBrandKitAssetContext1794200000000,
+    CreateSocialAdReachPeriods1794210000000,
     CreateSocialBreakdownFacts1794300000000,
+    CreateAgencyClientCompanyContexts1794400000000,
   ],
 });

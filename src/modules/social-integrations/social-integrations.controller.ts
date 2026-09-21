@@ -31,6 +31,7 @@ import { SocialAdBackfillResumeService } from './services/social-ad-backfill-res
 import { SocialAdBreakdownSyncService } from './services/social-ad-breakdown-sync.service';
 import { SocialAdHierarchySyncService } from './services/social-ad-hierarchy-sync.service';
 import { SocialAdInsightsSyncService } from './services/social-ad-insights-sync.service';
+import { SocialAdReachPeriodService } from './services/social-ad-reach-period.service';
 import { SocialAdSyncRunService } from './services/social-ad-sync-run.service';
 import { mapSocialAdSyncError } from './sync/social-ad-sync.http-error';
 
@@ -54,6 +55,7 @@ export class SocialIntegrationsController {
     private readonly hierarchySyncService: SocialAdHierarchySyncService,
     private readonly insightsSyncService: SocialAdInsightsSyncService,
     private readonly breakdownSyncService: SocialAdBreakdownSyncService,
+    private readonly reachPeriodService: SocialAdReachPeriodService,
     private readonly syncRunService: SocialAdSyncRunService,
     private readonly backfillResumeService: SocialAdBackfillResumeService,
   ) {}
@@ -335,6 +337,51 @@ export class SocialIntegrationsController {
 
     try {
       return await this.breakdownSyncService.syncBreakdowns({
+        tenantId: scope.tenantId,
+        workspaceId: scope.workspaceId,
+        agencyClientId: scope.agencyClientId,
+        connectionId,
+        since: dto.since,
+        until: dto.until,
+      });
+    } catch (error) {
+      throw mapSocialAdSyncError(error);
+    }
+  }
+
+  /**
+   * Measures the de-duplicated reach of one calendar range, or returns the
+   * measurement already cached for it.
+   *
+   * The only endpoint in this module that may spend a provider request to answer
+   * a range somebody typed. The analytics read path deliberately cannot: it
+   * reports `periodReach: null` for an unmeasured range rather than turning a
+   * dashboard load into a synchronous, rate-limitable Graph call. This is where
+   * an operator asks for that range on purpose, under the admin permission that
+   * governs every other provider-spending action here.
+   *
+   * Idempotent in the way that matters: a range entirely in the past is measured
+   * once, ever, and every later request for it is served from the cache with no
+   * provider call. A range that includes the account's today is re-measured,
+   * because the stored number is a subtotal of a day still accumulating.
+   *
+   * Gated off by default (`SOCIAL_ADS_PERIOD_REACH_ENABLED`); with the gate closed
+   * it answers 503 with a stated reason rather than a measurement of null, which
+   * would be indistinguishable from an account that reached nobody.
+   */
+  @Post('connections/:connectionId/reach-period')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireProductEntitlement('social')
+  @RequirePermission(SOCIAL_INTEGRATIONS_PERMISSION)
+  async measureConnectionReachPeriod(
+    @RequestContextData() ctx: RequestContext,
+    @Param('connectionId', ParseUUIDPipe) connectionId: string,
+    @Body() dto: SyncInsightsDto,
+  ) {
+    const scope = this.requireScope(ctx);
+
+    try {
+      return await this.reachPeriodService.resolve({
         tenantId: scope.tenantId,
         workspaceId: scope.workspaceId,
         agencyClientId: scope.agencyClientId,

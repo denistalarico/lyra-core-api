@@ -1,7 +1,11 @@
 import { TypeOrmModuleOptions } from '@nestjs/typeorm';
 
 import { MediaAssetEntity } from '../common/media-assets';
-import { CreativeAssetEntity, CreativeAssetVersionEntity, CreativeFolderEntity } from '../modules/social-creative-studio/entities';
+import {
+  CreativeAssetEntity,
+  CreativeAssetVersionEntity,
+  CreativeFolderEntity,
+} from '../modules/social-creative-studio/entities';
 
 import { UserPreferencesEntity } from '../modules/settings/entities/user-preferences.entity';
 import { WorkspaceSettingsAiEntity } from '../modules/settings/entities/workspace-settings-ai.entity';
@@ -210,6 +214,7 @@ import {
 } from '../modules/projects/entities';
 import {
   AgencyClient,
+  AgencyClientCompanyContext,
   ClientLifecycleProcess,
   ClientLifecycleStep,
 } from '../modules/clients/entities';
@@ -323,9 +328,11 @@ import {
 } from '../modules/admin/entities';
 import {
   SocialAdAccountConnectionEntity,
+  SocialAdBreakdownDailyEntity,
   SocialAdDestinationObservationEntity,
   SocialAdEntity,
   SocialAdMetricDailyEntity,
+  SocialAdReachPeriodEntity,
   SocialAdSyncRunEntity,
 } from '../modules/social-integrations/entities';
 import {
@@ -380,9 +387,14 @@ export const agencyEntities = [
   BrandKitEntity,
   BrandKitAssetEntity,
   SocialAdAccountConnectionEntity,
+  // Both connections run with `autoLoadEntities: false`, so a
+  // `TypeOrmModule.forFeature` is not enough on its own: an entity absent from
+  // this array makes `@InjectRepository` fail to resolve at boot.
+  SocialAdBreakdownDailyEntity,
   SocialAdDestinationObservationEntity,
   SocialAdEntity,
   SocialAdMetricDailyEntity,
+  SocialAdReachPeriodEntity,
   SocialAdSyncRunEntity,
   SocialAdActionPolicyEntity,
   SocialAdGovernedActionEntity,
@@ -510,6 +522,7 @@ export const agencyEntities = [
   AgencyTaskComment,
   AgencyTaskTimeEntry,
   AgencyClient,
+  AgencyClientCompanyContext,
   ClientLifecycleProcess,
   ClientLifecycleStep,
   AgencyActivity,

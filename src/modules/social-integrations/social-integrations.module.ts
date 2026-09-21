@@ -9,6 +9,7 @@ import {
   SocialAdDestinationObservationEntity,
   SocialAdEntity,
   SocialAdMetricDailyEntity,
+  SocialAdReachPeriodEntity,
   SocialAdSyncRunEntity,
 } from './entities';
 import { SocialPaidMediaIntelligenceAdapter } from './intelligence/social-paid-media-intelligence.adapter';
@@ -20,6 +21,7 @@ import { MetaAdsEntityReaderService } from './services/meta-ads-entity-reader.se
 import { MetaAdsGraphService } from './services/meta-ads-graph.service';
 import { MetaAdsInsightsReaderService } from './services/meta-ads-insights-reader.service';
 import { MetaAdsOAuthService } from './services/meta-ads-oauth.service';
+import { MetaAdsReachReaderService } from './services/meta-ads-reach-reader.service';
 import { MetaAdsSystemUserService } from './services/meta-ads-system-user.service';
 import { SocialAdBreakdownConfigService } from './services/social-ad-breakdown-config.service';
 import { SocialAdBreakdownReadService } from './services/social-ad-breakdown.read.service';
@@ -34,6 +36,10 @@ import { SocialAdEntityWriterService } from './services/social-ad-entity-writer.
 import { SocialAdHierarchySyncService } from './services/social-ad-hierarchy-sync.service';
 import { SocialAdInsightsSyncService } from './services/social-ad-insights-sync.service';
 import { SocialAdMetricsWriterService } from './services/social-ad-metrics-writer.service';
+import { SocialAdReachPeriodConfigService } from './services/social-ad-reach-period-config.service';
+import { SocialAdReachPeriodReadService } from './services/social-ad-reach-period.read.service';
+import { SocialAdReachPeriodScheduler } from './services/social-ad-reach-period.scheduler';
+import { SocialAdReachPeriodService } from './services/social-ad-reach-period.service';
 import { SocialAdRetentionConfigService } from './services/social-ad-retention-config.service';
 import { SocialAdRetentionService } from './services/social-ad-retention.service';
 import { SocialAdRetentionScheduler } from './services/social-ad-retention.scheduler';
@@ -67,6 +73,7 @@ import { SocialIntegrationsController } from './social-integrations.controller';
         SocialAdDestinationObservationEntity,
         SocialAdEntity,
         SocialAdMetricDailyEntity,
+        SocialAdReachPeriodEntity,
         SocialAdSyncRunEntity,
       ],
       'agency',
@@ -99,6 +106,17 @@ import { SocialIntegrationsController } from './social-integrations.controller';
     SocialAdBreakdownWriterService,
     SocialAdBreakdownSyncService,
     SocialAdBreakdownReadService,
+    // Period reach, split the same way and for a sharper reason: the measuring
+    // service holds a credential resolver and a Graph reader, while the read
+    // service holds one repository and no token — and it is the read one the
+    // analytics path injects, so a dashboard load can never become a provider
+    // call. The gate is off by default because these six requests per account
+    // per day are the cheapest thing on the shared quota to give up.
+    SocialAdReachPeriodConfigService,
+    MetaAdsReachReaderService,
+    SocialAdReachPeriodService,
+    SocialAdReachPeriodReadService,
+    SocialAdReachPeriodScheduler,
     SocialAdSyncConfigService,
     SocialAdSyncRunService,
     SocialAdBackfillPlannerService,

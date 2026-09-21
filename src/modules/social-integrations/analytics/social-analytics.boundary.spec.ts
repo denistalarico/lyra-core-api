@@ -55,6 +55,20 @@ const FORBIDDEN_DEPENDENCIES = [
   'SocialInternalAccessService',
   'SettingsCryptoService',
   'SocialAdSyncRunService',
+  /**
+   * Etapa 2B's measuring service, on the list for exactly the reason
+   * `SocialAdSyncRunService` is: it holds `SocialAdCredentialResolver` and a
+   * Graph reader, so injecting it would put a token-capable dependency behind a
+   * dashboard load through the back door.
+   *
+   * The temptation is sharper here than anywhere else on this list, because that
+   * class has a `resolve()` that measures a missing range — which is precisely
+   * what somebody adding `periodReach` to a custom period would reach for. The
+   * read path injects `SocialAdReachPeriodReadService` instead, which holds one
+   * repository and no token, and reports `null` for a range nobody measured.
+   */
+  'SocialAdReachPeriodService',
+  'MetaAdsReachReaderService',
   'accessTokenEncrypted',
   'requireSystemUserToken',
 ];
@@ -118,6 +132,31 @@ describe('Social analytics provider boundary', () => {
     expect(source).not.toContain('planNext');
     expect(source).not.toContain('planForConnectedAccount');
     expect(source).not.toMatch(/\benqueue\b/);
+  });
+
+  /**
+   * Period reach is read, never derived.
+   *
+   * The failure this guards is the one §2.1 of the campaign plan exists to
+   * prevent: somebody sees `periodReach` is null for a custom range, notices the
+   * daily reach column right there in the aggregate, and fills the gap with a
+   * sum. The number that produces is inflated by every person reached on more
+   * than one day — up to double for a two-day period — and it is the figure a
+   * client checks against Ads Manager first.
+   *
+   * So the aggregate may select reach (it does, for the single-day case
+   * `readReach` answers) but nothing may compute a period figure from it. The
+   * only source of `periodReach` is the measurement cache.
+   */
+  it('takes period reach from the measurement cache and never from a sum', () => {
+    const source = readSource('services/social-analytics-read.service.ts');
+
+    expect(source).toContain('SocialAdReachPeriodReadService');
+    expect(source).toContain('periodReach');
+
+    // The two expressions that would look obvious and be wrong.
+    expect(source).not.toMatch(/SUM\(fact\.reach\)\s*[,)]?\s*'period/i);
+    expect(source).not.toContain('MAX(fact.reach)');
   });
 
   /**

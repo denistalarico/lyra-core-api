@@ -3,4 +3,5 @@ export * from './social-ad-breakdown-daily.entity';
 export * from './social-ad-destination-observation.entity';
 export * from './social-ad-entity.entity';
 export * from './social-ad-metric-daily.entity';
+export * from './social-ad-reach-period.entity';
 export * from './social-ad-sync-run.entity';

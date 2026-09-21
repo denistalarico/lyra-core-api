@@ -12,6 +12,7 @@ import {
   SocialAdInsightsTruncatedError,
   SocialAdInsightsWindowNotClosedError,
 } from './sync/social-ad-insights.error';
+import { SocialAdReachMeasurementDisabledError } from './sync/social-ad-reach-period.error';
 import type { SocialAdBackfillResumeService } from './services/social-ad-backfill-resume.service';
 import type { MetaAdsOAuthService } from './services/meta-ads-oauth.service';
 import type { MetaAdsSystemUserService } from './services/meta-ads-system-user.service';
@@ -19,6 +20,7 @@ import type { SocialAdConnectionService } from './services/social-ad-connection.
 import type { SocialAdHierarchySyncService } from './services/social-ad-hierarchy-sync.service';
 import type { SocialAdBreakdownSyncService } from './services/social-ad-breakdown-sync.service';
 import type { SocialAdInsightsSyncService } from './services/social-ad-insights-sync.service';
+import type { SocialAdReachPeriodService } from './services/social-ad-reach-period.service';
 import type { SocialAdSyncRunService } from './services/social-ad-sync-run.service';
 import {
   SocialAdBackfillResumeError,
@@ -44,6 +46,9 @@ const GUARDED_HANDLERS = [
   // Breakdowns read the same ad account through the same credential, so the
   // extra dimension changes nothing about who may ask for it.
   'syncConnectionBreakdowns',
+  // Measuring a period's reach spends a provider request against the same
+  // credential, so it carries the same entitlement and admin permission.
+  'measureConnectionReachPeriod',
   // Queueing a sync and reading the run history are the same act as running
   // one: both name a connection whose credential reads somebody's ad spend.
   'enqueueConnectionSync',
@@ -58,6 +63,7 @@ function createHarness(
     internalAvailable?: boolean;
     syncFailure?: Error;
     insightsFailure?: Error;
+    reachPeriodFailure?: Error;
     enqueueFailure?: Error;
   } = {},
 ) {
@@ -164,6 +170,24 @@ function createHarness(
     }),
   };
 
+  const reachPeriodInputs: Record<string, unknown>[] = [];
+
+  const reachPeriods = {
+    resolve: jest.fn((input: Record<string, unknown>) => {
+      reachPeriodInputs.push(input);
+
+      if (options.reachPeriodFailure) {
+        return Promise.reject(options.reachPeriodFailure);
+      }
+
+      return Promise.resolve({
+        connectionId: input.connectionId,
+        reach: '4210',
+        fromCache: false,
+      });
+    }),
+  };
+
   const backfillResume = {
     resume: jest.fn((input: Record<string, unknown>) => {
       runInputs.push(input);
@@ -182,6 +206,7 @@ function createHarness(
     hierarchySync as unknown as SocialAdHierarchySyncService,
     insightsSync as unknown as SocialAdInsightsSyncService,
     breakdownSync as unknown as SocialAdBreakdownSyncService,
+    reachPeriods as unknown as SocialAdReachPeriodService,
     syncRuns as unknown as SocialAdSyncRunService,
     backfillResume as unknown as SocialAdBackfillResumeService,
   );
@@ -194,6 +219,7 @@ function createHarness(
     hierarchySync,
     insightsSync,
     breakdownSync,
+    reachPeriods,
     syncRuns,
     backfillResume,
     selectInputs,
@@ -201,6 +227,7 @@ function createHarness(
     syncInputs,
     insightsInputs,
     breakdownInputs,
+    reachPeriodInputs,
     runInputs,
   };
 }
@@ -559,6 +586,62 @@ describe('SocialIntegrationsController scope resolution', () => {
       // anything it sent.
       maxUntil: '2026-08-25',
       timezone: 'America/Sao_Paulo',
+    });
+  });
+
+  it('measures a period reach under the resolved scope, taking only the range from the body', async () => {
+    const harness = createHarness();
+    const connectionId = '11111111-1111-4111-8111-111111111111';
+
+    await harness.controller.measureConnectionReachPeriod(
+      context({
+        managedContext: {
+          productKey: 'social',
+          operatingMode: 'client',
+          clientId: 'client-a',
+          managedTenantId: 'managed-a',
+        },
+      }),
+      connectionId,
+      {
+        since: '2026-08-01',
+        until: '2026-08-31',
+        // Not declared by the DTO, and never read: a body that could name a
+        // scope would let a member measure somebody else's account.
+        tenantId: 'tenant-b',
+        agencyClientId: 'client-b',
+      } as never,
+    );
+
+    expect(harness.reachPeriodInputs[0]).toEqual({
+      tenantId: 'tenant-a',
+      workspaceId: 'workspace-a',
+      agencyClientId: 'client-a',
+      connectionId,
+      since: '2026-08-01',
+      until: '2026-08-31',
+    });
+  });
+
+  it('answers 503 when period reach measurement is switched off', async () => {
+    const harness = createHarness({
+      reachPeriodFailure: new SocialAdReachMeasurementDisabledError(),
+    });
+
+    const failure = await harness.controller
+      .measureConnectionReachPeriod(
+        context(),
+        '11111111-1111-4111-8111-111111111111',
+        { since: '2026-08-01', until: '2026-08-31' },
+      )
+      .catch((error: unknown) => error);
+
+    // 503 rather than a measurement of null: nothing about the caller or the
+    // connection is wrong, and a null would be indistinguishable from an account
+    // that reached nobody.
+    expect((failure as HttpException).getStatus()).toBe(503);
+    expect((failure as HttpException).getResponse()).toMatchObject({
+      code: 'period_reach_measurement_disabled',
     });
   });
 

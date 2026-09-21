@@ -11,9 +11,15 @@ import type { SocialAdChange, SocialAdKpis } from '../analytics/social-ad-kpi';
  *
  * So the overview does not sum it, and this field says so out loud rather than
  * letting a caller assume. `daily` means "the stored per-day figures, which you
- * may not add"; a future `period` would mean a genuine period-level reach
- * fetched as its own measurement. Returning a number with no grain attached is
- * how a dashboard ends up displaying the sum.
+ * may not add". Returning a number with no grain attached is how a dashboard
+ * ends up displaying the sum.
+ *
+ * Still only `daily`, even though Etapa 2B added a genuine period-level figure.
+ * That measurement travels as `periodReach`, its own field, rather than as a
+ * second value of this one — `reach` and `periodReach` are two different numbers
+ * with two different provenances, and a granularity that switched between them
+ * would make the meaning of `reach` depend on whether a cache happened to be
+ * warm.
  */
 export type SocialAdReachGranularity = 'daily';
 
@@ -45,6 +51,39 @@ export type SocialAdAnalyticsTotals = SocialAdKpis & {
    */
   reach: string | null;
   reachGranularity: SocialAdReachGranularity;
+
+  /**
+   * The reach of the whole period, de-duplicated by Meta — not a sum.
+   *
+   * The one number in this type that was not aggregated from
+   * `social_ad_metrics_daily`. It comes from `social_ad_reach_periods`, a cache
+   * of measurements taken by asking Meta for the range with no `time_increment`,
+   * so the de-duplication happened where the identities are. A local sum of the
+   * daily figures would be larger — up to the number of days larger — because
+   * anybody reached on more than one day is counted once here and once per day
+   * there.
+   *
+   * Null is the **expected** value on most deployments, and a consumer must
+   * handle it as a first-class case rather than an error: measurement is gated
+   * off by default (`SOCIAL_ADS_PERIOD_REACH_ENABLED`), and even when enabled a
+   * custom range nobody has measured yet has no row. The UI shows "alcance do
+   * período ainda não medido"; it never falls back to a sum.
+   *
+   * The comparison period carries this too, and it is null far more often: only
+   * the presets are pre-measured, and the window immediately preceding a preset
+   * is not one of them.
+   */
+  periodReach: string | null;
+
+  /**
+   * When `periodReach` was measured, as an ISO instant. Null whenever it is.
+   *
+   * Travels to the UI, which shows it in the tooltip. A reach figure with no
+   * measurement time is a number nobody can reconcile against the Ads Manager
+   * tab open beside it — and for a range that includes today it is the only
+   * thing that says how much of today the number covers.
+   */
+  periodReachMeasuredAt: string | null;
 };
 
 /** Period-over-period movement, one entry per additive metric. */

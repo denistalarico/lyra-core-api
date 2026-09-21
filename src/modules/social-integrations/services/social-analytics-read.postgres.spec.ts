@@ -7,6 +7,7 @@ import { describePostgresIntegration } from '../../../testing/postgres-integrati
 import { SocialAdAccountConnectionEntity } from '../entities/social-ad-account-connection.entity';
 import { SocialAdEntity } from '../entities/social-ad-entity.entity';
 import { SocialAdMetricDailyEntity } from '../entities/social-ad-metric-daily.entity';
+import { SocialAdReachPeriodEntity } from '../entities/social-ad-reach-period.entity';
 import { SocialAdSyncRunEntity } from '../entities/social-ad-sync-run.entity';
 import { shiftDay } from '../sync/insights-window';
 import { INSIGHTS_ENTITY_LEVELS } from '../sync/social-ad-sync-run.contract';
@@ -14,6 +15,7 @@ import type {
   SocialAdCampaignSort,
   SocialAdSortDirection,
 } from '../views/social-ad-analytics-campaigns.view';
+import { SocialAdReachPeriodReadService } from './social-ad-reach-period.read.service';
 import { SocialAdSyncConfigService } from './social-ad-sync-config.service';
 import { SocialAnalyticsReadService } from './social-analytics-read.service';
 
@@ -333,6 +335,12 @@ run('Social analytics read against PostgreSQL', () => {
       // The real config, so the chain is measured against the same 90/7 plan
       // production uses rather than numbers invented for the test.
       new SocialAdSyncConfigService(),
+      // The real reach cache read, against the same transaction: every assertion
+      // here is about a period with no measurement stored, which is the state
+      // that must report `periodReach: null` rather than a sum of daily reach.
+      new SocialAdReachPeriodReadService(
+        queryRunner.manager.getRepository(SocialAdReachPeriodEntity),
+      ),
     );
   });
 

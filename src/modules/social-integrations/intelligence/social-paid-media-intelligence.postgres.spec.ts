@@ -11,7 +11,9 @@ import { describePostgresIntegration } from '../../../testing/postgres-integrati
 import { SocialAdAccountConnectionEntity } from '../entities/social-ad-account-connection.entity';
 import { SocialAdEntity } from '../entities/social-ad-entity.entity';
 import { SocialAdMetricDailyEntity } from '../entities/social-ad-metric-daily.entity';
+import { SocialAdReachPeriodEntity } from '../entities/social-ad-reach-period.entity';
 import { SocialAdSyncRunEntity } from '../entities/social-ad-sync-run.entity';
+import { SocialAdReachPeriodReadService } from '../services/social-ad-reach-period.read.service';
 import { SocialAdSyncConfigService } from '../services/social-ad-sync-config.service';
 import { SocialAnalyticsReadService } from '../services/social-analytics-read.service';
 import { SocialPaidMediaIntelligenceAdapter } from './social-paid-media-intelligence.adapter';
@@ -172,6 +174,12 @@ run('Social paid media intelligence adapter against PostgreSQL', () => {
       queryRunner.manager.getRepository(SocialAdEntity),
       queryRunner.manager.getRepository(SocialAdSyncRunEntity),
       new SocialAdSyncConfigService(),
+      // The reach cache read, against the same transaction. Nothing here stores a
+      // measurement, so `periodReach` stays null throughout — and the adapter's
+      // metric map does not expose it, which is the point of the closed map.
+      new SocialAdReachPeriodReadService(
+        queryRunner.manager.getRepository(SocialAdReachPeriodEntity),
+      ),
     );
 
     adapter = new SocialPaidMediaIntelligenceAdapter(reads);
