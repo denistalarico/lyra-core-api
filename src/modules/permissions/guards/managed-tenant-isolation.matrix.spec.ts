@@ -163,6 +163,8 @@ function createFixture() {
   ];
 
   const clientsRepository = createFakeRepository(clients);
+  const companyContextsRepository = createFakeRepository([]);
+  const contactsRepository = createFakeRepository([]);
   const entitlementsRepository = createFakeRepository(entitlements);
   const clientAccessRepository = createFakeRepository(clientAccess);
   const clientProductAccessRepository =
@@ -171,6 +173,8 @@ function createFixture() {
 
   const managedContextDirectory = new ManagedContextDirectoryService(
     clientsRepository as never,
+    companyContextsRepository as never,
+    contactsRepository as never,
     entitlementsRepository as never,
     clientAccessRepository as never,
     clientProductAccessRepository as never,
@@ -195,7 +199,11 @@ function createFixture() {
     managedContextDirectory,
   );
 
-  const resolver = new OperationalContextResolver(clientsRepository as never);
+  const resolver = new OperationalContextResolver(
+    clientsRepository as never,
+    companyContextsRepository as never,
+    contactsRepository as never,
+  );
 
   const guard = new PermissionsGuard(
     {
@@ -303,7 +311,7 @@ describe('managed tenant isolation matrix (LF-RF-F12-004)', () => {
       expect(allowed).toBe(true);
     });
 
-    it("denies a member for a company they hold no grant for", async () => {
+    it('denies a member for a company they hold no grant for', async () => {
       const { allowed, error } = await runGuard(
         MEMBER_A,
         clientHeaders('client-a2'),

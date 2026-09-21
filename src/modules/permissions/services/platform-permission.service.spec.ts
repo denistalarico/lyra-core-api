@@ -22,6 +22,8 @@ function createService() {
   const clientAccessRepository = createRepositoryMock();
   const clientProductAccessRepository = createRepositoryMock();
   const clientsRepository = createRepositoryMock();
+  const companyContextsRepository = createRepositoryMock();
+  const contactsRepository = createRepositoryMock();
   const entitlementsRepository = createRepositoryMock();
   const auditRepository = createRepositoryMock();
   const platformContextService = {
@@ -36,6 +38,8 @@ function createService() {
   // these tests are the matrix that proves it.
   const managedContextDirectory = new ManagedContextDirectoryService(
     clientsRepository as never,
+    companyContextsRepository as never,
+    contactsRepository as never,
     entitlementsRepository as never,
     clientAccessRepository as never,
     clientProductAccessRepository as never,
@@ -443,14 +447,27 @@ describe('PlatformPermissionService', () => {
     });
 
     it('grants owner/admin every active client with an active entitlement, skipping access checks', async () => {
-      const { service, clientsRepository, entitlementsRepository, clientAccessRepository } =
-        createService();
+      const {
+        service,
+        clientsRepository,
+        entitlementsRepository,
+        clientAccessRepository,
+      } = createService();
       clientsRepository.find.mockResolvedValue([
         { ...activeClient, id: 'client-1', displayName: 'Client One' },
-        { ...activeClient, id: 'client-2', displayName: 'Client Two', managedTenantId: 'managed-tenant-2' },
+        {
+          ...activeClient,
+          id: 'client-2',
+          displayName: 'Client Two',
+          managedTenantId: 'managed-tenant-2',
+        },
       ]);
       entitlementsRepository.find.mockResolvedValue([
-        { ...activeEntitlement, tenantId: 'managed-tenant-1', productKey: 'leadflow' },
+        {
+          ...activeEntitlement,
+          tenantId: 'managed-tenant-1',
+          productKey: 'leadflow',
+        },
         {
           ...activeEntitlement,
           tenantId: 'managed-tenant-2',
@@ -470,7 +487,10 @@ describe('PlatformPermissionService', () => {
       );
 
       expect(result).toEqual([
-        expect.objectContaining({ clientId: 'client-1', managedTenantId: 'managed-tenant-1' }),
+        expect.objectContaining({
+          clientId: 'client-1',
+          managedTenantId: 'managed-tenant-1',
+        }),
       ]);
       expect(clientAccessRepository.find).not.toHaveBeenCalled();
     });
@@ -485,10 +505,18 @@ describe('PlatformPermissionService', () => {
       } = createService();
       clientsRepository.find.mockResolvedValue([
         { ...activeClient, id: 'client-1' },
-        { ...activeClient, id: 'client-2', managedTenantId: 'managed-tenant-1' },
+        {
+          ...activeClient,
+          id: 'client-2',
+          managedTenantId: 'managed-tenant-1',
+        },
       ]);
       entitlementsRepository.find.mockResolvedValue([
-        { ...activeEntitlement, tenantId: 'managed-tenant-1', productKey: 'leadflow' },
+        {
+          ...activeEntitlement,
+          tenantId: 'managed-tenant-1',
+          productKey: 'leadflow',
+        },
       ]);
       clientAccessRepository.find.mockResolvedValue([
         { clientId: 'client-1', managedTenantId: 'managed-tenant-1' },
@@ -507,7 +535,9 @@ describe('PlatformPermissionService', () => {
         'leadflow',
       );
 
-      expect(result).toEqual([expect.objectContaining({ clientId: 'client-1' })]);
+      expect(result).toEqual([
+        expect.objectContaining({ clientId: 'client-1' }),
+      ]);
     });
   });
 
@@ -539,7 +569,11 @@ describe('PlatformPermissionService', () => {
       ]);
 
       expect(clientProductAccessRepository.find).toHaveBeenCalledWith({
-        where: { tenantId: 'tenant-1', clientId: 'client-1', productKey: 'social' },
+        where: {
+          tenantId: 'tenant-1',
+          clientId: 'client-1',
+          productKey: 'social',
+        },
         order: { createdAt: 'ASC' },
       });
     });

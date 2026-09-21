@@ -3,7 +3,9 @@ import { InjectRepository } from '@nestjs/typeorm';
 import type { Request } from 'express';
 import { Repository } from 'typeorm';
 import { AgencyClient } from '../../modules/clients/entities';
+import { AgencyClientCompanyContext } from '../../modules/clients/entities/agency-client-company-context.entity';
 import { AgencyClientStatus } from '../../modules/clients/enums';
+import { ContactEntity } from '../../modules/contacts/entities/contact.entity';
 import type {
   ManagedContext,
   OperatingMode,
@@ -25,6 +27,10 @@ export class OperationalContextResolver {
   constructor(
     @InjectRepository(AgencyClient, AGENCY_CONNECTION)
     private readonly clientsRepository: Repository<AgencyClient>,
+    @InjectRepository(AgencyClientCompanyContext, AGENCY_CONNECTION)
+    private readonly companyContextsRepository: Repository<AgencyClientCompanyContext>,
+    @InjectRepository(ContactEntity, AGENCY_CONNECTION)
+    private readonly contactsRepository: Repository<ContactEntity>,
   ) {}
 
   async resolve(input: ResolveInput): Promise<ManagedContext> {
@@ -33,6 +39,9 @@ export class OperationalContextResolver {
     const clientId = this.readHeader(input.request, [
       'x-lyra-client-id',
       'x-client-id',
+    ]);
+    const companyContextId = this.readHeader(input.request, [
+      'x-lyra-company-context-id',
     ]);
 
     if (productKey === 'agency') {
@@ -44,13 +53,16 @@ export class OperationalContextResolver {
         productKey,
         operatingMode,
         clientId: null,
+        companyContextId: null,
         managedTenantId: null,
       };
     }
 
     if (!clientId) {
       throw new BadRequestException(
-        'x-lyra-client-id or x-client-id is required for client operating mode.',
+        companyContextId
+          ? 'A valid client context is required for the requested company context.'
+          : 'x-lyra-client-id or x-client-id is required for client operating mode.',
       );
     }
 
@@ -78,10 +90,58 @@ export class OperationalContextResolver {
       );
     }
 
+    let validatedCompanyContextId: string | null = null;
+    if (companyContextId) {
+      const companyContext = await this.companyContextsRepository.findOne({
+        where: {
+          id: companyContextId,
+          tenantId: input.tenantId,
+          workspaceId: input.workspaceId,
+          agencyClientId: client.id,
+        },
+      });
+
+      // Keep all missing, foreign-client, and cross-scope ids indistinguishable.
+      if (
+        !companyContext ||
+        companyContext.agencyClientId !== client.id ||
+        companyContext.tenantId !== input.tenantId ||
+        companyContext.workspaceId !== input.workspaceId ||
+        companyContext.status !== 'active' ||
+        companyContext.archivedAt
+      ) {
+        throw new BadRequestException(
+          'Company context is not available for this client and workspace.',
+        );
+      }
+
+      const companyContact = await this.contactsRepository.findOne({
+        where: {
+          id: companyContext.companyContactId,
+          tenantId: input.tenantId,
+          workspaceId: input.workspaceId,
+        },
+      });
+      if (
+        !companyContact ||
+        companyContact.tenantId !== input.tenantId ||
+        companyContact.workspaceId !== input.workspaceId ||
+        companyContact.type !== 'organization' ||
+        companyContact.status === 'archived'
+      ) {
+        throw new BadRequestException(
+          'Company context is not available for this client and workspace.',
+        );
+      }
+
+      validatedCompanyContextId = companyContext.id;
+    }
+
     return {
       productKey,
       operatingMode,
       clientId: client.id,
+      companyContextId: validatedCompanyContextId,
       managedTenantId: client.managedTenantId,
       clientName: client.displayName,
     };
@@ -92,6 +152,7 @@ export class OperationalContextResolver {
       productKey,
       operatingMode: 'agency',
       clientId: null,
+      companyContextId: null,
       managedTenantId: null,
     };
   }

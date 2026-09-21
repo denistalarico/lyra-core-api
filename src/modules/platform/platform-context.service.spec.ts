@@ -55,6 +55,7 @@ function createService(options?: {
           productKey: null,
           operatingMode: null,
           clientId: null,
+          companyContextId: null,
         },
         rejection: null,
       }),
@@ -373,7 +374,9 @@ describe('PlatformContextService', () => {
       expect(response.managedContext.available.social.agency.available).toBe(
         false,
       );
-      expect(managedContextDirectory.listAuthorizedClients).toHaveBeenCalledWith(
+      expect(
+        managedContextDirectory.listAuthorizedClients,
+      ).toHaveBeenCalledWith(
         {
           tenantId: contextInput.tenantId,
           workspaceId: contextInput.workspaceId,
@@ -399,6 +402,7 @@ describe('PlatformContextService', () => {
           productKey: 'leadflow',
           operatingMode: 'client',
           clientId: 'client-from-another-tenant',
+          companyContextId: null,
         },
         rejection: {
           code: 'context_not_authorized',
@@ -413,6 +417,7 @@ describe('PlatformContextService', () => {
           productKey: 'leadflow',
           operatingMode: 'client',
           clientId: 'client-from-another-tenant',
+          companyContextId: null,
         },
       });
 

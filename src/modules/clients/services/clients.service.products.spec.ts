@@ -461,11 +461,21 @@ describe('ClientsService client product entitlements', () => {
       const directoryClientsRepository = {
         find: jest.fn().mockResolvedValue([client]),
       };
+      const directoryCompanyContextsRepository = {
+        find: jest.fn().mockResolvedValue([]),
+        findOne: jest.fn().mockResolvedValue(null),
+      };
+      const directoryContactsRepository = {
+        find: jest.fn().mockResolvedValue([]),
+        findOne: jest.fn().mockResolvedValue(null),
+      };
       const directoryEntitlementsRepository = {
         find: jest.fn().mockResolvedValue([entitlement]),
       };
       const directory = new ManagedContextDirectoryService(
         directoryClientsRepository as never,
+        directoryCompanyContextsRepository as never,
+        directoryContactsRepository as never,
         directoryEntitlementsRepository as never,
         { find: jest.fn().mockResolvedValue([]) } as never,
         { find: jest.fn().mockResolvedValue([]) } as never,

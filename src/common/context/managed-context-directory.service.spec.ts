@@ -14,12 +14,16 @@ function createRepositoryMock() {
 
 function createDirectory() {
   const clientsRepository = createRepositoryMock();
+  const companyContextsRepository = createRepositoryMock();
+  const contactsRepository = createRepositoryMock();
   const entitlementsRepository = createRepositoryMock();
   const clientAccessRepository = createRepositoryMock();
   const clientProductAccessRepository = createRepositoryMock();
 
   const directory = new ManagedContextDirectoryService(
     clientsRepository as never,
+    companyContextsRepository as never,
+    contactsRepository as never,
     entitlementsRepository as never,
     clientAccessRepository as never,
     clientProductAccessRepository as never,
@@ -28,6 +32,8 @@ function createDirectory() {
   return {
     directory,
     clientsRepository,
+    companyContextsRepository,
+    contactsRepository,
     entitlementsRepository,
     clientAccessRepository,
     clientProductAccessRepository,
@@ -71,6 +77,34 @@ function makeEntitlement(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function makeCompanyContext(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'company-context-1',
+    tenantId: 'tenant-1',
+    workspaceId: 'workspace-1',
+    agencyClientId: 'client-1',
+    companyContactId: 'company-contact-1',
+    status: 'active',
+    isPrimary: false,
+    archivedAt: null,
+    createdAt: new Date('2026-01-01T00:00:00.000Z'),
+    ...overrides,
+  };
+}
+
+function makeCompanyContact(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'company-contact-1',
+    tenantId: 'tenant-1',
+    workspaceId: 'workspace-1',
+    type: 'organization',
+    displayName: 'Instituto XP',
+    legalName: 'Instituto XP Ltda.',
+    status: 'active',
+    ...overrides,
+  };
+}
+
 function requested(
   overrides: Partial<RequestedManagedContext> = {},
 ): RequestedManagedContext {
@@ -78,6 +112,7 @@ function requested(
     productKey: 'leadflow',
     operatingMode: 'client',
     clientId: 'client-1',
+    companyContextId: null,
     ...overrides,
   };
 }
@@ -89,11 +124,13 @@ describe('readRequestedManagedContext', () => {
         'x-lyra-product-key': 'social',
         'x-lyra-operating-mode': 'client',
         'x-lyra-client-id': 'client-9',
+        'x-lyra-company-context-id': 'company-9',
       }),
     ).toEqual({
       productKey: 'social',
       operatingMode: 'client',
       clientId: 'client-9',
+      companyContextId: 'company-9',
     });
   });
 
@@ -107,6 +144,7 @@ describe('readRequestedManagedContext', () => {
       productKey: 'leadflow',
       operatingMode: 'client',
       clientId: 'client-9',
+      companyContextId: null,
     });
   });
 
@@ -121,6 +159,7 @@ describe('readRequestedManagedContext', () => {
       productKey: null,
       operatingMode: null,
       clientId: null,
+      companyContextId: null,
     });
   });
 
@@ -129,11 +168,92 @@ describe('readRequestedManagedContext', () => {
       productKey: null,
       operatingMode: null,
       clientId: null,
+      companyContextId: null,
     });
   });
 });
 
 describe('ManagedContextDirectoryService.listAuthorizedClients', () => {
+  it('keeps an authorized Agency Client with no active companies once', async () => {
+    const { directory, clientsRepository, entitlementsRepository } =
+      createDirectory();
+    clientsRepository.find.mockResolvedValue([makeClient()]);
+    entitlementsRepository.find.mockResolvedValue([makeEntitlement()]);
+
+    const clients = await directory.listAuthorizedClients(owner, 'leadflow');
+
+    expect(clients).toHaveLength(1);
+    expect(clients[0].companies).toEqual([]);
+  });
+
+  it('groups active companies under one authorized Agency Client using Contact names', async () => {
+    const {
+      directory,
+      clientsRepository,
+      companyContextsRepository,
+      contactsRepository,
+      entitlementsRepository,
+    } = createDirectory();
+    clientsRepository.find.mockResolvedValue([makeClient()]);
+    entitlementsRepository.find.mockResolvedValue([makeEntitlement()]);
+    companyContextsRepository.find.mockResolvedValue([
+      makeCompanyContext({ id: 'company-context-primary', isPrimary: true }),
+      makeCompanyContext({
+        id: 'company-context-secondary',
+        companyContactId: 'company-contact-2',
+      }),
+      makeCompanyContext({ id: 'inactive-context', status: 'inactive' }),
+      makeCompanyContext({ id: 'archived-context', status: 'archived' }),
+      makeCompanyContext({ id: 'archived-at-context', archivedAt: new Date() }),
+      makeCompanyContext({ id: 'wrong-tenant', tenantId: 'tenant-other' }),
+      makeCompanyContext({
+        id: 'wrong-workspace',
+        workspaceId: 'workspace-other',
+      }),
+    ]);
+    contactsRepository.find.mockResolvedValue([
+      makeCompanyContact(),
+      makeCompanyContact({
+        id: 'company-contact-2',
+        displayName: 'Clínica XP',
+        legalName: 'Clínica XP S.A.',
+      }),
+      makeCompanyContact({ id: 'wrong-type', type: 'person' }),
+      makeCompanyContact({ id: 'archived-contact', status: 'archived' }),
+    ]);
+
+    const clients = await directory.listAuthorizedClients(owner, 'leadflow');
+
+    expect(clients).toHaveLength(1);
+    expect(clients[0].clientId).toBe('client-1');
+    expect(clients[0].companies).toEqual([
+      {
+        companyContextId: 'company-context-primary',
+        companyContactId: 'company-contact-1',
+        displayName: 'Instituto XP',
+        legalName: 'Instituto XP Ltda.',
+        isPrimary: true,
+      },
+      {
+        companyContextId: 'company-context-secondary',
+        companyContactId: 'company-contact-2',
+        displayName: 'Clínica XP',
+        legalName: 'Clínica XP S.A.',
+        isPrimary: false,
+      },
+    ]);
+    expect(companyContextsRepository.find).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          tenantId: 'tenant-1',
+          workspaceId: 'workspace-1',
+          status: 'active',
+          archivedAt: expect.anything(),
+        }),
+      }),
+    );
+  });
+
   it('returns every company the person is granted, not just one', async () => {
     const {
       directory,
@@ -406,7 +526,10 @@ describe('ManagedContextDirectoryService.listAuthorizedClients', () => {
         }),
       ]);
       entitlementsRepository.find.mockResolvedValue([
-        makeEntitlement({ productKey: 'social', status: ProductEntitlementStatus.Active }),
+        makeEntitlement({
+          productKey: 'social',
+          status: ProductEntitlementStatus.Active,
+        }),
         makeEntitlement({
           tenantId: 'managed-tenant-2',
           productKey: 'social',
@@ -439,6 +562,7 @@ describe('ManagedContextDirectoryService.resolveActiveContext', () => {
       kind: 'agency',
       productKey: 'leadflow',
       clientId: null,
+      companyContextId: null,
       managedTenantId: null,
       displayName: null,
     });
@@ -459,6 +583,7 @@ describe('ManagedContextDirectoryService.resolveActiveContext', () => {
       kind: 'client',
       productKey: 'leadflow',
       clientId: 'client-1',
+      companyContextId: null,
       managedTenantId: 'managed-tenant-1',
       displayName: 'Empresa A',
     });
@@ -486,6 +611,7 @@ describe('ManagedContextDirectoryService.resolveActiveContext', () => {
     expect(resolution.rejection).toEqual({
       code: 'context_not_authorized',
       requestedClientId: 'client-1',
+      requestedCompanyContextId: null,
       requestedProductKey: 'leadflow',
     });
   });
@@ -500,6 +626,18 @@ describe('ManagedContextDirectoryService.resolveActiveContext', () => {
       owner,
       requested({ clientId: 'client-from-workspace-2' }),
     );
+
+    expect(resolution.active.kind).toBe('agency');
+    expect(resolution.rejection?.code).toBe('context_not_authorized');
+  });
+
+  it('refuses a client that is no longer active', async () => {
+    const { directory, clientsRepository } = createDirectory();
+    clientsRepository.findOne.mockResolvedValue(
+      makeClient({ status: 'paused' }),
+    );
+
+    const resolution = await directory.resolveActiveContext(owner, requested());
 
     expect(resolution.active.kind).toBe('agency');
     expect(resolution.rejection?.code).toBe('context_not_authorized');
@@ -530,6 +668,146 @@ describe('ManagedContextDirectoryService.resolveActiveContext', () => {
 
     expect(resolution.active.kind).toBe('agency');
     expect(resolution.rejection?.code).toBe('client_id_missing');
+  });
+
+  it('rejects a company context when the Agency Client id is missing', async () => {
+    const { directory } = createDirectory();
+
+    const resolution = await directory.resolveActiveContext(
+      owner,
+      requested({ clientId: null, companyContextId: 'company-context-1' }),
+    );
+
+    expect(resolution.active.kind).toBe('agency');
+    expect(resolution.rejection?.code).toBe(
+      'company_context_client_id_missing',
+    );
+  });
+
+  it('activates a valid Agency Client and Company Context pair', async () => {
+    const {
+      directory,
+      clientsRepository,
+      companyContextsRepository,
+      contactsRepository,
+      entitlementsRepository,
+    } = createDirectory();
+    clientsRepository.findOne.mockResolvedValue(makeClient());
+    entitlementsRepository.findOne.mockResolvedValue(makeEntitlement());
+    companyContextsRepository.findOne.mockResolvedValue(makeCompanyContext());
+    contactsRepository.findOne.mockResolvedValue(makeCompanyContact());
+
+    const resolution = await directory.resolveActiveContext(
+      owner,
+      requested({ companyContextId: 'company-context-1' }),
+    );
+
+    expect(resolution.active).toEqual({
+      kind: 'client',
+      productKey: 'leadflow',
+      clientId: 'client-1',
+      companyContextId: 'company-context-1',
+      managedTenantId: 'managed-tenant-1',
+      displayName: 'Empresa A',
+    });
+    expect(resolution.rejection).toBeNull();
+  });
+
+  it.each([
+    ['inexistent', null, 'company_context_not_available'],
+    [
+      'other client',
+      makeCompanyContext({ agencyClientId: 'client-2' }),
+      'company_context_not_available',
+    ],
+    [
+      'other tenant',
+      makeCompanyContext({ tenantId: 'tenant-other' }),
+      'company_context_not_available',
+    ],
+    [
+      'other workspace',
+      makeCompanyContext({ workspaceId: 'workspace-other' }),
+      'company_context_not_available',
+    ],
+    [
+      'inactive',
+      makeCompanyContext({ status: 'inactive' }),
+      'company_context_inactive',
+    ],
+    [
+      'archived',
+      makeCompanyContext({ status: 'archived' }),
+      'company_context_archived',
+    ],
+    [
+      'archived timestamp',
+      makeCompanyContext({ archivedAt: new Date() }),
+      'company_context_archived',
+    ],
+  ])(
+    'refuses a %s company context without activating it',
+    async (_label, companyContext, code) => {
+      const {
+        directory,
+        clientsRepository,
+        companyContextsRepository,
+        entitlementsRepository,
+      } = createDirectory();
+      clientsRepository.findOne.mockResolvedValue(makeClient());
+      entitlementsRepository.findOne.mockResolvedValue(makeEntitlement());
+      companyContextsRepository.findOne.mockResolvedValue(companyContext);
+
+      const resolution = await directory.resolveActiveContext(
+        owner,
+        requested({ companyContextId: 'company-context-1' }),
+      );
+
+      expect(resolution.active.kind).toBe('agency');
+      expect(resolution.rejection?.code).toBe(code);
+      expect(resolution.rejection?.requestedCompanyContextId).toBe(
+        'company-context-1',
+      );
+    },
+  );
+
+  it('rejects a selected context whose organization Contact is no longer valid', async () => {
+    const {
+      directory,
+      clientsRepository,
+      companyContextsRepository,
+      contactsRepository,
+      entitlementsRepository,
+    } = createDirectory();
+    clientsRepository.findOne.mockResolvedValue(makeClient());
+    entitlementsRepository.findOne.mockResolvedValue(makeEntitlement());
+    companyContextsRepository.findOne.mockResolvedValue(makeCompanyContext());
+    contactsRepository.findOne.mockResolvedValue(null);
+
+    const resolution = await directory.resolveActiveContext(
+      owner,
+      requested({ companyContextId: 'company-context-1' }),
+    );
+
+    expect(resolution.active.kind).toBe('agency');
+    expect(resolution.rejection?.code).toBe('company_context_not_available');
+  });
+
+  it('does not require a company context in agency mode', async () => {
+    const { directory, companyContextsRepository } = createDirectory();
+
+    const resolution = await directory.resolveActiveContext(
+      owner,
+      requested({
+        operatingMode: 'agency',
+        clientId: null,
+        companyContextId: 'stale-company-id',
+      }),
+    );
+
+    expect(resolution.active.kind).toBe('agency');
+    expect(resolution.rejection).toBeNull();
+    expect(companyContextsRepository.findOne).not.toHaveBeenCalled();
   });
 
   it('refuses client mode for a product with no managed scope', async () => {

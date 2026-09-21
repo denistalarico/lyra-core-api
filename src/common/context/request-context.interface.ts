@@ -6,6 +6,8 @@ export interface ManagedContext {
   productKey: ProductKey;
   operatingMode: OperatingMode;
   clientId: string | null;
+  /** AgencyClientCompanyContext.id; null until a company is explicitly selected. */
+  companyContextId?: string | null;
   managedTenantId: string | null;
   clientName?: string | null;
 }

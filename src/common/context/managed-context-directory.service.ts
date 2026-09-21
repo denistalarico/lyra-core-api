@@ -1,9 +1,11 @@
 // src/common/context/managed-context-directory.service.ts
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { type FindOptionsWhere, In, IsNull, Repository } from 'typeorm';
+import { type FindOptionsWhere, In, IsNull, Not, Repository } from 'typeorm';
 import { AgencyClient } from '../../modules/clients/entities';
 import { AgencyClientStatus } from '../../modules/clients/enums';
+import { AgencyClientCompanyContext } from '../../modules/clients/entities/agency-client-company-context.entity';
+import { ContactEntity } from '../../modules/contacts/entities/contact.entity';
 import { AgencyClientAccessEntity } from '../../modules/permissions/entities/agency-client-access.entity';
 import { AgencyClientProductAccessEntity } from '../../modules/permissions/entities/agency-client-product-access.entity';
 import {
@@ -18,6 +20,7 @@ import { TenantProductEntitlementEntity } from '../../modules/platform/entities/
 import { PlatformProductKey } from '../../modules/platform/enums/platform-product.enums';
 import {
   ActiveManagedContextResolution,
+  AuthorizedManagedCompany,
   AuthorizedManagedClient,
   buildAgencyActiveContext,
   isManagedClientProductKey,
@@ -69,6 +72,10 @@ export class ManagedContextDirectoryService {
   constructor(
     @InjectRepository(AgencyClient, AGENCY_CONNECTION)
     private readonly clientsRepository: Repository<AgencyClient>,
+    @InjectRepository(AgencyClientCompanyContext, AGENCY_CONNECTION)
+    private readonly companyContextsRepository: Repository<AgencyClientCompanyContext>,
+    @InjectRepository(ContactEntity, AGENCY_CONNECTION)
+    private readonly contactsRepository: Repository<ContactEntity>,
     @InjectRepository(TenantProductEntitlementEntity, AGENCY_CONNECTION)
     private readonly entitlementsRepository: Repository<TenantProductEntitlementEntity>,
     @InjectRepository(AgencyClientAccessEntity, AGENCY_CONNECTION)
@@ -106,7 +113,7 @@ export class ManagedContextDirectoryService {
 
     if (
       !client ||
-      client.status === AgencyClientStatus.Archived ||
+      client.status !== AgencyClientStatus.Active ||
       client.archivedAt ||
       !client.managedTenantId
     ) {
@@ -296,6 +303,7 @@ export class ManagedContextDirectoryService {
         avatarUrl: this.extractClientAvatarUrl(client),
         status: client.status,
         managedTenantId: client.managedTenantId,
+        companies: [],
         entitlement: {
           status: entitlement!.status,
           planKey: entitlement!.planKey,
@@ -309,7 +317,7 @@ export class ManagedContextDirectoryService {
 
     entries.sort((a, b) => a.displayName.localeCompare(b.displayName));
 
-    return entries;
+    return this.attachActiveCompanies(entries, context);
   }
 
   /**
@@ -341,6 +349,7 @@ export class ManagedContextDirectoryService {
       rejection: {
         code,
         requestedClientId: requested.clientId,
+        requestedCompanyContextId: requested.companyContextId,
         requestedProductKey: requested.productKey,
       },
     });
@@ -354,7 +363,11 @@ export class ManagedContextDirectoryService {
     }
 
     if (!requested.clientId) {
-      return reject('client_id_missing');
+      return reject(
+        requested.companyContextId
+          ? 'company_context_client_id_missing'
+          : 'client_id_missing',
+      );
     }
 
     const authorized = await this.canAccessClientProduct({
@@ -382,17 +395,146 @@ export class ManagedContextDirectoryService {
       return reject('context_not_authorized');
     }
 
+    let companyContextId: string | null = null;
+    if (requested.companyContextId) {
+      const companyContext = await this.companyContextsRepository.findOne({
+        where: {
+          id: requested.companyContextId,
+          tenantId: context.tenantId,
+          workspaceId: context.workspaceId,
+          agencyClientId: client.id,
+        },
+      });
+
+      // A missing row intentionally groups nonexistent, foreign-client,
+      // cross-tenant, and cross-workspace ids into one non-disclosing result.
+      if (
+        !companyContext ||
+        companyContext.agencyClientId !== client.id ||
+        companyContext.tenantId !== context.tenantId ||
+        companyContext.workspaceId !== context.workspaceId
+      ) {
+        return reject('company_context_not_available');
+      }
+      if (companyContext.status === 'archived' || companyContext.archivedAt) {
+        return reject('company_context_archived');
+      }
+      if (companyContext.status !== 'active') {
+        return reject('company_context_inactive');
+      }
+
+      const companyContact = await this.contactsRepository.findOne({
+        where: {
+          id: companyContext.companyContactId,
+          tenantId: context.tenantId,
+          workspaceId: context.workspaceId,
+          type: 'organization',
+          status: Not('archived'),
+        },
+      });
+      if (!companyContact) return reject('company_context_not_available');
+      if (
+        companyContact.tenantId !== context.tenantId ||
+        companyContact.workspaceId !== context.workspaceId ||
+        companyContact.type !== 'organization' ||
+        companyContact.status === 'archived'
+      ) {
+        return reject('company_context_not_available');
+      }
+
+      companyContextId = companyContext.id;
+    }
+
     return {
       active: {
         kind: 'client',
         productKey,
         clientId: client.id,
+        companyContextId,
         managedTenantId: client.managedTenantId,
         displayName: client.displayName,
       },
       requested,
       rejection: null,
     };
+  }
+
+  private async attachActiveCompanies(
+    clients: AuthorizedManagedClient[],
+    context: ManagedContextIdentity,
+  ): Promise<AuthorizedManagedClient[]> {
+    if (clients.length === 0 || !context.workspaceId) return clients;
+
+    const clientIds = clients.map((client) => client.clientId);
+    const companyContexts = await this.companyContextsRepository.find({
+      where: {
+        tenantId: context.tenantId,
+        workspaceId: context.workspaceId,
+        agencyClientId: In(clientIds),
+        status: 'active',
+        archivedAt: IsNull(),
+      },
+      order: { isPrimary: 'DESC', createdAt: 'ASC' },
+    });
+    const validContextRows = companyContexts.filter(
+      (companyContext) =>
+        companyContext.tenantId === context.tenantId &&
+        companyContext.workspaceId === context.workspaceId &&
+        companyContext.status === 'active' &&
+        !companyContext.archivedAt &&
+        clients.some(
+          (client) => client.clientId === companyContext.agencyClientId,
+        ),
+    );
+
+    const contacts = validContextRows.length
+      ? await this.contactsRepository.find({
+          where: {
+            id: In(
+              validContextRows.map(
+                (companyContext) => companyContext.companyContactId,
+              ),
+            ),
+            tenantId: context.tenantId,
+            workspaceId: context.workspaceId,
+            type: 'organization',
+            status: Not('archived'),
+          },
+        })
+      : [];
+    const contactsById = new Map(
+      contacts
+        .filter(
+          (contact) =>
+            contact.tenantId === context.tenantId &&
+            contact.workspaceId === context.workspaceId &&
+            contact.type === 'organization' &&
+            contact.status !== 'archived',
+        )
+        .map((contact) => [contact.id, contact]),
+    );
+    const companiesByClientId = new Map<string, AuthorizedManagedCompany[]>();
+
+    for (const companyContext of validContextRows) {
+      const company = contactsById.get(companyContext.companyContactId);
+      if (!company) continue;
+
+      const companies =
+        companiesByClientId.get(companyContext.agencyClientId) ?? [];
+      companies.push({
+        companyContextId: companyContext.id,
+        companyContactId: company.id,
+        displayName: company.displayName,
+        legalName: company.legalName,
+        isPrimary: companyContext.isPrimary,
+      });
+      companiesByClientId.set(companyContext.agencyClientId, companies);
+    }
+
+    return clients.map((client) => ({
+      ...client,
+      companies: companiesByClientId.get(client.clientId) ?? [],
+    }));
   }
 
   private extractClientAvatarUrl(client: AgencyClient): string | null {

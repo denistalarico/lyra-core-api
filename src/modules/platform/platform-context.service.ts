@@ -35,6 +35,7 @@ const EMPTY_REQUESTED_CONTEXT: RequestedManagedContext = {
   productKey: null,
   operatingMode: null,
   clientId: null,
+  companyContextId: null,
 };
 
 type PlatformContextInput = {
@@ -132,10 +133,11 @@ export class PlatformContextService {
         requestedContext,
       ),
       ...MANAGED_CLIENT_PRODUCT_KEYS.map(async (productKey) => {
-        const clients = await this.managedContextDirectory.listAuthorizedClients(
-          identity,
-          productKey,
-        );
+        const clients =
+          await this.managedContextDirectory.listAuthorizedClients(
+            identity,
+            productKey,
+          );
 
         return [
           productKey,

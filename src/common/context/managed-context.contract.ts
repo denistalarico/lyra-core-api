@@ -16,6 +16,7 @@
 // headers, and the server answers with what it accepted.
 
 import type { OperatingMode, ProductKey } from './request-context.interface';
+import type { AgencyClientCompanyContextStatus } from '../../modules/clients/entities/agency-client-company-context.entity';
 
 /** Products that can be operated on behalf of a managed company. */
 export const MANAGED_CLIENT_PRODUCT_KEYS = ['leadflow', 'social'] as const;
@@ -52,6 +53,8 @@ export interface AuthorizedManagedClient {
   avatarUrl: string | null;
   status: string;
   managedTenantId: string;
+  /** Operational companies are nested under their Agency Client. */
+  companies: AuthorizedManagedCompany[];
   entitlement: {
     status: string;
     planKey: string | null;
@@ -60,6 +63,15 @@ export interface AuthorizedManagedClient {
     endsAt: string | null;
     trialEndsAt: string | null;
   };
+}
+
+export interface AuthorizedManagedCompany {
+  companyContextId: string;
+  companyContactId: string;
+  displayName: string;
+  legalName: string | null;
+  isPrimary: boolean;
+  status?: AgencyClientCompanyContextStatus;
 }
 
 /** Contexts available for one product. */
@@ -75,6 +87,7 @@ export type ActiveManagedContext =
       kind: 'agency';
       productKey: ProductKey;
       clientId: null;
+      companyContextId: null;
       managedTenantId: null;
       displayName: null;
     }
@@ -82,6 +95,8 @@ export type ActiveManagedContext =
       kind: 'client';
       productKey: ManagedClientProductKey;
       clientId: string;
+      /** Null means the explicitly supported legacy/unscoped client context. */
+      companyContextId: string | null;
       managedTenantId: string;
       displayName: string;
     };
@@ -89,6 +104,14 @@ export type ActiveManagedContext =
 export type ManagedContextRejectionCode =
   /** Client mode was requested without a client id header. */
   | 'client_id_missing'
+  /** Company was requested without its owning Agency Client. */
+  | 'company_context_client_id_missing'
+  /** Missing, cross-client, cross-tenant, or cross-workspace company context. */
+  | 'company_context_not_available'
+  /** Company context belongs to this client but is not active. */
+  | 'company_context_inactive'
+  /** Company context belongs to this client but has been archived. */
+  | 'company_context_archived'
   /** Client mode was requested for a product that has no managed scope. */
   | 'product_not_client_scoped'
   /** The session has no workspace, so no client context can be resolved. */
@@ -103,6 +126,7 @@ export type ManagedContextRejectionCode =
 export interface ManagedContextRejection {
   code: ManagedContextRejectionCode;
   requestedClientId: string | null;
+  requestedCompanyContextId?: string | null;
   requestedProductKey: string | null;
 }
 
@@ -114,6 +138,7 @@ export interface RequestedManagedContext {
   productKey: ProductKey | null;
   operatingMode: OperatingMode | null;
   clientId: string | null;
+  companyContextId: string | null;
 }
 
 export interface ActiveManagedContextResolution {
@@ -128,6 +153,7 @@ const OPERATING_MODE_HEADERS = [
   'x-leadflow-operating-mode',
 ];
 const CLIENT_ID_HEADERS = ['x-lyra-client-id', 'x-client-id'];
+const COMPANY_CONTEXT_ID_HEADERS = ['x-lyra-company-context-id'];
 
 const PRODUCT_KEYS = new Set<string>(['agency', 'leadflow', 'social']);
 const OPERATING_MODES = new Set<string>(['agency', 'client']);
@@ -169,6 +195,7 @@ export function readRequestedManagedContext(
   const rawProductKey = readHeader(headers, PRODUCT_KEY_HEADERS);
   const rawOperatingMode = readHeader(headers, OPERATING_MODE_HEADERS);
   const rawClientId = readHeader(headers, CLIENT_ID_HEADERS);
+  const companyContextId = readHeader(headers, COMPANY_CONTEXT_ID_HEADERS);
 
   const productKey =
     rawProductKey && PRODUCT_KEYS.has(rawProductKey)
@@ -187,6 +214,7 @@ export function readRequestedManagedContext(
     productKey,
     operatingMode,
     clientId: rawClientId,
+    companyContextId,
   };
 }
 
@@ -197,6 +225,7 @@ export function buildAgencyActiveContext(
     kind: 'agency',
     productKey,
     clientId: null,
+    companyContextId: null,
     managedTenantId: null,
     displayName: null,
   };
