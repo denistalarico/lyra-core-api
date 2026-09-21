@@ -218,4 +218,25 @@ describe('buildSocialAnalyticsReportHtml', () => {
     expect(html).not.toContain('Cliente Exemplo');
     expect(html).toContain('Agência Exemplo');
   });
+
+  it('embeds an inlined client logo as-is', () => {
+    // The Brand Kit logo arrives as a `data:` URI because Playwright renders
+    // with no session and could not fetch the authenticated endpoint. The
+    // renderer must not rewrite it into something resolvable.
+    const dataUri = `data:image/png;base64,${Buffer.from('LOGO').toString('base64')}`;
+    const html = render({
+      letterhead: { ...letterhead, clientLogoUrl: dataUri },
+    });
+
+    expect(html).toContain(`src="${dataUri}"`);
+  });
+
+  it('renders the client name with no mark when the kit has no logo', () => {
+    const html = render({
+      letterhead: { ...letterhead, clientLogoUrl: null },
+    });
+
+    expect(html).toContain('Cliente Exemplo');
+    expect(html).not.toContain('class="client-logo"');
+  });
 });

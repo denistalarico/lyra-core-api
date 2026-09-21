@@ -1,9 +1,14 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { IsNull, Repository } from 'typeorm';
-import type { CompanyAwareScope } from '../../../common/context/company-aware-scope';
+import {
+  resolveCompanyAwareScope,
+  type CompanyAwareScope,
+} from '../../../common/context/company-aware-scope';
+import type { RequestContext } from '../../../common/context/request-context.interface';
 import { AgencyWorkspaceCompanySettingsEntity } from '../../agency/entities/agency-settings.entities';
 import { DocumentPdfRendererService } from '../../document-layouts/document-pdf-renderer.service';
+import { SocialAnalyticsReportLogoService } from './social-analytics-report-logo.service';
 import type { DashboardChannelId } from '../dashboard-layout.contract';
 import { SocialAnalyticsReportEntity } from '../entities';
 import {
@@ -46,28 +51,30 @@ const MAX_REPORTS_PER_SCOPE = 200;
 /**
  * Renders and records the Analytics report — Etapa 9.
  *
- * ## What is and is not stored
+ * ## What is and is not stored — a decided MVP scope, not a gap
  *
  * A row per emission, holding the title, channels, period and page mode; the
  * PDF bytes are streamed to the caller and **not** written to disk. `file_url`
- * stays null, and reprinting from the Relatórios tab re-renders from the
- * dashboard rather than serving a stored file.
+ * stays null, and the archive is a record of what was emitted rather than a
+ * file cabinet.
  *
- * That is a deliberate reading of the plan's "relatório reimpresso é idêntico ao
- * original". Identical to *what the dashboard shows* is the promise this module
- * can actually keep: the numbers in a dashboard for a closed period do not
- * move, so a re-render of the same period reproduces the same document. Storing
- * bytes would need a blob store this module does not have, and would make the
- * archive diverge from the dashboard the moment a card is renamed — with no
- * signal to the reader about which of the two they are looking at. The column
- * exists for the day a blob store is wired in.
+ * This is a product decision taken for this first MVP, not an unfinished
+ * feature. Two things follow from it and are deliberate:
+ *
+ * 1. There is no "reprint the original" action. Re-rendering would build the
+ *    document from the dashboard *as it stands now*, which for a dashboard
+ *    edited since is a different document under the original's name. Offering
+ *    a reprint button would be claiming a fidelity nothing here can check.
+ * 2. `file_url` is kept on the entity anyway, because the day a blob store is
+ *    wired in, that column is where the object key goes — and adding it later
+ *    would mean altering a table that already holds rows.
  *
  * ## The letterhead is server-side
  *
  * The body of the document comes from the client, because it has to agree with
  * the screen it was exported from (see `report-document.contract.ts`). The
- * header does not: the agency's name, details and logo are read here from
- * `workspace_company_settings` for the caller's own tenant and workspace. The
+ * header does not: the agency's identity is read here from
+ * `workspace_company_settings`, and the client's logo from their Brand Kit. The
  * masthead of a document that gets forwarded to a client is exactly the part
  * that must not be settable by whatever posted the body.
  */
@@ -81,6 +88,7 @@ export class SocialAnalyticsReportService {
     @InjectRepository(AgencyWorkspaceCompanySettingsEntity, 'agency')
     private readonly companySettings: Repository<AgencyWorkspaceCompanySettingsEntity>,
     private readonly pdfRenderer: DocumentPdfRendererService,
+    private readonly logos: SocialAnalyticsReportLogoService,
   ) {}
 
   async list(scope: CompanyAwareScope): Promise<SocialAnalyticsReportView[]> {
@@ -102,10 +110,10 @@ export class SocialAnalyticsReportService {
    * step is to decide whether to send this exact thing.
    */
   async renderHtml(
-    scope: CompanyAwareScope,
-    clientName: string | null,
+    ctx: RequestContext,
     request: RenderReportRequest,
   ): Promise<{ html: string; title: string }> {
+    const scope = resolveCompanyAwareScope(ctx);
     const title = request.title.trim();
 
     if (!title) {
@@ -129,7 +137,7 @@ export class SocialAnalyticsReportService {
       throw error;
     }
 
-    const letterhead = await this.resolveLetterhead(scope, clientName);
+    const letterhead = await this.resolveLetterhead(ctx, scope);
 
     return {
       title,
@@ -153,12 +161,11 @@ export class SocialAnalyticsReportService {
    * Relatórios tab would offer a reprint of something that never existed.
    */
   async renderPdf(
-    scope: CompanyAwareScope,
-    actorId: string | null,
-    clientName: string | null,
+    ctx: RequestContext,
     request: RenderReportRequest,
   ): Promise<{ buffer: Buffer; filename: string }> {
-    const { html, title } = await this.renderHtml(scope, clientName, request);
+    const scope = resolveCompanyAwareScope(ctx);
+    const { html, title } = await this.renderHtml(ctx, request);
 
     const buffer = await this.pdfRenderer.renderHtmlToPdf(html, {
       format: 'A4',
@@ -168,7 +175,7 @@ export class SocialAnalyticsReportService {
     });
 
     if (request.persist) {
-      await this.record(scope, actorId, request, title);
+      await this.record(scope, ctx.userId ?? null, request, title);
     }
 
     return { buffer, filename: this.filename(title, request) };
@@ -242,14 +249,25 @@ export class SocialAnalyticsReportService {
    * lookup here: the context resolver already reads it from `agency_clients`,
    * and re-reading it would make this module depend on the clients module for a
    * string it is being handed.
+   *
+   * The client's logo comes from their Brand Kit, inlined as a `data:` URI —
+   * see `SocialAnalyticsReportLogoService` for why it cannot be a link. It is
+   * only asked for when there *is* a client: in agency scope the Brand Kit
+   * would answer with the agency's own kit, and printing the agency mark twice
+   * (once as sender, once as subject) would misstate who the report is about.
    */
   private async resolveLetterhead(
+    ctx: RequestContext,
     scope: CompanyAwareScope,
-    clientName: string | null,
   ): Promise<ReportLetterhead> {
-    const settings = await this.companySettings.findOne({
-      where: { tenantId: scope.tenantId, workspaceId: scope.workspaceId },
-    });
+    const clientName = ctx.managedContext?.clientName ?? null;
+
+    const [settings, clientLogoUrl] = await Promise.all([
+      this.companySettings.findOne({
+        where: { tenantId: scope.tenantId, workspaceId: scope.workspaceId },
+      }),
+      clientName ? this.logos.resolveClientLogo(ctx) : Promise.resolve(null),
+    ]);
 
     const agencyName =
       settings?.tradeName?.trim() ||
@@ -276,12 +294,9 @@ export class SocialAnalyticsReportService {
         settings?.logoUrl ?? settings?.avatarUrl,
       ),
       clientName: clientName?.trim() || null,
-      // The client's own mark has no column anywhere in the platform today —
-      // `agency_clients` stores a name and no brand asset. Rather than reach
-      // into the Brand Kit (another module, and a kit is a set of assets with
-      // no single "this is the logo" among them), the block renders the client's
-      // name. See the status note; wiring a real asset is a one-field change.
-      clientLogoUrl: null,
+      // Null is expected, not a failure: a client with no Brand Kit logo gets a
+      // letterhead with their name and no mark.
+      clientLogoUrl,
     };
   }
 

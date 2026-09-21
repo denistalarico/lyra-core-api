@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AgencyWorkspaceCompanySettingsEntity } from '../agency/entities/agency-settings.entities';
+import { BrandKitModule } from '../brand-kit/brand-kit.module';
 import { DocumentLayoutsModule } from '../document-layouts/document-layouts.module';
 import { PermissionsModule } from '../permissions';
 import {
@@ -14,6 +15,7 @@ import { SocialAnalyticsReportsController } from './social-analytics-reports.con
 import { SocialAnalyticsInsightConfigService } from './services/social-analytics-insight-config.service';
 import { SocialAnalyticsInsightProvider } from './services/social-analytics-insight.provider';
 import { SocialAnalyticsInsightService } from './services/social-analytics-insight.service';
+import { SocialAnalyticsReportLogoService } from './services/social-analytics-report-logo.service';
 import { SocialAnalyticsReportService } from './services/social-analytics-report.service';
 
 /**
@@ -27,15 +29,19 @@ import { SocialAnalyticsReportService } from './services/social-analytics-report
  * body, already formatted by the cards that are showing them.
  *
  * Reports (Etapa 9) are the third resident, on the same terms: the report body
- * also arrives formatted, and the only thing read server-side is the agency
+ * also arrives formatted, and the only thing read server-side is the
  * letterhead. `DocumentLayoutsModule` is imported for its Playwright renderer
  * — the one place in the codebase that launches a browser — rather than adding
- * a second launch path with its own production gotchas.
+ * a second launch path with its own production gotchas. `BrandKitModule` is
+ * imported for the client's logo, through the service it exports for exactly
+ * this: its own module doc says consumers must read Brand Kit through that
+ * service and never by building a storage URL by hand.
  */
 @Module({
   imports: [
     PermissionsModule,
     DocumentLayoutsModule,
+    BrandKitModule,
     TypeOrmModule.forFeature(
       [
         SocialAnalyticsDashboardEntity,
@@ -58,6 +64,7 @@ import { SocialAnalyticsReportService } from './services/social-analytics-report
     SocialAnalyticsInsightConfigService,
     SocialAnalyticsInsightProvider,
     SocialAnalyticsInsightService,
+    SocialAnalyticsReportLogoService,
     SocialAnalyticsReportService,
   ],
   exports: [

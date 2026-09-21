@@ -85,8 +85,7 @@ export class SocialAnalyticsReportsController {
     @Body() dto: PreviewSocialAnalyticsReportDto,
   ) {
     const { html, title } = await this.service.renderHtml(
-      resolveCompanyAwareScope(ctx),
-      ctx.managedContext?.clientName ?? null,
+      ctx,
       this.toRequest(dto, { persist: false }),
     );
 
@@ -104,9 +103,7 @@ export class SocialAnalyticsReportsController {
   ) {
     try {
       const report = await this.service.renderPdf(
-        resolveCompanyAwareScope(ctx),
-        ctx.userId ?? null,
-        ctx.managedContext?.clientName ?? null,
+        ctx,
         this.toRequest(dto, { persist: true }),
       );
 
