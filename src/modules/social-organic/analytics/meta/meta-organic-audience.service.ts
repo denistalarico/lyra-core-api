@@ -9,14 +9,11 @@ import type {
 } from '../social-organic-audience.contract';
 import { SocialOrganicAudienceWriterService } from '../social-organic-audience-writer.service';
 import { SocialOrganicSyncError } from '../social-organic-sync.error';
+import { normalizeInstagramFollowerDemographics } from './meta-organic-audience.normalizer';
 import {
-  normalizeFacebookFanDemographics,
-  normalizeInstagramFollowerDemographics,
-} from './meta-organic-audience.normalizer';
-import {
-  FACEBOOK_AUDIENCE_METRICS,
   INSTAGRAM_AUDIENCE_BREAKDOWNS,
   INSTAGRAM_AUDIENCE_METRIC,
+  META_ORGANIC_INSIGHTS_GRAPH_VERSION,
 } from './meta-organic-insights.types';
 
 /**
@@ -134,30 +131,26 @@ export class MetaOrganicAudienceService {
         rows.push(...produced);
       }
     } else if (credential.assetType === 'facebook_page') {
-      for (const { metric, kind } of FACEBOOK_AUDIENCE_METRICS) {
-        const insights = await this.graph.getOrganicInsights({
-          objectId: credential.externalAssetId,
-          accessToken: credential.accessToken,
-          metrics: [metric],
-          // No `breakdown` and no `metric_type`: a Page reports these as a
-          // lifetime metric whose value is already a bucket map, and sending
-          // either parameter is how the edge answers with nothing at all.
-          period: 'lifetime',
-        });
-
-        apiCalls += insights.apiCalls;
-
-        const produced = normalizeFacebookFanDemographics({
-          ...context,
-          kind,
-          metricName: metric,
-          insights,
-        });
-
-        if (produced.length) dimensions += 1;
-
-        rows.push(...produced);
-      }
+      // Nothing to collect: Meta retired Page fan demographics.
+      //
+      // `page_fans_gender_age`, `page_fans_city` and `page_fans_country` answer
+      // `(#100) The value must be a valid insights metric` — verified against
+      // production on 2026-09-22, and verified to be about the metric rather
+      // than the account or the token: a metric name invented for the test
+      // returns that same error, while `page_follows` succeeds in the identical
+      // call. The same request also fails on v23 and v20, so it is a retirement
+      // across the API and not a version this project could pin back to. No
+      // replacement endpoint exposes the buckets either — field expansion,
+      // per-age/gender impression metrics and a `page_audience` guess were all
+      // tried.
+      //
+      // The honest result is therefore zero dimensions, which surfaces in the UI
+      // as "not collected" rather than an error or an empty chart that would
+      // read as "this Page has no audience". Instagram still answers
+      // `follower_demographics`, so audience ingestion stays worth running.
+      this.logger.debug(
+        `Facebook Page audience demographics unavailable on Graph ${META_ORGANIC_INSIGHTS_GRAPH_VERSION}; skipping asset ${credential.assetId}.`,
+      );
     } else {
       throw new SocialOrganicSyncError('unsupported_analytics_asset_type');
     }

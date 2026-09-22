@@ -173,6 +173,59 @@ describe('Meta organic account insights normalizers', () => {
     ).toThrow('meta_invalid_response');
   });
 
+  // Observed in production on 2026-09-21: Meta answers a quiet day with the
+  // breakdown envelope and no `results` key at all. Before this was handled the
+  // whole run failed as `meta_invalid_response`, so a single day with no
+  // follows or unfollows stopped that day's account metrics from being written.
+  it('reads a breakdown with no results as an absence, not a malformed payload', () => {
+    const row = normalizeInstagramAccountInsights({
+      ...base,
+      followersCount: 1061,
+      mediaInsights: {
+        data: [breakdownMetric('views', 'media_product_type', [['POST', 4]])],
+      },
+      followInsights: {
+        data: [
+          {
+            name: 'follows_and_unfollows',
+            period: 'day',
+            total_value: { breakdowns: [{ dimension_keys: ['follow_type'] }] },
+          },
+        ],
+      },
+    });
+
+    expect(row).toMatchObject({
+      followersCount: '1061',
+      impressions: '4',
+      followersGained: null,
+      followersLost: null,
+    });
+  });
+
+  it('still fails closed when results is present but not an array', () => {
+    expect(() =>
+      normalizeInstagramAccountInsights({
+        ...base,
+        followersCount: undefined,
+        mediaInsights: {
+          data: [
+            {
+              name: 'views',
+              period: 'day',
+              total_value: {
+                breakdowns: [
+                  { dimension_keys: ['media_product_type'], results: 'nope' },
+                ],
+              },
+            },
+          ],
+        },
+        followInsights: { data: [] },
+      }),
+    ).toThrow('meta_invalid_response');
+  });
+
   it('marks only the asset-local same day partial', () => {
     const row = normalizeInstagramAccountInsights({
       ...base,

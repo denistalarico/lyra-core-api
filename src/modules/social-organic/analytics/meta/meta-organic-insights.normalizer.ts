@@ -280,6 +280,12 @@ function readNonAdMediaProducts(
       invalid();
     }
     if (!breakdown.dimension_keys.includes('media_product_type')) continue;
+    // A breakdown with no `results` key at all is Meta's shape for a day in
+    // which nothing happened — observed in production on 2026-09-21. That is an
+    // absence of activity, not a malformed answer, so it contributes nothing
+    // and the other breakdowns still count. A `results` that is present but not
+    // an array remains a broken payload and still refuses.
+    if (!hasOwn(breakdown, 'results')) continue;
     if (!Array.isArray(breakdown.results)) invalid();
 
     for (const result of breakdown.results as unknown[]) {
@@ -321,6 +327,10 @@ function readBreakdownDimension(
     ) {
       continue;
     }
+    // Same absence-is-zero rule as `readNonAdMediaProducts`: a `follow_type`
+    // breakdown that carries no `results` is a day with no follows or
+    // unfollows, which reads as null rather than failing the whole run.
+    if (!hasOwn(breakdown, 'results')) return null;
     if (!Array.isArray(breakdown.results)) invalid();
     const results = breakdown.results as unknown[];
     const result: unknown = results.find(

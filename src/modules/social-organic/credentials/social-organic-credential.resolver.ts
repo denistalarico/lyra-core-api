@@ -77,7 +77,11 @@ export class SocialOrganicCredentialResolver {
         workspaceId: input.workspaceId,
         agencyClientId: input.agencyClientId ?? IsNull(),
       },
-      select: ['companyContextId'],
+      // `id` is selected although only the context is read — see the same
+      // guard in `SocialAdCredentialResolver.resolvePersisted`. TypeORM 0.3.28
+      // hydrates `findOne` to null when every selected column is NULL in the
+      // row, and `companyContextId` is NULL for every agency-owned asset.
+      select: ['id', 'companyContextId'],
     });
     if (!asset) throw new SocialOrganicCredentialError('asset_not_found');
     return this.resolveInternal(

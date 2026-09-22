@@ -149,7 +149,9 @@ export class SocialAdCredentialResolver {
   }
 
   /** Read-only parent proof for child/log endpoints; it never loads a token. */
-  async hasConnectionInScope(input: ResolveAdCredentialInput): Promise<boolean> {
+  async hasConnectionInScope(
+    input: ResolveAdCredentialInput,
+  ): Promise<boolean> {
     return (await this.findInScope(input)) !== null;
   }
 
@@ -164,7 +166,13 @@ export class SocialAdCredentialResolver {
         workspaceId: input.workspaceId,
         agencyClientId: input.agencyClientId ?? IsNull(),
       },
-      select: ['companyContextId'],
+      // `id` is selected although only the context is read. TypeORM 0.3.28
+      // hydrates `findOne` to null when every selected column is NULL in the
+      // row, so a projection of `companyContextId` alone is indistinguishable
+      // from "no such connection" for the agency's own account, where the
+      // column is NULL by design. Including the primary key — never null —
+      // keeps the row addressable.
+      select: ['id', 'companyContextId'],
     });
     if (!connection) {
       throw new SocialAdCredentialError('connection_not_found');

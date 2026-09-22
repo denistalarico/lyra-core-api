@@ -236,13 +236,12 @@ export const INSTAGRAM_MEDIA_LIFETIME_METRICS = [
 /**
  * The audience-demographics metric each asset type exposes.
  *
- * Two names for one concept, because the two providers genuinely differ.
- * Instagram reports `follower_demographics` as a `total_value` metric taking one
- * `breakdown` at a time; a Facebook Page reports `page_fans_gender_age` and
- * `page_fans_city` as lifetime metrics whose value is a bucket map with no
- * breakdown parameter at all. Neither can be expressed in the other's shape,
- * which is why the reader has one normalizer per shape rather than one with a
- * flag.
+ * Instagram only, as of Graph v26. It reports `follower_demographics` as a
+ * `total_value` metric taking one `breakdown` at a time. A Facebook Page used to
+ * report `page_fans_gender_age` and `page_fans_city` as lifetime metrics whose
+ * value was already a bucket map — a shape different enough that the reader has
+ * one normalizer per provider rather than one with a flag — but Meta has since
+ * retired those metrics entirely; see `FACEBOOK_AUDIENCE_METRICS_RETIRED`.
  *
  * Every one of these is a **lifetime stock**, never a daily flow. They are
  * written only to `social_organic_audience_daily`, whose whole contract is that
@@ -269,15 +268,22 @@ export const INSTAGRAM_AUDIENCE_BREAKDOWNS = [
 ] as const;
 
 /**
- * The Page metrics that carry the same information, with their dimension.
+ * The Page metrics that used to carry the same information. **Retired by Meta.**
  *
- * `page_fans_gender_age` is one metric holding the cross, which is why the
- * Facebook side records `age_gender` where the Instagram side records two
- * marginals. Both spellings exist in `SocialOrganicAudienceKind` precisely so
- * that neither provider's answer has to be reshaped into the other's before it
- * is stored.
+ * `page_fans_gender_age`, `page_fans_city` and `page_fans_country` answer
+ * `(#100) The value must be a valid insights metric` — the byte-identical error
+ * an invented metric name gets, while `page_follows` succeeds in the same call
+ * against the same Page with the same token. v23 and v20 refuse it too, so this
+ * is a retirement across the API rather than a version to pin back to.
+ * Verified against production on 2026-09-22.
+ *
+ * Kept as documentation rather than deleted: the names are what a maintainer
+ * will search for when asked why the Facebook audience tab is empty, and the
+ * `age_gender` spelling still exists in `SocialOrganicAudienceKind` for rows
+ * collected before the retirement. Nothing requests these — see the
+ * `facebook_page` branch of `MetaOrganicAudienceService`.
  */
-export const FACEBOOK_AUDIENCE_METRICS = [
+export const FACEBOOK_AUDIENCE_METRICS_RETIRED = [
   { metric: 'page_fans_gender_age', kind: 'age_gender' },
   { metric: 'page_fans_city', kind: 'city' },
   { metric: 'page_fans_country', kind: 'country' },

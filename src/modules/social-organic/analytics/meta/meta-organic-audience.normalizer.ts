@@ -77,6 +77,13 @@ export function normalizeInstagramFollowerDemographics(
 /**
  * A Facebook Page's `page_fans_gender_age` / `page_fans_city` into audience rows.
  *
+ * **No caller ingests through this any more.** Meta retired the Page fan
+ * demographics metrics — see `FACEBOOK_AUDIENCE_METRICS_RETIRED` for the
+ * evidence — so `MetaOrganicAudienceService` no longer requests them. This is
+ * kept because rows collected before the retirement are still stored in that
+ * shape, and because the parser is the record of what those rows mean. Delete it
+ * only together with that history.
+ *
  * A different response shape from Instagram's, which is why this is a second
  * function rather than a flag: the Page insights edge reports these as a
  * lifetime `values` array whose last entry's `value` is a **map** from bucket to
