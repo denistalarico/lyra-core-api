@@ -221,7 +221,7 @@ export class SocialBoostTemplateEntity {
   @Column({
     name: 'message_destinations',
     type: 'jsonb',
-    default: () => "'{\"destinations\":[],\"whatsappPhoneNumber\":null}'::jsonb",
+    default: () => '\'{"destinations":[],"whatsappPhoneNumber":null}\'::jsonb',
   })
   messageDestinations!: SocialBoostMessageDestinationConfig;
 

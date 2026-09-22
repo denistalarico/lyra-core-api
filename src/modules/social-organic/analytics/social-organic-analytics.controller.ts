@@ -1,5 +1,4 @@
 import {
-  BadRequestException,
   Controller,
   Get,
   HttpStatus,
@@ -19,6 +18,7 @@ import {
 } from '../../permissions';
 import { AnalyticsAudienceQueryDto } from './dto/analytics-audience.query.dto';
 import { AnalyticsThumbnailQueryDto } from './dto/analytics-thumbnail.query.dto';
+import { AnalyticsTopPostsQueryDto } from './dto/analytics-top-posts.query.dto';
 import { AnalyticsFreshnessQueryDto } from './dto/analytics-freshness.query.dto';
 import { AnalyticsOverviewQueryDto } from './dto/analytics-overview.query.dto';
 import { ConsolidatedOverviewQueryDto } from './dto/consolidated-overview.query.dto';
@@ -118,6 +118,34 @@ export class SocialOrganicAnalyticsController {
     // signed URL behind it expires on its own schedule.
     response.setHeader('Cache-Control', 'private, max-age=300');
     response.redirect(HttpStatus.FOUND, url);
+  }
+
+  /**
+   * The asset's best posts in one period, ranked by a lifetime counter.
+   *
+   * The window filters on when each post was **published**, not on when Lyra
+   * observed it: the question is which content performed, and the observation
+   * day is an implementation detail of the sync. Each post appears once, from
+   * its newest observation — see `topPosts` for why that matters.
+   */
+  @Get('posts/top')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireProductEntitlement('social')
+  @RequirePermission(SOCIAL_ORGANIC_ANALYTICS_PERMISSION)
+  topPosts(
+    @RequestContextData() ctx: RequestContext,
+    @Query() query: AnalyticsTopPostsQueryDto,
+  ) {
+    const scope = this.requireScope(ctx);
+
+    return this.analyticsReadService.topPosts({
+      ...scope,
+      assetId: query.assetId,
+      since: query.since,
+      until: query.until,
+      sort: query.sort,
+      limit: query.limit,
+    });
   }
 
   @Get('overview')

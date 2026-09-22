@@ -1,10 +1,4 @@
-import {
-  BadRequestException,
-  Controller,
-  Get,
-  Query,
-  UseGuards,
-} from '@nestjs/common';
+import { Controller, Get, Query, UseGuards } from '@nestjs/common';
 import { RequestContextData } from '../../common/context/request-context.decorator';
 import type { RequestContext } from '../../common/context/request-context.interface';
 import { resolveCompanyAwareScope } from '../../common/context/company-aware-scope';

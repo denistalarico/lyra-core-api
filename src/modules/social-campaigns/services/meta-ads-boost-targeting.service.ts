@@ -10,7 +10,13 @@ type ProviderRow = Record<string, unknown>;
 export type SocialBoostTargetingOption = {
   id: string;
   label: string;
-  kind: 'region' | 'city' | 'postal_code' | 'interest' | 'language' | 'saved_audience';
+  kind:
+    | 'region'
+    | 'city'
+    | 'postal_code'
+    | 'interest'
+    | 'language'
+    | 'saved_audience';
   detail: string | null;
 };
 
@@ -27,26 +33,35 @@ export class MetaAdsBoostTargetingService {
   ) {}
 
   async search(scope: SocialCampaignsScope, dto: SocialBoostTargetingQueryDto) {
-    const credential = await this.credentials.resolve({ ...scope, connectionId: dto.connectionId });
+    const credential = await this.credentials.resolve({
+      ...scope,
+      connectionId: dto.connectionId,
+    });
     const query = dto.query?.trim() ?? '';
     if (dto.kind !== 'saved_audience' && query.length < 2) {
-      throw new BadRequestException('Search must contain at least two characters.');
+      throw new BadRequestException(
+        'Search must contain at least two characters.',
+      );
     }
 
-    const page = dto.kind === 'saved_audience'
-      ? await this.graph.readEdge({
-          accessToken: credential.accessToken,
-          path: `${credential.externalAccountId}/saved_audiences`,
-          fields: 'id,name',
-          limit: 25,
-          maxPages: 1,
-          failureMessage: 'Meta saved audiences could not be loaded.',
-        })
-      : await this.searchTargeting(credential, dto.kind, query);
+    const page =
+      dto.kind === 'saved_audience'
+        ? await this.graph.readEdge({
+            accessToken: credential.accessToken,
+            path: `${credential.externalAccountId}/saved_audiences`,
+            fields: 'id,name',
+            limit: 25,
+            maxPages: 1,
+            failureMessage: 'Meta saved audiences could not be loaded.',
+          })
+        : await this.searchTargeting(credential, dto.kind, query);
 
     return {
       items: page.rows
-        .filter((row): row is ProviderRow => Boolean(row) && typeof row === 'object' && !Array.isArray(row))
+        .filter(
+          (row): row is ProviderRow =>
+            Boolean(row) && typeof row === 'object' && !Array.isArray(row),
+        )
         .map((row) => this.toOption(dto.kind, row))
         .filter((row): row is SocialBoostTargetingOption => row !== null),
       isPartial: page.truncated,
@@ -54,7 +69,11 @@ export class MetaAdsBoostTargetingService {
   }
 
   private providerType(kind: Exclude<TargetingKind, 'saved_audience'>) {
-    return kind === 'location' ? 'adgeolocation' : kind === 'interest' ? 'adinterest' : 'adlocale';
+    return kind === 'location'
+      ? 'adgeolocation'
+      : kind === 'interest'
+        ? 'adinterest'
+        : 'adlocale';
   }
 
   private async searchTargeting(
@@ -86,18 +105,39 @@ export class MetaAdsBoostTargetingService {
     });
   }
 
-  private toOption(kind: TargetingKind, row: ProviderRow): SocialBoostTargetingOption | null {
+  private toOption(
+    kind: TargetingKind,
+    row: ProviderRow,
+  ): SocialBoostTargetingOption | null {
     const id = this.string(row.key) ?? this.string(row.id);
     const label = this.string(row.name);
     if (!id || !label || !/^\d+$/.test(id)) return null;
     if (kind === 'location') {
       const providerType = this.string(row.type)?.toLowerCase();
-      const optionKind = providerType === 'region' ? 'region' : providerType === 'city' ? 'city' : null;
+      const optionKind =
+        providerType === 'region'
+          ? 'region'
+          : providerType === 'city'
+            ? 'city'
+            : null;
       if (!optionKind) return null;
-      const detail = [this.string(row.region), this.string(row.country_code)].filter(Boolean).join(' · ') || null;
+      const detail =
+        [this.string(row.region), this.string(row.country_code)]
+          .filter(Boolean)
+          .join(' · ') || null;
       return { id, label, kind: optionKind, detail };
     }
-    return { id, label, kind: kind === 'interest' ? 'interest' : kind === 'language' ? 'language' : 'saved_audience', detail: null };
+    return {
+      id,
+      label,
+      kind:
+        kind === 'interest'
+          ? 'interest'
+          : kind === 'language'
+            ? 'language'
+            : 'saved_audience',
+      detail: null,
+    };
   }
 
   private string(value: unknown) {

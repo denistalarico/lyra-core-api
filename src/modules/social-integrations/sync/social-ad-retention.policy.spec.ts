@@ -267,8 +267,10 @@ describe('social ad sync run retention policy', () => {
     // A guard on the constants themselves: the log line and the production
     // audit both quote this figure.
     expect(MAX_RETENTION_DAYS).toBe(180);
-    expect(Math.max(...Object.values(RETENTION_DAYS_BY_STATUS as Record<string, number>))).toBe(
-      MAX_RETENTION_DAYS,
-    );
+    expect(
+      Math.max(
+        ...Object.values(RETENTION_DAYS_BY_STATUS as Record<string, number>),
+      ),
+    ).toBe(MAX_RETENTION_DAYS);
   });
 });

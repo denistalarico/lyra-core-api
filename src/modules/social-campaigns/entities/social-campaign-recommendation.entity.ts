@@ -13,10 +13,7 @@ export type SocialCampaignRecommendationRunStatus =
   | 'succeeded'
   | 'failed';
 
-export type SocialCampaignRecommendationConfidence =
-  | 'low'
-  | 'medium'
-  | 'high';
+export type SocialCampaignRecommendationConfidence = 'low' | 'medium' | 'high';
 
 export type SocialCampaignRecommendationItem = {
   priority: 'low' | 'medium' | 'high';
@@ -139,7 +136,12 @@ export class SocialCampaignRecommendationEntity {
   attempts!: number;
 
   /** Safe internal vocabulary only; provider response bodies are never stored. */
-  @Column({ name: 'failure_code', type: 'varchar', length: 120, nullable: true })
+  @Column({
+    name: 'failure_code',
+    type: 'varchar',
+    length: 120,
+    nullable: true,
+  })
   failureCode!: string | null;
 
   @Column({ name: 'requested_by_id', type: 'uuid', nullable: true })

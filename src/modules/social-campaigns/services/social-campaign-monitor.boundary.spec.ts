@@ -12,7 +12,7 @@ describe('Social Campaign Monitor boundary', () => {
   );
 
   it('reads the local paid account grain and never imports a provider client', () => {
-    expect(service).toContain("metric.entity_level = :level");
+    expect(service).toContain('metric.entity_level = :level');
     expect(service).toContain("level: 'account'");
     expect(service).toContain("source: 'paid'");
     expect(service).not.toMatch(/GraphApi|CredentialResolver|facebook\.com/);

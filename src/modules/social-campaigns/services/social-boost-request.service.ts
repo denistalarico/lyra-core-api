@@ -171,10 +171,10 @@ export class SocialBoostRequestService {
       claimed.status = result.providerAccepted ? 'created_active' : 'failed';
       claimed.errorCode = result.providerAccepted
         ? null
-        : result.errorCode ??
+        : (result.errorCode ??
           (result.stage === 'campaign'
             ? 'provider_create_failed'
-            : 'provider_partial_creation_requires_review');
+            : 'provider_partial_creation_requires_review'));
     } catch {
       claimed.status = 'failed';
       claimed.errorCode = 'provider_create_failed';

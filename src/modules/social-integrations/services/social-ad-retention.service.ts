@@ -172,10 +172,7 @@ export class SocialAdRetentionService {
    * `RETURNING` gives back the bucket of each deleted row, which is how the log
    * line reports counts per kind and status without a second query.
    */
-  private async deleteBatch(
-    now: Date,
-    limit: number,
-  ): Promise<DeletedRow[]> {
+  private async deleteBatch(now: Date, limit: number): Promise<DeletedRow[]> {
     const result: unknown = await this.dataSource.query(
       `DELETE FROM social_ad_sync_runs
         WHERE id IN (

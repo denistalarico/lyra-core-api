@@ -41,23 +41,28 @@ export class AddSocialOrganicPostLifetimeSnapshots1792400000000 implements Migra
   name = 'AddSocialOrganicPostLifetimeSnapshots1792400000000';
 
   public async up(queryRunner: QueryRunner): Promise<void> {
+    // `IF NOT EXISTS` so the migration can be applied to a database that
+    // already has these columns. That is not a production concern — it ran
+    // there once — but the PostgreSQL integration specs call `up()` directly
+    // against a database the migration runner has already migrated, and a bare
+    // `ADD COLUMN` makes every one of those suites fail on its second run.
     await queryRunner.query(`
       ALTER TABLE "social_organic_post_metrics_daily"
-        ADD COLUMN "impressions_lifetime" bigint,
-        ADD COLUMN "impressions_lifetime_observed_at" timestamptz,
-        ADD COLUMN "likes_lifetime" bigint,
-        ADD COLUMN "likes_lifetime_observed_at" timestamptz,
-        ADD COLUMN "comments_lifetime" bigint,
-        ADD COLUMN "comments_lifetime_observed_at" timestamptz,
-        ADD COLUMN "video_views_lifetime" bigint,
-        ADD COLUMN "video_views_lifetime_observed_at" timestamptz
+        ADD COLUMN IF NOT EXISTS "impressions_lifetime" bigint,
+        ADD COLUMN IF NOT EXISTS "impressions_lifetime_observed_at" timestamptz,
+        ADD COLUMN IF NOT EXISTS "likes_lifetime" bigint,
+        ADD COLUMN IF NOT EXISTS "likes_lifetime_observed_at" timestamptz,
+        ADD COLUMN IF NOT EXISTS "comments_lifetime" bigint,
+        ADD COLUMN IF NOT EXISTS "comments_lifetime_observed_at" timestamptz,
+        ADD COLUMN IF NOT EXISTS "video_views_lifetime" bigint,
+        ADD COLUMN IF NOT EXISTS "video_views_lifetime_observed_at" timestamptz
     `);
 
     // Postgres has no `ALTER CONSTRAINT`: the non-negative CHECK is dropped and
     // re-added widened to also cover the 4 new bigint counters.
     await queryRunner.query(`
       ALTER TABLE "social_organic_post_metrics_daily"
-        DROP CONSTRAINT "CK_social_organic_post_metrics_daily_non_negative"
+        DROP CONSTRAINT IF EXISTS "CK_social_organic_post_metrics_daily_non_negative"
     `);
     await queryRunner.query(`
       ALTER TABLE "social_organic_post_metrics_daily"

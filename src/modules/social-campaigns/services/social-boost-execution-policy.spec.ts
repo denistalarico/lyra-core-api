@@ -68,15 +68,34 @@ describe('C7 Boost execution policy', () => {
 
   it('allows canonical targeting identifiers and rejects arbitrary text', () => {
     const publication = {
-      provider: 'facebook', externalPublicationId: '123_456', externalAssetId: '123', assetType: 'facebook_page', assetMetadata: {},
+      provider: 'facebook',
+      externalPublicationId: '123_456',
+      externalAssetId: '123',
+      assetType: 'facebook_page',
+      assetMetadata: {},
     };
-    expect(boostExecutionBlockCode({
-      ...template,
-      audience: { ...template.audience, cities: ['123456'], interests: ['6003139266461'], languages: ['6'] },
-    }, publication)).toBeNull();
-    expect(boostExecutionBlockCode({
-      ...template,
-      audience: { ...template.audience, cities: ['São Paulo'] },
-    }, publication)).toBe('targeting_not_resolved');
+    expect(
+      boostExecutionBlockCode(
+        {
+          ...template,
+          audience: {
+            ...template.audience,
+            cities: ['123456'],
+            interests: ['6003139266461'],
+            languages: ['6'],
+          },
+        },
+        publication,
+      ),
+    ).toBeNull();
+    expect(
+      boostExecutionBlockCode(
+        {
+          ...template,
+          audience: { ...template.audience, cities: ['São Paulo'] },
+        },
+        publication,
+      ),
+    ).toBe('targeting_not_resolved');
   });
 });

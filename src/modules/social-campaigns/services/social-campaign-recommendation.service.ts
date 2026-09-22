@@ -33,7 +33,9 @@ type EvidencePacket = Record<string, unknown> & {
 
 @Injectable()
 export class SocialCampaignRecommendationService {
-  private readonly logger = new Logger(SocialCampaignRecommendationService.name);
+  private readonly logger = new Logger(
+    SocialCampaignRecommendationService.name,
+  );
 
   constructor(
     @InjectRepository(SocialCampaignRecommendationEntity, 'agency')
@@ -66,7 +68,10 @@ export class SocialCampaignRecommendationService {
       order: { createdAt: 'DESC' },
       take: Math.max(1, Math.min(20, limit)),
     });
-    return { items: items.map((item) => this.toView(item)), total: items.length };
+    return {
+      items: items.map((item) => this.toView(item)),
+      total: items.length,
+    };
   }
 
   async generate(
@@ -102,7 +107,12 @@ export class SocialCampaignRecommendationService {
       this.monitor.overview(scope, dto.connectionId),
     ]);
 
-    const evidence = buildEvidencePacket(overview, campaigns, freshness, monitor);
+    const evidence = buildEvidencePacket(
+      overview,
+      campaigns,
+      freshness,
+      monitor,
+    );
     if (Object.keys(evidence.evidenceIndex).length === 0) {
       throw new ServiceUnavailableException(
         'There is not enough local evidence to generate recommendations.',
@@ -111,8 +121,18 @@ export class SocialCampaignRecommendationService {
     const evidenceHash = createHash('sha256')
       .update(JSON.stringify(evidence))
       .digest('hex');
-    const confidenceCeiling = calculateConfidenceCeiling(overview, campaigns, freshness);
-    const run = await this.reserveRun(scope, userId, dto, evidence, evidenceHash);
+    const confidenceCeiling = calculateConfidenceCeiling(
+      overview,
+      campaigns,
+      freshness,
+    );
+    const run = await this.reserveRun(
+      scope,
+      userId,
+      dto,
+      evidence,
+      evidenceHash,
+    );
 
     try {
       const result = await this.provider.generate({
@@ -160,11 +180,15 @@ export class SocialCampaignRecommendationService {
   ) {
     return this.dataSource.transaction(async (manager) => {
       const lockKey = `${scope.tenantId}:${scope.workspaceId}:${scope.agencyClientId ?? 'agency'}:campaign-recommendations`;
-      await manager.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [lockKey]);
+      await manager.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [
+        lockKey,
+      ]);
 
       const existing = await manager
         .getRepository(SocialCampaignRecommendationEntity)
-        .findOne({ where: { requestId: dto.requestId, ...this.scopeWhere(scope) } });
+        .findOne({
+          where: { requestId: dto.requestId, ...this.scopeWhere(scope) },
+        });
       if (existing) return this.existingRun(existing);
 
       const [usage] = await manager.query<Array<{ cost_cents: string }>>(
@@ -183,7 +207,9 @@ export class SocialCampaignRecommendationService {
         );
       }
 
-      const repository = manager.getRepository(SocialCampaignRecommendationEntity);
+      const repository = manager.getRepository(
+        SocialCampaignRecommendationEntity,
+      );
       return repository.save(
         repository.create({
           ...scope,
@@ -216,9 +242,13 @@ export class SocialCampaignRecommendationService {
 
   private existingRun(existing: SocialCampaignRecommendationEntity): never {
     if (existing.status === 'processing') {
-      throw new ConflictException('Campaign recommendation is already processing.');
+      throw new ConflictException(
+        'Campaign recommendation is already processing.',
+      );
     }
-    throw new ConflictException('Campaign recommendation request was already used.');
+    throw new ConflictException(
+      'Campaign recommendation request was already used.',
+    );
   }
 
   private existingResult(existing: SocialCampaignRecommendationEntity) {
@@ -285,9 +315,24 @@ function buildEvidencePacket(
   monitor: Awaited<ReturnType<SocialCampaignMonitorService['overview']>>,
 ): EvidencePacket {
   const evidenceIndex: Record<string, EvidenceEntry> = {};
-  const add = (key: string, label: string, value: unknown, unit: string | null) => {
+  const add = (
+    key: string,
+    label: string,
+    value: unknown,
+    unit: string | null,
+  ) => {
     if (value === null || value === undefined) return;
-    evidenceIndex[key] = { label, value: String(value), unit };
+    evidenceIndex[key] = {
+      label,
+      value:
+        typeof value === 'string' ||
+        typeof value === 'number' ||
+        typeof value === 'boolean' ||
+        typeof value === 'bigint'
+          ? String(value)
+          : (JSON.stringify(value) ?? ''),
+      unit,
+    };
   };
 
   const metricKeys = [
@@ -321,7 +366,12 @@ function buildEvidencePacket(
       : ratioMetrics.has(key)
         ? 'ratio'
         : 'count';
-    add(`account.current.${key}`, `Conta · ${key} no período`, overview.current[key], unit);
+    add(
+      `account.current.${key}`,
+      `Conta · ${key} no período`,
+      overview.current[key],
+      unit,
+    );
     add(
       `account.previous.${key}`,
       `Conta · ${key} no período anterior`,
@@ -330,34 +380,51 @@ function buildEvidencePacket(
     );
   }
 
-  const campaignEvidence = campaigns.items.slice(0, 20).map((campaign, index) => {
-    const reference = `campaign_${index + 1}`;
-    for (const key of ['spend', 'impressions', 'clicks', 'leads', 'conversions', 'ctr', 'cpc', 'cpl', 'roas'] as const) {
-      add(
-        `${reference}.${key}`,
-        `${campaign.name?.slice(0, 160) || `Campanha ${index + 1}`} · ${key}`,
-        campaign[key],
-        currencyMetrics.has(key)
-          ? overview.currency
-          : ratioMetrics.has(key)
-            ? 'ratio'
-            : 'count',
-      );
-    }
-    return {
-      reference,
-      name: campaign.name?.slice(0, 160) ?? null,
-      status: campaign.effectiveStatus ?? campaign.status,
-      objective: campaign.objective,
-      archived: campaign.archived,
-      hasPartialData: campaign.hasPartialData,
-    };
-  });
+  const campaignEvidence = campaigns.items
+    .slice(0, 20)
+    .map((campaign, index) => {
+      const reference = `campaign_${index + 1}`;
+      for (const key of [
+        'spend',
+        'impressions',
+        'clicks',
+        'leads',
+        'conversions',
+        'ctr',
+        'cpc',
+        'cpl',
+        'roas',
+      ] as const) {
+        add(
+          `${reference}.${key}`,
+          `${campaign.name?.slice(0, 160) || `Campanha ${index + 1}`} · ${key}`,
+          campaign[key],
+          currencyMetrics.has(key)
+            ? overview.currency
+            : ratioMetrics.has(key)
+              ? 'ratio'
+              : 'count',
+        );
+      }
+      return {
+        reference,
+        name: campaign.name?.slice(0, 160) ?? null,
+        status: campaign.effectiveStatus ?? campaign.status,
+        objective: campaign.objective,
+        archived: campaign.archived,
+        hasPartialData: campaign.hasPartialData,
+      };
+    });
 
   const alertEvidence = monitor.alerts.map((alert, index) => {
     const key = `monitor.alert_${index + 1}`;
     add(key, `Alerta · ${alert.type}`, alert.currentValueMinor, alert.currency);
-    return { key, type: alert.type, status: alert.status, thresholdMinor: alert.thresholdMinor };
+    return {
+      key,
+      type: alert.type,
+      status: alert.status,
+      thresholdMinor: alert.thresholdMinor,
+    };
   });
 
   return {

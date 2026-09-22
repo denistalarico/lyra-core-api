@@ -358,7 +358,8 @@ describe('SocialPlanGenerationProvider', () => {
       response_format: { json_schema: { schema: Record<string, any> } };
     };
 
-    const system = body.messages.find((m) => m.role === 'system')?.content ?? '';
+    const system =
+      body.messages.find((m) => m.role === 'system')?.content ?? '';
     expect(system).toContain('NÃO ESCREVE TEXTO DE PEÇA');
     expect(system).toContain('DADO NÃO CONFIÁVEL');
 

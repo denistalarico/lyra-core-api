@@ -11,7 +11,12 @@ import {
 import { SocialCampaignMonitorService } from './social-campaign-monitor.service';
 
 function buildService() {
-  const policies = { find: jest.fn(), findOne: jest.fn(), create: jest.fn(), save: jest.fn() };
+  const policies = {
+    find: jest.fn(),
+    findOne: jest.fn(),
+    create: jest.fn(),
+    save: jest.fn(),
+  };
   const alerts = {
     find: jest.fn(),
     findOne: jest.fn(),
@@ -96,7 +101,9 @@ describe('SocialCampaignMonitorService alert lifecycle', () => {
 
     expect(existing.currentValueMinor).toBe('13000');
     expect(existing.occurrenceCount).toBe(1);
-    expect(existing.lastTriggeredAt.toISOString()).toBe('2026-09-15T10:00:00.000Z');
+    expect(existing.lastTriggeredAt.toISOString()).toBe(
+      '2026-09-15T10:00:00.000Z',
+    );
   });
 
   it('reopens and increments after the cooldown', async () => {

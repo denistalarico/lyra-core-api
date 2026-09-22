@@ -25,6 +25,12 @@ import {
 } from './views/social-organic-analytics-series.view';
 import type { SocialOrganicAnalyticsFreshnessView } from './views/social-organic-analytics-freshness.view';
 import {
+  toSocialOrganicTopPostView,
+  type SocialOrganicTopPostSort,
+  type SocialOrganicTopPostView,
+  type SocialOrganicTopPostsView,
+} from './views/social-organic-top-posts.view';
+import {
   toSocialOrganicPublicationMetricsView,
   type SocialOrganicPublicationMetricsView,
 } from './views/social-organic-publication-metrics.view';
@@ -331,6 +337,78 @@ export class SocialOrganicAnalyticsReadService {
     return facts.map(toSocialOrganicPublicationMetricsView);
   }
 
+  /**
+   * The asset's posts, ranked by one lifetime counter.
+   *
+   * `DISTINCT ON (external_publication_id)` because the table keeps one row per
+   * post **per day a sync observed it**: a post read on five days has five
+   * rows, all of them cumulative totals of the same post. Summing them would
+   * multiply the post by the number of times it was looked at, so the ranking
+   * takes the newest observation of each and orders those.
+   *
+   * The two-step shape — pick the latest row per post, then sort that set — is
+   * what makes it correct. Sorting first and de-duplicating afterwards would
+   * rank yesterday's snapshot of one post against today's of another.
+   *
+   * The window filters on `published_at`, not on `metric_date`: the operator is
+   * asking which posts *published* in this period did best, and `metric_date`
+   * is merely when Lyra last looked.
+   */
+  async topPosts(
+    input: SocialOrganicAnalyticsScope & {
+      assetId: string;
+      since: string;
+      until: string;
+      sort?: SocialOrganicTopPostSort;
+      limit?: number;
+    },
+  ): Promise<SocialOrganicTopPostsView> {
+    const period = this.parsePeriod({ since: input.since, until: input.until });
+    // Proves the asset is in scope before any fact is read, and throws the same
+    // "not found" an unknown id gets.
+    const asset = await this.findAssetInScope(input);
+
+    const sort = input.sort ?? 'reach';
+    const limit = Math.min(Math.max(input.limit ?? 10, 1), 50);
+
+    const latestPerPost = this.postMetricsRepository
+      .createQueryBuilder('fact')
+      .distinctOn(['fact.externalPublicationId'])
+      .where('fact.assetId = :assetId', { assetId: asset.id })
+      .andWhere('fact.tenantId = :tenantId', { tenantId: input.tenantId })
+      .andWhere('fact.workspaceId = :workspaceId', {
+        workspaceId: input.workspaceId,
+      })
+      .andWhere(
+        input.agencyClientId === null
+          ? 'fact.agencyClientId IS NULL'
+          : 'fact.agencyClientId = :agencyClientId',
+        input.agencyClientId === null
+          ? {}
+          : { agencyClientId: input.agencyClientId },
+      )
+      // A post with no publish date cannot be placed in the window, so it is
+      // left out rather than assumed to belong to it.
+      .andWhere('fact.publishedAt IS NOT NULL')
+      .andWhere('fact.publishedAt >= :since', {
+        since: `${period.since}T00:00:00Z`,
+      })
+      .andWhere('fact.publishedAt < :until', {
+        until: `${shiftCalendarDay(period.until, 1)}T00:00:00Z`,
+      })
+      .orderBy('fact.externalPublicationId', 'ASC')
+      .addOrderBy('fact.metricDate', 'DESC')
+      .addOrderBy('fact.syncedAt', 'DESC');
+
+    const facts = await latestPerPost.getMany();
+
+    const items = facts.map(toSocialOrganicTopPostView);
+
+    items.sort((a, b) => compareTopPosts(a, b, sort));
+
+    return { items: items.slice(0, limit), total: items.length };
+  }
+
   private parsePeriod(input: { since: string; until: string }) {
     try {
       return parseOrganicAnalyticsPeriod(input);
@@ -538,4 +616,45 @@ function toCount(value: string | null | undefined): bigint {
   const text = String(value).split('.')[0];
 
   return text.length && /^-?\d+$/.test(text) ? BigInt(text) : 0n;
+}
+
+/**
+ * Orders two ranked posts by one lifetime counter, descending.
+ *
+ * Null sorts last, always, and never as zero: a counter Meta did not report is
+ * not a post that scored nothing, and letting it sink to the bottom is the only
+ * ordering that does not claim otherwise. `publishedAt` is the one non-numeric
+ * key, ordered newest first.
+ *
+ * Ties break on the provider id so the order is stable between requests —
+ * without it, two posts with the same reach could swap places on a refresh and
+ * look like the data moved.
+ */
+function compareTopPosts(
+  a: SocialOrganicTopPostView,
+  b: SocialOrganicTopPostView,
+  sort: SocialOrganicTopPostSort,
+): number {
+  if (sort === 'publishedAt') {
+    const left = a.publishedAt ?? '';
+    const right = b.publishedAt ?? '';
+    if (left !== right) return left < right ? 1 : -1;
+    return a.externalPublicationId.localeCompare(b.externalPublicationId);
+  }
+
+  const left = a[sort];
+  const right = b[sort];
+
+  if (left === null && right === null) {
+    return a.externalPublicationId.localeCompare(b.externalPublicationId);
+  }
+  if (left === null) return 1;
+  if (right === null) return -1;
+
+  // BigInt rather than Number: these are `bigint` columns and a lifetime view
+  // count can exceed 2^53 on a large account.
+  const diff = BigInt(left) - BigInt(right);
+  if (diff !== 0n) return diff > 0n ? -1 : 1;
+
+  return a.externalPublicationId.localeCompare(b.externalPublicationId);
 }

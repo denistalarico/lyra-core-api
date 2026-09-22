@@ -281,7 +281,10 @@ function systemPrompt(input: CopyGenerationInput): string {
     `${formatBriefing(input)}\n\n` +
     'Gere apenas os campos solicitados:\n' +
     input.fields
-      .map((request) => `- ${request.field}: ${fieldGuidance(request.field, input)}`)
+      .map(
+        (request) =>
+          `- ${request.field}: ${fieldGuidance(request.field, input)}`,
+      )
       .join('\n') +
     '\n\nRegras: escreva em português do Brasil, pronto para publicar, sem ' +
     'rótulos, aspas envolventes ou marcadores; um item por campo solicitado e ' +

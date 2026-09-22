@@ -62,7 +62,8 @@ export function toSocialEditorialPillarView(
     key: pillar.key,
     label: pillar.label,
     description: pillar.description,
-    targetPercentage: target !== null && Number.isFinite(target) ? target : null,
+    targetPercentage:
+      target !== null && Number.isFinite(target) ? target : null,
     color: pillar.color,
     sortOrder: pillar.sortOrder,
     isActive: pillar.isActive,

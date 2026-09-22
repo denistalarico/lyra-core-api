@@ -32,9 +32,11 @@ describe('add social organic post lifetime snapshots migration', () => {
       'comments_lifetime',
       'video_views_lifetime',
     ]) {
-      expect(joined).toContain(`ADD COLUMN "${column}" bigint`);
+      // `IF NOT EXISTS` so the migration can re-run against an already
+      // migrated database, which the PostgreSQL integration specs do.
+      expect(joined).toContain(`ADD COLUMN IF NOT EXISTS "${column}" bigint`);
       expect(joined).toContain(
-        `ADD COLUMN "${column}_observed_at" timestamptz`,
+        `ADD COLUMN IF NOT EXISTS "${column}_observed_at" timestamptz`,
       );
     }
   });
@@ -42,17 +44,17 @@ describe('add social organic post lifetime snapshots migration', () => {
   it('never adds a NOT NULL or DEFAULT to a new column (additive, nullable-only)', async () => {
     const joined = await up();
 
-    expect(joined).not.toMatch(
-      /ADD COLUMN "impressions_lifetime"[^,]*NOT NULL/,
-    );
-    expect(joined).not.toMatch(/ADD COLUMN "impressions_lifetime"[^,]*DEFAULT/);
+    // Anchored on the column name rather than on `ADD COLUMN` so the guard
+    // survives the `IF NOT EXISTS` between them.
+    expect(joined).not.toMatch(/"impressions_lifetime" bigint[^,]*NOT NULL/);
+    expect(joined).not.toMatch(/"impressions_lifetime" bigint[^,]*DEFAULT/);
   });
 
   it('drops and re-adds the non-negative CHECK widened to the 4 new columns', async () => {
     const joined = await up();
 
     expect(joined).toContain(
-      'DROP CONSTRAINT "CK_social_organic_post_metrics_daily_non_negative"',
+      'DROP CONSTRAINT IF EXISTS "CK_social_organic_post_metrics_daily_non_negative"',
     );
     const addIndex = joined.indexOf(
       'ADD CONSTRAINT "CK_social_organic_post_metrics_daily_non_negative"',
@@ -74,9 +76,11 @@ describe('add social organic post lifetime snapshots migration', () => {
 
   it('drops the constraint before adding columns, and columns come before the ALTER-table statements needing them', async () => {
     const joined = await up();
-    const addColumns = joined.indexOf('ADD COLUMN "impressions_lifetime"');
+    const addColumns = joined.indexOf(
+      'ADD COLUMN IF NOT EXISTS "impressions_lifetime"',
+    );
     const dropConstraint = joined.indexOf(
-      'DROP CONSTRAINT "CK_social_organic_post_metrics_daily_non_negative"',
+      'DROP CONSTRAINT IF EXISTS "CK_social_organic_post_metrics_daily_non_negative"',
     );
 
     expect(addColumns).toBeGreaterThan(-1);

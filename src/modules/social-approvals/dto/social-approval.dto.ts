@@ -1,4 +1,11 @@
-import { IsIn, IsOptional, IsString, IsUUID, MaxLength, MinLength } from 'class-validator';
+import {
+  IsIn,
+  IsOptional,
+  IsString,
+  IsUUID,
+  MaxLength,
+  MinLength,
+} from 'class-validator';
 
 export class CreateSocialApprovalDto {
   @IsString() @IsIn(['creative_version']) subjectType!: string;

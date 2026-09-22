@@ -1,6 +1,18 @@
-import { IsIn, IsOptional, IsString, IsUUID, MaxLength, MinLength } from 'class-validator';
+import {
+  IsIn,
+  IsOptional,
+  IsString,
+  IsUUID,
+  MaxLength,
+  MinLength,
+} from 'class-validator';
 
-const TARGETING_KINDS = ['location', 'interest', 'language', 'saved_audience'] as const;
+const TARGETING_KINDS = [
+  'location',
+  'interest',
+  'language',
+  'saved_audience',
+] as const;
 
 export class SocialBoostTargetingQueryDto {
   @IsUUID()

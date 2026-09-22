@@ -18,8 +18,12 @@ describe('Campaign recommendations boundary', () => {
   it('uses the local read model and has no dependency capable of Meta writes', () => {
     expect(service).toContain('SocialAnalyticsReadService');
     expect(service).toContain('evidenceSnapshot');
-    expect(service).not.toMatch(/graph\.facebook|credential|accessToken|MetaAdsClient/);
-    expect(provider).not.toMatch(/graph\.facebook|credential|accessToken|MetaAdsClient/);
+    expect(service).not.toMatch(
+      /graph\.facebook|credential|accessToken|MetaAdsClient/,
+    );
+    expect(provider).not.toMatch(
+      /graph\.facebook|credential|accessToken|MetaAdsClient/,
+    );
   });
 
   it('exposes generation and history without an accept/apply/reject lifecycle', () => {

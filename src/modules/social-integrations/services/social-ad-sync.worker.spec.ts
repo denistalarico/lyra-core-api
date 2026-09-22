@@ -218,7 +218,9 @@ describe('SocialAdSyncWorker — a run that works', () => {
     // Three segments, one credential. Resolving per segment would decrypt the
     // same token three times and let one unit of work execute against three
     // separately resolved credentials.
-    expect(harness.credentialResolver.resolvePersisted).toHaveBeenCalledTimes(1);
+    expect(harness.credentialResolver.resolvePersisted).toHaveBeenCalledTimes(
+      1,
+    );
     expect(harness.credentialResolver.resolvePersisted).toHaveBeenCalledWith({
       tenantId: 'tenant-a',
       workspaceId: 'workspace-a',

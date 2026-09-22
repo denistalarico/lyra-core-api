@@ -81,7 +81,11 @@ describe('SocialCampaignRecommendationProvider', () => {
       new Response(
         JSON.stringify({
           choices: [
-            { message: { content: '{"summary":"Sem sugestão.","recommendations":[]}' } },
+            {
+              message: {
+                content: '{"summary":"Sem sugestão.","recommendations":[]}',
+              },
+            },
           ],
         }),
         { status: 200, headers: { 'Content-Type': 'application/json' } },
@@ -106,7 +110,9 @@ describe('SocialCampaignRecommendationProvider', () => {
 
     const request = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
     const prompt = request.messages[0].content as string;
-    expect(prompt).toContain('Nunca afirme que executou, pausou, publicou ou alterou');
+    expect(prompt).toContain(
+      'Nunca afirme que executou, pausou, publicou ou alterou',
+    );
     expect(prompt).toContain('Não gere payload, endpoint, comando de API');
     expect(request.messages[1].content).toBe('{"safe":true}');
   });

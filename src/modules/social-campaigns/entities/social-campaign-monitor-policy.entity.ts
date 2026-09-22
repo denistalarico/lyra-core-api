@@ -18,11 +18,9 @@ export type SocialCampaignAlertChannel = 'in_app' | 'email' | 'whatsapp';
  * the row that an authorised request created. No endpoint accepts those fields.
  */
 @Entity('social_campaign_monitor_policies')
-@Index(
-  'UQ_social_campaign_monitor_policies_connection',
-  ['connectionId'],
-  { unique: true },
-)
+@Index('UQ_social_campaign_monitor_policies_connection', ['connectionId'], {
+  unique: true,
+})
 @Index('IDX_social_campaign_monitor_policies_due', ['enabled', 'updatedAt'])
 @Check(
   'CK_social_campaign_monitor_policy_limits',
@@ -71,7 +69,11 @@ export class SocialCampaignMonitorPolicyEntity {
   cooldownMinutes!: number;
 
   /** External values are preferences until their platform adapters are wired. */
-  @Column({ name: 'delivery_channels', type: 'jsonb', default: () => `'["in_app"]'::jsonb` })
+  @Column({
+    name: 'delivery_channels',
+    type: 'jsonb',
+    default: () => `'["in_app"]'::jsonb`,
+  })
   deliveryChannels!: SocialCampaignAlertChannel[];
 
   @Column({ name: 'created_by_id', type: 'uuid', nullable: true })

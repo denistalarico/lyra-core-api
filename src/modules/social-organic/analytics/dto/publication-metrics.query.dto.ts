@@ -12,8 +12,8 @@ export class PublicationMetricsQueryDto {
   @Transform(({ value }: { value: unknown }) => {
     const values = Array.isArray(value) ? value : [value];
 
-    return values.flatMap((item) =>
-      typeof item === 'string' ? item.split(',').filter(Boolean) : [item],
+    return values.flatMap((item): string[] =>
+      typeof item === 'string' ? item.split(',').filter(Boolean) : [],
     );
   })
   @IsArray()

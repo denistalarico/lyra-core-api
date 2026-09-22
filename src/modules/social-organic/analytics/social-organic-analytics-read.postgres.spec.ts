@@ -6,6 +6,7 @@ import { CreateSocialOrganicConnections1791500000000 } from '../../../database/m
 import { CreateSocialOrganicReadModel1791900000000 } from '../../../database/migrations/1791900000000-create-social-organic-read-model';
 import { MakeSocialOrganicMetricsNullable1792100000000 } from '../../../database/migrations/1792100000000-make-social-organic-metrics-nullable';
 import { AddSocialOrganicPostLifetimeSnapshots1792400000000 } from '../../../database/migrations/1792400000000-add-social-organic-post-lifetime-snapshots';
+import { AddSocialOrganicPostIdentity1795400000000 } from '../../../database/migrations/1795400000000-add-social-organic-post-identity';
 import { describePostgresIntegration } from '../../../testing/postgres-integration';
 import { SocialOrganicAnalyticsReadService } from './social-organic-analytics-read.service';
 
@@ -175,6 +176,7 @@ run('SocialOrganicAnalyticsReadService against PostgreSQL', () => {
       await new CreateSocialOrganicReadModel1791900000000().up(setup);
       await new MakeSocialOrganicMetricsNullable1792100000000().up(setup);
       await new AddSocialOrganicPostLifetimeSnapshots1792400000000().up(setup);
+      await new AddSocialOrganicPostIdentity1795400000000().up(setup);
     } finally {
       await setup.release();
     }
@@ -468,6 +470,143 @@ run('SocialOrganicAnalyticsReadService against PostgreSQL', () => {
           publicationIds: [publicationId],
         }),
       ).resolves.toEqual([]);
+    });
+  });
+
+  describe('topPosts', () => {
+    /** A post row carrying the identity + lifetime columns the ranking reads. */
+    function insertRankedPost(input: {
+      externalPublicationId: string;
+      publishedAt: string;
+      metricDate: string;
+      reachLifetime?: string | null;
+      followsLifetime?: string | null;
+      syncedAt?: string;
+    }) {
+      const observedAt = input.syncedAt ?? `${input.metricDate}T12:00:00.000Z`;
+
+      return queryRunner.query(`
+        INSERT INTO "social_organic_post_metrics_daily"
+          ("tenant_id", "workspace_id", "asset_id", "provider", "source",
+           "external_publication_id", "metric_date", "asset_timezone",
+           "published_at", "permalink", "caption",
+           "reach_lifetime", "follows_lifetime", "lifetime_observed_at",
+           "is_partial", "synced_at")
+        VALUES (
+          '${tenantId}', '${workspaceId}', '${assetId}', 'meta', 'organic',
+          '${input.externalPublicationId}', '${input.metricDate}',
+          'America/Sao_Paulo', '${input.publishedAt}',
+          'https://example.test/${input.externalPublicationId}', 'legenda',
+          ${input.reachLifetime === null ? 'NULL' : (input.reachLifetime ?? '10')},
+          ${input.followsLifetime === null ? 'NULL' : (input.followsLifetime ?? '0')},
+          '${observedAt}', false, '${observedAt}'
+        )
+      `);
+    }
+
+    it('ranks each post once, from its newest observation', async () => {
+      // The same post observed twice. A lifetime total is cumulative, so
+      // summing the two rows would report 250 reach for a post that reached 150.
+      await insertRankedPost({
+        externalPublicationId: 'post-a',
+        publishedAt: '2026-09-02T10:00:00.000Z',
+        metricDate: '2026-09-03',
+        reachLifetime: '100',
+      });
+      await insertRankedPost({
+        externalPublicationId: 'post-a',
+        publishedAt: '2026-09-02T10:00:00.000Z',
+        metricDate: '2026-09-05',
+        reachLifetime: '150',
+      });
+
+      const view = await service.topPosts({
+        ...scope,
+        assetId,
+        since: '2026-09-01',
+        until: '2026-09-10',
+      });
+
+      expect(view.total).toBe(1);
+      expect(view.items[0]).toMatchObject({
+        externalPublicationId: 'post-a',
+        reach: '150',
+      });
+    });
+
+    it('orders by the requested counter and keeps nulls last', async () => {
+      await insertRankedPost({
+        externalPublicationId: 'post-low',
+        publishedAt: '2026-09-02T10:00:00.000Z',
+        metricDate: '2026-09-03',
+        reachLifetime: '10',
+      });
+      await insertRankedPost({
+        externalPublicationId: 'post-high',
+        publishedAt: '2026-09-03T10:00:00.000Z',
+        metricDate: '2026-09-04',
+        reachLifetime: '900',
+      });
+      // Never reported: must sort last rather than as a zero-reach post.
+      await insertRankedPost({
+        externalPublicationId: 'post-null',
+        publishedAt: '2026-09-04T10:00:00.000Z',
+        metricDate: '2026-09-05',
+        reachLifetime: null,
+      });
+
+      const view = await service.topPosts({
+        ...scope,
+        assetId,
+        since: '2026-09-01',
+        until: '2026-09-10',
+      });
+
+      expect(view.items.map((item) => item.externalPublicationId)).toEqual([
+        'post-high',
+        'post-low',
+        'post-null',
+      ]);
+    });
+
+    it('filters on the publish date, not on the observation day', async () => {
+      // Published before the window, observed inside it: the operator asked
+      // which posts *published* in the period did best, so it is excluded.
+      await insertRankedPost({
+        externalPublicationId: 'post-old',
+        publishedAt: '2026-08-01T10:00:00.000Z',
+        metricDate: '2026-09-05',
+        reachLifetime: '999',
+      });
+      await insertRankedPost({
+        externalPublicationId: 'post-in',
+        publishedAt: '2026-09-04T10:00:00.000Z',
+        metricDate: '2026-09-05',
+        reachLifetime: '5',
+      });
+
+      const view = await service.topPosts({
+        ...scope,
+        assetId,
+        since: '2026-09-01',
+        until: '2026-09-10',
+      });
+
+      expect(view.items.map((item) => item.externalPublicationId)).toEqual([
+        'post-in',
+      ]);
+    });
+
+    it('never reads another tenant\'s posts', async () => {
+      await expect(
+        service.topPosts({
+          ...scope,
+          tenantId: randomUUID(),
+          assetId,
+          since: '2026-09-01',
+          until: '2026-09-10',
+        }),
+      ).rejects.toBeInstanceOf(NotFoundException);
     });
   });
 

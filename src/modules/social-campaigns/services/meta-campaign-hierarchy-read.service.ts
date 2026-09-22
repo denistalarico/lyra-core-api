@@ -69,8 +69,13 @@ export class MetaCampaignHierarchyReadService {
     private readonly metrics: Repository<SocialAdMetricDailyEntity>,
   ) {}
 
-  async read(input: MetaCampaignHierarchyInput): Promise<MetaCampaignHierarchyView> {
-    const period = parseAnalyticsPeriod({ since: input.since, until: input.until });
+  async read(
+    input: MetaCampaignHierarchyInput,
+  ): Promise<MetaCampaignHierarchyView> {
+    const period = parseAnalyticsPeriod({
+      since: input.since,
+      until: input.until,
+    });
     const page = input.page ?? 1;
     const limit = input.limit ?? 25;
     const status = input.status ?? 'all';
@@ -130,22 +135,27 @@ export class MetaCampaignHierarchyReadService {
     const adSets = children.filter((entity) => entity.entityLevel === 'adset');
     const ads = children.filter((entity) => entity.entityLevel === 'ad');
     const adsByParent = groupBy(ads, (ad) => ad.parentExternalId);
-    const adSetsByCampaign = groupBy(adSets, (adSet) => adSet.campaignExternalId);
+    const adSetsByCampaign = groupBy(
+      adSets,
+      (adSet) => adSet.campaignExternalId,
+    );
     const adsByCampaign = groupBy(ads, (ad) => ad.campaignExternalId);
 
     const items = campaigns.map((campaign): MetaCampaignOperationalTree => {
       const campaignAdSets = adSetsByCampaign.get(campaign.externalId) ?? [];
       const assignedAdIds = new Set<string>();
-      const mappedAdSets = campaignAdSets.map((adSet): MetaAdSetOperationalNode => {
-        const childAds = adsByParent.get(adSet.externalId) ?? [];
-        childAds.forEach((ad) => assignedAdIds.add(ad.externalId));
-        return {
-          ...this.toNode(adSet, metrics, connection.lastSyncedAt),
-          ads: childAds.map((ad) =>
-            this.toNode(ad, metrics, connection.lastSyncedAt),
-          ),
-        };
-      });
+      const mappedAdSets = campaignAdSets.map(
+        (adSet): MetaAdSetOperationalNode => {
+          const childAds = adsByParent.get(adSet.externalId) ?? [];
+          childAds.forEach((ad) => assignedAdIds.add(ad.externalId));
+          return {
+            ...this.toNode(adSet, metrics, connection.lastSyncedAt),
+            ads: childAds.map((ad) =>
+              this.toNode(ad, metrics, connection.lastSyncedAt),
+            ),
+          };
+        },
+      );
 
       return {
         ...this.toNode(campaign, metrics, connection.lastSyncedAt),
@@ -189,14 +199,13 @@ export class MetaCampaignHierarchyReadService {
           agencyClientId:
             input.agencyClientId === null ? IsNull() : input.agencyClientId,
           companyContextId:
-            input.companyContextId == null
-              ? IsNull()
-              : input.companyContextId,
+            input.companyContextId == null ? IsNull() : input.companyContextId,
           provider: META_PROVIDER,
         },
       })
       .then((connection) => {
-        if (!connection) throw new NotFoundException('Meta connection not found.');
+        if (!connection)
+          throw new NotFoundException('Meta connection not found.');
         return connection;
       });
   }
@@ -271,10 +280,7 @@ export class MetaCampaignHierarchyReadService {
       .addSelect('SUM(fact.clicks)', 'clicks')
       .addSelect('SUM(fact.leads)', 'leads')
       .addSelect('SUM(fact.conversions)', 'conversions')
-      .addSelect(
-        'COUNT(*) FILTER (WHERE fact.is_partial)',
-        'partial_days',
-      )
+      .addSelect('COUNT(*) FILTER (WHERE fact.is_partial)', 'partial_days')
       .where('fact.tenant_id = :tenantId', { tenantId: scope.tenantId })
       .andWhere('fact.workspace_id = :workspaceId', {
         workspaceId: scope.workspaceId,

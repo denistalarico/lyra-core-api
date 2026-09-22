@@ -182,7 +182,10 @@ describe('SocialBoostTemplateService', () => {
         ...validDto,
         performanceGoal: 'messaging_conversations_started',
         conversionLocation: 'messaging_apps',
-        messageDestinations: { destinations: ['whatsapp'], whatsappPhoneNumber: null },
+        messageDestinations: {
+          destinations: ['whatsapp'],
+          whatsappPhoneNumber: null,
+        },
       }),
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(dataSource.transaction).not.toHaveBeenCalled();
@@ -201,12 +204,9 @@ describe('SocialBoostTemplateService', () => {
     });
 
     await expect(
-      service.update(
-        scope,
-        '00000000-0000-4000-8000-000000000010',
-        null,
-        { isActive: false },
-      ),
+      service.update(scope, '00000000-0000-4000-8000-000000000010', null, {
+        isActive: false,
+      }),
     ).resolves.toMatchObject({ isActive: false });
   });
 

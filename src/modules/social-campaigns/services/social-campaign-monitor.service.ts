@@ -122,7 +122,11 @@ export class SocialCampaignMonitorService {
     return this.toPolicy(saved);
   }
 
-  async evaluate(scope: SocialCampaignsScope, connectionId: string, now = new Date()) {
+  async evaluate(
+    scope: SocialCampaignsScope,
+    connectionId: string,
+    now = new Date(),
+  ) {
     const connection = await this.requireConnection(scope, connectionId);
     const policy = await this.findPolicy(scope, connection.id);
     if (!policy?.enabled) {
@@ -297,7 +301,9 @@ export class SocialCampaignMonitorService {
     await this.alerts.save(existing);
   }
 
-  private async resolveAlertsDisabledBy(policy: SocialCampaignMonitorPolicyEntity) {
+  private async resolveAlertsDisabledBy(
+    policy: SocialCampaignMonitorPolicyEntity,
+  ) {
     const activeTypes = new Set<string>();
     if (policy.enabled && policy.dailySpendLimitMinor !== null) {
       activeTypes.add('daily_spend_limit');
@@ -319,7 +325,8 @@ export class SocialCampaignMonitorService {
     });
     const now = new Date();
     const disabled = current.filter(
-      (alert) => alert.status !== 'resolved' && !activeTypes.has(alert.alertType),
+      (alert) =>
+        alert.status !== 'resolved' && !activeTypes.has(alert.alertType),
     );
     for (const alert of disabled) {
       alert.status = 'resolved';
@@ -355,11 +362,18 @@ export class SocialCampaignMonitorService {
         'monthly_rows',
       )
       .where('metric.tenant_id = :tenantId', { tenantId: scope.tenantId })
-      .andWhere('metric.workspace_id = :workspaceId', { workspaceId: scope.workspaceId })
-      .andWhere('metric.agency_client_id IS NOT DISTINCT FROM :agencyClientId', {
-        agencyClientId: scope.agencyClientId,
+      .andWhere('metric.workspace_id = :workspaceId', {
+        workspaceId: scope.workspaceId,
       })
-      .andWhere('metric.connection_id = :connectionId', { connectionId: connection.id })
+      .andWhere(
+        'metric.agency_client_id IS NOT DISTINCT FROM :agencyClientId',
+        {
+          agencyClientId: scope.agencyClientId,
+        },
+      )
+      .andWhere('metric.connection_id = :connectionId', {
+        connectionId: connection.id,
+      })
       .andWhere('metric.provider = :provider', { provider: META_PROVIDER })
       .andWhere('metric.entity_level = :level', { level: 'account' })
       .andWhere('metric.source = :source', { source: 'paid' })
@@ -373,7 +387,8 @@ export class SocialCampaignMonitorService {
       where: {
         tenantId: scope.tenantId,
         workspaceId: scope.workspaceId,
-        agencyClientId: scope.agencyClientId === null ? IsNull() : scope.agencyClientId,
+        agencyClientId:
+          scope.agencyClientId === null ? IsNull() : scope.agencyClientId,
         connectionId: connection.id,
         provider: META_PROVIDER,
         entityLevel: 'account',
@@ -384,9 +399,12 @@ export class SocialCampaignMonitorService {
     return {
       day,
       month,
-      dailySpendMinor: Number(spend?.daily_rows ?? 0) > 0 ? spend!.daily_spend_minor : null,
+      dailySpendMinor:
+        Number(spend?.daily_rows ?? 0) > 0 ? spend!.daily_spend_minor : null,
       monthlySpendMinor:
-        Number(spend?.monthly_rows ?? 0) > 0 ? spend!.monthly_spend_minor : null,
+        Number(spend?.monthly_rows ?? 0) > 0
+          ? spend!.monthly_spend_minor
+          : null,
       balanceMinor: account?.budgetRemainingMinor ?? null,
     };
   }
@@ -402,7 +420,8 @@ export class SocialCampaignMonitorService {
         },
       })
       .then((connection) => {
-        if (!connection) throw new NotFoundException('Meta connection not found.');
+        if (!connection)
+          throw new NotFoundException('Meta connection not found.');
         return connection;
       });
   }
@@ -425,7 +444,8 @@ export class SocialCampaignMonitorService {
     return {
       tenantId: scope.tenantId,
       workspaceId: scope.workspaceId,
-      agencyClientId: scope.agencyClientId === null ? IsNull() : scope.agencyClientId,
+      agencyClientId:
+        scope.agencyClientId === null ? IsNull() : scope.agencyClientId,
     };
   }
 
@@ -437,8 +457,15 @@ export class SocialCampaignMonitorService {
     return { connectionId, ...this.alertScope(scope) };
   }
 
-  private patchMinor(value: number | null | undefined, fallback: string | null) {
-    return value === undefined ? fallback : value === null ? null : String(value);
+  private patchMinor(
+    value: number | null | undefined,
+    fallback: string | null,
+  ) {
+    return value === undefined
+      ? fallback
+      : value === null
+        ? null
+        : String(value);
   }
 
   private toOverview(

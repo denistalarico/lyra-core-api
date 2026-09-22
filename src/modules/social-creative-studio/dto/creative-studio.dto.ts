@@ -1,5 +1,14 @@
 import { Type } from 'class-transformer';
-import { IsIn, IsISO8601, IsOptional, IsString, IsUUID, Max, MaxLength, Min } from 'class-validator';
+import {
+  IsIn,
+  IsISO8601,
+  IsOptional,
+  IsString,
+  IsUUID,
+  Max,
+  MaxLength,
+  Min,
+} from 'class-validator';
 
 export class ListCreativeAssetsQueryDto {
   @IsOptional() @IsIn(['image', 'video']) assetType?: 'image' | 'video';
@@ -13,7 +22,19 @@ export class ListCreativeAssetsQueryDto {
   @IsOptional() @Type(() => Number) @Min(1) @Max(100) limit?: number;
   @IsOptional() @IsString() cursor?: string;
 }
-export class CreateCreativeAssetDto { @IsOptional() @IsString() @MaxLength(255) name?: string; @IsOptional() @IsUUID() folderId?: string; @IsOptional() @IsUUID() contentItemId?: string; }
-export class UpdateCreativeAssetDto { @IsOptional() @IsString() @MaxLength(255) name?: string; @IsOptional() @IsUUID() folderId?: string | null; }
-export class CreateCreativeFolderDto { @IsString() @MaxLength(160) name!: string; @IsOptional() @IsUUID() parentId?: string; }
-export class UpdateCreativeFolderDto { @IsString() @MaxLength(160) name!: string; }
+export class CreateCreativeAssetDto {
+  @IsOptional() @IsString() @MaxLength(255) name?: string;
+  @IsOptional() @IsUUID() folderId?: string;
+  @IsOptional() @IsUUID() contentItemId?: string;
+}
+export class UpdateCreativeAssetDto {
+  @IsOptional() @IsString() @MaxLength(255) name?: string;
+  @IsOptional() @IsUUID() folderId?: string | null;
+}
+export class CreateCreativeFolderDto {
+  @IsString() @MaxLength(160) name!: string;
+  @IsOptional() @IsUUID() parentId?: string;
+}
+export class UpdateCreativeFolderDto {
+  @IsString() @MaxLength(160) name!: string;
+}

@@ -14,7 +14,11 @@ import {
 } from 'class-validator';
 import type { SocialCampaignAlertChannel } from '../entities';
 
-const CHANNELS = ['in_app', 'email', 'whatsapp'] satisfies SocialCampaignAlertChannel[];
+const CHANNELS = [
+  'in_app',
+  'email',
+  'whatsapp',
+] satisfies SocialCampaignAlertChannel[];
 
 export class SocialCampaignMonitorQueryDto {
   @IsUUID()

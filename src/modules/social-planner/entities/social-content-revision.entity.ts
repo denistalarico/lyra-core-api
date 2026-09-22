@@ -34,10 +34,7 @@ export type SocialContentRevisionSource =
   'CK_social_content_revisions_source',
   `"source" IN ('human', 'ai', 'ai_then_human', 'human_then_ai', 'restored', 'import')`,
 )
-@Check(
-  'CK_social_content_revisions_number',
-  '"revision_number" > 0',
-)
+@Check('CK_social_content_revisions_number', '"revision_number" > 0')
 @Check(
   'CK_social_content_revisions_hashtags_array',
   `jsonb_typeof("hashtags") = 'array'`,

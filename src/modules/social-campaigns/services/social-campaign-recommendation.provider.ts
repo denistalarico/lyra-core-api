@@ -36,16 +36,22 @@ export type SocialCampaignRecommendationProviderResult = {
 /** Provider seam for advisory text. It has no dependency capable of Meta writes. */
 @Injectable()
 export class SocialCampaignRecommendationProvider {
-  constructor(private readonly config: SocialCampaignRecommendationConfigService) {}
+  constructor(
+    private readonly config: SocialCampaignRecommendationConfigService,
+  ) {}
 
   async generate(
     input: SocialCampaignRecommendationProviderInput,
   ): Promise<SocialCampaignRecommendationProviderResult> {
     if (this.config.mode === 'disabled') {
-      throw new SocialCampaignRecommendationError('recommendation_provider_disabled');
+      throw new SocialCampaignRecommendationError(
+        'recommendation_provider_disabled',
+      );
     }
     if (input.evidenceKeys.length === 0) {
-      throw new SocialCampaignRecommendationError('recommendation_evidence_missing');
+      throw new SocialCampaignRecommendationError(
+        'recommendation_evidence_missing',
+      );
     }
     const started = Date.now();
     if (this.config.mode === 'mock') return this.mock(input, started);
@@ -135,7 +141,10 @@ export class SocialCampaignRecommendationProvider {
         );
       }
     }
-    throw new SocialCampaignRecommendationError(lastCode, this.config.maxAttempts);
+    throw new SocialCampaignRecommendationError(
+      lastCode,
+      this.config.maxAttempts,
+    );
   }
 
   private mock(
@@ -148,9 +157,11 @@ export class SocialCampaignRecommendationProvider {
         {
           priority: 'low',
           title: 'Revisar os dados apresentados',
-          rationale: 'O provider está em modo de teste e não realizou análise real.',
+          rationale:
+            'O provider está em modo de teste e não realizou análise real.',
           evidenceKeys: input.evidenceKeys.slice(0, 1),
-          suggestedAction: 'Confira a leitura local antes de tomar qualquer decisão.',
+          suggestedAction:
+            'Confira a leitura local antes de tomar qualquer decisão.',
           expectedImpact: 'Nenhum impacto estimado em modo de teste.',
           confidence: 'low',
           observationWindowDays: 7,
@@ -167,7 +178,9 @@ export class SocialCampaignRecommendationProvider {
   }
 }
 
-function systemPrompt(input: SocialCampaignRecommendationProviderInput): string {
+function systemPrompt(
+  input: SocialCampaignRecommendationProviderInput,
+): string {
   return [
     'Você é um analista consultivo de mídia paga do Lyra Social.',
     'Produza apenas sugestões em português do Brasil. Nunca afirme que executou, pausou, publicou ou alterou algo.',
@@ -228,7 +241,11 @@ function recommendationSchema(evidenceKeys: string[]) {
               suggestedAction: { type: 'string', maxLength: 800 },
               expectedImpact: { type: 'string', maxLength: 600 },
               confidence: { type: 'string', enum: ['low', 'medium', 'high'] },
-              observationWindowDays: { type: 'integer', minimum: 1, maximum: 90 },
+              observationWindowDays: {
+                type: 'integer',
+                minimum: 1,
+                maximum: 90,
+              },
               caveats: {
                 type: 'array',
                 maxItems: 6,
@@ -247,10 +264,14 @@ function readContent(body: Record<string, unknown>): string {
   const choice = record(choices[0]);
   const message = record(choice?.message);
   if (message?.refusal) {
-    throw new SocialCampaignRecommendationError('recommendation_provider_refused');
+    throw new SocialCampaignRecommendationError(
+      'recommendation_provider_refused',
+    );
   }
   if (typeof message?.content !== 'string') {
-    throw new SocialCampaignRecommendationError('recommendation_response_missing');
+    throw new SocialCampaignRecommendationError(
+      'recommendation_response_missing',
+    );
   }
   return message.content;
 }
@@ -258,10 +279,15 @@ function readContent(body: Record<string, unknown>): string {
 function normalizeResult(
   value: unknown,
   input: SocialCampaignRecommendationProviderInput,
-): Pick<SocialCampaignRecommendationProviderResult, 'summary' | 'recommendations'> {
+): Pick<
+  SocialCampaignRecommendationProviderResult,
+  'summary' | 'recommendations'
+> {
   const root = record(value);
   const allowed = new Set(input.evidenceKeys);
-  const items = Array.isArray(root?.recommendations) ? root.recommendations : [];
+  const items = Array.isArray(root?.recommendations)
+    ? root.recommendations
+    : [];
   const recommendations = items
     .slice(0, 6)
     .map(record)
@@ -269,7 +295,8 @@ function normalizeResult(
     .map((item) => normalizeItem(item, allowed, input.confidenceCeiling))
     .filter((item): item is SocialCampaignRecommendationItem => item !== null);
   return {
-    summary: text(root?.summary, 600) || 'A análise não produziu um resumo legível.',
+    summary:
+      text(root?.summary, 600) || 'A análise não produziu um resumo legível.',
     recommendations,
   };
 }
@@ -280,12 +307,19 @@ function normalizeItem(
   ceiling: SocialCampaignRecommendationConfidence,
 ): SocialCampaignRecommendationItem | null {
   const evidenceKeys = Array.isArray(item.evidenceKeys)
-    ? [...new Set(item.evidenceKeys.filter((key): key is string => typeof key === 'string' && allowed.has(key)))].slice(0, 8)
+    ? [
+        ...new Set(
+          item.evidenceKeys.filter(
+            (key): key is string => typeof key === 'string' && allowed.has(key),
+          ),
+        ),
+      ].slice(0, 8)
     : [];
   const title = text(item.title, 180);
   const rationale = text(item.rationale, 1200);
   const suggestedAction = text(item.suggestedAction, 800);
-  if (!title || !rationale || !suggestedAction || evidenceKeys.length === 0) return null;
+  if (!title || !rationale || !suggestedAction || evidenceKeys.length === 0)
+    return null;
   return {
     priority: enumValue(item.priority, ['low', 'medium', 'high'], 'medium'),
     title,
@@ -299,7 +333,10 @@ function normalizeItem(
     ),
     observationWindowDays: integer(item.observationWindowDays, 1, 90, 7),
     caveats: Array.isArray(item.caveats)
-      ? item.caveats.map((value) => text(value, 300)).filter(Boolean).slice(0, 6)
+      ? item.caveats
+          .map((value) => text(value, 300))
+          .filter(Boolean)
+          .slice(0, 6)
       : [],
   };
 }
@@ -312,7 +349,9 @@ function clampConfidence(
   return order[Math.min(order.indexOf(value), order.indexOf(ceiling))] ?? 'low';
 }
 
-function providerUsage(body: Record<string, unknown>): SocialCampaignRecommendationUsage {
+function providerUsage(
+  body: Record<string, unknown>,
+): SocialCampaignRecommendationUsage {
   const usage = record(body.usage);
   const details = record(usage?.prompt_tokens_details);
   return {

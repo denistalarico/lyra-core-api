@@ -35,9 +35,7 @@ describe('Meta campaign operational hierarchy boundary', () => {
   });
 
   it('keeps tenant and workspace out of the public query DTO', () => {
-    const source = readCode(
-      '../dto/meta-campaign-hierarchy.query.dto.ts',
-    );
+    const source = readCode('../dto/meta-campaign-hierarchy.query.dto.ts');
 
     expect(source).not.toContain('tenantId');
     expect(source).not.toContain('workspaceId');

@@ -188,8 +188,7 @@ export function decideRetention(
   }
 
   const days = retentionDaysFor(candidate.runKind, candidate.status);
-  const ageDays =
-    (now.getTime() - candidate.finishedAt.getTime()) / 86_400_000;
+  const ageDays = (now.getTime() - candidate.finishedAt.getTime()) / 86_400_000;
 
   // Strictly greater: a run finished exactly `days` ago is still inside its
   // window. The boundary has to fall somewhere, and keeping one extra day is

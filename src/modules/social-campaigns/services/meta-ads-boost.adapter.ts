@@ -97,9 +97,9 @@ export class MetaAdsBoostAdapter {
       // every object exists does the explicit confirmation activate delivery.
       // Activating child-to-parent preserves that invariant if an activation
       // request itself fails midway.
-      await this.activate(account, credential.accessToken, created.ad!);
-      await this.activate(account, credential.accessToken, created.adset!);
-      await this.activate(account, credential.accessToken, created.campaign!);
+      await this.activate(account, credential.accessToken, created.ad);
+      await this.activate(account, credential.accessToken, created.adset);
+      await this.activate(account, credential.accessToken, created.campaign);
       return { providerAccepted: true, stage: 'campaign' as const, created };
     } catch (error) {
       const stage: Level = created.creative

@@ -686,13 +686,14 @@ export class SocialAdSyncRunService {
    * endpoint confirms nothing about whether the id exists.
    */
   async listRecent(input: ListSyncRunsInput): Promise<SocialAdSyncRunView[]> {
-    const connectionInScope = await this.credentialResolver.hasConnectionInScope({
-      tenantId: input.tenantId,
-      workspaceId: input.workspaceId,
-      agencyClientId: input.agencyClientId,
-      companyContextId: input.companyContextId ?? null,
-      connectionId: input.connectionId,
-    });
+    const connectionInScope =
+      await this.credentialResolver.hasConnectionInScope({
+        tenantId: input.tenantId,
+        workspaceId: input.workspaceId,
+        agencyClientId: input.agencyClientId,
+        companyContextId: input.companyContextId ?? null,
+        connectionId: input.connectionId,
+      });
 
     if (!connectionInScope) return [];
 

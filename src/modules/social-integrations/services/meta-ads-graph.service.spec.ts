@@ -427,7 +427,10 @@ describe('MetaAdsGraphService', () => {
         failureMessage: 'create failed',
       });
 
-      const [url, init] = fetchMock.mock.calls[0] as unknown as [URL, RequestInit];
+      const [url, init] = fetchMock.mock.calls[0] as unknown as [
+        URL,
+        RequestInit,
+      ];
       expect(url.toString()).toBe(
         'https://graph.facebook.com/v25.0/act_123456/campaigns',
       );

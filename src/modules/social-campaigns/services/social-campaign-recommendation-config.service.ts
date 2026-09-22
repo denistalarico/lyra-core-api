@@ -70,7 +70,9 @@ export class SocialCampaignRecommendationConfigService implements OnModuleInit {
   onModuleInit(): void {
     if (this.mode !== 'live') return;
     if (!this.apiKey || !this.model) {
-      throw new Error('social_campaign_recommendation_live_configuration_missing');
+      throw new Error(
+        'social_campaign_recommendation_live_configuration_missing',
+      );
     }
     const endpoint = new URL(this.endpoint);
     const local =
@@ -86,7 +88,8 @@ function resolveMode(): SocialCampaignRecommendationProviderMode {
     process.env.SOCIAL_CAMPAIGN_RECOMMENDATION_PROVIDER_MODE ??
     process.env.SOCIAL_COPY_GENERATION_PROVIDER_MODE ??
     'disabled';
-  if (value === 'disabled' || value === 'mock' || value === 'live') return value;
+  if (value === 'disabled' || value === 'mock' || value === 'live')
+    return value;
   throw new Error('social_campaign_recommendation_provider_mode_invalid');
 }
 
@@ -118,7 +121,12 @@ function boundedNumberWithFallback(
   );
 }
 
-function boundedNumber(name: string, fallback: number, min: number, max: number) {
+function boundedNumber(
+  name: string,
+  fallback: number,
+  min: number,
+  max: number,
+) {
   return boundedNumberValue(process.env[name], fallback, min, max);
 }
 

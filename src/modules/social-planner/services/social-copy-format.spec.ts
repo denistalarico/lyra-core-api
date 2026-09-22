@@ -69,7 +69,9 @@ describe('wantsLongFormCaption', () => {
   });
 
   it('is never true for a Story, which has no caption at all', () => {
-    expect(wantsLongFormCaption(item(null, 'informative'), 'story')).toBe(false);
+    expect(wantsLongFormCaption(item(null, 'informative'), 'story')).toBe(
+      false,
+    );
   });
 
   it('applies to carousels and reels, not just single images', () => {

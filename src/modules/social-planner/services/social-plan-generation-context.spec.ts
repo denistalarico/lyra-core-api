@@ -155,8 +155,7 @@ describe('buildPlanGenerationContext', () => {
 
     expect(context.length).toBeLessThanOrEqual(120);
     // Every retained line must be whole.
-    for (const line of context.split('\n'))
-      expect(line).not.toMatch(/\s$/);
+    for (const line of context.split('\n')) expect(line).not.toMatch(/\s$/);
   });
 });
 
@@ -183,8 +182,18 @@ describe('planGenerationVocabulary', () => {
       {
         ...cadence,
         channels: [
-          { channel: 'instagram', enabled: true, frequencyPerMonth: null, slots: [] },
-          { channel: 'tiktok', enabled: false, frequencyPerMonth: null, slots: [] },
+          {
+            channel: 'instagram',
+            enabled: true,
+            frequencyPerMonth: null,
+            slots: [],
+          },
+          {
+            channel: 'tiktok',
+            enabled: false,
+            frequencyPerMonth: null,
+            slots: [],
+          },
         ],
       },
       [],

@@ -24,6 +24,8 @@ const GUARDED_HANDLERS = [
   // Resolving a post's image is a read of that asset's content, so it sits
   // behind the same permission as the numbers beside it.
   'postThumbnail',
+  // Ranking posts is the same asset read as the numbers above it.
+  'topPosts',
 ] as const;
 
 const ASSET_SCOPED_HANDLERS = ['overview', 'timeseries', 'audience'] as const;
