@@ -84,6 +84,29 @@ export type SocialAdAnalyticsTotals = SocialAdKpis & {
    * thing that says how much of today the number covers.
    */
   periodReachMeasuredAt: string | null;
+
+  /**
+   * Impressions per person reached, over the measured period.
+   *
+   * Null exactly when `periodReach` is: it is the denominator, and there is no
+   * substitute for it here. Summed daily reach would count a person once per day
+   * they were reached and deflate the ratio toward 1 — which is the reading a
+   * frequency figure exists to contradict.
+   *
+   * A bare multiplier: `2.500000` means each reached person saw the ads two and
+   * a half times. Above roughly 3 on a short window it is the usual sign of a
+   * saturated audience.
+   */
+  frequency: string | null;
+
+  /**
+   * Cost per person reached, in the account's currency.
+   *
+   * Distinct from CPM, which divides by a thousand *impressions* and therefore
+   * charges the same person again on every view. Null under the same rule as
+   * `frequency`.
+   */
+  cpp: string | null;
 };
 
 /** Period-over-period movement, one entry per additive metric. */

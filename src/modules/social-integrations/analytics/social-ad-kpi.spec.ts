@@ -1,5 +1,6 @@
 import {
   deriveChange,
+  derivePeriodReachKpis,
   deriveSocialAdKpis,
   divideScaled,
   formatDerived,
@@ -164,6 +165,54 @@ describe('deriveSocialAdKpis', () => {
     });
 
     expect(kpis.ctr).toBe('100.000000');
+  });
+});
+
+describe('derivePeriodReachKpis', () => {
+  it('derives frequency as impressions per reached person', () => {
+    // 2.500 impressions over 1.000 people: each person saw it 2,5 times.
+    expect(
+      derivePeriodReachKpis({
+        spend: money('500.00'),
+        impressions: 2_500n,
+        periodReach: 1_000n,
+      }),
+    ).toEqual({ frequency: '2.500000', cpp: '0.500000' });
+  });
+
+  it('reports nothing when reach was never measured', () => {
+    // The case this function exists to get right: a range the reach cache has
+    // not covered. Null is "not measured" — dividing by summed daily reach
+    // instead would answer with a number that is always too close to 1.
+    expect(
+      derivePeriodReachKpis({
+        spend: money('500.00'),
+        impressions: 2_500n,
+        periodReach: null,
+      }),
+    ).toEqual({ frequency: null, cpp: null });
+  });
+
+  it('reports nothing rather than dividing by zero people', () => {
+    expect(
+      derivePeriodReachKpis({
+        spend: money('10.00'),
+        impressions: 100n,
+        periodReach: 0n,
+      }),
+    ).toEqual({ frequency: null, cpp: null });
+  });
+
+  it('keeps a spend of zero as a real zero cost', () => {
+    // Zero spend is a measurement, not an absence: the ads were delivered
+    // organically-boosted or the budget had not been consumed yet.
+    expect(
+      derivePeriodReachKpis({
+        spend: 0n,
+        impressions: 300n,
+        periodReach: 100n,
+      }),
+    ).toEqual({ frequency: '3.000000', cpp: '0.000000' });
   });
 });
 

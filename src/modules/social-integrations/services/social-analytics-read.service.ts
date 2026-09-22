@@ -5,6 +5,7 @@ import {
   SocialAdKpiInputs,
   deriveChange,
   deriveSocialAdKpis,
+  derivePeriodReachKpis,
 } from '../analytics/social-ad-kpi';
 import {
   SocialAdAnalyticsPeriod,
@@ -1082,6 +1083,17 @@ export class SocialAnalyticsReadService {
           ? null
           : periodReach.measuredAt.toISOString(),
       ...deriveSocialAdKpis(inputs),
+      // Derived here rather than inside `deriveSocialAdKpis` because their
+      // denominator is the measured period reach, which is not one of its summed
+      // inputs and must not become one. Null wherever that measurement is
+      // missing — the same rule `periodReach` itself follows above.
+      ...derivePeriodReachKpis({
+        spend: inputs.spend,
+        impressions: inputs.impressions,
+        // A digit string on the cache row; parsed rather than coerced, so a
+        // malformed value reads as "not measured" instead of as zero people.
+        periodReach: parseCount(periodReach?.reach ?? null),
+      }),
     };
   }
 
@@ -1309,6 +1321,22 @@ function readReach(row: AggregateRow): string | null {
 }
 
 /** A `SUM(bigint)` result as an exact integer, with NULL meaning zero. */
+/**
+ * A digit string as a count, keeping "absent" distinct from "zero".
+ *
+ * `toCount` answers `0n` for a missing value, which is right for a `SUM` over
+ * days that had no delivery. It is wrong for period reach: zero people reached
+ * and reach never measured are different claims, and only the second one may
+ * suppress a KPI rather than report it as zero.
+ */
+function parseCount(value: string | null | undefined): bigint | null {
+  if (value === null || value === undefined) return null;
+
+  const text = String(value).split('.')[0];
+
+  return text.length && /^-?\d+$/.test(text) ? BigInt(text) : null;
+}
+
 function toCount(value: string | null | undefined): bigint {
   if (value === null || value === undefined) return 0n;
 

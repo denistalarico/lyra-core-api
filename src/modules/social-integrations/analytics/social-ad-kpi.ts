@@ -143,6 +143,47 @@ function divideCost(scaledAmount: bigint, count: bigint): bigint | null {
 }
 
 /**
+ * The two KPIs whose denominator is people rather than events.
+ *
+ * Separate from `deriveSocialAdKpis` because their denominator is not one of its
+ * inputs and must never become one. Every field of `SocialAdKpiInputs` is a sum
+ * over the selected days; period reach is the opposite — a single measurement of
+ * how many distinct people the period reached, which `SUM` would double-count
+ * and `MAX` would understate. It exists only where that measurement was actually
+ * taken, so these are derived at the overview and are `null` everywhere else.
+ *
+ * - **Frequency** is impressions per person. It is a bare multiplier, so both
+ *   operands are scaled to the shared basis and the scales cancel: `2.500000`
+ *   means each reached person saw the ad two and a half times.
+ * - **CPP** is cost per person reached, in money — unlike CPM, which is cost per
+ *   thousand *impressions* and so counts the same person repeatedly.
+ *
+ * Null when reach was never measured, which is the ordinary case for a range
+ * the reach cache has not covered. Null is "not measured", never zero.
+ */
+export function derivePeriodReachKpis(input: {
+  /** Scaled to 1e6. */
+  spend: bigint;
+  impressions: bigint;
+  /** The measured period reach, unscaled. Null when never measured. */
+  periodReach: bigint | null;
+}): { frequency: string | null; cpp: string | null } {
+  if (input.periodReach === null || input.periodReach <= 0n) {
+    return { frequency: null, cpp: null };
+  }
+
+  return {
+    // Two bare counts: `divideScaled` applies the basis itself, so neither
+    // operand is pre-scaled here. Scaling the numerator as well would answer in
+    // millions of impressions per person.
+    frequency: formatDerived(
+      divideScaled(input.impressions, input.periodReach),
+    ),
+    cpp: formatDerived(divideCost(input.spend, input.periodReach)),
+  };
+}
+
+/**
  * The period-over-period movement of one metric.
  *
  * `absolute` is always present — a difference of two known numbers is always
