@@ -88,6 +88,15 @@ export type CompanyLegacyDomain = {
   summaryColumns: readonly string[];
   /** Excludes soft-deleted rows from the inventory when present. */
   softDeleteColumn?: string;
+  /**
+   * Column projected as `createdAt` and used to order the inventory.
+   *
+   * Defaults to `created_at`, which every root carries except
+   * `inbox_autonomy_controls` — a single mutable control row per scope, which
+   * records only `updated_at`. Declared here rather than special-cased in the
+   * service so the registry stays the one description of each table's shape.
+   */
+  timestampColumn?: string;
   parentEvidence?: CompanyLegacyParentEvidence;
 };
 
@@ -194,6 +203,7 @@ export const COMPANY_LEGACY_DOMAINS: readonly CompanyLegacyDomain[] = [
     label: 'Controle de autonomia',
     titleColumn: null,
     summaryColumns: ['reason_code', 'paused_at'],
+    timestampColumn: 'updated_at',
   },
   {
     domainKey: 'leadflow.inbox.channel',

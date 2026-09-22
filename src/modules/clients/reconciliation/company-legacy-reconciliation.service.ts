@@ -362,9 +362,10 @@ export class CompanyLegacyReconciliationService {
       ...domain.summaryColumns,
       ...(domain.parentEvidence ? [domain.parentEvidence.column] : []),
     ]);
+    const timestampColumn = domain.timestampColumn ?? 'created_at';
     const columns = [
       'legacy_row."id" AS id',
-      'legacy_row."created_at" AS created_at',
+      `legacy_row."${timestampColumn}" AS created_at`,
       domain.scopeEncoding === 'column'
         ? 'NULL::uuid AS agency_client_id'
         : 'legacy_row."agency_client_id" AS agency_client_id',
@@ -374,7 +375,7 @@ export class CompanyLegacyReconciliationService {
     const where = page.rowId ? `${sql} AND legacy_row."id" = :rowId` : sql;
     const window = page.rowId
       ? ''
-      : ` ORDER BY legacy_row."created_at" ASC, legacy_row."id" ASC LIMIT ${Number(page.limit) || 25} OFFSET ${Number(page.offset) || 0}`;
+      : ` ORDER BY legacy_row."${timestampColumn}" ASC, legacy_row."id" ASC LIMIT ${Number(page.limit) || 25} OFFSET ${Number(page.offset) || 0}`;
 
     return this.query(
       `SELECT ${columns} FROM "${domain.table}" legacy_row WHERE ${where}${window}`,

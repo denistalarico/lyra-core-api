@@ -206,6 +206,7 @@ import { CreateSocialBreakdownFacts1794300000000 } from './migrations/1794300000
 import { CreateAgencyClientCompanyContexts1794400000000 } from './migrations/1794400000000-create-agency-client-company-contexts';
 import { CreateCompanyContextReconciliationAudit1795000000000 } from './migrations/1795000000000-create-company-context-reconciliation-audit';
 import { CreateSocialApprovals1795100000000 } from './migrations/1795100000000-create-social-approvals';
+import { PromoteAgencyOwnedLegacyScope1795200000000 } from './migrations/1795200000000-promote-agency-owned-legacy-scope';
 import { ScopeSocialEditorialByCompany1794500000000 } from './migrations/1794500000000-scope-social-editorial-by-company';
 import { ScopeBrandKitByCompany1794510000000 } from './migrations/1794510000000-scope-brand-kit-by-company';
 import { ScopeCreativeStudioByCompany1794520000000 } from './migrations/1794520000000-scope-creative-studio-by-company';
@@ -444,5 +445,6 @@ export const AgencyDataSource = new DataSource({
     ScopeLeadflowCrmOperationsByCompany1794900000000,
     CreateCompanyContextReconciliationAudit1795000000000,
     CreateSocialApprovals1795100000000,
+    PromoteAgencyOwnedLegacyScope1795200000000,
   ],
 });
