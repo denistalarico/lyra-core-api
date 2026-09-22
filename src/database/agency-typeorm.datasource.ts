@@ -150,6 +150,7 @@ import { CreateLeadflowAnalyticsViews1788900000000 } from './migrations/17889000
 import { AddLeadflowAnalyticsWidgetLayout1789000000000 } from './migrations/1789000000000-add-leadflow-analytics-widget-layout';
 import { ReconcileLeadflowBriefingFullSchema1789050000000 } from './migrations/1789050000000-reconcile-leadflow-briefing-full-schema';
 import { ReconcileLeadflowBriefingReviewSchema1789100000000 } from './migrations/1789100000000-reconcile-leadflow-briefing-review-schema';
+import { AddLeadflowAnalyticsViewPreferences1789200000000 } from './migrations/1789200000000-add-leadflow-analytics-view-preferences';
 import { CreateLeadflowOperationsActions1789300000000 } from './migrations/1789300000000-create-leadflow-operations-actions';
 import { AddUserProfileWhatsapp1789400000000 } from './migrations/1789400000000-add-user-profile-whatsapp';
 import { BackfillLeadDistributionNotificationChannels1789500000000 } from './migrations/1789500000000-backfill-lead-distribution-notification-channels';
@@ -376,6 +377,7 @@ export const AgencyDataSource = new DataSource({
     AddLeadflowAnalyticsWidgetLayout1789000000000,
     ReconcileLeadflowBriefingFullSchema1789050000000,
     ReconcileLeadflowBriefingReviewSchema1789100000000,
+    AddLeadflowAnalyticsViewPreferences1789200000000,
     CreateLeadflowOperationsActions1789300000000,
     AddUserProfileWhatsapp1789400000000,
     BackfillLeadDistributionNotificationChannels1789500000000,
