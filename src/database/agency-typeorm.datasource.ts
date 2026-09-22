@@ -203,6 +203,8 @@ import { ExpandBrandKitAssetContext1794200000000 } from './migrations/1794200000
 import { CreateSocialAdReachPeriods1794210000000 } from './migrations/1794210000000-create-social-ad-reach-periods';
 import { CreateSocialBreakdownFacts1794300000000 } from './migrations/1794300000000-create-social-breakdown-facts';
 import { CreateAgencyClientCompanyContexts1794400000000 } from './migrations/1794400000000-create-agency-client-company-contexts';
+import { CreateCompanyContextReconciliationAudit1795000000000 } from './migrations/1795000000000-create-company-context-reconciliation-audit';
+import { CreateSocialApprovals1795100000000 } from './migrations/1795100000000-create-social-approvals';
 import { ScopeSocialEditorialByCompany1794500000000 } from './migrations/1794500000000-scope-social-editorial-by-company';
 import { ScopeBrandKitByCompany1794510000000 } from './migrations/1794510000000-scope-brand-kit-by-company';
 import { ScopeCreativeStudioByCompany1794520000000 } from './migrations/1794520000000-scope-creative-studio-by-company';
@@ -438,5 +440,7 @@ export const AgencyDataSource = new DataSource({
     ScopeInboxChannelsByCompany1794810000000,
     ScopeInboxConversationsByCompany1794820000000,
     ScopeLeadflowCrmOperationsByCompany1794900000000,
+    CreateCompanyContextReconciliationAudit1795000000000,
+    CreateSocialApprovals1795100000000,
   ],
 });

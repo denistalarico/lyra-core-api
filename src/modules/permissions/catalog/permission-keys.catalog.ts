@@ -177,6 +177,11 @@ const RAW_PERMISSIONS: RawPermission[] = [
   ['agency.clients.profitability.view.owner_or_finance', OWNER_ONLY],
   ['agency.clients.products.view.assigned', MANAGER_UP],
   ['agency.clients.products.manage.admin', ADMIN_UP],
+  // CC2G. Reconciling legacy data permanently rewrites which company owns
+  // historical Social/LeadFlow records across every migrated boundary, so it
+  // is deliberately not folded into `profile.update.assigned` (Manager,
+  // assigned clients only): it is a structural change, not a profile edit.
+  ['agency.clients.company_context.reconcile.admin', ADMIN_UP],
   ['agency.clients.managed_tenant.view.admin', ADMIN_UP],
   ['agency.clients.managed_tenant.manage.owner_only', OWNER_ONLY, true],
   ['agency.clients.lifecycle.view.assigned', MANAGER_UP],

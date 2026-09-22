@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import type { RequestContext } from '../../../common/context/request-context.interface';
+import { resolveCompanyAwareScope } from '../../../common/context/company-aware-scope';
 import { LeadFlowClientSettingsService } from '../../leadflow-settings/services/leadflow-client-settings.service';
 import { WhatsAppChannelHealthService } from '../../inbox/channels/whatsapp/services/whatsapp-channel-health.service';
 import type { GetLeadFlowOverviewDto } from '../dto/get-leadflow-overview.dto';
@@ -60,15 +61,21 @@ export class LeadFlowOverviewService {
       await Promise.all([
         this.operationalAnalytics.getOverview(ctx, periodQuery),
         this.commercialAnalytics.getCommercialJourney(ctx, periodQuery),
-        this.whatsappHealth.listStatus({ tenantId, workspaceId }),
+        // CC2G.1: `listStatus` is itself company-scoped since CC2E — the
+        // previous tenant/workspace-only call defaulted to agency scope and
+        // relied on `isChannelForContext`'s legacy `metadata.clientId` filter
+        // to narrow it client-side afterwards. Passing the real persisted
+        // scope means the query itself never returns another company's
+        // channel, rather than trusting a JSONB stamp to filter it out later.
+        this.whatsappHealth.listStatus(
+          this.channelHealthScope(tenantId, workspaceId, context),
+        ),
         context.operatingMode === 'agency'
           ? this.clientSettings.getCapacity(ctx)
           : Promise.resolve(null),
       ]);
 
-    const scopedChannels = whatsappStatus.channels.filter((channel) =>
-      isChannelForContext(channel, context),
-    );
+    const scopedChannels = whatsappStatus.channels;
     const inboxConnectionState = resolveScopedConnectionState(scopedChannels);
 
     const kpis = this.buildKpis(window, operational, commercial);
@@ -439,16 +446,54 @@ export class LeadFlowOverviewService {
     return priorities;
   }
 
+  /**
+   * CC2G.1 — resolves through `resolveCompanyAwareScope`, same as the
+   * operational analytics and commercial journey services this Overview reads
+   * from. Client mode without a Company Context still fails closed; what CC2G.1
+   * removes is the *aggregate* fallback once a company is selected, not the
+   * requirement to select one.
+   */
   private resolveContext(
     ctx: RequestContext,
   ): LeadFlowOverviewOperatingContext {
-    if (ctx.managedContext?.operatingMode === 'client') {
-      if (!ctx.managedContext.clientId) {
-        throw new BadRequestException('Client context is required.');
-      }
-      return { operatingMode: 'client', clientId: ctx.managedContext.clientId };
+    const scope = resolveCompanyAwareScope(ctx);
+    if (scope.agencyClientId) {
+      return {
+        operatingMode: 'client',
+        clientId: scope.agencyClientId,
+        companyContextId: scope.companyContextId,
+      };
     }
-    return { operatingMode: 'agency', clientId: null };
+    return { operatingMode: 'agency', clientId: null, companyContextId: null };
+  }
+
+  /**
+   * The shape `WhatsAppChannelHealthService.listStatus` expects, built from the
+   * same `LeadFlowOverviewOperatingContext` the Overview response carries — so
+   * the channel status query and the response's own `context` field can never
+   * disagree about which scope was read.
+   */
+  private channelHealthScope(
+    tenantId: string,
+    workspaceId: string,
+    context: LeadFlowOverviewOperatingContext,
+  ) {
+    if (context.operatingMode === 'client') {
+      return {
+        tenantId,
+        workspaceId,
+        agencyClientId: context.clientId,
+        companyContextId: context.companyContextId,
+        scopeKind: 'company' as const,
+      };
+    }
+    return {
+      tenantId,
+      workspaceId,
+      agencyClientId: null,
+      companyContextId: null,
+      scopeKind: 'agency' as const,
+    };
   }
 
   private requireTenantId(ctx: RequestContext): string {
@@ -498,25 +543,13 @@ function differenceInDays(from: Date, to: Date): number {
   return Math.round((to.getTime() - from.getTime()) / 86_400_000);
 }
 
-function isChannelForContext(
-  channel: WhatsAppMappedChannel,
-  context: LeadFlowOverviewOperatingContext,
-): boolean {
-  const metadata = channel.metadata ?? {};
-  const operatingMode =
-    metadata.operatingMode === 'client' ? 'client' : 'agency';
-
-  if (context.operatingMode === 'client') {
-    return operatingMode === 'client' && metadata.clientId === context.clientId;
-  }
-  return operatingMode === 'agency';
-}
-
 /**
- * Mirrors WhatsAppChannelHealthService.resolveWorkspaceState's "best of"
- * ranking, applied only to the channels scoped to this context — that
- * service itself is tenant/workspace-scoped only (no client filtering), so
- * we cannot reuse it directly for a per-client Overview.
+ * Mirrors `WhatsAppChannelHealthService.resolveWorkspaceState`'s "best of"
+ * ranking, applied to `listStatus`' own result.
+ *
+ * CC2G.1: `listStatus` is now called with the real persisted scope (see
+ * `channelHealthScope`), so every channel in `whatsappStatus.channels` already
+ * belongs to this context — there is no client-side filter to apply first.
  */
 function resolveScopedConnectionState(
   channels: WhatsAppMappedChannel[],

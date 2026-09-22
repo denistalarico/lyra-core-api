@@ -16,6 +16,37 @@ export type CompanyAwareScope = {
   companyContextId: string | null;
 };
 
+/**
+ * CC2G — the single machine-readable rejection for a company-aware operation
+ * reached without a Company Context.
+ *
+ * Before CC2G every boundary threw its own prose, so a client could only
+ * pattern-match on message text. The UI needs to tell "you must pick a
+ * company" apart from every other 400 in order to route the user to the
+ * company switcher (CC2H), so the code — not the message — is the contract.
+ *
+ * Legacy selections (a client with no company) are still representable in the
+ * frontend provider until CC2H, so this is the error they must receive:
+ * a company-scoped endpoint never falls back to client-wide data.
+ */
+export const COMPANY_CONTEXT_REQUIRED = 'company_context_required';
+
+/** Companion code for a client-mode request that carries no client at all. */
+export const CLIENT_CONTEXT_REQUIRED = 'client_context_required';
+
+/**
+ * A `BadRequestException` whose body carries a stable `code`, alongside the
+ * usual `message`/`statusCode` Nest produces.
+ */
+export class CompanyContextRequiredException extends BadRequestException {
+  constructor(
+    message = 'Company context is required for this operation.',
+    code: string = COMPANY_CONTEXT_REQUIRED,
+  ) {
+    super({ statusCode: 400, message, error: 'Bad Request', code });
+  }
+}
+
 export function resolveCompanyAwareScope(
   ctx: RequestContext,
 ): CompanyAwareScope {
@@ -36,12 +67,16 @@ export function resolveCompanyAwareScope(
   const companyContextId = ctx.managedContext.companyContextId ?? null;
 
   if (!agencyClientId) {
-    throw new BadRequestException('Client context is required.');
+    throw new CompanyContextRequiredException(
+      'Client context is required.',
+      CLIENT_CONTEXT_REQUIRED,
+    );
   }
   if (!companyContextId) {
-    throw new BadRequestException(
-      'Company context is required for this operation.',
-    );
+    // CC2G: client mode without a company never degrades to client-wide data.
+    // Every migrated Social/LeadFlow boundary resolves its scope through this
+    // function, so the enforcement is structural rather than per-endpoint.
+    throw new CompanyContextRequiredException();
   }
 
   return {

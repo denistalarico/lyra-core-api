@@ -10,7 +10,6 @@ import {
   FindOptionsWhere,
   ILike,
   IsNull,
-  Raw,
   Repository,
 } from 'typeorm';
 import { RequestContext } from '../../common/context/request-context.interface';
@@ -234,13 +233,18 @@ export class CrmService {
     const created = await this.stagesRepository.manager.transaction(async (manager) => {
       await this.getPipelineWithManager(manager, ctx, dto.pipelineId, true);
       const repository = manager.getRepository(CrmStageEntity);
+      // CC2G: stages are children of a company-scoped pipeline, and
+      // `getPipelineWithManager` above already authorised this `pipelineId`
+      // against the caller's company. The old `metadata->>'clientId'` filter
+      // was company-blind and redundant here, so counting by the parent is
+      // both narrower and correct.
       const stageCount = await repository.count({
-        where: this.withClientScope(ctx, {
+        where: {
           tenantId,
           workspaceId,
           pipelineId: dto.pipelineId,
           deletedAt: IsNull(),
-        }),
+        },
       });
       const eligibleForInitial =
         (dto.type ?? 'open') === 'open' &&
@@ -1603,29 +1607,6 @@ export class CrmService {
     return date;
   }
 
-  /** Temporary child compatibility filter; roots use persisted scope below. */
-  private withClientScope<T>(
-    ctx: RequestContext,
-    where: FindOptionsWhere<T>,
-  ): FindOptionsWhere<T> {
-    const managed = ctx.managedContext;
-    const scoped = { ...where } as Record<string, unknown>;
-
-    if (managed?.operatingMode === 'client') {
-      scoped.metadata = Raw(
-        (column) => `${column} ->> 'clientId' = :lfClientId`,
-        { lfClientId: managed.clientId },
-      );
-    } else {
-      scoped.metadata = Raw(
-        (column) =>
-          `(${column} ->> 'clientId' IS NULL OR ${column} ->> 'operatingMode' = 'agency')`,
-      );
-    }
-
-    return scoped as FindOptionsWhere<T>;
-  }
-
   /** Direct persisted scope for CC2F roots. Stages and child rows inherit it. */
   private companyScope(ctx: RequestContext) {
     const scope = resolveCompanyAwareScope(ctx);
@@ -1646,8 +1627,12 @@ export class CrmService {
   }
 
   /**
-   * Stamps the current LeadFlow operating context into a record's metadata so it
-   * can later be filtered by {@link withClientScope}.
+   * Stamps the current LeadFlow operating context into a record's metadata.
+   *
+   * CC2G removed the last reader of this stamp (`withClientScope`): scope now
+   * comes from the persisted `agency_client_id`/`company_context_id` columns.
+   * The stamp is kept because existing rows carry it and downstream consumers
+   * still read `clientName`/`operatingMode` for display.
    */
   private stampContext(
     ctx: RequestContext,

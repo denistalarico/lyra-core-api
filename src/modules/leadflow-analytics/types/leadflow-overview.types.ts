@@ -1,6 +1,13 @@
 export type LeadFlowOverviewOperatingContext = {
   operatingMode: 'agency' | 'client';
   clientId: string | null;
+  /**
+   * CC2G.1 — the Company Context this Overview was read from, or `null` in
+   * agency mode. Always non-null in client mode: `resolveCompanyAwareScope`
+   * (via `LeadFlowOverviewService.resolveContext`) refuses a client-mode
+   * request with no company before a response is ever built.
+   */
+  companyContextId: string | null;
 };
 
 export type LeadFlowOverviewWindow = {

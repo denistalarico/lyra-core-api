@@ -10,6 +10,7 @@ import {
   SocialAnalyticsDashboardEntity,
   SocialAnalyticsReportEntity,
 } from '../modules/social-analytics-dashboards/entities';
+import { SocialApprovalCommentEntity, SocialApprovalRequestEntity, SocialApprovalStageDecisionEntity } from '../modules/social-approvals/entities';
 
 import { UserPreferencesEntity } from '../modules/settings/entities/user-preferences.entity';
 import { WorkspaceSettingsAiEntity } from '../modules/settings/entities/workspace-settings-ai.entity';
@@ -219,6 +220,7 @@ import {
 import {
   AgencyClient,
   AgencyClientCompanyContext,
+  CompanyContextReconciliationAudit,
   ClientLifecycleProcess,
   ClientLifecycleStep,
 } from '../modules/clients/entities';
@@ -390,6 +392,9 @@ export const agencyEntities = [
   CreativeFolderEntity,
   SocialAnalyticsDashboardEntity,
   SocialAnalyticsReportEntity,
+  SocialApprovalRequestEntity,
+  SocialApprovalCommentEntity,
+  SocialApprovalStageDecisionEntity,
   BrandKitEntity,
   BrandKitAssetEntity,
   SocialAdAccountConnectionEntity,
@@ -529,6 +534,7 @@ export const agencyEntities = [
   AgencyTaskTimeEntry,
   AgencyClient,
   AgencyClientCompanyContext,
+  CompanyContextReconciliationAudit,
   ClientLifecycleProcess,
   ClientLifecycleStep,
   AgencyActivity,

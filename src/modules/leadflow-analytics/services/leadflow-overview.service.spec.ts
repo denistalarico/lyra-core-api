@@ -122,6 +122,8 @@ const clientCtx = {
     productKey: 'leadflow' as const,
     operatingMode: 'client' as const,
     clientId: 'client-1',
+    // CC2G: client mode now requires a company.
+    companyContextId: 'company-1',
     managedTenantId: null,
   },
 };
@@ -300,51 +302,70 @@ describe('LeadFlowOverviewService', () => {
     expect(result.context).toEqual({
       operatingMode: 'client',
       clientId: 'client-1',
+      companyContextId: 'company-1',
     });
     expect(
       result.priorities.find((p) => p.key === 'company_capacity_full'),
     ).toBeFalsy();
   });
 
-  it('scopes WhatsApp channel status to the active client and ignores other clients/agency channels (cross-tenant isolation)', async () => {
+  /**
+   * CC2G.1: `WhatsAppChannelHealthService.listStatus` is itself company-scoped
+   * since CC2E — the Overview no longer re-filters its result by the legacy
+   * `metadata.clientId` stamp client-side. What this test proves is that the
+   * *query itself* is asked for the right scope, so a caller cannot leak
+   * another company's channel by returning it from a mis-scoped call.
+   */
+  it('asks WhatsApp channel status for the active client and company, not just tenant/workspace', async () => {
+    const h = harness();
+
+    await h.service.getOverview(clientCtx, {});
+
+    expect(h.listStatus).toHaveBeenCalledWith({
+      tenantId: 'tenant-1',
+      workspaceId: 'workspace-1',
+      agencyClientId: 'client-1',
+      companyContextId: 'company-1',
+      scopeKind: 'company',
+    });
+  });
+
+  it('asks WhatsApp channel status for agency scope in agency mode', async () => {
+    const h = harness();
+
+    await h.service.getOverview(agencyCtx, {});
+
+    expect(h.listStatus).toHaveBeenCalledWith({
+      tenantId: 'tenant-1',
+      workspaceId: 'workspace-1',
+      agencyClientId: null,
+      companyContextId: null,
+      scopeKind: 'agency',
+    });
+  });
+
+  it('reports no_data when listStatus returns no channel for this scope', async () => {
     const h = harness();
     h.listStatus.mockResolvedValue({
-      state: 'connected',
+      state: 'not_connected',
       primaryChannel: null,
-      channels: [
-        whatsappChannel({
-          state: 'connected',
-          metadata: { operatingMode: 'client', clientId: 'other-client' },
-        }),
-        whatsappChannel({ state: 'connected' }), // agency channel
-      ],
+      channels: [],
     });
 
     const result = await h.service.getOverview(clientCtx, {});
 
-    // Neither channel belongs to client-1, so the scoped state must fall back
-    // to not_connected rather than leaking another client's/the agency's health.
     expect(result.domainHealth.inbox.status).toBe('no_data');
     expect(
       result.priorities.find((p) => p.key === 'whatsapp_not_configured'),
     ).toBeTruthy();
   });
 
-  it('resolves the matching client channel and reports its own state', async () => {
+  it('reports the state of the channel listStatus already scoped to this company', async () => {
     const h = harness();
     h.listStatus.mockResolvedValue({
-      state: 'connected',
+      state: 'failed',
       primaryChannel: null,
-      channels: [
-        whatsappChannel({
-          state: 'failed',
-          metadata: { operatingMode: 'client', clientId: 'client-1' },
-        }),
-        whatsappChannel({
-          state: 'connected',
-          metadata: { operatingMode: 'client', clientId: 'other-client' },
-        }),
-      ],
+      channels: [whatsappChannel({ state: 'failed' })],
     });
 
     const result = await h.service.getOverview(clientCtx, {});

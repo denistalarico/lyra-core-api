@@ -4,11 +4,12 @@ import {
   Between,
   FindOptionsWhere,
   In,
+  IsNull,
   LessThanOrEqual,
-  Raw,
   Repository,
 } from 'typeorm';
 import type { RequestContext } from '../../../common/context/request-context.interface';
+import { resolveCompanyAwareScope } from '../../../common/context/company-aware-scope';
 import { CrmOpportunityEntity } from '../../crm/entities/crm-opportunity.entity';
 import { CrmOpportunityEventEntity } from '../../crm/entities/crm-opportunity-event.entity';
 import { CrmPipelineEntity } from '../../crm/entities/crm-pipeline.entity';
@@ -41,9 +42,16 @@ export class LeadFlowAnalyticsService {
   ) {
     const tenantId = this.requireTenantId(ctx);
     const workspaceId = this.requireWorkspaceId(ctx);
+    // CC2G.1: fails closed in client mode without a Company Context — the same
+    // guarantee every other migrated CC2E/CC2F boundary gives. What this phase
+    // removes is the fallback that used to run *after* a company was selected:
+    // `withClientScope` filtered by `metadata->>'clientId'`, which aggregates
+    // every company of the client into one cohort. `withCompanyScope` below
+    // reads the persisted `agency_client_id`/`company_context_id` columns
+    // CC2F added to `crm_opportunities`/`crm_pipelines` instead.
     const { from, to } = this.resolvePeriod(query);
     const cohort = await this.opportunities.find({
-      where: this.withClientScope<CrmOpportunityEntity>(ctx, {
+      where: this.withCompanyScope<CrmOpportunityEntity>(ctx, {
         tenantId,
         workspaceId,
         createdAt: Between(from, to),
@@ -73,43 +81,55 @@ export class LeadFlowAnalyticsService {
     const conversationIds = cohort
       .map((opportunity) => opportunity.inboxConversationId)
       .filter((id): id is string => Boolean(id));
-    const [events, inboxEvents, pipelineDefinitions, stageDefinitions] =
-      await Promise.all([
-        this.opportunityEvents.find({
+    const [events, inboxEvents, pipelineDefinitions] = await Promise.all([
+      this.opportunityEvents.find({
+        where: {
+          tenantId,
+          workspaceId,
+          opportunityId: In(opportunityIds),
+          createdAt: LessThanOrEqual(to),
+        },
+        order: { createdAt: 'ASC', id: 'ASC' },
+      }),
+      conversationIds.length
+        ? this.conversationEvents.find({
+            where: {
+              tenantId,
+              workspaceId,
+              conversationId: In(conversationIds),
+              createdAt: Between(from, to),
+            },
+            order: { createdAt: 'ASC', id: 'ASC' },
+          })
+        : Promise.resolve([]),
+      this.pipelines.find({
+        where: this.withCompanyScope<CrmPipelineEntity>(ctx, {
+          tenantId,
+          workspaceId,
+        }),
+        withDeleted: true,
+      }),
+    ]);
+
+    // `crm_stages` carries no company column of its own — CC2F's design has
+    // stages inherit scope from their pipeline (see CC2F doc §Serviços: "Stages
+    // são lidos através do Pipeline company-scoped"). Reading the pipeline set
+    // first and then asking only for *those* pipelines' stages is what makes
+    // that inheritance real here rather than an unenforced convention: a stage
+    // whose `pipeline_id` belongs to another company's pipeline (not in
+    // `pipelineDefinitions`) is never fetched, so it cannot be named in the
+    // response even if a cohort opportunity pointed at it.
+    const pipelineIds = pipelineDefinitions.map((pipeline) => pipeline.id);
+    const stageDefinitions = pipelineIds.length
+      ? await this.stages.find({
           where: {
             tenantId,
             workspaceId,
-            opportunityId: In(opportunityIds),
-            createdAt: LessThanOrEqual(to),
+            pipelineId: In(pipelineIds),
           },
-          order: { createdAt: 'ASC', id: 'ASC' },
-        }),
-        conversationIds.length
-          ? this.conversationEvents.find({
-              where: {
-                tenantId,
-                workspaceId,
-                conversationId: In(conversationIds),
-                createdAt: Between(from, to),
-              },
-              order: { createdAt: 'ASC', id: 'ASC' },
-            })
-          : Promise.resolve([]),
-        this.pipelines.find({
-          where: this.withClientScope<CrmPipelineEntity>(ctx, {
-            tenantId,
-            workspaceId,
-          }),
           withDeleted: true,
-        }),
-        this.stages.find({
-          where: this.withClientScope<CrmStageEntity>(ctx, {
-            tenantId,
-            workspaceId,
-          }),
-          withDeleted: true,
-        }),
-      ]);
+        })
+      : [];
 
     return projectCommercialJourney({
       from,
@@ -156,23 +176,24 @@ export class LeadFlowAnalyticsService {
     return { from, to };
   }
 
-  private withClientScope<T>(
+  /**
+   * CC2G.1 — the same shape `CrmService.withCompanyScope` uses: persisted
+   * `agency_client_id`/`company_context_id` columns, `IS NOT DISTINCT FROM`
+   * matched with `IsNull()` in agency mode so a missing predicate can never
+   * read as "every company". `resolveCompanyAwareScope` still throws before
+   * this runs if client mode carries no company, so the `IsNull()` branch is
+   * only ever reached in genuine agency mode.
+   */
+  private withCompanyScope<T>(
     ctx: RequestContext,
     where: FindOptionsWhere<T>,
   ): FindOptionsWhere<T> {
-    const scoped = { ...where } as Record<string, unknown>;
-    if (ctx.managedContext?.operatingMode === 'client') {
-      scoped.metadata = Raw(
-        (column) => `${column} ->> 'clientId' = :analyticsClientId`,
-        { analyticsClientId: ctx.managedContext.clientId },
-      );
-    } else {
-      scoped.metadata = Raw(
-        (column) =>
-          `(${column} ->> 'clientId' IS NULL OR ${column} ->> 'operatingMode' = 'agency')`,
-      );
-    }
-    return scoped as FindOptionsWhere<T>;
+    const scope = resolveCompanyAwareScope(ctx);
+    return {
+      ...where,
+      agencyClientId: scope.agencyClientId ?? IsNull(),
+      companyContextId: scope.companyContextId ?? IsNull(),
+    } as FindOptionsWhere<T>;
   }
 
   private requireTenantId(ctx: RequestContext) {

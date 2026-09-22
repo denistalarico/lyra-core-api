@@ -2,6 +2,7 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import type { DataSource } from 'typeorm';
 import type { RequestContext } from '../../../common/context/request-context.interface';
+import { resolveCompanyAwareScope } from '../../../common/context/company-aware-scope';
 import type { GetOperationalAnalyticsDto } from '../dto/get-operational-analytics.dto';
 import type {
   OperationalAnalyticsAttemptMetric,
@@ -10,7 +11,11 @@ import type {
   OperationalAnalyticsRunFact,
   OperationalAnalyticsScoreFact,
 } from '../types/operational-analytics.types';
-import { LEADFLOW_SCOPE_SQL } from '../scope/leadflow-analytics-scope.sql';
+import {
+  LEADFLOW_SCOPE_SQL_COMPANY,
+  leadFlowCompanyScopeParameters,
+  type LeadFlowAnalyticsScope,
+} from '../scope/leadflow-analytics-scope.sql';
 import { projectOperationalAnalytics } from './operational-analytics-projector';
 
 const MAX_PERIOD_DAYS = 366;
@@ -18,12 +23,15 @@ const MAX_MESSAGE_FACTS = 50_000;
 const MAX_SCORE_FACTS = 25_000;
 const MAX_RUN_FACTS = 20_000;
 
-type AnalyticsScope = {
-  tenantId: string;
-  workspaceId: string;
-  contextType: 'agency' | 'client';
-  clientId: string | null;
-};
+/**
+ * CC2G.1 — company-scoped. `clientId` is `AgencyClient.id` (commercial
+ * account), `companyContextId` is the operational unit inside it; client mode
+ * always carries both or neither call site would compile a query with a NULL
+ * comparison and silently match nothing (agency rows) or everything (a
+ * missing predicate) — see `resolveScope` below, the only place this type is
+ * constructed.
+ */
+type AnalyticsScope = LeadFlowAnalyticsScope;
 
 type RawChannelOption = { id: string; name: string; type: string };
 type RawAgentOption = { id: string; name: string; type: string };
@@ -105,7 +113,7 @@ export class LeadFlowOperationalAnalyticsService {
         WHERE channel.tenant_id = $1
           AND channel.workspace_id = $2
           AND channel.deleted_at IS NULL
-          AND ${LEADFLOW_SCOPE_SQL.CHANNEL_ONLY}
+          AND ${LEADFLOW_SCOPE_SQL_COMPANY.CHANNEL_ONLY}
         ORDER BY channel.name ASC, channel.id ASC
       `,
       scopeParameters(scope),
@@ -122,7 +130,7 @@ export class LeadFlowOperationalAnalyticsService {
           AND agent.workspace_id = $2
           AND agent.context_type = $3
           AND (
-            ($3 = 'client' AND agent.agency_client_id = $4::uuid)
+            ($3 = 'client' AND agent.agency_client_id = $4::uuid AND agent.company_context_id = $5::uuid)
             OR ($3 = 'agency' AND agent.agency_client_id IS NULL)
           )
         ORDER BY agent.name ASC, agent.id ASC
@@ -146,7 +154,7 @@ export class LeadFlowOperationalAnalyticsService {
            AND channel.deleted_at IS NULL
           WHERE conversation.tenant_id = $1
             AND conversation.workspace_id = $2
-            AND ${LEADFLOW_SCOPE_SQL.CHANNEL}
+            AND ${LEADFLOW_SCOPE_SQL_COMPANY.CHANNEL}
 
           UNION
 
@@ -154,7 +162,7 @@ export class LeadFlowOperationalAnalyticsService {
           FROM crm_opportunities opportunity
           WHERE opportunity.tenant_id = $1
             AND opportunity.workspace_id = $2
-            AND ${LEADFLOW_SCOPE_SQL.OPPORTUNITY}
+            AND ${LEADFLOW_SCOPE_SQL_COMPANY.OPPORTUNITY}
 
           UNION
 
@@ -164,7 +172,7 @@ export class LeadFlowOperationalAnalyticsService {
             AND automation.workspace_id = $2
             AND automation.context_type = $3
             AND (
-              ($3 = 'client' AND automation.agency_client_id = $4::uuid)
+              ($3 = 'client' AND automation.agency_client_id = $4::uuid AND automation.company_context_id = $5::uuid)
               OR ($3 = 'agency' AND automation.agency_client_id IS NULL)
             )
         ) modes
@@ -194,8 +202,8 @@ export class LeadFlowOperationalAnalyticsService {
       'message.tenant_id = $1',
       'message.workspace_id = $2',
       "message.direction IN ('inbound', 'outbound')",
-      'message.occurred_at BETWEEN $5::timestamptz AND $6::timestamptz',
-      LEADFLOW_SCOPE_SQL.CHANNEL,
+      'message.occurred_at BETWEEN $6::timestamptz AND $7::timestamptz',
+      LEADFLOW_SCOPE_SQL_COMPANY.CHANNEL,
     ];
     if (filters.channelId) {
       clauses.push(
@@ -221,7 +229,7 @@ export class LeadFlowOperationalAnalyticsService {
               AND selected_agent_message.direction = 'outbound'
               AND selected_agent_message.status IN ('sent', 'delivered', 'read')
               AND selected_agent_message.occurred_at
-                BETWEEN $5::timestamptz AND $6::timestamptz
+                BETWEEN $6::timestamptz AND $7::timestamptz
           )
           AND (
             message.direction = 'inbound'
@@ -284,8 +292,8 @@ export class LeadFlowOperationalAnalyticsService {
     const clauses = [
       'snapshot.tenant_id = $1',
       'snapshot.workspace_id = $2',
-      'snapshot.calculated_at BETWEEN $5::timestamptz AND $6::timestamptz',
-      LEADFLOW_SCOPE_SQL.OPPORTUNITY,
+      'snapshot.calculated_at BETWEEN $6::timestamptz AND $7::timestamptz',
+      LEADFLOW_SCOPE_SQL_COMPANY.OPPORTUNITY,
     ];
     if (filters.channelId) {
       clauses.push(
@@ -356,10 +364,10 @@ export class LeadFlowOperationalAnalyticsService {
     const clauses = [
       'run.tenant_id = $1',
       'run.workspace_id = $2',
-      'run.created_at BETWEEN $5::timestamptz AND $6::timestamptz',
+      'run.created_at BETWEEN $6::timestamptz AND $7::timestamptz',
       'automation.context_type = $3',
       `(
-        ($3 = 'client' AND automation.agency_client_id = $4::uuid)
+        ($3 = 'client' AND automation.agency_client_id = $4::uuid AND automation.company_context_id = $5::uuid)
         OR ($3 = 'agency' AND automation.agency_client_id IS NULL)
       )`,
     ];
@@ -426,29 +434,22 @@ export class LeadFlowOperationalAnalyticsService {
     );
   }
 
+  /**
+   * CC2G.1 — resolves through `resolveCompanyAwareScope`, the same helper
+   * every other migrated CC2E/CC2F boundary uses. Client mode without a
+   * Company Context still fails closed (that helper throws
+   * `CompanyContextRequiredException`) — CC2G.1 replaces the *aggregate*
+   * fallback this read model used to have, not the requirement to select a
+   * company at all.
+   */
   private resolveScope(ctx: RequestContext): AnalyticsScope {
-    if (!ctx.tenantId) {
-      throw new BadRequestException('Tenant context is required.');
-    }
-    if (!ctx.workspaceId) {
-      throw new BadRequestException('Workspace context is required.');
-    }
-    if (ctx.managedContext?.operatingMode === 'client') {
-      if (!ctx.managedContext.clientId) {
-        throw new BadRequestException('Client context is required.');
-      }
-      return {
-        tenantId: ctx.tenantId,
-        workspaceId: ctx.workspaceId,
-        contextType: 'client',
-        clientId: ctx.managedContext.clientId,
-      };
-    }
+    const companyScope = resolveCompanyAwareScope(ctx);
     return {
-      tenantId: ctx.tenantId,
-      workspaceId: ctx.workspaceId,
-      contextType: 'agency',
-      clientId: null,
+      tenantId: companyScope.tenantId,
+      workspaceId: companyScope.workspaceId,
+      contextType: companyScope.agencyClientId ? 'client' : 'agency',
+      clientId: companyScope.agencyClientId,
+      companyContextId: companyScope.companyContextId,
     };
   }
 
@@ -522,7 +523,7 @@ export class LeadFlowOperationalAnalyticsService {
 }
 
 function scopeParameters(scope: AnalyticsScope) {
-  return [scope.tenantId, scope.workspaceId, scope.contextType, scope.clientId];
+  return leadFlowCompanyScopeParameters(scope);
 }
 
 function bind(params: unknown[], value: unknown) {

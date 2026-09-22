@@ -12,13 +12,16 @@ import { AgencyProject, AgencyTask } from '../projects/entities';
 import { TeamConfigOption } from '../team/entities';
 import { ClientLifecycleController } from './controllers/client-lifecycle.controller';
 import { ClientCompaniesController } from './controllers/client-companies.controller';
+import { CompanyContextReconciliationController } from './controllers/company-context-reconciliation.controller';
 import { ClientsController } from './controllers/clients.controller';
 import {
   AgencyClient,
   AgencyClientCompanyContext,
   ClientLifecycleProcess,
   ClientLifecycleStep,
+  CompanyContextReconciliationAudit,
 } from './entities';
+import { CompanyLegacyReconciliationService } from './reconciliation/company-legacy-reconciliation.service';
 import { AgencyClientCompanyContextService } from './services/agency-client-company-context.service';
 import { ClientCostCenterService } from './services/client-cost-center.service';
 import { ClientLifecycleService } from './services/client-lifecycle.service';
@@ -37,6 +40,7 @@ const AGENCY_CONNECTION = 'agency';
       [
         AgencyClient,
         AgencyClientCompanyContext,
+        CompanyContextReconciliationAudit,
         ContactEntity,
         ContactCompanyLinkEntity,
         AgencyProject,
@@ -55,11 +59,13 @@ const AGENCY_CONNECTION = 'agency';
   controllers: [
     ClientsController,
     ClientCompaniesController,
+    CompanyContextReconciliationController,
     ClientLifecycleController,
   ],
   providers: [
     ClientsService,
     AgencyClientCompanyContextService,
+    CompanyLegacyReconciliationService,
     ClientsProfitabilityService,
     ClientNotificationPublisher,
     ClientLifecycleService,
