@@ -91,19 +91,26 @@ describe('brand kit migration', () => {
       expect(unconditionalUnique).toBeUndefined();
     });
 
-    it('the entity declares the same two partial indexes as the migration', () => {
+    it('keeps the historical indexes separate from the Company Context successors', () => {
       const indices = indicesOf(BrandKitEntity);
       const agency = indices.find(
         (index) => index.name === 'UQ_brand_kits_agency_scope',
       );
-      const client = indices.find(
-        (index) => index.name === 'UQ_brand_kits_client_scope',
+      const company = indices.find(
+        (index) => index.name === 'UQ_brand_kits_company_scope',
+      );
+      const legacy = indices.find(
+        (index) => index.name === 'UQ_brand_kits_legacy_scope',
       );
 
       expect(agency?.unique).toBe(true);
       expect(agency?.where).toBe('agency_client_id IS NULL');
-      expect(client?.unique).toBe(true);
-      expect(client?.where).toBe('agency_client_id IS NOT NULL');
+      expect(company?.unique).toBe(true);
+      expect(company?.where).toBe('company_context_id IS NOT NULL');
+      expect(legacy?.unique).toBe(true);
+      expect(legacy?.where).toBe(
+        'agency_client_id IS NOT NULL AND company_context_id IS NULL',
+      );
     });
   });
 
@@ -209,7 +216,11 @@ describe('brand kit migration', () => {
     it('creates every column the entities declare', async () => {
       const joined = (await up()).join('\n');
 
-      for (const column of columnsOf(BrandKitEntity)) {
+      // `company_context_id` is intentionally added by the CC2C follow-up,
+      // not by this historical foundation migration.
+      for (const column of columnsOf(BrandKitEntity).filter(
+        (column) => column !== 'company_context_id',
+      )) {
         expect(joined).toContain(`"${column}"`);
       }
       // `usage` is added by the CS2A follow-up migration, not by this

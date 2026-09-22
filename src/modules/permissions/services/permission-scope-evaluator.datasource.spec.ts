@@ -134,6 +134,11 @@ describe('Inbox channel permission scope HTTP integration', () => {
       name: 'Updated channel',
       hasAccessToken: true,
     }),
+    assertChannelInContext: jest.fn().mockResolvedValue({
+      id: CHANNEL_ID,
+      tenantId: 'tenant-1',
+      workspaceId: 'workspace-1',
+    }),
   };
   const inboundIngestionService = {
     ingest: jest.fn().mockResolvedValue({
@@ -278,6 +283,7 @@ describe('Inbox channel permission scope HTTP integration', () => {
     agencyChannelRepository.findOne.mockClear();
     defaultChannelRepository.findOne.mockClear();
     inboxService.patchChannel.mockClear();
+    inboxService.assertChannelInContext.mockClear();
     inboundIngestionService.ingest.mockClear();
     metaProvider.send.mockClear();
     outboundProvider.send.mockClear();
@@ -366,6 +372,10 @@ describe('Inbox channel permission scope HTTP integration', () => {
         workspaceId: 'workspace-1',
         channelId: CHANNEL_ID,
       }),
+    );
+    expect(inboxService.assertChannelInContext).toHaveBeenCalledWith(
+      expect.objectContaining({ tenantId: 'tenant-1', workspaceId: 'workspace-1' }),
+      CHANNEL_ID,
     );
     expect(metaProvider.send).not.toHaveBeenCalled();
     expect(outboundProvider.send).not.toHaveBeenCalled();
