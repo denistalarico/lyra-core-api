@@ -56,7 +56,12 @@ function payload(
     scheduledAt: new Date('2026-09-07T12:00:00Z'),
     ...overrides,
   };
-  return { ...result, mediaAssetIds: overrides.mediaAssetIds ?? (result.mediaAssetId ? [result.mediaAssetId] : []) };
+  return {
+    ...result,
+    mediaAssetIds:
+      overrides.mediaAssetIds ??
+      (result.mediaAssetId ? [result.mediaAssetId] : []),
+  };
 }
 
 function adapterWithMock() {
@@ -136,8 +141,14 @@ describe('FacebookPublisherAdapter', () => {
         mediaAssetIds: ['media-1', 'media-2'],
       }),
       preparedMedia: [
-        { providerMediaRef: '{"kind":"facebook_photo","id":"photo-1"}', expiresAt: null },
-        { providerMediaRef: '{"kind":"facebook_photo","id":"photo-2"}', expiresAt: null },
+        {
+          providerMediaRef: '{"kind":"facebook_photo","id":"photo-1"}',
+          expiresAt: null,
+        },
+        {
+          providerMediaRef: '{"kind":"facebook_photo","id":"photo-2"}',
+          expiresAt: null,
+        },
       ],
       idempotencyKey: 'carousel-1',
     });

@@ -2,9 +2,12 @@ import {
   BadRequestException,
   Controller,
   Get,
+  HttpStatus,
   Query,
+  Res,
   UseGuards,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { RequestContextData } from '../../../common/context/request-context.decorator';
 import type { RequestContext } from '../../../common/context/request-context.interface';
 import { resolveCompanyAwareScope } from '../../../common/context/company-aware-scope';
@@ -15,6 +18,7 @@ import {
   RequireProductEntitlement,
 } from '../../permissions';
 import { AnalyticsAudienceQueryDto } from './dto/analytics-audience.query.dto';
+import { AnalyticsThumbnailQueryDto } from './dto/analytics-thumbnail.query.dto';
 import { AnalyticsFreshnessQueryDto } from './dto/analytics-freshness.query.dto';
 import { AnalyticsOverviewQueryDto } from './dto/analytics-overview.query.dto';
 import { ConsolidatedOverviewQueryDto } from './dto/consolidated-overview.query.dto';
@@ -22,6 +26,7 @@ import { PublicationMetricsQueryDto } from './dto/publication-metrics.query.dto'
 import { SocialConsolidatedAnalyticsService } from './social-consolidated-analytics.service';
 import { SocialOrganicAnalyticsReadService } from './social-organic-analytics-read.service';
 import { SocialOrganicAudienceReadService } from './social-organic-audience-read.service';
+import { SocialOrganicThumbnailService } from './social-organic-thumbnail.service';
 
 /**
  * Reused verbatim from A2's on-demand sync endpoint
@@ -58,6 +63,7 @@ export class SocialOrganicAnalyticsController {
     private readonly analyticsReadService: SocialOrganicAnalyticsReadService,
     private readonly consolidatedReadService: SocialConsolidatedAnalyticsService,
     private readonly audienceReadService: SocialOrganicAudienceReadService,
+    private readonly thumbnailService: SocialOrganicThumbnailService,
   ) {}
 
   @Get('assets')
@@ -70,6 +76,48 @@ export class SocialOrganicAnalyticsController {
     const items = await this.analyticsReadService.listAssets(scope);
 
     return { items, total: items.length };
+  }
+
+  /**
+   * Redirects to one post's current image, resolved from the provider now.
+   *
+   * A redirect rather than proxied bytes: the browser then fetches the picture
+   * straight from Meta's CDN, so this process never streams image data and the
+   * access token never leaves it either. The URL is deliberately not stored
+   * anywhere — Meta signs it with a ~5 day expiry, and a persisted one turns
+   * into a broken image days later.
+   *
+   * 404 when there is nothing to show, which the front end renders as a
+   * placeholder. A missing thumbnail must never fail a page whose subject is
+   * the metrics beside it.
+   */
+  @Get('posts/thumbnail')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireProductEntitlement('social')
+  @RequirePermission(SOCIAL_ORGANIC_ANALYTICS_PERMISSION)
+  async postThumbnail(
+    @RequestContextData() ctx: RequestContext,
+    @Query() query: AnalyticsThumbnailQueryDto,
+    @Res() response: Response,
+  ) {
+    const scope = this.requireScope(ctx);
+
+    const url = await this.thumbnailService.resolve({
+      ...scope,
+      assetId: query.assetId,
+      externalPublicationId: query.postId,
+    });
+
+    if (!url) {
+      response.status(HttpStatus.NOT_FOUND).json({ message: 'Not found.' });
+      return;
+    }
+
+    // Private: the redirect target is scoped to this viewer's credential, so a
+    // shared cache must not hand it to another tenant. Short, because the
+    // signed URL behind it expires on its own schedule.
+    response.setHeader('Cache-Control', 'private, max-age=300');
+    response.redirect(HttpStatus.FOUND, url);
   }
 
   @Get('overview')

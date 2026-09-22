@@ -221,6 +221,30 @@ export const INSTAGRAM_ACCOUNT_FOLLOW_METRICS = [
 ] as const;
 
 /**
+ * Account-level engagement counters, read without a breakdown.
+ *
+ * One request for the whole family: unlike `views`/`reach`, these take no
+ * `breakdown`, so Meta returns each as a bare `total_value.value` and they can
+ * share a call. Only `profile_views` has a column today — the rest are stored in
+ * `provider_metrics` until columns exist for them, so that the request that
+ * would have to be repeated to backfill them is made once.
+ *
+ * Verified against production on 2026-09-22; `content_views` answers with an
+ * empty `data` array and `threads_views` is rejected outright, so neither is
+ * requested here.
+ */
+export const INSTAGRAM_ACCOUNT_ENGAGEMENT_METRICS = [
+  'profile_views',
+  'accounts_engaged',
+  'total_interactions',
+  'likes',
+  'comments',
+  'shares',
+  'saves',
+  'replies',
+] as const;
+
+/**
  * Post-level lifetime snapshot metrics (A2 §1). Sourced from
  * `META_ORGANIC_BLOCKED_LIFETIME_METRICS` below — these are the same
  * documented counters, now written into the `*_lifetime` snapshot columns
@@ -231,6 +255,15 @@ export const INSTAGRAM_MEDIA_LIFETIME_METRICS = [
   'comments',
   'likes',
   'views',
+  // Joined for the "best posts" ranking. All verified against production on
+  // 2026-09-22 at `/{ig-media-id}/insights`. `follows` is the one that answers
+  // a question nothing else does: how many accounts this post won.
+  'reach',
+  'saved',
+  'shares',
+  'total_interactions',
+  'profile_visits',
+  'follows',
 ] as const;
 
 /**

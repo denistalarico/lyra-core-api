@@ -85,9 +85,7 @@ export class SocialOrganicConnectionService {
         companyContextId === null
           ? 'asset.companyContextId IS NULL'
           : 'asset.companyContextId = :companyContextId',
-        companyContextId === null
-          ? {}
-          : { companyContextId },
+        companyContextId === null ? {} : { companyContextId },
       )
       .where('connection.tenantId = :tenantId', { tenantId: input.tenantId })
       .andWhere('connection.workspaceId = :workspaceId', {

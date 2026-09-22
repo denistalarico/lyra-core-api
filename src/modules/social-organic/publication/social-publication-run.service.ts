@@ -463,10 +463,18 @@ export class SocialPublicationRunService {
       ],
     );
 
-    const failed = returnedRows<Pick<
-      SocialPublicationEntity,
-      'id' | 'tenantId' | 'workspaceId' | 'agencyClientId' | 'contentItemId' | 'failureReason'
-    >>(result)[0] ?? null;
+    const failed =
+      returnedRows<
+        Pick<
+          SocialPublicationEntity,
+          | 'id'
+          | 'tenantId'
+          | 'workspaceId'
+          | 'agencyClientId'
+          | 'contentItemId'
+          | 'failureReason'
+        >
+      >(result)[0] ?? null;
     if (failed) {
       await this.notificationPublisher?.publishFailure(failed);
       return true;

@@ -9,6 +9,7 @@ import type { SocialConsolidatedAnalyticsService } from './social-consolidated-a
 import { SocialOrganicAnalyticsController } from './social-organic-analytics.controller';
 import type { SocialOrganicAnalyticsReadService } from './social-organic-analytics-read.service';
 import type { SocialOrganicAudienceReadService } from './social-organic-audience-read.service';
+import type { SocialOrganicThumbnailService } from './social-organic-thumbnail.service';
 
 /** Every handler on this controller carries the same guards. */
 const GUARDED_HANDLERS = [
@@ -20,6 +21,9 @@ const GUARDED_HANDLERS = [
   'consolidated',
   // Follower demographics are the same asset read, split a different way.
   'audience',
+  // Resolving a post's image is a read of that asset's content, so it sits
+  // behind the same permission as the numbers beside it.
+  'postThumbnail',
 ] as const;
 
 const ASSET_SCOPED_HANDLERS = ['overview', 'timeseries', 'audience'] as const;
@@ -69,6 +73,14 @@ function createHarness() {
     }),
   };
 
+  const thumbnailInputs: unknown[] = [];
+  const thumbnailService = {
+    resolve: jest.fn<Promise<string | null>, [unknown]>(async (input) => {
+      thumbnailInputs.push(input);
+      return 'https://cdn.example.test/image.jpg';
+    }),
+  };
+
   return {
     overviewInputs,
     seriesInputs,
@@ -77,13 +89,16 @@ function createHarness() {
     publicationMetricsInputs,
     consolidatedInputs,
     audienceInputs,
+    thumbnailInputs,
     analyticsReadService,
     consolidatedReadService,
     audienceReadService,
+    thumbnailService,
     controller: new SocialOrganicAnalyticsController(
       analyticsReadService as unknown as SocialOrganicAnalyticsReadService,
       consolidatedReadService as unknown as SocialConsolidatedAnalyticsService,
       audienceReadService as unknown as SocialOrganicAudienceReadService,
+      thumbnailService as unknown as SocialOrganicThumbnailService,
     ),
   };
 }
@@ -127,6 +142,36 @@ const consolidatedQuery = {
   since: query.since,
   until: query.until,
 };
+
+/** The two Express methods the thumbnail handler actually touches. */
+function fakeResponse() {
+  const state = {
+    statusCode: null as number | null,
+    redirectedTo: null as string | null,
+    headers: {} as Record<string, string>,
+    body: null as unknown,
+  };
+
+  const res = {
+    setHeader(name: string, value: string) {
+      state.headers[name] = value;
+    },
+    status(code: number) {
+      state.statusCode = code;
+      return res;
+    },
+    json(payload: unknown) {
+      state.body = payload;
+      return res;
+    },
+    redirect(code: number, url: string) {
+      state.statusCode = code;
+      state.redirectedTo = url;
+    },
+  };
+
+  return Object.assign(state, { res: res as never });
+}
 
 describe('SocialOrganicAnalyticsController metadata', () => {
   it.each(GUARDED_HANDLERS)(
@@ -322,6 +367,44 @@ describe('SocialOrganicAnalyticsController scope resolution', () => {
       since: consolidatedQuery.since,
       until: consolidatedQuery.until,
     });
+  });
+
+  it('redirects to the resolved image and never caches it publicly', async () => {
+    const harness = createHarness();
+    const response = fakeResponse();
+
+    await harness.controller.postThumbnail(
+      context(),
+      { assetId: query.assetId, postId: '17914449879259734' },
+      response.res,
+    );
+
+    expect(harness.thumbnailInputs[0]).toMatchObject({
+      tenantId: 'tenant-a',
+      workspaceId: 'workspace-a',
+      agencyClientId: null,
+      assetId: query.assetId,
+      externalPublicationId: '17914449879259734',
+    });
+    expect(response.redirectedTo).toBe('https://cdn.example.test/image.jpg');
+    // Private: the target is signed for this viewer's credential, so a shared
+    // cache must never hand it to another tenant.
+    expect(response.headers['Cache-Control']).toBe('private, max-age=300');
+  });
+
+  it('answers 404 rather than failing when there is no image', async () => {
+    const harness = createHarness();
+    harness.thumbnailService.resolve.mockResolvedValueOnce(null);
+    const response = fakeResponse();
+
+    await harness.controller.postThumbnail(
+      context(),
+      { assetId: query.assetId, postId: '17914449879259734' },
+      response.res,
+    );
+
+    expect(response.statusCode).toBe(404);
+    expect(response.redirectedTo).toBeNull();
   });
 
   it('refuses a scopeless consolidated request before reaching the service', () => {

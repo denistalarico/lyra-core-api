@@ -283,7 +283,9 @@ export class SocialPublicationExecutorService implements SocialPublicationExecut
     const snapshot = publication.payloadSnapshot as PayloadSnapshotShape;
 
     const snapshotMediaIds = Array.isArray(snapshot.mediaAssetIds)
-      ? snapshot.mediaAssetIds.filter((entry): entry is string => typeof entry === 'string')
+      ? snapshot.mediaAssetIds.filter(
+          (entry): entry is string => typeof entry === 'string',
+        )
       : [];
     const mediaAssetIds = snapshotMediaIds.length
       ? snapshotMediaIds

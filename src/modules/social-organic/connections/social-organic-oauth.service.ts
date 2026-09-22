@@ -136,7 +136,9 @@ export class SocialOrganicOAuthService {
       metadata: {
         startedAt: new Date().toISOString(),
         companyContextId,
-        ...(input.connectionMode ? { connectionMode: input.connectionMode } : {}),
+        ...(input.connectionMode
+          ? { connectionMode: input.connectionMode }
+          : {}),
         ...(input.allowedAssetTypes?.length
           ? { allowedAssetTypes: [...input.allowedAssetTypes] }
           : {}),
@@ -232,10 +234,7 @@ export class SocialOrganicOAuthService {
         return { ok: false as const, reason: 'invalid_connection' as const };
       }
 
-      if (
-        (connection.metadata.companyContextId ?? null) !==
-        companyContextId
-      ) {
+      if ((connection.metadata.companyContextId ?? null) !== companyContextId) {
         return { ok: false as const, reason: 'invalid_connection' as const };
       }
 
@@ -584,9 +583,13 @@ export class SocialOrganicOAuthService {
       .createQueryBuilder()
       .delete()
       .where('tenant_id = :tenantId', { tenantId: input.tenantId })
-      .andWhere('workspace_id = :workspaceId', { workspaceId: input.workspaceId })
+      .andWhere('workspace_id = :workspaceId', {
+        workspaceId: input.workspaceId,
+      })
       .andWhere('provider = :provider', { provider: input.provider })
-      .andWhere("connection_status IN ('pending', 'awaiting_selection', 'error')");
+      .andWhere(
+        "connection_status IN ('pending', 'awaiting_selection', 'error')",
+      );
 
     if (input.connectionMode) {
       query.andWhere("metadata ->> 'connectionMode' = :connectionMode", {
@@ -630,9 +633,7 @@ export class SocialOrganicOAuthService {
       where: { oauthStateHash: hashOAuthState(input.state) },
     });
 
-    return connection
-      ? this.providers.find(connection.provider)
-      : hinted;
+    return connection ? this.providers.find(connection.provider) : hinted;
   }
 
   private readAllowedAssetTypes(metadata: Record<string, unknown>): string[] {

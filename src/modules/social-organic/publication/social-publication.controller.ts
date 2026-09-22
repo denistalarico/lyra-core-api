@@ -76,9 +76,9 @@ export class SocialPublicationController {
     const items = this.publisherRegistry.registeredPairs.map(
       ({ provider, assetType }) =>
         toSocialPublisherCapabilityView(
-          this.publisherRegistry.resolve(provider, assetType).capabilities(
-            assetType,
-          ),
+          this.publisherRegistry
+            .resolve(provider, assetType)
+            .capabilities(assetType),
         ),
     );
 

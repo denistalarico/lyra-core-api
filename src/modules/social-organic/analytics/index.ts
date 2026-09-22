@@ -6,6 +6,7 @@ export * from './social-organic-analytics.controller';
 export * from './social-organic-analytics-read.service';
 export * from './social-organic-audience-config.service';
 export * from './social-organic-audience-read.service';
+export * from './social-organic-thumbnail.service';
 export * from './social-organic-audience-writer.service';
 export * from './social-organic-metrics-writer.service';
 export * from './social-organic-sync-run.service';

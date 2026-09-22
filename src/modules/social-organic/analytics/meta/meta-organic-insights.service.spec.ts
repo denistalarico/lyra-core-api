@@ -69,9 +69,30 @@ function harness(options: { publishedPosts?: PublishedPostRow[] } = {}) {
     ],
     apiCalls: 1 as const,
   }));
+  // Discovery is provider-side now, so the listing is mocked here rather than
+  // through `dataSource`. Empty by default, which is what keeps the
+  // account-only tests free of any post-level mocking.
+  const listPublishedPosts = jest.fn<
+    ReturnType<MetaOrganicGraphService['listPublishedPosts']>,
+    Parameters<MetaOrganicGraphService['listPublishedPosts']>
+  >(async () => ({
+    data: (options.publishedPosts ?? []).map((row) => ({
+      id: row.external_publication_id,
+      timestamp: '2026-09-08T10:00:00+0000',
+      created_time: '2026-09-08T10:00:00+0000',
+      permalink: `https://example.test/${row.external_publication_id}`,
+      permalink_url: `https://example.test/${row.external_publication_id}`,
+      media_type: 'IMAGE',
+      media_product_type: 'FEED',
+      caption: 'legenda',
+      message: 'legenda',
+    })),
+    apiCalls: 1 as const,
+  }));
   const graph = {
     getProfileFollowersCount,
     getOrganicInsights,
+    listPublishedPosts,
   };
   type WriterInput = Parameters<SocialOrganicMetricsWriterService['upsert']>[0];
   const writer = {
@@ -80,9 +101,9 @@ function harness(options: { publishedPosts?: PublishedPostRow[] } = {}) {
       accountRows: input.accountRows.length,
     })),
   };
-  // `social_publications` discovery: empty by default, so the 3 pre-existing
-  // account-only tests below naturally see zero candidate posts without any
-  // explicit mocking of the discovery call.
+  // Now only the back-join that resolves Lyra's own `publicationId` for a
+  // discovered post. A post Lyra did not publish has no row, which is the
+  // ordinary case — hence the empty default.
   const query = jest.fn(async () => options.publishedPosts ?? []);
   const dataSource = { query };
 
@@ -153,6 +174,19 @@ describe('MetaOrganicInsightsService', () => {
           ]),
         ],
         apiCalls: 1,
+      })
+      // The engagement family: no breakdown, so each metric is a bare
+      // `total_value.value` and all of them share one request.
+      .mockResolvedValueOnce({
+        data: [
+          { name: 'profile_views', period: 'day', total_value: { value: 7 } },
+          {
+            name: 'accounts_engaged',
+            period: 'day',
+            total_value: { value: 4 },
+          },
+        ],
+        apiCalls: 1,
       });
 
     const summary = await service.sync({
@@ -172,16 +206,26 @@ describe('MetaOrganicInsightsService', () => {
         breakdown: 'media_product_type',
       }),
     );
+    // The engagement read is one request for the whole family, which is what
+    // keeps this at three calls a day rather than one per counter.
+    expect(graph.getOrganicInsights).toHaveBeenNthCalledWith(
+      3,
+      expect.objectContaining({
+        metrics: expect.arrayContaining(['profile_views', 'accounts_engaged']),
+        metricType: 'total_value',
+      }),
+    );
     expect(summary.accountRows[0]).toMatchObject({
       impressions: '12',
       reach: '5',
       followersGained: '2',
       followersLost: '1',
       followersCount: null,
+      profileViews: '7',
       metricDate: '2026-09-07',
       isPartial: false,
     });
-    expect(summary.apiCalls).toBe(2);
+    expect(summary.apiCalls).toBe(3);
   });
 
   it('fails closed before a provider call for a non-Meta credential', async () => {
@@ -326,7 +370,18 @@ describe('MetaOrganicInsightsService', () => {
         1,
         expect.objectContaining({
           objectId: 'media-1',
-          metrics: ['comments', 'likes', 'views'],
+          // The ranking counters joined the batch; still one request per post.
+          metrics: [
+            'comments',
+            'likes',
+            'views',
+            'reach',
+            'saved',
+            'shares',
+            'total_interactions',
+            'profile_visits',
+            'follows',
+          ],
           period: 'lifetime',
         }),
       );
@@ -400,11 +455,13 @@ describe('MetaOrganicInsightsService', () => {
       expect(graph.getOrganicInsights).toHaveBeenCalledTimes(2);
     });
 
-    it('excludes posts outside the window and posts with no externalPublicationId', async () => {
-      // Discovery itself is scoped by the SQL query mocked here; this test
-      // asserts the service does not filter further in memory, i.e. it
-      // trusts exactly what discovery returns.
-      const { service, dataSource } = harness({ publishedPosts: [] });
+    it('trusts discovery and does not filter posts again in memory', async () => {
+      // Same guarantee as before, now that discovery is provider-side: the
+      // window is passed to Meta as `since`/`until`, so an empty listing means
+      // no posts and the service adds no second filter of its own. With nothing
+      // discovered it also never issues the publication back-join, which is the
+      // only thing `dataSource.query` is still used for here.
+      const { service, graph, dataSource } = harness({ publishedPosts: [] });
 
       const summary = await service.sync({
         resolved: resolved('facebook_page'),
@@ -414,7 +471,15 @@ describe('MetaOrganicInsightsService', () => {
         syncedAt: new Date('2026-09-08T15:00:00.000Z'),
       });
 
-      expect(dataSource.query).toHaveBeenCalledTimes(1);
+      expect(graph.listPublishedPosts).toHaveBeenCalledWith(
+        expect.objectContaining({
+          objectId: 'page-1',
+          assetType: 'facebook_page',
+          since: expect.any(Number),
+          until: expect.any(Number),
+        }),
+      );
+      expect(dataSource.query).not.toHaveBeenCalled();
       expect(summary.postRows).toEqual([]);
     });
 

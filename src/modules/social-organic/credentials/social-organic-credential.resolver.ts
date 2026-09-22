@@ -91,9 +91,7 @@ export class SocialOrganicCredentialResolver {
   }
 
   private async resolveInternal(
-    input:
-      | ResolveOrganicCredentialInput
-      | ResolvePersistedOrganicCredentialInput,
+    input: ResolveOrganicCredentialInput,
     purpose: 'publishing' | 'analytics',
   ): Promise<ResolvedOrganicAnalyticsCredential> {
     const asset = await this.findInScope(input);
@@ -342,9 +340,7 @@ export class SocialOrganicCredentialResolver {
     }
   }
 
-  private findInScope(
-    input: ResolveOrganicCredentialInput | ResolvePersistedOrganicCredentialInput,
-  ) {
+  private findInScope(input: ResolveOrganicCredentialInput) {
     const agencyClientId = input.agencyClientId ?? IsNull();
 
     return this.assetsRepository.findOne({

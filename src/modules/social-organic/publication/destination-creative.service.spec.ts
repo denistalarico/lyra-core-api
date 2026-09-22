@@ -384,16 +384,19 @@ describe('DestinationCreativeService', () => {
       const secondMediaId = 'ffffffff-ffff-4fff-8fff-ffffffffffff';
       destinationsRepository.findOne.mockResolvedValue(buildDestination());
       organicAssetsRepository.findOne.mockResolvedValue(buildOrganicAsset());
-      mediaAssetsRepository.findOne.mockImplementation(({ where }: { where: { id: string } }) =>
-        Promise.resolve(buildSquareJpeg({ id: where.id })),
+      mediaAssetsRepository.findOne.mockImplementation(
+        ({ where }: { where: { id: string } }) =>
+          Promise.resolve(buildSquareJpeg({ id: where.id })),
       );
       creativesRepository.save.mockImplementation((values: unknown[]) =>
-        Promise.resolve(values.map((value, index) => ({
-          id: `eeeeeeee-eeee-4eee-8eee-eeeeeeeeeee${index}`,
-          ...(value as object),
-          createdAt: new Date('2026-09-10T12:00:00Z'),
-          updatedAt: new Date('2026-09-10T12:00:00Z'),
-        }))),
+        Promise.resolve(
+          values.map((value, index) => ({
+            id: `eeeeeeee-eeee-4eee-8eee-eeeeeeeeeee${index}`,
+            ...(value as object),
+            createdAt: new Date('2026-09-10T12:00:00Z'),
+            updatedAt: new Date('2026-09-10T12:00:00Z'),
+          })),
+        ),
       );
 
       const result = await service.replaceCollectionForDestination(

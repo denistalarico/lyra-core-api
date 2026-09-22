@@ -189,16 +189,21 @@ describe('SocialPublicationRunService', () => {
     const notificationPublisher = { publishFailure: jest.fn() };
     const { service, dataSource } = harness({
       notificationPublisher,
-      queryResults: [[[
-        {
-          id: 'publication-a',
-          tenantId: 'tenant-a',
-          workspaceId: 'workspace-a',
-          agencyClientId: 'client-a',
-          contentItemId: 'content-a',
-          failureReason: 'payload_invalid',
-        },
-      ], 1]],
+      queryResults: [
+        [
+          [
+            {
+              id: 'publication-a',
+              tenantId: 'tenant-a',
+              workspaceId: 'workspace-a',
+              agencyClientId: 'client-a',
+              contentItemId: 'content-a',
+              failureReason: 'payload_invalid',
+            },
+          ],
+          1,
+        ],
+      ],
     });
 
     await expect(
@@ -210,7 +215,9 @@ describe('SocialPublicationRunService', () => {
       }),
     ).resolves.toBe(true);
 
-    expect(dataSource.query.mock.calls[0][0]).toContain('tenant_id AS "tenantId"');
+    expect(dataSource.query.mock.calls[0][0]).toContain(
+      'tenant_id AS "tenantId"',
+    );
     expect(notificationPublisher.publishFailure).toHaveBeenCalledWith(
       expect.objectContaining({
         tenantId: 'tenant-a',

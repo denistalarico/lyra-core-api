@@ -27,7 +27,10 @@ type CachedRendition = {
   readonly expiresAt: number;
 };
 
-type PreparedSource = Pick<MediaPreparationInput, 'sourceUrl' | 'mimeType' | 'bytes'>;
+type PreparedSource = Pick<
+  MediaPreparationInput,
+  'sourceUrl' | 'mimeType' | 'bytes'
+>;
 
 /**
  * Turns a resolved storage object into what `SocialPublisherAdapter.prepareMedia`
@@ -47,9 +50,7 @@ export class MediaPreparationService {
 
   constructor(private readonly filesService: FilesService) {}
 
-  async prepare(
-    input: PrepareMediaForPublishInput,
-  ): Promise<PreparedSource> {
+  async prepare(input: PrepareMediaForPublishInput): Promise<PreparedSource> {
     const cacheKey = this.renditionCacheKey(
       input.media.storagePath,
       input.provider,

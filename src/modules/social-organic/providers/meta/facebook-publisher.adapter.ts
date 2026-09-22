@@ -69,7 +69,11 @@ export class FacebookPublisherAdapter implements SocialPublisherAdapter {
     if (input.mediaAssetIds.length > 1 && input.placement !== 'feed') {
       issues.push({ field: 'mediaAssetIds', reason: 'carousel_feed_only' });
     }
-    if (input.placement === 'feed' && !input.caption && !input.mediaAssetIds.length) {
+    if (
+      input.placement === 'feed' &&
+      !input.caption &&
+      !input.mediaAssetIds.length
+    ) {
       issues.push({ field: 'caption', reason: 'content_required' });
     }
     if (
@@ -146,9 +150,14 @@ export class FacebookPublisherAdapter implements SocialPublisherAdapter {
         };
       }
 
-      const decodedMedia = input.preparedMedia.map((entry) => decodeMetaPreparedMediaRef(entry.providerMediaRef));
-      if (decodedMedia.some((entry) => entry === null)) return this.invalidPreparedMedia();
-      const media = decodedMedia.filter((entry): entry is NonNullable<typeof entry> => entry !== null);
+      const decodedMedia = input.preparedMedia.map((entry) =>
+        decodeMetaPreparedMediaRef(entry.providerMediaRef),
+      );
+      if (decodedMedia.some((entry) => entry === null))
+        return this.invalidPreparedMedia();
+      const media = decodedMedia.filter(
+        (entry): entry is NonNullable<typeof entry> => entry !== null,
+      );
       const pageId = input.credential.externalAssetId;
       const pageAccessToken = input.credential.accessToken;
       let published: { id: string };

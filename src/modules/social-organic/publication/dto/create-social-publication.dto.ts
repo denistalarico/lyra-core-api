@@ -1,4 +1,11 @@
-import { ArrayMaxSize, ArrayMinSize, IsArray, IsISO8601, IsOptional, IsUUID } from 'class-validator';
+import {
+  ArrayMaxSize,
+  ArrayMinSize,
+  IsArray,
+  IsISO8601,
+  IsOptional,
+  IsUUID,
+} from 'class-validator';
 
 /**
  * Schedules a publication for a Planner destination.

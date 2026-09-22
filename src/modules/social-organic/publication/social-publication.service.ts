@@ -88,7 +88,9 @@ export class SocialPublicationService {
     );
     const asset = await this.requirePublishableAsset(scope, dto.assetId);
     if (dto.mediaAssetId && dto.mediaAssetIds?.length) {
-      throw new BadRequestException('Choose mediaAssetId or mediaAssetIds, not both.');
+      throw new BadRequestException(
+        'Choose mediaAssetId or mediaAssetIds, not both.',
+      );
     }
     const mediaAssetIds = dto.mediaAssetIds?.length
       ? [...new Set(dto.mediaAssetIds)]
@@ -96,10 +98,17 @@ export class SocialPublicationService {
         ? [dto.mediaAssetId]
         : [];
     if (mediaAssetIds.length > 10) {
-      throw new BadRequestException('A publication supports at most 10 media assets.');
+      throw new BadRequestException(
+        'A publication supports at most 10 media assets.',
+      );
     }
-    if (mediaAssetIds.length !== (dto.mediaAssetIds?.length ?? mediaAssetIds.length)) {
-      throw new BadRequestException('Duplicate media assets are not supported.');
+    if (
+      mediaAssetIds.length !==
+      (dto.mediaAssetIds?.length ?? mediaAssetIds.length)
+    ) {
+      throw new BadRequestException(
+        'Duplicate media assets are not supported.',
+      );
     }
     const mediaAssetId = mediaAssetIds[0] ?? null;
 
@@ -454,10 +463,15 @@ export class SocialPublicationService {
     return typeof snapshot?.placement === 'string' ? snapshot.placement : '';
   }
 
-  private extractMediaAssetIds(snapshotValue: unknown, fallback: string | null): string[] {
+  private extractMediaAssetIds(
+    snapshotValue: unknown,
+    fallback: string | null,
+  ): string[] {
     const snapshot = snapshotValue as { mediaAssetIds?: unknown } | null;
     const ids = Array.isArray(snapshot?.mediaAssetIds)
-      ? snapshot.mediaAssetIds.filter((value): value is string => typeof value === 'string')
+      ? snapshot.mediaAssetIds.filter(
+          (value): value is string => typeof value === 'string',
+        )
       : [];
     return ids.length ? ids : fallback ? [fallback] : [];
   }
@@ -467,15 +481,23 @@ export class SocialPublicationService {
     mediaAssetIds: string[],
   ): Promise<SocialPublicationEntity> {
     return this.publicationsRepository.manager.transaction(async (manager) => {
-      const saved = await manager.getRepository(SocialPublicationEntity).save(publication);
+      const saved = await manager
+        .getRepository(SocialPublicationEntity)
+        .save(publication);
       if (mediaAssetIds.length) {
-        const mediaRepository = manager.getRepository(SocialPublicationMediaEntity);
-        await mediaRepository.save(mediaAssetIds.map((mediaAssetId, index) => mediaRepository.create({
-          publicationId: saved.id,
-          mediaAssetId,
-          role: mediaAssetIds.length > 1 ? 'slide' : 'primary',
-          sortOrder: index,
-        })));
+        const mediaRepository = manager.getRepository(
+          SocialPublicationMediaEntity,
+        );
+        await mediaRepository.save(
+          mediaAssetIds.map((mediaAssetId, index) =>
+            mediaRepository.create({
+              publicationId: saved.id,
+              mediaAssetId,
+              role: mediaAssetIds.length > 1 ? 'slide' : 'primary',
+              sortOrder: index,
+            }),
+          ),
+        );
       }
       return saved;
     });

@@ -21,6 +21,22 @@ export type NormalizedOrganicPostMetricDaily = {
   watchTimeSeconds: string | null;
   linkClicks: string | null;
   profileVisits: string | null;
+  /** SNAPSHOT counters, cumulative since publication. Never summed. */
+  reachLifetime: string | null;
+  savesLifetime: string | null;
+  sharesLifetime: string | null;
+  totalInteractionsLifetime: string | null;
+  profileVisitsLifetime: string | null;
+  followsLifetime: string | null;
+  /** One instant for the six counters above — one request observes them all. */
+  lifetimeObservedAt: Date | null;
+  /** Stable public URL. The image URL expires, so it is never stored. */
+  permalink: string | null;
+  caption: string | null;
+  mediaType: string | null;
+  mediaProductType: string | null;
+  /** The provider's publish time, not the observation day. */
+  publishedAt: Date | null;
   /** SNAPSHOT, not flow — see the entity docblock. Never summed across days. */
   impressionsLifetime: string | null;
   impressionsLifetimeObservedAt: Date | null;

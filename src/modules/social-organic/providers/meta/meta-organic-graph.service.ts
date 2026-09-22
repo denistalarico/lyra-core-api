@@ -151,7 +151,10 @@ export class MetaOrganicGraphService {
   ): Promise<MetaOrganicToken> {
     const url = new URL(`${META_INSTAGRAM_GRAPH_ORIGIN}/access_token`);
     url.searchParams.set('grant_type', 'ig_exchange_token');
-    url.searchParams.set('client_secret', requireSocialMetaInstagramAppSecret());
+    url.searchParams.set(
+      'client_secret',
+      requireSocialMetaInstagramAppSecret(),
+    );
     url.searchParams.set('access_token', accessToken);
     return this.readToken(await this.requestJson(url, { method: 'GET' }));
   }
@@ -291,6 +294,96 @@ export class MetaOrganicGraphService {
   }
 
   /**
+   * One post's current image URL, resolved fresh every time.
+   *
+   * Never stored by any caller: Meta signs these with an expiry of roughly five
+   * days, so a persisted one becomes a broken image without anything changing
+   * on our side. `thumbnail_url` is preferred where it exists — Instagram
+   * provides it for video and reels, where `media_url` is the video file itself
+   * and would make a browser download a clip to draw a card.
+   *
+   * Null rather than throwing when the provider has no picture for the object:
+   * a text-only Page post is an ordinary case, not a failure.
+   */
+  async getMediaImageUrl(input: {
+    objectId: string;
+    accessToken: string;
+    assetType: 'facebook_page' | 'instagram_professional';
+  }): Promise<string | null> {
+    const instagram = input.assetType === 'instagram_professional';
+    const url = this.graphUrl(encodeURIComponent(input.objectId));
+    url.searchParams.set(
+      'fields',
+      instagram ? 'media_url,thumbnail_url,media_type' : 'full_picture',
+    );
+
+    const payload = await this.requestJson(
+      url,
+      this.authorized(input.accessToken),
+    );
+
+    if (!isRecord(payload)) throw this.invalidResponse();
+
+    const candidate = instagram
+      ? (payload.thumbnail_url ?? payload.media_url)
+      : payload.full_picture;
+
+    return typeof candidate === 'string' && candidate.startsWith('https://')
+      ? candidate
+      : null;
+  }
+
+  /**
+   * The posts an asset published inside a window, with their identity fields.
+   *
+   * Discovery used to read `social_publications` — content Lyra itself
+   * published, one row against 326 on the account — which made a "best posts"
+   * table a table of one row. The provider is the only source that knows about
+   * the rest.
+   *
+   * `since`/`until` are honoured server-side by both edges, so the window bounds
+   * the page rather than the caller filtering 326 rows down to two afterwards.
+   *
+   * The image URL is requested but is **not** for storage: Meta signs it with an
+   * expiry of roughly five days. It is returned so a caller resolving a
+   * thumbnail right now can use it; the durable identifier is the permalink.
+   */
+  async listPublishedPosts(input: {
+    objectId: string;
+    accessToken: string;
+    assetType: 'facebook_page' | 'instagram_professional';
+    since: number;
+    until: number;
+    limit: number;
+  }): Promise<{ data: unknown[]; apiCalls: 1 }> {
+    const instagram = input.assetType === 'instagram_professional';
+    const url = this.graphUrl(
+      `${encodeURIComponent(input.objectId)}/${instagram ? 'media' : 'posts'}`,
+    );
+
+    url.searchParams.set(
+      'fields',
+      instagram
+        ? 'id,timestamp,media_type,media_product_type,media_url,thumbnail_url,permalink,caption'
+        : 'id,created_time,full_picture,permalink_url,message',
+    );
+    url.searchParams.set('since', String(input.since));
+    url.searchParams.set('until', String(input.until));
+    url.searchParams.set('limit', String(input.limit));
+
+    const payload = await this.requestJson(
+      url,
+      this.authorized(input.accessToken),
+    );
+
+    if (!isRecord(payload) || !Array.isArray(payload.data)) {
+      throw this.invalidResponse();
+    }
+
+    return { data: payload.data, apiCalls: 1 };
+  }
+
+  /**
    * Provider-owned Insights GET. Metric names come from A2's documented
    * allow-list; this method validates their shape and centralizes version,
    * timeout, auth header and safe error normalization.
@@ -393,9 +486,15 @@ export class MetaOrganicGraphService {
   }): Promise<MetaOrganicPublishedObject> {
     const fields: Record<string, string> = {};
     if (input.message) fields.message = input.message;
-    const photoIds = input.photoIds?.length ? input.photoIds : input.photoId ? [input.photoId] : [];
+    const photoIds = input.photoIds?.length
+      ? input.photoIds
+      : input.photoId
+        ? [input.photoId]
+        : [];
     photoIds.forEach((photoId, index) => {
-      fields[`attached_media[${index}]`] = JSON.stringify({ media_fbid: photoId });
+      fields[`attached_media[${index}]`] = JSON.stringify({
+        media_fbid: photoId,
+      });
     });
 
     return this.readPublishedObject(
@@ -583,14 +682,16 @@ export class MetaOrganicGraphService {
       children: input.childContainerIds.join(','),
     };
     if (input.caption) fields.caption = input.caption;
-    return this.readPublishedObject(await this.requestForm(
-      this.graphUrl(
-        `${encodeURIComponent(input.accountId)}/media`,
-        input.apiHost,
+    return this.readPublishedObject(
+      await this.requestForm(
+        this.graphUrl(
+          `${encodeURIComponent(input.accountId)}/media`,
+          input.apiHost,
+        ),
+        input.pageAccessToken,
+        fields,
       ),
-      input.pageAccessToken,
-      fields,
-    ));
+    );
   }
 
   async getInstagramContainerStatus(input: {
@@ -598,7 +699,10 @@ export class MetaOrganicGraphService {
     pageAccessToken: string;
     apiHost?: MetaInstagramApiHost;
   }): Promise<MetaOrganicInstagramContainerStatus> {
-    const url = this.graphUrl(encodeURIComponent(input.containerId), input.apiHost);
+    const url = this.graphUrl(
+      encodeURIComponent(input.containerId),
+      input.apiHost,
+    );
     url.searchParams.set('fields', 'status_code');
     const data = await this.requestJson(
       url,
@@ -656,14 +760,15 @@ export class MetaOrganicGraphService {
     );
   }
 
-  private graphUrl(path: string, apiHost: MetaInstagramApiHost = 'facebook'): URL {
+  private graphUrl(
+    path: string,
+    apiHost: MetaInstagramApiHost = 'facebook',
+  ): URL {
     const origin =
       apiHost === 'instagram'
         ? META_INSTAGRAM_GRAPH_ORIGIN
         : META_ORGANIC_GRAPH_ORIGIN;
-    return new URL(
-      `${origin}/${META_ORGANIC_GRAPH_API_VERSION}/${path}`,
-    );
+    return new URL(`${origin}/${META_ORGANIC_GRAPH_API_VERSION}/${path}`);
   }
 
   private authorized(accessToken: string, method = 'GET'): RequestInit {

@@ -5,6 +5,7 @@ import { CreateSocialOrganicConnections1791500000000 } from '../../../database/m
 import { CreateSocialOrganicReadModel1791900000000 } from '../../../database/migrations/1791900000000-create-social-organic-read-model';
 import { MakeSocialOrganicMetricsNullable1792100000000 } from '../../../database/migrations/1792100000000-make-social-organic-metrics-nullable';
 import { AddSocialOrganicPostLifetimeSnapshots1792400000000 } from '../../../database/migrations/1792400000000-add-social-organic-post-lifetime-snapshots';
+import { AddSocialOrganicPostIdentity1795400000000 } from '../../../database/migrations/1795400000000-add-social-organic-post-identity';
 import { describePostgresIntegration } from '../../../testing/postgres-integration';
 import type {
   NormalizedOrganicAccountMetricDaily,
@@ -78,6 +79,18 @@ run('SocialOrganicMetricsWriterService against PostgreSQL', () => {
     commentsLifetimeObservedAt: null,
     videoViewsLifetime: null,
     videoViewsLifetimeObservedAt: null,
+    reachLifetime: null,
+    savesLifetime: null,
+    sharesLifetime: null,
+    totalInteractionsLifetime: null,
+    profileVisitsLifetime: null,
+    followsLifetime: null,
+    lifetimeObservedAt: null,
+    permalink: null,
+    caption: null,
+    mediaType: null,
+    mediaProductType: null,
+    publishedAt: null,
     isPartial: true,
     syncedAt: new Date('2026-09-08T15:00:00.000Z'),
     syncRunId: firstRunId,
@@ -97,6 +110,7 @@ run('SocialOrganicMetricsWriterService against PostgreSQL', () => {
       await new AddSocialOrganicPostLifetimeSnapshots1792400000000().up(
         queryRunner,
       );
+      await new AddSocialOrganicPostIdentity1795400000000().up(queryRunner);
     } finally {
       await queryRunner.release();
     }

@@ -226,6 +226,59 @@ describe('Meta organic account insights normalizers', () => {
     ).toThrow('meta_invalid_response');
   });
 
+  it('reads profile views from the engagement family', () => {
+    const row = normalizeInstagramAccountInsights({
+      ...base,
+      followersCount: undefined,
+      mediaInsights: {
+        data: [breakdownMetric('views', 'media_product_type', [['POST', 9]])],
+      },
+      followInsights: { data: [] },
+      engagementInsights: {
+        data: [
+          { name: 'profile_views', period: 'day', total_value: { value: 12 } },
+        ],
+      },
+    });
+
+    expect(row?.profileViews).toBe('12');
+  });
+
+  it('keeps an explicit zero from the engagement family', () => {
+    // A day with no profile visits is a measurement, not an absence — the
+    // distinction the whole normalizer is built around.
+    const row = normalizeInstagramAccountInsights({
+      ...base,
+      followersCount: undefined,
+      mediaInsights: {
+        data: [breakdownMetric('views', 'media_product_type', [['POST', 1]])],
+      },
+      followInsights: { data: [] },
+      engagementInsights: {
+        data: [
+          { name: 'profile_views', period: 'day', total_value: { value: 0 } },
+        ],
+      },
+    });
+
+    expect(row?.profileViews).toBe('0');
+  });
+
+  it('normalizes without the engagement read at all', () => {
+    // A caller that predates the engagement request, or a replayed payload
+    // stored before it existed, still yields a row.
+    const row = normalizeInstagramAccountInsights({
+      ...base,
+      followersCount: undefined,
+      mediaInsights: {
+        data: [breakdownMetric('views', 'media_product_type', [['POST', 3]])],
+      },
+      followInsights: { data: [] },
+    });
+
+    expect(row).toMatchObject({ impressions: '3', profileViews: null });
+  });
+
   it('marks only the asset-local same day partial', () => {
     const row = normalizeInstagramAccountInsights({
       ...base,

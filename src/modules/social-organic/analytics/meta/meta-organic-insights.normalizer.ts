@@ -57,10 +57,22 @@ export function normalizeInstagramAccountInsights(
     followersCount: unknown;
     mediaInsights: unknown;
     followInsights: unknown;
+    /**
+     * The account engagement read, optional.
+     *
+     * Optional rather than required so that a caller which has not been updated
+     * — or a stored payload replayed from before this read existed — still
+     * normalizes, with the engagement fields null instead of throwing.
+     */
+    engagementInsights?: unknown;
   },
 ): NormalizedOrganicAccountMetricDaily | null {
   const media = readMetrics(input.mediaInsights);
   const follows = readMetrics(input.followInsights);
+  const engagement =
+    input.engagementInsights === undefined
+      ? null
+      : readMetrics(input.engagementInsights);
   const followersCount =
     input.metricDate === input.currentDay
       ? readOptionalCounter(input.followersCount)
@@ -70,13 +82,19 @@ export function normalizeInstagramAccountInsights(
   const followMetric = follows.get('follows_and_unfollows');
   const followersGained = readBreakdownDimension(followMetric, 'FOLLOWER');
   const followersLost = readBreakdownDimension(followMetric, 'NON_FOLLOWER');
+  // A plain `total_value.value`, with no breakdown to unpack — which is why it
+  // reads through `readPlainTotal` rather than either breakdown helper. The
+  // column already existed and was never populated for Instagram; the Page side
+  // has no equivalent metric on v26.
+  const profileViews = readPlainTotal(engagement?.get('profile_views'));
 
   if (
     followersCount === null &&
     impressions === null &&
     reach === null &&
     followersGained === null &&
-    followersLost === null
+    followersLost === null &&
+    profileViews === null
   ) {
     return null;
   }
@@ -87,8 +105,13 @@ export function normalizeInstagramAccountInsights(
     followersLost,
     impressions,
     reach,
+    profileViews,
     providerMetrics: withSnapshot(
-      { ...media.providerMetrics, ...follows.providerMetrics },
+      {
+        ...media.providerMetrics,
+        ...follows.providerMetrics,
+        ...(engagement?.providerMetrics ?? {}),
+      },
       {
         followers_count:
           input.metricDate === input.currentDay
@@ -103,6 +126,18 @@ type PostLifetimeBase = NormalizeBase & {
   externalPublicationId: string;
   publicationId: string | null;
   observedAt: Date;
+  /**
+   * Who the post is, carried from discovery rather than measured.
+   *
+   * Optional so a caller that only has ids still normalizes. The image URL is
+   * absent on purpose — Meta signs it with a ~5 day expiry, so it is resolved
+   * on demand and never stored.
+   */
+  permalink?: string | null;
+  caption?: string | null;
+  mediaType?: string | null;
+  mediaProductType?: string | null;
+  publishedAt?: Date | null;
 };
 
 /**
@@ -146,11 +181,33 @@ export function normalizeInstagramMediaLifetimeSnapshot(
   const commentsLifetime = readLifetimeCounter(metrics.get('comments'));
   const likesLifetime = readLifetimeCounter(metrics.get('likes'));
   const videoViewsLifetime = readLifetimeCounter(metrics.get('views'));
+  // The ranking counters, read from the same response. All lifetime totals, so
+  // they land in `*_lifetime` columns and share one observation instant.
+  const reachLifetime = readLifetimeCounter(metrics.get('reach'));
+  const savesLifetime = readLifetimeCounter(metrics.get('saved'));
+  const sharesLifetime = readLifetimeCounter(metrics.get('shares'));
+  const totalInteractionsLifetime = readLifetimeCounter(
+    metrics.get('total_interactions'),
+  );
+  const profileVisitsLifetime = readLifetimeCounter(
+    metrics.get('profile_visits'),
+  );
+  const followsLifetime = readLifetimeCounter(metrics.get('follows'));
+
+  const ranking = [
+    reachLifetime,
+    savesLifetime,
+    sharesLifetime,
+    totalInteractionsLifetime,
+    profileVisitsLifetime,
+    followsLifetime,
+  ];
 
   if (
     commentsLifetime === null &&
     likesLifetime === null &&
-    videoViewsLifetime === null
+    videoViewsLifetime === null &&
+    ranking.every((value) => value === null)
   ) {
     return null;
   }
@@ -164,6 +221,17 @@ export function normalizeInstagramMediaLifetimeSnapshot(
     videoViewsLifetime,
     videoViewsLifetimeObservedAt:
       videoViewsLifetime !== null ? input.observedAt : null,
+    reachLifetime,
+    savesLifetime,
+    sharesLifetime,
+    totalInteractionsLifetime,
+    profileVisitsLifetime,
+    followsLifetime,
+    // Stamped only when at least one of them was actually read, so the column
+    // never claims an observation that produced nothing.
+    lifetimeObservedAt: ranking.some((value) => value !== null)
+      ? input.observedAt
+      : null,
     providerMetrics: metrics.providerMetrics,
   });
 }
@@ -188,6 +256,13 @@ function postLifetimeFact(
       | 'commentsLifetimeObservedAt'
       | 'videoViewsLifetime'
       | 'videoViewsLifetimeObservedAt'
+      | 'reachLifetime'
+      | 'savesLifetime'
+      | 'sharesLifetime'
+      | 'totalInteractionsLifetime'
+      | 'profileVisitsLifetime'
+      | 'followsLifetime'
+      | 'lifetimeObservedAt'
     >
   > & { providerMetrics: Record<string, unknown> },
 ): NormalizedOrganicPostMetricDaily {
@@ -214,6 +289,22 @@ function postLifetimeFact(
     watchTimeSeconds: null,
     linkClicks: null,
     profileVisits: null,
+    reachLifetime: values.reachLifetime ?? null,
+    savesLifetime: values.savesLifetime ?? null,
+    sharesLifetime: values.sharesLifetime ?? null,
+    totalInteractionsLifetime: values.totalInteractionsLifetime ?? null,
+    profileVisitsLifetime: values.profileVisitsLifetime ?? null,
+    followsLifetime: values.followsLifetime ?? null,
+    lifetimeObservedAt: values.lifetimeObservedAt ?? null,
+    // Identity, not measurement: these describe which post the row is about,
+    // and they come from discovery rather than from the insights read — which
+    // is why they are taken from `input` and not from `values`. `permalink`
+    // rather than the image URL, which Meta signs with a ~5 day expiry.
+    permalink: input.permalink ?? null,
+    caption: input.caption ?? null,
+    mediaType: input.mediaType ?? null,
+    mediaProductType: input.mediaProductType ?? null,
+    publishedAt: input.publishedAt ?? null,
     impressionsLifetime: values.impressionsLifetime ?? null,
     impressionsLifetimeObservedAt: values.impressionsLifetimeObservedAt ?? null,
     likesLifetime: values.likesLifetime ?? null,
@@ -257,6 +348,21 @@ function readMetrics(payload: unknown): Map<string, MetricEntry> & {
   }
 
   return metrics;
+}
+
+/**
+ * A metric whose value is a single number rather than a distribution.
+ *
+ * The account-level engagement counters (`profile_views`, `accounts_engaged`,
+ * `total_interactions` and the interaction counts) are requested without a
+ * `breakdown`, so Meta answers with a bare `total_value.value`. Absent metric,
+ * absent value and an explicit null all read as null; an explicit `0` survives
+ * as `"0"`, because a day with no profile visits is a measurement.
+ */
+function readPlainTotal(metric: MetricEntry | undefined): string | null {
+  if (!metric) return null;
+
+  return readOptionalCounter(rawMetricValue(metric));
 }
 
 function readOrganicBreakdown(metric: MetricEntry | undefined): string | null {

@@ -48,7 +48,12 @@ function payload(
     scheduledAt: new Date('2026-09-07T12:00:00Z'),
     ...overrides,
   };
-  return { ...result, mediaAssetIds: overrides.mediaAssetIds ?? (result.mediaAssetId ? [result.mediaAssetId] : []) };
+  return {
+    ...result,
+    mediaAssetIds:
+      overrides.mediaAssetIds ??
+      (result.mediaAssetId ? [result.mediaAssetId] : []),
+  };
 }
 
 function adapterWithMock() {
@@ -107,10 +112,13 @@ describe('InstagramPublisherAdapter', () => {
       adapter.publish({
         credential: CREDENTIAL,
         payload: payload(),
-        preparedMedia: [{
-          providerMediaRef: '{"kind":"instagram_container","id":"container-1"}',
-          expiresAt: null,
-        }],
+        preparedMedia: [
+          {
+            providerMediaRef:
+              '{"kind":"instagram_container","id":"container-1"}',
+            expiresAt: null,
+          },
+        ],
         idempotencyKey: 'idem-1',
       }),
     ).resolves.toEqual({
@@ -186,15 +194,19 @@ describe('InstagramPublisherAdapter', () => {
       mediaAssetIds: ['media-asset-1', 'media-asset-2'],
     });
     expect(adapter.validate(carouselPayload)).toEqual({ valid: true });
-    const prepared = await Promise.all([0, 1].map((mediaIndex) => adapter.prepareMedia({
-      credential: CREDENTIAL,
-      payload: carouselPayload,
-      sourceUrl: `https://signed.test/media-${mediaIndex}.jpg`,
-      mimeType: 'image/jpeg',
-      bytes: 100,
-      mediaIndex,
-      mediaCount: 2,
-    })));
+    const prepared = await Promise.all(
+      [0, 1].map((mediaIndex) =>
+        adapter.prepareMedia({
+          credential: CREDENTIAL,
+          payload: carouselPayload,
+          sourceUrl: `https://signed.test/media-${mediaIndex}.jpg`,
+          mimeType: 'image/jpeg',
+          bytes: 100,
+          mediaIndex,
+          mediaCount: 2,
+        }),
+      ),
+    );
 
     await adapter.publish({
       credential: CREDENTIAL,

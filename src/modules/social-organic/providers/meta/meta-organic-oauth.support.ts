@@ -32,8 +32,7 @@ export const META_ORGANIC_GRAPH_API_VERSION = readMetaGraphApiVersion();
 export const META_ORGANIC_GRAPH_ORIGIN = 'https://graph.facebook.com';
 export const META_ORGANIC_AUTHORIZATION_ORIGIN = 'https://www.facebook.com';
 export const META_INSTAGRAM_GRAPH_ORIGIN = 'https://graph.instagram.com';
-export const META_INSTAGRAM_AUTHORIZATION_ORIGIN =
-  'https://www.instagram.com';
+export const META_INSTAGRAM_AUTHORIZATION_ORIGIN = 'https://www.instagram.com';
 export const META_INSTAGRAM_TOKEN_ORIGIN = 'https://api.instagram.com';
 
 function readMetaGraphApiVersion(): string {

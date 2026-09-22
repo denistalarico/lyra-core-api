@@ -159,10 +159,22 @@ describe('SocialPublicationService', () => {
   beforeEach(() => {
     publicationsRepository = createRepositoryMock();
     publicationMediaRepository = createRepositoryMock();
-    publicationsRepository.save.mockImplementation((value: object) => Promise.resolve({ id: '99999999-9999-4999-8999-999999999999', ...value }));
-    publicationsRepository.manager.transaction.mockImplementation((callback: (manager: { getRepository: (entity: unknown) => RepositoryMock }) => unknown) => callback({
-      getRepository: (entity: unknown) => entity === SocialPublicationEntity ? publicationsRepository : publicationMediaRepository,
-    }));
+    publicationsRepository.save.mockImplementation((value: object) =>
+      Promise.resolve({ id: '99999999-9999-4999-8999-999999999999', ...value }),
+    );
+    publicationsRepository.manager.transaction.mockImplementation(
+      (
+        callback: (manager: {
+          getRepository: (entity: unknown) => RepositoryMock;
+        }) => unknown,
+      ) =>
+        callback({
+          getRepository: (entity: unknown) =>
+            entity === SocialPublicationEntity
+              ? publicationsRepository
+              : publicationMediaRepository,
+        }),
+    );
     contentRepository = createRepositoryMock();
     destinationsRepository = createRepositoryMock();
     assetsRepository = createRepositoryMock();
@@ -277,7 +289,11 @@ describe('SocialPublicationService', () => {
       );
       expect(publicationMediaRepository.save).toHaveBeenCalledWith([
         expect.objectContaining({ mediaAssetId, role: 'slide', sortOrder: 0 }),
-        expect.objectContaining({ mediaAssetId: secondMediaAssetId, role: 'slide', sortOrder: 1 }),
+        expect.objectContaining({
+          mediaAssetId: secondMediaAssetId,
+          role: 'slide',
+          sortOrder: 1,
+        }),
       ]);
     });
 
@@ -798,9 +814,9 @@ describe('SocialPublicationService', () => {
         ...publication,
       });
 
-      await expect(
-        service.deleteFailed(agencyScope, 'pub-1'),
-      ).rejects.toThrow(ConflictException);
+      await expect(service.deleteFailed(agencyScope, 'pub-1')).rejects.toThrow(
+        ConflictException,
+      );
       expect(publicationsRepository.delete).not.toHaveBeenCalled();
     });
 
@@ -812,9 +828,9 @@ describe('SocialPublicationService', () => {
       });
       publicationsRepository.delete.mockResolvedValue({ affected: 0 });
 
-      await expect(
-        service.deleteFailed(agencyScope, 'pub-1'),
-      ).rejects.toThrow(ConflictException);
+      await expect(service.deleteFailed(agencyScope, 'pub-1')).rejects.toThrow(
+        ConflictException,
+      );
     });
   });
 

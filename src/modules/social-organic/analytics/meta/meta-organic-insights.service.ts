@@ -25,15 +25,32 @@ import {
 import {
   FACEBOOK_PAGE_ACCOUNT_METRICS,
   FACEBOOK_POST_LIFETIME_METRICS,
+  INSTAGRAM_ACCOUNT_ENGAGEMENT_METRICS,
   INSTAGRAM_ACCOUNT_FOLLOW_METRICS,
   INSTAGRAM_ACCOUNT_MEDIA_METRICS,
   INSTAGRAM_MEDIA_LIFETIME_METRICS,
 } from './meta-organic-insights.types';
 
-/** A Lyra-published post/media candidate for a lifetime snapshot read. */
+/**
+ * The ceiling on posts discovered in one pass.
+ *
+ * Each discovered post costs one insights request, so an unbounded window on a
+ * busy account would turn a sync into hundreds of calls against a shared quota.
+ * 50 is a month of daily posting; beyond that the honest answer is a narrower
+ * window, not a longer loop.
+ */
+const MAX_DISCOVERED_POSTS = 50;
+
+/** A post/media candidate for a lifetime snapshot read, with its identity. */
 type PublishedPostCandidate = {
   externalPublicationId: string;
+  /** Lyra's publication row, when Lyra published it. Null otherwise. */
   publicationId: string | null;
+  permalink: string | null;
+  caption: string | null;
+  mediaType: string | null;
+  mediaProductType: string | null;
+  publishedAt: Date | null;
 };
 
 @Injectable()
@@ -89,16 +106,26 @@ export class MetaOrganicInsightsService {
     const needsCurrentSnapshot = days.includes(currentDay);
 
     if (needsCurrentSnapshot) {
-      // Discovery source = `social_publications` (Lyra-published posts only).
-      // Confirmed scope decision, not an oversight: this intentionally
-      // narrows lifetime metrics to Lyra-authored content in this pass. A
-      // provider "list posts" call is out of scope here.
-      const candidatePosts = await this.discoverPublishedPosts({
+      // Discovery source = the provider's own listing, bounded by the window
+      // and by `MAX_DISCOVERED_POSTS`. It used to be `social_publications`
+      // (Lyra-authored content only); see `discoverPublishedPosts` for why
+      // that narrowing was lifted.
+      const discovery = await this.discoverPublishedPosts({
         assetId: credential.assetId,
         assetTimezone,
         fromDate: input.fromDate,
         toDate: input.toDate,
+        externalAssetId: credential.externalAssetId,
+        accessToken: credential.accessToken,
+        // The two the listing supports. Anything else already threw at the
+        // provider check above, and the per-post loop below refuses again.
+        assetType:
+          credential.assetType === 'instagram_professional'
+            ? 'instagram_professional'
+            : 'facebook_page',
       });
+      const candidatePosts = discovery.posts;
+      apiCalls += discovery.apiCalls;
 
       for (const post of candidatePosts) {
         if (credential.assetType === 'facebook_page') {
@@ -119,6 +146,11 @@ export class MetaOrganicInsightsService {
             metricDate: currentDay,
             externalPublicationId: post.externalPublicationId,
             publicationId: post.publicationId,
+            permalink: post.permalink,
+            caption: post.caption,
+            mediaType: post.mediaType,
+            mediaProductType: post.mediaProductType,
+            publishedAt: post.publishedAt,
             insights,
             observedAt: syncedAt,
           });
@@ -140,6 +172,11 @@ export class MetaOrganicInsightsService {
             metricDate: currentDay,
             externalPublicationId: post.externalPublicationId,
             publicationId: post.publicationId,
+            permalink: post.permalink,
+            caption: post.caption,
+            mediaType: post.mediaType,
+            mediaProductType: post.mediaProductType,
+            publishedAt: post.publishedAt,
             insights,
             observedAt: syncedAt,
           });
@@ -199,13 +236,28 @@ export class MetaOrganicInsightsService {
           breakdown: 'follow_type',
           ...range,
         });
-        apiCalls += mediaInsights.apiCalls + followInsights.apiCalls;
+        // The whole engagement family in one request: none of them takes a
+        // breakdown, so Meta returns all eight from a single call and the cost
+        // of the addition is one request per day rather than one per metric.
+        const engagementInsights = await this.graph.getOrganicInsights({
+          objectId: credential.externalAssetId,
+          accessToken: credential.accessToken,
+          metrics: INSTAGRAM_ACCOUNT_ENGAGEMENT_METRICS,
+          period: 'day',
+          metricType: 'total_value',
+          ...range,
+        });
+        apiCalls +=
+          mediaInsights.apiCalls +
+          followInsights.apiCalls +
+          engagementInsights.apiCalls;
         const row = normalizeInstagramAccountInsights({
           ...base,
           metricDate,
           followersCount,
           mediaInsights,
           followInsights,
+          engagementInsights,
         });
         if (row) accountRows.push(row);
         else rowsSkipped += 1;
@@ -236,54 +288,122 @@ export class MetaOrganicInsightsService {
   }
 
   /**
-   * Lyra-published posts/media in `[fromDate, toDate]` eligible for a
-   * lifetime snapshot read.
+   * Every post the asset published in `[fromDate, toDate]`, from the provider.
    *
-   * Reads `social_publications` directly — a small, read-only query on this
-   * service, not `SocialOrganicSyncRunService`/`SocialPublicationExecutorService`,
-   * which mutate state. Scope: `assetId`, `status = 'published'`,
-   * `external_publication_id IS NOT NULL`, and `published_at` inside the
-   * window (converted to an instant range the same way
-   * `providerDayRange`/`localDayStartEpochSeconds` already convert calendar
-   * days to instants).
+   * This used to read `social_publications` — content Lyra itself published —
+   * and that was a deliberate, documented narrowing. It is widened here because
+   * the question changed: a "best posts" table ranks what the audience actually
+   * saw, and on this account that is 326 posts against one Lyra-published row.
+   * Ranking the one would not be a smaller answer, it would be a wrong one.
    *
-   * This intentionally covers Lyra-published content only — a documented
-   * scope decision (confirmed), not an oversight: extending discovery to
-   * every post/media a provider-side "list posts" call would return is out
-   * of scope for this pass.
+   * The window is passed to Meta rather than applied afterwards — both `/media`
+   * and `/posts` honour `since`/`until` server-side — so the cost is one listing
+   * call plus one insights call per post *in the window*, not per post on the
+   * account. `MAX_DISCOVERED_POSTS` bounds a wide window.
+   *
+   * `publicationId` is still resolved, by joining back to `social_publications`
+   * on the provider's id: a post Lyra published keeps its link to the
+   * publication record, and one it did not simply has none.
    */
   private async discoverPublishedPosts(input: {
     assetId: string;
     assetTimezone: string;
     fromDate: string;
     toDate: string;
-  }): Promise<PublishedPostCandidate[]> {
-    const since = new Date(
-      localDayStartEpochSeconds(input.fromDate, input.assetTimezone) * 1000,
+    externalAssetId: string;
+    accessToken: string;
+    assetType: 'facebook_page' | 'instagram_professional';
+  }): Promise<{ posts: PublishedPostCandidate[]; apiCalls: number }> {
+    const sinceEpoch = localDayStartEpochSeconds(
+      input.fromDate,
+      input.assetTimezone,
     );
-    const until = new Date(
-      localDayStartEpochSeconds(
-        shiftCalendarDay(input.toDate, 1),
-        input.assetTimezone,
-      ) * 1000,
+    const untilEpoch = localDayStartEpochSeconds(
+      shiftCalendarDay(input.toDate, 1),
+      input.assetTimezone,
     );
 
-    const rows = await this.dataSource.query<
+    const listing = await this.graph.listPublishedPosts({
+      objectId: input.externalAssetId,
+      accessToken: input.accessToken,
+      assetType: input.assetType,
+      since: sinceEpoch,
+      until: untilEpoch,
+      limit: MAX_DISCOVERED_POSTS,
+    });
+
+    const candidates = listing.data.flatMap((entry) => {
+      const parsed = parseDiscoveredPost(entry, input.assetType);
+      return parsed ? [parsed] : [];
+    });
+
+    if (candidates.length === 0) {
+      return { posts: [], apiCalls: listing.apiCalls };
+    }
+
+    // Lyra's own publication id, where one exists. A post published outside
+    // Lyra simply has no row here, which is the ordinary case now that
+    // discovery is provider-side.
+    const owned = await this.dataSource.query<
       Array<{ external_publication_id: string; id: string }>
     >(
       `SELECT id, external_publication_id
          FROM social_publications
         WHERE asset_id = $1
-          AND status = 'published'
-          AND external_publication_id IS NOT NULL
-          AND published_at >= $2
-          AND published_at < $3`,
-      [input.assetId, since, until],
+          AND external_publication_id = ANY($2::text[])`,
+      [input.assetId, candidates.map((post) => post.externalPublicationId)],
     );
 
-    return rows.map((row) => ({
-      externalPublicationId: row.external_publication_id,
-      publicationId: row.id,
-    }));
+    const publicationIds = new Map(
+      owned.map((row) => [row.external_publication_id, row.id] as const),
+    );
+
+    return {
+      posts: candidates.map((post) => ({
+        ...post,
+        publicationId: publicationIds.get(post.externalPublicationId) ?? null,
+      })),
+      apiCalls: listing.apiCalls,
+    };
   }
+}
+
+/**
+ * One entry of a provider listing, or null when it cannot be identified.
+ *
+ * Null rather than throwing: a listing is a page of many posts, and one entry
+ * whose shape this build does not recognise should cost that post, not the
+ * whole sync. The id is the only field that is genuinely required — everything
+ * else is identity that a post may legitimately lack, such as a caption.
+ */
+function parseDiscoveredPost(
+  entry: unknown,
+  assetType: 'facebook_page' | 'instagram_professional',
+): PublishedPostCandidate | null {
+  if (typeof entry !== 'object' || entry === null) return null;
+
+  const row = entry as Record<string, unknown>;
+  const id = typeof row.id === 'string' ? row.id.trim() : '';
+  if (!id) return null;
+
+  const instagram = assetType === 'instagram_professional';
+  const timestamp = instagram ? row.timestamp : row.created_time;
+  const published = typeof timestamp === 'string' ? new Date(timestamp) : null;
+
+  return {
+    externalPublicationId: id,
+    publicationId: null,
+    permalink: readText(instagram ? row.permalink : row.permalink_url),
+    caption: readText(instagram ? row.caption : row.message),
+    mediaType: instagram ? readText(row.media_type) : null,
+    mediaProductType: instagram ? readText(row.media_product_type) : null,
+    publishedAt:
+      published && !Number.isNaN(published.getTime()) ? published : null,
+  };
+}
+
+function readText(value: unknown): string | null {
+  return typeof value === 'string' && value.trim().length > 0
+    ? value.trim()
+    : null;
 }

@@ -131,7 +131,7 @@ run('SocialOrganicAnalyticsReadService against PostgreSQL', () => {
     syncedAt?: string;
   }) {
     const nullable = (value: string | null | undefined) =>
-      value === null ? 'NULL' : (value === undefined ? 'NULL' : value);
+      value === null ? 'NULL' : value === undefined ? 'NULL' : value;
     const observedAt = input.syncedAt ?? `${input.metricDate}T12:00:00.000Z`;
     const clientId = input.agencyClientId
       ? `'${input.agencyClientId}'`
@@ -463,7 +463,10 @@ run('SocialOrganicAnalyticsReadService against PostgreSQL', () => {
       });
 
       await expect(
-        service.publicationMetrics({ ...scope, publicationIds: [publicationId] }),
+        service.publicationMetrics({
+          ...scope,
+          publicationIds: [publicationId],
+        }),
       ).resolves.toEqual([]);
     });
   });

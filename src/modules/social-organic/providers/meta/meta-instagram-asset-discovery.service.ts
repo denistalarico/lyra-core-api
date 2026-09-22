@@ -36,7 +36,9 @@ export class MetaInstagramAssetDiscoveryService {
     if (input.asset.assetType !== INSTAGRAM_PROFESSIONAL) {
       throw new BadRequestException('meta_asset_not_available');
     }
-    const account = await this.graph.getDirectInstagramAccount(input.accessToken);
+    const account = await this.graph.getDirectInstagramAccount(
+      input.accessToken,
+    );
     if (account.accountId !== input.asset.externalAssetId) {
       throw new BadRequestException('meta_asset_not_available');
     }
@@ -47,7 +49,10 @@ export class MetaInstagramAssetDiscoveryService {
       accessToken: null,
       tokenExpiresAt: null,
       assetTimezone: null,
-      metadata: { accountId: account.accountId, authorization: 'instagram_login' },
+      metadata: {
+        accountId: account.accountId,
+        authorization: 'instagram_login',
+      },
     };
   }
 }

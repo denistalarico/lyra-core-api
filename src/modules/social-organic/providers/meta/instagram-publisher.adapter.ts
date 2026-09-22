@@ -53,7 +53,11 @@ export class InstagramPublisherAdapter implements SocialPublisherAdapter {
     if (input.assetType !== INSTAGRAM_ASSET_TYPE) {
       issues.push({ field: 'assetType', reason: 'unsupported_asset_type' });
     }
-    if (!META_INSTAGRAM_PROFESSIONAL_CAPABILITIES.placements.includes(input.placement)) {
+    if (
+      !META_INSTAGRAM_PROFESSIONAL_CAPABILITIES.placements.includes(
+        input.placement,
+      )
+    ) {
       issues.push({ field: 'placement', reason: 'unsupported_placement' });
     }
     if (!input.mediaAssetIds.length) {
@@ -113,7 +117,9 @@ export class InstagramPublisherAdapter implements SocialPublisherAdapter {
         mediaKind: input.mimeType.startsWith('video/') ? 'video' : 'image',
         placement: input.payload.placement,
         caption:
-          input.mediaCount > 1 || input.payload.placement === 'story' ? null : input.payload.caption,
+          input.mediaCount > 1 || input.payload.placement === 'story'
+            ? null
+            : input.payload.caption,
         carouselItem: input.mediaCount > 1,
         ...this.instagramRequestOptions,
       });
@@ -144,15 +150,22 @@ export class InstagramPublisherAdapter implements SocialPublisherAdapter {
       };
     }
 
-    const decodedMedia = input.preparedMedia.map((entry) => decodeMetaPreparedMediaRef(entry.providerMediaRef));
-    if (!decodedMedia.length || decodedMedia.some((entry) => entry?.kind !== 'instagram_container')) {
+    const decodedMedia = input.preparedMedia.map((entry) =>
+      decodeMetaPreparedMediaRef(entry.providerMediaRef),
+    );
+    if (
+      !decodedMedia.length ||
+      decodedMedia.some((entry) => entry?.kind !== 'instagram_container')
+    ) {
       return {
         outcome: 'failed',
         reason: 'media_rejected',
         code: 'instagram_prepared_media_invalid',
       };
     }
-    const media = decodedMedia.filter((entry): entry is NonNullable<typeof entry> => entry !== null);
+    const media = decodedMedia.filter(
+      (entry): entry is NonNullable<typeof entry> => entry !== null,
+    );
 
     if (media.length > 1) {
       try {
@@ -168,7 +181,7 @@ export class InstagramPublisherAdapter implements SocialPublisherAdapter {
         return metaPublicationFailure(error);
       }
     }
-    return this.progressContainer(input.credential, media[0]!.id);
+    return this.progressContainer(input.credential, media[0].id);
   }
 
   async reconcile(input: ReconciliationInput): Promise<PublicationResult> {

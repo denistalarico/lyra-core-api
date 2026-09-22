@@ -84,7 +84,8 @@ export class MetaOrganicWebhookSignatureService {
         'hex',
       );
       return (
-        received.length === expected.length && timingSafeEqual(received, expected)
+        received.length === expected.length &&
+        timingSafeEqual(received, expected)
       );
     });
     if (!matches) {

@@ -95,5 +95,4 @@ export class MetaInstagramOAuthProvider implements SocialOrganicOAuthProviderHoo
   }) {
     return this.discovery.prepare(input);
   }
-
 }

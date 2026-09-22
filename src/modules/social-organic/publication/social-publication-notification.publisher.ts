@@ -2,17 +2,27 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { AgencyWorkspaceUserEntity } from '../../agency/entities/agency-settings.entities';
-import { NotificationActorType, NotificationInterestReason, NotificationProductKey } from '../../notifications/enums';
+import {
+  NotificationActorType,
+  NotificationInterestReason,
+  NotificationProductKey,
+} from '../../notifications/enums';
 import { NotificationEventProcessorService } from '../../notifications/services';
 import type { NotificationExplicitRecipient } from '../../notifications/types';
 import { PlatformPermissionService } from '../../permissions';
 import { SocialPublicationEntity } from './entities/social-publication.entity';
 
 const AGENCY_CONNECTION = 'agency';
-const VIEW_PUBLICATION_PERMISSION = 'social.publishing.publication.view.assigned';
+const VIEW_PUBLICATION_PERMISSION =
+  'social.publishing.publication.view.assigned';
 type FailedSocialPublication = Pick<
   SocialPublicationEntity,
-  'id' | 'tenantId' | 'workspaceId' | 'agencyClientId' | 'contentItemId' | 'failureReason'
+  | 'id'
+  | 'tenantId'
+  | 'workspaceId'
+  | 'agencyClientId'
+  | 'contentItemId'
+  | 'failureReason'
 >;
 
 /**
@@ -22,7 +32,9 @@ type FailedSocialPublication = Pick<
  */
 @Injectable()
 export class SocialPublicationNotificationPublisher {
-  private readonly logger = new Logger(SocialPublicationNotificationPublisher.name);
+  private readonly logger = new Logger(
+    SocialPublicationNotificationPublisher.name,
+  );
 
   constructor(
     @InjectRepository(AgencyWorkspaceUserEntity, AGENCY_CONNECTION)
@@ -108,7 +120,8 @@ export class SocialPublicationNotificationPublisher {
     );
 
     return recipients.filter(
-      (recipient): recipient is NotificationExplicitRecipient => recipient !== null,
+      (recipient): recipient is NotificationExplicitRecipient =>
+        recipient !== null,
     );
   }
 }

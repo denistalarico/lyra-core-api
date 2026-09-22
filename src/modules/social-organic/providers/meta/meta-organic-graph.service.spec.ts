@@ -263,8 +263,12 @@ describe('MetaOrganicGraphService', () => {
       photoIds: ['photo-1', 'photo-2'],
     });
 
-    expect(body!.get('attached_media[0]')).toBe(JSON.stringify({ media_fbid: 'photo-1' }));
-    expect(body!.get('attached_media[1]')).toBe(JSON.stringify({ media_fbid: 'photo-2' }));
+    expect(body!.get('attached_media[0]')).toBe(
+      JSON.stringify({ media_fbid: 'photo-1' }),
+    );
+    expect(body!.get('attached_media[1]')).toBe(
+      JSON.stringify({ media_fbid: 'photo-2' }),
+    );
   });
 
   it('refuses a provider-supplied video upload URL outside rupload.facebook.com', async () => {

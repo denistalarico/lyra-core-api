@@ -138,6 +138,86 @@ export class SocialOrganicPostMetricDailyEntity {
   profileVisits!: string | null;
 
   /**
+   * SNAPSHOT counters from `/{ig-media-id}/insights`, cumulative since the post
+   * was published. Never summed across days — a reader takes the latest
+   * observation, exactly as it does for the four `*_lifetime` columns below.
+   *
+   * They are deliberately not written into the flow columns of the same name
+   * (`reach`, `shares`, `saves`): those mean "this day's value", and a lifetime
+   * total stored there would be summed by any reader that trusts the column.
+   */
+  @Column({ name: 'reach_lifetime', type: 'bigint', nullable: true })
+  reachLifetime!: string | null;
+
+  @Column({ name: 'saves_lifetime', type: 'bigint', nullable: true })
+  savesLifetime!: string | null;
+
+  @Column({ name: 'shares_lifetime', type: 'bigint', nullable: true })
+  sharesLifetime!: string | null;
+
+  /** Likes + comments + saves + shares, as Meta totals them. */
+  @Column({
+    name: 'total_interactions_lifetime',
+    type: 'bigint',
+    nullable: true,
+  })
+  totalInteractionsLifetime!: string | null;
+
+  @Column({ name: 'profile_visits_lifetime', type: 'bigint', nullable: true })
+  profileVisitsLifetime!: string | null;
+
+  /** Accounts that followed the profile *from* this post. */
+  @Column({ name: 'follows_lifetime', type: 'bigint', nullable: true })
+  followsLifetime!: string | null;
+
+  /**
+   * When the six counters above were observed.
+   *
+   * One column for all of them because one request returns all of them, unlike
+   * the older `*_lifetime` counters, which each carry their own timestamp
+   * because they were added by separate reads.
+   */
+  @Column({ name: 'lifetime_observed_at', type: 'timestamptz', nullable: true })
+  lifetimeObservedAt!: Date | null;
+
+  /**
+   * The post's public URL — stable, unlike the image.
+   *
+   * Meta's CDN image URLs are signed and expire in about five days, so they are
+   * never stored; the thumbnail is re-resolved on demand. This one does not
+   * expire and is what identifies the post to a human.
+   */
+  @Column({ name: 'permalink', type: 'varchar', length: 500, nullable: true })
+  permalink!: string | null;
+
+  /** The caption as published, for recognising the post in a table. */
+  @Column({ name: 'caption', type: 'text', nullable: true })
+  caption!: string | null;
+
+  /** `IMAGE`, `VIDEO`, `CAROUSEL_ALBUM` — Meta's own spelling. */
+  @Column({ name: 'media_type', type: 'varchar', length: 40, nullable: true })
+  mediaType!: string | null;
+
+  /** `FEED`, `REEL`, `STORY` — the surface, which `media_type` does not say. */
+  @Column({
+    name: 'media_product_type',
+    type: 'varchar',
+    length: 40,
+    nullable: true,
+  })
+  mediaProductType!: string | null;
+
+  /**
+   * When the post was published, as the provider reports it.
+   *
+   * Distinct from `metric_date`, which is the day the snapshot was *observed*.
+   * A post published in August still gets a row dated today every time its
+   * lifetime totals are re-read.
+   */
+  @Column({ name: 'published_at', type: 'timestamptz', nullable: true })
+  publishedAt!: Date | null;
+
+  /**
    * SNAPSHOT, not flow — FB `post_media_view`, `period=lifetime`. Never
    * summed/averaged across days; a reader takes the latest observation.
    */

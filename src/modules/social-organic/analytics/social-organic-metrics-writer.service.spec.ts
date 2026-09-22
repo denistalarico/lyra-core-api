@@ -52,6 +52,18 @@ const postRow: NormalizedOrganicPostMetricDaily = {
   commentsLifetimeObservedAt: null,
   videoViewsLifetime: null,
   videoViewsLifetimeObservedAt: null,
+  reachLifetime: null,
+  savesLifetime: null,
+  sharesLifetime: null,
+  totalInteractionsLifetime: null,
+  profileVisitsLifetime: null,
+  followsLifetime: null,
+  lifetimeObservedAt: null,
+  permalink: null,
+  caption: null,
+  mediaType: null,
+  mediaProductType: null,
+  publishedAt: null,
 };
 
 describe('SocialOrganicMetricsWriterService', () => {

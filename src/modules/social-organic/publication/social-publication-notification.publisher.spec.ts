@@ -27,10 +27,14 @@ describe('SocialPublicationNotificationPublisher', () => {
     };
     const permissions = {
       can: jest.fn(({ userId }) => Promise.resolve(userId === 'user-allowed')),
-      canAccessClientProduct: jest.fn(({ userId }) => Promise.resolve(userId === 'user-allowed')),
+      canAccessClientProduct: jest.fn(({ userId }) =>
+        Promise.resolve(userId === 'user-allowed'),
+      ),
       canAccessProduct: jest.fn(),
     };
-    const notifications = { process: jest.fn().mockResolvedValue({ status: 'created' }) };
+    const notifications = {
+      process: jest.fn().mockResolvedValue({ status: 'created' }),
+    };
     const publisher = new SocialPublicationNotificationPublisher(
       workspaceUsers as unknown as Repository<AgencyWorkspaceUserEntity>,
       permissions as unknown as PlatformPermissionService,
@@ -40,7 +44,10 @@ describe('SocialPublicationNotificationPublisher', () => {
     await publisher.publishFailure(publication());
 
     expect(permissions.can).toHaveBeenCalledWith(
-      expect.objectContaining({ tenantId: 'tenant-a', workspaceId: 'workspace-a' }),
+      expect.objectContaining({
+        tenantId: 'tenant-a',
+        workspaceId: 'workspace-a',
+      }),
       'social.publishing.publication.view.assigned',
     );
     expect(permissions.canAccessClientProduct).toHaveBeenCalledWith(
@@ -50,8 +57,12 @@ describe('SocialPublicationNotificationPublisher', () => {
       expect.objectContaining({
         eventType: 'social.publishing.publication_failed',
         productKey: NotificationProductKey.SOCIAL,
-        recipients: [{ userId: 'user-allowed', interestReason: 'responsible_role' }],
-        payload: expect.objectContaining({ actionUrl: '/social/planner/content/content-a' }),
+        recipients: [
+          { userId: 'user-allowed', interestReason: 'responsible_role' },
+        ],
+        payload: expect.objectContaining({
+          actionUrl: '/social/planner/content/content-a',
+        }),
       }),
     );
   });
