@@ -3,7 +3,10 @@ import { IsNull, QueryFailedError } from 'typeorm';
 import type { CompanyAwareScope } from '../../common/context/company-aware-scope';
 import { DASHBOARD_LAYOUT_VERSION } from './dashboard-layout.contract';
 import type { SocialAnalyticsDashboardEntity } from './entities';
-import { SocialAnalyticsDashboardsService } from './social-analytics-dashboards.service';
+import {
+  SEEDED_CHANNEL_DASHBOARDS,
+  SocialAnalyticsDashboardsService,
+} from './social-analytics-dashboards.service';
 
 const scope: CompanyAwareScope = {
   tenantId: '10000000-0000-4000-8000-000000000001',
@@ -23,6 +26,7 @@ function dashboard(
     companyContextId: scope.companyContextId,
     name: 'Desempenho mensal',
     isDefault: false,
+    channelKey: null,
     channels: ['meta_ads'],
     layout: { version: DASHBOARD_LAYOUT_VERSION, sections: [] },
     createdById: null,
@@ -236,14 +240,187 @@ describe('SocialAnalyticsDashboardsService', () => {
       await expect(service.list(scope, null)).resolves.toEqual([]);
     });
 
-    it('does not seed when one already exists', async () => {
-      const builtIn = dashboard({ isDefault: true });
-      const { service, repository } = buildService([builtIn]);
-      repository.findOne.mockResolvedValue(builtIn);
+    it('does not seed when everything already exists', async () => {
+      const rows = [
+        dashboard({ isDefault: true, name: 'Visão Geral' }),
+        ...SEEDED_CHANNEL_DASHBOARDS.map((entry, index) =>
+          dashboard({
+            id: `4000000a-0000-4000-8000-00000000000${index}`,
+            name: entry.name,
+            channelKey: entry.channel,
+            channels: [entry.channel],
+          }),
+        ),
+      ];
+      const { service, repository } = buildService(rows);
+      repository.findOne.mockResolvedValue(rows[0]);
 
       await service.list(scope, null);
 
       expect(repository.save).not.toHaveBeenCalled();
+    });
+
+    it('seeds one editable screen per integrated channel', async () => {
+      // The channel tabs are screens of their own, not a filter over whichever
+      // dashboard is open. Each is a row so it can hold its own layout.
+      const { service, repository } = buildService([]);
+      repository.findOne.mockResolvedValue(null);
+
+      await service.list(scope, null);
+
+      const seededChannels = repository.save.mock.calls
+        .map(([entity]) => (entity as SocialAnalyticsDashboardEntity).channelKey)
+        .filter(Boolean);
+
+      expect(seededChannels).toEqual(['facebook', 'instagram', 'meta_ads']);
+
+      // Google Ads is not seeded: the integration does not exist, and a tab
+      // that can only say "not integrated" is a promise the product does not
+      // keep.
+      expect(seededChannels).not.toContain('google_ads');
+    });
+
+    it('does not promote an operator-made dashboard into a channel screen', async () => {
+      // A dashboard the operator called "Facebook", or any single-channel one
+      // they built, must keep its name and stay deletable. The distinction is
+      // the column, never the name or the channel list.
+      const handMade = dashboard({
+        name: 'Facebook',
+        channelKey: null,
+        channels: ['facebook'],
+      });
+      const { service, repository } = buildService([
+        dashboard({ isDefault: true, name: 'Visão Geral' }),
+        handMade,
+      ]);
+      repository.findOne.mockResolvedValue(null);
+
+      const listed = await service.list(scope, null);
+
+      expect(
+        listed.find((item) => item.id === handMade.id)?.channelKey,
+      ).toBeNull();
+    });
+
+    it('orders the strip: Visão Geral, the channels, then the rest', async () => {
+      // Seeding races in a fresh scope, so creation order would let two
+      // operators see differently ordered tabs for the same context.
+      const rows = [
+        dashboard({ id: 'r-custom', name: 'Meu painel' }),
+        dashboard({
+          id: 'r-meta',
+          name: 'Meta Ads',
+          channelKey: 'meta_ads',
+          channels: ['meta_ads'],
+        }),
+        dashboard({ id: 'r-default', isDefault: true, name: 'Visão Geral' }),
+        dashboard({
+          id: 'r-face',
+          name: 'Facebook',
+          channelKey: 'facebook',
+          channels: ['facebook'],
+        }),
+      ];
+      const { service, repository } = buildService(rows);
+      repository.findOne.mockResolvedValue(rows[2]);
+
+      const listed = await service.list(scope, null);
+
+      expect(listed.map((item) => item.id)).toEqual([
+        'r-default',
+        'r-face',
+        'r-meta',
+        'r-custom',
+      ]);
+    });
+
+    it('keeps listing when a channel name is already taken', async () => {
+      // The operator owns the name; the channel screen simply is not offered.
+      // Failing the whole list over it would take Analytics down.
+      const { service, repository } = buildService([]);
+      repository.findOne.mockResolvedValue(null);
+
+      const violation = new QueryFailedError('', [], new Error('duplicate'));
+      (violation as QueryFailedError & { code?: string }).code = '23505';
+      repository.save.mockRejectedValue(violation);
+
+      await expect(service.list(scope, null)).resolves.toEqual([]);
+    });
+  });
+
+  describe('channel screens are fixed', () => {
+    it('refuses to rename one', async () => {
+      // The name is how the operator finds the channel in the strip, and the
+      // seeder would not replace it because the channel is still taken.
+      const channelScreen = dashboard({
+        name: 'Instagram',
+        channelKey: 'instagram',
+        channels: ['instagram'],
+      });
+      const { service } = buildService([channelScreen]);
+
+      await expect(
+        service.update(scope, channelScreen.id, { name: 'Outro nome' }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('refuses to move one to another channel', async () => {
+      const channelScreen = dashboard({
+        name: 'Instagram',
+        channelKey: 'instagram',
+        channels: ['instagram'],
+      });
+      const { service } = buildService([channelScreen]);
+
+      await expect(
+        service.update(scope, channelScreen.id, { channels: ['facebook'] }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('refuses to delete one', async () => {
+      // The next read would seed it straight back, so the delete would look
+      // like a failure rather than a refusal.
+      const channelScreen = dashboard({
+        name: 'Instagram',
+        channelKey: 'instagram',
+        channels: ['instagram'],
+      });
+      const { service, repository } = buildService([channelScreen]);
+
+      await expect(
+        service.remove(scope, channelScreen.id),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(repository.remove).not.toHaveBeenCalled();
+    });
+
+    it('still accepts a layout edit', async () => {
+      // Fixed identity, fully editable contents — the whole point of the
+      // change. Renaming to the same string is also allowed, so a client that
+      // echoes the current name back is not rejected.
+      const channelScreen = dashboard({
+        name: 'Instagram',
+        channelKey: 'instagram',
+        channels: ['instagram'],
+      });
+      const { service } = buildService([channelScreen]);
+
+      const updated = await service.update(scope, channelScreen.id, {
+        name: 'Instagram',
+        layout: {
+          version: DASHBOARD_LAYOUT_VERSION,
+          sections: [
+            {
+              id: 'section-instagram',
+              channel: 'instagram',
+              title: 'Instagram',
+              cards: [{ id: 'c', kind: 'kpi', size: { w: 3, h: 1 } }],
+            },
+          ],
+        },
+      } as never);
+
+      expect(updated.layout.sections[0].cards).toHaveLength(1);
+      expect(updated.channelKey).toBe('instagram');
     });
   });
 });

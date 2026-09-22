@@ -29,10 +29,33 @@ import { SocialAnalyticsDashboardEntity } from './entities';
 export const DEFAULT_DASHBOARD_ALIAS = 'overview';
 export const DEFAULT_DASHBOARD_NAME = 'Visão Geral';
 
+/**
+ * The channels that get a screen of their own, and what those screens are
+ * called.
+ *
+ * `google_ads` is deliberately absent: the integration does not exist yet, and
+ * a seeded tab that can only ever say "not integrated" is a promise the product
+ * does not keep. It joins the list when the channel does.
+ */
+export const SEEDED_CHANNEL_DASHBOARDS: ReadonlyArray<{
+  channel: DashboardChannelId;
+  name: string;
+}> = [
+  { channel: 'facebook', name: 'Facebook' },
+  { channel: 'instagram', name: 'Instagram' },
+  { channel: 'meta_ads', name: 'Meta Ads' },
+];
+
 export type SocialAnalyticsDashboardView = {
   id: string;
   name: string;
   isDefault: boolean;
+  /**
+   * The channel this row is the fixed screen for, or null for an ordinary
+   * dashboard. The frontend uses it to lock the name and hide the delete
+   * option; it is never derived from `channels`, which an operator can edit.
+   */
+  channelKey: DashboardChannelId | null;
   channels: DashboardChannelId[];
   layout: DashboardLayout;
   createdAt: string;
@@ -61,6 +84,7 @@ export class SocialAnalyticsDashboardsService {
     actorId: string | null,
   ): Promise<SocialAnalyticsDashboardView[]> {
     await this.ensureDefault(scope, actorId);
+    await this.ensureChannelDashboards(scope, actorId);
 
     const rows = await this.dashboards.find({
       where: this.where(scope),
@@ -70,7 +94,30 @@ export class SocialAnalyticsDashboardsService {
       order: { isDefault: 'DESC', createdAt: 'ASC' },
     });
 
-    return rows.map((row) => this.toView(row));
+    // Visão Geral, then the channel screens in catalog order, then whatever the
+    // operator built. Sorting here rather than in SQL because the channel order
+    // is the product's, not the creation order's: seeding runs concurrently in
+    // a fresh scope, so two operators opening Analytics at the same moment
+    // could otherwise end up looking at differently ordered tabs.
+    return rows
+      .map((row) => this.toView(row))
+      .sort((left, right) => this.tabRank(left) - this.tabRank(right));
+  }
+
+  /** Where a dashboard sits in the tab strip. */
+  private tabRank(view: SocialAnalyticsDashboardView): number {
+    if (view.isDefault) return 0;
+
+    if (view.channelKey) {
+      const index = SEEDED_CHANNEL_DASHBOARDS.findIndex(
+        (entry) => entry.channel === view.channelKey,
+      );
+      return index >= 0 ? 1 + index : 1 + SEEDED_CHANNEL_DASHBOARDS.length;
+    }
+
+    // Everything the operator made keeps its creation order, after the fixed
+    // screens. `find` already returned them sorted, and `sort` is stable.
+    return 100;
   }
 
   async create(
@@ -127,10 +174,28 @@ export class SocialAnalyticsDashboardsService {
         throw new BadRequestException('Informe um nome para o dashboard.');
       }
 
+      // A channel screen is identified by its channel, and its name is how the
+      // operator finds that channel in the strip. Renaming "Instagram" to
+      // something else would leave a tab nobody can place, and the seeder would
+      // not create a replacement because the channel is still taken.
+      if (dashboard.channelKey && name !== dashboard.name) {
+        throw new BadRequestException(
+          'O nome de um dashboard de canal não pode ser alterado.',
+        );
+      }
+
       dashboard.name = name;
     }
 
     if (dto.channels !== undefined) {
+      // Same reasoning: the channel is this row's identity. Its layout is fully
+      // editable, its scope is not.
+      if (dashboard.channelKey) {
+        throw new BadRequestException(
+          'Um dashboard de canal não pode mudar de canal.',
+        );
+      }
+
       dashboard.channels = this.normalizeChannels(dto.channels);
     }
 
@@ -157,6 +222,14 @@ export class SocialAnalyticsDashboardsService {
     if (dashboard.isDefault) {
       throw new BadRequestException(
         'O dashboard "Visão Geral" não pode ser excluído.',
+      );
+    }
+
+    // A channel screen would be re-seeded by the next read, so the delete would
+    // appear to fail rather than to be refused. Refusing it says what is true.
+    if (dashboard.channelKey) {
+      throw new BadRequestException(
+        'Os dashboards de canal não podem ser excluídos.',
       );
     }
 
@@ -214,6 +287,55 @@ export class SocialAnalyticsDashboardsService {
     } catch (error) {
       if (!this.isUniqueViolation(error)) throw error;
       // Someone else seeded it between the read and the insert. Nothing to do.
+    }
+  }
+
+  /**
+   * Creates the per-channel screens this scope is missing.
+   *
+   * Read-then-insert per channel, with the unique violation swallowed, for the
+   * same reason `ensureDefault` does it: two operators opening Analytics at the
+   * same moment both see nothing and both insert, and the partial unique index
+   * on `channel_key` is what makes the loser harmless.
+   *
+   * A channel whose screen was deleted directly in the database is re-seeded on
+   * the next read. That is intended — these are fixed screens, and the delete
+   * path already refuses to remove them.
+   */
+  private async ensureChannelDashboards(
+    scope: CompanyAwareScope,
+    actorId: string | null,
+  ): Promise<void> {
+    const existing = await this.dashboards.find({
+      where: this.where(scope),
+      select: ['id', 'channelKey'],
+    });
+    const seeded = new Set(
+      existing.flatMap((row) => (row.channelKey ? [row.channelKey] : [])),
+    );
+
+    for (const entry of SEEDED_CHANNEL_DASHBOARDS) {
+      if (seeded.has(entry.channel)) continue;
+
+      try {
+        await this.dashboards.save(
+          this.dashboards.create({
+            ...this.values(scope),
+            name: entry.name,
+            isDefault: false,
+            channelKey: entry.channel,
+            channels: [entry.channel],
+            layout: emptyDashboardLayout([entry.channel]),
+            createdById: actorId,
+          }),
+        );
+      } catch (error) {
+        // Either another request seeded it first, or the scope already holds an
+        // operator-made dashboard with this name. Both are unique violations and
+        // neither is worth failing the whole list over — the operator keeps the
+        // dashboard they named, and the channel screen is simply not offered.
+        if (!this.isUniqueViolation(error)) throw error;
+      }
     }
   }
 
@@ -286,6 +408,7 @@ export class SocialAnalyticsDashboardsService {
       id: row.id,
       name: row.name,
       isDefault: row.isDefault,
+      channelKey: row.channelKey ?? null,
       channels: row.channels ?? [],
       layout: row.layout ?? emptyDashboardLayout([]),
       createdAt: row.createdAt.toISOString(),

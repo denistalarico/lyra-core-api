@@ -209,6 +209,7 @@ import { CreateSocialApprovals1795100000000 } from './migrations/1795100000000-c
 import { PromoteAgencyOwnedLegacyScope1795200000000 } from './migrations/1795200000000-promote-agency-owned-legacy-scope';
 import { ResolveLegacyInboxSettingsConflict1795300000000 } from './migrations/1795300000000-resolve-legacy-inbox-settings-conflict';
 import { AddSocialOrganicPostIdentity1795400000000 } from './migrations/1795400000000-add-social-organic-post-identity';
+import { AddSocialDashboardChannelKey1795500000000 } from './migrations/1795500000000-add-social-dashboard-channel-key';
 import { ScopeSocialEditorialByCompany1794500000000 } from './migrations/1794500000000-scope-social-editorial-by-company';
 import { ScopeBrandKitByCompany1794510000000 } from './migrations/1794510000000-scope-brand-kit-by-company';
 import { ScopeCreativeStudioByCompany1794520000000 } from './migrations/1794520000000-scope-creative-studio-by-company';
@@ -450,5 +451,6 @@ export const AgencyDataSource = new DataSource({
     PromoteAgencyOwnedLegacyScope1795200000000,
     ResolveLegacyInboxSettingsConflict1795300000000,
     AddSocialOrganicPostIdentity1795400000000,
+    AddSocialDashboardChannelKey1795500000000,
   ],
 });

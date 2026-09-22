@@ -44,6 +44,16 @@ export class SocialAnalyticsDashboardEntity {
   @Column({ name: 'is_default', type: 'boolean', default: false })
   isDefault!: boolean;
 
+  /**
+   * Set when this row is the fixed screen for one channel, null otherwise.
+   *
+   * Written by the seeder and by nothing else. Recognising these rows by name,
+   * or by "one channel and not default", would promote a dashboard the operator
+   * built by hand into an undeletable screen and rename it under them.
+   */
+  @Column({ name: 'channel_key', type: 'varchar', length: 32, nullable: true })
+  channelKey!: DashboardChannelId | null;
+
   @Column({ type: 'jsonb', default: () => `'[]'::jsonb` })
   channels!: DashboardChannelId[];
 
