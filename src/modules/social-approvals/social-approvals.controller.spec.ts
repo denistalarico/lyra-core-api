@@ -7,6 +7,7 @@ import {
   PRODUCT_ENTITLEMENT_METADATA,
 } from '../permissions/decorators/permissions.decorators';
 import { PermissionsGuard } from '../permissions/guards/permissions.guard';
+import type { RequestContext } from '../../common/context/request-context.interface';
 import { SocialApprovalsController } from './social-approvals.controller';
 import type { SocialApprovalsService } from './social-approvals.service';
 
@@ -32,13 +33,20 @@ describe('SocialApprovalsController AP1 Agency boundary', () => {
   });
 
   it('passes a server-resolved company scope and fails closed without it', async () => {
-    const context = {
+    const context: RequestContext = {
       tenantId: 'tenant-a', workspaceId: 'workspace-a', userId: 'user-a',
       managedContext: { productKey: 'social', operatingMode: 'client', clientId: 'client-a', companyContextId: 'company-a', managedTenantId: null },
-    } as never;
+    };
     await controller.list(context, {});
     expect(approvals.list).toHaveBeenCalledWith(expect.objectContaining({ agencyClientId: 'client-a', companyContextId: 'company-a' }), {});
-    expect(() => controller.list({ ...context, managedContext: { ...context.managedContext, companyContextId: null } }, {})).toThrow(BadRequestException);
+    const contextWithoutCompany: RequestContext = {
+      ...context,
+      managedContext: {
+        productKey: 'social', operatingMode: 'client', clientId: 'client-a',
+        companyContextId: null, managedTenantId: null,
+      },
+    };
+    expect(() => controller.list(contextWithoutCompany, {})).toThrow(BadRequestException);
   });
 
   it('exposes no Agency handler capable of submitting a client-stage decision or a caller-supplied actor', () => {
