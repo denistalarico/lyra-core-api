@@ -43,7 +43,10 @@ run('InboxChannelLifecycleService PostgreSQL isolation', () => {
     }
   });
 
-  beforeEach(resetFixtures);
+  beforeEach(async () => {
+    jest.clearAllMocks();
+    await resetFixtures();
+  });
 
   it('serializes concurrent disconnects and atomically preserves history while cancelling work', async () => {
     const channel = await AgencyDataSource.getRepository(
@@ -64,6 +67,7 @@ run('InboxChannelLifecycleService PostgreSQL isolation', () => {
       verifyToken: 'local-verify-token',
       webhookSecret: 'local-webhook-secret',
       aiEnabled: true,
+      scopeKind: 'agency',
       settings: {},
       metadata: {},
     });
@@ -73,6 +77,7 @@ run('InboxChannelLifecycleService PostgreSQL isolation', () => {
       tenantId,
       workspaceId,
       channelId: channel.id,
+      scopeKind: 'agency',
       status: 'open',
       source: 'whatsapp',
       businessMode: 'general',
@@ -210,7 +215,11 @@ run('InboxChannelLifecycleService PostgreSQL isolation', () => {
       ).count(),
     ).toBe(1);
     expect(
-      (await AgencyDataSource.getRepository(InboxDomainOutboxEntity).find())
+      (
+        await AgencyDataSource.getRepository(InboxDomainOutboxEntity).findBy({
+          tenantId,
+        })
+      )
         .map((event) => event.eventName)
         .sort(),
     ).toEqual([
@@ -232,6 +241,7 @@ run('InboxChannelLifecycleService PostgreSQL isolation', () => {
       status: 'active',
       connectionStatus: 'connected',
       aiEnabled: false,
+      scopeKind: 'agency',
       settings: {},
       metadata: {},
     });

@@ -208,9 +208,9 @@ run('Observed attribution summary against PostgreSQL', () => {
       `INSERT INTO inbox_channels
          (id, tenant_id, workspace_id, name, type, provider, status,
           connection_status, lifecycle_version, credential_version,
-          ai_enabled, settings, metadata)
+          ai_enabled, settings, metadata, scope_kind)
        VALUES ($1, $2, $3, 'Canal', $5, $6, 'active', 'connected', 1, 1,
-               false, '{}'::jsonb, $4::jsonb)`,
+               false, '{}'::jsonb, $4::jsonb, 'agency')`,
       [
         id,
         options.tenant ?? tenantId,
@@ -234,10 +234,10 @@ run('Observed attribution summary against PostgreSQL', () => {
          (id, tenant_id, workspace_id, channel_id, status, priority, source,
           business_mode, unread_count, ai_enabled, metadata, created_at,
           updated_at, ownership_state, ownership_version, ownership_changed_at,
-          qualification_status)
+          qualification_status, scope_kind)
        VALUES ($1, $2, $3, $4, 'new', 'normal', 'inbound', 'general', 0, false,
                '{}'::jsonb, $5::timestamptz, $5::timestamptz, 'paused', 1,
-               $5::timestamptz, 'pending')`,
+               $5::timestamptz, 'pending', 'agency')`,
       [
         id,
         options.tenant ?? tenantId,
@@ -324,8 +324,8 @@ run('Observed attribution summary against PostgreSQL', () => {
     const pipelineId = randomUUID();
     const stageId = randomUUID();
     await AgencyDataSource.query(
-      `INSERT INTO crm_pipelines (id, tenant_id, workspace_id, name, metadata)
-       VALUES ($1, $2, $3, 'Pipeline', '{}'::jsonb)`,
+      `INSERT INTO crm_pipelines (id, tenant_id, workspace_id, name, metadata, scope_kind)
+       VALUES ($1, $2, $3, 'Pipeline', '{}'::jsonb, 'agency')`,
       [pipelineId, tenant, workspaceId],
     );
     await AgencyDataSource.query(
@@ -355,10 +355,10 @@ run('Observed attribution summary against PostgreSQL', () => {
          (id, tenant_id, workspace_id, pipeline_id, stage_id, title, status,
           priority, source, business_mode, business_context, currency,
           value_amount, won_at, visibility, metadata, inbox_conversation_id,
-          created_at, updated_at)
+          created_at, updated_at, scope_kind)
        VALUES ($1, $2, $3, $4, $5, 'Deal', $6, 'normal', 'manual', 'general',
                '{}'::jsonb, $7, $8, $9::timestamptz, 'workspace', $10::jsonb,
-               $11, $12::timestamptz, now())`,
+               $11, $12::timestamptz, now(), 'agency')`,
       [
         id,
         options.tenant ?? tenantId,
@@ -1114,11 +1114,11 @@ run('Observed attribution summary against PostgreSQL', () => {
            (id, tenant_id, workspace_id, channel_id, status, priority, source,
             business_mode, unread_count, ai_enabled, metadata, created_at,
             updated_at, ownership_state, ownership_version,
-            ownership_changed_at, qualification_status)
+            ownership_changed_at, qualification_status, scope_kind)
          SELECT gen_random_uuid(), $1, $2, $3, 'new', 'normal', 'inbound',
                 'general', 0, false, '{}'::jsonb,
                 '2026-09-01T00:00:00Z'::timestamptz + (n || ' minutes')::interval,
-                now(), 'paused', 1, now(), 'pending'
+                now(), 'paused', 1, now(), 'pending', 'agency'
          FROM generate_series(1, 4000) n`,
         [tenantId, workspaceId, channelId],
       );

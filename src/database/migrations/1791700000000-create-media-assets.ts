@@ -48,6 +48,8 @@ export class CreateMediaAssets1791700000000 implements MigrationInterface {
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
-    await queryRunner.query(`DROP TABLE IF EXISTS "media_assets"`);
+    // Later migrations may add FKs to this root table. A direct down/up
+    // verification must remove those dependent constraints as well.
+    await queryRunner.query(`DROP TABLE IF EXISTS "media_assets" CASCADE`);
   }
 }

@@ -268,7 +268,11 @@ export class CrmOpportunityCommandService {
     options: CrmCommandOptions = {},
   ): Promise<CrmOpportunityEntity> {
     return this.dataSource.transaction(async (manager) => {
-      const replay = await this.findReplay(manager, ctx, options.idempotencyKey);
+      const replay = await this.findReplay(
+        manager,
+        ctx,
+        options.idempotencyKey,
+      );
       if (replay) return replay;
       const opportunity = await this.findScopedOpportunity(
         manager,
@@ -321,7 +325,11 @@ export class CrmOpportunityCommandService {
     reasonCode: string;
   }> {
     return this.dataSource.transaction(async (manager) => {
-      const replay = await this.findReplay(manager, ctx, options.idempotencyKey);
+      const replay = await this.findReplay(
+        manager,
+        ctx,
+        options.idempotencyKey,
+      );
       if (replay) {
         return {
           opportunity: replay,
@@ -506,6 +514,9 @@ export class CrmOpportunityCommandService {
     const opportunity = manager.getRepository(CrmOpportunityEntity).create({
       tenantId: source.tenantId,
       workspaceId: source.workspaceId,
+      agencyClientId: source.agencyClientId,
+      companyContextId: source.companyContextId,
+      scopeKind: source.scopeKind,
       pipelineId: pipeline.id,
       stageId: stage.id,
       contactId: source.contactId,
@@ -724,6 +735,9 @@ export class CrmOpportunityCommandService {
     const opportunity = manager.getRepository(CrmOpportunityEntity).create({
       tenantId: source.tenantId,
       workspaceId: source.workspaceId,
+      agencyClientId: source.agencyClientId,
+      companyContextId: source.companyContextId,
+      scopeKind: source.scopeKind,
       pipelineId: pipeline.id,
       stageId: stage.id,
       contactId: source.contactId,
@@ -2067,7 +2081,10 @@ export class CrmOpportunityCommandService {
    */
   private isLeadFlowManaged(opportunity: CrmOpportunityEntity): boolean {
     if (opportunity.inboxConversationId) return true;
-    if (typeof opportunity.source === 'string' && opportunity.source.startsWith('leadflow')) {
+    if (
+      typeof opportunity.source === 'string' &&
+      opportunity.source.startsWith('leadflow')
+    ) {
       return true;
     }
     const metadata = opportunity.metadata ?? {};

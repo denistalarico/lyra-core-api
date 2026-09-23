@@ -71,12 +71,14 @@ run('LeadFlowClientSettingsService publish PostgreSQL round trip', () => {
 
   afterAll(async () => {
     await AgencyDataSource.getRepository(
+      LeadFlowBriefingSuggestionApplicationEntity,
+    ).delete({ tenantId });
+    await AgencyDataSource.getRepository(
       LeadFlowBriefingContextSnapshotEntity,
     ).delete({ tenantId });
     await AgencyDataSource.getRepository(
-      LeadFlowBriefingSuggestionApplicationEntity,
-    ).delete({ tenantId });
-    await AgencyDataSource.getRepository(LeadFlowBriefingSuggestionEntity).delete({
+      LeadFlowBriefingSuggestionEntity,
+    ).delete({
       tenantId,
     });
     await AgencyDataSource.getRepository(
@@ -112,7 +114,7 @@ run('LeadFlowClientSettingsService publish PostgreSQL round trip', () => {
       settingsId,
       sourceId: source.id,
       sourceVersionId: version.id,
-      jobKind: `suggestions-${randomUUID()}`,
+      jobKind: `suggestions-${randomUUID().slice(0, 24)}`,
       createdById: null,
     });
     const [suggestion] = await suggestionService.recordSuggestions(ctx(), {

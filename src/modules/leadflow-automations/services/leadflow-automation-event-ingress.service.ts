@@ -85,12 +85,17 @@ export class LeadFlowAutomationEventIngressService implements OnApplicationShutd
     }
   }
 
-  async processPending(limit = 25): Promise<number> {
+  async processPending(
+    limit = 25,
+    scope?: { tenantId: string; workspaceId: string },
+  ): Promise<number> {
     const ids = await this.dataSource.transaction(async (manager) => {
       const rows = await manager.query<Array<{ id: string }>>(
         `SELECT id
            FROM leadflow_event_deliveries
           WHERE consumer_key = $1
+            AND ($3::uuid IS NULL OR tenant_id = $3)
+            AND ($4::uuid IS NULL OR workspace_id = $4)
             AND (
               (status = 'pending' AND available_at <= now())
               OR (status = 'processing' AND locked_at < now() - interval '1 minute')
@@ -98,7 +103,12 @@ export class LeadFlowAutomationEventIngressService implements OnApplicationShutd
           ORDER BY occurred_at, id
           FOR UPDATE SKIP LOCKED
           LIMIT $2`,
-        [LEADFLOW_AUTOMATIONS_EVENT_CONSUMER, Math.max(1, limit)],
+        [
+          LEADFLOW_AUTOMATIONS_EVENT_CONSUMER,
+          Math.max(1, limit),
+          scope?.tenantId ?? null,
+          scope?.workspaceId ?? null,
+        ],
       );
       if (rows.length > 0) {
         await manager

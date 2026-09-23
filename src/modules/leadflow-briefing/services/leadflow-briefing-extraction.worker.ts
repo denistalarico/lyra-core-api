@@ -50,7 +50,8 @@ export class LeadFlowBriefingExtractionWorker {
   private running = false;
 
   constructor(
-    @InjectDataSource(AGENCY_CONNECTION) private readonly dataSource: DataSource,
+    @InjectDataSource(AGENCY_CONNECTION)
+    private readonly dataSource: DataSource,
     private readonly files: FilesService,
     private readonly jobService: LeadFlowBriefingExtractionJobService,
     private readonly suggestionService: LeadFlowBriefingSuggestionService,
@@ -72,17 +73,27 @@ export class LeadFlowBriefingExtractionWorker {
     }
   }
 
-  async processPending(limit = 2): Promise<number> {
+  async processPending(
+    limit = 2,
+    scope?: { tenantId: string; workspaceId: string },
+  ): Promise<number> {
     const ids = await this.dataSource.transaction(async (manager) => {
       const rows = await manager.query<Array<{ id: string }>>(
         `SELECT id
-           FROM leadflow_briefing_extraction_jobs
-          WHERE (status = 'queued' AND available_at <= now())
+          FROM leadflow_briefing_extraction_jobs
+          WHERE ($2::uuid IS NULL OR tenant_id = $2)
+            AND ($3::uuid IS NULL OR workspace_id = $3)
+            AND ((status = 'queued' AND available_at <= now())
              OR (status = 'processing' AND locked_at < now() - interval '${STALE_LEASE_INTERVAL}')
+            )
           ORDER BY available_at, id
           FOR UPDATE SKIP LOCKED
           LIMIT $1`,
-        [Math.max(1, limit)],
+        [
+          Math.max(1, limit),
+          scope?.tenantId ?? null,
+          scope?.workspaceId ?? null,
+        ],
       );
       if (rows.length > 0) {
         await manager
@@ -106,7 +117,9 @@ export class LeadFlowBriefingExtractionWorker {
   }
 
   private async processOne(id: string): Promise<void> {
-    const jobRepo = this.dataSource.getRepository(LeadFlowBriefingExtractionJobEntity);
+    const jobRepo = this.dataSource.getRepository(
+      LeadFlowBriefingExtractionJobEntity,
+    );
     const job = await jobRepo.findOneBy({
       id,
       status: LeadFlowBriefingJobStatus.Processing,
@@ -114,16 +127,26 @@ export class LeadFlowBriefingExtractionWorker {
     });
     if (!job) return;
 
-    const ctx: RequestContext = { tenantId: job.tenantId, workspaceId: job.workspaceId };
+    const ctx: RequestContext = {
+      tenantId: job.tenantId,
+      workspaceId: job.workspaceId,
+    };
     let reservedCents: number | undefined;
 
     try {
       const allowed = await this.permissionService.canAccessProduct(
-        { tenantId: job.tenantId, workspaceId: job.workspaceId, userId: 'system', role: 'system' },
+        {
+          tenantId: job.tenantId,
+          workspaceId: job.workspaceId,
+          userId: 'system',
+          role: 'system',
+        },
         'leadflow',
       );
       if (!allowed)
-        throw new LeadFlowBriefingExtractionError('leadflow_entitlement_inactive');
+        throw new LeadFlowBriefingExtractionError(
+          'leadflow_entitlement_inactive',
+        );
 
       await this.assertWithinDailyBudget(job.tenantId, job.workspaceId);
       reservedCents = this.config.reserveCents;
@@ -139,8 +162,13 @@ export class LeadFlowBriefingExtractionWorker {
             workspaceId: job.workspaceId,
           },
         });
-      if (!version || version.status !== LeadFlowBriefingSourceVersionStatus.Available)
-        throw new LeadFlowBriefingExtractionError('source_version_not_available');
+      if (
+        !version ||
+        version.status !== LeadFlowBriefingSourceVersionStatus.Available
+      )
+        throw new LeadFlowBriefingExtractionError(
+          'source_version_not_available',
+        );
 
       const { text, images } = await this.buildContent(version);
       const fields = getCompanyContextFieldCatalog();
@@ -165,24 +193,38 @@ export class LeadFlowBriefingExtractionWorker {
       });
 
       const actualCents = this.estimateCostCents(result.usage);
-      await this.jobService.transitionJob(ctx, job.id, LeadFlowBriefingJobStatus.Succeeded, {
-        costBudgetCents: actualCents,
-      });
+      await this.jobService.transitionJob(
+        ctx,
+        job.id,
+        LeadFlowBriefingJobStatus.Succeeded,
+        {
+          costBudgetCents: actualCents,
+        },
+      );
     } catch (error) {
       const code = errorCode(error);
       this.logger.error(
         `Extraction job ${job.id} (tenant ${job.tenantId}) failed: ${code}`,
       );
-      await this.jobService.transitionJob(ctx, job.id, LeadFlowBriefingJobStatus.Failed, {
-        lastError: code,
-        ...(reservedCents !== undefined ? { costBudgetCents: reservedCents } : {}),
-      });
+      await this.jobService.transitionJob(
+        ctx,
+        job.id,
+        LeadFlowBriefingJobStatus.Failed,
+        {
+          lastError: code,
+          ...(reservedCents !== undefined
+            ? { costBudgetCents: reservedCents }
+            : {}),
+        },
+      );
 
       const dead = job.attempts >= job.maxAttempts;
       await this.jobService.transitionJob(
         ctx,
         job.id,
-        dead ? LeadFlowBriefingJobStatus.DeadLetter : LeadFlowBriefingJobStatus.Queued,
+        dead
+          ? LeadFlowBriefingJobStatus.DeadLetter
+          : LeadFlowBriefingJobStatus.Queued,
         dead ? {} : { availableAt: this.backoff(job.attempts) },
       );
     }
@@ -190,7 +232,10 @@ export class LeadFlowBriefingExtractionWorker {
 
   private async buildContent(
     version: LeadFlowBriefingSourceVersionEntity,
-  ): Promise<{ text: string; images: Array<{ mimeType: string; bytes: Buffer }> }> {
+  ): Promise<{
+    text: string;
+    images: Array<{ mimeType: string; bytes: Buffer }>;
+  }> {
     const mimeType = version.mimeType ?? '';
 
     if (mimeType === 'application/pdf' && version.objectKey) {
@@ -208,7 +253,10 @@ export class LeadFlowBriefingExtractionWorker {
     }
 
     if (version.rawText != null) {
-      return { text: version.rawText.slice(0, this.config.maxExtractedChars), images: [] };
+      return {
+        text: version.rawText.slice(0, this.config.maxExtractedChars),
+        images: [],
+      };
     }
 
     if (version.objectKey) {
@@ -224,13 +272,19 @@ export class LeadFlowBriefingExtractionWorker {
     throw new LeadFlowBriefingExtractionError('unsupported_source_content');
   }
 
-  private async readObject(objectKey: string, byteSize: string | null): Promise<Buffer> {
+  private async readObject(
+    objectKey: string,
+    byteSize: string | null,
+  ): Promise<Buffer> {
     const maxBytes = byteSize ? Number(byteSize) : Number.MAX_SAFE_INTEGER;
     const file = await this.files.getPrivateAsset(objectKey);
     return streamBuffer(file.body, maxBytes);
   }
 
-  private async assertWithinDailyBudget(tenantId: string, workspaceId: string): Promise<void> {
+  private async assertWithinDailyBudget(
+    tenantId: string,
+    workspaceId: string,
+  ): Promise<void> {
     const rows: Array<{ spent: string }> = await this.dataSource.query(
       `SELECT COALESCE(SUM(cost_budget_cents), 0)::text AS spent
          FROM leadflow_briefing_extraction_jobs
@@ -317,7 +371,9 @@ function htmlToText(html: string): string {
     .replace(/&#x([0-9a-f]+);/gi, (_, hex: string) =>
       String.fromCodePoint(Number.parseInt(hex, 16)),
     )
-    .replace(/&#(\d+);/g, (_, code: string) => String.fromCodePoint(Number(code)))
+    .replace(/&#(\d+);/g, (_, code: string) =>
+      String.fromCodePoint(Number(code)),
+    )
     .replace(
       /&([a-z][a-z0-9]*);/gi,
       (match, name: string) => HTML_ENTITIES[name] ?? match,
@@ -345,7 +401,9 @@ function usableSuggestions(
     if (!allowed.has(suggestion.fieldPath)) continue;
     if (seen.has(suggestion.fieldPath)) continue;
     const value =
-      typeof suggestion.value === 'string' ? suggestion.value.trim() : suggestion.value;
+      typeof suggestion.value === 'string'
+        ? suggestion.value.trim()
+        : suggestion.value;
     if (value === null || value === undefined || value === '') continue;
 
     seen.add(suggestion.fieldPath);
@@ -360,11 +418,16 @@ function usableSuggestions(
   return usable;
 }
 
-async function streamBuffer(stream: Readable, maxBytes: number): Promise<Buffer> {
+async function streamBuffer(
+  stream: Readable,
+  maxBytes: number,
+): Promise<Buffer> {
   const chunks: Buffer[] = [];
   let total = 0;
   for await (const chunk of stream) {
-    const part = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as Uint8Array);
+    const part = Buffer.isBuffer(chunk)
+      ? chunk
+      : Buffer.from(chunk as Uint8Array);
     total += part.length;
     if (total > maxBytes)
       throw new LeadFlowBriefingExtractionError('source_content_size_mismatch');

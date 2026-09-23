@@ -124,8 +124,8 @@ run('LeadFlow agent archive/soft-delete lifecycle PostgreSQL', () => {
     await AgencyDataSource.query(
       `INSERT INTO inbox_channels
         (id,tenant_id,workspace_id,name,type,status,connection_status,provider,
-         ai_enabled,settings,metadata)
-       VALUES ($1,$2,$3,'WhatsApp','whatsapp','active','connected','meta',false,'{}','{}')`,
+         ai_enabled,settings,metadata,scope_kind)
+       VALUES ($1,$2,$3,'WhatsApp','whatsapp','active','connected','meta',false,'{}','{}','agency')`,
       [channelId, tenantId, workspaceId],
     );
     return channelId;
@@ -193,6 +193,7 @@ run('LeadFlow agent archive/soft-delete lifecycle PostgreSQL', () => {
       workspaceId,
       assignedAgentId: agentId,
       status: 'open',
+      scopeKind: 'agency',
     });
 
     await expect(service.softDelete(ctx, agentId)).rejects.toThrow(

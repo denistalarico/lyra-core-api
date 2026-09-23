@@ -23,6 +23,8 @@ run('Inbound Meta referral attribution', () => {
   const tenantId = randomUUID();
   const workspaceId = randomUUID();
   const agencyClientId = randomUUID();
+  const companyContactId = randomUUID();
+  const companyContextId = randomUUID();
 
   const notificationPublisher = {
     publishInboundMessage: jest.fn().mockResolvedValue(undefined),
@@ -65,6 +67,9 @@ run('Inbound Meta referral attribution', () => {
       lifecycleVersion: 1,
       credentialVersion: 1,
       aiEnabled: false,
+      agencyClientId: clientId,
+      companyContextId: clientId ? companyContextId : null,
+      scopeKind: clientId ? 'company' : 'agency',
       settings: {},
       metadata: clientId ? { clientId } : {},
     });
@@ -110,11 +115,43 @@ run('Inbound Meta referral attribution', () => {
 
   beforeAll(async () => {
     await AgencyDataSource.initialize();
+    await AgencyDataSource.query(
+      `INSERT INTO contacts (id, tenant_id, workspace_id, type, display_name)
+       VALUES ($1, $2, $3, 'organization', 'Attribution company')`,
+      [companyContactId, tenantId, workspaceId],
+    );
+    await AgencyDataSource.query(
+      `INSERT INTO agency_clients (id, tenant_id, workspace_id, contact_id, display_name)
+       VALUES ($1, $2, $3, $4, 'Attribution client')`,
+      [agencyClientId, tenantId, workspaceId, companyContactId],
+    );
+    await AgencyDataSource.query(
+      `INSERT INTO agency_client_company_contexts
+        (id, tenant_id, workspace_id, agency_client_id, company_contact_id, status, is_primary)
+       VALUES ($1, $2, $3, $4, $5, 'active', true)`,
+      [
+        companyContextId,
+        tenantId,
+        workspaceId,
+        agencyClientId,
+        companyContactId,
+      ],
+    );
   });
 
   afterAll(async () => {
     if (AgencyDataSource.isInitialized) {
       await resetFixtures();
+      await AgencyDataSource.query(
+        'DELETE FROM agency_client_company_contexts WHERE id = $1',
+        [companyContextId],
+      );
+      await AgencyDataSource.query('DELETE FROM agency_clients WHERE id = $1', [
+        agencyClientId,
+      ]);
+      await AgencyDataSource.query('DELETE FROM contacts WHERE id = $1', [
+        companyContactId,
+      ]);
       await AgencyDataSource.destroy();
     }
   });
@@ -275,7 +312,11 @@ run('Inbound Meta referral attribution', () => {
     const second = await service.ingest(
       inbound({
         occurredAt: new Date('2026-09-02T10:00:00.000Z'),
-        referral: { adId: 'ad-reopen', clickId: 'clid-reopen', sourceType: 'ad' },
+        referral: {
+          adId: 'ad-reopen',
+          clickId: 'clid-reopen',
+          sourceType: 'ad',
+        },
       }),
     );
 
@@ -288,7 +329,11 @@ run('Inbound Meta referral attribution', () => {
   it('freezes the client binding resolved from the channel', async () => {
     await service.ingest(
       inbound({
-        referral: { adId: 'ad-client', clickId: 'clid-client', sourceType: 'ad' },
+        referral: {
+          adId: 'ad-client',
+          clickId: 'clid-client',
+          sourceType: 'ad',
+        },
       }),
     );
 
@@ -310,7 +355,11 @@ run('Inbound Meta referral attribution', () => {
 
     await service.ingest(
       inbound({
-        referral: { adId: 'ad-agency', clickId: 'clid-agency', sourceType: 'ad' },
+        referral: {
+          adId: 'ad-agency',
+          clickId: 'clid-agency',
+          sourceType: 'ad',
+        },
       }),
     );
 
@@ -380,14 +429,20 @@ run('Inbound Meta referral attribution', () => {
   it('keeps the existing inbound behaviour intact alongside the observation', async () => {
     const result = await service.ingest(
       inbound({
-        referral: { adId: 'ad-intact', clickId: 'clid-intact', sourceType: 'ad' },
+        referral: {
+          adId: 'ad-intact',
+          clickId: 'clid-intact',
+          sourceType: 'ad',
+        },
       }),
     );
 
     expect(result.deduplicated).toBe(false);
     expect(result.message.direction).toBe('inbound');
     expect(result.conversation.lastMessagePreview).toBe('Vim pelo anúncio');
-    expect(notificationPublisher.publishInboundMessage).toHaveBeenCalledTimes(1);
+    expect(notificationPublisher.publishInboundMessage).toHaveBeenCalledTimes(
+      1,
+    );
 
     const events = await AgencyDataSource.query(
       `SELECT event_type FROM inbox_conversation_events

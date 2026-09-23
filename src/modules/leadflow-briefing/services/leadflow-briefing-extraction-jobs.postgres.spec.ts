@@ -36,7 +36,9 @@ run('LeadFlow Briefing extraction jobs PostgreSQL', () => {
     );
     sourceService = new LeadFlowBriefingSourceService(AgencyDataSource);
 
-    const settings = await AgencyDataSource.getRepository(LeadFlowClientSettingsEntity).save({
+    const settings = await AgencyDataSource.getRepository(
+      LeadFlowClientSettingsEntity,
+    ).save({
       tenantId,
       workspaceId,
       contextType: LeadFlowSettingsContextType.Agency,
@@ -64,14 +66,22 @@ run('LeadFlow Briefing extraction jobs PostgreSQL', () => {
   });
 
   afterAll(async () => {
-    await AgencyDataSource.getRepository(LeadFlowBriefingExtractionJobEntity).delete({
+    await AgencyDataSource.getRepository(
+      LeadFlowBriefingExtractionJobEntity,
+    ).delete({
       tenantId,
     });
-    await AgencyDataSource.getRepository(LeadFlowBriefingSourceVersionEntity).delete({
+    await AgencyDataSource.getRepository(
+      LeadFlowBriefingSourceVersionEntity,
+    ).delete({
       tenantId,
     });
-    await AgencyDataSource.getRepository(LeadFlowBriefingSourceEntity).delete({ tenantId });
-    await AgencyDataSource.getRepository(LeadFlowClientSettingsEntity).delete({ tenantId });
+    await AgencyDataSource.getRepository(LeadFlowBriefingSourceEntity).delete({
+      tenantId,
+    });
+    await AgencyDataSource.getRepository(LeadFlowClientSettingsEntity).delete({
+      tenantId,
+    });
   });
 
   it('enqueues a job idempotently: the same (source_version_id, job_kind) twice returns the same row', async () => {
@@ -90,14 +100,18 @@ run('LeadFlow Briefing extraction jobs PostgreSQL', () => {
 
     expect(second.id).toBe(first.id);
 
-    const count = await AgencyDataSource.getRepository(LeadFlowBriefingExtractionJobEntity).count({
+    const count = await AgencyDataSource.getRepository(
+      LeadFlowBriefingExtractionJobEntity,
+    ).count({
       where: { tenantId, workspaceId, sourceVersionId },
     });
     expect(count).toBe(1);
   });
 
   it('rejects a direct duplicate idempotency-key insert at the DB level', async () => {
-    const repo = AgencyDataSource.getRepository(LeadFlowBriefingExtractionJobEntity);
+    const repo = AgencyDataSource.getRepository(
+      LeadFlowBriefingExtractionJobEntity,
+    );
     const key = `manual-dup-${randomUUID()}`;
     await repo.save(
       repo.create({
@@ -129,7 +143,7 @@ run('LeadFlow Briefing extraction jobs PostgreSQL', () => {
       settingsId,
       sourceId,
       sourceVersionId,
-      jobKind: `lifecycle-${randomUUID()}`,
+      jobKind: `lifecycle-${randomUUID().slice(0, 24)}`,
       createdById: null,
     });
 
@@ -154,12 +168,16 @@ run('LeadFlow Briefing extraction jobs PostgreSQL', () => {
       settingsId,
       sourceId,
       sourceVersionId,
-      jobKind: `illegal-${randomUUID()}`,
+      jobKind: `illegal-${randomUUID().slice(0, 24)}`,
       createdById: null,
     });
 
     await expect(
-      jobService.transitionJob(ctx(), enqueued.id, LeadFlowBriefingJobStatus.Succeeded),
+      jobService.transitionJob(
+        ctx(),
+        enqueued.id,
+        LeadFlowBriefingJobStatus.Succeeded,
+      ),
     ).rejects.toThrow();
   });
 
@@ -168,19 +186,25 @@ run('LeadFlow Briefing extraction jobs PostgreSQL', () => {
       settingsId,
       sourceId,
       sourceVersionId,
-      jobKind: `claimable-${randomUUID()}`,
+      jobKind: `claimable-${randomUUID().slice(0, 24)}`,
       createdById: null,
     });
     const locked = await jobService.enqueueJob(ctx(), {
       settingsId,
       sourceId,
       sourceVersionId,
-      jobKind: `locked-${randomUUID()}`,
+      jobKind: `locked-${randomUUID().slice(0, 24)}`,
       createdById: null,
     });
-    await jobService.transitionJob(ctx(), locked.id, LeadFlowBriefingJobStatus.Processing);
+    await jobService.transitionJob(
+      ctx(),
+      locked.id,
+      LeadFlowBriefingJobStatus.Processing,
+    );
 
-    const repo = AgencyDataSource.getRepository(LeadFlowBriefingExtractionJobEntity);
+    const repo = AgencyDataSource.getRepository(
+      LeadFlowBriefingExtractionJobEntity,
+    );
     const claimable = await jobService.findClaimableJobs(repo);
     const claimableIds = claimable
       .filter((job) => job.tenantId === tenantId)

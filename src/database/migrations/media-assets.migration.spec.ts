@@ -76,7 +76,7 @@ describe('media assets migration', () => {
       new CreateMediaAssets1791700000000().down(queryRunner),
     );
 
-    expect(sql.trim()).toBe('DROP TABLE IF EXISTS "media_assets"');
+    expect(sql.trim()).toBe('DROP TABLE IF EXISTS "media_assets" CASCADE');
   });
 });
 

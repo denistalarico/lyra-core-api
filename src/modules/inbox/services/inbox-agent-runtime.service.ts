@@ -910,9 +910,17 @@ export class InboxAgentRuntimeService {
           });
         const decisionId = randomUUID();
         await manager.query(
-          `INSERT INTO inbox_autonomy_controls (tenant_id,workspace_id)
-           VALUES ($1,$2) ON CONFLICT (tenant_id,workspace_id) DO NOTHING`,
-          [batch.tenantId, batch.workspaceId],
+          `INSERT INTO inbox_autonomy_controls
+             (tenant_id,workspace_id,agency_client_id,company_context_id,scope_kind)
+           VALUES ($1,$2,$3,$4,$5)
+           ON CONFLICT DO NOTHING`,
+          [
+            batch.tenantId,
+            batch.workspaceId,
+            lockedConversation.agencyClientId,
+            lockedConversation.companyContextId,
+            lockedConversation.scopeKind,
+          ],
         );
         if (lockedConversation.businessMode !== effectiveBusinessMode) {
           lockedConversation.businessMode = effectiveBusinessMode;

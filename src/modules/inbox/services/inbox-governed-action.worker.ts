@@ -659,6 +659,9 @@ export class InboxGovernedActionWorker
         .create({
           tenantId: action.tenantId,
           workspaceId: action.workspaceId,
+          agencyClientId: conversation.agencyClientId,
+          companyContextId: conversation.companyContextId,
+          scopeKind: conversation.scopeKind,
           pipelineId: pipeline.id,
           stageId: stage.id,
           contactId: conversation.contactId,
@@ -1167,9 +1170,18 @@ export class InboxGovernedActionWorker
     column: 'crm_enabled' | 'handoff_enabled',
   ) {
     const rows = await manager.query<Array<{ enabled: boolean }>>(
-      `SELECT ${column} enabled FROM inbox_autonomy_controls
-        WHERE tenant_id=$1 AND workspace_id=$2 FOR SHARE`,
-      [action.tenantId, action.workspaceId],
+      `SELECT control.${column} enabled
+         FROM inbox_autonomy_controls control
+         JOIN inbox_conversations conversation
+           ON conversation.id=$3
+          AND conversation.tenant_id=$1
+          AND conversation.workspace_id=$2
+        WHERE control.tenant_id=$1 AND control.workspace_id=$2
+          AND control.scope_kind=conversation.scope_kind
+          AND control.agency_client_id IS NOT DISTINCT FROM conversation.agency_client_id
+          AND control.company_context_id IS NOT DISTINCT FROM conversation.company_context_id
+        FOR SHARE`,
+      [action.tenantId, action.workspaceId, action.conversationId],
     );
     if (rows[0] && !rows[0].enabled) throw new Error('effect_kill_switch');
   }

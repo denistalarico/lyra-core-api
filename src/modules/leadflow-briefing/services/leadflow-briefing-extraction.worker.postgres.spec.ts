@@ -49,7 +49,12 @@ run('LeadFlowBriefingExtractionWorker PostgreSQL', () => {
 
   const ctx = () => ({ tenantId, workspaceId, userId: randomUUID() });
 
-  function makeWorker(opts: { entitlementAllowed?: boolean; configOverrides?: Record<string, unknown> } = {}) {
+  function makeWorker(
+    opts: {
+      entitlementAllowed?: boolean;
+      configOverrides?: Record<string, unknown>;
+    } = {},
+  ) {
     const provider = new LeadFlowBriefingExtractionProvider(
       fakeExtractionConfig(opts.configOverrides),
     );
@@ -64,7 +69,9 @@ run('LeadFlowBriefingExtractionWorker PostgreSQL', () => {
     );
   }
 
-  async function makeQueuedJob(overrides: { attempts?: number; maxAttempts?: number } = {}) {
+  async function makeQueuedJob(
+    overrides: { attempts?: number; maxAttempts?: number } = {},
+  ) {
     const source = await sourceService.createSource(ctx(), {
       settingsId,
       contextType: LeadFlowSettingsContextType.Agency,
@@ -86,11 +93,13 @@ run('LeadFlowBriefingExtractionWorker PostgreSQL', () => {
       settingsId,
       sourceId: source.id,
       sourceVersionId: version.id,
-      jobKind: `worker-test-${randomUUID()}`,
+      jobKind: `worker-test-${randomUUID().slice(0, 24)}`,
       createdById: null,
     });
     if (overrides.attempts || overrides.maxAttempts) {
-      await AgencyDataSource.getRepository(LeadFlowBriefingExtractionJobEntity).update(
+      await AgencyDataSource.getRepository(
+        LeadFlowBriefingExtractionJobEntity,
+      ).update(
         { id: job.id },
         {
           attempts: overrides.attempts ?? 0,
@@ -113,7 +122,9 @@ run('LeadFlowBriefingExtractionWorker PostgreSQL', () => {
       new CompanyContextService(),
     );
 
-    const settings = await AgencyDataSource.getRepository(LeadFlowClientSettingsEntity).save({
+    const settings = await AgencyDataSource.getRepository(
+      LeadFlowClientSettingsEntity,
+    ).save({
       tenantId,
       workspaceId,
       contextType: LeadFlowSettingsContextType.Agency,
@@ -123,26 +134,40 @@ run('LeadFlowBriefingExtractionWorker PostgreSQL', () => {
   });
 
   afterAll(async () => {
-    await AgencyDataSource.getRepository(LeadFlowBriefingSuggestionEntity).delete({ tenantId });
-    await AgencyDataSource.getRepository(LeadFlowBriefingExtractionJobEntity).delete({ tenantId });
-    await AgencyDataSource.getRepository(LeadFlowBriefingSourceVersionEntity).delete({ tenantId });
-    await AgencyDataSource.getRepository(LeadFlowBriefingSourceEntity).delete({ tenantId });
-    await AgencyDataSource.getRepository(LeadFlowClientSettingsEntity).delete({ tenantId });
+    await AgencyDataSource.getRepository(
+      LeadFlowBriefingSuggestionEntity,
+    ).delete({ tenantId });
+    await AgencyDataSource.getRepository(
+      LeadFlowBriefingExtractionJobEntity,
+    ).delete({ tenantId });
+    await AgencyDataSource.getRepository(
+      LeadFlowBriefingSourceVersionEntity,
+    ).delete({ tenantId });
+    await AgencyDataSource.getRepository(LeadFlowBriefingSourceEntity).delete({
+      tenantId,
+    });
+    await AgencyDataSource.getRepository(LeadFlowClientSettingsEntity).delete({
+      tenantId,
+    });
   });
 
   it('claims a due queued job, records real suggestions, and marks it Succeeded', async () => {
     const { jobId } = await makeQueuedJob();
     const worker = makeWorker();
 
-    const claimed = await worker.processPending(5);
+    const claimed = await worker.processPending(5, { tenantId, workspaceId });
     expect(claimed).toBeGreaterThanOrEqual(1);
 
-    const job = await AgencyDataSource.getRepository(LeadFlowBriefingExtractionJobEntity).findOneBy({
+    const job = await AgencyDataSource.getRepository(
+      LeadFlowBriefingExtractionJobEntity,
+    ).findOneBy({
       id: jobId,
     });
     expect(job?.status).toBe(LeadFlowBriefingJobStatus.Succeeded);
 
-    const suggestions = await AgencyDataSource.getRepository(LeadFlowBriefingSuggestionEntity).find({
+    const suggestions = await AgencyDataSource.getRepository(
+      LeadFlowBriefingSuggestionEntity,
+    ).find({
       where: { extractionJobId: jobId },
     });
     expect(suggestions.length).toBeGreaterThan(0);
@@ -150,7 +175,9 @@ run('LeadFlowBriefingExtractionWorker PostgreSQL', () => {
 
   it('reclaims a stale (lease-expired) processing job instead of leaving it stuck', async () => {
     const { jobId } = await makeQueuedJob();
-    await AgencyDataSource.getRepository(LeadFlowBriefingExtractionJobEntity).update(
+    await AgencyDataSource.getRepository(
+      LeadFlowBriefingExtractionJobEntity,
+    ).update(
       { id: jobId },
       {
         status: LeadFlowBriefingJobStatus.Processing,
@@ -161,10 +188,12 @@ run('LeadFlowBriefingExtractionWorker PostgreSQL', () => {
     );
 
     const worker = makeWorker();
-    const claimed = await worker.processPending(5);
+    const claimed = await worker.processPending(5, { tenantId, workspaceId });
     expect(claimed).toBeGreaterThanOrEqual(1);
 
-    const job = await AgencyDataSource.getRepository(LeadFlowBriefingExtractionJobEntity).findOneBy({
+    const job = await AgencyDataSource.getRepository(
+      LeadFlowBriefingExtractionJobEntity,
+    ).findOneBy({
       id: jobId,
     });
     expect(job?.status).toBe(LeadFlowBriefingJobStatus.Succeeded);
@@ -176,9 +205,14 @@ run('LeadFlowBriefingExtractionWorker PostgreSQL', () => {
     const workerA = makeWorker();
     const workerB = makeWorker();
 
-    await Promise.all([workerA.processPending(5), workerB.processPending(5)]);
+    await Promise.all([
+      workerA.processPending(5, { tenantId, workspaceId }),
+      workerB.processPending(5, { tenantId, workspaceId }),
+    ]);
 
-    const job = await AgencyDataSource.getRepository(LeadFlowBriefingExtractionJobEntity).findOneBy({
+    const job = await AgencyDataSource.getRepository(
+      LeadFlowBriefingExtractionJobEntity,
+    ).findOneBy({
       id: jobId,
     });
     expect(job?.status).toBe(LeadFlowBriefingJobStatus.Succeeded);
@@ -189,9 +223,11 @@ run('LeadFlowBriefingExtractionWorker PostgreSQL', () => {
     const { jobId } = await makeQueuedJob({ attempts: 4, maxAttempts: 5 });
     const worker = makeWorker({ entitlementAllowed: false });
 
-    await worker.processPending(5);
+    await worker.processPending(5, { tenantId, workspaceId });
 
-    const job = await AgencyDataSource.getRepository(LeadFlowBriefingExtractionJobEntity).findOneBy({
+    const job = await AgencyDataSource.getRepository(
+      LeadFlowBriefingExtractionJobEntity,
+    ).findOneBy({
       id: jobId,
     });
     expect(job?.status).toBe(LeadFlowBriefingJobStatus.DeadLetter);

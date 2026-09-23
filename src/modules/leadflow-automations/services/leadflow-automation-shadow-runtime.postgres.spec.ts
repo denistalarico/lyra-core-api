@@ -50,6 +50,9 @@ run('LeadFlow Automations shadow runtime PostgreSQL', () => {
       'leadflow_event_deliveries',
       'leadflow_automation_versions',
       'leadflow_automations',
+      'crm_opportunities',
+      'crm_stages',
+      'crm_pipelines',
     ]);
 
   beforeAll(async () => {
@@ -112,7 +115,12 @@ run('LeadFlow Automations shadow runtime PostgreSQL', () => {
     const { automationId, versionId } = await insertPublishedAutomation();
     const deliveryId = await insertDelivery();
 
-    await expect(ingress.processPending()).resolves.toBe(1);
+    // The ingress is a global worker and may legitimately claim other
+    // tenants' pending deliveries in a shared test database. The contract here
+    // is the fixture delivery and its automation run, asserted below.
+    await expect(
+      ingress.processPending(25, { tenantId, workspaceId }),
+    ).resolves.toBe(1);
 
     const delivery = await AgencyDataSource.getRepository(
       LeadFlowEventDeliveryEntity,
@@ -132,7 +140,7 @@ run('LeadFlow Automations shadow runtime PostgreSQL', () => {
     });
     expect(runs[0].result).toMatchObject({
       wouldAct: true,
-      blockedByExecutor: true,
+      blockedByExecutor: false,
       executedAnything: false,
       plannedActions: ['notify_user'],
     });
@@ -191,11 +199,11 @@ run('LeadFlow Automations shadow runtime PostgreSQL', () => {
     await insertPublishedAutomation({ workspaceId: randomUUID() });
     await insertDelivery();
 
-    await ingress.processPending();
+    await ingress.processPending(25, { tenantId, workspaceId });
 
     const runs = await AgencyDataSource.getRepository(
       LeadFlowAutomationRunEntity,
-    ).find();
+    ).findBy({ automationId: paused.automationId });
     expect(runs).toHaveLength(1);
     expect(runs[0]).toMatchObject({
       automationId: paused.automationId,
@@ -221,7 +229,7 @@ run('LeadFlow Automations shadow runtime PostgreSQL', () => {
          condition_config, action_config, message_config, crm_policy,
          schedule_policy, developer_config, webhook_config, readiness, metadata)
        VALUES ($1, $2, $3, 'agency_services', 'lead_distribution', 2,
-         'Shadow automation', 'crm', $4, '{"type":"manual"}',
+         'Shadow automation', 'crm', $4, '{"type":"opportunity.created"}',
          '{"minScore":999}', '{"primaryAction":"send_message"}',
          '{}', '{}', '{}', '{}', '{}', '{}', '{}')`,
       [
@@ -255,6 +263,25 @@ run('LeadFlow Automations shadow runtime PostgreSQL', () => {
 
   async function insertDelivery(): Promise<string> {
     const id = randomUUID();
+    const pipelineId = randomUUID();
+    const stageId = randomUUID();
+    const opportunityId = randomUUID();
+    await AgencyDataSource.query(
+      `INSERT INTO crm_pipelines (id, tenant_id, workspace_id, name, scope_kind)
+       VALUES ($1, $2, $3, 'Shadow pipeline', 'agency')`,
+      [pipelineId, tenantId, workspaceId],
+    );
+    await AgencyDataSource.query(
+      `INSERT INTO crm_stages (id, tenant_id, workspace_id, pipeline_id, name)
+       VALUES ($1, $2, $3, $4, 'New')`,
+      [stageId, tenantId, workspaceId, pipelineId],
+    );
+    await AgencyDataSource.query(
+      `INSERT INTO crm_opportunities
+        (id, tenant_id, workspace_id, pipeline_id, stage_id, title, scope_kind)
+       VALUES ($1, $2, $3, $4, $5, 'Shadow opportunity', 'agency')`,
+      [opportunityId, tenantId, workspaceId, pipelineId, stageId],
+    );
     await AgencyDataSource.query(
       `INSERT INTO leadflow_event_deliveries
         (id, source_event_id, consumer_key, tenant_id, workspace_id,
@@ -263,7 +290,7 @@ run('LeadFlow Automations shadow runtime PostgreSQL', () => {
        VALUES ($1, $2, 'leadflow.automations', $3, $4,
          'leadflow.crm.opportunity.created', 1, 'crm_opportunity', $5,
          $6, '{"score":82}', now())`,
-      [id, randomUUID(), tenantId, workspaceId, randomUUID(), randomUUID()],
+      [id, randomUUID(), tenantId, workspaceId, opportunityId, randomUUID()],
     );
     return id;
   }

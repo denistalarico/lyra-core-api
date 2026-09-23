@@ -53,7 +53,7 @@ run('LeadFlow Briefing suggestion applications PostgreSQL', () => {
       settingsId,
       sourceId: source.id,
       sourceVersionId: version.id,
-      jobKind: `apply-${randomUUID()}`,
+      jobKind: `apply-${randomUUID().slice(0, 24)}`,
       createdById: null,
     });
     return { source, version, job };
@@ -71,7 +71,9 @@ run('LeadFlow Briefing suggestion applications PostgreSQL', () => {
       new CompanyContextService(),
     );
 
-    const settings = await AgencyDataSource.getRepository(LeadFlowClientSettingsEntity).save({
+    const settings = await AgencyDataSource.getRepository(
+      LeadFlowClientSettingsEntity,
+    ).save({
       tenantId,
       workspaceId,
       contextType: LeadFlowSettingsContextType.Agency,
@@ -81,21 +83,35 @@ run('LeadFlow Briefing suggestion applications PostgreSQL', () => {
   });
 
   afterAll(async () => {
-    await AgencyDataSource.getRepository(LeadFlowBriefingSuggestionApplicationEntity).delete({
+    await AgencyDataSource.getRepository(
+      LeadFlowBriefingSuggestionApplicationEntity,
+    ).delete({
       tenantId,
     });
-    await AgencyDataSource.getRepository(LeadFlowBriefingContextSnapshotEntity).delete({
+    await AgencyDataSource.getRepository(
+      LeadFlowBriefingContextSnapshotEntity,
+    ).delete({
       tenantId,
     });
-    await AgencyDataSource.getRepository(LeadFlowBriefingSuggestionEntity).delete({ tenantId });
-    await AgencyDataSource.getRepository(LeadFlowBriefingExtractionJobEntity).delete({
+    await AgencyDataSource.getRepository(
+      LeadFlowBriefingSuggestionEntity,
+    ).delete({ tenantId });
+    await AgencyDataSource.getRepository(
+      LeadFlowBriefingExtractionJobEntity,
+    ).delete({
       tenantId,
     });
-    await AgencyDataSource.getRepository(LeadFlowBriefingSourceVersionEntity).delete({
+    await AgencyDataSource.getRepository(
+      LeadFlowBriefingSourceVersionEntity,
+    ).delete({
       tenantId,
     });
-    await AgencyDataSource.getRepository(LeadFlowBriefingSourceEntity).delete({ tenantId });
-    await AgencyDataSource.getRepository(LeadFlowClientSettingsEntity).delete({ tenantId });
+    await AgencyDataSource.getRepository(LeadFlowBriefingSourceEntity).delete({
+      tenantId,
+    });
+    await AgencyDataSource.getRepository(LeadFlowClientSettingsEntity).delete({
+      tenantId,
+    });
   });
 
   it('applies a pending suggestion, writing only the targeted field', async () => {
@@ -104,7 +120,9 @@ run('LeadFlow Briefing suggestion applications PostgreSQL', () => {
       extractionJobId: job.id,
       settingsId,
       sourceVersionId: version.id,
-      suggestions: [{ fieldPath: 'identity.publicName', suggestedValue: 'Loja Demo' }],
+      suggestions: [
+        { fieldPath: 'identity.publicName', suggestedValue: 'Loja Demo' },
+      ],
     });
 
     const application = await suggestionService.applySuggestion(ctx(), {
@@ -113,12 +131,15 @@ run('LeadFlow Briefing suggestion applications PostgreSQL', () => {
     });
 
     expect(application.fieldPath).toBe('identity.publicName');
-    const settings = await AgencyDataSource.getRepository(LeadFlowClientSettingsEntity).findOne({
+    const settings = await AgencyDataSource.getRepository(
+      LeadFlowClientSettingsEntity,
+    ).findOne({
       where: { id: settingsId },
     });
-    expect((settings?.companyContextDraft as { identity: { publicName: string } }).identity.publicName).toBe(
-      'Loja Demo',
-    );
+    expect(
+      (settings?.companyContextDraft as { identity: { publicName: string } })
+        .identity.publicName,
+    ).toBe('Loja Demo');
 
     const snapshot = await AgencyDataSource.getRepository(
       LeadFlowBriefingContextSnapshotEntity,
@@ -132,7 +153,9 @@ run('LeadFlow Briefing suggestion applications PostgreSQL', () => {
       extractionJobId: job.id,
       settingsId,
       sourceVersionId: version.id,
-      suggestions: [{ fieldPath: 'identity.legalName', suggestedValue: 'Loja Demo LTDA' }],
+      suggestions: [
+        { fieldPath: 'identity.legalName', suggestedValue: 'Loja Demo LTDA' },
+      ],
     });
 
     await suggestionService.applySuggestion(ctx(), {
@@ -154,7 +177,9 @@ run('LeadFlow Briefing suggestion applications PostgreSQL', () => {
       extractionJobId: job.id,
       settingsId,
       sourceVersionId: version.id,
-      suggestions: [{ fieldPath: 'service.businessHours', suggestedValue: '9-18' }],
+      suggestions: [
+        { fieldPath: 'service.businessHours', suggestedValue: '9-18' },
+      ],
     });
 
     await suggestionService.rejectSuggestion(ctx(), {
@@ -176,17 +201,23 @@ run('LeadFlow Briefing suggestion applications PostgreSQL', () => {
       extractionJobId: job.id,
       settingsId,
       sourceVersionId: version.id,
-      suggestions: [{ fieldPath: 'service.serviceLevel', suggestedValue: 'premium' }],
+      suggestions: [
+        { fieldPath: 'service.serviceLevel', suggestedValue: 'premium' },
+      ],
     });
 
-    const before = await AgencyDataSource.getRepository(LeadFlowClientSettingsEntity).findOne({
+    const before = await AgencyDataSource.getRepository(
+      LeadFlowClientSettingsEntity,
+    ).findOne({
       where: { id: settingsId },
     });
     await suggestionService.rejectSuggestion(ctx(), {
       suggestionId: suggestion.id,
       decidedById: randomUUID(),
     });
-    const after = await AgencyDataSource.getRepository(LeadFlowClientSettingsEntity).findOne({
+    const after = await AgencyDataSource.getRepository(
+      LeadFlowClientSettingsEntity,
+    ).findOne({
       where: { id: settingsId },
     });
 
@@ -208,7 +239,9 @@ run('LeadFlow Briefing suggestion applications PostgreSQL', () => {
       extractionJobId: job.id,
       settingsId,
       sourceVersionId: version.id,
-      suggestions: [{ fieldPath: 'identity.timezone', suggestedValue: 'America/Sao_Paulo' }],
+      suggestions: [
+        { fieldPath: 'identity.timezone', suggestedValue: 'America/Sao_Paulo' },
+      ],
     });
     await suggestionService.applySuggestion(ctx(), {
       suggestionId: suggestion.id,
@@ -232,7 +265,12 @@ run('LeadFlow Briefing suggestion applications PostgreSQL', () => {
       extractionJobId: job.id,
       settingsId,
       sourceVersionId: version.id,
-      suggestions: [{ fieldPath: 'identity.differentiators', suggestedValue: 'Atendimento 24h' }],
+      suggestions: [
+        {
+          fieldPath: 'identity.differentiators',
+          suggestedValue: 'Atendimento 24h',
+        },
+      ],
     });
     const firstApplication = await suggestionService.applySuggestion(ctx(), {
       suggestionId: suggestion.id,
@@ -244,7 +282,9 @@ run('LeadFlow Briefing suggestion applications PostgreSQL', () => {
       extractionJobId: job2.id,
       settingsId,
       sourceVersionId: version2.id,
-      suggestions: [{ fieldPath: 'identity.targetAudience', suggestedValue: 'PMEs' }],
+      suggestions: [
+        { fieldPath: 'identity.targetAudience', suggestedValue: 'PMEs' },
+      ],
     });
     await suggestionService.applySuggestion(ctx(), {
       suggestionId: suggestion2.id,
@@ -256,8 +296,11 @@ run('LeadFlow Briefing suggestion applications PostgreSQL', () => {
     ).findOne({ where: { id: firstApplication.resultingSnapshotId } });
     expect(firstSnapshotStillThere).not.toBeNull();
     expect(
-      (firstSnapshotStillThere?.draftValue as { identity: { differentiators: string } }).identity
-        .differentiators,
+      (
+        firstSnapshotStillThere?.draftValue as {
+          identity: { differentiators: string };
+        }
+      ).identity.differentiators,
     ).toBe('Atendimento 24h');
   });
 
@@ -280,7 +323,7 @@ run('LeadFlow Briefing suggestion applications PostgreSQL', () => {
       settingsId,
       sourceId: source.id,
       sourceVersionId: v1.id,
-      jobKind: `e2e-v1-${randomUUID()}`,
+      jobKind: `e2e-v1-${randomUUID().slice(0, 24)}`,
       createdById: null,
     });
 
@@ -288,16 +331,19 @@ run('LeadFlow Briefing suggestion applications PostgreSQL', () => {
     const fieldB = 'policies'; // applied, untouched by v2
     const fieldC = 'legacyTone'; // stays pending, then superseded by v2
 
-    const [suggA1, suggB1, suggC1] = await suggestionService.recordSuggestions(ctx(), {
-      extractionJobId: jobV1.id,
-      settingsId,
-      sourceVersionId: v1.id,
-      suggestions: [
-        { fieldPath: fieldA, suggestedValue: ['https://example.com'] },
-        { fieldPath: fieldB, suggestedValue: 'Sem reembolso após 7 dias' },
-        { fieldPath: fieldC, suggestedValue: 'consultivo' },
-      ],
-    });
+    const [suggA1, suggB1, suggC1] = await suggestionService.recordSuggestions(
+      ctx(),
+      {
+        extractionJobId: jobV1.id,
+        settingsId,
+        sourceVersionId: v1.id,
+        suggestions: [
+          { fieldPath: fieldA, suggestedValue: ['https://example.com'] },
+          { fieldPath: fieldB, suggestedValue: 'Sem reembolso após 7 dias' },
+          { fieldPath: fieldC, suggestedValue: 'consultivo' },
+        ],
+      },
+    );
 
     // Partial application: apply A and B, leave C pending.
     await suggestionService.applySuggestion(ctx(), {
@@ -319,7 +365,7 @@ run('LeadFlow Briefing suggestion applications PostgreSQL', () => {
       settingsId,
       sourceId: source.id,
       sourceVersionId: v2.id,
-      jobKind: `e2e-v2-${randomUUID()}`,
+      jobKind: `e2e-v2-${randomUUID().slice(0, 24)}`,
       createdById: null,
     });
 
@@ -353,7 +399,9 @@ run('LeadFlow Briefing suggestion applications PostgreSQL', () => {
     expect(reloadedB1?.status).toBe(LeadFlowBriefingSuggestionStatus.Applied);
 
     // Field C: still-pending sibling is auto-superseded, no conflict (nothing was committed).
-    expect(reloadedC1?.status).toBe(LeadFlowBriefingSuggestionStatus.Superseded);
+    expect(reloadedC1?.status).toBe(
+      LeadFlowBriefingSuggestionStatus.Superseded,
+    );
     expect(reloadedC1?.supersededBySuggestionId).toBe(suggC2.id);
     expect(suggC2.conflictsWithSuggestionId).toBeNull();
   });

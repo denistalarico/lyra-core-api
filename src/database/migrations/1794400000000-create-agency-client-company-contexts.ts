@@ -300,7 +300,10 @@ export class CreateAgencyClientCompanyContexts1794400000000 implements Migration
       `DROP FUNCTION IF EXISTS protect_agency_client_company_context_scope();`,
     );
     await queryRunner.query(
-      `DROP TABLE IF EXISTS "agency_client_company_contexts";`,
+      // A direct down/up verification can run against a database that already
+      // contains later Company Context migrations. Their foreign keys must be
+      // removed together with this migration's root table.
+      `DROP TABLE IF EXISTS "agency_client_company_contexts" CASCADE;`,
     );
     await queryRunner.query(
       `DROP FUNCTION IF EXISTS validate_agency_client_company_context_scope();`,

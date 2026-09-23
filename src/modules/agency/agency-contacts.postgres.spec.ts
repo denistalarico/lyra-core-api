@@ -104,8 +104,8 @@ run('AgencyContactsService permanent deletion PostgreSQL', () => {
     await AgencyDataSource.query(
       `INSERT INTO inbox_conversations
         (tenant_id,workspace_id,contact_id,status,source,business_mode,
-         ai_enabled,ownership_state,ownership_version,qualification_status)
-       VALUES ($1,$2,$3,'open','whatsapp','general',false,'paused',1,'unknown')`,
+         ai_enabled,ownership_state,ownership_version,qualification_status,scope_kind)
+       VALUES ($1,$2,$3,'open','whatsapp','general',false,'paused',1,'unknown','agency')`,
       [tenantId, workspaceId, contactId],
     );
     await expect(
@@ -123,8 +123,8 @@ run('AgencyContactsService permanent deletion PostgreSQL', () => {
     const pipelineId = randomUUID();
     const stageId = randomUUID();
     await AgencyDataSource.query(
-      `INSERT INTO crm_pipelines (id,tenant_id,workspace_id,name)
-       VALUES ($1,$2,$3,'Pipeline')`,
+      `INSERT INTO crm_pipelines (id,tenant_id,workspace_id,name,scope_kind)
+       VALUES ($1,$2,$3,'Pipeline','agency')`,
       [pipelineId, tenantId, workspaceId],
     );
     await AgencyDataSource.query(
@@ -134,8 +134,8 @@ run('AgencyContactsService permanent deletion PostgreSQL', () => {
     );
     await AgencyDataSource.query(
       `INSERT INTO crm_opportunities
-        (tenant_id,workspace_id,pipeline_id,stage_id,contact_id,title)
-       VALUES ($1,$2,$3,$4,$5,'Opportunity')`,
+        (tenant_id,workspace_id,pipeline_id,stage_id,contact_id,title,scope_kind)
+       VALUES ($1,$2,$3,$4,$5,'Opportunity','agency')`,
       [tenantId, workspaceId, pipelineId, stageId, contactId],
     );
     await expect(

@@ -104,9 +104,9 @@ run('LeadFlow intelligence adapter', () => {
       `INSERT INTO inbox_channels
          (id, tenant_id, workspace_id, name, type, provider, status,
           connection_status, lifecycle_version, credential_version,
-          ai_enabled, settings, metadata)
+          ai_enabled, settings, metadata, scope_kind)
        VALUES ($1, $2, $3, 'Canal', $5, 'meta', 'active',
-               'connected', 1, 1, false, '{}'::jsonb, $4::jsonb)`,
+               'connected', 1, 1, false, '{}'::jsonb, $4::jsonb, 'agency')`,
       [
         id,
         options.tenant ?? tenantId,
@@ -135,10 +135,10 @@ run('LeadFlow intelligence adapter', () => {
          (id, tenant_id, workspace_id, channel_id, status, priority, source,
           business_mode, unread_count, ai_enabled, metadata, created_at,
           updated_at, ownership_state, ownership_version, ownership_changed_at,
-          qualification_status)
+          qualification_status, scope_kind)
        VALUES ($1, $2, $3, $4, 'new', 'normal', 'inbound', 'general', 0, false,
                '{}'::jsonb, $5::timestamptz, $5::timestamptz, 'paused', 1,
-               $5::timestamptz, 'pending')`,
+               $5::timestamptz, 'pending', 'agency')`,
       [
         id,
         options.tenant ?? tenantId,
@@ -218,8 +218,8 @@ run('LeadFlow intelligence adapter', () => {
     const pipelineId = randomUUID();
     const stageId = randomUUID();
     await AgencyDataSource.query(
-      `INSERT INTO crm_pipelines (id, tenant_id, workspace_id, name, metadata)
-       VALUES ($1, $2, $3, 'Pipeline', '{}'::jsonb)`,
+      `INSERT INTO crm_pipelines (id, tenant_id, workspace_id, name, metadata, scope_kind)
+       VALUES ($1, $2, $3, 'Pipeline', '{}'::jsonb, 'agency')`,
       [pipelineId, tenant, workspace],
     );
     await AgencyDataSource.query(
@@ -249,10 +249,10 @@ run('LeadFlow intelligence adapter', () => {
       `INSERT INTO crm_opportunities
          (id, tenant_id, workspace_id, pipeline_id, stage_id, title, status,
           priority, source, business_mode, business_context, currency,
-          value_amount, won_at, visibility, metadata, created_at, updated_at)
+          value_amount, won_at, visibility, metadata, created_at, updated_at, scope_kind)
        VALUES ($1, $2, $3, $4, $5, 'Deal', $6, 'normal', 'manual', 'general',
                '{}'::jsonb, $7, $8, $9::timestamptz, 'workspace', $10::jsonb,
-               $11::timestamptz, $11::timestamptz)`,
+               $11::timestamptz, $11::timestamptz, 'agency')`,
       [
         id,
         options.tenant ?? tenantId,

@@ -68,9 +68,9 @@ run('qualification transition history', () => {
       `INSERT INTO inbox_channels
          (id, tenant_id, workspace_id, name, type, provider, status,
           connection_status, lifecycle_version, credential_version,
-          ai_enabled, settings, metadata)
+          ai_enabled, settings, metadata, scope_kind)
        VALUES ($1, $2, $3, 'WhatsApp', 'whatsapp', 'meta', 'active',
-               'connected', 1, 1, false, '{}'::jsonb, $4::jsonb)`,
+               'connected', 1, 1, false, '{}'::jsonb, $4::jsonb, 'agency')`,
       [
         id,
         options.tenant ?? tenantId,
@@ -98,9 +98,9 @@ run('qualification transition history', () => {
          (id, tenant_id, workspace_id, channel_id, status, priority, source,
           business_mode, unread_count, ai_enabled, metadata, created_at,
           updated_at, ownership_state, ownership_version, ownership_changed_at,
-          qualification_status)
+          qualification_status, scope_kind)
        VALUES ($1, $2, $3, $4, 'new', 'normal', 'inbound', 'general', 0, false,
-               '{}'::jsonb, now(), now(), 'paused', 1, now(), $5)`,
+               '{}'::jsonb, now(), now(), 'paused', 1, now(), $5, 'agency')`,
       [
         id,
         options.tenant ?? tenantId,

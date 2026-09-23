@@ -76,8 +76,8 @@ run('LeadFlow default binding reconciliation PostgreSQL', () => {
     await AgencyDataSource.query(
       `INSERT INTO inbox_channels
         (id,tenant_id,workspace_id,name,type,status,connection_status,provider,
-         ai_enabled,settings,metadata)
-       VALUES ($1,$2,$3,'WhatsApp','whatsapp',$4,$5,'meta',false,'{}','{}')`,
+         ai_enabled,settings,metadata,scope_kind)
+       VALUES ($1,$2,$3,'WhatsApp','whatsapp',$4,$5,'meta',false,'{}','{}','agency')`,
       [
         channelId,
         tenantId,

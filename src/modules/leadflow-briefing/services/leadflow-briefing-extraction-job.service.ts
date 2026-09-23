@@ -1,4 +1,9 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { createHash } from 'node:crypto';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, IsNull, LessThanOrEqual, Repository } from 'typeorm';
 import type { RequestContext } from '../../../common/context/request-context.interface';
@@ -39,7 +44,9 @@ export class LeadFlowBriefingExtractionJobService {
   ): Promise<BriefingExtractionJobResponse> {
     const workspaceId = this.requireWorkspaceId(ctx);
     const jobKind = input.jobKind ?? DEFAULT_JOB_KIND;
-    const repo = this.dataSource.getRepository(LeadFlowBriefingExtractionJobEntity);
+    const repo = this.dataSource.getRepository(
+      LeadFlowBriefingExtractionJobEntity,
+    );
 
     const previous = await repo.find({
       where: {
@@ -55,7 +62,12 @@ export class LeadFlowBriefingExtractionJobService {
       return this.mapJob(latest);
     }
 
-    const baseKey = `briefing-extraction:${input.sourceVersionId}:${jobKind}`;
+    // The persisted key is intentionally compact: source-version UUIDs plus a
+    // caller-defined job kind can exceed the legacy varchar(40) schema.
+    const baseKey = createHash('sha256')
+      .update(`briefing-extraction:${input.sourceVersionId}:${jobKind}`)
+      .digest('hex')
+      .slice(0, 32);
     const job = await repo.save(
       repo.create({
         tenantId: ctx.tenantId,
@@ -94,7 +106,12 @@ export class LeadFlowBriefingExtractionJobService {
       });
       if (!job) throw new NotFoundException('Extraction job not found.');
 
-      this.stateMachine.assertTransition(job.status, to, job.attempts, job.maxAttempts);
+      this.stateMachine.assertTransition(
+        job.status,
+        to,
+        job.attempts,
+        job.maxAttempts,
+      );
 
       const now = new Date();
       job.status = to;
@@ -159,7 +176,9 @@ export class LeadFlowBriefingExtractionJobService {
     settingsId: string,
   ): Promise<BriefingExtractionJobResponse[]> {
     const workspaceId = this.requireWorkspaceId(ctx);
-    const repo = this.dataSource.getRepository(LeadFlowBriefingExtractionJobEntity);
+    const repo = this.dataSource.getRepository(
+      LeadFlowBriefingExtractionJobEntity,
+    );
     const jobs = await repo.find({
       where: { tenantId: ctx.tenantId, workspaceId, settingsId },
       order: { createdAt: 'DESC' },

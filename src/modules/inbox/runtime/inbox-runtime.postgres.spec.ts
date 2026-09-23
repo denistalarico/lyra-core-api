@@ -508,7 +508,7 @@ run('Inbox Runtime PostgreSQL concurrency', () => {
     const stageId = randomUUID();
     const opportunityId = randomUUID();
     await AgencyDataSource.query(
-      `INSERT INTO crm_pipelines (id,tenant_id,workspace_id,name) VALUES ($1,$2,$3,'Takeover')`,
+      `INSERT INTO crm_pipelines (id,tenant_id,workspace_id,name,scope_kind) VALUES ($1,$2,$3,'Takeover','agency')`,
       [pipelineId, tenantId, workspaceId],
     );
     await AgencyDataSource.query(
@@ -517,8 +517,8 @@ run('Inbox Runtime PostgreSQL concurrency', () => {
     );
     await AgencyDataSource.query(
       `INSERT INTO crm_opportunities
-        (id,tenant_id,workspace_id,pipeline_id,stage_id,inbox_conversation_id,title)
-       VALUES ($1,$2,$3,$4,$5,$6,'Takeover')`,
+        (id,tenant_id,workspace_id,pipeline_id,stage_id,inbox_conversation_id,title,scope_kind)
+       VALUES ($1,$2,$3,$4,$5,$6,'Takeover','agency')`,
       [
         opportunityId,
         tenantId,
@@ -780,7 +780,7 @@ run('Inbox Runtime PostgreSQL concurrency', () => {
     const stageId = randomUUID();
     const opportunityId = randomUUID();
     await AgencyDataSource.query(
-      `INSERT INTO crm_pipelines (id,tenant_id,workspace_id,name) VALUES ($1,$2,$3,'Synthetic')`,
+      `INSERT INTO crm_pipelines (id,tenant_id,workspace_id,name,scope_kind) VALUES ($1,$2,$3,'Synthetic','agency')`,
       [pipelineId, tenantId, workspaceId],
     );
     await AgencyDataSource.query(
@@ -789,8 +789,8 @@ run('Inbox Runtime PostgreSQL concurrency', () => {
     );
     await AgencyDataSource.query(
       `INSERT INTO crm_opportunities
-        (id,tenant_id,workspace_id,pipeline_id,stage_id,inbox_conversation_id,title,business_context)
-       VALUES ($1,$2,$3,$4,$5,$6,'Synthetic',$7::jsonb)`,
+        (id,tenant_id,workspace_id,pipeline_id,stage_id,inbox_conversation_id,title,business_context,scope_kind)
+       VALUES ($1,$2,$3,$4,$5,$6,'Synthetic',$7::jsonb,'agency')`,
       [
         opportunityId,
         tenantId,
@@ -1081,8 +1081,8 @@ run('Inbox Runtime PostgreSQL concurrency', () => {
     );
     await AgencyDataSource.query(
       `INSERT INTO crm_pipelines
-        (id,tenant_id,workspace_id,name,business_mode,is_default,status)
-       VALUES ($1,$2,$3,'Synthetic Pipeline','general',true,'active')`,
+        (id,tenant_id,workspace_id,name,business_mode,is_default,status,scope_kind)
+       VALUES ($1,$2,$3,'Synthetic Pipeline','general',true,'active','agency')`,
       [pipelineId, tenantId, workspaceId],
     );
     await AgencyDataSource.query(
@@ -1243,8 +1243,8 @@ run('Inbox Runtime PostgreSQL concurrency', () => {
       );
       await AgencyDataSource.query(
         `INSERT INTO crm_pipelines
-          (id,tenant_id,workspace_id,name,business_mode,is_default,status)
-         VALUES ($1,$2,$3,'Reconversion Pipeline','general',true,'active')`,
+          (id,tenant_id,workspace_id,name,business_mode,is_default,status,scope_kind)
+         VALUES ($1,$2,$3,'Reconversion Pipeline','general',true,'active','agency')`,
         [pipelineId, tenantId, isolatedWorkspace],
       );
       await AgencyDataSource.query(
@@ -1261,8 +1261,8 @@ run('Inbox Runtime PostgreSQL concurrency', () => {
       await AgencyDataSource.query(
         `INSERT INTO crm_opportunities
           (id,tenant_id,workspace_id,pipeline_id,stage_id,contact_id,
-           inbox_conversation_id,title,status,source,deleted_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,'Prior conversion',$8,'referral',$9)`,
+           inbox_conversation_id,title,status,source,deleted_at,scope_kind)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,'Prior conversion',$8,'referral',$9,'agency')`,
         [
           terminalOpportunityId,
           tenantId,
@@ -1459,9 +1459,9 @@ async function insertConversation(
   await AgencyDataSource.query(
     `INSERT INTO inbox_channels
       (id,tenant_id,workspace_id,name,type,status,connection_status,provider,
-       default_agent_id,ai_enabled,settings,metadata)
+       default_agent_id,ai_enabled,settings,metadata,scope_kind)
      VALUES ($1,$2,$3,'Fixture Channel','whatsapp','active','connected','meta',
-             $4,true,'{}','{}')`,
+             $4,true,'{}','{}','agency')`,
     [channelId, tenantId, workspaceId, agentId],
   );
   await AgencyDataSource.query(
@@ -1473,8 +1473,8 @@ async function insertConversation(
   await AgencyDataSource.query(
     `INSERT INTO inbox_conversations
       (id,tenant_id,workspace_id,channel_id,status,source,business_mode,ai_enabled,
-       ownership_state,ownership_version,ownership_reason,qualification_status)
-     VALUES ($1,$2,$3,$4,'open','whatsapp','general',$5,$6,1,'fixture','qualified')`,
+       ownership_state,ownership_version,ownership_reason,qualification_status,scope_kind)
+     VALUES ($1,$2,$3,$4,'open','whatsapp','general',$5,$6,1,'fixture','qualified','agency')`,
     [
       id,
       tenantId,

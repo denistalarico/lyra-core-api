@@ -49,7 +49,7 @@ run('LeadFlow Briefing suggestions PostgreSQL', () => {
       settingsId,
       sourceId: source.id,
       sourceVersionId: version.id,
-      jobKind: `suggestions-${randomUUID()}`,
+      jobKind: `suggestions-${randomUUID().slice(0, 24)}`,
       createdById: null,
     });
     return { source, version, job };
@@ -67,7 +67,9 @@ run('LeadFlow Briefing suggestions PostgreSQL', () => {
       new CompanyContextService(),
     );
 
-    const settings = await AgencyDataSource.getRepository(LeadFlowClientSettingsEntity).save({
+    const settings = await AgencyDataSource.getRepository(
+      LeadFlowClientSettingsEntity,
+    ).save({
       tenantId,
       workspaceId,
       contextType: LeadFlowSettingsContextType.Agency,
@@ -77,15 +79,38 @@ run('LeadFlow Briefing suggestions PostgreSQL', () => {
   });
 
   afterAll(async () => {
-    await AgencyDataSource.getRepository(LeadFlowBriefingSuggestionEntity).delete({ tenantId });
-    await AgencyDataSource.getRepository(LeadFlowBriefingExtractionJobEntity).delete({
+    await AgencyDataSource.query(
+      `DELETE FROM leadflow_briefing_suggestion_applications
+        WHERE suggestion_id IN (
+          SELECT id FROM leadflow_briefing_suggestions WHERE tenant_id = $1
+        ) OR resulting_snapshot_id IN (
+          SELECT id FROM leadflow_briefing_context_snapshots WHERE settings_id = $2
+        )`,
+      [tenantId, settingsId],
+    );
+    await AgencyDataSource.query(
+      'DELETE FROM leadflow_briefing_context_snapshots WHERE settings_id = $1',
+      [settingsId],
+    );
+    await AgencyDataSource.getRepository(
+      LeadFlowBriefingSuggestionEntity,
+    ).delete({ tenantId });
+    await AgencyDataSource.getRepository(
+      LeadFlowBriefingExtractionJobEntity,
+    ).delete({
       tenantId,
     });
-    await AgencyDataSource.getRepository(LeadFlowBriefingSourceVersionEntity).delete({
+    await AgencyDataSource.getRepository(
+      LeadFlowBriefingSourceVersionEntity,
+    ).delete({
       tenantId,
     });
-    await AgencyDataSource.getRepository(LeadFlowBriefingSourceEntity).delete({ tenantId });
-    await AgencyDataSource.getRepository(LeadFlowClientSettingsEntity).delete({ tenantId });
+    await AgencyDataSource.getRepository(LeadFlowBriefingSourceEntity).delete({
+      tenantId,
+    });
+    await AgencyDataSource.getRepository(LeadFlowClientSettingsEntity).delete({
+      tenantId,
+    });
   });
 
   it('rejects a field path outside the canonical root schema', async () => {
@@ -95,7 +120,9 @@ run('LeadFlow Briefing suggestions PostgreSQL', () => {
         extractionJobId: job.id,
         settingsId,
         sourceVersionId: version.id,
-        suggestions: [{ fieldPath: 'unknownSection.field', suggestedValue: 'x' }],
+        suggestions: [
+          { fieldPath: 'unknownSection.field', suggestedValue: 'x' },
+        ],
       }),
     ).rejects.toThrow();
   });
@@ -139,18 +166,23 @@ run('LeadFlow Briefing suggestions PostgreSQL', () => {
     });
 
     const second = await makeJob();
-    const [secondSuggestion] = await suggestionService.recordSuggestions(ctx(), {
-      extractionJobId: second.job.id,
-      settingsId,
-      sourceVersionId: second.version.id,
-      suggestions: [{ fieldPath, suggestedValue: 'Resumo v2' }],
-    });
+    const [secondSuggestion] = await suggestionService.recordSuggestions(
+      ctx(),
+      {
+        extractionJobId: second.job.id,
+        settingsId,
+        sourceVersionId: second.version.id,
+        suggestions: [{ fieldPath, suggestedValue: 'Resumo v2' }],
+      },
+    );
 
     const reloadedFirst = await AgencyDataSource.getRepository(
       LeadFlowBriefingSuggestionEntity,
     ).findOne({ where: { id: firstSuggestion.id } });
 
-    expect(reloadedFirst?.status).toBe(LeadFlowBriefingSuggestionStatus.Superseded);
+    expect(reloadedFirst?.status).toBe(
+      LeadFlowBriefingSuggestionStatus.Superseded,
+    );
     expect(reloadedFirst?.supersededBySuggestionId).toBe(secondSuggestion.id);
   });
 
@@ -169,19 +201,26 @@ run('LeadFlow Briefing suggestions PostgreSQL', () => {
     });
 
     const second = await makeJob();
-    const [secondSuggestion] = await suggestionService.recordSuggestions(ctx(), {
-      extractionJobId: second.job.id,
-      settingsId,
-      sourceVersionId: second.version.id,
-      suggestions: [{ fieldPath, suggestedValue: 'Proposta v2' }],
-    });
+    const [secondSuggestion] = await suggestionService.recordSuggestions(
+      ctx(),
+      {
+        extractionJobId: second.job.id,
+        settingsId,
+        sourceVersionId: second.version.id,
+        suggestions: [{ fieldPath, suggestedValue: 'Proposta v2' }],
+      },
+    );
 
     const reloadedFirst = await AgencyDataSource.getRepository(
       LeadFlowBriefingSuggestionEntity,
     ).findOne({ where: { id: firstSuggestion.id } });
-    expect(reloadedFirst?.status).toBe(LeadFlowBriefingSuggestionStatus.Applied);
+    expect(reloadedFirst?.status).toBe(
+      LeadFlowBriefingSuggestionStatus.Applied,
+    );
     expect(reloadedFirst?.supersededBySuggestionId).toBeNull();
-    expect(secondSuggestion.status).toBe(LeadFlowBriefingSuggestionStatus.Pending);
+    expect(secondSuggestion.status).toBe(
+      LeadFlowBriefingSuggestionStatus.Pending,
+    );
     expect(secondSuggestion.conflictsWithSuggestionId).toBe(firstSuggestion.id);
   });
 
@@ -202,7 +241,10 @@ run('LeadFlow Briefing suggestions PostgreSQL', () => {
     });
 
     // gap: before any suggestion targets it, a truly-empty scalar field shows up.
-    const beforeSecondJob = await suggestionService.listForReview(ctx(), settingsId);
+    const beforeSecondJob = await suggestionService.listForReview(
+      ctx(),
+      settingsId,
+    );
     expect(beforeSecondJob.gaps).toContain(gapField);
 
     // aplicação parcial: apply one of two pending suggestions from the same job.
@@ -211,7 +253,10 @@ run('LeadFlow Briefing suggestions PostgreSQL', () => {
       appliedById: randomUUID(),
     });
 
-    const afterPartialApply = await suggestionService.listForReview(ctx(), settingsId);
+    const afterPartialApply = await suggestionService.listForReview(
+      ctx(),
+      settingsId,
+    );
     const untouchedRow = afterPartialApply.suggestions.find(
       (row) => row.fieldPath === untouchedField,
     );
@@ -227,19 +272,34 @@ run('LeadFlow Briefing suggestions PostgreSQL', () => {
 
     // conflito: a second job proposes a contradictory value for the already-applied field.
     const second = await makeJob();
-    const [conflictingSuggestion] = await suggestionService.recordSuggestions(ctx(), {
-      extractionJobId: second.job.id,
-      settingsId,
-      sourceVersionId: second.version.id,
-      suggestions: [{ fieldPath: contradictoryField, suggestedValue: 'Atendimento em horário comercial' }],
-    });
+    const [conflictingSuggestion] = await suggestionService.recordSuggestions(
+      ctx(),
+      {
+        extractionJobId: second.job.id,
+        settingsId,
+        sourceVersionId: second.version.id,
+        suggestions: [
+          {
+            fieldPath: contradictoryField,
+            suggestedValue: 'Atendimento em horário comercial',
+          },
+        ],
+      },
+    );
 
-    const afterConflict = await suggestionService.listForReview(ctx(), settingsId);
-    const conflictRow = afterConflict.suggestions.find((row) => row.id === conflictingSuggestion.id);
+    const afterConflict = await suggestionService.listForReview(
+      ctx(),
+      settingsId,
+    );
+    const conflictRow = afterConflict.suggestions.find(
+      (row) => row.id === conflictingSuggestion.id,
+    );
     expect(conflictRow?.status).toBe(LeadFlowBriefingSuggestionStatus.Pending);
     expect(conflictRow?.conflictsWithSuggestionId).toBe(firstSuggestion.id);
     expect(conflictRow?.currentValue).toBe('Atendimento 24h');
-    expect(conflictRow?.suggestedValue).toBe('Atendimento em horário comercial');
+    expect(conflictRow?.suggestedValue).toBe(
+      'Atendimento em horário comercial',
+    );
 
     // lacuna: a field with a pending suggestion is never double-counted as a gap.
     expect(afterConflict.gaps).not.toContain(untouchedField);

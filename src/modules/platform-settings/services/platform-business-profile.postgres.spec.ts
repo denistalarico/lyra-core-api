@@ -26,6 +26,7 @@ import { LeadFlowBusinessModeTemplateEntity } from '../../leadflow-settings/enti
 import { describePostgresIntegration } from '../../../testing/postgres-integration';
 import { PlatformBusinessProfileService } from './platform-business-profile.service';
 import { mapBusinessProfileResponse } from '../dto/business-profile.view';
+import { buildSharedSurfacePublishDocument } from './company-context-shared-projection';
 
 const run = describePostgresIntegration();
 
@@ -93,6 +94,10 @@ run(
       // Sweeps by tenant rather than relying on nested `describe` blocks having
       // already cleaned up their own fixtures — cleanup here must be safe to
       // run regardless of Jest's hook ordering.
+      await AgencyDataSource.query(
+        'DELETE FROM leadflow_briefing_context_snapshots WHERE tenant_id IN ($1, $2)',
+        [tenantId, otherTenantId],
+      );
       await AgencyDataSource.getRepository(LeadFlowClientSettingsEntity).delete(
         { tenantId },
       );
@@ -232,6 +237,14 @@ run(
       });
 
       afterAll(async () => {
+        await AgencyDataSource.query(
+          `DELETE FROM leadflow_briefing_context_snapshots
+            WHERE settings_id IN (
+              SELECT id FROM leadflow_client_settings
+               WHERE agency_client_id IN ($1, $2)
+            )`,
+          [clientAId, clientBId],
+        );
         await AgencyDataSource.getRepository(
           LeadFlowClientSettingsEntity,
         ).delete({ agencyClientId: In([clientAId, clientBId]) });
@@ -352,6 +365,10 @@ run(
       });
 
       afterAll(async () => {
+        await AgencyDataSource.query(
+          'DELETE FROM leadflow_briefing_context_snapshots WHERE settings_id = $1',
+          [settingsId],
+        );
         await AgencyDataSource.getRepository(
           LeadFlowClientSettingsEntity,
         ).delete({ id: settingsId });
@@ -613,6 +630,10 @@ run(
       });
 
       afterAll(async () => {
+        await AgencyDataSource.query(
+          'DELETE FROM leadflow_briefing_context_snapshots WHERE settings_id = $1',
+          [settingsId],
+        );
         await AgencyDataSource.getRepository(
           LeadFlowClientSettingsEntity,
         ).delete({ id: settingsId });
@@ -621,7 +642,7 @@ run(
         });
       });
 
-      it('publishing through the Platform path produces the same published document as the LeadFlow path would', async () => {
+      it('publishing through the Platform path persists its shared surface over the current mode defaults', async () => {
         const published = await platformService.publishCompanyContext(
           ctx(),
           clientId,
@@ -632,11 +653,20 @@ run(
           LeadFlowClientSettingsEntity,
         ).findOneOrFail({ where: { id: settingsId } });
 
-        // The full document is persisted — LeadFlow-only fields included —
-        // because this goes through the exact same
-        // `LeadFlowClientSettingsService.publishCompanyContext`.
+        // The first Platform publish has no prior baseline for LeadFlow-only
+        // fields. It therefore overlays only the visible shared fields onto
+        // the current business-mode defaults rather than promoting hidden
+        // draft values the Platform caller could not review.
         expect(persisted.companyContextPublished).toEqual(
-          companyContextService.normalizePersisted(draftWithLeadFlowOnlyFields),
+          companyContextService.normalizePersisted(
+            buildSharedSurfacePublishDocument(
+              draftWithLeadFlowOnlyFields,
+              await settingsService.getBusinessModeContextDefaults(
+                ctx(),
+                LeadFlowBusinessMode.AgencyServices,
+              ),
+            ),
+          ),
         );
         expect(persisted.companyContextPublishedVersion).toBe(1);
         expect(persisted.companyContextPublishedHash).toBeTruthy();
@@ -706,22 +736,31 @@ run(
           unknown
         >;
 
-        expect(published.qualification).toEqual({
-          conversionGoal: 'book_meeting',
-        });
-        expect(
-          (published.service as Record<string, unknown>).handoffRules,
-        ).toBe('transfer if angry');
-        expect((published.identity as Record<string, unknown>).legalName).toBe(
-          'Acme Ltda',
+        const expected = companyContextService.normalizePersisted(
+          buildSharedSurfacePublishDocument(
+            draftWithLeadFlowOnlyFields,
+            await settingsService.getBusinessModeContextDefaults(
+              ctx(),
+              LeadFlowBusinessMode.AgencyServices,
+            ),
+          ),
         );
+        expect(published).toEqual(expected);
       });
 
       it('after a Platform publish, the LeadFlow endpoint sees the same full companyContextPublished', async () => {
         const leadflowView = await settingsService.getSettings(ctx(), clientId);
 
         expect(leadflowView.companyContextPublished).toEqual(
-          companyContextService.normalizePersisted(draftWithLeadFlowOnlyFields),
+          companyContextService.normalizePersisted(
+            buildSharedSurfacePublishDocument(
+              draftWithLeadFlowOnlyFields,
+              await settingsService.getBusinessModeContextDefaults(
+                ctx(),
+                LeadFlowBusinessMode.AgencyServices,
+              ),
+            ),
+          ),
         );
       });
 
@@ -768,6 +807,10 @@ run(
       });
 
       afterAll(async () => {
+        await AgencyDataSource.query(
+          'DELETE FROM leadflow_briefing_context_snapshots WHERE settings_id = $1',
+          [settingsId],
+        );
         await AgencyDataSource.getRepository(
           LeadFlowClientSettingsEntity,
         ).delete({ id: settingsId });
@@ -896,6 +939,10 @@ run(
       });
 
       afterEach(async () => {
+        await AgencyDataSource.query(
+          'DELETE FROM leadflow_briefing_context_snapshots WHERE settings_id = $1',
+          [settingsId],
+        );
         await AgencyDataSource.getRepository(
           LeadFlowClientSettingsEntity,
         ).delete({ id: settingsId });
@@ -908,6 +955,18 @@ run(
         return AgencyDataSource.getRepository(
           LeadFlowClientSettingsEntity,
         ).findOneOrFail({ where: { id: settingsId } });
+      }
+
+      async function initialPlatformPublished() {
+        return companyContextService.normalizePersisted(
+          buildSharedSurfacePublishDocument(
+            initialDraft,
+            await settingsService.getBusinessModeContextDefaults(
+              ctx(),
+              LeadFlowBusinessMode.AgencyServices,
+            ),
+          ),
+        );
       }
 
       // ── A. Existing published ──────────────────────────────────────────
@@ -958,7 +1017,7 @@ run(
         expect(
           (persisted.companyContextPublished as Record<string, unknown>)
             .qualification,
-        ).toEqual({ conversionGoal: 'book_meeting' });
+        ).toEqual((await initialPlatformPublished()).qualification);
       });
 
       it('a LeadFlow-only pending change (service.handoffRules) is NOT promoted by the Platform publish', async () => {
@@ -1020,7 +1079,7 @@ run(
         expect(
           (persisted.companyContextPublished as Record<string, unknown>)
             .qualification,
-        ).toEqual({ conversionGoal: 'book_meeting' });
+        ).toEqual((await initialPlatformPublished()).qualification);
       });
 
       it('leaves the full draft intact after a Platform publish — the hidden pending change is still there', async () => {
@@ -1199,7 +1258,7 @@ run(
         expect(
           (persisted.companyContextPublished as Record<string, unknown>)
             .qualification,
-        ).toEqual({ conversionGoal: 'book_meeting' });
+        ).toEqual((await initialPlatformPublished()).qualification);
 
         // LeadFlow then publishes: hidden catches up to the draft.
         await settingsService.publishCompanyContext(ctx(), clientId, undefined);
