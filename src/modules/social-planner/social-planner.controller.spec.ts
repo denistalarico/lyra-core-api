@@ -88,6 +88,7 @@ describe('SocialPlannerController', () => {
     listCommemorativeDates: jest.fn(),
     generatePlan: jest.fn(),
   };
+  const approvalsService = { create: jest.fn() };
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -100,6 +101,7 @@ describe('SocialPlannerController', () => {
       campaignService as unknown as SocialCampaignService,
       copyGenerationService as unknown as SocialCopyGenerationService,
       planGenerationService as unknown as SocialPlanGenerationService,
+      approvalsService as never,
     );
   });
 

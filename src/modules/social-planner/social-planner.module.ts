@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { PermissionsModule } from '../permissions';
+import { SocialApprovalsModule } from '../social-approvals/social-approvals.module';
 import { LeadFlowClientSettingsEntity } from '../leadflow-settings/entities/leadflow-client-settings.entity';
 import {
   SocialCampaignInstanceEntity,
@@ -36,6 +37,7 @@ import { SocialPublishingCadenceService } from './services/social-publishing-cad
 @Module({
   imports: [
     PermissionsModule,
+    SocialApprovalsModule,
     TypeOrmModule.forFeature(
       [
         SocialPlanEntity,

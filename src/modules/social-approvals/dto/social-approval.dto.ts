@@ -8,7 +8,7 @@ import {
 } from 'class-validator';
 
 export class CreateSocialApprovalDto {
-  @IsString() @IsIn(['creative_version']) subjectType!: string;
+  @IsString() @IsIn(['creative_version', 'planner_content_revision']) subjectType!: string;
   @IsUUID() subjectId!: string;
   @IsUUID() subjectRevisionId!: string;
 }

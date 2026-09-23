@@ -63,6 +63,7 @@ import { SocialCopyGenerationService } from './services/social-copy-generation.s
 import { SocialPlanGenerationService } from './services/social-plan-generation.service';
 import { SocialPlannerSettingsService } from './services/social-planner-settings.service';
 import { SocialPublishingCadenceService } from './services/social-publishing-cadence.service';
+import { SocialApprovalsService } from '../social-approvals/social-approvals.service';
 
 const SOCIAL_PLANNER_VIEW_PERMISSION = 'social.planner.calendar.view.client';
 
@@ -107,6 +108,7 @@ export class SocialPlannerController {
     private readonly socialCampaignService: SocialCampaignService,
     private readonly socialCopyGenerationService: SocialCopyGenerationService,
     private readonly socialPlanGenerationService: SocialPlanGenerationService,
+    private readonly socialApprovalsService: SocialApprovalsService,
   ) {}
 
   @Get('plans')
@@ -473,6 +475,25 @@ export class SocialPlannerController {
       contentId,
       ctx.userId ?? null,
       dto,
+    );
+  }
+
+  /** The Planner owns the revision; Approvals receives only its immutable identity. */
+  @Post('content/:contentId/revisions/:revisionId/send-for-approval')
+  @RequirePermission(SOCIAL_PLANNER_UPDATE_PERMISSION)
+  sendRevisionForApproval(
+    @RequestContextData() ctx: RequestContext,
+    @Param('contentId', ParseUUIDPipe) contentId: string,
+    @Param('revisionId', ParseUUIDPipe) revisionId: string,
+  ) {
+    return this.socialApprovalsService.create(
+      resolveCompanyAwareScope(ctx),
+      ctx.userId,
+      {
+        subjectType: 'planner_content_revision',
+        subjectId: contentId,
+        subjectRevisionId: revisionId,
+      },
     );
   }
 

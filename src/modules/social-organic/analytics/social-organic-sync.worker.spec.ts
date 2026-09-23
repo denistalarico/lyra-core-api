@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/require-await, @typescript-eslint/no-unsafe-assignment -- worker doubles use Jest asymmetric matchers. */
 import type { SocialOrganicCredentialResolver } from '../credentials/social-organic-credential.resolver';
 import type { SocialOrganicSyncRunEntity } from './entities/social-organic-sync-run.entity';
+import type { MetaOrganicAudienceService } from './meta/meta-organic-audience.service';
 import type { MetaOrganicInsightsService } from './meta/meta-organic-insights.service';
 import type { SocialOrganicSyncRunService } from './social-organic-sync-run.service';
 import { SocialOrganicSyncWorker } from './social-organic-sync.worker';
@@ -46,15 +47,29 @@ function harness() {
     })),
   };
 
+  // The demographics snapshot, which the worker takes alongside the window.
+  // Defaults to the shape a closed gate returns, so existing assertions about
+  // counters stay about the metrics sync alone.
+  const audience = {
+    sync: jest.fn(async () => ({
+      assetId: 'asset-1',
+      dimensions: 0,
+      rowsWritten: 0,
+      apiCalls: 0,
+    })),
+  };
+
   return {
     claimed,
     runs,
     credentials,
     insights,
+    audience,
     worker: new SocialOrganicSyncWorker(
       runs as unknown as SocialOrganicSyncRunService,
       credentials as unknown as SocialOrganicCredentialResolver,
       insights as unknown as MetaOrganicInsightsService,
+      audience as unknown as MetaOrganicAudienceService,
     ),
   };
 }
@@ -99,5 +114,49 @@ describe('SocialOrganicSyncWorker', () => {
         lastError: 'run_window_missing',
       }),
     );
+  });
+});
+
+describe('audience snapshot', () => {
+  it('takes a demographics snapshot alongside the metrics window', async () => {
+    // The regression this guards: the audience service was written and
+    // registered in the module, and nothing ever called it — so the table
+    // stayed empty regardless of what the feature gate said, and enabling the
+    // gate looked like it had simply not worked.
+    const context = harness();
+
+    await context.worker.processDue(1);
+
+    expect(context.audience.sync).toHaveBeenCalledTimes(1);
+  });
+
+  it('counts the snapshot rows into the run', async () => {
+    const context = harness();
+    context.audience.sync.mockResolvedValueOnce({
+      assetId: 'asset-1',
+      dimensions: 4,
+      rowsWritten: 12,
+      apiCalls: 4,
+    });
+
+    await context.worker.processDue(1);
+
+    const [call] = context.runs.markSucceeded.mock.calls;
+    // 1 account row from the metrics sync, plus the snapshot's 12.
+    expect(call[0].counters.rowsWritten).toBe(13);
+    expect(call[0].counters.apiCalls).toBe(7);
+  });
+
+  it('a failed snapshot does not fail a good metrics run', async () => {
+    // The facts are already written and correct. Rescheduling the window over
+    // a demographics read would re-fetch all of them against the same quota,
+    // which is a larger harm than losing one day of demographics.
+    const context = harness();
+    context.audience.sync.mockRejectedValueOnce(new Error('graph_unavailable'));
+
+    await context.worker.processDue(1);
+
+    expect(context.runs.markSucceeded).toHaveBeenCalledTimes(1);
+    expect(context.runs.markFailed).not.toHaveBeenCalled();
   });
 });

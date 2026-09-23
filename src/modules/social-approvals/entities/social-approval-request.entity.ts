@@ -87,6 +87,15 @@ export class SocialApprovalRequestEntity {
     nullable: true,
   })
   clientLastViewedAt!: Date | null;
+  /** Agency review is deliberately separate from a Client Area view. */
+  @Column({ name: 'internal_first_viewed_at', type: 'timestamptz', nullable: true })
+  internalFirstViewedAt!: Date | null;
+  @Column({ name: 'internal_last_viewed_at', type: 'timestamptz', nullable: true })
+  internalLastViewedAt!: Date | null;
+  @Column({ name: 'internal_viewed_by_user_id', type: 'uuid', nullable: true })
+  internalViewedByUserId!: string | null;
+  @Column({ name: 'client_viewed_by_user_id', type: 'uuid', nullable: true })
+  clientViewedByUserId!: string | null;
   @Column({ name: 'approved_at', type: 'timestamptz', nullable: true })
   approvedAt!: Date | null;
   @Column({ name: 'cancelled_at', type: 'timestamptz', nullable: true })

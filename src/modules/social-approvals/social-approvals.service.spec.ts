@@ -39,6 +39,9 @@ function createHarness() {
         ? request
         : null,
     ),
+    find: jest.fn(async () => []),
+    create: jest.fn((value) => ({ id: 'approval-a', ...value })),
+    save: jest.fn(async (value) => value),
   };
   const manager = {
     save: jest.fn(async (value: unknown) => value),
@@ -266,6 +269,28 @@ describe('SocialApprovalsService AP1 state machine', () => {
     expect(decisions).toHaveLength(0);
   });
 
+  it('records an Agency view without changing status or appending a decision', async () => {
+    const { service, request, decisions } = createHarness();
+    request.status = 'awaiting_client';
+    await service.markAgencyViewed(scope, request.id, 'agency-user');
+    expect(request).toMatchObject({
+      status: 'awaiting_client',
+      internalViewedByUserId: 'agency-user',
+    });
+    expect(decisions).toHaveLength(0);
+  });
+
+  it('records a client view only at the client stage without a decision', async () => {
+    const { service, request, decisions } = createHarness();
+    request.status = 'awaiting_client';
+    await service.markClientViewed(scope, request.id, 'client-user');
+    expect(request).toMatchObject({
+      status: 'awaiting_client',
+      clientViewedByUserId: 'client-user',
+    });
+    expect(decisions).toHaveLength(0);
+  });
+
   it('accepts user and system actors only in the client-ready domain boundary', async () => {
     const { service, request, decisions } = createHarness();
     request.status = 'awaiting_client';
@@ -311,8 +336,8 @@ describe('SocialApprovalsService AP1 state machine', () => {
   });
 
   it('maps active-unique DB violations to a safe conflict while a later workflow can be created', async () => {
-    const { service, requestRepo } = createHarness();
-    requestRepo.save.mockRejectedValueOnce({ code: '23505' });
+    const { service, transactionRequestRepo } = createHarness();
+    transactionRequestRepo.save.mockRejectedValueOnce({ code: '23505' });
     const input = {
       subjectType: 'creative_version',
       subjectId: 'asset-a',

@@ -17,10 +17,16 @@ describe('ApprovalSubjectResolver', () => {
   function harness() {
     const assets = { findOne: jest.fn() };
     const versions = { findOne: jest.fn() };
+    const plans = { findOne: jest.fn() };
+    const contentItems = { findOne: jest.fn() };
+    const contentRevisions = { findOne: jest.fn() };
     return {
       assets,
       versions,
-      resolver: new ApprovalSubjectResolver(assets as never, versions as never),
+      plans,
+      contentItems,
+      contentRevisions,
+      resolver: new ApprovalSubjectResolver(assets as never, versions as never, plans as never, contentItems as never, contentRevisions as never),
     };
   }
 
@@ -72,7 +78,7 @@ describe('ApprovalSubjectResolver', () => {
     await expect(
       resolver.resolve(scope, {
         ...input,
-        subjectType: 'planner_content_revision',
+        subjectType: 'unsupported',
       }),
     ).rejects.toBeInstanceOf(BadRequestException);
     assets.findOne.mockResolvedValue(null);
@@ -86,6 +92,23 @@ describe('ApprovalSubjectResolver', () => {
     );
     expect(versions.findOne).toHaveBeenCalledWith({
       where: { id: 'version-1', creativeAssetId: 'asset-a' },
+    });
+  });
+
+  it('resolves a Planner immutable revision only through its company-owned plan', async () => {
+    const { contentItems, plans, contentRevisions, resolver } = harness();
+    contentItems.findOne.mockResolvedValue({ id: 'content-a', planId: 'plan-a' });
+    plans.findOne.mockResolvedValue({ id: 'plan-a' });
+    contentRevisions.findOne.mockResolvedValue({
+      id: 'revision-a', contentItemId: 'content-a', revisionNumber: 4,
+    });
+    await expect(resolver.resolve(scope, {
+      subjectType: 'planner_content_revision', subjectId: 'content-a', subjectRevisionId: 'revision-a',
+    })).resolves.toMatchObject({
+      subjectType: 'planner_content_revision', subjectId: 'content-a', subjectRevisionId: 'revision-a', subjectVersionLabel: 'r4',
+    });
+    expect(plans.findOne).toHaveBeenCalledWith({
+      where: expect.objectContaining({ id: 'plan-a', companyContextId: 'company-a' }),
     });
   });
 });

@@ -43,6 +43,26 @@ export class SocialApprovalsController {
   ) {
     return this.approvals.detail(resolveCompanyAwareScope(ctx), id);
   }
+  @Get(':id/preview')
+  @RequirePermission('social.approvals.review.view.assigned')
+  preview(
+    @RequestContextData() ctx: RequestContext,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.approvals.preview(resolveCompanyAwareScope(ctx), id);
+  }
+  @Post(':id/view')
+  @RequirePermission('social.approvals.review.view.assigned')
+  view(
+    @RequestContextData() ctx: RequestContext,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.approvals.markAgencyViewed(
+      resolveCompanyAwareScope(ctx),
+      id,
+      ctx.userId,
+    );
+  }
   @Post() @RequirePermission('social.approvals.review.comment.assigned') create(
     @RequestContextData() ctx: RequestContext,
     @Body() dto: CreateSocialApprovalDto,

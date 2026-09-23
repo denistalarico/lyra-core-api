@@ -92,6 +92,16 @@ export const AGENCY_NOTIFICATION_CATALOG: readonly NotificationDefinition[] = [
       selfNotificationPolicy: NotificationSelfPolicy.ALLOW_ACTOR,
     },
   ),
+  ...(['awaiting_client', 'changes_requested', 'approved', 'superseded'] as const).map(
+    (event) =>
+      standard(
+        `social.approval.${event}`,
+        'approvals',
+        NotificationCategory.APPROVAL,
+        NotificationRecipientStrategy.EXPLICIT_USERS,
+        { productKey: NotificationProductKey.SOCIAL },
+      ),
+  ),
 
   // Inbox (LeadFlow)
   standard(

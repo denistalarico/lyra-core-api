@@ -4,6 +4,7 @@ import { hostname } from 'node:os';
 import { SocialOrganicCredentialResolver } from '../credentials/social-organic-credential.resolver';
 import type { SocialOrganicSyncRunEntity } from './entities/social-organic-sync-run.entity';
 import { MetaOrganicInsightsService } from './meta/meta-organic-insights.service';
+import { MetaOrganicAudienceService } from './meta/meta-organic-audience.service';
 import { enumerateCalendarDays } from './social-organic-analytics-time';
 import {
   classifyOrganicSyncFailure,
@@ -28,6 +29,15 @@ export class SocialOrganicSyncWorker {
     private readonly runs: SocialOrganicSyncRunService,
     private readonly credentials: SocialOrganicCredentialResolver,
     private readonly insights: MetaOrganicInsightsService,
+    /**
+     * The follower-demographics snapshot, taken alongside the metrics window.
+     *
+     * It was written, registered in the module, and then never called from
+     * anywhere — so the table stayed empty no matter what
+     * `SOCIAL_ORGANIC_AUDIENCE_ENABLED` said, and enabling the gate looked like
+     * it had failed. This is the call it was waiting for.
+     */
+    private readonly audience: MetaOrganicAudienceService,
   ) {}
 
   @Interval(TICK_MS)
@@ -86,6 +96,30 @@ export class SocialOrganicSyncWorker {
         summary.postRows.length + summary.accountRows.length;
       counters.rowsSkipped = summary.rowsSkipped;
       counters.apiCalls = summary.apiCalls;
+
+      // A stock snapshot, not part of the window — it measures "now" and files
+      // itself under today, which is why it takes no dates.
+      //
+      // Its failure must not fail the run. The metrics above are already
+      // written and correct; losing a day of demographics is a smaller harm
+      // than rescheduling a window whose facts are in the table, which would
+      // re-read the whole thing against the same quota. The gate being closed
+      // returns an empty summary rather than throwing, so this costs nothing
+      // when the capability is off.
+      try {
+        const audience = await this.audience.sync({
+          resolved,
+          syncRunId: run.id,
+        });
+        counters.rowsWritten += audience.rowsWritten;
+        counters.apiCalls += audience.apiCalls;
+      } catch (error) {
+        this.logger.warn(
+          `Organic audience snapshot failed for run ${run.id}: ${
+            error instanceof Error ? error.name : 'unknown'
+          }`,
+        );
+      }
 
       await this.runs.markSucceeded({
         runId: run.id,

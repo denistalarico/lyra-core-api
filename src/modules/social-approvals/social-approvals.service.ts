@@ -16,6 +16,7 @@ import {
   type SocialApprovalStatus,
 } from './entities';
 import { ApprovalSubjectResolver } from './subjects/approval-subject-resolver';
+import { SocialApprovalNotificationPublisher } from './social-approval-notification.publisher';
 
 export type ApprovalActor = {
   type: SocialApprovalActorType;
@@ -39,6 +40,7 @@ export class SocialApprovalsService {
     private readonly decisions: Repository<SocialApprovalStageDecisionEntity>,
     @InjectDataSource('agency') private readonly dataSource: DataSource,
     private readonly subjects: ApprovalSubjectResolver,
+    private readonly notifications?: SocialApprovalNotificationPublisher,
   ) {}
   private scopeWhere(scope: CompanyAwareScope) {
     return {
@@ -128,8 +130,36 @@ export class SocialApprovalsService {
     const actor = this.user(actorUserId);
     const subject = await this.subjects.resolve(scope, input);
     try {
-      return await this.requests.save(
-        this.requests.create({
+      const created = await this.dataSource.transaction(async (manager) => {
+        const requests = manager.getRepository(SocialApprovalRequestEntity);
+        // PostgreSQL serializes replacement workflows per logical subject root.
+        // It prevents concurrent submissions of r2/r3 from both surviving active.
+        if ('query' in manager && typeof manager.query === 'function') {
+          await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
+            `social-approval:${scope.tenantId}:${scope.workspaceId}:${scope.agencyClientId}:${scope.companyContextId}:${subject.subjectType}:${subject.subjectId}`,
+          ]);
+        }
+        const previous = await requests.find({
+          where: {
+            ...this.scopeWhere(scope),
+            subjectType: subject.subjectType,
+            subjectId: subject.subjectId,
+          },
+          lock: { mode: 'pessimistic_write' },
+        });
+        const supersededAt = new Date();
+        const superseded = previous.filter(
+          (request) =>
+            request.subjectRevisionId !== subject.subjectRevisionId &&
+            ACTIVE.includes(request.status as (typeof ACTIVE)[number]),
+        );
+        for (const request of superseded) {
+          request.status = 'superseded';
+          request.supersededAt = supersededAt;
+          await requests.save(request);
+        }
+        const saved = await requests.save(
+          requests.create({
           ...this.scopeWhere(scope),
           ...subject,
           status: 'draft',
@@ -139,11 +169,24 @@ export class SocialApprovalsService {
           sentToClientAt: null,
           clientFirstViewedAt: null,
           clientLastViewedAt: null,
+          internalFirstViewedAt: null,
+          internalLastViewedAt: null,
+          internalViewedByUserId: null,
+          clientViewedByUserId: null,
           approvedAt: null,
           cancelledAt: null,
           supersededAt: null,
-        }),
+          }),
+        );
+        return { saved, superseded };
+      });
+      await Promise.all(
+        created.superseded.map((request) =>
+          this.notifications?.publish('superseded', request, actor.userId) ??
+          Promise.resolve(),
+        ),
       );
+      return created.saved;
     } catch (error: unknown) {
       if (this.isActiveUnique(error))
         throw new ConflictException(
@@ -196,6 +239,44 @@ export class SocialApprovalsService {
     ]);
     return { ...request, comments, decisions };
   }
+  async preview(scope: CompanyAwareScope, id: string) {
+    const request = await this.find(scope, id);
+    return this.subjects.getPreview(scope, {
+      subjectType: request.subjectType as 'creative_version' | 'planner_content_revision',
+      subjectId: request.subjectId,
+      subjectRevisionId: request.subjectRevisionId,
+      title: request.title,
+      subjectVersionLabel: request.subjectVersionLabel,
+    });
+  }
+  async markAgencyViewed(
+    scope: CompanyAwareScope,
+    id: string,
+    actorUserId: string | null | undefined,
+  ) {
+    const actor = this.user(actorUserId);
+    const request = await this.find(scope, id);
+    if (!ACTIVE.includes(request.status as (typeof ACTIVE)[number])) return request;
+    const now = new Date();
+    request.internalFirstViewedAt ??= now;
+    request.internalLastViewedAt = now;
+    request.internalViewedByUserId = actor.userId;
+    return this.requests.save(request);
+  }
+  async markClientViewed(
+    scope: CompanyAwareScope,
+    id: string,
+    actorUserId: string | null | undefined,
+  ) {
+    const actor = this.user(actorUserId);
+    const request = await this.find(scope, id);
+    this.assertStatus(request, ['awaiting_client']);
+    const now = new Date();
+    request.clientFirstViewedAt ??= now;
+    request.clientLastViewedAt = now;
+    request.clientViewedByUserId = actor.userId;
+    return this.requests.save(request);
+  }
   async submit(
     scope: CompanyAwareScope,
     id: string,
@@ -236,7 +317,7 @@ export class SocialApprovalsService {
     actorUserId: string | null | undefined,
   ) {
     const actor = this.user(actorUserId);
-    return this.dataSource.transaction(async (manager) => {
+    const saved = await this.dataSource.transaction(async (manager) => {
       const request = await manager
         .getRepository(SocialApprovalRequestEntity)
         .findOne({ where: { ...this.scopeWhere(scope), id } });
@@ -258,6 +339,8 @@ export class SocialApprovalsService {
       request.sentToClientAt = new Date();
       return manager.save(request);
     });
+    await this.notifications?.publish('awaiting_client', saved, actor.userId);
+    return saved;
   }
   /** The Agency boundary can decide only the internal stage. */
   async requestChanges(
@@ -276,7 +359,7 @@ export class SocialApprovalsService {
     actor: ApprovalActor,
   ) {
     this.validateActor(actor);
-    return this.dataSource.transaction(async (manager) => {
+    const saved = await this.dataSource.transaction(async (manager) => {
       const request = await manager
         .getRepository(SocialApprovalRequestEntity)
         .findOne({ where: { ...this.scopeWhere(scope), id } });
@@ -290,6 +373,8 @@ export class SocialApprovalsService {
       request.approvedAt = new Date();
       return manager.save(request);
     });
+    await this.notifications?.publish('approved', saved, actor.userId);
+    return saved;
   }
   async clientRequestChanges(
     scope: CompanyAwareScope,
@@ -300,6 +385,19 @@ export class SocialApprovalsService {
     this.validateActor(actor);
     return this.requestChangesAs(scope, id, actor, body, 'client');
   }
+  async clientComment(
+    scope: CompanyAwareScope,
+    id: string,
+    actorUserId: string | null | undefined,
+    body: string,
+  ) {
+    const actor = this.user(actorUserId);
+    const request = await this.find(scope, id);
+    this.assertStatus(request, ['awaiting_client']);
+    return this.dataSource.transaction((manager) =>
+      this.addCommentEntity(manager, request, actor, body, 'client'),
+    );
+  }
   private async requestChangesAs(
     scope: CompanyAwareScope,
     id: string,
@@ -307,7 +405,7 @@ export class SocialApprovalsService {
     body: string,
     stage: SocialApprovalStage,
   ) {
-    return this.dataSource.transaction(async (manager) => {
+    const saved = await this.dataSource.transaction(async (manager) => {
       const request = await manager
         .getRepository(SocialApprovalRequestEntity)
         .findOne({ where: { ...this.scopeWhere(scope), id } });
@@ -338,6 +436,9 @@ export class SocialApprovalsService {
       request.currentStage = 'internal';
       return manager.save(request);
     });
+    if (stage === 'client')
+      await this.notifications?.publish('changes_requested', saved, actor.userId);
+    return saved;
   }
   async cancel(
     scope: CompanyAwareScope,
@@ -361,7 +462,9 @@ export class SocialApprovalsService {
     this.assertStatus(item, ACTIVE);
     item.status = 'superseded';
     item.supersededAt = new Date();
-    return this.requests.save(item);
+    const saved = await this.requests.save(item);
+    await this.notifications?.publish('superseded', saved, actorUserId ?? null);
+    return saved;
   }
   private isActiveUnique(error: unknown) {
     return (
