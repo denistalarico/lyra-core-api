@@ -9,6 +9,7 @@ import { SocialAdEntity } from '../entities/social-ad-entity.entity';
 import { SocialAdMetricDailyEntity } from '../entities/social-ad-metric-daily.entity';
 import { SocialAdReachPeriodEntity } from '../entities/social-ad-reach-period.entity';
 import { SocialAdSyncRunEntity } from '../entities/social-ad-sync-run.entity';
+import { SocialBoostRequestEntity } from '../../social-campaigns/entities/social-boost-request.entity';
 import { shiftDay } from '../sync/insights-window';
 import { INSIGHTS_ENTITY_LEVELS } from '../sync/social-ad-sync-run.contract';
 import type {
@@ -384,6 +385,7 @@ run('Social analytics read against PostgreSQL', () => {
       queryRunner.manager.getRepository(SocialAdMetricDailyEntity),
       queryRunner.manager.getRepository(SocialAdEntity),
       queryRunner.manager.getRepository(SocialAdSyncRunEntity),
+      queryRunner.manager.getRepository(SocialBoostRequestEntity),
       // The real config, so the chain is measured against the same 90/7 plan
       // production uses rather than numbers invented for the test.
       new SocialAdSyncConfigService(),

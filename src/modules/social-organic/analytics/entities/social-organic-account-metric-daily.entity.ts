@@ -46,7 +46,14 @@ import type { SocialOrganicMetricSource } from './social-organic-post-metric-dai
    AND "followers_lost" >= 0
    AND "impressions" >= 0
    AND "reach" >= 0
-   AND "profile_views" >= 0`,
+   AND "profile_views" >= 0
+   AND "total_interactions" >= 0
+   AND "accounts_engaged" >= 0
+   AND "likes" >= 0
+   AND "comments" >= 0
+   AND "shares" >= 0
+   AND "saves" >= 0
+   AND "replies" >= 0`,
 )
 export class SocialOrganicAccountMetricDailyEntity {
   @PrimaryGeneratedColumn('uuid')
@@ -100,6 +107,40 @@ export class SocialOrganicAccountMetricDailyEntity {
 
   @Column({ name: 'profile_views', type: 'bigint', nullable: true })
   profileViews!: string | null;
+
+  /**
+   * Account-level engagement, all daily flows.
+   *
+   * Requested in one call with `profile_views` and, before the columns existed,
+   * kept only in `provider_metrics`. They are flows rather than `*_lifetime`
+   * snapshots because Meta reports them per day for that day.
+   *
+   * `accountsEngaged` is the exception to read carefully: it counts *distinct
+   * accounts within its own day*, so summing it over a period counts a person
+   * once per day they engaged. Stored as the provider reports it; the read layer
+   * is where that caveat is enforced.
+   */
+  @Column({ name: 'total_interactions', type: 'bigint', nullable: true })
+  totalInteractions!: string | null;
+
+  /** Distinct accounts for THIS DAY. Summing across days double counts people. */
+  @Column({ name: 'accounts_engaged', type: 'bigint', nullable: true })
+  accountsEngaged!: string | null;
+
+  @Column({ type: 'bigint', nullable: true })
+  likes!: string | null;
+
+  @Column({ type: 'bigint', nullable: true })
+  comments!: string | null;
+
+  @Column({ type: 'bigint', nullable: true })
+  shares!: string | null;
+
+  @Column({ type: 'bigint', nullable: true })
+  saves!: string | null;
+
+  @Column({ type: 'bigint', nullable: true })
+  replies!: string | null;
 
   /** True for same-day or provider-incomplete facts. */
   @Column({ name: 'is_partial', type: 'boolean', default: false })

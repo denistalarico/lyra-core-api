@@ -87,6 +87,19 @@ export function normalizeInstagramAccountInsights(
   // column already existed and was never populated for Instagram; the Page side
   // has no equivalent metric on v26.
   const profileViews = readPlainTotal(engagement?.get('profile_views'));
+  // The rest of the engagement family, read the same way and from the same
+  // response. They were already being requested and already being stored whole
+  // in `provider_metrics`; migration 1795600000000 gave them columns and
+  // backfilled the history from that JSONB.
+  const totalInteractions = readPlainTotal(
+    engagement?.get('total_interactions'),
+  );
+  const accountsEngaged = readPlainTotal(engagement?.get('accounts_engaged'));
+  const likes = readPlainTotal(engagement?.get('likes'));
+  const comments = readPlainTotal(engagement?.get('comments'));
+  const shares = readPlainTotal(engagement?.get('shares'));
+  const saves = readPlainTotal(engagement?.get('saves'));
+  const replies = readPlainTotal(engagement?.get('replies'));
 
   if (
     followersCount === null &&
@@ -94,7 +107,14 @@ export function normalizeInstagramAccountInsights(
     reach === null &&
     followersGained === null &&
     followersLost === null &&
-    profileViews === null
+    profileViews === null &&
+    totalInteractions === null &&
+    accountsEngaged === null &&
+    likes === null &&
+    comments === null &&
+    shares === null &&
+    saves === null &&
+    replies === null
   ) {
     return null;
   }
@@ -106,6 +126,13 @@ export function normalizeInstagramAccountInsights(
     impressions,
     reach,
     profileViews,
+    totalInteractions,
+    accountsEngaged,
+    likes,
+    comments,
+    shares,
+    saves,
+    replies,
     providerMetrics: withSnapshot(
       {
         ...media.providerMetrics,
@@ -493,6 +520,13 @@ function accountFact(
     impressions: values.impressions ?? null,
     reach: values.reach ?? null,
     profileViews: values.profileViews ?? null,
+    totalInteractions: values.totalInteractions ?? null,
+    accountsEngaged: values.accountsEngaged ?? null,
+    likes: values.likes ?? null,
+    comments: values.comments ?? null,
+    shares: values.shares ?? null,
+    saves: values.saves ?? null,
+    replies: values.replies ?? null,
     providerMetrics: values.providerMetrics,
   };
 }

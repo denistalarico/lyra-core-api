@@ -14,6 +14,7 @@ import { SocialAdEntity } from '../social-integrations/entities/social-ad-entity
 import { SocialAdMetricDailyEntity } from '../social-integrations/entities/social-ad-metric-daily.entity';
 import { SocialAdReachPeriodEntity } from '../social-integrations/entities/social-ad-reach-period.entity';
 import { SocialAdSyncRunEntity } from '../social-integrations/entities/social-ad-sync-run.entity';
+import { SocialBoostRequestEntity } from '../social-campaigns/entities/social-boost-request.entity';
 import { SocialPaidMediaIntelligenceAdapter } from '../social-integrations/intelligence/social-paid-media-intelligence.adapter';
 import { SocialAdDestinationBreakdownReadService } from '../social-integrations/services/social-ad-destination-breakdown.read.service';
 import { SocialAdDestinationHistoryReadService } from '../social-integrations/services/social-ad-destination-history.read.service';
@@ -86,6 +87,7 @@ run('Acquisition cohort against PostgreSQL', () => {
       AgencyDataSource.getRepository(SocialAdMetricDailyEntity),
       AgencyDataSource.getRepository(SocialAdEntity),
       AgencyDataSource.getRepository(SocialAdSyncRunEntity),
+      AgencyDataSource.getRepository(SocialBoostRequestEntity),
       new SocialAdSyncConfigService(),
       // The reach cache read, which these cohort assertions never populate: the
       // period reach they report is null, which is the correct state for a range

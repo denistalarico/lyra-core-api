@@ -33,6 +33,32 @@ export type SocialAdReachGranularity = 'daily';
  * 2^53 outright. The string is what Postgres stores and what the client should
  * parse with its own decimal type.
  */
+/**
+ * How much of each thing exists, as opposed to how it performed.
+ *
+ * Counts of objects, not measurements of delivery, which is why they sit apart
+ * from the totals rather than inside them. Two consequences follow from that
+ * and both are load-bearing:
+ *
+ * `campaigns` and `ads` count what DELIVERED in the period — objects with at
+ * least one fact row — not what exists in the account. An account with 72
+ * mirrored campaigns of which 1 ran last week must report 1, because the
+ * question the number answers is "what was running", and 72 next to a week's
+ * spend invites the reader to divide one by the other.
+ *
+ * `boosts` is scoped the same way but sourced from `social_boost_requests`,
+ * which is this platform's own record rather than Meta's, so it counts what
+ * this product did rather than what the account contains.
+ */
+export type SocialAdInventoryCounts = {
+  /** Campaigns with at least one fact row inside the period. */
+  campaigns: string;
+  /** Ads with at least one fact row inside the period. */
+  ads: string;
+  /** Boost requests created in the period by this platform. */
+  boosts: string;
+};
+
 export type SocialAdAnalyticsTotals = SocialAdKpis & {
   spend: string;
   impressions: string;
@@ -42,6 +68,25 @@ export type SocialAdAnalyticsTotals = SocialAdKpis & {
   conversions: string;
   conversionValue: string;
   videoViews: string;
+
+  /**
+   * ThruPlays — watched to the end, or at least 15 seconds.
+   *
+   * Null when no day in the period reported it, which includes every period
+   * before the field was requested. Distinct from `videoViews` (the 3-second
+   * action) by roughly 5x on real campaigns, so the two are never substituted
+   * for one another.
+   */
+  thruplays: string | null;
+
+  /**
+   * Average seconds watched per view, weighted by views across the period.
+   *
+   * Already the period's figure — a consumer must not average it again against
+   * anything, and there is no total watch time to sum because Meta does not
+   * report one here.
+   */
+  videoAvgWatchSeconds: string | null;
 
   /**
    * Null unless every contributing day reported it, and never a sum.
@@ -147,6 +192,9 @@ export type SocialAdAnalyticsOverviewView = {
   current: SocialAdAnalyticsTotals;
   previous: SocialAdAnalyticsTotals;
   change: SocialAdAnalyticsChange;
+
+  /** How many campaigns, ads and boosts the period contained. */
+  counts: SocialAdInventoryCounts;
 
   /**
    * Whether any day inside the *current* period is still provisional.

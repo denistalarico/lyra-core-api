@@ -13,6 +13,7 @@ import { SocialAdEntity } from '../entities/social-ad-entity.entity';
 import { SocialAdMetricDailyEntity } from '../entities/social-ad-metric-daily.entity';
 import { SocialAdReachPeriodEntity } from '../entities/social-ad-reach-period.entity';
 import { SocialAdSyncRunEntity } from '../entities/social-ad-sync-run.entity';
+import { SocialBoostRequestEntity } from '../../social-campaigns/entities/social-boost-request.entity';
 import { SocialAdReachPeriodReadService } from '../services/social-ad-reach-period.read.service';
 import { SocialAdSyncConfigService } from '../services/social-ad-sync-config.service';
 import { SocialAnalyticsReadService } from '../services/social-analytics-read.service';
@@ -173,6 +174,7 @@ run('Social paid media intelligence adapter against PostgreSQL', () => {
       queryRunner.manager.getRepository(SocialAdMetricDailyEntity),
       queryRunner.manager.getRepository(SocialAdEntity),
       queryRunner.manager.getRepository(SocialAdSyncRunEntity),
+      queryRunner.manager.getRepository(SocialBoostRequestEntity),
       new SocialAdSyncConfigService(),
       // The reach cache read, against the same transaction. Nothing here stores a
       // measurement, so `periodReach` stays null throughout — and the adapter's

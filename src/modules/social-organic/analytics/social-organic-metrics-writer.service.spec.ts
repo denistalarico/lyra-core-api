@@ -28,6 +28,13 @@ const accountRow: NormalizedOrganicAccountMetricDaily = {
   impressions: '10',
   reach: null,
   profileViews: null,
+  totalInteractions: null,
+  accountsEngaged: null,
+  likes: null,
+  comments: null,
+  shares: null,
+  saves: null,
+  replies: null,
 };
 
 const postRow: NormalizedOrganicPostMetricDaily = {

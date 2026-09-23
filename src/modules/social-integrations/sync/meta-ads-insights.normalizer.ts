@@ -98,6 +98,23 @@ export function normalizeMetricRow(
 
   const counts = readActionMap(row.actions);
   const values = readActionMap(row.action_values);
+  // Both arrive as action-shaped arrays keyed by `action_type` — Meta's own
+  // shape for these fields — so `readActionMap` parses them. The key inside is
+  // `video_view`, which is a naming coincidence and not a relationship to the
+  // `video_view` action type in `actions`: each array holds one entry, and it
+  // describes the field it came from.
+  //
+  // Absent stays null rather than becoming '0', matching `reach` above: the
+  // column has no default precisely so "not collected" stays distinguishable
+  // from "collected, and it was none".
+  const thruplays = readSingleVideoValue(
+    row.video_thruplay_watched_actions,
+    'truncate',
+  );
+  const videoAvgWatchSeconds = readSingleVideoValue(
+    row.video_avg_time_watched_actions,
+    'keep',
+  );
   const facts = deriveActionFacts({ counts, values });
 
   return {
@@ -123,6 +140,8 @@ export function normalizeMetricRow(
     conversions: facts.conversions,
     conversionValue: facts.conversionValue,
     videoViews: facts.videoViews,
+    thruplays,
+    videoAvgWatchSeconds,
     /**
      * Both halves of what Meta said, plus the version of the rules that read
      * them. The counts alone would not let a later mapping re-derive revenue,
@@ -213,4 +232,33 @@ function readAmount(value: unknown): string | null {
 
 function readCount(value: unknown): string | null {
   return value === undefined || value === null ? '0' : parseCountText(value);
+}
+
+/**
+ * The one value inside a video field's action-shaped array, or null.
+ *
+ * Unlike `readAmount`/`readCount` above, an absent field is null rather than
+ * `'0'`. These two columns were added after rows had already been written, so
+ * "the field was not requested when this row was collected" is a real state
+ * that every historical row is in, and it is not the same statement as "the
+ * campaign had no ThruPlays". The nullable columns exist to keep them apart.
+ *
+ * More than one entry is not expected — Meta returns a single `video_view`
+ * entry per field — and the first is taken rather than summing, because
+ * summing an average would be meaningless for `video_avg_time_watched_actions`.
+ *
+ * `readActionMap` formats every value as a six-decimal scaled string, which is
+ * right for `numeric` columns and wrong for a `bigint` one. `decimals` says
+ * which this field is: ThruPlays are whole plays and truncate the same way
+ * `deriveActionFacts` truncates `leads`, while the average keeps its fraction.
+ */
+function readSingleVideoValue(
+  value: unknown,
+  decimals: 'keep' | 'truncate',
+): string | null {
+  const entries = Object.values(readActionMap(value));
+
+  if (entries.length === 0) return null;
+
+  return decimals === 'keep' ? entries[0] : entries[0].split('.')[0];
 }

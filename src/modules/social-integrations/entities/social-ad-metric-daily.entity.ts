@@ -148,7 +148,9 @@ export type SocialAdAttributionSetting = 'account_default';
    AND "conversions" >= 0
    AND "conversion_value" >= 0
    AND "video_views" >= 0
-   AND ("reach" IS NULL OR "reach" >= 0)`,
+   AND ("reach" IS NULL OR "reach" >= 0)
+   AND ("thruplays" IS NULL OR "thruplays" >= 0)
+   AND ("video_avg_watch_seconds" IS NULL OR "video_avg_watch_seconds" >= 0)`,
 )
 export class SocialAdMetricDailyEntity {
   @PrimaryGeneratedColumn('uuid')
@@ -275,6 +277,35 @@ export class SocialAdMetricDailyEntity {
 
   @Column({ name: 'video_views', type: 'bigint', default: 0 })
   videoViews!: string;
+
+  /**
+   * ThruPlays — watched to the end, or for at least 15 seconds.
+   *
+   * Nullable with no default, unlike `videoViews` beside it. The field was
+   * added after rows existed, so NULL means "not requested when this row was
+   * collected"; a `0` default would have restated that history as measured
+   * zeros. Distinct from `videoViews`, which is the 3-second `video_view`
+   * action — the two differ by roughly 5x on real campaigns.
+   */
+  @Column({ name: 'thruplays', type: 'bigint', nullable: true })
+  thruplays!: string | null;
+
+  /**
+   * AVERAGE seconds watched per view. **Never sum this column.**
+   *
+   * `numeric`, not `bigint`, because it is a mean. Averaging stored averages
+   * across days or entities is only correct when each covered the same number
+   * of views, which is never guaranteed — a period figure must be weighted by
+   * views at read time.
+   */
+  @Column({
+    name: 'video_avg_watch_seconds',
+    type: 'numeric',
+    precision: 12,
+    scale: 4,
+    nullable: true,
+  })
+  videoAvgWatchSeconds!: string | null;
 
   /**
    * The full action breakdown as reported, plus the rules that read it:

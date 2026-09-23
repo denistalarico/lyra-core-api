@@ -46,10 +46,12 @@ export class SocialOrganicMetricsWriterService {
          tenant_id, workspace_id, agency_client_id, asset_id, provider, source,
          metric_date, asset_timezone, followers_count, followers_gained,
          followers_lost, impressions, reach, profile_views, is_partial,
-         synced_at, sync_run_id, provider_metrics
+         synced_at, sync_run_id, provider_metrics,
+         total_interactions, accounts_engaged, likes, comments, shares,
+         saves, replies
        ) VALUES (
          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
-         $15, $16, $17, $18::jsonb
+         $15, $16, $17, $18::jsonb, $19, $20, $21, $22, $23, $24, $25
        )
        ON CONFLICT (asset_id, metric_date, source) DO UPDATE SET
          followers_count = COALESCE(EXCLUDED.followers_count, social_organic_account_metrics_daily.followers_count),
@@ -58,6 +60,13 @@ export class SocialOrganicMetricsWriterService {
          impressions = COALESCE(EXCLUDED.impressions, social_organic_account_metrics_daily.impressions),
          reach = COALESCE(EXCLUDED.reach, social_organic_account_metrics_daily.reach),
          profile_views = COALESCE(EXCLUDED.profile_views, social_organic_account_metrics_daily.profile_views),
+         total_interactions = COALESCE(EXCLUDED.total_interactions, social_organic_account_metrics_daily.total_interactions),
+         accounts_engaged = COALESCE(EXCLUDED.accounts_engaged, social_organic_account_metrics_daily.accounts_engaged),
+         likes = COALESCE(EXCLUDED.likes, social_organic_account_metrics_daily.likes),
+         comments = COALESCE(EXCLUDED.comments, social_organic_account_metrics_daily.comments),
+         shares = COALESCE(EXCLUDED.shares, social_organic_account_metrics_daily.shares),
+         saves = COALESCE(EXCLUDED.saves, social_organic_account_metrics_daily.saves),
+         replies = COALESCE(EXCLUDED.replies, social_organic_account_metrics_daily.replies),
          is_partial = EXCLUDED.is_partial,
          synced_at = EXCLUDED.synced_at,
          sync_run_id = EXCLUDED.sync_run_id,
@@ -82,6 +91,13 @@ export class SocialOrganicMetricsWriterService {
         row.syncedAt,
         row.syncRunId,
         JSON.stringify(row.providerMetrics),
+        row.totalInteractions,
+        row.accountsEngaged,
+        row.likes,
+        row.comments,
+        row.shares,
+        row.saves,
+        row.replies,
       ],
     );
   }

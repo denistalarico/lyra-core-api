@@ -99,10 +99,10 @@ describe('Social analytics provider boundary', () => {
     }
   });
 
-  it('reads only the four read-model tables', () => {
+  it('reads only the read-model tables', () => {
     const source = readSource('services/social-analytics-read.service.ts');
 
-    // The four entities named in the principle, and nothing else from the ORM.
+    // The entities named in the principle, and nothing else from the ORM.
     const repositories = source.match(/Repository<(\w+)>/g) ?? [];
 
     expect(new Set(repositories)).toEqual(
@@ -111,6 +111,18 @@ describe('Social analytics provider boundary', () => {
         'Repository<SocialAdMetricDailyEntity>',
         'Repository<SocialAdEntity>',
         'Repository<SocialAdSyncRunEntity>',
+        /**
+         * Owned by `social-campaigns`, read here to count boosts beside
+         * campaigns and ads in the overview.
+         *
+         * Admitted deliberately rather than by loosening the assertion: the
+         * principle this list enforces is that the read path touches no
+         * provider and no credential, and a repository on a table this
+         * platform writes itself does neither. What would violate it is
+         * `SocialBoostService` — a write path holding a credential resolver —
+         * which is why the entity is injected and the service is not.
+         */
+        'Repository<SocialBoostRequestEntity>',
       ]),
     );
   });

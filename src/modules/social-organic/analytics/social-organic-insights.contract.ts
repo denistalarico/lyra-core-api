@@ -67,6 +67,15 @@ export type NormalizedOrganicAccountMetricDaily = {
   impressions: string | null;
   reach: string | null;
   profileViews: string | null;
+  /** Daily flows, read from the same call as `profileViews`. */
+  totalInteractions: string | null;
+  /** Distinct accounts for THAT DAY — see the entity docblock before summing. */
+  accountsEngaged: string | null;
+  likes: string | null;
+  comments: string | null;
+  shares: string | null;
+  saves: string | null;
+  replies: string | null;
   isPartial: boolean;
   syncedAt: Date;
   syncRunId: string;

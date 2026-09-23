@@ -66,6 +66,8 @@ run('Intraday convergence against PostgreSQL', () => {
       conversions: '1.000000',
       conversionValue: '0.000000',
       videoViews: '20',
+      thruplays: null,
+      videoAvgWatchSeconds: null,
       actions: {
         mappingVersion: META_ACTION_MAPPING_VERSION,
         counts: { lead: '1.000000' },

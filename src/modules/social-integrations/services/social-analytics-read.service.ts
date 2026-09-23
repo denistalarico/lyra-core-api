@@ -22,6 +22,7 @@ import { planBackfillChunks } from '../sync/social-ad-backfill-plan';
 import type {
   SocialAdAnalyticsChange,
   SocialAdAnalyticsOverviewView,
+  SocialAdInventoryCounts,
   SocialAdAnalyticsTotals,
 } from '../views/social-ad-analytics-overview.view';
 import {
@@ -55,6 +56,7 @@ import {
   SocialAdReachPeriodReadService,
   type SocialAdPeriodReach,
 } from './social-ad-reach-period.read.service';
+import { SocialBoostRequestEntity } from '../../social-campaigns/entities/social-boost-request.entity';
 import { SocialAdSyncConfigService } from './social-ad-sync-config.service';
 import type { SocialAdBackfillChunkOutcome } from './social-ad-sync-run.service';
 
@@ -134,6 +136,19 @@ type AggregateRow = {
   conversions: string | null;
   conversion_value: string | null;
   video_views: string | null;
+  /** Null across the whole period when no day reported it — see `readVideo`. */
+  thruplays: string | null;
+  thruplay_days: string | null;
+  /**
+   * The view-weighted numerator and denominator of the average watch time.
+   *
+   * Stored per day as a mean, which cannot be averaged again: the mean of two
+   * daily means is the period's mean only when both days had the same view
+   * count. Multiplying each day's average by that day's views recovers total
+   * seconds, and dividing by total views gives the period figure honestly.
+   */
+  watch_seconds_weighted: string | null;
+  watch_views: string | null;
   reach: string | null;
   reach_days: string | null;
   fact_days: string | null;
@@ -171,6 +186,16 @@ export class SocialAnalyticsReadService {
     private readonly entitiesRepository: Repository<SocialAdEntity>,
     @InjectRepository(SocialAdSyncRunEntity, 'agency')
     private readonly runsRepository: Repository<SocialAdSyncRunEntity>,
+    /**
+     * Read-only, and a repository rather than the boost service.
+     *
+     * The overview counts boosts beside campaigns and ads. Reaching for
+     * `SocialBoostService` would pull a write path — and a credential-capable
+     * one — onto a read that must never mutate or decrypt anything, the same
+     * rule `config` below is annotated with.
+     */
+    @InjectRepository(SocialBoostRequestEntity, 'agency')
+    private readonly boostRequestsRepository: Repository<SocialBoostRequestEntity>,
     /**
      * Config only — chunk size and horizon, so the chain is measured against the
      * same plan the planner builds.
@@ -293,8 +318,14 @@ export class SocialAnalyticsReadService {
       'externalAccountId',
     ]);
 
-    const [current, previous, lastFactDate, currentReach, previousReach] =
-      await Promise.all([
+    const [
+      current,
+      previous,
+      lastFactDate,
+      currentReach,
+      previousReach,
+      counts,
+    ] = await Promise.all([
         this.aggregate(connection.id, period),
         this.aggregate(connection.id, comparison),
         this.findLastFactDate(connection.id),
@@ -305,6 +336,7 @@ export class SocialAnalyticsReadService {
         // would be a period-over-period reach comparison where one side is a
         // measurement and the other a sum.
         this.findPeriodReach(connection, comparison),
+        this.countInventory(connection.id, period),
       ]);
 
     return {
@@ -319,8 +351,67 @@ export class SocialAnalyticsReadService {
       current: this.toTotals(current, currentReach),
       previous: this.toTotals(previous, previousReach),
       change: this.toChange(current, previous),
+      counts,
       hasPartialData: toCount(current.partial_days) > 0n,
       lastFactDate,
+    };
+  }
+
+  /**
+   * How many campaigns, ads and boosts the period contained.
+   *
+   * Counted from delivery rather than from the mirror. `social_ad_entities`
+   * holds every object ever synced — on the production account, 72 campaigns
+   * and 260 ads of which 1 and 6 are active — so counting rows there would put
+   * "72 campanhas" beside one week of spend and invite the reader to divide.
+   * `COUNT(DISTINCT ...)` over the facts answers the question actually being
+   * asked: how many were running.
+   *
+   * Ads are counted at `entity_level = 'ad'`, which this deployment does not
+   * yet ingest — so the honest answer today is 0, and it becomes real the day
+   * ad-level insights are switched on without this query changing.
+   *
+   * Boosts come from this platform's own table, scoped by the period's calendar
+   * days in the account's zone. They are not a Meta object: a boost is a thing
+   * this product did, and counting it beside Meta's own objects is the whole
+   * point of showing it.
+   */
+  private async countInventory(
+    connectionId: string,
+    period: SocialAdAnalyticsPeriod,
+  ): Promise<SocialAdInventoryCounts> {
+    const delivered = await this.metricsRepository
+      .createQueryBuilder('fact')
+      .select(
+        `COUNT(DISTINCT fact.campaign_external_id) FILTER (WHERE fact.entity_level = '${CAMPAIGN_ENTITY_LEVEL}')`,
+        'campaigns',
+      )
+      .addSelect(
+        `COUNT(DISTINCT fact.entity_external_id) FILTER (WHERE fact.entity_level = 'ad')`,
+        'ads',
+      )
+      .where('fact.connection_id = :connectionId', { connectionId })
+      .andWhere('fact.source = :source', { source: OVERVIEW_SOURCE })
+      .andWhere('fact.metric_date BETWEEN :since AND :until', {
+        since: period.since,
+        until: period.until,
+      })
+      .getRawOne<{ campaigns: string | null; ads: string | null }>();
+
+    const boosts = await this.boostRequestsRepository
+      .createQueryBuilder('boost')
+      .select('COUNT(boost.id)', 'boosts')
+      .where('boost.connection_id = :connectionId', { connectionId })
+      .andWhere('boost.created_at >= :since', { since: `${period.since}` })
+      .andWhere('boost.created_at < (:until::date + 1)', {
+        until: period.until,
+      })
+      .getRawOne<{ boosts: string | null }>();
+
+    return {
+      campaigns: toCount(delivered?.campaigns).toString(),
+      ads: toCount(delivered?.ads).toString(),
+      boosts: toCount(boosts?.boosts).toString(),
     };
   }
 
@@ -961,6 +1052,20 @@ export class SocialAnalyticsReadService {
       .addSelect('SUM(fact.conversions)', 'conversions')
       .addSelect('SUM(fact.conversion_value)', 'conversion_value')
       .addSelect('SUM(fact.video_views)', 'video_views')
+      .addSelect('SUM(fact.thruplays)', 'thruplays')
+      .addSelect('COUNT(fact.thruplays)', 'thruplay_days')
+      // The weighted average's two halves, summed separately so the division
+      // happens once over the period rather than once per day. Restricted to
+      // rows that have both an average and the views it was taken over —
+      // a day with an average but no views contributes nothing to either.
+      .addSelect(
+        'SUM(fact.video_avg_watch_seconds * fact.video_views)',
+        'watch_seconds_weighted',
+      )
+      .addSelect(
+        'SUM(fact.video_views) FILTER (WHERE fact.video_avg_watch_seconds IS NOT NULL)',
+        'watch_views',
+      )
       // Summed only to be discarded unless every day reported it — see
       // `readReach`. Reach is not additive and this total is never returned as
       // one; it exists so the "all days reported" case can answer at all.
@@ -1067,6 +1172,15 @@ export class SocialAnalyticsReadService {
       conversions: formatAmountText(row.conversions),
       conversionValue: formatAmountText(row.conversion_value),
       videoViews: toCount(row.video_views).toString(),
+      // Null, not '0', when no day in the period carried the field — the same
+      // distinction the nullable column exists for. A period that predates the
+      // field being requested has no ThruPlay figure, and saying "0" would
+      // report a collection gap as a performance result.
+      thruplays:
+        toCount(row.thruplay_days) > 0n
+          ? toCount(row.thruplays).toString()
+          : null,
+      videoAvgWatchSeconds: readWeightedAverage(row),
       reach: readReach(row),
       reachGranularity: 'daily',
       // From the measurement cache, never from `row`. There is no expression
@@ -1278,6 +1392,34 @@ function readInstant(value: Date | string | null): string | null {
   return value instanceof Date
     ? value.toISOString()
     : new Date(value).toISOString();
+}
+
+/**
+ * Average seconds watched over the period, weighted by views.
+ *
+ * The stored column is a per-day mean, and means do not average. Recovering
+ * total seconds (mean × that day's views) and dividing by the views those means
+ * covered gives the period's real average; averaging the averages would weight
+ * a day with three views the same as a day with thirty thousand.
+ *
+ * Null when nothing reported it, matching every other "not measured" in this
+ * module. Four decimal places, the column's own scale.
+ */
+function readWeightedAverage(row: AggregateRow): string | null {
+  const views = toCount(row.watch_views);
+
+  if (views === 0n) return null;
+
+  // `toAmount` already returns a SCALE-scaled bigint, so dividing it by a plain
+  // count leaves the result scaled. `formatAmountText` is not the formatter for
+  // that — it takes raw text and scales it itself, which would scale a second
+  // time — so the scaled value is rendered directly, the same way
+  // `formatAmountText` renders its own.
+  const scaled = toAmount(row.watch_seconds_weighted) / views;
+  const whole = scaled / SCALE_FACTOR;
+  const fraction = (scaled % SCALE_FACTOR).toString().padStart(6, '0');
+
+  return `${whole}.${fraction}`;
 }
 
 function toKpiInputs(row: AggregateRow): SocialAdKpiInputs {

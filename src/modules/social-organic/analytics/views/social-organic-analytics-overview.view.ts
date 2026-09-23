@@ -40,6 +40,29 @@ export type SocialOrganicAnalyticsTotals = {
   followersLost: string;
 
   profileViews: string;
+
+  /**
+   * Account-level engagement flows, safe to sum across the period.
+   *
+   * `likes`/`comments`/`shares`/`saves` here are the ACCOUNT's totals for the
+   * day, which is not the same as the sum of its posts': a like on a post
+   * published last year counts on the day it happened, and the post grain would
+   * never attribute it to this period.
+   */
+  totalInteractions: string;
+  likes: string;
+  comments: string;
+  shares: string;
+  saves: string;
+  replies: string;
+
+  /**
+   * Distinct accounts that engaged — null unless the period is exactly one day.
+   *
+   * Same rule as `reach`, for the same reason: Meta measures it per day, and no
+   * sum of daily distinct counts is the distinct count of the period.
+   */
+  accountsEngaged: string | null;
 };
 
 export type SocialOrganicAnalyticsPeriodView = {

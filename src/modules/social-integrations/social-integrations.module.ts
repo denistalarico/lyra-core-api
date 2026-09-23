@@ -33,6 +33,7 @@ import { SocialAdHierarchyLookupReadService } from './services/social-ad-hierarc
 import { SocialAdDestinationHistoryReadService } from './services/social-ad-destination-history.read.service';
 import { SocialAdDestinationObserverService } from './services/social-ad-destination-observer.service';
 import { SocialAdEntityWriterService } from './services/social-ad-entity-writer.service';
+import { SocialBoostRequestEntity } from '../social-campaigns/entities/social-boost-request.entity';
 import { SocialAdHierarchySyncService } from './services/social-ad-hierarchy-sync.service';
 import { SocialAdInsightsSyncService } from './services/social-ad-insights-sync.service';
 import { SocialAdMetricsWriterService } from './services/social-ad-metrics-writer.service';
@@ -75,6 +76,12 @@ import { SocialIntegrationsController } from './social-integrations.controller';
         SocialAdMetricDailyEntity,
         SocialAdReachPeriodEntity,
         SocialAdSyncRunEntity,
+        // Owned by `social-campaigns`, registered here for its repository only.
+        // The analytics overview counts boosts beside campaigns and ads, and a
+        // repository binding is not a dependency on that module's services —
+        // nothing here imports `SocialCampaignsModule`, which would form the
+        // cycle the boost flow already avoids in the other direction.
+        SocialBoostRequestEntity,
       ],
       'agency',
     ),

@@ -88,6 +88,32 @@ export type NormalizedAdMetricDaily = {
   conversions: string;
   conversionValue: string;
   videoViews: string;
+  /**
+   * ThruPlays: watched to the end, or for at least 15 seconds.
+   *
+   * Null, never `'0'`, when Meta did not report the field — the column it
+   * writes to has no default for the same reason. A zero here would claim we
+   * asked and the answer was none, which is indistinguishable on a chart from
+   * a row collected before the field was requested at all.
+   *
+   * **Not interchangeable with `videoViews`.** That is the three-second
+   * `video_view` action; on this account the same campaign over the same 90
+   * days reported 872 of those and 190 ThruPlays.
+   */
+  thruplays: string | null;
+  /**
+   * AVERAGE seconds watched per view — `video_avg_time_watched_actions`.
+   *
+   * An average, not a total, which makes it the one video number here that
+   * must never be summed across days or across entities: the mean of two means
+   * is not the mean of the pool unless both had the same view count. A period
+   * figure needs a view-weighted average, which the read layer computes; there
+   * is no stored total watch time to recover it from, because Meta does not
+   * offer one on this edge.
+   *
+   * Null when unreported, for the same reason as `thruplays`.
+   */
+  videoAvgWatchSeconds: string | null;
   /** Everything Meta reported, so the mapping above can be re-derived. */
   actions: Record<string, unknown>;
   /**

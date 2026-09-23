@@ -244,6 +244,56 @@ describe('Meta organic account insights normalizers', () => {
     expect(row?.profileViews).toBe('12');
   });
 
+  /**
+   * The whole engagement family, not just `profile_views`.
+   *
+   * All seven were already being requested in one call and all seven were
+   * already being stored in `provider_metrics`; migration 1795600000000 gave
+   * six of them columns. This pins that the normalizer now writes them, which
+   * is the difference between "collected" and "visible".
+   */
+  it('reads the whole engagement family, not only profile views', () => {
+    const row = normalizeInstagramAccountInsights({
+      ...base,
+      followersCount: undefined,
+      mediaInsights: {
+        data: [breakdownMetric('views', 'media_product_type', [['POST', 9]])],
+      },
+      followInsights: { data: [] },
+      engagementInsights: {
+        data: [
+          { name: 'profile_views', period: 'day', total_value: { value: 12 } },
+          {
+            name: 'total_interactions',
+            period: 'day',
+            total_value: { value: 31 },
+          },
+          {
+            name: 'accounts_engaged',
+            period: 'day',
+            total_value: { value: 24 },
+          },
+          { name: 'likes', period: 'day', total_value: { value: 18 } },
+          { name: 'comments', period: 'day', total_value: { value: 5 } },
+          { name: 'shares', period: 'day', total_value: { value: 4 } },
+          { name: 'saves', period: 'day', total_value: { value: 3 } },
+          { name: 'replies', period: 'day', total_value: { value: 1 } },
+        ],
+      },
+    });
+
+    expect(row).toMatchObject({
+      profileViews: '12',
+      totalInteractions: '31',
+      accountsEngaged: '24',
+      likes: '18',
+      comments: '5',
+      shares: '4',
+      saves: '3',
+      replies: '1',
+    });
+  });
+
   it('keeps an explicit zero from the engagement family', () => {
     // A day with no profile visits is a measurement, not an absence — the
     // distinction the whole normalizer is built around.

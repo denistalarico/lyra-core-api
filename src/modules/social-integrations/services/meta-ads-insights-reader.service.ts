@@ -23,12 +23,29 @@ import { MetaAdsGraphService } from './meta-ads-graph.service';
  * moment two rows are summed, because a ratio of sums is not a sum of ratios.
  * They are derived on read, from summed numerators and denominators.
  *
- * Also absent: the video breakdown fields. `video_view` arrives inside
- * `actions`, which is already requested, so `video_views` costs nothing extra.
+ * `video_view` arrives inside `actions`, which is already requested, so
+ * `video_views` costs nothing extra.
+ *
+ * `video_thruplay_watched_actions` and `video_avg_time_watched_actions` are the
+ * two that do cost: they are their own fields, not action types, so each is a
+ * column Meta has to compute. They are here because Boost sells ThruPlay as an
+ * optimization goal, and spending a client's budget optimizing for an outcome
+ * the report cannot show asks them to take the result on faith.
+ *
+ * `video_avg_time_watched_actions` is an AVERAGE in seconds per view, which is
+ * why it is stored as such and never summed — see the contract. Total watch
+ * time is not a field Meta offers here; multiplying the average by a view count
+ * would be a different metric's denominator applied to this one's numerator.
+ *
+ * Deliberately absent: `video_continuous_2_sec_watched_actions` (a third view
+ * definition nothing asks for) and the 25/50/75/100% completion fields, which
+ * are four more computed columns answering a question the product does not yet
+ * pose.
  */
 const INSIGHTS_FIELDS =
   'date_start,date_stop,spend,impressions,reach,clicks,inline_link_clicks,' +
-  'actions,action_values';
+  'actions,action_values,video_thruplay_watched_actions,' +
+  'video_avg_time_watched_actions';
 
 /** Campaign rows need the id they belong to; the name would be a stored lie. */
 const CAMPAIGN_FIELDS = `${INSIGHTS_FIELDS},campaign_id`;

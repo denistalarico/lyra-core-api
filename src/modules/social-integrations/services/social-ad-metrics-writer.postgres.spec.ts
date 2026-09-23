@@ -54,6 +54,8 @@ run('SocialAdMetricsWriterService against PostgreSQL', () => {
       conversions: '2.000000',
       conversionValue: '0.000000',
       videoViews: '72',
+      thruplays: null,
+      videoAvgWatchSeconds: null,
       actions: {
         mappingVersion: META_ACTION_MAPPING_VERSION,
         counts: { lead: '2.000000' },

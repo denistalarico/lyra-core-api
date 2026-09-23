@@ -255,7 +255,17 @@ describe('MetaAdsInsightsReaderService — the request', () => {
     }
   });
 
-  it('asks for no extra video field, since video_view rides inside actions', async () => {
+  /**
+   * Two video fields, and only two.
+   *
+   * `video_view` still rides inside `actions` and is still not requested
+   * separately. ThruPlays and average watch time are their own fields on the
+   * edge, so each is a column Meta computes against a CPU quota shared with the
+   * publishing path — which is why the assertion names them exhaustively rather
+   * than allowing anything matching `video_`. A third video field should have
+   * to justify itself here before it reaches production.
+   */
+  it('asks for ThruPlays and average watch time, and no other video field', async () => {
     const harness = createReader();
 
     await harness.reader.read({
@@ -266,7 +276,18 @@ describe('MetaAdsInsightsReaderService — the request', () => {
       syncedAt: SYNCED_AT,
     });
 
-    expect(String(harness.requests[0].fields)).not.toContain('video_');
+    const fields = String(harness.requests[0].fields);
+    const videoFields = fields.split(',').filter((f) => f.startsWith('video_'));
+
+    expect(new Set(videoFields)).toEqual(
+      new Set([
+        'video_thruplay_watched_actions',
+        'video_avg_time_watched_actions',
+      ]),
+    );
+    // `video_views` is derived from the `video_view` action type, so asking for
+    // it as a field would be paying twice for the same number.
+    expect(fields).not.toContain('video_views');
   });
 
   it('pages through the shared walker rather than a loop of its own', async () => {

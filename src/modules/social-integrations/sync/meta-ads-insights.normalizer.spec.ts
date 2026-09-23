@@ -70,6 +70,65 @@ describe('normalizeMetricRow — account level', () => {
     });
   });
 
+  /**
+   * The three video numbers are three different measurements, not fallbacks
+   * for one another. On the real account the same campaign over 90 days
+   * reported 4 877 plays, 872 three-second views and 190 ThruPlays.
+   */
+  it('keeps ThruPlays and the 3-second view as separate numbers', () => {
+    const row = normalizeMetricRow(
+      {
+        ...ACCOUNT_ROW,
+        video_thruplay_watched_actions: [
+          { action_type: 'video_view', value: '19' },
+        ],
+        video_avg_time_watched_actions: [
+          { action_type: 'video_view', value: '7' },
+        ],
+      },
+      context(),
+    );
+
+    expect(row).toMatchObject({
+      videoViews: '72',
+      // Whole plays: the column is `bigint`, and a fractional ThruPlay is not
+      // a thing that happened.
+      thruplays: '19',
+      // Keeps its decimals: the column is `numeric` because an average of
+      // seconds is not a whole number.
+      videoAvgWatchSeconds: '7.000000',
+    });
+  });
+
+  it('keeps the fractional part of an average watch time', () => {
+    const row = normalizeMetricRow(
+      {
+        ...ACCOUNT_ROW,
+        video_avg_time_watched_actions: [
+          { action_type: 'video_view', value: '6.25' },
+        ],
+      },
+      context(),
+    );
+
+    expect(row).toMatchObject({ videoAvgWatchSeconds: '6.250000' });
+  });
+
+  /**
+   * Null, never '0'. Every row collected before these fields were requested is
+   * in this state, and "we did not ask" must stay distinguishable from "we
+   * asked and the answer was none" — a zero would report a collection gap as a
+   * campaign that nobody watched.
+   */
+  it('leaves the video completion fields null when Meta omits them', () => {
+    const row = normalizeMetricRow(ACCOUNT_ROW, context());
+
+    expect(row).toMatchObject({
+      thruplays: null,
+      videoAvgWatchSeconds: null,
+    });
+  });
+
   it('takes the account id from the credential, never from the payload', () => {
     const row = normalizeMetricRow(
       { ...ACCOUNT_ROW, account_id: '999', id: 'act_999' },

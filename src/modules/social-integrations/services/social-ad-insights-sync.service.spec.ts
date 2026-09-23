@@ -44,6 +44,8 @@ function row(level: 'account' | 'campaign'): NormalizedAdMetricDaily {
     conversions: '2.000000',
     conversionValue: '0.000000',
     videoViews: '72',
+    thruplays: null,
+    videoAvgWatchSeconds: null,
     actions: { counts: {}, values: {} },
     isPartial: false,
     syncedAt: new Date(),

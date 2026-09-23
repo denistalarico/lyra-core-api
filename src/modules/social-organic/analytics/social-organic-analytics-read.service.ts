@@ -70,6 +70,22 @@ type AggregateRow = {
   followers_gained: string | null;
   followers_lost: string | null;
   profile_views: string | null;
+  total_interactions: string | null;
+  likes: string | null;
+  comments: string | null;
+  shares: string | null;
+  saves: string | null;
+  replies: string | null;
+  /**
+   * Summed for completeness, and paired with the count of days that reported
+   * it so the reader can refuse to present the sum as a period figure.
+   *
+   * `accounts_engaged` counts DISTINCT ACCOUNTS WITHIN ONE DAY. Adding seven
+   * days of it counts a person who engaged every day seven times, which is the
+   * same class of error as summing reach — see `readReach`.
+   */
+  accounts_engaged: string | null;
+  accounts_engaged_days: string | null;
 };
 
 /**
@@ -472,6 +488,14 @@ export class SocialOrganicAnalyticsReadService {
       .addSelect('SUM(fact.followers_gained)', 'followers_gained')
       .addSelect('SUM(fact.followers_lost)', 'followers_lost')
       .addSelect('SUM(fact.profile_views)', 'profile_views')
+      .addSelect('SUM(fact.total_interactions)', 'total_interactions')
+      .addSelect('SUM(fact.likes)', 'likes')
+      .addSelect('SUM(fact.comments)', 'comments')
+      .addSelect('SUM(fact.shares)', 'shares')
+      .addSelect('SUM(fact.saves)', 'saves')
+      .addSelect('SUM(fact.replies)', 'replies')
+      .addSelect('SUM(fact.accounts_engaged)', 'accounts_engaged')
+      .addSelect('COUNT(fact.accounts_engaged)', 'accounts_engaged_days')
       .where('fact.asset_id = :assetId', { assetId })
       .andWhere('fact.metric_date BETWEEN :since AND :until', {
         since,
@@ -579,8 +603,34 @@ export class SocialOrganicAnalyticsReadService {
       followersGained: toCount(row.followers_gained).toString(),
       followersLost: toCount(row.followers_lost).toString(),
       profileViews: toCount(row.profile_views).toString(),
+      totalInteractions: toCount(row.total_interactions).toString(),
+      likes: toCount(row.likes).toString(),
+      comments: toCount(row.comments).toString(),
+      shares: toCount(row.shares).toString(),
+      saves: toCount(row.saves).toString(),
+      replies: toCount(row.replies).toString(),
+      // Only when the period is a single day, for the reason `readReach`
+      // returns null on multi-day windows: a per-day distinct count has no
+      // additive period equivalent, and the alternative to null is a number
+      // that overstates the audience by roughly the number of days.
+      accountsEngaged: readSingleDayDistinct(row),
     };
   }
+}
+
+/**
+ * A per-day distinct count, or null when the period spans more than one
+ * reporting day.
+ *
+ * Deliberately shaped like `readReach`: both answer "how many different
+ * people", both are measured within a day, and neither can be recovered for a
+ * longer window by addition. A caller wanting a period figure needs Meta to
+ * measure the period, which this metric does not offer.
+ */
+function readSingleDayDistinct(row: AggregateRow): string | null {
+  const days = toCount(row.accounts_engaged_days);
+
+  return days === 1n ? toCount(row.accounts_engaged).toString() : null;
 }
 
 /** A timestamp column, whatever shape the driver returned it in. */
