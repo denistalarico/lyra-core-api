@@ -8,6 +8,7 @@ import {
 import type { SocialConsolidatedAnalyticsService } from './social-consolidated-analytics.service';
 import { SocialOrganicAnalyticsController } from './social-organic-analytics.controller';
 import type { SocialOrganicAnalyticsReadService } from './social-organic-analytics-read.service';
+import type { SocialOrganicActivityReadService } from './social-organic-activity-read.service';
 import type { SocialOrganicAudienceReadService } from './social-organic-audience-read.service';
 import type { SocialOrganicThumbnailService } from './social-organic-thumbnail.service';
 
@@ -75,6 +76,20 @@ function createHarness() {
     }),
   };
 
+  const activityInputs: Record<string, unknown>[] = [];
+
+  const activityReadService = {
+    activity: jest.fn((input: Record<string, unknown>) => {
+      activityInputs.push(input);
+
+      return Promise.resolve({
+        assetId: input.assetId,
+        hours: [],
+        weekdays: [],
+      });
+    }),
+  };
+
   const thumbnailInputs: unknown[] = [];
   const thumbnailService = {
     resolve: jest.fn<Promise<string | null>, [unknown]>(async (input) => {
@@ -91,15 +106,18 @@ function createHarness() {
     publicationMetricsInputs,
     consolidatedInputs,
     audienceInputs,
+    activityInputs,
     thumbnailInputs,
     analyticsReadService,
     consolidatedReadService,
     audienceReadService,
+    activityReadService,
     thumbnailService,
     controller: new SocialOrganicAnalyticsController(
       analyticsReadService as unknown as SocialOrganicAnalyticsReadService,
       consolidatedReadService as unknown as SocialConsolidatedAnalyticsService,
       audienceReadService as unknown as SocialOrganicAudienceReadService,
+      activityReadService as unknown as SocialOrganicActivityReadService,
       thumbnailService as unknown as SocialOrganicThumbnailService,
     ),
   };

@@ -9,6 +9,7 @@ export * from './meta/meta-organic-insights.types';
 export * from './social-organic-analytics.controller';
 export * from './social-organic-analytics-read.service';
 export * from './social-organic-audience-config.service';
+export * from './social-organic-activity-read.service';
 export * from './social-organic-audience-read.service';
 export * from './social-organic-thumbnail.service';
 export * from './social-organic-audience-writer.service';

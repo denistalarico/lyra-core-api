@@ -219,6 +219,33 @@ describe('MetaOrganicPeriodReachService', () => {
     expect(result.viewsOrganic).toBe('5');
   });
 
+  it('reads the feed slice as a subset of organic, not a third bucket', async () => {
+    // "Alcance das postagens" counts feed posts only. Meta spells that surface
+    // three ways on this edge, so all three must land in the slice — and reels
+    // and stories must stay out of it while remaining organic.
+    const graph = jest.fn().mockResolvedValue(
+      answer(500, [
+        ['POST', 30],
+        ['CAROUSEL_CONTAINER', 12],
+        ['FEED', 8],
+        ['REEL', 100],
+        ['STORY', 50],
+        ['AD', 400],
+      ]),
+    );
+
+    const result = await serviceWith(graph).measurePeriod({
+      resolved: instagram(),
+      since: '2026-09-18',
+      until: '2026-09-24',
+    });
+
+    expect(result.reachFeed).toBe('50');
+    // Still counted as organic too: the feed figure narrows that slice, it
+    // does not sit beside it. Reels and stories are organic as well.
+    expect(result.reachOrganic).toBe('200');
+  });
+
   it('counts an unrecognised surface as organic, never as paid', async () => {
     // A surface Meta adds later is content the account published. Dropping it
     // would understate the organic slice; calling it paid would be worse.

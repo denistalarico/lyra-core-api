@@ -1,8 +1,10 @@
-/* eslint-disable @typescript-eslint/require-await, @typescript-eslint/no-unsafe-assignment -- worker doubles use Jest asymmetric matchers. */
 import type { SocialOrganicCredentialResolver } from '../credentials/social-organic-credential.resolver';
 import type { SocialOrganicSyncRunEntity } from './entities/social-organic-sync-run.entity';
 import type { MetaOrganicOnlineFollowersService } from './meta/meta-organic-online-followers.service';
-import type { MetaOrganicPeriodReachService } from './meta/meta-organic-period-reach.service';
+import type {
+  MetaOrganicPeriodMeasurement,
+  MetaOrganicPeriodReachService,
+} from './meta/meta-organic-period-reach.service';
 import type { SocialOrganicReachPeriodWriterService } from './social-organic-reach-period-writer.service';
 import type { MetaOrganicAudienceService } from './meta/meta-organic-audience.service';
 import type { MetaOrganicInsightsService } from './meta/meta-organic-insights.service';
@@ -74,8 +76,34 @@ function harness() {
 
   // Period reach: not an Instagram asset by default (apiCalls 0), so the
   // existing counter assertions stay about the metrics sync alone.
+  //
+  // `measurePeriod` is the method the worker calls. A double that only carried
+  // `measure` still let every test pass — the worker swallows a failed
+  // measurement so a good metrics run is not lost — while the pass threw
+  // `TypeError` on every window and wrote nothing. The visible symptom was four
+  // warnings per test in the log and a period card that stayed empty in
+  // production, which is exactly the shape of failure the swallow is there to
+  // cause on purpose for real errors and hides for this one.
+  //
+  // Typed against the real measurement rather than inferred: the default's
+  // nulls would otherwise narrow every field to `null`, and a test overriding
+  // one with a real figure would not compile.
   const periodReach = {
-    measure: jest.fn(async () => ({ reach: null, apiCalls: 0 })),
+    measurePeriod: jest.fn<Promise<MetaOrganicPeriodMeasurement>, []>(
+      async () => ({
+        views: null,
+        viewsOrganic: null,
+        viewsPaid: null,
+        reach: null,
+        reachOrganic: null,
+        reachPaid: null,
+        reachFeed: null,
+        measuredSince: '2026-09-07',
+        measuredUntil: '2026-09-08',
+        truncated: false,
+        apiCalls: 0,
+      }),
+    ),
   };
   const reachWriter = { record: jest.fn(async () => undefined) };
 
@@ -188,6 +216,73 @@ describe('audience snapshot', () => {
 
     expect(context.runs.markSucceeded).toHaveBeenCalledTimes(1);
     expect(context.runs.markFailed).not.toHaveBeenCalled();
+  });
+});
+
+describe('period measurement', () => {
+  it('stores all six figures, not just the total', async () => {
+    // The gap this closes: `measurePeriod` computes views and reach with their
+    // organic and paid slices from the same two API calls, and the worker used
+    // to call the narrower `measure` and keep one number. The other five were
+    // paid for and discarded, so the cards asking for them had nothing to read.
+    const context = harness();
+    context.periodReach.measurePeriod.mockResolvedValue({
+      views: '9155',
+      viewsOrganic: '509',
+      viewsPaid: '8646',
+      reach: '6783',
+      reachOrganic: '156',
+      reachPaid: '6645',
+      reachFeed: '39',
+      measuredSince: '2026-08-26',
+      measuredUntil: '2026-09-24',
+      truncated: false,
+      apiCalls: 2,
+    });
+
+    await context.worker.processDue(1);
+
+    expect(context.reachWriter.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        reach: '6783',
+        reachOrganic: '156',
+        reachPaid: '6645',
+        reachFeed: '39',
+        views: '9155',
+        viewsOrganic: '509',
+        viewsPaid: '8646',
+      }),
+    );
+  });
+
+  it('carries the measured range so a clamped window can say so', async () => {
+    // Meta refuses a span wider than 30 days, so a longer request is measured
+    // over its last 30. Storing the range keeps a card from labelling that
+    // figure with the period the operator asked for.
+    const context = harness();
+    context.periodReach.measurePeriod.mockResolvedValue({
+      views: '10',
+      viewsOrganic: null,
+      viewsPaid: null,
+      reach: '10',
+      reachOrganic: null,
+      reachPaid: null,
+      reachFeed: null,
+      measuredSince: '2026-08-26',
+      measuredUntil: '2026-09-24',
+      truncated: true,
+      apiCalls: 2,
+    });
+
+    await context.worker.processDue(1);
+
+    expect(context.reachWriter.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        measuredSince: '2026-08-26',
+        measuredUntil: '2026-09-24',
+        truncated: true,
+      }),
+    );
   });
 });
 

@@ -218,7 +218,10 @@ export class SocialOrganicSyncWorker {
 
     for (const window of periodReachWindows(today)) {
       try {
-        const measurement = await this.periodReach.measure({
+        // `measurePeriod`, not `measure`: the same two API calls carry views
+        // and reach with their organic and paid slices, and the narrower call
+        // discarded five of the six. Nothing extra is spent here.
+        const measurement = await this.periodReach.measurePeriod({
           resolved,
           since: window.since,
           until: window.until,
@@ -237,6 +240,15 @@ export class SocialOrganicSyncWorker {
           periodUntil: window.until,
           assetTimezone: resolved.assetTimezone,
           reach: measurement.reach,
+          reachOrganic: measurement.reachOrganic,
+          reachPaid: measurement.reachPaid,
+          reachFeed: measurement.reachFeed,
+          views: measurement.views,
+          viewsOrganic: measurement.viewsOrganic,
+          viewsPaid: measurement.viewsPaid,
+          measuredSince: measurement.measuredSince,
+          measuredUntil: measurement.measuredUntil,
+          truncated: measurement.truncated,
           // A window whose last day is today is still accumulating, so it is
           // worth re-measuring on the next pass; a closed one is final.
           isPartial: window.until >= today,

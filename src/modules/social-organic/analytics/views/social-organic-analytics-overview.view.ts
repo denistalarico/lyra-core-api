@@ -50,6 +50,57 @@ export type SocialOrganicAnalyticsTotals = {
   periodReachIncludesAds: boolean;
 
   /**
+   * The same measured window split the way Meta splits it, plus the views
+   * equivalent — what the "Alcance total" and "Visualizações totais" cards show.
+   *
+   * ## These three do not add up, by design
+   *
+   * `periodReachOrganic + periodReachPaid` is larger than `periodReach`.
+   * Verified against production: 156 + 6 645 = 6 801 against a total of 6 783.
+   * An account reached both organically and by an ad is one account in the
+   * total and one in each slice, so the excess is the overlap.
+   *
+   * A card may therefore show all three, and must not show one as a percentage
+   * of another or present the pair as a stacked bar summing to the total.
+   *
+   * Null means the window was measured but Meta returned no breakdown for it —
+   * distinct from zero, which would assert that nothing was paid.
+   */
+  periodReachOrganic: string | null;
+  periodReachPaid: string | null;
+
+  /** Total views of the measured window, ads included; slices on the same terms. */
+  periodViews: string | null;
+  periodViewsOrganic: string | null;
+  periodViewsPaid: string | null;
+
+  /**
+   * The range the figures above actually describe.
+   *
+   * Meta refuses a window wider than 30 days, so a longer request is measured
+   * over its last 30 and `periodTruncated` says so. The card labels itself from
+   * these rather than from the requested period — a "últimos 90 dias" heading
+   * over a 30-day number is the failure this exists to prevent.
+   *
+   * Null when no measurement exists for the window at all.
+   */
+  periodMeasuredSince: string | null;
+  periodMeasuredUntil: string | null;
+  periodTruncated: boolean;
+
+  /**
+   * Reach of feed posts alone in the measured window — "Alcance das postagens".
+   *
+   * Excludes reels and stories, and comes from Meta's own `media_product_type`
+   * breakdown rather than from adding the per-post reach figures: post reach is
+   * de-duplicated per post, so summing it counts a follower who saw three posts
+   * three times.
+   *
+   * Instagram only, and null when the window carries no breakdown.
+   */
+  periodFeedReach: string | null;
+
+  /**
    * STOCK, not flow — the latest observed value inside the period, never a
    * sum. Null when the period has no observation at all.
    */

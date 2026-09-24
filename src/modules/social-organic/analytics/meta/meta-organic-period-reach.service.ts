@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import type { ResolvedOrganicAnalyticsCredential } from '../../credentials/social-organic-credential.resolver';
 import { MetaOrganicGraphService } from '../../providers/meta/meta-organic-graph.service';
+import { socialOrganicSurfaceSpellings } from '../views/social-organic-top-posts.view';
 
 /**
  * The de-duplicated organic reach of a whole period, measured by Meta.
@@ -116,6 +117,7 @@ export class MetaOrganicPeriodReachService {
       reach: reach.total,
       reachOrganic: reach.organic,
       reachPaid: reach.paid,
+      reachFeed: reach.feed,
       measuredSince: window.since,
       measuredUntil: window.until,
       truncated: window.truncated,
@@ -131,6 +133,7 @@ export class MetaOrganicPeriodReachService {
     total: string | null;
     organic: string | null;
     paid: string | null;
+    feed: string | null;
     apiCalls: number;
   }> {
     const response = await this.graph.getOrganicInsights({
@@ -152,6 +155,9 @@ export class MetaOrganicPeriodReachService {
       total: readTotalValue(response.data),
       organic: readSurfaceSum(response.data, 'organic'),
       paid: readSurfaceSum(response.data, 'paid'),
+      // Read from the same response: "Alcance das postagens" costs no extra
+      // call, it is one more way of reading the breakdown already in hand.
+      feed: readSurfaceSum(response.data, 'feed'),
       apiCalls: response.apiCalls,
     };
   }
@@ -164,6 +170,11 @@ export type MetaOrganicPeriodMeasurement = {
   reach: string | null;
   reachOrganic: string | null;
   reachPaid: string | null;
+  /**
+   * Feed posts only — "Alcance das postagens". A subset of `reachOrganic`, not
+   * a further slice beside it: reels and stories are organic too.
+   */
+  reachFeed: string | null;
   /** The range actually asked for, which a clamp may have narrowed. */
   measuredSince: string;
   measuredUntil: string;
@@ -179,6 +190,7 @@ const EMPTY_MEASUREMENT = {
   reach: null,
   reachOrganic: null,
   reachPaid: null,
+  reachFeed: null,
   measuredSince: '',
   measuredUntil: '',
   truncated: false,
@@ -203,7 +215,8 @@ function clampToMaxWindow(
   // doing", and the most recent 30 days answer that where the oldest 30 would
   // describe a period the operator has already scrolled past.
   const clampedSince = new Date(
-    Date.parse(`${until}T00:00:00Z`) - (MAX_WINDOW_DAYS - 1) * DAY_SECONDS * 1000,
+    Date.parse(`${until}T00:00:00Z`) -
+      (MAX_WINDOW_DAYS - 1) * DAY_SECONDS * 1000,
   )
     .toISOString()
     .slice(0, 10);
@@ -263,11 +276,19 @@ function readTotalValueObject(data: unknown[]): object | null {
  * deliberately so that a day and a period answer the same question the same
  * way. An unrecognised surface counts as organic: it is content the account
  * published, and dropping it would understate the organic slice.
+ *
+ * `feed` is narrower than organic and is not a third bucket beside the other
+ * two: it is the subset Meta calls "Alcance das postagens", feed posts only,
+ * excluding reels and stories. Its spellings come from
+ * `socialOrganicSurfaceSpellings` so the period figure and the per-surface post
+ * tables cannot drift apart on what counts as a post — Meta writes the same
+ * surface as `FEED`, `POST` and `CAROUSEL_CONTAINER` depending on the edge.
  */
 function readSurfaceSum(
   data: unknown[],
-  slice: 'organic' | 'paid',
+  slice: 'organic' | 'paid' | 'feed',
 ): string | null {
+  const feedSpellings = new Set(socialOrganicSurfaceSpellings('feed'));
   const totalValue = readTotalValueObject(data);
   const breakdowns = (totalValue as { breakdowns?: unknown } | null)
     ?.breakdowns;
@@ -298,8 +319,14 @@ function readSurfaceSum(
       const row = result as { dimension_values?: unknown; value?: unknown };
       if (!Array.isArray(row.dimension_values)) continue;
 
-      const isPaid = String(row.dimension_values[0]) === 'AD';
-      if (isPaid !== (slice === 'paid')) continue;
+      const surface = String(row.dimension_values[0]).toUpperCase();
+      const isPaid = surface === 'AD';
+
+      if (slice === 'feed') {
+        if (!feedSpellings.has(surface)) continue;
+      } else if (isPaid !== (slice === 'paid')) {
+        continue;
+      }
 
       const value = row.value;
       if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {

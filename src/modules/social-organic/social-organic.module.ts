@@ -25,6 +25,7 @@ import {
   SocialOrganicAnalyticsReadService,
   SocialOrganicAudienceConfigService,
   SocialOrganicAudienceDailyEntity,
+  SocialOrganicActivityReadService,
   SocialOrganicAudienceReadService,
   SocialOrganicAudienceWriterService,
   SocialOrganicOnlineFollowersEntity,
@@ -211,6 +212,7 @@ export function createMetaOrganicOAuthProviders(
     // read two ways, on its own 30-day retention clock.
     MetaOrganicOnlineFollowersService,
     SocialOrganicOnlineFollowersWriterService,
+    SocialOrganicActivityReadService,
     SocialOrganicThumbnailService,
     SocialOrganicSyncRunService,
     SocialOrganicSyncScheduler,

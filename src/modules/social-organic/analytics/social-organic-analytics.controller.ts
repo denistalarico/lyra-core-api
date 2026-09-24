@@ -16,6 +16,7 @@ import {
   RequirePermission,
   RequireProductEntitlement,
 } from '../../permissions';
+import { AnalyticsActivityQueryDto } from './dto/analytics-activity.query.dto';
 import { AnalyticsAudienceQueryDto } from './dto/analytics-audience.query.dto';
 import { AnalyticsThumbnailQueryDto } from './dto/analytics-thumbnail.query.dto';
 import { AnalyticsTopPostsQueryDto } from './dto/analytics-top-posts.query.dto';
@@ -25,6 +26,7 @@ import { ConsolidatedOverviewQueryDto } from './dto/consolidated-overview.query.
 import { PublicationMetricsQueryDto } from './dto/publication-metrics.query.dto';
 import { SocialConsolidatedAnalyticsService } from './social-consolidated-analytics.service';
 import { SocialOrganicAnalyticsReadService } from './social-organic-analytics-read.service';
+import { SocialOrganicActivityReadService } from './social-organic-activity-read.service';
 import { SocialOrganicAudienceReadService } from './social-organic-audience-read.service';
 import { SocialOrganicThumbnailService } from './social-organic-thumbnail.service';
 
@@ -63,6 +65,7 @@ export class SocialOrganicAnalyticsController {
     private readonly analyticsReadService: SocialOrganicAnalyticsReadService,
     private readonly consolidatedReadService: SocialConsolidatedAnalyticsService,
     private readonly audienceReadService: SocialOrganicAudienceReadService,
+    private readonly activityReadService: SocialOrganicActivityReadService,
     private readonly thumbnailService: SocialOrganicThumbnailService,
   ) {}
 
@@ -228,6 +231,35 @@ export class SocialOrganicAnalyticsController {
       ...scope,
       assetId: query.assetId,
       kind: query.kind,
+    });
+  }
+
+  /**
+   * When this account's followers are online — the two activity charts.
+   *
+   * Takes no period, like `audience` and for a related reason: Meta serves
+   * roughly the last 30 days of this metric whatever the report asks for, so
+   * the response states the window it actually averaged rather than accepting
+   * one it cannot honour.
+   *
+   * Hours come back converted into the asset's own timezone. The raw grid is
+   * Pacific, and on a Brazilian account the difference moves the peak by four
+   * or five hours — a chart showing the stored hour would name the wrong time
+   * to post, which is the only thing the chart is for.
+   */
+  @Get('activity')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireProductEntitlement('social')
+  @RequirePermission(SOCIAL_ORGANIC_ANALYTICS_PERMISSION)
+  activity(
+    @RequestContextData() ctx: RequestContext,
+    @Query() query: AnalyticsActivityQueryDto,
+  ) {
+    const scope = this.requireScope(ctx);
+
+    return this.activityReadService.activity({
+      ...scope,
+      assetId: query.assetId,
     });
   }
 

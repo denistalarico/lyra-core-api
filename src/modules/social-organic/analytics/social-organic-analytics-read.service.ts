@@ -672,20 +672,31 @@ export class SocialOrganicAnalyticsReadService {
     assetId: string,
     since: string,
     until: string,
-  ): Promise<string | null> {
-    const row = await this.reachPeriodsRepository.findOne({
+  ): Promise<SocialOrganicReachPeriodEntity | null> {
+    return this.reachPeriodsRepository.findOne({
       where: { assetId, periodSince: since, periodUntil: until },
-      select: ['reach'],
+      select: [
+        'reach',
+        'reachOrganic',
+        'reachPaid',
+        'reachFeed',
+        'views',
+        'viewsOrganic',
+        'viewsPaid',
+        'measuredSince',
+        'measuredUntil',
+        'truncated',
+      ],
     });
-
-    return row?.reach ?? null;
   }
 
   private toTotals(
     row: AggregateRow,
     followersCount: string | null,
-    periodReach: string | null,
+    measurement: SocialOrganicReachPeriodEntity | null,
   ): SocialOrganicAnalyticsTotals {
+    const periodReach = measurement?.reach ?? null;
+
     return {
       impressions: toCount(row.impressions).toString(),
       reach: readReach(row),
@@ -709,6 +720,18 @@ export class SocialOrganicAnalyticsReadService {
       // Always true when there is a figure: the request that produces it must
       // omit the breakdown, and the breakdown is what excludes the AD bucket.
       periodReachIncludesAds: periodReach !== null,
+      // Passed through exactly as measured. No arithmetic between them here or
+      // anywhere downstream: the slices overlap the total, so every apparently
+      // obvious subtraction produces a number Meta never reported.
+      periodReachOrganic: measurement?.reachOrganic ?? null,
+      periodReachPaid: measurement?.reachPaid ?? null,
+      periodFeedReach: measurement?.reachFeed ?? null,
+      periodViews: measurement?.views ?? null,
+      periodViewsOrganic: measurement?.viewsOrganic ?? null,
+      periodViewsPaid: measurement?.viewsPaid ?? null,
+      periodMeasuredSince: measurement?.measuredSince ?? null,
+      periodMeasuredUntil: measurement?.measuredUntil ?? null,
+      periodTruncated: measurement?.truncated ?? false,
     };
   }
 }

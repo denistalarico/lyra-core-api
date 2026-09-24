@@ -75,9 +75,77 @@ export class SocialOrganicReachPeriodEntity {
   @Column({ name: 'asset_timezone', type: 'varchar', length: 64 })
   assetTimezone!: string;
 
-  /** NULL when Meta reported none — never conflated with a measured zero. */
+  /**
+   * The de-duplicated reach of the window, **ads included**. NULL when Meta
+   * reported none — never conflated with a measured zero.
+   */
   @Column({ type: 'bigint', nullable: true })
   reach!: string | null;
+
+  /**
+   * The same window's reach split into Meta's own slices.
+   *
+   * **They do not add up to `reach`, and that is not a bug.** Verified against
+   * production on 2026-09-24: 156 organic + 6 645 paid = 6 801 against a total
+   * of 6 783. Meta counts an account reached both organically and by an ad once
+   * in the total and once in each slice, so the difference is the overlap.
+   *
+   * The consequence for any caller: never derive one of these from the others.
+   * `total - organic` is not the paid slice, it is the paid slice minus the
+   * overlap, and it will read as a plausible number that is quietly wrong.
+   *
+   * NULL means Meta returned no breakdown for the window — not zero. "Nothing
+   * was paid" and "we did not learn what was paid" must not render alike.
+   */
+  @Column({ name: 'reach_organic', type: 'bigint', nullable: true })
+  reachOrganic!: string | null;
+
+  @Column({ name: 'reach_paid', type: 'bigint', nullable: true })
+  reachPaid!: string | null;
+
+  /**
+   * Feed posts only — Meta's "Alcance das postagens".
+   *
+   * A **subset of `reachOrganic`**, not a third slice beside it: reels and
+   * stories are organic as well. So `reachFeed <= reachOrganic` holds, and the
+   * two must never be added.
+   */
+  @Column({ name: 'reach_feed', type: 'bigint', nullable: true })
+  reachFeed!: string | null;
+
+  /**
+   * Views for the same window, on the same terms as `reach` above: the total
+   * includes ads, the slices are Meta's and do not sum to it.
+   *
+   * Views are impressions, not people, so unlike reach they *are* additive
+   * across days in principle — but the period figure is still stored rather
+   * than summed, because Meta's own window answer is what the card must match
+   * and the daily rows only ever covered days the sync happened to catch.
+   */
+  @Column({ type: 'bigint', nullable: true })
+  views!: string | null;
+
+  @Column({ name: 'views_organic', type: 'bigint', nullable: true })
+  viewsOrganic!: string | null;
+
+  @Column({ name: 'views_paid', type: 'bigint', nullable: true })
+  viewsPaid!: string | null;
+
+  /**
+   * The range Meta actually measured, which may be narrower than the stored
+   * window: Meta refuses a span wider than 30 days, so a longer request is
+   * clamped to its last 30. Kept so a card can label the figure with the range
+   * behind it instead of the one that was asked for.
+   */
+  @Column({ name: 'measured_since', type: 'date', nullable: true })
+  measuredSince!: string | null;
+
+  @Column({ name: 'measured_until', type: 'date', nullable: true })
+  measuredUntil!: string | null;
+
+  /** True when the clamp above narrowed the caller's window. */
+  @Column({ type: 'boolean', default: false })
+  truncated!: boolean;
 
   /**
    * Whether the range's last day was still accumulating when this was taken.
