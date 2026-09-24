@@ -8,7 +8,10 @@ const scope = {
   companyContextId: 'company-a',
 };
 const input = {
-  subjectType: 'creative_version',
+  // `as const` so the literal keeps its type: without it the object widens to
+  // `string` and stops satisfying the resolver's `subjectType` union, which is
+  // the whole point of that union being closed.
+  subjectType: 'creative_version' as const,
   subjectId: 'asset-a',
   subjectRevisionId: 'version-1',
 };
