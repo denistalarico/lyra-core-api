@@ -450,6 +450,20 @@ export class SocialAnalyticsReadService {
       .addSelect('SUM(fact.conversions)', 'conversions')
       .addSelect('SUM(fact.conversion_value)', 'conversion_value')
       .addSelect('SUM(fact.video_views)', 'video_views')
+      .addSelect('SUM(fact.thruplays)', 'thruplays')
+      .addSelect('COUNT(fact.thruplays)', 'thruplay_days')
+      // Weighted the same way the period total is, even though the group is a
+      // single day: a day holds several rows and their per-row averages do not
+      // average either. `readWeightedAverage` then reads identically here and
+      // in the overview, which is the point of reusing it.
+      .addSelect(
+        'SUM(fact.video_avg_watch_seconds * fact.video_views)',
+        'watch_seconds_weighted',
+      )
+      .addSelect(
+        'SUM(fact.video_views) FILTER (WHERE fact.video_avg_watch_seconds IS NOT NULL)',
+        'watch_views',
+      )
       // Grouped by day, so this sum is over one day's rows only — the grain
       // reach was measured at. This is the one query in the module where
       // returning it is honest.
@@ -1351,6 +1365,8 @@ function emptySeriesPoint(date: string): SocialAdSeriesPoint {
     conversions: null,
     conversionValue: null,
     videoViews: null,
+    thruplays: null,
+    videoAvgWatchSeconds: null,
     reach: null,
     isPartial: false,
     ctr: null,
@@ -1377,6 +1393,13 @@ function toSeriesPoint(
     conversions: formatAmountText(row.conversions),
     conversionValue: formatAmountText(row.conversion_value),
     videoViews: toCount(row.video_views).toString(),
+    // Null rather than '0' on a day that predates the field being requested,
+    // the same rule the period total follows.
+    thruplays:
+      toCount(row.thruplay_days) > 0n
+        ? toCount(row.thruplays).toString()
+        : null,
+    videoAvgWatchSeconds: readWeightedAverage(row),
     // The grain here is one day, which is the grain Meta de-duplicated reach
     // at — so `readReach` returns it rather than refusing.
     reach: readReach(row),

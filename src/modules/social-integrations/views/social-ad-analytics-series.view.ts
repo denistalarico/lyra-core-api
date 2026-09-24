@@ -47,6 +47,17 @@ export type SocialAdSeriesPoint = SocialAdSeriesKpis & {
   videoViews: string | null;
 
   /**
+   * ThruPlays, and the day's view-weighted average watch time in seconds.
+   *
+   * Null here carries an extra meaning the other fields do not have: both
+   * columns arrived on 2026-09-23 with no backfill possible, so every day
+   * before that is null on an otherwise observed day (`hasData: true`). A chart
+   * breaks its line there, which is the truth — it was never collected.
+   */
+  thruplays: string | null;
+  videoAvgWatchSeconds: string | null;
+
+  /**
    * The day's own de-duplicated reach, as reported.
    *
    * Returnable here — unlike in any period total — precisely because the grain

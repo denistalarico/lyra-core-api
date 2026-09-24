@@ -219,6 +219,18 @@ export class SocialOrganicAnalyticsReadService {
       .addSelect('SUM(fact.followers_gained)', 'followers_gained')
       .addSelect('SUM(fact.followers_lost)', 'followers_lost')
       .addSelect('SUM(fact.profile_views)', 'profile_views')
+      // Engagement columns only exist from 2026-09-23 (migration
+      // 1795600000000) and are nullable with no default. SUM over a day that
+      // predates collection returns NULL, and that NULL is carried through to
+      // the point rather than coerced to "0": a gap in collection must draw as
+      // a break in the line, not as a day nobody interacted.
+      .addSelect('SUM(fact.total_interactions)', 'total_interactions')
+      .addSelect('SUM(fact.likes)', 'likes')
+      .addSelect('SUM(fact.comments)', 'comments')
+      .addSelect('SUM(fact.shares)', 'shares')
+      .addSelect('SUM(fact.saves)', 'saves')
+      .addSelect('SUM(fact.replies)', 'replies')
+      .addSelect('SUM(fact.accounts_engaged)', 'accounts_engaged')
       .addSelect('bool_or(fact.is_partial)', 'is_partial')
       .where('fact.asset_id = :assetId', { assetId: asset.id })
       .andWhere('fact.metric_date BETWEEN :since AND :until', {
@@ -236,6 +248,13 @@ export class SocialOrganicAnalyticsReadService {
         followers_gained: string | null;
         followers_lost: string | null;
         profile_views: string | null;
+        total_interactions: string | null;
+        likes: string | null;
+        comments: string | null;
+        shares: string | null;
+        saves: string | null;
+        replies: string | null;
+        accounts_engaged: string | null;
         is_partial: boolean;
       }>();
 
@@ -270,6 +289,13 @@ export class SocialOrganicAnalyticsReadService {
         followersGained: toCount(row.followers_gained).toString(),
         followersLost: toCount(row.followers_lost).toString(),
         profileViews: toCount(row.profile_views).toString(),
+        totalInteractions: readNullableCount(row.total_interactions),
+        likes: readNullableCount(row.likes),
+        comments: readNullableCount(row.comments),
+        shares: readNullableCount(row.shares),
+        saves: readNullableCount(row.saves),
+        replies: readNullableCount(row.replies),
+        accountsEngaged: readNullableCount(row.accounts_engaged),
         isPartial: row.is_partial === true,
       });
     }
@@ -695,6 +721,22 @@ function readReach(row: AggregateRow): string | null {
   return row.reach === null || row.reach === undefined
     ? null
     : toCount(row.reach).toString();
+}
+
+/**
+ * A `SUM(bigint)` result that keeps NULL as null instead of reading it as zero.
+ *
+ * The opposite of `toCount`, and deliberately a separate function rather than a
+ * flag on it. `toCount`'s NULL-is-zero rule is right for a column that has
+ * always existed: a missing sum there means no rows matched. It is wrong for
+ * the engagement columns, which were added on 2026-09-23 with no backfill for
+ * days whose `provider_metrics` never carried them — there, NULL means "not
+ * collected", and a chart has to break the line rather than draw a zero.
+ */
+function readNullableCount(value: string | null | undefined): string | null {
+  return value === null || value === undefined
+    ? null
+    : toCount(value).toString();
 }
 
 /** A `SUM(bigint)` result as an exact integer, with NULL meaning zero. */

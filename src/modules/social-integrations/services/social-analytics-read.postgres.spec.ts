@@ -82,6 +82,14 @@ run('Social analytics read against PostgreSQL', () => {
     conversions?: string;
     conversionValue?: string;
     videoViews?: string;
+    /**
+     * NULL by default, which is what every day before 2026-09-23 holds: both
+     * columns arrived with migration 1795700000000, no default and no backfill
+     * possible. Defaulting them to a number here would make the "never
+     * collected" case — the one the nullable column exists for — untestable.
+     */
+    thruplays?: string | null;
+    videoAvgWatchSeconds?: string | null;
     reach?: string | null;
     isPartial?: boolean;
     currency?: string;
@@ -94,7 +102,7 @@ run('Social analytics read against PostgreSQL', () => {
          "entity_level", "entity_external_id", "metric_date", "account_timezone",
          "currency", "attribution_setting", "spend", "impressions", "reach",
          "clicks", "link_clicks", "leads", "conversions", "conversion_value",
-         "video_views", "is_partial")
+         "video_views", "thruplays", "video_avg_watch_seconds", "is_partial")
       VALUES (
         '${input.tenantId ?? tenantId}', '${workspaceId}',
         '${input.connectionId ?? connectionId}', 'meta_ads', 'paid',
@@ -106,6 +114,8 @@ run('Social analytics read against PostgreSQL', () => {
         ${input.clicks ?? '20'}, ${input.linkClicks ?? '15'},
         ${input.leads ?? '2'}, ${input.conversions ?? '1.000000'},
         ${input.conversionValue ?? '50.000000'}, ${input.videoViews ?? '100'},
+        ${input.thruplays ?? 'NULL'},
+        ${input.videoAvgWatchSeconds ?? 'NULL'},
         ${input.isPartial ?? false}
       )
     `);
@@ -720,6 +730,55 @@ run('Social analytics read against PostgreSQL', () => {
       await expect(
         timeseries('2026-08-21', '2026-08-23', otherTenantConnectionId),
       ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('keeps the video fields null on a day that predates their collection', async () => {
+      // A fully observed day — the fixture writes spend, impressions and the
+      // rest — that simply has no ThruPlay figure. `hasData` is true and the
+      // two video fields stay null, because a collection gap is not a zero.
+      const result = await timeseries('2026-08-21', '2026-08-21');
+
+      expect(result.points[0]).toMatchObject({
+        hasData: true,
+        thruplays: null,
+        videoAvgWatchSeconds: null,
+      });
+    });
+
+    it('returns ThruPlays and the watch-time average per day', async () => {
+      // One account-level row per day is the grain the unique key enforces, so
+      // each point reports that day's own figures — no weighting happens here.
+      // The weighting that matters is across days, and the overview owns it;
+      // `readWeightedAverage` is shared so both read the column identically.
+      await insertFact({
+        metricDate: '2027-01-20',
+        videoViews: '100',
+        thruplays: '40',
+        videoAvgWatchSeconds: '5.0000',
+      });
+      await insertFact({
+        metricDate: '2027-01-21',
+        videoViews: '300',
+        thruplays: '60',
+        videoAvgWatchSeconds: '9.0000',
+      });
+
+      const result = await timeseries('2027-01-20', '2027-01-21');
+
+      expect(result.points[0].thruplays).toBe('40');
+      expect(result.points[0].videoAvgWatchSeconds).toBe('5.000000');
+      expect(result.points[1].thruplays).toBe('60');
+      expect(result.points[1].videoAvgWatchSeconds).toBe('9.000000');
+    });
+
+    it('weights the period average by views, never averaging the averages', async () => {
+      // The days above: 100 views at 5s and 300 at 9s. Weighted, that is
+      // (100×5 + 300×9) / 400 = 8 seconds. A mean of the two daily means would
+      // say 7, weighting a quiet day the same as a busy one.
+      const result = await overview('2027-01-20', '2027-01-21');
+
+      expect(result.current.videoAvgWatchSeconds).toBe('8.000000');
+      expect(result.current.thruplays).toBe('100');
     });
   });
 

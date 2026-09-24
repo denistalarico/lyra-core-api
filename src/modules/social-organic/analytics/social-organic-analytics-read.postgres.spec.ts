@@ -7,6 +7,8 @@ import { CreateSocialOrganicReadModel1791900000000 } from '../../../database/mig
 import { MakeSocialOrganicMetricsNullable1792100000000 } from '../../../database/migrations/1792100000000-make-social-organic-metrics-nullable';
 import { AddSocialOrganicPostLifetimeSnapshots1792400000000 } from '../../../database/migrations/1792400000000-add-social-organic-post-lifetime-snapshots';
 import { AddSocialOrganicPostIdentity1795400000000 } from '../../../database/migrations/1795400000000-add-social-organic-post-identity';
+import { AddOrganicAccountEngagementColumns1795600000000 } from '../../../database/migrations/1795600000000-add-organic-account-engagement-columns';
+import { CreateOrganicReachPeriods1795900000000 } from '../../../database/migrations/1795900000000-create-organic-reach-periods';
 import { describePostgresIntegration } from '../../../testing/postgres-integration';
 import { SocialOrganicAnalyticsReadService } from './social-organic-analytics-read.service';
 
@@ -76,6 +78,15 @@ run('SocialOrganicAnalyticsReadService against PostgreSQL', () => {
     followersGained?: string | null;
     followersLost?: string | null;
     profileViews?: string | null;
+    /**
+     * The engagement columns default to NULL here, not to a number, because
+     * that is what every day before 2026-09-23 actually holds: the columns were
+     * added with no default and no backfill was possible for days whose
+     * `provider_metrics` never carried them. A helper that quietly wrote zeros
+     * would make the "not collected" case untestable.
+     */
+    totalInteractions?: string | null;
+    accountsEngaged?: string | null;
     isPartial?: boolean;
   }) {
     const nullable = (value: string | null | undefined, fallback: string) =>
@@ -86,7 +97,7 @@ run('SocialOrganicAnalyticsReadService against PostgreSQL', () => {
         ("tenant_id", "workspace_id", "asset_id", "provider", "source",
          "metric_date", "asset_timezone", "impressions", "reach",
          "followers_count", "followers_gained", "followers_lost",
-         "profile_views", "is_partial")
+         "profile_views", "total_interactions", "accounts_engaged", "is_partial")
       VALUES (
         '${tenantId}', '${workspaceId}', '${input.assetId ?? assetId}', 'meta',
         'organic', '${input.metricDate}', 'America/Sao_Paulo',
@@ -94,7 +105,10 @@ run('SocialOrganicAnalyticsReadService against PostgreSQL', () => {
         ${nullable(input.followersCount, '500')},
         ${nullable(input.followersGained, '5')},
         ${nullable(input.followersLost, '1')},
-        ${nullable(input.profileViews, '10')}, ${input.isPartial ?? false}
+        ${nullable(input.profileViews, '10')},
+        ${nullable(input.totalInteractions, 'NULL')},
+        ${nullable(input.accountsEngaged, 'NULL')},
+        ${input.isPartial ?? false}
       )
     `);
   }
@@ -177,6 +191,10 @@ run('SocialOrganicAnalyticsReadService against PostgreSQL', () => {
       await new MakeSocialOrganicMetricsNullable1792100000000().up(setup);
       await new AddSocialOrganicPostLifetimeSnapshots1792400000000().up(setup);
       await new AddSocialOrganicPostIdentity1795400000000().up(setup);
+      await new AddOrganicAccountEngagementColumns1795600000000().up(setup);
+      // The overview reads this table on every call (`findPeriodReach`), so it
+      // has to exist even for the tests that never assert on period reach.
+      await new CreateOrganicReachPeriods1795900000000().up(setup);
     } finally {
       await setup.release();
     }
@@ -338,6 +356,52 @@ run('SocialOrganicAnalyticsReadService against PostgreSQL', () => {
         impressions: '50',
       });
       expect(result.observedDays).toBe(2);
+    });
+
+    it('keeps an uncollected engagement column null on an observed day', async () => {
+      // The row exists and carries impressions, so `hasData` is true — but the
+      // engagement columns were never written for it. That is every day before
+      // 2026-09-23, and the two states must stay distinguishable: the day was
+      // observed, the metric was not collected.
+      await insertFact({ metricDate: '2026-09-01', impressions: '100' });
+
+      const result = await timeseries('2026-09-01', '2026-09-01');
+
+      expect(result.points[0]).toMatchObject({
+        hasData: true,
+        impressions: '100',
+        totalInteractions: null,
+        accountsEngaged: null,
+        likes: null,
+      });
+    });
+
+    it('returns the engagement columns per day once they are collected', async () => {
+      await insertFact({
+        metricDate: '2026-09-01',
+        totalInteractions: '40',
+        accountsEngaged: '25',
+      });
+      await insertFact({
+        metricDate: '2026-09-02',
+        totalInteractions: '0',
+        accountsEngaged: '0',
+      });
+
+      const result = await timeseries('2026-09-01', '2026-09-02');
+
+      expect(result.points[0]).toMatchObject({
+        totalInteractions: '40',
+        // Per day, which is the grain the distinct count was taken at — the
+        // period total withholds this and a point does not have to.
+        accountsEngaged: '25',
+      });
+      // A real zero, distinct from the null above: engagement was collected and
+      // nobody engaged.
+      expect(result.points[1]).toMatchObject({
+        totalInteractions: '0',
+        accountsEngaged: '0',
+      });
     });
   });
 

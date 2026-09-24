@@ -26,6 +26,24 @@ export type SocialOrganicSeriesPoint = {
   followersLost: string | null;
   profileViews: string | null;
 
+  totalInteractions: string | null;
+  likes: string | null;
+  comments: string | null;
+  shares: string | null;
+  saves: string | null;
+  replies: string | null;
+
+  /**
+   * Distinct accounts that engaged on this day.
+   *
+   * Returnable per point for the same reason `reach` is: the grain here is one
+   * day, which is the grain Meta counted the distinct accounts at. The period
+   * total withholds it (`readSingleDayDistinct`) because adding the days would
+   * count one account once per day — but that objection does not apply to a
+   * series, where each point *is* the day.
+   */
+  accountsEngaged: string | null;
+
   /** True while the day is still accumulating; see the sync's `is_partial` flag. */
   isPartial: boolean;
 };
@@ -43,6 +61,13 @@ export function emptyOrganicSeriesPoint(
     followersGained: null,
     followersLost: null,
     profileViews: null,
+    totalInteractions: null,
+    likes: null,
+    comments: null,
+    shares: null,
+    saves: null,
+    replies: null,
+    accountsEngaged: null,
     isPartial: false,
   };
 }
