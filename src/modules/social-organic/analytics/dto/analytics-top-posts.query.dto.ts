@@ -1,6 +1,9 @@
 import { Type } from 'class-transformer';
 import { IsIn, IsInt, IsOptional, IsString, Matches, Max, Min } from 'class-validator';
-import { SOCIAL_ORGANIC_TOP_POST_SORTS } from '../views/social-organic-top-posts.view';
+import {
+  SOCIAL_ORGANIC_POST_SURFACES,
+  SOCIAL_ORGANIC_TOP_POST_SORTS,
+} from '../views/social-organic-top-posts.view';
 
 export class AnalyticsTopPostsQueryDto {
   @IsString()
@@ -26,6 +29,20 @@ export class AnalyticsTopPostsQueryDto {
   @IsOptional()
   @IsIn(SOCIAL_ORGANIC_TOP_POST_SORTS)
   sort?: (typeof SOCIAL_ORGANIC_TOP_POST_SORTS)[number];
+
+  /**
+   * Narrows the ranking to one surface. Omitted, every surface is ranked
+   * together — which is what the single posts table has always done and stays
+   * the default, so an existing caller is unaffected.
+   *
+   * The values are Lyra's own (`feed`, `reel`, `story`), not Meta's: the
+   * provider spells the same surface several ways and the read layer maps them,
+   * so a client that had to send `CAROUSEL_CONTAINER` to get carousels would be
+   * carrying the provider's inconsistency into the URL.
+   */
+  @IsOptional()
+  @IsIn(SOCIAL_ORGANIC_POST_SURFACES)
+  surface?: (typeof SOCIAL_ORGANIC_POST_SURFACES)[number];
 
   @IsOptional()
   @Type(() => Number)

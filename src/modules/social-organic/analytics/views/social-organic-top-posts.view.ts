@@ -62,6 +62,69 @@ export const SOCIAL_ORGANIC_TOP_POST_SORTS = [
 export type SocialOrganicTopPostSort =
   (typeof SOCIAL_ORGANIC_TOP_POST_SORTS)[number];
 
+/**
+ * The surfaces a ranking can be narrowed to.
+ *
+ * A *surface*, not a media type: a reel and a feed video are both
+ * `media_type=VIDEO` and behave nothing alike — one plays in a vertical feed of
+ * its own, the other sits in the timeline — while a feed post may be an image,
+ * a video or a carousel and is one kind of thing to the operator asking "how
+ * did my posts do". The question the dashboard asks is about the surface, so
+ * that is what this filters.
+ *
+ * ## Instagram only, and not by choice
+ *
+ * `media_product_type` is an Instagram field. The Facebook Page reader asks
+ * `/{page}/posts` for `id,created_time,full_picture,permalink_url,message`
+ * because the Graph API offers nothing like it there — a Page post has no
+ * surface to report. So a Facebook asset's rows carry null here and match no
+ * surface, which means a surface-filtered ranking of one is empty rather than
+ * wrong. Ranking without a surface still returns them, and that is the honest
+ * shape of it: the split exists where the provider distinguishes the surfaces
+ * and does not exist where it does not.
+ */
+export const SOCIAL_ORGANIC_POST_SURFACES = ['feed', 'reel', 'story'] as const;
+
+export type SocialOrganicPostSurface =
+  (typeof SOCIAL_ORGANIC_POST_SURFACES)[number];
+
+/**
+ * The `media_product_type` spellings each surface answers to.
+ *
+ * Meta is not consistent here and the inconsistency is documented, not
+ * incidental: `/{ig-user}/media` returns `FEED`, `REELS` and `STORY`, while the
+ * insights breakdown on the same account returns `POST`, `CAROUSEL_CONTAINER`,
+ * `REEL` and `STORY` for what are the same three surfaces — the normalizer
+ * already accepts both sets when it reads a breakdown. A filter that matched a
+ * single literal would therefore be right for whichever endpoint happened to
+ * have written the row and silently empty for the other, which is the worst
+ * kind of wrong: a table that says "no reels this period" about an account full
+ * of them.
+ *
+ * Compared case-insensitively at the query, so a provider that lowercases one
+ * day does not empty the table.
+ */
+const SURFACE_SPELLINGS: Record<SocialOrganicPostSurface, readonly string[]> = {
+  feed: ['FEED', 'POST', 'CAROUSEL_CONTAINER'],
+  reel: ['REEL', 'REELS'],
+  story: ['STORY', 'STORIES'],
+};
+
+export function socialOrganicSurfaceSpellings(
+  surface: SocialOrganicPostSurface,
+): readonly string[] {
+  return SURFACE_SPELLINGS[surface];
+}
+
+export function isSocialOrganicPostSurface(
+  value: unknown,
+): value is SocialOrganicPostSurface {
+  return (
+    typeof value === 'string' &&
+    (SOCIAL_ORGANIC_POST_SURFACES as readonly string[]).includes(value)
+  );
+}
+
 export function toSocialOrganicTopPostView(
   fact: SocialOrganicPostMetricDailyEntity,
 ): SocialOrganicTopPostView {

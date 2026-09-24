@@ -546,6 +546,8 @@ run('SocialOrganicAnalyticsReadService against PostgreSQL', () => {
       metricDate: string;
       reachLifetime?: string | null;
       followsLifetime?: string | null;
+      /** Meta's own spelling, left null when the row predates collecting it. */
+      mediaProductType?: string | null;
       syncedAt?: string;
     }) {
       const observedAt = input.syncedAt ?? `${input.metricDate}T12:00:00.000Z`;
@@ -554,7 +556,7 @@ run('SocialOrganicAnalyticsReadService against PostgreSQL', () => {
         INSERT INTO "social_organic_post_metrics_daily"
           ("tenant_id", "workspace_id", "asset_id", "provider", "source",
            "external_publication_id", "metric_date", "asset_timezone",
-           "published_at", "permalink", "caption",
+           "published_at", "permalink", "caption", "media_product_type",
            "reach_lifetime", "follows_lifetime", "lifetime_observed_at",
            "is_partial", "synced_at")
         VALUES (
@@ -562,6 +564,7 @@ run('SocialOrganicAnalyticsReadService against PostgreSQL', () => {
           '${input.externalPublicationId}', '${input.metricDate}',
           'America/Sao_Paulo', '${input.publishedAt}',
           'https://example.test/${input.externalPublicationId}', 'legenda',
+          ${input.mediaProductType ? `'${input.mediaProductType}'` : 'NULL'},
           ${input.reachLifetime === null ? 'NULL' : (input.reachLifetime ?? '10')},
           ${input.followsLifetime === null ? 'NULL' : (input.followsLifetime ?? '0')},
           '${observedAt}', false, '${observedAt}'
@@ -672,6 +675,142 @@ run('SocialOrganicAnalyticsReadService against PostgreSQL', () => {
           until: '2026-09-10',
         }),
       ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    describe('surface', () => {
+      /** One post on each surface, in each of Meta's spellings for it. */
+      async function insertOnePerSurface() {
+        // The `/{ig-user}/media` vocabulary...
+        await insertRankedPost({
+          externalPublicationId: 'feed-a',
+          publishedAt: '2026-09-02T10:00:00.000Z',
+          metricDate: '2026-09-03',
+          mediaProductType: 'FEED',
+        });
+        await insertRankedPost({
+          externalPublicationId: 'reel-a',
+          publishedAt: '2026-09-02T11:00:00.000Z',
+          metricDate: '2026-09-03',
+          mediaProductType: 'REELS',
+        });
+        await insertRankedPost({
+          externalPublicationId: 'story-a',
+          publishedAt: '2026-09-02T12:00:00.000Z',
+          metricDate: '2026-09-03',
+          mediaProductType: 'STORY',
+        });
+        // ...and the insights-breakdown vocabulary for the same three surfaces.
+        await insertRankedPost({
+          externalPublicationId: 'feed-b',
+          publishedAt: '2026-09-02T13:00:00.000Z',
+          metricDate: '2026-09-03',
+          mediaProductType: 'CAROUSEL_CONTAINER',
+        });
+        await insertRankedPost({
+          externalPublicationId: 'reel-b',
+          publishedAt: '2026-09-02T14:00:00.000Z',
+          metricDate: '2026-09-03',
+          mediaProductType: 'REEL',
+        });
+      }
+
+      const surfaced = (surface: 'feed' | 'reel' | 'story') =>
+        service.topPosts({
+          ...scope,
+          assetId,
+          since: '2026-09-01',
+          until: '2026-09-10',
+          sort: 'publishedAt',
+          surface,
+        });
+
+      it('accepts every spelling Meta uses for the same surface', async () => {
+        // The point of the test: `REEL` and `REELS` are one surface, and so are
+        // `FEED`, `POST` and `CAROUSEL_CONTAINER`. Matching a single literal
+        // would report "no reels" on an account whose rows happen to have been
+        // written by the other endpoint.
+        await insertOnePerSurface();
+
+        const feed = await surfaced('feed');
+        const reels = await surfaced('reel');
+        const stories = await surfaced('story');
+
+        expect(new Set(feed.items.map((i) => i.externalPublicationId))).toEqual(
+          new Set(['feed-a', 'feed-b']),
+        );
+        expect(
+          new Set(reels.items.map((i) => i.externalPublicationId)),
+        ).toEqual(new Set(['reel-a', 'reel-b']));
+        expect(stories.items.map((i) => i.externalPublicationId)).toEqual([
+          'story-a',
+        ]);
+      });
+
+      it('leaves a post with no known surface out of every surface', async () => {
+        // Nullable column, older rows predate it. Guessing "probably a feed
+        // post" would put a story in the posts table with nothing to show for
+        // it, so an unknown surface belongs to none of them.
+        await insertRankedPost({
+          externalPublicationId: 'post-unknown',
+          publishedAt: '2026-09-02T10:00:00.000Z',
+          metricDate: '2026-09-03',
+          mediaProductType: null,
+        });
+
+        expect((await surfaced('feed')).items).toEqual([]);
+        expect((await surfaced('reel')).items).toEqual([]);
+        expect((await surfaced('story')).items).toEqual([]);
+
+        // ...but it is still a post, so the unfiltered ranking keeps it. The
+        // split is a view of the data, not a filter that discards it.
+        const all = await service.topPosts({
+          ...scope,
+          assetId,
+          since: '2026-09-01',
+          until: '2026-09-10',
+        });
+        expect(all.items.map((i) => i.externalPublicationId)).toEqual([
+          'post-unknown',
+        ]);
+      });
+
+      it('counts only the filtered surface in `total`', async () => {
+        // `total` drives "showing 10 of N". Counting every surface would tell
+        // the reader there are 5 reels when the table can only ever show 2.
+        await insertOnePerSurface();
+
+        const reels = await surfaced('reel');
+        expect(reels.total).toBe(2);
+      });
+
+      it("picks each post's newest row before filtering, not after", async () => {
+        // Two observations of one reel. The filter runs inside the same query
+        // that de-duplicates, so the post appears once, at its latest figure —
+        // not twice, and not at the older one.
+        await insertRankedPost({
+          externalPublicationId: 'reel-twice',
+          publishedAt: '2026-09-02T10:00:00.000Z',
+          metricDate: '2026-09-03',
+          mediaProductType: 'REELS',
+          reachLifetime: '100',
+        });
+        await insertRankedPost({
+          externalPublicationId: 'reel-twice',
+          publishedAt: '2026-09-02T10:00:00.000Z',
+          metricDate: '2026-09-05',
+          mediaProductType: 'REELS',
+          reachLifetime: '180',
+        });
+
+        const reels = await surfaced('reel');
+
+        expect(reels.total).toBe(1);
+        expect(reels.items[0]).toMatchObject({
+          externalPublicationId: 'reel-twice',
+          reach: '180',
+          mediaProductType: 'REELS',
+        });
+      });
     });
   });
 

@@ -144,6 +144,7 @@ export class SocialOrganicAnalyticsController {
       since: query.since,
       until: query.until,
       sort: query.sort,
+      surface: query.surface,
       limit: query.limit,
     });
   }

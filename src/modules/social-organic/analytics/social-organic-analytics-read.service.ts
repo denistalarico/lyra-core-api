@@ -26,7 +26,9 @@ import {
 } from './views/social-organic-analytics-series.view';
 import type { SocialOrganicAnalyticsFreshnessView } from './views/social-organic-analytics-freshness.view';
 import {
+  socialOrganicSurfaceSpellings,
   toSocialOrganicTopPostView,
+  type SocialOrganicPostSurface,
   type SocialOrganicTopPostSort,
   type SocialOrganicTopPostView,
   type SocialOrganicTopPostsView,
@@ -408,6 +410,22 @@ export class SocialOrganicAnalyticsReadService {
    * The window filters on `published_at`, not on `metric_date`: the operator is
    * asking which posts *published* in this period did best, and `metric_date`
    * is merely when Lyra last looked.
+   *
+   * ## Narrowing to one surface
+   *
+   * `surface` splits the ranking into "Postagens", "Reels" and "Stories", which
+   * are three different questions — a reel's reach and a feed image's are not
+   * compared by anybody who understands either. It filters inside the same
+   * query as everything else, which matters: `media_product_type` is a property
+   * of the post and so is identical on all of its rows, but applying the filter
+   * *after* `DISTINCT ON` picked the newest row would still be a different
+   * statement, and one that quietly breaks the day a post's surface is
+   * backfilled onto some of its rows and not others.
+   *
+   * A row whose `media_product_type` is null matches no surface at all. That is
+   * deliberate: the column is nullable and older rows predate it being
+   * collected, and guessing that an unknown surface is a feed post would put
+   * stories into the posts table with no way for a reader to tell.
    */
   async topPosts(
     input: SocialOrganicAnalyticsScope & {
@@ -415,6 +433,7 @@ export class SocialOrganicAnalyticsReadService {
       since: string;
       until: string;
       sort?: SocialOrganicTopPostSort;
+      surface?: SocialOrganicPostSurface;
       limit?: number;
     },
   ): Promise<SocialOrganicTopPostsView> {
@@ -454,6 +473,18 @@ export class SocialOrganicAnalyticsReadService {
       .orderBy('fact.externalPublicationId', 'ASC')
       .addOrderBy('fact.metricDate', 'DESC')
       .addOrderBy('fact.syncedAt', 'DESC');
+
+    if (input.surface) {
+      // `UPPER(...) IN (...)` rather than an equality: one surface answers to
+      // several of Meta's spellings — see `socialOrganicSurfaceSpellings`. The
+      // list is closed and comes from the module's own constant, never from the
+      // request, which is what makes interpolating it unnecessary: it is still
+      // bound as a parameter.
+      latestPerPost.andWhere(
+        'UPPER(fact.mediaProductType) IN (:...surfaceSpellings)',
+        { surfaceSpellings: socialOrganicSurfaceSpellings(input.surface) },
+      );
+    }
 
     const facts = await latestPerPost.getMany();
 
