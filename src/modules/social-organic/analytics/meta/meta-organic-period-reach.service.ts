@@ -61,31 +61,154 @@ export class MetaOrganicPeriodReachService {
     since: string;
     until: string;
   }): Promise<{ reach: string | null; apiCalls: number }> {
+    const measured = await this.measurePeriod(input);
+
+    return { reach: measured.reach, apiCalls: measured.apiCalls };
+  }
+
+  /**
+   * Views and reach for the range, each as a total and split organic vs paid.
+   *
+   * One call per metric, both in the collapsing shape `measure` documents, and
+   * `breakdown=media_product_type` on top of it. The breakdown is what makes the
+   * split possible, and it does not cost a second request: Meta returns
+   * `total_value.value` *and* `total_value.breakdowns` in the same answer, so
+   * the total and the slices come back together.
+   *
+   * The paid slice is Meta's own `AD` bucket, never `total - organic`. Meta
+   * de-duplicates the total across both, so an account reached organically and
+   * by an ad is counted once in the total and once in each slice — subtracting
+   * would state a number Meta did not report. On the production account this
+   * was verified against, 30 days gave a total reach of 6 783 where the slices
+   * were 6 645 paid and 156 organic, which sum to 6 801.
+   */
+  async measurePeriod(input: {
+    resolved: ResolvedOrganicAnalyticsCredential;
+    since: string;
+    until: string;
+  }): Promise<MetaOrganicPeriodMeasurement> {
     const { credential } = input.resolved;
 
     // Facebook Pages have no equivalent: `page_impressions_unique` was retired
     // alongside the other Page insights, so asking would spend a call to be
     // refused. Instagram is the only surface that answers this today.
     if (credential.assetType !== 'instagram_professional') {
-      return { reach: null, apiCalls: 0 };
+      return { ...EMPTY_MEASUREMENT, apiCalls: 0 };
     }
 
+    // Meta refuses a range wider than 30 days outright — verified on
+    // 2026-09-24: `(#100) There cannot be more than 30 days (2592000 s) between
+    // since and until`. Asking anyway spends a call to get an error and leaves
+    // the card empty, so the window is clamped to its last 30 days and the
+    // range actually measured is returned for the caller to label. A card that
+    // says "90 dias" over a 30-day figure is the failure this prevents.
+    const window = clampToMaxWindow(input.since, input.until);
+
+    const [views, reach] = await Promise.all([
+      this.readMetric(credential, 'views', window),
+      this.readMetric(credential, 'reach', window),
+    ]);
+
+    return {
+      views: views.total,
+      viewsOrganic: views.organic,
+      viewsPaid: views.paid,
+      reach: reach.total,
+      reachOrganic: reach.organic,
+      reachPaid: reach.paid,
+      measuredSince: window.since,
+      measuredUntil: window.until,
+      truncated: window.truncated,
+      apiCalls: views.apiCalls + reach.apiCalls,
+    };
+  }
+
+  private async readMetric(
+    credential: ResolvedOrganicAnalyticsCredential['credential'],
+    metric: 'views' | 'reach',
+    window: { since: string; until: string },
+  ): Promise<{
+    total: string | null;
+    organic: string | null;
+    paid: string | null;
+    apiCalls: number;
+  }> {
     const response = await this.graph.getOrganicInsights({
       objectId: credential.externalAssetId,
       accessToken: credential.accessToken,
-      metrics: ['reach'],
+      metrics: [metric],
       period: 'day',
       metricType: 'total_value',
+      breakdown: 'media_product_type',
       // `until` is exclusive on this edge, so the last day is included by
       // asking for the instant after it rather than by shifting the caller's
       // calendar day — which would make the stored range disagree with the one
       // requested.
-      since: toUnixDay(input.since),
-      until: toUnixDay(input.until) + DAY_SECONDS,
+      since: toUnixDay(window.since),
+      until: toUnixDay(window.until) + DAY_SECONDS,
     });
 
-    return { reach: readTotalValue(response.data), apiCalls: response.apiCalls };
+    return {
+      total: readTotalValue(response.data),
+      organic: readSurfaceSum(response.data, 'organic'),
+      paid: readSurfaceSum(response.data, 'paid'),
+      apiCalls: response.apiCalls,
+    };
   }
+}
+
+export type MetaOrganicPeriodMeasurement = {
+  views: string | null;
+  viewsOrganic: string | null;
+  viewsPaid: string | null;
+  reach: string | null;
+  reachOrganic: string | null;
+  reachPaid: string | null;
+  /** The range actually asked for, which a clamp may have narrowed. */
+  measuredSince: string;
+  measuredUntil: string;
+  /** True when the caller's window was wider than Meta allows. */
+  truncated: boolean;
+  apiCalls: number;
+};
+
+const EMPTY_MEASUREMENT = {
+  views: null,
+  viewsOrganic: null,
+  viewsPaid: null,
+  reach: null,
+  reachOrganic: null,
+  reachPaid: null,
+  measuredSince: '',
+  measuredUntil: '',
+  truncated: false,
+} satisfies Omit<MetaOrganicPeriodMeasurement, 'apiCalls'>;
+
+/** Meta's hard limit on this edge, in days, inclusive of both ends. */
+const MAX_WINDOW_DAYS = 30;
+
+function clampToMaxWindow(
+  since: string,
+  until: string,
+): { since: string; until: string; truncated: boolean } {
+  const spanDays =
+    Math.round(
+      (Date.parse(`${until}T00:00:00Z`) - Date.parse(`${since}T00:00:00Z`)) /
+        (DAY_SECONDS * 1000),
+    ) + 1;
+
+  if (spanDays <= MAX_WINDOW_DAYS) return { since, until, truncated: false };
+
+  // Keep the end of the range, not the start: the question is always "how is it
+  // doing", and the most recent 30 days answer that where the oldest 30 would
+  // describe a period the operator has already scrolled past.
+  const clampedSince = new Date(
+    Date.parse(`${until}T00:00:00Z`) - (MAX_WINDOW_DAYS - 1) * DAY_SECONDS * 1000,
+  )
+    .toISOString()
+    .slice(0, 10);
+
+  return { since: clampedSince, until, truncated: true };
 }
 
 const DAY_SECONDS = 86_400;
@@ -99,19 +222,19 @@ function toUnixDay(day: string): number {
  * The one `total_value.value` in the response, as a digit string.
  *
  * Anything else — no rows, a row without the field, a non-finite number — is
- * null rather than zero, for the reason `measure` documents. A breakdown array
- * in this position would mean the request was not the collapsing shape this
- * service depends on, and is refused the same way.
+ * null rather than zero, for the reason `measure` documents.
+ *
+ * A `breakdowns` array beside the value is expected and fine: `measurePeriod`
+ * asks with `breakdown=media_product_type` and Meta answers with the
+ * de-duplicated total *and* the slices in the same object. What would be wrong
+ * is a `total_value` carrying only breakdowns and no `value` of its own —
+ * `follows_and_unfollows` answers that way — and that case falls through to the
+ * null below rather than being read as a zero.
  */
 function readTotalValue(data: unknown[]): string | null {
-  const [first] = data;
+  const totalValue = readTotalValueObject(data);
 
-  if (!first || typeof first !== 'object') return null;
-
-  const totalValue = (first as { total_value?: unknown }).total_value;
-
-  if (!totalValue || typeof totalValue !== 'object') return null;
-  if ('breakdowns' in totalValue) return null;
+  if (!totalValue) return null;
 
   const value = (totalValue as { value?: unknown }).value;
 
@@ -120,4 +243,73 @@ function readTotalValue(data: unknown[]): string | null {
   }
 
   return Math.trunc(value).toString();
+}
+
+function readTotalValueObject(data: unknown[]): object | null {
+  const [first] = data;
+
+  if (!first || typeof first !== 'object') return null;
+
+  const totalValue = (first as { total_value?: unknown }).total_value;
+
+  return totalValue && typeof totalValue === 'object' ? totalValue : null;
+}
+
+/**
+ * The `media_product_type` surfaces that make up each slice.
+ *
+ * `AD` is the paid bucket and everything else is organic — the same division
+ * `readNonAdMediaProducts` makes in the daily normalizer, kept in step with it
+ * deliberately so that a day and a period answer the same question the same
+ * way. An unrecognised surface counts as organic: it is content the account
+ * published, and dropping it would understate the organic slice.
+ */
+function readSurfaceSum(
+  data: unknown[],
+  slice: 'organic' | 'paid',
+): string | null {
+  const totalValue = readTotalValueObject(data);
+  const breakdowns = (totalValue as { breakdowns?: unknown } | null)
+    ?.breakdowns;
+
+  if (!Array.isArray(breakdowns)) return null;
+
+  let total = 0n;
+  let found = false;
+
+  for (const breakdown of breakdowns as unknown[]) {
+    if (!breakdown || typeof breakdown !== 'object') continue;
+
+    const entry = breakdown as { dimension_keys?: unknown; results?: unknown };
+    if (
+      !Array.isArray(entry.dimension_keys) ||
+      !entry.dimension_keys.includes('media_product_type')
+    ) {
+      continue;
+    }
+    // A breakdown with no `results` is Meta's shape for a range in which
+    // nothing happened, not a malformed answer — the same tolerance the daily
+    // normalizer applies.
+    if (!Array.isArray(entry.results)) continue;
+
+    for (const result of entry.results as unknown[]) {
+      if (!result || typeof result !== 'object') continue;
+
+      const row = result as { dimension_values?: unknown; value?: unknown };
+      if (!Array.isArray(row.dimension_values)) continue;
+
+      const isPaid = String(row.dimension_values[0]) === 'AD';
+      if (isPaid !== (slice === 'paid')) continue;
+
+      const value = row.value;
+      if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+        continue;
+      }
+
+      total += BigInt(Math.trunc(value));
+      found = true;
+    }
+  }
+
+  return found ? total.toString() : null;
 }

@@ -64,8 +64,18 @@ export type NormalizedOrganicAccountMetricDaily = {
   followersCount: string | null;
   followersGained: string | null;
   followersLost: string | null;
+  /** ORGANIC only — the `media_product_type` breakdown with `AD` excluded. */
   impressions: string | null;
   reach: string | null;
+  /**
+   * The account TOTAL for the day, ads included, as Meta de-duplicates it.
+   *
+   * From the same response as the two above, read at `total_value.value`
+   * instead of from the breakdown. Never the sum of the slices and never
+   * derived by subtracting them — see the entity docblock.
+   */
+  viewsTotal: string | null;
+  reachTotal: string | null;
   profileViews: string | null;
   /** Daily flows, read from the same call as `profileViews`. */
   totalInteractions: string | null;

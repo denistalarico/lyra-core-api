@@ -48,10 +48,11 @@ export class SocialOrganicMetricsWriterService {
          followers_lost, impressions, reach, profile_views, is_partial,
          synced_at, sync_run_id, provider_metrics,
          total_interactions, accounts_engaged, likes, comments, shares,
-         saves, replies
+         saves, replies, views_total, reach_total
        ) VALUES (
          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
-         $15, $16, $17, $18::jsonb, $19, $20, $21, $22, $23, $24, $25
+         $15, $16, $17, $18::jsonb, $19, $20, $21, $22, $23, $24, $25,
+         $26, $27
        )
        ON CONFLICT (asset_id, metric_date, source) DO UPDATE SET
          followers_count = COALESCE(EXCLUDED.followers_count, social_organic_account_metrics_daily.followers_count),
@@ -67,6 +68,8 @@ export class SocialOrganicMetricsWriterService {
          shares = COALESCE(EXCLUDED.shares, social_organic_account_metrics_daily.shares),
          saves = COALESCE(EXCLUDED.saves, social_organic_account_metrics_daily.saves),
          replies = COALESCE(EXCLUDED.replies, social_organic_account_metrics_daily.replies),
+         views_total = COALESCE(EXCLUDED.views_total, social_organic_account_metrics_daily.views_total),
+         reach_total = COALESCE(EXCLUDED.reach_total, social_organic_account_metrics_daily.reach_total),
          is_partial = EXCLUDED.is_partial,
          synced_at = EXCLUDED.synced_at,
          sync_run_id = EXCLUDED.sync_run_id,
@@ -98,6 +101,8 @@ export class SocialOrganicMetricsWriterService {
         row.shares,
         row.saves,
         row.replies,
+        row.viewsTotal,
+        row.reachTotal,
       ],
     );
   }

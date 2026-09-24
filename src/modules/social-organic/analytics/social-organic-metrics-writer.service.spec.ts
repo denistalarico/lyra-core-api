@@ -27,6 +27,8 @@ const accountRow: NormalizedOrganicAccountMetricDaily = {
   followersLost: null,
   impressions: '10',
   reach: null,
+  viewsTotal: null,
+  reachTotal: null,
   profileViews: null,
   totalInteractions: null,
   accountsEngaged: null,

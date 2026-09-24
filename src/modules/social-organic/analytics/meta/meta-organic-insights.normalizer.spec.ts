@@ -37,11 +37,20 @@ function breakdownMetric(
   name: string,
   key: string,
   values: Array<[string, string | number]>,
+  /**
+   * Meta's own de-duplicated total, which it sends beside the breakdown.
+   *
+   * Optional because a payload can legitimately arrive without it, and the two
+   * reads have to stay independent: omitting it must leave `viewsTotal` null
+   * rather than fall back to the sum of the slices.
+   */
+  total?: string | number,
 ) {
   return {
     name,
     period: 'day',
     total_value: {
+      ...(total === undefined ? {} : { value: total }),
       breakdowns: [
         {
           dimension_keys: [key],
@@ -136,7 +145,66 @@ describe('Meta organic account insights normalizers', () => {
       impressions: '38',
       reach: '7',
       profileViews: null,
+      // This payload carries no `total_value.value`, so the total is unknown —
+      // not the sum of the slices, which would silently invent a figure that
+      // excludes the ads Meta counts in its own total.
+      viewsTotal: null,
+      reachTotal: null,
     });
+  });
+
+  it('reads the ads-inclusive total and the organic slice from one payload', () => {
+    // The two answers live in the same response: `total_value.value` is the
+    // account total, the breakdown beneath it is the split. Reading both is
+    // what lets a card show the number Meta's app shows and still break it
+    // into organic and paid.
+    const row = normalizeInstagramAccountInsights({
+      ...base,
+      followersCount: 800,
+      mediaInsights: {
+        data: [
+          breakdownMetric(
+            'views',
+            'media_product_type',
+            [
+              ['POST', 123],
+              ['STORY', 347],
+              ['REEL', 20],
+              ['CAROUSEL_CONTAINER', 19],
+              ['AD', 8646],
+            ],
+            9155,
+          ),
+          breakdownMetric(
+            'reach',
+            'media_product_type',
+            [
+              ['POST', 39],
+              ['STORY', 105],
+              ['REEL', 11],
+              ['CAROUSEL_CONTAINER', 1],
+              ['AD', 6645],
+            ],
+            6783,
+          ),
+        ],
+      },
+      followInsights: { data: [] },
+    });
+
+    expect(row).toMatchObject({
+      // Organic only: the four non-AD surfaces.
+      impressions: '509',
+      reach: '156',
+      // Meta's own total, ads included.
+      viewsTotal: '9155',
+      reachTotal: '6783',
+    });
+
+    // The reach total is deliberately NOT organic + AD (156 + 6645 = 6801).
+    // Meta de-duplicates across the two, so anyone reached both ways is counted
+    // once — which is exactly why the total must be read and never computed.
+    expect(row?.reachTotal).toBe('6783');
   });
 
   it('keeps missing Instagram values null and preserves explicit zero', () => {

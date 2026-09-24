@@ -214,6 +214,7 @@ import { AddOrganicAccountEngagementColumns1795600000000 } from './migrations/17
 import { AddAdVideoCompletionColumns1795700000000 } from './migrations/1795700000000-add-ad-video-completion-columns';
 import { AddSocialApprovalViewedAudit1795800000000 } from './migrations/1795800000000-add-social-approval-viewed-audit';
 import { CreateOrganicReachPeriods1795900000000 } from './migrations/1795900000000-create-organic-reach-periods';
+import { AddOrganicAccountTotalReachViews1796000000000 } from './migrations/1796000000000-add-organic-account-total-reach-views';
 import { ScopeSocialEditorialByCompany1794500000000 } from './migrations/1794500000000-scope-social-editorial-by-company';
 import { ScopeBrandKitByCompany1794510000000 } from './migrations/1794510000000-scope-brand-kit-by-company';
 import { ScopeCreativeStudioByCompany1794520000000 } from './migrations/1794520000000-scope-creative-studio-by-company';
@@ -460,5 +461,6 @@ export const AgencyDataSource = new DataSource({
     AddAdVideoCompletionColumns1795700000000,
     AddSocialApprovalViewedAudit1795800000000,
     CreateOrganicReachPeriods1795900000000,
+    AddOrganicAccountTotalReachViews1796000000000,
   ],
 });

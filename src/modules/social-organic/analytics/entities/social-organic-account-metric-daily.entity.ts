@@ -53,7 +53,9 @@ import type { SocialOrganicMetricSource } from './social-organic-post-metric-dai
    AND "comments" >= 0
    AND "shares" >= 0
    AND "saves" >= 0
-   AND "replies" >= 0`,
+   AND "replies" >= 0
+   AND "views_total" >= 0
+   AND "reach_total" >= 0`,
 )
 export class SocialOrganicAccountMetricDailyEntity {
   @PrimaryGeneratedColumn('uuid')
@@ -98,12 +100,40 @@ export class SocialOrganicAccountMetricDailyEntity {
   @Column({ name: 'followers_lost', type: 'bigint', nullable: true })
   followersLost!: string | null;
 
+  /**
+   * Views of ORGANIC surfaces only — ads excluded.
+   *
+   * Read from the `media_product_type` breakdown with `AD` dropped
+   * (`readNonAdMediaProducts`), which is what makes this the organic figure and
+   * not the account's total. `viewsTotal` below is the total.
+   */
   @Column({ type: 'bigint', nullable: true })
   impressions!: string | null;
 
-  /** De-duplicated audience for this grain; never sum across days. */
+  /** De-duplicated ORGANIC audience for this grain; never sum across days. */
   @Column({ type: 'bigint', nullable: true })
   reach!: string | null;
+
+  /**
+   * The account's TOTAL views and reach for the day, ads included.
+   *
+   * Meta's own `total_value.value`, taken before the breakdown is read. It is a
+   * separate measurement rather than a sum of the slices: an account reached
+   * both organically and by an ad is counted once here and once in each slice,
+   * so `reachTotal` is normally *less* than `reach + paid reach` and that is not
+   * an error. For the same reason the paid slice is never derived as
+   * `total - organic`, which would state a number Meta did not.
+   *
+   * Null on a day whose payload predates these columns and carried no
+   * `total_value.value` to backfill from — not zero, which would claim the
+   * account was seen by nobody.
+   */
+  @Column({ name: 'views_total', type: 'bigint', nullable: true })
+  viewsTotal!: string | null;
+
+  /** Total de-duplicated audience, ads included. Never sum across days. */
+  @Column({ name: 'reach_total', type: 'bigint', nullable: true })
+  reachTotal!: string | null;
 
   @Column({ name: 'profile_views', type: 'bigint', nullable: true })
   profileViews!: string | null;

@@ -79,6 +79,19 @@ export function normalizeInstagramAccountInsights(
       : null;
   const impressions = readNonAdMediaProducts(media.get('views'));
   const reach = readNonAdMediaProducts(media.get('reach'));
+  // The same two responses read a second way: `total_value.value` is the
+  // account's total with ads included, which the breakdown sum above
+  // deliberately excludes. Both numbers come from one request — the total was
+  // always in the payload and simply had nowhere to go until migration
+  // 1796000000000, which also backfilled it from `provider_metrics`.
+  //
+  // Not derived from each other in either direction. Meta de-duplicates the
+  // total independently, so an account reached organically and by an ad is
+  // counted once in the total and once in each slice; the slices do not add up
+  // to it, and subtracting one from the other would state a figure Meta never
+  // reported.
+  const viewsTotal = readPlainTotal(media.get('views'));
+  const reachTotal = readPlainTotal(media.get('reach'));
   const followMetric = follows.get('follows_and_unfollows');
   const followersGained = readBreakdownDimension(followMetric, 'FOLLOWER');
   const followersLost = readBreakdownDimension(followMetric, 'NON_FOLLOWER');
@@ -105,6 +118,8 @@ export function normalizeInstagramAccountInsights(
     followersCount === null &&
     impressions === null &&
     reach === null &&
+    viewsTotal === null &&
+    reachTotal === null &&
     followersGained === null &&
     followersLost === null &&
     profileViews === null &&
@@ -125,6 +140,8 @@ export function normalizeInstagramAccountInsights(
     followersLost,
     impressions,
     reach,
+    viewsTotal,
+    reachTotal,
     profileViews,
     totalInteractions,
     accountsEngaged,
@@ -519,6 +536,11 @@ function accountFact(
     followersLost: values.followersLost ?? null,
     impressions: values.impressions ?? null,
     reach: values.reach ?? null,
+    // Null for a Facebook Page, which has no metric that answers this: the
+    // Page reader asks for `page_media_view`, and there is no ads-inclusive
+    // account total on that side of the API.
+    viewsTotal: values.viewsTotal ?? null,
+    reachTotal: values.reachTotal ?? null,
     profileViews: values.profileViews ?? null,
     totalInteractions: values.totalInteractions ?? null,
     accountsEngaged: values.accountsEngaged ?? null,

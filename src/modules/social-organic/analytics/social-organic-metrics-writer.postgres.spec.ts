@@ -40,6 +40,8 @@ run('SocialOrganicMetricsWriterService against PostgreSQL', () => {
     followersLost: null,
     impressions: '10',
     reach: null,
+    viewsTotal: null,
+    reachTotal: null,
     profileViews: null,
     totalInteractions: null,
     accountsEngaged: null,
@@ -224,6 +226,75 @@ run('SocialOrganicMetricsWriterService against PostgreSQL', () => {
         views: { value: '10' },
         reach: { value: '7' },
       },
+    });
+  });
+
+  it('stores the ads-inclusive total beside the organic figure, never merging them', async () => {
+    // The numbers are the shape production showed on 2026-09-24: the organic
+    // slice is a small fraction of the account's total because almost all the
+    // delivery was paid. Writing only the organic one is what made the
+    // dashboard show 509 where Meta's own app showed 9.155.
+    await service.upsert({
+      accountRows: [
+        account({
+          impressions: '509',
+          reach: '138',
+          viewsTotal: '9155',
+          reachTotal: '6783',
+        }),
+      ],
+      postRows: [],
+    });
+
+    const rows = await AgencyDataSource.query<Array<Record<string, unknown>>>(
+      `SELECT impressions::text, reach::text,
+              views_total::text, reach_total::text
+         FROM social_organic_account_metrics_daily
+        WHERE asset_id = $1 AND metric_date = '2026-09-08'`,
+      [assetId],
+    );
+
+    expect(rows[0]).toMatchObject({
+      impressions: '509',
+      reach: '138',
+      views_total: '9155',
+      reach_total: '6783',
+    });
+
+    // The four are four separate measurements. The total is not the sum of the
+    // slices, and nothing in the write derives one from another.
+    expect(rows[0].views_total).not.toBe(rows[0].impressions);
+    expect(rows[0].reach_total).not.toBe(rows[0].reach);
+  });
+
+  it('never regresses a stored total to NULL on a later partial write', async () => {
+    // Same COALESCE rule the lifetime columns follow: a sync that could not
+    // read the total must leave yesterday's reading alone rather than erase it.
+    await service.upsert({
+      accountRows: [account({ viewsTotal: '9155', reachTotal: '6783' })],
+      postRows: [],
+    });
+    await service.upsert({
+      accountRows: [
+        account({
+          viewsTotal: null,
+          reachTotal: null,
+          syncRunId: secondRunId,
+        }),
+      ],
+      postRows: [],
+    });
+
+    const rows = await AgencyDataSource.query<Array<Record<string, unknown>>>(
+      `SELECT views_total::text, reach_total::text
+         FROM social_organic_account_metrics_daily
+        WHERE asset_id = $1 AND metric_date = '2026-09-08'`,
+      [assetId],
+    );
+
+    expect(rows[0]).toMatchObject({
+      views_total: '9155',
+      reach_total: '6783',
     });
   });
 
