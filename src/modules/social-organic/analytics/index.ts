@@ -1,5 +1,7 @@
 export * from './entities';
 export * from './meta/meta-organic-audience.service';
+export * from './meta/meta-organic-period-reach.service';
+export * from './social-organic-reach-period-writer.service';
 export * from './meta/meta-organic-insights.service';
 export * from './meta/meta-organic-insights.types';
 export * from './social-organic-analytics.controller';

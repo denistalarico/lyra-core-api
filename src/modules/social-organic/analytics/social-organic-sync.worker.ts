@@ -5,7 +5,14 @@ import { SocialOrganicCredentialResolver } from '../credentials/social-organic-c
 import type { SocialOrganicSyncRunEntity } from './entities/social-organic-sync-run.entity';
 import { MetaOrganicInsightsService } from './meta/meta-organic-insights.service';
 import { MetaOrganicAudienceService } from './meta/meta-organic-audience.service';
-import { enumerateCalendarDays } from './social-organic-analytics-time';
+import { MetaOrganicPeriodReachService } from './meta/meta-organic-period-reach.service';
+import { SocialOrganicReachPeriodWriterService } from './social-organic-reach-period-writer.service';
+import type { ResolvedOrganicAnalyticsCredential } from '../credentials/social-organic-credential.resolver';
+import {
+  calendarDayIn,
+  enumerateCalendarDays,
+  periodReachWindows,
+} from './social-organic-analytics-time';
 import {
   classifyOrganicSyncFailure,
   nextOrganicSyncAttempt,
@@ -38,6 +45,9 @@ export class SocialOrganicSyncWorker {
      * it had failed. This is the call it was waiting for.
      */
     private readonly audience: MetaOrganicAudienceService,
+    /** Period reach, measured by Meta and cached — see `measurePeriodReach`. */
+    private readonly periodReach: MetaOrganicPeriodReachService,
+    private readonly reachWriter: SocialOrganicReachPeriodWriterService,
   ) {}
 
   @Interval(TICK_MS)
@@ -121,6 +131,8 @@ export class SocialOrganicSyncWorker {
         );
       }
 
+      await this.measurePeriodReach(resolved, counters);
+
       await this.runs.markSucceeded({
         runId: run.id,
         lockedBy: this.workerId,
@@ -159,6 +171,61 @@ export class SocialOrganicSyncWorker {
         counters,
         policy.code,
       );
+    }
+  }
+
+  /**
+   * Measures the reach of the windows the dashboard can actually ask for.
+   *
+   * Only the presets, deliberately. A custom range is one request each and the
+   * set of them is unbounded, so measuring every possible window would spend a
+   * shared quota on answers nobody asked for. A custom range therefore reports
+   * null, exactly as the paid side does, and the card says the measurement has
+   * not been taken rather than inventing a sum.
+   *
+   * Every failure is swallowed per window: the facts of this run are already
+   * written, and reach is an addition to them. Rescheduling over it would
+   * re-read the whole window against the same quota to recover a number that
+   * the next hourly pass would have fetched anyway.
+   */
+  private async measurePeriodReach(
+    resolved: ResolvedOrganicAnalyticsCredential,
+    counters: SocialOrganicSyncRunCounters,
+  ): Promise<void> {
+    const today = calendarDayIn(resolved.assetTimezone, new Date());
+
+    for (const window of periodReachWindows(today)) {
+      try {
+        const measurement = await this.periodReach.measure({
+          resolved,
+          since: window.since,
+          until: window.until,
+        });
+
+        counters.apiCalls += measurement.apiCalls;
+        if (measurement.apiCalls === 0) return; // Not an Instagram asset.
+
+        await this.reachWriter.record({
+          tenantId: resolved.credential.tenantId,
+          workspaceId: resolved.credential.workspaceId,
+          agencyClientId: resolved.credential.agencyClientId,
+          assetId: resolved.credential.assetId,
+          provider: resolved.credential.provider,
+          periodSince: window.since,
+          periodUntil: window.until,
+          assetTimezone: resolved.assetTimezone,
+          reach: measurement.reach,
+          // A window whose last day is today is still accumulating, so it is
+          // worth re-measuring on the next pass; a closed one is final.
+          isPartial: window.until >= today,
+        });
+      } catch (error) {
+        this.logger.warn(
+          `Organic period reach failed for ${window.since}..${window.until}: ${
+            error instanceof Error ? error.name : 'unknown'
+          }`,
+        );
+      }
     }
   }
 

@@ -8,6 +8,7 @@ import { IsNull, Repository } from 'typeorm';
 import { SocialOrganicAssetEntity } from '../entities/social-organic-asset.entity';
 import { SocialOrganicAccountMetricDailyEntity } from './entities/social-organic-account-metric-daily.entity';
 import { SocialOrganicPostMetricDailyEntity } from './entities/social-organic-post-metric-daily.entity';
+import { SocialOrganicReachPeriodEntity } from './entities/social-organic-reach-period.entity';
 import { SocialOrganicSyncRunEntity } from './entities/social-organic-sync-run.entity';
 import {
   parseOrganicAnalyticsPeriod,
@@ -110,6 +111,13 @@ export class SocialOrganicAnalyticsReadService {
     private readonly postMetricsRepository: Repository<SocialOrganicPostMetricDailyEntity>,
     @InjectRepository(SocialOrganicSyncRunEntity, 'agency')
     private readonly runsRepository: Repository<SocialOrganicSyncRunEntity>,
+    /**
+     * The period-reach measurement cache. Read-only here: measurements are
+     * taken by the sync worker, never by a dashboard load, so opening a report
+     * never spends provider quota.
+     */
+    @InjectRepository(SocialOrganicReachPeriodEntity, 'agency')
+    private readonly reachPeriodsRepository: Repository<SocialOrganicReachPeriodEntity>,
   ) {}
 
   /**
@@ -168,17 +176,22 @@ export class SocialOrganicAnalyticsReadService {
     const period = this.parsePeriod(input);
     const asset = await this.findAssetInScope(input);
 
-    const [aggregate, followersCount, lastFactDate] = await Promise.all([
-      this.aggregate(asset.id, period.since, period.until),
-      this.readFollowersCountStock(asset.id, period.since, period.until),
-      this.findLastFactDate(asset.id),
-    ]);
+    const [aggregate, followersCount, lastFactDate, periodReach] =
+      await Promise.all([
+        this.aggregate(asset.id, period.since, period.until),
+        this.readFollowersCountStock(asset.id, period.since, period.until),
+        this.findLastFactDate(asset.id),
+        // From the measurement cache, never from the daily rows: no expression
+        // over them produces this number, because the duplicates it removes
+        // were resolved inside Meta.
+        this.findPeriodReach(asset.id, period.since, period.until),
+      ]);
 
     return {
       assetId: asset.id,
       timezone: asset.assetTimezone ?? '',
       period: { since: period.since, until: period.until },
-      totals: this.toTotals(aggregate, followersCount),
+      totals: this.toTotals(aggregate, followersCount, periodReach),
       hasPartialData: toCount(aggregate.partial_days) > 0n,
       lastFactDate,
     };
@@ -591,9 +604,30 @@ export class SocialOrganicAnalyticsReadService {
     return row?.last ?? null;
   }
 
+  /**
+   * The cached period measurement for this exact window, or null.
+   *
+   * Exact-match only, never the nearest window: a measurement of 1–30 September
+   * says nothing about 5–12 September, and offering it would answer a question
+   * the operator did not ask with a number they would have no way to question.
+   */
+  private async findPeriodReach(
+    assetId: string,
+    since: string,
+    until: string,
+  ): Promise<string | null> {
+    const row = await this.reachPeriodsRepository.findOne({
+      where: { assetId, periodSince: since, periodUntil: until },
+      select: ['reach'],
+    });
+
+    return row?.reach ?? null;
+  }
+
   private toTotals(
     row: AggregateRow,
     followersCount: string | null,
+    periodReach: string | null,
   ): SocialOrganicAnalyticsTotals {
     return {
       impressions: toCount(row.impressions).toString(),
@@ -614,6 +648,10 @@ export class SocialOrganicAnalyticsReadService {
       // additive period equivalent, and the alternative to null is a number
       // that overstates the audience by roughly the number of days.
       accountsEngaged: readSingleDayDistinct(row),
+      periodReach,
+      // Always true when there is a figure: the request that produces it must
+      // omit the breakdown, and the breakdown is what excludes the AD bucket.
+      periodReachIncludesAds: periodReach !== null,
     };
   }
 }

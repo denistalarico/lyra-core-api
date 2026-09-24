@@ -4,6 +4,7 @@ import type { Repository } from 'typeorm';
 import type { SocialOrganicAssetEntity } from '../entities/social-organic-asset.entity';
 import type { SocialOrganicAccountMetricDailyEntity } from './entities/social-organic-account-metric-daily.entity';
 import type { SocialOrganicPostMetricDailyEntity } from './entities/social-organic-post-metric-daily.entity';
+import type { SocialOrganicReachPeriodEntity } from './entities/social-organic-reach-period.entity';
 import type { SocialOrganicSyncRunEntity } from './entities/social-organic-sync-run.entity';
 import { SocialOrganicAnalyticsReadService } from './social-organic-analytics-read.service';
 
@@ -30,6 +31,11 @@ describe('SocialOrganicAnalyticsReadService (scope + validation)', () => {
     const postMetricsRepository =
       {} as Repository<SocialOrganicPostMetricDailyEntity>;
     const runsRepository = {} as Repository<SocialOrganicSyncRunEntity>;
+    // No measurement stored, which is the state every assertion here is about:
+    // the overview reports `periodReach: null` rather than summing days.
+    const reachPeriodsRepository = {
+      findOne: jest.fn(async () => null),
+    } as unknown as Repository<SocialOrganicReachPeriodEntity>;
 
     return {
       findOne,
@@ -38,6 +44,7 @@ describe('SocialOrganicAnalyticsReadService (scope + validation)', () => {
         metricsRepository,
         postMetricsRepository,
         runsRepository,
+        reachPeriodsRepository,
       ),
     };
   }

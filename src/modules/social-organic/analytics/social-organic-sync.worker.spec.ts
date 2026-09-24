@@ -1,6 +1,8 @@
 /* eslint-disable @typescript-eslint/require-await, @typescript-eslint/no-unsafe-assignment -- worker doubles use Jest asymmetric matchers. */
 import type { SocialOrganicCredentialResolver } from '../credentials/social-organic-credential.resolver';
 import type { SocialOrganicSyncRunEntity } from './entities/social-organic-sync-run.entity';
+import type { MetaOrganicPeriodReachService } from './meta/meta-organic-period-reach.service';
+import type { SocialOrganicReachPeriodWriterService } from './social-organic-reach-period-writer.service';
 import type { MetaOrganicAudienceService } from './meta/meta-organic-audience.service';
 import type { MetaOrganicInsightsService } from './meta/meta-organic-insights.service';
 import type { SocialOrganicSyncRunService } from './social-organic-sync-run.service';
@@ -59,17 +61,28 @@ function harness() {
     })),
   };
 
+  // Period reach: not an Instagram asset by default (apiCalls 0), so the
+  // existing counter assertions stay about the metrics sync alone.
+  const periodReach = {
+    measure: jest.fn(async () => ({ reach: null, apiCalls: 0 })),
+  };
+  const reachWriter = { record: jest.fn(async () => undefined) };
+
   return {
     claimed,
     runs,
     credentials,
     insights,
     audience,
+    periodReach,
+    reachWriter,
     worker: new SocialOrganicSyncWorker(
       runs as unknown as SocialOrganicSyncRunService,
       credentials as unknown as SocialOrganicCredentialResolver,
       insights as unknown as MetaOrganicInsightsService,
       audience as unknown as MetaOrganicAudienceService,
+      periodReach as unknown as MetaOrganicPeriodReachService,
+      reachWriter as unknown as SocialOrganicReachPeriodWriterService,
     ),
   };
 }
@@ -141,10 +154,14 @@ describe('audience snapshot', () => {
 
     await context.worker.processDue(1);
 
-    const [call] = context.runs.markSucceeded.mock.calls;
+    const counters = (
+      context.runs.markSucceeded.mock.calls as unknown as Array<
+        [{ counters: { rowsWritten: number; apiCalls: number } }]
+      >
+    )[0]?.[0]?.counters;
     // 1 account row from the metrics sync, plus the snapshot's 12.
-    expect(call[0].counters.rowsWritten).toBe(13);
-    expect(call[0].counters.apiCalls).toBe(7);
+    expect(counters?.rowsWritten).toBe(13);
+    expect(counters?.apiCalls).toBe(7);
   });
 
   it('a failed snapshot does not fail a good metrics run', async () => {

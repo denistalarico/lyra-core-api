@@ -202,6 +202,7 @@ run('SocialOrganicAnalyticsReadService against PostgreSQL', () => {
       manager.getRepository('SocialOrganicAccountMetricDailyEntity') as never,
       manager.getRepository('SocialOrganicPostMetricDailyEntity') as never,
       manager.getRepository('SocialOrganicSyncRunEntity') as never,
+      manager.getRepository('SocialOrganicReachPeriodEntity') as never,
     );
   });
 

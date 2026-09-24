@@ -30,7 +30,11 @@ function createHarness() {
   const requestRepo = {
     create: jest.fn((value) => ({ id: 'approval-a', ...value })),
     save: jest.fn(async (value) => value),
-    findOne: jest.fn(async () => request),
+    findOne: jest.fn(async ({ where }: { where: Record<string, string> }) =>
+      Object.entries(scope).every(([key, value]) => where[key] === value)
+        ? request
+        : null,
+    ),
     createQueryBuilder: jest.fn(),
   };
   const transactionRequestRepo = {
@@ -45,6 +49,7 @@ function createHarness() {
   };
   const manager = {
     save: jest.fn(async (value: unknown) => value),
+    query: jest.fn().mockResolvedValue(undefined),
     getRepository: (entity: unknown) =>
       entity === SocialApprovalRequestEntity
         ? transactionRequestRepo
@@ -92,6 +97,7 @@ function createHarness() {
     requestRepo,
     transactionRequestRepo,
     subjectResolver,
+    manager,
     service: new SocialApprovalsService(
       requestRepo as never,
       { find: jest.fn() } as never,
@@ -280,6 +286,27 @@ describe('SocialApprovalsService AP1 state machine', () => {
     expect(decisions).toHaveLength(0);
   });
 
+  it('preserves the first Agency view, updates the last viewer, and keeps client fields untouched', async () => {
+    const { service, request, decisions } = createHarness();
+    request.status = 'approved';
+    const first = new Date('2026-09-23T10:00:00.000Z');
+    request.internalFirstViewedAt = first;
+    request.clientFirstViewedAt = new Date('2026-09-22T10:00:00.000Z');
+    request.clientLastViewedAt = new Date('2026-09-22T11:00:00.000Z');
+    request.clientViewedByUserId = 'client-user';
+
+    await service.markAgencyViewed(scope, request.id, 'agency-user');
+
+    expect(request).toMatchObject({
+      status: 'approved',
+      internalFirstViewedAt: first,
+      internalViewedByUserId: 'agency-user',
+      clientViewedByUserId: 'client-user',
+    });
+    expect(request.internalLastViewedAt).toBeInstanceOf(Date);
+    expect(decisions).toHaveLength(0);
+  });
+
   it('records a client view only at the client stage without a decision', async () => {
     const { service, request, decisions } = createHarness();
     request.status = 'awaiting_client';
@@ -288,6 +315,27 @@ describe('SocialApprovalsService AP1 state machine', () => {
       status: 'awaiting_client',
       clientViewedByUserId: 'client-user',
     });
+    expect(decisions).toHaveLength(0);
+  });
+
+  it('preserves the first client view, updates the last viewer, and never writes internal fields', async () => {
+    const { service, request, decisions } = createHarness();
+    request.status = 'awaiting_client';
+    const first = new Date('2026-09-23T10:00:00.000Z');
+    request.clientFirstViewedAt = first;
+    request.internalFirstViewedAt = new Date('2026-09-22T10:00:00.000Z');
+    request.internalLastViewedAt = new Date('2026-09-22T11:00:00.000Z');
+    request.internalViewedByUserId = 'agency-user';
+
+    await service.markClientViewed(scope, request.id, 'client-user-2');
+
+    expect(request).toMatchObject({
+      status: 'awaiting_client',
+      clientFirstViewedAt: first,
+      clientViewedByUserId: 'client-user-2',
+      internalViewedByUserId: 'agency-user',
+    });
+    expect(request.clientLastViewedAt).toBeInstanceOf(Date);
     expect(decisions).toHaveLength(0);
   });
 
@@ -335,6 +383,32 @@ describe('SocialApprovalsService AP1 state machine', () => {
     expect(request.status).toBe('awaiting_internal_review');
   });
 
+  it.each(['approved', 'cancelled', 'superseded'] as const)(
+    'rejects a client view or decision after the workflow is %s',
+    async (status) => {
+      const { service, request, comments, decisions } = createHarness();
+      request.status = status;
+      await expect(service.markClientViewed(scope, request.id, 'client-user')).rejects.toBeInstanceOf(ConflictException);
+      await expect(service.clientComment(scope, request.id, 'client-user', 'texto')).rejects.toBeInstanceOf(ConflictException);
+      await expect(service.clientApprove(scope, request.id, { type: 'user', userId: 'client-user' })).rejects.toBeInstanceOf(ConflictException);
+      await expect(service.clientRequestChanges(scope, request.id, { type: 'user', userId: 'client-user' }, 'texto')).rejects.toBeInstanceOf(ConflictException);
+      expect(comments).toHaveLength(0);
+      expect(decisions).toHaveLength(0);
+    },
+  );
+
+  it('rejects missing client users and a Company B approval ID without creating client history', async () => {
+    const { service, request, comments, decisions } = createHarness();
+    request.status = 'awaiting_client';
+    await expect(service.markClientViewed(scope, request.id, undefined)).rejects.toBeInstanceOf(BadRequestException);
+    await expect(service.clientComment(scope, request.id, undefined, 'texto')).rejects.toBeInstanceOf(BadRequestException);
+    await expect(service.clientApprove(scope, request.id, { type: 'user', userId: null })).rejects.toBeInstanceOf(BadRequestException);
+    await expect(service.clientRequestChanges(scope, request.id, { type: 'user', userId: null }, 'texto')).rejects.toBeInstanceOf(BadRequestException);
+    await expect(service.markClientViewed({ ...scope, companyContextId: 'company-b' }, request.id, 'client-user')).rejects.toBeInstanceOf(NotFoundException);
+    expect(comments).toHaveLength(0);
+    expect(decisions).toHaveLength(0);
+  });
+
   it('maps active-unique DB violations to a safe conflict while a later workflow can be created', async () => {
     const { service, transactionRequestRepo } = createHarness();
     transactionRequestRepo.save.mockRejectedValueOnce({ code: '23505' });
@@ -349,5 +423,31 @@ describe('SocialApprovalsService AP1 state machine', () => {
     await expect(
       service.create(scope, 'requester', input),
     ).resolves.toMatchObject({ status: 'draft' });
+  });
+
+  it('automatically supersedes only a prior active revision of the same scoped root, preserving its history fields', async () => {
+    const { service, transactionRequestRepo, manager, subjectResolver } = createHarness();
+    const previous = {
+      id: 'approval-r1', ...scope, subjectType: 'creative_version', subjectId: 'asset-a', subjectRevisionId: 'version-a',
+      status: 'awaiting_client', comments: ['history'], decisions: ['history'], internalFirstViewedAt: new Date('2026-09-20T10:00:00.000Z'), requestedByUserId: 'requester',
+    } as unknown as SocialApprovalRequestEntity;
+    transactionRequestRepo.find.mockResolvedValue([previous] as never);
+    subjectResolver.resolve.mockResolvedValue({
+      subjectType: 'creative_version', subjectId: 'asset-a', subjectRevisionId: 'version-b', sourceModule: 'creative_studio', displayType: 'creative', title: 'Criativo', subjectVersionLabel: 'v2',
+    });
+    const created = await service.create(scope, 'requester', {
+      subjectType: 'creative_version', subjectId: 'asset-a', subjectRevisionId: 'version-b',
+    });
+
+    expect(previous).toMatchObject({ status: 'superseded', comments: ['history'], decisions: ['history'], requestedByUserId: 'requester' });
+    expect(previous.supersededAt).toBeInstanceOf(Date);
+    expect(created).toMatchObject({ subjectRevisionId: 'version-b', status: 'draft' });
+    expect(transactionRequestRepo.find).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ ...scope, subjectId: 'asset-a' }), lock: { mode: 'pessimistic_write' },
+    }));
+    expect(manager.query).toHaveBeenCalledWith(
+      'SELECT pg_advisory_xact_lock(hashtext($1))',
+      [expect.stringContaining(':company-a:creative_version:asset-a')],
+    );
   });
 });

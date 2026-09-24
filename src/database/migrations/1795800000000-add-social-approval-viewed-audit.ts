@@ -17,11 +17,23 @@ export class AddSocialApprovalViewedAudit1795800000000
       'ALTER TABLE "social_approval_requests" ADD COLUMN IF NOT EXISTS "internal_viewed_by_user_id" uuid',
     );
     await queryRunner.query(
+      'ALTER TABLE "social_approval_requests" ADD COLUMN IF NOT EXISTS "client_first_viewed_at" timestamptz',
+    );
+    await queryRunner.query(
+      'ALTER TABLE "social_approval_requests" ADD COLUMN IF NOT EXISTS "client_last_viewed_at" timestamptz',
+    );
+    await queryRunner.query(
       'ALTER TABLE "social_approval_requests" ADD COLUMN IF NOT EXISTS "client_viewed_by_user_id" uuid',
     );
   }
 
   async down(queryRunner: QueryRunner): Promise<void> {
+    await queryRunner.query(
+      'ALTER TABLE "social_approval_requests" DROP COLUMN IF EXISTS "client_last_viewed_at"',
+    );
+    await queryRunner.query(
+      'ALTER TABLE "social_approval_requests" DROP COLUMN IF EXISTS "client_first_viewed_at"',
+    );
     await queryRunner.query(
       'ALTER TABLE "social_approval_requests" DROP COLUMN IF EXISTS "client_viewed_by_user_id"',
     );

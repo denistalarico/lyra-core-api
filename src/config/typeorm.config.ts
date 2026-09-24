@@ -356,6 +356,7 @@ import {
 } from '../modules/social-organic/entities';
 import {
   SocialOrganicAccountMetricDailyEntity,
+  SocialOrganicReachPeriodEntity,
   SocialOrganicPostMetricDailyEntity,
   SocialOrganicSyncRunEntity,
 } from '../modules/social-organic/analytics/entities';
@@ -418,6 +419,7 @@ export const agencyEntities = [
   SocialOrganicAssetEntity,
   SocialOrganicPostMetricDailyEntity,
   SocialOrganicAccountMetricDailyEntity,
+  SocialOrganicReachPeriodEntity,
   SocialOrganicSyncRunEntity,
   SocialOrganicWebhookEventEntity,
   SocialOrganicInteractionEntity,

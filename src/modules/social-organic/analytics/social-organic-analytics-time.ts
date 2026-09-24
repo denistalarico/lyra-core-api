@@ -179,3 +179,35 @@ function zonedParts(timezone: string, instant: Date): CalendarParts {
 function formatDay(year: number, month: number, day: number): string {
   return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 }
+
+/**
+ * The windows a period-reach measurement is taken for.
+ *
+ * Exactly the dashboard's resolvable presets — "Hoje", "Esta semana", "Este
+ * mês", "Últimos 30 dias" — and no more. `maximum` is deliberately absent: its
+ * range moves as history accumulates, so every pass would measure a different
+ * window and none of them would be reusable.
+ *
+ * Custom ranges are not measured. The set of them is unbounded and each is one
+ * provider request, so covering them would spend a shared quota on windows
+ * nobody opened; the reader reports null for those and the card says the
+ * measurement has not been taken.
+ *
+ * Weeks start on Monday, matching the frontend's `resolveDashboardPeriod`. A
+ * mismatch here would store a measurement under a window the dashboard never
+ * asks for, so the card would silently stay empty.
+ */
+export function periodReachWindows(
+  today: string,
+): ReadonlyArray<{ since: string; until: string }> {
+  const date = new Date(`${today}T00:00:00Z`);
+  // `getUTCDay()` is 0 for Sunday; shift so Monday is 0.
+  const weekdayFromMonday = (date.getUTCDay() + 6) % 7;
+
+  return [
+    { since: today, until: today },
+    { since: shiftCalendarDay(today, -weekdayFromMonday), until: today },
+    { since: `${today.slice(0, 7)}-01`, until: today },
+    { since: shiftCalendarDay(today, -29), until: today },
+  ];
+}

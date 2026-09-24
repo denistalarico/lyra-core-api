@@ -14,9 +14,12 @@ import { AgencyWorkspaceUserEntity } from '../agency/entities/agency-settings.en
 import { SocialIntegrationsModule } from '../social-integrations/social-integrations.module';
 import {
   MetaOrganicAudienceService,
+  MetaOrganicPeriodReachService,
   MetaOrganicInsightsService,
   SocialConsolidatedAnalyticsService,
   SocialOrganicAccountMetricDailyEntity,
+  SocialOrganicReachPeriodEntity,
+  SocialOrganicReachPeriodWriterService,
   SocialOrganicAnalyticsController,
   SocialOrganicAnalyticsReadService,
   SocialOrganicAudienceConfigService,
@@ -131,6 +134,7 @@ export function createMetaOrganicOAuthProviders(
         SocialDestinationCreativeEntity,
         SocialOrganicPostMetricDailyEntity,
         SocialOrganicAccountMetricDailyEntity,
+        SocialOrganicReachPeriodEntity,
         SocialOrganicAudienceDailyEntity,
         SocialOrganicSyncRunEntity,
         SocialOrganicWebhookEventEntity,
@@ -195,6 +199,8 @@ export function createMetaOrganicOAuthProviders(
     // the read that takes the newest snapshot and never a range.
     SocialOrganicAudienceConfigService,
     MetaOrganicAudienceService,
+    MetaOrganicPeriodReachService,
+    SocialOrganicReachPeriodWriterService,
     SocialOrganicAudienceWriterService,
     SocialOrganicAudienceReadService,
     SocialOrganicThumbnailService,

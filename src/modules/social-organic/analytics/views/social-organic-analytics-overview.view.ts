@@ -29,6 +29,27 @@ export type SocialOrganicAnalyticsTotals = {
   reachGranularity: SocialOrganicReachGranularity;
 
   /**
+   * The de-duplicated reach of the whole period, measured by Meta — not a sum.
+   *
+   * The number the dashboard actually shows. `reach` above is the daily grain
+   * and is null for any real reporting window, which left the card showing a
+   * dash forever; this is measured by asking Meta for the range in one request,
+   * so the de-duplication happens where the identities are.
+   *
+   * **It includes ads.** Meta only collapses reach to one period figure when
+   * nothing breaks it down, and the breakdown is what the daily ingest uses to
+   * exclude the AD bucket. So this matches Meta's own "Contas alcançadas" and is
+   * a different measurement from summing `reach` — which is why the two are
+   * separate fields rather than one field with a flag.
+   *
+   * Null when not measured: Instagram only (Meta retired the Page equivalent),
+   * and null while the first measurement for a window has not been taken.
+   */
+  periodReach: string | null;
+  /** True whenever `periodReach` is non-null — it is never ads-free. */
+  periodReachIncludesAds: boolean;
+
+  /**
    * STOCK, not flow — the latest observed value inside the period, never a
    * sum. Null when the period has no observation at all.
    */

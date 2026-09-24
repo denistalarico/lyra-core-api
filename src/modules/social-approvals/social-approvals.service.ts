@@ -256,7 +256,6 @@ export class SocialApprovalsService {
   ) {
     const actor = this.user(actorUserId);
     const request = await this.find(scope, id);
-    if (!ACTIVE.includes(request.status as (typeof ACTIVE)[number])) return request;
     const now = new Date();
     request.internalFirstViewedAt ??= now;
     request.internalLastViewedAt = now;
