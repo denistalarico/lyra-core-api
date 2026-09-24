@@ -5,6 +5,7 @@ import { SocialOrganicCredentialResolver } from '../credentials/social-organic-c
 import type { SocialOrganicSyncRunEntity } from './entities/social-organic-sync-run.entity';
 import { MetaOrganicInsightsService } from './meta/meta-organic-insights.service';
 import { MetaOrganicAudienceService } from './meta/meta-organic-audience.service';
+import { MetaOrganicOnlineFollowersService } from './meta/meta-organic-online-followers.service';
 import { MetaOrganicPeriodReachService } from './meta/meta-organic-period-reach.service';
 import { SocialOrganicReachPeriodWriterService } from './social-organic-reach-period-writer.service';
 import type { ResolvedOrganicAnalyticsCredential } from '../credentials/social-organic-credential.resolver';
@@ -45,6 +46,7 @@ export class SocialOrganicSyncWorker {
      * it had failed. This is the call it was waiting for.
      */
     private readonly audience: MetaOrganicAudienceService,
+    private readonly onlineFollowers: MetaOrganicOnlineFollowersService,
     /** Period reach, measured by Meta and cached — see `measurePeriodReach`. */
     private readonly periodReach: MetaOrganicPeriodReachService,
     private readonly reachWriter: SocialOrganicReachPeriodWriterService,
@@ -126,6 +128,26 @@ export class SocialOrganicSyncWorker {
       } catch (error) {
         this.logger.warn(
           `Organic audience snapshot failed for run ${run.id}: ${
+            error instanceof Error ? error.name : 'unknown'
+          }`,
+        );
+      }
+
+      // The online-followers grid, isolated for the reason the audience pass
+      // above is — and with more at stake in getting the isolation right: Meta
+      // keeps only ~30 days of this metric, so a failure here loses days that
+      // cannot be re-read later. Losing them is still better than failing a run
+      // whose facts are already written, which would re-read the whole window.
+      try {
+        const online = await this.onlineFollowers.sync({
+          resolved,
+          syncRunId: run.id,
+        });
+        counters.rowsWritten += online.rowsWritten;
+        counters.apiCalls += online.apiCalls;
+      } catch (error) {
+        this.logger.warn(
+          `Organic online-followers sync failed for run ${run.id}: ${
             error instanceof Error ? error.name : 'unknown'
           }`,
         );

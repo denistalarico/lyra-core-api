@@ -76,6 +76,43 @@ describe('normalizeInstagramFollowerDemographics', () => {
     ]);
   });
 
+  it('joins a two-dimension cross into one canonical key', () => {
+    // `breakdown=age,gender` answers with two `dimension_values` per result.
+    // Verified against production on 2026-09-24. The key is joined with `|` and
+    // lowercased, which is the format the column has always documented and the
+    // one the retired Facebook reader rewrote its `M.25-34` into — so a chart
+    // over both providers sees one audience, not two.
+    const rows = normalizeInstagramFollowerDemographics({
+      ...context(),
+      kind: 'age_gender',
+      insights: {
+        data: [
+          {
+            name: 'follower_demographics',
+            total_value: {
+              breakdowns: [
+                {
+                  dimension_keys: ['age', 'gender'],
+                  results: [
+                    { dimension_values: ['25-34', 'F'], value: 110 },
+                    { dimension_values: ['25-34', 'M'], value: 109 },
+                    { dimension_values: ['65+', 'F'], value: 5 },
+                  ],
+                },
+              ],
+            },
+          },
+        ],
+      },
+    });
+
+    expect(rows.map((row) => [row.breakdownKind, row.breakdownKey, row.value])).toEqual([
+      ['age_gender', '25-34|f', '110'],
+      ['age_gender', '25-34|m', '109'],
+      ['age_gender', '65+|f', '5'],
+    ]);
+  });
+
   it('files every row under the day of observation', () => {
     const rows = normalizeInstagramFollowerDemographics({
       ...context(),

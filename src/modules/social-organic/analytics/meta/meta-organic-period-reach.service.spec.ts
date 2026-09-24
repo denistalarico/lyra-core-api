@@ -152,9 +152,12 @@ describe('MetaOrganicPeriodReachService', () => {
   it('keeps the older reach-only reading working', async () => {
     // `measure` is what the sync worker still calls. It goes through the same
     // request now, so this pins that the narrower contract did not change.
-    const graph = jest
-      .fn()
-      .mockResolvedValue(answer(6783, [['AD', 6645], ['POST', 138]]));
+    const graph = jest.fn().mockResolvedValue(
+      answer(6783, [
+        ['AD', 6645],
+        ['POST', 138],
+      ]),
+    );
 
     const result = await serviceWith(graph).measure({
       resolved: instagram(),
@@ -219,9 +222,12 @@ describe('MetaOrganicPeriodReachService', () => {
   it('counts an unrecognised surface as organic, never as paid', async () => {
     // A surface Meta adds later is content the account published. Dropping it
     // would understate the organic slice; calling it paid would be worse.
-    const graph = jest
-      .fn()
-      .mockResolvedValue(answer(30, [['POST', 10], ['LIVE_SOMETHING', 20]]));
+    const graph = jest.fn().mockResolvedValue(
+      answer(30, [
+        ['POST', 10],
+        ['LIVE_SOMETHING', 20],
+      ]),
+    );
 
     const result = await serviceWith(graph).measurePeriod({
       resolved: instagram(),

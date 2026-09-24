@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/require-await, @typescript-eslint/no-unsafe-assignment -- worker doubles use Jest asymmetric matchers. */
 import type { SocialOrganicCredentialResolver } from '../credentials/social-organic-credential.resolver';
 import type { SocialOrganicSyncRunEntity } from './entities/social-organic-sync-run.entity';
+import type { MetaOrganicOnlineFollowersService } from './meta/meta-organic-online-followers.service';
 import type { MetaOrganicPeriodReachService } from './meta/meta-organic-period-reach.service';
 import type { SocialOrganicReachPeriodWriterService } from './social-organic-reach-period-writer.service';
 import type { MetaOrganicAudienceService } from './meta/meta-organic-audience.service';
@@ -61,6 +62,16 @@ function harness() {
     })),
   };
 
+  // Likewise silent by default, so the existing counter assertions stay about
+  // the metrics sync alone.
+  const onlineFollowers = {
+    sync: jest.fn(async () => ({
+      rowsWritten: 0,
+      daysCovered: 0,
+      apiCalls: 0,
+    })),
+  };
+
   // Period reach: not an Instagram asset by default (apiCalls 0), so the
   // existing counter assertions stay about the metrics sync alone.
   const periodReach = {
@@ -74,6 +85,7 @@ function harness() {
     credentials,
     insights,
     audience,
+    onlineFollowers,
     periodReach,
     reachWriter,
     worker: new SocialOrganicSyncWorker(
@@ -81,6 +93,7 @@ function harness() {
       credentials as unknown as SocialOrganicCredentialResolver,
       insights as unknown as MetaOrganicInsightsService,
       audience as unknown as MetaOrganicAudienceService,
+      onlineFollowers as unknown as MetaOrganicOnlineFollowersService,
       periodReach as unknown as MetaOrganicPeriodReachService,
       reachWriter as unknown as SocialOrganicReachPeriodWriterService,
     ),
@@ -170,6 +183,51 @@ describe('audience snapshot', () => {
     // which is a larger harm than losing one day of demographics.
     const context = harness();
     context.audience.sync.mockRejectedValueOnce(new Error('graph_unavailable'));
+
+    await context.worker.processDue(1);
+
+    expect(context.runs.markSucceeded).toHaveBeenCalledTimes(1);
+    expect(context.runs.markFailed).not.toHaveBeenCalled();
+  });
+});
+
+describe('online followers', () => {
+  it('collects the hourly grid alongside the metrics window', async () => {
+    // Same regression the audience test guards, and more costly here: Meta
+    // keeps ~30 days of this metric, so a pass that is never called does not
+    // just leave a table empty — it loses days permanently as they age out.
+    const context = harness();
+
+    await context.worker.processDue(1);
+
+    expect(context.onlineFollowers.sync).toHaveBeenCalledTimes(1);
+  });
+
+  it('counts the grid rows into the run', async () => {
+    const context = harness();
+    context.onlineFollowers.sync.mockResolvedValueOnce({
+      rowsWritten: 720,
+      daysCovered: 30,
+      apiCalls: 1,
+    });
+
+    await context.worker.processDue(1);
+
+    const counters = (
+      context.runs.markSucceeded.mock.calls as unknown as Array<
+        [{ counters: { rowsWritten: number; apiCalls: number } }]
+      >
+    )[0]?.[0]?.counters;
+    // 1 account row from the metrics sync, plus 30 days × 24 hours.
+    expect(counters?.rowsWritten).toBe(721);
+    expect(counters?.apiCalls).toBe(4);
+  });
+
+  it('a failed grid does not fail a good metrics run', async () => {
+    const context = harness();
+    context.onlineFollowers.sync.mockRejectedValueOnce(
+      new Error('graph_unavailable'),
+    );
 
     await context.worker.processDue(1);
 

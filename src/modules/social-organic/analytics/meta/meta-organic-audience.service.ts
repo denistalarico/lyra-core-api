@@ -11,6 +11,7 @@ import { SocialOrganicAudienceWriterService } from '../social-organic-audience-w
 import { SocialOrganicSyncError } from '../social-organic-sync.error';
 import { normalizeInstagramFollowerDemographics } from './meta-organic-audience.normalizer';
 import {
+  INSTAGRAM_AUDIENCE_BREAKDOWN_KINDS,
   INSTAGRAM_AUDIENCE_BREAKDOWNS,
   INSTAGRAM_AUDIENCE_METRIC,
   META_ORGANIC_INSIGHTS_GRAPH_VERSION,
@@ -118,7 +119,9 @@ export class MetaOrganicAudienceService {
 
         const produced = normalizeInstagramFollowerDemographics({
           ...context,
-          kind: breakdown,
+          // Meta's parameter spelling is not the stored kind: `age,gender` is
+          // written as `age_gender`, the value the column has always used.
+          kind: INSTAGRAM_AUDIENCE_BREAKDOWN_KINDS[breakdown],
           insights,
         });
 

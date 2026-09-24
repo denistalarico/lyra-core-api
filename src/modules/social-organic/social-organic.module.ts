@@ -14,6 +14,7 @@ import { AgencyWorkspaceUserEntity } from '../agency/entities/agency-settings.en
 import { SocialIntegrationsModule } from '../social-integrations/social-integrations.module';
 import {
   MetaOrganicAudienceService,
+  MetaOrganicOnlineFollowersService,
   MetaOrganicPeriodReachService,
   MetaOrganicInsightsService,
   SocialConsolidatedAnalyticsService,
@@ -26,6 +27,8 @@ import {
   SocialOrganicAudienceDailyEntity,
   SocialOrganicAudienceReadService,
   SocialOrganicAudienceWriterService,
+  SocialOrganicOnlineFollowersEntity,
+  SocialOrganicOnlineFollowersWriterService,
   SocialOrganicThumbnailService,
   SocialOrganicMetricsWriterService,
   SocialOrganicPostMetricDailyEntity,
@@ -136,6 +139,7 @@ export function createMetaOrganicOAuthProviders(
         SocialOrganicAccountMetricDailyEntity,
         SocialOrganicReachPeriodEntity,
         SocialOrganicAudienceDailyEntity,
+        SocialOrganicOnlineFollowersEntity,
         SocialOrganicSyncRunEntity,
         SocialOrganicWebhookEventEntity,
         SocialOrganicInteractionEntity,
@@ -203,6 +207,10 @@ export function createMetaOrganicOAuthProviders(
     SocialOrganicReachPeriodWriterService,
     SocialOrganicAudienceWriterService,
     SocialOrganicAudienceReadService,
+    // The hourly grid behind "melhor dia" and "melhor horário": one collection
+    // read two ways, on its own 30-day retention clock.
+    MetaOrganicOnlineFollowersService,
+    SocialOrganicOnlineFollowersWriterService,
     SocialOrganicThumbnailService,
     SocialOrganicSyncRunService,
     SocialOrganicSyncScheduler,

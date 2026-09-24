@@ -1,4 +1,5 @@
 import { META_ORGANIC_GRAPH_API_VERSION } from '../../providers/meta/meta-organic-oauth.support';
+import type { SocialOrganicAudienceKind } from '../entities/social-organic-audience-daily.entity';
 
 export const META_ORGANIC_INSIGHTS_GRAPH_VERSION =
   META_ORGANIC_GRAPH_API_VERSION;
@@ -287,18 +288,51 @@ export const INSTAGRAM_AUDIENCE_METRIC = 'follower_demographics';
 /**
  * The dimensions asked of `follower_demographics`, one request each.
  *
- * `age` and `gender` as separate marginals rather than a cross: Instagram's
- * `follower_demographics` takes one breakdown per call, so the cross is not on
- * offer here. Deriving one from the two would be arithmetic on suppressed data —
- * Meta withholds small buckets — and would produce a cross that does not sum to
- * either marginal.
+ * ## The cross is real, and is asked for rather than derived
+ *
+ * `age,gender` is a single breakdown Meta accepts, verified against production
+ * on 2026-09-24: it answers with `dimension_keys: ["age","gender"]` and one
+ * result per cell (`["25-34","F"] → 110`). An earlier version of this comment
+ * said the cross was not on offer and that only marginals were available; that
+ * was wrong, and the marginals-only reading is what left the audience chart
+ * unable to show the breakdown an operator actually asks for.
+ *
+ * The marginals are still requested alongside it. They are not redundant: Meta
+ * suppresses small buckets independently in each response, so the cross does
+ * not sum to either marginal — on the production account the `age` marginal
+ * totals 1 058 while the cross totals less. Each is the best answer to its own
+ * question, and deriving one from the other would be arithmetic on suppressed
+ * data.
  */
 export const INSTAGRAM_AUDIENCE_BREAKDOWNS = [
   'age',
   'gender',
+  // Comma-joined in one parameter, which is how Meta spells a cross. Not two
+  // dimensions in two calls.
+  'age,gender',
   'city',
   'country',
 ] as const;
+
+/**
+ * The stored `breakdown_kind` for each requested breakdown.
+ *
+ * Only the cross needs translating: Meta's parameter is `age,gender` and the
+ * column's value is `age_gender`, which the entity's type has always declared
+ * and which rows collected from the (now retired) Facebook side already use.
+ * Storing the provider's spelling instead would split one audience into two
+ * kinds that no chart joins back together.
+ */
+export const INSTAGRAM_AUDIENCE_BREAKDOWN_KINDS: Record<
+  (typeof INSTAGRAM_AUDIENCE_BREAKDOWNS)[number],
+  SocialOrganicAudienceKind
+> = {
+  age: 'age',
+  gender: 'gender',
+  'age,gender': 'age_gender',
+  city: 'city',
+  country: 'country',
+};
 
 /**
  * The Page metrics that used to carry the same information. **Retired by Meta.**

@@ -404,16 +404,18 @@ export class MetaOrganicGraphService {
     until?: number;
     metricType?: 'total_value';
     /**
-     * The four audience dimensions join the existing three.
+     * The audience dimensions join the existing three.
      *
-     * Meta accepts exactly one `breakdown` per request on
-     * `follower_demographics`, so a dimension is a request — the same shape the
-     * paid Insights edge imposes, arrived at independently.
+     * One `breakdown` parameter per request, but that parameter may name a
+     * cross: `age,gender` is a single comma-joined value Meta accepts on
+     * `follower_demographics`, and it answers with `dimension_keys` of length
+     * two. Verified against production on 2026-09-24.
      */
     breakdown?:
       | 'media_product_type'
       | 'follow_type'
       | 'is_from_ads'
+      | 'age,gender'
       | 'age'
       | 'gender'
       | 'city'
