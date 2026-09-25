@@ -5,6 +5,7 @@ import type {
   MetaOrganicPeriodMeasurement,
   MetaOrganicPeriodReachService,
 } from './meta/meta-organic-period-reach.service';
+import type { MetaOrganicFacebookReelsService } from './meta/meta-organic-facebook-reels.service';
 import type { MetaOrganicStoriesService } from './meta/meta-organic-stories.service';
 import type { SocialOrganicReachPeriodWriterService } from './social-organic-reach-period-writer.service';
 import type { MetaOrganicAudienceService } from './meta/meta-organic-audience.service';
@@ -58,6 +59,7 @@ function measurement(
     savesReel: null,
     sharesReel: null,
     sharesStory: null,
+    pageViews: null,
     measuredSince: '2026-09-07',
     measuredUntil: '2026-09-08',
     truncated: false,
@@ -141,6 +143,13 @@ function harness() {
       apiCalls: 0,
     })),
   };
+  const facebookReels = {
+    sync: jest.fn(async () => ({
+      reelsSeen: 0,
+      rowsWritten: 0,
+      apiCalls: 0,
+    })),
+  };
 
   return {
     claimed,
@@ -152,6 +161,7 @@ function harness() {
     periodReach,
     reachWriter,
     stories,
+    facebookReels,
     worker: new SocialOrganicSyncWorker(
       runs as unknown as SocialOrganicSyncRunService,
       credentials as unknown as SocialOrganicCredentialResolver,
@@ -161,6 +171,7 @@ function harness() {
       periodReach as unknown as MetaOrganicPeriodReachService,
       reachWriter as unknown as SocialOrganicReachPeriodWriterService,
       stories as unknown as MetaOrganicStoriesService,
+      facebookReels as unknown as MetaOrganicFacebookReelsService,
     ),
   };
 }

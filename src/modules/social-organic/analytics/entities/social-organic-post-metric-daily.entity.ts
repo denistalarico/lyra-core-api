@@ -319,6 +319,64 @@ export class SocialOrganicPostMetricDailyEntity {
   @Column({ name: 'reposts_lifetime', type: 'bigint', nullable: true })
   repostsLifetime!: string | null;
 
+  /**
+   * Reactions on a Facebook Page post, split by type.
+   *
+   * Facebook only. Instagram has one reaction — the like — which already has a
+   * column; asking Meta for `post_reactions_by_type_total` on IG media is
+   * refused outright.
+   *
+   * ## Why six columns and not one jsonb map
+   *
+   * Meta answers with a map (`{"like": 1, "love": 3}`), and storing it as one
+   * would be a smaller change. But the operator's table has a column per emoji
+   * and sorts by them, and a reader that has to unpack jsonb cannot push that
+   * sort into SQL. The six types are a closed set Meta has not changed since
+   * 2016; a seventh would need a migration, which is the right amount of
+   * friction for something that would also need a column in the UI.
+   *
+   * Every one is nullable and stays null on Instagram, where the metric does
+   * not exist — never zero, which would claim nobody reacted.
+   */
+  @Column({ name: 'reactions_total', type: 'bigint', nullable: true })
+  reactionsTotal!: string | null;
+
+  @Column({ name: 'reactions_like', type: 'bigint', nullable: true })
+  reactionsLike!: string | null;
+
+  @Column({ name: 'reactions_love', type: 'bigint', nullable: true })
+  reactionsLove!: string | null;
+
+  @Column({ name: 'reactions_wow', type: 'bigint', nullable: true })
+  reactionsWow!: string | null;
+
+  @Column({ name: 'reactions_haha', type: 'bigint', nullable: true })
+  reactionsHaha!: string | null;
+
+  /** Meta's own name for the "sad" reaction. */
+  @Column({ name: 'reactions_sorry', type: 'bigint', nullable: true })
+  reactionsSorry!: string | null;
+
+  @Column({ name: 'reactions_anger', type: 'bigint', nullable: true })
+  reactionsAnger!: string | null;
+
+  /**
+   * `post_media_view` split by `is_from_ads`, as a lifetime total.
+   *
+   * Facebook only, and the split is real rather than derived: Meta returns both
+   * buckets in the same response, so the paid figure is its own measurement and
+   * never `total - organic`.
+   *
+   * A boosted post has both. Neither is a subset of `impressionsLifetime` in
+   * any way worth relying on — they are the two buckets of that same total, and
+   * on this edge they do add up, unlike Instagram's de-duplicated slices.
+   */
+  @Column({ name: 'views_organic_lifetime', type: 'bigint', nullable: true })
+  viewsOrganicLifetime!: string | null;
+
+  @Column({ name: 'views_paid_lifetime', type: 'bigint', nullable: true })
+  viewsPaidLifetime!: string | null;
+
   /** True for same-day or provider-incomplete facts. */
   @Column({ name: 'is_partial', type: 'boolean', default: false })
   isPartial!: boolean;

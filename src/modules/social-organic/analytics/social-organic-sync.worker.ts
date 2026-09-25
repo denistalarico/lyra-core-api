@@ -7,6 +7,7 @@ import { MetaOrganicInsightsService } from './meta/meta-organic-insights.service
 import { MetaOrganicAudienceService } from './meta/meta-organic-audience.service';
 import { MetaOrganicOnlineFollowersService } from './meta/meta-organic-online-followers.service';
 import { MetaOrganicPeriodReachService } from './meta/meta-organic-period-reach.service';
+import { MetaOrganicFacebookReelsService } from './meta/meta-organic-facebook-reels.service';
 import { MetaOrganicStoriesService } from './meta/meta-organic-stories.service';
 import { SocialOrganicReachPeriodWriterService } from './social-organic-reach-period-writer.service';
 import type { ResolvedOrganicAnalyticsCredential } from '../credentials/social-organic-credential.resolver';
@@ -56,6 +57,11 @@ export class SocialOrganicSyncWorker {
      * so a manual sync also picks up what is up right now.
      */
     private readonly stories: MetaOrganicStoriesService,
+    /**
+     * Facebook Page reels, which live on an edge of their own — see
+     * `MetaOrganicFacebookReelsService`. A no-op on an Instagram asset.
+     */
+    private readonly facebookReels: MetaOrganicFacebookReelsService,
   ) {}
 
   @Interval(TICK_MS)
@@ -180,6 +186,28 @@ export class SocialOrganicSyncWorker {
         );
       }
 
+      // Facebook reels, isolated for the same reason as the passes above. A
+      // Page reel is on neither `/posts` nor `/media` and answers only
+      // `/{reel}/video_insights`, so nothing the insights pass did covers it —
+      // and nothing it writes is at risk if this fails. A reel is permanent,
+      // so a lost pass is recovered by the next one.
+      try {
+        const reels = await this.facebookReels.sync({
+          resolved,
+          fromDate: run.windowStart,
+          toDate: run.windowEnd,
+          syncRunId: run.id,
+        });
+        counters.rowsWritten += reels.rowsWritten;
+        counters.apiCalls += reels.apiCalls;
+      } catch (error) {
+        this.logger.warn(
+          `Facebook reels sync failed for run ${run.id}: ${
+            error instanceof Error ? error.name : 'unknown'
+          }`,
+        );
+      }
+
       await this.measurePeriodReach(resolved, counters);
 
       await this.runs.markSucceeded({
@@ -255,7 +283,10 @@ export class SocialOrganicSyncWorker {
         });
 
         counters.apiCalls += measurement.apiCalls;
-        if (measurement.apiCalls === 0) return; // Not an Instagram asset.
+        // Zero calls means the asset type has nothing to measure at all. A
+        // Facebook Page now spends one call per window — `measurePage` reads
+        // what a Page still answers — so this no longer fires for one.
+        if (measurement.apiCalls === 0) return;
 
         await this.reachWriter.record({
           tenantId: resolved.credential.tenantId,
@@ -285,6 +316,11 @@ export class SocialOrganicSyncWorker {
           savesReel: measurement.savesReel,
           sharesReel: measurement.sharesReel,
           sharesStory: measurement.sharesStory,
+          // Facebook only; null on an Instagram measurement. The Page's
+          // reaction, comment and share totals are not written here for the
+          // same reason the counts are not — they are sums over the post table,
+          // which the read layer computes for the period actually requested.
+          pageViews: measurement.pageViews,
           // `reelCount`/`storyCount` are deliberately not written here. They
           // are questions about published content rather than measurements of a
           // window, Meta has no metric for them, and the post facts and the

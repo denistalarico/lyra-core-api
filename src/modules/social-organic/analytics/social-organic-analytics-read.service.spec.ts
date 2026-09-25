@@ -4,6 +4,7 @@ import type { SocialOrganicAssetEntity } from '../entities/social-organic-asset.
 import type { SocialOrganicAccountMetricDailyEntity } from './entities/social-organic-account-metric-daily.entity';
 import type { SocialOrganicPostMetricDailyEntity } from './entities/social-organic-post-metric-daily.entity';
 import type { SocialOrganicReachPeriodEntity } from './entities/social-organic-reach-period.entity';
+import type { SocialOrganicFacebookReelEntity } from './entities/social-organic-facebook-reel.entity';
 import type { SocialOrganicStoryEntity } from './entities/social-organic-story.entity';
 import type { SocialOrganicSyncRunEntity } from './entities/social-organic-sync-run.entity';
 import { SocialOrganicAnalyticsReadService } from './social-organic-analytics-read.service';
@@ -46,6 +47,11 @@ describe('SocialOrganicAnalyticsReadService (scope + validation)', () => {
       query: jest.fn(async () => [{ count: '0' }]),
     } as unknown as Repository<SocialOrganicStoryEntity>;
 
+    // No Facebook reels either: an Instagram asset has none by definition, and
+    // the ranking is not what these tests exercise.
+    const facebookReelsRepository =
+      {} as unknown as Repository<SocialOrganicFacebookReelEntity>;
+
     return {
       findOne,
       service: new SocialOrganicAnalyticsReadService(
@@ -55,6 +61,7 @@ describe('SocialOrganicAnalyticsReadService (scope + validation)', () => {
         runsRepository,
         reachPeriodsRepository,
         storiesRepository,
+        facebookReelsRepository,
       ),
     };
   }

@@ -205,6 +205,46 @@ export class SocialOrganicReachPeriodEntity {
   storyCount!: number | null;
 
   /**
+   * The Facebook Page figures for the same window.
+   *
+   * Separate columns from the Instagram ones above rather than shared, because
+   * they are not the same measurements under two names. `pageViews` is
+   * `page_media_view`, a count of content appearing on screen; `views` is
+   * Instagram's own metric with its own definition and its own de-duplication.
+   * One column holding either would make a consolidated report add two numbers
+   * that Meta never intended to be added.
+   *
+   * There is no `pageReach` here, and the absence is the finding: every
+   * unique-audience metric a Page used to report has been retired — verified
+   * on 2026-09-24 against `page_impressions_unique`, `page_views_unique`,
+   * `page_content_viewers` and a dozen other spellings, all answering
+   * `(#100) The value must be a valid insights metric`. A Page cannot say how
+   * many people it reached, so nothing here claims to.
+   *
+   * The engagement three are summed from the post listing rather than read
+   * from an account metric: `page_post_engagements` exists but lumps reactions,
+   * comments, shares and clicks into one number, which cannot be split back
+   * apart into the three the operator asked for.
+   */
+  @Column({ name: 'page_views', type: 'bigint', nullable: true })
+  pageViews!: string | null;
+
+  @Column({ name: 'page_reactions_total', type: 'bigint', nullable: true })
+  pageReactionsTotal!: string | null;
+
+  @Column({ name: 'page_comments', type: 'bigint', nullable: true })
+  pageComments!: string | null;
+
+  @Column({ name: 'page_shares', type: 'bigint', nullable: true })
+  pageShares!: string | null;
+
+  @Column({ name: 'page_post_count', type: 'int', nullable: true })
+  pagePostCount!: number | null;
+
+  @Column({ name: 'page_reel_count', type: 'int', nullable: true })
+  pageReelCount!: number | null;
+
+  /**
    * The range Meta actually measured, which may be narrower than the stored
    * window: Meta refuses a span wider than 30 days, so a longer request is
    * clamped to its last 30. Kept so a card can label the figure with the range

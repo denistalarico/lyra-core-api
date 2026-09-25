@@ -147,6 +147,40 @@ export type SocialOrganicAnalyticsTotals = {
    */
   periodReelCount: string;
   periodStoryCount: string;
+  /**
+   * The Facebook Page figures. Null or zero on an Instagram asset.
+   *
+   * There is no `pageReach` and there will not be one: Meta retired every
+   * unique-audience metric a Page reported — `page_impressions_unique`,
+   * `page_views_unique`, `page_content_viewers` and the rest all answer
+   * `(#100) The value must be a valid insights metric`. A Page cannot say how
+   * many people it reached, so the dashboard does not offer the card.
+   *
+   * `pageViews` is measured by Meta for the window and may be null. The other
+   * four are summed or counted from stored rows, so zero is a real answer and
+   * they are never null.
+   */
+  pageViews: string | null;
+  pageReactions: string;
+  pageComments: string;
+  pageShares: string;
+  pagePostCount: string;
+  pageReelCount: string;
+  /**
+   * The reel aggregates, summed over the reels published in the window.
+   *
+   * `pageReelViewers` is the one that overstates, and knowingly: Meta reports
+   * unique viewers per reel and offers no de-duplicated union, so an account
+   * that watched two reels is counted twice. It is kept because it is the only
+   * unique-viewer figure left anywhere on the Facebook side, and the card's
+   * description says what it is.
+   */
+  pageReelPlays: string;
+  pageReelViewers: string;
+  pageReelWatchTimeSeconds: string;
+  pageReelReactions: string;
+  pageReelComments: string;
+  pageReelShares: string;
 
   /**
    * STOCK, not flow — the latest observed value inside the period, never a

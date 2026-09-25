@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import type { ResolvedOrganicAnalyticsCredential } from '../../credentials/social-organic-credential.resolver';
 import { MetaOrganicGraphService } from '../../providers/meta/meta-organic-graph.service';
 import { socialOrganicSurfaceSpellings } from '../views/social-organic-top-posts.view';
+import { FACEBOOK_PAGE_PERIOD_METRICS } from './meta-organic-insights.types';
 
 /**
  * The de-duplicated organic reach of a whole period, measured by Meta.
@@ -90,9 +91,13 @@ export class MetaOrganicPeriodReachService {
   }): Promise<MetaOrganicPeriodMeasurement> {
     const { credential } = input.resolved;
 
-    // Facebook Pages have no equivalent: `page_impressions_unique` was retired
-    // alongside the other Page insights, so asking would spend a call to be
-    // refused. Instagram is the only surface that answers this today.
+    // A Page answers a different, smaller set, and no reach at all:
+    // `page_impressions_unique` was retired along with every other
+    // unique-audience metric. `measurePage` reads what is left.
+    if (credential.assetType === 'facebook_page') {
+      return this.measurePage(input);
+    }
+
     if (credential.assetType !== 'instagram_professional') {
       return { ...EMPTY_MEASUREMENT, apiCalls: 0 };
     }
@@ -143,6 +148,8 @@ export class MetaOrganicPeriodReachService {
       savesReel: saves.reel,
       sharesReel: shares.reel,
       sharesStory: shares.story,
+      // Instagram has no Page view count; `views` above is its own metric.
+      pageViews: null,
       measuredSince: window.since,
       measuredUntil: window.until,
       truncated: window.truncated,
@@ -154,6 +161,66 @@ export class MetaOrganicPeriodReachService {
         comments.apiCalls +
         saves.apiCalls +
         shares.apiCalls,
+    };
+  }
+
+  /**
+   * What a Facebook Page can still report for a window.
+   *
+   * ## There is no reach here, and that is the finding
+   *
+   * Every unique-audience metric a Page used to answer has been retired.
+   * Verified against production on 2026-09-24 across `page_impressions_unique`,
+   * `page_views_unique`, `page_content_viewers`, `page_daily_unique_viewers`
+   * and a dozen other spellings, all returning `(#100) The value must be a
+   * valid insights metric` — the same error an invented name gets. So a Page
+   * cannot say how many people it reached, and nothing here pretends to. The
+   * only Facebook surface that still reports unique viewers is a reel, through
+   * `/{reel}/video_insights`.
+   *
+   * ## Why the total is summed here rather than asked for
+   *
+   * `page_media_view` has no `metric_type=total_value` collapsing shape — the
+   * trick that gives Instagram a de-duplicated period figure in one call.
+   * Verified: the breakdown parameters Instagram accepts are all refused here
+   * (`(#100) The breakdown value is invalid`), and the metric answers as a
+   * plain daily series.
+   *
+   * Summing a daily series is only sound because this is a **view count**, not
+   * an audience: two views on two days are two views, and there is nobody to
+   * double-count. The same arithmetic on a reach metric would be wrong, which
+   * is the reason this module refuses to do it anywhere else — see the class
+   * docblock. That distinction is the whole justification for the `+=` below.
+   */
+  private async measurePage(input: {
+    resolved: ResolvedOrganicAnalyticsCredential;
+    since: string;
+    until: string;
+  }): Promise<MetaOrganicPeriodMeasurement> {
+    const { credential } = input.resolved;
+
+    const response = await this.graph.getOrganicInsights({
+      objectId: credential.externalAssetId,
+      accessToken: credential.accessToken,
+      metrics: FACEBOOK_PAGE_PERIOD_METRICS,
+      period: 'day',
+      since: toUnixDay(input.since),
+      until: toUnixDay(input.until) + DAY_SECONDS,
+    });
+
+    return {
+      ...EMPTY_MEASUREMENT,
+      pageViews: readDailySeriesSum(response.data, 'page_media_view'),
+      // The engagement three are not read here. `page_post_engagements` exists
+      // but lumps reactions, comments, shares and clicks into one number that
+      // cannot be split back apart, so the read layer sums them from the post
+      // table instead — where each is stored separately and per post.
+      measuredSince: input.since,
+      measuredUntil: input.until,
+      // No clamp: the 30-day ceiling is an Instagram `total_value` limit, and a
+      // plain daily series has no such restriction.
+      truncated: false,
+      apiCalls: response.apiCalls,
     };
   }
 
@@ -242,6 +309,17 @@ export type MetaOrganicPeriodMeasurement = {
   savesReel: string | null;
   sharesReel: string | null;
   sharesStory: string | null;
+  /**
+   * `page_media_view` summed over the window — Facebook only, null on
+   * Instagram.
+   *
+   * A separate field from `views` rather than the same one, because they are
+   * different measurements: this counts Page content appearing on screen,
+   * while `views` is Instagram's own metric with its own de-duplication. One
+   * field holding either would invite a consolidated report to add two numbers
+   * Meta never meant to be added.
+   */
+  pageViews: string | null;
   /** The range actually asked for, which a clamp may have narrowed. */
   measuredSince: string;
   measuredUntil: string;
@@ -270,6 +348,7 @@ const EMPTY_MEASUREMENT = {
   savesReel: null,
   sharesReel: null,
   sharesStory: null,
+  pageViews: null,
   measuredSince: '',
   measuredUntil: '',
   truncated: false,
@@ -335,6 +414,44 @@ function readTotalValue(data: unknown[]): string | null {
   }
 
   return Math.trunc(value).toString();
+}
+
+/**
+ * A plain daily series, summed across the window.
+ *
+ * The shape a Facebook Page metric answers in: `values: [{value, end_time},
+ * ...]`, one entry per day, with no `total_value` to collapse to. Summing is
+ * sound here and nowhere else in this file — see `measurePage` for why a view
+ * count may be added across days while an audience may not.
+ *
+ * Null when the metric is absent entirely, zero when every day reported zero.
+ * The distinction matters: a Page that published nothing and a metric Meta
+ * stopped answering look the same in a total and are not the same fact.
+ */
+function readDailySeriesSum(data: unknown[], metric: string): string | null {
+  let total = 0n;
+  let found = false;
+
+  for (const entry of data) {
+    if (!entry || typeof entry !== 'object') continue;
+
+    const row = entry as { name?: unknown; values?: unknown };
+    if (row.name !== metric || !Array.isArray(row.values)) continue;
+
+    for (const day of row.values as unknown[]) {
+      if (!day || typeof day !== 'object') continue;
+
+      const value = (day as { value?: unknown }).value;
+      if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+        continue;
+      }
+
+      total += BigInt(Math.trunc(value));
+      found = true;
+    }
+  }
+
+  return found ? String(total) : null;
 }
 
 function readTotalValueObject(data: unknown[]): object | null {

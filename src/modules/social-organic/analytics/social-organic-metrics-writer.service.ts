@@ -141,12 +141,17 @@ export class SocialOrganicMetricsWriterService {
          -- them in a tidier order is a change where an off-by-one type-checks
          -- perfectly and writes the wrong column.
          reels_avg_watch_time_ms, reels_total_watch_time_ms,
-         reels_skip_rate_bp, reposts_lifetime
+         reels_skip_rate_bp, reposts_lifetime,
+         -- Facebook-only, appended for the same reason the reel columns were.
+         reactions_total, reactions_like, reactions_love, reactions_wow,
+         reactions_haha, reactions_sorry, reactions_anger,
+         views_organic_lifetime, views_paid_lifetime
        ) VALUES (
          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
          $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27,
          $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40,
-         $41, $42, $43, $44::jsonb, $45, $46, $47, $48
+         $41, $42, $43, $44::jsonb, $45, $46, $47, $48,
+         $49, $50, $51, $52, $53, $54, $55, $56, $57
        )
        ON CONFLICT (asset_id, external_publication_id, metric_date, source)
        DO UPDATE SET
@@ -180,6 +185,15 @@ export class SocialOrganicMetricsWriterService {
          reels_total_watch_time_ms = COALESCE(EXCLUDED.reels_total_watch_time_ms, social_organic_post_metrics_daily.reels_total_watch_time_ms),
          reels_skip_rate_bp = COALESCE(EXCLUDED.reels_skip_rate_bp, social_organic_post_metrics_daily.reels_skip_rate_bp),
          reposts_lifetime = COALESCE(EXCLUDED.reposts_lifetime, social_organic_post_metrics_daily.reposts_lifetime),
+         reactions_total = COALESCE(EXCLUDED.reactions_total, social_organic_post_metrics_daily.reactions_total),
+         reactions_like = COALESCE(EXCLUDED.reactions_like, social_organic_post_metrics_daily.reactions_like),
+         reactions_love = COALESCE(EXCLUDED.reactions_love, social_organic_post_metrics_daily.reactions_love),
+         reactions_wow = COALESCE(EXCLUDED.reactions_wow, social_organic_post_metrics_daily.reactions_wow),
+         reactions_haha = COALESCE(EXCLUDED.reactions_haha, social_organic_post_metrics_daily.reactions_haha),
+         reactions_sorry = COALESCE(EXCLUDED.reactions_sorry, social_organic_post_metrics_daily.reactions_sorry),
+         reactions_anger = COALESCE(EXCLUDED.reactions_anger, social_organic_post_metrics_daily.reactions_anger),
+         views_organic_lifetime = COALESCE(EXCLUDED.views_organic_lifetime, social_organic_post_metrics_daily.views_organic_lifetime),
+         views_paid_lifetime = COALESCE(EXCLUDED.views_paid_lifetime, social_organic_post_metrics_daily.views_paid_lifetime),
          -- Identity fields follow the same COALESCE rule as the metrics: a read
          -- that did not resolve them must not erase what an earlier, fuller read
          -- stored. The cost is that a caption edited on the provider keeps its
@@ -244,6 +258,15 @@ export class SocialOrganicMetricsWriterService {
         row.reelsTotalWatchTimeMs,
         row.reelsSkipRateBp,
         row.repostsLifetime,
+        row.reactionsTotal,
+        row.reactionsLike,
+        row.reactionsLove,
+        row.reactionsWow,
+        row.reactionsHaha,
+        row.reactionsSorry,
+        row.reactionsAnger,
+        row.viewsOrganicLifetime,
+        row.viewsPaidLifetime,
       ],
     );
   }

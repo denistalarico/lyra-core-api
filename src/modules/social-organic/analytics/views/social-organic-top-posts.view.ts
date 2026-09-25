@@ -38,6 +38,28 @@ export type SocialOrganicTopPostView = {
   totalInteractions: string | null;
   profileVisits: string | null;
   follows: string | null;
+  /**
+   * Reactions by type — Facebook only, null on every Instagram row.
+   *
+   * Instagram has one reaction and it is already `likes`. These stay null
+   * there rather than being filled with zeros, so the table can tell "this
+   * surface has no reactions" from "nobody reacted".
+   */
+  reactionsTotal: string | null;
+  reactionsLike: string | null;
+  reactionsLove: string | null;
+  reactionsWow: string | null;
+  reactionsHaha: string | null;
+  reactionsSorry: string | null;
+  reactionsAnger: string | null;
+  /**
+   * `post_media_view` split by `is_from_ads` — Facebook only.
+   *
+   * These two do partition the total, unlike Instagram's de-duplicated surface
+   * slices: a view was served by an ad or it was not.
+   */
+  viewsOrganic: string | null;
+  viewsPaid: string | null;
 };
 
 export type SocialOrganicTopPostsView = {
@@ -56,6 +78,11 @@ export const SOCIAL_ORGANIC_TOP_POST_SORTS = [
   'totalInteractions',
   'profileVisits',
   'follows',
+  // Facebook only. Sorting an Instagram ranking by it puts every row in a tie,
+  // which the comparator resolves by publish date — an empty column cannot
+  // order anything, and refusing the sort outright would mean the table's own
+  // header could produce a request the endpoint rejects.
+  'reactionsTotal',
   'publishedAt',
 ] as const;
 
@@ -150,5 +177,14 @@ export function toSocialOrganicTopPostView(
     totalInteractions: fact.totalInteractionsLifetime,
     profileVisits: fact.profileVisitsLifetime,
     follows: fact.followsLifetime,
+    reactionsTotal: fact.reactionsTotal,
+    reactionsLike: fact.reactionsLike,
+    reactionsLove: fact.reactionsLove,
+    reactionsWow: fact.reactionsWow,
+    reactionsHaha: fact.reactionsHaha,
+    reactionsSorry: fact.reactionsSorry,
+    reactionsAnger: fact.reactionsAnger,
+    viewsOrganic: fact.viewsOrganicLifetime,
+    viewsPaid: fact.viewsPaidLifetime,
   };
 }

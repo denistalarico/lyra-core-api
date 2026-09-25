@@ -93,10 +93,23 @@ function harness(options: { publishedPosts?: PublishedPostRow[] } = {}) {
     })),
     apiCalls: 1 as const,
   }));
+  // Shares, comments and reactions are post *fields*, read in their own call.
+  // Mocked with real counts so the Facebook path exercises the reader rather
+  // than falling into its try/catch — which passes either way, and would hide a
+  // broken read behind a warning.
+  const getPostEngagementFields = jest.fn(async () => ({
+    data: {
+      shares: { count: 6 },
+      comments: { summary: { total_count: 4 } },
+      reactions: { summary: { total_count: 9 } },
+    },
+    apiCalls: 1 as const,
+  }));
   const graph = {
     getProfileFollowersCount,
     getOrganicInsights,
     listPublishedPosts,
+    getPostEngagementFields,
   };
   type WriterInput = Parameters<SocialOrganicMetricsWriterService['upsert']>[0];
   const writer = {
@@ -311,8 +324,12 @@ describe('MetaOrganicInsightsService', () => {
         1,
         expect.objectContaining({
           objectId: 'post-1',
+          // `is_from_ads` splits the view total in the same response. The
+          // reaction map cannot ride along: it does not accept that breakdown
+          // and Meta refuses the whole request, so it is call #2.
           metrics: ['post_media_view'],
           period: 'lifetime',
+          breakdown: 'is_from_ads',
         }),
       );
       const lifetimeCall = graph.getOrganicInsights.mock.calls[0][0];
@@ -329,6 +346,120 @@ describe('MetaOrganicInsightsService', () => {
         isPartial: false,
       });
       expect(writer.upsert).toHaveBeenCalledTimes(1);
+    });
+
+    it('unpacks the reaction map, the ad split and the post fields', async () => {
+      const { service, graph } = harness({
+        publishedPosts: [{ id: 'pub-1', external_publication_id: 'post-1' }],
+      });
+      graph.getOrganicInsights.mockResolvedValueOnce({
+        data: [
+          {
+            name: 'post_media_view',
+            period: 'lifetime',
+            // Meta spells the buckets as strings, and they *do* partition the
+            // total here — unlike Instagram's de-duplicated surface slices.
+            values: [
+              { value: 30, is_from_ads: '0' },
+              { value: 12, is_from_ads: '1' },
+            ],
+          },
+        ],
+        apiCalls: 1,
+      });
+      // Call #2: the reaction map, in a request of its own.
+      graph.getOrganicInsights.mockResolvedValueOnce({
+        data: [
+          {
+            name: 'post_reactions_by_type_total',
+            period: 'lifetime',
+            values: [{ value: { like: 5, love: 2, anger: 1 } }],
+          },
+        ],
+        apiCalls: 1,
+      });
+      graph.getOrganicInsights.mockResolvedValueOnce({
+        data: [
+          {
+            name: 'page_media_view',
+            period: 'day',
+            values: [{ value: { organic: 11, paid: 7 } }],
+          },
+        ],
+        apiCalls: 1,
+      });
+
+      const summary = await service.sync({
+        resolved: resolved('facebook_page'),
+        fromDate: '2026-09-08',
+        toDate: '2026-09-08',
+        syncRunId: 'run-1',
+        syncedAt: new Date('2026-09-08T15:00:00.000Z'),
+      });
+
+      expect(summary.postRows[0]).toMatchObject({
+        viewsOrganicLifetime: '30',
+        viewsPaidLifetime: '12',
+        reactionsLike: '5',
+        reactionsLove: '2',
+        reactionsAnger: '1',
+        // A type Meta omitted is a measured zero, not a null: the map came
+        // back, it simply had no `wow` in it.
+        reactionsWow: '0',
+        // The summary count wins over the map's sum of 8. Meta counts the
+        // summary as of now while the map is a lifetime total that still
+        // includes reactions since removed.
+        reactionsTotal: '9',
+        commentsLifetime: '4',
+        sharesLifetime: '6',
+      });
+    });
+
+    it('still writes a Facebook post when its engagement fields are refused', async () => {
+      const { service, graph } = harness({
+        publishedPosts: [{ id: 'pub-1', external_publication_id: 'post-1' }],
+      });
+      graph.getPostEngagementFields.mockRejectedValueOnce(
+        new Error('(#100) refused'),
+      );
+      graph.getOrganicInsights.mockResolvedValueOnce({
+        data: [
+          {
+            name: 'post_media_view',
+            period: 'lifetime',
+            values: [{ value: 42 }],
+          },
+        ],
+        apiCalls: 1,
+      });
+      graph.getOrganicInsights.mockResolvedValueOnce({ data: [], apiCalls: 1 });
+      graph.getOrganicInsights.mockResolvedValueOnce({
+        data: [
+          {
+            name: 'page_media_view',
+            period: 'day',
+            values: [{ value: { organic: 11, paid: 7 } }],
+          },
+        ],
+        apiCalls: 1,
+      });
+
+      const summary = await service.sync({
+        resolved: resolved('facebook_page'),
+        fromDate: '2026-09-08',
+        toDate: '2026-09-08',
+        syncRunId: 'run-1',
+        syncedAt: new Date('2026-09-08T15:00:00.000Z'),
+      });
+
+      // The insights are the measurement that matters; losing the fields costs
+      // three columns, not the row.
+      expect(summary.postRows).toHaveLength(1);
+      expect(summary.postRows[0]).toMatchObject({
+        impressionsLifetime: '42',
+        commentsLifetime: null,
+        sharesLifetime: null,
+      });
     });
 
     it('fetches one batched IG media lifetime snapshot (comments, likes, views)', async () => {

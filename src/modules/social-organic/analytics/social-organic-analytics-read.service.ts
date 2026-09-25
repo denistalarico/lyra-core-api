@@ -43,6 +43,13 @@ import type {
   SocialOrganicTopStoryView,
 } from './views/social-organic-top-stories.view';
 import { SocialOrganicStoryEntity } from './entities/social-organic-story.entity';
+import {
+  toSocialOrganicFacebookReelView,
+  type SocialOrganicFacebookReelSort,
+  type SocialOrganicFacebookReelView,
+  type SocialOrganicFacebookReelsView,
+} from './views/social-organic-facebook-reels.view';
+import { SocialOrganicFacebookReelEntity } from './entities/social-organic-facebook-reel.entity';
 
 export type SocialOrganicAnalyticsScope = {
   tenantId: string;
@@ -68,6 +75,48 @@ export type SocialOrganicPublicationMetricsInput =
   SocialOrganicAnalyticsScope & {
     publicationIds: string[];
   };
+
+/**
+ * What `countPublications` answers.
+ *
+ * Counts and sums over stored rows, never provider measurements — which is why
+ * every field is a string rather than a nullable one. Zero here means the table
+ * holds nothing for the window, and that is a real answer.
+ */
+type PublicationCounts = {
+  reels: string;
+  stories: string;
+  pageReactions: string;
+  pageComments: string;
+  pageShares: string;
+  pagePosts: string;
+  pageReels: string;
+  pageReelPlays: string;
+  pageReelViewers: string;
+  pageReelWatchTimeSeconds: string;
+  pageReelReactions: string;
+  pageReelComments: string;
+  pageReelShares: string;
+};
+
+/** The Facebook reel aggregate, all columns as text. */
+type FacebookReelAggregateRow = {
+  count: string | null;
+  plays: string | null;
+  viewers: string | null;
+  watch_time_ms: string | null;
+  reactions: string | null;
+  comments: string | null;
+  shares: string | null;
+};
+
+/** The Facebook engagement aggregate, all columns as text. */
+type PageAggregateRow = {
+  reactions: string | null;
+  comments: string | null;
+  shares: string | null;
+  posts: string | null;
+};
 
 /** The raw shape one aggregation query returns, all columns as text. */
 type AggregateRow = {
@@ -133,6 +182,8 @@ export class SocialOrganicAnalyticsReadService {
      */
     @InjectRepository(SocialOrganicStoryEntity, 'agency')
     private readonly storiesRepository: Repository<SocialOrganicStoryEntity>,
+    @InjectRepository(SocialOrganicFacebookReelEntity, 'agency')
+    private readonly facebookReelsRepository: Repository<SocialOrganicFacebookReelEntity>,
   ) {}
 
   /**
@@ -233,10 +284,10 @@ export class SocialOrganicAnalyticsReadService {
     assetId: string,
     since: string,
     until: string,
-  ): Promise<{ reels: string; stories: string }> {
+  ): Promise<PublicationCounts> {
     const reelSpellings = socialOrganicSurfaceSpellings('reel');
 
-    const [reels, stories] = await Promise.all([
+    const [reels, stories, page, pageReels] = await Promise.all([
       this.postMetricsRepository.query<Array<{ count: string }>>(
         `SELECT COUNT(DISTINCT external_publication_id)::text AS count
            FROM social_organic_post_metrics_daily
@@ -255,11 +306,76 @@ export class SocialOrganicAnalyticsReadService {
             AND published_at::date BETWEEN $2::date AND $3::date`,
         [assetId, since, until],
       ),
+      // The Facebook Page engagement totals, summed from the post facts rather
+      // than read from an account metric. Meta's `page_post_engagements` exists
+      // but lumps reactions, comments, shares and clicks into one number that
+      // cannot be split back into the three the operator asked for.
+      //
+      // `DISTINCT ON` first, because the post fact has one row per observation
+      // day: summing the table directly would count a post observed five times
+      // five times over. The subquery takes each post's newest row, and the
+      // outer query adds those.
+      this.postMetricsRepository.query<Array<PageAggregateRow>>(
+        `SELECT COALESCE(SUM(reactions_total), 0)::text AS reactions,
+                COALESCE(SUM(comments_lifetime), 0)::text AS comments,
+                COALESCE(SUM(shares_lifetime), 0)::text AS shares,
+                COUNT(*)::text AS posts
+           FROM (
+             SELECT DISTINCT ON (external_publication_id)
+                    reactions_total, comments_lifetime, shares_lifetime
+               FROM social_organic_post_metrics_daily
+              WHERE asset_id = $1
+                AND published_at IS NOT NULL
+                AND (published_at AT TIME ZONE asset_timezone)::date
+                    BETWEEN $2::date AND $3::date
+              ORDER BY external_publication_id, metric_date DESC, synced_at DESC
+           ) AS latest`,
+        [assetId, since, until],
+      ),
+      // The reel aggregates, summed over the reels published in the window.
+      //
+      // `unique_viewers` is summed with the others and it is the one figure
+      // here that overstates: Meta reports it per reel and offers no
+      // de-duplicated union, so an account that watched two reels is counted
+      // twice. The alternative is no card at all, since this is the only
+      // unique-viewer figure left on the Facebook side. The catalog's
+      // description says so in the operator's own words rather than leaving
+      // them to assume it is a distinct-people count.
+      this.facebookReelsRepository.query<Array<FacebookReelAggregateRow>>(
+        `SELECT COUNT(*)::text AS count,
+                COALESCE(SUM(plays), 0)::text AS plays,
+                COALESCE(SUM(unique_viewers), 0)::text AS viewers,
+                COALESCE(SUM(total_watch_time_ms), 0)::text AS watch_time_ms,
+                COALESCE(SUM(reactions_total), 0)::text AS reactions,
+                COALESCE(SUM(comments), 0)::text AS comments,
+                COALESCE(SUM(shares), 0)::text AS shares
+           FROM social_organic_facebook_reels
+          WHERE asset_id = $1
+            AND published_at IS NOT NULL
+            AND published_at::date BETWEEN $2::date AND $3::date`,
+        [assetId, since, until],
+      ),
     ]);
 
     return {
       reels: reels[0]?.count ?? '0',
       stories: stories[0]?.count ?? '0',
+      pageReactions: page[0]?.reactions ?? '0',
+      pageComments: page[0]?.comments ?? '0',
+      pageShares: page[0]?.shares ?? '0',
+      pagePosts: page[0]?.posts ?? '0',
+      pageReels: pageReels[0]?.count ?? '0',
+      pageReelPlays: pageReels[0]?.plays ?? '0',
+      pageReelViewers: pageReels[0]?.viewers ?? '0',
+      // Milliseconds in the column, seconds on the card: a total watch time in
+      // milliseconds is a number nobody reads, and the conversion belongs where
+      // the unit is decided rather than in each consumer.
+      pageReelWatchTimeSeconds: String(
+        BigInt(pageReels[0]?.watch_time_ms ?? '0') / 1000n,
+      ),
+      pageReelReactions: pageReels[0]?.reactions ?? '0',
+      pageReelComments: pageReels[0]?.comments ?? '0',
+      pageReelShares: pageReels[0]?.shares ?? '0',
     };
   }
 
@@ -634,6 +750,70 @@ export class SocialOrganicAnalyticsReadService {
     return { items: items.slice(0, limit), total: items.length };
   }
 
+  /**
+   * The best Facebook reels of a period.
+   *
+   * ## Why it does not go through `topPosts`
+   *
+   * A Page reel is on none of the edges `topPosts` reads. It is absent from
+   * `/{page}/posts` and answers nothing on `/{post}/insights`, so it never
+   * reaches `social_organic_post_metrics_daily` at all — it has a table of its
+   * own, filled by a collector of its own.
+   *
+   * The measurements differ too, not just the plumbing. A Facebook reel reports
+   * plays, replays and unique viewers where an Instagram one reports views,
+   * reach and saves. Serving both through one shape would put two different
+   * things in one column and invite a comparison that means nothing.
+   *
+   * Unlike `topStories`, this ranking is complete: a reel is permanent, so
+   * every reel published in the window is here once a pass has seen it.
+   */
+  async facebookReels(
+    input: SocialOrganicAnalyticsScope & {
+      assetId: string;
+      since: string;
+      until: string;
+      sort?: SocialOrganicFacebookReelSort;
+      limit?: number;
+    },
+  ): Promise<SocialOrganicFacebookReelsView> {
+    const period = this.parsePeriod({ since: input.since, until: input.until });
+    const asset = await this.findAssetInScope(input);
+
+    const sort = input.sort ?? 'plays';
+    const limit = Math.min(Math.max(input.limit ?? 10, 1), 50);
+
+    const rows = await this.facebookReelsRepository
+      .createQueryBuilder('reel')
+      .where('reel.assetId = :assetId', { assetId: asset.id })
+      .andWhere('reel.tenantId = :tenantId', { tenantId: input.tenantId })
+      .andWhere('reel.workspaceId = :workspaceId', {
+        workspaceId: input.workspaceId,
+      })
+      .andWhere(
+        input.agencyClientId === null
+          ? 'reel.agencyClientId IS NULL'
+          : 'reel.agencyClientId = :agencyClientId',
+        input.agencyClientId === null
+          ? {}
+          : { agencyClientId: input.agencyClientId },
+      )
+      .andWhere('reel.publishedAt IS NOT NULL')
+      .andWhere('reel.publishedAt >= :since', {
+        since: `${period.since}T00:00:00Z`,
+      })
+      .andWhere('reel.publishedAt < :until', {
+        until: `${shiftCalendarDay(period.until, 1)}T00:00:00Z`,
+      })
+      .getMany();
+
+    const items = rows.map(toSocialOrganicFacebookReelView);
+
+    items.sort((a, b) => compareFacebookReels(a, b, sort));
+
+    return { items: items.slice(0, limit), total: items.length };
+  }
+
   private parsePeriod(input: { since: string; until: string }) {
     try {
       return parseOrganicAnalyticsPeriod(input);
@@ -845,7 +1025,7 @@ export class SocialOrganicAnalyticsReadService {
     row: AggregateRow,
     followersCount: string | null,
     measurement: SocialOrganicReachPeriodEntity | null,
-    counts: { reels: string; stories: string },
+    counts: PublicationCounts,
   ): SocialOrganicAnalyticsTotals {
     const periodReach = measurement?.reach ?? null;
 
@@ -894,6 +1074,22 @@ export class SocialOrganicAnalyticsReadService {
       // account simply published nothing.
       periodReelCount: counts.reels,
       periodStoryCount: counts.stories,
+      // The Facebook figures. `pageViews` is measured by Meta for the window;
+      // the rest are summed from the post facts, which is why they are counts
+      // rather than nullable measurements — an account with no posts really did
+      // get zero reactions, and there is no provider to have stayed silent.
+      pageViews: measurement?.pageViews ?? null,
+      pageReactions: counts.pageReactions,
+      pageComments: counts.pageComments,
+      pageShares: counts.pageShares,
+      pagePostCount: counts.pagePosts,
+      pageReelCount: counts.pageReels,
+      pageReelPlays: counts.pageReelPlays,
+      pageReelViewers: counts.pageReelViewers,
+      pageReelWatchTimeSeconds: counts.pageReelWatchTimeSeconds,
+      pageReelReactions: counts.pageReelReactions,
+      pageReelComments: counts.pageReelComments,
+      pageReelShares: counts.pageReelShares,
       periodViews: measurement?.views ?? null,
       periodViewsOrganic: measurement?.viewsOrganic ?? null,
       periodViewsPaid: measurement?.viewsPaid ?? null,
@@ -1005,6 +1201,44 @@ function compareTopPosts(
 
   // BigInt rather than Number: these are `bigint` columns and a lifetime view
   // count can exceed 2^53 on a large account.
+  const diff = BigInt(left) - BigInt(right);
+  if (diff !== 0n) return diff > 0n ? -1 : 1;
+
+  return a.externalPublicationId.localeCompare(b.externalPublicationId);
+}
+
+/**
+ * Orders a reel ranking, descending, with a stable tiebreak.
+ *
+ * Its own comparator rather than a shared generic: the sort keys are a
+ * different set, and a shared one would have to accept any string, losing the
+ * check that the key names a column that exists on this shape.
+ */
+function compareFacebookReels(
+  a: SocialOrganicFacebookReelView,
+  b: SocialOrganicFacebookReelView,
+  sort: SocialOrganicFacebookReelSort,
+): number {
+  if (sort === 'publishedAt') {
+    const left = a.publishedAt ?? '';
+    const right = b.publishedAt ?? '';
+    if (left !== right) return left < right ? 1 : -1;
+    return a.externalPublicationId.localeCompare(b.externalPublicationId);
+  }
+
+  const left = a[sort];
+  const right = b[sort];
+
+  // Nulls last in both directions: a reel Meta did not measure should not head
+  // a ranking, and should not be dropped from it either.
+  if (left === null && right === null) {
+    return a.externalPublicationId.localeCompare(b.externalPublicationId);
+  }
+  if (left === null) return 1;
+  if (right === null) return -1;
+
+  // BigInt rather than Number: watch time is milliseconds summed over every
+  // viewer, which passes 2^53 on a reel that does well.
   const diff = BigInt(left) - BigInt(right);
   if (diff !== 0n) return diff > 0n ? -1 : 1;
 

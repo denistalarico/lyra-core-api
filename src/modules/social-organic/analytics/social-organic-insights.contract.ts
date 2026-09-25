@@ -60,6 +60,27 @@ export type NormalizedOrganicPostMetricDaily = {
   reelsTotalWatchTimeMs: string | null;
   reelsSkipRateBp: string | null;
   repostsLifetime: string | null;
+  /**
+   * Facebook-only measures, null on every Instagram row.
+   *
+   * The six reactions come from `post_reactions_by_type_total`, which answers
+   * with a map rather than a counter; `reactionsTotal` prefers the post's own
+   * `reactions.summary.total_count`, which counts as of now while the map is a
+   * lifetime figure including reactions since removed.
+   *
+   * The two view columns are the `is_from_ads` buckets of `post_media_view`.
+   * Unlike Instagram's de-duplicated surface slices, these two do partition the
+   * total — a view was served by an ad or it was not.
+   */
+  reactionsTotal: string | null;
+  reactionsLike: string | null;
+  reactionsLove: string | null;
+  reactionsWow: string | null;
+  reactionsHaha: string | null;
+  reactionsSorry: string | null;
+  reactionsAnger: string | null;
+  viewsOrganicLifetime: string | null;
+  viewsPaidLifetime: string | null;
   isPartial: boolean;
   syncedAt: Date;
   syncRunId: string;

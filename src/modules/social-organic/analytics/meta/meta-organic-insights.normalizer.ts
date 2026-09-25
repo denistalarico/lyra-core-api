@@ -2,6 +2,10 @@ import type {
   NormalizedOrganicAccountMetricDaily,
   NormalizedOrganicPostMetricDaily,
 } from '../social-organic-insights.contract';
+import {
+  FACEBOOK_REACTION_TYPES,
+  type FacebookReactionType,
+} from './meta-organic-insights.types';
 
 type NormalizeBase = {
   tenantId: string;
@@ -195,20 +199,193 @@ type PostLifetimeBase = NormalizeBase & {
  * actually saw that value.
  */
 export function normalizeFacebookPostLifetimeSnapshot(
-  input: PostLifetimeBase & { insights: unknown },
+  input: PostLifetimeBase & {
+    insights: unknown;
+    /**
+     * The reaction map, from a request of its own.
+     *
+     * Separate because `post_reactions_by_type_total` does not accept the
+     * `is_from_ads` breakdown that `post_media_view` is read with, and Meta
+     * refuses the whole request rather than the one metric — see
+     * `FACEBOOK_POST_REACTION_METRICS`. Optional, so a refusal costs six
+     * columns rather than the row.
+     */
+    reactionInsights?: unknown;
+    /**
+     * `shares`, `comments` and `reactions` read as post *fields*.
+     *
+     * Optional because they come from a second call that is allowed to fail:
+     * the insights are the measurement, and losing the engagement fields should
+     * cost those three columns rather than the whole row.
+     */
+    engagementFields?: unknown;
+  },
 ): NormalizedOrganicPostMetricDaily | null {
   const metrics = readMetrics(input.insights);
   const impressionsLifetime = readLifetimeCounter(
     metrics.get('post_media_view'),
   );
+  const reactionMetrics =
+    input.reactionInsights === undefined
+      ? null
+      : readMetrics(input.reactionInsights);
+  const reactions = readReactionMap(
+    reactionMetrics?.get('post_reactions_by_type_total'),
+  );
+  // Read a second way from the same response: the `is_from_ads` breakdown puts
+  // both buckets in the payload that already carried the total, so the split
+  // costs no extra call. Meta's own buckets, never `total - organic`.
+  const viewSplit = readAdsBreakdown(metrics.get('post_media_view'));
+  const fields = readPostEngagementFields(input.engagementFields);
 
-  if (impressionsLifetime === null) return null;
+  // The row is worth writing if *anything* was measured. Keyed on the whole set
+  // rather than on impressions alone, because a post with reactions and no
+  // recorded views is a real post and dropping it would leave a gap in the
+  // ranking that looks like the post never existed.
+  if (
+    impressionsLifetime === null &&
+    reactions === null &&
+    fields.commentsTotal === null &&
+    fields.sharesTotal === null &&
+    fields.reactionsTotal === null
+  ) {
+    return null;
+  }
 
   return postLifetimeFact(input, {
     impressionsLifetime,
-    impressionsLifetimeObservedAt: input.observedAt,
-    providerMetrics: metrics.providerMetrics,
+    impressionsLifetimeObservedAt:
+      impressionsLifetime === null ? null : input.observedAt,
+    viewsOrganicLifetime: viewSplit.organic,
+    viewsPaidLifetime: viewSplit.paid,
+    // The summary total wins over the map's sum when both exist: Meta counts
+    // the summary as of now while the insights map is a lifetime figure that
+    // still includes reactions since removed, and the operator's "total de
+    // reações" is the number their own Page dashboard shows.
+    reactionsTotal: fields.reactionsTotal ?? reactions?.total ?? null,
+    reactionsLike: reactions?.like ?? null,
+    reactionsLove: reactions?.love ?? null,
+    reactionsWow: reactions?.wow ?? null,
+    reactionsHaha: reactions?.haha ?? null,
+    reactionsSorry: reactions?.sorry ?? null,
+    reactionsAnger: reactions?.anger ?? null,
+    commentsLifetime: fields.commentsTotal,
+    commentsLifetimeObservedAt:
+      fields.commentsTotal === null ? null : input.observedAt,
+    sharesLifetime: fields.sharesTotal,
+    lifetimeObservedAt: input.observedAt,
+    // Both responses' leftovers. The reaction read is a separate request, so
+    // anything Meta returned there that has no column would be dropped if only
+    // the first response's bag were kept.
+    providerMetrics: {
+      ...metrics.providerMetrics,
+      ...(reactionMetrics?.providerMetrics ?? {}),
+    },
   });
+}
+
+/**
+ * `post_reactions_by_type_total` — a map, not a counter.
+ *
+ * Meta answers `{"like": 1, "love": 3}`, omitting every type with no
+ * reactions, and `{}` for a post nobody reacted to. An empty map is a real
+ * measurement of zero and is reported as zeros rather than nulls; a missing
+ * metric is null, because "nobody reacted" and "not measured" are different
+ * claims and the table prints them differently.
+ *
+ * An unrecognised key is dropped rather than added to the total. Meta's six
+ * types have been fixed since 2016, so an unknown one is more likely a new
+ * reaction with no column than a value belonging in an existing bucket, and a
+ * wrong bucket looks like a measurement while an absent one does not.
+ */
+function readReactionMap(
+  metric: MetricEntry | undefined,
+): (Record<FacebookReactionType, string> & { total: string }) | null {
+  if (!metric) return null;
+
+  const value = rawMetricValue(metric);
+  if (!isRecord(value)) return null;
+
+  const counts = {} as Record<FacebookReactionType, string>;
+  let total = 0n;
+
+  for (const type of FACEBOOK_REACTION_TYPES) {
+    const raw: unknown = hasOwn(value, type) ? value[type] : 0;
+    const counter = readOptionalCounter(raw) ?? '0';
+    counts[type] = counter;
+    total += BigInt(counter);
+  }
+
+  return { ...counts, total: String(total) };
+}
+
+/**
+ * The `is_from_ads` buckets of a post metric.
+ *
+ * Meta spells them `"0"` and `"1"` as strings on the value entries. Unlike
+ * Instagram's `media_product_type` slices, these two *do* partition the total:
+ * a view was either served by an ad or it was not, and Meta does no
+ * de-duplication across them.
+ */
+function readAdsBreakdown(metric: MetricEntry | undefined): {
+  organic: string | null;
+  paid: string | null;
+} {
+  const blank = { organic: null, paid: null };
+  if (!metric) return blank;
+
+  const values: unknown = metric.values;
+  if (!Array.isArray(values)) return blank;
+
+  let organic: string | null = null;
+  let paid: string | null = null;
+
+  for (const entry of values as unknown[]) {
+    if (!isRecord(entry) || !hasOwn(entry, 'is_from_ads')) continue;
+
+    const counter = readOptionalCounter(entry.value);
+    if (counter === null) continue;
+
+    if (entry.is_from_ads === '0' || entry.is_from_ads === 0) organic = counter;
+    if (entry.is_from_ads === '1' || entry.is_from_ads === 1) paid = counter;
+  }
+
+  return { organic, paid };
+}
+
+/**
+ * `shares.count`, `comments.summary.total_count`, `reactions.summary.*`.
+ *
+ * Three different shapes in one payload, because Meta never settled on one:
+ * shares is a bare object with a `count`, while comments and reactions are
+ * edges carrying a `summary`. All three are absent rather than zero on a post
+ * that has none of that kind, which is why each is read independently.
+ */
+function readPostEngagementFields(payload: unknown): {
+  sharesTotal: string | null;
+  commentsTotal: string | null;
+  reactionsTotal: string | null;
+} {
+  const blank = {
+    sharesTotal: null,
+    commentsTotal: null,
+    reactionsTotal: null,
+  };
+  if (!isRecord(payload)) return blank;
+
+  const summaryCount = (key: string): string | null => {
+    const edge: unknown = hasOwn(payload, key) ? payload[key] : null;
+    if (!isRecord(edge) || !isRecord(edge.summary)) return null;
+    return readOptionalCounter(edge.summary.total_count);
+  };
+
+  const shares: unknown = hasOwn(payload, 'shares') ? payload.shares : null;
+
+  return {
+    sharesTotal: isRecord(shares) ? readOptionalCounter(shares.count) : null,
+    commentsTotal: summaryCount('comments'),
+    reactionsTotal: summaryCount('reactions'),
+  };
 }
 
 /**
@@ -361,6 +538,15 @@ function postLifetimeFact(
       | 'reelsTotalWatchTimeMs'
       | 'reelsSkipRateBp'
       | 'repostsLifetime'
+      | 'reactionsTotal'
+      | 'reactionsLike'
+      | 'reactionsLove'
+      | 'reactionsWow'
+      | 'reactionsHaha'
+      | 'reactionsSorry'
+      | 'reactionsAnger'
+      | 'viewsOrganicLifetime'
+      | 'viewsPaidLifetime'
     >
   > & { providerMetrics: Record<string, unknown> },
 ): NormalizedOrganicPostMetricDaily {
@@ -415,6 +601,17 @@ function postLifetimeFact(
     reelsTotalWatchTimeMs: values.reelsTotalWatchTimeMs ?? null,
     reelsSkipRateBp: values.reelsSkipRateBp ?? null,
     repostsLifetime: values.repostsLifetime ?? null,
+    // Facebook only; null on every Instagram row, where the metric does not
+    // exist rather than measuring zero.
+    reactionsTotal: values.reactionsTotal ?? null,
+    reactionsLike: values.reactionsLike ?? null,
+    reactionsLove: values.reactionsLove ?? null,
+    reactionsWow: values.reactionsWow ?? null,
+    reactionsHaha: values.reactionsHaha ?? null,
+    reactionsSorry: values.reactionsSorry ?? null,
+    reactionsAnger: values.reactionsAnger ?? null,
+    viewsOrganicLifetime: values.viewsOrganicLifetime ?? null,
+    viewsPaidLifetime: values.viewsPaidLifetime ?? null,
     // A lifetime read is complete-as-of-observation by definition, unlike a
     // same-day flow row that is still accumulating.
     isPartial: false,

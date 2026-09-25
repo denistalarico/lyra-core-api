@@ -254,6 +254,117 @@ export const INSTAGRAM_ACCOUNT_ENGAGEMENT_METRICS = [
 export const FACEBOOK_POST_LIFETIME_METRICS = ['post_media_view'] as const;
 
 /**
+ * The emoji split, read in a request of its own.
+ *
+ * Separate from `FACEBOOK_POST_LIFETIME_METRICS` because it cannot share that
+ * request: `post_media_view` is asked with `breakdown=is_from_ads` to get the
+ * organic/paid split, and `post_reactions_by_type_total` does not accept that
+ * breakdown — asking for both together fails with `(#100) An unknown error has
+ * occurred` and returns nothing at all, not even the metric that would have
+ * worked. Verified against production on 2026-09-25, one combination at a time:
+ * either metric alone succeeds with or without the breakdown, and the two
+ * together succeed only when the breakdown is absent.
+ *
+ * This is the same failure mode as the Instagram reel bug — Meta refusing a
+ * whole request because of one incompatible part — and it is split for the same
+ * reason: one request that can fail entirely is worse than two that fail
+ * independently.
+ *
+ * Returns a **map** (`{"like": 1}`), not a counter. See `readReactionMap`.
+ */
+export const FACEBOOK_POST_REACTION_METRICS = [
+  'post_reactions_by_type_total',
+] as const;
+
+/**
+ * The metrics a Facebook Page still answers at the account level.
+ *
+ * Verified against production on 2026-09-24. What is *absent* is the finding:
+ * every unique-audience metric a Page used to report now answers `(#100) The
+ * value must be a valid insights metric` — `page_impressions_unique`,
+ * `page_views_unique`, `page_content_viewers`, `page_daily_unique_viewers` and
+ * a dozen other spellings were all tried. A Page cannot report how many people
+ * it reached, which is why the Facebook block has no "Visualizadores" card at
+ * the Page level and no reach column on the period cache.
+ *
+ * `page_media_view` is already collected daily with `breakdown=is_from_ads`;
+ * it is repeated here because the period measurement reads it without the
+ * breakdown, for the whole window at once.
+ */
+export const FACEBOOK_PAGE_PERIOD_METRICS = ['page_media_view'] as const;
+
+/**
+ * Meta's six reaction types, in the order the operator's table shows them.
+ *
+ * `sorry` is Meta's own name for the sad reaction on this edge — not a typo
+ * for `sad`, which the API does not use. The set has been closed since 2016;
+ * an unrecognised key is dropped rather than folded into a neighbour, for the
+ * same reason story navigation drops one: a wrong bucket looks like a
+ * measurement, an absent one does not.
+ */
+export const FACEBOOK_REACTION_TYPES = [
+  'like',
+  'love',
+  'haha',
+  'wow',
+  'sorry',
+  'anger',
+] as const;
+
+export type FacebookReactionType = (typeof FACEBOOK_REACTION_TYPES)[number];
+
+/**
+ * The metrics a Facebook reel answers, on `/{reel}/video_insights`.
+ *
+ * A different edge with a different vocabulary: `/{reel}/insights` answers
+ * nothing at all for a reel, and none of these names is valid on the post
+ * edge. Established by asking `video_insights` with no `metric` parameter,
+ * which is the one edge here that returns everything it has.
+ *
+ * Production values for one reel on 2026-09-24: `fb_reels_total_plays` 5 659,
+ * `blue_reels_play_count` 5 285, `fb_reels_replay_count` 374,
+ * `post_impressions_unique` 6 243, `post_video_view_time` 47 678 166 ms,
+ * `post_video_avg_time_watched` 9 023 ms.
+ *
+ * `post_impressions_unique` is notable: it is valid *here* and refused on the
+ * post edge, making a reel the only Facebook surface that still reports unique
+ * viewers.
+ */
+export const FACEBOOK_REEL_INSIGHT_METRICS = [
+  'fb_reels_total_plays',
+  'blue_reels_play_count',
+  'fb_reels_replay_count',
+  'post_video_view_time',
+  'post_video_avg_time_watched',
+  'post_video_likes_by_reaction_type',
+  'post_video_social_actions',
+  'post_video_followers',
+  'post_video_retention_graph',
+] as const;
+
+/**
+ * The reel metric that can only be asked for by not asking.
+ *
+ * `post_impressions_unique` — the accounts that saw the reel at least once, and
+ * the only unique-viewer figure left anywhere on the Facebook side — is
+ * returned by `/{reel}/video_insights` when the request names **no** `metric`
+ * parameter, and is refused with `(#100) The value must be a valid insights
+ * metric` when it is named explicitly. Verified against production on
+ * 2026-09-25, one metric at a time: the other nine pass either way, this one
+ * only in the unnamed request.
+ *
+ * So the collector omits `metric` entirely and reads the names it knows out of
+ * whatever comes back. The list above is kept as the record of what is expected
+ * — it is what the spec asserts against, and what a reader needs in order to
+ * know which of the returned names have columns.
+ *
+ * The cost of the unnamed request is that a metric Meta adds later arrives
+ * unannounced; it lands in `provider_metrics` rather than changing any column,
+ * which is the same outcome an unrecognised name has everywhere else here.
+ */
+export const FACEBOOK_REEL_UNIQUE_VIEWERS_METRIC = 'post_impressions_unique';
+
+/**
  * The counters every Instagram surface answers, whatever it is.
  *
  * Verified against production on 2026-09-24 at `/{ig-media-id}/insights` for a

@@ -20,6 +20,7 @@ import { AnalyticsActivityQueryDto } from './dto/analytics-activity.query.dto';
 import { AnalyticsAudienceQueryDto } from './dto/analytics-audience.query.dto';
 import { AnalyticsThumbnailQueryDto } from './dto/analytics-thumbnail.query.dto';
 import { AnalyticsTopPostsQueryDto } from './dto/analytics-top-posts.query.dto';
+import { AnalyticsFacebookReelsQueryDto } from './dto/analytics-facebook-reels.query.dto';
 import { AnalyticsTopStoriesQueryDto } from './dto/analytics-top-stories.query.dto';
 import { AnalyticsFreshnessQueryDto } from './dto/analytics-freshness.query.dto';
 import { AnalyticsOverviewQueryDto } from './dto/analytics-overview.query.dto';
@@ -175,6 +176,36 @@ export class SocialOrganicAnalyticsController {
     const scope = this.requireScope(ctx);
 
     return this.analyticsReadService.topStories({
+      ...scope,
+      assetId: query.assetId,
+      since: query.since,
+      until: query.until,
+      sort: query.sort,
+      limit: query.limit,
+    });
+  }
+
+  /**
+   * A Facebook Page's best reels in one period.
+   *
+   * Separate from `posts/top` for the same structural reason stories are: a
+   * Page reel is on neither `/{page}/posts` nor `/{post}/insights`, so it never
+   * reaches the post fact table and has one of its own. Its counters are
+   * different too — plays, replays and unique viewers, against a post's views
+   * and reactions — so one endpoint could not serve both without putting
+   * unlike measurements in the same column.
+   */
+  @Get('facebook/reels')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireProductEntitlement('social')
+  @RequirePermission(SOCIAL_ORGANIC_ANALYTICS_PERMISSION)
+  facebookReels(
+    @RequestContextData() ctx: RequestContext,
+    @Query() query: AnalyticsFacebookReelsQueryDto,
+  ) {
+    const scope = this.requireScope(ctx);
+
+    return this.analyticsReadService.facebookReels({
       ...scope,
       assetId: query.assetId,
       since: query.since,

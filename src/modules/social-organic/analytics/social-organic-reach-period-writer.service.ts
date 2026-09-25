@@ -47,6 +47,20 @@ export type OrganicReachMeasurement = {
   savesReel?: string | null;
   sharesReel?: string | null;
   sharesStory?: string | null;
+  /**
+   * Facebook Page figures for the same window, null on Instagram.
+   *
+   * Deliberately separate from the Instagram fields above: `pageViews` counts
+   * Page content appearing on screen while `views` is Instagram's own metric
+   * with its own de-duplication, and there is no `pageReach` because Meta
+   * retired every Page unique-audience metric.
+   */
+  pageViews?: string | null;
+  pageReactionsTotal?: string | null;
+  pageComments?: string | null;
+  pageShares?: string | null;
+  pagePostCount?: number | null;
+  pageReelCount?: number | null;
   /** Published counts for the window, from the listing rather than insights. */
   reelCount?: number | null;
   storyCount?: number | null;
@@ -83,11 +97,14 @@ export class SocialOrganicReachPeriodWriterService {
          reach_reel, reach_story, views_feed, views_reel, views_story,
          interactions_reel, interactions_story, likes_reel, comments_reel,
          saves_reel, shares_reel, shares_story, reel_count, story_count,
+         page_views, page_reactions_total, page_comments, page_shares,
+         page_post_count, page_reel_count,
          measured_at
        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
                  $11, $12, $13, $14, $15, $16, $17, $18, $19,
                  $20, $21, $22, $23, $24, $25, $26, $27, $28,
-                 $29, $30, $31, $32, $33, now())
+                 $29, $30, $31, $32, $33,
+                 $34, $35, $36, $37, $38, $39, now())
        ON CONFLICT (asset_id, period_since, period_until) DO UPDATE SET
          reach = EXCLUDED.reach,
          reach_organic = EXCLUDED.reach_organic,
@@ -113,6 +130,12 @@ export class SocialOrganicReachPeriodWriterService {
          shares_story = EXCLUDED.shares_story,
          reel_count = EXCLUDED.reel_count,
          story_count = EXCLUDED.story_count,
+         page_views = EXCLUDED.page_views,
+         page_reactions_total = EXCLUDED.page_reactions_total,
+         page_comments = EXCLUDED.page_comments,
+         page_shares = EXCLUDED.page_shares,
+         page_post_count = EXCLUDED.page_post_count,
+         page_reel_count = EXCLUDED.page_reel_count,
          is_partial = EXCLUDED.is_partial,
          measured_at = now(),
          updated_at = now()`,
@@ -153,6 +176,12 @@ export class SocialOrganicReachPeriodWriterService {
         measurement.sharesStory ?? null,
         measurement.reelCount ?? null,
         measurement.storyCount ?? null,
+        measurement.pageViews ?? null,
+        measurement.pageReactionsTotal ?? null,
+        measurement.pageComments ?? null,
+        measurement.pageShares ?? null,
+        measurement.pagePostCount ?? null,
+        measurement.pageReelCount ?? null,
       ],
     );
   }

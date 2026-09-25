@@ -129,8 +129,25 @@ describe('MetaOrganicPeriodReachService', () => {
     });
   });
 
-  it('spends no call on a Facebook Page, which cannot answer this', async () => {
-    const graph = jest.fn();
+  it('reads a Page as a daily series, and reports no reach for it', async () => {
+    // A Page answers `page_media_view` as a plain daily series — it has no
+    // `metric_type=total_value` collapsing shape and refuses every breakdown
+    // Instagram accepts. Summing across days is sound *here* because this is a
+    // view count, not an audience: nobody is double counted.
+    const graph = jest.fn().mockResolvedValue({
+      data: [
+        {
+          name: 'page_media_view',
+          period: 'day',
+          values: [
+            { value: 2, end_time: '2026-09-19T07:00:00+0000' },
+            { value: 0, end_time: '2026-09-20T07:00:00+0000' },
+            { value: 5, end_time: '2026-09-21T07:00:00+0000' },
+          ],
+        },
+      ],
+      apiCalls: 1,
+    });
     const page = {
       credential: {
         assetType: 'facebook_page',
@@ -145,8 +162,36 @@ describe('MetaOrganicPeriodReachService', () => {
       until: '2026-09-24',
     });
 
-    expect(graph).not.toHaveBeenCalled();
-    expect(result).toMatchObject({ views: null, reach: null, apiCalls: 0 });
+    expect(result).toMatchObject({ pageViews: '7', apiCalls: 1 });
+    // Meta retired every Page unique-audience metric, so there is no reach to
+    // report and none is invented from the views above.
+    expect(result.reach).toBeNull();
+    expect(result.reachOrganic).toBeNull();
+    // Instagram's own `views` stays null too: it is a different measurement,
+    // and putting the Page count there would invite a consolidated report to
+    // add two numbers Meta never meant to be added.
+    expect(result.views).toBeNull();
+  });
+
+  it('reports a Page metric Meta did not answer as null, not zero', async () => {
+    const graph = jest.fn().mockResolvedValue({ data: [], apiCalls: 1 });
+    const page = {
+      credential: {
+        assetType: 'facebook_page',
+        externalAssetId: 'page-1',
+        accessToken: 'token',
+      },
+    } as unknown as ResolvedOrganicAnalyticsCredential;
+
+    const result = await serviceWith(graph).measurePeriod({
+      resolved: page,
+      since: '2026-09-18',
+      until: '2026-09-24',
+    });
+
+    // A Page that published nothing and a metric Meta stopped answering look
+    // the same in a total and are not the same fact.
+    expect(result.pageViews).toBeNull();
   });
 
   it('keeps the older reach-only reading working', async () => {

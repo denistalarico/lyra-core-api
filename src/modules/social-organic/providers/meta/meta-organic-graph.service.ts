@@ -420,6 +420,131 @@ export class MetaOrganicGraphService {
   }
 
   /**
+   * The reels a Facebook Page has published.
+   *
+   * A third listing edge, because a Page reel is on none of the other two.
+   * `/{page}/posts` does not return it — verified against production on
+   * 2026-09-24, where the Page listing held only photo posts while
+   * `/{page}/video_reels` returned 58 reels.
+   *
+   * It takes no `since`/`until`: unlike `/posts` and `/media`, this edge
+   * ignores a range, so the window is applied by the caller against
+   * `created_time`. Asking for a page of results and filtering locally is the
+   * only shape on offer here.
+   *
+   * `views` and `post_views` come back as plain fields rather than insights,
+   * and are read as a fallback for a reel whose `video_insights` call is
+   * refused — a number Meta already put in the listing costs nothing to keep.
+   */
+  async listPageReels(input: {
+    objectId: string;
+    accessToken: string;
+    limit: number;
+  }): Promise<{ data: unknown[]; apiCalls: 1 }> {
+    const url = this.graphUrl(
+      `${encodeURIComponent(input.objectId)}/video_reels`,
+    );
+
+    url.searchParams.set(
+      'fields',
+      [
+        'id',
+        'created_time',
+        'description',
+        'permalink_url',
+        'picture',
+        'length',
+        'views',
+        'post_views',
+        'comments.summary(true).limit(0)',
+        'likes.summary(true).limit(0)',
+      ].join(','),
+    );
+    url.searchParams.set('limit', String(input.limit));
+
+    const payload = await this.requestJson(
+      url,
+      this.authorized(input.accessToken),
+    );
+
+    if (!isRecord(payload) || !Array.isArray(payload.data)) {
+      throw this.invalidResponse();
+    }
+
+    return { data: payload.data, apiCalls: 1 };
+  }
+
+  /**
+   * A Facebook reel's metrics, from the edge that has them.
+   *
+   * `/{reel}/video_insights`, not `/{reel}/insights` — the latter answers
+   * nothing for a reel, for every metric name tried.
+   *
+   * `metrics` is optional, and omitting it is not laziness: this edge returns
+   * `post_impressions_unique` — the reel's unique viewers — only when no
+   * `metric` parameter is sent, and refuses it when it is named. See
+   * `FACEBOOK_REEL_UNIQUE_VIEWERS_METRIC`.
+   */
+  async getVideoInsights(input: {
+    objectId: string;
+    accessToken: string;
+    /** Omit to let Meta return everything it has for this video. */
+    metrics?: readonly string[];
+  }): Promise<{ data: unknown[]; apiCalls: 1 }> {
+    if (input.metrics && input.metrics.length === 0) {
+      throw this.invalidResponse();
+    }
+
+    const url = this.graphUrl(
+      `${encodeURIComponent(input.objectId)}/video_insights`,
+    );
+    if (input.metrics) url.searchParams.set('metric', input.metrics.join(','));
+
+    const payload = await this.requestJson(
+      url,
+      this.authorized(input.accessToken),
+    );
+
+    if (!isRecord(payload) || !Array.isArray(payload.data)) {
+      throw this.invalidResponse();
+    }
+
+    return { data: payload.data, apiCalls: 1 };
+  }
+
+  /**
+   * The engagement fields a Page post carries outside of insights.
+   *
+   * Shares, comments and reactions are **fields**, not metrics: Meta has no
+   * `post_shares` insight, and `post_reactions_by_type_total` gives the emoji
+   * split but not the total the Page owner sees. One call per post returns all
+   * three with `summary(true)`, which asks for the counts without the rows.
+   */
+  async getPostEngagementFields(input: {
+    objectId: string;
+    accessToken: string;
+  }): Promise<{ data: Record<string, unknown>; apiCalls: 1 }> {
+    const url = this.graphUrl(encodeURIComponent(input.objectId));
+    url.searchParams.set(
+      'fields',
+      [
+        'shares',
+        'comments.summary(true).limit(0)',
+        'reactions.summary(true).limit(0)',
+      ].join(','),
+    );
+
+    const payload = await this.requestJson(
+      url,
+      this.authorized(input.accessToken),
+    );
+
+    if (!isRecord(payload)) throw this.invalidResponse();
+
+    return { data: payload, apiCalls: 1 };
+  }
+
+  /**
    * Provider-owned Insights GET. Metric names come from A2's documented
    * allow-list; this method validates their shape and centralizes version,
    * timeout, auth header and safe error normalization.

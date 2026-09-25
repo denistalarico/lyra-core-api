@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import type { DataSource } from 'typeorm';
 import type { ResolvedOrganicAnalyticsCredential } from '../../credentials/social-organic-credential.resolver';
@@ -25,6 +25,7 @@ import {
 import {
   FACEBOOK_PAGE_ACCOUNT_METRICS,
   FACEBOOK_POST_LIFETIME_METRICS,
+  FACEBOOK_POST_REACTION_METRICS,
   INSTAGRAM_ACCOUNT_ENGAGEMENT_METRICS,
   INSTAGRAM_ACCOUNT_FOLLOW_METRICS,
   INSTAGRAM_ACCOUNT_MEDIA_METRICS,
@@ -55,6 +56,8 @@ type PublishedPostCandidate = {
 
 @Injectable()
 export class MetaOrganicInsightsService {
+  private readonly logger = new Logger(MetaOrganicInsightsService.name);
+
   constructor(
     private readonly graph: MetaOrganicGraphService,
     private readonly writer: SocialOrganicMetricsWriterService,
@@ -134,8 +137,28 @@ export class MetaOrganicInsightsService {
             accessToken: credential.accessToken,
             metrics: FACEBOOK_POST_LIFETIME_METRICS,
             period: 'lifetime',
+            // Splits `post_media_view` into its ad and non-ad buckets. The
+            // total is in the same response either way, so the split costs
+            // nothing beyond the parameter.
+            breakdown: 'is_from_ads',
           });
           apiCalls += insights.apiCalls;
+          // A request of its own: the reaction map does not accept
+          // `is_from_ads`, and asking for both under one breakdown makes Meta
+          // refuse the whole thing — see `FACEBOOK_POST_REACTION_METRICS`.
+          const reactions = await this.readPostReactions(
+            post.externalPublicationId,
+            credential.accessToken,
+          );
+          apiCalls += reactions.apiCalls;
+          // Shares, comments and reactions are post *fields*, not metrics —
+          // Meta has no `post_shares` insight. A second call, allowed to fail
+          // on its own: losing it costs three columns, not the row.
+          const engagement = await this.readPostEngagement(
+            post.externalPublicationId,
+            credential.accessToken,
+          );
+          apiCalls += engagement.apiCalls;
           // `metricDate` is always `currentDay` (the day of observation),
           // never the post's publish day and never iterated per day — a
           // lifetime total's meaning is "as observed now". The writer's
@@ -152,6 +175,8 @@ export class MetaOrganicInsightsService {
             mediaProductType: post.mediaProductType,
             publishedAt: post.publishedAt,
             insights,
+            reactionInsights: reactions.data,
+            engagementFields: engagement.data,
             observedAt: syncedAt,
           });
           if (row) postRows.push(row);
@@ -280,6 +305,63 @@ export class MetaOrganicInsightsService {
       rowsSkipped,
       apiCalls,
     };
+  }
+
+  /**
+   * A Page post's reactions by emoji, or nothing.
+   *
+   * Its own call and its own try/catch, for the reason
+   * `FACEBOOK_POST_REACTION_METRICS` documents: it cannot ride along with the
+   * view read, and a refusal here should cost the six reaction columns rather
+   * than the view total that already came back.
+   */
+  private async readPostReactions(
+    postId: string,
+    accessToken: string,
+  ): Promise<{ data: unknown; apiCalls: number }> {
+    try {
+      const insights = await this.graph.getOrganicInsights({
+        objectId: postId,
+        accessToken,
+        metrics: FACEBOOK_POST_REACTION_METRICS,
+        period: 'lifetime',
+      });
+
+      return { data: insights, apiCalls: insights.apiCalls };
+    } catch (error) {
+      this.logger.warn(
+        `Post ${postId} reactions unavailable: ${String(error)}`,
+      );
+      // One call was still spent getting the refusal.
+      return { data: undefined, apiCalls: 1 };
+    }
+  }
+
+  /**
+   * A Page post's shares, comments and reactions, or nothing.
+   *
+   * Its own try/catch because it is a second call for one post: a post whose
+   * fields are refused should lose those three columns, not its whole row and
+   * not the pass. The insights already read are the measurement that matters.
+   */
+  private async readPostEngagement(
+    postId: string,
+    accessToken: string,
+  ): Promise<{ data: unknown; apiCalls: number }> {
+    try {
+      const fields = await this.graph.getPostEngagementFields({
+        objectId: postId,
+        accessToken,
+      });
+
+      return { data: fields.data, apiCalls: fields.apiCalls };
+    } catch (error) {
+      this.logger.warn(
+        `Post ${postId} engagement fields unavailable: ${String(error)}`,
+      );
+      // One call was still spent getting the refusal.
+      return { data: undefined, apiCalls: 1 };
+    }
   }
 
   private providerDayRange(metricDate: string, timezone: string) {
