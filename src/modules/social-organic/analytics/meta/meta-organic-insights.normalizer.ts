@@ -217,6 +217,11 @@ export function normalizeFacebookPostLifetimeSnapshot(
  * Returns whichever subset of the three is actually present in the response
  * (not all-or-nothing): a partial IG response still carries real evidence for
  * the metrics it does report. Only returns `null` if all three are absent.
+ *
+ * One function for every surface, because it reads by metric name and the
+ * caller chooses which names to ask for. A feed post's response simply has no
+ * `ig_reels_avg_watch_time` in it, and a reel's has no `profile_visits`; both
+ * come back null through the same path, with no branch to keep in step.
  */
 export function normalizeInstagramMediaLifetimeSnapshot(
   input: PostLifetimeBase & { insights: unknown },
@@ -237,6 +242,15 @@ export function normalizeInstagramMediaLifetimeSnapshot(
     metrics.get('profile_visits'),
   );
   const followsLifetime = readLifetimeCounter(metrics.get('follows'));
+  // Reel-only, and absent from a feed post's response rather than zero there.
+  const reelsAvgWatchTimeMs = readLifetimeCounter(
+    metrics.get('ig_reels_avg_watch_time'),
+  );
+  const reelsTotalWatchTimeMs = readLifetimeCounter(
+    metrics.get('ig_reels_video_view_total_time'),
+  );
+  const repostsLifetime = readLifetimeCounter(metrics.get('reposts'));
+  const reelsSkipRateBp = readRateAsBasisPoints(metrics.get('reels_skip_rate'));
 
   const ranking = [
     reachLifetime,
@@ -251,7 +265,14 @@ export function normalizeInstagramMediaLifetimeSnapshot(
     commentsLifetime === null &&
     likesLifetime === null &&
     videoViewsLifetime === null &&
-    ranking.every((value) => value === null)
+    ranking.every((value) => value === null) &&
+    // A reel whose only readable numbers are its watch times is still a reel
+    // worth a row: dropping it would leave the table saying the account
+    // published nothing that day.
+    reelsAvgWatchTimeMs === null &&
+    reelsTotalWatchTimeMs === null &&
+    reelsSkipRateBp === null &&
+    repostsLifetime === null
   ) {
     return null;
   }
@@ -271,6 +292,10 @@ export function normalizeInstagramMediaLifetimeSnapshot(
     totalInteractionsLifetime,
     profileVisitsLifetime,
     followsLifetime,
+    reelsAvgWatchTimeMs,
+    reelsTotalWatchTimeMs,
+    reelsSkipRateBp,
+    repostsLifetime,
     // Stamped only when at least one of them was actually read, so the column
     // never claims an observation that produced nothing.
     lifetimeObservedAt: ranking.some((value) => value !== null)
@@ -278,6 +303,31 @@ export function normalizeInstagramMediaLifetimeSnapshot(
       : null,
     providerMetrics: metrics.providerMetrics,
   });
+}
+
+/**
+ * A percentage metric as basis points: `66.1` becomes `"6610"`.
+ *
+ * `reels_skip_rate` is the only metric on this endpoint that is a rate rather
+ * than a count, and the fact table deliberately stores no ratios as ratios —
+ * see the column's docblock. Scaling here rather than at the writer keeps the
+ * one place that knows Meta's unit next to the one that knows the metric name.
+ *
+ * Rounded, not truncated: at two decimal places of a percentage the difference
+ * is a hundredth of a point, and rounding is the one that does not always
+ * understate.
+ */
+function readRateAsBasisPoints(metric: MetricEntry | undefined): string | null {
+  if (!metric) return null;
+
+  const raw = rawMetricValue(metric);
+
+  if (typeof raw !== 'number' || !Number.isFinite(raw)) return null;
+  // Outside 0-100 it is not a small error, it is a different unit or a parsing
+  // failure, and the check constraint would refuse it at the writer anyway.
+  if (raw < 0 || raw > 100) return null;
+
+  return String(Math.round(raw * 100));
 }
 
 /** A lifetime metric's raw scalar value, wherever this endpoint places it. */
@@ -307,6 +357,10 @@ function postLifetimeFact(
       | 'profileVisitsLifetime'
       | 'followsLifetime'
       | 'lifetimeObservedAt'
+      | 'reelsAvgWatchTimeMs'
+      | 'reelsTotalWatchTimeMs'
+      | 'reelsSkipRateBp'
+      | 'repostsLifetime'
     >
   > & { providerMetrics: Record<string, unknown> },
 ): NormalizedOrganicPostMetricDaily {
@@ -357,6 +411,10 @@ function postLifetimeFact(
     commentsLifetimeObservedAt: values.commentsLifetimeObservedAt ?? null,
     videoViewsLifetime: values.videoViewsLifetime ?? null,
     videoViewsLifetimeObservedAt: values.videoViewsLifetimeObservedAt ?? null,
+    reelsAvgWatchTimeMs: values.reelsAvgWatchTimeMs ?? null,
+    reelsTotalWatchTimeMs: values.reelsTotalWatchTimeMs ?? null,
+    reelsSkipRateBp: values.reelsSkipRateBp ?? null,
+    repostsLifetime: values.repostsLifetime ?? null,
     // A lifetime read is complete-as-of-observation by definition, unlike a
     // same-day flow row that is still accumulating.
     isPartial: false,

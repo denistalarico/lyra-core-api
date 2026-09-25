@@ -252,20 +252,124 @@ export const INSTAGRAM_ACCOUNT_ENGAGEMENT_METRICS = [
  * rather than withheld.
  */
 export const FACEBOOK_POST_LIFETIME_METRICS = ['post_media_view'] as const;
-export const INSTAGRAM_MEDIA_LIFETIME_METRICS = [
+
+/**
+ * The counters every Instagram surface answers, whatever it is.
+ *
+ * Verified against production on 2026-09-24 at `/{ig-media-id}/insights` for a
+ * feed post and a reel. These are the ones a ranking can order by across
+ * surfaces, because they mean the same thing on each.
+ */
+const INSTAGRAM_MEDIA_SHARED_METRICS = [
   'comments',
   'likes',
   'views',
-  // Joined for the "best posts" ranking. All verified against production on
-  // 2026-09-22 at `/{ig-media-id}/insights`. `follows` is the one that answers
-  // a question nothing else does: how many accounts this post won.
   'reach',
   'saved',
+  'shares',
+  'total_interactions',
+] as const;
+
+/**
+ * The lifetime metrics for a feed post.
+ *
+ * `profile_visits` and `follows` answer a question nothing else does — how many
+ * accounts this post sent to the profile, and how many it won — and the feed is
+ * the only surface that reports them.
+ */
+export const INSTAGRAM_MEDIA_LIFETIME_METRICS = [
+  ...INSTAGRAM_MEDIA_SHARED_METRICS,
+  'profile_visits',
+  'follows',
+] as const;
+
+/**
+ * The lifetime metrics for a reel, which are not the feed's.
+ *
+ * ## Why this list has to exist
+ *
+ * Meta rejects the *whole request* when one metric does not apply to the
+ * media's product type: asking a reel for `profile_visits, follows` returns
+ * `(#100) The Media Insights API does not support the profile_visits, follows
+ * metric for this media product type` and nothing else. It is not a partial
+ * answer with the unsupported fields missing — the supported seven come back
+ * too, so one inapplicable name costs the entire read.
+ *
+ * That is exactly what was happening: the sync sent
+ * `INSTAGRAM_MEDIA_LIFETIME_METRICS` to every discovered post, so every reel's
+ * call failed and no reel ever produced a row. Verified on 2026-09-24 against
+ * an account with 65 reels and 313 feed posts, whose fact table held three feed
+ * posts and no reels at all. The symptom looked like "the account has no
+ * reels", which is why it survived: an empty table is indistinguishable from an
+ * account that does not post reels.
+ *
+ * `reels_skip_rate` is a **percentage**, not a counter — it is stored scaled
+ * rather than in a `bigint` counter column, for the reason the entity
+ * documents. The two watch-time metrics are **milliseconds**.
+ */
+export const INSTAGRAM_REEL_LIFETIME_METRICS = [
+  ...INSTAGRAM_MEDIA_SHARED_METRICS,
+  'ig_reels_avg_watch_time',
+  'ig_reels_video_view_total_time',
+  'reels_skip_rate',
+  'reposts',
+] as const;
+
+/**
+ * The lifetime metrics for a story.
+ *
+ * `navigation` is the one that carries the retention columns — "Avançar",
+ * "Próximo story", "Voltar" and "Sair" — as a breakdown by
+ * `story_navigation_action_type`, which is why it is read in its own request
+ * rather than joined here.
+ *
+ * Unverifiable against the production account: it has never had a story while
+ * one was being observed, and a story cannot be read after it expires. Both
+ * names come from Meta's Media Insights reference and its refusal message,
+ * which listed `replies` and `navigation` among the valid metrics for *some*
+ * product type while rejecting them for feed and reel — the two surfaces that
+ * account has. So the list is documented, not measured, and the collector
+ * treats a refusal as an absent metric rather than a failed sync.
+ */
+export const INSTAGRAM_STORY_LIFETIME_METRICS = [
+  'reach',
+  'views',
+  'replies',
   'shares',
   'total_interactions',
   'profile_visits',
   'follows',
 ] as const;
+
+/**
+ * The metric whose breakdown gives a story's retention.
+ *
+ * Read separately from `INSTAGRAM_STORY_LIFETIME_METRICS` because it needs
+ * `breakdown=story_navigation_action_type` and `metric_type=total_value`, which
+ * the plain lifetime read does not take.
+ */
+export const INSTAGRAM_STORY_NAVIGATION_METRIC = 'navigation';
+
+/**
+ * The Instagram lifetime metric list for a `media_product_type`.
+ *
+ * Unknown spellings get the feed list: it is the conservative choice for the
+ * surface Meta most often means by an unfamiliar name, and a wrong guess costs
+ * one refused call for one post rather than a silent gap.
+ */
+export function instagramMediaLifetimeMetrics(
+  mediaProductType: string | null,
+): readonly string[] {
+  const surface = (mediaProductType ?? '').toUpperCase();
+
+  if (surface === 'REEL' || surface === 'REELS') {
+    return INSTAGRAM_REEL_LIFETIME_METRICS;
+  }
+  if (surface === 'STORY' || surface === 'STORIES') {
+    return INSTAGRAM_STORY_LIFETIME_METRICS;
+  }
+  return INSTAGRAM_MEDIA_LIFETIME_METRICS;
+}
 
 /**
  * The audience-demographics metric each asset type exposes.

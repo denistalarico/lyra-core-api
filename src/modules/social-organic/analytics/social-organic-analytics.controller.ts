@@ -20,6 +20,7 @@ import { AnalyticsActivityQueryDto } from './dto/analytics-activity.query.dto';
 import { AnalyticsAudienceQueryDto } from './dto/analytics-audience.query.dto';
 import { AnalyticsThumbnailQueryDto } from './dto/analytics-thumbnail.query.dto';
 import { AnalyticsTopPostsQueryDto } from './dto/analytics-top-posts.query.dto';
+import { AnalyticsTopStoriesQueryDto } from './dto/analytics-top-stories.query.dto';
 import { AnalyticsFreshnessQueryDto } from './dto/analytics-freshness.query.dto';
 import { AnalyticsOverviewQueryDto } from './dto/analytics-overview.query.dto';
 import { ConsolidatedOverviewQueryDto } from './dto/consolidated-overview.query.dto';
@@ -148,6 +149,37 @@ export class SocialOrganicAnalyticsController {
       until: query.until,
       sort: query.sort,
       surface: query.surface,
+      limit: query.limit,
+    });
+  }
+
+  /**
+   * The asset's best stories in one period.
+   *
+   * Separate from `posts/top` because stories live in a separate table for a
+   * structural reason — they cannot be re-read after 24 hours, so their rows
+   * are a capture rather than a cache — and because the panel that renders
+   * them shows a creative beside a dozen figures rather than a row in a table.
+   *
+   * Only stories the hourly collector caught are here. One posted and expired
+   * between two passes is absent rather than zero.
+   */
+  @Get('stories/top')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireProductEntitlement('social')
+  @RequirePermission(SOCIAL_ORGANIC_ANALYTICS_PERMISSION)
+  topStories(
+    @RequestContextData() ctx: RequestContext,
+    @Query() query: AnalyticsTopStoriesQueryDto,
+  ) {
+    const scope = this.requireScope(ctx);
+
+    return this.analyticsReadService.topStories({
+      ...scope,
+      assetId: query.assetId,
+      since: query.since,
+      until: query.until,
+      sort: query.sort,
       limit: query.limit,
     });
   }

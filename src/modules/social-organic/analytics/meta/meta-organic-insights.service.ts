@@ -28,7 +28,7 @@ import {
   INSTAGRAM_ACCOUNT_ENGAGEMENT_METRICS,
   INSTAGRAM_ACCOUNT_FOLLOW_METRICS,
   INSTAGRAM_ACCOUNT_MEDIA_METRICS,
-  INSTAGRAM_MEDIA_LIFETIME_METRICS,
+  instagramMediaLifetimeMetrics,
 } from './meta-organic-insights.types';
 
 /**
@@ -160,10 +160,15 @@ export class MetaOrganicInsightsService {
         }
 
         if (credential.assetType === 'instagram_professional') {
+          // The metric list is chosen per surface. Meta refuses the whole
+          // request when one metric does not apply to the media's product type,
+          // so a single list for every post meant every reel's call failed and
+          // no reel ever reached the table — see
+          // `INSTAGRAM_REEL_LIFETIME_METRICS`.
           const insights = await this.graph.getOrganicInsights({
             objectId: post.externalPublicationId,
             accessToken: credential.accessToken,
-            metrics: INSTAGRAM_MEDIA_LIFETIME_METRICS,
+            metrics: instagramMediaLifetimeMetrics(post.mediaProductType),
             period: 'lifetime',
           });
           apiCalls += insights.apiCalls;

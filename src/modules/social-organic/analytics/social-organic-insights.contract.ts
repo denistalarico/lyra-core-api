@@ -46,6 +46,20 @@ export type NormalizedOrganicPostMetricDaily = {
   commentsLifetimeObservedAt: Date | null;
   videoViewsLifetime: string | null;
   videoViewsLifetimeObservedAt: Date | null;
+  /**
+   * Reel-only measures, null on every other surface.
+   *
+   * They are read from a different metric list than a feed post's, because Meta
+   * refuses a whole request that names one metric the media's product type does
+   * not support — see `INSTAGRAM_REEL_LIFETIME_METRICS`.
+   *
+   * `reelsSkipRateBp` is a percentage in **basis points** (66.1% → 6610), not a
+   * counter; the other three are milliseconds and a count.
+   */
+  reelsAvgWatchTimeMs: string | null;
+  reelsTotalWatchTimeMs: string | null;
+  reelsSkipRateBp: string | null;
+  repostsLifetime: string | null;
   isPartial: boolean;
   syncedAt: Date;
   syncRunId: string;

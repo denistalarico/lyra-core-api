@@ -7,6 +7,7 @@ import { MetaOrganicInsightsService } from './meta/meta-organic-insights.service
 import { MetaOrganicAudienceService } from './meta/meta-organic-audience.service';
 import { MetaOrganicOnlineFollowersService } from './meta/meta-organic-online-followers.service';
 import { MetaOrganicPeriodReachService } from './meta/meta-organic-period-reach.service';
+import { MetaOrganicStoriesService } from './meta/meta-organic-stories.service';
 import { SocialOrganicReachPeriodWriterService } from './social-organic-reach-period-writer.service';
 import type { ResolvedOrganicAnalyticsCredential } from '../credentials/social-organic-credential.resolver';
 import {
@@ -50,6 +51,11 @@ export class SocialOrganicSyncWorker {
     /** Period reach, measured by Meta and cached — see `measurePeriodReach`. */
     private readonly periodReach: MetaOrganicPeriodReachService,
     private readonly reachWriter: SocialOrganicReachPeriodWriterService,
+    /**
+     * Live stories. The hourly scheduler is the real capture; this call exists
+     * so a manual sync also picks up what is up right now.
+     */
+    private readonly stories: MetaOrganicStoriesService,
   ) {}
 
   @Interval(TICK_MS)
@@ -153,6 +159,27 @@ export class SocialOrganicSyncWorker {
         );
       }
 
+      // The live stories, isolated for the same reason. This pass is not the
+      // primary capture — `SocialOrganicStoriesScheduler` runs hourly because a
+      // story is unreadable after 24 hours and a daily pass would lose whole
+      // stories. It runs here too so that a manual sync captures what is up
+      // now, rather than leaving an operator who just triggered one wondering
+      // why today's story is missing.
+      try {
+        const stories = await this.stories.sync({
+          resolved,
+          syncRunId: run.id,
+        });
+        counters.rowsWritten += stories.rowsWritten;
+        counters.apiCalls += stories.apiCalls;
+      } catch (error) {
+        this.logger.warn(
+          `Organic stories capture failed for run ${run.id}: ${
+            error instanceof Error ? error.name : 'unknown'
+          }`,
+        );
+      }
+
       await this.measurePeriodReach(resolved, counters);
 
       await this.runs.markSucceeded({
@@ -243,9 +270,27 @@ export class SocialOrganicSyncWorker {
           reachOrganic: measurement.reachOrganic,
           reachPaid: measurement.reachPaid,
           reachFeed: measurement.reachFeed,
+          reachReel: measurement.reachReel,
+          reachStory: measurement.reachStory,
           views: measurement.views,
           viewsOrganic: measurement.viewsOrganic,
           viewsPaid: measurement.viewsPaid,
+          viewsFeed: measurement.viewsFeed,
+          viewsReel: measurement.viewsReel,
+          viewsStory: measurement.viewsStory,
+          interactionsReel: measurement.interactionsReel,
+          interactionsStory: measurement.interactionsStory,
+          likesReel: measurement.likesReel,
+          commentsReel: measurement.commentsReel,
+          savesReel: measurement.savesReel,
+          sharesReel: measurement.sharesReel,
+          sharesStory: measurement.sharesStory,
+          // `reelCount`/`storyCount` are deliberately not written here. They
+          // are questions about published content rather than measurements of a
+          // window, Meta has no metric for them, and the post facts and the
+          // story table already answer them — so the read layer counts rows for
+          // the period it was actually asked about, instead of this cache
+          // pinning an answer to one of four pre-measured windows.
           measuredSince: measurement.measuredSince,
           measuredUntil: measurement.measuredUntil,
           truncated: measurement.truncated,

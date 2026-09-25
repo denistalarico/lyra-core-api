@@ -135,12 +135,18 @@ export class SocialOrganicMetricsWriterService {
          total_interactions_lifetime, profile_visits_lifetime, follows_lifetime,
          lifetime_observed_at,
          permalink, caption, media_type, media_product_type, published_at,
-         is_partial, synced_at, sync_run_id, provider_metrics
+         is_partial, synced_at, sync_run_id, provider_metrics,
+         -- Reel-only, appended rather than slotted in beside the other
+         -- lifetime counters: renumbering 44 positional parameters to keep
+         -- them in a tidier order is a change where an off-by-one type-checks
+         -- perfectly and writes the wrong column.
+         reels_avg_watch_time_ms, reels_total_watch_time_ms,
+         reels_skip_rate_bp, reposts_lifetime
        ) VALUES (
          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
          $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27,
          $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40,
-         $41, $42, $43, $44::jsonb
+         $41, $42, $43, $44::jsonb, $45, $46, $47, $48
        )
        ON CONFLICT (asset_id, external_publication_id, metric_date, source)
        DO UPDATE SET
@@ -170,6 +176,10 @@ export class SocialOrganicMetricsWriterService {
          profile_visits_lifetime = COALESCE(EXCLUDED.profile_visits_lifetime, social_organic_post_metrics_daily.profile_visits_lifetime),
          follows_lifetime = COALESCE(EXCLUDED.follows_lifetime, social_organic_post_metrics_daily.follows_lifetime),
          lifetime_observed_at = COALESCE(EXCLUDED.lifetime_observed_at, social_organic_post_metrics_daily.lifetime_observed_at),
+         reels_avg_watch_time_ms = COALESCE(EXCLUDED.reels_avg_watch_time_ms, social_organic_post_metrics_daily.reels_avg_watch_time_ms),
+         reels_total_watch_time_ms = COALESCE(EXCLUDED.reels_total_watch_time_ms, social_organic_post_metrics_daily.reels_total_watch_time_ms),
+         reels_skip_rate_bp = COALESCE(EXCLUDED.reels_skip_rate_bp, social_organic_post_metrics_daily.reels_skip_rate_bp),
+         reposts_lifetime = COALESCE(EXCLUDED.reposts_lifetime, social_organic_post_metrics_daily.reposts_lifetime),
          -- Identity fields follow the same COALESCE rule as the metrics: a read
          -- that did not resolve them must not erase what an earlier, fuller read
          -- stored. The cost is that a caption edited on the provider keeps its
@@ -230,6 +240,10 @@ export class SocialOrganicMetricsWriterService {
         row.syncedAt,
         row.syncRunId,
         JSON.stringify(row.providerMetrics),
+        row.reelsAvgWatchTimeMs,
+        row.reelsTotalWatchTimeMs,
+        row.reelsSkipRateBp,
+        row.repostsLifetime,
       ],
     );
   }

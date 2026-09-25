@@ -5,6 +5,7 @@ import type {
   MetaOrganicPeriodMeasurement,
   MetaOrganicPeriodReachService,
 } from './meta/meta-organic-period-reach.service';
+import type { MetaOrganicStoriesService } from './meta/meta-organic-stories.service';
 import type { SocialOrganicReachPeriodWriterService } from './social-organic-reach-period-writer.service';
 import type { MetaOrganicAudienceService } from './meta/meta-organic-audience.service';
 import type { MetaOrganicInsightsService } from './meta/meta-organic-insights.service';
@@ -24,6 +25,45 @@ function run(overrides: Partial<SocialOrganicSyncRunEntity> = {}) {
     maxAttempts: 5,
     ...overrides,
   } as SocialOrganicSyncRunEntity;
+}
+
+/**
+ * A period measurement, all-null unless a test says otherwise.
+ *
+ * Written as a builder rather than a literal per test: the measurement carries
+ * nineteen figures, and a test that spelled out all of them would be mostly
+ * noise around the two it cares about — and would need editing every time a
+ * surface is added.
+ */
+function measurement(
+  overrides: Partial<MetaOrganicPeriodMeasurement> = {},
+): MetaOrganicPeriodMeasurement {
+  return {
+    views: null,
+    viewsOrganic: null,
+    viewsPaid: null,
+    viewsFeed: null,
+    viewsReel: null,
+    viewsStory: null,
+    reach: null,
+    reachOrganic: null,
+    reachPaid: null,
+    reachFeed: null,
+    reachReel: null,
+    reachStory: null,
+    interactionsReel: null,
+    interactionsStory: null,
+    likesReel: null,
+    commentsReel: null,
+    savesReel: null,
+    sharesReel: null,
+    sharesStory: null,
+    measuredSince: '2026-09-07',
+    measuredUntil: '2026-09-08',
+    truncated: false,
+    apiCalls: 0,
+    ...overrides,
+  };
 }
 
 function harness() {
@@ -90,22 +130,17 @@ function harness() {
   // one with a real figure would not compile.
   const periodReach = {
     measurePeriod: jest.fn<Promise<MetaOrganicPeriodMeasurement>, []>(
-      async () => ({
-        views: null,
-        viewsOrganic: null,
-        viewsPaid: null,
-        reach: null,
-        reachOrganic: null,
-        reachPaid: null,
-        reachFeed: null,
-        measuredSince: '2026-09-07',
-        measuredUntil: '2026-09-08',
-        truncated: false,
-        apiCalls: 0,
-      }),
+      async () => measurement(),
     ),
   };
   const reachWriter = { record: jest.fn(async () => undefined) };
+  const stories = {
+    sync: jest.fn(async () => ({
+      storiesSeen: 0,
+      rowsWritten: 0,
+      apiCalls: 0,
+    })),
+  };
 
   return {
     claimed,
@@ -116,6 +151,7 @@ function harness() {
     onlineFollowers,
     periodReach,
     reachWriter,
+    stories,
     worker: new SocialOrganicSyncWorker(
       runs as unknown as SocialOrganicSyncRunService,
       credentials as unknown as SocialOrganicCredentialResolver,
@@ -124,6 +160,7 @@ function harness() {
       onlineFollowers as unknown as MetaOrganicOnlineFollowersService,
       periodReach as unknown as MetaOrganicPeriodReachService,
       reachWriter as unknown as SocialOrganicReachPeriodWriterService,
+      stories as unknown as MetaOrganicStoriesService,
     ),
   };
 }
@@ -226,19 +263,22 @@ describe('period measurement', () => {
     // to call the narrower `measure` and keep one number. The other five were
     // paid for and discarded, so the cards asking for them had nothing to read.
     const context = harness();
-    context.periodReach.measurePeriod.mockResolvedValue({
-      views: '9155',
-      viewsOrganic: '509',
-      viewsPaid: '8646',
-      reach: '6783',
-      reachOrganic: '156',
-      reachPaid: '6645',
-      reachFeed: '39',
-      measuredSince: '2026-08-26',
-      measuredUntil: '2026-09-24',
-      truncated: false,
-      apiCalls: 2,
-    });
+    context.periodReach.measurePeriod.mockResolvedValue(
+      measurement({
+        views: '9155',
+        viewsOrganic: '509',
+        viewsPaid: '8646',
+        reach: '6783',
+        reachOrganic: '156',
+        reachPaid: '6645',
+        reachFeed: '39',
+        reachReel: '11',
+        reachStory: '105',
+        measuredSince: '2026-08-26',
+        measuredUntil: '2026-09-24',
+        apiCalls: 2,
+      }),
+    );
 
     await context.worker.processDue(1);
 
@@ -260,19 +300,16 @@ describe('period measurement', () => {
     // over its last 30. Storing the range keeps a card from labelling that
     // figure with the period the operator asked for.
     const context = harness();
-    context.periodReach.measurePeriod.mockResolvedValue({
-      views: '10',
-      viewsOrganic: null,
-      viewsPaid: null,
-      reach: '10',
-      reachOrganic: null,
-      reachPaid: null,
-      reachFeed: null,
-      measuredSince: '2026-08-26',
-      measuredUntil: '2026-09-24',
-      truncated: true,
-      apiCalls: 2,
-    });
+    context.periodReach.measurePeriod.mockResolvedValue(
+      measurement({
+        views: '10',
+        reach: '10',
+        measuredSince: '2026-08-26',
+        measuredUntil: '2026-09-24',
+        truncated: true,
+        apiCalls: 2,
+      }),
+    );
 
     await context.worker.processDue(1);
 

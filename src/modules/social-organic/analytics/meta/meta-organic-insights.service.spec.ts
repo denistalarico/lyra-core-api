@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/require-await -- provider doubles intentionally return promises. */
 import type { DataSource } from 'typeorm';
 import type { ResolvedOrganicAnalyticsCredential } from '../../credentials/social-organic-credential.resolver';
 import type { MetaOrganicGraphService } from '../../providers/meta/meta-organic-graph.service';
@@ -49,7 +48,12 @@ function breakdownMetric(
   };
 }
 
-type PublishedPostRow = { id: string; external_publication_id: string };
+type PublishedPostRow = {
+  id: string;
+  external_publication_id: string;
+  /** The surface. Defaults to a feed post, which is what most tests want. */
+  media_product_type?: string;
+};
 
 function harness(options: { publishedPosts?: PublishedPostRow[] } = {}) {
   const getProfileFollowersCount = jest.fn<
@@ -83,7 +87,7 @@ function harness(options: { publishedPosts?: PublishedPostRow[] } = {}) {
       permalink: `https://example.test/${row.external_publication_id}`,
       permalink_url: `https://example.test/${row.external_publication_id}`,
       media_type: 'IMAGE',
-      media_product_type: 'FEED',
+      media_product_type: row.media_product_type ?? 'FEED',
       caption: 'legenda',
       message: 'legenda',
     })),
@@ -393,6 +397,126 @@ describe('MetaOrganicInsightsService', () => {
         videoViewsLifetime: '100',
         metricDate: '2026-09-08',
         isPartial: false,
+      });
+    });
+
+    it('asks a reel for the metrics a reel has, not a feed post’s', async () => {
+      // The production bug this fixes. Meta rejects the *whole* request when
+      // one metric does not apply to the media's product type: a reel asked for
+      // `profile_visits, follows` answers `(#100) The Media Insights API does
+      // not support the profile_visits, follows metric for this media product
+      // type` and returns nothing at all — not the seven it does support.
+      //
+      // Because the sync sent one list for every post, every reel's call failed
+      // and no reel ever produced a row. Verified against an account with 65
+      // reels and 313 feed posts whose fact table held three feed posts and no
+      // reels. It survived because an empty table looks exactly like an account
+      // that does not post reels.
+      const { service, graph } = harness({
+        publishedPosts: [
+          {
+            id: 'pub-reel',
+            external_publication_id: 'reel-1',
+            media_product_type: 'REELS',
+          },
+        ],
+      });
+      graph.getOrganicInsights.mockResolvedValueOnce({
+        data: [
+          { name: 'reach', period: 'lifetime', values: [{ value: 323 }] },
+          { name: 'views', period: 'lifetime', values: [{ value: 512 }] },
+          { name: 'likes', period: 'lifetime', values: [{ value: 13 }] },
+          {
+            name: 'ig_reels_avg_watch_time',
+            period: 'lifetime',
+            values: [{ value: 8084 }],
+          },
+          {
+            name: 'ig_reels_video_view_total_time',
+            period: 'lifetime',
+            values: [{ value: 3144797 }],
+          },
+          {
+            name: 'reels_skip_rate',
+            period: 'lifetime',
+            values: [{ value: 66.1 }],
+          },
+          { name: 'reposts', period: 'lifetime', values: [{ value: 0 }] },
+        ],
+        apiCalls: 1,
+      });
+
+      const summary = await service.sync({
+        resolved: resolved('instagram_professional'),
+        fromDate: '2026-09-08',
+        toDate: '2026-09-08',
+        syncRunId: 'run-1',
+        syncedAt: new Date('2026-09-08T15:00:00.000Z'),
+      });
+
+      const asked = graph.getOrganicInsights.mock.calls[0][0];
+      expect(asked.metrics).not.toContain('profile_visits');
+      expect(asked.metrics).not.toContain('follows');
+      expect(asked.metrics).toContain('ig_reels_avg_watch_time');
+      expect(asked.metrics).toContain('reels_skip_rate');
+
+      // The figures are the ones measured against the live account on
+      // 2026-09-24, so a mis-mapped metric name shows up as a moved value.
+      expect(summary.postRows[0]).toMatchObject({
+        externalPublicationId: 'reel-1',
+        reachLifetime: '323',
+        videoViewsLifetime: '512',
+        likesLifetime: '13',
+        reelsAvgWatchTimeMs: '8084',
+        reelsTotalWatchTimeMs: '3144797',
+        // 66.1% as basis points: this column is not a counter, and the fact
+        // table stores no ratio as a ratio.
+        reelsSkipRateBp: '6610',
+        repostsLifetime: '0',
+        // Asked for and genuinely unavailable on this surface, so null rather
+        // than zero — the two are different claims.
+        profileVisitsLifetime: null,
+        followsLifetime: null,
+      });
+    });
+
+    it('writes a reel row even when only its watch times came back', async () => {
+      // A reel whose only readable numbers are its watch times is still a reel
+      // worth a row. Dropping it would leave the table saying the account
+      // published nothing that day, which is the failure mode this whole change
+      // is about.
+      const { service, graph } = harness({
+        publishedPosts: [
+          {
+            id: 'pub-reel',
+            external_publication_id: 'reel-2',
+            media_product_type: 'REEL',
+          },
+        ],
+      });
+      graph.getOrganicInsights.mockResolvedValueOnce({
+        data: [
+          {
+            name: 'ig_reels_avg_watch_time',
+            period: 'lifetime',
+            values: [{ value: 4000 }],
+          },
+        ],
+        apiCalls: 1,
+      });
+
+      const summary = await service.sync({
+        resolved: resolved('instagram_professional'),
+        fromDate: '2026-09-08',
+        toDate: '2026-09-08',
+        syncRunId: 'run-1',
+        syncedAt: new Date('2026-09-08T15:00:00.000Z'),
+      });
+
+      expect(summary.postRows).toHaveLength(1);
+      expect(summary.postRows[0]).toMatchObject({
+        externalPublicationId: 'reel-2',
+        reelsAvgWatchTimeMs: '4000',
       });
     });
 

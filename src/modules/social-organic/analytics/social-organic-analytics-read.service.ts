@@ -37,6 +37,12 @@ import {
   toSocialOrganicPublicationMetricsView,
   type SocialOrganicPublicationMetricsView,
 } from './views/social-organic-publication-metrics.view';
+import type {
+  SocialOrganicTopStoriesView,
+  SocialOrganicTopStorySort,
+  SocialOrganicTopStoryView,
+} from './views/social-organic-top-stories.view';
+import { SocialOrganicStoryEntity } from './entities/social-organic-story.entity';
 
 export type SocialOrganicAnalyticsScope = {
   tenantId: string;
@@ -120,6 +126,13 @@ export class SocialOrganicAnalyticsReadService {
      */
     @InjectRepository(SocialOrganicReachPeriodEntity, 'agency')
     private readonly reachPeriodsRepository: Repository<SocialOrganicReachPeriodEntity>,
+    /**
+     * Captured stories. Read-only here too, and for a stronger reason than the
+     * cache above: this table cannot be rebuilt from the provider, so a read
+     * path must never be in a position to write to it.
+     */
+    @InjectRepository(SocialOrganicStoryEntity, 'agency')
+    private readonly storiesRepository: Repository<SocialOrganicStoryEntity>,
   ) {}
 
   /**
@@ -178,7 +191,7 @@ export class SocialOrganicAnalyticsReadService {
     const period = this.parsePeriod(input);
     const asset = await this.findAssetInScope(input);
 
-    const [aggregate, followersCount, lastFactDate, periodReach] =
+    const [aggregate, followersCount, lastFactDate, periodReach, counts] =
       await Promise.all([
         this.aggregate(asset.id, period.since, period.until),
         this.readFollowersCountStock(asset.id, period.since, period.until),
@@ -187,15 +200,66 @@ export class SocialOrganicAnalyticsReadService {
         // over them produces this number, because the duplicates it removes
         // were resolved inside Meta.
         this.findPeriodReach(asset.id, period.since, period.until),
+        // Counted here rather than cached with the measurement, so the answer
+        // follows the period actually asked for instead of being pinned to one
+        // of the four windows the sync pre-measures.
+        this.countPublications(asset.id, period.since, period.until),
       ]);
 
     return {
       assetId: asset.id,
       timezone: asset.assetTimezone ?? '',
       period: { since: period.since, until: period.until },
-      totals: this.toTotals(aggregate, followersCount, periodReach),
+      totals: this.toTotals(aggregate, followersCount, periodReach, counts),
       hasPartialData: toCount(aggregate.partial_days) > 0n,
       lastFactDate,
+    };
+  }
+
+  /**
+   * How many reels and stories the asset published in the window.
+   *
+   * Two sources because the two surfaces are stored differently, and they are
+   * stored differently because Meta treats them differently — see the stories
+   * entity. Reels are counted distinctly from the post facts, which carry one
+   * row per observation day, so a reel observed on five days must not count
+   * five times.
+   *
+   * Both counts are by **publish date**, not observation date: "quantos reels
+   * no período" asks what was published then, and a reel published in August
+   * and re-observed in September belongs to August.
+   */
+  private async countPublications(
+    assetId: string,
+    since: string,
+    until: string,
+  ): Promise<{ reels: string; stories: string }> {
+    const reelSpellings = socialOrganicSurfaceSpellings('reel');
+
+    const [reels, stories] = await Promise.all([
+      this.postMetricsRepository.query<Array<{ count: string }>>(
+        `SELECT COUNT(DISTINCT external_publication_id)::text AS count
+           FROM social_organic_post_metrics_daily
+          WHERE asset_id = $1
+            AND published_at IS NOT NULL
+            AND (published_at AT TIME ZONE asset_timezone)::date
+                BETWEEN $2::date AND $3::date
+            AND UPPER(media_product_type) = ANY($4::text[])`,
+        [assetId, since, until, reelSpellings],
+      ),
+      this.storiesRepository.query<Array<{ count: string }>>(
+        `SELECT COUNT(*)::text AS count
+           FROM social_organic_stories
+          WHERE asset_id = $1
+            AND published_at IS NOT NULL
+            AND published_at::date BETWEEN $2::date AND $3::date`,
+        [assetId, since, until],
+      ),
+    ]);
+
+    return {
+      reels: reels[0]?.count ?? '0',
+      stories: stories[0]?.count ?? '0',
     };
   }
 
@@ -495,6 +559,81 @@ export class SocialOrganicAnalyticsReadService {
     return { items: items.slice(0, limit), total: items.length };
   }
 
+  /**
+   * The best stories of a period, as the two-column panel renders them.
+   *
+   * ## Why it does not go through `topPosts`
+   *
+   * `topPosts` reads `social_organic_post_metrics_daily`, which has one row per
+   * observation day and needs `DISTINCT ON` to pick the newest. The stories
+   * table has one row per story — a story's counters are overwritten in place
+   * as it moves through its day, because there is no history worth keeping
+   * between two readings an hour apart — so there is nothing to de-duplicate
+   * and no `metricDate` to order by.
+   *
+   * The deeper reason is that they are not the same kind of record. A post fact
+   * is a cache of something re-readable; a story row is the only evidence that
+   * the story existed. Sharing a query would eventually mean sharing a
+   * retention or a rebuild policy, and those must not be shared.
+   *
+   * ## The ranking is honest about what it cannot see
+   *
+   * Only stories the hourly collector caught are here. A story posted and
+   * expired between two passes is absent, not zero — which is why the panel's
+   * empty state has to say "no stories captured" rather than "no stories".
+   */
+  async topStories(
+    input: SocialOrganicAnalyticsScope & {
+      assetId: string;
+      since: string;
+      until: string;
+      sort?: SocialOrganicTopStorySort;
+      limit?: number;
+    },
+  ): Promise<SocialOrganicTopStoriesView> {
+    const period = this.parsePeriod({ since: input.since, until: input.until });
+    const asset = await this.findAssetInScope(input);
+
+    const sort = input.sort ?? 'views';
+    // The panel shows five; the cap is higher so a caller can ask for more
+    // without a new endpoint, and low enough that a creative-heavy response
+    // cannot become a page of its own.
+    const limit = Math.min(Math.max(input.limit ?? 5, 1), 50);
+
+    const rows = await this.storiesRepository
+      .createQueryBuilder('story')
+      .where('story.assetId = :assetId', { assetId: asset.id })
+      .andWhere('story.tenantId = :tenantId', { tenantId: input.tenantId })
+      .andWhere('story.workspaceId = :workspaceId', {
+        workspaceId: input.workspaceId,
+      })
+      .andWhere(
+        input.agencyClientId === null
+          ? 'story.agencyClientId IS NULL'
+          : 'story.agencyClientId = :agencyClientId',
+        input.agencyClientId === null
+          ? {}
+          : { agencyClientId: input.agencyClientId },
+      )
+      // A story with no publish time cannot be placed in the window. It should
+      // not happen — the listing always carries a timestamp — but leaving it
+      // out is better than assuming it belongs here.
+      .andWhere('story.publishedAt IS NOT NULL')
+      .andWhere('story.publishedAt >= :since', {
+        since: `${period.since}T00:00:00Z`,
+      })
+      .andWhere('story.publishedAt < :until', {
+        until: `${shiftCalendarDay(period.until, 1)}T00:00:00Z`,
+      })
+      .getMany();
+
+    const items = rows.map(toSocialOrganicTopStoryView);
+
+    items.sort((a, b) => compareTopStories(a, b, sort));
+
+    return { items: items.slice(0, limit), total: items.length };
+  }
+
   private parsePeriod(input: { since: string; until: string }) {
     try {
       return parseOrganicAnalyticsPeriod(input);
@@ -680,9 +819,21 @@ export class SocialOrganicAnalyticsReadService {
         'reachOrganic',
         'reachPaid',
         'reachFeed',
+        'reachReel',
+        'reachStory',
         'views',
         'viewsOrganic',
         'viewsPaid',
+        'viewsFeed',
+        'viewsReel',
+        'viewsStory',
+        'interactionsReel',
+        'interactionsStory',
+        'likesReel',
+        'commentsReel',
+        'savesReel',
+        'sharesReel',
+        'sharesStory',
         'measuredSince',
         'measuredUntil',
         'truncated',
@@ -694,6 +845,7 @@ export class SocialOrganicAnalyticsReadService {
     row: AggregateRow,
     followersCount: string | null,
     measurement: SocialOrganicReachPeriodEntity | null,
+    counts: { reels: string; stories: string },
   ): SocialOrganicAnalyticsTotals {
     const periodReach = measurement?.reach ?? null;
 
@@ -726,6 +878,22 @@ export class SocialOrganicAnalyticsReadService {
       periodReachOrganic: measurement?.reachOrganic ?? null,
       periodReachPaid: measurement?.reachPaid ?? null,
       periodFeedReach: measurement?.reachFeed ?? null,
+      periodReelReach: measurement?.reachReel ?? null,
+      periodStoryReach: measurement?.reachStory ?? null,
+      periodFeedViews: measurement?.viewsFeed ?? null,
+      periodReelViews: measurement?.viewsReel ?? null,
+      periodStoryViews: measurement?.viewsStory ?? null,
+      periodReelInteractions: measurement?.interactionsReel ?? null,
+      periodStoryInteractions: measurement?.interactionsStory ?? null,
+      periodReelLikes: measurement?.likesReel ?? null,
+      periodReelComments: measurement?.commentsReel ?? null,
+      periodReelSaves: measurement?.savesReel ?? null,
+      periodReelShares: measurement?.sharesReel ?? null,
+      periodStoryShares: measurement?.sharesStory ?? null,
+      // Counted, not measured — and so a real zero rather than a null when the
+      // account simply published nothing.
+      periodReelCount: counts.reels,
+      periodStoryCount: counts.stories,
       periodViews: measurement?.views ?? null,
       periodViewsOrganic: measurement?.viewsOrganic ?? null,
       periodViewsPaid: measurement?.viewsPaid ?? null,
@@ -837,6 +1005,62 @@ function compareTopPosts(
 
   // BigInt rather than Number: these are `bigint` columns and a lifetime view
   // count can exceed 2^53 on a large account.
+  const diff = BigInt(left) - BigInt(right);
+  if (diff !== 0n) return diff > 0n ? -1 : 1;
+
+  return a.externalPublicationId.localeCompare(b.externalPublicationId);
+}
+
+function toSocialOrganicTopStoryView(
+  story: SocialOrganicStoryEntity,
+): SocialOrganicTopStoryView {
+  return {
+    externalPublicationId: story.externalPublicationId,
+    assetId: story.assetId,
+    publishedAt: story.publishedAt?.toISOString() ?? null,
+    mediaType: story.mediaType,
+    permalink: story.permalink,
+    // Serialised as stored. It may already have expired — see the view's
+    // docblock — and the reader renders the absence rather than the service
+    // pretending to know whether it still resolves.
+    mediaUrl: story.mediaUrl,
+    thumbnailUrl: story.thumbnailUrl,
+    views: story.views,
+    reach: story.reach,
+    totalInteractions: story.totalInteractions,
+    profileVisits: story.profileVisits,
+    replies: story.replies,
+    shares: story.shares,
+    navForward: story.navForward,
+    navNextStory: story.navNextStory,
+    navBack: story.navBack,
+    navExit: story.navExit,
+    observedAt: story.observedAt?.toISOString() ?? null,
+  };
+}
+
+/** Same ordering rules as `compareTopPosts`: nulls last, ties by id. */
+function compareTopStories(
+  a: SocialOrganicTopStoryView,
+  b: SocialOrganicTopStoryView,
+  sort: SocialOrganicTopStorySort,
+): number {
+  if (sort === 'publishedAt') {
+    const left = a.publishedAt ?? '';
+    const right = b.publishedAt ?? '';
+    if (left !== right) return left < right ? 1 : -1;
+    return a.externalPublicationId.localeCompare(b.externalPublicationId);
+  }
+
+  const left = a[sort];
+  const right = b[sort];
+
+  if (left === null && right === null) {
+    return a.externalPublicationId.localeCompare(b.externalPublicationId);
+  }
+  if (left === null) return 1;
+  if (right === null) return -1;
+
   const diff = BigInt(left) - BigInt(right);
   if (diff !== 0n) return diff > 0n ? -1 : 1;
 

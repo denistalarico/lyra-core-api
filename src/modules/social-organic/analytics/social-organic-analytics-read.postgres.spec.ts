@@ -221,6 +221,7 @@ run('SocialOrganicAnalyticsReadService against PostgreSQL', () => {
       manager.getRepository('SocialOrganicPostMetricDailyEntity') as never,
       manager.getRepository('SocialOrganicSyncRunEntity') as never,
       manager.getRepository('SocialOrganicReachPeriodEntity') as never,
+      manager.getRepository('SocialOrganicStoryEntity') as never,
     );
   });
 
@@ -665,7 +666,7 @@ run('SocialOrganicAnalyticsReadService against PostgreSQL', () => {
       ]);
     });
 
-    it('never reads another tenant\'s posts', async () => {
+    it("never reads another tenant's posts", async () => {
       await expect(
         service.topPosts({
           ...scope,

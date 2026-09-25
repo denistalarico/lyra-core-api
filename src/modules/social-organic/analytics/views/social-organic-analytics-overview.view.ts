@@ -101,6 +101,54 @@ export type SocialOrganicAnalyticsTotals = {
   periodFeedReach: string | null;
 
   /**
+   * The same measurement for reels and for stories.
+   *
+   * Each is a subset of the organic slice and none of the three surfaces
+   * partitions it: Meta de-duplicates within each, so an account that saw both
+   * a story and a reel is counted once in the organic total and once in each of
+   * these. They must not be added to each other.
+   *
+   * Instagram only, and null when the window carries no breakdown.
+   */
+  periodReelReach: string | null;
+  periodStoryReach: string | null;
+  periodFeedViews: string | null;
+  periodReelViews: string | null;
+  periodStoryViews: string | null;
+
+  /**
+   * Engagement for the same window, by surface.
+   *
+   * Unlike reach these are ordinary additive counters — a like is a like — but
+   * they still come from Meta's breakdown rather than from summing per-post
+   * rows, because the per-post rows only exist for content a sync caught, and
+   * because a story's engagement has no per-post source at all once the story
+   * has expired.
+   */
+  periodReelInteractions: string | null;
+  periodStoryInteractions: string | null;
+  periodReelLikes: string | null;
+  periodReelComments: string | null;
+  periodReelSaves: string | null;
+  periodReelShares: string | null;
+  periodStoryShares: string | null;
+
+  /**
+   * How many reels and stories were published in the period.
+   *
+   * Counted from the stored publications rather than measured: Meta has no
+   * metric for "how many reels", and the question is about content rather than
+   * about a window's audience.
+   *
+   * `storyCount` is a floor, not a certainty. A story is only ever visible to
+   * the collector while it is live, so one posted and expired between two
+   * hourly passes was never recorded — and unlike every other figure here, that
+   * gap can never be filled.
+   */
+  periodReelCount: string;
+  periodStoryCount: string;
+
+  /**
    * STOCK, not flow — the latest observed value inside the period, never a
    * sum. Null when the period has no observation at all.
    */

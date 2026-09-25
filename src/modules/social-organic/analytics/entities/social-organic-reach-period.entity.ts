@@ -132,6 +132,79 @@ export class SocialOrganicReachPeriodEntity {
   viewsPaid!: string | null;
 
   /**
+   * The remaining per-surface slices, on the same terms as `reachFeed`.
+   *
+   * Each is a **subset of the organic slice**, and the three surfaces do not
+   * partition it: Meta de-duplicates within each, so an account that saw a
+   * story and a reel is one account in `reachOrganic` and one in each of the
+   * two columns. Adding them, or subtracting them from the organic total,
+   * states a number Meta did not report.
+   *
+   * Views are the exception to the de-duplication concern — they are
+   * impressions, not people — but they are still stored per surface rather than
+   * derived, because the total's own de-duplication is Meta's and nothing local
+   * could reproduce it.
+   */
+  @Column({ name: 'reach_reel', type: 'bigint', nullable: true })
+  reachReel!: string | null;
+
+  @Column({ name: 'reach_story', type: 'bigint', nullable: true })
+  reachStory!: string | null;
+
+  @Column({ name: 'views_feed', type: 'bigint', nullable: true })
+  viewsFeed!: string | null;
+
+  @Column({ name: 'views_reel', type: 'bigint', nullable: true })
+  viewsReel!: string | null;
+
+  @Column({ name: 'views_story', type: 'bigint', nullable: true })
+  viewsStory!: string | null;
+
+  /**
+   * The engagement family for the same window, sliced by surface.
+   *
+   * These *are* additive in the ordinary sense — a like is a like — so unlike
+   * reach they could in principle be summed from per-post rows. They are stored
+   * because per-post rows only exist for content the sync caught, and because
+   * `interactionsStory` has no per-post source at all on an account whose
+   * stories expired before they were observed.
+   */
+  @Column({ name: 'interactions_reel', type: 'bigint', nullable: true })
+  interactionsReel!: string | null;
+
+  @Column({ name: 'interactions_story', type: 'bigint', nullable: true })
+  interactionsStory!: string | null;
+
+  @Column({ name: 'likes_reel', type: 'bigint', nullable: true })
+  likesReel!: string | null;
+
+  @Column({ name: 'comments_reel', type: 'bigint', nullable: true })
+  commentsReel!: string | null;
+
+  @Column({ name: 'saves_reel', type: 'bigint', nullable: true })
+  savesReel!: string | null;
+
+  @Column({ name: 'shares_reel', type: 'bigint', nullable: true })
+  sharesReel!: string | null;
+
+  @Column({ name: 'shares_story', type: 'bigint', nullable: true })
+  sharesStory!: string | null;
+
+  /**
+   * How many reels and stories the account published in the window.
+   *
+   * Counted from the publication listing, not from insights: "quantos reels no
+   * período" is a question about content, and Meta offers no metric for it.
+   * `storyCount` is what the story collector saw while the stories were live,
+   * so it is a floor rather than a certainty — see the stories entity.
+   */
+  @Column({ name: 'reel_count', type: 'int', nullable: true })
+  reelCount!: number | null;
+
+  @Column({ name: 'story_count', type: 'int', nullable: true })
+  storyCount!: number | null;
+
+  /**
    * The range Meta actually measured, which may be narrower than the stored
    * window: Meta refuses a span wider than 30 days, so a longer request is
    * clamped to its last 30. Kept so a card can label the figure with the range

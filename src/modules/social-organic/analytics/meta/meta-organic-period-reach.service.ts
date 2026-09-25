@@ -105,35 +105,76 @@ export class MetaOrganicPeriodReachService {
     // says "90 dias" over a 30-day figure is the failure this prevents.
     const window = clampToMaxWindow(input.since, input.until);
 
-    const [views, reach] = await Promise.all([
-      this.readMetric(credential, 'views', window),
-      this.readMetric(credential, 'reach', window),
-    ]);
+    // The engagement family takes the same breakdown, verified against
+    // production on 2026-09-24: `total_interactions`, `likes`, `comments`,
+    // `saves` and `shares` all answer with `media_product_type` slices. The one
+    // that does not is `replies` — it fails with an opaque
+    // `(#100) An unknown error has occurred`, so story replies come from the
+    // un-broken-down account metric the daily sync already collects, and are
+    // not asked for here.
+    const [views, reach, interactions, likes, comments, saves, shares] =
+      await Promise.all([
+        this.readMetric(credential, 'views', window),
+        this.readMetric(credential, 'reach', window),
+        this.readMetric(credential, 'total_interactions', window),
+        this.readMetric(credential, 'likes', window),
+        this.readMetric(credential, 'comments', window),
+        this.readMetric(credential, 'saves', window),
+        this.readMetric(credential, 'shares', window),
+      ]);
 
     return {
       views: views.total,
       viewsOrganic: views.organic,
       viewsPaid: views.paid,
+      viewsFeed: views.feed,
+      viewsReel: views.reel,
+      viewsStory: views.story,
       reach: reach.total,
       reachOrganic: reach.organic,
       reachPaid: reach.paid,
       reachFeed: reach.feed,
+      reachReel: reach.reel,
+      reachStory: reach.story,
+      interactionsReel: interactions.reel,
+      interactionsStory: interactions.story,
+      likesReel: likes.reel,
+      commentsReel: comments.reel,
+      savesReel: saves.reel,
+      sharesReel: shares.reel,
+      sharesStory: shares.story,
       measuredSince: window.since,
       measuredUntil: window.until,
       truncated: window.truncated,
-      apiCalls: views.apiCalls + reach.apiCalls,
+      apiCalls:
+        views.apiCalls +
+        reach.apiCalls +
+        interactions.apiCalls +
+        likes.apiCalls +
+        comments.apiCalls +
+        saves.apiCalls +
+        shares.apiCalls,
     };
   }
 
   private async readMetric(
     credential: ResolvedOrganicAnalyticsCredential['credential'],
-    metric: 'views' | 'reach',
+    metric:
+      | 'views'
+      | 'reach'
+      | 'total_interactions'
+      | 'likes'
+      | 'comments'
+      | 'saves'
+      | 'shares',
     window: { since: string; until: string },
   ): Promise<{
     total: string | null;
     organic: string | null;
     paid: string | null;
     feed: string | null;
+    reel: string | null;
+    story: string | null;
     apiCalls: number;
   }> {
     const response = await this.graph.getOrganicInsights({
@@ -155,9 +196,11 @@ export class MetaOrganicPeriodReachService {
       total: readTotalValue(response.data),
       organic: readSurfaceSum(response.data, 'organic'),
       paid: readSurfaceSum(response.data, 'paid'),
-      // Read from the same response: "Alcance das postagens" costs no extra
-      // call, it is one more way of reading the breakdown already in hand.
+      // All read from the same response: the per-surface figures cost no extra
+      // call, they are more ways of reading the breakdown already in hand.
       feed: readSurfaceSum(response.data, 'feed'),
+      reel: readSurfaceSum(response.data, 'reel'),
+      story: readSurfaceSum(response.data, 'story'),
       apiCalls: response.apiCalls,
     };
   }
@@ -171,10 +214,34 @@ export type MetaOrganicPeriodMeasurement = {
   reachOrganic: string | null;
   reachPaid: string | null;
   /**
-   * Feed posts only — "Alcance das postagens". A subset of `reachOrganic`, not
-   * a further slice beside it: reels and stories are organic too.
+   * The per-surface slices, each a **subset of the organic slice** rather than
+   * a further bucket beside it, and not a partition of it either: Meta
+   * de-duplicates within each, so an account that saw both a story and a reel
+   * is counted once in `reachOrganic` and once in each of the two. They must
+   * never be added to each other or subtracted from the organic total.
+   *
+   * `reachFeed` is what Meta calls "Alcance das postagens".
    */
   reachFeed: string | null;
+  reachReel: string | null;
+  reachStory: string | null;
+  viewsFeed: string | null;
+  viewsReel: string | null;
+  viewsStory: string | null;
+  /**
+   * The engagement family, sliced by the same breakdown.
+   *
+   * Only the surfaces a card asks for are carried: reels and stories. The feed
+   * equivalents are not, because the feed's engagement is already answered
+   * per-post by the posts table, at a grain that can be ranked.
+   */
+  interactionsReel: string | null;
+  interactionsStory: string | null;
+  likesReel: string | null;
+  commentsReel: string | null;
+  savesReel: string | null;
+  sharesReel: string | null;
+  sharesStory: string | null;
   /** The range actually asked for, which a clamp may have narrowed. */
   measuredSince: string;
   measuredUntil: string;
@@ -191,6 +258,18 @@ const EMPTY_MEASUREMENT = {
   reachOrganic: null,
   reachPaid: null,
   reachFeed: null,
+  reachReel: null,
+  reachStory: null,
+  viewsFeed: null,
+  viewsReel: null,
+  viewsStory: null,
+  interactionsReel: null,
+  interactionsStory: null,
+  likesReel: null,
+  commentsReel: null,
+  savesReel: null,
+  sharesReel: null,
+  sharesStory: null,
   measuredSince: '',
   measuredUntil: '',
   truncated: false,
@@ -277,18 +356,23 @@ function readTotalValueObject(data: unknown[]): object | null {
  * way. An unrecognised surface counts as organic: it is content the account
  * published, and dropping it would understate the organic slice.
  *
- * `feed` is narrower than organic and is not a third bucket beside the other
- * two: it is the subset Meta calls "Alcance das postagens", feed posts only,
- * excluding reels and stories. Its spellings come from
- * `socialOrganicSurfaceSpellings` so the period figure and the per-surface post
- * tables cannot drift apart on what counts as a post — Meta writes the same
- * surface as `FEED`, `POST` and `CAROUSEL_CONTAINER` depending on the edge.
+ * `feed`, `reel` and `story` are narrower than organic and are not further
+ * buckets beside it: each is a subset of the organic slice, and the three do
+ * not partition it either, because Meta de-duplicates within each. An account
+ * that saw a story and a reel is one account in `organic` and one in each of
+ * those two. Their spellings come from `socialOrganicSurfaceSpellings` so the
+ * period figures and the per-surface post tables cannot drift apart on what
+ * counts as a post — Meta writes the same surface as `FEED`, `POST` and
+ * `CAROUSEL_CONTAINER` depending on the edge.
  */
 function readSurfaceSum(
   data: unknown[],
-  slice: 'organic' | 'paid' | 'feed',
+  slice: 'organic' | 'paid' | 'feed' | 'reel' | 'story',
 ): string | null {
-  const feedSpellings = new Set(socialOrganicSurfaceSpellings('feed'));
+  const surfaceSpellings =
+    slice === 'feed' || slice === 'reel' || slice === 'story'
+      ? new Set(socialOrganicSurfaceSpellings(slice))
+      : null;
   const totalValue = readTotalValueObject(data);
   const breakdowns = (totalValue as { breakdowns?: unknown } | null)
     ?.breakdowns;
@@ -322,8 +406,8 @@ function readSurfaceSum(
       const surface = String(row.dimension_values[0]).toUpperCase();
       const isPaid = surface === 'AD';
 
-      if (slice === 'feed') {
-        if (!feedSpellings.has(surface)) continue;
+      if (surfaceSpellings) {
+        if (!surfaceSpellings.has(surface)) continue;
       } else if (isPaid !== (slice === 'paid')) {
         continue;
       }

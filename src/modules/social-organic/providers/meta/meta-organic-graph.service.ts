@@ -384,6 +384,42 @@ export class MetaOrganicGraphService {
   }
 
   /**
+   * The stories an Instagram account has live right now.
+   *
+   * A separate method from `listPublishedPosts` because it is a separate edge
+   * answering a separate question, and the difference is not cosmetic:
+   * `/{ig-user}/media` never returns a story at all — verified on 2026-09-24
+   * across four pages of a real account's 378 items, not one story among them —
+   * while `/{ig-user}/stories` returns only what is live, and only for the 24
+   * hours it is.
+   *
+   * It therefore takes no `since`/`until`: there is no window to ask for, only
+   * "what is up now". Everything older is unreachable, which is why what this
+   * returns has to be stored rather than re-derived later.
+   */
+  async listActiveStories(input: {
+    objectId: string;
+    accessToken: string;
+  }): Promise<{ data: unknown[]; apiCalls: 1 }> {
+    const url = this.graphUrl(`${encodeURIComponent(input.objectId)}/stories`);
+    url.searchParams.set(
+      'fields',
+      'id,timestamp,media_type,media_product_type,media_url,thumbnail_url,permalink',
+    );
+
+    const payload = await this.requestJson(
+      url,
+      this.authorized(input.accessToken),
+    );
+
+    if (!isRecord(payload) || !Array.isArray(payload.data)) {
+      throw this.invalidResponse();
+    }
+
+    return { data: payload.data, apiCalls: 1 };
+  }
+
+  /**
    * Provider-owned Insights GET. Metric names come from A2's documented
    * allow-list; this method validates their shape and centralizes version,
    * timeout, auth header and safe error normalization.
@@ -419,7 +455,11 @@ export class MetaOrganicGraphService {
       | 'age'
       | 'gender'
       | 'city'
-      | 'country';
+      | 'country'
+      // A story's retention: how the viewer left it. Documented by Meta on the
+      // `navigation` metric; unverifiable against the production account, which
+      // has never had a story live while one was being observed.
+      | 'story_navigation_action_type';
   }): Promise<{ data: unknown[]; apiCalls: 1 }> {
     if (
       input.metrics.length === 0 ||

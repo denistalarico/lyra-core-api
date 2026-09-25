@@ -1,10 +1,10 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment -- repository doubles inspected via Jest asymmetric matchers cross TypeORM's dynamic query boundary. */
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import type { Repository } from 'typeorm';
 import type { SocialOrganicAssetEntity } from '../entities/social-organic-asset.entity';
 import type { SocialOrganicAccountMetricDailyEntity } from './entities/social-organic-account-metric-daily.entity';
 import type { SocialOrganicPostMetricDailyEntity } from './entities/social-organic-post-metric-daily.entity';
 import type { SocialOrganicReachPeriodEntity } from './entities/social-organic-reach-period.entity';
+import type { SocialOrganicStoryEntity } from './entities/social-organic-story.entity';
 import type { SocialOrganicSyncRunEntity } from './entities/social-organic-sync-run.entity';
 import { SocialOrganicAnalyticsReadService } from './social-organic-analytics-read.service';
 
@@ -28,14 +28,23 @@ describe('SocialOrganicAnalyticsReadService (scope + validation)', () => {
     } as unknown as Repository<SocialOrganicAssetEntity>;
     const metricsRepository =
       {} as Repository<SocialOrganicAccountMetricDailyEntity>;
-    const postMetricsRepository =
-      {} as Repository<SocialOrganicPostMetricDailyEntity>;
+    // `query` is stubbed because `overview` counts published reels through it.
+    // Zero is the honest answer for a harness with no facts, and it keeps these
+    // assertions about the aggregate rather than about the counts.
+    const postMetricsRepository = {
+      query: jest.fn(async () => [{ count: '0' }]),
+    } as unknown as Repository<SocialOrganicPostMetricDailyEntity>;
     const runsRepository = {} as Repository<SocialOrganicSyncRunEntity>;
     // No measurement stored, which is the state every assertion here is about:
     // the overview reports `periodReach: null` rather than summing days.
     const reachPeriodsRepository = {
       findOne: jest.fn(async () => null),
     } as unknown as Repository<SocialOrganicReachPeriodEntity>;
+    // No stories captured either, so the reel and story counts read zero — the
+    // ordinary state of an asset before the hourly collector has run.
+    const storiesRepository = {
+      query: jest.fn(async () => [{ count: '0' }]),
+    } as unknown as Repository<SocialOrganicStoryEntity>;
 
     return {
       findOne,
@@ -45,6 +54,7 @@ describe('SocialOrganicAnalyticsReadService (scope + validation)', () => {
         postMetricsRepository,
         runsRepository,
         reachPeriodsRepository,
+        storiesRepository,
       ),
     };
   }

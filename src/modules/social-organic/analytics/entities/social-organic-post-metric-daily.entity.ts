@@ -277,6 +277,48 @@ export class SocialOrganicPostMetricDailyEntity {
   })
   videoViewsLifetimeObservedAt!: Date | null;
 
+  /**
+   * Average watch time of this reel, in milliseconds.
+   *
+   * Reels only — Meta refuses the metric for any other product type, and
+   * refuses the *whole request* along with it, which is why the metric list is
+   * chosen per surface. Null on a feed post, always.
+   *
+   * Not summable across posts and not averageable without weights: it is
+   * already a mean over one reel's views, so averaging two reels' averages
+   * would weight a reel with 10 views the same as one with 10 000.
+   */
+  @Column({
+    name: 'reels_avg_watch_time_ms',
+    type: 'bigint',
+    nullable: true,
+  })
+  reelsAvgWatchTimeMs!: string | null;
+
+  /** Total time this reel was watched, in milliseconds. Additive across reels. */
+  @Column({
+    name: 'reels_total_watch_time_ms',
+    type: 'bigint',
+    nullable: true,
+  })
+  reelsTotalWatchTimeMs!: string | null;
+
+  /**
+   * Share of views that skipped this reel in its first 3 seconds, in **basis
+   * points**: 66.1% is 6610.
+   *
+   * Stored scaled because this table's rule is that no ratio lives in it as a
+   * ratio — a stored percentage gets averaged across rows with the wrong
+   * weights the first time anyone aggregates. Basis points keep it exact and
+   * integral, and the column name says it is not a counter.
+   */
+  @Column({ name: 'reels_skip_rate_bp', type: 'bigint', nullable: true })
+  reelsSkipRateBp!: string | null;
+
+  /** Times this reel was reposted. Reels only. */
+  @Column({ name: 'reposts_lifetime', type: 'bigint', nullable: true })
+  repostsLifetime!: string | null;
+
   /** True for same-day or provider-incomplete facts. */
   @Column({ name: 'is_partial', type: 'boolean', default: false })
   isPartial!: boolean;

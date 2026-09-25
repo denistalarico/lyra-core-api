@@ -6,9 +6,9 @@ import { SocialOrganicReachPeriodEntity } from './entities/social-organic-reach-
 /**
  * One measurement of one window, with the scope it belongs to.
  *
- * The six figures travel together because they come from one pair of API calls
- * about one range. Writing a subset would leave the row describing a window
- * with numbers from two different readings of it.
+ * The figures travel together because they come from one set of API calls about
+ * one range. Writing a subset would leave the row describing a window with
+ * numbers from two different readings of it.
  *
  * The slices are optional: a caller that only measured the totals passes them
  * as null, and null must stay null rather than becoming zero — see the entity.
@@ -26,11 +26,30 @@ export type OrganicReachMeasurement = {
   reach: string | null;
   reachOrganic?: string | null;
   reachPaid?: string | null;
-  /** Feed posts only; a subset of `reachOrganic`, never added to it. */
+  /**
+   * The per-surface slices. Each is a subset of the organic slice and none is
+   * added to another — see the entity.
+   */
   reachFeed?: string | null;
+  reachReel?: string | null;
+  reachStory?: string | null;
   views?: string | null;
   viewsOrganic?: string | null;
   viewsPaid?: string | null;
+  viewsFeed?: string | null;
+  viewsReel?: string | null;
+  viewsStory?: string | null;
+  /** Engagement by surface, from the same breakdown. */
+  interactionsReel?: string | null;
+  interactionsStory?: string | null;
+  likesReel?: string | null;
+  commentsReel?: string | null;
+  savesReel?: string | null;
+  sharesReel?: string | null;
+  sharesStory?: string | null;
+  /** Published counts for the window, from the listing rather than insights. */
+  reelCount?: number | null;
+  storyCount?: number | null;
   /** The range Meta measured, when it differs from the window asked for. */
   measuredSince?: string | null;
   measuredUntil?: string | null;
@@ -61,9 +80,14 @@ export class SocialOrganicReachPeriodWriterService {
          reach_organic, reach_paid, reach_feed,
          views, views_organic, views_paid,
          measured_since, measured_until, truncated,
+         reach_reel, reach_story, views_feed, views_reel, views_story,
+         interactions_reel, interactions_story, likes_reel, comments_reel,
+         saves_reel, shares_reel, shares_story, reel_count, story_count,
          measured_at
        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-                 $11, $12, $13, $14, $15, $16, $17, $18, $19, now())
+                 $11, $12, $13, $14, $15, $16, $17, $18, $19,
+                 $20, $21, $22, $23, $24, $25, $26, $27, $28,
+                 $29, $30, $31, $32, $33, now())
        ON CONFLICT (asset_id, period_since, period_until) DO UPDATE SET
          reach = EXCLUDED.reach,
          reach_organic = EXCLUDED.reach_organic,
@@ -75,6 +99,20 @@ export class SocialOrganicReachPeriodWriterService {
          measured_since = EXCLUDED.measured_since,
          measured_until = EXCLUDED.measured_until,
          truncated = EXCLUDED.truncated,
+         reach_reel = EXCLUDED.reach_reel,
+         reach_story = EXCLUDED.reach_story,
+         views_feed = EXCLUDED.views_feed,
+         views_reel = EXCLUDED.views_reel,
+         views_story = EXCLUDED.views_story,
+         interactions_reel = EXCLUDED.interactions_reel,
+         interactions_story = EXCLUDED.interactions_story,
+         likes_reel = EXCLUDED.likes_reel,
+         comments_reel = EXCLUDED.comments_reel,
+         saves_reel = EXCLUDED.saves_reel,
+         shares_reel = EXCLUDED.shares_reel,
+         shares_story = EXCLUDED.shares_story,
+         reel_count = EXCLUDED.reel_count,
+         story_count = EXCLUDED.story_count,
          is_partial = EXCLUDED.is_partial,
          measured_at = now(),
          updated_at = now()`,
@@ -101,6 +139,20 @@ export class SocialOrganicReachPeriodWriterService {
         measurement.measuredSince ?? null,
         measurement.measuredUntil ?? null,
         measurement.truncated ?? false,
+        measurement.reachReel ?? null,
+        measurement.reachStory ?? null,
+        measurement.viewsFeed ?? null,
+        measurement.viewsReel ?? null,
+        measurement.viewsStory ?? null,
+        measurement.interactionsReel ?? null,
+        measurement.interactionsStory ?? null,
+        measurement.likesReel ?? null,
+        measurement.commentsReel ?? null,
+        measurement.savesReel ?? null,
+        measurement.sharesReel ?? null,
+        measurement.sharesStory ?? null,
+        measurement.reelCount ?? null,
+        measurement.storyCount ?? null,
       ],
     );
   }
