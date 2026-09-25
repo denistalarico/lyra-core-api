@@ -44,6 +44,23 @@ export type SocialOrganicSeriesPoint = {
    */
   accountsEngaged: string | null;
 
+  /**
+   * A Facebook Page's follower level on this day. Null for Instagram.
+   *
+   * The series field for a growth chart, and `followersCount` is not: that one
+   * is written from a profile field that only knows "now", so every historical
+   * row carries today's value and a line through it is flat and wrong. See the
+   * entity.
+   */
+  pageFollows: string | null;
+  pageDailyFollows: string | null;
+  pageDailyUnfollows: string | null;
+  /** Both halves of the Page's `is_from_ads` view split. Null for Instagram. */
+  viewsOrganic: string | null;
+  viewsPaid: string | null;
+  /** Messenger threads opened by a first-time sender. Null for Instagram. */
+  newConversations: string | null;
+
   /** True while the day is still accumulating; see the sync's `is_partial` flag. */
   isPartial: boolean;
 };
@@ -68,6 +85,12 @@ export function emptyOrganicSeriesPoint(
     saves: null,
     replies: null,
     accountsEngaged: null,
+    pageFollows: null,
+    pageDailyFollows: null,
+    pageDailyUnfollows: null,
+    viewsOrganic: null,
+    viewsPaid: null,
+    newConversations: null,
     isPartial: false,
   };
 }

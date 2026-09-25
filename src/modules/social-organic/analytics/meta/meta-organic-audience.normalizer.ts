@@ -75,25 +75,35 @@ export function normalizeInstagramFollowerDemographics(
 }
 
 /**
- * A Facebook Page's `page_fans_gender_age` / `page_fans_city` into audience rows.
+ * A Facebook Page's follower geography into audience rows.
  *
- * **No caller ingests through this any more.** Meta retired the Page fan
- * demographics metrics — see `FACEBOOK_AUDIENCE_METRICS_RETIRED` for the
- * evidence — so `MetaOrganicAudienceService` no longer requests them. This is
- * kept because rows collected before the retirement are still stored in that
- * shape, and because the parser is the record of what those rows mean. Delete it
- * only together with that history.
+ * Live again, against `page_follows_city` and `page_follows_country` — see
+ * `FACEBOOK_AUDIENCE_METRICS`. The `page_fans_*` names this was written for are
+ * retired, but the replacements return the identical shape, so the parser did
+ * not change; only its callers and this comment did.
  *
  * A different response shape from Instagram's, which is why this is a second
  * function rather than a flag: the Page insights edge reports these as a
- * lifetime `values` array whose last entry's `value` is a **map** from bucket to
- * count (`{"M.25-34": 1200, "F.25-34": 1500}`), with no `breakdowns` anywhere.
- * Reading both shapes through one branching parser would mean a function where
- * neither shape's rules are stated plainly.
+ * `values` array whose last entry's `value` is a **map** from bucket to count
+ * (`{"Rio Verde, GO, Brazil": 5}`), with no `breakdowns` anywhere. Reading both
+ * shapes through one branching parser would mean a function where neither
+ * shape's rules are stated plainly.
  *
- * Facebook's gender/age key is `M.25-34`, which is gender-first and dot-joined.
- * It is rewritten to this table's canonical `25-34|male` so that a chart drawn
- * over both providers does not show one audience as two.
+ * Only the newest entry is read, and that is correct rather than lossy: these
+ * metrics are **lifetime stocks that Meta happens to deliver under
+ * `period=day`**, so every entry in the window is the whole distribution as of
+ * its own day. Taking the last is taking today's snapshot; summing them would
+ * count every follower once per day in the window.
+ *
+ * The `age_gender` path has no live metric behind it — no spelling of a Page
+ * age or gender breakdown survives. It is kept for rows collected before the
+ * retirement, whose keys are Facebook's gender-first `M.25-34` and are
+ * rewritten to this table's canonical `25-34|male`.
+ *
+ * Buckets whose key Meta itself mangles are dropped by `readKey`: production
+ * returns `"??gua Comprida, MG, Brazil"` for "Água Comprida", and a bucket
+ * labelled with question marks is worse in a client's report than one fewer
+ * city in a list Meta already truncates.
  */
 export function normalizeFacebookFanDemographics(
   input: AudienceNormalizeContext & {

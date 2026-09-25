@@ -3,9 +3,81 @@ import type {
   NormalizedOrganicPostMetricDaily,
 } from '../social-organic-insights.contract';
 import {
+  calendarDayIn,
+  shiftCalendarDay,
+} from '../social-organic-analytics-time';
+import {
   FACEBOOK_REACTION_TYPES,
   type FacebookReactionType,
 } from './meta-organic-insights.types';
+
+/** One day of the Page series, as the backfill writes it. */
+export type PageSeriesDay = {
+  pageFollows: string | null;
+  pageDailyFollows: string | null;
+  pageDailyUnfollows: string | null;
+  newConversations: string | null;
+};
+
+/**
+ * A multi-day Page series response, indexed by the calendar day it describes.
+ *
+ * ## `end_time` is not the day
+ *
+ * Meta stamps each entry with the **end** of the period it covers, which is
+ * midnight at the start of the *next* day: the entry for Monday arrives as
+ * `2026-09-22T07:00:00+0000` when the Page is in São Paulo. Filing it under the
+ * day that timestamp falls on would shift the entire series forward by one, so
+ * every figure would be attributed to the day after the one it happened on —
+ * a bug that produces a perfectly plausible chart.
+ *
+ * So the timestamp is converted to a calendar day in the asset's zone and then
+ * shifted back one. The zone matters as much as the shift: the same instant is
+ * a different date in two zones, and a Page in São Paulo whose days were filed
+ * in UTC would be off by one for every post-21:00 reading.
+ */
+export function readPageSeriesByDate(
+  payload: unknown,
+  timezone: string,
+): Map<string, PageSeriesDay> {
+  const metrics = readMetrics(payload);
+  const byDate = new Map<string, PageSeriesDay>();
+
+  const collect = (metricName: string, field: keyof PageSeriesDay): void => {
+    const metric = metrics.get(metricName);
+    if (!metric) return;
+
+    const values: unknown = metric.values;
+    if (!Array.isArray(values)) return;
+
+    for (const entry of values as unknown[]) {
+      if (!isRecord(entry) || typeof entry.end_time !== 'string') continue;
+
+      const endsAt = new Date(entry.end_time);
+      if (Number.isNaN(endsAt.getTime())) continue;
+
+      const day = shiftCalendarDay(calendarDayIn(timezone, endsAt), -1);
+      const counter = readOptionalCounter(entry.value);
+      if (counter === null) continue;
+
+      const existing = byDate.get(day) ?? {
+        pageFollows: null,
+        pageDailyFollows: null,
+        pageDailyUnfollows: null,
+        newConversations: null,
+      };
+
+      byDate.set(day, { ...existing, [field]: counter });
+    }
+  };
+
+  collect('page_follows', 'pageFollows');
+  collect('page_daily_follows_unique', 'pageDailyFollows');
+  collect('page_daily_unfollows_unique', 'pageDailyUnfollows');
+  collect('page_messages_new_conversations_unique', 'newConversations');
+
+  return byDate;
+}
 
 type NormalizeBase = {
   tenantId: string;
@@ -33,26 +105,73 @@ export function normalizeFacebookAccountInsights(
   input: NormalizeBase & {
     followersCount: unknown;
     insights: unknown;
+    /**
+     * The Page's daily series read, optional.
+     *
+     * Optional for the reason the Instagram engagement read is: a caller that
+     * predates it, or a stored payload replayed from before it existed, still
+     * normalizes with these fields null rather than throwing.
+     */
+    seriesInsights?: unknown;
   },
 ): NormalizedOrganicAccountMetricDaily | null {
   const metrics = readMetrics(input.insights);
+  const series =
+    input.seriesInsights === undefined
+      ? null
+      : readMetrics(input.seriesInsights);
   const followersCount =
     input.metricDate === input.currentDay
       ? readOptionalCounter(input.followersCount)
       : null;
   const impressions = readOrganicBreakdown(metrics.get('page_media_view'));
+  // The same response the organic figure comes from, read for both halves.
+  // The paid half was always in the payload and was being discarded.
+  const viewSplit = readAdsBreakdown(metrics.get('page_media_view'));
+  // `page_follows` is the day's own follower level. Unlike `followersCount`
+  // above it is not gated on `currentDay`: that gate exists because the profile
+  // field only knows "now", which is exactly the limitation this metric does
+  // not have.
+  const pageFollows = readDaySeriesValue(series?.get('page_follows'));
+  const pageDailyFollows = readDaySeriesValue(
+    series?.get('page_daily_follows_unique'),
+  );
+  const pageDailyUnfollows = readDaySeriesValue(
+    series?.get('page_daily_unfollows_unique'),
+  );
+  const newConversations = readDaySeriesValue(
+    series?.get('page_messages_new_conversations_unique'),
+  );
 
-  if (followersCount === null && impressions === null) return null;
+  if (
+    followersCount === null &&
+    impressions === null &&
+    pageFollows === null &&
+    pageDailyFollows === null &&
+    pageDailyUnfollows === null &&
+    newConversations === null
+  ) {
+    return null;
+  }
 
   return accountFact(input, {
     followersCount,
     impressions,
-    providerMetrics: withSnapshot(metrics.providerMetrics, {
-      followers_count:
-        input.metricDate === input.currentDay
-          ? jsonValue(input.followersCount)
-          : undefined,
-    }),
+    pageFollows,
+    pageDailyFollows,
+    pageDailyUnfollows,
+    viewsOrganic: viewSplit.organic,
+    viewsPaid: viewSplit.paid,
+    newConversations,
+    providerMetrics: withSnapshot(
+      { ...metrics.providerMetrics, ...(series?.providerMetrics ?? {}) },
+      {
+        followers_count:
+          input.metricDate === input.currentDay
+            ? jsonValue(input.followersCount)
+            : undefined,
+      },
+    ),
   });
 }
 
@@ -664,6 +783,25 @@ function readPlainTotal(metric: MetricEntry | undefined): string | null {
   return readOptionalCounter(rawMetricValue(metric));
 }
 
+/**
+ * One plain daily counter out of a Page series metric.
+ *
+ * These metrics answer with a `values` array and no breakdown. The caller reads
+ * them inside the per-day loop with a one-day range, so the array holds the day
+ * being normalized and `rawMetricValue`'s "newest entry" is that day — there is
+ * no date matching to do here, and doing it would only re-derive what the
+ * request already constrained.
+ *
+ * Null rather than zero when the metric is absent, which is the rule everywhere
+ * in this file: a Page that has never had a Messenger conversation and a read
+ * that failed must not produce the same row.
+ */
+function readDaySeriesValue(metric: MetricEntry | undefined): string | null {
+  if (!metric) return null;
+
+  return readOptionalCounter(rawMetricValue(metric));
+}
+
 function readOrganicBreakdown(metric: MetricEntry | undefined): string | null {
   if (!metric) return null;
   const value = rawMetricValue(metric);
@@ -804,6 +942,14 @@ function accountFact(
     shares: values.shares ?? null,
     saves: values.saves ?? null,
     replies: values.replies ?? null,
+    // Facebook Page only; Instagram has no daily equivalent and leaves these
+    // null, keeping `followersCount` as its follower figure.
+    pageFollows: values.pageFollows ?? null,
+    pageDailyFollows: values.pageDailyFollows ?? null,
+    pageDailyUnfollows: values.pageDailyUnfollows ?? null,
+    viewsOrganic: values.viewsOrganic ?? null,
+    viewsPaid: values.viewsPaid ?? null,
+    newConversations: values.newConversations ?? null,
     providerMetrics: values.providerMetrics,
   };
 }

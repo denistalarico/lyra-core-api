@@ -121,6 +121,20 @@ export type NormalizedOrganicAccountMetricDaily = {
   shares: string | null;
   saves: string | null;
   replies: string | null;
+  /**
+   * Facebook Page series, null on Instagram.
+   *
+   * `pageFollows` is the day's own follower level and is the only chartable
+   * follower figure — `followersCount` above knows only "now" and is stamped
+   * onto whichever day is being written. See the entity for the full reason.
+   */
+  pageFollows: string | null;
+  pageDailyFollows: string | null;
+  pageDailyUnfollows: string | null;
+  /** Both halves of the `is_from_ads` split on `page_media_view`. */
+  viewsOrganic: string | null;
+  viewsPaid: string | null;
+  newConversations: string | null;
   isPartial: boolean;
   syncedAt: Date;
   syncRunId: string;

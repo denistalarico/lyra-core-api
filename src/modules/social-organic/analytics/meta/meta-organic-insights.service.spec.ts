@@ -706,8 +706,22 @@ describe('MetaOrganicInsightsService', () => {
 
       expect(dataSource.query).not.toHaveBeenCalled();
       expect(summary.postRows).toEqual([]);
-      // Only the per-day account call happened; no lifetime call.
-      expect(graph.getOrganicInsights).toHaveBeenCalledTimes(2);
+
+      // The point of the test: no `period: 'lifetime'` call was made. Asserted
+      // on the calls themselves rather than on their count, which used to stand
+      // in for it — the count also moves when the number of *daily* calls
+      // changes, as it did when the Page series was added, and then the test
+      // fails for a reason that has nothing to do with what it is guarding.
+      const periods = graph.getOrganicInsights.mock.calls.map(
+        ([call]: [{ period?: string }]) => call.period,
+      );
+      expect(periods).not.toContain('lifetime');
+      expect(
+        periods.every((period: string | undefined) => period === 'day'),
+      ).toBe(true);
+      // Two days in the window, two calls each: the views read and the series
+      // read, which cannot share a request because only one takes a breakdown.
+      expect(graph.getOrganicInsights).toHaveBeenCalledTimes(4);
     });
 
     it('trusts discovery and does not filter posts again in memory', async () => {

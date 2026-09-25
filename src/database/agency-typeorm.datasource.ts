@@ -219,6 +219,7 @@ import { CreateOrganicOnlineFollowers1796100000000 } from './migrations/17961000
 import { AddOrganicPeriodMeasurementColumns1796200000000 } from './migrations/1796200000000-add-organic-period-measurement-columns';
 import { AddReelAndStoryMeasures1796300000000 } from './migrations/1796300000000-add-reel-and-story-measures';
 import { AddFacebookPageMeasures1796400000000 } from './migrations/1796400000000-add-facebook-page-measures';
+import { AddFacebookPageSeries1796500000000 } from './migrations/1796500000000-add-facebook-page-series';
 import { ScopeSocialEditorialByCompany1794500000000 } from './migrations/1794500000000-scope-social-editorial-by-company';
 import { ScopeBrandKitByCompany1794510000000 } from './migrations/1794510000000-scope-brand-kit-by-company';
 import { ScopeCreativeStudioByCompany1794520000000 } from './migrations/1794520000000-scope-creative-studio-by-company';
@@ -470,5 +471,6 @@ export const AgencyDataSource = new DataSource({
     AddOrganicPeriodMeasurementColumns1796200000000,
     AddReelAndStoryMeasures1796300000000,
     AddFacebookPageMeasures1796400000000,
+    AddFacebookPageSeries1796500000000,
   ],
 });

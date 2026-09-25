@@ -216,6 +216,72 @@ export const META_ORGANIC_DOCUMENTED_METRICS = [
 ] as const satisfies readonly MetaOrganicDocumentedMetric[];
 
 export const FACEBOOK_PAGE_ACCOUNT_METRICS = ['page_media_view'] as const;
+
+/**
+ * The Page's daily series, read in one request without a breakdown.
+ *
+ * None of these takes a `breakdown`, so they share a call the way the Instagram
+ * engagement family does. They are kept apart from
+ * `FACEBOOK_PAGE_ACCOUNT_METRICS` for the opposite reason: that one *is* asked
+ * with `breakdown=is_from_ads`, and this project has now been bitten twice by
+ * Meta refusing an entire request because one metric in it did not accept the
+ * breakdown the others needed.
+ *
+ * - `page_follows` is a **stock** — the follower level at the end of each day,
+ *   and the only honest source for a growth chart. See the `pageFollows`
+ *   column for why `followers_count` cannot serve.
+ * - `page_daily_follows_unique` / `page_daily_unfollows_unique` are flows. The
+ *   `_unique` spellings are used rather than `page_daily_follows`: they count
+ *   accounts rather than events, which is what "ganhou 3 seguidores" means.
+ * - `page_messages_new_conversations_unique` counts Messenger threads opened by
+ *   someone who had never messaged the Page.
+ *
+ * Verified against production on 2026-09-25, all four answering with a full
+ * thirty-day series.
+ */
+export const FACEBOOK_PAGE_SERIES_METRICS = [
+  'page_follows',
+  'page_daily_follows_unique',
+  'page_daily_unfollows_unique',
+  'page_messages_new_conversations_unique',
+] as const;
+
+/**
+ * A Page's follower geography. **Not retired — the old names were.**
+ *
+ * `page_fans_city` and `page_fans_country` answer `(#100) The value must be a
+ * valid insights metric`, which this project read as "Meta removed Page
+ * audience data". That was too broad a conclusion: these two are the
+ * replacements and they work.
+ *
+ * ## They answer only with `period=day`
+ *
+ * With `period=lifetime` — the period the retired metric used, and the obvious
+ * one for a lifetime stock — they return `{"data": []}` with **no error**.
+ * `days_28` and `month` are empty too; `day` and `week` return data. A silent
+ * empty response is why they looked dead, and is the thing to remember: an
+ * empty `data` array here means the wrong period, not an empty audience.
+ *
+ * ## What comes back is a stock, despite `period=day`
+ *
+ * Each day's entry is the **entire** distribution as of that day, not that
+ * day's new followers. A one-day window and a ninety-day window return the same
+ * 45 city buckets. So only the newest entry is kept, and it is written to
+ * `social_organic_audience_daily` — the table whose contract is that its rows
+ * are never summed across days.
+ *
+ * Production, 2026-09-25: 45 city buckets summing to 123, and 6 country buckets
+ * summing to 149, on a Page with 150 followers. The city total is short because
+ * Meta suppresses small buckets, which is why neither may be presented as
+ * "where your followers are" in total terms.
+ */
+export const FACEBOOK_AUDIENCE_METRICS = [
+  { metric: 'page_follows_city', kind: 'city' },
+  { metric: 'page_follows_country', kind: 'country' },
+] as const satisfies readonly {
+  metric: string;
+  kind: SocialOrganicAudienceKind;
+}[];
 export const INSTAGRAM_ACCOUNT_MEDIA_METRICS = ['views', 'reach'] as const;
 export const INSTAGRAM_ACCOUNT_FOLLOW_METRICS = [
   'follows_and_unfollows',
@@ -550,20 +616,25 @@ export const INSTAGRAM_AUDIENCE_BREAKDOWN_KINDS: Record<
 };
 
 /**
- * The Page metrics that used to carry the same information. **Retired by Meta.**
+ * The Page metric *names* that were retired. **Two of the three have working
+ * replacements — see `FACEBOOK_AUDIENCE_METRICS`.**
  *
  * `page_fans_gender_age`, `page_fans_city` and `page_fans_country` answer
  * `(#100) The value must be a valid insights metric` — the byte-identical error
  * an invented metric name gets, while `page_follows` succeeds in the same call
- * against the same Page with the same token. v23 and v20 refuse it too, so this
- * is a retirement across the API rather than a version to pin back to.
- * Verified against production on 2026-09-22.
+ * against the same Page with the same token. v21, v19 and v17 refuse them too,
+ * so the names are gone across the API rather than behind a version to pin back
+ * to. Verified against production on 2026-09-22 and again on 2026-09-25.
  *
- * Kept as documentation rather than deleted: the names are what a maintainer
- * will search for when asked why the Facebook audience tab is empty, and the
- * `age_gender` spelling still exists in `SocialOrganicAudienceKind` for rows
- * collected before the retirement. Nothing requests these — see the
- * `facebook_page` branch of `MetaOrganicAudienceService`.
+ * What this list does **not** mean, and was wrongly read to mean for three
+ * days: that a Page has no follower geography. `page_follows_city` and
+ * `page_follows_country` are live and are collected. Only the age/gender
+ * breakdown has no replacement — no spelling of it answers, and there is no
+ * `page_follows_age` or `page_follows_gender`.
+ *
+ * Kept as documentation rather than deleted: these are the names a maintainer
+ * will search for, and finding them here with a pointer to the replacement is
+ * the whole point.
  */
 export const FACEBOOK_AUDIENCE_METRICS_RETIRED = [
   { metric: 'page_fans_gender_age', kind: 'age_gender' },

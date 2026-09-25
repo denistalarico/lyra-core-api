@@ -18,12 +18,14 @@ import {
 import { SocialOrganicSyncError } from '../social-organic-sync.error';
 import {
   normalizeFacebookAccountInsights,
+  readPageSeriesByDate,
   normalizeFacebookPostLifetimeSnapshot,
   normalizeInstagramAccountInsights,
   normalizeInstagramMediaLifetimeSnapshot,
 } from './meta-organic-insights.normalizer';
 import {
   FACEBOOK_PAGE_ACCOUNT_METRICS,
+  FACEBOOK_PAGE_SERIES_METRICS,
   FACEBOOK_POST_LIFETIME_METRICS,
   FACEBOOK_POST_REACTION_METRICS,
   INSTAGRAM_ACCOUNT_ENGAGEMENT_METRICS,
@@ -235,12 +237,25 @@ export class MetaOrganicInsightsService {
           breakdown: 'is_from_ads',
           ...range,
         });
-        apiCalls += insights.apiCalls;
+        // A second call rather than more metrics on the first: that one carries
+        // `breakdown=is_from_ads`, which none of these accept. Meta refuses the
+        // whole request when one metric rejects the breakdown — this module has
+        // been bitten by that twice — so the breakdown decides the split.
+        //
+        // Its own try/catch for the same reason the post reaction read has one:
+        // these are an addition to a sync that already worked, and a Page that
+        // refuses them should lose the series, not the day.
+        const seriesInsights = await this.readPageSeries({
+          credential,
+          range,
+        });
+        apiCalls += insights.apiCalls + seriesInsights.apiCalls;
         const row = normalizeFacebookAccountInsights({
           ...base,
           metricDate,
           followersCount,
           insights,
+          seriesInsights: seriesInsights.data,
         });
         if (row) accountRows.push(row);
         else rowsSkipped += 1;
@@ -315,6 +330,169 @@ export class MetaOrganicInsightsService {
    * view read, and a refusal here should cost the six reaction columns rather
    * than the view total that already came back.
    */
+  /**
+   * Fills the Page follower series backwards, in one call for the whole window.
+   *
+   * ## Why this is not just a wider `sync()`
+   *
+   * `sync()` loops calendar days and spends two provider calls on each, because
+   * the metrics it reads are per-day requests. Ninety days through that path is
+   * a hundred and eighty calls against a quota shared with publishing, to
+   * collect a series Meta will hand over in **one** request: these metrics
+   * accept a range and answer with one entry per day inside it.
+   *
+   * So this is a separate, one-pass path rather than a raised limit on the
+   * on-demand window, which is capped at seven days for exactly the reason
+   * above and should stay capped.
+   *
+   * ## What it writes, and what it deliberately does not
+   *
+   * Only the four series columns. It does not touch `impressions`,
+   * `followers_count` or anything the daily sync owns — the writer's COALESCE
+   * means a row that already exists keeps every value it has and gains only
+   * these. A day with no row yet gets one carrying just the series.
+   *
+   * `isPartial` is false for every day but today: these are settled historical
+   * figures, which is the whole point of being able to ask for them.
+   *
+   * Returns the number of days written, or zero when the Page refuses — a
+   * refusal here must not fail whatever called it, since the series is an
+   * addition to a sync that already worked.
+   */
+  async backfillPageSeries(input: {
+    resolved: ResolvedOrganicAnalyticsCredential;
+    fromDate: string;
+    toDate: string;
+    /**
+     * Required, not nullable: every account fact carries the run that produced
+     * it, and a backfill writing rows with no provenance would leave the one
+     * kind of row nobody could later trace or re-run.
+     */
+    syncRunId: string;
+    syncedAt?: Date;
+  }): Promise<{ daysWritten: number; apiCalls: number }> {
+    const { credential, assetTimezone } = input.resolved;
+
+    if (
+      credential.provider !== 'meta' ||
+      credential.assetType !== 'facebook_page'
+    ) {
+      throw new SocialOrganicSyncError('unsupported_analytics_asset_type');
+    }
+
+    const syncedAt = input.syncedAt ?? new Date();
+    const currentDay = calendarDayIn(assetTimezone, syncedAt);
+    const days = enumerateCalendarDays(input.fromDate, input.toDate);
+
+    const series = await this.readPageSeries({
+      credential,
+      range: {
+        since: localDayStartEpochSeconds(input.fromDate, assetTimezone),
+        until:
+          localDayStartEpochSeconds(
+            shiftCalendarDay(input.toDate, 1),
+            assetTimezone,
+          ) - 1,
+      },
+    });
+
+    if (series.data === undefined) {
+      return { daysWritten: 0, apiCalls: series.apiCalls };
+    }
+
+    const byDate = readPageSeriesByDate(series.data, assetTimezone);
+    const accountRows: NormalizedOrganicAccountMetricDaily[] = [];
+
+    for (const metricDate of days) {
+      const measured = byDate.get(metricDate);
+
+      // No entry for this day means Meta reported nothing for it, which is not
+      // a zero — a row of nulls would claim the Page had no followers.
+      if (!measured) continue;
+
+      accountRows.push({
+        tenantId: credential.tenantId,
+        workspaceId: credential.workspaceId,
+        agencyClientId: credential.agencyClientId,
+        assetId: credential.assetId,
+        provider: credential.provider,
+        source: 'organic',
+        metricDate,
+        assetTimezone,
+        followersCount: null,
+        followersGained: null,
+        followersLost: null,
+        impressions: null,
+        reach: null,
+        viewsTotal: null,
+        reachTotal: null,
+        profileViews: null,
+        totalInteractions: null,
+        accountsEngaged: null,
+        likes: null,
+        comments: null,
+        shares: null,
+        saves: null,
+        replies: null,
+        pageFollows: measured.pageFollows,
+        pageDailyFollows: measured.pageDailyFollows,
+        pageDailyUnfollows: measured.pageDailyUnfollows,
+        viewsOrganic: null,
+        viewsPaid: null,
+        newConversations: measured.newConversations,
+        isPartial: metricDate === currentDay,
+        syncedAt,
+        syncRunId: input.syncRunId,
+        providerMetrics: {},
+      });
+    }
+
+    await this.writer.upsert({ postRows: [], accountRows });
+
+    this.logger.log(
+      `Page series backfilled: ${JSON.stringify({
+        assetId: credential.assetId,
+        fromDate: input.fromDate,
+        toDate: input.toDate,
+        daysWritten: accountRows.length,
+      })}`,
+    );
+
+    return { daysWritten: accountRows.length, apiCalls: series.apiCalls };
+  }
+
+  /**
+   * A Page's follower level, follow flows and new conversations for one day.
+   *
+   * Separate from the `page_media_view` read because that one carries
+   * `breakdown=is_from_ads` and none of these accepts it. Its own try/catch
+   * because it is an addition to a path that already worked: a Page that
+   * refuses these — an older Page, a token without the messaging scope — should
+   * lose the series columns and keep the day's views.
+   */
+  private async readPageSeries(input: {
+    credential: { externalAssetId: string; accessToken: string };
+    range: { since: number; until: number };
+  }): Promise<{ data: unknown; apiCalls: number }> {
+    try {
+      const insights = await this.graph.getOrganicInsights({
+        objectId: input.credential.externalAssetId,
+        accessToken: input.credential.accessToken,
+        metrics: FACEBOOK_PAGE_SERIES_METRICS,
+        period: 'day',
+        ...input.range,
+      });
+
+      return { data: insights, apiCalls: insights.apiCalls };
+    } catch (error) {
+      this.logger.warn(
+        `Page ${input.credential.externalAssetId} series unavailable: ${String(error)}`,
+      );
+      // One call was still spent getting the refusal.
+      return { data: undefined, apiCalls: 1 };
+    }
+  }
+
   private async readPostReactions(
     postId: string,
     accessToken: string,

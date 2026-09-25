@@ -50,6 +50,12 @@ import {
   type SocialOrganicFacebookReelsView,
 } from './views/social-organic-facebook-reels.view';
 import { SocialOrganicFacebookReelEntity } from './entities/social-organic-facebook-reel.entity';
+import {
+  emptyWeekdayBucket,
+  pickBestWeekday,
+  WEEKDAY_ORDER,
+  type SocialOrganicWeekdayView,
+} from './views/social-organic-weekday.view';
 
 export type SocialOrganicAnalyticsScope = {
   tenantId: string;
@@ -413,6 +419,16 @@ export class SocialOrganicAnalyticsReadService {
       .addSelect('SUM(fact.saves)', 'saves')
       .addSelect('SUM(fact.replies)', 'replies')
       .addSelect('SUM(fact.accounts_engaged)', 'accounts_engaged')
+      // MAX, not SUM: `page_follows` is a STOCK — the follower level at the end
+      // of the day — and the grouping here is already one day, so MAX is just
+      // "the value for this day". Summing it would add levels together and
+      // produce a growth line climbing by the whole audience every day.
+      .addSelect('MAX(fact.page_follows)', 'page_follows')
+      .addSelect('SUM(fact.page_daily_follows)', 'page_daily_follows')
+      .addSelect('SUM(fact.page_daily_unfollows)', 'page_daily_unfollows')
+      .addSelect('SUM(fact.views_organic)', 'views_organic')
+      .addSelect('SUM(fact.views_paid)', 'views_paid')
+      .addSelect('SUM(fact.new_conversations)', 'new_conversations')
       .addSelect('bool_or(fact.is_partial)', 'is_partial')
       .where('fact.asset_id = :assetId', { assetId: asset.id })
       .andWhere('fact.metric_date BETWEEN :since AND :until', {
@@ -437,6 +453,12 @@ export class SocialOrganicAnalyticsReadService {
         saves: string | null;
         replies: string | null;
         accounts_engaged: string | null;
+        page_follows: string | null;
+        page_daily_follows: string | null;
+        page_daily_unfollows: string | null;
+        views_organic: string | null;
+        views_paid: string | null;
+        new_conversations: string | null;
         is_partial: boolean;
       }>();
 
@@ -478,6 +500,12 @@ export class SocialOrganicAnalyticsReadService {
         saves: readNullableCount(row.saves),
         replies: readNullableCount(row.replies),
         accountsEngaged: readNullableCount(row.accounts_engaged),
+        pageFollows: readNullableCount(row.page_follows),
+        pageDailyFollows: readNullableCount(row.page_daily_follows),
+        pageDailyUnfollows: readNullableCount(row.page_daily_unfollows),
+        viewsOrganic: readNullableCount(row.views_organic),
+        viewsPaid: readNullableCount(row.views_paid),
+        newConversations: readNullableCount(row.new_conversations),
         isPartial: row.is_partial === true,
       });
     }
@@ -673,6 +701,115 @@ export class SocialOrganicAnalyticsReadService {
     items.sort((a, b) => compareTopPosts(a, b, sort));
 
     return { items: items.slice(0, limit), total: items.length };
+  }
+
+  /**
+   * Publishing performance by day of the week.
+   *
+   * Built from the same `DISTINCT ON` the ranking uses, for the same reason: the
+   * post table holds one row per observation day, and a post observed on five
+   * days would otherwise be counted five times — which would make the weekday a
+   * post was *read* on matter as much as the one it was published on.
+   *
+   * The weekday comes from `published_at` rendered in the asset's own timezone.
+   * Without the cast, a post published at 21:00 in São Paulo is a Tuesday to
+   * Postgres and a Monday to the operator who wrote it, and the card would
+   * quietly recommend the wrong day.
+   */
+  async weekdayPerformance(
+    input: SocialOrganicAnalyticsScope & {
+      assetId: string;
+      since: string;
+      until: string;
+    },
+  ): Promise<SocialOrganicWeekdayView> {
+    const period = this.parsePeriod({ since: input.since, until: input.until });
+    const asset = await this.findAssetInScope(input);
+    const timezone = asset.assetTimezone ?? 'UTC';
+
+    const latestPerPost = this.postMetricsRepository
+      .createQueryBuilder('fact')
+      .distinctOn(['fact.externalPublicationId'])
+      .select('fact.externalPublicationId', 'external_publication_id')
+      .addSelect('fact.publishedAt', 'published_at')
+      // The lifetime view total where it exists, falling back to the daily
+      // impressions column. A Page post reports the first; older rows, and
+      // Instagram, have only the second.
+      .addSelect(
+        'COALESCE(fact.impressions_lifetime, fact.impressions)',
+        'views',
+      )
+      .where('fact.assetId = :assetId', { assetId: asset.id })
+      .andWhere('fact.tenantId = :tenantId', { tenantId: input.tenantId })
+      .andWhere('fact.workspaceId = :workspaceId', {
+        workspaceId: input.workspaceId,
+      })
+      .andWhere(
+        input.agencyClientId === null
+          ? 'fact.agencyClientId IS NULL'
+          : 'fact.agencyClientId = :agencyClientId',
+        input.agencyClientId === null
+          ? {}
+          : { agencyClientId: input.agencyClientId },
+      )
+      .andWhere('fact.publishedAt IS NOT NULL')
+      .andWhere('fact.publishedAt >= :since', {
+        since: `${period.since}T00:00:00Z`,
+      })
+      .andWhere('fact.publishedAt < :until', {
+        until: `${shiftCalendarDay(period.until, 1)}T00:00:00Z`,
+      })
+      .orderBy('fact.externalPublicationId', 'ASC')
+      .addOrderBy('fact.metricDate', 'DESC')
+      .addOrderBy('fact.syncedAt', 'DESC');
+
+    const rows = await this.postMetricsRepository.manager
+      .createQueryBuilder()
+      .select(
+        'EXTRACT(ISODOW FROM latest.published_at AT TIME ZONE :zone)',
+        'weekday',
+      )
+      .addSelect('COUNT(*)', 'publications')
+      .addSelect('SUM(latest.views)', 'total')
+      .from(`(${latestPerPost.getQuery()})`, 'latest')
+      .setParameters({ ...latestPerPost.getParameters(), zone: timezone })
+      .groupBy('1')
+      .getRawMany<{
+        weekday: string;
+        publications: string;
+        total: string | null;
+      }>();
+
+    const byWeekday = new Map(rows.map((row) => [Number(row.weekday), row]));
+
+    const buckets = WEEKDAY_ORDER.map((weekday) => {
+      const row = byWeekday.get(weekday);
+
+      if (!row) return emptyWeekdayBucket(weekday);
+
+      const publications = Number(row.publications);
+      const total = row.total === null ? null : toCount(row.total).toString();
+
+      return {
+        weekday,
+        publications,
+        total,
+        // Null when no post on this weekday reported views at all — an average
+        // of zero would draw as the worst day rather than as no evidence.
+        average:
+          total === null || publications === 0
+            ? null
+            : (Number(total) / publications).toFixed(1),
+      };
+    });
+
+    return {
+      assetId: asset.id,
+      timezone: asset.assetTimezone ?? '',
+      period: { since: period.since, until: period.until },
+      buckets,
+      bestWeekday: pickBestWeekday(buckets),
+    };
   }
 
   /**

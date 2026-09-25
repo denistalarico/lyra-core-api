@@ -139,6 +139,56 @@ export class SocialOrganicAccountMetricDailyEntity {
   profileViews!: string | null;
 
   /**
+   * A Facebook Page's follower level at the end of this day. STOCK.
+   *
+   * Separate from `followersCount` because they answer different questions and
+   * only one of them can be charted. `followersCount` comes from
+   * `GET /{page}?fields=followers_count`, which knows only "now" — the sync
+   * stamps that single number onto whichever day it is writing, so historical
+   * rows all carry today's value and a line drawn through them is flat and
+   * wrong. This column comes from the `page_follows` insights metric, which
+   * reports each day's own level and can be asked for retroactively.
+   *
+   * Instagram leaves this null and keeps using `followersCount`; Meta offers no
+   * equivalent daily-level metric there.
+   */
+  @Column({ name: 'page_follows', type: 'bigint', nullable: true })
+  pageFollows!: string | null;
+
+  /** New follows on this day. Flow; safe to sum. Facebook Page only. */
+  @Column({ name: 'page_daily_follows', type: 'bigint', nullable: true })
+  pageDailyFollows!: string | null;
+
+  /** Unfollows on this day. Flow; safe to sum. Facebook Page only. */
+  @Column({ name: 'page_daily_unfollows', type: 'bigint', nullable: true })
+  pageDailyUnfollows!: string | null;
+
+  /**
+   * This day's Page media views, split by whether an ad delivered them.
+   *
+   * Both halves of the `is_from_ads` breakdown that `page_media_view` is
+   * already requested with. `viewsOrganic` duplicates `impressions` for a
+   * Page — kept as its own column so the pair reads as a pair, and so a chart
+   * asking for "organic vs paid" does not have to know that one of its two
+   * series is spelled differently from the other.
+   *
+   * These are view counts, not audiences, so unlike `reach` they may be summed
+   * across days.
+   */
+  @Column({ name: 'views_organic', type: 'bigint', nullable: true })
+  viewsOrganic!: string | null;
+
+  @Column({ name: 'views_paid', type: 'bigint', nullable: true })
+  viewsPaid!: string | null;
+
+  /**
+   * Messenger conversations that began on this day with someone who had never
+   * messaged the Page before. Flow; safe to sum.
+   */
+  @Column({ name: 'new_conversations', type: 'bigint', nullable: true })
+  newConversations!: string | null;
+
+  /**
    * Account-level engagement, all daily flows.
    *
    * Requested in one call with `profile_views` and, before the columns existed,

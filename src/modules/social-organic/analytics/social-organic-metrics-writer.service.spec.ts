@@ -37,6 +37,12 @@ const accountRow: NormalizedOrganicAccountMetricDaily = {
   shares: null,
   saves: null,
   replies: null,
+  pageFollows: null,
+  pageDailyFollows: null,
+  pageDailyUnfollows: null,
+  viewsOrganic: null,
+  viewsPaid: null,
+  newConversations: null,
 };
 
 const postRow: NormalizedOrganicPostMetricDaily = {

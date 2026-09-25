@@ -251,6 +251,32 @@ export class SocialOrganicAnalyticsController {
     });
   }
 
+  /**
+   * Publishing performance by weekday — the "melhor dia para postagem" card.
+   *
+   * Its own route rather than a field on `timeseries`: that one is a calendar
+   * series with one point per date, and this is seven buckets with no dates in
+   * them. Folding a different shape into that response would make every caller
+   * of the series carry a field none of them plot.
+   */
+  @Get('weekday')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireProductEntitlement('social')
+  @RequirePermission(SOCIAL_ORGANIC_ANALYTICS_PERMISSION)
+  weekday(
+    @RequestContextData() ctx: RequestContext,
+    @Query() query: AnalyticsOverviewQueryDto,
+  ) {
+    const scope = this.requireScope(ctx);
+
+    return this.analyticsReadService.weekdayPerformance({
+      ...scope,
+      assetId: query.assetId,
+      since: query.since,
+      until: query.until,
+    });
+  }
+
   @Get('freshness')
   @UseGuards(JwtAuthGuard, PermissionsGuard)
   @RequireProductEntitlement('social')

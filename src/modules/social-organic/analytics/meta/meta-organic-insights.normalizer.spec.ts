@@ -3,6 +3,7 @@ import {
   normalizeFacebookPostLifetimeSnapshot,
   normalizeInstagramAccountInsights,
   normalizeInstagramMediaLifetimeSnapshot,
+  readPageSeriesByDate,
 } from './meta-organic-insights.normalizer';
 
 const base = {
@@ -518,5 +519,113 @@ describe('Meta organic post lifetime snapshot normalizers', () => {
         }),
       ).toThrow('meta_invalid_response');
     });
+  });
+});
+
+describe('readPageSeriesByDate', () => {
+  /** Meta stamps each entry with midnight at the START of the next day. */
+  const series = (name: string, values: Array<[string, number]>) => ({
+    name,
+    period: 'day',
+    values: values.map(([end_time, value]) => ({ end_time, value })),
+  });
+
+  it('files each entry under the day it describes, not its end_time', () => {
+    // 07:00Z is midnight in São Paulo. The entry stamped with the 28th covers
+    // the 27th, and filing it under the 28th would shift the whole series
+    // forward a day while still drawing a plausible chart.
+    const byDate = readPageSeriesByDate(
+      {
+        data: [
+          series('page_follows', [
+            ['2026-08-28T07:00:00+0000', 148],
+            ['2026-08-29T07:00:00+0000', 149],
+          ]),
+        ],
+      },
+      'America/Sao_Paulo',
+    );
+
+    expect([...byDate.keys()].sort()).toEqual(['2026-08-27', '2026-08-28']);
+    expect(byDate.get('2026-08-27')?.pageFollows).toBe('148');
+    expect(byDate.get('2026-08-28')?.pageFollows).toBe('149');
+  });
+
+  it('reads the day in the asset timezone, not UTC', () => {
+    // The same instant falls on two different dates: 02:00Z on the 28th is
+    // still 23:00 on the 27th in São Paulo (UTC-3). A Page filed in UTC would
+    // be off by one for every reading after 21:00 local.
+    const payload = {
+      data: [series('page_follows', [['2026-08-28T02:00:00+0000', 148]])],
+    };
+
+    expect([
+      ...readPageSeriesByDate(payload, 'America/Sao_Paulo').keys(),
+    ]).toEqual(['2026-08-26']);
+    expect([...readPageSeriesByDate(payload, 'UTC').keys()]).toEqual([
+      '2026-08-27',
+    ]);
+  });
+
+  it('merges every metric onto the day they share', () => {
+    const byDate = readPageSeriesByDate(
+      {
+        data: [
+          series('page_follows', [['2026-09-13T07:00:00+0000', 150]]),
+          series('page_daily_follows_unique', [
+            ['2026-09-13T07:00:00+0000', 1],
+          ]),
+          series('page_daily_unfollows_unique', [
+            ['2026-09-13T07:00:00+0000', 0],
+          ]),
+          series('page_messages_new_conversations_unique', [
+            ['2026-09-13T07:00:00+0000', 2],
+          ]),
+        ],
+      },
+      'America/Sao_Paulo',
+    );
+
+    expect(byDate.get('2026-09-12')).toEqual({
+      pageFollows: '150',
+      pageDailyFollows: '1',
+      pageDailyUnfollows: '0',
+      newConversations: '2',
+    });
+  });
+
+  it('leaves a metric null rather than zero when it is absent', () => {
+    // A Page whose token lacks the messaging scope answers with the other
+    // three. Storing zero conversations would be a measurement nobody made.
+    const byDate = readPageSeriesByDate(
+      { data: [series('page_follows', [['2026-09-13T07:00:00+0000', 150]])] },
+      'America/Sao_Paulo',
+    );
+
+    expect(byDate.get('2026-09-12')).toEqual({
+      pageFollows: '150',
+      pageDailyFollows: null,
+      pageDailyUnfollows: null,
+      newConversations: null,
+    });
+  });
+
+  it('keeps a measured zero, which is not the same as absent', () => {
+    const byDate = readPageSeriesByDate(
+      {
+        data: [
+          series('page_daily_follows_unique', [
+            ['2026-09-13T07:00:00+0000', 0],
+          ]),
+        ],
+      },
+      'America/Sao_Paulo',
+    );
+
+    expect(byDate.get('2026-09-12')?.pageDailyFollows).toBe('0');
+  });
+
+  it('is empty for a payload with no data rather than throwing', () => {
+    expect(readPageSeriesByDate({ data: [] }, 'UTC').size).toBe(0);
   });
 });

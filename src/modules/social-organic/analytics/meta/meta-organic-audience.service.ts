@@ -9,12 +9,15 @@ import type {
 } from '../social-organic-audience.contract';
 import { SocialOrganicAudienceWriterService } from '../social-organic-audience-writer.service';
 import { SocialOrganicSyncError } from '../social-organic-sync.error';
-import { normalizeInstagramFollowerDemographics } from './meta-organic-audience.normalizer';
 import {
+  normalizeFacebookFanDemographics,
+  normalizeInstagramFollowerDemographics,
+} from './meta-organic-audience.normalizer';
+import {
+  FACEBOOK_AUDIENCE_METRICS,
   INSTAGRAM_AUDIENCE_BREAKDOWN_KINDS,
   INSTAGRAM_AUDIENCE_BREAKDOWNS,
   INSTAGRAM_AUDIENCE_METRIC,
-  META_ORGANIC_INSIGHTS_GRAPH_VERSION,
 } from './meta-organic-insights.types';
 
 /**
@@ -134,26 +137,41 @@ export class MetaOrganicAudienceService {
         rows.push(...produced);
       }
     } else if (credential.assetType === 'facebook_page') {
-      // Nothing to collect: Meta retired Page fan demographics.
+      // City and country, one request each.
       //
-      // `page_fans_gender_age`, `page_fans_city` and `page_fans_country` answer
-      // `(#100) The value must be a valid insights metric` — verified against
-      // production on 2026-09-22, and verified to be about the metric rather
-      // than the account or the token: a metric name invented for the test
-      // returns that same error, while `page_follows` succeeds in the identical
-      // call. The same request also fails on v23 and v20, so it is a retirement
-      // across the API and not a version this project could pin back to. No
-      // replacement endpoint exposes the buckets either — field expansion,
-      // per-age/gender impression metrics and a `page_audience` guess were all
-      // tried.
+      // `period: 'day'` is load-bearing and counter-intuitive. What comes back
+      // is a lifetime stock — each day's entry is the whole distribution as of
+      // that day — but `period: 'lifetime'`, the period the retired
+      // `page_fans_*` metrics used, returns `{"data": []}` with no error at
+      // all. That silent empty is why this project spent three days believing
+      // Page geography had been retired along with the old metric names. If
+      // these ever go quiet, check the period before concluding anything.
       //
-      // The honest result is therefore zero dimensions, which surfaces in the UI
-      // as "not collected" rather than an error or an empty chart that would
-      // read as "this Page has no audience". Instagram still answers
-      // `follower_demographics`, so audience ingestion stays worth running.
-      this.logger.debug(
-        `Facebook Page audience demographics unavailable on Graph ${META_ORGANIC_INSIGHTS_GRAPH_VERSION}; skipping asset ${credential.assetId}.`,
-      );
+      // Age and gender have no replacement and are not requested: no spelling
+      // of a Page age or gender breakdown answers. That half of the Facebook
+      // audience tab stays empty, and honestly so.
+      for (const { metric, kind } of FACEBOOK_AUDIENCE_METRICS) {
+        const insights = await this.graph.getOrganicInsights({
+          objectId: credential.externalAssetId,
+          accessToken: credential.accessToken,
+          metrics: [metric],
+          period: 'day',
+          ...this.recentWindow(syncedAt),
+        });
+
+        apiCalls += insights.apiCalls;
+
+        const produced = normalizeFacebookFanDemographics({
+          ...context,
+          kind,
+          metricName: metric,
+          insights,
+        });
+
+        if (produced.length) dimensions += 1;
+
+        rows.push(...produced);
+      }
     } else {
       throw new SocialOrganicSyncError('unsupported_analytics_asset_type');
     }
@@ -173,5 +191,20 @@ export class MetaOrganicAudienceService {
     );
 
     return summary;
+  }
+
+  /**
+   * The shortest window that reliably returns today's snapshot.
+   *
+   * These metrics need a `since`/`until` — with `period=day` and no window Meta
+   * answers for its own default range, which trails the present. Three days
+   * rather than one because the newest entry is what gets stored and a Page
+   * whose insights lag by a day would otherwise produce nothing at all; the
+   * extra entries cost nothing, since only the last is read.
+   */
+  private recentWindow(syncedAt: Date): { since: number; until: number } {
+    const until = Math.floor(syncedAt.getTime() / 1000);
+
+    return { since: until - 3 * 86_400, until };
   }
 }
