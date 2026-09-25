@@ -1067,6 +1067,177 @@ run('Social analytics read against PostgreSQL', () => {
     });
   });
 
+  /**
+   * The ranked action-type table, read out of the same `actions` payload.
+   *
+   * The fixtures below reproduce the *shape* of the production account's
+   * payload — the duplicate engagement names, the four lead spellings, the two
+   * messaging counts that disagree — because those are the cases the grouping
+   * exists for and none of them can be exercised by a tidy fixture.
+   */
+  describe('ranked action types', () => {
+    const actionsConnection = '66666666-6666-4666-8666-666666666666';
+
+    beforeAll(async () => {
+      await insertConnection(actionsConnection);
+
+      // Two days, so the per-day collapse is actually exercised: collapsing
+      // once over the summed payload would give the same answer here only by
+      // accident, and the alias-switch test below is what separates them.
+      await insertFact({
+        connectionId: actionsConnection,
+        metricDate: '2027-03-10',
+        spend: '50.000000',
+        actions: {
+          counts: {
+            page_engagement: '500.000000',
+            post_engagement: '500.000000',
+            video_view: '400.000000',
+            link_click: '25.000000',
+            lead: '2.000000',
+            'onsite_conversion.lead': '2.000000',
+            'onsite_conversion.lead_grouped': '2.000000',
+            onsite_web_lead: '2.000000',
+            'onsite_conversion.messaging_conversation_started_7d': '5.000000',
+            'onsite_conversion.total_messaging_connection': '6.000000',
+          },
+        },
+      });
+      await insertFact({
+        connectionId: actionsConnection,
+        metricDate: '2027-03-11',
+        spend: '50.000000',
+        actions: {
+          counts: {
+            page_engagement: '536.000000',
+            post_engagement: '536.000000',
+            video_view: '562.000000',
+            link_click: '25.000000',
+            some_future_meta_type: '9.000000',
+          },
+        },
+      });
+    });
+
+    const actionTypes = async () => {
+      const result = await service.overview({
+        ...scope,
+        connectionId: actionsConnection,
+        since: '2027-03-10',
+        until: '2027-03-11',
+      });
+
+      return result.actionTypes;
+    };
+
+    const rowFor = async (type: string) =>
+      (await actionTypes()).find((one) => one.type === type) ?? null;
+
+    /**
+     * The headline failure this table exists to avoid. Both names carried the
+     * same figure on every day, so the answer is 1 036 — not 2 072.
+     */
+    it('counts two names for one event once', async () => {
+      const engagement = await rowFor('page_engagement');
+
+      expect(engagement?.count).toBe('1036');
+    });
+
+    it('never lists the absorbed alias as a row of its own', async () => {
+      const rows = await actionTypes();
+
+      expect(rows.map((one) => one.type)).not.toContain('post_engagement');
+    });
+
+    /** The collapse has to be visible, or the alias is simply missing. */
+    it('names the aliases it folded into the row', async () => {
+      const engagement = await rowFor('page_engagement');
+
+      expect(engagement?.absorbed).toContain('post_engagement');
+    });
+
+    it('reports four names for one lead as one lead count', async () => {
+      const leads = await rowFor('lead');
+
+      expect(leads?.count).toBe('2');
+    });
+
+    /**
+     * 5 and 6 are two counts of one overlapping thing. The fuller one is the
+     * answer; 11 would be the sum of a double count.
+     */
+    it('takes the larger member when two messaging counts disagree', async () => {
+      const conversations = await rowFor(
+        'onsite_conversion.messaging_conversation_started_7d',
+      );
+
+      expect(conversations?.count).toBe('6');
+    });
+
+    it('ranks by count, largest first', async () => {
+      const rows = await actionTypes();
+
+      expect(rows[0]?.type).toBe('page_engagement');
+      expect(rows[1]?.type).toBe('video_view');
+    });
+
+    /**
+     * A type no catalog knows still belongs in the ranking — the whole point
+     * of this table is to show what the account actually reported.
+     */
+    it('shows an uncatalogued type under its own name', async () => {
+      const unknown = await rowFor('some_future_meta_type');
+
+      expect(unknown?.count).toBe('9');
+      expect(unknown?.label).toBe('some_future_meta_type');
+      expect(unknown?.known).toBe(false);
+    });
+
+    it('marks a type that already has a card of its own', async () => {
+      expect((await rowFor('lead'))?.promoted).toBe(true);
+      expect((await rowFor('video_view'))?.promoted).toBe(false);
+    });
+
+    it('labels a catalogued type in pt-BR', async () => {
+      const video = await rowFor('video_view');
+
+      expect(video?.label).toBe('Visualizações do vídeo (3s)');
+      expect(video?.known).toBe(true);
+    });
+
+    /**
+     * A day reporting only the canonical name and a day reporting only the
+     * alias must add to the total of both. Collapsing once over the whole
+     * period would pick one name and silently drop the other day.
+     */
+    it('adds days that reported the event under different names', async () => {
+      const switching = '77777777-7777-4777-8777-777777777777';
+
+      await insertConnection(switching);
+      await insertFact({
+        connectionId: switching,
+        metricDate: '2027-04-10',
+        actions: { counts: { page_engagement: '7.000000' } },
+      });
+      await insertFact({
+        connectionId: switching,
+        metricDate: '2027-04-11',
+        actions: { counts: { post_engagement: '4.000000' } },
+      });
+
+      const result = await service.overview({
+        ...scope,
+        connectionId: switching,
+        since: '2027-04-10',
+        until: '2027-04-11',
+      });
+
+      expect(
+        result.actionTypes.find((one) => one.type === 'page_engagement')?.count,
+      ).toBe('11');
+    });
+  });
+
   describe('campaigns', () => {
     beforeAll(async () => {
       await insertCampaignEntity({

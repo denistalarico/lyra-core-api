@@ -9,12 +9,21 @@ import type { SocialAdInsightsLevel } from './meta-ads-insights.contract';
  * is a single request returning the cross of the two, which is what the
  * dashboard's grouped bar chart needs — asking for them separately would give
  * two marginal distributions that cannot be recombined into the cross.
+ *
+ * This is the only place the provider's vocabulary appears for a dimension, and
+ * `hourly` is why that separation earns its keep: the parameter's full name
+ * says the hours are cut **in the audience's timezone**, not the ad account's.
+ * That is Meta's only hourly option for this edge, so it is not a choice this
+ * code makes — but it does mean an hourly row's `metric_date` and its daypart
+ * are measured against two different clocks, which is stated on the reader and
+ * surfaced in the chart's caption rather than left for a reader to discover.
  */
 export const BREAKDOWN_PARAMS: Readonly<Record<SocialAdBreakdownKind, string>> =
   {
     age_gender: 'age,gender',
     device_platform: 'device_platform',
     publisher_platform: 'publisher_platform',
+    hourly: 'hourly_stats_aggregated_by_audience_time_zone',
   };
 
 /**
@@ -24,11 +33,18 @@ export const BREAKDOWN_PARAMS: Readonly<Record<SocialAdBreakdownKind, string>> =
  * `INGEST_LEVELS` is: the list is what a pass reports having covered, and a
  * caller-supplied one would produce coverage claims describing whatever that
  * caller happened to ask for.
+ *
+ * `hourly` goes last because it is the most expensive of the four and a pass
+ * that fails partway reports the dimensions that already landed. Measured
+ * against this account's 90 days: 484 hourly rows where `age_gender` produced
+ * 83 and `publisher_platform` 15. The ceiling is 24 rows per delivering day —
+ * fixed, unlike the audience dimensions, which is what keeps the cost bounded.
  */
 export const BREAKDOWN_KINDS: readonly SocialAdBreakdownKind[] = [
   'age_gender',
   'device_platform',
   'publisher_platform',
+  'hourly',
 ];
 
 /**

@@ -220,6 +220,53 @@ export type SocialAdConversionTotal = {
   verified: boolean;
 };
 
+/**
+ * One action type the account reported, over the period.
+ *
+ * A separate list from `conversions` above, and the distinction is the question
+ * each answers. `conversions` is a fixed catalog of commerce events, each looked
+ * up by name whether or not the account has them — the shape of a shop. This is
+ * whatever the account *actually* reported, ranked, including types no catalog
+ * knows. On the measured account `conversions` is empty and this holds 25 rows.
+ *
+ * Current period only, for the same reason `conversions` is: a type that starts
+ * appearing mid-period is an integration change, not growth.
+ */
+export type SocialAdActionTypeTotal = {
+  /** The canonical Meta type name, which is also the row's stable id. */
+  type: string;
+  /**
+   * The pt-BR label, or the raw type name when this is a type no catalog knows.
+   *
+   * Never null: a table cell needs something to draw, and an unknown type shows
+   * its own name so it can be looked up against Meta's documentation rather
+   * than appearing as a blank row.
+   */
+  label: string;
+  count: string;
+  /**
+   * Alias names folded into this row, so the collapse is visible.
+   *
+   * Meta reports one event under several names — `page_engagement` and
+   * `post_engagement` both carried 1 036 on the measured account. The table
+   * shows the canonical name once; without this field the other names would
+   * simply be missing, and anyone querying the stored payload directly would
+   * find types the dashboard denies. Empty when nothing was absorbed.
+   */
+  absorbed: readonly string[];
+  /**
+   * Whether a KPI card elsewhere already shows this same event.
+   *
+   * Leads and conversations appear here *and* as their own cards. That is not a
+   * duplicate to be removed — an operator reading "all actions" expects them —
+   * but the flag lets the interface mark them, so the row is not read as
+   * additional to the card above it.
+   */
+  promoted: boolean;
+  /** False when the type is not catalogued and is shown by its raw name. */
+  known: boolean;
+};
+
 /** Period-over-period movement, one entry per additive metric. */
 export type SocialAdAnalyticsChange = {
   spend: SocialAdChange;
@@ -276,6 +323,16 @@ export type SocialAdAnalyticsOverviewView = {
    * what is actually an integration change.
    */
   conversions: SocialAdConversionTotal[];
+
+  /**
+   * Every action type the period recorded, ranked by count, aliases collapsed.
+   *
+   * Unranked by the caller and unlimited here on purpose: the response carries
+   * all of them and the UI takes its top N. A limit applied in SQL would make
+   * the list depend on a presentation choice, and the payload is one small row
+   * per type — twenty-five on the measured account.
+   */
+  actionTypes: SocialAdActionTypeTotal[];
 
   /**
    * Whether any day inside the *current* period is still provisional.

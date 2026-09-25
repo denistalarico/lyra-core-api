@@ -81,10 +81,32 @@ export class MetaAdsBreakdownReaderService {
    *
    * - `breakdowns` names the dimension. **One dimension per request**: the
    *   Marketing API rejects `age,gender` combined with `device_platform` or
-   *   `publisher_platform`, so three dimensions are three requests and there is
+   *   `publisher_platform`, so four dimensions are four requests and there is
    *   no cheaper shape available. `age,gender` is itself one request returning
    *   the cross of the two, which is what a grouped bar chart needs — two
    *   separate marginal distributions could not be recombined into it.
+   *
+   * ## The hourly dimension measures against a second clock
+   *
+   * Every other row this reader produces is cut entirely in the ad account's
+   * timezone: `time_increment=1` gives days in that zone, and `metric_date`
+   * stores them unconverted. An hourly row's *date* is still that day — but its
+   * *daypart* is the hour in the **viewer's** timezone, because
+   * `hourly_stats_aggregated_by_audience_time_zone` is the only hourly option
+   * this edge offers.
+   *
+   * That is the right measurement for the question being asked — "when are the
+   * people I am paying for actually awake" is about their clock, not the
+   * agency's — but it means the 24 dayparts of one row's day do not partition
+   * that day for an account whose audience spans zones. Impressions still sum
+   * to the day's total (measured: 9 038 both ways over this account's 90 days,
+   * exactly), because each impression is counted once under whatever hour its
+   * viewer saw it. What does not hold is the boundary: an impression near
+   * midnight can sit in a daypart belonging to the neighbouring calendar day.
+   *
+   * Nothing here corrects for that, and nothing should — the correction would
+   * require a per-impression timezone Meta does not report. It is stated on the
+   * chart instead.
    */
   async read(input: {
     credential: ResolvedAdCredential;

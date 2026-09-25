@@ -221,6 +221,7 @@ import { AddReelAndStoryMeasures1796300000000 } from './migrations/1796300000000
 import { AddFacebookPageMeasures1796400000000 } from './migrations/1796400000000-add-facebook-page-measures';
 import { AddFacebookPageSeries1796500000000 } from './migrations/1796500000000-add-facebook-page-series';
 import { AddAdMessagingConversations1796600000000 } from './migrations/1796600000000-add-ad-messaging-conversations';
+import { AddHourlyBreakdownKind1796700000000 } from './migrations/1796700000000-add-hourly-breakdown-kind';
 import { ScopeSocialEditorialByCompany1794500000000 } from './migrations/1794500000000-scope-social-editorial-by-company';
 import { ScopeBrandKitByCompany1794510000000 } from './migrations/1794510000000-scope-brand-kit-by-company';
 import { ScopeCreativeStudioByCompany1794520000000 } from './migrations/1794520000000-scope-creative-studio-by-company';
@@ -474,5 +475,6 @@ export const AgencyDataSource = new DataSource({
     AddFacebookPageMeasures1796400000000,
     AddFacebookPageSeries1796500000000,
     AddAdMessagingConversations1796600000000,
+    AddHourlyBreakdownKind1796700000000,
   ],
 });

@@ -14,6 +14,7 @@ const BREAKDOWN_KINDS = [
   'age_gender',
   'device_platform',
   'publisher_platform',
+  'hourly',
 ] as const satisfies readonly SocialAdBreakdownKind[];
 
 /**

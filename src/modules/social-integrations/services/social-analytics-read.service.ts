@@ -13,6 +13,13 @@ import {
   META_CONVERSION_CATALOG,
   readConversion,
 } from '../analytics/meta-conversion-catalog';
+import {
+  META_ACTION_TYPE_GROUPS,
+  findActionTypeGroup,
+  findActionTypeLabel,
+  isGroupedActionType,
+  readActionGroup,
+} from '../analytics/meta-action-type-catalog';
 import type { MetaActionBreakdown } from '../sync/meta-action-mapping';
 import {
   SocialAdAnalyticsPeriod,
@@ -24,9 +31,14 @@ import { SocialAdEntity } from '../entities/social-ad-entity.entity';
 import { SocialAdMetricDailyEntity } from '../entities/social-ad-metric-daily.entity';
 import { SocialAdSyncRunEntity } from '../entities/social-ad-sync-run.entity';
 import { shiftDay } from '../sync/insights-window';
-import { formatScaledAmount, parseScaledAmount } from '../sync/metric-number';
+import {
+  formatScaledAmount,
+  parseCountText,
+  parseScaledAmount,
+} from '../sync/metric-number';
 import { planBackfillChunks } from '../sync/social-ad-backfill-plan';
 import type {
+  SocialAdActionTypeTotal,
   SocialAdAnalyticsChange,
   SocialAdAnalyticsOverviewView,
   SocialAdConversionTotal,
@@ -343,7 +355,7 @@ export class SocialAnalyticsReadService {
       currentReach,
       previousReach,
       counts,
-      conversions,
+      actionFacts,
     ] = await Promise.all([
       this.aggregate(connection.id, period),
       this.aggregate(connection.id, comparison),
@@ -356,7 +368,10 @@ export class SocialAnalyticsReadService {
       // measurement and the other a sum.
       this.findPeriodReach(connection, comparison),
       this.countInventory(connection.id, period),
-      this.aggregateConversions(connection.id, period),
+      // One pass over the action payloads, two lists out. Both read the same
+      // rows with the same filter, so a second query would double the scan to
+      // re-derive facts already in hand.
+      this.aggregateActionFacts(connection.id, period),
     ]);
 
     return {
@@ -372,7 +387,8 @@ export class SocialAnalyticsReadService {
       previous: this.toTotals(previous, previousReach),
       change: this.toChange(current, previous),
       counts,
-      conversions,
+      conversions: actionFacts.conversions,
+      actionTypes: actionFacts.actionTypes,
       hasPartialData: toCount(current.partial_days) > 0n,
       lastFactDate,
     };
@@ -409,10 +425,13 @@ export class SocialAnalyticsReadService {
    * `messagingConversations` took — not to index a JSONB path that twenty
    * events share.
    */
-  private async aggregateConversions(
+  private async aggregateActionFacts(
     connectionId: string,
     period: SocialAdAnalyticsPeriod,
-  ): Promise<SocialAdConversionTotal[]> {
+  ): Promise<{
+    conversions: SocialAdConversionTotal[];
+    actionTypes: SocialAdActionTypeTotal[];
+  }> {
     const rows = await this.metricsRepository
       .createQueryBuilder('fact')
       .select('fact.actions', 'actions')
@@ -442,11 +461,16 @@ export class SocialAnalyticsReadService {
       { count: bigint; value: bigint; hasValue: boolean }
     >();
     const seen = new Set<string>();
+    // Keyed by canonical type. A grouped type accumulates under its canonical
+    // name so the four names Meta sends for one lead land in one entry.
+    const byType = new Map<string, bigint>();
 
     for (const row of rows) {
       spend += parseScaledAmount(row.spend) ?? 0n;
 
       const breakdown = readStoredActions(row.actions);
+
+      accumulateActionTypes(breakdown, byType);
 
       for (const definition of META_CONVERSION_CATALOG) {
         const one = readConversion(breakdown, definition);
@@ -478,37 +502,36 @@ export class SocialAnalyticsReadService {
 
     // Catalog order, not insertion order: the response should not reorder
     // itself because one day's payload happened to list events differently.
-    return META_CONVERSION_CATALOG.filter((one) => seen.has(one.id)).map(
-      (definition) => {
-        const running = totals.get(definition.id) ?? {
-          count: 0n,
-          value: 0n,
-          hasValue: false,
-        };
+    const conversions = META_CONVERSION_CATALOG.filter((one) =>
+      seen.has(one.id),
+    ).map((definition) => {
+      const running = totals.get(definition.id) ?? {
+        count: 0n,
+        value: 0n,
+        hasValue: false,
+      };
 
-        // Null unless a value actually arrived. A monetary event the account
-        // reported without a price — a purchase with no revenue configured on
-        // the pixel — has no value and no ROAS, and rendering either as zero
-        // would report a working shop as one that earns nothing.
-        const value = running.hasValue ? running.value : null;
+      // Null unless a value actually arrived. A monetary event the account
+      // reported without a price — a purchase with no revenue configured on
+      // the pixel — has no value and no ROAS, and rendering either as zero
+      // would report a working shop as one that earns nothing.
+      const value = running.hasValue ? running.value : null;
 
-        return {
-          id: definition.id,
-          label: definition.label,
-          group: definition.group,
-          count: running.count.toString(),
-          value: value === null ? null : formatScaledAmount(value),
-          costPer: formatDerived(
-            divideScaled(spend, running.count * 1_000_000n),
-          ),
-          // Null when nothing was spent too — the same zero-denominator rule
-          // every other KPI follows.
-          roas:
-            value === null ? null : formatDerived(divideScaled(value, spend)),
-          verified: definition.verified,
-        };
-      },
-    );
+      return {
+        id: definition.id,
+        label: definition.label,
+        group: definition.group,
+        count: running.count.toString(),
+        value: value === null ? null : formatScaledAmount(value),
+        costPer: formatDerived(divideScaled(spend, running.count * 1_000_000n)),
+        // Null when nothing was spent too — the same zero-denominator rule
+        // every other KPI follows.
+        roas: value === null ? null : formatDerived(divideScaled(value, spend)),
+        verified: definition.verified,
+      };
+    });
+
+    return { conversions, actionTypes: rankActionTypes(byType) };
   }
 
   /**
@@ -1684,6 +1707,81 @@ function readStoredActions(value: unknown): MetaActionBreakdown {
     counts: readStringMap(payload.counts),
     values: readStringMap(payload.values),
   };
+}
+
+/**
+ * Adds one day's action counts into the running per-type totals.
+ *
+ * The collapse runs **per day**, before the addition, for the same reason the
+ * conversion aliases do: a period where Meta reported `page_engagement` on some
+ * days and `post_engagement` on others would, if collapsed once at the end,
+ * take the larger of two partial sums and lose the days the other name covered.
+ * A day is the grain Meta de-duplicated at, so it is the grain the rule runs at.
+ *
+ * Types no group claims accumulate under their own name — this catalog is not
+ * a filter, and a type it has never heard of still belongs in the ranking.
+ */
+function accumulateActionTypes(
+  breakdown: MetaActionBreakdown,
+  totals: Map<string, bigint>,
+): void {
+  const add = (type: string, amount: bigint) => {
+    totals.set(type, (totals.get(type) ?? 0n) + amount);
+  };
+
+  for (const group of META_ACTION_TYPE_GROUPS) {
+    const collapsed = readActionGroup(breakdown, group);
+
+    if (collapsed !== null) add(group.canonical, BigInt(collapsed));
+  }
+
+  for (const [type, stored] of Object.entries(breakdown.counts)) {
+    // Already counted under its group's canonical name above. Adding it here
+    // too is precisely the double count the grouping exists to prevent.
+    if (isGroupedActionType(type)) continue;
+
+    const parsed = parseCountText(stored.split('.')[0]);
+
+    if (parsed !== null) add(type, BigInt(parsed));
+  }
+}
+
+/**
+ * The per-type totals as a ranked list, largest first.
+ *
+ * Ranked here rather than in SQL because the collapse cannot be expressed as a
+ * `GROUP BY`: the winning member of a group is chosen per day and then summed,
+ * which is two aggregations in sequence over a JSONB payload. The list is one
+ * small row per type — twenty-five on the measured account — so ordering it in
+ * the process costs nothing worth a query.
+ *
+ * Ties break on the type name so the order is stable between requests; a table
+ * whose rows swap places on refresh reads as a data change.
+ */
+function rankActionTypes(
+  totals: Map<string, bigint>,
+): SocialAdActionTypeTotal[] {
+  return [...totals.entries()]
+    .sort(([leftType, left], [rightType, right]) => {
+      if (left !== right) return left > right ? -1 : 1;
+
+      return leftType.localeCompare(rightType);
+    })
+    .map(([type, count]) => {
+      const group = findActionTypeGroup(type);
+      const label = findActionTypeLabel(type);
+
+      return {
+        type,
+        // The raw name when nothing catalogues it, so the row is looked up
+        // rather than blank. `known` is what lets the UI mark the difference.
+        label: label ?? type,
+        count: count.toString(),
+        absorbed: group?.aliases ?? [],
+        promoted: group?.promoted ?? false,
+        known: label !== null,
+      };
+    });
 }
 
 function readStringMap(value: unknown): Record<string, string> {

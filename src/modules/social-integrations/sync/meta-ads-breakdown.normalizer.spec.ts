@@ -138,6 +138,94 @@ describe('normalizeBreakdownRow identity and key', () => {
   });
 });
 
+/**
+ * The hourly dimension, which is the one whose stored key is not Meta's own
+ * string. Every test here is about that fold being total and lossless, because
+ * a fold that silently mapped two different ranges onto one key would double
+ * that bucket and leave the chart adding up correctly while being wrong.
+ */
+describe('normalizeBreakdownRow hourly key', () => {
+  function hourRow(value: unknown) {
+    return normalizeBreakdownRow(
+      row({ hourly_stats_aggregated_by_audience_time_zone: value }),
+      context({ breakdownKind: 'hourly' }),
+    );
+  }
+
+  it("folds Meta's hour range to the stored daypart key", () => {
+    expect(hourRow('09:00:00 - 09:59:59')?.breakdownKey).toBe('h09');
+  });
+
+  it('keeps the zero padding, so key order is clock order', () => {
+    // The whole reason the key is `h09` and not `h9`: the view sorts dayparts
+    // by key, and an unpadded key would place 10h before 9h.
+    const keys = [
+      '00:00:00 - 00:59:59',
+      '09:00:00 - 09:59:59',
+      '10:00:00 - 10:59:59',
+      '23:00:00 - 23:59:59',
+    ]
+      .map((value) => hourRow(value)?.breakdownKey)
+      .filter((key): key is string => key !== undefined);
+
+    expect(keys).toEqual(['h00', 'h09', 'h10', 'h23']);
+    expect([...keys].sort()).toEqual(keys);
+  });
+
+  it('covers all 24 dayparts, so no delivering hour is ever skipped', () => {
+    for (let hour = 0; hour < 24; hour += 1) {
+      const padded = String(hour).padStart(2, '0');
+
+      expect(hourRow(`${padded}:00:00 - ${padded}:59:59`)?.breakdownKey).toBe(
+        `h${padded}`,
+      );
+    }
+  });
+
+  it('tolerates the range being written without spaces', () => {
+    expect(hourRow('14:00:00-14:59:59')?.breakdownKey).toBe('h14');
+  });
+
+  it('refuses a range that is not one whole hour', () => {
+    // A half-hour or a multi-hour span would otherwise collapse onto the key of
+    // its start hour, doubling that bucket rather than being visibly skipped.
+    expect(hourRow('09:00:00 - 09:29:59')).toBeNull();
+    expect(hourRow('09:00:00 - 11:59:59')).toBeNull();
+  });
+
+  it('refuses an hour outside the day', () => {
+    expect(hourRow('24:00:00 - 24:59:59')).toBeNull();
+  });
+
+  it('refuses a missing or non-string daypart rather than inventing one', () => {
+    expect(hourRow(undefined)).toBeNull();
+    expect(hourRow(9)).toBeNull();
+  });
+
+  it('never yields a key a chart could mistake for a number', () => {
+    // The `h` prefix is load-bearing: a bare `09` is a key some consumer
+    // eventually does arithmetic on, and a breakdown key is an opaque join
+    // value in every dimension.
+    expect(hourRow('00:00:00 - 00:59:59')?.breakdownKey).toBe('h00');
+    expect(Number(hourRow('00:00:00 - 00:59:59')?.breakdownKey)).toBeNaN();
+  });
+
+  it('reads the hourly row through the same measurement path as any other', () => {
+    // The dimension is new; the fact shape is not. Same columns, same decimal
+    // text, same null reach rule.
+    const fact = hourRow('16:00:00 - 16:59:59');
+
+    expect(fact).toMatchObject({
+      breakdownKind: 'hourly',
+      breakdownKey: 'h16',
+      metricDate: '2026-09-01',
+      spend: '13.420000',
+      impressions: '5351',
+      reach: null,
+    });
+  });
+});
+
 describe('normalizeBreakdownRow measurement', () => {
   it('carries the day verbatim, with no conversion', () => {
     const fact = normalizeBreakdownRow(

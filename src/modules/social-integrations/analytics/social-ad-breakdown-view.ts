@@ -83,6 +83,24 @@ const PUBLISHER_LABELS: Readonly<Record<string, string>> = {
 };
 
 /**
+ * The stored daypart key rendered as the hour it names.
+ *
+ * `h09` becomes `09h`, not `09:00 - 09:59`. The range is what Meta sends and it
+ * is accurate, but it is also twice the width in an axis label that has 24 of
+ * them, and the second half carries no information the first does not — a
+ * reader who sees `09h` and `10h` side by side already knows where one ends.
+ *
+ * A key that does not match falls through to itself, like every other label
+ * here. It should be unreachable: the normalizer refuses anything but `h00`
+ * through `h23`, so a key arriving here in another shape predates that
+ * normalizer, and showing it raw is how that becomes visible instead of being
+ * rendered as a plausible wrong hour.
+ */
+function describeHourKey(key: string): string {
+  return /^h\d{2}$/.test(key) ? `${key.slice(1)}h` : key;
+}
+
+/**
  * A stored key rendered for a person.
  *
  * Unknown keys fall through to the key itself rather than to a placeholder. Meta
@@ -111,24 +129,33 @@ export function describeBreakdownKey(
 
   if (kind === 'device_platform') return DEVICE_LABELS[key] ?? key;
 
+  if (kind === 'hourly') return describeHourKey(key);
+
   return PUBLISHER_LABELS[key] ?? key;
 }
 
 /**
  * Buckets in the order a chart should draw them.
  *
- * Age/gender sorts by its key, so the age brackets stay in their natural order
- * and each age holds its genders together — the arrangement a grouped bar chart
- * needs, and one that does not move as spend does. Every other dimension sorts
- * by spend descending, which is what a pie or a ranked bar wants, with the key
- * as a tiebreak so equal spend does not produce an order that depends on
- * Postgres's physical row order.
+ * Age/gender and hourly sort by their key, so the age brackets stay in their
+ * natural order and each age holds its genders together, and so the 24 dayparts
+ * run from midnight to midnight. Both are **ordinal** dimensions, and ranking
+ * an ordinal axis by size destroys the only thing it is read for: a daypart
+ * chart sorted by spend would put 16h next to 09h and make the shape of a day
+ * unreadable, which is the entire question "por hora" asks.
+ *
+ * `h00`…`h23` is zero-padded for exactly this: the key order is the clock
+ * order, with no comparator that has to know the keys are hours.
+ *
+ * Every other dimension sorts by spend descending, which is what a pie or a
+ * ranked bar wants, with the key as a tiebreak so equal spend does not produce
+ * an order that depends on Postgres's physical row order.
  */
 export function sortBreakdownBuckets(
   kind: SocialAdBreakdownKind,
   buckets: SocialAdBreakdownBucket[],
 ): SocialAdBreakdownBucket[] {
-  if (kind === 'age_gender') {
+  if (kind === 'age_gender' || kind === 'hourly') {
     return [...buckets].sort((left, right) =>
       left.key.localeCompare(right.key),
     );

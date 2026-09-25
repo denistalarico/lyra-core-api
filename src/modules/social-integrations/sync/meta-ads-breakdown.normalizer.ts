@@ -14,13 +14,31 @@ const OBJECT_ID_PATTERN = /^\d+$/;
 /**
  * The shape a stored breakdown key may take.
  *
- * Meta's values for these three dimensions are lowercase words, digits, hyphens
- * and underscores — `25-34`, `mobile_app`, `instagram`, `65+`, `unknown` — plus
- * the `|` this normalizer joins an age/gender pair with. A value outside this
- * alphabet is not a dimension value this code understands, and storing it would
- * put an unlabelled key in a chart legend.
+ * Meta's values for the audience dimensions are lowercase words, digits,
+ * hyphens and underscores — `25-34`, `mobile_app`, `instagram`, `65+`,
+ * `unknown` — plus the `|` this normalizer joins an age/gender pair with. A
+ * value outside this alphabet is not a dimension value this code understands,
+ * and storing it would put an unlabelled key in a chart legend.
+ *
+ * The hourly dimension is the one that does not arrive in this alphabet, and
+ * it is folded to one (`h09`) before it gets here rather than by widening the
+ * pattern. Widening it to admit spaces and colons would also admit them for
+ * every other dimension, where such a value really would mean a payload this
+ * code had misread.
  */
 const BREAKDOWN_KEY_PATTERN = /^[a-z0-9_+|-]+$/;
+
+/**
+ * Meta's rendering of one whole hour: `09:00:00 - 09:59:59`.
+ *
+ * Anchored on both the start and the end, and on the end's `:59:59`, because
+ * the point of matching it is to be sure the row really is one of the 24 whole
+ * hours before folding it to a start hour. A range Meta might introduce later
+ * that is not a whole hour — half-hours, or a span — would fail this and be
+ * skipped and counted, rather than silently collapsing two spans onto one key
+ * and doubling that bucket.
+ */
+const HOURLY_RANGE_PATTERN = /^(\d{2}):00:00 ?- ?(\d{2}):59:59$/;
 
 /** The column's own ceiling; a longer key is a payload this code misread. */
 const MAX_BREAKDOWN_KEY_LENGTH = 64;
@@ -138,10 +156,13 @@ export function normalizeBreakdownRow(
  * that the key is derivable from the pair in exactly one way. A second ordering
  * anywhere would produce rows that never collide with the ones already stored.
  *
- * Meta reports `unknown` as a real bucket for every one of these dimensions, and
- * it is kept: it carries genuine delivery, and dropping it would make the
+ * Meta reports `unknown` as a real bucket for each of the audience dimensions,
+ * and it is kept: it carries genuine delivery, and dropping it would make the
  * buckets quietly fail to add up to the account total — the one property a
- * reader checks.
+ * reader checks. The hourly dimension has no such bucket, because every
+ * impression happened at some hour; a daypart that is simply absent from a
+ * day's rows had no delivery, which is a different statement and one the read
+ * layer renders as a zero rather than a gap.
  */
 function readBreakdownKey(
   row: Record<string, unknown>,
@@ -160,7 +181,49 @@ function readBreakdownKey(
     return bounded(readKeyPart(row.device_platform));
   }
 
+  if (kind === 'hourly') {
+    return bounded(
+      readHourKey(row.hourly_stats_aggregated_by_audience_time_zone),
+    );
+  }
+
   return bounded(readKeyPart(row.publisher_platform));
+}
+
+/**
+ * Meta's hour range folded to the key this table stores: `h00` … `h23`.
+ *
+ * The only dimension whose stored key is not the provider's own string, and the
+ * only one where that is right. `09:00:00 - 09:59:59` is a *rendering* of an
+ * hour, not an identifier for it: it carries three redundant fields, it is 19
+ * of the column's 64 characters, and it sorts correctly only by the accident of
+ * Meta zero-padding the first digit. `h09` identifies the same bucket, sorts in
+ * the order a daypart chart draws, and is re-rendered on read the way every
+ * other key in this table is.
+ *
+ * The `h` prefix is not decoration. A bare `09` would be a key that some
+ * consumer eventually reads as the number nine, and the one thing a breakdown
+ * key must never be is arithmetic — it is an opaque join value, and the prefix
+ * makes that true by construction.
+ *
+ * An hour outside 00–23, or a range whose two halves disagree, is refused.
+ * Meta has never sent either; the check is here because the alternative to
+ * refusing is storing a 25th daypart that every chart would draw and no reader
+ * could explain.
+ */
+function readHourKey(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+
+  const match = HOURLY_RANGE_PATTERN.exec(value.trim());
+  if (!match) return null;
+
+  const [, start, end] = match;
+  if (start !== end) return null;
+
+  const hour = Number(start);
+  if (!Number.isInteger(hour) || hour < 0 || hour > 23) return null;
+
+  return `h${start}`;
 }
 
 /**

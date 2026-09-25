@@ -399,4 +399,174 @@ run('Social ad breakdowns against PostgreSQL', () => {
       expect(result.coveredDays).toBe(1);
     });
   });
+
+  /**
+   * The daypart dimension, against the real constraint.
+   *
+   * Everything here is about the two properties that separate `hourly` from the
+   * three audience dimensions: its buckets are ordinal, so the read has to
+   * return them in clock order rather than by size, and its reach is inflated
+   * by construction, so the read must refuse to total it — the same refusal as
+   * the other dimensions but for a reason that bites much harder.
+   */
+  describe('the hourly dimension', () => {
+    it('is accepted by the widened CHECK constraint', async () => {
+      // The migration is the whole of Fatia B's schema change; if it has not
+      // run, this insert fails instead of the assertion.
+      const key = 'h07';
+
+      await expect(
+        writer.upsert([
+          fact({
+            breakdownKind: 'hourly',
+            breakdownKey: key,
+            metricDate: '2026-11-01',
+          }),
+        ]),
+      ).resolves.toBeGreaterThan(0);
+    });
+
+    it('returns the dayparts in clock order, never by size', async () => {
+      // The busiest hour is deliberately not the first one written, and not the
+      // first one expected back: a daypart axis sorted by spend would put 16h
+      // beside 07h and destroy the shape of the day, which is the only thing
+      // the chart is read for.
+      await writer.upsert([
+        fact({
+          breakdownKind: 'hourly',
+          breakdownKey: 'h16',
+          metricDate: '2026-11-02',
+          spend: '90.000000',
+          impressions: '900',
+        }),
+        fact({
+          breakdownKind: 'hourly',
+          breakdownKey: 'h00',
+          metricDate: '2026-11-02',
+          spend: '1.000000',
+          impressions: '10',
+        }),
+        fact({
+          breakdownKind: 'hourly',
+          breakdownKey: 'h07',
+          metricDate: '2026-11-02',
+          spend: '50.000000',
+          impressions: '500',
+        }),
+      ]);
+
+      const result = await reader.breakdown({
+        tenantId,
+        workspaceId,
+        agencyClientId: null,
+        connectionId,
+        kind: 'hourly',
+        since: '2026-11-02',
+        until: '2026-11-02',
+      });
+
+      expect(result.buckets.map((bucket) => bucket.key)).toEqual([
+        'h00',
+        'h07',
+        'h16',
+      ]);
+    });
+
+    it('labels each daypart as the hour it names', async () => {
+      await writer.upsert([
+        fact({
+          breakdownKind: 'hourly',
+          breakdownKey: 'h09',
+          metricDate: '2026-11-03',
+        }),
+      ]);
+
+      const result = await reader.breakdown({
+        tenantId,
+        workspaceId,
+        agencyClientId: null,
+        connectionId,
+        kind: 'hourly',
+        since: '2026-11-03',
+        until: '2026-11-03',
+      });
+
+      expect(result.buckets.find((bucket) => bucket.key === 'h09')?.label).toBe(
+        '09h',
+      );
+    });
+
+    it('sums impressions across days but still refuses a period reach', async () => {
+      // Both halves of the request "impressões e alcance por hora" in one test.
+      // Impressions are counted once each, under the hour their viewer saw
+      // them, so they add up. Reach counts the same person in every hour they
+      // were reached in — measured at ~13% inflation on the production account
+      // — so there is no period figure to return.
+      await writer.upsert([
+        fact({
+          breakdownKind: 'hourly',
+          breakdownKey: 'h20',
+          metricDate: '2026-11-04',
+          impressions: '120',
+          reach: '80',
+        }),
+        fact({
+          breakdownKind: 'hourly',
+          breakdownKey: 'h20',
+          metricDate: '2026-11-05',
+          impressions: '130',
+          reach: '90',
+        }),
+      ]);
+
+      const result = await reader.breakdown({
+        tenantId,
+        workspaceId,
+        agencyClientId: null,
+        connectionId,
+        kind: 'hourly',
+        since: '2026-11-04',
+        until: '2026-11-05',
+      });
+
+      const bucket = result.buckets.find((item) => item.key === 'h20');
+
+      expect(bucket?.impressions).toBe('250');
+      expect(bucket?.reach).toBeNull();
+    });
+
+    it('does not collide with another dimension using the same key text', async () => {
+      // `breakdown_kind` is in the unique index for exactly this: Meta's
+      // vocabularies overlap across dimensions, and a daypart key is short
+      // enough to collide with something by accident.
+      const key = 'h11';
+
+      await writer.upsert([
+        fact({
+          breakdownKind: 'hourly',
+          breakdownKey: key,
+          metricDate: '2026-11-06',
+          spend: '3.000000',
+        }),
+        fact({
+          breakdownKind: 'device_platform',
+          breakdownKey: key,
+          metricDate: '2026-11-06',
+          spend: '7.000000',
+        }),
+      ]);
+
+      const rows = await query<{ breakdown_kind: string; spend: string }>(
+        `SELECT "breakdown_kind", "spend" FROM "social_ad_breakdown_daily"
+          WHERE "breakdown_key" = $1 AND "metric_date" = '2026-11-06'
+          ORDER BY "breakdown_kind"`,
+        [key],
+      );
+
+      expect(rows).toEqual([
+        { breakdown_kind: 'device_platform', spend: '7.000000' },
+        { breakdown_kind: 'hourly', spend: '3.000000' },
+      ]);
+    });
+  });
 });

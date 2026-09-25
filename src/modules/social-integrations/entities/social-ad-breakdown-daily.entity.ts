@@ -12,7 +12,7 @@ import type { SocialAdEntityLevel } from './social-ad-entity.entity';
 /**
  * The Meta breakdown dimensions this pipeline ingests.
  *
- * Three, and each is a separate provider request: the Marketing API refuses to
+ * Four, and each is a separate provider request: the Marketing API refuses to
  * combine `age,gender` with `device_platform` or `publisher_platform` in one
  * call, so there is no version of this that costs fewer requests. The union is
  * mirrored by a CHECK constraint, unlike `source` on the facts table — that one
@@ -20,14 +20,28 @@ import type { SocialAdEntityLevel } from './social-ad-entity.entity';
  * always arrives with a reader that has to know how to label its keys, so the
  * constraint is a useful place for the mistake to surface.
  *
- * Deliberately absent: `country`, `region`, `hourly_stats_*`, `placement`.
- * Nothing in the dashboard asks for them, and every extra dimension is another
- * full copy of the window's rows against a CPU-metered quota.
+ * `hourly` is the daypart dimension, Meta's
+ * `hourly_stats_aggregated_by_audience_time_zone`. Named for what it measures
+ * rather than transliterated, because the provider's spelling names a *choice*
+ * — the figures are cut in the viewer's timezone, not the advertiser's — and
+ * that choice belongs in the reader's documentation and the chart's caption,
+ * not in a stored enum every query has to repeat. The Graph spelling lives in
+ * `BREAKDOWN_PARAMS`, which is the one place provider vocabulary belongs.
+ *
+ * It is also the only dimension of the four whose buckets cover a *closed set
+ * of known size*: exactly 24 dayparts, always, where the audience dimensions
+ * grow whenever Meta adds a platform. That is why a missing hour is readable as
+ * "no delivery" rather than "a bucket this code did not recognize".
+ *
+ * Deliberately absent: `country`, `region`, `placement`. Nothing in the
+ * dashboard asks for them, and every extra dimension is another full copy of
+ * the window's rows against a CPU-metered quota.
  */
 export type SocialAdBreakdownKind =
   | 'age_gender'
   | 'device_platform'
-  | 'publisher_platform';
+  | 'publisher_platform'
+  | 'hourly';
 
 /**
  * Paid delivery for one object on one day, split by one breakdown dimension.
@@ -100,7 +114,7 @@ export type SocialAdBreakdownKind =
 )
 @Check(
   'CK_social_ad_breakdown_daily_kind',
-  `"breakdown_kind" IN ('age_gender', 'device_platform', 'publisher_platform')`,
+  `"breakdown_kind" IN ('age_gender', 'device_platform', 'publisher_platform', 'hourly')`,
 )
 @Check(
   'CK_social_ad_breakdown_daily_non_negative',
@@ -157,6 +171,13 @@ export class SocialAdBreakdownDailyEntity {
    * join key between a stored row and a label the read layer supplies — a
    * "friendlier" value written here would make old rows unmatchable the first
    * time that friendliness was revised.
+   *
+   * `hourly` is the one dimension whose key is not Meta's own string, and the
+   * exception proves the rule: the provider reports `09:00:00 - 09:59:59`, which
+   * is a *rendering* of the hour rather than an identifier for it, and storing
+   * it would be storing a format. The stored `h09` is derived from it by a total
+   * function over the 24 values the dimension can take, so nothing is lost and
+   * the key sorts in the order a daypart chart draws.
    */
   @Column({ name: 'breakdown_key', type: 'varchar', length: 64 })
   breakdownKey!: string;
