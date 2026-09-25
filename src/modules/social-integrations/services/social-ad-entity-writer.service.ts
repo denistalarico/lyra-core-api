@@ -81,6 +81,15 @@ export const REFRESHED_COLUMNS = [
   'destination_type',
   'destination_raw',
   'destination_observed_at',
+  /**
+   * Refreshed, because an ad's creative is replaceable in Ads Manager and the
+   * stored id must follow it — a stale one resolves to the picture of an ad
+   * that is no longer running, which is worse than no picture.
+   *
+   * Levels that cannot carry one write NULL on every run, so refreshing them
+   * changes nothing.
+   */
+  'creative_id',
   'daily_budget_minor',
   'lifetime_budget_minor',
   'budget_remaining_minor',
@@ -165,6 +174,7 @@ export class SocialAdEntityWriterService {
             destinationType: row.destinationType,
             destinationRaw: row.destinationRaw,
             destinationObservedAt: row.destinationObservedAt,
+            creativeId: row.creativeId,
             dailyBudgetMinor: row.dailyBudgetMinor,
             lifetimeBudgetMinor: row.lifetimeBudgetMinor,
             budgetRemainingMinor: row.budgetRemainingMinor,

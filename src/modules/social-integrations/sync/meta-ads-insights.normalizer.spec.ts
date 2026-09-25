@@ -374,6 +374,147 @@ describe('normalizeMetricRow — ad set level', () => {
   });
 });
 
+/**
+ * Ad level — the grain at which "which creative worked" can be answered.
+ *
+ * `AD_ROW` carries all three ids because Meta returns all three at this level,
+ * taken from a real `level=ad` read of the production account.
+ */
+describe('normalizeMetricRow — ad level', () => {
+  const AD_ROW = {
+    ...ACCOUNT_ROW,
+    ad_id: '120250205947130411',
+    adset_id: '120250205947140411',
+    campaign_id: '120250205356510411',
+  };
+
+  const adContext = () => context({ entityLevel: 'ad' });
+
+  it('keys the row by the ad, not by its ad set', () => {
+    // The same distinction the ad set level draws against its campaign. One ad
+    // set routinely runs several ads; keying on the ad set would collapse them
+    // onto one row per day and overwrite them in turn.
+    const row = normalizeMetricRow(AD_ROW, adContext());
+
+    expect(row).toMatchObject({
+      entityLevel: 'ad',
+      entityExternalId: '120250205947130411',
+    });
+  });
+
+  it('carries the campaign as the parent, never the ad set', () => {
+    // `campaign_external_id` is indexed to answer "this campaign's objects".
+    // Writing an ad set id into it would make that index point at objects that
+    // are not campaigns; a reader wanting the ad set joins the mirror instead.
+    const row = normalizeMetricRow(AD_ROW, adContext());
+
+    expect(row?.campaignExternalId).toBe('120250205356510411');
+    expect(row?.campaignExternalId).not.toBe(AD_ROW.adset_id);
+  });
+
+  it('keeps two ads of one ad set as two distinct facts', () => {
+    const first = normalizeMetricRow(AD_ROW, adContext());
+    const second = normalizeMetricRow(
+      { ...AD_ROW, ad_id: '120250205947150411' },
+      adContext(),
+    );
+
+    expect(first?.entityExternalId).not.toBe(second?.entityExternalId);
+    // Same campaign, so a campaign roll-up still finds both.
+    expect(first?.campaignExternalId).toBe(second?.campaignExternalId);
+  });
+
+  it('normalizes an ad that has no row in the hierarchy mirror', () => {
+    // An ad created since the last hierarchy sweep must still get its spend
+    // recorded; only its name and thumbnail are missing, which the read layer
+    // renders as a placeholder.
+    const row = normalizeMetricRow(
+      { ...AD_ROW, ad_id: '999999999999999' },
+      adContext(),
+    );
+
+    expect(row?.entityExternalId).toBe('999999999999999');
+  });
+
+  it('skips an ad row with no usable ad id', () => {
+    for (const adId of [undefined, '', 'act_1', 'abc', null, 12345]) {
+      expect(
+        normalizeMetricRow({ ...AD_ROW, ad_id: adId }, adContext()),
+      ).toBeNull();
+    }
+  });
+
+  it.each(['campaign_id', 'adset_id'] as const)(
+    'skips an ad row missing %s, which Meta always sends with the rest',
+    (field) => {
+      // Stricter than storage requires — `adset_id` is written nowhere by an
+      // ad-level fact — and that is the point: the three ids arrive together
+      // from this edge, so a payload carrying only some of them is not an ad
+      // this code recognises.
+      expect(
+        normalizeMetricRow({ ...AD_ROW, [field]: undefined }, adContext()),
+      ).toBeNull();
+    },
+  );
+
+  it('ignores ad_id at the levels that are not about an ad', () => {
+    // A stray field must never change what a row is keyed by.
+    expect(
+      normalizeMetricRow(AD_ROW, context({ entityLevel: 'adset' })),
+    ).toMatchObject({ entityExternalId: '120250205947140411' });
+
+    expect(
+      normalizeMetricRow(AD_ROW, context({ entityLevel: 'campaign' })),
+    ).toMatchObject({ entityExternalId: '120250205356510411' });
+
+    expect(
+      normalizeMetricRow(AD_ROW, context({ entityLevel: 'account' })),
+    ).toMatchObject({ entityExternalId: 'act_415877197389621' });
+  });
+
+  it('measures an ad row exactly as it measures the coarser levels', () => {
+    const account = normalizeMetricRow(ACCOUNT_ROW, context());
+    const ad = normalizeMetricRow(AD_ROW, adContext());
+
+    for (const field of [
+      'spend',
+      'impressions',
+      'reach',
+      'clicks',
+      'linkClicks',
+      'leads',
+      'conversions',
+      'conversionValue',
+      'videoViews',
+    ] as const) {
+      expect(ad?.[field]).toEqual(account?.[field]);
+    }
+
+    expect(ad?.actions).toEqual(account?.actions);
+  });
+
+  it('stores no creative on the fact', () => {
+    // A picture is a rendering detail of the hierarchy mirror, not a
+    // measurement. The fact carries the ad's id and the read layer joins for
+    // the rest — so a creative swapped in Ads Manager does not rewrite history.
+    const row = normalizeMetricRow(
+      { ...AD_ROW, creative: { id: '1606435724534548' } },
+      adContext(),
+    );
+
+    expect(JSON.stringify(row)).not.toContain('1606435724534548');
+  });
+
+  it('keeps reach nullable rather than zero at ad level too', () => {
+    const row = normalizeMetricRow(
+      { ...AD_ROW, reach: undefined },
+      adContext(),
+    );
+
+    expect(row?.reach).toBeNull();
+  });
+});
+
 describe('normalizeMetricRow — absence and invalidity', () => {
   it('reads an omitted metric as zero, because Meta omits what is zero', () => {
     const row = normalizeMetricRow(

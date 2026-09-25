@@ -156,7 +156,9 @@ describe('INSIGHTS_LEVEL_BY_SEGMENT', () => {
 
 describe('coversInsightsLevels', () => {
   it('accepts a run that recorded every level currently ingested', () => {
-    expect(coversInsightsLevels(['account', 'campaign', 'adset'])).toBe(true);
+    expect(coversInsightsLevels(['account', 'campaign', 'adset', 'ad'])).toBe(
+      true,
+    );
   });
 
   it('rejects a run written before ad set insights existed', () => {
@@ -166,11 +168,22 @@ describe('coversInsightsLevels', () => {
     expect(coversInsightsLevels(['account', 'campaign'])).toBe(false);
   });
 
+  it('rejects a run written before ad insights existed', () => {
+    // The same mechanism one level down, and the reason Fatia C needed no
+    // migration either: a chunk that stored these three really did not read the
+    // ad level, so the planner is right to re-run its window.
+    expect(coversInsightsLevels(['account', 'campaign', 'adset'])).toBe(false);
+  });
+
   it('accepts a run that read more levels than are required', () => {
-    // Coverage, not equality. A `daily` run records all four hierarchy levels.
-    expect(coversInsightsLevels(['account', 'campaign', 'adset', 'ad'])).toBe(
-      true,
-    );
+    // Coverage, not equality, so shrinking the list later would not
+    // retroactively invalidate history.
+    expect(
+      coversInsightsLevels(
+        ['account', 'campaign', 'adset', 'ad'],
+        ['account', 'campaign'],
+      ),
+    ).toBe(true);
   });
 
   it('fails closed on anything that is not a list of levels', () => {

@@ -322,12 +322,22 @@ export class MetaAdsGraphService {
     accessToken: string;
     path: string;
     fields?: string;
+    /**
+     * Extra query parameters, validated and written before the owned ones by
+     * `buildGraphUrl` — a caller cannot shadow `fields` or `access_token`.
+     *
+     * Added for the creative node's `thumbnail_width`/`thumbnail_height`, which
+     * are the difference between a usable picture and the 64×64 the ads edge
+     * returns regardless of what it is asked for.
+     */
+    params?: Readonly<Record<string, string>>;
     failureMessage: string;
   }): Promise<Record<string, unknown>> {
     const url = this.buildGraphUrl({
       path: input.path,
       accessToken: input.accessToken,
       fields: input.fields,
+      params: input.params,
     });
 
     const { response, data, usage } = await this.requestGraph(url);

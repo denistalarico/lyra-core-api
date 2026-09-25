@@ -187,7 +187,12 @@ export function normalizeMetricRow(
  * A row that names an ad set but no campaign is refused rather than stored with
  * a null parent. Meta returns both together at this level, so one without the
  * other is a payload this code does not understand, and a skip is counted where
- * a half-attributed fact would not be.
+ * a half-attributed fact would not be. The ad level inherits that rule twice
+ * over: it needs its campaign, its ad set *and* its own id, and it is refused
+ * if any is missing. That is stricter than it has to be — `adset_id` is not
+ * written anywhere by an ad-level row — and it is the point: the three ids
+ * arrive together from this edge, so a payload carrying only some of them is
+ * not an ad this code recognises.
  */
 function readIdentity(
   row: Record<string, unknown>,
@@ -212,7 +217,22 @@ function readIdentity(
 
   if (!adsetId) return null;
 
-  return { entityExternalId: adsetId, campaignExternalId: campaignId };
+  if (context.entityLevel === 'adset') {
+    return { entityExternalId: adsetId, campaignExternalId: campaignId };
+  }
+
+  const adId = readObjectId(row.ad_id);
+
+  if (!adId) return null;
+
+  // The ad is the identity; the campaign above it stays the parent, as at every
+  // level below the account. The ad *set* is deliberately not carried onto the
+  // fact: the column that would hold it is `campaign_external_id`, whose index
+  // exists to answer "this campaign's objects", and writing an ad set id into
+  // it would make that index point at objects that are not campaigns. A reader
+  // that needs the ad's ad set joins `social_ad_entities` on the ad's own id,
+  // where `parent_external_id` is kept current by the hierarchy sync.
+  return { entityExternalId: adId, campaignExternalId: campaignId };
 }
 
 /** A Meta object id below the account level: bare digits, or nothing. */

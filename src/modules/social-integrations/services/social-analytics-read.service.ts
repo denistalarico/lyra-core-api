@@ -60,6 +60,11 @@ import type {
   SocialAdAdSetSort,
   SocialAdAnalyticsAdSetsView,
 } from '../views/social-ad-analytics-ad-sets.view';
+import type {
+  SocialAdAdRow,
+  SocialAdAdSort,
+  SocialAdAnalyticsAdsView,
+} from '../views/social-ad-analytics-ads.view';
 import {
   toBackfillChainStatus,
   type SocialAdAnalyticsFreshnessView,
@@ -118,6 +123,9 @@ const CAMPAIGN_ENTITY_LEVEL = 'campaign';
 /** Ad-set facts, for the per-ad-set breakdown. */
 const ADSET_ENTITY_LEVEL = 'adset';
 
+/** Ad facts, for the per-ad breakdown — the finest grain this table holds. */
+const AD_ENTITY_LEVEL = 'ad';
+
 export type SocialAdAnalyticsScope = {
   tenantId: string;
   workspaceId: string;
@@ -139,6 +147,11 @@ export type SocialAdAnalyticsCampaignsInput = SocialAdAnalyticsOverviewInput & {
 
 export type SocialAdAnalyticsAdSetsInput = SocialAdAnalyticsOverviewInput & {
   sort?: SocialAdAdSetSort;
+  direction?: SocialAdSortDirection;
+};
+
+export type SocialAdAnalyticsAdsInput = SocialAdAnalyticsOverviewInput & {
+  sort?: SocialAdAdSort;
   direction?: SocialAdSortDirection;
 };
 
@@ -900,6 +913,115 @@ export class SocialAnalyticsReadService {
   }
 
   /**
+   * Per-ad totals for the period, ranked.
+   *
+   * The same two-step shape as `adSets()`, aggregating `entity_external_id` at
+   * `entity_level = 'ad'` and merging the hierarchy in memory — an ad that
+   * delivered before the mirror saw it must still show its spend rather than
+   * vanish from an inner join.
+   *
+   * This is the level where "which creative worked" can be answered, and the
+   * only one: one ad set routinely runs several ads against one audience on one
+   * budget, so splitting an ad set's spend between them would be an estimate,
+   * not a measurement.
+   *
+   * `adSetExternalId` comes from the mirror rather than from the fact, unlike
+   * `campaignExternalId` which is denormalised onto every ad row. See
+   * `SocialAdAdRow` for why an ad set id must not be written into the column
+   * whose index answers "this campaign's objects".
+   *
+   * Only ads with at least one fact in the period appear. On the production
+   * account that is the difference between 3 rows and 260: Meta reports nothing
+   * for an ad that did not deliver, and padding the table with every ad that
+   * ever existed would bury the answer under paused history.
+   */
+  async ads(
+    input: SocialAdAnalyticsAdsInput,
+  ): Promise<SocialAdAnalyticsAdsView> {
+    const period = parseAnalyticsPeriod({
+      since: input.since,
+      until: input.until,
+    });
+    const sort = input.sort ?? 'spend';
+    const direction = input.direction ?? 'desc';
+
+    const connection = await this.findInScope(input);
+
+    const rows = await this.metricsRepository
+      .createQueryBuilder('fact')
+      .select('fact.entity_external_id', 'entity_external_id')
+      .addSelect('MAX(fact.campaign_external_id)', 'campaign_external_id')
+      .addSelect('SUM(fact.spend)', 'spend')
+      .addSelect('SUM(fact.impressions)', 'impressions')
+      .addSelect('SUM(fact.clicks)', 'clicks')
+      .addSelect('SUM(fact.link_clicks)', 'link_clicks')
+      .addSelect('SUM(fact.leads)', 'leads')
+      .addSelect('SUM(fact.conversions)', 'conversions')
+      .addSelect('SUM(fact.conversion_value)', 'conversion_value')
+      .addSelect('SUM(fact.video_views)', 'video_views')
+      .addSelect('SUM(fact.messaging_conversations)', 'messaging_conversations')
+      .addSelect(
+        'COUNT(fact.messaging_conversations)',
+        'messaging_conversation_days',
+      )
+      .addSelect('SUM(fact.reach)', 'reach')
+      .addSelect('COUNT(fact.reach)', 'reach_days')
+      .addSelect('COUNT(DISTINCT fact.metric_date)', 'fact_days')
+      .addSelect(
+        'COUNT(DISTINCT fact.metric_date) FILTER (WHERE fact.is_partial)',
+        'partial_days',
+      )
+      .addSelect('MAX(fact.currency)', 'currency')
+      .where('fact.connection_id = :connectionId', {
+        connectionId: connection.id,
+      })
+      .andWhere('fact.entity_level = :level', { level: AD_ENTITY_LEVEL })
+      .andWhere('fact.source = :source', { source: OVERVIEW_SOURCE })
+      .andWhere('fact.attribution_setting = :attribution', {
+        attribution: ANALYTICS_ATTRIBUTION,
+      })
+      .andWhere('fact.metric_date BETWEEN :since AND :until', {
+        since: period.since,
+        until: period.until,
+      })
+      .groupBy('fact.entity_external_id')
+      // The sort is a lookup into a closed map, never the caller's string. See
+      // `AD_SORT_SQL`.
+      .orderBy(
+        AD_SORT_SQL[sort],
+        direction === 'asc' ? 'ASC' : 'DESC',
+        'NULLS LAST',
+      )
+      // A stable tiebreak, so two ads with identical spend do not swap places
+      // between requests and make a table appear to flicker.
+      .addOrderBy('fact.entity_external_id', 'ASC')
+      .getRawMany<
+        AggregateRow & {
+          entity_external_id: string;
+          campaign_external_id: string | null;
+        }
+      >();
+
+    const identities = await this.findAdIdentities(
+      connection,
+      rows.map((row) => row.entity_external_id),
+    );
+
+    return {
+      connectionId: connection.id,
+      timezone: connection.timezone ?? '',
+      currency: rows[0]?.currency ?? connection.currency ?? null,
+      period: { since: period.since, until: period.until },
+      sort,
+      direction,
+      items: rows.map((row) =>
+        this.toAdRow(row, identities.get(row.entity_external_id)),
+      ),
+      total: rows.length,
+    };
+  }
+
+  /**
    * How current this connection's read model is, and where its backfill stands.
    *
    * Pure: it derives the chain's state from the run log using the very functions
@@ -1233,6 +1355,64 @@ export class SocialAnalyticsReadService {
     };
   }
 
+  private async findAdIdentities(
+    connection: SocialAdAccountConnectionEntity,
+    externalIds: readonly string[],
+  ): Promise<Map<string, SocialAdEntity>> {
+    if (externalIds.length === 0) return new Map();
+
+    const entities = await this.entitiesRepository
+      .createQueryBuilder('entity')
+      .where('entity.tenant_id = :tenantId', { tenantId: connection.tenantId })
+      .andWhere('entity.workspace_id = :workspaceId', {
+        workspaceId: connection.workspaceId,
+      })
+      .andWhere('entity.connection_id = :connectionId', {
+        connectionId: connection.id,
+      })
+      .andWhere('entity.entity_level = :level', { level: AD_ENTITY_LEVEL })
+      .andWhere('entity.external_id IN (:...externalIds)', { externalIds })
+      .getMany();
+
+    return new Map(entities.map((entity) => [entity.externalId, entity]));
+  }
+
+  private toAdRow(
+    row: AggregateRow & {
+      entity_external_id: string;
+      campaign_external_id: string | null;
+    },
+    entity: SocialAdEntity | undefined,
+  ): SocialAdAdRow {
+    return {
+      externalId: row.entity_external_id,
+      campaignExternalId:
+        entity?.campaignExternalId ?? row.campaign_external_id,
+      // Only the mirror knows this: an ad-level fact does not carry its ad set.
+      adSetExternalId: entity?.parentExternalId ?? null,
+      // Null rather than the id as a stand-in — see `toCampaignRow`.
+      name: entity?.name ?? null,
+      status: entity?.status ?? null,
+      effectiveStatus: entity?.effectiveStatus ?? null,
+      // The id, never a URL. The picture is a separate, cached request.
+      creativeId: entity?.creativeId ?? null,
+      archived: entity?.archivedAt != null,
+      spend: formatAmountText(row.spend),
+      impressions: toCount(row.impressions).toString(),
+      clicks: toCount(row.clicks).toString(),
+      linkClicks: toCount(row.link_clicks).toString(),
+      leads: toCount(row.leads).toString(),
+      messagingConversations:
+        readMessagingConversations(row)?.toString() ?? null,
+      conversions: formatAmountText(row.conversions),
+      conversionValue: formatAmountText(row.conversion_value),
+      videoViews: toCount(row.video_views).toString(),
+      reach: readReach(row),
+      hasPartialData: toCount(row.partial_days) > 0n,
+      ...deriveSocialAdKpis(toKpiInputs(row)),
+    };
+  }
+
   /**
    * One period's additive totals, summed in Postgres.
    *
@@ -1541,6 +1721,32 @@ const CAMPAIGN_SORT_SQL: Record<SocialAdCampaignSort, string> = {
 
 /** Same closed-lookup discipline as `CAMPAIGN_SORT_SQL`, grouped by ad set. */
 const ADSET_SORT_SQL: Record<SocialAdAdSetSort, string> = {
+  spend: 'SUM(fact.spend)',
+  impressions: 'SUM(fact.impressions)',
+  clicks: 'SUM(fact.clicks)',
+  leads: 'SUM(fact.leads)',
+  conversions: 'SUM(fact.conversions)',
+  ctr: 'SUM(fact.clicks)::numeric / NULLIF(SUM(fact.impressions), 0)',
+  cpc: 'SUM(fact.spend) / NULLIF(SUM(fact.clicks), 0)',
+  cpl: 'SUM(fact.spend) / NULLIF(SUM(fact.leads), 0)',
+  roas: 'SUM(fact.conversion_value) / NULLIF(SUM(fact.spend), 0)',
+  name: 'fact.entity_external_id',
+};
+
+/**
+ * The same closed lookup at ad level.
+ *
+ * Spelled out rather than aliased to `ADSET_SORT_SQL`, even though the two are
+ * currently identical. They are two different levels' orderings that happen to
+ * agree today; sharing one object would make a change intended for one silently
+ * reorder the other, and this is the map whose values reach an ORDER BY.
+ *
+ * `name` sorts by the external id, like every other level here, because the
+ * name lives in the hierarchy mirror and is merged in after the aggregation.
+ * Ordering by the displayed name would mean joining the mirror into the
+ * grouped query — which is the join this whole two-step shape exists to avoid.
+ */
+const AD_SORT_SQL: Record<SocialAdAdSort, string> = {
   spend: 'SUM(fact.spend)',
   impressions: 'SUM(fact.impressions)',
   clicks: 'SUM(fact.clicks)',

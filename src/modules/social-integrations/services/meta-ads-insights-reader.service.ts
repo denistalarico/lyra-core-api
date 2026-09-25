@@ -60,11 +60,22 @@ const CAMPAIGN_FIELDS = `${INSIGHTS_FIELDS},campaign_id`;
  */
 const ADSET_FIELDS = `${INSIGHTS_FIELDS},adset_id,campaign_id`;
 
+/**
+ * Ad rows carry all three ids: their own, their ad set's and their campaign's.
+ *
+ * `ad_name` is absent for the same reason `adset_name` is — the name lives in
+ * the hierarchy mirror, keyed on the id that does not change. So is the
+ * creative: an ad's picture is resolved from `social_ad_entities.creative_id`
+ * at read time, and a facts row is not where a rendering detail belongs.
+ */
+const AD_FIELDS = `${INSIGHTS_FIELDS},ad_id,adset_id,campaign_id`;
+
 /** The field list each level needs, by that level. */
 const FIELDS_BY_LEVEL: Record<SocialAdInsightsLevel, string> = {
   account: INSIGHTS_FIELDS,
   campaign: CAMPAIGN_FIELDS,
   adset: ADSET_FIELDS,
+  ad: AD_FIELDS,
 };
 
 /**

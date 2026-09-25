@@ -63,6 +63,7 @@ run('SocialAdEntityWriterService against PostgreSQL', () => {
       destinationRaw: null,
       destinationObservedAt: null,
       destinationObserved: false,
+      creativeId: null,
       dailyBudgetMinor: '5000',
       lifetimeBudgetMinor: null,
       budgetRemainingMinor: '0',
@@ -78,8 +79,8 @@ run('SocialAdEntityWriterService against PostgreSQL', () => {
 
   const rowsOf = (externalId: string) =>
     queryRunner.query(
-      `SELECT "name", "status", "daily_budget_minor", "first_seen_at",
-              "last_seen_at", "archived_at", "raw"
+      `SELECT "name", "status", "daily_budget_minor", "creative_id",
+              "first_seen_at", "last_seen_at", "archived_at", "raw"
        FROM "social_ad_entities"
        WHERE "connection_id" = '${connectionId}' AND "external_id" = '${externalId}'`,
     ) as Promise<
@@ -87,6 +88,7 @@ run('SocialAdEntityWriterService against PostgreSQL', () => {
         name: string;
         status: string;
         daily_budget_minor: string | null;
+        creative_id: string | null;
         first_seen_at: Date;
         last_seen_at: Date;
         archived_at: Date | null;
@@ -261,5 +263,64 @@ run('SocialAdEntityWriterService against PostgreSQL', () => {
     // `bigint` comes back as a string, which is what keeps a lifetime budget
     // above 2^53 minor units exact.
     expect(row.daily_budget_minor).toBe('5000');
+  });
+
+  /**
+   * The creative id, round-tripped.
+   *
+   * Against the database rather than against the value object, because the bug
+   * this covers cannot be seen from the TypeScript side: the upsert's values
+   * are typed `QueryDeepPartialEntity`, which makes every field optional, so a
+   * column listed in `REFRESHED_COLUMNS` but never *supplied* compiles, runs,
+   * writes NULL, and then copies NULL over NULL on every later sync. It reached
+   * production reads as a permanently empty column with no error anywhere.
+   */
+  describe('creative id', () => {
+    it('stores the creative the normalizer read', async () => {
+      await writer.upsert({
+        scope,
+        seenAt: at('2026-09-25T12:00:00.000Z'),
+        rows: [
+          campaign('c-creative', {
+            entityLevel: 'ad',
+            creativeId: '1606435724534548',
+          }),
+        ],
+      });
+
+      const [row] = await rowsOf('c-creative');
+
+      expect(row.creative_id).toBe('1606435724534548');
+    });
+
+    it('follows a creative that was swapped in Ads Manager', async () => {
+      const rows = (creativeId: string) => [
+        campaign('c-swap', { entityLevel: 'ad', creativeId }),
+      ];
+
+      await writer.upsert({
+        scope,
+        seenAt: at('2026-09-25T12:00:00.000Z'),
+        rows: rows('1111111111111111'),
+      });
+      await writer.upsert({
+        scope,
+        seenAt: at('2026-09-26T12:00:00.000Z'),
+        rows: rows('2222222222222222'),
+      });
+
+      // A stale id resolves to the picture of an ad that is no longer running,
+      // which is worse than no picture — so this column is refreshed like any
+      // other provider attribute.
+      const [row] = await rowsOf('c-swap');
+
+      expect(row.creative_id).toBe('2222222222222222');
+    });
+
+    it('leaves it null at a level that has no creative', async () => {
+      const [row] = await rowsOf('c-1');
+
+      expect(row.creative_id).toBeNull();
+    });
   });
 });

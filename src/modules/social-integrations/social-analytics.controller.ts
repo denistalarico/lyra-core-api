@@ -1,4 +1,12 @@
-import { Controller, Get, Query, UseGuards } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  HttpStatus,
+  Query,
+  Res,
+  UseGuards,
+} from '@nestjs/common';
+import type { Response } from 'express';
 import { RequestContextData } from '../../common/context/request-context.decorator';
 import type { RequestContext } from '../../common/context/request-context.interface';
 import { resolveCompanyAwareScope } from '../../common/context/company-aware-scope';
@@ -9,11 +17,14 @@ import {
   RequireProductEntitlement,
 } from '../permissions';
 import { AnalyticsAdSetsQueryDto } from './dto/analytics-ad-sets.query.dto';
+import { AnalyticsAdThumbnailQueryDto } from './dto/analytics-ad-thumbnail.query.dto';
+import { AnalyticsAdsQueryDto } from './dto/analytics-ads.query.dto';
 import { AnalyticsBreakdownQueryDto } from './dto/analytics-breakdown.query.dto';
 import { AnalyticsCampaignsQueryDto } from './dto/analytics-campaigns.query.dto';
 import { AnalyticsFreshnessQueryDto } from './dto/analytics-freshness.query.dto';
 import { AnalyticsOverviewQueryDto } from './dto/analytics-overview.query.dto';
 import { SocialAdBreakdownReadService } from './services/social-ad-breakdown.read.service';
+import { SocialAdCreativeThumbnailService } from './services/social-ad-creative-thumbnail.service';
 import { SocialAnalyticsReadService } from './services/social-analytics-read.service';
 
 /**
@@ -49,6 +60,7 @@ export class SocialAnalyticsController {
   constructor(
     private readonly analyticsReadService: SocialAnalyticsReadService,
     private readonly breakdownReadService: SocialAdBreakdownReadService,
+    private readonly creativeThumbnailService: SocialAdCreativeThumbnailService,
   ) {}
 
   /**
@@ -187,6 +199,81 @@ export class SocialAnalyticsController {
       sort: query.sort,
       direction: query.direction,
     });
+  }
+
+  /**
+   * Per-ad totals for the period, ranked.
+   *
+   * The finest grain the facts table holds, and the only one at which "which
+   * creative worked" can be answered: one ad set routinely runs several ads
+   * against one audience on one budget, so dividing its spend between them
+   * would be an estimate rather than a measurement.
+   *
+   * Each row carries `creativeId` — the id, never a URL — which is what the
+   * thumbnail route below turns into a picture. Only ads with delivery inside
+   * the period appear.
+   */
+  @Get('ads')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireProductEntitlement('social')
+  @RequirePermission(SOCIAL_ANALYTICS_READ_PERMISSION)
+  ads(
+    @RequestContextData() ctx: RequestContext,
+    @Query() query: AnalyticsAdsQueryDto,
+  ) {
+    const scope = this.requireScope(ctx);
+
+    return this.analyticsReadService.ads({
+      ...scope,
+      connectionId: query.connectionId,
+      since: query.since,
+      until: query.until,
+      sort: query.sort,
+      direction: query.direction,
+    });
+  }
+
+  /**
+   * One ad's creative thumbnail, resolved from Meta at this moment.
+   *
+   * A redirect rather than proxied bytes, exactly like the organic posts
+   * thumbnail: the browser loads the CDN link directly and the access token
+   * never leaves the server. Nothing about the picture is stored — Meta signs
+   * these URLs with an expiry of roughly five days, so a persisted one renders
+   * for a few days and then 403s.
+   *
+   * 404 for every ordinary absence: an ad this scope cannot see, an ad the
+   * hierarchy sync has not learned a creative for, a provider that will not
+   * answer. The client draws a placeholder, because the row is about the
+   * numbers beside it.
+   */
+  @Get('ads/thumbnail')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireProductEntitlement('social')
+  @RequirePermission(SOCIAL_ANALYTICS_READ_PERMISSION)
+  async adThumbnail(
+    @RequestContextData() ctx: RequestContext,
+    @Query() query: AnalyticsAdThumbnailQueryDto,
+    @Res() response: Response,
+  ) {
+    const scope = this.requireScope(ctx);
+
+    const url = await this.creativeThumbnailService.resolve({
+      ...scope,
+      connectionId: query.connectionId,
+      adExternalId: query.adId,
+    });
+
+    if (!url) {
+      response.status(HttpStatus.NOT_FOUND).json({ message: 'Not found.' });
+      return;
+    }
+
+    // Private: the redirect target is scoped to this viewer's credential, so a
+    // shared cache must not hand it to another tenant. Short, because the
+    // signed URL behind it expires on its own schedule.
+    response.setHeader('Cache-Control', 'private, max-age=300');
+    response.redirect(HttpStatus.FOUND, url);
   }
 
   /**

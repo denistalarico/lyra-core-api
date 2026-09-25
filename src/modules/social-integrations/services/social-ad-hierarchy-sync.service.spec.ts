@@ -36,6 +36,7 @@ function entity(
     destinationRaw: null,
     destinationObservedAt: null,
     destinationObserved: false,
+    creativeId: null,
     dailyBudgetMinor: null,
     lifetimeBudgetMinor: null,
     budgetRemainingMinor: null,

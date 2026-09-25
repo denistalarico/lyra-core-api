@@ -55,6 +55,14 @@ export type NormalizedAdEntity = {
    */
   destinationObserved: boolean;
   /**
+   * The creative this ad renders, by id.
+   *
+   * `null` at every level except ad, because only an ad has one. Never a URL —
+   * see the entity column for why a signed CDN link must not be stored, and
+   * why the id alone is what makes the picture addressable later.
+   */
+  creativeId: string | null;
+  /**
    * Budgets in the currency's minor unit, as decimal strings.
    *
    * Strings rather than numbers on purpose: the column is `bigint`, TypeORM

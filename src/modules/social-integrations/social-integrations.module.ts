@@ -25,6 +25,7 @@ import { MetaAdsReachReaderService } from './services/meta-ads-reach-reader.serv
 import { MetaAdsSystemUserService } from './services/meta-ads-system-user.service';
 import { SocialAdBreakdownConfigService } from './services/social-ad-breakdown-config.service';
 import { SocialAdBreakdownReadService } from './services/social-ad-breakdown.read.service';
+import { SocialAdCreativeThumbnailService } from './services/social-ad-creative-thumbnail.service';
 import { SocialAdBreakdownSyncService } from './services/social-ad-breakdown-sync.service';
 import { SocialAdBreakdownWriterService } from './services/social-ad-breakdown-writer.service';
 import { SocialAdConnectionService } from './services/social-ad-connection.service';
@@ -113,6 +114,7 @@ import { SocialIntegrationsController } from './social-integrations.controller';
     SocialAdBreakdownWriterService,
     SocialAdBreakdownSyncService,
     SocialAdBreakdownReadService,
+    SocialAdCreativeThumbnailService,
     // Period reach, split the same way and for a sharper reason: the measuring
     // service holds a credential resolver and a Graph reader, while the read
     // service holds one repository and no token — and it is the read one the

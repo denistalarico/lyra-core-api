@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/require-await -- planner test doubles expose partial service shapes. */
 import { INSIGHTS_ENTITY_LEVELS } from '../sync/social-ad-sync-run.contract';
 import {
   SocialAdBackfillPlannerService,
@@ -168,14 +167,13 @@ describe('SocialAdBackfillPlannerService — starting a chain', () => {
 
     await harness.planner.planNext(CONNECTION, NOW);
 
-    // The three levels the insights pipeline ingests. `ad` is absent because
-    // nothing reads it, and the hierarchy's own levels are absent because the
-    // chunk carries no hierarchy segment — listing either would describe work
-    // this run does not do, and the column is what later certifies coverage.
+    // The four levels the insights pipeline ingests, and only those: a backfill
+    // chunk carries no hierarchy segment, so claiming the hierarchy's own work
+    // would describe work this run does not do — and the column is what later
+    // certifies coverage.
     expect(harness.enqueued[0]).toMatchObject({
-      entityLevels: ['account', 'campaign', 'adset'],
+      entityLevels: ['account', 'campaign', 'adset', 'ad'],
     });
-    expect(harness.enqueued[0].entityLevels).not.toContain('ad');
   });
 });
 
@@ -227,7 +225,7 @@ describe('SocialAdBackfillPlannerService — a connection backfilled before ad s
     // written a second set of windows overlapping the first.
     expect(harness.enqueued[0]).toMatchObject({
       windowEnd: FULL_PLAN_ENDS[0],
-      entityLevels: ['account', 'campaign', 'adset'],
+      entityLevels: ['account', 'campaign', 'adset', 'ad'],
     });
   });
 

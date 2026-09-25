@@ -201,11 +201,20 @@ export const SYNC_ENTITY_LEVELS: readonly SocialAdEntityLevel[] = [
  * simply never read back. Adding a version number beside it would be a second
  * answer to a question this column already answers, and the two would disagree
  * the first time one of them was updated alone.
+ *
+ * Fatia C added `ad` the same way, and the same consequence follows
+ * deliberately: every chunk backfilled before it stored `["account","campaign",
+ * "adset"]`, so the planner now sees those windows as needing ad-level history
+ * and re-runs them. That is the honest reading — those runs really did not read
+ * the ad level — and re-running is cheap, because Meta returns no row for an ad
+ * that did not deliver: the production account's whole 90 days came back as 73
+ * rows in one paginated request.
  */
 export const INSIGHTS_ENTITY_LEVELS: readonly SocialAdEntityLevel[] = [
   'account',
   'campaign',
   'adset',
+  'ad',
 ];
 
 /**

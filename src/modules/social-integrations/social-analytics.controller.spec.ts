@@ -6,6 +6,7 @@ import {
   PRODUCT_ENTITLEMENT_METADATA,
 } from '../permissions/decorators/permissions.decorators';
 import type { SocialAdBreakdownReadService } from './services/social-ad-breakdown.read.service';
+import type { SocialAdCreativeThumbnailService } from './services/social-ad-creative-thumbnail.service';
 import type { SocialAnalyticsReadService } from './services/social-analytics-read.service';
 import { SocialAnalyticsController } from './social-analytics.controller';
 
@@ -15,6 +16,8 @@ const GUARDED_HANDLERS = [
   'timeseries',
   'campaigns',
   'adSets',
+  'ads',
+  'adThumbnail',
   'breakdown',
   'freshness',
   'connections',
@@ -24,22 +27,29 @@ const GUARDED_HANDLERS = [
  * The handlers that take a connection id and a period.
  *
  * `connections` is excluded because it takes no query at all — it is the call a
- * client makes *before* it has an id to send.
+ * client makes *before* it has an id to send. `adThumbnail` is excluded because
+ * it takes a response object as well, and is covered on its own below.
  */
 const CONNECTION_SCOPED_HANDLERS = [
   'overview',
   'timeseries',
   'campaigns',
   'adSets',
+  'ads',
   'breakdown',
   'freshness',
 ] as const;
+
+/** What the thumbnail service resolves to, by default. */
+const thumbnailUrl = 'https://scontent.example/creative.jpg?oe=6ABCC3C4';
 
 function createHarness() {
   const overviewInputs: Record<string, unknown>[] = [];
   const seriesInputs: Record<string, unknown>[] = [];
   const campaignInputs: Record<string, unknown>[] = [];
   const adSetInputs: Record<string, unknown>[] = [];
+  const adInputs: Record<string, unknown>[] = [];
+  const thumbnailInputs: Record<string, unknown>[] = [];
   const freshnessInputs: Record<string, unknown>[] = [];
 
   const record =
@@ -55,6 +65,7 @@ function createHarness() {
     timeseries: jest.fn(record(seriesInputs)),
     campaigns: jest.fn(record(campaignInputs)),
     adSets: jest.fn(record(adSetInputs)),
+    ads: jest.fn(record(adInputs)),
     freshness: jest.fn(record(freshnessInputs)),
     listConnections: jest.fn((input: Record<string, unknown>) => {
       connectionInputs.push(input);
@@ -68,20 +79,62 @@ function createHarness() {
     breakdown: jest.fn(record(breakdownInputs)),
   };
 
+  const thumbnails = {
+    resolve: jest.fn(
+      (input: Record<string, unknown>): Promise<string | null> => {
+        thumbnailInputs.push(input);
+        return Promise.resolve(thumbnailUrl);
+      },
+    ),
+  };
+
   return {
     overviewInputs,
     seriesInputs,
     campaignInputs,
     adSetInputs,
+    adInputs,
+    thumbnailInputs,
     freshnessInputs,
     connectionInputs,
     breakdownInputs,
     analytics,
     breakdowns,
+    thumbnails,
+    response: createResponse(),
     controller: new SocialAnalyticsController(
       analytics as unknown as SocialAnalyticsReadService,
       breakdowns as unknown as SocialAdBreakdownReadService,
+      thumbnails as unknown as SocialAdCreativeThumbnailService,
     ),
+  };
+}
+
+/** What `adThumbnail` writes to, standing in for the Express response. */
+function createResponse() {
+  const headers: Record<string, string> = {};
+
+  return {
+    headers,
+    statusCode: null as number | null,
+    body: null as unknown,
+    redirectedTo: null as string | null,
+    redirectStatus: null as number | null,
+    setHeader(name: string, value: string) {
+      headers[name] = value;
+    },
+    status(code: number) {
+      this.statusCode = code;
+      return this;
+    },
+    json(payload: unknown) {
+      this.body = payload;
+      return this;
+    },
+    redirect(status: number, url: string) {
+      this.redirectStatus = status;
+      this.redirectedTo = url;
+    },
   };
 }
 
@@ -106,15 +159,16 @@ function context(overrides: Partial<RequestContext> = {}): RequestContext {
 /**
  * One query shape for every handler.
  *
- * `kind` is only read by `breakdown`, and `sort`/`direction` only by
- * `campaigns`; the rest ignore what they were not given. Sharing one object
- * keeps these tests about scope resolution and guards — the two things every
- * handler must get right — rather than about each handler's own DTO, which its
- * validator already covers.
+ * `kind` is only read by `breakdown`, `adId` only by `adThumbnail`, and
+ * `sort`/`direction` only by `campaigns`; the rest ignore what they were not
+ * given. Sharing one object keeps these tests about scope resolution and
+ * guards — the two things every handler must get right — rather than about each
+ * handler's own DTO, which its validator already covers.
  */
 const query = {
   connectionId: '11111111-1111-4111-8111-111111111111',
   kind: 'age_gender',
+  adId: '120250205947130411',
   since: '2026-08-01',
   until: '2026-08-27',
 };
@@ -236,6 +290,7 @@ describe('SocialAnalyticsController scope resolution', () => {
         timeseries: harness.seriesInputs,
         campaigns: harness.campaignInputs,
         adSets: harness.adSetInputs,
+        ads: harness.adInputs,
         breakdown: harness.breakdownInputs,
         freshness: harness.freshnessInputs,
       };
@@ -255,7 +310,7 @@ describe('SocialAnalyticsController scope resolution', () => {
       const harness = createHarness();
       const handlers = harness.controller as unknown as Record<
         string,
-        (ctx: RequestContext, query: unknown) => unknown
+        (ctx: RequestContext, query: unknown, response?: unknown) => unknown
       >;
 
       // `connections` is declared `async`, so its rejection arrives as a
@@ -268,22 +323,116 @@ describe('SocialAnalyticsController scope resolution', () => {
           handlers[handler](
             context({ tenantId: undefined } as Partial<RequestContext>),
             query,
+            // Ignored by every handler but `adThumbnail`, which takes it third.
+            harness.response,
           ))(),
       ).rejects.toThrow(BadRequestException);
 
-      // `connections` reads through a differently named service method and
-      // `breakdown` through a different service altogether; the rest share
-      // their handler's name on the analytics read service.
+      // `connections` reads through a differently named service method,
+      // `breakdown` and `adThumbnail` through different services altogether;
+      // the rest share their handler's name on the analytics read service.
       const reads =
         handler === 'connections'
           ? harness.analytics.listConnections
           : handler === 'breakdown'
             ? harness.breakdowns.breakdown
-            : harness.analytics[handler];
+            : handler === 'adThumbnail'
+              ? harness.thumbnails.resolve
+              : harness.analytics[handler];
 
       expect(reads).not.toHaveBeenCalled();
     },
   );
+
+  /**
+   * The thumbnail route, whose failure mode is different from every other
+   * handler here: it can reach a provider, and it answers with a redirect.
+   */
+  describe('adThumbnail', () => {
+    it('resolves the picture for the ad under the context scope', async () => {
+      const harness = createHarness();
+
+      await harness.controller.adThumbnail(
+        context({
+          managedContext: { operatingMode: 'client', clientId: 'client-a' },
+        } as Partial<RequestContext>),
+        query,
+        harness.response as never,
+      );
+
+      // The ad id comes from the query; every scope field comes from the
+      // context. A caller-supplied client id would let one agency member read
+      // another client's creatives.
+      expect(harness.thumbnailInputs[0]).toMatchObject({
+        tenantId: 'tenant-a',
+        workspaceId: 'workspace-a',
+        agencyClientId: 'client-a',
+        connectionId: query.connectionId,
+        adExternalId: query.adId,
+      });
+    });
+
+    it('redirects to the resolved URL rather than proxying the bytes', async () => {
+      const harness = createHarness();
+
+      await harness.controller.adThumbnail(
+        context(),
+        query,
+        harness.response as never,
+      );
+
+      // The browser loads the CDN link itself, so the access token never leaves
+      // the server and no image byte passes through this process.
+      expect(harness.response.redirectStatus).toBe(302);
+      expect(harness.response.redirectedTo).toBe(thumbnailUrl);
+    });
+
+    it('caches the redirect privately and briefly', async () => {
+      const harness = createHarness();
+
+      await harness.controller.adThumbnail(
+        context(),
+        query,
+        harness.response as never,
+      );
+
+      // Private because the target was resolved under this viewer's credential
+      // and a shared cache must not hand it to another tenant; short because
+      // the signed URL behind it expires on Meta's own schedule.
+      expect(harness.response.headers['Cache-Control']).toBe(
+        'private, max-age=300',
+      );
+    });
+
+    it('answers 404 when there is no picture, without failing the page', async () => {
+      const harness = createHarness();
+      harness.thumbnails.resolve.mockResolvedValueOnce(null);
+
+      await harness.controller.adThumbnail(
+        context(),
+        query,
+        harness.response as never,
+      );
+
+      // An unknown ad, an ad with no creative yet, and a provider that will not
+      // answer all arrive here identically — the client draws a placeholder,
+      // because the row is about the numbers beside it.
+      expect(harness.response.statusCode).toBe(404);
+      expect(harness.response.redirectedTo).toBeNull();
+    });
+
+    it('never puts a resolved URL in a cache other viewers could share', async () => {
+      const harness = createHarness();
+
+      await harness.controller.adThumbnail(
+        context(),
+        query,
+        harness.response as never,
+      );
+
+      expect(harness.response.headers['Cache-Control']).not.toContain('public');
+    });
+  });
 
   it('lists connections for the resolved scope and asks for nothing else', async () => {
     const harness = createHarness();

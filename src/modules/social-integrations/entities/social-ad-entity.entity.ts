@@ -242,6 +242,36 @@ export class SocialAdEntity {
   destinationObservedAt!: Date | null;
 
   /**
+   * The creative this ad renders, by id — never its picture.
+   *
+   * Meaningful at ad level only, and NULL everywhere else: a campaign and an ad
+   * set have no creative of their own, and the ads under one ad set routinely
+   * differ. On the account this was built against, 260 ads carried 260 distinct
+   * creatives, so there is no sharing to collapse here either.
+   *
+   * **The id, and deliberately not `thumbnail_url`.** Meta signs those URLs with
+   * an `oe` parameter that expires in roughly five days; a stored one renders
+   * for a few days and then returns 403, which surfaces as a broken image long
+   * after the commit that caused it. The id is stable, and the picture is
+   * resolved at read time through `SocialAdCreativeThumbnailService` — the same
+   * shape `SocialOrganicThumbnailService` already uses for posts.
+   *
+   * Storing it costs nothing: `creative{id}` rides along on the ads edge the
+   * hierarchy sync already reads, adding no Graph calls. It has to be stored
+   * because the *picture* is not free — `thumbnail_width` is ignored on the ads
+   * edge (every URL there is stamped `p64x64`) and honoured on the creative
+   * node, so a usable image means one request per creative, at read time,
+   * cached, rather than during a sync.
+   */
+  @Column({
+    name: 'creative_id',
+    type: 'varchar',
+    length: 180,
+    nullable: true,
+  })
+  creativeId!: string | null;
+
+  /**
    * Budgets in the currency's minor unit (cents), which is how Meta reports
    * them. Stored as given rather than converted: a float division here would
    * be a rounding error that then propagates into every derived KPI.

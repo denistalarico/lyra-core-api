@@ -90,14 +90,13 @@ describe('MetaAdsEntityReaderService', () => {
     expect(adSets.path).toBe(`${ACCOUNT_ID}/adsets`);
     expect(ads.path).toBe(`${ACCOUNT_ID}/ads`);
 
-    // Read-only and cheap: nothing here asks for a creative payload, an image,
-    // a video or a targeting spec, all of which cost quota and none of which
-    // has a column.
+    // Read-only and cheap: nothing here asks for an image, a video or a
+    // targeting spec, all of which cost quota and none of which has a column.
     for (const request of harness.edgeRequests) {
       const fields = String(request.fields);
       for (const forbidden of [
-        'creative',
         'image_url',
+        'thumbnail_url',
         'video_id',
         'targeting',
         'insights',
@@ -108,6 +107,59 @@ describe('MetaAdsEntityReaderService', () => {
 
     expect(String(adSets.fields)).toContain('campaign_id');
     expect(String(ads.fields)).toContain('adset_id');
+  });
+
+  /**
+   * The creative, which is the one subfield expansion this reader makes.
+   *
+   * `creative` used to sit in the forbidden list above, under a rule that was
+   * correct when written and is now false in both halves: it has a column
+   * (`social_ad_entities.creative_id`), and measured against the production
+   * account it costs nothing — 260 ads still came back in two pages of 200 with
+   * the subfield expanded. What stays forbidden is the *payload*: the image,
+   * the video and the targeting spec, which is what the rule was protecting.
+   */
+  describe('the creative subfield', () => {
+    it('asks the ads edge for the creative id, and only the ads edge', async () => {
+      const harness = createReader();
+      const resolved = credential();
+
+      await harness.reader.readCampaigns(resolved, { currency: 'BRL' });
+      await harness.reader.readAdSets(resolved, {
+        currency: 'BRL',
+        observedAt: new Date(),
+      });
+      await harness.reader.readAds(resolved, {
+        currency: 'BRL',
+        campaignByAdSetId: new Map(),
+      });
+
+      const [campaigns, adSets, ads] = harness.edgeRequests;
+
+      expect(String(ads.fields)).toContain('creative{id}');
+      // A campaign and an ad set have no creative of their own, so asking would
+      // be quota spent on a field that cannot answer.
+      expect(String(campaigns.fields)).not.toContain('creative');
+      expect(String(adSets.fields)).not.toContain('creative');
+    });
+
+    it('never asks for the thumbnail URL that rides beside the id', async () => {
+      const harness = createReader();
+
+      await harness.reader.readAds(credential(), {
+        currency: 'BRL',
+        campaignByAdSetId: new Map(),
+      });
+
+      // Free to request here and useless: the ads edge ignores
+      // `thumbnail_width` and stamps every URL it returns at 64×64, and Meta
+      // signs them with an expiry of about five days, so nothing may store one.
+      // The real picture comes from the creative node at read time.
+      const fields = String(harness.edgeRequests[0].fields);
+
+      expect(fields).toContain('creative{id}');
+      expect(fields).not.toContain('thumbnail');
+    });
   });
 
   describe('paid media destination', () => {

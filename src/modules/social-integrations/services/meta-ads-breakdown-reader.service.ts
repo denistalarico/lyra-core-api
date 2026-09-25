@@ -31,10 +31,24 @@ const BREAKDOWN_FIELDS =
 const CAMPAIGN_FIELDS = `${BREAKDOWN_FIELDS},campaign_id`;
 const ADSET_FIELDS = `${BREAKDOWN_FIELDS},adset_id,campaign_id`;
 
+const AD_FIELDS = `${BREAKDOWN_FIELDS},ad_id,adset_id,campaign_id`;
+
+/**
+ * The field list each level needs.
+ *
+ * `ad` is present for completeness of the union and is not reached: breakdowns
+ * are ingested at account level only (`BREAKDOWN_LEVEL` in the sync service),
+ * because a dimension multiplies the row count and the level multiplies it
+ * again. Listing it here rather than narrowing the map's key type is deliberate
+ * — the entry makes the cost of ever enabling it visible at the place the
+ * decision would be made, where a `Partial<Record<…>>` would make the level
+ * quietly fall through to no fields at all.
+ */
 const FIELDS_BY_LEVEL: Record<SocialAdInsightsLevel, string> = {
   account: BREAKDOWN_FIELDS,
   campaign: CAMPAIGN_FIELDS,
   adset: ADSET_FIELDS,
+  ad: AD_FIELDS,
 };
 
 /**

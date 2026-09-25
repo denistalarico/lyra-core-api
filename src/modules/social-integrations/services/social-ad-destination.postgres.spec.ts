@@ -64,6 +64,7 @@ run('Paid media destination against PostgreSQL', () => {
       destinationRaw: 'WHATSAPP',
       destinationObservedAt: OBSERVED_AT,
       destinationObserved: false,
+      creativeId: null,
       dailyBudgetMinor: '5000',
       lifetimeBudgetMinor: null,
       budgetRemainingMinor: null,

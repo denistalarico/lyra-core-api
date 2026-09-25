@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/require-await -- scheduler test doubles expose partial service shapes. */
 import type {
   SocialAdBackfillDecision,
   SocialAdBackfillPlannerService,
@@ -294,7 +293,7 @@ describe('SocialAdSyncScheduler — intraday', () => {
         // into a partial write.
         windowStart: '2026-08-26',
         windowEnd: '2026-08-26',
-        entityLevels: ['account', 'campaign', 'adset'],
+        entityLevels: ['account', 'campaign', 'adset', 'ad'],
         bucket: 'h09',
         requestedById: null,
       }),

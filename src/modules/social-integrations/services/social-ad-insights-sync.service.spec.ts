@@ -128,44 +128,49 @@ function createHarness(
 }
 
 describe('SocialAdInsightsSyncService — the happy path', () => {
-  it('ingests account, campaign and ad set, coarsest first', async () => {
+  it('ingests every level, coarsest first', async () => {
     const harness = createHarness();
 
     const summary = await harness.service.syncInsights(INPUT);
 
-    expect(harness.reads).toEqual(['account', 'campaign', 'adset']);
+    // Coarsest first so a failure at the finest level leaves the coarser
+    // windows already written, and because the account totals are what every
+    // finer sum is checked against.
+    expect(harness.reads).toEqual(['account', 'campaign', 'adset', 'ad']);
     expect(summary.status).toBe('completed');
-    expect(summary.rowsWritten).toBe(3);
+    expect(summary.rowsWritten).toBe(4);
     expect(summary.levels.map((level) => level.level)).toEqual([
       'account',
       'campaign',
       'adset',
+      'ad',
     ]);
   });
 
-  it('reads no other level, whatever the caller asked for', async () => {
+  it('reads the levels it declares, whatever the caller asked for', async () => {
     const harness = createHarness();
 
     await harness.service.syncInsights({
       ...INPUT,
-      // Not part of the input type. `ad` is the level this pipeline does not
-      // ingest, and a caller-supplied list would also decide what a run's
-      // `entity_levels` recorded — which is what later certifies coverage.
-      levels: ['ad'],
+      // Not part of the input type. The list is what a run's `entity_levels`
+      // records, so a caller-supplied one would produce runs whose stored
+      // coverage described the request rather than what was read.
+      levels: ['campaign'],
     } as never);
 
-    expect(harness.reads).toEqual(['account', 'campaign', 'adset']);
+    expect(harness.reads).toEqual(['account', 'campaign', 'adset', 'ad']);
   });
 
-  it('never reads the ad level, which is the one grain left out', async () => {
-    // §5: the smallest grain that resolves destination, and no smaller. `ad`
-    // multiplies the row count again — 254 ads against 126 ad sets on the
-    // production account — for a question nobody asks yet.
+  it('reads the ad level last, because it is the finest grain', async () => {
+    // It joined in Fatia C on measurement, not on appetite: the cost follows
+    // *delivery*, not the object count. Meta returns nothing for an ad that did
+    // not deliver, so the production account's 260 mirrored ads produced 73
+    // daily rows over 90 days in a single paginated request.
     const harness = createHarness();
 
     await harness.service.syncInsights(INPUT);
 
-    expect(harness.reads).not.toContain('ad');
+    expect(harness.reads.at(-1)).toBe('ad');
   });
 
   it('stamps every row of the run with one synced_at', async () => {

@@ -114,6 +114,10 @@ function base(
     destinationRaw: null,
     destinationObservedAt: null,
     destinationObserved: false,
+    // Null for every level by default, like the destination above. Only the ad
+    // overrides it — a campaign and an ad set have no creative of their own,
+    // and the ads beneath one ad set routinely render different ones.
+    creativeId: null,
     dailyBudgetMinor: parseMinorUnits(payload.daily_budget),
     lifetimeBudgetMinor: parseMinorUnits(payload.lifetime_budget),
     budgetRemainingMinor: parseMinorUnits(payload.budget_remaining),
@@ -274,6 +278,13 @@ export function normalizeAdSet(
  * lookup is the point: the alternative is one extra Graph call per ad, which on
  * an account with a few thousand ads is a few thousand calls against a shared
  * business quota to learn something the previous level already said.
+ *
+ * The creative arrives nested — `creative: { id: … }` — because the ads edge
+ * expands it as a subfield rather than returning a flat `creative_id`. Only the
+ * id is taken. `thumbnail_url` sits right beside it in the payload and is
+ * deliberately dropped here rather than being carried one layer further: it is
+ * a CDN link signed with an expiry, and the narrowest place to refuse it is the
+ * function that would otherwise be the first to hold it.
  */
 export function normalizeAd(
   payload: unknown,
@@ -301,5 +312,34 @@ export function normalizeAd(
     externalId,
     parentExternalId: adSetExternalId,
     campaignExternalId,
+    creativeId: readCreativeId(payload.creative),
   };
+}
+
+/**
+ * The creative's id out of the nested object the ads edge returns.
+ *
+ * Narrower than `parseExternalId`, which every other id on this table uses.
+ * That function accepts any trimmed string inside the column width, because
+ * most ids here are only ever compared and joined on. This one is different:
+ * it is the single stored value that later becomes a **Graph path**, when
+ * `SocialAdCreativeThumbnailService` reads the creative node.
+ *
+ * `MetaAdsGraphService` does validate the path it is handed — a value carrying
+ * `..` or a query string is refused there — but that guard admits `a/b`,
+ * because a legitimate path may name an edge. A creative id that arrived with a
+ * slash in it would therefore be a stored value capable of pointing our token
+ * at a different edge entirely. Digits only, checked where the value is first
+ * accepted, so that can never be stored in the first place.
+ *
+ * A payload with no `creative` key is ordinary, not an error: it is what an ad
+ * whose creative was deleted answers, and it costs the ad its thumbnail and
+ * nothing else.
+ */
+function readCreativeId(value: unknown): string | null {
+  if (!isRecord(value)) return null;
+
+  const candidate = parseExternalId(value.id);
+
+  return candidate && /^\d+$/.test(candidate) ? candidate : null;
 }

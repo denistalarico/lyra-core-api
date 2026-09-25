@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/require-await -- resume test doubles expose partial service shapes. */
 import type { ResolvedAdCredential } from '../credentials/resolved-ad-credential';
 import { SocialAdCredentialError } from '../credentials/social-ad-credential.error';
 import type { SocialAdCredentialResolver } from '../credentials/social-ad-credential.resolver';
@@ -116,7 +115,7 @@ describe('SocialAdBackfillResumeService', () => {
       runKind: 'backfill',
       windowStart: '2026-08-12',
       windowEnd: shift(ANCHOR, -7),
-      entityLevels: ['account', 'campaign', 'adset'],
+      entityLevels: ['account', 'campaign', 'adset', 'ad'],
     });
   });
 

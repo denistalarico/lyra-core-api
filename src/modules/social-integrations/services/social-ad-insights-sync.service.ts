@@ -18,20 +18,26 @@ import { SocialAdMetricsWriterService } from './social-ad-metrics-writer.service
 /**
  * The levels this slice ingests, in order.
  *
- * Fixed internally rather than accepted from the request. A caller that could
- * name levels would be a caller that could ask for `ad` — the level this
- * pipeline deliberately does not ingest — and the list is also what a run's
- * `entity_levels` records, so a request-supplied list would produce runs whose
- * stored coverage described whatever that request happened to ask for.
+ * Fixed internally rather than accepted from the request. The list is what a
+ * run's `entity_levels` records, so a request-supplied one would produce runs
+ * whose stored coverage described whatever that request happened to ask for
+ * rather than what the pipeline reads.
  *
  * Coarsest first: the account totals are the cheapest read and the ones every
- * finer sum is checked against, and ad set last so that a failure at the
- * largest level leaves the two coarser windows already written.
+ * finer sum is checked against, and each finer level after it, so that a
+ * failure at the largest level leaves the coarser windows already written.
+ *
+ * `ad` is last and is the finest grain this pipeline reads. Measured on the
+ * production account before it was added: 73 daily rows over 90 days in one
+ * paginated request, against 260 mirrored ads — Meta returns nothing for an ad
+ * that did not deliver, so the cost follows concurrent delivery rather than the
+ * size of the account's history.
  */
 const INGEST_LEVELS: readonly SocialAdInsightsLevel[] = [
   'account',
   'campaign',
   'adset',
+  'ad',
 ];
 
 export type SyncAdInsightsInput = SocialAdCredentialScope & {

@@ -8,22 +8,32 @@ import type {
 /**
  * The levels this pipeline reads.
  *
- * Ad set joined in I3.4 and `ad` deliberately did not. The rule that decided it
- * is *the smallest grain that answers a question we actually have*: paid media
- * destination — WhatsApp, Instagram Direct, Messenger, a website — is a property
- * of the **ad set** (`destination_type`), so without ad-set insights the only
- * way to report spend per destination is to apportion a campaign's money across
- * ad sets that may not share a destination. That is not a measurement, it is an
- * estimate presented as one, and it is why this type was widened rather than a
- * ratio being invented downstream.
+ * Ad set joined in I3.4 under the rule *the smallest grain that answers a
+ * question we actually have*: paid media destination — WhatsApp, Instagram
+ * Direct, Messenger, a website — is a property of the **ad set**
+ * (`destination_type`), so without ad-set insights the only way to report spend
+ * per destination is to apportion a campaign's money across ad sets that may
+ * not share a destination. That is not a measurement, it is an estimate
+ * presented as one.
  *
- * `ad` stays out because nothing needs it. It multiplies the row count again —
- * this account carries 254 ads against 126 ad sets — for a grain no current
- * question is asked at, and the honest time to add it is when one is.
+ * `ad` joined under the same rule, and the question is *which creative worked*.
+ * It is the only level at which that can be answered: one ad set routinely runs
+ * several ads against one audience with one budget, and splitting the ad set's
+ * spend between them would once again be an estimate wearing a measurement's
+ * clothes.
+ *
+ * It was left out until now on a cost estimate that measurement did not
+ * support. The fear was that the row count multiplied with the object count —
+ * this account mirrors 260 ads against 128 ad sets. What it actually multiplies
+ * with is *delivery*: Meta returns no row for an object that did not deliver on
+ * a day, and over this account's last 90 days the ad level returned 73 daily
+ * rows in a single paginated request. Over the last 14 days it returned 3, from
+ * 3 distinct ads, against the ad set level's 2. The ceiling that matters is
+ * concurrently delivering ads, not ads that exist.
  */
 export type SocialAdInsightsLevel = Extract<
   SocialAdEntityLevel,
-  'account' | 'campaign' | 'adset'
+  'account' | 'campaign' | 'adset' | 'ad'
 >;
 
 /**

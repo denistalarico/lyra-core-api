@@ -189,6 +189,115 @@ describe('ad normalization', () => {
     expect(ad?.parentExternalId).toBe('unknown-adset');
     expect(ad?.campaignExternalId).toBeNull();
   });
+
+  /**
+   * The creative, which is the one field on this level that arrives nested and
+   * the one whose neighbour in the payload must never be stored.
+   */
+  describe('creative', () => {
+    it('reads the id out of the nested creative object', () => {
+      // The ads edge expands `creative` as a subfield; there is no flat
+      // `creative_id` to read.
+      const ad = normalizeAd(
+        { id: '999', adset_id: ADSET_ID, creative: { id: '1606435724534548' } },
+        context,
+      );
+
+      expect(ad?.creativeId).toBe('1606435724534548');
+    });
+
+    it('drops the thumbnail URL that arrives beside it', () => {
+      // The whole reason the id is what gets stored: Meta signs these with an
+      // `oe` parameter that expires in about five days, so a persisted URL
+      // renders for a few days and then 403s. This is the narrowest place to
+      // refuse it — the first function that would otherwise hold it.
+      const ad = normalizeAd(
+        {
+          id: '999',
+          adset_id: ADSET_ID,
+          creative: {
+            id: '1606435724534548',
+            thumbnail_url: 'https://scontent.example/x.jpg?oe=6ABCC3C4',
+          },
+        },
+        context,
+      );
+
+      expect(JSON.stringify(ad)).not.toContain('scontent.example');
+      expect(JSON.stringify(ad)).not.toContain('oe=');
+    });
+
+    it('keeps the ad when it has no creative, losing only the picture', () => {
+      // An ad whose creative was deleted still spent money, and a row that
+      // vanished over a missing thumbnail would take its spend with it.
+      for (const creative of [undefined, null, 'not-an-object', {}]) {
+        const ad = normalizeAd(
+          { id: '999', adset_id: ADSET_ID, creative },
+          context,
+        );
+
+        expect(ad?.externalId).toBe('999');
+        expect(ad?.creativeId).toBeNull();
+      }
+    });
+
+    it('refuses a creative id that is not bare digits', () => {
+      // Narrower than every other id on this table, because this is the one
+      // stored value that later becomes a Graph path. The graph client's own
+      // guard admits `a/b` — a legitimate path may name an edge — so a slash
+      // stored here would be a value able to point our token somewhere else.
+      // A placeholder is the right outcome for a picture; a redirected read is
+      // not.
+      for (const hostile of [
+        '../../me',
+        'me/accounts',
+        '1606435724534548/insights',
+        'act_415877197389621',
+        '',
+        '  ',
+      ]) {
+        const ad = normalizeAd(
+          { id: '999', adset_id: ADSET_ID, creative: { id: hostile } },
+          context,
+        );
+
+        expect(ad?.creativeId).toBeNull();
+      }
+
+      // And the ad itself survives every one of them.
+      expect(
+        normalizeAd(
+          { id: '999', adset_id: ADSET_ID, creative: { id: '../../me' } },
+          context,
+        )?.externalId,
+      ).toBe('999');
+    });
+  });
+
+  it.each([
+    ['account', () => normalizeAccount({ id: ACCOUNT_ID }, ACCOUNT_ID)],
+    [
+      'campaign',
+      () =>
+        normalizeCampaign(
+          { id: CAMPAIGN_ID },
+          { accountExternalId: ACCOUNT_ID, currency: 'BRL' },
+        ),
+    ],
+    [
+      'adset',
+      () =>
+        normalizeAdSet(
+          { id: ADSET_ID, creative: { id: '1606435724534548' } },
+          { currency: 'BRL', observedAt: new Date() },
+        ),
+    ],
+  ])('leaves creativeId null at %s level', (_level, build) => {
+    // Only an ad has a creative. The ad set case passes a creative deliberately:
+    // a level that started copying one from its payload would be inventing a
+    // fact, since the ads beneath one ad set routinely render different ones.
+    expect(build()?.creativeId).toBeNull();
+  });
 });
 
 describe('budgets', () => {
