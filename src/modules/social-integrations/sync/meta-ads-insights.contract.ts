@@ -89,6 +89,15 @@ export type NormalizedAdMetricDaily = {
   conversionValue: string;
   videoViews: string;
   /**
+   * Conversations started by the ad, or null when none were reported.
+   *
+   * Null rather than `'0'`, like `thruplays` below: the column was added after
+   * rows existed, so a zero would be indistinguishable from a row collected
+   * before the field was derived at all. Not a component of `leads` or
+   * `conversions` — see the entity for why summing them double counts.
+   */
+  messagingConversations: string | null;
+  /**
    * ThruPlays: watched to the end, or for at least 15 seconds.
    *
    * Null, never `'0'`, when Meta did not report the field — the column it

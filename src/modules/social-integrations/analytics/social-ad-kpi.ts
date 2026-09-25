@@ -83,6 +83,15 @@ export type SocialAdKpiInputs = {
   /** Scaled to 1e6. */
   conversionValue: bigint;
   videoViews: bigint;
+  /**
+   * Conversations started, unscaled, or null when no day reported any.
+   *
+   * Null rather than `0n` so that `cpc_conversation` can tell "never measured"
+   * from "measured none" — the first has no cost per conversation and the
+   * second has one that is undefined for the same reason a zero denominator
+   * always is. Both answer null, but only the second is a fact about the ads.
+   */
+  messagingConversations: bigint | null;
 };
 
 export type SocialAdKpis = {
@@ -92,6 +101,8 @@ export type SocialAdKpis = {
   cpl: string | null;
   cpa: string | null;
   roas: string | null;
+  /** Cost per conversation started. Null when none were measured. */
+  costPerConversation: string | null;
 };
 
 /**
@@ -113,6 +124,12 @@ export type SocialAdKpis = {
  * - **ROAS** is a ratio of two money columns, so the scales cancel and the
  *   result is a bare multiplier — `3.500000` means three and a half times, not
  *   R$ 3.50.
+ * - **Cost per conversation** divides the same spend by conversations started.
+ *   Its denominator is not part of `conversions`, so this is not a variant of
+ *   CPA: on a messaging account the two answer different questions and neither
+ *   contains the other. Null when conversations were never measured, which is
+ *   the same answer a zero denominator gives — deliberately, because "no
+ *   conversations" has no cost per conversation either.
  */
 export function deriveSocialAdKpis(inputs: SocialAdKpiInputs): SocialAdKpis {
   return {
@@ -128,6 +145,9 @@ export function deriveSocialAdKpis(inputs: SocialAdKpiInputs): SocialAdKpis {
     // the quotient in money rather than in money-per-1e6-conversions.
     cpa: formatDerived(divideScaled(inputs.spend, inputs.conversions)),
     roas: formatDerived(divideScaled(inputs.conversionValue, inputs.spend)),
+    costPerConversation: formatDerived(
+      divideCost(inputs.spend, inputs.messagingConversations ?? 0n),
+    ),
   };
 }
 

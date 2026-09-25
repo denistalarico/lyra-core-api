@@ -51,6 +51,8 @@ export type SocialAdAdSetRow = SocialAdKpis & {
   clicks: string;
   linkClicks: string;
   leads: string;
+  /** Conversations started. Beside `leads`, never summed with it. */
+  messagingConversations: string | null;
   conversions: string;
   conversionValue: string;
   videoViews: string;

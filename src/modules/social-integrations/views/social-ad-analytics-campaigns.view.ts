@@ -59,6 +59,13 @@ export type SocialAdCampaignRow = SocialAdKpis & {
   clicks: string;
   linkClicks: string;
   leads: string;
+  /**
+   * Conversations started, or null when no day of this campaign carried one.
+   *
+   * Beside `leads`, never inside it and never added to it — the two overlap on
+   * a messaging campaign, which is exactly the kind this column exists for.
+   */
+  messagingConversations: string | null;
   conversions: string;
   conversionValue: string;
   videoViews: string;

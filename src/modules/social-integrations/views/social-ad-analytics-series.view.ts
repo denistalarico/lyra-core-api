@@ -47,6 +47,16 @@ export type SocialAdSeriesPoint = SocialAdSeriesKpis & {
   videoViews: string | null;
 
   /**
+   * Conversations started by ads that day.
+   *
+   * Unlike `thruplays` below, null here does **not** mark the field's arrival:
+   * every existing row was backfilled from the stored `actions` payload when
+   * the column was added, so the history is continuous and a null is a day
+   * whose value was never derived — which the current ingest does not produce.
+   */
+  messagingConversations: string | null;
+
+  /**
    * ThruPlays, and the day's view-weighted average watch time in seconds.
    *
    * Null here carries an extra meaning the other fields do not have: both

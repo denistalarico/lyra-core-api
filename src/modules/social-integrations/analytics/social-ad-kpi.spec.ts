@@ -24,6 +24,7 @@ const NO_ACTIVITY = {
   conversions: 0n,
   conversionValue: 0n,
   videoViews: 0n,
+  messagingConversations: null,
 };
 
 describe('divideScaled', () => {
@@ -59,6 +60,7 @@ describe('deriveSocialAdKpis', () => {
       conversions: money('25'),
       conversionValue: money('5000'),
       videoViews: 8_000n,
+      messagingConversations: null,
     });
 
     expect(kpis).toEqual({
@@ -74,6 +76,9 @@ describe('deriveSocialAdKpis', () => {
       cpa: '40.000000',
       // 5000 / 1000
       roas: '5.000000',
+      // Null even with spend: this fixture reports no conversations, and a
+      // cost per conversation without conversations is not zero.
+      costPerConversation: null,
     });
   });
 
@@ -87,7 +92,50 @@ describe('deriveSocialAdKpis', () => {
       cpl: null,
       cpa: null,
       roas: null,
+      costPerConversation: null,
     });
+  });
+
+  it('derives cost per conversation from spend and conversations', () => {
+    const kpis = deriveSocialAdKpis({
+      ...NO_ACTIVITY,
+      spend: money('88'),
+      messagingConversations: 11n,
+    });
+
+    expect(kpis.costPerConversation).toBe('8.000000');
+  });
+
+  it('keeps cost per conversation independent of cost per lead', () => {
+    // The operator's real shape: eleven conversations and four leads over the
+    // same spend, overlapping people. The two costs must be derived from their
+    // own denominators — a conversation is not a cheap lead, and averaging or
+    // substituting one for the other misstates both.
+    const kpis = deriveSocialAdKpis({
+      ...NO_ACTIVITY,
+      spend: money('220'),
+      leads: 4n,
+      messagingConversations: 11n,
+    });
+
+    expect(kpis.costPerConversation).toBe('20.000000');
+    expect(kpis.cpl).toBe('55.000000');
+  });
+
+  it('answers null for cost per conversation when none were measured', () => {
+    // Null and zero arrive at the same answer here on purpose: neither "never
+    // measured" nor "no conversations" has a cost per conversation, and
+    // rendering either as R$ 0,00 would say the conversations were free.
+    const spending = { ...NO_ACTIVITY, spend: money('500') };
+
+    expect(
+      deriveSocialAdKpis({ ...spending, messagingConversations: null })
+        .costPerConversation,
+    ).toBeNull();
+    expect(
+      deriveSocialAdKpis({ ...spending, messagingConversations: 0n })
+        .costPerConversation,
+    ).toBeNull();
   });
 
   it('reports a cost per lead only when there are leads, even with spend', () => {

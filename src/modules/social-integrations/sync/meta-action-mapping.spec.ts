@@ -37,6 +37,31 @@ describe('meta action mapping — version', () => {
     expect(META_ACTION_MAPPING_VERSION).toBe(1);
   });
 
+  it('did not move when messaging conversations were promoted', () => {
+    // Promoting a column is not a mapping change: the type belongs to no
+    // family, so `leads`, `conversions`, `conversion_value` and `video_views`
+    // come out identical for the same input, and rows from before and after
+    // the promotion stay comparable — which is the only thing the version
+    // protects. This asserts the four columns, not the number, so it fails if
+    // the promotion ever starts changing one of them.
+    const before = deriveActionFacts({
+      counts: readActionMap(REAL_LEAD_DAY),
+      values: {},
+    });
+
+    expect({
+      leads: before.leads,
+      conversions: before.conversions,
+      conversionValue: before.conversionValue,
+      videoViews: before.videoViews,
+    }).toEqual({
+      leads: '2',
+      conversions: '2.000000',
+      conversionValue: '0.000000',
+      videoViews: '72',
+    });
+  });
+
   it('describes exactly the families that version 1 counts', () => {
     // If this list changes, rows written before the change mean something
     // different from rows written after, and the version must move with it.
@@ -136,6 +161,59 @@ describe('deriveActionFacts', () => {
     // One conversation started on the same day as two leads. Adding it would
     // count a person who messaged and became a lead twice.
     expect(facts.conversions).toBe('2.000000');
+    // Reported all the same, in its own column — the point of the promotion is
+    // that the number is available without ever entering a total with leads.
+    expect(facts.messagingConversations).toBe('1');
+    expect(facts.leads).toBe('2');
+  });
+
+  it('reads conversations from the started type, not the connection total', () => {
+    // The two sit beside each other reporting near-identical figures, and an
+    // ordered family would take whichever came first — making the KPI's
+    // meaning depend on which names a campaign happened to report.
+    const facts = deriveActionFacts({
+      counts: readActionMap([
+        {
+          action_type: 'onsite_conversion.messaging_conversation_started_7d',
+          value: '11',
+        },
+        {
+          action_type: 'onsite_conversion.total_messaging_connection',
+          value: '12',
+        },
+      ]),
+      values: {},
+    });
+
+    expect(facts.messagingConversations).toBe('11');
+  });
+
+  it('answers null, not zero, when no conversation type was reported', () => {
+    // The column is nullable for this case: a row that never carried the field
+    // must stay distinguishable from one measured at zero, because the backfill
+    // has to know which rows it still owes a value.
+    const facts = deriveActionFacts({
+      counts: readActionMap([{ action_type: 'lead', value: '4' }]),
+      values: {},
+    });
+
+    expect(facts.messagingConversations).toBeNull();
+  });
+
+  it('truncates a conversation split across ads rather than rounding up', () => {
+    // Attribution can credit half a conversation to each of two ads. Rounding
+    // either half up invents a conversation that did not happen.
+    const facts = deriveActionFacts({
+      counts: readActionMap([
+        {
+          action_type: 'onsite_conversion.messaging_conversation_started_7d',
+          value: '1.5',
+        },
+      ]),
+      values: {},
+    });
+
+    expect(facts.messagingConversations).toBe('1');
   });
 
   it('makes leads a subset of conversions, never a sibling', () => {
@@ -221,14 +299,19 @@ describe('deriveActionFacts', () => {
     expect(facts.videoViews).toBe('72');
   });
 
-  it('answers zeros for a row with no actions at all', () => {
+  it('answers zeros for a row with no actions at all — but null conversations', () => {
     const facts = deriveActionFacts({ counts: {}, values: {} });
 
+    // The one field that breaks the pattern, deliberately. The four columns
+    // that predate the nullable one default to 0 because their table column
+    // does; `messagingConversations` answers null because a row with no value
+    // is a row the backfill still owes, and a zero would hide it.
     expect(facts).toEqual({
       leads: '0',
       conversions: '0.000000',
       conversionValue: '0.000000',
       videoViews: '0',
+      messagingConversations: null,
     });
   });
 

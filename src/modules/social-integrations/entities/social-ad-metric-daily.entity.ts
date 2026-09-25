@@ -279,6 +279,27 @@ export class SocialAdMetricDailyEntity {
   videoViews!: string;
 
   /**
+   * Conversations an ad started — Ads Manager's "Conversas por mensagem
+   * iniciadas", the `messaging_conversation_started_7d` action type.
+   *
+   * **Never add this to `leads` or `conversions`.** On a WhatsApp account they
+   * overlap without matching — eleven conversations against four leads on the
+   * measured account — so a total counts most people twice, while treating them
+   * as disjoint categories asserts an independence the data does not show. They
+   * are two labelled columns, and any report showing both must say so.
+   *
+   * Nullable with no default, unlike `videoViews` beside it and for the same
+   * reason as `thruplays`: the column was added to a table that already held
+   * rows. NULL means the value was never derived for that row; it does not mean
+   * zero conversations, and a `0` default would have restated history as
+   * measured zeros. The migration backfilled every existing row from `actions`,
+   * so in practice NULL only appears on rows written by a path that did not
+   * populate it.
+   */
+  @Column({ name: 'messaging_conversations', type: 'bigint', nullable: true })
+  messagingConversations!: string | null;
+
+  /**
    * ThruPlays — watched to the end, or for at least 15 seconds.
    *
    * Nullable with no default, unlike `videoViews` beside it. The field was

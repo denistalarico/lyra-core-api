@@ -136,6 +136,16 @@ type AggregateRow = {
   conversions: string | null;
   conversion_value: string | null;
   video_views: string | null;
+  /**
+   * Conversations started, with the count of days that carried a value.
+   *
+   * The companion count exists for the same reason `thruplay_days` does: a
+   * `SUM` of all-NULL is NULL and a `SUM` of stored zeros is `0`, and the two
+   * must not collapse into the same answer. "No day reported this" is not "the
+   * ads started no conversations", and only the second is a result.
+   */
+  messaging_conversations: string | null;
+  messaging_conversation_days: string | null;
   /** Null across the whole period when no day reported it — see `readVideo`. */
   thruplays: string | null;
   thruplay_days: string | null;
@@ -326,18 +336,18 @@ export class SocialAnalyticsReadService {
       previousReach,
       counts,
     ] = await Promise.all([
-        this.aggregate(connection.id, period),
-        this.aggregate(connection.id, comparison),
-        this.findLastFactDate(connection.id),
-        this.findPeriodReach(connection, period),
-        // Looked up for the comparison window too, and usually null: only the
-        // presets are pre-measured, and the window immediately preceding a preset
-        // is not one of them. A null there is the honest answer — the alternative
-        // would be a period-over-period reach comparison where one side is a
-        // measurement and the other a sum.
-        this.findPeriodReach(connection, comparison),
-        this.countInventory(connection.id, period),
-      ]);
+      this.aggregate(connection.id, period),
+      this.aggregate(connection.id, comparison),
+      this.findLastFactDate(connection.id),
+      this.findPeriodReach(connection, period),
+      // Looked up for the comparison window too, and usually null: only the
+      // presets are pre-measured, and the window immediately preceding a preset
+      // is not one of them. A null there is the honest answer — the alternative
+      // would be a period-over-period reach comparison where one side is a
+      // measurement and the other a sum.
+      this.findPeriodReach(connection, comparison),
+      this.countInventory(connection.id, period),
+    ]);
 
     return {
       connectionId: connection.id,
@@ -450,6 +460,11 @@ export class SocialAnalyticsReadService {
       .addSelect('SUM(fact.conversions)', 'conversions')
       .addSelect('SUM(fact.conversion_value)', 'conversion_value')
       .addSelect('SUM(fact.video_views)', 'video_views')
+      .addSelect('SUM(fact.messaging_conversations)', 'messaging_conversations')
+      .addSelect(
+        'COUNT(fact.messaging_conversations)',
+        'messaging_conversation_days',
+      )
       .addSelect('SUM(fact.thruplays)', 'thruplays')
       .addSelect('COUNT(fact.thruplays)', 'thruplay_days')
       // Weighted the same way the period total is, even though the group is a
@@ -557,6 +572,11 @@ export class SocialAnalyticsReadService {
       .addSelect('SUM(fact.conversions)', 'conversions')
       .addSelect('SUM(fact.conversion_value)', 'conversion_value')
       .addSelect('SUM(fact.video_views)', 'video_views')
+      .addSelect('SUM(fact.messaging_conversations)', 'messaging_conversations')
+      .addSelect(
+        'COUNT(fact.messaging_conversations)',
+        'messaging_conversation_days',
+      )
       .addSelect('SUM(fact.reach)', 'reach')
       .addSelect('COUNT(fact.reach)', 'reach_days')
       .addSelect('COUNT(DISTINCT fact.metric_date)', 'fact_days')
@@ -650,6 +670,11 @@ export class SocialAnalyticsReadService {
       .addSelect('SUM(fact.conversions)', 'conversions')
       .addSelect('SUM(fact.conversion_value)', 'conversion_value')
       .addSelect('SUM(fact.video_views)', 'video_views')
+      .addSelect('SUM(fact.messaging_conversations)', 'messaging_conversations')
+      .addSelect(
+        'COUNT(fact.messaging_conversations)',
+        'messaging_conversation_days',
+      )
       .addSelect('SUM(fact.reach)', 'reach')
       .addSelect('COUNT(fact.reach)', 'reach_days')
       .addSelect('COUNT(DISTINCT fact.metric_date)', 'fact_days')
@@ -963,6 +988,8 @@ export class SocialAnalyticsReadService {
       clicks: toCount(row.clicks).toString(),
       linkClicks: toCount(row.link_clicks).toString(),
       leads: toCount(row.leads).toString(),
+      messagingConversations:
+        readMessagingConversations(row)?.toString() ?? null,
       conversions: formatAmountText(row.conversions),
       conversionValue: formatAmountText(row.conversion_value),
       videoViews: toCount(row.video_views).toString(),
@@ -1028,6 +1055,8 @@ export class SocialAnalyticsReadService {
       clicks: toCount(row.clicks).toString(),
       linkClicks: toCount(row.link_clicks).toString(),
       leads: toCount(row.leads).toString(),
+      messagingConversations:
+        readMessagingConversations(row)?.toString() ?? null,
       conversions: formatAmountText(row.conversions),
       conversionValue: formatAmountText(row.conversion_value),
       videoViews: toCount(row.video_views).toString(),
@@ -1066,6 +1095,11 @@ export class SocialAnalyticsReadService {
       .addSelect('SUM(fact.conversions)', 'conversions')
       .addSelect('SUM(fact.conversion_value)', 'conversion_value')
       .addSelect('SUM(fact.video_views)', 'video_views')
+      .addSelect('SUM(fact.messaging_conversations)', 'messaging_conversations')
+      .addSelect(
+        'COUNT(fact.messaging_conversations)',
+        'messaging_conversation_days',
+      )
       .addSelect('SUM(fact.thruplays)', 'thruplays')
       .addSelect('COUNT(fact.thruplays)', 'thruplay_days')
       // The weighted average's two halves, summed separately so the division
@@ -1182,6 +1216,9 @@ export class SocialAnalyticsReadService {
       impressions: toCount(row.impressions).toString(),
       clicks: toCount(row.clicks).toString(),
       linkClicks: toCount(row.link_clicks).toString(),
+      // From `inputs` rather than re-read, so the number shown and the
+      // denominator of `costPerConversation` can never disagree.
+      messagingConversations: inputs.messagingConversations?.toString() ?? null,
       leads: toCount(row.leads).toString(),
       conversions: formatAmountText(row.conversions),
       conversionValue: formatAmountText(row.conversion_value),
@@ -1365,6 +1402,7 @@ function emptySeriesPoint(date: string): SocialAdSeriesPoint {
     conversions: null,
     conversionValue: null,
     videoViews: null,
+    messagingConversations: null,
     thruplays: null,
     videoAvgWatchSeconds: null,
     reach: null,
@@ -1375,6 +1413,7 @@ function emptySeriesPoint(date: string): SocialAdSeriesPoint {
     cpl: null,
     cpa: null,
     roas: null,
+    costPerConversation: null,
   };
 }
 
@@ -1393,6 +1432,7 @@ function toSeriesPoint(
     conversions: formatAmountText(row.conversions),
     conversionValue: formatAmountText(row.conversion_value),
     videoViews: toCount(row.video_views).toString(),
+    messagingConversations: readMessagingConversations(row)?.toString() ?? null,
     // Null rather than '0' on a day that predates the field being requested,
     // the same rule the period total follows.
     thruplays:
@@ -1455,7 +1495,23 @@ function toKpiInputs(row: AggregateRow): SocialAdKpiInputs {
     conversions: toAmount(row.conversions),
     conversionValue: toAmount(row.conversion_value),
     videoViews: toCount(row.video_views),
+    messagingConversations: readMessagingConversations(row),
   };
+}
+
+/**
+ * Conversations for the period, or null when no day carried a value.
+ *
+ * The day count is what separates the two nulls `SUM` cannot: all-NULL and a
+ * genuine zero both arrive here as something falsy, and only the first means
+ * "not measured". Same shape as `readVideo` uses for ThruPlays, and kept as a
+ * function so the overview, the series and the KPI inputs cannot drift into
+ * three slightly different readings of the same pair of columns.
+ */
+function readMessagingConversations(row: AggregateRow): bigint | null {
+  return toCount(row.messaging_conversation_days) > 0n
+    ? toCount(row.messaging_conversations)
+    : null;
 }
 
 /**

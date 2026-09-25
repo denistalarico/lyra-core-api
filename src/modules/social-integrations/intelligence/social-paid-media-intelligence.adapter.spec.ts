@@ -39,6 +39,7 @@ function totals(overrides: Record<string, unknown> = {}) {
     conversions: '12.500000',
     conversionValue: '3500.000000',
     videoViews: '2200',
+    messagingConversations: null,
     reach: null,
     reachGranularity: 'daily' as const,
     ctr: '1.800000',
@@ -63,6 +64,7 @@ function seriesPoint(date: string, overrides: Record<string, unknown> = {}) {
     conversions: '0.500000',
     conversionValue: '35.000000',
     videoViews: '22',
+    messagingConversations: null,
     reach: '480',
     isPartial: false,
     ctr: '1.800000',
@@ -318,6 +320,7 @@ describe('SocialPaidMediaIntelligenceAdapter', () => {
             conversions: null,
             conversionValue: null,
             videoViews: null,
+            messagingConversations: null,
             reach: null,
             isPartial: false,
             ctr: null,
@@ -582,6 +585,7 @@ describe('paid media ratio semantics against the shipped KPI implementation', ()
     conversions: 0n,
     conversionValue: 0n,
     videoViews: 0n,
+    messagingConversations: null,
     ...overrides,
   });
 

@@ -140,6 +140,7 @@ export function normalizeMetricRow(
     conversions: facts.conversions,
     conversionValue: facts.conversionValue,
     videoViews: facts.videoViews,
+    messagingConversations: facts.messagingConversations,
     thruplays,
     videoAvgWatchSeconds,
     /**

@@ -90,6 +90,13 @@ run('Social analytics read against PostgreSQL', () => {
      */
     thruplays?: string | null;
     videoAvgWatchSeconds?: string | null;
+    /**
+     * NULL by default too, but for a different reason from the pair above:
+     * this column WAS backfilled, so in production a null means a day whose
+     * ads started no conversations. Left null here so the "no day reported
+     * any" path stays reachable from a fixture.
+     */
+    messagingConversations?: string | null;
     reach?: string | null;
     isPartial?: boolean;
     currency?: string;
@@ -102,7 +109,8 @@ run('Social analytics read against PostgreSQL', () => {
          "entity_level", "entity_external_id", "metric_date", "account_timezone",
          "currency", "attribution_setting", "spend", "impressions", "reach",
          "clicks", "link_clicks", "leads", "conversions", "conversion_value",
-         "video_views", "thruplays", "video_avg_watch_seconds", "is_partial")
+         "video_views", "thruplays", "video_avg_watch_seconds",
+         "messaging_conversations", "is_partial")
       VALUES (
         '${input.tenantId ?? tenantId}', '${workspaceId}',
         '${input.connectionId ?? connectionId}', 'meta_ads', 'paid',
@@ -116,6 +124,7 @@ run('Social analytics read against PostgreSQL', () => {
         ${input.conversionValue ?? '50.000000'}, ${input.videoViews ?? '100'},
         ${input.thruplays ?? 'NULL'},
         ${input.videoAvgWatchSeconds ?? 'NULL'},
+        ${input.messagingConversations ?? 'NULL'},
         ${input.isPartial ?? false}
       )
     `);
@@ -779,6 +788,81 @@ run('Social analytics read against PostgreSQL', () => {
 
       expect(result.current.videoAvgWatchSeconds).toBe('8.000000');
       expect(result.current.thruplays).toBe('100');
+    });
+  });
+
+  describe('messaging conversations', () => {
+    it('sums conversations and derives the cost per conversation', async () => {
+      await insertFact({
+        metricDate: '2027-01-25',
+        spend: '60.000000',
+        messagingConversations: '4',
+      });
+      await insertFact({
+        metricDate: '2027-01-26',
+        spend: '60.000000',
+        messagingConversations: '2',
+      });
+
+      const result = await overview('2027-01-25', '2027-01-26');
+
+      expect(result.current.messagingConversations).toBe('6');
+      // 120 / 6 — the quotient of two sums, not a mean of two daily costs,
+      // which would have said 12.5 by weighting a 4-conversation day the same
+      // as a 2-conversation one.
+      expect(result.current.costPerConversation).toBe('20.000000');
+    });
+
+    it('keeps the cost per conversation off the cost per lead', async () => {
+      // The operator's real shape: more conversations than leads over the same
+      // spend. Each cost must come from its own denominator.
+      await insertFact({
+        metricDate: '2027-01-27',
+        spend: '220.000000',
+        leads: '4',
+        messagingConversations: '11',
+      });
+
+      const result = await overview('2027-01-27', '2027-01-27');
+
+      expect(result.current.costPerConversation).toBe('20.000000');
+      expect(result.current.cpl).toBe('55.000000');
+    });
+
+    it('answers null, not zero, when no day reported the field', async () => {
+      // The distinction the nullable column exists for. A period with real
+      // spend and no conversation figure has not measured none — and a `0`
+      // here would report a collection gap as a campaign that failed.
+      await insertFact({ metricDate: '2027-01-28', spend: '50.000000' });
+
+      const result = await overview('2027-01-28', '2027-01-28');
+
+      expect(result.current.messagingConversations).toBeNull();
+      expect(result.current.costPerConversation).toBeNull();
+    });
+
+    it('distinguishes a measured zero from an unmeasured day', async () => {
+      // Both arrive as falsy out of SQL and only the day count separates them.
+      // A measured zero is a result: the ads ran and started no conversations.
+      await insertFact({
+        metricDate: '2027-01-29',
+        spend: '50.000000',
+        messagingConversations: '0',
+      });
+
+      const result = await overview('2027-01-29', '2027-01-29');
+
+      expect(result.current.messagingConversations).toBe('0');
+      // Still null: zero conversations has no cost per conversation, for the
+      // same reason every other zero denominator does.
+      expect(result.current.costPerConversation).toBeNull();
+    });
+
+    it('reports the day figure on the series, not a running total', async () => {
+      const result = await timeseries('2027-01-25', '2027-01-26');
+
+      expect(result.points[0].messagingConversations).toBe('4');
+      expect(result.points[1].messagingConversations).toBe('2');
     });
   });
 

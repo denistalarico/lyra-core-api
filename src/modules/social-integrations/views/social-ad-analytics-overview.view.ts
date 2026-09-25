@@ -70,6 +70,19 @@ export type SocialAdAnalyticsTotals = SocialAdKpis & {
   videoViews: string;
 
   /**
+   * Conversations started by ads in the period.
+   *
+   * **Never add this to `leads` or `conversions` above.** They overlap: on the
+   * measured account eleven conversations sit against four leads, largely on
+   * the same days, because for a messaging campaign a conversation and a lead
+   * describe one person twice. Shown side by side and labelled, never totalled.
+   *
+   * Null when no day in the period carried a value, which after the backfill
+   * means no data at all rather than a period of silence.
+   */
+  messagingConversations: string | null;
+
+  /**
    * ThruPlays — watched to the end, or at least 15 seconds.
    *
    * Null when no day in the period reported it, which includes every period

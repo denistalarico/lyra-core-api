@@ -54,6 +54,7 @@ run('SocialAdMetricsWriterService against PostgreSQL', () => {
       conversions: '2.000000',
       conversionValue: '0.000000',
       videoViews: '72',
+      messagingConversations: null,
       thruplays: null,
       videoAvgWatchSeconds: null,
       actions: {

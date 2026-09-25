@@ -66,6 +66,7 @@ run('Intraday convergence against PostgreSQL', () => {
       conversions: '1.000000',
       conversionValue: '0.000000',
       videoViews: '20',
+      messagingConversations: null,
       thruplays: null,
       videoAvgWatchSeconds: null,
       actions: {

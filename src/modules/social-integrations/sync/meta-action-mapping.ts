@@ -53,6 +53,14 @@ import {
  * a family gaining or losing a type, an ordering change, a family becoming
  * counted. Do not bump it for a comment, a rename, or a new family that no
  * account has ever reported — those produce identical numbers.
+ *
+ * **Still 1 after messaging conversations were promoted**, and the rule above
+ * is what decides it. `messagingConversations` reads a type that no family has
+ * ever claimed, and the four columns named above come out byte-identical for
+ * every input they ever saw — so rows written before and after the promotion
+ * remain comparable, which is the only thing this number protects. Bumping
+ * anyway would assert a difference that does not exist and would split the
+ * history of `leads` into two eras for no reason.
  */
 export const META_ACTION_MAPPING_VERSION = 1;
 
@@ -171,23 +179,41 @@ export const META_ACTION_FAMILIES: readonly MetaActionFamily[] = [
 ];
 
 /**
- * Messaging action types, recorded and deliberately **not** counted.
+ * Conversations started by an ad — Ads Manager's "Conversas por mensagem
+ * iniciadas".
  *
- * On the measured account these overlap the lead family without matching it:
- * five conversations started against four leads, three of the five on days that
- * also recorded a lead. For a WhatsApp campaign a conversation and a lead are
- * two views of one funnel, so adding both would count most people twice — and
- * asserting they are entirely distinct would be a claim the data does not
- * support either.
+ * Promoted to its own column after the operator named it their primary
+ * conversion. The `_7d` suffix is Meta's own and is not a window this code
+ * chose: the type counts a conversation opened within seven days of the click,
+ * and it is the type behind the Ads Manager column of that name — so the number
+ * reconciles with what the operator checks it against.
  *
- * The honest v1 is to leave them out of the counted columns and keep every one
- * of them in `actions`, where a later slice that knows the campaign objective
- * can decide. Listed here so the omission is visible and testable rather than
- * an oversight.
+ * Deliberately a single type rather than a family. `total_messaging_connection`
+ * sits beside it reporting a near-identical figure (12 against 11 on the
+ * measured account) and an ordered family would silently take whichever
+ * appeared first, making the KPI's meaning depend on which names a given
+ * campaign happened to report. One type, one definition.
+ */
+export const MESSAGING_CONVERSATION_ACTION_TYPE =
+  'onsite_conversion.messaging_conversation_started_7d';
+
+/**
+ * **Never added to `leads` or `conversions`, and it is not an oversight.**
+ *
+ * On the measured account the two overlap without matching: eleven
+ * conversations against four leads, on days that largely coincide. For a
+ * WhatsApp campaign a conversation and a lead are two views of one funnel, so a
+ * total of both counts most people twice — while asserting they are entirely
+ * distinct is a claim the data does not support either. The honest presentation
+ * is two columns side by side, each labelled, and no sum of them anywhere.
+ *
+ * This is why the type is absent from `META_ACTION_FAMILIES` rather than
+ * present with `countsAsConversion: false`: a family is the unit `conversions`
+ * sums over, and membership with a flag would put the decision one boolean away
+ * from being reversed by someone who did not read this.
  */
 export const UNCOUNTED_MESSAGING_ACTION_TYPES: readonly string[] = [
   'onsite_conversion.total_messaging_connection',
-  'onsite_conversion.messaging_conversation_started_7d',
   'onsite_conversion.messaging_first_reply',
   'onsite_conversion.messaging_user_depth_2_message_send',
   'onsite_conversion.messaging_user_depth_3_message_send',
@@ -205,6 +231,15 @@ export type MetaActionFacts = {
   conversions: string;
   conversionValue: string;
   videoViews: string;
+  /**
+   * Conversations started, or null when the account reported none at all.
+   *
+   * Null rather than '0' because the column it feeds was added to a table that
+   * already held rows: a zero here would be indistinguishable from the days
+   * collected before the field was promoted, and those days had conversations.
+   * The backfill fills them from `actions`; nothing else may assume a zero.
+   */
+  messagingConversations: string | null;
 };
 
 /**
@@ -286,6 +321,13 @@ export function deriveActionFacts(
     videoViews:
       parseCountText(breakdown.counts[VIDEO_VIEW_ACTION_TYPE]?.split('.')[0]) ??
       '0',
+    // Truncated like `leads`, and for the same reason: a conversation split
+    // across two ads by attribution is two halves of one conversation, and
+    // rounding either half up would invent one that never happened.
+    messagingConversations:
+      parseCountText(
+        breakdown.counts[MESSAGING_CONVERSATION_ACTION_TYPE]?.split('.')[0],
+      ) ?? null,
   };
 }
 
