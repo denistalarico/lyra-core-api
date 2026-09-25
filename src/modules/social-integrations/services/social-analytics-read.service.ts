@@ -6,7 +6,14 @@ import {
   deriveChange,
   deriveSocialAdKpis,
   derivePeriodReachKpis,
+  divideScaled,
+  formatDerived,
 } from '../analytics/social-ad-kpi';
+import {
+  META_CONVERSION_CATALOG,
+  readConversion,
+} from '../analytics/meta-conversion-catalog';
+import type { MetaActionBreakdown } from '../sync/meta-action-mapping';
 import {
   SocialAdAnalyticsPeriod,
   parseAnalyticsPeriod,
@@ -17,11 +24,12 @@ import { SocialAdEntity } from '../entities/social-ad-entity.entity';
 import { SocialAdMetricDailyEntity } from '../entities/social-ad-metric-daily.entity';
 import { SocialAdSyncRunEntity } from '../entities/social-ad-sync-run.entity';
 import { shiftDay } from '../sync/insights-window';
-import { parseScaledAmount } from '../sync/metric-number';
+import { formatScaledAmount, parseScaledAmount } from '../sync/metric-number';
 import { planBackfillChunks } from '../sync/social-ad-backfill-plan';
 import type {
   SocialAdAnalyticsChange,
   SocialAdAnalyticsOverviewView,
+  SocialAdConversionTotal,
   SocialAdInventoryCounts,
   SocialAdAnalyticsTotals,
 } from '../views/social-ad-analytics-overview.view';
@@ -335,6 +343,7 @@ export class SocialAnalyticsReadService {
       currentReach,
       previousReach,
       counts,
+      conversions,
     ] = await Promise.all([
       this.aggregate(connection.id, period),
       this.aggregate(connection.id, comparison),
@@ -347,6 +356,7 @@ export class SocialAnalyticsReadService {
       // measurement and the other a sum.
       this.findPeriodReach(connection, comparison),
       this.countInventory(connection.id, period),
+      this.aggregateConversions(connection.id, period),
     ]);
 
     return {
@@ -362,9 +372,143 @@ export class SocialAnalyticsReadService {
       previous: this.toTotals(previous, previousReach),
       change: this.toChange(current, previous),
       counts,
+      conversions,
       hasPartialData: toCount(current.partial_days) > 0n,
       lastFactDate,
     };
+  }
+
+  /**
+   * Catalogued conversion events over the period, read from stored `actions`.
+   *
+   * ## Why this is one query and not one per event
+   *
+   * Every catalogued type is summed in a single pass, in the database, and the
+   * alias rule is applied here afterwards. The obvious alternative — a query
+   * per event, or a `jsonb_each` unnest joined per alias — multiplies a
+   * dashboard load by twenty for numbers that are usually all null.
+   *
+   * The pass sums *every* alias independently; the first-present rule that
+   * collapses them into one figure is applied in `readConversion` over the
+   * result. That ordering matters and is not an implementation detail: summing
+   * after collapsing would let a period where Meta reported `purchase` on some
+   * days and `omni_purchase` on others silently drop half the sales, because
+   * the winning alias would be chosen once for the whole period instead of
+   * being a property of each day.
+   *
+   * Which is also why the day-level collapse is what happens: each day's map is
+   * collapsed by the alias rule, then the collapsed counts are added. A day is
+   * the grain Meta de-duplicates at, so it is the grain the rule must run at.
+   *
+   * ## What it does not do
+   *
+   * No index serves this and none is proposed. It reads the same rows the
+   * totals already scan, for a period a dashboard has already bounded, and the
+   * payload is small. If an account ever makes this slow the answer is to
+   * promote that specific event to a column — the path `leads` and
+   * `messagingConversations` took — not to index a JSONB path that twenty
+   * events share.
+   */
+  private async aggregateConversions(
+    connectionId: string,
+    period: SocialAdAnalyticsPeriod,
+  ): Promise<SocialAdConversionTotal[]> {
+    const rows = await this.metricsRepository
+      .createQueryBuilder('fact')
+      .select('fact.actions', 'actions')
+      .addSelect('fact.spend', 'spend')
+      .where('fact.connection_id = :connectionId', { connectionId })
+      .andWhere('fact.entity_level = :level', { level: OVERVIEW_ENTITY_LEVEL })
+      .andWhere('fact.source = :source', { source: OVERVIEW_SOURCE })
+      .andWhere('fact.attribution_setting = :attribution', {
+        attribution: ANALYTICS_ATTRIBUTION,
+      })
+      .andWhere('fact.metric_date BETWEEN :since AND :until', {
+        since: period.since,
+        until: period.until,
+      })
+      // Rows with no action payload cannot contribute, and skipping them in SQL
+      // keeps an account that has never converted from shipping its whole
+      // history to this process to be discarded here.
+      .andWhere(`fact.actions -> 'counts' <> '{}'::jsonb`)
+      .getRawMany<{ actions: unknown; spend: string | null }>();
+
+    // Spend is summed over the same rows the events came from, not over the
+    // period: a cost-per-event whose numerator included days the payload was
+    // missing would divide a larger spend by the same count and overstate cost.
+    let spend = 0n;
+    const totals = new Map<
+      string,
+      { count: bigint; value: bigint; hasValue: boolean }
+    >();
+    const seen = new Set<string>();
+
+    for (const row of rows) {
+      spend += parseScaledAmount(row.spend) ?? 0n;
+
+      const breakdown = readStoredActions(row.actions);
+
+      for (const definition of META_CONVERSION_CATALOG) {
+        const one = readConversion(breakdown, definition);
+
+        if (one.count === null && one.value === null) continue;
+
+        seen.add(definition.id);
+
+        const running = totals.get(definition.id) ?? {
+          count: 0n,
+          value: 0n,
+          hasValue: false,
+        };
+
+        running.count += BigInt(one.count ?? '0');
+
+        // Tracked rather than inferred from the sum being non-zero. An event
+        // Meta priced at zero and an event Meta priced not at all both add 0n
+        // here, and only the first is a measurement — the same distinction the
+        // nullable columns exist for, one level down.
+        if (one.value !== null) {
+          running.value += parseScaledAmount(one.value) ?? 0n;
+          running.hasValue = true;
+        }
+
+        totals.set(definition.id, running);
+      }
+    }
+
+    // Catalog order, not insertion order: the response should not reorder
+    // itself because one day's payload happened to list events differently.
+    return META_CONVERSION_CATALOG.filter((one) => seen.has(one.id)).map(
+      (definition) => {
+        const running = totals.get(definition.id) ?? {
+          count: 0n,
+          value: 0n,
+          hasValue: false,
+        };
+
+        // Null unless a value actually arrived. A monetary event the account
+        // reported without a price — a purchase with no revenue configured on
+        // the pixel — has no value and no ROAS, and rendering either as zero
+        // would report a working shop as one that earns nothing.
+        const value = running.hasValue ? running.value : null;
+
+        return {
+          id: definition.id,
+          label: definition.label,
+          group: definition.group,
+          count: running.count.toString(),
+          value: value === null ? null : formatScaledAmount(value),
+          costPer: formatDerived(
+            divideScaled(spend, running.count * 1_000_000n),
+          ),
+          // Null when nothing was spent too — the same zero-denominator rule
+          // every other KPI follows.
+          roas:
+            value === null ? null : formatDerived(divideScaled(value, spend)),
+          verified: definition.verified,
+        };
+      },
+    );
   }
 
   /**
@@ -1512,6 +1656,46 @@ function readMessagingConversations(row: AggregateRow): bigint | null {
   return toCount(row.messaging_conversation_days) > 0n
     ? toCount(row.messaging_conversations)
     : null;
+}
+
+/**
+ * The stored `actions` payload as the breakdown the catalog reads.
+ *
+ * Defensive about shape in a way the rest of this file is not, and the reason
+ * is where the value comes from: `jsonb` arrives as whatever was written, and
+ * rows exist from before `messaging_conversations` was promoted — a future
+ * revision of the payload must degrade to "no conversions found" rather than
+ * throw inside a dashboard load.
+ *
+ * `mappingVersion` is deliberately ignored. It stamps how `leads`,
+ * `conversions`, `conversion_value` and `video_views` were derived; nothing
+ * here feeds those columns, and the raw `counts` map means the same thing under
+ * every version — that is what makes reading it version-independent, and why
+ * this whole feature needs no bump.
+ */
+function readStoredActions(value: unknown): MetaActionBreakdown {
+  const empty: MetaActionBreakdown = { counts: {}, values: {} };
+
+  if (!value || typeof value !== 'object') return empty;
+
+  const payload = value as Record<string, unknown>;
+
+  return {
+    counts: readStringMap(payload.counts),
+    values: readStringMap(payload.values),
+  };
+}
+
+function readStringMap(value: unknown): Record<string, string> {
+  if (!value || typeof value !== 'object') return {};
+
+  const map: Record<string, string> = {};
+
+  for (const [key, entry] of Object.entries(value)) {
+    if (typeof entry === 'string') map[key] = entry;
+  }
+
+  return map;
 }
 
 /**

@@ -167,6 +167,59 @@ export type SocialAdAnalyticsTotals = SocialAdKpis & {
   cpp: string | null;
 };
 
+/**
+ * One conversion event of the catalog, over the period.
+ *
+ * Absent from `SocialAdAnalyticsTotals` on purpose, and travelling as its own
+ * list rather than as more fields: these are read out of the stored `actions`
+ * payload instead of from promoted columns, they are hidden by default, and the
+ * set of them changes as the catalog grows. Folding them into the totals would
+ * make a type that grows by a field every time a pixel event is catalogued, and
+ * would put figures a client is *not* invoiced against beside the four that
+ * they are.
+ */
+export type SocialAdConversionTotal = {
+  /** The catalog id, not Meta's action type name. */
+  id: string;
+  label: string;
+  group: string;
+  /**
+   * How many the period recorded, or null when no alias ever appeared.
+   *
+   * Null is the ordinary answer on an account with no pixel, and it is not the
+   * same as `'0'`: an account that has never fired an event and one that fired
+   * none in this period are different facts. Only the second is a measurement,
+   * and a dashboard that renders the first as zero reports a missing
+   * integration as a performance result.
+   */
+  count: string | null;
+  /** Money, when the event carries any. Null for non-monetary events. */
+  value: string | null;
+  /** Spend over count. Null when count is null or zero, as every KPI is. */
+  costPer: string | null;
+  /**
+   * Value over spend, for monetary events only.
+   *
+   * This is the per-event ROAS, and for `purchase` it is the "ROAS de compras
+   * no site" the operator asked for. It is deliberately **not** the `roas` on
+   * the totals: that one divides the whole `conversion_value` — every counted
+   * family, leads and registrations included — by spend. On an account running
+   * a shop and a lead form at once the two differ, and only this one answers
+   * "what did the shop return".
+   */
+  roas: string | null;
+  /**
+   * Whether this codebase has ever observed the event on a real account.
+   *
+   * Travels to the UI so a number derived from Meta's documented alias names
+   * rather than from measurement can be labelled as such. A missing alias
+   * undercounts silently, and this is the flag that lets the interface say so
+   * instead of presenting an unverified figure with the same confidence as
+   * spend.
+   */
+  verified: boolean;
+};
+
 /** Period-over-period movement, one entry per additive metric. */
 export type SocialAdAnalyticsChange = {
   spend: SocialAdChange;
@@ -208,6 +261,21 @@ export type SocialAdAnalyticsOverviewView = {
 
   /** How many campaigns, ads and boosts the period contained. */
   counts: SocialAdInventoryCounts;
+
+  /**
+   * Catalogued conversion events the period recorded, current period only.
+   *
+   * Only events with at least one alias present appear — an account with no
+   * pixel gets an empty array, which is the honest shape for "this business
+   * does not have these". Listing all twenty with null counts would fill a
+   * dashboard with rows that can never have a number.
+   *
+   * Current period only, with no comparison. A period-over-period change needs
+   * both sides to mean the same thing, and an event that started firing
+   * mid-period because a pixel was installed would report infinite growth in
+   * what is actually an integration change.
+   */
+  conversions: SocialAdConversionTotal[];
 
   /**
    * Whether any day inside the *current* period is still provisional.

@@ -97,11 +97,28 @@ run('Social analytics read against PostgreSQL', () => {
      * any" path stays reachable from a fixture.
      */
     messagingConversations?: string | null;
+    /**
+     * The raw action payload, for the catalogued conversions read out of it.
+     *
+     * Defaults to an empty pair rather than to a realistic payload: the
+     * aggregation skips rows whose `counts` is `{}`, so every fixture that does
+     * not opt in stays invisible to it — which keeps the conversion tests from
+     * picking up the dozens of facts the rest of this file inserts.
+     */
+    actions?: {
+      counts?: Record<string, string>;
+      values?: Record<string, string>;
+    };
     reach?: string | null;
     isPartial?: boolean;
     currency?: string;
   }) {
     const reach = input.reach === undefined ? '300' : input.reach;
+    const actions = JSON.stringify({
+      mappingVersion: 1,
+      counts: input.actions?.counts ?? {},
+      values: input.actions?.values ?? {},
+    });
 
     return queryRunner.query(`
       INSERT INTO "social_ad_metrics_daily"
@@ -110,7 +127,7 @@ run('Social analytics read against PostgreSQL', () => {
          "currency", "attribution_setting", "spend", "impressions", "reach",
          "clicks", "link_clicks", "leads", "conversions", "conversion_value",
          "video_views", "thruplays", "video_avg_watch_seconds",
-         "messaging_conversations", "is_partial")
+         "messaging_conversations", "actions", "is_partial")
       VALUES (
         '${input.tenantId ?? tenantId}', '${workspaceId}',
         '${input.connectionId ?? connectionId}', 'meta_ads', 'paid',
@@ -125,6 +142,7 @@ run('Social analytics read against PostgreSQL', () => {
         ${input.thruplays ?? 'NULL'},
         ${input.videoAvgWatchSeconds ?? 'NULL'},
         ${input.messagingConversations ?? 'NULL'},
+        '${actions}'::jsonb,
         ${input.isPartial ?? false}
       )
     `);
@@ -863,6 +881,189 @@ run('Social analytics read against PostgreSQL', () => {
 
       expect(result.points[0].messagingConversations).toBe('4');
       expect(result.points[1].messagingConversations).toBe('2');
+    });
+  });
+
+  /**
+   * Conversions read out of the stored `actions` payload.
+   *
+   * Dates sit in February 2027 so these fixtures cannot collide with the
+   * January ones above, which other tests in this file assert exact totals
+   * over. The freshness test that pins "the newest closed day" reads a
+   * different connection, so these do not disturb it.
+   */
+  describe('catalogued conversions', () => {
+    const shopConnection = '33333333-3333-4333-8333-333333333333';
+
+    beforeAll(async () => {
+      await insertConnection(shopConnection);
+
+      await insertFact({
+        connectionId: shopConnection,
+        metricDate: '2027-02-10',
+        spend: '100.000000',
+        actions: {
+          counts: { purchase: '2.000000', add_to_cart: '10.000000' },
+          values: { purchase: '400.000000' },
+        },
+      });
+      await insertFact({
+        connectionId: shopConnection,
+        metricDate: '2027-02-11',
+        spend: '100.000000',
+        actions: {
+          counts: { purchase: '3.000000', add_to_cart: '15.000000' },
+          values: { purchase: '600.000000' },
+        },
+      });
+    });
+
+    const conversionsOf = async (id: string) => {
+      const result = await service.overview({
+        ...scope,
+        connectionId: shopConnection,
+        since: '2027-02-10',
+        until: '2027-02-11',
+      });
+
+      return result.conversions.find((one) => one.id === id) ?? null;
+    };
+
+    it('sums an event across days and derives its cost', async () => {
+      const purchases = await conversionsOf('purchase');
+
+      expect(purchases?.count).toBe('5');
+      expect(purchases?.value).toBe('1000.000000');
+      // 200 / 5.
+      expect(purchases?.costPer).toBe('40.000000');
+    });
+
+    /**
+     * The KPI the operator asked for first. It divides the purchase value by
+     * spend — not the whole `conversionValue`, which also carries leads and
+     * registrations on an account running both.
+     */
+    it('derives ROAS from the purchase value alone', async () => {
+      const purchases = await conversionsOf('purchase');
+
+      // 1000 / 200.
+      expect(purchases?.roas).toBe('5.000000');
+    });
+
+    /**
+     * `add_to_cart` CAN carry money, and here it did not. The distinction is
+     * the one the nullable columns exist for, one level down: an event priced
+     * at zero and an event priced not at all both sum to zero, and only the
+     * first is a measurement. A `0.000000` here would report a working shop as
+     * one that earns nothing.
+     */
+    it('answers null value for a monetary event the account never priced', async () => {
+      const carts = await conversionsOf('add_to_cart');
+
+      expect(carts?.count).toBe('25');
+      expect(carts?.value).toBeNull();
+      expect(carts?.roas).toBeNull();
+      // Still costed: spend over count needs no value at all.
+      expect(carts?.costPer).toBe('8.000000');
+    });
+
+    it('never gives a non-monetary event a value or a ROAS', async () => {
+      const searchConnection = '55555555-5555-4555-8555-555555555555';
+
+      await insertConnection(searchConnection);
+      await insertFact({
+        connectionId: searchConnection,
+        metricDate: '2027-02-14',
+        spend: '20.000000',
+        // Meta sent a value; the catalog says this event has none, so the
+        // number must not appear.
+        actions: {
+          counts: { search: '4.000000' },
+          values: { search: '99.000000' },
+        },
+      });
+
+      const result = await service.overview({
+        ...scope,
+        connectionId: searchConnection,
+        since: '2027-02-14',
+        until: '2027-02-14',
+      });
+
+      const searches = result.conversions.find((one) => one.id === 'search');
+
+      expect(searches?.count).toBe('4');
+      expect(searches?.value).toBeNull();
+      expect(searches?.roas).toBeNull();
+      expect(searches?.costPer).toBe('5.000000');
+    });
+
+    /**
+     * An account with no pixel gets an empty list, not twenty null rows. The
+     * rest of this file's fixtures carry an empty payload, so this also pins
+     * that they stay invisible here.
+     */
+    it('omits events the account never reported', async () => {
+      const result = await service.overview({
+        ...scope,
+        connectionId,
+        since: '2027-01-25',
+        until: '2027-01-29',
+      });
+
+      expect(result.conversions).toEqual([]);
+    });
+
+    /**
+     * The alias rule at the level that matters: the collapse happens per day,
+     * so a period where Meta switched alias mid-way still counts each day once
+     * rather than dropping the days that used the second name.
+     */
+    it('collapses aliases per day rather than once per period', async () => {
+      const aliasConnection = '44444444-4444-4444-8444-444444444444';
+
+      await insertConnection(aliasConnection);
+      await insertFact({
+        connectionId: aliasConnection,
+        metricDate: '2027-02-12',
+        spend: '10.000000',
+        actions: { counts: { purchase: '1.000000' } },
+      });
+      await insertFact({
+        connectionId: aliasConnection,
+        metricDate: '2027-02-13',
+        spend: '10.000000',
+        actions: { counts: { omni_purchase: '1.000000' } },
+      });
+
+      const result = await service.overview({
+        ...scope,
+        connectionId: aliasConnection,
+        since: '2027-02-12',
+        until: '2027-02-13',
+      });
+
+      expect(
+        result.conversions.find((one) => one.id === 'purchase')?.count,
+      ).toBe('2');
+    });
+
+    /**
+     * The claim that let this ship without a mapping version bump, checked
+     * end to end rather than only in the unit test: a payload full of
+     * catalogued events must leave the promoted columns alone.
+     */
+    it('leaves leads and conversions untouched', async () => {
+      const result = await service.overview({
+        ...scope,
+        connectionId: shopConnection,
+        since: '2027-02-10',
+        until: '2027-02-11',
+      });
+
+      // The fixture's own column values, not anything the payload implied.
+      expect(result.current.leads).toBe('4');
+      expect(result.current.conversions).toBe('2.000000');
     });
   });
 
