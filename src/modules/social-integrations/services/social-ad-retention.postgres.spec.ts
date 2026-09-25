@@ -84,11 +84,48 @@ run('Social ad sync run retention against PostgreSQL', () => {
     return id;
   }
 
-  const clearRuns = () =>
-    AgencyDataSource.query(
+  /**
+   * Empties this spec's own runs, and neutralises everyone else's.
+   *
+   * The two halves are not the same operation and neither replaces the other.
+   *
+   * The delete is scoped to this spec's connections because that is the rule
+   * this file follows everywhere: it owns those two connection rows and nothing
+   * else, and a broader delete in a gated Postgres spec is how the 2026-08-26
+   * incident happened.
+   *
+   * But `sweep()` has no connection scope — retention is a global job whose
+   * whole contract is "delete every run past its policy" — and its candidate
+   * query is **deliberately unordered** under a `LIMIT`, which the service
+   * documents as a performance decision. Both facts together are what makes a
+   * run another spec left behind matter here: with
+   * `SOCIAL_ADS_RETENTION_BATCH_SIZE = 2`, a batch of two may take the stray
+   * and only one of this spec's five, leaving four survivors where the test
+   * asserts three.
+   *
+   * It is order-dependent in two ways at once — which suites ran before, and
+   * which rows Postgres happens to pick — so it fails rarely and never on a
+   * re-run of the file alone. That is exactly how it presented.
+   *
+   * Pushing the strays' `finished_at` forward makes them ineligible instead of
+   * deleting them: they belong to specs that may still assert on them, and
+   * moving a timestamp is reversible where a delete is not.
+   */
+  const clearRuns = async () => {
+    await AgencyDataSource.query(
       `DELETE FROM social_ad_sync_runs WHERE connection_id = ANY($1::uuid[])`,
       [[connectionA, connectionB]],
     );
+
+    await AgencyDataSource.query(
+      `UPDATE social_ad_sync_runs
+          SET finished_at = $2
+        WHERE connection_id <> ALL($1::uuid[])
+          AND finished_at IS NOT NULL
+          AND finished_at < $2`,
+      [[connectionA, connectionB], NOW],
+    );
+  };
 
   const survivingIds = async (): Promise<string[]> => {
     const rows = await AgencyDataSource.query<{ id: string }[]>(
