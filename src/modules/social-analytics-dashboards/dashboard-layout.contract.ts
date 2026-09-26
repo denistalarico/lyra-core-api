@@ -14,6 +14,13 @@
 export const DASHBOARD_LAYOUT_VERSION = 1;
 
 export const DASHBOARD_CHANNEL_IDS = [
+  /**
+   * The cross-channel block ("Resumo"). Not a network, but a section carries a
+   * channel and every rule on the frontend keys off it, so it is one here too.
+   * It was missing, which made every layout holding a Resumo block fail to
+   * save with "aponta para um canal desconhecido".
+   */
+  'summary',
   'facebook',
   'instagram',
   'meta_ads',
@@ -28,6 +35,10 @@ export const DASHBOARD_CARD_KINDS = [
   'table',
   'funnel',
   'insight',
+  // A distribution metric (age, city, publisher…). Written by the frontend
+  // since the breakdown cards shipped; its absence rejected every layout that
+  // held one.
+  'breakdown',
 ] as const;
 
 export type DashboardCardKind = (typeof DASHBOARD_CARD_KINDS)[number];
@@ -55,6 +66,11 @@ export type DashboardSection = {
   id: string;
   channel: DashboardChannelId;
   title: string;
+  /**
+   * Free text under the block's title. Only the Resumo block offers it today,
+   * where it takes the place of the asset name the network blocks show.
+   */
+  description?: string | null;
   cards: DashboardCard[];
 };
 
@@ -68,6 +84,7 @@ const MAX_SECTIONS = 24;
 const MAX_CARDS_PER_SECTION = 60;
 const MAX_ID_LENGTH = 64;
 const MAX_TITLE_LENGTH = 120;
+const MAX_SECTION_DESCRIPTION_LENGTH = 280;
 
 export function isDashboardChannelId(
   value: unknown,
@@ -104,6 +121,7 @@ export function emptyDashboardLayout(
 }
 
 const DEFAULT_SECTION_TITLES: Record<DashboardChannelId, string> = {
+  summary: 'Resumo',
   facebook: 'Facebook',
   instagram: 'Instagram',
   meta_ads: 'Meta Ads',
@@ -187,7 +205,29 @@ function parseSection(raw: unknown): DashboardSection {
     return parsed;
   });
 
-  return { id, channel: raw.channel, title, cards };
+  const description = parseSectionDescription(raw.description);
+
+  return description === undefined
+    ? { id, channel: raw.channel, title, cards }
+    : { id, channel: raw.channel, title, description, cards };
+}
+
+/** Absent stays absent, so layouts that never had one are stored unchanged. */
+function parseSectionDescription(value: unknown): string | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+
+  if (typeof value !== 'string') {
+    throw new DashboardLayoutError('A descrição de uma seção é inválida.');
+  }
+
+  const description = value.trim();
+
+  if (description.length > MAX_SECTION_DESCRIPTION_LENGTH) {
+    throw new DashboardLayoutError('A descrição de uma seção é longa demais.');
+  }
+
+  return description.length > 0 ? description : null;
 }
 
 function parseCard(raw: unknown): DashboardCard {

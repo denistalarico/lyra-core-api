@@ -40,6 +40,56 @@ describe('parseDashboardLayout', () => {
     );
   });
 
+  it('accepts the Resumo block and breakdown cards the frontend writes', () => {
+    // Both were missing from the allowlists, so any layout holding either was
+    // refused on save — the operator's "Salvar alterações" simply failed.
+    const parsed = parseDashboardLayout(
+      layout({
+        sections: [
+          {
+            id: 'section-summary',
+            channel: 'summary',
+            title: 'Resumo',
+            description: '  Visão consolidada  ',
+            cards: [
+              { id: 'b', kind: 'breakdown', size: { w: 4, h: 4 }, metric: 'x' },
+            ],
+          },
+        ],
+      }),
+    );
+
+    expect(parsed.sections[0].channel).toBe('summary');
+    expect(parsed.sections[0].description).toBe('Visão consolidada');
+    expect(parsed.sections[0].cards[0].kind).toBe('breakdown');
+  });
+
+  it('keeps a section without description free of the field', () => {
+    const parsed = parseDashboardLayout(layout());
+
+    expect('description' in parsed.sections[0]).toBe(false);
+  });
+
+  it('refuses a section description that is not text or too long', () => {
+    for (const description of [42, 'x'.repeat(281)]) {
+      expect(() =>
+        parseDashboardLayout(
+          layout({
+            sections: [
+              {
+                id: 's',
+                channel: 'summary',
+                title: 'T',
+                description,
+                cards: [],
+              },
+            ],
+          }),
+        ),
+      ).toThrow(DashboardLayoutError);
+    }
+  });
+
   it('refuses a card whose kind is unknown', () => {
     expect(() =>
       parseDashboardLayout(
