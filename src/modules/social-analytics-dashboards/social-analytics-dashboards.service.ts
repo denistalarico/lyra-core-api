@@ -49,6 +49,7 @@ export const SEEDED_CHANNEL_DASHBOARDS: ReadonlyArray<{
 export type SocialAnalyticsDashboardView = {
   id: string;
   name: string;
+  description: string | null;
   isDefault: boolean;
   /**
    * The channel this row is the fixed screen for, or null for an ordinary
@@ -185,6 +186,10 @@ export class SocialAnalyticsDashboardsService {
       }
 
       dashboard.name = name;
+    }
+
+    if (dto.description !== undefined) {
+      dashboard.description = dto.description.trim() || null;
     }
 
     if (dto.channels !== undefined) {
@@ -407,6 +412,7 @@ export class SocialAnalyticsDashboardsService {
     return {
       id: row.id,
       name: row.name,
+      description: row.description ?? null,
       isDefault: row.isDefault,
       channelKey: row.channelKey ?? null,
       channels: row.channels ?? [],

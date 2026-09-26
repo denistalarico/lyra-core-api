@@ -34,6 +34,10 @@ export class SocialAnalyticsDashboardEntity {
 
   @Column({ type: 'varchar', length: 120 }) name!: string;
 
+  /** Optional operator-facing context shown below the dashboard title. */
+  @Column({ type: 'varchar', length: 500, nullable: true })
+  description!: string | null;
+
   /**
    * The dashboard every scope has and nobody may delete.
    *

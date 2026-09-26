@@ -37,6 +37,11 @@ export class UpdateSocialAnalyticsDashboardDto {
   name?: string;
 
   @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  description?: string | null;
+
+  @IsOptional()
   @IsArray()
   @ArrayNotEmpty()
   @ArrayUnique()

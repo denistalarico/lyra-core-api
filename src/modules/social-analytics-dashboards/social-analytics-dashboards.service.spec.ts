@@ -25,6 +25,7 @@ function dashboard(
     agencyClientId: scope.agencyClientId,
     companyContextId: scope.companyContextId,
     name: 'Desempenho mensal',
+    description: null,
     isDefault: false,
     channelKey: null,
     channels: ['meta_ads'],
@@ -102,6 +103,17 @@ describe('SocialAnalyticsDashboardsService', () => {
       await expect(
         service.update(scope, existing.id, { name: '   ' }),
       ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('trims a description and clears it when left blank', async () => {
+      const existing = dashboard({ description: 'Anterior' });
+      const { service, repository } = buildService([existing]);
+
+      await service.update(scope, existing.id, { description: '  Contexto  ' });
+      expect(repository.save.mock.calls[0][0].description).toBe('Contexto');
+
+      await service.update(scope, existing.id, { description: '   ' });
+      expect(repository.save.mock.calls[1][0].description).toBeNull();
     });
 
     it('rejects a malformed layout instead of storing it', async () => {
