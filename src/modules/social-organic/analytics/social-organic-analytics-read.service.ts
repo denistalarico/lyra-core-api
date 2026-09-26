@@ -90,6 +90,19 @@ export type SocialOrganicPublicationMetricsInput =
  * holds nothing for the window, and that is a real answer.
  */
 type PublicationCounts = {
+  /**
+   * Every post published in the window, whatever its surface.
+   *
+   * Not `reels + pagePosts`: those two count different assets on different
+   * networks and neither covers an Instagram feed post. This is the one figure
+   * that answers "quantas postagens", which the summary block asks for and
+   * which nothing else in the read model could produce — the metric existed in
+   * the catalog with no source behind it, so its card rendered a dash.
+   *
+   * By publish date, like `reels` and `stories` below, and `DISTINCT` because
+   * the fact table holds one row per post per observation day.
+   */
+  publications: string;
   reels: string;
   stories: string;
   pageReactions: string;
@@ -293,7 +306,18 @@ export class SocialOrganicAnalyticsReadService {
   ): Promise<PublicationCounts> {
     const reelSpellings = socialOrganicSurfaceSpellings('reel');
 
-    const [reels, stories, page, pageReels] = await Promise.all([
+    const [publications, reels, stories, page, pageReels] = await Promise.all([
+      // Every surface, unlike the reel count below it: no `media_product_type`
+      // filter, because a post with none recorded is still a post.
+      this.postMetricsRepository.query<Array<{ count: string }>>(
+        `SELECT COUNT(DISTINCT external_publication_id)::text AS count
+           FROM social_organic_post_metrics_daily
+          WHERE asset_id = $1
+            AND published_at IS NOT NULL
+            AND (published_at AT TIME ZONE asset_timezone)::date
+                BETWEEN $2::date AND $3::date`,
+        [assetId, since, until],
+      ),
       this.postMetricsRepository.query<Array<{ count: string }>>(
         `SELECT COUNT(DISTINCT external_publication_id)::text AS count
            FROM social_organic_post_metrics_daily
@@ -364,6 +388,7 @@ export class SocialOrganicAnalyticsReadService {
     ]);
 
     return {
+      publications: publications[0]?.count ?? '0',
       reels: reels[0]?.count ?? '0',
       stories: stories[0]?.count ?? '0',
       pageReactions: page[0]?.reactions ?? '0',
@@ -1209,6 +1234,7 @@ export class SocialOrganicAnalyticsReadService {
       periodStoryShares: measurement?.sharesStory ?? null,
       // Counted, not measured — and so a real zero rather than a null when the
       // account simply published nothing.
+      publications: counts.publications,
       periodReelCount: counts.reels,
       periodStoryCount: counts.stories,
       // The Facebook figures. `pageViews` is measured by Meta for the window;

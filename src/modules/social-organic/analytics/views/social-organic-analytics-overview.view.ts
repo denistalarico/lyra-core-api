@@ -145,6 +145,16 @@ export type SocialOrganicAnalyticsTotals = {
    * hourly passes was never recorded — and unlike every other figure here, that
    * gap can never be filled.
    */
+  /**
+   * Posts published in the window, every surface together.
+   *
+   * Distinct from the two counts below it, which narrow to one surface each,
+   * and not obtainable by adding them: neither covers an Instagram feed post,
+   * and the Page count lives on the other network. The `publications` metric
+   * had been in the catalog as `available` with nothing resolving it, so its
+   * card rendered a dash — this is the reading it was always meant to have.
+   */
+  publications: string;
   periodReelCount: string;
   periodStoryCount: string;
   /**
