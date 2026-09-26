@@ -120,8 +120,9 @@ function createResponse() {
     body: null as unknown,
     redirectedTo: null as string | null,
     redirectStatus: null as number | null,
-    setHeader(name: string, value: string) {
-      headers[name] = value;
+    sent: null as Buffer | null,
+    setHeader(name: string, value: string | number) {
+      headers[name] = String(value);
     },
     status(code: number) {
       this.statusCode = code;
@@ -131,11 +132,42 @@ function createResponse() {
       this.body = payload;
       return this;
     },
+    send(payload: Buffer) {
+      this.sent = payload;
+      return this;
+    },
+    /**
+     * Still modelled although the controller no longer calls it, so the specs
+     * below can assert that it *stays* uncalled. A redirect cannot work on this
+     * route — see `streamMetaThumbnail` — and a future edit restoring one would
+     * break the browser silently rather than break a test.
+     */
     redirect(status: number, url: string) {
       this.redirectStatus = status;
       this.redirectedTo = url;
     },
   };
+}
+
+/**
+ * Stands in for Meta's CDN, which the thumbnail route now fetches from.
+ *
+ * Returns a tiny PNG-shaped body: the proxy checks `content-type` before it
+ * relays anything, so a fake without one would exercise the refusal path rather
+ * than the success path.
+ */
+function stubCdn(
+  init: { ok?: boolean; contentType?: string; body?: string } = {},
+): jest.SpyInstance {
+  const bytes = Buffer.from(init.body ?? 'PNGBYTES');
+
+  return jest.spyOn(global, 'fetch').mockResolvedValue({
+    ok: init.ok ?? true,
+    headers: new Headers({
+      'content-type': init.contentType ?? 'image/png',
+    }),
+    arrayBuffer: () => Promise.resolve(bytes),
+  } as unknown as Response);
 }
 
 function context(overrides: Partial<RequestContext> = {}): RequestContext {
@@ -198,6 +230,13 @@ describe('SocialAnalyticsController metadata', () => {
 });
 
 describe('SocialAnalyticsController scope resolution', () => {
+  // `stubCdn` spies on the global `fetch`. Nothing in this repo's Jest config
+  // restores mocks between tests, so a spy left in place would make every
+  // later suite in this worker talk to a stub instead of the network.
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
   it('reads under the tenant and workspace of the authenticated context', async () => {
     const harness = createHarness();
 
@@ -372,8 +411,9 @@ describe('SocialAnalyticsController scope resolution', () => {
       });
     });
 
-    it('redirects to the resolved URL rather than proxying the bytes', async () => {
+    it('relays the bytes instead of redirecting the browser', async () => {
       const harness = createHarness();
+      const cdn = stubCdn({ body: 'IMAGEBYTES' });
 
       await harness.controller.adThumbnail(
         context(),
@@ -381,14 +421,23 @@ describe('SocialAnalyticsController scope resolution', () => {
         harness.response as never,
       );
 
-      // The browser loads the CDN link itself, so the access token never leaves
-      // the server and no image byte passes through this process.
-      expect(harness.response.redirectStatus).toBe(302);
-      expect(harness.response.redirectedTo).toBe(thumbnailUrl);
+      // The load-bearing assertion, and it replaced its own opposite. This
+      // route used to answer 302 with the signed CDN URL, which is a sound
+      // design everywhere except here: the client authenticates with headers,
+      // so it must use `fetch`, so the redirect is followed as a CORS request,
+      // and Meta's CDN serves no `Access-Control-Allow-Origin`. The browser
+      // discarded every response and every ad drew a placeholder while this
+      // spec passed. A redirect on this route is a bug.
+      expect(harness.response.redirectStatus).toBeNull();
+      expect(harness.response.redirectedTo).toBeNull();
+      expect(cdn).toHaveBeenCalledWith(thumbnailUrl, expect.anything());
+      expect(harness.response.statusCode).toBe(200);
+      expect(harness.response.sent?.toString()).toBe('IMAGEBYTES');
     });
 
-    it('caches the redirect privately and briefly', async () => {
+    it('sends no Lyra credential to the CDN', async () => {
       const harness = createHarness();
+      const cdn = stubCdn();
 
       await harness.controller.adThumbnail(
         context(),
@@ -396,11 +445,65 @@ describe('SocialAnalyticsController scope resolution', () => {
         harness.response as never,
       );
 
-      // Private because the target was resolved under this viewer's credential
-      // and a shared cache must not hand it to another tenant; short because
-      // the signed URL behind it expires on Meta's own schedule.
+      // The signature is already in the URL. A bearer token or a managed-context
+      // header forwarded here would hand a Lyra credential to Meta.
+      const init = cdn.mock.calls[0][1] as RequestInit;
+
+      expect(init.headers).toBeUndefined();
+    });
+
+    it('refuses anything that is not an image', async () => {
+      const harness = createHarness();
+      stubCdn({ contentType: 'text/html' });
+
+      await harness.controller.adThumbnail(
+        context(),
+        query,
+        harness.response as never,
+      );
+
+      // The bytes are about to be served from Lyra's own origin, so a signed
+      // link that resolved to a document must not be relayed as one.
+      expect(harness.response.statusCode).toBe(404);
+      expect(harness.response.sent).toBeNull();
+    });
+
+    it('answers 404 when the CDN cannot be reached, never the provider error', async () => {
+      const harness = createHarness();
+      jest.spyOn(global, 'fetch').mockRejectedValue(new Error('ECONNRESET'));
+
+      await harness.controller.adThumbnail(
+        context(),
+        query,
+        harness.response as never,
+      );
+
+      // A transport failure stringifies to the full signed URL, so the error is
+      // swallowed rather than surfaced: re-throwing it would put a live
+      // credential in the logs.
+      expect(harness.response.statusCode).toBe(404);
+      expect(JSON.stringify(harness.response.body)).not.toContain('ECONNRESET');
+    });
+
+    it('caches the picture privately and briefly', async () => {
+      const harness = createHarness();
+      stubCdn();
+
+      await harness.controller.adThumbnail(
+        context(),
+        query,
+        harness.response as never,
+      );
+
+      // Private because it was resolved under this viewer's credential and a
+      // shared cache must not hand it to another tenant; short because the
+      // signed URL behind it expires on Meta's own schedule.
       expect(harness.response.headers['Cache-Control']).toBe(
         'private, max-age=300',
+      );
+      // Served from Lyra's origin now, so the browser must not sniff it.
+      expect(harness.response.headers['X-Content-Type-Options']).toBe(
+        'nosniff',
       );
     });
 
@@ -421,8 +524,9 @@ describe('SocialAnalyticsController scope resolution', () => {
       expect(harness.response.redirectedTo).toBeNull();
     });
 
-    it('never puts a resolved URL in a cache other viewers could share', async () => {
+    it('never puts the picture in a cache other viewers could share', async () => {
       const harness = createHarness();
+      stubCdn();
 
       await harness.controller.adThumbnail(
         context(),
@@ -430,6 +534,10 @@ describe('SocialAnalyticsController scope resolution', () => {
         harness.response as never,
       );
 
+      // Needs the CDN stub: without a picture to relay the handler 404s and
+      // sets no cache header at all, so the assertion would pass on absence
+      // rather than on the header being private.
+      expect(harness.response.headers['Cache-Control']).toBeDefined();
       expect(harness.response.headers['Cache-Control']).not.toContain('public');
     });
   });

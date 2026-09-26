@@ -170,11 +170,12 @@ function fakeResponse() {
     redirectedTo: null as string | null,
     headers: {} as Record<string, string>,
     body: null as unknown,
+    sent: null as Buffer | null,
   };
 
   const res = {
-    setHeader(name: string, value: string) {
-      state.headers[name] = value;
+    setHeader(name: string, value: string | number) {
+      state.headers[name] = String(value);
     },
     status(code: number) {
       state.statusCode = code;
@@ -184,6 +185,16 @@ function fakeResponse() {
       state.body = payload;
       return res;
     },
+    send(payload: Buffer) {
+      state.sent = payload;
+      return res;
+    },
+    /**
+     * Kept although the controller no longer calls it, so the spec can assert
+     * it stays uncalled: a redirect cannot reach the browser on this route
+     * (see `streamMetaThumbnail`) and restoring one would break the picture
+     * without breaking anything that reports an error.
+     */
     redirect(code: number, url: string) {
       state.statusCode = code;
       state.redirectedTo = url;
@@ -191,6 +202,19 @@ function fakeResponse() {
   };
 
   return Object.assign(state, { res: res as never });
+}
+
+/** Stands in for Meta's CDN. See the twin helper in the paid controller's spec. */
+function stubCdn(
+  init: { ok?: boolean; contentType?: string; body?: string } = {},
+): jest.SpyInstance {
+  const bytes = Buffer.from(init.body ?? 'PNGBYTES');
+
+  return jest.spyOn(global, 'fetch').mockResolvedValue({
+    ok: init.ok ?? true,
+    headers: new Headers({ 'content-type': init.contentType ?? 'image/jpeg' }),
+    arrayBuffer: () => Promise.resolve(bytes),
+  } as unknown as Response);
 }
 
 describe('SocialOrganicAnalyticsController metadata', () => {
@@ -217,6 +241,13 @@ describe('SocialOrganicAnalyticsController metadata', () => {
 });
 
 describe('SocialOrganicAnalyticsController scope resolution', () => {
+  // `stubCdn` spies on the global `fetch`, and nothing in this repo's Jest
+  // config restores mocks between tests. A spy left in place would make every
+  // later suite in this worker talk to a stub instead of the network.
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
   it('reads under the tenant and workspace of the authenticated context', async () => {
     const harness = createHarness();
 
@@ -389,9 +420,10 @@ describe('SocialOrganicAnalyticsController scope resolution', () => {
     });
   });
 
-  it('redirects to the resolved image and never caches it publicly', async () => {
+  it('relays the resolved image and never caches it publicly', async () => {
     const harness = createHarness();
     const response = fakeResponse();
+    const cdn = stubCdn({ body: 'JPEGBYTES' });
 
     await harness.controller.postThumbnail(
       context(),
@@ -406,9 +438,20 @@ describe('SocialOrganicAnalyticsController scope resolution', () => {
       assetId: query.assetId,
       externalPublicationId: '17914449879259734',
     });
-    expect(response.redirectedTo).toBe('https://cdn.example.test/image.jpg');
-    // Private: the target is signed for this viewer's credential, so a shared
-    // cache must never hand it to another tenant.
+
+    // This asserted a 302 to the CDN until that turned out to be unreachable
+    // from the browser: the client authenticates with headers, so it fetches
+    // rather than using `<img src>`, so the redirect is followed as a CORS
+    // request — and Meta's CDN sends no `Access-Control-Allow-Origin`. Every
+    // post thumbnail was blocked while this spec passed.
+    expect(response.redirectedTo).toBeNull();
+    expect(cdn).toHaveBeenCalledWith(
+      'https://cdn.example.test/image.jpg',
+      expect.anything(),
+    );
+    expect(response.sent?.toString()).toBe('JPEGBYTES');
+    // Private: the picture was resolved under this viewer's credential, so a
+    // shared cache must never hand it to another tenant.
     expect(response.headers['Cache-Control']).toBe('private, max-age=300');
   });
 

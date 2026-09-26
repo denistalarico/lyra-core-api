@@ -1,15 +1,12 @@
-import {
-  Controller,
-  Get,
-  HttpStatus,
-  Query,
-  Res,
-  UseGuards,
-} from '@nestjs/common';
+import { Controller, Get, Query, Res, UseGuards } from '@nestjs/common';
 import type { Response } from 'express';
 import { RequestContextData } from '../../../common/context/request-context.decorator';
 import type { RequestContext } from '../../../common/context/request-context.interface';
 import { resolveCompanyAwareScope } from '../../../common/context/company-aware-scope';
+import {
+  notFound,
+  streamMetaThumbnail,
+} from '../../../common/meta/meta-thumbnail-proxy';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import {
   PermissionsGuard,
@@ -84,13 +81,17 @@ export class SocialOrganicAnalyticsController {
   }
 
   /**
-   * Redirects to one post's current image, resolved from the provider now.
+   * One post's current image, resolved from the provider now and relayed.
    *
-   * A redirect rather than proxied bytes: the browser then fetches the picture
-   * straight from Meta's CDN, so this process never streams image data and the
-   * access token never leaves it either. The URL is deliberately not stored
-   * anywhere — Meta signs it with a ~5 day expiry, and a persisted one turns
-   * into a broken image days later.
+   * This answered `302` with the signed CDN URL until it turned out a redirect
+   * cannot reach the browser here at all: the client must use `fetch` because
+   * its credentials are headers, that makes the request CORS, and Meta's CDN
+   * sends no `Access-Control-Allow-Origin`, so the browser blocked every
+   * response. Every post thumbnail in the product drew its placeholder while
+   * every layer reported success. `streamMetaThumbnail` has the full account.
+   *
+   * The URL is still stored nowhere — Meta signs it with a ~5 day expiry, and a
+   * persisted one turns into a broken image days later.
    *
    * 404 when there is nothing to show, which the front end renders as a
    * placeholder. A missing thumbnail must never fail a page whose subject is
@@ -114,15 +115,11 @@ export class SocialOrganicAnalyticsController {
     });
 
     if (!url) {
-      response.status(HttpStatus.NOT_FOUND).json({ message: 'Not found.' });
+      notFound(response);
       return;
     }
 
-    // Private: the redirect target is scoped to this viewer's credential, so a
-    // shared cache must not hand it to another tenant. Short, because the
-    // signed URL behind it expires on its own schedule.
-    response.setHeader('Cache-Control', 'private, max-age=300');
-    response.redirect(HttpStatus.FOUND, url);
+    await streamMetaThumbnail(url, response);
   }
 
   /**

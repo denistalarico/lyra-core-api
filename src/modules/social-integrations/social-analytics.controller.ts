@@ -1,15 +1,12 @@
-import {
-  Controller,
-  Get,
-  HttpStatus,
-  Query,
-  Res,
-  UseGuards,
-} from '@nestjs/common';
+import { Controller, Get, Query, Res, UseGuards } from '@nestjs/common';
 import type { Response } from 'express';
 import { RequestContextData } from '../../common/context/request-context.decorator';
 import type { RequestContext } from '../../common/context/request-context.interface';
 import { resolveCompanyAwareScope } from '../../common/context/company-aware-scope';
+import {
+  notFound,
+  streamMetaThumbnail,
+} from '../../common/meta/meta-thumbnail-proxy';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import {
   PermissionsGuard,
@@ -236,11 +233,18 @@ export class SocialAnalyticsController {
   /**
    * One ad's creative thumbnail, resolved from Meta at this moment.
    *
-   * A redirect rather than proxied bytes, exactly like the organic posts
-   * thumbnail: the browser loads the CDN link directly and the access token
-   * never leaves the server. Nothing about the picture is stored — Meta signs
-   * these URLs with an expiry of roughly five days, so a persisted one renders
-   * for a few days and then 403s.
+   * The bytes are relayed through this process rather than redirected to. That
+   * was not the first design and the reason is worth keeping: a `302` to the
+   * signed CDN URL kept the access token here, which was right, but the client
+   * must call `fetch` (its credentials are headers, which an `<img>` would not
+   * send), so the redirect was followed as a CORS request and Meta's CDN serves
+   * no `Access-Control-Allow-Origin`. The browser blocked every response and
+   * every thumbnail drew a placeholder, with nothing failing anywhere.
+   * `streamMetaThumbnail` documents the whole chain.
+   *
+   * Nothing about the picture is stored either way — Meta signs these URLs with
+   * an expiry of roughly five days, so a persisted one renders for a few days
+   * and then 403s.
    *
    * 404 for every ordinary absence: an ad this scope cannot see, an ad the
    * hierarchy sync has not learned a creative for, a provider that will not
@@ -265,15 +269,11 @@ export class SocialAnalyticsController {
     });
 
     if (!url) {
-      response.status(HttpStatus.NOT_FOUND).json({ message: 'Not found.' });
+      notFound(response);
       return;
     }
 
-    // Private: the redirect target is scoped to this viewer's credential, so a
-    // shared cache must not hand it to another tenant. Short, because the
-    // signed URL behind it expires on its own schedule.
-    response.setHeader('Cache-Control', 'private, max-age=300');
-    response.redirect(HttpStatus.FOUND, url);
+    await streamMetaThumbnail(url, response);
   }
 
   /**
