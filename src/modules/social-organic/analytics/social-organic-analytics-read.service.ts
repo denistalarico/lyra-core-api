@@ -250,39 +250,78 @@ export class SocialOrganicAnalyticsReadService {
   }
 
   /**
-   * Totals for one organic asset and period. No comparison period, no KPI
-   * derivation beyond what `SocialOrganicAnalyticsTotals` documents — this
-   * first pass of A3 reads only the account grain, which has no
-   * engagement-rate inputs (see the view's docblock).
+   * Totals for one organic asset and period, and for the window of the same
+   * length immediately before it. No KPI derivation beyond what
+   * `SocialOrganicAnalyticsTotals` documents — this first pass of A3 reads
+   * only the account grain, which has no engagement-rate inputs (see the
+   * view's docblock).
+   *
+   * The comparison window is derived here, never accepted from the caller,
+   * with the same rule the paid overview uses — so the two halves of a
+   * dashboard compare against the same days.
    */
   async overview(
     input: SocialOrganicAnalyticsOverviewInput,
   ): Promise<SocialOrganicAnalyticsOverviewView> {
     const period = this.parsePeriod(input);
     const asset = await this.findAssetInScope(input);
+    const comparisonUntil = shiftCalendarDay(period.since, -1);
+    const comparison = {
+      since: shiftCalendarDay(comparisonUntil, -(period.days - 1)),
+      until: comparisonUntil,
+    };
 
-    const [aggregate, followersCount, lastFactDate, periodReach, counts] =
-      await Promise.all([
-        this.aggregate(asset.id, period.since, period.until),
-        this.readFollowersCountStock(asset.id, period.since, period.until),
-        this.findLastFactDate(asset.id),
-        // From the measurement cache, never from the daily rows: no expression
-        // over them produces this number, because the duplicates it removes
-        // were resolved inside Meta.
-        this.findPeriodReach(asset.id, period.since, period.until),
-        // Counted here rather than cached with the measurement, so the answer
-        // follows the period actually asked for instead of being pinned to one
-        // of the four windows the sync pre-measures.
-        this.countPublications(asset.id, period.since, period.until),
-      ]);
+    const [current, previous, lastFactDate] = await Promise.all([
+      this.readPeriodTotals(asset.id, period.since, period.until),
+      this.readPeriodTotals(asset.id, comparison.since, comparison.until),
+      this.findLastFactDate(asset.id),
+    ]);
 
     return {
       assetId: asset.id,
       timezone: asset.assetTimezone ?? '',
       period: { since: period.since, until: period.until },
-      totals: this.toTotals(aggregate, followersCount, periodReach, counts),
-      hasPartialData: toCount(aggregate.partial_days) > 0n,
+      comparisonPeriod: comparison,
+      totals: current.totals,
+      previousTotals: {
+        ...previous.totals,
+        // Withheld, not compared. The sync stamps the follower count it reads
+        // today onto whichever day it is syncing, so a past window's "latest
+        // observation" is usually a recent number wearing an old date — a
+        // comparison against it reads as "no change" whatever happened.
+        followersCount: null,
+      },
+      hasPartialData: toCount(current.aggregate.partial_days) > 0n,
       lastFactDate,
+    };
+  }
+
+  /** Every figure `toTotals` needs for one window, read in parallel. */
+  private async readPeriodTotals(
+    assetId: string,
+    since: string,
+    until: string,
+  ): Promise<{
+    aggregate: AggregateRow;
+    totals: SocialOrganicAnalyticsTotals;
+  }> {
+    const [aggregate, followersCount, periodReach, counts] = await Promise.all([
+      this.aggregate(assetId, since, until),
+      this.readFollowersCountStock(assetId, since, until),
+      // From the measurement cache, never from the daily rows: no expression
+      // over them produces this number, because the duplicates it removes were
+      // resolved inside Meta. Usually absent for a comparison window — only the
+      // presets are pre-measured — and then the figures it carries are null.
+      this.findPeriodReach(assetId, since, until),
+      // Counted here rather than cached with the measurement, so the answer
+      // follows the period actually asked for instead of being pinned to one of
+      // the four windows the sync pre-measures.
+      this.countPublications(assetId, since, until),
+    ]);
+
+    return {
+      aggregate,
+      totals: this.toTotals(aggregate, followersCount, periodReach, counts),
     };
   }
 

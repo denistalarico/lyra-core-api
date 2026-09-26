@@ -368,6 +368,7 @@ export class SocialAnalyticsReadService {
       currentReach,
       previousReach,
       counts,
+      previousCounts,
       actionFacts,
     ] = await Promise.all([
       this.aggregate(connection.id, period),
@@ -381,6 +382,7 @@ export class SocialAnalyticsReadService {
       // measurement and the other a sum.
       this.findPeriodReach(connection, comparison),
       this.countInventory(connection.id, period),
+      this.countInventory(connection.id, comparison),
       // One pass over the action payloads, two lists out. Both read the same
       // rows with the same filter, so a second query would double the scan to
       // re-derive facts already in hand.
@@ -400,6 +402,7 @@ export class SocialAnalyticsReadService {
       previous: this.toTotals(previous, previousReach),
       change: this.toChange(current, previous),
       counts,
+      previousCounts,
       conversions: actionFacts.conversions,
       actionTypes: actionFacts.actionTypes,
       hasPartialData: toCount(current.partial_days) > 0n,

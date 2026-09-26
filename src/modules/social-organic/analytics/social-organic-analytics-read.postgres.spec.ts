@@ -330,6 +330,28 @@ run('SocialOrganicAnalyticsReadService against PostgreSQL', () => {
       const result = await overview('2026-09-01', '2026-09-01');
       expect(result.totals.followersCount).toBeNull();
     });
+
+    it('returns the window of the same length before the period, on the same rules', async () => {
+      await insertFact({
+        metricDate: '2026-08-31',
+        impressions: '40',
+        followersCount: '480',
+      });
+      await insertFact({ metricDate: '2026-09-01', impressions: '30' });
+      await insertFact({ metricDate: '2026-09-02', impressions: '100' });
+      await insertFact({ metricDate: '2026-09-03', impressions: '50' });
+
+      const result = await overview('2026-09-02', '2026-09-03');
+
+      expect(result.comparisonPeriod).toEqual({
+        since: '2026-08-31',
+        until: '2026-09-01',
+      });
+      expect(result.totals.impressions).toBe('150');
+      expect(result.previousTotals.impressions).toBe('70');
+      // The stored stock history is not trustworthy, so it is never compared.
+      expect(result.previousTotals.followersCount).toBeNull();
+    });
   });
 
   describe('timeseries', () => {

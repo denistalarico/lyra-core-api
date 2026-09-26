@@ -246,7 +246,20 @@ export type SocialOrganicAnalyticsOverviewView = {
   timezone: string;
 
   period: SocialOrganicAnalyticsPeriodView;
+  /** The window of the same length immediately before `period`. */
+  comparisonPeriod: SocialOrganicAnalyticsPeriodView;
   totals: SocialOrganicAnalyticsTotals;
+
+  /**
+   * The same totals for `comparisonPeriod`, on the same rules.
+   *
+   * Two differences a reader must expect: the period measurements are usually
+   * null here, because only the presets are pre-measured and the window before
+   * a preset is not one; and `followersCount` is always null, because the
+   * stored history of the stock is not trustworthy (see the read service).
+   * A null on either side means "no comparison", never "compared with zero".
+   */
+  previousTotals: SocialOrganicAnalyticsTotals;
 
   /**
    * Whether any day inside the period is still provisional (`is_partial`).

@@ -319,6 +319,8 @@ export type SocialAdAnalyticsOverviewView = {
 
   /** How many campaigns, ads and boosts the period contained. */
   counts: SocialAdInventoryCounts;
+  /** The same counts for `comparisonPeriod`, so a count card can compare. */
+  previousCounts: SocialAdInventoryCounts;
 
   /**
    * Catalogued conversion events the period recorded, current period only.
