@@ -245,6 +245,17 @@ export type SocialAdActionTypeTotal = {
   label: string;
   count: string;
   /**
+   * Period spend divided by this event's count, or null when nothing was spent.
+   *
+   * Present on every row regardless of what the campaigns were optimised for.
+   * The money bought every one of these events together — an ad run for
+   * messages also produced link clicks and video views — so each row answers
+   * "what did an event of this type cost over the period", and only that. The
+   * column deliberately does not apportion: the same total spend is the
+   * numerator everywhere, so the rows do not sum to the budget.
+   */
+  costPer: string | null;
+  /**
    * Alias names folded into this row, so the collapse is visible.
    *
    * Meta reports one event under several names — `page_engagement` and

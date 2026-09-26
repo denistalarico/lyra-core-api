@@ -1198,6 +1198,54 @@ run('Social analytics read against PostgreSQL', () => {
       expect((await rowFor('video_view'))?.promoted).toBe(false);
     });
 
+    /**
+     * Cost per event, on every row.
+     *
+     * Two days at 50 each is 100 spent; the collapsed engagement row is 1 036,
+     * so an engagement cost R$ 0,0965…. No Meta call is involved and none
+     * could be: the division is spend over count, both of which are already in
+     * the rows this method read.
+     */
+    it('divides the period spend by each type', async () => {
+      const engagement = await rowFor('page_engagement');
+
+      expect(engagement?.costPer).toBe('0.096525');
+    });
+
+    it('costs every type, not only the campaign objective', async () => {
+      // The decision this column encodes. The budget bought all of these
+      // events together — an ad optimised for one still produced the others —
+      // so each row answers what an event of its type cost. There is no
+      // apportioning, so the numerator is the same everywhere and the rows
+      // deliberately do not sum to the spend.
+      const clicks = await rowFor('link_click');
+
+      // 100 over 50 link clicks.
+      expect(clicks?.costPer).toBe('2.000000');
+
+      // And an uncatalogued type is costed too: 100 over 9.
+      expect((await rowFor('some_future_meta_type'))?.costPer).toBe(
+        '11.111111',
+      );
+    });
+
+    it('costs the collapsed count, never one alias in isolation', async () => {
+      // Dividing by 500 rather than by the collapsed 1 036 would double the
+      // cost of the single most prominent row in the table.
+      const engagement = await rowFor('page_engagement');
+
+      expect(engagement?.count).toBe('1036');
+      expect(engagement?.costPer).not.toBe('0.200000');
+    });
+
+    it('gives every row a cost', async () => {
+      // A row without one reads as "this event was free", which no event here
+      // was: the same spend bought all of them.
+      for (const row of await actionTypes()) {
+        expect(row.costPer).not.toBeNull();
+      }
+    });
+
     it('labels a catalogued type in pt-BR', async () => {
       const video = await rowFor('video_view');
 

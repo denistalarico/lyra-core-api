@@ -544,7 +544,7 @@ export class SocialAnalyticsReadService {
       };
     });
 
-    return { conversions, actionTypes: rankActionTypes(byType) };
+    return { conversions, actionTypes: rankActionTypes(byType, spend) };
   }
 
   /**
@@ -1966,6 +1966,7 @@ function accumulateActionTypes(
  */
 function rankActionTypes(
   totals: Map<string, bigint>,
+  spend: bigint,
 ): SocialAdActionTypeTotal[] {
   return [...totals.entries()]
     .sort(([leftType, left], [rightType, right]) => {
@@ -1983,6 +1984,24 @@ function rankActionTypes(
         // rather than blank. `known` is what lets the UI mark the difference.
         label: label ?? type,
         count: count.toString(),
+        /**
+         * Spend divided by this event's count — the same arithmetic the
+         * catalogued conversions above already use, over the same rows.
+         *
+         * **Every row gets one, whatever the campaign's objective was.** That
+         * is the point rather than an oversight: the money bought all of it
+         * together. An ad optimised for messages also produced link clicks and
+         * three-second views, and "what did each of those cost me" is a
+         * question the operator gets to ask about any of them. There is no
+         * apportioning here and none is possible — the whole spend is the
+         * numerator for every row, so the columns do not add up to the budget
+         * and are not meant to. Each row answers its own question in
+         * isolation: how much was spent in the period per event of this type.
+         *
+         * Null when nothing was spent, like every other derived figure here:
+         * a zero denominator is not a cost of zero.
+         */
+        costPer: formatDerived(divideScaled(spend, count * 1_000_000n)),
         absorbed: group?.aliases ?? [],
         promoted: group?.promoted ?? false,
         known: label !== null,
