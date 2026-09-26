@@ -189,7 +189,7 @@ export class SocialAnalyticsDashboardsService {
     }
 
     if (dto.description !== undefined) {
-      dashboard.description = dto.description.trim() || null;
+      dashboard.description = dto.description?.trim() || null;
     }
 
     if (dto.channels !== undefined) {
