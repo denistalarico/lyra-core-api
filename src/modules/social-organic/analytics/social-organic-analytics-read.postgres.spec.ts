@@ -87,9 +87,6 @@ run('SocialOrganicAnalyticsReadService against PostgreSQL', () => {
      */
     totalInteractions?: string | null;
     accountsEngaged?: string | null;
-    /** NULL by default, like the engagement columns above. */
-    viewsTotal?: string | null;
-    viewsPaid?: string | null;
     isPartial?: boolean;
   }) {
     const nullable = (value: string | null | undefined, fallback: string) =>
@@ -100,8 +97,7 @@ run('SocialOrganicAnalyticsReadService against PostgreSQL', () => {
         ("tenant_id", "workspace_id", "asset_id", "provider", "source",
          "metric_date", "asset_timezone", "impressions", "reach",
          "followers_count", "followers_gained", "followers_lost",
-         "profile_views", "total_interactions", "accounts_engaged",
-         "views_total", "views_paid", "is_partial")
+         "profile_views", "total_interactions", "accounts_engaged", "is_partial")
       VALUES (
         '${tenantId}', '${workspaceId}', '${input.assetId ?? assetId}', 'meta',
         'organic', '${input.metricDate}', 'America/Sao_Paulo',
@@ -112,8 +108,6 @@ run('SocialOrganicAnalyticsReadService against PostgreSQL', () => {
         ${nullable(input.profileViews, '10')},
         ${nullable(input.totalInteractions, 'NULL')},
         ${nullable(input.accountsEngaged, 'NULL')},
-        ${nullable(input.viewsTotal, 'NULL')},
-        ${nullable(input.viewsPaid, 'NULL')},
         ${input.isPartial ?? false}
       )
     `);
@@ -337,30 +331,105 @@ run('SocialOrganicAnalyticsReadService against PostgreSQL', () => {
       expect(result.totals.followersCount).toBeNull();
     });
 
-    it('sums total and paid impressions per day, and withholds a partial sum', async () => {
-      await insertFact({
-        metricDate: '2026-09-01',
-        impressions: '3',
-        viewsTotal: '1309',
-        viewsPaid: '1306',
-      });
-      await insertFact({
+    it("sums each post's newest lifetime counters per surface, by publish date", async () => {
+      const insertPublished = (input: {
+        id: string;
+        metricDate: string;
+        publishedAt: string;
+        surface: string | null;
+        views: string;
+        likes: string;
+        comments: string | null;
+      }) => {
+        const at = `'${input.metricDate}T12:00:00.000Z'`;
+        return queryRunner.query(`
+          INSERT INTO "social_organic_post_metrics_daily"
+            ("tenant_id", "workspace_id", "asset_id", "provider", "source",
+             "external_publication_id", "publication_id", "metric_date",
+             "asset_timezone", "published_at", "media_product_type",
+             "video_views_lifetime", "video_views_lifetime_observed_at",
+             "likes_lifetime", "likes_lifetime_observed_at",
+             "comments_lifetime", "comments_lifetime_observed_at", "synced_at")
+          VALUES (
+            '${tenantId}', '${workspaceId}', '${assetId}', 'meta', 'organic',
+            'ext-${input.id}', '${randomUUID()}', '${input.metricDate}',
+            'America/Sao_Paulo', '${input.publishedAt}',
+            ${input.surface === null ? 'NULL' : `'${input.surface}'`},
+            ${input.views}, ${at}, ${input.likes}, ${at},
+            ${input.comments ?? 'NULL'}, ${input.comments === null ? 'NULL' : at},
+            ${at}
+          )
+        `);
+      };
+
+      // The same post observed twice: only the newest observation counts.
+      await insertPublished({
+        id: 'a',
         metricDate: '2026-09-02',
-        impressions: '10',
-        viewsTotal: '10',
-        viewsPaid: '0',
+        publishedAt: '2026-09-02T15:00:00Z',
+        surface: 'FEED',
+        views: '10',
+        likes: '1',
+        comments: '0',
       });
-      // A day before the columns were collected.
-      await insertFact({ metricDate: '2026-08-31', impressions: '5' });
+      await insertPublished({
+        id: 'a',
+        metricDate: '2026-09-03',
+        publishedAt: '2026-09-02T15:00:00Z',
+        surface: 'FEED',
+        views: '40',
+        likes: '4',
+        comments: '2',
+      });
+      await insertPublished({
+        id: 'b',
+        metricDate: '2026-09-03',
+        publishedAt: '2026-09-03T15:00:00Z',
+        surface: 'CAROUSEL_CONTAINER',
+        views: '5',
+        likes: '1',
+        comments: '1',
+      });
+      await insertPublished({
+        id: 'c',
+        metricDate: '2026-09-03',
+        publishedAt: '2026-09-03T15:00:00Z',
+        surface: 'REEL',
+        views: '300',
+        likes: '30',
+        comments: null,
+      });
+      // Published before the window: not counted.
+      await insertPublished({
+        id: 'd',
+        metricDate: '2026-09-03',
+        publishedAt: '2026-08-20T15:00:00Z',
+        surface: 'FEED',
+        views: '999',
+        likes: '99',
+        comments: '9',
+      });
 
-      const complete = await overview('2026-09-01', '2026-09-02');
-      expect(complete.totals.impressions).toBe('13');
-      expect(complete.totals.impressionsTotal).toBe('1319');
-      expect(complete.totals.impressionsPaid).toBe('1306');
+      const result = await overview('2026-09-01', '2026-09-03');
 
-      const partial = await overview('2026-08-31', '2026-09-02');
-      expect(partial.totals.impressionsTotal).toBeNull();
-      expect(partial.totals.impressionsPaid).toBeNull();
+      expect(result.totals.feedInteractions).toEqual({
+        publications: '2',
+        views: '45',
+        likes: '5',
+        comments: '3',
+        shares: null,
+        saves: null,
+      });
+      // A column no reel carried was not collected — null, not zero.
+      expect(result.totals.reelInteractions).toMatchObject({
+        publications: '1',
+        views: '300',
+        likes: '30',
+        comments: null,
+      });
+
+      const empty = await overview('2026-08-01', '2026-08-02');
+      expect(empty.totals.feedInteractions.likes).toBe('0');
     });
 
     it('returns the window of the same length before the period, on the same rules', async () => {

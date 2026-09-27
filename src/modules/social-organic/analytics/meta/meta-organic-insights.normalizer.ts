@@ -201,11 +201,6 @@ export function normalizeInstagramAccountInsights(
       ? readOptionalCounter(input.followersCount)
       : null;
   const impressions = readNonAdMediaProducts(media.get('views'));
-  // The `AD` bucket the line above drops: Meta's own paid slice of the day's
-  // views. Views are counts, so the buckets partition the total — organic plus
-  // this equals `viewsTotal` — which is what makes reading it honest, unlike
-  // reach, whose slices overlap.
-  const viewsPaid = readAdMediaProduct(media.get('views'));
   const reach = readNonAdMediaProducts(media.get('reach'));
   // The same two responses read a second way: `total_value.value` is the
   // account's total with ads included, which the breakdown sum above
@@ -270,7 +265,6 @@ export function normalizeInstagramAccountInsights(
     reach,
     viewsTotal,
     reachTotal,
-    viewsPaid,
     profileViews,
     totalInteractions,
     accountsEngaged,
@@ -854,42 +848,6 @@ function readNonAdMediaProducts(
       }
       total += BigInt(readRequiredCounter(result.value));
       found = true;
-    }
-  }
-
-  return found ? total.toString() : null;
-}
-
-/**
- * The `AD` bucket of a `media_product_type` breakdown, or null when the metric
- * carries no such breakdown.
- *
- * A breakdown present without an `AD` bucket — or without `results` at all,
- * Meta's shape for a quiet day — is a day no ad delivered, and answers "0":
- * the breakdown is what says so. Only its absence leaves the day unknown.
- */
-function readAdMediaProduct(metric: MetricEntry | undefined): string | null {
-  if (!metric || !isRecord(metric.total_value)) return null;
-  const breakdowns: unknown = metric.total_value.breakdowns;
-  if (!Array.isArray(breakdowns)) return null;
-
-  let total = 0n;
-  let found = false;
-  for (const breakdown of breakdowns as unknown[]) {
-    if (!isRecord(breakdown) || !Array.isArray(breakdown.dimension_keys)) {
-      invalid();
-    }
-    if (!breakdown.dimension_keys.includes('media_product_type')) continue;
-    found = true;
-    if (!hasOwn(breakdown, 'results')) continue;
-    if (!Array.isArray(breakdown.results)) invalid();
-
-    for (const result of breakdown.results as unknown[]) {
-      if (!isRecord(result) || !Array.isArray(result.dimension_values)) {
-        invalid();
-      }
-      if (result.dimension_values[0] !== 'AD') continue;
-      total += BigInt(readRequiredCounter(result.value));
     }
   }
 

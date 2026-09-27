@@ -18,6 +18,7 @@ import type { SocialOrganicAnalyticsAssetView } from './views/social-organic-ana
 import type {
   SocialOrganicAnalyticsOverviewView,
   SocialOrganicAnalyticsTotals,
+  SocialOrganicInteractionSums,
 } from './views/social-organic-analytics-overview.view';
 import {
   emptyOrganicSeriesPoint,
@@ -116,6 +117,19 @@ type PublicationCounts = {
   pageReelReactions: string;
   pageReelComments: string;
   pageReelShares: string;
+  feedInteractions: SocialOrganicInteractionSums;
+  reelInteractions: SocialOrganicInteractionSums;
+};
+
+/** One surface's row of the interaction aggregate, all columns as text. */
+type InteractionAggregateRow = {
+  surface: 'feed' | 'reel';
+  publications: string;
+  views: string | null;
+  likes: string | null;
+  comments: string | null;
+  shares: string | null;
+  saves: string | null;
 };
 
 /** The Facebook reel aggregate, all columns as text. */
@@ -163,14 +177,6 @@ type AggregateRow = {
    */
   accounts_engaged: string | null;
   accounts_engaged_days: string | null;
-  /**
-   * Instagram's total and paid views, with the count of days that carried
-   * each — see `readCompleteSum` for why a partial sum is withheld.
-   */
-  views_total: string | null;
-  views_total_days: string | null;
-  views_paid: string | null;
-  views_paid_days: string | null;
 };
 
 /**
@@ -353,47 +359,48 @@ export class SocialOrganicAnalyticsReadService {
   ): Promise<PublicationCounts> {
     const reelSpellings = socialOrganicSurfaceSpellings('reel');
 
-    const [publications, reels, stories, page, pageReels] = await Promise.all([
-      // Every surface, unlike the reel count below it: no `media_product_type`
-      // filter, because a post with none recorded is still a post.
-      this.postMetricsRepository.query<Array<{ count: string }>>(
-        `SELECT COUNT(DISTINCT external_publication_id)::text AS count
+    const [publications, reels, stories, page, pageReels, interactions] =
+      await Promise.all([
+        // Every surface, unlike the reel count below it: no `media_product_type`
+        // filter, because a post with none recorded is still a post.
+        this.postMetricsRepository.query<Array<{ count: string }>>(
+          `SELECT COUNT(DISTINCT external_publication_id)::text AS count
            FROM social_organic_post_metrics_daily
           WHERE asset_id = $1
             AND published_at IS NOT NULL
             AND (published_at AT TIME ZONE asset_timezone)::date
                 BETWEEN $2::date AND $3::date`,
-        [assetId, since, until],
-      ),
-      this.postMetricsRepository.query<Array<{ count: string }>>(
-        `SELECT COUNT(DISTINCT external_publication_id)::text AS count
+          [assetId, since, until],
+        ),
+        this.postMetricsRepository.query<Array<{ count: string }>>(
+          `SELECT COUNT(DISTINCT external_publication_id)::text AS count
            FROM social_organic_post_metrics_daily
           WHERE asset_id = $1
             AND published_at IS NOT NULL
             AND (published_at AT TIME ZONE asset_timezone)::date
                 BETWEEN $2::date AND $3::date
             AND UPPER(media_product_type) = ANY($4::text[])`,
-        [assetId, since, until, reelSpellings],
-      ),
-      this.storiesRepository.query<Array<{ count: string }>>(
-        `SELECT COUNT(*)::text AS count
+          [assetId, since, until, reelSpellings],
+        ),
+        this.storiesRepository.query<Array<{ count: string }>>(
+          `SELECT COUNT(*)::text AS count
            FROM social_organic_stories
           WHERE asset_id = $1
             AND published_at IS NOT NULL
             AND published_at::date BETWEEN $2::date AND $3::date`,
-        [assetId, since, until],
-      ),
-      // The Facebook Page engagement totals, summed from the post facts rather
-      // than read from an account metric. Meta's `page_post_engagements` exists
-      // but lumps reactions, comments, shares and clicks into one number that
-      // cannot be split back into the three the operator asked for.
-      //
-      // `DISTINCT ON` first, because the post fact has one row per observation
-      // day: summing the table directly would count a post observed five times
-      // five times over. The subquery takes each post's newest row, and the
-      // outer query adds those.
-      this.postMetricsRepository.query<Array<PageAggregateRow>>(
-        `SELECT COALESCE(SUM(reactions_total), 0)::text AS reactions,
+          [assetId, since, until],
+        ),
+        // The Facebook Page engagement totals, summed from the post facts rather
+        // than read from an account metric. Meta's `page_post_engagements` exists
+        // but lumps reactions, comments, shares and clicks into one number that
+        // cannot be split back into the three the operator asked for.
+        //
+        // `DISTINCT ON` first, because the post fact has one row per observation
+        // day: summing the table directly would count a post observed five times
+        // five times over. The subquery takes each post's newest row, and the
+        // outer query adds those.
+        this.postMetricsRepository.query<Array<PageAggregateRow>>(
+          `SELECT COALESCE(SUM(reactions_total), 0)::text AS reactions,
                 COALESCE(SUM(comments_lifetime), 0)::text AS comments,
                 COALESCE(SUM(shares_lifetime), 0)::text AS shares,
                 COUNT(*)::text AS posts
@@ -407,19 +414,19 @@ export class SocialOrganicAnalyticsReadService {
                     BETWEEN $2::date AND $3::date
               ORDER BY external_publication_id, metric_date DESC, synced_at DESC
            ) AS latest`,
-        [assetId, since, until],
-      ),
-      // The reel aggregates, summed over the reels published in the window.
-      //
-      // `unique_viewers` is summed with the others and it is the one figure
-      // here that overstates: Meta reports it per reel and offers no
-      // de-duplicated union, so an account that watched two reels is counted
-      // twice. The alternative is no card at all, since this is the only
-      // unique-viewer figure left on the Facebook side. The catalog's
-      // description says so in the operator's own words rather than leaving
-      // them to assume it is a distinct-people count.
-      this.facebookReelsRepository.query<Array<FacebookReelAggregateRow>>(
-        `SELECT COUNT(*)::text AS count,
+          [assetId, since, until],
+        ),
+        // The reel aggregates, summed over the reels published in the window.
+        //
+        // `unique_viewers` is summed with the others and it is the one figure
+        // here that overstates: Meta reports it per reel and offers no
+        // de-duplicated union, so an account that watched two reels is counted
+        // twice. The alternative is no card at all, since this is the only
+        // unique-viewer figure left on the Facebook side. The catalog's
+        // description says so in the operator's own words rather than leaving
+        // them to assume it is a distinct-people count.
+        this.facebookReelsRepository.query<Array<FacebookReelAggregateRow>>(
+          `SELECT COUNT(*)::text AS count,
                 COALESCE(SUM(plays), 0)::text AS plays,
                 COALESCE(SUM(unique_viewers), 0)::text AS viewers,
                 COALESCE(SUM(total_watch_time_ms), 0)::text AS watch_time_ms,
@@ -430,9 +437,10 @@ export class SocialOrganicAnalyticsReadService {
           WHERE asset_id = $1
             AND published_at IS NOT NULL
             AND published_at::date BETWEEN $2::date AND $3::date`,
-        [assetId, since, until],
-      ),
-    ]);
+          [assetId, since, until],
+        ),
+        this.sumInteractionsBySurface(assetId, since, until),
+      ]);
 
     return {
       publications: publications[0]?.count ?? '0',
@@ -454,7 +462,100 @@ export class SocialOrganicAnalyticsReadService {
       pageReelReactions: pageReels[0]?.reactions ?? '0',
       pageReelComments: pageReels[0]?.comments ?? '0',
       pageReelShares: pageReels[0]?.shares ?? '0',
+      feedInteractions: interactions.feed,
+      reelInteractions: interactions.reel,
     };
+  }
+
+  /**
+   * Views, likes, comments, shares and saves of the posts published in the
+   * window, summed per surface — the "Interações" table's postagens and reels
+   * rows.
+   *
+   * Each post contributes its newest observation (`DISTINCT ON`), because the
+   * fact table holds one row per post per observation day and these are
+   * lifetime counters. Summing across posts is sound: a like is a like, and a
+   * view is a view, so none of these double counts a person the way reach
+   * would.
+   *
+   * By publish date, like every other publication count here. A Facebook Page
+   * post carries no `media_product_type` and counts as feed; its reels live in
+   * their own table and are read by the reel aggregate above.
+   *
+   * Null-aware, unlike the Page sums beside it: a column no post of the window
+   * carries was not collected, and summing it to 0 would claim nobody liked
+   * anything. With no post published at all, 0 is the truthful answer.
+   */
+  private async sumInteractionsBySurface(
+    assetId: string,
+    since: string,
+    until: string,
+  ): Promise<Record<'feed' | 'reel', SocialOrganicInteractionSums>> {
+    const nullableSum = (expression: string, alias: string) =>
+      `CASE WHEN COUNT(${expression}) = 0 THEN NULL
+            ELSE SUM(${expression}) END::text AS ${alias}`;
+
+    const rows = await this.postMetricsRepository.query<
+      InteractionAggregateRow[]
+    >(
+      `SELECT surface,
+              COUNT(*)::text AS publications,
+              ${nullableSum('COALESCE(video_views_lifetime, impressions_lifetime)', 'views')},
+              ${nullableSum('COALESCE(likes_lifetime, reactions_total)', 'likes')},
+              ${nullableSum('comments_lifetime', 'comments')},
+              ${nullableSum('shares_lifetime', 'shares')},
+              ${nullableSum('saves_lifetime', 'saves')}
+         FROM (
+           SELECT DISTINCT ON (external_publication_id)
+                  CASE
+                    WHEN UPPER(media_product_type) = ANY($4::text[]) THEN 'reel'
+                    WHEN media_product_type IS NULL
+                      OR UPPER(media_product_type) = ANY($5::text[]) THEN 'feed'
+                  END AS surface,
+                  video_views_lifetime, impressions_lifetime, likes_lifetime,
+                  reactions_total, comments_lifetime, shares_lifetime,
+                  saves_lifetime
+             FROM social_organic_post_metrics_daily
+            WHERE asset_id = $1
+              AND published_at IS NOT NULL
+              AND (published_at AT TIME ZONE asset_timezone)::date
+                  BETWEEN $2::date AND $3::date
+            ORDER BY external_publication_id, metric_date DESC, synced_at DESC
+         ) AS latest
+        WHERE surface IS NOT NULL
+        GROUP BY surface`,
+      [
+        assetId,
+        since,
+        until,
+        socialOrganicSurfaceSpellings('reel'),
+        socialOrganicSurfaceSpellings('feed'),
+      ],
+    );
+
+    const read = (surface: 'feed' | 'reel'): SocialOrganicInteractionSums => {
+      const row = rows.find((entry) => entry.surface === surface);
+      if (!row) {
+        return {
+          publications: '0',
+          views: '0',
+          likes: '0',
+          comments: '0',
+          shares: '0',
+          saves: '0',
+        };
+      }
+      return {
+        publications: row.publications,
+        views: row.views,
+        likes: row.likes,
+        comments: row.comments,
+        shares: row.shares,
+        saves: row.saves,
+      };
+    };
+
+    return { feed: read('feed'), reel: read('reel') };
   }
 
   /**
@@ -1094,10 +1195,6 @@ export class SocialOrganicAnalyticsReadService {
       .addSelect('SUM(fact.replies)', 'replies')
       .addSelect('SUM(fact.accounts_engaged)', 'accounts_engaged')
       .addSelect('COUNT(fact.accounts_engaged)', 'accounts_engaged_days')
-      .addSelect('SUM(fact.views_total)', 'views_total')
-      .addSelect('COUNT(fact.views_total)', 'views_total_days')
-      .addSelect('SUM(fact.views_paid)', 'views_paid')
-      .addSelect('COUNT(fact.views_paid)', 'views_paid_days')
       .where('fact.asset_id = :assetId', { assetId })
       .andWhere('fact.metric_date BETWEEN :since AND :until', {
         since,
@@ -1244,20 +1341,6 @@ export class SocialOrganicAnalyticsReadService {
 
     return {
       impressions: toCount(row.impressions).toString(),
-      // Summed per day, so any window has them — unlike `periodViews*` below,
-      // which exist only for the windows the sync pre-measured. Views are
-      // counts, so the days add up; organic (`impressions`) plus paid equals
-      // total on every Instagram day stored.
-      impressionsTotal: readCompleteSum(
-        row,
-        row.views_total,
-        row.views_total_days,
-      ),
-      impressionsPaid: readCompleteSum(
-        row,
-        row.views_paid,
-        row.views_paid_days,
-      ),
       reach: readReach(row),
       reachGranularity: 'daily',
       followersCount,
@@ -1318,6 +1401,8 @@ export class SocialOrganicAnalyticsReadService {
       pageReelReactions: counts.pageReelReactions,
       pageReelComments: counts.pageReelComments,
       pageReelShares: counts.pageReelShares,
+      feedInteractions: counts.feedInteractions,
+      reelInteractions: counts.reelInteractions,
       periodViews: measurement?.views ?? null,
       periodViewsOrganic: measurement?.viewsOrganic ?? null,
       periodViewsPaid: measurement?.viewsPaid ?? null,
@@ -1367,26 +1452,6 @@ function readReach(row: AggregateRow): string | null {
   return row.reach === null || row.reach === undefined
     ? null
     : toCount(row.reach).toString();
-}
-
-/**
- * A daily sum, or null unless every day of the window carried the column.
- *
- * A window where some days predate the column would sum to a plausible
- * undercount — and one compared with the previous period would report a growth
- * that is only collection starting. Null says "not answerable", which the card
- * shows as such.
- */
-function readCompleteSum(
-  row: AggregateRow,
-  sum: string | null,
-  days: string | null,
-): string | null {
-  const factDays = toCount(row.fact_days);
-
-  if (factDays === 0n || toCount(days) !== factDays) return null;
-
-  return toCount(sum).toString();
 }
 
 /**

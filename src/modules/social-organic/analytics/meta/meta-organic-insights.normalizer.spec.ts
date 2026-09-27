@@ -208,58 +208,6 @@ describe('Meta organic account insights normalizers', () => {
     expect(row?.reachTotal).toBe('6783');
   });
 
-  it("stores the views' AD bucket as the paid views, and 0 when no ad ran", () => {
-    // Views are counts, so the buckets partition the total: 509 + 8646 = 9155.
-    const withAds = normalizeInstagramAccountInsights({
-      ...base,
-      followersCount: 800,
-      mediaInsights: {
-        data: [
-          breakdownMetric(
-            'views',
-            'media_product_type',
-            [
-              ['POST', 123],
-              ['STORY', 347],
-              ['REEL', 20],
-              ['CAROUSEL_CONTAINER', 19],
-              ['AD', 8646],
-            ],
-            9155,
-          ),
-        ],
-      },
-      followInsights: { data: [] },
-    });
-    expect(withAds).toMatchObject({
-      impressions: '509',
-      viewsPaid: '8646',
-      viewsTotal: '9155',
-    });
-
-    // A breakdown with no AD bucket says no ad delivered that day.
-    const withoutAds = normalizeInstagramAccountInsights({
-      ...base,
-      followersCount: 800,
-      mediaInsights: {
-        data: [
-          breakdownMetric('views', 'media_product_type', [['POST', 4]], 4),
-        ],
-      },
-      followInsights: { data: [] },
-    });
-    expect(withoutAds?.viewsPaid).toBe('0');
-
-    // No breakdown at all says nothing about ads.
-    const unknown = normalizeInstagramAccountInsights({
-      ...base,
-      followersCount: 800,
-      mediaInsights: { data: [metric('views', 4)] },
-      followInsights: { data: [] },
-    });
-    expect(unknown?.viewsPaid ?? null).toBeNull();
-  });
-
   it('keeps missing Instagram values null and preserves explicit zero', () => {
     const row = normalizeInstagramAccountInsights({
       ...base,
