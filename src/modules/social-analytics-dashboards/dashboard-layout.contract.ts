@@ -39,6 +39,12 @@ export const DASHBOARD_CARD_KINDS = [
   // since the breakdown cards shipped; its absence rejected every layout that
   // held one.
   'breakdown',
+  /**
+   * A sub-block: a heading over cards of one category (posts, reels, stories)
+   * inside a block. Its `cards` are validated like a section's, one level
+   * deep — a group inside a group is refused.
+   */
+  'group',
 ] as const;
 
 export type DashboardCardKind = (typeof DASHBOARD_CARD_KINDS)[number];
@@ -85,6 +91,7 @@ const MAX_CARDS_PER_SECTION = 60;
 const MAX_ID_LENGTH = 64;
 const MAX_TITLE_LENGTH = 120;
 const MAX_SECTION_DESCRIPTION_LENGTH = 280;
+const MAX_CARDS_PER_GROUP = 40;
 
 export function isDashboardChannelId(
   value: unknown,
@@ -193,14 +200,23 @@ function parseSection(raw: unknown): DashboardSection {
     throw new DashboardLayoutError('Uma seção do layout tem cards demais.');
   }
 
+  // One set for the whole section, sub-blocks included: the editor finds a
+  // card by id without knowing which grid holds it.
   const seenCardIds = new Set<string>();
-  const cards = raw.cards.map((card) => {
-    const parsed = parseCard(card);
-
-    if (seenCardIds.has(parsed.id)) {
+  const claim = (card: DashboardCard) => {
+    if (seenCardIds.has(card.id)) {
       throw new DashboardLayoutError('Há cards com o mesmo identificador.');
     }
-    seenCardIds.add(parsed.id);
+    seenCardIds.add(card.id);
+  };
+
+  const cards = raw.cards.map((card) => {
+    const parsed = parseCard(card, { allowGroup: true });
+    claim(parsed);
+
+    if (parsed.kind === 'group') {
+      (parsed.cards as DashboardCard[]).forEach(claim);
+    }
 
     return parsed;
   });
@@ -230,7 +246,10 @@ function parseSectionDescription(value: unknown): string | null | undefined {
   return description.length > 0 ? description : null;
 }
 
-function parseCard(raw: unknown): DashboardCard {
+function parseCard(
+  raw: unknown,
+  { allowGroup }: { allowGroup: boolean },
+): DashboardCard {
   if (!isPlainObject(raw)) {
     throw new DashboardLayoutError('Um card do layout é inválido.');
   }
@@ -242,6 +261,30 @@ function parseCard(raw: unknown): DashboardCard {
   }
 
   const size = parseSize(raw.size);
+
+  if (raw.kind === 'group') {
+    if (!allowGroup) {
+      throw new DashboardLayoutError(
+        'Um sub-bloco não pode conter outro sub-bloco.',
+      );
+    }
+
+    if (!Array.isArray(raw.cards)) {
+      throw new DashboardLayoutError('Um sub-bloco do layout não tem cards.');
+    }
+
+    if (raw.cards.length > MAX_CARDS_PER_GROUP) {
+      throw new DashboardLayoutError(
+        'Um sub-bloco do layout tem cards demais.',
+      );
+    }
+
+    const cards = raw.cards.map((card) =>
+      parseCard(card, { allowGroup: false }),
+    );
+
+    return { ...raw, id, kind: raw.kind, size, cards };
+  }
 
   // The body passes through, minus the envelope fields, which are rebuilt.
   return { ...raw, id, kind: raw.kind, size };

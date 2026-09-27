@@ -64,6 +64,77 @@ describe('parseDashboardLayout', () => {
     expect(parsed.sections[0].cards[0].kind).toBe('breakdown');
   });
 
+  describe('sub-blocks', () => {
+    const withGroup = (group: Record<string, unknown>) =>
+      layout({
+        sections: [
+          {
+            id: 'section-instagram',
+            channel: 'instagram',
+            title: 'Instagram',
+            cards: [
+              { id: 'k', kind: 'kpi', size: { w: 2, h: 2 } },
+              {
+                id: 'g',
+                kind: 'group',
+                category: 'reels',
+                title: 'Reels',
+                size: { w: 5, h: 1 },
+                ...group,
+              },
+            ],
+          },
+        ],
+      });
+
+    it('accepts a group and validates the cards inside it', () => {
+      const parsed = parseDashboardLayout(
+        withGroup({
+          cards: [{ id: 'r1', kind: 'kpi', size: { w: 2, h: 2 }, metric: 'x' }],
+        }),
+      );
+
+      const group = parsed.sections[0].cards[1];
+      expect(group.kind).toBe('group');
+      expect(group.category).toBe('reels');
+      expect(group.cards).toEqual([
+        { id: 'r1', kind: 'kpi', size: { w: 2, h: 2 }, metric: 'x' },
+      ]);
+    });
+
+    it('refuses a group without cards, a nested group and a bad inner card', () => {
+      expect(() => parseDashboardLayout(withGroup({}))).toThrow(
+        DashboardLayoutError,
+      );
+      expect(() =>
+        parseDashboardLayout(
+          withGroup({
+            cards: [
+              { id: 'n', kind: 'group', size: { w: 5, h: 1 }, cards: [] },
+            ],
+          }),
+        ),
+      ).toThrow('Um sub-bloco não pode conter outro sub-bloco.');
+      expect(() =>
+        parseDashboardLayout(
+          withGroup({
+            cards: [{ id: 'r1', kind: 'kpi', size: { w: 20, h: 2 } }],
+          }),
+        ),
+      ).toThrow(DashboardLayoutError);
+    });
+
+    it('refuses an inner card id that repeats one of the section', () => {
+      expect(() =>
+        parseDashboardLayout(
+          withGroup({
+            cards: [{ id: 'k', kind: 'kpi', size: { w: 2, h: 2 } }],
+          }),
+        ),
+      ).toThrow('Há cards com o mesmo identificador.');
+    });
+  });
+
   it('keeps a section without description free of the field', () => {
     const parsed = parseDashboardLayout(layout());
 
