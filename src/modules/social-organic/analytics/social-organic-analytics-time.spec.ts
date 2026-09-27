@@ -2,6 +2,7 @@ import {
   calendarDayIn,
   enumerateCalendarDays,
   localDayStartEpochSeconds,
+  postDiscoveryWindow,
 } from './social-organic-analytics-time';
 
 describe('organic analytics calendar boundaries', () => {
@@ -31,5 +32,29 @@ describe('organic analytics calendar boundaries', () => {
     expect(() => enumerateCalendarDays('2026-09-09', '2026-09-08')).toThrow(
       'invalid_sync_window',
     );
+  });
+});
+
+describe('postDiscoveryWindow', () => {
+  it("widens a window that reaches today to the last 30 days' posts", () => {
+    // The daily run's two days used to be the whole discovery range, so a
+    // post's counters froze at their second-day value.
+    expect(
+      postDiscoveryWindow({
+        fromDate: '2026-09-26',
+        toDate: '2026-09-27',
+        currentDay: '2026-09-27',
+      }),
+    ).toEqual({ fromDate: '2026-08-29', toDate: '2026-09-27' });
+  });
+
+  it('keeps the start of a window already wider than the refresh range', () => {
+    expect(
+      postDiscoveryWindow({
+        fromDate: '2026-06-01',
+        toDate: '2026-09-27',
+        currentDay: '2026-09-27',
+      }),
+    ).toEqual({ fromDate: '2026-06-01', toDate: '2026-09-27' });
   });
 });

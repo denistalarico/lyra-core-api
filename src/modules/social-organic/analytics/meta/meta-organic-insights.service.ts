@@ -13,6 +13,7 @@ import {
   calendarDayIn,
   enumerateCalendarDays,
   localDayStartEpochSeconds,
+  postDiscoveryWindow,
   shiftCalendarDay,
 } from '../social-organic-analytics-time';
 import { SocialOrganicSyncError } from '../social-organic-sync.error';
@@ -118,8 +119,14 @@ export class MetaOrganicInsightsService {
       const discovery = await this.discoverPublishedPosts({
         assetId: credential.assetId,
         assetTimezone,
-        fromDate: input.fromDate,
-        toDate: input.toDate,
+        // Wider than the window: every post of the refresh range gets today's
+        // lifetime counters, not only the ones published inside it — see
+        // `SOCIAL_ORGANIC_POST_REFRESH_DAYS`.
+        ...postDiscoveryWindow({
+          fromDate: input.fromDate,
+          toDate: input.toDate,
+          currentDay,
+        }),
         externalAssetId: credential.externalAssetId,
         accessToken: credential.accessToken,
         // The two the listing supports. Anything else already threw at the

@@ -38,10 +38,12 @@ describe('MetaOrganicFacebookReelsService', () => {
     };
 
     const writer = {
-      upsert: jest.fn(async (rows: readonly OrganicFacebookReelObservation[]) => {
-        written.push(...rows);
-        return rows.length;
-      }),
+      upsert: jest.fn(
+        async (rows: readonly OrganicFacebookReelObservation[]) => {
+          written.push(...rows);
+          return rows.length;
+        },
+      ),
     };
 
     return {
@@ -197,6 +199,28 @@ describe('MetaOrganicFacebookReelsService', () => {
     // The listing call was spent; no insights call was, and nothing was written.
     expect(summary).toEqual({ reelsSeen: 0, rowsWritten: 0, apiCalls: 1 });
     expect(writer.upsert).not.toHaveBeenCalled();
+  });
+
+  it('refreshes every reel of the last 30 days when the pass reaches today', async () => {
+    // The daily run's window is two days; a reel published earlier used to be
+    // skipped, so its plays and reactions froze — or it never got a row at all.
+    const { service, written } = harness({
+      listing: [
+        { ...reel, id: 'recent', created_time: '2026-09-10T13:41:05+0000' },
+        { ...reel, id: 'old', created_time: '2026-08-01T13:41:05+0000' },
+      ],
+      insights,
+    });
+
+    await service.sync({
+      resolved,
+      fromDate: '2026-09-26',
+      toDate: '2026-09-27',
+      syncRunId: null,
+      syncedAt: new Date('2026-09-27T15:00:00.000Z'),
+    });
+
+    expect(written.map((row) => row.externalPublicationId)).toEqual(['recent']);
   });
 
   it('spends no call at all on an Instagram asset', async () => {

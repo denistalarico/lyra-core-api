@@ -1,3 +1,4 @@
+import { localDayStartEpochSeconds } from '../social-organic-analytics-time';
 import type { DataSource } from 'typeorm';
 import type { ResolvedOrganicAnalyticsCredential } from '../../credentials/social-organic-credential.resolver';
 import type { MetaOrganicGraphService } from '../../providers/meta/meta-organic-graph.service';
@@ -750,6 +751,27 @@ describe('MetaOrganicInsightsService', () => {
       );
       expect(dataSource.query).not.toHaveBeenCalled();
       expect(summary.postRows).toEqual([]);
+    });
+
+    it("discovers the last 30 days' posts when the window reaches today", async () => {
+      // A lifetime counter keeps growing after the post's second day; reading
+      // only the window's posts froze every older one at that value.
+      const { service, graph } = harness({ publishedPosts: [] });
+
+      await service.sync({
+        resolved: resolved('facebook_page'),
+        fromDate: '2026-09-26',
+        toDate: '2026-09-27',
+        syncRunId: 'run-1',
+        syncedAt: new Date('2026-09-27T15:00:00.000Z'),
+      });
+
+      expect(graph.listPublishedPosts).toHaveBeenCalledWith(
+        expect.objectContaining({
+          since: localDayStartEpochSeconds('2026-08-29', 'America/Sao_Paulo'),
+          until: localDayStartEpochSeconds('2026-09-28', 'America/Sao_Paulo'),
+        }),
+      );
     });
 
     it('gives each of multiple posts its own row', async () => {

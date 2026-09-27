@@ -5,6 +5,10 @@ import {
   SocialOrganicFacebookReelWriterService,
   type OrganicFacebookReelObservation,
 } from '../social-organic-facebook-reel-writer.service';
+import {
+  calendarDayIn,
+  postDiscoveryWindow,
+} from '../social-organic-analytics-time';
 import { SocialOrganicSyncError } from '../social-organic-sync.error';
 import {
   FACEBOOK_REACTION_TYPES,
@@ -92,6 +96,19 @@ export class MetaOrganicFacebookReelsService {
     // by the post pass, with entirely different metrics.
     if (credential.assetType !== 'facebook_page') return empty;
 
+    // A reel's counters keep growing like a post's, so a pass that reaches
+    // today refreshes every reel of the refresh range, not only those
+    // published inside the window — see `SOCIAL_ORGANIC_POST_REFRESH_DAYS`.
+    const currentDay = calendarDayIn(input.resolved.assetTimezone, observedAt);
+    const discovery =
+      input.fromDate <= currentDay && currentDay <= input.toDate
+        ? postDiscoveryWindow({
+            fromDate: input.fromDate,
+            toDate: input.toDate,
+            currentDay,
+          })
+        : { fromDate: input.fromDate, toDate: input.toDate };
+
     const listing = await this.graph.listPageReels({
       objectId: credential.externalAssetId,
       accessToken: credential.accessToken,
@@ -110,7 +127,7 @@ export class MetaOrganicFacebookReelsService {
         return parsed ? [parsed] : [];
       })
       .filter((reel) =>
-        inWindow(reel.publishedAt, input.fromDate, input.toDate),
+        inWindow(reel.publishedAt, discovery.fromDate, discovery.toDate),
       );
 
     if (reels.length === 0) return { ...empty, apiCalls };

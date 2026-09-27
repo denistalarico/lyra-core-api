@@ -11,6 +11,47 @@ const DAY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
  */
 export const MAX_ORGANIC_ANALYTICS_PERIOD_DAYS = 365;
 
+/**
+ * How far back a sync refreshes the lifetime counters of published posts.
+ *
+ * A post's likes, comments, views and saves keep growing after it is
+ * published, and Meta only answers them as lifetime totals "as of now". Posts
+ * used to be discovered inside the sync's own window — two days for the daily
+ * run — so a post's counters stopped at their second-day value and every
+ * interaction after that was lost: a table summing a month of posts showed
+ * each one as it looked the day after it went out.
+ *
+ * Thirty days covers the tail where nearly all of a post's interactions
+ * happen, and matches the longest window Meta measures periods over. A post
+ * older than that keeps its day-30 figure. The cost is one insights read per
+ * post in the range (three on a Facebook Page), bounded by the discovery
+ * limit.
+ */
+export const SOCIAL_ORGANIC_POST_REFRESH_DAYS = 30;
+
+/**
+ * The publish-date range whose posts a sync reads, given the sync's window.
+ *
+ * Only a window that reaches today takes a snapshot — a lifetime counter's
+ * meaning is "as observed now" — and that snapshot covers the refresh range
+ * as well as the window. A wider window, a backfill, keeps its own start.
+ */
+export function postDiscoveryWindow(input: {
+  fromDate: string;
+  toDate: string;
+  currentDay: string;
+}): { fromDate: string; toDate: string } {
+  const refreshFrom = shiftCalendarDay(
+    input.currentDay,
+    -(SOCIAL_ORGANIC_POST_REFRESH_DAYS - 1),
+  );
+
+  return {
+    fromDate: refreshFrom < input.fromDate ? refreshFrom : input.fromDate,
+    toDate: input.toDate,
+  };
+}
+
 /** An inclusive calendar range in the asset's own timezone. */
 export type SocialOrganicAnalyticsPeriod = {
   since: string;
