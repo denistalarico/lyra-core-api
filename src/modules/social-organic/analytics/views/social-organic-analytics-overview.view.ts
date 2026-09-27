@@ -24,6 +24,20 @@ export type SocialOrganicReachGranularity = 'daily';
 export type SocialOrganicAnalyticsTotals = {
   impressions: string;
 
+  /**
+   * Instagram's views with ads included, and the ads' share — summed per day.
+   *
+   * `impressions` above is the organic figure (the `AD` bucket dropped). These
+   * two complete the set for any window, where `periodViews`/`periodViewsPaid`
+   * only exist for windows the sync pre-measured. Views are counts, so organic
+   * plus paid is the total, day by day.
+   *
+   * Null on a Facebook Page, and on any window where a day lacks the column —
+   * a partial sum is withheld rather than shown as a total.
+   */
+  impressionsTotal: string | null;
+  impressionsPaid: string | null;
+
   /** Null unless the period is exactly one day and that day reported it. */
   reach: string | null;
   reachGranularity: SocialOrganicReachGranularity;

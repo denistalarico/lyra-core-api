@@ -163,6 +163,14 @@ type AggregateRow = {
    */
   accounts_engaged: string | null;
   accounts_engaged_days: string | null;
+  /**
+   * Instagram's total and paid views, with the count of days that carried
+   * each — see `readCompleteSum` for why a partial sum is withheld.
+   */
+  views_total: string | null;
+  views_total_days: string | null;
+  views_paid: string | null;
+  views_paid_days: string | null;
 };
 
 /**
@@ -1086,6 +1094,10 @@ export class SocialOrganicAnalyticsReadService {
       .addSelect('SUM(fact.replies)', 'replies')
       .addSelect('SUM(fact.accounts_engaged)', 'accounts_engaged')
       .addSelect('COUNT(fact.accounts_engaged)', 'accounts_engaged_days')
+      .addSelect('SUM(fact.views_total)', 'views_total')
+      .addSelect('COUNT(fact.views_total)', 'views_total_days')
+      .addSelect('SUM(fact.views_paid)', 'views_paid')
+      .addSelect('COUNT(fact.views_paid)', 'views_paid_days')
       .where('fact.asset_id = :assetId', { assetId })
       .andWhere('fact.metric_date BETWEEN :since AND :until', {
         since,
@@ -1232,6 +1244,20 @@ export class SocialOrganicAnalyticsReadService {
 
     return {
       impressions: toCount(row.impressions).toString(),
+      // Summed per day, so any window has them — unlike `periodViews*` below,
+      // which exist only for the windows the sync pre-measured. Views are
+      // counts, so the days add up; organic (`impressions`) plus paid equals
+      // total on every Instagram day stored.
+      impressionsTotal: readCompleteSum(
+        row,
+        row.views_total,
+        row.views_total_days,
+      ),
+      impressionsPaid: readCompleteSum(
+        row,
+        row.views_paid,
+        row.views_paid_days,
+      ),
       reach: readReach(row),
       reachGranularity: 'daily',
       followersCount,
@@ -1341,6 +1367,26 @@ function readReach(row: AggregateRow): string | null {
   return row.reach === null || row.reach === undefined
     ? null
     : toCount(row.reach).toString();
+}
+
+/**
+ * A daily sum, or null unless every day of the window carried the column.
+ *
+ * A window where some days predate the column would sum to a plausible
+ * undercount — and one compared with the previous period would report a growth
+ * that is only collection starting. Null says "not answerable", which the card
+ * shows as such.
+ */
+function readCompleteSum(
+  row: AggregateRow,
+  sum: string | null,
+  days: string | null,
+): string | null {
+  const factDays = toCount(row.fact_days);
+
+  if (factDays === 0n || toCount(days) !== factDays) return null;
+
+  return toCount(sum).toString();
 }
 
 /**

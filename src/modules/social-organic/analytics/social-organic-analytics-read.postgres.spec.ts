@@ -87,6 +87,9 @@ run('SocialOrganicAnalyticsReadService against PostgreSQL', () => {
      */
     totalInteractions?: string | null;
     accountsEngaged?: string | null;
+    /** NULL by default, like the engagement columns above. */
+    viewsTotal?: string | null;
+    viewsPaid?: string | null;
     isPartial?: boolean;
   }) {
     const nullable = (value: string | null | undefined, fallback: string) =>
@@ -97,7 +100,8 @@ run('SocialOrganicAnalyticsReadService against PostgreSQL', () => {
         ("tenant_id", "workspace_id", "asset_id", "provider", "source",
          "metric_date", "asset_timezone", "impressions", "reach",
          "followers_count", "followers_gained", "followers_lost",
-         "profile_views", "total_interactions", "accounts_engaged", "is_partial")
+         "profile_views", "total_interactions", "accounts_engaged",
+         "views_total", "views_paid", "is_partial")
       VALUES (
         '${tenantId}', '${workspaceId}', '${input.assetId ?? assetId}', 'meta',
         'organic', '${input.metricDate}', 'America/Sao_Paulo',
@@ -108,6 +112,8 @@ run('SocialOrganicAnalyticsReadService against PostgreSQL', () => {
         ${nullable(input.profileViews, '10')},
         ${nullable(input.totalInteractions, 'NULL')},
         ${nullable(input.accountsEngaged, 'NULL')},
+        ${nullable(input.viewsTotal, 'NULL')},
+        ${nullable(input.viewsPaid, 'NULL')},
         ${input.isPartial ?? false}
       )
     `);
@@ -329,6 +335,32 @@ run('SocialOrganicAnalyticsReadService against PostgreSQL', () => {
 
       const result = await overview('2026-09-01', '2026-09-01');
       expect(result.totals.followersCount).toBeNull();
+    });
+
+    it('sums total and paid impressions per day, and withholds a partial sum', async () => {
+      await insertFact({
+        metricDate: '2026-09-01',
+        impressions: '3',
+        viewsTotal: '1309',
+        viewsPaid: '1306',
+      });
+      await insertFact({
+        metricDate: '2026-09-02',
+        impressions: '10',
+        viewsTotal: '10',
+        viewsPaid: '0',
+      });
+      // A day before the columns were collected.
+      await insertFact({ metricDate: '2026-08-31', impressions: '5' });
+
+      const complete = await overview('2026-09-01', '2026-09-02');
+      expect(complete.totals.impressions).toBe('13');
+      expect(complete.totals.impressionsTotal).toBe('1319');
+      expect(complete.totals.impressionsPaid).toBe('1306');
+
+      const partial = await overview('2026-08-31', '2026-09-02');
+      expect(partial.totals.impressionsTotal).toBeNull();
+      expect(partial.totals.impressionsPaid).toBeNull();
     });
 
     it('returns the window of the same length before the period, on the same rules', async () => {
