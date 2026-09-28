@@ -76,7 +76,7 @@ export class CreateSocialAnalyticsReportDto {
 /**
  * The preview request.
  *
- * The same body, rendered to HTML and never recorded: an operator who looks at
+ * The same body, rendered to the same PDF and never recorded: an operator who looks at
  * a preview and closes it has not emitted a report, and an archive that listed
  * every look would stop being a record of what the client received.
  */

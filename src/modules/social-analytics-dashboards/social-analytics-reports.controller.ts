@@ -69,12 +69,12 @@ export class SocialAnalyticsReportsController {
   }
 
   /**
-   * The preview overlay's content.
+   * The preview overlay's content: the same PDF the export produces, shown
+   * inline and never recorded (see the DTO).
    *
-   * Returns HTML, not a PDF: the overlay shows the report in the page and the
-   * browser's own print dialog handles "Imprimir", so rendering a PDF here
-   * would spend a Playwright launch on a document the operator may well close.
-   * Nothing is recorded — see the DTO.
+   * A PDF rather than HTML, although it costs a Playwright launch: pages exist
+   * only in print, so an HTML preview shows one endless sheet, with none of the
+   * page breaks, margins or page footers the operator is deciding on.
    */
   @Post('preview')
   @UseGuards(JwtAuthGuard, PermissionsGuard)
@@ -83,13 +83,17 @@ export class SocialAnalyticsReportsController {
   async preview(
     @RequestContextData() ctx: RequestContext,
     @Body() dto: PreviewSocialAnalyticsReportDto,
+    @Res({ passthrough: false }) response: Response,
   ) {
-    const { html, title } = await this.service.renderHtml(
-      ctx,
-      this.toRequest(dto, { persist: false }),
-    );
+    const report = await this.render(ctx, dto, { persist: false });
 
-    return { html, title };
+    response.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `inline; filename="${report.filename}"`,
+      'Cache-Control': 'no-store',
+    });
+
+    return response.send(report.buffer);
   }
 
   @Post('pdf')
@@ -101,19 +105,36 @@ export class SocialAnalyticsReportsController {
     @Body() dto: CreateSocialAnalyticsReportDto,
     @Res({ passthrough: false }) response: Response,
   ) {
+    const report = await this.render(ctx, dto, { persist: true });
+
+    response.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `attachment; filename="${report.filename}"`,
+      'Cache-Control': 'no-store',
+    });
+
+    return response.send(report.buffer);
+  }
+
+  @Delete(':id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireProductEntitlement('social')
+  @RequirePermission(MANAGE_PERMISSION)
+  async remove(
+    @RequestContextData() ctx: RequestContext,
+    @Param('id', new ParseUUIDPipe()) id: string,
+  ) {
+    await this.service.remove(resolveCompanyAwareScope(ctx), id);
+  }
+
+  private async render(
+    ctx: RequestContext,
+    dto: CreateSocialAnalyticsReportDto,
+    options: { persist: boolean },
+  ) {
     try {
-      const report = await this.service.renderPdf(
-        ctx,
-        this.toRequest(dto, { persist: true }),
-      );
-
-      response.set({
-        'Content-Type': 'application/pdf',
-        'Content-Disposition': `attachment; filename="${report.filename}"`,
-        'Cache-Control': 'no-store',
-      });
-
-      return response.send(report.buffer);
+      return await this.service.renderPdf(ctx, this.toRequest(dto, options));
     } catch (error) {
       // The engine being absent is an environment problem, not a bad request:
       // in production the Playwright chromium build lives in `/root/.cache`, so
@@ -137,18 +158,6 @@ export class SocialAnalyticsReportsController {
 
       throw error;
     }
-  }
-
-  @Delete(':id')
-  @HttpCode(HttpStatus.NO_CONTENT)
-  @UseGuards(JwtAuthGuard, PermissionsGuard)
-  @RequireProductEntitlement('social')
-  @RequirePermission(MANAGE_PERMISSION)
-  async remove(
-    @RequestContextData() ctx: RequestContext,
-    @Param('id', new ParseUUIDPipe()) id: string,
-  ) {
-    await this.service.remove(resolveCompanyAwareScope(ctx), id);
   }
 
   private toRequest(

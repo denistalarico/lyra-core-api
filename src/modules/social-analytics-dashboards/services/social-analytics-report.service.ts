@@ -44,7 +44,7 @@ export type RenderReportRequest = {
   orientation: ReportOrientation;
   /** The dashboard as the operator sees it. See the contract module. */
   snapshot: unknown;
-  /** Skips persistence — the preview asks for HTML and stores nothing. */
+  /** Skips persistence — the preview renders the same PDF and stores nothing. */
   persist: boolean;
 };
 
@@ -104,22 +104,10 @@ export class SocialAnalyticsReportService {
   }
 
   /**
-   * Builds the report's HTML.
-   *
-   * Shared by the preview and the PDF so that what the operator approves in the
-   * overlay is the same document that is printed — a preview rendered by a
-   * second code path would eventually stop matching, and the whole point of the
-   * step is to decide whether to send this exact thing.
+   * Builds the report's HTML. The preview and the export both go through here
+   * and through `renderPdf`, so what the operator approves in the overlay is
+   * the document that is printed.
    */
-  async renderHtml(
-    ctx: RequestContext,
-    request: RenderReportRequest,
-  ): Promise<{ html: string; title: string }> {
-    const { html, title } = await this.build(ctx, request);
-
-    return { html, title };
-  }
-
   private async build(
     ctx: RequestContext,
     request: RenderReportRequest,
