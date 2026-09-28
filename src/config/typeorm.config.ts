@@ -386,7 +386,14 @@ import {
   SocialPublishingCadenceEntity,
 } from '../modules/social-planner/entities';
 
+import { ClientAreaMembershipEntity } from '../modules/client-area/entities/client-area-membership.entity';
+import { ClientAreaInvitationEntity } from '../modules/client-area/entities/client-area-invitation.entity';
+import { ClientAreaMemberEventEntity } from '../modules/client-area/entities/client-area-member-event.entity';
+
 export const agencyEntities = [
+  ClientAreaMembershipEntity,
+  ClientAreaInvitationEntity,
+  ClientAreaMemberEventEntity,
   MediaAssetEntity,
   CreativeAssetEntity,
   CreativeAssetVersionEntity,

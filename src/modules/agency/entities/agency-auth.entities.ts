@@ -8,6 +8,15 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 
+/**
+ * CA1 — which product surface a session or login event belongs to. The
+ * Agency and Client Area share `user_sessions`/`user_login_events`; every
+ * refresh/logout filters by its own surface so one surface's refresh token
+ * can never renew or end the other's session.
+ */
+export const AUTH_SURFACES = ['agency', 'client_area'] as const;
+export type AuthSurface = (typeof AUTH_SURFACES)[number];
+
 @Entity('user_security_settings')
 @Unique('uq_agency_user_security_settings_tenant_user', ['tenantId', 'userId'])
 @Index('idx_agency_user_security_settings_tenant_user', ['tenantId', 'userId'])
@@ -117,6 +126,9 @@ export class AgencyUserSessionEntity {
   @Column({ name: 'expires_at', type: 'timestamptz', nullable: true })
   expiresAt!: Date | null;
 
+  @Column({ type: 'varchar', length: 16, default: 'agency' })
+  surface!: AuthSurface;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;
 
@@ -187,6 +199,9 @@ export class AgencyUserLoginEventEntity {
   @Column({ name: 'event_type', type: 'varchar', length: 30 })
   eventType!: 'login_success' | 'login_failed' | 'logout';
 
+  @Column({ type: 'varchar', length: 16, default: 'agency' })
+  surface!: AuthSurface;
+
   @Column({ name: 'device_name', type: 'varchar', length: 120, nullable: true })
   deviceName!: string | null;
 
@@ -224,6 +239,13 @@ export class AgencyPasswordResetEntity {
 
   @Column({ name: 'used_at', type: 'timestamptz', nullable: true })
   usedAt!: Date | null;
+
+  /**
+   * CA2 — which surface issued the reset link. The Agency and the Client
+   * Area share this table; each surface only redeems its own tokens.
+   */
+  @Column({ type: 'varchar', length: 16, default: 'agency' })
+  surface!: AuthSurface;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;

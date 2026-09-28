@@ -6,6 +6,7 @@ import { SettingsCryptoService } from '../../common/crypto/settings-crypto.servi
 import { EmailModule } from '../email/email.module';
 import { AgencyAuthController } from './agency-auth.controller';
 import { AgencyAuthService } from './agency-auth.service';
+import { AgencyIdentityCredentialsModule } from './agency-identity-credentials.module';
 import {
   AgencyEmailTwoFactorCodeEntity,
   AgencyPasswordResetEntity,
@@ -27,6 +28,7 @@ const AGENCY_CONNECTION = 'agency';
     ConfigModule,
     JwtModule.register({}),
     EmailModule,
+    AgencyIdentityCredentialsModule,
     TypeOrmModule.forFeature(
       [
         AgencyUserSecuritySettingsEntity,

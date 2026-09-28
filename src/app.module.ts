@@ -59,6 +59,8 @@ import { SocialCampaignsModule } from './modules/social-campaigns';
 import { SocialCreativeStudioModule } from './modules/social-creative-studio/social-creative-studio.module';
 import { SocialAnalyticsDashboardsModule } from './modules/social-analytics-dashboards/social-analytics-dashboards.module';
 import { SocialApprovalsModule } from './modules/social-approvals/social-approvals.module';
+import { ClientAreaModule } from './modules/client-area/client-area.module';
+import { ClientAreaAgencyModule } from './modules/client-area/agency/client-area-agency.module';
 
 @Module({
   imports: [
@@ -123,6 +125,8 @@ import { SocialApprovalsModule } from './modules/social-approvals/social-approva
     SocialCreativeStudioModule,
     SocialAnalyticsDashboardsModule,
     SocialApprovalsModule,
+    ClientAreaModule,
+    ClientAreaAgencyModule,
     SocialOrganicModule,
   ],
 })

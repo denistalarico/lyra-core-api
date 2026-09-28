@@ -182,6 +182,10 @@ const RAW_PERMISSIONS: RawPermission[] = [
   // is deliberately not folded into `profile.update.assigned` (Manager,
   // assigned clients only): it is a structural change, not a profile edit.
   ['agency.clients.company_context.reconcile.admin', ADMIN_UP],
+  // CA2. Inviting, re-roling and removing the client people who may act for
+  // a company in the Client Area (approve content in its name). Admin+ only:
+  // it grants external access, so it is not part of `profile.update.assigned`.
+  ['agency.clients.client_area_members.manage.admin', ADMIN_UP],
   ['agency.clients.managed_tenant.view.admin', ADMIN_UP],
   ['agency.clients.managed_tenant.manage.owner_only', OWNER_ONLY, true],
   ['agency.clients.lifecycle.view.assigned', MANAGER_UP],

@@ -3,12 +3,10 @@ import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
 import * as argon2 from 'argon2';
-import { createHash, randomBytes, randomInt } from 'crypto';
+import { randomBytes } from 'crypto';
 import type { Request } from 'express';
-import { verify } from 'otplib';
 import { Repository } from 'typeorm';
-import { SettingsCryptoService } from '../../common/crypto/settings-crypto.service';
-import { EmailService, type EmailTransportOverride } from '../email/email.service';
+import { EmailService } from '../email/email.service';
 import { renderTransactionalEmail } from '../email/templates/transactional-email.template';
 import { LoginDto } from '../auth/dto/login.dto';
 import { RefreshTokenDto } from '../auth/dto/refresh-token.dto';
@@ -18,19 +16,20 @@ import {
   type LoginRequestContext,
 } from '../auth/utils/login-context.util';
 import {
-  AgencyEmailTwoFactorCodeEntity,
   AgencyPasswordResetEntity,
-  AgencyUserLoginEventEntity,
   AgencyUserSecuritySettingsEntity,
   AgencyUserSessionEntity,
   AgencyUserTrustedDeviceEntity,
 } from './entities/agency-auth.entities';
 import {
-  AgencyWorkspaceEmailSettingsEntity,
   AgencyWorkspaceUserEntity,
   AgencyWorkspaceUserPermissionEntity,
 } from './entities/agency-settings.entities';
 import { isDevOnlyAgencyLoginBlocked } from './dev-agency-login.policy';
+import {
+  AgencyIdentityCredentialsService,
+  type TwoFactorMethod,
+} from './agency-identity-credentials.service';
 
 const AGENCY_CONNECTION = 'agency';
 
@@ -39,7 +38,13 @@ type AgencyLoginContext = {
   workspaceUser: AgencyWorkspaceUserEntity;
 };
 
-type TwoFactorMethod = 'email' | 'authenticator';
+/**
+ * CA1 — the Agency surface only ever refreshes, rotates or ends Agency
+ * sessions. `user_sessions` also holds Client Area sessions for identities
+ * without `workspace_users`; filtering by surface keeps a Client Area refresh
+ * token from being accepted here even before the membership check runs.
+ */
+const AGENCY_SURFACE = 'agency' as const;
 
 type AgencyTwoFactorTokenPayload = {
   sub: string;
@@ -61,18 +66,12 @@ export class AgencyAuthService {
     private readonly sessionsRepo: Repository<AgencyUserSessionEntity>,
     @InjectRepository(AgencyPasswordResetEntity, AGENCY_CONNECTION)
     private readonly passwordResetRepo: Repository<AgencyPasswordResetEntity>,
-    @InjectRepository(AgencyEmailTwoFactorCodeEntity, AGENCY_CONNECTION)
-    private readonly emailTwoFactorRepo: Repository<AgencyEmailTwoFactorCodeEntity>,
-    @InjectRepository(AgencyUserLoginEventEntity, AGENCY_CONNECTION)
-    private readonly loginEventsRepo: Repository<AgencyUserLoginEventEntity>,
-    @InjectRepository(AgencyWorkspaceEmailSettingsEntity, AGENCY_CONNECTION)
-    private readonly emailSettingsRepo: Repository<AgencyWorkspaceEmailSettingsEntity>,
     @InjectRepository(AgencyUserTrustedDeviceEntity, AGENCY_CONNECTION)
     private readonly trustedDevicesRepo: Repository<AgencyUserTrustedDeviceEntity>,
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
     private readonly emailService: EmailService,
-    private readonly cryptoService: SettingsCryptoService,
+    private readonly credentials: AgencyIdentityCredentialsService,
   ) {}
 
   async login(dto: LoginDto, req: Request) {
@@ -89,7 +88,7 @@ export class AgencyAuthService {
       throw new UnauthorizedException('Invalid credentials');
     }
 
-    if (this.hasTwoFactorEnabled(loginContext.security)) {
+    if (this.credentials.hasTwoFactorEnabled(loginContext.security)) {
       return this.createTwoFactorChallenge(loginContext.security);
     }
 
@@ -101,7 +100,10 @@ export class AgencyAuthService {
 
   async refresh(dto: RefreshTokenDto) {
     const session = await this.sessionsRepo.findOne({
-      where: { sessionTokenHash: this.hashToken(dto.refreshToken) },
+      where: {
+        sessionTokenHash: this.hashToken(dto.refreshToken),
+        surface: AGENCY_SURFACE,
+      },
     });
 
     if (!session || session.revokedAt || session.status === 'expired') {
@@ -144,7 +146,10 @@ export class AgencyAuthService {
 
   async logout(refreshToken: string) {
     const session = await this.sessionsRepo.findOne({
-      where: { sessionTokenHash: this.hashToken(refreshToken) },
+      where: {
+        sessionTokenHash: this.hashToken(refreshToken),
+        surface: AGENCY_SURFACE,
+      },
     });
 
     if (session) {
@@ -152,12 +157,17 @@ export class AgencyAuthService {
         status: 'expired',
         revokedAt: new Date(),
       });
-      await this.recordLoginEvent(session.tenantId, session.userId, 'logout', {
-        deviceName: session.deviceName,
-        userAgent: session.userAgent,
-        ipAddress: session.ipAddress,
-        location: session.location,
-      });
+      await this.credentials.recordLoginEvent(
+        session.tenantId,
+        session.userId,
+        'logout',
+        {
+          deviceName: session.deviceName,
+          userAgent: session.userAgent,
+          ipAddress: session.ipAddress,
+          location: session.location,
+        },
+      );
     }
 
     return { success: true };
@@ -176,8 +186,9 @@ export class AgencyAuthService {
   }
 
   async resetPassword(token: string, password: string) {
+    // CA2 — a Client Area reset link must never be redeemable here.
     const resetRequest = await this.passwordResetRepo.findOne({
-      where: { tokenHash: this.hashToken(token) },
+      where: { tokenHash: this.hashToken(token), surface: AGENCY_SURFACE },
       order: { createdAt: 'DESC' },
     });
 
@@ -217,11 +228,11 @@ export class AgencyAuthService {
   async loginWith2FA(token: string, code: string, req: Request) {
     const payload = await this.verifyTwoFactorToken(token);
 
-    if (payload.method === 'email') {
-      await this.verifyEmailTwoFactorCode(payload, code);
-    } else {
-      await this.verifyAuthenticatorCode(payload, code);
-    }
+    await this.credentials.verifyTwoFactorCode(
+      payload.method,
+      { tenantId: payload.tenantId, userId: payload.sub },
+      code,
+    );
 
     const security = await this.securityRepo.findOne({
       where: { tenantId: payload.tenantId, userId: payload.sub },
@@ -255,7 +266,11 @@ export class AgencyAuthService {
       throw new UnauthorizedException('Invalid 2FA context');
     }
 
-    await this.sendEmailTwoFactorCode(security, 'login');
+    await this.credentials.sendEmailTwoFactorCode(
+      security,
+      'login',
+      this.getProductName(),
+    );
 
     return { success: true };
   }
@@ -271,13 +286,10 @@ export class AgencyAuthService {
     });
 
     for (const security of securityRecords) {
-      if (!security.passwordHash) {
-        continue;
-      }
-
-      const isValidPassword = await argon2
-        .verify(security.passwordHash, password)
-        .catch(() => false);
+      const isValidPassword = await this.credentials.verifyPassword(
+        security,
+        password,
+      );
 
       if (!isValidPassword) {
         continue;
@@ -293,30 +305,6 @@ export class AgencyAuthService {
     return null;
   }
 
-  private async recordLoginEvent(
-    tenantId: string,
-    userId: string,
-    eventType: 'login_success' | 'login_failed' | 'logout',
-    client: {
-      deviceName?: string | null;
-      userAgent?: string | null;
-      ipAddress?: string | null;
-      location?: string | null;
-    },
-  ) {
-    await this.loginEventsRepo.save(
-      this.loginEventsRepo.create({
-        tenantId,
-        userId,
-        eventType,
-        deviceName: client.deviceName ?? null,
-        userAgent: client.userAgent ?? null,
-        ipAddress: client.ipAddress ?? null,
-        location: client.location ?? client.ipAddress ?? null,
-      }),
-    );
-  }
-
   private async recordFailedLoginIfKnownEmail(
     email: string,
     client: LoginRequestContext,
@@ -330,7 +318,7 @@ export class AgencyAuthService {
       return;
     }
 
-    await this.recordLoginEvent(
+    await this.credentials.recordLoginEvent(
       security.tenantId,
       security.userId,
       'login_failed',
@@ -364,25 +352,17 @@ export class AgencyAuthService {
     });
   }
 
-  private hasTwoFactorEnabled(security: AgencyUserSecuritySettingsEntity) {
-    return (
-      security.twoFactorEnabled || Boolean(security.twoFactorSecretEncrypted)
-    );
-  }
-
-  private getTwoFactorMethod(
-    security: AgencyUserSecuritySettingsEntity,
-  ): TwoFactorMethod {
-    return security.twoFactorMethod === 'email' ? 'email' : 'authenticator';
-  }
-
   private async createTwoFactorChallenge(
     security: AgencyUserSecuritySettingsEntity,
   ) {
-    const method = this.getTwoFactorMethod(security);
+    const method = this.credentials.getTwoFactorMethod(security);
 
     if (method === 'email') {
-      await this.sendEmailTwoFactorCode(security, 'login');
+      await this.credentials.sendEmailTwoFactorCode(
+        security,
+        'login',
+        this.getProductName(),
+      );
     }
 
     return {
@@ -413,6 +393,7 @@ export class AgencyAuthService {
         tenantId: security.tenantId,
         userId: security.userId,
         status: 'current',
+        surface: AGENCY_SURFACE,
       },
       { status: 'active' },
     );
@@ -431,6 +412,7 @@ export class AgencyAuthService {
         location: client.location ?? client.ipAddress,
         lastSeen: new Date().toISOString(),
         status: 'current',
+        surface: AGENCY_SURFACE,
         expiresAt: this.getRefreshExpirationDate(),
         revokedAt: null,
       }),
@@ -438,7 +420,12 @@ export class AgencyAuthService {
 
     const payload = this.buildTokenPayload(security, workspaceUser, session.id);
 
-    await this.recordLoginEvent(security.tenantId, security.userId, 'login_success', client);
+    await this.credentials.recordLoginEvent(
+      security.tenantId,
+      security.userId,
+      'login_success',
+      client,
+    );
 
     if (security.loginAlertsEnabled) {
       await this.sendNewLoginAlert(security, client, workspaceUser.workspaceId);
@@ -545,117 +532,6 @@ export class AgencyAuthService {
     }
   }
 
-  private async verifyEmailTwoFactorCode(
-    payload: AgencyTwoFactorTokenPayload,
-    code: string,
-  ) {
-    const codeHash = this.hashToken(code.trim());
-    const record = await this.emailTwoFactorRepo.findOne({
-      where: {
-        tenantId: payload.tenantId,
-        userId: payload.sub,
-        purpose: 'login',
-      },
-      order: { createdAt: 'DESC' },
-    });
-
-    if (
-      !record ||
-      record.usedAt ||
-      record.expiresAt.getTime() < Date.now() ||
-      record.codeHash !== codeHash
-    ) {
-      if (record) {
-        record.attempts += 1;
-        await this.emailTwoFactorRepo.save(record);
-      }
-
-      throw new UnauthorizedException('Invalid 2FA code');
-    }
-
-    record.usedAt = new Date();
-    await this.emailTwoFactorRepo.save(record);
-  }
-
-  private async verifyAuthenticatorCode(
-    payload: AgencyTwoFactorTokenPayload,
-    code: string,
-  ) {
-    const security = await this.securityRepo.findOne({
-      where: { tenantId: payload.tenantId, userId: payload.sub },
-    });
-    const secret = this.cryptoService.decrypt(
-      security?.twoFactorSecretEncrypted,
-    );
-
-    if (!secret || !verify({ token: code.trim(), secret })) {
-      throw new UnauthorizedException('Invalid 2FA code');
-    }
-  }
-
-  private async getEmailTransportOverride(
-    tenantId: string,
-    workspaceId?: string,
-  ): Promise<EmailTransportOverride | undefined> {
-    const settings = await this.emailSettingsRepo.findOne({
-      where: workspaceId ? { tenantId, workspaceId } : { tenantId },
-      order: { updatedAt: 'DESC' },
-    });
-
-    if (!settings?.smtpHost || !settings.smtpUser || !settings.smtpPasswordEncrypted || !settings.fromEmail) {
-      return undefined;
-    }
-
-    const smtpPassword = this.cryptoService.decrypt(settings.smtpPasswordEncrypted);
-
-    if (!smtpPassword) {
-      return undefined;
-    }
-
-    return {
-      smtpHost: settings.smtpHost,
-      smtpPort: settings.smtpPort ?? 587,
-      smtpSecure: settings.smtpSecure,
-      smtpUser: settings.smtpUser,
-      smtpPassword,
-      fromName: settings.fromName,
-      fromEmail: settings.fromEmail,
-    };
-  }
-
-  private async sendEmailTwoFactorCode(
-    security: AgencyUserSecuritySettingsEntity,
-    purpose: 'login' | 'setup',
-  ) {
-    const code = String(randomInt(100000, 999999));
-
-    await this.emailTwoFactorRepo.save(
-      this.emailTwoFactorRepo.create({
-        tenantId: security.tenantId,
-        userId: security.userId,
-        codeHash: this.hashToken(code),
-        purpose,
-        expiresAt: new Date(Date.now() + 5 * 60 * 1000),
-      }),
-    );
-
-    const { html, text } = renderTransactionalEmail({
-      title: 'Codigo de verificacao',
-      intro: `Use este codigo para concluir seu acesso ao ${this.getProductName()}.`,
-      secondaryText: `<strong>Codigo:</strong> ${code}`,
-      footerText:
-        'Este codigo expira em 5 minutos. Se voce nao solicitou este acesso, ignore este e-mail.',
-    });
-
-    await this.emailService.sendEmail({
-      to: security.currentEmail,
-      subject: `Codigo de verificacao do ${this.getProductName()}`,
-      html,
-      text,
-      override: await this.getEmailTransportOverride(security.tenantId),
-    });
-  }
-
   private async sendPasswordResetEmail(
     security: AgencyUserSecuritySettingsEntity,
   ) {
@@ -667,6 +543,7 @@ export class AgencyAuthService {
         userId: security.userId,
         tokenHash: this.hashToken(token),
         expiresAt: new Date(Date.now() + 15 * 60 * 1000),
+        surface: AGENCY_SURFACE,
       }),
     );
 
@@ -684,7 +561,9 @@ export class AgencyAuthService {
       subject: `Recuperacao de senha do ${this.getProductName()}`,
       html,
       text,
-      override: await this.getEmailTransportOverride(security.tenantId),
+      override: await this.credentials.getEmailTransportOverride(
+        security.tenantId,
+      ),
     });
   }
 
@@ -709,7 +588,10 @@ export class AgencyAuthService {
       subject: `Novo login no ${this.getProductName()}`,
       html,
       text,
-      override: await this.getEmailTransportOverride(security.tenantId, workspaceId),
+      override: await this.credentials.getEmailTransportOverride(
+        security.tenantId,
+        workspaceId,
+      ),
     });
   }
 
@@ -762,6 +644,6 @@ export class AgencyAuthService {
   }
 
   private hashToken(value: string) {
-    return createHash('sha256').update(value).digest('hex');
+    return this.credentials.hashToken(value);
   }
 }
