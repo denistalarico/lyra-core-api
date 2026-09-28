@@ -91,6 +91,7 @@ export class OperationalContextResolver {
     }
 
     let validatedCompanyContextId: string | null = null;
+    let companyName: string | null = null;
     if (companyContextId) {
       const companyContext = await this.companyContextsRepository.findOne({
         where: {
@@ -135,6 +136,7 @@ export class OperationalContextResolver {
       }
 
       validatedCompanyContextId = companyContext.id;
+      companyName = companyContact.displayName?.trim() || null;
     }
 
     return {
@@ -144,6 +146,7 @@ export class OperationalContextResolver {
       companyContextId: validatedCompanyContextId,
       managedTenantId: client.managedTenantId,
       clientName: client.displayName,
+      companyName,
     };
   }
 

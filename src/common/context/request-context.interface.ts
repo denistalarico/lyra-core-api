@@ -10,6 +10,8 @@ export interface ManagedContext {
   companyContextId?: string | null;
   managedTenantId: string | null;
   clientName?: string | null;
+  /** The selected company context's organization name, when there is one. */
+  companyName?: string | null;
 }
 
 export interface RequestContext {

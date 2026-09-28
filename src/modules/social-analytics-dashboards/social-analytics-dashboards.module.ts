@@ -1,6 +1,5 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { AgencyWorkspaceCompanySettingsEntity } from '../agency/entities/agency-settings.entities';
 import { BrandKitModule } from '../brand-kit/brand-kit.module';
 import { DocumentLayoutsModule } from '../document-layouts/document-layouts.module';
 import { PermissionsModule } from '../permissions';
@@ -30,9 +29,9 @@ import { SocialAnalyticsReportService } from './services/social-analytics-report
  *
  * Reports (Etapa 9) are the third resident, on the same terms: the report body
  * also arrives formatted, and the only thing read server-side is the
- * letterhead. `DocumentLayoutsModule` is imported for its Playwright renderer
- * — the one place in the codebase that launches a browser — rather than adding
- * a second launch path with its own production gotchas. `BrandKitModule` is
+ * letterhead. `DocumentLayoutsModule` is imported for the agency's document
+ * model (the report's header and footer) and for its Playwright renderer, the
+ * one place in the codebase that launches a browser. `BrandKitModule` is
  * imported for the client's logo, through the service it exports for exactly
  * this: its own module doc says consumers must read Brand Kit through that
  * service and never by building a storage URL by hand.
@@ -43,14 +42,7 @@ import { SocialAnalyticsReportService } from './services/social-analytics-report
     DocumentLayoutsModule,
     BrandKitModule,
     TypeOrmModule.forFeature(
-      [
-        SocialAnalyticsDashboardEntity,
-        SocialAnalyticsReportEntity,
-        // Read-only, for the letterhead. Registered here rather than reached
-        // through the agency module so this module keeps depending on entities
-        // instead of on another module's services.
-        AgencyWorkspaceCompanySettingsEntity,
-      ],
+      [SocialAnalyticsDashboardEntity, SocialAnalyticsReportEntity],
       'agency',
     ),
   ],

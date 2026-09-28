@@ -52,6 +52,14 @@ type RenderBillPdfInput = {
 type RenderHtmlPdfOptions = {
   format?: 'A4' | 'Letter';
   margin?: { top?: string; right?: string; bottom?: string; left?: string };
+  /** Lets the document's own `@page` size and orientation win. */
+  preferCSSPageSize?: boolean;
+  /**
+   * For HTML that is not entirely the server's own: scripts off, and every
+   * network request refused unless `allowRequest` accepts its URL. `data:` URIs
+   * never reach the network, so they are not affected.
+   */
+  untrusted?: { allowRequest: (url: string) => boolean };
 };
 
 type TeamDocumentAgency = {
@@ -226,12 +234,28 @@ export class DocumentPdfRendererService {
     let page: Awaited<ReturnType<typeof browser.newPage>> | null = null;
 
     try {
-      page = await browser.newPage();
+      const untrusted = options.untrusted;
+
+      page = untrusted
+        ? await (
+            await browser.newContext({ javaScriptEnabled: false })
+          ).newPage()
+        : await browser.newPage();
+
+      if (untrusted) {
+        await page.route('**/*', (route) =>
+          untrusted.allowRequest(route.request().url())
+            ? route.continue()
+            : route.abort(),
+        );
+      }
+
       await page.setContent(html, { waitUntil: 'networkidle' });
       await page.emulateMedia({ media: 'print' });
 
       return await page.pdf({
         format: options.format ?? 'A4',
+        preferCSSPageSize: options.preferCSSPageSize ?? false,
         printBackground: true,
         margin: options.margin ?? {
           top: '12mm',
@@ -333,6 +357,62 @@ export class DocumentPdfRendererService {
 </head>
 <body>${html}</body>
 </html>`;
+  }
+
+  /**
+   * The header and footer of the agency's document model, for a document whose
+   * body is not built from this service's templates (the Social Analytics
+   * report).
+   *
+   * Same markup and the same template CSS as a quote, so the chosen model looks
+   * the same on every document the agency sends out. The logo falls back to the
+   * company name, because a report without a logo would otherwise open with an
+   * empty header.
+   */
+  buildLayoutChrome(
+    layout: DocumentLayoutEntity,
+    template: DocumentLayoutTemplateEntity | null,
+  ): {
+    css: string;
+    headerHtml: string;
+    footerHtml: string;
+    logoUrl: string | null;
+  } {
+    const brand =
+      this.buildCompanyBrandBlock(layout) ||
+      (layout.companyName?.trim()
+        ? `<strong>${this.escapeHtml(layout.companyName)}</strong>`
+        : '');
+    const documentId = [
+      layout.companyDocumentLabel,
+      layout.companyDocumentValue,
+    ]
+      .map((value) => value?.trim() ?? '')
+      .filter(Boolean);
+
+    const css = template
+      ? this.replaceTokens(template.cssTemplate, {
+          primaryColor: this.escapeCssValue(layout.primaryColor || '#2563EB'),
+          secondaryColor: this.escapeCssValue(
+            layout.secondaryColor || '#0F172A',
+          ),
+          textColor: this.escapeCssValue(layout.textColor || '#0F172A'),
+          backgroundColor: this.escapeCssValue(
+            layout.backgroundColor || '#FFFFFF',
+          ),
+          fontFamily: this.escapeCssValue(layout.fontFamily || 'Inter'),
+          headingFontFamily: this.escapeCssValue(
+            layout.headingFontFamily || 'Sora',
+          ),
+        })
+      : '';
+
+    return {
+      css,
+      headerHtml: `<header class="doc-header"><div class="doc-brand">${brand}</div><div class="doc-company">${this.buildCompanyHeaderSideBlock(layout)}</div></header>`,
+      footerHtml: `<footer class="doc-footer"><span>${this.escapeHtml(layout.footerText ?? '')}</span><span>${this.escapeHtml(documentId.length === 2 ? documentId.join(' ') : '')}</span></footer>`,
+      logoUrl: this.resolveAssetUrl(layout.logoUrl) || null,
+    };
   }
 
   private escapeHtml(value: unknown) {

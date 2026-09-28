@@ -165,7 +165,8 @@ export class SocialAnalyticsReportsController {
       since: dto.since.slice(0, 10),
       until: dto.until.slice(0, 10),
       pageMode: dto.pageMode,
-      document: dto.document,
+      orientation: dto.orientation ?? 'landscape',
+      snapshot: dto.snapshot,
       persist: options.persist,
     };
   }

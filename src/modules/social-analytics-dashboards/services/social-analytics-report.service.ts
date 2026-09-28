@@ -6,17 +6,18 @@ import {
   type CompanyAwareScope,
 } from '../../../common/context/company-aware-scope';
 import type { RequestContext } from '../../../common/context/request-context.interface';
-import { AgencyWorkspaceCompanySettingsEntity } from '../../agency/entities/agency-settings.entities';
+import { DocumentLayoutsService } from '../../document-layouts/document-layouts.service';
 import { DocumentPdfRendererService } from '../../document-layouts/document-pdf-renderer.service';
 import { SocialAnalyticsReportLogoService } from './social-analytics-report-logo.service';
 import type { DashboardChannelId } from '../dashboard-layout.contract';
 import { SocialAnalyticsReportEntity } from '../entities';
 import {
-  parseReportDocument,
-  ReportDocumentError,
-  type ReportDocument,
+  parseReportSnapshot,
+  ReportSnapshotError,
+  type ReportOrientation,
   type ReportPageMode,
-} from '../report-document.contract';
+  type ReportSnapshot,
+} from '../report-snapshot.contract';
 import {
   buildSocialAnalyticsReportHtml,
   type ReportLetterhead,
@@ -40,8 +41,9 @@ export type RenderReportRequest = {
   since: string;
   until: string;
   pageMode: ReportPageMode;
-  /** The report body, as the dashboard rendered it. See the contract module. */
-  document: unknown;
+  orientation: ReportOrientation;
+  /** The dashboard as the operator sees it. See the contract module. */
+  snapshot: unknown;
   /** Skips persistence — the preview asks for HTML and stores nothing. */
   persist: boolean;
 };
@@ -71,12 +73,13 @@ const MAX_REPORTS_PER_SCOPE = 200;
  *
  * ## The letterhead is server-side
  *
- * The body of the document comes from the client, because it has to agree with
- * the screen it was exported from (see `report-document.contract.ts`). The
- * header does not: the agency's identity is read here from
- * `workspace_company_settings`, and the client's logo from their Brand Kit. The
- * masthead of a document that gets forwarded to a client is exactly the part
- * that must not be settable by whatever posted the body.
+ * The body of the document comes from the client, because it has to look like
+ * the screen it was exported from (see `report-snapshot.contract.ts`). The
+ * header and footer do not: they are the agency's document model (Vendas ›
+ * Layout de documentos, one per tenant and workspace), and the client's name
+ * and logo come from the managed context and their Brand Kit. The masthead of a
+ * document that gets forwarded to a client is exactly the part that must not be
+ * settable by whatever posted the body.
  */
 @Injectable()
 export class SocialAnalyticsReportService {
@@ -85,8 +88,7 @@ export class SocialAnalyticsReportService {
   constructor(
     @InjectRepository(SocialAnalyticsReportEntity, 'agency')
     private readonly reports: Repository<SocialAnalyticsReportEntity>,
-    @InjectRepository(AgencyWorkspaceCompanySettingsEntity, 'agency')
-    private readonly companySettings: Repository<AgencyWorkspaceCompanySettingsEntity>,
+    private readonly documentLayouts: DocumentLayoutsService,
     private readonly pdfRenderer: DocumentPdfRendererService,
     private readonly logos: SocialAnalyticsReportLogoService,
   ) {}
@@ -113,6 +115,15 @@ export class SocialAnalyticsReportService {
     ctx: RequestContext,
     request: RenderReportRequest,
   ): Promise<{ html: string; title: string }> {
+    const { html, title } = await this.build(ctx, request);
+
+    return { html, title };
+  }
+
+  private async build(
+    ctx: RequestContext,
+    request: RenderReportRequest,
+  ): Promise<{ html: string; title: string; logoUrl: string | null }> {
     const scope = resolveCompanyAwareScope(ctx);
     const title = request.title.trim();
 
@@ -126,29 +137,30 @@ export class SocialAnalyticsReportService {
       );
     }
 
-    let document: ReportDocument;
+    let snapshot: ReportSnapshot;
 
     try {
-      document = parseReportDocument(request.document);
+      snapshot = parseReportSnapshot(request.snapshot);
     } catch (error) {
-      if (error instanceof ReportDocumentError) {
+      if (error instanceof ReportSnapshotError) {
         throw new BadRequestException(error.message);
       }
       throw error;
     }
 
-    const letterhead = await this.resolveLetterhead(ctx, scope);
+    const { letterhead, logoUrl } = await this.resolveLetterhead(ctx, scope);
 
     return {
       title,
+      logoUrl,
       html: buildSocialAnalyticsReportHtml({
         title,
         periodSince: request.since,
         periodUntil: request.until,
         pageMode: request.pageMode,
-        document,
+        orientation: request.orientation,
+        snapshot,
         letterhead,
-        generatedAt: new Date(),
       }),
     };
   }
@@ -165,13 +177,17 @@ export class SocialAnalyticsReportService {
     request: RenderReportRequest,
   ): Promise<{ buffer: Buffer; filename: string }> {
     const scope = resolveCompanyAwareScope(ctx);
-    const { html, title } = await this.renderHtml(ctx, request);
+    const { html, title, logoUrl } = await this.build(ctx, request);
 
     const buffer = await this.pdfRenderer.renderHtmlToPdf(html, {
       format: 'A4',
-      // Zero here because the document declares its own `@page` margins; two
-      // sets of margins would compound and shrink the content area.
+      // The document's `@page` sets the size, the orientation and the margins
+      // the footer is printed in; margins here would compound with those.
+      preferCSSPageSize: true,
       margin: { top: '0', right: '0', bottom: '0', left: '0' },
+      untrusted: {
+        allowRequest: (url) => isAllowedReportRequest(url, logoUrl),
+      },
     });
 
     if (request.persist) {
@@ -243,90 +259,57 @@ export class SocialAnalyticsReportService {
   }
 
   /**
-   * The agency block, plus the client the data belongs to.
+   * The agency's document model, plus the client the data belongs to.
    *
-   * `clientName` comes from the resolved managed context rather than from a
-   * lookup here: the context resolver already reads it from `agency_clients`,
-   * and re-reading it would make this module depend on the clients module for a
-   * string it is being handed.
+   * The model is the one Vendas › Layout de documentos edits: the default
+   * layout of this tenant and workspace, with the company data filled from the
+   * workspace settings where the layout leaves it blank, and the CSS of the
+   * template it picked.
    *
-   * The client's logo comes from their Brand Kit, inlined as a `data:` URI —
-   * see `SocialAnalyticsReportLogoService` for why it cannot be a link. It is
-   * only asked for when there *is* a client: in agency scope the Brand Kit
-   * would answer with the agency's own kit, and printing the agency mark twice
-   * (once as sender, once as subject) would misstate who the report is about.
+   * The client's company is the selected company context when there is one,
+   * otherwise the client itself. Their logo comes from the Brand Kit, inlined as
+   * a `data:` URI (see `SocialAnalyticsReportLogoService`). Neither is asked for
+   * in agency scope, where the Brand Kit would answer with the agency's own kit
+   * and the agency would appear as the subject of its own report.
    */
   private async resolveLetterhead(
     ctx: RequestContext,
     scope: CompanyAwareScope,
-  ): Promise<ReportLetterhead> {
-    const clientName = ctx.managedContext?.clientName ?? null;
+  ): Promise<{ letterhead: ReportLetterhead; logoUrl: string | null }> {
+    const clientName =
+      ctx.managedContext?.companyName?.trim() ||
+      ctx.managedContext?.clientName?.trim() ||
+      null;
 
-    const [settings, clientLogoUrl] = await Promise.all([
-      this.companySettings.findOne({
-        where: { tenantId: scope.tenantId, workspaceId: scope.workspaceId },
+    const [layout, clientLogoUrl] = await Promise.all([
+      this.documentLayouts.getDefaultLayout({
+        tenantId: scope.tenantId,
+        workspaceId: scope.workspaceId,
       }),
       clientName ? this.logos.resolveClientLogo(ctx) : Promise.resolve(null),
     ]);
-
-    const agencyName =
-      settings?.tradeName?.trim() ||
-      settings?.legalName?.trim() ||
-      settings?.workspaceName?.trim() ||
-      'Relatório de Social Analytics';
+    const template = await this.documentLayouts.getSystemTemplateForType(
+      layout.layoutType,
+    );
+    const chrome = this.pdfRenderer.buildLayoutChrome(layout, template);
 
     return {
-      agencyName,
-      agencyDetails: [
-        settings?.legalName?.trim() && settings.legalName !== agencyName
-          ? settings.legalName
-          : '',
-        settings?.taxId?.trim()
-          ? `${settings.taxIdType || 'CNPJ'}: ${settings.taxId}`
-          : '',
-        settings?.addressLine?.trim() ?? '',
-        [settings?.supportEmail, settings?.phone]
-          .filter((value) => value?.trim())
-          .join(' · '),
-        settings?.website?.trim() ?? '',
-      ].filter((line) => line.trim().length > 0),
-      agencyLogoUrl: this.resolveAssetUrl(
-        settings?.logoUrl ?? settings?.avatarUrl,
-      ),
-      clientName: clientName?.trim() || null,
-      // Null is expected, not a failure: a client with no Brand Kit logo gets a
-      // letterhead with their name and no mark.
-      clientLogoUrl,
+      logoUrl: chrome.logoUrl,
+      letterhead: {
+        layoutType: layout.layoutType,
+        layoutCss: chrome.css,
+        headerHtml: chrome.headerHtml,
+        footerHtml: chrome.footerHtml,
+        footerText:
+          layout.footerText?.trim() || layout.companyName?.trim() || '',
+        fontFamily: layout.fontFamily || 'Inter',
+        headingFontFamily: layout.headingFontFamily || 'Sora',
+        clientName,
+        // Null is expected, not a failure: a client with no Brand Kit logo
+        // gets their name and no mark.
+        clientLogoUrl,
+      },
     };
-  }
-
-  /**
-   * Makes a stored asset path absolute.
-   *
-   * Playwright loads the HTML with `setContent`, so the document has no base
-   * URL — a relative `/uploads/...` would resolve against `about:blank` and the
-   * logo would silently not print. Mirrors `resolveAssetUrl` in
-   * `document-pdf-renderer.service.ts`.
-   */
-  private resolveAssetUrl(value: string | null | undefined): string | null {
-    const url = value?.trim();
-
-    if (!url) return null;
-    if (/^[a-z][a-z\d+\-.]*:/i.test(url)) return url;
-
-    if (url.startsWith('/')) {
-      const apiBaseUrl = (
-        process.env.AGENCY_PUBLIC_API_URL ||
-        process.env.API_PUBLIC_URL ||
-        'http://localhost:3000/api'
-      ).replace(/\/$/, '');
-
-      return url.startsWith('/api/')
-        ? `${apiBaseUrl.replace(/\/api$/i, '')}${url}`
-        : `${apiBaseUrl}${url}`;
-    }
-
-    return url;
   }
 
   /** A filename an operator can find again in a downloads folder. */
@@ -367,3 +350,37 @@ export class SocialAnalyticsReportService {
     };
   }
 }
+
+/**
+ * What the report may load while Chromium renders it.
+ *
+ * The body is operator-supplied markup, so by default nothing is fetched: the
+ * client inlines every image it can as a `data:` URI, and those never touch the
+ * network. Two exceptions remain. The agency logo is a URL of this API, allowed
+ * exactly. Meta's CDN serves the reel thumbnails the browser could not inline
+ * (it does not send CORS headers), and is allowed by host, over HTTPS only.
+ * Everything else, internal addresses included, is refused.
+ */
+export function isAllowedReportRequest(
+  url: string,
+  logoUrl: string | null,
+): boolean {
+  if (logoUrl && url === logoUrl) return true;
+
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+
+  if (parsed.protocol !== 'https:') return false;
+
+  const host = parsed.hostname.toLowerCase();
+
+  return META_CDN_HOSTS.some(
+    (suffix) => host === suffix || host.endsWith(`.${suffix}`),
+  );
+}
+
+const META_CDN_HOSTS = ['fbcdn.net', 'cdninstagram.com'];

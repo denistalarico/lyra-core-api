@@ -1,242 +1,209 @@
-import { parseReportDocument } from '../report-document.contract';
+import {
+  parseReportSnapshot,
+  ReportSnapshotError,
+  REPORT_SNAPSHOT_VERSION,
+  type ReportSnapshot,
+} from '../report-snapshot.contract';
 import {
   buildSocialAnalyticsReportHtml,
+  reportZoom,
   type ReportLetterhead,
   type ReportRenderInput,
 } from './social-analytics-report.renderer';
+import { isAllowedReportRequest } from './social-analytics-report.service';
+
+const snapshot: ReportSnapshot = {
+  version: REPORT_SNAPSHOT_VERSION,
+  width: 1200,
+  html: '<div class="agency-shell" data-lyra-product="social"><section data-report-channel="instagram">Cards</section><section data-report-channel="facebook">Mais cards</section></div>',
+  css: '.social-analytics-card { border-radius: 12px; }',
+  rootAttributes: { class: 'font-inter', 'data-theme': 'dark' },
+};
 
 const letterhead: ReportLetterhead = {
-  agencyName: 'Agência Exemplo',
-  agencyDetails: ['CNPJ: 00.000.000/0001-00', 'contato@exemplo.com'],
-  agencyLogoUrl: 'https://cdn.exemplo.com/logo.png',
-  clientName: 'Cliente Exemplo',
+  layoutType: 'pulse',
+  layoutCss: '.doc-header { display: flex; }',
+  headerHtml: '<header class="doc-header"><strong>Agência X</strong></header>',
+  footerHtml: '<footer class="doc-footer"><span>Rodapé</span></footer>',
+  footerText: 'Agência "X" </style>',
+  fontFamily: 'Inter',
+  headingFontFamily: 'Sora',
+  clientName: 'Padaria <Central>',
   clientLogoUrl: null,
 };
 
 function render(overrides: Partial<ReportRenderInput> = {}): string {
-  const document = parseReportDocument({
-    version: 1,
-    sections: [
-      {
-        channelLabel: 'Meta Ads',
-        title: 'Desempenho pago',
-        cards: [
-          {
-            title: 'Valor gasto',
-            description: 'Investimento no período',
-            block: {
-              kind: 'metric',
-              label: 'Valor gasto',
-              value: 'R$ 1.234,56',
-              detail: null,
-              highlighted: true,
-            },
-          },
-        ],
-      },
-      {
-        channelLabel: 'Instagram',
-        title: 'Orgânico',
-        cards: [
-          {
-            title: 'Alcance do período',
-            description: null,
-            block: {
-              kind: 'notice',
-              message: 'Alcance do período ainda não medido.',
-            },
-          },
-        ],
-      },
-    ],
-  });
-
   return buildSocialAnalyticsReportHtml({
     title: 'Relatório mensal',
     periodSince: '2026-09-01',
-    periodUntil: '2026-09-30',
+    periodUntil: '2026-09-27',
     pageMode: 'paginated',
-    document,
+    orientation: 'landscape',
+    snapshot,
     letterhead,
-    generatedAt: new Date('2026-09-21T13:45:00Z'),
     ...overrides,
   });
 }
 
 describe('buildSocialAnalyticsReportHtml', () => {
-  it('puts the agency above and the client below, per the plan', () => {
+  it('opens with the model header, then the client company and the title', () => {
     const html = render();
 
-    const agencyAt = html.indexOf('Agência Exemplo');
-    const clientAt = html.indexOf('Cliente Exemplo');
+    const header = html.indexOf('class="doc-header"');
+    const client = html.indexOf('Padaria &lt;Central&gt;');
+    const title = html.indexOf('<h1>Relatório mensal</h1>');
+    const body = html.indexOf('data-report-channel="instagram"');
 
-    expect(agencyAt).toBeGreaterThan(-1);
-    expect(clientAt).toBeGreaterThan(agencyAt);
-    expect(html).toContain('https://cdn.exemplo.com/logo.png');
+    expect(header).toBeGreaterThan(0);
+    expect(client).toBeGreaterThan(header);
+    expect(title).toBeGreaterThan(client);
+    expect(body).toBeGreaterThan(title);
+    expect(html).toContain('01/09/2026 a 27/09/2026');
   });
 
-  it('prints the period as calendar days, not as parsed dates', () => {
-    // Constructing a Date from 'YYYY-MM-DD' re-anchors it to the runtime zone
-    // and can print the day before — the bug §1.3 keeps warning about.
-    expect(render()).toContain('01/09/2026 a 30/09/2026');
+  it('uses the agency model class and falls back to essence for an unknown one', () => {
+    expect(render()).toContain('doc-template-pulse report-page');
+    expect(
+      render({ letterhead: { ...letterhead, layoutType: 'bogus' } }),
+    ).toContain('doc-template-essence report-page');
   });
 
-  it('breaks the page before each channel after the first in paginated mode', () => {
-    const html = render({ pageMode: 'paginated' });
-    const applied = html.match(/class="section section--break"/g) ?? [];
+  it('always prints in the light theme', () => {
+    const html = render();
 
-    // Two sections, one break: before the second only. A trailing break would
-    // print a blank final sheet. Matched on the applied class rather than on
-    // the bare name, which also appears in the stylesheet that defines it.
-    expect(applied).toHaveLength(1);
+    expect(html).toContain('data-theme="light"');
+    expect(html).not.toContain('data-theme="dark"');
+    expect(html).toContain('class="font-inter"');
   });
 
-  it('omits the breaks in continuous mode', () => {
+  it('declares page margins and a footer with the page count on every sheet', () => {
+    const html = render();
+
+    expect(html).toContain('size: A4 landscape;');
+    expect(html).toMatch(/margin: 12mm 12mm 16mm;/);
+    expect(html).toContain('counter(page)');
+    expect(html).toContain('counter(pages)');
+    // The footer text is a CSS string: quotes escaped, and `<` cannot close
+    // the style element.
+    expect(html).toContain('content: "Agência \\"X\\" \\3C /style>"');
+  });
+
+  it('breaks pages between channels only in the paginated mode', () => {
+    expect(render()).toContain('break-before: page');
     expect(render({ pageMode: 'continuous' })).not.toContain(
-      'class="section section--break"',
+      'break-before: page',
     );
   });
 
-  it('prints the empty-state sentence instead of dropping the card', () => {
-    // A card the operator placed and cannot find in the PDF reads as the export
-    // having lost it; the sentence says plainly there is no number.
-    expect(render()).toContain('Alcance do período ainda não medido.');
-  });
-
-  it('escapes operator-authored text', () => {
-    // Card titles are free text and the document is rendered by a real browser.
-    const document = parseReportDocument({
-      version: 1,
-      sections: [
-        {
-          channelLabel: 'Meta Ads',
-          title: '<script>alert(1)</script>',
-          cards: [
-            {
-              title: '"><img src=x onerror=alert(1)>',
-              description: null,
-              block: {
-                kind: 'metric',
-                label: 'x',
-                value: '1',
-                detail: null,
-                highlighted: false,
-              },
-            },
-          ],
-        },
-      ],
-    });
-
-    const html = buildSocialAnalyticsReportHtml({
-      title: 'Relatório',
-      periodSince: '2026-09-01',
-      periodUntil: '2026-09-01',
-      pageMode: 'continuous',
-      document,
-      letterhead,
-      generatedAt: new Date('2026-09-21T00:00:00Z'),
-    });
-
-    // The payload survives as text and is inert as markup: no unescaped angle
-    // bracket or quote means no element and no attribute can be introduced.
-    expect(html).not.toContain('<script>');
-    expect(html).toContain('&lt;script&gt;alert(1)&lt;/script&gt;');
-    expect(html).toContain('&quot;&gt;&lt;img src=x onerror=alert(1)&gt;');
-  });
-
-  it('draws funnel bands as polygons with plain hex fills', () => {
-    // Polygons because Etapa 7 recorded that a clip-path is at the mercy of the
-    // print rasteriser; plain hex because a colour function inside an SVG `fill`
-    // attribute is the kind of thing that differs between screen and print.
-    const document = parseReportDocument({
-      version: 1,
-      sections: [
-        {
-          channelLabel: 'Meta Ads',
-          title: 'Funil',
-          cards: [
-            {
-              title: 'Funil de conversão',
-              description: null,
-              block: {
-                kind: 'funnel',
-                orientation: 'vertical',
-                steps: [
-                  {
-                    label: 'Impressões',
-                    value: '1.000',
-                    ratio: 1,
-                    rate: null,
-                    note: null,
-                  },
-                  {
-                    label: 'Cliques',
-                    value: '100',
-                    ratio: 0.3,
-                    rate: '10,0%',
-                    note: null,
-                  },
-                ],
-              },
-            },
-          ],
-        },
-      ],
-    });
-
-    const html = buildSocialAnalyticsReportHtml({
-      title: 'Relatório',
-      periodSince: '2026-09-01',
-      periodUntil: '2026-09-30',
-      pageMode: 'continuous',
-      document,
-      letterhead,
-      generatedAt: new Date('2026-09-21T00:00:00Z'),
-    });
-
-    expect(html).toContain('<polygon');
-    expect(html).toMatch(/fill="#[0-9a-f]{6}"/);
-    expect(html).not.toContain('color-mix');
-    // The numbers live in the list beside the shape, so a text extractor gets
-    // values rather than a picture of them.
-    expect(html).toContain('Taxa vs. etapa anterior: 10,0%');
-  });
-
-  it('keeps cards from splitting across the fold', () => {
+  it('keeps the on-screen width and zooms it to the printable width', () => {
     const html = render();
 
-    expect(html).toContain('break-inside: avoid');
-    expect(html).toContain('page-break-inside: avoid');
+    expect(html).toContain(
+      `width: 1200px; zoom: ${reportZoom(1200, 'landscape')};`,
+    );
+    expect(reportZoom(1200, 'landscape')).toBeCloseTo(1031.81 / 1200, 3);
+    expect(reportZoom(1200, 'portrait')).toBeCloseTo(702.99 / 1200, 3);
+    // A narrow dashboard is not enlarged.
+    expect(reportZoom(400, 'portrait')).toBe(1);
   });
 
-  it('renders without a client when the report is agency-scoped', () => {
-    const html = render({
-      letterhead: { ...letterhead, clientName: null, clientLogoUrl: null },
-    });
+  it('shows the client logo only when there is one', () => {
+    expect(render()).not.toContain('<img class="report-title__logo"');
+    expect(
+      render({
+        letterhead: {
+          ...letterhead,
+          clientLogoUrl: 'data:image/png;base64,AA',
+        },
+      }),
+    ).toContain(
+      '<img class="report-title__logo" src="data:image/png;base64,AA"',
+    );
+  });
+});
 
-    expect(html).not.toContain('Cliente Exemplo');
-    expect(html).toContain('Agência Exemplo');
+describe('parseReportSnapshot', () => {
+  const raw = (overrides: Record<string, unknown> = {}) => ({
+    version: 2,
+    width: 1200,
+    html: '<section data-report-channel="instagram">x</section>',
+    css: '.a{}',
+    rootAttributes: { 'data-lyra-product': 'social' },
+    ...overrides,
   });
 
-  it('embeds an inlined client logo as-is', () => {
-    // The Brand Kit logo arrives as a `data:` URI because Playwright renders
-    // with no session and could not fetch the authenticated endpoint. The
-    // renderer must not rewrite it into something resolvable.
-    const dataUri = `data:image/png;base64,${Buffer.from('LOGO').toString('base64')}`;
-    const html = render({
-      letterhead: { ...letterhead, clientLogoUrl: dataUri },
-    });
-
-    expect(html).toContain(`src="${dataUri}"`);
+  it('accepts what the dashboard sends', () => {
+    expect(parseReportSnapshot(raw()).width).toBe(1200);
   });
 
-  it('renders the client name with no mark when the kit has no logo', () => {
-    const html = render({
-      letterhead: { ...letterhead, clientLogoUrl: null },
-    });
+  it('refuses an older body, a bad width and empty content', () => {
+    for (const overrides of [
+      { version: 1 },
+      { width: 100 },
+      { width: 99_999 },
+      { width: '1200' },
+      { html: '   ' },
+    ]) {
+      expect(() => parseReportSnapshot(raw(overrides))).toThrow(
+        ReportSnapshotError,
+      );
+    }
+  });
 
-    expect(html).toContain('Cliente Exemplo');
-    expect(html).not.toContain('class="client-logo"');
+  it('refuses markup that only exists to run or embed something', () => {
+    for (const html of [
+      '<script>alert(1)</script>',
+      '<IFRAME src="x">',
+      '<link rel="stylesheet" href="http://10.0.0.1/x.css">',
+      '<base href="http://internal/">',
+      '<meta http-equiv="refresh" content="0">',
+    ]) {
+      expect(() => parseReportSnapshot(raw({ html }))).toThrow(
+        ReportSnapshotError,
+      );
+    }
+  });
+
+  it('does not mistake escaped text for markup', () => {
+    expect(() =>
+      parseReportSnapshot(raw({ html: '<p>&lt;script&gt; no título</p>' })),
+    ).not.toThrow();
+  });
+
+  it('refuses CSS that closes the style element and unsafe root attributes', () => {
+    expect(() => parseReportSnapshot(raw({ css: '</style><p>x</p>' }))).toThrow(
+      ReportSnapshotError,
+    );
+    expect(() =>
+      parseReportSnapshot(raw({ rootAttributes: { onload: 'x' } })),
+    ).toThrow(ReportSnapshotError);
+  });
+});
+
+describe('isAllowedReportRequest', () => {
+  const logo = 'https://api.lyra.test/api/assets/logo.png';
+
+  it('allows the agency logo exactly and Meta thumbnails over HTTPS', () => {
+    expect(isAllowedReportRequest(logo, logo)).toBe(true);
+    expect(
+      isAllowedReportRequest('https://scontent.xx.fbcdn.net/v/t1.jpg', logo),
+    ).toBe(true);
+    expect(
+      isAllowedReportRequest('https://scontent.cdninstagram.com/a.jpg', logo),
+    ).toBe(true);
+  });
+
+  it('refuses everything else', () => {
+    for (const url of [
+      'http://scontent.xx.fbcdn.net/v/t1.jpg',
+      'https://fbcdn.net.evil.test/a.jpg',
+      'http://127.0.0.1:3000/api/admin',
+      'http://169.254.169.254/latest/meta-data',
+      'https://api.lyra.test/api/assets/other.png',
+      'file:///etc/passwd',
+      'not a url',
+    ]) {
+      expect(isAllowedReportRequest(url, logo)).toBe(false);
+    }
   });
 });

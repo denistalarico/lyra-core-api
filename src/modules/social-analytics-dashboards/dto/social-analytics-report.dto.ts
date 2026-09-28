@@ -16,20 +16,20 @@ import {
   type DashboardChannelId,
 } from '../dashboard-layout.contract';
 import {
+  REPORT_ORIENTATIONS,
   REPORT_PAGE_MODES,
+  type ReportOrientation,
   type ReportPageMode,
-} from '../report-document.contract';
+} from '../report-snapshot.contract';
 
 /**
  * The export request — Etapa 9.
  *
- * `document` is `@IsObject()` and nothing more, for the same reason `layout` is
+ * `snapshot` is `@IsObject()` and nothing more, for the same reason `layout` is
  * on the dashboard DTO: the global pipe runs with `whitelist: true`, so every
- * nested property without a mirroring DTO class is stripped on the way in. A
- * report body is a tree of five card shapes, and declaring each one here would
- * create a second definition of every block to keep in step with the frontend
- * and with the renderer. `parseReportDocument` is the validator instead, and it
- * rebuilds the document rather than trusting it.
+ * nested property without a mirroring DTO class is stripped on the way in.
+ * `parseReportSnapshot` is the validator instead, and it rebuilds the value
+ * rather than trusting it.
  */
 export class CreateSocialAnalyticsReportDto {
   @IsString()
@@ -64,8 +64,13 @@ export class CreateSocialAnalyticsReportDto {
   @IsIn(REPORT_PAGE_MODES)
   pageMode!: ReportPageMode;
 
+  /** Landscape by default: a dashboard is wider than it is tall. */
+  @IsOptional()
+  @IsIn(REPORT_ORIENTATIONS)
+  orientation?: ReportOrientation;
+
   @IsObject()
-  document!: Record<string, unknown>;
+  snapshot!: Record<string, unknown>;
 }
 
 /**
