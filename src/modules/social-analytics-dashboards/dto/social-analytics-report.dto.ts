@@ -69,6 +69,15 @@ export class CreateSocialAnalyticsReportDto {
   @IsIn(REPORT_ORIENTATIONS)
   orientation?: ReportOrientation;
 
+  /**
+   * The dashboard's account timezone. It is frozen on the emission so the
+   * archive keeps showing the instant in the client's operational timezone.
+   */
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  issuedTimezone?: string;
+
   @IsObject()
   snapshot!: Record<string, unknown>;
 }

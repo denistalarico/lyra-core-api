@@ -482,3 +482,5 @@ export const AgencyDataSource = new DataSource({
     AddSocialDashboardDescription1796900000000,
   ],
 });
+import { StoreSocialAnalyticsReportFiles1797200000000 } from './migrations/1797200000000-store-social-analytics-report-files';
+    StoreSocialAnalyticsReportFiles1797200000000,

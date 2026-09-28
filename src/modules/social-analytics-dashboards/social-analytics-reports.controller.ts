@@ -9,6 +9,7 @@ import {
   Param,
   ParseUUIDPipe,
   Post,
+  Query,
   Res,
   ServiceUnavailableException,
   UseGuards,
@@ -116,6 +117,31 @@ export class SocialAnalyticsReportsController {
     return response.send(report.buffer);
   }
 
+  /** The original emitted bytes, never a re-render of today's dashboard. */
+  @Get(':id/file')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireProductEntitlement('social')
+  @RequirePermission(READ_PERMISSION)
+  async file(
+    @RequestContextData() ctx: RequestContext,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Query('disposition') disposition: string | undefined,
+    @Res({ passthrough: false }) response: Response,
+  ) {
+    const report = await this.service.getFile(
+      resolveCompanyAwareScope(ctx),
+      id,
+    );
+    const inline = disposition === 'inline';
+
+    response.set({
+      'Content-Type': report.contentType,
+      'Content-Disposition': `${inline ? 'inline' : 'attachment'}; filename="${report.filename}"`,
+      'Cache-Control': 'private, no-store',
+    });
+    report.body.pipe(response);
+  }
+
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
   @UseGuards(JwtAuthGuard, PermissionsGuard)
@@ -175,6 +201,7 @@ export class SocialAnalyticsReportsController {
       until: dto.until.slice(0, 10),
       pageMode: dto.pageMode,
       orientation: dto.orientation ?? 'landscape',
+      issuedTimezone: dto.issuedTimezone,
       snapshot: dto.snapshot,
       persist: options.persist,
     };

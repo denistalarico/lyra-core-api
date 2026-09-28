@@ -60,8 +60,33 @@ export class SocialAnalyticsReportEntity {
   @Column({ name: 'file_url', type: 'text', nullable: true })
   fileUrl!: string | null;
 
+  /** Private-object key. A report is never stored in the public asset bucket. */
+  @Column({ name: 'storage_key', type: 'text', nullable: true })
+  storageKey!: string | null;
+
+  @Column({ name: 'file_name', type: 'varchar', length: 180, nullable: true })
+  fileName!: string | null;
+
   @Column({ name: 'created_by_id', type: 'uuid', nullable: true })
   createdById!: string | null;
+
+  /** Immutable display label, so an archived emission remains understandable. */
+  @Column({
+    name: 'issued_by_name',
+    type: 'varchar',
+    length: 160,
+    nullable: true,
+  })
+  issuedByName!: string | null;
+
+  /** IANA zone of the client account at the time this document was issued. */
+  @Column({
+    name: 'issued_timezone',
+    type: 'varchar',
+    length: 80,
+    nullable: true,
+  })
+  issuedTimezone!: string | null;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;

@@ -1,6 +1,14 @@
-import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { IsNull, Repository } from 'typeorm';
+import { randomUUID } from 'crypto';
+import type { Readable } from 'stream';
+import { FilesService } from '../../../common/files/files.service';
 import {
   resolveCompanyAwareScope,
   type CompanyAwareScope,
@@ -8,6 +16,7 @@ import {
 import type { RequestContext } from '../../../common/context/request-context.interface';
 import { DocumentLayoutsService } from '../../document-layouts/document-layouts.service';
 import { DocumentPdfRendererService } from '../../document-layouts/document-pdf-renderer.service';
+import { AgencyUserProfileEntity } from '../../agency/entities/agency-settings.entities';
 import { SocialAnalyticsReportLogoService } from './social-analytics-report-logo.service';
 import type { DashboardChannelId } from '../dashboard-layout.contract';
 import { SocialAnalyticsReportEntity } from '../entities';
@@ -32,6 +41,9 @@ export type SocialAnalyticsReportView = {
   periodUntil: string;
   pageMode: ReportPageMode;
   createdAt: string;
+  issuedByName: string | null;
+  issuedTimezone: string | null;
+  fileAvailable: boolean;
 };
 
 export type RenderReportRequest = {
@@ -42,6 +54,7 @@ export type RenderReportRequest = {
   until: string;
   pageMode: ReportPageMode;
   orientation: ReportOrientation;
+  issuedTimezone?: string;
   /** The dashboard as the operator sees it. See the contract module. */
   snapshot: unknown;
   /** Skips persistence — the preview renders the same PDF and stores nothing. */
@@ -53,23 +66,11 @@ const MAX_REPORTS_PER_SCOPE = 200;
 /**
  * Renders and records the Analytics report — Etapa 9.
  *
- * ## What is and is not stored — a decided MVP scope, not a gap
+ * ## The archive stores the original emitted bytes
  *
- * A row per emission, holding the title, channels, period and page mode; the
- * PDF bytes are streamed to the caller and **not** written to disk. `file_url`
- * stays null, and the archive is a record of what was emitted rather than a
- * file cabinet.
- *
- * This is a product decision taken for this first MVP, not an unfinished
- * feature. Two things follow from it and are deliberate:
- *
- * 1. There is no "reprint the original" action. Re-rendering would build the
- *    document from the dashboard *as it stands now*, which for a dashboard
- *    edited since is a different document under the original's name. Offering
- *    a reprint button would be claiming a fidelity nothing here can check.
- * 2. `file_url` is kept on the entity anyway, because the day a blob store is
- *    wired in, that column is where the object key goes — and adding it later
- *    would mean altering a table that already holds rows.
+ * Each successful emission goes to the private object bucket before its
+ * database row is committed. The archive serves those bytes back; it never
+ * rebuilds a document from a dashboard that may since have changed.
  *
  * ## The letterhead is server-side
  *
@@ -88,9 +89,12 @@ export class SocialAnalyticsReportService {
   constructor(
     @InjectRepository(SocialAnalyticsReportEntity, 'agency')
     private readonly reports: Repository<SocialAnalyticsReportEntity>,
+    @InjectRepository(AgencyUserProfileEntity, 'agency')
+    private readonly profiles: Repository<AgencyUserProfileEntity>,
     private readonly documentLayouts: DocumentLayoutsService,
     private readonly pdfRenderer: DocumentPdfRendererService,
     private readonly logos: SocialAnalyticsReportLogoService,
+    private readonly files: FilesService,
   ) {}
 
   async list(scope: CompanyAwareScope): Promise<SocialAnalyticsReportView[]> {
@@ -179,7 +183,14 @@ export class SocialAnalyticsReportService {
     });
 
     if (request.persist) {
-      await this.record(scope, ctx.userId ?? null, request, title);
+      await this.record(
+        scope,
+        ctx.userId ?? null,
+        request,
+        title,
+        buffer,
+        this.filename(title, request),
+      );
     }
 
     return { buffer, filename: this.filename(title, request) };
@@ -190,26 +201,24 @@ export class SocialAnalyticsReportService {
     actorId: string | null,
     request: RenderReportRequest,
     title: string,
+    buffer: Buffer,
+    filename: string,
   ): Promise<void> {
+    const id = randomUUID();
+    const storageKey = this.storageKey(scope, id);
+    const issuedByName = await this.resolveActorName(scope.tenantId, actorId);
+    const issuedTimezone = normalizeTimezone(request.issuedTimezone);
+
+    await this.files.uploadPrivateBuffer({
+      body: buffer,
+      path: storageKey,
+      contentType: 'application/pdf',
+    });
+
     try {
-      const total = await this.reports.count({ where: this.where(scope) });
-
-      // The archive is a log, and a log that grows without bound eventually
-      // makes the tab unusable. The oldest rows go rather than the emission
-      // being refused: refusing would block an export the operator needs now
-      // because of one they made months ago.
-      if (total >= MAX_REPORTS_PER_SCOPE) {
-        const oldest = await this.reports.find({
-          where: this.where(scope),
-          order: { createdAt: 'ASC' },
-          take: total - MAX_REPORTS_PER_SCOPE + 1,
-        });
-
-        if (oldest.length > 0) await this.reports.remove(oldest);
-      }
-
       await this.reports.save(
         this.reports.create({
+          id,
           tenantId: scope.tenantId,
           workspaceId: scope.workspaceId,
           agencyClientId: scope.agencyClientId,
@@ -221,19 +230,65 @@ export class SocialAnalyticsReportService {
           periodUntil: request.until,
           pageMode: request.pageMode,
           fileUrl: null,
+          storageKey,
+          fileName: filename,
           createdById: actorId,
+          issuedByName,
+          issuedTimezone,
         }),
       );
     } catch (error) {
-      // The PDF is already rendered and about to be streamed. Failing the
-      // request now would deny the operator a document that exists, over a
-      // bookkeeping row — so the failure is logged and the download proceeds.
+      await this.files
+        .deleteObject({ bucket: 'private', path: storageKey })
+        .catch((cleanupError) =>
+          this.logger.error(
+            `Failed to clean up Social Analytics report ${id}: ${
+              cleanupError instanceof Error
+                ? cleanupError.message
+                : String(cleanupError)
+            }`,
+          ),
+        );
+      throw error;
+    }
+
+    // Retention must not turn a successfully archived emission into a failed
+    // download. A later emission retries this cleanup, while this row keeps
+    // pointing at the original PDF that has already been stored.
+    await this.prune(scope).catch((error) =>
       this.logger.error(
-        `Failed to record social analytics report for tenant=${scope.tenantId}: ${
+        `Failed to prune Social Analytics reports for tenant=${scope.tenantId}: ${
           error instanceof Error ? error.message : String(error)
         }`,
+      ),
+    );
+  }
+
+  async getFile(
+    scope: CompanyAwareScope,
+    id: string,
+  ): Promise<{ body: Readable; contentType: string; filename: string }> {
+    const report = await this.reports.findOne({
+      where: { ...this.where(scope), id },
+    });
+
+    if (!report?.storageKey) {
+      throw new NotFoundException(
+        'O arquivo deste relatório não está disponível.',
       );
     }
+
+    const asset = await this.files.getPrivateAsset(report.storageKey);
+    return {
+      body: asset.body,
+      contentType: asset.contentType,
+      filename:
+        report.fileName ??
+        this.filename(report.title, {
+          since: report.periodSince,
+          until: report.periodUntil,
+        }),
+    };
   }
 
   async remove(scope: CompanyAwareScope, id: string): Promise<void> {
@@ -243,7 +298,64 @@ export class SocialAnalyticsReportService {
 
     if (!report) return;
 
+    if (report.storageKey) {
+      await this.files.deleteObject({
+        bucket: 'private',
+        path: report.storageKey,
+      });
+    }
+
     await this.reports.remove(report);
+  }
+
+  private async prune(scope: CompanyAwareScope): Promise<void> {
+    const total = await this.reports.count({ where: this.where(scope) });
+    if (total <= MAX_REPORTS_PER_SCOPE) return;
+
+    const oldest = await this.reports.find({
+      where: this.where(scope),
+      order: { createdAt: 'ASC' },
+      take: total - MAX_REPORTS_PER_SCOPE,
+    });
+
+    for (const report of oldest) {
+      if (report.storageKey) {
+        await this.files.deleteObject({
+          bucket: 'private',
+          path: report.storageKey,
+        });
+      }
+      await this.reports.remove(report);
+    }
+  }
+
+  private async resolveActorName(
+    tenantId: string,
+    actorId: string | null,
+  ): Promise<string> {
+    if (!actorId) return 'Automação Lyra';
+
+    const profile = await this.profiles.findOne({
+      where: { tenantId, userId: actorId },
+      select: { displayName: true, email: true },
+    });
+
+    return (
+      profile?.displayName?.trim() ||
+      profile?.email?.trim() ||
+      'Usuário da agência'
+    );
+  }
+
+  private storageKey(scope: CompanyAwareScope, id: string): string {
+    return [
+      'social-analytics-reports',
+      scope.tenantId,
+      scope.workspaceId,
+      scope.agencyClientId ?? 'agency',
+      scope.companyContextId ?? 'root',
+      `${id}.pdf`,
+    ].join('/');
   }
 
   /**
@@ -301,7 +413,10 @@ export class SocialAnalyticsReportService {
   }
 
   /** A filename an operator can find again in a downloads folder. */
-  private filename(title: string, request: RenderReportRequest): string {
+  private filename(
+    title: string,
+    request: Pick<RenderReportRequest, 'since' | 'until'>,
+  ): string {
     const slug =
       title
         .normalize('NFD')
@@ -335,7 +450,20 @@ export class SocialAnalyticsReportService {
       periodUntil: row.periodUntil,
       pageMode: row.pageMode,
       createdAt: row.createdAt.toISOString(),
+      issuedByName: row.issuedByName,
+      issuedTimezone: row.issuedTimezone,
+      fileAvailable: Boolean(row.storageKey),
     };
+  }
+}
+
+function normalizeTimezone(value: string | undefined): string {
+  const timezone = value?.trim() || 'UTC';
+  try {
+    Intl.DateTimeFormat('en-US', { timeZone: timezone }).format();
+    return timezone;
+  } catch {
+    return 'UTC';
   }
 }
 

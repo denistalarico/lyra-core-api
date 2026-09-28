@@ -1,12 +1,14 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { BrandKitModule } from '../brand-kit/brand-kit.module';
+import { FilesModule } from '../../common/files/files.module';
 import { DocumentLayoutsModule } from '../document-layouts/document-layouts.module';
 import { PermissionsModule } from '../permissions';
 import {
   SocialAnalyticsDashboardEntity,
   SocialAnalyticsReportEntity,
 } from './entities';
+import { AgencyUserProfileEntity } from '../agency/entities/agency-settings.entities';
 import { SocialAnalyticsDashboardsController } from './social-analytics-dashboards.controller';
 import { SocialAnalyticsDashboardsService } from './social-analytics-dashboards.service';
 import { SocialAnalyticsInsightsController } from './social-analytics-insights.controller';
@@ -39,10 +41,15 @@ import { SocialAnalyticsReportService } from './services/social-analytics-report
 @Module({
   imports: [
     PermissionsModule,
+    FilesModule,
     DocumentLayoutsModule,
     BrandKitModule,
     TypeOrmModule.forFeature(
-      [SocialAnalyticsDashboardEntity, SocialAnalyticsReportEntity],
+      [
+        SocialAnalyticsDashboardEntity,
+        SocialAnalyticsReportEntity,
+        AgencyUserProfileEntity,
+      ],
       'agency',
     ),
   ],
