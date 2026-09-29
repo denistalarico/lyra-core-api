@@ -5,6 +5,7 @@ import type {
 } from '../client-area.types';
 import { ClientAreaAuthService } from './client-area-auth.service';
 import { ClientAreaAuthorizationService } from './client-area-authorization.service';
+import { ClientAreaManagementService } from './client-area-management.service';
 
 export type ClientAreaCompanyListItem = {
   companyContextId: string;
@@ -18,6 +19,7 @@ export type ClientAreaContextProjection = {
   role: ClientAreaContext['role'];
   permissions: string[];
   modules: ClientAreaContext['modules'];
+  branding: Awaited<ReturnType<ClientAreaManagementService['branding']>>;
 };
 
 /**
@@ -37,6 +39,7 @@ export class ClientAreaDirectoryService {
   constructor(
     private readonly authorization: ClientAreaAuthorizationService,
     private readonly auth: ClientAreaAuthService,
+    private readonly management: ClientAreaManagementService,
   ) {}
 
   async me(identity: ClientAreaIdentity) {
@@ -78,13 +81,14 @@ export class ClientAreaDirectoryService {
       );
   }
 
-  projectContext(context: ClientAreaContext): ClientAreaContextProjection {
+  async projectContext(context: ClientAreaContext): Promise<ClientAreaContextProjection> {
     return {
       companyContextId: context.companyContextId,
       displayName: context.companyDisplayName,
       role: context.role,
       permissions: [...context.permissions].sort(),
       modules: { approvals: context.modules.approvals },
+      branding: await this.management.branding(context.tenantId, context.workspaceId),
     };
   }
 }

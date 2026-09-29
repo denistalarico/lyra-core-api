@@ -11,6 +11,7 @@ import {
 } from '../agency/entities/agency-auth.entities';
 import {
   AgencyUserProfileEntity,
+  AgencyWorkspaceCompanySettingsEntity,
   AgencyWorkspaceUserEntity,
 } from '../agency/entities/agency-settings.entities';
 import { AgencyClient } from '../clients/entities/agency-client.entity';
@@ -28,6 +29,7 @@ import { ClientAreaInvitationsController } from './controllers/client-area-invit
 import { ClientAreaInvitationEntity } from './entities/client-area-invitation.entity';
 import { ClientAreaMemberEventEntity } from './entities/client-area-member-event.entity';
 import { ClientAreaMembershipEntity } from './entities/client-area-membership.entity';
+import { ClientAreaCompanySettingsEntity, ClientAreaPreviewEventEntity, ClientAreaSettingsEntity } from './entities/client-area-settings.entity';
 import {
   ClientAreaAuthGuard,
   ClientAreaEnabledGuard,
@@ -43,6 +45,7 @@ import { ClientAreaMembershipService } from './services/client-area-membership.s
 import { ClientAreaPasswordResetService } from './services/client-area-password-reset.service';
 import { ClientAreaRateLimitService } from './services/client-area-rate-limit.service';
 import { ClientAreaSessionService } from './services/client-area-session.service';
+import { ClientAreaManagementService } from './services/client-area-management.service';
 import { ClientAreaJwtStrategy } from './strategies/client-area-jwt.strategy';
 
 const AGENCY_CONNECTION = 'agency';
@@ -63,6 +66,9 @@ const AGENCY_CONNECTION = 'agency';
     TypeOrmModule.forFeature(
       [
         ClientAreaMembershipEntity,
+        ClientAreaSettingsEntity,
+        ClientAreaCompanySettingsEntity,
+        ClientAreaPreviewEventEntity,
         ClientAreaInvitationEntity,
         ClientAreaMemberEventEntity,
         AgencyPasswordResetEntity,
@@ -70,6 +76,7 @@ const AGENCY_CONNECTION = 'agency';
         AgencyUserSessionEntity,
         AgencyUserProfileEntity,
         AgencyWorkspaceUserEntity,
+        AgencyWorkspaceCompanySettingsEntity,
         AgencyClient,
         AgencyClientCompanyContext,
         ContactEntity,
@@ -86,6 +93,7 @@ const AGENCY_CONNECTION = 'agency';
   providers: [
     ClientAreaJwtStrategy,
     ClientAreaSessionService,
+    ClientAreaManagementService,
     ClientAreaAuthService,
     ClientAreaAuthorizationService,
     ClientAreaMembershipService,
@@ -105,6 +113,7 @@ const AGENCY_CONNECTION = 'agency';
     ClientAreaRateLimitService,
     ClientAreaAuthorizationService,
     ClientAreaSessionService,
+    ClientAreaManagementService,
     ClientAreaAuthGuard,
     ClientAreaMembershipGuard,
     ClientAreaEnabledGuard,

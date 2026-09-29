@@ -186,6 +186,8 @@ const RAW_PERMISSIONS: RawPermission[] = [
   // a company in the Client Area (approve content in its name). Admin+ only:
   // it grants external access, so it is not part of `profile.update.assigned`.
   ['agency.clients.client_area_members.manage.admin', ADMIN_UP],
+  // CA3. Agency-wide configuration and support preview of the Client Area.
+  ['agency.client_area.manage.admin', ADMIN_UP],
   ['agency.clients.managed_tenant.view.admin', ADMIN_UP],
   ['agency.clients.managed_tenant.manage.owner_only', OWNER_ONLY, true],
   ['agency.clients.lifecycle.view.assigned', MANAGER_UP],

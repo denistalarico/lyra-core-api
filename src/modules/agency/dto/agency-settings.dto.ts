@@ -7,6 +7,7 @@ import {
   IsNumber,
   IsObject,
   IsOptional,
+  Matches,
   IsString,
   MaxLength,
   Min,
@@ -148,6 +149,14 @@ export class PatchAgencyWorkspaceCompanyDto {
   @IsOptional()
   @IsIn(['sunday', 'monday', 'saturday'])
   firstWeekday?: 'sunday' | 'monday' | 'saturday';
+
+  @IsOptional()
+  @Matches(/^#[0-9a-fA-F]{6}$/)
+  primaryColor?: string | null;
+
+  @IsOptional()
+  @Matches(/^#[0-9a-fA-F]{6}$/)
+  secondaryColor?: string | null;
 }
 
 export class QuietHourDto {

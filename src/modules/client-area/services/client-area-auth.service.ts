@@ -37,6 +37,7 @@ import {
   ClientAreaSessionService,
   isLiveSession,
 } from './client-area-session.service';
+import { ClientAreaManagementService } from './client-area-management.service';
 
 const AGENCY_CONNECTION = 'agency';
 const ACCESS_TOKEN_TTL = '15m';
@@ -108,6 +109,7 @@ export class ClientAreaAuthService {
     private readonly sessions: ClientAreaSessionService,
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
+    private readonly management: ClientAreaManagementService,
   ) {}
 
   async login(
@@ -339,13 +341,7 @@ export class ClientAreaAuthService {
   }
 
   async isEligible(identity: AgencyUserSecuritySettingsEntity) {
-    const hasMembership = await this.membershipsRepo.exists({
-      where: {
-        tenantId: identity.tenantId,
-        userId: identity.userId,
-        status: 'active',
-      },
-    });
+    const hasMembership = await this.management.hasIdentityAvailableCompany(identity);
 
     return (
       hasMembership &&

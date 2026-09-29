@@ -20,6 +20,7 @@ import type {
 } from '../client-area.types';
 import { ClientAreaAuthorizationService } from '../services/client-area-authorization.service';
 import { ClientAreaSessionService } from '../services/client-area-session.service';
+import { ClientAreaManagementService } from '../services/client-area-management.service';
 import {
   CLIENT_AREA_JWT_STRATEGY,
   clientAreaSessionInvalidError,
@@ -58,6 +59,7 @@ export class ClientAreaAuthGuard
   constructor(
     private readonly config: ConfigService,
     private readonly sessions: ClientAreaSessionService,
+    private readonly management: ClientAreaManagementService,
   ) {
     super();
   }
@@ -75,6 +77,8 @@ export class ClientAreaAuthGuard
     }
 
     request.clientAreaIdentity = await this.sessions.authenticate(payload);
+    // A valid historical session must not survive the Agency application gate.
+    await this.management.assertIdentityAgencyEnabled(request.clientAreaIdentity);
     return true;
   }
 

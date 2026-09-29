@@ -34,7 +34,7 @@ export class ClientAreaDirectoryController {
 
   @Get('companies/:companyContextId/context')
   @UseGuards(ClientAreaMembershipGuard)
-  context(@ClientAreaContextData() context: ClientAreaContext) {
-    return { context: this.directory.projectContext(context) };
+  async context(@ClientAreaContextData() context: ClientAreaContext) {
+    return { context: await this.directory.projectContext(context) };
   }
 }

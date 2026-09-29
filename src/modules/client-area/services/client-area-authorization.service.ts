@@ -5,13 +5,10 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { isActiveProductEntitlement } from '../../../common/context/product-entitlement-availability';
 import { AgencyClient } from '../../clients/entities/agency-client.entity';
 import { AgencyClientCompanyContext } from '../../clients/entities/agency-client-company-context.entity';
 import { AgencyClientStatus } from '../../clients/enums';
 import { ContactEntity } from '../../contacts/entities/contact.entity';
-import { TenantProductEntitlementEntity } from '../../platform/entities/tenant-product-entitlement.entity';
-import { PlatformProductKey } from '../../platform/enums/platform-product.enums';
 import { permissionsForClientAreaRole } from '../client-area-permissions.catalog';
 import {
   CLIENT_AREA_ERROR_CODES,
@@ -20,17 +17,12 @@ import {
   type ClientAreaContext,
   type ClientAreaIdentity,
   type ClientAreaModuleKey,
-  type ClientAreaModules,
   type ClientAreaPermissionKey,
 } from '../client-area.types';
 import { ClientAreaMembershipEntity } from '../entities/client-area-membership.entity';
+import { ClientAreaManagementService } from './client-area-management.service';
 
 const AGENCY_CONNECTION = 'agency';
-
-/** Which contracted product makes each Client Area module available. */
-const MODULE_PRODUCT: Record<ClientAreaModuleKey, PlatformProductKey> = {
-  approvals: PlatformProductKey.Social,
-};
 
 export type AuthorizeClientAreaInput = {
   identity: ClientAreaIdentity;
@@ -79,8 +71,7 @@ export class ClientAreaAuthorizationService {
     private readonly contactsRepo: Repository<ContactEntity>,
     @InjectRepository(AgencyClient, AGENCY_CONNECTION)
     private readonly clientsRepo: Repository<AgencyClient>,
-    @InjectRepository(TenantProductEntitlementEntity, AGENCY_CONNECTION)
-    private readonly entitlementsRepo: Repository<TenantProductEntitlementEntity>,
+    private readonly management: ClientAreaManagementService,
   ) {}
 
   async authorize(input: AuthorizeClientAreaInput): Promise<ClientAreaContext> {
@@ -161,6 +152,17 @@ export class ClientAreaAuthorizationService {
       return null;
     }
 
+    // This is deliberately resolved before exposing a directory/context. A
+    // membership is historical evidence, not an enablement flag.
+    try {
+      await this.management.assertAgencyEnabled(
+        membership.tenantId,
+        membership.workspaceId,
+      );
+    } catch {
+      return null;
+    }
+
     const scope = {
       tenantId: membership.tenantId,
       workspaceId: membership.workspaceId,
@@ -210,29 +212,16 @@ export class ClientAreaAuthorizationService {
       companyDisplayName: companyDisplayName(organization),
       role: membership.role,
       permissions: permissionsForClientAreaRole(membership.role),
-      modules: await this.resolveModules(client, now),
+      modules: await this.management.resolveCompanyModules({
+        tenantId: membership.tenantId,
+        workspaceId: membership.workspaceId,
+        agencyClientId: membership.agencyClientId,
+        companyContextId: membership.companyContextId,
+        now,
+      }),
     };
   }
 
-  private async resolveModules(
-    client: AgencyClient,
-    now: Date,
-  ): Promise<ClientAreaModules> {
-    if (!client.managedTenantId) {
-      return { approvals: false };
-    }
-
-    // Commercial availability only: entitlement lives on the managed tenant of
-    // the Agency Client (no company-level entitlement exists, CC2B/CC2H).
-    const entitlement = await this.entitlementsRepo.findOne({
-      where: {
-        tenantId: client.managedTenantId,
-        productKey: MODULE_PRODUCT.approvals,
-      },
-    });
-
-    return { approvals: isActiveProductEntitlement(entitlement, now) };
-  }
 }
 
 /**

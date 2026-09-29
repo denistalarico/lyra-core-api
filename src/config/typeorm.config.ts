@@ -108,6 +108,11 @@ import {
   AgencyWorkspaceUserEntity,
   AgencyWorkspaceUserPermissionEntity,
 } from '../modules/agency/entities/agency-settings.entities';
+import {
+  ClientAreaCompanySettingsEntity,
+  ClientAreaPreviewEventEntity,
+  ClientAreaSettingsEntity,
+} from '../modules/client-area/entities/client-area-settings.entity';
 
 import {
   AgencySalesActivityEntity,
@@ -461,6 +466,9 @@ export const agencyEntities = [
   AgencyWorkspaceIntegrationEntity,
   AgencyWorkspaceUserEntity,
   AgencyWorkspaceUserPermissionEntity,
+  ClientAreaSettingsEntity,
+  ClientAreaCompanySettingsEntity,
+  ClientAreaPreviewEventEntity,
   AgencyUserSecuritySettingsEntity,
   AgencyUserSessionEntity,
   AgencyUserTrustedDeviceEntity,

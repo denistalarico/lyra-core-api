@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { PermissionsModule } from '../../permissions';
 import { ClientAreaModule } from '../client-area.module';
 import { ClientAreaMembersAgencyController } from './client-area-members.agency.controller';
+import { ClientAreaManagementAgencyController } from './client-area-management.agency.controller';
 
 /**
  * CA2 — the Agency-facing side of the Client Area (member management).
@@ -13,6 +14,6 @@ import { ClientAreaMembersAgencyController } from './client-area-members.agency.
  */
 @Module({
   imports: [PermissionsModule, ClientAreaModule],
-  controllers: [ClientAreaMembersAgencyController],
+  controllers: [ClientAreaMembersAgencyController, ClientAreaManagementAgencyController],
 })
 export class ClientAreaAgencyModule {}

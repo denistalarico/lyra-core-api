@@ -207,6 +207,26 @@ export class AgencyWorkspaceCompanySettingsEntity {
   @Column({ name: 'logo_path', type: 'varchar', length: 255, nullable: true })
   logoPath!: string | null;
 
+  // CA3: `logoUrl` remains the backwards-compatible light logo. Extra
+  // identity references are optional; no second media pipeline is introduced.
+  @Column({ name: 'logo_dark_url', type: 'text', nullable: true })
+  logoDarkUrl!: string | null;
+
+  @Column({ name: 'mark_light_url', type: 'text', nullable: true })
+  markLightUrl!: string | null;
+
+  @Column({ name: 'mark_dark_url', type: 'text', nullable: true })
+  markDarkUrl!: string | null;
+
+  @Column({ name: 'favicon_url', type: 'text', nullable: true })
+  faviconUrl!: string | null;
+
+  @Column({ name: 'primary_color', type: 'varchar', length: 7, nullable: true })
+  primaryColor!: string | null;
+
+  @Column({ name: 'secondary_color', type: 'varchar', length: 7, nullable: true })
+  secondaryColor!: string | null;
+
   @Column({ type: 'jsonb', default: () => "'{}'::jsonb" })
   metadata!: Record<string, unknown>;
 
