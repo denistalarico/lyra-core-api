@@ -37,7 +37,16 @@ export default tseslint.config(
     // methods. Type-aware production-safety rules cannot infer those mock
     // contracts and make the Social test suite lint-noisy without improving
     // runtime coverage.
-    files: ['src/modules/social-*/**/*.spec.ts'],
+    //
+    // The Team Chat and files specs are here for the same reason: the CCOM0.5
+    // security matrices stand up in-memory repositories and socket stubs, whose
+    // shapes these rules cannot infer. The production files they exercise are
+    // held to the full rule set.
+    files: [
+      'src/modules/social-*/**/*.spec.ts',
+      'src/modules/team-chat/**/*.spec.ts',
+      'src/common/files/**/*.spec.ts',
+    ],
     rules: {
       '@typescript-eslint/no-base-to-string': 'off',
       '@typescript-eslint/no-unsafe-assignment': 'off',

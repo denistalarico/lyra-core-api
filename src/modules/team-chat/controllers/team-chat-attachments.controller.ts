@@ -33,6 +33,7 @@ type TeamChatContext = {
   tenantId: string;
   workspaceId: string;
   userId?: string | null;
+  role?: string | null;
 };
 
 @UseGuards(JwtAuthGuard, PermissionsGuard)
@@ -62,10 +63,12 @@ export class TeamChatAttachmentsController {
     @Headers('x-tenant-id') tenantId: string,
     @Headers('x-workspace-id') workspaceId: string,
     @Headers('x-user-id') userId: string | undefined,
+    @Headers('x-user-role') userRole: string | undefined,
+    @Headers('x-role') role: string | undefined,
     @Param('messageId') messageId: string,
   ) {
     return this.attachmentsService.listByMessage(
-      this.getContext(tenantId, workspaceId, userId),
+      this.getContext(tenantId, workspaceId, userId, userRole ?? role),
       messageId,
     );
   }
@@ -126,11 +129,15 @@ export class TeamChatAttachmentsController {
     tenantId: string,
     workspaceId: string,
     userId?: string,
+    role?: string,
   ): TeamChatContext {
     return {
       tenantId,
       workspaceId,
       userId: userId || null,
+      // Same default as TeamChatController: an absent role is 'member', never
+      // elevated, so the access primitive fails closed.
+      role: role ?? 'member',
     };
   }
 }

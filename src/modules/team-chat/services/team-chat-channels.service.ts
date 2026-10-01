@@ -1,4 +1,9 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 
@@ -8,6 +13,12 @@ import {
   AgencyChatChannelMember,
   AgencyChatMessage,
 } from '../entities';
+import { WorkspaceUserEntity } from '../../settings/entities/workspace-user.entity';
+import {
+  ChannelAccessDenialReason,
+  evaluateChannelAccess,
+  isElevatedRole,
+} from './team-chat-access';
 import {
   TeamChatChannelKind,
   TeamChatChannelStatus,
@@ -33,19 +44,10 @@ type TeamChatContext = {
 
 const AGENCY_CONNECTION = 'agency';
 
-function normalizeRole(role?: string | null): string {
-  if (role === 'owner') return 'owner';
-  if (role === 'admin' || role === 'administrator') return 'admin';
-  if (role === 'manager') return 'manager';
-  return 'member';
-}
-
-function isElevatedRole(role?: string | null): boolean {
-  return ['owner', 'admin'].includes(normalizeRole(role));
-}
-
 @Injectable()
 export class TeamChatChannelsService {
+  private readonly logger = new Logger(TeamChatChannelsService.name);
+
   constructor(
     @InjectRepository(AgencyChatChannel, AGENCY_CONNECTION)
     private readonly channelsRepository: Repository<AgencyChatChannel>,
@@ -55,6 +57,8 @@ export class TeamChatChannelsService {
     private readonly messagesRepository: Repository<AgencyChatMessage>,
     @InjectRepository(AgencyChatAttachment, AGENCY_CONNECTION)
     private readonly attachmentsRepository: Repository<AgencyChatAttachment>,
+    @InjectRepository(WorkspaceUserEntity, AGENCY_CONNECTION)
+    private readonly workspaceUsersRepository: Repository<WorkspaceUserEntity>,
     private readonly teamChatNotificationPublisher: TeamChatNotificationPublisher,
   ) {}
 
@@ -224,14 +228,28 @@ export class TeamChatChannelsService {
       },
     });
 
-    if (!membership?.lastReadAt) {
-      return this.messagesRepository.count({
-        where: {
-          tenantId: context.tenantId,
-          workspaceId: context.workspaceId,
-          channelId,
-        },
-      });
+    if (!membership) {
+      return 0;
+    }
+
+    /**
+     * Unread is a watermark, and the watermark is `last_read_at` falling back
+     * to `joined_at` (§29/§30).
+     *
+     * Before CCOM0.5 a member with `last_read_at = null` — every member who had
+     * never opened the channel, including one just invited — counted the
+     * channel's entire history as unread. Falling back to `joined_at` makes the
+     * contract "unread = messages since you joined that you have not read".
+     * Rows predating the join are history, not news.
+     *
+     * A member with neither timestamp (legacy rows) counts nothing rather than
+     * everything: the badge may under-report for those rows, which is the safe
+     * direction for a counter.
+     */
+    const watermark = membership.lastReadAt ?? membership.joinedAt;
+
+    if (!watermark) {
+      return 0;
     }
 
     return this.messagesRepository
@@ -241,9 +259,7 @@ export class TeamChatChannelsService {
         workspaceId: context.workspaceId,
       })
       .andWhere('message.channel_id = :channelId', { channelId })
-      .andWhere('message.created_at > :lastReadAt', {
-        lastReadAt: membership.lastReadAt,
-      })
+      .andWhere('message.created_at > :watermark', { watermark })
       .getCount();
   }
 
@@ -268,6 +284,7 @@ export class TeamChatChannelsService {
     const savedChannel = await this.channelsRepository.save(channel);
 
     if (context.userId) {
+      const joinedAt = new Date();
       await this.membersRepository.save(
         this.membersRepository.create({
           tenantId: context.tenantId,
@@ -277,7 +294,8 @@ export class TeamChatChannelsService {
           teamMemberId: null,
           displayName: null,
           role: TeamChatMemberRole.OWNER,
-          joinedAt: new Date(),
+          joinedAt,
+          lastReadAt: joinedAt,
         }),
       );
     }
@@ -290,7 +308,11 @@ export class TeamChatChannelsService {
     channelId: string,
     dto: PatchTeamChatChannelDto,
   ) {
-    const channel = await this.assertChannel(context, channelId);
+    const channel = await this.assertChannelAccess(
+      context,
+      channelId,
+      'channel.patch',
+    );
 
     if (dto.name !== undefined) {
       const name = dto.name.trim();
@@ -326,7 +348,11 @@ export class TeamChatChannelsService {
   }
 
   async remove(context: TeamChatContext, channelId: string) {
-    const channel = await this.assertChannel(context, channelId);
+    const channel = await this.assertChannelAccess(
+      context,
+      channelId,
+      'channel.remove',
+    );
 
     await this.attachmentsRepository
       .createQueryBuilder()
@@ -366,8 +392,36 @@ export class TeamChatChannelsService {
     channelId: string,
     dto: AddTeamChatChannelMembersDto,
   ) {
-    const channel = await this.assertChannel(context, channelId);
+    const channel = await this.assertChannelAccess(
+      context,
+      channelId,
+      'channel.add_members',
+    );
     const createdMembers: AgencyChatChannelMember[] = [];
+
+    // Before CCOM0.5 any UUID at all became a channel member. Only active users
+    // of the authenticated workspace may be added now (§22); anything else —
+    // a random UUID, a user of another workspace, or a Client Area-only
+    // identity — is rejected rather than silently mixed into the channel.
+    const eligibleUserIds = await this.resolveActiveWorkspaceUserIds(
+      context,
+      dto.userIds,
+    );
+    const rejectedUserIds = dto.userIds.filter(
+      (userId) => !eligibleUserIds.has(userId),
+    );
+
+    if (rejectedUserIds.length > 0) {
+      this.logger.warn(
+        `Team Chat add_members rejected ${rejectedUserIds.length} ineligible ` +
+          `identity(ies): channelId=${channelId} ` +
+          `actorUserId=${context.userId ?? 'anonymous'} ` +
+          `tenantId=${context.tenantId} workspaceId=${context.workspaceId}`,
+      );
+      throw new BadRequestException(
+        'Um ou mais usuários não pertencem a este workspace.',
+      );
+    }
 
     const results = await Promise.all(
       dto.userIds.map(async (userId) => {
@@ -382,6 +436,7 @@ export class TeamChatChannelsService {
 
         if (existing) return existing;
 
+        const joinedAt = new Date();
         const savedMember = await this.membersRepository.save(
           this.membersRepository.create({
             tenantId: context.tenantId,
@@ -391,7 +446,10 @@ export class TeamChatChannelsService {
             teamMemberId: null,
             displayName: null,
             role: TeamChatMemberRole.MEMBER,
-            joinedAt: new Date(),
+            joinedAt,
+            // Watermark starts at join time so history predating the member
+            // does not arrive as unread (§29).
+            lastReadAt: joinedAt,
           }),
         );
         createdMembers.push(savedMember);
@@ -422,6 +480,23 @@ export class TeamChatChannelsService {
   ) {
     if (!context.userId) {
       throw new BadRequestException('Usuário não autenticado.');
+    }
+
+    // A DM target is an identity like any other: it must be an active user of
+    // this workspace, not merely a well-formed UUID (§22).
+    const eligibleTargets = await this.resolveActiveWorkspaceUserIds(context, [
+      dto.targetUserId,
+    ]);
+
+    if (!eligibleTargets.has(dto.targetUserId)) {
+      this.logger.warn(
+        `Team Chat direct channel rejected ineligible target: ` +
+          `actorUserId=${context.userId} tenantId=${context.tenantId} ` +
+          `workspaceId=${context.workspaceId}`,
+      );
+      throw new BadRequestException(
+        'Usuário de destino não pertence a este workspace.',
+      );
     }
 
     const userIds = [context.userId, dto.targetUserId].sort();
@@ -485,6 +560,7 @@ export class TeamChatChannelsService {
     );
 
     // Add both users as members
+    const directJoinedAt = new Date();
     await this.membersRepository.save([
       this.membersRepository.create({
         tenantId: context.tenantId,
@@ -494,7 +570,8 @@ export class TeamChatChannelsService {
         teamMemberId: null,
         displayName: null,
         role: TeamChatMemberRole.OWNER,
-        joinedAt: new Date(),
+        joinedAt: directJoinedAt,
+        lastReadAt: directJoinedAt,
       }),
       this.membersRepository.create({
         tenantId: context.tenantId,
@@ -504,7 +581,8 @@ export class TeamChatChannelsService {
         teamMemberId: null,
         displayName: null,
         role: TeamChatMemberRole.MEMBER,
-        joinedAt: new Date(),
+        joinedAt: directJoinedAt,
+        lastReadAt: directJoinedAt,
       }),
     ]);
 
@@ -516,7 +594,7 @@ export class TeamChatChannelsService {
     channelId: string,
     dto: UpdateChannelMembershipDto,
   ) {
-    await this.assertChannel(context, channelId);
+    await this.assertChannelAccess(context, channelId, 'channel.update_membership');
 
     if (!context.userId) {
       throw new BadRequestException('Usuário não autenticado.');
@@ -547,7 +625,7 @@ export class TeamChatChannelsService {
   }
 
   async leaveChannel(context: TeamChatContext, channelId: string) {
-    await this.assertChannel(context, channelId);
+    await this.assertChannelAccess(context, channelId, 'channel.leave');
 
     if (!context.userId) {
       throw new BadRequestException('Usuário não autenticado.');
@@ -566,20 +644,127 @@ export class TeamChatChannelsService {
     return { ok: true, channelId };
   }
 
-  async assertChannel(context: TeamChatContext, channelId: string) {
+  /**
+   * The single authorization gate for any operation on one known channel.
+   *
+   * Replaces the former `assertChannel()`, which checked only
+   * `id + tenant_id + workspace_id` and so let any authenticated user of the
+   * workspace read and write any private channel by UUID (CCOM0 §2, §8).
+   *
+   * Fails closed as 404, never 403: a user who cannot access a channel must not
+   * learn whether it exists. `getMessage()` inherits the same property.
+   */
+  async assertChannelAccess(
+    context: TeamChatContext,
+    channelId: string,
+    action: string,
+  ) {
     const channel = await this.channelsRepository.findOne({
-      where: {
-        id: channelId,
-        tenantId: context.tenantId,
-        workspaceId: context.workspaceId,
-      },
+      where: { id: channelId },
     });
 
     if (!channel) {
       throw new NotFoundException('Canal não encontrado.');
     }
 
+    const membership = context.userId
+      ? await this.membersRepository.findOne({
+          where: {
+            tenantId: context.tenantId,
+            workspaceId: context.workspaceId,
+            channelId,
+            userId: context.userId,
+          },
+        })
+      : null;
+
+    const decision = evaluateChannelAccess(context, channel, membership);
+
+    if (!decision.allowed) {
+      this.logChannelDenial(context, channelId, action, decision.reason);
+      throw new NotFoundException('Canal não encontrado.');
+    }
+
     return channel;
+  }
+
+  /**
+   * Security denials are logged with the authenticated actor, never with the
+   * token or any payload-supplied identity (CCOM0.5 §41).
+   */
+  private logChannelDenial(
+    context: TeamChatContext,
+    channelId: string,
+    action: string,
+    reason: ChannelAccessDenialReason,
+  ) {
+    this.logger.warn(
+      `Team Chat access denied: action=${action} reason=${reason} ` +
+        `channelId=${channelId} userId=${context.userId ?? 'anonymous'} ` +
+        `tenantId=${context.tenantId} workspaceId=${context.workspaceId}`,
+    );
+  }
+
+  /**
+   * Resolves which of `userIds` are real, active members of the authenticated
+   * workspace.
+   *
+   * `workspace_users` is the agency's membership table, so a Client Area-only
+   * identity — which lives in `user_security_settings` and has no row here —
+   * can never be returned. That is the §22/§37 rule enforced by construction
+   * rather than by a surface check.
+   */
+  async resolveActiveWorkspaceUserIds(
+    context: TeamChatContext,
+    userIds: string[],
+  ): Promise<Set<string>> {
+    const candidates = Array.from(
+      new Set(userIds.filter((userId) => Boolean(userId))),
+    );
+
+    if (candidates.length === 0) {
+      return new Set<string>();
+    }
+
+    const rows = await this.workspaceUsersRepository
+      .createQueryBuilder('workspace_user')
+      .select('workspace_user.user_id', 'userId')
+      .where('workspace_user.tenant_id = :tenantId', {
+        tenantId: context.tenantId,
+      })
+      .andWhere('workspace_user.workspace_id = :workspaceId', {
+        workspaceId: context.workspaceId,
+      })
+      .andWhere('workspace_user.status = :status', { status: 'active' })
+      .andWhere('workspace_user.user_id IN (:...candidates)', { candidates })
+      .getRawMany<{ userId: string | null }>();
+
+    return new Set(
+      rows
+        .map((row) => row.userId)
+        .filter((userId): userId is string => Boolean(userId)),
+    );
+  }
+
+  /** Active participants of a channel, used to scope mentions (§21). */
+  async getActiveParticipantUserIds(
+    context: TeamChatContext,
+    channelId: string,
+  ): Promise<Set<string>> {
+    const members = await this.membersRepository.find({
+      where: {
+        tenantId: context.tenantId,
+        workspaceId: context.workspaceId,
+        channelId,
+      },
+    });
+
+    return new Set(
+      members
+        .filter((member) => member.leftAt === null)
+        .map((member) => member.userId)
+        .filter((userId): userId is string => Boolean(userId)),
+    );
   }
 
   private slugify(value: string) {

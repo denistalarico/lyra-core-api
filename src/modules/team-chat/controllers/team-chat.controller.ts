@@ -76,10 +76,12 @@ export class TeamChatController {
     @Headers('x-tenant-id') tenantId: string,
     @Headers('x-workspace-id') workspaceId: string,
     @Headers('x-user-id') userId: string | undefined,
+    @Headers('x-user-role') userRole: string | undefined,
+    @Headers('x-role') role: string | undefined,
     @Body() dto: FindOrCreateDirectChannelDto,
   ) {
     return this.channelsService.findOrCreateDirect(
-      this.getContext(tenantId, workspaceId, userId),
+      this.getContext(tenantId, workspaceId, userId, userRole ?? role),
       dto,
     );
   }
@@ -136,11 +138,13 @@ export class TeamChatController {
     @Headers('x-tenant-id') tenantId: string,
     @Headers('x-workspace-id') workspaceId: string,
     @Headers('x-user-id') userId: string | undefined,
+    @Headers('x-user-role') userRole: string | undefined,
+    @Headers('x-role') role: string | undefined,
     @Param('channelId') channelId: string,
     @Body() dto: PatchTeamChatChannelDto,
   ) {
     return this.channelsService.patch(
-      this.getContext(tenantId, workspaceId, userId),
+      this.getContext(tenantId, workspaceId, userId, userRole ?? role),
       channelId,
       dto,
     );
@@ -153,10 +157,12 @@ export class TeamChatController {
     @Headers('x-tenant-id') tenantId: string,
     @Headers('x-workspace-id') workspaceId: string,
     @Headers('x-user-id') userId: string | undefined,
+    @Headers('x-user-role') userRole: string | undefined,
+    @Headers('x-role') role: string | undefined,
     @Param('channelId') channelId: string,
   ) {
     return this.channelsService.remove(
-      this.getContext(tenantId, workspaceId, userId),
+      this.getContext(tenantId, workspaceId, userId, userRole ?? role),
       channelId,
     );
   }
@@ -167,11 +173,13 @@ export class TeamChatController {
     @Headers('x-tenant-id') tenantId: string,
     @Headers('x-workspace-id') workspaceId: string,
     @Headers('x-user-id') userId: string | undefined,
+    @Headers('x-user-role') userRole: string | undefined,
+    @Headers('x-role') role: string | undefined,
     @Param('channelId') channelId: string,
     @Body() dto: AddTeamChatChannelMembersDto,
   ) {
     return this.channelsService.addMembers(
-      this.getContext(tenantId, workspaceId, userId),
+      this.getContext(tenantId, workspaceId, userId, userRole ?? role),
       channelId,
       dto,
     );
@@ -183,11 +191,13 @@ export class TeamChatController {
     @Headers('x-tenant-id') tenantId: string,
     @Headers('x-workspace-id') workspaceId: string,
     @Headers('x-user-id') userId: string | undefined,
+    @Headers('x-user-role') userRole: string | undefined,
+    @Headers('x-role') role: string | undefined,
     @Param('channelId') channelId: string,
     @Query() query: ListTeamChatMessagesQueryDto,
   ) {
     return this.messagesService.list(
-      this.getContext(tenantId, workspaceId, userId),
+      this.getContext(tenantId, workspaceId, userId, userRole ?? role),
       channelId,
       query,
     );
@@ -199,11 +209,13 @@ export class TeamChatController {
     @Headers('x-tenant-id') tenantId: string,
     @Headers('x-workspace-id') workspaceId: string,
     @Headers('x-user-id') userId: string | undefined,
+    @Headers('x-user-role') userRole: string | undefined,
+    @Headers('x-role') role: string | undefined,
     @Param('channelId') channelId: string,
     @Body() dto: CreateTeamChatMessageDto,
   ) {
     return this.messagesService.create(
-      this.getContext(tenantId, workspaceId, userId),
+      this.getContext(tenantId, workspaceId, userId, userRole ?? role),
       channelId,
       dto,
     );
@@ -215,12 +227,14 @@ export class TeamChatController {
     @Headers('x-tenant-id') tenantId: string,
     @Headers('x-workspace-id') workspaceId: string,
     @Headers('x-user-id') userId: string | undefined,
+    @Headers('x-user-role') userRole: string | undefined,
+    @Headers('x-role') role: string | undefined,
     @Param('channelId') channelId: string,
     @Param('messageId') messageId: string,
     @Body() dto: PatchTeamChatMessageDto,
   ) {
     return this.messagesService.patch(
-      this.getContext(tenantId, workspaceId, userId),
+      this.getContext(tenantId, workspaceId, userId, userRole ?? role),
       channelId,
       messageId,
       dto,
@@ -234,11 +248,13 @@ export class TeamChatController {
     @Headers('x-tenant-id') tenantId: string,
     @Headers('x-workspace-id') workspaceId: string,
     @Headers('x-user-id') userId: string | undefined,
+    @Headers('x-user-role') userRole: string | undefined,
+    @Headers('x-role') role: string | undefined,
     @Param('channelId') channelId: string,
     @Param('messageId') messageId: string,
   ) {
     return this.messagesService.remove(
-      this.getContext(tenantId, workspaceId, userId),
+      this.getContext(tenantId, workspaceId, userId, userRole ?? role),
       channelId,
       messageId,
     );
@@ -250,12 +266,14 @@ export class TeamChatController {
     @Headers('x-tenant-id') tenantId: string,
     @Headers('x-workspace-id') workspaceId: string,
     @Headers('x-user-id') userId: string | undefined,
+    @Headers('x-user-role') userRole: string | undefined,
+    @Headers('x-role') role: string | undefined,
     @Param('channelId') channelId: string,
     @Param('messageId') messageId: string,
     @Body() dto: ReactToTeamChatMessageDto,
   ) {
     return this.messagesService.react(
-      this.getContext(tenantId, workspaceId, userId),
+      this.getContext(tenantId, workspaceId, userId, userRole ?? role),
       channelId,
       messageId,
       dto,
@@ -268,12 +286,14 @@ export class TeamChatController {
     @Headers('x-tenant-id') tenantId: string,
     @Headers('x-workspace-id') workspaceId: string,
     @Headers('x-user-id') userId: string | undefined,
+    @Headers('x-user-role') userRole: string | undefined,
+    @Headers('x-role') role: string | undefined,
     @Param('channelId') channelId: string,
     @Param('messageId') messageId: string,
     @Body() dto: { pinned?: boolean },
   ) {
     return this.messagesService.pin(
-      this.getContext(tenantId, workspaceId, userId),
+      this.getContext(tenantId, workspaceId, userId, userRole ?? role),
       channelId,
       messageId,
       dto.pinned !== false,
@@ -286,10 +306,12 @@ export class TeamChatController {
     @Headers('x-tenant-id') tenantId: string,
     @Headers('x-workspace-id') workspaceId: string,
     @Headers('x-user-id') userId: string | undefined,
+    @Headers('x-user-role') userRole: string | undefined,
+    @Headers('x-role') role: string | undefined,
     @Param('channelId') channelId: string,
   ) {
     return this.messagesService.markAsRead(
-      this.getContext(tenantId, workspaceId, userId),
+      this.getContext(tenantId, workspaceId, userId, userRole ?? role),
       channelId,
     );
   }
@@ -316,11 +338,13 @@ export class TeamChatController {
     @Headers('x-tenant-id') tenantId: string,
     @Headers('x-workspace-id') workspaceId: string,
     @Headers('x-user-id') userId: string | undefined,
+    @Headers('x-user-role') userRole: string | undefined,
+    @Headers('x-role') role: string | undefined,
     @Param('channelId') channelId: string,
     @Body() dto: UpdateChannelMembershipDto,
   ) {
     return this.channelsService.updateMembership(
-      this.getContext(tenantId, workspaceId, userId),
+      this.getContext(tenantId, workspaceId, userId, userRole ?? role),
       channelId,
       dto,
     );
@@ -332,10 +356,12 @@ export class TeamChatController {
     @Headers('x-tenant-id') tenantId: string,
     @Headers('x-workspace-id') workspaceId: string,
     @Headers('x-user-id') userId: string | undefined,
+    @Headers('x-user-role') userRole: string | undefined,
+    @Headers('x-role') role: string | undefined,
     @Param('channelId') channelId: string,
   ) {
     return this.channelsService.leaveChannel(
-      this.getContext(tenantId, workspaceId, userId),
+      this.getContext(tenantId, workspaceId, userId, userRole ?? role),
       channelId,
     );
   }

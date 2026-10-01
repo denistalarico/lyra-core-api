@@ -7,6 +7,7 @@ import {
 } from '../entities';
 import { TeamChatNotificationPublisher } from './team-chat-notification.publisher';
 import { TeamChatChannelsService } from './team-chat-channels.service';
+import { WorkspaceUserEntity } from '../../settings/entities/workspace-user.entity';
 
 describe('TeamChatChannelsService collection scoping', () => {
   it('lists only channels where a member user has active membership', async () => {
@@ -79,16 +80,34 @@ function makeService() {
   const publisher = {
     publishChannelInvited: jest.fn(),
   } as unknown as TeamChatNotificationPublisher;
+  const workspaceUsersQueryBuilder = {
+    select: jest.fn(() => workspaceUsersQueryBuilder),
+    where: jest.fn(() => workspaceUsersQueryBuilder),
+    andWhere: jest.fn(() => workspaceUsersQueryBuilder),
+    getRawMany: jest.fn().mockResolvedValue([] as { userId: string | null }[]),
+  };
+  const workspaceUsersRepository = {
+    createQueryBuilder: jest.fn(() => workspaceUsersQueryBuilder),
+  };
 
   const service = new TeamChatChannelsService(
     channelsRepository as unknown as Repository<AgencyChatChannel>,
     membersRepository as unknown as Repository<AgencyChatChannelMember>,
     messagesRepository as unknown as Repository<AgencyChatMessage>,
     attachmentsRepository as unknown as Repository<AgencyChatAttachment>,
+    workspaceUsersRepository as unknown as Repository<WorkspaceUserEntity>,
     publisher,
   );
 
-  return { service, queryBuilder };
+  return {
+    service,
+    queryBuilder,
+    channelsRepository,
+    membersRepository,
+    messagesRepository,
+    workspaceUsersQueryBuilder,
+    publisher,
+  };
 }
 
 function createQueryBuilderMock<T>() {

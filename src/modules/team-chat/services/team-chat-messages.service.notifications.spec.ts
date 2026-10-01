@@ -1,5 +1,10 @@
 import { TeamChatMessagesService } from './team-chat-messages.service';
-import { TeamChatChannelKind, TeamChatMessageStatus } from '../enums';
+import {
+  TeamChatChannelKind,
+  TeamChatChannelStatus,
+  TeamChatChannelVisibility,
+  TeamChatMessageStatus,
+} from '../enums';
 
 function createRepositoryMock() {
   return {
@@ -22,19 +27,44 @@ const context = {
   userId: 'sender-a',
 };
 
+/**
+ * CCOM0.5 renamed the gate to `assertChannelAccess` and made mentions resolve
+ * through the channels service, so the stub provides both. `eligibleMentions`
+ * is the set of ids the workspace/participation filters would accept.
+ */
+function createChannelsServiceMock(
+  channel: Record<string, unknown>,
+  eligibleMentions: string[] = [],
+) {
+  return {
+    assertChannelAccess: jest.fn().mockResolvedValue(channel),
+    resolveActiveWorkspaceUserIds: jest
+      .fn()
+      .mockResolvedValue(new Set(eligibleMentions)),
+    getActiveParticipantUserIds: jest
+      .fn()
+      .mockResolvedValue(new Set(eligibleMentions)),
+  };
+}
+
+const assetAccess = {
+  isPrivatePath: jest.fn().mockReturnValue(false),
+  issueGrant: jest.fn(),
+};
+
 describe('TeamChatMessagesService notifications', () => {
   it('publishes direct message received for a direct channel recipient', async () => {
     const messagesRepository = createRepositoryMock();
     const readsRepository = createRepositoryMock();
     const membersRepository = createRepositoryMock();
-    const channelsService = {
-      assertChannel: jest.fn().mockResolvedValue({
-        id: 'channel-a',
-        tenantId: context.tenantId,
-        workspaceId: context.workspaceId,
-        kind: TeamChatChannelKind.DIRECT,
-      }),
-    };
+    const channelsService = createChannelsServiceMock({
+      id: 'channel-a',
+      tenantId: context.tenantId,
+      workspaceId: context.workspaceId,
+      kind: TeamChatChannelKind.DIRECT,
+      visibility: TeamChatChannelVisibility.PRIVATE,
+      status: TeamChatChannelStatus.ACTIVE,
+    });
     const publisher = {
       publishDirectMessageReceived: jest.fn(),
       publishUserMentioned: jest.fn(),
@@ -50,6 +80,7 @@ describe('TeamChatMessagesService notifications', () => {
       membersRepository as never,
       channelsService as never,
       publisher as never,
+      assetAccess as never,
     );
 
     await service.create(context, 'channel-a', { body: 'Olá' });
@@ -70,14 +101,17 @@ describe('TeamChatMessagesService notifications', () => {
     const messagesRepository = createRepositoryMock();
     const readsRepository = createRepositoryMock();
     const membersRepository = createRepositoryMock();
-    const channelsService = {
-      assertChannel: jest.fn().mockResolvedValue({
+    const channelsService = createChannelsServiceMock(
+      {
         id: 'channel-a',
         tenantId: context.tenantId,
         workspaceId: context.workspaceId,
         kind: TeamChatChannelKind.DIRECT,
-      }),
-    };
+        visibility: TeamChatChannelVisibility.PRIVATE,
+        status: TeamChatChannelStatus.ACTIVE,
+      },
+      ['recipient-a'],
+    );
     const publisher = {
       publishDirectMessageReceived: jest.fn(),
       publishUserMentioned: jest.fn(),
@@ -93,6 +127,7 @@ describe('TeamChatMessagesService notifications', () => {
       membersRepository as never,
       channelsService as never,
       publisher as never,
+      assetAccess as never,
     );
 
     await service.create(context, 'channel-a', {
@@ -112,14 +147,14 @@ describe('TeamChatMessagesService notifications', () => {
     const messagesRepository = createRepositoryMock();
     const readsRepository = createRepositoryMock();
     const membersRepository = createRepositoryMock();
-    const channelsService = {
-      assertChannel: jest.fn().mockResolvedValue({
-        id: 'channel-a',
-        tenantId: context.tenantId,
-        workspaceId: context.workspaceId,
-        kind: TeamChatChannelKind.CHANNEL,
-      }),
-    };
+    const channelsService = createChannelsServiceMock({
+      id: 'channel-a',
+      tenantId: context.tenantId,
+      workspaceId: context.workspaceId,
+      kind: TeamChatChannelKind.CHANNEL,
+      visibility: TeamChatChannelVisibility.WORKSPACE,
+      status: TeamChatChannelStatus.ACTIVE,
+    });
     const publisher = {
       publishDirectMessageReceived: jest.fn(),
       publishUserMentioned: jest.fn(),
@@ -131,6 +166,7 @@ describe('TeamChatMessagesService notifications', () => {
       membersRepository as never,
       channelsService as never,
       publisher as never,
+      assetAccess as never,
     );
 
     await service.create(context, 'channel-a', { body: 'Mensagem aberta' });

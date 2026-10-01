@@ -13,11 +13,15 @@ import {
   validateTeamChatAttachment,
 } from './team-chat-media-rules';
 import { FilesService } from '../../../common/files/files.service';
+import { AssetAccessService } from '../../../common/files/asset-access.service';
+import { authorizeAttachmentUrl } from './team-chat-attachment-urls';
+import { TeamChatChannelsService } from './team-chat-channels.service';
 
 type TeamChatContext = {
   tenantId: string;
   workspaceId: string;
   userId?: string | null;
+  role?: string | null;
 };
 
 @Injectable()
@@ -30,7 +34,71 @@ export class TeamChatAttachmentsService {
     @InjectRepository(AgencyMeetingRoom, 'agency')
     private readonly meetingsRepository: Repository<AgencyMeetingRoom>,
     private readonly filesService: FilesService,
+    private readonly assetAccess: AssetAccessService,
+    private readonly channelsService: TeamChatChannelsService,
   ) {}
+
+  /**
+   * Appends a fresh, viewer-bound grant to the stored `publicUrl` (§25–§28).
+   * The column keeps the plain storage path; the grant is added per read.
+   */
+  private authorizeAttachment(
+    attachment: AgencyChatAttachment,
+    viewerUserId: string | null | undefined,
+  ): AgencyChatAttachment {
+    const authorized = authorizeAttachmentUrl(
+      this.assetAccess,
+      attachment.publicUrl,
+      viewerUserId,
+    );
+
+    if (authorized === attachment.publicUrl) {
+      return attachment;
+    }
+
+    // A shallow copy, so the grant never reaches the stored row.
+    return { ...attachment, publicUrl: authorized };
+  }
+
+  /**
+   * Resolves the channel a message belongs to and authorizes the caller against
+   * it with the shared primitive. Attachment reads were previously scoped only by
+   * tenant/workspace, so an attachment of an inaccessible channel was listable
+   * by message id (§16).
+   */
+  private async assertMessageChannelAccess(
+    context: TeamChatContext,
+    messageId: string,
+    action: string,
+  ) {
+    const message = await this.messagesRepository.findOne({
+      where: {
+        id: messageId,
+        tenantId: context.tenantId,
+        workspaceId: context.workspaceId,
+      },
+    });
+
+    if (!message) {
+      throw new NotFoundException('Mensagem não encontrada.');
+    }
+
+    // `channel_id` is nullable: a meeting message has no channel. Without a
+    // channel there is no membership to evaluate, so this fails closed rather
+    // than defaulting to "accessible" — meeting attachments are reached through
+    // `listByMeeting`, which the meetings module governs.
+    if (!message.channelId) {
+      throw new NotFoundException('Mensagem não encontrada.');
+    }
+
+    await this.channelsService.assertChannelAccess(
+      context,
+      message.channelId,
+      action,
+    );
+
+    return message;
+  }
 
   async create(context: TeamChatContext, dto: CreateTeamChatAttachmentDto) {
     if (!dto.messageId && !dto.meetingRoomId) {
@@ -99,7 +167,8 @@ export class TeamChatAttachmentsService {
       },
     });
 
-    return this.attachmentsRepository.save(attachment);
+    const saved = await this.attachmentsRepository.save(attachment);
+    return this.authorizeAttachment(saved, context.userId);
   }
 
   async uploadForMessage(
@@ -159,11 +228,18 @@ export class TeamChatAttachmentsService {
       },
     });
 
-    return this.attachmentsRepository.save(attachment);
+    const saved = await this.attachmentsRepository.save(attachment);
+    return this.authorizeAttachment(saved, context.userId);
   }
 
   async listByMessage(context: TeamChatContext, messageId: string) {
-    return this.attachmentsRepository.find({
+    await this.assertMessageChannelAccess(
+      context,
+      messageId,
+      'attachments.list_by_message',
+    );
+
+    const attachments = await this.attachmentsRepository.find({
       where: {
         tenantId: context.tenantId,
         workspaceId: context.workspaceId,
@@ -173,6 +249,10 @@ export class TeamChatAttachmentsService {
         createdAt: 'ASC',
       },
     });
+
+    return attachments.map((attachment) =>
+      this.authorizeAttachment(attachment, context.userId),
+    );
   }
 
   async deleteFromMessage(
@@ -202,7 +282,7 @@ export class TeamChatAttachmentsService {
   }
 
   async listByMeeting(context: TeamChatContext, meetingRoomId: string) {
-    return this.attachmentsRepository.find({
+    const attachments = await this.attachmentsRepository.find({
       where: {
         tenantId: context.tenantId,
         workspaceId: context.workspaceId,
@@ -212,5 +292,9 @@ export class TeamChatAttachmentsService {
         createdAt: 'ASC',
       },
     });
+
+    return attachments.map((attachment) =>
+      this.authorizeAttachment(attachment, context.userId),
+    );
   }
 }

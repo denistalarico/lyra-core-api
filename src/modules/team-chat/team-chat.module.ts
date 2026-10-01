@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { JwtModule } from '@nestjs/jwt';
 import { TypeOrmModule } from '@nestjs/typeorm';
 
 import {
@@ -28,6 +29,7 @@ import { NotificationsModule } from '../notifications';
 import { PermissionsModule } from '../permissions';
 import { TeamChatNotificationPublisher } from './services/team-chat-notification.publisher';
 import { TeamChatCardPostService } from './services/team-chat-card-post.service';
+import { WorkspaceUserEntity } from '../settings/entities/workspace-user.entity';
 
 const AGENCY_CONNECTION = 'agency';
 
@@ -36,6 +38,9 @@ const AGENCY_CONNECTION = 'agency';
     FilesModule,
     NotificationsModule,
     PermissionsModule,
+    // The gateway verifies the Agency access token in the handshake; the secret
+    // is supplied per call, as in NotificationsModule.
+    JwtModule.register({}),
     TypeOrmModule.forFeature(
       [
         AgencyChatChannel,
@@ -48,6 +53,9 @@ const AGENCY_CONNECTION = 'agency';
         AgencyMeetingParticipant,
         AgencyMeetingEvent,
         AgencyMeetingAiSummary,
+        // Read-only: the membership source that validates channel members and
+        // mentions against the agency workspace (CCOM0.5 §22/§21).
+        WorkspaceUserEntity,
       ],
       AGENCY_CONNECTION,
     ),
