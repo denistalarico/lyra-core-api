@@ -12,6 +12,7 @@ import {
   SocialApprovalRequestEntity,
   SocialApprovalStageDecisionEntity,
   type SocialApprovalActorType,
+  type SocialApprovalCommentVisibility,
   type SocialApprovalStage,
   type SocialApprovalStatus,
 } from './entities';
@@ -83,12 +84,19 @@ export class SocialApprovalsService {
         'A aprovação não está em um estado que permite esta ação.',
       );
   }
+  /**
+   * `visibility` is always explicit at the call site: `stage` says when the
+   * comment happened, never who may read it (CA0 §AC). Every Agency path
+   * passes `internal`, even during `awaiting_client`; only Client Area
+   * authorship and an explicit Agency reply-to-client pass `client`.
+   */
   private async addCommentEntity(
     manager: DataSource['manager'],
     request: SocialApprovalRequestEntity,
     actor: ApprovalActor,
     body: string,
     stage: SocialApprovalStage | null,
+    visibility: SocialApprovalCommentVisibility,
   ) {
     const normalized = typeof body === 'string' ? body.trim() : '';
     if (!normalized)
@@ -99,6 +107,7 @@ export class SocialApprovalsService {
       actorType: actor.type,
       actorUserId: actor.userId,
       body: normalized,
+      visibility,
     });
   }
   private async decision(
@@ -288,11 +297,18 @@ export class SocialApprovalsService {
     item.currentStage = 'internal';
     return this.requests.save(item);
   }
+  /**
+   * Agency comment. `visibility` is `internal` unless the operator explicitly
+   * addresses the client: an operator writing while the request sits in
+   * `awaiting_client` is taking an internal note, and inferring otherwise from
+   * `stage` is what CA0 §AC forbids.
+   */
   async comment(
     scope: CompanyAwareScope,
     id: string,
     actorUserId: string | null | undefined,
     body: string,
+    visibility: SocialApprovalCommentVisibility = 'internal',
   ) {
     const actor = this.user(actorUserId);
     const request = await this.find(scope, id);
@@ -300,15 +316,31 @@ export class SocialApprovalsService {
       throw new ConflictException(
         'Não é possível comentar em uma aprovação encerrada.',
       );
-    return this.dataSource.transaction((manager) =>
+    if (visibility === 'client' && !request.sentToClientAt)
+      throw new ConflictException(
+        'Esta aprovação ainda não foi enviada ao cliente.',
+      );
+    const saved = await this.dataSource.transaction((manager) =>
       this.addCommentEntity(
         manager,
         request,
         actor,
         body,
         request.currentStage,
+        visibility,
       ),
     );
+    // AP4 §24 — an explicit Agency reply to the client is worth an email,
+    // same as any other "something changed, go look" moment. Never for an
+    // internal note: `visibility` already gates everything above this line.
+    // The comment's own id/createdAt disambiguates the ledger event so two
+    // separate replies on the same approval both deliver (§28).
+    if (visibility === 'client')
+      await this.notifications?.publishClientOnly('agency_reply', request, {
+        id: saved.id,
+        occurredAt: saved.createdAt,
+      });
+    return saved;
   }
   async approveInternal(
     scope: CompanyAwareScope,
@@ -394,7 +426,7 @@ export class SocialApprovalsService {
     const request = await this.find(scope, id);
     this.assertStatus(request, ['awaiting_client']);
     return this.dataSource.transaction((manager) =>
-      this.addCommentEntity(manager, request, actor, body, 'client'),
+      this.addCommentEntity(manager, request, actor, body, 'client', 'client'),
     );
   }
   private async requestChangesAs(
@@ -416,12 +448,16 @@ export class SocialApprovalsService {
         request,
         stage === 'client' ? ['awaiting_client'] : ['awaiting_internal_review'],
       );
+      // The client's own reason is client-visible: they wrote it, and it is
+      // the anchor of the thread they see. An internal request-changes note
+      // stays internal.
       const comment = await this.addCommentEntity(
         manager,
         request,
         actor,
         body,
         stage,
+        stage === 'client' ? 'client' : 'internal',
       );
       await this.decision(
         manager,
@@ -449,7 +485,12 @@ export class SocialApprovalsService {
     this.assertStatus(item, ACTIVE);
     item.status = 'cancelled';
     item.cancelledAt = new Date();
-    return this.requests.save(item);
+    const saved = await this.requests.save(item);
+    // §49 — only the client channel, and only for something the client
+    // already saw. `cancelled` has no Agency catalog event in AP2, and
+    // inventing one would be a duplicated taxonomy for no reader.
+    await this.notifications?.publishClientOnly('cancelled', saved);
+    return saved;
   }
   async supersede(
     scope: CompanyAwareScope,

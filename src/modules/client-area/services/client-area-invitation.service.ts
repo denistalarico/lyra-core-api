@@ -21,6 +21,7 @@ import {
 } from '../../agency/entities/agency-settings.entities';
 import { AgencyClientCompanyContext } from '../../clients/entities/agency-client-company-context.entity';
 import { ContactEntity } from '../../contacts/entities/contact.entity';
+import { ContactMethodEntity } from '../../contacts/entities/contact-method.entity';
 import { extractLoginContext } from '../../auth/utils/login-context.util';
 import {
   assertClientAreaEnabled,
@@ -37,6 +38,7 @@ import {
   type ClientAreaRole,
 } from '../client-area.types';
 import { ClientAreaInvitationEntity } from '../entities/client-area-invitation.entity';
+import { ClientAreaIdentityContactEntity } from '../entities/client-area-identity-contact.entity';
 import { ClientAreaMembershipEntity } from '../entities/client-area-membership.entity';
 import { companyDisplayName } from './client-area-authorization.service';
 import {
@@ -56,6 +58,7 @@ import {
   clientAreaCodedError,
   isUniqueViolation,
 } from './client-area-membership.service';
+import { ClientAreaEligibilityService } from './client-area-eligibility.service';
 
 const AGENCY_CONNECTION = 'agency';
 
@@ -181,6 +184,7 @@ export class ClientAreaInvitationService {
     private readonly auth: ClientAreaAuthService,
     private readonly jwtService: JwtService,
     private readonly config: ConfigService,
+    private readonly eligibility: ClientAreaEligibilityService,
   ) {}
 
   // ─── Agency side ──────────────────────────────────────────────────────────
@@ -220,7 +224,7 @@ export class ClientAreaInvitationService {
     ]);
 
     const userIds = [...new Set(memberships.map((entry) => entry.userId))];
-    const [identities, profiles] = userIds.length
+    const [identities, profiles, identityContacts] = userIds.length
       ? await Promise.all([
           manager.getRepository(AgencyUserSecuritySettingsEntity).find({
             where: { tenantId: company.tenantId, userId: In(userIds) },
@@ -228,10 +232,35 @@ export class ClientAreaInvitationService {
           manager.getRepository(AgencyUserProfileEntity).find({
             where: { tenantId: company.tenantId, userId: In(userIds) },
           }),
+          manager.getRepository(ClientAreaIdentityContactEntity).find({
+            where: {
+              tenantId: company.tenantId,
+              userId: In(userIds),
+              status: 'active',
+            },
+          }),
         ])
-      : [[], []];
+      : [[], [], []];
+    const contactIds = [
+      ...new Set(identityContacts.map((link) => link.contactId)),
+    ];
+    const contacts = contactIds.length
+      ? await manager.getRepository(ContactEntity).find({
+          where: {
+            tenantId: company.tenantId,
+            workspaceId: company.workspaceId,
+            id: In(contactIds),
+          },
+        })
+      : [];
     const emailOf = new Map(identities.map((i) => [i.userId, i.currentEmail]));
     const nameOf = new Map(profiles.map((p) => [p.userId, p.displayName]));
+    const identityContactOf = new Map(
+      identityContacts.map((link) => [link.userId, link.contactId]),
+    );
+    const contactNameOf = new Map(
+      contacts.map((contact) => [contact.id, contact.displayName]),
+    );
     const now = Date.now();
 
     return {
@@ -249,11 +278,17 @@ export class ClientAreaInvitationService {
         )
         .map((membership) => {
           const email = emailOf.get(membership.userId) ?? null;
+          const contactId = identityContactOf.get(membership.userId) ?? null;
           return {
             membershipId: membership.id,
             userId: membership.userId,
             email,
             displayName: nameOf.get(membership.userId)?.trim() || email,
+            contactId,
+            contactDisplayName: contactId
+              ? (contactNameOf.get(contactId) ?? null)
+              : null,
+            companies: [{ companyContextId: company.id, displayName }],
             role: membership.role,
             status: membership.status,
             grantedAt: membership.grantedAt,
@@ -267,30 +302,85 @@ export class ClientAreaInvitationService {
         expiresAt: invitation.expiresAt,
         expired: invitation.expiresAt.getTime() <= now,
         createdAt: invitation.createdAt,
+        contactId: invitation.contactId,
       })),
     };
+  }
+
+  /** Agency-only, company-scoped projection for the person-first CA4 invite UI. */
+  async listEligibleContacts(
+    actor: ClientAreaAgencyActor,
+    clientId: string,
+    companyContextId: string,
+  ) {
+    const manager = this.dataSource.manager;
+    const { company } = await this.resolveAgencyCompany(
+      manager,
+      actor,
+      clientId,
+      companyContextId,
+      { requireUsable: true },
+    );
+    await this.memberships.assertAgencyActor(
+      manager,
+      actor.tenantId,
+      company.workspaceId,
+      actor.userId,
+    );
+    const rows = await manager
+      .getRepository(ContactEntity)
+      .createQueryBuilder('person')
+      .innerJoin(
+        'contact_company_links',
+        'link',
+        `link.person_contact_id = person.id AND link.tenant_id = person.tenant_id
+          AND link.workspace_id = person.workspace_id AND link.status = 'active'`,
+      )
+      .where('person.tenant_id = :tenantId', { tenantId: company.tenantId })
+      .andWhere('person.workspace_id = :workspaceId', {
+        workspaceId: company.workspaceId,
+      })
+      .andWhere('link.company_contact_id = :companyContactId', {
+        companyContactId: company.companyContactId,
+      })
+      .andWhere(`person.type = 'person' AND person.status = 'active'`)
+      .orderBy('person.display_name', 'ASC')
+      .getMany();
+    const methods = rows.length
+      ? await manager.getRepository(ContactMethodEntity).find({
+          where: {
+            tenantId: company.tenantId,
+            workspaceId: company.workspaceId,
+            type: 'email',
+            contactId: In(rows.map((row) => row.id)),
+          },
+          order: { isPrimary: 'DESC', createdAt: 'ASC' },
+        })
+      : [];
+    return rows.map((contact) => {
+      const email = methods.find(
+        (method) =>
+          method.contactId === contact.id &&
+          EMAIL_PATTERN.test(method.value.trim()),
+      );
+      return {
+        contactId: contact.id,
+        contactDisplayName: contact.displayName,
+        email: email?.value.trim() ?? null,
+      };
+    });
   }
 
   async invite(
     actor: ClientAreaAgencyActor,
     clientId: string,
     companyContextId: string,
-    input: { email: unknown; role: unknown },
+    input: { contactId?: unknown; email?: unknown; role: unknown },
   ) {
     // Fail closed: an invitation emails a link to the Client Area, which is
     // useless (404) while the surface is off.
     assertClientAreaEnabled(this.config);
 
-    const email = typeof input.email === 'string' ? input.email.trim() : '';
-    const emailNormalized = normalizeClientAreaEmail(email);
-    if (!EMAIL_PATTERN.test(email) || email.length > 160) {
-      throw clientAreaCodedError(
-        BadRequestException,
-        400,
-        CLIENT_AREA_ERROR_CODES.emailInvalid,
-        'Invalid email.',
-      );
-    }
     if (!isClientAreaRole(input.role)) {
       throw clientAreaCodedError(
         BadRequestException,
@@ -316,17 +406,22 @@ export class ClientAreaInvitationService {
         ref.company.workspaceId,
         actor.userId,
       );
+      const contact = await this.resolveInvitationContact(
+        manager,
+        ref.company,
+        input,
+      );
       const existingAccount = await this.assertInvitable(
         manager,
         ref.company,
-        emailNormalized,
+        contact.emailNormalized,
       );
 
       const invitations = manager.getRepository(ClientAreaInvitationEntity);
       const pending = await invitations.findOne({
         where: {
           companyContextId: ref.company.id,
-          emailNormalized,
+          emailNormalized: contact.emailNormalized,
           status: 'pending',
         },
         lock: { mode: 'pessimistic_write' },
@@ -364,8 +459,9 @@ export class ClientAreaInvitationService {
 
       const invitation = await this.insertInvitation(manager, {
         company: tupleOf(ref.company),
-        email,
-        emailNormalized,
+        contactId: contact.contactId,
+        email: contact.email,
+        emailNormalized: contact.emailNormalized,
         role,
         token,
         invitedByUserId: actor.userId,
@@ -457,6 +553,11 @@ export class ClientAreaInvitationService {
       );
       const invitation = await this.insertInvitation(manager, {
         company: tupleOf(ref.company),
+        contactId: await this.assertStoredInvitationContact(
+          manager,
+          ref.company,
+          previous,
+        ),
         email: previous.email,
         emailNormalized: previous.emailNormalized,
         role: previous.role,
@@ -853,6 +954,13 @@ export class ClientAreaInvitationService {
         ]);
 
         await this.resolveInvitationCompany(manager, invitation);
+        if (!invitation.contactId) throw invitationInvalid();
+        await this.eligibility.assertContactEligibleForCompany(manager, {
+          tenantId: invitation.tenantId,
+          workspaceId: invitation.workspaceId,
+          contactId: invitation.contactId,
+          companyContextId: invitation.companyContextId,
+        });
         const identities = await this.findIdentitiesByEmail(
           manager,
           invitation,
@@ -880,6 +988,14 @@ export class ClientAreaInvitationService {
           }
           userId = await this.createIdentity(manager, invitation, signup);
         }
+
+        await this.eligibility.linkIdentityInTransaction(manager, {
+          tenantId: invitation.tenantId,
+          workspaceId: invitation.workspaceId,
+          userId,
+          contactId: invitation.contactId,
+          linkedByUserId: invitation.invitedByUserId,
+        });
 
         if (
           await this.isEmailAgencyOperator(manager, invitation, [
@@ -985,6 +1101,7 @@ export class ClientAreaInvitationService {
     manager: EntityManager,
     input: {
       company: ClientAreaCompanyTuple;
+      contactId: string;
       email: string;
       emailNormalized: string;
       role: ClientAreaRole;
@@ -999,6 +1116,7 @@ export class ClientAreaInvitationService {
         workspaceId: input.company.workspaceId,
         agencyClientId: input.company.agencyClientId,
         companyContextId: input.company.companyContextId,
+        contactId: input.contactId,
         email: input.email,
         emailNormalized: input.emailNormalized,
         role: input.role,
@@ -1045,6 +1163,129 @@ export class ClientAreaInvitationService {
     }
 
     return identities.length === 1;
+  }
+
+  private async assertStoredInvitationContact(
+    manager: EntityManager,
+    company: AgencyClientCompanyContext,
+    invitation: ClientAreaInvitationEntity,
+  ): Promise<string> {
+    if (!invitation.contactId) {
+      throw clientAreaCodedError(
+        ConflictException,
+        409,
+        CLIENT_AREA_ERROR_CODES.contactIneligible,
+        'Legacy invitations without a CRM person cannot be resent. Create a new invitation from the contact.',
+      );
+    }
+    await this.eligibility.assertContactEligibleForCompany(manager, {
+      tenantId: company.tenantId,
+      workspaceId: company.workspaceId,
+      contactId: invitation.contactId,
+      companyContextId: company.id,
+    });
+    return invitation.contactId;
+  }
+
+  /** Resolve the CRM person first; the delivery address is then derived. */
+  private async resolveInvitationContact(
+    manager: EntityManager,
+    company: AgencyClientCompanyContext,
+    input: { contactId?: unknown; email?: unknown },
+  ): Promise<{ contactId: string; email: string; emailNormalized: string }> {
+    let contactId =
+      typeof input.contactId === 'string' ? input.contactId : null;
+    if (contactId && !isUuid(contactId)) contactId = null;
+    if (!contactId) {
+      const email = typeof input.email === 'string' ? input.email.trim() : '';
+      const emailNormalized = normalizeClientAreaEmail(email);
+      if (!EMAIL_PATTERN.test(email) || email.length > 160) {
+        throw clientAreaCodedError(
+          BadRequestException,
+          400,
+          CLIENT_AREA_ERROR_CODES.emailInvalid,
+          'Invalid email.',
+        );
+      }
+      const candidates = await manager
+        .getRepository(ContactMethodEntity)
+        .createQueryBuilder('method')
+        .innerJoin(
+          ContactEntity,
+          'contact',
+          `contact.id = method.contact_id AND contact.tenant_id = method.tenant_id AND contact.workspace_id = method.workspace_id`,
+        )
+        .where('method.tenant_id = :tenantId', { tenantId: company.tenantId })
+        .andWhere('method.workspace_id = :workspaceId', {
+          workspaceId: company.workspaceId,
+        })
+        .andWhere(
+          `method.type = 'email' AND LOWER(BTRIM(method.value)) = :email`,
+          { email: emailNormalized },
+        )
+        .andWhere(`contact.type = 'person'`)
+        .select('contact.id', 'contactId')
+        .getRawMany<{ contactId: string }>();
+      const eligible = await Promise.all(
+        candidates.map(async (candidate) => {
+          try {
+            await this.eligibility.assertContactEligibleForCompany(manager, {
+              tenantId: company.tenantId,
+              workspaceId: company.workspaceId,
+              contactId: candidate.contactId,
+              companyContextId: company.id,
+            });
+            return candidate.contactId;
+          } catch {
+            return null;
+          }
+        }),
+      );
+      const exact = [
+        ...new Set(eligible.filter((id): id is string => Boolean(id))),
+      ];
+      if (exact.length !== 1) {
+        throw clientAreaCodedError(
+          ConflictException,
+          409,
+          CLIENT_AREA_ERROR_CODES.contactIneligible,
+          'Email must resolve to exactly one eligible CRM person.',
+        );
+      }
+      contactId = exact[0];
+    }
+    await this.eligibility.assertContactEligibleForCompany(manager, {
+      tenantId: company.tenantId,
+      workspaceId: company.workspaceId,
+      contactId,
+      companyContextId: company.id,
+    });
+    const methods = await manager.getRepository(ContactMethodEntity).find({
+      where: {
+        tenantId: company.tenantId,
+        workspaceId: company.workspaceId,
+        contactId,
+        type: 'email',
+      },
+      order: { isPrimary: 'DESC', createdAt: 'ASC' },
+    });
+    const method = methods.find((candidate) =>
+      EMAIL_PATTERN.test(candidate.value.trim()),
+    );
+    if (!method) {
+      throw clientAreaCodedError(
+        BadRequestException,
+        400,
+        CLIENT_AREA_ERROR_CODES.contactEmailUnavailable,
+        'The CRM person needs a valid email before an invitation can be sent.',
+      );
+    }
+    const email = method.value.trim();
+    return {
+      contactId,
+      email,
+      emailNormalized: normalizeClientAreaEmail(email),
+    };
   }
 
   private findIdentitiesByEmail(

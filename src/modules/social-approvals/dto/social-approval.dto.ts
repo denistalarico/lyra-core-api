@@ -14,6 +14,14 @@ export class CreateSocialApprovalDto {
 }
 export class AddSocialApprovalCommentDto {
   @IsString() @MinLength(1) @MaxLength(8000) body!: string;
+  /**
+   * AP4 §2/§5 — explicit opt-in only. Omitted or any value other than
+   * `'client'` stays `internal` at the service layer (the DTO only restricts
+   * the accepted values; the default itself lives in
+   * `SocialApprovalsService.comment`, so a caller that forgets this field
+   * entirely still fails closed).
+   */
+  @IsOptional() @IsIn(['internal', 'client']) visibility?: 'internal' | 'client';
 }
 export class ListSocialApprovalsDto {
   @IsOptional() @IsString() status?: string;

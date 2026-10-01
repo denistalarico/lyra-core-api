@@ -14,6 +14,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { JwtStrategy } from '../auth/strategies/jwt.strategy';
 import type { ClientAreaRequest } from './client-area.types';
 import { ClientAreaAuthGuard } from './guards/client-area.guards';
+import { ClientAreaManagementService } from './services/client-area-management.service';
 import { ClientAreaSessionService } from './services/client-area-session.service';
 import { ClientAreaJwtStrategy } from './strategies/client-area-jwt.strategy';
 
@@ -47,6 +48,7 @@ describe('CA1 cross-surface access tokens', () => {
   let app: INestApplication;
   let jwt: JwtService;
   const authenticate = jest.fn();
+  const assertIdentityAgencyEnabled = jest.fn();
   const savedEnv = { ...process.env };
 
   beforeEach(async () => {
@@ -64,6 +66,16 @@ describe('CA1 cross-surface access tokens', () => {
           email: 'u1@example.com',
         }),
     );
+    // `assertIdentityAgencyEnabled` is the CA3 Agency-enabled-gate business
+    // rule (DB-backed: active memberships + `client_area_settings.enabled`).
+    // It is exercised end-to-end by the Postgres security-matrix spec; this
+    // suite is about the token/strategy boundary between the two surfaces,
+    // so it fakes this single downstream call (same pattern as
+    // `ClientAreaSessionService.authenticate` below) without touching
+    // `ClientAreaAuthGuard`, `ClientAreaJwtStrategy` or `JwtStrategy`, all of
+    // which run for real here.
+    assertIdentityAgencyEnabled.mockReset();
+    assertIdentityAgencyEnabled.mockResolvedValue({ enabled: true });
 
     const moduleRef = await Test.createTestingModule({
       imports: [
@@ -77,6 +89,10 @@ describe('CA1 cross-surface access tokens', () => {
         ClientAreaJwtStrategy,
         ClientAreaAuthGuard,
         { provide: ClientAreaSessionService, useValue: { authenticate } },
+        {
+          provide: ClientAreaManagementService,
+          useValue: { assertIdentityAgencyEnabled },
+        },
       ],
     }).compile();
 

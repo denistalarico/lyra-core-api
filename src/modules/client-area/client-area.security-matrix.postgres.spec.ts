@@ -24,6 +24,9 @@ import { SettingsCryptoService } from '../../common/crypto/settings-crypto.servi
 import { getAgencyTypeOrmConfig } from '../../config/typeorm.config';
 import { CreateClientAreaMemberships1797000000000 } from '../../database/migrations/1797000000000-create-client-area-memberships';
 import { CreateClientAreaInvitations1797100000000 } from '../../database/migrations/1797100000000-create-client-area-invitations';
+import { CreateClientAreaManagement1797150000000 } from '../../database/migrations/1797150000000-create-client-area-management';
+import { AddCompanyBrandIdentityFoundation1797160000000 } from '../../database/migrations/1797160000000-add-company-brand-identity-foundation';
+import { CreateClientAreaCrmIdentityRelationships1797300000000 } from '../../database/migrations/1797300000000-create-client-area-crm-identity-relationships';
 import { assertSafePostgresTarget } from '../../testing/postgres-integration-guard';
 import { describePostgresIntegration } from '../../testing/postgres-integration';
 import { AgencyAuthModule } from '../agency/agency-auth.module';
@@ -224,6 +227,18 @@ run('CA1 Client Area security matrix (PostgreSQL, real guards)', () => {
       await new CreateClientAreaMemberships1797000000000().up(runner);
       // CA2: revocations by an Agency actor now write audit rows.
       await new CreateClientAreaInvitations1797100000000().up(runner);
+      // CA3: `client_area_settings`/`client_area_company_settings` back the
+      // activation formula (`assertAgencyEnabled`/`hasIdentityAvailableCompany`)
+      // every login and company-bound request already depends on.
+      await new CreateClientAreaManagement1797150000000().up(runner);
+      // CA3 sibling: the context/branding projection reads these columns.
+      await new AddCompanyBrandIdentityFoundation1797160000000().up(runner);
+      // CA4: the CRM identity chain is part of the runtime authorization
+      // formula (CA4.1) — every membership exercised through a real
+      // company-bound route needs an eligible CRM person behind it.
+      await new CreateClientAreaCrmIdentityRelationships1797300000000().up(
+        runner,
+      );
     } finally {
       await runner.release();
     }
@@ -247,6 +262,21 @@ run('CA1 Client Area security matrix (PostgreSQL, real guards)', () => {
         ($1,$5,$6,$7,$9,'active',true),($2,$5,$6,$7,$10,'active',false),
         ($3,$5,$6,$8,$11,'active',true),($4,$12,$13,$14,$15,'active',true)`,
       [A, A2, B, C, T, W, X, Y, orgA, orgA2, orgB, T2, W2, Z, orgC],
+    );
+    // CA3: the activation formula (`assertAgencyEnabled` at login,
+    // `hasIdentityAvailableCompany`, `resolveCompanyModules`) requires an
+    // enabled tenant-level row and an enabled per-company row before any
+    // membership can be used.
+    await db.query(
+      `INSERT INTO client_area_settings (tenant_id,workspace_id,enabled) VALUES
+        ($1,$2,true),($3,$4,true)`,
+      [T, W, T2, W2],
+    );
+    await db.query(
+      `INSERT INTO client_area_company_settings (tenant_id,workspace_id,agency_client_id,company_context_id,enabled,approvals_enabled) VALUES
+        ($1,$2,$3,$5,true,true),($1,$2,$3,$6,true,true),
+        ($1,$2,$4,$7,true,true),($8,$9,$10,$11,true,true)`,
+      [T, W, X, Y, A, A2, B, T2, W2, Z, C],
     );
     await db.query(
       `INSERT INTO tenant_product_entitlements (tenant_id,product_key,status,source) VALUES
@@ -320,6 +350,58 @@ run('CA1 Client Area security matrix (PostgreSQL, real guards)', () => {
     await grant(T2, C, MT2, 'client_viewer');
     await grant(T, A, SOLO, 'client_viewer');
 
+    // CA4.1 — every membership above that is actually exercised through a
+    // company-bound route (guard/directory/preview) needs a live CRM chain
+    // behind it: an active person Contact, linked to the company's
+    // organization Contact. `grant()` itself never required this (it is
+    // still the sole source of authorization); only the runtime formula
+    // re-checks it on every request.
+    const crmLink = async (
+      tenantId: string,
+      workspaceId: string,
+      userId: string,
+      address: string,
+      organizationContactId: string,
+    ) => {
+      const [{ id: personContactId }] = await db.query<Array<{ id: string }>>(
+        `INSERT INTO contacts (tenant_id,workspace_id,type,display_name)
+         VALUES ($1,$2,'person',$3) RETURNING id`,
+        [tenantId, workspaceId, address],
+      );
+      await db.query(
+        `INSERT INTO contact_methods (tenant_id,workspace_id,contact_id,type,value,is_primary)
+         VALUES ($1,$2,$3,'email',$4,true)`,
+        [tenantId, workspaceId, personContactId, address],
+      );
+      await db.query(
+        `INSERT INTO contact_company_links
+           (tenant_id,workspace_id,person_contact_id,company_contact_id,status,linked_at,is_primary)
+         VALUES ($1,$2,$3,$4,'active',now(),false)`,
+        [tenantId, workspaceId, personContactId, organizationContactId],
+      );
+      await db.query(
+        `INSERT INTO client_area_identity_contacts
+           (tenant_id,workspace_id,user_id,contact_id,status,linked_at)
+         VALUES ($1,$2,$3,$4,'active',now())`,
+        [tenantId, workspaceId, userId, personContactId],
+      );
+      return personContactId;
+    };
+    // U1: only company A (org orgA). U2: only company B (orgB). U3: both A
+    // and B — one identity, two eligible companies. U4/U5: company A only.
+    await crmLink(T, W, U1, email('u1'), orgA);
+    await crmLink(T, W, U2, email('u2'), orgB);
+    const orgFor: Record<string, string> = { [A]: orgA, [B]: orgB };
+    const u3ContactId = await crmLink(T, W, U3, email('u3'), orgFor[A]);
+    await db.query(
+      `INSERT INTO contact_company_links
+         (tenant_id,workspace_id,person_contact_id,company_contact_id,status,linked_at,is_primary)
+       VALUES ($1,$2,$3,$4,'active',now(),false)`,
+      [T, W, u3ContactId, orgFor[B]],
+    );
+    await crmLink(T, W, U4, email('u4'), orgA);
+    await crmLink(T, W, U5, email('u5'), orgA);
+
     await db.query(
       `INSERT INTO social_approval_requests (id,tenant_id,workspace_id,agency_client_id,company_context_id,subject_type,subject_id,subject_revision_id,source_module,display_type,title,subject_version_label,status,current_stage,requested_by_user_id)
        VALUES ($1,$2,$3,$4,$5,'creative_version',$6,$7,'creative_studio','creative','Peça B','v1','awaiting_client','client',$8)`,
@@ -338,7 +420,12 @@ run('CA1 Client Area security matrix (PostgreSQL, real guards)', () => {
         for (const table of [
           'client_area_member_events',
           'client_area_invitations',
+          'client_area_identity_contacts',
+          'contact_company_links',
+          'contact_methods',
           'client_area_memberships',
+          'client_area_company_settings',
+          'client_area_settings',
           'social_approval_requests',
           'user_sessions',
           'user_login_events',
@@ -546,6 +633,22 @@ run('CA1 Client Area security matrix (PostgreSQL, real guards)', () => {
           'client_area.approvals.view',
         ],
         modules: { approvals: true },
+        branding: {
+          displayName: 'Lyra',
+          logoLightUrl: null,
+          logoDarkUrl: null,
+          markLightUrl: null,
+          markDarkUrl: null,
+          faviconUrl: null,
+          primaryColor: null,
+          secondaryColor: null,
+          login: {
+            layout: 'centered',
+            heading: null,
+            supportingText: null,
+            backgroundColor: null,
+          },
+        },
       });
       const contextB = await authed(
         `/client-area/companies/${B}/context`,

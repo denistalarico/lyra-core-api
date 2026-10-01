@@ -21,6 +21,7 @@ import {
 } from '../client-area.types';
 import { ClientAreaMembershipEntity } from '../entities/client-area-membership.entity';
 import { ClientAreaManagementService } from './client-area-management.service';
+import { ClientAreaEligibilityService } from './client-area-eligibility.service';
 
 const AGENCY_CONNECTION = 'agency';
 
@@ -52,6 +53,8 @@ function companyNotFound() {
  *   AND Company Context active + not archived
  *   AND organization Contact valid + not archived (same tenant/workspace)
  *   AND Agency Client active + not archived
+ *   AND CRM identity chain intact (active identity-contact -> active PF
+ *       -> active contact_company_link -> this company; CA4.1)
  *   AND module available (entitlement of the managed tenant)
  *   AND role preset grants the permission
  *
@@ -72,6 +75,7 @@ export class ClientAreaAuthorizationService {
     @InjectRepository(AgencyClient, AGENCY_CONNECTION)
     private readonly clientsRepo: Repository<AgencyClient>,
     private readonly management: ClientAreaManagementService,
+    private readonly eligibility: ClientAreaEligibilityService,
   ) {}
 
   async authorize(input: AuthorizeClientAreaInput): Promise<ClientAreaContext> {
@@ -134,9 +138,10 @@ export class ClientAreaAuthorizationService {
 
   /**
    * The full context a membership grants right now, or `null` when any link
-   * of the chain (membership, company, organization, Agency Client) is no
-   * longer valid. Shared by the guard and the directory so the list of
-   * companies and the per-request authorization can never disagree.
+   * of the chain (membership, company, organization, Agency Client, CRM
+   * identity link) is no longer valid. Shared by the guard and the directory
+   * so the list of companies and the per-request authorization can never
+   * disagree.
    */
   async resolveMembershipContext(
     membership: ClientAreaMembershipEntity,
@@ -200,6 +205,18 @@ export class ClientAreaAuthorizationService {
       return null;
     }
 
+    const eligible = await this.eligibility.isMembershipEligible(
+      this.membershipsRepo.manager,
+      {
+        tenantId: membership.tenantId,
+        userId: membership.userId,
+        companyContextId: company.id,
+      },
+    );
+    if (!eligible) {
+      return null;
+    }
+
     return {
       surface: 'client_area',
       userId: identity.userId,
@@ -221,7 +238,6 @@ export class ClientAreaAuthorizationService {
       }),
     };
   }
-
 }
 
 /**

@@ -88,11 +88,14 @@ export class SocialApprovalsController {
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: AddSocialApprovalCommentDto,
   ) {
+    // AP4 §5 — the DTO field is optional and the service default is
+    // `internal`; a request that never set `visibility` cannot leak.
     return this.approvals.comment(
       resolveCompanyAwareScope(ctx),
       id,
       ctx.userId,
       dto.body,
+      dto.visibility,
     );
   }
   @Post(':id/internal/approve')

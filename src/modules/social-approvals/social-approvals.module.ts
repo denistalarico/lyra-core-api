@@ -21,6 +21,20 @@ import {
 import { SocialApprovalsController } from './social-approvals.controller';
 import { SocialApprovalsService } from './social-approvals.service';
 import { ApprovalSubjectResolver } from './subjects/approval-subject-resolver';
+
+/**
+ * The approvals domain and its Agency surface.
+ *
+ * Deliberately knows nothing about the Client Area: AP3's client routes live
+ * in `ClientAreaApprovalsModule`, which imports this module and the Client
+ * Area one. Importing `ClientAreaModule` here would make every consumer of
+ * the approvals domain (the Planner, and through it Social Organic) depend
+ * on the Client Area authentication stack.
+ *
+ * `SocialApprovalNotificationPublisher` reaches the client email channel
+ * through an optional injection, so the client notifier is used when the
+ * Client Area surface is wired and simply absent when it is not.
+ */
 @Module({
   imports: [
     PermissionsModule,
@@ -46,6 +60,12 @@ import { ApprovalSubjectResolver } from './subjects/approval-subject-resolver';
     SocialApprovalNotificationPublisher,
     ApprovalClientReviewService,
   ],
-  exports: [SocialApprovalsService, ApprovalClientReviewService],
+  exports: [
+    SocialApprovalsService,
+    ApprovalClientReviewService,
+    ApprovalSubjectResolver,
+    SocialApprovalNotificationPublisher,
+    TypeOrmModule,
+  ],
 })
 export class SocialApprovalsModule {}

@@ -141,4 +141,29 @@ export class ClientAreaManagementAgencyController {
       'preview_ended',
     );
   }
+
+  /**
+   * CA3.1 — read-only refresh for the navigable preview renderer. Re-runs
+   * the full authorization chain on every call (no audit row: start/end
+   * already cover the audit trail) so a revoked membership or a disabled
+   * Company/app fails the very next page the operator opens.
+   */
+  @Get(
+    'clients/:clientId/companies/:companyContextId/preview/:membershipId/context',
+  )
+  @RequireClientAccess()
+  previewContext(
+    @AuthenticatedUser() user: AuthTokenPayload,
+    @Param('clientId') clientId: string,
+    @Param('companyContextId') companyContextId: string,
+    @Param('membershipId') membershipId: string,
+  ) {
+    return this.management.previewContext(
+      user.tenantId,
+      user.workspaceId,
+      clientId,
+      companyContextId,
+      membershipId,
+    );
+  }
 }

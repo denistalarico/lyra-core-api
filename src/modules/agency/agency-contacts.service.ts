@@ -3,6 +3,7 @@ import {
   Injectable,
   ConflictException,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, In, QueryFailedError, Repository } from 'typeorm';
@@ -49,6 +50,7 @@ import { PatchContactTagDto } from '../contacts/dto/patch-contact-tag.dto';
 import { CreateContactSegmentDto } from '../contacts/dto/create-contact-segment.dto';
 import { PatchContactSegmentDto } from '../contacts/dto/patch-contact-segment.dto';
 import { UpdateContactCompanyLinkDto } from '../contacts/dto/contact-company-link.dto';
+import { ClientAreaMembershipService } from '../client-area/services/client-area-membership.service';
 
 const AGENCY_CONNECTION = 'agency';
 
@@ -117,6 +119,8 @@ export class AgencyContactsService {
     private readonly bankAccountsRepo: Repository<AgencyContactBankAccountEntity>,
 
     private readonly filesService: FilesService,
+    @Optional()
+    private readonly clientAreaMemberships?: ClientAreaMembershipService,
   ) {}
 
   private requireWorkspaceId(ctx: RequestContext) {
@@ -1402,30 +1406,69 @@ export class AgencyContactsService {
       };
     }
 
-    const [profiles, methods, tagAssignments] = await Promise.all([
-      this.profilesRepo.find({
-        where: {
-          tenantId: ctx.tenantId,
-          workspaceId,
-          contactId: In(contactIds),
-        },
-      }),
-      this.methodsRepo.find({
-        where: {
-          tenantId: ctx.tenantId,
-          workspaceId,
-          contactId: In(contactIds),
-        },
-        order: { isPrimary: 'DESC', createdAt: 'ASC' },
-      }),
-      this.tagAssignmentsRepo.find({
-        where: {
-          tenantId: ctx.tenantId,
-          workspaceId,
-          contactId: In(contactIds),
-        },
-      }),
-    ]);
+    const [profiles, methods, tagAssignments, companyLinks] = await Promise.all(
+      [
+        this.profilesRepo.find({
+          where: {
+            tenantId: ctx.tenantId,
+            workspaceId,
+            contactId: In(contactIds),
+          },
+        }),
+        this.methodsRepo.find({
+          where: {
+            tenantId: ctx.tenantId,
+            workspaceId,
+            contactId: In(contactIds),
+          },
+          order: { isPrimary: 'DESC', createdAt: 'ASC' },
+        }),
+        this.tagAssignmentsRepo.find({
+          where: {
+            tenantId: ctx.tenantId,
+            workspaceId,
+            contactId: In(contactIds),
+          },
+        }),
+        this.companyLinksRepo.find({
+          where: {
+            tenantId: ctx.tenantId,
+            workspaceId,
+            personContactId: In(contactIds),
+            status: 'active',
+          },
+        }),
+      ],
+    );
+
+    const companyIds = [
+      ...new Set(companyLinks.map((link) => link.companyContactId)),
+    ];
+    const companies = companyIds.length
+      ? await this.contactsRepo.find({
+          where: {
+            tenantId: ctx.tenantId,
+            workspaceId,
+            id: In(companyIds),
+            type: 'organization',
+            status: 'active',
+          },
+        })
+      : [];
+    const companyById = new Map(
+      companies.map((company) => [company.id, company]),
+    );
+    const companiesByPersonId = new Map<
+      string,
+      Array<{ id: string; displayName: string }>
+    >();
+    companyLinks.forEach((link) => {
+      const company = companyById.get(link.companyContactId);
+      if (!company) return;
+      const current = companiesByPersonId.get(link.personContactId) ?? [];
+      current.push({ id: company.id, displayName: company.displayName });
+      companiesByPersonId.set(link.personContactId, current);
+    });
 
     const tagIds = [
       ...new Set(tagAssignments.map((assignment) => assignment.tagId)),
@@ -1480,6 +1523,7 @@ export class AgencyContactsService {
         tags: tagsByContactId.get(contact.id) ?? [],
         primaryEmail: primaryEmail?.value ?? null,
         primaryPhone: primaryPhone?.value ?? null,
+        relatedCompanies: companiesByPersonId.get(contact.id) ?? [],
       };
     });
 
@@ -1988,7 +2032,7 @@ export class AgencyContactsService {
         tenantId: ctx.tenantId,
         workspaceId,
         contactId,
-        type: type as any,
+        type: type as ContactMethodEntity['type'],
         isPrimary: true,
       },
       {
@@ -2234,7 +2278,7 @@ export class AgencyContactsService {
 
     try {
       return await this.tagsRepo.save(tag);
-    } catch (error) {
+    } catch {
       throw new ConflictException(
         'A contact tag with this name already exists.',
       );
@@ -2381,7 +2425,7 @@ export class AgencyContactsService {
       },
     });
 
-    if (existing) {
+    if (existing?.status === 'active') {
       throw new ConflictException('This person/company link already exists.');
     }
 
@@ -2410,15 +2454,25 @@ export class AgencyContactsService {
     }
 
     const saved = await this.companyLinksRepo.save(
-      this.companyLinksRepo.create({
-        tenantId: ctx.tenantId,
-        workspaceId,
-        personContactId,
-        companyContactId,
-        role: dto.role ?? null,
-        isPrimary,
-        status: nextStatus,
-      }),
+      existing
+        ? Object.assign(existing, {
+            role: dto.role ?? existing.role,
+            isPrimary,
+            status: nextStatus,
+            linkedAt: new Date(),
+            unlinkedAt: nextStatus === 'active' ? null : new Date(),
+          })
+        : this.companyLinksRepo.create({
+            tenantId: ctx.tenantId,
+            workspaceId,
+            personContactId,
+            companyContactId,
+            role: dto.role ?? null,
+            isPrimary,
+            status: nextStatus,
+            linkedAt: new Date(),
+            unlinkedAt: nextStatus === 'active' ? null : new Date(),
+          }),
     );
 
     await this.syncPrimaryCompany(ctx, personContactId);
@@ -2485,12 +2539,14 @@ export class AgencyContactsService {
       );
       link.isPrimary = true;
       link.status = 'active';
+      link.unlinkedAt = null;
     } else if (dto.isPrimary === false) {
       link.isPrimary = false;
     }
     if (dto.role !== undefined) link.role = dto.role;
     if (dto.status !== undefined) {
       link.status = dto.status;
+      link.unlinkedAt = dto.status === 'active' ? null : new Date();
       if (dto.status !== 'active') link.isPrimary = false;
     }
 
@@ -2508,11 +2564,38 @@ export class AgencyContactsService {
 
     await this.findContactOrFail(ctx, personContactId);
 
-    await this.companyLinksRepo.delete({
-      tenantId: ctx.tenantId,
-      workspaceId,
-      personContactId,
-      companyContactId,
+    await this.dataSource.transaction(async (manager) => {
+      const link = await manager
+        .getRepository(ContactCompanyLinkEntity)
+        .findOne({
+          where: {
+            tenantId: ctx.tenantId,
+            workspaceId,
+            personContactId,
+            companyContactId,
+            status: 'active',
+          },
+          lock: { mode: 'pessimistic_write' },
+        });
+      if (!link) throw new NotFoundException('Person/company link not found.');
+      await manager
+        .getRepository(ContactCompanyLinkEntity)
+        .update(
+          { id: link.id, status: 'active' },
+          { status: 'inactive', isPrimary: false, unlinkedAt: new Date() },
+        );
+      if (this.clientAreaMemberships) {
+        await this.clientAreaMemberships.revokeForCrmRelationshipInTransaction(
+          manager,
+          {
+            tenantId: ctx.tenantId,
+            workspaceId,
+            personContactId,
+            companyContactId,
+            revokedByUserId: ctx.userId ?? null,
+          },
+        );
+      }
     });
 
     await this.syncPrimaryCompany(ctx, personContactId);
@@ -2548,7 +2631,7 @@ export class AgencyContactsService {
 
     try {
       return await this.segmentsRepo.save(segment);
-    } catch (error) {
+    } catch {
       throw new ConflictException(
         'A contact segment with this name already exists.',
       );

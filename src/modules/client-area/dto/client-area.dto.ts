@@ -3,6 +3,7 @@ import {
   IsIn,
   IsOptional,
   IsString,
+  IsUUID,
   Matches,
   MaxLength,
 } from 'class-validator';
@@ -81,9 +82,16 @@ export class ClientAreaResetPasswordDto {
 }
 
 export class CreateClientAreaInvitationDto {
+  /** CA4 primary Agency intent. The server derives the delivery email. */
+  @IsOptional()
+  @IsUUID()
+  contactId?: string;
+
+  /** CA2 compatibility only; server resolves one eligible CRM person or fails closed. */
+  @IsOptional()
   @IsEmail()
   @MaxLength(160)
-  email!: string;
+  email?: string;
 
   @IsIn(CLIENT_AREA_ROLES)
   role!: string;

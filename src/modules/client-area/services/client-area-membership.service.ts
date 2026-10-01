@@ -18,6 +18,7 @@ import { AgencyClient } from '../../clients/entities/agency-client.entity';
 import { AgencyClientCompanyContext } from '../../clients/entities/agency-client-company-context.entity';
 import { AgencyClientStatus } from '../../clients/enums';
 import { ContactEntity } from '../../contacts/entities/contact.entity';
+import { ClientAreaIdentityContactEntity } from '../entities/client-area-identity-contact.entity';
 import {
   CLIENT_AREA_ERROR_CODES,
   isClientAreaRole,
@@ -379,6 +380,99 @@ export class ClientAreaMembershipService {
 
       return { ...membership, role };
     });
+  }
+
+  /**
+   * CA4 relationship removal is a persisted revocation, not a hidden runtime
+   * denial. Only memberships whose identity is explicitly linked to the CRM
+   * person and whose Company Context uses the removed organization are hit.
+   */
+  async revokeForCrmRelationshipInTransaction(
+    manager: EntityManager,
+    input: {
+      tenantId: string;
+      workspaceId: string;
+      personContactId: string;
+      companyContactId: string;
+      revokedByUserId: string | null;
+    },
+  ): Promise<number> {
+    const rows = await manager
+      .getRepository(ClientAreaMembershipEntity)
+      .createQueryBuilder('membership')
+      .innerJoin(
+        ClientAreaIdentityContactEntity,
+        'identityContact',
+        `identityContact.tenant_id = membership.tenant_id
+          AND identityContact.user_id = membership.user_id
+          AND identityContact.status = 'active'`,
+      )
+      .innerJoin(
+        AgencyClientCompanyContext,
+        'company',
+        `company.id = membership.company_context_id
+          AND company.tenant_id = membership.tenant_id`,
+      )
+      .where('membership.tenant_id = :tenantId', { tenantId: input.tenantId })
+      .andWhere('membership.workspace_id = :workspaceId', {
+        workspaceId: input.workspaceId,
+      })
+      .andWhere('identityContact.workspace_id = :workspaceId', {
+        workspaceId: input.workspaceId,
+      })
+      .andWhere('identityContact.contact_id = :personContactId', {
+        personContactId: input.personContactId,
+      })
+      .andWhere('company.company_contact_id = :companyContactId', {
+        companyContactId: input.companyContactId,
+      })
+      .andWhere(`membership.status = 'active'`)
+      .setLock('pessimistic_write')
+      .getMany();
+
+    const now = new Date();
+    for (const membership of rows) {
+      await manager.getRepository(ClientAreaMembershipEntity).update(
+        { id: membership.id, status: 'active' },
+        {
+          status: 'revoked',
+          revokedAt: now,
+          revokedByUserId: input.revokedByUserId,
+        },
+      );
+      const remaining = await manager
+        .getRepository(ClientAreaMembershipEntity)
+        .exists({
+          where: {
+            tenantId: membership.tenantId,
+            userId: membership.userId,
+            status: 'active',
+          },
+        });
+      if (!remaining) {
+        await this.sessions.revokeAll(
+          membership.tenantId,
+          membership.userId,
+          manager,
+        );
+      }
+      if (input.revokedByUserId) {
+        await this.audit.record(manager, {
+          company: membership,
+          action: 'membership_revoked',
+          actorSurface: 'agency',
+          actorUserId: input.revokedByUserId,
+          membershipId: membership.id,
+          targetUserId: membership.userId,
+          previousRole: membership.role,
+          metadata: {
+            reason: 'crm_relationship_removed',
+            lastMembership: !remaining,
+          },
+        });
+      }
+    }
+    return rows.length;
   }
 
   listForUser(tenantId: string, userId: string) {

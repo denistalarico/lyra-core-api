@@ -48,6 +48,12 @@ export class ContactCompanyLinkEntity {
   @Column({ type: 'varchar', length: 20, default: 'active' })
   status!: 'active' | 'inactive' | 'archived';
 
+  @Column({ name: 'linked_at', type: 'timestamptz' })
+  linkedAt!: Date;
+
+  @Column({ name: 'unlinked_at', type: 'timestamptz', nullable: true })
+  unlinkedAt!: Date | null;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;
 

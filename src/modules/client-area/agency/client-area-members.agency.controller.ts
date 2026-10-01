@@ -76,6 +76,19 @@ export class ClientAreaMembersAgencyController {
     );
   }
 
+  @Get('eligible-contacts')
+  eligibleContacts(
+    @AuthenticatedUser() user: AuthTokenPayload,
+    @Param('clientId') clientId: string,
+    @Param('companyContextId') companyContextId: string,
+  ) {
+    return this.invitations.listEligibleContacts(
+      actorFrom(user),
+      clientId,
+      companyContextId,
+    );
+  }
+
   @Post('invitations/:invitationId/resend')
   @HttpCode(200)
   resend(

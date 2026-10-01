@@ -32,6 +32,7 @@ import {
   type ClientAreaModules,
 } from '../client-area.types';
 import { permissionsForClientAreaRole } from '../client-area-permissions.catalog';
+import { ClientAreaEligibilityService } from './client-area-eligibility.service';
 
 const AGENCY_CONNECTION = 'agency';
 const EMPTY_MODULES: ClientAreaModules = { approvals: false };
@@ -77,6 +78,7 @@ export class ClientAreaManagementService {
     private readonly invitationsRepo: Repository<ClientAreaInvitationEntity>,
     @InjectRepository(TenantProductEntitlementEntity, AGENCY_CONNECTION)
     private readonly entitlementsRepo: Repository<TenantProductEntitlementEntity>,
+    private readonly eligibility: ClientAreaEligibilityService,
   ) {}
 
   private async findSettings(tenantId: string, workspaceId: string) {
@@ -354,7 +356,12 @@ export class ClientAreaManagementService {
       where: { tenantId, workspaceId, status: 'active' },
     });
     const ids = contexts.map((context) => context.id);
-    const [settings, configured, memberships, invitations] = await Promise.all([
+    const [settings, configured, memberships, invitations]: [
+      ClientAreaSettingsEntity,
+      ClientAreaCompanySettingsEntity[],
+      ClientAreaMembershipEntity[],
+      ClientAreaInvitationEntity[],
+    ] = await Promise.all([
       this.getSettings(tenantId, workspaceId),
       ids.length
         ? this.companySettingsRepo.find({
@@ -465,14 +472,21 @@ export class ClientAreaManagementService {
       .sort((a, b) => a.company.localeCompare(b.company, 'pt-BR'));
   }
 
-  async preview(
+  /**
+   * Re-validated on every call: membership must still be active, the
+   * Company Context must still resolve, the Agency app must still be
+   * enabled, and the CRM identity chain (active identity-contact -> active
+   * PF -> active contact_company_link -> this company) must still hold.
+   * Nothing here is cached from a prior start, so a revoked membership, a
+   * disabled Company/app, an archived PF or a revoked identity link all
+   * fail the very next call.
+   */
+  private async resolvePreviewProjection(
     tenantId: string,
     workspaceId: string,
     agencyClientId: string,
     companyContextId: string,
-    actorUserId: string,
     membershipId: string,
-    action: 'preview_started' | 'preview_ended',
   ) {
     await this.assertAgencyEnabled(tenantId, workspaceId);
     const membership = await this.membershipsRepo.findOne({
@@ -487,21 +501,19 @@ export class ClientAreaManagementService {
     });
     if (!membership)
       throw new NotFoundException('Client Area membership not found.');
-    await this.previewEventsRepo.save(
-      this.previewEventsRepo.create({
-        tenantId,
-        workspaceId,
-        agencyClientId,
-        companyContextId,
-        agencyActorUserId: actorUserId,
-        targetMembershipId: membership.id,
-        action,
-      }),
+    const company = await this.assertUsableCompany(
+      tenantId,
+      workspaceId,
+      agencyClientId,
+      companyContextId,
     );
-    const [company, identity, profile, modules] = await Promise.all([
-      this.contextsRepo.findOne({
-        where: { id: companyContextId, tenantId, workspaceId, agencyClientId },
-      }),
+    const eligible = await this.eligibility.isMembershipEligible(
+      this.membershipsRepo.manager,
+      { tenantId, userId: membership.userId, companyContextId },
+    );
+    if (!eligible)
+      throw new NotFoundException('Client Area membership not found.');
+    const [identity, profile, modules, organization] = await Promise.all([
       this.securityRepo.findOne({
         where: { tenantId, userId: membership.userId },
       }),
@@ -514,15 +526,16 @@ export class ClientAreaManagementService {
         agencyClientId,
         companyContextId,
       }),
+      this.contactsRepo.findOne({
+        where: { id: company.companyContactId, tenantId, workspaceId },
+      }),
     ]);
-    const organization = company
-      ? await this.contactsRepo.findOne({
-          where: { id: company.companyContactId, tenantId, workspaceId },
-        })
-      : null;
+    const companyDisplayName =
+      organization?.displayName || organization?.legalName || 'Empresa';
     return {
+      membership,
       preview: {
-        surface: 'agency_client_preview',
+        surface: 'agency_client_preview' as const,
         companyContextId,
         membershipId: membership.id,
         user: {
@@ -532,13 +545,102 @@ export class ClientAreaManagementService {
             'Usuário cliente',
           email: identity?.currentEmail || null,
         },
-        company:
-          organization?.displayName || organization?.legalName || 'Empresa',
+        company: companyDisplayName,
+        displayName: companyDisplayName,
         role: membership.role,
         permissions: [...permissionsForClientAreaRole(membership.role)].sort(),
         modules,
-        readOnly: true,
+        branding: await this.branding(tenantId, workspaceId),
+        readOnly: true as const,
       },
+    };
+  }
+
+  async preview(
+    tenantId: string,
+    workspaceId: string,
+    agencyClientId: string,
+    companyContextId: string,
+    actorUserId: string,
+    membershipId: string,
+    action: 'preview_started' | 'preview_ended',
+  ) {
+    const resolved = await this.resolvePreviewProjection(
+      tenantId,
+      workspaceId,
+      agencyClientId,
+      companyContextId,
+      membershipId,
+    );
+    await this.previewEventsRepo.save(
+      this.previewEventsRepo.create({
+        tenantId,
+        workspaceId,
+        agencyClientId,
+        companyContextId,
+        agencyActorUserId: actorUserId,
+        targetMembershipId: resolved.membership.id,
+        action,
+      }),
+    );
+    return { preview: resolved.preview };
+  }
+
+  /**
+   * Read-only refresh of the same projection `preview()` returns, without
+   * writing an audit row. Used by the preview renderer while navigating so
+   * every internal page revalidates the membership/company/app chain
+   * without generating `preview_started`/`preview_ended` noise per page.
+   */
+  async previewContext(
+    tenantId: string,
+    workspaceId: string,
+    agencyClientId: string,
+    companyContextId: string,
+    membershipId: string,
+  ) {
+    const resolved = await this.resolvePreviewProjection(
+      tenantId,
+      workspaceId,
+      agencyClientId,
+      companyContextId,
+      membershipId,
+    );
+    return { preview: resolved.preview };
+  }
+
+  /**
+   * AP3 §42/§43 — the membership/company a preview may read, re-validated by
+   * the same chain `previewContext` runs. Returns the scope of a *module*
+   * read inside the preview plus the target's own permissions, so a preview
+   * of a viewer renders as a viewer. Read-only by construction: this returns
+   * a scope, and no Client Area mutation accepts one (they all require a
+   * `ClientAreaContext`, which only the Client Area guards can produce).
+   */
+  async previewModuleScope(
+    tenantId: string,
+    workspaceId: string,
+    agencyClientId: string,
+    companyContextId: string,
+    membershipId: string,
+  ) {
+    const resolved = await this.resolvePreviewProjection(
+      tenantId,
+      workspaceId,
+      agencyClientId,
+      companyContextId,
+      membershipId,
+    );
+    return {
+      scope: {
+        tenantId,
+        workspaceId,
+        agencyClientId,
+        companyContextId,
+      },
+      membership: resolved.membership,
+      modules: resolved.preview.modules,
+      permissions: permissionsForClientAreaRole(resolved.membership.role),
     };
   }
 

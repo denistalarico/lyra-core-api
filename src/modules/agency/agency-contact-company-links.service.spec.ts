@@ -3,6 +3,7 @@ import {
   ConflictException,
   NotFoundException,
 } from '@nestjs/common';
+/* eslint-disable @typescript-eslint/require-await */
 import type { Repository } from 'typeorm';
 import { ContactCompanyLinkEntity } from '../contacts/entities/contact-company-link.entity';
 import { ContactEntity } from '../contacts/entities/contact.entity';
@@ -75,10 +76,26 @@ describe('AgencyContactsService person/company links', () => {
 
     await fixture.service.removeCompanyLink(ctx, 'person-a', 'company-b');
 
-    expect(fixture.links).toHaveLength(1);
-    expect(fixture.links[0]).toMatchObject({
+    expect(fixture.links).toHaveLength(2);
+    expect(fixture.links).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          companyContactId: 'company-a',
+          isPrimary: true,
+        }),
+      ]),
+    );
+    expect(
+      fixture.links.find((link) => link.companyContactId === 'company-a'),
+    ).toMatchObject({
       companyContactId: 'company-a',
       isPrimary: true,
+    });
+    expect(
+      fixture.links.find((link) => link.companyContactId === 'company-b'),
+    ).toMatchObject({
+      status: 'inactive',
+      isPrimary: false,
     });
   });
 });
@@ -114,7 +131,12 @@ function makeFixture() {
           (link) =>
             link.tenantId === where.tenantId &&
             link.workspaceId === where.workspaceId &&
-            link.personContactId === where.personContactId &&
+            (where.id === undefined || link.id === where.id) &&
+            (where.personContactId === undefined ||
+              link.personContactId === where.personContactId) &&
+            (where.companyContactId === undefined ||
+              link.companyContactId === where.companyContactId) &&
+            (where.status === undefined || link.status === where.status) &&
             link.companyContactId === where.companyContactId,
         ) ?? null,
     ),
@@ -123,8 +145,10 @@ function makeFixture() {
         links
           .filter(
             (link) =>
-              link.tenantId === where.tenantId &&
-              link.workspaceId === where.workspaceId &&
+              (where.tenantId === undefined ||
+                link.tenantId === where.tenantId) &&
+              (where.workspaceId === undefined ||
+                link.workspaceId === where.workspaceId) &&
               link.personContactId === where.personContactId &&
               (where.status === undefined || link.status === where.status),
           )
@@ -152,9 +176,16 @@ function makeFixture() {
         links
           .filter(
             (link) =>
-              link.tenantId === where.tenantId &&
-              link.workspaceId === where.workspaceId &&
-              link.personContactId === where.personContactId &&
+              (where.tenantId === undefined ||
+                link.tenantId === where.tenantId) &&
+              (where.workspaceId === undefined ||
+                link.workspaceId === where.workspaceId) &&
+              (where.id === undefined || link.id === where.id) &&
+              (where.personContactId === undefined ||
+                link.personContactId === where.personContactId) &&
+              (where.companyContactId === undefined ||
+                link.companyContactId === where.companyContactId) &&
+              (where.status === undefined || link.status === where.status) &&
               (where.isPrimary === undefined ||
                 link.isPrimary === where.isPrimary),
           )
@@ -175,8 +206,15 @@ function makeFixture() {
     }),
   } as unknown as Repository<ContactCompanyLinkEntity>;
 
+  const dataSource = {
+    transaction: async (
+      work: (manager: {
+        getRepository: () => typeof linksRepository;
+      }) => Promise<unknown>,
+    ) => work({ getRepository: () => linksRepository }),
+  };
   const service = new AgencyContactsService(
-    {} as never,
+    dataSource as never,
     contactsRepository,
     {} as never,
     {} as never,

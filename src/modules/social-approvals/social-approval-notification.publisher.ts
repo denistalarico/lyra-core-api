@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import {
   NotificationActorType,
   NotificationInterestReason,
@@ -6,6 +6,11 @@ import {
 } from '../notifications/enums';
 import { NotificationEventProcessorService } from '../notifications/services';
 import { type SocialApprovalRequestEntity } from './entities';
+import {
+  CLIENT_APPROVAL_NOTIFIER,
+  type ClientApprovalNotificationType,
+  type ClientApprovalNotifier,
+} from './client-approval-notifier.port';
 
 export type SocialApprovalNotificationType =
   | 'awaiting_client'
@@ -15,8 +20,15 @@ export type SocialApprovalNotificationType =
 
 /**
  * The shared notification processor owns catalog validation, delivery and its
- * source-event idempotency. AP2 never guesses a Client Area recipient: all
- * events here are for the known agency requester.
+ * source-event idempotency for the **Agency** audience.
+ *
+ * AP3 adds the client audience without duplicating the taxonomy (§48): the
+ * same transitions publish here, and this one publisher fans out to the two
+ * channels that actually exist — the shared Agency stack for the requester,
+ * and the Client Area email channel for eligible memberships. Agency
+ * notifications are unchanged; nothing is sent twice to the same person,
+ * because the two audiences are disjoint by construction (an Agency operator
+ * cannot hold a Client Area membership).
  */
 @Injectable()
 export class SocialApprovalNotificationPublisher {
@@ -24,9 +36,53 @@ export class SocialApprovalNotificationPublisher {
 
   constructor(
     private readonly notifications: NotificationEventProcessorService,
+    @Optional()
+    @Inject(CLIENT_APPROVAL_NOTIFIER)
+    private readonly clientNotifications?: ClientApprovalNotifier,
   ) {}
 
   async publish(
+    type: SocialApprovalNotificationType,
+    approval: SocialApprovalRequestEntity,
+    actorUserId: string | null,
+  ): Promise<void> {
+    await Promise.all([
+      this.publishToAgency(type, approval, actorUserId),
+      this.publishToClient(type, approval),
+    ]);
+  }
+
+  /**
+   * A transition the Agency catalog has no event for, but the client should
+   * still hear about (§49: a cancelled request they were already asked to
+   * review; AP4 §24: an Agency operator's explicit client-visible reply, which
+   * is a comment, not an approval-status transition, so it has no Agency
+   * catalog event either). Kept separate so it cannot be mistaken for a new
+   * Agency event.
+   */
+  async publishClientOnly(
+    type: ClientApprovalNotificationType,
+    approval: SocialApprovalRequestEntity,
+    event?: { id: string; occurredAt: Date },
+  ): Promise<void> {
+    await this.clientNotifications?.publish(type, approval, event);
+  }
+
+  /**
+   * Client-facing transitions only. `approved`/`changes_requested` are the
+   * client's *own* decisions — mailing someone about what they just did is
+   * noise — so they stay Agency-only, exactly as AP2 had them.
+   */
+  private async publishToClient(
+    type: SocialApprovalNotificationType,
+    approval: SocialApprovalRequestEntity,
+  ): Promise<void> {
+    if (!this.clientNotifications) return;
+    if (type !== 'awaiting_client' && type !== 'superseded') return;
+    await this.clientNotifications.publish(type, approval);
+  }
+
+  private async publishToAgency(
     type: SocialApprovalNotificationType,
     approval: SocialApprovalRequestEntity,
     actorUserId: string | null,

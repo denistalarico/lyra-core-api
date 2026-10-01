@@ -53,6 +53,10 @@ export class ClientAreaInvitationEntity {
   @Column({ name: 'company_context_id', type: 'uuid' })
   companyContextId!: string;
 
+  /** CA4: the CRM person selected by the Agency, null only for legacy CA2 rows. */
+  @Column({ name: 'contact_id', type: 'uuid', nullable: true })
+  contactId!: string | null;
+
   /** As typed by the Agency operator (trimmed), for display. */
   @Column({ type: 'varchar', length: 160 })
   email!: string;

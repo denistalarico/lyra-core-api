@@ -10,7 +10,11 @@ import {
   SocialAnalyticsDashboardEntity,
   SocialAnalyticsReportEntity,
 } from '../modules/social-analytics-dashboards/entities';
-import { SocialApprovalCommentEntity, SocialApprovalRequestEntity, SocialApprovalStageDecisionEntity } from '../modules/social-approvals/entities';
+import {
+  SocialApprovalCommentEntity,
+  SocialApprovalRequestEntity,
+  SocialApprovalStageDecisionEntity,
+} from '../modules/social-approvals/entities';
 
 import { UserPreferencesEntity } from '../modules/settings/entities/user-preferences.entity';
 import { WorkspaceSettingsAiEntity } from '../modules/settings/entities/workspace-settings-ai.entity';
@@ -394,8 +398,10 @@ import {
 import { ClientAreaMembershipEntity } from '../modules/client-area/entities/client-area-membership.entity';
 import { ClientAreaInvitationEntity } from '../modules/client-area/entities/client-area-invitation.entity';
 import { ClientAreaMemberEventEntity } from '../modules/client-area/entities/client-area-member-event.entity';
+import { ClientAreaIdentityContactEntity } from '../modules/client-area/entities/client-area-identity-contact.entity';
 
 export const agencyEntities = [
+  ClientAreaIdentityContactEntity,
   ClientAreaMembershipEntity,
   ClientAreaInvitationEntity,
   ClientAreaMemberEventEntity,

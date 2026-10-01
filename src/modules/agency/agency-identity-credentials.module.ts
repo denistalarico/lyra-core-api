@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { SettingsCryptoService } from '../../common/crypto/settings-crypto.service';
 import { EmailModule } from '../email/email.module';
 import { AgencyIdentityCredentialsService } from './agency-identity-credentials.service';
+import { AGENCY_IDENTITY_CREDENTIALS } from './agency-identity-credentials.token';
 import {
   AgencyEmailTwoFactorCodeEntity,
   AgencyUserLoginEventEntity,
@@ -26,7 +27,16 @@ const AGENCY_CONNECTION = 'agency';
       AGENCY_CONNECTION,
     ),
   ],
-  providers: [AgencyIdentityCredentialsService, SettingsCryptoService],
-  exports: [AgencyIdentityCredentialsService],
+  providers: [
+    AgencyIdentityCredentialsService,
+    SettingsCryptoService,
+    // Alias for consumers that must not value-import the class (see the
+    // token's own file: the class drags `otplib` into their module graph).
+    {
+      provide: AGENCY_IDENTITY_CREDENTIALS,
+      useExisting: AgencyIdentityCredentialsService,
+    },
+  ],
+  exports: [AgencyIdentityCredentialsService, AGENCY_IDENTITY_CREDENTIALS],
 })
 export class AgencyIdentityCredentialsModule {}

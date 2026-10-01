@@ -20,6 +20,7 @@ import { ContactSegmentEntity } from '../contacts/entities/contact-segment.entit
 import { ContactTagAssignmentEntity } from '../contacts/entities/contact-tag-assignment.entity';
 import { ContactCompanyLinkEntity } from '../contacts/entities/contact-company-link.entity';
 import { PermissionsModule } from '../permissions';
+import { ClientAreaModule } from '../client-area/client-area.module';
 
 const AGENCY_CONNECTION = 'agency';
 
@@ -27,6 +28,7 @@ const AGENCY_CONNECTION = 'agency';
   imports: [
     FilesModule,
     PermissionsModule,
+    ClientAreaModule,
     TypeOrmModule.forFeature(
       [
         ContactEntity,

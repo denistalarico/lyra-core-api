@@ -3,6 +3,8 @@ import { describePostgresIntegration } from '../../testing/postgres-integration'
 import { AgencyDataSource } from '../agency-typeorm.datasource';
 import { CreateClientAreaMemberships1797000000000 } from './1797000000000-create-client-area-memberships';
 import { CreateClientAreaInvitations1797100000000 } from './1797100000000-create-client-area-invitations';
+import { CreateClientAreaManagement1797150000000 } from './1797150000000-create-client-area-management';
+import { CreateClientAreaCrmIdentityRelationships1797300000000 } from './1797300000000-create-client-area-crm-identity-relationships';
 
 const run = describePostgresIntegration();
 
@@ -76,8 +78,16 @@ run('CA1 client area memberships migration against PostgreSQL', () => {
           );
 
     try {
-      // CA2 depends on this table; a real revert undoes CA2 first (the
-      // transaction below is rolled back, so the database keeps both).
+      // CA2/CA3/CA4 all depend on this table (directly or transitively via
+      // client_area_invitations); a real revert undoes them first, in
+      // reverse deploy order, so `migration.down` below can drop
+      // client_area_memberships even when an earlier spec in this same run
+      // left the later tables committed. The transaction below is rolled
+      // back, so the database keeps all of them once this spec finishes.
+      await new CreateClientAreaCrmIdentityRelationships1797300000000().down(
+        runner,
+      );
+      await new CreateClientAreaManagement1797150000000().down(runner);
       await new CreateClientAreaInvitations1797100000000().down(runner);
       await migration.up(runner);
       await migration.down(runner);

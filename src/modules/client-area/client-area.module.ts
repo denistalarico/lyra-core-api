@@ -17,6 +17,7 @@ import {
 import { AgencyClient } from '../clients/entities/agency-client.entity';
 import { AgencyClientCompanyContext } from '../clients/entities/agency-client-company-context.entity';
 import { ContactEntity } from '../contacts/entities/contact.entity';
+import { ContactCompanyLinkEntity } from '../contacts/entities/contact-company-link.entity';
 import { EmailModule } from '../email/email.module';
 import { TenantProductEntitlementEntity } from '../platform/entities/tenant-product-entitlement.entity';
 import {
@@ -28,8 +29,13 @@ import { ClientAreaDirectoryController } from './controllers/client-area-directo
 import { ClientAreaInvitationsController } from './controllers/client-area-invitations.controller';
 import { ClientAreaInvitationEntity } from './entities/client-area-invitation.entity';
 import { ClientAreaMemberEventEntity } from './entities/client-area-member-event.entity';
+import { ClientAreaIdentityContactEntity } from './entities/client-area-identity-contact.entity';
 import { ClientAreaMembershipEntity } from './entities/client-area-membership.entity';
-import { ClientAreaCompanySettingsEntity, ClientAreaPreviewEventEntity, ClientAreaSettingsEntity } from './entities/client-area-settings.entity';
+import {
+  ClientAreaCompanySettingsEntity,
+  ClientAreaPreviewEventEntity,
+  ClientAreaSettingsEntity,
+} from './entities/client-area-settings.entity';
 import {
   ClientAreaAuthGuard,
   ClientAreaEnabledGuard,
@@ -42,6 +48,8 @@ import { ClientAreaEmailService } from './services/client-area-email.service';
 import { ClientAreaInvitationService } from './services/client-area-invitation.service';
 import { ClientAreaMemberAuditService } from './services/client-area-member-audit.service';
 import { ClientAreaMembershipService } from './services/client-area-membership.service';
+import { ClientAreaEligibilityService } from './services/client-area-eligibility.service';
+import { ClientAreaLegacyAuditService } from './services/client-area-legacy-audit.service';
 import { ClientAreaPasswordResetService } from './services/client-area-password-reset.service';
 import { ClientAreaRateLimitService } from './services/client-area-rate-limit.service';
 import { ClientAreaSessionService } from './services/client-area-session.service';
@@ -66,6 +74,7 @@ const AGENCY_CONNECTION = 'agency';
     TypeOrmModule.forFeature(
       [
         ClientAreaMembershipEntity,
+        ClientAreaIdentityContactEntity,
         ClientAreaSettingsEntity,
         ClientAreaCompanySettingsEntity,
         ClientAreaPreviewEventEntity,
@@ -80,6 +89,7 @@ const AGENCY_CONNECTION = 'agency';
         AgencyClient,
         AgencyClientCompanyContext,
         ContactEntity,
+        ContactCompanyLinkEntity,
         TenantProductEntitlementEntity,
       ],
       AGENCY_CONNECTION,
@@ -97,6 +107,8 @@ const AGENCY_CONNECTION = 'agency';
     ClientAreaAuthService,
     ClientAreaAuthorizationService,
     ClientAreaMembershipService,
+    ClientAreaEligibilityService,
+    ClientAreaLegacyAuditService,
     ClientAreaDirectoryService,
     ClientAreaMemberAuditService,
     ClientAreaEmailService,
@@ -108,7 +120,13 @@ const AGENCY_CONNECTION = 'agency';
     ClientAreaMembershipGuard,
   ],
   exports: [
+    // Re-exported so a module that already depends on the Client Area (AP3)
+    // gets the credential primitives without importing
+    // `AgencyIdentityCredentialsModule` itself: that import pulls `otplib`
+    // (ESM) into the module graph of every spec that reaches it.
+    AgencyIdentityCredentialsModule,
     ClientAreaMembershipService,
+    ClientAreaEligibilityService,
     ClientAreaInvitationService,
     ClientAreaRateLimitService,
     ClientAreaAuthorizationService,

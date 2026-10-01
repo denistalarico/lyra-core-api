@@ -58,6 +58,7 @@ function createHarness() {
               save: async (value: Record<string, unknown>) => {
                 const stored = {
                   id: `comment-${comments.length + 1}`,
+                  createdAt: new Date(),
                   ...value,
                 };
                 comments.push(stored);
@@ -449,5 +450,92 @@ describe('SocialApprovalsService AP1 state machine', () => {
       'SELECT pg_advisory_xact_lock(hashtext($1))',
       [expect.stringContaining(':company-a:creative_version:asset-a')],
     );
+  });
+});
+
+/**
+ * AP4 §2–§5/§24 — Agency comment visibility. `stage` never decides the
+ * audience (CA0 §AC); `visibility` defaults to `internal` and only an
+ * explicit `'client'` call both persists the client-visible row and fires the
+ * reply notification.
+ */
+describe('SocialApprovalsService AP4 comment visibility', () => {
+  function harnessWithNotifications() {
+    const base = createHarness();
+    const notifications = { publishClientOnly: jest.fn() };
+    const service = new SocialApprovalsService(
+      base.requestRepo as never,
+      { find: jest.fn() } as never,
+      { find: jest.fn() } as never,
+      { transaction: base.manager ? (fn: (m: unknown) => unknown) => fn(base.manager) : undefined } as never,
+      base.subjectResolver as never,
+      notifications as never,
+    );
+    return { ...base, service, notifications };
+  }
+
+  it('defaults to internal visibility when the caller omits it, even mid-client-stage (fail-closed)', async () => {
+    const { service, request, comments, notifications } = harnessWithNotifications();
+    request.status = 'awaiting_client';
+    request.currentStage = 'client';
+    request.sentToClientAt = new Date('2026-01-02T10:00:00.000Z');
+
+    await service.comment(scope, request.id, 'agency-user', 'Nota interna');
+
+    expect(comments).toEqual([
+      expect.objectContaining({ body: 'Nota interna', visibility: 'internal' }),
+    ]);
+    expect(notifications.publishClientOnly).not.toHaveBeenCalled();
+  });
+
+  it('persists a client-visible reply and fires exactly one agency_reply notification with the comment identity', async () => {
+    const { service, request, comments, notifications } = harnessWithNotifications();
+    request.status = 'awaiting_client';
+    request.currentStage = 'client';
+    request.sentToClientAt = new Date('2026-01-02T10:00:00.000Z');
+
+    await service.comment(
+      scope,
+      request.id,
+      'agency-user',
+      'Já ajustamos o CTA.',
+      'client',
+    );
+
+    expect(comments).toEqual([
+      expect.objectContaining({
+        body: 'Já ajustamos o CTA.',
+        visibility: 'client',
+      }),
+    ]);
+    expect(notifications.publishClientOnly).toHaveBeenCalledTimes(1);
+    expect(notifications.publishClientOnly).toHaveBeenCalledWith(
+      'agency_reply',
+      request,
+      { id: comments[0].id, occurredAt: expect.anything() },
+    );
+  });
+
+  it('refuses a client-visible reply before the approval has ever been sent to the client', async () => {
+    const { service, request, comments, notifications } = harnessWithNotifications();
+    request.status = 'draft';
+    request.sentToClientAt = null;
+
+    await expect(
+      service.comment(scope, request.id, 'agency-user', 'Oi', 'client'),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(comments).toHaveLength(0);
+    expect(notifications.publishClientOnly).not.toHaveBeenCalled();
+  });
+
+  it('never fires a notification for an internal comment written while the request waits on the client', async () => {
+    const { service, request, notifications } = harnessWithNotifications();
+    request.status = 'awaiting_client';
+    request.currentStage = 'client';
+    request.sentToClientAt = new Date('2026-01-02T10:00:00.000Z');
+
+    await service.comment(scope, request.id, 'agency-user', 'Nota interna', 'internal');
+
+    expect(notifications.publishClientOnly).not.toHaveBeenCalled();
   });
 });

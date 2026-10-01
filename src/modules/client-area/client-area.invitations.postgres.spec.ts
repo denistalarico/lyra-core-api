@@ -13,6 +13,7 @@ import { SettingsCryptoService } from '../../common/crypto/settings-crypto.servi
 import { getAgencyTypeOrmConfig } from '../../config/typeorm.config';
 import { CreateClientAreaMemberships1797000000000 } from '../../database/migrations/1797000000000-create-client-area-memberships';
 import { CreateClientAreaInvitations1797100000000 } from '../../database/migrations/1797100000000-create-client-area-invitations';
+import { CreateClientAreaCrmIdentityRelationships1797300000000 } from '../../database/migrations/1797300000000-create-client-area-crm-identity-relationships';
 import { assertSafePostgresTarget } from '../../testing/postgres-integration-guard';
 import { describePostgresIntegration } from '../../testing/postgres-integration';
 import { AgencyAuthModule } from '../agency/agency-auth.module';
@@ -172,12 +173,79 @@ run(
       return last[1];
     }
 
+    // CA4 requires the invited email to resolve to exactly one eligible CRM
+    // person for the target company before an invitation can even be
+    // created. These fixtures predate CA4, so every email used to create a
+    // NEW invitation during the run needs a person `contacts` row, a matching
+    // `contact_methods` row, and an active `contact_company_links` row to the
+    // target company's organization contact. `companyOrg` maps each company
+    // context constant used in this file to its organization contact and
+    // tenant/workspace (company C lives under tenant T2/W2, everything else
+    // under T/W).
+    const companyOrg: Record<
+      string,
+      { organizationContactId: string; tenantId: string; workspaceId: string }
+    > = {
+      [A]: { organizationContactId: orgA, tenantId: T, workspaceId: W },
+      [A2]: { organizationContactId: orgA2, tenantId: T, workspaceId: W },
+      [B]: { organizationContactId: orgB, tenantId: T, workspaceId: W },
+      [C]: { organizationContactId: orgC, tenantId: T2, workspaceId: W2 },
+    };
+    // Memoized by `${tenantId}:${normalizedEmail}` so repeated invites of the
+    // same email within a tenant reuse one CRM person (this matters for the
+    // "two invitations, one identity" tests), while the same email under a
+    // different tenant (the "same email at another agency" test) still gets
+    // its own person.
+    const crmPersonByKey = new Map<string, string>();
+    async function ensureCrmPerson(address: string, company: string) {
+      const target = companyOrg[company];
+      if (!target) {
+        throw new Error(`ensureCrmPerson: unknown company context ${company}`);
+      }
+      const normalized = address.trim().toLowerCase();
+      const key = `${target.tenantId}:${normalized}`;
+      let contactId = crmPersonByKey.get(key);
+      if (!contactId) {
+        contactId = randomUUID();
+        await db.query(
+          `INSERT INTO contacts (id, tenant_id, workspace_id, type, display_name)
+           VALUES ($1, $2, $3, 'person', $4)`,
+          [
+            contactId,
+            target.tenantId,
+            target.workspaceId,
+            `Contato ${normalized}`,
+          ],
+        );
+        await db.query(
+          `INSERT INTO contact_methods (id, tenant_id, workspace_id, contact_id, type, value, is_primary)
+           VALUES (gen_random_uuid(), $1, $2, $3, 'email', $4, true)`,
+          [target.tenantId, target.workspaceId, contactId, address.trim()],
+        );
+        crmPersonByKey.set(key, contactId);
+      }
+      await db.query(
+        `INSERT INTO contact_company_links
+           (id, tenant_id, workspace_id, person_contact_id, company_contact_id, status, is_primary, linked_at)
+         VALUES (gen_random_uuid(), $1, $2, $3, $4, 'active', false, now())
+         ON CONFLICT (person_contact_id, company_contact_id) DO NOTHING`,
+        [
+          target.tenantId,
+          target.workspaceId,
+          contactId,
+          target.organizationContactId,
+        ],
+      );
+      return contactId;
+    }
+
     async function invite(
       address: string,
       role = 'client_viewer',
       company = A,
       client = X,
     ) {
+      await ensureCrmPerson(address, company);
       const response = await admin()
         .post(`${base(client, company)}/invitations`, { email: address, role })
         .expect(201);
@@ -283,6 +351,9 @@ run(
       try {
         await new CreateClientAreaMemberships1797000000000().up(runner);
         await new CreateClientAreaInvitations1797100000000().up(runner);
+        await new CreateClientAreaCrmIdentityRelationships1797300000000().up(
+          runner,
+        );
       } finally {
         await runner.release();
       }
@@ -304,6 +375,22 @@ run(
         ($1,$5,$6,$7,$9,'active',true),($2,$5,$6,$7,$10,'active',false),
         ($3,$5,$6,$8,$11,'active',true),($4,$12,$13,$14,$15,'active',true)`,
         [A, A2, B, C, T, W, X, Y, orgA, orgA2, orgB, T2, W2, Z, orgC],
+      );
+      // Pre-existing gate (CA3), independent of CA4/CRM: `assertAgencyEnabled`,
+      // `hasIdentityAvailableCompany` and `assertIdentityAgencyEnabled` all
+      // require an enabled tenant-level row plus an enabled per-company row
+      // before any membership grants access. Mirrors the seeding pattern in
+      // client-area.security-matrix.postgres.spec.ts.
+      await db.query(
+        `INSERT INTO client_area_settings (tenant_id,workspace_id,enabled) VALUES
+        ($1,$2,true),($3,$4,true)`,
+        [T, W, T2, W2],
+      );
+      await db.query(
+        `INSERT INTO client_area_company_settings (tenant_id,workspace_id,agency_client_id,company_context_id,enabled,approvals_enabled) VALUES
+        ($1,$2,$3,$5,true,true),($1,$2,$3,$6,true,true),
+        ($1,$2,$4,$7,true,true),($8,$9,$10,$11,true,true)`,
+        [T, W, X, Y, A, A2, B, T2, W2, Z, C],
       );
 
       const identities: Array<[string, string, string, boolean]> = [
@@ -373,6 +460,45 @@ run(
           [T, W, Y, B, user, ADMIN],
         );
       }
+
+      // CA4: every Client Area identity needs a linked CRM person. Seed one
+      // for each of the two pre-existing members (EXIST, EXIST2FA), both
+      // eligible for company B (matching their existing membership above).
+      for (const [user, address] of [
+        [EXIST, email('exist')],
+        [EXIST2FA, email('exist2fa')],
+      ] as const) {
+        const personContactId = randomUUID();
+        await db.query(
+          `INSERT INTO contacts (id, tenant_id, workspace_id, type, display_name)
+           VALUES ($1, $2, $3, 'person', $4)`,
+          [personContactId, T, W, `Contato ${address}`],
+        );
+        await db.query(
+          `INSERT INTO contact_methods (id, tenant_id, workspace_id, contact_id, type, value, is_primary)
+           VALUES (gen_random_uuid(), $1, $2, $3, 'email', $4, true)`,
+          [T, W, personContactId, address],
+        );
+        await db.query(
+          `INSERT INTO contact_company_links
+             (id, tenant_id, workspace_id, person_contact_id, company_contact_id, status, is_primary, linked_at)
+           VALUES (gen_random_uuid(), $1, $2, $3, $4, 'active', false, now())`,
+          [T, W, personContactId, orgB],
+        );
+        await db.query(
+          `INSERT INTO client_area_identity_contacts
+             (id, tenant_id, workspace_id, user_id, contact_id, status, linked_at)
+           VALUES (gen_random_uuid(), $1, $2, $3, $4, 'active', now())`,
+          [T, W, user, personContactId],
+        );
+        // Register with ensureCrmPerson's memo so later invites of this same
+        // email (e.g. to company A/A2) reuse this contact and only add a new
+        // contact_company_links row, instead of creating a second person.
+        crmPersonByKey.set(
+          `${T}:${address.trim().toLowerCase()}`,
+          personContactId,
+        );
+      }
     }, 90_000);
 
     beforeEach(() => {
@@ -398,6 +524,15 @@ run(
             'user_profile',
             'workspace_users',
             'platform_permission_audit_events',
+            // CA4 CRM identity bridge — must be deleted before `contacts`
+            // (FK ... REFERENCES contacts ON DELETE RESTRICT).
+            'client_area_identity_contacts',
+            'contact_company_links',
+            'contact_methods',
+            // CA3 settings gates — `client_area_company_settings` FKs to
+            // `agency_client_company_contexts` (RESTRICT), delete first.
+            'client_area_company_settings',
+            'client_area_settings',
             'agency_client_company_contexts',
             'agency_clients',
             'contacts',
@@ -558,6 +693,7 @@ run(
 
       it('#3 Agency operators (active seat or pending seat) cannot be invited; becoming one after the invite blocks acceptance (audited)', async () => {
         for (const address of [email('manager'), email('seat')]) {
+          await ensureCrmPerson(address, A);
           const response = await admin()
             .post(`${base(X, A)}/invitations`, {
               email: address,
@@ -675,6 +811,10 @@ run(
       });
 
       it('#10 two identities with the invited email fail closed at invite and at acceptance (audited)', async () => {
+        // Exactly one CRM person for email('dup')/company A, so the request
+        // reaches assertInvitable and fails on account ambiguity (the two
+        // user_security_settings rows below), not on CRM ineligibility.
+        await ensureCrmPerson(email('dup'), A);
         const refused = await admin()
           .post(`${base(X, A)}/invitations`, {
             email: email('dup'),
@@ -888,6 +1028,7 @@ run(
         const first = await invite(address);
         await signup(first.token).expect(200);
 
+        await ensureCrmPerson(address, C);
         const other = await asAgency(agency.admin2)
           .post(`${base(Z, C)}/invitations`, {
             email: address,
@@ -1195,6 +1336,7 @@ run(
 
       it('a failed email keeps the invitation and says so', async () => {
         sendEmail.mockRejectedValueOnce(new Error('smtp down'));
+        await ensureCrmPerson(email('smtp'), A);
         const response = await admin()
           .post(`${base(X, A)}/invitations`, {
             email: email('smtp'),
