@@ -93,6 +93,13 @@ export class ClientAreaSettingsEntity {
     default: false,
   })
   approvalsDefaultEnabled!: boolean;
+  /** CCOM1 — default for a company's `conversations_enabled`, same as above. */
+  @Column({
+    name: 'conversations_default_enabled',
+    type: 'boolean',
+    default: false,
+  })
+  conversationsDefaultEnabled!: boolean;
   @Column({
     name: 'domain_mode',
     type: 'varchar',
@@ -141,6 +148,13 @@ export class ClientAreaCompanySettingsEntity {
   @Column({ type: 'boolean', default: false }) enabled!: boolean;
   @Column({ name: 'approvals_enabled', type: 'boolean', default: false })
   approvalsEnabled!: boolean;
+  /**
+   * CCOM1 §19 — the per-company switch for conversations, in the same shape as
+   * `approvals_enabled` rather than a parallel settings table. Defaults to
+   * false: a channel to the outside is opt-in per company.
+   */
+  @Column({ name: 'conversations_enabled', type: 'boolean', default: false })
+  conversationsEnabled!: boolean;
   @Column({
     name: 'default_role',
     type: 'varchar',

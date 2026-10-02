@@ -87,7 +87,10 @@ export class ClientAreaDirectoryService {
       displayName: context.companyDisplayName,
       role: context.role,
       permissions: [...context.permissions].sort(),
-      modules: { approvals: context.modules.approvals },
+      modules: {
+        approvals: context.modules.approvals,
+        conversations: context.modules.conversations,
+      },
       branding: await this.management.branding(context.tenantId, context.workspaceId),
     };
   }

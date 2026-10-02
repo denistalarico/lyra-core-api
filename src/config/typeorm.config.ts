@@ -399,9 +399,19 @@ import { ClientAreaMembershipEntity } from '../modules/client-area/entities/clie
 import { ClientAreaInvitationEntity } from '../modules/client-area/entities/client-area-invitation.entity';
 import { ClientAreaMemberEventEntity } from '../modules/client-area/entities/client-area-member-event.entity';
 import { ClientAreaIdentityContactEntity } from '../modules/client-area/entities/client-area-identity-contact.entity';
+import {
+  ClientConversationAttachmentEntity,
+  ClientConversationEntity,
+  ClientConversationMessageEntity,
+  ClientConversationParticipantEntity,
+} from '../modules/client-conversations/entities';
 
 export const agencyEntities = [
   ClientAreaIdentityContactEntity,
+  ClientConversationEntity,
+  ClientConversationParticipantEntity,
+  ClientConversationMessageEntity,
+  ClientConversationAttachmentEntity,
   ClientAreaMembershipEntity,
   ClientAreaInvitationEntity,
   ClientAreaMemberEventEntity,

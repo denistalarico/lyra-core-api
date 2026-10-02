@@ -60,6 +60,8 @@ import { SocialCreativeStudioModule } from './modules/social-creative-studio/soc
 import { SocialAnalyticsDashboardsModule } from './modules/social-analytics-dashboards/social-analytics-dashboards.module';
 import { SocialApprovalsModule } from './modules/social-approvals/social-approvals.module';
 import { ClientAreaModule } from './modules/client-area/client-area.module';
+import { ClientConversationApprovalsModule } from './modules/client-conversations/client-conversation-approvals.module';
+import { ClientConversationsModule } from './modules/client-conversations/client-conversations.module';
 import { ClientAreaApprovalsModule } from './modules/social-approvals/client/client-approvals.module';
 import { ClientAreaAgencyModule } from './modules/client-area/agency/client-area-agency.module';
 
@@ -127,9 +129,14 @@ import { ClientAreaAgencyModule } from './modules/client-area/agency/client-area
     SocialAnalyticsDashboardsModule,
     SocialApprovalsModule,
     ClientAreaModule,
+    ClientConversationsModule,
     // AP3 — the Client Area approvals surface. Wired here rather than inside
     // either module so the dependency arrow stays Client Area → domain.
     ClientAreaApprovalsModule,
+    // CCOM2 — the join that lets approvals post cards into conversations and
+    // lets the conversation timeline resolve them. Both domains work without
+    // it; it is what connects them (see the module's own note).
+    ClientConversationApprovalsModule,
     ClientAreaAgencyModule,
     SocialOrganicModule,
   ],

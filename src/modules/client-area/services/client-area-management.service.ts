@@ -35,7 +35,10 @@ import { permissionsForClientAreaRole } from '../client-area-permissions.catalog
 import { ClientAreaEligibilityService } from './client-area-eligibility.service';
 
 const AGENCY_CONNECTION = 'agency';
-const EMPTY_MODULES: ClientAreaModules = { approvals: false };
+const EMPTY_MODULES: ClientAreaModules = {
+  approvals: false,
+  conversations: false,
+};
 
 function trimOrNull(value: string | null | undefined) {
   return value?.trim() || null;
@@ -96,6 +99,7 @@ export class ClientAreaManagementService {
         loginLayout: 'centered',
         defaultRole: 'client_viewer',
         approvalsDefaultEnabled: false,
+        conversationsDefaultEnabled: false,
         domainMode: 'default',
         domainVerificationStatus: 'not_configured',
       })
@@ -242,6 +246,31 @@ export class ClientAreaManagementService {
         companySettings.approvalsEnabled &&
         isActiveProductEntitlement(entitlement, input.now ?? new Date()),
       ),
+      /**
+       * CCOM1 §21 — conversations is gated by the Client Area itself, with no
+       * product entitlement, and that is a decision against the real model
+       * rather than an omission.
+       *
+       * The entitlement above is read on `client.managedTenantId` — the
+       * *client's* tenant — and `approvals` requires `Social` there because an
+       * approval is a Social artefact: a client with no Social contract has
+       * nothing to approve. A conversation is not an artefact of any product;
+       * it is the agency talking to its client, and it must work for a client
+       * who buys only Social, only LeadFlow, or neither.
+       *
+       * `PlatformProductKey.Agency` was considered and rejected: it enumerates
+       * the agency's *own* modules (dashboard, finance, team…), is held by the
+       * agency tenant rather than a managed one, and is used as a runtime gate
+       * nowhere in the codebase. Gating on it would fail closed for every real
+       * client — the wrong kind of "safe", since it would silently disable a
+       * channel the agency explicitly switched on.
+       *
+       * So the gate is the three enablement layers that already apply above:
+       * the platform flag (`CLIENT_AREA_ENABLED`), the agency's Client Area
+       * settings, and this company's own row. Membership and role are enforced
+       * per request by the guard chain, never cached here.
+       */
+      conversations: Boolean(companySettings.conversationsEnabled),
     };
   }
 
@@ -269,6 +298,7 @@ export class ClientAreaManagementService {
         companyContextId,
         enabled: false,
         approvalsEnabled: global.approvalsDefaultEnabled,
+        conversationsEnabled: global.conversationsDefaultEnabled,
         defaultRole: global.defaultRole,
       })
     );
@@ -404,6 +434,9 @@ export class ClientAreaManagementService {
         approvalsEnabledCompanies: enabled.filter(
           (item) => item.approvalsEnabled,
         ).length,
+        conversationsEnabledCompanies: enabled.filter(
+          (item) => item.conversationsEnabled,
+        ).length,
       },
     };
   }
@@ -460,6 +493,7 @@ export class ClientAreaManagementService {
             clientBy.get(context.agencyClientId)?.displayName || 'Cliente',
           enabled: config?.enabled ?? false,
           approvalsEnabled: config?.approvalsEnabled ?? false,
+          conversationsEnabled: config?.conversationsEnabled ?? false,
           defaultRole: config?.defaultRole ?? 'client_viewer',
           membersCount: memberships.filter(
             (item) => item.companyContextId === context.id,

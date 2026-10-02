@@ -12,6 +12,7 @@ import {
   SocialPlanEntity,
 } from '../social-planner/entities';
 import { ApprovalClientReviewService } from './approval-client-review.service';
+import { ClientConversationCardRegistry } from './client-conversation-card.port';
 import { SocialApprovalNotificationPublisher } from './social-approval-notification.publisher';
 import {
   SocialApprovalCommentEntity,
@@ -59,12 +60,18 @@ import { ApprovalSubjectResolver } from './subjects/approval-subject-resolver';
     ApprovalSubjectResolver,
     SocialApprovalNotificationPublisher,
     ApprovalClientReviewService,
+    // CCOM2 §7 — declared here so it is inside the publisher's own resolution
+    // context; `ClientConversationApprovalsModule` fills it on init. Empty
+    // until then, which is how this domain keeps working without the
+    // conversation surface.
+    ClientConversationCardRegistry,
   ],
   exports: [
     SocialApprovalsService,
     ApprovalClientReviewService,
     ApprovalSubjectResolver,
     SocialApprovalNotificationPublisher,
+    ClientConversationCardRegistry,
     TypeOrmModule,
   ],
 })

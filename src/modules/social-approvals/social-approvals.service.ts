@@ -335,12 +335,43 @@ export class SocialApprovalsService {
     // internal note: `visibility` already gates everything above this line.
     // The comment's own id/createdAt disambiguates the ledger event so two
     // separate replies on the same approval both deliver (§28).
-    if (visibility === 'client')
+    if (visibility === 'client') {
       await this.notifications?.publishClientOnly('agency_reply', request, {
         id: saved.id,
         occurredAt: saved.createdAt,
       });
+      // CCOM2 §43 — the comment is now part of the conversation timeline
+      // (projected, never copied), so open timelines are told to re-read.
+      await this.announceTimeline(request, 'comment_created');
+    }
     return saved;
+  }
+
+  /**
+   * CCOM2 §43/§45 — tells open conversation timelines to re-read.
+   *
+   * Defensive on purpose, on two axes. The publisher is an optional injection,
+   * and it may also be a stub that predates this method — several specs build
+   * one with just the fields they assert on. More importantly, this is a
+   * *signal about an effect*: the comment is already written and the decision
+   * already taken, so a missing re-read must never turn a committed transition
+   * into a thrown error (§10, §42: no approval rule may contaminate the
+   * conversation path, and no conversation effect may contaminate approvals).
+   */
+  private async announceTimeline(
+    request: SocialApprovalRequestEntity,
+    reason: 'comment_created' | 'decision_changed',
+  ): Promise<void> {
+    const publisher = this.notifications;
+    // Probed rather than called blind, and never detached from its object: a
+    // partially-stubbed publisher must be a no-op, not a TypeError.
+    if (typeof publisher?.announceConversationActivity !== 'function') return;
+
+    try {
+      await publisher.announceConversationActivity(request, reason);
+    } catch {
+      // The publisher already logs; swallowing here keeps the transition whole.
+    }
   }
   async approveInternal(
     scope: CompanyAwareScope,
@@ -405,6 +436,9 @@ export class SocialApprovalsService {
       return manager.save(request);
     });
     await this.notifications?.publish('approved', saved, actor.userId);
+    // CCOM2 §45 — the card's status is resolved on read, never persisted, so
+    // a decision only needs the timeline to re-read. No second card is created.
+    await this.announceTimeline(saved, 'decision_changed');
     return saved;
   }
   async clientRequestChanges(
@@ -425,9 +459,13 @@ export class SocialApprovalsService {
     const actor = this.user(actorUserId);
     const request = await this.find(scope, id);
     this.assertStatus(request, ['awaiting_client']);
-    return this.dataSource.transaction((manager) =>
+    const saved = await this.dataSource.transaction((manager) =>
       this.addCommentEntity(manager, request, actor, body, 'client', 'client'),
     );
+    // CCOM2 §43 — a client comment is client-visible by construction here, so
+    // the Agency "Clientes" timeline and the client's own both re-read.
+    await this.announceTimeline(request, 'comment_created');
+    return saved;
   }
   private async requestChangesAs(
     scope: CompanyAwareScope,
@@ -471,8 +509,13 @@ export class SocialApprovalsService {
       request.currentStage = 'internal';
       return manager.save(request);
     });
-    if (stage === 'client')
+    if (stage === 'client') {
       await this.notifications?.publish('changes_requested', saved, actor.userId);
+      // CCOM2 §40/§45 — the card now resolves as `in_revision` and its actions
+      // fall away; the client's reason is a client-visible comment that the
+      // timeline projects. Both are read-time facts, so this is a re-read.
+      await this.announceTimeline(saved, 'decision_changed');
+    }
     return saved;
   }
   async cancel(

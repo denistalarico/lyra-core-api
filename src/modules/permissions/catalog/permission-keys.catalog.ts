@@ -136,6 +136,14 @@ const RAW_PERMISSIONS: RawPermission[] = [
   ['agency.chat.channels.archive.all', ADMIN_UP],
   ['agency.chat.channels.delete.owner_only', OWNER_ONLY, true],
 
+  // 9.2b Client Conversations (CCOM1 §28)
+  // Deliberately NOT folded into `agency.chat.*`: those keys govern internal
+  // channels and are held by every role, so reusing them would mean anyone who
+  // can post in an internal channel can also write to a client, with no key to
+  // revoke. Same default roles today, separately revocable tomorrow.
+  ['agency.client_conversations.view.assigned', ALL_ROLES],
+  ['agency.client_conversations.send.assigned', ALL_ROLES],
+
   // 9.3 Projects e Tasks
   ['agency.projects.project.view.assigned', ALL_ROLES],
   ['agency.projects.project.create.department', MANAGER_UP],

@@ -11,6 +11,7 @@ import {
   type ClientApprovalNotificationType,
   type ClientApprovalNotifier,
 } from './client-approval-notifier.port';
+import { ClientConversationCardRegistry } from './client-conversation-card.port';
 
 export type SocialApprovalNotificationType =
   | 'awaiting_client'
@@ -39,6 +40,18 @@ export class SocialApprovalNotificationPublisher {
     @Optional()
     @Inject(CLIENT_APPROVAL_NOTIFIER)
     private readonly clientNotifications?: ClientApprovalNotifier,
+    /**
+     * CCOM2 §7 — the conversation timeline, as a third audience of the same
+     * single fan-out point (CCOM0 §27).
+     *
+     * A registry rather than an optional token: a token bound by the join
+     * module would not be in this provider's resolution context and would
+     * silently inject `undefined` (see the port's note). The registry is
+     * provided by this module, so it always resolves; whether it holds an
+     * implementation is what says if the surface is wired.
+     */
+    @Optional()
+    private readonly conversationCards?: ClientConversationCardRegistry,
   ) {}
 
   async publish(
@@ -49,6 +62,7 @@ export class SocialApprovalNotificationPublisher {
     await Promise.all([
       this.publishToAgency(type, approval, actorUserId),
       this.publishToClient(type, approval),
+      this.publishToConversation(type, approval),
     ]);
   }
 
@@ -82,6 +96,88 @@ export class SocialApprovalNotificationPublisher {
     await this.clientNotifications.publish(type, approval);
   }
 
+  /**
+   * CCOM2 §7/§8/§9 — the conversation card.
+   *
+   * ONLY `awaiting_client` PUBLISHES A CARD
+   * --------------------------------------
+   * The card announces "there is something new for you to review", which is
+   * what that one transition means. `approved` and `changes_requested` are the
+   * client's own decisions and `superseded` is resolved on read by the card
+   * that already exists — §30/§52 require that a decision never create a second
+   * card, and the cleanest way to guarantee that is for no other transition to
+   * reach this method at all. Each new revision is a *different* approval and
+   * therefore its own `awaiting_client` event, which is why a replacement chain
+   * still produces one card per revision (§51/§52).
+   *
+   * THE DEDUPE KEY IS THE EVENT'S OWN IDENTITY
+   * ------------------------------------------
+   * Byte-for-byte the `eventId` the Agency ledger deduplicates on, built from
+   * the same `occurredAt()`. So a retried publication of one event cannot
+   * produce a second card (§9/§51), and the card's idempotency cannot drift
+   * from the notification's — there is one key, not two derivations of one.
+   */
+  private async publishToConversation(
+    type: SocialApprovalNotificationType,
+    approval: SocialApprovalRequestEntity,
+  ): Promise<void> {
+    if (type !== 'awaiting_client') return;
+
+    const cards = this.conversationCards?.get();
+    if (!cards) return;
+
+    try {
+      await cards.publishApprovalCard({
+        approval,
+        dedupeKey: this.eventIdFor(type, approval),
+      });
+    } catch (error) {
+      // §10 — the transition is the fact and the card is an effect; a failure
+      // to post must never fail the approval. The implementation already
+      // swallows its own errors, so reaching here means something unexpected.
+      this.logger.error(
+        `Failed to project approval card for ${approval.id}`,
+        error instanceof Error ? error.stack : String(error),
+      );
+    }
+  }
+
+  /**
+   * CCOM2 §43/§45 — tells the conversation timeline that an approval changed
+   * without a conversation row being written.
+   *
+   * Called for a client-visible comment and for a decision. Not a notification
+   * and not a card: no row is created, nothing is deduplicated, and the only
+   * effect is that open timelines re-read.
+   */
+  async announceConversationActivity(
+    approval: SocialApprovalRequestEntity,
+    reason: 'comment_created' | 'decision_changed',
+  ): Promise<void> {
+    const cards = this.conversationCards?.get();
+    if (!cards) return;
+    try {
+      await cards.announceApprovalActivity({ approval, reason });
+    } catch (error) {
+      this.logger.warn(
+        `Failed to announce approval activity for ${approval.id}: ${
+          error instanceof Error ? error.message : 'unknown_error'
+        }`,
+      );
+    }
+  }
+
+  /** The event's identity, shared by the ledger and the card's dedupe key. */
+  private eventIdFor(
+    type: SocialApprovalNotificationType,
+    approval: SocialApprovalRequestEntity,
+  ): string {
+    return `social.approval.${type}:${approval.id}:${this.occurredAt(
+      type,
+      approval,
+    ).toISOString()}`;
+  }
+
   private async publishToAgency(
     type: SocialApprovalNotificationType,
     approval: SocialApprovalRequestEntity,
@@ -90,7 +186,9 @@ export class SocialApprovalNotificationPublisher {
     const occurredAt = this.occurredAt(type, approval);
     try {
       await this.notifications.process({
-        eventId: `social.approval.${type}:${approval.id}:${occurredAt.toISOString()}`,
+        // Shared with the conversation card's dedupe key (§9), so one event
+        // cannot produce one notification and two cards.
+        eventId: this.eventIdFor(type, approval),
         eventType: `social.approval.${type}`,
         tenantId: approval.tenantId,
         workspaceId: approval.workspaceId,

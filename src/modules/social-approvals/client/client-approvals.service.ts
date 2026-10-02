@@ -246,6 +246,22 @@ export class ClientApprovalsService {
   }
 
   /**
+   * CCOM2 §17 — the same author resolution, for the conversation timeline.
+   *
+   * A thin alias rather than a copy: the conversation projects approval
+   * comments and must name their authors exactly as the approvals detail does,
+   * including showing the agency as a team rather than as an operator. Letting
+   * the timeline resolve names itself would be a second place where an
+   * operator's display name could reach a client.
+   */
+  resolveTimelineAuthors(
+    scope: CompanyAwareScope,
+    userIds: readonly (string | null)[],
+  ) {
+    return this.resolveAuthors(scope, userIds);
+  }
+
+  /**
    * Display names for the people in a thread (§17).
    *
    * A client author is someone with a membership in *this* company: their name

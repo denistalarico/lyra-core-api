@@ -25,11 +25,15 @@ export const CLIENT_AREA_PERMISSION_KEYS = [
   'client_area.approvals.view',
   'client_area.approvals.comment',
   'client_area.approvals.decide',
+  // CCOM1 — conversations. `send` is separate from `view` because a viewer
+  // preset must be able to read a thread without being able to speak into it.
+  'client_area.conversations.view',
+  'client_area.conversations.send',
 ] as const;
 export type ClientAreaPermissionKey =
   (typeof CLIENT_AREA_PERMISSION_KEYS)[number];
 
-export const CLIENT_AREA_MODULE_KEYS = ['approvals'] as const;
+export const CLIENT_AREA_MODULE_KEYS = ['approvals', 'conversations'] as const;
 export type ClientAreaModuleKey = (typeof CLIENT_AREA_MODULE_KEYS)[number];
 
 export type ClientAreaModules = Record<ClientAreaModuleKey, boolean>;

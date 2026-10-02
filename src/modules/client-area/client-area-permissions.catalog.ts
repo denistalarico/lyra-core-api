@@ -19,15 +19,24 @@ export const CLIENT_AREA_ROLE_PERMISSIONS: Readonly<
     'client_area.approvals.view',
     'client_area.approvals.comment',
     'client_area.approvals.decide',
+    'client_area.conversations.view',
+    'client_area.conversations.send',
   ] as const),
   client_operator: Object.freeze([
     'client_area.approvals.view',
     'client_area.approvals.comment',
     'client_area.approvals.decide',
+    'client_area.conversations.view',
+    'client_area.conversations.send',
   ] as const),
+  // CCOM1 §18 — a viewer reads the thread but cannot send. Note this differs
+  // from approvals, where a viewer may comment: an approval comment is scoped
+  // to one artefact under review, while a conversation message is an open
+  // channel to the agency, so the write there is the operator's call.
   client_viewer: Object.freeze([
     'client_area.approvals.view',
     'client_area.approvals.comment',
+    'client_area.conversations.view',
   ] as const),
 });
 

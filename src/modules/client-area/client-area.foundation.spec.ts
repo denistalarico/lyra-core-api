@@ -110,12 +110,18 @@ describe('CA1 Client Area permission catalog', () => {
       'client_area.approvals.comment',
       'client_area.approvals.decide',
       'client_area.approvals.view',
+      'client_area.conversations.send',
+      'client_area.conversations.view',
     ]);
+    // CCOM1 — admin and operator hold the same preset, as they did for
+    // approvals: the distinction between them is not about conversations.
     expect([...permissionsForClientAreaRole('client_operator')].sort()).toEqual(
       [
         'client_area.approvals.comment',
         'client_area.approvals.decide',
         'client_area.approvals.view',
+        'client_area.conversations.send',
+        'client_area.conversations.view',
       ],
     );
     expect(
@@ -124,6 +130,20 @@ describe('CA1 Client Area permission catalog', () => {
       ),
     ).toBe(false);
     expect(Object.isFrozen(CLIENT_AREA_ROLE_PERMISSIONS)).toBe(true);
+  });
+
+  /**
+   * CCOM1 §18 — a viewer reads the thread and cannot write to it. Asserted
+   * separately from the admin/operator presets because it is the one place
+   * where conversations and approvals deliberately differ: a viewer may
+   * comment on an approval (scoped to one artefact under review) but may not
+   * open a message to the agency.
+   */
+  it('lets a viewer read conversations but not send', () => {
+    const viewer = permissionsForClientAreaRole('client_viewer');
+
+    expect(viewer.has('client_area.conversations.view')).toBe(true);
+    expect(viewer.has('client_area.conversations.send')).toBe(false);
   });
 
   it('stays outside the Agency catalog and Agency role names', () => {
@@ -151,7 +171,7 @@ describe('CA1 toCompanyAwareScope → ApprovalClientReviewService', () => {
     companyDisplayName: 'Empresa A',
     role: 'client_operator',
     permissions: permissionsForClientAreaRole('client_operator'),
-    modules: { approvals: true },
+    modules: { approvals: true, conversations: true },
   };
 
   it('produces a full company scope from the validated membership only', () => {

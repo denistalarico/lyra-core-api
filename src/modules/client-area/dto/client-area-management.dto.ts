@@ -29,6 +29,7 @@ export class PatchClientAreaSettingsDto {
   @IsIn(['client_admin', 'client_operator', 'client_viewer'])
   defaultRole?: ClientAreaRole;
   @IsOptional() @IsBoolean() approvalsDefaultEnabled?: boolean;
+  @IsOptional() @IsBoolean() conversationsDefaultEnabled?: boolean;
   @IsOptional() @IsIn(['default', 'custom']) domainMode?: 'default' | 'custom';
   @IsOptional() @IsString() @MaxLength(253) customDomain?: string | null;
 }
@@ -36,6 +37,7 @@ export class PatchClientAreaSettingsDto {
 export class PatchClientAreaCompanySettingsDto {
   @IsOptional() @IsBoolean() enabled?: boolean;
   @IsOptional() @IsBoolean() approvalsEnabled?: boolean;
+  @IsOptional() @IsBoolean() conversationsEnabled?: boolean;
   @IsOptional()
   @IsIn(['client_admin', 'client_operator', 'client_viewer'])
   defaultRole?: ClientAreaRole;
