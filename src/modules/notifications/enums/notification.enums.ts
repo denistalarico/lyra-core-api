@@ -111,3 +111,33 @@ export enum NotificationCatalogStatus {
   EMITTED = 'emitted',
   DELIVERED = 'delivered',
 }
+
+/**
+ * NTF-C1 — which product surface a recipient was addressed *as*.
+ *
+ * The same human can be both: an Agency operator who is also a member of a
+ * Company is one `user_id` wearing two hats, and the two feeds must never
+ * merge. So this is a property of the recipient row, not of the person and not
+ * of the notification.
+ *
+ * It is always written explicitly by the publisher that knows its audience,
+ * and never inferred from the absence of a `workspace_users` row (§7): that
+ * would turn a missing operator record into a client delivery.
+ */
+export enum NotificationRecipientSurface {
+  AGENCY = 'agency',
+  CLIENT_AREA = 'client_area',
+}
+
+/**
+ * NTF-C1 — which surfaces a catalog definition may address.
+ *
+ * Defaults to `AGENCY` for every existing definition, so the whole catalog
+ * keeps its current behaviour with no edit. A definition only reaches the
+ * Client Area when it says so.
+ */
+export enum NotificationAudience {
+  AGENCY = 'agency',
+  CLIENT_AREA = 'client_area',
+  BOTH = 'both',
+}

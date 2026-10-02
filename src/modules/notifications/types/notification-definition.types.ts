@@ -1,5 +1,6 @@
 import {
   NotificationActionType,
+  NotificationAudience,
   NotificationCatalogStatus,
   NotificationCategory,
   NotificationDefaultDelivery,
@@ -14,6 +15,17 @@ export type NotificationDefinition = {
   eventType: string;
   productKey: NotificationProductKey;
   moduleKey: string;
+
+  /**
+   * NTF-C1 §6 — which surfaces this event may address. Defaults to `AGENCY`,
+   * so every definition written before NTF-C1 keeps its exact behaviour
+   * without being touched; an event reaches the Client Area only by saying so.
+   *
+   * This is a *permission*, not an instruction: it bounds which recipient
+   * surfaces the processor will accept for the event. The publisher still
+   * decides who is actually addressed.
+   */
+  audience: NotificationAudience;
 
   category: NotificationCategory;
   defaultPriority: NotificationPriority;
@@ -41,6 +53,7 @@ export type NotificationDefinitionInput = Omit<
   | 'required'
   | 'groupable'
   | 'catalogStatus'
+  | 'audience'
 > &
   Partial<
     Pick<
@@ -51,5 +64,6 @@ export type NotificationDefinitionInput = Omit<
       | 'groupable'
       | 'catalogStatus'
       | 'expiresAfterSeconds'
+      | 'audience'
     >
   >;

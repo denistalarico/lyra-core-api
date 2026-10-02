@@ -32,6 +32,8 @@ import { toConversationScope } from '../services/client-conversation-access';
 import { ClientConversationsGateway } from '../gateways/client-conversations.gateway';
 import { AgencyClientConversationsGateway } from '../gateways/agency-client-conversations.gateway';
 import { SendClientConversationMessageDto } from '../dto/client-conversation.dto';
+import { NotificationRecipientSurface } from '../../notifications/enums';
+import { ClientConversationNotificationPublisher } from '../services/client-conversation-notification.publisher';
 
 /**
  * CCOM1 — the Client Area conversations boundary (§22–§24).
@@ -68,6 +70,7 @@ export class ClientAreaConversationsController {
     private readonly files: FilesService,
     private readonly clientRealtime: ClientConversationsGateway,
     private readonly agencyRealtime: AgencyClientConversationsGateway,
+    private readonly notificationPublisher: ClientConversationNotificationPublisher,
   ) {}
 
   private scope(context: ClientAreaContext) {
@@ -202,6 +205,22 @@ export class ClientAreaConversationsController {
     // Both surfaces watching this conversation learn about it; the rooms are
     // separate, so this is two explicit emits rather than one shared room.
     this.broadcast(scope, message.conversationId, message);
+
+    // NTF-C1 §40 — the mirror direction: a client message notifies the
+    // conversation's Agency participants, through the same publisher and the
+    // same event, resolved on the Agency surface. Published after persistence
+    // and broadcast, and never allowed to fail the send (§70).
+    await this.notificationPublisher.publishMessageCreated({
+      tenantId: scope.tenantId,
+      workspaceId: scope.workspaceId,
+      companyContextId: scope.companyContextId,
+      conversationId: message.conversationId,
+      messageId: message.id,
+      authorSurface: NotificationRecipientSurface.CLIENT_AREA,
+      authorUserId: context.userId,
+      createdAt: new Date(message.createdAt),
+    });
+
     return { message };
   }
 

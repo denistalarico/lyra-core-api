@@ -12,6 +12,7 @@ import {
   NotificationDeliveryChannel,
   NotificationDeliveryStatus,
   NotificationProductKey,
+  NotificationRecipientSurface,
 } from '../enums';
 import {
   NotificationListItem,
@@ -24,6 +25,17 @@ type NotificationsContext = {
   tenantId: string;
   workspaceId?: string | null;
   userId: string;
+  /**
+   * NTF-C1 §15/§44 — which surface's feed this is.
+   *
+   * Defaults to `AGENCY`, so every existing Agency caller keeps exactly the
+   * rows it has today. It is not optional in effect, only in syntax: every
+   * query below filters on it, because `user_id` alone no longer identifies a
+   * feed. Without this filter, an operator who is also a member of a Company
+   * would find their client notifications mixed into the Agency bell — the
+   * same identity, two roles, one list.
+   */
+  surface?: NotificationRecipientSurface;
 };
 
 type CursorPayload = {
@@ -207,6 +219,13 @@ export class NotificationsService {
         readAt: () => 'COALESCE(read_at, now())',
       })
       .where('user_id = :userId', { userId: context.userId })
+      // §15 — a bulk update must be scoped like a read; these two UPDATEs do
+      // not go through `createUserQuery`, so the predicate is repeated rather
+      // than assumed.
+      .andWhere('recipient_surface = :recipientSurface', {
+        recipientSurface:
+          context.surface ?? NotificationRecipientSurface.AGENCY,
+      })
       .andWhere('read_at IS NULL')
       .andWhere('archived_at IS NULL')
       .andWhere(
@@ -257,6 +276,11 @@ export class NotificationsService {
       })
       .where('user_id = :userId', {
         userId: context.userId,
+      })
+      // §15 — see `markReadByResource`.
+      .andWhere('recipient_surface = :recipientSurface', {
+        recipientSurface:
+          context.surface ?? NotificationRecipientSurface.AGENCY,
       })
       .andWhere('read_at IS NULL')
       .andWhere('archived_at IS NULL')
@@ -356,6 +380,14 @@ export class NotificationsService {
       .innerJoin('recipient.notification', 'notificationScope')
       .where('recipient.userId = :userId', {
         userId: context.userId,
+      })
+      // §15 — the surface is part of the ownership predicate, not a display
+      // filter: a client user's query can never reach an Agency recipient row
+      // and vice versa, including on `findOne`, `markRead` and `archive`,
+      // which all build on this query.
+      .andWhere('recipient.recipientSurface = :recipientSurface', {
+        recipientSurface:
+          context.surface ?? NotificationRecipientSurface.AGENCY,
       })
       .andWhere('notificationScope.tenantId = :tenantId', {
         tenantId: context.tenantId,

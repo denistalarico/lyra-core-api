@@ -144,6 +144,24 @@ export function conversationRoom(
 }
 
 /**
+ * NTF-C1 §18 — the notification room of one client user in one company.
+ *
+ * Built exactly like `conversationRoom`, and for the same reason: every id in
+ * it comes from the authenticated context the handshake and the authorization
+ * produced, never from a socket payload. The `user:` segment is what makes a
+ * notification reach one person rather than everyone watching the company, and
+ * the company segment is what keeps a membership in company A from receiving
+ * company B's notifications even for the same person (§46).
+ */
+export function clientNotificationRoom(scope: {
+  tenantId: string;
+  companyContextId: string;
+  userId: string;
+}): string {
+  return `client:${scope.tenantId}:${scope.companyContextId}:user:${scope.userId}:notifications`;
+}
+
+/**
  * Unread count watermark (CCOM1 §45). `last_read_at ?? joined_at`, never
  * "everything when null" — the Agency chat's counter returned the whole channel
  * history for anyone who had not opened it yet (CCOM0.5 §7), and a legacy row

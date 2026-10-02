@@ -62,6 +62,7 @@ import { SocialApprovalsModule } from './modules/social-approvals/social-approva
 import { ClientAreaModule } from './modules/client-area/client-area.module';
 import { ClientConversationApprovalsModule } from './modules/client-conversations/client-conversation-approvals.module';
 import { ClientConversationsModule } from './modules/client-conversations/client-conversations.module';
+import { ClientNotificationsModule } from './modules/client-notifications/client-notifications.module';
 import { ClientAreaApprovalsModule } from './modules/social-approvals/client/client-approvals.module';
 import { ClientAreaAgencyModule } from './modules/client-area/agency/client-area-agency.module';
 
@@ -137,6 +138,11 @@ import { ClientAreaAgencyModule } from './modules/client-area/agency/client-area
     // lets the conversation timeline resolve them. Both domains work without
     // it; it is what connects them (see the module's own note).
     ClientConversationApprovalsModule,
+    // NTF-C1 — the join that gives the Notifications Core its Client Area
+    // recipient resolver and gives the Client Area its notification feed.
+    // Without it the core logs an error for any event whose audience is the
+    // Client Area, instead of dropping it silently as AP3's token did.
+    ClientNotificationsModule,
     ClientAreaAgencyModule,
     SocialOrganicModule,
   ],

@@ -1,5 +1,6 @@
 import {
   NotificationActionType,
+  NotificationAudience,
   NotificationCatalogStatus,
   NotificationCategory,
   NotificationDefaultDelivery,
@@ -18,6 +19,9 @@ function define(input: NotificationDefinitionInput): NotificationDefinition {
   return {
     ...input,
     productKey: input.productKey ?? NotificationProductKey.AGENCY,
+    // NTF-C1 §6 — Agency unless a definition opts in. Every pre-NTF-C1 entry
+    // in this file keeps its behaviour through this one default.
+    audience: input.audience ?? NotificationAudience.AGENCY,
     preferenceKey:
       input.preferenceKey ??
       `${input.productKey ?? NotificationProductKey.AGENCY}.${input.moduleKey}.${input.category}`,
@@ -92,15 +96,104 @@ export const AGENCY_NOTIFICATION_CATALOG: readonly NotificationDefinition[] = [
       selfNotificationPolicy: NotificationSelfPolicy.ALLOW_ACTOR,
     },
   ),
-  ...(['awaiting_client', 'changes_requested', 'approved', 'superseded'] as const).map(
-    (event) =>
-      standard(
-        `social.approval.${event}`,
-        'approvals',
-        NotificationCategory.APPROVAL,
-        NotificationRecipientStrategy.EXPLICIT_USERS,
-        { productKey: NotificationProductKey.SOCIAL },
-      ),
+  /**
+   * NTF-C1 §35/§38 — the approval transitions, now addressing both surfaces
+   * where both surfaces care.
+   *
+   * `awaiting_client` and `superseded` are the two the client is told about
+   * (AP3's rule, unchanged: a client is never mailed about a decision they
+   * themselves just made), so they become `BOTH`. `changes_requested` and
+   * `approved` stay Agency-only, which is the client's own action reported to
+   * the operator.
+   *
+   * `awaiting_client` is REQUIRED rather than configurable: it is the one
+   * notification whose absence silently stalls the customer's own work, and
+   * AP3 already treated it as unconditional. Making it required here preserves
+   * that — a preference cannot switch it off (§34).
+   */
+  required(
+    'social.approval.awaiting_client',
+    'approvals',
+    NotificationCategory.APPROVAL,
+    NotificationRecipientStrategy.EXPLICIT_USERS,
+    {
+      productKey: NotificationProductKey.SOCIAL,
+      audience: NotificationAudience.BOTH,
+      defaultPriority: NotificationPriority.NORMAL,
+    },
+  ),
+  standard(
+    'social.approval.superseded',
+    'approvals',
+    NotificationCategory.APPROVAL,
+    NotificationRecipientStrategy.EXPLICIT_USERS,
+    {
+      productKey: NotificationProductKey.SOCIAL,
+      audience: NotificationAudience.BOTH,
+    },
+  ),
+  ...(['changes_requested', 'approved'] as const).map((event) =>
+    standard(
+      `social.approval.${event}`,
+      'approvals',
+      NotificationCategory.APPROVAL,
+      NotificationRecipientStrategy.EXPLICIT_USERS,
+      { productKey: NotificationProductKey.SOCIAL },
+    ),
+  ),
+  /**
+   * NTF-C1 §35/§37/§38 — the two client events that have no Agency
+   * counterpart, kept under the same `social.approval.*` taxonomy they already
+   * had in AP3's ledger (`cancelled`, `agency_reply`).
+   *
+   * They are `CLIENT_AREA`, not `BOTH`: a cancellation is an Agency operator's
+   * own action, and an Agency reply is a message *to* the client. Neither is
+   * news for the Agency feed, and AP3 never put them there. Migrating the
+   * pipeline must not invent new events, so the names and the semantics are
+   * the ones that already existed.
+   */
+  standard(
+    'social.approval.cancelled',
+    'approvals',
+    NotificationCategory.APPROVAL,
+    NotificationRecipientStrategy.EXPLICIT_USERS,
+    {
+      productKey: NotificationProductKey.SOCIAL,
+      audience: NotificationAudience.CLIENT_AREA,
+    },
+  ),
+  standard(
+    'social.approval.agency_reply',
+    'approvals',
+    NotificationCategory.COMMENT,
+    NotificationRecipientStrategy.EXPLICIT_USERS,
+    {
+      productKey: NotificationProductKey.SOCIAL,
+      audience: NotificationAudience.CLIENT_AREA,
+    },
+  ),
+  /**
+   * NTF-C1 §39/§41 — a new message in a Client Conversation.
+   *
+   * `BOTH`, because the event is symmetric: an Agency operator writing to the
+   * client notifies the client's memberships, and a client writing back
+   * notifies the Agency participants. One definition, one publisher, two
+   * recipient surfaces — not two events (§40).
+   *
+   * `SUPPRESS_ACTOR` is what keeps the author out of their own notification
+   * (§42), and it is the catalog default, stated here because it is the whole
+   * correctness condition of a message event.
+   */
+  standard(
+    'client_conversation.message.created',
+    'conversations',
+    NotificationCategory.MESSAGE,
+    NotificationRecipientStrategy.EXPLICIT_USERS,
+    {
+      productKey: NotificationProductKey.SOCIAL,
+      audience: NotificationAudience.BOTH,
+      selfNotificationPolicy: NotificationSelfPolicy.SUPPRESS_ACTOR,
+    },
   ),
 
   // Inbox (LeadFlow)

@@ -25,6 +25,8 @@ import { AgencyClientConversationAccessService } from './services/agency-client-
 import { ClientConversationAttachmentsService } from './services/client-conversation-attachments.service';
 import { ClientConversationTimelineService } from './services/client-conversation-timeline.service';
 import { ClientConversationsService } from './services/client-conversations.service';
+import { ClientConversationNotificationPublisher } from './services/client-conversation-notification.publisher';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 const AGENCY_CONNECTION = 'agency';
 
@@ -58,6 +60,9 @@ const AGENCY_CONNECTION = 'agency';
     FilesModule,
     PermissionsModule,
     ClientAreaModule,
+    // NTF-C1 — the Notifications Core, for the message-created publisher. The
+    // arrow runs this way only: the core knows nothing of conversations.
+    NotificationsModule,
   ],
   controllers: [
     ClientAreaConversationsController,
@@ -76,6 +81,9 @@ const AGENCY_CONNECTION = 'agency';
     // fills it on init (see that module's note on why not a token).
     ClientConversationTimelineService,
     ClientConversationApprovalsRegistry,
+    // NTF-C1 §39/§40 — one publisher for both directions of
+    // `client_conversation.message.created`.
+    ClientConversationNotificationPublisher,
   ],
   exports: [
     ClientConversationsService,

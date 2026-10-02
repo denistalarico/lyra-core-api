@@ -21,6 +21,7 @@ import {
   NotificationRecipientEntity,
 } from './entities';
 import { SelfNotificationPolicy } from './policies';
+import { ClientNotificationSurfaceRegistry } from './ports/client-notification-surface.port';
 import {
   NotificationEventProcessorService,
   NotificationPushService,
@@ -60,12 +61,24 @@ import {
     NotificationsService,
     NotificationsGateway,
     SettingsCryptoService,
+    /**
+     * NTF-C1 §48 — declared *here*, by the module that declares the processor
+     * which consumes it. That is the whole correctness condition: a provider's
+     * dependencies resolve in its declaring module, so a registry bound in
+     * another module would inject as `undefined`. AP3's
+     * `CLIENT_APPROVAL_NOTIFIER` did exactly that and silently dropped every
+     * client email for the life of the feature.
+     */
+    ClientNotificationSurfaceRegistry,
   ],
   exports: [
     TypeOrmModule,
     NotificationCatalogService,
     NotificationEventProcessorService,
     NotificationsService,
+    NotificationPushService,
+    NotificationRealtimeService,
+    ClientNotificationSurfaceRegistry,
   ],
 })
 export class NotificationsModule {}

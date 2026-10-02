@@ -27,6 +27,8 @@ import { ClientConversationTimelineService } from '../services/client-conversati
 import { ClientConversationsGateway } from '../gateways/client-conversations.gateway';
 import { AgencyClientConversationsGateway } from '../gateways/agency-client-conversations.gateway';
 import { SendClientConversationMessageDto } from '../dto/client-conversation.dto';
+import { NotificationRecipientSurface } from '../../notifications/enums';
+import { ClientConversationNotificationPublisher } from '../services/client-conversation-notification.publisher';
 
 const AGENCY_CONNECTION = 'agency';
 
@@ -78,6 +80,7 @@ export class AgencyClientConversationsController {
     private readonly files: FilesService,
     private readonly clientRealtime: ClientConversationsGateway,
     private readonly agencyRealtime: AgencyClientConversationsGateway,
+    private readonly notificationPublisher: ClientConversationNotificationPublisher,
   ) {}
 
   private actorOf(user: AuthTokenPayload) {
@@ -272,6 +275,19 @@ export class AgencyClientConversationsController {
     };
     this.clientRealtime.broadcastMessageCreated(payload);
     this.agencyRealtime.broadcastMessageCreated(payload);
+
+    // NTF-C1 §39/§66 — after the message is persisted and broadcast, so a
+    // notification failure can never cost the message or the realtime event.
+    await this.notificationPublisher.publishMessageCreated({
+      tenantId: scope.tenantId,
+      workspaceId: scope.workspaceId,
+      companyContextId: scope.companyContextId,
+      conversationId: message.conversationId,
+      messageId: message.id,
+      authorSurface: NotificationRecipientSurface.AGENCY,
+      authorUserId: user.sub,
+      createdAt: new Date(message.createdAt),
+    });
 
     return { message };
   }

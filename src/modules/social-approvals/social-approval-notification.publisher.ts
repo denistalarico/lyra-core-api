@@ -5,11 +5,11 @@ import {
   NotificationProductKey,
 } from '../notifications/enums';
 import { NotificationEventProcessorService } from '../notifications/services';
+import type { NotificationClientAudience } from '../notifications/types';
 import { type SocialApprovalRequestEntity } from './entities';
 import {
-  CLIENT_APPROVAL_NOTIFIER,
+  ClientApprovalNotifierRegistry,
   type ClientApprovalNotificationType,
-  type ClientApprovalNotifier,
 } from './client-approval-notifier.port';
 import { ClientConversationCardRegistry } from './client-conversation-card.port';
 
@@ -18,6 +18,46 @@ export type SocialApprovalNotificationType =
   | 'changes_requested'
   | 'approved'
   | 'superseded';
+
+/**
+ * NTF-C1 §10 — the client-facing wording of each event, carried over from
+ * AP3's email renderer so migrating the pipeline does not change what the
+ * customer reads.
+ *
+ * Plain text, not HTML: the body now travels through the shared notification
+ * row, which feeds the in-app feed, the realtime payload and the push
+ * notification as well as the email. AP3's `<strong>` markup belonged to a
+ * renderer that was the only consumer. Rich email returns in NTF-C2 (§62).
+ *
+ * Note what is absent from `agency_reply`: the operator's name and the comment
+ * text. AP4 §25/§31 keeps both out of any transport — the notification says
+ * that something was said and sends the person to read it in session.
+ */
+const CLIENT_COPY: Record<
+  ClientApprovalNotificationType,
+  { title: string; body: (approval: SocialApprovalRequestEntity) => string }
+> = {
+  awaiting_client: {
+    title: 'Uma aprovação aguarda você',
+    body: (approval) =>
+      `${approval.title} (${approval.subjectVersionLabel}) foi enviado para a sua aprovação.`,
+  },
+  superseded: {
+    title: 'Uma nova versão substituiu esta',
+    body: (approval) =>
+      `${approval.title} (${approval.subjectVersionLabel}) foi substituído por uma versão mais recente.`,
+  },
+  cancelled: {
+    title: 'Uma aprovação foi cancelada',
+    body: (approval) =>
+      `${approval.title} (${approval.subjectVersionLabel}) não precisa mais da sua avaliação.`,
+  },
+  agency_reply: {
+    title: 'A agência respondeu',
+    body: (approval) =>
+      `A agência respondeu sobre ${approval.title} (${approval.subjectVersionLabel}).`,
+  },
+};
 
 /**
  * The shared notification processor owns catalog validation, delivery and its
@@ -37,9 +77,17 @@ export class SocialApprovalNotificationPublisher {
 
   constructor(
     private readonly notifications: NotificationEventProcessorService,
+    /**
+     * NTF-C1 §48 — a registry, not an injection token.
+     *
+     * This parameter was `@Optional() @Inject(CLIENT_APPROVAL_NOTIFIER)` and
+     * it silently resolved to `undefined` in production for the whole life of
+     * AP3, because the token was bound by a module other than the one
+     * declaring this provider. See the port's header and
+     * `ap3-client-notifier-wiring.spec.ts`.
+     */
     @Optional()
-    @Inject(CLIENT_APPROVAL_NOTIFIER)
-    private readonly clientNotifications?: ClientApprovalNotifier,
+    private readonly clientNotifications?: ClientApprovalNotifierRegistry,
     /**
      * CCOM2 §7 — the conversation timeline, as a third audience of the same
      * single fan-out point (CCOM0 §27).
@@ -61,7 +109,6 @@ export class SocialApprovalNotificationPublisher {
   ): Promise<void> {
     await Promise.all([
       this.publishToAgency(type, approval, actorUserId),
-      this.publishToClient(type, approval),
       this.publishToConversation(type, approval),
     ]);
   }
@@ -79,21 +126,69 @@ export class SocialApprovalNotificationPublisher {
     approval: SocialApprovalRequestEntity,
     event?: { id: string; occurredAt: Date },
   ): Promise<void> {
-    await this.clientNotifications?.publish(type, approval, event);
+    const client = this.clientNotifications?.get();
+    if (!client) {
+      // §48 — a client notification that reaches nobody is now reported. The
+      // predecessor of this line was an `?.` on an `undefined` token, which is
+      // how AP3's client channel disappeared without a trace.
+      this.logger.error(
+        `Client approval notifier is not wired; ${type} for ${approval.id} reached no client recipient.`,
+      );
+      return;
+    }
+    await client.publish(type, approval, event);
   }
 
   /**
-   * Client-facing transitions only. `approved`/`changes_requested` are the
-   * client's *own* decisions — mailing someone about what they just did is
-   * noise — so they stay Agency-only, exactly as AP2 had them.
+   * NTF-C1 §3/§27 — the client audience of an approval transition, or null.
+   *
+   * `awaiting_client` and `superseded` are the two the client hears about;
+   * `approved` and `changes_requested` are the client's *own* decisions and
+   * mailing someone about what they just did is noise, so they stay
+   * Agency-only exactly as AP2/AP3 had them.
+   *
+   * This is now returned to the single `process()` call rather than sent down
+   * a second pipeline: one notification row, two recipient surfaces, one
+   * source-event id, one idempotency. That is the whole point of §3 — the
+   * client stops being a parallel system and becomes an audience.
    */
-  private async publishToClient(
+  private clientAudienceFor(
     type: SocialApprovalNotificationType,
     approval: SocialApprovalRequestEntity,
-  ): Promise<void> {
-    if (!this.clientNotifications) return;
-    if (type !== 'awaiting_client' && type !== 'superseded') return;
-    await this.clientNotifications.publish(type, approval);
+  ): NotificationClientAudience | undefined {
+    if (type !== 'awaiting_client' && type !== 'superseded') return undefined;
+    // Nothing the client was never shown is worth telling them about — AP3's
+    // rule, preserved.
+    if (!approval.sentToClientAt) return undefined;
+
+    return this.clientAudience(type, approval);
+  }
+
+  /**
+   * The client audience descriptor shared by every client-facing approval
+   * event, including the client-only ones (`cancelled`, `agency_reply`).
+   *
+   * The permission and module are the AP3 rules, unchanged: only a membership
+   * whose role preset grants `client_area.approvals.view`, in a company whose
+   * `approvals` module is on, is in this audience. The core re-resolves them
+   * against live membership and CRM eligibility at processing time (§8/§21).
+   */
+  private clientAudience(
+    type: ClientApprovalNotificationType,
+    approval: SocialApprovalRequestEntity,
+  ): NotificationClientAudience {
+    return {
+      companyContextId: approval.companyContextId,
+      requiredPermission: 'client_area.approvals.view',
+      requiredModule: 'approvals',
+      interestReason: NotificationInterestReason.APPROVER,
+      // §16 — a Client Area route, never the Agency one in `payload.actionUrl`.
+      actionUrl: `/client-area/companies/${encodeURIComponent(
+        approval.companyContextId,
+      )}/approvals/${encodeURIComponent(approval.id)}`,
+      title: CLIENT_COPY[type].title,
+      body: CLIENT_COPY[type].body(approval),
+    };
   }
 
   /**
@@ -205,6 +300,12 @@ export class SocialApprovalNotificationPublisher {
           userId: approval.requestedByUserId,
           interestReason: NotificationInterestReason.REQUESTER,
         }],
+        /**
+         * NTF-C1 §27 — the second audience of the same event, on the same
+         * notification. The core resolves who that is; this only says which
+         * company, which permission and which module define the audience.
+         */
+        clientAudience: this.clientAudienceFor(type, approval),
         payload: {
           title: this.titleFor(type, approval),
           body: this.bodyFor(type, approval),

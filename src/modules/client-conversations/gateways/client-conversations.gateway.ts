@@ -22,6 +22,7 @@ import {
 import { toCompanyAwareScope } from '../../client-area/client-area-scope';
 import { ClientConversationsService } from '../services/client-conversations.service';
 import {
+  clientNotificationRoom,
   conversationRoom,
   toConversationScope,
 } from '../services/client-conversation-access';
@@ -306,6 +307,114 @@ export class ClientConversationsGateway
       userId: input.userId,
       lastReadAt: input.lastReadAt,
     });
+  }
+
+  /**
+   * NTF-C1 §17/§18 — joins the caller's own notification room for one company.
+   *
+   * Authorized like a read of that company and nothing more: a notification
+   * room reveals only what the person is already entitled to be told. The room
+   * is built from the authorized context plus the *authenticated* user id, so
+   * a client cannot subscribe to another member's notifications even inside a
+   * company they legitimately belong to — the `user:` segment never comes from
+   * the payload.
+   *
+   * One room per company, because a person may hold several memberships (§20)
+   * and losing one must not silence the others.
+   */
+  @SubscribeMessage('client-notifications:join')
+  async joinNotifications(
+    @ConnectedSocket() client: ClientSocket,
+    @MessageBody() payload: ConversationPayload,
+  ) {
+    const resolved = await this.resolveCompany(client, payload);
+    if ('error' in resolved) return resolved.error;
+
+    const { context } = resolved;
+    await client.join(
+      clientNotificationRoom({
+        tenantId: context.tenantId,
+        companyContextId: context.companyContextId,
+        userId: context.userId,
+      }),
+    );
+
+    return { ok: true as const, companyContextId: context.companyContextId };
+  }
+
+  @SubscribeMessage('client-notifications:leave')
+  async leaveNotifications(
+    @ConnectedSocket() client: ClientSocket,
+    @MessageBody() payload: ConversationPayload,
+  ) {
+    const resolved = await this.resolveCompany(client, payload);
+    if ('error' in resolved) return resolved.error;
+
+    const { context } = resolved;
+    await client.leave(
+      clientNotificationRoom({
+        tenantId: context.tenantId,
+        companyContextId: context.companyContextId,
+        userId: context.userId,
+      }),
+    );
+
+    return { ok: true as const };
+  }
+
+  /**
+   * NTF-C1 §19 — a notification was created for a client recipient.
+   *
+   * Carries the client-safe projection the core built field by field, and the
+   * unread count so the badge updates without a round trip. No internal
+   * metadata, no Agency actor id, no workspace id (§43).
+   */
+  broadcastNotificationCreated(input: {
+    tenantId: string;
+    companyContextId: string;
+    userId: string;
+    notification: unknown;
+    unreadCount: number;
+  }): void {
+    this.server
+      ?.to(
+        clientNotificationRoom({
+          tenantId: input.tenantId,
+          companyContextId: input.companyContextId,
+          userId: input.userId,
+        }),
+      )
+      .emit('notification.created', {
+        notification: input.notification,
+        unreadCount: input.unreadCount,
+      });
+  }
+
+  /**
+   * Company-level authorization for an event that is not about one
+   * conversation. Same chain as `resolve`, minus the conversation lookup.
+   */
+  private async resolveCompany(
+    client: ClientSocket,
+    payload: ConversationPayload,
+  ): Promise<{ context: ClientAreaContext } | { error: AckFailure }> {
+    const auth = this.getAuth(client);
+    if (!auth) return { error: this.denied('unauthenticated') };
+
+    try {
+      const context = await this.authorization.authorize({
+        identity: {
+          userId: auth.userId,
+          tenantId: auth.tenantId,
+          sessionId: auth.sessionId,
+          email: auth.email,
+        },
+        companyContextId: payload?.companyContextId,
+      });
+      return { context };
+    } catch {
+      return { error: this.denied('company_not_accessible') };
+    }
   }
 
   /**

@@ -228,6 +228,7 @@ import { CreateClientAreaMemberships1797000000000 } from './migrations/179700000
 import { CreateClientAreaInvitations1797100000000 } from './migrations/1797100000000-create-client-area-invitations';
 import { CreateClientAreaManagement1797150000000 } from './migrations/1797150000000-create-client-area-management';
 import { CreateClientConversations1797500000000 } from './migrations/1797500000000-create-client-conversations';
+import { AddNotificationRecipientSurface1797600000000 } from './migrations/1797600000000-add-notification-recipient-surface';
 import { AddCompanyBrandIdentityFoundation1797160000000 } from './migrations/1797160000000-add-company-brand-identity-foundation';
 import { StoreSocialAnalyticsReportFiles1797200000000 } from './migrations/1797200000000-store-social-analytics-report-files';
 import { CreateClientAreaCrmIdentityRelationships1797300000000 } from './migrations/1797300000000-create-client-area-crm-identity-relationships';
@@ -496,5 +497,6 @@ export const AgencyDataSource = new DataSource({
     CreateClientAreaCrmIdentityRelationships1797300000000,
     AddSocialApprovalCommentVisibility1797400000000,
     CreateClientConversations1797500000000,
+    AddNotificationRecipientSurface1797600000000,
   ],
 });

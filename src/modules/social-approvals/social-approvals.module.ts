@@ -12,6 +12,7 @@ import {
   SocialPlanEntity,
 } from '../social-planner/entities';
 import { ApprovalClientReviewService } from './approval-client-review.service';
+import { ClientApprovalNotifierRegistry } from './client-approval-notifier.port';
 import { ClientConversationCardRegistry } from './client-conversation-card.port';
 import { SocialApprovalNotificationPublisher } from './social-approval-notification.publisher';
 import {
@@ -65,6 +66,13 @@ import { ApprovalSubjectResolver } from './subjects/approval-subject-resolver';
     // until then, which is how this domain keeps working without the
     // conversation surface.
     ClientConversationCardRegistry,
+    /**
+     * NTF-C1 §48 — declared here, inside the publisher's own resolution
+     * context, for the same reason as the card registry. The token this
+     * replaces was bound by `ClientAreaApprovalsModule` and therefore never
+     * resolved; `ClientAreaApprovalsModule` now fills this on init instead.
+     */
+    ClientApprovalNotifierRegistry,
   ],
   exports: [
     SocialApprovalsService,
@@ -72,6 +80,7 @@ import { ApprovalSubjectResolver } from './subjects/approval-subject-resolver';
     ApprovalSubjectResolver,
     SocialApprovalNotificationPublisher,
     ClientConversationCardRegistry,
+    ClientApprovalNotifierRegistry,
     TypeOrmModule,
   ],
 })
