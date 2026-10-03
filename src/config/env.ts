@@ -25,10 +25,15 @@ export default () => ({
         process.env.S3_ENDPOINT ??
         process.env.OBJECT_STORAGE_ENDPOINT ??
         'http://localhost:9200',
-      bucket:
-        process.env.S3_BUCKET ??
-        process.env.OBJECT_STORAGE_BUCKET ??
-        'lyra-assets',
+      // Deliberately does NOT fall back to OBJECT_STORAGE_BUCKET. That variable
+      // names the *contracts* bucket (`contracts.service.ts`), so the old
+      // `S3_BUCKET ?? OBJECT_STORAGE_BUCKET` chain silently redirected every
+      // public asset — contact and bank avatars, workspace logos, task covers —
+      // into `lyra-contracts` whenever S3_BUCKET was unset. Production ran that
+      // way from 2026-06-02 and the objects were written to the wrong bucket,
+      // so the URLs already persisted in the database 404'd (PD1 §A). Two
+      // buckets with conflicting meanings must not share one variable.
+      bucket: process.env.S3_BUCKET ?? 'lyra-assets',
       privateBucket: process.env.S3_PRIVATE_BUCKET ?? 'lyra-private-assets',
       region:
         process.env.S3_REGION ??
@@ -47,9 +52,8 @@ export default () => ({
       publicBaseUrl:
         process.env.S3_PUBLIC_BASE_URL ??
         `${process.env.S3_ENDPOINT ?? process.env.OBJECT_STORAGE_ENDPOINT ?? 'http://localhost:9200'}/${
-          process.env.S3_BUCKET ??
-          process.env.OBJECT_STORAGE_BUCKET ??
-          'lyra-assets'
+          // Same reason as `bucket` above: never OBJECT_STORAGE_BUCKET.
+          process.env.S3_BUCKET ?? 'lyra-assets'
         }`,
       forcePathStyle: process.env.S3_FORCE_PATH_STYLE !== 'false',
       createBucket: process.env.S3_CREATE_BUCKET !== 'false',

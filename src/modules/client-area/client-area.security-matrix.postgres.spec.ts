@@ -623,6 +623,13 @@ run('CA1 Client Area security matrix (PostgreSQL, real guards)', () => {
         `/client-area/companies/${A}/context`,
         accessToken,
       ).expect(200);
+      // PD2 §22 — same class of stale assertion as #11, diagnosed here: this
+      // exhaustive `toEqual` predates CCOM1, which legitimately added the
+      // `conversations` module and its two permissions to the projection. The
+      // behaviour under test (U3 alternating A↔B with the right context) was
+      // never broken; the expectation simply did not know about the new
+      // module. Kept exhaustive on purpose, because this case is also what
+      // proves the projection carries nothing extra.
       expect(bodyOf(contextA).context).toEqual({
         companyContextId: A,
         displayName: 'Empresa A',
@@ -631,8 +638,10 @@ run('CA1 Client Area security matrix (PostgreSQL, real guards)', () => {
           'client_area.approvals.comment',
           'client_area.approvals.decide',
           'client_area.approvals.view',
+          'client_area.conversations.send',
+          'client_area.conversations.view',
         ],
-        modules: { approvals: true },
+        modules: { approvals: true, conversations: false },
         branding: {
           displayName: 'Lyra',
           logoLightUrl: null,
@@ -828,7 +837,15 @@ run('CA1 Client Area security matrix (PostgreSQL, real guards)', () => {
           `/client-area/companies/${A}/context`,
           accessToken,
         ).expect(200);
-        expect(bodyOf(context).context.modules).toEqual({ approvals: false });
+        // PD2 §22 — stale assertion, not a product change: CCOM1 added
+        // `conversations` beside `approvals`, so a whole-object `toEqual` with
+        // one key started failing while the behaviour under test (an expired
+        // Social entitlement closes approvals) stayed correct. Asserting the
+        // approvals contract keeps the test about its own subject and lets a
+        // later module be added without reopening it.
+        expect(bodyOf(context).context.modules).toMatchObject({
+          approvals: false,
+        });
         const probe = await authed(
           `/client-area/companies/${A}/probe/decide`,
           accessToken,
