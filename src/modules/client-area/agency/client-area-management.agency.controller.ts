@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   Param,
@@ -17,10 +18,14 @@ import {
   RequirePermission,
 } from '../../permissions';
 import {
+  GrantClientAreaSelfAccessDto,
   PatchClientAreaCompanySettingsDto,
+  PatchClientAreaSelfAccessRoleDto,
+  PatchClientAreaSelfSettingsDto,
   PatchClientAreaSettingsDto,
 } from '../dto/client-area-management.dto';
 import { ClientAreaManagementService } from '../services/client-area-management.service';
+import { ClientAreaSelfAccessService } from '../services/client-area-self-access.service';
 
 export const CLIENT_AREA_MANAGE_PERMISSION = 'agency.client_area.manage.admin';
 
@@ -30,7 +35,10 @@ export const CLIENT_AREA_MANAGE_PERMISSION = 'agency.client_area.manage.admin';
 @RequirePermission(CLIENT_AREA_MANAGE_PERMISSION)
 @Controller('agency/client-area-management')
 export class ClientAreaManagementAgencyController {
-  constructor(private readonly management: ClientAreaManagementService) {}
+  constructor(
+    private readonly management: ClientAreaManagementService,
+    private readonly selfAccess: ClientAreaSelfAccessService,
+  ) {}
 
   @Get() overview(@AuthenticatedUser() user: AuthTokenPayload) {
     return this.management.overview(user.tenantId, user.workspaceId);
@@ -49,6 +57,72 @@ export class ClientAreaManagementAgencyController {
   }
   @Get('companies') companies(@AuthenticatedUser() user: AuthTokenPayload) {
     return this.management.listCompanies(user.tenantId, user.workspaceId);
+  }
+
+  // ------------------------------------------------- PD3 — "Minha Agência"
+  //
+  // The agency's own Client Area. Scoped strictly to the caller's own
+  // tenant/workspace from the verified Agency token: there is no path
+  // parameter to point this at another tenant (§21 case 6).
+
+  @Get('self') selfOverview(@AuthenticatedUser() user: AuthTokenPayload) {
+    return this.selfAccess.overview({
+      tenantId: user.tenantId,
+      workspaceId: user.workspaceId,
+    });
+  }
+
+  @Patch('self')
+  patchSelfSettings(
+    @AuthenticatedUser() user: AuthTokenPayload,
+    @Body() dto: PatchClientAreaSelfSettingsDto,
+  ) {
+    return this.selfAccess.setSelfEnabled(
+      { tenantId: user.tenantId, workspaceId: user.workspaceId },
+      dto.selfEnabled,
+      user.sub,
+    );
+  }
+
+  @Post('self/access')
+  @HttpCode(201)
+  grantSelfAccess(
+    @AuthenticatedUser() user: AuthTokenPayload,
+    @Body() dto: GrantClientAreaSelfAccessDto,
+  ) {
+    return this.selfAccess.grant({
+      scope: { tenantId: user.tenantId, workspaceId: user.workspaceId },
+      userId: dto.userId,
+      role: dto.role,
+      grantedByUserId: user.sub,
+    });
+  }
+
+  @Patch('self/access/:userId')
+  patchSelfAccessRole(
+    @AuthenticatedUser() user: AuthTokenPayload,
+    @Param('userId') userId: string,
+    @Body() dto: PatchClientAreaSelfAccessRoleDto,
+  ) {
+    return this.selfAccess.changeRole({
+      scope: { tenantId: user.tenantId, workspaceId: user.workspaceId },
+      userId,
+      role: dto.role,
+      actorUserId: user.sub,
+    });
+  }
+
+  @Delete('self/access/:userId')
+  @HttpCode(204)
+  async revokeSelfAccess(
+    @AuthenticatedUser() user: AuthTokenPayload,
+    @Param('userId') userId: string,
+  ) {
+    await this.selfAccess.revoke({
+      scope: { tenantId: user.tenantId, workspaceId: user.workspaceId },
+      userId,
+      revokedByUserId: user.sub,
+    });
   }
 
   @Get('clients/:clientId/companies/:companyContextId')

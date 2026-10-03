@@ -38,6 +38,28 @@ export type ClientAreaModuleKey = (typeof CLIENT_AREA_MODULE_KEYS)[number];
 
 export type ClientAreaModules = Record<ClientAreaModuleKey, boolean>;
 
+/**
+ * PD3 §16 — a Client Area context is either an external company or the agency
+ * itself. An explicit discriminator, so `companyContextId` never carries a
+ * fake UUID to stand in for the agency.
+ */
+export const CLIENT_AREA_CONTEXT_KINDS = ['company', 'agency_self'] as const;
+export type ClientAreaContextKind = (typeof CLIENT_AREA_CONTEXT_KINDS)[number];
+
+/** Opaque id of the agency self-context in URLs and the directory. */
+export const AGENCY_SELF_CONTEXT_ID = 'agency_self' as const;
+
+/** PD3 §29 — audit actions of self-context activation and access. */
+export const CLIENT_AREA_SELF_ACCESS_EVENT_ACTIONS = [
+  'self_area_enabled',
+  'self_area_disabled',
+  'self_access_granted',
+  'self_access_revoked',
+  'self_access_role_changed',
+] as const;
+export type ClientAreaSelfAccessEventAction =
+  (typeof CLIENT_AREA_SELF_ACCESS_EVENT_ACTIONS)[number];
+
 /** CA2 — invitation lifecycle. Expiry is `expires_at`, never a status. */
 export const CLIENT_AREA_INVITATION_STATUSES = [
   'pending',
@@ -127,9 +149,42 @@ export interface ClientAreaContext {
   modules: ClientAreaModules;
 }
 
+/**
+ * PD3 — the agency acting as its own client.
+ *
+ * Structurally incompatible with `ClientAreaContext` on purpose: there is no
+ * `agencyClientId`, no `companyContextId` and no `membershipId`, so a
+ * downstream service that needs a company scope cannot be handed a self
+ * context by accident — it fails to typecheck. `toCompanyAwareScope` therefore
+ * accepts only `ClientAreaContext` (§18, §34).
+ */
+export interface ClientAreaSelfContext {
+  surface: 'client_area';
+  kind: typeof AGENCY_SELF_CONTEXT_ID;
+  userId: string;
+  tenantId: string;
+  sessionId: string;
+  selfAccessId: string;
+  workspaceId: string;
+  agencyDisplayName: string;
+  role: ClientAreaRole;
+  permissions: ReadonlySet<ClientAreaPermissionKey>;
+  /**
+   * Always all-false in V1. Approvals and Conversations are company-bound
+   * artefacts (they need `agencyClientId`/`companyContextId`), so enabling
+   * them here would require inventing a company scope. PD3 §15/§34.
+   */
+  modules: ClientAreaModules;
+}
+
+export function isAgencySelfContextId(value: unknown): boolean {
+  return value === AGENCY_SELF_CONTEXT_ID;
+}
+
 export interface ClientAreaRequest extends Request {
   clientAreaIdentity?: ClientAreaIdentity;
   clientAreaContext?: ClientAreaContext;
+  clientAreaSelfContext?: ClientAreaSelfContext;
 }
 
 /** Stable, machine-readable error codes of the Client Area surface. */
@@ -162,6 +217,14 @@ export const CLIENT_AREA_ERROR_CODES = {
   emailInvalid: 'client_area_email_invalid',
   passwordPolicy: 'client_area_password_policy',
   resetTokenInvalid: 'client_area_reset_token_invalid',
+  // PD3 — self-context. `selfContextNotFound` mirrors `companyNotFound`: one
+  // generic answer for "not enabled", "no access", "revoked", "wrong tenant"
+  // and "not an Agency operator", so nothing is enumerable.
+  selfContextNotFound: 'client_area_self_context_not_found',
+  selfAccessExists: 'client_area_self_access_exists',
+  selfAccessNotFound: 'client_area_self_access_not_found',
+  selfIdentityNotOperator: 'client_area_self_identity_not_agency_operator',
+  selfIdentityIneligible: 'client_area_self_identity_ineligible',
 } as const;
 
 export function normalizeClientAreaEmail(value: unknown): string {

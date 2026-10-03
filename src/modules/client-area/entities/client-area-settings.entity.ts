@@ -100,6 +100,14 @@ export class ClientAreaSettingsEntity {
     default: false,
   })
   conversationsDefaultEnabled!: boolean;
+  /**
+   * PD3 — the agency consumes its own Client Area as a second surface. A
+   * separate switch from `enabled` so the agency can run the Client Area for
+   * its clients without opening a self-context, and so turning the
+   * self-context off revokes only the self sessions.
+   */
+  @Column({ name: 'self_enabled', type: 'boolean', default: false })
+  selfEnabled!: boolean;
   @Column({
     name: 'domain_mode',
     type: 'varchar',

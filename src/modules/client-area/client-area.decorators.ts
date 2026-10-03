@@ -8,6 +8,7 @@ import type {
   ClientAreaModuleKey,
   ClientAreaPermissionKey,
   ClientAreaRequest,
+  ClientAreaSelfContext,
 } from './client-area.types';
 
 export const CLIENT_AREA_PERMISSION_KEY = 'client_area:permission';
@@ -39,5 +40,24 @@ export const ClientAreaContextData = createParamDecorator(
     }
 
     return request.clientAreaContext;
+  },
+);
+
+/**
+ * PD3 — the agency self-context resolved by `ClientAreaSelfContextGuard`.
+ * Separate from `ClientAreaContextData` on purpose: a handler declares which
+ * kind of context it serves, and the two can never be confused.
+ */
+export const ClientAreaSelfContextData = createParamDecorator(
+  (_data: unknown, ctx: ExecutionContext): ClientAreaSelfContext => {
+    const request = ctx.switchToHttp().getRequest<ClientAreaRequest>();
+
+    if (!request.clientAreaSelfContext) {
+      throw new Error(
+        'ClientAreaSelfContext requested without ClientAreaSelfContextGuard.',
+      );
+    }
+
+    return request.clientAreaSelfContext;
   },
 );

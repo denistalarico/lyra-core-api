@@ -3,6 +3,7 @@ import {
   IsIn,
   IsOptional,
   IsString,
+  IsUUID,
   Matches,
   MaxLength,
 } from 'class-validator';
@@ -32,6 +33,28 @@ export class PatchClientAreaSettingsDto {
   @IsOptional() @IsBoolean() conversationsDefaultEnabled?: boolean;
   @IsOptional() @IsIn(['default', 'custom']) domainMode?: 'default' | 'custom';
   @IsOptional() @IsString() @MaxLength(253) customDomain?: string | null;
+}
+
+/**
+ * PD3 — self-context activation has its own route rather than a field on
+ * `PatchClientAreaSettingsDto`, because switching it off must also revoke the
+ * self Client Area sessions and write an audit row. A generic settings PATCH
+ * would make that side effect invisible.
+ */
+export class PatchClientAreaSelfSettingsDto {
+  @IsBoolean() selfEnabled!: boolean;
+}
+
+export class GrantClientAreaSelfAccessDto {
+  @IsUUID() userId!: string;
+  @IsOptional()
+  @IsIn(['client_admin', 'client_operator', 'client_viewer'])
+  role?: ClientAreaRole;
+}
+
+export class PatchClientAreaSelfAccessRoleDto {
+  @IsIn(['client_admin', 'client_operator', 'client_viewer'])
+  role!: ClientAreaRole;
 }
 
 export class PatchClientAreaCompanySettingsDto {

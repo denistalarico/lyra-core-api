@@ -488,9 +488,14 @@ run('CA1 Client Area security matrix (PostgreSQL, real guards)', () => {
         '/client-area/me',
         bodyOf(response).accessToken,
       ).expect(200);
+      // Kept exhaustive on purpose: this is the assertion that proves the
+      // projection carries nothing extra (no tenant/workspace/client ids).
+      // PD3 added `hasAgencySelfContext`, and `false` is the correct value —
+      // U1 is an external client person, never an Agency operator.
       expect(me.body).toEqual({
         user: { id: U1, email: email('u1'), displayName: 'Joana Cliente' },
         activeMembershipCount: 1,
+        hasAgencySelfContext: false,
       });
     });
 

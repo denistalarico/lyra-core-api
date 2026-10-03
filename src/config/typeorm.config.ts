@@ -400,6 +400,10 @@ import { ClientAreaInvitationEntity } from '../modules/client-area/entities/clie
 import { ClientAreaMemberEventEntity } from '../modules/client-area/entities/client-area-member-event.entity';
 import { ClientAreaIdentityContactEntity } from '../modules/client-area/entities/client-area-identity-contact.entity';
 import {
+  ClientAreaSelfAccessEntity,
+  ClientAreaSelfAccessEventEntity,
+} from '../modules/client-area/entities/client-area-self-access.entity';
+import {
   ClientConversationAttachmentEntity,
   ClientConversationEntity,
   ClientConversationMessageEntity,
@@ -413,6 +417,8 @@ export const agencyEntities = [
   ClientConversationMessageEntity,
   ClientConversationAttachmentEntity,
   ClientAreaMembershipEntity,
+  ClientAreaSelfAccessEntity,
+  ClientAreaSelfAccessEventEntity,
   ClientAreaInvitationEntity,
   ClientAreaMemberEventEntity,
   MediaAssetEntity,

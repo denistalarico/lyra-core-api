@@ -32,6 +32,10 @@ import { ClientAreaMemberEventEntity } from './entities/client-area-member-event
 import { ClientAreaIdentityContactEntity } from './entities/client-area-identity-contact.entity';
 import { ClientAreaMembershipEntity } from './entities/client-area-membership.entity';
 import {
+  ClientAreaSelfAccessEntity,
+  ClientAreaSelfAccessEventEntity,
+} from './entities/client-area-self-access.entity';
+import {
   ClientAreaCompanySettingsEntity,
   ClientAreaPreviewEventEntity,
   ClientAreaSettingsEntity,
@@ -40,6 +44,7 @@ import {
   ClientAreaAuthGuard,
   ClientAreaEnabledGuard,
   ClientAreaMembershipGuard,
+  ClientAreaSelfContextGuard,
 } from './guards/client-area.guards';
 import { ClientAreaAuthService } from './services/client-area-auth.service';
 import { ClientAreaAuthorizationService } from './services/client-area-authorization.service';
@@ -52,6 +57,7 @@ import { ClientAreaEligibilityService } from './services/client-area-eligibility
 import { ClientAreaLegacyAuditService } from './services/client-area-legacy-audit.service';
 import { ClientAreaPasswordResetService } from './services/client-area-password-reset.service';
 import { ClientAreaRateLimitService } from './services/client-area-rate-limit.service';
+import { ClientAreaSelfAccessService } from './services/client-area-self-access.service';
 import { ClientAreaSessionService } from './services/client-area-session.service';
 import { ClientAreaManagementService } from './services/client-area-management.service';
 import { ClientAreaJwtStrategy } from './strategies/client-area-jwt.strategy';
@@ -74,6 +80,8 @@ const AGENCY_CONNECTION = 'agency';
     TypeOrmModule.forFeature(
       [
         ClientAreaMembershipEntity,
+        ClientAreaSelfAccessEntity,
+        ClientAreaSelfAccessEventEntity,
         ClientAreaIdentityContactEntity,
         ClientAreaSettingsEntity,
         ClientAreaCompanySettingsEntity,
@@ -104,6 +112,7 @@ const AGENCY_CONNECTION = 'agency';
     ClientAreaJwtStrategy,
     ClientAreaSessionService,
     ClientAreaManagementService,
+    ClientAreaSelfAccessService,
     ClientAreaAuthService,
     ClientAreaAuthorizationService,
     ClientAreaMembershipService,
@@ -118,6 +127,7 @@ const AGENCY_CONNECTION = 'agency';
     ClientAreaEnabledGuard,
     ClientAreaAuthGuard,
     ClientAreaMembershipGuard,
+    ClientAreaSelfContextGuard,
   ],
   exports: [
     // Re-exported so a module that already depends on the Client Area (AP3)
@@ -132,8 +142,10 @@ const AGENCY_CONNECTION = 'agency';
     ClientAreaAuthorizationService,
     ClientAreaSessionService,
     ClientAreaManagementService,
+    ClientAreaSelfAccessService,
     ClientAreaAuthGuard,
     ClientAreaMembershipGuard,
+    ClientAreaSelfContextGuard,
     ClientAreaEnabledGuard,
   ],
 })

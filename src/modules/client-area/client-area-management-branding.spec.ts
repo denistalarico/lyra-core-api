@@ -58,6 +58,8 @@ describe('PD1 ClientAreaManagementService branding', () => {
       repo(null) as never,
       repo(null) as never,
       repo(null) as never,
+      // PD3 — self access repository; branding does not read it.
+      repo(null) as never,
       { isMembershipEligible: jest.fn().mockResolvedValue(true) } as never,
     );
   }

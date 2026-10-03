@@ -141,6 +141,8 @@ describe('CA3.1 ClientAreaManagementService preview', () => {
       clientsRepo as never,
       contactsRepo as never,
       membershipsRepo as never,
+      // PD3 — self access repository; no preview path reads it.
+      { find: jest.fn().mockResolvedValue([]) } as never,
       securityRepo as never,
       profilesRepo as never,
       invitationsRepo as never,

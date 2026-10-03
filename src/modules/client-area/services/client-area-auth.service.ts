@@ -340,8 +340,35 @@ export class ClientAreaAuthService {
     return eligible;
   }
 
+  /**
+   * May this identity hold a Client Area session at all?
+   *
+   * Two disjoint ways in, and the distinction is the PD3 §5 invariant:
+   *
+   *  - **external client** — at least one usable Company Context membership
+   *    AND no active `workspace_users`. Unchanged from CA1: an Agency operator
+   *    still cannot log in as an external client, with no role exception.
+   *  - **agency self** — an active self access, which *requires* being an
+   *    eligible Agency operator (Owner/Admin) of that workspace.
+   *
+   * A person with neither is refused; the caller answers with the same
+   * generic error either way (§28), so the response never reveals which
+   * branch failed.
+   */
   async isEligible(identity: AgencyUserSecuritySettingsEntity) {
-    const hasMembership = await this.management.hasIdentityAvailableCompany(identity);
+    return (
+      (await this.isEligibleAsExternalClient(identity)) ||
+      (await this.sessions.hasAgencySelfAccess(
+        identity.tenantId,
+        identity.userId,
+      ))
+    );
+  }
+
+  /** CA1's original predicate, deliberately left intact (§36). */
+  async isEligibleAsExternalClient(identity: AgencyUserSecuritySettingsEntity) {
+    const hasMembership =
+      await this.management.hasIdentityAvailableCompany(identity);
 
     return (
       hasMembership &&

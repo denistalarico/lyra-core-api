@@ -1,4 +1,5 @@
 import {
+  ForbiddenException,
   Injectable,
   UnauthorizedException,
   type CanActivate,
@@ -12,13 +13,15 @@ import {
   CLIENT_AREA_PERMISSION_KEY,
 } from '../client-area.decorators';
 import { assertClientAreaEnabled } from '../client-area.config';
-import type {
-  ClientAreaModuleKey,
-  ClientAreaPermissionKey,
-  ClientAreaRequest,
-  ClientAreaTokenPayload,
+import {
+  CLIENT_AREA_ERROR_CODES,
+  type ClientAreaModuleKey,
+  type ClientAreaPermissionKey,
+  type ClientAreaRequest,
+  type ClientAreaTokenPayload,
 } from '../client-area.types';
 import { ClientAreaAuthorizationService } from '../services/client-area-authorization.service';
+import { ClientAreaSelfAccessService } from '../services/client-area-self-access.service';
 import { ClientAreaSessionService } from '../services/client-area-session.service';
 import { ClientAreaManagementService } from '../services/client-area-management.service';
 import {
@@ -78,7 +81,9 @@ export class ClientAreaAuthGuard
 
     request.clientAreaIdentity = await this.sessions.authenticate(payload);
     // A valid historical session must not survive the Agency application gate.
-    await this.management.assertIdentityAgencyEnabled(request.clientAreaIdentity);
+    await this.management.assertIdentityAgencyEnabled(
+      request.clientAreaIdentity,
+    );
     return true;
   }
 
@@ -92,6 +97,66 @@ export class ClientAreaAuthGuard
     }
 
     return user;
+  }
+}
+
+/**
+ * PD3 — routes of the agency self-context (`/client-area/self/...`).
+ * Must run after `ClientAreaAuthGuard`. Resolves `request.clientAreaSelfContext`
+ * and never a company context, so no company scope can leak out of here.
+ *
+ * Fails closed with the same generic 404 for "self not enabled", "no access",
+ * "revoked", "no longer an eligible operator" and "external client": the
+ * response never reveals which link of the chain failed (§28).
+ */
+@Injectable()
+export class ClientAreaSelfContextGuard implements CanActivate {
+  constructor(
+    private readonly reflector: Reflector,
+    private readonly selfAccess: ClientAreaSelfAccessService,
+  ) {}
+
+  async canActivate(context: ExecutionContext): Promise<boolean> {
+    const request = context.switchToHttp().getRequest<ClientAreaRequest>();
+
+    if (!request.clientAreaIdentity) {
+      throw clientAreaSessionInvalidError();
+    }
+
+    const selfContext = await this.selfAccess.requireSelfContext(
+      request.clientAreaIdentity,
+    );
+
+    const targets = [context.getHandler(), context.getClass()];
+    const permission = this.reflector.getAllAndOverride<
+      ClientAreaPermissionKey | undefined
+    >(CLIENT_AREA_PERMISSION_KEY, targets);
+    const module = this.reflector.getAllAndOverride<
+      ClientAreaModuleKey | undefined
+    >(CLIENT_AREA_MODULE_KEY, targets);
+
+    // Modules are all-false in the self-context V1, so a module-gated route
+    // is unreachable here by construction rather than by omission (§15).
+    if (module && !selfContext.modules[module]) {
+      throw new ForbiddenException({
+        statusCode: 403,
+        error: 'Forbidden',
+        message: 'This module is not available in the agency self context.',
+        code: CLIENT_AREA_ERROR_CODES.moduleUnavailable,
+      });
+    }
+
+    if (permission && !selfContext.permissions.has(permission)) {
+      throw new ForbiddenException({
+        statusCode: 403,
+        error: 'Forbidden',
+        message: 'You do not have permission for this action.',
+        code: CLIENT_AREA_ERROR_CODES.permissionDenied,
+      });
+    }
+
+    request.clientAreaSelfContext = selfContext;
+    return true;
   }
 }
 

@@ -27,6 +27,7 @@ import {
 } from '../entities/client-area-settings.entity';
 import { ClientAreaInvitationEntity } from '../entities/client-area-invitation.entity';
 import { ClientAreaMembershipEntity } from '../entities/client-area-membership.entity';
+import { ClientAreaSelfAccessEntity } from '../entities/client-area-self-access.entity';
 import {
   CLIENT_AREA_ERROR_CODES,
   type ClientAreaModules,
@@ -73,6 +74,8 @@ export class ClientAreaManagementService {
     private readonly contactsRepo: Repository<ContactEntity>,
     @InjectRepository(ClientAreaMembershipEntity, AGENCY_CONNECTION)
     private readonly membershipsRepo: Repository<ClientAreaMembershipEntity>,
+    @InjectRepository(ClientAreaSelfAccessEntity, AGENCY_CONNECTION)
+    private readonly selfAccessRepo: Repository<ClientAreaSelfAccessEntity>,
     @InjectRepository(AgencyUserSecuritySettingsEntity, AGENCY_CONNECTION)
     private readonly securityRepo: Repository<AgencyUserSecuritySettingsEntity>,
     @InjectRepository(AgencyUserProfileEntity, AGENCY_CONNECTION)
@@ -169,6 +172,23 @@ export class ClientAreaManagementService {
         membership.workspaceId,
       );
       if (settings?.enabled) return settings;
+    }
+    // PD3 — a self-context holder has no membership at all, so the gate above
+    // can never pass for them. Their workspace must have both the Client Area
+    // and the self-context switched on.
+    const selfAccesses = await this.selfAccessRepo.find({
+      where: {
+        tenantId: identity.tenantId,
+        userId: identity.userId,
+        status: 'active',
+      },
+    });
+    for (const access of selfAccesses) {
+      const settings = await this.findSettings(
+        access.tenantId,
+        access.workspaceId,
+      );
+      if (settings?.enabled && settings.selfEnabled) return settings;
     }
     throw unavailable();
   }
