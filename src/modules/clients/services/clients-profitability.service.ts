@@ -298,7 +298,13 @@ export class ClientsProfitabilityService {
       recurringRevenue: this.roundMoney(recurringRevenue),
       grossProfit: this.roundMoney(grossProfit),
       margin: this.roundRate(margin),
-      health: this.resolveHealth(margin, revenue, grossProfit, rules),
+      health: this.resolveHealth(
+        margin,
+        revenue,
+        grossProfit,
+        rules,
+        metrics.delinquency,
+      ),
       metadata: {
         ...(metrics.metadata ?? {}),
         contractedMonthlyFee: this.roundMoney(appliedFee),
@@ -311,19 +317,27 @@ export class ClientsProfitabilityService {
     revenue: number,
     grossProfit: number,
     rules?: Record<string, any> | null,
+    delinquency?: { overdueInvoiceCount: number } | null,
   ): AgencyClientHealthStatus {
-    if (revenue <= 0 && grossProfit < 0) return AgencyClientHealthStatus.Loss;
-    if (revenue <= 0) return AgencyClientHealthStatus.NoRevenue;
-    if (grossProfit < 0) return AgencyClientHealthStatus.Loss;
+    let health: AgencyClientHealthStatus;
 
-    const healthy = this.toNumber(rules?.healthyMarginThreshold ?? 0.4);
-    const attention = this.toNumber(rules?.attentionMarginThreshold ?? 0.2);
-    const risk = this.toNumber(rules?.riskMarginThreshold ?? 0);
+    if (revenue <= 0 && grossProfit < 0) health = AgencyClientHealthStatus.Loss;
+    else if (revenue <= 0) health = AgencyClientHealthStatus.NoRevenue;
+    else if (grossProfit < 0) health = AgencyClientHealthStatus.Loss;
+    else {
+      const healthy = this.toNumber(rules?.healthyMarginThreshold ?? 0.4);
+      const attention = this.toNumber(rules?.attentionMarginThreshold ?? 0.2);
+      const risk = this.toNumber(rules?.riskMarginThreshold ?? 0);
 
-    if (margin >= healthy) return AgencyClientHealthStatus.Healthy;
-    if (margin >= attention) return AgencyClientHealthStatus.Attention;
-    if (margin >= risk) return AgencyClientHealthStatus.Risk;
-    return AgencyClientHealthStatus.Loss;
+      if (margin >= healthy) health = AgencyClientHealthStatus.Healthy;
+      else if (margin >= attention) health = AgencyClientHealthStatus.Attention;
+      else if (margin >= risk) health = AgencyClientHealthStatus.Risk;
+      else health = AgencyClientHealthStatus.Loss;
+    }
+
+    return delinquency && health !== AgencyClientHealthStatus.Loss
+      ? AgencyClientHealthStatus.Risk
+      : health;
   }
 
   private toNumber(value: unknown): number {
@@ -351,6 +365,7 @@ export class ClientsProfitabilityService {
       grossProfit: item.grossProfit,
       margin: item.margin,
       health: item.health,
+      delinquency: item.delinquency ?? null,
       tasks: item.tasks,
       hoursWithoutCost: item.hoursWithoutCost ?? 0,
       membersMissingCost: item.membersMissingCost ?? [],
@@ -370,6 +385,7 @@ export class ClientsProfitabilityService {
       grossProfit: 0,
       margin: 0,
       health: AgencyClientHealthStatus.NoRevenue,
+      delinquency: null,
       tasks: 0,
       hoursWithoutCost: 0,
       membersMissingCost: [],

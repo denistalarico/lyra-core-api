@@ -178,6 +178,46 @@ async function clientItem(data: Data) {
 }
 
 describe('FinanceProfitabilityService — direct profitability', () => {
+  it('marks a client at risk when unpaid invoices are more than 30 days overdue', async () => {
+    const data = baseData();
+    const overdueDate = new Date();
+    overdueDate.setUTCDate(overdueDate.getUTCDate() - 45);
+    const dueDate = overdueDate.toISOString().slice(0, 10);
+
+    data.invoices = [
+      {
+        id: 'overdue-1',
+        customerId: CLIENT,
+        status: 'issued' as FinanceInvoice['status'],
+        totalAmount: '1000.00',
+        balanceDue: '1000.00',
+        dueDate,
+        issueDate: inPeriodDate(),
+        createdAt: new Date(),
+      } as Partial<FinanceInvoice>,
+      {
+        id: 'overdue-2',
+        customerId: CLIENT,
+        status: 'partially_paid' as FinanceInvoice['status'],
+        totalAmount: '1200.00',
+        balanceDue: '1000.00',
+        dueDate,
+        issueDate: inPeriodDate(),
+        createdAt: new Date(),
+      } as Partial<FinanceInvoice>,
+    ];
+
+    const client = await clientItem(data);
+
+    expect(client?.health).toBe('risk');
+    expect((client as any)?.delinquency).toMatchObject({
+      overdueInvoiceCount: 2,
+      overdueBalance: 2000,
+      oldestOverdueDays: expect.any(Number),
+    });
+    expect((client as any)?.delinquency.oldestOverdueDays).toBeGreaterThan(30);
+  });
+
   it('computes labor cost as logged hours × the responsible member hourly cost', async () => {
     const client = await clientItem(baseData());
     expect(client?.laborHours).toBe(2);

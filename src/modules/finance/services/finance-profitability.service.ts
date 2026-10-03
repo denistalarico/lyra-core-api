@@ -24,6 +24,13 @@ import { FinanceRequestContext } from './finance-context';
 // monthly cost when neither an explicit hourly cost nor a contracted-hours value
 // is configured (≈ 40h/week × 52 weeks / 12 months).
 const DEFAULT_MONTHLY_HOURS = 173.33;
+const DELINQUENCY_RISK_DAYS = 30;
+
+type ClientDelinquency = {
+  overdueInvoiceCount: number;
+  overdueBalance: number;
+  oldestOverdueDays: number;
+};
 
 type LaborAggregate = {
   minutes: number;
@@ -53,6 +60,7 @@ type ProfitabilityItem = {
   grossProfit: number;
   margin: number;
   health: ProfitabilityHealth;
+  delinquency: ClientDelinquency | null;
   tasks: number;
   // Configuration completeness signals for labor cost: how much tracked time
   // had no hourly cost available, and which responsibles are missing a cost.
@@ -309,6 +317,10 @@ export class FinanceProfitabilityService {
       (invoice) =>
         !['cancelled', 'void', 'draft'].includes(String(invoice.status)),
     );
+    const delinquencyByClientId = this.calculateClientDelinquency(
+      validInvoices,
+      now,
+    );
 
     const periodInvoices = validInvoices.filter((invoice) => {
       const date = invoice.issueDate ?? invoice.createdAt.toISOString().slice(0, 10);
@@ -379,6 +391,7 @@ export class FinanceProfitabilityService {
           ...tasks.map((task) => task.clientId),
           ...periodInvoices.map((invoice) => invoice.customerId),
           ...activeRecurringProfiles.map((profile) => profile.customerId),
+          ...delinquencyByClientId.keys(),
           // A client may have no project, task, invoice or recurring profile
           // yet. Its linked payable cost center must still make it visible in
           // profitability, otherwise the direct cost is calculated and then
@@ -425,6 +438,7 @@ export class FinanceProfitabilityService {
         labor: clientLabor,
         tasks: clientTasks.length,
         rules,
+        delinquency: delinquencyByClientId.get(clientId) ?? null,
         metadata: {
           projects: clientProjects.length,
         },
@@ -1428,6 +1442,54 @@ export class FinanceProfitabilityService {
       .reduce((sum, invoice) => sum + toNumber(invoice.totalAmount), 0);
   }
 
+  private calculateClientDelinquency(
+    invoices: FinanceInvoice[],
+    now: Date,
+  ): Map<string, ClientDelinquency> {
+    const today = Date.UTC(
+      now.getUTCFullYear(),
+      now.getUTCMonth(),
+      now.getUTCDate(),
+    );
+    const result = new Map<string, ClientDelinquency>();
+
+    for (const invoice of invoices) {
+      if (!invoice.customerId || !invoice.dueDate) continue;
+
+      const balanceDue = toNumber(invoice.balanceDue);
+      if (balanceDue <= 0) continue;
+
+      const dueAt = Date.parse(`${String(invoice.dueDate).slice(0, 10)}T00:00:00.000Z`);
+      if (Number.isNaN(dueAt)) continue;
+
+      const overdueDays = Math.floor((today - dueAt) / (24 * 60 * 60 * 1000));
+      if (overdueDays <= DELINQUENCY_RISK_DAYS) continue;
+
+      const current = result.get(invoice.customerId) ?? {
+        overdueInvoiceCount: 0,
+        overdueBalance: 0,
+        oldestOverdueDays: 0,
+      };
+
+      current.overdueInvoiceCount += 1;
+      current.overdueBalance += balanceDue;
+      current.oldestOverdueDays = Math.max(
+        current.oldestOverdueDays,
+        overdueDays,
+      );
+      result.set(invoice.customerId, current);
+    }
+
+    for (const [clientId, delinquency] of result) {
+      result.set(clientId, {
+        ...delinquency,
+        overdueBalance: roundMoney(delinquency.overdueBalance),
+      });
+    }
+
+    return result;
+  }
+
   private sumProjectRecurringRevenue(
     projectId: string,
     profiles: FinanceRecurringProfile[],
@@ -1507,6 +1569,7 @@ export class FinanceProfitabilityService {
     labor?: LaborAggregate;
     tasks: number;
     rules: FinanceProfitabilityRule;
+    delinquency?: ClientDelinquency | null;
     metadata?: Record<string, unknown>;
   }): ProfitabilityItem & { metadata?: Record<string, unknown> } {
     const laborHours = input.laborMinutes / 60;
@@ -1526,7 +1589,14 @@ export class FinanceProfitabilityService {
       laborCost: roundMoney(input.laborCost),
       grossProfit: roundMoney(grossProfit),
       margin: roundRate(margin),
-      health: this.resolveHealth(margin, input.revenue, grossProfit, input.rules),
+      health: this.resolveHealth(
+        margin,
+        input.revenue,
+        grossProfit,
+        input.rules,
+        input.delinquency,
+      ),
+      delinquency: input.delinquency ?? null,
       tasks: input.tasks,
       hoursWithoutCost: roundMoney((input.labor?.minutesWithoutCost ?? 0) / 60),
       membersMissingCost: input.labor
@@ -1571,15 +1641,24 @@ export class FinanceProfitabilityService {
     revenue: number,
     grossProfit: number,
     rules: FinanceProfitabilityRule,
+    delinquency?: ClientDelinquency | null,
   ): ProfitabilityHealth {
-    if (revenue <= 0 && grossProfit < 0) return 'loss';
-    if (revenue <= 0) return 'no_revenue';
-    if (grossProfit < 0) return 'loss';
+    let health: ProfitabilityHealth;
 
-    if (margin >= toNumber(rules.healthyMarginThreshold)) return 'healthy';
-    if (margin >= toNumber(rules.attentionMarginThreshold)) return 'attention';
-    if (margin >= toNumber(rules.riskMarginThreshold)) return 'risk';
+    if (revenue <= 0 && grossProfit < 0) health = 'loss';
+    else if (revenue <= 0) health = 'no_revenue';
+    else if (grossProfit < 0) health = 'loss';
+    else if (margin >= toNumber(rules.healthyMarginThreshold)) health = 'healthy';
+    else if (margin >= toNumber(rules.attentionMarginThreshold)) health = 'attention';
+    else if (margin >= toNumber(rules.riskMarginThreshold)) health = 'risk';
+    else health = 'loss';
 
-    return 'loss';
+    // An invoice still unpaid more than 30 days after its due date is a
+    // collection risk even when issued revenue keeps the direct margin high.
+    // Never soften an existing loss; otherwise delinquency sets the minimum
+    // client health to risk.
+    if (delinquency && health !== 'loss') return 'risk';
+
+    return health;
   }
 }
