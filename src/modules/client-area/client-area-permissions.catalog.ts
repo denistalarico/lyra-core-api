@@ -21,6 +21,7 @@ export const CLIENT_AREA_ROLE_PERMISSIONS: Readonly<
     'client_area.approvals.decide',
     'client_area.conversations.view',
     'client_area.conversations.send',
+    'client_area.self.overview.view',
   ] as const),
   client_operator: Object.freeze([
     'client_area.approvals.view',
@@ -28,6 +29,7 @@ export const CLIENT_AREA_ROLE_PERMISSIONS: Readonly<
     'client_area.approvals.decide',
     'client_area.conversations.view',
     'client_area.conversations.send',
+    'client_area.self.overview.view',
   ] as const),
   // CCOM1 §18 — a viewer reads the thread but cannot send. Note this differs
   // from approvals, where a viewer may comment: an approval comment is scoped
@@ -37,6 +39,11 @@ export const CLIENT_AREA_ROLE_PERMISSIONS: Readonly<
     'client_area.approvals.view',
     'client_area.approvals.comment',
     'client_area.conversations.view',
+    // PD4 — a viewer reads the overview. The surface is read-only by nature,
+    // so there is no narrower variant to withhold; the gate that matters for
+    // the self-context is self access itself (PD3 §7), re-evaluated per
+    // request, not a split between reading and acting on a number.
+    'client_area.self.overview.view',
   ] as const),
 });
 

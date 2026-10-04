@@ -183,6 +183,21 @@ export class ClientAreaSelfAccessService {
     const access = await this.resolveActiveSelfAccess(identity);
     if (!access) return null;
 
+    // PD4 — the Agency role of this operator, from the same `workspace_users`
+    // row `resolveActiveSelfAccess` just required to be active and eligible.
+    // Read again rather than threaded out of that method so its contract
+    // stays "is there a usable access row?"; the lookup is by primary-key-like
+    // columns and `SELF_ACCESS_ELIGIBLE_AGENCY_ROLES` guarantees the narrowing
+    // below can only fail if the row vanished between the two reads, in which
+    // case the context is refused.
+    const operator = await this.findEligibleOperator(
+      { tenantId: access.tenantId, workspaceId: access.workspaceId },
+      access.userId,
+    );
+    if (!operator) return null;
+    const agencyRole = operator.role;
+    if (agencyRole !== 'owner' && agencyRole !== 'admin') return null;
+
     return {
       surface: 'client_area',
       kind: AGENCY_SELF_CONTEXT_ID,
@@ -196,6 +211,7 @@ export class ClientAreaSelfAccessService {
         access.workspaceId,
       ),
       role: access.role,
+      agencyRole,
       permissions: permissionsForClientAreaRole(access.role),
       // V1: no module is company-free yet (§15). Not a placeholder for a
       // future fake scope — approvals/conversations stay off until they have

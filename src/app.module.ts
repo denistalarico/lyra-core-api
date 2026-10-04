@@ -64,6 +64,7 @@ import { ClientConversationApprovalsModule } from './modules/client-conversation
 import { ClientConversationsModule } from './modules/client-conversations/client-conversations.module';
 import { ClientNotificationsModule } from './modules/client-notifications/client-notifications.module';
 import { ClientAreaApprovalsModule } from './modules/social-approvals/client/client-approvals.module';
+import { ClientAreaSelfOverviewModule } from './modules/dashboards/client/client-area-self-overview.module';
 import { ClientAreaAgencyModule } from './modules/client-area/agency/client-area-agency.module';
 
 @Module({
@@ -138,6 +139,9 @@ import { ClientAreaAgencyModule } from './modules/client-area/agency/client-area
     // lets the conversation timeline resolve them. Both domains work without
     // it; it is what connects them (see the module's own note).
     ClientConversationApprovalsModule,
+    // PD4 — the self-context executive overview, projecting the canonical
+    // Agency dashboard. Wired here for the same reason as AP3 above.
+    ClientAreaSelfOverviewModule,
     // NTF-C1 — the join that gives the Notifications Core its Client Area
     // recipient resolver and gives the Client Area its notification feed.
     // Without it the core logs an error for any event whose audience is the

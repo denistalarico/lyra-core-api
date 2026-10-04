@@ -29,6 +29,13 @@ export const CLIENT_AREA_PERMISSION_KEYS = [
   // preset must be able to read a thread without being able to speak into it.
   'client_area.conversations.view',
   'client_area.conversations.send',
+  // PD4 — the agency self-context executive overview. A key of its own rather
+  // than reusing an approvals/conversations one: those are company-bound
+  // artefact permissions, and the overview is neither. It is granted to all
+  // three presets because the self-context is the agency reading its own
+  // numbers, and every eligible holder is already an Owner/Admin who sees
+  // the same figures in the Agency surface (PD3 §12).
+  'client_area.self.overview.view',
 ] as const;
 export type ClientAreaPermissionKey =
   (typeof CLIENT_AREA_PERMISSION_KEYS)[number];
@@ -168,6 +175,19 @@ export interface ClientAreaSelfContext {
   workspaceId: string;
   agencyDisplayName: string;
   role: ClientAreaRole;
+  /**
+   * PD4 — the Agency workspace role of this operator, as re-validated this
+   * request by `resolveActiveSelfAccess` (it is the row that proves the person
+   * is still an eligible Owner/Admin).
+   *
+   * It travels on the context so a canonical Agency projection can be asked
+   * for this person's own view without the Client Area either hard-coding
+   * `'owner'` or handing an Agency service a Client Area role name. It is
+   * **never** serialized to the client: no Client Area projection includes it
+   * (§21), and it grants nothing on its own — the Agency permission stack is
+   * not reachable from this surface.
+   */
+  agencyRole: 'owner' | 'admin';
   permissions: ReadonlySet<ClientAreaPermissionKey>;
   /**
    * Always all-false in V1. Approvals and Conversations are company-bound

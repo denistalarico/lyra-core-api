@@ -645,6 +645,14 @@ run('CA1 Client Area security matrix (PostgreSQL, real guards)', () => {
           'client_area.approvals.view',
           'client_area.conversations.send',
           'client_area.conversations.view',
+          // PD4 — the role preset is shared by both kinds of context, so an
+          // external client's projection lists this key too. It grants
+          // nothing here: the only route that reads it also requires
+          // `ClientAreaSelfContextGuard`, which answers 404 for anyone
+          // without active self access. Asserted rather than filtered,
+          // because hiding it per context would mean the projection no longer
+          // reports the preset the server actually resolved.
+          'client_area.self.overview.view',
         ],
         modules: { approvals: true, conversations: false },
         branding: {

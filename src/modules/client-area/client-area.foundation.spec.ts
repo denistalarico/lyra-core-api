@@ -106,12 +106,18 @@ describe('CA1 Client Area configuration (fail-closed)', () => {
 
 describe('CA1 Client Area permission catalog', () => {
   it('grants the CA0 presets with no bypass for client_admin', () => {
+    // Kept exhaustive on purpose: this list is what makes an accidental
+    // permission widening fail a test rather than ship. PD4 added
+    // `client_area.self.overview.view` to all three presets (the self
+    // overview is read-only and every self holder is already an Owner/Admin
+    // who sees the same figures in the Agency surface).
     expect([...permissionsForClientAreaRole('client_admin')].sort()).toEqual([
       'client_area.approvals.comment',
       'client_area.approvals.decide',
       'client_area.approvals.view',
       'client_area.conversations.send',
       'client_area.conversations.view',
+      'client_area.self.overview.view',
     ]);
     // CCOM1 — admin and operator hold the same preset, as they did for
     // approvals: the distinction between them is not about conversations.
@@ -122,6 +128,7 @@ describe('CA1 Client Area permission catalog', () => {
         'client_area.approvals.view',
         'client_area.conversations.send',
         'client_area.conversations.view',
+        'client_area.self.overview.view',
       ],
     );
     expect(
