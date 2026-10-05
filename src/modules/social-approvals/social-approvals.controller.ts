@@ -23,6 +23,10 @@ import {
   ListSocialApprovalsDto,
 } from './dto/social-approval.dto';
 import { SocialApprovalsService } from './social-approvals.service';
+import {
+  APPROVAL_SUBJECT_OWNER_ACTIONS,
+  ApprovalOwnerActionRequiredException,
+} from './approval-owner-actions';
 
 @Controller('social/approvals')
 @UseGuards(JwtAuthGuard, PermissionsGuard)
@@ -67,6 +71,11 @@ export class SocialApprovalsController {
     @RequestContextData() ctx: RequestContext,
     @Body() dto: CreateSocialApprovalDto,
   ) {
+    // Refused before any scope or subject lookup: owner-domain subjects are
+    // created only through their owner module (see approval-owner-actions).
+    const owner = APPROVAL_SUBJECT_OWNER_ACTIONS.get(dto.subjectType);
+    if (owner)
+      throw new ApprovalOwnerActionRequiredException(dto.subjectType, owner);
     return this.approvals.create(
       resolveCompanyAwareScope(ctx),
       ctx.userId,

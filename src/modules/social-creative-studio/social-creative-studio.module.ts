@@ -5,6 +5,7 @@ import { BrandKitModule } from '../brand-kit/brand-kit.module';
 import { PermissionsModule } from '../permissions';
 import { SocialOrganicModule } from '../social-organic/social-organic.module';
 import { SocialApprovalsModule } from '../social-approvals/social-approvals.module';
+import { SocialPlannerModule } from '../social-planner/social-planner.module';
 import { CreativeAssetService } from './creative-asset.service';
 import { CreativeStudioBrandContextService } from './creative-brand-context.service';
 import { CreativeFolderService } from './creative-folder.service';
@@ -29,6 +30,9 @@ import {
     BrandKitModule,
     SocialOrganicModule,
     SocialApprovalsModule,
+    // CS2B.4: Planner status reflection goes through the Planner's own
+    // `SocialContentProductionStatusService`. One-way: Studio → Planner.
+    SocialPlannerModule,
     TypeOrmModule.forFeature(
       [
         CreativeAssetEntity,

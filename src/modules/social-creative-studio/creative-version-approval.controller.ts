@@ -1,5 +1,6 @@
 import {
   Controller,
+  Get,
   Param,
   ParseUUIDPipe,
   Post,
@@ -19,8 +20,8 @@ import { CreativeVersionApprovalService } from './creative-version-approval.serv
 const SUBMIT_REVIEW = 'social.creative.content.submit_review.assigned';
 
 /**
- * CS2B.2 — kept apart from `CreativeStudioController` so the approval entry
- * point does not share a file with asset/brand-context work. Same route
+ * CS2B.2/CS2B.3 — owner-domain approval entry point and read projection.
+ * Kept apart from asset/brand-context work. Same route
  * prefix, guards and entitlement as the main Studio controller.
  */
 @Controller('social/creative-studio')
@@ -28,6 +29,20 @@ const SUBMIT_REVIEW = 'social.creative.content.submit_review.assigned';
 @RequireProductEntitlement('social')
 export class CreativeVersionApprovalController {
   constructor(private readonly approvals: CreativeVersionApprovalService) {}
+
+  @Get('assets/:id/versions/:versionId/approval')
+  @RequirePermission('social.approvals.review.view.assigned')
+  versionApproval(
+    @RequestContextData() ctx: RequestContext,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('versionId', ParseUUIDPipe) versionId: string,
+  ) {
+    return this.approvals.approvalForVersion(
+      creativeStudioScope(ctx),
+      id,
+      versionId,
+    );
+  }
 
   /** The Studio owns the version; Approvals receives only its immutable identity. */
   @Post('assets/:id/versions/:versionId/send-for-approval')

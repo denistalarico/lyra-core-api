@@ -22,6 +22,7 @@ import {
 } from './approval-scope';
 import { ApprovalSubjectResolver } from './subjects/approval-subject-resolver';
 import { SocialApprovalNotificationPublisher } from './social-approval-notification.publisher';
+import type { SocialApprovalStateProjection } from './approval-state.projection';
 
 export type ApprovalActor = {
   type: SocialApprovalActorType;
@@ -248,6 +249,59 @@ export class SocialApprovalsService {
       });
     const items = await qb.orderBy('request.createdAt', 'DESC').getMany();
     return { items, total: items.length };
+  }
+  /**
+   * The owner domain must authorize its root and immutable revision first.
+   * Prefer an active request of that exact revision; otherwise the latest
+   * historical request. Equal creation timestamps are broken by id DESC.
+   * One bounded read, with no viewed audit or workflow side effects.
+   */
+  async findStateForSubjectRevision(
+    scope: CompanyAwareScope,
+    subject: {
+      subjectType: string;
+      subjectId: string;
+      subjectRevisionId: string;
+    },
+  ): Promise<SocialApprovalStateProjection | null> {
+    const request = await this.requests
+      .createQueryBuilder('request')
+      .select([
+        'request.id',
+        'request.status',
+        'request.currentStage',
+        'request.createdAt',
+        'request.sentToClientAt',
+        'request.approvedAt',
+        'request.cancelledAt',
+        'request.supersededAt',
+      ])
+      .where({
+        ...this.scopeWhere(scope),
+        subjectType: subject.subjectType,
+        subjectId: subject.subjectId,
+        subjectRevisionId: subject.subjectRevisionId,
+      })
+      .orderBy(
+        'CASE WHEN request.status IN (:...activeStatuses) THEN 0 ELSE 1 END',
+        'ASC',
+      )
+      .setParameter('activeStatuses', ACTIVE)
+      .addOrderBy('request.createdAt', 'DESC')
+      .addOrderBy('request.id', 'DESC')
+      .limit(1)
+      .getOne();
+    if (!request) return null;
+    return {
+      approvalId: request.id,
+      status: request.status,
+      currentStage: request.currentStage,
+      createdAt: request.createdAt,
+      sentToClientAt: request.sentToClientAt,
+      approvedAt: request.approvedAt,
+      cancelledAt: request.cancelledAt,
+      supersededAt: request.supersededAt,
+    };
   }
   async detail(scope: CompanyAwareScope, id: string) {
     const request = await this.find(scope, id);

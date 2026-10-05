@@ -1,4 +1,8 @@
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
 import { SELF_DECLARED_DEPS_METADATA } from '@nestjs/common/constants';
 import { getDataSourceToken } from '@nestjs/typeorm';
 import { FindOperator, IsNull, Repository } from 'typeorm';
@@ -138,15 +142,15 @@ function makeHarness() {
     exists: jest.fn(async ({ where }: { where: Row }) =>
       state.assets.some((asset) => rowMatches(asset as unknown as Row, where)),
     ),
-    update: jest.fn(
-      async (
-        { id: assetId }: { id: string },
-        patch: Partial<CreativeAssetEntity>,
-      ) => {
-        const asset = state.assets.find((item) => item.id === assetId);
-        if (asset) Object.assign(asset, patch, { updatedAt: now() });
-      },
-    ),
+    update: jest.fn(async (where: Row, patch: Partial<CreativeAssetEntity>) => {
+      // Matches every given column, so a compare-and-set misses like SQL does.
+      const matched = state.assets.filter((asset) =>
+        rowMatches(asset as unknown as Row, where),
+      );
+      for (const asset of matched)
+        Object.assign(asset, patch, { updatedAt: now() });
+      return { affected: matched.length };
+    }),
     remove: jest.fn(async (asset: CreativeAssetEntity) => {
       state.assets = state.assets.filter((item) => item.id !== asset.id);
     }),
@@ -364,6 +368,10 @@ function makeHarness() {
   };
   const contentItems = { findOne: jest.fn().mockResolvedValue(null) };
   const plans = { exists: jest.fn().mockResolvedValue(false) };
+  const plannerStatus = {
+    reflectCreativeStatus: jest.fn().mockResolvedValue(true),
+    reflectCreativeRevisionStarted: jest.fn().mockResolvedValue(true),
+  };
 
   return {
     state,
@@ -376,6 +384,7 @@ function makeHarness() {
     dataSource,
     contentItems,
     plans,
+    plannerStatus,
     assetService: new CreativeAssetService(
       assets as unknown as Repository<CreativeAssetEntity>,
       versions as unknown as Repository<CreativeAssetVersionEntity>,
@@ -386,6 +395,7 @@ function makeHarness() {
       mediaUpload as never,
       mediaResolver as never,
       thumbnails as unknown as CreativeThumbnailService,
+      plannerStatus as never,
     ),
     folderService: new CreativeFolderService(
       folders as unknown as Repository<CreativeFolderEntity>,
@@ -463,7 +473,11 @@ describe('Creative Studio asset service', () => {
       video.id,
       file(MP4, 'replacement.mp4', 'video/mp4'),
     );
-    expect(videoVersion.thumbnailMediaAssetId).toBeNull();
+    expect(videoVersion.thumbnailPath).toBeNull();
+    expect(
+      h.state.versions.find((v) => v.id === videoVersion.id)
+        ?.thumbnailMediaAssetId,
+    ).toBeNull();
     expect(h.thumbnails.create).not.toHaveBeenCalled();
     await h.assetService.list(clientA, { assetType: 'video' });
     expect(h.mediaResolver.resolve).not.toHaveBeenCalled();
@@ -690,6 +704,322 @@ describe('Creative Studio asset service', () => {
       }),
     });
     expect(h.mediaUpload.upload).not.toHaveBeenCalled();
+  });
+
+  describe('CS2B.4 Planner production status reflection', () => {
+    const contentItemId = id(80);
+    const linkedHarness = () => {
+      const h = makeHarness();
+      h.contentItems.findOne.mockResolvedValue({
+        id: contentItemId,
+        planId: id(81),
+      });
+      h.plans.exists.mockResolvedValue(true);
+      return h;
+    };
+
+    it('never reaches the Planner for an asset without contentItemId', async () => {
+      const h = makeHarness();
+      const asset = await h.assetService.upload(clientA, 'user-a', {
+        file: file(PNG),
+      });
+      await h.assetService.createVersion(
+        clientA,
+        'user-a',
+        asset.id,
+        file(PNG),
+      );
+
+      expect(h.plannerStatus.reflectCreativeStatus).not.toHaveBeenCalled();
+    });
+
+    it('reports creative_in_progress for the first version, inside the upload transaction', async () => {
+      const h = linkedHarness();
+      await h.assetService.upload(clientA, 'user-a', {
+        file: file(PNG),
+        contentItemId,
+      });
+
+      expect(h.plannerStatus.reflectCreativeStatus).toHaveBeenCalledTimes(1);
+      expect(h.plannerStatus.reflectCreativeStatus).toHaveBeenCalledWith(
+        clientA,
+        {
+          contentItemId,
+          status: 'creative_in_progress',
+          actorUserId: 'user-a',
+        },
+        expect.objectContaining({ getRepository: expect.any(Function) }),
+      );
+    });
+
+    it('reports every later version with the same Planner scope and leaves the decision to the Planner', async () => {
+      const h = linkedHarness();
+      const asset = await h.assetService.upload(clientA, 'user-a', {
+        file: file(PNG),
+        contentItemId,
+      });
+      for (let i = 0; i < 2; i++)
+        await h.assetService.createVersion(
+          clientA,
+          'user-b',
+          asset.id,
+          file(PNG),
+        );
+
+      const calls = h.plannerStatus.reflectCreativeStatus.mock.calls;
+      expect(calls).toHaveLength(3);
+      for (const [scope, input] of calls) {
+        expect(scope).toEqual(clientA);
+        expect(input).toMatchObject({
+          contentItemId,
+          status: 'creative_in_progress',
+        });
+      }
+      expect(calls.at(-1)?.[1].actorUserId).toBe('user-b');
+      expect(h.state.versions.map((v) => v.versionNumber)).toEqual([1, 2, 3]);
+    });
+
+    it('rolls the version back with the Planner when the reflection fails', async () => {
+      const h = linkedHarness();
+      const asset = await h.assetService.upload(clientA, 'user-a', {
+        file: file(PNG),
+        contentItemId,
+      });
+      h.plannerStatus.reflectCreativeStatus.mockRejectedValueOnce(
+        new Error('planner write failed'),
+      );
+
+      await expect(
+        h.assetService.createVersion(clientA, 'user-a', asset.id, file(PNG)),
+      ).rejects.toThrow('planner write failed');
+      expect(h.state.versions).toHaveLength(1);
+      // Original + thumbnail of the failed version are compensated.
+      expect(
+        h.mediaUpload.removeAfterFailedConsumerOperation,
+      ).toHaveBeenCalledTimes(2);
+    });
+
+    it('never reflects for a cross-company content link, which fails before any write', async () => {
+      const h = makeHarness();
+      h.contentItems.findOne.mockResolvedValue({
+        id: contentItemId,
+        planId: id(81),
+      });
+      h.plans.exists.mockResolvedValue(false);
+
+      await expect(
+        h.assetService.upload(clientB, 'user-b', {
+          file: file(PNG),
+          contentItemId,
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(h.plannerStatus.reflectCreativeStatus).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('CS2B.6 revision after changes_requested', () => {
+    const contentItemId = id(80);
+    const seeded = (overrides: Partial<CreativeAssetEntity> = {}) => {
+      const h = makeHarness();
+      const asset = makeAsset(clientA, {
+        id: id(50),
+        currentVersionId: id(51),
+        ...overrides,
+      });
+      const v1 = makeVersion(asset.id, 1, { id: id(51) });
+      h.state.assets.push(asset);
+      h.state.versions.push(v1);
+      return { h, asset, v1, v1Snapshot: { ...v1 } };
+    };
+    const revise = (
+      h: ReturnType<typeof makeHarness>,
+      assetId: string,
+      revisesVersionId: string,
+      scope = clientA,
+    ) =>
+      h.assetService.createVersion(scope, 'user-b', assetId, file(PNG), {
+        revisesVersionId,
+      });
+
+    it('creates the next immutable version of the same asset and leaves v1 intact', async () => {
+      const { h, asset, v1, v1Snapshot } = seeded();
+
+      const v2 = await revise(h, asset.id, v1.id);
+
+      expect(v2.id).not.toBe(v1.id);
+      expect(v2).toMatchObject({ versionNumber: 2, source: 'replace' });
+      // The response is the canonical version view: no media/storage ids.
+      expect(v2).not.toHaveProperty('mediaAssetId');
+      expect(v2).not.toHaveProperty('thumbnailMediaAssetId');
+      expect(h.state.versions.find((v) => v.id === v2.id)).toMatchObject({
+        creativeAssetId: asset.id,
+        versionNumber: 2,
+        source: 'replace',
+        createdById: 'user-b',
+      });
+      expect(h.state.versions.find((v) => v.id === v1.id)).toEqual(v1Snapshot);
+      expect(asset.currentVersionId).toBe(v2.id);
+      expect(h.state.assets).toHaveLength(1);
+      expect(
+        (await h.assetService.versionsFor(clientA, asset.id)).map(
+          (v) => v.versionNumber,
+        ),
+      ).toEqual([2, 1]);
+    });
+
+    it('follows the existing sequence when the revised version is not v1', async () => {
+      const { h, asset } = seeded({ currentVersionId: id(53) });
+      h.state.versions.push(
+        makeVersion(asset.id, 2, { id: id(52) }),
+        makeVersion(asset.id, 3, { id: id(53) }),
+      );
+      await expect(revise(h, asset.id, id(53))).resolves.toMatchObject({
+        versionNumber: 4,
+      });
+    });
+
+    it('reports the revision start to the Planner inside the version transaction, never the generic status', async () => {
+      const { h, asset, v1 } = seeded({ contentItemId });
+
+      await revise(h, asset.id, v1.id);
+
+      expect(
+        h.plannerStatus.reflectCreativeRevisionStarted,
+      ).toHaveBeenCalledWith(
+        clientA,
+        { contentItemId, actorUserId: 'user-b' },
+        expect.objectContaining({ getRepository: expect.any(Function) }),
+      );
+      expect(h.plannerStatus.reflectCreativeStatus).not.toHaveBeenCalled();
+    });
+
+    it('a plain new version still uses only the non-regressing generic status', async () => {
+      const { h, asset } = seeded({ contentItemId });
+      await h.assetService.createVersion(
+        clientA,
+        'user-b',
+        asset.id,
+        file(PNG),
+      );
+      expect(h.plannerStatus.reflectCreativeStatus).toHaveBeenCalledTimes(1);
+      expect(
+        h.plannerStatus.reflectCreativeRevisionStarted,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('works without a Planner link', async () => {
+      const { h, asset, v1 } = seeded();
+      await expect(revise(h, asset.id, v1.id)).resolves.toMatchObject({
+        versionNumber: 2,
+      });
+      expect(
+        h.plannerStatus.reflectCreativeRevisionStarted,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('rolls the version back with the Planner when the revision reflection fails', async () => {
+      const { h, asset, v1 } = seeded({ contentItemId });
+      h.plannerStatus.reflectCreativeRevisionStarted.mockRejectedValueOnce(
+        new Error('planner write failed'),
+      );
+      await expect(revise(h, asset.id, v1.id)).rejects.toThrow(
+        'planner write failed',
+      );
+      // The pointer rollback itself is proven against PostgreSQL in
+      // creative-revision-loop.postgres.spec.ts (this mock does not undo it).
+      expect(h.state.versions).toHaveLength(1);
+      expect(
+        h.mediaUpload.removeAfterFailedConsumerOperation,
+      ).toHaveBeenCalledTimes(2);
+    });
+
+    it('refuses an archived asset before any storage write', async () => {
+      const { h, asset, v1 } = seeded({
+        status: 'archived',
+        archivedAt: new Date(),
+      });
+      await expect(revise(h, asset.id, v1.id)).rejects.toThrow(
+        'Criativo arquivado',
+      );
+      expect(h.mediaUpload.upload).not.toHaveBeenCalled();
+      expect(h.state.versions).toHaveLength(1);
+    });
+
+    it('only revises the current version: a second revision of v1 (double click) is a conflict', async () => {
+      const { h, asset, v1 } = seeded();
+      await revise(h, asset.id, v1.id);
+      h.mediaUpload.upload.mockClear();
+
+      await expect(revise(h, asset.id, v1.id)).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+      expect(h.mediaUpload.upload).not.toHaveBeenCalled();
+      expect(h.state.versions.map((v) => v.versionNumber)).toEqual([1, 2]);
+    });
+
+    it('compare-and-sets the current version: a revision that loses the race rolls back and compensates its binaries', async () => {
+      const { h, asset, v1 } = seeded();
+      // Another operator's revision commits while this upload is in flight.
+      h.mediaUpload.upload.mockImplementationOnce(async () => {
+        asset.currentVersionId = id(99);
+        return { id: 'media-race', originalFilename: 'r.png' };
+      });
+
+      await expect(revise(h, asset.id, v1.id)).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+      expect(h.state.versions).toHaveLength(1);
+      expect(asset.currentVersionId).toBe(id(99));
+      expect(
+        h.mediaUpload.removeAfterFailedConsumerOperation,
+      ).toHaveBeenCalledWith(clientA, 'media-race');
+    });
+
+    it.each([
+      ['revision', true],
+      ['plain version', false],
+    ])(
+      'maps a version-number unique violation to 409 for a %s',
+      async (_label, isRevision) => {
+        const { h, asset, v1 } = seeded();
+        h.versions.save.mockRejectedValueOnce(
+          Object.assign(new Error('duplicate key'), {
+            code: '23505',
+            constraint: 'UQ_social_creative_asset_versions_number',
+          }),
+        );
+        const attempt = isRevision
+          ? revise(h, asset.id, v1.id)
+          : h.assetService.createVersion(
+              clientA,
+              'user-b',
+              asset.id,
+              file(PNG),
+            );
+        await expect(attempt).rejects.toBeInstanceOf(ConflictException);
+        expect(
+          h.mediaUpload.removeAfterFailedConsumerOperation,
+        ).toHaveBeenCalledTimes(2);
+      },
+    );
+
+    it('keeps other failures untouched', async () => {
+      const { h, asset } = seeded();
+      h.versions.save.mockRejectedValueOnce(
+        Object.assign(new Error('other unique'), { code: '23505' }),
+      );
+      await expect(
+        h.assetService.createVersion(clientA, 'user-b', asset.id, file(PNG)),
+      ).rejects.toThrow('other unique');
+    });
+
+    it('never revises another company asset', async () => {
+      const { h, asset, v1 } = seeded();
+      await expect(revise(h, asset.id, v1.id, clientB)).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+      expect(h.mediaUpload.upload).not.toHaveBeenCalled();
+    });
   });
 
   it('archives without deleting and allows the archived filter to retrieve history', async () => {

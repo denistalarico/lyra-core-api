@@ -30,9 +30,11 @@ import {
 import { CreativeAssetService } from './creative-asset.service';
 import { CreativeStudioBrandContextService } from './creative-brand-context.service';
 import { CreativeFolderService } from './creative-folder.service';
+import { CreativeVersionApprovalService } from './creative-version-approval.service';
 import {
   CreateCreativeAssetDto,
   CreateCreativeFolderDto,
+  CreateCreativeVersionDto,
   ListCreativeAssetsQueryDto,
   UpdateCreativeAssetDto,
   UpdateCreativeFolderDto,
@@ -58,6 +60,7 @@ export class CreativeStudioController {
     private readonly folders: CreativeFolderService,
     private readonly files: FilesService,
     private readonly brandContext: CreativeStudioBrandContextService,
+    private readonly versionApprovals: CreativeVersionApprovalService,
   ) {}
   @Get('brand-context') @RequirePermission(VIEW) brandContextForStudio(
     @RequestContextData() ctx: RequestContext,
@@ -112,7 +115,16 @@ export class CreativeStudioController {
     @RequestContextData() ctx: RequestContext,
     @Param('id', ParseUUIDPipe) id: string,
     @UploadedFile() file: Express.Multer.File,
+    @Body() dto: CreateCreativeVersionDto,
   ) {
+    if (dto.revisesVersionId)
+      return this.versionApprovals.startRevision(
+        creativeStudioScope(ctx),
+        ctx.userId ?? null,
+        id,
+        dto.revisesVersionId,
+        file,
+      );
     return this.assets.createVersion(
       creativeStudioScope(ctx),
       ctx.userId ?? null,

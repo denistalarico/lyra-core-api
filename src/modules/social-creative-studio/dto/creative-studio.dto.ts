@@ -27,6 +27,13 @@ export class CreateCreativeAssetDto {
   @IsOptional() @IsUUID() folderId?: string;
   @IsOptional() @IsUUID() contentItemId?: string;
 }
+export class CreateCreativeVersionDto {
+  /**
+   * CS2B.6: the version whose `changes_requested` approval this new version
+   * answers. Absent for a plain replacement.
+   */
+  @IsOptional() @IsUUID() revisesVersionId?: string;
+}
 export class UpdateCreativeAssetDto {
   @IsOptional() @IsString() @MaxLength(255) name?: string;
   @IsOptional() @IsUUID() folderId?: string | null;

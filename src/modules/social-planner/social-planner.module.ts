@@ -22,6 +22,7 @@ import { SocialPlannerController } from './social-planner.controller';
 import { SocialContentPublicationGuard } from './services/content-publication-guard.port';
 import { SocialCampaignService } from './services/social-campaign.service';
 import { SocialContentLifecycleService } from './services/social-content-lifecycle.service';
+import { SocialContentProductionStatusService } from './services/social-content-production-status.service';
 import { SocialCopyGenerationConfigService } from './services/social-copy-generation-config.service';
 import { SocialCopyGenerationProvider } from './services/social-copy-generation-provider';
 import { SocialCopyGenerationStateMachine } from './services/social-copy-generation-state-machine';
@@ -111,6 +112,12 @@ import { SocialPublishingCadenceService } from './services/social-publishing-cad
      * imports this module, which is the direction that was already true.
      */
     SocialContentPublicationGuard,
+    /**
+     * Exported for the Creative Studio (CS2B.4), which reports creative
+     * production through it instead of writing `planningStatus` itself. The
+     * Studio imports this module; the Planner imports nothing from the Studio.
+     */
+    SocialContentProductionStatusService,
   ],
   exports: [
     SocialPlannerService,
@@ -121,6 +128,7 @@ import { SocialPublishingCadenceService } from './services/social-publishing-cad
     SocialCopyGenerationService,
     SocialPlanGenerationService,
     SocialContentPublicationGuard,
+    SocialContentProductionStatusService,
   ],
 })
 export class SocialPlannerModule {}

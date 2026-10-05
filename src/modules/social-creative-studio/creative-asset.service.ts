@@ -1,10 +1,11 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
-import { DataSource, IsNull, Repository } from 'typeorm';
+import { DataSource, type EntityManager, IsNull, Repository } from 'typeorm';
 import {
   detectMediaAssetMimeType,
   MediaAssetResolverService,
@@ -21,6 +22,7 @@ import {
   SocialContentItemEntity,
   SocialPlanEntity,
 } from '../social-planner/entities';
+import { SocialContentProductionStatusService } from '../social-planner/services/social-content-production-status.service';
 
 const IMAGE_MAX = 20 * 1024 * 1024;
 const VIDEO_MAX = 300 * 1024 * 1024;
@@ -49,6 +51,7 @@ export class CreativeAssetService {
     private readonly mediaUpload: MediaAssetUploadService,
     private readonly mediaResolver: MediaAssetResolverService,
     private readonly thumbnails: CreativeThumbnailService,
+    private readonly plannerStatus: SocialContentProductionStatusService,
   ) {}
   private scopeWhere(scope: CreativeStudioScope) {
     return {
@@ -106,6 +109,29 @@ export class CreativeAssetService {
       },
     });
     if (!planExists) throw new BadRequestException('Conteúdo não encontrado.');
+  }
+  /**
+   * CS2B.4: a version now exists for the linked Planner item. The Planner
+   * decides whether that moves it to `creative_in_progress`; an asset without
+   * `contentItemId` never reaches the Planner. Runs inside the version's
+   * transaction so both commit or roll back together.
+   */
+  private async reflectProductionStarted(
+    scope: CreativeStudioScope,
+    actor: string | null,
+    asset: CreativeAssetEntity,
+    manager: EntityManager,
+  ) {
+    if (!asset.contentItemId) return;
+    await this.plannerStatus.reflectCreativeStatus(
+      scope,
+      {
+        contentItemId: asset.contentItemId,
+        status: 'creative_in_progress',
+        actorUserId: actor,
+      },
+      manager,
+    );
   }
   private kind(file: UploadFile | undefined): 'image' | 'video' {
     if (!file?.buffer?.length)
@@ -180,7 +206,9 @@ export class CreativeAssetService {
           }),
         );
         asset.currentVersionId = version.id;
-        return assets.save(asset);
+        const saved = await assets.save(asset);
+        await this.reflectProductionStarted(scope, actor, saved, manager);
+        return saved;
       });
     } catch (error) {
       if (thumbnailId)
@@ -195,13 +223,22 @@ export class CreativeAssetService {
       throw error;
     }
   }
+  /**
+   * `revision` (CS2B.6) marks a version produced in answer to a client's
+   * request for changes on `revisesVersionId`. The caller
+   * (`CreativeVersionApprovalService.startRevision`) has already proven that
+   * against Approvals; here the Studio enforces its own part: a live asset,
+   * and only the current version can be revised — once, even under races.
+   */
   async createVersion(
     scope: CreativeStudioScope,
     actor: string | null,
     assetId: string,
     file: UploadFile,
+    revision?: { revisesVersionId: string },
   ) {
     const asset = await this.find(scope, assetId);
+    if (revision) this.assertRevisable(asset, revision.revisesVersionId);
     const assetType = this.kind(file);
     if (asset.assetType !== assetType)
       throw new BadRequestException(
@@ -234,8 +271,29 @@ export class CreativeAssetService {
             createdById: actor,
           }),
         );
-        await assets.update({ id: asset.id }, { currentVersionId: version.id });
-        return version;
+        if (!revision) {
+          await assets.update(
+            { id: asset.id },
+            { currentVersionId: version.id },
+          );
+          await this.reflectProductionStarted(scope, actor, asset, manager);
+          return this.versionView(version);
+        }
+        // Compare-and-set: of two revisions of the same version (double
+        // click, two operators) only the first moves the pointer; the other
+        // rolls back here and its binaries are compensated below.
+        const moved = await assets.update(
+          { id: asset.id, currentVersionId: revision.revisesVersionId },
+          { currentVersionId: version.id },
+        );
+        if ((moved.affected ?? 0) !== 1) throw this.revisionAlreadyStarted();
+        if (asset.contentItemId)
+          await this.plannerStatus.reflectCreativeRevisionStarted(
+            scope,
+            { contentItemId: asset.contentItemId, actorUserId: actor },
+            manager,
+          );
+        return this.versionView(version);
       });
     } catch (error) {
       if (thumbnailId)
@@ -247,8 +305,46 @@ export class CreativeAssetService {
         scope,
         original.id,
       );
+      // Two versions racing for the same number: the unique constraint already
+      // serializes them; report the loser as a conflict instead of a 500.
+      if (this.isVersionNumberConflict(error))
+        throw revision
+          ? this.revisionAlreadyStarted()
+          : new ConflictException(
+              'Outra versão deste criativo foi criada ao mesmo tempo. Atualize e tente novamente.',
+            );
       throw error;
     }
+  }
+  private assertRevisable(
+    asset: CreativeAssetEntity,
+    revisesVersionId: string,
+  ) {
+    if (asset.status === 'archived' || asset.archivedAt)
+      throw new ConflictException(
+        'Criativo arquivado: não é possível iniciar uma revisão.',
+      );
+    if (asset.currentVersionId !== revisesVersionId)
+      throw this.revisionAlreadyStarted();
+  }
+  private revisionAlreadyStarted() {
+    return new ConflictException(
+      'Já existe uma versão mais recente deste criativo. Envie essa versão para aprovação.',
+    );
+  }
+  private isVersionNumberConflict(error: unknown) {
+    const candidate = error as {
+      code?: string;
+      constraint?: string;
+      driverError?: { code?: string; constraint?: string };
+    } | null;
+    const code = candidate?.code ?? candidate?.driverError?.code;
+    const constraint =
+      candidate?.constraint ?? candidate?.driverError?.constraint;
+    return (
+      code === '23505' &&
+      constraint === 'UQ_social_creative_asset_versions_number'
+    );
   }
   async list(
     scope: CreativeStudioScope,

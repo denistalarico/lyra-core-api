@@ -92,20 +92,103 @@ function creativeStore() {
 
 function unitHarness() {
   const store = creativeStore();
+  const plannerStatus = {
+    reflectCreativeStatus: jest.fn().mockResolvedValue(true),
+  };
   const approvals = {
     create: jest.fn(async (_scope, _actor, input) => ({
       id: 'approval-1',
       status: 'draft',
       ...input,
     })),
+    findStateForSubjectRevision: jest.fn(
+      async (): Promise<{ status: string } | null> => null,
+    ),
+  };
+  const assetVersions = {
+    createVersion: jest.fn(async (_scope, _actor, assetId: string) => ({
+      id: VERSION_A2,
+      creativeAssetId: assetId,
+      versionNumber: 2,
+      source: 'replace',
+    })),
   };
   const service = new CreativeVersionApprovalService(
     store.assets as never,
     store.versions as never,
     approvals as unknown as SocialApprovalsService,
+    plannerStatus as never,
+    assetVersions as never,
   );
-  return { ...store, approvals, service };
+  return { ...store, approvals, plannerStatus, assetVersions, service };
 }
+
+describe('CS2B.4 send for approval → Planner creative_ready', () => {
+  const CONTENT_A = 'cccccccc-0001-4000-8000-000000000001';
+  const linked = () => {
+    const h = unitHarness();
+    Object.assign(h.assets.rows[0], { contentItemId: CONTENT_A });
+    return h;
+  };
+
+  it('reports creative_ready for the linked content item after Approvals created the request', async () => {
+    const h = linked();
+    const order: string[] = [];
+    h.approvals.create.mockImplementationOnce(async (_s, _a, input) => {
+      order.push('approval');
+      return { id: 'approval-1', status: 'draft', ...input };
+    });
+    h.plannerStatus.reflectCreativeStatus.mockImplementationOnce(async () => {
+      order.push('planner');
+      return true;
+    });
+
+    const created = await h.service.sendForApproval(
+      companyA,
+      'user-a',
+      ASSET_A,
+      VERSION_A1,
+    );
+
+    expect(created).toMatchObject({ id: 'approval-1', status: 'draft' });
+    expect(order).toEqual(['approval', 'planner']);
+    expect(h.plannerStatus.reflectCreativeStatus).toHaveBeenCalledWith(
+      companyA,
+      {
+        contentItemId: CONTENT_A,
+        status: 'creative_ready',
+        actorUserId: 'user-a',
+      },
+    );
+  });
+
+  it('leaves the Planner alone for an asset without contentItemId', async () => {
+    const h = unitHarness();
+    await h.service.sendForApproval(companyA, 'user-a', ASSET_A, VERSION_A1);
+    expect(h.approvals.create).toHaveBeenCalledTimes(1);
+    expect(h.plannerStatus.reflectCreativeStatus).not.toHaveBeenCalled();
+  });
+
+  it('does not reflect when Approvals refuses the request', async () => {
+    const h = linked();
+    h.approvals.create.mockRejectedValueOnce(
+      new ConflictException('active approval'),
+    );
+    await expect(
+      h.service.sendForApproval(companyA, 'user-a', ASSET_A, VERSION_A1),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(h.plannerStatus.reflectCreativeStatus).not.toHaveBeenCalled();
+  });
+
+  it('never reflects for an asset of another company', async () => {
+    const h = linked();
+    await expect(
+      h.service.sendForApproval(companyB, 'user-b', ASSET_A, VERSION_A1),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    expect(h.approvals.create).not.toHaveBeenCalled();
+    expect(h.plannerStatus.reflectCreativeStatus).not.toHaveBeenCalled();
+  });
+});
 
 describe('CS2B.2 CreativeVersionApprovalService — owner-domain entry point', () => {
   it('delegates an explicit, scoped version to SocialApprovalsService.create as creative_version', async () => {
@@ -355,6 +438,8 @@ describe('CS2B.2 contract — Studio → real SocialApprovalsService', () => {
       assets as never,
       versions as never,
       approvals,
+      { reflectCreativeStatus: jest.fn().mockResolvedValue(false) } as never,
+      {} as never,
     );
     return { assets, versions, requests, manager, notifications, studio };
   }
@@ -444,5 +529,101 @@ describe('CS2B.2 contract — Studio → real SocialApprovalsService', () => {
       studio.sendForApproval(companyA, 'user-a', ASSET_A, VERSION_B1),
     ).rejects.toBeInstanceOf(NotFoundException);
     expect(requests.rows).toHaveLength(0);
+  });
+});
+
+describe('CS2B.6 revision loop — CreativeVersionApprovalService.startRevision', () => {
+  const FILE = {
+    buffer: Buffer.from('png'),
+    originalname: 'revisao.png',
+    size: 3,
+  };
+  const withApproval = (status: string | null) => {
+    const h = unitHarness();
+    h.approvals.findStateForSubjectRevision.mockResolvedValue(
+      status ? { status } : null,
+    );
+    return h;
+  };
+
+  it('creates the next version of the same asset from a changes_requested version, without touching Approvals', async () => {
+    const h = withApproval('changes_requested');
+
+    const created = await h.service.startRevision(
+      companyA,
+      'user-a',
+      ASSET_A,
+      VERSION_A1,
+      FILE,
+    );
+
+    expect(h.approvals.findStateForSubjectRevision).toHaveBeenCalledWith(
+      companyA,
+      {
+        subjectType: 'creative_version',
+        subjectId: ASSET_A,
+        subjectRevisionId: VERSION_A1,
+      },
+    );
+    expect(h.assetVersions.createVersion).toHaveBeenCalledWith(
+      companyA,
+      'user-a',
+      ASSET_A,
+      FILE,
+      { revisesVersionId: VERSION_A1 },
+    );
+    expect(created).toMatchObject({
+      creativeAssetId: ASSET_A,
+      versionNumber: 2,
+    });
+    // The new version is not handed to Approvals automatically, and the old
+    // request is neither edited nor re-pointed: supersede belongs to create().
+    expect(h.approvals.create).not.toHaveBeenCalled();
+    expect(h.plannerStatus.reflectCreativeStatus).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    null,
+    'draft',
+    'awaiting_internal_review',
+    'awaiting_client',
+    'approved',
+    'cancelled',
+    'superseded',
+  ])('refuses a revision when the version approval is %s', async (status) => {
+    const h = withApproval(status);
+    await expect(
+      h.service.startRevision(companyA, 'user-a', ASSET_A, VERSION_A1, FILE),
+    ).rejects.toMatchObject({
+      response: { code: 'revision_requires_changes_requested' },
+    });
+    await expect(
+      h.service.startRevision(companyA, 'user-a', ASSET_A, VERSION_A1, FILE),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(h.assetVersions.createVersion).not.toHaveBeenCalled();
+  });
+
+  it('authorizes the asset before the version: company A cannot revise company B, nor a version of another asset', async () => {
+    const h = withApproval('changes_requested');
+    await expect(
+      h.service.startRevision(companyA, 'user-a', ASSET_B, VERSION_B1, FILE),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    await expect(
+      h.service.startRevision(companyA, 'user-a', ASSET_A, VERSION_B1, FILE),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    await expect(
+      h.service.startRevision(companyB, 'user-b', ASSET_A, VERSION_A1, FILE),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    expect(h.approvals.findStateForSubjectRevision).not.toHaveBeenCalled();
+    expect(h.assetVersions.createVersion).not.toHaveBeenCalled();
+  });
+
+  it('requires a Company Context, with no lookup in agency scope', async () => {
+    const h = withApproval('changes_requested');
+    await expect(
+      h.service.startRevision(agencyScope, 'user-a', ASSET_A, VERSION_A1, FILE),
+    ).rejects.toMatchObject({ response: { code: COMPANY_CONTEXT_REQUIRED } });
+    expect(h.assets.findOne).not.toHaveBeenCalled();
+    expect(h.assetVersions.createVersion).not.toHaveBeenCalled();
   });
 });

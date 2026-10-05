@@ -12,6 +12,9 @@ import {
 import { PermissionsGuard } from '../permissions/guards/permissions.guard';
 import type { RequestContext } from '../../common/context/request-context.interface';
 import { CreativeStudioController } from './creative-studio.controller';
+import { CreateCreativeVersionDto } from './dto/creative-studio.dto';
+import { plainToInstance } from 'class-transformer';
+import { validate } from 'class-validator';
 
 const ROUTE_PERMISSIONS = {
   brandContextForStudio: 'social.creative.content.view.assigned',
@@ -63,6 +66,7 @@ describe('Creative Studio controller permission contract', () => {
       {} as never,
       {} as never,
       brandContext as never,
+      {} as never,
     );
     const clientContext = {
       tenantId: 'tenant-a',
@@ -91,6 +95,79 @@ describe('Creative Studio controller permission contract', () => {
       }),
     ).toThrow(BadRequestException);
     expect(brandContext.load).toHaveBeenCalledTimes(1);
+  });
+
+  it('CS2B.6: routes a version with revisesVersionId to the revision loop and a plain one to generic versioning', async () => {
+    const assets = { createVersion: jest.fn().mockResolvedValue({ id: 'v' }) };
+    const versionApprovals = {
+      startRevision: jest.fn().mockResolvedValue({ id: 'v' }),
+    };
+    const controller = new CreativeStudioController(
+      assets as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      versionApprovals as never,
+    );
+    const ctx = {
+      tenantId: 'tenant-a',
+      workspaceId: 'workspace-a',
+      userId: 'user-a',
+      managedContext: {
+        productKey: 'social',
+        operatingMode: 'client',
+        clientId: 'client-a',
+        companyContextId: 'company-a',
+        managedTenantId: 'managed-tenant-a',
+      },
+    } as RequestContext;
+    const scope = {
+      tenantId: 'tenant-a',
+      workspaceId: 'workspace-a',
+      agencyClientId: 'client-a',
+      companyContextId: 'company-a',
+    };
+    const file = { buffer: Buffer.from('x') } as Express.Multer.File;
+    const assetId = '11111111-1111-4111-8111-111111111111';
+    const versionId = 'aaaaaaaa-0001-4000-8000-000000000001';
+
+    await controller.version(ctx, assetId, file, {
+      revisesVersionId: versionId,
+    });
+    expect(versionApprovals.startRevision).toHaveBeenCalledWith(
+      scope,
+      'user-a',
+      assetId,
+      versionId,
+      file,
+    );
+    expect(assets.createVersion).not.toHaveBeenCalled();
+
+    await controller.version(ctx, assetId, file, {});
+    expect(assets.createVersion).toHaveBeenCalledWith(
+      scope,
+      'user-a',
+      assetId,
+      file,
+    );
+    expect(versionApprovals.startRevision).toHaveBeenCalledTimes(1);
+  });
+
+  it('CS2B.6: only accepts a UUID as revisesVersionId', async () => {
+    const dto = plainToInstance(CreateCreativeVersionDto, {
+      revisesVersionId: 'v1',
+    });
+    expect(await validate(dto)).toHaveLength(1);
+    expect(
+      await validate(
+        plainToInstance(CreateCreativeVersionDto, {
+          revisesVersionId: 'aaaaaaaa-0001-4000-8000-000000000001',
+        }),
+      ),
+    ).toHaveLength(0);
+    expect(
+      await validate(plainToInstance(CreateCreativeVersionDto, {})),
+    ).toHaveLength(0);
   });
 
   it('applies JWT, permission and Social entitlement guards at the controller boundary', () => {

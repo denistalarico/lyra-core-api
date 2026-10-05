@@ -10,6 +10,11 @@ import { PermissionsGuard } from '../permissions/guards/permissions.guard';
 import type { RequestContext } from '../../common/context/request-context.interface';
 import { SocialApprovalsController } from './social-approvals.controller';
 import type { SocialApprovalsService } from './social-approvals.service';
+import {
+  APPROVAL_OWNER_ACTION_REQUIRED,
+  APPROVAL_SUBJECT_OWNER_ACTIONS,
+  ApprovalOwnerActionRequiredException,
+} from './approval-owner-actions';
 
 describe('SocialApprovalsController AP1 Agency boundary', () => {
   const approvals = {
@@ -113,6 +118,103 @@ describe('SocialApprovalsController AP1 Agency boundary', () => {
     expect(() => controller.list(contextWithoutCompany, {})).toThrow(
       BadRequestException,
     );
+  });
+
+  describe('generic create respects owner-domain actions', () => {
+    const context: RequestContext = {
+      tenantId: 'tenant-a',
+      workspaceId: 'workspace-a',
+      userId: 'user-a',
+      managedContext: {
+        productKey: 'social',
+        operatingMode: 'client',
+        clientId: 'client-a',
+        companyContextId: 'company-a',
+        managedTenantId: null,
+      },
+    };
+    const subject = {
+      subjectId: '11111111-1111-4111-8111-111111111111',
+      subjectRevisionId: '22222222-2222-4222-8222-222222222222',
+    };
+
+    it.each([
+      ['creative_version', 'Creative Studio', '/social/creative-studio/'],
+      ['planner_content_revision', 'Social Planner', '/social/planner/'],
+    ])(
+      'refuses %s with a stable 400 approval_owner_action_required',
+      (subjectType, owner, route) => {
+        let thrown: unknown;
+        try {
+          void controller.create(context, { subjectType, ...subject });
+        } catch (error) {
+          thrown = error;
+        }
+
+        expect(thrown).toBeInstanceOf(ApprovalOwnerActionRequiredException);
+        expect(thrown).toBeInstanceOf(BadRequestException);
+        const exception = thrown as BadRequestException;
+        expect(exception.getStatus()).toBe(400);
+        expect(exception.getResponse()).toMatchObject({
+          statusCode: 400,
+          code: APPROVAL_OWNER_ACTION_REQUIRED,
+          subjectType,
+          message: expect.stringContaining(owner),
+          ownerAction: expect.stringContaining(route),
+        });
+        expect(approvals.create).not.toHaveBeenCalled();
+      },
+    );
+
+    it('refuses before resolving scope, so even a context without company gets the owner error', () => {
+      expect(() =>
+        controller.create(
+          { tenantId: 'tenant-a', workspaceId: 'workspace-a', userId: 'u' },
+          { subjectType: 'creative_version', ...subject },
+        ),
+      ).toThrow(ApprovalOwnerActionRequiredException);
+      expect(approvals.create).not.toHaveBeenCalled();
+    });
+
+    it('does not resolve inherited keys as owner actions', () => {
+      expect(APPROVAL_SUBJECT_OWNER_ACTIONS.get('constructor')).toBeUndefined();
+      expect(APPROVAL_SUBJECT_OWNER_ACTIONS.get('__proto__')).toBeUndefined();
+    });
+
+    it('keeps every workflow action delegating to the domain service', async () => {
+      const id = '33333333-3333-4333-8333-333333333333';
+      const scope = expect.objectContaining({
+        agencyClientId: 'client-a',
+        companyContextId: 'company-a',
+      });
+
+      await controller.submit(context, id);
+      await controller.comment(context, id, { body: 'ok' });
+      await controller.approveInternal(context, id);
+      await controller.requestChanges(context, id, { body: 'ajuste' });
+      await controller.cancel(context, id);
+
+      expect(approvals.submit).toHaveBeenCalledWith(scope, id, 'user-a');
+      expect(approvals.comment).toHaveBeenCalledWith(
+        scope,
+        id,
+        'user-a',
+        'ok',
+        undefined,
+      );
+      expect(approvals.approveInternal).toHaveBeenCalledWith(
+        scope,
+        id,
+        'user-a',
+      );
+      expect(approvals.requestChanges).toHaveBeenCalledWith(
+        scope,
+        id,
+        'user-a',
+        'ajuste',
+      );
+      expect(approvals.cancel).toHaveBeenCalledWith(scope, id, 'user-a');
+    });
   });
 
   it('exposes no Agency handler capable of submitting a client-stage decision or a caller-supplied actor', () => {
