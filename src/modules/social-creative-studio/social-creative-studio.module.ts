@@ -1,12 +1,17 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { MediaAssetsModule } from '../../common/media-assets';
+import { BrandKitModule } from '../brand-kit/brand-kit.module';
 import { PermissionsModule } from '../permissions';
 import { SocialOrganicModule } from '../social-organic/social-organic.module';
+import { SocialApprovalsModule } from '../social-approvals/social-approvals.module';
 import { CreativeAssetService } from './creative-asset.service';
+import { CreativeStudioBrandContextService } from './creative-brand-context.service';
 import { CreativeFolderService } from './creative-folder.service';
 import { CreativeThumbnailService } from './creative-thumbnail.service';
 import { CreativeStudioController } from './creative-studio.controller';
+import { CreativeVersionApprovalController } from './creative-version-approval.controller';
+import { CreativeVersionApprovalService } from './creative-version-approval.service';
 import {
   CreativeAssetEntity,
   CreativeAssetVersionEntity,
@@ -21,7 +26,9 @@ import {
   imports: [
     PermissionsModule,
     MediaAssetsModule,
+    BrandKitModule,
     SocialOrganicModule,
+    SocialApprovalsModule,
     TypeOrmModule.forFeature(
       [
         CreativeAssetEntity,
@@ -33,11 +40,13 @@ import {
       'agency',
     ),
   ],
-  controllers: [CreativeStudioController],
+  controllers: [CreativeStudioController, CreativeVersionApprovalController],
   providers: [
     CreativeAssetService,
+    CreativeStudioBrandContextService,
     CreativeFolderService,
     CreativeThumbnailService,
+    CreativeVersionApprovalService,
   ],
 })
 export class SocialCreativeStudioModule {}

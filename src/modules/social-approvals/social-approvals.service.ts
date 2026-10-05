@@ -16,6 +16,10 @@ import {
   type SocialApprovalStage,
   type SocialApprovalStatus,
 } from './entities';
+import {
+  approvalScopeWhere,
+  assertApprovalCompanyScope,
+} from './approval-scope';
 import { ApprovalSubjectResolver } from './subjects/approval-subject-resolver';
 import { SocialApprovalNotificationPublisher } from './social-approval-notification.publisher';
 
@@ -44,12 +48,7 @@ export class SocialApprovalsService {
     private readonly notifications?: SocialApprovalNotificationPublisher,
   ) {}
   private scopeWhere(scope: CompanyAwareScope) {
-    return {
-      tenantId: scope.tenantId,
-      workspaceId: scope.workspaceId,
-      agencyClientId: scope.agencyClientId!,
-      companyContextId: scope.companyContextId!,
-    };
+    return approvalScopeWhere(scope);
   }
   private user(actorUserId: string | null | undefined): ApprovalActor {
     if (!actorUserId)
@@ -137,6 +136,7 @@ export class SocialApprovalsService {
     },
   ) {
     const actor = this.user(actorUserId);
+    assertApprovalCompanyScope(scope);
     const subject = await this.subjects.resolve(scope, input);
     try {
       const created = await this.dataSource.transaction(async (manager) => {
@@ -169,7 +169,10 @@ export class SocialApprovalsService {
         }
         const saved = await requests.save(
           requests.create({
-          ...this.scopeWhere(scope),
+          tenantId: scope.tenantId,
+          workspaceId: scope.workspaceId,
+          agencyClientId: scope.agencyClientId,
+          companyContextId: scope.companyContextId,
           ...subject,
           status: 'draft',
           currentStage: 'internal',
@@ -216,8 +219,20 @@ export class SocialApprovalsService {
     const qb = this.requests
       .createQueryBuilder('request')
       .where(
-        'request.tenantId = :tenantId AND request.workspaceId = :workspaceId AND request.agencyClientId = :agencyClientId AND request.companyContextId = :companyContextId',
-        this.scopeWhere(scope),
+        'request.tenantId = :tenantId AND request.workspaceId = :workspaceId',
+        { tenantId: scope.tenantId, workspaceId: scope.workspaceId },
+      )
+      .andWhere(
+        scope.agencyClientId === null
+          ? 'request.agencyClientId IS NULL'
+          : 'request.agencyClientId = :agencyClientId',
+        { agencyClientId: scope.agencyClientId },
+      )
+      .andWhere(
+        scope.companyContextId === null
+          ? 'request.companyContextId IS NULL'
+          : 'request.companyContextId = :companyContextId',
+        { companyContextId: scope.companyContextId },
       );
     if (filters.status)
       qb.andWhere('request.status = :status', { status: filters.status });

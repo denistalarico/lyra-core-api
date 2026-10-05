@@ -28,6 +28,7 @@ import {
   RequireProductEntitlement,
 } from '../permissions';
 import { CreativeAssetService } from './creative-asset.service';
+import { CreativeStudioBrandContextService } from './creative-brand-context.service';
 import { CreativeFolderService } from './creative-folder.service';
 import {
   CreateCreativeAssetDto,
@@ -56,7 +57,13 @@ export class CreativeStudioController {
     private readonly assets: CreativeAssetService,
     private readonly folders: CreativeFolderService,
     private readonly files: FilesService,
+    private readonly brandContext: CreativeStudioBrandContextService,
   ) {}
+  @Get('brand-context') @RequirePermission(VIEW) brandContextForStudio(
+    @RequestContextData() ctx: RequestContext,
+  ) {
+    return this.brandContext.load(creativeStudioScope(ctx));
+  }
   @Get('assets') @RequirePermission(VIEW) list(
     @RequestContextData() ctx: RequestContext,
     @Query() query: ListCreativeAssetsQueryDto,

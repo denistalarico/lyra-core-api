@@ -15,6 +15,7 @@ import {
   SocialContentRevisionEntity,
   SocialPlanEntity,
 } from '../../social-planner/entities';
+import { approvalClientWhere, approvalScopeWhere } from '../approval-scope';
 
 export type ResolvedApprovalSubject = {
   subjectType: 'creative_version' | 'planner_content_revision';
@@ -91,10 +92,7 @@ export class ApprovalSubjectResolver {
       const asset = await this.assets.findOneOrFail({
         where: {
           id: subject.subjectId,
-          tenantId: scope.tenantId,
-          workspaceId: scope.workspaceId,
-          agencyClientId: scope.agencyClientId!,
-          companyContextId: scope.companyContextId!,
+          ...approvalScopeWhere(scope),
         },
       });
       const version = await this.versions.findOneOrFail({
@@ -119,9 +117,7 @@ export class ApprovalSubjectResolver {
       where: {
         id: subject.subjectRevisionId,
         contentItemId: subject.subjectId,
-        tenantId: scope.tenantId,
-        workspaceId: scope.workspaceId,
-        agencyClientId: scope.agencyClientId!,
+        ...approvalClientWhere(scope),
       },
     });
     return {
@@ -147,10 +143,7 @@ export class ApprovalSubjectResolver {
     const asset = await this.assets.findOne({
       where: {
         id: input.subjectId,
-        tenantId: scope.tenantId,
-        workspaceId: scope.workspaceId,
-        agencyClientId: scope.agencyClientId!,
-        companyContextId: scope.companyContextId!,
+        ...approvalScopeWhere(scope),
       },
     });
     if (!asset)
@@ -179,9 +172,7 @@ export class ApprovalSubjectResolver {
     const item = await this.contentItems.findOne({
       where: {
         id: input.subjectId,
-        tenantId: scope.tenantId,
-        workspaceId: scope.workspaceId,
-        agencyClientId: scope.agencyClientId!,
+        ...approvalClientWhere(scope),
       },
     });
     if (!item)
@@ -189,10 +180,7 @@ export class ApprovalSubjectResolver {
     const plan = await this.plans.findOne({
       where: {
         id: item.planId,
-        tenantId: scope.tenantId,
-        workspaceId: scope.workspaceId,
-        agencyClientId: scope.agencyClientId!,
-        companyContextId: scope.companyContextId!,
+        ...approvalScopeWhere(scope),
       },
     });
     if (!plan)
@@ -201,9 +189,7 @@ export class ApprovalSubjectResolver {
       where: {
         id: input.subjectRevisionId,
         contentItemId: item.id,
-        tenantId: scope.tenantId,
-        workspaceId: scope.workspaceId,
-        agencyClientId: scope.agencyClientId!,
+        ...approvalClientWhere(scope),
       },
     });
     if (!revision)

@@ -1,5 +1,5 @@
 import 'reflect-metadata';
-import { ForbiddenException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import type { ExecutionContext } from '@nestjs/common';
 import { GUARDS_METADATA } from '@nestjs/common/constants';
 import { Reflector } from '@nestjs/core';
@@ -10,9 +10,11 @@ import {
   PRODUCT_ENTITLEMENT_METADATA,
 } from '../permissions/decorators/permissions.decorators';
 import { PermissionsGuard } from '../permissions/guards/permissions.guard';
+import type { RequestContext } from '../../common/context/request-context.interface';
 import { CreativeStudioController } from './creative-studio.controller';
 
 const ROUTE_PERMISSIONS = {
+  brandContextForStudio: 'social.creative.content.view.assigned',
   list: 'social.creative.content.view.assigned',
   detail: 'social.creative.content.view.assigned',
   content: 'social.creative.content.view.assigned',
@@ -54,6 +56,43 @@ function executionContext(handler: unknown): ExecutionContext {
 }
 
 describe('Creative Studio controller permission contract', () => {
+  it('loads Brand Context exclusively from the resolved company-aware request scope', () => {
+    const brandContext = { load: jest.fn().mockResolvedValue({}) };
+    const controller = new CreativeStudioController(
+      {} as never,
+      {} as never,
+      {} as never,
+      brandContext as never,
+    );
+    const clientContext = {
+      tenantId: 'tenant-a',
+      workspaceId: 'workspace-a',
+      managedContext: {
+        productKey: 'social',
+        operatingMode: 'client',
+        clientId: 'client-a',
+        companyContextId: 'company-a',
+        managedTenantId: 'managed-tenant-a',
+      },
+    } as RequestContext;
+
+    controller.brandContextForStudio(clientContext);
+
+    expect(brandContext.load).toHaveBeenCalledWith({
+      tenantId: 'tenant-a',
+      workspaceId: 'workspace-a',
+      agencyClientId: 'client-a',
+      companyContextId: 'company-a',
+    });
+    expect(() =>
+      controller.brandContextForStudio({
+        ...clientContext,
+        managedContext: { ...clientContext.managedContext!, companyContextId: null },
+      }),
+    ).toThrow(BadRequestException);
+    expect(brandContext.load).toHaveBeenCalledTimes(1);
+  });
+
   it('applies JWT, permission and Social entitlement guards at the controller boundary', () => {
     expect(
       Reflect.getMetadata(GUARDS_METADATA, CreativeStudioController),
