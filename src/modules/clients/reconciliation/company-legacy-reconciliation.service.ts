@@ -11,6 +11,7 @@ import type { RequestContext } from '../../../common/context/request-context.int
 import { AgencyClientCompanyContext } from '../entities';
 import { CompanyContextReconciliationAudit } from '../entities/company-context-reconciliation-audit.entity';
 import type { CompanyLegacyDomain } from './company-legacy-domains';
+import { ASSIGN_EXCLUSIVE_LEGACY_MEDIA_SQL } from './company-legacy-media';
 import {
   COMPANY_LEGACY_DOMAINS,
   findCompanyLegacyDomain,
@@ -234,6 +235,13 @@ export class CompanyLegacyReconciliationService {
       await this.assertParentCompatible(manager, ctx, domain, locked, company);
 
       await this.writeAssignment(manager, domain, rowId, company);
+      const ownedMediaAssigned = await this.assignOwnedMedia(
+        manager,
+        ctx,
+        domain,
+        rowId,
+        company,
+      );
 
       const audit = await manager.getRepository(
         CompanyContextReconciliationAudit,
@@ -250,6 +258,7 @@ export class CompanyLegacyReconciliationService {
           reason,
           evidence: {
             scopeEncoding: domain.scopeEncoding,
+            ...(domain.mediaOwnerKind ? { ownedMediaAssigned } : {}),
             previousScope: {
               agencyClientId: rowClientId,
               companyContextId: null,
@@ -709,6 +718,37 @@ export class CompanyLegacyReconciliationService {
         'This row is no longer pending: it was already assigned to a company.',
       );
     }
+  }
+
+  /**
+   * CS3.1.1 — moves the legacy media this root alone owns into the same
+   * company, inside the assignment's transaction. Returns how many rows moved
+   * (recorded in the audit evidence).
+   */
+  private async assignOwnedMedia(
+    manager: EntityManager,
+    ctx: RequestContext,
+    domain: CompanyLegacyDomain,
+    rowId: string,
+    company: AgencyClientCompanyContext,
+  ): Promise<number> {
+    if (!domain.mediaOwnerKind) return 0;
+    const result: unknown = await manager.query(
+      ...this.bind(ASSIGN_EXCLUSIVE_LEGACY_MEDIA_SQL, {
+        ownerKey: `${domain.mediaOwnerKind}:${rowId}`,
+        tenantId: ctx.tenantId,
+        workspaceId: ctx.workspaceId,
+        agencyClientId: company.agencyClientId,
+        companyContextId: company.id,
+      }),
+    );
+    // Same `[rows, rowCount]` shape note as `writeAssignment`.
+    const rows = Array.isArray(result)
+      ? Array.isArray(result[0])
+        ? (result[0] as unknown[])
+        : (result as unknown[])
+      : [];
+    return rows.length;
   }
 
   // ── Query plumbing ────────────────────────────────────────────────────

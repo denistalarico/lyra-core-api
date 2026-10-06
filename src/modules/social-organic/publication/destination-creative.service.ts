@@ -5,7 +5,11 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, IsNull, Raw, type FindOptionsWhere, Repository } from 'typeorm';
-import { MediaAssetEntity } from '../../../common/media-assets';
+import {
+  durableMediaAssetSource,
+  MediaAssetEntity,
+  mediaAssetScopeWhere,
+} from '../../../common/media-assets';
 import { SocialContentDestinationEntity } from '../../social-planner/entities/social-content-destination.entity';
 import { SocialContentItemEntity } from '../../social-planner/entities/social-content-item.entity';
 import { SocialDestinationCreativeEntity } from '../../social-planner/entities/social-destination-creative.entity';
@@ -488,14 +492,20 @@ export class DestinationCreativeService {
     };
   }
 
+  /**
+   * Full company scope (CS3.1.1): Company A cannot bind Company B's media to
+   * its destination. Temporary media (CS3.1) is never bindable: cleanup may
+   * delete it.
+   */
   private mediaScopeWhere(
     scope: DestinationCreativeScope,
   ): FindOptionsWhere<MediaAssetEntity> {
     return {
-      tenantId: scope.tenantId,
-      workspaceId: scope.workspaceId,
-      agencyClientId:
-        scope.agencyClientId === null ? IsNull() : scope.agencyClientId,
+      ...mediaAssetScopeWhere({
+        ...scope,
+        companyContextId: scope.companyContextId ?? null,
+      }),
+      source: durableMediaAssetSource(),
     };
   }
 

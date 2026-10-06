@@ -1,6 +1,9 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { IsNull, type Repository } from 'typeorm';
-import { MediaAssetEntity } from '../../../common/media-assets';
+import {
+  durableMediaAssetSource,
+  MediaAssetEntity,
+} from '../../../common/media-assets';
 import { SocialContentDestinationEntity } from '../../social-planner/entities/social-content-destination.entity';
 import { SocialContentItemEntity } from '../../social-planner/entities/social-content-item.entity';
 import { SocialDestinationCreativeEntity } from '../../social-planner/entities/social-destination-creative.entity';
@@ -135,6 +138,7 @@ describe('DestinationCreativeService', () => {
   const clientScope: DestinationCreativeScope = {
     ...agencyScope,
     agencyClientId: '33333333-3333-4333-8333-333333333333',
+    companyContextId: '44444444-4444-4444-8444-44444444444a',
   };
 
   beforeEach(() => {
@@ -312,7 +316,7 @@ describe('DestinationCreativeService', () => {
       expect(destinationsRepository.findOne).not.toHaveBeenCalled();
     });
 
-    it('queries the media asset within the caller scope only', async () => {
+    it('queries the media asset within the caller scope only, never a temporary one', async () => {
       await service.replaceForDestination(
         clientScope,
         DESTINATION_ID,
@@ -326,7 +330,47 @@ describe('DestinationCreativeService', () => {
           tenantId: clientScope.tenantId,
           workspaceId: clientScope.workspaceId,
           agencyClientId: clientScope.agencyClientId,
+          companyContextId: clientScope.companyContextId,
+          source: durableMediaAssetSource(),
         },
+      });
+    });
+
+    it('CS3.1.1: Company B cannot bind media of Company A', async () => {
+      const companyB: DestinationCreativeScope = {
+        ...clientScope,
+        companyContextId: '44444444-4444-4444-8444-44444444444b',
+      };
+      // The scoped query does not match A's row, exactly like a missing id.
+      mediaAssetsRepository.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.replaceForDestination(companyB, DESTINATION_ID, 'user-1', {
+          mediaAssetId: MEDIA_ASSET_ID,
+          organicAssetId: ORGANIC_ASSET_ID,
+        }),
+      ).rejects.toThrow(NotFoundException);
+      expect(mediaAssetsRepository.findOne).toHaveBeenCalledWith({
+        where: expect.objectContaining({
+          companyContextId: companyB.companyContextId,
+        }),
+      });
+      expect(creativesRepository.save).not.toHaveBeenCalled();
+    });
+
+    it('CS3.1.1: agency binding matches only agency media (IsNull on client and company)', async () => {
+      await service.replaceForDestination(
+        agencyScope,
+        DESTINATION_ID,
+        'user-1',
+        { mediaAssetId: MEDIA_ASSET_ID, organicAssetId: ORGANIC_ASSET_ID },
+      );
+
+      expect(mediaAssetsRepository.findOne).toHaveBeenCalledWith({
+        where: expect.objectContaining({
+          agencyClientId: IsNull(),
+          companyContextId: IsNull(),
+        }),
       });
     });
 

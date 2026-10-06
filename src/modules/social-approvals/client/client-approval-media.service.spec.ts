@@ -80,6 +80,7 @@ describe('AP3 client media boundary', () => {
       tenantId: scope.tenantId,
       workspaceId: scope.workspaceId,
       agencyClientId: scope.agencyClientId,
+      companyContextId: scope.companyContextId,
       mediaAssetId: 'media-a',
     });
   });

@@ -16,7 +16,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { createHash, randomUUID } from 'node:crypto';
-import { IsNull, Repository } from 'typeorm';
+import { Repository } from 'typeorm';
 import { FilesService } from '../files/files.service';
 import {
   MEDIA_ASSET_METADATA_READER,
@@ -29,7 +29,14 @@ import {
   sanitizeMediaAssetFilename,
 } from './media-asset-upload.rules';
 import { MediaAssetEntity } from './media-asset.entity';
-import type { MediaAssetScope } from './media-asset-resolver.service';
+import {
+  type MediaAssetScope,
+  mediaAssetScopeWhere,
+} from './media-asset-resolver.service';
+import {
+  durableMediaAssetSource,
+  isTemporaryMediaAssetSource,
+} from './media-asset-retention';
 
 export type UploadMediaAssetInput = {
   readonly file: {
@@ -39,6 +46,8 @@ export type UploadMediaAssetInput = {
     readonly size?: number;
   };
   readonly source: string;
+  /** Sanitized product metadata (the entity's rule applies: no secrets). */
+  readonly metadata?: Record<string, unknown>;
 };
 
 /** Upper bound on one listing page, so a scope with thousands of assets cannot be asked for all of them at once. */
@@ -121,6 +130,7 @@ export class MediaAssetUploadService {
           tenantId: scope.tenantId,
           workspaceId: scope.workspaceId,
           agencyClientId: scope.agencyClientId,
+          companyContextId: scope.companyContextId,
           storagePath: objectKey,
           mimeType: contentType,
           byteSize: String(file.buffer.length),
@@ -134,7 +144,7 @@ export class MediaAssetUploadService {
               : String(Math.round(metadata.durationSeconds * 1000)),
           codec: metadata.codec || null,
           source: input.source,
-          metadata: {},
+          metadata: input.metadata ?? {},
           createdById: actorUserId,
         }),
       );
@@ -147,10 +157,13 @@ export class MediaAssetUploadService {
   /**
    * Lists the scope's assets, newest first.
    *
-   * `agencyClientId ?? IsNull()` is the whole authorization here. A raw null
-   * would be read by TypeORM as "no filter on this column" and would return
-   * every managed client's media to an agency-context caller — the exact leak
-   * this repository has already paid for once.
+   * `mediaAssetScopeWhere` is the whole authorization here: tenant,
+   * workspace, client AND company (CS3.1.1), each null matched with
+   * `IsNull()`. A raw null would be read by TypeORM as "no filter on this
+   * column" and would return every managed client's media to an
+   * agency-context caller — the exact leak this repository has already paid
+   * for once. Temporary assets never appear:
+   * this listing is the publication media picker.
    */
   async list(scope: MediaAssetScope, query: { limit?: number } = {}) {
     const limit = Math.min(
@@ -160,10 +173,8 @@ export class MediaAssetUploadService {
 
     const [items, total] = await this.mediaAssets.findAndCount({
       where: {
-        tenantId: scope.tenantId,
-        workspaceId: scope.workspaceId,
-        agencyClientId:
-          scope.agencyClientId === null ? IsNull() : scope.agencyClientId,
+        ...mediaAssetScopeWhere(scope),
+        source: durableMediaAssetSource(),
       },
       order: { createdAt: 'DESC' },
       take: limit,
@@ -177,19 +188,49 @@ export class MediaAssetUploadService {
    *
    * The scope filter IS the authorization: an asset belonging to another
    * tenant, to the agency while a client context is active, or to a different
-   * client simply does not match and surfaces as 404 — the same answer as an
+   * client or company simply does not match and surfaces as 404 — the same answer as an
    * id that never existed, so this never confirms that someone else's asset
-   * is real.
+   * is real. A temporary asset answers the same 404: only its owner reads it,
+   * through `getTemporaryContent`.
    */
   async getContent(scope: MediaAssetScope, mediaAssetId: string) {
     const asset = await this.mediaAssets.findOne({
       where: {
         id: mediaAssetId,
-        tenantId: scope.tenantId,
-        workspaceId: scope.workspaceId,
-        agencyClientId:
-          scope.agencyClientId === null ? IsNull() : scope.agencyClientId,
+        ...mediaAssetScopeWhere(scope),
+        source: durableMediaAssetSource(),
       },
+    });
+
+    if (!asset) {
+      throw new NotFoundException('Media asset not found.');
+    }
+
+    const file = await this.filesService.getPrivateAsset(asset.storagePath);
+
+    return { asset, file };
+  }
+
+  /**
+   * Reads a temporary asset for the module that wrote it (CS3.1).
+   *
+   * `source` must be the exact temporary source the owner wrote, so one
+   * owner's candidates are never readable through another's path. Scope is
+   * the full four-part scope, Company Context included (CS3.1.1): a candidate
+   * of Company B answers Company A with the same 404 as a missing row,
+   * decided before any object is opened.
+   */
+  async getTemporaryContent(
+    scope: MediaAssetScope,
+    mediaAssetId: string,
+    source: string,
+  ) {
+    if (!isTemporaryMediaAssetSource(source)) {
+      throw new Error('getTemporaryContent requires a temporary source.');
+    }
+
+    const asset = await this.mediaAssets.findOne({
+      where: { id: mediaAssetId, ...mediaAssetScopeWhere(scope), source },
     });
 
     if (!asset) {
@@ -211,12 +252,7 @@ export class MediaAssetUploadService {
     mediaAssetId: string,
   ): Promise<void> {
     const asset = await this.mediaAssets.findOne({
-      where: {
-        id: mediaAssetId,
-        tenantId: scope.tenantId,
-        workspaceId: scope.workspaceId,
-        agencyClientId: scope.agencyClientId === null ? IsNull() : scope.agencyClientId,
-      },
+      where: { id: mediaAssetId, ...mediaAssetScopeWhere(scope) },
     });
     if (!asset) return;
     await this.mediaAssets.remove(asset);

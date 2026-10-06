@@ -17,10 +17,15 @@ import {
  * short-lived capability instead of returning this entity.
  */
 @Entity('media_assets')
-@Index('IDX_media_assets_scope', ['tenantId', 'workspaceId', 'agencyClientId'])
+@Index('IDX_media_assets_scope', [
+  'tenantId',
+  'workspaceId',
+  'agencyClientId',
+  'companyContextId',
+])
 @Index(
   'IDX_media_assets_scope_checksum',
-  ['tenantId', 'workspaceId', 'agencyClientId', 'checksum'],
+  ['tenantId', 'workspaceId', 'agencyClientId', 'companyContextId', 'checksum'],
   { where: 'checksum IS NOT NULL' },
 )
 export class MediaAssetEntity {
@@ -36,6 +41,14 @@ export class MediaAssetEntity {
   /** NULL means the agency's own context; otherwise a managed client. */
   @Column({ name: 'agency_client_id', type: 'uuid', nullable: true })
   agencyClientId!: string | null;
+
+  /**
+   * CS3.1.1 — the client's company. `(NULL, NULL)` is the agency, both set is
+   * a company, `(client, NULL)` is legacy_unassigned (never written by an
+   * operational request). Same encoding as every CC2C Social root.
+   */
+  @Column({ name: 'company_context_id', type: 'uuid', nullable: true })
+  companyContextId!: string | null;
 
   /** Key in the private bucket. Backend-only; not a URL or bearer capability. */
   @Column({ name: 'storage_path', type: 'varchar', length: 512 })

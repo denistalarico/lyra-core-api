@@ -24,7 +24,8 @@ import {
 } from '../social-planner/entities';
 import { SocialContentProductionStatusService } from '../social-planner/services/social-content-production-status.service';
 
-const IMAGE_MAX = 20 * 1024 * 1024;
+/** Studio-level image ceiling; generated outputs are held to it too (CS3.1). */
+export const CREATIVE_IMAGE_MAX_BYTES = 20 * 1024 * 1024;
 const VIDEO_MAX = 300 * 1024 * 1024;
 const PAGE_SIZE = 50;
 type UploadFile = {
@@ -33,6 +34,16 @@ type UploadFile = {
   mimetype?: string;
   size?: number;
 };
+
+/**
+ * CS3.2: runs inside the transaction that creates a version, once the version
+ * row exists. A throw rolls the version back and compensates its binaries —
+ * which is how a generation output records its promotion exactly once.
+ */
+export type CreativeVersionCreatedHook = (
+  manager: EntityManager,
+  created: { creativeAssetId: string; versionId: string },
+) => Promise<void>;
 
 @Injectable()
 export class CreativeAssetService {
@@ -143,7 +154,7 @@ export class CreativeAssetService {
   }
   private assertDomainLimit(file: UploadFile, type: 'image' | 'video') {
     const bytes = Math.max(file.size ?? 0, file.buffer.length);
-    if (bytes > (type === 'image' ? IMAGE_MAX : VIDEO_MAX))
+    if (bytes > (type === 'image' ? CREATIVE_IMAGE_MAX_BYTES : VIDEO_MAX))
       throw new BadRequestException(
         type === 'image'
           ? 'A imagem excede o limite de 20 MB.'
@@ -158,6 +169,9 @@ export class CreativeAssetService {
       name?: string;
       folderId?: string;
       contentItemId?: string;
+      /** `generated` when a CS3 output is promoted; the column has no CHECK. */
+      sourceType?: 'upload' | 'generated';
+      onVersionCreated?: CreativeVersionCreatedHook;
     },
   ) {
     const assetType = this.kind(input.file);
@@ -185,7 +199,7 @@ export class CreativeAssetService {
               'Criativo'
             ).slice(0, 255),
             assetType,
-            sourceType: 'upload',
+            sourceType: input.sourceType ?? 'upload',
             status: 'ready',
             folderId: input.folderId ?? null,
             contentItemId: input.contentItemId ?? null,
@@ -208,6 +222,10 @@ export class CreativeAssetService {
         asset.currentVersionId = version.id;
         const saved = await assets.save(asset);
         await this.reflectProductionStarted(scope, actor, saved, manager);
+        await input.onVersionCreated?.(manager, {
+          creativeAssetId: asset.id,
+          versionId: version.id,
+        });
         return saved;
       });
     } catch (error) {
@@ -236,6 +254,7 @@ export class CreativeAssetService {
     assetId: string,
     file: UploadFile,
     revision?: { revisesVersionId: string },
+    onVersionCreated?: CreativeVersionCreatedHook,
   ) {
     const asset = await this.find(scope, assetId);
     if (revision) this.assertRevisable(asset, revision.revisesVersionId);
@@ -271,12 +290,14 @@ export class CreativeAssetService {
             createdById: actor,
           }),
         );
+        const created = { creativeAssetId: asset.id, versionId: version.id };
         if (!revision) {
           await assets.update(
             { id: asset.id },
             { currentVersionId: version.id },
           );
           await this.reflectProductionStarted(scope, actor, asset, manager);
+          await onVersionCreated?.(manager, created);
           return this.versionView(version);
         }
         // Compare-and-set: of two revisions of the same version (double
@@ -293,6 +314,7 @@ export class CreativeAssetService {
             { contentItemId: asset.contentItemId, actorUserId: actor },
             manager,
           );
+        await onVersionCreated?.(manager, created);
         return this.versionView(version);
       });
     } catch (error) {

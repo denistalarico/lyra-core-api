@@ -5,6 +5,10 @@ import type { MediaAssetMetadataReader } from './media-asset-metadata.port';
 import type { MediaAssetScope } from './media-asset-resolver.service';
 import { MediaAssetUploadService } from './media-asset-upload.service';
 import type { MediaAssetEntity } from './media-asset.entity';
+import {
+  durableMediaAssetSource,
+  temporaryMediaAssetSource,
+} from './media-asset-retention';
 
 const PNG = Buffer.concat([
   Buffer.from([0x89]),
@@ -24,11 +28,18 @@ describe('MediaAssetUploadService', () => {
     tenantId: '11111111-1111-4111-8111-111111111111',
     workspaceId: '22222222-2222-4222-8222-222222222222',
     agencyClientId: null,
+    companyContextId: null,
   };
 
   const clientScope: MediaAssetScope = {
     ...agencyScope,
     agencyClientId: '33333333-3333-4333-8333-333333333333',
+    companyContextId: '44444444-4444-4444-8444-44444444444a',
+  };
+
+  const companyBScope: MediaAssetScope = {
+    ...clientScope,
+    companyContextId: '44444444-4444-4444-8444-44444444444b',
   };
 
   const actorId = '55555555-5555-4555-8555-555555555555';
@@ -245,6 +256,8 @@ describe('MediaAssetUploadService', () => {
             tenantId: agencyScope.tenantId,
             workspaceId: agencyScope.workspaceId,
             agencyClientId: IsNull(),
+            companyContextId: IsNull(),
+            source: durableMediaAssetSource(),
           },
         }),
       );
@@ -302,6 +315,8 @@ describe('MediaAssetUploadService', () => {
           tenantId: agencyScope.tenantId,
           workspaceId: agencyScope.workspaceId,
           agencyClientId: IsNull(),
+          companyContextId: IsNull(),
+          source: durableMediaAssetSource(),
         },
       });
     });
@@ -313,6 +328,131 @@ describe('MediaAssetUploadService', () => {
         NotFoundException,
       );
       expect(files.getPrivateAsset).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('temporary media (CS3.1)', () => {
+    const TEMP = temporaryMediaAssetSource('creative_generation');
+
+    it('stores the metadata the owner passes, and an empty bag otherwise', async () => {
+      await service.upload(clientScope, actorId, {
+        file: { buffer: PNG, originalname: 'g.png', mimetype: 'image/png' },
+        source: TEMP,
+        metadata: { companyContextId: 'company-a', generationId: 'gen-1' },
+      });
+      await upload(clientScope);
+
+      const [[temporary], [durable]] = repository.create.mock.calls as [
+        [MediaAssetEntity],
+        [MediaAssetEntity],
+      ];
+      expect(temporary.source).toBe(TEMP);
+      expect(temporary.metadata).toEqual({
+        companyContextId: 'company-a',
+        generationId: 'gen-1',
+      });
+      expect(durable.metadata).toEqual({});
+    });
+
+    it('excludes temporary assets from the listing and the generic content read', async () => {
+      await service.list(clientScope);
+      repository.findOne.mockResolvedValue(null);
+      await expect(service.getContent(clientScope, 'temp-1')).rejects.toThrow(
+        NotFoundException,
+      );
+
+      type WhereCall = [{ where: { source: unknown } }];
+      const [[list]] = repository.findAndCount.mock.calls as WhereCall[];
+      const [[content]] = repository.findOne.mock.calls as WhereCall[];
+      expect(list.where.source).toEqual(durableMediaAssetSource());
+      expect(content.where.source).toEqual(durableMediaAssetSource());
+    });
+
+    it('reads a temporary asset only by its exact source, in the full company scope', async () => {
+      repository.findOne.mockResolvedValue({
+        storagePath: 'media-assets/t/x.png',
+        source: TEMP,
+      } as unknown as MediaAssetEntity);
+      files.getPrivateAsset.mockResolvedValue({ body: {} });
+
+      await service.getTemporaryContent(clientScope, 'temp-1', TEMP);
+
+      expect(repository.findOne).toHaveBeenCalledWith({
+        where: {
+          id: 'temp-1',
+          tenantId: clientScope.tenantId,
+          workspaceId: clientScope.workspaceId,
+          agencyClientId: clientScope.agencyClientId,
+          companyContextId: clientScope.companyContextId,
+          source: TEMP,
+        },
+      });
+      expect(files.getPrivateAsset).toHaveBeenCalledWith(
+        'media-assets/t/x.png',
+      );
+    });
+
+    it("answers 404 for another company's temporary asset, before opening any object", async () => {
+      repository.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.getTemporaryContent(companyBScope, 'temp-of-a', TEMP),
+      ).rejects.toThrow(NotFoundException);
+      expect(repository.findOne).toHaveBeenCalledWith({
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- expect.objectContaining(...) is typed `any` by @types/jest.
+        where: expect.objectContaining({
+          companyContextId: companyBScope.companyContextId,
+        }),
+      });
+      expect(files.getPrivateAsset).not.toHaveBeenCalled();
+    });
+
+    it('refuses to be used as a back door to durable assets', async () => {
+      await expect(
+        service.getTemporaryContent(clientScope, 'asset-1', 'creative_studio'),
+      ).rejects.toThrow('temporary source');
+      expect(repository.findOne).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('Company Context (CS3.1.1)', () => {
+    it('writes the caller company on upload: A gets A, B gets B, agency gets NULL', async () => {
+      await upload(clientScope);
+      await upload(companyBScope);
+      await upload(agencyScope);
+
+      const rows = (repository.create.mock.calls as [MediaAssetEntity][]).map(
+        ([row]) => [row.agencyClientId, row.companyContextId],
+      );
+      expect(rows).toEqual([
+        [clientScope.agencyClientId, clientScope.companyContextId],
+        [companyBScope.agencyClientId, companyBScope.companyContextId],
+        [null, null],
+      ]);
+    });
+
+    it('lists only the caller company', async () => {
+      await service.list(clientScope);
+      await service.list(companyBScope);
+
+      type WhereCall = [{ where: Record<string, unknown> }];
+      const [[a], [b]] = repository.findAndCount.mock.calls as WhereCall[];
+      expect(a.where.companyContextId).toBe(clientScope.companyContextId);
+      expect(b.where.companyContextId).toBe(companyBScope.companyContextId);
+    });
+
+    it('scopes the compensating delete by company too', async () => {
+      repository.findOne.mockResolvedValue(null);
+
+      await service.removeAfterFailedConsumerOperation(companyBScope, 'm-a');
+
+      expect(repository.findOne).toHaveBeenCalledWith({
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- expect.objectContaining(...) is typed `any` by @types/jest.
+        where: expect.objectContaining({
+          id: 'm-a',
+          companyContextId: companyBScope.companyContextId,
+        }),
+      });
     });
   });
 });

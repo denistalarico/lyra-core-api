@@ -5,6 +5,8 @@ import {
   CreativeAssetEntity,
   CreativeAssetVersionEntity,
   CreativeFolderEntity,
+  CreativeGenerationEntity,
+  CreativeGenerationOutputEntity,
 } from '../modules/social-creative-studio/entities';
 import {
   SocialAnalyticsDashboardEntity,
@@ -425,6 +427,8 @@ export const agencyEntities = [
   CreativeAssetEntity,
   CreativeAssetVersionEntity,
   CreativeFolderEntity,
+  CreativeGenerationEntity,
+  CreativeGenerationOutputEntity,
   SocialAnalyticsDashboardEntity,
   SocialAnalyticsReportEntity,
   SocialApprovalRequestEntity,

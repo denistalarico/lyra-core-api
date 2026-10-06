@@ -3,6 +3,7 @@ import { NotFoundException } from '@nestjs/common';
 import { IsNull, type FindOneOptions, type Repository } from 'typeorm';
 import { MediaAssetResolverService } from './media-asset-resolver.service';
 import type { MediaAssetEntity } from './media-asset.entity';
+import { durableMediaAssetSource } from './media-asset-retention';
 
 function buildAsset(
   overrides: Partial<MediaAssetEntity> = {},
@@ -12,6 +13,7 @@ function buildAsset(
     tenantId: 'tenant-1',
     workspaceId: 'workspace-1',
     agencyClientId: null,
+    companyContextId: null,
     storagePath: 'tenant-1/workspace-1/media/asset.jpg',
     mimeType: 'image/jpeg',
     byteSize: '1000',
@@ -51,6 +53,7 @@ describe('MediaAssetResolverService', () => {
       tenantId: 'tenant-1',
       workspaceId: 'workspace-1',
       agencyClientId: null,
+      companyContextId: null,
     });
 
     expect(result).toEqual({
@@ -73,6 +76,7 @@ describe('MediaAssetResolverService', () => {
       tenantId: 'tenant-1',
       workspaceId: 'workspace-1',
       agencyClientId: null,
+      companyContextId: null,
     });
 
     const options = repository.findOne.mock
@@ -90,6 +94,7 @@ describe('MediaAssetResolverService', () => {
         tenantId: 'tenant-1',
         workspaceId: 'workspace-1',
         agencyClientId: null,
+        companyContextId: null,
       }),
     ).rejects.toThrow(NotFoundException);
   });
@@ -106,6 +111,7 @@ describe('MediaAssetResolverService', () => {
         tenantId: 'other-tenant',
         workspaceId: 'workspace-1',
         agencyClientId: null,
+        companyContextId: null,
       }),
     ).rejects.toThrow(NotFoundException);
 
@@ -125,6 +131,7 @@ describe('MediaAssetResolverService', () => {
         tenantId: 'tenant-1',
         workspaceId: 'other-workspace',
         agencyClientId: null,
+        companyContextId: null,
       }),
     ).rejects.toThrow(NotFoundException);
 
@@ -144,6 +151,7 @@ describe('MediaAssetResolverService', () => {
         tenantId: 'tenant-1',
         workspaceId: 'workspace-1',
         agencyClientId: 'other-client',
+        companyContextId: 'company-x',
       }),
     ).rejects.toThrow(NotFoundException);
 
@@ -165,7 +173,90 @@ describe('MediaAssetResolverService', () => {
         tenantId: 'tenant-1',
         workspaceId: 'workspace-1',
         agencyClientId: null,
+        companyContextId: null,
       }),
     ).rejects.toThrow(NotFoundException);
+  });
+
+  it('never resolves a temporary asset (CS3.1): publication must not depend on a binary cleanup may delete', async () => {
+    repository.findOne.mockResolvedValue(buildAsset());
+
+    await resolver.resolve({
+      mediaAssetId: 'media-1',
+      tenantId: 'tenant-1',
+      workspaceId: 'workspace-1',
+      agencyClientId: null,
+      companyContextId: null,
+    });
+
+    const options = repository.findOne.mock
+      .calls[0][0] as FindOneOptions<MediaAssetEntity>;
+    expect((options.where as { source: unknown }).source).toEqual(
+      durableMediaAssetSource(),
+    );
+  });
+
+  describe('Company Context (CS3.1.1)', () => {
+    const companyA = {
+      tenantId: 'tenant-1',
+      workspaceId: 'workspace-1',
+      agencyClientId: 'client-1',
+      companyContextId: 'company-a',
+    };
+
+    it('matches the company exactly: B never resolves a mediaAssetId of A', async () => {
+      repository.findOne.mockResolvedValue(null);
+
+      await expect(
+        resolver.resolve({
+          ...companyA,
+          companyContextId: 'company-b',
+          mediaAssetId: 'media-of-a',
+        }),
+      ).rejects.toThrow(NotFoundException);
+
+      const options = repository.findOne.mock
+        .calls[0][0] as FindOneOptions<MediaAssetEntity>;
+      expect(options.where).toEqual({
+        id: 'media-of-a',
+        tenantId: 'tenant-1',
+        workspaceId: 'workspace-1',
+        agencyClientId: 'client-1',
+        companyContextId: 'company-b',
+        source: durableMediaAssetSource(),
+      });
+    });
+
+    it('agency scope matches company with IsNull(), never a raw null that TypeORM would drop', async () => {
+      repository.findOne.mockResolvedValue(buildAsset());
+
+      await resolver.resolve({
+        tenantId: 'tenant-1',
+        workspaceId: 'workspace-1',
+        agencyClientId: null,
+        companyContextId: null,
+        mediaAssetId: 'media-1',
+      });
+
+      const options = repository.findOne.mock
+        .calls[0][0] as FindOneOptions<MediaAssetEntity>;
+      const where = options.where as Record<string, unknown>;
+      expect(where.agencyClientId).toEqual(IsNull());
+      expect(where.companyContextId).toEqual(IsNull());
+    });
+
+    it('a legacy scope (client, no company) only ever matches legacy rows', async () => {
+      repository.findOne.mockResolvedValue(null);
+
+      await resolver
+        .resolve({ ...companyA, companyContextId: null, mediaAssetId: 'm' })
+        .catch(() => undefined);
+
+      const options = repository.findOne.mock
+        .calls[0][0] as FindOneOptions<MediaAssetEntity>;
+      const where = options.where as Record<string, unknown>;
+      expect(where.agencyClientId).toBe('client-1');
+      expect(where.companyContextId).toEqual(IsNull());
+    });
   });
 });

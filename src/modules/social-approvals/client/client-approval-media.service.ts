@@ -100,12 +100,13 @@ export class ClientApprovalMediaService {
     const mediaAssetId = this.mediaAssetIdFor(version, mediaRef);
     if (!mediaAssetId) throw new NotFoundException('Mídia não encontrada.');
 
-    // Step 5: the resolver matches the scope triple again and answers the
-    // same way for "missing" and "belongs to someone else".
+    // Step 5: the resolver matches the full company scope again and answers
+    // the same way for "missing" and "belongs to someone else".
     return this.media.resolve({
       tenantId: scope.tenantId,
       workspaceId: scope.workspaceId,
       agencyClientId: scope.agencyClientId!,
+      companyContextId: scope.companyContextId!,
       mediaAssetId,
     });
   }

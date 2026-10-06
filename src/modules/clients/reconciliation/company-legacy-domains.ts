@@ -1,3 +1,5 @@
+import type { CompanyLegacyMediaOwnerKind } from './company-legacy-media';
+
 /**
  * CC2G — the reconciliation domain registry.
  *
@@ -98,6 +100,11 @@ export type CompanyLegacyDomain = {
    */
   timestampColumn?: string;
   parentEvidence?: CompanyLegacyParentEvidence;
+  /**
+   * CS3.1.1 — this root owns `media_assets` rows; on assignment, media owned
+   * by this root alone follows it (see `company-legacy-media.ts`).
+   */
+  mediaOwnerKind?: CompanyLegacyMediaOwnerKind;
 };
 
 export const COMPANY_LEGACY_DOMAINS: readonly CompanyLegacyDomain[] = [
@@ -111,6 +118,7 @@ export const COMPANY_LEGACY_DOMAINS: readonly CompanyLegacyDomain[] = [
     titleColumn: 'title',
     summaryColumns: ['period_start', 'period_end', 'status'],
     softDeleteColumn: 'deleted_at',
+    mediaOwnerKind: 'plan',
   },
   {
     domainKey: 'social.brand-kit',
@@ -138,6 +146,7 @@ export const COMPANY_LEGACY_DOMAINS: readonly CompanyLegacyDomain[] = [
     label: 'Asset do Creative Studio',
     titleColumn: 'name',
     summaryColumns: ['asset_type'],
+    mediaOwnerKind: 'creative_asset',
     // `folder_id` is nullable, so it can only narrow the candidates.
     parentEvidence: {
       column: 'folder_id',

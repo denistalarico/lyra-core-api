@@ -2,6 +2,7 @@ export * from './dto/list-media-assets-query.dto';
 export * from './dto/upload-media-asset.dto';
 export * from './media-asset-metadata.port';
 export * from './media-asset-resolver.service';
+export * from './media-asset-retention';
 export * from './media-asset-upload.rules';
 export * from './media-asset-upload.service';
 export * from './media-asset.controller';

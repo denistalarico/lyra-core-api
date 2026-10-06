@@ -23,7 +23,6 @@
 // client's scope.
 
 import {
-  BadRequestException,
   Body,
   Controller,
   Get,
@@ -39,6 +38,7 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import type { Response } from 'express';
 import { memoryStorage } from 'multer';
+import { resolveCompanyAwareScope } from '../context/company-aware-scope';
 import { RequestContextData } from '../context/request-context.decorator';
 import type { RequestContext } from '../context/request-context.interface';
 import { JwtAuthGuard } from '../../modules/auth/guards/jwt-auth.guard';
@@ -147,31 +147,14 @@ export class MediaAssetController {
   }
 
   /**
-   * Scope comes only from server-resolved request context — the same shape
-   * `SocialPublicationController.requireScope` uses, so a media asset and the
-   * publication that references it can never resolve to different scopes.
+   * Scope comes only from server-resolved request context, through the same
+   * `resolveCompanyAwareScope` the Planner and publication controllers use
+   * (CS3.1.1). Before, this resolved tenant/workspace/client only, so the
+   * media picker of Company A listed — and let it bind and publish — Company
+   * B's media. Client mode without a company is refused with
+   * `company_context_required` instead of degrading to client-wide media.
    */
   private requireScope(ctx: RequestContext): MediaAssetScope {
-    if (!ctx.tenantId || !ctx.workspaceId) {
-      throw new BadRequestException(
-        'Tenant and workspace context are required.',
-      );
-    }
-
-    const managedContext = ctx.managedContext;
-    const agencyClientId =
-      managedContext?.operatingMode === 'client'
-        ? (managedContext.clientId ?? null)
-        : null;
-
-    if (managedContext?.operatingMode === 'client' && !agencyClientId) {
-      throw new BadRequestException('Client context is required.');
-    }
-
-    return {
-      tenantId: ctx.tenantId,
-      workspaceId: ctx.workspaceId,
-      agencyClientId,
-    };
+    return resolveCompanyAwareScope(ctx);
   }
 }

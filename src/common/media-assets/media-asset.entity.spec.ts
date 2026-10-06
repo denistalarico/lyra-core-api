@@ -90,11 +90,13 @@ describe('MediaAssetEntity metadata', () => {
       'tenantId',
       'workspaceId',
       'agencyClientId',
+      'companyContextId',
     ]);
     expect(checksum?.columns).toEqual([
       'tenantId',
       'workspaceId',
       'agencyClientId',
+      'companyContextId',
       'checksum',
     ]);
     expect(checksum?.where).toBe('checksum IS NOT NULL');

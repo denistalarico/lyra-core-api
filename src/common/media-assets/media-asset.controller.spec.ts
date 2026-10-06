@@ -34,6 +34,7 @@ describe('MediaAssetController', () => {
       productKey: 'social',
       operatingMode: 'client',
       clientId: '33333333-3333-4333-8333-333333333333',
+      companyContextId: '44444444-4444-4444-8444-44444444444a',
       managedTenantId: '88888888-8888-4888-8888-888888888888',
     },
   };
@@ -95,21 +96,53 @@ describe('MediaAssetController', () => {
         tenantId: agencyCtx.tenantId,
         workspaceId: agencyCtx.workspaceId,
         agencyClientId: null,
+        companyContextId: null,
       },
       { limit: undefined },
     );
   });
 
-  it('maps managed client mode to the server-resolved client id', async () => {
+  it('maps managed client mode to the server-resolved client AND company', async () => {
     uploadService.list.mockResolvedValue({ items: [], total: 0 });
 
     await controller.list(clientCtx, {});
 
     expect(uploadService.list).toHaveBeenCalledWith(
-      expect.objectContaining({
+      {
+        tenantId: agencyCtx.tenantId,
+        workspaceId: agencyCtx.workspaceId,
         agencyClientId: '33333333-3333-4333-8333-333333333333',
-      }),
+        companyContextId: '44444444-4444-4444-8444-44444444444a',
+      },
       { limit: undefined },
+    );
+  });
+
+  it('CS3.1.1: refuses client mode without a company instead of listing client-wide media', async () => {
+    const noCompany: RequestContext = {
+      ...clientCtx,
+      managedContext: { ...clientCtx.managedContext!, companyContextId: null },
+    };
+
+    await expect(controller.list(noCompany, {})).rejects.toThrow(
+      BadRequestException,
+    );
+    expect(uploadService.list).not.toHaveBeenCalled();
+  });
+
+  it('CS3.1.1: a company cannot be smuggled through the upload body either', async () => {
+    uploadService.upload.mockResolvedValue(sampleAsset());
+
+    await controller.upload(clientCtx, file, {
+      companyContextId: 'ffffffff-ffff-4fff-8fff-ffffffffffff',
+    } as never);
+
+    expect(uploadService.upload).toHaveBeenCalledWith(
+      expect.objectContaining({
+        companyContextId: '44444444-4444-4444-8444-44444444444a',
+      }),
+      agencyCtx.userId,
+      expect.anything(),
     );
   });
 
@@ -127,6 +160,7 @@ describe('MediaAssetController', () => {
         tenantId: agencyCtx.tenantId,
         workspaceId: agencyCtx.workspaceId,
         agencyClientId: null,
+        companyContextId: null,
       },
       agencyCtx.userId,
       { file, source: 'planner_upload' },

@@ -80,6 +80,7 @@ export class CreativeVersionApprovalService {
     assetId: string,
     versionId: string,
     file: Parameters<CreativeAssetService['createVersion']>[3],
+    onVersionCreated?: Parameters<CreativeAssetService['createVersion']>[5],
   ) {
     const { asset, version } = await this.resolveVersion(
       scope,
@@ -103,6 +104,7 @@ export class CreativeVersionApprovalService {
       asset.id,
       file,
       { revisesVersionId: version.id },
+      onVersionCreated,
     );
   }
 

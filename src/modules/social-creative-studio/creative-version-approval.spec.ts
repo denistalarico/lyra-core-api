@@ -571,6 +571,7 @@ describe('CS2B.6 revision loop — CreativeVersionApprovalService.startRevision'
       ASSET_A,
       FILE,
       { revisesVersionId: VERSION_A1 },
+      undefined,
     );
     expect(created).toMatchObject({
       creativeAssetId: ASSET_A,

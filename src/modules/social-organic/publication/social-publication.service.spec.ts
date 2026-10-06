@@ -241,6 +241,34 @@ describe('SocialPublicationService', () => {
       expect(publisherRegistry.resolve).not.toHaveBeenCalled();
     });
 
+    it('CS3.1.1: resolves the mediaAssetId in the caller company, so B cannot schedule media of A', async () => {
+      const companyScope: SocialPublicationScope = {
+        ...agencyScope,
+        agencyClientId: '33333333-3333-4333-8333-333333333333',
+        companyContextId: '44444444-4444-4444-8444-44444444444b',
+      };
+      mediaAssetResolver.resolve.mockRejectedValueOnce(
+        new NotFoundException('Media asset not found.'),
+      );
+
+      await expect(
+        service.create(companyScope, actorUserId, {
+          contentItemId,
+          destinationId,
+          assetId,
+          mediaAssetId,
+        }),
+      ).rejects.toThrow(NotFoundException);
+      expect(mediaAssetResolver.resolve).toHaveBeenCalledWith({
+        tenantId: companyScope.tenantId,
+        workspaceId: companyScope.workspaceId,
+        agencyClientId: companyScope.agencyClientId,
+        companyContextId: companyScope.companyContextId,
+        mediaAssetId,
+      });
+      expect(publicationsRepository.save).not.toHaveBeenCalled();
+    });
+
     it('resolves and validates a scoped mediaAssetId, persisting only the reference', async () => {
       const result = await service.create(agencyScope, actorUserId, {
         contentItemId,
@@ -253,6 +281,7 @@ describe('SocialPublicationService', () => {
         tenantId: agencyScope.tenantId,
         workspaceId: agencyScope.workspaceId,
         agencyClientId: agencyScope.agencyClientId,
+        companyContextId: null,
         mediaAssetId,
       });
       expect(publisherRegistry.resolve).toHaveBeenCalledWith(
@@ -743,6 +772,7 @@ describe('SocialPublicationService', () => {
         tenantId: agencyScope.tenantId,
         workspaceId: agencyScope.workspaceId,
         agencyClientId: agencyScope.agencyClientId,
+        companyContextId: null,
         mediaAssetId,
       });
       expect(result.status).toBe('scheduled');

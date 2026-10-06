@@ -2,9 +2,8 @@ import { resolveCompanyAwareScope } from '../../common/context/company-aware-sco
 import type { RequestContext } from '../../common/context/request-context.interface';
 import type { MediaAssetScope } from '../../common/media-assets';
 
-export type CreativeStudioScope = MediaAssetScope & {
-  companyContextId: string | null;
-};
+/** Since CS3.1.1 the media scope already carries Company Context. */
+export type CreativeStudioScope = MediaAssetScope;
 
 export function creativeStudioScope(ctx: RequestContext): CreativeStudioScope {
   return resolveCompanyAwareScope(ctx);

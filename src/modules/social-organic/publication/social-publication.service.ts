@@ -432,6 +432,7 @@ export class SocialPublicationService {
       tenantId: input.scope.tenantId,
       workspaceId: input.scope.workspaceId,
       agencyClientId: input.scope.agencyClientId,
+      companyContextId: input.scope.companyContextId ?? null,
       mediaAssetId: input.mediaAssetId,
     });
 

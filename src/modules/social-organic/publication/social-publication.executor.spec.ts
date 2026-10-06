@@ -260,7 +260,26 @@ describe('SocialPublicationExecutorService', () => {
         tenantId: 'tenant-1',
         workspaceId: 'workspace-1',
         agencyClientId: null,
+        companyContextId: null,
       });
+    });
+
+    it('CS3.1.1: resolves media in the company of the publication organic asset', async () => {
+      const adapter = buildAdapter();
+      registry.resolve.mockReturnValue(adapter);
+      mockResolvedMedia();
+      const asset = (await assetsRepository.findOne()) as Record<string, unknown>;
+      assetsRepository.findOne.mockResolvedValue({
+        ...asset,
+        agencyClientId: 'client-1',
+        companyContextId: 'company-a',
+      });
+
+      await executor.publish(withMedia());
+
+      expect(mediaAssetResolver.resolve).toHaveBeenCalledWith(
+        expect.objectContaining({ companyContextId: 'company-a' }),
+      );
     });
 
     it('calls M3 MediaPreparationService for valid media and hands the adapter a signed URL/metadata', async () => {

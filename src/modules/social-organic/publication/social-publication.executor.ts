@@ -119,6 +119,7 @@ export class SocialPublicationExecutorService implements SocialPublicationExecut
           mediaIndex,
           mediaCount: payload.mediaAssetIds.length,
           publication,
+          companyContextId: asset.companyContextId ?? null,
           payload,
           credential,
           adapter,
@@ -222,6 +223,12 @@ export class SocialPublicationExecutorService implements SocialPublicationExecut
     mediaIndex: number;
     mediaCount: number;
     publication: SocialPublicationEntity;
+    /**
+     * The publication row has no company column; its organic asset does, and
+     * `TR_social_publications_company_scope` keeps it equal to the plan's.
+     * The same value the credential resolver already trusts.
+     */
+    companyContextId: string | null;
     payload: PublicationPayload;
     credential: Awaited<ReturnType<SocialOrganicCredentialResolver['resolve']>>;
     adapter: ReturnType<SocialPublisherRegistry['resolve']>;
@@ -233,6 +240,7 @@ export class SocialPublicationExecutorService implements SocialPublicationExecut
       tenantId: publication.tenantId,
       workspaceId: publication.workspaceId,
       agencyClientId: publication.agencyClientId,
+      companyContextId: input.companyContextId,
     });
 
     const capabilities = adapter.capabilities(payload.assetType);
