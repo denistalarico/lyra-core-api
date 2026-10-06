@@ -1,4 +1,4 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, Logger } from '@nestjs/common';
 import type { MediaAssetUploadService } from '../../common/media-assets';
 import { CreativeGenerationConfigService } from './creative-generation-config';
 import {
@@ -8,7 +8,9 @@ import {
   type ImageGenerationProviderResult,
 } from './creative-image-generation.provider';
 import { CreativeImageGenerationWorker } from './creative-image-generation.worker';
+import { CREATIVE_IMAGE_MAX_BYTES } from './creative-asset.service';
 import { CREATIVE_GENERATION_MEDIA_SOURCE } from './creative-retention';
+import { OpenAIImageGenerationProvider } from './openai-image-generation.provider';
 import type { CreativeGenerationEntity } from './entities';
 
 const scopeA = {
@@ -82,8 +84,8 @@ function claimed(
  * `creative-image-generation.postgres.spec.ts`; here the database is a
  * recorder, so each test can see which terminal write was issued with what.
  */
-function harness(
-  provider = new FakeImageProvider(),
+function harness<P extends ImageGenerationProvider = FakeImageProvider>(
+  provider: P = new FakeImageProvider() as unknown as P,
   row: CreativeGenerationEntity = claimed(),
 ) {
   const queries: Array<{ sql: string; params: unknown[] }> = [];
@@ -411,6 +413,15 @@ describe('CreativeImageGenerationWorker (CS3.2)', () => {
       ['more outputs than requested', [{ body: PNG }, { body: PNG }], 1],
       ['empty bytes', [{ body: Buffer.alloc(0) }], 1],
       ['bytes that are not an image', [{ body: MP4 }], 1],
+      [
+        'an output above the size limit',
+        [
+          {
+            body: Buffer.concat([PNG, Buffer.alloc(CREATIVE_IMAGE_MAX_BYTES)]),
+          },
+        ],
+        1,
+      ],
       ['a non-buffer body', [{ body: 'https://cdn/x.png' }], 1],
       [
         'one bad output among good ones',
@@ -418,7 +429,9 @@ describe('CreativeImageGenerationWorker (CS3.2)', () => {
         2,
       ],
     ])(
-      'refuses %s as retryable invalid_output, storing nothing but keeping usage',
+      // CS3.3.1: the provider already returned (and may have billed) — a
+      // retry would buy the same unusable answer again.
+      'fails %s as FINAL invalid_output after one paid call, storing nothing but keeping usage',
       async (_label, outputs, outputCount) => {
         const provider = new FakeImageProvider();
         provider.next = () =>
@@ -434,20 +447,97 @@ describe('CreativeImageGenerationWorker (CS3.2)', () => {
 
         await h.worker.processPending();
 
+        expect(h.provider.calls).toHaveLength(1);
         expect(failParams(h)).toEqual(
           expect.objectContaining({
-            status: 'queued',
+            status: 'failed',
             code: 'invalid_output',
-            retryable: true,
+            retryable: false,
+            provider: 'fake',
+            metrics: JSON.stringify({ images: 1 }),
             amount: '0.04',
             currency: 'USD',
           }),
         );
+        expect(h.terminal('fail')[0].params[3]).toBe('m');
         expect(h.mediaUpload.upload).not.toHaveBeenCalled();
       },
     );
 
-    it('removes already-stored outputs when a later one cannot be read', async () => {
+    it('fails for good, keeping usage and removing stored outputs, when the upload cannot read a later one', async () => {
+      const provider = new FakeImageProvider();
+      provider.next = () =>
+        Promise.resolve({
+          outputs: [{ body: PNG }, { body: PNG }],
+          usage: { model: 'm', metrics: { output_tokens: 3 }, cost: null },
+        });
+      const h = harness(provider, claimed({ outputCount: 2 }));
+      h.mediaUpload.upload
+        .mockResolvedValueOnce({ id: 'media-1' } as never)
+        .mockRejectedValueOnce(new BadRequestException('unreadable'));
+
+      await h.worker.processPending();
+
+      expect(h.provider.calls).toHaveLength(1);
+      expect(failParams(h)).toEqual(
+        expect.objectContaining({
+          status: 'failed',
+          code: 'invalid_output',
+          retryable: false,
+          metrics: JSON.stringify({ output_tokens: 3 }),
+        }),
+      );
+      expect(
+        h.mediaUpload.removeAfterFailedConsumerOperation,
+      ).toHaveBeenCalledWith(scopeA, 'media-1');
+      expect(h.inserted).toEqual([]);
+    });
+
+    it("uses a provider's Retry-After only as a floor on the worker's own backoff, still capped", async () => {
+      const cases: Array<[number | null, number, number]> = [
+        // [retryAfter, attempts, expected delay]
+        [null, 1, 30],
+        [5, 1, 30], // shorter hint: our backoff wins
+        [90, 1, 90], // longer hint: respected
+        [5_000, 2, 600], // never beyond the cap
+      ];
+      for (const [retryAfterSeconds, attempts, expected] of cases) {
+        const provider = new FakeImageProvider();
+        provider.next = () =>
+          Promise.reject(
+            new ImageGenerationProviderError('rate_limited', true, {
+              retryAfterSeconds: retryAfterSeconds ?? undefined,
+            }),
+          );
+        const h = harness(provider, claimed({ attempts, maxAttempts: 3 }));
+        await h.worker.processPending();
+        expect(failParams(h)).toEqual(
+          expect.objectContaining({ status: 'queued', delay: expected }),
+        );
+      }
+    });
+
+    it('records the usage a failing provider reports for a call it already paid', async () => {
+      const provider = new FakeImageProvider();
+      provider.next = () =>
+        Promise.reject(
+          new ImageGenerationProviderError('invalid_output', false, {
+            usage: { model: 'm-1', metrics: { output_tokens: 7 }, cost: null },
+          }),
+        );
+      const h = harness(provider);
+
+      await h.worker.processPending();
+
+      const params = h.terminal('fail')[0].params;
+      expect(params[3]).toBe('m-1');
+      expect(params[4]).toBe(JSON.stringify({ output_tokens: 7 }));
+      expect(failParams(h)).toEqual(
+        expect.objectContaining({ status: 'failed', retryable: false }),
+      );
+    });
+
+    it('still writes the final failure when cleaning up stored outputs fails (no lease-expiry re-bill)', async () => {
       const provider = new FakeImageProvider();
       provider.next = () =>
         Promise.resolve({
@@ -457,15 +547,26 @@ describe('CreativeImageGenerationWorker (CS3.2)', () => {
       const h = harness(provider, claimed({ outputCount: 2 }));
       h.mediaUpload.upload
         .mockResolvedValueOnce({ id: 'media-1' } as never)
-        .mockRejectedValueOnce(new BadRequestException('unreadable'));
+        .mockRejectedValueOnce(new Error('ECONNREFUSED'));
+      h.mediaUpload.removeAfterFailedConsumerOperation.mockRejectedValueOnce(
+        new Error(`db down ${SECRET}`),
+      );
+      const warn = jest
+        .spyOn(
+          (h.worker as unknown as { logger: { warn: () => void } }).logger,
+          'warn',
+        )
+        .mockImplementation(() => undefined);
 
       await h.worker.processPending();
 
-      expect(failParams(h).code).toBe('invalid_output');
+      expect(failParams(h)).toEqual(
+        expect.objectContaining({ status: 'failed', retryable: false }),
+      );
       expect(
         h.mediaUpload.removeAfterFailedConsumerOperation,
       ).toHaveBeenCalledWith(scopeA, 'media-1');
-      expect(h.inserted).toEqual([]);
+      expect(JSON.stringify(warn.mock.calls)).not.toContain(SECRET);
     });
 
     it('treats a storage outage after a paid call as a final failure, not a silent re-bill', async () => {
@@ -480,9 +581,244 @@ describe('CreativeImageGenerationWorker (CS3.2)', () => {
 
       await h.worker.processPending();
 
+      expect(h.provider.calls).toHaveLength(1);
       expect(failParams(h)).toEqual(
-        expect.objectContaining({ status: 'failed', code: 'failed' }),
+        expect.objectContaining({
+          status: 'failed',
+          code: 'failed',
+          retryable: false,
+        }),
       );
+    });
+  });
+
+  /**
+   * CS3.3 — the real OpenAI adapter behind the port, with only `fetch`
+   * faked: no network, no spend.
+   */
+  describe('with the OpenAI adapter (fetch faked)', () => {
+    const openAiConfig = {
+      openAiApiKey: SECRET,
+      imageModel: 'gpt-image-2.5-flare-2026-09-08',
+      imageTimeoutMs: 180_000,
+    } as unknown as CreativeGenerationConfigService;
+    let fetchMock: jest.SpyInstance;
+    let logs: string[];
+
+    beforeEach(() => {
+      fetchMock = jest.spyOn(global, 'fetch');
+      logs = [];
+      for (const level of ['log', 'warn', 'error'] as const)
+        jest
+          .spyOn(Logger.prototype, level)
+          .mockImplementation((message: unknown) => {
+            logs.push(String(message));
+          });
+    });
+    afterEach(() => jest.restoreAllMocks());
+
+    const json = (status: number, body: unknown, headers = {}) =>
+      new Response(JSON.stringify(body), { status, headers });
+
+    it('runs a claimed generation to completed with openai provenance', async () => {
+      fetchMock.mockResolvedValueOnce(
+        json(200, {
+          data: [
+            { b64_json: PNG.toString('base64') },
+            { b64_json: PNG.toString('base64') },
+          ],
+          usage: {
+            input_tokens: 40,
+            output_tokens: 2_000,
+            total_tokens: 2_040,
+          },
+        }),
+      );
+      const h = harness(
+        new OpenAIImageGenerationProvider(openAiConfig),
+        claimed({ outputCount: 2 }),
+      );
+
+      // queued → processing (claim) → completed (guarded terminal write)
+      expect(await h.worker.processPending()).toBe(1);
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(h.mediaUpload.upload).toHaveBeenCalledTimes(2);
+      expect(
+        (h.mediaUpload.upload.mock.calls[0][2].file.buffer as Buffer).equals(
+          PNG,
+        ),
+      ).toBe(true);
+      const [complete] = h.terminal('completed');
+      expect(complete.params.slice(2)).toEqual([
+        'openai',
+        'gpt-image-2.5-flare-2026-09-08',
+        JSON.stringify({
+          images: 2,
+          input_tokens: 40,
+          output_tokens: 2_000,
+          total_tokens: 2_040,
+        }),
+        null,
+        null,
+      ]);
+      expect(h.inserted).toHaveLength(2);
+      expect(h.terminal('fail')).toHaveLength(0);
+      expect(logs.join('\n')).toMatch(
+        /generation=gen-1 attempt=1\/3 provider=openai model=gpt-image-2\.5-flare-2026-09-08 outcome=completed durationMs=\d+/,
+      );
+    });
+
+    it.each([
+      [
+        '429',
+        json(
+          429,
+          { error: { code: 'rate_limit_exceeded' } },
+          { 'retry-after': '120' },
+        ),
+        'queued',
+        'rate_limited',
+        true,
+        120,
+      ],
+      [
+        '503',
+        json(503, { error: { code: 'server_is_overloaded' } }),
+        'queued',
+        'unavailable',
+        true,
+        30,
+      ],
+      [
+        'moderation',
+        json(400, { error: { code: 'moderation_blocked' } }),
+        'failed',
+        'rejected',
+        false,
+        30,
+      ],
+      [
+        'bad key',
+        json(401, { error: { code: 'invalid_api_key' } }),
+        'failed',
+        'unavailable',
+        false,
+        30,
+      ],
+      [
+        'invalid request',
+        json(400, { error: { code: 'invalid_value' } }),
+        'failed',
+        'failed',
+        false,
+        30,
+      ],
+      [
+        'quota',
+        json(429, { error: { code: 'insufficient_quota' } }),
+        'failed',
+        'unavailable',
+        false,
+        30,
+      ],
+    ])(
+      '%s → %s/%s (retryable=%s)',
+      async (_label, response, status, code, retryable, delay) => {
+        fetchMock.mockResolvedValueOnce(response);
+        const h = harness(new OpenAIImageGenerationProvider(openAiConfig));
+
+        await h.worker.processPending();
+
+        expect(failParams(h)).toEqual(
+          expect.objectContaining({ status, code, retryable, delay }),
+        );
+        expect(h.mediaUpload.upload).not.toHaveBeenCalled();
+      },
+    );
+
+    it('a 200 with well-formed base64 that is not an image fails for good after ONE call (CS3.3.1)', async () => {
+      fetchMock.mockResolvedValueOnce(
+        json(200, {
+          data: [{ b64_json: MP4.toString('base64') }],
+          usage: { output_tokens: 1_100 },
+        }),
+      );
+      const h = harness(new OpenAIImageGenerationProvider(openAiConfig));
+
+      await h.worker.processPending();
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(failParams(h)).toEqual(
+        expect.objectContaining({
+          status: 'failed',
+          code: 'invalid_output',
+          retryable: false,
+          provider: 'openai',
+          metrics: JSON.stringify({ images: 1, output_tokens: 1_100 }),
+          amount: null,
+        }),
+      );
+      expect(h.mediaUpload.upload).not.toHaveBeenCalled();
+    });
+
+    it('retries a timeout through the queue, not inside the adapter', async () => {
+      fetchMock.mockRejectedValueOnce(
+        Object.assign(new Error('signal timed out'), { name: 'TimeoutError' }),
+      );
+      const h = harness(new OpenAIImageGenerationProvider(openAiConfig));
+
+      await h.worker.processPending();
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(failParams(h)).toEqual(
+        expect.objectContaining({
+          status: 'queued',
+          code: 'timeout',
+          retryable: true,
+        }),
+      );
+    });
+
+    it('fails a malformed paid answer for good, keeping its usage', async () => {
+      fetchMock.mockResolvedValueOnce(
+        json(200, {
+          data: [{ url: 'https://x/y.png' }],
+          usage: { output_tokens: 900 },
+        }),
+      );
+      const h = harness(new OpenAIImageGenerationProvider(openAiConfig));
+
+      await h.worker.processPending();
+
+      expect(failParams(h)).toEqual(
+        expect.objectContaining({
+          status: 'failed',
+          code: 'invalid_output',
+          retryable: false,
+          provider: 'openai',
+          metrics: JSON.stringify({ images: 1, output_tokens: 900 }),
+        }),
+      );
+    });
+
+    it('never lets the key, prompt or provider text reach the database or logs', async () => {
+      fetchMock.mockResolvedValueOnce(
+        json(401, {
+          error: {
+            code: 'invalid_api_key',
+            message: `Incorrect API key provided: ${SECRET} for café na mesa`,
+          },
+        }),
+      );
+      const h = harness(new OpenAIImageGenerationProvider(openAiConfig));
+
+      await h.worker.processPending();
+
+      const surface = JSON.stringify([h.queries, logs]);
+      expect(surface).not.toContain(SECRET);
+      expect(surface).not.toContain('Incorrect API key');
+      expect(JSON.stringify(logs)).not.toContain('café na mesa');
     });
   });
 });

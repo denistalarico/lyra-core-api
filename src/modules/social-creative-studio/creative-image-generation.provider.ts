@@ -1,9 +1,10 @@
 // CS3.1 — provider boundary for image generation.
 //
 // The domain (`CreativeImageGenerationService`) depends on this port only.
-// Nothing here names a vendor or a model: the concrete adapter (OpenAI in
-// CS3.3) maps Lyra's vocabulary onto its own API and back, and is bound to
-// the abstract class below in `SocialCreativeStudioModule`.
+// Nothing here names a vendor or a model: the concrete adapter
+// (`OpenAIImageGenerationProvider`, CS3.3) maps Lyra's vocabulary onto its own
+// API and back, and is bound to the abstract class below by
+// `bindImageGenerationProvider` only when explicitly configured.
 //
 // What an adapter receives and returns is deliberately narrow:
 //   - in:  a prompt the domain already composed (Brand Kit and Planner
@@ -85,18 +86,37 @@ export type ImageGenerationFailureCode =
   | 'invalid_output';
 
 /**
+ * Optional facts an adapter may attach to a failure (CS3.3):
+ *   - `retryAfterSeconds`: the provider's own "wait at least this long" hint.
+ *     The worker owns the retry policy and only uses it as a floor for its
+ *     backoff — adapters never sleep or retry themselves;
+ *   - `usage`: what a call that RETURNED cost before its answer proved
+ *     unusable, so a paid attempt is still accounted for.
+ */
+export type ImageGenerationProviderErrorDetails = {
+  readonly retryAfterSeconds?: number;
+  readonly usage?: ImageGenerationUsage | null;
+};
+
+/**
  * The only error an adapter should throw. Its message is the code itself: an
  * adapter translates vendor errors into a code and drops the vendor text,
  * which may carry request ids, keys or prompt fragments. Anything else an
  * adapter throws is treated by the domain as `failed` and never echoed.
  */
 export class ImageGenerationProviderError extends Error {
+  readonly retryAfterSeconds: number | null;
+  readonly usage: ImageGenerationUsage | null;
+
   constructor(
     readonly code: ImageGenerationFailureCode,
     readonly retryable: boolean,
+    details: ImageGenerationProviderErrorDetails = {},
   ) {
     super(`image_generation_${code}`);
     this.name = 'ImageGenerationProviderError';
+    this.retryAfterSeconds = details.retryAfterSeconds ?? null;
+    this.usage = details.usage ?? null;
   }
 }
 

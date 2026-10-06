@@ -11,10 +11,8 @@ import { CreativeStudioBrandContextService } from './creative-brand-context.serv
 import { CreativeFolderService } from './creative-folder.service';
 import { CreativeGenerationConfigService } from './creative-generation-config';
 import { CreativeImageGenerationController } from './creative-image-generation.controller';
-import {
-  DisabledImageGenerationProvider,
-  ImageGenerationProvider,
-} from './creative-image-generation.provider';
+import { bindImageGenerationProvider } from './creative-image-generation.binding';
+import { ImageGenerationProvider } from './creative-image-generation.provider';
 import { CreativeImageGenerationService } from './creative-image-generation.service';
 import { CreativeImageGenerationWorker } from './creative-image-generation.worker';
 import { CreativeThumbnailService } from './creative-thumbnail.service';
@@ -72,10 +70,11 @@ import {
     CreativeImageGenerationService,
     CreativeImageGenerationWorker,
     CreativeGenerationConfigService,
-    // Fail-closed until a real adapter is bound (CS3.3).
+    // CS3.3: OpenAI only when explicitly enabled by env; disabled otherwise.
     {
       provide: ImageGenerationProvider,
-      useClass: DisabledImageGenerationProvider,
+      inject: [CreativeGenerationConfigService],
+      useFactory: bindImageGenerationProvider,
     },
   ],
 })

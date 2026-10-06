@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   GoneException,
   NotFoundException,
@@ -22,7 +23,10 @@ import {
   SocialContentItemEntity,
   SocialPlanEntity,
 } from '../social-planner/entities';
-import { CreativeAssetService } from './creative-asset.service';
+import {
+  CREATIVE_IMAGE_MAX_BYTES,
+  CreativeAssetService,
+} from './creative-asset.service';
 import { CreativeGenerationConfigService } from './creative-generation-config';
 import {
   ImageGenerationProvider,
@@ -95,6 +99,8 @@ run('CS3.2 creative generation jobs (real PostgreSQL)', () => {
   let provider: ScriptedProvider;
   let mediaUpload: MediaAssetUploadService;
   let generation: CreativeImageGenerationService;
+  /** CS3.3.1: flips the metadata reader to the real reader's 400 for unreadable bytes. */
+  let metadataReadable = true;
   const config = new CreativeGenerationConfigService();
 
   function options(entities: DataSourceOptions['entities'], name: string) {
@@ -247,12 +253,16 @@ run('CS3.2 creative generation jobs (real PostgreSQL)', () => {
       mediaRepository,
       files as unknown as FilesService,
       {
-        extract: async () => ({
-          width: 8,
-          height: 8,
-          durationSeconds: null,
-          codec: 'png',
-        }),
+        extract: async () => {
+          if (!metadataReadable)
+            throw new BadRequestException('Não foi possível ler a imagem.');
+          return {
+            width: 8,
+            height: 8,
+            durationSeconds: null,
+            codec: 'png',
+          };
+        },
       },
     );
     const assets = new CreativeAssetService(
@@ -289,6 +299,7 @@ run('CS3.2 creative generation jobs (real PostgreSQL)', () => {
   });
 
   beforeEach(() => {
+    metadataReadable = true;
     provider.script = [];
     provider.calls.length = 0;
     provider.fallback = () => Promise.reject(new Error('unscripted'));
@@ -594,16 +605,19 @@ run('CS3.2 creative generation jobs (real PostgreSQL)', () => {
 
     it('persists retries: retryable failure → queued with backoff and kept cost, then completes summing usage', async () => {
       provider.script.push(
-        // Paid but unusable: a retryable invalid_output that still cost money.
+        // Retryable by the adapter's own classification, reporting usage
+        // (the port allows it). Since CS3.3.1, outputs the worker rejects
+        // after a successful call are never retried — see below.
         () =>
-          Promise.resolve({
-            outputs: [{ body: Buffer.from('not an image') }],
-            usage: {
-              model: 'scripted-model',
-              metrics: { images: 1 },
-              cost: { amount: '0.040000', currency: 'USD' },
-            },
-          }),
+          Promise.reject(
+            new ImageGenerationProviderError('rate_limited', true, {
+              usage: {
+                model: 'scripted-model',
+                metrics: { images: 1 },
+                cost: { amount: '0.040000', currency: 'USD' },
+              },
+            }),
+          ),
         () => ok(1),
       );
       const { generationId } = await enqueue(scopeA, {
@@ -616,7 +630,7 @@ run('CS3.2 creative generation jobs (real PostgreSQL)', () => {
         expect.objectContaining({
           status: 'queued',
           attempts: 1,
-          error_code: 'invalid_output',
+          error_code: 'rate_limited',
           error_retryable: true,
           locked_by: null,
           cost_amount: '0.040000',
@@ -642,6 +656,102 @@ run('CS3.2 creative generation jobs (real PostgreSQL)', () => {
           cost_amount: '0.080000',
         }),
       );
+    });
+
+    describe('paid output retry safety (CS3.3.1)', () => {
+      it.each([
+        [
+          'bytes that are not an image',
+          () => Buffer.from('not an image'),
+          true,
+        ],
+        [
+          'an output above the size limit',
+          () => Buffer.concat([image, Buffer.alloc(CREATIVE_IMAGE_MAX_BYTES)]),
+          true,
+        ],
+        ['bytes whose metadata cannot be read', () => image, false],
+      ])(
+        '%s: failed after ONE paid call, usage kept, never claimed again',
+        async (_label, body, readable) => {
+          metadataReadable = readable;
+          provider.script.push(() =>
+            Promise.resolve({
+              outputs: [{ body: body() }],
+              usage: {
+                model: 'scripted-model',
+                metrics: { images: 1, output_tokens: 1_000 },
+                cost: null,
+              },
+            }),
+          );
+          const { generationId } = await enqueue(scopeA, { prompt: 'x' });
+
+          expect(await worker('w-1').processPending()).toBe(1);
+          const failed = await row(generationId);
+          expect(failed).toEqual(
+            expect.objectContaining({
+              status: 'failed',
+              attempts: 1,
+              error_code: 'invalid_output',
+              error_retryable: false,
+              locked_by: null,
+              provider: 'scripted',
+              model: 'scripted-model',
+              usage_metrics: { images: 1, output_tokens: 1_000 },
+              cost_amount: null,
+            }),
+          );
+          expect(failed.failed_at).not.toBeNull();
+
+          // "Restart": fresh worker instances, even with the row made due,
+          // never claim a failed generation again.
+          await db.query(
+            'UPDATE social_creative_generations SET available_at = now() WHERE id = $1',
+            [generationId],
+          );
+          for (const id of ['w-restart-1', 'w-restart-2'])
+            expect(await worker(id).processPending()).toBe(0);
+          expect(await row(generationId)).toEqual(
+            expect.objectContaining({
+              status: 'failed',
+              attempts: 1,
+              usage_metrics: { images: 1, output_tokens: 1_000 },
+            }),
+          );
+          expect(provider.calls).toHaveLength(1);
+          // Nothing half-stored is left behind.
+          const [{ count }] = await db.query(
+            `SELECT count(*)::int AS count FROM media_assets
+              WHERE metadata->>'generationId' = $1`,
+            [generationId],
+          );
+          expect(count).toBe(0);
+        },
+      );
+
+      it('the distinction holds: a timeout BEFORE any answer is still retried', async () => {
+        provider.script.push(
+          () =>
+            Promise.reject(new ImageGenerationProviderError('timeout', true)),
+          () => ok(1),
+        );
+        const { generationId } = await enqueue(scopeA, { prompt: 'x' });
+
+        await worker('w-1').processPending();
+        expect(await row(generationId)).toEqual(
+          expect.objectContaining({ status: 'queued', attempts: 1 }),
+        );
+        await db.query(
+          'UPDATE social_creative_generations SET available_at = now() WHERE id = $1',
+          [generationId],
+        );
+        await worker('w-2').processPending();
+        expect(await row(generationId)).toEqual(
+          expect.objectContaining({ status: 'completed', attempts: 2 }),
+        );
+        expect(provider.calls).toHaveLength(2);
+      });
     });
 
     it('fails a non-retryable error at once and a retryable one after max attempts, never looping', async () => {

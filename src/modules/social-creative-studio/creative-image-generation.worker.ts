@@ -189,6 +189,8 @@ export class CreativeImageGenerationWorker {
     };
     const stored: MediaAssetEntity[] = [];
     let usage: ImageGenerationUsage | null = null;
+    let retryAfterSeconds: number | null = null;
+    const started = Date.now();
     try {
       let result: ImageGenerationProviderResult;
       try {
@@ -200,6 +202,11 @@ export class CreativeImageGenerationWorker {
           references: [],
         });
       } catch (error) {
+        // A call that returned and then proved unusable was still paid for.
+        if (error instanceof ImageGenerationProviderError) {
+          usage = error.usage;
+          retryAfterSeconds = error.retryAfterSeconds;
+        }
         throw this.sanitize(error);
       }
       usage = result.usage ?? null;
@@ -210,11 +217,41 @@ export class CreativeImageGenerationWorker {
       if (!(await this.complete(generation, stored, usage))) {
         // Lease lost while working: the generation belongs to someone else now.
         await this.compensate(scope, stored);
+        this.report(generation, usage, started, 'lease_lost');
+        return;
       }
+      this.report(generation, usage, started, 'completed');
     } catch (error) {
-      await this.compensate(scope, stored);
-      await this.fail(generation, this.classify(error), usage);
+      // CS3.3.1: a cleanup error must not skip the terminal write — a paid
+      // generation left in `processing` is revived when its lease expires
+      // and bought again. Leftover temporary media is CS3.6's to collect.
+      await this.compensate(scope, stored).catch((cleanup: unknown) =>
+        this.logger.warn(
+          `generation=${generation.id} output cleanup failed: ${(cleanup as Error)?.name ?? typeof cleanup}`,
+        ),
+      );
+      const failure = this.classify(error);
+      const status = await this.fail(
+        generation,
+        failure,
+        usage,
+        retryAfterSeconds,
+      );
+      this.report(generation, usage, started, status, failure.code);
     }
+  }
+
+  /** One line per attempt: ids, provider, model, outcome, duration. Never the prompt. */
+  private report(
+    generation: CreativeGenerationEntity,
+    usage: ImageGenerationUsage | null,
+    started: number,
+    outcome: string,
+    code?: string,
+  ) {
+    this.logger.log(
+      `generation=${generation.id} attempt=${generation.attempts}/${generation.maxAttempts} provider=${this.provider.id} model=${usage?.model?.slice(0, 120) ?? '-'} outcome=${outcome}${code ? ` code=${code}` : ''} durationMs=${Date.now() - started}`,
+    );
   }
 
   private async store(
@@ -238,9 +275,10 @@ export class CreativeImageGenerationWorker {
       });
     } catch (error) {
       // The shared upload refuses bytes whose metadata it cannot read; for a
-      // generated output that is the provider's fault, not the caller's.
-      if (error instanceof BadRequestException)
-        throw this.failure('invalid_output', true);
+      // generated output that is the provider's fault, not the caller's —
+      // and the call is already paid, so it is final. Any other storage
+      // error falls through to `classify` → `failed`, also final.
+      if (error instanceof BadRequestException) throw this.unusablePaidOutput();
       throw error;
     }
   }
@@ -287,17 +325,26 @@ export class CreativeImageGenerationWorker {
    * A retryable failure with attempts left goes back to `queued` with backoff;
    * anything else is `failed`. Both keep the attempt's usage: a provider call
    * that returned was paid for even if what it returned was unusable.
+   *
+   * A provider's `Retry-After` (CS3.3) is a floor on this backoff, never a
+   * second policy: the delay is the larger of the two, still capped.
    */
   private async fail(
     generation: CreativeGenerationEntity,
     failure: CreativeImageGenerationException,
     usage: ImageGenerationUsage | null,
-  ): Promise<void> {
+    retryAfterSeconds: number | null = null,
+  ): Promise<'queued' | 'failed'> {
     const retry =
       failure.retryable && generation.attempts < generation.maxAttempts;
     const delay = Math.min(
       RETRY_MAX_SECONDS,
-      RETRY_BASE_SECONDS * 2 ** Math.max(0, generation.attempts - 1),
+      Math.max(
+        RETRY_BASE_SECONDS * 2 ** Math.max(0, generation.attempts - 1),
+        retryAfterSeconds !== null && Number.isFinite(retryAfterSeconds)
+          ? Math.ceil(retryAfterSeconds)
+          : 0,
+      ),
     );
     await this.dataSource.query(
       `UPDATE social_creative_generations
@@ -320,6 +367,7 @@ export class CreativeImageGenerationWorker {
         failure.retryable,
       ],
     );
+    return retry ? 'queued' : 'failed';
   }
 
   /**
@@ -382,19 +430,19 @@ export class CreativeImageGenerationWorker {
       outputs.length === 0 ||
       outputs.length > requested
     )
-      throw this.failure('invalid_output', true);
+      throw this.unusablePaidOutput();
     // `Array.isArray` widened `outputs` to `any[]`; re-assert the port type.
     return outputs.map((output: ImageGenerationProviderOutput | undefined) => {
       const body: unknown = output?.body;
       if (!Buffer.isBuffer(body) || body.length === 0)
-        throw this.failure('invalid_output', true);
+        throw this.unusablePaidOutput();
       const mimeType = detectMediaAssetMimeType(body);
       if (
         !mimeType ||
         !GENERATED_IMAGE_MIME_TYPES.has(mimeType) ||
         body.length > CREATIVE_IMAGE_MAX_BYTES
       )
-        throw this.failure('invalid_output', true);
+        throw this.unusablePaidOutput();
       return { body, mimeType };
     });
   }
@@ -425,6 +473,16 @@ export class CreativeImageGenerationWorker {
       `generation step failed: ${(error as Error)?.name ?? typeof error}`,
     );
     return new CreativeImageGenerationException('failed', false);
+  }
+
+  /**
+   * CS3.3.1 — outputs the provider already RETURNED (and may have billed)
+   * that fail validation or upload. Never retryable: the same request would
+   * most likely produce the same unusable bytes, and each retry is another
+   * paid call. Failing lets the user decide to ask again explicitly.
+   */
+  private unusablePaidOutput() {
+    return this.failure('invalid_output', false);
   }
 
   private failure(code: ImageGenerationFailureCode, retryable: boolean) {
