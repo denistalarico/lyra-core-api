@@ -36,13 +36,57 @@ export type CreativeImageQuality = (typeof CREATIVE_IMAGE_QUALITIES)[number];
 export const MAX_IMAGE_GENERATION_OUTPUTS = 4;
 
 /**
- * A reference image, resolved by the domain from Brand Kit assets or Creative
- * Versions. `subject` is a real element to preserve (product, logo), `style`
- * an aesthetic direction, `base` the image being edited or adapted — the Brand
- * Kit's asset/reference split (blueprint §10.2) carried to the provider.
+ * CS3.4.2 — what a reference image is FOR, in provider-neutral terms. The
+ * domain derives it from the reference's `kind` (`referenceRole`):
+ *   - `subject`: a real element whose essential appearance should be kept
+ *     (product, packaging, person, property, vehicle, apparel);
+ *   - `logo`:    the brand mark — reproduced as is when shown, never redrawn;
+ *   - `context`: setting or visual context, adapted freely;
+ *   - `style`:   aesthetic direction only, its subject is not copied;
+ *   - `general`: a client-provided reference with no declared role.
+ * The composed prompt already explains each image by its position; the role
+ * travels with the bytes so an adapter whose API has per-image roles can use
+ * them without parsing text.
+ */
+export const IMAGE_GENERATION_REFERENCE_ROLES = [
+  'subject',
+  'logo',
+  'context',
+  'style',
+  'general',
+] as const;
+export type ImageGenerationReferenceRole =
+  (typeof IMAGE_GENERATION_REFERENCE_ROLES)[number];
+
+/**
+ * Technical bound per generation (CS3.4.2). OpenAI accepts up to 16 inputs,
+ * but each image is billed as high-fidelity input tokens, the prompt names
+ * every image by position, and the Planner alone allows 10 per item: six
+ * keeps cost, payload and "Image 1..N" instructions bounded. Never truncated
+ * silently — more than this must be an explicit selection.
+ */
+export const MAX_IMAGE_GENERATION_REFERENCES = 6;
+
+/** Formats every adapter must accept (OpenAI edits: png, webp, jpg). */
+export const IMAGE_GENERATION_REFERENCE_MIME_TYPES = [
+  'image/png',
+  'image/jpeg',
+  'image/webp',
+] as const;
+
+/**
+ * Per image and per request, in bytes. Far below OpenAI's 50 MB per file:
+ * the worker holds every reference in memory for the call, once per slot.
+ */
+export const MAX_IMAGE_GENERATION_REFERENCE_BYTES = 16 * 1024 * 1024;
+export const MAX_IMAGE_GENERATION_REFERENCE_TOTAL_BYTES = 48 * 1024 * 1024;
+
+/**
+ * A reference image as BYTES, already resolved, verified and ordered by the
+ * domain. Position in the array is the "Image N" the prompt refers to.
  */
 export type ImageGenerationReference = {
-  readonly role: 'subject' | 'style' | 'base';
+  readonly role: ImageGenerationReferenceRole;
   readonly mimeType: string;
   readonly body: Buffer;
 };
@@ -52,7 +96,11 @@ export type ImageGenerationProviderInput = {
   readonly outputCount: number;
   readonly aspectRatio: CreativeImageAspectRatio;
   readonly quality: CreativeImageQuality;
-  /** Empty until reference resolution lands (CS3.4). */
+  /**
+   * CS3.4.2 — the generation's frozen references, in order. Empty means a
+   * text-only generation; how an adapter delivers them (OpenAI: `/edits`) is
+   * its own business.
+   */
   readonly references: readonly ImageGenerationReference[];
 };
 
@@ -84,6 +132,15 @@ export type ImageGenerationFailureCode =
   | 'timeout'
   | 'failed'
   | 'invalid_output';
+
+/**
+ * What a generation can record as its failure: the provider codes plus the
+ * one failure the domain itself raises before any provider call (CS3.4.2).
+ * Adapters never throw `reference_unavailable`.
+ */
+export type CreativeGenerationFailureCode =
+  | ImageGenerationFailureCode
+  | 'reference_unavailable';
 
 /**
  * Optional facts an adapter may attach to a failure (CS3.3):

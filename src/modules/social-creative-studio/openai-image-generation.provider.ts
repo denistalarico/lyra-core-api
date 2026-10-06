@@ -3,14 +3,18 @@ import type { CreativeGenerationConfigService } from './creative-generation-conf
 import {
   type CreativeImageAspectRatio,
   type CreativeImageQuality,
+  IMAGE_GENERATION_REFERENCE_MIME_TYPES,
   type ImageGenerationFailureCode,
   ImageGenerationProvider,
   ImageGenerationProviderError,
   type ImageGenerationProviderErrorDetails,
   type ImageGenerationProviderInput,
   type ImageGenerationProviderResult,
+  type ImageGenerationReference,
   type ImageGenerationUsage,
   MAX_IMAGE_GENERATION_OUTPUTS,
+  MAX_IMAGE_GENERATION_REFERENCE_BYTES,
+  MAX_IMAGE_GENERATION_REFERENCES,
 } from './creative-image-generation.provider';
 
 /**
@@ -20,6 +24,14 @@ import {
  */
 export const OPENAI_IMAGES_GENERATIONS_URL =
   'https://api.openai.com/v1/images/generations';
+/** CS3.4.2 — same host, chosen by the adapter when references are present. */
+export const OPENAI_IMAGES_EDITS_URL = 'https://api.openai.com/v1/images/edits';
+
+const REFERENCE_EXTENSION: Readonly<Record<string, string>> = {
+  'image/png': 'png',
+  'image/jpeg': 'jpg',
+  'image/webp': 'webp',
+};
 
 /**
  * Lyra aspect ratio → GPT Image `size`. All four are EXACT ratios inside the
@@ -71,9 +83,17 @@ const BASE64 = /^[A-Za-z0-9+/]+={0,2}$/;
 /**
  * CS3.3 — OpenAI Images API adapter behind `ImageGenerationProvider`.
  *
- * One `POST /v1/images/generations` per attempt, with `n = outputCount`: the
- * API generates up to 10 images in a single request, so one Lyra attempt is
- * exactly one billed call and the worker's retry count is the call count.
+ * One call per attempt, with `n = outputCount`: the API generates up to 10
+ * images in a single request, so one Lyra attempt is exactly one billed call
+ * and the worker's retry count is the call count. The endpoint is this
+ * adapter's decision, never the domain's (CS3.4.2):
+ *   - no references → `POST /v1/images/generations` (JSON);
+ *   - references    → `POST /v1/images/edits` (multipart), one `image[]` part
+ *     per reference in the domain's order — the order the prompt's
+ *     "Image 1..N" refers to. `input_fidelity` is not sent: GPT Image 2.x
+ *     models process image inputs at high fidelity and reject the parameter.
+ *     No `mask`: a reference workflow, not an in-place edit.
+ * Response, usage and every error rule are the same for both.
  *
  * Plain `fetch`, like every other OpenAI integration in this API (Planner,
  * briefing, Inbox, campaigns, analytics) — no SDK in the monorepo, and the
@@ -99,42 +119,54 @@ export class OpenAIImageGenerationProvider extends ImageGenerationProvider {
   async generate(
     input: ImageGenerationProviderInput,
   ): Promise<ImageGenerationProviderResult> {
-    // References need `/v1/images/edits` (CS3.4). Refusing beats dropping
-    // them: a product photo silently ignored is a wrong image, still billed.
-    if (input.references.length > 0)
-      throw this.fail('failed', false, 'references_unsupported');
     if (
       !Number.isInteger(input.outputCount) ||
       input.outputCount < 1 ||
       input.outputCount > MAX_IMAGE_GENERATION_OUTPUTS ||
       !(input.aspectRatio in OPENAI_IMAGE_SIZE) ||
-      !(input.quality in OPENAI_IMAGE_QUALITY)
+      !(input.quality in OPENAI_IMAGE_QUALITY) ||
+      !Array.isArray(input.references) ||
+      input.references.length > MAX_IMAGE_GENERATION_REFERENCES ||
+      // `Array.isArray` widened the array to `any[]`; re-assert the port type.
+      !input.references.every(
+        (ref: ImageGenerationReference | undefined) =>
+          ref !== undefined &&
+          (IMAGE_GENERATION_REFERENCE_MIME_TYPES as readonly string[]).includes(
+            ref.mimeType,
+          ) &&
+          Buffer.isBuffer(ref.body) &&
+          ref.body.length > 0 &&
+          ref.body.length <= MAX_IMAGE_GENERATION_REFERENCE_BYTES,
+      )
     )
+      // Refusing beats trimming: a product photo silently dropped is a wrong
+      // image, still billed.
       throw this.fail('failed', false, 'request_out_of_contract');
+    const editing = input.references.length > 0;
 
     const model = this.config.imageModel;
     const started = Date.now();
     let response: Response;
     try {
-      response = await fetch(OPENAI_IMAGES_GENERATIONS_URL, {
-        method: 'POST',
-        // A redirect would carry the Authorization header to another host.
-        redirect: 'error',
-        headers: {
-          Authorization: `Bearer ${this.config.openAiApiKey}`,
-          'Content-Type': 'application/json',
+      response = await fetch(
+        editing ? OPENAI_IMAGES_EDITS_URL : OPENAI_IMAGES_GENERATIONS_URL,
+        {
+          method: 'POST',
+          // A redirect would carry the Authorization header to another host.
+          redirect: 'error',
+          // Multipart sets its own Content-Type (with the boundary).
+          headers: editing
+            ? { Authorization: `Bearer ${this.config.openAiApiKey}` }
+            : {
+                Authorization: `Bearer ${this.config.openAiApiKey}`,
+                'Content-Type': 'application/json',
+              },
+          body: editing
+            ? editForm(model, input)
+            : JSON.stringify({ model, ...requestFields(input) }),
+          signal: AbortSignal.timeout(this.config.imageTimeoutMs),
         },
-        body: JSON.stringify({
-          model,
-          prompt: input.prompt,
-          n: input.outputCount,
-          size: OPENAI_IMAGE_SIZE[input.aspectRatio],
-          quality: OPENAI_IMAGE_QUALITY[input.quality],
-          // Explicit so a default change upstream cannot change what we store.
-          output_format: 'png',
-        }),
-        signal: AbortSignal.timeout(this.config.imageTimeoutMs),
-      });
+      );
     } catch (error) {
       // Nothing came back: OpenAI may or may not have billed, and this is
       // the documented transient class — the worker retries with backoff.
@@ -165,7 +197,7 @@ export class OpenAIImageGenerationProvider extends ImageGenerationProvider {
       });
 
     this.logger.log(
-      `provider=openai model=${model} http=${response.status} outputs=${outputs.length} durationMs=${Date.now() - started}`,
+      `provider=openai model=${model} endpoint=${editing ? 'edits' : 'generations'} references=${input.references.length} http=${response.status} outputs=${outputs.length} durationMs=${Date.now() - started}`,
     );
     return { outputs, usage };
   }
@@ -243,6 +275,37 @@ export class OpenAIImageGenerationProvider extends ImageGenerationProvider {
     );
     return new ImageGenerationProviderError(code, retryable, details);
   }
+}
+
+/** Fields both endpoints share, in Lyra's translation. */
+function requestFields(input: ImageGenerationProviderInput) {
+  return {
+    prompt: input.prompt,
+    n: input.outputCount,
+    size: OPENAI_IMAGE_SIZE[input.aspectRatio],
+    quality: OPENAI_IMAGE_QUALITY[input.quality],
+    // Explicit so a default change upstream cannot change what we store.
+    output_format: 'png',
+  };
+}
+
+/**
+ * `/v1/images/edits` body. Built per attempt from the bytes the worker
+ * verified; file names are positional and carry nothing about the asset.
+ */
+function editForm(model: string, input: ImageGenerationProviderInput) {
+  const form = new FormData();
+  form.append('model', model);
+  for (const [key, value] of Object.entries(requestFields(input)))
+    form.append(key, String(value));
+  input.references.forEach((ref, index) =>
+    form.append(
+      'image[]',
+      new Blob([new Uint8Array(ref.body)], { type: ref.mimeType }),
+      `reference-${index + 1}.${REFERENCE_EXTENSION[ref.mimeType]}`,
+    ),
+  );
+  return form;
 }
 
 /**

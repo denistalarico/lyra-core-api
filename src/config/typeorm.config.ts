@@ -7,6 +7,7 @@ import {
   CreativeFolderEntity,
   CreativeGenerationEntity,
   CreativeGenerationOutputEntity,
+  CreativeGenerationReferenceEntity,
 } from '../modules/social-creative-studio/entities';
 import {
   SocialAnalyticsDashboardEntity,
@@ -390,6 +391,7 @@ import {
   SocialContentRevisionEntity,
   SocialCopyGenerationProposalEntity,
   SocialCopyGenerationRunEntity,
+  SocialContentReferenceEntity,
   SocialDestinationCreativeEntity,
   SocialEditorialPillarEntity,
   SocialPlannerSettingsEntity,
@@ -429,6 +431,7 @@ export const agencyEntities = [
   CreativeFolderEntity,
   CreativeGenerationEntity,
   CreativeGenerationOutputEntity,
+  CreativeGenerationReferenceEntity,
   SocialAnalyticsDashboardEntity,
   SocialAnalyticsReportEntity,
   SocialApprovalRequestEntity,
@@ -701,6 +704,7 @@ export const agencyEntities = [
   SocialContentItemEntity,
   SocialContentDestinationEntity,
   SocialDestinationCreativeEntity,
+  SocialContentReferenceEntity,
   SocialContentRevisionEntity,
   SocialCopyGenerationRunEntity,
   SocialCopyGenerationProposalEntity,

@@ -4,17 +4,25 @@ import {
   GoneException,
   NotFoundException,
 } from '@nestjs/common';
+import { createHash } from 'node:crypto';
 import { Readable } from 'node:stream';
 import type { MediaAssetUploadService } from '../../common/media-assets';
+import type { CreativeStudioBrandContext } from './creative-brand-context.service';
 import type { CreativeAssetService } from './creative-asset.service';
 import { CreativeGenerationConfigService } from './creative-generation-config';
+import {
+  buildGenerationContext,
+  type CreativeGenerationContextService,
+} from './creative-generation-context';
 import {
   DisabledImageGenerationProvider,
   ImageGenerationProvider,
   type ImageGenerationProviderResult,
 } from './creative-image-generation.provider';
+import { CreativeGenerationReferenceSelector } from './creative-generation-references';
 import {
   CreativeImageGenerationException,
+  type CreativeImageGenerationRequest,
   CreativeImageGenerationService,
   imageRequestFingerprint,
 } from './creative-image-generation.service';
@@ -32,11 +40,70 @@ const companyA: CreativeStudioScope = {
   agencyClientId: '30000000-0000-4000-8000-000000000001',
   companyContextId: '31000000-0000-4000-8000-000000000001',
 };
+const EMPTY_BRAND: CreativeStudioBrandContext = {
+  palette: [],
+  typography: [],
+  guidelines: null,
+  assets: [],
+  references: [],
+};
+const EMPTY_DIGEST = buildGenerationContext({
+  contentItemId: null,
+  brand: EMPTY_BRAND,
+  item: null,
+}).digest;
+const CONTENT_ID = '40000000-0000-4000-8000-000000000001';
+type PlannerItem = NonNullable<
+  Parameters<typeof buildGenerationContext>[0]['item']
+>;
+function plannerItem(patch: Partial<PlannerItem> = {}): PlannerItem {
+  return {
+    id: CONTENT_ID,
+    planId: '41000000-0000-4000-8000-000000000001',
+    title: 'Lançamento do blend de inverno',
+    theme: null,
+    brief: 'Mostrar o café em clima aconchegante',
+    keyMessage: null,
+    copy: null,
+    caption: 'Chegou o blend de inverno',
+    script: null,
+    cta: null,
+    hashtags: [],
+    firstComment: null,
+    currentRevisionId: '42000000-0000-4000-8000-000000000001',
+    funnelStage: null,
+    contentType: 'post',
+    objective: null,
+    creativeFormat: 'image',
+    planningStatus: 'copy_ready',
+    calendarOnly: false,
+    plannedDate: null,
+    sortOrder: 0,
+    campaignInstanceId: null,
+    editorialPillarId: null,
+    destinations: [],
+    archivedAt: null,
+    createdAt: new Date('2026-10-01T10:00:00Z'),
+    updatedAt: new Date('2026-10-01T10:00:00Z'),
+    ...patch,
+  } as PlannerItem;
+}
 const PNG = Buffer.concat([
   Buffer.from([0x89]),
   Buffer.from('PNG\r\n\x1a\n', 'latin1'),
   Buffer.alloc(32, 1),
 ]);
+
+/** A durable, in-scope image as the media boundary would answer it. */
+function durableImage(id: string, patch: Record<string, unknown> = {}) {
+  return {
+    id,
+    mimeType: 'image/png',
+    byteSize: '2048',
+    checksum: createHash('sha256').update(id).digest('hex'),
+    ...patch,
+  };
+}
 
 class EnabledProvider extends ImageGenerationProvider {
   readonly id = 'fake';
@@ -57,12 +124,18 @@ function generationRow(
     outputCount: 1,
     aspectRatio: '1:1',
     quality: 'standard',
+    contentItemId: null,
+    effectivePrompt: 'composed: café na mesa',
+    generationContext: null,
     idempotencyKey: 'key-1',
     requestFingerprint: imageRequestFingerprint({
       prompt: 'café na mesa',
+      contentItemId: null,
       outputCount: 1,
       aspectRatio: '1:1',
       quality: 'standard',
+      contextDigest: EMPTY_DIGEST,
+      referencesDigest: null,
     }),
     attempts: 1,
     maxAttempts: 3,
@@ -194,6 +267,62 @@ function harness(provider: ImageGenerationProvider = new EnabledProvider()) {
       },
     ),
   };
+  /** What the server resolves: the Brand Kit of the scope, the Planner item if it is visible. */
+  let brand = EMPTY_BRAND;
+  let visibleItem: PlannerItem | null = plannerItem();
+  /** The item's Planner Visual References (identities from the Planner contract). */
+  let plannerReferences: {
+    referenceId: string;
+    mediaAssetId: string;
+    kind: string;
+    sortOrder: number;
+  }[] = [];
+  const context = {
+    resolve: jest.fn(async (_scope: CreativeStudioScope, id: string | null) => {
+      if (id && !visibleItem)
+        throw new BadRequestException({ code: 'content_item_not_found' });
+      return buildGenerationContext({
+        contentItemId: id,
+        brand,
+        item: id ? visibleItem : null,
+        plannerReferences: id ? plannerReferences : [],
+      });
+    }),
+  };
+  /** Owner rows the selector reads: Brand Kit assets and durable media, per id. */
+  const brandAssets = new Map<string, Record<string, unknown>>();
+  const brandPort = {
+    resolveAssets: jest.fn(async (_scope: CreativeStudioScope, ids: string[]) =>
+      ids.flatMap((id) => (brandAssets.has(id) ? [brandAssets.get(id)] : [])),
+    ),
+  };
+  const durableMedia = new Map<string, Record<string, unknown>>();
+  const referenceMedia = {
+    find: jest.fn(async ({ where }: { where: { id: { value: string[] } } }) =>
+      where.id.value.flatMap((id) =>
+        durableMedia.has(id) ? [durableMedia.get(id)] : [],
+      ),
+    ),
+  };
+  const referenceRows: Record<string, unknown>[] = [];
+  const references = {
+    insert: jest.fn(async (row: Record<string, unknown>) => {
+      referenceRows.push(row);
+    }),
+    find: jest.fn(async () =>
+      referenceRows.map((row) => ({ dispatchStartedAt: null, ...row })),
+    ),
+  };
+  Object.assign(generations, {
+    manager: {
+      transaction: jest.fn(async (work: (m: unknown) => unknown) =>
+        work({
+          withRepository: () => generations,
+          getRepository: () => references,
+        }),
+      ),
+    },
+  });
   const service = new CreativeImageGenerationService(
     provider,
     new CreativeGenerationConfigService(),
@@ -204,6 +333,12 @@ function harness(provider: ImageGenerationProvider = new EnabledProvider()) {
     mediaUpload as unknown as MediaAssetUploadService,
     assets as unknown as CreativeAssetService,
     versionApprovals as unknown as CreativeVersionApprovalService,
+    context as unknown as CreativeGenerationContextService,
+    new CreativeGenerationReferenceSelector(
+      brandPort as never,
+      referenceMedia as never,
+    ),
+    references as never,
   );
   return {
     service,
@@ -217,6 +352,17 @@ function harness(provider: ImageGenerationProvider = new EnabledProvider()) {
     setOutput: (next: CreativeGenerationOutputEntity) => (output = next),
     setCasAffected: (n: number) => (casAffected = n),
     setByKey: (row: CreativeGenerationEntity | null) => (byKey = row),
+    context,
+    setBrand: (next: CreativeStudioBrandContext) => (brand = next),
+    setVisibleItem: (next: PlannerItem | null) => (visibleItem = next),
+    setPlannerReferences: (next: typeof plannerReferences) =>
+      (plannerReferences = next),
+    brandAssets,
+    durableMedia,
+    brandPort,
+    referenceMedia,
+    references,
+    referenceRows,
   };
 }
 
@@ -244,9 +390,18 @@ describe('CreativeImageGenerationService (CS3.2)', () => {
         generationType: 'image',
         status: 'queued',
         prompt: 'café na mesa',
+        contentItemId: null,
         outputCount: 1,
         aspectRatio: '1:1',
         quality: 'standard',
+        effectivePrompt: expect.stringContaining('café na mesa'),
+        generationContext: expect.objectContaining({
+          version: 'generation-context.v1',
+          composer: 'image-prompt.v2',
+          digest: EMPTY_DIGEST,
+          brand: null,
+          content: null,
+        }),
         idempotencyKey: 'key-1',
         requestFingerprint: generationRow().requestFingerprint,
         maxAttempts: 3,
@@ -424,12 +579,15 @@ describe('CreativeImageGenerationService (CS3.2)', () => {
       ).rejects.toBe(other);
     });
 
-    it('fingerprints only the normalized business fields, deterministically', () => {
+    it('fingerprints only the normalized business fields and context, deterministically', () => {
       const base = {
         prompt: 'café',
+        contentItemId: null as string | null,
         outputCount: 1,
         aspectRatio: '1:1' as const,
         quality: 'standard' as const,
+        contextDigest: EMPTY_DIGEST,
+        referencesDigest: null as string | null,
       };
       expect(imageRequestFingerprint(base)).toMatch(/^[0-9a-f]{64}$/);
       expect(imageRequestFingerprint({ ...base })).toBe(
@@ -440,10 +598,311 @@ describe('CreativeImageGenerationService (CS3.2)', () => {
         { outputCount: 2 },
         { aspectRatio: '4:5' as const },
         { quality: 'high' as const },
+        { contentItemId: CONTENT_ID },
+        { contextDigest: 'f'.repeat(64) },
+        { referencesDigest: 'e'.repeat(64) },
       ])
         expect(imageRequestFingerprint({ ...base, ...changed })).not.toBe(
           imageRequestFingerprint(base),
         );
+    });
+  });
+
+  describe('generation context (CS3.4.1)', () => {
+    const BRAND: CreativeStudioBrandContext = {
+      palette: [{ role: 'primary', hex: '#0B3D2E', label: 'Verde escuro' }],
+      typography: [{ role: 'heading', family: 'Montserrat' }],
+      guidelines: 'Fotografia natural, luz quente.',
+      assets: [
+        {
+          id: '50000000-0000-4000-8000-000000000001',
+          kind: 'logo',
+          usage: 'asset',
+          mimeType: 'image/png',
+          width: 512,
+          height: 512,
+          metadata: {},
+        },
+      ],
+      references: [],
+    };
+
+    /** Enqueues and returns what was persisted. */
+    async function enqueued(
+      h: ReturnType<typeof harness>,
+      request: { prompt: string; contentItemId?: string },
+    ) {
+      await h.service.enqueue(companyA, 'user-a', request, 'key-ctx');
+      const calls = h.generations.create.mock.calls as unknown as [
+        Partial<CreativeGenerationEntity>,
+      ][];
+      return calls[calls.length - 1][0];
+    }
+
+    it('standalone: operator prompt + Brand Kit compose a deterministic effective prompt', async () => {
+      const h = harness();
+      h.setBrand(BRAND);
+
+      const first = await enqueued(h, { prompt: 'xícara na mesa' });
+      const second = await enqueued(h, { prompt: 'xícara na mesa' });
+
+      expect(h.context.resolve).toHaveBeenCalledWith(companyA, null);
+      expect(first.prompt).toBe('xícara na mesa');
+      expect(first.contentItemId).toBeNull();
+      expect(first.effectivePrompt).toContain('xícara na mesa');
+      expect(first.effectivePrompt).toContain('#0B3D2E');
+      expect(first.effectivePrompt).not.toContain('CONTENT CONTEXT');
+      expect(second.effectivePrompt).toBe(first.effectivePrompt);
+      expect(second.requestFingerprint).toBe(first.requestFingerprint);
+      expect(first.generationContext).toEqual(
+        expect.objectContaining({
+          brand: expect.objectContaining({
+            applied: ['palette', 'typography', 'guidelines'],
+          }),
+          content: null,
+          references: {
+            delivery: 'none',
+            brand: expect.objectContaining({ count: 1, kinds: { logo: 1 } }),
+            planner: { count: 0, kinds: {}, digest: null },
+            // Available is not selected: Brand Kit images are never sent by default.
+            selected: {
+              selection: 'default',
+              count: 0,
+              sources: {},
+              kinds: {},
+              digest: null,
+            },
+          },
+        }),
+      );
+    });
+
+    it('planner: content item A is resolved in the caller scope and frames the prompt', async () => {
+      const h = harness();
+      const row = await enqueued(h, {
+        prompt: 'xícara na mesa',
+        contentItemId: CONTENT_ID,
+      });
+
+      expect(h.context.resolve).toHaveBeenCalledWith(companyA, CONTENT_ID);
+      expect(row.contentItemId).toBe(CONTENT_ID);
+      expect(row.effectivePrompt).toContain(
+        'Brief: Mostrar o café em clima aconchegante',
+      );
+      expect(row.generationContext?.content).toEqual(
+        expect.objectContaining({
+          revisionId: '42000000-0000-4000-8000-000000000001',
+        }),
+      );
+    });
+
+    it('company isolation: an item the scope cannot see resolves to nothing and records nothing', async () => {
+      const h = harness();
+      h.setVisibleItem(null);
+
+      await expect(
+        h.service.enqueue(
+          companyA,
+          'user-a',
+          { prompt: 'x', contentItemId: CONTENT_ID },
+          'key-1',
+        ),
+      ).rejects.toThrow(BadRequestException);
+      expect(h.generations.findOne).not.toHaveBeenCalled();
+      expect(h.generations.save).not.toHaveBeenCalled();
+    });
+
+    it('refuses a malformed content item id before resolving anything', async () => {
+      const h = harness();
+      await expect(
+        h.service.enqueue(
+          companyA,
+          'user-a',
+          { prompt: 'x', contentItemId: 'not-a-uuid' },
+          'key-1',
+        ),
+      ).rejects.toThrow(BadRequestException);
+      expect(h.context.resolve).not.toHaveBeenCalled();
+    });
+
+    it('works without a Brand Kit: request-only prompt, nothing invented', async () => {
+      const h = harness();
+      const row = await enqueued(h, { prompt: 'xícara na mesa' });
+      expect(row.effectivePrompt).not.toContain('BRAND IDENTITY');
+      expect(row.effectivePrompt).not.toContain('palette');
+      expect(row.generationContext?.brand).toBeNull();
+    });
+
+    describe('idempotency over context', () => {
+      async function replayAfter(
+        change: (h: ReturnType<typeof harness>) => void,
+        request: { prompt: string; contentItemId?: string } = {
+          prompt: 'xícara na mesa',
+          contentItemId: CONTENT_ID,
+        },
+      ) {
+        const h = harness();
+        h.setBrand(BRAND);
+        const first = await enqueued(h, request);
+        h.setByKey(
+          generationRow({
+            id: 'gen-1',
+            requestFingerprint: first.requestFingerprint ?? null,
+          }),
+        );
+        change(h);
+        return h.service
+          .enqueue(companyA, 'user-a', request, 'key-ctx')
+          .catch((e: unknown) => e);
+      }
+
+      it('a retry of the same intent over the same context replays the generation', async () => {
+        await expect(replayAfter(() => undefined)).resolves.toEqual(
+          expect.objectContaining({ generationId: 'gen-1' }),
+        );
+      });
+
+      it.each([
+        [
+          'brand palette changed',
+          (h: ReturnType<typeof harness>) =>
+            h.setBrand({
+              ...BRAND,
+              palette: [{ role: 'primary', hex: '#FF0000', label: null }],
+            }),
+        ],
+        [
+          'brand reference added',
+          (h: ReturnType<typeof harness>) =>
+            h.setBrand({
+              ...BRAND,
+              references: [
+                {
+                  id: '50000000-0000-4000-8000-000000000002',
+                  kind: 'reference',
+                  usage: 'reference',
+                  mimeType: 'image/jpeg',
+                  width: null,
+                  height: null,
+                  metadata: {},
+                },
+              ],
+            }),
+        ],
+        [
+          'planner brief edited in place (no new revision)',
+          (h: ReturnType<typeof harness>) =>
+            h.setVisibleItem(plannerItem({ brief: 'Outro brief' })),
+        ],
+        [
+          'planner reference photo swapped',
+          (h: ReturnType<typeof harness>) => {
+            h.durableMedia.set(
+              '61000000-0000-4000-8000-000000000002',
+              durableImage('61000000-0000-4000-8000-000000000002'),
+            );
+            h.setPlannerReferences([
+              {
+                referenceId: '60000000-0000-4000-8000-000000000001',
+                mediaAssetId: '61000000-0000-4000-8000-000000000002',
+                kind: 'product',
+                sortOrder: 0,
+              },
+            ]);
+          },
+        ],
+        [
+          'planner copy revised',
+          (h: ReturnType<typeof harness>) =>
+            h.setVisibleItem(
+              plannerItem({
+                caption: 'Nova legenda',
+                currentRevisionId: '42000000-0000-4000-8000-000000000002',
+              }),
+            ),
+        ],
+      ])(
+        'a real context change under the same key is a 409: %s',
+        async (_label, change) => {
+          const error = await replayAfter(change);
+          expect(error).toBeInstanceOf(ConflictException);
+          expect((error as ConflictException).getResponse()).toEqual(
+            expect.objectContaining({ code: 'idempotency_key_conflict' }),
+          );
+        },
+      );
+
+      it('timestamps and revision ids alone are not a context change', async () => {
+        await expect(
+          replayAfter((h) =>
+            h.setVisibleItem(
+              plannerItem({
+                updatedAt: new Date('2026-10-06T00:00:00Z'),
+                currentRevisionId: '42000000-0000-4000-8000-000000000009',
+              }),
+            ),
+          ),
+        ).resolves.toEqual(expect.objectContaining({ generationId: 'gen-1' }));
+      });
+
+      it('the same typed prompt standalone and for a content item are different intents', async () => {
+        const h = harness();
+        const standalone = await enqueued(h, { prompt: 'xícara na mesa' });
+        h.setByKey(
+          generationRow({
+            requestFingerprint: standalone.requestFingerprint ?? null,
+          }),
+        );
+        const error = await h.service
+          .enqueue(
+            companyA,
+            'user-a',
+            { prompt: 'xícara na mesa', contentItemId: CONTENT_ID },
+            'key-ctx',
+          )
+          .catch((e: unknown) => e);
+        expect(error).toBeInstanceOf(ConflictException);
+      });
+    });
+
+    it('security: no scope, item, plan, revision or asset id reaches the effective prompt or its record text', async () => {
+      const h = harness();
+      h.setBrand(BRAND);
+      h.setVisibleItem(
+        plannerItem({
+          destinations: [
+            {
+              id: '43000000-0000-4000-8000-000000000001',
+              channel: 'instagram',
+              placement: 'feed',
+              plannedAt: null,
+              createdAt: new Date(),
+              updatedAt: new Date(),
+            },
+          ],
+        }),
+      );
+      const row = await enqueued(h, {
+        prompt: 'xícara na mesa',
+        contentItemId: CONTENT_ID,
+      });
+
+      expect(row.effectivePrompt).toContain('instagram/feed');
+      for (const id of [
+        companyA.tenantId,
+        companyA.workspaceId,
+        companyA.agencyClientId!,
+        companyA.companyContextId!,
+        CONTENT_ID,
+        '41000000-0000-4000-8000-000000000001',
+        '42000000-0000-4000-8000-000000000001',
+        '43000000-0000-4000-8000-000000000001',
+        '50000000-0000-4000-8000-000000000001',
+      ])
+        expect(row.effectivePrompt).not.toContain(id);
+      expect(row.effectivePrompt).not.toMatch(
+        /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i,
+      );
     });
   });
 
@@ -473,10 +932,12 @@ describe('CreativeImageGenerationService (CS3.2)', () => {
         status: 'completed',
         request: {
           prompt: 'café na mesa',
+          contentItemId: null,
           outputCount: 1,
           aspectRatio: '1:1',
           quality: 'standard',
         },
+        references: [],
         outputs: [
           {
             id: 'output-1',
@@ -511,6 +972,8 @@ describe('CreativeImageGenerationService (CS3.2)', () => {
         companyA.tenantId,
         companyA.agencyClientId!,
         companyA.companyContextId!,
+        // The composed prompt stays internal (provenance, not UI).
+        'composed:',
       ])
         expect(json).not.toContain(leak);
     });
@@ -768,5 +1231,426 @@ describe('CreativeImageGenerationService (CS3.2)', () => {
       expect(mediaUpload.getTemporaryContent).not.toHaveBeenCalled();
       expect(assets.upload).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe('CreativeImageGenerationService — reference images (CS3.4.2)', () => {
+  const LOGO = '70000000-0000-4000-8000-000000000001';
+  const STYLE = '70000000-0000-4000-8000-000000000002';
+  const PRODUCT = '71000000-0000-4000-8000-000000000001';
+  const PACKSHOT = '71000000-0000-4000-8000-000000000002';
+  const LIBRARY = '72000000-0000-4000-8000-000000000001';
+
+  function brandAsset(id: string, kind: string, patch = {}) {
+    return {
+      id,
+      kind,
+      usage: kind === 'reference' ? 'reference' : 'asset',
+      mimeType: 'image/png',
+      byteSize: '4096',
+      checksum: createHash('sha256').update(`brand:${id}`).digest('hex'),
+      ...patch,
+    };
+  }
+
+  /** Item with two Planner references; brand logo + style; one library image. */
+  function setup() {
+    const h = harness();
+    h.brandAssets.set(LOGO, brandAsset(LOGO, 'logo'));
+    h.brandAssets.set(STYLE, brandAsset(STYLE, 'reference'));
+    h.durableMedia.set(PRODUCT, durableImage(PRODUCT));
+    h.durableMedia.set(
+      PACKSHOT,
+      durableImage(PACKSHOT, { mimeType: 'image/jpeg' }),
+    );
+    h.durableMedia.set(
+      LIBRARY,
+      durableImage(LIBRARY, { mimeType: 'image/webp' }),
+    );
+    h.setPlannerReferences([
+      {
+        referenceId: 'r-1',
+        mediaAssetId: PRODUCT,
+        kind: 'product',
+        sortOrder: 0,
+      },
+      {
+        referenceId: 'r-2',
+        mediaAssetId: PACKSHOT,
+        kind: 'packaging',
+        sortOrder: 1,
+      },
+    ]);
+    return h;
+  }
+
+  function created(h: ReturnType<typeof harness>) {
+    const calls = h.generations.create.mock.calls;
+    return calls[calls.length - 1][0] as CreativeGenerationEntity;
+  }
+
+  const withItem = (references?: unknown[]) =>
+    ({
+      prompt: 'xícara na mesa',
+      contentItemId: CONTENT_ID,
+      ...(references === undefined ? {} : { references }),
+    }) as CreativeImageGenerationRequest;
+
+  async function refusal(promise: Promise<unknown>) {
+    const error = await promise.catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(BadRequestException);
+    return ((error as BadRequestException).getResponse() as { code: string })
+      .code;
+  }
+
+  it("default selection: the item's Planner references in Planner order — never Brand Kit", async () => {
+    const h = setup();
+    await h.service.enqueue(companyA, 'user-a', withItem(), 'k');
+
+    expect(h.referenceRows).toEqual([
+      expect.objectContaining({
+        generationId: 'gen-new',
+        position: 0,
+        source: 'planner',
+        kind: 'product',
+        role: 'subject',
+        mediaAssetId: PRODUCT,
+        brandKitAssetId: null,
+        mimeType: 'image/png',
+        checksum: createHash('sha256').update(PRODUCT).digest('hex'),
+      }),
+      expect.objectContaining({
+        position: 1,
+        source: 'planner',
+        kind: 'packaging',
+        mediaAssetId: PACKSHOT,
+      }),
+    ]);
+    const row = created(h);
+    expect(row.generationContext?.references).toEqual(
+      expect.objectContaining({
+        delivery: 'provider_reference_images',
+        selected: expect.objectContaining({
+          selection: 'default',
+          count: 2,
+          sources: { planner: 2 },
+        }),
+      }),
+    );
+    expect(row.effectivePrompt).toContain('REFERENCE IMAGES');
+    expect(row.effectivePrompt).toContain('- Image 1: the product');
+    expect(row.effectivePrompt).toContain('- Image 2: the product packaging');
+    // Nothing internal reaches the provider text.
+    for (const id of [PRODUCT, PACKSHOT, LOGO, CONTENT_ID])
+      expect(row.effectivePrompt).not.toContain(id);
+    expect(h.brandPort.resolveAssets).toHaveBeenCalledWith(companyA, []);
+  });
+
+  it('brand only: an explicitly chosen Brand Kit logo, its kind from the Brand Kit', async () => {
+    const h = setup();
+    await h.service.enqueue(
+      companyA,
+      'user-a',
+      {
+        prompt: 'post com a marca',
+        references: [{ source: 'brand', id: LOGO }],
+      },
+      'k',
+    );
+    expect(h.referenceRows).toEqual([
+      expect.objectContaining({
+        source: 'brand',
+        kind: 'logo',
+        role: 'logo',
+        brandKitAssetId: LOGO,
+        mediaAssetId: null,
+      }),
+    ]);
+    const prompt = created(h).effectivePrompt;
+    expect(prompt).toContain("- Image 1: the brand's logo");
+    expect(prompt).toContain(
+      'the only logo allowed is the one in the reference images',
+    );
+  });
+
+  it('brand + planner + operator stay distinct, in exactly the order chosen', async () => {
+    const h = setup();
+    await h.service.enqueue(
+      companyA,
+      'user-a',
+      withItem([
+        { source: 'operator', id: LIBRARY, kind: 'environment' },
+        { source: 'planner', id: PACKSHOT },
+        { source: 'brand', id: STYLE },
+      ]),
+      'k',
+    );
+    expect(
+      h.referenceRows.map((r) => [r.position, r.source, r.kind, r.role]),
+    ).toEqual([
+      [0, 'operator', 'environment', 'context'],
+      [1, 'planner', 'packaging', 'subject'],
+      [2, 'brand', 'reference', 'style'],
+    ]);
+    // The unselected Planner reference (PRODUCT) is available, not sent.
+    expect(h.referenceRows.some((r) => r.mediaAssetId === PRODUCT)).toBe(false);
+    expect(created(h).generationContext?.references.selected).toEqual(
+      expect.objectContaining({
+        selection: 'explicit',
+        sources: { operator: 1, planner: 1, brand: 1 },
+      }),
+    );
+  });
+
+  it('an explicit empty selection sends nothing, even with Planner references', async () => {
+    const h = setup();
+    await h.service.enqueue(companyA, 'user-a', withItem([]), 'k');
+    expect(h.references.insert).not.toHaveBeenCalled();
+    expect(created(h).generationContext?.references.delivery).toBe('none');
+    expect(created(h).effectivePrompt).not.toContain('REFERENCE IMAGES');
+  });
+
+  it.each([
+    [
+      "another company's Brand Kit asset (absent from this scope)",
+      [{ source: 'brand', id: '70000000-0000-4000-8000-0000000000ff' }],
+      'reference_not_found',
+    ],
+    [
+      'media not in this scope, temporary or deleted',
+      [
+        {
+          source: 'operator',
+          id: '72000000-0000-4000-8000-0000000000ff',
+          kind: 'product',
+        },
+      ],
+      'reference_not_found',
+    ],
+    [
+      "a media that is not one of this item's Planner references",
+      [{ source: 'planner', id: LIBRARY }],
+      'reference_not_found',
+    ],
+    [
+      'operator choice without a kind',
+      [{ source: 'operator', id: LIBRARY }],
+      'reference_kind_required',
+    ],
+    [
+      'a kind override on a Planner reference',
+      [{ source: 'planner', id: PRODUCT, kind: 'style' }],
+      'reference_kind_not_allowed',
+    ],
+    [
+      'the same image twice',
+      [
+        { source: 'planner', id: PRODUCT },
+        { source: 'operator', id: PRODUCT, kind: 'product' },
+      ],
+      'reference_duplicated',
+    ],
+    [
+      'more than six',
+      Array.from({ length: 7 }, (_, i) => ({
+        source: 'brand',
+        id: `70000000-0000-4000-8000-00000000001${i}`,
+      })),
+      'reference_limit_exceeded',
+    ],
+  ])(
+    'refuses %s before anything is persisted',
+    async (_label, references, code) => {
+      const h = setup();
+      expect(
+        await refusal(
+          h.service.enqueue(companyA, 'user-a', withItem(references), 'k'),
+        ),
+      ).toBe(code);
+      expect(h.generations.save).not.toHaveBeenCalled();
+      expect(h.references.insert).not.toHaveBeenCalled();
+    },
+  );
+
+  it('asks the media boundary only for durable media of the exact four-part scope', async () => {
+    const h = setup();
+    await h.service.enqueue(companyA, 'user-a', withItem(), 'k');
+    const where = h.referenceMedia.find.mock.calls[0][0].where as Record<
+      string,
+      unknown
+    >;
+    expect(where).toEqual(
+      expect.objectContaining({
+        tenantId: companyA.tenantId,
+        workspaceId: companyA.workspaceId,
+        agencyClientId: companyA.agencyClientId,
+        companyContextId: companyA.companyContextId,
+      }),
+    );
+    // `Not(Like('temporary:%'))` — a generation output is never a reference.
+    expect(JSON.stringify(where.source)).toContain('temporary:%');
+  });
+
+  it('refuses formats the provider cannot take instead of skipping them', async () => {
+    const h = setup();
+    h.durableMedia.set(
+      PRODUCT,
+      durableImage(PRODUCT, { mimeType: 'image/gif' }),
+    );
+    expect(
+      await refusal(h.service.enqueue(companyA, 'u', withItem(), 'k')),
+    ).toBe('reference_format_unsupported');
+  });
+
+  it('never truncates: more Planner references than the limit require an explicit selection', async () => {
+    const h = setup();
+    const many = Array.from({ length: 7 }, (_, i) => {
+      const id = `73000000-0000-4000-8000-00000000000${i}`;
+      h.durableMedia.set(id, durableImage(id));
+      return {
+        referenceId: `r-${i}`,
+        mediaAssetId: id,
+        kind: 'product',
+        sortOrder: i,
+      };
+    });
+    h.setPlannerReferences(many);
+    expect(
+      await refusal(h.service.enqueue(companyA, 'u', withItem(), 'k')),
+    ).toBe('reference_selection_required');
+    // ...and an explicit subset of the same item works.
+    await h.service.enqueue(
+      companyA,
+      'u',
+      withItem(
+        many
+          .slice(0, 3)
+          .map((r) => ({ source: 'planner', id: r.mediaAssetId })),
+      ),
+      'k2',
+    );
+    expect(h.referenceRows).toHaveLength(3);
+  });
+
+  it('refuses references over the per-image size limit', async () => {
+    const h = setup();
+    h.durableMedia.set(
+      PRODUCT,
+      durableImage(PRODUCT, { byteSize: String(17 * 1024 * 1024) }),
+    );
+    expect(
+      await refusal(h.service.enqueue(companyA, 'u', withItem(), 'k')),
+    ).toBe('reference_too_large');
+  });
+
+  describe('idempotency over the selection', () => {
+    async function retryWith(
+      first: unknown[] | undefined,
+      second: unknown[] | undefined,
+      change: (h: ReturnType<typeof harness>) => void = () => undefined,
+    ) {
+      const h = setup();
+      await h.service.enqueue(companyA, 'u', withItem(first), 'key-refs');
+      h.setByKey(
+        generationRow({
+          id: 'gen-1',
+          requestFingerprint: created(h).requestFingerprint,
+        }),
+      );
+      change(h);
+      return h.service
+        .enqueue(companyA, 'u', withItem(second), 'key-refs')
+        .catch((e: unknown) => e);
+    }
+
+    it('same images in the same order replay — default or explicit alike', async () => {
+      await expect(
+        retryWith(undefined, [
+          { source: 'planner', id: PRODUCT },
+          { source: 'planner', id: PACKSHOT },
+        ]),
+      ).resolves.toEqual(expect.objectContaining({ generationId: 'gen-1' }));
+    });
+
+    it.each([
+      [
+        'another product photo selected',
+        [{ source: 'planner', id: PRODUCT }],
+        [{ source: 'planner', id: PACKSHOT }],
+      ],
+      [
+        'same images, other order',
+        [
+          { source: 'planner', id: PRODUCT },
+          { source: 'planner', id: PACKSHOT },
+        ],
+        [
+          { source: 'planner', id: PACKSHOT },
+          { source: 'planner', id: PRODUCT },
+        ],
+      ],
+      [
+        'an operator kind changed',
+        [{ source: 'operator', id: LIBRARY, kind: 'product' }],
+        [{ source: 'operator', id: LIBRARY, kind: 'style' }],
+      ],
+      ['a brand logo added', [], [{ source: 'brand', id: LOGO }]],
+    ])(
+      'a different selection under the same key is a 409: %s',
+      async (_l, first, second) => {
+        const error = await retryWith(first, second);
+        expect(error).toBeInstanceOf(ConflictException);
+      },
+    );
+
+    it('same id with different bytes (checksum) is a 409', async () => {
+      const error = await retryWith(
+        [{ source: 'operator', id: LIBRARY, kind: 'product' }],
+        [{ source: 'operator', id: LIBRARY, kind: 'product' }],
+        (h) =>
+          h.durableMedia.set(
+            LIBRARY,
+            durableImage(LIBRARY, {
+              mimeType: 'image/webp',
+              checksum: 'a'.repeat(64),
+            }),
+          ),
+      );
+      expect(error).toBeInstanceOf(ConflictException);
+    });
+  });
+
+  it('GET exposes the frozen references by owner id — no checksum, storage or scope', async () => {
+    const h = setup();
+    await h.service.enqueue(
+      companyA,
+      'u',
+      withItem([
+        { source: 'brand', id: LOGO },
+        { source: 'planner', id: PRODUCT },
+      ]),
+      'k',
+    );
+    const view = await h.service.get(companyA, 'gen-1');
+    expect(view.references).toEqual([
+      {
+        position: 0,
+        source: 'brand',
+        id: LOGO,
+        kind: 'logo',
+        role: 'logo',
+        dispatchStartedAt: null,
+      },
+      {
+        position: 1,
+        source: 'planner',
+        id: PRODUCT,
+        kind: 'product',
+        role: 'subject',
+        dispatchStartedAt: null,
+      },
+    ]);
+    const json = JSON.stringify(view.references);
+    expect(json).not.toMatch(/checksum|storage|tenant|company|[0-9a-f]{64}/i);
   });
 });

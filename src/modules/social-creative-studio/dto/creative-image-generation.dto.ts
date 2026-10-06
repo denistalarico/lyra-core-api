@@ -1,5 +1,7 @@
 import { Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
+  IsArray,
   IsIn,
   IsInt,
   IsOptional,
@@ -9,14 +11,41 @@ import {
   MaxLength,
   Min,
   MinLength,
+  ValidateNested,
 } from 'class-validator';
+import {
+  CREATIVE_GENERATION_REFERENCE_SOURCES,
+  type CreativeGenerationReferenceSource,
+  OPERATOR_REFERENCE_KINDS,
+} from '../creative-generation-references';
 import {
   CREATIVE_IMAGE_ASPECT_RATIOS,
   CREATIVE_IMAGE_QUALITIES,
   type CreativeImageAspectRatio,
   type CreativeImageQuality,
   MAX_IMAGE_GENERATION_OUTPUTS,
+  MAX_IMAGE_GENERATION_REFERENCES,
 } from '../creative-image-generation.provider';
+import type { SocialContentReferenceKind } from '../../social-planner/entities';
+
+/**
+ * CS3.4.2 — one explicitly selected reference. Only owner ids of the SAME
+ * scope are accepted; never a storage key, URL or bytes (no upload here: new
+ * images go through the existing media/Brand Kit uploads first).
+ *   - `brand`:    a Brand Kit asset id; its kind comes from the Brand Kit;
+ *   - `planner`:  a media asset id linked to `contentItemId` in the Planner;
+ *                 its kind comes from the Planner;
+ *   - `operator`: any durable image of the scope (media asset id), with the
+ *                 `kind` the operator declares.
+ */
+export class GenerationReferenceSelectionDto {
+  @IsIn(CREATIVE_GENERATION_REFERENCE_SOURCES)
+  source!: CreativeGenerationReferenceSource;
+  @IsUUID() id!: string;
+  @IsOptional()
+  @IsIn(OPERATOR_REFERENCE_KINDS)
+  kind?: SocialContentReferenceKind;
+}
 
 /**
  * CS3.1 — Lyra vocabulary only. No provider, model or vendor option is
@@ -25,6 +54,11 @@ import {
  */
 export class GenerateCreativeImageDto {
   @IsString() @MinLength(1) @MaxLength(4000) prompt!: string;
+  /**
+   * CS3.4.1 — optional Planner content item. Only the reference: its content
+   * is resolved server-side in the caller's scope, never sent by the client.
+   */
+  @IsOptional() @IsUUID() contentItemId?: string;
   @IsOptional()
   @Type(() => Number)
   @IsInt()
@@ -35,6 +69,16 @@ export class GenerateCreativeImageDto {
   @IsIn(CREATIVE_IMAGE_ASPECT_RATIOS)
   aspectRatio?: CreativeImageAspectRatio;
   @IsOptional() @IsIn(CREATIVE_IMAGE_QUALITIES) quality?: CreativeImageQuality;
+  /**
+   * CS3.4.2 — ordered ("Image 1..N"). Omitted: the item's Planner references
+   * in Planner order; `[]`: none.
+   */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(MAX_IMAGE_GENERATION_REFERENCES)
+  @ValidateNested({ each: true })
+  @Type(() => GenerationReferenceSelectionDto)
+  references?: GenerationReferenceSelectionDto[];
 }
 export class PromoteGeneratedOutputDto {
   @IsOptional() @IsString() @MaxLength(255) name?: string;

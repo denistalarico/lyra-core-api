@@ -1,4 +1,7 @@
-import { BadRequestException, Logger } from '@nestjs/common';
+import { BadRequestException, Logger, NotFoundException } from '@nestjs/common';
+import { createHash } from 'node:crypto';
+import { Readable } from 'node:stream';
+import type { SocialBrandKitContextPort } from '../brand-kit/services/social-brand-kit-context.port';
 import type { MediaAssetUploadService } from '../../common/media-assets';
 import { CreativeGenerationConfigService } from './creative-generation-config';
 import {
@@ -11,7 +14,10 @@ import { CreativeImageGenerationWorker } from './creative-image-generation.worke
 import { CREATIVE_IMAGE_MAX_BYTES } from './creative-asset.service';
 import { CREATIVE_GENERATION_MEDIA_SOURCE } from './creative-retention';
 import { OpenAIImageGenerationProvider } from './openai-image-generation.provider';
-import type { CreativeGenerationEntity } from './entities';
+import type {
+  CreativeGenerationEntity,
+  CreativeGenerationReferenceEntity,
+} from './entities';
 
 const scopeA = {
   tenantId: '10000000-0000-4000-8000-000000000001',
@@ -55,6 +61,10 @@ function claimed(
     outputCount: 1,
     aspectRatio: '4:5',
     quality: 'high',
+    contentItemId: null,
+    effectivePrompt:
+      'Social media creative image.\n\nREQUEST:\ncafé na mesa\n\nBRAND IDENTITY:\n- Color palette: primary #0B3D2E',
+    generationContext: null,
     idempotencyKey: 'key-1',
     requestFingerprint: 'f'.repeat(64),
     attempts: 1,
@@ -87,10 +97,12 @@ function claimed(
 function harness<P extends ImageGenerationProvider = FakeImageProvider>(
   provider: P = new FakeImageProvider() as unknown as P,
   row: CreativeGenerationEntity = claimed(),
+  references: Partial<CreativeGenerationReferenceEntity>[] = [],
 ) {
   const queries: Array<{ sql: string; params: unknown[] }> = [];
   let claims = ['gen-1'];
   let completeMatches = true;
+  let sentMatches = true;
   const inserted: unknown[] = [];
   const query = jest.fn(async (sql: string, params: unknown[] = []) => {
     queries.push({ sql, params });
@@ -100,11 +112,19 @@ function harness<P extends ImageGenerationProvider = FakeImageProvider>(
     }
     if (sql.includes("SET status = 'completed'"))
       return completeMatches ? [[{ id: row.id }], 1] : [[], 0];
+    if (sql.includes('UPDATE social_creative_generation_references'))
+      return sentMatches ? [references.map((r) => ({ id: r.id }))] : [[], 0];
     return [[], 0];
   });
+  const referenceFind = jest.fn(async () =>
+    [...references].sort((a, b) => (a.position ?? 0) - (b.position ?? 0)),
+  );
   const dataSource = {
     query,
-    getRepository: () => ({ findOneBy: jest.fn(async () => row) }),
+    getRepository: () => ({
+      findOneBy: jest.fn(async () => row),
+      find: referenceFind,
+    }),
     transaction: async (body: (manager: unknown) => Promise<unknown>) =>
       body({
         query,
@@ -120,12 +140,27 @@ function harness<P extends ImageGenerationProvider = FakeImageProvider>(
       mimeType: input.file.mimetype,
     })),
     removeAfterFailedConsumerOperation: jest.fn().mockResolvedValue(undefined),
+    /** Durable media bytes by id; absent = the shared boundary's 404. */
+    getContent: jest.fn(async (_scope: unknown, id: string) => {
+      const body = mediaBytes.get(id);
+      if (!body) throw new NotFoundException('Media asset not found.');
+      return { asset: { id }, file: { body: Readable.from([body]) } };
+    }),
+  };
+  const mediaBytes = new Map<string, Buffer>();
+  const brandBytes = new Map<string, Buffer>();
+  const brandKit = {
+    readAssetContent: jest.fn(async (_scope: unknown, id: string) => {
+      const body = brandBytes.get(id);
+      return body ? { mimeType: 'image/png', checksum: null, body } : null;
+    }),
   };
   const worker = new CreativeImageGenerationWorker(
     dataSource as never,
     provider,
     mediaUpload as unknown as MediaAssetUploadService,
     new CreativeGenerationConfigService(),
+    brandKit as unknown as SocialBrandKitContextPort,
   );
   (worker as unknown as { workerId: string }).workerId = 'me';
   const terminal = (kind: 'completed' | 'fail') =>
@@ -144,6 +179,11 @@ function harness<P extends ImageGenerationProvider = FakeImageProvider>(
     terminal,
     setClaims: (ids: string[]) => (claims = ids),
     loseLease: () => (completeMatches = false),
+    loseLeaseBeforeSending: () => (sentMatches = false),
+    mediaBytes,
+    brandBytes,
+    brandKit,
+    referenceFind,
   };
 }
 
@@ -206,9 +246,10 @@ describe('CreativeImageGenerationWorker (CS3.2)', () => {
     it('calls the provider with the frozen request, in Lyra vocabulary', async () => {
       const h = harness();
       await h.worker.processPending();
+      // CS3.4.1: the effective prompt composed at enqueue, not the typed one.
       expect(h.provider.calls).toEqual([
         {
-          prompt: 'café na mesa',
+          prompt: claimed().effectivePrompt,
           outputCount: 1,
           aspectRatio: '4:5',
           quality: 'high',
@@ -665,7 +706,7 @@ describe('CreativeImageGenerationWorker (CS3.2)', () => {
       expect(h.inserted).toHaveLength(2);
       expect(h.terminal('fail')).toHaveLength(0);
       expect(logs.join('\n')).toMatch(
-        /generation=gen-1 attempt=1\/3 provider=openai model=gpt-image-2\.5-flare-2026-09-08 outcome=completed durationMs=\d+/,
+        /generation=gen-1 attempt=1\/3 provider=openai model=gpt-image-2\.5-flare-2026-09-08 references=0 outcome=completed durationMs=\d+/,
       );
     });
 
@@ -819,6 +860,330 @@ describe('CreativeImageGenerationWorker (CS3.2)', () => {
       expect(surface).not.toContain(SECRET);
       expect(surface).not.toContain('Incorrect API key');
       expect(JSON.stringify(logs)).not.toContain('café na mesa');
+      expect(JSON.stringify(logs)).not.toContain('#0B3D2E');
+    });
+  });
+});
+
+describe('CreativeImageGenerationWorker — reference images (CS3.4.2)', () => {
+  const WEBP = Buffer.concat([
+    Buffer.from('RIFF', 'latin1'),
+    Buffer.from([0x24, 0, 0, 0]),
+    Buffer.from('WEBPVP8 ', 'latin1'),
+    Buffer.alloc(32, 2),
+  ]);
+  const sha = (body: Buffer) => createHash('sha256').update(body).digest('hex');
+  const LOGO = '70000000-0000-4000-8000-000000000001';
+  const PRODUCT = '71000000-0000-4000-8000-000000000001';
+
+  /** Frozen rows as enqueue wrote them: brand logo (pos 1), planner product (pos 0). */
+  function frozen(): Partial<CreativeGenerationReferenceEntity>[] {
+    return [
+      {
+        id: 'ref-b',
+        generationId: 'gen-1',
+        position: 1,
+        source: 'brand',
+        kind: 'logo',
+        role: 'logo',
+        brandKitAssetId: LOGO,
+        mediaAssetId: null,
+        mimeType: 'image/png',
+        byteSize: String(PNG.length),
+        checksum: sha(PNG),
+      },
+      {
+        id: 'ref-p',
+        generationId: 'gen-1',
+        position: 0,
+        source: 'planner',
+        kind: 'product',
+        role: 'subject',
+        brandKitAssetId: null,
+        mediaAssetId: PRODUCT,
+        mimeType: 'image/webp',
+        byteSize: String(WEBP.length),
+        checksum: sha(WEBP),
+      },
+    ];
+  }
+
+  function withBytes(h: ReturnType<typeof harness>) {
+    h.brandBytes.set(LOGO, PNG);
+    h.mediaBytes.set(PRODUCT, WEBP);
+    return h;
+  }
+
+  it('sends the persisted references in position order, as verified bytes with their role', async () => {
+    const provider = new FakeImageProvider();
+    const h = withBytes(harness(provider, claimed(), frozen()));
+
+    await h.worker.processPending();
+
+    expect(provider.calls).toHaveLength(1);
+    const sent = provider.calls[0].references;
+    expect(sent.map((r) => [r.role, r.mimeType])).toEqual([
+      ['subject', 'image/webp'],
+      ['logo', 'image/png'],
+    ]);
+    expect(sent[0].body.equals(WEBP)).toBe(true);
+    expect(sent[1].body.equals(PNG)).toBe(true);
+    // Owners read in the generation's own four-part scope.
+    expect(h.mediaUpload.getContent).toHaveBeenCalledWith(scopeA, PRODUCT);
+    expect(h.brandKit.readAssetContent).toHaveBeenCalledWith(scopeA, LOGO);
+    // Only this generation's frozen rows — never a live Planner/Brand Kit read.
+    expect(h.referenceFind).toHaveBeenCalledWith({
+      where: { generationId: 'gen-1' },
+      order: { position: 'ASC' },
+    });
+    expect(h.terminal('completed')).toHaveLength(1);
+  });
+
+  it('stamps dispatch_started_at under the lease BEFORE the provider call', async () => {
+    const provider = new FakeImageProvider();
+    const h = withBytes(harness(provider, claimed(), frozen()));
+    let stampedBeforeCall = false;
+    provider.next = () => {
+      stampedBeforeCall = h.queries.some((q) =>
+        q.sql.includes('UPDATE social_creative_generation_references'),
+      );
+      return Promise.resolve({ outputs: [{ body: PNG }], usage: null });
+    };
+    await h.worker.processPending();
+    expect(stampedBeforeCall).toBe(true);
+    const stamp = h.queries.find((q) =>
+      q.sql.includes('UPDATE social_creative_generation_references'),
+    );
+    expect(stamp?.sql).toContain(
+      'COALESCE(reference.dispatch_started_at, now())',
+    );
+    expect(stamp?.sql).toContain('generation.locked_by = $2');
+    expect(stamp?.params).toEqual(['gen-1', 'me']);
+  });
+
+  it('dispatch_started_at means an attempt STARTED, not a delivery: it stays even when nothing reached the provider', async () => {
+    const provider = new FakeImageProvider();
+    const h = withBytes(harness(provider, claimed(), frozen()));
+    // The request never got a response (network failure before any answer).
+    provider.next = () =>
+      Promise.reject(new ImageGenerationProviderError('unavailable', true));
+    await h.worker.processPending();
+
+    const stamps = h.queries.filter((q) =>
+      q.sql.includes('UPDATE social_creative_generation_references'),
+    );
+    expect(stamps).toHaveLength(1);
+    // Retryable, no usage: the stamp is not evidence of receipt or billing.
+    expect(failParams(h)).toEqual(
+      expect.objectContaining({
+        status: 'queued',
+        code: 'unavailable',
+        retryable: true,
+        metrics: null,
+        amount: null,
+      }),
+    );
+    // Write-once by construction: a retry can only fill a NULL.
+    expect(stamps[0].sql).toContain(
+      'COALESCE(reference.dispatch_started_at, now())',
+    );
+    expect(stamps[0].sql).not.toMatch(/SET dispatch_started_at = now\(\)/);
+  });
+
+  it('a lease lost before sending sends nothing and writes nothing', async () => {
+    const provider = new FakeImageProvider();
+    const h = withBytes(harness(provider, claimed(), frozen()));
+    h.loseLeaseBeforeSending();
+    await h.worker.processPending();
+    expect(provider.calls).toHaveLength(0);
+    expect(h.terminal('completed')).toHaveLength(0);
+    expect(h.terminal('fail')).toHaveLength(0);
+  });
+
+  it.each([
+    [
+      'planner media deleted',
+      (h: ReturnType<typeof harness>) => h.mediaBytes.delete(PRODUCT),
+    ],
+    [
+      'brand asset deleted',
+      (h: ReturnType<typeof harness>) => h.brandBytes.delete(LOGO),
+    ],
+    [
+      'bytes replaced under the same id (checksum)',
+      (h: ReturnType<typeof harness>) =>
+        h.mediaBytes.set(PRODUCT, Buffer.concat([WEBP, Buffer.from([1])])),
+    ],
+    [
+      'bytes are not the frozen type',
+      (h: ReturnType<typeof harness>) => h.brandBytes.set(LOGO, JPEG),
+    ],
+  ])(
+    '%s → failed reference_unavailable, final, nothing sent or substituted',
+    async (_label, damage) => {
+      const provider = new FakeImageProvider();
+      const h = withBytes(harness(provider, claimed(), frozen()));
+      if (_label.includes('frozen type')) {
+        // Same checksum as frozen, so only the sniffed type can catch it.
+        const rows = frozen();
+        rows[0].checksum = sha(JPEG);
+        const h2 = withBytes(harness(provider, claimed(), rows));
+        damage(h2);
+        await h2.worker.processPending();
+        expect(provider.calls).toHaveLength(0);
+        expect(failParams(h2)).toEqual(
+          expect.objectContaining({
+            status: 'failed',
+            code: 'reference_unavailable',
+            retryable: false,
+          }),
+        );
+        return;
+      }
+      damage(h);
+      await h.worker.processPending();
+      expect(provider.calls).toHaveLength(0);
+      expect(
+        h.queries.some((q) =>
+          q.sql.includes('UPDATE social_creative_generation_references'),
+        ),
+      ).toBe(false);
+      expect(failParams(h)).toEqual(
+        expect.objectContaining({
+          status: 'failed',
+          code: 'reference_unavailable',
+          retryable: false,
+          // No provider call happened: nothing to account.
+          metrics: null,
+          amount: null,
+        }),
+      );
+    },
+  );
+
+  it('a storage outage while reading is retryable — nothing was sent or paid', async () => {
+    const provider = new FakeImageProvider();
+    const h = withBytes(harness(provider, claimed(), frozen()));
+    h.mediaUpload.getContent.mockRejectedValueOnce(
+      Object.assign(new Error('socket hang up'), {
+        name: 'S3ServiceException',
+      }),
+    );
+    await h.worker.processPending();
+    expect(provider.calls).toHaveLength(0);
+    expect(failParams(h)).toEqual(
+      expect.objectContaining({
+        status: 'queued',
+        code: 'unavailable',
+        retryable: true,
+      }),
+    );
+  });
+
+  it('a text-only generation never stamps or reads references', async () => {
+    const provider = new FakeImageProvider();
+    const h = harness(provider);
+    await h.worker.processPending();
+    expect(provider.calls[0].references).toEqual([]);
+    expect(
+      h.queries.some((q) =>
+        q.sql.includes('social_creative_generation_references'),
+      ),
+    ).toBe(false);
+  });
+
+  describe('with the OpenAI adapter (fetch faked)', () => {
+    const openAiConfig = {
+      openAiApiKey: SECRET,
+      imageModel: 'gpt-image-2.5-flare-2026-09-08',
+      imageTimeoutMs: 180_000,
+    } as unknown as CreativeGenerationConfigService;
+    let fetchMock: jest.SpyInstance;
+    beforeEach(() => {
+      fetchMock = jest.spyOn(global, 'fetch');
+      for (const level of ['log', 'warn', 'error'] as const)
+        jest.spyOn(Logger.prototype, level).mockImplementation(() => undefined);
+    });
+    afterEach(() => jest.restoreAllMocks());
+
+    it('routes a generation with references to /edits with the frozen bytes', async () => {
+      fetchMock.mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ data: [{ b64_json: PNG.toString('base64') }] }),
+          { status: 200 },
+        ),
+      );
+      const h = withBytes(
+        harness(
+          new OpenAIImageGenerationProvider(openAiConfig),
+          claimed(),
+          frozen(),
+        ),
+      );
+      await h.worker.processPending();
+
+      const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+      expect(url).toBe('https://api.openai.com/v1/images/edits');
+      const form = init.body as FormData;
+      const images = form.getAll('image[]') as File[];
+      expect(images.map((f) => f.type)).toEqual(['image/webp', 'image/png']);
+      expect(Buffer.from(await images[0].arrayBuffer()).equals(WEBP)).toBe(
+        true,
+      );
+      expect(form.get('prompt')).toBe(claimed().effectivePrompt);
+      expect(h.terminal('completed')).toHaveLength(1);
+    });
+
+    it('a 429 on /edits stays retryable; a malformed paid 2xx stays final', async () => {
+      fetchMock.mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ error: { code: 'rate_limit_exceeded' } }),
+          {
+            status: 429,
+          },
+        ),
+      );
+      const h = withBytes(
+        harness(
+          new OpenAIImageGenerationProvider(openAiConfig),
+          claimed(),
+          frozen(),
+        ),
+      );
+      await h.worker.processPending();
+      expect(failParams(h)).toEqual(
+        expect.objectContaining({
+          status: 'queued',
+          code: 'rate_limited',
+          retryable: true,
+        }),
+      );
+
+      fetchMock.mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            data: [{ b64_json: '%%%' }],
+            usage: { input_tokens: 900 },
+          }),
+          { status: 200 },
+        ),
+      );
+      const paid = withBytes(
+        harness(
+          new OpenAIImageGenerationProvider(openAiConfig),
+          claimed(),
+          frozen(),
+        ),
+      );
+      await paid.worker.processPending();
+      expect(failParams(paid)).toEqual(
+        expect.objectContaining({
+          status: 'failed',
+          code: 'invalid_output',
+          retryable: false,
+          metrics: expect.stringContaining('"input_tokens":900'),
+        }),
+      );
     });
   });
 });

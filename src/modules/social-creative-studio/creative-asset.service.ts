@@ -97,6 +97,8 @@ export class CreativeAssetService {
     contentItemId: string | undefined,
   ) {
     if (!contentItemId) return;
+    // Soft-deleted items and plans are invisible to every Planner read (E6);
+    // linking one here would attach a creative to content nobody can open.
     const item = await this.contentItems.findOne({
       where: {
         id: contentItemId,
@@ -104,6 +106,7 @@ export class CreativeAssetService {
         workspaceId: scope.workspaceId,
         agencyClientId:
           scope.agencyClientId === null ? IsNull() : scope.agencyClientId,
+        deletedAt: IsNull(),
       },
       select: { id: true, planId: true },
     });
@@ -117,6 +120,7 @@ export class CreativeAssetService {
           scope.agencyClientId === null ? IsNull() : scope.agencyClientId,
         companyContextId:
           scope.companyContextId === null ? IsNull() : scope.companyContextId,
+        deletedAt: IsNull(),
       },
     });
     if (!planExists) throw new BadRequestException('Conteúdo não encontrado.');

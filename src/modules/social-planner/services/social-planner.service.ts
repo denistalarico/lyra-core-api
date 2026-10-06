@@ -659,7 +659,13 @@ export class SocialPlannerService {
     return plan;
   }
 
-  private async requireContent(
+  /**
+   * The one visibility rule for a content item: caller scope, not
+   * soft-deleted, and its plan in the caller's company and not deleted.
+   * Public so other Planner services (references) reuse it instead of
+   * re-deriving it.
+   */
+  async requireContent(
     scope: SocialPlannerScope,
     contentId: string,
   ): Promise<SocialContentItemEntity> {

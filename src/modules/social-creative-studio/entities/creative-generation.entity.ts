@@ -9,10 +9,13 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 import type {
+  CreativeGenerationFailureCode,
   CreativeImageAspectRatio,
   CreativeImageQuality,
-  ImageGenerationFailureCode,
+  ImageGenerationReferenceRole,
 } from '../creative-image-generation.provider';
+import type { CreativeGenerationReferenceSource } from '../creative-generation-references';
+import type { CreativeGenerationContextRecord } from '../creative-generation-context';
 
 /**
  * CS3.2 — the generation's own lifecycle. Not Approvals' and not the Creative
@@ -75,12 +78,38 @@ export class CreativeGenerationEntity {
   @Column({ type: 'varchar', length: 16, default: 'queued' })
   status!: CreativeGenerationStatus;
 
-  /** Request, frozen at enqueue: the worker runs minutes later, elsewhere. */
+  /**
+   * Request, frozen at enqueue: the worker runs minutes later, elsewhere.
+   * `prompt` is what the operator typed (the intent) — never replaced by the
+   * composed text.
+   */
   @Column({ type: 'text' }) prompt!: string;
   @Column({ name: 'output_count', type: 'smallint' }) outputCount!: number;
   @Column({ name: 'aspect_ratio', type: 'varchar', length: 8 })
   aspectRatio!: CreativeImageAspectRatio;
   @Column({ type: 'varchar', length: 16 }) quality!: CreativeImageQuality;
+
+  /**
+   * CS3.4.1 — the Planner item this generation was made for (NULL =
+   * standalone). Resolved in the caller's full scope at enqueue; FK ON DELETE
+   * SET NULL like `social_creative_assets.content_item_id`.
+   */
+  @Column({ name: 'content_item_id', type: 'uuid', nullable: true })
+  contentItemId!: string | null;
+  /**
+   * CS3.4.1 — the exact text sent to the provider: operator intent composed
+   * with the resolved context (`composeCreativeImagePrompt`). Frozen at
+   * enqueue, so a later Brand Kit or Planner edit never changes what a
+   * queued generation sends. Equals `prompt` on rows created before CS3.4.1.
+   */
+  @Column({ name: 'effective_prompt', type: 'text' })
+  effectivePrompt!: string;
+  /**
+   * CS3.4.1 — references and digests of the context used, no copied text
+   * (`CreativeGenerationContextRecord`). NULL on rows created before CS3.4.1.
+   */
+  @Column({ name: 'generation_context', type: 'jsonb', nullable: true })
+  generationContext!: CreativeGenerationContextRecord | null;
 
   /**
    * CS3.2.1 — the client's `Idempotency-Key` and the sha256 of the normalized
@@ -114,9 +143,12 @@ export class CreativeGenerationEntity {
   @Column({ name: 'locked_by', type: 'varchar', length: 120, nullable: true })
   lockedBy!: string | null;
 
-  /** Last failure as a port code — never provider text. Kept while a retry waits. */
+  /**
+   * Last failure as a closed code — never provider text. Kept while a retry
+   * waits. `reference_unavailable` (CS3.4.2) is the domain's own.
+   */
   @Column({ name: 'error_code', type: 'varchar', length: 40, nullable: true })
-  errorCode!: ImageGenerationFailureCode | null;
+  errorCode!: CreativeGenerationFailureCode | null;
   @Column({ name: 'error_retryable', type: 'boolean', nullable: true })
   errorRetryable!: boolean | null;
 
@@ -198,6 +230,61 @@ export class CreativeGenerationOutputEntity {
   promotedById!: string | null;
   @Column({ name: 'promoted_at', type: 'timestamptz', nullable: true })
   promotedAt!: Date | null;
+  @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
+  createdAt!: Date;
+}
+
+/**
+ * CS3.4.2 — one reference image of a generation, frozen at enqueue in the
+ * same transaction as the generation. The worker sends exactly these rows, in
+ * `position` order ("Image 1..N" of the effective prompt), and never resolves
+ * the current Planner or Brand Kit again.
+ *
+ * Exactly one owner id: `brand_kit_asset_id` for `brand`, `media_asset_id`
+ * for `planner`/`operator`. Deliberately NOT foreign keys — provenance must
+ * outlive the binary (a later Brand Kit delete or a CS3.6 expiry). What the
+ * database enforces instead (migration 1798300000000):
+ *   - on insert: owner row exists, in the generation's exact four-part scope,
+ *     durable, not deleted, and its mime/size/checksum equal the snapshot;
+ *     a `planner` media is a current reference of the generation's item;
+ *     the generation is still a fresh `queued` row;
+ *   - afterwards: the row is immutable except `dispatch_started_at` (NULL → time once);
+ *   - a referenced `media_assets` row cannot be deleted, tombstoned, re-scoped
+ *     or have its bytes/key swapped while the generation is pending.
+ *
+ * `checksum` is the owner's sha256 at enqueue; the worker refuses bytes that
+ * do not hash to it. No binary is stored here.
+ */
+@Entity('social_creative_generation_references')
+@Unique('UQ_social_creative_generation_references_position', [
+  'generationId',
+  'position',
+])
+export class CreativeGenerationReferenceEntity {
+  @PrimaryGeneratedColumn('uuid') id!: string;
+  @Column({ name: 'generation_id', type: 'uuid' }) generationId!: string;
+  @Column({ type: 'smallint' }) position!: number;
+  @Column({ type: 'varchar', length: 16 })
+  source!: CreativeGenerationReferenceSource;
+  @Column({ type: 'varchar', length: 40 }) kind!: string;
+  @Column({ type: 'varchar', length: 16 })
+  role!: ImageGenerationReferenceRole;
+  @Column({ name: 'brand_kit_asset_id', type: 'uuid', nullable: true })
+  brandKitAssetId!: string | null;
+  @Column({ name: 'media_asset_id', type: 'uuid', nullable: true })
+  mediaAssetId!: string | null;
+  @Column({ name: 'mime_type', type: 'varchar', length: 32 })
+  mimeType!: string;
+  @Column({ name: 'byte_size', type: 'bigint' }) byteSize!: string;
+  @Column({ type: 'char', length: 64 }) checksum!: string;
+  /**
+   * First time the worker, with a valid lease and these bytes verified,
+   * STARTED a dispatch attempt to the provider (NULL = never started).
+   * Not proof of delivery: the provider may never have received, processed,
+   * billed or answered it. Write-once; retries keep the first value.
+   */
+  @Column({ name: 'dispatch_started_at', type: 'timestamptz', nullable: true })
+  dispatchStartedAt!: Date | null;
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;
 }

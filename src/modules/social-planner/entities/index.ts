@@ -2,6 +2,7 @@ export * from './social-plan.entity';
 export * from './social-content-item.entity';
 export * from './social-content-destination.entity';
 export * from './social-destination-creative.entity';
+export * from './social-content-reference.entity';
 export * from './social-content-revision.entity';
 export * from './social-copy-generation-run.entity';
 export * from './social-copy-generation-proposal.entity';

@@ -706,6 +706,33 @@ describe('Creative Studio asset service', () => {
     expect(h.mediaUpload.upload).not.toHaveBeenCalled();
   });
 
+  it('never links a soft-deleted content item or one under a deleted plan', async () => {
+    const h = makeHarness();
+    const contentItemId = id(72);
+    h.contentItems.findOne.mockResolvedValue({
+      id: contentItemId,
+      planId: id(73),
+    });
+    h.plans.exists.mockResolvedValue(true);
+
+    await h.assetService.upload(clientA, 'user-a', {
+      file: file(PNG),
+      contentItemId,
+    });
+
+    expect(h.contentItems.findOne).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: contentItemId,
+          deletedAt: IsNull(),
+        }),
+      }),
+    );
+    expect(h.plans.exists).toHaveBeenCalledWith({
+      where: expect.objectContaining({ id: id(73), deletedAt: IsNull() }),
+    });
+  });
+
   describe('CS2B.4 Planner production status reflection', () => {
     const contentItemId = id(80);
     const linkedHarness = () => {

@@ -18,6 +18,12 @@ export const MEDIA_ASSET_SOURCES = [
   'planner_upload',
   'creative_studio',
   'brand_kit',
+  /**
+   * Planner Visual References: a new image uploaded to be linked to a content
+   * item (`POST /social/planner/content/:id/references`). Still a normal
+   * durable library media — the link, not the source, makes it a reference.
+   */
+  'planner_reference',
 ] as const;
 
 export class UploadMediaAssetDto {

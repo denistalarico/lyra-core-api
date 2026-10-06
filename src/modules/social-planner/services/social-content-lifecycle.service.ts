@@ -26,6 +26,7 @@ import {
   type SocialContentPublicationBlocker,
 } from './content-publication-guard.port';
 import { toCsvDocument, type CsvValue } from './social-content-csv';
+import { cloneContentReferences } from './social-content-reference.service';
 import type { SocialPlannerScope } from './social-planner.service';
 
 /**
@@ -128,7 +129,8 @@ export class SocialContentLifecycleService {
    * ------------------------------
    * Copied: the editorial substance (title, theme, brief, key message, copy,
    * caption, script, CTA, hashtags, first comment), the classification, the
-   * destinations, and the creative chosen for each destination.
+   * destinations, the creative chosen for each destination, and the Planner
+   * Visual References (same media links — the binary is never copied).
    *
    * Not copied: revisions, publications, `currentRevisionId`, and the lifecycle
    * stamps. A duplicate has no history because it never had one — carrying a
@@ -201,6 +203,12 @@ export class SocialContentLifecycleService {
         );
 
         await this.cloneDestinationsAndCreatives(manager, scope, {
+          sourceContentId: source.id,
+          targetContentId: clone.id,
+          actorUserId,
+        });
+        // Planner Visual References: same links, same media, no copy.
+        await cloneContentReferences(manager, scope, {
           sourceContentId: source.id,
           targetContentId: clone.id,
           actorUserId,

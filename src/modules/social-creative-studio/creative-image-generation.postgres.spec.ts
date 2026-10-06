@@ -4,7 +4,7 @@ import {
   GoneException,
   NotFoundException,
 } from '@nestjs/common';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { Readable } from 'node:stream';
 import sharp from 'sharp';
 import { DataSource, type DataSourceOptions } from 'typeorm';
@@ -18,16 +18,25 @@ import type { FilesService } from '../../common/files/files.service';
 import { getAgencyTypeOrmConfig } from '../../config/typeorm.config';
 import { CreateSocialCreativeGenerations1797900000000 } from '../../database/migrations/1797900000000-create-social-creative-generations';
 import { AddSocialCreativeGenerationIdempotency1798000000000 } from '../../database/migrations/1798000000000-add-social-creative-generation-idempotency';
+import { AddSocialCreativeGenerationContext1798100000000 } from '../../database/migrations/1798100000000-add-social-creative-generation-context';
+import { CreateSocialContentReferences1798200000000 } from '../../database/migrations/1798200000000-create-social-content-references';
+import { CreateSocialCreativeGenerationReferences1798300000000 } from '../../database/migrations/1798300000000-create-social-creative-generation-references';
+import { BrandKitAssetEntity, BrandKitEntity } from '../brand-kit/entities';
+import { SocialBrandKitContextPort } from '../brand-kit/services/social-brand-kit-context.port';
 import { describePostgresIntegration } from '../../testing/postgres-integration';
 import {
   SocialContentItemEntity,
+  SocialContentReferenceEntity,
   SocialPlanEntity,
 } from '../social-planner/entities';
 import {
   CREATIVE_IMAGE_MAX_BYTES,
   CreativeAssetService,
 } from './creative-asset.service';
+import type { CreativeStudioBrandContext } from './creative-brand-context.service';
 import { CreativeGenerationConfigService } from './creative-generation-config';
+import { CreativeGenerationContextService } from './creative-generation-context';
+import { CreativeGenerationReferenceSelector } from './creative-generation-references';
 import {
   ImageGenerationProvider,
   ImageGenerationProviderError,
@@ -44,6 +53,7 @@ import {
   CreativeFolderEntity,
   CreativeGenerationEntity,
   CreativeGenerationOutputEntity,
+  CreativeGenerationReferenceEntity,
 } from './entities';
 
 const run = describePostgresIntegration();
@@ -102,6 +112,52 @@ run('CS3.2 creative generation jobs (real PostgreSQL)', () => {
   /** CS3.3.1: flips the metadata reader to the real reader's 400 for unreadable bytes. */
   let metadataReadable = true;
   const config = new CreativeGenerationConfigService();
+  /**
+   * CS3.4.1 — the context owners, stubbed at their public contracts: the
+   * Brand Kit projection of the scope and the Planner's scoped `getContent`
+   * (unknown or other-company ids answer 404, like the real one).
+   */
+  let brand: CreativeStudioBrandContext = {
+    palette: [],
+    typography: [],
+    guidelines: null,
+    assets: [],
+    references: [],
+  };
+  const plannerItems = new Map<string, Record<string, unknown>>();
+  const generationContext = new CreativeGenerationContextService(
+    { load: async () => brand } as never,
+    {
+      getContent: async (scope: MediaAssetScope, id: string) => {
+        const item = plannerItems.get(`${scope.companyContextId}:${id}`);
+        if (!item) throw new NotFoundException();
+        return item;
+      },
+    } as never,
+    {
+      // CS3.4.2: the item's real `social_content_references` rows, read at
+      // their public contract's shape (identities only).
+      listContentReferences: async (scope: MediaAssetScope, id: string) => {
+        if (!plannerItems.has(`${scope.companyContextId}:${id}`))
+          throw new NotFoundException();
+        const rows = await db.query(
+          `SELECT id, media_asset_id, kind, sort_order
+             FROM social_content_references
+            WHERE content_item_id = $1 ORDER BY sort_order`,
+          [id],
+        );
+        return rows.map((r) => ({
+          referenceId: r.id,
+          mediaAssetId: r.media_asset_id,
+          kind: r.kind,
+          sortOrder: r.sort_order,
+        }));
+      },
+    } as never,
+  );
+  /** CS3.4.2: the real Brand Kit port over this schema. */
+  let brandKitPort: SocialBrandKitContextPort;
+  let referenceSelector: CreativeGenerationReferenceSelector;
 
   function options(entities: DataSourceOptions['entities'], name: string) {
     const base = getAgencyTypeOrmConfig() as Extract<
@@ -127,6 +183,7 @@ run('CS3.2 creative generation jobs (real PostgreSQL)', () => {
       provider,
       mediaUpload,
       config,
+      brandKitPort,
     );
     (instance as unknown as { workerId: string }).workerId = id;
     return instance;
@@ -183,6 +240,12 @@ run('CS3.2 creative generation jobs (real PostgreSQL)', () => {
           CreativeAssetEntity,
           CreativeAssetVersionEntity,
           CreativeFolderEntity,
+          // CS3.4.1: FK target of `content_item_id`, inside the throwaway schema.
+          SocialPlanEntity,
+          SocialContentItemEntity,
+          // CS3.4.2: Brand Kit owner tables (references of source `brand`).
+          BrandKitEntity,
+          BrandKitAssetEntity,
         ],
         `${schema}_bootstrap`,
       ),
@@ -214,6 +277,11 @@ run('CS3.2 creative generation jobs (real PostgreSQL)', () => {
     const runner = bootstrap.createQueryRunner();
     await new CreateSocialCreativeGenerations1797900000000().up(runner);
     await new AddSocialCreativeGenerationIdempotency1798000000000().up(runner);
+    await new AddSocialCreativeGenerationContext1798100000000().up(runner);
+    await new CreateSocialContentReferences1798200000000().up(runner);
+    await new CreateSocialCreativeGenerationReferences1798300000000().up(
+      runner,
+    );
     await runner.release();
     await bootstrap.destroy();
 
@@ -226,8 +294,12 @@ run('CS3.2 creative generation jobs (real PostgreSQL)', () => {
           CreativeFolderEntity,
           CreativeGenerationEntity,
           CreativeGenerationOutputEntity,
+          CreativeGenerationReferenceEntity,
           SocialPlanEntity,
           SocialContentItemEntity,
+          SocialContentReferenceEntity,
+          BrandKitEntity,
+          BrandKitAssetEntity,
         ],
         schema,
       ),
@@ -277,6 +349,15 @@ run('CS3.2 creative generation jobs (real PostgreSQL)', () => {
       new CreativeThumbnailService(mediaUpload),
       {} as never,
     );
+    brandKitPort = new SocialBrandKitContextPort(
+      db.getRepository(BrandKitEntity),
+      db.getRepository(BrandKitAssetEntity),
+      files as unknown as FilesService,
+    );
+    referenceSelector = new CreativeGenerationReferenceSelector(
+      brandKitPort,
+      mediaRepository,
+    );
     provider = new ScriptedProvider();
     generation = new CreativeImageGenerationService(
       provider,
@@ -288,6 +369,9 @@ run('CS3.2 creative generation jobs (real PostgreSQL)', () => {
       mediaUpload,
       assets,
       {} as never,
+      generationContext,
+      referenceSelector,
+      db.getRepository(CreativeGenerationReferenceEntity),
     );
   });
 
@@ -322,9 +406,13 @@ run('CS3.2 creative generation jobs (real PostgreSQL)', () => {
     it('is re-runnable and reversible: up → up → down → up', async () => {
       const runner = db.createQueryRunner();
       const migration = new CreateSocialCreativeGenerations1797900000000();
+      // CS3.4.2's child table depends on it: peeled off first, put back last.
+      const references =
+        new CreateSocialCreativeGenerationReferences1798300000000();
       try {
         await runner.startTransaction();
         await migration.up(runner);
+        await references.down(runner);
         await migration.down(runner);
         const tables = (await runner.query(
           `SELECT table_name FROM information_schema.tables
@@ -333,6 +421,7 @@ run('CS3.2 creative generation jobs (real PostgreSQL)', () => {
         )) as unknown[];
         expect(tables).toHaveLength(0);
         await migration.up(runner);
+        await references.up(runner);
       } finally {
         await runner.rollbackTransaction();
         await runner.release();
@@ -348,6 +437,7 @@ run('CS3.2 creative generation jobs (real PostgreSQL)', () => {
           company_context_id: companyA,
           generation_type: 'image',
           prompt: 'x',
+          effective_prompt: 'x',
           output_count: 1,
           aspect_ratio: '1:1',
           quality: 'standard',
@@ -1076,6 +1166,7 @@ run('CS3.2 creative generation jobs (real PostgreSQL)', () => {
           company_context_id: null,
           generation_type: 'image',
           prompt: 'x',
+          effective_prompt: 'x',
           output_count: 1,
           aspect_ratio: '1:1',
           quality: 'standard',
@@ -1199,7 +1290,10 @@ run('CS3.2 creative generation jobs (real PostgreSQL)', () => {
         worker('w-a').processPending(),
         worker('w-b').processPending(),
       ]);
-      const forThisRequest = provider.calls.filter((c) => c.prompt === 'café');
+      // The provider receives the composed prompt (CS3.4.1); find the typed text in it.
+      const forThisRequest = provider.calls.filter((c) =>
+        c.prompt.includes(':\ncafé\n'),
+      );
       expect(forThisRequest).toHaveLength(1);
       expect(await row(results[0].generationId)).toEqual(
         expect.objectContaining({ status: 'completed', attempts: 1 }),
@@ -1279,6 +1373,9 @@ run('CS3.2 creative generation jobs (real PostgreSQL)', () => {
         mediaUpload,
         {} as never,
         {} as never,
+        generationContext,
+        referenceSelector,
+        db.getRepository(CreativeGenerationReferenceEntity),
       );
       const replay = await restarted.enqueue(
         scopeA,
@@ -1296,6 +1393,854 @@ run('CS3.2 creative generation jobs (real PostgreSQL)', () => {
       expect(await row(first.generationId)).toEqual(completed);
       expect(await worker('w-1').processPending()).toBe(0);
       expect(provider.calls).toHaveLength(1);
+    });
+  });
+
+  describe('generation context & provenance (CS3.4.1)', () => {
+    async function plannerContent(scope: MediaAssetScope) {
+      const plan = await db.getRepository(SocialPlanEntity).save({
+        tenantId: scope.tenantId,
+        workspaceId: scope.workspaceId,
+        agencyClientId: scope.agencyClientId,
+        companyContextId: scope.companyContextId,
+        title: 'Plano de outubro',
+        periodStart: '2026-10-01',
+        periodEnd: '2026-10-31',
+      });
+      const item = await db.getRepository(SocialContentItemEntity).save({
+        tenantId: scope.tenantId,
+        workspaceId: scope.workspaceId,
+        agencyClientId: scope.agencyClientId,
+        planId: plan.id,
+        title: 'Blend de inverno',
+        brief: 'Café em clima aconchegante',
+      });
+      // What the Planner's scoped `getContent` answers — for this company only.
+      plannerItems.set(`${scope.companyContextId}:${item.id}`, {
+        ...item,
+        currentRevisionId: null,
+        destinations: [],
+      });
+      return item.id;
+    }
+
+    const generationsByKey = async (key: string) =>
+      (
+        await db.query(
+          'SELECT count(*)::int AS n FROM social_creative_generations WHERE idempotency_key = $1',
+          [key],
+        )
+      )[0].n as number;
+
+    afterEach(() => {
+      brand = {
+        palette: [],
+        typography: [],
+        guidelines: null,
+        assets: [],
+        references: [],
+      };
+    });
+
+    it('migration is re-runnable, reversible and backfills effective_prompt = prompt', async () => {
+      const runner = db.createQueryRunner();
+      const migration = new AddSocialCreativeGenerationContext1798100000000();
+      const columns = async () =>
+        (
+          (await runner.query(
+            `SELECT column_name FROM information_schema.columns
+              WHERE table_schema = $1 AND table_name = 'social_creative_generations'
+                AND column_name IN ('content_item_id', 'effective_prompt', 'generation_context')`,
+            [schema],
+          )) as unknown[]
+        ).length;
+      try {
+        await runner.startTransaction();
+        await migration.up(runner);
+        expect(await columns()).toBe(3);
+        await migration.down(runner);
+        expect(await columns()).toBe(0);
+        // A pre-CS3.4.1 row: the worker sent `prompt` verbatim.
+        const [legacy] = await runner.query(
+          `INSERT INTO social_creative_generations
+             (tenant_id, workspace_id, agency_client_id, company_context_id,
+              generation_type, prompt, output_count, aspect_ratio, quality, max_attempts)
+           VALUES ($1, $2, $3, $4, 'image', 'pedido antigo', 1, '1:1', 'standard', 3)
+           RETURNING id`,
+          [tenantId, workspaceId, clientId, companyA],
+        );
+        await migration.up(runner);
+        expect(await columns()).toBe(3);
+        const [after] = await runner.query(
+          `SELECT effective_prompt, generation_context, content_item_id
+             FROM social_creative_generations WHERE id = $1`,
+          [legacy.id],
+        );
+        expect(after).toEqual({
+          effective_prompt: 'pedido antigo',
+          generation_context: null,
+          content_item_id: null,
+        });
+      } finally {
+        await runner.rollbackTransaction();
+        await runner.release();
+      }
+    });
+
+    it('stores user prompt, effective prompt and context record apart; the worker sends the effective prompt', async () => {
+      brand = {
+        ...brand,
+        palette: [{ role: 'primary', hex: '#0B3D2E', label: 'Verde' }],
+      };
+      const contentItemId = await plannerContent(scopeA);
+      provider.calls.length = 0;
+      provider.script.push(() => ok(1));
+
+      const { generationId } = await enqueue(scopeA, {
+        prompt: 'xícara na mesa',
+        contentItemId,
+      });
+      await worker('w-ctx').processPending();
+      const stored = await row(generationId);
+
+      expect(stored.prompt).toBe('xícara na mesa');
+      expect(stored.content_item_id).toBe(contentItemId);
+      expect(stored.effective_prompt).toContain('xícara na mesa');
+      expect(stored.effective_prompt).toContain('Café em clima aconchegante');
+      expect(stored.effective_prompt).toContain('#0B3D2E');
+      expect(stored.effective_prompt).not.toContain(contentItemId);
+      expect(stored.generation_context).toEqual(
+        expect.objectContaining({
+          version: 'generation-context.v1',
+          composer: 'image-prompt.v2',
+          content: expect.objectContaining({ revisionId: null }),
+          references: expect.objectContaining({ delivery: 'none' }),
+        }),
+      );
+      expect(JSON.stringify(stored.generation_context)).not.toContain(
+        'Café em clima',
+      );
+      expect(provider.calls).toEqual([
+        expect.objectContaining({ prompt: stored.effective_prompt }),
+      ]);
+      expect((await generation.get(scopeA, generationId)).request).toEqual(
+        expect.objectContaining({ prompt: 'xícara na mesa', contentItemId }),
+      );
+    });
+
+    it('Company B cannot generate from a content item of Company A', async () => {
+      const contentItemId = await plannerContent(scopeA);
+      const key = randomUUID();
+      const error = await enqueue(
+        scopeB,
+        { prompt: 'x', contentItemId },
+        key,
+      ).catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(BadRequestException);
+      expect(await generationsByKey(key)).toBe(0);
+    });
+
+    it('the same key over a changed Brand Kit is a 409, not a replay', async () => {
+      const key = randomUUID();
+      await enqueue(scopeA, { prompt: 'café' }, key);
+      brand = { ...brand, guidelines: 'Sempre fundo claro.' };
+      await expect(enqueue(scopeA, { prompt: 'café' }, key)).rejects.toThrow(
+        ConflictException,
+      );
+      expect(await generationsByKey(key)).toBe(1);
+    });
+
+    it('the database refuses a Planner link without context and an empty effective prompt', async () => {
+      const contentItemId = await plannerContent(scopeA);
+      const { generationId } = await enqueue(scopeA, { prompt: 'café' });
+      await expect(
+        db.query(
+          `UPDATE social_creative_generations
+              SET content_item_id = $2, generation_context = NULL WHERE id = $1`,
+          [generationId, contentItemId],
+        ),
+      ).rejects.toThrow(/CK_social_creative_generations_context/);
+      await expect(
+        db.query(
+          `UPDATE social_creative_generations SET effective_prompt = '' WHERE id = $1`,
+          [generationId],
+        ),
+      ).rejects.toThrow(/CK_social_creative_generations_context/);
+    });
+
+    it('removing the content item keeps the generation and its frozen prompt (FK SET NULL)', async () => {
+      const contentItemId = await plannerContent(scopeA);
+      const { generationId } = await enqueue(scopeA, {
+        prompt: 'café',
+        contentItemId,
+      });
+      const before = await row(generationId);
+      await db.query('DELETE FROM social_content_items WHERE id = $1', [
+        contentItemId,
+      ]);
+      const after = await row(generationId);
+      expect(after.content_item_id).toBeNull();
+      expect(after.effective_prompt).toBe(before.effective_prompt);
+      expect(after.generation_context).toEqual(before.generation_context);
+    });
+  });
+
+  /**
+   * CS3.4.2 — reference images, end to end on PostgreSQL: owner rows of both
+   * stores, the selector, the frozen child rows and their triggers, the
+   * worker's verified read and the bytes the provider receives.
+   */
+  describe('reference images (CS3.4.2)', () => {
+    const sha = (body: Buffer) =>
+      createHash('sha256').update(body).digest('hex');
+    let jpeg: Buffer;
+    let webp: Buffer;
+
+    beforeAll(async () => {
+      jpeg = await sharp({
+        create: { width: 8, height: 8, channels: 3, background: '#aa3300' },
+      })
+        .jpeg()
+        .toBuffer();
+      webp = await sharp({
+        create: { width: 8, height: 8, channels: 3, background: '#0033aa' },
+      })
+        .webp()
+        .toBuffer();
+    });
+
+    /** A durable library/Planner image, uploaded through the shared boundary. */
+    const durable = (scope: MediaAssetScope, body: Buffer, name = 'ref.png') =>
+      mediaUpload.upload(scope, null, {
+        file: { buffer: body, originalname: name },
+        source: 'planner_reference',
+      });
+
+    /** A Brand Kit asset of the scope's kit, bytes in the private store. */
+    async function brandAsset(
+      scope: MediaAssetScope,
+      kind: string,
+      body: Buffer,
+    ) {
+      await db.query(
+        `INSERT INTO brand_kits (tenant_id, workspace_id, agency_client_id, company_context_id)
+         SELECT $1, $2, $3, $4
+          WHERE NOT EXISTS (
+            SELECT 1 FROM brand_kits
+             WHERE tenant_id = $1 AND workspace_id = $2
+               AND agency_client_id IS NOT DISTINCT FROM $3
+               AND company_context_id IS NOT DISTINCT FROM $4)`,
+        [
+          scope.tenantId,
+          scope.workspaceId,
+          scope.agencyClientId,
+          scope.companyContextId,
+        ],
+      );
+      const id = randomUUID();
+      const path = `brand-kit/${id}.png`;
+      objects.set(path, body);
+      await db.query(
+        `INSERT INTO brand_kit_assets
+           (id, brand_kit_id, tenant_id, workspace_id, agency_client_id, kind, usage,
+            storage_path, mime_type, byte_size, original_filename, checksum)
+         SELECT $1, kit.id, $2, $3, $4, $6, 'asset', $7, 'image/png', $8, 'logo.png', $9
+           FROM brand_kits kit
+          WHERE kit.tenant_id = $2 AND kit.workspace_id = $3
+            AND kit.agency_client_id IS NOT DISTINCT FROM $4
+            AND kit.company_context_id IS NOT DISTINCT FROM $5`,
+        [
+          id,
+          scope.tenantId,
+          scope.workspaceId,
+          scope.agencyClientId,
+          scope.companyContextId,
+          kind,
+          path,
+          body.length,
+          sha(body),
+        ],
+      );
+      return id;
+    }
+
+    /** A Planner item of the scope with its Visual References, in order. */
+    async function itemWith(
+      scope: MediaAssetScope,
+      refs: Array<{ mediaAssetId: string; kind: string }>,
+    ) {
+      const plan = await db.getRepository(SocialPlanEntity).save({
+        tenantId: scope.tenantId,
+        workspaceId: scope.workspaceId,
+        agencyClientId: scope.agencyClientId,
+        companyContextId: scope.companyContextId,
+        title: 'Plano',
+        periodStart: '2026-10-01',
+        periodEnd: '2026-10-31',
+      });
+      const item = await db.getRepository(SocialContentItemEntity).save({
+        tenantId: scope.tenantId,
+        workspaceId: scope.workspaceId,
+        agencyClientId: scope.agencyClientId,
+        planId: plan.id,
+        title: 'Lançamento',
+      });
+      plannerItems.set(`${scope.companyContextId}:${item.id}`, {
+        ...item,
+        currentRevisionId: null,
+        destinations: [],
+      });
+      for (const [sortOrder, ref] of refs.entries())
+        await linkPlanner(
+          scope,
+          item.id,
+          ref.mediaAssetId,
+          ref.kind,
+          sortOrder,
+        );
+      return item.id;
+    }
+
+    const linkPlanner = (
+      scope: MediaAssetScope,
+      itemId: string,
+      mediaAssetId: string,
+      kind: string,
+      sortOrder: number,
+    ) =>
+      db.query(
+        `INSERT INTO social_content_references
+           (tenant_id, workspace_id, agency_client_id, company_context_id,
+            content_item_id, media_asset_id, kind, sort_order)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+        [
+          scope.tenantId,
+          scope.workspaceId,
+          scope.agencyClientId,
+          scope.companyContextId,
+          itemId,
+          mediaAssetId,
+          kind,
+          sortOrder,
+        ],
+      );
+
+    const frozenRows = (generationId: string) =>
+      db.query(
+        `SELECT position, source, kind, role, brand_kit_asset_id, media_asset_id,
+                mime_type, checksum, dispatch_started_at
+           FROM social_creative_generation_references
+          WHERE generation_id = $1 ORDER BY position`,
+        [generationId],
+      );
+
+    async function badRequest(promise: Promise<unknown>) {
+      const error = await promise.catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(BadRequestException);
+      return ((error as BadRequestException).getResponse() as { code: string })
+        .code;
+    }
+
+    it('migration is re-runnable and reversible, and admits the new failure code', async () => {
+      const runner = db.createQueryRunner();
+      const migration =
+        new CreateSocialCreativeGenerationReferences1798300000000();
+      const exists = async () =>
+        (
+          (await runner.query(
+            `SELECT 1 FROM information_schema.tables
+            WHERE table_schema = $1 AND table_name = 'social_creative_generation_references'`,
+            [schema],
+          )) as unknown[]
+        ).length;
+      try {
+        await runner.startTransaction();
+        await migration.up(runner);
+        await migration.down(runner);
+        expect(await exists()).toBe(0);
+        await migration.up(runner);
+        await migration.up(runner);
+        expect(await exists()).toBe(1);
+      } finally {
+        await runner.rollbackTransaction();
+        await runner.release();
+      }
+      const { generationId } = await enqueue(scopeA, { prompt: 'x' });
+      await db.query(
+        `UPDATE social_creative_generations
+            SET status = 'failed', failed_at = now(), error_code = 'reference_unavailable'
+          WHERE id = $1`,
+        [generationId],
+      );
+      expect((await row(generationId)).error_code).toBe(
+        'reference_unavailable',
+      );
+    });
+
+    it('brand only: an explicit Brand Kit logo is frozen, stamped as sent and delivered as its bytes', async () => {
+      const logo = await brandAsset(scopeA, 'logo', image);
+      provider.script.push(() => ok(1));
+      const { generationId } = await enqueue(scopeA, {
+        prompt: 'post com a marca',
+        references: [{ source: 'brand', id: logo }],
+      });
+      await worker('w-ref').processPending();
+
+      expect((await row(generationId)).status).toBe('completed');
+      const [call] = provider.calls;
+      expect(call.references).toHaveLength(1);
+      expect(call.references[0]).toEqual(
+        expect.objectContaining({ role: 'logo', mimeType: 'image/png' }),
+      );
+      expect(call.references[0].body.equals(image)).toBe(true);
+      expect(call.prompt).toContain("- Image 1: the brand's logo");
+      const [frozen] = await frozenRows(generationId);
+      expect(frozen).toEqual(
+        expect.objectContaining({
+          source: 'brand',
+          kind: 'logo',
+          brand_kit_asset_id: logo,
+          media_asset_id: null,
+          checksum: sha(image),
+          dispatch_started_at: expect.any(Date),
+        }),
+      );
+      expect((await row(generationId)).generation_context.references).toEqual(
+        expect.objectContaining({
+          delivery: 'provider_reference_images',
+          selected: expect.objectContaining({
+            selection: 'explicit',
+            count: 1,
+            sources: { brand: 1 },
+          }),
+        }),
+      );
+      // Provenance through the API: owner ids only.
+      const view = await generation.get(scopeA, generationId);
+      expect(view.references).toEqual([
+        expect.objectContaining({
+          position: 0,
+          source: 'brand',
+          id: logo,
+          kind: 'logo',
+          dispatchStartedAt: expect.any(String),
+        }),
+      ]);
+      expect(JSON.stringify(view)).not.toContain('brand-kit/');
+    });
+
+    it('planner only (default) and brand + planner + operator: distinct sources, exact order, exact bytes', async () => {
+      const product = await durable(scopeA, jpeg, 'produto.jpg');
+      const packshot = await durable(scopeA, webp, 'embalagem.webp');
+      const library = await durable(scopeA, image, 'cozinha.png');
+      const logo = await brandAsset(scopeA, 'logo', image);
+      const itemId = await itemWith(scopeA, [
+        { mediaAssetId: product.id, kind: 'product' },
+        { mediaAssetId: packshot.id, kind: 'packaging' },
+      ]);
+
+      provider.script.push(
+        () => ok(1),
+        () => ok(1),
+      );
+      const byDefault = await enqueue(scopeA, {
+        prompt: 'café',
+        contentItemId: itemId,
+      });
+      const explicit = await enqueue(scopeA, {
+        prompt: 'café',
+        contentItemId: itemId,
+        references: [
+          { source: 'operator', id: library.id, kind: 'environment' },
+          { source: 'planner', id: packshot.id },
+          { source: 'brand', id: logo },
+        ],
+      });
+      process.env.CREATIVE_GENERATION_WORKER_CONCURRENCY = '1';
+      await worker('w-ref').processPending();
+      await worker('w-ref').processPending();
+
+      expect(provider.calls).toHaveLength(2);
+      // Two references (default) vs three (explicit) tells the calls apart.
+      const sent = (count: number) => {
+        const call = provider.calls.find((c) => c.references.length === count);
+        if (!call) throw new Error(`no call with ${count} references`);
+        return call;
+      };
+      const first = sent(2);
+      expect(first.references.map((r) => r.mimeType)).toEqual([
+        'image/jpeg',
+        'image/webp',
+      ]);
+      expect(first.references[0].body.equals(jpeg)).toBe(true);
+      expect(first.references[1].body.equals(webp)).toBe(true);
+      expect(
+        (await frozenRows(byDefault.generationId)).map((r) => r.source),
+      ).toEqual(['planner', 'planner']);
+
+      const second = sent(3);
+      expect(second.references.map((r) => [r.role, r.mimeType])).toEqual([
+        ['context', 'image/png'],
+        ['subject', 'image/webp'],
+        ['logo', 'image/png'],
+      ]);
+      expect(second.references[1].body.equals(webp)).toBe(true);
+      expect(
+        (await frozenRows(explicit.generationId)).map((r) => [
+          r.source,
+          r.kind,
+          r.media_asset_id ?? r.brand_kit_asset_id,
+        ]),
+      ).toEqual([
+        ['operator', 'environment', library.id],
+        ['planner', 'packaging', packshot.id],
+        ['brand', 'logo', logo],
+      ]);
+    });
+
+    it("Company B can never use Company A's references — service and database", async () => {
+      const mediaA = await durable(scopeA, image);
+      const logoA = await brandAsset(scopeA, 'logo', image);
+      const itemA = await itemWith(scopeA, [
+        { mediaAssetId: mediaA.id, kind: 'product' },
+      ]);
+      const itemB = await itemWith(scopeB, []);
+
+      for (const references of [
+        [{ source: 'brand' as const, id: logoA }],
+        [
+          {
+            source: 'operator' as const,
+            id: mediaA.id,
+            kind: 'product' as const,
+          },
+        ],
+        [{ source: 'planner' as const, id: mediaA.id }],
+      ])
+        expect(
+          await badRequest(
+            enqueue(scopeB, { prompt: 'x', contentItemId: itemB, references }),
+          ),
+        ).toBe('reference_not_found');
+      // A's item is invisible to B altogether.
+      expect(
+        await badRequest(
+          enqueue(scopeB, { prompt: 'x', contentItemId: itemA }),
+        ),
+      ).toBe('content_item_not_found');
+
+      // Below the service: B's fresh generation pointing at A's binaries.
+      const { generationId } = await enqueue(scopeB, { prompt: 'x' });
+      for (const [source, column, id] of [
+        ['operator', 'media_asset_id', mediaA.id],
+        ['brand', 'brand_kit_asset_id', logoA],
+      ])
+        await expect(
+          db.query(
+            `INSERT INTO social_creative_generation_references
+               (generation_id, position, source, kind, role, ${column}, mime_type, byte_size, checksum)
+             VALUES ($1, 0, $2, 'logo', 'logo', $3, 'image/png', $4, $5)`,
+            [generationId, source, id, image.length, sha(image)],
+          ),
+        ).rejects.toThrow(/scope/);
+    });
+
+    it('temporary outputs and deleted media are refused as references — service and database', async () => {
+      const view = await completedGeneration(scopeA);
+      const [{ media_asset_id: temporaryId }] = await db.query(
+        'SELECT media_asset_id FROM social_creative_generation_outputs WHERE id = $1',
+        [view.outputs[0].id],
+      );
+      const deleted = await durable(scopeA, image);
+      await db.query(
+        'UPDATE media_assets SET deleted_at = now() WHERE id = $1',
+        [deleted.id],
+      );
+
+      for (const id of [temporaryId as string, deleted.id])
+        expect(
+          await badRequest(
+            enqueue(scopeA, {
+              prompt: 'x',
+              references: [{ source: 'operator', id, kind: 'product' }],
+            }),
+          ),
+        ).toBe('reference_not_found');
+
+      const { generationId } = await enqueue(scopeA, { prompt: 'x' });
+      for (const id of [temporaryId as string, deleted.id])
+        await expect(
+          db.query(
+            `INSERT INTO social_creative_generation_references
+               (generation_id, position, source, kind, role, media_asset_id, mime_type, byte_size, checksum)
+             SELECT $1, 0, 'operator', 'product', 'subject', id, mime_type, byte_size, checksum
+               FROM media_assets WHERE id = $2`,
+            [generationId, id],
+          ),
+        ).rejects.toThrow(/durable image/);
+    });
+
+    it('frozen: a Planner change after enqueue does not change what the worker sends', async () => {
+      const original = await durable(scopeA, jpeg, 'original.jpg');
+      const replacement = await durable(scopeA, webp, 'nova.webp');
+      const itemId = await itemWith(scopeA, [
+        { mediaAssetId: original.id, kind: 'product' },
+      ]);
+      const { generationId } = await enqueue(scopeA, {
+        prompt: 'café',
+        contentItemId: itemId,
+      });
+
+      // The operator swaps the item's reference before the worker runs.
+      await db.query(
+        'DELETE FROM social_content_references WHERE content_item_id = $1',
+        [itemId],
+      );
+      await linkPlanner(scopeA, itemId, replacement.id, 'style', 0);
+
+      provider.script.push(() => ok(1));
+      await worker('w-ref').processPending();
+      expect((await row(generationId)).status).toBe('completed');
+      const [call] = provider.calls;
+      expect(call.references).toHaveLength(1);
+      expect(call.references[0].body.equals(jpeg)).toBe(true);
+      expect(call.references[0].role).toBe('subject');
+      expect((await frozenRows(generationId))[0].media_asset_id).toBe(
+        original.id,
+      );
+    });
+
+    it('rows are immutable provenance; none can be added after enqueue, or with another checksum or item', async () => {
+      const mediaA = await durable(scopeA, image);
+      const other = await durable(scopeA, jpeg);
+      const itemId = await itemWith(scopeA, [
+        { mediaAssetId: mediaA.id, kind: 'product' },
+      ]);
+      const { generationId } = await enqueue(scopeA, {
+        prompt: 'x',
+        contentItemId: itemId,
+      });
+
+      for (const sql of [
+        `UPDATE social_creative_generation_references SET kind = 'style' WHERE generation_id = $1`,
+        `UPDATE social_creative_generation_references SET checksum = repeat('0', 64) WHERE generation_id = $1`,
+        `DELETE FROM social_creative_generation_references WHERE generation_id = $1`,
+      ])
+        await expect(db.query(sql, [generationId])).rejects.toThrow(
+          /frozen|provenance/,
+        );
+
+      const insertFor = (
+        target: string,
+        id: string,
+        source = 'operator',
+        checksum?: string,
+      ) =>
+        db.query(
+          `INSERT INTO social_creative_generation_references
+             (generation_id, position, source, kind, role, media_asset_id, mime_type, byte_size, checksum)
+           SELECT $1, 5, $3, 'product', 'subject', id, mime_type, byte_size, COALESCE($4, checksum)
+             FROM media_assets WHERE id = $2`,
+          [target, id, source, checksum ?? null],
+        );
+      // A fresh generation, but a checksum that is not the media's.
+      const fresh = await enqueue(scopeA, {
+        prompt: 'y',
+        contentItemId: itemId,
+        references: [],
+      });
+      await expect(
+        insertFor(fresh.generationId, other.id, 'operator', '0'.repeat(64)),
+      ).rejects.toThrow(/durable image/);
+      // `planner` must be a reference of the generation's item.
+      await expect(
+        insertFor(fresh.generationId, other.id, 'planner'),
+      ).rejects.toThrow(/content item/);
+      // After the claim nothing can be added.
+      provider.script.push(() => ok(1));
+      await worker('w-ref').processPending();
+      await expect(insertFor(generationId, other.id)).rejects.toThrow(
+        /frozen at enqueue/,
+      );
+    });
+
+    it('a pending generation holds its media; once terminal, the media is free and provenance stays', async () => {
+      const mediaA = await durable(scopeA, image);
+      const { generationId } = await enqueue(scopeA, {
+        prompt: 'x',
+        references: [{ source: 'operator', id: mediaA.id, kind: 'product' }],
+      });
+      for (const sql of [
+        'UPDATE media_assets SET deleted_at = now() WHERE id = $1',
+        "UPDATE media_assets SET storage_path = 'elsewhere.png' WHERE id = $1",
+        `UPDATE media_assets SET checksum = repeat('1', 64) WHERE id = $1`,
+        'DELETE FROM media_assets WHERE id = $1',
+      ])
+        await expect(db.query(sql, [mediaA.id])).rejects.toThrow(
+          /pending generation/,
+        );
+
+      provider.script.push(() => ok(1));
+      await worker('w-ref').processPending();
+      expect((await row(generationId)).status).toBe('completed');
+      await db.query(
+        'UPDATE media_assets SET deleted_at = now() WHERE id = $1',
+        [mediaA.id],
+      );
+      await db.query('DELETE FROM media_assets WHERE id = $1', [mediaA.id]);
+      const [kept] = await frozenRows(generationId);
+      expect(kept).toEqual(
+        expect.objectContaining({
+          media_asset_id: mediaA.id,
+          checksum: sha(image),
+          dispatch_started_at: expect.any(Date),
+        }),
+      );
+    });
+
+    it('dispatch_started_at records an attempt started — not delivery — and keeps the first value across retries', async () => {
+      const mediaA = await durable(scopeA, image);
+      const { generationId } = await enqueue(scopeA, {
+        prompt: 'x',
+        references: [{ source: 'operator', id: mediaA.id, kind: 'product' }],
+      });
+      // Attempt 1: no response came back (nothing provably received or paid).
+      provider.script.push(() =>
+        Promise.reject(new ImageGenerationProviderError('timeout', true)),
+      );
+      await worker('w-dispatch').processPending();
+      const afterFirst = await row(generationId);
+      expect(afterFirst).toEqual(
+        expect.objectContaining({ status: 'queued', usage_metrics: null }),
+      );
+      const [{ dispatch_started_at: first }] = await frozenRows(generationId);
+      expect(first).toEqual(expect.any(Date));
+
+      // Write-once at the database too.
+      await expect(
+        db.query(
+          `UPDATE social_creative_generation_references
+              SET dispatch_started_at = now() + interval '1 hour'
+            WHERE generation_id = $1`,
+          [generationId],
+        ),
+      ).rejects.toThrow(/frozen at enqueue/);
+
+      // Attempt 2 succeeds; the first start time is kept.
+      await db.query(
+        'UPDATE social_creative_generations SET available_at = now() WHERE id = $1',
+        [generationId],
+      );
+      provider.script.push(() => ok(1));
+      await worker('w-dispatch').processPending();
+      expect((await row(generationId)).status).toBe('completed');
+      const [{ dispatch_started_at: kept }] = await frozenRows(generationId);
+      expect(kept).toEqual(first);
+      expect(provider.calls).toHaveLength(2);
+    });
+
+    it('a lease lost before the stamp dispatches nothing and stamps nothing', async () => {
+      const mediaA = await durable(scopeA, image);
+      const { generationId } = await enqueue(scopeA, {
+        prompt: 'x',
+        references: [{ source: 'operator', id: mediaA.id, kind: 'product' }],
+      });
+      const stale = worker('w-stale');
+      // Another worker takes the generation over between claim and stamp.
+      const original = (stale as unknown as { dataSource: DataSource })
+        .dataSource;
+      const takeover = Object.create(original) as DataSource;
+      takeover.query = (async (sql: string, params?: unknown[]) => {
+        if (sql.includes('UPDATE social_creative_generation_references'))
+          await original.query(
+            `UPDATE social_creative_generations SET locked_by = 'w-other' WHERE id = $1`,
+            [generationId],
+          );
+        return original.query(sql, params);
+      }) as DataSource['query'];
+      (stale as unknown as { dataSource: DataSource }).dataSource = takeover;
+
+      await stale.processPending();
+      expect(provider.calls).toHaveLength(0);
+      const [{ dispatch_started_at: stamp }] = await frozenRows(generationId);
+      expect(stamp).toBeNull();
+      expect(await row(generationId)).toEqual(
+        expect.objectContaining({ status: 'processing', locked_by: 'w-other' }),
+      );
+    });
+
+    it('a Brand Kit image deleted before the worker reads it fails the generation — nothing sent, nothing substituted', async () => {
+      const logo = await brandAsset(scopeA, 'logo', image);
+      const { generationId } = await enqueue(scopeA, {
+        prompt: 'x',
+        references: [{ source: 'brand', id: logo }],
+      });
+      // The Brand Kit's own delete: tombstone, object, row.
+      await db.query(
+        'UPDATE brand_kit_assets SET deleted_at = now() WHERE id = $1',
+        [logo],
+      );
+      await db.query('DELETE FROM brand_kit_assets WHERE id = $1', [logo]);
+
+      await worker('w-ref').processPending();
+      expect(provider.calls).toHaveLength(0);
+      expect(await row(generationId)).toEqual(
+        expect.objectContaining({
+          status: 'failed',
+          error_code: 'reference_unavailable',
+          error_retryable: false,
+          // No provider call: nothing used, nothing billed.
+          usage_metrics: null,
+          cost_amount: null,
+        }),
+      );
+      const [kept] = await frozenRows(generationId);
+      expect(kept).toEqual(
+        expect.objectContaining({
+          brand_kit_asset_id: logo,
+          dispatch_started_at: null,
+        }),
+      );
+      expect((await generation.get(scopeA, generationId)).error).toEqual(
+        expect.objectContaining({
+          code: 'image_generation_reference_unavailable',
+          retryable: false,
+        }),
+      );
+    });
+
+    it('same key: same selection replays; another photo or another order is a 409', async () => {
+      const a = await durable(scopeA, image);
+      const b = await durable(scopeA, jpeg);
+      const key = randomUUID();
+      const pick = (...ids: string[]) =>
+        enqueue(
+          scopeA,
+          {
+            prompt: 'café',
+            references: ids.map((id) => ({
+              source: 'operator' as const,
+              id,
+              kind: 'product' as const,
+            })),
+          },
+          key,
+        );
+      const first = await pick(a.id, b.id);
+      expect(await pick(a.id, b.id)).toEqual(first);
+      for (const ids of [[a.id], [b.id, a.id]])
+        expect(await pick(...ids).catch((e: unknown) => e)).toBeInstanceOf(
+          ConflictException,
+        );
+      expect(
+        (
+          await db.query(
+            'SELECT count(*)::int AS n FROM social_creative_generations WHERE idempotency_key = $1',
+            [key],
+          )
+        )[0].n,
+      ).toBe(1);
+      expect(await frozenRows(first.generationId)).toHaveLength(2);
     });
   });
 });

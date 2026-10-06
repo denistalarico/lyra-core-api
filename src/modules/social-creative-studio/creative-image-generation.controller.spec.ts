@@ -132,6 +132,16 @@ describe('Creative image generation controller (CS3.1/CS3.2)', () => {
       outputCount: '2',
       aspectRatio: '4:5',
       quality: 'high',
+      contentItemId: '40000000-0000-4000-8000-000000000001',
+      references: [
+        { source: 'brand', id: '70000000-0000-4000-8000-000000000001' },
+        { source: 'planner', id: '71000000-0000-4000-8000-000000000001' },
+        {
+          source: 'operator',
+          id: '72000000-0000-4000-8000-000000000001',
+          kind: 'product',
+        },
+      ],
     });
     expect(
       await validate(ok, { forbidNonWhitelisted: true, whitelist: true }),
@@ -143,6 +153,42 @@ describe('Creative image generation controller (CS3.1/CS3.2)', () => {
       { provider: 'openai' },
       { size: '1024x1024' },
       { companyContextId: 'company-b' },
+      // CS3.4.1: context is resolved server-side, never accepted as data.
+      { agencyClientId: '30000000-0000-4000-8000-000000000001' },
+      { palette: [{ role: 'primary', hex: '#000000' }] },
+      { guidelines: 'x' },
+      { caption: 'x' },
+      { effectivePrompt: 'x' },
+      // CS3.4.2: never bytes, storage keys or URLs for a reference.
+      {
+        references: [
+          {
+            source: 'operator',
+            id: '70000000-0000-4000-8000-000000000001',
+            kind: 'product',
+            storagePath: 'x',
+          },
+        ],
+      },
+      {
+        references: [
+          {
+            source: 'operator',
+            id: '70000000-0000-4000-8000-000000000001',
+            kind: 'product',
+            url: 'https://x',
+          },
+        ],
+      },
+      {
+        references: [
+          {
+            source: 'brand',
+            id: '70000000-0000-4000-8000-000000000001',
+            body: 'iVBOR',
+          },
+        ],
+      },
     ]) {
       const dto = plainToInstance(GenerateCreativeImageDto, {
         prompt: 'x',
@@ -158,6 +204,33 @@ describe('Creative image generation controller (CS3.1/CS3.2)', () => {
       { prompt: 'x', outputCount: 5 },
       { prompt: 'x', aspectRatio: '3:2' },
       { prompt: 'x', quality: 'ultra' },
+      { prompt: 'x', contentItemId: 'not-a-uuid' },
+      // CS3.4.2: references are owner ids of a closed source vocabulary.
+      {
+        prompt: 'x',
+        references: [
+          { source: 'upload', id: '70000000-0000-4000-8000-000000000001' },
+        ],
+      },
+      { prompt: 'x', references: [{ source: 'brand', id: 'not-a-uuid' }] },
+      {
+        prompt: 'x',
+        references: [
+          {
+            source: 'operator',
+            id: '70000000-0000-4000-8000-000000000001',
+            kind: 'logo',
+          },
+        ],
+      },
+      { prompt: 'x', references: 'all' },
+      {
+        prompt: 'x',
+        references: Array.from({ length: 7 }, () => ({
+          source: 'brand',
+          id: '70000000-0000-4000-8000-000000000001',
+        })),
+      },
     ])
       expect(
         await validate(plainToInstance(GenerateCreativeImageDto, bad)),

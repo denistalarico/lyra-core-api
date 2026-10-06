@@ -11,6 +11,7 @@ import {
   SocialContentItemEntity,
   SocialCopyGenerationProposalEntity,
   SocialCopyGenerationRunEntity,
+  SocialContentReferenceEntity,
   SocialDestinationCreativeEntity,
   SocialEditorialPillarEntity,
   SocialPlanEntity,
@@ -32,6 +33,9 @@ import { SocialBrandContextPort } from './services/social-brand-context.port';
 import { SocialPlanGenerationProvider } from './services/social-plan-generation-provider';
 import { SocialPlanGenerationService } from './services/social-plan-generation.service';
 import { SocialPlannerService } from './services/social-planner.service';
+import { SocialContentReferenceService } from './services/social-content-reference.service';
+import { SocialContentReferenceController } from './social-content-reference.controller';
+import { MediaAssetEntity } from '../../common/media-assets/media-asset.entity';
 import { SocialPlannerSettingsService } from './services/social-planner-settings.service';
 import { SocialPublishingCadenceService } from './services/social-publishing-cadence.service';
 
@@ -51,6 +55,14 @@ import { SocialPublishingCadenceService } from './services/social-publishing-cad
          * capability lives in `social-organic`.
          */
         SocialDestinationCreativeEntity,
+        /**
+         * Planner Visual References: links from a content item to durable
+         * images. `MediaAssetEntity` is read only to prove a linked media is
+         * in scope, durable and an image (the upload itself stays in the
+         * media library endpoint).
+         */
+        SocialContentReferenceEntity,
+        MediaAssetEntity,
         SocialContentRevisionEntity,
         /**
          * Copy generation (E8). The runs and their staged proposals live in this
@@ -80,9 +92,10 @@ import { SocialPublishingCadenceService } from './services/social-publishing-cad
       'agency',
     ),
   ],
-  controllers: [SocialPlannerController],
+  controllers: [SocialPlannerController, SocialContentReferenceController],
   providers: [
     SocialPlannerService,
+    SocialContentReferenceService,
     SocialContentLifecycleService,
     SocialPlannerSettingsService,
     SocialPublishingCadenceService,
@@ -129,6 +142,8 @@ import { SocialPublishingCadenceService } from './services/social-publishing-cad
     SocialPlanGenerationService,
     SocialContentPublicationGuard,
     SocialContentProductionStatusService,
+    // Planner Visual References: the Creative Studio reads them through this.
+    SocialContentReferenceService,
   ],
 })
 export class SocialPlannerModule {}

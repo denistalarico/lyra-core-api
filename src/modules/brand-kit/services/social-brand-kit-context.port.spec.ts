@@ -1,3 +1,5 @@
+import { NotFoundException } from '@nestjs/common';
+import { Readable } from 'node:stream';
 import { IsNull } from 'typeorm';
 import { BrandKitAssetEntity, BrandKitEntity } from '../entities';
 import { SocialBrandKitContextPort } from './social-brand-kit-context.port';
@@ -37,7 +39,11 @@ describe('SocialBrandKitContextPort', () => {
   it('returns normalized visual context without storage capabilities', async () => {
     const kits = { findOne: jest.fn().mockResolvedValue(kit) };
     const assets = { find: jest.fn().mockResolvedValue([asset]) };
-    const port = new SocialBrandKitContextPort(kits as never, assets as never);
+    const port = new SocialBrandKitContextPort(
+      kits as never,
+      assets as never,
+      {} as never,
+    );
 
     const result = await port.load({
       tenantId: 'tenant-a',
@@ -74,7 +80,11 @@ describe('SocialBrandKitContextPort', () => {
   it('scopes agency and client reads by tenant, workspace and nullable client id', async () => {
     const kits = { findOne: jest.fn().mockResolvedValue(kit) };
     const assets = { find: jest.fn().mockResolvedValue([]) };
-    const port = new SocialBrandKitContextPort(kits as never, assets as never);
+    const port = new SocialBrandKitContextPort(
+      kits as never,
+      assets as never,
+      {} as never,
+    );
 
     await port.load({
       tenantId: 'tenant-a',
@@ -113,7 +123,11 @@ describe('SocialBrandKitContextPort', () => {
       findOne: jest.fn().mockResolvedValueOnce(kit).mockResolvedValueOnce(null),
     };
     const assets = { find: jest.fn().mockResolvedValue([]) };
-    const port = new SocialBrandKitContextPort(kits as never, assets as never);
+    const port = new SocialBrandKitContextPort(
+      kits as never,
+      assets as never,
+      {} as never,
+    );
     const scope = {
       tenantId: 'tenant-a',
       workspaceId: 'workspace-a',
@@ -135,5 +149,98 @@ describe('SocialBrandKitContextPort', () => {
       assets: [],
     });
     expect(assets.find).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('SocialBrandKitContextPort — binary reads (CS3.4.2)', () => {
+  const scope = {
+    tenantId: 'tenant-a',
+    workspaceId: 'workspace-a',
+    agencyClientId: 'client-a',
+    companyContextId: 'company-a',
+  };
+  const ID = '70000000-0000-4000-8000-000000000001';
+  const row = {
+    id: ID,
+    kind: 'logo',
+    usage: 'asset',
+    mimeType: 'image/png',
+    byteSize: '42',
+    checksum: 'c'.repeat(64),
+    storagePath: 'brand-kit/private/secret.png',
+  };
+
+  function port(found: unknown[], file?: unknown) {
+    const kits = { findOne: jest.fn().mockResolvedValue({ id: 'kit-a' }) };
+    const assets = { find: jest.fn().mockResolvedValue(found) };
+    const files = {
+      getPrivateAsset:
+        file instanceof Error
+          ? jest.fn().mockRejectedValue(file)
+          : jest.fn().mockResolvedValue(file),
+    };
+    return {
+      kits,
+      assets,
+      files,
+      port: new SocialBrandKitContextPort(
+        kits as never,
+        assets as never,
+        files as never,
+      ),
+    };
+  }
+
+  it('resolves identities (with checksum) only inside the scope kit, company included — never the storage key', async () => {
+    const { port: p, kits, assets } = port([row]);
+    const [identity] = await p.resolveAssets(scope, [ID, 'not-a-uuid']);
+    expect(identity).toEqual({
+      id: ID,
+      kind: 'logo',
+      usage: 'asset',
+      mimeType: 'image/png',
+      byteSize: '42',
+      checksum: 'c'.repeat(64),
+    });
+    expect(kits.findOne).toHaveBeenCalledWith({
+      where: {
+        tenantId: 'tenant-a',
+        workspaceId: 'workspace-a',
+        agencyClientId: 'client-a',
+        companyContextId: 'company-a',
+      },
+    });
+    const [[{ where }]] = assets.find.mock.calls as [
+      [{ where: { brandKitId: string; id: { value: string[] } } }],
+    ];
+    expect(where.brandKitId).toBe('kit-a');
+    expect(where.id.value).toEqual([ID]);
+  });
+
+  it('a scope without a kit (other company) resolves and reads nothing', async () => {
+    const { port: p, kits, assets, files } = port([row]);
+    kits.findOne.mockResolvedValue(null);
+    expect(await p.resolveAssets(scope, [ID])).toEqual([]);
+    expect(await p.readAssetContent(scope, ID)).toBeNull();
+    expect(assets.find).not.toHaveBeenCalled();
+    expect(files.getPrivateAsset).not.toHaveBeenCalled();
+  });
+
+  it('reads bytes through FilesService by the row key; a missing object reads as absent', async () => {
+    const body = Buffer.from('png-bytes');
+    const { port: p, files } = port([row], {
+      body: Readable.from([body]),
+      contentType: 'image/png',
+    });
+    const read = await p.readAssetContent(scope, ID);
+    expect(read?.body.equals(body)).toBe(true);
+    expect(files.getPrivateAsset).toHaveBeenCalledWith(row.storagePath);
+
+    const gone = port([row], new NotFoundException());
+    expect(await gone.port.readAssetContent(scope, ID)).toBeNull();
+    const outage = port([row], new Error('S3 down'));
+    await expect(outage.port.readAssetContent(scope, ID)).rejects.toThrow(
+      'S3 down',
+    );
   });
 });

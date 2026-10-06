@@ -1,7 +1,14 @@
-import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { Interval } from '@nestjs/schedule';
 import { InjectDataSource } from '@nestjs/typeorm';
+import { createHash } from 'node:crypto';
 import { hostname } from 'node:os';
+import type { Readable } from 'node:stream';
 import { DataSource } from 'typeorm';
 import {
   detectMediaAssetMimeType,
@@ -9,13 +16,17 @@ import {
   type MediaAssetScope,
   MediaAssetUploadService,
 } from '../../common/media-assets';
+import { SocialBrandKitContextPort } from '../brand-kit/services/social-brand-kit-context.port';
 import { CREATIVE_IMAGE_MAX_BYTES } from './creative-asset.service';
 import { CreativeGenerationConfigService } from './creative-generation-config';
 import {
-  type ImageGenerationFailureCode,
+  type CreativeGenerationFailureCode,
+  IMAGE_GENERATION_REFERENCE_MIME_TYPES,
   ImageGenerationProvider,
   ImageGenerationProviderError,
   type ImageGenerationProviderOutput,
+  type ImageGenerationReference,
+  MAX_IMAGE_GENERATION_REFERENCE_BYTES,
   type ImageGenerationProviderResult,
   type ImageGenerationUsage,
 } from './creative-image-generation.provider';
@@ -24,6 +35,7 @@ import { CREATIVE_GENERATION_MEDIA_SOURCE } from './creative-retention';
 import {
   CreativeGenerationEntity,
   CreativeGenerationOutputEntity,
+  CreativeGenerationReferenceEntity,
   type CreativeGenerationStatus,
 } from './entities';
 
@@ -84,6 +96,7 @@ export class CreativeImageGenerationWorker {
     private readonly provider: ImageGenerationProvider,
     private readonly mediaUpload: MediaAssetUploadService,
     private readonly config: CreativeGenerationConfigService,
+    private readonly brandKit: SocialBrandKitContextPort,
   ) {}
 
   @Interval(5_000)
@@ -191,15 +204,25 @@ export class CreativeImageGenerationWorker {
     let usage: ImageGenerationUsage | null = null;
     let retryAfterSeconds: number | null = null;
     const started = Date.now();
+    let referenceCount = 0;
     try {
+      // CS3.4.2: bytes of the references FROZEN at enqueue, verified against
+      // their checksum. Read before the provider call: a failure here costs
+      // nothing and is never replaced by another image.
+      const references = await this.resolveReferences(scope, generation);
+      referenceCount = references.length;
+      if (references.length && !(await this.markDispatchStarted(generation)))
+        return; // lease lost before the stamp: nothing is dispatched
       let result: ImageGenerationProviderResult;
       try {
         result = await this.provider.generate({
-          prompt: generation.prompt,
+          // CS3.4.1: the composed text frozen at enqueue, never the raw
+          // operator prompt or any live Brand Kit/Planner read.
+          prompt: generation.effectivePrompt,
           outputCount: generation.outputCount,
           aspectRatio: generation.aspectRatio,
           quality: generation.quality,
-          references: [],
+          references,
         });
       } catch (error) {
         // A call that returned and then proved unusable was still paid for.
@@ -217,10 +240,10 @@ export class CreativeImageGenerationWorker {
       if (!(await this.complete(generation, stored, usage))) {
         // Lease lost while working: the generation belongs to someone else now.
         await this.compensate(scope, stored);
-        this.report(generation, usage, started, 'lease_lost');
+        this.report(generation, usage, started, 'lease_lost', referenceCount);
         return;
       }
-      this.report(generation, usage, started, 'completed');
+      this.report(generation, usage, started, 'completed', referenceCount);
     } catch (error) {
       // CS3.3.1: a cleanup error must not skip the terminal write — a paid
       // generation left in `processing` is revived when its lease expires
@@ -237,8 +260,124 @@ export class CreativeImageGenerationWorker {
         usage,
         retryAfterSeconds,
       );
-      this.report(generation, usage, started, status, failure.code);
+      this.report(
+        generation,
+        usage,
+        started,
+        status,
+        referenceCount,
+        failure.code,
+      );
     }
+  }
+
+  /**
+   * CS3.4.2 — the generation's persisted references, in `position` order,
+   * read through their owners (Brand Kit port / shared media boundary) in
+   * the generation's own four-part scope. Never the current Planner or Brand
+   * Kit selection: what was accepted is what is sent, or nothing is.
+   *
+   * Unreadable (gone, out of scope, tombstoned, temporary) or not the bytes
+   * that were frozen (checksum, sniffed type, size) → `reference_unavailable`,
+   * final: retrying cannot bring a deleted image back, and substituting one
+   * would be a different request. A storage outage is retryable — nothing
+   * was sent or paid yet.
+   */
+  private async resolveReferences(
+    scope: MediaAssetScope,
+    generation: CreativeGenerationEntity,
+  ): Promise<ImageGenerationReference[]> {
+    const rows = await this.dataSource
+      .getRepository(CreativeGenerationReferenceEntity)
+      .find({
+        where: { generationId: generation.id },
+        order: { position: 'ASC' },
+      });
+    const references: ImageGenerationReference[] = [];
+    for (const row of rows) {
+      let body: Buffer | null;
+      try {
+        body = await this.readReference(scope, row);
+      } catch (error) {
+        this.logger.warn(
+          `generation=${generation.id} reference=${row.position} read failed: ${(error as Error)?.name ?? typeof error}`,
+        );
+        throw new CreativeImageGenerationException('unavailable', true);
+      }
+      const sniffed = body ? detectMediaAssetMimeType(body) : null;
+      if (
+        !body ||
+        body.length === 0 ||
+        body.length > MAX_IMAGE_GENERATION_REFERENCE_BYTES ||
+        createHash('sha256').update(body).digest('hex') !== row.checksum ||
+        sniffed !== row.mimeType ||
+        !(IMAGE_GENERATION_REFERENCE_MIME_TYPES as readonly string[]).includes(
+          sniffed,
+        )
+      ) {
+        this.logger.warn(
+          `generation=${generation.id} reference=${row.position} source=${row.source} unavailable`,
+        );
+        throw new CreativeImageGenerationException(
+          'reference_unavailable',
+          false,
+        );
+      }
+      references.push({ role: row.role, mimeType: row.mimeType, body });
+    }
+    return references;
+  }
+
+  /** `null` = not readable in this scope (absence and denial look alike). */
+  private async readReference(
+    scope: MediaAssetScope,
+    row: CreativeGenerationReferenceEntity,
+  ): Promise<Buffer | null> {
+    if (row.brandKitAssetId) {
+      const asset = await this.brandKit.readAssetContent(
+        scope,
+        row.brandKitAssetId,
+      );
+      return asset?.body ?? null;
+    }
+    try {
+      // Durable, in-scope, not tombstoned — the shared read rule.
+      const { file } = await this.mediaUpload.getContent(
+        scope,
+        row.mediaAssetId as string,
+      );
+      return await readAll(file.body);
+    } catch (error) {
+      if (error instanceof NotFoundException) return null;
+      throw error;
+    }
+  }
+
+  /**
+   * Stamps `dispatch_started_at`: the first time a worker holding the lease,
+   * with every reference verified, STARTS a provider attempt. Written before
+   * the call, so it records an attempt begun — never that the provider
+   * received, billed or answered (the process may die before `fetch`).
+   * Guarded by the lease: a worker that lost the generation stamps nothing and
+   * dispatches nothing. Write-once: retries keep the first value.
+   */
+  private async markDispatchStarted(
+    generation: CreativeGenerationEntity,
+  ): Promise<boolean> {
+    const rows = returnedRows<{ id: string }>(
+      await this.dataSource.query(
+        `UPDATE social_creative_generation_references reference
+            SET dispatch_started_at = COALESCE(reference.dispatch_started_at, now())
+           FROM social_creative_generations generation
+          WHERE reference.generation_id = $1
+            AND generation.id = reference.generation_id
+            AND generation.status = 'processing'
+            AND generation.locked_by = $2
+          RETURNING reference.id`,
+        [generation.id, this.workerId],
+      ),
+    );
+    return rows.length > 0;
   }
 
   /** One line per attempt: ids, provider, model, outcome, duration. Never the prompt. */
@@ -247,10 +386,11 @@ export class CreativeImageGenerationWorker {
     usage: ImageGenerationUsage | null,
     started: number,
     outcome: string,
+    references: number,
     code?: string,
   ) {
     this.logger.log(
-      `generation=${generation.id} attempt=${generation.attempts}/${generation.maxAttempts} provider=${this.provider.id} model=${usage?.model?.slice(0, 120) ?? '-'} outcome=${outcome}${code ? ` code=${code}` : ''} durationMs=${Date.now() - started}`,
+      `generation=${generation.id} attempt=${generation.attempts}/${generation.maxAttempts} provider=${this.provider.id} model=${usage?.model?.slice(0, 120) ?? '-'} references=${references} outcome=${outcome}${code ? ` code=${code}` : ''} durationMs=${Date.now() - started}`,
     );
   }
 
@@ -485,7 +625,7 @@ export class CreativeImageGenerationWorker {
     return this.failure('invalid_output', false);
   }
 
-  private failure(code: ImageGenerationFailureCode, retryable: boolean) {
+  private failure(code: CreativeGenerationFailureCode, retryable: boolean) {
     this.logger.warn(`provider=${this.provider.id} code=${code}`);
     return new CreativeImageGenerationException(code, retryable);
   }
@@ -503,3 +643,10 @@ const USAGE_SET = `
                      ELSE COALESCE(cost_amount, 0) + $6::numeric END,
   cost_currency = COALESCE(cost_currency, $7::char(3)),
   updated_at = now()`;
+
+async function readAll(stream: Readable): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of stream)
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as string));
+  return Buffer.concat(chunks);
+}

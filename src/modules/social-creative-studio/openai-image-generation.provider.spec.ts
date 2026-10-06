@@ -8,6 +8,7 @@ import {
 import {
   OPENAI_IMAGE_QUALITY,
   OPENAI_IMAGE_SIZE,
+  OPENAI_IMAGES_EDITS_URL,
   OPENAI_IMAGES_GENERATIONS_URL,
   OpenAIImageGenerationProvider,
 } from './openai-image-generation.provider';
@@ -194,25 +195,46 @@ describe('OpenAIImageGenerationProvider (CS3.3)', () => {
       });
     });
 
-    it('refuses reference images instead of silently dropping them (edits are CS3.4)', async () => {
-      const provider = new OpenAIImageGenerationProvider(config());
-      const error = await failure(
-        provider.generate(
-          request({
-            references: [
-              { role: 'subject', mimeType: 'image/png', body: PNG_A },
-            ],
-          }),
-        ),
-      );
-      expect([error.code, error.retryable]).toEqual(['failed', false]);
-      expect(fetchMock).not.toHaveBeenCalled();
-    });
-
     it.each([
       ['an out-of-contract output count', { outputCount: 5 }],
       ['an unknown aspect ratio', { aspectRatio: '3:2' }],
       ['an unknown quality', { quality: 'max' }],
+      [
+        'more references than the technical limit',
+        {
+          references: Array.from({ length: 7 }, () => ({
+            role: 'subject',
+            mimeType: 'image/png',
+            body: PNG_A,
+          })),
+        },
+      ],
+      [
+        'a reference format OpenAI does not take',
+        {
+          references: [{ role: 'subject', mimeType: 'image/gif', body: PNG_A }],
+        },
+      ],
+      [
+        'an empty reference',
+        {
+          references: [
+            { role: 'subject', mimeType: 'image/png', body: Buffer.alloc(0) },
+          ],
+        },
+      ],
+      [
+        'a reference over the per-image limit',
+        {
+          references: [
+            {
+              role: 'subject',
+              mimeType: 'image/png',
+              body: Buffer.alloc(16 * 1024 * 1024 + 1),
+            },
+          ],
+        },
+      ],
     ])('refuses %s without calling OpenAI', async (_label, patch) => {
       const provider = new OpenAIImageGenerationProvider(config());
       const error = await failure(
@@ -571,5 +593,158 @@ describe('OpenAIImageGenerationProvider (CS3.3)', () => {
       expect(logs.join('\n')).not.toContain(API_KEY);
       expect(logs.join('\n')).toContain('reason=http_400 ');
     });
+  });
+});
+
+describe('OpenAIImageGenerationProvider — reference images via /edits (CS3.4.2)', () => {
+  const JPEG = Buffer.concat([
+    Buffer.from([0xff, 0xd8, 0xff]),
+    Buffer.alloc(24, 3),
+  ]);
+  let fetchMock: jest.SpyInstance;
+  let logs: string[];
+  beforeEach(() => {
+    fetchMock = jest.spyOn(global, 'fetch');
+    logs = [];
+    for (const level of ['log', 'warn', 'error'] as const)
+      jest
+        .spyOn(Logger.prototype, level)
+        .mockImplementation((message: unknown) => {
+          logs.push(String(message));
+        });
+  });
+  afterEach(() => jest.restoreAllMocks());
+
+  const withRefs = (patch: Partial<ImageGenerationProviderInput> = {}) =>
+    request({
+      outputCount: 2,
+      quality: 'high',
+      aspectRatio: '9:16',
+      references: [
+        { role: 'subject', mimeType: 'image/jpeg', body: JPEG },
+        { role: 'logo', mimeType: 'image/png', body: PNG_A },
+      ],
+      ...patch,
+    });
+
+  it('routes 0 references to /generations (JSON) and 1+ to /edits (multipart)', async () => {
+    fetchMock
+      .mockResolvedValueOnce(ok([PNG_A]))
+      .mockResolvedValueOnce(ok([PNG_A]));
+    const provider = new OpenAIImageGenerationProvider(config());
+    await provider.generate(request());
+    await provider.generate(withRefs({ outputCount: 1 }));
+    expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
+      OPENAI_IMAGES_GENERATIONS_URL,
+      OPENAI_IMAGES_EDITS_URL,
+    ]);
+    expect(OPENAI_IMAGES_EDITS_URL).toBe(
+      'https://api.openai.com/v1/images/edits',
+    );
+  });
+
+  it('builds the documented multipart request: image[] in order with real bytes and mime, Lyra vocabulary mapped', async () => {
+    fetchMock.mockResolvedValueOnce(ok([PNG_A, PNG_B]));
+    const provider = new OpenAIImageGenerationProvider(config());
+    const result = await provider.generate(withRefs());
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(init.method).toBe('POST');
+    expect(init.redirect).toBe('error');
+    // fetch must set multipart/form-data with its own boundary.
+    expect(init.headers).toEqual({ Authorization: `Bearer ${API_KEY}` });
+    const form = init.body as FormData;
+    expect(form).toBeInstanceOf(FormData);
+    expect([...form.keys()].filter((key) => key !== 'image[]').sort()).toEqual([
+      'model',
+      'n',
+      'output_format',
+      'prompt',
+      'quality',
+      'size',
+    ]);
+    expect(form.get('model')).toBe('gpt-image-2.5-flare-2026-09-08');
+    expect(form.get('prompt')).toBe(PROMPT);
+    expect(form.get('n')).toBe('2');
+    expect(form.get('size')).toBe('864x1536');
+    expect(form.get('quality')).toBe('high');
+    expect(form.get('output_format')).toBe('png');
+    // GPT Image 2.x rejects it; no mask either (reference workflow).
+    expect(form.has('input_fidelity')).toBe(false);
+    expect(form.has('mask')).toBe(false);
+    expect(form.has('image')).toBe(false);
+
+    const images = form.getAll('image[]') as File[];
+    expect(images.map((file) => [file.name, file.type])).toEqual([
+      ['reference-1.jpg', 'image/jpeg'],
+      ['reference-2.png', 'image/png'],
+    ]);
+    expect(Buffer.from(await images[0].arrayBuffer()).equals(JPEG)).toBe(true);
+    expect(Buffer.from(await images[1].arrayBuffer()).equals(PNG_A)).toBe(true);
+
+    // Same response handling as /generations.
+    expect(
+      result.outputs.map((o) => o.body.equals(PNG_A) || o.body.equals(PNG_B)),
+    ).toEqual([true, true]);
+    expect(result.usage?.metrics).toEqual(
+      expect.objectContaining({ input_image_tokens: 0, images: 2 }),
+    );
+    expect(logs.join('\n')).toMatch(/endpoint=edits references=2 http=200/);
+  });
+
+  it('keeps retry safety on /edits: network/timeout/429/5xx retryable, any 2xx failure final', async () => {
+    const provider = new OpenAIImageGenerationProvider(config());
+    const failure = async (response: Response | Error) => {
+      if (response instanceof Error) fetchMock.mockRejectedValueOnce(response);
+      else fetchMock.mockResolvedValueOnce(response);
+      const error = await provider
+        .generate(withRefs())
+        .catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(ImageGenerationProviderError);
+      const e = error as ImageGenerationProviderError;
+      return [e.code, e.retryable];
+    };
+    expect(
+      await failure(Object.assign(new Error('t'), { name: 'TimeoutError' })),
+    ).toEqual(['timeout', true]);
+    expect(await failure(new TypeError('fetch failed'))).toEqual([
+      'unavailable',
+      true,
+    ]);
+    expect(await failure(apiError(429, 'rate_limit_exceeded'))).toEqual([
+      'rate_limited',
+      true,
+    ]);
+    expect(await failure(apiError(503, null))).toEqual(['unavailable', true]);
+    expect(await failure(apiError(400, 'moderation_blocked'))).toEqual([
+      'rejected',
+      false,
+    ]);
+    expect(await failure(apiError(400, 'invalid_image_format'))).toEqual([
+      'failed',
+      false,
+    ]);
+    expect(
+      await failure(
+        new Response(
+          JSON.stringify({ data: [{ b64_json: '@@' }], usage: USAGE }),
+          { status: 200 },
+        ),
+      ),
+    ).toEqual(['invalid_output', false]);
+  });
+
+  it('never logs or throws the key, prompt or image bytes', async () => {
+    fetchMock.mockResolvedValueOnce(apiError(400, 'invalid_value'));
+    const provider = new OpenAIImageGenerationProvider(config());
+    const error = await provider.generate(withRefs()).catch((e: unknown) => e);
+    const text = `${logs.join('\n')}\n${(error as Error).message}`;
+    for (const secret of [
+      API_KEY,
+      PROMPT,
+      JPEG.toString('base64'),
+      PNG_A.toString('base64'),
+    ])
+      expect(text).not.toContain(secret);
   });
 });

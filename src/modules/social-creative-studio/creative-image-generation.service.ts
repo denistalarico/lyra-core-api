@@ -22,12 +22,26 @@ import {
 } from './creative-asset.service';
 import { CreativeGenerationConfigService } from './creative-generation-config';
 import {
+  CreativeGenerationContextService,
+  generationContextRecord,
+} from './creative-generation-context';
+import {
+  type CreativeGenerationReferenceSelection,
+  CreativeGenerationReferenceSelector,
+  type CreativeGenerationReferenceSource,
+} from './creative-generation-references';
+import {
+  type CreativeGenerationFailureCode,
   type CreativeImageAspectRatio,
   type CreativeImageQuality,
-  type ImageGenerationFailureCode,
   ImageGenerationProvider,
+  type ImageGenerationReferenceRole,
   MAX_IMAGE_GENERATION_OUTPUTS,
 } from './creative-image-generation.provider';
+import {
+  composeCreativeImagePrompt,
+  CREATIVE_IMAGE_PROMPT_COMPOSER_VERSION,
+} from './creative-image-prompt.composer';
 import {
   CREATIVE_GENERATION_MEDIA_SOURCE,
   type CreativeRetentionClass,
@@ -39,20 +53,28 @@ import {
   CreativeGenerationEntity,
   CreativeGenerationOutputEntity,
   type CreativeGenerationPromotionKind,
+  CreativeGenerationReferenceEntity,
   type CreativeGenerationStatus,
 } from './entities';
 
 /**
- * Lyra's request vocabulary. Brand Kit and Planner context will be added as
- * REFERENCES (ids resolved server-side under the same scope), never as copied
- * fields: the Brand Kit stays in Social Settings and copy/caption stay in the
- * Planner.
+ * Lyra's request vocabulary. Context arrives as REFERENCES only (CS3.4.1):
+ * `contentItemId` is resolved server-side under the caller's scope, and the
+ * Brand Kit comes from the scope itself. Palette, guidelines, copy or scope
+ * ids are never accepted from the client — the Brand Kit stays in Social
+ * Settings and copy/caption stay in the Planner.
  */
 export type CreativeImageGenerationRequest = {
   prompt: string;
+  contentItemId?: string | null;
   outputCount?: number;
   aspectRatio?: CreativeImageAspectRatio;
   quality?: CreativeImageQuality;
+  /**
+   * CS3.4.2 — explicit, ordered reference selection. Omitted = the default
+   * rule (the item's Planner references, in Planner order); `[]` = none.
+   */
+  references?: CreativeGenerationReferenceSelection[];
 };
 
 /**
@@ -90,12 +112,28 @@ export type CreativeImageGenerationView = {
   generationId: string;
   type: 'image';
   status: CreativeGenerationStatus;
+  /** `prompt` is the operator's text; the composed prompt stays internal. */
   request: {
     prompt: string;
+    contentItemId: string | null;
     outputCount: number;
     aspectRatio: CreativeImageAspectRatio;
     quality: CreativeImageQuality;
   };
+  /**
+   * CS3.4.2 — the references frozen for this generation, in the order sent
+   * ("Image 1..N"). Owner ids only: no storage key, checksum or URL.
+   */
+  references: {
+    position: number;
+    source: CreativeGenerationReferenceSource;
+    /** Brand Kit asset id (`brand`) or media asset id (`planner`/`operator`). */
+    id: string;
+    kind: string;
+    role: ImageGenerationReferenceRole;
+    /** First dispatch attempt started; not proof the provider received it. */
+    dispatchStartedAt: string | null;
+  }[];
   outputs: CreativeGeneratedOutputView[];
   error: { code: string; message: string; retryable: boolean } | null;
   createdAt: string;
@@ -116,7 +154,7 @@ export type PromoteToVersionInput = {
 };
 
 const FAILURES: Record<
-  ImageGenerationFailureCode,
+  CreativeGenerationFailureCode,
   { status: number; message: string }
 > = {
   unavailable: {
@@ -144,6 +182,13 @@ const FAILURES: Record<
     status: HttpStatus.BAD_GATEWAY,
     message: 'A geração retornou um resultado inválido. Tente novamente.',
   },
+  // CS3.4.2: a frozen reference could not be read (deleted, replaced) before
+  // the provider call. Nothing was sent or billed; nothing is substituted.
+  reference_unavailable: {
+    status: HttpStatus.UNPROCESSABLE_ENTITY,
+    message:
+      'Uma imagem de referência não está mais disponível. Revise as referências e gere novamente.',
+  },
 };
 
 /**
@@ -153,7 +198,7 @@ const FAILURES: Record<
  */
 export class CreativeImageGenerationException extends HttpException {
   constructor(
-    readonly code: ImageGenerationFailureCode,
+    readonly code: CreativeGenerationFailureCode,
     readonly retryable: boolean,
   ) {
     const { status, message } = FAILURES[code];
@@ -177,6 +222,8 @@ const OUTPUT_NOT_FOUND = 'Imagem gerada não encontrada.';
 /** Same rule as the Inbox `Idempotency-Key` headers. */
 const IDEMPOTENCY_KEY = /^[A-Za-z0-9._:-]{1,180}$/;
 const IDEMPOTENCY_INDEX = 'UQ_social_creative_generations_idempotency';
+/** Callers outside HTTP skip the DTO; a malformed id must not reach SQL. */
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
  * CS3.2 — the API side of asynchronous image generation.
@@ -205,6 +252,10 @@ export class CreativeImageGenerationService {
     private readonly mediaUpload: MediaAssetUploadService,
     private readonly assets: CreativeAssetService,
     private readonly versionApprovals: CreativeVersionApprovalService,
+    private readonly context: CreativeGenerationContextService,
+    private readonly referenceSelector: CreativeGenerationReferenceSelector,
+    @InjectRepository(CreativeGenerationReferenceEntity, 'agency')
+    private readonly references: Repository<CreativeGenerationReferenceEntity>,
   ) {}
 
   /**
@@ -217,6 +268,18 @@ export class CreativeImageGenerationService {
    * it (retrying the provider is the worker's job). The same key with another
    * request is a 409. The unique index decides concurrent requests; the
    * lookup before the INSERT is only the fast path for plain retries.
+   *
+   * CS3.4.1 — the context is resolved BEFORE the idempotency lookup because
+   * it is part of the request's identity: the same key and the same typed
+   * prompt over a different Brand Kit or Planner content is a different
+   * intent (409), not a replay. The effective prompt is composed and frozen
+   * here, so the worker sends exactly what was accepted.
+   *
+   * CS3.4.2 — the reference selection is resolved with the context, for the
+   * same reason: the ordered images (with their checksums) are part of the
+   * intent. They are inserted with the generation in one transaction, so the
+   * worker can never claim a generation whose references are not there yet.
+   * No bytes are read here — only owner rows (scope, mime, size, checksum).
    */
   async enqueue(
     scope: CreativeStudioScope,
@@ -226,7 +289,17 @@ export class CreativeImageGenerationService {
   ): Promise<CreativeImageGenerationAccepted> {
     const key = requireIdempotencyKey(idempotencyKey);
     const input = this.validRequest(request);
-    const fingerprint = imageRequestFingerprint(input);
+    const context = await this.context.resolve(scope, input.contentItemId);
+    const plan = await this.referenceSelector.select(
+      scope,
+      context,
+      request.references,
+    );
+    const fingerprint = imageRequestFingerprint({
+      ...input,
+      contextDigest: context.digest,
+      referencesDigest: plan.digest,
+    });
 
     const existing = await this.findByIdempotencyKey(scope, key);
     if (existing) return this.replayEnqueue(existing, fingerprint);
@@ -237,21 +310,57 @@ export class CreativeImageGenerationService {
       throw new CreativeImageGenerationException('unavailable', false);
     let saved: CreativeGenerationEntity;
     try {
-      saved = await this.generations.save(
-        this.generations.create({
-          tenantId: scope.tenantId,
-          workspaceId: scope.workspaceId,
-          agencyClientId: scope.agencyClientId,
-          companyContextId: scope.companyContextId,
-          generationType: 'image',
-          status: 'queued',
-          ...input,
-          idempotencyKey: key,
-          requestFingerprint: fingerprint,
-          maxAttempts: this.config.maxAttempts,
-          requestedById: actor,
-        }),
-      );
+      saved = await this.generations.manager.transaction(async (manager) => {
+        const generations = manager.withRepository(this.generations);
+        const generation = await generations.save(
+          generations.create({
+            tenantId: scope.tenantId,
+            workspaceId: scope.workspaceId,
+            agencyClientId: scope.agencyClientId,
+            companyContextId: scope.companyContextId,
+            generationType: 'image',
+            status: 'queued',
+            prompt: input.prompt,
+            contentItemId: input.contentItemId,
+            outputCount: input.outputCount,
+            aspectRatio: input.aspectRatio,
+            quality: input.quality,
+            effectivePrompt: composeCreativeImagePrompt({
+              prompt: input.prompt,
+              aspectRatio: input.aspectRatio,
+              brand: context.brand,
+              content: context.content,
+              references: plan.references,
+            }),
+            generationContext: generationContextRecord(
+              context,
+              CREATIVE_IMAGE_PROMPT_COMPOSER_VERSION,
+              plan,
+            ),
+            idempotencyKey: key,
+            requestFingerprint: fingerprint,
+            maxAttempts: this.config.maxAttempts,
+            requestedById: actor,
+          }),
+        );
+        // Sequential on purpose: one transaction client, one query at a time.
+        for (const [position, ref] of plan.references.entries())
+          await manager
+            .getRepository(CreativeGenerationReferenceEntity)
+            .insert({
+              generationId: generation.id,
+              position,
+              source: ref.source,
+              kind: ref.kind,
+              role: ref.role,
+              brandKitAssetId: ref.source === 'brand' ? ref.assetId : null,
+              mediaAssetId: ref.source === 'brand' ? null : ref.assetId,
+              mimeType: ref.mimeType,
+              byteSize: String(ref.byteSize),
+              checksum: ref.checksum,
+            });
+        return generation;
+      });
     } catch (error) {
       if (!isIdempotencyViolation(error)) throw error;
       // Lost the race: the winner's row is committed by the time Postgres
@@ -327,6 +436,10 @@ export class CreativeImageGenerationService {
         })
       : [];
     const mediaById = new Map(media.map((asset) => [asset.id, asset]));
+    const references = await this.references.find({
+      where: { generationId: generation.id },
+      order: { position: 'ASC' },
+    });
 
     return {
       generationId: generation.id,
@@ -334,10 +447,19 @@ export class CreativeImageGenerationService {
       status: generation.status,
       request: {
         prompt: generation.prompt,
+        contentItemId: generation.contentItemId,
         outputCount: generation.outputCount,
         aspectRatio: generation.aspectRatio,
         quality: generation.quality,
       },
+      references: references.map((ref) => ({
+        position: ref.position,
+        source: ref.source,
+        id: (ref.brandKitAssetId ?? ref.mediaAssetId) as string,
+        kind: ref.kind,
+        role: ref.role,
+        dispatchStartedAt: ref.dispatchStartedAt?.toISOString() ?? null,
+      })),
       outputs: outputs.map((output) =>
         this.outputView(
           output,
@@ -564,6 +686,17 @@ export class CreativeImageGenerationService {
   private validRequest(request: CreativeImageGenerationRequest) {
     const prompt = request.prompt?.trim();
     if (!prompt) throw new BadRequestException('Descreva a imagem desejada.');
+    const contentItemId = request.contentItemId ?? null;
+    if (contentItemId !== null && !UUID.test(contentItemId))
+      throw new BadRequestException({
+        code: 'content_item_not_found',
+        message: 'Conteúdo não encontrado.',
+      });
+    if (request.references !== undefined && !Array.isArray(request.references))
+      throw new BadRequestException({
+        code: 'reference_not_found',
+        message: 'Imagem de referência não encontrada.',
+      });
     const outputCount = request.outputCount ?? 1;
     if (
       !Number.isInteger(outputCount) ||
@@ -575,6 +708,7 @@ export class CreativeImageGenerationService {
       );
     return {
       prompt,
+      contentItemId,
       outputCount,
       aspectRatio: request.aspectRatio ?? ('1:1' as const),
       quality: request.quality ?? ('standard' as const),
@@ -626,23 +760,40 @@ function requireIdempotencyKey(value: string | undefined) {
 
 /**
  * sha256 of the normalized business request: defaults applied and the prompt
- * trimmed (exactly what is stored and sent to the provider), serialized with
- * a fixed field order. `outputCount` omitted and `outputCount: 1` are the
- * same request. Scope, actor, time and queue state stay out — scope is part
- * of the unique key instead. The version prefix lets the fields evolve.
+ * trimmed, serialized with a fixed field order. `outputCount` omitted and
+ * `outputCount: 1` are the same request. Scope, actor, time and queue state
+ * stay out — scope is part of the unique key instead.
+ *
+ * `image.v2` (CS3.4.1) adds the intent's context: the Planner item and the
+ * Generation Context digest (normalized creative facts + reference
+ * identities; no timestamps, no volatile ids). The composer version is left
+ * out on purpose — a recipe deploy must not turn a client retry into a 409.
+ * Rows fingerprinted as `image.v1` simply never match a v2 request.
+ *
+ * `image.v3` (CS3.4.2) adds the SELECTED references: their ordered identities
+ * and checksums (`referencesDigest`, NULL = none). Order counts — the prompt
+ * names images by position. The available set stays in `contextDigest`.
+ * Whether the selection was explicit or the default does not: the same
+ * images in the same order are the same request.
  */
 export function imageRequestFingerprint(input: {
   prompt: string;
+  contentItemId: string | null;
   outputCount: number;
   aspectRatio: CreativeImageAspectRatio;
   quality: CreativeImageQuality;
+  contextDigest: string;
+  referencesDigest: string | null;
 }) {
   const canonical = JSON.stringify([
-    'image.v1',
+    'image.v3',
     input.prompt,
+    input.contentItemId,
     input.outputCount,
     input.aspectRatio,
     input.quality,
+    input.contextDigest,
+    input.referencesDigest,
   ]);
   return createHash('sha256').update(canonical).digest('hex');
 }

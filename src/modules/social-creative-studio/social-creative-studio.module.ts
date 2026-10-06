@@ -10,6 +10,8 @@ import { CreativeAssetService } from './creative-asset.service';
 import { CreativeStudioBrandContextService } from './creative-brand-context.service';
 import { CreativeFolderService } from './creative-folder.service';
 import { CreativeGenerationConfigService } from './creative-generation-config';
+import { CreativeGenerationContextService } from './creative-generation-context';
+import { CreativeGenerationReferenceSelector } from './creative-generation-references';
 import { CreativeImageGenerationController } from './creative-image-generation.controller';
 import { bindImageGenerationProvider } from './creative-image-generation.binding';
 import { ImageGenerationProvider } from './creative-image-generation.provider';
@@ -25,6 +27,7 @@ import {
   CreativeFolderEntity,
   CreativeGenerationEntity,
   CreativeGenerationOutputEntity,
+  CreativeGenerationReferenceEntity,
 } from './entities';
 import {
   SocialContentItemEntity,
@@ -48,6 +51,7 @@ import {
         CreativeFolderEntity,
         CreativeGenerationEntity,
         CreativeGenerationOutputEntity,
+        CreativeGenerationReferenceEntity,
         // CS3.2: reads the metadata of its own temporary outputs (scoped).
         MediaAssetEntity,
         SocialContentItemEntity,
@@ -70,6 +74,8 @@ import {
     CreativeImageGenerationService,
     CreativeImageGenerationWorker,
     CreativeGenerationConfigService,
+    CreativeGenerationContextService,
+    CreativeGenerationReferenceSelector,
     // CS3.3: OpenAI only when explicitly enabled by env; disabled otherwise.
     {
       provide: ImageGenerationProvider,
