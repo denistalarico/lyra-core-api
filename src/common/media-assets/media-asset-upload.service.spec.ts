@@ -1,5 +1,5 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
-import { IsNull } from 'typeorm';
+import { IsNull, Not } from 'typeorm';
 import type { FilesService } from '../files/files.service';
 import type { MediaAssetMetadataReader } from './media-asset-metadata.port';
 import type { MediaAssetScope } from './media-asset-resolver.service';
@@ -453,6 +453,81 @@ describe('MediaAssetUploadService', () => {
           companyContextId: companyBScope.companyContextId,
         }),
       });
+    });
+  });
+
+  describe('purgeTombstonedTemporary (CS3.6.1)', () => {
+    const tombstoned = {
+      id: 'm-1',
+      storagePath: 'media-assets/t/clients/c/m-1.png',
+      source: 'temporary:creative_generation',
+      deletedAt: new Date('2026-10-07T12:00:00.000Z'),
+    };
+    let order: string[];
+
+    beforeEach(() => {
+      order = [];
+      repository.findOne.mockResolvedValue(tombstoned);
+      files.deleteObject.mockImplementation(async () => {
+        order.push('object');
+      });
+      Object.assign(repository, {
+        delete: jest.fn(async () => {
+          order.push('row');
+          return { affected: 1 };
+        }),
+      });
+    });
+
+    const purge = () =>
+      service.purgeTombstonedTemporary('m-1', 'temporary:creative_generation');
+
+    it('removes the object, then the row — only a tombstoned row of that source', async () => {
+      await expect(purge()).resolves.toBe(true);
+
+      expect(order).toEqual(['object', 'row']);
+      expect(files.deleteObject).toHaveBeenCalledWith({
+        bucket: 'private',
+        path: tombstoned.storagePath,
+      });
+      type Call = [{ where: Record<string, unknown>; withDeleted: boolean }];
+      const [[lookup]] = repository.findOne.mock.calls as Call[];
+      expect(lookup.withDeleted).toBe(true);
+      expect(lookup.where).toMatchObject({
+        id: 'm-1',
+        source: 'temporary:creative_generation',
+      });
+      expect(lookup.where.deletedAt).toEqual(Not(IsNull()));
+    });
+
+    it('keeps the row (and its key) when storage fails', async () => {
+      files.deleteObject.mockRejectedValue(new Error('bucket unreachable'));
+
+      await expect(purge()).rejects.toThrow('bucket unreachable');
+      expect(order).toEqual([]);
+    });
+
+    it('treats an object already gone as purged', async () => {
+      files.deleteObject.mockRejectedValue(
+        Object.assign(new Error('missing'), { name: 'NoSuchKey' }),
+      );
+
+      await expect(purge()).resolves.toBe(true);
+      expect(order).toEqual(['row']);
+    });
+
+    it('does nothing for a row that is not (or no longer) tombstoned', async () => {
+      repository.findOne.mockResolvedValue(null);
+
+      await expect(purge()).resolves.toBe(false);
+      expect(files.deleteObject).not.toHaveBeenCalled();
+    });
+
+    it('refuses durable sources', async () => {
+      await expect(
+        service.purgeTombstonedTemporary('m-1', 'creative_studio'),
+      ).rejects.toThrow('temporary source');
+      expect(repository.findOne).not.toHaveBeenCalled();
     });
   });
 });

@@ -218,6 +218,7 @@ export class CreativeImageGenerationException extends HttpException {
 class OutputAlreadyPromotedError extends Error {}
 
 const OUTPUT_NOT_FOUND = 'Imagem gerada não encontrada.';
+const OUTPUT_EXPIRED = 'A imagem gerada expirou. Gere novamente.';
 
 /** Same rule as the Inbox `Idempotency-Key` headers. */
 const IDEMPOTENCY_KEY = /^[A-Za-z0-9._:-]{1,180}$/;
@@ -490,8 +491,11 @@ export class CreativeImageGenerationService {
   /**
    * Promotion copies the chosen output's bytes through the Studio's normal
    * upload path — same validation, numbering, thumbnail and Planner
-   * reflection — and leaves the temporary row as it is, still eligible for
-   * cleanup. A version therefore never shares a binary with a candidate.
+   * reflection — and leaves the temporary row as it is. A version therefore
+   * never shares a binary with a candidate, and the candidate's binary
+   * becomes eligible for cleanup on the next sweep (CS3.6.1), never inside
+   * this transaction. A replay after cleanup still answers from the output
+   * row: it needs no binary.
    *
    * At most once per output: the output records the version it became in the
    * same transaction that creates it. A repeated request with the same intent
@@ -656,17 +660,30 @@ export class CreativeImageGenerationService {
     return output;
   }
 
-  private temporaryContent(
+  /**
+   * CS3.6.1 — every "binary expired" state answers the same 410: purged
+   * (`media_asset_id` NULL), tombstoned by cleanup but not yet purged (the row
+   * is hidden from reads), or object already gone mid-purge. `findOutput`
+   * already proved the output is the caller's, and the output's media is held
+   * to the generation's scope by trigger, so a missing media here is never a
+   * scope denial.
+   */
+  private async temporaryContent(
     scope: CreativeStudioScope,
     output: CreativeGenerationOutputEntity,
   ) {
-    if (!output.mediaAssetId)
-      throw new GoneException('A imagem gerada expirou. Gere novamente.');
-    return this.mediaUpload.getTemporaryContent(
-      scope,
-      output.mediaAssetId,
-      CREATIVE_GENERATION_MEDIA_SOURCE,
-    );
+    if (!output.mediaAssetId) throw new GoneException(OUTPUT_EXPIRED);
+    try {
+      return await this.mediaUpload.getTemporaryContent(
+        scope,
+        output.mediaAssetId,
+        CREATIVE_GENERATION_MEDIA_SOURCE,
+      );
+    } catch (error) {
+      if (error instanceof NotFoundException)
+        throw new GoneException(OUTPUT_EXPIRED);
+      throw error;
+    }
   }
 
   private async outputFile(

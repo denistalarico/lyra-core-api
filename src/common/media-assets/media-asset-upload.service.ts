@@ -16,7 +16,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { createHash, randomUUID } from 'node:crypto';
-import { Repository } from 'typeorm';
+import { IsNull, Not, Repository } from 'typeorm';
 import { FilesService } from '../files/files.service';
 import {
   MEDIA_ASSET_METADATA_READER,
@@ -260,6 +260,56 @@ export class MediaAssetUploadService {
   }
 
   /**
+   * CS3.6.1 — last step of a temporary asset's lifecycle: object, then row.
+   *
+   * Only for a row its owning module already TOMBSTONED (`deleted_at`) after
+   * proving it expired: from that commit on, no read path serves it (every
+   * repository read skips tombstones) and no owner can attach to it, so the
+   * binary can go without a reader seeing it disappear underneath.
+   *
+   * ORDER: object → row, never the reverse. A storage failure throws and
+   * leaves the tombstone, which still knows the key, so the owner retries
+   * later. A row delete that fails after the object is gone leaves an
+   * invisible tombstone, and the retry converges: deleting a missing key
+   * succeeds (S3 semantics; a backend answering 404 is treated the same).
+   * Removing the row first would turn a failed storage call into an orphan
+   * object nothing can ever find again.
+   *
+   * `false` when there was nothing to purge: never tombstoned, another
+   * source, or already purged by a concurrent sweep.
+   */
+  async purgeTombstonedTemporary(
+    mediaAssetId: string,
+    source: string,
+  ): Promise<boolean> {
+    if (!isTemporaryMediaAssetSource(source)) {
+      throw new Error('purgeTombstonedTemporary requires a temporary source.');
+    }
+
+    const asset = await this.mediaAssets.findOne({
+      where: { id: mediaAssetId, source, deletedAt: Not(IsNull()) },
+      withDeleted: true,
+    });
+    if (!asset) return false;
+
+    try {
+      await this.filesService.deleteObject({
+        bucket: 'private',
+        path: asset.storagePath,
+      });
+    } catch (error) {
+      if (!isMissingObject(error)) throw error;
+    }
+
+    const removed = await this.mediaAssets.delete({
+      id: mediaAssetId,
+      source,
+      deletedAt: Not(IsNull()),
+    });
+    return (removed.affected ?? 0) > 0;
+  }
+
+  /**
    * Rollback cleanup only. A failure here is swallowed on purpose: the caller
    * is already throwing the error that matters, and replacing it with a
    * storage error would hide why the upload actually failed.
@@ -274,4 +324,17 @@ export class MediaAssetUploadService {
       // Intentionally ignored — see docblock.
     }
   }
+}
+
+/** S3 deletes of a missing key succeed; some compatible backends answer 404 instead. */
+function isMissingObject(error: unknown): boolean {
+  const candidate = error as {
+    name?: string;
+    $metadata?: { httpStatusCode?: number };
+  } | null;
+  return (
+    candidate?.$metadata?.httpStatusCode === 404 ||
+    candidate?.name === 'NoSuchKey' ||
+    candidate?.name === 'NotFound'
+  );
 }

@@ -17,10 +17,16 @@ import { temporaryMediaAssetSource } from '../../common/media-assets';
  *                         later, one bound to a publication). Approvals owns
  *                         that state; the Studio only reads it.
  *
- * Durations and quotas are commercial policy and deliberately absent: a
- * future cleanup computes eligibility at sweep time (`created_at` + the
- * policy then in force), so a policy change applies without rewriting rows.
- * Expiring a binary never deletes metadata, thumbnails or approval history.
+ * Eligibility is computed at sweep time (`created_at` + the policy then in
+ * force), so a policy change applies without rewriting rows. Expiring a
+ * binary never deletes metadata, thumbnails or approval history.
+ *
+ * CS3.6.1 implements the lifecycle of `temporary_generation` only
+ * (`CreativeGenerationCleanupWorker`): unpromoted outputs expire after
+ * `CREATIVE_GENERATION_TEMP_RETENTION_DAYS` from the binary's `created_at`,
+ * promoted ones on the next sweep. The generation, output row, promotion link
+ * and references stay; `outputs.media_asset_id` becomes NULL. Quotas and the
+ * other classes' durations remain commercial policy, absent here.
  */
 export const CREATIVE_RETENTION_CLASSES = [
   'temporary_generation',

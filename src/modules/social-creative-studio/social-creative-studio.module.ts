@@ -9,6 +9,7 @@ import { SocialPlannerModule } from '../social-planner/social-planner.module';
 import { CreativeAssetService } from './creative-asset.service';
 import { CreativeStudioBrandContextService } from './creative-brand-context.service';
 import { CreativeFolderService } from './creative-folder.service';
+import { CreativeGenerationCleanupWorker } from './creative-generation-cleanup.worker';
 import { CreativeGenerationConfigService } from './creative-generation-config';
 import { CreativeGenerationContextService } from './creative-generation-context';
 import { CreativeGenerationReferenceSelector } from './creative-generation-references';
@@ -73,6 +74,8 @@ import {
     CreativeVersionApprovalService,
     CreativeImageGenerationService,
     CreativeImageGenerationWorker,
+    // CS3.6.1: expires temporary outputs; off unless explicitly enabled.
+    CreativeGenerationCleanupWorker,
     CreativeGenerationConfigService,
     CreativeGenerationContextService,
     CreativeGenerationReferenceSelector,

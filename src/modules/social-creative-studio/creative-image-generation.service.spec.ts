@@ -1062,6 +1062,24 @@ describe('CreativeImageGenerationService (CS3.2)', () => {
         GoneException,
       );
     });
+
+    it('answers the same 410 while cleanup holds a tombstone or the object is already gone (CS3.6.1)', async () => {
+      const { service, mediaUpload } = harness();
+      mediaUpload.getTemporaryContent.mockRejectedValue(
+        new NotFoundException('Media asset not found.'),
+      );
+      await expect(service.readOutput(companyA, 'output-1')).rejects.toThrow(
+        GoneException,
+      );
+    });
+
+    it('lets any other storage error through (never disguised as expiry)', async () => {
+      const { service, mediaUpload } = harness();
+      mediaUpload.getTemporaryContent.mockRejectedValue(new Error('down'));
+      await expect(service.readOutput(companyA, 'output-1')).rejects.toThrow(
+        'down',
+      );
+    });
   });
 
   describe('promotion', () => {

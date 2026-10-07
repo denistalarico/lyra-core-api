@@ -16,6 +16,14 @@ export const CREATIVE_IMAGE_GENERATION_MODEL_ENV =
   'CREATIVE_IMAGE_GENERATION_MODEL';
 export const CREATIVE_IMAGE_GENERATION_TIMEOUT_MS_ENV =
   'CREATIVE_IMAGE_GENERATION_TIMEOUT_MS';
+export const CREATIVE_GENERATION_CLEANUP_ENABLED_ENV =
+  'CREATIVE_GENERATION_CLEANUP_ENABLED';
+export const CREATIVE_GENERATION_CLEANUP_DRY_RUN_ENV =
+  'CREATIVE_GENERATION_CLEANUP_DRY_RUN';
+export const CREATIVE_GENERATION_TEMP_RETENTION_DAYS_ENV =
+  'CREATIVE_GENERATION_TEMP_RETENTION_DAYS';
+export const CREATIVE_GENERATION_CLEANUP_BATCH_SIZE_ENV =
+  'CREATIVE_GENERATION_CLEANUP_BATCH_SIZE';
 
 /**
  * CS3.3 — pinned snapshot, not the moving alias, so the model recorded on a
@@ -122,6 +130,54 @@ export class CreativeGenerationConfigService {
       30_000,
       300_000,
     );
+  }
+
+  /**
+   * CS3.6.1 — whether THIS process sweeps expired temporary outputs at all.
+   * Default **false**: the first deletion of real binaries is an explicit
+   * operator decision, never a side effect of deploying the code. Its own
+   * switch — never `workerEnabled`: pausing generation must not pause
+   * housekeeping, and enabling generation must not authorize deletion.
+   */
+  get cleanupEnabled(): boolean {
+    const raw =
+      process.env[
+        CREATIVE_GENERATION_CLEANUP_ENABLED_ENV
+      ]?.trim().toLowerCase();
+    return ['true', '1', 'yes', 'on'].includes(raw ?? '');
+  }
+
+  /**
+   * Second key of the rollout. Default **true**: an enabled sweep only counts
+   * and logs what it would expire. Only an explicit, recognizable "off"
+   * deletes, so a typo stays harmless.
+   */
+  get cleanupDryRun(): boolean {
+    const raw =
+      process.env[
+        CREATIVE_GENERATION_CLEANUP_DRY_RUN_ENV
+      ]?.trim().toLowerCase();
+    return !['false', '0', 'no', 'off'].includes(raw ?? '');
+  }
+
+  /**
+   * Days an UNPROMOTED output's binary is kept, counted from the binary's own
+   * `media_assets.created_at`. Default 7: the Results UI has no history (the
+   * generation id lives in the page state), so after the session the binary
+   * is reachable only by API; a week covers "come back the next working day"
+   * without keeping a month of unchosen 1–4 images per request. Promoted
+   * outputs do not wait for it (their bytes were copied into the version).
+   */
+  get tempRetentionDays(): number {
+    return bounded(CREATIVE_GENERATION_TEMP_RETENTION_DAYS_ENV, 7, 1, 90);
+  }
+
+  /**
+   * Binaries one sweep claims. Each one is a storage call, so the bound is
+   * kept low; the scheduler runs a few batches per tick.
+   */
+  get cleanupBatchSize(): number {
+    return bounded(CREATIVE_GENERATION_CLEANUP_BATCH_SIZE_ENV, 100, 1, 500);
   }
 }
 
