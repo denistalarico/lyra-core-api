@@ -33,6 +33,13 @@ type UploadFile = {
   originalname: string;
   mimetype?: string;
   size?: number;
+  /**
+   * CS4-B — a video has no thumbnail of its own (no FFmpeg in the stack); a
+   * caller that holds a poster image (a generated Reel's provider cover)
+   * passes it here and it becomes the version's thumbnail, through the same
+   * image thumbnail path. Ignored for images.
+   */
+  videoPoster?: { buffer: Buffer; originalname: string; mimetype?: string };
 };
 
 /**
@@ -165,6 +172,22 @@ export class CreativeAssetService {
           : 'O vídeo excede o limite de 300 MB.',
       );
   }
+  private async thumbnailFor(
+    scope: CreativeStudioScope,
+    actor: string | null,
+    file: UploadFile,
+    assetType: 'image' | 'video',
+  ): Promise<string | null> {
+    if (assetType === 'image')
+      return (await this.thumbnails.create(scope, actor, file)).id;
+    if (!file.videoPoster) return null;
+    // A poster is a convenience: an unreadable one never blocks the video.
+    try {
+      return (await this.thumbnails.create(scope, actor, file.videoPoster)).id;
+    } catch {
+      return null;
+    }
+  }
   async upload(
     scope: CreativeStudioScope,
     actor: string | null,
@@ -188,9 +211,12 @@ export class CreativeAssetService {
     });
     let thumbnailId: string | null = null;
     try {
-      if (assetType === 'image')
-        thumbnailId = (await this.thumbnails.create(scope, actor, input.file))
-          .id;
+      thumbnailId = await this.thumbnailFor(
+        scope,
+        actor,
+        input.file,
+        assetType,
+      );
       return await this.dataSource.transaction(async (manager) => {
         const assets = manager.getRepository(CreativeAssetEntity);
         const versions = manager.getRepository(CreativeAssetVersionEntity);
@@ -274,8 +300,7 @@ export class CreativeAssetService {
     });
     let thumbnailId: string | null = null;
     try {
-      if (assetType === 'image')
-        thumbnailId = (await this.thumbnails.create(scope, actor, file)).id;
+      thumbnailId = await this.thumbnailFor(scope, actor, file, assetType);
       return await this.dataSource.transaction(async (manager) => {
         const versions = manager.getRepository(CreativeAssetVersionEntity);
         const assets = manager.getRepository(CreativeAssetEntity);

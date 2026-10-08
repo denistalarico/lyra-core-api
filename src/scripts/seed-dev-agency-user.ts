@@ -4,11 +4,10 @@ import { randomUUID } from 'crypto';
 import { existsSync, readFileSync } from 'fs';
 import { resolve } from 'path';
 import { DataSource } from 'typeorm';
+import { AgencyDataSource } from '../database/agency-typeorm.datasource';
 import { agencyEntities } from '../config/typeorm.config';
 import { AgencyClientAccessEntity } from '../modules/permissions/entities/agency-client-access.entity';
-import {
-  AgencyUserSecuritySettingsEntity,
-} from '../modules/agency/entities/agency-auth.entities';
+import { AgencyUserSecuritySettingsEntity } from '../modules/agency/entities/agency-auth.entities';
 import {
   AgencyUserPreferencesEntity,
   AgencyUserProfileEntity,
@@ -40,12 +39,6 @@ function loadLocalEnvFile() {
   }
 }
 
-function requiredEnv(name: string): string {
-  const value = process.env[name]?.trim();
-  if (!value) throw new Error(`${name} is required.`);
-  return value;
-}
-
 function assertDevelopmentTarget() {
   const coreDatabase = process.env.DB_NAME;
   const agencyDatabase = process.env.AGENCY_DB_NAME;
@@ -65,7 +58,8 @@ async function run() {
   loadLocalEnvFile();
   assertDevelopmentTarget();
 
-  const sourceEmail = requiredEnv('DEV_AGENCY_SOURCE_USER_EMAIL').toLowerCase();
+  const sourceEmail =
+    process.env.DEV_AGENCY_SOURCE_USER_EMAIL?.trim().toLowerCase();
   const devEmail = (
     process.env.DEV_AGENCY_USER_EMAIL?.trim() || DEFAULT_DEV_EMAIL
   ).toLowerCase();
@@ -73,11 +67,15 @@ async function run() {
     process.env.DEV_AGENCY_USER_PASSWORD || DEFAULT_DEV_PASSWORD;
 
   if (sourceEmail === devEmail) {
-    throw new Error('DEV_AGENCY_SOURCE_USER_EMAIL must differ from the dev user email.');
+    throw new Error(
+      'DEV_AGENCY_SOURCE_USER_EMAIL must differ from the dev user email.',
+    );
   }
 
   if (!devEmail.endsWith('@example.test')) {
-    throw new Error('DEV_AGENCY_USER_EMAIL must use the reserved @example.test domain.');
+    throw new Error(
+      'DEV_AGENCY_USER_EMAIL must use the reserved @example.test domain.',
+    );
   }
 
   const dataSource = new DataSource({
@@ -94,11 +92,14 @@ async function run() {
     synchronize: false,
     logging: false,
     entities: agencyEntities,
+    // Reuse only the registry; connection settings stay explicitly dev-only.
+    migrations: AgencyDataSource.options.migrations,
   });
 
   await dataSource.initialize();
 
   try {
+    await dataSource.runMigrations();
     await dataSource.transaction(async (manager) => {
       const workspaceUsers = manager.getRepository(AgencyWorkspaceUserEntity);
       const security = manager.getRepository(AgencyUserSecuritySettingsEntity);
@@ -109,16 +110,20 @@ async function run() {
       const profiles = manager.getRepository(AgencyUserProfileEntity);
       const preferences = manager.getRepository(AgencyUserPreferencesEntity);
 
-      const sourceMemberships = await workspaceUsers.find({
-        where: { email: sourceEmail, status: 'active' },
-        order: { updatedAt: 'DESC' },
-      });
+      const sourceMemberships = (
+        await workspaceUsers.find({
+          where: sourceEmail
+            ? { email: sourceEmail, status: 'active' }
+            : { role: 'owner', status: 'active' },
+          order: { updatedAt: 'DESC' },
+        })
+      ).filter((membership) => membership.email.toLowerCase() !== devEmail);
 
       const [source] = sourceMemberships;
 
       if (sourceMemberships.length !== 1 || !source?.userId) {
         throw new Error(
-          'DEV_AGENCY_SOURCE_USER_EMAIL must identify exactly one active Agency workspace user.',
+          'Set DEV_AGENCY_SOURCE_USER_EMAIL to identify exactly one active Agency workspace user; automatic selection requires one owner besides the dev user.',
         );
       }
 
@@ -271,13 +276,18 @@ async function run() {
     });
 
     console.log(`Development Agency owner ready: ${devEmail}`);
-    console.log('2FA is disabled and all permissions are granted. The password was not printed.');
+    console.log(
+      '2FA is disabled and all permissions are granted. The password was not printed.',
+    );
   } finally {
     await dataSource.destroy();
   }
 }
 
-run().catch((error) => {
-  console.error('Development Agency user seed failed:', error.message);
+run().catch((error: unknown) => {
+  console.error(
+    'Development Agency user seed failed:',
+    error instanceof Error ? error.message : 'Unknown error',
+  );
   process.exit(1);
 });

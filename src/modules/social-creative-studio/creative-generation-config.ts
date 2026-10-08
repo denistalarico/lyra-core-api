@@ -181,7 +181,12 @@ export class CreativeGenerationConfigService {
   }
 }
 
-function bounded(name: string, fallback: number, min: number, max: number) {
+export function bounded(
+  name: string,
+  fallback: number,
+  min: number,
+  max: number,
+) {
   const raw = process.env[name]?.trim();
   if (!raw) return fallback;
   const value = Number(raw);

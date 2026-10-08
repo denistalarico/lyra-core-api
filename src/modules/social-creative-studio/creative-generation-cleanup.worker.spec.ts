@@ -18,6 +18,7 @@ describe('CreativeGenerationCleanupWorker (CS3.6.1)', () => {
   let logs: string[];
   /** Rows the tombstone statement claims, one array per call. */
   let fresh: { id: string; reason: string }[][];
+  let videoEligible: { reason: string; count: number }[];
 
   function worker() {
     return new CreativeGenerationCleanupWorker(
@@ -30,12 +31,16 @@ describe('CreativeGenerationCleanupWorker (CS3.6.1)', () => {
   beforeEach(() => {
     fresh = [];
     logs = [];
-    query = jest.fn(async (sql: string) => {
+    videoEligible = [];
+    // CS4-B: the worker sweeps two families; the image one answers the
+    // scripted rows, the Reel one `videoEligible` (empty by default).
+    query = jest.fn(async (sql: string, params: unknown[] = []) => {
+      const image = params[0] === 'temporary:creative_generation';
       if (sql.includes('GROUP BY eligible.reason'))
-        return [{ reason: 'expired', count: 3 }];
+        return image ? [{ reason: 'expired', count: 3 }] : videoEligible;
       if (sql.includes('deleted_at IS NOT NULL')) return [{ count: 1 }];
       if (sql.includes('RETURNING target.id, claimed.reason'))
-        return [fresh.shift() ?? [], 0];
+        return [image ? (fresh.shift() ?? []) : [], 0];
       return [[], 0]; // stale reclaim: nothing
     });
     purge = jest.fn().mockResolvedValue(true);
@@ -124,6 +129,25 @@ describe('CreativeGenerationCleanupWorker (CS3.6.1)', () => {
     const [, params] = query.mock.calls[0] as [string, unknown[]];
     expect(params[1]).toEqual(new Date('2026-10-13T00:00:00Z'));
     expect(logs.join('\n')).toContain('"mode":"dry_run"');
+  });
+
+  it('dry run: counts generated Reels with the images (CS4-B)', async () => {
+    process.env.CREATIVE_GENERATION_CLEANUP_ENABLED = 'true';
+    videoEligible = [
+      { reason: 'promoted', count: 2 },
+      { reason: 'expired', count: 1 },
+    ];
+
+    const [report] = await worker().run(new Date('2026-10-20T00:00:00Z'));
+
+    expect(report.eligible).toEqual({ promoted: 2, expired: 4, orphan: 0 });
+    const sources = (query.mock.calls as [string, unknown[]][])
+      .filter(([sql]) => sql.includes('GROUP BY eligible.reason'))
+      .map(([, params]) => params[0]);
+    expect(sources).toEqual([
+      'temporary:creative_generation',
+      'temporary:creative_video_generation',
+    ]);
   });
 
   it('delete: stops at the first storage failure and defers the rest', async () => {

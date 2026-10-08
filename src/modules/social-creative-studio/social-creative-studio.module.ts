@@ -22,6 +22,20 @@ import { ImageGenerationProvider } from './creative-image-generation.provider';
 import { CreativeImageGenerationService } from './creative-image-generation.service';
 import { CreativeImageGenerationWorker } from './creative-image-generation.worker';
 import { CreativeThumbnailService } from './creative-thumbnail.service';
+import { CreativeVideoAvatarCatalogService } from './creative-video-avatar-catalog.service';
+import { CreativeVideoCallbackService } from './creative-video-callback.service';
+import {
+  bindVideoGenerationProviders,
+  CreativeVideoProviderRegistry,
+} from './creative-video-generation.binding';
+import { CreativeVideoGenerationConfigService } from './creative-video-generation-config';
+import {
+  CreativeVideoAvatarController,
+  CreativeVideoCallbackController,
+  CreativeVideoGenerationController,
+} from './creative-video-generation.controller';
+import { CreativeVideoGenerationService } from './creative-video-generation.service';
+import { CreativeVideoGenerationWorker } from './creative-video-generation.worker';
 import { CreativeStudioController } from './creative-studio.controller';
 import { CreativeVersionApprovalController } from './creative-version-approval.controller';
 import { CreativeVersionApprovalService } from './creative-version-approval.service';
@@ -32,6 +46,10 @@ import {
   CreativeGenerationEntity,
   CreativeGenerationOutputEntity,
   CreativeGenerationReferenceEntity,
+  CreativeVideoAvatarEntity,
+  CreativeVideoGenerationEntity,
+  CreativeVideoOperationEntity,
+  CreativeVideoReferenceEntity,
 } from './entities';
 import {
   SocialContentItemEntity,
@@ -56,6 +74,11 @@ import {
         CreativeGenerationEntity,
         CreativeGenerationOutputEntity,
         CreativeGenerationReferenceEntity,
+        // CS4-B: Reel generation, its provider-operation ledger and avatars.
+        CreativeVideoGenerationEntity,
+        CreativeVideoOperationEntity,
+        CreativeVideoReferenceEntity,
+        CreativeVideoAvatarEntity,
         // CS3.2: reads the metadata of its own temporary outputs (scoped).
         MediaAssetEntity,
         SocialContentItemEntity,
@@ -69,6 +92,9 @@ import {
     CreativeVersionApprovalController,
     CreativeImageGenerationController,
     CreativeVersionVariationController,
+    CreativeVideoGenerationController,
+    CreativeVideoAvatarController,
+    CreativeVideoCallbackController,
   ],
   providers: [
     CreativeAssetService,
@@ -89,6 +115,18 @@ import {
       inject: [CreativeGenerationConfigService],
       useFactory: bindImageGenerationProvider,
     },
+    // CS4-B: Reels. Vidu (generative) / HeyGen (UGC) only with the global
+    // switch, a dedicated key and a confirmed pricing version; else 503.
+    CreativeVideoGenerationConfigService,
+    {
+      provide: CreativeVideoProviderRegistry,
+      inject: [CreativeVideoGenerationConfigService],
+      useFactory: bindVideoGenerationProviders,
+    },
+    CreativeVideoGenerationService,
+    CreativeVideoGenerationWorker,
+    CreativeVideoAvatarCatalogService,
+    CreativeVideoCallbackService,
   ],
 })
 export class SocialCreativeStudioModule {}

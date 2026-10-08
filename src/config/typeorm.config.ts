@@ -8,6 +8,10 @@ import {
   CreativeGenerationEntity,
   CreativeGenerationOutputEntity,
   CreativeGenerationReferenceEntity,
+  CreativeVideoAvatarEntity,
+  CreativeVideoGenerationEntity,
+  CreativeVideoOperationEntity,
+  CreativeVideoReferenceEntity,
 } from '../modules/social-creative-studio/entities';
 import {
   SocialAnalyticsDashboardEntity,
@@ -432,6 +436,10 @@ export const agencyEntities = [
   CreativeGenerationEntity,
   CreativeGenerationOutputEntity,
   CreativeGenerationReferenceEntity,
+  CreativeVideoAvatarEntity,
+  CreativeVideoGenerationEntity,
+  CreativeVideoOperationEntity,
+  CreativeVideoReferenceEntity,
   SocialAnalyticsDashboardEntity,
   SocialAnalyticsReportEntity,
   SocialApprovalRequestEntity,

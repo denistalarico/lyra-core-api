@@ -4,7 +4,10 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { MediaAssetUploadService } from '../../common/media-assets';
 import { CreativeGenerationConfigService } from './creative-generation-config';
-import { CREATIVE_GENERATION_MEDIA_SOURCE } from './creative-retention';
+import {
+  CREATIVE_GENERATION_MEDIA_SOURCE,
+  CREATIVE_VIDEO_GENERATION_MEDIA_SOURCE,
+} from './creative-retention';
 
 /**
  * A tombstone older than this whose binary is still there belongs to a sweep
@@ -72,7 +75,7 @@ const NO_OTHER_OWNER = `
             AND pending.status IN ('queued', 'processing'))`;
 
 /**
- * The whole eligibility rule. `$1` source, `$2` retention cutoff.
+ * The whole eligibility rule of IMAGE outputs. `$1` source, `$2` cutoff.
  *
  * - temporary generation media, not yet tombstoned;
  * - its generation resolved from the output row (authoritative) or, for an
@@ -104,6 +107,47 @@ const ELIGIBLE = `
      AND g.company_context_id IS NOT DISTINCT FROM m.company_context_id
      AND (o.promoted_version_id IS NOT NULL OR m.created_at < $2)
      AND ${NO_OTHER_OWNER}`;
+
+/**
+ * CS4-B — the same rule for generated REELS (video and its poster). The
+ * generation row is the authoritative link (`output_media_asset_id` /
+ * `poster_media_asset_id`); `metadata.videoGenerationId` only finds an
+ * orphan the worker stored but never linked. Terminal generation of the same
+ * four-part scope, promoted (bytes copied) or past the cutoff, no other owner.
+ */
+const VIDEO_ELIGIBLE = `
+  SELECT m.id,
+         CASE WHEN linked.id IS NULL THEN 'orphan'
+              WHEN g.promoted_version_id IS NOT NULL THEN 'promoted'
+              ELSE 'expired' END AS reason
+    FROM media_assets m
+    LEFT JOIN social_creative_video_generations linked
+      ON linked.output_media_asset_id = m.id OR linked.poster_media_asset_id = m.id
+    JOIN social_creative_video_generations g
+      ON g.id = COALESCE(
+           linked.id,
+           CASE WHEN m.metadata ->> 'videoGenerationId' ~* '${UUID_PATTERN}'
+                THEN (m.metadata ->> 'videoGenerationId')::uuid END)
+   WHERE m.source = $1
+     AND m.deleted_at IS NULL
+     AND g.status IN ('completed', 'failed')
+     AND g.tenant_id = m.tenant_id
+     AND g.workspace_id = m.workspace_id
+     AND g.agency_client_id IS NOT DISTINCT FROM m.agency_client_id
+     AND g.company_context_id IS NOT DISTINCT FROM m.company_context_id
+     AND (g.promoted_version_id IS NOT NULL OR m.created_at < $2)
+     AND ${NO_OTHER_OWNER}`;
+
+/**
+ * Temporary media families this worker expires. Same lifecycle, same
+ * retention knob; each with its own source and its own owner link.
+ */
+const FAMILIES = [
+  { source: CREATIVE_GENERATION_MEDIA_SOURCE, eligible: ELIGIBLE },
+  { source: CREATIVE_VIDEO_GENERATION_MEDIA_SOURCE, eligible: VIDEO_ELIGIBLE },
+] as const;
+const SOURCES = FAMILIES.map((family) => family.source);
+type Claimed = { id: string; source: string };
 
 /** `DataSource.query` answers `[rows, rowCount]` for UPDATE … RETURNING (S2.5 lesson). */
 function returnedRows<T>(result: unknown): T[] {
@@ -223,21 +267,21 @@ export class CreativeGenerationCleanupWorker {
     result.mode = 'delete';
     const limit = this.config.cleanupBatchSize;
     const retried = await this.reclaimStale(limit);
-    const fresh =
-      retried.length < limit
-        ? await this.tombstone(cutoff, limit - retried.length)
-        : [];
+    const fresh: (Claimed & { reason: CreativeGenerationCleanupReason })[] = [];
+    for (const family of FAMILIES) {
+      const room = limit - retried.length - fresh.length;
+      if (room <= 0) break;
+      for (const row of await this.tombstone(family, cutoff, room))
+        fresh.push({ ...row, source: family.source });
+    }
     result.retried = retried.length;
     for (const row of fresh) result.eligible[row.reason] += 1;
     result.hadMore = retried.length + fresh.length >= limit;
 
-    const claimed = [
-      ...retried.map((row) => row.id),
-      ...fresh.map((row) => row.id),
-    ];
-    for (const [index, id] of claimed.entries()) {
+    const claimed: Claimed[] = [...retried, ...fresh];
+    for (const [index, { id, source }] of claimed.entries()) {
       try {
-        if (await this.purge(id)) result.purged += 1;
+        if (await this.purge(id, source)) result.purged += 1;
       } catch (error) {
         // Storage is most likely down: stop here instead of failing the rest
         // one by one. Every claimed row stays tombstoned for a later sweep.
@@ -258,7 +302,11 @@ export class CreativeGenerationCleanupWorker {
     return result;
   }
 
-  private async tombstone(cutoff: Date, limit: number) {
+  private async tombstone(
+    family: (typeof FAMILIES)[number],
+    cutoff: Date,
+    limit: number,
+  ) {
     return returnedRows<{
       id: string;
       reason: CreativeGenerationCleanupReason;
@@ -267,27 +315,27 @@ export class CreativeGenerationCleanupWorker {
         `UPDATE media_assets AS target
             SET deleted_at = now()
            FROM (
-             ${ELIGIBLE}
+             ${family.eligible}
               ORDER BY m.created_at, m.id
               LIMIT $3
               FOR UPDATE OF m SKIP LOCKED
            ) AS claimed
           WHERE target.id = claimed.id
           RETURNING target.id, claimed.reason`,
-        [CREATIVE_GENERATION_MEDIA_SOURCE, cutoff, limit],
+        [family.source, cutoff, limit],
       ),
     );
   }
 
-  private async reclaimStale(limit: number) {
-    return returnedRows<{ id: string }>(
+  private async reclaimStale(limit: number): Promise<Claimed[]> {
+    return returnedRows<Claimed>(
       await this.dataSource.query(
         `UPDATE media_assets AS target
             SET deleted_at = now()
            FROM (
              SELECT m.id
                FROM media_assets m
-              WHERE m.source = $1
+              WHERE m.source = ANY($1::varchar[])
                 AND m.deleted_at < now() - interval '${CREATIVE_GENERATION_CLEANUP_LEASE}'
                 AND ${NO_OTHER_OWNER}
               ORDER BY m.deleted_at, m.id
@@ -295,36 +343,38 @@ export class CreativeGenerationCleanupWorker {
               FOR UPDATE OF m SKIP LOCKED
            ) AS claimed
           WHERE target.id = claimed.id
-          RETURNING target.id`,
-        [CREATIVE_GENERATION_MEDIA_SOURCE, limit],
+          RETURNING target.id, target.source`,
+        [SOURCES, limit],
       ),
     );
   }
 
   /** Read-only: no lock, no write, no storage call. */
   private async report(cutoff: Date, result: CreativeGenerationCleanupResult) {
-    const rows = await this.dataSource.query<
-      { reason: CreativeGenerationCleanupReason; count: number }[]
-    >(
-      `SELECT eligible.reason, count(*)::int AS count
-         FROM (${ELIGIBLE}) AS eligible
-        GROUP BY eligible.reason`,
-      [CREATIVE_GENERATION_MEDIA_SOURCE, cutoff],
-    );
-    for (const row of rows) result.eligible[row.reason] = row.count;
+    for (const family of FAMILIES) {
+      const rows = await this.dataSource.query<
+        { reason: CreativeGenerationCleanupReason; count: number }[]
+      >(
+        `SELECT eligible.reason, count(*)::int AS count
+           FROM (${family.eligible}) AS eligible
+          GROUP BY eligible.reason`,
+        [family.source, cutoff],
+      );
+      for (const row of rows) result.eligible[row.reason] += row.count;
+    }
     const [pending] = await this.dataSource.query<{ count: number }[]>(
       `SELECT count(*)::int AS count
          FROM media_assets
-        WHERE source = $1 AND deleted_at IS NOT NULL`,
-      [CREATIVE_GENERATION_MEDIA_SOURCE],
+        WHERE source = ANY($1::varchar[]) AND deleted_at IS NOT NULL`,
+      [SOURCES],
     );
     result.pendingPurge = pending?.count ?? 0;
   }
 
-  private purge(mediaAssetId: string): Promise<boolean> {
+  private purge(mediaAssetId: string, source: string): Promise<boolean> {
     const purge = this.mediaUpload.purgeTombstonedTemporary(
       mediaAssetId,
-      CREATIVE_GENERATION_MEDIA_SOURCE,
+      source,
     );
     let timer: ReturnType<typeof setTimeout> | undefined;
     const timeout = new Promise<never>((_, reject) => {

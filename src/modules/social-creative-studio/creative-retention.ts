@@ -39,3 +39,12 @@ export type CreativeRetentionClass =
 export const CREATIVE_GENERATION_MEDIA_SOURCE = temporaryMediaAssetSource(
   'creative_generation',
 );
+
+/**
+ * CS4-B — a generated Reel (and its provider poster) no one chose yet. Same
+ * class (`temporary_generation`) and the same lifecycle worker as images;
+ * its own source so each owner reads only its own candidates.
+ */
+export const CREATIVE_VIDEO_GENERATION_MEDIA_SOURCE = temporaryMediaAssetSource(
+  'creative_video_generation',
+);
