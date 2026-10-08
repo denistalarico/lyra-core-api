@@ -97,6 +97,7 @@ function financeWidget() {
       mrr: 50000,
       revenueIssued: 120000,
       revenueReceived: 90000,
+      costsPaid: 45000,
       openReceivables: 30000,
       overdueReceivables: 8000,
       defaultRate: 0.1,

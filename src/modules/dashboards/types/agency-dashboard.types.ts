@@ -99,6 +99,7 @@ export type AgencyDashboardFinanceWidget = {
     mrr: number;
     revenueIssued: number;
     revenueReceived: number;
+    costsPaid: number;
     openReceivables: number;
     overdueReceivables: number;
     defaultRate: number;

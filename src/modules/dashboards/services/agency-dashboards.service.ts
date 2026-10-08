@@ -543,6 +543,7 @@ export class AgencyDashboardsService {
         mrr: this.toNumber(cards.mrr),
         revenueIssued: this.toNumber(cards.revenueIssued),
         revenueReceived: this.toNumber(cards.revenueReceived),
+        costsPaid: this.toNumber(cards.costsPaid),
         openReceivables: this.toNumber(cards.openReceivables),
         overdueReceivables: this.toNumber(cards.overdueReceivables),
         defaultRate: this.toNumber(cards.defaultRate),

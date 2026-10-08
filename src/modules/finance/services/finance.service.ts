@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository } from 'typeorm';
+import { Between, In, Repository } from 'typeorm';
 import {
   CreateFinanceAccountDto,
   CreateFinanceBankAccountDto,
@@ -39,7 +39,14 @@ import {
   FinanceSetting,
   FinanceTag,
 } from '../entities';
-import { FinanceAccountType, FinanceBankAccountType } from '../enums';
+import {
+  FinanceAccountType,
+  FinanceBankAccountType,
+  FinancePaymentDirection,
+  FinancePaymentStatus,
+  FinanceRecurringInterval,
+  FinanceRecurringProfileStatus,
+} from '../enums';
 import { AgencyClient } from '../../clients/entities';
 import { AgencyClientStatus } from '../../clients/enums';
 import { FinanceRequestContext } from './finance-context';
@@ -602,6 +609,7 @@ export class FinanceService {
       categories,
       metricsCount,
       reportsCount,
+      monthPayments,
     ] = await Promise.all([
       this.invoicesRepo.find({
         where: {
@@ -645,6 +653,14 @@ export class FinanceService {
           workspaceId: ctx.workspaceId,
         },
       }),
+      this.paymentsRepo.find({
+        where: {
+          tenantId: ctx.tenantId,
+          workspaceId: ctx.workspaceId,
+          status: FinancePaymentStatus.Completed,
+          paymentDate: Between(periodStartDate, periodEndDate),
+        },
+      }),
     ]);
 
     const categoriesById = new Map(
@@ -676,21 +692,35 @@ export class FinanceService {
       (bill) => bill.status !== 'cancelled',
     );
 
+    const activeClients = clients.filter(
+      (client) =>
+        client.status === AgencyClientStatus.Active && !client.archivedAt,
+    );
+    const clientContactIds = new Set(
+      clients.map((client) => client.contactId).filter(Boolean),
+    );
+    const activeClientContactIds = new Set(
+      activeClients.map((client) => client.contactId).filter(Boolean),
+    );
+    // A recurrence can remain active after its Agency client has left.
+    // Standalone Finance customers still count; known clients must be active.
     const activeRecurringProfiles = recurringProfiles.filter(
-      (profile) => profile.status === 'active',
+      (profile) =>
+        profile.status === FinanceRecurringProfileStatus.Active &&
+        profile.startDate <= today &&
+        (!profile.endDate || profile.endDate >= today) &&
+        (!profile.customerId ||
+          !clientContactIds.has(profile.customerId) ||
+          activeClientContactIds.has(profile.customerId)),
     );
 
     const activeMonthlyProfiles = activeRecurringProfiles.filter(
-      (profile) => profile.interval === 'monthly',
+      (profile) => profile.interval === FinanceRecurringInterval.Monthly,
     );
     const recurringProfileContactIds = new Set(
       activeMonthlyProfiles
         .map((profile) => profile.customerId)
         .filter((customerId): customerId is string => Boolean(customerId)),
-    );
-    const activeClients = clients.filter(
-      (client) =>
-        client.status === AgencyClientStatus.Active && !client.archivedAt,
     );
     const contractedClientMonthlyFees = activeClients
       .filter(
@@ -712,10 +742,16 @@ export class FinanceService {
       0,
     );
 
-    const revenueReceived = validMonthInvoices.reduce(
-      (sum, invoice) => sum + this.toNumber(invoice.paidAmount),
-      0,
-    );
+    // Cash follows payment date, including older documents and unallocated
+    // payments. Invoice/bill issue dates continue to drive accrual metrics.
+    const revenueReceived = monthPayments
+      .filter(
+        (payment) => payment.direction === FinancePaymentDirection.Customer,
+      )
+      .reduce((sum, payment) => sum + this.toNumber(payment.amount), 0);
+    const costsPaid = monthPayments
+      .filter((payment) => payment.direction === FinancePaymentDirection.Vendor)
+      .reduce((sum, payment) => sum + this.toNumber(payment.amount), 0);
 
     const openReceivables = validInvoices.reduce(
       (sum, invoice) => sum + this.toNumber(invoice.balanceDue),
@@ -779,11 +815,6 @@ export class FinanceService {
             !recurringProfileContactIds.has(client.contactId)),
       )
       .map((client) => client.id);
-    const activeClientContactIds = new Set(
-      activeClients
-        .map((client) => client.contactId)
-        .filter((contactId): contactId is string => Boolean(contactId)),
-    );
     const activeContracts = new Set([
       ...activeClients.map((client) => client.id),
       ...activeRecurringProfiles
@@ -881,6 +912,7 @@ export class FinanceService {
         mrr: this.roundMoney(mrr),
         revenueIssued: this.roundMoney(revenueIssued),
         revenueReceived: this.roundMoney(revenueReceived),
+        costsPaid: this.roundMoney(costsPaid),
         openReceivables: this.roundMoney(openReceivables),
         overdueReceivables: this.roundMoney(overdueReceivables),
         defaultRate: this.roundRate(defaultRate),
