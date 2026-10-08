@@ -237,6 +237,7 @@ import { AddSocialCreativeGenerationContext1798100000000 } from './migrations/17
 import { CreateSocialContentReferences1798200000000 } from './migrations/1798200000000-create-social-content-references';
 import { CreateSocialCreativeGenerationReferences1798300000000 } from './migrations/1798300000000-create-social-creative-generation-references';
 import { AddCreativeGenerationCleanupIndexes1798400000000 } from './migrations/1798400000000-add-creative-generation-cleanup-indexes';
+import { AddSocialCreativeGenerationDerivation1798500000000 } from './migrations/1798500000000-add-social-creative-generation-derivation';
 import { AddCompanyBrandIdentityFoundation1797160000000 } from './migrations/1797160000000-add-company-brand-identity-foundation';
 import { StoreSocialAnalyticsReportFiles1797200000000 } from './migrations/1797200000000-store-social-analytics-report-files';
 import { CreateClientAreaCrmIdentityRelationships1797300000000 } from './migrations/1797300000000-create-client-area-crm-identity-relationships';
@@ -514,5 +515,6 @@ export const AgencyDataSource = new DataSource({
     CreateSocialContentReferences1798200000000,
     CreateSocialCreativeGenerationReferences1798300000000,
     AddCreativeGenerationCleanupIndexes1798400000000,
+    AddSocialCreativeGenerationDerivation1798500000000,
   ],
 });

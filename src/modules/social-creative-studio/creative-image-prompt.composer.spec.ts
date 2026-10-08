@@ -244,3 +244,67 @@ describe('composeCreativeImagePrompt — reference images (CS3.4.2)', () => {
     expect(composeCreativeImagePrompt(base)).not.toContain('REFERENCE IMAGES');
   });
 });
+
+describe('composeCreativeImagePrompt — variations (CS3.6.2)', () => {
+  const fresh = {
+    prompt: 'troque o fundo por uma praia ao entardecer',
+    aspectRatio: '4:5' as const,
+    brand: BRAND,
+    content: CONTENT,
+  };
+
+  it('a base as Image 1 makes the request "what to change" and Image 1 "what to keep"', () => {
+    const text = composeCreativeImagePrompt({
+      ...fresh,
+      references: [
+        { kind: 'base', role: 'base' },
+        { kind: 'logo', role: 'logo' },
+      ],
+    });
+    expect(text).toContain(
+      'Social media creative image, portrait format (4:5), for instagram/feed, as a variation of Image 1.',
+    );
+    expect(text).toContain(
+      "REQUESTED CHANGES (the operator's intent — what to change in Image 1; it takes priority over everything below):\ntroque o fundo por uma praia ao entardecer",
+    );
+    expect(text).toContain(
+      '- Image 1: the base image — this creative is a variation of it: keep its subject, composition, framing, colors and style, except what the request asks to change.',
+    );
+    expect(text).toContain("- Image 2: the brand's logo");
+    expect(text).toContain(
+      '- Change only what the request asks for; everything else should stay as close to Image 1 as possible. This is a close variation, not a pixel-exact edit.',
+    );
+    // Deterministic.
+    expect(
+      composeCreativeImagePrompt({
+        ...fresh,
+        references: [
+          { kind: 'base', role: 'base' },
+          { kind: 'logo', role: 'logo' },
+        ],
+      }),
+    ).toBe(text);
+  });
+
+  it('without a base nothing changes: a fresh prompt is the v2 recipe, byte for byte', () => {
+    const text = composeCreativeImagePrompt({
+      ...fresh,
+      references: [{ kind: 'product', role: 'subject' }],
+    });
+    expect(text).not.toMatch(/variation|REQUESTED CHANGES|pixel/);
+    expect(text).toContain(
+      "REQUEST (the operator's intent — it takes priority over everything below):",
+    );
+  });
+
+  it('only Image 1 can be a base: a base role elsewhere is not a variation', () => {
+    const text = composeCreativeImagePrompt({
+      ...fresh,
+      references: [
+        { kind: 'product', role: 'subject' },
+        { kind: 'base', role: 'base' },
+      ],
+    });
+    expect(text).not.toContain('as a variation of Image 1');
+  });
+});

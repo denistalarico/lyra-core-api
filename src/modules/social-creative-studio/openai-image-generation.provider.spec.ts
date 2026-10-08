@@ -748,3 +748,76 @@ describe('OpenAIImageGenerationProvider — reference images via /edits (CS3.4.2
       expect(text).not.toContain(secret);
   });
 });
+
+describe('OpenAIImageGenerationProvider — variation base (CS3.6.2)', () => {
+  let fetchMock: jest.SpyInstance;
+  beforeEach(() => {
+    fetchMock = jest.spyOn(global, 'fetch');
+    for (const level of ['log', 'warn', 'error'] as const)
+      jest.spyOn(Logger.prototype, level).mockImplementation(() => undefined);
+  });
+  afterEach(() => jest.restoreAllMocks());
+
+  it('fresh without references → /generations; a base → /edits with the base as the FIRST image[]', async () => {
+    fetchMock
+      .mockResolvedValueOnce(ok([PNG_A]))
+      .mockResolvedValueOnce(ok([PNG_A]))
+      .mockResolvedValueOnce(ok([PNG_A]));
+    const provider = new OpenAIImageGenerationProvider(config());
+    await provider.generate(request());
+    await provider.generate(
+      request({
+        references: [{ role: 'base', mimeType: 'image/png', body: PNG_B }],
+      }),
+    );
+    await provider.generate(
+      request({
+        references: [
+          { role: 'base', mimeType: 'image/png', body: PNG_B },
+          { role: 'style', mimeType: 'image/png', body: PNG_A },
+        ],
+      }),
+    );
+    expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
+      OPENAI_IMAGES_GENERATIONS_URL,
+      OPENAI_IMAGES_EDITS_URL,
+      OPENAI_IMAGES_EDITS_URL,
+    ]);
+    for (const [index, count] of [
+      [1, 1],
+      [2, 2],
+    ] as const) {
+      const form = (fetchMock.mock.calls[index] as [string, RequestInit])[1]
+        .body as FormData;
+      const images = form.getAll('image[]') as File[];
+      expect(images).toHaveLength(count);
+      expect(images[0].name).toBe('reference-1.png');
+      expect(Buffer.from(await images[0].arrayBuffer()).equals(PNG_B)).toBe(
+        true,
+      );
+      if (count === 2)
+        expect(Buffer.from(await images[1].arrayBuffer()).equals(PNG_A)).toBe(
+          true,
+        );
+      // Not an in-place edit: no mask, no fidelity knob (GPT Image 2.x).
+      expect(form.has('mask')).toBe(false);
+      expect(form.has('input_fidelity')).toBe(false);
+    }
+  });
+
+  it('a base counts toward the six images: seven are refused before any call', async () => {
+    const provider = new OpenAIImageGenerationProvider(config());
+    await expect(
+      provider.generate(
+        request({
+          references: Array.from({ length: 7 }, (_, i) => ({
+            role: i === 0 ? ('base' as const) : ('style' as const),
+            mimeType: 'image/png',
+            body: PNG_A,
+          })),
+        }),
+      ),
+    ).rejects.toMatchObject({ code: 'failed', retryable: false });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});

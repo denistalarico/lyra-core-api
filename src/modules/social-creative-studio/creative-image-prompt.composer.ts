@@ -13,7 +13,7 @@ import type {
  * stays explainable. Deliberately NOT part of the request fingerprint: the
  * same intent over the same context is the same request across deploys.
  */
-export const CREATIVE_IMAGE_PROMPT_COMPOSER_VERSION = 'image-prompt.v2';
+export const CREATIVE_IMAGE_PROMPT_COMPOSER_VERSION = 'image-prompt.v3';
 
 /**
  * CS3.4.2 — a reference image as the composer sees it: its position is the
@@ -75,6 +75,7 @@ const ROLE_INSTRUCTION: Record<ImageGenerationReferenceRole, string> = {
     'a style reference — use only its look and feel; do not copy its subject',
   general:
     'a reference provided by the client — use it as the request describes, assuming no other role',
+  base: 'the base image — this creative is a variation of it: keep its subject, composition, framing, colors and style, except what the request asks to change',
 };
 
 const FORMAT: Record<CreativeImageAspectRatio, string> = {
@@ -105,7 +106,11 @@ const FORMAT: Record<CreativeImageAspectRatio, string> = {
  *     it may only use that mark, and only if the request asks for it;
  *   - reference images are named by position with a role from their kind —
  *     what to preserve, what to use as direction — never by id or label;
- *   - Planner copy is context for the scene, not text to paint.
+ *   - Planner copy is context for the scene, not text to paint;
+ *   - CS3.6.2: when Image 1 has the `base` role the creative is a VARIATION:
+ *     the request becomes "what to change", Image 1 is what to keep, and the
+ *     text says it is a close variation — never a promise of a pixel-exact
+ *     edit. Without a base the text is exactly the v2 recipe.
  *
  * Inputs are the Generation Context facts, which carry no ids, scope, storage
  * or approval data — so neither does the output.
@@ -115,29 +120,33 @@ export function composeCreativeImagePrompt(
 ): string {
   const { brand, content } = input;
   const sections: string[] = [];
+  const references = input.references ?? [];
+  // CS3.6.2: a variation's base is always Image 1 (the service puts it there).
+  const variation = references[0]?.role === 'base';
 
   const channels = content?.channels.length
     ? `, for ${content.channels.join(', ')}`
     : '';
   sections.push(
-    `Social media creative image, ${FORMAT[input.aspectRatio]}${channels}.`,
+    `Social media creative image, ${FORMAT[input.aspectRatio]}${channels}${variation ? ', as a variation of Image 1' : ''}.`,
   );
 
   sections.push(
     block(
-      "REQUEST (the operator's intent — it takes priority over everything below)",
+      variation
+        ? "REQUESTED CHANGES (the operator's intent — what to change in Image 1; it takes priority over everything below)"
+        : "REQUEST (the operator's intent — it takes priority over everything below)",
       [input.prompt],
     ),
   );
 
-  const references = input.references ?? [];
   if (references.length) {
     sections.push(
       block(
         'REFERENCE IMAGES (attached in this order; follow the role given to each)',
         references.map(
           (ref, index) =>
-            `- Image ${index + 1}: ${Object.hasOwn(KIND_INSTRUCTION, ref.kind) ? KIND_INSTRUCTION[ref.kind] : ROLE_INSTRUCTION[ref.role]}.`,
+            `- Image ${index + 1}: ${ref.role !== 'base' && Object.hasOwn(KIND_INSTRUCTION, ref.kind) ? KIND_INSTRUCTION[ref.kind] : ROLE_INSTRUCTION[ref.role]}.`,
         ),
       ),
     );
@@ -193,6 +202,11 @@ export function composeCreativeImagePrompt(
   }
 
   const constraints = [
+    ...(variation
+      ? [
+          'Change only what the request asks for; everything else should stay as close to Image 1 as possible. This is a close variation, not a pixel-exact edit.',
+        ]
+      : []),
     'If the request conflicts with any context above, follow the request.',
     'Do not add text, captions or lettering unless the request asks for it; reproduce any requested text exactly as written.',
     references.some((ref) => ref.role === 'logo')

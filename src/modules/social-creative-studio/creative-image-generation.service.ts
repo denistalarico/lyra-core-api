@@ -12,6 +12,7 @@ import { createHash } from 'node:crypto';
 import type { Readable } from 'node:stream';
 import { In, IsNull, Repository } from 'typeorm';
 import {
+  durableMediaAssetSource,
   MediaAssetEntity,
   mediaAssetScopeWhere,
   MediaAssetUploadService,
@@ -26,17 +27,20 @@ import {
   generationContextRecord,
 } from './creative-generation-context';
 import {
+  type CreativeGenerationPersistedReferenceSource,
   type CreativeGenerationReferenceSelection,
   CreativeGenerationReferenceSelector,
-  type CreativeGenerationReferenceSource,
+  type SelectedCreativeGenerationReference,
 } from './creative-generation-references';
 import {
   type CreativeGenerationFailureCode,
   type CreativeImageAspectRatio,
   type CreativeImageQuality,
+  IMAGE_GENERATION_REFERENCE_MIME_TYPES,
   ImageGenerationProvider,
   type ImageGenerationReferenceRole,
   MAX_IMAGE_GENERATION_OUTPUTS,
+  MAX_IMAGE_GENERATION_REFERENCE_BYTES,
 } from './creative-image-generation.provider';
 import {
   composeCreativeImagePrompt,
@@ -50,9 +54,11 @@ import type { CreativeStudioScope } from './creative-studio.scope';
 import { CreativeVersionApprovalService } from './creative-version-approval.service';
 import {
   CreativeAssetEntity,
+  CreativeAssetVersionEntity,
   CreativeGenerationEntity,
   CreativeGenerationOutputEntity,
   type CreativeGenerationPromotionKind,
+  type CreativeGenerationOriginType,
   CreativeGenerationReferenceEntity,
   type CreativeGenerationStatus,
 } from './entities';
@@ -75,6 +81,55 @@ export type CreativeImageGenerationRequest = {
    * rule (the item's Planner references, in Planner order); `[]` = none.
    */
   references?: CreativeGenerationReferenceSelection[];
+};
+
+/**
+ * CS3.6.2 — "Gerar novamente": a NEW generation with the origin's intent.
+ * Only legitimate overrides; everything omitted is taken from the origin
+ * (prompt, settings, and — when the origin chose them explicitly — its
+ * references). The Planner item is always the origin's, never chosen here.
+ */
+export type CreativeImageRegenerationRequest = {
+  prompt?: string;
+  outputCount?: number;
+  aspectRatio?: CreativeImageAspectRatio;
+  quality?: CreativeImageQuality;
+  /** Replaces the origin's ordinary references; a variation's base stays. */
+  references?: CreativeGenerationReferenceSelection[];
+};
+
+/**
+ * CS3.6.2 — "Criar variação": what to change in the base image. The base
+ * comes from the route (an output or a Creative Version), never from here.
+ * `references` are ADDITIONAL images (omitted = none); the base counts
+ * toward the six.
+ */
+export type CreativeImageVariationRequest = {
+  prompt: string;
+  outputCount?: number;
+  aspectRatio?: CreativeImageAspectRatio;
+  quality?: CreativeImageQuality;
+  references?: CreativeGenerationReferenceSelection[];
+};
+
+/** Exactly one origin per derived generation (CS3.6.2). */
+type CreativeGenerationOrigin =
+  | { type: 'regeneration'; generationId: string }
+  | { type: 'variation'; outputId: string }
+  | { type: 'variation'; versionId: string };
+
+/** Everything `enqueueIntent` needs; built by each entry point. */
+type CreativeGenerationIntent = {
+  input: ReturnType<CreativeImageGenerationService['validRequest']>;
+  references: CreativeGenerationReferenceSelection[] | undefined;
+  base?: SelectedCreativeGenerationReference;
+  origin?: CreativeGenerationOrigin;
+  /**
+   * Regeneration reusing the origin's own explicit selection: owner id →
+   * checksum frozen by the origin. Gone, moved out of reach or other bytes
+   * is a 409 — never a silent substitute.
+   */
+  frozen?: Map<string, string>;
 };
 
 /**
@@ -121,13 +176,25 @@ export type CreativeImageGenerationView = {
     quality: CreativeImageQuality;
   };
   /**
+   * CS3.6.2 — where this generation came from. `generationId` is the
+   * generation to go back to (the regenerated one, or the one that produced
+   * the varied output); `creativeAssetId`/`versionId` name a varied version.
+   */
+  origin: {
+    type: CreativeGenerationOriginType;
+    generationId: string | null;
+    outputId: string | null;
+    creativeAssetId: string | null;
+    versionId: string | null;
+  };
+  /**
    * CS3.4.2 — the references frozen for this generation, in the order sent
    * ("Image 1..N"). Owner ids only: no storage key, checksum or URL.
    */
   references: {
     position: number;
-    source: CreativeGenerationReferenceSource;
-    /** Brand Kit asset id (`brand`) or media asset id (`planner`/`operator`). */
+    source: CreativeGenerationPersistedReferenceSource;
+    /** Brand Kit asset id (`brand`) or media asset id (`planner`/`operator`/`base`). */
     id: string;
     kind: string;
     role: ImageGenerationReferenceRole;
@@ -219,6 +286,8 @@ class OutputAlreadyPromotedError extends Error {}
 
 const OUTPUT_NOT_FOUND = 'Imagem gerada não encontrada.';
 const OUTPUT_EXPIRED = 'A imagem gerada expirou. Gere novamente.';
+const BASE_EXPIRED =
+  'Este resultado expirou e não pode mais ser usado como base.';
 
 /** Same rule as the Inbox `Idempotency-Key` headers. */
 const IDEMPOTENCY_KEY = /^[A-Za-z0-9._:-]{1,180}$/;
@@ -289,18 +358,228 @@ export class CreativeImageGenerationService {
     idempotencyKey: string | undefined,
   ): Promise<CreativeImageGenerationAccepted> {
     const key = requireIdempotencyKey(idempotencyKey);
-    const input = this.validRequest(request);
-    const context = await this.context.resolve(scope, input.contentItemId);
-    const plan = await this.referenceSelector.select(
+    return this.enqueueIntent(scope, actor, key, {
+      input: this.validRequest(request),
+      references: request.references,
+    });
+  }
+
+  /**
+   * CS3.6.2 — "Gerar novamente". A new generation (never a reset of the
+   * old one, which stays byte-for-byte as it was) with:
+   *   - the origin's operator prompt and settings, unless overridden;
+   *   - its Planner item, resolved again — the CURRENT Brand Kit and Planner
+   *     context, so a correction made since then is used (decision 48);
+   *   - its explicit reference selection, the same images with the same
+   *     bytes (409 when one is gone); a default selection is the default rule
+   *     again, over the item's current references;
+   *   - a variation's base, the exact same bytes (410 once expired).
+   * The effective prompt is composed again; nothing internal is copied.
+   */
+  async regenerate(
+    scope: CreativeStudioScope,
+    actor: string | null,
+    generationId: string,
+    request: CreativeImageRegenerationRequest,
+    idempotencyKey: string | undefined,
+  ): Promise<CreativeImageGenerationAccepted> {
+    const key = requireIdempotencyKey(idempotencyKey);
+    const origin = await this.generations.findOne({
+      where: { id: generationId, ...mediaAssetScopeWhere(scope) },
+    });
+    if (!origin) throw new NotFoundException('Geração não encontrada.');
+    if (origin.status !== 'completed' && origin.status !== 'failed')
+      throw new ConflictException({
+        code: 'generation_not_finished',
+        message: 'Aguarde a geração terminar para gerar novamente.',
+      });
+    this.assertOriginContent(origin);
+
+    const rows = await this.references.find({
+      where: { generationId: origin.id },
+      order: { position: 'ASC' },
+    });
+    const baseRow = rows.find((row) => row.source === 'base');
+    const previous = rows.filter((row) => row.source !== 'base');
+    const reuse =
+      request.references === undefined &&
+      origin.generationContext?.references.selected?.selection === 'explicit';
+    return this.enqueueIntent(scope, actor, key, {
+      input: this.validRequest({
+        prompt: request.prompt ?? origin.prompt,
+        contentItemId: origin.contentItemId,
+        outputCount: request.outputCount ?? origin.outputCount,
+        aspectRatio: request.aspectRatio ?? origin.aspectRatio,
+        quality: request.quality ?? origin.quality,
+        references: request.references,
+      }),
+      references: reuse ? previous.map(selectionOf) : request.references,
+      frozen: reuse
+        ? new Map(previous.map((row) => [ownerId(row), row.checksum]))
+        : undefined,
+      base: baseRow ? await this.frozenBase(scope, baseRow) : undefined,
+      origin: { type: 'regeneration', generationId: origin.id },
+    });
+  }
+
+  /**
+   * CS3.6.2 — variation of a generation output. The base is that output's
+   * temporary binary while it exists; once expired it is a 410, even when
+   * the output was promoted — the saved copy is named in the answer, and
+   * using it is an explicit choice (`varyVersion`), never a silent swap.
+   * Settings and Planner item default to the origin generation's.
+   */
+  async varyOutput(
+    scope: CreativeStudioScope,
+    actor: string | null,
+    outputId: string,
+    request: CreativeImageVariationRequest,
+    idempotencyKey: string | undefined,
+  ): Promise<CreativeImageGenerationAccepted> {
+    const key = requireIdempotencyKey(idempotencyKey);
+    const output = await this.findOutput(scope, outputId);
+    const origin = await this.generations.findOneByOrFail({
+      id: output.generationId,
+    });
+    this.assertOriginContent(origin);
+    const media = output.mediaAssetId
+      ? await this.media.findOne({
+          where: {
+            id: output.mediaAssetId,
+            ...mediaAssetScopeWhere(scope),
+            source: CREATIVE_GENERATION_MEDIA_SOURCE,
+          },
+        })
+      : null;
+    if (!media)
+      throw new GoneException({
+        code: 'variation_base_expired',
+        message: BASE_EXPIRED,
+        savedCopy:
+          output.promotedCreativeAssetId && output.promotedVersionId
+            ? {
+                creativeAssetId: output.promotedCreativeAssetId,
+                versionId: output.promotedVersionId,
+              }
+            : null,
+      });
+    return this.enqueueIntent(scope, actor, key, {
+      input: this.validRequest(
+        {
+          prompt: request.prompt,
+          contentItemId: origin.contentItemId,
+          outputCount: request.outputCount ?? 1,
+          aspectRatio: request.aspectRatio ?? origin.aspectRatio,
+          quality: request.quality ?? origin.quality,
+          references: request.references,
+        },
+        'Descreva o que deseja mudar.',
+      ),
+      references: request.references ?? [],
+      base: baseReference(media),
+      origin: { type: 'variation', outputId: output.id },
+    });
+  }
+
+  /**
+   * CS3.6.2 — variation of an immutable Creative Version: its durable media
+   * is the base, read through the same media boundary by the worker — no
+   * copy is made up front. The Planner item is the asset's.
+   */
+  async varyVersion(
+    scope: CreativeStudioScope,
+    actor: string | null,
+    assetId: string,
+    versionId: string,
+    request: CreativeImageVariationRequest,
+    idempotencyKey: string | undefined,
+  ): Promise<CreativeImageGenerationAccepted> {
+    const key = requireIdempotencyKey(idempotencyKey);
+    const asset = await this.creativeAssets.findOne({
+      where: { id: assetId, ...mediaAssetScopeWhere(scope) },
+    });
+    const version = asset
+      ? await this.creativeAssets.manager
+          .getRepository(CreativeAssetVersionEntity)
+          .findOneBy({ id: versionId, creativeAssetId: asset.id })
+      : null;
+    if (!asset || !version)
+      throw new NotFoundException('Versão não encontrada.');
+    const media =
+      asset.assetType === 'image'
+        ? await this.media.findOne({
+            where: {
+              id: version.mediaAssetId,
+              ...mediaAssetScopeWhere(scope),
+              source: durableMediaAssetSource(),
+            },
+          })
+        : null;
+    if (!media) throw unsupportedBase();
+    return this.enqueueIntent(scope, actor, key, {
+      input: this.validRequest(
+        {
+          prompt: request.prompt,
+          contentItemId: asset.contentItemId,
+          outputCount: request.outputCount,
+          aspectRatio: request.aspectRatio,
+          quality: request.quality,
+          references: request.references,
+        },
+        'Descreva o que deseja mudar.',
+      ),
+      references: request.references ?? [],
+      base: baseReference(media),
+      origin: { type: 'variation', versionId: version.id },
+    });
+  }
+
+  /**
+   * An origin made for a Planner item whose link was erased (item hard
+   * deleted → FK SET NULL) must not silently become standalone.
+   */
+  private assertOriginContent(origin: CreativeGenerationEntity) {
+    if (!origin.contentItemId && origin.generationContext?.content)
+      throw originContentUnavailable();
+  }
+
+  /** A regenerated variation's base: the same media, still the same bytes. */
+  private async frozenBase(
+    scope: CreativeStudioScope,
+    row: CreativeGenerationReferenceEntity,
+  ) {
+    const media = await this.media.findOne({
+      where: { id: row.mediaAssetId ?? '', ...mediaAssetScopeWhere(scope) },
+    });
+    if (!media || media.checksum !== row.checksum)
+      throw new GoneException({
+        code: 'variation_base_expired',
+        message: BASE_EXPIRED,
+        savedCopy: null,
+      });
+    return baseReference(media);
+  }
+
+  private async enqueueIntent(
+    scope: CreativeStudioScope,
+    actor: string | null,
+    key: string,
+    intent: CreativeGenerationIntent,
+  ): Promise<CreativeImageGenerationAccepted> {
+    const { input, origin } = intent;
+    const context = await this.resolveContext(
       scope,
-      context,
-      request.references,
+      input.contentItemId,
+      origin,
     );
-    const fingerprint = imageRequestFingerprint({
-      ...input,
+    const plan = await this.selectReferences(scope, context, intent);
+    const digests = {
       contextDigest: context.digest,
       referencesDigest: plan.digest,
-    });
+    };
+    const fingerprint = origin
+      ? derivedImageRequestFingerprint({ ...input, ...digests, origin })
+      : imageRequestFingerprint({ ...input, ...digests });
 
     const existing = await this.findByIdempotencyKey(scope, key);
     if (existing) return this.replayEnqueue(existing, fingerprint);
@@ -326,6 +605,13 @@ export class CreativeImageGenerationService {
             outputCount: input.outputCount,
             aspectRatio: input.aspectRatio,
             quality: input.quality,
+            originType: origin?.type ?? 'fresh',
+            originGenerationId:
+              origin && 'generationId' in origin ? origin.generationId : null,
+            originOutputId:
+              origin && 'outputId' in origin ? origin.outputId : null,
+            originVersionId:
+              origin && 'versionId' in origin ? origin.versionId : null,
             effectivePrompt: composeCreativeImagePrompt({
               prompt: input.prompt,
               aspectRatio: input.aspectRatio,
@@ -371,6 +657,53 @@ export class CreativeImageGenerationService {
       return this.replayEnqueue(winner, fingerprint);
     }
     return this.accepted(saved.id, 'queued');
+  }
+
+  /** A derived generation's Planner item must still resolve (409 otherwise). */
+  private async resolveContext(
+    scope: CreativeStudioScope,
+    contentItemId: string | null,
+    origin: CreativeGenerationOrigin | undefined,
+  ) {
+    try {
+      return await this.context.resolve(scope, contentItemId);
+    } catch (error) {
+      if (origin && refusalCode(error) === 'content_item_not_found')
+        throw originContentUnavailable();
+      throw error;
+    }
+  }
+
+  private async selectReferences(
+    scope: CreativeStudioScope,
+    context: Awaited<ReturnType<CreativeGenerationContextService['resolve']>>,
+    intent: CreativeGenerationIntent,
+  ) {
+    const { frozen } = intent;
+    let plan: Awaited<
+      ReturnType<CreativeGenerationReferenceSelector['select']>
+    >;
+    try {
+      plan = await this.referenceSelector.select(
+        scope,
+        context,
+        intent.references,
+        intent.base,
+      );
+    } catch (error) {
+      if (frozen && refusalCode(error) === 'reference_not_found')
+        throw originReferenceUnavailable();
+      throw error;
+    }
+    if (
+      frozen &&
+      plan.references.some(
+        (ref) =>
+          ref.source !== 'base' && frozen.get(ref.assetId) !== ref.checksum,
+      )
+    )
+      throw originReferenceUnavailable();
+    return plan;
   }
 
   private findByIdempotencyKey(scope: CreativeStudioScope, key: string) {
@@ -441,6 +774,15 @@ export class CreativeImageGenerationService {
       where: { generationId: generation.id },
       order: { position: 'ASC' },
     });
+    // The origin rows are in the generation's scope by trigger.
+    const originOutput = generation.originOutputId
+      ? await this.outputs.findOneBy({ id: generation.originOutputId })
+      : null;
+    const originVersion = generation.originVersionId
+      ? await this.creativeAssets.manager
+          .getRepository(CreativeAssetVersionEntity)
+          .findOneBy({ id: generation.originVersionId })
+      : null;
 
     return {
       generationId: generation.id,
@@ -452,6 +794,14 @@ export class CreativeImageGenerationService {
         outputCount: generation.outputCount,
         aspectRatio: generation.aspectRatio,
         quality: generation.quality,
+      },
+      origin: {
+        type: generation.originType,
+        generationId:
+          generation.originGenerationId ?? originOutput?.generationId ?? null,
+        outputId: generation.originOutputId,
+        creativeAssetId: originVersion?.creativeAssetId ?? null,
+        versionId: generation.originVersionId,
       },
       references: references.map((ref) => ({
         position: ref.position,
@@ -700,9 +1050,13 @@ export class CreativeImageGenerationService {
     };
   }
 
-  private validRequest(request: CreativeImageGenerationRequest) {
-    const prompt = request.prompt?.trim();
-    if (!prompt) throw new BadRequestException('Descreva a imagem desejada.');
+  private validRequest(
+    request: CreativeImageGenerationRequest,
+    emptyPrompt = 'Descreva a imagem desejada.',
+  ) {
+    const prompt =
+      typeof request.prompt === 'string' ? request.prompt.trim() : '';
+    if (!prompt) throw new BadRequestException(emptyPrompt);
     const contentItemId = request.contentItemId ?? null;
     if (contentItemId !== null && !UUID.test(contentItemId))
       throw new BadRequestException({
@@ -813,6 +1167,123 @@ export function imageRequestFingerprint(input: {
     input.referencesDigest,
   ]);
   return createHash('sha256').update(canonical).digest('hex');
+}
+
+/**
+ * `image.v4` (CS3.6.2) — the fingerprint of a DERIVED intent: every v3
+ * field plus the mode and the exact origin. The base is inside
+ * `referencesDigest` (source `base`, Image 1, its checksum), so another base,
+ * the same base with other bytes, or the same image moved between base and
+ * reference all differ. A fresh request keeps `image.v3` untouched, so rows
+ * accepted before this slice still replay; a derived intent can never match
+ * a fresh one (or its own origin) under the same key.
+ */
+export function derivedImageRequestFingerprint(input: {
+  origin: CreativeGenerationOrigin;
+  prompt: string;
+  contentItemId: string | null;
+  outputCount: number;
+  aspectRatio: CreativeImageAspectRatio;
+  quality: CreativeImageQuality;
+  contextDigest: string;
+  referencesDigest: string | null;
+}) {
+  const { origin } = input;
+  const canonical = JSON.stringify([
+    'image.v4',
+    origin.type,
+    'generationId' in origin
+      ? ['generation', origin.generationId.toLowerCase()]
+      : 'outputId' in origin
+        ? ['output', origin.outputId.toLowerCase()]
+        : ['version', origin.versionId.toLowerCase()],
+    input.prompt,
+    input.contentItemId,
+    input.outputCount,
+    input.aspectRatio,
+    input.quality,
+    input.contextDigest,
+    input.referencesDigest,
+  ]);
+  return createHash('sha256').update(canonical).digest('hex');
+}
+
+/**
+ * The base as a frozen reference. Only a binary the provider can take and
+ * whose bytes can be proven (checksum); anything else is not a base.
+ */
+function baseReference(
+  media: MediaAssetEntity,
+): SelectedCreativeGenerationReference {
+  const byteSize = Number(media.byteSize);
+  if (
+    !media.checksum ||
+    !(IMAGE_GENERATION_REFERENCE_MIME_TYPES as readonly string[]).includes(
+      media.mimeType,
+    ) ||
+    !Number.isSafeInteger(byteSize) ||
+    byteSize <= 0 ||
+    byteSize > MAX_IMAGE_GENERATION_REFERENCE_BYTES
+  )
+    throw unsupportedBase();
+  return {
+    source: 'base',
+    assetId: media.id,
+    kind: 'base',
+    role: 'base',
+    mimeType: media.mimeType,
+    byteSize,
+    checksum: media.checksum,
+  };
+}
+
+function unsupportedBase() {
+  return new BadRequestException({
+    code: 'variation_base_unsupported',
+    message:
+      'Esta imagem não pode ser usada como base. Use uma imagem PNG, JPEG ou WebP de até 16 MB.',
+  });
+}
+
+function originContentUnavailable() {
+  return new ConflictException({
+    code: 'origin_content_item_unavailable',
+    message:
+      'O conteúdo do Planner desta geração não está mais disponível. Crie uma nova geração.',
+  });
+}
+
+function originReferenceUnavailable() {
+  return new ConflictException({
+    code: 'origin_reference_unavailable',
+    message:
+      'Uma referência da geração original não está mais disponível. Revise as referências.',
+  });
+}
+
+function refusalCode(error: unknown) {
+  if (!(error instanceof HttpException)) return null;
+  const body = error.getResponse() as { code?: unknown } | string;
+  return typeof body === 'object' && typeof body.code === 'string'
+    ? body.code
+    : null;
+}
+
+function ownerId(row: CreativeGenerationReferenceEntity) {
+  return (row.brandKitAssetId ?? row.mediaAssetId) as string;
+}
+
+/** A frozen row back into the explicit choice that produced it. */
+function selectionOf(
+  row: CreativeGenerationReferenceEntity,
+): CreativeGenerationReferenceSelection {
+  return row.source === 'operator'
+    ? {
+        source: 'operator',
+        id: ownerId(row),
+        kind: row.kind as CreativeGenerationReferenceSelection['kind'],
+      }
+    : { source: row.source as 'brand' | 'planner', id: ownerId(row) };
 }
 
 function isIdempotencyViolation(error: unknown) {

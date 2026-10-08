@@ -43,7 +43,9 @@ export const MAX_IMAGE_GENERATION_OUTPUTS = 4;
  *   - `logo`:    the brand mark — reproduced as is when shown, never redrawn;
  *   - `context`: setting or visual context, adapted freely;
  *   - `style`:   aesthetic direction only, its subject is not copied;
- *   - `general`: a client-provided reference with no declared role.
+ *   - `general`: a client-provided reference with no declared role;
+ *   - `base`:    (CS3.6.2) the image a variation changes. Always the FIRST
+ *     reference ("Image 1") and at most one; never inferred from a kind.
  * The composed prompt already explains each image by its position; the role
  * travels with the bytes so an adapter whose API has per-image roles can use
  * them without parsing text.
@@ -54,6 +56,7 @@ export const IMAGE_GENERATION_REFERENCE_ROLES = [
   'context',
   'style',
   'general',
+  'base',
 ] as const;
 export type ImageGenerationReferenceRole =
   (typeof IMAGE_GENERATION_REFERENCE_ROLES)[number];
@@ -99,7 +102,7 @@ export type ImageGenerationProviderInput = {
   /**
    * CS3.4.2 — the generation's frozen references, in order. Empty means a
    * text-only generation; how an adapter delivers them (OpenAI: `/edits`) is
-   * its own business.
+   * its own business. A variation's `base` is always first (CS3.6.2).
    */
   readonly references: readonly ImageGenerationReference[];
 };

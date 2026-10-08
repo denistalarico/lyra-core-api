@@ -90,3 +90,53 @@ export class PromoteGeneratedOutputAsVersionDto {
   /** Same meaning as `CreateCreativeVersionDto.revisesVersionId` (CS2B.6). */
   @IsOptional() @IsUUID() revisesVersionId?: string;
 }
+
+/**
+ * CS3.6.2 — "Gerar novamente". Only overrides of the origin's intent: no
+ * Planner item, scope, provider, model, checksum, effective prompt or storage
+ * path. Everything omitted comes from the origin generation.
+ */
+export class RegenerateCreativeImageDto {
+  @IsOptional() @IsString() @MinLength(1) @MaxLength(4000) prompt?: string;
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(MAX_IMAGE_GENERATION_OUTPUTS)
+  outputCount?: number;
+  @IsOptional()
+  @IsIn(CREATIVE_IMAGE_ASPECT_RATIOS)
+  aspectRatio?: CreativeImageAspectRatio;
+  @IsOptional() @IsIn(CREATIVE_IMAGE_QUALITIES) quality?: CreativeImageQuality;
+  /** Replaces the origin's ordinary references; a variation's base stays. */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(MAX_IMAGE_GENERATION_REFERENCES)
+  @ValidateNested({ each: true })
+  @Type(() => GenerationReferenceSelectionDto)
+  references?: GenerationReferenceSelectionDto[];
+}
+
+/**
+ * CS3.6.2 — "Criar variação". `prompt` is what to change; the base comes
+ * from the route. `references` are additional images (base + up to five).
+ */
+export class VaryCreativeImageDto {
+  @IsString() @MinLength(1) @MaxLength(4000) prompt!: string;
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(MAX_IMAGE_GENERATION_OUTPUTS)
+  outputCount?: number;
+  @IsOptional()
+  @IsIn(CREATIVE_IMAGE_ASPECT_RATIOS)
+  aspectRatio?: CreativeImageAspectRatio;
+  @IsOptional() @IsIn(CREATIVE_IMAGE_QUALITIES) quality?: CreativeImageQuality;
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(MAX_IMAGE_GENERATION_REFERENCES - 1)
+  @ValidateNested({ each: true })
+  @Type(() => GenerationReferenceSelectionDto)
+  references?: GenerationReferenceSelectionDto[];
+}

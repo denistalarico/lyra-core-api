@@ -26,6 +26,8 @@ import {
   GenerateCreativeImageDto,
   PromoteGeneratedOutputAsVersionDto,
   PromoteGeneratedOutputDto,
+  RegenerateCreativeImageDto,
+  VaryCreativeImageDto,
 } from './dto/creative-image-generation.dto';
 
 const VIEW = 'social.creative.content.view.assigned';
@@ -61,6 +63,47 @@ export class CreativeImageGenerationController {
     return this.generation.enqueue(
       creativeStudioScope(ctx),
       ctx.userId ?? null,
+      dto,
+      idempotencyKey,
+    );
+  }
+
+  /**
+   * CS3.6.2 — a new generation with this one's intent (202, same contract
+   * and `Idempotency-Key` rules as `POST images`). The origin is untouched.
+   */
+  @Post(':generationId/regenerate')
+  @HttpCode(HttpStatus.ACCEPTED)
+  @RequirePermission(CREATE)
+  regenerate(
+    @RequestContextData() ctx: RequestContext,
+    @Param('generationId', ParseUUIDPipe) generationId: string,
+    @Body() dto: RegenerateCreativeImageDto,
+    @Headers('idempotency-key') idempotencyKey: string | undefined,
+  ) {
+    return this.generation.regenerate(
+      creativeStudioScope(ctx),
+      ctx.userId ?? null,
+      generationId,
+      dto,
+      idempotencyKey,
+    );
+  }
+
+  /** CS3.6.2 — a new generation varying this output (410 once it expired). */
+  @Post('outputs/:outputId/vary')
+  @HttpCode(HttpStatus.ACCEPTED)
+  @RequirePermission(CREATE)
+  varyOutput(
+    @RequestContextData() ctx: RequestContext,
+    @Param('outputId', ParseUUIDPipe) outputId: string,
+    @Body() dto: VaryCreativeImageDto,
+    @Headers('idempotency-key') idempotencyKey: string | undefined,
+  ) {
+    return this.generation.varyOutput(
+      creativeStudioScope(ctx),
+      ctx.userId ?? null,
+      outputId,
       dto,
       idempotencyKey,
     );
@@ -115,6 +158,38 @@ export class CreativeImageGenerationController {
       ctx.userId ?? null,
       outputId,
       dto,
+    );
+  }
+}
+
+/**
+ * CS3.6.2 — variation of an immutable Creative Version, addressed where the
+ * version lives (same convention as CS2B.2's `send-for-approval`). Answers
+ * like `POST generations/images`: 202 + `statusPath`, `Idempotency-Key`.
+ */
+@Controller('social/creative-studio/assets')
+@UseGuards(JwtAuthGuard, PermissionsGuard)
+@RequireProductEntitlement('social')
+export class CreativeVersionVariationController {
+  constructor(private readonly generation: CreativeImageGenerationService) {}
+
+  @Post(':assetId/versions/:versionId/vary')
+  @HttpCode(HttpStatus.ACCEPTED)
+  @RequirePermission(CREATE)
+  varyVersion(
+    @RequestContextData() ctx: RequestContext,
+    @Param('assetId', ParseUUIDPipe) assetId: string,
+    @Param('versionId', ParseUUIDPipe) versionId: string,
+    @Body() dto: VaryCreativeImageDto,
+    @Headers('idempotency-key') idempotencyKey: string | undefined,
+  ) {
+    return this.generation.varyVersion(
+      creativeStudioScope(ctx),
+      ctx.userId ?? null,
+      assetId,
+      versionId,
+      dto,
+      idempotencyKey,
     );
   }
 }

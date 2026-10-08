@@ -348,6 +348,19 @@ export class CreativeImageGenerationWorker {
       );
       return await readAll(file.body);
     } catch (error) {
+      if (!(error instanceof NotFoundException)) throw error;
+      if (row.source !== 'base') return null;
+    }
+    // CS3.6.2: only a variation's base may be a temporary output — the
+    // owner's own read path, same scope; the checksum still decides.
+    try {
+      const { file } = await this.mediaUpload.getTemporaryContent(
+        scope,
+        row.mediaAssetId as string,
+        CREATIVE_GENERATION_MEDIA_SOURCE,
+      );
+      return await readAll(file.body);
+    } catch (error) {
       if (error instanceof NotFoundException) return null;
       throw error;
     }

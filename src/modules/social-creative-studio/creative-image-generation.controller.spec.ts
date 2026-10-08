@@ -11,8 +11,15 @@ import {
   PRODUCT_ENTITLEMENT_METADATA,
 } from '../permissions/decorators/permissions.decorators';
 import { PermissionsGuard } from '../permissions/guards/permissions.guard';
-import { CreativeImageGenerationController } from './creative-image-generation.controller';
-import { GenerateCreativeImageDto } from './dto/creative-image-generation.dto';
+import {
+  CreativeImageGenerationController,
+  CreativeVersionVariationController,
+} from './creative-image-generation.controller';
+import {
+  GenerateCreativeImageDto,
+  RegenerateCreativeImageDto,
+  VaryCreativeImageDto,
+} from './dto/creative-image-generation.dto';
 
 const ROUTE_PERMISSIONS = {
   generateImages: 'social.creative.content.create_draft.assigned',
@@ -20,6 +27,9 @@ const ROUTE_PERMISSIONS = {
   outputContent: 'social.creative.content.view.assigned',
   promote: 'social.creative.content.create_draft.assigned',
   promoteAsVersion: 'social.creative.content.update.assigned',
+  // CS3.6.2: a derived generation is a generation (same key as `images`).
+  regenerate: 'social.creative.content.create_draft.assigned',
+  varyOutput: 'social.creative.content.create_draft.assigned',
 } as const;
 
 const clientCtx = {
@@ -234,6 +244,157 @@ describe('Creative image generation controller (CS3.1/CS3.2)', () => {
     ])
       expect(
         await validate(plainToInstance(GenerateCreativeImageDto, bad)),
+      ).not.toHaveLength(0);
+  });
+});
+
+describe('Regeneration & variation routes (CS3.6.2)', () => {
+  const scope = {
+    tenantId: 'tenant-a',
+    workspaceId: 'workspace-a',
+    agencyClientId: 'client-a',
+    companyContextId: 'company-a',
+  };
+
+  it('answer 202 and delegate with scope from the context and the Idempotency-Key', async () => {
+    const generation = {
+      regenerate: jest.fn().mockResolvedValue({}),
+      varyOutput: jest.fn().mockResolvedValue({}),
+      varyVersion: jest.fn().mockResolvedValue({}),
+    };
+    const controller = new CreativeImageGenerationController(
+      generation as never,
+    );
+    const versions = new CreativeVersionVariationController(
+      generation as never,
+    );
+    for (const handler of [
+      CreativeImageGenerationController.prototype.regenerate,
+      CreativeImageGenerationController.prototype.varyOutput,
+      CreativeVersionVariationController.prototype.varyVersion,
+    ])
+      expect(Reflect.getMetadata(HTTP_CODE_METADATA, handler)).toBe(202);
+
+    await controller.regenerate(clientCtx, 'gen-1', {}, 'key-1');
+    await controller.varyOutput(clientCtx, 'out-1', { prompt: 'x' }, 'key-2');
+    await versions.varyVersion(
+      clientCtx,
+      'asset-1',
+      'v-1',
+      { prompt: 'y' },
+      'key-3',
+    );
+    expect(generation.regenerate).toHaveBeenCalledWith(
+      scope,
+      'user-a',
+      'gen-1',
+      {},
+      'key-1',
+    );
+    expect(generation.varyOutput).toHaveBeenCalledWith(
+      scope,
+      'user-a',
+      'out-1',
+      { prompt: 'x' },
+      'key-2',
+    );
+    expect(generation.varyVersion).toHaveBeenCalledWith(
+      scope,
+      'user-a',
+      'asset-1',
+      'v-1',
+      { prompt: 'y' },
+      'key-3',
+    );
+  });
+
+  it('the version route has the same guards, entitlement and permission', () => {
+    expect(
+      Reflect.getMetadata(GUARDS_METADATA, CreativeVersionVariationController),
+    ).toEqual([JwtAuthGuard, PermissionsGuard]);
+    expect(
+      Reflect.getMetadata(
+        PRODUCT_ENTITLEMENT_METADATA,
+        CreativeVersionVariationController,
+      ),
+    ).toBe('social');
+    expect(
+      Reflect.getMetadata(
+        PERMISSION_KEY_METADATA,
+        CreativeVersionVariationController.prototype.varyVersion,
+      ),
+    ).toBe('social.creative.content.create_draft.assigned');
+  });
+
+  it('accept only legitimate overrides — never scope, Planner item, provider, model, checksum, prompt internals or storage', async () => {
+    const strict = { forbidNonWhitelisted: true, whitelist: true };
+    expect(
+      await validate(plainToInstance(RegenerateCreativeImageDto, {}), strict),
+    ).toHaveLength(0);
+    expect(
+      await validate(
+        plainToInstance(RegenerateCreativeImageDto, {
+          prompt: 'outra luz',
+          outputCount: 2,
+          aspectRatio: '9:16',
+          quality: 'high',
+          references: [],
+        }),
+        strict,
+      ),
+    ).toHaveLength(0);
+    expect(
+      await validate(
+        plainToInstance(VaryCreativeImageDto, {
+          prompt: 'troque o fundo',
+          references: Array.from({ length: 5 }, () => ({
+            source: 'brand',
+            id: '70000000-0000-4000-8000-000000000001',
+          })),
+        }),
+        strict,
+      ),
+    ).toHaveLength(0);
+
+    for (const extra of [
+      { contentItemId: '40000000-0000-4000-8000-000000000001' },
+      { companyContextId: 'company-b' },
+      { agencyClientId: '30000000-0000-4000-8000-000000000001' },
+      { provider: 'openai' },
+      { model: 'gpt-image-1' },
+      { checksum: 'a'.repeat(64) },
+      { effectivePrompt: 'x' },
+      { storagePath: 'x' },
+      { baseMediaAssetId: '70000000-0000-4000-8000-000000000001' },
+      // The base is never a selectable reference.
+      {
+        references: [
+          { source: 'base', id: '70000000-0000-4000-8000-000000000001' },
+        ],
+      },
+    ]) {
+      for (const Dto of [RegenerateCreativeImageDto, VaryCreativeImageDto])
+        expect(
+          await validate(
+            plainToInstance(Dto, { prompt: 'x', ...extra }),
+            strict,
+          ),
+        ).not.toHaveLength(0);
+    }
+    // A variation needs to say what changes; base + 5 is the ceiling.
+    for (const bad of [
+      {},
+      { prompt: '' },
+      {
+        prompt: 'x',
+        references: Array.from({ length: 6 }, () => ({
+          source: 'brand',
+          id: '70000000-0000-4000-8000-000000000001',
+        })),
+      },
+    ])
+      expect(
+        await validate(plainToInstance(VaryCreativeImageDto, bad)),
       ).not.toHaveLength(0);
   });
 });

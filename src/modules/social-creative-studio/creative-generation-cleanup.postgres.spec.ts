@@ -17,6 +17,7 @@ import { AddSocialCreativeGenerationContext1798100000000 } from '../../database/
 import { CreateSocialContentReferences1798200000000 } from '../../database/migrations/1798200000000-create-social-content-references';
 import { CreateSocialCreativeGenerationReferences1798300000000 } from '../../database/migrations/1798300000000-create-social-creative-generation-references';
 import { AddCreativeGenerationCleanupIndexes1798400000000 } from '../../database/migrations/1798400000000-add-creative-generation-cleanup-indexes';
+import { AddSocialCreativeGenerationDerivation1798500000000 } from '../../database/migrations/1798500000000-add-social-creative-generation-derivation';
 import { BrandKitAssetEntity, BrandKitEntity } from '../brand-kit/entities';
 import { SocialBrandKitContextPort } from '../brand-kit/services/social-brand-kit-context.port';
 import { describePostgresIntegration } from '../../testing/postgres-integration';
@@ -286,6 +287,8 @@ run('CS3.6.1 temporary generation cleanup (real PostgreSQL)', () => {
       runner,
     );
     await new AddCreativeGenerationCleanupIndexes1798400000000().up(runner);
+    // CS3.6.2: the entity maps the origin columns.
+    await new AddSocialCreativeGenerationDerivation1798500000000().up(runner);
     await runner.release();
     await bootstrap.destroy();
 

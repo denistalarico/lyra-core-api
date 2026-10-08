@@ -13,7 +13,10 @@ import { CreativeGenerationCleanupWorker } from './creative-generation-cleanup.w
 import { CreativeGenerationConfigService } from './creative-generation-config';
 import { CreativeGenerationContextService } from './creative-generation-context';
 import { CreativeGenerationReferenceSelector } from './creative-generation-references';
-import { CreativeImageGenerationController } from './creative-image-generation.controller';
+import {
+  CreativeImageGenerationController,
+  CreativeVersionVariationController,
+} from './creative-image-generation.controller';
 import { bindImageGenerationProvider } from './creative-image-generation.binding';
 import { ImageGenerationProvider } from './creative-image-generation.provider';
 import { CreativeImageGenerationService } from './creative-image-generation.service';
@@ -65,6 +68,7 @@ import {
     CreativeStudioController,
     CreativeVersionApprovalController,
     CreativeImageGenerationController,
+    CreativeVersionVariationController,
   ],
   providers: [
     CreativeAssetService,

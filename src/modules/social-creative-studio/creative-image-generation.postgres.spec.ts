@@ -21,6 +21,7 @@ import { AddSocialCreativeGenerationIdempotency1798000000000 } from '../../datab
 import { AddSocialCreativeGenerationContext1798100000000 } from '../../database/migrations/1798100000000-add-social-creative-generation-context';
 import { CreateSocialContentReferences1798200000000 } from '../../database/migrations/1798200000000-create-social-content-references';
 import { CreateSocialCreativeGenerationReferences1798300000000 } from '../../database/migrations/1798300000000-create-social-creative-generation-references';
+import { AddSocialCreativeGenerationDerivation1798500000000 } from '../../database/migrations/1798500000000-add-social-creative-generation-derivation';
 import { BrandKitAssetEntity, BrandKitEntity } from '../brand-kit/entities';
 import { SocialBrandKitContextPort } from '../brand-kit/services/social-brand-kit-context.port';
 import { describePostgresIntegration } from '../../testing/postgres-integration';
@@ -282,6 +283,8 @@ run('CS3.2 creative generation jobs (real PostgreSQL)', () => {
     await new CreateSocialCreativeGenerationReferences1798300000000().up(
       runner,
     );
+    // CS3.6.2: the entity maps the origin columns.
+    await new AddSocialCreativeGenerationDerivation1798500000000().up(runner);
     await runner.release();
     await bootstrap.destroy();
 
@@ -409,9 +412,13 @@ run('CS3.2 creative generation jobs (real PostgreSQL)', () => {
       // CS3.4.2's child table depends on it: peeled off first, put back last.
       const references =
         new CreateSocialCreativeGenerationReferences1798300000000();
+      // CS3.6.2's origin FKs point at outputs and versions: peeled off first.
+      const derivation =
+        new AddSocialCreativeGenerationDerivation1798500000000();
       try {
         await runner.startTransaction();
         await migration.up(runner);
+        await derivation.down(runner);
         await references.down(runner);
         await migration.down(runner);
         const tables = (await runner.query(
@@ -422,6 +429,7 @@ run('CS3.2 creative generation jobs (real PostgreSQL)', () => {
         expect(tables).toHaveLength(0);
         await migration.up(runner);
         await references.up(runner);
+        await derivation.up(runner);
       } finally {
         await runner.rollbackTransaction();
         await runner.release();
@@ -1512,7 +1520,7 @@ run('CS3.2 creative generation jobs (real PostgreSQL)', () => {
       expect(stored.generation_context).toEqual(
         expect.objectContaining({
           version: 'generation-context.v1',
-          composer: 'image-prompt.v2',
+          composer: 'image-prompt.v3',
           content: expect.objectContaining({ revisionId: null }),
           references: expect.objectContaining({ delivery: 'none' }),
         }),

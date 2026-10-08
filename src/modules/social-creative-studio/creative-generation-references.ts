@@ -55,6 +55,17 @@ export const CREATIVE_GENERATION_REFERENCE_SOURCES = [
 export type CreativeGenerationReferenceSource =
   (typeof CREATIVE_GENERATION_REFERENCE_SOURCES)[number];
 
+/**
+ * CS3.6.2 — what a frozen reference row may hold: the selectable sources plus
+ * `base`, a variation's Image 1. `base` is never selectable (the DTO only
+ * admits the three above): the service resolves it from the variation's
+ * origin — an output or a Creative Version the caller can see — and never
+ * from an id the client chose as "a reference".
+ */
+export type CreativeGenerationPersistedReferenceSource =
+  | CreativeGenerationReferenceSource
+  | 'base';
+
 /** Operator media has no kind of its own: the operator states it (Planner vocabulary). */
 export const OPERATOR_REFERENCE_KINDS = SOCIAL_CONTENT_REFERENCE_KINDS;
 
@@ -69,7 +80,7 @@ export type CreativeGenerationReferenceSelection = {
 
 /** A reference as frozen at enqueue — the row's content, before ids/time. */
 export type SelectedCreativeGenerationReference = {
-  source: CreativeGenerationReferenceSource;
+  source: CreativeGenerationPersistedReferenceSource;
   assetId: string;
   kind: string;
   role: ImageGenerationReferenceRole;
@@ -134,10 +145,17 @@ export class CreativeGenerationReferenceSelector {
     private readonly media: Repository<MediaAssetEntity>,
   ) {}
 
+  /**
+   * CS3.6.2 — `base`, when given, is a variation's Image 1, already resolved
+   * and checked by the service. It is prepended, counts toward the limit
+   * (six images in total, base included) and may not also be chosen as an
+   * ordinary reference.
+   */
   async select(
     scope: CreativeStudioScope,
     context: ResolvedCreativeGenerationContext,
     explicit: readonly CreativeGenerationReferenceSelection[] | undefined,
+    base?: SelectedCreativeGenerationReference,
   ): Promise<CreativeGenerationReferencePlan> {
     const selection = explicit === undefined ? 'default' : 'explicit';
     const choices: CreativeGenerationReferenceSelection[] =
@@ -148,19 +166,27 @@ export class CreativeGenerationReferenceSelector {
           }))
         : explicit.map((choice) => ({ ...choice }));
 
-    if (choices.length > MAX_IMAGE_GENERATION_REFERENCES)
+    const limit = MAX_IMAGE_GENERATION_REFERENCES - (base ? 1 : 0);
+    if (choices.length > limit)
       throw refusal(
         selection === 'default'
           ? 'reference_selection_required'
           : 'reference_limit_exceeded',
         selection === 'default'
-          ? `O conteúdo tem mais de ${MAX_IMAGE_GENERATION_REFERENCES} referências; escolha quais usar.`
-          : `Escolha até ${MAX_IMAGE_GENERATION_REFERENCES} referências por geração.`,
+          ? `O conteúdo tem mais de ${limit} referências; escolha quais usar.`
+          : base
+            ? `Escolha até ${limit} referências além da imagem base.`
+            : `Escolha até ${limit} referências por geração.`,
       );
     for (const choice of choices) assertChoiceShape(choice);
     // Postgres answers uuids in lower case; compare and freeze them that way.
     for (const choice of choices) choice.id = choice.id.toLowerCase();
-    if (new Set(choices.map((c) => c.id)).size !== choices.length)
+    const baseId = base?.assetId.toLowerCase();
+    if (
+      new Set([...choices.map((c) => c.id), ...(baseId ? [baseId] : [])])
+        .size !==
+      choices.length + (baseId ? 1 : 0)
+    )
       throw refusal(
         'reference_duplicated',
         'A mesma imagem foi escolhida mais de uma vez.',
@@ -192,7 +218,7 @@ export class CreativeGenerationReferenceSelector {
     const brandById = new Map(brandRows.map((row) => [row.id, row]));
     const mediaById = new Map(mediaRows.map((row) => [row.id, row]));
 
-    const references = choices.map((choice) => {
+    const chosen = choices.map((choice) => {
       let kind: string | undefined;
       let binary:
         | { mimeType: string; byteSize: string; checksum: string | null }
@@ -246,6 +272,10 @@ export class CreativeGenerationReferenceSelector {
       };
     });
 
+    const references: SelectedCreativeGenerationReference[] = [
+      ...(base ? [{ ...base, assetId: base.assetId.toLowerCase() }] : []),
+      ...chosen,
+    ];
     if (
       references.reduce((sum, ref) => sum + ref.byteSize, 0) >
       MAX_IMAGE_GENERATION_REFERENCE_TOTAL_BYTES
@@ -269,6 +299,9 @@ export function referencesDigest(
     SelectedCreativeGenerationReference,
     'source' | 'assetId' | 'kind' | 'checksum'
   >[],
+  // The base (CS3.6.2) is part of this digest like any reference: its source
+  // `base`, position 0 and checksum make "same base, other bytes" and "same
+  // image as base vs. as reference" different requests.
 ): string | null {
   if (!references.length) return null;
   return createHash('sha256')

@@ -14,7 +14,7 @@ import type {
   CreativeImageQuality,
   ImageGenerationReferenceRole,
 } from '../creative-image-generation.provider';
-import type { CreativeGenerationReferenceSource } from '../creative-generation-references';
+import type { CreativeGenerationPersistedReferenceSource } from '../creative-generation-references';
 import type { CreativeGenerationContextRecord } from '../creative-generation-context';
 
 /**
@@ -35,6 +35,17 @@ export type CreativeGenerationStatus =
   | 'failed';
 
 export type CreativeGenerationType = 'image';
+
+/**
+ * CS3.6.2 — where a generation came from. `fresh` = a new intent; a
+ * `regeneration` re-runs another generation's intent; a `variation` changes
+ * a base image (an output or a Creative Version). Exactly one origin column
+ * matches the type (`CK_social_creative_generations_origin`).
+ */
+export type CreativeGenerationOriginType =
+  | 'fresh'
+  | 'regeneration'
+  | 'variation';
 
 /** How an output became durable; `revision` is the CS2B.6 loop. */
 export type CreativeGenerationPromotionKind =
@@ -110,6 +121,26 @@ export class CreativeGenerationEntity {
    */
   @Column({ name: 'generation_context', type: 'jsonb', nullable: true })
   generationContext!: CreativeGenerationContextRecord | null;
+
+  /**
+   * CS3.6.2 — provenance of a derived generation (migration 1798500000000).
+   * FKs `ON DELETE RESTRICT` to entities that are never deleted; same scope
+   * and immutability enforced by `TR_social_creative_generations_origin`.
+   * A variation's base bytes are its reference at position 0 (`base`).
+   */
+  @Column({
+    name: 'origin_type',
+    type: 'varchar',
+    length: 16,
+    default: 'fresh',
+  })
+  originType!: CreativeGenerationOriginType;
+  @Column({ name: 'origin_generation_id', type: 'uuid', nullable: true })
+  originGenerationId!: string | null;
+  @Column({ name: 'origin_output_id', type: 'uuid', nullable: true })
+  originOutputId!: string | null;
+  @Column({ name: 'origin_version_id', type: 'uuid', nullable: true })
+  originVersionId!: string | null;
 
   /**
    * CS3.2.1 — the client's `Idempotency-Key` and the sha256 of the normalized
@@ -241,7 +272,8 @@ export class CreativeGenerationOutputEntity {
  * the current Planner or Brand Kit again.
  *
  * Exactly one owner id: `brand_kit_asset_id` for `brand`, `media_asset_id`
- * for `planner`/`operator`. Deliberately NOT foreign keys — provenance must
+ * for `planner`/`operator`/`base`. `base` (CS3.6.2) is a variation's Image 1:
+ * the origin output's temporary media or the origin version's durable media. Deliberately NOT foreign keys — provenance must
  * outlive the binary (a later Brand Kit delete or a CS3.6 expiry). What the
  * database enforces instead (migration 1798300000000):
  *   - on insert: owner row exists, in the generation's exact four-part scope,
@@ -265,7 +297,7 @@ export class CreativeGenerationReferenceEntity {
   @Column({ name: 'generation_id', type: 'uuid' }) generationId!: string;
   @Column({ type: 'smallint' }) position!: number;
   @Column({ type: 'varchar', length: 16 })
-  source!: CreativeGenerationReferenceSource;
+  source!: CreativeGenerationPersistedReferenceSource;
   @Column({ type: 'varchar', length: 40 }) kind!: string;
   @Column({ type: 'varchar', length: 16 })
   role!: ImageGenerationReferenceRole;
