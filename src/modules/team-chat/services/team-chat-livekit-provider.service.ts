@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { AccessToken } from 'livekit-server-sdk';
+import { AccessToken, RoomServiceClient } from 'livekit-server-sdk';
 
 import {
   MeetingTokenInput,
@@ -9,6 +9,46 @@ import {
 
 @Injectable()
 export class TeamChatLiveKitProviderService extends TeamChatMeetingProviderService {
+  private roomClient(): RoomServiceClient | null {
+    const {
+      LIVEKIT_URL: url,
+      LIVEKIT_API_KEY: key,
+      LIVEKIT_API_SECRET: secret,
+    } = process.env;
+    return url && key && secret
+      ? new RoomServiceClient(url.replace(/^ws/, 'http'), key, secret)
+      : null;
+  }
+
+  async roomOccupancy(names: string[]): Promise<Map<string, number> | null> {
+    const client = this.roomClient();
+    if (!client) return null;
+    const rooms = await client.listRooms(names);
+    // Room.numParticipants can lag or remain zero for connected listeners.
+    // Inspect actual participants so muted users still keep the meeting alive.
+    const occupancy = await Promise.all(
+      rooms.map(async (room): Promise<[string, number]> => {
+        const participants = await client.listParticipants(room.name);
+        return [
+          room.name,
+          participants.filter(
+            ({ permission }) =>
+              !permission?.hidden &&
+              !permission?.recorder &&
+              !permission?.agent,
+          ).length,
+        ];
+      }),
+    );
+    return new Map(occupancy);
+  }
+
+  async closeRoom(name: string): Promise<void> {
+    const client = this.roomClient();
+    if (!client) return;
+    if ((await client.listRooms([name])).length) await client.deleteRoom(name);
+  }
+
   async createParticipantToken(
     input: MeetingTokenInput,
   ): Promise<MeetingTokenResult> {
@@ -29,6 +69,8 @@ export class TeamChatLiveKitProviderService extends TeamChatMeetingProviderServi
     const token = new AccessToken(apiKey, apiSecret, {
       identity: input.identity,
       name: input.participantName,
+      metadata: JSON.stringify({ avatarUrl: input.avatarUrl ?? null }),
+      ttl: '5m',
     });
 
     token.addGrant({
@@ -37,6 +79,7 @@ export class TeamChatLiveKitProviderService extends TeamChatMeetingProviderServi
       canPublish: input.canPublish ?? true,
       canSubscribe: input.canSubscribe ?? true,
       canPublishData: input.canPublishData ?? true,
+      canUpdateOwnMetadata: true,
       roomAdmin: input.isHost ?? false,
     });
 

@@ -3,7 +3,7 @@ import {
   Controller,
   Delete,
   Get,
-  Headers,
+  ForbiddenException,
   Param,
   Patch,
   Post,
@@ -24,6 +24,8 @@ import {
   RequireAnyPermission,
   RequirePermission,
 } from '../../permissions';
+import { RequestContextData } from '../../../common/context/request-context.decorator';
+import type { RequestContext } from '../../../common/context/request-context.interface';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 
 type TeamChatContext = {
@@ -40,13 +42,11 @@ export class TeamChatMeetingsController {
   @Post('agency/team-chat/meetings/:meetingId/start')
   @RequirePermission('agency.chat.channels.manage_members.assigned')
   startMeeting(
-    @Headers('x-tenant-id') tenantId: string,
-    @Headers('x-workspace-id') workspaceId: string,
-    @Headers('x-user-id') userId: string | undefined,
+    @RequestContextData() context: RequestContext,
     @Param('meetingId') meetingId: string,
   ) {
     return this.meetingsService.startMeeting(
-      this.getContext(tenantId, workspaceId, userId),
+      this.getContext(context),
       meetingId,
     );
   }
@@ -54,28 +54,21 @@ export class TeamChatMeetingsController {
   @Post('agency/team-chat/meetings/:meetingId/end')
   @RequirePermission('agency.chat.channels.manage_members.assigned')
   endMeeting(
-    @Headers('x-tenant-id') tenantId: string,
-    @Headers('x-workspace-id') workspaceId: string,
-    @Headers('x-user-id') userId: string | undefined,
+    @RequestContextData() context: RequestContext,
     @Param('meetingId') meetingId: string,
   ) {
-    return this.meetingsService.endMeeting(
-      this.getContext(tenantId, workspaceId, userId),
-      meetingId,
-    );
+    return this.meetingsService.endMeeting(this.getContext(context), meetingId);
   }
 
   @Patch('agency/team-chat/meetings/:meetingId')
   @RequirePermission('agency.chat.channels.manage_members.assigned')
   patchMeeting(
-    @Headers('x-tenant-id') tenantId: string,
-    @Headers('x-workspace-id') workspaceId: string,
-    @Headers('x-user-id') userId: string | undefined,
+    @RequestContextData() context: RequestContext,
     @Param('meetingId') meetingId: string,
     @Body() dto: PatchTeamChatMeetingDto,
   ) {
     return this.meetingsService.patchMeeting(
-      this.getContext(tenantId, workspaceId, userId),
+      this.getContext(context),
       meetingId,
       dto,
     );
@@ -85,13 +78,11 @@ export class TeamChatMeetingsController {
   @RequirePermission('agency.chat.channels.manage_members.assigned')
   @DangerousAction()
   cancelMeeting(
-    @Headers('x-tenant-id') tenantId: string,
-    @Headers('x-workspace-id') workspaceId: string,
-    @Headers('x-user-id') userId: string | undefined,
+    @RequestContextData() context: RequestContext,
     @Param('meetingId') meetingId: string,
   ) {
     return this.meetingsService.cancelMeeting(
-      this.getContext(tenantId, workspaceId, userId),
+      this.getContext(context),
       meetingId,
     );
   }
@@ -100,13 +91,11 @@ export class TeamChatMeetingsController {
   @RequirePermission('agency.chat.channels.delete.owner_only')
   @DangerousAction()
   deleteMeeting(
-    @Headers('x-tenant-id') tenantId: string,
-    @Headers('x-workspace-id') workspaceId: string,
-    @Headers('x-user-id') userId: string | undefined,
+    @RequestContextData() context: RequestContext,
     @Param('meetingId') meetingId: string,
   ) {
     return this.meetingsService.deleteMeeting(
-      this.getContext(tenantId, workspaceId, userId),
+      this.getContext(context),
       meetingId,
     );
   }
@@ -114,28 +103,21 @@ export class TeamChatMeetingsController {
   @Get('agency/team-chat/meetings/:meetingId/events')
   @RequirePermission('agency.chat.channels.view.assigned')
   listMeetingEvents(
-    @Headers('x-tenant-id') tenantId: string,
-    @Headers('x-workspace-id') workspaceId: string,
-    @Headers('x-user-id') userId: string | undefined,
+    @RequestContextData() context: RequestContext,
     @Param('meetingId') meetingId: string,
   ) {
-    return this.meetingsService.listEvents(
-      this.getContext(tenantId, workspaceId, userId),
-      meetingId,
-    );
+    return this.meetingsService.listEvents(this.getContext(context), meetingId);
   }
 
   @Post('agency/team-chat/meetings/:meetingId/events')
   @RequirePermission('agency.chat.messages.send.assigned')
   createMeetingEvent(
-    @Headers('x-tenant-id') tenantId: string,
-    @Headers('x-workspace-id') workspaceId: string,
-    @Headers('x-user-id') userId: string | undefined,
+    @RequestContextData() context: RequestContext,
     @Param('meetingId') meetingId: string,
     @Body() dto: CreateTeamChatMeetingEventDto,
   ) {
     return this.meetingsService.createEvent(
-      this.getContext(tenantId, workspaceId, userId),
+      this.getContext(context),
       meetingId,
       dto,
     );
@@ -144,14 +126,12 @@ export class TeamChatMeetingsController {
   @Post('agency/team-chat/meetings/:meetingId/ai-summary/request')
   @RequirePermission('agency.chat.channels.manage_members.assigned')
   requestAiSummary(
-    @Headers('x-tenant-id') tenantId: string,
-    @Headers('x-workspace-id') workspaceId: string,
-    @Headers('x-user-id') userId: string | undefined,
+    @RequestContextData() context: RequestContext,
     @Param('meetingId') meetingId: string,
     @Body() dto: RequestTeamChatMeetingAiSummaryDto,
   ) {
     return this.meetingsService.requestAiSummary(
-      this.getContext(tenantId, workspaceId, userId),
+      this.getContext(context),
       meetingId,
       dto,
     );
@@ -163,14 +143,12 @@ export class TeamChatMeetingsController {
     'agency.chat.messages.send.assigned',
   )
   joinInternalMeeting(
-    @Headers('x-tenant-id') tenantId: string,
-    @Headers('x-workspace-id') workspaceId: string,
-    @Headers('x-user-id') userId: string | undefined,
+    @RequestContextData() context: RequestContext,
     @Param('meetingId') meetingId: string,
     @Body() dto: JoinTeamChatMeetingDto,
   ) {
     return this.meetingsService.joinInternal(
-      this.getContext(tenantId, workspaceId, userId),
+      this.getContext(context),
       meetingId,
       dto,
     );
@@ -184,15 +162,16 @@ export class TeamChatMeetingsController {
     return this.meetingsService.joinPublic(publicSlug, dto);
   }
 
-  private getContext(
-    tenantId: string,
-    workspaceId: string,
-    userId?: string,
-  ): TeamChatContext {
+  private getContext(context: RequestContext): TeamChatContext {
+    if (!context.tenantId || !context.workspaceId || !context.userId) {
+      throw new ForbiddenException(
+        'Contexto autenticado de workspace obrigatório.',
+      );
+    }
     return {
-      tenantId,
-      workspaceId,
-      userId: userId || null,
+      tenantId: context.tenantId,
+      workspaceId: context.workspaceId,
+      userId: context.userId,
     };
   }
 }

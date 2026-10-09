@@ -2,6 +2,7 @@ export type MeetingTokenInput = {
   roomName: string;
   identity: string;
   participantName: string;
+  avatarUrl?: string | null;
   canPublish?: boolean;
   canSubscribe?: boolean;
   canPublishData?: boolean;

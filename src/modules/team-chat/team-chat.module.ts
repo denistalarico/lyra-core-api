@@ -30,6 +30,7 @@ import { PermissionsModule } from '../permissions';
 import { TeamChatNotificationPublisher } from './services/team-chat-notification.publisher';
 import { TeamChatCardPostService } from './services/team-chat-card-post.service';
 import { WorkspaceUserEntity } from '../settings/entities/workspace-user.entity';
+import { AgencyUserProfileEntity } from '../agency/entities/agency-settings.entities';
 
 const AGENCY_CONNECTION = 'agency';
 
@@ -56,6 +57,7 @@ const AGENCY_CONNECTION = 'agency';
         // Read-only: the membership source that validates channel members and
         // mentions against the agency workspace (CCOM0.5 §22/§21).
         WorkspaceUserEntity,
+        AgencyUserProfileEntity,
       ],
       AGENCY_CONNECTION,
     ),
