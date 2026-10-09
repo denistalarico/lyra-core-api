@@ -5,14 +5,24 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
-import { DataSource, type EntityManager, IsNull, Repository } from 'typeorm';
-import { MediaAssetEntity } from '../../common/media-assets';
+import {
+  DataSource,
+  type EntityManager,
+  IsNull,
+  Repository,
+  type SelectQueryBuilder,
+} from 'typeorm';
+import {
+  detectMediaAssetMimeType,
+  MediaAssetEntity,
+} from '../../common/media-assets';
 import type { RequestContext } from '../../common/context/request-context.interface';
 import { PlatformPermissionService } from '../permissions';
 import {
   AgencyProject,
   AgencyTask,
   AgencyTaskChecklistItem,
+  TaskStatus,
   TaskVisibility,
 } from '../projects';
 import { TasksCrudService } from '../projects/services/tasks-crud.service';
@@ -21,7 +31,11 @@ import {
   SocialContentDestinationEntity,
   SocialDestinationCreativeEntity,
 } from '../social-planner/entities';
-import { databaseConstraint } from './creative-asset.service';
+import {
+  CreativeAssetService,
+  type CreativeVersionCreatedHook,
+  databaseConstraint,
+} from './creative-asset.service';
 import {
   CreativeProductionReadinessService,
   type CreativeProductionSnapshot,
@@ -33,6 +47,8 @@ import type {
   CreateProductionTaskDto,
   HandoffProductionDestinationDto,
   LinkProductionTaskDto,
+  ProductionWorkCandidatesQueryDto,
+  UploadProductionCreativeDto,
 } from './dto/creative-production.dto';
 import {
   CreativeAssetEntity,
@@ -87,7 +103,11 @@ export type CreativeProductionView = {
     thumbnailPath: string | null;
   } | null;
   approval: {
-    required: boolean;
+    /** Always true since the CS5 Closeout (every scope approves). */
+    required: true;
+    /** `own` = internal only; `managed_client` = internal → client. */
+    scopeKind: CreativeProductionSnapshot['approval']['scopeKind'];
+    stages: CreativeProductionSnapshot['approval']['stages'];
     state: CreativeProductionSnapshot['approval']['state'];
     approvalId: string | null;
     status: string | null;
@@ -159,6 +179,23 @@ export type CreativeProductionView = {
 };
 
 const HISTORY_LIMIT = 50;
+const CANDIDATE_LIMIT = 25;
+
+/** An Agency task the production of this item may link (same rule as link). */
+export type ProductionTaskCandidate = {
+  id: string;
+  title: string;
+  status: string;
+  dueDate: string | null;
+  assigneeId: string | null;
+  projectId: string | null;
+  projectName: string | null;
+};
+
+export type ProductionProjectCandidate = { id: string; name: string };
+
+/** Where an uploaded-and-selected creative came from (history only). */
+export type ProductionUploadOrigin = 'production' | 'planner';
 
 /**
  * CS5-B — orchestration of creative production for one Planner content item.
@@ -204,6 +241,7 @@ export class CreativeProductionService {
     private readonly destinationOwner: DestinationCreativeService,
     private readonly taskOwner: TasksCrudService,
     private readonly permissions: PlatformPermissionService,
+    private readonly assetOwner: CreativeAssetService,
   ) {}
 
   // ── View ────────────────────────────────────────────────────────────────
@@ -250,6 +288,8 @@ export class CreativeProductionService {
         : null,
       approval: {
         required: approval.required,
+        scopeKind: approval.scopeKind,
+        stages: approval.stages,
         state: approval.state,
         approvalId: approval.projection?.approvalId ?? null,
         status: approval.projection?.status ?? null,
@@ -392,6 +432,91 @@ export class CreativeProductionService {
     return { changed, production: await this.view(ctx, scope, item.id) };
   }
 
+  /**
+   * CS5 Closeout — "Enviar novo arquivo" in Production, and the Planner's
+   * explicit "replace the creative". One command on one owner path: the file
+   * becomes an immutable Creative Version through the Studio's own upload
+   * (CS1) — a new version of the selected asset when that asset was produced
+   * for this item and has the same media type, otherwise a new asset linked
+   * to the item — and that exact version becomes the selection inside the
+   * same transaction. The user's upload is the selection intent; nothing is
+   * inferred later. Destinations and publications are untouched: they keep the
+   * previous version until an explicit handoff.
+   */
+  async uploadAndSelect(
+    ctx: RequestContext,
+    scope: CreativeStudioScope,
+    contentItemId: string,
+    file: Parameters<CreativeAssetService['createVersion']>[3],
+    input: UploadProductionCreativeDto,
+  ) {
+    await this.assertPermission(ctx, P.create);
+    const item = await this.readiness.requireContentItem(scope, contentItemId);
+    this.assertNotArchived(item);
+    const actor = ctx.userId ?? null;
+    const origin: ProductionUploadOrigin = input.origin ?? 'production';
+    const reuse = await this.reusableSelectedAsset(scope, item.id, file);
+    const selectUploaded: CreativeVersionCreatedHook = async (
+      manager,
+      created,
+    ) => {
+      const production = await this.lockProduction(manager, scope, item.id);
+      const version = await manager
+        .getRepository(CreativeAssetVersionEntity)
+        .findOneOrFail({ where: { id: created.versionId } });
+      await manager.getRepository(CreativeProductionEntity).update(
+        { id: production.id },
+        {
+          selectedCreativeAssetId: created.creativeAssetId,
+          selectedVersionId: version.id,
+          selectedById: actor,
+          selectedAt: new Date(),
+        },
+      );
+      await this.readiness.recordEvent(
+        manager,
+        scope,
+        item.id,
+        'social.creative.version.selected',
+        version.id,
+        actor,
+        {
+          creativeAssetId: created.creativeAssetId,
+          versionNumber: version.versionNumber,
+          previousVersionId: production.selectedVersionId,
+          via: 'upload',
+          origin,
+        },
+      );
+    };
+    const created = await this.guarded(async () => {
+      if (reuse) {
+        const version = await this.assetOwner.createVersion(
+          scope,
+          actor,
+          reuse.id,
+          file,
+          undefined,
+          selectUploaded,
+        );
+        return { creativeAssetId: reuse.id, versionId: version.id };
+      }
+      const asset = await this.assetOwner.upload(scope, actor, {
+        file,
+        name: input.name,
+        contentItemId: item.id,
+        onVersionCreated: selectUploaded,
+      });
+      return { creativeAssetId: asset.id, versionId: asset.currentVersionId! };
+    });
+    await this.readiness.reflectPlanner(scope, item.id, actor);
+    return {
+      changed: true,
+      ...created,
+      production: await this.view(ctx, scope, item.id),
+    };
+  }
+
   // ── Approval ────────────────────────────────────────────────────────────
 
   /**
@@ -409,11 +534,6 @@ export class CreativeProductionService {
     const snapshot = await this.readiness.snapshot(scope, contentItemId);
     this.assertNotArchived(snapshot.contentItem);
     const selection = this.requireAvailableSelection(snapshot);
-    if (!snapshot.approval.required)
-      throw this.conflict(
-        'approval_not_required',
-        'Este contexto não usa aprovação: a versão selecionada já está pronta.',
-      );
     if (snapshot.approval.state === 'changes_requested')
       throw this.conflict(
         'revision_required',
@@ -654,6 +774,72 @@ export class CreativeProductionService {
           .catch(() => undefined);
       throw error;
     }
+  }
+
+  /**
+   * The tasks this item's production may link — computed by the same
+   * predicate the link command enforces, so a picker built on it can never
+   * offer a task the link refuses (CS5 Closeout: own-scope content, a picker
+   * listing every workspace task, and a 404 on link).
+   */
+  async taskCandidates(
+    ctx: RequestContext,
+    scope: CreativeStudioScope,
+    contentItemId: string,
+    query: ProductionWorkCandidatesQueryDto,
+  ): Promise<{ items: ProductionTaskCandidate[] }> {
+    await this.readiness.requireContentItem(scope, contentItemId);
+    const qb = this.eligibleTasks(ctx, scope)
+      .select('task.id', 'id')
+      .addSelect('task.title', 'title')
+      .addSelect('task.status', 'status')
+      .addSelect('task.dueDate', 'dueDate')
+      .addSelect('task.assigneeId', 'assigneeId')
+      .addSelect('task.projectId', 'projectId')
+      .addSelect('project.name', 'projectName');
+    const search = query.search?.trim();
+    if (search)
+      qb.andWhere('task.title ILIKE :search', { search: `%${search}%` });
+    const rows = await qb
+      .orderBy('task.updatedAt', 'DESC')
+      .addOrderBy('task.id', 'DESC')
+      .limit(query.limit ?? CANDIDATE_LIMIT)
+      .getRawMany<{
+        id: string;
+        title: string;
+        status: string;
+        dueDate: Date | string | null;
+        assigneeId: string | null;
+        projectId: string | null;
+        projectName: string | null;
+      }>();
+    return {
+      items: rows.map((row) => ({
+        ...row,
+        dueDate: row.dueDate ? new Date(row.dueDate).toISOString() : null,
+      })),
+    };
+  }
+
+  /** Projects a created task may go to: same rule as `createTask`. */
+  async projectCandidates(
+    scope: CreativeStudioScope,
+    contentItemId: string,
+    query: ProductionWorkCandidatesQueryDto,
+  ): Promise<{ items: ProductionProjectCandidate[] }> {
+    await this.readiness.requireContentItem(scope, contentItemId);
+    const qb = this.eligibleProjects(scope).select([
+      'project.id',
+      'project.name',
+    ]);
+    const search = query.search?.trim();
+    if (search)
+      qb.andWhere('project.name ILIKE :search', { search: `%${search}%` });
+    const rows = await qb
+      .orderBy('project.name', 'ASC')
+      .take(query.limit ?? CANDIDATE_LIMIT)
+      .getMany();
+    return { items: rows.map(({ id, name }) => ({ id, name })) };
   }
 
   // ── Destination handoff ─────────────────────────────────────────────────
@@ -964,7 +1150,6 @@ export class CreativeProductionService {
         [live, 'content_archived'],
         [selected, 'no_creative_selected'],
         [available, 'selected_version_unavailable'],
-        [approval.required, 'approval_not_required'],
         [approval.state !== 'pending', 'approval_pending'],
         [approval.state !== 'approved', 'already_approved'],
         [approval.state !== 'changes_requested', 'revision_required'],
@@ -994,42 +1179,78 @@ export class CreativeProductionService {
     ];
   }
 
+  /**
+   * The single rule for "which Agency task may this item's production use":
+   * live (not archived), visible to the actor (not someone else's private
+   * task), and whose effective client — the task's own, else its project's —
+   * is exactly the scope's client, `NULL` for the tenant's own content. Tasks
+   * are client-scoped in the Agency model (no Company Context there).
+   */
+  private eligibleTasks(
+    ctx: RequestContext,
+    scope: CreativeStudioScope,
+  ): SelectQueryBuilder<AgencyTask> {
+    const qb = this.tasks
+      .createQueryBuilder('task')
+      .leftJoin(
+        AgencyProject,
+        'project',
+        'project.id = task.projectId AND project.tenantId = task.tenantId AND project.workspaceId = task.workspaceId',
+      )
+      .where('task.tenantId = :tenantId AND task.workspaceId = :workspaceId', {
+        tenantId: scope.tenantId,
+        workspaceId: scope.workspaceId,
+      })
+      .andWhere('task.archivedAt IS NULL')
+      .andWhere('task.status <> :archivedStatus', {
+        archivedStatus: TaskStatus.Archived,
+      })
+      .andWhere(
+        '(task.visibility <> :private OR task.createdById = :actorId)',
+        {
+          private: TaskVisibility.Private,
+          actorId: ctx.userId ?? null,
+        },
+      );
+    return scope.agencyClientId === null
+      ? qb.andWhere('COALESCE(task.clientId, project.clientId) IS NULL')
+      : qb.andWhere('COALESCE(task.clientId, project.clientId) = :clientId', {
+          clientId: scope.agencyClientId,
+        });
+  }
+
+  /** Live projects of exactly the scope's client (`NULL` = own projects). */
+  private eligibleProjects(
+    scope: CreativeStudioScope,
+  ): SelectQueryBuilder<AgencyProject> {
+    const qb = this.projects
+      .createQueryBuilder('project')
+      .where(
+        'project.tenantId = :tenantId AND project.workspaceId = :workspaceId',
+        { tenantId: scope.tenantId, workspaceId: scope.workspaceId },
+      )
+      .andWhere('project.archivedAt IS NULL');
+    return scope.agencyClientId === null
+      ? qb.andWhere('project.clientId IS NULL')
+      : qb.andWhere('project.clientId = :clientId', {
+          clientId: scope.agencyClientId,
+        });
+  }
+
+  /** Anything outside `eligibleTasks` is indistinguishable from "not found". */
   private async requireTaskInScope(
     ctx: RequestContext,
     scope: CreativeStudioScope,
     taskId: string,
   ): Promise<AgencyTask> {
-    const task = await this.tasks.findOne({
-      where: {
-        id: taskId,
-        tenantId: scope.tenantId,
-        workspaceId: scope.workspaceId,
-      },
-    });
-    const hidden =
-      !task ||
-      task.archivedAt !== null ||
-      (task.visibility === TaskVisibility.Private &&
-        task.createdById !== ctx.userId);
-    // Tasks are client-scoped (no Company Context in the Agency model). The
-    // effective client is the task's own, else its project's.
-    const clientId = hidden
-      ? undefined
-      : (task.clientId ??
-        (task.projectId
-          ? ((
-              await this.projects.findOne({
-                where: {
-                  id: task.projectId,
-                  tenantId: scope.tenantId,
-                  workspaceId: scope.workspaceId,
-                },
-                select: { id: true, clientId: true },
-              })
-            )?.clientId ?? null)
-          : null));
-    if (hidden || clientId !== scope.agencyClientId)
-      throw new NotFoundException('Tarefa não encontrada.');
+    const task = await this.eligibleTasks(ctx, scope)
+      .andWhere('task.id = :taskId', { taskId })
+      .getOne();
+    if (!task)
+      throw new NotFoundException({
+        code: 'task_not_found',
+        message: 'Tarefa não encontrada.',
+      });
     return task;
   }
 
@@ -1037,16 +1258,50 @@ export class CreativeProductionService {
     scope: CreativeStudioScope,
     projectId: string,
   ): Promise<void> {
-    const project = await this.projects.findOne({
+    const exists = await this.eligibleProjects(scope)
+      .andWhere('project.id = :projectId', { projectId })
+      .getExists();
+    if (!exists)
+      throw new NotFoundException({
+        code: 'project_not_found',
+        message: 'Projeto não encontrado.',
+      });
+  }
+
+  /**
+   * A new version goes on the selected asset only when that asset was
+   * produced for this item, is live and has the uploaded media type; a
+   * library asset is never versioned for one item's sake.
+   */
+  private async reusableSelectedAsset(
+    scope: CreativeStudioScope,
+    contentItemId: string,
+    file: { buffer?: Buffer } | undefined,
+  ): Promise<CreativeAssetEntity | null> {
+    const production = await this.readiness.findProduction(
+      scope,
+      contentItemId,
+    );
+    if (!production?.selectedCreativeAssetId || !file?.buffer?.length)
+      return null;
+    const mime = detectMediaAssetMimeType(file.buffer);
+    const asset = await this.assets.findOne({
       where: {
-        id: projectId,
-        tenantId: scope.tenantId,
-        workspaceId: scope.workspaceId,
+        ...this.scopeWhere(scope),
+        id: production.selectedCreativeAssetId,
       },
-      select: { id: true, clientId: true },
     });
-    if (!project || project.clientId !== scope.agencyClientId)
-      throw new NotFoundException('Projeto não encontrado.');
+    if (
+      !mime ||
+      !asset ||
+      asset.contentItemId !== contentItemId ||
+      asset.status === 'archived' ||
+      asset.archivedAt
+    )
+      return null;
+    return asset.assetType === (mime.startsWith('image/') ? 'image' : 'video')
+      ? asset
+      : null;
   }
 
   /** Only an active team member of this workspace can be assigned. */

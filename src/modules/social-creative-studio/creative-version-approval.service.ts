@@ -6,7 +6,8 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { CompanyContextRequiredException } from '../../common/context/company-aware-scope';
+import { approvalScopeWhere } from '../social-approvals/approval-scope';
+import { approvalScopeKind } from '../social-approvals/approval-stage.policy';
 import { SocialApprovalsService } from '../social-approvals/social-approvals.service';
 import { SocialContentProductionStatusService } from '../social-planner/services/social-content-production-status.service';
 import { CreativeAssetEntity, CreativeAssetVersionEntity } from './entities';
@@ -20,7 +21,8 @@ import type { CreativeVersionApprovalResponse } from './dto/creative-version-app
  *
  * The Studio owns the asset and its immutable versions; Approvals owns the
  * workflow. This service proves that the explicitly chosen version belongs
- * to an asset in the authorized Company Context, then delegates creation or
+ * to an asset in the authorized scope (a Company Context or, since the CS5
+ * Closeout, the own scope), then delegates creation or
  * read-only state projection (CS2B.3) to Approvals. Status, supersede, the
  * advisory lock and active-request uniqueness all stay in that domain.
  */
@@ -149,21 +151,13 @@ export class CreativeVersionApprovalService {
     assetId: string,
     versionId: string,
   ) {
-    // Domain rule, not a workaround: an approval request always belongs to a
-    // Company Context (`CK_social_approval_requests_scope`), and
-    // `SocialApprovalsService.create()` enforces the same. Rejecting here
-    // keeps agency scope from running any Studio lookup for a request that
-    // can never exist.
-    if (!scope.agencyClientId || !scope.companyContextId)
-      throw new CompanyContextRequiredException();
+    // CS5 Closeout: a request belongs to a Company Context or to the own
+    // scope `(null, null)` (internal-only stage policy). Legacy
+    // `(client, null)` still cannot hold one, so it is refused before any
+    // Studio lookup, exactly as before.
+    approvalScopeKind(scope);
     const asset = await this.assets.findOne({
-      where: {
-        id: assetId,
-        tenantId: scope.tenantId,
-        workspaceId: scope.workspaceId,
-        agencyClientId: scope.agencyClientId,
-        companyContextId: scope.companyContextId,
-      },
+      where: { id: assetId, ...approvalScopeWhere(scope) },
       select: { id: true, contentItemId: true },
     });
     if (!asset) throw new NotFoundException('Criativo não encontrado.');

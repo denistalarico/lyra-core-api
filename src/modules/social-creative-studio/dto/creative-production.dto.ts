@@ -1,11 +1,16 @@
+import { Type } from 'class-transformer';
 import {
   IsBoolean,
   IsDateString,
   IsEnum,
+  IsIn,
+  IsInt,
   IsOptional,
   IsString,
   IsUUID,
+  Max,
   MaxLength,
+  Min,
 } from 'class-validator';
 import { TaskPriority } from '../../projects/enums';
 
@@ -75,4 +80,37 @@ export class HandoffProductionDestinationDto {
   @IsOptional()
   @IsBoolean()
   replaceExisting?: boolean;
+}
+
+/**
+ * CS5 Closeout — "Enviar novo arquivo" (multipart `file`). The server decides
+ * whether it becomes a new version of the selected asset or a new asset linked
+ * to the item; the client never names an asset or a media id.
+ */
+export class UploadProductionCreativeDto {
+  /** Name of a NEW asset; ignored when the file becomes a new version. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  name?: string;
+
+  /** Where the explicit replacement happened; recorded in history only. */
+  @IsOptional()
+  @IsIn(['production', 'planner'])
+  origin?: 'production' | 'planner';
+}
+
+/** Search over the tasks/projects this item's production may use. */
+export class ProductionWorkCandidatesQueryDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  search?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(50)
+  limit?: number;
 }

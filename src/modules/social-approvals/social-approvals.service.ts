@@ -17,10 +17,8 @@ import {
   type SocialApprovalStage,
   type SocialApprovalStatus,
 } from './entities';
-import {
-  approvalScopeWhere,
-  assertApprovalCompanyScope,
-} from './approval-scope';
+import { approvalScopeWhere, assertApprovalScope } from './approval-scope';
+import { internalApprovalIsFinal } from './approval-stage.policy';
 import { ApprovalSubjectResolver } from './subjects/approval-subject-resolver';
 import { SocialApprovalNotificationPublisher } from './social-approval-notification.publisher';
 import type { SocialApprovalStateProjection } from './approval-state.projection';
@@ -162,7 +160,7 @@ export class SocialApprovalsService {
     },
   ) {
     const actor = this.user(actorUserId);
-    assertApprovalCompanyScope(scope);
+    assertApprovalScope(scope);
     const subject = await this.subjects.resolve(scope, input);
     try {
       const created = await this.dataSource.transaction(async (manager) => {
@@ -470,6 +468,12 @@ export class SocialApprovalsService {
       // The publisher already logs; swallowing here keeps the transition whole.
     }
   }
+  /**
+   * The internal decision. Where the stage policy has a client stage (managed
+   * client) it hands the request to the client; where it does not (the
+   * tenant's own content) it is the final approval and the request never
+   * enters `awaiting_client`.
+   */
   async approveInternal(
     scope: CompanyAwareScope,
     id: string,
@@ -493,12 +497,21 @@ export class SocialApprovalsService {
         actor,
         null,
       );
-      request.status = 'awaiting_client';
-      request.currentStage = 'client';
-      request.sentToClientAt = new Date();
+      if (internalApprovalIsFinal(request)) {
+        request.status = 'approved';
+        request.approvedAt = new Date();
+      } else {
+        request.status = 'awaiting_client';
+        request.currentStage = 'client';
+        request.sentToClientAt = new Date();
+      }
       return manager.save(request);
     });
-    await this.notifications?.publish('awaiting_client', saved, actor.userId);
+    await this.notifications?.publish(
+      saved.status === 'approved' ? 'approved' : 'awaiting_client',
+      saved,
+      actor.userId,
+    );
     await this.observeTransition(saved);
     return saved;
   }

@@ -28,9 +28,18 @@ export type SocialApprovalStage = 'internal' | 'client';
   'companyContextId',
   'createdAt',
 ])
+/**
+ * Company scope (both ids) or, since the CS5 Closeout, the tenant's own scope
+ * (both NULL). Legacy `(client, null)` stays impossible.
+ */
 @Check(
   'CK_social_approval_requests_scope',
-  '"agency_client_id" IS NOT NULL AND "company_context_id" IS NOT NULL',
+  '("agency_client_id" IS NULL AND "company_context_id" IS NULL) OR ("agency_client_id" IS NOT NULL AND "company_context_id" IS NOT NULL)',
+)
+/** Own scope has no client stage (see `approval-stage.policy.ts`). */
+@Check(
+  'CK_social_approval_requests_own_internal',
+  `"agency_client_id" IS NOT NULL OR ("current_stage" = 'internal' AND "status" <> 'awaiting_client' AND "sent_to_client_at" IS NULL)`,
 )
 @Check(
   'CK_social_approval_requests_status',
@@ -44,10 +53,12 @@ export class SocialApprovalRequestEntity {
   @PrimaryGeneratedColumn('uuid') id!: string;
   @Column({ name: 'tenant_id', type: 'uuid' }) tenantId!: string;
   @Column({ name: 'workspace_id', type: 'uuid' }) workspaceId!: string;
-  @Column({ name: 'agency_client_id', type: 'uuid' }) agencyClientId!: string;
+  /** Null together with `companyContextId` for the tenant's own scope. */
+  @Column({ name: 'agency_client_id', type: 'uuid', nullable: true })
+  agencyClientId!: string | null;
   /** AgencyClientCompanyContext.id, never a body-authoritative input. */
-  @Column({ name: 'company_context_id', type: 'uuid' })
-  companyContextId!: string;
+  @Column({ name: 'company_context_id', type: 'uuid', nullable: true })
+  companyContextId!: string | null;
   @Column({ name: 'subject_type', type: 'varchar', length: 80 })
   subjectType!: string;
   @Column({ name: 'subject_id', type: 'uuid' }) subjectId!: string;

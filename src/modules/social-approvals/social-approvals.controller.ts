@@ -20,8 +20,10 @@ import {
 import {
   AddSocialApprovalCommentDto,
   CreateSocialApprovalDto,
+  ListSocialApprovalInboxDto,
   ListSocialApprovalsDto,
 } from './dto/social-approval.dto';
+import { SocialApprovalInboxService } from './social-approval-inbox.service';
 import { SocialApprovalsService } from './social-approvals.service';
 import {
   APPROVAL_SUBJECT_OWNER_ACTIONS,
@@ -32,12 +34,28 @@ import {
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 @RequireProductEntitlement('social')
 export class SocialApprovalsController {
-  constructor(private readonly approvals: SocialApprovalsService) {}
+  constructor(
+    private readonly approvals: SocialApprovalsService,
+    private readonly inbox: SocialApprovalInboxService,
+  ) {}
   @Get() @RequirePermission('social.approvals.review.view.assigned') list(
     @RequestContextData() ctx: RequestContext,
     @Query() query: ListSocialApprovalsDto,
   ) {
     return this.approvals.list(resolveCompanyAwareScope(ctx), query);
+  }
+  /**
+   * CS5 Closeout — every approval the caller may operate, across the own
+   * scope and the managed companies, each row with the context to act in.
+   * Declared before `:id` so the literal segment is never parsed as an id.
+   */
+  @Get('inbox')
+  @RequirePermission('social.approvals.review.view.assigned')
+  inboxList(
+    @RequestContextData() ctx: RequestContext,
+    @Query() query: ListSocialApprovalInboxDto,
+  ) {
+    return this.inbox.list(ctx, query);
   }
   @Get(':id')
   @RequirePermission('social.approvals.review.view.assigned')

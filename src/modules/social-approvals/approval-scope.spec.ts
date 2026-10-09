@@ -4,7 +4,7 @@ import { COMPANY_CONTEXT_REQUIRED } from '../../common/context/company-aware-sco
 import {
   approvalClientWhere,
   approvalScopeWhere,
-  assertApprovalCompanyScope,
+  assertApprovalScope,
 } from './approval-scope';
 import { SocialApprovalRequestEntity } from './entities';
 import { SocialApprovalsService } from './social-approvals.service';
@@ -145,12 +145,13 @@ describe('Approvals scope predicates — null means IS NULL', () => {
     expect(isNullOperator(where.companyContextId)).toBe(true);
   });
 
-  it('requires both ids to open an approval request', () => {
-    expect(() => assertApprovalCompanyScope(clientACompanyA)).not.toThrow();
-    for (const scope of [agency, legacyClientA])
-      expect(() => assertApprovalCompanyScope(scope)).toThrow(
-        BadRequestException,
-      );
+  it('opens a request in a company scope or the own scope, never in legacy (client, null)', () => {
+    expect(() => assertApprovalScope(clientACompanyA)).not.toThrow();
+    // CS5 Closeout: the agency's own content has an internal-only approval.
+    expect(() => assertApprovalScope(agency)).not.toThrow();
+    expect(() => assertApprovalScope(legacyClientA)).toThrow(
+      BadRequestException,
+    );
   });
 });
 
@@ -268,22 +269,33 @@ describe('SocialApprovalsService — agency scope never widens or 500s', () => {
     return { service, subjects, transaction, where, clientRequest };
   }
 
-  it('rejects create in agency and legacy scope with company_context_required, before any read or write', async () => {
+  it('rejects create in legacy (client, null) scope with company_context_required, before any read or write', async () => {
     const { service, subjects, transaction } = serviceHarness();
 
-    for (const scope of [agency, legacyClientA]) {
-      const attempt = service.create(
-        scope,
-        'user-a',
-        creative(ids.agencyAsset, 'v-agency'),
-      );
-      await expect(attempt).rejects.toBeInstanceOf(BadRequestException);
-      await expect(attempt).rejects.toMatchObject({
-        response: { code: COMPANY_CONTEXT_REQUIRED },
-      });
-    }
+    const attempt = service.create(
+      legacyClientA,
+      'user-a',
+      creative(ids.agencyAsset, 'v-agency'),
+    );
+    await expect(attempt).rejects.toBeInstanceOf(BadRequestException);
+    await expect(attempt).rejects.toMatchObject({
+      response: { code: COMPANY_CONTEXT_REQUIRED },
+    });
     expect(subjects.resolve).not.toHaveBeenCalled();
     expect(transaction).not.toHaveBeenCalled();
+  });
+
+  it('lets the own scope (null, null) open a request through its own subject resolution', async () => {
+    const { service, subjects } = serviceHarness();
+    subjects.resolve.mockRejectedValueOnce(new NotFoundException());
+
+    await expect(
+      service.create(agency, 'user-a', creative(ids.agencyAsset, 'v-agency')),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    expect(subjects.resolve).toHaveBeenCalledWith(
+      agency,
+      creative(ids.agencyAsset, 'v-agency'),
+    );
   });
 
   it('agency scope cannot read or mutate a request of Client A / Company A', async () => {

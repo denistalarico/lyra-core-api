@@ -9,8 +9,14 @@ import {
   ParseUUIDPipe,
   Post,
   Put,
+  Query,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
+import { MEDIA_ASSET_MAX_UPLOAD_BYTES } from '../../common/media-assets';
 import { RequestContextData } from '../../common/context/request-context.decorator';
 import type { RequestContext } from '../../common/context/request-context.interface';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -26,8 +32,16 @@ import {
   CreateProductionTaskDto,
   HandoffProductionDestinationDto,
   LinkProductionTaskDto,
+  ProductionWorkCandidatesQueryDto,
   SelectCreativeVersionDto,
+  UploadProductionCreativeDto,
 } from './dto/creative-production.dto';
+
+/** Same limits as the Studio upload (CS1): one file, media-asset ceiling. */
+const UPLOAD_OPTIONS = {
+  storage: memoryStorage(),
+  limits: { fileSize: MEDIA_ASSET_MAX_UPLOAD_BYTES, files: 1 },
+};
 
 /**
  * CS5-B — creative production of one Planner content item.
@@ -69,6 +83,30 @@ export class CreativeProductionController {
     );
   }
 
+  /**
+   * CS5 Closeout — upload a new file and select it explicitly (Production's
+   * "Enviar novo arquivo" and the Planner's "replace the creative"). The
+   * Studio's upload key is checked in the service, on top of `update`.
+   */
+  @Post(':contentItemId/creative')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission(P.update)
+  @UseInterceptors(FileInterceptor('file', UPLOAD_OPTIONS))
+  uploadCreative(
+    @RequestContextData() ctx: RequestContext,
+    @Param('contentItemId', ParseUUIDPipe) contentItemId: string,
+    @UploadedFile() file: Express.Multer.File,
+    @Body() dto: UploadProductionCreativeDto,
+  ) {
+    return this.production.uploadAndSelect(
+      ctx,
+      creativeStudioScope(ctx),
+      contentItemId,
+      file,
+      dto,
+    );
+  }
+
   @Delete(':contentItemId/selected-version')
   @RequirePermission(P.update)
   clearSelection(
@@ -94,6 +132,37 @@ export class CreativeProductionController {
       ctx,
       creativeStudioScope(ctx),
       contentItemId,
+    );
+  }
+
+  /** Tasks the link command accepts for this item (same predicate). */
+  @Get(':contentItemId/task-candidates')
+  @RequirePermission(P.update)
+  taskCandidates(
+    @RequestContextData() ctx: RequestContext,
+    @Param('contentItemId', ParseUUIDPipe) contentItemId: string,
+    @Query() query: ProductionWorkCandidatesQueryDto,
+  ) {
+    return this.production.taskCandidates(
+      ctx,
+      creativeStudioScope(ctx),
+      contentItemId,
+      query,
+    );
+  }
+
+  /** Projects the task creation accepts for this item (same predicate). */
+  @Get(':contentItemId/project-candidates')
+  @RequirePermission(P.update)
+  projectCandidates(
+    @RequestContextData() ctx: RequestContext,
+    @Param('contentItemId', ParseUUIDPipe) contentItemId: string,
+    @Query() query: ProductionWorkCandidatesQueryDto,
+  ) {
+    return this.production.projectCandidates(
+      creativeStudioScope(ctx),
+      contentItemId,
+      query,
     );
   }
 

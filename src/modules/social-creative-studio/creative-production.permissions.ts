@@ -7,6 +7,12 @@ export const CREATIVE_PRODUCTION_PERMISSIONS = {
   view: 'social.creative.content.view.assigned',
   /** Select / clear the creative, link/unlink work, reconcile. */
   update: 'social.creative.content.update.assigned',
+  /**
+   * CS5 Closeout — upload a new file from Production (or the Planner's
+   * replacement): the Studio's own upload key, checked in addition to
+   * `update` because the command creates a Creative Asset/Version.
+   */
+  create: 'social.creative.content.create_draft.assigned',
   /** Send the selected version for approval (CS2B.2 key). */
   submitReview: 'social.creative.content.submit_review.assigned',
   /** Destination handoff: the key that already governs destination creatives (E5). */

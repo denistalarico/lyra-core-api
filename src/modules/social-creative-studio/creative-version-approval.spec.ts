@@ -46,6 +46,7 @@ const agencyScope = {
   agencyClientId: null,
   companyContextId: null,
 };
+const legacyScope = { ...companyA, companyContextId: null };
 
 type Row = Record<string, unknown>;
 const matches = (row: Row, where: Row) =>
@@ -232,11 +233,20 @@ describe('CS2B.2 CreativeVersionApprovalService — owner-domain entry point', (
     expect(approvals.create).not.toHaveBeenCalled();
   });
 
-  it('fails closed without a Company Context (agency scope) and never reaches Approvals', async () => {
+  it('CS5 Closeout: the own scope looks up only its own assets — a client creative is not found', async () => {
+    const { service, approvals } = unitHarness();
+
+    await expect(
+      service.sendForApproval(agencyScope, 'user-a', ASSET_A, VERSION_A1),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    expect(approvals.create).not.toHaveBeenCalled();
+  });
+
+  it('fails closed in legacy (client, null) scope and never reaches Approvals', async () => {
     const { service, approvals, assets } = unitHarness();
 
     const attempt = service.sendForApproval(
-      agencyScope,
+      legacyScope,
       'user-a',
       ASSET_A,
       VERSION_A1,
@@ -619,12 +629,15 @@ describe('CS2B.6 revision loop — CreativeVersionApprovalService.startRevision'
     expect(h.assetVersions.createVersion).not.toHaveBeenCalled();
   });
 
-  it('requires a Company Context, with no lookup in agency scope', async () => {
+  it('refuses legacy (client, null) scope with no lookup; the own scope never sees a client asset', async () => {
     const h = withApproval('changes_requested');
     await expect(
-      h.service.startRevision(agencyScope, 'user-a', ASSET_A, VERSION_A1, FILE),
+      h.service.startRevision(legacyScope, 'user-a', ASSET_A, VERSION_A1, FILE),
     ).rejects.toMatchObject({ response: { code: COMPANY_CONTEXT_REQUIRED } });
     expect(h.assets.findOne).not.toHaveBeenCalled();
+    await expect(
+      h.service.startRevision(agencyScope, 'user-a', ASSET_A, VERSION_A1, FILE),
+    ).rejects.toBeInstanceOf(NotFoundException);
     expect(h.assetVersions.createVersion).not.toHaveBeenCalled();
   });
 });

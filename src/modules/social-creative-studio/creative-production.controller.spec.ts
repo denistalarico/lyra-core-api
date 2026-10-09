@@ -15,7 +15,9 @@ import { CREATIVE_PRODUCTION_PERMISSIONS } from './creative-production.permissio
 import {
   CreateProductionTaskDto,
   HandoffProductionDestinationDto,
+  ProductionWorkCandidatesQueryDto,
   SelectCreativeVersionDto,
+  UploadProductionCreativeDto,
 } from './dto/creative-production.dto';
 
 const ROUTE_PERMISSIONS = {
@@ -28,6 +30,10 @@ const ROUTE_PERMISSIONS = {
   createTask: 'social.creative.content.update.assigned',
   handoff: 'social.planner.calendar.update.manager',
   reconcile: 'social.creative.content.update.assigned',
+  // CS5 Closeout.
+  uploadCreative: 'social.creative.content.update.assigned',
+  taskCandidates: 'social.creative.content.update.assigned',
+  projectCandidates: 'social.creative.content.update.assigned',
 } as const;
 
 const clientCtx = {
@@ -117,5 +123,56 @@ describe('Creative production controller (CS5-B)', () => {
       }),
     ).toEqual(['title', 'dueDate']);
     expect(await errors(CreateProductionTaskDto, {})).toEqual([]);
+    expect(
+      await errors(UploadProductionCreativeDto, { origin: 'campaigns' }),
+    ).toEqual(['origin']);
+    expect(
+      await errors(UploadProductionCreativeDto, { origin: 'planner' }),
+    ).toEqual([]);
+    expect(
+      await errors(ProductionWorkCandidatesQueryDto, { limit: '500' }),
+    ).toEqual(['limit']);
+    expect(
+      await errors(ProductionWorkCandidatesQueryDto, { limit: '10' }),
+    ).toEqual([]);
+  });
+
+  it('CS5 Closeout: upload and candidates take scope only from the request context', async () => {
+    const production = {
+      uploadAndSelect: jest.fn(async () => ({})),
+      taskCandidates: jest.fn(async () => ({ items: [] })),
+      projectCandidates: jest.fn(async () => ({ items: [] })),
+    };
+    const controller = new CreativeProductionController(production as never);
+    const scope = {
+      tenantId: 'tenant-a',
+      workspaceId: 'workspace-a',
+      agencyClientId: 'client-a',
+      companyContextId: 'company-a',
+    };
+    const file = { buffer: Buffer.from('x') } as Express.Multer.File;
+    await controller.uploadCreative(clientCtx, 'content-a', file, {
+      origin: 'planner',
+    });
+    expect(production.uploadAndSelect).toHaveBeenCalledWith(
+      clientCtx,
+      scope,
+      'content-a',
+      file,
+      { origin: 'planner' },
+    );
+    await controller.taskCandidates(clientCtx, 'content-a', { search: 'arte' });
+    expect(production.taskCandidates).toHaveBeenCalledWith(
+      clientCtx,
+      scope,
+      'content-a',
+      { search: 'arte' },
+    );
+    await controller.projectCandidates(clientCtx, 'content-a', {});
+    expect(production.projectCandidates).toHaveBeenCalledWith(
+      scope,
+      'content-a',
+      {},
+    );
   });
 });

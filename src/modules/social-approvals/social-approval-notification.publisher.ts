@@ -160,8 +160,10 @@ export class SocialApprovalNotificationPublisher {
     // Nothing the client was never shown is worth telling them about — AP3's
     // rule, preserved.
     if (!approval.sentToClientAt) return undefined;
+    // CS5 Closeout — the tenant's own scope has no client audience at all.
+    if (!approval.companyContextId) return undefined;
 
-    return this.clientAudience(type, approval);
+    return this.clientAudience(type, approval, approval.companyContextId);
   }
 
   /**
@@ -176,15 +178,16 @@ export class SocialApprovalNotificationPublisher {
   private clientAudience(
     type: ClientApprovalNotificationType,
     approval: SocialApprovalRequestEntity,
+    companyContextId: string,
   ): NotificationClientAudience {
     return {
-      companyContextId: approval.companyContextId,
+      companyContextId,
       requiredPermission: 'client_area.approvals.view',
       requiredModule: 'approvals',
       interestReason: NotificationInterestReason.APPROVER,
       // §16 — a Client Area route, never the Agency one in `payload.actionUrl`.
       actionUrl: `/client-area/companies/${encodeURIComponent(
-        approval.companyContextId,
+        companyContextId,
       )}/approvals/${encodeURIComponent(approval.id)}`,
       title: CLIENT_COPY[type].title,
       body: CLIENT_COPY[type].body(approval),

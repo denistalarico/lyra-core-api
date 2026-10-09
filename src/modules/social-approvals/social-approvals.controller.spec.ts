@@ -9,6 +9,7 @@ import {
 import { PermissionsGuard } from '../permissions/guards/permissions.guard';
 import type { RequestContext } from '../../common/context/request-context.interface';
 import { SocialApprovalsController } from './social-approvals.controller';
+import type { SocialApprovalInboxService } from './social-approval-inbox.service';
 import type { SocialApprovalsService } from './social-approvals.service';
 import {
   APPROVAL_OWNER_ACTION_REQUIRED,
@@ -27,8 +28,10 @@ describe('SocialApprovalsController AP1 Agency boundary', () => {
     requestChanges: jest.fn(),
     cancel: jest.fn(),
   };
+  const inbox = { list: jest.fn() };
   const controller = new SocialApprovalsController(
     approvals as unknown as SocialApprovalsService,
+    inbox as unknown as SocialApprovalInboxService,
   );
 
   beforeEach(() => jest.clearAllMocks());
@@ -56,6 +59,12 @@ describe('SocialApprovalsController AP1 Agency boundary', () => {
       Reflect.getMetadata(
         PERMISSION_KEY_METADATA,
         SocialApprovalsController.prototype.detail,
+      ),
+    ).toBe('social.approvals.review.view.assigned');
+    expect(
+      Reflect.getMetadata(
+        PERMISSION_KEY_METADATA,
+        SocialApprovalsController.prototype.inboxList,
       ),
     ).toBe('social.approvals.review.view.assigned');
     expect(
@@ -224,5 +233,23 @@ describe('SocialApprovalsController AP1 Agency boundary', () => {
     >;
     expect(handlers.clientApprove).toBeUndefined();
     expect(handlers.clientRequestChanges).toBeUndefined();
+  });
+
+  it('CS5 Closeout: declares the cross-context inbox before `:id` and passes the request context through', async () => {
+    const methods = Object.getOwnPropertyNames(
+      SocialApprovalsController.prototype,
+    );
+    expect(methods.indexOf('inboxList')).toBeLessThan(
+      methods.indexOf('detail'),
+    );
+    expect(
+      Reflect.getMetadata(
+        PATH_METADATA,
+        SocialApprovalsController.prototype.inboxList,
+      ),
+    ).toBe('inbox');
+    const ctx = { tenantId: 't', workspaceId: 'w', userId: 'u' };
+    await controller.inboxList(ctx as RequestContext, { scope: 'own' });
+    expect(inbox.list).toHaveBeenCalledWith(ctx, { scope: 'own' });
   });
 });

@@ -77,6 +77,9 @@ export class ClientApprovalNotificationService implements ClientApprovalNotifier
     // AP3's rule, preserved: nothing the client was never shown is worth
     // telling them about.
     if (!approval.sentToClientAt) return;
+    // CS5 Closeout — own-scope requests never reach a client.
+    const companyContextId = approval.companyContextId;
+    if (!companyContextId) return;
 
     // `awaiting_client` and `superseded` are published by the Agency path as
     // one notification addressing both audiences (§27). Routing them here too
@@ -99,7 +102,7 @@ export class ClientApprovalNotificationService implements ClientApprovalNotifier
         // No Agency recipients: these two events are client-only, and the
         // definition's `audience='client_area'` makes that structural.
         recipients: [],
-        clientAudience: this.audience(type, approval),
+        clientAudience: this.audience(type, approval, companyContextId),
         payload: {
           title: CLIENT_COPY[type].title,
           body: CLIENT_COPY[type].body(approval),
@@ -120,15 +123,16 @@ export class ClientApprovalNotificationService implements ClientApprovalNotifier
   private audience(
     type: ClientApprovalNotificationType,
     approval: SocialApprovalRequestEntity,
+    companyContextId: string,
   ): NotificationClientAudience {
     return {
-      companyContextId: approval.companyContextId,
+      companyContextId,
       requiredPermission: 'client_area.approvals.view',
       requiredModule: 'approvals',
       interestReason: NotificationInterestReason.APPROVER,
       // §16 — always the Client Area route.
       actionUrl: `/client-area/companies/${encodeURIComponent(
-        approval.companyContextId,
+        companyContextId,
       )}/approvals/${encodeURIComponent(approval.id)}`,
       title: CLIENT_COPY[type].title,
       body: CLIENT_COPY[type].body(approval),

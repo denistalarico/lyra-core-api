@@ -1,8 +1,6 @@
 import { IsNull } from 'typeorm';
-import {
-  type CompanyAwareScope,
-  CompanyContextRequiredException,
-} from '../../common/context/company-aware-scope';
+import type { CompanyAwareScope } from '../../common/context/company-aware-scope';
+import { approvalScopeKind } from './approval-stage.policy';
 
 /**
  * TypeORM 0.3 drops a raw `null` from a find `where` (default
@@ -33,18 +31,13 @@ export function approvalClientWhere(scope: CompanyAwareScope) {
 }
 
 /**
- * An approval request always belongs to a Company Context:
- * `CK_social_approval_requests_scope` requires both ids and
- * `FK_social_approval_requests_company` ties them to
- * `agency_client_company_contexts`. Agency `(null, null)` and legacy
- * `(client, null)` scopes therefore cannot open one.
+ * An approval request belongs either to a Company Context (both ids, tied to
+ * `agency_client_company_contexts` by `FK_social_approval_requests_company`)
+ * or, since the CS5 Closeout, to the tenant's own scope `(null, null)` — the
+ * agency producing for itself or a B2B company running its own Social. No
+ * synthetic Company Context is ever created for the latter.
+ * `CK_social_approval_requests_scope` keeps legacy `(client, null)` out.
  */
-export function assertApprovalCompanyScope(
-  scope: CompanyAwareScope,
-): asserts scope is CompanyAwareScope & {
-  agencyClientId: string;
-  companyContextId: string;
-} {
-  if (!scope.agencyClientId || !scope.companyContextId)
-    throw new CompanyContextRequiredException();
+export function assertApprovalScope(scope: CompanyAwareScope): void {
+  approvalScopeKind(scope);
 }

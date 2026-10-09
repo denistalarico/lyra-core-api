@@ -22,6 +22,7 @@ import {
   SocialApprovalStageDecisionEntity,
 } from './entities';
 import { SocialApprovalsController } from './social-approvals.controller';
+import { SocialApprovalInboxService } from './social-approval-inbox.service';
 import { SocialApprovalsService } from './social-approvals.service';
 import { ApprovalSubjectResolver } from './subjects/approval-subject-resolver';
 
@@ -59,6 +60,9 @@ import { ApprovalSubjectResolver } from './subjects/approval-subject-resolver';
   controllers: [SocialApprovalsController],
   providers: [
     SocialApprovalsService,
+    // CS5 Closeout — cross-context list (reads the managed-context directory
+    // re-exported by PermissionsModule).
+    SocialApprovalInboxService,
     // CS5-B — filled by the Creative Studio on init (production readiness).
     SocialApprovalTransitionRegistry,
     ApprovalSubjectResolver,

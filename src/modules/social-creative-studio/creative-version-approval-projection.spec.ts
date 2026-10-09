@@ -152,24 +152,30 @@ describe('CS2B.3 Studio approval projection', () => {
     },
   );
 
-  it.each([
-    { agencyClientId: null, companyContextId: null },
-    { agencyClientId: 'client-a', companyContextId: null },
-  ])(
-    'requires Company Context before any repository read (%j)',
-    async (ownership) => {
-      const { service, assets, approvals } = harness();
-      await expect(
-        service.approvalForVersion(
-          { ...scope, ...ownership },
-          'asset-a',
-          'version-a1',
-        ),
-      ).rejects.toBeInstanceOf(BadRequestException);
-      expect(assets.findOne).not.toHaveBeenCalled();
-      expect(approvals.findStateForSubjectRevision).not.toHaveBeenCalled();
-    },
-  );
+  it('refuses legacy (client, null) scope before any repository read', async () => {
+    const { service, assets, approvals } = harness();
+    await expect(
+      service.approvalForVersion(
+        { ...scope, companyContextId: null },
+        'asset-a',
+        'version-a1',
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(assets.findOne).not.toHaveBeenCalled();
+    expect(approvals.findStateForSubjectRevision).not.toHaveBeenCalled();
+  });
+
+  it('CS5 Closeout: the own scope (null, null) reads only its own assets — a client asset is not found', async () => {
+    const { service, approvals } = harness();
+    await expect(
+      service.approvalForVersion(
+        { ...scope, agencyClientId: null, companyContextId: null },
+        'asset-a',
+        'version-a1',
+      ),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    expect(approvals.findStateForSubjectRevision).not.toHaveBeenCalled();
+  });
 });
 
 describe('CS2B.3 read endpoint contract', () => {

@@ -7,9 +7,17 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { type EntityManager, IsNull, Repository } from 'typeorm';
 import { MediaAssetEntity } from '../../common/media-assets';
+import {
+  approvalScopeKind,
+  approvalStagesFor,
+  type ApprovalScopeKind,
+} from '../social-approvals/approval-stage.policy';
 import type { SocialApprovalStateProjection } from '../social-approvals/approval-state.projection';
 import { SocialApprovalTransitionRegistry } from '../social-approvals/approval-transition.port';
-import type { SocialApprovalRequestEntity } from '../social-approvals/entities';
+import type {
+  SocialApprovalRequestEntity,
+  SocialApprovalStage,
+} from '../social-approvals/entities';
 import { SocialApprovalsService } from '../social-approvals/social-approvals.service';
 import {
   SocialContentItemEntity,
@@ -35,7 +43,6 @@ import {
  * returned next to it).
  */
 export type CreativeApprovalState =
-  | 'not_required'
   | 'not_sent'
   | 'pending'
   | 'changes_requested'
@@ -68,7 +75,11 @@ export type CreativeProductionSnapshot = {
     unavailableReason: CreativeSelectionUnavailableReason | null;
   } | null;
   approval: {
-    required: boolean;
+    /** Always true since the CS5 Closeout; kept for the CS5-F contract. */
+    required: true;
+    /** Approvals' stage policy for this scope (never a frontend rule). */
+    scopeKind: ApprovalScopeKind;
+    stages: readonly SocialApprovalStage[];
     state: CreativeApprovalState;
     projection: SocialApprovalStateProjection | null;
   };
@@ -89,8 +100,8 @@ const PENDING = new Set([
  *
  * Answered on every read from the authoritative owners, never persisted:
  *
- *   explicit selection (Studio) + approval of that EXACT version (Approvals)
- *   + approval requirement (structural, see `approvalRequired`).
+ *   explicit selection (Studio) + final approval of that EXACT version
+ *   (Approvals, whose stage policy decides which stages "final" walks).
  *
  * The same derivation drives the Planner reflection, so the projection the
  * operator reads and the Planner state the Studio asks for can never use two
@@ -126,19 +137,6 @@ export class CreativeProductionReadinessService implements OnModuleInit {
     this.transitions.register((approval) =>
       this.onApprovalTransition(approval),
     );
-  }
-
-  /**
-   * Approval is required exactly where it can exist. Approvals is
-   * company-bound by CHECK (`CK_social_approval_requests_scope`): agency scope
-   * cannot hold a request at all, and every company scope routes client work
-   * through Approvals (the Planner's own vocabulary puts approval inside the
-   * pipeline: `creative_ready` "Em aprovação", `ready` "Aprovado"). No setting
-   * expresses anything finer today — Planner milestones are deadline alerts and
-   * Client Area `approvals_enabled` is a surface switch — so none is invented.
-   */
-  approvalRequired(scope: CreativeStudioScope): boolean {
-    return scope.agencyClientId !== null && scope.companyContextId !== null;
   }
 
   /** Content item in the full Company Context of its plan; 404 otherwise. */
@@ -191,33 +189,39 @@ export class CreativeProductionReadinessService implements OnModuleInit {
     const contentItem = await this.requireContentItem(scope, contentItemId);
     const production = await this.findProduction(scope, contentItem.id);
     const selection = await this.resolveSelection(scope, production);
-    const required = this.approvalRequired(scope);
+    // CS5 Closeout: every scope approves. The own scope (agency or B2B
+    // producing for itself) is internal-only and a managed client is internal
+    // then client — Approvals' stage policy decides, and `approved` is only
+    // ever reached at the end of the policy, so "approved" here is final.
     // The approval of the EXACT selected version — never the asset's latest,
     // so approving v1 can never make v2 look approved.
-    const projection =
-      required && selection
-        ? await this.approvals.findStateForSubjectRevision(scope, {
-            subjectType: 'creative_version',
-            subjectId: selection.asset.id,
-            subjectRevisionId: selection.version.id,
-          })
-        : null;
-    const state: CreativeApprovalState = !required
-      ? 'not_required'
-      : !projection
-        ? 'not_sent'
-        : projection.status === 'approved'
-          ? 'approved'
-          : projection.status === 'changes_requested'
-            ? 'changes_requested'
-            : PENDING.has(projection.status)
-              ? 'pending'
-              : 'not_sent';
+    const projection = selection
+      ? await this.approvals.findStateForSubjectRevision(scope, {
+          subjectType: 'creative_version',
+          subjectId: selection.asset.id,
+          subjectRevisionId: selection.version.id,
+        })
+      : null;
+    const state: CreativeApprovalState = !projection
+      ? 'not_sent'
+      : projection.status === 'approved'
+        ? 'approved'
+        : projection.status === 'changes_requested'
+          ? 'changes_requested'
+          : PENDING.has(projection.status)
+            ? 'pending'
+            : 'not_sent';
     return {
       contentItem,
       production,
       selection,
-      approval: { required, state, projection },
+      approval: {
+        required: true,
+        scopeKind: approvalScopeKind(scope),
+        stages: approvalStagesFor(scope),
+        state,
+        projection,
+      },
       readiness: this.deriveReadiness(selection, state),
     };
   }
@@ -392,7 +396,6 @@ export class CreativeProductionReadinessService implements OnModuleInit {
         blockers: ['selected_version_unavailable'],
       };
     switch (approval) {
-      case 'not_required':
       case 'approved':
         return { state: 'ready', blockers: [] };
       case 'pending':

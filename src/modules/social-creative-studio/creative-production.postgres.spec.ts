@@ -196,6 +196,13 @@ run('CS5-B creative production (real PostgreSQL)', () => {
         ON social_approval_requests (tenant_id, workspace_id, agency_client_id,
           company_context_id, subject_type, subject_id, subject_revision_id)
         WHERE status IN ('draft','awaiting_internal_review','awaiting_client','changes_requested')`);
+    // CS5 Closeout (1798800000000): the own scope's active-request index.
+    await bootstrap.query(`
+      CREATE UNIQUE INDEX "UQ_social_approval_requests_active_revision_own"
+        ON social_approval_requests (tenant_id, workspace_id, subject_type,
+          subject_id, subject_revision_id)
+        WHERE agency_client_id IS NULL AND company_context_id IS NULL
+          AND status IN ('draft','awaiting_internal_review','awaiting_client','changes_requested')`);
     const runner = bootstrap.createQueryRunner();
     await new CreateSocialCreativeProductions1798700000000().up(runner);
     await runner.release();
@@ -352,6 +359,7 @@ run('CS5-B creative production (real PostgreSQL)', () => {
       destinationOwner,
       taskOwner,
       permissions as never,
+      assetService,
     );
   });
 
@@ -414,6 +422,29 @@ run('CS5-B creative production (real PostgreSQL)', () => {
     await approvals.submit(scope, approvalId, operator);
     await approvals.approveInternal(scope, approvalId, operator);
   }
+  /** Own scope: send the selection, submit, internal approve (final). */
+  async function approveOwn(scope: CreativeStudioScope, itemId: string) {
+    const { approvalId } = await production.sendSelectedForApproval(
+      ctx(),
+      scope,
+      itemId,
+    );
+    await approvals.submit(scope, approvalId, operator);
+    await approvals.approveInternal(scope, approvalId, operator);
+    return approvalId;
+  }
+  const MP4 = Buffer.concat([
+    Buffer.from([0, 0, 0, 0x18]),
+    Buffer.from('ftypisom', 'latin1'),
+    Buffer.alloc(12),
+  ]);
+  const mp4 = () => ({ buffer: MP4, originalname: 'reel.mp4', size: 24 });
+  const upload = (
+    scope: CreativeStudioScope,
+    itemId: string,
+    file = png(),
+    origin: 'production' | 'planner' = 'production',
+  ) => production.uploadAndSelect(ctx(), scope, itemId, file, { origin });
   const clientUserActor = { type: 'user' as const, userId: clientUser };
   async function destination(
     scope: CreativeStudioScope,
@@ -651,24 +682,90 @@ run('CS5-B creative production (real PostgreSQL)', () => {
       });
     });
 
-    it('agency scope needs no approval: a valid selection is ready and the Planner reaches ready', async () => {
+    it('own scope (agency or B2B for itself) needs the internal approval only: sent → internal approved → ready', async () => {
       const item = await seedItem(agency);
       const { v1 } = await produce(agency, item.id);
       expect(await statusOf(item.id)).toBe('creative_in_progress');
       const result = await select(agency, item.id, v1);
       expect(result.production.approval).toMatchObject({
-        required: false,
-        state: 'not_required',
+        required: true,
+        scopeKind: 'own',
+        stages: ['internal'],
+        state: 'not_sent',
       });
       expect(result.production.readiness).toEqual({
-        state: 'ready',
-        blockers: [],
+        state: 'needs_approval',
+        blockers: ['approval_not_sent'],
       });
+      expect(await statusOf(item.id)).toBe('creative_in_progress');
+      const { approvalId } = await production.sendSelectedForApproval(
+        ctx(),
+        agency,
+        item.id,
+      );
+      expect(await statusOf(item.id)).toBe('creative_ready');
+      await approvals.submit(agency, approvalId, operator);
+      let state = await view(agency, item.id);
+      expect(state.approval).toMatchObject({
+        state: 'pending',
+        status: 'awaiting_internal_review',
+        currentStage: 'internal',
+      });
+      expect(state.readiness.state).toBe('creative_ready');
+      await approvals.approveInternal(agency, approvalId, operator);
+      state = await view(agency, item.id);
+      // Final at the internal stage: never `awaiting_client`.
+      expect(state.approval).toMatchObject({
+        state: 'approved',
+        status: 'approved',
+        currentStage: 'internal',
+        sentToClientAt: null,
+      });
+      expect(state.readiness).toEqual({ state: 'ready', blockers: [] });
       expect(await statusOf(item.id)).toBe('ready');
-      expect(await eventsOf(item.id)).toEqual([
-        'social.creative.version.selected',
-        'social.creative.planner.reflected',
-      ]);
+    });
+
+    it('managed client: internal approval alone is not ready; the client approval is', async () => {
+      const item = await seedItem(scopeA);
+      const { v1 } = await produce(scopeA, item.id);
+      const selected = await select(scopeA, item.id, v1);
+      expect(selected.production.approval).toMatchObject({
+        scopeKind: 'managed_client',
+        stages: ['internal', 'client'],
+      });
+      const { approvalId } = await production.sendSelectedForApproval(
+        ctx(),
+        scopeA,
+        item.id,
+      );
+      await toClient(scopeA, approvalId);
+      const atClient = await view(scopeA, item.id);
+      expect(atClient.approval).toMatchObject({
+        state: 'pending',
+        status: 'awaiting_client',
+        currentStage: 'client',
+      });
+      expect(atClient.readiness.state).toBe('creative_ready');
+      expect(await statusOf(item.id)).toBe('creative_ready');
+      await approvals.clientApprove(scopeA, approvalId, clientUserActor);
+      expect((await view(scopeA, item.id)).readiness.state).toBe('ready');
+      expect(await statusOf(item.id)).toBe('ready');
+    });
+
+    it('own scope: V1 approved → V2 selected needs a new internal approval', async () => {
+      const item = await seedItem(agency);
+      const { asset, v1 } = await produce(agency, item.id);
+      await select(agency, item.id, v1);
+      await approveOwn(agency, item.id);
+      expect(await statusOf(item.id)).toBe('ready');
+      const v2 = await newVersion(agency, asset.id);
+      await select(agency, item.id, v2);
+      expect((await view(agency, item.id)).readiness.state).toBe(
+        'needs_approval',
+      );
+      expect(await statusOf(item.id)).toBe('creative_in_progress');
+      await approveOwn(agency, item.id);
+      expect(await statusOf(item.id)).toBe('ready');
     });
 
     it('never moves a Planner item whose copy is not ready', async () => {
@@ -1060,6 +1157,308 @@ run('CS5-B creative production (real PostgreSQL)', () => {
     });
   });
 
+  // ── CS5 Closeout: the production 404 on task link ──────────────────────
+
+  describe('task 404 (CS5 Closeout validation)', () => {
+    /**
+     * Exactly the production data shape: own-scope content (agency producing
+     * for itself) in a workspace whose only live tasks sit in CLIENT projects
+     * (task.client_id NULL, project.client_id set). The old picker listed
+     * them all; linking any of them was a correct 404.
+     */
+    async function workspace() {
+      const projects = db.getRepository(AgencyProject);
+      const clientProject = await projects.save({
+        tenantId,
+        workspaceId,
+        clientId,
+        name: 'Projeto do cliente',
+      });
+      const ownProject = await projects.save({
+        tenantId,
+        workspaceId,
+        clientId: null,
+        name: 'Marketing da agência',
+      });
+      const base = {
+        tenantId,
+        workspaceId,
+        createdById: operator,
+        visibility: TaskVisibility.Workspace,
+      };
+      const clientTask = await tasks.save({
+        ...base,
+        clientId: null,
+        projectId: clientProject.id,
+        title: 'Arte do cliente',
+      });
+      const ownTask = await tasks.save({
+        ...base,
+        clientId: null,
+        projectId: ownProject.id,
+        title: 'Arte da agência',
+      });
+      const looseOwnTask = await tasks.save({
+        ...base,
+        clientId: null,
+        projectId: null,
+        title: 'Arte avulsa',
+      });
+      const othersPrivate = await tasks.save({
+        ...base,
+        clientId: null,
+        projectId: null,
+        title: 'Arte privada',
+        visibility: TaskVisibility.Private,
+        createdById: otherUser,
+      });
+      return {
+        clientProject,
+        ownProject,
+        clientTask,
+        ownTask,
+        looseOwnTask,
+        othersPrivate,
+      };
+    }
+
+    it('reproduces it: a client-project task is never linkable to own content, and is no longer offered', async () => {
+      const item = await seedItem(agency);
+      const w = await workspace();
+      // The failure seen in production, unchanged: the scope is NOT relaxed.
+      const refused = await production
+        .linkTask(ctx(), agency, item.id, { taskId: w.clientTask.id })
+        .then(
+          () => null,
+          (error: unknown) => error,
+        );
+      expect(refused).toBeInstanceOf(NotFoundException);
+      expect((refused as NotFoundException).getResponse()).toMatchObject({
+        code: 'task_not_found',
+      });
+
+      // The cause: what the picker offers now comes from the link's own rule.
+      const offered = (
+        await production.taskCandidates(ctx(), agency, item.id, {})
+      ).items;
+      const offeredIds = offered.map((task) => task.id);
+      expect(offeredIds).toEqual(
+        expect.arrayContaining([w.ownTask.id, w.looseOwnTask.id]),
+      );
+      expect(offeredIds).not.toContain(w.clientTask.id);
+      expect(offeredIds).not.toContain(w.othersPrivate.id);
+      expect(offered.find((task) => task.id === w.ownTask.id)).toMatchObject({
+        projectId: w.ownProject.id,
+        projectName: 'Marketing da agência',
+      });
+      // Everything offered links.
+      for (const taskId of offeredIds)
+        await expect(
+          production.linkTask(ctx(), agency, item.id, { taskId }),
+        ).resolves.toMatchObject({
+          production: { operationalWork: { state: 'linked', taskId } },
+        });
+      await expect(
+        production.taskCandidates(ctx(), agency, item.id, {
+          search: 'avulsa',
+        }),
+      ).resolves.toEqual({
+        items: [expect.objectContaining({ id: w.looseOwnTask.id })],
+      });
+    });
+
+    it('client content is offered (and links) its client tasks only; projects follow the same rule', async () => {
+      const item = await seedItem(scopeA);
+      const w = await workspace();
+      const offered = (
+        await production.taskCandidates(ctx(), scopeA, item.id, { limit: 50 })
+      ).items.map((task) => task.id);
+      expect(offered).toContain(w.clientTask.id);
+      expect(offered).not.toContain(w.ownTask.id);
+      expect(offered).not.toContain(w.looseOwnTask.id);
+      await expect(
+        production.linkTask(ctx(), scopeA, item.id, { taskId: w.ownTask.id }),
+      ).rejects.toBeInstanceOf(NotFoundException);
+
+      const ownItem = await seedItem(agency);
+      const projectsFor = async (scope: CreativeStudioScope, itemId: string) =>
+        (
+          await production.projectCandidates(scope, itemId, { limit: 50 })
+        ).items.map((project) => project.id);
+      expect(await projectsFor(agency, ownItem.id)).toContain(w.ownProject.id);
+      expect(await projectsFor(agency, ownItem.id)).not.toContain(
+        w.clientProject.id,
+      );
+      expect(await projectsFor(scopeA, item.id)).toContain(w.clientProject.id);
+      // Creating under a project of the wrong scope is the same 404.
+      await expect(
+        production.createTask(ctx(), agency, ownItem.id, {
+          projectId: w.clientProject.id,
+        }),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      await expect(
+        production.createTask(ctx(), agency, ownItem.id, {
+          projectId: w.ownProject.id,
+        }),
+      ).resolves.toMatchObject({ changed: true });
+      // Candidates of another company's item: 404, nothing listed.
+      await expect(
+        production.taskCandidates(ctx(), scopeB, item.id, {}),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+  });
+
+  // ── CS5 Closeout: upload from Production / Planner replacement ─────────
+
+  describe('upload and select', () => {
+    it('uploads through the Studio owner, creates the version and selects it explicitly', async () => {
+      const item = await seedItem(scopeA);
+      const first = await upload(scopeA, item.id);
+      const asset = await assets.findOneByOrFail({ id: first.creativeAssetId });
+      expect(asset).toMatchObject({
+        contentItemId: item.id,
+        currentVersionId: first.versionId,
+        sourceType: 'upload',
+      });
+      expect(first.production.selectedCreative).toMatchObject({
+        assetId: asset.id,
+        versionId: first.versionId,
+        versionNumber: 1,
+      });
+      expect(first.production.readiness.state).toBe('needs_approval');
+      expect(await statusOf(item.id)).toBe('creative_in_progress');
+      const selected = await events.findOneByOrFail({
+        contentItemId: item.id,
+        eventType: 'social.creative.version.selected',
+      });
+      expect(selected.payload).toMatchObject({
+        via: 'upload',
+        origin: 'production',
+        previousVersionId: null,
+      });
+      // Never sent to approval by itself.
+      expect(
+        await requests.countBy({ subjectRevisionId: first.versionId }),
+      ).toBe(0);
+
+      // A second image becomes v2 of the same item asset, selected.
+      const second = await upload(scopeA, item.id);
+      expect(second.creativeAssetId).toBe(asset.id);
+      expect(second.production.selectedCreative).toMatchObject({
+        versionNumber: 2,
+        versionId: second.versionId,
+      });
+      // A video cannot be a version of an image: a new asset of the item.
+      const video = await upload(scopeA, item.id, mp4());
+      expect(video.creativeAssetId).not.toBe(asset.id);
+      expect(video.production.selectedCreative).toMatchObject({
+        mediaType: 'video',
+        versionNumber: 1,
+      });
+    });
+
+    it('never versions a reused library asset, refuses archived content, missing permission and another company', async () => {
+      const item = await seedItem(scopeA);
+      const library = await produce(scopeA);
+      await select(scopeA, item.id, library.v1);
+      const uploaded = await upload(scopeA, item.id);
+      expect(uploaded.creativeAssetId).not.toBe(library.asset.id);
+      expect(
+        await versions.countBy({ creativeAssetId: library.asset.id }),
+      ).toBe(1);
+
+      await expect(upload(scopeB, item.id)).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+      permissions.assertCan.mockImplementation(async () => {
+        throw new ForbiddenException();
+      });
+      const before = await assets.countBy({ contentItemId: item.id });
+      await expect(upload(scopeA, item.id)).rejects.toBeInstanceOf(
+        ForbiddenException,
+      );
+      expect(await assets.countBy({ contentItemId: item.id })).toBe(before);
+      permissions.assertCan.mockImplementation(async () => undefined);
+      await items.update({ id: item.id }, { archivedAt: new Date() });
+      await expectCode(upload(scopeA, item.id), 'content_archived');
+    });
+
+    it('§17 Planner replacement: A selected/approved/handed off → B uploaded → B selected, A historical, destination stays A', async () => {
+      const item = await seedItem(scopeA);
+      const feed = await destination(scopeA, item.id);
+      const a = await upload(scopeA, item.id);
+      const sentA = await production.sendSelectedForApproval(
+        ctx(),
+        scopeA,
+        item.id,
+      );
+      await toClient(scopeA, sentA.approvalId);
+      await approvals.clientApprove(scopeA, sentA.approvalId, clientUserActor);
+      await production.handoffToDestination(ctx(), scopeA, item.id, feed.id, {
+        organicAssetId,
+      });
+      expect(await statusOf(item.id)).toBe('ready');
+
+      const b = await upload(scopeA, item.id, png(), 'planner');
+      expect(b.versionId).not.toBe(a.versionId);
+      // B is the explicit selection, recorded as the Planner's act.
+      expect(b.production.selectedCreative?.versionId).toBe(b.versionId);
+      const replaced = await events.findOneByOrFail({
+        contentItemId: item.id,
+        creativeVersionId: b.versionId,
+        eventType: 'social.creative.version.selected',
+      });
+      expect(replaced.payload).toMatchObject({
+        origin: 'planner',
+        via: 'upload',
+        previousVersionId: a.versionId,
+      });
+      // B needs its own approval; the Planner goes back to production.
+      expect(b.production.readiness).toEqual({
+        state: 'needs_approval',
+        blockers: ['approval_not_sent'],
+      });
+      expect(await statusOf(item.id)).toBe('creative_in_progress');
+      // A is history: its version and approval are intact.
+      await expect(
+        versions.findOneByOrFail({ id: a.versionId }),
+      ).resolves.toMatchObject({ versionNumber: 1 });
+      await expect(
+        requests.findOneByOrFail({ id: sentA.approvalId }),
+      ).resolves.toMatchObject({
+        status: 'approved',
+        subjectRevisionId: a.versionId,
+      });
+      // The destination keeps A until an explicit handoff of approved B.
+      expect(b.production.destinations[0]).toMatchObject({
+        handoff: 'other_version',
+        creatives: [{ creativeVersionId: a.versionId }],
+      });
+      await expectCode(
+        production.handoffToDestination(ctx(), scopeA, item.id, feed.id, {
+          organicAssetId,
+          replaceExisting: true,
+        }),
+        'creative_not_ready',
+      );
+      const sentB = await production.sendSelectedForApproval(
+        ctx(),
+        scopeA,
+        item.id,
+      );
+      await toClient(scopeA, sentB.approvalId);
+      await approvals.clientApprove(scopeA, sentB.approvalId, clientUserActor);
+      await production.handoffToDestination(ctx(), scopeA, item.id, feed.id, {
+        organicAssetId,
+        replaceExisting: true,
+      });
+      expect(
+        (await destinationCreatives.findOneByOrFail({ destinationId: feed.id }))
+          .creativeVersionId,
+      ).toBe(b.versionId);
+    });
+  });
+
   // ── Destination handoff (and the Campaigns path through it) ────────────
 
   describe('destination handoff', () => {
@@ -1074,6 +1473,7 @@ run('CS5-B creative production (real PostgreSQL)', () => {
         'no_creative_selected',
       );
       await select(agency, item.id, v1);
+      await approveOwn(agency, item.id);
 
       const [first, second] = await Promise.all([
         production.handoffToDestination(ctx(), agency, item.id, feed.id, {
@@ -1099,6 +1499,7 @@ run('CS5-B creative production (real PostgreSQL)', () => {
 
       const v2 = await newVersion(agency, asset.id);
       await select(agency, item.id, v2);
+      await approveOwn(agency, item.id);
       let state = await view(agency, item.id);
       // The destination keeps v1; only an explicit handoff moves it.
       expect(state.destinations[0]).toMatchObject({
