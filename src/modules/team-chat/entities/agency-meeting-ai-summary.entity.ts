@@ -8,11 +8,39 @@ import {
 } from 'typeorm';
 
 import { TeamChatAiSummaryStatus } from '../enums';
+import type {
+  MeetingAiExecution,
+  MeetingAiEvidence,
+  MeetingAiAction,
+} from '../meeting-ai.types';
 
 @Entity('agency_meeting_ai_summaries')
 @Index(['tenantId', 'workspaceId'])
 @Index(['meetingRoomId'])
+@Index(
+  'agency_meeting_ai_execution_unique',
+  ['tenantId', 'workspaceId', 'meetingRoomId'],
+  { unique: true, where: 'execution IS NOT NULL' },
+)
 export class AgencyMeetingAiSummary {
+  @Column({ type: 'jsonb', nullable: true })
+  execution!: MeetingAiExecution | null;
+
+  @Column({ type: 'jsonb', nullable: true })
+  agreements!: MeetingAiEvidence[] | null;
+
+  @Column({ name: 'open_questions', type: 'jsonb', nullable: true })
+  openQuestions!: string[] | null;
+
+  @Column({ name: 'lease_token', type: 'uuid', nullable: true })
+  leaseToken!: string | null;
+
+  @Column({ name: 'lease_expires_at', type: 'timestamptz', nullable: true })
+  leaseExpiresAt!: Date | null;
+
+  @Column({ name: 'next_attempt_at', type: 'timestamptz', nullable: true })
+  nextAttemptAt!: Date | null;
+
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 
@@ -36,16 +64,16 @@ export class AgencyMeetingAiSummary {
   summary!: string | null;
 
   @Column({ type: 'jsonb', nullable: true })
-  topics!: unknown[] | null;
+  topics!: string[] | null;
 
   @Column({ type: 'jsonb', nullable: true })
-  decisions!: unknown[] | null;
+  decisions!: MeetingAiEvidence[] | null;
 
   @Column({ name: 'next_steps', type: 'jsonb', nullable: true })
-  nextSteps!: unknown[] | null;
+  nextSteps!: string[] | null;
 
   @Column({ name: 'action_items', type: 'jsonb', nullable: true })
-  actionItems!: unknown[] | null;
+  actionItems!: MeetingAiAction[] | null;
 
   @Column({ name: 'transcript_ref', type: 'text', nullable: true })
   transcriptRef!: string | null;

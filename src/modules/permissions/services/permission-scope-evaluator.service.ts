@@ -682,6 +682,12 @@ export class PermissionScopeEvaluatorService {
       return scopeKey === 'assigned';
     }
 
+    if (resource.kind === 'chat_meeting_collection') {
+      // The meetings service filters every row by active workspace membership
+      // and host, participant or channel assignment before returning data.
+      return scopeKey === 'assigned';
+    }
+
     if (resource.kind === 'chat_direct') {
       const body = resource.record as
         | Record<string, unknown>
@@ -1705,6 +1711,19 @@ export class PermissionScopeEvaluatorService {
     const messageId = firstParam(params.messageId);
     const attachmentId = firstParam(params.attachmentId);
     const meetingId = firstParam(params.meetingId);
+
+    if (
+      context.workspaceId &&
+      request?.method === 'GET' &&
+      (request.routePath ?? '').endsWith('/meetings')
+    ) {
+      return {
+        exists: false,
+        kind: 'chat_meeting_collection',
+        id: null,
+        collectionSafe: true,
+      };
+    }
 
     if (!context.workspaceId) {
       return {

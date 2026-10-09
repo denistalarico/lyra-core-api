@@ -1,3 +1,4 @@
+import { AgencyMeetingAiSettings } from '../modules/team-chat/entities/agency-meeting-ai-settings.entity';
 import { TypeOrmModuleOptions } from '@nestjs/typeorm';
 
 import { MediaAssetEntity } from '../common/media-assets';
@@ -421,6 +422,7 @@ import {
 } from '../modules/client-conversations/entities';
 
 export const agencyEntities = [
+  AgencyMeetingAiSettings,
   ClientAreaIdentityContactEntity,
   ClientConversationEntity,
   ClientConversationParticipantEntity,

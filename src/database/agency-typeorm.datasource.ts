@@ -1,4 +1,5 @@
 import 'reflect-metadata';
+import { CreateMeetingAiProcessing1798900000000 } from './migrations/1798900000000-create-meeting-ai-processing';
 import { DataSource } from 'typeorm';
 import { agencyEntities } from '../config/typeorm.config';
 import { CreateAgencySettingsCore1760001000000 } from './migrations/1760001000000-create-agency-settings-core';
@@ -270,6 +271,7 @@ export const AgencyDataSource = new DataSource({
   logging: false,
   entities: agencyEntities,
   migrations: [
+    CreateMeetingAiProcessing1798900000000,
     CreateInboxCore1760000020000,
     CreateInboxSettings1760000021000,
     ExpandInboxChannelsFoundation1760000024000,

@@ -1,8 +1,11 @@
+import { RequestContextData } from '../../../common/context/request-context.decorator';
+import type { RequestContext } from '../../../common/context/request-context.interface';
 import {
   Body,
   Controller,
   Delete,
   Get,
+  ForbiddenException,
   Headers,
   Param,
   Patch,
@@ -394,28 +397,17 @@ export class TeamChatController {
 
   @Get('meetings')
   @RequirePermission('agency.chat.channels.view.assigned')
-  listMeetings(
-    @Headers('x-tenant-id') tenantId: string,
-    @Headers('x-workspace-id') workspaceId: string,
-    @Headers('x-user-id') userId?: string,
-  ) {
-    return this.meetingsService.list(
-      this.getContext(tenantId, workspaceId, userId),
-    );
+  listMeetings(@RequestContextData() context: RequestContext) {
+    return this.meetingsService.list(this.getMeetingContext(context));
   }
 
   @Post('meetings')
   @RequirePermission('agency.chat.channels.create.department')
   createMeeting(
-    @Headers('x-tenant-id') tenantId: string,
-    @Headers('x-workspace-id') workspaceId: string,
-    @Headers('x-user-id') userId: string | undefined,
+    @RequestContextData() context: RequestContext,
     @Body() dto: CreateTeamChatMeetingDto,
   ) {
-    return this.meetingsService.create(
-      this.getContext(tenantId, workspaceId, userId),
-      dto,
-    );
+    return this.meetingsService.create(this.getMeetingContext(context), dto);
   }
 
   @Get('meetings/:meetingId')
@@ -424,15 +416,23 @@ export class TeamChatController {
     'agency.chat.channels.manage_members.assigned',
   )
   getMeeting(
-    @Headers('x-tenant-id') tenantId: string,
-    @Headers('x-workspace-id') workspaceId: string,
-    @Headers('x-user-id') userId: string | undefined,
+    @RequestContextData() context: RequestContext,
     @Param('meetingId') meetingId: string,
   ) {
-    return this.meetingsService.get(
-      this.getContext(tenantId, workspaceId, userId),
-      meetingId,
-    );
+    return this.meetingsService.get(this.getMeetingContext(context), meetingId);
+  }
+
+  private getMeetingContext(context: RequestContext): TeamChatContext {
+    if (!context.tenantId || !context.workspaceId || !context.userId)
+      throw new ForbiddenException(
+        'Contexto autenticado de workspace obrigatório.',
+      );
+    return {
+      tenantId: context.tenantId,
+      workspaceId: context.workspaceId,
+      userId: context.userId,
+      role: context.role,
+    };
   }
 
   private getContext(

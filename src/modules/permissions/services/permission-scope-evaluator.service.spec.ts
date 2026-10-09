@@ -152,6 +152,31 @@ const baseContext = {
 };
 
 describe('PermissionScopeEvaluatorService', () => {
+  it('permits assigned meeting collection and availability requests with backend row filtering', async () => {
+    const { service } = createService();
+    const context = { ...baseContext, role: PlatformRoleKey.Member };
+    await expect(
+      service.assertScope(context, 'agency.chat.channels.view.assigned', {
+        method: 'GET',
+        routePath: '/agency/team-chat/meetings',
+        params: {},
+      }),
+    ).resolves.toBeUndefined();
+    await expect(
+      service.assertScope(context, 'agency.chat.channels.view.assigned', {
+        method: 'GET',
+        routePath: '/agency/team-chat/meeting-ai/settings/availability',
+        params: {},
+      }),
+    ).resolves.toBeUndefined();
+    await expect(
+      service.assertScope(
+        { ...context, workspaceId: undefined },
+        'agency.chat.channels.view.assigned',
+        { method: 'GET', routePath: '/agency/team-chat/meetings', params: {} },
+      ),
+    ).rejects.toThrow(ForbiddenException);
+  });
   it('allows assigned contact access through owner or creator fields', async () => {
     const { service, contactsRepository } = createService();
     contactsRepository.findOne.mockResolvedValue({

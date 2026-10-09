@@ -6,6 +6,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Interval } from '@nestjs/schedule';
@@ -38,11 +39,13 @@ import {
 import { TeamChatLiveKitProviderService } from './team-chat-livekit-provider.service';
 import { TeamChatNotificationPublisher } from './team-chat-notification.publisher';
 import { NotificationInterestReason } from '../../notifications/enums';
+import { TeamChatMeetingAiService } from './team-chat-meeting-ai.service';
 
 type TeamChatContext = {
   tenantId: string;
   workspaceId: string;
   userId?: string | null;
+  role?: string | null;
 };
 
 const AGENCY_CONNECTION = 'agency';
@@ -87,6 +90,7 @@ export class TeamChatMeetingsService {
     private readonly profilesRepository: Repository<AgencyUserProfileEntity>,
     @InjectRepository(WorkspaceUserEntity, AGENCY_CONNECTION)
     private readonly workspaceUsersRepository: Repository<WorkspaceUserEntity>,
+    @Optional() private readonly meetingAi?: TeamChatMeetingAiService,
   ) {}
 
   /** Provider presence is authoritative, including guests and closed browsers. */
@@ -166,7 +170,7 @@ export class TeamChatMeetingsService {
   }
 
   async list(context: TeamChatContext) {
-    return this.meetingsRepository.find({
+    const rooms = await this.meetingsRepository.find({
       where: {
         tenantId: context.tenantId,
         workspaceId: context.workspaceId,
@@ -176,9 +180,14 @@ export class TeamChatMeetingsService {
       },
       take: 100,
     });
+    return this.meetingAi
+      ? this.meetingAi.listProjection(context, rooms)
+      : rooms;
   }
 
   async create(context: TeamChatContext, dto: CreateTeamChatMeetingDto) {
+    if (this.meetingAi)
+      await this.meetingAi.assertMeetingChannel(context, dto.channelId);
     const publicSlug = this.createPublicSlug();
 
     const meeting = await this.meetingsRepository.save(
@@ -370,6 +379,7 @@ export class TeamChatMeetingsService {
   }
 
   async get(context: TeamChatContext, meetingId: string) {
+    if (this.meetingAi) await this.meetingAi.meeting(context, meetingId);
     const meeting = await this.meetingsRepository.findOne({
       where: {
         id: meetingId,
@@ -395,7 +405,9 @@ export class TeamChatMeetingsService {
 
     return {
       ...meeting,
-      aiSummary,
+      aiSummary: this.meetingAi
+        ? await this.meetingAi.detail(context, meetingId)
+        : aiSummary,
       publicUrl: `/meet/${meeting.publicSlug}`,
     };
   }
@@ -444,6 +456,8 @@ export class TeamChatMeetingsService {
     meetingId: string,
     expectedEmptySince?: string,
   ) {
+    if (this.meetingAi && context.userId)
+      await this.meetingAi.meeting(context, meetingId);
     return this.meetingsRepository.manager.transaction(async (manager) => {
       const repository = manager.getRepository(AgencyMeetingRoom);
       const meeting = await repository.findOne({
@@ -560,6 +574,7 @@ export class TeamChatMeetingsService {
 
   async deleteMeeting(context: TeamChatContext, meetingId: string) {
     await this.findMeeting(context, meetingId);
+    if (this.meetingAi) await this.meetingAi.prepareDelete(context, meetingId);
 
     await this.summariesRepository.delete({
       tenantId: context.tenantId,
@@ -626,48 +641,12 @@ export class TeamChatMeetingsService {
     meetingId: string,
     dto: RequestTeamChatMeetingAiSummaryDto,
   ) {
-    const meeting = await this.findMeeting(context, meetingId);
-
-    let summary = await this.summariesRepository.findOne({
-      where: {
-        tenantId: context.tenantId,
-        workspaceId: context.workspaceId,
-        meetingRoomId: meeting.id,
-      },
-      order: {
-        createdAt: 'DESC',
-      },
-    });
-
-    if (!summary) {
-      summary = this.summariesRepository.create({
-        tenantId: context.tenantId,
-        workspaceId: context.workspaceId,
-        meetingRoomId: meeting.id,
-        status: TeamChatAiSummaryStatus.PENDING,
-        requestedById: context.userId ?? null,
-      });
-    }
-
-    summary.status = TeamChatAiSummaryStatus.PROCESSING;
-    summary.model = dto.model ?? summary.model ?? null;
-    summary.transcriptRef = dto.transcriptRef ?? summary.transcriptRef ?? null;
-    summary.requestedById = context.userId ?? summary.requestedById ?? null;
-    summary.errorMessage = null;
-
-    const savedSummary = await this.summariesRepository.save(summary);
-
-    await this.createEvent(context, meeting.id, {
-      type: 'ai_summary_requested',
-      payload: {
-        requestedById: context.userId ?? null,
-        summaryId: savedSummary.id,
-        model: savedSummary.model,
-        transcriptRef: savedSummary.transcriptRef,
-      },
-    });
-
-    return savedSummary;
+    if (dto.model || dto.transcriptRef)
+      throw new BadRequestException(
+        'O modelo e o áudio são definidos pelo servidor.',
+      );
+    if (this.meetingAi) return this.meetingAi.request(context, meetingId);
+    throw new BadRequestException('Análise de reuniões indisponível.');
   }
 
   async joinInternal(
@@ -771,6 +750,10 @@ export class TeamChatMeetingsService {
     if (!meeting) {
       throw new NotFoundException('Reunião pública não encontrada.');
     }
+    if (meeting.accessMode !== TeamChatMeetingAccessMode.PUBLIC_LINK)
+      throw new ForbiddenException(
+        'Esta reunião não permite convidados externos.',
+      );
     this.assertMeetingOpen(meeting);
 
     const identity = `guest:${randomUUID()}`;
@@ -840,6 +823,8 @@ export class TeamChatMeetingsService {
   }
 
   private async findMeeting(context: TeamChatContext, meetingId: string) {
+    if (this.meetingAi && context.userId)
+      return this.meetingAi.meeting(context, meetingId);
     const meeting = await this.meetingsRepository.findOne({
       where: {
         id: meetingId,

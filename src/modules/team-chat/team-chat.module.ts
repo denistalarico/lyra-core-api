@@ -31,12 +31,23 @@ import { TeamChatNotificationPublisher } from './services/team-chat-notification
 import { TeamChatCardPostService } from './services/team-chat-card-post.service';
 import { WorkspaceUserEntity } from '../settings/entities/workspace-user.entity';
 import { AgencyUserProfileEntity } from '../agency/entities/agency-settings.entities';
+import { AgencyMeetingAiSettings } from './entities/agency-meeting-ai-settings.entity';
+import { FinanceAccount } from '../finance/entities/finance-account.entity';
+import { FinanceCostCenter } from '../finance/entities/finance-cost-center.entity';
+import { DocumentLayoutsModule } from '../document-layouts/document-layouts.module';
+import { TeamChatMeetingAiController } from './controllers/team-chat-meeting-ai.controller';
+import { TeamChatMeetingAiService } from './services/team-chat-meeting-ai.service';
+import { TeamChatMeetingAiProviderService } from './services/team-chat-meeting-ai-provider.service';
+import { TeamChatMeetingAiWorkerService } from './services/team-chat-meeting-ai-worker.service';
+import { TeamChatMeetingAiPdfService } from './services/team-chat-meeting-ai-pdf.service';
+import { TeamChatPublicMeetingsController } from './controllers/team-chat-public-meetings.controller';
 
 const AGENCY_CONNECTION = 'agency';
 
 @Module({
   imports: [
     FilesModule,
+    DocumentLayoutsModule,
     NotificationsModule,
     PermissionsModule,
     // The gateway verifies the Agency access token in the handshake; the secret
@@ -54,6 +65,9 @@ const AGENCY_CONNECTION = 'agency';
         AgencyMeetingParticipant,
         AgencyMeetingEvent,
         AgencyMeetingAiSummary,
+        AgencyMeetingAiSettings,
+        FinanceAccount,
+        FinanceCostCenter,
         // Read-only: the membership source that validates channel members and
         // mentions against the agency workspace (CCOM0.5 §22/§21).
         WorkspaceUserEntity,
@@ -63,11 +77,17 @@ const AGENCY_CONNECTION = 'agency';
     ),
   ],
   controllers: [
+    TeamChatPublicMeetingsController,
+    TeamChatMeetingAiController,
     TeamChatController,
     TeamChatAttachmentsController,
     TeamChatMeetingsController,
   ],
   providers: [
+    TeamChatMeetingAiService,
+    TeamChatMeetingAiProviderService,
+    TeamChatMeetingAiWorkerService,
+    TeamChatMeetingAiPdfService,
     TeamChatChannelsService,
     TeamChatMessagesService,
     TeamChatMeetingsService,

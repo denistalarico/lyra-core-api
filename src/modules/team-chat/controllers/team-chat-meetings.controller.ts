@@ -12,7 +12,6 @@ import {
 
 import {
   CreateTeamChatMeetingEventDto,
-  JoinPublicTeamChatMeetingDto,
   JoinTeamChatMeetingDto,
   PatchTeamChatMeetingDto,
   RequestTeamChatMeetingAiSummaryDto,
@@ -32,6 +31,7 @@ type TeamChatContext = {
   tenantId: string;
   workspaceId: string;
   userId?: string | null;
+  role?: string;
 };
 
 @UseGuards(JwtAuthGuard, PermissionsGuard)
@@ -154,14 +154,6 @@ export class TeamChatMeetingsController {
     );
   }
 
-  @Post('public/agency/team-chat/meetings/:publicSlug/join')
-  joinPublicMeeting(
-    @Param('publicSlug') publicSlug: string,
-    @Body() dto: JoinPublicTeamChatMeetingDto,
-  ) {
-    return this.meetingsService.joinPublic(publicSlug, dto);
-  }
-
   private getContext(context: RequestContext): TeamChatContext {
     if (!context.tenantId || !context.workspaceId || !context.userId) {
       throw new ForbiddenException(
@@ -172,6 +164,7 @@ export class TeamChatMeetingsController {
       tenantId: context.tenantId,
       workspaceId: context.workspaceId,
       userId: context.userId,
+      ...(context.role ? { role: context.role } : {}),
     };
   }
 }
