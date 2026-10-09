@@ -69,6 +69,19 @@ const PREVIEW_MAX_BYTES = 5 * 1024 * 1024;
 /** HeyGen replays an Idempotency-Key for 24 h; recovery stays well inside. */
 const IDEMPOTENCY_REPLAY_MS = 23 * 60 * 60_000;
 const CATALOG_MAX_PAGES = 40;
+/**
+ * The only avatar type offered. The public listing is dominated by thousands
+ * of photo avatars (audited 2026-10-08: the first 2,000 public looks are all
+ * `photo_avatar`), so an unfiltered sync never reaches a studio look, and
+ * studio is the only type whose PAYG price was confirmed for this account.
+ */
+const CATALOG_AVATAR_TYPE = 'studio_avatar';
+/**
+ * Reels are 9:16. A landscape look is rendered by HeyGen as a horizontal band
+ * in the middle of the vertical frame (2026-10-08 smoke), so only portrait
+ * looks are offered.
+ */
+const CATALOG_ORIENTATION = 'portrait';
 const BACKGROUND_MIME_TYPES = new Set(['image/png', 'image/jpeg']);
 
 const AVATAR_CODES = new Set([
@@ -103,6 +116,8 @@ export class HeyGenVideoGenerationProvider extends VideoGenerationProvider {
    */
   override isAvatarUsable(entry: VideoAvatarCatalogEntry): boolean {
     return (
+      entry.avatarType === CATALOG_AVATAR_TYPE &&
+      entry.orientation === CATALOG_ORIENTATION &&
       entry.defaultVoiceId !== null &&
       entry.supportedEngines.includes(this.engine) &&
       heygenSecondPrice(this.engine, entry.avatarType) !== null
@@ -316,7 +331,7 @@ export class HeyGenVideoGenerationProvider extends VideoGenerationProvider {
   }
 
   /**
-   * Public (preset) looks only. A private look — a client's Digital Twin —
+   * Public (preset) studio looks only. A private look — a client's Digital Twin —
    * belongs to whoever consented to it; with one platform account it would be
    * visible to every tenant, so it never enters the catalog until an
    * ownership model exists (custom avatars are a future capability).
@@ -325,7 +340,11 @@ export class HeyGenVideoGenerationProvider extends VideoGenerationProvider {
     const entries: VideoAvatarCatalogEntry[] = [];
     let cursor: string | null = null;
     for (let page = 0; page < CATALOG_MAX_PAGES; page += 1) {
-      const query = new URLSearchParams({ ownership: 'public', limit: '50' });
+      const query = new URLSearchParams({
+        ownership: 'public',
+        avatar_type: CATALOG_AVATAR_TYPE,
+        limit: '50',
+      });
       if (cursor) query.set('token', cursor);
       let response: Response;
       try {
@@ -368,7 +387,7 @@ export class HeyGenVideoGenerationProvider extends VideoGenerationProvider {
       }
       const next =
         json?.has_more === true || record(data)?.has_more === true
-          ? token(json?.next_token ?? record(data)?.next_token, 512)
+          ? pageCursor(json?.next_token ?? record(data)?.next_token)
           : null;
       if (!next) break;
       cursor = next;
@@ -512,4 +531,11 @@ export function failureOf(code: string): VideoGenerationFailureCode {
   if (/credit|balance|quota/.test(value))
     return 'insufficient_provider_balance';
   return 'provider_failed';
+}
+
+/** v3 page cursors are padded base64, outside `token`'s id charset. */
+function pageCursor(value: unknown): string | null {
+  return typeof value === 'string' && /^[A-Za-z0-9+/=._:-]{1,512}$/.test(value)
+    ? value
+    : null;
 }

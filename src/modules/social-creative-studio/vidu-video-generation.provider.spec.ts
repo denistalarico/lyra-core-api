@@ -148,14 +148,14 @@ describe('ViduVideoGenerationProvider (CS4-B contract)', () => {
           json(200, {
             id: 'task-1',
             state: 'success',
-            credits: 192,
+            credits: 160,
             creations: [
               { id: 'creation-1', url: 'https://cdn.vidu.example/v.mp4' },
             ],
           }),
         )
         .mockResolvedValueOnce(
-          json(200, { task_id: 'task-2', state: 'created', credits: 50 }),
+          json(200, { task_id: 'task-2', state: 'created', credits: 45 }),
         );
 
       const submitted = await provider.submit(

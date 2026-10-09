@@ -65,14 +65,15 @@ describe('CS4-B video duration plan', () => {
 
 describe('CS4-B video pricing snapshot', () => {
   it('Vidu: provider-reported credits × versioned credit price, exact decimals', () => {
-    // Q3 turbo 720p, 16 s: 12 cr/s × 16 = 192 credits (official table).
-    const snapshot = viduCostSnapshot(192, viduPricing(null));
+    // Q3 turbo 720p reference2video, 16 s: 160 credits reported by Vidu in
+    // the 2026-10-08 production smoke (10 cr/s).
+    const snapshot = viduCostSnapshot(160, viduPricing(null));
     expect(snapshot).toEqual({
-      units: '192.000',
+      units: '160.000',
       unitKind: 'vidu_credit',
       unitPrice: '0.00500000',
       pricingVersion: VIDU_PRICING.version,
-      costAmount: '0.960000',
+      costAmount: '0.800000',
       costCurrency: 'USD',
       costSource: 'lyra_calculated',
     });
@@ -89,20 +90,24 @@ describe('CS4-B video pricing snapshot', () => {
     expect(snapshot).toMatchObject({
       units: '23.400',
       unitKind: 'output_second:avatar_iv:studio_avatar',
-      unitPrice: '0.06670000',
+      unitPrice: '0.08050000',
       pricingVersion: HEYGEN_PRICING.version,
-      // 23.4 × 0.0667 = 1.56078
-      costAmount: '1.560780',
+      // 23.4 × 0.0805 = 1.8837
+      costAmount: '1.883700',
       costSource: 'lyra_calculated',
     });
-    // Seconds kept to the millisecond: 12.345 × 0.05 = 0.61725.
+    // Seconds kept to the millisecond: 12.345 × 0.0385 = 0.4752825 → 0.475283.
     expect(
       heygenCostSnapshot(12.345, 'avatar_iv', 'photo_avatar')?.costAmount,
-    ).toBe('0.617250');
-    // Rounded once, half-up: 1.001 × 0.0667 = 0.0667667 → 0.066767.
+    ).toBe('0.475283');
+    // Rounded once, half-up: 1.001 × 0.0805 = 0.0805805 → 0.080581.
     expect(
       heygenCostSnapshot(1.001, 'avatar_iv', 'studio_avatar')?.costAmount,
-    ).toBe('0.066767');
+    ).toBe('0.080581');
+    // The default UGC engine: 10.345 × 0.0165 = 0.1706925 → 0.170693.
+    expect(
+      heygenCostSnapshot(10.345, 'avatar_iii', 'studio_avatar'),
+    ).toMatchObject({ unitPrice: '0.01650000', costAmount: '0.170693' });
   });
 
   it('an unpriced combination has no cost (never billed at a guess)', () => {
@@ -113,14 +118,15 @@ describe('CS4-B video pricing snapshot', () => {
 
   it('multi-operation total keeps the breakdown and sums exactly', () => {
     const operations = [
-      // 30 s 720p: 192 + 50 + 50 credits at US$0.005.
-      { costAmount: '0.960000', costCurrency: 'USD' },
-      { costAmount: '0.250000', costCurrency: 'USD' },
-      { costAmount: '0.250000', costCurrency: 'USD' },
+      // 30 s 720p as billed in the 2026-10-08 smoke: 160 + 45 + 45 credits
+      // at US$0.005 (Vidu balance moved by exactly 250).
+      { costAmount: '0.800000', costCurrency: 'USD' },
+      { costAmount: '0.225000', costCurrency: 'USD' },
+      { costAmount: '0.225000', costCurrency: 'USD' },
       { costAmount: null, costCurrency: null },
     ];
     expect(sumCosts(operations)).toEqual({
-      amount: '1.460000',
+      amount: '1.250000',
       currency: 'USD',
     });
     // 0.1 + 0.2 in floating point would not be 0.3.

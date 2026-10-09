@@ -46,12 +46,14 @@ export type CreativeVideoCostSnapshot = {
 /**
  * Vidu — one API credit. platform.vidu.com/docs/overview/pricing states
  * credits per second per model/resolution and that failed tasks consume no
- * credits (audited 2026-10-08: Q3 turbo 720p 12 cr/s; Q2 turbo extension
- * 720p "Starting at 15 credits, +5 credits/second" → +7 s ≈ 50 cr). Lyra
- * never estimates credits from that table: the ledger records the `credits`
- * Vidu reports for each finished task; the international account recharge page prices credits in USD
- * ($0.005 at audit time; the docs' Chinese table quotes ¥0.03125). The task
- * response already carries `credits`, so only the unit price is Lyra's.
+ * credits. Production smoke 2026-10-08 (account balance moved by exactly the
+ * reported credits): Q3 turbo 720p reference2video 10 cr/s (10 s = 100,
+ * 16 s = 160); Q2 turbo extension 720p +7 s = 45 cr (15 for the first second
+ * + 5 per further second). Lyra never estimates credits from that table: the
+ * ledger records the `credits` Vidu reports for each task; the international
+ * account recharge page prices credits in USD ($0.005, confirmed by the
+ * operator on the account). The task response already carries `credits`, so
+ * only the unit price is Lyra's.
  *
  * The operator MUST confirm this price against the account's own recharge
  * page before enabling (`CREATIVE_VIDEO_PRICING_CONFIRMED`); a negotiated or
@@ -66,10 +68,13 @@ export const VIDU_PRICING = {
 } as const;
 
 /**
- * HeyGen v3 pay-as-you-go, USD per second of output, by engine × avatar type.
- * Source: HeyGen API pricing (developers.heygen.com enterprise table converts
- * credits at $0.50; PAYG prices shown in app.heygen.com/developers/api
- * pricing modal, as audited 2026-10). Unknown combinations have NO price, and
+ * HeyGen v3 pay-as-you-go, USD per second of output, by engine × avatar type,
+ * exactly as the self-serve pricing table of the account shows it
+ * (app.heygen.com/developers/api?modal=pricing; confirmed by the operator
+ * 2026-10-08). "Custom Video" avatars are `digital_twin`. HeyGen returns no
+ * money per video and documents no billable-duration rounding for avatar
+ * video, so the cost is the API's own `duration` × this price, unrounded
+ * (`lyra_calculated`). Unknown combinations have NO price, and
  * a look whose combination is unpriced is never offered (the domain refuses
  * rather than bill an unknown amount).
  */
@@ -79,17 +84,17 @@ export const HEYGEN_PRICING = {
   unitKind: 'output_second',
   perSecond: {
     avatar_iii: {
-      digital_twin: '0.0167',
-      studio_avatar: '0.0167',
-      photo_avatar: '0.0433',
+      digital_twin: '0.01',
+      studio_avatar: '0.0165',
+      photo_avatar: '0.0165',
     },
     avatar_iv: {
-      digital_twin: '0.0667',
-      studio_avatar: '0.0667',
-      photo_avatar: '0.05',
+      digital_twin: '0.0805',
+      studio_avatar: '0.0805',
+      photo_avatar: '0.0385',
     },
     avatar_v: {
-      digital_twin: '0.0667',
+      digital_twin: '0.12',
     },
   } as Record<string, Record<string, string>>,
 } as const;

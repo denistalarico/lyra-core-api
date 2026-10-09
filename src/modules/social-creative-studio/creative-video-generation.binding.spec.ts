@@ -111,7 +111,7 @@ describe('CS4-B video provider binding', () => {
     expect(config.enabled).toBe(false);
     expect(config.workerConcurrency).toBe(2);
     expect(config.providerConcurrency).toBe(3);
-    expect(config.ugcEngine).toBe('avatar_iv');
+    expect(config.ugcEngine).toBe('avatar_iii');
     expect(config.callbackBaseUrl).toBeNull();
     process.env.CREATIVE_VIDEO_CALLBACK_BASE_URL = 'http://insecure.example';
     expect(config.callbackBaseUrl).toBeNull();

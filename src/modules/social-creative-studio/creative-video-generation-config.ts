@@ -99,15 +99,16 @@ export class CreativeVideoGenerationConfigService {
   }
 
   /**
-   * HeyGen engine for UGC. Default Avatar IV (HeyGen's v3 default). Unknown
-   * values fall back to the default rather than to an unpriced engine.
+   * HeyGen engine for UGC. Default Avatar III: the portrait studio looks a 9:16
+   * Reel needs support only Avatar III (audited 2026-10-08). Unknown values
+   * fall back to the default rather than to an unpriced engine.
    */
   get ugcEngine(): CreativeVideoUgcEngine {
     const raw =
       process.env[CREATIVE_VIDEO_UGC_ENGINE_ENV]?.trim().toLowerCase();
     return (CREATIVE_VIDEO_UGC_ENGINES as readonly string[]).includes(raw ?? '')
       ? (raw as CreativeVideoUgcEngine)
-      : 'avatar_iv';
+      : 'avatar_iii';
   }
 
   /**

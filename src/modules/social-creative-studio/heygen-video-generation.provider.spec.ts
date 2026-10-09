@@ -97,7 +97,7 @@ describe('HeyGenVideoGenerationProvider (CS4-B contract, v3)', () => {
         avatar_id: 'look_123',
         script: ugc.mode === 'ugc_avatar' ? ugc.script : '',
         voice_id: 'voice_9',
-        engine: { type: 'avatar_iv' },
+        engine: { type: 'avatar_iii' },
         aspect_ratio: '9:16',
         resolution: '1080p',
         output_format: 'mp4',
@@ -107,7 +107,7 @@ describe('HeyGenVideoGenerationProvider (CS4-B contract, v3)', () => {
       });
       expect(submitted).toEqual({
         jobId: 'v_abc',
-        model: 'avatar_iv',
+        model: 'avatar_iii',
         operation: 'avatar_video',
         resolution: '1080p',
         usage: null,
@@ -319,7 +319,7 @@ describe('HeyGenVideoGenerationProvider (CS4-B contract, v3)', () => {
       ).toMatchObject({
         units: '23.400',
         unitKind: 'output_second:avatar_iv:studio_avatar',
-        costAmount: '1.560780',
+        costAmount: '1.883700',
         pricingVersion: 'heygen.payg.2026-10',
         costSource: 'lyra_calculated',
       });
@@ -345,7 +345,9 @@ describe('HeyGenVideoGenerationProvider (CS4-B contract, v3)', () => {
               },
             ],
             has_more: true,
-            next_token: 'page2',
+            // Real v3 cursors are padded base64.
+            next_token:
+              'eyJ0cyI6ICIyMDI2LTA5LTA0VDEyOjM0OjA2IiwgImlkIjogIjQ3Y2EwYWQ4MmE0ZTQ4YWNiZWI1YmZiOGViZjc0MWY1In0=',
           }),
         )
         .mockResolvedValueOnce(
@@ -365,7 +367,12 @@ describe('HeyGenVideoGenerationProvider (CS4-B contract, v3)', () => {
       const entries = await provider.listAvatars();
 
       expect(new URL(call(0).url).searchParams.get('ownership')).toBe('public');
-      expect(new URL(call(1).url).searchParams.get('token')).toBe('page2');
+      expect(new URL(call(0).url).searchParams.get('avatar_type')).toBe(
+        'studio_avatar',
+      );
+      expect(new URL(call(1).url).searchParams.get('token')).toBe(
+        'eyJ0cyI6ICIyMDI2LTA5LTA0VDEyOjM0OjA2IiwgImlkIjogIjQ3Y2EwYWQ4MmE0ZTQ4YWNiZWI1YmZiOGViZjc0MWY1In0=',
+      );
       expect(entries).toEqual([
         {
           providerAvatarId: 'look_1',
@@ -383,11 +390,19 @@ describe('HeyGenVideoGenerationProvider (CS4-B contract, v3)', () => {
           defaultVoiceId: null,
         }),
       ]);
-      // Usable = configured engine + default voice + a price for (engine, type).
+      // Usable = studio + portrait + configured engine + default voice + a price.
       expect(provider.isAvatarUsable(entries[0])).toBe(true);
       expect(provider.isAvatarUsable(entries[1])).toBe(false);
       expect(
         provider.isAvatarUsable({ ...entries[0], avatarType: 'unknown_type' }),
+      ).toBe(false);
+      // Priced in the table, but not a confirmed type for this account.
+      expect(
+        provider.isAvatarUsable({ ...entries[0], avatarType: 'photo_avatar' }),
+      ).toBe(false);
+      // A landscape look becomes a band inside the 9:16 frame.
+      expect(
+        provider.isAvatarUsable({ ...entries[0], orientation: 'landscape' }),
       ).toBe(false);
     });
   });
