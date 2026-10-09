@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -284,6 +285,117 @@ export class DestinationCreativeService {
         ),
       ),
       total: saved.length,
+    };
+  }
+
+  /**
+   * CS5-B — hands one immutable Creative Version off to a destination.
+   *
+   * The caller (Creative Studio production) resolved the version server-side
+   * from the explicit selection; this owner keeps every rule it already
+   * applies to a manual choice — destination and account scope, durable media
+   * in the same Company Context, the fail-closed capability check — and adds
+   * the version identity, which the database ties to exactly that media.
+   *
+   * Explicit and non-destructive by default:
+   *
+   * - the same version on the same account is a replay: the existing row is
+   *   returned untouched (`created: false`), so a retry never rewrites it;
+   * - anything else already on the destination (a manual file, a carousel, an
+   *   older version) is only replaced with `replaceExisting`. A new version
+   *   never reaches a destination by itself.
+   *
+   * The destination row is locked for the duration, so two handoffs of the
+   * same destination serialize instead of racing on the primary slot.
+   * Publications already created keep their own media snapshot.
+   */
+  async handoffCreativeVersion(
+    scope: DestinationCreativeScope,
+    destinationId: string,
+    actorUserId: string | null,
+    input: {
+      contentItemId: string;
+      creativeVersionId: string;
+      mediaAssetId: string;
+      organicAssetId: string;
+      replaceExisting: boolean;
+    },
+  ): Promise<{ creative: SocialDestinationCreativeView; created: boolean }> {
+    const destination = await this.requireDestination(scope, destinationId);
+    if (destination.contentItemId !== input.contentItemId) {
+      throw new NotFoundException('Social content destination not found.');
+    }
+    const organicAsset = await this.requirePublishableAsset(
+      scope,
+      input.organicAssetId,
+    );
+    const mediaAsset = await this.requireMediaAsset(scope, input.mediaAssetId);
+    this.assertCapabilityOrThrow({
+      mediaAsset,
+      organicAsset,
+      placement: destination.placement,
+    });
+
+    const result = await this.creativesRepository.manager.transaction(
+      async (manager) => {
+        await manager.getRepository(SocialContentDestinationEntity).findOne({
+          where: { id: destination.id },
+          lock: { mode: 'pessimistic_write' },
+        });
+        const repository = manager.getRepository(
+          SocialDestinationCreativeEntity,
+        );
+        const existing = await repository.find({
+          where: {
+            ...this.creativeScopeWhere(scope),
+            destinationId: destination.id,
+          },
+          order: { sortOrder: 'ASC', createdAt: 'ASC' },
+        });
+        const [only] = existing;
+        if (
+          existing.length === 1 &&
+          only.role === PRIMARY_ROLE &&
+          only.creativeVersionId === input.creativeVersionId &&
+          only.mediaAssetId === mediaAsset.id &&
+          only.organicAssetId === organicAsset.id
+        ) {
+          return { row: only, created: false };
+        }
+        if (existing.length > 0 && !input.replaceExisting) {
+          throw new ConflictException({
+            code: 'destination_has_creative',
+            message:
+              'Este destino já tem um criativo. Confirme a substituição para usar a versão selecionada.',
+          });
+        }
+        await repository.delete({
+          ...this.creativeScopeWhere(scope),
+          destinationId: destination.id,
+        });
+        const row = await repository.save(
+          repository.create({
+            tenantId: scope.tenantId,
+            workspaceId: scope.workspaceId,
+            agencyClientId: scope.agencyClientId,
+            destinationId: destination.id,
+            contentItemId: destination.contentItemId,
+            mediaAssetId: mediaAsset.id,
+            creativeVersionId: input.creativeVersionId,
+            organicAssetId: organicAsset.id,
+            role: PRIMARY_ROLE,
+            sortOrder: 0,
+            source: 'creative_studio',
+            createdById: actorUserId,
+          }),
+        );
+        return { row, created: true };
+      },
+    );
+
+    return {
+      creative: toSocialDestinationCreativeView(result.row, mediaAsset),
+      created: result.created,
     };
   }
 

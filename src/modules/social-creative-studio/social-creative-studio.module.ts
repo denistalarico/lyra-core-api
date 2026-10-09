@@ -3,10 +3,19 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { MediaAssetEntity, MediaAssetsModule } from '../../common/media-assets';
 import { BrandKitModule } from '../brand-kit/brand-kit.module';
 import { PermissionsModule } from '../permissions';
+import {
+  AgencyProject,
+  AgencyTask,
+  AgencyTaskChecklistItem,
+} from '../projects/entities';
+import { ProjectsModule } from '../projects/projects.module';
 import { SocialOrganicModule } from '../social-organic/social-organic.module';
 import { SocialApprovalsModule } from '../social-approvals/social-approvals.module';
 import { SocialPlannerModule } from '../social-planner/social-planner.module';
 import { CreativeAssetService } from './creative-asset.service';
+import { CreativeProductionController } from './creative-production.controller';
+import { CreativeProductionReadinessService } from './creative-production-readiness.service';
+import { CreativeProductionService } from './creative-production.service';
 import { CreativeStudioBrandContextService } from './creative-brand-context.service';
 import { CreativeFolderService } from './creative-folder.service';
 import { CreativeGenerationCleanupWorker } from './creative-generation-cleanup.worker';
@@ -46,13 +55,17 @@ import {
   CreativeGenerationEntity,
   CreativeGenerationOutputEntity,
   CreativeGenerationReferenceEntity,
+  CreativeProductionEntity,
+  CreativeProductionEventEntity,
   CreativeVideoAvatarEntity,
   CreativeVideoGenerationEntity,
   CreativeVideoOperationEntity,
   CreativeVideoReferenceEntity,
 } from './entities';
 import {
+  SocialContentDestinationEntity,
   SocialContentItemEntity,
+  SocialDestinationCreativeEntity,
   SocialPlanEntity,
 } from '../social-planner/entities';
 
@@ -66,6 +79,8 @@ import {
     // CS2B.4: Planner status reflection goes through the Planner's own
     // `SocialContentProductionStatusService`. One-way: Studio → Planner.
     SocialPlannerModule,
+    // CS5-B: opt-in production task through the Agency owner (`TasksCrudService`).
+    ProjectsModule,
     TypeOrmModule.forFeature(
       [
         CreativeAssetEntity,
@@ -83,6 +98,15 @@ import {
         MediaAssetEntity,
         SocialContentItemEntity,
         SocialPlanEntity,
+        // CS5-B: production selection/history, and read-only views of the
+        // destination links and of linked Agency work.
+        CreativeProductionEntity,
+        CreativeProductionEventEntity,
+        SocialContentDestinationEntity,
+        SocialDestinationCreativeEntity,
+        AgencyTask,
+        AgencyTaskChecklistItem,
+        AgencyProject,
       ],
       'agency',
     ),
@@ -90,6 +114,7 @@ import {
   controllers: [
     CreativeStudioController,
     CreativeVersionApprovalController,
+    CreativeProductionController,
     CreativeImageGenerationController,
     CreativeVersionVariationController,
     CreativeVideoGenerationController,
@@ -102,6 +127,9 @@ import {
     CreativeFolderService,
     CreativeThumbnailService,
     CreativeVersionApprovalService,
+    // CS5-B: readiness projection + Planner reconciliation, and orchestration.
+    CreativeProductionReadinessService,
+    CreativeProductionService,
     CreativeImageGenerationService,
     CreativeImageGenerationWorker,
     // CS3.6.1: expires temporary outputs; off unless explicitly enabled.

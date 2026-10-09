@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
@@ -23,6 +24,7 @@ import {
 import { ApprovalSubjectResolver } from './subjects/approval-subject-resolver';
 import { SocialApprovalNotificationPublisher } from './social-approval-notification.publisher';
 import type { SocialApprovalStateProjection } from './approval-state.projection';
+import { SocialApprovalTransitionRegistry } from './approval-transition.port';
 
 export type ApprovalActor = {
   type: SocialApprovalActorType;
@@ -37,6 +39,7 @@ const ACTIVE = [
 
 @Injectable()
 export class SocialApprovalsService {
+  private readonly logger = new Logger(SocialApprovalsService.name);
   constructor(
     @InjectRepository(SocialApprovalRequestEntity, 'agency')
     private readonly requests: Repository<SocialApprovalRequestEntity>,
@@ -47,7 +50,29 @@ export class SocialApprovalsService {
     @InjectDataSource('agency') private readonly dataSource: DataSource,
     private readonly subjects: ApprovalSubjectResolver,
     private readonly notifications?: SocialApprovalNotificationPublisher,
+    /** CS5-B: owner projections told after a transition commits. */
+    private readonly transitions?: SocialApprovalTransitionRegistry,
   ) {}
+  /**
+   * CS5-B — best-effort, after commit: a decision never fails because an
+   * observer did. Observers re-read their owners, so a swallowed failure is
+   * repaired by their own reconciliation.
+   */
+  private async observeTransition(
+    ...requests: SocialApprovalRequestEntity[]
+  ): Promise<void> {
+    for (const observer of this.transitions?.list() ?? [])
+      for (const request of requests)
+        try {
+          await observer(request);
+        } catch (error) {
+          this.logger.warn(
+            `approval transition observer failed for ${request.id}: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+        }
+  }
   private scopeWhere(scope: CompanyAwareScope) {
     return approvalScopeWhere(scope);
   }
@@ -199,6 +224,7 @@ export class SocialApprovalsService {
           Promise.resolve(),
         ),
       );
+      await this.observeTransition(...created.superseded, created.saved);
       return created.saved;
     } catch (error: unknown) {
       if (this.isActiveUnique(error))
@@ -364,7 +390,9 @@ export class SocialApprovalsService {
     this.assertStatus(item, ['draft', 'changes_requested']);
     item.status = 'awaiting_internal_review';
     item.currentStage = 'internal';
-    return this.requests.save(item);
+    const saved = await this.requests.save(item);
+    await this.observeTransition(saved);
+    return saved;
   }
   /**
    * Agency comment. `visibility` is `internal` unless the operator explicitly
@@ -471,6 +499,7 @@ export class SocialApprovalsService {
       return manager.save(request);
     });
     await this.notifications?.publish('awaiting_client', saved, actor.userId);
+    await this.observeTransition(saved);
     return saved;
   }
   /** The Agency boundary can decide only the internal stage. */
@@ -508,6 +537,7 @@ export class SocialApprovalsService {
     // CCOM2 §45 — the card's status is resolved on read, never persisted, so
     // a decision only needs the timeline to re-read. No second card is created.
     await this.announceTimeline(saved, 'decision_changed');
+    await this.observeTransition(saved);
     return saved;
   }
   async clientRequestChanges(
@@ -585,6 +615,7 @@ export class SocialApprovalsService {
       // timeline projects. Both are read-time facts, so this is a re-read.
       await this.announceTimeline(saved, 'decision_changed');
     }
+    await this.observeTransition(saved);
     return saved;
   }
   async cancel(
@@ -602,6 +633,7 @@ export class SocialApprovalsService {
     // already saw. `cancelled` has no Agency catalog event in AP2, and
     // inventing one would be a duplicated taxonomy for no reader.
     await this.notifications?.publishClientOnly('cancelled', saved);
+    await this.observeTransition(saved);
     return saved;
   }
   async supersede(
@@ -616,6 +648,7 @@ export class SocialApprovalsService {
     item.supersededAt = new Date();
     const saved = await this.requests.save(item);
     await this.notifications?.publish('superseded', saved, actorUserId ?? null);
+    await this.observeTransition(saved);
     return saved;
   }
   private isActiveUnique(error: unknown) {

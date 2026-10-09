@@ -13,6 +13,7 @@ import {
 } from '../social-planner/entities';
 import { ApprovalClientReviewService } from './approval-client-review.service';
 import { ClientApprovalNotifierRegistry } from './client-approval-notifier.port';
+import { SocialApprovalTransitionRegistry } from './approval-transition.port';
 import { ClientConversationCardRegistry } from './client-conversation-card.port';
 import { SocialApprovalNotificationPublisher } from './social-approval-notification.publisher';
 import {
@@ -58,6 +59,8 @@ import { ApprovalSubjectResolver } from './subjects/approval-subject-resolver';
   controllers: [SocialApprovalsController],
   providers: [
     SocialApprovalsService,
+    // CS5-B — filled by the Creative Studio on init (production readiness).
+    SocialApprovalTransitionRegistry,
     ApprovalSubjectResolver,
     SocialApprovalNotificationPublisher,
     ApprovalClientReviewService,
@@ -81,6 +84,7 @@ import { ApprovalSubjectResolver } from './subjects/approval-subject-resolver';
     SocialApprovalNotificationPublisher,
     ClientConversationCardRegistry,
     ClientApprovalNotifierRegistry,
+    SocialApprovalTransitionRegistry,
     TypeOrmModule,
   ],
 })

@@ -33,6 +33,8 @@ export type SocialDestinationCreativeView = {
   role: string;
   sortOrder: number;
   source: string;
+  /** CS5-B: the Creative Version this creative was handed off from; null when manual. */
+  creativeVersionId: string | null;
   media: MediaAssetView | null;
   createdAt: string;
   updatedAt: string;
@@ -50,6 +52,7 @@ export function toSocialDestinationCreativeView(
     role: creative.role,
     sortOrder: creative.sortOrder,
     source: creative.source,
+    creativeVersionId: creative.creativeVersionId ?? null,
     /**
      * `null` when the media row could not be read in this scope. That is a
      * fail-closed answer, not a "no creative" one: the link still exists, and

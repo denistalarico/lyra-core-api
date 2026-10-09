@@ -61,6 +61,66 @@ const REVISION_FROM: readonly SocialContentPlanningStatus[] = [
 ];
 
 /**
+ * CS5-B — what the creative production of an item amounts to, as reported by
+ * the Creative Studio after reading its owners (the explicit selection in the
+ * Studio and the approval of that exact version in Approvals).
+ *
+ * - `in_production`: a version is selected but not handed to approval (never
+ *   sent, cancelled, superseded, or sent back with `changes_requested`).
+ * - `in_approval`: the selected version is in an active approval.
+ * - `final`: the selected version was approved, or no approval applies.
+ *
+ * "Nothing selected" is not a phase: with no selection the Studio claims
+ * nothing, and the Planner keeps whatever it has.
+ */
+export type SocialContentCreativeProductionPhase =
+  | 'in_production'
+  | 'in_approval'
+  | 'final';
+
+/**
+ * CS5-B — the consolidated reflection, decided here by the Planner.
+ *
+ * Planner vocabulary: `creative_ready` is "Em aprovação" and `ready` is
+ * "Aprovado" (the cockpit's only persisted signal that approval concluded).
+ *
+ * - Pre-copy states are never moved: copy is the Planner's own prerequisite
+ *   for `ready` and for entering the creative segment (CS2B.4).
+ * - Since CS5, `ready` means "the CURRENTLY SELECTED Creative Version is
+ *   final". It therefore follows the selection: when a different version is
+ *   selected (not sent, sent back with changes, or pending), `ready` regresses
+ *   to `creative_in_progress` / `creative_ready`. This replaces, for items with
+ *   an explicit selection only, CS2B.6's "ready never regresses"; the legacy
+ *   CS2B paths (`reflectCreativeStatus`, `reflectCreativeRevisionStarted`)
+ *   keep their own tables unchanged. Approvals of earlier versions stay intact
+ *   in Approvals — only the Planner reading of the item moves.
+ * - `creative_ready → creative_in_progress` is allowed for `in_production`:
+ *   the evidence is the owners' own state — the selected version is not in an
+ *   approval — which generalizes CS2B.6's `changes_requested` rule to an
+ *   explicit re-selection.
+ */
+const PRODUCTION_REFLECTION: Record<
+  SocialContentCreativeProductionPhase,
+  {
+    target: SocialContentPlanningStatus;
+    from: readonly SocialContentPlanningStatus[];
+  }
+> = {
+  in_production: {
+    target: 'creative_in_progress',
+    from: ['copy_ready', 'creative_ready', 'ready'],
+  },
+  in_approval: {
+    target: 'creative_ready',
+    from: ['copy_ready', 'creative_in_progress', 'ready'],
+  },
+  final: {
+    target: 'ready',
+    from: ['copy_ready', 'creative_in_progress', 'creative_ready'],
+  },
+};
+
+/**
  * How another module reports creative production on a Planner content item.
  *
  * The Planner owns `planningStatus`; callers never touch the content
@@ -99,7 +159,7 @@ export class SocialContentProductionStatusService {
     },
     manager?: EntityManager,
   ): Promise<boolean> {
-    return this.move(
+    const moved = await this.move(
       scope,
       input.contentItemId,
       input.status,
@@ -107,6 +167,37 @@ export class SocialContentProductionStatusService {
       input.actorUserId,
       manager,
     );
+    return moved !== null;
+  }
+
+  /**
+   * CS5-B — recalculates the Planner state of an item from its creative
+   * production phase (see `PRODUCTION_REFLECTION`). Same scope, silent no-op
+   * and compare-and-set contract as `reflectCreativeStatus`; returns the
+   * transition it applied, or null.
+   */
+  async reflectCreativeProduction(
+    scope: SocialPlannerScope,
+    input: {
+      contentItemId: string;
+      phase: SocialContentCreativeProductionPhase;
+      actorUserId: string | null;
+    },
+    manager?: EntityManager,
+  ): Promise<{
+    from: SocialContentPlanningStatus;
+    to: SocialContentPlanningStatus;
+  } | null> {
+    const rule = PRODUCTION_REFLECTION[input.phase];
+    const from = await this.move(
+      scope,
+      input.contentItemId,
+      rule.target,
+      rule.from,
+      input.actorUserId,
+      manager,
+    );
+    return from === null ? null : { from, to: rule.target };
   }
 
   /**
@@ -120,7 +211,7 @@ export class SocialContentProductionStatusService {
     input: { contentItemId: string; actorUserId: string | null },
     manager?: EntityManager,
   ): Promise<boolean> {
-    return this.move(
+    const moved = await this.move(
       scope,
       input.contentItemId,
       'creative_in_progress',
@@ -128,16 +219,18 @@ export class SocialContentProductionStatusService {
       input.actorUserId,
       manager,
     );
+    return moved !== null;
   }
 
+  /** Returns the state it moved from, or null when nothing changed. */
   private async move(
     scope: SocialPlannerScope,
     contentItemId: string,
-    target: SocialContentCreativeStatus,
+    target: SocialContentPlanningStatus,
     from: readonly SocialContentPlanningStatus[],
     actorUserId: string | null,
     manager?: EntityManager,
-  ): Promise<boolean> {
+  ): Promise<SocialContentPlanningStatus | null> {
     const contents = manager
       ? manager.getRepository(SocialContentItemEntity)
       : this.contentRepository;
@@ -158,7 +251,7 @@ export class SocialContentProductionStatusService {
     });
 
     if (!item || !from.includes(item.planningStatus)) {
-      return false;
+      return null;
     }
 
     const planInScope = await plans.exists({
@@ -175,7 +268,7 @@ export class SocialContentProductionStatusService {
     });
 
     if (!planInScope) {
-      return false;
+      return null;
     }
 
     const result = await contents.update(
@@ -183,6 +276,6 @@ export class SocialContentProductionStatusService {
       { planningStatus: target, updatedById: actorUserId },
     );
 
-    return (result.affected ?? 0) > 0;
+    return (result.affected ?? 0) > 0 ? item.planningStatus : null;
   }
 }

@@ -251,6 +251,9 @@ describe('SocialOrganicModule', () => {
     expect(
       Reflect.getMetadata(MODULE_METADATA.EXPORTS, SocialOrganicModule),
     ).toEqual([
+      // CS5-B: the Creative Studio hands a selected version off to a
+      // destination through the destination owner.
+      DestinationCreativeService,
       // Re-exported so `SocialCreativeStudioModule`, which imports this
       // module, resolves the shared upload service and the metadata port
       // bound here. Without them the Creative Studio's providers cannot be

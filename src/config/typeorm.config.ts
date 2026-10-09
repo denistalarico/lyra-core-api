@@ -12,6 +12,8 @@ import {
   CreativeVideoGenerationEntity,
   CreativeVideoOperationEntity,
   CreativeVideoReferenceEntity,
+  CreativeProductionEntity,
+  CreativeProductionEventEntity,
 } from '../modules/social-creative-studio/entities';
 import {
   SocialAnalyticsDashboardEntity,
@@ -440,6 +442,8 @@ export const agencyEntities = [
   CreativeVideoGenerationEntity,
   CreativeVideoOperationEntity,
   CreativeVideoReferenceEntity,
+  CreativeProductionEntity,
+  CreativeProductionEventEntity,
   SocialAnalyticsDashboardEntity,
   SocialAnalyticsReportEntity,
   SocialApprovalRequestEntity,

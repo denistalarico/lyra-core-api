@@ -255,6 +255,8 @@ export function createMetaOrganicOAuthProviders(
     },
   ],
   exports: [
+    // CS5-B: Creative Studio production hands a selected version off through it.
+    DestinationCreativeService,
     MediaAssetUploadService,
     MEDIA_ASSET_METADATA_READER,
     SocialOrganicCredentialResolver,

@@ -2,6 +2,7 @@ import {
   ConflictException,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -10,6 +11,7 @@ import { SocialApprovalsService } from '../social-approvals/social-approvals.ser
 import { SocialContentProductionStatusService } from '../social-planner/services/social-content-production-status.service';
 import { CreativeAssetEntity, CreativeAssetVersionEntity } from './entities';
 import { CreativeAssetService } from './creative-asset.service';
+import { CreativeProductionReadinessService } from './creative-production-readiness.service';
 import type { CreativeStudioScope } from './creative-studio.scope';
 import type { CreativeVersionApprovalResponse } from './dto/creative-version-approval.dto';
 
@@ -32,6 +34,13 @@ export class CreativeVersionApprovalService {
     private readonly approvals: SocialApprovalsService,
     private readonly plannerStatus: SocialContentProductionStatusService,
     private readonly assetVersions: CreativeAssetService,
+    /**
+     * CS5-B: consolidates the hand-off reflection with the explicit selection.
+     * Absent only where a caller builds this service by hand without CS5; the
+     * CS2B.4 rule below is then exactly what runs with no selection anyway.
+     */
+    @Optional()
+    private readonly production?: CreativeProductionReadinessService,
   ) {}
 
   async sendForApproval(
@@ -51,15 +60,24 @@ export class CreativeVersionApprovalService {
       subjectRevisionId: version.id,
     });
     // CS2B.4: handing a version to Approvals is where production ends for the
-    // Planner (`creative_ready`, "Em aprovação"). Only the hand-off is
-    // reflected; later Approval statuses never reach `planningStatus`.
-    // Approvals commits in its own transaction, so this runs after it.
-    if (asset.contentItemId)
-      await this.plannerStatus.reflectCreativeStatus(scope, {
-        contentItemId: asset.contentItemId,
-        status: 'creative_ready',
-        actorUserId: actorUserId ?? null,
-      });
+    // Planner (`creative_ready`, "Em aprovação"). CS5-B: when the item has an
+    // explicit selection, the production rule decides instead — the selected
+    // version, not whichever version was just sent, is what the Planner
+    // reflects. Approvals commits in its own transaction, so this runs after.
+    if (asset.contentItemId) {
+      if (this.production)
+        await this.production.reflectAfterApprovalHandoff(
+          scope,
+          asset.contentItemId,
+          actorUserId ?? null,
+        );
+      else
+        await this.plannerStatus.reflectCreativeStatus(scope, {
+          contentItemId: asset.contentItemId,
+          status: 'creative_ready',
+          actorUserId: actorUserId ?? null,
+        });
+    }
     return request;
   }
 

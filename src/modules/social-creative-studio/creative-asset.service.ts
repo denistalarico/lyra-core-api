@@ -52,6 +52,15 @@ export type CreativeVersionCreatedHook = (
   created: { creativeAssetId: string; versionId: string },
 ) => Promise<void>;
 
+/** The constraint (or guard trigger) named by a PostgreSQL error, if any. */
+export function databaseConstraint(error: unknown): string | undefined {
+  const candidate = error as {
+    constraint?: string;
+    driverError?: { constraint?: string };
+  } | null;
+  return candidate?.constraint ?? candidate?.driverError?.constraint;
+}
+
 @Injectable()
 export class CreativeAssetService {
   constructor(
@@ -523,11 +532,30 @@ export class CreativeAssetService {
     if (input.folderId !== undefined) asset.folderId = input.folderId;
     return this.assets.save(asset);
   }
+  /**
+   * CS5-B: an asset whose version is the explicit selection of a live content
+   * item cannot be archived (`TR_social_creative_assets_selection_guard`, which
+   * also closes the race with a concurrent selection). The operator changes or
+   * clears the selection first; nothing cascades.
+   */
   async archive(scope: CreativeStudioScope, id: string) {
     const asset = await this.find(scope, id);
     asset.status = 'archived';
     asset.archivedAt = new Date();
-    return this.assets.save(asset);
+    try {
+      return await this.assets.save(asset);
+    } catch (error) {
+      if (
+        databaseConstraint(error) ===
+        'TR_social_creative_assets_selection_guard'
+      )
+        throw new ConflictException({
+          code: 'creative_selected_for_content',
+          message:
+            'Este criativo é a versão selecionada de um conteúdo. Troque ou remova a seleção antes de arquivar.',
+        });
+      throw error;
+    }
   }
   async content(
     scope: CreativeStudioScope,

@@ -79,6 +79,17 @@ export class SocialDestinationCreativeEntity {
   mediaAssetId!: string;
 
   /**
+   * CS5-B — the immutable Creative Version this row was handed off from.
+   *
+   * NULL for manual choices and for every row older than CS5-B (no backfill
+   * guess). When set, the database proves `media_asset_id` is exactly that
+   * version's media, so a newer version of the same asset can never be
+   * attributed to this link: changing the creative is a new, explicit handoff.
+   */
+  @Column({ name: 'creative_version_id', type: 'uuid', nullable: true })
+  creativeVersionId!: string | null;
+
+  /**
    * The connected account this creative was validated against.
    *
    * Capability is a property of `(provider, assetType, placement)`, and a

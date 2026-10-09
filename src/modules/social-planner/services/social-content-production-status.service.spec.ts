@@ -2,6 +2,7 @@ import { FindOperator } from 'typeorm';
 import type { SocialContentPlanningStatus } from '../entities';
 import {
   SocialContentProductionStatusService,
+  type SocialContentCreativeProductionPhase,
   type SocialContentCreativeStatus,
 } from './social-content-production-status.service';
 import type { SocialPlannerScope } from './social-planner.service';
@@ -325,6 +326,134 @@ describe('CS2B.4 SocialContentProductionStatusService', () => {
       });
       await expect(revise(h)).resolves.toBe(false);
       expect(h.item.planningStatus).toBe('ready');
+    });
+  });
+
+  describe('CS5-B reflectCreativeProduction', () => {
+    it('V1 approved → V2 selected → V2 sent → V2 approved walks ready back and forth', async () => {
+      const h = harness('ready');
+      const step = (phase: SocialContentCreativeProductionPhase) =>
+        h.service.reflectCreativeProduction(companyA, {
+          contentItemId: 'content-a',
+          phase,
+          actorUserId: 'studio-user',
+        });
+      await expect(step('in_production')).resolves.toEqual({
+        from: 'ready',
+        to: 'creative_in_progress',
+      });
+      await expect(step('in_approval')).resolves.toEqual({
+        from: 'creative_in_progress',
+        to: 'creative_ready',
+      });
+      await expect(step('in_production')).resolves.toEqual({
+        from: 'creative_ready',
+        to: 'creative_in_progress',
+      });
+      await expect(step('in_approval')).resolves.toMatchObject({
+        to: 'creative_ready',
+      });
+      await expect(step('final')).resolves.toEqual({
+        from: 'creative_ready',
+        to: 'ready',
+      });
+    });
+
+    it('the legacy CS2B paths still never regress ready', async () => {
+      const h = harness('ready');
+      await expect(h.reflect('creative_in_progress')).resolves.toBe(false);
+      await expect(
+        h.service.reflectCreativeRevisionStarted(companyA, {
+          contentItemId: 'content-a',
+          actorUserId: 'studio-user',
+        }),
+      ).resolves.toBe(false);
+      expect(h.item.planningStatus).toBe('ready');
+    });
+
+    /**
+     * Expected state per (phase, current); equal to the input = no-op.
+     * Pre-copy states are never moved. `ready` follows the selected version
+     * (CS5): it regresses when that version is not final.
+     */
+    const RULES: Record<
+      SocialContentCreativeProductionPhase,
+      Record<SocialContentPlanningStatus, SocialContentPlanningStatus>
+    > = {
+      in_production: {
+        idea: 'idea',
+        planned: 'planned',
+        copy_in_progress: 'copy_in_progress',
+        copy_ready: 'creative_in_progress',
+        creative_in_progress: 'creative_in_progress',
+        creative_ready: 'creative_in_progress',
+        ready: 'creative_in_progress',
+      },
+      in_approval: {
+        idea: 'idea',
+        planned: 'planned',
+        copy_in_progress: 'copy_in_progress',
+        copy_ready: 'creative_ready',
+        creative_in_progress: 'creative_ready',
+        creative_ready: 'creative_ready',
+        ready: 'creative_ready',
+      },
+      final: {
+        idea: 'idea',
+        planned: 'planned',
+        copy_in_progress: 'copy_in_progress',
+        copy_ready: 'ready',
+        creative_in_progress: 'ready',
+        creative_ready: 'ready',
+        ready: 'ready',
+      },
+    };
+    const cases = (
+      Object.keys(RULES) as SocialContentCreativeProductionPhase[]
+    ).flatMap((phase) => ALL.map((from) => [phase, from] as const));
+
+    it.each(cases)('%s from %s follows the table', async (phase, from) => {
+      const h = harness(from);
+      const moved = await h.service.reflectCreativeProduction(companyA, {
+        contentItemId: 'content-a',
+        phase,
+        actorUserId: 'studio-user',
+      });
+      const expected = RULES[phase][from];
+      expect(h.item.planningStatus).toBe(expected);
+      expect(moved).toEqual(expected === from ? null : { from, to: expected });
+      if (expected === from) expect(h.contents.update).not.toHaveBeenCalled();
+    });
+
+    it('never moves content of another company or of agency scope', async () => {
+      for (const scope of [companyB, agency]) {
+        const h = harness('creative_ready');
+        await expect(
+          h.service.reflectCreativeProduction(scope, {
+            contentItemId: 'content-a',
+            phase: 'final',
+            actorUserId: null,
+          }),
+        ).resolves.toBeNull();
+        expect(h.item.planningStatus).toBe('creative_ready');
+      }
+    });
+
+    it('loses to a concurrent operator edit (compare-and-set)', async () => {
+      const h = harness('creative_ready');
+      h.contents.findOne.mockImplementationOnce(async () => {
+        const snapshot = { ...h.item };
+        h.item.planningStatus = 'planned';
+        return snapshot;
+      });
+      await expect(
+        h.service.reflectCreativeProduction(companyA, {
+          contentItemId: 'content-a',
+          phase: 'final',
+          actorUserId: null,
+        }),
+      ).resolves.toBeNull();
+      expect(h.item.planningStatus).toBe('planned');
     });
   });
 });

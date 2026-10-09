@@ -868,13 +868,16 @@ run('CS4-B creative video generation (real PostgreSQL)', () => {
         duration_requested_seconds: 15,
         duration_actual_seconds: '23.400',
         has_audio: true,
-        cost_amount: '1.560780',
+        // CS4 Closeout official table (heygen.payg.2026-10): Avatar IV studio
+        // look = 0.0805 USD/s → 23.4 s × 0.0805 = 1.8837, unrounded.
+        cost_amount: '1.883700',
       });
       const [operation] = await operationRows(generationId);
       expect(operation).toMatchObject({
         provider_model: 'avatar_iv',
         unit_kind: 'output_second:avatar_iv:studio_avatar',
         billed_units: '23.400',
+        pricing_version: 'heygen.payg.2026-10',
       });
       // Provider ids resolved from Lyra's catalog only inside the worker.
       expect(ugc.submits[0].input).toMatchObject({
