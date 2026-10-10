@@ -2,6 +2,10 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import {
+  AgencyClient,
+  AgencyClientCompanyContext,
+} from '../../clients/entities';
+import {
   AgencyProject,
   AgencyProjectSettings,
   AgencyTask,
@@ -253,6 +257,12 @@ export class FinanceProfitabilityService {
     private readonly projectSettingsRepo: Repository<AgencyProjectSettings>,
 
     private readonly aiCosts: AiCostLedgerService,
+
+    @InjectRepository(AgencyClient, 'agency')
+    private readonly clientsRepo: Repository<AgencyClient>,
+
+    @InjectRepository(AgencyClientCompanyContext, 'agency')
+    private readonly companyContextsRepo: Repository<AgencyClientCompanyContext>,
   ) {}
 
   async getOverview(ctx: FinanceRequestContext) {
@@ -381,7 +391,18 @@ export class FinanceProfitabilityService {
       defaultHourlyCost,
     );
 
-    const validInvoices = invoices.filter(
+    const customerClientIds = await this.resolveCustomerClientIds(ctx);
+    const clientInvoices = invoices.map((invoice) => ({
+      ...invoice,
+      customerId:
+        customerClientIds.get(invoice.customerId ?? '') ?? invoice.customerId,
+    }));
+    const clientRecurringProfiles = recurringProfiles.map((profile) => ({
+      ...profile,
+      customerId:
+        customerClientIds.get(profile.customerId ?? '') ?? profile.customerId,
+    }));
+    const validInvoices = clientInvoices.filter(
       (invoice) =>
         !['cancelled', 'void', 'draft'].includes(String(invoice.status)),
     );
@@ -416,7 +437,7 @@ export class FinanceProfitabilityService {
       costCenters,
     );
 
-    const activeRecurringProfiles = recurringProfiles.filter(
+    const activeRecurringProfiles = clientRecurringProfiles.filter(
       (profile) => String(profile.status) === 'active',
     );
 
@@ -668,11 +689,29 @@ export class FinanceProfitabilityService {
   // Months with no movement are emitted with zero so the chart stays continuous.
   // Recurring profiles and contracted fees are NOT projected into the historical
   // series (they are "current snapshot" concepts) — see notes.
-  async getClientMonthlyProfitability(
+  getClientMonthlyProfitability(
     ctx: FinanceRequestContext,
     clientId: string,
     options: { startMonth?: string; endMonth?: string; months?: number } = {},
   ) {
+    return this.getMonthlyProfitability(ctx, clientId, options);
+  }
+
+  getPortfolioMonthlyProfitability(
+    ctx: FinanceRequestContext,
+    clientIds: string[],
+    options: { startMonth?: string; endMonth?: string; months?: number } = {},
+  ) {
+    return this.getMonthlyProfitability(ctx, clientIds, options);
+  }
+
+  private async getMonthlyProfitability(
+    ctx: FinanceRequestContext,
+    clientId: string | string[],
+    options: { startMonth?: string; endMonth?: string; months?: number } = {},
+  ) {
+    const clientIds = new Set(Array.isArray(clientId) ? clientId : [clientId]);
+    const customerClientIds = await this.resolveCustomerClientIds(ctx);
     const [settings, rules] = await Promise.all([
       this.getSettings(ctx),
       this.getRules(ctx),
@@ -703,7 +742,7 @@ export class FinanceProfitabilityService {
           where: {
             tenantId: ctx.tenantId,
             workspaceId: ctx.workspaceId,
-            clientId,
+            clientId: In([...clientIds]),
           },
         }),
       ]);
@@ -716,7 +755,11 @@ export class FinanceProfitabilityService {
     // Tasks owned by the client directly OR belonging to one of its projects.
     const tasks = await this.tasksRepo.find({
       where: [
-        { tenantId: ctx.tenantId, workspaceId: ctx.workspaceId, clientId },
+        {
+          tenantId: ctx.tenantId,
+          workspaceId: ctx.workspaceId,
+          clientId: In([...clientIds]),
+        },
         ...(projectIds.length
           ? [
               {
@@ -728,8 +771,8 @@ export class FinanceProfitabilityService {
           : []),
       ],
     });
-    const relevantTasks = tasks.filter(
-      (task) => this.resolveTaskClientId(task, projectClientById) === clientId,
+    const relevantTasks = tasks.filter((task) =>
+      clientIds.has(this.resolveTaskClientId(task, projectClientById) ?? ''),
     );
     const taskIds = relevantTasks.map((task) => task.id);
 
@@ -753,15 +796,19 @@ export class FinanceProfitabilityService {
       : [];
 
     const revenueByMonth = this.aggregateClientRevenueByMonth(
-      invoices,
-      clientId,
+      invoices.map((invoice) => ({
+        ...invoice,
+        customerId:
+          customerClientIds.get(invoice.customerId ?? '') ?? invoice.customerId,
+      })),
+      clientIds,
       monthsInRange,
     );
     const directCostByMonth = this.aggregateClientDirectCostByMonth(
       bills,
       billLines,
       costCenters,
-      clientId,
+      clientIds,
       monthsInRange,
     );
     const laborByMonth = this.aggregateClientLaborByMonth(
@@ -776,7 +823,9 @@ export class FinanceProfitabilityService {
     const aiRange: AiCostFilter = {
       tenantId: ctx.tenantId,
       workspaceId: ctx.workspaceId,
-      agencyClientId: clientId,
+      ...(Array.isArray(clientId)
+        ? { agencyClientIds: clientId }
+        : { agencyClientId: clientId }),
       from: new Date(`${range.start}-01T00:00:00.000Z`),
       to: new Date(
         `${monthFromIndex(monthIndex(range.end) + 1)}-01T00:00:00.000Z`,
@@ -835,8 +884,8 @@ export class FinanceProfitabilityService {
       status: 'ok' as const,
       module: 'agency-finance',
       area: 'profitability',
-      type: 'client_monthly',
-      id: clientId,
+      type: Array.isArray(clientId) ? 'portfolio_monthly' : 'client_monthly',
+      id: Array.isArray(clientId) ? null : clientId,
       currency: settings.baseCurrency,
       period: {
         type: 'monthly_series',
@@ -962,13 +1011,13 @@ export class FinanceProfitabilityService {
 
   private aggregateClientRevenueByMonth(
     invoices: FinanceInvoice[],
-    clientId: string,
+    clientIds: Set<string>,
     monthsInRange: Set<string>,
   ): Map<string, number> {
     const byMonth = new Map<string, number>();
 
     for (const invoice of invoices) {
-      if (invoice.customerId !== clientId) continue;
+      if (!clientIds.has(invoice.customerId ?? '')) continue;
       if (['cancelled', 'void', 'draft'].includes(String(invoice.status))) {
         continue;
       }
@@ -987,7 +1036,7 @@ export class FinanceProfitabilityService {
     bills: FinanceBill[],
     billLines: FinanceBillLine[],
     costCenters: FinanceCostCenter[],
-    clientId: string,
+    clientIds: Set<string>,
     monthsInRange: Set<string>,
   ): Map<string, number> {
     const clientIdByCostCenterId = new Map<string, string>();
@@ -1040,7 +1089,7 @@ export class FinanceProfitabilityService {
             ]);
         }
 
-        if (lineClientId !== clientId) continue;
+        if (!clientIds.has(lineClientId ?? '')) continue;
         byMonth.set(month, (byMonth.get(month) ?? 0) + amount);
       }
     }
@@ -1600,6 +1649,39 @@ export class FinanceProfitabilityService {
     return invoices
       .filter((invoice) => invoice.customerId === clientId)
       .reduce((sum, invoice) => sum + toNumber(invoice.totalAmount), 0);
+  }
+
+  // Finance invoices/recurrences identify a Contact; operational work identifies
+  // an Agency Client. Resolve only structurally proven, unambiguous ownership in
+  // this tenant/workspace. Primary-company flags and display names are not proof.
+  private async resolveCustomerClientIds(ctx: FinanceRequestContext) {
+    const where = { tenantId: ctx.tenantId, workspaceId: ctx.workspaceId };
+    const [clients, contexts] = await Promise.all([
+      this.clientsRepo.find({ where }),
+      this.companyContextsRepo.find({ where }),
+    ]);
+    const clientIds = new Set(clients.map((client) => client.id));
+    const candidates = new Map<string, Set<string>>();
+    const add = (contactId: string | null, clientId: string) => {
+      if (!contactId || !clientIds.has(clientId)) return;
+      const owners = candidates.get(contactId) ?? new Set<string>();
+      owners.add(clientId);
+      candidates.set(contactId, owners);
+    };
+    for (const client of clients) {
+      add(client.contactId, client.id);
+      // Older Clients saves stored the selected contact only in metadata.
+      const legacyContact = getMetadataString(client.metadata, ['contactId']);
+      add(legacyContact, client.id);
+    }
+    for (const context of contexts)
+      add(context.companyContactId, context.agencyClientId);
+    const result = new Map<string, string>();
+    for (const [contactId, owners] of candidates) {
+      if (owners.size === 1 && !clientIds.has(contactId))
+        result.set(contactId, [...owners][0]);
+    }
+    return result;
   }
 
   private calculateClientDelinquency(

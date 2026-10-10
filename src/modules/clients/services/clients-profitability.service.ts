@@ -1,10 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { IsNull, Not, Repository } from 'typeorm';
 import { FinanceProfitabilityService } from '../../finance/services/finance-profitability.service';
 import { FinanceRequestContext } from '../../finance/services/finance-context';
 import { AgencyClient } from '../entities';
-import { AgencyClientHealthStatus } from '../enums';
+import { AgencyClientStatus, AgencyClientHealthStatus } from '../enums';
 
 type RequestContext = {
   tenantId: string;
@@ -163,6 +163,28 @@ export class ClientsProfitabilityService {
         'Client identity and lifecycle data are enriched from agency_clients.',
       ],
     };
+  }
+
+  async getPortfolioMonthlyProfitability(
+    ctx: RequestContext,
+    options: { startMonth?: string; endMonth?: string; months?: number } = {},
+  ) {
+    const clients = await this.clientsRepository.find({
+      where: {
+        tenantId: ctx.tenantId,
+        workspaceId: ctx.workspaceId,
+        archivedAt: IsNull(),
+        status: Not(AgencyClientStatus.Archived),
+      },
+      select: { id: true },
+    });
+    const result =
+      await this.financeProfitabilityService.getPortfolioMonthlyProfitability(
+        this.toFinanceContext(ctx),
+        clients.map((client) => client.id),
+        options,
+      );
+    return { ...result, module: 'agency-clients' };
   }
 
   async getClientMonthlyProfitability(

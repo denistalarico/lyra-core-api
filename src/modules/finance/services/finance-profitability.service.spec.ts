@@ -1,5 +1,9 @@
 import { ObjectLiteral, Repository } from 'typeorm';
 import {
+  AgencyClient,
+  AgencyClientCompanyContext,
+} from '../../clients/entities';
+import {
   AgencyProject,
   AgencyProjectSettings,
   AgencyTask,
@@ -40,6 +44,8 @@ function ctx() {
 }
 
 type Data = {
+  clients?: Partial<AgencyClient>[];
+  companyContexts?: Partial<AgencyClientCompanyContext>[];
   rules?: Partial<FinanceProfitabilityRule>;
   projects?: Partial<AgencyProject>[];
   tasks?: Partial<AgencyTask>[];
@@ -88,6 +94,11 @@ function fakeAiLedger(rows: FakeAiCost[] = []) {
         if (
           filter.agencyClientId !== undefined &&
           row.agencyClientId !== filter.agencyClientId
+        )
+          continue;
+        if (
+          filter.agencyClientIds &&
+          !filter.agencyClientIds.includes(row.agencyClientId ?? '')
         )
           continue;
         const key = keyOf(row);
@@ -170,6 +181,8 @@ function makeService(data: Data) {
     repo<AgencyTaskTimeEntry>(data.timeEntries),
     repo<AgencyProjectSettings>(data.projectSettings),
     fakeAiLedger(data.aiCosts),
+    repo<AgencyClient>(data.clients),
+    repo<AgencyClientCompanyContext>(data.companyContexts),
   );
 
   return service;
@@ -255,6 +268,84 @@ async function clientItem(data: Data) {
 }
 
 describe('FinanceProfitabilityService — direct profitability', () => {
+  it('resolves company-contact invoices to the Agency client, including past-due months', async () => {
+    const due = new Date();
+    due.setUTCDate(due.getUTCDate() - 60);
+    const data = baseData({
+      clients: [{ id: CLIENT, contactId: null }],
+      companyContexts: [
+        { agencyClientId: CLIENT, companyContactId: 'company-contact' },
+      ],
+      projects: [],
+      tasks: [],
+      bills: [],
+      billLines: [],
+      recurringProfiles: [],
+      invoices: [0, 1].map((n) => ({
+        id: `overdue-${n}`,
+        customerId: 'company-contact',
+        status: 'issued' as FinanceInvoice['status'],
+        balanceDue: '1000',
+        totalAmount: '1000',
+        dueDate: due.toISOString().slice(0, 10),
+        issueDate: due.toISOString().slice(0, 10),
+        createdAt: due,
+      })),
+    });
+    const overview = await makeService(data).getOverview(ctx());
+    expect(overview.clients).toHaveLength(1);
+    expect(overview.clients[0]).toMatchObject({
+      id: CLIENT,
+      revenue: 0,
+      health: 'risk',
+      delinquency: {
+        overdueInvoiceCount: 2,
+        overdueBalance: 2000,
+        oldestOverdueDays: 60,
+      },
+    });
+  });
+
+  it('resolves legacy metadata contacts and does not guess ambiguous company ownership', async () => {
+    const data = baseData({
+      clients: [
+        { id: CLIENT, metadata: { contactId: 'legacy-contact' } },
+        { id: 'client-2' },
+      ],
+      companyContexts: [
+        { agencyClientId: CLIENT, companyContactId: 'shared-contact' },
+        { agencyClientId: 'client-2', companyContactId: 'shared-contact' },
+      ],
+      bills: [],
+      billLines: [],
+      invoices: [
+        {
+          id: 'legacy',
+          customerId: 'legacy-contact',
+          status: 'issued' as FinanceInvoice['status'],
+          totalAmount: '1000',
+          issueDate: inPeriodDate(),
+          createdAt: new Date(),
+        },
+        {
+          id: 'ambiguous',
+          customerId: 'shared-contact',
+          status: 'issued' as FinanceInvoice['status'],
+          totalAmount: '500',
+          issueDate: inPeriodDate(),
+          createdAt: new Date(),
+        },
+      ],
+    });
+    const overview = await makeService(data).getOverview(ctx());
+    expect(overview.clients.find((c) => c.id === CLIENT)?.invoicedRevenue).toBe(
+      1000,
+    );
+    expect(
+      overview.clients.find((c) => c.id === 'shared-contact')?.invoicedRevenue,
+    ).toBe(500);
+  });
+
   it('marks a client at risk when unpaid invoices are more than 30 days overdue', async () => {
     const data = baseData();
     const overdueDate = new Date();
@@ -681,6 +772,111 @@ function utcDate(year: number, monthIndex0: number, day: number): Date {
 }
 
 describe('FinanceProfitabilityService — monthly series', () => {
+  it('consolidates only the requested clients with weighted margin and scoped AI costs', async () => {
+    const data = monthlyData({
+      clients: [
+        { id: CLIENT, contactId: 'contact-1' },
+        { id: 'client-2', contactId: 'contact-2' },
+      ],
+      invoices: [
+        {
+          customerId: 'contact-1',
+          status: 'issued' as FinanceInvoice['status'],
+          totalAmount: '1000',
+          issueDate: '2026-09-10',
+        },
+        {
+          customerId: 'contact-2',
+          status: 'issued' as FinanceInvoice['status'],
+          totalAmount: '3000',
+          issueDate: '2026-09-10',
+        },
+        {
+          customerId: 'archived',
+          status: 'issued' as FinanceInvoice['status'],
+          totalAmount: '9000',
+          issueDate: '2026-09-10',
+        },
+        {
+          customerId: CLIENT,
+          status: 'draft' as FinanceInvoice['status'],
+          totalAmount: '5000',
+          issueDate: '2026-09-10',
+        },
+      ],
+      bills: [
+        {
+          id: 'bill',
+          status: 'confirmed' as FinanceBill['status'],
+          costCenterId: CC_CLIENT.id,
+          periodStart: '2026-09-01',
+        },
+      ],
+      billLines: [{ billId: 'bill', totalAmount: '400' }],
+      aiCosts: [
+        {
+          agencyClientId: CLIENT,
+          currency: 'BRL',
+          amount: '20',
+          occurredAt: utcDate(2026, 8, 10),
+        },
+        {
+          agencyClientId: 'client-2',
+          currency: 'USD',
+          amount: '5',
+          occurredAt: utcDate(2026, 8, 10),
+        },
+        {
+          agencyClientId: 'client-2',
+          currency: null,
+          amount: null,
+          occurredAt: utcDate(2026, 8, 10),
+        },
+        {
+          agencyClientId: null,
+          currency: 'BRL',
+          amount: '1000',
+          occurredAt: utcDate(2026, 8, 10),
+        },
+        {
+          agencyClientId: 'archived',
+          currency: 'BRL',
+          amount: '1000',
+          occurredAt: utcDate(2026, 8, 10),
+        },
+      ],
+    });
+    const service = makeService(data);
+    const result = await service.getPortfolioMonthlyProfitability(
+      ctx(),
+      [CLIENT, 'client-2'],
+      { startMonth: '2026-09', endMonth: '2026-10' },
+    );
+    expect(result.series[0]).toMatchObject({
+      month: '2026-09',
+      revenue: 4000,
+      directCost: 400,
+      directProfit: 3580,
+      directMargin: 89.5,
+      aiCost: {
+        includedInGrossProfit: 20,
+        unknownOperations: 1,
+        excludedFromGrossProfit: [{ currency: 'USD', amount: '5.000000' }],
+      },
+    });
+    expect(result.series[1]).toMatchObject({ revenue: 0, directProfit: 0 });
+    const empty = await service.getPortfolioMonthlyProfitability(ctx(), [], {
+      startMonth: '2026-09',
+      endMonth: '2026-09',
+    });
+    expect(empty.series[0]).toMatchObject({
+      revenue: 0,
+      directCost: 0,
+      directProfit: 0,
+      aiCost: { operations: 0 },
+    });
+  });
+
   it('defaults to the trailing 12 months ending in the current month', async () => {
     const service = makeService(monthlyData());
     const result = await service.getClientMonthlyProfitability(ctx(), CLIENT, {});

@@ -1,3 +1,5 @@
+import { IsNull, Not } from 'typeorm';
+import { AgencyClientStatus } from '../enums';
 import { ClientsProfitabilityService } from './clients-profitability.service';
 
 const CONTEXT = {
@@ -7,6 +9,39 @@ const CONTEXT = {
 };
 
 describe('ClientsProfitabilityService', () => {
+  it('requests monthly aggregation only for non-archived clients in the authorized workspace', async () => {
+    const finance = {
+      getPortfolioMonthlyProfitability: jest
+        .fn()
+        .mockResolvedValue({ status: 'ok', series: [] }),
+    };
+    const repository = {
+      find: jest.fn().mockResolvedValue([{ id: 'active-client' }]),
+    };
+    const service = new ClientsProfitabilityService(
+      finance as never,
+      repository as never,
+    );
+    const result = await service.getPortfolioMonthlyProfitability(CONTEXT, {
+      months: 6,
+    });
+    expect(repository.find).toHaveBeenCalledWith({
+      where: {
+        tenantId: CONTEXT.tenantId,
+        workspaceId: CONTEXT.workspaceId,
+        archivedAt: IsNull(),
+        status: Not(AgencyClientStatus.Archived),
+      },
+      select: { id: true },
+    });
+    expect(finance.getPortfolioMonthlyProfitability).toHaveBeenCalledWith(
+      CONTEXT,
+      ['active-client'],
+      { months: 6 },
+    );
+    expect(result.module).toBe('agency-clients');
+  });
+
   it('keeps delinquency as a risk after applying a contracted monthly fee', async () => {
     const financeProfitabilityService = {
       getClientDetail: jest.fn().mockResolvedValue({

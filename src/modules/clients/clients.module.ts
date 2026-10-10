@@ -13,6 +13,7 @@ import { TeamConfigOption } from '../team/entities';
 import { ClientLifecycleController } from './controllers/client-lifecycle.controller';
 import { ClientCompaniesController } from './controllers/client-companies.controller';
 import { CompanyContextReconciliationController } from './controllers/company-context-reconciliation.controller';
+import { ClientsPortfolioMonthlyController } from './controllers/clients-portfolio-monthly.controller';
 import { ClientsController } from './controllers/clients.controller';
 import {
   AgencyClient,
@@ -58,6 +59,7 @@ const AGENCY_CONNECTION = 'agency';
   ],
   controllers: [
     ClientsController,
+    ClientsPortfolioMonthlyController,
     ClientCompaniesController,
     CompanyContextReconciliationController,
     ClientLifecycleController,

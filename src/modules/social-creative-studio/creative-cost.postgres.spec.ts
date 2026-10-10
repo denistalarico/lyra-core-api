@@ -1,3 +1,4 @@
+import { AgencyClient, AgencyClientCompanyContext } from '../clients/entities';
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { DataSource, type DataSourceOptions, type Repository } from 'typeorm';
@@ -112,6 +113,8 @@ run('CS6-B AI cost ledger (real PostgreSQL)', () => {
   };
 
   const ENTITIES = [
+    AgencyClient,
+    AgencyClientCompanyContext,
     CreativeGenerationEntity,
     CreativeGenerationOutputEntity,
     CreativeVideoGenerationEntity,
@@ -224,6 +227,8 @@ run('CS6-B AI cost ledger (real PostgreSQL)', () => {
       db.getRepository(AgencyTaskTimeEntry),
       db.getRepository(AgencyProjectSettings),
       ledger,
+      db.getRepository(AgencyClient),
+      db.getRepository(AgencyClientCompanyContext),
     );
   });
 
@@ -804,6 +809,27 @@ run('CS6-B AI cost ledger (real PostgreSQL)', () => {
       expect(summary?.totals).toEqual([]);
     });
 
+    it('filters ledger totals by an explicit client portfolio, excluding internal and other scope costs', async () => {
+      await image(scopeA);
+      await image(scopeB);
+      await image(own);
+      await image(otherClient);
+      await image({ ...scopeA, tenantId: randomUUID() });
+      await image({ ...scopeA, workspaceId: randomUUID() });
+      await reconcile();
+      const total = (
+        await ledger.summarize({
+          tenantId,
+          workspaceId,
+          agencyClientIds: [clientId],
+        })
+      ).get(null);
+      expect(total?.operations).toBe(2);
+      expect(
+        await ledger.summarize({ tenantId, workspaceId, agencyClientIds: [] }),
+      ).toEqual(new Map());
+    });
+
     it('records each paid operation once under replays and concurrent reconciles', async () => {
       const fresh = await image(own);
       const reel = await video(own);
@@ -1097,6 +1123,91 @@ run('CS6-B AI cost ledger (real PostgreSQL)', () => {
   // ── profitability (real Finance) ─────────────────────────────────────────
 
   describe('Finance profitability over the ledger', () => {
+    it('resolves overdue contact invoices to the client without mixing tenant or workspace ownership', async () => {
+      const contact = randomUUID();
+      const foreignTenant = randomUUID();
+      const foreignWorkspace = randomUUID();
+      await db.getRepository(AgencyClient).save([
+        {
+          id: clientId,
+          tenantId,
+          workspaceId,
+          displayName: 'Cliente',
+          metadata: { contactId: contact },
+        },
+        {
+          tenantId: foreignTenant,
+          workspaceId,
+          displayName: 'Outro tenant',
+          metadata: { contactId: contact },
+        },
+        {
+          tenantId,
+          workspaceId: foreignWorkspace,
+          displayName: 'Outro workspace',
+          metadata: { contactId: contact },
+        },
+      ]);
+      const date = new Date();
+      date.setUTCDate(date.getUTCDate() - 60);
+      const day = date.toISOString().slice(0, 10);
+      await db
+        .getRepository(FinanceInvoice)
+        .save([
+          ...['H-1', 'H-2'].map((invoiceNumber) => ({
+            tenantId,
+            workspaceId,
+            invoiceNumber,
+            customerId: contact,
+            status: FinanceInvoiceStatus.Issued,
+            totalAmount: '1000',
+            balanceDue: '1000',
+            issueDate: day,
+            dueDate: day,
+          })),
+          {
+            tenantId: foreignTenant,
+            workspaceId,
+            invoiceNumber: 'H-foreign',
+            customerId: contact,
+            status: FinanceInvoiceStatus.Issued,
+            totalAmount: '9000',
+            balanceDue: '9000',
+            issueDate: day,
+            dueDate: day,
+          },
+          {
+            tenantId,
+            workspaceId: foreignWorkspace,
+            invoiceNumber: 'H-workspace',
+            customerId: contact,
+            status: FinanceInvoiceStatus.Issued,
+            totalAmount: '9000',
+            balanceDue: '9000',
+            issueDate: day,
+            dueDate: day,
+          },
+        ]);
+      const overview = await finance.getOverview(financeCtx);
+      expect(overview.clients).toHaveLength(1);
+      expect(overview.clients[0]).toMatchObject({
+        id: clientId,
+        health: 'risk',
+        delinquency: {
+          overdueInvoiceCount: 2,
+          overdueBalance: 2000,
+          oldestOverdueDays: 60,
+        },
+      });
+      const month = day.slice(0, 7);
+      const monthly = await finance.getClientMonthlyProfitability(
+        financeCtx,
+        clientId,
+        { startMonth: month, endMonth: month },
+      );
+      expect(monthly.series[0].revenue).toBe(2000);
+    });
+
     async function workspaceWithLabor(baseCurrency: string) {
       await db.getRepository(FinanceSetting).save({
         tenantId,

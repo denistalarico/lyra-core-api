@@ -100,6 +100,7 @@ export type AiCostFilter = {
   from?: Date;
   to?: Date;
   agencyClientId?: string | null;
+  agencyClientIds?: readonly string[];
   companyContextId?: string | null;
   projectId?: string;
   taskId?: string;
@@ -441,6 +442,11 @@ export class AiCostLedgerService {
       clauses.push('agency_client_id IS NULL');
     else if (filter.agencyClientId !== undefined)
       add((n) => `agency_client_id = $${n}::uuid`, filter.agencyClientId);
+    if (filter.agencyClientIds !== undefined)
+      add(
+        (n) => `agency_client_id = ANY($${n}::uuid[])`,
+        filter.agencyClientIds,
+      );
     if (filter.companyContextId === null)
       clauses.push('company_context_id IS NULL');
     else if (filter.companyContextId !== undefined)
