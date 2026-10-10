@@ -59,6 +59,7 @@ import {
   UpdateFinanceSettingsDto,
   FinanceMetricsHistoryQueryDto,
   FinanceDreQueryDto,
+  FinanceAiCostQueryDto,
   UpdateFinanceFiscalProfileDto,
   CreateFinancePaymentProviderDto,
   UpdateFinancePaymentProviderDto,
@@ -878,6 +879,21 @@ export class FinanceController {
     return this.financeProfitabilityService.getClientDetail(
       getFinanceContext(req),
       id,
+    );
+  }
+
+  /** CS6-B — the paid AI operations behind any AI cost figure. */
+  @Get('profitability/ai-costs')
+  @RequireFinancePermission(
+    'agency.finance.profitability.view.finance_or_owner',
+  )
+  getProfitabilityAiCosts(
+    @Req() req: Request,
+    @Query() query: FinanceAiCostQueryDto,
+  ) {
+    return this.financeProfitabilityService.getAiCostDrilldown(
+      getFinanceContext(req),
+      query,
     );
   }
 

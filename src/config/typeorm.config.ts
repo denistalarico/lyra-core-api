@@ -2,6 +2,7 @@ import { AgencyMeetingAiSettings } from '../modules/team-chat/entities/agency-me
 import { TypeOrmModuleOptions } from '@nestjs/typeorm';
 
 import { MediaAssetEntity } from '../common/media-assets';
+import { AiOperationalCostEntity } from '../modules/ai-costs/entities';
 import {
   CreativeAssetEntity,
   CreativeAssetVersionEntity,
@@ -446,6 +447,8 @@ export const agencyEntities = [
   CreativeVideoReferenceEntity,
   CreativeProductionEntity,
   CreativeProductionEventEntity,
+  // CS6-B: provider-neutral AI cost ledger (Finance reads it, never providers).
+  AiOperationalCostEntity,
   SocialAnalyticsDashboardEntity,
   SocialAnalyticsReportEntity,
   SocialApprovalRequestEntity,

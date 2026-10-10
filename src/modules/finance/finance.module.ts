@@ -61,6 +61,7 @@ import { FinanceNotificationPublisher } from './services/finance-notification.pu
 import { FinanceTeamPaymentReconciliationService } from './services/finance-team-payment-reconciliation.service';
 import { FinanceBankTransferService } from './services/finance-bank-transfer.service';
 import { PermissionsModule } from '../permissions';
+import { AiCostsModule } from '../ai-costs/ai-costs.module';
 import { ContactEntity } from '../contacts/entities/contact.entity';
 import { ContactMethodEntity } from '../contacts/entities/contact-method.entity';
 
@@ -71,6 +72,9 @@ import { ContactMethodEntity } from '../contacts/entities/contact-method.entity'
     EmailModule,
     NotificationsModule,
     PermissionsModule,
+    // CS6-B: AI cost as a profitability component, read from the
+    // provider-neutral ledger only (never a provider's own tables).
+    AiCostsModule,
     TypeOrmModule.forFeature(
       [
         FinanceAccount,

@@ -3,6 +3,7 @@ import {
   ConflictException,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import {
@@ -36,6 +37,7 @@ import {
   type CreativeVersionCreatedHook,
   databaseConstraint,
 } from './creative-asset.service';
+import { CreativeCostMaterializer } from './creative-cost.materializer';
 import {
   CreativeProductionReadinessService,
   type CreativeProductionSnapshot,
@@ -242,6 +244,8 @@ export class CreativeProductionService {
     private readonly taskOwner: TasksCrudService,
     private readonly permissions: PlatformPermissionService,
     private readonly assetOwner: CreativeAssetService,
+    /** CS6-B: late binding of AI costs to the linked task/project. */
+    @Optional() private readonly costs?: CreativeCostMaterializer,
   ) {}
 
   // ── View ────────────────────────────────────────────────────────────────
@@ -653,6 +657,7 @@ export class CreativeProductionService {
       );
       return true;
     });
+    if (changed) await this.costs?.refreshContentItem(scope, item.id);
     return { changed, production: await this.view(ctx, scope, item.id) };
   }
 
@@ -690,6 +695,7 @@ export class CreativeProductionService {
       );
       return true;
     });
+    if (changed) await this.costs?.refreshContentItem(scope, item.id);
     return { changed, production: await this.view(ctx, scope, item.id) };
   }
 
@@ -761,6 +767,7 @@ export class CreativeProductionService {
         );
         return { changed: true, taskId: task.id };
       });
+      if (outcome.changed) await this.costs?.refreshContentItem(scope, item.id);
       return {
         ...outcome,
         production: await this.view(ctx, scope, item.id),

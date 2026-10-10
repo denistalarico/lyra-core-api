@@ -10,6 +10,15 @@ import {
 } from '../../projects/entities';
 import { TeamMember } from '../../team/entities';
 import {
+  AiCostLedgerService,
+  EMPTY_AI_COST_SUMMARY,
+  type AiCostCurrencyTotal,
+  type AiCostFilter,
+  type AiCostSummary,
+} from '../../ai-costs/ai-cost-ledger.service';
+import type { AiCostCurrencyAmount } from '../../ai-costs/ai-cost-money';
+import type { FinanceAiCostQueryDto } from '../dto/finance-ai-cost.dto';
+import {
   FinanceBill,
   FinanceBillLine,
   FinanceCostCenter,
@@ -46,6 +55,22 @@ type ProfitabilityHealth =
   | 'loss'
   | 'no_revenue';
 
+/**
+ * CS6-B — AI operational cost of a profitability row, from the
+ * provider-neutral ledger. Kept per currency: the platform has no FX, so only
+ * the part already in the Finance base currency enters `grossProfit`
+ * (`includedInGrossProfit`); any other currency is reported, never converted
+ * (`excludedFromGrossProfit`). Unknown costs are counted, never taken as 0.
+ */
+type ProfitabilityAiCost = {
+  totals: AiCostCurrencyTotal[];
+  unknownOperations: number;
+  operations: number;
+  generations: number;
+  includedInGrossProfit: number;
+  excludedFromGrossProfit: AiCostCurrencyAmount[];
+};
+
 type ProfitabilityItem = {
   id: string;
   name: string;
@@ -57,6 +82,7 @@ type ProfitabilityItem = {
   laborMinutes: number;
   laborHours: number;
   laborCost: number;
+  aiCost: ProfitabilityAiCost;
   grossProfit: number;
   margin: number;
   health: ProfitabilityHealth;
@@ -106,6 +132,31 @@ function getMetadataString(
 function roundPercent(value: number): number {
   return Math.round(value * 100) / 100;
 }
+
+// Splits an AI cost summary into the base-currency part (a Finance cost
+// component, in the margin) and the rest (no FX: reported, not converted).
+function toProfitabilityAiCost(
+  summary: AiCostSummary | undefined,
+  baseCurrency: string,
+): ProfitabilityAiCost {
+  const source = summary ?? EMPTY_AI_COST_SUMMARY;
+  const included = source.totals
+    .filter((total) => total.currency === baseCurrency)
+    .reduce((sum, total) => sum + toNumber(total.amount), 0);
+  return {
+    totals: source.totals.map((total) => ({ ...total })),
+    unknownOperations: source.unknownOperations,
+    operations: source.operations,
+    generations: source.generations,
+    includedInGrossProfit: roundMoney(included),
+    excludedFromGrossProfit: source.totals
+      .filter((total) => total.currency !== baseCurrency)
+      .map(({ currency, amount }) => ({ currency, amount })),
+  };
+}
+
+const AI_COST_NOTE =
+  'AI cost: paid AI provider operations from the provider-neutral ledger (ai_operational_costs), dated by the operation, in the provider currency. Only AI cost already in the base currency is subtracted from grossProfit; other currencies are listed in aiCost.excludedFromGrossProfit and are NOT converted (no FX source). Unknown costs are counted in aiCost.unknownOperations, never as zero. Agency-own AI cost (no client) is in summary.aiCost.internal and is not allocated to clients.';
 
 // ── Month helpers (YYYY-MM) ──────────────────────────────────────────────────
 // The monthly profitability series buckets every figure into a YYYY-MM key and
@@ -200,6 +251,8 @@ export class FinanceProfitabilityService {
 
     @InjectRepository(AgencyProjectSettings, 'agency')
     private readonly projectSettingsRepo: Repository<AgencyProjectSettings>,
+
+    private readonly aiCosts: AiCostLedgerService,
   ) {}
 
   async getOverview(ctx: FinanceRequestContext) {
@@ -292,6 +345,21 @@ export class FinanceProfitabilityService {
       }),
     ]);
 
+    // AI cost of the period, by the operation's own date (never approval or
+    // publication date). `to` is exclusive: the day after the period end.
+    const aiPeriod: AiCostFilter = {
+      tenantId: ctx.tenantId,
+      workspaceId: ctx.workspaceId,
+      from: periodStart,
+      to: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1)),
+    };
+    const [aiByClient, aiByProject, aiTotal] = await Promise.all([
+      this.aiCosts.summarize(aiPeriod, 'client'),
+      this.aiCosts.summarize(aiPeriod, 'project'),
+      this.aiCosts.summarize(aiPeriod, 'none'),
+    ]);
+    const baseCurrency = settings.baseCurrency;
+
     const defaultHourlyCost = toNumber(rules.defaultHourlyCost);
     const tasksById = new Map(tasks.map((task) => [task.id, task]));
     const tasksByProjectId = this.groupTasksByProject(tasks);
@@ -379,6 +447,10 @@ export class FinanceProfitabilityService {
         laborMinutes: projectLabor?.minutes ?? 0,
         laborCost: projectLabor?.cost ?? 0,
         labor: projectLabor,
+        aiCost: toProfitabilityAiCost(
+          aiByProject.get(project.id),
+          baseCurrency,
+        ),
         tasks: projectTasks.length,
         rules,
       });
@@ -397,6 +469,8 @@ export class FinanceProfitabilityService {
           // profitability, otherwise the direct cost is calculated and then
           // silently discarded before the client rows are built.
           ...directCostByClientId.keys(),
+          // Same for a client whose only movement in the period is AI cost.
+          ...aiByClient.keys(),
         ].filter(Boolean) as string[],
       ),
     );
@@ -436,6 +510,7 @@ export class FinanceProfitabilityService {
         laborMinutes: clientLabor?.minutes ?? 0,
         laborCost: clientLabor?.cost ?? 0,
         labor: clientLabor,
+        aiCost: toProfitabilityAiCost(aiByClient.get(clientId), baseCurrency),
         tasks: clientTasks.length,
         rules,
         delinquency: delinquencyByClientId.get(clientId) ?? null,
@@ -481,6 +556,15 @@ export class FinanceProfitabilityService {
         recurringRevenue: roundMoney(totals.recurringRevenue),
         directCosts: roundMoney(totals.directCosts),
         laborCost: roundMoney(totals.laborCost),
+        // Every AI cost of the period (clients + the agency's own operation).
+        // `includedInGrossProfit` is what this summary's grossProfit actually
+        // subtracted: the clients' base-currency part. The agency's own AI
+        // cost is in `internal` and is not allocated to clients.
+        aiCost: {
+          ...toProfitabilityAiCost(aiTotal.get(null), baseCurrency),
+          includedInGrossProfit: roundMoney(totals.aiCost),
+          internal: toProfitabilityAiCost(aiByClient.get(null), baseCurrency),
+        },
         grossProfit: roundMoney(totals.grossProfit),
         margin: roundRate(totals.margin),
         health: this.resolveHealth(totals.margin, totals.revenue, totals.grossProfit, rules),
@@ -492,6 +576,7 @@ export class FinanceProfitabilityService {
         'Direct cost source: confirmed payable (bill) lines whose effective cost center is the client cost center (draft/cancelled bills excluded). Falls back to bill/line metadata clientId when no cost center matches.',
         'Labor cost: subtask time entries × subtask responsible hourly cost (falling back to task responsible). Task trackedMinutes is used only when a task has no subtask time; missing responsible/cost is reported in membersMissingCost/hoursWithoutCost.',
         'This is a DIRECT margin: shared/overhead costs (tools, infrastructure, internal cost centers) are NOT allocated to clients in this view.',
+        AI_COST_NOTE,
       ],
       debug: {
         invoicesInPeriod: periodInvoices.length,
@@ -687,6 +772,21 @@ export class FinanceProfitabilityService {
       defaultHourlyCost,
       monthsInRange,
     );
+    // AI cost by the UTC month of each paid operation.
+    const aiRange: AiCostFilter = {
+      tenantId: ctx.tenantId,
+      workspaceId: ctx.workspaceId,
+      agencyClientId: clientId,
+      from: new Date(`${range.start}-01T00:00:00.000Z`),
+      to: new Date(
+        `${monthFromIndex(monthIndex(range.end) + 1)}-01T00:00:00.000Z`,
+      ),
+    };
+    const [aiByMonth, aiInRange] = await Promise.all([
+      this.aiCosts.summarize(aiRange, 'month'),
+      this.aiCosts.summarize(aiRange, 'none'),
+    ]);
+    const baseCurrency = settings.baseCurrency;
 
     let totalHoursWithoutCost = 0;
     const allMembersMissing = new Set<string>();
@@ -696,7 +796,10 @@ export class FinanceProfitabilityService {
       const directCost = roundMoney(directCostByMonth.get(month) ?? 0);
       const labor = laborByMonth.get(month);
       const laborCost = roundMoney(labor?.cost ?? 0);
-      const directProfit = roundMoney(revenue - directCost - laborCost);
+      const aiCost = toProfitabilityAiCost(aiByMonth.get(month), baseCurrency);
+      const directProfit = roundMoney(
+        revenue - directCost - laborCost - aiCost.includedInGrossProfit,
+      );
       // Margin is 0 (not 100%) when there is no revenue, even if costs exist —
       // the negative result is still visible in directProfit.
       const directMargin =
@@ -715,6 +818,7 @@ export class FinanceProfitabilityService {
         revenue,
         directCost,
         laborCost,
+        aiCost,
         directProfit,
         directMargin,
         hoursLogged: roundMoney(minutes / 60),
@@ -745,6 +849,7 @@ export class FinanceProfitabilityService {
         revenue: sum((point) => point.revenue),
         directCost: sum((point) => point.directCost),
         laborCost: sum((point) => point.laborCost),
+        aiCost: toProfitabilityAiCost(aiInRange.get(null), baseCurrency),
         directProfit: sum((point) => point.directProfit),
         hoursLogged: sum((point) => point.hoursLogged),
         hoursWithoutCost: roundMoney(totalHoursWithoutCost / 60),
@@ -755,7 +860,62 @@ export class FinanceProfitabilityService {
         'Monthly direct cost: payable (bill) lines whose effective cost center is the client cost center (draft/cancelled bills excluded), bucketed by competence (metadata competencePeriod/accrualDate, then bill periodStart/issueDate/createdAt).',
         'Monthly labor cost: subtask time entries by startedAt × subtask/task responsible hourly cost; task trackedMinutes fallback is used only when a task has no subtask time. Missing responsible/cost is reported in hoursWithoutCost/membersMissingCost.',
         'This is a DIRECT margin: shared/overhead costs are NOT allocated to the client in this view.',
+        AI_COST_NOTE,
       ],
+    };
+  }
+
+  // ── AI cost drill-down (CS6-B) ──────────────────────────────────────────────
+  //
+  // Every AI cost figure above decomposes into these rows: the paid operations
+  // themselves, provider-neutral, newest first. The summary covers the whole
+  // filter (not just the page) and stays per currency.
+  async getAiCostDrilldown(
+    ctx: FinanceRequestContext,
+    query: FinanceAiCostQueryDto,
+  ) {
+    const now = new Date();
+    const start = query.startDate
+      ? new Date(`${query.startDate.slice(0, 10)}T00:00:00.000Z`)
+      : new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+    const endExclusive = query.endDate
+      ? new Date(
+          Date.parse(`${query.endDate.slice(0, 10)}T00:00:00.000Z`) +
+            24 * 60 * 60 * 1000,
+        )
+      : new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
+    const filter: AiCostFilter = {
+      tenantId: ctx.tenantId,
+      workspaceId: ctx.workspaceId,
+      from: start,
+      to: endExclusive,
+      ...(query.internal ? { agencyClientId: null } : {}),
+      ...(query.clientId && !query.internal
+        ? { agencyClientId: query.clientId }
+        : {}),
+      ...(query.projectId ? { projectId: query.projectId } : {}),
+      ...(query.taskId ? { taskId: query.taskId } : {}),
+      ...(query.contentItemId ? { contentItemId: query.contentItemId } : {}),
+    };
+    const [settings, summary, page] = await Promise.all([
+      this.getSettings(ctx),
+      this.aiCosts.summarize(filter, 'none'),
+      this.aiCosts.page(filter, { cursor: query.cursor, limit: query.limit }),
+    ]);
+    return {
+      status: 'ok' as const,
+      module: 'agency-finance',
+      area: 'profitability',
+      type: 'ai_costs',
+      baseCurrency: settings.baseCurrency,
+      period: {
+        start: start.toISOString().slice(0, 10),
+        end: new Date(endExclusive.getTime() - 1).toISOString().slice(0, 10),
+      },
+      summary: toProfitabilityAiCost(summary.get(null), settings.baseCurrency),
+      items: page.items,
+      nextCursor: page.nextCursor,
+      notes: [AI_COST_NOTE],
     };
   }
 
@@ -1567,13 +1727,18 @@ export class FinanceProfitabilityService {
     laborMinutes: number;
     laborCost: number;
     labor?: LaborAggregate;
+    aiCost: ProfitabilityAiCost;
     tasks: number;
     rules: FinanceProfitabilityRule;
     delinquency?: ClientDelinquency | null;
     metadata?: Record<string, unknown>;
   }): ProfitabilityItem & { metadata?: Record<string, unknown> } {
     const laborHours = input.laborMinutes / 60;
-    const grossProfit = input.revenue - input.directCosts - input.laborCost;
+    const grossProfit =
+      input.revenue -
+      input.directCosts -
+      input.laborCost -
+      input.aiCost.includedInGrossProfit;
     const margin = input.revenue > 0 ? grossProfit / input.revenue : 0;
 
     return {
@@ -1587,6 +1752,7 @@ export class FinanceProfitabilityService {
       laborMinutes: input.laborMinutes,
       laborHours: roundMoney(laborHours),
       laborCost: roundMoney(input.laborCost),
+      aiCost: input.aiCost,
       grossProfit: roundMoney(grossProfit),
       margin: roundRate(margin),
       health: this.resolveHealth(
@@ -1620,7 +1786,11 @@ export class FinanceProfitabilityService {
     const laborMinutes = items.reduce((sum, item) => sum + item.laborMinutes, 0);
     const laborHours = laborMinutes / 60;
     const laborCost = items.reduce((sum, item) => sum + item.laborCost, 0);
-    const grossProfit = revenue - directCosts - laborCost;
+    const aiCost = items.reduce(
+      (sum, item) => sum + item.aiCost.includedInGrossProfit,
+      0,
+    );
+    const grossProfit = revenue - directCosts - laborCost - aiCost;
     const margin = revenue > 0 ? grossProfit / revenue : 0;
 
     return {
@@ -1631,6 +1801,7 @@ export class FinanceProfitabilityService {
       laborMinutes,
       laborHours,
       laborCost,
+      aiCost,
       grossProfit,
       margin,
     };

@@ -120,6 +120,8 @@ run('CS5-B creative production (real PostgreSQL)', () => {
     can: jest.fn(async (_context: unknown, _key: string) => true),
     assertCan: jest.fn(async () => undefined),
   };
+  // CS6-B late binding seam (the ledger itself is covered by its own spec).
+  const costs = { refreshContentItem: jest.fn(async () => 0) };
 
   function options(entities: DataSourceOptions['entities'], name: string) {
     const base = getAgencyTypeOrmConfig() as Extract<
@@ -360,6 +362,7 @@ run('CS5-B creative production (real PostgreSQL)', () => {
       taskOwner,
       permissions as never,
       assetService,
+      costs as never,
     );
   });
 
@@ -1013,6 +1016,11 @@ run('CS5-B creative production (real PostgreSQL)', () => {
         taskId: design.id,
         task: { id: design.id, title: 'Design' },
       });
+      expect(costs.refreshContentItem).toHaveBeenLastCalledWith(
+        scopeA,
+        item.id,
+      );
+      costs.refreshContentItem.mockClear();
       expect(
         (
           await production.linkTask(ctx(), scopeA, item.id, {
@@ -1020,6 +1028,8 @@ run('CS5-B creative production (real PostgreSQL)', () => {
           })
         ).changed,
       ).toBe(false);
+      // A replay changes no link, so no cost is re-projected.
+      expect(costs.refreshContentItem).not.toHaveBeenCalled();
       // The task owner deletes it permanently: a dangling link, not a cascade.
       await tasks.delete({ id: design.id });
       expect((await view(scopeA, item.id)).operationalWork.state).toBe(
@@ -1027,6 +1037,10 @@ run('CS5-B creative production (real PostgreSQL)', () => {
       );
       const unlinked = await production.unlinkTask(ctx(), scopeA, item.id);
       expect(unlinked.production.operationalWork.state).toBe('none');
+      expect(costs.refreshContentItem).toHaveBeenLastCalledWith(
+        scopeA,
+        item.id,
+      );
     });
 
     it('links a subtask only under its own task, through the project client when the task has none', async () => {
@@ -1099,6 +1113,8 @@ run('CS5-B creative production (real PostgreSQL)', () => {
         }),
       ]);
       expect(a.taskId).toBe(b.taskId);
+      // CS6-B: the one creation re-projects the item's AI costs.
+      expect(costs.refreshContentItem).toHaveBeenCalledWith(scopeA, item.id);
       const created = await tasks.findBy({
         tenantId,
         title: 'Produção criativa: Post de lançamento',

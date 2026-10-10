@@ -45,6 +45,10 @@ import {
 } from './creative-video-generation.controller';
 import { CreativeVideoGenerationService } from './creative-video-generation.service';
 import { CreativeVideoGenerationWorker } from './creative-video-generation.worker';
+import { AiCostsModule } from '../ai-costs/ai-costs.module';
+import { CreativeCostController } from './creative-cost.controller';
+import { CreativeCostMaterializer } from './creative-cost.materializer';
+import { CreativeCostService } from './creative-cost.service';
 import { CreativeStudioController } from './creative-studio.controller';
 import { CreativeVersionApprovalController } from './creative-version-approval.controller';
 import { CreativeVersionApprovalService } from './creative-version-approval.service';
@@ -72,6 +76,8 @@ import {
 @Module({
   imports: [
     PermissionsModule,
+    // CS6-B: writes its paid operations to the provider-neutral AI cost ledger.
+    AiCostsModule,
     MediaAssetsModule,
     BrandKitModule,
     SocialOrganicModule,
@@ -115,6 +121,7 @@ import {
     CreativeStudioController,
     CreativeVersionApprovalController,
     CreativeProductionController,
+    CreativeCostController,
     CreativeImageGenerationController,
     CreativeVersionVariationController,
     CreativeVideoGenerationController,
@@ -130,6 +137,9 @@ import {
     // CS5-B: readiness projection + Planner reconciliation, and orchestration.
     CreativeProductionReadinessService,
     CreativeProductionService,
+    // CS6-B: ledger materialization/correlation and the Studio cost read model.
+    CreativeCostMaterializer,
+    CreativeCostService,
     CreativeImageGenerationService,
     CreativeImageGenerationWorker,
     // CS3.6.1: expires temporary outputs; off unless explicitly enabled.

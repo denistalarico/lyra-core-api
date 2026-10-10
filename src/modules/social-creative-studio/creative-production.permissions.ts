@@ -20,4 +20,10 @@ export const CREATIVE_PRODUCTION_PERMISSIONS = {
   /** Agency owner keys, checked in addition to `update`. */
   taskCreate: 'agency.tasks.task.create.assigned',
   taskUpdate: 'agency.tasks.task.update.assigned',
+  /**
+   * CS6-B — real AI cost (provider money) and its reconcile: the Finance
+   * profitability key, checked in addition to `view`. Generating does not
+   * imply seeing what the agency pays.
+   */
+  costView: 'agency.finance.profitability.view.finance_or_owner',
 } as const;

@@ -16,6 +16,11 @@ import {
   FinanceRecurringProfile,
   FinanceSetting,
 } from '../entities';
+import type {
+  AiCostFilter,
+  AiCostGroupBy,
+  AiCostSummary,
+} from '../../ai-costs/ai-cost-ledger.service';
 import { FinanceProfitabilityService } from './finance-profitability.service';
 
 const TENANT = 'tenant-1';
@@ -47,7 +52,78 @@ type Data = {
   members?: Partial<TeamMember>[];
   recurringProfiles?: Partial<FinanceRecurringProfile>[];
   projectSettings?: Partial<AgencyProjectSettings>[];
+  aiCosts?: FakeAiCost[];
 };
+
+/** A ledger row, as far as Finance can see it (provider-neutral). */
+type FakeAiCost = {
+  agencyClientId: string | null;
+  projectId?: string | null;
+  currency: string | null;
+  amount: string | null;
+  occurredAt: Date;
+  logicalId?: string;
+};
+
+/**
+ * In-memory stand-in for `AiCostLedgerService.summarize`, same contract:
+ * per key, per currency, unknown rows counted and never summed. The SQL
+ * itself is covered by the real-PostgreSQL CS6-B spec.
+ */
+function fakeAiLedger(rows: FakeAiCost[] = []) {
+  const summarize = jest.fn(
+    (filter: AiCostFilter, groupBy: AiCostGroupBy = 'none') => {
+      const result = new Map<string | null, AiCostSummary>();
+      const keyOf = (row: FakeAiCost) =>
+        groupBy === 'client'
+          ? row.agencyClientId
+          : groupBy === 'project'
+            ? (row.projectId ?? null)
+            : groupBy === 'month'
+              ? row.occurredAt.toISOString().slice(0, 7)
+              : null;
+      for (const row of rows) {
+        if (filter.from && row.occurredAt < filter.from) continue;
+        if (filter.to && row.occurredAt >= filter.to) continue;
+        if (
+          filter.agencyClientId !== undefined &&
+          row.agencyClientId !== filter.agencyClientId
+        )
+          continue;
+        const key = keyOf(row);
+        const summary = result.get(key) ?? {
+          totals: [],
+          unknownOperations: 0,
+          operations: 0,
+          generations: 0,
+        };
+        summary.operations += 1;
+        summary.generations += 1;
+        if (row.currency === null || row.amount === null)
+          summary.unknownOperations += 1;
+        else {
+          const total = summary.totals.find((t) => t.currency === row.currency);
+          if (total) {
+            total.amount = (Number(total.amount) + Number(row.amount)).toFixed(
+              6,
+            );
+            total.operations += 1;
+            total.generations += 1;
+          } else
+            summary.totals.push({
+              currency: row.currency,
+              amount: Number(row.amount).toFixed(6),
+              operations: 1,
+              generations: 1,
+            });
+        }
+        result.set(key, summary);
+      }
+      return Promise.resolve(result);
+    },
+  );
+  return { summarize, page: jest.fn() } as never;
+}
 
 function makeService(data: Data) {
   const repo = <T extends ObjectLiteral>(rows: Partial<T>[] = []) =>
@@ -93,6 +169,7 @@ function makeService(data: Data) {
     repo<AgencyTaskChecklistItem>(data.checklistItems),
     repo<AgencyTaskTimeEntry>(data.timeEntries),
     repo<AgencyProjectSettings>(data.projectSettings),
+    fakeAiLedger(data.aiCosts),
   );
 
   return service;
@@ -1034,5 +1111,184 @@ describe('FinanceProfitabilityService — monthly series', () => {
     expect(september?.revenue).toBe(0);
     expect(september?.directProfit).toBe(-300);
     expect(september?.directMargin).toBe(0);
+  });
+});
+
+describe('FinanceProfitabilityService — AI cost component (CS6-B)', () => {
+  const inPeriod = () => new Date(`${inPeriodDate()}T12:00:00.000Z`);
+
+  it('subtracts base-currency AI cost from gross profit and margin', async () => {
+    const client = await clientItem(
+      baseData({
+        aiCosts: [
+          {
+            agencyClientId: CLIENT,
+            projectId: 'proj-1',
+            currency: 'BRL',
+            amount: '50.000000',
+            occurredAt: inPeriod(),
+          },
+        ],
+      }),
+    );
+    // 1000 revenue − 300 direct − 100 labor − 50 AI.
+    expect(client?.aiCost.includedInGrossProfit).toBe(50);
+    expect(client?.grossProfit).toBe(550);
+    expect(client?.margin).toBe(0.55);
+  });
+
+  it('reports USD AI cost without converting it into a BRL margin', async () => {
+    const client = await clientItem(
+      baseData({
+        aiCosts: [
+          {
+            agencyClientId: CLIENT,
+            currency: 'USD',
+            amount: '2.631808',
+            occurredAt: inPeriod(),
+          },
+        ],
+      }),
+    );
+    expect(client?.aiCost.totals).toEqual([
+      expect.objectContaining({ currency: 'USD', amount: '2.631808' }),
+    ]);
+    expect(client?.aiCost.includedInGrossProfit).toBe(0);
+    expect(client?.aiCost.excludedFromGrossProfit).toEqual([
+      { currency: 'USD', amount: '2.631808' },
+    ]);
+    expect(client?.grossProfit).toBe(600); // unchanged: no FX invented
+  });
+
+  it('counts unknown AI costs and never treats them as zero cost', async () => {
+    const client = await clientItem(
+      baseData({
+        aiCosts: [
+          {
+            agencyClientId: CLIENT,
+            currency: null,
+            amount: null,
+            occurredAt: inPeriod(),
+          },
+        ],
+      }),
+    );
+    expect(client?.aiCost.unknownOperations).toBe(1);
+    expect(client?.aiCost.totals).toEqual([]);
+  });
+
+  it('attributes AI cost to the project only through its explicit link', async () => {
+    const service = makeService(
+      baseData({
+        aiCosts: [
+          {
+            agencyClientId: CLIENT,
+            projectId: 'proj-1',
+            currency: 'BRL',
+            amount: '10.000000',
+            occurredAt: inPeriod(),
+          },
+          {
+            agencyClientId: CLIENT,
+            projectId: null,
+            currency: 'BRL',
+            amount: '5.000000',
+            occurredAt: inPeriod(),
+          },
+        ],
+      }),
+    );
+    const overview = await service.getOverview(ctx());
+    const project = overview.projects.find((p) => p.id === 'proj-1');
+    const client = overview.clients.find((c) => c.id === CLIENT);
+    expect(project?.aiCost.includedInGrossProfit).toBe(10);
+    // The client sees both; nothing is counted twice across rows.
+    expect(client?.aiCost.includedInGrossProfit).toBe(15);
+    expect(overview.summary.aiCost.includedInGrossProfit).toBe(15);
+    expect(overview.summary.grossProfit).toBe(1000 - 300 - 100 - 15);
+  });
+
+  it('keeps a client whose only movement is AI cost, and isolates own-agency cost', async () => {
+    const service = makeService({
+      aiCosts: [
+        {
+          agencyClientId: 'client-ai-only',
+          currency: 'USD',
+          amount: '1.000000',
+          occurredAt: inPeriod(),
+        },
+        {
+          agencyClientId: null,
+          currency: 'USD',
+          amount: '0.500000',
+          occurredAt: inPeriod(),
+        },
+      ],
+    });
+    const overview = await service.getOverview(ctx());
+    expect(overview.clients.map((c) => c.id)).toEqual(['client-ai-only']);
+    expect(overview.summary.aiCost.internal.totals).toEqual([
+      expect.objectContaining({ currency: 'USD', amount: '0.500000' }),
+    ]);
+    expect(overview.summary.aiCost.totals).toEqual([
+      expect.objectContaining({ currency: 'USD', amount: '1.500000' }),
+    ]);
+  });
+
+  it('dates AI cost by the operation, outside the period it is excluded', async () => {
+    const lastYear = new Date();
+    lastYear.setUTCFullYear(lastYear.getUTCFullYear() - 1);
+    const client = await clientItem(
+      baseData({
+        aiCosts: [
+          {
+            agencyClientId: CLIENT,
+            currency: 'BRL',
+            amount: '99.000000',
+            occurredAt: lastYear,
+          },
+        ],
+      }),
+    );
+    expect(client?.aiCost.operations).toBe(0);
+    expect(client?.grossProfit).toBe(600);
+  });
+
+  it('buckets AI cost by the operation month in the client series', async () => {
+    const service = makeService(
+      baseData({
+        aiCosts: [
+          {
+            agencyClientId: CLIENT,
+            currency: 'BRL',
+            amount: '20.000000',
+            occurredAt: new Date('2026-03-10T10:00:00.000Z'),
+          },
+          {
+            agencyClientId: CLIENT,
+            currency: 'USD',
+            amount: '1.250000',
+            occurredAt: new Date('2026-03-31T23:59:00.000Z'),
+          },
+          {
+            agencyClientId: 'other-client',
+            currency: 'BRL',
+            amount: '500.000000',
+            occurredAt: new Date('2026-03-10T10:00:00.000Z'),
+          },
+        ],
+      }),
+    );
+    const result = await service.getClientMonthlyProfitability(ctx(), CLIENT, {
+      startMonth: '2026-02',
+      endMonth: '2026-04',
+    });
+    const march = result.series.find((point) => point.month === '2026-03');
+    expect(march?.aiCost.includedInGrossProfit).toBe(20);
+    expect(march?.aiCost.excludedFromGrossProfit).toEqual([
+      { currency: 'USD', amount: '1.250000' },
+    ]);
+    expect(march?.directProfit).toBe(-20);
+    expect(result.summary.aiCost.operations).toBe(2);
   });
 });

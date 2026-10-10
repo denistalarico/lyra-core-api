@@ -289,7 +289,12 @@ export class ClientsProfitabilityService {
     const recurringRevenue = baseRecurring + appliedFee;
     const directCosts = this.toNumber(metrics.directCosts);
     const laborCost = this.toNumber(metrics.laborCost);
-    const grossProfit = revenue - directCosts - laborCost;
+    // CS6-B: the base-currency AI cost Finance already put in grossProfit.
+    const aiCost = this.toNumber(
+      (metrics.aiCost as { includedInGrossProfit?: unknown } | undefined)
+        ?.includedInGrossProfit,
+    );
+    const grossProfit = revenue - directCosts - laborCost - aiCost;
     const margin = revenue > 0 ? grossProfit / revenue : 0;
 
     return {
@@ -362,6 +367,9 @@ export class ClientsProfitabilityService {
       laborMinutes: item.laborMinutes,
       laborHours: item.laborHours,
       laborCost: item.laborCost,
+      aiCost:
+        (item.aiCost as ReturnType<typeof this.emptyAiCost> | undefined) ??
+        this.emptyAiCost(),
       grossProfit: item.grossProfit,
       margin: item.margin,
       health: item.health,
@@ -382,6 +390,7 @@ export class ClientsProfitabilityService {
       laborMinutes: 0,
       laborHours: 0,
       laborCost: 0,
+      aiCost: this.emptyAiCost(),
       grossProfit: 0,
       margin: 0,
       health: AgencyClientHealthStatus.NoRevenue,
@@ -390,6 +399,17 @@ export class ClientsProfitabilityService {
       hoursWithoutCost: 0,
       membersMissingCost: [],
       metadata: { projects: 0, source: 'agency_clients' },
+    };
+  }
+
+  private emptyAiCost() {
+    return {
+      totals: [],
+      unknownOperations: 0,
+      operations: 0,
+      generations: 0,
+      includedInGrossProfit: 0,
+      excludedFromGrossProfit: [],
     };
   }
 
