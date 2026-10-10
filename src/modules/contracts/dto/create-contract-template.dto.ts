@@ -1,97 +1,105 @@
 import {
-IsEnum,
-IsObject,
-IsOptional,
-IsString,
-MaxLength,
+  IsEnum,
+  IsIn,
+  IsObject,
+  IsOptional,
+  IsString,
+  MaxLength,
 } from 'class-validator';
 import {
-ContractFooterPreset,
-ContractHeaderPreset,
-ContractSignatureMode,
-ContractTemplateEditorMode,
-ContractTargetType,
+  ContractFooterPreset,
+  ContractHeaderPreset,
+  ContractSignatureMode,
+  ContractTemplateEditorMode,
+  ContractTemplateSource,
+  ContractTargetType,
 } from '../enums';
 
 export class CreateContractTemplateDto {
-@IsString()
-@MaxLength(160)
-name!: string;
+  @IsOptional()
+  @IsIn(['custom', 'ai_assisted'])
+  templateSource?:
+    | ContractTemplateSource.Custom
+    | ContractTemplateSource.AiAssisted;
 
-@IsOptional()
-@IsString()
-description?: string | null;
+  @IsString()
+  @MaxLength(160)
+  name!: string;
 
-@IsString()
-@MaxLength(60)
-category!: string;
+  @IsOptional()
+  @IsString()
+  description?: string | null;
 
-@IsEnum(ContractTargetType)
-targetType!: ContractTargetType;
+  @IsString()
+  @MaxLength(60)
+  category!: string;
 
-@IsOptional()
-@IsEnum(ContractSignatureMode)
-defaultSignatureMode?: ContractSignatureMode;
+  @IsEnum(ContractTargetType)
+  targetType!: ContractTargetType;
 
-@IsOptional()
-@IsString()
-headerHtml?: string | null;
+  @IsOptional()
+  @IsEnum(ContractSignatureMode)
+  defaultSignatureMode?: ContractSignatureMode;
 
-@IsString()
-bodyHtml!: string;
+  @IsOptional()
+  @IsString()
+  headerHtml?: string | null;
 
-@IsOptional()
-@IsString()
-footerHtml?: string | null;
+  @IsString()
+  bodyHtml!: string;
 
-@IsOptional()
-@IsEnum(ContractHeaderPreset)
-headerPreset?: ContractHeaderPreset | null;
+  @IsOptional()
+  @IsString()
+  footerHtml?: string | null;
 
-@IsOptional()
-@IsEnum(ContractFooterPreset)
-footerPreset?: ContractFooterPreset | null;
+  @IsOptional()
+  @IsEnum(ContractHeaderPreset)
+  headerPreset?: ContractHeaderPreset | null;
 
-@IsOptional()
-@IsString()
-@MaxLength(20)
-locale?: string;
+  @IsOptional()
+  @IsEnum(ContractFooterPreset)
+  footerPreset?: ContractFooterPreset | null;
 
-@IsOptional()
-@IsString()
-@MaxLength(2)
-countryCode?: string | null;
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  locale?: string;
 
-@IsOptional()
-@IsString()
-@MaxLength(120)
-jurisdictionRegion?: string | null;
+  @IsOptional()
+  @IsString()
+  @MaxLength(2)
+  countryCode?: string | null;
 
-@IsOptional()
-@IsString()
-legalDisclaimer?: string | null;
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  jurisdictionRegion?: string | null;
 
-@IsOptional()
-showLogo?: boolean;
+  @IsOptional()
+  @IsString()
+  legalDisclaimer?: string | null;
 
-@IsOptional()
-showCompanyData?: boolean;
+  @IsOptional()
+  showLogo?: boolean;
 
-@IsOptional()
-showContractNumber?: boolean;
+  @IsOptional()
+  showCompanyData?: boolean;
 
-@IsOptional()
-showPoweredByLyra?: boolean;
+  @IsOptional()
+  showContractNumber?: boolean;
 
-@IsOptional()
-@IsEnum(ContractTemplateEditorMode)
-editorMode?: ContractTemplateEditorMode;
+  @IsOptional()
+  showPoweredByLyra?: boolean;
 
-@IsOptional()
-@IsObject()
-variablesSchema?: Record<string, unknown>;
+  @IsOptional()
+  @IsEnum(ContractTemplateEditorMode)
+  editorMode?: ContractTemplateEditorMode;
 
-@IsOptional()
-@IsObject()
-metadata?: Record<string, unknown>;
+  @IsOptional()
+  @IsObject()
+  variablesSchema?: Record<string, unknown>;
+
+  @IsOptional()
+  @IsObject()
+  metadata?: Record<string, unknown>;
 }
