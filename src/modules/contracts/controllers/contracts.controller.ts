@@ -327,6 +327,24 @@ export class ContractsController {
     );
   }
 
+  @Get(':id/signature-readiness')
+  @RequirePermission('agency.contracts.send_signature.manager_or_admin')
+  getSignatureReadiness(
+    @AuthorizedContext() context: AuthorizedRequestContext,
+    @Param('id') id: string,
+  ) {
+    return this.contractsService.getSignatureReadiness(context, id);
+  }
+
+  @Post(':id/signature-sync')
+  @RequirePermission('agency.contracts.send_signature.manager_or_admin')
+  syncSignatureStatus(
+    @AuthorizedContext() context: AuthorizedRequestContext,
+    @Param('id') id: string,
+  ) {
+    return this.contractsService.syncSignatureStatus(context, id);
+  }
+
   @Post(':id/mark-manually-signed')
   @RequirePermission('agency.contracts.send_signature.manager_or_admin')
   markManuallySigned(

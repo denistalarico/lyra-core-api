@@ -1,3 +1,4 @@
+import { ContractAiAssistRun } from '../modules/contracts/entities/contract-ai-assist-run.entity';
 import { AgencyMeetingAiSettings } from '../modules/team-chat/entities/agency-meeting-ai-settings.entity';
 import { TypeOrmModuleOptions } from '@nestjs/typeorm';
 
@@ -423,6 +424,7 @@ import {
 } from '../modules/client-conversations/entities';
 
 export const agencyEntities = [
+  ContractAiAssistRun,
   AgencyMeetingAiSettings,
   ClientAreaIdentityContactEntity,
   ClientConversationEntity,

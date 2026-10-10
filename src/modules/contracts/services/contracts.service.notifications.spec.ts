@@ -223,60 +223,6 @@ describe('ContractsService notification triggers', () => {
       expect(contractsRepository.save).not.toHaveBeenCalled();
       expect(publisher.publishSentForSignature).not.toHaveBeenCalled();
     });
-
-    it('does not call publishSentForSignature when mockProvider is true', async () => {
-      const contract = makeDigitalContract();
-      const party = makeParty({ name: 'Signer', email: 'signer@example.com' });
-      const {
-        service,
-        publisher,
-        contractsRepository,
-        signatureProviderSettingsRepository,
-      } = makeService({ contract, parties: [party] });
-
-      const apiTokenEncrypted = (service as any).encryptSecret('token-value');
-      signatureProviderSettingsRepository.findOne.mockResolvedValue(
-        makeSettings({ apiTokenEncrypted }),
-      );
-
-      const result = await service.sendContractToSignatureProvider(makeContext(), contract.id, {
-        dryRun: false,
-        mockProvider: true,
-      });
-
-      expect(result.mockProvider).toBe(true);
-      expect(contractsRepository.save).toHaveBeenCalledWith(
-        expect.objectContaining({
-          id: contract.id,
-          status: ContractStatus.SentForSignature,
-          metadata: expect.objectContaining({ signatureProviderMode: 'mock' }),
-        }),
-      );
-      expect(publisher.publishSentForSignature).not.toHaveBeenCalled();
-    });
-
-    it('throws and does not call the publisher when a real provider call is requested', async () => {
-      const contract = makeDigitalContract();
-      const party = makeParty({ name: 'Signer', email: 'signer@example.com' });
-      const {
-        service,
-        publisher,
-        contractsRepository,
-        signatureProviderSettingsRepository,
-      } = makeService({ contract, parties: [party] });
-
-      const apiTokenEncrypted = (service as any).encryptSecret('token-value');
-      signatureProviderSettingsRepository.findOne.mockResolvedValue(
-        makeSettings({ apiTokenEncrypted }),
-      );
-
-      await expect(
-        service.sendContractToSignatureProvider(makeContext(), contract.id, { dryRun: false }),
-      ).rejects.toThrow('Real Autentique API call is not implemented yet');
-
-      expect(contractsRepository.save).not.toHaveBeenCalled();
-      expect(publisher.publishSentForSignature).not.toHaveBeenCalled();
-    });
   });
 });
 

@@ -1,10 +1,17 @@
 import {
+  BadGatewayException,
   BadRequestException,
+  ConflictException,
+  HttpException,
+  HttpStatus,
   Injectable,
+  InternalServerErrorException,
+  Logger,
   NotFoundException,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Brackets, Repository } from 'typeorm';
+import { Brackets, In, Raw, Repository } from 'typeorm';
 import {
   CreateBucketCommand,
   GetObjectCommand,
@@ -22,7 +29,28 @@ import {
 import { CONTRACT_TEMPLATE_PRESETS } from '../contracts-presets';
 import { sanitizeContractHtml } from '../contracts-sanitize';
 import { getContractTemplateContentByPresetKey } from '../contracts-template-content';
-import { sendAutentiqueSignatureRequestMock } from '../autentique-signature-adapter';
+import {
+  AutentiqueApiError,
+  AutentiqueClient,
+  assertAutentiqueApiBaseUrl,
+  type AutentiqueDocument,
+} from '../autentique/autentique.client';
+import {
+  contractStatusesBelow,
+  isContractInSignatureFlow,
+  parseAutentiqueWebhookEvent,
+  partyStatusesBelow,
+  planSignatureTransitions,
+  snapshotFromDocument,
+  verifyAutentiqueWebhookSignature,
+  type AutentiqueDocumentSnapshot,
+  type PartyTransition,
+} from '../autentique/autentique-signature-state';
+import {
+  deriveSignatureParties,
+  validateSigners,
+  type SignatureReadinessIssue,
+} from '../autentique/contract-signature-parties';
 import {
   ContractDocument,
   ContractEvent,
@@ -37,6 +65,7 @@ import {
   ContractEventType,
   ContractFooterPreset,
   ContractHeaderPreset,
+  ContractPartyRole,
   ContractPartySignatureStatus,
   ContractSignatureMode,
   ContractSignatureProvider,
@@ -58,7 +87,6 @@ import {
   ListContractsQueryDto,
   ListContractTemplatesQueryDto,
   MarkContractManuallySignedDto,
-  MockSignatureProviderCallbackDto,
   PrepareContractSignatureDto,
   SendContractToSignatureProviderDto,
   PreviewContractTemplateDto,
@@ -79,6 +107,39 @@ type RequestContext = {
   workspaceId: string;
   userId: string;
 };
+
+// Tenant scope without an acting user (Autentique webhook).
+type ContractScope = {
+  tenantId: string;
+  workspaceId: string;
+  userId?: string | null;
+};
+
+type SignaturePlan = {
+  source: 'parties' | 'derived';
+  signers: Array<{
+    partyId: string | null;
+    role: ContractPartyRole;
+    name: string | null;
+    email: string | null;
+    signatureOrder: number;
+    userId: string | null;
+    signatureStatus: ContractPartySignatureStatus | null;
+  }>;
+  issues: SignatureReadinessIssue[];
+  warnings: SignatureReadinessIssue[];
+};
+
+// Contract statuses from which a digital signature can be sent.
+const SIGNATURE_SENDABLE_STATUSES = [
+  ContractStatus.Draft,
+  ContractStatus.Generated,
+  ContractStatus.PendingSignature,
+];
+
+// A send claim older than this no longer blocks a new attempt. Long enough for
+// someone to check the Autentique panel after an uncertain (timed out) send.
+const AUTENTIQUE_SEND_LOCK_STALE_MS = 30 * 60 * 1000;
 
 type LetterheadSettings = {
   headerPreset?: ContractHeaderPreset | null;
@@ -111,6 +172,8 @@ export class ContractsService {
     private readonly eventsRepository: Repository<ContractEvent>,
     private readonly contractNotificationPublisher: ContractNotificationPublisher,
   ) {}
+
+  private readonly logger = new Logger(ContractsService.name);
 
   getTemplatePresets() {
     return CONTRACT_TEMPLATE_PRESETS;
@@ -272,14 +335,30 @@ export class ContractsService {
       provider,
     );
 
+    // The account verified by "Testar conexão" belongs to the token: keep it
+    // across metadata replacements, drop it when the token changes.
+    const verifiedAccount = settings.metadata?.autentiqueAccount;
+
     if (dto.status !== undefined)
       settings.status = dto.status as 'active' | 'inactive';
-    if (dto.apiBaseUrl !== undefined)
-      settings.apiBaseUrl = dto.apiBaseUrl ?? null;
+    if (dto.apiBaseUrl !== undefined) {
+      settings.apiBaseUrl = dto.apiBaseUrl
+        ? this.toAutentiqueHttpError(() =>
+            assertAutentiqueApiBaseUrl(dto.apiBaseUrl as string),
+          )
+        : null;
+    }
+    if (dto.metadata !== undefined) settings.metadata = dto.metadata;
     if (dto.apiToken !== undefined) {
       settings.apiTokenEncrypted = dto.apiToken
         ? this.encryptSecret(dto.apiToken)
         : null;
+    }
+    settings.metadata = { ...(settings.metadata ?? {}) };
+    if (dto.apiToken !== undefined || !verifiedAccount) {
+      delete settings.metadata.autentiqueAccount;
+    } else {
+      settings.metadata.autentiqueAccount = verifiedAccount;
     }
     if (dto.webhookSecret !== undefined) {
       settings.webhookSecretEncrypted = dto.webhookSecret
@@ -291,7 +370,6 @@ export class ContractsService {
     }
     if (dto.sandboxEnabled !== undefined)
       settings.sandboxEnabled = dto.sandboxEnabled;
-    if (dto.metadata !== undefined) settings.metadata = dto.metadata;
     settings.updatedById = context.userId;
 
     const saved = await this.signatureProviderSettingsRepository.save(settings);
@@ -309,24 +387,62 @@ export class ContractsService {
 
     const hasApiBaseUrl = Boolean(settings.apiBaseUrl);
     const hasApiToken = Boolean(settings.apiTokenEncrypted);
-
-    return {
+    const base = {
       provider,
-      ok: hasApiBaseUrl && hasApiToken && settings.status === 'active',
       status: settings.status,
       checks: {
         hasApiBaseUrl,
         hasApiToken,
+        hasWebhookSecret: Boolean(settings.webhookSecretEncrypted),
         sandboxEnabled: settings.sandboxEnabled,
       },
-      message:
-        settings.status === 'active' && hasApiBaseUrl && hasApiToken
-          ? 'Integração configurada e ativa.'
-          : !hasApiBaseUrl
-            ? 'URL da API não configurada.'
-            : !hasApiToken
-              ? 'Token de API não configurado.'
-              : 'Provedor inativo. Configure e ative para habilitar.',
+    };
+
+    if (!hasApiToken) {
+      return {
+        ...base,
+        ok: false,
+        account: null,
+        message: 'Token de API não configurado.',
+      };
+    }
+
+    // Real round-trip: `me` proves the token. Only the account identity is
+    // returned, never the token.
+    let account: {
+      id: string | null;
+      name: string | null;
+      email: string | null;
+    };
+    try {
+      account = await this.createAutentiqueClient(settings).me();
+    } catch (error) {
+      if (!(error instanceof AutentiqueApiError)) throw error;
+      return { ...base, ok: false, account: null, message: error.message };
+    }
+
+    settings.metadata = {
+      ...(settings.metadata ?? {}),
+      autentiqueAccount: {
+        name: account.name,
+        email: account.email,
+        verifiedAt: new Date().toISOString(),
+      },
+    };
+    await this.signatureProviderSettingsRepository.save(settings);
+
+    const who = [account.name, account.email ? `(${account.email})` : null]
+      .filter(Boolean)
+      .join(' ');
+    const isActive = settings.status === 'active';
+
+    return {
+      ...base,
+      ok: isActive,
+      account: { name: account.name, email: account.email },
+      message: isActive
+        ? `Conectado como ${who}.`
+        : `Token válido para ${who}, mas o provedor está inativo. Ative para enviar contratos.`,
     };
   }
 
@@ -398,7 +514,7 @@ export class ContractsService {
       locale: dto.locale ?? 'pt-BR',
       countryCode: dto.countryCode ?? 'BR',
       jurisdictionRegion: dto.jurisdictionRegion ?? null,
-      templateSource: ContractTemplateSource.Custom,
+      templateSource: dto.templateSource ?? ContractTemplateSource.Custom,
       editorMode: dto.editorMode ?? ContractTemplateEditorMode.Html,
       legalDisclaimer: dto.legalDisclaimer ?? null,
       metadata: dto.metadata ?? {},
@@ -1210,6 +1326,51 @@ export class ContractsService {
     };
   }
 
+  /**
+   * Who will sign and what is still missing before the contract can go to
+   * Autentique. Feeds the confirmation dialog; never calls the provider.
+   */
+  async getSignatureReadiness(context: RequestContext, id: string) {
+    const contract = await this.getContractOrFail(context, id);
+    const settings = await this.getOrCreateSignatureProviderSettings(
+      context,
+      ContractSignatureProvider.Autentique,
+    );
+    const plan = await this.buildSignaturePlan(context, contract, settings);
+    const latestPdf = await this.findLatestGeneratedPdf(context, contract.id);
+
+    return {
+      contractId: contract.id,
+      provider: ContractSignatureProvider.Autentique,
+      status: contract.status,
+      sandbox: settings.sandboxEnabled,
+      providerActive: settings.status === 'active',
+      hasApiToken: Boolean(settings.apiTokenEncrypted),
+      hasWebhookSecret: Boolean(settings.webhookSecretEncrypted),
+      alreadySent: Boolean(contract.externalDocumentId),
+      externalDocumentId: contract.externalDocumentId,
+      hasPdf: Boolean(latestPdf?.fileKey),
+      signersSource: plan.source,
+      signers: plan.signers.map((signer) => ({
+        partyId: signer.partyId,
+        role: signer.role,
+        name: signer.name,
+        email: signer.email,
+        signatureStatus: signer.signatureStatus,
+      })),
+      issues: plan.issues,
+      warnings: plan.warnings,
+      canSend: plan.issues.length === 0,
+    };
+  }
+
+  /**
+   * Sends the contract to Autentique for real. Single idempotent flow: makes
+   * sure the PDF and the signing parties exist, moves the contract to
+   * PendingSignature, creates the Autentique document and records the
+   * external ids. `dryRun: true` only validates. A contract that already has an
+   * external document is refused with 409.
+   */
   async sendContractToSignatureProvider(
     context: RequestContext,
     id: string,
@@ -1217,21 +1378,226 @@ export class ContractsService {
   ) {
     const contract = await this.getContractOrFail(context, id);
 
-    if (contract.signatureMode !== ContractSignatureMode.Digital) {
-      throw new BadRequestException(
-        'Contract signature mode must be digital before sending to provider',
+    if (contract.externalDocumentId) {
+      throw new ConflictException({
+        message: 'Este contrato já foi enviado ao Autentique.',
+        externalDocumentId: contract.externalDocumentId,
+      });
+    }
+
+    const settings = await this.getOrCreateSignatureProviderSettings(
+      context,
+      ContractSignatureProvider.Autentique,
+    );
+    const plan = await this.buildSignaturePlan(context, contract, settings);
+
+    if (plan.issues.length > 0) {
+      throw new BadRequestException({
+        message: plan.issues.map((issue) => issue.message).join(' '),
+        issues: plan.issues,
+      });
+    }
+
+    if (dto.dryRun === true) {
+      return {
+        dryRun: true,
+        readyToSend: true,
+        provider: ContractSignatureProvider.Autentique,
+        sandbox: settings.sandboxEnabled,
+        signers: plan.signers.map(({ role, name, email }) => ({
+          role,
+          name,
+          email,
+        })),
+      };
+    }
+
+    if (!(await this.claimAutentiqueSend(context, contract.id))) {
+      throw new ConflictException(
+        'Já existe um envio deste contrato em andamento. Se o último envio ficou sem resposta, confira no painel do Autentique antes de tentar de novo.',
       );
     }
 
-    if (contract.signatureProvider !== ContractSignatureProvider.Autentique) {
-      throw new BadRequestException(
-        'Only Autentique provider is supported at this stage',
+    const prepared = await this.prepareAutentiqueSend(
+      context,
+      contract,
+      plan,
+    ).catch(async (error: unknown) => {
+      await this.releaseAutentiqueSend(context, contract.id);
+      throw error;
+    });
+
+    let document: AutentiqueDocument;
+    try {
+      document = await this.createAutentiqueClient(settings).createDocument({
+        name: prepared.contract.title,
+        pdf: prepared.pdf,
+        fileName: prepared.fileName,
+        signers: prepared.parties.map((party) => ({
+          name: party.name,
+          email: (party.email ?? '').trim().toLowerCase(),
+        })),
+        sandbox: settings.sandboxEnabled,
+        message: dto.message ?? null,
+      });
+    } catch (error) {
+      // Without an answer the document may exist on Autentique: keep the claim
+      // so nobody resends blindly; on a definite rejection, free it.
+      const uncertain =
+        !(error instanceof AutentiqueApiError) || error.outcomeUncertain;
+      if (uncertain) {
+        await this.markAutentiqueSendUncertain(context, contract.id);
+      } else {
+        await this.releaseAutentiqueSend(context, contract.id);
+      }
+      this.logger.warn(
+        `Autentique send failed for contract ${contract.id} (tenant ${context.tenantId}, uncertain=${uncertain}): ${
+          error instanceof Error ? error.message : 'unknown error'
+        }`,
+      );
+      throw this.mapAutentiqueError(
+        error,
+        uncertain
+          ? 'O Autentique não confirmou o envio. Confira no painel do Autentique se o documento foi criado antes de tentar de novo (novo envio fica bloqueado por 30 minutos).'
+          : undefined,
       );
     }
 
-    if (contract.status !== ContractStatus.PendingSignature) {
+    // Record the external id before anything else, so a later failure can
+    // never lead to a second document for the same contract.
+    const sentAt = new Date();
+    const mode = settings.sandboxEnabled ? 'sandbox' : 'live';
+    // Writing the metadata without the claim keys also releases the claim.
+    const metadata = { ...(prepared.contract.metadata ?? {}) };
+    delete metadata.autentiqueSendLockAt;
+    delete metadata.autentiqueSendUncertainAt;
+
+    try {
+      await this.contractsRepository.update(
+        {
+          id: contract.id,
+          tenantId: context.tenantId,
+          workspaceId: context.workspaceId,
+        },
+        {
+          externalDocumentId: document.id,
+          status: ContractStatus.SentForSignature,
+          signatureMode: ContractSignatureMode.Digital,
+          signatureProvider: ContractSignatureProvider.Autentique,
+          updatedById: context.userId,
+          metadata: {
+            ...metadata,
+            signatureProviderMode: mode,
+            signatureProviderSentAt: sentAt.toISOString(),
+          },
+        },
+      );
+    } catch (error) {
+      this.logger.error(
+        `Autentique document ${document.id} was created for contract ${contract.id} (tenant ${context.tenantId}) but could not be recorded`,
+        error instanceof Error ? error.stack : undefined,
+      );
+      throw new InternalServerErrorException({
+        message:
+          'O documento foi criado no Autentique, mas não foi possível registrá-lo no Lyra. Não reenvie; informe o suporte com o ID do documento.',
+        externalDocumentId: document.id,
+      });
+    }
+
+    const signatureByEmail = new Map(
+      document.signatures
+        .filter((signature) => signature.email)
+        .map((signature) => [signature.email!.trim().toLowerCase(), signature]),
+    );
+
+    const sentSigners: Array<Record<string, unknown>> = [];
+    for (const party of prepared.parties) {
+      const signature = signatureByEmail.get(
+        (party.email ?? '').trim().toLowerCase(),
+      );
+      const externalSignerId = signature?.public_id ?? null;
+
+      await this.partiesRepository.update(
+        {
+          id: party.id,
+          tenantId: context.tenantId,
+          workspaceId: context.workspaceId,
+          contractId: contract.id,
+        },
+        {
+          signatureStatus: ContractPartySignatureStatus.Sent,
+          metadata: {
+            ...(party.metadata ?? {}),
+            ...(externalSignerId ? { externalSignerId } : {}),
+            ...(signature?.link?.short_link
+              ? { signingUrl: signature.link.short_link }
+              : {}),
+            sentAt: sentAt.toISOString(),
+          },
+        },
+      );
+
+      sentSigners.push({
+        partyId: party.id,
+        role: party.role,
+        name: party.name,
+        email: party.email,
+        externalSignerId,
+      });
+    }
+
+    const saved = await this.getContractOrFail(context, contract.id);
+
+    const event = await this.createEvent(
+      context,
+      saved.id,
+      ContractEventType.SignatureSent,
+      dto.note ??
+        (settings.sandboxEnabled
+          ? 'Contrato enviado ao Autentique em sandbox (documento de teste, sem validade jurídica).'
+          : 'Contrato enviado ao Autentique para assinatura.'),
+      {
+        provider: ContractSignatureProvider.Autentique,
+        mode,
+        externalDocumentId: document.id,
+        signers: sentSigners,
+      },
+    );
+
+    await this.contractNotificationPublisher.publishSentForSignature({
+      contract: saved,
+      actorUserId: context.userId,
+      sourceEventId: event.id,
+      occurredAt: event.createdAt,
+      recipients: await this.resolveContractNotificationRecipients(
+        context,
+        saved,
+      ),
+    });
+
+    return {
+      dryRun: false,
+      sent: true,
+      provider: ContractSignatureProvider.Autentique,
+      sandbox: settings.sandboxEnabled,
+      externalDocumentId: document.id,
+      contract: await this.findContract(context, saved.id),
+    };
+  }
+
+  /**
+   * Manual fallback for a missed webhook: reads the document from Autentique
+   * and applies the same monotonic transitions the webhook would.
+   */
+  async syncSignatureStatus(context: RequestContext, id: string) {
+    const contract = await this.getContractOrFail(context, id);
+
+    if (
+      !contract.externalDocumentId ||
+      contract.signatureProvider !== ContractSignatureProvider.Autentique
+    ) {
       throw new BadRequestException(
-        'Contract must be pending signature before sending to provider',
+        'Este contrato não foi enviado ao Autentique.',
       );
     }
 
@@ -1240,32 +1606,219 @@ export class ContractsService {
       ContractSignatureProvider.Autentique,
     );
 
-    if (settings.status !== 'active') {
-      throw new BadRequestException('Autentique provider is not active');
+    let remote: AutentiqueDocument | null;
+    try {
+      remote = await this.createAutentiqueClient(settings).getDocument(
+        contract.externalDocumentId,
+      );
+    } catch (error) {
+      throw this.mapAutentiqueError(error);
     }
 
-    if (!settings.apiBaseUrl || !settings.apiTokenEncrypted) {
-      throw new BadRequestException(
-        'Autentique provider settings are incomplete',
+    if (!remote) {
+      throw new NotFoundException(
+        'Documento não encontrado no Autentique (pode ter sido removido ou, em sandbox, expirado).',
       );
     }
 
-    const apiToken = this.decryptSecret(settings.apiTokenEncrypted);
+    const snapshot = snapshotFromDocument(remote);
+    const result = await this.applyAutentiqueSnapshot(
+      context,
+      contract,
+      snapshot,
+      { source: 'sync', actorUserId: context.userId },
+    );
 
-    const latestPdf = await this.documentsRepository.findOne({
-      where: {
-        tenantId: context.tenantId,
-        workspaceId: context.workspaceId,
-        contractId: contract.id,
-        type: ContractDocumentType.GeneratedPdf,
-      },
-      order: { createdAt: 'DESC' },
+    let signedPdfError: string | null = null;
+    if (result.needsSignedPdf) {
+      try {
+        await this.storeAutentiqueSignedPdf(
+          context,
+          contract.id,
+          settings,
+          snapshot.signedFileUrl,
+          context.userId,
+        );
+      } catch (error) {
+        signedPdfError =
+          error instanceof Error
+            ? error.message
+            : 'Falha ao baixar o PDF assinado.';
+        this.logger.warn(
+          `Signed PDF download failed for contract ${contract.id}: ${signedPdfError}`,
+        );
+      }
+    }
+
+    return {
+      changed: result.changed,
+      signedPdfError,
+      contract: await this.findContract(context, contract.id),
+    };
+  }
+
+  /**
+   * Public Autentique webhook. The settings id resolves the tenant; the body
+   * is accepted only with a valid HMAC under that tenant's webhook secret.
+   * Status changes are applied synchronously (fast, retried by Autentique on
+   * failure); the signed PDF download runs after the response.
+   */
+  async handleAutentiqueWebhook(
+    settingsId: string,
+    rawBody: Buffer | undefined,
+    signatureHeader: string | undefined,
+  ) {
+    const settings = await this.signatureProviderSettingsRepository.findOne({
+      where: { id: settingsId, provider: ContractSignatureProvider.Autentique },
     });
 
-    if (!latestPdf || !latestPdf.fileKey) {
-      throw new BadRequestException(
-        'Contract must have a generated PDF stored before sending to provider',
-      );
+    let secret: string | null = null;
+    if (settings?.webhookSecretEncrypted) {
+      try {
+        secret = this.decryptSecret(settings.webhookSecretEncrypted);
+      } catch {
+        this.logger.error(
+          `Autentique webhook secret for settings ${settingsId} could not be decrypted`,
+        );
+      }
+    }
+
+    if (
+      !settings ||
+      !secret ||
+      !verifyAutentiqueWebhookSignature(rawBody, signatureHeader, secret)
+    ) {
+      throw new UnauthorizedException('Invalid Autentique webhook signature.');
+    }
+
+    let body: unknown;
+    try {
+      body = JSON.parse((rawBody as Buffer).toString('utf8'));
+    } catch {
+      throw new BadRequestException('Invalid Autentique webhook payload.');
+    }
+
+    const event = parseAutentiqueWebhookEvent(body);
+    if (!event?.snapshot) {
+      return { received: true, handled: false, reason: 'ignored_event' };
+    }
+
+    const scope: ContractScope = {
+      tenantId: settings.tenantId,
+      workspaceId: settings.workspaceId,
+      userId: null,
+    };
+
+    const contract = await this.contractsRepository.findOne({
+      where: {
+        tenantId: scope.tenantId,
+        workspaceId: scope.workspaceId,
+        signatureProvider: ContractSignatureProvider.Autentique,
+        externalDocumentId: event.snapshot.documentId,
+      },
+    });
+
+    if (!contract) {
+      return { received: true, handled: false, reason: 'unknown_document' };
+    }
+
+    if (event.eventId) {
+      const duplicate = await this.eventsRepository.findOne({
+        where: {
+          tenantId: scope.tenantId,
+          workspaceId: scope.workspaceId,
+          contractId: contract.id,
+          metadata: Raw(
+            (alias) => `${alias} ->> 'providerEventId' = :providerEventId`,
+            {
+              providerEventId: event.eventId,
+            },
+          ),
+        },
+      });
+      if (duplicate) {
+        return { received: true, handled: false, reason: 'duplicate' };
+      }
+    }
+
+    const result = await this.applyAutentiqueSnapshot(
+      scope,
+      contract,
+      event.snapshot,
+      {
+        source: 'webhook',
+        actorUserId: null,
+        providerEventId: event.eventId,
+        providerEventType: event.type,
+      },
+    );
+
+    if (result.needsSignedPdf) {
+      const signedFileUrl = event.snapshot.signedFileUrl;
+      setImmediate(() => {
+        this.storeAutentiqueSignedPdf(
+          scope,
+          contract.id,
+          settings,
+          signedFileUrl,
+          null,
+        ).catch((error: unknown) =>
+          this.logger.warn(
+            `Signed PDF download failed for contract ${contract.id}: ${
+              error instanceof Error ? error.message : 'unknown error'
+            }`,
+          ),
+        );
+      });
+    }
+
+    return { received: true, handled: true, changed: result.changed };
+  }
+
+  private async buildSignaturePlan(
+    context: ContractScope,
+    contract: ContractRecord,
+    settings: ContractSignatureProviderSetting,
+  ): Promise<SignaturePlan> {
+    const issues: SignatureReadinessIssue[] = [];
+    const warnings: SignatureReadinessIssue[] = [];
+
+    if (contract.externalDocumentId) {
+      issues.push({
+        code: 'already_sent',
+        message: 'Este contrato já foi enviado ao Autentique.',
+      });
+    } else if (!SIGNATURE_SENDABLE_STATUSES.includes(contract.status)) {
+      issues.push({
+        code: 'invalid_status',
+        message: `Contrato no status "${contract.status}" não pode ser enviado para assinatura.`,
+      });
+    }
+
+    if (settings.status !== 'active') {
+      issues.push({
+        code: 'provider_inactive',
+        message: 'A integração com o Autentique está inativa.',
+      });
+    }
+    if (!settings.apiTokenEncrypted) {
+      issues.push({
+        code: 'provider_token_missing',
+        message: 'Token de API do Autentique não configurado.',
+      });
+    }
+    if (!settings.webhookSecretEncrypted) {
+      warnings.push({
+        code: 'webhook_secret_missing',
+        message:
+          'Webhook secret não configurado: o status só será atualizado pelo botão "Atualizar status".',
+      });
+    }
+    if (settings.sandboxEnabled) {
+      warnings.push({
+        code: 'sandbox',
+        message: 'Sandbox ativo: documento de teste, sem validade jurídica.',
+      });
     }
 
     const parties = await this.partiesRepository.find({
@@ -1277,138 +1830,647 @@ export class ContractsService {
       order: { signatureOrder: 'ASC', createdAt: 'ASC' },
     });
 
-    if (parties.length === 0) {
-      throw new BadRequestException(
-        'Contract must have signing parties before sending to provider',
-      );
+    if (parties.length > 0) {
+      issues.push(...validateSigners(parties));
+      return {
+        source: 'parties',
+        signers: parties.map((party) => ({
+          partyId: party.id,
+          role: party.role,
+          name: party.name,
+          email: party.email?.trim().toLowerCase() ?? null,
+          signatureOrder: party.signatureOrder,
+          userId: party.userId,
+          signatureStatus: party.signatureStatus,
+        })),
+        issues,
+        warnings,
+      };
     }
 
-    const invalidParties = parties
-      .filter((party) => !party.name || !party.email)
-      .map((party) => ({
-        id: party.id,
-        name: party.name,
-        email: party.email,
-      }));
+    const variables = contract.variablesData ?? {};
+    const derived = deriveSignatureParties({
+      targetType: contract.targetType,
+      read: (path) => this.getValueByPath(variables, path),
+      settingsMetadata: settings.metadata,
+    });
+    issues.push(...derived.issues);
 
-    if (invalidParties.length > 0) {
+    return {
+      source: 'derived',
+      signers: derived.signers.map((signer) => ({
+        partyId: null,
+        role: signer.role,
+        name: signer.name,
+        email: signer.email,
+        signatureOrder: signer.signatureOrder,
+        userId: signer.userId,
+        signatureStatus: null,
+      })),
+      issues,
+      warnings,
+    };
+  }
+
+  // Runs while holding the send claim: PDF, parties, PendingSignature.
+  private async prepareAutentiqueSend(
+    context: RequestContext,
+    contract: ContractRecord,
+    plan: SignaturePlan,
+  ) {
+    let pdfDocument = await this.findLatestGeneratedPdf(context, contract.id);
+    if (!pdfDocument?.fileKey) {
+      await this.generateContractPdf(context, contract.id, {
+        generateHtmlIfMissing: true,
+        note: 'PDF gerado automaticamente para envio ao Autentique.',
+      } as GenerateContractPdfDto);
+      pdfDocument = await this.findLatestGeneratedPdf(context, contract.id);
+    }
+    if (!pdfDocument?.fileKey) {
+      throw new BadRequestException(
+        'Não foi possível gerar o PDF do contrato.',
+      );
+    }
+    const file = await this.getContractDocumentFile(
+      context,
+      contract.id,
+      pdfDocument.id,
+    );
+
+    if (plan.source === 'derived') {
+      for (const signer of plan.signers) {
+        const party = await this.partiesRepository.save(
+          this.partiesRepository.create({
+            tenantId: context.tenantId,
+            workspaceId: context.workspaceId,
+            contractId: contract.id,
+            role: signer.role,
+            contactId: null,
+            userId: signer.userId,
+            name: (signer.name ?? '').slice(0, 160),
+            email: signer.email,
+            document: null,
+            signatureStatus: ContractPartySignatureStatus.Pending,
+            signedAt: null,
+            signatureOrder: signer.signatureOrder,
+            metadata: { derivedFrom: 'contract_variables' },
+          }),
+        );
+        await this.createEvent(
+          context,
+          contract.id,
+          ContractEventType.PartyAdded,
+          'Signatário derivado das variáveis do contrato.',
+          { partyId: party.id, role: party.role },
+        );
+      }
+    }
+
+    const parties = await this.partiesRepository.find({
+      where: {
+        tenantId: context.tenantId,
+        workspaceId: context.workspaceId,
+        contractId: contract.id,
+      },
+      order: { signatureOrder: 'ASC', createdAt: 'ASC' },
+    });
+    const issues = validateSigners(parties);
+    if (parties.length === 0 || issues.length > 0) {
       throw new BadRequestException({
-        message: 'All signing parties must have name and email',
-        invalidParties,
+        message:
+          issues.map((issue) => issue.message).join(' ') ||
+          'O contrato não tem signatários.',
+        issues,
       });
     }
 
-    const providerPayload = {
-      provider: ContractSignatureProvider.Autentique,
-      apiBaseUrl: settings.apiBaseUrl,
-      contract: {
+    // Column-only update: a full save would drop the send claim kept in
+    // metadata.
+    await this.contractsRepository.update(
+      {
         id: contract.id,
-        title: contract.title,
-        targetType: contract.targetType,
-        targetId: contract.targetId,
+        tenantId: context.tenantId,
+        workspaceId: context.workspaceId,
       },
-      document: {
-        id: latestPdf.id,
-        fileName: latestPdf.fileName,
-        fileKey: latestPdf.fileKey,
-        mimeType: latestPdf.mimeType,
-        sizeBytes: latestPdf.sizeBytes,
+      {
+        status: ContractStatus.PendingSignature,
+        signatureMode: ContractSignatureMode.Digital,
+        signatureProvider: ContractSignatureProvider.Autentique,
+        updatedById: context.userId,
       },
-      signers: parties.map((party) => ({
-        id: party.id,
-        role: party.role,
-        name: party.name,
-        email: party.email,
-        document: party.document,
-        signatureOrder: party.signatureOrder,
-      })),
-      options: {
-        message:
-          dto.message ?? 'Você recebeu um contrato para assinatura eletrônica.',
-        sandboxEnabled: settings.sandboxEnabled,
-      },
-    };
+    );
 
     await this.createEvent(
       context,
       contract.id,
-      ContractEventType.SignatureSendPrepared,
-      dto.note ?? 'Envio para assinatura digital preparado.',
+      ContractEventType.SignaturePrepared,
+      'Contrato preparado para assinatura digital (Autentique).',
       {
-        dryRun: dto.dryRun ?? true,
-        provider: ContractSignatureProvider.Autentique,
-        documentId: latestPdf.id,
-        fileKey: latestPdf.fileKey,
-        signersCount: parties.length,
-      },
-    );
-
-    if (dto.dryRun !== false) {
-      return {
-        dryRun: true,
-        readyToSend: true,
-        provider: ContractSignatureProvider.Autentique,
-        hasApiToken: Boolean(apiToken),
-        payload: providerPayload,
-      };
-    }
-
-    if (dto.mockProvider !== true) {
-      throw new BadRequestException(
-        'Real Autentique API call is not implemented yet. Use dryRun: true or mockProvider: true for now.',
-      );
-    }
-
-    const mockResult = sendAutentiqueSignatureRequestMock(
-      providerPayload as Parameters<
-        typeof sendAutentiqueSignatureRequestMock
-      >[0],
-    );
-
-    contract.status = ContractStatus.SentForSignature;
-    contract.externalDocumentId = mockResult.externalDocumentId;
-    contract.updatedById = context.userId;
-    contract.metadata = {
-      ...(contract.metadata ?? {}),
-      signatureProviderMode: 'mock',
-      signatureProviderSentAt: new Date().toISOString(),
-      signatureProviderSigningUrl: mockResult.signingUrl,
-    };
-
-    const saved = await this.contractsRepository.save(contract);
-
-    await this.createEvent(
-      context,
-      saved.id,
-      ContractEventType.SignatureSent,
-      dto.note ?? 'Contrato enviado para assinatura digital em modo mock.',
-      {
-        provider: ContractSignatureProvider.Autentique,
-        mode: 'mock',
-        externalDocumentId: mockResult.externalDocumentId,
-        signingUrl: mockResult.signingUrl,
-        signers: mockResult.signers.map((signer) => ({
-          id: signer.id,
-          name: signer.name,
-          email: signer.email,
-          externalSignerId: signer.externalSignerId,
-          signingUrl: signer.signingUrl,
+        signatureMode: ContractSignatureMode.Digital,
+        signatureProvider: ContractSignatureProvider.Autentique,
+        documentId: pdfDocument.id,
+        parties: parties.map((party) => ({
+          id: party.id,
+          role: party.role,
+          name: party.name,
+          email: party.email,
+          signatureOrder: party.signatureOrder,
         })),
       },
     );
 
-    // contract.sent_for_signature represents a real send confirmed by the
-    // provider. Mock mode persists local state for development but must not
-    // produce that notification — no external send actually happened.
+    return {
+      contract: await this.getContractOrFail(context, contract.id),
+      pdf: file.buffer,
+      fileName:
+        pdfDocument.fileName ??
+        `${this.slugifyFileName(contract.title || 'contract')}.pdf`,
+      parties,
+    };
+  }
+
+  /**
+   * Applies a normalized Autentique snapshot (webhook or sync). Every write is
+   * conditional on the current status being lower, so late, duplicated or
+   * concurrent deliveries can never move a party or the contract backwards.
+   */
+  private async applyAutentiqueSnapshot(
+    scope: ContractScope,
+    contract: ContractRecord,
+    snapshot: AutentiqueDocumentSnapshot,
+    options: {
+      source: 'webhook' | 'sync';
+      actorUserId: string | null;
+      providerEventId?: string | null;
+      providerEventType?: string | null;
+    },
+  ) {
+    if (!isContractInSignatureFlow(contract.status)) {
+      return { changed: false, needsSignedPdf: false };
+    }
+
+    const where = {
+      tenantId: scope.tenantId,
+      workspaceId: scope.workspaceId,
+      contractId: contract.id,
+    };
+    const parties = await this.partiesRepository.find({
+      where,
+      order: { signatureOrder: 'ASC', createdAt: 'ASC' },
+    });
+    const plan = planSignatureTransitions(contract.status, parties, snapshot);
+
+    const applied: PartyTransition[] = [];
+    for (const transition of plan.partyTransitions) {
+      const party = parties.find((item) => item.id === transition.partyId);
+      if (!party) continue;
+
+      const at = this.parseProviderDate(transition.at);
+      const result = await this.partiesRepository.update(
+        {
+          ...where,
+          id: party.id,
+          signatureStatus: In(partyStatusesBelow(transition.to)),
+        },
+        {
+          signatureStatus: transition.to,
+          ...(transition.to === ContractPartySignatureStatus.Signed
+            ? { signedAt: at ?? new Date() }
+            : {}),
+          metadata: {
+            ...(party.metadata ?? {}),
+            ...(transition.externalSignerId
+              ? { externalSignerId: transition.externalSignerId }
+              : {}),
+            ...(transition.signingUrl
+              ? { signingUrl: transition.signingUrl }
+              : {}),
+            providerStatus: transition.to,
+            ...(transition.at ? { providerStatusAt: transition.at } : {}),
+            ...(transition.reason ? { providerReason: transition.reason } : {}),
+          },
+        },
+      );
+      if (result.affected) applied.push(transition);
+    }
+
+    let contractStatusChanged = false;
+    const nextStatus = plan.nextContractStatus;
+    if (nextStatus) {
+      const signedAt =
+        nextStatus === ContractStatus.DigitallySigned
+          ? (this.latestProviderDate(snapshot) ?? new Date())
+          : undefined;
+      const result = await this.contractsRepository.update(
+        {
+          id: contract.id,
+          tenantId: scope.tenantId,
+          workspaceId: scope.workspaceId,
+          status: In(contractStatusesBelow(nextStatus)),
+        },
+        { status: nextStatus, ...(signedAt ? { signedAt } : {}) },
+      );
+      contractStatusChanged = Boolean(result.affected);
+    }
+
+    const changed = applied.length > 0 || contractStatusChanged;
+    const fresh = changed
+      ? ((await this.contractsRepository.findOne({
+          where: {
+            id: contract.id,
+            tenantId: scope.tenantId,
+            workspaceId: scope.workspaceId,
+          },
+        })) ?? contract)
+      : contract;
+
+    if (changed) {
+      const actorScope = { ...scope, userId: options.actorUserId };
+      // This event is also the dedupe anchor for webhook deliveries.
+      const event = await this.createEvent(
+        actorScope,
+        contract.id,
+        ContractEventType.SignatureStatusUpdated,
+        options.source === 'webhook'
+          ? 'Status de assinatura atualizado pelo Autentique.'
+          : 'Status de assinatura sincronizado com o Autentique.',
+        {
+          provider: ContractSignatureProvider.Autentique,
+          source: options.source,
+          providerEventId: options.providerEventId ?? null,
+          providerEventType: options.providerEventType ?? null,
+          externalDocumentId: snapshot.documentId,
+          transitions: applied.map((transition) => ({
+            partyId: transition.partyId,
+            from: transition.from,
+            to: transition.to,
+            at: transition.at,
+            reason: transition.reason,
+          })),
+          contractStatus: contractStatusChanged ? nextStatus : null,
+        },
+      );
+
+      if (
+        contractStatusChanged &&
+        nextStatus === ContractStatus.DigitallySigned
+      ) {
+        await this.createEvent(
+          actorScope,
+          contract.id,
+          ContractEventType.DigitallySigned,
+          'Todas as partes assinaram no Autentique.',
+          { externalDocumentId: snapshot.documentId },
+        );
+      }
+
+      await this.publishSignatureNotifications(
+        scope,
+        fresh,
+        applied,
+        contractStatusChanged ? nextStatus : null,
+        event,
+        options.actorUserId,
+      );
+    }
 
     return {
-      dryRun: false,
-      mockProvider: true,
-      sent: true,
-      provider: ContractSignatureProvider.Autentique,
-      contract: saved,
-      result: mockResult,
+      changed,
+      needsSignedPdf: fresh.status === ContractStatus.DigitallySigned,
     };
+  }
+
+  private async publishSignatureNotifications(
+    scope: ContractScope,
+    contract: ContractRecord,
+    transitions: PartyTransition[],
+    contractStatus: ContractStatus | null,
+    event: ContractEvent,
+    actorUserId: string | null,
+  ) {
+    const common = {
+      contract,
+      actorType: actorUserId
+        ? NotificationActorType.USER
+        : NotificationActorType.INTEGRATION,
+      actorUserId,
+      sourceEventId: event.id,
+      occurredAt: event.createdAt,
+      recipients: await this.resolveContractNotificationRecipients(
+        scope,
+        contract,
+      ),
+    };
+    const reached = (status: ContractPartySignatureStatus) =>
+      transitions.some((transition) => transition.to === status);
+
+    if (reached(ContractPartySignatureStatus.Viewed)) {
+      await this.contractNotificationPublisher.publishViewed(common);
+    }
+    if (reached(ContractPartySignatureStatus.Refused)) {
+      await this.contractNotificationPublisher.publishRejected(common);
+    }
+    if (reached(ContractPartySignatureStatus.Failed)) {
+      await this.contractNotificationPublisher.publishProviderFailed({
+        ...common,
+        provider: ContractSignatureProvider.Autentique,
+        failureCode: 'delivery_failed',
+      });
+    }
+    if (contractStatus === ContractStatus.DigitallySigned) {
+      await this.contractNotificationPublisher.publishSigned(common);
+    }
+  }
+
+  /**
+   * Downloads the signed PDF of a DigitallySigned contract, stores it as a
+   * SignedPdf document and completes the contract. Safe to call again: an
+   * already stored file is reused and completion is conditional.
+   */
+  private async storeAutentiqueSignedPdf(
+    scope: ContractScope,
+    contractId: string,
+    settings: ContractSignatureProviderSetting,
+    signedFileUrl: string | null,
+    actorUserId: string | null,
+  ) {
+    const contract = await this.contractsRepository.findOne({
+      where: {
+        id: contractId,
+        tenantId: scope.tenantId,
+        workspaceId: scope.workspaceId,
+      },
+    });
+    if (
+      !contract ||
+      contract.status !== ContractStatus.DigitallySigned ||
+      !contract.externalDocumentId
+    ) {
+      return null;
+    }
+
+    const externalDocumentId = contract.externalDocumentId;
+    const actorScope = { ...scope, userId: actorUserId };
+
+    let document = await this.documentsRepository.findOne({
+      where: {
+        tenantId: scope.tenantId,
+        workspaceId: scope.workspaceId,
+        contractId,
+        type: ContractDocumentType.SignedPdf,
+        metadata: Raw(
+          (alias) => `${alias} ->> 'externalDocumentId' = :externalDocumentId`,
+          {
+            externalDocumentId,
+          },
+        ),
+      },
+    });
+
+    if (!document) {
+      const client = this.createAutentiqueClient(settings);
+      let url = signedFileUrl;
+      if (!url) {
+        const remote = await client.getDocument(externalDocumentId);
+        url = remote?.files?.signed ?? null;
+      }
+      if (!url) {
+        throw new Error(
+          'O Autentique ainda não disponibilizou o PDF assinado.',
+        );
+      }
+
+      const buffer = await client.downloadFile(url);
+      const fileName = `${this.slugifyFileName(contract.title || 'contract')}-assinado.pdf`;
+      const storage = await this.uploadPdfToObjectStorage({
+        buffer,
+        fileKey: this.buildContractPdfFileKey({
+          tenantId: scope.tenantId,
+          workspaceId: scope.workspaceId,
+          contractId,
+          fileName,
+        }),
+        contentType: 'application/pdf',
+      });
+
+      document = await this.documentsRepository.save(
+        this.documentsRepository.create({
+          tenantId: scope.tenantId,
+          workspaceId: scope.workspaceId,
+          contractId,
+          type: ContractDocumentType.SignedPdf,
+          fileName,
+          fileKey: storage.fileKey,
+          mimeType: 'application/pdf',
+          sizeBytes: String(buffer.length),
+          externalUrl: null,
+          uploadedById: actorUserId,
+          metadata: {
+            source: 'autentique',
+            externalDocumentId,
+            sandbox: contract.metadata?.signatureProviderMode === 'sandbox',
+            downloadedAt: new Date().toISOString(),
+            storageBucket: storage.bucket,
+            storageProvider: 'minio',
+          },
+        }),
+      );
+
+      await this.createEvent(
+        actorScope,
+        contractId,
+        ContractEventType.DocumentAdded,
+        'PDF assinado baixado do Autentique.',
+        {
+          documentId: document.id,
+          documentType: document.type,
+          fileName: document.fileName,
+          fileKey: document.fileKey,
+          sizeBytes: document.sizeBytes,
+        },
+      );
+    }
+
+    const result = await this.contractsRepository.update(
+      {
+        id: contractId,
+        tenantId: scope.tenantId,
+        workspaceId: scope.workspaceId,
+        status: ContractStatus.DigitallySigned,
+      },
+      { status: ContractStatus.Completed, completedAt: new Date() },
+    );
+
+    if (result.affected) {
+      await this.createEvent(
+        actorScope,
+        contractId,
+        ContractEventType.SignatureCompleted,
+        'Contrato concluído por assinatura digital (Autentique).',
+        {
+          signatureMode: ContractSignatureMode.Digital,
+          provider: ContractSignatureProvider.Autentique,
+          signedDocumentId: document.id,
+        },
+      );
+    }
+
+    return document;
+  }
+
+  // Atomic claim in metadata: only one send per contract can be in flight.
+  private async claimAutentiqueSend(
+    context: ContractScope,
+    contractId: string,
+  ) {
+    const now = new Date();
+    const result = await this.contractsRepository
+      .createQueryBuilder()
+      .update(ContractRecord)
+      .set({
+        metadata: () =>
+          `COALESCE(metadata, '{}'::jsonb) || jsonb_build_object('autentiqueSendLockAt', CAST(:lockAt AS text))`,
+      })
+      .where(
+        'id = :id AND tenant_id = :tenantId AND workspace_id = :workspaceId',
+      )
+      .andWhere('external_document_id IS NULL')
+      .andWhere(
+        `(metadata->>'autentiqueSendLockAt' IS NULL OR (metadata->>'autentiqueSendLockAt')::timestamptz < CAST(:staleBefore AS timestamptz))`,
+      )
+      .setParameters({
+        id: contractId,
+        tenantId: context.tenantId,
+        workspaceId: context.workspaceId,
+        lockAt: now.toISOString(),
+        staleBefore: new Date(
+          now.getTime() - AUTENTIQUE_SEND_LOCK_STALE_MS,
+        ).toISOString(),
+      })
+      .execute();
+
+    return (result.affected ?? 0) > 0;
+  }
+
+  private async releaseAutentiqueSend(
+    context: ContractScope,
+    contractId: string,
+  ) {
+    await this.contractsRepository
+      .createQueryBuilder()
+      .update(ContractRecord)
+      .set({
+        metadata: () =>
+          `COALESCE(metadata, '{}'::jsonb) - 'autentiqueSendLockAt' - 'autentiqueSendUncertainAt'`,
+      })
+      .where(
+        'id = :id AND tenant_id = :tenantId AND workspace_id = :workspaceId',
+        {
+          id: contractId,
+          tenantId: context.tenantId,
+          workspaceId: context.workspaceId,
+        },
+      )
+      .andWhere('external_document_id IS NULL')
+      .execute();
+  }
+
+  private async markAutentiqueSendUncertain(
+    context: ContractScope,
+    contractId: string,
+  ) {
+    await this.contractsRepository
+      .createQueryBuilder()
+      .update(ContractRecord)
+      .set({
+        metadata: () =>
+          `COALESCE(metadata, '{}'::jsonb) || jsonb_build_object('autentiqueSendUncertainAt', CAST(:at AS text))`,
+      })
+      .where(
+        'id = :id AND tenant_id = :tenantId AND workspace_id = :workspaceId',
+        {
+          id: contractId,
+          tenantId: context.tenantId,
+          workspaceId: context.workspaceId,
+        },
+      )
+      .setParameter('at', new Date().toISOString())
+      .execute();
+  }
+
+  private findLatestGeneratedPdf(context: ContractScope, contractId: string) {
+    return this.documentsRepository.findOne({
+      where: {
+        tenantId: context.tenantId,
+        workspaceId: context.workspaceId,
+        contractId,
+        type: ContractDocumentType.GeneratedPdf,
+      },
+      order: { createdAt: 'DESC' },
+    });
+  }
+
+  // Overridable seam for specs: no spec ever reaches the real API.
+  protected createAutentiqueClient(settings: ContractSignatureProviderSetting) {
+    return new AutentiqueClient({
+      apiBaseUrl: settings.apiBaseUrl,
+      apiToken: settings.apiTokenEncrypted
+        ? this.decryptSecret(settings.apiTokenEncrypted)
+        : '',
+    });
+  }
+
+  private mapAutentiqueError(error: unknown, uncertainMessage?: string) {
+    if (!(error instanceof AutentiqueApiError)) return error;
+
+    switch (error.code) {
+      case 'rate_limited':
+        return new HttpException(
+          {
+            message: error.message,
+            retryAfterSeconds: error.retryAfterSeconds,
+          },
+          HttpStatus.TOO_MANY_REQUESTS,
+        );
+      case 'unauthorized':
+        return new BadRequestException(
+          'O Autentique recusou o token. Revise a integração em Configurações.',
+        );
+      case 'invalid_config':
+        return new BadRequestException(error.message);
+      case 'graphql':
+        return new BadRequestException(
+          `O Autentique recusou a operação: ${error.message}`,
+        );
+      default:
+        return new BadGatewayException(uncertainMessage ?? error.message);
+    }
+  }
+
+  private toAutentiqueHttpError<T>(fn: () => T): T {
+    try {
+      return fn();
+    } catch (error) {
+      throw this.mapAutentiqueError(error);
+    }
+  }
+
+  private parseProviderDate(value: string | null | undefined) {
+    if (!value) return null;
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+
+  private latestProviderDate(snapshot: AutentiqueDocumentSnapshot) {
+    return (
+      snapshot.signers
+        .filter(
+          (signer) => signer.status === ContractPartySignatureStatus.Signed,
+        )
+        .map((signer) => this.parseProviderDate(signer.at))
+        .filter((date): date is Date => Boolean(date))
+        .sort((a, b) => b.getTime() - a.getTime())[0] ?? null
+    );
   }
 
   async uploadManuallySignedContract(
@@ -1882,7 +2944,7 @@ export class ContractsService {
   }
 
   async getContractDocumentFile(
-    context: RequestContext,
+    context: ContractScope,
     contractId: string,
     documentId: string,
   ) {
@@ -2340,19 +3402,48 @@ export class ContractsService {
       hasWebhookSecret: Boolean(settings.webhookSecretEncrypted),
       defaultSignatureMode: settings.defaultSignatureMode,
       sandboxEnabled: settings.sandboxEnabled,
+      webhookUrl: this.buildAutentiqueWebhookUrl(settings),
+      account: settings.metadata?.autentiqueAccount ?? null,
       metadata: settings.metadata,
       createdAt: settings.createdAt,
       updatedAt: settings.updatedAt,
     };
   }
 
-  private getSecretEncryptionKey() {
-    const raw =
-      process.env.CONTRACTS_PROVIDER_ENCRYPTION_KEY ??
-      process.env.SETTINGS_ENCRYPTION_KEY ??
-      'lyra-dev-contracts-provider-encryption-key';
+  // URL to paste in the Autentique panel. Null until the public API base is
+  // configured (CONTRACTS_WEBHOOK_PUBLIC_BASE_URL, e.g. https://host/api).
+  private buildAutentiqueWebhookUrl(
+    settings: ContractSignatureProviderSetting,
+  ) {
+    const base = process.env.CONTRACTS_WEBHOOK_PUBLIC_BASE_URL?.trim().replace(
+      /\/+$/,
+      '',
+    );
+    if (!base || settings.provider !== ContractSignatureProvider.Autentique) {
+      return null;
+    }
+    return `${base}/agency/contracts/webhooks/autentique/${settings.id}`;
+  }
 
-    return createHash('sha256').update(raw).digest();
+  private getSecretEncryptionKey() {
+    const configured =
+      process.env.CONTRACTS_PROVIDER_ENCRYPTION_KEY ??
+      process.env.SETTINGS_ENCRYPTION_KEY;
+
+    if (configured === undefined || configured.trim() === '') {
+      // Fail closed: production never encrypts provider secrets with a key
+      // that is public in the source code.
+      if (process.env.NODE_ENV === 'production') {
+        throw new InternalServerErrorException(
+          'Contracts provider encryption key is not configured.',
+        );
+      }
+      return createHash('sha256')
+        .update('lyra-dev-contracts-provider-encryption-key')
+        .digest();
+    }
+
+    return createHash('sha256').update(configured).digest();
   }
 
   private encryptSecret(value: string) {
@@ -3080,7 +4171,7 @@ export class ContractsService {
     return template;
   }
 
-  private async getContractOrFail(context: RequestContext, id: string) {
+  private async getContractOrFail(context: ContractScope, id: string) {
     const contract = await this.contractsRepository.findOne({
       where: {
         id,
@@ -3150,7 +4241,7 @@ export class ContractsService {
   }
 
   private async createEvent(
-    context: RequestContext,
+    context: ContractScope,
     contractId: string,
     type: ContractEventType,
     message?: string | null,
@@ -3161,7 +4252,7 @@ export class ContractsService {
       workspaceId: context.workspaceId,
       contractId,
       type,
-      actorUserId: context.userId,
+      actorUserId: context.userId ?? null,
       message: message ?? null,
       metadata: metadata ?? {},
     });
@@ -3170,7 +4261,7 @@ export class ContractsService {
   }
 
   private async resolveContractNotificationRecipients(
-    context: RequestContext,
+    context: ContractScope,
     contract: ContractRecord,
   ) {
     const parties = await this.partiesRepository.find({

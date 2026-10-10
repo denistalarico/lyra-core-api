@@ -1,3 +1,4 @@
+import { CreateContractAiAssistRuns1799200000000 } from './migrations/1799200000000-create-contract-ai-assist-runs';
 import 'reflect-metadata';
 import { CreateMeetingAiProcessing1798900000000 } from './migrations/1798900000000-create-meeting-ai-processing';
 import { DataSource } from 'typeorm';
@@ -528,5 +529,6 @@ export const AgencyDataSource = new DataSource({
     AllowOwnScopeSocialApprovals1798800000000,
     CreateAiOperationalCosts1799000000000,
     AddKnowledgeAuthorDisplay1799100000000,
+    CreateContractAiAssistRuns1799200000000,
   ],
 });
