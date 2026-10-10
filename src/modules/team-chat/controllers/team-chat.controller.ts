@@ -6,7 +6,6 @@ import {
   Delete,
   Get,
   ForbiddenException,
-  Headers,
   Param,
   Patch,
   Post,
@@ -41,6 +40,10 @@ import {
   RequirePermission,
 } from '../../permissions';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
+import {
+  AuthorizedContext,
+  type AuthorizedRequestContext,
+} from '../../../common/context/authorized-context.decorator';
 
 type TeamChatContext = {
   tenantId: string;
@@ -61,30 +64,18 @@ export class TeamChatController {
 
   @Get('summary')
   @RequirePermission('agency.chat.channels.view.assigned')
-  getSummary(
-    @Headers('x-tenant-id') tenantId: string,
-    @Headers('x-workspace-id') workspaceId: string,
-    @Headers('x-user-id') userId?: string,
-    @Headers('x-user-role') userRole?: string,
-    @Headers('x-role') role?: string,
-  ) {
-    return this.channelsService.getSummary(
-      this.getContext(tenantId, workspaceId, userId, userRole ?? role),
-    );
+  getSummary(@AuthorizedContext() context: AuthorizedRequestContext) {
+    return this.channelsService.getSummary(this.getContext(context));
   }
 
   @Post('channels/direct')
   @RequirePermission('agency.chat.messages.send.assigned')
   findOrCreateDirectChannel(
-    @Headers('x-tenant-id') tenantId: string,
-    @Headers('x-workspace-id') workspaceId: string,
-    @Headers('x-user-id') userId: string | undefined,
-    @Headers('x-user-role') userRole: string | undefined,
-    @Headers('x-role') role: string | undefined,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Body() dto: FindOrCreateDirectChannelDto,
   ) {
     return this.channelsService.findOrCreateDirect(
-      this.getContext(tenantId, workspaceId, userId, userRole ?? role),
+      this.getContext(context),
       dto,
     );
   }
@@ -92,97 +83,59 @@ export class TeamChatController {
   @Get('channels/enriched')
   @RequirePermission('agency.chat.channels.view.assigned')
   listEnrichedChannels(
-    @Headers('x-tenant-id') tenantId: string,
-    @Headers('x-workspace-id') workspaceId: string,
-    @Headers('x-user-id') userId: string | undefined,
-    @Headers('x-user-role') userRole: string | undefined,
-    @Headers('x-role') role: string | undefined,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Query() query: ListTeamChatChannelsQueryDto,
   ) {
-    return this.channelsService.listEnriched(
-      this.getContext(tenantId, workspaceId, userId, userRole ?? role),
-      query,
-    );
+    return this.channelsService.listEnriched(this.getContext(context), query);
   }
 
   @Get('channels')
   @RequirePermission('agency.chat.channels.view.assigned')
   listChannels(
-    @Headers('x-tenant-id') tenantId: string,
-    @Headers('x-workspace-id') workspaceId: string,
-    @Headers('x-user-id') userId: string | undefined,
-    @Headers('x-user-role') userRole: string | undefined,
-    @Headers('x-role') role: string | undefined,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Query() query: ListTeamChatChannelsQueryDto,
   ) {
-    return this.channelsService.list(
-      this.getContext(tenantId, workspaceId, userId, userRole ?? role),
-      query,
-    );
+    return this.channelsService.list(this.getContext(context), query);
   }
 
   @Post('channels')
   @RequirePermission('agency.chat.channels.create.department')
   createChannel(
-    @Headers('x-tenant-id') tenantId: string,
-    @Headers('x-workspace-id') workspaceId: string,
-    @Headers('x-user-id') userId: string | undefined,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Body() dto: CreateTeamChatChannelDto,
   ) {
-    return this.channelsService.create(
-      this.getContext(tenantId, workspaceId, userId),
-      dto,
-    );
+    return this.channelsService.create(this.getContext(context), dto);
   }
 
   @Patch('channels/:channelId')
   @RequirePermission('agency.chat.channels.manage_members.assigned')
   patchChannel(
-    @Headers('x-tenant-id') tenantId: string,
-    @Headers('x-workspace-id') workspaceId: string,
-    @Headers('x-user-id') userId: string | undefined,
-    @Headers('x-user-role') userRole: string | undefined,
-    @Headers('x-role') role: string | undefined,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('channelId') channelId: string,
     @Body() dto: PatchTeamChatChannelDto,
   ) {
-    return this.channelsService.patch(
-      this.getContext(tenantId, workspaceId, userId, userRole ?? role),
-      channelId,
-      dto,
-    );
+    return this.channelsService.patch(this.getContext(context), channelId, dto);
   }
 
   @Delete('channels/:channelId')
   @RequirePermission('agency.chat.channels.delete.owner_only')
   @DangerousAction()
   deleteChannel(
-    @Headers('x-tenant-id') tenantId: string,
-    @Headers('x-workspace-id') workspaceId: string,
-    @Headers('x-user-id') userId: string | undefined,
-    @Headers('x-user-role') userRole: string | undefined,
-    @Headers('x-role') role: string | undefined,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('channelId') channelId: string,
   ) {
-    return this.channelsService.remove(
-      this.getContext(tenantId, workspaceId, userId, userRole ?? role),
-      channelId,
-    );
+    return this.channelsService.remove(this.getContext(context), channelId);
   }
 
   @Post('channels/:channelId/members')
   @RequirePermission('agency.chat.channels.manage_members.assigned')
   addChannelMembers(
-    @Headers('x-tenant-id') tenantId: string,
-    @Headers('x-workspace-id') workspaceId: string,
-    @Headers('x-user-id') userId: string | undefined,
-    @Headers('x-user-role') userRole: string | undefined,
-    @Headers('x-role') role: string | undefined,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('channelId') channelId: string,
     @Body() dto: AddTeamChatChannelMembersDto,
   ) {
     return this.channelsService.addMembers(
-      this.getContext(tenantId, workspaceId, userId, userRole ?? role),
+      this.getContext(context),
       channelId,
       dto,
     );
@@ -191,16 +144,12 @@ export class TeamChatController {
   @Get('channels/:channelId/messages')
   @RequirePermission('agency.chat.channels.view.assigned')
   listMessages(
-    @Headers('x-tenant-id') tenantId: string,
-    @Headers('x-workspace-id') workspaceId: string,
-    @Headers('x-user-id') userId: string | undefined,
-    @Headers('x-user-role') userRole: string | undefined,
-    @Headers('x-role') role: string | undefined,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('channelId') channelId: string,
     @Query() query: ListTeamChatMessagesQueryDto,
   ) {
     return this.messagesService.list(
-      this.getContext(tenantId, workspaceId, userId, userRole ?? role),
+      this.getContext(context),
       channelId,
       query,
     );
@@ -209,16 +158,12 @@ export class TeamChatController {
   @Post('channels/:channelId/messages')
   @RequirePermission('agency.chat.messages.send.assigned')
   createMessage(
-    @Headers('x-tenant-id') tenantId: string,
-    @Headers('x-workspace-id') workspaceId: string,
-    @Headers('x-user-id') userId: string | undefined,
-    @Headers('x-user-role') userRole: string | undefined,
-    @Headers('x-role') role: string | undefined,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('channelId') channelId: string,
     @Body() dto: CreateTeamChatMessageDto,
   ) {
     return this.messagesService.create(
-      this.getContext(tenantId, workspaceId, userId, userRole ?? role),
+      this.getContext(context),
       channelId,
       dto,
     );
@@ -227,17 +172,13 @@ export class TeamChatController {
   @Patch('channels/:channelId/messages/:messageId')
   @RequirePermission('agency.chat.messages.send.assigned')
   patchMessage(
-    @Headers('x-tenant-id') tenantId: string,
-    @Headers('x-workspace-id') workspaceId: string,
-    @Headers('x-user-id') userId: string | undefined,
-    @Headers('x-user-role') userRole: string | undefined,
-    @Headers('x-role') role: string | undefined,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('channelId') channelId: string,
     @Param('messageId') messageId: string,
     @Body() dto: PatchTeamChatMessageDto,
   ) {
     return this.messagesService.patch(
-      this.getContext(tenantId, workspaceId, userId, userRole ?? role),
+      this.getContext(context),
       channelId,
       messageId,
       dto,
@@ -248,16 +189,12 @@ export class TeamChatController {
   @RequirePermission('agency.chat.messages.send.assigned')
   @DangerousAction()
   deleteMessage(
-    @Headers('x-tenant-id') tenantId: string,
-    @Headers('x-workspace-id') workspaceId: string,
-    @Headers('x-user-id') userId: string | undefined,
-    @Headers('x-user-role') userRole: string | undefined,
-    @Headers('x-role') role: string | undefined,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('channelId') channelId: string,
     @Param('messageId') messageId: string,
   ) {
     return this.messagesService.remove(
-      this.getContext(tenantId, workspaceId, userId, userRole ?? role),
+      this.getContext(context),
       channelId,
       messageId,
     );
@@ -266,17 +203,13 @@ export class TeamChatController {
   @Post('channels/:channelId/messages/:messageId/reactions')
   @RequirePermission('agency.chat.messages.send.assigned')
   reactToMessage(
-    @Headers('x-tenant-id') tenantId: string,
-    @Headers('x-workspace-id') workspaceId: string,
-    @Headers('x-user-id') userId: string | undefined,
-    @Headers('x-user-role') userRole: string | undefined,
-    @Headers('x-role') role: string | undefined,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('channelId') channelId: string,
     @Param('messageId') messageId: string,
     @Body() dto: ReactToTeamChatMessageDto,
   ) {
     return this.messagesService.react(
-      this.getContext(tenantId, workspaceId, userId, userRole ?? role),
+      this.getContext(context),
       channelId,
       messageId,
       dto,
@@ -286,17 +219,13 @@ export class TeamChatController {
   @Post('channels/:channelId/messages/:messageId/pin')
   @RequirePermission('agency.chat.channels.manage_members.assigned')
   pinMessage(
-    @Headers('x-tenant-id') tenantId: string,
-    @Headers('x-workspace-id') workspaceId: string,
-    @Headers('x-user-id') userId: string | undefined,
-    @Headers('x-user-role') userRole: string | undefined,
-    @Headers('x-role') role: string | undefined,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('channelId') channelId: string,
     @Param('messageId') messageId: string,
     @Body() dto: { pinned?: boolean },
   ) {
     return this.messagesService.pin(
-      this.getContext(tenantId, workspaceId, userId, userRole ?? role),
+      this.getContext(context),
       channelId,
       messageId,
       dto.pinned !== false,
@@ -306,48 +235,30 @@ export class TeamChatController {
   @Post('channels/:channelId/read')
   @RequirePermission('agency.chat.channels.view.assigned')
   markChannelAsRead(
-    @Headers('x-tenant-id') tenantId: string,
-    @Headers('x-workspace-id') workspaceId: string,
-    @Headers('x-user-id') userId: string | undefined,
-    @Headers('x-user-role') userRole: string | undefined,
-    @Headers('x-role') role: string | undefined,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('channelId') channelId: string,
   ) {
-    return this.messagesService.markAsRead(
-      this.getContext(tenantId, workspaceId, userId, userRole ?? role),
-      channelId,
-    );
+    return this.messagesService.markAsRead(this.getContext(context), channelId);
   }
 
   @Get('search/messages')
   @RequirePermission('agency.chat.channels.view.assigned')
   searchMessages(
-    @Headers('x-tenant-id') tenantId: string,
-    @Headers('x-workspace-id') workspaceId: string,
-    @Headers('x-user-id') userId: string | undefined,
-    @Headers('x-user-role') userRole: string | undefined,
-    @Headers('x-role') role: string | undefined,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Query() query: SearchTeamChatMessagesQueryDto,
   ) {
-    return this.messagesService.search(
-      this.getContext(tenantId, workspaceId, userId, userRole ?? role),
-      query,
-    );
+    return this.messagesService.search(this.getContext(context), query);
   }
 
   @Patch('channels/:channelId/members/me')
   @RequirePermission('agency.chat.channels.view.assigned')
   updateMyMembership(
-    @Headers('x-tenant-id') tenantId: string,
-    @Headers('x-workspace-id') workspaceId: string,
-    @Headers('x-user-id') userId: string | undefined,
-    @Headers('x-user-role') userRole: string | undefined,
-    @Headers('x-role') role: string | undefined,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('channelId') channelId: string,
     @Body() dto: UpdateChannelMembershipDto,
   ) {
     return this.channelsService.updateMembership(
-      this.getContext(tenantId, workspaceId, userId, userRole ?? role),
+      this.getContext(context),
       channelId,
       dto,
     );
@@ -356,43 +267,28 @@ export class TeamChatController {
   @Delete('channels/:channelId/members/me')
   @RequirePermission('agency.chat.channels.view.assigned')
   leaveChannel(
-    @Headers('x-tenant-id') tenantId: string,
-    @Headers('x-workspace-id') workspaceId: string,
-    @Headers('x-user-id') userId: string | undefined,
-    @Headers('x-user-role') userRole: string | undefined,
-    @Headers('x-role') role: string | undefined,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('channelId') channelId: string,
   ) {
     return this.channelsService.leaveChannel(
-      this.getContext(tenantId, workspaceId, userId, userRole ?? role),
+      this.getContext(context),
       channelId,
     );
   }
 
   @Get('settings')
   @RequirePermission('agency.chat.channels.view.assigned')
-  getUserSettings(
-    @Headers('x-tenant-id') tenantId: string,
-    @Headers('x-workspace-id') workspaceId: string,
-    @Headers('x-user-id') userId: string | undefined,
-  ) {
-    return this.userSettingsService.get(
-      this.getContext(tenantId, workspaceId, userId),
-    );
+  getUserSettings(@AuthorizedContext() context: AuthorizedRequestContext) {
+    return this.userSettingsService.get(this.getContext(context));
   }
 
   @Put('settings')
   @RequirePermission('agency.chat.channels.view.assigned')
   saveUserSettings(
-    @Headers('x-tenant-id') tenantId: string,
-    @Headers('x-workspace-id') workspaceId: string,
-    @Headers('x-user-id') userId: string | undefined,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Body() dto: SaveTeamChatUserSettingsDto,
   ) {
-    return this.userSettingsService.upsert(
-      this.getContext(tenantId, workspaceId, userId),
-      dto.data,
-    );
+    return this.userSettingsService.upsert(this.getContext(context), dto.data);
   }
 
   @Get('meetings')
@@ -435,17 +331,16 @@ export class TeamChatController {
     };
   }
 
-  private getContext(
-    tenantId: string,
-    workspaceId: string,
-    userId?: string,
-    role?: string,
-  ): TeamChatContext {
+  /**
+   * SEC-A1: identity and role come from the authorized token context (live
+   * membership role), never from `x-user-id`/`x-user-role`/`x-role`.
+   */
+  private getContext(context: AuthorizedRequestContext): TeamChatContext {
     return {
-      tenantId,
-      workspaceId,
-      userId: userId || null,
-      role: role ?? 'member',
+      tenantId: context.tenantId,
+      workspaceId: context.workspaceId,
+      userId: context.userId,
+      role: context.role,
     };
   }
 }

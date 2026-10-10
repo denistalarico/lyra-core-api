@@ -3,7 +3,6 @@ import {
   Controller,
   Delete,
   Get,
-  Headers,
   Param,
   Patch,
   Post,
@@ -41,22 +40,10 @@ import {
   PermissionsGuard,
   RequirePermission,
 } from '../../permissions';
-
-type RequestContext = {
-  tenantId: string;
-  workspaceId: string;
-  userId: string;
-};
-
-function getContextFromHeaders(
-  headers: Record<string, string | string[] | undefined>,
-): RequestContext {
-  return {
-    tenantId: String(headers['x-tenant-id'] ?? ''),
-    workspaceId: String(headers['x-workspace-id'] ?? ''),
-    userId: String(headers['x-user-id'] ?? ''),
-  };
-}
+import {
+  AuthorizedContext,
+  type AuthorizedRequestContext,
+} from '../../../common/context/authorized-context.decorator';
 
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 @Controller('agency/contracts')
@@ -76,37 +63,28 @@ export class ContractsController {
   @Post('templates/from-preset')
   @RequirePermission('agency.contracts.templates.manage.admin')
   createTemplateFromPreset(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Body() dto: CreateContractTemplateFromPresetDto,
   ) {
-    return this.contractsService.createTemplateFromPreset(
-      getContextFromHeaders(headers),
-      dto,
-    );
+    return this.contractsService.createTemplateFromPreset(context, dto);
   }
 
   @Post('templates/custom')
   @RequirePermission('agency.contracts.templates.manage.admin')
   createCustomTemplate(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Body() dto: CreateCustomContractTemplateDto,
   ) {
-    return this.contractsService.createCustomTemplate(
-      getContextFromHeaders(headers),
-      dto,
-    );
+    return this.contractsService.createCustomTemplate(context, dto);
   }
 
   @Post('templates/preview')
   @RequirePermission('agency.contracts.templates.manage.admin')
   previewTemplate(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Body() dto: PreviewContractTemplateDto,
   ) {
-    return this.contractsService.previewTemplate(
-      getContextFromHeaders(headers),
-      dto,
-    );
+    return this.contractsService.previewTemplate(context, dto);
   }
 
   // ─── Template CRUD ───────────────────────────────────────────────────────────
@@ -114,48 +92,43 @@ export class ContractsController {
   @Get('templates')
   @RequirePermission('agency.contracts.templates.manage.admin')
   listTemplates(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Query() query: ListContractTemplatesQueryDto,
   ) {
-    return this.contractsService.listTemplates(
-      getContextFromHeaders(headers),
-      query,
-    );
+    return this.contractsService.listTemplates(context, query);
   }
 
   @Post('templates')
   @RequirePermission('agency.contracts.templates.manage.admin')
   createTemplate(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Body() dto: CreateContractTemplateDto,
   ) {
-    return this.contractsService.createTemplate(
-      getContextFromHeaders(headers),
-      dto,
-    );
+    return this.contractsService.createTemplate(context, dto);
   }
 
   @Get('templates/:id/schema')
   @RequirePermission('agency.contracts.templates.manage.admin')
   getTemplateSchema(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
   ) {
-    return this.contractsService.getTemplateSchema(
-      getContextFromHeaders(headers),
-      id,
-    );
+    return this.contractsService.getTemplateSchema(context, id);
   }
 
   @Post('templates/:id/validate-variables')
   @RequirePermission('agency.contracts.templates.manage.admin')
   validateTemplateVariables(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
-    @Body() body: { variablesData: Record<string, unknown>; templateVersionId?: string },
+    @Body()
+    body: {
+      variablesData: Record<string, unknown>;
+      templateVersionId?: string;
+    },
   ) {
     return this.contractsService.validateTemplateVariables(
-      getContextFromHeaders(headers),
+      context,
       id,
       body.variablesData ?? {},
       body.templateVersionId ?? null,
@@ -165,88 +138,68 @@ export class ContractsController {
   @Get('templates/:id/versions')
   @RequirePermission('agency.contracts.templates.manage.admin')
   listTemplateVersions(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
   ) {
-    return this.contractsService.listTemplateVersions(
-      getContextFromHeaders(headers),
-      id,
-    );
+    return this.contractsService.listTemplateVersions(context, id);
   }
 
   @Post('templates/:id/versions')
   @RequirePermission('agency.contracts.templates.manage.admin')
   createTemplateVersion(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
     @Body() dto: CreateContractTemplateVersionDto,
   ) {
-    return this.contractsService.createTemplateVersion(
-      getContextFromHeaders(headers),
-      id,
-      dto,
-    );
+    return this.contractsService.createTemplateVersion(context, id, dto);
   }
 
   @Post('templates/:id/activate')
   @RequirePermission('agency.contracts.templates.manage.admin')
   activateTemplate(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
   ) {
-    return this.contractsService.activateTemplate(
-      getContextFromHeaders(headers),
-      id,
-    );
+    return this.contractsService.activateTemplate(context, id);
   }
 
   @Post('templates/:id/archive')
   @DangerousAction()
   @RequirePermission('agency.contracts.archive.admin')
   archiveTemplate(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
   ) {
-    return this.contractsService.archiveTemplate(
-      getContextFromHeaders(headers),
-      id,
-    );
+    return this.contractsService.archiveTemplate(context, id);
   }
 
   @Delete('templates/:id')
   @DangerousAction()
   @RequirePermission('agency.contracts.templates.manage.admin')
   deleteTemplate(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
   ) {
-    return this.contractsService.deleteTemplate(
-      getContextFromHeaders(headers),
-      id,
-    );
+    return this.contractsService.deleteTemplate(context, id);
   }
 
   @Get('templates/:id')
   @RequirePermission('agency.contracts.templates.manage.admin')
   findTemplate(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
   ) {
-    return this.contractsService.findTemplate(getContextFromHeaders(headers), id);
+    return this.contractsService.findTemplate(context, id);
   }
 
   @Patch('templates/:id')
   @RequirePermission('agency.contracts.templates.manage.admin')
   updateTemplate(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
     @Body() dto: UpdateContractTemplateDto,
   ) {
-    return this.contractsService.updateTemplate(
-      getContextFromHeaders(headers),
-      id,
-      dto,
-    );
+    return this.contractsService.updateTemplate(context, id, dto);
   }
 
   // ─── Signature providers (must come before /:id routes) ─────────────────────
@@ -260,10 +213,10 @@ export class ContractsController {
   @Get('signature-providers/autentique')
   @RequirePermission('agency.contracts.integrations.manage.owner_only')
   getAutentiqueSettings(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
   ) {
     return this.contractsService.getSignatureProviderSettings(
-      getContextFromHeaders(headers),
+      context,
       ContractSignatureProvider.Autentique,
     );
   }
@@ -271,11 +224,11 @@ export class ContractsController {
   @Put('signature-providers/autentique')
   @RequirePermission('agency.contracts.integrations.manage.owner_only')
   updateAutentiqueSettings(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Body() dto: UpdateSignatureProviderSettingsDto,
   ) {
     return this.contractsService.updateSignatureProviderSettings(
-      getContextFromHeaders(headers),
+      context,
       ContractSignatureProvider.Autentique,
       dto,
     );
@@ -284,10 +237,10 @@ export class ContractsController {
   @Post('signature-providers/autentique/test')
   @RequirePermission('agency.contracts.integrations.manage.owner_only')
   testAutentiqueSettings(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
   ) {
     return this.contractsService.testSignatureProviderSettings(
-      getContextFromHeaders(headers),
+      context,
       ContractSignatureProvider.Autentique,
     );
   }
@@ -297,99 +250,78 @@ export class ContractsController {
   @Post('from-template')
   @RequirePermission('agency.contracts.create.from_template')
   createContractFromTemplate(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Body() dto: CreateContractFromTemplateDto,
   ) {
-    return this.contractsService.createContractFromTemplate(
-      getContextFromHeaders(headers),
-      dto,
-    );
+    return this.contractsService.createContractFromTemplate(context, dto);
   }
 
   @Get()
   @RequirePermission('agency.contracts.view.assigned')
   listContracts(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Query() query: ListContractsQueryDto,
   ) {
-    return this.contractsService.listContracts(
-      getContextFromHeaders(headers),
-      query,
-    );
+    return this.contractsService.listContracts(context, query);
   }
 
   @Post()
   @RequirePermission('agency.contracts.create.from_template')
   createContract(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Body() dto: CreateContractRecordDto,
   ) {
-    return this.contractsService.createContract(
-      getContextFromHeaders(headers),
-      dto,
-    );
+    return this.contractsService.createContract(context, dto);
   }
 
   @Get(':id/events')
   @RequirePermission('agency.contracts.view.assigned')
   listEvents(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
   ) {
-    return this.contractsService.listEvents(getContextFromHeaders(headers), id);
+    return this.contractsService.listEvents(context, id);
   }
 
   @Post(':id/generate-html')
   @RequirePermission('agency.contracts.view.assigned')
   generateContractHtml(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
     @Body() dto: GenerateContractHtmlDto,
   ) {
-    return this.contractsService.generateContractHtml(
-      getContextFromHeaders(headers),
-      id,
-      dto,
-    );
+    return this.contractsService.generateContractHtml(context, id, dto);
   }
 
   @Post(':id/generate-pdf')
   @RequirePermission('agency.contracts.view.assigned')
   generateContractPdf(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
     @Body() dto: GenerateContractPdfDto,
   ) {
-    return this.contractsService.generateContractPdf(
-      getContextFromHeaders(headers),
-      id,
-      dto,
-    );
+    return this.contractsService.generateContractPdf(context, id, dto);
   }
 
   @Post(':id/prepare-signature')
   @RequirePermission('agency.contracts.send_signature.manager_or_admin')
   prepareContractSignature(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
     @Body() dto: PrepareContractSignatureDto,
   ) {
-    return this.contractsService.prepareContractSignature(
-      getContextFromHeaders(headers),
-      id,
-      dto,
-    );
+    return this.contractsService.prepareContractSignature(context, id, dto);
   }
 
   @Post(':id/send-signature')
   @RequirePermission('agency.contracts.send_signature.manager_or_admin')
   sendContractToSignatureProvider(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
     @Body() dto: SendContractToSignatureProviderDto,
   ) {
     return this.contractsService.sendContractToSignatureProvider(
-      getContextFromHeaders(headers),
+      context,
       id,
       dto,
     );
@@ -398,54 +330,42 @@ export class ContractsController {
   @Post(':id/mark-manually-signed')
   @RequirePermission('agency.contracts.send_signature.manager_or_admin')
   markManuallySigned(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
     @Body() dto: MarkContractManuallySignedDto,
   ) {
-    return this.contractsService.markManuallySigned(
-      getContextFromHeaders(headers),
-      id,
-      dto,
-    );
+    return this.contractsService.markManuallySigned(context, id, dto);
   }
 
   @Post(':id/upload-manually-signed')
   @RequirePermission('agency.contracts.send_signature.manager_or_admin')
   uploadManuallySignedContract(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
     @Body() dto: UploadManuallySignedContractDto,
   ) {
-    return this.contractsService.uploadManuallySignedContract(
-      getContextFromHeaders(headers),
-      id,
-      dto,
-    );
+    return this.contractsService.uploadManuallySignedContract(context, id, dto);
   }
 
   @Post(':id/upload-attachment')
   @RequirePermission('agency.contracts.create.from_template')
   uploadContractAttachment(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
     @Body() dto: UploadManuallySignedContractDto,
   ) {
-    return this.contractsService.uploadContractAttachment(
-      getContextFromHeaders(headers),
-      id,
-      dto,
-    );
+    return this.contractsService.uploadContractAttachment(context, id, dto);
   }
 
   @Get(':id/documents/:documentId/file')
   @RequirePermission('agency.contracts.view.assigned')
   getContractDocumentFile(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
     @Param('documentId') documentId: string,
   ) {
     return this.contractsService.getContractDocumentBase64(
-      getContextFromHeaders(headers),
+      context,
       id,
       documentId,
     );
@@ -454,81 +374,61 @@ export class ContractsController {
   @Post(':id/parties')
   @RequirePermission('agency.contracts.create.from_template')
   addParty(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
     @Body() dto: CreateContractPartyDto,
   ) {
-    return this.contractsService.addParty(
-      getContextFromHeaders(headers),
-      id,
-      dto,
-    );
+    return this.contractsService.addParty(context, id, dto);
   }
 
   @Patch(':id/parties/:partyId')
   @RequirePermission('agency.contracts.create.from_template')
   updateParty(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
     @Param('partyId') partyId: string,
     @Body() dto: UpdateContractPartyDto,
   ) {
-    return this.contractsService.updateParty(
-      getContextFromHeaders(headers),
-      id,
-      partyId,
-      dto,
-    );
+    return this.contractsService.updateParty(context, id, partyId, dto);
   }
 
   @Delete(':id/parties/:partyId')
   @DangerousAction()
   @RequirePermission('agency.contracts.archive.admin')
   removeParty(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
     @Param('partyId') partyId: string,
   ) {
-    return this.contractsService.removeParty(
-      getContextFromHeaders(headers),
-      id,
-      partyId,
-    );
+    return this.contractsService.removeParty(context, id, partyId);
   }
 
   @Get(':id')
   @RequirePermission('agency.contracts.view.assigned')
   findContract(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
   ) {
-    return this.contractsService.findContract(getContextFromHeaders(headers), id);
+    return this.contractsService.findContract(context, id);
   }
 
   @Patch(':id')
   @RequirePermission('agency.contracts.create.from_template')
   updateContract(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
     @Body() dto: UpdateContractRecordDto,
   ) {
-    return this.contractsService.updateContract(
-      getContextFromHeaders(headers),
-      id,
-      dto,
-    );
+    return this.contractsService.updateContract(context, id, dto);
   }
 
   @Post(':id/cancel')
   @DangerousAction()
   @RequirePermission('agency.contracts.delete.owner_only')
   cancelContract(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
   ) {
-    return this.contractsService.cancelContract(
-      getContextFromHeaders(headers),
-      id,
-    );
+    return this.contractsService.cancelContract(context, id);
   }
 }

@@ -48,6 +48,7 @@ import {
 } from './guards/client-area.guards';
 import { ClientAreaMembershipService } from './services/client-area-membership.service';
 import { ClientAreaRateLimitService } from './services/client-area-rate-limit.service';
+import { TenantContextAuthority } from '../../common/context/tenant-context-authority.service';
 
 // Same contract as otplib v13 (async, resolves `{ valid }`).
 jest.mock('otplib', () => ({
@@ -201,7 +202,7 @@ run('CA1 Client Area security matrix (PostgreSQL, real guards)', () => {
         ClientAreaModule,
       ],
       controllers: [ClientAreaProbeController],
-      providers: [JwtStrategy],
+      providers: [JwtStrategy, TenantContextAuthority],
     })
       .overrideModule(EmailModule)
       .useModule(FakeEmailModule)

@@ -2,7 +2,6 @@ import {
   Body,
   Controller,
   Get,
-  Headers,
   Param,
   Patch,
   Query,
@@ -18,26 +17,24 @@ import type { DocumentLayoutType } from './entities/document-layout.entities';
 @Controller('agency/document-layouts')
 @UseGuards(JwtAuthGuard)
 export class DocumentLayoutsController {
-  constructor(private readonly documentLayoutsService: DocumentLayoutsService) {}
+  constructor(
+    private readonly documentLayoutsService: DocumentLayoutsService,
+  ) {}
 
   @Get('default')
-  getDefaultLayout(
-    @AuthenticatedUser() user: AuthTokenPayload,
-    @Headers('x-workspace-id') workspaceId: string | undefined,
-  ) {
+  getDefaultLayout(@AuthenticatedUser() user: AuthTokenPayload) {
     return this.documentLayoutsService.getDefaultLayout(
-      this.documentLayoutsService.getContext(user, workspaceId),
+      this.documentLayoutsService.getContext(user),
     );
   }
 
   @Patch('default')
   updateDefaultLayout(
     @AuthenticatedUser() user: AuthTokenPayload,
-    @Headers('x-workspace-id') workspaceId: string | undefined,
     @Body() body: UpdateDocumentLayoutDto,
   ) {
     return this.documentLayoutsService.updateDefaultLayout(
-      this.documentLayoutsService.getContext(user, workspaceId),
+      this.documentLayoutsService.getContext(user),
       body,
     );
   }

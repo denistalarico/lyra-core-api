@@ -1,4 +1,4 @@
-import { Controller, Get, Headers, Param, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common';
 import { ProjectBoardsService } from '../services/project-boards.service';
 import {
   PermissionsGuard,
@@ -6,22 +6,10 @@ import {
   RequirePermission,
 } from '../../permissions';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
-
-type RequestContext = {
-  tenantId: string;
-  workspaceId: string;
-  userId: string;
-};
-
-function getContextFromHeaders(
-  headers: Record<string, string | string[] | undefined>,
-): RequestContext {
-  return {
-    tenantId: String(headers['x-tenant-id'] ?? ''),
-    workspaceId: String(headers['x-workspace-id'] ?? ''),
-    userId: String(headers['x-user-id'] ?? ''),
-  };
-}
+import {
+  AuthorizedContext,
+  type AuthorizedRequestContext,
+} from '../../../common/context/authorized-context.decorator';
 
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 @Controller('agency/projects')
@@ -31,11 +19,11 @@ export class ProjectBoardsController {
   @Get('board')
   @RequirePermission('agency.projects.project.view.assigned')
   getProjectsBoard(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Query('includeArchived') includeArchived?: string,
   ) {
     return this.projectBoardsService.getProjectsBoard(
-      getContextFromHeaders(headers),
+      context,
       includeArchived === 'true',
     );
   }
@@ -43,21 +31,19 @@ export class ProjectBoardsController {
   @Get('reports/checklist-items')
   @RequirePermission('agency.tasks.task.manage.department')
   listAllChecklistItems(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
   ) {
-    return this.projectBoardsService.listAllChecklistItems(
-      getContextFromHeaders(headers),
-    );
+    return this.projectBoardsService.listAllChecklistItems(context);
   }
 
   @Get('tasks/board')
   @RequirePermission('agency.tasks.task.manage.department')
   getWorkspaceTasksBoard(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Query('includeArchived') includeArchived?: string,
   ) {
     return this.projectBoardsService.getWorkspaceTasksBoard(
-      getContextFromHeaders(headers),
+      context,
       includeArchived === 'true',
     );
   }
@@ -68,12 +54,12 @@ export class ProjectBoardsController {
     'agency.tasks.task.manage.department',
   )
   getProjectTasksBoard(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('projectId') projectId: string,
     @Query('includeArchived') includeArchived?: string,
   ) {
     return this.projectBoardsService.getProjectTasksBoard(
-      getContextFromHeaders(headers),
+      context,
       projectId,
       includeArchived === 'true',
     );
@@ -82,11 +68,11 @@ export class ProjectBoardsController {
   @Get('tasks/my/board')
   @RequirePermission('agency.tasks.task.update.assigned')
   getMyTasksBoard(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Query('includeArchived') includeArchived?: string,
   ) {
     return this.projectBoardsService.getMyTasksBoard(
-      getContextFromHeaders(headers),
+      context,
       includeArchived === 'true',
     );
   }

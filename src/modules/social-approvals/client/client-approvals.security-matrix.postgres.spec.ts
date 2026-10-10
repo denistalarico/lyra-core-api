@@ -27,6 +27,7 @@ import { ClientAreaRateLimitService } from '../../client-area/services/client-ar
 import { EmailModule } from '../../email/email.module';
 import { EmailService } from '../../email/email.service';
 import { ClientAreaApprovalsModule } from './client-approvals.module';
+import { TenantContextAuthority } from '../../../common/context/tenant-context-authority.service';
 
 // Same contract as otplib v13 (async, resolves `{ valid }`).
 jest.mock('otplib', () => ({
@@ -358,7 +359,7 @@ run('AP3 Client Approvals security matrix (PostgreSQL, real guards)', () => {
         ClientAreaModule,
         ClientAreaApprovalsModule,
       ],
-      providers: [JwtStrategy],
+      providers: [JwtStrategy, TenantContextAuthority],
     })
       .overrideModule(EmailModule)
       .useModule(FakeEmailModule)

@@ -10,6 +10,7 @@ import {
   AgencyKnowledgeArticleStatus,
   AgencyKnowledgeArticleType,
   AgencyKnowledgeArticleVisibility,
+  AgencyKnowledgeAuthorDisplayMode,
 } from "../enums";
 
 @Entity("agency_knowledge_articles")
@@ -32,6 +33,24 @@ export class AgencyKnowledgeArticle {
 
   @Column({ name: "author_id", type: "uuid" })
   authorId!: string;
+
+  /** How authorship was shown at publication (SEC-A1); `authorId` is the real author. */
+  @Column({
+    name: "author_display_mode",
+    type: "varchar",
+    length: 20,
+    default: AgencyKnowledgeAuthorDisplayMode.NAME_AND_ROLE,
+  })
+  authorDisplayMode!: AgencyKnowledgeAuthorDisplayMode;
+
+  /** Backend-composed snapshot (name — job title, or job title only). */
+  @Column({
+    name: "author_display_value",
+    type: "varchar",
+    length: 300,
+    nullable: true,
+  })
+  authorDisplayValue!: string | null;
 
   @Column({ name: "owner_id", type: "uuid", nullable: true })
   ownerId!: string | null;

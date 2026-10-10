@@ -16,6 +16,7 @@ import { AuthTokenPayload } from '../../auth/types/auth-token-payload.type';
 import { TeamChatChannelsService } from '../services/team-chat-channels.service';
 import { TeamChatMessagesService } from '../services/team-chat-messages.service';
 import type { TeamChatContext } from '../services/team-chat-access';
+import { TenantContextAuthority } from '../../../common/context/tenant-context-authority.service';
 
 /**
  * The authenticated identity of a socket, derived from the handshake JWT and
@@ -86,6 +87,7 @@ export class TeamChatGateway
     private readonly messagesService: TeamChatMessagesService,
     private readonly channelsService: TeamChatChannelsService,
     private readonly jwtService: JwtService,
+    private readonly tenantContextAuthority: TenantContextAuthority,
     private readonly configService: ConfigService,
   ) {}
 
@@ -99,7 +101,12 @@ export class TeamChatGateway
    */
   async handleConnection(client: TeamChatSocket): Promise<void> {
     try {
-      const payload = await this.verifyClientToken(client);
+      // SEC-A1: same authority as HTTP — membership required, live role.
+      const payload = await this.tenantContextAuthority.authorize(
+        await this.verifyClientToken(client),
+        {},
+        'socket',
+      );
 
       const auth: TeamChatSocketAuth = {
         userId: payload.sub,

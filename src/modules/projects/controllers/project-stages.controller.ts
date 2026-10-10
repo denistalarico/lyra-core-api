@@ -3,7 +3,6 @@ import {
   Controller,
   Delete,
   Get,
-  Headers,
   Param,
   Patch,
   Post,
@@ -26,26 +25,10 @@ import {
   RequirePermission,
 } from '../../permissions';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
-
-type RequestContext = {
-  tenantId: string;
-  workspaceId: string;
-  userId: string;
-};
-
-function getContextFromHeaders(
-  headers: Record<string, string | string[] | undefined>,
-): RequestContext {
-  const tenantId = String(headers['x-tenant-id'] ?? '');
-  const workspaceId = String(headers['x-workspace-id'] ?? '');
-  const userId = String(headers['x-user-id'] ?? '');
-
-  return {
-    tenantId,
-    workspaceId,
-    userId,
-  };
-}
+import {
+  AuthorizedContext,
+  type AuthorizedRequestContext,
+} from '../../../common/context/authorized-context.decorator';
 
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 @Controller('agency/projects')
@@ -57,12 +40,8 @@ export class ProjectStagesController {
     'agency.projects.stages.manage.admin',
     'agency.projects.project.update.department',
   )
-  listProjectStages(
-    @Headers() headers: Record<string, string | string[] | undefined>,
-  ) {
-    return this.projectStagesService.listProjectStages(
-      getContextFromHeaders(headers),
-    );
+  listProjectStages(@AuthorizedContext() context: AuthorizedRequestContext) {
+    return this.projectStagesService.listProjectStages(context);
   }
 
   @Post('project-stages')
@@ -71,13 +50,10 @@ export class ProjectStagesController {
     'agency.projects.project.update.department',
   )
   createProjectStage(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Body() dto: CreateProjectStageDto,
   ) {
-    return this.projectStagesService.createProjectStage(
-      getContextFromHeaders(headers),
-      dto,
-    );
+    return this.projectStagesService.createProjectStage(context, dto);
   }
 
   @Patch('project-stages/:id')
@@ -86,15 +62,11 @@ export class ProjectStagesController {
     'agency.projects.project.update.department',
   )
   updateProjectStage(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
     @Body() dto: UpdateProjectStageDto,
   ) {
-    return this.projectStagesService.updateProjectStage(
-      getContextFromHeaders(headers),
-      id,
-      dto,
-    );
+    return this.projectStagesService.updateProjectStage(context, id, dto);
   }
 
   @Delete('project-stages/:id')
@@ -104,13 +76,10 @@ export class ProjectStagesController {
   )
   @DangerousAction()
   archiveProjectStage(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
   ) {
-    return this.projectStagesService.archiveProjectStage(
-      getContextFromHeaders(headers),
-      id,
-    );
+    return this.projectStagesService.archiveProjectStage(context, id);
   }
 
   @Get('task-stages')
@@ -119,11 +88,11 @@ export class ProjectStagesController {
     'agency.tasks.task.update.assigned',
   )
   listTaskStages(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Query('projectId') projectId?: string,
   ) {
     return this.projectStagesService.listTaskStages(
-      getContextFromHeaders(headers),
+      context,
       projectId === 'null' ? null : projectId,
     );
   }
@@ -134,13 +103,10 @@ export class ProjectStagesController {
     'agency.tasks.task.manage.department',
   )
   createTaskStage(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Body() dto: CreateTaskStageDto,
   ) {
-    return this.projectStagesService.createTaskStage(
-      getContextFromHeaders(headers),
-      dto,
-    );
+    return this.projectStagesService.createTaskStage(context, dto);
   }
 
   @Patch('task-stages/:id')
@@ -149,15 +115,11 @@ export class ProjectStagesController {
     'agency.tasks.task.manage.department',
   )
   updateTaskStage(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
     @Body() dto: UpdateTaskStageDto,
   ) {
-    return this.projectStagesService.updateTaskStage(
-      getContextFromHeaders(headers),
-      id,
-      dto,
-    );
+    return this.projectStagesService.updateTaskStage(context, id, dto);
   }
 
   @Delete('task-stages/:id')
@@ -167,61 +129,46 @@ export class ProjectStagesController {
   )
   @DangerousAction()
   archiveTaskStage(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
   ) {
-    return this.projectStagesService.archiveTaskStage(
-      getContextFromHeaders(headers),
-      id,
-    );
+    return this.projectStagesService.archiveTaskStage(context, id);
   }
 
   @Get('my-task-stages')
   @RequirePermission('agency.tasks.task.update.assigned')
   listPersonalTaskStages(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
   ) {
-    return this.projectStagesService.listPersonalTaskStages(
-      getContextFromHeaders(headers),
-    );
+    return this.projectStagesService.listPersonalTaskStages(context);
   }
 
   @Post('my-task-stages')
   @RequirePermission('agency.tasks.task.update.assigned')
   createPersonalTaskStage(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Body() dto: CreatePersonalTaskStageDto,
   ) {
-    return this.projectStagesService.createPersonalTaskStage(
-      getContextFromHeaders(headers),
-      dto,
-    );
+    return this.projectStagesService.createPersonalTaskStage(context, dto);
   }
 
   @Patch('my-task-stages/:id')
   @RequirePermission('agency.tasks.task.update.assigned')
   updatePersonalTaskStage(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
     @Body() dto: UpdatePersonalTaskStageDto,
   ) {
-    return this.projectStagesService.updatePersonalTaskStage(
-      getContextFromHeaders(headers),
-      id,
-      dto,
-    );
+    return this.projectStagesService.updatePersonalTaskStage(context, id, dto);
   }
 
   @Delete('my-task-stages/:id')
   @RequirePermission('agency.tasks.task.update.assigned')
   @DangerousAction()
   deletePersonalTaskStage(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
   ) {
-    return this.projectStagesService.deletePersonalTaskStage(
-      getContextFromHeaders(headers),
-      id,
-    );
+    return this.projectStagesService.deletePersonalTaskStage(context, id);
   }
 }

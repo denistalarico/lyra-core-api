@@ -3,7 +3,6 @@ import {
   Controller,
   Delete,
   Get,
-  Headers,
   Param,
   Patch,
   Post,
@@ -23,6 +22,10 @@ import {
   RequirePermission,
 } from '../permissions';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import {
+  AuthorizedContext,
+  type AuthorizedRequestContext,
+} from '../../common/context/authorized-context.decorator';
 
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 @Controller('calendar')
@@ -31,48 +34,23 @@ export class CalendarController {
 
   @Get('settings')
   @RequirePermission('agency.calendar.settings.manage.admin')
-  getSettings(
-    @Headers('x-tenant-id') tenantId: string,
-    @Headers('x-workspace-id') workspaceId: string | undefined,
-    @Headers('x-user-id') userId: string | undefined,
-  ) {
-    return this.calendarService.getSettings({
-      tenantId,
-      workspaceId: workspaceId ?? null,
-      userId: userId ?? null,
-    });
+  getSettings(@AuthorizedContext() context: AuthorizedRequestContext) {
+    return this.calendarService.getSettings(context);
   }
 
   @Patch('settings')
   @RequirePermission('agency.calendar.settings.manage.admin')
   updateSettings(
-    @Headers('x-tenant-id') tenantId: string,
-    @Headers('x-workspace-id') workspaceId: string | undefined,
-    @Headers('x-user-id') userId: string | undefined,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Body() dto: UpdateCalendarSettingsDto,
   ) {
-    return this.calendarService.updateSettings(
-      {
-        tenantId,
-        workspaceId: workspaceId ?? null,
-        userId: userId ?? null,
-      },
-      dto,
-    );
+    return this.calendarService.updateSettings(context, dto);
   }
 
   @Post('settings/reset')
   @RequirePermission('agency.calendar.settings.manage.admin')
-  resetSettings(
-    @Headers('x-tenant-id') tenantId: string,
-    @Headers('x-workspace-id') workspaceId: string | undefined,
-    @Headers('x-user-id') userId: string | undefined,
-  ) {
-    return this.calendarService.resetSettings({
-      tenantId,
-      workspaceId: workspaceId ?? null,
-      userId: userId ?? null,
-    });
+  resetSettings(@AuthorizedContext() context: AuthorizedRequestContext) {
+    return this.calendarService.resetSettings(context);
   }
 
   @Get('events')
@@ -82,23 +60,11 @@ export class CalendarController {
     'agency.calendar.events.view.all',
   )
   listEvents(
-    @Headers('x-tenant-id') tenantId: string,
-    @Headers('x-workspace-id') workspaceId: string | undefined,
-    @Headers('x-user-id') userId: string | undefined,
-    @Headers('x-user-role') userRole: string | undefined,
-    @Headers('x-role') role: string | undefined,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Query('startsAt') startsAt?: string,
     @Query('endsAt') endsAt?: string,
   ) {
-    return this.calendarService.listEvents(
-      {
-        tenantId,
-        workspaceId: workspaceId ?? null,
-        userId: userId ?? null,
-        role: userRole ?? role ?? 'member',
-      },
-      { startsAt, endsAt },
-    );
+    return this.calendarService.listEvents(context, { startsAt, endsAt });
   }
 
   @Post('events')
@@ -108,15 +74,10 @@ export class CalendarController {
     'agency.calendar.events.view.all',
   )
   createEvent(
-    @Headers('x-tenant-id') tenantId: string,
-    @Headers('x-workspace-id') workspaceId: string | undefined,
-    @Headers('x-user-id') userId: string | undefined,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Body() dto: CreateCalendarEventDto,
   ) {
-    return this.calendarService.createEvent(
-      { tenantId, workspaceId: workspaceId ?? null, userId: userId ?? null },
-      dto,
-    );
+    return this.calendarService.createEvent(context, dto);
   }
 
   @Patch('events/:eventId')
@@ -126,17 +87,11 @@ export class CalendarController {
     'agency.calendar.events.view.all',
   )
   updateEvent(
-    @Headers('x-tenant-id') tenantId: string,
-    @Headers('x-workspace-id') workspaceId: string | undefined,
-    @Headers('x-user-id') userId: string | undefined,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('eventId') eventId: string,
     @Body() dto: UpdateCalendarEventDto,
   ) {
-    return this.calendarService.updateEvent(
-      { tenantId, workspaceId: workspaceId ?? null, userId: userId ?? null },
-      eventId,
-      dto,
-    );
+    return this.calendarService.updateEvent(context, eventId, dto);
   }
 
   @Delete('events/:eventId')
@@ -147,73 +102,44 @@ export class CalendarController {
   )
   @DangerousAction()
   removeEvent(
-    @Headers('x-tenant-id') tenantId: string,
-    @Headers('x-workspace-id') workspaceId: string | undefined,
-    @Headers('x-user-id') userId: string | undefined,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('eventId') eventId: string,
   ) {
-    return this.calendarService.removeEvent(
-      { tenantId, workspaceId: workspaceId ?? null, userId: userId ?? null },
-      eventId,
-    );
+    return this.calendarService.removeEvent(context, eventId);
   }
 
   @Get('routine-blocks')
   @RequirePermission('agency.calendar.events.view.self')
-  listRoutineBlocks(
-    @Headers('x-tenant-id') tenantId: string,
-    @Headers('x-workspace-id') workspaceId: string | undefined,
-    @Headers('x-user-id') userId: string | undefined,
-  ) {
-    return this.calendarService.listRoutineBlocks({
-      tenantId,
-      workspaceId: workspaceId ?? null,
-      userId: userId ?? null,
-    });
+  listRoutineBlocks(@AuthorizedContext() context: AuthorizedRequestContext) {
+    return this.calendarService.listRoutineBlocks(context);
   }
 
   @Post('routine-blocks')
   @RequirePermission('agency.calendar.events.manage.self')
   createRoutineBlock(
-    @Headers('x-tenant-id') tenantId: string,
-    @Headers('x-workspace-id') workspaceId: string | undefined,
-    @Headers('x-user-id') userId: string | undefined,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Body() dto: CreateCalendarRoutineBlockDto,
   ) {
-    return this.calendarService.createRoutineBlock(
-      { tenantId, workspaceId: workspaceId ?? null, userId: userId ?? null },
-      dto,
-    );
+    return this.calendarService.createRoutineBlock(context, dto);
   }
 
   @Patch('routine-blocks/:blockId')
   @RequirePermission('agency.calendar.events.manage.self')
   updateRoutineBlock(
-    @Headers('x-tenant-id') tenantId: string,
-    @Headers('x-workspace-id') workspaceId: string | undefined,
-    @Headers('x-user-id') userId: string | undefined,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('blockId') blockId: string,
     @Body() dto: UpdateCalendarRoutineBlockDto,
   ) {
-    return this.calendarService.updateRoutineBlock(
-      { tenantId, workspaceId: workspaceId ?? null, userId: userId ?? null },
-      blockId,
-      dto,
-    );
+    return this.calendarService.updateRoutineBlock(context, blockId, dto);
   }
 
   @Delete('routine-blocks/:blockId')
   @RequirePermission('agency.calendar.events.manage.self')
   @DangerousAction()
   removeRoutineBlock(
-    @Headers('x-tenant-id') tenantId: string,
-    @Headers('x-workspace-id') workspaceId: string | undefined,
-    @Headers('x-user-id') userId: string | undefined,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('blockId') blockId: string,
   ) {
-    return this.calendarService.removeRoutineBlock(
-      { tenantId, workspaceId: workspaceId ?? null, userId: userId ?? null },
-      blockId,
-    );
+    return this.calendarService.removeRoutineBlock(context, blockId);
   }
 }

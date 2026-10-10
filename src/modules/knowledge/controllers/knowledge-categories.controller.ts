@@ -3,7 +3,6 @@ import {
   Controller,
   Delete,
   Get,
-  Headers,
   Param,
   Patch,
   Post,
@@ -17,18 +16,10 @@ import {
 } from '../../permissions';
 import { CreateKnowledgeCategoryDto, UpdateKnowledgeCategoryDto } from '../dto';
 import { KnowledgeCategoriesService } from '../services';
-import { KnowledgeContext } from '../services/knowledge-context';
-
-function buildKnowledgeContext(
-  headers: Record<string, string | string[] | undefined>,
-): KnowledgeContext {
-  return {
-    tenantId: String(headers['x-tenant-id'] ?? ''),
-    workspaceId: String(headers['x-workspace-id'] ?? ''),
-    userId: String(headers['x-user-id'] ?? ''),
-    role: String(headers['x-user-role'] ?? ''),
-  };
-}
+import {
+  AuthorizedContext,
+  type AuthorizedRequestContext,
+} from '../../../common/context/authorized-context.decorator';
 
 @Controller('agency/knowledge/categories')
 @UseGuards(JwtAuthGuard, PermissionsGuard)
@@ -37,40 +28,36 @@ export class KnowledgeCategoriesController {
 
   @Get()
   @RequirePermission('agency.knowledge.articles.view.published')
-  list(@Headers() headers: Record<string, string | string[] | undefined>) {
-    return this.categoriesService.list(buildKnowledgeContext(headers));
+  list(@AuthorizedContext() context: AuthorizedRequestContext) {
+    return this.categoriesService.list(context);
   }
 
   @Post()
   @RequirePermission('agency.knowledge.categories.manage.admin')
   create(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Body() dto: CreateKnowledgeCategoryDto,
   ) {
-    return this.categoriesService.create(buildKnowledgeContext(headers), dto);
+    return this.categoriesService.create(context, dto);
   }
 
   @Patch(':id')
   @RequirePermission('agency.knowledge.categories.manage.admin')
   update(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
     @Body() dto: UpdateKnowledgeCategoryDto,
   ) {
-    return this.categoriesService.update(
-      buildKnowledgeContext(headers),
-      id,
-      dto,
-    );
+    return this.categoriesService.update(context, id, dto);
   }
 
   @Delete(':id')
   @RequirePermission('agency.knowledge.categories.manage.admin')
   @DangerousAction()
   delete(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
   ) {
-    return this.categoriesService.delete(buildKnowledgeContext(headers), id);
+    return this.categoriesService.delete(context, id);
   }
 }

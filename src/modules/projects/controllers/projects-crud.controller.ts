@@ -3,7 +3,6 @@ import {
   Controller,
   Delete,
   Get,
-  Headers,
   Param,
   Patch,
   Post,
@@ -23,24 +22,10 @@ import {
   RequirePermission,
 } from '../../permissions';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
-
-type RequestContext = {
-  tenantId: string;
-  workspaceId: string;
-  userId: string;
-  role?: string;
-};
-
-function getContextFromHeaders(
-  headers: Record<string, string | string[] | undefined>,
-): RequestContext {
-  return {
-    tenantId: String(headers['x-tenant-id'] ?? ''),
-    workspaceId: String(headers['x-workspace-id'] ?? ''),
-    userId: String(headers['x-user-id'] ?? ''),
-    role: String(headers['x-user-role'] ?? headers['x-role'] ?? 'member'),
-  };
-}
+import {
+  AuthorizedContext,
+  type AuthorizedRequestContext,
+} from '../../../common/context/authorized-context.decorator';
 
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 @Controller('agency/projects')
@@ -50,42 +35,38 @@ export class ProjectsCrudController {
   @Get()
   @RequirePermission('agency.projects.project.view.assigned')
   list(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Query() query: ListProjectsQueryDto,
   ) {
-    return this.projectsCrudService.list(getContextFromHeaders(headers), query);
+    return this.projectsCrudService.list(context, query);
   }
 
   @Get(':id')
   @RequirePermission('agency.projects.project.view.assigned')
   findOne(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
   ) {
-    return this.projectsCrudService.findOne(getContextFromHeaders(headers), id);
+    return this.projectsCrudService.findOne(context, id);
   }
 
   @Post()
   @RequirePermission('agency.projects.project.create.department')
   create(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Body() dto: CreateProjectDto,
   ) {
-    return this.projectsCrudService.create(getContextFromHeaders(headers), dto);
+    return this.projectsCrudService.create(context, dto);
   }
 
   @Patch(':id')
   @RequirePermission('agency.projects.project.update.department')
   update(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
     @Body() dto: UpdateProjectDto,
   ) {
-    return this.projectsCrudService.update(
-      getContextFromHeaders(headers),
-      id,
-      dto,
-    );
+    return this.projectsCrudService.update(context, id, dto);
   }
 
   @Delete(':id')
@@ -95,19 +76,19 @@ export class ProjectsCrudController {
   )
   @DangerousAction()
   archive(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
   ) {
-    return this.projectsCrudService.archive(getContextFromHeaders(headers), id);
+    return this.projectsCrudService.archive(context, id);
   }
 
   @Delete(':id/permanent')
   @RequirePermission('agency.projects.project.delete.owner_only')
   @DangerousAction()
   remove(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
   ) {
-    return this.projectsCrudService.remove(getContextFromHeaders(headers), id);
+    return this.projectsCrudService.remove(context, id);
   }
 }

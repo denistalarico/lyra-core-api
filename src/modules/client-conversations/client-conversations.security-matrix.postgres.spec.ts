@@ -26,6 +26,7 @@ import { EmailModule } from '../email/email.module';
 import { EmailService } from '../email/email.service';
 import { FilesService } from '../../common/files/files.service';
 import { ClientConversationsModule } from './client-conversations.module';
+import { TenantContextAuthority } from '../../common/context/tenant-context-authority.service';
 
 // `otplib` v13 ships ESM that Jest's CommonJS transform cannot load, and
 // `AgencyAuthModule` imports it. Same contract as the real module (async,
@@ -149,7 +150,7 @@ run(
           ClientAreaModule,
           ClientConversationsModule,
         ],
-        providers: [JwtStrategy],
+        providers: [JwtStrategy, TenantContextAuthority],
       })
         .overrideModule(EmailModule)
         .useModule(FakeEmailModule)

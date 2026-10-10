@@ -19,6 +19,7 @@ import { AuthService } from './auth.service';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { SettingsCryptoService } from '../../common/crypto/settings-crypto.service';
 import { AccessControlModule } from '../../common/access-control/access-control.module';
+import { ContextModule } from '../../common/context/context.module';
 
 @Module({
   imports: [
@@ -26,6 +27,7 @@ import { AccessControlModule } from '../../common/access-control/access-control.
     JwtModule.register({}),
     EmailModule,
     AccessControlModule,
+    ContextModule,
     TypeOrmModule.forFeature([
       UserSecuritySettingsEntity,
       WorkspaceUserEntity,

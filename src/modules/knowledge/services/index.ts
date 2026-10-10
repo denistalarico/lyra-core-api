@@ -1,4 +1,5 @@
 export * from "./knowledge-context";
+export * from "./knowledge-authorship.service";
 export * from "./knowledge-categories.service";
 export * from "./knowledge-articles.service";
 export * from "./knowledge-vault.service";

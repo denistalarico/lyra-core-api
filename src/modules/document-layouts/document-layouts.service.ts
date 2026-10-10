@@ -37,13 +37,11 @@ export class DocumentLayoutsService {
     private readonly companyRepo: Repository<WorkspaceSettingsCompanyEntity>,
   ) {}
 
-  getContext(
-    user: AuthTokenPayload,
-    workspaceId?: string,
-  ): DocumentLayoutContext {
+  /** SEC-A1: workspace comes from the authorized token, never a header. */
+  getContext(user: AuthTokenPayload): DocumentLayoutContext {
     return {
       tenantId: user.tenantId,
-      workspaceId: workspaceId ?? user.workspaceId,
+      workspaceId: user.workspaceId,
       userId: user.sub,
     };
   }
@@ -128,7 +126,9 @@ export class DocumentLayoutsService {
         company.logoUrl,
         company.brandLogoUrl,
         company.logoPath ? `/api/assets/${company.logoPath}` : null,
-        company.brandLogoAssetKey ? `/api/assets/${company.brandLogoAssetKey}` : null,
+        company.brandLogoAssetKey
+          ? `/api/assets/${company.brandLogoAssetKey}`
+          : null,
       ),
       primaryColor:
         firstNonEmpty(layout.primaryColor, company.primaryColor) ?? '#2563EB',

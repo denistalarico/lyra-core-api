@@ -2,6 +2,7 @@ import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 
 import { TeamChatGateway } from './team-chat.gateway';
+import { TenantContextAuthority } from '../../../common/context/tenant-context-authority.service';
 
 /**
  * Socket security matrix for the Team Chat gateway (CCOM0.5 §32, §33).
@@ -81,6 +82,7 @@ function createGateway(
     create?: jest.Mock;
     markAsRead?: jest.Mock;
     assertChannelAccess?: jest.Mock;
+    findMembership?: jest.Mock;
   } = {},
 ) {
   const messagesService = {
@@ -96,10 +98,19 @@ function createGateway(
       jest.fn().mockResolvedValue({ id: 'channel-a' }),
   };
 
+  // The real SEC-A1 authority over a stubbed membership lookup.
+  const findMembership =
+    overrides.findMembership ??
+    jest.fn().mockResolvedValue({ id: 'membership-a', role: 'member' });
+  const tenantContextAuthority = new TenantContextAuthority({
+    getRepository: () => ({ findOne: findMembership }),
+  } as never);
+
   const gateway = new TeamChatGateway(
     messagesService as never,
     channelsService as never,
     jwtService,
+    tenantContextAuthority,
     configService,
   );
 
@@ -124,6 +135,28 @@ describe('TeamChatGateway handshake', () => {
       workspaceId: 'workspace-a',
       role: 'member',
     });
+  });
+
+  it('rejects a valid token without an active membership (SEC-A1)', async () => {
+    const { gateway } = createGateway({
+      findMembership: jest.fn().mockResolvedValue(null),
+    });
+    const socket = createSocket(agencyToken());
+
+    await gateway.handleConnection(socket as never);
+
+    expect(socket.disconnect).toHaveBeenCalledWith(true);
+    expect(socket.data.auth).toBeUndefined();
+  });
+
+  it('takes the role from the live membership, not the token (SEC-A1)', async () => {
+    const { gateway } = createGateway();
+    const socket = createSocket(agencyToken({ role: 'owner' }));
+
+    await gateway.handleConnection(socket as never);
+
+    expect(socket.disconnect).not.toHaveBeenCalled();
+    expect(socket.data.auth).toMatchObject({ role: 'member' });
   });
 
   it('rejects a connection with no token', async () => {

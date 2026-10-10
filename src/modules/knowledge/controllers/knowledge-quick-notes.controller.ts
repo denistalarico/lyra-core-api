@@ -3,7 +3,6 @@ import {
   Controller,
   Delete,
   Get,
-  Headers,
   Param,
   Patch,
   Post,
@@ -15,19 +14,12 @@ import {
   PermissionsGuard,
   RequirePermission,
 } from '../../permissions';
+import { CreateKnowledgeQuickNoteDto } from '../dto';
 import { KnowledgeQuickNotesService } from '../services';
-import type { KnowledgeContext } from '../services/knowledge-context';
-
-function buildKnowledgeContext(
-  headers: Record<string, string | string[] | undefined>,
-): KnowledgeContext {
-  return {
-    tenantId: String(headers['x-tenant-id'] ?? ''),
-    workspaceId: String(headers['x-workspace-id'] ?? ''),
-    userId: String(headers['x-user-id'] ?? ''),
-    role: String(headers['x-user-role'] ?? ''),
-  };
-}
+import {
+  AuthorizedContext,
+  type AuthorizedRequestContext,
+} from '../../../common/context/authorized-context.decorator';
 
 @Controller('agency/knowledge/notes')
 @UseGuards(JwtAuthGuard, PermissionsGuard)
@@ -36,57 +28,39 @@ export class KnowledgeQuickNotesController {
 
   @Get()
   @RequirePermission('agency.knowledge.wall.post')
-  list(@Headers() headers: Record<string, string | string[] | undefined>) {
-    return this.notesService.list(buildKnowledgeContext(headers));
+  list(@AuthorizedContext() context: AuthorizedRequestContext) {
+    return this.notesService.list(context);
   }
 
   @Post()
   @RequirePermission('agency.knowledge.wall.post')
   create(
-    @Headers() headers: Record<string, string | string[] | undefined>,
-    @Body()
-    body: {
-      title: string;
-      body?: string | null;
-      color?: string | null;
-      tags?: string[];
-      authorName: string;
-      positionX?: number;
-      positionY?: number;
-    },
+    @AuthorizedContext() context: AuthorizedRequestContext,
+    @Body() body: CreateKnowledgeQuickNoteDto,
   ) {
-    return this.notesService.create(buildKnowledgeContext(headers), body);
+    return this.notesService.create(context, body);
   }
 
   // ── Personal board (any authenticated user, scoped to themselves) ────────
 
   @Get('personal')
   listPersonal(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
   ) {
-    return this.notesService.listPersonal(buildKnowledgeContext(headers));
+    return this.notesService.listPersonal(context);
   }
 
   @Post('personal')
   createPersonal(
-    @Headers() headers: Record<string, string | string[] | undefined>,
-    @Body()
-    body: {
-      title: string;
-      body?: string | null;
-      color?: string | null;
-      tags?: string[];
-      authorName: string;
-      positionX?: number;
-      positionY?: number;
-    },
+    @AuthorizedContext() context: AuthorizedRequestContext,
+    @Body() body: CreateKnowledgeQuickNoteDto,
   ) {
-    return this.notesService.createPersonal(buildKnowledgeContext(headers), body);
+    return this.notesService.createPersonal(context, body);
   }
 
   @Patch('personal/:id')
   updatePersonal(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
     @Body()
     body: {
@@ -99,7 +73,7 @@ export class KnowledgeQuickNotesController {
     },
   ) {
     return this.notesService.updatePersonal(
-      buildKnowledgeContext(headers),
+      context,
       id,
       body,
     );
@@ -108,16 +82,16 @@ export class KnowledgeQuickNotesController {
   @Delete('personal/:id')
   @DangerousAction()
   deletePersonal(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
   ) {
-    return this.notesService.deletePersonal(buildKnowledgeContext(headers), id);
+    return this.notesService.deletePersonal(context, id);
   }
 
   @Patch(':id')
   @RequirePermission('agency.knowledge.categories.manage.admin')
   update(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
     @Body()
     body: {
@@ -129,16 +103,16 @@ export class KnowledgeQuickNotesController {
       positionY?: number;
     },
   ) {
-    return this.notesService.update(buildKnowledgeContext(headers), id, body);
+    return this.notesService.update(context, id, body);
   }
 
   @Delete(':id')
   @RequirePermission('agency.knowledge.categories.manage.admin')
   @DangerousAction()
   delete(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
   ) {
-    return this.notesService.delete(buildKnowledgeContext(headers), id);
+    return this.notesService.delete(context, id);
   }
 }

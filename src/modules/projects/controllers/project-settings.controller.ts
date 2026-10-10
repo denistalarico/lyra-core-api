@@ -1,31 +1,12 @@
-import {
-  Body,
-  Controller,
-  Get,
-  Headers,
-  Patch,
-  UseGuards,
-} from '@nestjs/common';
+import { Body, Controller, Get, Patch, UseGuards } from '@nestjs/common';
 import { UpdateProjectPreferencesDto, UpdateProjectSettingsDto } from '../dto';
 import { ProjectSettingsService } from '../services/project-settings.service';
 import { PermissionsGuard, RequirePermission } from '../../permissions';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
-
-type RequestContext = {
-  tenantId: string;
-  workspaceId: string;
-  userId: string;
-};
-
-function getContextFromHeaders(
-  headers: Record<string, string | string[] | undefined>,
-): RequestContext {
-  return {
-    tenantId: String(headers['x-tenant-id'] ?? ''),
-    workspaceId: String(headers['x-workspace-id'] ?? ''),
-    userId: String(headers['x-user-id'] ?? ''),
-  };
-}
+import {
+  AuthorizedContext,
+  type AuthorizedRequestContext,
+} from '../../../common/context/authorized-context.decorator';
 
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 @Controller('agency/projects')
@@ -36,45 +17,31 @@ export class ProjectSettingsController {
 
   @Get('settings')
   @RequirePermission('agency.projects.stages.manage.admin')
-  getSettings(
-    @Headers() headers: Record<string, string | string[] | undefined>,
-  ) {
-    return this.projectSettingsService.getSettings(
-      getContextFromHeaders(headers),
-    );
+  getSettings(@AuthorizedContext() context: AuthorizedRequestContext) {
+    return this.projectSettingsService.getSettings(context);
   }
 
   @Patch('settings')
   @RequirePermission('agency.projects.stages.manage.admin')
   updateSettings(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Body() dto: UpdateProjectSettingsDto,
   ) {
-    return this.projectSettingsService.updateSettings(
-      getContextFromHeaders(headers),
-      dto,
-    );
+    return this.projectSettingsService.updateSettings(context, dto);
   }
 
   @Get('preferences')
   @RequirePermission('agency.projects.project.view.assigned')
-  getPreferences(
-    @Headers() headers: Record<string, string | string[] | undefined>,
-  ) {
-    return this.projectSettingsService.getPreferences(
-      getContextFromHeaders(headers),
-    );
+  getPreferences(@AuthorizedContext() context: AuthorizedRequestContext) {
+    return this.projectSettingsService.getPreferences(context);
   }
 
   @Patch('preferences')
   @RequirePermission('agency.projects.project.view.assigned')
   updatePreferences(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Body() dto: UpdateProjectPreferencesDto,
   ) {
-    return this.projectSettingsService.updatePreferences(
-      getContextFromHeaders(headers),
-      dto,
-    );
+    return this.projectSettingsService.updatePreferences(context, dto);
   }
 }

@@ -22,6 +22,7 @@ import { describePostgresIntegration } from '../../testing/postgres-integration'
 import { JwtStrategy } from '../auth/strategies/jwt.strategy';
 import { ClientAreaModule } from '../client-area/client-area.module';
 import { ClientConversationsModule } from './client-conversations.module';
+import { TenantContextAuthority } from '../../common/context/tenant-context-authority.service';
 
 // `otplib` v13 ships ESM that Jest's CommonJS transform cannot load, and it
 // arrives transitively through the Client Area auth services. Nothing here
@@ -122,7 +123,7 @@ run('CCOM1 Agency Client Conversation security matrix (PostgreSQL)', () => {
         ClientAreaModule,
         ClientConversationsModule,
       ],
-      providers: [JwtStrategy],
+      providers: [JwtStrategy, TenantContextAuthority],
     })
       .overrideProvider(FilesService)
       .useValue({

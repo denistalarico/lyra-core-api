@@ -22,6 +22,7 @@ import { AddNotificationRecipientSurface1797600000000 } from '../../database/mig
 import { describePostgresIntegration } from '../../testing/postgres-integration';
 import { AgencyAuthModule } from '../agency/agency-auth.module';
 import { JwtStrategy } from '../auth/strategies/jwt.strategy';
+import { TenantContextAuthority } from '../../common/context/tenant-context-authority.service';
 import { ClientAreaModule } from '../client-area/client-area.module';
 import { ClientAreaMembershipService } from '../client-area/services/client-area-membership.service';
 import { EmailModule } from '../email/email.module';
@@ -220,7 +221,7 @@ run('NTF-C1 client notification security matrix (PostgreSQL, real guards)', () =
         NotificationsModule,
         ClientNotificationsModule,
       ],
-      providers: [JwtStrategy],
+      providers: [JwtStrategy, TenantContextAuthority],
     })
       .overrideModule(EmailModule)
       .useModule(FakeEmailModule)

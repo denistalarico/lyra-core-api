@@ -17,6 +17,7 @@ import { ClientAreaAuthGuard } from './guards/client-area.guards';
 import { ClientAreaManagementService } from './services/client-area-management.service';
 import { ClientAreaSessionService } from './services/client-area-session.service';
 import { ClientAreaJwtStrategy } from './strategies/client-area-jwt.strategy';
+import { TenantContextAuthority } from '../../common/context/tenant-context-authority.service';
 
 const AGENCY_SECRET = 'agency-access-secret-for-ca1-spec-000000';
 const CLIENT_SECRET = 'client-area-secret-for-ca1-spec-11111111';
@@ -86,6 +87,17 @@ describe('CA1 cross-surface access tokens', () => {
       controllers: [ProbeController],
       providers: [
         JwtStrategy,
+        // SEC-A1: the real authority, over a stubbed active membership — this
+        // suite is about the token boundary, not membership.
+        {
+          provide: TenantContextAuthority,
+          useValue: new TenantContextAuthority({
+            getRepository: () => ({
+              findOne: () =>
+                Promise.resolve({ id: 'membership', role: 'owner' }),
+            }),
+          } as never),
+        },
         ClientAreaJwtStrategy,
         ClientAreaAuthGuard,
         { provide: ClientAreaSessionService, useValue: { authenticate } },

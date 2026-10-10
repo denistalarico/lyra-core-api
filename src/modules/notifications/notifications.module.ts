@@ -29,10 +29,12 @@ import {
   NotificationRecipientResolverService,
   NotificationsService,
 } from './services';
+import { ContextModule } from '../../common/context/context.module';
 
 @Module({
   imports: [
     JwtModule.register({}),
+    ContextModule,
     EmailModule,
     TypeOrmModule.forFeature(
       [

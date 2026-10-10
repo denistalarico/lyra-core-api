@@ -3,7 +3,6 @@ import {
   Controller,
   Delete,
   Get,
-  Headers,
   Param,
   Patch,
   Post,
@@ -49,11 +48,8 @@ export class QuotesController {
 
   @Get('templates')
   @RequirePermission('agency.sales.quotes.create')
-  listTemplates(
-    @AuthenticatedUser() user: AuthTokenPayload,
-    @Headers('x-workspace-id') workspaceId?: string,
-  ) {
-    return this.quotesService.listTemplates(this.getContext(user, workspaceId));
+  listTemplates(@AuthenticatedUser() user: AuthTokenPayload) {
+    return this.quotesService.listTemplates(this.getContext(user));
   }
 
   @Get()
@@ -63,39 +59,27 @@ export class QuotesController {
   )
   listQuotes(
     @AuthenticatedUser() user: AuthTokenPayload,
-    @Headers('x-workspace-id') workspaceId: string | undefined,
     @Query() query: QuoteListQueryDto,
   ) {
-    return this.quotesService.listQuotes(
-      this.getContext(user, workspaceId),
-      query,
-    );
+    return this.quotesService.listQuotes(this.getContext(user), query);
   }
 
   @Post()
   @RequirePermission('agency.sales.quotes.create')
   createQuote(
     @AuthenticatedUser() user: AuthTokenPayload,
-    @Headers('x-workspace-id') workspaceId: string | undefined,
     @Body() dto: CreateQuoteDto,
   ) {
-    return this.quotesService.createQuote(
-      this.getContext(user, workspaceId),
-      dto,
-    );
+    return this.quotesService.createQuote(this.getContext(user), dto);
   }
 
   @Post(':id/duplicate')
   @RequirePermission('agency.sales.quotes.create')
   duplicateQuote(
     @AuthenticatedUser() user: AuthTokenPayload,
-    @Headers('x-workspace-id') workspaceId: string | undefined,
     @Param('id') id: string,
   ) {
-    return this.quotesService.duplicateQuote(
-      this.getContext(user, workspaceId),
-      id,
-    );
+    return this.quotesService.duplicateQuote(this.getContext(user), id);
   }
 
   @Get(':id/preview')
@@ -105,25 +89,20 @@ export class QuotesController {
   )
   getQuotePreview(
     @AuthenticatedUser() user: AuthTokenPayload,
-    @Headers('x-workspace-id') workspaceId: string | undefined,
     @Param('id') id: string,
   ) {
-    return this.quotesService.getQuotePreview(
-      this.getContext(user, workspaceId),
-      id,
-    );
+    return this.quotesService.getQuotePreview(this.getContext(user), id);
   }
 
   @Post(':id/convert')
   @RequirePermission('agency.sales.quotes.approve.department')
   convertQuote(
     @AuthenticatedUser() user: AuthTokenPayload,
-    @Headers('x-workspace-id') workspaceId: string | undefined,
     @Param('id') id: string,
     @Body() body: { reason?: string },
   ) {
     return this.quotesService.convertQuote(
-      this.getContext(user, workspaceId),
+      this.getContext(user),
       id,
       body?.reason,
     );
@@ -133,12 +112,11 @@ export class QuotesController {
   @RequirePermission('agency.sales.quotes.approve.department')
   expireQuote(
     @AuthenticatedUser() user: AuthTokenPayload,
-    @Headers('x-workspace-id') workspaceId: string | undefined,
     @Param('id') id: string,
     @Body() body: { reason?: string },
   ) {
     return this.quotesService.expireQuote(
-      this.getContext(user, workspaceId),
+      this.getContext(user),
       id,
       body?.reason,
     );
@@ -151,14 +129,10 @@ export class QuotesController {
   )
   async createQuotePdf(
     @AuthenticatedUser() user: AuthTokenPayload,
-    @Headers('x-workspace-id') workspaceId: string | undefined,
     @Param('id') id: string,
     @Res({ passthrough: false }) response: Response,
   ) {
-    const pdf = await this.quotesService.createPdf(
-      this.getContext(user, workspaceId),
-      id,
-    );
+    const pdf = await this.quotesService.createPdf(this.getContext(user), id);
 
     response.set({
       'Content-Type': 'application/pdf',
@@ -176,25 +150,19 @@ export class QuotesController {
   )
   getQuote(
     @AuthenticatedUser() user: AuthTokenPayload,
-    @Headers('x-workspace-id') workspaceId: string | undefined,
     @Param('id') id: string,
   ) {
-    return this.quotesService.getQuote(this.getContext(user, workspaceId), id);
+    return this.quotesService.getQuote(this.getContext(user), id);
   }
 
   @Patch(':id')
   @RequirePermission('agency.sales.crm.manage.department')
   updateQuote(
     @AuthenticatedUser() user: AuthTokenPayload,
-    @Headers('x-workspace-id') workspaceId: string | undefined,
     @Param('id') id: string,
     @Body() dto: UpdateQuoteDto,
   ) {
-    return this.quotesService.updateQuote(
-      this.getContext(user, workspaceId),
-      id,
-      dto,
-    );
+    return this.quotesService.updateQuote(this.getContext(user), id, dto);
   }
 
   @Delete(':id')
@@ -202,41 +170,31 @@ export class QuotesController {
   @DangerousAction()
   deleteQuote(
     @AuthenticatedUser() user: AuthTokenPayload,
-    @Headers('x-workspace-id') workspaceId: string | undefined,
     @Param('id') id: string,
   ) {
-    return this.quotesService.deleteQuote(
-      this.getContext(user, workspaceId),
-      id,
-    );
+    return this.quotesService.deleteQuote(this.getContext(user), id);
   }
 
   @Post(':id/items')
   @RequirePermission('agency.sales.crm.manage.department')
   addItem(
     @AuthenticatedUser() user: AuthTokenPayload,
-    @Headers('x-workspace-id') workspaceId: string | undefined,
     @Param('id') id: string,
     @Body() dto: CreateQuoteItemDto,
   ) {
-    return this.quotesService.addItem(
-      this.getContext(user, workspaceId),
-      id,
-      dto,
-    );
+    return this.quotesService.addItem(this.getContext(user), id, dto);
   }
 
   @Patch(':id/items/:itemId')
   @RequirePermission('agency.sales.crm.manage.department')
   updateItem(
     @AuthenticatedUser() user: AuthTokenPayload,
-    @Headers('x-workspace-id') workspaceId: string | undefined,
     @Param('id') id: string,
     @Param('itemId') itemId: string,
     @Body() dto: UpdateQuoteItemDto,
   ) {
     return this.quotesService.updateItem(
-      this.getContext(user, workspaceId),
+      this.getContext(user),
       id,
       itemId,
       dto,
@@ -248,60 +206,40 @@ export class QuotesController {
   @DangerousAction()
   deleteItem(
     @AuthenticatedUser() user: AuthTokenPayload,
-    @Headers('x-workspace-id') workspaceId: string | undefined,
     @Param('id') id: string,
     @Param('itemId') itemId: string,
   ) {
-    return this.quotesService.deleteItem(
-      this.getContext(user, workspaceId),
-      id,
-      itemId,
-    );
+    return this.quotesService.deleteItem(this.getContext(user), id, itemId);
   }
 
   @Post(':id/send')
   @RequirePermission('agency.sales.quotes.approve.department')
   sendQuote(
     @AuthenticatedUser() user: AuthTokenPayload,
-    @Headers('x-workspace-id') workspaceId: string | undefined,
     @Param('id') id: string,
     @Body() dto: ChangeQuoteStatusDto,
   ) {
-    return this.quotesService.sendQuote(
-      this.getContext(user, workspaceId),
-      id,
-      dto,
-    );
+    return this.quotesService.sendQuote(this.getContext(user), id, dto);
   }
 
   @Post(':id/accept')
   @RequirePermission('agency.sales.quotes.approve.department')
   acceptQuote(
     @AuthenticatedUser() user: AuthTokenPayload,
-    @Headers('x-workspace-id') workspaceId: string | undefined,
     @Param('id') id: string,
     @Body() dto: ChangeQuoteStatusDto,
   ) {
-    return this.quotesService.acceptQuote(
-      this.getContext(user, workspaceId),
-      id,
-      dto,
-    );
+    return this.quotesService.acceptQuote(this.getContext(user), id, dto);
   }
 
   @Post(':id/reject')
   @RequirePermission('agency.sales.quotes.approve.department')
   rejectQuote(
     @AuthenticatedUser() user: AuthTokenPayload,
-    @Headers('x-workspace-id') workspaceId: string | undefined,
     @Param('id') id: string,
     @Body() dto: ChangeQuoteStatusDto,
   ) {
-    return this.quotesService.rejectQuote(
-      this.getContext(user, workspaceId),
-      id,
-      dto,
-    );
+    return this.quotesService.rejectQuote(this.getContext(user), id, dto);
   }
 
   @Post(':id/archive')
@@ -309,24 +247,17 @@ export class QuotesController {
   @DangerousAction()
   archiveQuote(
     @AuthenticatedUser() user: AuthTokenPayload,
-    @Headers('x-workspace-id') workspaceId: string | undefined,
     @Param('id') id: string,
     @Body() dto: ChangeQuoteStatusDto,
   ) {
-    return this.quotesService.archiveQuote(
-      this.getContext(user, workspaceId),
-      id,
-      dto,
-    );
+    return this.quotesService.archiveQuote(this.getContext(user), id, dto);
   }
 
-  private getContext(
-    user: AuthTokenPayload,
-    workspaceId?: string,
-  ): AgencyContext {
+  /** SEC-A1: workspace comes from the authorized token, never a header. */
+  private getContext(user: AuthTokenPayload): AgencyContext {
     return {
       tenantId: user.tenantId,
-      workspaceId: workspaceId ?? user.workspaceId,
+      workspaceId: user.workspaceId,
       userId: user.sub,
     };
   }

@@ -3,7 +3,6 @@ import {
   Controller,
   Delete,
   Get,
-  Headers,
   Param,
   Patch,
   Post,
@@ -25,18 +24,10 @@ import {
   KnowledgeVaultReauthService,
   KnowledgeVaultService,
 } from '../services';
-import { KnowledgeContext } from '../services/knowledge-context';
-
-function buildKnowledgeContext(
-  headers: Record<string, string | string[] | undefined>,
-): KnowledgeContext {
-  return {
-    tenantId: String(headers['x-tenant-id'] ?? ''),
-    workspaceId: String(headers['x-workspace-id'] ?? ''),
-    userId: String(headers['x-user-id'] ?? ''),
-    role: String(headers['x-user-role'] ?? ''),
-  };
-}
+import {
+  AuthorizedContext,
+  type AuthorizedRequestContext,
+} from '../../../common/context/authorized-context.decorator';
 
 @Controller('agency/knowledge/vault')
 @UseGuards(JwtAuthGuard, PermissionsGuard)
@@ -48,35 +39,35 @@ export class KnowledgeVaultController {
 
   @Get()
   @RequirePermission('agency.knowledge.categories.manage.admin')
-  list(@Headers() headers: Record<string, string | string[] | undefined>) {
-    return this.vaultService.list(buildKnowledgeContext(headers));
+  list(@AuthorizedContext() context: AuthorizedRequestContext) {
+    return this.vaultService.list(context);
   }
 
   // ── Personal vault (any authenticated user, scoped to themselves) ────────
 
   @Get('personal')
   listPersonal(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
   ) {
-    return this.vaultService.listPersonal(buildKnowledgeContext(headers));
+    return this.vaultService.listPersonal(context);
   }
 
   @Post('personal')
   createPersonal(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Body() dto: CreateKnowledgeVaultItemDto,
   ) {
-    return this.vaultService.createPersonal(buildKnowledgeContext(headers), dto);
+    return this.vaultService.createPersonal(context, dto);
   }
 
   @Patch('personal/:id')
   updatePersonal(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
     @Body() dto: UpdateKnowledgeVaultItemDto,
   ) {
     return this.vaultService.updatePersonal(
-      buildKnowledgeContext(headers),
+      context,
       id,
       dto,
     );
@@ -85,20 +76,19 @@ export class KnowledgeVaultController {
   @Delete('personal/:id')
   @DangerousAction()
   deletePersonal(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
   ) {
-    return this.vaultService.deletePersonal(buildKnowledgeContext(headers), id);
+    return this.vaultService.deletePersonal(context, id);
   }
 
   @Post('personal/:id/reveal')
   @DangerousAction()
   async revealPersonal(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
     @Body() dto: RevealKnowledgeVaultItemDto,
   ) {
-    const context = buildKnowledgeContext(headers);
     await this.reauthService.verifyPassword(context, dto.password);
     return this.vaultService.revealPersonal(context, id);
   }
@@ -106,31 +96,31 @@ export class KnowledgeVaultController {
   @Post()
   @RequirePermission('agency.knowledge.categories.manage.admin')
   create(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Body() dto: CreateKnowledgeVaultItemDto,
   ) {
-    return this.vaultService.create(buildKnowledgeContext(headers), dto);
+    return this.vaultService.create(context, dto);
   }
 
   @Patch(':id')
   @RequirePermission('agency.knowledge.categories.manage.admin')
   update(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
     @Body() dto: UpdateKnowledgeVaultItemDto,
   ) {
-    return this.vaultService.update(buildKnowledgeContext(headers), id, dto);
+    return this.vaultService.update(context, id, dto);
   }
 
   @Post(':id/permissions')
   @RequirePermission('agency.knowledge.categories.manage.admin')
   grantPermission(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
     @Body() dto: GrantKnowledgeVaultPermissionDto,
   ) {
     return this.vaultService.grantPermission(
-      buildKnowledgeContext(headers),
+      context,
       id,
       dto,
     );
@@ -140,21 +130,20 @@ export class KnowledgeVaultController {
   @RequirePermission('agency.knowledge.categories.manage.admin')
   @DangerousAction()
   delete(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
   ) {
-    return this.vaultService.delete(buildKnowledgeContext(headers), id);
+    return this.vaultService.delete(context, id);
   }
 
   @Post(':id/reveal')
   @RequirePermission('agency.knowledge.categories.manage.admin')
   @DangerousAction()
   async reveal(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
     @Body() dto: RevealKnowledgeVaultItemDto,
   ) {
-    const context = buildKnowledgeContext(headers);
 
     await this.reauthService.verifyPassword(context, dto.password);
 

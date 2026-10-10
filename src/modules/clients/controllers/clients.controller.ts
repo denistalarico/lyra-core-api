@@ -3,7 +3,6 @@ import {
   Controller,
   Delete,
   Get,
-  Headers,
   Param,
   Patch,
   Post,
@@ -27,22 +26,16 @@ import {
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { AuthenticatedUser } from '../../auth/decorators/authenticated-user.decorator';
 import type { AuthTokenPayload } from '../../auth/types/auth-token-payload.type';
+import {
+  AuthorizedContext,
+  type AuthorizedRequestContext,
+} from '../../../common/context/authorized-context.decorator';
 
 type RequestContext = {
   tenantId: string;
   workspaceId: string;
   userId: string | null;
 };
-
-function getContextFromHeaders(
-  headers: Record<string, string | string[] | undefined>,
-): RequestContext {
-  return {
-    tenantId: String(headers['x-tenant-id'] ?? ''),
-    workspaceId: String(headers['x-workspace-id'] ?? ''),
-    userId: headers['x-user-id'] ? String(headers['x-user-id']) : null,
-  };
-}
 
 function getContextFromUser(user: AuthTokenPayload): RequestContext {
   return {
@@ -73,61 +66,51 @@ export class ClientsController {
 
   @Get('summary')
   @RequirePermission('agency.clients.profile.view.basic.assigned')
-  summary(@Headers() headers: Record<string, string | string[] | undefined>) {
-    return this.clientsService.summary(getContextFromHeaders(headers));
+  summary(@AuthorizedContext() context: AuthorizedRequestContext) {
+    return this.clientsService.summary(context);
   }
 
   @Post()
   @RequirePermission('agency.clients.profile.create.admin')
   create(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Body() dto: CreateClientDto,
   ) {
-    return this.clientsService.create(getContextFromHeaders(headers), dto);
+    return this.clientsService.create(context, dto);
   }
 
   @Get('profitability/portfolio')
   @RequirePermission('agency.clients.profitability.view.owner_or_finance')
   getPortfolioProfitability(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
   ) {
-    return this.clientsProfitabilityService.getPortfolio(
-      getContextFromHeaders(headers),
-    );
+    return this.clientsProfitabilityService.getPortfolio(context);
   }
 
   // Administrative backfill: create/link a cost center for every client that
   // does not have one yet. Declared before the `:clientId` routes.
   @Post('cost-centers/sync')
   @RequirePermission('agency.clients.profile.create.admin')
-  syncCostCenters(
-    @Headers() headers: Record<string, string | string[] | undefined>,
-  ) {
-    return this.clientsService.syncCostCenters(getContextFromHeaders(headers));
+  syncCostCenters(@AuthorizedContext() context: AuthorizedRequestContext) {
+    return this.clientsService.syncCostCenters(context);
   }
 
   @Get(':clientId/cost-center')
   @RequirePermission('agency.clients.profile.view.basic.assigned')
   getCostCenter(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('clientId') clientId: string,
   ) {
-    return this.clientsService.getCostCenter(
-      getContextFromHeaders(headers),
-      clientId,
-    );
+    return this.clientsService.getCostCenter(context, clientId);
   }
 
   @Post(':clientId/cost-center')
   @RequirePermission('agency.clients.profile.update.assigned')
   ensureCostCenter(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('clientId') clientId: string,
   ) {
-    return this.clientsService.ensureCostCenter(
-      getContextFromHeaders(headers),
-      clientId,
-    );
+    return this.clientsService.ensureCostCenter(context, clientId);
   }
 
   @Get(':clientId')
@@ -164,20 +147,17 @@ export class ClientsController {
     @AuthenticatedUser() user: AuthTokenPayload,
     @Param('clientId') clientId: string,
   ) {
-    return this.clientsService.getOverview(
-      getContextFromUser(user),
-      clientId,
-    );
+    return this.clientsService.getOverview(getContextFromUser(user), clientId);
   }
 
   @Get(':clientId/profitability')
   @RequirePermission('agency.clients.profitability.view.owner_or_finance')
   getClientProfitability(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('clientId') clientId: string,
   ) {
     return this.clientsProfitabilityService.getClientProfitability(
-      getContextFromHeaders(headers),
+      context,
       clientId,
     );
   }
@@ -185,12 +165,12 @@ export class ClientsController {
   @Get(':clientId/profitability/monthly')
   @RequirePermission('agency.clients.profitability.view.owner_or_finance')
   getClientMonthlyProfitability(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('clientId') clientId: string,
     @Query() query: ClientProfitabilityMonthlyQueryDto,
   ) {
     return this.clientsProfitabilityService.getClientMonthlyProfitability(
-      getContextFromHeaders(headers),
+      context,
       clientId,
       query,
     );
@@ -199,52 +179,39 @@ export class ClientsController {
   @Patch(':clientId')
   @RequirePermission('agency.clients.profile.update.assigned')
   update(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('clientId') clientId: string,
     @Body() dto: UpdateClientDto,
   ) {
-    return this.clientsService.update(
-      getContextFromHeaders(headers),
-      clientId,
-      dto,
-    );
+    return this.clientsService.update(context, clientId, dto);
   }
 
   @Delete(':clientId')
   @DangerousAction()
   @RequirePermission('agency.clients.profile.archive.admin')
   archive(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('clientId') clientId: string,
   ) {
-    return this.clientsService.archive(
-      getContextFromHeaders(headers),
-      clientId,
-    );
+    return this.clientsService.archive(context, clientId);
   }
 
   @Post(':clientId/unarchive')
   @RequirePermission('agency.clients.profile.archive.admin')
   unarchive(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('clientId') clientId: string,
   ) {
-    return this.clientsService.unarchive(
-      getContextFromHeaders(headers),
-      clientId,
-    );
+    return this.clientsService.unarchive(context, clientId);
   }
 
   @Delete(':clientId/permanent')
   @DangerousAction()
   @RequirePermission('agency.clients.profile.delete.owner_only')
   remove(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('clientId') clientId: string,
   ) {
-    return this.clientsService.remove(
-      getContextFromHeaders(headers),
-      clientId,
-    );
+    return this.clientsService.remove(context, clientId);
   }
 }

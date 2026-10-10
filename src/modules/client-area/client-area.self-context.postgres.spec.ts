@@ -40,6 +40,7 @@ import {
 } from './guards/client-area.guards';
 import { ClientAreaMembershipService } from './services/client-area-membership.service';
 import { ClientAreaSelfAccessService } from './services/client-area-self-access.service';
+import { TenantContextAuthority } from '../../common/context/tenant-context-authority.service';
 
 jest.mock('otplib', () => ({
   verify: jest.fn(({ token }: { token: string }) =>
@@ -133,7 +134,7 @@ run('PD3 agency self-context security matrix (PostgreSQL, real guards)', () => {
         ClientAreaModule,
       ],
       controllers: [SelfProbeController],
-      providers: [JwtStrategy],
+      providers: [JwtStrategy, TenantContextAuthority],
     })
       .overrideModule(EmailModule)
       .useModule(FakeEmailModule)

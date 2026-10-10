@@ -4,7 +4,6 @@ import {
   Controller,
   Delete,
   Get,
-  Headers,
   Param,
   Post,
   UploadedFile,
@@ -23,6 +22,10 @@ import {
   RequirePermission,
 } from '../../permissions';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
+import {
+  AuthorizedContext,
+  type AuthorizedRequestContext,
+} from '../../../common/context/authorized-context.decorator';
 
 const TEAM_CHAT_ATTACHMENT_UPLOAD_OPTIONS = {
   storage: memoryStorage(),
@@ -46,29 +49,20 @@ export class TeamChatAttachmentsController {
   @Post('attachments')
   @RequirePermission('agency.chat.messages.send.assigned')
   createAttachment(
-    @Headers('x-tenant-id') tenantId: string,
-    @Headers('x-workspace-id') workspaceId: string,
-    @Headers('x-user-id') userId: string | undefined,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Body() dto: CreateTeamChatAttachmentDto,
   ) {
-    return this.attachmentsService.create(
-      this.getContext(tenantId, workspaceId, userId),
-      dto,
-    );
+    return this.attachmentsService.create(this.getContext(context), dto);
   }
 
   @Get('messages/:messageId/attachments')
   @RequirePermission('agency.chat.channels.view.assigned')
   listMessageAttachments(
-    @Headers('x-tenant-id') tenantId: string,
-    @Headers('x-workspace-id') workspaceId: string,
-    @Headers('x-user-id') userId: string | undefined,
-    @Headers('x-user-role') userRole: string | undefined,
-    @Headers('x-role') role: string | undefined,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('messageId') messageId: string,
   ) {
     return this.attachmentsService.listByMessage(
-      this.getContext(tenantId, workspaceId, userId, userRole ?? role),
+      this.getContext(context),
       messageId,
     );
   }
@@ -77,15 +71,13 @@ export class TeamChatAttachmentsController {
   @RequirePermission('agency.chat.messages.send.assigned')
   @UseInterceptors(FileInterceptor('file', TEAM_CHAT_ATTACHMENT_UPLOAD_OPTIONS))
   uploadMessageAttachment(
-    @Headers('x-tenant-id') tenantId: string,
-    @Headers('x-workspace-id') workspaceId: string,
-    @Headers('x-user-id') userId: string | undefined,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('messageId') messageId: string,
     @UploadedFile() file: Express.Multer.File,
   ) {
     if (!file) throw new BadRequestException('Arquivo não enviado.');
     return this.attachmentsService.uploadForMessage(
-      this.getContext(tenantId, workspaceId, userId),
+      this.getContext(context),
       messageId,
       file,
     );
@@ -95,14 +87,12 @@ export class TeamChatAttachmentsController {
   @RequirePermission('agency.chat.messages.send.assigned')
   @DangerousAction()
   deleteMessageAttachment(
-    @Headers('x-tenant-id') tenantId: string,
-    @Headers('x-workspace-id') workspaceId: string,
-    @Headers('x-user-id') userId: string | undefined,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('messageId') messageId: string,
     @Param('attachmentId') attachmentId: string,
   ) {
     return this.attachmentsService.deleteFromMessage(
-      this.getContext(tenantId, workspaceId, userId),
+      this.getContext(context),
       messageId,
       attachmentId,
     );
@@ -114,30 +104,25 @@ export class TeamChatAttachmentsController {
     'agency.chat.channels.manage_members.assigned',
   )
   listMeetingAttachments(
-    @Headers('x-tenant-id') tenantId: string,
-    @Headers('x-workspace-id') workspaceId: string,
-    @Headers('x-user-id') userId: string | undefined,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('meetingId') meetingId: string,
   ) {
     return this.attachmentsService.listByMeeting(
-      this.getContext(tenantId, workspaceId, userId),
+      this.getContext(context),
       meetingId,
     );
   }
 
-  private getContext(
-    tenantId: string,
-    workspaceId: string,
-    userId?: string,
-    role?: string,
-  ): TeamChatContext {
+  /**
+   * SEC-A1: identity and role come from the authorized token context (live
+   * membership role), never from `x-user-id`/`x-user-role`/`x-role`.
+   */
+  private getContext(context: AuthorizedRequestContext): TeamChatContext {
     return {
-      tenantId,
-      workspaceId,
-      userId: userId || null,
-      // Same default as TeamChatController: an absent role is 'member', never
-      // elevated, so the access primitive fails closed.
-      role: role ?? 'member',
+      tenantId: context.tenantId,
+      workspaceId: context.workspaceId,
+      userId: context.userId,
+      role: context.role,
     };
   }
 }

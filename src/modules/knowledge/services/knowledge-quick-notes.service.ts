@@ -3,17 +3,12 @@ import { InjectRepository } from "@nestjs/typeorm";
 import { Repository } from "typeorm";
 import { AgencyKnowledgeQuickNote } from "../entities";
 import { AgencyKnowledgeScope } from "../enums";
+import type { CreateKnowledgeQuickNoteDto } from "../dto";
+import { KnowledgeAuthorshipService } from "./knowledge-authorship.service";
 import type { KnowledgeContext } from "./knowledge-context";
 
-type CreateNoteDto = {
-  title: string;
-  body?: string | null;
-  color?: string | null;
-  tags?: string[];
-  authorName: string;
-  positionX?: number;
-  positionY?: number;
-};
+/** `author_name` is NOT NULL and predates the snapshot; it mirrors the value. */
+const LEGACY_AUTHOR_NAME_LENGTH = 120;
 
 type UpdateNoteDto = {
   title?: string;
@@ -29,6 +24,7 @@ export class KnowledgeQuickNotesService {
   constructor(
     @InjectRepository(AgencyKnowledgeQuickNote, "agency")
     private readonly notesRepo: Repository<AgencyKnowledgeQuickNote>,
+    private readonly authorshipService: KnowledgeAuthorshipService,
   ) {}
 
   list(context: KnowledgeContext) {
@@ -55,24 +51,33 @@ export class KnowledgeQuickNotesService {
     });
   }
 
-  create(context: KnowledgeContext, dto: CreateNoteDto) {
+  create(context: KnowledgeContext, dto: CreateKnowledgeQuickNoteDto) {
     return this.createScoped(context, dto, AgencyKnowledgeScope.SHARED);
   }
 
-  createPersonal(context: KnowledgeContext, dto: CreateNoteDto) {
+  createPersonal(context: KnowledgeContext, dto: CreateKnowledgeQuickNoteDto) {
     return this.createScoped(context, dto, AgencyKnowledgeScope.PERSONAL);
   }
 
-  private createScoped(
+  private async createScoped(
     context: KnowledgeContext,
-    dto: CreateNoteDto,
+    dto: CreateKnowledgeQuickNoteDto,
     scope: AgencyKnowledgeScope,
   ) {
+    // SEC-A1: authorship comes from the authenticated user, never the body.
+    const authorship = await this.authorshipService.resolve(
+      context,
+      dto.authorDisplayMode,
+    );
     const note = this.notesRepo.create({
       tenantId: context.tenantId,
       workspaceId: context.workspaceId,
       authorId: context.userId,
-      authorName: dto.authorName,
+      authorName: authorship.authorDisplayValue.slice(
+        0,
+        LEGACY_AUTHOR_NAME_LENGTH,
+      ),
+      ...authorship,
       title: dto.title,
       body: dto.body ?? null,
       color: dto.color ?? null,

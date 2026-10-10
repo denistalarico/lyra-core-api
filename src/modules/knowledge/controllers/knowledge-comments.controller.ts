@@ -2,7 +2,6 @@ import {
   Body,
   Controller,
   Get,
-  Headers,
   Param,
   Patch,
   Post,
@@ -12,21 +11,10 @@ import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { PermissionsGuard, RequirePermission } from '../../permissions';
 import { CreateKnowledgeCommentDto, UpdateKnowledgeCommentDto } from '../dto';
 import { KnowledgeCommentsService } from '../services';
-import { KnowledgeContext } from '../services/knowledge-context';
-
-function buildKnowledgeContext(
-  headers: Record<string, string | string[] | undefined>,
-): KnowledgeContext {
-  return {
-    tenantId: String(headers['x-tenant-id'] ?? ''),
-    workspaceId: String(headers['x-workspace-id'] ?? ''),
-    userId: String(headers['x-user-id'] ?? ''),
-    role: String(headers['x-user-role'] ?? ''),
-    userName: headers['x-user-name']
-      ? String(headers['x-user-name'])
-      : undefined,
-  };
-}
+import {
+  AuthorizedContext,
+  type AuthorizedRequestContext,
+} from '../../../common/context/authorized-context.decorator';
 
 @Controller('agency/knowledge')
 @UseGuards(JwtAuthGuard, PermissionsGuard)
@@ -36,40 +24,29 @@ export class KnowledgeCommentsController {
   @Get('articles/:articleId/comments')
   @RequirePermission('agency.knowledge.articles.view.published')
   listByArticle(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('articleId') articleId: string,
   ) {
-    return this.commentsService.listByArticle(
-      buildKnowledgeContext(headers),
-      articleId,
-    );
+    return this.commentsService.listByArticle(context, articleId);
   }
 
   @Post('articles/:articleId/comments')
   @RequirePermission('agency.knowledge.articles.comment')
   create(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('articleId') articleId: string,
     @Body() dto: CreateKnowledgeCommentDto,
   ) {
-    return this.commentsService.create(
-      buildKnowledgeContext(headers),
-      articleId,
-      dto,
-    );
+    return this.commentsService.create(context, articleId, dto);
   }
 
   @Patch('comments/:commentId')
   @RequirePermission('agency.knowledge.categories.manage.admin')
   update(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('commentId') commentId: string,
     @Body() dto: UpdateKnowledgeCommentDto,
   ) {
-    return this.commentsService.update(
-      buildKnowledgeContext(headers),
-      commentId,
-      dto,
-    );
+    return this.commentsService.update(context, commentId, dto);
   }
 }

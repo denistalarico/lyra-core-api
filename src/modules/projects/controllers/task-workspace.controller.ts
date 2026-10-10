@@ -3,7 +3,6 @@ import {
   Controller,
   Delete,
   Get,
-  Headers,
   Param,
   Patch,
   Post,
@@ -17,24 +16,10 @@ import {
   RequirePermission,
 } from '../../permissions';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
-
-type RequestContext = {
-  tenantId: string;
-  workspaceId: string;
-  userId: string;
-  role: string;
-};
-
-function getContextFromHeaders(
-  headers: Record<string, string | string[] | undefined>,
-): RequestContext {
-  return {
-    tenantId: String(headers['x-tenant-id'] ?? ''),
-    workspaceId: String(headers['x-workspace-id'] ?? ''),
-    userId: String(headers['x-user-id'] ?? ''),
-    role: String(headers['x-user-role'] ?? headers['x-role'] ?? 'member'),
-  };
-}
+import {
+  AuthorizedContext,
+  type AuthorizedRequestContext,
+} from '../../../common/context/authorized-context.decorator';
 
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 @Controller('agency/projects/tasks/:taskId')
@@ -47,13 +32,10 @@ export class TaskWorkspaceController {
     'agency.tasks.task.manage.department',
   )
   listChecklist(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('taskId') taskId: string,
   ) {
-    return this.taskWorkspaceService.listChecklist(
-      getContextFromHeaders(headers),
-      taskId,
-    );
+    return this.taskWorkspaceService.listChecklist(context, taskId);
   }
 
   @Post('checklist')
@@ -62,7 +44,7 @@ export class TaskWorkspaceController {
     'agency.tasks.task.manage.department',
   )
   createChecklistItem(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('taskId') taskId: string,
     @Body()
     body: {
@@ -77,11 +59,7 @@ export class TaskWorkspaceController {
       dueDate?: string | null;
     },
   ) {
-    return this.taskWorkspaceService.createChecklistItem(
-      getContextFromHeaders(headers),
-      taskId,
-      body,
-    );
+    return this.taskWorkspaceService.createChecklistItem(context, taskId, body);
   }
 
   @Patch('checklist/:itemId')
@@ -90,7 +68,7 @@ export class TaskWorkspaceController {
     'agency.tasks.task.manage.department',
   )
   updateChecklistItem(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('taskId') taskId: string,
     @Param('itemId') itemId: string,
     @Body()
@@ -107,7 +85,7 @@ export class TaskWorkspaceController {
     },
   ) {
     return this.taskWorkspaceService.updateChecklistItem(
-      getContextFromHeaders(headers),
+      context,
       taskId,
       itemId,
       body,
@@ -121,12 +99,12 @@ export class TaskWorkspaceController {
   )
   @DangerousAction()
   deleteChecklistItem(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('taskId') taskId: string,
     @Param('itemId') itemId: string,
   ) {
     return this.taskWorkspaceService.deleteChecklistItem(
-      getContextFromHeaders(headers),
+      context,
       taskId,
       itemId,
     );
@@ -138,26 +116,22 @@ export class TaskWorkspaceController {
     'agency.tasks.task.manage.department',
   )
   getChecklistItem(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('taskId') taskId: string,
     @Param('itemId') itemId: string,
   ) {
-    return this.taskWorkspaceService.getChecklistItem(
-      getContextFromHeaders(headers),
-      taskId,
-      itemId,
-    );
+    return this.taskWorkspaceService.getChecklistItem(context, taskId, itemId);
   }
 
   @Get('checklist/:itemId/time')
   @RequirePermission('agency.tasks.time.track.self')
   listChecklistTimeEntries(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('taskId') taskId: string,
     @Param('itemId') itemId: string,
   ) {
     return this.taskWorkspaceService.listChecklistTimeEntries(
-      getContextFromHeaders(headers),
+      context,
       taskId,
       itemId,
     );
@@ -166,13 +140,13 @@ export class TaskWorkspaceController {
   @Patch('checklist/:itemId/time/manual')
   @RequirePermission('agency.tasks.time.track.self')
   setChecklistTrackedMinutes(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('taskId') taskId: string,
     @Param('itemId') itemId: string,
     @Body() body: { minutes?: number },
   ) {
     return this.taskWorkspaceService.setChecklistTrackedMinutes(
-      getContextFromHeaders(headers),
+      context,
       taskId,
       itemId,
       Number(body?.minutes ?? 0),
@@ -182,12 +156,12 @@ export class TaskWorkspaceController {
   @Post('checklist/:itemId/time/start')
   @RequirePermission('agency.tasks.time.track.self')
   startChecklistTimer(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('taskId') taskId: string,
     @Param('itemId') itemId: string,
   ) {
     return this.taskWorkspaceService.startChecklistTimer(
-      getContextFromHeaders(headers),
+      context,
       taskId,
       itemId,
     );
@@ -196,12 +170,12 @@ export class TaskWorkspaceController {
   @Patch('checklist/:itemId/time/stop')
   @RequirePermission('agency.tasks.time.track.self')
   stopChecklistTimer(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('taskId') taskId: string,
     @Param('itemId') itemId: string,
   ) {
     return this.taskWorkspaceService.stopChecklistTimer(
-      getContextFromHeaders(headers),
+      context,
       taskId,
       itemId,
     );
@@ -213,13 +187,10 @@ export class TaskWorkspaceController {
     'agency.tasks.task.manage.department',
   )
   listComments(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('taskId') taskId: string,
   ) {
-    return this.taskWorkspaceService.listComments(
-      getContextFromHeaders(headers),
-      taskId,
-    );
+    return this.taskWorkspaceService.listComments(context, taskId);
   }
 
   @Delete('comments/:commentId')
@@ -229,15 +200,11 @@ export class TaskWorkspaceController {
   )
   @DangerousAction()
   deleteComment(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('taskId') taskId: string,
     @Param('commentId') commentId: string,
   ) {
-    return this.taskWorkspaceService.deleteComment(
-      getContextFromHeaders(headers),
-      taskId,
-      commentId,
-    );
+    return this.taskWorkspaceService.deleteComment(context, taskId, commentId);
   }
 
   @Post('comments')
@@ -246,12 +213,12 @@ export class TaskWorkspaceController {
     'agency.tasks.task.manage.department',
   )
   createComment(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('taskId') taskId: string,
     @Body() body: { body?: string },
   ) {
     return this.taskWorkspaceService.createComment(
-      getContextFromHeaders(headers),
+      context,
       taskId,
       body.body ?? '',
     );
@@ -260,24 +227,21 @@ export class TaskWorkspaceController {
   @Get('time-entries')
   @RequirePermission('agency.tasks.time.track.self')
   listTimeEntries(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('taskId') taskId: string,
   ) {
-    return this.taskWorkspaceService.listTimeEntries(
-      getContextFromHeaders(headers),
-      taskId,
-    );
+    return this.taskWorkspaceService.listTimeEntries(context, taskId);
   }
 
   @Patch('time-entries/manual')
   @RequirePermission('agency.tasks.time.track.self')
   setTaskTrackedMinutes(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('taskId') taskId: string,
     @Body() body: { minutes?: number },
   ) {
     return this.taskWorkspaceService.setTaskTrackedMinutes(
-      getContextFromHeaders(headers),
+      context,
       taskId,
       Number(body?.minutes ?? 0),
     );
@@ -286,38 +250,28 @@ export class TaskWorkspaceController {
   @Post('time-entries/start')
   @RequirePermission('agency.tasks.time.track.self')
   startTimer(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('taskId') taskId: string,
   ) {
-    return this.taskWorkspaceService.startTimer(
-      getContextFromHeaders(headers),
-      taskId,
-    );
+    return this.taskWorkspaceService.startTimer(context, taskId);
   }
 
   @Patch('time-entries/stop-active')
   @RequirePermission('agency.tasks.time.track.self')
   stopActiveTimer(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('taskId') taskId: string,
   ) {
-    return this.taskWorkspaceService.stopActiveTimer(
-      getContextFromHeaders(headers),
-      taskId,
-    );
+    return this.taskWorkspaceService.stopActiveTimer(context, taskId);
   }
 
   @Patch('time-entries/:entryId/stop')
   @RequirePermission('agency.tasks.time.track.self')
   stopTimer(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('taskId') taskId: string,
     @Param('entryId') entryId: string,
   ) {
-    return this.taskWorkspaceService.stopTimer(
-      getContextFromHeaders(headers),
-      taskId,
-      entryId,
-    );
+    return this.taskWorkspaceService.stopTimer(context, taskId, entryId);
   }
 }

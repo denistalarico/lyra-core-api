@@ -29,6 +29,7 @@ import { FilesService } from '../../common/files/files.service';
 import { ClientConversationApprovalsModule } from './client-conversation-approvals.module';
 import { ClientConversationsModule } from './client-conversations.module';
 import { ClientConversationCardService } from './services/client-conversation-card.service';
+import { TenantContextAuthority } from '../../common/context/tenant-context-authority.service';
 
 // `otplib` v13 ships ESM that Jest's CommonJS transform cannot load, and
 // `AgencyAuthModule` imports it. Same contract as the real module, and the same
@@ -261,7 +262,7 @@ run('CCOM2 approval cards in conversations (PostgreSQL, real guards)', () => {
         // resolve. Importing it here is what puts CCOM2 under test at all.
         ClientConversationApprovalsModule,
       ],
-      providers: [JwtStrategy],
+      providers: [JwtStrategy, TenantContextAuthority],
     })
       .overrideModule(EmailModule)
       .useModule(FakeEmailModule)

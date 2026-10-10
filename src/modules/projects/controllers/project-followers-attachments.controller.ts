@@ -4,7 +4,6 @@ import {
   Controller,
   Delete,
   Get,
-  Headers,
   Param,
   Post,
   UploadedFile,
@@ -26,18 +25,10 @@ const ATTACHMENT_UPLOAD_OPTIONS = {
   limits: { fileSize: 10 * 1024 * 1024 },
 };
 import { ProjectFollowersAttachmentsService } from '../services/project-followers-attachments.service';
-
-type RequestContext = { tenantId: string; workspaceId: string; userId: string };
-
-function ctx(
-  headers: Record<string, string | string[] | undefined>,
-): RequestContext {
-  return {
-    tenantId: String(headers['x-tenant-id'] ?? ''),
-    workspaceId: String(headers['x-workspace-id'] ?? ''),
-    userId: String(headers['x-user-id'] ?? ''),
-  };
-}
+import {
+  AuthorizedContext,
+  type AuthorizedRequestContext,
+} from '../../../common/context/authorized-context.decorator';
 
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 @Controller('agency/projects/:projectId')
@@ -49,21 +40,21 @@ export class ProjectFollowersAttachmentsController {
   @Get('followers')
   @RequirePermission('agency.projects.project.view.assigned')
   listFollowers(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('projectId') projectId: string,
   ) {
-    return this.svc.listFollowers(ctx(headers), projectId);
+    return this.svc.listFollowers(context, projectId);
   }
 
   @Post('followers')
   @RequirePermission('agency.projects.project.update.department')
   addFollower(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('projectId') projectId: string,
     @Body() body: { userId: string; userName: string },
   ) {
     return this.svc.addFollower(
-      ctx(headers),
+      context,
       projectId,
       body.userId,
       body.userName ?? '',
@@ -77,11 +68,11 @@ export class ProjectFollowersAttachmentsController {
   )
   @DangerousAction()
   removeFollower(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('projectId') projectId: string,
     @Param('followerId') followerId: string,
   ) {
-    return this.svc.removeFollower(ctx(headers), projectId, followerId);
+    return this.svc.removeFollower(context, projectId, followerId);
   }
 
   // ── Attachments ────────────────────────────────────────────────────────────
@@ -89,22 +80,22 @@ export class ProjectFollowersAttachmentsController {
   @Get('attachments')
   @RequirePermission('agency.projects.project.view.assigned')
   listAttachments(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('projectId') projectId: string,
   ) {
-    return this.svc.listAttachments(ctx(headers), projectId);
+    return this.svc.listAttachments(context, projectId);
   }
 
   @Post('attachments')
   @RequirePermission('agency.projects.project.update.department')
   @UseInterceptors(FileInterceptor('file', ATTACHMENT_UPLOAD_OPTIONS))
   uploadAttachment(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('projectId') projectId: string,
     @UploadedFile() file: Express.Multer.File,
   ) {
     if (!file) throw new BadRequestException('No file provided');
-    return this.svc.uploadAttachment(ctx(headers), projectId, file);
+    return this.svc.uploadAttachment(context, projectId, file);
   }
 
   @Delete('attachments/:attachmentId')
@@ -114,10 +105,10 @@ export class ProjectFollowersAttachmentsController {
   )
   @DangerousAction()
   deleteAttachment(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('projectId') projectId: string,
     @Param('attachmentId') attachmentId: string,
   ) {
-    return this.svc.deleteAttachment(ctx(headers), projectId, attachmentId);
+    return this.svc.deleteAttachment(context, projectId, attachmentId);
   }
 }

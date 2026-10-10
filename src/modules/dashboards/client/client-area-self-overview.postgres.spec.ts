@@ -26,6 +26,7 @@ import { EmailService } from '../../email/email.service';
 import { AgencyDashboardsService } from '../services/agency-dashboards.service';
 import { ClientAreaSelfOverviewController } from './client-area-self-overview.controller';
 import { ClientAreaSelfOverviewService } from './client-area-self-overview.service';
+import { TenantContextAuthority } from '../../../common/context/tenant-context-authority.service';
 
 jest.mock('otplib', () => ({
   verify: jest.fn(({ token }: { token: string }) =>
@@ -222,6 +223,7 @@ run('PD4 self overview security matrix (PostgreSQL, real guards)', () => {
       controllers: [ClientAreaSelfOverviewController],
       providers: [
         JwtStrategy,
+        TenantContextAuthority,
         ClientAreaSelfOverviewService,
         { provide: AgencyDashboardsService, useValue: dashboardStub },
       ],

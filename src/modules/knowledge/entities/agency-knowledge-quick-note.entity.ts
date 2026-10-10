@@ -6,7 +6,10 @@ import {
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from "typeorm";
-import { AgencyKnowledgeScope } from "../enums";
+import {
+  AgencyKnowledgeAuthorDisplayMode,
+  AgencyKnowledgeScope,
+} from "../enums";
 
 @Entity("agency_knowledge_quick_notes")
 @Index(["tenantId", "workspaceId"])
@@ -25,6 +28,24 @@ export class AgencyKnowledgeQuickNote {
 
   @Column({ name: "author_name", type: "varchar", length: 120 })
   authorName!: string;
+
+  /** How authorship was shown at publication (SEC-A1); `authorId` is the real author. */
+  @Column({
+    name: "author_display_mode",
+    type: "varchar",
+    length: 20,
+    default: AgencyKnowledgeAuthorDisplayMode.NAME_AND_ROLE,
+  })
+  authorDisplayMode!: AgencyKnowledgeAuthorDisplayMode;
+
+  /** Backend-composed snapshot (name — job title, or job title only). */
+  @Column({
+    name: "author_display_value",
+    type: "varchar",
+    length: 300,
+    nullable: true,
+  })
+  authorDisplayValue!: string | null;
 
   @Column({
     type: "varchar",

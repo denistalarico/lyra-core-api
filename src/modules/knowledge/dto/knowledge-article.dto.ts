@@ -14,9 +14,18 @@ import {
   AgencyKnowledgeArticleStatus,
   AgencyKnowledgeArticleType,
   AgencyKnowledgeArticleVisibility,
+  AgencyKnowledgeAuthorDisplayMode,
 } from "../enums";
 
 export class CreateKnowledgeArticleDto {
+  /**
+   * The only authorship input the browser controls (SEC-A1): which label to
+   * show. Name and job title are resolved by the backend.
+   */
+  @IsOptional()
+  @IsEnum(AgencyKnowledgeAuthorDisplayMode)
+  authorDisplayMode?: AgencyKnowledgeAuthorDisplayMode;
+
   @IsOptional()
   @IsUUID()
   categoryId?: string | null;
@@ -104,6 +113,14 @@ export class CreateKnowledgeArticleDto {
 }
 
 export class UpdateKnowledgeArticleDto {
+  /**
+   * The only authorship input the browser controls (SEC-A1): which label to
+   * show. Name and job title are resolved by the backend.
+   */
+  @IsOptional()
+  @IsEnum(AgencyKnowledgeAuthorDisplayMode)
+  authorDisplayMode?: AgencyKnowledgeAuthorDisplayMode;
+
   @IsOptional()
   @IsUUID()
   categoryId?: string | null;

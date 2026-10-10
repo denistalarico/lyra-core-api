@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { CreateKnowledgeCommentDto, UpdateKnowledgeCommentDto } from '../dto';
 import { AgencyKnowledgeArticle, AgencyKnowledgeComment } from '../entities';
+import { KnowledgeAuthorshipService } from './knowledge-authorship.service';
 import { KnowledgeContext } from './knowledge-context';
 import { KnowledgeNotificationPublisher } from './knowledge-notification.publisher';
 
@@ -14,6 +15,7 @@ export class KnowledgeCommentsService {
     @InjectRepository(AgencyKnowledgeArticle, 'agency')
     private readonly articlesRepository: Repository<AgencyKnowledgeArticle>,
     private readonly knowledgeNotificationPublisher: KnowledgeNotificationPublisher,
+    private readonly authorshipService: KnowledgeAuthorshipService,
   ) {}
 
   listByArticle(context: KnowledgeContext, articleId: string) {
@@ -46,12 +48,19 @@ export class KnowledgeCommentsService {
       throw new NotFoundException('Knowledge article not found');
     }
 
+    // SEC-A1: the author is the authenticated user; the browser only picks
+    // the display mode. `author_name` is legacy (it was `x-user-name`).
+    const authorship = await this.authorshipService.resolve(
+      context,
+      dto.authorDisplayMode,
+    );
     const comment = this.commentsRepository.create({
       tenantId: context.tenantId,
       workspaceId: context.workspaceId,
       articleId,
       authorId: context.userId,
-      authorName: context.userName ?? null,
+      authorName: null,
+      ...authorship,
       body: dto.body,
     });
 

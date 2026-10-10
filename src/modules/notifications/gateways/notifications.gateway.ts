@@ -11,6 +11,7 @@ import {
 import { Server, Socket } from 'socket.io';
 import { AuthTokenPayload } from '../../auth/types/auth-token-payload.type';
 import { NotificationRealtimeService } from '../services/notification-realtime.service';
+import { TenantContextAuthority } from '../../../common/context/tenant-context-authority.service';
 
 @WebSocketGateway({
   namespace: '/agency/notifications',
@@ -30,6 +31,7 @@ export class NotificationsGateway
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
     private readonly realtimeService: NotificationRealtimeService,
+    private readonly tenantContextAuthority: TenantContextAuthority,
   ) {}
 
   afterInit(server: Server): void {
@@ -38,7 +40,13 @@ export class NotificationsGateway
 
   async handleConnection(client: Socket): Promise<void> {
     try {
-      const payload = await this.verifyClientToken(client);
+      // SEC-A1: same authority as HTTP — a valid signature is not enough
+      // without an active membership in the token's tenant/workspace.
+      const payload = await this.tenantContextAuthority.authorize(
+        await this.verifyClientToken(client),
+        {},
+        'socket',
+      );
       const room = NotificationRealtimeService.getUserRoom({
         tenantId: payload.tenantId,
         workspaceId: payload.workspaceId,

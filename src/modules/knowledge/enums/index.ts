@@ -89,3 +89,13 @@ export enum AgencyKnowledgeVaultAccessAction {
   ARCHIVED = "archived",
   FAILED_REVEAL_ATTEMPT = "failed_reveal_attempt",
 }
+
+/**
+ * How the authenticated author's identity is shown on published Knowledge
+ * content. The real author is always `author_id`; this only picks the label
+ * the backend composes (SEC-A1).
+ */
+export enum AgencyKnowledgeAuthorDisplayMode {
+  NAME_AND_ROLE = "name_and_role",
+  ROLE_ONLY = "role_only",
+}

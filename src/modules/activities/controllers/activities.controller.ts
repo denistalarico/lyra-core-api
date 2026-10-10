@@ -3,12 +3,14 @@ import {
   Controller,
   Delete,
   Get,
-  Headers,
   Param,
   Patch,
   Post,
   Query,
+  UseGuards,
 } from '@nestjs/common';
+import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
+import { PermissionsGuard } from '../../permissions';
 import { ActivitiesService } from '../services/activities.service';
 import {
   CancelActivityDto,
@@ -20,23 +22,14 @@ import {
   UpdateActivityDto,
 } from '../dto';
 import { ActivityEntityType } from '../enums';
+import {
+  AuthorizedContext,
+  type AuthorizedRequestContext,
+} from '../../../common/context/authorized-context.decorator';
 
-type RequestContext = {
-  tenantId: string;
-  workspaceId: string;
-  userId: string;
-};
-
-function getContextFromHeaders(
-  headers: Record<string, string | string[] | undefined>,
-): RequestContext {
-  return {
-    tenantId: String(headers['x-tenant-id'] ?? ''),
-    workspaceId: String(headers['x-workspace-id'] ?? ''),
-    userId: String(headers['x-user-id'] ?? ''),
-  };
-}
-
+// SEC-A1: this controller had no guard at all — any anonymous request with a
+// tenant/workspace id in headers read and wrote that tenant's activities.
+@UseGuards(JwtAuthGuard, PermissionsGuard)
 @Controller('agency/activities')
 export class ActivitiesController {
   constructor(private readonly activitiesService: ActivitiesService) {}
@@ -48,145 +41,125 @@ export class ActivitiesController {
 
   @Get()
   list(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Query() query: ListActivitiesQueryDto,
   ) {
-    return this.activitiesService.list(getContextFromHeaders(headers), query);
+    return this.activitiesService.list(context, query);
   }
 
   @Get('my')
   listMyActivities(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Query() query: ListActivitiesQueryDto,
   ) {
-    return this.activitiesService.listMyActivities(
-      getContextFromHeaders(headers),
-      query,
-    );
+    return this.activitiesService.listMyActivities(context, query);
   }
 
   @Get('overdue')
   listOverdueActivities(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Query() query: ListActivitiesQueryDto,
   ) {
-    return this.activitiesService.listOverdueActivities(
-      getContextFromHeaders(headers),
-      query,
-    );
+    return this.activitiesService.listOverdueActivities(context, query);
   }
 
   @Get('summary')
-  getSummary(
-    @Headers() headers: Record<string, string | string[] | undefined>,
-  ) {
-    return this.activitiesService.getSummary(getContextFromHeaders(headers));
+  getSummary(@AuthorizedContext() context: AuthorizedRequestContext) {
+    return this.activitiesService.getSummary(context);
   }
 
   @Get('context/:entityType/:entityId')
   listByContext(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('entityType') entityType: ActivityEntityType,
     @Param('entityId') entityId: string,
   ) {
-    return this.activitiesService.listByContext(
-      getContextFromHeaders(headers),
-      entityType,
-      entityId,
-    );
+    return this.activitiesService.listByContext(context, entityType, entityId);
   }
 
   @Post()
   create(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Body() dto: CreateActivityDto,
   ) {
-    return this.activitiesService.create(getContextFromHeaders(headers), dto);
+    return this.activitiesService.create(context, dto);
   }
 
   @Get(':id')
   findOne(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
   ) {
-    return this.activitiesService.findOne(getContextFromHeaders(headers), id);
+    return this.activitiesService.findOne(context, id);
   }
 
   @Patch(':id')
   update(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
     @Body() dto: UpdateActivityDto,
   ) {
-    return this.activitiesService.update(getContextFromHeaders(headers), id, dto);
+    return this.activitiesService.update(context, id, dto);
   }
 
   @Delete(':id')
   remove(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
   ) {
-    return this.activitiesService.remove(getContextFromHeaders(headers), id);
+    return this.activitiesService.remove(context, id);
   }
 
   @Post(':id/archive')
   archive(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
   ) {
-    return this.activitiesService.archive(getContextFromHeaders(headers), id);
+    return this.activitiesService.archive(context, id);
   }
 
   @Post(':id/complete')
   complete(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
     @Body() dto: CompleteActivityDto,
   ) {
-    return this.activitiesService.complete(getContextFromHeaders(headers), id, dto);
+    return this.activitiesService.complete(context, id, dto);
   }
 
   @Post(':id/complete-and-schedule-next')
   completeAndScheduleNext(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
     @Body() dto: CompleteAndScheduleNextActivityDto,
   ) {
-    return this.activitiesService.completeAndScheduleNext(
-      getContextFromHeaders(headers),
-      id,
-      dto,
-    );
+    return this.activitiesService.completeAndScheduleNext(context, id, dto);
   }
 
   @Post(':id/cancel')
   cancel(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
     @Body() dto: CancelActivityDto,
   ) {
-    return this.activitiesService.cancel(getContextFromHeaders(headers), id, dto);
+    return this.activitiesService.cancel(context, id, dto);
   }
 
   @Post(':id/links')
   createLink(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
     @Body() dto: CreateActivityLinkDto,
   ) {
-    return this.activitiesService.createLink(getContextFromHeaders(headers), id, dto);
+    return this.activitiesService.createLink(context, id, dto);
   }
 
   @Delete(':id/links/:linkId')
   deleteLink(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
     @Param('linkId') linkId: string,
   ) {
-    return this.activitiesService.deleteLink(
-      getContextFromHeaders(headers),
-      id,
-      linkId,
-    );
+    return this.activitiesService.deleteLink(context, id, linkId);
   }
 }

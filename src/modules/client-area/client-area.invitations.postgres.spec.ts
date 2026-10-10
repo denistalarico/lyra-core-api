@@ -35,6 +35,7 @@ import { PlatformContextService } from '../platform/platform-context.service';
 import { ClientAreaMembersAgencyController } from './agency/client-area-members.agency.controller';
 import { ClientAreaModule } from './client-area.module';
 import { ClientAreaRateLimitService } from './services/client-area-rate-limit.service';
+import { TenantContextAuthority } from '../../common/context/tenant-context-authority.service';
 
 // Same contract as otplib v13 (async, resolves `{ valid }`).
 jest.mock('otplib', () => ({
@@ -310,6 +311,7 @@ run(
         controllers: [ClientAreaMembersAgencyController],
         providers: [
           JwtStrategy,
+          TenantContextAuthority,
           // The real guard and the real role-permission lookup (rows seeded by
           // the CA2 migration). The scope evaluator and context resolvers are
           // stubbed: an `.admin` key never reaches resource scoping and this

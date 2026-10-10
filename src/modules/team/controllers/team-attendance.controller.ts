@@ -3,7 +3,6 @@ import {
   Controller,
   Delete,
   Get,
-  Headers,
   Param,
   Patch,
   Post,
@@ -22,22 +21,10 @@ import {
   PermissionsGuard,
   RequirePermission,
 } from '../../permissions';
-
-type RequestContext = {
-  tenantId: string;
-  workspaceId: string;
-  userId: string;
-};
-
-function getContextFromHeaders(
-  headers: Record<string, string | string[] | undefined>,
-): RequestContext {
-  return {
-    tenantId: String(headers['x-tenant-id'] ?? ''),
-    workspaceId: String(headers['x-workspace-id'] ?? ''),
-    userId: String(headers['x-user-id'] ?? ''),
-  };
-}
+import {
+  AuthorizedContext,
+  type AuthorizedRequestContext,
+} from '../../../common/context/authorized-context.decorator';
 
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 @Controller('agency/team')
@@ -49,62 +36,51 @@ export class TeamAttendanceController {
   @Get('members/:id/presence')
   @RequirePermission('agency.team.attendance.view.department')
   getPresence(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
   ) {
-    return this.teamAttendanceService.getPresence(getContextFromHeaders(headers), id);
+    return this.teamAttendanceService.getPresence(context, id);
   }
 
   @Patch('members/:id/presence')
   @RequirePermission('agency.team.member.update.department')
   updatePresence(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
     @Body() dto: UpdateTeamPresenceDto,
   ) {
-    return this.teamAttendanceService.updatePresence(
-      getContextFromHeaders(headers),
-      id,
-      dto,
-    );
+    return this.teamAttendanceService.updatePresence(context, id, dto);
   }
 
   @Get('members/:id/attendance')
   @RequirePermission('agency.team.attendance.view.department')
   listAttendanceEntries(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
   ) {
-    return this.teamAttendanceService.listAttendanceEntries(
-      getContextFromHeaders(headers),
-      id,
-    );
+    return this.teamAttendanceService.listAttendanceEntries(context, id);
   }
 
   @Post('members/:id/attendance')
   @RequirePermission('agency.team.attendance.approve.department')
   createAttendanceEntry(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
     @Body() dto: CreateTeamAttendanceEntryDto,
   ) {
-    return this.teamAttendanceService.createAttendanceEntry(
-      getContextFromHeaders(headers),
-      id,
-      dto,
-    );
+    return this.teamAttendanceService.createAttendanceEntry(context, id, dto);
   }
 
   @Delete('members/:id/attendance/:entryId')
   @DangerousAction()
   @RequirePermission('agency.team.attendance.approve.department')
   deleteAttendanceEntry(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
     @Param('entryId') entryId: string,
   ) {
     return this.teamAttendanceService.deleteAttendanceEntry(
-      getContextFromHeaders(headers),
+      context,
       id,
       entryId,
     );
@@ -112,56 +88,44 @@ export class TeamAttendanceController {
 
   @Get('members/me/access-code')
   getOwnMemberAccessCodeStatus(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
   ) {
-    return this.teamAttendanceService.getOwnMemberAccessCodeStatus(
-      getContextFromHeaders(headers),
-    );
+    return this.teamAttendanceService.getOwnMemberAccessCodeStatus(context);
   }
 
   @Patch('members/me/access-code')
   updateOwnMemberAccessCode(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Body() dto: UpdateTeamMemberAccessCodeDto,
   ) {
-    return this.teamAttendanceService.updateOwnMemberAccessCode(
-      getContextFromHeaders(headers),
-      dto,
-    );
+    return this.teamAttendanceService.updateOwnMemberAccessCode(context, dto);
   }
 
   @Get('members/:id/access-code')
   @RequirePermission('agency.team.member.update.department')
   getMemberAccessCodeStatus(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
   ) {
-    return this.teamAttendanceService.getMemberAccessCodeStatus(
-      getContextFromHeaders(headers),
-      id,
-    );
+    return this.teamAttendanceService.getMemberAccessCodeStatus(context, id);
   }
 
   @Patch('members/:id/access-code')
   @RequirePermission('agency.team.member.update.department')
   updateMemberAccessCode(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
     @Body() dto: UpdateTeamMemberAccessCodeDto,
   ) {
-    return this.teamAttendanceService.updateMemberAccessCode(
-      getContextFromHeaders(headers),
-      id,
-      dto,
-    );
+    return this.teamAttendanceService.updateMemberAccessCode(context, id, dto);
   }
 
   @Post('kiosk/punch')
   @RequirePermission('agency.team.attendance.approve.department')
   kioskPunch(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Body() dto: TeamKioskPunchDto,
   ) {
-    return this.teamAttendanceService.kioskPunch(getContextFromHeaders(headers), dto);
+    return this.teamAttendanceService.kioskPunch(context, dto);
   }
 }

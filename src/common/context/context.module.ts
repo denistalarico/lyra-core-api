@@ -8,6 +8,7 @@ import { AgencyClientProductAccessEntity } from '../../modules/permissions/entit
 import { TenantProductEntitlementEntity } from '../../modules/platform/entities/tenant-product-entitlement.entity';
 import { ManagedContextDirectoryService } from './managed-context-directory.service';
 import { OperationalContextResolver } from './operational-context.resolver';
+import { TenantContextAuthority } from './tenant-context-authority.service';
 
 const AGENCY_CONNECTION = 'agency';
 
@@ -25,7 +26,15 @@ const AGENCY_CONNECTION = 'agency';
       AGENCY_CONNECTION,
     ),
   ],
-  providers: [OperationalContextResolver, ManagedContextDirectoryService],
-  exports: [OperationalContextResolver, ManagedContextDirectoryService],
+  providers: [
+    OperationalContextResolver,
+    ManagedContextDirectoryService,
+    TenantContextAuthority,
+  ],
+  exports: [
+    OperationalContextResolver,
+    ManagedContextDirectoryService,
+    TenantContextAuthority,
+  ],
 })
 export class ContextModule {}

@@ -6,7 +6,10 @@ import {
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from "typeorm";
-import { AgencyKnowledgeCommentStatus } from "../enums";
+import {
+  AgencyKnowledgeAuthorDisplayMode,
+  AgencyKnowledgeCommentStatus,
+} from "../enums";
 
 @Entity("agency_knowledge_comments")
 @Index(["tenantId", "workspaceId", "articleId"])
@@ -28,6 +31,24 @@ export class AgencyKnowledgeComment {
 
   @Column({ name: "author_name", type: "varchar", length: 180, nullable: true })
   authorName!: string | null;
+
+  /** How authorship was shown at publication (SEC-A1); `authorId` is the real author. */
+  @Column({
+    name: "author_display_mode",
+    type: "varchar",
+    length: 20,
+    default: AgencyKnowledgeAuthorDisplayMode.NAME_AND_ROLE,
+  })
+  authorDisplayMode!: AgencyKnowledgeAuthorDisplayMode;
+
+  /** Backend-composed snapshot (name — job title, or job title only). */
+  @Column({
+    name: "author_display_value",
+    type: "varchar",
+    length: 300,
+    nullable: true,
+  })
+  authorDisplayValue!: string | null;
 
   @Column({ type: "text" })
   body!: string;

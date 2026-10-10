@@ -3,7 +3,6 @@ import {
   Controller,
   Delete,
   Get,
-  Headers,
   Param,
   Post,
   UseGuards,
@@ -17,22 +16,10 @@ import {
   RequirePermission,
 } from '../../permissions';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
-
-type RequestContext = {
-  tenantId: string;
-  workspaceId: string;
-  userId: string;
-};
-
-function getContextFromHeaders(
-  headers: Record<string, string | string[] | undefined>,
-): RequestContext {
-  return {
-    tenantId: String(headers['x-tenant-id'] ?? ''),
-    workspaceId: String(headers['x-workspace-id'] ?? ''),
-    userId: String(headers['x-user-id'] ?? ''),
-  };
-}
+import {
+  AuthorizedContext,
+  type AuthorizedRequestContext,
+} from '../../../common/context/authorized-context.decorator';
 
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 @Controller('agency/projects/:projectId/events')
@@ -42,27 +29,20 @@ export class ProjectEventsController {
   @Get()
   @RequirePermission('agency.projects.project.view.assigned')
   list(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('projectId') projectId: string,
   ) {
-    return this.projectEventsService.list(
-      getContextFromHeaders(headers),
-      projectId,
-    );
+    return this.projectEventsService.list(context, projectId);
   }
 
   @Post()
   @RequirePermission('agency.projects.project.update.department')
   create(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('projectId') projectId: string,
     @Body() dto: CreateProjectEventDto,
   ) {
-    return this.projectEventsService.create(
-      getContextFromHeaders(headers),
-      projectId,
-      dto,
-    );
+    return this.projectEventsService.create(context, projectId, dto);
   }
 
   @Delete()
@@ -72,13 +52,10 @@ export class ProjectEventsController {
   )
   @DangerousAction()
   clearAll(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('projectId') projectId: string,
   ) {
-    return this.projectEventsService.clearAll(
-      getContextFromHeaders(headers),
-      projectId,
-    );
+    return this.projectEventsService.clearAll(context, projectId);
   }
 
   @Delete(':eventId')
@@ -88,14 +65,10 @@ export class ProjectEventsController {
   )
   @DangerousAction()
   delete(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('projectId') projectId: string,
     @Param('eventId') eventId: string,
   ) {
-    return this.projectEventsService.delete(
-      getContextFromHeaders(headers),
-      projectId,
-      eventId,
-    );
+    return this.projectEventsService.delete(context, projectId, eventId);
   }
 }

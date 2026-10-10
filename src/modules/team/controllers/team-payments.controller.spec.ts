@@ -1,10 +1,12 @@
 import { TeamPaymentStatus } from '../enums';
 import { TeamPaymentsController } from './team-payments.controller';
 
-const HEADERS = {
-  'x-tenant-id': 'tenant-1',
-  'x-workspace-id': 'workspace-1',
-  'x-user-id': 'user-1',
+const CONTEXT = {
+  tenantId: 'tenant-1',
+  workspaceId: 'workspace-1',
+  userId: 'user-1',
+  role: 'owner',
+  sessionId: 'session-1',
 };
 
 function makePayment(status = TeamPaymentStatus.PaymentPending) {
@@ -58,7 +60,7 @@ describe('TeamPaymentsController Finance reconciliation', () => {
       financeReconciliationService,
     } = makeController();
 
-    const result = await controller.listPayments(HEADERS, {
+    const result = await controller.listPayments(CONTEXT, {
       memberId: 'member-1',
       competenceStart: '2026-07-01',
       competenceEnd: '2026-07-31',
@@ -68,11 +70,11 @@ describe('TeamPaymentsController Finance reconciliation', () => {
     expect(
       financeReconciliationService.reconcileWorkspacePayments,
     ).toHaveBeenCalledWith(
-      {
+      expect.objectContaining({
         tenantId: 'tenant-1',
         workspaceId: 'workspace-1',
         userId: 'user-1',
-      },
+      }),
       {
         memberId: 'member-1',
         batchId: undefined,
@@ -92,15 +94,15 @@ describe('TeamPaymentsController Finance reconciliation', () => {
     const { controller, reconciled, financeReconciliationService } =
       makeController();
 
-    const result = await controller.getPayment(HEADERS, 'team-payment-1');
+    const result = await controller.getPayment(CONTEXT, 'team-payment-1');
 
     expect(result).toBe(reconciled);
     expect(financeReconciliationService.reconcilePayment).toHaveBeenCalledWith(
-      {
+      expect.objectContaining({
         tenantId: 'tenant-1',
         workspaceId: 'workspace-1',
         userId: 'user-1',
-      },
+      }),
       expect.objectContaining({ id: 'team-payment-1' }),
     );
   });
@@ -116,7 +118,7 @@ describe('TeamPaymentsController Finance reconciliation', () => {
       new Error('Finance unavailable'),
     );
 
-    const result = await controller.listPayments(HEADERS, {});
+    const result = await controller.listPayments(CONTEXT, {});
 
     expect(result).toEqual([reconciled]);
     expect(teamPaymentsService.listPayments).toHaveBeenCalled();
@@ -127,7 +129,7 @@ describe('TeamPaymentsController Finance reconciliation', () => {
       makeController();
 
     const result = await controller.getPaymentFinanceStatus(
-      HEADERS,
+      CONTEXT,
       'team-payment-1',
     );
 

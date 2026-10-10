@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { ILike, Repository } from 'typeorm';
 import {
@@ -7,10 +11,26 @@ import {
   UpdateKnowledgeArticleDto,
 } from '../dto';
 import { AgencyKnowledgeArticle } from '../entities';
-import { AgencyKnowledgeArticleStatus } from '../enums';
+import {
+  AgencyKnowledgeArticleStatus,
+  AgencyKnowledgeAuthorDisplayMode,
+} from '../enums';
 import { parseOptionalDate, KnowledgeContext } from './knowledge-context';
 import { FilesService } from '../../../common/files/files.service';
 import { KnowledgeNotificationPublisher } from './knowledge-notification.publisher';
+import { KnowledgeAuthorshipService } from './knowledge-authorship.service';
+
+/** Shape kept in `headerJson.history` (unchanged; the UI renders it). */
+type ArticleHistoryEntry = { savedAt: string; savedBy: string };
+
+/** `headerJson` without any browser-supplied `history` (SEC-A1). */
+function withoutHistory(
+  headerJson: Record<string, unknown>,
+): Record<string, unknown> {
+  const rest = { ...headerJson };
+  delete rest.history;
+  return rest;
+}
 
 @Injectable()
 export class KnowledgeArticlesService {
@@ -19,6 +39,7 @@ export class KnowledgeArticlesService {
     private readonly articlesRepository: Repository<AgencyKnowledgeArticle>,
     private readonly filesService: FilesService,
     private readonly knowledgeNotificationPublisher: KnowledgeNotificationPublisher,
+    private readonly authorshipService: KnowledgeAuthorshipService,
   ) {}
 
   list(context: KnowledgeContext, query: ListKnowledgeArticlesQueryDto) {
@@ -58,10 +79,17 @@ export class KnowledgeArticlesService {
 
   async create(context: KnowledgeContext, dto: CreateKnowledgeArticleDto) {
     const status = dto.status ?? AgencyKnowledgeArticleStatus.DRAFT;
+    // SEC-A1: real author = authenticated user; the snapshot of how it is
+    // shown is composed here, never taken from the request.
+    const authorship = await this.authorshipService.resolve(
+      context,
+      dto.authorDisplayMode,
+    );
     const article = this.articlesRepository.create({
       tenantId: context.tenantId,
       workspaceId: context.workspaceId,
       authorId: context.userId,
+      ...authorship,
       categoryId: dto.categoryId ?? null,
       ownerId: dto.ownerId ?? null,
       clientId: dto.clientId ?? null,
@@ -73,7 +101,8 @@ export class KnowledgeArticlesService {
       type: dto.type,
       status,
       visibility: dto.visibility,
-      headerJson: dto.headerJson ?? {},
+      // The edit history is server-owned (SEC-A1): never taken from the body.
+      headerJson: withoutHistory(dto.headerJson ?? {}),
       contentJson: dto.contentJson ?? [],
       contentHtml: dto.contentHtml ?? null,
       footerJson: dto.footerJson ?? {},
@@ -131,7 +160,14 @@ export class KnowledgeArticlesService {
       type: dto.type ?? article.type,
       status: dto.status ?? article.status,
       visibility: dto.visibility ?? article.visibility,
-      headerJson: dto.headerJson ?? article.headerJson,
+      headerJson:
+        dto.headerJson === undefined
+          ? article.headerJson
+          : await this.withServerHistory(
+              context,
+              article.headerJson,
+              dto.headerJson,
+            ),
       contentJson: dto.contentJson ?? article.contentJson,
       contentHtml:
         dto.contentHtml === undefined ? article.contentHtml : dto.contentHtml,
@@ -155,6 +191,13 @@ export class KnowledgeArticlesService {
     ) {
       article.publishedAt = new Date();
     }
+
+    await this.applyAuthorshipChange(
+      context,
+      article,
+      dto.authorDisplayMode,
+      previousStatus,
+    );
 
     if (
       previousStatus !== AgencyKnowledgeArticleStatus.ARCHIVED &&
@@ -213,5 +256,69 @@ export class KnowledgeArticlesService {
     });
     article.headerJson = { ...article.headerJson, coverUrl: stored.url };
     return this.articlesRepository.save(article);
+  }
+
+  /**
+   * The authorship snapshot belongs to the author. It is recomposed only when
+   * the author picks another mode or publishes; ordinary edits keep the label
+   * shown at publication, so a later rename or job change does not rewrite
+   * history. Another editor cannot change how someone else is credited.
+   */
+  /**
+   * The edit history is an audit trail, so the server owns it: the browser's
+   * copy is discarded, the stored entries are kept, and the editor save gets
+   * one entry signed with the authenticated membership name. Until SEC-A1 the
+   * browser sent the whole array, `savedBy` included, and could rewrite it.
+   */
+  private async withServerHistory(
+    context: KnowledgeContext,
+    storedHeaderJson: Record<string, unknown>,
+    incomingHeaderJson: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    const stored = Array.isArray(storedHeaderJson.history)
+      ? (storedHeaderJson.history as ArticleHistoryEntry[])
+      : [];
+    const { name } = await this.authorshipService.getIdentity(context);
+    const entry: ArticleHistoryEntry = {
+      savedAt: new Date().toISOString(),
+      savedBy: name,
+    };
+
+    return {
+      ...withoutHistory(incomingHeaderJson),
+      history: [...stored, entry],
+    };
+  }
+
+  private async applyAuthorshipChange(
+    context: KnowledgeContext,
+    article: AgencyKnowledgeArticle,
+    requestedMode: AgencyKnowledgeAuthorDisplayMode | undefined,
+    previousStatus: AgencyKnowledgeArticleStatus,
+  ) {
+    const isAuthor = article.authorId === context.userId;
+    const modeChanged =
+      requestedMode !== undefined &&
+      requestedMode !== article.authorDisplayMode;
+
+    if (modeChanged && !isAuthor) {
+      throw new ForbiddenException(
+        'Somente o autor pode alterar como a autoria é exibida.',
+      );
+    }
+
+    const published =
+      previousStatus !== AgencyKnowledgeArticleStatus.PUBLISHED &&
+      article.status === AgencyKnowledgeArticleStatus.PUBLISHED;
+
+    if (isAuthor && (modeChanged || published || !article.authorDisplayValue)) {
+      Object.assign(
+        article,
+        await this.authorshipService.resolve(
+          context,
+          requestedMode ?? article.authorDisplayMode,
+        ),
+      );
+    }
   }
 }

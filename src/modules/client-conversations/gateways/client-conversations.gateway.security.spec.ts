@@ -4,6 +4,7 @@ import { randomUUID } from 'crypto';
 import { AgencyClientConversationsGateway } from './agency-client-conversations.gateway';
 import { ClientConversationsGateway } from './client-conversations.gateway';
 import { conversationRoom } from '../services/client-conversation-access';
+import { TenantContextAuthority } from '../../../common/context/tenant-context-authority.service';
 
 const AGENCY_SECRET = 'agency-secret-ccom1-realtime-000000000000';
 const CLIENT_SECRET = 'client-area-secret-ccom1-realtime-1111111';
@@ -435,6 +436,13 @@ describe('CCOM1 Agency realtime gateway security', () => {
           Promise.resolve({ id: CONVERSATION }),
         ),
       } as never,
+      new TenantContextAuthority({
+        getRepository: () => ({
+          findOne: jest.fn(() =>
+            Promise.resolve({ id: 'membership', role: 'member' }),
+          ),
+        }),
+      } as never),
     );
 
     return { gateway, resolveScope };

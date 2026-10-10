@@ -3,7 +3,6 @@ import {
   Controller,
   Delete,
   Get,
-  Headers,
   Logger,
   Param,
   Patch,
@@ -31,22 +30,16 @@ import {
   PermissionsGuard,
   RequirePermission,
 } from '../../permissions';
+import {
+  AuthorizedContext,
+  type AuthorizedRequestContext,
+} from '../../../common/context/authorized-context.decorator';
 
 type RequestContext = {
   tenantId: string;
   workspaceId: string;
   userId: string;
 };
-
-function getContextFromHeaders(
-  headers: Record<string, string | string[] | undefined>,
-): RequestContext {
-  return {
-    tenantId: String(headers['x-tenant-id'] ?? ''),
-    workspaceId: String(headers['x-workspace-id'] ?? ''),
-    userId: String(headers['x-user-id'] ?? ''),
-  };
-}
 
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 @Controller('agency/team/payments')
@@ -76,31 +69,26 @@ export class TeamPaymentsController {
 
   @Get('batches')
   @RequirePermission('agency.team.compensation.view.owner_or_hr')
-  listBatches(
-    @Headers() headers: Record<string, string | string[] | undefined>,
-  ) {
-    return this.teamPaymentsService.listBatches(getContextFromHeaders(headers));
+  listBatches(@AuthorizedContext() context: AuthorizedRequestContext) {
+    return this.teamPaymentsService.listBatches(context);
   }
 
   @Post('generate')
   @RequirePermission('agency.team.compensation.view.owner_or_hr')
   generatePayments(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Body() dto: GenerateTeamPaymentsDto,
   ) {
-    return this.teamPaymentsService.generatePayments(
-      getContextFromHeaders(headers),
-      dto,
-    );
+    return this.teamPaymentsService.generatePayments(context, dto);
   }
 
   @Get()
   @RequirePermission('agency.team.compensation.view.owner_or_hr')
   async listPayments(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Query() query: ListTeamPaymentsQueryDto,
   ) {
-    const ctx = getContextFromHeaders(headers);
+    const ctx = context;
     try {
       await this.financeTeamPaymentReconciliationService.reconcileWorkspacePayments(
         ctx,
@@ -123,204 +111,156 @@ export class TeamPaymentsController {
   @Post()
   @RequirePermission('agency.team.compensation.view.owner_or_hr')
   createPayment(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Body() dto: CreateTeamPaymentDto,
   ) {
-    return this.teamPaymentsService.createPayment(
-      getContextFromHeaders(headers),
-      dto,
-    );
+    return this.teamPaymentsService.createPayment(context, dto);
   }
 
   @Get(':id')
   @RequirePermission('agency.team.compensation.view.owner_or_hr')
   async getPayment(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
   ) {
-    const ctx = getContextFromHeaders(headers);
+    const ctx = context;
     return this.getReconciledPayment(ctx, id);
   }
 
   @Patch(':id')
   @RequirePermission('agency.team.compensation.view.owner_or_hr')
   updatePayment(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
     @Body() dto: UpdateTeamPaymentDto,
   ) {
-    return this.teamPaymentsService.updatePayment(
-      getContextFromHeaders(headers),
-      id,
-      dto,
-    );
+    return this.teamPaymentsService.updatePayment(context, id, dto);
   }
 
   @Delete(':id')
   @DangerousAction()
   @RequirePermission('agency.team.compensation.view.owner_or_hr')
   deletePayment(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
   ) {
-    return this.teamPaymentsService.deletePayment(
-      getContextFromHeaders(headers),
-      id,
-    );
+    return this.teamPaymentsService.deletePayment(context, id);
   }
 
   @Post(':id/archive')
   @DangerousAction()
   @RequirePermission('agency.team.compensation.view.owner_or_hr')
   archivePayment(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
   ) {
-    return this.teamPaymentsService.archivePayment(
-      getContextFromHeaders(headers),
-      id,
-    );
+    return this.teamPaymentsService.archivePayment(context, id);
   }
 
   @Post(':id/confirm')
   @RequirePermission('agency.team.compensation.view.owner_or_hr')
   confirmPayment(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
   ) {
-    return this.teamPaymentsService.confirmPayment(
-      getContextFromHeaders(headers),
-      id,
-    );
+    return this.teamPaymentsService.confirmPayment(context, id);
   }
 
   @Post(':id/approve')
   @RequirePermission('agency.team.compensation.view.owner_or_hr')
   approvePayment(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
   ) {
-    return this.teamPaymentsService.approvePayment(
-      getContextFromHeaders(headers),
-      id,
-    );
+    return this.teamPaymentsService.approvePayment(context, id);
   }
 
   @Post(':id/send-to-finance')
   @RequirePermission('agency.team.compensation.view.owner_or_hr')
   sendToFinance(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
   ) {
-    return this.teamPaymentsService.sendPaymentToFinance(
-      getContextFromHeaders(headers),
-      id,
-    );
+    return this.teamPaymentsService.sendPaymentToFinance(context, id);
   }
 
   @Post(':id/mark-paid')
   @RequirePermission('agency.team.compensation.view.owner_or_hr')
   markPaid(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
     @Body() dto: MarkTeamPaymentPaidDto,
   ) {
-    return this.teamPaymentsService.markPaid(
-      getContextFromHeaders(headers),
-      id,
-      dto,
-    );
+    return this.teamPaymentsService.markPaid(context, id, dto);
   }
 
   @Post(':id/revert-payment')
   @RequirePermission('agency.team.compensation.view.owner_or_hr')
   revertPayment(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
   ) {
-    return this.teamPaymentsService.revertPayment(
-      getContextFromHeaders(headers),
-      id,
-    );
+    return this.teamPaymentsService.revertPayment(context, id);
   }
 
   @Post(':id/cancel')
   @DangerousAction()
   @RequirePermission('agency.team.compensation.view.owner_or_hr')
   cancelPayment(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
   ) {
-    return this.teamPaymentsService.cancelPayment(
-      getContextFromHeaders(headers),
-      id,
-    );
+    return this.teamPaymentsService.cancelPayment(context, id);
   }
 
   @Post(':id/back-to-draft')
   @RequirePermission('agency.team.compensation.view.owner_or_hr')
   backToDraft(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
   ) {
-    return this.teamPaymentsService.backToDraft(
-      getContextFromHeaders(headers),
-      id,
-    );
+    return this.teamPaymentsService.backToDraft(context, id);
   }
 
   @Post(':id/items')
   @RequirePermission('agency.team.compensation.view.owner_or_hr')
   createItem(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
     @Body() dto: CreateTeamPaymentItemDto,
   ) {
-    return this.teamPaymentsService.createItem(
-      getContextFromHeaders(headers),
-      id,
-      dto,
-    );
+    return this.teamPaymentsService.createItem(context, id, dto);
   }
 
   @Patch(':id/items/:itemId')
   @RequirePermission('agency.team.compensation.view.owner_or_hr')
   updateItem(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
     @Param('itemId') itemId: string,
     @Body() dto: UpdateTeamPaymentItemDto,
   ) {
-    return this.teamPaymentsService.updateItem(
-      getContextFromHeaders(headers),
-      id,
-      itemId,
-      dto,
-    );
+    return this.teamPaymentsService.updateItem(context, id, itemId, dto);
   }
 
   @Delete(':id/items/:itemId')
   @DangerousAction()
   @RequirePermission('agency.team.compensation.view.owner_or_hr')
   deleteItem(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
     @Param('itemId') itemId: string,
   ) {
-    return this.teamPaymentsService.deleteItem(
-      getContextFromHeaders(headers),
-      id,
-      itemId,
-    );
+    return this.teamPaymentsService.deleteItem(context, id, itemId);
   }
 
   @Get(':id/finance')
   @RequirePermission('agency.team.compensation.view.owner_or_hr')
   async getPaymentFinanceStatus(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
   ) {
-    const ctx = getContextFromHeaders(headers);
+    const ctx = context;
     await this.getReconciledPayment(ctx, id);
     return this.teamPaymentsService.getPaymentFinanceStatus(ctx, id);
   }
@@ -328,42 +268,34 @@ export class TeamPaymentsController {
   @Post(':id/documents')
   @RequirePermission('agency.team.compensation.view.owner_or_hr')
   createDocument(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
     @Body() dto: CreateTeamPaymentDocumentDto,
   ) {
-    return this.teamPaymentsService.createDocument(
-      getContextFromHeaders(headers),
-      id,
-      dto,
-    );
+    return this.teamPaymentsService.createDocument(context, id, dto);
   }
 
   @Delete(':id/documents/:documentId')
   @DangerousAction()
   @RequirePermission('agency.team.compensation.view.owner_or_hr')
   deleteDocument(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
     @Param('documentId') documentId: string,
   ) {
-    return this.teamPaymentsService.deleteDocument(
-      getContextFromHeaders(headers),
-      id,
-      documentId,
-    );
+    return this.teamPaymentsService.deleteDocument(context, id, documentId);
   }
 
   @Get(':id/documents/:documentId/pdf')
   @RequirePermission('agency.team.compensation.view.owner_or_hr')
   async getDocumentPdf(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
     @Param('documentId') documentId: string,
     @Res() res: Response,
   ) {
     const buffer = await this.teamPaymentsService.generateDocumentPdf(
-      getContextFromHeaders(headers),
+      context,
       id,
       documentId,
     );

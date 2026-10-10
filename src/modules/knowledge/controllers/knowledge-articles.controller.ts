@@ -4,7 +4,6 @@ import {
   Controller,
   Delete,
   Get,
-  Headers,
   Param,
   Patch,
   Post,
@@ -28,8 +27,11 @@ import {
   UpdateKnowledgeArticleDto,
 } from '../dto';
 import { KnowledgeArticlesService } from '../services';
-import { KnowledgeContext } from '../services/knowledge-context';
 import { MAX_IMAGE_UPLOAD_BYTES } from '../../../common/files/files.service';
+import {
+  AuthorizedContext,
+  type AuthorizedRequestContext,
+} from '../../../common/context/authorized-context.decorator';
 
 const COVER_UPLOAD_OPTIONS = {
   storage: memoryStorage(),
@@ -43,20 +45,6 @@ const COVER_UPLOAD_OPTIONS = {
   },
 };
 
-function buildKnowledgeContext(
-  headers: Record<string, string | string[] | undefined>,
-): KnowledgeContext {
-  return {
-    tenantId: String(headers['x-tenant-id'] ?? ''),
-    workspaceId: String(headers['x-workspace-id'] ?? ''),
-    userId: String(headers['x-user-id'] ?? ''),
-    role: String(headers['x-user-role'] ?? ''),
-    userName: headers['x-user-name']
-      ? String(headers['x-user-name'])
-      : undefined,
-  };
-}
-
 @Controller('agency/knowledge/articles')
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 export class KnowledgeArticlesController {
@@ -69,10 +57,10 @@ export class KnowledgeArticlesController {
     'agency.knowledge.categories.manage.admin',
   )
   list(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Query() query: ListKnowledgeArticlesQueryDto,
   ) {
-    return this.articlesService.list(buildKnowledgeContext(headers), query);
+    return this.articlesService.list(context, query);
   }
 
   @Get(':id')
@@ -82,10 +70,10 @@ export class KnowledgeArticlesController {
     'agency.knowledge.categories.manage.admin',
   )
   get(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
   ) {
-    return this.articlesService.get(buildKnowledgeContext(headers), id);
+    return this.articlesService.get(context, id);
   }
 
   @Post()
@@ -95,10 +83,10 @@ export class KnowledgeArticlesController {
     'agency.knowledge.categories.manage.admin',
   )
   create(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Body() dto: CreateKnowledgeArticleDto,
   ) {
-    return this.articlesService.create(buildKnowledgeContext(headers), dto);
+    return this.articlesService.create(context, dto);
   }
 
   @Patch(':id')
@@ -108,21 +96,21 @@ export class KnowledgeArticlesController {
     'agency.knowledge.categories.manage.admin',
   )
   update(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
     @Body() dto: UpdateKnowledgeArticleDto,
   ) {
-    return this.articlesService.update(buildKnowledgeContext(headers), id, dto);
+    return this.articlesService.update(context, id, dto);
   }
 
   @Delete(':id')
   @RequirePermission('agency.knowledge.articles.delete.owner_only')
   @DangerousAction()
   remove(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
   ) {
-    return this.articlesService.remove(buildKnowledgeContext(headers), id);
+    return this.articlesService.remove(context, id);
   }
 
   @Post(':id/cover')
@@ -133,15 +121,11 @@ export class KnowledgeArticlesController {
   )
   @UseInterceptors(FileInterceptor('file', COVER_UPLOAD_OPTIONS))
   uploadCover(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
     @UploadedFile() file: Express.Multer.File,
   ) {
     if (!file) throw new BadRequestException('Missing multipart field "file".');
-    return this.articlesService.uploadCover(
-      buildKnowledgeContext(headers),
-      id,
-      file,
-    );
+    return this.articlesService.uploadCover(context, id, file);
   }
 }

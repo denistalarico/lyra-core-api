@@ -1,12 +1,20 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PassportStrategy } from '@nestjs/passport';
+import type { Request } from 'express';
 import { ExtractJwt, Strategy } from 'passport-jwt';
+import {
+  readRequestedTenantContext,
+  TenantContextAuthority,
+} from '../../../common/context/tenant-context-authority.service';
 import { AuthTokenPayload } from '../types/auth-token-payload.type';
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
-  constructor(configService: ConfigService) {
+  constructor(
+    configService: ConfigService,
+    private readonly tenantContextAuthority: TenantContextAuthority,
+  ) {
     const secretOrKey = configService.get<string>('JWT_ACCESS_SECRET');
 
     if (!secretOrKey) {
@@ -17,6 +25,7 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
       secretOrKey,
+      passReqToCallback: true,
     });
   }
 
@@ -33,14 +42,23 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
    *   on every `JwtAuthGuard` route and skip the second factor.
    *
    * Existing access tokens have neither claim, so no live session is affected.
+   *
+   * SEC-A1: the token alone is not the context. `TenantContextAuthority`
+   * refuses context headers that disagree with it and requires an active
+   * Agency membership, so `request.user` is the authorized context every
+   * controller reads (directly or through `@AuthorizedContext()`).
    */
-  validate(
+  async validate(
+    request: Request,
     payload: AuthTokenPayload & { typ?: unknown; type?: unknown },
-  ): AuthTokenPayload {
+  ): Promise<AuthTokenPayload> {
     if (payload.typ !== undefined || payload.type !== undefined) {
       throw new UnauthorizedException('Invalid access token');
     }
 
-    return payload;
+    return this.tenantContextAuthority.authorize(
+      payload,
+      readRequestedTenantContext(request.headers),
+    );
   }
 }

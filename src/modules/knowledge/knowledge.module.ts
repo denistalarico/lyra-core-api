@@ -2,10 +2,13 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { FilesModule } from '../../common/files/files.module';
 import { AgencyUserSecuritySettingsEntity } from '../agency/entities/agency-auth.entities';
+import { AgencyWorkspaceUserEntity } from '../agency/entities/agency-settings.entities';
+import { TeamMember } from '../team/entities/team-member.entity';
 import { NotificationsModule } from '../notifications';
 import { PermissionsModule } from '../permissions';
 import {
   KnowledgeArticlesController,
+  KnowledgeAuthorshipController,
   KnowledgeCategoriesController,
   KnowledgeCommentsController,
   KnowledgeQuickNotesController,
@@ -35,6 +38,7 @@ import {
 } from './help';
 import {
   KnowledgeArticlesService,
+  KnowledgeAuthorshipService,
   KnowledgeCategoriesService,
   KnowledgeCommentsService,
   KnowledgeNotificationPublisher,
@@ -52,6 +56,9 @@ import {
     TypeOrmModule.forFeature(
       [
         AgencyUserSecuritySettingsEntity,
+        // SEC-A1: author name (membership) and job title (Team) for authorship.
+        AgencyWorkspaceUserEntity,
+        TeamMember,
         AgencyKnowledgeArticle,
         AgencyKnowledgeArticleVersion,
         AgencyKnowledgeCategory,
@@ -71,6 +78,7 @@ import {
   ],
   controllers: [
     KnowledgeArticlesController,
+    KnowledgeAuthorshipController,
     KnowledgeCategoriesController,
     KnowledgeCommentsController,
     KnowledgeQuickNotesController,
@@ -80,6 +88,7 @@ import {
   ],
   providers: [
     KnowledgeArticlesService,
+    KnowledgeAuthorshipService,
     KnowledgeCategoriesService,
     KnowledgeCommentsService,
     KnowledgeNotificationPublisher,

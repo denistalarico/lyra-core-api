@@ -5,7 +5,6 @@ import {
   Controller,
   Delete,
   Get,
-  Headers,
   Param,
   Patch,
   Post,
@@ -39,18 +38,16 @@ import {
   PermissionsGuard,
   RequirePermission,
 } from '../../permissions';
+import {
+  AuthorizedContext,
+  type AuthorizedRequestContext,
+} from '../../../common/context/authorized-context.decorator';
 
 const RequireTeamPermission = (permissionKey: string) =>
   applyDecorators(
     UseGuards(JwtAuthGuard, PermissionsGuard),
     RequirePermission(permissionKey),
   );
-
-type RequestContext = {
-  tenantId: string;
-  workspaceId: string;
-  userId: string;
-};
 
 const IMAGE_UPLOAD_OPTIONS = {
   storage: memoryStorage(),
@@ -78,16 +75,6 @@ const IMAGE_UPLOAD_OPTIONS = {
   },
 };
 
-function getContextFromHeaders(
-  headers: Record<string, string | string[] | undefined>,
-): RequestContext {
-  return {
-    tenantId: String(headers['x-tenant-id'] ?? ''),
-    workspaceId: String(headers['x-workspace-id'] ?? ''),
-    userId: String(headers['x-user-id'] ?? ''),
-  };
-}
-
 @Controller('agency/team')
 export class TeamController {
   constructor(private readonly teamService: TeamService) {}
@@ -101,94 +88,94 @@ export class TeamController {
   // evaluators are available for team member routes.
   @Post('seed-defaults')
   @RequireTeamPermission('agency.team.structure.manage.admin')
-  seedDefaults(@Headers() headers: Record<string, string | string[] | undefined>) {
-    return this.teamService.seedDefaults(getContextFromHeaders(headers));
+  seedDefaults(@AuthorizedContext() context: AuthorizedRequestContext) {
+    return this.teamService.seedDefaults(context);
   }
 
   @Get('departments')
   @RequireTeamPermission('agency.team.directory.view.all_members')
-  listDepartments(@Headers() headers: Record<string, string | string[] | undefined>) {
-    return this.teamService.listDepartments(getContextFromHeaders(headers));
+  listDepartments(@AuthorizedContext() context: AuthorizedRequestContext) {
+    return this.teamService.listDepartments(context);
   }
 
   @Post('departments')
   @RequireTeamPermission('agency.team.structure.manage.admin')
   createDepartment(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Body() dto: CreateTeamDepartmentDto,
   ) {
-    return this.teamService.createDepartment(getContextFromHeaders(headers), dto);
+    return this.teamService.createDepartment(context, dto);
   }
 
   @Patch('departments/:id')
   @RequireTeamPermission('agency.team.structure.manage.admin')
   updateDepartment(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
     @Body() dto: UpdateTeamDepartmentDto,
   ) {
-    return this.teamService.updateDepartment(getContextFromHeaders(headers), id, dto);
+    return this.teamService.updateDepartment(context, id, dto);
   }
 
   @Delete('departments/:id/permanent')
   @DangerousAction()
   @RequireTeamPermission('agency.team.structure.delete.owner_only')
   deleteDepartment(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
   ) {
-    return this.teamService.deleteDepartment(getContextFromHeaders(headers), id);
+    return this.teamService.deleteDepartment(context, id);
   }
 
   @Delete('departments/:id')
   @DangerousAction()
   @RequireTeamPermission('agency.team.structure.manage.admin')
   archiveDepartment(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
   ) {
-    return this.teamService.archiveDepartment(getContextFromHeaders(headers), id);
+    return this.teamService.archiveDepartment(context, id);
   }
 
   @Get('skills')
   @RequireTeamPermission('agency.team.directory.view.all_members')
-  listSkills(@Headers() headers: Record<string, string | string[] | undefined>) {
-    return this.teamService.listSkills(getContextFromHeaders(headers));
+  listSkills(@AuthorizedContext() context: AuthorizedRequestContext) {
+    return this.teamService.listSkills(context);
   }
 
   @Post('skills')
   @RequireTeamPermission('agency.team.structure.manage.admin')
   createSkill(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Body() dto: CreateTeamSkillDto,
   ) {
-    return this.teamService.createSkill(getContextFromHeaders(headers), dto);
+    return this.teamService.createSkill(context, dto);
   }
 
   @Patch('skills/:id')
   @RequireTeamPermission('agency.team.structure.manage.admin')
   updateSkill(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
     @Body() dto: UpdateTeamSkillDto,
   ) {
-    return this.teamService.updateSkill(getContextFromHeaders(headers), id, dto);
+    return this.teamService.updateSkill(context, id, dto);
   }
 
   @Delete('skills/:id')
   @DangerousAction()
   @RequireTeamPermission('agency.team.structure.manage.admin')
   archiveSkill(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
   ) {
-    return this.teamService.archiveSkill(getContextFromHeaders(headers), id);
+    return this.teamService.archiveSkill(context, id);
   }
 
   @Get('config-options')
   @RequireTeamPermission('agency.team.directory.view.all_members')
   listConfigOptions(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Query('type')
     type?:
       | 'job_title'
@@ -217,47 +204,47 @@ export class TeamController {
       | 'client_onboarding_task'
       | 'client_offboarding_task',
   ) {
-    return this.teamService.listConfigOptions(getContextFromHeaders(headers), type);
+    return this.teamService.listConfigOptions(context, type);
   }
 
   @Post('config-options')
   @RequireTeamPermission('agency.team.structure.manage.admin')
   createConfigOption(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Body() dto: CreateTeamConfigOptionDto,
   ) {
-    return this.teamService.createConfigOption(getContextFromHeaders(headers), dto);
+    return this.teamService.createConfigOption(context, dto);
   }
 
   @Patch('config-options/:id')
   @RequireTeamPermission('agency.team.structure.manage.admin')
   updateConfigOption(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
     @Body() dto: UpdateTeamConfigOptionDto,
   ) {
-    return this.teamService.updateConfigOption(getContextFromHeaders(headers), id, dto);
+    return this.teamService.updateConfigOption(context, id, dto);
   }
 
   @Delete('config-options/:id')
   @DangerousAction()
   @RequireTeamPermission('agency.team.structure.delete.owner_only')
   deleteConfigOption(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
   ) {
-    return this.teamService.deleteConfigOption(getContextFromHeaders(headers), id);
+    return this.teamService.deleteConfigOption(context, id);
   }
 
   @Get('config-options/:id/document-pdf')
   @RequireTeamPermission('agency.team.directory.view.all_members')
   async getConfigOptionDocumentPdf(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
     @Res() res: Response,
   ) {
     const buffer = await this.teamService.renderDocumentTemplatePdf(
-      getContextFromHeaders(headers),
+      context,
       id,
     );
     res.setHeader('Content-Type', 'application/pdf');
@@ -268,13 +255,10 @@ export class TeamController {
   @Get('config-options/:id/document-preview-html')
   @RequireTeamPermission('agency.team.directory.view.all_members')
   async getConfigOptionDocumentPreviewHtml(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
   ) {
-    const html = await this.teamService.renderDocumentTemplateHtml(
-      getContextFromHeaders(headers),
-      id,
-    );
+    const html = await this.teamService.renderDocumentTemplateHtml(context, id);
     return { html };
   }
 
@@ -296,45 +280,45 @@ export class TeamController {
   @Get('members')
   @RequireTeamPermission('agency.team.member.view.department')
   listMembers(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Query() query: ListTeamMembersQueryDto,
   ) {
-    return this.teamService.listMembers(getContextFromHeaders(headers), query);
+    return this.teamService.listMembers(context, query);
   }
 
   @Get('members/:id')
   @RequireTeamPermission('agency.team.member.view.department')
   getMember(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
   ) {
-    return this.teamService.getMember(getContextFromHeaders(headers), id);
+    return this.teamService.getMember(context, id);
   }
 
   @Post('members')
   @RequireTeamPermission('agency.team.users.invite.admin')
   createMember(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Body() dto: CreateTeamMemberDto,
   ) {
-    return this.teamService.createMember(getContextFromHeaders(headers), dto);
+    return this.teamService.createMember(context, dto);
   }
 
   @Patch('members/:id')
   @RequireTeamPermission('agency.team.member.update.department')
   updateMember(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
     @Body() dto: UpdateTeamMemberDto,
   ) {
-    return this.teamService.updateMember(getContextFromHeaders(headers), id, dto);
+    return this.teamService.updateMember(context, id, dto);
   }
 
   @Post('members/:id/avatar')
   @RequireTeamPermission('agency.team.member.update.department')
   @UseInterceptors(FileInterceptor('file', IMAGE_UPLOAD_OPTIONS))
   uploadMemberAvatar(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
     @UploadedFile() file: Express.Multer.File,
   ) {
@@ -342,37 +326,37 @@ export class TeamController {
       throw new BadRequestException('Image file is required.');
     }
 
-    return this.teamService.uploadMemberAvatar(getContextFromHeaders(headers), id, file);
+    return this.teamService.uploadMemberAvatar(context, id, file);
   }
 
   @Delete('members/:id')
   @DangerousAction()
   @RequireTeamPermission('agency.team.users.delete.owner_only')
   deleteMember(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
   ) {
-    return this.teamService.deleteMember(getContextFromHeaders(headers), id);
+    return this.teamService.deleteMember(context, id);
   }
 
   @Post('members/:id/skills')
   @RequireTeamPermission('agency.team.member.update.department')
   upsertMemberSkill(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
     @Body() dto: UpsertTeamMemberSkillDto,
   ) {
-    return this.teamService.upsertMemberSkill(getContextFromHeaders(headers), id, dto);
+    return this.teamService.upsertMemberSkill(context, id, dto);
   }
 
   @Delete('members/:id/skills/:skillId')
   @DangerousAction()
   @RequireTeamPermission('agency.team.member.update.department')
   removeMemberSkill(
-    @Headers() headers: Record<string, string | string[] | undefined>,
+    @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
     @Param('skillId') skillId: string,
   ) {
-    return this.teamService.removeMemberSkill(getContextFromHeaders(headers), id, skillId);
+    return this.teamService.removeMemberSkill(context, id, skillId);
   }
 }

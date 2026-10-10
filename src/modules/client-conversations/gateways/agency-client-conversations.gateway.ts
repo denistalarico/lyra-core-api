@@ -15,6 +15,7 @@ import type { AuthTokenPayload } from '../../auth/types/auth-token-payload.type'
 import { ClientConversationsService } from '../services/client-conversations.service';
 import { AgencyClientConversationAccessService } from '../services/agency-client-conversation-access.service';
 import { conversationRoom } from '../services/client-conversation-access';
+import { TenantContextAuthority } from '../../../common/context/tenant-context-authority.service';
 
 type AgencySocketAuth = {
   userId: string;
@@ -85,11 +86,17 @@ export class AgencyClientConversationsGateway
     private readonly configService: ConfigService,
     private readonly access: AgencyClientConversationAccessService,
     private readonly conversations: ClientConversationsService,
+    private readonly tenantContextAuthority: TenantContextAuthority,
   ) {}
 
   async handleConnection(client: AgencySocket): Promise<void> {
     try {
-      const payload = await this.verifyToken(client);
+      // SEC-A1: same authority as HTTP — membership required, live role.
+      const payload = await this.tenantContextAuthority.authorize(
+        await this.verifyToken(client),
+        {},
+        'socket',
+      );
       client.data.auth = {
         userId: payload.sub,
         tenantId: payload.tenantId,
