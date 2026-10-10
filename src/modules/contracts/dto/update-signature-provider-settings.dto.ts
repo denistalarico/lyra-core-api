@@ -25,6 +25,11 @@ export class UpdateSignatureProviderSettingsDto {
   @IsString()
   webhookSecret?: string | null;
 
+  // Autentique gives each webhook category its own endpoint and secret.
+  @IsOptional()
+  @IsString()
+  documentWebhookSecret?: string | null;
+
   @IsOptional()
   @IsEnum(ContractSignatureMode)
   defaultSignatureMode?: ContractSignatureMode;

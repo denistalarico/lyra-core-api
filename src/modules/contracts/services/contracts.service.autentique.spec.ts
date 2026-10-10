@@ -39,6 +39,7 @@ jest.mock('@aws-sdk/client-s3', () => ({
 }));
 
 const WEBHOOK_SECRET = 'whsec_test';
+const DOCUMENT_WEBHOOK_SECRET = 'whsec_document_test';
 
 // Private seams of the service exercised by these specs.
 type ServiceInternals = {
@@ -365,6 +366,126 @@ describe('ContractsService — Autentique', () => {
         reason: 'unknown_document',
       });
     });
+
+    describe('per-category endpoints', () => {
+      // Autentique registers one webhook per category, each with its own
+      // secret, so each endpoint only accepts its own secret.
+      const finishedEvent = {
+        event: {
+          id: 'evt-finished',
+          type: 'document.finished',
+          data: {
+            object: {
+              id: 'doc-1',
+              signatures: [],
+              files: { signed: 'https://autentique.test/signed.pdf' },
+            },
+          },
+        },
+      };
+
+      it('verifies the documents endpoint with the document secret only', async () => {
+        const harness = makeHarness();
+        harness.contractsRepository.findOne.mockResolvedValue(null);
+        const valid = signedBody(finishedEvent, DOCUMENT_WEBHOOK_SECRET);
+        const signatureSecret = signedBody(finishedEvent, WEBHOOK_SECRET);
+
+        await expect(
+          harness.service.handleAutentiqueWebhook(
+            'settings-1',
+            valid.raw,
+            valid.signature,
+            'document',
+          ),
+        ).resolves.toMatchObject({ reason: 'unknown_document' });
+        await expect(
+          harness.service.handleAutentiqueWebhook(
+            'settings-1',
+            signatureSecret.raw,
+            signatureSecret.signature,
+            'document',
+          ),
+        ).rejects.toMatchObject({ status: 401 });
+      });
+
+      it('rejects the document secret on the signature endpoint', async () => {
+        const harness = makeHarness();
+        const { raw, signature } = signedBody(
+          viewedEvent,
+          DOCUMENT_WEBHOOK_SECRET,
+        );
+
+        await expect(
+          harness.service.handleAutentiqueWebhook('settings-1', raw, signature),
+        ).rejects.toMatchObject({ status: 401 });
+      });
+
+      it('returns 401 on the documents endpoint without a document secret', async () => {
+        const harness = makeHarness({ documentWebhookSecret: null });
+        const { raw, signature } = signedBody(finishedEvent, WEBHOOK_SECRET);
+
+        await expect(
+          harness.service.handleAutentiqueWebhook(
+            'settings-1',
+            raw,
+            signature,
+            'document',
+          ),
+        ).rejects.toMatchObject({ status: 401 });
+      });
+
+      it('ignores an event delivered to the other category endpoint', async () => {
+        const harness = makeHarness();
+        const { raw, signature } = signedBody(
+          viewedEvent,
+          DOCUMENT_WEBHOOK_SECRET,
+        );
+
+        await expect(
+          harness.service.handleAutentiqueWebhook(
+            'settings-1',
+            raw,
+            signature,
+            'document',
+          ),
+        ).resolves.toEqual({
+          received: true,
+          handled: false,
+          reason: 'category_mismatch',
+        });
+        expect(harness.contractsRepository.findOne).not.toHaveBeenCalled();
+      });
+    });
+  });
+
+  describe('signature provider settings', () => {
+    it('stores the document webhook secret encrypted and exposes one URL per category', async () => {
+      process.env.CONTRACTS_WEBHOOK_PUBLIC_BASE_URL =
+        'https://api.example.com/api/';
+      const harness = makeHarness({ documentWebhookSecret: null });
+
+      const result = await harness.service.updateSignatureProviderSettings(
+        context(),
+        ContractSignatureProvider.Autentique,
+        { documentWebhookSecret: 'whsec_new_document' },
+      );
+
+      const saved = harness.signatureProviderSettingsRepository.save.mock
+        .calls[0][0] as ContractSignatureProviderSetting;
+      expect(saved.documentWebhookSecretEncrypted).toEqual(expect.any(String));
+      expect(saved.documentWebhookSecretEncrypted).not.toContain(
+        'whsec_new_document',
+      );
+      expect(result).toMatchObject({
+        hasWebhookSecret: true,
+        hasDocumentWebhookSecret: true,
+        webhookUrl:
+          'https://api.example.com/api/agency/contracts/webhooks/autentique/settings-1',
+        documentWebhookUrl:
+          'https://api.example.com/api/agency/contracts/webhooks/autentique/settings-1/documents',
+      });
+      expect(JSON.stringify(result)).not.toContain('whsec_new_document');
+    });
   });
 
   describe('testSignatureProviderSettings', () => {
@@ -450,6 +571,7 @@ function makeHarness(
     contract?: ContractRecord;
     parties?: ContractParty[];
     webhookSecret?: string | null;
+    documentWebhookSecret?: string | null;
   } = {},
 ) {
   process.env.NODE_ENV = 'test';
@@ -552,6 +674,12 @@ function makeHarness(
         options.webhookSecret === null
           ? null
           : seams.encryptSecret(options.webhookSecret ?? WEBHOOK_SECRET),
+      documentWebhookSecretEncrypted:
+        options.documentWebhookSecret === null
+          ? null
+          : seams.encryptSecret(
+              options.documentWebhookSecret ?? DOCUMENT_WEBHOOK_SECRET,
+            ),
     }),
   );
 
@@ -585,6 +713,7 @@ function makeHarness(
     client,
     publisher,
     queryBuilder,
+    signatureProviderSettingsRepository,
     contractsRepository,
     partiesRepository,
     documentsRepository,
@@ -666,6 +795,7 @@ function makeSettings(
     apiBaseUrl: 'https://api.autentique.com.br/v2',
     apiTokenEncrypted: null,
     webhookSecretEncrypted: null,
+    documentWebhookSecretEncrypted: null,
     defaultSignatureMode: ContractSignatureMode.Digital,
     sandboxEnabled: true,
     metadata: {},

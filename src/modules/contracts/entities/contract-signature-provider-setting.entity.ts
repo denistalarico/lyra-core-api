@@ -33,8 +33,17 @@ export class ContractSignatureProviderSetting {
   @Column({ name: 'api_token_encrypted', type: 'text', nullable: true })
   apiTokenEncrypted!: string | null;
 
+  /** Secret of the signature-category webhook (`signature.*` events). */
   @Column({ name: 'webhook_secret_encrypted', type: 'text', nullable: true })
   webhookSecretEncrypted!: string | null;
+
+  /** Secret of the document-category webhook (`document.finished`). */
+  @Column({
+    name: 'document_webhook_secret_encrypted',
+    type: 'text',
+    nullable: true,
+  })
+  documentWebhookSecretEncrypted!: string | null;
 
   @Column({
     name: 'default_signature_mode',

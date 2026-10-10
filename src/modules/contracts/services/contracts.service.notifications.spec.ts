@@ -376,6 +376,7 @@ function makeSettings(
     apiBaseUrl: 'https://api.autentique.com.br/v2',
     apiTokenEncrypted: null,
     webhookSecretEncrypted: null,
+    documentWebhookSecretEncrypted: null,
     defaultSignatureMode: ContractSignatureMode.Digital,
     sandboxEnabled: false,
     metadata: {},

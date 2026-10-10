@@ -108,6 +108,9 @@ type RequestContext = {
   userId: string;
 };
 
+/** Autentique webhook categories this module listens to (one endpoint each). */
+export type AutentiqueWebhookCategory = 'signature' | 'document';
+
 // Tenant scope without an acting user (Autentique webhook).
 type ContractScope = {
   tenantId: string;
@@ -365,6 +368,11 @@ export class ContractsService {
         ? this.encryptSecret(dto.webhookSecret)
         : null;
     }
+    if (dto.documentWebhookSecret !== undefined) {
+      settings.documentWebhookSecretEncrypted = dto.documentWebhookSecret
+        ? this.encryptSecret(dto.documentWebhookSecret)
+        : null;
+    }
     if (dto.defaultSignatureMode !== undefined) {
       settings.defaultSignatureMode = dto.defaultSignatureMode;
     }
@@ -394,6 +402,9 @@ export class ContractsService {
         hasApiBaseUrl,
         hasApiToken,
         hasWebhookSecret: Boolean(settings.webhookSecretEncrypted),
+        hasDocumentWebhookSecret: Boolean(
+          settings.documentWebhookSecretEncrypted,
+        ),
         sandboxEnabled: settings.sandboxEnabled,
       },
     };
@@ -1347,6 +1358,9 @@ export class ContractsService {
       providerActive: settings.status === 'active',
       hasApiToken: Boolean(settings.apiTokenEncrypted),
       hasWebhookSecret: Boolean(settings.webhookSecretEncrypted),
+      hasDocumentWebhookSecret: Boolean(
+        settings.documentWebhookSecretEncrypted,
+      ),
       alreadySent: Boolean(contract.externalDocumentId),
       externalDocumentId: contract.externalDocumentId,
       hasPdf: Boolean(latestPdf?.fileKey),
@@ -1667,18 +1681,24 @@ export class ContractsService {
     settingsId: string,
     rawBody: Buffer | undefined,
     signatureHeader: string | undefined,
+    category: AutentiqueWebhookCategory = 'signature',
   ) {
     const settings = await this.signatureProviderSettingsRepository.findOne({
       where: { id: settingsId, provider: ContractSignatureProvider.Autentique },
     });
 
+    // Each category endpoint is verified only with its own secret.
+    const encryptedSecret =
+      category === 'document'
+        ? settings?.documentWebhookSecretEncrypted
+        : settings?.webhookSecretEncrypted;
     let secret: string | null = null;
-    if (settings?.webhookSecretEncrypted) {
+    if (encryptedSecret) {
       try {
-        secret = this.decryptSecret(settings.webhookSecretEncrypted);
+        secret = this.decryptSecret(encryptedSecret);
       } catch {
         this.logger.error(
-          `Autentique webhook secret for settings ${settingsId} could not be decrypted`,
+          `Autentique ${category} webhook secret for settings ${settingsId} could not be decrypted`,
         );
       }
     }
@@ -1701,6 +1721,9 @@ export class ContractsService {
     const event = parseAutentiqueWebhookEvent(body);
     if (!event?.snapshot) {
       return { received: true, handled: false, reason: 'ignored_event' };
+    }
+    if (!event.type.startsWith(`${category}.`)) {
+      return { received: true, handled: false, reason: 'category_mismatch' };
     }
 
     const scope: ContractScope = {
@@ -1811,7 +1834,14 @@ export class ContractsService {
       warnings.push({
         code: 'webhook_secret_missing',
         message:
-          'Webhook secret não configurado: o status só será atualizado pelo botão "Atualizar status".',
+          'Secret do webhook de assinaturas não configurado: visualizações, assinaturas e recusas só serão atualizadas pelo botão "Atualizar status".',
+      });
+    }
+    if (!settings.documentWebhookSecretEncrypted) {
+      warnings.push({
+        code: 'document_webhook_secret_missing',
+        message:
+          'Secret do webhook de documento não configurado: a conclusão e o PDF assinado só chegarão pelo botão "Atualizar status".',
       });
     }
     if (settings.sandboxEnabled) {
@@ -3378,6 +3408,7 @@ export class ContractsService {
               : null,
           apiTokenEncrypted: null,
           webhookSecretEncrypted: null,
+          documentWebhookSecretEncrypted: null,
           defaultSignatureMode: ContractSignatureMode.Digital,
           sandboxEnabled: false,
           metadata: {},
@@ -3400,9 +3431,16 @@ export class ContractsService {
       apiBaseUrl: settings.apiBaseUrl,
       hasApiToken: Boolean(settings.apiTokenEncrypted),
       hasWebhookSecret: Boolean(settings.webhookSecretEncrypted),
+      hasDocumentWebhookSecret: Boolean(
+        settings.documentWebhookSecretEncrypted,
+      ),
       defaultSignatureMode: settings.defaultSignatureMode,
       sandboxEnabled: settings.sandboxEnabled,
-      webhookUrl: this.buildAutentiqueWebhookUrl(settings),
+      // Autentique registers one endpoint per event category, each with its
+      // own secret: `webhookUrl` takes `signature.*`, the document URL takes
+      // `document.finished`.
+      webhookUrl: this.buildAutentiqueWebhookUrl(settings, 'signature'),
+      documentWebhookUrl: this.buildAutentiqueWebhookUrl(settings, 'document'),
       account: settings.metadata?.autentiqueAccount ?? null,
       metadata: settings.metadata,
       createdAt: settings.createdAt,
@@ -3414,6 +3452,7 @@ export class ContractsService {
   // configured (CONTRACTS_WEBHOOK_PUBLIC_BASE_URL, e.g. https://host/api).
   private buildAutentiqueWebhookUrl(
     settings: ContractSignatureProviderSetting,
+    category: AutentiqueWebhookCategory,
   ) {
     const base = process.env.CONTRACTS_WEBHOOK_PUBLIC_BASE_URL?.trim().replace(
       /\/+$/,
@@ -3422,7 +3461,8 @@ export class ContractsService {
     if (!base || settings.provider !== ContractSignatureProvider.Autentique) {
       return null;
     }
-    return `${base}/agency/contracts/webhooks/autentique/${settings.id}`;
+    const path = `${base}/agency/contracts/webhooks/autentique/${settings.id}`;
+    return category === 'document' ? `${path}/documents` : path;
   }
 
   private getSecretEncryptionKey() {
