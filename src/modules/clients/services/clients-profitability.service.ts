@@ -291,10 +291,10 @@ export class ClientsProfitabilityService {
     return value > 0 ? this.roundMoney(value) : 0;
   }
 
-  // Adds the client's contracted monthly fee to its revenue/recurring revenue
-  // and recomputes profit/margin/health. The fee is only applied when the
-  // client has no Finance recurring revenue, so it acts as a fallback and never
-  // double-counts a real recurring profile.
+  // The contract is a fallback for monthly revenue not yet covered by Finance.
+  // Issued invoices already recognize that revenue; adding the full fee again
+  // would count the same monthly service twice. Existing recurring profiles
+  // remain authoritative, and invoiced revenue above the fee is preserved.
   private applyContractedFee(
     metrics: Record<string, any>,
     client: AgencyClient | null,
@@ -304,7 +304,10 @@ export class ClientsProfitabilityService {
     if (fee <= 0) return metrics;
 
     const baseRecurring = this.toNumber(metrics.recurringRevenue);
-    const appliedFee = baseRecurring > 0 ? 0 : fee;
+    const appliedFee =
+      baseRecurring > 0
+        ? 0
+        : this.roundMoney(Math.max(0, fee - this.toNumber(metrics.revenue)));
     if (appliedFee <= 0) return metrics;
 
     const revenue = this.toNumber(metrics.revenue) + appliedFee;
