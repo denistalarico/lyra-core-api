@@ -1,3 +1,5 @@
+import { ContractDefaultsService } from './services/contract-defaults.service';
+import { ContractAdjustmentIndexService } from './services/contract-adjustment-index.service';
 import { Module } from '@nestjs/common';
 import { AiCostsModule } from '../ai-costs/ai-costs.module';
 import { ContractAiAssistController } from './ai-assist/contract-ai-assist.controller';
@@ -13,6 +15,7 @@ import { NotificationsModule } from '../notifications';
 import { PermissionsModule } from '../permissions';
 import { ContractNotificationPublisher } from './services/contract-notification.publisher';
 import {
+  ContractDefaults,
   ContractDocument,
   ContractEvent,
   ContractParty,
@@ -31,6 +34,7 @@ const AGENCY_CONNECTION = 'agency';
     PermissionsModule,
     TypeOrmModule.forFeature(
       [
+        ContractDefaults,
         ContractAiAssistRun,
         ContractTemplate,
         ContractTemplateVersion,
@@ -50,6 +54,8 @@ const AGENCY_CONNECTION = 'agency';
   ],
   providers: [
     ContractsService,
+    ContractDefaultsService,
+    ContractAdjustmentIndexService,
     ContractNotificationPublisher,
     ContractAiAssistConfigService,
     ContractAiAssistProvider,

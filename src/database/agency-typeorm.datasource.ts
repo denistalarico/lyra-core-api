@@ -1,5 +1,6 @@
 import { CreateContractAiAssistRuns1799200000000 } from './migrations/1799200000000-create-contract-ai-assist-runs';
 import { AddContractDocumentWebhookSecret1799300000000 } from './migrations/1799300000000-add-contract-document-webhook-secret';
+import { AddContractKindsDefaultsAttachments1799400000000 } from './migrations/1799400000000-add-contract-kinds-defaults-attachments';
 import 'reflect-metadata';
 import { CreateMeetingAiProcessing1798900000000 } from './migrations/1798900000000-create-meeting-ai-processing';
 import { DataSource } from 'typeorm';
@@ -532,5 +533,6 @@ export const AgencyDataSource = new DataSource({
     AddKnowledgeAuthorDisplay1799100000000,
     CreateContractAiAssistRuns1799200000000,
     AddContractDocumentWebhookSecret1799300000000,
+    AddContractKindsDefaultsAttachments1799400000000,
   ],
 });

@@ -358,10 +358,32 @@ const contractorHomeHourServices: ContractTemplateContent = {
   footerHtml: `<p>Contrato nº {{contract.number}}</p>`,
 };
 
+const clientTermContent: Record<string, ContractTemplateContent> = {
+  client_amendment: {
+    headerHtml: '<h1>Termo aditivo {{term.number}}</h1>',
+    bodyHtml:
+      '<p>{{agency.legalName}} e {{client.legalName}} registram o aditivo ao contrato {{contract.number}} — {{parentContract.title}}, iniciado em {{contract.startDate}}.</p><p>{{term.description}}</p><p>Novo valor mensal, quando acordado: {{term.newMonthlyValue}}.</p><p>Nova data de término, quando acordada: {{term.newEndDate}}.</p><p>As demais condições permanecem conforme o contrato principal.</p>',
+    footerHtml: '<p>{{term.date}}</p>',
+  },
+  client_settlement: {
+    headerHtml: '<h1>Termo de quitação {{term.number}}</h1>',
+    bodyHtml:
+      '<p>{{agency.legalName}} e {{client.legalName}} registram a quitação referente ao contrato {{contract.number}} — {{parentContract.title}}.</p><p>Período: {{term.settlementPeriod}}. Valor: {{term.settlementAmount}}.</p><p>{{term.description}}</p>',
+    footerHtml: '<p>{{term.date}}</p>',
+  },
+  client_termination: {
+    headerHtml: '<h1>Termo de rescisão {{term.number}}</h1>',
+    bodyHtml:
+      '<p>{{agency.legalName}} e {{client.legalName}} registram o encerramento do contrato {{contract.number}} — {{parentContract.title}} em {{term.effectiveDate}}.</p><p>{{term.terminationReason}}</p><p>{{term.description}}</p><p>Encargos acordados, quando aplicáveis: {{term.terminationFee}}.</p>',
+    footerHtml: '<p>{{term.date}}</p>',
+  },
+};
+
 export function getContractTemplateContentByPresetKey(
   presetKey: string,
 ): ContractTemplateContent | null {
   const map: Record<string, ContractTemplateContent> = {
+    ...clientTermContent,
     client_recurring_marketing_services: clientRecurringMarketingServices,
     client_short_term_marketing_services: clientShortTermMarketingServices,
     mei_contractor_monthly_services: meiContractorMonthlyServices,

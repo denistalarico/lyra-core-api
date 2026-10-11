@@ -147,6 +147,11 @@ export class ContractAiAssistService {
         ...applied,
         suggestions: response.output.suggestions,
         reviewNotes: response.output.reviewNotes,
+        contractDefaults: Object.fromEntries(
+          Object.entries(response.output.contractDefaults).filter(
+            (entry): entry is [string, string] => entry[1] !== null,
+          ),
+        ),
         usage: {
           inputTokens: response.usage.inputTokens ?? null,
           outputTokens: response.usage.outputTokens ?? null,

@@ -1,3 +1,4 @@
+import { CONTRACT_DEFAULT_KEYS } from '../contract-defaults.catalog';
 import { DataSource, type EntityManager } from 'typeorm';
 import { ContractAiAssistService } from './contract-ai-assist.service';
 import { ContractAiAssistConfigService } from './contract-ai-assist-config.service';
@@ -44,6 +45,9 @@ const response: ContractAiAssistProviderResult = {
       locale: null,
     },
     reviewNotes: [],
+    contractDefaults: Object.fromEntries(
+      CONTRACT_DEFAULT_KEYS.map((key) => [key, null]),
+    ),
   },
 };
 
@@ -150,6 +154,28 @@ describe('ContractAiAssistService', () => {
   });
   afterEach(() => {
     process.env = originalEnv;
+  });
+
+  it('carries only non-null defaults through one provider call and one ledger entry', async () => {
+    const h = harness();
+    h.generate.mockResolvedValue({
+      ...response,
+      output: {
+        ...response.output,
+        contractDefaults: {
+          ...response.output.contractDefaults,
+          'contract.city': 'São Paulo',
+          'contract.autoRenewal': 'monthly',
+        },
+      },
+    });
+    const result = await h.service.assist(context, dto, 'defaults');
+    expect(result.contractDefaults).toEqual({
+      'contract.city': 'São Paulo',
+      'contract.autoRenewal': 'monthly',
+    });
+    expect(h.generate).toHaveBeenCalledTimes(1);
+    expect(h.entries).toHaveLength(1);
   });
 
   it('returns a sanitized result and atomically records unknown/unpriced internal agency cost', async () => {

@@ -1,3 +1,4 @@
+import { ContractDocumentKind } from '../enums';
 import { Logger } from '@nestjs/common';
 import {
   NotificationActorType,
@@ -179,6 +180,8 @@ function makeContract(overrides: Partial<ContractRecord> = {}): ContractRecord {
     tenantId: 'tenant-1',
     workspaceId: 'workspace-1',
     title: 'Contrato de prestacao de servicos',
+    documentKind: ContractDocumentKind.Contract,
+    parentContractId: null,
     targetType: ContractTargetType.Client,
     targetId: 'client-1',
     templateId: null,

@@ -1,3 +1,4 @@
+import { CONTRACT_DEFAULT_KEYS } from '../contract-defaults.catalog';
 import { ContractAiAssistConfigService } from './contract-ai-assist-config.service';
 import {
   ContractAiAssistProvider,
@@ -24,6 +25,9 @@ const output: ContractAiAssistOutput = {
     locale: null,
   },
   reviewNotes: [],
+  contractDefaults: Object.fromEntries(
+    CONTRACT_DEFAULT_KEYS.map((key) => [key, null]),
+  ),
 };
 const input = {
   sourceText: 'ACME',
@@ -195,6 +199,51 @@ describe('ContractAiAssistProvider', () => {
     respond();
     expect((await provider().generate(input, 'run-id')).paid).toBe(true);
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('v2 schema requires exactly 25 nullable defaults and valid enum values', () => {
+    const schema = contractAiAssistSchema([]);
+    expect(schema.name).toBe('contract_variables_v2');
+    expect(schema.schema.properties.contractDefaults.required).toHaveLength(25);
+    expect(schema.schema.properties.contractDefaults.required).toEqual(
+      CONTRACT_DEFAULT_KEYS,
+    );
+  });
+  it('normalizes invalid extracted values to null without rejecting paid work', async () => {
+    respond({
+      ...output,
+      contractDefaults: {
+        ...output.contractDefaults,
+        'contract.city': 'São Paulo',
+        'contract.dueDay': '32',
+        'contract.autoRenewal': 'invented',
+        'contract.adjustmentPercent': '10,1250',
+        'contract.noticeDays': 'word',
+        'service.businessHours': 'x'.repeat(2001),
+      },
+    });
+    const result = await provider().generate(input, 'run-id');
+    expect(result.paid).toBe(true);
+    expect(result.output.contractDefaults).toMatchObject({
+      'contract.city': 'São Paulo',
+      'contract.dueDay': null,
+      'contract.autoRenewal': null,
+      'contract.adjustmentPercent': '10,1250',
+      'contract.noticeDays': null,
+      'service.businessHours': null,
+    });
+  });
+  it('extra or missing defaults keys still invalidate paid response', async () => {
+    for (const contractDefaults of [
+      { ...output.contractDefaults, unknown: 'unsafe' },
+      {},
+    ]) {
+      respond({ ...output, contractDefaults });
+      await expect(provider().generate(input, 'run-id')).rejects.toMatchObject({
+        reason: 'invalid_response',
+        paid: true,
+      });
+    }
   });
 
   it('maps network failures to a safe error', async () => {

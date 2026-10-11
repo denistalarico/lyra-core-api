@@ -22,6 +22,9 @@ export enum ContractCategory {
   Vendor = 'vendor',
   Partnership = 'partnership',
   Other = 'other',
+  Amendment = 'amendment',
+  Settlement = 'settlement',
+  Termination = 'termination',
 }
 
 export enum ContractStatus {
@@ -79,6 +82,8 @@ export enum ContractDocumentType {
 }
 
 export enum ContractEventType {
+  Renewed = 'contract.renewed',
+  TermCreated = 'contract.term_created',
   Created = 'contract.created',
   Updated = 'contract.updated',
   Generated = 'contract.generated',
@@ -128,4 +133,19 @@ export enum ContractFooterPreset {
   Company = 'company',
   Legal = 'legal',
   None = 'none',
+}
+
+export enum ContractDocumentKind {
+  Contract = 'contract',
+  Amendment = 'amendment',
+  Settlement = 'settlement',
+  Termination = 'termination',
+}
+export enum ContractAttachmentKind {
+  ContractPdf = 'contract_pdf',
+  Quote = 'quote',
+  Amendment = 'amendment',
+  Settlement = 'settlement',
+  Termination = 'termination',
+  Other = 'other',
 }

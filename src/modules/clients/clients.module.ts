@@ -1,3 +1,4 @@
+import { ContractRecord, ContractDefaults } from '../contracts/entities';
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AgencyActivity, AgencyActivityLink } from '../activities/entities';
@@ -39,6 +40,8 @@ const AGENCY_CONNECTION = 'agency';
     PermissionsModule,
     TypeOrmModule.forFeature(
       [
+        ContractRecord,
+        ContractDefaults,
         AgencyClient,
         AgencyClientCompanyContext,
         CompanyContextReconciliationAudit,

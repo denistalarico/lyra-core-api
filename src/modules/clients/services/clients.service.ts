@@ -534,15 +534,20 @@ export class ClientsService {
   }
 
   async getOverview(context: RequestContext, clientId: string) {
-    const [client, profitability, counters, costCenter] = await Promise.all([
-      this.findOneWithProducts(context, clientId),
-      this.clientsProfitabilityService.getClientProfitability(
-        context,
-        clientId,
-      ),
-      this.getCounters(context, clientId),
-      this.clientCostCenterService.findLinkedCostCenter(context, clientId),
-    ]);
+    const [client, profitability, counters, costCenter, contractTerm] =
+      await Promise.all([
+        this.findOneWithProducts(context, clientId),
+        this.clientsProfitabilityService.getClientProfitability(
+          context,
+          clientId,
+        ),
+        this.getCounters(context, clientId),
+        this.clientCostCenterService.findLinkedCostCenter(context, clientId),
+        this.clientsProfitabilityService.getClientContractTerm(
+          context,
+          clientId,
+        ),
+      ]);
 
     return {
       client,
@@ -553,6 +558,7 @@ export class ClientsService {
         (profitability as { profitability?: unknown }).profitability ?? null,
       costCenter,
       recent: null,
+      contractTerm,
     };
   }
 

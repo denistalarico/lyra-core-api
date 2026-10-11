@@ -1,3 +1,4 @@
+import { ContractDocumentKind } from '../enums';
 import { createHmac } from 'crypto';
 import { Repository } from 'typeorm';
 import {
@@ -728,6 +729,8 @@ function makeContract(overrides: Partial<ContractRecord> = {}): ContractRecord {
     tenantId: 'tenant-1',
     workspaceId: 'workspace-1',
     title: 'Contrato de prestacao de servicos',
+    documentKind: ContractDocumentKind.Contract,
+    parentContractId: null,
     targetType: ContractTargetType.Client,
     targetId: 'client-1',
     templateId: null,
@@ -816,6 +819,7 @@ function makeDocument(
     tenantId: 'tenant-1',
     workspaceId: 'workspace-1',
     contractId: 'contract-1',
+    attachmentKind: null,
     type: ContractDocumentType.GeneratedPdf,
     fileName: 'contrato.pdf',
     fileKey: 'contracts/contrato.pdf',

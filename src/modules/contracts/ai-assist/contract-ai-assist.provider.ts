@@ -1,3 +1,8 @@
+import {
+  CONTRACT_DEFAULT_KEYS,
+  CONTRACT_DEFAULTS_CATALOG,
+  normalizeExtractedContractDefault,
+} from '../contract-defaults.catalog';
 import { Injectable } from '@nestjs/common';
 import { ContractAiAssistConfigService } from './contract-ai-assist-config.service';
 import { CONTRACT_CLIENT_VARIABLE_CATALOG } from './contract-variable-catalog';
@@ -9,7 +14,7 @@ import {
   type ContractAiAssistUsage,
 } from './contract-ai-assist.types';
 
-export const CONTRACT_AI_ASSIST_PROMPT_VERSION = 'contract-variables-v1';
+export const CONTRACT_AI_ASSIST_PROMPT_VERSION = 'contract-variables-v2';
 const VARIABLE_KEYS = CONTRACT_CLIENT_VARIABLE_CATALOG.map((v) => v.key);
 const SUGGESTION_LIMITS = {
   name: 160,
@@ -35,6 +40,9 @@ export class ContractAiAssistProvider {
     if (this.config.mode === 'mock')
       return {
         output: {
+          contractDefaults: Object.fromEntries(
+            CONTRACT_DEFAULT_KEYS.map((key) => [key, null]),
+          ),
           replacements: [],
           headings: [],
           suggestions: {
@@ -153,7 +161,9 @@ function systemPrompt(): string {
     'Nunca reescreva, resuma ou devolva o corpo do contrato. Retorne apenas o mapa de trechos literais para chaves do catálogo, headings, sugestões e notas de revisão. originalText deve ser uma cópia literal de um nó de texto (em HTML, use o texto visível com entidades decodificadas), com pelo menos 3 caracteres. ' +
     'Não altere {{variáveis}} existentes. Não invente valores, cláusulas ou chaves. headings contém apenas linhas de título copiadas literalmente do texto. ' +
     'Só sugira campos suportados pelo contrato e use null quando não houver evidência; category é o value de uma opção fornecida, nunca o label. Inclua ambiguidades e pontos jurídicos para revisão humana. ' +
-    'Catálogo permitido: ' +
+    'Em contractDefaults extraia só condições declaradas literalmente; use null sem evidência. Para presets e selects retorne o código da opção, para números retorne string curta, para texto copie literalmente até 2000 caracteres. Não infira condições usuais. Catálogo de defaults: ' +
+    JSON.stringify(CONTRACT_DEFAULTS_CATALOG) +
+    '. Catálogo permitido: ' +
     JSON.stringify(CONTRACT_CLIENT_VARIABLE_CATALOG)
   );
 }
@@ -166,13 +176,35 @@ export function contractAiAssistSchema(
     maxLength,
   });
   return {
-    name: 'contract_variables_v1',
+    name: 'contract_variables_v2',
     strict: true,
     schema: {
       type: 'object',
       additionalProperties: false,
-      required: ['replacements', 'headings', 'suggestions', 'reviewNotes'],
+      required: [
+        'replacements',
+        'headings',
+        'suggestions',
+        'reviewNotes',
+        'contractDefaults',
+      ],
       properties: {
+        contractDefaults: {
+          type: 'object',
+          additionalProperties: false,
+          required: CONTRACT_DEFAULT_KEYS,
+          properties: Object.fromEntries(
+            CONTRACT_DEFAULTS_CATALOG.map((definition) => [
+              definition.key,
+              definition.options
+                ? {
+                    type: ['string', 'null'],
+                    enum: [...definition.options, null],
+                  }
+                : { type: ['string', 'null'], maxLength: 2000 },
+            ]),
+          ),
+        },
         replacements: {
           type: 'array',
           maxItems: 200,
@@ -243,6 +275,7 @@ function validateOutput(
       'headings',
       'suggestions',
       'reviewNotes',
+      'contractDefaults',
     ])
   )
     throw new Error();
@@ -268,6 +301,15 @@ function validateOutput(
     throw new Error();
   if (!exactKeys(value.suggestions, Object.keys(SUGGESTION_LIMITS)))
     throw new Error();
+  if (!exactKeys(value.contractDefaults, CONTRACT_DEFAULT_KEYS))
+    throw new Error();
+  const defaults = value.contractDefaults;
+  value.contractDefaults = Object.fromEntries(
+    CONTRACT_DEFAULTS_CATALOG.map((definition) => [
+      definition.key,
+      normalizeExtractedContractDefault(definition, defaults[definition.key]),
+    ]),
+  );
   const suggestions = value.suggestions;
   for (const [key, limit] of Object.entries(SUGGESTION_LIMITS))
     if (suggestions[key] !== null && !text(suggestions[key], limit))

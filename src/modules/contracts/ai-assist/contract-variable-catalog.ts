@@ -210,6 +210,11 @@ export const CONTRACT_CLIENT_VARIABLE_CATALOG = [
     description: 'Condições específicas do contrato: Condições de pagamento.',
   },
   {
+    key: 'contract.adjustmentPercent',
+    label: 'Percentual de reajuste (%)',
+    description: 'Percentual fixo de reajuste declarado no contrato.',
+  },
+  {
     key: 'contract.adjustmentIndex',
     label: 'Índice de reajuste',
     description: 'Condições específicas do contrato: Índice de reajuste.',

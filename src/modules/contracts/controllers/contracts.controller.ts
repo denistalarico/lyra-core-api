@@ -1,3 +1,7 @@
+import { RenewContractDto } from '../dto/renew-contract.dto';
+import { CreateContractTermDto } from '../dto/create-contract-term.dto';
+import { UploadContractAttachmentDto } from '../dto/upload-contract-attachment.dto';
+import { ListContractDocumentsQueryDto } from '../dto/list-contract-documents-query.dto';
 import {
   Body,
   Controller,
@@ -10,6 +14,13 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
+import { ContractDefaultsService } from '../services/contract-defaults.service';
+import { ContractAdjustmentIndexService } from '../services/contract-adjustment-index.service';
+import {
+  ContractDefaultsQueryDto,
+  UpdateContractDefaultsDto,
+} from '../dto/update-contract-defaults.dto';
+import { ContractAdjustmentIndexQueryDto } from '../dto/contract-adjustment-index-query.dto';
 import { ContractsService } from '../services/contracts.service';
 import {
   CreateContractFromTemplateDto,
@@ -48,7 +59,35 @@ import {
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 @Controller('agency/contracts')
 export class ContractsController {
-  constructor(private readonly contractsService: ContractsService) {}
+  constructor(
+    private readonly contractsService: ContractsService,
+    private readonly defaultsService: ContractDefaultsService,
+    private readonly adjustmentIndexService: ContractAdjustmentIndexService,
+  ) {}
+
+  @Get('defaults')
+  @RequirePermission('agency.contracts.create.from_template')
+  getDefaults(
+    @AuthorizedContext() context: AuthorizedRequestContext,
+    @Query() query: ContractDefaultsQueryDto,
+  ) {
+    return this.defaultsService.get(context, query.targetType);
+  }
+
+  @Put('defaults')
+  @RequirePermission('agency.contracts.templates.manage.admin')
+  putDefaults(
+    @AuthorizedContext() context: AuthorizedRequestContext,
+    @Body() dto: UpdateContractDefaultsDto,
+  ) {
+    return this.defaultsService.put(context, dto);
+  }
+
+  @Get('adjustment-index')
+  @RequirePermission('agency.contracts.create.from_template')
+  getAdjustmentIndex(@Query() query: ContractAdjustmentIndexQueryDto) {
+    return this.adjustmentIndexService.get(query);
+  }
 
   // TODO(permissions): enforce assigned/client/department contract scope when
   // scoped evaluators are available for contract records.
@@ -90,7 +129,7 @@ export class ContractsController {
   // ─── Template CRUD ───────────────────────────────────────────────────────────
 
   @Get('templates')
-  @RequirePermission('agency.contracts.templates.manage.admin')
+  @RequirePermission('agency.contracts.create.from_template')
   listTemplates(
     @AuthorizedContext() context: AuthorizedRequestContext,
     @Query() query: ListContractTemplatesQueryDto,
@@ -165,7 +204,7 @@ export class ContractsController {
 
   @Post('templates/:id/archive')
   @DangerousAction()
-  @RequirePermission('agency.contracts.archive.admin')
+  @RequirePermission('agency.contracts.templates.manage.admin')
   archiveTemplate(
     @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
@@ -184,7 +223,7 @@ export class ContractsController {
   }
 
   @Get('templates/:id')
-  @RequirePermission('agency.contracts.templates.manage.admin')
+  @RequirePermission('agency.contracts.create.from_template')
   findTemplate(
     @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
@@ -272,6 +311,26 @@ export class ContractsController {
     @Body() dto: CreateContractRecordDto,
   ) {
     return this.contractsService.createContract(context, dto);
+  }
+
+  @Post(':id/renew')
+  @RequirePermission('agency.contracts.create.from_template')
+  renew(
+    @AuthorizedContext() context: AuthorizedRequestContext,
+    @Param('id') id: string,
+    @Body() dto: RenewContractDto,
+  ) {
+    return this.contractsService.renewContract(context, id, dto);
+  }
+
+  @Post(':id/terms')
+  @RequirePermission('agency.contracts.create.from_template')
+  createTerm(
+    @AuthorizedContext() context: AuthorizedRequestContext,
+    @Param('id') id: string,
+    @Body() dto: CreateContractTermDto,
+  ) {
+    return this.contractsService.createContractTerm(context, id, dto);
   }
 
   @Get(':id/events')
@@ -370,9 +429,19 @@ export class ContractsController {
   uploadContractAttachment(
     @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
-    @Body() dto: UploadManuallySignedContractDto,
+    @Body() dto: UploadContractAttachmentDto,
   ) {
     return this.contractsService.uploadContractAttachment(context, id, dto);
+  }
+
+  @Get(':id/documents')
+  @RequirePermission('agency.contracts.view.assigned')
+  listDocuments(
+    @AuthorizedContext() context: AuthorizedRequestContext,
+    @Param('id') id: string,
+    @Query() query: ListContractDocumentsQueryDto,
+  ) {
+    return this.contractsService.listDocuments(context, id, query.type);
   }
 
   @Get(':id/documents/:documentId/file')

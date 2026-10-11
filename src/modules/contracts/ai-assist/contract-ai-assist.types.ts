@@ -27,6 +27,7 @@ export interface ContractAiAssistReviewNote {
 }
 
 export interface ContractAiAssistOutput {
+  contractDefaults: Record<string, string | null>;
   replacements: ContractVariableMapping[];
   headings: string[];
   suggestions: ContractAiAssistSuggestions;
@@ -45,6 +46,7 @@ export interface ContractAiAssistResult {
   model: string;
   promptVersion: string;
   bodyHtml: string;
+  contractDefaults?: Partial<Record<string, string>>;
   suggestions: ContractAiAssistSuggestions;
   replacements: ContractAppliedMapping[];
   unresolved: ContractUnresolvedMapping[];

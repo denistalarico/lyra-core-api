@@ -1,3 +1,18 @@
+function contractRepositories() {
+  const query = {
+    select: jest.fn().mockReturnThis(),
+    addSelect: jest.fn().mockReturnThis(),
+    distinctOn: jest.fn().mockReturnThis(),
+    where: jest.fn().mockReturnThis(),
+    andWhere: jest.fn().mockReturnThis(),
+    orderBy: jest.fn().mockReturnThis(),
+    getRawMany: jest.fn().mockResolvedValue([]),
+  };
+  return [
+    { createQueryBuilder: () => query },
+    { findOne: jest.fn().mockResolvedValue(null) },
+  ] as const;
+}
 import { IsNull, Not } from 'typeorm';
 import { AgencyClientStatus } from '../enums';
 import { ClientsProfitabilityService } from './clients-profitability.service';
@@ -80,6 +95,8 @@ describe('ClientsProfitabilityService', () => {
       const service = new ClientsProfitabilityService(
         finance as never,
         repository as never,
+        contractRepositories()[0] as never,
+        contractRepositories()[1] as never,
       );
       const portfolio = await service.getPortfolio(CONTEXT);
       const detail = await service.getClientProfitability(CONTEXT, client.id);
@@ -114,6 +131,8 @@ describe('ClientsProfitabilityService', () => {
     const service = new ClientsProfitabilityService(
       finance as never,
       repository as never,
+      contractRepositories()[0] as never,
+      contractRepositories()[1] as never,
     );
     const result = await service.getPortfolioMonthlyProfitability(CONTEXT, {
       months: 6,
@@ -178,6 +197,8 @@ describe('ClientsProfitabilityService', () => {
     const service = new ClientsProfitabilityService(
       financeProfitabilityService as never,
       clientsRepository as never,
+      contractRepositories()[0] as never,
+      contractRepositories()[1] as never,
     );
 
     const result = await service.getClientProfitability(CONTEXT, 'client-1');

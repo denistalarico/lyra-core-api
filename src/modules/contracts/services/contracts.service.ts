@@ -1,4 +1,21 @@
 import {
+  buildContractRenewal,
+  contractRuleError,
+  contractMoneyUnits,
+  formatContractMoney,
+} from '../contract-renewal';
+import { RenewContractDto } from '../dto/renew-contract.dto';
+import { CreateContractTermDto } from '../dto/create-contract-term.dto';
+import { contractToday, isSignedContract } from '../contract-term';
+import { decodeContractUpload } from '../contract-upload';
+import { contractObject } from '../contract-term';
+import { UploadContractAttachmentDto } from '../dto/upload-contract-attachment.dto';
+import {
+  ContractAttachmentKind,
+  ContractTargetType,
+  ContractDocumentKind,
+} from '../enums';
+import {
   BadGatewayException,
   BadRequestException,
   ConflictException,
@@ -11,7 +28,15 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Brackets, In, Raw, Repository } from 'typeorm';
+import {
+  Brackets,
+  In,
+  Raw,
+  Repository,
+  IsNull,
+  Not,
+  EntityManager,
+} from 'typeorm';
 import {
   CreateBucketCommand,
   GetObjectCommand,
@@ -224,7 +249,7 @@ export class ContractsService {
       jurisdictionRegion: null,
       templateSource: ContractTemplateSource.Preset,
       editorMode: ContractTemplateEditorMode.Html,
-      legalDisclaimer: null,
+      legalDisclaimer: preset.legalDisclaimer ?? null,
       metadata: { ...(dto.metadata ?? {}), presetKey: preset.key },
       createdById: context.userId,
       updatedById: context.userId,
@@ -677,6 +702,15 @@ export class ContractsService {
         workspaceId: context.workspaceId,
       });
 
+    if (query.documentKind !== 'all')
+      qb.andWhere('contract.document_kind = :documentKind', {
+        documentKind: query.documentKind ?? ContractDocumentKind.Contract,
+      });
+    if (query.parentContractId)
+      qb.andWhere('contract.parent_contract_id = :parentContractId', {
+        parentContractId: query.parentContractId,
+      });
+
     if (query.includeArchived !== 'true') {
       qb.andWhere('contract.archived_at IS NULL');
     }
@@ -722,6 +756,494 @@ export class ContractsService {
     }
 
     return qb.orderBy('contract.updated_at', 'DESC').getMany();
+  }
+
+  async renewContract(
+    context: RequestContext,
+    id: string,
+    dto: RenewContractDto,
+  ) {
+    const saved = await this.contractsRepository.manager.transaction(
+      async (manager) => {
+        const records = manager.getRepository(ContractRecord),
+          events = manager.getRepository(ContractEvent);
+        const parent = await this.lockClientContract(manager, context, id);
+        if (parent.metadata.termination)
+          contractRuleError('contract_terminated');
+        const successor = await records.findOne({
+          where: {
+            tenantId: context.tenantId,
+            workspaceId: context.workspaceId,
+            parentContractId: parent.id,
+            documentKind: ContractDocumentKind.Contract,
+            cancelledAt: IsNull(),
+            archivedAt: IsNull(),
+            status: Not(
+              In([ContractStatus.Cancelled, ContractStatus.Archived]),
+            ),
+          },
+        });
+        if (successor) contractRuleError('contract_already_renewed', 409);
+        const draft = buildContractRenewal(parent, dto, contractToday());
+        let templateVersionId = parent.templateVersionId;
+        if (parent.templateId) {
+          const template = await manager
+            .getRepository(ContractTemplate)
+            .findOne({
+              where: {
+                id: parent.templateId,
+                tenantId: context.tenantId,
+                workspaceId: context.workspaceId,
+              },
+            });
+          if (!template) throw new NotFoundException('Template not found');
+          if (template.status !== ContractTemplateStatus.Archived) {
+            const version = await manager
+              .getRepository(ContractTemplateVersion)
+              .findOne({
+                where: {
+                  templateId: template.id,
+                  tenantId: context.tenantId,
+                  workspaceId: context.workspaceId,
+                },
+                order: { version: 'DESC' },
+              });
+            templateVersionId = version?.id ?? null;
+          }
+        }
+        const contract = await records.save(
+          records.create({
+            tenantId: context.tenantId,
+            workspaceId: context.workspaceId,
+            title: dto.title ?? parent.title,
+            targetType: parent.targetType,
+            targetId: parent.targetId,
+            documentKind: ContractDocumentKind.Contract,
+            parentContractId: parent.id,
+            templateId: parent.templateId,
+            templateVersionId,
+            status: ContractStatus.Draft,
+            signatureMode: parent.signatureMode,
+            signatureProvider: ContractSignatureProvider.None,
+            externalDocumentId: null,
+            variablesData: draft.variablesData,
+            generatedHtml: null,
+            validFrom: draft.validFrom,
+            validUntil: draft.validUntil,
+            signedAt: null,
+            completedAt: null,
+            cancelledAt: null,
+            archivedAt: null,
+            createdById: context.userId,
+            updatedById: context.userId,
+            cancelledById: null,
+            metadata: {
+              clientContract: draft.clientContract,
+              ...(parent.metadata.templateName
+                ? { templateName: parent.metadata.templateName }
+                : {}),
+              renewal: {
+                previousContractId: parent.id,
+                periodMode: dto.periodMode,
+                valueMode: dto.valueMode,
+                adjustmentIndex: dto.adjustmentIndex ?? null,
+                adjustmentPercent: dto.adjustmentPercent ?? null,
+                adjustmentSource: dto.adjustmentSource ?? 'manual',
+                indexPeriod: dto.indexPeriod ?? null,
+                previousMonthlyValue: draft.previousMonthlyValue,
+                newMonthlyValue: draft.newMonthlyValue,
+                renewedAt: new Date().toISOString(),
+                renewedById: context.userId,
+                note: dto.note ?? null,
+              },
+            },
+          }),
+        );
+        await events.save(
+          events.create({
+            tenantId: context.tenantId,
+            workspaceId: context.workspaceId,
+            contractId: contract.id,
+            type: ContractEventType.Created,
+            message: 'Contrato criado por renovação.',
+            actorUserId: context.userId,
+            metadata: { previousContractId: parent.id },
+          }),
+        );
+        await events.save(
+          events.create({
+            tenantId: context.tenantId,
+            workspaceId: context.workspaceId,
+            contractId: parent.id,
+            type: ContractEventType.Renewed,
+            message: 'Renovação de contrato registrada.',
+            actorUserId: context.userId,
+            metadata: { renewedByContractId: contract.id },
+          }),
+        );
+        // Server metadata is an audit hint; the scoped successor query remains the
+        // authority when a successor is cancelled or archived.
+        parent.metadata = {
+          ...parent.metadata,
+          renewedByContractId: contract.id,
+        };
+        await records.save(parent);
+        return contract;
+      },
+    );
+    return this.findContract(context, saved.id);
+  }
+
+  async createContractTerm(
+    context: RequestContext,
+    id: string,
+    dto: CreateContractTermDto,
+  ) {
+    const saved = await this.contractsRepository.manager.transaction(
+      async (manager) => {
+        const records = manager.getRepository(ContractRecord),
+          events = manager.getRepository(ContractEvent);
+        const parent = await this.lockClientContract(manager, context, id);
+        if (parent.metadata.termination)
+          contractRuleError(
+            dto.kind === ContractDocumentKind.Termination
+              ? 'contract_already_terminated'
+              : 'contract_terminated',
+            dto.kind === ContractDocumentKind.Termination ? 409 : 422,
+          );
+        const today = contractToday();
+        if (
+          dto.kind === ContractDocumentKind.Amendment &&
+          parent.validUntil &&
+          parent.validUntil < today
+        )
+          contractRuleError('contract_expired');
+        if (dto.kind === ContractDocumentKind.Termination && !dto.effectiveDate)
+          contractRuleError('contract_effective_date_required');
+        if (dto.kind !== ContractDocumentKind.Amendment && dto.changes)
+          contractRuleError('contract_term_changes_invalid');
+        if (
+          dto.changes?.validUntil &&
+          dto.changes.validUntil < (parent.validFrom ?? today)
+        )
+          contractRuleError('contract_term_changes_invalid');
+        let template: ContractTemplate | null = null;
+        let templateVersionId: string | null = null;
+        if (dto.templateId) {
+          template = await manager.getRepository(ContractTemplate).findOne({
+            where: {
+              id: dto.templateId,
+              tenantId: context.tenantId,
+              workspaceId: context.workspaceId,
+            },
+          });
+          if (!template) throw new NotFoundException('Template not found');
+          if (
+            template.category !== String(dto.kind) ||
+            template.targetType !== ContractTargetType.Client ||
+            template.status === ContractTemplateStatus.Archived
+          )
+            contractRuleError('contract_term_template_invalid');
+          templateVersionId =
+            (
+              await manager.getRepository(ContractTemplateVersion).findOne({
+                where: {
+                  templateId: template.id,
+                  tenantId: context.tenantId,
+                  workspaceId: context.workspaceId,
+                },
+                order: { version: 'DESC' },
+              })
+            )?.id ?? null;
+        }
+        if (dto.generateHtml && !template)
+          contractRuleError('contract_term_template_required');
+        const number =
+          (await records.count({
+            where: {
+              tenantId: context.tenantId,
+              workspaceId: context.workspaceId,
+              parentContractId: id,
+              documentKind: dto.kind,
+            },
+          })) + 1;
+        const changes = { ...dto.changes };
+        if (changes.monthlyValue !== undefined)
+          changes.monthlyValue = formatContractMoney(
+            contractMoneyUnits(changes.monthlyValue),
+          );
+        const variablesData = this.deepMerge(
+          parent.variablesData,
+          dto.variablesData ?? {},
+        );
+        Object.assign(variablesData, {
+          'term.number': `${number}º`,
+          'term.date': today,
+          'parentContract.title': parent.title,
+          ...(dto.effectiveDate
+            ? { 'term.effectiveDate': dto.effectiveDate }
+            : {}),
+          ...(changes.monthlyValue !== undefined
+            ? { 'term.newMonthlyValue': changes.monthlyValue }
+            : {}),
+          ...(changes.validUntil
+            ? { 'term.newEndDate': changes.validUntil }
+            : {}),
+        });
+        const term = records.create({
+          tenantId: context.tenantId,
+          workspaceId: context.workspaceId,
+          title: dto.title ?? `${dto.kind} — ${parent.title}`,
+          targetType: parent.targetType,
+          targetId: parent.targetId,
+          documentKind: dto.kind,
+          parentContractId: id,
+          templateId: template?.id ?? null,
+          templateVersionId,
+          status: ContractStatus.Draft,
+          signatureMode: template?.defaultSignatureMode ?? parent.signatureMode,
+          signatureProvider: ContractSignatureProvider.None,
+          externalDocumentId: null,
+          variablesData,
+          generatedHtml: null,
+          validFrom: today,
+          validUntil: null,
+          signedAt: null,
+          completedAt: null,
+          cancelledAt: null,
+          archivedAt: null,
+          createdById: context.userId,
+          updatedById: context.userId,
+          cancelledById: null,
+          metadata: {
+            clientContract: { mode: template ? 'generator' : 'manual' },
+            ...(dto.kind === ContractDocumentKind.Amendment
+              ? { amendment: { changes, state: 'pending' } }
+              : {}),
+          },
+        });
+        if (dto.generateHtml) {
+          const parts = await this.resolveTemplatePartsForTemplate(
+            context,
+            template!.id,
+            templateVersionId,
+          );
+          const missing = this.getMissingRequiredVariables(
+            parts.variablesSchema,
+            variablesData,
+          );
+          if (missing.length)
+            throw new BadRequestException({
+              message: 'Missing required contract variables',
+              missingVariables: missing,
+            });
+          term.generatedHtml = this.wrapContractHtml({
+            title: term.title,
+            locale: parts.locale,
+            headerHtml: this.renderTemplateString(
+              this.resolveHeaderHtml({
+                fallbackHtml: parts.headerHtml ?? '',
+                variablesData,
+                settings: parts,
+              }),
+              variablesData,
+            ),
+            bodyHtml: this.renderTemplateString(
+              sanitizeContractHtml(parts.bodyHtml),
+              variablesData,
+            ),
+            footerHtml: this.renderTemplateString(
+              this.resolveFooterHtml({
+                fallbackHtml: parts.footerHtml ?? '',
+                variablesData,
+                settings: parts,
+              }),
+              variablesData,
+            ),
+          });
+          term.status = ContractStatus.Generated;
+        }
+        const contract = await records.save(term);
+        if (dto.kind === ContractDocumentKind.Termination) {
+          parent.metadata = {
+            ...parent.metadata,
+            termination: {
+              termId: contract.id,
+              effectiveDate: dto.effectiveDate,
+              registeredAt: new Date().toISOString(),
+              registeredById: context.userId,
+            },
+          };
+          await records.save(parent);
+        }
+        for (const [contractId, type, message, metadata] of [
+          [
+            contract.id,
+            ContractEventType.Created,
+            'Termo criado.',
+            { parentContractId: id, kind: dto.kind },
+          ],
+          [
+            parent.id,
+            ContractEventType.TermCreated,
+            'Termo contratual registrado.',
+            { termId: contract.id, kind: dto.kind },
+          ],
+        ] as const)
+          await events.save(
+            events.create({
+              tenantId: context.tenantId,
+              workspaceId: context.workspaceId,
+              contractId,
+              type,
+              message,
+              actorUserId: context.userId,
+              metadata,
+            }),
+          );
+        return contract;
+      },
+    );
+    return this.findContract(context, saved.id);
+  }
+
+  private async lockClientContract(
+    manager: EntityManager,
+    scope: ContractScope,
+    id: string,
+  ) {
+    const parent = await manager.getRepository(ContractRecord).findOne({
+      where: { id, tenantId: scope.tenantId, workspaceId: scope.workspaceId },
+      lock: { mode: 'pessimistic_write' },
+    });
+    if (!parent) throw new NotFoundException('Contract not found');
+    if (parent.targetType !== ContractTargetType.Client)
+      contractRuleError('contract_target_not_supported');
+    if (
+      parent.documentKind !== ContractDocumentKind.Contract ||
+      parent.cancelledAt ||
+      parent.archivedAt ||
+      [ContractStatus.Cancelled, ContractStatus.Archived].includes(
+        parent.status,
+      )
+    )
+      contractRuleError('contract_parent_invalid');
+    const documents = await manager.getRepository(ContractDocument).find({
+      where: {
+        contractId: id,
+        tenantId: scope.tenantId,
+        workspaceId: scope.workspaceId,
+        type: In([
+          ContractDocumentType.SignedPdf,
+          ContractDocumentType.ManuallySignedPdf,
+        ]),
+      },
+    });
+    if (!isSignedContract({ ...parent, documents }))
+      contractRuleError('contract_not_signed');
+    return parent;
+  }
+
+  async applySignedAmendment(scope: ContractScope, term: ContractRecord) {
+    if (
+      term.documentKind !== ContractDocumentKind.Amendment ||
+      !term.parentContractId
+    )
+      return;
+    await this.contractsRepository.manager.transaction(async (manager) => {
+      const records = manager.getRepository(ContractRecord),
+        events = manager.getRepository(ContractEvent);
+      // All lifecycle mutations acquire parent first, then child. Serializes
+      // duplicate webhook/sync/uploads and concurrent amendments consistently.
+      const parent = await records.findOne({
+        where: {
+          id: term.parentContractId!,
+          tenantId: scope.tenantId,
+          workspaceId: scope.workspaceId,
+        },
+        lock: { mode: 'pessimistic_write' },
+      });
+      const fresh = await records.findOne({
+        where: {
+          id: term.id,
+          tenantId: scope.tenantId,
+          workspaceId: scope.workspaceId,
+        },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!parent || !fresh) throw new NotFoundException('Contract not found');
+      const amendment = contractObject(fresh.metadata.amendment);
+      if (amendment.state !== 'pending') return;
+      const documents = await manager.getRepository(ContractDocument).find({
+        where: {
+          contractId: fresh.id,
+          tenantId: scope.tenantId,
+          workspaceId: scope.workspaceId,
+          type: In([
+            ContractDocumentType.SignedPdf,
+            ContractDocumentType.ManuallySignedPdf,
+          ]),
+        },
+      });
+      if (!isSignedContract({ ...fresh, documents })) return;
+      const signedDay = contractToday(fresh.signedAt ?? new Date());
+      const termination = contractObject(parent.metadata.termination);
+      const voidReason =
+        parent.validUntil && signedDay > parent.validUntil
+          ? 'parent_expired'
+          : parent.cancelledAt ||
+              parent.archivedAt ||
+              [ContractStatus.Cancelled, ContractStatus.Archived].includes(
+                parent.status,
+              ) ||
+              (typeof termination.effectiveDate === 'string' &&
+                termination.effectiveDate <= signedDay)
+            ? 'parent_terminated'
+            : null;
+      const changes = contractObject(amendment.changes),
+        now = new Date().toISOString();
+      if (!voidReason && Object.keys(changes).length) {
+        parent.metadata = {
+          ...parent.metadata,
+          effectiveTerms: {
+            ...contractObject(parent.metadata.effectiveTerms),
+            ...changes,
+            sourceTermId: fresh.id,
+            appliedAt: now,
+          },
+        };
+        if (typeof changes.validUntil === 'string')
+          parent.validUntil = changes.validUntil;
+        await records.save(parent);
+      }
+      fresh.metadata = {
+        ...fresh.metadata,
+        amendment: {
+          ...amendment,
+          state: voidReason ? 'void' : 'applied',
+          ...(voidReason ? { voidReason } : { appliedAt: now }),
+        },
+      };
+      await records.save(fresh);
+      term.metadata = fresh.metadata;
+      await events.save(
+        events.create({
+          tenantId: scope.tenantId,
+          workspaceId: scope.workspaceId,
+          contractId: parent.id,
+          type: ContractEventType.Updated,
+          message: voidReason
+            ? 'Aditivo assinado sem efeito.'
+            : 'Aditivo assinado aplicado.',
+          actorUserId: scope.userId ?? null,
+          metadata: {
+            sourceTermId: fresh.id,
+            amendmentState: voidReason ? 'void' : 'applied',
+            voidReason,
+          },
+        }),
+      );
+    });
   }
 
   async getTemplateSchema(context: RequestContext, templateId: string) {
@@ -813,6 +1335,8 @@ export class ContractsService {
       workspaceId: context.workspaceId,
       title: dto.title,
       targetType: template.targetType,
+      documentKind: ContractDocumentKind.Contract,
+      parentContractId: null,
       targetId: dto.targetId ?? null,
       templateId: template.id,
       templateVersionId: templateParts.templateVersionId,
@@ -866,6 +1390,8 @@ export class ContractsService {
       workspaceId: context.workspaceId,
       title: dto.title,
       targetType: dto.targetType,
+      documentKind: ContractDocumentKind.Contract,
+      parentContractId: null,
       targetId: dto.targetId ?? null,
       templateId: dto.templateId ?? null,
       templateVersionId: dto.templateVersionId ?? null,
@@ -944,10 +1470,39 @@ export class ContractsService {
   ) {
     const contract = await this.getContractOrFail(context, id);
 
-    Object.assign(contract, {
-      ...dto,
-      updatedById: context.userId,
-    });
+    const changes = Object.fromEntries(
+      Object.entries(dto).filter(([, value]) => value !== undefined),
+    );
+    if (changes.metadata) {
+      const metadata = Object.fromEntries(
+        Object.entries(changes.metadata as Record<string, unknown>).filter(
+          ([key]) =>
+            !/^(autentique|signatureProvider|manuallySigned)/.test(key) &&
+            ![
+              'createdFromTemplate',
+              'templateName',
+              'renewal',
+              'renewedByContractId',
+              'termination',
+              'effectiveTerms',
+              'amendment',
+            ].includes(key),
+        ),
+      );
+      // Signature evidence and amendment effects are written only by the server.
+      if (
+        metadata.clientContract &&
+        typeof metadata.clientContract === 'object'
+      ) {
+        const clientContract = {
+          ...(metadata.clientContract as Record<string, unknown>),
+        };
+        delete clientContract.attachedPdf;
+        metadata.clientContract = clientContract;
+      }
+      changes.metadata = this.deepMerge(contract.metadata ?? {}, metadata);
+    }
+    Object.assign(contract, changes, { updatedById: context.userId });
 
     const saved = await this.contractsRepository.save(contract);
 
@@ -957,7 +1512,7 @@ export class ContractsService {
       ContractEventType.Updated,
       'Contrato atualizado.',
       {
-        updatedFields: Object.keys(dto),
+        updatedFields: Object.keys(changes),
       },
     );
 
@@ -2036,6 +2591,15 @@ export class ContractsService {
     },
   ) {
     if (!isContractInSignatureFlow(contract.status)) {
+      if (
+        [ContractStatus.DigitallySigned, ContractStatus.Completed].includes(
+          contract.status,
+        )
+      )
+        await this.applySignedAmendment(
+          { ...scope, userId: options.actorUserId },
+          contract,
+        );
       return { changed: false, needsSignedPdf: false };
     }
 
@@ -2113,6 +2677,16 @@ export class ContractsService {
           },
         })) ?? contract)
       : contract;
+
+    if (
+      [ContractStatus.DigitallySigned, ContractStatus.Completed].includes(
+        fresh.status,
+      )
+    )
+      await this.applySignedAmendment(
+        { ...scope, userId: options.actorUserId },
+        fresh,
+      );
 
     if (changed) {
       const actorScope = { ...scope, userId: options.actorUserId };
@@ -2510,49 +3084,49 @@ export class ContractsService {
   ) {
     const contract = await this.getContractOrFail(context, id);
 
+    const signedDocumentId = contract.metadata.manuallySignedPdfDocumentId;
     if (
-      [
-        ContractStatus.Completed,
-        ContractStatus.Cancelled,
-        ContractStatus.Archived,
-      ].includes(contract.status)
+      contract.documentKind === ContractDocumentKind.Amendment &&
+      contract.status === ContractStatus.Completed &&
+      typeof signedDocumentId === 'string'
+    ) {
+      // Resume an interrupted effect application without uploading twice. The
+      // signed document and completion may already have persisted on attempt 1.
+      await this.applySignedAmendment(context, contract);
+      const document = await this.documentsRepository.findOne({
+        where: {
+          id: signedDocumentId,
+          contractId: id,
+          tenantId: context.tenantId,
+          workspaceId: context.workspaceId,
+        },
+      });
+      if (!document) throw new NotFoundException('Signed document not found');
+      return { contract, document };
+    }
+
+    if (
+      [ContractStatus.Cancelled, ContractStatus.Archived].includes(
+        contract.status,
+      ) ||
+      (contract.status === ContractStatus.Completed &&
+        !contract.metadata.manuallySignedWithoutUpload)
     ) {
       throw new BadRequestException(
         'Contract cannot receive a manually signed upload in current status',
       );
     }
 
-    const mimeType = dto.mimeType ?? 'application/pdf';
+    const { buffer, mimeType, extension } = decodeContractUpload(dto, true);
 
-    if (mimeType !== 'application/pdf') {
-      throw new BadRequestException('Only PDF uploads are supported for now');
-    }
-
-    const normalizedBase64 = dto.fileBase64.includes(',')
-      ? (dto.fileBase64.split(',').pop() ?? '')
-      : dto.fileBase64;
-
-    const buffer = Buffer.from(normalizedBase64, 'base64');
-
-    if (!buffer.length) {
-      throw new BadRequestException('Invalid fileBase64 payload');
-    }
-
-    const pdfHeader = buffer.subarray(0, 4).toString('utf8');
-
-    if (pdfHeader !== '%PDF') {
-      throw new BadRequestException('Uploaded file is not a valid PDF');
-    }
-
-    const fileName =
-      dto.fileName ??
-      `${this.slugifyFileName(contract.title || 'contract')}-signed.pdf`;
+    const fileName = `${dto.fileName?.replace(/\.[^.]+$/, '') ?? `${this.slugifyFileName(contract.title || 'contract')}-signed`}.${extension}`;
 
     const fileKey = this.buildContractPdfFileKey({
       tenantId: context.tenantId,
       workspaceId: context.workspaceId,
       contractId: contract.id,
-      fileName: fileName.replace(/\.pdf$/i, '-signed.pdf'),
+      fileName,
+      preserveExtension: true,
     });
 
     const storage = await this.uploadPdfToObjectStorage({
@@ -2594,9 +3168,25 @@ export class ContractsService {
       ...(contract.metadata ?? {}),
       manuallySignedPdfDocumentId: document.id,
       manuallySignedPdfUploadedAt: now.toISOString(),
+      ...(contract.targetType === ContractTargetType.Client
+        ? {
+            clientContract: {
+              ...contractObject(contract.metadata.clientContract),
+              attachedPdf: {
+                documentId: document.id,
+                fileName: document.fileName,
+                mimeType: document.mimeType,
+                sizeBytes: document.sizeBytes,
+                uploadedAt: now.toISOString(),
+                signed: true,
+              },
+            },
+          }
+        : {}),
     };
 
     const saved = await this.contractsRepository.save(contract);
+    await this.applySignedAmendment(context, saved);
 
     await this.createEvent(
       context,
@@ -2647,7 +3237,7 @@ export class ContractsService {
   async uploadContractAttachment(
     context: RequestContext,
     id: string,
-    dto: UploadManuallySignedContractDto,
+    dto: UploadContractAttachmentDto,
   ) {
     const contract = await this.getContractOrFail(context, id);
 
@@ -2661,35 +3251,22 @@ export class ContractsService {
       );
     }
 
-    const mimeType = dto.mimeType ?? 'application/pdf';
+    const attachmentKind =
+      dto.attachmentKind ?? ContractAttachmentKind.ContractPdf;
+    const { buffer, mimeType, extension } = decodeContractUpload(
+      dto,
+      false,
+      attachmentKind,
+    );
 
-    if (mimeType !== 'application/pdf') {
-      throw new BadRequestException('Only PDF uploads are supported for now');
-    }
-
-    const normalizedBase64 = dto.fileBase64.includes(',')
-      ? (dto.fileBase64.split(',').pop() ?? '')
-      : dto.fileBase64;
-
-    const buffer = Buffer.from(normalizedBase64, 'base64');
-
-    if (!buffer.length) {
-      throw new BadRequestException('Invalid fileBase64 payload');
-    }
-
-    if (buffer.subarray(0, 4).toString('utf8') !== '%PDF') {
-      throw new BadRequestException('Uploaded file is not a valid PDF');
-    }
-
-    const fileName =
-      dto.fileName ??
-      `${this.slugifyFileName(contract.title || 'contract')}.pdf`;
+    const fileName = `${dto.fileName?.replace(/\.[^.]+$/, '') ?? this.slugifyFileName(contract.title || 'contract')}.${extension}`;
 
     const fileKey = this.buildContractPdfFileKey({
       tenantId: context.tenantId,
       workspaceId: context.workspaceId,
       contractId: contract.id,
-      fileName,
+      fileName: `${fileName.replace(/\.[^.]+$/, '')}.${extension}`,
+      preserveExtension: true,
     });
 
     const storage = await this.uploadPdfToObjectStorage({
@@ -2704,6 +3281,7 @@ export class ContractsService {
         workspaceId: context.workspaceId,
         contractId: contract.id,
         type: ContractDocumentType.Attachment,
+        attachmentKind,
         fileName,
         fileKey: storage.fileKey,
         mimeType,
@@ -2711,7 +3289,10 @@ export class ContractsService {
         externalUrl: null,
         uploadedById: context.userId,
         metadata: {
-          uploadedAs: 'manual_contract_pdf',
+          uploadedAs:
+            attachmentKind === ContractAttachmentKind.ContractPdf
+              ? 'contract_attachment'
+              : 'supporting_attachment',
           uploadedAt: new Date().toISOString(),
           storageBucket: storage.bucket,
           storageProvider: 'minio',
@@ -2724,19 +3305,21 @@ export class ContractsService {
         | Record<string, unknown>
         | undefined) ?? {};
 
-    contract.metadata = {
-      ...(contract.metadata ?? {}),
-      clientContract: {
-        ...existingClientContract,
-        attachedPdf: {
-          documentId: document.id,
-          fileName: document.fileName,
-          mimeType: document.mimeType,
-          sizeBytes: document.sizeBytes,
-          uploadedAt: new Date().toISOString(),
+    if (attachmentKind === ContractAttachmentKind.ContractPdf)
+      contract.metadata = {
+        ...(contract.metadata ?? {}),
+        clientContract: {
+          ...existingClientContract,
+          attachedPdf: {
+            signed: false,
+            documentId: document.id,
+            fileName: document.fileName,
+            mimeType: document.mimeType,
+            sizeBytes: document.sizeBytes,
+            uploadedAt: new Date().toISOString(),
+          },
         },
-      },
-    };
+      };
     contract.updatedById = context.userId;
 
     const saved = await this.contractsRepository.save(contract);
@@ -2759,6 +3342,44 @@ export class ContractsService {
 
   // Returns a stored contract document as base64 so the web client can download
   // it (mirrors the generate-pdf response shape).
+  async listDocuments(
+    context: RequestContext,
+    id: string,
+    type?: ContractDocumentType,
+  ) {
+    await this.getContractOrFail(context, id);
+    const documents = await this.documentsRepository.find({
+      where: {
+        tenantId: context.tenantId,
+        workspaceId: context.workspaceId,
+        contractId: id,
+        ...(type ? { type } : {}),
+      },
+      order: { createdAt: 'DESC' },
+    });
+    return documents.map(
+      ({
+        id,
+        type,
+        attachmentKind,
+        fileName,
+        mimeType,
+        sizeBytes,
+        createdAt,
+        uploadedById,
+      }) => ({
+        id,
+        type,
+        attachmentKind,
+        fileName,
+        mimeType,
+        sizeBytes,
+        createdAt,
+        uploadedById,
+      }),
+    );
+  }
+
   async getContractDocumentBase64(
     context: RequestContext,
     contractId: string,
@@ -3352,6 +3973,11 @@ export class ContractsService {
     const output: Record<string, unknown> = { ...base };
 
     for (const [key, value] of Object.entries(override)) {
+      if (
+        ['__proto__', 'constructor', 'prototype'].includes(key) ||
+        value === undefined
+      )
+        continue;
       const current = output[key];
 
       if (
@@ -3574,13 +4200,20 @@ export class ContractsService {
     workspaceId,
     contractId,
     fileName,
+    preserveExtension = false,
   }: {
     tenantId: string;
     workspaceId: string;
     contractId: string;
     fileName: string;
+    preserveExtension?: boolean;
   }) {
-    const safeFileName = this.slugifyFileName(fileName.replace(/\.pdf$/i, ''));
+    const extension = preserveExtension
+      ? (fileName
+          .match(/\.(pdf|png|jpe?g|webp|docx?|xlsx)$/i)?.[1]
+          ?.toLowerCase() ?? 'pdf')
+      : 'pdf';
+    const safeFileName = this.slugifyFileName(fileName.replace(/\.[^.]+$/, ''));
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
 
     return [
@@ -3588,7 +4221,7 @@ export class ContractsService {
       tenantId,
       workspaceId,
       contractId,
-      `${timestamp}-${safeFileName}.pdf`,
+      `${timestamp}-${safeFileName}.${extension}`,
     ].join('/');
   }
 

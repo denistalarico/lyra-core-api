@@ -1,41 +1,50 @@
-import { IsEnum, IsOptional, IsString, IsUUID } from 'class-validator';
+import { IsEnum, IsIn, IsOptional, IsString, IsUUID } from 'class-validator';
 import {
-ContractSignatureMode,
-ContractSignatureProvider,
-ContractStatus,
-ContractTargetType,
+  ContractDocumentKind,
+  ContractSignatureMode,
+  ContractSignatureProvider,
+  ContractStatus,
+  ContractTargetType,
 } from '../enums';
 
 export class ListContractsQueryDto {
-@IsOptional()
-@IsString()
-search?: string;
+  @IsOptional()
+  @IsIn([...Object.values(ContractDocumentKind), 'all'])
+  documentKind?: ContractDocumentKind | 'all';
 
-@IsOptional()
-@IsEnum(ContractStatus)
-status?: ContractStatus;
+  @IsOptional()
+  @IsUUID()
+  parentContractId?: string;
 
-@IsOptional()
-@IsEnum(ContractTargetType)
-targetType?: ContractTargetType;
+  @IsOptional()
+  @IsString()
+  search?: string;
 
-@IsOptional()
-@IsUUID()
-targetId?: string;
+  @IsOptional()
+  @IsEnum(ContractStatus)
+  status?: ContractStatus;
 
-@IsOptional()
-@IsUUID()
-templateId?: string;
+  @IsOptional()
+  @IsEnum(ContractTargetType)
+  targetType?: ContractTargetType;
 
-@IsOptional()
-@IsEnum(ContractSignatureMode)
-signatureMode?: ContractSignatureMode;
+  @IsOptional()
+  @IsUUID()
+  targetId?: string;
 
-@IsOptional()
-@IsEnum(ContractSignatureProvider)
-signatureProvider?: ContractSignatureProvider;
+  @IsOptional()
+  @IsUUID()
+  templateId?: string;
 
-@IsOptional()
-@IsString()
-includeArchived?: string;
+  @IsOptional()
+  @IsEnum(ContractSignatureMode)
+  signatureMode?: ContractSignatureMode;
+
+  @IsOptional()
+  @IsEnum(ContractSignatureProvider)
+  signatureProvider?: ContractSignatureProvider;
+
+  @IsOptional()
+  @IsString()
+  includeArchived?: string;
 }

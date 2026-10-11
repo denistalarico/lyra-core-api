@@ -1,3 +1,4 @@
+import { ContractDocumentKind } from '../enums';
 import { Repository } from 'typeorm';
 import {
   ContractDocument,
@@ -312,6 +313,8 @@ function makeContract(overrides: Partial<ContractRecord> = {}): ContractRecord {
     tenantId: 'tenant-1',
     workspaceId: 'workspace-1',
     title: 'Contrato de prestacao de servicos',
+    documentKind: ContractDocumentKind.Contract,
+    parentContractId: null,
     targetType: ContractTargetType.Client,
     targetId: 'client-1',
     templateId: null,
@@ -396,6 +399,7 @@ function makeDocument(overrides: Partial<ContractDocument> = {}): ContractDocume
     tenantId: 'tenant-1',
     workspaceId: 'workspace-1',
     contractId: 'contract-1',
+    attachmentKind: null,
     type: ContractDocumentType.GeneratedPdf,
     fileName: 'contract.pdf',
     fileKey: 'contracts/contract.pdf',

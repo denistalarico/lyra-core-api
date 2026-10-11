@@ -5,3 +5,5 @@ export * from './contract-party.entity';
 export * from './contract-document.entity';
 export * from './contract-event.entity';
 export * from './contract-signature-provider-setting.entity';
+
+export * from './contract-defaults.entity';

@@ -11,6 +11,7 @@ export type ContractTemplatePreset = {
   category: ContractCategory;
   targetType: ContractTargetType;
   defaultSignatureMode: ContractSignatureMode;
+  legalDisclaimer?: string;
   requiredVariables: string[];
   recommendedVariables: string[];
   variableGroups: Array<{
@@ -26,7 +27,65 @@ export type ContractTemplatePreset = {
   }>;
 };
 
+const clientTermPresets: ContractTemplatePreset[] = [
+  {
+    kind: ContractCategory.Amendment,
+    label: 'Termo aditivo',
+    fields: ['term.description', 'term.newMonthlyValue', 'term.newEndDate'],
+  },
+  {
+    kind: ContractCategory.Settlement,
+    label: 'Termo de quitação',
+    fields: [
+      'term.description',
+      'term.settlementAmount',
+      'term.settlementPeriod',
+    ],
+  },
+  {
+    kind: ContractCategory.Termination,
+    label: 'Termo de rescisão',
+    fields: [
+      'term.description',
+      'term.effectiveDate',
+      'term.terminationReason',
+      'term.terminationFee',
+    ],
+  },
+].map(({ kind, label, fields }) => ({
+  key: `client_${kind}`,
+  label,
+  description: `Modelo base genérico de ${label.toLowerCase()}.`,
+  category: kind,
+  targetType: ContractTargetType.Client,
+  defaultSignatureMode: ContractSignatureMode.Manual,
+  legalDisclaimer:
+    'Modelo base genérico. Revise com sua assessoria jurídica antes de usar.',
+  requiredVariables: [
+    'parentContract.title',
+    'term.number',
+    'term.date',
+    ...(kind === ContractCategory.Termination ? ['term.effectiveDate'] : []),
+  ],
+  recommendedVariables: fields,
+  variableGroups: [
+    {
+      key: 'term',
+      label: 'Dados do termo',
+      fields: [
+        ...new Set([
+          'parentContract.title',
+          'term.number',
+          'term.date',
+          ...fields,
+        ]),
+      ].map((key) => ({ key, label: key, type: 'text' as const })),
+    },
+  ],
+}));
+
 export const CONTRACT_TEMPLATE_PRESETS: ContractTemplatePreset[] = [
+  ...clientTermPresets,
   {
     key: 'client_recurring_marketing_services',
     label: 'Cliente recorrente — Serviços de marketing digital',

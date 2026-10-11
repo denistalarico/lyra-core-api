@@ -1,3 +1,5 @@
+import { ContractRecord, ContractDefaults } from '../../contracts/entities';
+import { readClientContractTerms } from '../../contracts/contract-term-reader';
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { IsNull, Not, Repository } from 'typeorm';
@@ -20,6 +22,10 @@ export class ClientsProfitabilityService {
     private readonly financeProfitabilityService: FinanceProfitabilityService,
     @InjectRepository(AgencyClient, AGENCY_CONNECTION)
     private readonly clientsRepository: Repository<AgencyClient>,
+    @InjectRepository(ContractRecord, AGENCY_CONNECTION)
+    private readonly contractsRepository: Repository<ContractRecord>,
+    @InjectRepository(ContractDefaults, AGENCY_CONNECTION)
+    private readonly contractDefaultsRepository: Repository<ContractDefaults>,
   ) {}
 
   async getPortfolio(ctx: RequestContext) {
@@ -40,6 +46,17 @@ export class ClientsProfitabilityService {
     const clientsById = new Map(clients.map((client) => [client.id, client]));
     const financeClients = financeOverview.clients ?? [];
     const financeClientIds = new Set(financeClients.map((client) => client.id));
+    const contractTerms = await readClientContractTerms(
+      this.contractsRepository,
+      this.contractDefaultsRepository,
+      ctx,
+      [
+        ...new Set([
+          ...clients.map((client) => client.id),
+          ...financeClientIds,
+        ]),
+      ],
+    );
     const rules = financeOverview.rules;
     const enrichedClients = financeClients.map((client) =>
       this.enrichClientItem(client, clientsById.get(client.id) ?? null, rules),
@@ -87,12 +104,25 @@ export class ClientsProfitabilityService {
         clientsWithProfitabilityData: financeClients.length,
         clientsWithoutProfitabilityData: clientsWithoutFinance.length,
       },
-      clients: [...enrichedClients, ...clientsWithoutFinance],
+      clients: [...enrichedClients, ...clientsWithoutFinance].map((client) => ({
+        ...client,
+        contractTerm: contractTerms.get(client.id as string)!,
+      })),
       notes: [
         ...financeOverview.notes,
         'Client identity and lifecycle data are enriched from agency_clients.',
       ],
     };
+  }
+
+  async getClientContractTerm(ctx: RequestContext, clientId: string) {
+    const terms = await readClientContractTerms(
+      this.contractsRepository,
+      this.contractDefaultsRepository,
+      ctx,
+      [clientId],
+    );
+    return terms.get(clientId)!;
   }
 
   async getClientProfitability(ctx: RequestContext, clientId: string) {
@@ -270,11 +300,7 @@ export class ClientsProfitabilityService {
       segment: client.segment,
       accountOwnerId: client.accountOwnerId,
       managedTenantId: client.managedTenantId,
-      ...this.applyContractedFee(
-        this.buildEmptyProfitability(),
-        client,
-        rules,
-      ),
+      ...this.applyContractedFee(this.buildEmptyProfitability(), client, rules),
     };
   }
 
