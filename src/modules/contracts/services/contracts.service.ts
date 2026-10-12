@@ -3870,7 +3870,8 @@ export class ContractsService {
         return this.escapeHtml(JSON.stringify(value));
       }
 
-      return this.escapeHtml(String(value));
+      // Multi-line values (deliverables, item lists) keep one item per line.
+      return this.escapeHtml(String(value)).replace(/\r?\n/g, '<br />');
     });
   }
 

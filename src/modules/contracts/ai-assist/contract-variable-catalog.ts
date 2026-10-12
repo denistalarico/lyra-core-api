@@ -36,6 +36,16 @@ export const CONTRACT_CLIENT_VARIABLE_CATALOG = [
     description: 'Dados da agência contratada: Website.',
   },
   {
+    key: 'agency.city',
+    label: 'Cidade',
+    description: 'Dados da agência contratada: Cidade.',
+  },
+  {
+    key: 'agency.state',
+    label: 'Estado / região',
+    description: 'Dados da agência contratada: Estado / região.',
+  },
+  {
     key: 'agency.country',
     label: 'País',
     description: 'Dados da agência contratada: País.',

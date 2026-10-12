@@ -136,6 +136,18 @@ export class PatchAgencyWorkspaceCompanyDto {
   @MaxLength(255)
   addressLine?: string | null;
 
+  /** Kept in `metadata.city` (no column): used by contracts (foro, `agency.city`). */
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  city?: string | null;
+
+  /** Kept in `metadata.state`: state / region abbreviation, e.g. "SP". */
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  state?: string | null;
+
   @IsOptional()
   @IsString()
   @MaxLength(80)
