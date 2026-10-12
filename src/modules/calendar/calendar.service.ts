@@ -133,7 +133,9 @@ export class CalendarService implements OnModuleInit {
     const startsAt = new Date(dto.startsAt);
     const endsAt = new Date(dto.endsAt);
 
-    if (startsAt.getTime() < Date.now()) {
+    // An all-day event remains current until its local-day range has ended.
+    const dateToValidate = dto.allDay ? endsAt : startsAt;
+    if (dto.eventType !== 'holiday' && dateToValidate.getTime() < Date.now()) {
       throw new BadRequestException('startsAt must not be in the past');
     }
 
@@ -179,7 +181,14 @@ export class CalendarService implements OnModuleInit {
     const startsAt = dto.startsAt ? new Date(dto.startsAt) : event.startsAt;
     const endsAt = dto.endsAt ? new Date(dto.endsAt) : event.endsAt;
 
-    if (dto.startsAt && startsAt.getTime() < Date.now()) {
+    const eventType = dto.eventType ?? event.eventType;
+    const allDay = dto.allDay ?? event.allDay;
+    const dateToValidate = allDay ? endsAt : startsAt;
+    if (
+      dto.startsAt &&
+      eventType !== 'holiday' &&
+      dateToValidate.getTime() < Date.now()
+    ) {
       throw new BadRequestException('startsAt must not be in the past');
     }
 
@@ -191,10 +200,10 @@ export class CalendarService implements OnModuleInit {
     event.endsAt = endsAt;
     event.title = dto.title ?? event.title;
     event.description = dto.description ?? event.description;
-    event.eventType = dto.eventType ?? event.eventType;
+    event.eventType = eventType;
     event.status = dto.status ?? event.status;
     event.visibility = dto.visibility ?? event.visibility;
-    event.allDay = dto.allDay ?? event.allDay;
+    event.allDay = allDay;
     event.ownerUserId = dto.ownerUserId ?? event.ownerUserId;
     event.clientId = dto.clientId ?? event.clientId;
     event.projectId = dto.projectId ?? event.projectId;

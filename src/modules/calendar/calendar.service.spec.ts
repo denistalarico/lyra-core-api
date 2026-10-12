@@ -6,6 +6,139 @@ import { CalendarEvent } from './entities/calendar-event.entity';
 import { CalendarRoutineBlock } from './entities/calendar-routine-block.entity';
 import { CalendarSettings } from './entities/calendar-settings.entity';
 
+describe('CalendarService event date validation', () => {
+  beforeEach(() => {
+    jest
+      .spyOn(Date, 'now')
+      .mockReturnValue(new Date('2030-06-13T22:00:00.000Z').getTime());
+  });
+
+  afterEach(() => jest.restoreAllMocks());
+
+  describe.each(['create', 'update'] as const)('%s', (operation) => {
+    it.each([
+      [
+        'today in UTC-3',
+        '2030-06-13T00:00:00-03:00',
+        '2030-06-13T23:59:59-03:00',
+      ],
+      [
+        'today in UTC+14',
+        '2030-06-14T00:00:00+14:00',
+        '2030-06-14T23:59:59+14:00',
+      ],
+    ])('allows all-day events %s', async (_, startsAt, endsAt) => {
+      const { service } = makeService({ event: makeEvent({ allDay: true }) });
+      const dto = {
+        title: 'Evento de dia inteiro',
+        startsAt,
+        endsAt,
+        allDay: true,
+      };
+      const result =
+        operation === 'create'
+          ? service.createEvent(makeContext(), dto)
+          : service.updateEvent(makeContext(), 'event-1', { startsAt, endsAt });
+
+      await expect(result).resolves.toMatchObject({ allDay: true });
+    });
+
+    it.each([true, false])(
+      'allows past holidays with allDay=%s',
+      async (allDay) => {
+        const { service } = makeService({
+          event: makeEvent({ eventType: 'holiday', allDay }),
+        });
+        const dto = {
+          title: 'Feriado passado',
+          eventType: 'holiday' as const,
+          startsAt: '2030-06-01T03:00:00.000Z',
+          endsAt: '2030-06-02T02:59:59.000Z',
+          allDay,
+        };
+        const result =
+          operation === 'create'
+            ? service.createEvent(makeContext(), dto)
+            : service.updateEvent(makeContext(), 'event-1', {
+                startsAt: dto.startsAt,
+                endsAt: dto.endsAt,
+              });
+
+        await expect(result).resolves.toMatchObject({
+          eventType: 'holiday',
+          allDay,
+        });
+      },
+    );
+
+    it.each([true, false])(
+      'rejects past ordinary events with allDay=%s',
+      async (allDay) => {
+        const { service, eventsRepository } = makeService();
+        const dto = {
+          title: 'Evento passado',
+          startsAt: '2030-06-12T03:00:00.000Z',
+          endsAt: '2030-06-13T02:59:59.000Z',
+          allDay,
+        };
+        const result =
+          operation === 'create'
+            ? service.createEvent(makeContext(), dto)
+            : service.updateEvent(makeContext(), 'event-1', dto);
+
+        await expect(result).rejects.toThrow(
+          'startsAt must not be in the past',
+        );
+        expect(eventsRepository.save).not.toHaveBeenCalled();
+      },
+    );
+
+    it('rejects a timed event that started earlier today', async () => {
+      const { service } = makeService();
+      const dto = {
+        title: 'Reunião',
+        startsAt: '2030-06-13T21:00:00.000Z',
+        endsAt: '2030-06-13T23:00:00.000Z',
+      };
+      const result =
+        operation === 'create'
+          ? service.createEvent(makeContext(), dto)
+          : service.updateEvent(makeContext(), 'event-1', dto);
+
+      await expect(result).rejects.toThrow('startsAt must not be in the past');
+    });
+
+    it('rejects an invalid range even for a past holiday', async () => {
+      const { service } = makeService();
+      const dto = {
+        title: 'Feriado',
+        eventType: 'holiday' as const,
+        startsAt: '2030-06-01T03:00:00.000Z',
+        endsAt: '2030-06-01T03:00:00.000Z',
+        allDay: true,
+      };
+      const result =
+        operation === 'create'
+          ? service.createEvent(makeContext(), dto)
+          : service.updateEvent(makeContext(), 'event-1', dto);
+
+      await expect(result).rejects.toThrow('endsAt must be after startsAt');
+    });
+  });
+
+  it('uses the new type and allDay flag when editing an event', async () => {
+    const { service } = makeService();
+    await expect(
+      service.updateEvent(makeContext(), 'event-1', {
+        eventType: 'holiday',
+        allDay: true,
+        startsAt: '2030-06-01T03:00:00.000Z',
+        endsAt: '2030-06-02T02:59:59.000Z',
+      }),
+    ).resolves.toMatchObject({ eventType: 'holiday', allDay: true });
+  });
+});
+
 describe('CalendarService notification triggers', () => {
   it('scopes member calendar lists to owned or created events', async () => {
     const { service, queryBuilder } = makeService();
