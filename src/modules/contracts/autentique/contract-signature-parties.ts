@@ -57,6 +57,7 @@ export function deriveSignatureParties(input: {
   targetType: ContractTargetType;
   read: PathReader;
   settingsMetadata: Record<string, unknown> | null | undefined;
+  clientContactEmail?: string | null;
 }): { signers: SignerCandidate[]; issues: SignatureReadinessIssue[] } {
   const { read } = input;
   const settings = input.settingsMetadata ?? {};
@@ -100,7 +101,10 @@ export function deriveSignatureParties(input: {
     signers.push({
       role: ContractPartyRole.Client,
       name: firstText(read, ['client.signatory', 'client.signatory.name']),
-      email: firstEmail(read, ['client.signatory.email']),
+      email:
+        firstEmail(read, ['client.email']) ??
+        input.clientContactEmail?.trim().toLowerCase() ??
+        firstEmail(read, ['client.signatory.email']),
       signatureOrder: 2,
       userId: null,
     });
@@ -145,7 +149,7 @@ const ROLE_HINT: Partial<
   [ContractPartyRole.Client]: {
     name: 'Preencha o signatário do cliente (client.signatory).',
     email:
-      'Preencha o e-mail do signatário do cliente (client.signatory.email).',
+      'Preencha o e-mail de contato no contrato (client.email) ou cadastre um e-mail no contato vinculado ao cliente.',
   },
   [ContractPartyRole.TeamMember]: {
     name: 'Preencha o nome do prestador (contractor.fullName).',

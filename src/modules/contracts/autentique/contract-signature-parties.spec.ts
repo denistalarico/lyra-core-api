@@ -103,12 +103,27 @@ describe('deriveSignatureParties', () => {
     );
   });
 
+  it('uses the contract contact email before the legacy signatory email', () => {
+    const result = deriveSignatureParties({
+      targetType: ContractTargetType.Client,
+      read: reader({
+        'agency.signerName': 'Ana',
+        'agency.signerEmail': 'ana@agencia.com',
+        'client.signatory': 'Carlos',
+        'client.email': ' Contrato@cliente.com ',
+        'client.signatory.email': 'outro@cliente.com',
+      }),
+      settingsMetadata: {},
+    });
+    expect(result.issues).toEqual([]);
+    expect(result.signers[1].email).toBe('contrato@cliente.com');
+  });
+
   it('reports what is missing instead of guessing', () => {
     const result = deriveSignatureParties({
       targetType: ContractTargetType.Client,
       read: reader({
         'client.signatory': 'Carlos',
-        'client.email': 'geral@cliente.com',
       }),
       settingsMetadata: {},
     });

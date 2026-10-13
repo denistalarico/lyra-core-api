@@ -73,6 +73,7 @@ import {
 } from '../autentique/autentique-signature-state';
 import {
   deriveSignatureParties,
+  isValidSignerEmail,
   validateSigners,
   type SignatureReadinessIssue,
 } from '../autentique/contract-signature-parties';
@@ -126,6 +127,9 @@ import {
   NotificationInterestReason,
 } from '../../notifications/enums';
 import { ContractNotificationPublisher } from './contract-notification.publisher';
+import { AgencyClient } from '../../clients/entities/agency-client.entity';
+import { ContactEntity } from '../../contacts/entities/contact.entity';
+import { ContactMethodEntity } from '../../contacts/entities/contact-method.entity';
 
 type RequestContext = {
   tenantId: string;
@@ -2434,10 +2438,22 @@ export class ContractsService {
     }
 
     const variables = contract.variablesData ?? {};
+    const clientEmail = this.getValueByPath(variables, 'client.email');
+    let clientContactEmail: string | null = null;
+    if (
+      contract.targetType === ContractTargetType.Client &&
+      (typeof clientEmail !== 'string' || !clientEmail.trim())
+    ) {
+      clientContactEmail = await this.resolveClientContactEmail(
+        context,
+        contract.targetId,
+      );
+    }
     const derived = deriveSignatureParties({
       targetType: contract.targetType,
       read: (path) => this.getValueByPath(variables, path),
       settingsMetadata: settings.metadata,
+      clientContactEmail,
     });
     issues.push(...derived.issues);
 
@@ -2455,6 +2471,38 @@ export class ContractsService {
       issues,
       warnings,
     };
+  }
+
+  private async resolveClientContactEmail(
+    context: ContractScope,
+    clientId: string | null,
+  ) {
+    if (!clientId) return null;
+    const scope = {
+      tenantId: context.tenantId,
+      workspaceId: context.workspaceId,
+    };
+    const manager = this.contractsRepository.manager;
+    const client = await manager.getRepository(AgencyClient).findOne({
+      where: { ...scope, id: clientId },
+      select: { id: true, contactId: true },
+    });
+    if (!client?.contactId) return null;
+    const contact = await manager.getRepository(ContactEntity).findOne({
+      where: { ...scope, id: client.contactId },
+      select: { id: true },
+    });
+    if (!contact) return null;
+    const methods = await manager.getRepository(ContactMethodEntity).find({
+      where: { ...scope, contactId: contact.id, type: 'email' },
+      order: { isPrimary: 'DESC', createdAt: 'ASC', id: 'ASC' },
+    });
+    return (
+      methods
+        .find((method) => isValidSignerEmail(method.value?.trim()))
+        ?.value.trim()
+        .toLowerCase() ?? null
+    );
   }
 
   // Runs while holding the send claim: PDF, parties, PendingSignature.

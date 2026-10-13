@@ -26,6 +26,9 @@ import {
 } from '../autentique/autentique.client';
 import { ContractNotificationPublisher } from './contract-notification.publisher';
 import { ContractsService } from './contracts.service';
+import { AgencyClient } from '../../clients/entities/agency-client.entity';
+import { ContactEntity } from '../../contacts/entities/contact.entity';
+import { ContactMethodEntity } from '../../contacts/entities/contact-method.entity';
 
 jest.mock('@aws-sdk/client-s3', () => ({
   S3Client: jest.fn().mockImplementation(() => ({
@@ -65,6 +68,133 @@ describe('ContractsService — Autentique', () => {
   });
 
   describe('sendContractToSignatureProvider', () => {
+    it('prefers the contract contact email without querying the CRM contact', async () => {
+      const harness = makeHarness({
+        contract: makeContract({
+          variablesData: {
+            'agency.signerName': 'Ana',
+            'agency.signerEmail': 'ana@agencia.com',
+            'client.signatory': 'Carlos',
+            'client.email': 'contrato@cliente.com',
+            'client.signatory.email': 'legado@cliente.com',
+          },
+        }),
+      });
+      const result = await harness.service.sendContractToSignatureProvider(
+        context(),
+        'contract-1',
+        { dryRun: true },
+      );
+      expect(result.readyToSend).toBe(true);
+      expect(
+        result.signers?.find(
+          (signer) => signer.role === ContractPartyRole.Client,
+        ),
+      ).toMatchObject({
+        email: 'contrato@cliente.com',
+      });
+      expect(harness.clientsRepository.findOne).not.toHaveBeenCalled();
+    });
+
+    it('falls back to a valid email of the linked contact, scoped by tenant and workspace', async () => {
+      const harness = makeHarness({
+        contract: makeContract({
+          variablesData: {
+            'agency.signerName': 'Ana',
+            'agency.signerEmail': 'ana@agencia.com',
+            'client.signatory': 'Carlos',
+            'client.email': ' ',
+            'client.signatory.email': 'legado@cliente.com',
+          },
+        }),
+      });
+      harness.clientsRepository.findOne.mockResolvedValue({
+        id: 'client-1',
+        contactId: 'contact-1',
+      });
+      harness.contactsRepository.findOne.mockResolvedValue({ id: 'contact-1' });
+      harness.contactMethodsRepository.find.mockResolvedValue([
+        { value: 'invalid' },
+        { value: ' Contato@cliente.com ' },
+      ]);
+      const result = await harness.service.sendContractToSignatureProvider(
+        context(),
+        'contract-1',
+        { dryRun: true },
+      );
+      expect(result.readyToSend).toBe(true);
+      expect(
+        result.signers?.find(
+          (signer) => signer.role === ContractPartyRole.Client,
+        ),
+      ).toMatchObject({
+        email: 'contato@cliente.com',
+      });
+      const scope = {
+        tenantId: context().tenantId,
+        workspaceId: context().workspaceId,
+      };
+      expect(harness.clientsRepository.findOne).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { ...scope, id: 'client-1' } }),
+      );
+      expect(harness.contactsRepository.findOne).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { ...scope, id: 'contact-1' } }),
+      );
+      expect(harness.contactMethodsRepository.find).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { ...scope, contactId: 'contact-1', type: 'email' },
+          order: { isPrimary: 'DESC', createdAt: 'ASC', id: 'ASC' },
+        }),
+      );
+      expect(harness.client.createDocument).not.toHaveBeenCalled();
+    });
+
+    it('cannot read email methods when the linked contact is outside the scope', async () => {
+      const harness = makeHarness({
+        contract: makeContract({
+          variablesData: {
+            'agency.signerName': 'Ana',
+            'agency.signerEmail': 'ana@agencia.com',
+            'client.signatory': 'Carlos',
+          },
+        }),
+      });
+      harness.clientsRepository.findOne.mockResolvedValue({
+        id: 'client-1',
+        contactId: 'foreign-contact',
+      });
+      await expect(
+        harness.service.sendContractToSignatureProvider(
+          context(),
+          'contract-1',
+          { dryRun: true },
+        ),
+      ).rejects.toMatchObject({ status: 400 });
+      expect(harness.contactMethodsRepository.find).not.toHaveBeenCalled();
+    });
+
+    it('rejects an invalid contract email instead of silently using another address', async () => {
+      const harness = makeHarness({
+        contract: makeContract({
+          variablesData: {
+            'agency.signerName': 'Ana',
+            'agency.signerEmail': 'ana@agencia.com',
+            'client.signatory': 'Carlos',
+            'client.email': 'invalid',
+            'client.signatory.email': 'legado@cliente.com',
+          },
+        }),
+      });
+      await expect(
+        harness.service.sendContractToSignatureProvider(
+          context(),
+          'contract-1',
+          { dryRun: true },
+        ),
+      ).rejects.toMatchObject({ status: 400 });
+      expect(harness.clientsRepository.findOne).not.toHaveBeenCalled();
+    });
+
     it('validates only on dryRun: no claim, no provider call, no writes', async () => {
       const harness = makeHarness();
 
@@ -591,7 +721,18 @@ function makeHarness(
     execute: jest.fn().mockResolvedValue({ affected: 1 }),
   };
 
+  const clientsRepository = { findOne: jest.fn().mockResolvedValue(null) };
+  const contactsRepository = { findOne: jest.fn().mockResolvedValue(null) };
+  const contactMethodsRepository = { find: jest.fn().mockResolvedValue([]) };
   const contractsRepository = {
+    manager: {
+      getRepository: jest.fn((entity: unknown) => {
+        if (entity === AgencyClient) return clientsRepository;
+        if (entity === ContactEntity) return contactsRepository;
+        if (entity === ContactMethodEntity) return contactMethodsRepository;
+        throw new Error('Unexpected repository');
+      }),
+    },
     findOne: jest.fn(() =>
       Promise.resolve<ContractRecord | null>({ ...contract }),
     ),
@@ -711,6 +852,9 @@ function makeHarness(
 
   return {
     service,
+    clientsRepository,
+    contactsRepository,
+    contactMethodsRepository,
     client,
     publisher,
     queryBuilder,
