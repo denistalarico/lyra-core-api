@@ -1,3 +1,4 @@
+import { emailFrontendUrl } from '../../email/email-frontend-url';
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
@@ -831,10 +832,16 @@ export class NotificationEventProcessorService {
     const body = isClient
       ? this.resolveClientBody(event)
       : this.resolveBody(event);
-    const frontendUrl =
-      this.configService.get<string>('AGENCY_FRONTEND_URL') ??
-      'http://localhost:3003';
+    const frontendUrl = emailFrontendUrl(
+      this.configService.get<string>('AGENCY_FRONTEND_URL'),
+      this.configService.get<string>('APP_FRONTEND_URL'),
+    );
 
+    const route = this.optionalString(event.payload.actionUrl);
+    const actionUrl =
+      route?.startsWith('/') && !route.startsWith('//') && !route.includes('\\')
+        ? route
+        : '/';
     const { html, text } = isClient
       ? renderTransactionalEmail({
           title,
@@ -846,7 +853,7 @@ export class NotificationEventProcessorService {
           title,
           intro: body,
           buttonLabel: 'Abrir Lyra Agency',
-          buttonUrl: frontendUrl,
+          buttonUrl: new URL(actionUrl, `${frontendUrl}/`).href,
         });
 
     const deliveryRepo = this.dataSource.getRepository(
@@ -929,9 +936,10 @@ export class NotificationEventProcessorService {
     const body = isClient
       ? this.resolveClientBody(event)
       : this.resolveBody(event);
-    const frontendUrl =
-      this.configService.get<string>('AGENCY_FRONTEND_URL') ??
-      'http://localhost:3003';
+    const frontendUrl = emailFrontendUrl(
+      this.configService.get<string>('AGENCY_FRONTEND_URL'),
+      this.configService.get<string>('APP_FRONTEND_URL'),
+    );
     // §60 — a client push opens a Client Area route, never an Agency one.
     const actionUrl = isClient
       ? this.clientActionUrl(event)
@@ -1007,11 +1015,11 @@ export class NotificationEventProcessorService {
    * leaks internal structure.
    */
   private clientActionUrl(event: NotificationSourceEvent): string {
-    const base = (
-      this.configService.get<string>('CLIENT_AREA_FRONTEND_URL') ??
-      this.configService.get<string>('AGENCY_FRONTEND_URL') ??
-      'http://localhost:3003'
-    ).replace(/\/$/, '');
+    const base = emailFrontendUrl(
+      this.configService.get<string>('CLIENT_AREA_FRONTEND_URL'),
+      this.configService.get<string>('AGENCY_FRONTEND_URL'),
+      this.configService.get<string>('APP_FRONTEND_URL'),
+    );
 
     const route = event.clientAudience?.actionUrl;
 

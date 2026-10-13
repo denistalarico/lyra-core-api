@@ -64,7 +64,7 @@ describe('ContractNotificationPublisher', () => {
           },
         ],
         payload: expect.objectContaining({
-          actionUrl: '/clients/client-1',
+          actionUrl: '/clients/client-1?tab=contract',
           contractId: contract.id,
         }),
       }),

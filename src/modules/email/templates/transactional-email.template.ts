@@ -1,3 +1,4 @@
+import { emailFrontendUrl } from '../email-frontend-url';
 type TransactionalEmailOptions = {
   title: string;
   intro: string;
@@ -7,10 +8,8 @@ type TransactionalEmailOptions = {
   footerText?: string;
 };
 
-const defaultFrontendUrl = 'http://82.29.61.35:3001';
-
 function getLogoUrl() {
-  const frontendUrl = process.env.APP_FRONTEND_URL ?? defaultFrontendUrl;
+  const frontendUrl = emailFrontendUrl(process.env.APP_FRONTEND_URL);
 
   return `${frontendUrl.replace(/\/$/, '')}/brand/suite-full-light.svg`;
 }

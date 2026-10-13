@@ -1,3 +1,4 @@
+import { emailFrontendUrl } from '../email/email-frontend-url';
 import {
   BadRequestException,
   ConflictException,
@@ -791,10 +792,10 @@ export class SettingsService {
     const company = await this.getCompany(tenantId, workspaceId);
     const workspaceName =
       company.publicName || company.workspaceName || company.legalName || 'Lyra Suite';
-    const frontendUrl =
-      this.configService.get<string>('FRONTEND_APP_URL') ??
-      this.configService.get<string>('APP_FRONTEND_URL') ??
-      'http://82.29.61.35:3001';
+    const frontendUrl = emailFrontendUrl(
+      this.configService.get<string>('FRONTEND_APP_URL'),
+      this.configService.get<string>('APP_FRONTEND_URL'),
+    );
     const inviteUrl = `${frontendUrl.replace(/\/$/, '')}/invite/${token}`;
 
     await this.transactionalEmailService.sendWorkspaceInvitationEmail({

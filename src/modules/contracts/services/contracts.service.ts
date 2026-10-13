@@ -1492,12 +1492,33 @@ export class ContractsService {
     return { ...contract, parties, documents, events };
   }
 
+  private async assertContractUnsigned(
+    context: RequestContext,
+    contract: ContractRecord,
+  ) {
+    const signed =
+      isSignedContract(contract) ||
+      (await this.documentsRepository.findOne({
+        where: {
+          tenantId: context.tenantId,
+          workspaceId: context.workspaceId,
+          contractId: contract.id,
+          type: In([
+            ContractDocumentType.SignedPdf,
+            ContractDocumentType.ManuallySignedPdf,
+          ]),
+        },
+      }));
+    if (signed) contractRuleError('contract_signed_immutable', 409);
+  }
+
   async updateContract(
     context: RequestContext,
     id: string,
     dto: UpdateContractRecordDto,
   ) {
     const contract = await this.getContractOrFail(context, id);
+    await this.assertContractUnsigned(context, contract);
 
     const changes = Object.fromEntries(
       Object.entries(dto).filter(([, value]) => value !== undefined),
@@ -1597,6 +1618,7 @@ export class ContractsService {
     dto: GenerateContractHtmlDto,
   ) {
     const contract = await this.getContractOrFail(context, id);
+    await this.assertContractUnsigned(context, contract);
 
     if (
       [
@@ -1685,6 +1707,7 @@ export class ContractsService {
     dto: GenerateContractPdfDto,
   ) {
     let contract = await this.getContractOrFail(context, id);
+    await this.assertContractUnsigned(context, contract);
 
     if (!contract.generatedHtml) {
       if (!dto.generateHtmlIfMissing) {

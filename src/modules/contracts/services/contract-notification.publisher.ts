@@ -326,7 +326,7 @@ export class ContractNotificationPublisher {
 
   private resolveActionUrl(contract: ContractRecord) {
     if (contract.targetType === ContractTargetType.Client && contract.targetId) {
-      return `/clients/${contract.targetId}`;
+      return `/clients/${contract.targetId}?tab=contract`;
     }
 
     if (

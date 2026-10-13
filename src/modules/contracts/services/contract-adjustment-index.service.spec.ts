@@ -8,7 +8,14 @@ const data = (percent = '1') =>
     };
   });
 describe('BCB contract adjustment (offline)', () => {
-  afterEach(() => jest.restoreAllMocks());
+  beforeEach(() => {
+    jest.useFakeTimers({ doNotFake: ['nextTick', 'setImmediate'] });
+    jest.setSystemTime(new Date('2026-11-15T12:00:00Z'));
+  });
+  afterEach(() => {
+    jest.restoreAllMocks();
+    jest.useRealTimers();
+  });
   it('compounds 12 published months and caches for 12 hours', async () => {
     const fetchMock = jest
       .spyOn(globalThis, 'fetch')
@@ -50,7 +57,34 @@ describe('BCB contract adjustment (offline)', () => {
       accumulatedPercent: -1.1934,
     });
   });
-  it.each(['network', 'http', 'short', 'duplicate', 'invalid', 'gap'])(
+  it('rejects a future month without calling BCB', async () => {
+    const mock = jest.spyOn(globalThis, 'fetch');
+    await expect(
+      new ContractAdjustmentIndexService().get({
+        index: 'ipca',
+        until: '2026-12',
+      }),
+    ).rejects.toMatchObject({
+      status: 422,
+      response: { code: 'contract_index_not_published' },
+    });
+    expect(mock).not.toHaveBeenCalled();
+  });
+  it('distinguishes insufficient publications from an upstream outage', async () => {
+    jest
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(new Response(JSON.stringify(data().slice(4))));
+    await expect(
+      new ContractAdjustmentIndexService().get({
+        index: 'ipca',
+        until: '2026-10',
+      }),
+    ).rejects.toMatchObject({
+      status: 422,
+      response: { code: 'contract_index_not_published' },
+    });
+  });
+  it.each(['network', 'http', 'duplicate', 'invalid', 'gap'])(
     'returns 503 for %s, leaving manual fallback available',
     async (failure) => {
       const mock = jest.spyOn(globalThis, 'fetch');

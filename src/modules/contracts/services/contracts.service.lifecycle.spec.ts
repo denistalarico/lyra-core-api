@@ -243,6 +243,29 @@ function fixture(override: Partial<ContractRecord> = {}) {
   };
 }
 describe('contract E3 lifecycle (no database/storage/provider)', () => {
+  it.each(['update', 'html', 'pdf'] as const)(
+    'prevents %s from rewriting a signed contract',
+    async (operation) => {
+      const h = fixture();
+      const before = structuredClone(h.parent);
+      const result =
+        operation === 'update'
+          ? h.service.updateContract(scope, 'parent', {
+              title: 'Changed',
+              variablesData: { 'contract.monthlyValue': '1' },
+            })
+          : operation === 'html'
+            ? h.service.generateContractHtml(scope, 'parent', {})
+            : h.service.generateContractPdf(scope, 'parent', {});
+      await expect(result).rejects.toMatchObject({
+        status: 409,
+        response: { code: 'contract_signed_immutable' },
+      });
+      expect(h.parent).toEqual(before);
+      expect(h.repo.save).not.toHaveBeenCalled();
+    },
+  );
+
   beforeEach(() => {
     jest.useFakeTimers();
     jest.setSystemTime(new Date('2026-10-11T12:00:00Z'));
@@ -251,14 +274,54 @@ describe('contract E3 lifecycle (no database/storage/provider)', () => {
     jest.useRealTimers();
     jest.restoreAllMocks();
   });
-  it('PATCH ignores undefined and preserves Autentique and nested signature evidence', async () => {
+  it.each(['digital', 'document'] as const)(
+    'protects %s signature evidence from PATCH',
+    async (kind) => {
+      const h = fixture({
+        metadata: {},
+        status:
+          kind === 'digital'
+            ? ContractStatus.DigitallySigned
+            : ContractStatus.Completed,
+        signatureProvider:
+          kind === 'digital'
+            ? ContractSignatureProvider.Autentique
+            : ContractSignatureProvider.None,
+      });
+      if (kind === 'document')
+        h.documents.push(
+          Object.assign(new ContractDocument(), {
+            ...scope,
+            id: 'signed',
+            contractId: 'parent',
+            type: ContractDocumentType.ManuallySignedPdf,
+          }),
+        );
+      await expect(
+        h.service.updateContract(scope, 'parent', { validUntil: '2099-01-01' }),
+      ).rejects.toMatchObject({
+        status: 409,
+        response: { code: 'contract_signed_immutable' },
+      });
+      expect(h.repo.save).not.toHaveBeenCalled();
+      if (kind === 'document') {
+        expect(h.docs.findOne.mock.calls[0][0].where).toMatchObject({
+          tenantId: scope.tenantId,
+          workspaceId: scope.workspaceId,
+          contractId: 'parent',
+        });
+      }
+    },
+  );
+
+  it('PATCH ignores undefined and preserves protected and nested metadata', async () => {
     const h = fixture({
       metadata: {
         signatureProviderMode: 'sandbox',
         templateName: 'Template',
         clientContract: {
           mode: 'manual',
-          attachedPdf: { documentId: 'legacy' },
+          attachedPdf: { documentId: 'legacy', signed: false },
           note: 'old',
         },
         effectiveTerms: { monthlyValue: '150' },

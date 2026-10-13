@@ -1,3 +1,4 @@
+import { emailFrontendUrl } from '../email/email-frontend-url';
 import {
   BadRequestException,
   ConflictException,
@@ -940,9 +941,9 @@ export class AuthService {
       expiresAt,
     });
 
-    const frontendUrl =
-      this.configService.get<string>('APP_FRONTEND_URL') ??
-      'http://82.29.61.35:3001';
+    const frontendUrl = emailFrontendUrl(
+      this.configService.get<string>('APP_FRONTEND_URL'),
+    );
     const resetUrl = `${frontendUrl}/reset-password?token=${token}`;
     const preferences = await this.userPreferencesRepository.findOne({
       where: {

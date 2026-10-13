@@ -1,3 +1,4 @@
+import { emailFrontendUrl } from '../../email/email-frontend-url';
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { AgencyIdentityCredentialsService } from '../../agency/agency-identity-credentials.service';
@@ -143,11 +144,11 @@ export class ClientAreaEmailService {
   }
 
   private frontendUrl() {
-    return (
-      this.config.get<string>('CLIENT_AREA_FRONTEND_URL') ??
-      this.config.get<string>('AGENCY_FRONTEND_URL') ??
-      'http://localhost:3003'
-    ).replace(/\/$/, '');
+    return emailFrontendUrl(
+      this.config.get<string>('CLIENT_AREA_FRONTEND_URL'),
+      this.config.get<string>('AGENCY_FRONTEND_URL'),
+      this.config.get<string>('APP_FRONTEND_URL'),
+    );
   }
 
   private productName() {

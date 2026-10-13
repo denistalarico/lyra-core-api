@@ -46,6 +46,35 @@ describe('NotificationEventProcessorService realtime', () => {
     );
   });
 
+  it('sends contract notifications to the public contract tab when Agency URL is missing', async () => {
+    const { service, emailService, configService } = makeService();
+    configService.get.mockImplementation((key: string) =>
+      key === 'APP_FRONTEND_URL' ? 'https://lyrasuite.com' : undefined,
+    );
+    const event = makeEvent();
+    event.payload.actionUrl = '/clients/client-1?tab=contract';
+    await (
+      service as unknown as {
+        sendEmailDeliveries: (
+          event: ReturnType<typeof makeEvent>,
+          deliveries: { deliveryId: string; email: string }[],
+        ) => Promise<void>;
+      }
+    ).sendEmailDeliveries(event, [
+      { deliveryId: 'delivery-1', email: 'user@example.test' },
+    ]);
+    const calls = emailService.sendEmail.mock.calls as unknown as Array<
+      [{ html: string; text: string }]
+    >;
+    const message = calls[0][0];
+    expect(message.html).toContain(
+      'https://lyrasuite.com/clients/client-1?tab=contract',
+    );
+    expect(message.text).toContain(
+      'https://lyrasuite.com/clients/client-1?tab=contract',
+    );
+  });
+
   it('does not emit realtime for duplicate events', async () => {
     const { service, realtime } = makeService({
       existingNotification: {
@@ -198,7 +227,7 @@ function makeService(
     pushService as never,
   );
 
-  return { service, realtime, repos };
+  return { service, realtime, repos, emailService, configService };
 }
 
 function makeRepositories(

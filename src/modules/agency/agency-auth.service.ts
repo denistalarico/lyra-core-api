@@ -1,3 +1,4 @@
+import { emailFrontendUrl } from '../email/email-frontend-url';
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
@@ -614,9 +615,9 @@ export class AgencyAuthService {
   }
 
   private getFrontendUrl() {
-    return (
-      this.configService.get<string>('AGENCY_FRONTEND_URL') ??
-      'http://localhost:3003'
+    return emailFrontendUrl(
+      this.configService.get<string>('AGENCY_FRONTEND_URL'),
+      this.configService.get<string>('APP_FRONTEND_URL'),
     );
   }
 

@@ -1,4 +1,5 @@
-import { HttpException, Injectable } from '@nestjs/common';
+import { HttpException, Injectable, Logger } from '@nestjs/common';
+import { contractToday } from '../contract-term';
 import { ContractAdjustmentIndexQueryDto } from '../dto/contract-adjustment-index-query.dto';
 export type ContractAdjustmentIndex = {
   index: 'ipca' | 'igpm';
@@ -11,6 +12,7 @@ export type ContractAdjustmentIndex = {
 };
 @Injectable()
 export class ContractAdjustmentIndexService {
+  private readonly logger = new Logger(ContractAdjustmentIndexService.name);
   private readonly cache = new Map<
     string,
     { expiresAt: number; value: ContractAdjustmentIndex }
@@ -18,6 +20,9 @@ export class ContractAdjustmentIndexService {
   async get(
     query: ContractAdjustmentIndexQueryDto,
   ): Promise<ContractAdjustmentIndex> {
+    if (query.until > contractToday().slice(0, 7)) {
+      throw new HttpException({ code: 'contract_index_not_published' }, 422);
+    }
     const series = query.index === 'ipca' ? 433 : 189;
     const key = `${series}:${query.until}`,
       cached = this.cache.get(key);
@@ -40,12 +45,13 @@ export class ContractAdjustmentIndexService {
         signal: AbortSignal.timeout(8000),
         redirect: 'error',
       });
-      if (!response.ok) throw new Error();
+      if (!response.ok) throw new Error(`BCB HTTP ${response.status}`);
       const data: unknown = await response.json();
-      if (!Array.isArray(data)) throw new Error();
+      if (!Array.isArray(data)) throw new Error('Invalid BCB response');
       const monthly = new Map<string, number>();
       for (const item of data as unknown[]) {
-        if (!item || typeof item !== 'object') throw new Error();
+        if (!item || typeof item !== 'object')
+          throw new Error('Invalid BCB response');
         const { data: date, valor } = item as { data: unknown; valor: unknown };
         if (
           typeof date !== 'string' ||
@@ -53,27 +59,28 @@ export class ContractAdjustmentIndexService {
           typeof valor !== 'string' ||
           !/^-?\d+(?:[.,]\d+)?$/.test(valor)
         )
-          throw new Error();
+          throw new Error('Invalid BCB response');
         const parts = date.split('/');
         const m = `${parts[2]}-${parts[1]}`,
           percent = Number(valor.replace(',', '.'));
         if (m > query.until || m < start.toISOString().slice(0, 7)) continue;
         if (!Number.isFinite(percent) || percent <= -100 || monthly.has(m))
-          throw new Error();
+          throw new Error('Invalid BCB response');
         monthly.set(m, percent);
       }
       const months = [...monthly]
         .sort(([a], [b]) => a.localeCompare(b))
         .slice(-12)
         .map(([month, percent]) => ({ month, percent }));
-      if (months.length !== 12) throw new Error();
+      if (months.length !== 12)
+        throw new HttpException({ code: 'contract_index_not_published' }, 422);
       // A missing publication within the selected period must not silently turn
       // a 12-month adjustment into a 13-month one.
       for (let i = 1; i < months.length; i++) {
         const prior = new Date(`${months[i - 1].month}-01T00:00:00Z`);
         prior.setUTCMonth(prior.getUTCMonth() + 1);
         if (prior.toISOString().slice(0, 7) !== months[i].month)
-          throw new Error();
+          throw new Error('BCB publication gap');
       }
       const accumulatedPercent = Number(
         (
@@ -85,7 +92,8 @@ export class ContractAdjustmentIndexService {
           100
         ).toFixed(4),
       );
-      if (!Number.isFinite(accumulatedPercent)) throw new Error();
+      if (!Number.isFinite(accumulatedPercent))
+        throw new Error('Invalid BCB response');
       const value: ContractAdjustmentIndex = {
         index: query.index,
         source: 'bcb_sgs',
@@ -106,7 +114,11 @@ export class ContractAdjustmentIndexService {
         value,
       });
       return value;
-    } catch {
+    } catch (error) {
+      if (error instanceof HttpException) throw error;
+      this.logger.warn(
+        `BCB index ${query.index} until ${query.until} failed: ${error instanceof Error ? error.message : 'invalid response'}`,
+      );
       throw new HttpException({ code: 'contract_index_unavailable' }, 503);
     }
   }
