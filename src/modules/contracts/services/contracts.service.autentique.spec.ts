@@ -26,6 +26,7 @@ import {
 } from '../autentique/autentique.client';
 import { ContractNotificationPublisher } from './contract-notification.publisher';
 import { ContractsService } from './contracts.service';
+import type { EmailService } from '../../email/email.service';
 import { AgencyClient } from '../../clients/entities/agency-client.entity';
 import { ContactEntity } from '../../contacts/entities/contact.entity';
 import { ContactMethodEntity } from '../../contacts/entities/contact-method.entity';
@@ -332,6 +333,87 @@ describe('ContractsService — Autentique', () => {
       );
     });
 
+    it('e-mails the Autentique author its link through Lyra (Autentique never does)', async () => {
+      const harness = makeHarness();
+      harness.client.me.mockResolvedValue({
+        id: '1',
+        name: 'Ana',
+        email: 'Ana@Agencia.com',
+      });
+
+      await harness.service.sendContractToSignatureProvider(
+        context(),
+        'contract-1',
+        {},
+      );
+
+      expect(harness.client.createLinkToSignature).toHaveBeenCalledWith(
+        'sig-agency',
+      );
+      expect(harness.client.createLinkToSignature).toHaveBeenCalledTimes(1);
+      expect(harness.emailService.sendEmail).toHaveBeenCalledWith(
+        expect.objectContaining({
+          to: 'ana@agencia.com',
+          subject: 'Contrato para assinar: Contrato de prestacao de servicos',
+          html: expect.stringContaining(
+            'href="https://assina.ae/sig-agency"',
+          ) as unknown,
+          override: { smtpHost: 'smtp.agencia.com' },
+        }),
+      );
+      expect(
+        harness.emailTransport.getEmailTransportOverride,
+      ).toHaveBeenCalledWith('tenant-1', 'workspace-1');
+      expect(harness.partiesRepository.update).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'party-1' }),
+        {
+          metadata: expect.objectContaining({
+            externalSignerId: 'sig-agency',
+            lyraSigningEmailReason: 'author',
+          }) as unknown,
+        },
+      );
+      const sentEvent = harness.eventsRepository.save.mock.calls
+        .map(([event]) => event)
+        .find((event) => event.type === ContractEventType.SignatureSent);
+      expect(
+        (
+          sentEvent?.metadata as { signers: Array<{ deliveredBy: string }> }
+        ).signers.map((s) => s.deliveredBy),
+      ).toEqual(['lyra', 'autentique']);
+    });
+
+    it('keeps the send when the author e-mail fails', async () => {
+      const harness = makeHarness();
+      harness.client.me.mockResolvedValue({
+        id: '1',
+        name: 'Ana',
+        email: 'ana@agencia.com',
+      });
+      harness.emailService.sendEmail.mockRejectedValue(new Error('smtp down'));
+
+      const result = await harness.service.sendContractToSignatureProvider(
+        context(),
+        'contract-1',
+        {},
+      );
+
+      expect(result).toEqual(
+        expect.objectContaining({ sent: true, externalDocumentId: 'doc-1' }),
+      );
+    });
+
+    it('does not e-mail anyone when the author is not a signer', async () => {
+      const harness = makeHarness();
+      await harness.service.sendContractToSignatureProvider(
+        context(),
+        'contract-1',
+        {},
+      );
+      expect(harness.emailService.sendEmail).not.toHaveBeenCalled();
+      expect(harness.client.createLinkToSignature).not.toHaveBeenCalled();
+    });
+
     it('frees the claim after a definite rejection by Autentique', async () => {
       const harness = makeHarness();
       harness.client.createDocument.mockRejectedValueOnce(
@@ -589,6 +671,130 @@ describe('ContractsService — Autentique', () => {
     });
   });
 
+  describe('signing links', () => {
+    function sentHarness() {
+      return makeHarness({
+        contract: makeContract({
+          status: ContractStatus.SentForSignature,
+          externalDocumentId: 'doc-1',
+          signatureProvider: ContractSignatureProvider.Autentique,
+        }),
+        parties: sentParties(),
+      });
+    }
+
+    it('returns a party link on demand without storing it', async () => {
+      const harness = sentHarness();
+      await expect(
+        harness.service.getSigningLink(context(), 'contract-1', 'party-2'),
+      ).resolves.toEqual({
+        partyId: 'party-2',
+        signingUrl: 'https://assina.ae/sig-client',
+      });
+      expect(harness.partiesRepository.update).not.toHaveBeenCalled();
+    });
+
+    it('e-mails a party its link on request and records it', async () => {
+      const harness = sentHarness();
+      await harness.service.emailSigningLink(
+        context(),
+        'contract-1',
+        'party-2',
+      );
+      expect(harness.emailService.sendEmail).toHaveBeenCalledWith(
+        expect.objectContaining({ to: 'carlos@cliente.com' }),
+      );
+      expect(harness.eventsRepository.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: ContractEventType.PartyUpdated,
+          metadata: expect.objectContaining({
+            partyId: 'party-2',
+            reason: 'manual',
+            deliveredBy: 'lyra',
+          }) as unknown,
+        }),
+      );
+    });
+
+    it('refuses a signer that already signed, an unsent contract and a non-https link', async () => {
+      const signed = makeHarness({
+        contract: makeContract({
+          status: ContractStatus.PartiallySigned,
+          externalDocumentId: 'doc-1',
+          signatureProvider: ContractSignatureProvider.Autentique,
+        }),
+        parties: sentParties().map((party) =>
+          party.id === 'party-2'
+            ? { ...party, signatureStatus: ContractPartySignatureStatus.Signed }
+            : party,
+        ),
+      });
+      await expect(
+        signed.service.getSigningLink(context(), 'contract-1', 'party-2'),
+      ).rejects.toMatchObject({ status: 400 });
+
+      const unsent = makeHarness({ parties: sentParties() });
+      await expect(
+        unsent.service.getSigningLink(context(), 'contract-1', 'party-2'),
+      ).rejects.toMatchObject({ status: 400 });
+
+      const harness = sentHarness();
+      harness.client.createLinkToSignature.mockResolvedValue(
+        'javascript:alert(1)',
+      );
+      await expect(
+        harness.service.emailSigningLink(context(), 'contract-1', 'party-2'),
+      ).rejects.toMatchObject({ status: 502 });
+      expect(harness.emailService.sendEmail).not.toHaveBeenCalled();
+    });
+
+    it('sends the link through Lyra once when Autentique reports a failed e-mail', async () => {
+      const harness = sentHarness();
+      const raw = Buffer.from(
+        JSON.stringify({
+          event: {
+            id: 'evt-failed',
+            type: 'signature.delivery_failed',
+            data: {
+              public_id: 'sig-client',
+              document: 'doc-1',
+              user: { email: 'carlos@cliente.com' },
+              email_events: {
+                refused: '2026-10-10 12:00:00',
+                reason: 'mailbox full',
+              },
+            },
+          },
+        }),
+      );
+      const signature = createHmac('sha256', WEBHOOK_SECRET)
+        .update(raw)
+        .digest('hex');
+
+      await harness.service.handleAutentiqueWebhook(
+        'settings-1',
+        raw,
+        signature,
+      );
+      await new Promise((resolve) => setImmediate(resolve));
+
+      expect(harness.client.createLinkToSignature).toHaveBeenCalledWith(
+        'sig-client',
+      );
+      expect(harness.emailService.sendEmail).toHaveBeenCalledWith(
+        expect.objectContaining({ to: 'carlos@cliente.com' }),
+      );
+      expect(harness.partiesRepository.update).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'party-2' }),
+        {
+          metadata: expect.objectContaining({
+            lyraSigningEmailReason: 'failed',
+          }) as unknown,
+        },
+      );
+    });
+  });
+
   describe('signature provider settings', () => {
     it('stores the document webhook secret encrypted and exposes one URL per category', async () => {
       process.env.CONTRACTS_WEBHOOK_PUBLIC_BASE_URL =
@@ -753,6 +959,16 @@ function makeHarness(
       return Promise.resolve(saved);
     }),
     update: jest.fn(() => Promise.resolve({ affected: 1 })),
+    findOne: jest.fn(({ where }: { where: { id: string } }) =>
+      Promise.resolve(parties.find((party) => party.id === where.id) ?? null),
+    ),
+  };
+
+  const emailService = { sendEmail: jest.fn().mockResolvedValue(undefined) };
+  const emailTransport = {
+    getEmailTransportOverride: jest
+      .fn()
+      .mockResolvedValue({ smtpHost: 'smtp.agencia.com' }),
   };
 
   const documentsRepository = {
@@ -806,6 +1022,8 @@ function makeHarness(
     documentsRepository as unknown as Repository<ContractDocument>,
     eventsRepository as unknown as Repository<ContractEvent>,
     publisher as unknown as ContractNotificationPublisher,
+    emailService as unknown as EmailService,
+    emailTransport,
   );
 
   const seams = internals(service);
@@ -845,6 +1063,9 @@ function makeHarness(
     }),
     getDocument: jest.fn(),
     downloadFile: jest.fn(),
+    createLinkToSignature: jest.fn((publicId: string) =>
+      Promise.resolve(`https://assina.ae/${publicId}`),
+    ),
   };
   jest
     .spyOn(seams, 'createAutentiqueClient')
@@ -852,6 +1073,8 @@ function makeHarness(
 
   return {
     service,
+    emailService,
+    emailTransport,
     clientsRepository,
     contactsRepository,
     contactMethodsRepository,

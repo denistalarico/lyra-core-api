@@ -404,6 +404,28 @@ export class ContractsController {
     return this.contractsService.syncSignatureStatus(context, id);
   }
 
+  /** Autentique signing link of one signer (signs as that party: managers only). */
+  @Post(':id/parties/:partyId/signing-link')
+  @RequirePermission('agency.contracts.send_signature.manager_or_admin')
+  getSigningLink(
+    @AuthorizedContext() context: AuthorizedRequestContext,
+    @Param('id') id: string,
+    @Param('partyId') partyId: string,
+  ) {
+    return this.contractsService.getSigningLink(context, id, partyId);
+  }
+
+  /** Lyra e-mails the signer its Autentique signing link. */
+  @Post(':id/parties/:partyId/signing-link/email')
+  @RequirePermission('agency.contracts.send_signature.manager_or_admin')
+  emailSigningLink(
+    @AuthorizedContext() context: AuthorizedRequestContext,
+    @Param('id') id: string,
+    @Param('partyId') partyId: string,
+  ) {
+    return this.contractsService.emailSigningLink(context, id, partyId);
+  }
+
   @Post(':id/mark-manually-signed')
   @RequirePermission('agency.contracts.send_signature.manager_or_admin')
   markManuallySigned(

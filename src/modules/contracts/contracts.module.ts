@@ -2,6 +2,8 @@ import { ContractDefaultsService } from './services/contract-defaults.service';
 import { ContractAdjustmentIndexService } from './services/contract-adjustment-index.service';
 import { Module } from '@nestjs/common';
 import { AiCostsModule } from '../ai-costs/ai-costs.module';
+import { AgencyIdentityCredentialsModule } from '../agency/agency-identity-credentials.module';
+import { EmailModule } from '../email/email.module';
 import { ContractAiAssistController } from './ai-assist/contract-ai-assist.controller';
 import { ContractAiAssistService } from './ai-assist/contract-ai-assist.service';
 import { ContractAiAssistConfigService } from './ai-assist/contract-ai-assist-config.service';
@@ -30,6 +32,9 @@ const AGENCY_CONNECTION = 'agency';
 @Module({
   imports: [
     AiCostsModule,
+    // Signing links e-mailed by Lyra, through the agency SMTP when configured.
+    AgencyIdentityCredentialsModule,
+    EmailModule,
     NotificationsModule,
     PermissionsModule,
     TypeOrmModule.forFeature(

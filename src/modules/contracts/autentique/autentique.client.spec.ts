@@ -134,6 +134,30 @@ describe('AutentiqueClient', () => {
     );
   });
 
+  it('asks Autentique for one signer link and validates the public id', async () => {
+    const fetchImpl = jest.fn().mockResolvedValue(
+      jsonResponse({
+        data: {
+          createLinkToSignature: { short_link: 'https://assina.ae/abc' },
+        },
+      }),
+    );
+    await expect(
+      makeClient(fetchImpl).createLinkToSignature('96812d20c718'),
+    ).resolves.toBe('https://assina.ae/abc');
+    const body = JSON.parse(initOf(fetchImpl).body as string) as {
+      query: string;
+    };
+    expect(body.query).toContain(
+      'createLinkToSignature(public_id: "96812d20c718")',
+    );
+
+    await expect(
+      makeClient(fetchImpl).createLinkToSignature('x") { id } #'),
+    ).rejects.toBeInstanceOf(AutentiqueApiError);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
   it('maps HTTP 429 to a rate_limited error with retry-after', async () => {
     const fetchImpl = jest
       .fn()

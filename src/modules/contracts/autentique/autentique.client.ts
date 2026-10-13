@@ -263,6 +263,28 @@ export class AutentiqueClient {
     return { ...data.document, signatures: data.document.signatures ?? [] };
   }
 
+  /**
+   * Signing link of one signer (`signatures.public_id`). Autentique never
+   * e-mails the document author, so this is how the author — or anyone whose
+   * e-mail failed — gets a link. The link signs as that signer: never store it
+   * where read-only users can see it.
+   */
+  async createLinkToSignature(publicId: string): Promise<string | null> {
+    if (!/^[A-Za-z0-9_-]{1,160}$/.test(publicId)) {
+      throw new AutentiqueApiError(
+        'ID de signatário inválido.',
+        'invalid_config',
+      );
+    }
+
+    const data = await this.postJson<{
+      createLinkToSignature?: { short_link?: string | null } | null;
+    }>(
+      `mutation { createLinkToSignature(public_id: ${JSON.stringify(publicId)}) { short_link } }`,
+    );
+    return data.createLinkToSignature?.short_link ?? null;
+  }
+
   async downloadFile(url: string): Promise<Buffer> {
     let current = assertDownloadUrl(url);
 

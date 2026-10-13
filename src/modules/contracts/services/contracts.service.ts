@@ -21,10 +21,12 @@ import {
   ConflictException,
   HttpException,
   HttpStatus,
+  Inject,
   Injectable,
   InternalServerErrorException,
   Logger,
   NotFoundException,
+  Optional,
   UnauthorizedException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -127,6 +129,16 @@ import {
   NotificationInterestReason,
 } from '../../notifications/enums';
 import { ContractNotificationPublisher } from './contract-notification.publisher';
+import {
+  EmailService,
+  type EmailTransportOverride,
+} from '../../email/email.service';
+import { AGENCY_IDENTITY_CREDENTIALS } from '../../agency/agency-identity-credentials.token';
+import {
+  isHttpsUrl,
+  renderContractSigningEmail,
+  type SigningLinkEmailReason,
+} from '../autentique/contract-signing-email';
 import { AgencyClient } from '../../clients/entities/agency-client.entity';
 import { ContactEntity } from '../../contacts/entities/contact.entity';
 import { ContactMethodEntity } from '../../contacts/entities/contact-method.entity';
@@ -135,6 +147,14 @@ type RequestContext = {
   tenantId: string;
   workspaceId: string;
   userId: string;
+};
+
+/** The only part of the agency credentials this service needs (agency SMTP). */
+type SigningEmailTransport = {
+  getEmailTransportOverride(
+    tenantId: string,
+    workspaceId?: string,
+  ): Promise<EmailTransportOverride | undefined>;
 };
 
 /** Autentique webhook categories this module listens to (one endpoint each). */
@@ -203,6 +223,11 @@ export class ContractsService {
     @InjectRepository(ContractEvent, AGENCY_CONNECTION)
     private readonly eventsRepository: Repository<ContractEvent>,
     private readonly contractNotificationPublisher: ContractNotificationPublisher,
+    // Signing links e-mailed by Lyra (Autentique never e-mails the author).
+    @Optional() private readonly emailService?: EmailService,
+    @Optional()
+    @Inject(AGENCY_IDENTITY_CREDENTIALS)
+    private readonly emailTransport?: SigningEmailTransport,
   ) {}
 
   private readonly logger = new Logger(ContractsService.name);
@@ -2116,10 +2141,50 @@ export class ContractsService {
         name: party.name,
         email: party.email,
         externalSignerId,
+        deliveredBy: 'autentique',
       });
     }
 
-    const saved = await this.getContractOrFail(context, contract.id);
+    let saved = await this.getContractOrFail(context, contract.id);
+
+    // Autentique does not e-mail the document author (the token's account):
+    // Lyra sends that signer the link. Best-effort — the send already happened.
+    const authorEmail = await this.autentiqueAuthorEmail(settings);
+    if (authorEmail) {
+      for (const signer of sentSigners) {
+        const party = prepared.parties.find(
+          (item) => item.id === signer.partyId,
+        );
+        const email = (party?.email ?? '').trim().toLowerCase();
+        if (!party || email !== authorEmail || !signer.externalSignerId)
+          continue;
+        try {
+          await this.deliverSigningLinkByLyra(
+            context,
+            settings,
+            saved,
+            {
+              ...party,
+              metadata: {
+                ...(party.metadata ?? {}),
+                externalSignerId: signer.externalSignerId,
+                sentAt: sentAt.toISOString(),
+              },
+            },
+            'author',
+          );
+          signer.deliveredBy = 'lyra';
+        } catch (error) {
+          signer.deliveredBy = 'none';
+          this.logger.warn(
+            `Signing link e-mail to the Autentique author failed for contract ${contract.id}: ${
+              error instanceof Error ? error.message : 'unknown error'
+            }`,
+          );
+        }
+      }
+      saved = await this.getContractOrFail(context, contract.id);
+    }
 
     const event = await this.createEvent(
       context,
@@ -2156,6 +2221,188 @@ export class ContractsService {
       externalDocumentId: document.id,
       contract: await this.findContract(context, saved.id),
     };
+  }
+
+  /**
+   * Signing link of one party, generated on demand by Autentique. Never
+   * stored: whoever opens it signs as that party.
+   */
+  async getSigningLink(context: RequestContext, id: string, partyId: string) {
+    const { settings, party } = await this.loadPendingSigner(
+      context,
+      id,
+      partyId,
+    );
+    return {
+      partyId: party.id,
+      signingUrl: await this.requestSigningLink(settings, party),
+    };
+  }
+
+  /** Lyra e-mails one party its signing link (Autentique did not, or failed). */
+  async emailSigningLink(context: RequestContext, id: string, partyId: string) {
+    const { contract, settings, party } = await this.loadPendingSigner(
+      context,
+      id,
+      partyId,
+    );
+    await this.deliverSigningLinkByLyra(
+      context,
+      settings,
+      contract,
+      party,
+      'manual',
+    );
+    return {
+      partyId: party.id,
+      sentTo: party.email,
+      contract: await this.findContract(context, contract.id),
+    };
+  }
+
+  private async loadPendingSigner(
+    context: RequestContext,
+    id: string,
+    partyId: string,
+  ) {
+    const contract = await this.getContractOrFail(context, id);
+    if (
+      !contract.externalDocumentId ||
+      contract.signatureProvider !== ContractSignatureProvider.Autentique
+    ) {
+      throw new BadRequestException(
+        'Este contrato não foi enviado ao Autentique.',
+      );
+    }
+    if (!isContractInSignatureFlow(contract.status)) {
+      throw new BadRequestException(
+        'Este contrato não está mais aguardando assinaturas.',
+      );
+    }
+    const party = await this.partiesRepository.findOne({
+      where: {
+        id: partyId,
+        contractId: contract.id,
+        tenantId: context.tenantId,
+        workspaceId: context.workspaceId,
+      },
+    });
+    if (!party) throw new NotFoundException('Signatário não encontrado.');
+    if (party.signatureStatus === ContractPartySignatureStatus.Signed) {
+      throw new BadRequestException('Este signatário já assinou.');
+    }
+    const settings = await this.getOrCreateSignatureProviderSettings(
+      context,
+      ContractSignatureProvider.Autentique,
+    );
+    return { contract, settings, party };
+  }
+
+  private async requestSigningLink(
+    settings: ContractSignatureProviderSetting,
+    party: ContractParty,
+  ) {
+    const externalSignerId = party.metadata?.externalSignerId;
+    if (typeof externalSignerId !== 'string' || !externalSignerId) {
+      throw new BadRequestException(
+        'Este signatário ainda não tem identificação no Autentique. Use "Atualizar status" e tente de novo.',
+      );
+    }
+    let url: string | null;
+    try {
+      url =
+        await this.createAutentiqueClient(settings).createLinkToSignature(
+          externalSignerId,
+        );
+    } catch (error) {
+      throw this.mapAutentiqueError(error);
+    }
+    if (!url || !isHttpsUrl(url)) {
+      throw new BadGatewayException(
+        'O Autentique não devolveu um link de assinatura.',
+      );
+    }
+    return url;
+  }
+
+  private async deliverSigningLinkByLyra(
+    scope: ContractScope,
+    settings: ContractSignatureProviderSetting,
+    contract: ContractRecord,
+    party: ContractParty,
+    reason: SigningLinkEmailReason,
+  ) {
+    const to = party.email?.trim();
+    if (!to) throw new BadRequestException('Este signatário não tem e-mail.');
+    if (!this.emailService) {
+      throw new InternalServerErrorException(
+        'Envio de e-mail indisponível no servidor.',
+      );
+    }
+    const url = await this.requestSigningLink(settings, party);
+    const variables = contract.variablesData ?? {};
+    const agencyName = ['agency.publicName', 'agency.name', 'agency.legalName']
+      .map((key) => variables[key])
+      .find(
+        (value): value is string =>
+          typeof value === 'string' && value.trim() !== '',
+      );
+
+    await this.emailService.sendEmail({
+      to,
+      ...renderContractSigningEmail({
+        signerName: party.name,
+        contractTitle: contract.title,
+        agencyName: agencyName ?? null,
+        url,
+      }),
+      override: await this.emailTransport?.getEmailTransportOverride(
+        scope.tenantId,
+        scope.workspaceId,
+      ),
+    });
+
+    const sentAt = new Date().toISOString();
+    await this.partiesRepository.update(
+      {
+        id: party.id,
+        tenantId: scope.tenantId,
+        workspaceId: scope.workspaceId,
+        contractId: contract.id,
+      },
+      {
+        metadata: {
+          ...(party.metadata ?? {}),
+          lyraSigningEmailSentAt: sentAt,
+          lyraSigningEmailReason: reason,
+        },
+      },
+    );
+    await this.createEvent(
+      scope,
+      contract.id,
+      ContractEventType.PartyUpdated,
+      `Link de assinatura enviado por e-mail pela Lyra para ${party.name}.`,
+      { partyId: party.id, reason, deliveredBy: 'lyra' },
+    );
+  }
+
+  /** E-mail of the Autentique account that owns the token (the document author). */
+  private async autentiqueAuthorEmail(
+    settings: ContractSignatureProviderSetting,
+  ) {
+    const account = settings.metadata?.autentiqueAccount as
+      | { email?: unknown }
+      | undefined;
+    if (typeof account?.email === 'string' && account.email.trim()) {
+      return account.email.trim().toLowerCase();
+    }
+    try {
+      const me = await this.createAutentiqueClient(settings).me();
+      return me.email?.trim().toLowerCase() || null;
+    } catch {
+      return null;
+    }
   }
 
   /**
@@ -2715,6 +2962,23 @@ export class ContractsService {
       contractStatusChanged = Boolean(result.affected);
     }
 
+    // Autentique could not e-mail a signer: Lyra sends the link once (background).
+    for (const transition of applied) {
+      if (transition.to !== ContractPartySignatureStatus.Failed) continue;
+      const party = parties.find((item) => item.id === transition.partyId);
+      if (!party || party.metadata?.lyraSigningEmailSentAt) continue;
+      void this.deliverFailedSignerLink(scope, contract, {
+        ...party,
+        metadata: {
+          ...(party.metadata ?? {}),
+          ...(transition.externalSignerId
+            ? { externalSignerId: transition.externalSignerId }
+            : {}),
+          providerStatus: transition.to,
+        },
+      });
+    }
+
     const changed = applied.length > 0 || contractStatusChanged;
     const fresh = changed
       ? ((await this.contractsRepository.findOne({
@@ -3063,6 +3327,36 @@ export class ContractsService {
   }
 
   // Overridable seam for specs: no spec ever reaches the real API.
+  private async deliverFailedSignerLink(
+    scope: ContractScope,
+    contract: ContractRecord,
+    party: ContractParty,
+  ) {
+    try {
+      const settings = await this.signatureProviderSettingsRepository.findOne({
+        where: {
+          tenantId: scope.tenantId,
+          workspaceId: scope.workspaceId,
+          provider: ContractSignatureProvider.Autentique,
+        },
+      });
+      if (!settings) return;
+      await this.deliverSigningLinkByLyra(
+        scope,
+        settings,
+        contract,
+        party,
+        'failed',
+      );
+    } catch (error) {
+      this.logger.warn(
+        `Fallback signing link e-mail failed for contract ${contract.id}, party ${party.id}: ${
+          error instanceof Error ? error.message : 'unknown error'
+        }`,
+      );
+    }
+  }
+
   protected createAutentiqueClient(settings: ContractSignatureProviderSetting) {
     return new AutentiqueClient({
       apiBaseUrl: settings.apiBaseUrl,
