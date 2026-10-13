@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { ILike, Repository } from 'typeorm';
+import { ContactEntity } from '../contacts/entities/contact.entity';
 import { SalesNotificationPublisher } from '../crm/sales-notification.publisher';
 import { DocumentPdfRendererService } from '../document-layouts/document-pdf-renderer.service';
 import { DocumentLayoutsService } from '../document-layouts/document-layouts.service';
@@ -57,6 +58,8 @@ export class QuotesService {
     private readonly documentPdfRenderer: DocumentPdfRendererService,
     private readonly salesNotificationPublisher: SalesNotificationPublisher,
     private readonly quoteInvoiceService: QuoteInvoiceService,
+    @InjectRepository(ContactEntity, AGENCY_CONNECTION)
+    private readonly contactsRepo: Repository<ContactEntity>,
   ) {}
 
   health() {
@@ -266,11 +269,22 @@ export class QuotesService {
       throw new NotFoundException('Document layout template not found.');
     }
 
+    const customer = quote.contactId
+      ? await this.contactsRepo.findOne({
+          where: {
+            id: quote.contactId,
+            tenantId: context.tenantId,
+            workspaceId: context.workspaceId,
+          },
+        })
+      : null;
+
     const buffer = await this.documentPdfRenderer.renderQuotePdf({
       quote,
       items,
       layout,
       template,
+      customerName: customer?.displayName,
     });
 
     return {

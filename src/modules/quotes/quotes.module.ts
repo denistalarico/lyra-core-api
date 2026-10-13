@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AgencySalesItemEntity } from '../agency/entities/agency-sales.entities';
+import { ContactEntity } from '../contacts/entities/contact.entity';
 import { AgencyClient } from '../clients/entities';
 import { SalesNotificationPublisher } from '../crm/sales-notification.publisher';
 import { DocumentLayoutsModule } from '../document-layouts/document-layouts.module';
@@ -33,6 +34,7 @@ const AGENCY_CONNECTION = 'agency';
     FinanceModule,
     TypeOrmModule.forFeature(
       [
+        ContactEntity,
         QuoteEntity,
         QuoteItemEntity,
         QuoteStatusHistoryEntity,

@@ -28,6 +28,7 @@ import type { FinanceBillLine } from '../finance/entities/finance-bill-line.enti
 import type { FinanceBankAccount } from '../finance/entities/finance-bank-account.entity';
 
 type RenderQuotePdfInput = {
+  customerName?: string | null;
   quote: QuoteEntity;
   items: QuoteItemEntity[];
   layout: DocumentLayoutEntity;
@@ -300,6 +301,8 @@ export class DocumentPdfRendererService {
     const { quote, items, layout, template } = input;
     const companyBrandBlock = this.buildCompanyBrandBlock(layout);
     const termsBlock = this.buildTermsBlock(quote.termsAndConditions);
+    const customerName =
+      input.customerName?.trim() || this.getCustomerName(quote);
     const html = this.replaceTokens(template.htmlTemplate, {
       layoutType: this.escapeHtml(layout.layoutType),
       companyBrandBlock,
@@ -321,7 +324,8 @@ export class DocumentPdfRendererService {
       documentSubtitle: this.escapeHtml(this.getDocumentSubtitle(quote)),
       clientLabel: 'Cliente',
       documentNumberLabel: 'Número',
-      customerName: this.escapeHtml(this.getCustomerName(quote)),
+      customerName: this.escapeHtml(customerName),
+      customerHeaderBlock: `<div class="doc-customer-header"><span class="doc-customer-header-avatar">${this.escapeHtml(customerName.charAt(0).toUpperCase())}</span><div><small>Cliente</small><strong>${this.escapeHtml(customerName)}</strong></div></div>`,
       documentNumber: this.escapeHtml(quote.quoteNumber),
       // new tokens (post-migration templates)
       dateGridCells: `<div><small>Validade</small><strong>${this.escapeHtml(this.formatDate(quote.validUntil))}</strong></div>`,
@@ -353,6 +357,13 @@ export class DocumentPdfRendererService {
   <style>
     @page { margin: 0; size: ${layout.paperFormat === 'letter' ? 'Letter' : 'A4'}; }
     ${css}
+    .doc-header, .doc-hero, .doc-grid, .doc-closing { break-inside: avoid; page-break-inside: avoid; }
+    .doc-section h2 { break-after: avoid; }
+    .doc-items-table tbody { break-inside: avoid; page-break-inside: avoid; }
+    .doc-items-table tr { break-inside: avoid; page-break-inside: avoid; }
+    .doc-items-table thead { display: table-header-group; }
+    .doc-quote-note td { white-space: pre-wrap; }
+    .doc-quote-section td { font-weight: 700; }
   </style>
 </head>
 <body>${html}</body>
@@ -447,17 +458,23 @@ export class DocumentPdfRendererService {
   }
 
   private buildItemsTable(items: QuoteItemEntity[], fallbackCurrency: string) {
-    const rows =
-      items.length > 0
-        ? items
-            .map((item) => {
-              const currency = item.currency || fallbackCurrency || 'BRL';
-              const recurringLabel =
-                item.recurringTotalCents > 0
-                  ? `${this.formatMoney(item.recurringPriceCents, currency)}<br /><span style="color:#64748b;">Total recorrente: ${this.formatMoney(item.recurringTotalCents, currency)}</span>`
-                  : '-';
+    const groups: string[][] = [[]];
+    for (const item of items) {
+      const row = (() => {
+        if (item.metadata?.kind === 'section') {
+          if (groups[groups.length - 1].length) groups.push([]);
+          return `<tr class="doc-quote-section"><td colspan="6">${this.escapeHtml(item.name)}</td></tr>`;
+        }
+        if (item.metadata?.kind === 'note') {
+          return `<tr class="doc-quote-note"><td colspan="6"><strong>${this.escapeHtml(item.name)}</strong>${item.description ? `\n${this.escapeHtml(item.description)}` : ''}</td></tr>`;
+        }
+        const currency = item.currency || fallbackCurrency || 'BRL';
+        const recurringLabel =
+          item.recurringTotalCents > 0
+            ? `${this.formatMoney(item.recurringPriceCents, currency)}<br /><span style="color:#64748b;">Total recorrente: ${this.formatMoney(item.recurringTotalCents, currency)}</span>`
+            : '-';
 
-              return `
+        return `
         <tr>
           <td>
             <strong>${this.escapeHtml(item.name)}</strong>
@@ -473,12 +490,12 @@ export class DocumentPdfRendererService {
           <td style="text-align:right;">${recurringLabel}</td>
           <td style="text-align:right;"><strong>${this.escapeHtml(this.formatMoney(item.totalCents, currency))}</strong></td>
         </tr>`;
-            })
-            .join('')
-        : `
-        <tr>
-          <td colspan="6" style="text-align:center;color:#64748b;">Nenhum item informado.</td>
-        </tr>`;
+      })();
+      groups[groups.length - 1].push(row);
+    }
+    const rows = items.length
+      ? groups.map((group) => `<tbody>${group.join('')}</tbody>`).join('')
+      : '<tbody><tr><td colspan="6" style="text-align:center;color:#64748b;">Nenhum item informado.</td></tr></tbody>';
 
     return `
     <table class="doc-items-table">
@@ -492,8 +509,7 @@ export class DocumentPdfRendererService {
           <th style="text-align:right;">Total</th>
         </tr>
       </thead>
-      <tbody>${rows}
-      </tbody>
+      ${rows}
     </table>`;
   }
 
