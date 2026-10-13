@@ -4,6 +4,8 @@ import {
   Controller,
   Delete,
   Get,
+  HttpCode,
+  HttpStatus,
   Param,
   Patch,
   Post,
@@ -25,6 +27,11 @@ import { RequestContextData } from '../../common/context/request-context.decorat
 import type { RequestContext } from '../../common/context/request-context.interface';
 import { MAX_IMAGE_UPLOAD_BYTES } from '../../common/files/files.service';
 import { AgencyContactsService } from './agency-contacts.service';
+import { AgencyContactLookupService } from './agency-contact-lookup.service';
+import {
+  AgencyContactCompanyLookupDto,
+  AgencyContactPostalLookupDto,
+} from './dto/agency-contact-lookup.dto';
 import { CreateContactListDto } from '../contacts/dto/create-contact-list.dto';
 import { PatchContactListDto } from '../contacts/dto/patch-contact-list.dto';
 import { CreateContactDto } from '../contacts/dto/create-contact.dto';
@@ -108,7 +115,35 @@ const CONTACT_UPDATE_PERMISSIONS = [
 @Controller('agency/contacts')
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 export class AgencyContactsController {
-  constructor(private readonly agencyContactsService: AgencyContactsService) {}
+  constructor(
+    private readonly agencyContactsService: AgencyContactsService,
+    private readonly agencyContactLookupService: AgencyContactLookupService,
+  ) {}
+
+  /**
+   * Assisted fill (E1): suggestions for the drawer, never a write. POST keeps
+   * the CEP/CNPJ in the body, out of URLs and access logs; 200 because
+   * nothing is created.
+   */
+  @Post('lookup/postal')
+  @HttpCode(HttpStatus.OK)
+  @RequireAnyPermission(...CONTACT_VIEW_PERMISSIONS)
+  lookupPostal(
+    @RequestContextData() ctx: RequestContext,
+    @Body() dto: AgencyContactPostalLookupDto,
+  ) {
+    return this.agencyContactLookupService.lookupPostal(ctx, dto);
+  }
+
+  @Post('lookup/company')
+  @HttpCode(HttpStatus.OK)
+  @RequireAnyPermission(...CONTACT_VIEW_PERMISSIONS)
+  lookupCompany(
+    @RequestContextData() ctx: RequestContext,
+    @Body() dto: AgencyContactCompanyLookupDto,
+  ) {
+    return this.agencyContactLookupService.lookupCompany(ctx, dto);
+  }
 
   @Get('lists')
   @RequireAnyPermission(...CONTACT_VIEW_PERMISSIONS)

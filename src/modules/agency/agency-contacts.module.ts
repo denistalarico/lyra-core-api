@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { FilesModule } from '../../common/files/files.module';
 import { AgencyContactsController } from './agency-contacts.controller';
 import { AgencyContactsService } from './agency-contacts.service';
+import { AgencyContactLookupService } from './agency-contact-lookup.service';
 import { ContactEntity } from '../contacts/entities/contact.entity';
 import { ContactListEntity } from '../contacts/entities/contact-list.entity';
 import { ContactListMemberEntity } from '../contacts/entities/contact-list-member.entity';
@@ -50,7 +51,7 @@ const AGENCY_CONNECTION = 'agency';
     ),
   ],
   controllers: [AgencyContactsController],
-  providers: [AgencyContactsService],
+  providers: [AgencyContactsService, AgencyContactLookupService],
   exports: [AgencyContactsService],
 })
 export class AgencyContactsModule {}

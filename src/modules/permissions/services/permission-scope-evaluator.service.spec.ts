@@ -235,6 +235,25 @@ describe('PermissionScopeEvaluatorService', () => {
     expect(agencyContactsRepository.findOne).not.toHaveBeenCalled();
   });
 
+  it('allows assisted-fill lookups for assigned-scope members without resolving a contact', async () => {
+    const { service, agencyContactsRepository } = createService();
+
+    for (const routePath of [
+      '/agency/contacts/lookup/postal',
+      '/agency/contacts/lookup/company',
+    ]) {
+      await expect(
+        service.assertScope(
+          { ...baseContext, role: PlatformRoleKey.Member },
+          'shared.contacts.view.assigned',
+          { routePath, params: {} },
+        ),
+      ).resolves.toBeUndefined();
+    }
+
+    expect(agencyContactsRepository.findOne).not.toHaveBeenCalled();
+  });
+
   it('allows deleting a contact source as the owner without an out-of-scope error', async () => {
     const { service, agencyContactsRepository } = createService();
 

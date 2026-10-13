@@ -1244,9 +1244,12 @@ export class PermissionScopeEvaluatorService {
     // not a contact id, so it must not be resolved as a contact (doing so
     // makes `exists` false and trips the out-of-scope guard). These routes
     // live directly under `agency/contacts/...`, never under `:contactId`.
+    // Assisted-fill lookups (`agency/contacts/lookup/*`) read public CEP/ZIP/
+    // CNPJ data and touch no contact either, so they share this bucket.
     const isContactConfigRoute =
       !path.includes(':contactId') &&
-      (path.includes('identification-types') ||
+      (path.includes('/contacts/lookup/') ||
+        path.includes('identification-types') ||
         path.includes('/sources') ||
         path.includes('/banks') ||
         path.includes('bank-accounts') ||
