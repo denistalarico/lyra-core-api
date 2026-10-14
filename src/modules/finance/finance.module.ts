@@ -1,3 +1,5 @@
+import { FinanceDocumentRecurrenceService } from './services/finance-document-recurrence.service';
+import { FinanceRecurrenceScheduler } from './services/finance-recurrence.scheduler';
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { SettingsCryptoService } from '../../common/crypto/settings-crypto.service';
@@ -122,6 +124,8 @@ import { ContactMethodEntity } from '../contacts/entities/contact-method.entity'
   ],
   controllers: [FinanceController],
   providers: [
+    FinanceDocumentRecurrenceService,
+    FinanceRecurrenceScheduler,
     FinanceService,
     FinanceDefaultsService,
     FinanceBillingService,

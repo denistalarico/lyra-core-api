@@ -378,11 +378,9 @@ describe('FinanceBillingService notification triggers', () => {
     const profile = makeRecurringProfile({
       metadata: { ownerUserId: 'user-owner' },
     });
-    const { service, publisher, invoicesRepo } = makeService({
+    const { service, publisher } = makeService({
       recurringProfile: profile,
     });
-
-    invoicesRepo.findOne.mockResolvedValueOnce(null);
 
     await service.generateInvoiceFromRecurringProfile(
       makeContext(),
@@ -390,6 +388,22 @@ describe('FinanceBillingService notification triggers', () => {
     );
 
     expect(publisher.publishRecurringChargeCreated).not.toHaveBeenCalled();
+  });
+});
+
+describe('FinanceBillingService automatic invoice issue', () => {
+  it('issues configured recurring invoices through the normal posting path', async () => {
+    const profile = makeRecurringProfile({
+      metadata: { generateAsStatus: 'issued' },
+    });
+    const { service, postingService } = makeService({
+      recurringProfile: profile,
+    });
+    await service.generateInvoiceFromRecurringProfile(
+      makeContext(),
+      profile.id,
+    );
+    expect(postingService.postInvoiceConfirmed.mock.calls).toHaveLength(1);
   });
 });
 
@@ -573,6 +587,51 @@ describe('FinanceBillingService bill recurrences', () => {
     const savedRec = lastSaved(billRecurrencesRepo.save);
     expect(savedRec.status).toBe(FinanceBillRecurrenceStatus.Completed);
     expect(savedRec.active).toBe(false);
+  });
+
+  it('rejects stale occurrences beyond the end date before creating a bill', async () => {
+    const billRecurrence = makeBillRecurrence({
+      nextGenerationDate: '2026-07-01',
+      endDate: '2026-06-30',
+    });
+    const { service, billRecurrencesRepo } = makeService({ billRecurrence });
+    await expect(
+      service.generateBillFromRecurrence(makeContext(), billRecurrence.id),
+    ).rejects.toThrow('vigência');
+    expect(billRecurrencesRepo.save).not.toHaveBeenCalled();
+  });
+
+  it('uses scheduled dates to distinguish weekly occurrences in the same month', async () => {
+    const billRecurrence = makeBillRecurrence({
+      frequency: FinanceBillRecurrenceFrequency.Weekly,
+      nextGenerationDate: '2026-07-01',
+      generationDay: null,
+    });
+    const { service, billsRepo } = makeService({ billRecurrence });
+    await service.generateBillFromRecurrence(makeContext(), billRecurrence.id);
+    await service.generateBillFromRecurrence(makeContext(), billRecurrence.id);
+    expect(billsRepo.createQueryBuilder).toHaveBeenCalledTimes(2);
+    const query = billsRepo.createQueryBuilder.mock.results[0].value as {
+      andWhere: jest.Mock;
+    };
+    expect(query.andWhere).toHaveBeenCalledWith(
+      expect.stringContaining('recurrenceOccurrenceKey'),
+      { key: `${billRecurrence.id}:2026-07-01` },
+    );
+    expect(query.andWhere).toHaveBeenCalledWith(
+      expect.stringContaining('recurrenceOccurrenceKey'),
+      { key: `${billRecurrence.id}:2026-07-08` },
+    );
+    expect(billRecurrence.nextGenerationDate).toBe('2026-07-15');
+  });
+
+  it('does not expose a stale link left by an older bill deletion', async () => {
+    const billRecurrence = makeBillRecurrence({
+      lastGeneratedBillId: 'deleted-bill',
+    });
+    const { service } = makeService({ billRecurrence });
+    const result = await service.listBillRecurrences(makeContext());
+    expect(result[0].lastGeneratedBillId).toBeNull();
   });
 
   it('refuses to generate from a cancelled recurrence', async () => {
@@ -822,6 +881,7 @@ function makeService(
     getCount: jest.fn().mockResolvedValue(0),
   };
   const billsRepo = {
+    find: jest.fn().mockResolvedValue([]),
     findOne: jest.fn().mockResolvedValue(bill),
     save: jest.fn(async (item: FinanceBill) => item),
     count: jest.fn().mockResolvedValue(0),
@@ -884,7 +944,44 @@ function makeService(
   const dataSource = {
     transaction: jest.fn(async (callback: (manager: any) => Promise<unknown>) =>
       callback(
-        makeTransactionManager({ invoice, bill, payment, recurringProfile }),
+        (() => {
+          const manager = makeTransactionManager({
+            invoice,
+            bill,
+            payment,
+            recurringProfile,
+          });
+          const base = manager.getRepository;
+          manager.getRepository = jest.fn((entity) => {
+            if (entity === FinanceBillRecurrence) return billRecurrencesRepo;
+            if (entity === FinanceRecurringProfile)
+              return recurringProfilesRepo;
+            const repo = base(entity) as Record<string, unknown>;
+            if (entity === FinanceBill)
+              return {
+                ...repo,
+                createQueryBuilder: billsRepo.createQueryBuilder,
+              };
+            if (entity === FinanceInvoice)
+              return {
+                ...repo,
+                findOne: jest.fn(
+                  (query: {
+                    where:
+                      | { sourceModule?: string }
+                      | Array<{ sourceModule?: string }>;
+                  }) => {
+                    const where = Array.isArray(query.where)
+                      ? query.where[0]
+                      : query.where;
+                    return Promise.resolve(where.sourceModule ? null : invoice);
+                  },
+                ),
+              };
+            return repo;
+          });
+          return manager;
+        })(),
       ),
     ),
   };

@@ -1,11 +1,20 @@
+import { contractToday, contractObject } from '../../contracts/contract-term';
+import { FinanceDocumentRecurrenceService } from './finance-document-recurrence.service';
+import {
+  recurrenceMonth,
+  nextMonthlyOccurrence,
+  recurrenceDocumentMetadata,
+  recurrenceText,
+} from './finance-recurrence.rules';
 import {
   BadRequestException,
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
-import { DataSource, In, Repository } from 'typeorm';
+import { DataSource, In, Raw, Repository } from 'typeorm';
 import {
   BillRecurrenceConfigDto,
   CreateFinanceBillDto,
@@ -118,6 +127,8 @@ export class FinanceBillingService {
     private readonly postingService: FinancePostingService,
     private readonly financeNotificationPublisher: FinanceNotificationPublisher,
     private readonly financeTeamPaymentReconciliationService: FinanceTeamPaymentReconciliationService,
+    @Optional()
+    private readonly documentRecurrences?: FinanceDocumentRecurrenceService,
   ) {}
 
   private async reconcileTeamPaymentsForBills(
@@ -399,6 +410,11 @@ export class FinanceBillingService {
         totalAmount: money(total),
         balanceDue: money(total),
       },
+    );
+    await this.documentRecurrences?.refreshSourceTemplate(
+      ctx,
+      'invoice',
+      invoiceId,
     );
   }
 
@@ -917,6 +933,22 @@ export class FinanceBillingService {
         tenantId: ctx.tenantId,
         workspaceId: ctx.workspaceId,
       });
+      await manager.getRepository(FinanceBillRecurrence).update(
+        {
+          tenantId: ctx.tenantId,
+          workspaceId: ctx.workspaceId,
+          lastGeneratedBillId: id,
+        },
+        { lastGeneratedBillId: null, lastGeneratedAt: null },
+      );
+      await manager.getRepository(FinanceBillRecurrence).update(
+        {
+          tenantId: ctx.tenantId,
+          workspaceId: ctx.workspaceId,
+          sourceBillId: id,
+        },
+        { sourceBillId: null },
+      );
       await manager.getRepository(FinanceBill).remove(bill);
     });
     return { success: true, id };
@@ -942,6 +974,7 @@ export class FinanceBillingService {
         balanceDue: money(total),
       },
     );
+    await this.documentRecurrences?.refreshSourceTemplate(ctx, 'bill', billId);
   }
 
   async addBillLine(
@@ -1052,11 +1085,28 @@ export class FinanceBillingService {
   // Generated bills default to Draft (Bill has a Draft status), so no posting
   // happens until the user confirms them.
 
-  listBillRecurrences(ctx: FinanceRequestContext) {
-    return this.billRecurrencesRepo.find({
-      where: { tenantId: ctx.tenantId, workspaceId: ctx.workspaceId },
+  async listBillRecurrences(ctx: FinanceRequestContext) {
+    const scope = { tenantId: ctx.tenantId, workspaceId: ctx.workspaceId };
+    const recurrences = await this.billRecurrencesRepo.find({
+      where: scope,
       order: { createdAt: 'DESC' },
     });
+    const ids = recurrences.flatMap((recurrence) =>
+      recurrence.lastGeneratedBillId ? [recurrence.lastGeneratedBillId] : [],
+    );
+    if (!ids.length) return recurrences;
+    const bills = await this.billsRepo.find({
+      where: { ...scope, id: In(ids) },
+      select: { id: true },
+    });
+    const existing = new Set(bills.map((bill) => bill.id));
+    // Repair the read projection for links left dangling by older deletions.
+    return recurrences.map((recurrence) =>
+      recurrence.lastGeneratedBillId &&
+      !existing.has(recurrence.lastGeneratedBillId)
+        ? { ...recurrence, lastGeneratedBillId: null }
+        : recurrence,
+    );
   }
 
   async getBillRecurrence(ctx: FinanceRequestContext, id: string) {
@@ -1184,7 +1234,7 @@ export class FinanceBillingService {
         costCenterId: billDto.costCenterId ?? null,
         lineTemplate: template,
         active: isActive,
-        metadata: {},
+        metadata: { document: { notes: billDto.notes ?? null } },
         createdById: ctx.userId,
         updatedById: ctx.userId,
       }),
@@ -1330,7 +1380,7 @@ export class FinanceBillingService {
 
   /** Run all active recurrences whose nextGenerationDate is due (manual scheduler). */
   async generateDueBillRecurrences(ctx: FinanceRequestContext) {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = contractToday();
     const settings = await this.getFinanceSettings(ctx);
 
     const recurrences = await this.billRecurrencesRepo.find({
@@ -1415,168 +1465,235 @@ export class FinanceBillingService {
     competencePeriod: string;
     nextGenerationDate: string | null;
   }> {
-    const template = recurrence.lineTemplate ?? [];
-    if (!template.length) {
-      throw new BadRequestException(
-        'Recurrence has no line template to generate from',
-      );
-    }
-
-    const competencePeriod = generationDate.slice(0, 7);
-    const occurrenceKey = `${recurrence.id}:${competencePeriod}`;
-
-    // Idempotency: never generate two bills for the same occurrence. Backed by
-    // the partial unique index on bills.metadata->>'recurrenceOccurrenceKey'.
-    const existing = await this.billsRepo
-      .createQueryBuilder('bill')
-      .where('bill.tenantId = :tenantId', { tenantId: ctx.tenantId })
-      .andWhere('bill.workspaceId = :workspaceId', {
-        workspaceId: ctx.workspaceId,
-      })
-      .andWhere("bill.metadata ->> 'recurrenceOccurrenceKey' = :key", {
-        key: occurrenceKey,
-      })
-      .getOne();
-
-    if (existing) {
-      return {
-        skipped: true,
-        reason: 'already_generated_for_period',
-        billId: existing.id,
-        occurrenceKey,
-        competencePeriod,
-        nextGenerationDate: recurrence.nextGenerationDate,
-      };
-    }
-
-    const accrualDate = `${competencePeriod}-01`;
-    const periodEnd = this.lastDayOfMonth(competencePeriod);
-    const dueDate = this.computeRecurrenceDueDate(
-      generationDate,
-      recurrence.dueDay,
-      settings,
-    );
-    const generateStatus =
-      recurrence.generateAsStatus === FinanceBillStatus.Open
-        ? FinanceBillStatus.Open
-        : FinanceBillStatus.Draft;
-    const billNumber = await this.generateDocumentNumber(ctx, 'BILL');
-
-    let billId: string;
-    try {
-      billId = await this.dataSource.transaction(async (manager) => {
-        const totals = this.recurrenceTemplateTotals(template);
-        const taxTotal = template.reduce((s, l) => s + toMoney(l.taxAmount), 0);
-        const subtotal = totals - taxTotal;
-
-        const bill = await manager.getRepository(FinanceBill).save(
-          manager.getRepository(FinanceBill).create({
-            tenantId: ctx.tenantId,
-            workspaceId: ctx.workspaceId,
-            vendorId: recurrence.vendorId ?? null,
-            billNumber,
-            status: generateStatus,
-            currency: recurrence.currency ?? settings.baseCurrency ?? 'BRL',
-            issueDate: generationDate,
-            dueDate,
-            periodStart: accrualDate,
-            periodEnd,
-            subtotalAmount: money(subtotal),
-            taxAmount: money(taxTotal),
-            totalAmount: money(totals),
-            paidAmount: '0.00',
-            balanceDue: money(totals),
-            categoryId: recurrence.categoryId ?? null,
-            costCenterId: recurrence.costCenterId ?? null,
-            notes: recurrence.description ?? null,
-            metadata: {
-              recurrenceId: recurrence.id,
-              recurrenceName: recurrence.name,
-              recurrenceOccurrenceKey: occurrenceKey,
-              generatedFromRecurrenceId: recurrence.id,
-              competencePeriod,
-              accrualDate,
-              generatedBy: ctx.userId,
-              generatedAt: new Date().toISOString(),
-            },
-          }),
-        );
-
-        const lines = template.map((line) =>
-          manager.getRepository(FinanceBillLine).create({
-            tenantId: ctx.tenantId,
-            workspaceId: ctx.workspaceId,
-            billId: bill.id,
-            description: line.description,
-            quantity: toMoney(line.quantity).toFixed(4),
-            unitPrice: money(toMoney(line.unitPrice)),
-            taxAmount: money(toMoney(line.taxAmount)),
-            totalAmount: money(
-              toMoney(line.quantity) * toMoney(line.unitPrice) +
-                toMoney(line.taxAmount),
-            ),
-            categoryId: line.categoryId ?? recurrence.categoryId ?? null,
-            costCenterId: line.costCenterId ?? recurrence.costCenterId ?? null,
-            metadata: line.metadata ?? {},
-          }),
-        );
-        await manager.getRepository(FinanceBillLine).save(lines);
-
-        // Draft bills do NOT post: recognition happens only on confirm/open.
-        if (generateStatus === FinanceBillStatus.Open) {
-          await this.postingService.postBillConfirmed(ctx, bill.id, manager);
-        }
-
-        return bill.id;
+    const result = await this.dataSource.transaction(async (manager) => {
+      const fresh = await manager.getRepository(FinanceBillRecurrence).findOne({
+        where: {
+          id: recurrence.id,
+          tenantId: ctx.tenantId,
+          workspaceId: ctx.workspaceId,
+        },
+        lock: { mode: 'pessimistic_write' },
       });
-    } catch (error) {
-      // Unique-index race for the same occurrence → treat as idempotent skip.
-      if ((error as { code?: string })?.code === '23505') {
-        // Concurrent run already created this occurrence (unique-index race).
+      if (!fresh)
+        throw new NotFoundException('Finance bill recurrence not found');
+      recurrence = fresh;
+      if (
+        recurrence.status !== FinanceBillRecurrenceStatus.Active ||
+        !recurrence.active ||
+        (recurrence.endDate && generationDate > recurrence.endDate) ||
+        (recurrence.occurrencesLimit != null &&
+          recurrence.occurrencesCreated >= recurrence.occurrencesLimit)
+      ) {
+        throw new BadRequestException(
+          'Recorrência inativa, encerrada ou fora da vigência.',
+        );
+      }
+      if (
+        generationDate !==
+        (recurrence.nextGenerationDate ?? recurrence.startDate)
+      ) {
+        return {
+          skipped: true,
+          reason: 'occurrence_already_advanced',
+          billId: recurrence.lastGeneratedBillId ?? '',
+          occurrenceKey: '',
+          competencePeriod: generationDate.slice(0, 7),
+          nextGenerationDate: recurrence.nextGenerationDate,
+        };
+      }
+      const template = recurrence.lineTemplate ?? [];
+      if (!template.length) {
+        throw new BadRequestException(
+          'Recurrence has no line template to generate from',
+        );
+      }
+
+      const dueDate = this.computeRecurrenceDueDate(
+        generationDate,
+        recurrence.dueDay,
+        settings,
+      );
+      const competencePeriod = recurrenceMonth(
+        dueDate,
+        recurrence.metadata?.competenceMode === 'previous' ? -1 : 0,
+      );
+      const occurrenceKey = `${recurrence.id}:${this.isMonthBasedFrequency(recurrence.frequency) ? generationDate.slice(0, 7) : generationDate}`;
+
+      // Idempotency: never generate two bills for the same occurrence. Backed by
+      // the partial unique index on bills.metadata->>'recurrenceOccurrenceKey'.
+      const existing = await manager
+        .getRepository(FinanceBill)
+        .createQueryBuilder('bill')
+        .where('bill.tenantId = :tenantId', { tenantId: ctx.tenantId })
+        .andWhere('bill.workspaceId = :workspaceId', {
+          workspaceId: ctx.workspaceId,
+        })
+        .andWhere("bill.metadata ->> 'recurrenceOccurrenceKey' = :key", {
+          key: occurrenceKey,
+        })
+        .getOne();
+
+      if (existing) {
         return {
           skipped: true,
           reason: 'already_generated_for_period',
-          billId: '',
+          billId: existing.id,
           occurrenceKey,
           competencePeriod,
           nextGenerationDate: recurrence.nextGenerationDate,
         };
       }
-      throw error;
+
+      const accrualDate = `${competencePeriod}-01`;
+      const periodEnd = this.lastDayOfMonth(competencePeriod);
+
+      const generateStatus =
+        recurrence.generateAsStatus === 'open'
+          ? FinanceBillStatus.Open
+          : FinanceBillStatus.Draft;
+      const billNumber = await this.generateDocumentNumber(ctx, 'BILL');
+
+      let billId: string;
+      try {
+        billId = await (async () => {
+          const totals = this.recurrenceTemplateTotals(template);
+          const taxTotal = template.reduce(
+            (s, l) => s + toMoney(l.taxAmount),
+            0,
+          );
+          const subtotal = totals - taxTotal;
+
+          const bill = await manager.getRepository(FinanceBill).save(
+            manager.getRepository(FinanceBill).create({
+              tenantId: ctx.tenantId,
+              workspaceId: ctx.workspaceId,
+              vendorId: recurrence.vendorId ?? null,
+              billNumber,
+              status: generateStatus,
+              currency: recurrence.currency ?? settings.baseCurrency ?? 'BRL',
+              issueDate: generationDate,
+              dueDate,
+              periodStart: accrualDate,
+              periodEnd,
+              subtotalAmount: money(subtotal),
+              taxAmount: money(taxTotal),
+              totalAmount: money(totals),
+              paidAmount: '0.00',
+              balanceDue: money(totals),
+              categoryId: recurrence.categoryId ?? null,
+              costCenterId: recurrence.costCenterId ?? null,
+              notes:
+                typeof contractObject(recurrence.metadata?.document).notes ===
+                'string'
+                  ? String(contractObject(recurrence.metadata?.document).notes)
+                  : (recurrence.description ?? null),
+              metadata: {
+                ...recurrenceDocumentMetadata(
+                  contractObject(
+                    contractObject(recurrence.metadata?.document).metadata,
+                  ),
+                ),
+                recurrenceId: recurrence.id,
+                recurrenceName: recurrence.name,
+                recurrenceOccurrenceKey: occurrenceKey,
+                generatedFromRecurrenceId: recurrence.id,
+                competencePeriod,
+                accrualDate,
+                generatedBy: ctx.userId,
+                generatedAt: new Date().toISOString(),
+              },
+            }),
+          );
+
+          const lines = template.map((line) =>
+            manager.getRepository(FinanceBillLine).create({
+              tenantId: ctx.tenantId,
+              workspaceId: ctx.workspaceId,
+              billId: bill.id,
+              description: line.description,
+              quantity: toMoney(line.quantity).toFixed(4),
+              unitPrice: money(toMoney(line.unitPrice)),
+              taxAmount: money(toMoney(line.taxAmount)),
+              totalAmount: money(
+                toMoney(line.quantity) * toMoney(line.unitPrice) +
+                  toMoney(line.taxAmount),
+              ),
+              categoryId: line.categoryId ?? recurrence.categoryId ?? null,
+              costCenterId:
+                line.costCenterId ?? recurrence.costCenterId ?? null,
+              metadata: line.metadata ?? {},
+            }),
+          );
+          await manager.getRepository(FinanceBillLine).save(lines);
+
+          // Draft bills do NOT post: recognition happens only on confirm/open.
+          if (generateStatus === FinanceBillStatus.Open) {
+            await this.postingService.postBillConfirmed(ctx, bill.id, manager);
+          }
+
+          return bill.id;
+        })();
+      } catch (error) {
+        // Unique-index race for the same occurrence → treat as idempotent skip.
+        if (
+          (error as { code?: string; constraint?: string })?.code === '23505' &&
+          String((error as { constraint?: string }).constraint).includes(
+            'recurrence',
+          )
+        ) {
+          // Concurrent run already created this occurrence (unique-index race).
+          return {
+            skipped: true,
+            reason: 'already_generated_for_period',
+            billId: '',
+            occurrenceKey,
+            competencePeriod,
+            nextGenerationDate: recurrence.nextGenerationDate,
+          };
+        }
+        throw error;
+      }
+
+      // Advance the recurrence and close it out when limits/end date are reached.
+      recurrence.occurrencesCreated += 1;
+      recurrence.lastGeneratedAt = new Date();
+      recurrence.lastGeneratedBillId = billId;
+      recurrence.nextGenerationDate = this.computeNextGenerationDate(
+        generationDate,
+        recurrence.frequency,
+        recurrence.intervalCount,
+        recurrence.generationDay,
+      );
+
+      const reachedLimit =
+        recurrence.occurrencesLimit != null &&
+        recurrence.occurrencesCreated >= recurrence.occurrencesLimit;
+      const reachedEnd =
+        recurrence.endDate != null &&
+        recurrence.nextGenerationDate != null &&
+        recurrence.nextGenerationDate > recurrence.endDate;
+      if (reachedLimit || reachedEnd) {
+        recurrence.status = FinanceBillRecurrenceStatus.Completed;
+        recurrence.active = false;
+      }
+
+      await manager.getRepository(FinanceBillRecurrence).save(recurrence);
+
+      return {
+        skipped: false,
+        billId,
+        occurrenceKey,
+        competencePeriod,
+        nextGenerationDate: recurrence.nextGenerationDate,
+      };
+    });
+    if (!result.skipped && recurrence.generateAsStatus === 'open') {
+      await this.ensureScheduledPaymentForBillSafely(
+        ctx,
+        await this.getBill(ctx, result.billId),
+      );
     }
-
-    // Advance the recurrence and close it out when limits/end date are reached.
-    recurrence.occurrencesCreated += 1;
-    recurrence.lastGeneratedAt = new Date();
-    recurrence.lastGeneratedBillId = billId;
-    recurrence.nextGenerationDate = this.computeNextGenerationDate(
-      generationDate,
-      recurrence.frequency,
-      recurrence.intervalCount,
-      recurrence.generationDay,
-    );
-
-    const reachedLimit =
-      recurrence.occurrencesLimit != null &&
-      recurrence.occurrencesCreated >= recurrence.occurrencesLimit;
-    const reachedEnd =
-      recurrence.endDate != null &&
-      recurrence.nextGenerationDate != null &&
-      recurrence.nextGenerationDate > recurrence.endDate;
-    if (reachedLimit || reachedEnd) {
-      recurrence.status = FinanceBillRecurrenceStatus.Completed;
-      recurrence.active = false;
-    }
-
-    await this.billRecurrencesRepo.save(recurrence);
-
-    return {
-      skipped: false,
-      billId,
-      occurrenceKey,
-      competencePeriod,
-      nextGenerationDate: recurrence.nextGenerationDate,
-    };
+    return result;
   }
 
   private buildRecurrenceLineTemplate(
@@ -2601,13 +2718,14 @@ export class FinanceBillingService {
   }
 
   async generateDueRecurringInvoices(ctx: FinanceRequestContext) {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = contractToday();
 
     const profiles = await this.recurringProfilesRepo.find({
       where: {
         tenantId: ctx.tenantId,
         workspaceId: ctx.workspaceId,
         status: FinanceRecurringProfileStatus.Active,
+        autoGenerateInvoice: true,
       },
       order: {
         nextInvoiceDate: 'ASC',
@@ -2617,7 +2735,12 @@ export class FinanceBillingService {
 
     const dueProfiles = profiles.filter((profile) => {
       const nextInvoiceDate = profile.nextInvoiceDate ?? profile.startDate;
-      return Boolean(nextInvoiceDate) && nextInvoiceDate <= today;
+      return (
+        profile.autoGenerateInvoice !== false &&
+        Boolean(nextInvoiceDate) &&
+        nextInvoiceDate <= today &&
+        (!profile.endDate || nextInvoiceDate <= profile.endDate)
+      );
     });
 
     const generated: Array<{
@@ -2639,8 +2762,16 @@ export class FinanceBillingService {
           ctx,
           profile,
           invoiceDate,
+          true,
         );
 
+        if (result.skipped) {
+          skipped.push({
+            recurringProfileId: profile.id,
+            reason: 'already_generated_for_occurrence',
+          });
+          continue;
+        }
         generated.push({
           recurringProfileId: profile.id,
           invoiceId: result.invoice.id,
@@ -2675,115 +2806,245 @@ export class FinanceBillingService {
     ctx: FinanceRequestContext,
     profile: FinanceRecurringProfile,
     invoiceDate: string,
+    automatic = false,
   ) {
-    const periodStart = invoiceDate;
-    const periodEnd = this.calculatePeriodEnd(invoiceDate, profile.interval);
-
-    const existingInvoice = await this.invoicesRepo.findOne({
-      where: {
+    const result = await this.dataSource.transaction(async (manager) => {
+      const profiles = manager.getRepository(FinanceRecurringProfile);
+      const fresh = await profiles.findOne({
+        where: {
+          id: profile.id,
+          tenantId: ctx.tenantId,
+          workspaceId: ctx.workspaceId,
+        },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!fresh)
+        throw new NotFoundException('Finance recurring profile not found');
+      profile = fresh;
+      if (
+        profile.status !== FinanceRecurringProfileStatus.Active ||
+        (automatic && !profile.autoGenerateInvoice) ||
+        (profile.endDate && invoiceDate > profile.endDate)
+      )
+        throw new BadRequestException(
+          'Recorrência inativa ou fora da vigência.',
+        );
+      if (invoiceDate !== (profile.nextInvoiceDate ?? profile.startDate))
+        throw new BadRequestException(
+          'Ocorrência já gerada. Atualize a listagem.',
+        );
+      const metadata = profile.metadata ?? {};
+      const contractId = metadata.contractId;
+      if (typeof contractId === 'string' && contractId) {
+        if (!this.documentRecurrences || !profile.customerId)
+          throw new BadRequestException('Origem contratual indisponível.');
+        const contract = (
+          await this.documentRecurrences.eligibleContractsForCustomer(
+            ctx,
+            profile.customerId,
+          )
+        ).find((item) => item.id === contractId);
+        if (!contract?.dueDay)
+          throw new BadRequestException(
+            'Contrato não está vigente para o cliente.',
+          );
+        metadata.dueDay = contract.dueDay;
+      }
+      const settings = await this.getFinanceSettings(ctx);
+      const dueDate = this.computeRecurrenceDueDate(
+        invoiceDate,
+        Number(metadata.dueDay) || null,
+        settings,
+      );
+      const competence = recurrenceMonth(
+        dueDate,
+        metadata.competenceMode === 'previous' ? -1 : 0,
+      );
+      const periodStart =
+        profile.sourceModule === 'finance_invoice'
+          ? `${competence}-01`
+          : invoiceDate;
+      const periodEnd =
+        profile.sourceModule === 'finance_invoice'
+          ? this.lastDayOfMonth(competence)
+          : this.calculatePeriodEnd(invoiceDate, profile.interval);
+      const invoices = manager.getRepository(FinanceInvoice);
+      const occurrenceScope = {
         tenantId: ctx.tenantId,
         workspaceId: ctx.workspaceId,
         sourceModule: 'finance_recurring_profile',
         sourceId: profile.id,
-        periodStart,
-      },
-    });
-
-    if (existingInvoice) {
-      throw new BadRequestException(
-        'Invoice already generated for this recurring profile period',
-      );
-    }
-
-    const settings = await this.getFinanceSettings(ctx);
-    const dueDate = this.addDays(
-      invoiceDate,
-      settings.defaultPaymentTermsDays ?? 7,
-    );
-    const invoiceNumber = await this.generateDocumentNumber(ctx, 'INV');
-
-    const result = await this.dataSource.transaction(async (manager) => {
-      const invoice = await manager.getRepository(FinanceInvoice).save(
-        manager.getRepository(FinanceInvoice).create({
+      };
+      const existing = await invoices.findOne({
+        where: [
+          {
+            ...occurrenceScope,
+            metadata: Raw(
+              (alias) =>
+                `${alias} ->> 'recurrenceOccurrenceDate' = :occurrenceDate`,
+              { occurrenceDate: invoiceDate },
+            ),
+          },
+          // Historical generations used issue date as periodStart and had no marker.
+          {
+            ...occurrenceScope,
+            periodStart: invoiceDate,
+            metadata: Raw(
+              (alias) => `${alias} ->> 'recurrenceOccurrenceDate' IS NULL`,
+            ),
+          },
+        ],
+      });
+      if (existing) {
+        profile.lastInvoiceDate = invoiceDate;
+        profile.nextInvoiceDate = metadata.generationDay
+          ? nextMonthlyOccurrence(invoiceDate, Number(metadata.generationDay))
+          : this.calculateNextInvoiceDate(invoiceDate, profile.interval);
+        await profiles.save(profile);
+        return {
+          invoiceId: existing.id,
+          recurringProfile: profile,
+          skipped: true,
+        };
+      }
+      const document = contractObject(metadata.document);
+      const template = Array.isArray(metadata.lines)
+        ? (metadata.lines as Record<string, unknown>[])
+        : [];
+      if (Array.isArray(metadata.lines) && !template.length)
+        throw new BadRequestException(
+          'Adicione itens ao documento de origem antes de gerar a recorrência.',
+        );
+      const lines = template.length
+        ? template
+        : [
+            {
+              description: profile.name,
+              quantity: '1.0000',
+              unitPrice: profile.amount,
+              discountAmount: '0.00',
+              taxAmount: '0.00',
+              categoryId: profile.categoryId,
+              costCenterId: profile.costCenterId,
+            },
+          ];
+      const inputLines = lines.map((line) => ({
+        description: recurrenceText(line.description ?? profile.name),
+        quantity: recurrenceText(line.quantity ?? '1'),
+        unitPrice: recurrenceText(line.unitPrice ?? '0'),
+        discountAmount: recurrenceText(line.discountAmount ?? '0'),
+        taxAmount: recurrenceText(line.taxAmount ?? '0'),
+        productId: typeof line.productId === 'string' ? line.productId : null,
+        serviceId: typeof line.serviceId === 'string' ? line.serviceId : null,
+        categoryId:
+          typeof line.categoryId === 'string'
+            ? line.categoryId
+            : profile.categoryId,
+        costCenterId:
+          typeof line.costCenterId === 'string'
+            ? line.costCenterId
+            : profile.costCenterId,
+        metadata: contractObject(line.metadata),
+      }));
+      const totals = this.calculateInvoiceTotals(inputLines);
+      const issueAutomatically = metadata.generateAsStatus === 'issued';
+      const invoiceNumber = issueAutomatically
+        ? await this.generateDocumentNumber(ctx, 'INV')
+        : '';
+      const invoice = await invoices.save(
+        invoices.create({
           tenantId: ctx.tenantId,
           workspaceId: ctx.workspaceId,
-          customerId: profile.customerId ?? null,
+          customerId: profile.customerId,
           sourceModule: 'finance_recurring_profile',
           sourceId: profile.id,
           invoiceNumber,
-          status: FinanceInvoiceStatus.Draft,
+          status: issueAutomatically
+            ? FinanceInvoiceStatus.Issued
+            : FinanceInvoiceStatus.Draft,
+          issuedAt: issueAutomatically ? new Date() : null,
           currency: profile.currency ?? settings.baseCurrency ?? 'BRL',
           issueDate: invoiceDate,
           dueDate,
           periodStart,
           periodEnd,
-          subtotalAmount: money(toMoney(profile.amount)),
-          taxAmount: '0.00',
-          discountAmount: '0.00',
-          totalAmount: money(toMoney(profile.amount)),
+          subtotalAmount: money(totals.subtotal),
+          taxAmount: money(totals.tax),
+          discountAmount: money(totals.discount),
+          totalAmount: money(totals.total),
           paidAmount: '0.00',
-          balanceDue: money(toMoney(profile.amount)),
-          terms: settings.invoiceTerms ?? null,
-          notes: `Generated from recurring profile: ${profile.name}`,
+          balanceDue: money(totals.total),
+          terms:
+            typeof document.terms === 'string'
+              ? document.terms
+              : (settings.invoiceTerms ?? null),
+          notes:
+            typeof document.notes === 'string' ? document.notes : profile.name,
           metadata: {
+            ...recurrenceDocumentMetadata(contractObject(document.metadata)),
+            recurrenceOccurrenceDate: invoiceDate,
             recurringProfileId: profile.id,
             recurringProfileName: profile.name,
+            generatedFromRecurringProfileId: profile.id,
+            contractId: metadata.contractId ?? null,
+            contractTitle: metadata.contractTitle ?? null,
+            competencePeriod: competence,
             generatedBy: ctx.userId,
             generatedAt: new Date().toISOString(),
-            originalSourceModule: profile.sourceModule,
-            originalSourceId: profile.sourceId,
           },
         }),
       );
-
-      await manager.getRepository(FinanceInvoiceLine).save(
-        manager.getRepository(FinanceInvoiceLine).create({
-          tenantId: ctx.tenantId,
-          workspaceId: ctx.workspaceId,
-          invoiceId: invoice.id,
-          productId: null,
-          serviceId: null,
-          description: profile.name,
-          quantity: '1.0000',
-          unitPrice: money(toMoney(profile.amount)),
-          discountAmount: '0.00',
-          taxAmount: '0.00',
-          totalAmount: money(toMoney(profile.amount)),
-          categoryId: profile.categoryId ?? null,
-          costCenterId: profile.costCenterId ?? null,
-          metadata: {
-            recurringProfileId: profile.id,
-          },
-        }),
+      const lineRepo = manager.getRepository(FinanceInvoiceLine);
+      await lineRepo.save(
+        inputLines.map((line) =>
+          lineRepo.create({
+            ...line,
+            tenantId: ctx.tenantId,
+            workspaceId: ctx.workspaceId,
+            invoiceId: invoice.id,
+            totalAmount: money(
+              toMoney(line.quantity) * toMoney(line.unitPrice) -
+                toMoney(line.discountAmount) +
+                toMoney(line.taxAmount),
+            ),
+          }),
+        ),
       );
-
+      if (issueAutomatically)
+        await this.postingService.postInvoiceConfirmed(
+          ctx,
+          invoice.id,
+          manager,
+        );
       profile.lastInvoiceDate = invoiceDate;
-      profile.nextInvoiceDate = this.calculateNextInvoiceDate(
-        invoiceDate,
-        profile.interval,
-      );
-
-      await manager.getRepository(FinanceRecurringProfile).save(profile);
-
-      const invoiceWithLines = await this.getInvoice(ctx, invoice.id);
-
+      profile.nextInvoiceDate = metadata.generationDay
+        ? nextMonthlyOccurrence(invoiceDate, Number(metadata.generationDay))
+        : this.calculateNextInvoiceDate(invoiceDate, profile.interval);
+      await profiles.save(profile);
       return {
-        status: 'ok',
-        invoice: invoiceWithLines,
+        invoiceId: invoice.id,
         recurringProfile: profile,
+        skipped: false,
       };
     });
-
-    // finance.recurring_charge_created is informational with
-    // defaultDelivery=DISABLED in the catalog, and the processor does not
-    // yet enforce that policy. Auto-firing on every cycle would create
-    // per-period noise, and the previous recipient source (profile.metadata)
-    // was client-supplied and untrusted. Disabled until the processor
-    // respects defaultDelivery/preferences and a validated recipient source
-    // exists. publishRecurringChargeCreated remains available on the
-    // publisher for that future wiring.
-
-    return result;
+    // Read only after COMMIT: injected repositories use a different connection.
+    const invoice = await this.getInvoice(ctx, result.invoiceId);
+    if (!result.skipped && invoice.status === FinanceInvoiceStatus.Issued) {
+      try {
+        await this.ensureScheduledPaymentForInvoice(ctx, invoice);
+      } catch (error) {
+        this.logger.error(
+          `Recurring invoice ${invoice.id} was issued, but its scheduled payment could not be created`,
+          error instanceof Error ? error.stack : String(error),
+        );
+      }
+    }
+    return {
+      status: 'ok',
+      skipped: result.skipped,
+      invoice,
+      recurringProfile: result.recurringProfile,
+    };
   }
 
   private async getFinanceSettings(ctx: FinanceRequestContext) {

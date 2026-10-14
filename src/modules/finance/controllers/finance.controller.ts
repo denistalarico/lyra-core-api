@@ -1,3 +1,5 @@
+import { ConfigureFinanceDocumentRecurrenceDto } from '../dto/finance-document-recurrence.dto';
+import { FinanceDocumentRecurrenceService } from '../services/finance-document-recurrence.service';
 import {
   applyDecorators,
   BadRequestException,
@@ -171,6 +173,7 @@ export class FinanceController {
     private readonly financeJournalEntryService: FinanceJournalEntryService,
     private readonly financeBankTransferService: FinanceBankTransferService,
     private readonly documentLayoutsService: DocumentLayoutsService,
+    private readonly documentRecurrences: FinanceDocumentRecurrenceService,
     private readonly documentPdfRenderer: DocumentPdfRendererService,
     private readonly emailService: EmailService,
     private readonly cryptoService: SettingsCryptoService,
@@ -1146,6 +1149,47 @@ export class FinanceController {
     });
 
     return { success: true, to: recipientEmail };
+  }
+
+  @Get('invoices/:id/contracts')
+  @RequireFinancePermission('agency.finance.billing.manage.owner_only')
+  eligibleInvoiceContracts(@Req() req: Request, @Param('id') id: string) {
+    return this.documentRecurrences.eligibleContracts(
+      getFinanceContext(req),
+      id,
+    );
+  }
+
+  @Post('invoices/:id/recurrence')
+  @RequireFinancePermission('agency.finance.billing.manage.owner_only')
+  configureInvoiceRecurrence(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Body() dto: ConfigureFinanceDocumentRecurrenceDto,
+  ) {
+    return this.documentRecurrences.configure(
+      getFinanceContext(req),
+      'invoice',
+      id,
+      dto,
+    );
+  }
+
+  @Post('bills/:id/recurrence')
+  @RequireFinancePermission(
+    'agency.finance.transactions.manage.finance_or_owner',
+  )
+  configureBillRecurrence(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Body() dto: ConfigureFinanceDocumentRecurrenceDto,
+  ) {
+    return this.documentRecurrences.configure(
+      getFinanceContext(req),
+      'bill',
+      id,
+      dto,
+    );
   }
 
   @Get('invoices/:id')
