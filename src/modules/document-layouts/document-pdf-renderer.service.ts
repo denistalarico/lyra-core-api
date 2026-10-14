@@ -281,15 +281,85 @@ export class DocumentPdfRendererService {
       await page.setContent(html, { waitUntil: 'networkidle' });
       await page.emulateMedia({ media: 'print' });
 
+      // Chromium renders these templates on every page. Measure the actual
+      // model first and reserve both bands before paginating the quote body.
+      const bands = await page.evaluate(() => {
+        const sheet = document.querySelector('.doc-page');
+        const style = sheet ? getComputedStyle(sheet) : null;
+        const footer = document.querySelector('.doc-footer');
+        const footerStyle = footer ? getComputedStyle(footer) : null;
+        return {
+          className: sheet?.className ?? 'doc-page',
+          header:
+            document.querySelector('.doc-header')?.getBoundingClientRect()
+              .height ?? 0,
+          footer:
+            document.querySelector('.doc-footer')?.getBoundingClientRect()
+              .height ?? 0,
+          top: Number.parseFloat(style?.paddingTop ?? '0'),
+          bottom:
+            Number.parseFloat(style?.paddingBottom ?? '0') +
+            Number.parseFloat(footerStyle?.marginBottom ?? '0'),
+          left: Number.parseFloat(style?.paddingLeft ?? '0'),
+          right: Number.parseFloat(style?.paddingRight ?? '0'),
+        };
+      });
+      const modelCss = (await page.locator('style').allTextContents()).join(
+        '\n',
+      );
+      const repeatingTemplates: string[] = [];
+      for (const selector of ['.doc-header', '.doc-footer']) {
+        const element = page.locator(selector).first();
+        if (!(await element.count())) {
+          repeatingTemplates.push('<div></div>');
+          continue;
+        }
+        // Header/footer templates cannot fetch images. Embed the logo that
+        // this page already loaded, preserving private/data/external assets.
+        for (const image of await element.locator('img').all()) {
+          if (!(await image.isVisible())) continue;
+          const bitmap = await image.screenshot();
+          await image.evaluate(
+            (node, src) => node.setAttribute('src', src),
+            `data:image/png;base64,${bitmap.toString('base64')}`,
+          );
+        }
+        const markup = await element.evaluate((node) => node.outerHTML);
+        const isHeader = selector === '.doc-header';
+        repeatingTemplates.push(`<style>${modelCss}
+          body { margin: 0; background: transparent; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+          .doc-page { width: 100% !important; min-height: 0 !important; padding: 0 !important; margin: 0 !important; border: 0 !important; }
+          .doc-footer { margin-top: 0 !important; margin-bottom: 0 !important; }
+          .doc-template-authority .doc-header { background: linear-gradient(135deg, #0f172a, #1e3a8a); }
+          ${isHeader ? '' : '.doc-page::before, .doc-page::after { display: none; }'}
+        </style><div style="width:100%; padding: ${isHeader ? bands.top : 0}px ${bands.right}px ${isHeader ? 0 : bands.bottom}px ${bands.left}px;"><div class="${this.escapeHtml(bands.className)}">${markup}</div></div>`);
+        await element.evaluate((node) => node.remove());
+      }
+      const margin =
+        bands.header || bands.footer
+          ? {
+              top: `${bands.top + bands.header + 24}px`,
+              right: `${bands.right}px`,
+              bottom: `${bands.bottom + bands.footer + 24}px`,
+              left: `${bands.left}px`,
+            }
+          : { top: '0', right: '0', bottom: '0', left: '0' };
+      if (bands.header || bands.footer) {
+        await page.addStyleTag({
+          content: `
+          @page { margin: ${margin.top} ${margin.right} ${margin.bottom} ${margin.left}; }
+          .doc-page { width: auto !important; min-height: 0 !important; padding: 0 !important; }
+        `,
+        });
+      }
+
       return await page.pdf({
         format: input.layout.paperFormat === 'letter' ? 'Letter' : 'A4',
         printBackground: true,
-        margin: {
-          top: '0',
-          right: '0',
-          bottom: '0',
-          left: '0',
-        },
+        displayHeaderFooter: Boolean(bands.header || bands.footer),
+        headerTemplate: repeatingTemplates[0],
+        footerTemplate: repeatingTemplates[1],
+        margin,
       });
     } finally {
       await page?.close().catch(() => undefined);
@@ -348,7 +418,10 @@ export class DocumentPdfRendererService {
       headingFontFamily: this.escapeCssValue(
         layout.headingFontFamily || 'Sora',
       ),
-    });
+    }).replace(
+      /@media\s*\(max-width:\s*640px\)/g,
+      '@media screen and (max-width: 640px)',
+    );
 
     return `<!doctype html>
 <html>
