@@ -2,6 +2,8 @@ import { contractToday, contractObject } from '../../contracts/contract-term';
 import { FinanceDocumentRecurrenceService } from './finance-document-recurrence.service';
 import {
   recurrenceMonth,
+  recurrenceNotBefore,
+  monthlyOccurrenceOnOrAfter,
   nextMonthlyOccurrence,
   recurrenceDocumentMetadata,
   recurrenceText,
@@ -1372,12 +1374,17 @@ export class FinanceBillingService {
       recurrence.startDate ??
       new Date().toISOString().slice(0, 10);
 
-    return this.generateBillForRecurrence(
+    const result = await this.generateBillForRecurrence(
       ctx,
       recurrence,
       generationDate,
       settings,
     );
+    if (result.reason === 'before_recurrence_registration')
+      throw new BadRequestException(
+        `Agenda corrigida: não são permitidas emissões anteriores ao cadastro. Próxima emissão: ${result.nextGenerationDate}.`,
+      );
+    return result;
   }
 
   /** Run all active recurrences whose nextGenerationDate is due (manual scheduler). */
@@ -1502,6 +1509,30 @@ export class FinanceBillingService {
           occurrenceKey: '',
           competencePeriod: generationDate.slice(0, 7),
           nextGenerationDate: recurrence.nextGenerationDate,
+        };
+      }
+      const notBefore = recurrenceNotBefore(
+        recurrence.createdAt,
+        recurrence.metadata,
+      );
+      if (notBefore && generationDate < notBefore) {
+        let next = generationDate;
+        while (next < notBefore)
+          next = this.computeNextGenerationDate(
+            next,
+            recurrence.frequency,
+            recurrence.intervalCount,
+            recurrence.generationDay,
+          );
+        recurrence.nextGenerationDate = next;
+        await manager.getRepository(FinanceBillRecurrence).save(recurrence);
+        return {
+          skipped: true,
+          reason: 'before_recurrence_registration',
+          billId: '',
+          occurrenceKey: '',
+          competencePeriod: '',
+          nextGenerationDate: next,
         };
       }
       const template = recurrence.lineTemplate ?? [];
@@ -2840,6 +2871,22 @@ export class FinanceBillingService {
           'Ocorrência já gerada. Atualize a listagem.',
         );
       const metadata = profile.metadata ?? {};
+      const notBefore = recurrenceNotBefore(profile.createdAt, metadata);
+      if (notBefore && invoiceDate < notBefore) {
+        let next = invoiceDate;
+        if (metadata.generationDay)
+          next = monthlyOccurrenceOnOrAfter(
+            next,
+            Number(metadata.generationDay),
+            notBefore,
+          );
+        else
+          while (next < notBefore)
+            next = this.calculateNextInvoiceDate(next, profile.interval);
+        profile.nextInvoiceDate = next;
+        await profiles.save(profile);
+        return { rescheduled: true as const, nextInvoiceDate: next };
+      }
       const contractId = metadata.contractId;
       if (typeof contractId === 'string' && contractId) {
         if (!this.documentRecurrences || !profile.customerId)
@@ -2908,6 +2955,7 @@ export class FinanceBillingService {
           : this.calculateNextInvoiceDate(invoiceDate, profile.interval);
         await profiles.save(profile);
         return {
+          rescheduled: false as const,
           invoiceId: existing.id,
           recurringProfile: profile,
           skipped: true,
@@ -3028,11 +3076,16 @@ export class FinanceBillingService {
         : this.calculateNextInvoiceDate(invoiceDate, profile.interval);
       await profiles.save(profile);
       return {
+        rescheduled: false as const,
         invoiceId: invoice.id,
         recurringProfile: profile,
         skipped: false,
       };
     });
+    if (result.rescheduled)
+      throw new BadRequestException(
+        `Agenda corrigida: não são permitidas emissões anteriores ao cadastro. Próxima emissão: ${result.nextInvoiceDate}.`,
+      );
     // Read only after COMMIT: injected repositories use a different connection.
     const invoice = await this.getInvoice(ctx, result.invoiceId);
     if (!result.skipped && invoice.status === FinanceInvoiceStatus.Issued) {

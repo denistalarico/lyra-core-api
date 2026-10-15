@@ -12,6 +12,8 @@ import {
 } from '../../contracts/enums';
 import {
   FinanceInvoice,
+  FinanceInvoiceLine,
+  FinanceBillLine,
   FinanceBill,
   FinanceBillRecurrence,
   FinanceRecurringProfile,
@@ -245,4 +247,111 @@ describe('Finance recurrence deletion', () => {
     );
     expect(transaction).not.toHaveBeenCalled();
   });
+});
+
+describe('Finance recurrence registration date', () => {
+  beforeEach(() =>
+    jest.useFakeTimers().setSystemTime(new Date('2026-10-15T15:00:00Z')),
+  );
+  afterEach(() => jest.useRealTimers());
+
+  it.each([
+    ['invoice', 10, '2026-11-10', false],
+    ['invoice', 20, '2026-10-20', false],
+    ['invoice', 15, '2026-10-15', false],
+    ['bill', 10, '2026-11-10', false],
+    ['bill', 20, '2026-10-20', false],
+    ['invoice', 10, '2026-11-10', true],
+    ['bill', 10, '2026-11-10', true],
+  ] as const)(
+    'starts an old %s registered today on the next configured day %s',
+    async (kind, generationDay, expected, reactivating) => {
+      const document = {
+        id: 'source',
+        customerId: 'contact-a',
+        vendorId: 'vendor',
+        issueDate: '2026-03-01',
+        currency: 'BRL',
+        totalAmount: '100',
+        metadata: reactivating
+          ? { recurringProfileId: 'profile', recurrenceId: 'profile' }
+          : {},
+      };
+      const documentRepo = {
+        findOne: jest.fn().mockResolvedValue(document),
+        save: jest.fn((value: unknown) => Promise.resolve(value)),
+      };
+      const linesRepo = {
+        find: jest.fn().mockResolvedValue([
+          {
+            description: 'Retainer',
+            quantity: '1',
+            unitPrice: '100',
+            totalAmount: '100',
+            metadata: {},
+          },
+        ]),
+      };
+      const profileRepo = {
+        findOne: jest.fn().mockResolvedValue(
+          reactivating
+            ? {
+                id: 'profile',
+                status: 'paused',
+                startDate: '2026-03-01',
+                nextInvoiceDate: '2026-04-10',
+                nextGenerationDate: '2026-04-10',
+                createdAt: new Date('2026-03-01T12:00:00Z'),
+                metadata: { generationNotBefore: '2026-03-01' },
+              }
+            : null,
+        ),
+        create: jest.fn((value: Record<string, unknown>) => ({
+          id: 'profile',
+          ...value,
+        })),
+        save: jest.fn((value: Record<string, unknown>) =>
+          Promise.resolve(value),
+        ),
+      };
+      const getRepository = (entity: unknown) =>
+        entity === FinanceInvoice || entity === FinanceBill
+          ? documentRepo
+          : entity === FinanceInvoiceLine || entity === FinanceBillLine
+            ? linesRepo
+            : profileRepo;
+      const dataSource = {
+        transaction: (run: (manager: unknown) => Promise<unknown>) =>
+          run({ getRepository }),
+      };
+      const service = new FinanceDocumentRecurrenceService(
+        dataSource as unknown as DataSource,
+      );
+      Object.assign(service, {
+        eligibleContracts: jest.fn().mockResolvedValue([
+          {
+            id: 'contract-a',
+            customerId: 'contact-a',
+            title: 'Signed contract',
+            dueDay: 25,
+          },
+        ]),
+      });
+      await service.configure(scope, kind, document.id, {
+        enabled: true,
+        generationDay,
+        dueDay: 25,
+        competenceMode: 'current',
+        ...(kind === 'invoice' ? { contractId: 'contract-a' } : {}),
+      });
+      const saved = profileRepo.save.mock.calls[0][0];
+      expect(saved.startDate).toBe(reactivating ? '2026-03-01' : '2026-10-15');
+      expect(
+        (saved.metadata as Record<string, unknown>).generationNotBefore,
+      ).toBe('2026-10-15');
+      expect(
+        kind === 'invoice' ? saved.nextInvoiceDate : saved.nextGenerationDate,
+      ).toBe(expected);
+    },
+  );
 });

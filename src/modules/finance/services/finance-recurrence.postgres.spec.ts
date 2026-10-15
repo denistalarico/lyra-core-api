@@ -1,4 +1,5 @@
 import { randomUUID } from 'crypto';
+import * as contractCalendar from '../../contracts/contract-term';
 import { DataSource } from 'typeorm';
 import { describePostgresIntegration } from '../../../testing/postgres-integration';
 import {
@@ -106,6 +107,7 @@ run('Finance recurring document transactions (disposable PostgreSQL)', () => {
   });
   it('serializes competing bill generators and commits one occurrence with its cursor', async () => {
     const recurrence = await db.getRepository(FinanceBillRecurrence).save({
+      createdAt: new Date('2025-01-01T12:00:00Z'),
       tenantId: ctx.tenantId,
       workspaceId: ctx.workspaceId,
       name: 'Aluguel',
@@ -167,6 +169,7 @@ run('Finance recurring document transactions (disposable PostgreSQL)', () => {
   });
   it('reads generated invoices after commit, copying source prices, discount and dimensions', async () => {
     const profile = await db.getRepository(FinanceRecurringProfile).save({
+      createdAt: new Date('2025-01-01T12:00:00Z'),
       tenantId: ctx.tenantId,
       workspaceId: ctx.workspaceId,
       name: 'Contrato',
@@ -267,6 +270,7 @@ run('Finance recurring document transactions (disposable PostgreSQL)', () => {
 
   it('keeps occurrence identity independent of changing competence and due day', async () => {
     const profile = await db.getRepository(FinanceRecurringProfile).save({
+      createdAt: new Date('2025-01-01T12:00:00Z'),
       tenantId: ctx.tenantId,
       workspaceId: ctx.workspaceId,
       sourceModule: 'finance_invoice',
@@ -299,6 +303,7 @@ run('Finance recurring document transactions (disposable PostgreSQL)', () => {
 
   it('rechecks automatic generation under the profile lock', async () => {
     const profile = await db.getRepository(FinanceRecurringProfile).save({
+      createdAt: new Date('2025-01-01T12:00:00Z'),
       tenantId: ctx.tenantId,
       workspaceId: ctx.workspaceId,
       name: 'Paused automation',
@@ -344,6 +349,7 @@ run('Finance recurring document transactions (disposable PostgreSQL)', () => {
       status: FinanceBillStatus.Draft,
     });
     const profile = await db.getRepository(FinanceBillRecurrence).save({
+      createdAt: new Date('2025-01-01T12:00:00Z'),
       tenantId: ctx.tenantId,
       workspaceId: ctx.workspaceId,
       name: 'Delete pointers',
@@ -372,6 +378,7 @@ run('Finance recurring document transactions (disposable PostgreSQL)', () => {
 
   it('deduplicates legacy invoice occurrences without the new metadata marker', async () => {
     const profile = await db.getRepository(FinanceRecurringProfile).save({
+      createdAt: new Date('2025-01-01T12:00:00Z'),
       tenantId: ctx.tenantId,
       workspaceId: ctx.workspaceId,
       name: 'Legacy',
@@ -457,6 +464,7 @@ run('Finance recurring document transactions (disposable PostgreSQL)', () => {
 
   it('emits an automatically issued invoice with its number and payment forecast', async () => {
     const profile = await db.getRepository(FinanceRecurringProfile).save({
+      createdAt: new Date('2025-01-01T12:00:00Z'),
       tenantId: ctx.tenantId,
       workspaceId: ctx.workspaceId,
       name: 'Issued monthly',
@@ -488,6 +496,7 @@ run('Finance recurring document transactions (disposable PostgreSQL)', () => {
 
   it('rolls back a failed occurrence without advancing its profile', async () => {
     const profile = await db.getRepository(FinanceBillRecurrence).save({
+      createdAt: new Date('2025-01-01T12:00:00Z'),
       tenantId: ctx.tenantId,
       workspaceId: ctx.workspaceId,
       name: 'Broken',
@@ -598,5 +607,129 @@ run('Finance recurring document transactions (disposable PostgreSQL)', () => {
       .findOneByOrFail({ id: restored.profileId });
     expect(profile.metadata.deletedAt).toBeNull();
     expect(profile.nextInvoiceDate).toBe(pending);
+  });
+  it('repairs a legacy invoice cursor before registration and emits only on the first eligible day', async () => {
+    const originalDay = contractCalendar.contractToday;
+    let today = '2026-10-15';
+    const clock = jest
+      .spyOn(contractCalendar, 'contractToday')
+      .mockImplementation((date) => (date ? originalDay(date) : today));
+    try {
+      const profile = await db.getRepository(FinanceRecurringProfile).save({
+        tenantId: ctx.tenantId,
+        workspaceId: ctx.workspaceId,
+        createdAt: new Date('2026-10-15T15:00:00Z'),
+        sourceModule: 'finance_invoice',
+        name: 'Legacy cursor',
+        status: FinanceRecurringProfileStatus.Active,
+        interval: FinanceRecurringInterval.Monthly,
+        amount: '100',
+        currency: 'BRL',
+        startDate: '2026-03-01',
+        nextInvoiceDate: '2026-04-10',
+        autoGenerateInvoice: true,
+        metadata: { generationDay: 10, dueDay: 25 },
+      });
+      const count = () =>
+        db.getRepository(FinanceInvoice).count({
+          where: {
+            sourceModule: 'finance_recurring_profile',
+            sourceId: profile.id,
+          },
+        });
+      await billing.generateDueRecurringInvoices(ctx);
+      expect(await count()).toBe(0);
+      expect(
+        (
+          await db
+            .getRepository(FinanceRecurringProfile)
+            .findOneByOrFail({ id: profile.id })
+        ).nextInvoiceDate,
+      ).toBe('2026-11-10');
+      await billing.generateDueRecurringInvoices(ctx);
+      expect(await count()).toBe(0);
+      today = '2026-11-10';
+      await billing.generateDueRecurringInvoices(ctx);
+      expect(await count()).toBe(1);
+      const invoice = await db.getRepository(FinanceInvoice).findOneByOrFail({
+        sourceModule: 'finance_recurring_profile',
+        sourceId: profile.id,
+      });
+      expect(invoice.issueDate).toBe('2026-11-10');
+      expect(
+        (
+          await db
+            .getRepository(FinanceRecurringProfile)
+            .findOneByOrFail({ id: profile.id })
+        ).nextInvoiceDate,
+      ).toBe('2026-12-10');
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  it('also blocks manual retroactive generation and repairs a bill cursor atomically', async () => {
+    const profile = await db.getRepository(FinanceRecurringProfile).save({
+      tenantId: ctx.tenantId,
+      workspaceId: ctx.workspaceId,
+      createdAt: new Date('2026-10-15T15:00:00Z'),
+      name: 'Manual legacy',
+      status: FinanceRecurringProfileStatus.Active,
+      interval: FinanceRecurringInterval.Monthly,
+      amount: '100',
+      currency: 'BRL',
+      startDate: '2026-03-01',
+      nextInvoiceDate: '2026-04-10',
+      metadata: { generationDay: 10 },
+    });
+    const invoiceCount = await db.getRepository(FinanceInvoice).count();
+    await expect(
+      billing.generateInvoiceFromRecurringProfile(ctx, profile.id),
+    ).rejects.toThrow('Agenda corrigida');
+    expect(await db.getRepository(FinanceInvoice).count()).toBe(invoiceCount);
+    expect(
+      (
+        await db
+          .getRepository(FinanceRecurringProfile)
+          .findOneByOrFail({ id: profile.id })
+      ).nextInvoiceDate,
+    ).toBe('2026-11-10');
+    const recurrence = await db.getRepository(FinanceBillRecurrence).save({
+      tenantId: ctx.tenantId,
+      workspaceId: ctx.workspaceId,
+      createdAt: new Date('2026-10-15T15:00:00Z'),
+      name: 'Old bill',
+      amount: '100',
+      currency: 'BRL',
+      status: FinanceBillRecurrenceStatus.Active,
+      active: true,
+      frequency: FinanceBillRecurrenceFrequency.Monthly,
+      intervalCount: 1,
+      startDate: '2026-03-01',
+      nextGenerationDate: '2026-04-10',
+      generationDay: 10,
+      lineTemplate: [
+        {
+          description: 'Retainer',
+          quantity: '1',
+          unitPrice: '100',
+          taxAmount: '0',
+          categoryId: null,
+          costCenterId: null,
+        },
+      ],
+    });
+    const billCount = await db.getRepository(FinanceBill).count();
+    await expect(
+      billing.generateBillFromRecurrence(ctx, recurrence.id),
+    ).rejects.toThrow('Agenda corrigida');
+    expect(
+      (
+        await db
+          .getRepository(FinanceBillRecurrence)
+          .findOneByOrFail({ id: recurrence.id })
+      ).nextGenerationDate,
+    ).toBe('2026-11-10');
+    expect(await db.getRepository(FinanceBill).count()).toBe(billCount);
   });
 });

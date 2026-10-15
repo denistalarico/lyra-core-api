@@ -40,6 +40,8 @@ import {
 import { FinanceRequestContext } from './finance-context';
 import {
   nextMonthlyOccurrence,
+  monthlyOccurrenceOnOrAfter,
+  recurrenceNotBefore,
   recurrenceDay,
   recurrenceDocumentMetadata,
   validateRecurrenceDays,
@@ -328,9 +330,17 @@ export class FinanceDocumentRecurrenceService {
           'Configure a recorrência no documento de origem.',
         );
       const dueDay = contract?.dueDay ?? dto.dueDay;
-      const startDate = document.issueDate ?? contractToday();
-      const firstDate = recurrenceDay(startDate, dto.generationDay);
-      const nextDate = nextMonthlyOccurrence(firstDate, dto.generationDay);
+      const startDate = contractToday();
+      // The source document already occupies its month; it must never backdate registration.
+      const sourceNext = nextMonthlyOccurrence(
+        document.issueDate ?? startDate,
+        dto.generationDay,
+      );
+      const nextDate = monthlyOccurrenceOnOrAfter(
+        sourceNext,
+        dto.generationDay,
+        startDate,
+      );
       const template = {
         document: {
           metadata: recurrenceDocumentMetadata(metadata),
@@ -372,11 +382,19 @@ export class FinanceDocumentRecurrenceService {
             nextInvoiceDate: nextDate,
             interval: FinanceRecurringInterval.Monthly,
           });
-        if (existing?.nextInvoiceDate)
-          profile.nextInvoiceDate = recurrenceDay(
-            existing.nextInvoiceDate,
-            dto.generationDay,
-          );
+        const notBefore =
+          dto.enabled &&
+          existing?.status !== FinanceRecurringProfileStatus.Active
+            ? startDate
+            : (recurrenceNotBefore(existing?.createdAt, existing?.metadata) ??
+              startDate);
+        profile.nextInvoiceDate = monthlyOccurrenceOnOrAfter(
+          existing?.nextInvoiceDate
+            ? recurrenceDay(existing.nextInvoiceDate, dto.generationDay)
+            : nextDate,
+          dto.generationDay,
+          notBefore,
+        );
         Object.assign(profile, {
           customerId: (document as FinanceInvoice).customerId,
           name: recurrenceText(
@@ -393,6 +411,7 @@ export class FinanceDocumentRecurrenceService {
           metadata: {
             ...profile.metadata,
             ...template,
+            generationNotBefore: notBefore,
             deletedAt: dto.enabled
               ? null
               : (profile.metadata?.deletedAt ?? null),
@@ -422,11 +441,18 @@ export class FinanceDocumentRecurrenceService {
             generateAsStatus: 'draft',
             createdById: ctx.userId,
           });
-        if (existing?.nextGenerationDate)
-          profile.nextGenerationDate = recurrenceDay(
-            existing.nextGenerationDate,
-            dto.generationDay,
-          );
+        const notBefore =
+          dto.enabled && existing?.status !== FinanceBillRecurrenceStatus.Active
+            ? startDate
+            : (recurrenceNotBefore(existing?.createdAt, existing?.metadata) ??
+              startDate);
+        profile.nextGenerationDate = monthlyOccurrenceOnOrAfter(
+          existing?.nextGenerationDate
+            ? recurrenceDay(existing.nextGenerationDate, dto.generationDay)
+            : nextDate,
+          dto.generationDay,
+          notBefore,
+        );
         Object.assign(profile, {
           vendorId: (document as FinanceBill).vendorId,
           name: recurrenceText(
@@ -448,6 +474,7 @@ export class FinanceDocumentRecurrenceService {
           metadata: {
             ...profile.metadata,
             ...template,
+            generationNotBefore: notBefore,
             deletedAt: dto.enabled
               ? null
               : (profile.metadata?.deletedAt ?? null),

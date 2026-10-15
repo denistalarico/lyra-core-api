@@ -1,4 +1,6 @@
 import {
+  monthlyOccurrenceOnOrAfter,
+  recurrenceNotBefore,
   recurrenceDay,
   recurrenceDocumentMetadata,
   recurrenceMonth,
@@ -45,4 +47,29 @@ describe('Finance recurrence calendar and metadata', () => {
       expect(() => validateRecurrenceDays(value, 15)).toThrow();
     },
   );
+});
+
+describe('Finance recurrence registration boundaries', () => {
+  it.each([
+    ['2026-04-10', 10, '2026-10-15', '2026-11-10'],
+    ['2026-04-20', 20, '2026-10-15', '2026-10-20'],
+    ['2026-04-15', 15, '2026-10-15', '2026-10-15'],
+    ['2026-03-31', 31, '2026-02-15', '2026-03-31'],
+    ['2026-01-31', 31, '2026-02-15', '2026-02-28'],
+    ['2026-01-31', 31, '2028-02-15', '2028-02-29'],
+  ] as const)(
+    'bounds %s to its first eligible scheduled date',
+    (candidate, day, floor, expected) => {
+      expect(monthlyOccurrenceOnOrAfter(candidate, day, floor)).toBe(expected);
+    },
+  );
+  it('uses the Sao Paulo registration date and never lowers it through metadata', () => {
+    const registered = new Date('2026-10-15T01:00:00Z');
+    expect(
+      recurrenceNotBefore(registered, { generationNotBefore: '2026-03-01' }),
+    ).toBe('2026-10-14');
+    expect(
+      recurrenceNotBefore(registered, { generationNotBefore: '2026-11-01' }),
+    ).toBe('2026-11-01');
+  });
 });

@@ -1,4 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
+import { contractToday } from '../../contracts/contract-term';
 
 export type CompetenceMode = 'current' | 'previous';
 
@@ -64,4 +65,31 @@ export function recurrenceText(value: unknown, fallback = ''): string {
   return typeof value === 'string' || typeof value === 'number'
     ? String(value)
     : fallback;
+}
+
+/** First scheduled day on or after the recurrence registration/activation date. */
+export function monthlyOccurrenceOnOrAfter(
+  candidate: string,
+  day: number,
+  notBefore: string,
+): string {
+  if (candidate >= notBefore) return candidate;
+  const current = recurrenceDay(notBefore, day);
+  return current >= notBefore ? current : nextMonthlyOccurrence(current, day);
+}
+
+export function recurrenceNotBefore(
+  createdAt?: Date,
+  metadata: Record<string, unknown> = {},
+): string | null {
+  const created = createdAt ? contractToday(createdAt) : null;
+  const registered =
+    typeof metadata.generationNotBefore === 'string'
+      ? metadata.generationNotBefore
+      : null;
+  return created && registered
+    ? created > registered
+      ? created
+      : registered
+    : (created ?? registered);
 }
