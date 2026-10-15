@@ -1525,6 +1525,23 @@ export class FinanceController {
     return this.financeBankTransferService.create(getFinanceContext(req), dto);
   }
 
+  @Post('bank-transfers/:id/archive')
+  @RequireFinancePermission(
+    'agency.finance.transactions.manage.finance_or_owner',
+  )
+  archiveBankTransfer(@Req() req: Request, @Param('id') id: string) {
+    return this.financeBankTransferService.archive(getFinanceContext(req), id);
+  }
+
+  @Delete('bank-transfers/:id')
+  @DangerousAction()
+  @RequireFinancePermission(
+    'agency.finance.transactions.manage.finance_or_owner',
+  )
+  deleteBankTransfer(@Req() req: Request, @Param('id') id: string) {
+    return this.financeBankTransferService.delete(getFinanceContext(req), id);
+  }
+
   @Post('bank-transfers/:id/reverse')
   @DangerousAction()
   @RequireFinancePermission(
@@ -1618,6 +1635,17 @@ export class FinanceController {
     );
   }
 
+  @Delete('recurring-profiles/:id')
+  @DangerousAction()
+  @RequireFinancePermission('agency.finance.billing.manage.owner_only')
+  deleteInvoiceRecurrence(@Req() req: Request, @Param('id') id: string) {
+    return this.documentRecurrences.delete(
+      getFinanceContext(req),
+      'invoice',
+      id,
+    );
+  }
+
   @Patch('recurring-profiles/:id')
   @RequireFinancePermission('agency.finance.billing.manage.owner_only')
   updateRecurringProfile(
@@ -1671,6 +1699,13 @@ export class FinanceController {
       getFinanceContext(req),
       id,
     );
+  }
+
+  @Delete('bill-recurrences/:id')
+  @DangerousAction()
+  @RequireFinancePermission('agency.finance.billing.manage.owner_only')
+  deleteBillRecurrence(@Req() req: Request, @Param('id') id: string) {
+    return this.documentRecurrences.delete(getFinanceContext(req), 'bill', id);
   }
 
   @Patch('bill-recurrences/:id')

@@ -524,4 +524,79 @@ run('Finance recurring document transactions (disposable PostgreSQL)', () => {
       ).nextGenerationDate,
     ).toBe('2026-02-01');
   });
+  it('logically deletes a source recurrence, preserves generated history and reuses its pending cursor on explicit reactivation', async () => {
+    const service = new FinanceDocumentRecurrenceService(db);
+    const invoice = await db.getRepository(FinanceInvoice).save({
+      ...ctx,
+      invoiceNumber: '',
+      currency: 'BRL',
+      issueDate: '2026-10-01',
+      totalAmount: '100',
+      metadata: {},
+    });
+    await db.getRepository(FinanceInvoiceLine).save({
+      tenantId: ctx.tenantId,
+      workspaceId: ctx.workspaceId,
+      invoiceId: invoice.id,
+      description: 'Retainer',
+      quantity: '1',
+      unitPrice: '100',
+      totalAmount: '100',
+      metadata: {},
+    });
+    const config = {
+      enabled: true,
+      generationDay: 1,
+      dueDay: 10,
+      competenceMode: 'current' as const,
+      generateAsStatus: 'draft' as const,
+    };
+    const configured = await service.configure(
+      ctx,
+      'invoice',
+      invoice.id,
+      config,
+    );
+    const generated = await billing.generateInvoiceFromRecurringProfile(
+      ctx,
+      configured.profileId,
+    );
+    const pending = generated.recurringProfile.nextInvoiceDate;
+    await service.delete(ctx, 'invoice', configured.profileId);
+    expect(
+      (await billing.listRecurringProfiles(ctx)).some(
+        (row) => row.id === configured.profileId,
+      ),
+    ).toBe(false);
+    expect((await billing.getInvoice(ctx, generated.invoice.id)).id).toBe(
+      generated.invoice.id,
+    );
+    expect(
+      (await billing.getInvoice(ctx, invoice.id)).metadata.isRecurring,
+    ).toBe(false);
+    await expect(
+      billing.generateInvoiceFromRecurringProfile(ctx, configured.profileId),
+    ).rejects.toThrow('active');
+    await service.configure(ctx, 'invoice', invoice.id, {
+      ...config,
+      enabled: false,
+    });
+    expect(
+      (await billing.listRecurringProfiles(ctx)).some(
+        (row) => row.id === configured.profileId,
+      ),
+    ).toBe(false);
+    const restored = await service.configure(
+      ctx,
+      'invoice',
+      invoice.id,
+      config,
+    );
+    expect(restored.profileId).toBe(configured.profileId);
+    const profile = await db
+      .getRepository(FinanceRecurringProfile)
+      .findOneByOrFail({ id: restored.profileId });
+    expect(profile.metadata.deletedAt).toBeNull();
+    expect(profile.nextInvoiceDate).toBe(pending);
+  });
 });

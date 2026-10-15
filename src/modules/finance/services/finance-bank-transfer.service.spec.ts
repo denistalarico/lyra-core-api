@@ -33,6 +33,7 @@ function makeService(overrides?: { destinationCurrency?: string }) {
     create: jest.fn((value) => ({ ...value })),
     save: jest.fn(async (value) => ({ id: 'transfer-1', ...value })),
     find: jest.fn(),
+    findOne: jest.fn(),
   } as unknown as Repository<FinanceBankTransfer>;
   const bankRepo = {
     findOne: jest.fn(async ({ where }: { where: { id: string } }) =>
@@ -103,5 +104,72 @@ describe('FinanceBankTransferService', () => {
     ).rejects.toThrow('mesma moeda');
     expect(transferRepo.save).not.toHaveBeenCalled();
     expect(postingService.postBankTransfer).not.toHaveBeenCalled();
+  });
+});
+
+describe('Finance transfer visibility', () => {
+  it('archives without changing the movement or its accounting', async () => {
+    const { service, transferRepo, postingService } = makeService();
+    jest.mocked(transferRepo).findOne.mockResolvedValue({
+      id: 'transfer-1',
+      status: FinanceBankTransferStatus.Completed,
+      metadata: { reference: 'kept' },
+    } as unknown as FinanceBankTransfer);
+    const result = await service.archive(context, 'transfer-1');
+    expect(result.status).toBe(FinanceBankTransferStatus.Completed);
+    expect(result.metadata.reference).toBe('kept');
+    expect(typeof result.metadata.archivedAt).toBe('string');
+    expect(
+      jest.mocked(postingService).reverseBankTransfer.mock.calls,
+    ).toHaveLength(0);
+    expect(jest.mocked(transferRepo).findOne.mock.calls[0][0]).toEqual({
+      where: {
+        id: 'transfer-1',
+        tenantId: context.tenantId,
+        workspaceId: context.workspaceId,
+      },
+      lock: { mode: 'pessimistic_write' },
+    });
+  });
+  it('reverses a completed transfer before logical deletion and remains idempotent', async () => {
+    const { service, transferRepo, postingService } = makeService();
+    const transfer = {
+      id: 'transfer-1',
+      status: FinanceBankTransferStatus.Completed,
+      metadata: {},
+    } as FinanceBankTransfer;
+    jest.mocked(transferRepo).findOne.mockResolvedValue(transfer);
+    await service.delete(context, 'transfer-1');
+    await service.delete(context, 'transfer-1');
+    expect(
+      jest.mocked(postingService).reverseBankTransfer.mock.calls,
+    ).toHaveLength(1);
+    expect(transfer.status).toBe(FinanceBankTransferStatus.Reversed);
+    expect(transfer.metadata.deletedAt).toEqual(expect.any(String));
+  });
+  it('does not hide the transfer when accounting reversal fails', async () => {
+    const { service, transferRepo, postingService } = makeService();
+    const transfer = {
+      id: 'transfer-1',
+      status: FinanceBankTransferStatus.Completed,
+      metadata: {},
+    } as FinanceBankTransfer;
+    jest.mocked(transferRepo).findOne.mockResolvedValue(transfer);
+    jest
+      .mocked(postingService)
+      .reverseBankTransfer.mockRejectedValue(new Error('posting failed'));
+    await expect(service.delete(context, 'transfer-1')).rejects.toThrow(
+      'posting failed',
+    );
+    expect(jest.mocked(transferRepo).save.mock.calls).toHaveLength(0);
+    expect(transfer.metadata.deletedAt).toBeUndefined();
+  });
+  it('rejects a transfer outside the scoped repository lookup', async () => {
+    const { service, transferRepo } = makeService();
+    jest.mocked(transferRepo).findOne.mockResolvedValue(null);
+    await expect(service.archive(context, 'other')).rejects.toThrow(
+      'não encontrada',
+    );
+    expect(jest.mocked(transferRepo).save.mock.calls).toHaveLength(0);
   });
 });

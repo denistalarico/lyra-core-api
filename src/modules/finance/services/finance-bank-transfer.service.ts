@@ -124,6 +124,47 @@ export class FinanceBankTransferService {
     });
   }
 
+  async archive(ctx: FinanceRequestContext, id: string) {
+    return this.changeVisibility(ctx, id, false);
+  }
+
+  async delete(ctx: FinanceRequestContext, id: string) {
+    return this.changeVisibility(ctx, id, true);
+  }
+
+  private async changeVisibility(
+    ctx: FinanceRequestContext,
+    id: string,
+    deleted: boolean,
+  ) {
+    return this.dataSource.transaction(async (manager) => {
+      const repo = manager.getRepository(FinanceBankTransfer);
+      const transfer = await repo.findOne({
+        where: { id, tenantId: ctx.tenantId, workspaceId: ctx.workspaceId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!transfer)
+        throw new NotFoundException('Transferência não encontrada.');
+      // Archiving only hides the row. Deletion reverses the posted movement atomically;
+      // retain the record so the journal and audit trail still have their source.
+      if (deleted && transfer.status === FinanceBankTransferStatus.Completed) {
+        await this.postingService.reverseBankTransfer(
+          ctx,
+          transfer.id,
+          manager,
+        );
+        transfer.status = FinanceBankTransferStatus.Reversed;
+        transfer.reversedAt = new Date();
+        transfer.reversedById = ctx.userId ?? null;
+      }
+      transfer.metadata = {
+        ...transfer.metadata,
+        [deleted ? 'deletedAt' : 'archivedAt']: new Date().toISOString(),
+      };
+      return repo.save(transfer);
+    });
+  }
+
   private async findBankAccount(
     manager: EntityManager,
     ctx: FinanceRequestContext,

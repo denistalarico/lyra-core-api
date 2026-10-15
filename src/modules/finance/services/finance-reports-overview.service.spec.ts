@@ -1,4 +1,5 @@
 import { Between } from 'typeorm';
+import { FinanceMetricKey } from '../enums';
 import { FinanceService } from './finance.service';
 
 const context = {
@@ -213,5 +214,121 @@ describe('FinanceService reports overview', () => {
     expect(result.cards.revenueReceived).toBe(0);
     expect(result.cards).toEqual(expect.objectContaining({ costsPaid: 0 }));
     expect(result.cards.variableCosts).toBe(400);
+  });
+});
+
+describe('Finance monthly history without snapshots', () => {
+  beforeEach(() => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-10-15T12:00:00Z'));
+  });
+  afterEach(() => jest.useRealTimers());
+
+  function historyService(snapshots: Record<string, unknown>[] = []) {
+    const { service } = makeService({
+      invoices: [
+        {
+          issueDate: '2026-08-10',
+          totalAmount: '1000',
+          status: 'issued',
+          balanceDue: '1000',
+          createdAt,
+        },
+      ],
+      bills: [
+        {
+          issueDate: '2026-08-10',
+          totalAmount: '200',
+          status: 'open',
+          createdAt,
+        },
+      ],
+      clients: [
+        client('old', 'ended', 100, new Date('2026-09-12T12:00:00Z')),
+        {
+          ...client('current', 'active', 100),
+          createdAt: new Date('2026-01-01'),
+        },
+      ],
+    });
+    const qb = {
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      addOrderBy: jest.fn().mockReturnThis(),
+      getMany: jest.fn().mockResolvedValue(snapshots),
+    };
+    const metricsRepo = {
+      createQueryBuilder: jest.fn().mockReturnValue(qb),
+      count: jest.fn().mockResolvedValue(0),
+      save: jest.fn(),
+    };
+    Object.assign(service, { metricSnapshotsRepo: metricsRepo });
+    return { service, qb, metricsRepo };
+  }
+
+  it('fills twelve months from canonical calculations with one scoped source fetch and no snapshot writes', async () => {
+    const { service, qb, metricsRepo } = historyService();
+    const result = await service.getMetricsHistory(context, {
+      periodType: 'monthly',
+    });
+    expect(result.data).toHaveLength(48);
+    expect(
+      result.data.find(
+        (row) =>
+          row.metricKey === FinanceMetricKey.GrossMargin &&
+          row.periodStart === '2026-08-01',
+      )?.value,
+    ).toBe(0.8);
+    expect(
+      result.data.find(
+        (row) =>
+          row.metricKey === FinanceMetricKey.NetMargin &&
+          row.periodStart === '2026-08-01',
+      )?.value,
+    ).toBe(0.8);
+    expect(
+      result.data.find(
+        (row) =>
+          row.metricKey === FinanceMetricKey.CustomerChurn &&
+          row.periodStart === '2026-09-01',
+      )?.value,
+    ).toBeGreaterThan(0);
+    expect(jest.mocked(service).getSettings.mock.calls).toHaveLength(1);
+    expect(qb.where).toHaveBeenCalledWith('metric.tenant_id = :tenantId', {
+      tenantId: context.tenantId,
+    });
+    expect(qb.andWhere).toHaveBeenCalledWith(
+      'metric.workspace_id = :workspaceId',
+      { workspaceId: context.workspaceId },
+    );
+    expect(metricsRepo.save).not.toHaveBeenCalled();
+  });
+
+  it('keeps persisted values and honors metric/date filters for the calculated projection', async () => {
+    const { service } = historyService([
+      {
+        id: 'saved',
+        metricKey: 'gross_margin',
+        periodType: 'monthly',
+        periodStart: '2026-08-01',
+        periodEnd: '2026-08-31',
+        value: '.73',
+        currency: 'BRL',
+        metadata: {},
+        source: 'monthly_snapshot',
+        calculatedAt: createdAt,
+      },
+    ]);
+    const result = await service.getMetricsHistory(context, {
+      metricKey: 'grossMargin',
+      periodType: 'monthly',
+      startDate: '2026-08-01',
+      endDate: '2026-09-30',
+    });
+    expect(result.data.map((row) => [row.periodStart, row.value])).toEqual([
+      ['2026-08-01', 0.73],
+      ['2026-09-01', 0],
+    ]);
+    expect(result.data[0].id).toBe('saved');
   });
 });

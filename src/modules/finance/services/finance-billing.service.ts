@@ -1087,10 +1087,12 @@ export class FinanceBillingService {
 
   async listBillRecurrences(ctx: FinanceRequestContext) {
     const scope = { tenantId: ctx.tenantId, workspaceId: ctx.workspaceId };
-    const recurrences = await this.billRecurrencesRepo.find({
-      where: scope,
-      order: { createdAt: 'DESC' },
-    });
+    const recurrences = (
+      await this.billRecurrencesRepo.find({
+        where: scope,
+        order: { createdAt: 'DESC' },
+      })
+    ).filter((profile) => !profile.metadata?.deletedAt);
     const ids = recurrences.flatMap((recurrence) =>
       recurrence.lastGeneratedBillId ? [recurrence.lastGeneratedBillId] : [],
     );
@@ -1479,6 +1481,7 @@ export class FinanceBillingService {
       recurrence = fresh;
       if (
         recurrence.status !== FinanceBillRecurrenceStatus.Active ||
+        Boolean(recurrence.metadata?.deletedAt) ||
         !recurrence.active ||
         (recurrence.endDate && generationDate > recurrence.endDate) ||
         (recurrence.occurrencesLimit != null &&
@@ -2637,11 +2640,13 @@ export class FinanceBillingService {
     return result;
   }
 
-  listRecurringProfiles(ctx: FinanceRequestContext) {
-    return this.recurringProfilesRepo.find({
-      where: { tenantId: ctx.tenantId, workspaceId: ctx.workspaceId },
-      order: { createdAt: 'DESC' },
-    });
+  async listRecurringProfiles(ctx: FinanceRequestContext) {
+    return (
+      await this.recurringProfilesRepo.find({
+        where: { tenantId: ctx.tenantId, workspaceId: ctx.workspaceId },
+        order: { createdAt: 'DESC' },
+      })
+    ).filter((profile) => !profile.metadata?.deletedAt);
   }
 
   createRecurringProfile(
@@ -2823,6 +2828,7 @@ export class FinanceBillingService {
       profile = fresh;
       if (
         profile.status !== FinanceRecurringProfileStatus.Active ||
+        Boolean(profile.metadata?.deletedAt) ||
         (automatic && !profile.autoGenerateInvoice) ||
         (profile.endDate && invoiceDate > profile.endDate)
       )

@@ -52,6 +52,87 @@ export class FinanceDocumentRecurrenceService {
     @InjectDataSource('agency') private readonly dataSource: DataSource,
   ) {}
 
+  async delete(
+    ctx: FinanceRequestContext,
+    kind: 'invoice' | 'bill',
+    id: string,
+  ) {
+    const scope = { tenantId: ctx.tenantId, workspaceId: ctx.workspaceId };
+    const initial =
+      kind === 'invoice'
+        ? await this.dataSource
+            .getRepository(FinanceRecurringProfile)
+            .findOne({ where: { ...scope, id } })
+        : await this.dataSource
+            .getRepository(FinanceBillRecurrence)
+            .findOne({ where: { ...scope, id } });
+    if (!initial) throw new NotFoundException('Recorrência não encontrada.');
+    const sourceId =
+      kind === 'invoice'
+        ? (initial as FinanceRecurringProfile).sourceModule ===
+          'finance_invoice'
+          ? (initial as FinanceRecurringProfile).sourceId
+          : null
+        : (initial as FinanceBillRecurrence).sourceBillId;
+    return this.dataSource.transaction(async (manager) => {
+      // Match configuration lock order: source document, then recurrence.
+      const document = !sourceId
+        ? null
+        : kind === 'invoice'
+          ? await manager.getRepository(FinanceInvoice).findOne({
+              where: { ...scope, id: sourceId },
+              lock: { mode: 'pessimistic_write' },
+            })
+          : await manager.getRepository(FinanceBill).findOne({
+              where: { ...scope, id: sourceId },
+              lock: { mode: 'pessimistic_write' },
+            });
+      if (kind === 'invoice') {
+        const repo = manager.getRepository(FinanceRecurringProfile);
+        const profile = await repo.findOne({
+          where: { ...scope, id },
+          lock: { mode: 'pessimistic_write' },
+        });
+        if (!profile)
+          throw new NotFoundException('Recorrência não encontrada.');
+        profile.status = FinanceRecurringProfileStatus.Cancelled;
+        profile.autoGenerateInvoice = false;
+        profile.metadata = {
+          ...profile.metadata,
+          deletedAt: new Date().toISOString(),
+        };
+        await repo.save(profile);
+      } else {
+        const repo = manager.getRepository(FinanceBillRecurrence);
+        const profile = await repo.findOne({
+          where: { ...scope, id },
+          lock: { mode: 'pessimistic_write' },
+        });
+        if (!profile)
+          throw new NotFoundException('Recorrência não encontrada.');
+        profile.status = FinanceBillRecurrenceStatus.Cancelled;
+        profile.active = false;
+        profile.metadata = {
+          ...profile.metadata,
+          deletedAt: new Date().toISOString(),
+        };
+        await repo.save(profile);
+      }
+      if (document) {
+        document.metadata = { ...document.metadata, isRecurring: false };
+        if (kind === 'invoice')
+          await manager
+            .getRepository(FinanceInvoice)
+            .save(document as FinanceInvoice);
+        else
+          await manager
+            .getRepository(FinanceBill)
+            .save(document as FinanceBill);
+      }
+      return { id, deleted: true };
+    });
+  }
+
   async eligibleContracts(ctx: FinanceRequestContext, invoiceId: string) {
     const invoice = await this.dataSource
       .getRepository(FinanceInvoice)
@@ -309,7 +390,13 @@ export class FinanceDocumentRecurrenceService {
             ? FinanceRecurringProfileStatus.Active
             : FinanceRecurringProfileStatus.Paused,
           autoGenerateInvoice: dto.enabled,
-          metadata: { ...profile.metadata, ...template },
+          metadata: {
+            ...profile.metadata,
+            ...template,
+            deletedAt: dto.enabled
+              ? null
+              : (profile.metadata?.deletedAt ?? null),
+          },
         });
         profileId = (await repo.save(profile)).id;
       } else {
@@ -358,7 +445,13 @@ export class FinanceDocumentRecurrenceService {
           status: dto.enabled
             ? FinanceBillRecurrenceStatus.Active
             : FinanceBillRecurrenceStatus.Paused,
-          metadata: { ...profile.metadata, ...template },
+          metadata: {
+            ...profile.metadata,
+            ...template,
+            deletedAt: dto.enabled
+              ? null
+              : (profile.metadata?.deletedAt ?? null),
+          },
           updatedById: ctx.userId,
         });
         profileId = (await repo.save(profile)).id;

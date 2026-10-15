@@ -40,6 +40,8 @@ import {
   FinanceTag,
 } from '../entities';
 import {
+  FinanceMetricKey,
+  FinanceMetricPeriodType,
   FinanceAccountType,
   FinanceBankAccountType,
   FinancePaymentDirection,
@@ -586,31 +588,13 @@ export class FinanceService {
     return this.profitabilityRulesRepo.save(rules);
   }
 
-  async getReportsOverview(ctx: FinanceRequestContext) {
+  private async loadOverviewSources(
+    ctx: FinanceRequestContext,
+    periodStartDate: string,
+    periodEndDate: string,
+  ) {
     const settings = await this.getSettings(ctx);
-
-    const now = new Date();
-    const periodStart = new Date(
-      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1),
-    );
-    const periodEnd = new Date(
-      Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0),
-    );
-
-    const periodStartDate = periodStart.toISOString().slice(0, 10);
-    const periodEndDate = periodEnd.toISOString().slice(0, 10);
-    const today = now.toISOString().slice(0, 10);
-
-    const [
-      invoices,
-      bills,
-      recurringProfiles,
-      clients,
-      categories,
-      metricsCount,
-      reportsCount,
-      monthPayments,
-    ] = await Promise.all([
+    const rows = await Promise.all([
       this.invoicesRepo.find({
         where: {
           tenantId: ctx.tenantId,
@@ -661,7 +645,45 @@ export class FinanceService {
           paymentDate: Between(periodStartDate, periodEndDate),
         },
       }),
-    ]);
+    ] as const);
+    return { settings, rows };
+  }
+
+  async getReportsOverview(
+    ctx: FinanceRequestContext,
+    now = new Date(),
+    sources?: Awaited<ReturnType<FinanceService['loadOverviewSources']>>,
+  ) {
+    const periodStart = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1),
+    );
+    const periodEnd = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0),
+    );
+
+    const periodStartDate = periodStart.toISOString().slice(0, 10);
+    const periodEndDate = periodEnd.toISOString().slice(0, 10);
+    const today = now.toISOString().slice(0, 10);
+
+    const data =
+      sources ??
+      (await this.loadOverviewSources(ctx, periodStartDate, periodEndDate));
+    const { settings } = data;
+    const [
+      invoices,
+      bills,
+      recurringProfiles,
+      clients,
+      categories,
+      metricsCount,
+      reportsCount,
+      periodPayments,
+    ] = data.rows;
+    const monthPayments = periodPayments.filter(
+      (payment) =>
+        payment.paymentDate >= periodStartDate &&
+        payment.paymentDate <= periodEndDate,
+    );
 
     const categoriesById = new Map(
       categories.map((category) => [category.id, category]),
@@ -983,6 +1005,104 @@ export class FinanceService {
       .addOrderBy('metric.metric_key', 'ASC')
       .getMany();
 
+    const data = rows.map((row) => ({
+      id: row.id,
+      metricKey: row.metricKey,
+      periodType: row.periodType,
+      periodStart: row.periodStart,
+      periodEnd: row.periodEnd,
+      value: Number(row.value),
+      currency: row.currency,
+      source: row.source,
+      calculatedAt: row.calculatedAt,
+      metadata: row.metadata,
+    }));
+    const supported = {
+      gross_margin: 'grossMargin',
+      net_margin: 'netMargin',
+      customer_churn: 'customerChurn',
+      revenue_churn: 'revenueChurn',
+    } as const;
+    const metricKey = query.metricKey?.replace(
+      /[A-Z]/g,
+      (c) => `_${c.toLowerCase()}`,
+    );
+    const keys = (
+      Object.keys(supported) as Array<keyof typeof supported>
+    ).filter((key) => !metricKey || key === metricKey);
+    if ((!query.periodType || query.periodType === 'monthly') && keys.length) {
+      const now = new Date();
+      // Bound the live projection to the last twelve months. Persisted older points remain available.
+      const months = Array.from({ length: 12 }, (_, index) => {
+        const start = new Date(
+          Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 11 + index, 1),
+        );
+        const end = new Date(
+          Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 1, 0),
+        );
+        return {
+          start: start.toISOString().slice(0, 10),
+          end: end.toISOString().slice(0, 10),
+        };
+      }).filter(
+        (month) =>
+          (!query.startDate || month.start >= query.startDate) &&
+          (!query.endDate || month.end <= query.endDate),
+      );
+      const missing = months.filter((month) =>
+        keys.some(
+          (key) =>
+            !data.some(
+              (point) =>
+                String(point.metricKey) === key &&
+                point.periodType === FinanceMetricPeriodType.Monthly &&
+                point.periodStart === month.start,
+            ),
+        ),
+      );
+      if (missing.length) {
+        const sources = await this.loadOverviewSources(
+          ctx,
+          missing[0].start,
+          missing[missing.length - 1].end,
+        );
+        for (const month of missing) {
+          const overview = await this.getReportsOverview(
+            ctx,
+            new Date(`${month.start}T12:00:00Z`),
+            sources,
+          );
+          for (const key of keys) {
+            if (
+              data.some(
+                (point) =>
+                  String(point.metricKey) === key &&
+                  point.periodType === FinanceMetricPeriodType.Monthly &&
+                  point.periodStart === month.start,
+              )
+            )
+              continue;
+            data.push({
+              id: `calculated:${key}:${month.start}`,
+              metricKey: key as FinanceMetricKey,
+              periodType: FinanceMetricPeriodType.Monthly,
+              periodStart: month.start,
+              periodEnd: month.end,
+              value: overview.cards[supported[key]],
+              currency: overview.currency,
+              source: 'calculated',
+              calculatedAt: now,
+              metadata: { historicalProjection: true },
+            });
+          }
+        }
+      }
+    }
+    data.sort(
+      (a, b) =>
+        a.periodStart.localeCompare(b.periodStart) ||
+        a.metricKey.localeCompare(b.metricKey),
+    );
     return {
       status: 'ok',
       module: 'agency-finance',
@@ -992,19 +1112,8 @@ export class FinanceService {
         startDate: query.startDate ?? null,
         endDate: query.endDate ?? null,
       },
-      total: rows.length,
-      data: rows.map((row) => ({
-        id: row.id,
-        metricKey: row.metricKey,
-        periodType: row.periodType,
-        periodStart: row.periodStart,
-        periodEnd: row.periodEnd,
-        value: Number(row.value),
-        currency: row.currency,
-        source: row.source,
-        calculatedAt: row.calculatedAt,
-        metadata: row.metadata,
-      })),
+      total: data.length,
+      data,
     };
   }
 

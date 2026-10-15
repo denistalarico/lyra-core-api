@@ -10,7 +10,12 @@ import {
   ContractStatus,
   ContractTargetType,
 } from '../../contracts/enums';
-import { FinanceInvoice } from '../entities';
+import {
+  FinanceInvoice,
+  FinanceBill,
+  FinanceBillRecurrence,
+  FinanceRecurringProfile,
+} from '../entities';
 import { FinanceDocumentRecurrenceService } from './finance-document-recurrence.service';
 
 const scope = {
@@ -149,5 +154,95 @@ describe('Finance active contract linkage', () => {
       ],
     });
     expect(await service.eligibleContracts(scope, 'invoice-a')).toEqual([]);
+  });
+});
+
+describe('Finance recurrence deletion', () => {
+  it.each(['invoice', 'bill'] as const)(
+    'disables a %s recurrence and its scoped source without removing generated history',
+    async (kind) => {
+      const document = {
+        id: 'source',
+        metadata: { isRecurring: true, reference: 'kept' },
+      };
+      const profile = {
+        id: 'profile',
+        sourceModule: 'finance_invoice',
+        sourceId: 'source',
+        sourceBillId: 'source',
+        status: 'active',
+        active: true,
+        autoGenerateInvoice: true,
+        metadata: { cursor: 'kept' },
+      };
+      const locks: string[] = [];
+      const profileRepo = {
+        findOne: jest.fn((options: { lock?: unknown }) => {
+          if (options.lock) locks.push('profile');
+          return Promise.resolve(profile);
+        }),
+        save: jest.fn(),
+      };
+      const documentRepo = {
+        findOne: jest.fn(() => {
+          locks.push('source');
+          return Promise.resolve(document);
+        }),
+        save: jest.fn(),
+      };
+      const getRepository = jest.fn((entity: unknown) =>
+        entity === FinanceBill || entity === FinanceInvoice
+          ? documentRepo
+          : entity === FinanceBillRecurrence ||
+              entity === FinanceRecurringProfile
+            ? profileRepo
+            : undefined,
+      );
+      const dataSource = {
+        getRepository,
+        transaction: async (run: (manager: unknown) => Promise<unknown>) =>
+          run({ getRepository }),
+      };
+      const service = new FinanceDocumentRecurrenceService(
+        dataSource as unknown as DataSource,
+      );
+      expect(await service.delete(scope, kind, 'profile')).toEqual({
+        id: 'profile',
+        deleted: true,
+      });
+      expect(locks).toEqual(['source', 'profile']);
+      expect(profile.status).toBe('cancelled');
+      expect(profile.metadata.cursor).toBe('kept');
+      expect(
+        typeof (profile.metadata as Record<string, unknown>).deletedAt,
+      ).toBe('string');
+      expect(document.metadata).toEqual({
+        isRecurring: false,
+        reference: 'kept',
+      });
+      expect(profileRepo.findOne).toHaveBeenLastCalledWith({
+        where: {
+          id: 'profile',
+          tenantId: scope.tenantId,
+          workspaceId: scope.workspaceId,
+        },
+        lock: { mode: 'pessimistic_write' },
+      });
+      expect(documentRepo.save).toHaveBeenCalledWith(document);
+    },
+  );
+  it('rejects a profile outside the tenant/workspace before starting a transaction', async () => {
+    const transaction = jest.fn();
+    const dataSource = {
+      getRepository: () => ({ findOne: jest.fn().mockResolvedValue(null) }),
+      transaction,
+    };
+    const service = new FinanceDocumentRecurrenceService(
+      dataSource as unknown as DataSource,
+    );
+    await expect(service.delete(scope, 'invoice', 'other')).rejects.toThrow(
+      'não encontrada',
+    );
+    expect(transaction).not.toHaveBeenCalled();
   });
 });
