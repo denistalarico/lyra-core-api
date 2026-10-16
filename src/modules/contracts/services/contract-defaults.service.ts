@@ -4,9 +4,8 @@ import { Repository } from 'typeorm';
 import { ContractDefaults } from '../entities/contract-defaults.entity';
 import { ContractTargetType } from '../enums';
 import {
-  CONTRACT_DEFAULT_KEYS,
-  CONTRACT_DEFAULT_PRESET_KEYS,
-  CONTRACT_DEFAULTS_CATALOG,
+  contractDefaultsCatalog,
+  type ContractDefaultDefinition,
 } from '../contract-defaults.catalog';
 import { UpdateContractDefaultsDto } from '../dto/update-contract-defaults.dto';
 type Scope = { tenantId: string; workspaceId: string; userId?: string | null };
@@ -17,22 +16,23 @@ export class ContractDefaultsService {
     private readonly repository: Repository<ContractDefaults>,
   ) {}
   async get(scope: Scope, targetType = 'client') {
-    if (targetType !== 'client')
+    if (targetType !== 'client' && targetType !== 'team_member')
       throw new HttpException({ code: 'contract_target_not_supported' }, 422);
     const row = await this.repository.findOne({
       where: {
         tenantId: scope.tenantId,
         workspaceId: scope.workspaceId,
-        targetType: ContractTargetType.Client,
+        targetType: targetType as ContractTargetType,
       },
     });
-    return this.present(row);
+    return this.present(row, targetType);
   }
   async put(scope: Scope, dto: UpdateContractDefaultsDto) {
-    const values = this.validateEntries(dto.values, false),
-      presets = this.validateEntries(dto.presets, true);
-    if (dto.targetType !== 'client')
+    if (dto.targetType !== 'client' && dto.targetType !== 'team_member')
       throw new HttpException({ code: 'contract_target_not_supported' }, 422);
+    const catalog = contractDefaultsCatalog(dto.targetType);
+    const values = this.validateEntries(dto.values, false, catalog);
+    const presets = this.validateEntries(dto.presets, true, catalog);
     return this.repository.manager.transaction(async (manager) => {
       // Also serializes first creation: row locks alone cannot lock an absent row.
       await manager.query(
@@ -45,7 +45,7 @@ export class ContractDefaultsService {
       const where = {
         tenantId: scope.tenantId,
         workspaceId: scope.workspaceId,
-        targetType: ContractTargetType.Client,
+        targetType: dto.targetType as ContractTargetType,
       };
       const row = await repo.findOne({ where });
       if (
@@ -69,15 +69,17 @@ export class ContractDefaultsService {
           updatedById: scope.userId ?? null,
         }),
       );
-      return this.present(saved);
+      return this.present(saved, dto.targetType);
     });
   }
-  private validateEntries(entries: Record<string, string>, preset: boolean) {
+  private validateEntries(
+    entries: Record<string, string>,
+    preset: boolean,
+    catalog: readonly ContractDefaultDefinition[],
+  ) {
     const result: Record<string, string> = {};
     for (const [key, value] of Object.entries(entries)) {
-      const definition = CONTRACT_DEFAULTS_CATALOG.find(
-        (item) => item.key === key,
-      );
+      const definition = catalog.find((item) => item.key === key);
       if (!definition || (preset && definition.type !== 'preset'))
         throw new HttpException(
           { code: 'contract_default_key_invalid', key },
@@ -99,17 +101,23 @@ export class ContractDefaultsService {
     }
     return result;
   }
-  private present(row: ContractDefaults | null) {
+  private present(
+    row: ContractDefaults | null,
+    targetType: 'client' | 'team_member',
+  ) {
+    const catalog = contractDefaultsCatalog(targetType);
     return {
-      targetType: 'client',
+      targetType,
       values: row?.values ?? {},
       presets: row?.presets ?? {},
       expiringWindowDays: row?.expiringWindowDays ?? 30,
       version: row?.version ?? 0,
       updatedAt: row?.updatedAt ?? null,
       updatedById: row?.updatedById ?? null,
-      allowedKeys: CONTRACT_DEFAULT_KEYS,
-      presetKeys: CONTRACT_DEFAULT_PRESET_KEYS,
+      allowedKeys: catalog.map((item) => item.key),
+      presetKeys: catalog
+        .filter((item) => item.type === 'preset')
+        .map((item) => item.key),
     };
   }
 }

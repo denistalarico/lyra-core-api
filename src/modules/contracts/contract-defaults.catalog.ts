@@ -60,6 +60,43 @@ export const CONTRACT_DEFAULTS_CATALOG: readonly ContractDefaultDefinition[] = [
   { key: 'service.approvalPolicy', type: 'text' },
   { key: 'service.platformDependencyStatement', type: 'text' },
 ];
+// Team uses its own variables and preset codes; never reuse client billing defaults.
+export const TEAM_CONTRACT_DEFAULTS_CATALOG: readonly ContractDefaultDefinition[] =
+  [
+    { key: 'contract.city', type: 'text' },
+    {
+      key: 'contract.jurisdiction',
+      type: 'preset',
+      options: ['company_location', 'contractor_location', 'arbitration'],
+    },
+    { key: 'contract.termMonths', type: 'integer' },
+    { key: 'contract.minimumTermMonths', type: 'integer' },
+    { key: 'contract.noticeDays', type: 'integer' },
+    {
+      key: 'contract.autoRenewal',
+      type: 'preset',
+      options: ['none', 'same_period', 'monthly'],
+    },
+    { key: 'payment.dueDay', type: 'integer', max: 31 },
+    { key: 'payment.reportDueDay', type: 'integer', max: 31 },
+    { key: 'payment.billingDocument', type: 'text' },
+    {
+      key: 'payment.paymentTerms',
+      type: 'preset',
+      options: ['monthly_after_report', 'monthly_fixed', 'per_deliverable'],
+    },
+    {
+      key: 'work.noTimeTracking',
+      type: 'preset',
+      options: ['no_time_tracking', 'timesheet_for_billing'],
+    },
+    { key: 'work.autonomyStatement', type: 'text' },
+  ];
+export function contractDefaultsCatalog(targetType: 'client' | 'team_member') {
+  return targetType === 'team_member'
+    ? TEAM_CONTRACT_DEFAULTS_CATALOG
+    : CONTRACT_DEFAULTS_CATALOG;
+}
 export const CONTRACT_DEFAULT_KEYS = CONTRACT_DEFAULTS_CATALOG.map(
   (item) => item.key,
 );
