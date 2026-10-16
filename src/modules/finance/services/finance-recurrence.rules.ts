@@ -48,6 +48,16 @@ export function recurrenceDocumentMetadata(
   );
 }
 
+/** Line competence (Produtos e serviços) follows the generated occurrence. */
+export function recurrenceLineMetadata(
+  metadata: Record<string, unknown> | null | undefined,
+  competencePeriod: string,
+): Record<string, unknown> {
+  const value = { ...(metadata ?? {}) };
+  if (value.competence) value.competence = competencePeriod;
+  return value;
+}
+
 export function validateRecurrenceDays(
   generationDay: unknown,
   dueDay: unknown,

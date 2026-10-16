@@ -3,6 +3,7 @@ import {
   recurrenceNotBefore,
   recurrenceDay,
   recurrenceDocumentMetadata,
+  recurrenceLineMetadata,
   recurrenceMonth,
   nextMonthlyOccurrence,
   validateRecurrenceDays,
@@ -18,6 +19,15 @@ describe('Finance recurrence calendar and metadata', () => {
   it('separates competence from payment month across the year boundary', () => {
     expect(recurrenceMonth('2027-01-15', -1)).toBe('2026-12');
     expect(recurrenceMonth('2027-01-15')).toBe('2027-01');
+  });
+  it('moves a filled line competence to the generated occurrence', () => {
+    expect(
+      recurrenceLineMetadata({ competence: '2026-08', notes: 'x' }, '2026-10'),
+    ).toEqual({ competence: '2026-10', notes: 'x' });
+    expect(recurrenceLineMetadata({ notes: 'x' }, '2026-10')).toEqual({
+      notes: 'x',
+    });
+    expect(recurrenceLineMetadata(null, '2026-10')).toEqual({});
   });
   it('uses the Sao Paulo business day before midnight UTC', () => {
     expect(contractToday(new Date('2026-10-15T01:00:00Z'))).toBe('2026-10-14');

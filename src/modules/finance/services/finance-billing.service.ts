@@ -6,6 +6,7 @@ import {
   monthlyOccurrenceOnOrAfter,
   nextMonthlyOccurrence,
   recurrenceDocumentMetadata,
+  recurrenceLineMetadata,
   recurrenceText,
 } from './finance-recurrence.rules';
 import {
@@ -1655,7 +1656,7 @@ export class FinanceBillingService {
               categoryId: line.categoryId ?? recurrence.categoryId ?? null,
               costCenterId:
                 line.costCenterId ?? recurrence.costCenterId ?? null,
-              metadata: line.metadata ?? {},
+              metadata: recurrenceLineMetadata(line.metadata, competencePeriod),
             }),
           );
           await manager.getRepository(FinanceBillLine).save(lines);
@@ -2998,7 +2999,10 @@ export class FinanceBillingService {
           typeof line.costCenterId === 'string'
             ? line.costCenterId
             : profile.costCenterId,
-        metadata: contractObject(line.metadata),
+        metadata: recurrenceLineMetadata(
+          contractObject(line.metadata),
+          competence,
+        ),
       }));
       const totals = this.calculateInvoiceTotals(inputLines);
       const issueAutomatically = metadata.generateAsStatus === 'issued';
