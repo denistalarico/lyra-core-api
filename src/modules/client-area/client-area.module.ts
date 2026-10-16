@@ -59,6 +59,7 @@ import { ClientAreaPasswordResetService } from './services/client-area-password-
 import { ClientAreaRateLimitService } from './services/client-area-rate-limit.service';
 import { ClientAreaSelfAccessService } from './services/client-area-self-access.service';
 import { ClientAreaSessionService } from './services/client-area-session.service';
+import { ClientAreaLifecycleService } from './services/client-area-lifecycle.service';
 import { ClientAreaManagementService } from './services/client-area-management.service';
 import { ClientAreaJwtStrategy } from './strategies/client-area-jwt.strategy';
 
@@ -112,6 +113,7 @@ const AGENCY_CONNECTION = 'agency';
     ClientAreaJwtStrategy,
     ClientAreaSessionService,
     ClientAreaManagementService,
+    ClientAreaLifecycleService,
     ClientAreaSelfAccessService,
     ClientAreaAuthService,
     ClientAreaAuthorizationService,
@@ -142,6 +144,7 @@ const AGENCY_CONNECTION = 'agency';
     ClientAreaAuthorizationService,
     ClientAreaSessionService,
     ClientAreaManagementService,
+    ClientAreaLifecycleService,
     ClientAreaSelfAccessService,
     ClientAreaAuthGuard,
     ClientAreaMembershipGuard,

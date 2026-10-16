@@ -616,6 +616,11 @@ function makeService(
     {} as ClientsProfitabilityService,
     {} as ClientNotificationPublisher,
     {} as ClientCostCenterService,
+    { onClientArchived: jest.fn() } as never,
+    {
+      pendingForClients: jest.fn().mockResolvedValue(new Set()),
+      apply: jest.fn(),
+    } as never,
   );
 
   return { service, entitlementsRepository, queryBuilder };

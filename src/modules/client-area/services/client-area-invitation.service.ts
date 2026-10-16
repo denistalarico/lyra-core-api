@@ -12,7 +12,7 @@ import { JwtService } from '@nestjs/jwt';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { createHash, randomBytes, randomUUID } from 'crypto';
 import type { Request } from 'express';
-import { DataSource, type EntityManager, In } from 'typeorm';
+import { MoreThan, DataSource, type EntityManager, In } from 'typeorm';
 import { AgencyIdentityCredentialsService } from '../../agency/agency-identity-credentials.service';
 import { AgencyUserSecuritySettingsEntity } from '../../agency/entities/agency-auth.entities';
 import {
@@ -400,6 +400,23 @@ export class ClientAreaInvitationService {
         companyContextId,
         { requireUsable: true },
       );
+      // The first invitation uses today's admin role; CA7 migrates it to owner.
+      const hasMember = await manager
+        .getRepository(ClientAreaMembershipEntity)
+        .exists({
+          where: { companyContextId: ref.company.id, status: 'active' },
+        });
+      const hasInvitation = await manager
+        .getRepository(ClientAreaInvitationEntity)
+        .exists({
+          where: {
+            companyContextId: ref.company.id,
+            status: 'pending',
+            expiresAt: MoreThan(new Date()),
+          },
+        });
+      const effectiveRole =
+        !hasMember && !hasInvitation ? 'client_admin' : role;
       await this.memberships.assertAgencyActor(
         manager,
         actor.tenantId,
@@ -462,7 +479,7 @@ export class ClientAreaInvitationService {
         contactId: contact.contactId,
         email: contact.email,
         emailNormalized: contact.emailNormalized,
-        role,
+        role: effectiveRole,
         token,
         invitedByUserId: actor.userId,
       });
@@ -473,7 +490,7 @@ export class ClientAreaInvitationService {
         actorUserId: actor.userId,
         invitationId: invitation.id,
         targetEmail: invitation.email,
-        newRole: role,
+        newRole: effectiveRole,
         metadata: { existingAccount },
       });
 
@@ -592,6 +609,41 @@ export class ClientAreaInvitationService {
   }
 
   /** Revokes a pending invitation. Never deletes; its token stops working. */
+  /** CA5: same transition/audit as a single invitation revoke, in the
+   * company's removal transaction. Pending rows are historical, never deleted. */
+  async revokePendingForCompanyInTransaction(
+    manager: EntityManager,
+    company: ClientAreaCompanyTuple,
+    actorUserId: string | null,
+    reason: string,
+  ): Promise<number> {
+    const repo = manager.getRepository(ClientAreaInvitationEntity);
+    const pending = await repo.find({
+      where: { ...company, status: 'pending' },
+      lock: { mode: 'pessimistic_write' },
+    });
+    for (const invitation of pending) {
+      await repo.update(
+        { id: invitation.id, status: 'pending' },
+        {
+          status: 'revoked',
+          revokedAt: new Date(),
+          revokedByUserId: actorUserId,
+        },
+      );
+      await this.audit.record(manager, {
+        company,
+        action: 'invitation_revoked',
+        actorSurface: actorUserId ? 'agency' : 'system',
+        actorUserId,
+        invitationId: invitation.id,
+        targetEmail: invitation.email,
+        metadata: { reason },
+      });
+    }
+    return pending.length;
+  }
+
   async revokeInvitation(
     actor: ClientAreaAgencyActor,
     clientId: string,
@@ -1440,6 +1492,10 @@ export class ClientAreaInvitationService {
           workspaceId: actor.workspaceId,
           agencyClientId: clientId,
         },
+        lock:
+          options.requireUsable && manager.queryRunner?.isTransactionActive
+            ? { mode: 'pessimistic_write' }
+            : undefined,
       });
 
     if (!company) {

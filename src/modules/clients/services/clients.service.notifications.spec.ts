@@ -17,7 +17,10 @@ describe('ClientsService notification triggers', () => {
   it('publishes client.assigned on create when an account owner is set', async () => {
     const { service, publisher } = makeService();
 
-    await service.create(makeContext(), makeCreateDto({ accountOwnerId: 'user-owner' }));
+    await service.create(
+      makeContext(),
+      makeCreateDto({ accountOwnerId: 'user-owner' }),
+    );
 
     expect(publisher.publishAssigned).toHaveBeenCalledTimes(1);
     expect(publisher.publishOwnerChanged).not.toHaveBeenCalled();
@@ -28,13 +31,18 @@ describe('ClientsService notification triggers', () => {
 
     await service.create(makeContext(), makeCreateDto());
 
-    expect(clientCostCenterService.ensureForClientSafe).toHaveBeenCalledTimes(1);
+    expect(clientCostCenterService.ensureForClientSafe).toHaveBeenCalledTimes(
+      1,
+    );
   });
 
   it('does not publish client.assigned on create without an account owner', async () => {
     const { service, publisher } = makeService();
 
-    await service.create(makeContext(), makeCreateDto({ accountOwnerId: undefined }));
+    await service.create(
+      makeContext(),
+      makeCreateDto({ accountOwnerId: undefined }),
+    );
 
     expect(publisher.publishAssigned).not.toHaveBeenCalled();
   });
@@ -43,7 +51,9 @@ describe('ClientsService notification triggers', () => {
     const client = makeClient({ accountOwnerId: null });
     const { service, publisher } = makeService({ client });
 
-    await service.update(makeContext(), client.id, { accountOwnerId: 'user-owner' });
+    await service.update(makeContext(), client.id, {
+      accountOwnerId: 'user-owner',
+    });
 
     expect(publisher.publishAssigned).toHaveBeenCalledTimes(1);
     expect(publisher.publishOwnerChanged).not.toHaveBeenCalled();
@@ -53,7 +63,9 @@ describe('ClientsService notification triggers', () => {
     const client = makeClient({ accountOwnerId: 'user-old-owner' });
     const { service, publisher } = makeService({ client });
 
-    await service.update(makeContext(), client.id, { accountOwnerId: 'user-new-owner' });
+    await service.update(makeContext(), client.id, {
+      accountOwnerId: 'user-new-owner',
+    });
 
     expect(publisher.publishOwnerChanged).toHaveBeenCalledWith(
       expect.objectContaining({ previousOwnerId: 'user-old-owner' }),
@@ -65,7 +77,9 @@ describe('ClientsService notification triggers', () => {
     const client = makeClient({ accountOwnerId: 'user-owner' });
     const { service, publisher } = makeService({ client });
 
-    await service.update(makeContext(), client.id, { displayName: 'Updated name' });
+    await service.update(makeContext(), client.id, {
+      displayName: 'Updated name',
+    });
 
     expect(publisher.publishAssigned).not.toHaveBeenCalled();
     expect(publisher.publishOwnerChanged).not.toHaveBeenCalled();
@@ -75,21 +89,29 @@ describe('ClientsService notification triggers', () => {
     const client = makeClient({ managedTenantId: null });
     const { service, publisher } = makeService({ client });
 
-    await service.update(makeContext(), client.id, { managedTenantId: 'managed-tenant-1' });
+    await service.update(makeContext(), client.id, {
+      managedTenantId: 'managed-tenant-1',
+    });
     expect(publisher.publishManagedTenantConnected).toHaveBeenCalledTimes(1);
 
     jest.clearAllMocks();
     const connectedClient = makeClient({ managedTenantId: 'managed-tenant-1' });
-    const { service: service2, publisher: publisher2 } = makeService({ client: connectedClient });
+    const { service: service2, publisher: publisher2 } = makeService({
+      client: connectedClient,
+    });
 
-    await service2.update(makeContext(), connectedClient.id, { managedTenantId: null });
+    await service2.update(makeContext(), connectedClient.id, {
+      managedTenantId: null,
+    });
     expect(publisher2.publishManagedTenantDisconnected).toHaveBeenCalledWith(
       expect.objectContaining({ previousManagedTenantId: 'managed-tenant-1' }),
     );
   });
 
   it('publishes onboarding_started and onboarding_completed on lifecycle stage transitions', async () => {
-    const client = makeClient({ lifecycleStage: AgencyClientLifecycleStage.Active });
+    const client = makeClient({
+      lifecycleStage: AgencyClientLifecycleStage.Active,
+    });
     const { service, publisher } = makeService({ client });
 
     await service.update(makeContext(), client.id, {
@@ -98,8 +120,12 @@ describe('ClientsService notification triggers', () => {
     expect(publisher.publishOnboardingStarted).toHaveBeenCalledTimes(1);
 
     jest.clearAllMocks();
-    const onboardingClient = makeClient({ lifecycleStage: AgencyClientLifecycleStage.Onboarding });
-    const { service: service2, publisher: publisher2 } = makeService({ client: onboardingClient });
+    const onboardingClient = makeClient({
+      lifecycleStage: AgencyClientLifecycleStage.Onboarding,
+    });
+    const { service: service2, publisher: publisher2 } = makeService({
+      client: onboardingClient,
+    });
 
     await service2.update(makeContext(), onboardingClient.id, {
       lifecycleStage: AgencyClientLifecycleStage.Active,
@@ -108,10 +134,14 @@ describe('ClientsService notification triggers', () => {
   });
 
   it('does not publish lifecycle events when the lifecycle stage is unchanged', async () => {
-    const client = makeClient({ lifecycleStage: AgencyClientLifecycleStage.Active });
+    const client = makeClient({
+      lifecycleStage: AgencyClientLifecycleStage.Active,
+    });
     const { service, publisher } = makeService({ client });
 
-    await service.update(makeContext(), client.id, { displayName: 'Updated name' });
+    await service.update(makeContext(), client.id, {
+      displayName: 'Updated name',
+    });
 
     expect(publisher.publishOnboardingStarted).not.toHaveBeenCalled();
     expect(publisher.publishOnboardingCompleted).not.toHaveBeenCalled();
@@ -131,7 +161,10 @@ function makeService(options: { client?: AgencyClient } = {}) {
 
   const clientsRepository = {
     findOne: jest.fn().mockResolvedValue(client),
-    create: jest.fn((value: Partial<AgencyClient>) => ({ ...client, ...value })),
+    create: jest.fn((value: Partial<AgencyClient>) => ({
+      ...client,
+      ...value,
+    })),
     save: jest.fn(async (value: AgencyClient) => value),
   };
 
@@ -151,6 +184,12 @@ function makeService(options: { client?: AgencyClient } = {}) {
     syncAll: jest.fn(),
   };
 
+  Object.assign(clientsRepository, {
+    manager: {
+      transaction: (work: (manager: unknown) => Promise<unknown>) =>
+        work({ getRepository: () => clientsRepository }),
+    },
+  });
   const service = new ClientsService(
     clientsRepository as unknown as Repository<AgencyClient>,
     {} as Repository<ClientLifecycleProcess>,
@@ -161,6 +200,11 @@ function makeService(options: { client?: AgencyClient } = {}) {
     {} as ClientsProfitabilityService,
     publisher,
     clientCostCenterService as unknown as ClientCostCenterService,
+    { onClientArchived: jest.fn() } as never,
+    {
+      pendingForClients: jest.fn().mockResolvedValue(new Set()),
+      apply: jest.fn(),
+    } as never,
   );
 
   return { service, publisher, clientsRepository, clientCostCenterService };

@@ -5,7 +5,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { IsNull, Repository } from 'typeorm';
 import { isActiveProductEntitlement } from '../../../common/context/product-entitlement-availability';
 import { AgencyWorkspaceCompanySettingsEntity } from '../../agency/entities/agency-settings.entities';
 import { AgencyUserProfileEntity } from '../../agency/entities/agency-settings.entities';
@@ -15,6 +15,11 @@ import { AgencyClientCompanyContext } from '../../clients/entities/agency-client
 import { ContactEntity } from '../../contacts/entities/contact.entity';
 import { TenantProductEntitlementEntity } from '../../platform/entities/tenant-product-entitlement.entity';
 import { PlatformProductKey } from '../../platform/enums/platform-product.enums';
+import {
+  isActiveClient,
+  isActiveCompany,
+  isAvailableOrganization,
+} from '../client-area-availability';
 import { isClientAreaEnabled } from '../client-area.config';
 import {
   type PatchClientAreaCompanySettingsDto,
@@ -252,7 +257,8 @@ export class ClientAreaManagementService {
       !isClientAreaEnabled(this.config) ||
       !settings?.enabled ||
       !companySettings?.enabled ||
-      !client?.managedTenantId
+      !isActiveClient(client) ||
+      !client.managedTenantId
     )
       return EMPTY_MODULES;
     const entitlement = await this.entitlementsRepo.findOne({
@@ -331,23 +337,42 @@ export class ClientAreaManagementService {
     companyContextId: string,
     dto: PatchClientAreaCompanySettingsDto,
   ) {
-    const current = await this.getCompanySettings(
-      tenantId,
-      workspaceId,
-      agencyClientId,
-      companyContextId,
-    );
-    await this.companySettingsRepo.upsert(
-      {
-        ...current,
-        ...dto,
+    await this.companySettingsRepo.manager.transaction(async (manager) => {
+      // Serialize switches with removal and invitations. In particular, an
+      // approvals-only PATCH must not resurrect enabled=true from a stale row.
+      const company = await manager
+        .getRepository(AgencyClientCompanyContext)
+        .findOne({
+          where: {
+            id: companyContextId,
+            tenantId,
+            workspaceId,
+            agencyClientId,
+          },
+          lock: { mode: 'pessimistic_write' },
+        });
+      if (!company) throw new NotFoundException('Company is not available.');
+      const current = await this.getCompanySettings(
         tenantId,
         workspaceId,
         agencyClientId,
         companyContextId,
-      },
-      ['companyContextId'],
-    );
+      );
+      const settingsRepository = manager.getRepository(
+        ClientAreaCompanySettingsEntity,
+      );
+      await settingsRepository.upsert(
+        {
+          ...current,
+          ...dto,
+          tenantId,
+          workspaceId,
+          agencyClientId,
+          companyContextId,
+        },
+        ['companyContextId'],
+      );
+    });
     return this.getCompanySettings(
       tenantId,
       workspaceId,
@@ -402,60 +427,29 @@ export class ClientAreaManagementService {
   }
 
   async overview(tenantId: string, workspaceId: string) {
-    const contexts = await this.contextsRepo.find({
-      where: { tenantId, workspaceId, status: 'active' },
-    });
-    const ids = contexts.map((context) => context.id);
-    const [settings, configured, memberships, invitations]: [
-      ClientAreaSettingsEntity,
-      ClientAreaCompanySettingsEntity[],
-      ClientAreaMembershipEntity[],
-      ClientAreaInvitationEntity[],
-    ] = await Promise.all([
+    const [settings, companies] = await Promise.all([
       this.getSettings(tenantId, workspaceId),
-      ids.length
-        ? this.companySettingsRepo.find({
-            where: ids.map((companyContextId) => ({
-              tenantId,
-              workspaceId,
-              companyContextId,
-            })),
-          })
-        : [],
-      ids.length
-        ? this.membershipsRepo.find({
-            where: ids.map((companyContextId) => ({
-              tenantId,
-              workspaceId,
-              companyContextId,
-              status: 'active',
-            })),
-          })
-        : [],
-      ids.length
-        ? this.invitationsRepo.find({
-            where: ids.map((companyContextId) => ({
-              tenantId,
-              workspaceId,
-              companyContextId,
-              status: 'pending',
-            })),
-          })
-        : [],
+      this.listCompanies(tenantId, workspaceId),
     ]);
-    const enabled = configured.filter((item) => item.enabled);
+    const enabled = companies.filter((company) => company.enabled);
     return {
       platformEnabled: isClientAreaEnabled(this.config),
       settings,
       metrics: {
         enabledCompanies: enabled.length,
-        activeUsers: memberships.length,
-        pendingInvites: invitations.length,
+        activeUsers: companies.reduce(
+          (sum, company) => sum + company.membersCount,
+          0,
+        ),
+        pendingInvites: companies.reduce(
+          (sum, company) => sum + company.pendingInvites,
+          0,
+        ),
         approvalsEnabledCompanies: enabled.filter(
-          (item) => item.approvalsEnabled,
+          (company) => company.approvalsEnabled,
         ).length,
         conversationsEnabledCompanies: enabled.filter(
-          (item) => item.conversationsEnabled,
+          (company) => company.conversationsEnabled,
         ).length,
       },
     };
@@ -463,7 +457,7 @@ export class ClientAreaManagementService {
 
   async listCompanies(tenantId: string, workspaceId: string) {
     const contexts = await this.contextsRepo.find({
-      where: { tenantId, workspaceId, status: 'active' },
+      where: { tenantId, workspaceId, status: 'active', archivedAt: IsNull() },
     });
     const clientIds = [...new Set(contexts.map((c) => c.agencyClientId))];
     const contactIds = [...new Set(contexts.map((c) => c.companyContactId))];
@@ -502,6 +496,15 @@ export class ClientAreaManagementService {
       contacts.map((item) => [item.id, item] as [string, ContactEntity]),
     );
     return contexts
+      .filter((context) => {
+        const organization = contactBy.get(context.companyContactId);
+        return (
+          isActiveCompany(context) &&
+          isActiveClient(clientBy.get(context.agencyClientId)) &&
+          isAvailableOrganization(organization) &&
+          organization.status === 'active'
+        );
+      })
       .map((context) => {
         const config = configBy.get(context.id);
         const contact = contactBy.get(context.companyContactId);
@@ -763,7 +766,22 @@ export class ClientAreaManagementService {
         status: 'active',
       },
     });
-    if (!context) throw new NotFoundException('Company is not available.');
+    if (!isActiveCompany(context))
+      throw new NotFoundException('Company is not available.');
+    const [client, organization] = await Promise.all([
+      this.clientsRepo.findOne({
+        where: { id: agencyClientId, tenantId, workspaceId },
+      }),
+      this.contactsRepo.findOne({
+        where: { id: context.companyContactId, tenantId, workspaceId },
+      }),
+    ]);
+    if (
+      !isActiveClient(client) ||
+      !isAvailableOrganization(organization) ||
+      organization.status !== 'active'
+    )
+      throw new NotFoundException('Company is not available.');
     return context;
   }
 }

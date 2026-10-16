@@ -7,8 +7,12 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { AgencyClient } from '../../clients/entities/agency-client.entity';
 import { AgencyClientCompanyContext } from '../../clients/entities/agency-client-company-context.entity';
-import { AgencyClientStatus } from '../../clients/enums';
 import { ContactEntity } from '../../contacts/entities/contact.entity';
+import {
+  isActiveClient,
+  isActiveCompany,
+  isAvailableOrganization,
+} from '../client-area-availability';
 import { permissionsForClientAreaRole } from '../client-area-permissions.catalog';
 import {
   CLIENT_AREA_ERROR_CODES,
@@ -181,7 +185,7 @@ export class ClientAreaAuthorizationService {
       },
     });
 
-    if (!company || company.status !== 'active' || company.archivedAt) {
+    if (!isActiveCompany(company)) {
       return null;
     }
 
@@ -194,14 +198,7 @@ export class ClientAreaAuthorizationService {
       }),
     ]);
 
-    if (
-      !organization ||
-      organization.type !== 'organization' ||
-      organization.status === 'archived' ||
-      !client ||
-      client.status !== AgencyClientStatus.Active ||
-      client.archivedAt
-    ) {
+    if (!isAvailableOrganization(organization) || !isActiveClient(client)) {
       return null;
     }
 

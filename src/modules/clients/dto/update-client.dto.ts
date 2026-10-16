@@ -1,4 +1,7 @@
 import {
+  ArrayMaxSize,
+  ArrayUnique,
+  IsArray,
   IsDateString,
   IsEnum,
   IsObject,
@@ -14,6 +17,13 @@ import {
 } from '../enums';
 
 export class UpdateClientDto {
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(100)
+  @ArrayUnique()
+  @IsUUID('all', { each: true })
+  companyContactIds?: string[];
+
   @IsOptional()
   @IsUUID()
   contactId?: string | null;

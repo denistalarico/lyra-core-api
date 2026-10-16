@@ -10,7 +10,10 @@ import type {
   ClientAreaRole,
 } from '../client-area.types';
 
-export type ClientAreaMemberEventActorSurface = 'agency' | 'client_area';
+export type ClientAreaMemberEventActorSurface =
+  | 'agency'
+  | 'client_area'
+  | 'system';
 
 /**
  * CA2 — append-only audit trail of Client Area invitations and memberships
@@ -18,8 +21,8 @@ export type ClientAreaMemberEventActorSurface = 'agency' | 'client_area';
  * for which company, and when). The service only inserts.
  *
  * `actor_user_id` is the Agency operator for management actions and the
- * client person for `invitation_accepted`; it is NULL only for
- * `invitation_acceptance_blocked`, which records a refused acceptance before
+ * client person for `invitation_accepted`; it is NULL for system revocations
+ * (CA5) and `invitation_acceptance_blocked`, a refused acceptance before
  * anyone authenticated.
  */
 @Entity('client_area_member_events')

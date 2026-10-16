@@ -98,12 +98,16 @@ describe('CA3.1 ClientAreaManagementService preview', () => {
         tenantId: TENANT,
         workspaceId: WORKSPACE,
         managedTenantId: 'managed-tenant-1',
+        status: 'active',
       }),
     };
     const contactsRepo = {
-      findOne: jest
-        .fn()
-        .mockResolvedValue({ id: 'contact-1', displayName: 'Empresa Cliente' }),
+      findOne: jest.fn().mockResolvedValue({
+        id: 'contact-1',
+        displayName: 'Empresa Cliente',
+        type: 'organization',
+        status: 'active',
+      }),
     };
     const membershipsRepo = {
       findOne: jest.fn().mockResolvedValue(membership),

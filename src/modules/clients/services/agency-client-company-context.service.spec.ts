@@ -269,6 +269,7 @@ function makeFixture() {
     contextsRepository,
     contactsRepository,
     {} as Repository<ContactCompanyLinkEntity>,
+    { onCompanyContextArchived: jest.fn() } as never,
   );
 
   return { service, contexts, contacts };

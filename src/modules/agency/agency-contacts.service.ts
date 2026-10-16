@@ -6,7 +6,13 @@ import {
   Optional,
 } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
-import { DataSource, In, QueryFailedError, Repository } from 'typeorm';
+import {
+  DataSource,
+  type EntityManager,
+  In,
+  QueryFailedError,
+  Repository,
+} from 'typeorm';
 import { FilesService } from '../../common/files/files.service';
 import { ContactEntity } from '../contacts/entities/contact.entity';
 import { ContactListEntity } from '../contacts/entities/contact-list.entity';
@@ -439,10 +445,16 @@ export class AgencyContactsService {
     };
   }
 
-  private async findContactOrFail(ctx: RequestContext, contactId: string) {
+  private async findContactOrFail(
+    ctx: RequestContext,
+    contactId: string,
+    manager?: EntityManager,
+  ) {
     const workspaceId = this.requireWorkspaceId(ctx);
 
-    const contact = await this.contactsRepo.findOne({
+    const contact = await (
+      manager?.getRepository(ContactEntity) ?? this.contactsRepo
+    ).findOne({
       where: {
         id: contactId,
         tenantId: ctx.tenantId,
@@ -465,14 +477,15 @@ export class AgencyContactsService {
     ctx: RequestContext,
     personContactId: string,
     companyContactId: string,
+    manager?: EntityManager,
   ) {
     if (personContactId === companyContactId) {
       throw new BadRequestException('A contact cannot be its own company.');
     }
 
     const [person, company] = await Promise.all([
-      this.findContactOrFail(ctx, personContactId),
-      this.findContactOrFail(ctx, companyContactId),
+      this.findContactOrFail(ctx, personContactId, manager),
+      this.findContactOrFail(ctx, companyContactId, manager),
     ]);
     if (person.type !== 'person') {
       throw new BadRequestException(
@@ -2380,10 +2393,14 @@ export class AgencyContactsService {
   private async syncPrimaryCompany(
     ctx: RequestContext,
     personContactId: string,
+    manager?: EntityManager,
   ) {
     const workspaceId = this.requireWorkspaceId(ctx);
+    const links =
+      manager?.getRepository(ContactCompanyLinkEntity) ?? this.companyLinksRepo;
+    const contacts = manager?.getRepository(ContactEntity) ?? this.contactsRepo;
 
-    const remainingLinks = await this.companyLinksRepo.find({
+    const remainingLinks = await links.find({
       where: {
         tenantId: ctx.tenantId,
         workspaceId,
@@ -2398,10 +2415,10 @@ export class AgencyContactsService {
       !remainingLinks.some((link) => link.isPrimary)
     ) {
       remainingLinks[0].isPrimary = true;
-      await this.companyLinksRepo.save(remainingLinks[0]);
+      await links.save(remainingLinks[0]);
     }
 
-    await this.contactsRepo.update(
+    await contacts.update(
       { id: personContactId, tenantId: ctx.tenantId, workspaceId },
       { companyContactId: remainingLinks[0]?.companyContactId ?? null },
     );
@@ -2412,11 +2429,19 @@ export class AgencyContactsService {
     personContactId: string,
     companyContactId: string,
     dto: UpdateContactCompanyLinkDto = {},
+    manager?: EntityManager,
   ) {
     const workspaceId = this.requireWorkspaceId(ctx);
-    await this.assertPersonCompanyPair(ctx, personContactId, companyContactId);
+    const links =
+      manager?.getRepository(ContactCompanyLinkEntity) ?? this.companyLinksRepo;
+    await this.assertPersonCompanyPair(
+      ctx,
+      personContactId,
+      companyContactId,
+      manager,
+    );
 
-    const existing = await this.companyLinksRepo.findOne({
+    const existing = await links.findOne({
       where: {
         tenantId: ctx.tenantId,
         workspaceId,
@@ -2429,7 +2454,7 @@ export class AgencyContactsService {
       throw new ConflictException('This person/company link already exists.');
     }
 
-    const activeLinks = await this.companyLinksRepo.find({
+    const activeLinks = await links.find({
       where: {
         tenantId: ctx.tenantId,
         workspaceId,
@@ -2442,7 +2467,7 @@ export class AgencyContactsService {
       nextStatus === 'active' &&
       (activeLinks.length === 0 || dto.isPrimary === true);
     if (isPrimary && activeLinks.length > 0) {
-      await this.companyLinksRepo.update(
+      await links.update(
         {
           tenantId: ctx.tenantId,
           workspaceId,
@@ -2453,7 +2478,7 @@ export class AgencyContactsService {
       );
     }
 
-    const saved = await this.companyLinksRepo.save(
+    const saved = await links.save(
       existing
         ? Object.assign(existing, {
             role: dto.role ?? existing.role,
@@ -2462,7 +2487,7 @@ export class AgencyContactsService {
             linkedAt: new Date(),
             unlinkedAt: nextStatus === 'active' ? null : new Date(),
           })
-        : this.companyLinksRepo.create({
+        : links.create({
             tenantId: ctx.tenantId,
             workspaceId,
             personContactId,
@@ -2475,7 +2500,7 @@ export class AgencyContactsService {
           }),
     );
 
-    await this.syncPrimaryCompany(ctx, personContactId);
+    await this.syncPrimaryCompany(ctx, personContactId, manager);
     return saved;
   }
 

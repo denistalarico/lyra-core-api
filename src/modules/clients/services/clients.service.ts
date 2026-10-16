@@ -6,10 +6,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Brackets, In, IsNull, Repository } from 'typeorm';
 import { isActiveProductEntitlement } from '../../../common/context/product-entitlement-availability';
-import {
-  AgencyActivity,
-  AgencyActivityLink,
-} from '../../activities/entities';
+import { AgencyActivity, AgencyActivityLink } from '../../activities/entities';
 import { ActivityEntityType, ActivityStatus } from '../../activities/enums';
 import { AgencyProject, AgencyTask } from '../../projects/entities';
 import { ProjectStatus, TaskStatus } from '../../projects/enums';
@@ -25,6 +22,8 @@ import {
   AgencyClientStatus,
   ClientLifecycleProcessStatus,
 } from '../enums';
+import { AgencyClientLifecycleHooks } from '../agency-client-lifecycle-hooks';
+import { ClientCompanySetupService } from './client-company-setup.service';
 import { ClientCostCenterService } from './client-cost-center.service';
 import { ClientNotificationPublisher } from './client-notification.publisher';
 import { ClientsProfitabilityService } from './clients-profitability.service';
@@ -80,6 +79,8 @@ export class ClientsService {
     private readonly clientsProfitabilityService: ClientsProfitabilityService,
     private readonly clientNotificationPublisher: ClientNotificationPublisher,
     private readonly clientCostCenterService: ClientCostCenterService,
+    private readonly lifecycleHooks: AgencyClientLifecycleHooks,
+    private readonly companySetup: ClientCompanySetupService,
   ) {}
 
   async list(context: RequestContext, query: ListClientsQueryDto) {
@@ -176,11 +177,14 @@ export class ClientsService {
       processesByClient.set(process.clientId, clientProcesses);
     }
 
+    const pending = await this.companySetup.pendingForClients(items);
     return {
       items: items.map((client) => ({
         ...client,
+        companySetupPending: pending.has(client.id),
         productsProvisioned: Boolean(client.managedTenantId),
-        products: productsByClientId.get(client.id) ?? this.emptyProductSummaries(),
+        products:
+          productsByClientId.get(client.id) ?? this.emptyProductSummaries(),
         activeLifecycleProcesses: processesByClient.get(client.id) ?? [],
       })),
       total,
@@ -290,7 +294,18 @@ export class ClientsService {
       archivedAt: null,
     });
 
-    const saved = await this.clientsRepository.save(client);
+    const saved = await this.clientsRepository.manager.transaction(
+      async (manager) => {
+        const saved = await manager.getRepository(AgencyClient).save(client);
+        await this.companySetup.apply(
+          manager,
+          saved,
+          dto.companyContactIds,
+          context.userId,
+        );
+        return saved;
+      },
+    );
 
     // Auto-provision a dedicated cost center so quotes/invoices using the
     // `use_client_cost_center` strategy can resolve it. Best-effort and
@@ -304,7 +319,7 @@ export class ClientsService {
       });
     }
 
-    return saved;
+    return this.projectCompanySetup(saved);
   }
 
   async ensureCostCenter(context: RequestContext, clientId: string) {
@@ -347,8 +362,12 @@ export class ClientsService {
 
     return {
       ...client,
+      companySetupPending: (
+        await this.companySetup.pendingForClients([client])
+      ).has(client.id),
       productsProvisioned: Boolean(client.managedTenantId),
-      products: productsByClientId.get(client.id) ?? this.emptyProductSummaries(),
+      products:
+        productsByClientId.get(client.id) ?? this.emptyProductSummaries(),
     };
   }
 
@@ -407,8 +426,15 @@ export class ClientsService {
     return this.toProductSummary(manageableProductKey, saved);
   }
 
-  async update(context: RequestContext, clientId: string, dto: UpdateClientDto) {
+  async update(
+    context: RequestContext,
+    clientId: string,
+    dto: UpdateClientDto,
+  ) {
     const client = await this.findOne(context, clientId);
+    const previousStatus = client.status;
+    const contactChanged =
+      dto.contactId !== undefined && dto.contactId !== client.contactId;
     const previousOwnerId = client.accountOwnerId;
     const previousManagedTenantId = client.managedTenantId;
     const previousLifecycleStage = client.lifecycleStage;
@@ -417,11 +443,14 @@ export class ClientsService {
     if (dto.displayName !== undefined) client.displayName = dto.displayName;
     if (dto.legalName !== undefined) client.legalName = dto.legalName;
     if (dto.status !== undefined) client.status = dto.status;
-    if (dto.lifecycleStage !== undefined) client.lifecycleStage = dto.lifecycleStage;
+    if (dto.lifecycleStage !== undefined)
+      client.lifecycleStage = dto.lifecycleStage;
     if (dto.healthStatus !== undefined) client.healthStatus = dto.healthStatus;
     if (dto.segment !== undefined) client.segment = dto.segment;
-    if (dto.accountOwnerId !== undefined) client.accountOwnerId = dto.accountOwnerId;
-    if (dto.managedTenantId !== undefined) client.managedTenantId = dto.managedTenantId;
+    if (dto.accountOwnerId !== undefined)
+      client.accountOwnerId = dto.accountOwnerId;
+    if (dto.managedTenantId !== undefined)
+      client.managedTenantId = dto.managedTenantId;
     if (dto.startDate !== undefined) client.startDate = dto.startDate;
     if (dto.endDate !== undefined) client.endDate = dto.endDate;
     if (dto.notes !== undefined) client.notes = dto.notes;
@@ -431,7 +460,33 @@ export class ClientsService {
       client.archivedAt = new Date();
     }
 
-    const saved = await this.clientsRepository.save(client);
+    const saved = contactChanged
+      ? await this.clientsRepository.manager.transaction(async (manager) => {
+          // Serialize company setup with explicit company changes.
+          await manager.getRepository(AgencyClient).findOneOrFail({
+            where: { id: client.id },
+            lock: { mode: 'pessimistic_write' },
+          });
+          const saved = await manager.getRepository(AgencyClient).save(client);
+          await this.companySetup.apply(
+            manager,
+            saved,
+            dto.companyContactIds,
+            context.userId,
+          );
+          return saved;
+        })
+      : await this.clientsRepository.save(client);
+    if (
+      previousStatus !== AgencyClientStatus.Archived &&
+      saved.status === AgencyClientStatus.Archived
+    ) {
+      await this.lifecycleHooks.onClientArchived({
+        ...context,
+        agencyClientId: saved.id,
+        actorUserId: context.userId,
+      });
+    }
     const actorUserId = context.userId;
 
     if (saved.accountOwnerId && saved.accountOwnerId !== previousOwnerId) {
@@ -456,11 +511,13 @@ export class ClientsService {
           actorUserId,
         });
       } else if (previousManagedTenantId && !saved.managedTenantId) {
-        await this.clientNotificationPublisher.publishManagedTenantDisconnected({
-          client: saved,
-          actorUserId,
-          previousManagedTenantId,
-        });
+        await this.clientNotificationPublisher.publishManagedTenantDisconnected(
+          {
+            client: saved,
+            actorUserId,
+            previousManagedTenantId,
+          },
+        );
       }
     }
 
@@ -470,7 +527,9 @@ export class ClientsService {
           client: saved,
           actorUserId,
         });
-      } else if (previousLifecycleStage === AgencyClientLifecycleStage.Onboarding) {
+      } else if (
+        previousLifecycleStage === AgencyClientLifecycleStage.Onboarding
+      ) {
         await this.clientNotificationPublisher.publishOnboardingCompleted({
           client: saved,
           actorUserId,
@@ -478,16 +537,26 @@ export class ClientsService {
       }
     }
 
-    return saved;
+    return this.projectCompanySetup(saved);
   }
 
   async archive(context: RequestContext, clientId: string) {
-    const client = await this.findOne(context, clientId);
+    return this.archiveEffective(context, clientId);
+  }
 
+  /** CA6 must call this when scheduled archival becomes effective. No access
+   * restoration counterpart: unarchive only restores the commercial client. */
+  async archiveEffective(context: RequestContext, clientId: string) {
+    const client = await this.findAny(context, clientId);
     client.status = AgencyClientStatus.Archived;
-    client.archivedAt = new Date();
-
-    return this.clientsRepository.save(client);
+    client.archivedAt = client.archivedAt ?? new Date();
+    const saved = await this.clientsRepository.save(client);
+    await this.lifecycleHooks.onClientArchived({
+      ...context,
+      agencyClientId: saved.id,
+      actorUserId: context.userId,
+    });
+    return saved;
   }
 
   async unarchive(context: RequestContext, clientId: string) {
@@ -497,6 +566,15 @@ export class ClientsService {
       return client;
     }
 
+    await this.lifecycleHooks.onClientArchived(
+      {
+        tenantId: context.tenantId,
+        workspaceId: context.workspaceId,
+        agencyClientId: client.id,
+        actorUserId: context.userId,
+      },
+      true,
+    );
     client.status = AgencyClientStatus.Active;
     client.archivedAt = null;
 
@@ -515,6 +593,15 @@ export class ClientsService {
     await this.clientsRepository.remove(client);
 
     return { deleted: true };
+  }
+
+  private async projectCompanySetup(client: AgencyClient) {
+    return {
+      ...client,
+      companySetupPending: (
+        await this.companySetup.pendingForClients([client])
+      ).has(client.id),
+    };
   }
 
   private async findAny(context: RequestContext, clientId: string) {
@@ -571,14 +658,15 @@ export class ClientsService {
       ),
     );
 
-    const entitlements = managedTenantIds.length > 0
-      ? await this.entitlementsRepository.find({
-          where: {
-            tenantId: In(managedTenantIds),
-            productKey: In([...MANAGEABLE_CLIENT_PRODUCTS]),
-          },
-        })
-      : [];
+    const entitlements =
+      managedTenantIds.length > 0
+        ? await this.entitlementsRepository.find({
+            where: {
+              tenantId: In(managedTenantIds),
+              productKey: In([...MANAGEABLE_CLIENT_PRODUCTS]),
+            },
+          })
+        : [];
 
     const entitlementByTenantAndProduct = new Map(
       entitlements.map((entitlement) => [
@@ -594,9 +682,9 @@ export class ClientsService {
           this.toProductSummary(
             productKey,
             client.managedTenantId
-              ? entitlementByTenantAndProduct.get(
+              ? (entitlementByTenantAndProduct.get(
                   `${client.managedTenantId}:${productKey}`,
-                ) ?? null
+                ) ?? null)
               : null,
           ),
         ),
@@ -625,8 +713,12 @@ export class ClientsService {
     };
   }
 
-  private assertManageableProductKey(productKey: string): ManageableClientProductKey {
-    if (!(MANAGEABLE_CLIENT_PRODUCTS as readonly string[]).includes(productKey)) {
+  private assertManageableProductKey(
+    productKey: string,
+  ): ManageableClientProductKey {
+    if (
+      !(MANAGEABLE_CLIENT_PRODUCTS as readonly string[]).includes(productKey)
+    ) {
       throw new BadRequestException('Unsupported managed client product');
     }
     return productKey as ManageableClientProductKey;
@@ -670,46 +762,51 @@ export class ClientsService {
       ? { clientId, projectIds }
       : { clientId };
 
-    const [activeProjects, openTasks, overdueTasks, openActivities, overdueActivities] =
-      await Promise.all([
-        this.projectsRepository.count({
-          where: {
-            tenantId: context.tenantId,
-            workspaceId: context.workspaceId,
-            clientId,
-            status: ProjectStatus.Active,
-            archivedAt: IsNull(),
-          },
-        }),
-        this.tasksRepository
-          .createQueryBuilder('task')
-          .where('task.tenant_id = :tenantId', { tenantId: context.tenantId })
-          .andWhere('task.workspace_id = :workspaceId', {
-            workspaceId: context.workspaceId,
-          })
-          .andWhere(taskScopeWhere, taskScopeParams)
-          .andWhere('task.archived_at IS NULL')
-          .andWhere('task.status IN (:...statuses)', {
-            statuses: openTaskStatuses,
-          })
-          .getCount(),
-        this.tasksRepository
-          .createQueryBuilder('task')
-          .where('task.tenant_id = :tenantId', { tenantId: context.tenantId })
-          .andWhere('task.workspace_id = :workspaceId', {
-            workspaceId: context.workspaceId,
-          })
-          .andWhere(taskScopeWhere, taskScopeParams)
-          .andWhere('task.archived_at IS NULL')
-          .andWhere('task.due_date IS NOT NULL')
-          .andWhere('task.due_date < :now', { now })
-          .andWhere('task.status IN (:...statuses)', {
-            statuses: openTaskStatuses,
-          })
-          .getCount(),
-        this.countClientActivities(context, clientId, openActivityStatuses),
-        this.countClientActivities(context, clientId, openActivityStatuses, now),
-      ]);
+    const [
+      activeProjects,
+      openTasks,
+      overdueTasks,
+      openActivities,
+      overdueActivities,
+    ] = await Promise.all([
+      this.projectsRepository.count({
+        where: {
+          tenantId: context.tenantId,
+          workspaceId: context.workspaceId,
+          clientId,
+          status: ProjectStatus.Active,
+          archivedAt: IsNull(),
+        },
+      }),
+      this.tasksRepository
+        .createQueryBuilder('task')
+        .where('task.tenant_id = :tenantId', { tenantId: context.tenantId })
+        .andWhere('task.workspace_id = :workspaceId', {
+          workspaceId: context.workspaceId,
+        })
+        .andWhere(taskScopeWhere, taskScopeParams)
+        .andWhere('task.archived_at IS NULL')
+        .andWhere('task.status IN (:...statuses)', {
+          statuses: openTaskStatuses,
+        })
+        .getCount(),
+      this.tasksRepository
+        .createQueryBuilder('task')
+        .where('task.tenant_id = :tenantId', { tenantId: context.tenantId })
+        .andWhere('task.workspace_id = :workspaceId', {
+          workspaceId: context.workspaceId,
+        })
+        .andWhere(taskScopeWhere, taskScopeParams)
+        .andWhere('task.archived_at IS NULL')
+        .andWhere('task.due_date IS NOT NULL')
+        .andWhere('task.due_date < :now', { now })
+        .andWhere('task.status IN (:...statuses)', {
+          statuses: openTaskStatuses,
+        })
+        .getCount(),
+      this.countClientActivities(context, clientId, openActivityStatuses),
+      this.countClientActivities(context, clientId, openActivityStatuses, now),
+    ]);
 
     return {
       activeProjects,

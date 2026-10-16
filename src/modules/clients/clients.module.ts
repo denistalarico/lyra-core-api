@@ -1,3 +1,6 @@
+import { AgencyContactsModule } from '../agency/agency-contacts.module';
+import { AgencyClientLifecycleHooks } from './agency-client-lifecycle-hooks';
+import { ClientCompanySetupService } from './services/client-company-setup.service';
 import { ContractRecord, ContractDefaults } from '../contracts/entities';
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
@@ -35,6 +38,7 @@ const AGENCY_CONNECTION = 'agency';
 
 @Module({
   imports: [
+    AgencyContactsModule,
     FinanceModule,
     NotificationsModule,
     PermissionsModule,
@@ -68,6 +72,8 @@ const AGENCY_CONNECTION = 'agency';
     ClientLifecycleController,
   ],
   providers: [
+    AgencyClientLifecycleHooks,
+    ClientCompanySetupService,
     ClientsService,
     AgencyClientCompanyContextService,
     CompanyLegacyReconciliationService,
@@ -77,6 +83,7 @@ const AGENCY_CONNECTION = 'agency';
     ClientCostCenterService,
   ],
   exports: [
+    AgencyClientLifecycleHooks,
     ClientsService,
     ClientsProfitabilityService,
     ClientCostCenterService,

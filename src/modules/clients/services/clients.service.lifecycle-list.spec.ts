@@ -65,6 +65,11 @@ describe('ClientsService lifecycle list status', () => {
       {} as ClientsProfitabilityService,
       {} as ClientNotificationPublisher,
       {} as ClientCostCenterService,
+      { onClientArchived: jest.fn() } as never,
+      {
+        pendingForClients: jest.fn().mockResolvedValue(new Set()),
+        apply: jest.fn(),
+      } as never,
     );
 
     const result = await service.list(

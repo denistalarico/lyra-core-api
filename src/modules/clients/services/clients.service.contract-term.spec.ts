@@ -20,6 +20,11 @@ it('overview exposes backend term without modifying financial health or counters
     profitability as unknown as ClientsProfitabilityService,
     {} as never,
     { findLinkedCostCenter: jest.fn().mockResolvedValue(null) } as never,
+    { onClientArchived: jest.fn() } as never,
+    {
+      pendingForClients: jest.fn().mockResolvedValue(new Set()),
+      apply: jest.fn(),
+    } as never,
   );
   jest
     .spyOn(service, 'findOneWithProducts')

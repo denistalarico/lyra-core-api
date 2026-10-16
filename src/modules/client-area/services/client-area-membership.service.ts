@@ -263,52 +263,67 @@ export class ClientAreaMembershipService {
         );
       }
 
-      const revokedAt = new Date();
-      await repo.update(
-        { id: membership.id, tenantId: membership.tenantId, status: 'active' },
-        {
-          status: 'revoked',
-          revokedAt,
-          revokedByUserId: input.revokedByUserId,
-        },
-      );
+      return this.revokeInTransaction(manager, membership, input);
+    });
+  }
 
-      const remaining = await repo.exists({
-        where: {
-          tenantId: membership.tenantId,
-          userId: membership.userId,
-          status: 'active',
-        },
-      });
-
-      if (!remaining) {
-        await this.sessions.revokeAll(
-          membership.tenantId,
-          membership.userId,
-          manager,
-        );
-      }
-
-      if (input.revokedByUserId) {
-        await this.audit.record(manager, {
-          company: membership,
-          action: 'membership_revoked',
-          actorSurface: 'agency',
-          actorUserId: input.revokedByUserId,
-          membershipId: membership.id,
-          targetUserId: membership.userId,
-          previousRole: membership.role,
-          metadata: { lastMembership: !remaining },
-        });
-      }
-
-      return {
-        ...membership,
-        status: 'revoked' as const,
+  /** Shared by individual revocation and CA5 company removal. Caller holds
+   * the company/membership locks; identity lock serializes last-membership checks. */
+  async revokeInTransaction(
+    manager: EntityManager,
+    membership: ClientAreaMembershipEntity,
+    input: { revokedByUserId: string | null; reason?: string },
+  ): Promise<ClientAreaMembershipEntity> {
+    await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
+      `client_area_membership_revoke:${membership.tenantId}:${membership.userId}`,
+    ]);
+    const repo = manager.getRepository(ClientAreaMembershipEntity);
+    const revokedAt = new Date();
+    await repo.update(
+      { id: membership.id, tenantId: membership.tenantId, status: 'active' },
+      {
+        status: 'revoked',
         revokedAt,
         revokedByUserId: input.revokedByUserId,
-      };
+      },
+    );
+
+    const remaining = await repo.exists({
+      where: {
+        tenantId: membership.tenantId,
+        userId: membership.userId,
+        status: 'active',
+      },
     });
+
+    if (!remaining) {
+      await this.sessions.revokeAll(
+        membership.tenantId,
+        membership.userId,
+        manager,
+      );
+    }
+
+    await this.audit.record(manager, {
+      company: membership,
+      action: 'membership_revoked',
+      actorSurface: input.revokedByUserId ? 'agency' : 'system',
+      actorUserId: input.revokedByUserId,
+      membershipId: membership.id,
+      targetUserId: membership.userId,
+      previousRole: membership.role,
+      metadata: {
+        lastMembership: !remaining,
+        ...(input.reason ? { reason: input.reason } : {}),
+      },
+    });
+
+    return {
+      ...membership,
+      status: 'revoked' as const,
+      revokedAt,
+      revokedByUserId: input.revokedByUserId,
+    };
   }
 
   /**

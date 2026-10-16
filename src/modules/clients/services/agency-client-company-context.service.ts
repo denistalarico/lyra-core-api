@@ -22,6 +22,7 @@ import {
   UpdateAgencyClientCompanyContextDto,
 } from '../dto';
 import { AgencyClient, AgencyClientCompanyContext } from '../entities';
+import { AgencyClientLifecycleHooks } from '../agency-client-lifecycle-hooks';
 import { AgencyClientStatus } from '../enums';
 
 const AGENCY_CONNECTION = 'agency';
@@ -53,6 +54,7 @@ export class AgencyClientCompanyContextService {
     private readonly contactsRepository: Repository<ContactEntity>,
     @InjectRepository(ContactCompanyLinkEntity, AGENCY_CONNECTION)
     private readonly companyLinksRepository: Repository<ContactCompanyLinkEntity>,
+    private readonly lifecycleHooks: AgencyClientLifecycleHooks,
   ) {}
 
   async list(
@@ -327,7 +329,7 @@ export class AgencyClientCompanyContextService {
     agencyClientId: string,
     contextId: string,
   ): Promise<AgencyClientCompanyProjection> {
-    return this.dataSource.transaction(async (manager) => {
+    const saved = await this.dataSource.transaction(async (manager) => {
       const clients = manager.getRepository(AgencyClient);
       const contexts = manager.getRepository(AgencyClientCompanyContext);
       const contacts = manager.getRepository(ContactEntity);
@@ -354,6 +356,14 @@ export class AgencyClientCompanyContextService {
       );
       return this.project(saved, company);
     });
+    await this.lifecycleHooks.onCompanyContextArchived({
+      tenantId: context.tenantId,
+      workspaceId: context.workspaceId!,
+      agencyClientId,
+      companyContextId: contextId,
+      actorUserId: context.userId ?? null,
+    });
+    return saved;
   }
 
   private async findClientOrFail(

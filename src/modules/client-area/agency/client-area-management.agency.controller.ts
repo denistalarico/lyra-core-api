@@ -24,6 +24,7 @@ import {
   PatchClientAreaSelfSettingsDto,
   PatchClientAreaSettingsDto,
 } from '../dto/client-area-management.dto';
+import { ClientAreaLifecycleService } from '../services/client-area-lifecycle.service';
 import { ClientAreaManagementService } from '../services/client-area-management.service';
 import { ClientAreaSelfAccessService } from '../services/client-area-self-access.service';
 
@@ -38,6 +39,7 @@ export class ClientAreaManagementAgencyController {
   constructor(
     private readonly management: ClientAreaManagementService,
     private readonly selfAccess: ClientAreaSelfAccessService,
+    private readonly lifecycle: ClientAreaLifecycleService,
   ) {}
 
   @Get() overview(@AuthenticatedUser() user: AuthTokenPayload) {
@@ -155,6 +157,24 @@ export class ClientAreaManagementAgencyController {
       companyContextId,
       dto,
     );
+  }
+
+  @Post('clients/:clientId/companies/:companyContextId/remove-access')
+  @RequireClientAccess()
+  @HttpCode(200)
+  removeAccess(
+    @AuthenticatedUser() user: AuthTokenPayload,
+    @Param('clientId') clientId: string,
+    @Param('companyContextId') companyContextId: string,
+  ) {
+    return this.lifecycle.removeCompanyAccess({
+      tenantId: user.tenantId,
+      workspaceId: user.workspaceId,
+      agencyClientId: clientId,
+      companyContextId,
+      actorUserId: user.sub,
+      reason: 'access_removed',
+    });
   }
 
   @Get('clients/:clientId/companies/:companyContextId/preview-targets')

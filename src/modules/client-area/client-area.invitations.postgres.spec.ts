@@ -580,12 +580,13 @@ run(
         expect(mail.html).toContain('Empresa A &lt;b&gt;');
         expect(mail.html).not.toContain('Empresa A <b>');
 
+        // CA5: the first invitation is admin (future owner), even when a lower role is requested.
         const previewed = await preview(token).expect(200);
         expect(bodyOf(previewed).invitation).toEqual({
           companyDisplayName: 'Empresa A <b>',
           email: address.toUpperCase(),
-          role: 'client_operator',
-          roleLabel: 'Operador',
+          role: 'client_admin',
+          roleLabel: 'Administrador',
           expiresAt: expect.any(String) as unknown,
           accountStatus: 'new',
         });
@@ -607,7 +608,7 @@ run(
           {
             companyContextId: A,
             displayName: 'Empresa A <b>',
-            role: 'client_operator',
+            role: 'client_admin',
           },
         ]);
 
@@ -636,7 +637,7 @@ run(
         );
         expect(membership).toMatchObject({
           id: invitation.accepted_membership_id,
-          role: 'client_operator',
+          role: 'client_admin',
           granted_by_user_id: ADMIN,
         });
         const trail = await events('invitation_id = $1', [invitationId]);

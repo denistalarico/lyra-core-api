@@ -1,4 +1,7 @@
-import { Module } from '@nestjs/common';
+import { Module, type OnModuleInit } from '@nestjs/common';
+import { ClientsModule } from '../../clients/clients.module';
+import { AgencyClientLifecycleHooks } from '../../clients/agency-client-lifecycle-hooks';
+import { ClientAreaLifecycleService } from '../services/client-area-lifecycle.service';
 import { PermissionsModule } from '../../permissions';
 import { ClientAreaModule } from '../client-area.module';
 import { ClientAreaMembersAgencyController } from './client-area-members.agency.controller';
@@ -13,7 +16,18 @@ import { ClientAreaManagementAgencyController } from './client-area-management.a
  * Agency controller uses it.
  */
 @Module({
-  imports: [PermissionsModule, ClientAreaModule],
-  controllers: [ClientAreaMembersAgencyController, ClientAreaManagementAgencyController],
+  imports: [PermissionsModule, ClientAreaModule, ClientsModule],
+  controllers: [
+    ClientAreaMembersAgencyController,
+    ClientAreaManagementAgencyController,
+  ],
 })
-export class ClientAreaAgencyModule {}
+export class ClientAreaAgencyModule implements OnModuleInit {
+  constructor(
+    private readonly hooks: AgencyClientLifecycleHooks,
+    private readonly lifecycle: ClientAreaLifecycleService,
+  ) {}
+  onModuleInit() {
+    this.hooks.register(this.lifecycle);
+  }
+}

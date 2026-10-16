@@ -85,6 +85,7 @@ export const CLIENT_AREA_MEMBER_EVENT_ACTIONS = [
   'invitation_acceptance_blocked',
   'role_changed',
   'membership_revoked',
+  'access_removed',
 ] as const;
 export type ClientAreaMemberEventAction =
   (typeof CLIENT_AREA_MEMBER_EVENT_ACTIONS)[number];

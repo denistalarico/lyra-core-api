@@ -1,3 +1,4 @@
+import { DisableClientAreaOnInactiveClients1799500000000 } from './migrations/1799500000000-disable-client-area-on-inactive-clients';
 import { CreateContractAiAssistRuns1799200000000 } from './migrations/1799200000000-create-contract-ai-assist-runs';
 import { AddContractDocumentWebhookSecret1799300000000 } from './migrations/1799300000000-add-contract-document-webhook-secret';
 import { AddContractKindsDefaultsAttachments1799400000000 } from './migrations/1799400000000-add-contract-kinds-defaults-attachments';
@@ -534,5 +535,6 @@ export const AgencyDataSource = new DataSource({
     CreateContractAiAssistRuns1799200000000,
     AddContractDocumentWebhookSecret1799300000000,
     AddContractKindsDefaultsAttachments1799400000000,
+    DisableClientAreaOnInactiveClients1799500000000,
   ],
 });
