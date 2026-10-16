@@ -3,7 +3,10 @@ import { ContractsController } from './contracts.controller';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import { RenewContractDto } from '../dto/renew-contract.dto';
-import { UpdateContractDefaultsDto } from '../dto/update-contract-defaults.dto';
+import {
+  ContractDefaultsQueryDto,
+  UpdateContractDefaultsDto,
+} from '../dto/update-contract-defaults.dto';
 import { CreateContractTermDto } from '../dto/create-contract-term.dto';
 import { UploadContractAttachmentDto } from '../dto/upload-contract-attachment.dto';
 import { UploadManuallySignedContractDto } from '../dto/upload-manually-signed-contract.dto';
@@ -81,14 +84,37 @@ it('permits all E3 payload fields through the production whitelist', async () =>
       }),
     ).toEqual([]);
 });
-it('rejects invalid windows, unsupported targets, excessive percent precision and attachment kinds', async () => {
-  for (const payload of [
-    { targetType: 'team_member', values: {}, presets: {} },
-    { targetType: 'client', values: {}, presets: {}, expiringWindowDays: 181 },
-  ])
+it.each(['client', 'team_member'])(
+  'permits %s contract defaults through the production whitelist',
+  async (targetType) => {
+    const options = { whitelist: true, forbidNonWhitelisted: true };
     expect(
-      await validate(plainToInstance(UpdateContractDefaultsDto, payload)),
-    ).not.toEqual([]);
+      await validate(
+        plainToInstance(ContractDefaultsQueryDto, { targetType }),
+        options,
+      ),
+    ).toEqual([]);
+    expect(
+      await validate(
+        plainToInstance(UpdateContractDefaultsDto, {
+          targetType,
+          values: {},
+          presets: {},
+        }),
+        options,
+      ),
+    ).toEqual([]);
+  },
+);
+it.each([
+  { targetType: 'lead', values: {}, presets: {} },
+  { targetType: 'client', values: {}, presets: {}, expiringWindowDays: 181 },
+])('rejects invalid contract defaults: %j', async (payload) => {
+  expect(
+    await validate(plainToInstance(UpdateContractDefaultsDto, payload)),
+  ).not.toEqual([]);
+});
+it('rejects excessive percent precision and attachment kinds', async () => {
   for (const adjustmentPercent of [-100, 1000.1, 1.12345])
     expect(
       await validate(
