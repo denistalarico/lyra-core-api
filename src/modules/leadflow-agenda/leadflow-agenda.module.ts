@@ -1,3 +1,5 @@
+import { CompanyProductsModule } from '../../common/company-products/company-products.module';
+import { LeadFlowAgendaCompanyProductParticipant } from './leadflow-agenda-company-product.participant';
 import { Module } from '@nestjs/common';
 import { ActivitiesModule } from '../activities';
 import { AppointmentsModule } from '../appointments/appointments.module';
@@ -7,9 +9,18 @@ import { LeadFlowAgendaRolloutService } from './leadflow-agenda-rollout.service'
 import { LeadFlowAgendaService } from './leadflow-agenda.service';
 
 @Module({
-  imports: [AppointmentsModule, ActivitiesModule, PermissionsModule],
+  imports: [
+    CompanyProductsModule,
+    AppointmentsModule,
+    ActivitiesModule,
+    PermissionsModule,
+  ],
   controllers: [LeadFlowAgendaController],
-  providers: [LeadFlowAgendaService, LeadFlowAgendaRolloutService],
+  providers: [
+    LeadFlowAgendaCompanyProductParticipant,
+    LeadFlowAgendaService,
+    LeadFlowAgendaRolloutService,
+  ],
   exports: [LeadFlowAgendaService],
 })
 export class LeadFlowAgendaModule {}

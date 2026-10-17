@@ -43,6 +43,10 @@ function createService() {
     entitlementsRepository as never,
     clientAccessRepository as never,
     clientProductAccessRepository as never,
+    {
+      find: jest.fn().mockResolvedValue([]),
+      findOne: jest.fn().mockResolvedValue(null),
+    } as never,
   );
 
   const service = new PlatformPermissionService(

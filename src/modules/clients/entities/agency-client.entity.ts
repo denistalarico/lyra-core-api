@@ -74,6 +74,20 @@ export class AgencyClient {
   @Column({ name: 'archived_at', type: 'timestamptz', nullable: true })
   archivedAt!: Date | null;
 
+  @Column({ name: 'archive_requested_at', type: 'timestamptz', nullable: true })
+  archiveRequestedAt!: Date | null;
+  @Column({ name: 'archive_requested_by', type: 'uuid', nullable: true })
+  archiveRequestedBy!: string | null;
+  @Column({ name: 'archive_mode', type: 'varchar', length: 30, nullable: true })
+  archiveMode!: 'immediate' | 'after_last_publication' | null;
+  @Column({
+    name: 'archive_status',
+    type: 'varchar',
+    length: 20,
+    default: 'none',
+  })
+  archiveStatus!: 'none' | 'scheduled' | 'blocked';
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt!: Date;
 

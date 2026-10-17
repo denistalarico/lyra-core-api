@@ -1,3 +1,4 @@
+import { AgencyContactsService } from '../../agency/agency-contacts.service';
 import {
   BadRequestException,
   ConflictException,
@@ -55,6 +56,7 @@ export class AgencyClientCompanyContextService {
     @InjectRepository(ContactCompanyLinkEntity, AGENCY_CONNECTION)
     private readonly companyLinksRepository: Repository<ContactCompanyLinkEntity>,
     private readonly lifecycleHooks: AgencyClientLifecycleHooks,
+    private readonly agencyContacts: AgencyContactsService,
   ) {}
 
   async list(
@@ -189,7 +191,12 @@ export class AgencyClientCompanyContextService {
         const contexts = manager.getRepository(AgencyClientCompanyContext);
         const contacts = manager.getRepository(ContactEntity);
 
-        await this.findClientOrFail(clients, context, agencyClientId, true);
+        const client = await this.findClientOrFail(
+          clients,
+          context,
+          agencyClientId,
+          true,
+        );
         const company = await this.findOrganizationOrFail(
           contacts,
           context,
@@ -202,6 +209,42 @@ export class AgencyClientCompanyContextService {
           throw new ConflictException(
             'This company is already linked to the client.',
           );
+        }
+
+        if (client.contactId) {
+          const contact = await contacts.findOne({
+            where: {
+              id: client.contactId,
+              tenantId: context.tenantId,
+              workspaceId: context.workspaceId,
+              status: 'active',
+            },
+            lock: { mode: 'pessimistic_write' },
+          });
+          if (!contact)
+            throw new NotFoundException('Client contact not found.');
+          if (contact.type === 'person') {
+            const linked = await manager
+              .getRepository(ContactCompanyLinkEntity)
+              .findOne({
+                where: {
+                  tenantId: context.tenantId,
+                  workspaceId: context.workspaceId,
+                  personContactId: contact.id,
+                  companyContactId: company.id,
+                  status: 'active',
+                  unlinkedAt: IsNull(),
+                },
+              });
+            if (!linked)
+              await this.agencyContacts.addCompanyLink(
+                context,
+                contact.id,
+                company.id,
+                {},
+                manager,
+              );
+          }
         }
 
         const activeCount = await contexts.count({

@@ -6,7 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, EntityManager, Repository } from 'typeorm';
 import type { CompanyAwareScope } from '../../common/context/company-aware-scope';
 import {
   SocialApprovalCommentEntity,
@@ -193,33 +193,34 @@ export class SocialApprovalsService {
         }
         const saved = await requests.save(
           requests.create({
-          tenantId: scope.tenantId,
-          workspaceId: scope.workspaceId,
-          agencyClientId: scope.agencyClientId,
-          companyContextId: scope.companyContextId,
-          ...subject,
-          status: 'draft',
-          currentStage: 'internal',
-          requestedByUserId: actor.userId!,
-          requestedAt: new Date(),
-          sentToClientAt: null,
-          clientFirstViewedAt: null,
-          clientLastViewedAt: null,
-          internalFirstViewedAt: null,
-          internalLastViewedAt: null,
-          internalViewedByUserId: null,
-          clientViewedByUserId: null,
-          approvedAt: null,
-          cancelledAt: null,
-          supersededAt: null,
+            tenantId: scope.tenantId,
+            workspaceId: scope.workspaceId,
+            agencyClientId: scope.agencyClientId,
+            companyContextId: scope.companyContextId,
+            ...subject,
+            status: 'draft',
+            currentStage: 'internal',
+            requestedByUserId: actor.userId!,
+            requestedAt: new Date(),
+            sentToClientAt: null,
+            clientFirstViewedAt: null,
+            clientLastViewedAt: null,
+            internalFirstViewedAt: null,
+            internalLastViewedAt: null,
+            internalViewedByUserId: null,
+            clientViewedByUserId: null,
+            approvedAt: null,
+            cancelledAt: null,
+            supersededAt: null,
           }),
         );
         return { saved, superseded };
       });
       await Promise.all(
-        created.superseded.map((request) =>
-          this.notifications?.publish('superseded', request, actor.userId) ??
-          Promise.resolve(),
+        created.superseded.map(
+          (request) =>
+            this.notifications?.publish('superseded', request, actor.userId) ??
+            Promise.resolve(),
         ),
       );
       await this.observeTransition(...created.superseded, created.saved);
@@ -344,7 +345,9 @@ export class SocialApprovalsService {
   async preview(scope: CompanyAwareScope, id: string) {
     const request = await this.find(scope, id);
     return this.subjects.getPreview(scope, {
-      subjectType: request.subjectType as 'creative_version' | 'planner_content_revision',
+      subjectType: request.subjectType as
+        | 'creative_version'
+        | 'planner_content_revision',
       subjectId: request.subjectId,
       subjectRevisionId: request.subjectRevisionId,
       title: request.title,
@@ -622,7 +625,11 @@ export class SocialApprovalsService {
       return manager.save(request);
     });
     if (stage === 'client') {
-      await this.notifications?.publish('changes_requested', saved, actor.userId);
+      await this.notifications?.publish(
+        'changes_requested',
+        saved,
+        actor.userId,
+      );
       // CCOM2 §40/§45 — the card now resolves as `in_revision` and its actions
       // fall away; the client's reason is a client-visible comment that the
       // timeline projects. Both are read-time facts, so this is a re-read.
@@ -635,18 +642,33 @@ export class SocialApprovalsService {
     scope: CompanyAwareScope,
     id: string,
     actorUserId: string | null | undefined,
+    operation?: {
+      manager: EntityManager;
+      afterCommit: Array<() => Promise<unknown>>;
+    },
   ) {
-    this.user(actorUserId);
-    const item = await this.find(scope, id);
+    if (!operation) this.user(actorUserId);
+    const item = operation
+      ? await operation.manager
+          .getRepository(SocialApprovalRequestEntity)
+          .findOneOrFail({ where: { ...this.scopeWhere(scope), id } })
+      : await this.find(scope, id);
     this.assertStatus(item, ACTIVE);
     item.status = 'cancelled';
     item.cancelledAt = new Date();
-    const saved = await this.requests.save(item);
+    const saved = await (
+      operation?.manager.getRepository(SocialApprovalRequestEntity) ??
+      this.requests
+    ).save(item);
     // §49 — only the client channel, and only for something the client
     // already saw. `cancelled` has no Agency catalog event in AP2, and
     // inventing one would be a duplicated taxonomy for no reader.
-    await this.notifications?.publishClientOnly('cancelled', saved);
-    await this.observeTransition(saved);
+    const announce = async () => {
+      await this.notifications?.publishClientOnly('cancelled', saved);
+      await this.observeTransition(saved);
+    };
+    if (operation) operation.afterCommit.push(announce);
+    else await announce();
     return saved;
   }
   async supersede(

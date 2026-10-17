@@ -1,3 +1,5 @@
+import { CompanyProductsModule } from '../../common/company-products/company-products.module';
+import { LeadFlowAgentsCompanyProductParticipant } from './leadflow-agents-company-product.participant';
 import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { TypeOrmModule } from '@nestjs/typeorm';
@@ -37,6 +39,7 @@ import { LeadFlowOperationsActionService } from './services/leadflow-operations-
 
 @Module({
   imports: [
+    CompanyProductsModule,
     JwtModule.register({}),
     PermissionsModule,
     TypeOrmModule.forFeature(
@@ -63,6 +66,7 @@ import { LeadFlowOperationsActionService } from './services/leadflow-operations-
   ],
   controllers: [LeadFlowAgentsController],
   providers: [
+    LeadFlowAgentsCompanyProductParticipant,
     LeadFlowAgentService,
     LeadFlowAgentBindingReconcilerService,
     LeadFlowAgentPresetService,

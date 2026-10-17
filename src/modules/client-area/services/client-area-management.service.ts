@@ -1,3 +1,4 @@
+import { AgencyClientCompanyProduct } from '../../clients/entities/agency-client-company-product.entity';
 import {
   BadRequestException,
   Injectable,
@@ -90,6 +91,8 @@ export class ClientAreaManagementService {
     @InjectRepository(TenantProductEntitlementEntity, AGENCY_CONNECTION)
     private readonly entitlementsRepo: Repository<TenantProductEntitlementEntity>,
     private readonly eligibility: ClientAreaEligibilityService,
+    @InjectRepository(AgencyClientCompanyProduct, AGENCY_CONNECTION)
+    private readonly productsRepo: Repository<AgencyClientCompanyProduct>,
   ) {}
 
   private async findSettings(tenantId: string, workspaceId: string) {
@@ -267,8 +270,19 @@ export class ClientAreaManagementService {
         productKey: PlatformProductKey.Social,
       },
     });
+    const social = await this.productsRepo.findOne({
+      where: {
+        tenantId: input.tenantId,
+        workspaceId: input.workspaceId,
+        agencyClientId: input.agencyClientId,
+        companyContextId: input.companyContextId,
+        productKey: 'social',
+        status: 'active',
+      },
+    });
     return {
       approvals: Boolean(
+        social &&
         companySettings.approvalsEnabled &&
         isActiveProductEntitlement(entitlement, input.now ?? new Date()),
       ),

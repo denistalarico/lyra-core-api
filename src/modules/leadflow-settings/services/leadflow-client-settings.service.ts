@@ -12,14 +12,16 @@ import {
   EntityManager,
   In,
   IsNull,
-  Not,
   Repository,
 } from 'typeorm';
 import { randomUUID } from 'crypto';
 import type { RequestContext } from '../../../common/context/request-context.interface';
 import { resolveCompanyAwareScope } from '../../../common/context/company-aware-scope';
 import { AgencyClient } from '../../clients/entities';
-import { PlatformProductKey, TenantProductEntitlementEntity } from '../../platform';
+import {
+  PlatformProductKey,
+  TenantProductEntitlementEntity,
+} from '../../platform';
 import {
   CompanyContextFieldChange,
   CompanyContextPreviewResponse,
@@ -50,9 +52,7 @@ import {
   LeadFlowEnabledIntegrationsConfig,
   LeadFlowJsonObject,
 } from '../types/leadflow-settings.types';
-import {
-  getCompanyContextScalarFieldPaths,
-} from './company-context.service';
+import { getCompanyContextScalarFieldPaths } from './company-context.service';
 import { LeadFlowBusinessModeTemplateService } from './leadflow-business-mode-template.service';
 import { CompanyContextService } from './company-context.service';
 import { InboxDomainOutboxEntity } from '../../inbox/entities/inbox-domain-outbox.entity';
@@ -280,8 +280,17 @@ export class LeadFlowClientSettingsService {
     ctx: RequestContext,
     agencyClientId: string,
     dto: CreateLeadFlowClientSettingsDto,
+    transactionManager?: EntityManager,
   ): Promise<LeadFlowClientSettingsResponse> {
-    const agencyClient = await this.assertAgencyClient(ctx, agencyClientId);
+    const agencyClient = transactionManager
+      ? await transactionManager.getRepository(AgencyClient).findOneOrFail({
+          where: {
+            id: agencyClientId,
+            tenantId: ctx.tenantId,
+            workspaceId: ctx.workspaceId,
+          },
+        })
+      : await this.assertAgencyClient(ctx, agencyClientId);
     const companyContextId = this.requireClientCompanyContext(
       ctx,
       agencyClientId,
@@ -302,7 +311,7 @@ export class LeadFlowClientSettingsService {
 
     const workspaceId = this.requireWorkspaceId(ctx);
 
-    return this.dataSource.transaction(async (manager) => {
+    const create = async (manager: EntityManager) => {
       await this.assertCapacityAvailable(manager, ctx.tenantId, workspaceId);
 
       const settingsRepository = manager.getRepository(
@@ -329,7 +338,10 @@ export class LeadFlowClientSettingsService {
         agentConfig: dto.agentConfig ?? {},
         clientPromptConfig: dto.clientPromptConfig ?? {},
         companyContextSchemaVersion: 1,
-        companyContextDraft: this.buildInitialCompanyContextDraft(dto, template),
+        companyContextDraft: this.buildInitialCompanyContextDraft(
+          dto,
+          template,
+        ),
         companyContextPublished: {},
         companyContextPublishedVersion: 0,
         companyContextPublishedHash: null,
@@ -350,7 +362,10 @@ export class LeadFlowClientSettingsService {
       return mapLeadFlowClientSettingsResponse(
         await settingsRepository.save(settings),
       );
-    });
+    };
+    return transactionManager
+      ? create(transactionManager)
+      : this.dataSource.transaction(create);
   }
 
   async updateSettings(
@@ -989,7 +1004,7 @@ export class LeadFlowClientSettingsService {
    * `null` means "no limit". Returning it from the fallback branch would make
    * every unconfigured tenant unlimited, so the default is a number.
    */
-  private resolveCompanyLimit(
+  resolveCompanyLimit(
     entitlement: TenantProductEntitlementEntity | null,
     tenantId?: string | null,
   ): number | null {
@@ -1005,7 +1020,10 @@ export class LeadFlowClientSettingsService {
 
     const resolvedTenantId = tenantId ?? entitlement?.tenantId ?? null;
 
-    if (resolvedTenantId && readUnlimitedCompanyTenants().has(resolvedTenantId)) {
+    if (
+      resolvedTenantId &&
+      readUnlimitedCompanyTenants().has(resolvedTenantId)
+    ) {
       return null;
     }
 
@@ -1019,7 +1037,10 @@ export class LeadFlowClientSettingsService {
   ): Promise<number> {
     return settingsRepository
       .createQueryBuilder('settings')
-      .select('COUNT(DISTINCT settings.agency_client_id)', 'count')
+      .select(
+        "COUNT(DISTINCT COALESCE(settings.company_context_id::text, 'legacy:' || settings.agency_client_id::text))",
+        'count',
+      )
       .where('settings.tenant_id = :tenantId', { tenantId })
       .andWhere('settings.workspace_id = :workspaceId', { workspaceId })
       .andWhere('settings.context_type = :contextType', {
@@ -1039,11 +1060,15 @@ export class LeadFlowClientSettingsService {
    * observe a free slot and both succeed (Fase 2 risk: "corrida de duas
    * criações").
    */
-  private async assertCapacityAvailable(
+  async assertCapacityAvailable(
     manager: EntityManager,
     tenantId: string,
     workspaceId: string,
   ): Promise<void> {
+    await manager.query(
+      'SELECT pg_advisory_xact_lock(hashtextextended($1,0))',
+      [`leadflow-capacity:${tenantId}:${workspaceId}`],
+    );
     const entitlement = await manager
       .getRepository(TenantProductEntitlementEntity)
       .findOne({
@@ -1598,10 +1623,7 @@ export class LeadFlowClientSettingsService {
     agencyClientId: string,
   ): string {
     const scope = resolveCompanyAwareScope(ctx);
-    if (
-      scope.agencyClientId !== agencyClientId ||
-      !scope.companyContextId
-    ) {
+    if (scope.agencyClientId !== agencyClientId || !scope.companyContextId) {
       throw new NotFoundException('LeadFlow settings not found.');
     }
     return scope.companyContextId;

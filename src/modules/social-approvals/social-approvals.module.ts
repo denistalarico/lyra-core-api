@@ -1,3 +1,5 @@
+import { CompanyProductsModule } from '../../common/company-products/company-products.module';
+import { SocialApprovalsCompanyProductParticipant } from './social-approvals-company-product.participant';
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { PermissionsModule } from '../permissions';
@@ -41,6 +43,7 @@ import { ApprovalSubjectResolver } from './subjects/approval-subject-resolver';
  */
 @Module({
   imports: [
+    CompanyProductsModule,
     PermissionsModule,
     NotificationsModule,
     TypeOrmModule.forFeature(
@@ -59,6 +62,7 @@ import { ApprovalSubjectResolver } from './subjects/approval-subject-resolver';
   ],
   controllers: [SocialApprovalsController],
   providers: [
+    SocialApprovalsCompanyProductParticipant,
     SocialApprovalsService,
     // CS5 Closeout — cross-context list (reads the managed-context directory
     // re-exported by PermissionsModule).

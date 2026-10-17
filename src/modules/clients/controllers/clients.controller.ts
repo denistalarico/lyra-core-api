@@ -1,3 +1,6 @@
+import { AgencyClientStatus } from '../enums';
+import { ConflictException } from '@nestjs/common';
+import { ClientCompanyProductsService } from '../services/client-company-products.service';
 import {
   Body,
   Controller,
@@ -50,6 +53,7 @@ function getContextFromUser(user: AuthTokenPayload): RequestContext {
 export class ClientsController {
   constructor(
     private readonly clientsService: ClientsService,
+    private readonly companyProducts: ClientCompanyProductsService,
     private readonly clientsProfitabilityService: ClientsProfitabilityService,
   ) {}
 
@@ -183,6 +187,12 @@ export class ClientsController {
     @Param('clientId') clientId: string,
     @Body() dto: UpdateClientDto,
   ) {
+    if (dto.status === AgencyClientStatus.Archived)
+      throw new ConflictException({
+        code: 'client_archive_mode_required',
+        message:
+          'Use POST /agency/clients/:clientId/archive to archive with product cleanup.',
+      });
     return this.clientsService.update(context, clientId, dto);
   }
 
@@ -193,7 +203,7 @@ export class ClientsController {
     @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('clientId') clientId: string,
   ) {
-    return this.clientsService.archive(context, clientId);
+    return this.companyProducts.archive(context, clientId);
   }
 
   @Post(':clientId/unarchive')

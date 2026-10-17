@@ -6,7 +6,13 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { IsNull, Raw, type FindOptionsWhere, Repository } from 'typeorm';
+import {
+  IsNull,
+  Raw,
+  type FindOptionsWhere,
+  EntityManager,
+  Repository,
+} from 'typeorm';
 import { MediaAssetResolverService } from '../../../common/media-assets';
 import { checkMediaAssetCapability } from '../media/media-capability-check';
 import { SocialContentDestinationEntity } from '../../social-planner/entities/social-content-destination.entity';
@@ -285,6 +291,7 @@ export class SocialPublicationService {
     scope: SocialPublicationScope,
     actorUserId: string | null,
     publicationId: string,
+    manager?: EntityManager,
   ): Promise<SocialPublicationEntity> {
     const publication = await this.requirePublication(scope, publicationId);
 
@@ -298,7 +305,10 @@ export class SocialPublicationService {
     publication.cancelledById = actorUserId;
     publication.cancelledAt = new Date();
 
-    return this.publicationsRepository.save(publication);
+    return (
+      manager?.getRepository(SocialPublicationEntity) ??
+      this.publicationsRepository
+    ).save(publication);
   }
 
   /**
@@ -311,6 +321,7 @@ export class SocialPublicationService {
     scope: SocialPublicationScope,
     actorUserId: string | null,
     publicationId: string,
+    manager?: EntityManager,
   ): Promise<SocialPublicationEntity> {
     const original = await this.requirePublication(scope, publicationId);
 
@@ -373,7 +384,7 @@ export class SocialPublicationService {
       cancelledAt: null,
     });
 
-    return this.saveWithMedia(retryPublication, originalMediaAssetIds);
+    return this.saveWithMedia(retryPublication, originalMediaAssetIds, manager);
   }
 
   /**
@@ -480,8 +491,9 @@ export class SocialPublicationService {
   private saveWithMedia(
     publication: SocialPublicationEntity,
     mediaAssetIds: string[],
+    transactionManager?: EntityManager,
   ): Promise<SocialPublicationEntity> {
-    return this.publicationsRepository.manager.transaction(async (manager) => {
+    const save = async (manager: EntityManager) => {
       const saved = await manager
         .getRepository(SocialPublicationEntity)
         .save(publication);
@@ -501,7 +513,10 @@ export class SocialPublicationService {
         );
       }
       return saved;
-    });
+    };
+    return transactionManager
+      ? save(transactionManager)
+      : this.publicationsRepository.manager.transaction(save);
   }
 
   private buildPayloadSnapshot(

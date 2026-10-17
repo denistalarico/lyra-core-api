@@ -1,10 +1,11 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Brackets, In, IsNull, Repository } from 'typeorm';
+import { Brackets, In, IsNull, Repository, EntityManager } from 'typeorm';
 import { isActiveProductEntitlement } from '../../../common/context/product-entitlement-availability';
 import { AgencyActivity, AgencyActivityLink } from '../../activities/entities';
 import { ActivityEntityType, ActivityStatus } from '../../activities/enums';
@@ -30,7 +31,6 @@ import { ClientsProfitabilityService } from './clients-profitability.service';
 import { TenantProductEntitlementEntity } from '../../platform/entities/tenant-product-entitlement.entity';
 import {
   PlatformProductKey,
-  ProductEntitlementSource,
   ProductEntitlementStatus,
 } from '../../platform/enums/platform-product.enums';
 
@@ -376,54 +376,15 @@ export class ClientsService {
     clientId: string,
     productKey: string,
     dto: UpdateClientProductDto,
-  ): Promise<ClientProductSummary> {
-    const client = await this.findOne(context, clientId);
-    const manageableProductKey = this.assertManageableProductKey(productKey);
-
-    if (!client.managedTenantId) {
-      throw new BadRequestException(
-        'Client products cannot be changed until the managed tenant is provisioned',
-      );
-    }
-
-    let entitlement = await this.entitlementsRepository.findOne({
-      where: {
-        tenantId: client.managedTenantId,
-        productKey: manageableProductKey,
-      },
+  ) {
+    await this.findOne(context, clientId);
+    void productKey;
+    void dto; // Compatibility route: reject every legacy client-wide mutation.
+    throw new ConflictException({
+      code: 'company_product_scope_required',
+      message:
+        'Manage products per company using /agency/clients/:clientId/companies/:companyContextId/products/:productKey/activate or /remove.',
     });
-
-    if (dto.action === 'suspend') {
-      if (!entitlement) {
-        throw new BadRequestException('Product entitlement is not configured');
-      }
-      entitlement.status = ProductEntitlementStatus.Suspended;
-    } else if (entitlement) {
-      // Reactivation reuses the unique tenant/product row. Plan, source,
-      // settings, startsAt and trial history stay intact. A still-valid
-      // contractual end is also preserved; only an already-ended window,
-      // which would keep the new "active" status unavailable, is cleared.
-      const now = new Date();
-      entitlement.status = ProductEntitlementStatus.Active;
-      if (entitlement.endsAt && entitlement.endsAt <= now) {
-        entitlement.endsAt = null;
-      }
-    } else {
-      entitlement = this.entitlementsRepository.create({
-        tenantId: client.managedTenantId,
-        productKey: manageableProductKey,
-        status: ProductEntitlementStatus.Active,
-        source: ProductEntitlementSource.Manual,
-        planKey: null,
-        startsAt: new Date(),
-        endsAt: null,
-        trialEndsAt: null,
-        settings: {},
-      });
-    }
-
-    const saved = await this.entitlementsRepository.save(entitlement);
-    return this.toProductSummary(manageableProductKey, saved);
   }
 
   async update(
@@ -460,14 +421,25 @@ export class ClientsService {
       client.archivedAt = new Date();
     }
 
-    const saved = contactChanged
+    // Lifecycle fields belong to CA6. A profile save must not restore a stale
+    // archive request that changed while this request was preparing its edit.
+    const profile = { ...client };
+    delete (profile as Partial<AgencyClient>).archiveStatus;
+    delete (profile as Partial<AgencyClient>).archiveRequestedAt;
+    delete (profile as Partial<AgencyClient>).archiveRequestedBy;
+    delete (profile as Partial<AgencyClient>).archiveMode;
+    if (dto.status === undefined) {
+      delete (profile as Partial<AgencyClient>).status;
+      delete (profile as Partial<AgencyClient>).archivedAt;
+    }
+    const persisted = contactChanged
       ? await this.clientsRepository.manager.transaction(async (manager) => {
           // Serialize company setup with explicit company changes.
           await manager.getRepository(AgencyClient).findOneOrFail({
             where: { id: client.id },
             lock: { mode: 'pessimistic_write' },
           });
-          const saved = await manager.getRepository(AgencyClient).save(client);
+          const saved = await manager.getRepository(AgencyClient).save(profile);
           await this.companySetup.apply(
             manager,
             saved,
@@ -476,7 +448,8 @@ export class ClientsService {
           );
           return saved;
         })
-      : await this.clientsRepository.save(client);
+      : await this.clientsRepository.save(profile);
+    const saved = Object.assign(client, persisted);
     if (
       previousStatus !== AgencyClientStatus.Archived &&
       saved.status === AgencyClientStatus.Archived
@@ -546,16 +519,36 @@ export class ClientsService {
 
   /** CA6 must call this when scheduled archival becomes effective. No access
    * restoration counterpart: unarchive only restores the commercial client. */
-  async archiveEffective(context: RequestContext, clientId: string) {
-    const client = await this.findAny(context, clientId);
+  async archiveEffective(
+    context: RequestContext,
+    clientId: string,
+    operation?: {
+      manager: EntityManager;
+      afterCommit: Array<() => Promise<unknown>>;
+    },
+  ) {
+    const repository =
+      operation?.manager.getRepository(AgencyClient) ?? this.clientsRepository;
+    const client = await repository.findOne({
+      where: {
+        id: clientId,
+        tenantId: context.tenantId,
+        workspaceId: context.workspaceId,
+      },
+    });
+    if (!client) throw new NotFoundException('Client not found');
     client.status = AgencyClientStatus.Archived;
     client.archivedAt = client.archivedAt ?? new Date();
-    const saved = await this.clientsRepository.save(client);
-    await this.lifecycleHooks.onClientArchived({
-      ...context,
-      agencyClientId: saved.id,
-      actorUserId: context.userId,
-    });
+    client.archiveStatus = 'none';
+    const saved = await repository.save(client);
+    const notify = () =>
+      this.lifecycleHooks.onClientArchived({
+        ...context,
+        agencyClientId: saved.id,
+        actorUserId: context.userId,
+      });
+    if (operation) operation.afterCommit.push(notify);
+    else await notify();
     return saved;
   }
 

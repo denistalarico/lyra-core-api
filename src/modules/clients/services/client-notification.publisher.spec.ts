@@ -44,7 +44,10 @@ describe('ClientNotificationPublisher', () => {
         resourceType: 'client',
         resourceId: client.id,
         recipients: [
-          { userId: 'user-owner', interestReason: NotificationInterestReason.ASSIGNED },
+          {
+            userId: 'user-owner',
+            interestReason: NotificationInterestReason.ASSIGNED,
+          },
         ],
         payload: expect.objectContaining({
           actionUrl: `/clients/${client.id}`,
@@ -69,7 +72,10 @@ describe('ClientNotificationPublisher', () => {
     expect(event.eventId).toContain('user-old-owner');
     expect(event.eventId).toContain('user-new-owner');
     expect(event.recipients).toEqual([
-      { userId: 'user-new-owner', interestReason: NotificationInterestReason.OWNER },
+      {
+        userId: 'user-new-owner',
+        interestReason: NotificationInterestReason.OWNER,
+      },
     ]);
   });
 
@@ -80,8 +86,13 @@ describe('ClientNotificationPublisher', () => {
       lifecycleStage: AgencyClientLifecycleStage.Onboarding,
     });
 
-    await publisher.publishOnboardingStarted({ client, actorUserId: 'user-actor' });
-    expect(expectProcessedEvent(processor).eventType).toBe('client.onboarding_started');
+    await publisher.publishOnboardingStarted({
+      client,
+      actorUserId: 'user-actor',
+    });
+    expect(expectProcessedEvent(processor).eventType).toBe(
+      'client.onboarding_started',
+    );
 
     jest.clearAllMocks();
     processor.process.mockResolvedValue({
@@ -97,7 +108,9 @@ describe('ClientNotificationPublisher', () => {
       }),
       actorUserId: 'user-actor',
     });
-    expect(expectProcessedEvent(processor).eventType).toBe('client.onboarding_completed');
+    expect(expectProcessedEvent(processor).eventType).toBe(
+      'client.onboarding_completed',
+    );
   });
 
   it('publishes client.managed_tenant_connected and client.managed_tenant_disconnected', async () => {
@@ -107,8 +120,13 @@ describe('ClientNotificationPublisher', () => {
       managedTenantId: 'managed-tenant-1',
     });
 
-    await publisher.publishManagedTenantConnected({ client: connected, actorUserId: 'user-actor' });
-    expect(expectProcessedEvent(processor).eventType).toBe('client.managed_tenant_connected');
+    await publisher.publishManagedTenantConnected({
+      client: connected,
+      actorUserId: 'user-actor',
+    });
+    expect(expectProcessedEvent(processor).eventType).toBe(
+      'client.managed_tenant_connected',
+    );
 
     jest.clearAllMocks();
     processor.process.mockResolvedValue({
@@ -117,7 +135,10 @@ describe('ClientNotificationPublisher', () => {
       recipientCount: 1,
     });
 
-    const disconnected = makeClient({ accountOwnerId: 'user-owner', managedTenantId: null });
+    const disconnected = makeClient({
+      accountOwnerId: 'user-owner',
+      managedTenantId: null,
+    });
 
     await publisher.publishManagedTenantDisconnected({
       client: disconnected,
@@ -139,14 +160,26 @@ describe('ClientNotificationPublisher', () => {
       actorUserId: 'user-actor',
       recipients: [
         { userId: '', interestReason: NotificationInterestReason.ASSIGNED },
-        { userId: 'user-actor', interestReason: NotificationInterestReason.ASSIGNED },
-        { userId: 'user-owner', interestReason: NotificationInterestReason.ASSIGNED },
-        { userId: 'user-owner', interestReason: NotificationInterestReason.OWNER },
+        {
+          userId: 'user-actor',
+          interestReason: NotificationInterestReason.ASSIGNED,
+        },
+        {
+          userId: 'user-owner',
+          interestReason: NotificationInterestReason.ASSIGNED,
+        },
+        {
+          userId: 'user-owner',
+          interestReason: NotificationInterestReason.OWNER,
+        },
       ],
     });
 
     expect(expectProcessedEvent(processor).recipients).toEqual([
-      { userId: 'user-owner', interestReason: NotificationInterestReason.ASSIGNED },
+      {
+        userId: 'user-owner',
+        interestReason: NotificationInterestReason.ASSIGNED,
+      },
     ]);
   });
 
@@ -205,6 +238,10 @@ function makeClient(overrides: Partial<AgencyClient> = {}): AgencyClient {
     notes: null,
     metadata: null,
     archivedAt: null,
+    archiveRequestedAt: null,
+    archiveRequestedBy: null,
+    archiveMode: null,
+    archiveStatus: 'none',
     createdAt: now,
     updatedAt: now,
     ...overrides,

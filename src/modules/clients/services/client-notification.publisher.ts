@@ -38,14 +38,12 @@ export class ClientNotificationPublisher {
         input.client.accountOwnerId,
         this.timestampFor(input.occurredAt ?? input.client.updatedAt),
       ],
-      recipients:
-        input.recipients ??
-        [
-          {
-            userId: input.client.accountOwnerId,
-            interestReason: NotificationInterestReason.ASSIGNED,
-          },
-        ],
+      recipients: input.recipients ?? [
+        {
+          userId: input.client.accountOwnerId,
+          interestReason: NotificationInterestReason.ASSIGNED,
+        },
+      ],
       title: 'Cliente atribuído a você',
       body: `O cliente "${input.client.displayName}" foi atribuído a você.`,
     });
@@ -64,14 +62,12 @@ export class ClientNotificationPublisher {
         input.client.accountOwnerId,
         this.timestampFor(input.occurredAt ?? input.client.updatedAt),
       ],
-      recipients:
-        input.recipients ??
-        [
-          {
-            userId: input.client.accountOwnerId,
-            interestReason: NotificationInterestReason.OWNER,
-          },
-        ],
+      recipients: input.recipients ?? [
+        {
+          userId: input.client.accountOwnerId,
+          interestReason: NotificationInterestReason.OWNER,
+        },
+      ],
       title: 'Você agora é responsável por este cliente',
       body: `Você passou a ser o responsável pelo cliente "${input.client.displayName}".`,
     });
@@ -109,14 +105,12 @@ export class ClientNotificationPublisher {
         input.client.id,
         this.timestampFor(input.occurredAt ?? input.client.updatedAt),
       ],
-      recipients:
-        input.recipients ??
-        [
-          {
-            userId: input.client.accountOwnerId,
-            interestReason: NotificationInterestReason.OWNER,
-          },
-        ],
+      recipients: input.recipients ?? [
+        {
+          userId: input.client.accountOwnerId,
+          interestReason: NotificationInterestReason.OWNER,
+        },
+      ],
       title: 'Onboarding do cliente iniciado',
       body: `O onboarding do cliente "${input.client.displayName}" foi iniciado.`,
     });
@@ -131,14 +125,12 @@ export class ClientNotificationPublisher {
         input.client.id,
         this.timestampFor(input.occurredAt ?? input.client.updatedAt),
       ],
-      recipients:
-        input.recipients ??
-        [
-          {
-            userId: input.client.accountOwnerId,
-            interestReason: NotificationInterestReason.OWNER,
-          },
-        ],
+      recipients: input.recipients ?? [
+        {
+          userId: input.client.accountOwnerId,
+          interestReason: NotificationInterestReason.OWNER,
+        },
+      ],
       title: 'Onboarding do cliente concluído',
       body: `O onboarding do cliente "${input.client.displayName}" foi concluído.`,
     });
@@ -153,14 +145,12 @@ export class ClientNotificationPublisher {
         input.client.id,
         this.timestampFor(input.occurredAt ?? input.client.updatedAt),
       ],
-      recipients:
-        input.recipients ??
-        [
-          {
-            userId: input.client.accountOwnerId,
-            interestReason: NotificationInterestReason.OWNER,
-          },
-        ],
+      recipients: input.recipients ?? [
+        {
+          userId: input.client.accountOwnerId,
+          interestReason: NotificationInterestReason.OWNER,
+        },
+      ],
       title: 'Offboarding do cliente iniciado',
       body: `O offboarding do cliente "${input.client.displayName}" foi iniciado.`,
     });
@@ -175,14 +165,12 @@ export class ClientNotificationPublisher {
         input.client.id,
         this.timestampFor(input.occurredAt ?? input.client.updatedAt),
       ],
-      recipients:
-        input.recipients ??
-        [
-          {
-            userId: input.client.accountOwnerId,
-            interestReason: NotificationInterestReason.OWNER,
-          },
-        ],
+      recipients: input.recipients ?? [
+        {
+          userId: input.client.accountOwnerId,
+          interestReason: NotificationInterestReason.OWNER,
+        },
+      ],
       title: 'Offboarding do cliente concluído',
       body: `O offboarding do cliente "${input.client.displayName}" foi concluído.`,
     });
@@ -225,14 +213,12 @@ export class ClientNotificationPublisher {
         input.documentType,
         this.timestampFor(input.occurredAt),
       ],
-      recipients:
-        input.recipients ??
-        [
-          {
-            userId: input.client.accountOwnerId,
-            interestReason: NotificationInterestReason.OWNER,
-          },
-        ],
+      recipients: input.recipients ?? [
+        {
+          userId: input.client.accountOwnerId,
+          interestReason: NotificationInterestReason.OWNER,
+        },
+      ],
       title: 'Documento do cliente recebido',
       body: `Um documento foi recebido do cliente "${input.client.displayName}".`,
       payload: {
@@ -263,6 +249,39 @@ export class ClientNotificationPublisher {
       payload: {
         previousPlan: input.previousPlan ?? null,
         plan: input.plan ?? null,
+      },
+    });
+  }
+
+  publishProductRemovalBlocked(
+    input: ClientNotificationInput & {
+      requestedBy: string | null;
+      productKey: string;
+      companyContextId: string;
+    },
+  ) {
+    return this.publishClientEvent({
+      ...input,
+      actorType: NotificationActorType.SYSTEM,
+      eventType: 'client.risk_detected',
+      eventIdParts: [
+        'company_product_removal_blocked',
+        input.companyContextId,
+        input.productKey,
+        this.timestampFor(input.occurredAt),
+      ],
+      recipients: [
+        {
+          userId: input.requestedBy,
+          interestReason: NotificationInterestReason.OWNER,
+        },
+      ],
+      title: 'Remoção de produto pausada',
+      body: 'Uma publicação falhou. Tente novamente, remova agora ou cancele a remoção.',
+      payload: {
+        riskReason: 'company_product_removal_blocked',
+        companyContextId: input.companyContextId,
+        productKey: input.productKey,
       },
     });
   }
@@ -323,21 +342,21 @@ export class ClientNotificationPublisher {
         input.client.managedTenantId,
         this.timestampFor(input.occurredAt ?? input.client.updatedAt),
       ],
-      recipients:
-        input.recipients ??
-        [
-          {
-            userId: input.client.accountOwnerId,
-            interestReason: NotificationInterestReason.OWNER,
-          },
-        ],
+      recipients: input.recipients ?? [
+        {
+          userId: input.client.accountOwnerId,
+          interestReason: NotificationInterestReason.OWNER,
+        },
+      ],
       title: 'Workspace gerenciado conectado',
       body: `O cliente "${input.client.displayName}" foi conectado a um workspace gerenciado.`,
     });
   }
 
   publishManagedTenantDisconnected(
-    input: ClientNotificationInput & { previousManagedTenantId?: string | null },
+    input: ClientNotificationInput & {
+      previousManagedTenantId?: string | null;
+    },
   ) {
     return this.publishClientEvent({
       ...input,
@@ -348,14 +367,12 @@ export class ClientNotificationPublisher {
         input.previousManagedTenantId,
         this.timestampFor(input.occurredAt ?? input.client.updatedAt),
       ],
-      recipients:
-        input.recipients ??
-        [
-          {
-            userId: input.client.accountOwnerId,
-            interestReason: NotificationInterestReason.OWNER,
-          },
-        ],
+      recipients: input.recipients ?? [
+        {
+          userId: input.client.accountOwnerId,
+          interestReason: NotificationInterestReason.OWNER,
+        },
+      ],
       title: 'Workspace gerenciado desconectado',
       body: `O cliente "${input.client.displayName}" foi desconectado do workspace gerenciado.`,
     });
@@ -376,14 +393,12 @@ export class ClientNotificationPublisher {
         input.contractId,
         input.validUntil,
       ],
-      recipients:
-        input.recipients ??
-        [
-          {
-            userId: input.client.accountOwnerId,
-            interestReason: NotificationInterestReason.OWNER,
-          },
-        ],
+      recipients: input.recipients ?? [
+        {
+          userId: input.client.accountOwnerId,
+          interestReason: NotificationInterestReason.OWNER,
+        },
+      ],
       title: 'Contrato do cliente perto do vencimento',
       body: `O contrato do cliente "${input.client.displayName}" está perto do vencimento.`,
       payload: {
@@ -407,14 +422,12 @@ export class ClientNotificationPublisher {
         input.riskReason,
         this.timestampFor(input.occurredAt ?? input.client.updatedAt),
       ],
-      recipients:
-        input.recipients ??
-        [
-          {
-            userId: input.client.accountOwnerId,
-            interestReason: NotificationInterestReason.OWNER,
-          },
-        ],
+      recipients: input.recipients ?? [
+        {
+          userId: input.client.accountOwnerId,
+          interestReason: NotificationInterestReason.OWNER,
+        },
+      ],
       title: 'Risco identificado no cliente',
       body: `Um risco foi identificado para o cliente "${input.client.displayName}".`,
       payload: {
@@ -423,14 +436,17 @@ export class ClientNotificationPublisher {
     });
   }
 
-  private async publishClientEvent(input: ClientNotificationInput & {
-    eventType: string;
-    eventIdParts: Array<string | null | undefined>;
-    recipients: ClientRecipientInput[];
-    title: string;
-    body: string;
-    payload?: Record<string, unknown>;
-  }) {
+  private async publishClientEvent(
+    input: ClientNotificationInput & {
+      eventType: string;
+      actorType?: NotificationActorType;
+      eventIdParts: Array<string | null | undefined>;
+      recipients: ClientRecipientInput[];
+      title: string;
+      body: string;
+      payload?: Record<string, unknown>;
+    },
+  ) {
     const recipients = this.normalizeRecipients(
       input.recipients,
       input.actorUserId,
@@ -448,7 +464,7 @@ export class ClientNotificationPublisher {
         workspaceId: input.client.workspaceId,
         productKey: NotificationProductKey.AGENCY,
         moduleKey: 'clients',
-        actorType: NotificationActorType.USER,
+        actorType: input.actorType ?? NotificationActorType.USER,
         actorUserId: input.actorUserId ?? null,
         resourceType: 'client',
         resourceId: input.client.id,
@@ -491,12 +507,10 @@ export class ClientNotificationPublisher {
       }
     }
 
-    return Array.from(normalized.entries()).map(
-      ([userId, interestReason]) => ({
-        userId,
-        interestReason,
-      }),
-    );
+    return Array.from(normalized.entries()).map(([userId, interestReason]) => ({
+      userId,
+      interestReason,
+    }));
   }
 
   private resolveActionUrl(client: AgencyClient) {

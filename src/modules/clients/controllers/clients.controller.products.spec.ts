@@ -23,6 +23,7 @@ describe('ClientsController product authorization', () => {
     const controller = new ClientsController(
       clientsService as never,
       {} as never,
+      {} as never,
     );
     const user = {
       sub: 'user-1',

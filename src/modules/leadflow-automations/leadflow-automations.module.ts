@@ -1,3 +1,5 @@
+import { CompanyProductsModule } from '../../common/company-products/company-products.module';
+import { LeadFlowAutomationsCompanyProductParticipant } from './leadflow-automations-company-product.participant';
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { LeadFlowClientSettingsEntity } from '../leadflow-settings/entities';
@@ -90,6 +92,7 @@ import { LeadFlowAppointmentLifecycleSchedulerService } from './services/leadflo
 
 @Module({
   imports: [
+    CompanyProductsModule,
     PermissionsModule,
     CrmModule,
     InboxModule,
@@ -130,6 +133,7 @@ import { LeadFlowAppointmentLifecycleSchedulerService } from './services/leadflo
   ],
   controllers: [LeadFlowAutomationsController],
   providers: [
+    LeadFlowAutomationsCompanyProductParticipant,
     LeadFlowAutomationService,
     LeadFlowAutomationRecipeService,
     LeadFlowAutomationRuntimeConfigService,

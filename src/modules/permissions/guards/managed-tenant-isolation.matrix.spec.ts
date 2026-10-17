@@ -79,7 +79,8 @@ function createFakeRepository(rows: Row[]) {
       matching(options),
     ),
     findOne: jest.fn(
-      async (options?: { where?: Row | Row[] }) => matching(options)[0] ?? null,
+      async (options?: { where?: Row | Row[] }): Promise<Row | null> =>
+        matching(options)[0] ?? null,
     ),
     create: jest.fn((value: Row) => value),
     save: jest.fn(async (value: Row) => value),
@@ -171,6 +172,7 @@ function createFixture() {
     createFakeRepository(clientProductAccess);
   const auditRepository = createFakeRepository([]);
 
+  const companyProductsRepository = createFakeRepository([]);
   const managedContextDirectory = new ManagedContextDirectoryService(
     clientsRepository as never,
     companyContextsRepository as never,
@@ -178,6 +180,7 @@ function createFixture() {
     entitlementsRepository as never,
     clientAccessRepository as never,
     clientProductAccessRepository as never,
+    companyProductsRepository as never,
   );
 
   const platformContextService = new PlatformContextService(
@@ -214,7 +217,13 @@ function createFixture() {
     resolver,
   );
 
-  return { guard, auditRepository, clientsRepository };
+  return {
+    guard,
+    auditRepository,
+    clientsRepository,
+    managedContextDirectory,
+    companyProductsRepository,
+  };
 }
 
 type Caller = {
@@ -471,4 +480,54 @@ describe('managed tenant isolation matrix (LF-RF-F12-004)', () => {
       expect(unguarded).toEqual([]);
     });
   });
+});
+
+describe('CA6 company product isolation', () => {
+  it.each(['active', 'removal_scheduled', 'removal_blocked'])(
+    'allows a company with %s product but never a sibling/foreign company',
+    async (status) => {
+      const f = createFixture();
+      f.companyProductsRepository.findOne.mockImplementation((options) =>
+        Promise.resolve(
+          options?.where &&
+            !Array.isArray(options.where) &&
+            options.where.companyContextId === 'company-a1'
+            ? {
+                ...AGENCY_A,
+                agencyClientId: 'client-a1',
+                companyContextId: 'company-a1',
+                productKey: 'leadflow',
+                status,
+              }
+            : null,
+        ),
+      );
+      const check = {
+        ...AGENCY_A,
+        userId: 'user-a-owner',
+        role: 'owner',
+        clientId: 'client-a1',
+        productKey: 'leadflow',
+      };
+      expect(
+        await f.managedContextDirectory.canAccessClientProduct({
+          ...check,
+          companyContextId: 'company-a1',
+        }),
+      ).toBe(true);
+      expect(
+        await f.managedContextDirectory.canAccessClientProduct({
+          ...check,
+          companyContextId: 'company-a2',
+        }),
+      ).toBe(false);
+      expect(
+        await f.managedContextDirectory.canAccessClientProduct({
+          ...check,
+          tenantId: 'tenant-b',
+          companyContextId: 'company-a1',
+        }),
+      ).toBe(false);
+    },
+  );
 });

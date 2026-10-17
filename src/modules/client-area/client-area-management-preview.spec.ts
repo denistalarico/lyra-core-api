@@ -152,6 +152,10 @@ describe('CA3.1 ClientAreaManagementService preview', () => {
       invitationsRepo as never,
       entitlementsRepo as never,
       eligibilityService as never,
+      {
+        find: jest.fn().mockResolvedValue([]),
+        findOne: jest.fn().mockResolvedValue(null),
+      } as never,
     );
 
     return {

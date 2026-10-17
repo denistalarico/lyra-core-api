@@ -1,3 +1,11 @@
+import { CompanyProductClientAccessGuard } from './controllers/company-product-client-access.guard';
+import { APP_INTERCEPTOR } from '@nestjs/core';
+import { CompanyProductsModule } from '../../common/company-products/company-products.module';
+import { CompanyProductWriteInterceptor } from '../../common/company-products/company-product-write.interceptor';
+import { ClientCompanyProductsService } from './services/client-company-products.service';
+import { ClientManagedTenantProvisioningService } from './services/client-managed-tenant-provisioning.service';
+import { ClientCompanyProductsScheduler } from './services/client-company-products.scheduler';
+import { ClientCompanyProductsController } from './controllers/client-company-products.controller';
 import { AgencyContactsModule } from '../agency/agency-contacts.module';
 import { AgencyClientLifecycleHooks } from './agency-client-lifecycle-hooks';
 import { ClientCompanySetupService } from './services/client-company-setup.service';
@@ -38,6 +46,7 @@ const AGENCY_CONNECTION = 'agency';
 
 @Module({
   imports: [
+    CompanyProductsModule,
     AgencyContactsModule,
     FinanceModule,
     NotificationsModule,
@@ -65,6 +74,7 @@ const AGENCY_CONNECTION = 'agency';
     ),
   ],
   controllers: [
+    ClientCompanyProductsController,
     ClientsController,
     ClientsPortfolioMonthlyController,
     ClientCompaniesController,
@@ -72,6 +82,11 @@ const AGENCY_CONNECTION = 'agency';
     ClientLifecycleController,
   ],
   providers: [
+    CompanyProductClientAccessGuard,
+    ClientCompanyProductsService,
+    ClientManagedTenantProvisioningService,
+    ClientCompanyProductsScheduler,
+    { provide: APP_INTERCEPTOR, useClass: CompanyProductWriteInterceptor },
     AgencyClientLifecycleHooks,
     ClientCompanySetupService,
     ClientsService,

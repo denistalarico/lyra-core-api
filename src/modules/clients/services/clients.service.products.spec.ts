@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   NotFoundException,
   ValidationPipe,
 } from '@nestjs/common';
@@ -160,156 +161,27 @@ describe('ClientsService client product entitlements', () => {
     expect(result.items[0].productsProvisioned).toBe(false);
   });
 
-  it('creates an active manual entitlement without creating access grants', async () => {
-    const client = makeClient('client-1', 'managed-1');
-    const { service, entitlementsRepository } = makeService({
-      clients: [client],
-    });
-
-    const result = await service.updateProduct(
-      makeContext(),
-      client.id,
-      PlatformProductKey.Social,
-      { action: 'activate' },
-    );
-
-    expect(entitlementsRepository.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        tenantId: 'managed-1',
-        productKey: PlatformProductKey.Social,
-        status: ProductEntitlementStatus.Active,
-        source: ProductEntitlementSource.Manual,
-      }),
-    );
-    expect(entitlementsRepository.save).toHaveBeenCalledTimes(1);
-    expect(result).toMatchObject({
-      productKey: 'social',
-      status: 'active',
-      available: true,
-    });
-    // The service has no ACL repository dependency: activation cannot grant
-    // agency_client_product_access implicitly.
-    expect(
-      (service as unknown as Record<string, unknown>)
-        .clientProductAccessRepository,
-    ).toBeUndefined();
-  });
-
-  it('reactivates a valid suspended entitlement as available', async () => {
-    const startsAt = new Date(Date.now() - 120_000);
-    const endsAt = new Date(Date.now() + 120_000);
-    const existing = makeEntitlement('managed-1', PlatformProductKey.Social, {
-      status: ProductEntitlementStatus.Suspended,
-      startsAt,
-      endsAt,
-    });
-    const { service } = makeService({
-      clients: [makeClient('client-1', 'managed-1')],
-      entitlementForMutation: existing,
-    });
-
-    const result = await service.updateProduct(
-      makeContext(),
-      'client-1',
-      PlatformProductKey.Social,
-      { action: 'activate' },
-    );
-
-    expect(existing).toMatchObject({
-      status: ProductEntitlementStatus.Active,
-      startsAt,
-      endsAt,
-    });
-    expect(result.available).toBe(true);
-  });
-
-  it('reactivates an expired entitlement by clearing only its elapsed endsAt', async () => {
-    const trialEndsAt = new Date(Date.now() - 120_000);
-    const settings = { seats: 12, commercialReference: 'contract-42' };
-    const createdAt = new Date('2025-01-02T03:04:05.000Z');
-    const existing = makeEntitlement('managed-1', PlatformProductKey.LeadFlow, {
-      status: ProductEntitlementStatus.Expired,
-      source: ProductEntitlementSource.Subscription,
-      planKey: 'pro',
-      endsAt: new Date(Date.now() - 60_000),
-      trialEndsAt,
-      settings,
-      createdAt,
-    });
-    const { service, entitlementsRepository } = makeService({
-      clients: [makeClient('client-1', 'managed-1')],
-      entitlementForMutation: existing,
-    });
-
-    const result = await service.updateProduct(
-      makeContext(),
-      'client-1',
-      PlatformProductKey.LeadFlow,
-      { action: 'activate' },
-    );
-
-    expect(entitlementsRepository.create).not.toHaveBeenCalled();
-    expect(existing).toMatchObject({
-      status: ProductEntitlementStatus.Active,
-      source: ProductEntitlementSource.Subscription,
-      planKey: 'pro',
-      endsAt: null,
-      trialEndsAt,
-      settings,
-      createdAt,
-    });
-    expect(result.available).toBe(true);
-  });
-
-  it('reactivates a cancelled entitlement with an elapsed endsAt as available', async () => {
-    const existing = makeEntitlement('managed-1', PlatformProductKey.Social, {
-      status: ProductEntitlementStatus.Cancelled,
-      endsAt: new Date(Date.now() - 60_000),
-    });
-    const { service } = makeService({
-      clients: [makeClient('client-1', 'managed-1')],
-      entitlementForMutation: existing,
-    });
-
-    const result = await service.updateProduct(
-      makeContext(),
-      'client-1',
-      PlatformProductKey.Social,
-      { action: 'activate' },
-    );
-
-    expect(existing).toMatchObject({
-      status: ProductEntitlementStatus.Active,
-      endsAt: null,
-    });
-    expect(result.available).toBe(true);
-  });
-
-  it.each([
-    ProductEntitlementStatus.Active,
-    ProductEntitlementStatus.Suspended,
-  ])(
-    'preserves a future startsAt for an existing %s entitlement and does not report it as available early',
+  it.each(['active', 'suspended', 'trial', 'cancelled', null] as const)(
+    'requires a company for legacy mutations even with entitlement %s',
     async (status) => {
-      const startsAt = new Date(Date.now() + 86_400_000);
-      const existing = makeEntitlement('managed-1', PlatformProductKey.Social, {
-        status,
-        startsAt,
-      });
-      const { service } = makeService({
+      const { service, entitlementsRepository } = makeService({
         clients: [makeClient('client-1', 'managed-1')],
-        entitlementForMutation: existing,
+        entitlementForMutation: status
+          ? makeEntitlement('managed-1', PlatformProductKey.Social, {
+              status: status as ProductEntitlementStatus,
+            })
+          : null,
       });
-
-      const result = await service.updateProduct(
-        makeContext(),
-        'client-1',
-        PlatformProductKey.Social,
-        { action: 'activate' },
-      );
-
-      expect(existing.startsAt).toBe(startsAt);
-      expect(result).toMatchObject({ status: 'active', available: false });
+      for (const action of ['activate', 'suspend'] as const) {
+        await expect(
+          service.updateProduct(makeContext(), 'client-1', 'social', {
+            action,
+          }),
+        ).rejects.toMatchObject({
+          response: { code: 'company_product_scope_required' },
+        });
+      }
+      expect(entitlementsRepository.save).not.toHaveBeenCalled();
     },
   );
 
@@ -338,82 +210,6 @@ describe('ClientsService client product entitlements', () => {
       });
     },
   );
-
-  it('converts an elapsed trial to active without extending or erasing trial history', async () => {
-    const trialEndsAt = new Date(Date.now() - 86_400_000);
-    const existing = makeEntitlement('managed-1', PlatformProductKey.Social, {
-      status: ProductEntitlementStatus.Trial,
-      source: ProductEntitlementSource.Trial,
-      trialEndsAt,
-    });
-    const { service } = makeService({
-      clients: [makeClient('client-1', 'managed-1')],
-      entitlementForMutation: existing,
-    });
-
-    const result = await service.updateProduct(
-      makeContext(),
-      'client-1',
-      PlatformProductKey.Social,
-      { action: 'activate' },
-    );
-
-    expect(existing).toMatchObject({
-      status: ProductEntitlementStatus.Active,
-      source: ProductEntitlementSource.Trial,
-      trialEndsAt,
-    });
-    expect(result.available).toBe(true);
-  });
-
-  it('suspends only the selected product and leaves the other entitlement untouched', async () => {
-    const social = makeEntitlement('managed-1', PlatformProductKey.Social);
-    const leadflow = makeEntitlement('managed-1', PlatformProductKey.LeadFlow);
-    const { service, entitlementsRepository } = makeService({
-      clients: [makeClient('client-1', 'managed-1')],
-      entitlementForMutation: social,
-    });
-
-    const result = await service.updateProduct(
-      makeContext(),
-      'client-1',
-      PlatformProductKey.Social,
-      { action: 'suspend' },
-    );
-
-    expect(result).toMatchObject({ status: 'suspended', available: false });
-    expect(leadflow.status).toBe(ProductEntitlementStatus.Active);
-    expect(entitlementsRepository.findOne).toHaveBeenCalledWith({
-      where: {
-        tenantId: 'managed-1',
-        productKey: PlatformProductKey.Social,
-      },
-    });
-    expect(
-      (service as unknown as Record<string, unknown>)
-        .clientProductAccessRepository,
-    ).toBeUndefined();
-  });
-
-  it('reuses the tenant+product row instead of creating a duplicate on activation', async () => {
-    const existing = makeEntitlement('managed-1', PlatformProductKey.Social, {
-      status: ProductEntitlementStatus.Suspended,
-    });
-    const { service, entitlementsRepository } = makeService({
-      clients: [makeClient('client-1', 'managed-1')],
-      entitlementForMutation: existing,
-    });
-
-    await service.updateProduct(
-      makeContext(),
-      'client-1',
-      PlatformProductKey.Social,
-      { action: 'activate' },
-    );
-
-    expect(entitlementsRepository.create).not.toHaveBeenCalled();
-    expect(entitlementsRepository.save).toHaveBeenCalledWith(existing);
-  });
 
   it.each([
     [
@@ -479,6 +275,10 @@ describe('ClientsService client product entitlements', () => {
         directoryEntitlementsRepository as never,
         { find: jest.fn().mockResolvedValue([]) } as never,
         { find: jest.fn().mockResolvedValue([]) } as never,
+        {
+          find: jest.fn().mockResolvedValue([]),
+          findOne: jest.fn().mockResolvedValue(null),
+        } as never,
       );
 
       const projected = await service.list(makeContext(), {});
@@ -506,7 +306,7 @@ describe('ClientsService client product entitlements', () => {
       provisioned.updateProduct(makeContext(), 'client-1', 'agency', {
         action: 'activate',
       }),
-    ).rejects.toBeInstanceOf(BadRequestException);
+    ).rejects.toBeInstanceOf(ConflictException);
 
     const unprovisioned = makeService({
       clients: [makeClient('client-1', null)],
@@ -515,7 +315,7 @@ describe('ClientsService client product entitlements', () => {
       unprovisioned.updateProduct(makeContext(), 'client-1', 'social', {
         action: 'activate',
       }),
-    ).rejects.toBeInstanceOf(BadRequestException);
+    ).rejects.toBeInstanceOf(ConflictException);
 
     const foreign = makeService({
       clients: [],
@@ -646,6 +446,10 @@ function makeClient(id: string, managedTenantId: string | null): AgencyClient {
     notes: null,
     metadata: null,
     archivedAt: null,
+    archiveRequestedAt: null,
+    archiveRequestedBy: null,
+    archiveMode: null,
+    archiveStatus: 'none',
     createdAt: now,
     updatedAt: now,
   };

@@ -1,3 +1,5 @@
+import { CompanyProductsModule } from '../../common/company-products/company-products.module';
+import { LeadFlowCompanyProductParticipant } from './leadflow-company-product.participant';
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AgencyClient } from '../clients/entities';
@@ -18,6 +20,7 @@ import { InboxDomainOutboxEntity } from '../inbox/entities/inbox-domain-outbox.e
 
 @Module({
   imports: [
+    CompanyProductsModule,
     PermissionsModule,
     TypeOrmModule.forFeature(
       [
@@ -36,6 +39,7 @@ import { InboxDomainOutboxEntity } from '../inbox/entities/inbox-domain-outbox.e
     LeadFlowClientSettingsController,
   ],
   providers: [
+    LeadFlowCompanyProductParticipant,
     LeadFlowBusinessModeTemplateService,
     LeadFlowBusinessModeTemplateSeederService,
     LeadFlowClientSettingsService,

@@ -20,6 +20,19 @@ function createDirectory() {
   const clientAccessRepository = createRepositoryMock();
   const clientProductAccessRepository = createRepositoryMock();
 
+  const companyProductsRepository = {
+    find: jest.fn().mockResolvedValue([
+      {
+        companyContextId: 'company-context-primary',
+        agencyClientId: 'client-1',
+      },
+      {
+        companyContextId: 'company-context-secondary',
+        agencyClientId: 'client-1',
+      },
+    ]),
+    findOne: jest.fn().mockResolvedValue({ status: 'active' }),
+  };
   const directory = new ManagedContextDirectoryService(
     clientsRepository as never,
     companyContextsRepository as never,
@@ -27,10 +40,12 @@ function createDirectory() {
     entitlementsRepository as never,
     clientAccessRepository as never,
     clientProductAccessRepository as never,
+    companyProductsRepository as never,
   );
 
   return {
     directory,
+    companyProductsRepository,
     clientsRepository,
     companyContextsRepository,
     contactsRepository,

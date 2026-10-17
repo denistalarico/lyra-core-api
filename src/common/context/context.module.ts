@@ -1,3 +1,4 @@
+import { AgencyClientCompanyProduct } from '../../modules/clients/entities/agency-client-company-product.entity';
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AgencyClient } from '../../modules/clients/entities';
@@ -16,6 +17,7 @@ const AGENCY_CONNECTION = 'agency';
   imports: [
     TypeOrmModule.forFeature(
       [
+        AgencyClientCompanyProduct,
         AgencyClient,
         AgencyClientCompanyContext,
         ContactEntity,

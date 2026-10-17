@@ -1,4 +1,8 @@
-import { ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import type { DataSource, EntityManager, Repository } from 'typeorm';
 import type { RequestContext } from '../../../common/context/request-context.interface';
 import type { AgencyClient } from '../../clients/entities';
@@ -49,7 +53,9 @@ describe('LeadFlowClientSettingsService tenant/workspace isolation', () => {
       count: jest.fn().mockResolvedValue(0),
       createQueryBuilder: jest.fn(),
     } as unknown as Repository<LeadFlowClientSettingsEntity>;
-    (settingsRepository.createQueryBuilder as unknown as jest.Mock).mockReturnValue(
+    (
+      settingsRepository.createQueryBuilder as unknown as jest.Mock
+    ).mockReturnValue(
       countQueryBuilder(settingsRepository.count as unknown as jest.Mock),
     );
     const entitlementsRepository = {
@@ -148,8 +154,7 @@ describe('LeadFlowClientSettingsService company capacity', () => {
       tenantId: 'tenant-a',
       productKey: 'leadflow',
       status: 'active',
-      settings:
-        maxManagedClients === null ? {} : { maxManagedClients },
+      settings: maxManagedClients === null ? {} : { maxManagedClients },
     } as unknown as TenantProductEntitlementEntity;
   }
 
@@ -160,19 +165,16 @@ describe('LeadFlowClientSettingsService company capacity', () => {
     if (originalUnlimitedTenants === undefined) {
       delete process.env.LEADFLOW_UNLIMITED_COMPANY_TENANTS;
     } else {
-      process.env.LEADFLOW_UNLIMITED_COMPANY_TENANTS =
-        originalUnlimitedTenants;
+      process.env.LEADFLOW_UNLIMITED_COMPANY_TENANTS = originalUnlimitedTenants;
     }
   });
 
   function setup() {
     const agencyClientsRepository = {
-      findOne: jest
-        .fn()
-        .mockResolvedValue({
-          id: 'client-a',
-          managedTenantId: 'managed-a',
-        } as AgencyClient),
+      findOne: jest.fn().mockResolvedValue({
+        id: 'client-a',
+        managedTenantId: 'managed-a',
+      } as AgencyClient),
     } as unknown as Repository<AgencyClient>;
     const settingsRepository = {
       findOne: jest.fn().mockResolvedValue(null),
@@ -180,7 +182,9 @@ describe('LeadFlowClientSettingsService company capacity', () => {
       createQueryBuilder: jest.fn(),
       save: jest.fn(async (entity: unknown) => entity),
     } as unknown as Repository<LeadFlowClientSettingsEntity>;
-    (settingsRepository.createQueryBuilder as unknown as jest.Mock).mockReturnValue(
+    (
+      settingsRepository.createQueryBuilder as unknown as jest.Mock
+    ).mockReturnValue(
       countQueryBuilder(settingsRepository.count as unknown as jest.Mock),
     );
     const entitlementsRepository = {
@@ -203,6 +207,7 @@ describe('LeadFlowClientSettingsService company capacity', () => {
     const dataSource = {
       transaction: jest.fn(async (cb: (manager: EntityManager) => unknown) =>
         cb({
+          query: jest.fn().mockResolvedValue([]),
           getRepository: jest.fn((entity: unknown) => {
             if (entity === TenantProductEntitlementEntity) {
               return managerEntitlementRepo;
@@ -474,6 +479,7 @@ describe('LeadFlowClientSettingsService.deleteSettings', () => {
     const dataSource = {
       transaction: jest.fn(async (cb: (manager: EntityManager) => unknown) =>
         cb({
+          query: jest.fn().mockResolvedValue([]),
           getRepository: jest.fn((entity: unknown) => ({
             delete: jest.fn(async (criteria: unknown) => {
               deletedByEntity.push({ entity, criteria });
@@ -730,7 +736,8 @@ describe('LeadFlowClientSettingsService.publishCompanyContext', () => {
       getRepository: jest.fn((entity: unknown) => {
         if (entity === LeadFlowClientSettingsEntity) return settingsEntityRepo;
         if (entity === InboxDomainOutboxEntity) return outboxRepo;
-        if (entity === LeadFlowBriefingContextSnapshotEntity) return snapshotRepo;
+        if (entity === LeadFlowBriefingContextSnapshotEntity)
+          return snapshotRepo;
         throw new Error('Unexpected repository requested in test.');
       }),
     };
@@ -738,8 +745,8 @@ describe('LeadFlowClientSettingsService.publishCompanyContext', () => {
       findOne: jest.fn().mockResolvedValue(settings),
     } as unknown as Repository<LeadFlowClientSettingsEntity>;
     const dataSource = {
-      transaction: jest.fn(async (run: (m: typeof manager) => Promise<unknown>) =>
-        run(manager),
+      transaction: jest.fn(
+        async (run: (m: typeof manager) => Promise<unknown>) => run(manager),
       ),
     };
     const service = new LeadFlowClientSettingsService(

@@ -1,3 +1,4 @@
+import { AgencyClientCompanyProduct } from '../../modules/clients/entities/agency-client-company-product.entity';
 // src/common/context/managed-context-directory.service.ts
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -47,6 +48,7 @@ function normalizeRole(role: string): PlatformRoleKey {
 
 export interface ManagedClientAccessCheck extends ManagedContextIdentity {
   clientId: string;
+  companyContextId?: string | null;
   productKey: string;
   requiredRole?: ClientProductRoleKey;
 }
@@ -82,6 +84,8 @@ export class ManagedContextDirectoryService {
     private readonly clientAccessRepository: Repository<AgencyClientAccessEntity>,
     @InjectRepository(AgencyClientProductAccessEntity, AGENCY_CONNECTION)
     private readonly clientProductAccessRepository: Repository<AgencyClientProductAccessEntity>,
+    @InjectRepository(AgencyClientCompanyProduct, AGENCY_CONNECTION)
+    private readonly companyProductsRepository: Repository<AgencyClientCompanyProduct>,
   ) {}
 
   /**
@@ -118,6 +122,20 @@ export class ManagedContextDirectoryService {
       !client.managedTenantId
     ) {
       return false;
+    }
+
+    if (check.companyContextId) {
+      const product = await this.companyProductsRepository.findOne({
+        where: {
+          tenantId: check.tenantId,
+          workspaceId: check.workspaceId,
+          agencyClientId: check.clientId,
+          companyContextId: check.companyContextId,
+          productKey: check.productKey as 'social' | 'leadflow',
+          status: In(['active', 'removal_scheduled', 'removal_blocked']),
+        },
+      });
+      if (!product) return false;
     }
 
     const entitlement = await this.entitlementsRepository.findOne({
@@ -317,7 +335,7 @@ export class ManagedContextDirectoryService {
 
     entries.sort((a, b) => a.displayName.localeCompare(b.displayName));
 
-    return this.attachActiveCompanies(entries, context);
+    return this.attachActiveCompanies(entries, context, productKey);
   }
 
   /**
@@ -373,6 +391,7 @@ export class ManagedContextDirectoryService {
     const authorized = await this.canAccessClientProduct({
       ...context,
       clientId: requested.clientId,
+      companyContextId: requested.companyContextId,
       productKey,
     });
 
@@ -462,6 +481,7 @@ export class ManagedContextDirectoryService {
   private async attachActiveCompanies(
     clients: AuthorizedManagedClient[],
     context: ManagedContextIdentity,
+    productKey: string,
   ): Promise<AuthorizedManagedClient[]> {
     if (clients.length === 0 || !context.workspaceId) return clients;
 
@@ -476,10 +496,24 @@ export class ManagedContextDirectoryService {
       },
       order: { isPrimary: 'DESC', createdAt: 'ASC' },
     });
+    const products = await this.companyProductsRepository.find({
+      where: {
+        tenantId: context.tenantId,
+        workspaceId: context.workspaceId,
+        agencyClientId: In(clientIds),
+        productKey: productKey as 'leadflow' | 'social',
+        status: In(['active', 'removal_scheduled', 'removal_blocked']),
+      },
+    });
     const validContextRows = companyContexts.filter(
       (companyContext) =>
         companyContext.tenantId === context.tenantId &&
         companyContext.workspaceId === context.workspaceId &&
+        products.some(
+          (p) =>
+            p.companyContextId === companyContext.id &&
+            p.agencyClientId === companyContext.agencyClientId,
+        ) &&
         companyContext.status === 'active' &&
         !companyContext.archivedAt &&
         clients.some(

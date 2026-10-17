@@ -1,3 +1,4 @@
+import { AgencyClientCompanyProduct } from '../clients/entities/agency-client-company-product.entity';
 import { Logger, Module, type OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
@@ -95,6 +96,7 @@ const AGENCY_CONNECTION = 'agency';
         AgencyUserProfileEntity,
         AgencyWorkspaceUserEntity,
         AgencyWorkspaceCompanySettingsEntity,
+        AgencyClientCompanyProduct,
         AgencyClient,
         AgencyClientCompanyContext,
         ContactEntity,

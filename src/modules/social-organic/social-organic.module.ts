@@ -1,3 +1,5 @@
+import { CompanyProductsModule } from '../../common/company-products/company-products.module';
+import { SocialPublicationCompanyProductParticipant } from './publication/social-publication-company-product.participant';
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { SettingsCryptoService } from '../../common/crypto/settings-crypto.service';
@@ -112,6 +114,7 @@ export function createMetaOrganicOAuthProviders(
 
 @Module({
   imports: [
+    CompanyProductsModule,
     PermissionsModule,
     NotificationsModule,
     FilesModule,
@@ -173,6 +176,7 @@ export function createMetaOrganicOAuthProviders(
     SocialOrganicAnalyticsController,
   ],
   providers: [
+    SocialPublicationCompanyProductParticipant,
     MetaOrganicGraphService,
     MetaOrganicAssetDiscoveryService,
     MetaOrganicOAuthProvider,
