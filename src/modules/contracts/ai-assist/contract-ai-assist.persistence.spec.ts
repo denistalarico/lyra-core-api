@@ -20,9 +20,13 @@ it('registers the migration at both agency datasource points and the run in the 
     'utf8',
   );
   expect(registry).toContain('import { ContractAiAssistRun }');
-  expect(registry.split('export const agencyEntities = [')[1]).toMatch(
-    /^\s*ContractAiAssistRun,/,
-  );
+  const agencyEntityRegistry = registry.match(
+    /export const agencyEntities = \[([\s\S]*?)\];/,
+  )?.[1];
+  // Other modules may add entities before this one; registration is required,
+  // not a particular position in the shared array.
+  expect(agencyEntityRegistry).toBeDefined();
+  expect(agencyEntityRegistry).toMatch(/^\s*ContractAiAssistRun,/m);
 });
 
 it('defines a scoped unique key, constrained lifecycle and daily index without storing the input text', async () => {

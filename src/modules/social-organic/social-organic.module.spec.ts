@@ -8,6 +8,7 @@ jest.mock('@nestjs/typeorm', () => ({
 
 import { MODULE_METADATA } from '@nestjs/common/constants';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { CompanyProductsModule } from '../../common/company-products/company-products.module';
 import { SettingsCryptoService } from '../../common/crypto/settings-crypto.service';
 import { FilesModule } from '../../common/files/files.module';
 import {
@@ -87,6 +88,7 @@ import {
   SocialPublicationWorker,
 } from './publication';
 import { SocialPublicationExecutorService } from './publication/social-publication.executor';
+import { SocialPublicationCompanyProductParticipant } from './publication/social-publication-company-product.participant';
 import { SOCIAL_PUBLICATION_EXECUTOR } from './publication/social-publication.worker';
 import {
   FacebookPublisherAdapter,
@@ -142,6 +144,9 @@ describe('SocialOrganicModule', () => {
     ]);
     expect(
       Reflect.getMetadata(MODULE_METADATA.IMPORTS, SocialOrganicModule),
+    ).toContain(CompanyProductsModule);
+    expect(
+      Reflect.getMetadata(MODULE_METADATA.IMPORTS, SocialOrganicModule),
     ).toContain(PermissionsModule);
     expect(
       Reflect.getMetadata(MODULE_METADATA.IMPORTS, SocialOrganicModule),
@@ -177,6 +182,7 @@ describe('SocialOrganicModule', () => {
     expect(
       Reflect.getMetadata(MODULE_METADATA.PROVIDERS, SocialOrganicModule),
     ).toEqual([
+      SocialPublicationCompanyProductParticipant,
       MetaOrganicGraphService,
       MetaOrganicAssetDiscoveryService,
       MetaOrganicOAuthProvider,
