@@ -1,4 +1,5 @@
 export interface AuthTokenPayload {
+  surface?: 'client_area';
   sub: string;
   tenantId: string;
   workspaceId: string;

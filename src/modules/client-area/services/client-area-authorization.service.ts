@@ -1,3 +1,7 @@
+import { ClientAreaCompanySettingsEntity } from '../entities/client-area-settings.entity';
+import { Optional } from '@nestjs/common';
+import { ClientAreaMemberAccessService } from './client-area-member-access.service';
+import { ClientAreaConsentService } from './client-area-consent.service';
 import {
   ForbiddenException,
   Injectable,
@@ -13,7 +17,10 @@ import {
   isActiveCompany,
   isAvailableOrganization,
 } from '../client-area-availability';
-import { permissionsForClientAreaRole } from '../client-area-permissions.catalog';
+import {
+  permissionsForMemberAccess,
+  resolveMemberAccess,
+} from '../client-area-permissions.catalog';
 import {
   CLIENT_AREA_ERROR_CODES,
   isClientAreaRole,
@@ -80,6 +87,8 @@ export class ClientAreaAuthorizationService {
     private readonly clientsRepo: Repository<AgencyClient>,
     private readonly management: ClientAreaManagementService,
     private readonly eligibility: ClientAreaEligibilityService,
+    @Optional() private readonly access?: ClientAreaMemberAccessService,
+    @Optional() private readonly consents?: ClientAreaConsentService,
   ) {}
 
   async authorize(input: AuthorizeClientAreaInput): Promise<ClientAreaContext> {
@@ -214,6 +223,28 @@ export class ClientAreaAuthorizationService {
       return null;
     }
 
+    const modules = await this.management.resolveCompanyModules({
+      tenantId: membership.tenantId,
+      workspaceId: membership.workspaceId,
+      agencyClientId: membership.agencyClientId,
+      companyContextId: membership.companyContextId,
+      now,
+    });
+    const memberAccess = this.access
+      ? await this.access.resolveMemberAccess(membership, modules)
+      : resolveMemberAccess(membership.role, modules, {});
+    const consent = await this.consents?.state(
+      membership,
+      membership.role === 'client_owner',
+    );
+    const settings = await this.membershipsRepo.manager
+      .getRepository(ClientAreaCompanySettingsEntity)
+      .findOne({
+        where: {
+          tenantId: membership.tenantId,
+          companyContextId: membership.companyContextId,
+        },
+      });
     return {
       surface: 'client_area',
       userId: identity.userId,
@@ -225,14 +256,23 @@ export class ClientAreaAuthorizationService {
       companyContextId: membership.companyContextId,
       companyDisplayName: companyDisplayName(organization),
       role: membership.role,
-      permissions: permissionsForClientAreaRole(membership.role),
-      modules: await this.management.resolveCompanyModules({
-        tenantId: membership.tenantId,
-        workspaceId: membership.workspaceId,
-        agencyClientId: membership.agencyClientId,
-        companyContextId: membership.companyContextId,
-        now,
-      }),
+      accountRole:
+        membership.role === 'client_owner' ? 'client_owner' : 'client_member',
+      permissions: permissionsForMemberAccess(memberAccess),
+      modules: Object.fromEntries(
+        Object.entries(memberAccess).map(([key, state]) => [
+          key,
+          state.available,
+        ]),
+      ) as ClientAreaContext['modules'],
+      memberAccess,
+      consent: consent ?? {
+        status: 'notice_unavailable',
+        noticeVersion: null,
+        ownerDecides: membership.role === 'client_owner',
+      },
+      allowAiCostActions: settings?.allowAiCostActions === true,
+      allowMediaSpendActions: settings?.allowMediaSpendActions === true,
     };
   }
 }

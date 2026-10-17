@@ -2,12 +2,17 @@ import {
   IsBoolean,
   IsIn,
   IsOptional,
+  IsObject,
   IsString,
   IsUUID,
+  ValidateIf,
   Matches,
   MaxLength,
 } from 'class-validator';
-import type { ClientAreaRole } from '../client-area.types';
+import type {
+  ClientAreaRole,
+  ClientAreaModuleSettings,
+} from '../client-area.types';
 
 const HEX = /^#[0-9a-fA-F]{6}$/;
 
@@ -58,6 +63,13 @@ export class PatchClientAreaSelfAccessRoleDto {
 }
 
 export class PatchClientAreaCompanySettingsDto {
+  @IsOptional() @IsObject() moduleSettings?: ClientAreaModuleSettings;
+  @ValidateIf((_object: unknown, value: unknown) => value !== undefined)
+  @IsBoolean()
+  allowAiCostActions?: boolean;
+  @ValidateIf((_object: unknown, value: unknown) => value !== undefined)
+  @IsBoolean()
+  allowMediaSpendActions?: boolean;
   @IsOptional() @IsBoolean() enabled?: boolean;
   @IsOptional() @IsBoolean() approvalsEnabled?: boolean;
   @IsOptional() @IsBoolean() conversationsEnabled?: boolean;

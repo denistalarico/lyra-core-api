@@ -1,3 +1,11 @@
+import {
+  CLIENT_AREA_ACCOUNT_ROLES,
+  CLIENT_AREA_MODULE_KEYS,
+} from './client-area.types';
+import {
+  resolveMemberAccess,
+  permissionsForMemberAccess,
+} from './client-area-permissions.catalog';
 import { NotFoundException } from '@nestjs/common';
 import { isKnownPermissionKey } from '../permissions/catalog/permission-keys.catalog';
 import { PlatformRoleKey } from '../permissions/enums/permission.enums';
@@ -218,5 +226,51 @@ describe('CA1 toCompanyAwareScope → ApprovalClientReviewService', () => {
     expect(JSON.stringify(approvals.clientApprove.mock.calls)).not.toContain(
       context.membershipId,
     );
+  });
+});
+
+describe('CA7 exhaustive account roles and module permissions', () => {
+  it('defines exactly two company account roles and the complete fourteen-module contract', () => {
+    expect(CLIENT_AREA_ACCOUNT_ROLES).toEqual([
+      'client_owner',
+      'client_member',
+    ]);
+    expect(CLIENT_AREA_MODULE_KEYS).toEqual([
+      'overview',
+      'analytics',
+      'agency_projects',
+      'agency_billing',
+      'conversations',
+      'approvals',
+      'social_planner',
+      'social_creative_studio',
+      'social_campaigns',
+      'leadflow_inbox',
+      'leadflow_crm',
+      'leadflow_appointments',
+      'leadflow_agents',
+      'settings',
+    ]);
+    const enabled = Object.fromEntries(
+      CLIENT_AREA_MODULE_KEYS.map((key) => [key, true]),
+    );
+    for (const role of CLIENT_AREA_ACCOUNT_ROLES)
+      for (const level of ['viewer', 'operator', 'manager'] as const) {
+        const access = resolveMemberAccess(role, enabled, {
+          approvals: level,
+          conversations: level,
+        });
+        expect([...permissionsForMemberAccess(access)].sort()).toEqual(
+          role === 'client_owner' || level !== 'viewer'
+            ? [
+                'client_area.approvals.comment',
+                'client_area.approvals.decide',
+                'client_area.approvals.view',
+                'client_area.conversations.send',
+                'client_area.conversations.view',
+              ]
+            : ['client_area.approvals.view', 'client_area.conversations.view'],
+        );
+      }
   });
 });

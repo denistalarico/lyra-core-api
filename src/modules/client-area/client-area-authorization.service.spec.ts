@@ -62,7 +62,11 @@ describe('CA4.1 ClientAreaAuthorizationService.resolveMembershipContext eligibil
   };
 
   function buildService(eligible: boolean) {
-    const membershipsRepo = { manager: {} };
+    const membershipsRepo = {
+      manager: {
+        getRepository: () => ({ findOne: jest.fn().mockResolvedValue(null) }),
+      },
+    };
     const companyContextsRepo = {
       findOne: jest.fn().mockResolvedValue(company),
     };

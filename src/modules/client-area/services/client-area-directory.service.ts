@@ -1,3 +1,4 @@
+import { clientAreaUiPermissions } from '../client-area-agency-permission-projection';
 import { Injectable } from '@nestjs/common';
 import {
   AGENCY_SELF_CONTEXT_ID,
@@ -22,7 +23,10 @@ export type ClientAreaContextProjection = {
   displayName: string;
   role: ClientAreaContext['role'];
   permissions: string[];
-  modules: ClientAreaContext['modules'];
+  modules: NonNullable<ClientAreaContext['memberAccess']>;
+  accountRole: NonNullable<ClientAreaContext['accountRole']>;
+  uiPermissions: string[];
+  consent: NonNullable<ClientAreaContext['consent']>;
   branding: Awaited<ReturnType<ClientAreaManagementService['branding']>>;
 };
 
@@ -179,10 +183,17 @@ export class ClientAreaDirectoryService {
       displayName: context.companyDisplayName,
       role: context.role,
       permissions: [...context.permissions].sort(),
-      modules: {
-        approvals: context.modules.approvals,
-        conversations: context.modules.conversations,
-      },
+      modules: context.memberAccess!,
+      accountRole: context.accountRole!,
+      uiPermissions: [
+        ...new Set([
+          ...context.permissions,
+          ...(context.memberAccess
+            ? clientAreaUiPermissions(context.memberAccess)
+            : []),
+        ]),
+      ].sort(),
+      consent: context.consent!,
       branding: await this.management.branding(
         context.tenantId,
         context.workspaceId,

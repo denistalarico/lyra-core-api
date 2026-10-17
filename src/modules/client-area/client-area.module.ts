@@ -1,3 +1,19 @@
+import { APP_INTERCEPTOR } from '@nestjs/core';
+import {
+  ClientAreaBridgeRegistry,
+  ClientAreaBridgeRegistryModule,
+} from '../../common/client-area-bridge/client-area-bridge.registry';
+import { ClientAreaBridgeAuthenticator } from './services/client-area-bridge-authenticator';
+import { ClientAreaMemberModuleAccessEntity } from './entities/client-area-member-module-access.entity';
+import { AuditChangeEventEntity } from './entities/audit-change-event.entity';
+import { LeadFlowTelemetryConsentEntity } from '../leadflow-privacy/entities/leadflow-telemetry-consent.entity';
+import { LeadFlowTelemetryConsentNoticeEntity } from '../leadflow-privacy/entities/leadflow-telemetry-consent-notice.entity';
+import { ClientAreaAccessController } from './controllers/client-area-access.controller';
+import { ClientAreaMemberAccessService } from './services/client-area-member-access.service';
+import { ClientAreaConsentService } from './services/client-area-consent.service';
+import { AuditChangeService } from './services/audit-change.service';
+import { AuditChangeInterceptor } from './services/audit-change.interceptor';
+import { ActorDirectoryService } from './services/actor-directory.service';
 import { AgencyClientCompanyProduct } from '../clients/entities/agency-client-company-product.entity';
 import { Logger, Module, type OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -75,12 +91,17 @@ const AGENCY_CONNECTION = 'agency';
  */
 @Module({
   imports: [
+    ClientAreaBridgeRegistryModule,
     PassportModule,
     JwtModule.register({}),
     AgencyIdentityCredentialsModule,
     EmailModule,
     TypeOrmModule.forFeature(
       [
+        ClientAreaMemberModuleAccessEntity,
+        AuditChangeEventEntity,
+        LeadFlowTelemetryConsentEntity,
+        LeadFlowTelemetryConsentNoticeEntity,
         ClientAreaMembershipEntity,
         ClientAreaSelfAccessEntity,
         ClientAreaSelfAccessEventEntity,
@@ -107,11 +128,19 @@ const AGENCY_CONNECTION = 'agency';
     ),
   ],
   controllers: [
+    ClientAreaAccessController,
     ClientAreaAuthController,
     ClientAreaDirectoryController,
     ClientAreaInvitationsController,
   ],
   providers: [
+    ClientAreaBridgeAuthenticator,
+    ClientAreaMemberAccessService,
+    ClientAreaConsentService,
+    AuditChangeService,
+    AuditChangeInterceptor,
+    ActorDirectoryService,
+    { provide: APP_INTERCEPTOR, useExisting: AuditChangeInterceptor },
     ClientAreaJwtStrategy,
     ClientAreaSessionService,
     ClientAreaManagementService,
@@ -134,6 +163,10 @@ const AGENCY_CONNECTION = 'agency';
     ClientAreaSelfContextGuard,
   ],
   exports: [
+    ClientAreaMemberAccessService,
+    ClientAreaConsentService,
+    AuditChangeService,
+    ActorDirectoryService,
     // Re-exported so a module that already depends on the Client Area (AP3)
     // gets the credential primitives without importing
     // `AgencyIdentityCredentialsModule` itself: that import pulls `otplib`
@@ -157,9 +190,14 @@ const AGENCY_CONNECTION = 'agency';
 export class ClientAreaModule implements OnModuleInit {
   private readonly logger = new Logger(ClientAreaModule.name);
 
-  constructor(private readonly config: ConfigService) {}
+  constructor(
+    private readonly config: ConfigService,
+    private readonly bridgeRegistry: ClientAreaBridgeRegistry,
+    private readonly bridge: ClientAreaBridgeAuthenticator,
+  ) {}
 
   onModuleInit() {
+    this.bridgeRegistry.register(this.bridge);
     const requested =
       this.config.get<string>(CLIENT_AREA_ENABLED_ENV)?.trim().toLowerCase() ===
       'true';

@@ -1,3 +1,6 @@
+import { ClientAreaMemberAccessService } from './services/client-area-member-access.service';
+import { AuditChangeService } from './services/audit-change.service';
+import { CompanyProductClientAccessGuard } from '../clients/controllers/company-product-client-access.guard';
 import { Module } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { AgencyClientLifecycleHooks } from '../clients/agency-client-lifecycle-hooks';
@@ -32,6 +35,8 @@ class FakeClientsModule {}
       ClientAreaSelfAccessService,
       ClientAreaInvitationService,
       ClientAreaMembershipService,
+      ClientAreaMemberAccessService,
+      AuditChangeService,
     ].map((provide) => ({ provide, useValue: {} })),
   ],
   exports: [
@@ -40,6 +45,8 @@ class FakeClientsModule {}
     ClientAreaSelfAccessService,
     ClientAreaInvitationService,
     ClientAreaMembershipService,
+    ClientAreaMemberAccessService,
+    AuditChangeService,
   ],
 })
 class FakeClientAreaModule {}
@@ -63,6 +70,8 @@ describe('CA5 runtime registry wiring', () => {
       .useModule(FakeClientAreaModule)
       .overrideModule(PermissionsModule)
       .useModule(FakePermissionsModule)
+      .overrideGuard(CompanyProductClientAccessGuard)
+      .useValue({ canActivate: () => true })
       .overrideGuard(PermissionsGuard)
       .useValue({ canActivate: () => true })
       .compile();

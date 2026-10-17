@@ -1,3 +1,5 @@
+import { CreateAgencyClientCompanyProducts1799600000000 } from '../../database/migrations/1799600000000-create-agency-client-company-products';
+import { ClientAreaAccessModelV21799700000000 } from '../../database/migrations/1799700000000-client-area-access-model-v2';
 import { Module, ValidationPipe, type INestApplication } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { PassportModule } from '@nestjs/passport';
@@ -356,6 +358,8 @@ run(
         await new CreateClientAreaCrmIdentityRelationships1797300000000().up(
           runner,
         );
+        await new CreateAgencyClientCompanyProducts1799600000000().up(runner);
+        await new ClientAreaAccessModelV21799700000000().up(runner);
       } finally {
         await runner.release();
       }
@@ -454,11 +458,15 @@ run(
         agency[key] = bodyOf(response).accessToken!;
       }
 
+      await db.query(
+        `UPDATE client_area_company_settings SET module_settings='{"overview":{"enabled":true,"defaultLevel":"viewer"},"conversations":{"enabled":true,"defaultLevel":"viewer"}}'::jsonb WHERE tenant_id=$1`,
+        [T],
+      );
       // Existing Client Area people, members of B (granted by the Agency).
       for (const user of [EXIST, EXIST2FA]) {
         await db.query(
           `INSERT INTO client_area_memberships (tenant_id,workspace_id,agency_client_id,company_context_id,user_id,role,granted_by_user_id)
-         VALUES ($1,$2,$3,$4,$5,'client_viewer',$6)`,
+         VALUES ($1,$2,$3,$4,$5,'client_member',$6)`,
           [T, W, Y, B, user, ADMIN],
         );
       }
@@ -513,6 +521,10 @@ run(
         if (db?.isInitialized) {
           assertSafePostgresTarget();
           const tenants = [T, T2];
+          await db.query(
+            `DELETE FROM client_area_member_module_access WHERE membership_id IN (SELECT id FROM client_area_memberships WHERE tenant_id=ANY($1::uuid[]))`,
+            [tenants],
+          );
           for (const table of [
             'client_area_member_events',
             'client_area_invitations',
@@ -535,6 +547,7 @@ run(
             // `agency_client_company_contexts` (RESTRICT), delete first.
             'client_area_company_settings',
             'client_area_settings',
+            'agency_client_company_products',
             'agency_client_company_contexts',
             'agency_clients',
             'contacts',
@@ -585,8 +598,8 @@ run(
         expect(bodyOf(previewed).invitation).toEqual({
           companyDisplayName: 'Empresa A <b>',
           email: address.toUpperCase(),
-          role: 'client_admin',
-          roleLabel: 'Administrador',
+          role: 'client_owner',
+          roleLabel: 'Responsável',
           expiresAt: expect.any(String) as unknown,
           accountStatus: 'new',
         });
@@ -608,7 +621,7 @@ run(
           {
             companyContextId: A,
             displayName: 'Empresa A <b>',
-            role: 'client_admin',
+            role: 'client_owner',
           },
         ]);
 
@@ -637,7 +650,7 @@ run(
         );
         expect(membership).toMatchObject({
           id: invitation.accepted_membership_id,
-          role: 'client_admin',
+          role: 'client_owner',
           granted_by_user_id: ADMIN,
         });
         const trail = await events('invitation_id = $1', [invitationId]);
@@ -953,7 +966,7 @@ run(
         ).expect(200);
         expect(
           (context.body as { context: { role: string } }).context.role,
-        ).toBe('client_viewer');
+        ).toBe('client_member');
         await clientGet(
           `/client-area/companies/${B}/context`,
           bodyOf(done).accessToken!,
@@ -1021,8 +1034,8 @@ run(
           [userId, A],
         );
         expect(rows).toEqual([
-          { status: 'revoked', role: 'client_viewer' },
-          { status: 'active', role: 'client_admin' },
+          { status: 'revoked', role: 'client_member' },
+          { status: 'active', role: 'client_member' },
         ]);
       });
 
@@ -1157,12 +1170,12 @@ run(
           'SELECT status, role FROM client_area_memberships WHERE id = $1',
           [bMember.membershipId],
         );
-        expect(still).toEqual({ status: 'active', role: 'client_viewer' });
+        expect(still).toEqual({ status: 'active', role: 'client_member' });
         await preview(bInvite.token).expect(200);
       });
 
-      it('role change: only Client Area roles, audited before/after, same role is a no-op', async () => {
-        const { token } = await invite(email('papel'));
+      it('the legacy role route validates input but cannot bypass module access or ownership transfer', async () => {
+        const { token } = await invite(email('role'));
         const joined = await signup(token).expect(200);
         const userId = bodyOf(joined).user!.id;
         const list = await admin()
@@ -1171,44 +1184,52 @@ run(
         const { membershipId } = bodyOf(list).members!.find(
           (member) => member.userId === userId,
         )!;
-
-        for (const role of ['admin', 'owner', 'member', '']) {
+        for (const role of ['admin', 'owner', 'member', ''])
           await admin()
             .patch(`${base(X, A)}/members/${membershipId}/role`, { role })
             .expect(400);
-        }
-        const changed = await admin()
-          .patch(`${base(X, A)}/members/${membershipId}/role`, {
-            role: 'client_admin',
-          })
-          .expect(200);
-        expect(bodyOf(changed).member).toMatchObject({ role: 'client_admin' });
         await admin()
           .patch(`${base(X, A)}/members/${membershipId}/role`, {
-            role: 'client_admin',
+            role: 'client_owner',
           })
-          .expect(200);
-
-        const trail = await events(
-          `membership_id = $1 AND action = 'role_changed'`,
-          [membershipId],
-        );
-        expect(trail).toEqual([
-          expect.objectContaining({
-            actor_user_id: ADMIN,
-            actor_surface: 'agency',
-            previous_role: 'client_viewer',
-            new_role: 'client_admin',
-          }),
-        ]);
-        // The new role applies on the next request of the running session.
+          .expect(409);
+        expect(
+          await events(`membership_id=$1 AND action='role_changed'`, [
+            membershipId,
+          ]),
+        ).toEqual([]);
         const context = await clientGet(
           `/client-area/companies/${A}/context`,
           bodyOf(joined).accessToken!,
         ).expect(200);
         expect(
           (context.body as { context: { role: string } }).context.role,
-        ).toBe('client_admin');
+        ).toBe('client_member');
+      });
+
+      it('stores explicitly requested module levels in the invitation and applies the same levels atomically on acceptance', async () => {
+        const address = email('module-levels');
+        await ensureCrmPerson(address, A);
+        await admin()
+          .post(`${base(X, A)}/invitations`, {
+            email: address,
+            accountRole: 'client_member',
+            moduleLevels: { overview: 'viewer', conversations: 'operator' },
+          })
+          .expect(201);
+        const token = lastTokenFor(address, 'invitation');
+        const joined = await signup(token).expect(200);
+        const userId = bodyOf(joined).user!.id;
+        const rows = await db.query<
+          Array<{ module_key: string; level: string }>
+        >(
+          `SELECT a.module_key,a.level FROM client_area_member_module_access a JOIN client_area_memberships m ON m.id=a.membership_id WHERE m.user_id=$1 ORDER BY a.module_key`,
+          [userId],
+        );
+        expect(rows).toEqual([
+          { module_key: 'conversations', level: 'operator' },
+          { module_key: 'overview', level: 'viewer' },
+        ]);
       });
 
       it('revoke: last membership ends the session; a second revoke is 404 and writes no second audit row', async () => {

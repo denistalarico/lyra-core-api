@@ -7,7 +7,10 @@ import {
   Unique,
   UpdateDateColumn,
 } from 'typeorm';
-import type { ClientAreaRole } from '../client-area.types';
+import type {
+  ClientAreaRole,
+  ClientAreaModuleSettings,
+} from '../client-area.types';
 
 /** Agency-level configuration.  It intentionally holds only Client Area
  * overrides; Agency identity continues to live in workspace_company_settings. */
@@ -170,6 +173,20 @@ export class ClientAreaCompanySettingsEntity {
     default: 'client_viewer',
   })
   defaultRole!: ClientAreaRole;
+  @Column({
+    name: 'module_settings',
+    type: 'jsonb',
+    default: () => "'{}'::jsonb",
+  })
+  moduleSettings!: ClientAreaModuleSettings;
+  @Column({ name: 'allow_ai_cost_actions', type: 'boolean', default: false })
+  allowAiCostActions!: boolean;
+  @Column({
+    name: 'allow_media_spend_actions',
+    type: 'boolean',
+    default: false,
+  })
+  allowMediaSpendActions!: boolean;
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;
   @UpdateDateColumn({ name: 'updated_at', type: 'timestamptz' })

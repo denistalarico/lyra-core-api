@@ -143,6 +143,7 @@ export class ClientAreaManagementAgencyController {
   }
 
   @Patch('clients/:clientId/companies/:companyContextId')
+  @RequirePermission('agency.clients.client_area_members.manage.admin')
   @RequireClientAccess()
   patchCompanySettings(
     @AuthenticatedUser() user: AuthTokenPayload,

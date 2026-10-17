@@ -1,6 +1,9 @@
+import { CLIENT_AREA_MODULE_KEYS } from './client-area.types';
 import type {
   ClientAreaPermissionKey,
   ClientAreaRole,
+  ClientAreaMemberAccess,
+  ClientAreaModuleLevels,
 } from './client-area.types';
 
 /**
@@ -15,6 +18,15 @@ import type {
 export const CLIENT_AREA_ROLE_PERMISSIONS: Readonly<
   Record<ClientAreaRole, readonly ClientAreaPermissionKey[]>
 > = Object.freeze({
+  client_owner: Object.freeze([
+    'client_area.approvals.view',
+    'client_area.approvals.comment',
+    'client_area.approvals.decide',
+    'client_area.conversations.view',
+    'client_area.conversations.send',
+    'client_area.self.overview.view',
+  ] as const),
+  client_member: Object.freeze([]),
   client_admin: Object.freeze([
     'client_area.approvals.view',
     'client_area.approvals.comment',
@@ -51,4 +63,52 @@ export function permissionsForClientAreaRole(
   role: ClientAreaRole,
 ): ReadonlySet<ClientAreaPermissionKey> {
   return new Set(CLIENT_AREA_ROLE_PERMISSIONS[role]);
+}
+
+/** Company gates are resolved before levels: Owner never bypasses a disabled module. */
+export function resolveMemberAccess(
+  role: ClientAreaRole,
+  modules: Partial<Record<string, boolean>>,
+  levels: ClientAreaModuleLevels,
+): ClientAreaMemberAccess {
+  return Object.fromEntries(
+    CLIENT_AREA_MODULE_KEYS.map((key) => {
+      const level = role === 'client_owner' ? 'manager' : (levels[key] ?? null);
+      const allowed = key !== 'agency_billing' || role === 'client_owner';
+      const available = modules[key] === true && allowed && level !== null;
+      return [
+        key,
+        available
+          ? { available, level }
+          : {
+              available: false,
+              level: null,
+              reason: !modules[key]
+                ? 'module_unavailable'
+                : !allowed
+                  ? 'owner_required'
+                  : 'no_access',
+            },
+      ];
+    }),
+  ) as ClientAreaMemberAccess;
+}
+
+export function permissionsForMemberAccess(
+  access: ClientAreaMemberAccess,
+): ReadonlySet<ClientAreaPermissionKey> {
+  const result = new Set<ClientAreaPermissionKey>();
+  if (access.approvals.available) {
+    result.add('client_area.approvals.view');
+    if (access.approvals.level !== 'viewer') {
+      result.add('client_area.approvals.comment');
+      result.add('client_area.approvals.decide');
+    }
+  }
+  if (access.conversations.available) {
+    result.add('client_area.conversations.view');
+    if (access.conversations.level !== 'viewer')
+      result.add('client_area.conversations.send');
+  }
+  return result;
 }

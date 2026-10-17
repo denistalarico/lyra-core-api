@@ -2,12 +2,18 @@ import {
   IsEmail,
   IsIn,
   IsOptional,
+  IsObject,
   IsString,
   IsUUID,
   Matches,
   MaxLength,
 } from 'class-validator';
-import { CLIENT_AREA_ROLES } from '../client-area.types';
+import {
+  CLIENT_AREA_ROLES,
+  CLIENT_AREA_ACCOUNT_ROLES,
+  type ClientAreaAccountRole,
+  type ClientAreaModuleLevels,
+} from '../client-area.types';
 
 /**
  * CA2 — request bodies of the Client Area invitation/reset endpoints and of
@@ -82,6 +88,10 @@ export class ClientAreaResetPasswordDto {
 }
 
 export class CreateClientAreaInvitationDto {
+  @IsOptional()
+  @IsIn(CLIENT_AREA_ACCOUNT_ROLES)
+  accountRole?: ClientAreaAccountRole;
+  @IsOptional() @IsObject() moduleLevels?: ClientAreaModuleLevels;
   /** CA4 primary Agency intent. The server derives the delivery email. */
   @IsOptional()
   @IsUUID()
@@ -93,8 +103,9 @@ export class CreateClientAreaInvitationDto {
   @MaxLength(160)
   email?: string;
 
+  @IsOptional()
   @IsIn(CLIENT_AREA_ROLES)
-  role!: string;
+  role?: string;
 }
 
 export class ChangeClientAreaMemberRoleDto {

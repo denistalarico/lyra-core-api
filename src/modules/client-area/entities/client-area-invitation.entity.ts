@@ -9,6 +9,7 @@ import {
 import type {
   ClientAreaInvitationStatus,
   ClientAreaRole,
+  ClientAreaModuleLevels,
 } from '../client-area.types';
 
 /**
@@ -67,6 +68,13 @@ export class ClientAreaInvitationEntity {
 
   @Column({ type: 'varchar', length: 24 })
   role!: ClientAreaRole;
+
+  @Column({
+    name: 'module_levels',
+    type: 'jsonb',
+    default: () => "'{}'::jsonb",
+  })
+  moduleLevels!: ClientAreaModuleLevels;
 
   @Column({ name: 'token_hash', type: 'varchar', length: 64 })
   tokenHash!: string;

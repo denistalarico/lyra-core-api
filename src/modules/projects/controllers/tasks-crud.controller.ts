@@ -168,7 +168,7 @@ export class TasksCrudController {
     'agency.tasks.task.update.assigned',
     'agency.tasks.task.manage.department',
   )
-  @DangerousAction()
+  // CA7: ordinary client-scoped action; the bridge additionally enforces creator ownership.
   archive(
     @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
@@ -178,7 +178,7 @@ export class TasksCrudController {
 
   @Delete(':id/permanent')
   @RequirePermission('agency.tasks.task.manage.department')
-  @DangerousAction()
+  // CA7: reclassified with explicit user authorization; Agency permissions stay unchanged.
   remove(
     @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,

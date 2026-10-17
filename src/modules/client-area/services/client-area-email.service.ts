@@ -8,6 +8,8 @@ import type { ClientAreaRole } from '../client-area.types';
 
 export const CLIENT_AREA_ROLE_LABELS: Readonly<Record<ClientAreaRole, string>> =
   Object.freeze({
+    client_owner: 'Responsável',
+    client_member: 'Membro',
     client_admin: 'Administrador',
     client_operator: 'Operador',
     client_viewer: 'Visualizador',

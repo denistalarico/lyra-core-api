@@ -14,7 +14,7 @@ import type { ClientAreaContext } from './client-area.types';
  */
 export function toCompanyAwareScope(
   context: ClientAreaContext,
-): CompanyAwareScope {
+): CompanyAwareScope & { agencyClientId: string; companyContextId: string } {
   return {
     tenantId: context.tenantId,
     workspaceId: context.workspaceId,

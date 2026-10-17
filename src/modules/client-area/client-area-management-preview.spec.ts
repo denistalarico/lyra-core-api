@@ -133,7 +133,10 @@ describe('CA3.1 ClientAreaManagementService preview', () => {
       }),
     };
     const invitationsRepo = { find: jest.fn().mockResolvedValue([]) };
-    const entitlementsRepo = { findOne: jest.fn().mockResolvedValue(null) };
+    const entitlementsRepo = {
+      find: jest.fn().mockResolvedValue([]),
+      findOne: jest.fn().mockResolvedValue(null),
+    };
 
     const service = new ClientAreaManagementService(
       config,

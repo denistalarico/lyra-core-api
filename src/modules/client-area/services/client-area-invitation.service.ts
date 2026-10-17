@@ -1,3 +1,14 @@
+import { ClientAreaCompanySettingsEntity } from '../entities/client-area-settings.entity';
+import {
+  validateModuleLevels,
+  legacyDefaultLevel,
+} from '../client-area-access-validation';
+import {
+  CLIENT_AREA_ACCOUNT_ROLES,
+  CLIENT_AREA_MODULE_KEYS,
+  type ClientAreaModuleLevels,
+  type ClientAreaAccountRole,
+} from '../client-area.types';
 import {
   BadRequestException,
   ConflictException,
@@ -290,6 +301,7 @@ export class ClientAreaInvitationService {
               : null,
             companies: [{ companyContextId: company.id, displayName }],
             role: membership.role,
+            accountRole: membership.role,
             status: membership.status,
             grantedAt: membership.grantedAt,
             revokedAt: membership.revokedAt,
@@ -375,13 +387,25 @@ export class ClientAreaInvitationService {
     actor: ClientAreaAgencyActor,
     clientId: string,
     companyContextId: string,
-    input: { contactId?: unknown; email?: unknown; role: unknown },
+    input: {
+      contactId?: unknown;
+      email?: unknown;
+      role?: unknown;
+      accountRole?: unknown;
+      moduleLevels?: ClientAreaModuleLevels;
+    },
   ) {
     // Fail closed: an invitation emails a link to the Client Area, which is
     // useless (404) while the surface is off.
     assertClientAreaEnabled(this.config);
 
-    if (!isClientAreaRole(input.role)) {
+    if (
+      (input.role !== undefined && !isClientAreaRole(input.role)) ||
+      (input.accountRole !== undefined &&
+        !(CLIENT_AREA_ACCOUNT_ROLES as readonly unknown[]).includes(
+          input.accountRole,
+        ))
+    ) {
       throw clientAreaCodedError(
         BadRequestException,
         400,
@@ -389,10 +413,15 @@ export class ClientAreaInvitationService {
         'Invalid Client Area role.',
       );
     }
-    const role = input.role;
+    const role = input.accountRole ?? input.role ?? 'client_member';
+    if (input.moduleLevels !== undefined)
+      validateModuleLevels(input.moduleLevels);
     const token = randomBytes(INVITATION_TOKEN_BYTES).toString('hex');
 
     const created = await this.runInvitationTransaction(async (manager) => {
+      await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
+        `client_area_access:${companyContextId}`,
+      ]);
       const ref = await this.resolveAgencyCompany(
         manager,
         actor,
@@ -400,7 +429,7 @@ export class ClientAreaInvitationService {
         companyContextId,
         { requireUsable: true },
       );
-      // The first invitation uses today's admin role; CA7 migrates it to owner.
+      // CA7: the first invitation reserves ownership; company locking serializes invitations.
       const hasMember = await manager
         .getRepository(ClientAreaMembershipEntity)
         .exists({
@@ -415,8 +444,60 @@ export class ClientAreaInvitationService {
             expiresAt: MoreThan(new Date()),
           },
         });
-      const effectiveRole =
-        !hasMember && !hasInvitation ? 'client_admin' : role;
+      const effectiveRole: ClientAreaAccountRole =
+        (!hasMember && !hasInvitation) || role === 'client_owner'
+          ? 'client_owner'
+          : 'client_member';
+      if (
+        effectiveRole === 'client_owner' &&
+        ((await manager.getRepository(ClientAreaMembershipEntity).exists({
+          where: {
+            companyContextId: ref.company.id,
+            status: 'active',
+            role: 'client_owner',
+          },
+        })) ||
+          (await manager.getRepository(ClientAreaInvitationEntity).exists({
+            where: {
+              companyContextId: ref.company.id,
+              status: 'pending',
+              role: 'client_owner',
+              expiresAt: MoreThan(new Date()),
+            },
+          })))
+      )
+        throw new ConflictException(
+          'The company already has an Owner or a pending Owner invitation.',
+        );
+      const settings = await manager
+        .getRepository(ClientAreaCompanySettingsEntity)
+        .findOne({
+          where: { companyContextId: ref.company.id, tenantId: actor.tenantId },
+        });
+      const defaults: ClientAreaModuleLevels = {};
+      for (const key of CLIENT_AREA_MODULE_KEYS) {
+        const setting = settings?.moduleSettings?.[key];
+        if (
+          setting?.enabled &&
+          key !== 'agency_billing' &&
+          setting.defaultLevel
+        )
+          defaults[key] =
+            input.role && isClientAreaRole(input.role) && !input.accountRole
+              ? legacyDefaultLevel(input.role)
+              : setting.defaultLevel;
+      }
+      const moduleLevels = input.moduleLevels ?? defaults;
+      for (const key of Object.keys(
+        moduleLevels,
+      ) as (keyof ClientAreaModuleLevels)[])
+        if (
+          key === 'agency_billing' ||
+          !settings?.moduleSettings?.[key]?.enabled
+        )
+          throw new BadRequestException(
+            'Invitation cannot grant a disabled or Owner-only module.',
+          );
       await this.memberships.assertAgencyActor(
         manager,
         actor.tenantId,
@@ -480,6 +561,7 @@ export class ClientAreaInvitationService {
         email: contact.email,
         emailNormalized: contact.emailNormalized,
         role: effectiveRole,
+        moduleLevels,
         token,
         invitedByUserId: actor.userId,
       });
@@ -578,6 +660,7 @@ export class ClientAreaInvitationService {
         email: previous.email,
         emailNormalized: previous.emailNormalized,
         role: previous.role,
+        moduleLevels: previous.moduleLevels,
         token,
         invitedByUserId: actor.userId,
       });
@@ -982,6 +1065,13 @@ export class ClientAreaInvitationService {
   ): Promise<string> {
     try {
       return await this.dataSource.transaction(async (manager) => {
+        const requested = await manager
+          .getRepository(ClientAreaInvitationEntity)
+          .findOne({ where: { id: invitationId } });
+        if (!requested) throw invitationInvalid();
+        await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
+          `client_area_access:${requested.companyContextId}`,
+        ]);
         const invitation = await manager
           .getRepository(ClientAreaInvitationEntity)
           .findOne({
@@ -1064,6 +1154,7 @@ export class ClientAreaInvitationService {
             companyContextId: invitation.companyContextId,
             userId,
             role: invitation.role,
+            moduleLevels: invitation.moduleLevels,
             // The inviter must still be an active operator of the workspace:
             // an invitation of someone who left the agency dies with them.
             grantedByUserId: invitation.invitedByUserId,
@@ -1157,6 +1248,7 @@ export class ClientAreaInvitationService {
       email: string;
       emailNormalized: string;
       role: ClientAreaRole;
+      moduleLevels?: ClientAreaModuleLevels;
       token: string;
       invitedByUserId: string;
     },
@@ -1172,6 +1264,7 @@ export class ClientAreaInvitationService {
         email: input.email,
         emailNormalized: input.emailNormalized,
         role: input.role,
+        moduleLevels: input.moduleLevels ?? {},
         tokenHash: hashToken(input.token),
         expiresAt: new Date(Date.now() + CLIENT_AREA_INVITATION_TTL_MS),
         status: 'pending',

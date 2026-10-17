@@ -21,6 +21,10 @@ import type {
  * validates the identity in the same tenant.
  */
 @Entity('client_area_memberships')
+@Index('UQ_client_area_owner_active', ['companyContextId'], {
+  unique: true,
+  where: "status = 'active' AND role = 'client_owner'",
+})
 @Index('IDX_client_area_memberships_user', ['tenantId', 'userId', 'status'])
 @Index('IDX_client_area_memberships_company', [
   'tenantId',

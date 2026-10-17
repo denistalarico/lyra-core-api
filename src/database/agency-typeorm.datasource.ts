@@ -1,3 +1,4 @@
+import { ClientAreaAccessModelV21799700000000 } from './migrations/1799700000000-client-area-access-model-v2';
 import { CreateAgencyClientCompanyProducts1799600000000 } from './migrations/1799600000000-create-agency-client-company-products';
 import { DisableClientAreaOnInactiveClients1799500000000 } from './migrations/1799500000000-disable-client-area-on-inactive-clients';
 import { CreateContractAiAssistRuns1799200000000 } from './migrations/1799200000000-create-contract-ai-assist-runs';
@@ -538,5 +539,6 @@ export const AgencyDataSource = new DataSource({
     AddContractKindsDefaultsAttachments1799400000000,
     DisableClientAreaOnInactiveClients1799500000000,
     CreateAgencyClientCompanyProducts1799600000000,
+    ClientAreaAccessModelV21799700000000,
   ],
 });

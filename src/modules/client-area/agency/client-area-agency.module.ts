@@ -1,3 +1,4 @@
+import { ClientAreaAccessAgencyController } from './client-area-access.agency.controller';
 import { Module, type OnModuleInit } from '@nestjs/common';
 import { ClientsModule } from '../../clients/clients.module';
 import { AgencyClientLifecycleHooks } from '../../clients/agency-client-lifecycle-hooks';
@@ -18,6 +19,7 @@ import { ClientAreaManagementAgencyController } from './client-area-management.a
 @Module({
   imports: [PermissionsModule, ClientAreaModule, ClientsModule],
   controllers: [
+    ClientAreaAccessAgencyController,
     ClientAreaMembersAgencyController,
     ClientAreaManagementAgencyController,
   ],

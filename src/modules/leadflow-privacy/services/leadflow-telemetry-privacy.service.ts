@@ -845,7 +845,11 @@ export class LeadFlowTelemetryPrivacyService {
     purposeKey: string,
   ) {
     return repository.findOne({
-      where: { ...this.scopeWhere(scope), purposeKey },
+      where: {
+        ...this.scopeWhere(scope),
+        purposeKey,
+        companyContextId: IsNull(),
+      },
       order: { occurredAt: 'DESC', createdAt: 'DESC' },
     });
   }

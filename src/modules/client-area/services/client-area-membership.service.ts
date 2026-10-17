@@ -1,3 +1,9 @@
+import { ClientAreaCompanySettingsEntity } from '../entities/client-area-settings.entity';
+import { legacyDefaultLevel } from '../client-area-access-validation';
+import { CLIENT_AREA_MODULE_KEYS } from '../client-area.types';
+import { validateModuleLevels } from '../client-area-access-validation';
+import { replaceModuleLevels } from './client-area-module-levels.persistence';
+import type { ClientAreaModuleLevels } from '../client-area.types';
 import {
   BadRequestException,
   ConflictException,
@@ -23,7 +29,6 @@ import {
   CLIENT_AREA_ERROR_CODES,
   isClientAreaRole,
   isUuid,
-  type ClientAreaRole,
 } from '../client-area.types';
 import { ClientAreaMembershipEntity } from '../entities/client-area-membership.entity';
 import { ClientAreaMemberAuditService } from './client-area-member-audit.service';
@@ -42,6 +47,7 @@ export type GrantClientAreaMembershipInput = {
    * the company's workspace. For an accepted invitation it is the inviter.
    */
   grantedByUserId: string | null;
+  moduleLevels?: ClientAreaModuleLevels;
 };
 
 export type RevokeClientAreaMembershipInput = {
@@ -154,6 +160,11 @@ export class ClientAreaMembershipService {
       );
     }
 
+    if (input.moduleLevels !== undefined)
+      validateModuleLevels(input.moduleLevels);
+    await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
+      `client_area_access:${input.companyContextId}`,
+    ]);
     const { company } = await this.findUsableCompany(
       manager,
       input.tenantId,
@@ -204,14 +215,14 @@ export class ClientAreaMembershipService {
       throw this.membershipExists();
     }
 
-    return repo.save(
+    const member = await repo.save(
       repo.create({
         tenantId: company.tenantId,
         workspaceId: company.workspaceId,
         agencyClientId: company.agencyClientId,
         companyContextId: company.id,
         userId: input.userId,
-        role: input.role,
+        role: input.role === 'client_owner' ? 'client_owner' : 'client_member',
         status: 'active',
         grantedByUserId: input.grantedByUserId,
         grantedAt: new Date(),
@@ -219,6 +230,36 @@ export class ClientAreaMembershipService {
         revokedAt: null,
       }),
     );
+    if (input.moduleLevels)
+      await replaceModuleLevels(manager, member, input.moduleLevels, {
+        userId: input.grantedByUserId,
+        surface: 'agency',
+      });
+    if (!input.moduleLevels) {
+      const settings = await manager
+        .getRepository(ClientAreaCompanySettingsEntity)
+        .findOne({
+          where: { companyContextId: company.id, tenantId: company.tenantId },
+        });
+      const levels: ClientAreaModuleLevels = {};
+      for (const key of CLIENT_AREA_MODULE_KEYS) {
+        const setting = settings?.moduleSettings?.[key];
+        if (key === 'agency_billing' || !setting?.enabled) continue;
+        const level =
+          input.role === 'client_admin' ||
+          input.role === 'client_operator' ||
+          input.role === 'client_viewer'
+            ? legacyDefaultLevel(input.role)
+            : setting.defaultLevel;
+        if (level) levels[key] = level;
+      }
+      await replaceModuleLevels(manager, member, levels, {
+        userId: input.grantedByUserId,
+        surface: 'agency',
+      });
+    }
+
+    return member;
   }
 
   async revoke(
@@ -272,7 +313,11 @@ export class ClientAreaMembershipService {
   async revokeInTransaction(
     manager: EntityManager,
     membership: ClientAreaMembershipEntity,
-    input: { revokedByUserId: string | null; reason?: string },
+    input: {
+      revokedByUserId: string | null;
+      reason?: string;
+      actorSurface?: 'agency' | 'client_area' | 'system';
+    },
   ): Promise<ClientAreaMembershipEntity> {
     await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
       `client_area_membership_revoke:${membership.tenantId}:${membership.userId}`,
@@ -307,7 +352,8 @@ export class ClientAreaMembershipService {
     await this.audit.record(manager, {
       company: membership,
       action: 'membership_revoked',
-      actorSurface: input.revokedByUserId ? 'agency' : 'system',
+      actorSurface:
+        input.actorSurface ?? (input.revokedByUserId ? 'agency' : 'system'),
       actorUserId: input.revokedByUserId,
       membershipId: membership.id,
       targetUserId: membership.userId,
@@ -326,11 +372,7 @@ export class ClientAreaMembershipService {
     };
   }
 
-  /**
-   * CA2 — Agency changes the role of an active membership. The row keeps its
-   * id (the person's access is the same grant); before/after, actor and time
-   * go to the audit trail. Setting the current role again is a no-op.
-   */
+  /** Legacy route remains addressable but cannot bypass module grants or ownership transfer. */
   async changeRole(
     input: ChangeClientAreaMembershipRoleInput,
   ): Promise<ClientAreaMembershipEntity> {
@@ -352,48 +394,24 @@ export class ClientAreaMembershipService {
       throw this.membershipNotFound();
     }
 
-    const role: ClientAreaRole = input.role;
-
-    return this.dataSource.transaction(async (manager) => {
-      const repo = manager.getRepository(ClientAreaMembershipEntity);
-      const membership = await repo.findOne({
-        where: {
-          id: input.membershipId,
-          tenantId: input.tenantId,
-          companyContextId: input.companyContextId,
-          status: 'active',
-        },
-        lock: { mode: 'pessimistic_write' },
-      });
-
-      if (!membership) {
-        throw this.membershipNotFound();
-      }
-
-      await this.assertAgencyActor(
-        manager,
-        membership.tenantId,
-        membership.workspaceId,
-        input.changedByUserId,
-      );
-
-      if (membership.role === role) {
-        return membership;
-      }
-
-      await repo.update({ id: membership.id }, { role });
-      await this.audit.record(manager, {
-        company: membership,
-        action: 'role_changed',
-        actorSurface: 'agency',
-        actorUserId: input.changedByUserId,
-        membershipId: membership.id,
-        targetUserId: membership.userId,
-        previousRole: membership.role,
-        newRole: role,
-      });
-
-      return { ...membership, role };
+    const membership = await this.membershipsRepo.findOne({
+      where: {
+        id: input.membershipId,
+        tenantId: input.tenantId,
+        companyContextId: input.companyContextId,
+        status: 'active',
+      },
+    });
+    if (!membership) throw this.membershipNotFound();
+    await this.assertAgencyActor(
+      this.dataSource.manager,
+      input.tenantId,
+      membership.workspaceId,
+      input.changedByUserId,
+    );
+    throw new ConflictException({
+      code: 'client_area_use_module_levels',
+      message: 'Use module levels and the ownership transfer endpoint.',
     });
   }
 

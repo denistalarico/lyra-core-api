@@ -1,3 +1,15 @@
+import { ClientAreaMemberAccessService } from './client-area-member-access.service';
+import { permissionsForMemberAccess } from '../client-area-permissions.catalog';
+import { Optional } from '@nestjs/common';
+import { ClientAreaConsentService } from './client-area-consent.service';
+import {
+  CLIENT_AREA_MODULE_KEYS,
+  type ClientAreaModuleSettings,
+} from '../client-area.types';
+import {
+  validateModuleSettings,
+  legacyDefaultLevel,
+} from '../client-area-access-validation';
 import { AgencyClientCompanyProduct } from '../../clients/entities/agency-client-company-product.entity';
 import {
   BadRequestException,
@@ -15,7 +27,6 @@ import { AgencyClient } from '../../clients/entities/agency-client.entity';
 import { AgencyClientCompanyContext } from '../../clients/entities/agency-client-company-context.entity';
 import { ContactEntity } from '../../contacts/entities/contact.entity';
 import { TenantProductEntitlementEntity } from '../../platform/entities/tenant-product-entitlement.entity';
-import { PlatformProductKey } from '../../platform/enums/platform-product.enums';
 import {
   isActiveClient,
   isActiveCompany,
@@ -42,10 +53,6 @@ import { permissionsForClientAreaRole } from '../client-area-permissions.catalog
 import { ClientAreaEligibilityService } from './client-area-eligibility.service';
 
 const AGENCY_CONNECTION = 'agency';
-const EMPTY_MODULES: ClientAreaModules = {
-  approvals: false,
-  conversations: false,
-};
 
 function trimOrNull(value: string | null | undefined) {
   return value?.trim() || null;
@@ -93,6 +100,8 @@ export class ClientAreaManagementService {
     private readonly eligibility: ClientAreaEligibilityService,
     @InjectRepository(AgencyClientCompanyProduct, AGENCY_CONNECTION)
     private readonly productsRepo: Repository<AgencyClientCompanyProduct>,
+    @Optional() private readonly consents?: ClientAreaConsentService,
+    @Optional() private readonly memberAccess?: ClientAreaMemberAccessService,
   ) {}
 
   private async findSettings(tenantId: string, workspaceId: string) {
@@ -256,62 +265,63 @@ export class ClientAreaManagementService {
         },
       }),
     ]);
+    const modules = Object.fromEntries(
+      CLIENT_AREA_MODULE_KEYS.map((key) => [key, false]),
+    ) as ClientAreaModules;
     if (
       !isClientAreaEnabled(this.config) ||
       !settings?.enabled ||
       !companySettings?.enabled ||
-      !isActiveClient(client) ||
-      !client.managedTenantId
+      !isActiveClient(client)
     )
-      return EMPTY_MODULES;
-    const entitlement = await this.entitlementsRepo.findOne({
-      where: {
-        tenantId: client.managedTenantId,
-        productKey: PlatformProductKey.Social,
-      },
-    });
-    const social = await this.productsRepo.findOne({
-      where: {
-        tenantId: input.tenantId,
-        workspaceId: input.workspaceId,
-        agencyClientId: input.agencyClientId,
-        companyContextId: input.companyContextId,
-        productKey: 'social',
-        status: 'active',
-      },
-    });
-    return {
-      approvals: Boolean(
-        social &&
-        companySettings.approvalsEnabled &&
-        isActiveProductEntitlement(entitlement, input.now ?? new Date()),
-      ),
-      /**
-       * CCOM1 §21 — conversations is gated by the Client Area itself, with no
-       * product entitlement, and that is a decision against the real model
-       * rather than an omission.
-       *
-       * The entitlement above is read on `client.managedTenantId` — the
-       * *client's* tenant — and `approvals` requires `Social` there because an
-       * approval is a Social artefact: a client with no Social contract has
-       * nothing to approve. A conversation is not an artefact of any product;
-       * it is the agency talking to its client, and it must work for a client
-       * who buys only Social, only LeadFlow, or neither.
-       *
-       * `PlatformProductKey.Agency` was considered and rejected: it enumerates
-       * the agency's *own* modules (dashboard, finance, team…), is held by the
-       * agency tenant rather than a managed one, and is used as a runtime gate
-       * nowhere in the codebase. Gating on it would fail closed for every real
-       * client — the wrong kind of "safe", since it would silently disable a
-       * channel the agency explicitly switched on.
-       *
-       * So the gate is the three enablement layers that already apply above:
-       * the platform flag (`CLIENT_AREA_ENABLED`), the agency's Client Area
-       * settings, and this company's own row. Membership and role are enforced
-       * per request by the guard chain, never cached here.
-       */
-      conversations: Boolean(companySettings.conversationsEnabled),
-    };
+      return modules;
+    const moduleSettings = companySettings.moduleSettings ?? {};
+    for (const key of CLIENT_AREA_MODULE_KEYS)
+      modules[key] =
+        moduleSettings[key]?.enabled ??
+        (key === 'approvals'
+          ? companySettings.approvalsEnabled
+          : key === 'conversations'
+            ? companySettings.conversationsEnabled
+            : false);
+    const [products, entitlements, consent] = await Promise.all([
+      this.productsRepo.find({
+        where: {
+          tenantId: input.tenantId,
+          workspaceId: input.workspaceId,
+          agencyClientId: input.agencyClientId,
+          companyContextId: input.companyContextId,
+          status: 'active',
+        },
+      }),
+      client.managedTenantId
+        ? this.entitlementsRepo.find({
+            where: { tenantId: client.managedTenantId },
+          })
+        : Promise.resolve([]),
+      this.consents?.state(input),
+    ]);
+    for (const key of CLIENT_AREA_MODULE_KEYS) {
+      const product =
+        key === 'approvals' || key.startsWith('social_')
+          ? 'social'
+          : key.startsWith('leadflow_')
+            ? 'leadflow'
+            : null;
+      if (product)
+        modules[key] = Boolean(
+          modules[key] &&
+          client.managedTenantId &&
+          products.some((row) => row.productKey === product) &&
+          entitlements.some(
+            (row) =>
+              String(row.productKey) === product &&
+              isActiveProductEntitlement(row, input.now ?? new Date()),
+          ) &&
+          consent?.status === 'accepted',
+        );
+    }
+    return modules;
   }
 
   async getCompanySettings(
@@ -340,6 +350,22 @@ export class ClientAreaManagementService {
         approvalsEnabled: global.approvalsDefaultEnabled,
         conversationsEnabled: global.conversationsDefaultEnabled,
         defaultRole: global.defaultRole,
+        moduleSettings: Object.fromEntries(
+          CLIENT_AREA_MODULE_KEYS.map((key) => [
+            key,
+            {
+              enabled:
+                key === 'approvals'
+                  ? global.approvalsDefaultEnabled
+                  : key === 'conversations'
+                    ? global.conversationsDefaultEnabled
+                    : ['overview', 'analytics', 'settings'].includes(key),
+              defaultLevel: legacyDefaultLevel(global.defaultRole),
+            },
+          ]),
+        ),
+        allowAiCostActions: false,
+        allowMediaSpendActions: false,
       })
     );
   }
@@ -351,6 +377,8 @@ export class ClientAreaManagementService {
     companyContextId: string,
     dto: PatchClientAreaCompanySettingsDto,
   ) {
+    if (dto.moduleSettings !== undefined)
+      validateModuleSettings(dto.moduleSettings);
     await this.companySettingsRepo.manager.transaction(async (manager) => {
       // Serialize switches with removal and invitations. In particular, an
       // approvals-only PATCH must not resurrect enabled=true from a stale row.
@@ -372,6 +400,24 @@ export class ClientAreaManagementService {
         agencyClientId,
         companyContextId,
       );
+      const moduleSettings: ClientAreaModuleSettings = {
+        ...current.moduleSettings,
+        ...dto.moduleSettings,
+      };
+      if (dto.approvalsEnabled !== undefined)
+        moduleSettings.approvals = {
+          ...(moduleSettings.approvals ?? {
+            defaultLevel: legacyDefaultLevel(current.defaultRole),
+          }),
+          enabled: dto.approvalsEnabled,
+        };
+      if (dto.conversationsEnabled !== undefined)
+        moduleSettings.conversations = {
+          ...(moduleSettings.conversations ?? {
+            defaultLevel: legacyDefaultLevel(current.defaultRole),
+          }),
+          enabled: dto.conversationsEnabled,
+        };
       const settingsRepository = manager.getRepository(
         ClientAreaCompanySettingsEntity,
       );
@@ -379,6 +425,12 @@ export class ClientAreaManagementService {
         {
           ...current,
           ...dto,
+          moduleSettings,
+          approvalsEnabled:
+            moduleSettings.approvals?.enabled ?? current.approvalsEnabled,
+          conversationsEnabled:
+            moduleSettings.conversations?.enabled ??
+            current.conversationsEnabled,
           tenantId,
           workspaceId,
           agencyClientId,
@@ -601,6 +653,12 @@ export class ClientAreaManagementService {
         where: { id: company.companyContactId, tenantId, workspaceId },
       }),
     ]);
+    const access = this.memberAccess
+      ? await this.memberAccess.resolveMemberAccess(membership, modules)
+      : undefined;
+    const permissions = access
+      ? permissionsForMemberAccess(access)
+      : permissionsForClientAreaRole(membership.role);
     const companyDisplayName =
       organization?.displayName || organization?.legalName || 'Empresa';
     return {
@@ -619,7 +677,7 @@ export class ClientAreaManagementService {
         company: companyDisplayName,
         displayName: companyDisplayName,
         role: membership.role,
-        permissions: [...permissionsForClientAreaRole(membership.role)].sort(),
+        permissions: [...permissions].sort(),
         modules,
         branding: await this.branding(tenantId, workspaceId),
         readOnly: true as const,

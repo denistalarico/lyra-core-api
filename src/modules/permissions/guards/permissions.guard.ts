@@ -1,3 +1,11 @@
+import { Optional, NotFoundException } from '@nestjs/common';
+import { PermissionScopeEvaluatorService } from '../services/permission-scope-evaluator.service';
+import { CLIENT_AREA_EXPOSED_METADATA } from '../../../common/client-area-bridge/client-area-bridge.registry';
+import { projectAgencyPermissions } from '../../client-area/client-area-agency-permission-projection';
+import type {
+  ClientAreaContext,
+  ClientAreaModuleKey,
+} from '../../client-area/client-area.types';
 import {
   CanActivate,
   ExecutionContext,
@@ -40,6 +48,8 @@ export class PermissionsGuard implements CanActivate {
     private readonly reflector: Reflector,
     private readonly permissionService: PlatformPermissionService,
     private readonly operationalContextResolver: OperationalContextResolver,
+    @Optional()
+    private readonly clientAreaScopes?: PermissionScopeEvaluatorService,
   ) {}
 
   async canActivate(executionContext: ExecutionContext): Promise<boolean> {
@@ -47,6 +57,9 @@ export class PermissionsGuard implements CanActivate {
       .switchToHttp()
       .getRequest<AuthenticatedRequest>();
     const user = request.user;
+
+    if (user?.surface === 'client_area')
+      return this.authorizeClientArea(executionContext, request);
 
     const targets = [
       executionContext.getHandler(),
@@ -255,6 +268,104 @@ export class PermissionsGuard implements CanActivate {
       });
     }
 
+    return true;
+  }
+  private async authorizeClientArea(
+    execution: ExecutionContext,
+    request: AuthenticatedRequest,
+  ): Promise<boolean> {
+    const context = (
+      request as AuthenticatedRequest & {
+        clientAreaContext?: ClientAreaContext;
+      }
+    ).clientAreaContext;
+    const module = this.reflector.get<ClientAreaModuleKey | undefined>(
+      CLIENT_AREA_EXPOSED_METADATA,
+      execution.getHandler(),
+    );
+    const targets = [execution.getHandler(), execution.getClass()];
+    const required = this.reflector.getAllAndOverride<string | undefined>(
+      PERMISSION_KEY_METADATA,
+      targets,
+    );
+    const any = this.reflector.getAllAndOverride<string[] | undefined>(
+      ANY_PERMISSION_KEYS_METADATA,
+      targets,
+    );
+    if (
+      !context ||
+      !module ||
+      !this.clientAreaScopes ||
+      !context.memberAccess?.[module]?.available ||
+      this.reflector.getAllAndOverride<boolean>(
+        DANGEROUS_ACTION_METADATA,
+        targets,
+      ) ||
+      (!required && !any?.length)
+    )
+      throw new ForbiddenException('Client Area action is not allowed.');
+    const clientAccess =
+      this.reflector.getAllAndOverride<RequireClientAccessOptions>(
+        CLIENT_ACCESS_METADATA,
+        targets,
+      );
+    const productAccess =
+      this.reflector.getAllAndOverride<RequireClientProductAccessOptions>(
+        CLIENT_PRODUCT_ACCESS_METADATA,
+        targets,
+      );
+    for (const access of [clientAccess, productAccess])
+      if (
+        access &&
+        request.params[access.param ?? 'clientId'] !== context.agencyClientId
+      )
+        throw new NotFoundException('Resource is not available.');
+    if (
+      productAccess &&
+      productAccess.productKey !== request.managedContext?.productKey
+    )
+      throw new ForbiddenException();
+    const grants = projectAgencyPermissions(
+      module,
+      context.memberAccess[module].level,
+    ).filter((grant) => grant.methods.includes(request.method));
+    const route = request.route as { path?: string } | undefined;
+    const scopeRequest = {
+      method: request.method,
+      routePath: route?.path ?? null,
+      params: request.params,
+      query: request.query,
+      body: request.body as Record<string, unknown> | null,
+    };
+    const check = async (keys: string[]) => {
+      const matches = grants.filter((grant) => keys.includes(grant.key));
+      if (!matches.length)
+        throw new ForbiddenException('Insufficient module level.');
+      let denied: NotFoundException | undefined;
+      for (const grant of matches) {
+        if (
+          (grant.cost === 'ai' && !context.allowAiCostActions) ||
+          (grant.cost === 'media' && !context.allowMediaSpendActions)
+        )
+          throw new ForbiddenException('Cost actions are disabled.');
+        try {
+          await this.clientAreaScopes!.assertClientAreaScope(
+            context,
+            module,
+            grant.key,
+            scopeRequest,
+            grant.scope === 'created_by_me',
+          );
+          return;
+        } catch (error) {
+          if (!(error instanceof NotFoundException)) throw error;
+          denied = error;
+        }
+      }
+      throw denied ?? new NotFoundException();
+    };
+    if (required) await check([required]);
+    if (any?.length) await check(any);
     return true;
   }
 }

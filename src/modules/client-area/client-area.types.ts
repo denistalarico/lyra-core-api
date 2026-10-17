@@ -1,16 +1,20 @@
 import type { Request } from 'express';
 
 /**
- * CA1 — Client Area contracts.
- *
- * Deliberately independent from the Agency `RequestContext`/`ManagedContext`
- * (CA0 §K/L): `operatingMode='client'` means "an Agency operator working on a
- * managed client", never "the client person". Nothing here may flow into
- * `normalizeRole`, `PlatformPermissionService` or `PermissionsGuard`, which is
- * why the role keys are prefixed and live in this module only.
+ * CA7 — Client Area account roles and module levels are independent from Agency roles.
+ * `client_area_actor` crosses only the opt-in Surface Bridge: it never becomes an
+ * Agency Owner and never enters PlatformPermissionService.can(). Legacy presets
+ * remain for the independent agency-self context and old invitation input/history.
  */
 
+export const CLIENT_AREA_ACCOUNT_ROLES = [
+  'client_owner',
+  'client_member',
+] as const;
+export type ClientAreaAccountRole = (typeof CLIENT_AREA_ACCOUNT_ROLES)[number];
+/** Legacy values remain only for self-context, audit history and old invitation input. */
 export const CLIENT_AREA_ROLES = [
+  ...CLIENT_AREA_ACCOUNT_ROLES,
   'client_admin',
   'client_operator',
   'client_viewer',
@@ -40,10 +44,53 @@ export const CLIENT_AREA_PERMISSION_KEYS = [
 export type ClientAreaPermissionKey =
   (typeof CLIENT_AREA_PERMISSION_KEYS)[number];
 
-export const CLIENT_AREA_MODULE_KEYS = ['approvals', 'conversations'] as const;
+export const CLIENT_AREA_MODULE_KEYS = [
+  'overview',
+  'analytics',
+  'agency_projects',
+  'agency_billing',
+  'conversations',
+  'approvals',
+  'social_planner',
+  'social_creative_studio',
+  'social_campaigns',
+  'leadflow_inbox',
+  'leadflow_crm',
+  'leadflow_appointments',
+  'leadflow_agents',
+  'settings',
+] as const;
+export const CLIENT_AREA_ACCESS_LEVELS = [
+  'viewer',
+  'operator',
+  'manager',
+] as const;
+export type ClientAreaAccessLevel = (typeof CLIENT_AREA_ACCESS_LEVELS)[number];
+export type ClientAreaModuleLevels = Partial<
+  Record<ClientAreaModuleKey, ClientAreaAccessLevel>
+>;
+export type ClientAreaModuleSettings = Partial<
+  Record<
+    ClientAreaModuleKey,
+    { enabled: boolean; defaultLevel: ClientAreaAccessLevel | null }
+  >
+>;
+export type ClientAreaMemberAccess = Record<
+  ClientAreaModuleKey,
+  { available: boolean; level: ClientAreaAccessLevel | null; reason?: string }
+>;
+export type ClientAreaConsentState = {
+  status: 'required' | 'accepted' | 'revoked' | 'notice_unavailable';
+  noticeVersion: number | null;
+  ownerDecides: boolean;
+};
+
 export type ClientAreaModuleKey = (typeof CLIENT_AREA_MODULE_KEYS)[number];
 
-export type ClientAreaModules = Record<ClientAreaModuleKey, boolean>;
+export type ClientAreaModules = {
+  approvals: boolean;
+  conversations: boolean;
+} & Partial<Record<ClientAreaModuleKey, boolean>>;
 
 /**
  * PD3 §16 — a Client Area context is either an external company or the agency
@@ -86,6 +133,8 @@ export const CLIENT_AREA_MEMBER_EVENT_ACTIONS = [
   'role_changed',
   'membership_revoked',
   'access_removed',
+  'module_access_changed',
+  'owner_transferred',
 ] as const;
 export type ClientAreaMemberEventAction =
   (typeof CLIENT_AREA_MEMBER_EVENT_ACTIONS)[number];
@@ -155,6 +204,11 @@ export interface ClientAreaContext {
   role: ClientAreaRole;
   permissions: ReadonlySet<ClientAreaPermissionKey>;
   modules: ClientAreaModules;
+  accountRole?: ClientAreaAccountRole;
+  memberAccess?: ClientAreaMemberAccess;
+  consent?: ClientAreaConsentState;
+  allowAiCostActions?: boolean;
+  allowMediaSpendActions?: boolean;
 }
 
 /**

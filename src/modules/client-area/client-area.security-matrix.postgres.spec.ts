@@ -1,3 +1,5 @@
+import { CreateAgencyClientCompanyProducts1799600000000 } from '../../database/migrations/1799600000000-create-agency-client-company-products';
+import { ClientAreaAccessModelV21799700000000 } from '../../database/migrations/1799700000000-client-area-access-model-v2';
 import {
   Controller,
   Get,
@@ -187,6 +189,7 @@ run('CA1 Client Area security matrix (PostgreSQL, real guards)', () => {
       await authed('/client-area/companies', token).expect(200),
     ).companies.map((company) => company.companyContextId);
 
+  let activeNoticeVersion: number;
   beforeAll(async () => {
     process.env.JWT_ACCESS_SECRET = AGENCY_SECRET;
     process.env.JWT_CLIENT_AREA_ACCESS_SECRET = CLIENT_SECRET;
@@ -240,6 +243,8 @@ run('CA1 Client Area security matrix (PostgreSQL, real guards)', () => {
       await new CreateClientAreaCrmIdentityRelationships1797300000000().up(
         runner,
       );
+      await new CreateAgencyClientCompanyProducts1799600000000().up(runner);
+      await new ClientAreaAccessModelV21799700000000().up(runner);
     } finally {
       await runner.release();
     }
@@ -284,6 +289,50 @@ run('CA1 Client Area security matrix (PostgreSQL, real guards)', () => {
         ($1,'social','active','manual'),($2,'social','active','manual'),($3,'social','active','manual')`,
       [MX, MY, MZ],
     );
+
+    const v2Runner = db.createQueryRunner();
+    await v2Runner.connect();
+    try {
+      await new ClientAreaAccessModelV21799700000000().up(v2Runner);
+    } finally {
+      await v2Runner.release();
+    }
+    for (const [tenantId, workspaceId, agencyClientId, companyContextId] of [
+      [T, W, X, A],
+      [T, W, X, A2],
+      [T, W, Y, B],
+      [T2, W2, Z, C],
+    ])
+      await db.query(
+        `INSERT INTO agency_client_company_products (tenant_id,workspace_id,agency_client_id,company_context_id,product_key,status) VALUES ($1,$2,$3,$4,'social','active') ON CONFLICT DO NOTHING`,
+        [tenantId, workspaceId, agencyClientId, companyContextId],
+      );
+    const [{ id: noticeId, version: noticeVersion, content_hash: noticeHash }] =
+      await db.query<
+        Array<{ id: string; version: number; content_hash: string }>
+      >(
+        `INSERT INTO leadflow_telemetry_consent_notices (purpose_key,version,locale,title,body,content_hash,categories,retention_days,k_anonymity_threshold,legal_review_status,status,effective_at) SELECT 'client_area_essential_processing',COALESCE(max(version),0)+1,'pt-BR','CA7 TEST NOTICE','TEST ONLY',$1,'[]',365,5,'approved','active',now() FROM leadflow_telemetry_consent_notices WHERE purpose_key='client_area_essential_processing' RETURNING id,version,content_hash`,
+        ['f'.repeat(64)],
+      );
+    activeNoticeVersion = noticeVersion;
+    for (const [tenantId, workspaceId, agencyClientId, companyContextId] of [
+      [T, W, X, A],
+      [T, W, X, A2],
+      [T, W, Y, B],
+      [T2, W2, Z, C],
+    ])
+      await db.query(
+        `INSERT INTO leadflow_telemetry_consents (tenant_id,workspace_id,agency_client_id,company_context_id,context_type,notice_id,purpose_key,status,actor_surface,notice_version,notice_content_hash,occurred_at) VALUES ($1,$2,$3,$4,'client',$5,'client_area_essential_processing','opted_in','client_area',$6,$7,now())`,
+        [
+          tenantId,
+          workspaceId,
+          agencyClientId,
+          companyContextId,
+          noticeId,
+          noticeVersion,
+          noticeHash,
+        ],
+      );
 
     const identities: Array<
       [string, string, string, Partial<{ twoFactor: boolean }>]
@@ -336,7 +385,7 @@ run('CA1 Client Area security matrix (PostgreSQL, real guards)', () => {
         tenantId,
         companyContextId,
         userId,
-        role,
+        role: role === 'client_admin' ? 'client_owner' : role,
         grantedByUserId: tenantId === T ? OP : null,
       });
     await grant(T, A, U1, 'client_viewer');
@@ -418,6 +467,10 @@ run('CA1 Client Area security matrix (PostgreSQL, real guards)', () => {
       if (db?.isInitialized) {
         assertSafePostgresTarget();
         const tenants = [T, T2];
+        await db.query(
+          `DELETE FROM client_area_member_module_access WHERE membership_id IN (SELECT id FROM client_area_memberships WHERE tenant_id=ANY($1::uuid[]))`,
+          [tenants],
+        );
         for (const table of [
           'client_area_member_events',
           'client_area_invitations',
@@ -435,6 +488,7 @@ run('CA1 Client Area security matrix (PostgreSQL, real guards)', () => {
           'user_security_settings',
           'user_profile',
           'workspace_users',
+          'agency_client_company_products',
           'agency_client_company_contexts',
           'agency_clients',
           'contacts',
@@ -597,7 +651,7 @@ run('CA1 Client Area security matrix (PostgreSQL, real guards)', () => {
         {
           companyContextId: A,
           displayName: 'Empresa A',
-          role: 'client_viewer',
+          role: 'client_member',
         },
       ]);
       expect(JSON.stringify(response.body)).not.toContain('Rotulo interno');
@@ -639,23 +693,79 @@ run('CA1 Client Area security matrix (PostgreSQL, real guards)', () => {
       expect(bodyOf(contextA).context).toEqual({
         companyContextId: A,
         displayName: 'Empresa A',
-        role: 'client_admin',
+        role: 'client_owner',
+        accountRole: 'client_owner',
         permissions: [
           'client_area.approvals.comment',
           'client_area.approvals.decide',
           'client_area.approvals.view',
-          'client_area.conversations.send',
-          'client_area.conversations.view',
-          // PD4 — the role preset is shared by both kinds of context, so an
-          // external client's projection lists this key too. It grants
-          // nothing here: the only route that reads it also requires
-          // `ClientAreaSelfContextGuard`, which answers 404 for anyone
-          // without active self access. Asserted rather than filtered,
-          // because hiding it per context would mean the projection no longer
-          // reports the preset the server actually resolved.
-          'client_area.self.overview.view',
         ],
-        modules: { approvals: true, conversations: false },
+        uiPermissions: [
+          'client_area.approvals.comment',
+          'client_area.approvals.decide',
+          'client_area.approvals.view',
+        ],
+        consent: {
+          status: 'accepted',
+          noticeVersion: activeNoticeVersion,
+          ownerDecides: true,
+        },
+        modules: {
+          approvals: { available: true, level: 'manager' },
+          overview: { available: true, level: 'manager' },
+          analytics: { available: true, level: 'manager' },
+          agency_projects: {
+            available: false,
+            level: null,
+            reason: 'module_unavailable',
+          },
+          agency_billing: {
+            available: false,
+            level: null,
+            reason: 'module_unavailable',
+          },
+          conversations: {
+            available: false,
+            level: null,
+            reason: 'module_unavailable',
+          },
+          social_planner: {
+            available: false,
+            level: null,
+            reason: 'module_unavailable',
+          },
+          social_creative_studio: {
+            available: false,
+            level: null,
+            reason: 'module_unavailable',
+          },
+          social_campaigns: {
+            available: false,
+            level: null,
+            reason: 'module_unavailable',
+          },
+          leadflow_inbox: {
+            available: false,
+            level: null,
+            reason: 'module_unavailable',
+          },
+          leadflow_crm: {
+            available: false,
+            level: null,
+            reason: 'module_unavailable',
+          },
+          leadflow_appointments: {
+            available: false,
+            level: null,
+            reason: 'module_unavailable',
+          },
+          leadflow_agents: {
+            available: false,
+            level: null,
+            reason: 'module_unavailable',
+          },
+          settings: { available: true, level: 'manager' },
+        },
         branding: {
           displayName: 'Lyra',
           logoLightUrl: null,
@@ -679,7 +789,7 @@ run('CA1 Client Area security matrix (PostgreSQL, real guards)', () => {
       ).expect(200);
       expect(bodyOf(contextB).context).toMatchObject({
         companyContextId: B,
-        role: 'client_viewer',
+        role: 'client_member',
       });
       // Projection carries no internal ids.
       for (const internal of [T, W, X, Y, MX, MY]) {
@@ -858,7 +968,7 @@ run('CA1 Client Area security matrix (PostgreSQL, real guards)', () => {
         // approvals contract keeps the test about its own subject and lets a
         // later module be added without reopening it.
         expect(bodyOf(context).context.modules).toMatchObject({
-          approvals: false,
+          approvals: { available: false, level: null },
         });
         const probe = await authed(
           `/client-area/companies/${A}/probe/decide`,

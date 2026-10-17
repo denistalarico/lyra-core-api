@@ -1,3 +1,9 @@
+import { ClientAreaBridgeRegistry } from '../../../common/client-area-bridge/client-area-bridge.registry';
+import { NotFoundException, Optional } from '@nestjs/common';
+import type {
+  ClientAreaContext,
+  ClientAreaModuleKey,
+} from '../../client-area/client-area.types';
 import { ForbiddenException, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { IsNull, Repository } from 'typeorm';
@@ -231,7 +237,124 @@ export class PermissionScopeEvaluatorService {
     private readonly knowledgeQuickNotesRepository: Repository<AgencyKnowledgeQuickNote>,
     @InjectRepository(AgencyKnowledgeVaultItem, AGENCY_CONNECTION)
     private readonly knowledgeVaultItemsRepository: Repository<AgencyKnowledgeVaultItem>,
+    @Optional()
+    private readonly clientAreaScopeRegistry?: ClientAreaBridgeRegistry,
   ) {}
+
+  /** CA7: separate entry point. No role normalization, Agency grants or elevated-role shortcuts. */
+  async assertClientAreaScope(
+    context: ClientAreaContext,
+    module: ClientAreaModuleKey,
+    permissionKey: string,
+    request: PermissionScopeRequest,
+    own: boolean,
+  ): Promise<void> {
+    const denied = () => new NotFoundException('Resource is not available.');
+    const definition = getPermissionDefinition(permissionKey);
+    if (!definition) throw denied();
+    if (module !== 'agency_projects') {
+      // CA10/CA11 register company-aware resolvers in their own modules on init.
+      // The registry grants no scope itself: this evaluator proves the full grain and authorship.
+      const resource = await this.clientAreaScopeRegistry?.resolveScope(
+        module,
+        context,
+        permissionKey,
+        request,
+      );
+      if (
+        !resource ||
+        resource.tenantId !== context.tenantId ||
+        resource.workspaceId !== context.workspaceId ||
+        resource.agencyClientId !== context.agencyClientId ||
+        resource.companyContextId !== context.companyContextId ||
+        (own && resource.createdById !== context.userId)
+      )
+        throw denied();
+      for (const data of [request.params, request.query, request.body]) {
+        if (!data || typeof data !== 'object') continue;
+        for (const key of ['clientId', 'agencyClientId'])
+          if (key in data && data[key] !== context.agencyClientId)
+            throw denied();
+        if (
+          'companyContextId' in data &&
+          data.companyContextId !== context.companyContextId
+        )
+          throw denied();
+      }
+      return;
+    }
+    if (!['projects', 'tasks'].includes(definition.moduleKey)) throw denied();
+    const principal: PermissionContext = {
+      tenantId: context.tenantId,
+      workspaceId: context.workspaceId,
+      userId: context.userId,
+      role: 'client_area_actor',
+    };
+    const payload = request.body as Record<string, unknown> | undefined;
+    if (
+      definition.moduleKey === 'tasks' &&
+      context.memberAccess?.agency_projects.level === 'operator' &&
+      payload?.status === 'archived'
+    )
+      own = true;
+    const resource = await this.resolveResource(principal, definition, request);
+    if (!['project', 'task', 'task_create'].includes(resource.kind ?? ''))
+      throw denied();
+    const record = resource.record as
+      | { clientId?: string; createdById?: string; projectId?: string }
+      | undefined;
+    if (resource.id && !resource.exists) throw denied();
+    // Collections with no verified client filter fail closed until their product stage audits the query path.
+    const creating =
+      resource.kind === 'task_create' ||
+      (!resource.id &&
+        request.method === 'POST' &&
+        definition.actionKey === 'create');
+    const body = request.body as Record<string, unknown> | undefined;
+    if (creating) {
+      if (body?.clientId !== context.agencyClientId || own) throw denied();
+    } else if (
+      !record ||
+      record.clientId !== context.agencyClientId ||
+      (own && record.createdById !== context.userId)
+    )
+      throw denied();
+    // Prevent changing a scoped resource into another client/project through its update payload.
+    for (const data of [request.params, request.query, request.body]) {
+      if (!data || typeof data !== 'object') continue;
+      for (const key of ['clientId', 'agencyClientId'])
+        if (key in data && data[key] !== context.agencyClientId) throw denied();
+      if (
+        'companyContextId' in data &&
+        data.companyContextId !== context.companyContextId
+      )
+        throw denied();
+      if ('projectId' in data && data.projectId) {
+        if (typeof data.projectId !== 'string') throw denied();
+        const project = await this.projectsRepository.findOne({
+          where: {
+            id: data.projectId,
+            tenantId: context.tenantId,
+            workspaceId: context.workspaceId,
+            clientId: context.agencyClientId,
+          },
+        });
+        if (!project) throw denied();
+      }
+      if ('parentTaskId' in data && data.parentTaskId) {
+        if (typeof data.parentTaskId !== 'string') throw denied();
+        const parent = await this.tasksRepository.findOne({
+          where: {
+            id: data.parentTaskId,
+            tenantId: context.tenantId,
+            workspaceId: context.workspaceId,
+            clientId: context.agencyClientId,
+          },
+        });
+        if (!parent) throw denied();
+      }
+    }
+  }
 
   async assertScope(
     context: PermissionContext,
