@@ -1,3 +1,4 @@
+import { ClientAreaPublicBrandingService } from './modules/client-area/services/client-area-public-branding.service';
 import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import type { NestExpressApplication } from '@nestjs/platform-express';
@@ -10,7 +11,12 @@ async function bootstrap() {
   });
   app.enableShutdownHooks();
 
-  app.enableCors(buildCorsOptions());
+  const clientAreaBranding = app.get(ClientAreaPublicBrandingService);
+  app.enableCors(
+    buildCorsOptions(process.env, (origin) =>
+      clientAreaBranding.isAllowedOrigin(origin),
+    ),
+  );
 
   // Use Nest's adapter-aware parsers so `rawBody: true` keeps the exact
   // request bytes required for Meta's X-Hub-Signature-256 validation.

@@ -1,3 +1,4 @@
+import { ClientAreaPublicBrandingService } from '../services/client-area-public-branding.service';
 import {
   Body,
   Controller,
@@ -40,7 +41,14 @@ export class ClientAreaManagementAgencyController {
     private readonly management: ClientAreaManagementService,
     private readonly selfAccess: ClientAreaSelfAccessService,
     private readonly lifecycle: ClientAreaLifecycleService,
+    private readonly publicBranding: ClientAreaPublicBrandingService,
   ) {}
+
+  @Post('domain/verify')
+  @HttpCode(200)
+  verifyDomain(@AuthenticatedUser() user: AuthTokenPayload) {
+    return this.publicBranding.verify(user.tenantId, user.workspaceId);
+  }
 
   @Get() overview(@AuthenticatedUser() user: AuthTokenPayload) {
     return this.management.overview(user.tenantId, user.workspaceId);

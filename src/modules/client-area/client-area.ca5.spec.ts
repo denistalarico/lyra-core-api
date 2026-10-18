@@ -1,3 +1,4 @@
+import { ClientAreaPublicBrandingService } from './services/client-area-public-branding.service';
 import { ClientAreaMemberAccessService } from './services/client-area-member-access.service';
 import { AuditChangeService } from './services/audit-change.service';
 import { CompanyProductClientAccessGuard } from '../clients/controllers/company-product-client-access.guard';
@@ -31,6 +32,7 @@ class FakeClientsModule {}
       },
     },
     ...[
+      ClientAreaPublicBrandingService,
       ClientAreaManagementService,
       ClientAreaSelfAccessService,
       ClientAreaInvitationService,
@@ -41,6 +43,7 @@ class FakeClientsModule {}
   ],
   exports: [
     ClientAreaLifecycleService,
+    ClientAreaPublicBrandingService,
     ClientAreaManagementService,
     ClientAreaSelfAccessService,
     ClientAreaInvitationService,

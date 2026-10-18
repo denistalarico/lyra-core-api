@@ -1,6 +1,7 @@
 import type { CorsOptions } from '@nestjs/common/interfaces/external/cors-options.interface';
 
 export const CORS_ALLOWED_HEADERS = [
+  'x-lyra-client-area-company',
   'Content-Type',
   'Authorization',
   'Idempotency-Key',
@@ -52,6 +53,7 @@ export function getCorsAllowedOrigins(
 
 export function buildCorsOptions(
   environment: NodeJS.ProcessEnv = process.env,
+  dynamicOrigin?: (origin: string) => Promise<boolean>,
 ): CorsOptions {
   const allowedOrigins = getCorsAllowedOrigins(environment);
 
@@ -62,7 +64,12 @@ export function buildCorsOptions(
         return;
       }
 
-      callback(null, false);
+      if (dynamicOrigin) {
+        void dynamicOrigin(origin).then(
+          (allowed) => callback(null, allowed),
+          () => callback(null, false),
+        );
+      } else callback(null, false);
     },
     methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: [...CORS_ALLOWED_HEADERS],

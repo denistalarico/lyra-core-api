@@ -19,6 +19,7 @@ const MINUTE = 60 * 1000;
  * whether or not the email exists, so a 429 reveals nothing about accounts.
  */
 export const CLIENT_AREA_RATE_LIMIT_RULES = {
+  branding_ip: { limit: 60, windowMs: MINUTE },
   login_ip: { limit: 30, windowMs: 15 * MINUTE },
   login_account: { limit: 10, windowMs: 15 * MINUTE },
   login_email: { limit: 30, windowMs: 15 * MINUTE },

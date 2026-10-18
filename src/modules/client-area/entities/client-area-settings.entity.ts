@@ -18,6 +18,17 @@ import type {
 @Unique('UQ_client_area_settings_tenant_workspace', ['tenantId', 'workspaceId'])
 export class ClientAreaSettingsEntity {
   @PrimaryGeneratedColumn('uuid') id!: string;
+  @Column({ name: 'public_slug', type: 'varchar', length: 48 })
+  publicSlug!: string;
+  @Column({
+    name: 'domain_verification_token',
+    type: 'varchar',
+    length: 64,
+    nullable: true,
+  })
+  domainVerificationToken!: string | null;
+  @Column({ name: 'domain_verified_at', type: 'timestamptz', nullable: true })
+  domainVerifiedAt!: Date | null;
   @Column({ name: 'tenant_id', type: 'uuid' }) tenantId!: string;
   @Column({ name: 'workspace_id', type: 'uuid' }) workspaceId!: string;
   @Column({ type: 'boolean', default: false }) enabled!: boolean;

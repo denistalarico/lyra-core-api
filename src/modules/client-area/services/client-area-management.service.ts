@@ -1,3 +1,5 @@
+import { clientAreaUiPermissions } from '../client-area-agency-permission-projection';
+import { randomBytes } from 'node:crypto';
 import { ClientAreaMemberAccessService } from './client-area-member-access.service';
 import { permissionsForMemberAccess } from '../client-area-permissions.catalog';
 import { Optional } from '@nestjs/common';
@@ -139,6 +141,23 @@ export class ClientAreaManagementService {
         : null;
     if (domainMode === 'custom' && !customDomain)
       throw new BadRequestException('A custom domain is required.');
+    const identity = await this.companyIdentityRepo.findOne({
+      where: { tenantId, workspaceId },
+    });
+    const name =
+      dto.displayName?.trim() ||
+      identity?.tradeName?.trim() ||
+      identity?.workspaceName?.trim() ||
+      identity?.legalName?.trim() ||
+      'agency';
+    const prefix =
+      name
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-|-$/g, '')
+        .slice(0, 15) || 'agency';
     await this.settingsRepo.upsert(
       {
         ...current,
@@ -147,6 +166,21 @@ export class ClientAreaManagementService {
         workspaceId,
         customDomain,
         domainMode,
+        publicSlug: current.id
+          ? current.publicSlug
+          : `${prefix}-${randomBytes(12).toString('hex')}`,
+        domainVerificationToken:
+          customDomain &&
+          (customDomain !== current.customDomain ||
+            !current.domainVerificationToken)
+            ? randomBytes(32).toString('hex')
+            : customDomain
+              ? current.domainVerificationToken
+              : null,
+        domainVerifiedAt:
+          customDomain === current.customDomain && domainMode === 'custom'
+            ? current.domainVerifiedAt
+            : null,
         domainVerificationStatus:
           domainMode === 'custom' && customDomain !== current.customDomain
             ? 'pending'
@@ -678,6 +712,18 @@ export class ClientAreaManagementService {
         displayName: companyDisplayName,
         role: membership.role,
         permissions: [...permissions].sort(),
+        memberAccess: access,
+        uiPermissions: access
+          ? [
+              ...new Set([...permissions, ...clientAreaUiPermissions(access)]),
+            ].sort()
+          : [...permissions].sort(),
+        consent: this.consents
+          ? await this.consents.state(
+              { tenantId, workspaceId, agencyClientId, companyContextId },
+              membership.role === 'client_owner',
+            )
+          : undefined,
         modules,
         branding: await this.branding(tenantId, workspaceId),
         readOnly: true as const,

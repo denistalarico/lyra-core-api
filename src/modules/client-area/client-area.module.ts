@@ -1,3 +1,7 @@
+import { ClientAreaPublicController } from './controllers/client-area-public.controller';
+import { ClientAreaPreferencesController } from './controllers/client-area-preferences.controller';
+import { ClientAreaPublicBrandingService } from './services/client-area-public-branding.service';
+import { ClientAreaIdentityPreferencesEntity } from './entities/client-area-identity-preferences.entity';
 import { APP_INTERCEPTOR } from '@nestjs/core';
 import {
   ClientAreaBridgeRegistry,
@@ -98,6 +102,7 @@ const AGENCY_CONNECTION = 'agency';
     EmailModule,
     TypeOrmModule.forFeature(
       [
+        ClientAreaIdentityPreferencesEntity,
         ClientAreaMemberModuleAccessEntity,
         AuditChangeEventEntity,
         LeadFlowTelemetryConsentEntity,
@@ -128,12 +133,15 @@ const AGENCY_CONNECTION = 'agency';
     ),
   ],
   controllers: [
+    ClientAreaPublicController,
+    ClientAreaPreferencesController,
     ClientAreaAccessController,
     ClientAreaAuthController,
     ClientAreaDirectoryController,
     ClientAreaInvitationsController,
   ],
   providers: [
+    ClientAreaPublicBrandingService,
     ClientAreaBridgeAuthenticator,
     ClientAreaMemberAccessService,
     ClientAreaConsentService,
@@ -163,6 +171,7 @@ const AGENCY_CONNECTION = 'agency';
     ClientAreaSelfContextGuard,
   ],
   exports: [
+    ClientAreaPublicBrandingService,
     ClientAreaMemberAccessService,
     ClientAreaConsentService,
     AuditChangeService,

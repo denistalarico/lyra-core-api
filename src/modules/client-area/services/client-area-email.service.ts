@@ -1,3 +1,6 @@
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { ClientAreaSettingsEntity } from '../entities/client-area-settings.entity';
 import { emailFrontendUrl } from '../../email/email-frontend-url';
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -25,12 +28,20 @@ export function escapeHtml(value: string): string {
     .replace(/'/g, '&#39;');
 }
 
-export function buildClientAreaInvitationUrl(baseUrl: string, token: string) {
-  return `${baseUrl}/client-area/invitations/${encodeURIComponent(token)}`;
+export function buildClientAreaInvitationUrl(
+  baseUrl: string,
+  token: string,
+  slug?: string,
+) {
+  return `${baseUrl}/client-area/invitations/${encodeURIComponent(token)}${slug ? `?a=${encodeURIComponent(slug)}` : ''}`;
 }
 
-export function buildClientAreaResetUrl(baseUrl: string, token: string) {
-  return `${baseUrl}/client-area/reset-password?token=${encodeURIComponent(token)}`;
+export function buildClientAreaResetUrl(
+  baseUrl: string,
+  token: string,
+  slug?: string,
+) {
+  return `${baseUrl}/client-area/reset-password?token=${encodeURIComponent(token)}${slug ? `&a=${encodeURIComponent(slug)}` : ''}`;
 }
 
 export function renderClientAreaInvitationEmail(input: {
@@ -95,6 +106,8 @@ export class ClientAreaEmailService {
     private readonly emailService: EmailService,
     private readonly credentials: AgencyIdentityCredentialsService,
     private readonly config: ConfigService,
+    @InjectRepository(ClientAreaSettingsEntity, 'agency')
+    private readonly settingsRepo: Repository<ClientAreaSettingsEntity>,
   ) {}
 
   async sendInvitation(input: {
@@ -106,10 +119,17 @@ export class ClientAreaEmailService {
     role: ClientAreaRole;
     expiresAt: Date;
   }) {
+    const settings = await this.settingsRepo.findOne({
+      where: { tenantId: input.tenantId, workspaceId: input.workspaceId },
+    });
     const email = renderClientAreaInvitationEmail({
       companyDisplayName: input.companyDisplayName,
       role: input.role,
-      url: buildClientAreaInvitationUrl(this.frontendUrl(), input.token),
+      url: buildClientAreaInvitationUrl(
+        this.frontendUrl(),
+        input.token,
+        settings?.publicSlug,
+      ),
       expiresAt: input.expiresAt,
       productName: this.productName(),
     });
@@ -130,8 +150,16 @@ export class ClientAreaEmailService {
     token: string;
     ttlMinutes: number;
   }) {
+    const settings = await this.settingsRepo.findOne({
+      where: { tenantId: input.tenantId, enabled: true },
+      order: { createdAt: 'ASC' },
+    });
     const email = renderClientAreaResetEmail({
-      url: buildClientAreaResetUrl(this.frontendUrl(), input.token),
+      url: buildClientAreaResetUrl(
+        this.frontendUrl(),
+        input.token,
+        settings?.publicSlug,
+      ),
       ttlMinutes: input.ttlMinutes,
       productName: this.productName(),
     });

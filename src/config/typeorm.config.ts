@@ -1,3 +1,4 @@
+import { ClientAreaIdentityPreferencesEntity } from '../modules/client-area/entities/client-area-identity-preferences.entity';
 import { ClientAreaMemberModuleAccessEntity } from '../modules/client-area/entities/client-area-member-module-access.entity';
 import { AuditChangeEventEntity } from '../modules/client-area/entities/audit-change-event.entity';
 import {
@@ -431,6 +432,7 @@ import {
 } from '../modules/client-conversations/entities';
 
 export const agencyEntities = [
+  ClientAreaIdentityPreferencesEntity,
   ClientAreaMemberModuleAccessEntity,
   AuditChangeEventEntity,
   AgencyClientCompanyProduct,
