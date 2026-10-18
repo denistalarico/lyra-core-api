@@ -1,3 +1,4 @@
+import { type ProjectRequestContext } from '../client-area/projects-client-area.context';
 import {
   BadRequestException,
   Injectable,
@@ -9,7 +10,7 @@ import { AgencyTaskAttachment } from '../entities';
 import { FilesService } from '../../../common/files/files.service';
 import { TasksCrudService } from './tasks-crud.service';
 
-type RequestContext = { tenantId: string; workspaceId: string; userId: string };
+type RequestContext = ProjectRequestContext;
 
 const MAX_ATTACHMENTS = 10;
 

@@ -1,3 +1,7 @@
+import {
+  clientProjectWhere,
+  type ProjectRequestContext,
+} from '../client-area/projects-client-area.context';
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Brackets, Repository } from 'typeorm';
@@ -15,12 +19,7 @@ import {
   UpdateProjectDto,
 } from '../dto';
 
-type RequestContext = {
-  tenantId: string;
-  workspaceId: string;
-  userId: string;
-  role?: string;
-};
+type RequestContext = ProjectRequestContext;
 
 function normalizeRole(role?: string): string {
   if (role === 'owner') return 'owner';
@@ -116,6 +115,12 @@ export class ProjectsCrudService {
     qb: ReturnType<Repository<AgencyProject>['createQueryBuilder']>,
     context: RequestContext,
   ) {
+    if (context.clientArea) {
+      qb.andWhere('project.client_id = :clientAreaId', {
+        clientAreaId: context.clientArea.agencyClientId,
+      });
+      return;
+    }
     if (isElevatedRole(context.role)) {
       return;
     }
@@ -165,6 +170,7 @@ export class ProjectsCrudService {
     const project = await this.projectsRepository.findOne({
       where: {
         id,
+        ...clientProjectWhere(context),
         tenantId: context.tenantId,
         workspaceId: context.workspaceId,
       },
@@ -191,7 +197,7 @@ export class ProjectsCrudService {
     const project = this.projectsRepository.create({
       tenantId: context.tenantId,
       workspaceId: context.workspaceId,
-      clientId: dto.clientId ?? null,
+      clientId: context.clientArea?.agencyClientId ?? dto.clientId ?? null,
       stageId: dto.stageId ?? null,
       ownerId: dto.ownerId ?? context.userId,
       name: dto.name,
@@ -325,6 +331,7 @@ export class ProjectsCrudService {
     const project = await this.projectsRepository.findOne({
       where: {
         id,
+        ...clientProjectWhere(context),
         tenantId: context.tenantId,
         workspaceId: context.workspaceId,
       },

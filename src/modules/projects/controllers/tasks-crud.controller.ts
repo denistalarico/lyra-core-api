@@ -1,3 +1,5 @@
+import { ClientAreaExposed } from '../../client-area/client-area.decorators';
+import { ProjectsClientAreaInterceptor } from '../client-area/projects-client-area.interceptor';
 import {
   Body,
   BadRequestException,
@@ -29,7 +31,7 @@ import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import {
   AuthorizedContext,
   type AuthorizedRequestContext,
-} from '../../../common/context/authorized-context.decorator';
+} from '../client-area/projects-client-area.context';
 
 const TASK_ATTACHMENT_UPLOAD_OPTIONS = {
   storage: memoryStorage(),
@@ -62,6 +64,7 @@ const TASK_COVER_UPLOAD_OPTIONS = {
 };
 
 @UseGuards(JwtAuthGuard, PermissionsGuard)
+@UseInterceptors(ProjectsClientAreaInterceptor)
 @Controller('agency/projects/tasks')
 export class TasksCrudController {
   constructor(
@@ -72,6 +75,7 @@ export class TasksCrudController {
 
   @Get()
   @RequirePermission('agency.tasks.task.manage.department')
+  @ClientAreaExposed('agency_projects')
   listWorkspaceTasks(
     @AuthorizedContext() context: AuthorizedRequestContext,
     @Query() query: ListTasksQueryDto,
@@ -87,6 +91,7 @@ export class TasksCrudController {
 
   @Get('my-assigned-subtasks')
   @RequirePermission('agency.tasks.task.update.assigned')
+  @ClientAreaExposed('agency_projects')
   listMyAssignedSubtasks(
     @AuthorizedContext() context: AuthorizedRequestContext,
   ) {
@@ -95,6 +100,7 @@ export class TasksCrudController {
 
   @Get('my')
   @RequirePermission('agency.tasks.task.update.assigned')
+  @ClientAreaExposed('agency_projects')
   listMyTasks(
     @AuthorizedContext() context: AuthorizedRequestContext,
     @Query() query: ListTasksQueryDto,
@@ -104,6 +110,7 @@ export class TasksCrudController {
 
   @Post()
   @RequirePermission('agency.tasks.task.create.assigned')
+  @ClientAreaExposed('agency_projects')
   createWorkspaceTask(
     @AuthorizedContext() context: AuthorizedRequestContext,
     @Body() dto: CreateTaskDto,
@@ -113,6 +120,7 @@ export class TasksCrudController {
 
   @Post('my')
   @RequirePermission('agency.tasks.task.create.assigned')
+  @ClientAreaExposed('agency_projects')
   createMyTask(
     @AuthorizedContext() context: AuthorizedRequestContext,
     @Body() dto: CreateTaskDto,
@@ -125,6 +133,7 @@ export class TasksCrudController {
     'agency.tasks.task.update.assigned',
     'agency.tasks.task.manage.department',
   )
+  @ClientAreaExposed('agency_projects')
   findOne(
     @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
@@ -137,6 +146,7 @@ export class TasksCrudController {
     'agency.tasks.task.update.assigned',
     'agency.tasks.task.manage.department',
   )
+  @ClientAreaExposed('agency_projects')
   update(
     @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
@@ -151,6 +161,7 @@ export class TasksCrudController {
     'agency.tasks.task.manage.department',
   )
   @UseInterceptors(FileInterceptor('file', TASK_COVER_UPLOAD_OPTIONS))
+  @ClientAreaExposed('agency_projects')
   uploadCover(
     @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
@@ -169,6 +180,7 @@ export class TasksCrudController {
     'agency.tasks.task.manage.department',
   )
   // CA7: ordinary client-scoped action; the bridge additionally enforces creator ownership.
+  @ClientAreaExposed('agency_projects')
   archive(
     @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
@@ -179,6 +191,7 @@ export class TasksCrudController {
   @Delete(':id/permanent')
   @RequirePermission('agency.tasks.task.manage.department')
   // CA7: reclassified with explicit user authorization; Agency permissions stay unchanged.
+  @ClientAreaExposed('agency_projects')
   remove(
     @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
@@ -193,6 +206,7 @@ export class TasksCrudController {
     'agency.tasks.task.update.assigned',
     'agency.tasks.task.manage.department',
   )
+  @ClientAreaExposed('agency_projects')
   listAttachments(
     @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
@@ -206,6 +220,7 @@ export class TasksCrudController {
     'agency.tasks.task.manage.department',
   )
   @UseInterceptors(FileInterceptor('file', TASK_ATTACHMENT_UPLOAD_OPTIONS))
+  @ClientAreaExposed('agency_projects')
   uploadAttachment(
     @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,

@@ -1,3 +1,6 @@
+import { ClientAreaBridgeRegistryModule } from '../../common/client-area-bridge/client-area-bridge.registry';
+import { ProjectsClientAreaScopeService } from './client-area/projects-client-area-scope.service';
+import { ProjectsClientAreaInterceptor } from './client-area/projects-client-area.interceptor';
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import {
@@ -50,6 +53,7 @@ const AGENCY_CONNECTION = 'agency';
 
 @Module({
   imports: [
+    ClientAreaBridgeRegistryModule,
     TypeOrmModule.forFeature(
       [
         AgencyProject,
@@ -87,6 +91,8 @@ const AGENCY_CONNECTION = 'agency';
     ProjectsPublicController,
   ],
   providers: [
+    ProjectsClientAreaScopeService,
+    ProjectsClientAreaInterceptor,
     ProjectsService,
     ProjectsCrudService,
     ProjectStagesService,

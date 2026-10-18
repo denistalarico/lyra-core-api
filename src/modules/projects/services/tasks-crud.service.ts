@@ -1,3 +1,7 @@
+import {
+  clientProjectWhere,
+  type ProjectRequestContext,
+} from '../client-area/projects-client-area.context';
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Brackets, IsNull, Repository } from 'typeorm';
@@ -17,12 +21,7 @@ import { CreateTaskDto, ListTasksQueryDto, UpdateTaskDto } from '../dto';
 import { FilesService } from '../../../common/files/files.service';
 import { TaskNotificationPublisher } from './task-notification.publisher';
 
-type RequestContext = {
-  tenantId: string;
-  workspaceId: string;
-  userId: string;
-  role?: string;
-};
+type RequestContext = ProjectRequestContext;
 
 function normalizeRole(role?: string): string {
   if (role === 'owner') return 'owner';
@@ -302,6 +301,13 @@ export class TasksCrudService {
       qb.andWhere('task.archived_at IS NULL');
     }
 
+    if (context.clientArea)
+      qb.andWhere('task.client_id = :clientAreaId', {
+        clientAreaId: context.clientArea.agencyClientId,
+      }).andWhere(
+        "(task.visibility = 'workspace' OR task.created_by_id = :clientAreaUser)",
+        { clientAreaUser: context.userId },
+      );
     this.applyFilters(qb, query);
 
     return qb
@@ -314,6 +320,7 @@ export class TasksCrudService {
     const task = await this.tasksRepository.findOne({
       where: {
         id,
+        ...clientProjectWhere(context),
         tenantId: context.tenantId,
         workspaceId: context.workspaceId,
       },
@@ -357,7 +364,7 @@ export class TasksCrudService {
       tenantId: context.tenantId,
       workspaceId: context.workspaceId,
       projectId: dto.projectId ?? null,
-      clientId: dto.clientId ?? null,
+      clientId: context.clientArea?.agencyClientId ?? dto.clientId ?? null,
       stageId,
       projectStageId:
         dto.projectStageId !== undefined
@@ -411,7 +418,7 @@ export class TasksCrudService {
       tenantId: context.tenantId,
       workspaceId: context.workspaceId,
       projectId: dto.projectId ?? null,
-      clientId: dto.clientId ?? null,
+      clientId: context.clientArea?.agencyClientId ?? dto.clientId ?? null,
       stageId: null,
       projectStageId: null,
       personalStageId,
@@ -591,6 +598,7 @@ export class TasksCrudService {
     const task = await this.tasksRepository.findOne({
       where: {
         id,
+        ...clientProjectWhere(context),
         tenantId: context.tenantId,
         workspaceId: context.workspaceId,
       },
@@ -677,6 +685,15 @@ export class TasksCrudService {
     qb: ReturnType<Repository<AgencyTask>['createQueryBuilder']>,
     context: RequestContext,
   ) {
+    if (context.clientArea) {
+      qb.andWhere('task.client_id = :clientAreaId', {
+        clientAreaId: context.clientArea.agencyClientId,
+      }).andWhere(
+        "(task.visibility = 'workspace' OR task.created_by_id = :clientAreaUser)",
+        { clientAreaUser: context.userId },
+      );
+      return;
+    }
     if (isElevatedRole(context.role)) {
       return;
     }

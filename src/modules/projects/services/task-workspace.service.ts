@@ -1,4 +1,8 @@
 import {
+  clientProjectWhere,
+  type ProjectRequestContext,
+} from '../client-area/projects-client-area.context';
+import {
   BadRequestException,
   ForbiddenException,
   Injectable,
@@ -13,15 +17,10 @@ import {
   AgencyTaskComment,
   AgencyTaskTimeEntry,
 } from '../entities';
-import { TaskStatus } from '../enums';
+import { TaskStatus, TaskVisibility } from '../enums';
 import { TasksCrudService } from './tasks-crud.service';
 
-type RequestContext = {
-  tenantId: string;
-  workspaceId: string;
-  userId: string;
-  role?: string;
-};
+type RequestContext = ProjectRequestContext;
 
 type ChecklistPayload = {
   title?: string;
@@ -112,6 +111,12 @@ export class TaskWorkspaceService {
     context: RequestContext,
     items: AgencyTaskChecklistItem[],
   ) {
+    if (context.clientArea)
+      return items.map((item) => ({
+        ...item,
+        trackedMinutes: 0,
+        activeTimerStartedAt: null,
+      }));
     const itemIds = items.map((item) => item.id);
     if (itemIds.length === 0) return items.map((item) => ({ ...item, trackedMinutes: 0, activeTimerStartedAt: null }));
 
@@ -440,10 +445,20 @@ export class TaskWorkspaceService {
         tenantId: context.tenantId,
         workspaceId: context.workspaceId,
         id: In(taskIds),
+        ...clientProjectWhere(context),
         archivedAt: IsNull(),
       },
     });
-    const taskById = new Map(tasks.map((task) => [task.id, task]));
+    const taskById = new Map(
+      tasks
+        .filter(
+          (task) =>
+            !context.clientArea ||
+            task.visibility === TaskVisibility.Workspace ||
+            task.createdById === context.userId,
+        )
+        .map((task) => [task.id, task]),
+    );
 
     const projectIds = Array.from(
       new Set(tasks.map((task) => task.projectId).filter((id): id is string => Boolean(id))),
@@ -454,6 +469,7 @@ export class TaskWorkspaceService {
             tenantId: context.tenantId,
             workspaceId: context.workspaceId,
             id: In(projectIds),
+            ...clientProjectWhere(context),
           },
         })
       : [];

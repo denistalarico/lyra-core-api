@@ -26,6 +26,7 @@ export type ClientAreaMembershipStatus =
   (typeof CLIENT_AREA_MEMBERSHIP_STATUSES)[number];
 
 export const CLIENT_AREA_PERMISSION_KEYS = [
+  'client_area.agency_billing.view',
   'client_area.approvals.view',
   'client_area.approvals.comment',
   'client_area.approvals.decide',

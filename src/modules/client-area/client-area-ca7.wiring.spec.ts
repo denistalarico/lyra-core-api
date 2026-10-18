@@ -66,6 +66,12 @@ describe('CA7 real Nest module wiring', () => {
       ref.get(ClientAreaBridgeRegistry).authenticate(execution),
     ).resolves.toBe(true);
     expect(handler).toHaveBeenCalledWith(execution);
+    jest
+      .spyOn(ref.get(ActorDirectoryService), 'resolveNames')
+      .mockResolvedValue({ client: 'Client (cliente)' });
+    await expect(
+      ref.get(ClientAreaBridgeRegistry).resolveActorNames('tenant', ['client']),
+    ).resolves.toEqual({ client: 'Client (cliente)' });
     await ref.close();
   });
 });

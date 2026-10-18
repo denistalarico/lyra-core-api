@@ -1,3 +1,6 @@
+import { UseInterceptors } from '@nestjs/common';
+import { ClientAreaExposed } from '../../client-area/client-area.decorators';
+import { ProjectsClientAreaInterceptor } from '../client-area/projects-client-area.interceptor';
 import {
   Body,
   Controller,
@@ -19,15 +22,17 @@ import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import {
   AuthorizedContext,
   type AuthorizedRequestContext,
-} from '../../../common/context/authorized-context.decorator';
+} from '../client-area/projects-client-area.context';
 
 @UseGuards(JwtAuthGuard, PermissionsGuard)
+@UseInterceptors(ProjectsClientAreaInterceptor)
 @Controller('agency/projects/:projectId/events')
 export class ProjectEventsController {
   constructor(private readonly projectEventsService: ProjectEventsService) {}
 
   @Get()
   @RequirePermission('agency.projects.project.view.assigned')
+  @ClientAreaExposed('agency_projects')
   list(
     @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('projectId') projectId: string,
@@ -37,6 +42,7 @@ export class ProjectEventsController {
 
   @Post()
   @RequirePermission('agency.projects.project.update.department')
+  @ClientAreaExposed('agency_projects')
   create(
     @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('projectId') projectId: string,

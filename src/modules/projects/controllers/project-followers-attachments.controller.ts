@@ -1,3 +1,5 @@
+import { ClientAreaExposed } from '../../client-area/client-area.decorators';
+import { ProjectsClientAreaInterceptor } from '../client-area/projects-client-area.interceptor';
 import {
   BadRequestException,
   Body,
@@ -28,9 +30,10 @@ import { ProjectFollowersAttachmentsService } from '../services/project-follower
 import {
   AuthorizedContext,
   type AuthorizedRequestContext,
-} from '../../../common/context/authorized-context.decorator';
+} from '../client-area/projects-client-area.context';
 
 @UseGuards(JwtAuthGuard, PermissionsGuard)
+@UseInterceptors(ProjectsClientAreaInterceptor)
 @Controller('agency/projects/:projectId')
 export class ProjectFollowersAttachmentsController {
   constructor(private readonly svc: ProjectFollowersAttachmentsService) {}
@@ -39,6 +42,7 @@ export class ProjectFollowersAttachmentsController {
 
   @Get('followers')
   @RequirePermission('agency.projects.project.view.assigned')
+  @ClientAreaExposed('agency_projects')
   listFollowers(
     @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('projectId') projectId: string,
@@ -79,6 +83,7 @@ export class ProjectFollowersAttachmentsController {
 
   @Get('attachments')
   @RequirePermission('agency.projects.project.view.assigned')
+  @ClientAreaExposed('agency_projects')
   listAttachments(
     @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('projectId') projectId: string,
@@ -89,6 +94,7 @@ export class ProjectFollowersAttachmentsController {
   @Post('attachments')
   @RequirePermission('agency.projects.project.update.department')
   @UseInterceptors(FileInterceptor('file', ATTACHMENT_UPLOAD_OPTIONS))
+  @ClientAreaExposed('agency_projects')
   uploadAttachment(
     @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('projectId') projectId: string,

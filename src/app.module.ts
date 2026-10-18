@@ -1,3 +1,4 @@
+import { ClientAgencyBillingModule } from './modules/client-agency-billing/client-agency-billing.module';
 // src/app.module.ts
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
@@ -147,6 +148,7 @@ import { ClientAreaAgencyModule } from './modules/client-area/agency/client-area
     // Without it the core logs an error for any event whose audience is the
     // Client Area, instead of dropping it silently as AP3's token did.
     ClientNotificationsModule,
+    ClientAgencyBillingModule,
     ClientAreaAgencyModule,
     SocialOrganicModule,
   ],

@@ -84,6 +84,26 @@ function required(
 }
 
 export const AGENCY_NOTIFICATION_CATALOG: readonly NotificationDefinition[] = [
+  // CA9 — Owner-only billing, using the existing NTF-C1 audience registry.
+  ...[
+    'agency.invoice.issued',
+    'agency.contract.document_available',
+    'agency.contract.renewal_upcoming',
+    'agency.contract.renewed',
+  ].map((eventType) =>
+    required(
+      eventType,
+      'agency_billing',
+      eventType.startsWith('agency.invoice.')
+        ? NotificationCategory.FINANCIAL
+        : NotificationCategory.CONTRACT,
+      NotificationRecipientStrategy.EXPLICIT_USERS,
+      {
+        audience: NotificationAudience.CLIENT_AREA,
+        selfNotificationPolicy: NotificationSelfPolicy.ALLOW_ACTOR,
+      },
+    ),
+  ),
   // Social publishing
   required(
     'social.publishing.publication_failed',

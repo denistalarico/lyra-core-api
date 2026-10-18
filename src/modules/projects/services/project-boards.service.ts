@@ -1,3 +1,7 @@
+import {
+  clientProjectWhere,
+  type ProjectRequestContext,
+} from '../client-area/projects-client-area.context';
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Brackets, In, IsNull, Repository } from 'typeorm';
@@ -10,11 +14,7 @@ import {
 } from '../entities';
 import { TaskVisibility } from '../enums';
 
-type RequestContext = {
-  tenantId: string;
-  workspaceId: string;
-  userId: string;
-};
+type RequestContext = ProjectRequestContext;
 
 type BoardColumn<TCard> = {
   id: string;
@@ -107,6 +107,7 @@ export class ProjectBoardsService {
         where: {
           tenantId: context.tenantId,
           workspaceId: context.workspaceId,
+          ...clientProjectWhere(context),
           ...(includeArchived ? {} : { archivedAt: IsNull() }),
         },
         order: {
@@ -141,18 +142,26 @@ export class ProjectBoardsService {
     context: RequestContext,
     includeArchived = false,
   ): Promise<BoardResponse<TaskBoardCard>> {
-    const tasks = await this.tasksRepository.find({
-      where: {
-        tenantId: context.tenantId,
-        workspaceId: context.workspaceId,
-        ...(includeArchived ? {} : { archivedAt: IsNull() }),
-        visibility: TaskVisibility.Workspace,
-      },
-      order: {
-        updatedAt: 'DESC',
-        createdAt: 'DESC',
-      },
-    });
+    const tasks = (
+      await this.tasksRepository.find({
+        where: {
+          tenantId: context.tenantId,
+          workspaceId: context.workspaceId,
+          ...clientProjectWhere(context),
+          ...(includeArchived ? {} : { archivedAt: IsNull() }),
+          visibility: TaskVisibility.Workspace,
+        },
+        order: {
+          updatedAt: 'DESC',
+          createdAt: 'DESC',
+        },
+      })
+    ).filter(
+      (task) =>
+        !context.clientArea ||
+        task.visibility === TaskVisibility.Workspace ||
+        task.createdById === context.userId,
+    );
     const stages = await this.listTaskStagesForBoard(context, null, tasks, 'stageId');
 
     return this.buildBoard(stages, await this.withChecklistCounts(context, tasks), 'Sem estágio', 'stageId');
@@ -163,15 +172,23 @@ export class ProjectBoardsService {
     projectId: string,
     includeArchived = false,
   ): Promise<BoardResponse<TaskBoardCard>> {
-    const tasks = await this.tasksRepository.find({
-      where: {
-        tenantId: context.tenantId,
-        workspaceId: context.workspaceId,
-        projectId,
-        ...(includeArchived ? {} : { archivedAt: IsNull() }),
-      },
-      order: { updatedAt: 'DESC', createdAt: 'DESC' },
-    });
+    const tasks = (
+      await this.tasksRepository.find({
+        where: {
+          tenantId: context.tenantId,
+          workspaceId: context.workspaceId,
+          projectId,
+          ...clientProjectWhere(context),
+          ...(includeArchived ? {} : { archivedAt: IsNull() }),
+        },
+        order: { updatedAt: 'DESC', createdAt: 'DESC' },
+      })
+    ).filter(
+      (task) =>
+        !context.clientArea ||
+        task.visibility === TaskVisibility.Workspace ||
+        task.createdById === context.userId,
+    );
     const stages = await this.listTaskStagesForBoard(context, projectId, tasks, 'projectStageId');
 
     return this.buildBoard(
@@ -204,8 +221,10 @@ export class ProjectBoardsService {
             stageQb.where('stage.project_id IS NULL');
           }
 
-          if (referencedStageIds.length) {
-            stageQb.orWhere('stage.id IN (:...referencedStageIds)', { referencedStageIds });
+          if (referencedStageIds.length && !context.clientArea) {
+            stageQb.orWhere('stage.id IN (:...referencedStageIds)', {
+              referencedStageIds,
+            });
           }
         }),
       )
@@ -248,12 +267,14 @@ export class ProjectBoardsService {
           {
             tenantId: context.tenantId,
             workspaceId: context.workspaceId,
+            ...clientProjectWhere(context),
             ...(includeArchived ? {} : { archivedAt: IsNull() }),
             assigneeId: In(assigneeIds),
           },
           {
             tenantId: context.tenantId,
             workspaceId: context.workspaceId,
+            ...clientProjectWhere(context),
             ...(includeArchived ? {} : { archivedAt: IsNull() }),
             createdById: context.userId,
             visibility: TaskVisibility.Private,
@@ -266,7 +287,18 @@ export class ProjectBoardsService {
       }),
     ]);
 
-    return this.buildPersonalTasksBoard(stages, await this.withChecklistCounts(context, tasks));
+    return this.buildPersonalTasksBoard(
+      stages,
+      await this.withChecklistCounts(
+        context,
+        tasks.filter(
+          (task) =>
+            !context.clientArea ||
+            task.visibility === TaskVisibility.Workspace ||
+            task.createdById === context.userId,
+        ),
+      ),
+    );
   }
 
   private async getProjectTaskCounts(context: RequestContext, projectIds: string[]) {
@@ -281,8 +313,19 @@ export class ProjectBoardsService {
       .select('task.project_id', 'projectId')
       .addSelect('COUNT(task.id)', 'taskCount')
       .where('task.tenant_id = :tenantId', { tenantId: context.tenantId })
-      .andWhere('task.workspace_id = :workspaceId', { workspaceId: context.workspaceId })
+      .andWhere('task.workspace_id = :workspaceId', {
+        workspaceId: context.workspaceId,
+      })
       .andWhere('task.archived_at IS NULL')
+      .andWhere(context.clientArea ? 'task.client_id = :clientAreaId' : '1=1', {
+        clientAreaId: context.clientArea?.agencyClientId,
+      })
+      .andWhere(
+        context.clientArea
+          ? "(task.visibility = 'workspace' OR task.created_by_id = :clientAreaUser)"
+          : '1=1',
+        { clientAreaUser: context.userId },
+      )
       .andWhere('task.project_id IN (:...projectIds)', { projectIds })
       .groupBy('task.project_id')
       .getRawMany<{ projectId: string; taskCount: string }>();
@@ -308,7 +351,10 @@ export class ProjectBoardsService {
       .addSelect('task.project_id', 'projectId')
       .addSelect('task.status', 'status')
       .addSelect('COUNT(item.id)', 'checklistTotal')
-      .addSelect('SUM(CASE WHEN item.is_done THEN 1 ELSE 0 END)', 'checklistDone')
+      .addSelect(
+        'SUM(CASE WHEN item.is_done THEN 1 ELSE 0 END)',
+        'checklistDone',
+      )
       .from('agency_tasks', 'task')
       .leftJoin(
         'agency_task_checklist_items',
@@ -316,9 +362,22 @@ export class ProjectBoardsService {
         'item.task_id = task.id AND item.tenant_id = task.tenant_id AND item.workspace_id = task.workspace_id',
       )
       .where('task.tenant_id = :tenantId', { tenantId: context.tenantId })
-      .andWhere('task.workspace_id = :workspaceId', { workspaceId: context.workspaceId })
+      .andWhere('task.workspace_id = :workspaceId', {
+        workspaceId: context.workspaceId,
+      })
       .andWhere('task.archived_at IS NULL')
-      .andWhere('task.project_id IN (:...projectIds)', { projectIds: uniqueProjectIds })
+      .andWhere(context.clientArea ? 'task.client_id = :clientAreaId' : '1=1', {
+        clientAreaId: context.clientArea?.agencyClientId,
+      })
+      .andWhere(
+        context.clientArea
+          ? "(task.visibility = 'workspace' OR task.created_by_id = :clientAreaUser)"
+          : '1=1',
+        { clientAreaUser: context.userId },
+      )
+      .andWhere('task.project_id IN (:...projectIds)', {
+        projectIds: uniqueProjectIds,
+      })
       .groupBy('task.id')
       .addGroupBy('task.project_id')
       .addGroupBy('task.status')

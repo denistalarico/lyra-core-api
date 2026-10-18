@@ -135,9 +135,19 @@ describe('CA7 real HTTP bridge authentication and scopes', () => {
           ),
       ),
     };
+    const registry = new ClientAreaBridgeRegistry();
+    const dependencies = Array(
+      (
+        Reflect.getMetadata(
+          'design:paramtypes',
+          PermissionScopeEvaluatorService,
+        ) as unknown[]
+      ).length,
+    ).fill(repo);
+    dependencies[dependencies.length - 1] = registry;
     const evaluator = Reflect.construct(
       PermissionScopeEvaluatorService,
-      Array(60).fill(repo),
+      dependencies,
     ) as PermissionScopeEvaluatorService;
     const mod = await Test.createTestingModule({
       imports: [
@@ -184,7 +194,36 @@ describe('CA7 real HTTP bridge authentication and scopes', () => {
           },
         },
       ],
-    }).compile();
+    })
+      .overrideProvider(ClientAreaBridgeRegistry)
+      .useValue(registry)
+      .compile();
+    mod
+      .get(ClientAreaBridgeRegistry)
+      .registerScopeResolver('agency_projects', async (ctx, _key, req) => {
+        const row = await repo.findOne({
+          where: {
+            id: String(req.params?.id),
+            tenantId: ctx.tenantId,
+            workspaceId: ctx.workspaceId,
+          },
+        });
+        if (
+          !row ||
+          row.clientId !== ctx.agencyClientId ||
+          (req.body?.status === 'archived' &&
+            ctx.memberAccess?.agency_projects.level === 'operator' &&
+            row.createdById !== ctx.userId)
+        )
+          return null;
+        return {
+          tenantId: ctx.tenantId,
+          workspaceId: ctx.workspaceId,
+          agencyClientId: row.clientId,
+          companyContextId: ctx.companyContextId,
+          createdById: row.createdById,
+        };
+      });
     app = mod.createNestApplication();
     await app.init();
     jwt = mod.get(JwtService);

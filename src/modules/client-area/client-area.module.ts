@@ -203,10 +203,14 @@ export class ClientAreaModule implements OnModuleInit {
     private readonly config: ConfigService,
     private readonly bridgeRegistry: ClientAreaBridgeRegistry,
     private readonly bridge: ClientAreaBridgeAuthenticator,
+    private readonly actors: ActorDirectoryService,
   ) {}
 
   onModuleInit() {
     this.bridgeRegistry.register(this.bridge);
+    this.bridgeRegistry.registerActorDirectory((tenantId, ids) =>
+      this.actors.resolveNames(tenantId, ids),
+    );
     const requested =
       this.config.get<string>(CLIENT_AREA_ENABLED_ENV)?.trim().toLowerCase() ===
       'true';

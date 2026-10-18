@@ -263,6 +263,9 @@ describe('CA7 exhaustive account roles and module permissions', () => {
         expect([...permissionsForMemberAccess(access)].sort()).toEqual(
           role === 'client_owner' || level !== 'viewer'
             ? [
+                ...(role === 'client_owner'
+                  ? ['client_area.agency_billing.view']
+                  : []),
                 'client_area.approvals.comment',
                 'client_area.approvals.decide',
                 'client_area.approvals.view',

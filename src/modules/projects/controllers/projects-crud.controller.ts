@@ -1,3 +1,6 @@
+import { UseInterceptors } from '@nestjs/common';
+import { ClientAreaExposed } from '../../client-area/client-area.decorators';
+import { ProjectsClientAreaInterceptor } from '../client-area/projects-client-area.interceptor';
 import {
   Body,
   Controller,
@@ -25,15 +28,17 @@ import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import {
   AuthorizedContext,
   type AuthorizedRequestContext,
-} from '../../../common/context/authorized-context.decorator';
+} from '../client-area/projects-client-area.context';
 
 @UseGuards(JwtAuthGuard, PermissionsGuard)
+@UseInterceptors(ProjectsClientAreaInterceptor)
 @Controller('agency/projects')
 export class ProjectsCrudController {
   constructor(private readonly projectsCrudService: ProjectsCrudService) {}
 
   @Get()
   @RequirePermission('agency.projects.project.view.assigned')
+  @ClientAreaExposed('agency_projects')
   list(
     @AuthorizedContext() context: AuthorizedRequestContext,
     @Query() query: ListProjectsQueryDto,
@@ -43,6 +48,7 @@ export class ProjectsCrudController {
 
   @Get(':id')
   @RequirePermission('agency.projects.project.view.assigned')
+  @ClientAreaExposed('agency_projects')
   findOne(
     @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
@@ -52,6 +58,7 @@ export class ProjectsCrudController {
 
   @Post()
   @RequirePermission('agency.projects.project.create.department')
+  @ClientAreaExposed('agency_projects')
   create(
     @AuthorizedContext() context: AuthorizedRequestContext,
     @Body() dto: CreateProjectDto,
@@ -61,6 +68,7 @@ export class ProjectsCrudController {
 
   @Patch(':id')
   @RequirePermission('agency.projects.project.update.department')
+  @ClientAreaExposed('agency_projects')
   update(
     @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,
@@ -74,7 +82,8 @@ export class ProjectsCrudController {
     'agency.projects.project.archive.department',
     'agency.projects.project.archive.own',
   )
-  @DangerousAction()
+  // CA9: reclassified with explicit user authorization; Agency permissions stay unchanged.
+  @ClientAreaExposed('agency_projects')
   archive(
     @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('id') id: string,

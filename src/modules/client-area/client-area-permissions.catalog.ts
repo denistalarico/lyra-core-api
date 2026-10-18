@@ -19,6 +19,7 @@ export const CLIENT_AREA_ROLE_PERMISSIONS: Readonly<
   Record<ClientAreaRole, readonly ClientAreaPermissionKey[]>
 > = Object.freeze({
   client_owner: Object.freeze([
+    'client_area.agency_billing.view',
     'client_area.approvals.view',
     'client_area.approvals.comment',
     'client_area.approvals.decide',
@@ -98,6 +99,8 @@ export function permissionsForMemberAccess(
   access: ClientAreaMemberAccess,
 ): ReadonlySet<ClientAreaPermissionKey> {
   const result = new Set<ClientAreaPermissionKey>();
+  if (access.agency_billing.available)
+    result.add('client_area.agency_billing.view');
   if (access.approvals.available) {
     result.add('client_area.approvals.view');
     if (access.approvals.level !== 'viewer') {

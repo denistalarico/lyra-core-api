@@ -1,3 +1,4 @@
+import { type ProjectRequestContext } from '../client-area/projects-client-area.context';
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -5,11 +6,7 @@ import { AgencyProjectEvent } from '../entities';
 import { CreateProjectEventDto } from '../dto';
 import { ProjectsCrudService } from './projects-crud.service';
 
-type RequestContext = {
-  tenantId: string;
-  workspaceId: string;
-  userId: string;
-};
+type RequestContext = ProjectRequestContext;
 
 @Injectable()
 export class ProjectEventsService {

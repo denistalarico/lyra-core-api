@@ -88,6 +88,41 @@ describe('CA7 production route boundaries and Agency preservation', () => {
             }
         }
     }
-    expect(exposed.sort()).toMatchInlineSnapshot(`[]`);
+    expect(exposed.sort()).toMatchInlineSnapshot(`
+     [
+       "projects/controllers/project-boards.controller.ts:getMyTasksBoard",
+       "projects/controllers/project-boards.controller.ts:getProjectTasksBoard",
+       "projects/controllers/project-boards.controller.ts:getProjectsBoard",
+       "projects/controllers/project-boards.controller.ts:getWorkspaceTasksBoard",
+       "projects/controllers/project-events.controller.ts:create",
+       "projects/controllers/project-events.controller.ts:list",
+       "projects/controllers/project-followers-attachments.controller.ts:listAttachments",
+       "projects/controllers/project-followers-attachments.controller.ts:listFollowers",
+       "projects/controllers/project-followers-attachments.controller.ts:uploadAttachment",
+       "projects/controllers/projects-crud.controller.ts:archive",
+       "projects/controllers/projects-crud.controller.ts:create",
+       "projects/controllers/projects-crud.controller.ts:findOne",
+       "projects/controllers/projects-crud.controller.ts:list",
+       "projects/controllers/projects-crud.controller.ts:update",
+       "projects/controllers/task-workspace.controller.ts:createChecklistItem",
+       "projects/controllers/task-workspace.controller.ts:createComment",
+       "projects/controllers/task-workspace.controller.ts:getChecklistItem",
+       "projects/controllers/task-workspace.controller.ts:listChecklist",
+       "projects/controllers/task-workspace.controller.ts:listComments",
+       "projects/controllers/task-workspace.controller.ts:updateChecklistItem",
+       "projects/controllers/tasks-crud.controller.ts:archive",
+       "projects/controllers/tasks-crud.controller.ts:createMyTask",
+       "projects/controllers/tasks-crud.controller.ts:createWorkspaceTask",
+       "projects/controllers/tasks-crud.controller.ts:findOne",
+       "projects/controllers/tasks-crud.controller.ts:listAttachments",
+       "projects/controllers/tasks-crud.controller.ts:listMyAssignedSubtasks",
+       "projects/controllers/tasks-crud.controller.ts:listMyTasks",
+       "projects/controllers/tasks-crud.controller.ts:listWorkspaceTasks",
+       "projects/controllers/tasks-crud.controller.ts:remove",
+       "projects/controllers/tasks-crud.controller.ts:update",
+       "projects/controllers/tasks-crud.controller.ts:uploadAttachment",
+       "projects/controllers/tasks-crud.controller.ts:uploadCover",
+     ]
+    `);
   });
 });

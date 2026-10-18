@@ -1,3 +1,4 @@
+import { resolveClientInvoiceOwnership } from './client-invoice-ownership.resolver';
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
@@ -1655,33 +1656,11 @@ export class FinanceProfitabilityService {
   // an Agency Client. Resolve only structurally proven, unambiguous ownership in
   // this tenant/workspace. Primary-company flags and display names are not proof.
   private async resolveCustomerClientIds(ctx: FinanceRequestContext) {
-    const where = { tenantId: ctx.tenantId, workspaceId: ctx.workspaceId };
-    const [clients, contexts] = await Promise.all([
-      this.clientsRepo.find({ where }),
-      this.companyContextsRepo.find({ where }),
-    ]);
-    const clientIds = new Set(clients.map((client) => client.id));
-    const candidates = new Map<string, Set<string>>();
-    const add = (contactId: string | null, clientId: string) => {
-      if (!contactId || !clientIds.has(clientId)) return;
-      const owners = candidates.get(contactId) ?? new Set<string>();
-      owners.add(clientId);
-      candidates.set(contactId, owners);
-    };
-    for (const client of clients) {
-      add(client.contactId, client.id);
-      // Older Clients saves stored the selected contact only in metadata.
-      const legacyContact = getMetadataString(client.metadata, ['contactId']);
-      add(legacyContact, client.id);
-    }
-    for (const context of contexts)
-      add(context.companyContactId, context.agencyClientId);
-    const result = new Map<string, string>();
-    for (const [contactId, owners] of candidates) {
-      if (owners.size === 1 && !clientIds.has(contactId))
-        result.set(contactId, [...owners][0]);
-    }
-    return result;
+    return resolveClientInvoiceOwnership(
+      this.clientsRepo,
+      this.companyContextsRepo,
+      { tenantId: ctx.tenantId, workspaceId: ctx.workspaceId },
+    );
   }
 
   private calculateClientDelinquency(

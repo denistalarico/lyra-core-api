@@ -1,3 +1,6 @@
+import { UseInterceptors } from '@nestjs/common';
+import { ClientAreaExposed } from '../../client-area/client-area.decorators';
+import { ProjectsClientAreaInterceptor } from '../client-area/projects-client-area.interceptor';
 import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common';
 import { ProjectBoardsService } from '../services/project-boards.service';
 import {
@@ -9,15 +12,17 @@ import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import {
   AuthorizedContext,
   type AuthorizedRequestContext,
-} from '../../../common/context/authorized-context.decorator';
+} from '../client-area/projects-client-area.context';
 
 @UseGuards(JwtAuthGuard, PermissionsGuard)
+@UseInterceptors(ProjectsClientAreaInterceptor)
 @Controller('agency/projects')
 export class ProjectBoardsController {
   constructor(private readonly projectBoardsService: ProjectBoardsService) {}
 
   @Get('board')
   @RequirePermission('agency.projects.project.view.assigned')
+  @ClientAreaExposed('agency_projects')
   getProjectsBoard(
     @AuthorizedContext() context: AuthorizedRequestContext,
     @Query('includeArchived') includeArchived?: string,
@@ -38,6 +43,7 @@ export class ProjectBoardsController {
 
   @Get('tasks/board')
   @RequirePermission('agency.tasks.task.manage.department')
+  @ClientAreaExposed('agency_projects')
   getWorkspaceTasksBoard(
     @AuthorizedContext() context: AuthorizedRequestContext,
     @Query('includeArchived') includeArchived?: string,
@@ -53,6 +59,7 @@ export class ProjectBoardsController {
     'agency.projects.project.view.assigned',
     'agency.tasks.task.manage.department',
   )
+  @ClientAreaExposed('agency_projects')
   getProjectTasksBoard(
     @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('projectId') projectId: string,
@@ -67,6 +74,7 @@ export class ProjectBoardsController {
 
   @Get('tasks/my/board')
   @RequirePermission('agency.tasks.task.update.assigned')
+  @ClientAreaExposed('agency_projects')
   getMyTasksBoard(
     @AuthorizedContext() context: AuthorizedRequestContext,
     @Query('includeArchived') includeArchived?: string,

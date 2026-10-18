@@ -1,3 +1,6 @@
+import { UseInterceptors } from '@nestjs/common';
+import { ClientAreaExposed } from '../../client-area/client-area.decorators';
+import { ProjectsClientAreaInterceptor } from '../client-area/projects-client-area.interceptor';
 import {
   Body,
   Controller,
@@ -19,9 +22,10 @@ import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import {
   AuthorizedContext,
   type AuthorizedRequestContext,
-} from '../../../common/context/authorized-context.decorator';
+} from '../client-area/projects-client-area.context';
 
 @UseGuards(JwtAuthGuard, PermissionsGuard)
+@UseInterceptors(ProjectsClientAreaInterceptor)
 @Controller('agency/projects/tasks/:taskId')
 export class TaskWorkspaceController {
   constructor(private readonly taskWorkspaceService: TaskWorkspaceService) {}
@@ -31,6 +35,7 @@ export class TaskWorkspaceController {
     'agency.tasks.task.update.assigned',
     'agency.tasks.task.manage.department',
   )
+  @ClientAreaExposed('agency_projects')
   listChecklist(
     @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('taskId') taskId: string,
@@ -43,6 +48,7 @@ export class TaskWorkspaceController {
     'agency.tasks.task.update.assigned',
     'agency.tasks.task.manage.department',
   )
+  @ClientAreaExposed('agency_projects')
   createChecklistItem(
     @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('taskId') taskId: string,
@@ -67,6 +73,7 @@ export class TaskWorkspaceController {
     'agency.tasks.task.update.assigned',
     'agency.tasks.task.manage.department',
   )
+  @ClientAreaExposed('agency_projects')
   updateChecklistItem(
     @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('taskId') taskId: string,
@@ -115,6 +122,7 @@ export class TaskWorkspaceController {
     'agency.tasks.task.update.assigned',
     'agency.tasks.task.manage.department',
   )
+  @ClientAreaExposed('agency_projects')
   getChecklistItem(
     @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('taskId') taskId: string,
@@ -186,6 +194,7 @@ export class TaskWorkspaceController {
     'agency.tasks.task.update.assigned',
     'agency.tasks.task.manage.department',
   )
+  @ClientAreaExposed('agency_projects')
   listComments(
     @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('taskId') taskId: string,
@@ -212,6 +221,7 @@ export class TaskWorkspaceController {
     'agency.tasks.task.update.assigned',
     'agency.tasks.task.manage.department',
   )
+  @ClientAreaExposed('agency_projects')
   createComment(
     @AuthorizedContext() context: AuthorizedRequestContext,
     @Param('taskId') taskId: string,

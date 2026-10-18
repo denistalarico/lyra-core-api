@@ -27,10 +27,24 @@ export type ClientAreaScopeResolver = (
   permissionKey: string,
   request: PermissionScopeRequest,
 ) => Promise<ClientAreaScopedResource | null>;
+export type ClientAreaActorNamesResolver = (
+  tenantId: string,
+  userIds: readonly string[],
+) => Promise<Record<string, string>>;
 /** Owned by the consumer; ClientAreaModule registers at init. Absence is fail-closed. */
 @Injectable()
 export class ClientAreaBridgeRegistry {
   private bridge?: ClientAreaBridgePort;
+  private actorNames?: ClientAreaActorNamesResolver;
+  registerActorDirectory(resolver: ClientAreaActorNamesResolver) {
+    this.actorNames = resolver;
+  }
+  resolveActorNames(
+    tenantId: string,
+    userIds: readonly string[],
+  ): Promise<Record<string, string>> {
+    return this.actorNames?.(tenantId, userIds) ?? Promise.resolve({});
+  }
   private readonly scopeResolvers = new Map<
     ClientAreaModuleKey,
     ClientAreaScopeResolver

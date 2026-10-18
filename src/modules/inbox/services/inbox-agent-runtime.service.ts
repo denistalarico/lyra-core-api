@@ -2353,7 +2353,7 @@ export function factualReplyIsSupported(
   reply: string,
   contextText: string,
 ): boolean {
-  const urls = reply.match(/https?:\/\/[^\s)]+/gi) ?? [];
+  const urls: string[] = reply.match(/https?:\/\/[^\s)]+/gi) ?? [];
   if (urls.some((url) => !contextText.includes(url.toLowerCase())))
     return false;
   const normalizedReply = normalizeFactualText(reply);
