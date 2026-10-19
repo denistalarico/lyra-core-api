@@ -27,6 +27,7 @@ import {
   FinanceBankAccount,
   FinanceBankTransfer,
   FinanceBill,
+  FinanceBillLine,
   FinanceCategory,
   FinanceCostCenter,
   FinanceInvoice,
@@ -43,6 +44,7 @@ import {
   FinanceMetricKey,
   FinanceMetricPeriodType,
   FinanceAccountType,
+  FinanceCostBehavior,
   FinanceBankAccountType,
   FinancePaymentDirection,
   FinancePaymentStatus,
@@ -69,6 +71,8 @@ export class FinanceService {
     private readonly invoicesRepo: Repository<FinanceInvoice>,
     @InjectRepository(FinanceBill, 'agency')
     private readonly billsRepo: Repository<FinanceBill>,
+    @InjectRepository(FinanceBillLine, 'agency')
+    private readonly billLinesRepo: Repository<FinanceBillLine>,
     @InjectRepository(FinanceRecurringProfile, 'agency')
     private readonly recurringProfilesRepo: Repository<FinanceRecurringProfile>,
     @InjectRepository(AgencyClient, 'agency')
@@ -645,6 +649,9 @@ export class FinanceService {
           paymentDate: Between(periodStartDate, periodEndDate),
         },
       }),
+      this.billLinesRepo.find({
+        where: { tenantId: ctx.tenantId, workspaceId: ctx.workspaceId },
+      }),
     ] as const);
     return { settings, rows };
   }
@@ -678,6 +685,7 @@ export class FinanceService {
       metricsCount,
       reportsCount,
       periodPayments,
+      billLines,
     ] = data.rows;
     const monthPayments = periodPayments.filter(
       (payment) =>
@@ -803,20 +811,30 @@ export class FinanceService {
         ? revenueIssued / validMonthInvoices.length
         : 0;
 
-    const fixedCosts = validMonthBills
-      .filter((bill) => {
-        if (!bill.categoryId) return false;
-        return categoriesById.get(bill.categoryId)?.costBehavior === 'fixed';
-      })
-      .reduce((sum, bill) => sum + this.toNumber(bill.totalAmount), 0);
-
-    const variableCosts = validMonthBills
-      .filter((bill) => {
-        if (!bill.categoryId) return true;
-        const behavior = categoriesById.get(bill.categoryId)?.costBehavior;
-        return behavior === 'variable' || behavior === 'mixed' || !behavior;
-      })
-      .reduce((sum, bill) => sum + this.toNumber(bill.totalAmount), 0);
+    const linesByBill = new Map<string, FinanceBillLine[]>();
+    for (const line of billLines) {
+      const lines = linesByBill.get(line.billId) ?? [];
+      lines.push(line);
+      linesByBill.set(line.billId, lines);
+    }
+    let fixedCosts = 0;
+    let variableCosts = 0;
+    for (const bill of validMonthBills) {
+      // Item classification is what the bill editor saves. Legacy documents
+      // without items retain their document-level category and total.
+      const items = linesByBill.get(bill.id) ?? [bill];
+      for (const item of items) {
+        const categoryId = item.categoryId ?? bill.categoryId;
+        const behavior = categoryId
+          ? categoriesById.get(categoryId)?.costBehavior
+          : undefined;
+        if (behavior === FinanceCostBehavior.Fixed) {
+          fixedCosts += this.toNumber(item.totalAmount);
+        } else {
+          variableCosts += this.toNumber(item.totalAmount);
+        }
+      }
+    }
 
     const totalCosts = fixedCosts + variableCosts;
 

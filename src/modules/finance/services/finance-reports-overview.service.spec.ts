@@ -16,6 +16,8 @@ function makeService(
     invoices?: Record<string, unknown>[];
     bills?: Record<string, unknown>[];
     payments?: Record<string, unknown>[];
+    billLines?: Record<string, unknown>[];
+    categories?: Record<string, unknown>[];
   } = {},
 ) {
   const repo = (rows: Record<string, unknown>[] = []) => ({
@@ -29,9 +31,10 @@ function makeService(
     getSettings: jest.fn().mockResolvedValue({ baseCurrency: 'BRL' }),
     invoicesRepo: repo(data.invoices),
     billsRepo: repo(data.bills),
+    billLinesRepo: repo(data.billLines),
     recurringProfilesRepo: repo(data.profiles),
     clientsRepo: repo(data.clients),
-    categoriesRepo: repo(),
+    categoriesRepo: repo(data.categories),
     metricSnapshotsRepo: repo(),
     reportSnapshotsRepo: repo(),
     paymentsRepo,
@@ -90,6 +93,90 @@ describe('FinanceService reports overview', () => {
     jest.useFakeTimers().setSystemTime(new Date('2026-10-08T12:00:00Z'));
   });
   afterEach(() => jest.useRealTimers());
+
+  it('classifies costs by bill items with document fallback and no double counting', async () => {
+    const { service } = makeService({
+      categories: [
+        { id: 'fixed', costBehavior: 'fixed' },
+        { id: 'variable', costBehavior: 'variable' },
+      ],
+      invoices: [
+        {
+          issueDate: '2026-10-01',
+          status: 'issued',
+          totalAmount: '1000',
+          balanceDue: '1000',
+        },
+      ],
+      bills: [
+        {
+          id: 'items',
+          issueDate: '2026-10-01',
+          status: 'open',
+          totalAmount: '500',
+          categoryId: 'fixed',
+        },
+        {
+          id: 'legacy',
+          issueDate: '2026-10-01',
+          status: 'open',
+          totalAmount: '100',
+          categoryId: 'fixed',
+        },
+        {
+          id: 'cancelled',
+          issueDate: '2026-10-01',
+          status: 'cancelled',
+          totalAmount: '999',
+        },
+        {
+          id: 'older',
+          issueDate: '2026-09-01',
+          status: 'open',
+          totalAmount: '999',
+        },
+      ],
+      billLines: [
+        { billId: 'items', totalAmount: '200', categoryId: 'fixed' },
+        { billId: 'items', totalAmount: '100', categoryId: 'variable' },
+        { billId: 'items', totalAmount: '200', categoryId: null },
+        { billId: 'cancelled', totalAmount: '999', categoryId: 'fixed' },
+        { billId: 'older', totalAmount: '999', categoryId: 'fixed' },
+      ],
+    });
+    const result = await service.getReportsOverview(context);
+    expect(result.cards.fixedCosts).toBe(500);
+    expect(result.cards.variableCosts).toBe(100);
+    expect(result.cards.breakEvenPoint).toBe(555.56);
+  });
+
+  it('recognizes fixed categories on items when the bill has no category', async () => {
+    const { service } = makeService({
+      categories: [{ id: 'fixed', costBehavior: 'fixed' }],
+      invoices: [
+        {
+          issueDate: '2026-10-01',
+          status: 'issued',
+          totalAmount: '1000',
+          balanceDue: '1000',
+        },
+      ],
+      bills: [
+        {
+          id: 'bill',
+          issueDate: '2026-10-01',
+          status: 'open',
+          totalAmount: '300',
+          categoryId: null,
+        },
+      ],
+      billLines: [{ billId: 'bill', totalAmount: '300', categoryId: 'fixed' }],
+    });
+    const result = await service.getReportsOverview(context);
+    expect(result.cards.fixedCosts).toBe(300);
+    expect(result.cards.variableCosts).toBe(0);
+    expect(result.cards.breakEvenPoint).toBe(300);
+  });
 
   it('excludes recurring profiles of inactive or archived clients from MRR and active contracts', async () => {
     const { service } = makeService({
