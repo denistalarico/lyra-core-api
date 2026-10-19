@@ -68,6 +68,15 @@ export class FinanceInvoice {
   @Column({ name: 'paid_amount', type: 'numeric', precision: 14, scale: 2, default: 0 })
   paidAmount!: string;
 
+  @Column({
+    name: 'written_off_amount',
+    type: 'numeric',
+    precision: 14,
+    scale: 2,
+    default: 0,
+  })
+  writtenOffAmount!: string;
+
   @Column({ name: 'balance_due', type: 'numeric', precision: 14, scale: 2, default: 0 })
   balanceDue!: string;
 

@@ -206,6 +206,11 @@ export class FinanceJournalEntryService {
       throw new NotFoundException('Finance journal entry not found');
     }
 
+    if (entry.sourceModule === 'receivable_write_off') {
+      throw new BadRequestException(
+        'Estorne a perda pela fatura; seus lançamentos contábeis não podem ser cancelados separadamente.',
+      );
+    }
     if (entry.status === FinanceJournalEntryStatus.Cancelled) {
       return this.get(ctx, entry.id);
     }

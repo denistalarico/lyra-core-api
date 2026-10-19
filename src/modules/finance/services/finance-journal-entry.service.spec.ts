@@ -6,6 +6,21 @@ import { FinanceJournalEntryService } from './finance-journal-entry.service';
 import { FinanceNotificationPublisher } from './finance-notification.publisher';
 
 describe('FinanceJournalEntryService notification triggers', () => {
+  it.each(['receivable_written_off', 'receivable_write_off_reversed'])(
+    'rejects generic cancellation of %s',
+    async (eventType) => {
+      const entry = makeEntry({
+        status: FinanceJournalEntryStatus.Posted,
+        sourceModule: 'receivable_write_off',
+        eventType,
+      });
+      const { service } = makeService({ entry });
+      await expect(service.cancel(makeContext(), entry.id)).rejects.toThrow(
+        'fatura',
+      );
+      expect(entry.status).toBe(FinanceJournalEntryStatus.Posted);
+    },
+  );
   it('does not auto-fire finance.entry_approved when posting a journal entry', async () => {
     const entry = makeEntry({
       status: FinanceJournalEntryStatus.Draft,

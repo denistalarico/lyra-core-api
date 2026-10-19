@@ -200,8 +200,35 @@ export class FinanceDreService {
       else linesByEntry.set(line.journalEntryId, [line]);
     }
 
+    const currency = settings?.baseCurrency ?? 'BRL';
+    const currencyOf = (entry: FinanceJournalEntry) => {
+      const declared = entry.metadata?.currency;
+      return typeof declared === 'string' && /^[A-Z]{3}$/.test(declared)
+        ? declared
+        : currency;
+    };
+    const currencyEntries = entries.filter(
+      (entry) => currencyOf(entry) === currency,
+    );
+    const excludedStart = query.compare
+      ? this.previousPeriod(period).startDate
+      : period.startDate;
+    const excludedCurrencies = [
+      ...new Set(
+        entries
+          .filter((entry) => {
+            const date = this.bucketDate(entry);
+            return (
+              currencyOf(entry) !== currency &&
+              date >= excludedStart &&
+              date <= period.endDate
+            );
+          })
+          .map(currencyOf),
+      ),
+    ].sort();
     const current = this.computeStatement(
-      entries,
+      currencyEntries,
       linesByEntry,
       accountsById,
       categoriesById,
@@ -210,7 +237,8 @@ export class FinanceDreService {
 
     const response: Record<string, unknown> = {
       period,
-      currency: settings?.baseCurrency ?? 'BRL',
+      currency,
+      excludedCurrencies,
       ...current.summary,
       groups: current.groups,
       classification: current.classification,
@@ -219,7 +247,7 @@ export class FinanceDreService {
     if (query.compare) {
       const previousPeriod = this.previousPeriod(period);
       const previous = this.computeStatement(
-        entries,
+        currencyEntries,
         linesByEntry,
         accountsById,
         categoriesById,

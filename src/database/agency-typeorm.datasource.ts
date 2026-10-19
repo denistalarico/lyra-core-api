@@ -1,3 +1,4 @@
+import { CreateFinanceReceivableWriteOffs1799900000000 } from './migrations/1799900000000-create-finance-receivable-write-offs';
 import { ClientAreaPublicBrandingAndPreferences1799800000000 } from './migrations/1799800000000-client-area-public-branding-and-preferences';
 import { ClientAreaAccessModelV21799700000000 } from './migrations/1799700000000-client-area-access-model-v2';
 import { CreateAgencyClientCompanyProducts1799600000000 } from './migrations/1799600000000-create-agency-client-company-products';
@@ -542,5 +543,6 @@ export const AgencyDataSource = new DataSource({
     CreateAgencyClientCompanyProducts1799600000000,
     ClientAreaAccessModelV21799700000000,
     ClientAreaPublicBrandingAndPreferences1799800000000,
+    CreateFinanceReceivableWriteOffs1799900000000,
   ],
 });

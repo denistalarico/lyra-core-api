@@ -6,4 +6,5 @@ export * from './finance-fiscal.dto';
 export * from './finance-payment-provider.dto';
 export * from './finance-journal-entry.dto';
 export * from './finance-bank-transfer.dto';
+export * from './finance-receivable-write-off.dto';
 export * from './finance-ai-cost.dto';

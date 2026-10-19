@@ -103,6 +103,7 @@ function setup() {
     status?: FinanceJournalEntryStatus;
     tenantId?: string;
     workspaceId?: string;
+    currency?: string;
   }) {
     const tenantId = params.tenantId ?? TENANT;
     const workspaceId = params.workspaceId ?? WORKSPACE;
@@ -113,10 +114,12 @@ function setup() {
       workspaceId,
       status: params.status ?? FinanceJournalEntryStatus.Posted,
       entryDate: params.entryDate ?? '2026-06-15',
-      metadata:
-        params.accrualDate !== undefined && params.accrualDate !== null
+      metadata: {
+        ...(params.accrualDate !== undefined && params.accrualDate !== null
           ? { accrualDate: params.accrualDate }
-          : {},
+          : {}),
+        ...(params.currency ? { currency: params.currency } : {}),
+      },
       createdAt: new Date('2026-06-15T00:00:00Z'),
       postedAt: new Date('2026-06-15T00:00:00Z'),
     });
@@ -153,6 +156,39 @@ const JUNE = { startDate: '2026-06-01', endDate: '2026-06-30' };
 const { Debit, Credit } = FinanceJournalEntryLineType;
 
 describe('FinanceDreService', () => {
+  it('keeps loss and reversal in their own currency without changing issued revenue', async () => {
+    const env = setup();
+    const expense = env.addAccount('6.99', FinanceAccountType.Expense);
+    const receivable = env.addAccount('1.1.02', FinanceAccountType.Asset);
+    const revenue = env.addAccount('3.1.01', FinanceAccountType.Revenue);
+    env.addEntry({
+      lines: [{ type: Credit, amount: '1000', accountId: revenue }],
+    });
+    for (const [currency, amount] of [
+      ['BRL', '100'],
+      ['USD', '200'],
+    ]) {
+      env.addEntry({
+        currency,
+        lines: [
+          { type: Debit, amount, accountId: expense },
+          { type: Credit, amount, accountId: receivable },
+        ],
+      });
+    }
+    env.addEntry({
+      currency: 'BRL',
+      lines: [
+        { type: Credit, amount: '30', accountId: expense },
+        { type: Debit, amount: '30', accountId: receivable },
+      ],
+    });
+    const dre = await env.service.getDre(ctx, JUNE);
+    expect(dre.grossRevenue).toBe(1000);
+    expect(dre.operatingExpenses).toBe(70);
+    expect(dre.netResult).toBe(930);
+    expect(dre.excludedCurrencies).toEqual(['USD']);
+  });
   it('1. revenue credited to a revenue account counts as positive gross revenue', async () => {
     const env = setup();
     const recv = env.addAccount('1.1.02', FinanceAccountType.Asset);

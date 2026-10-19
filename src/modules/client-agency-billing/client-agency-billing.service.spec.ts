@@ -50,6 +50,22 @@ function setup(invoice: object | null = row) {
   );
 }
 describe('CA9 Owner billing facade', () => {
+  it('projects written-off value separately from cash without exposing loss evidence', () => {
+    const invoice = invoiceView({
+      ...row,
+      totalAmount: '1000',
+      paidAmount: '300',
+      writtenOffAmount: '700',
+      balanceDue: '0',
+    } as FinanceInvoice);
+    expect(invoice).toMatchObject({
+      paidAmount: '300',
+      writtenOffAmount: '700',
+      balanceDue: '0',
+    });
+    expect(invoice).not.toHaveProperty('reason');
+    expect(invoice).not.toHaveProperty('evidence');
+  });
   it('rejects members even when they claim a module level', () => {
     expect(() =>
       billingOwnerScope({ ...context, role: 'client_member' }),

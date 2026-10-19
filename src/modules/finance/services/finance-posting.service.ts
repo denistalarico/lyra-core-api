@@ -15,6 +15,7 @@ import {
   FinanceJournalEntryLine,
   FinancePayment,
   FinancePaymentAllocation,
+  FinanceReceivableWriteOff,
 } from '../entities';
 import {
   FinanceAccountStatus,
@@ -85,13 +86,16 @@ type EventType =
   | 'supplier_payment_completed'
   | 'payment_reversed'
   | 'bank_transfer_completed'
-  | 'bank_transfer_reversed';
+  | 'bank_transfer_reversed'
+  | 'receivable_written_off'
+  | 'receivable_write_off_reversed';
 
 const REVERSAL_EVENTS: EventType[] = [
   'invoice_reversed',
   'bill_reversed',
   'payment_reversed',
   'bank_transfer_reversed',
+  'receivable_write_off_reversed',
 ];
 
 interface PostingLine {
@@ -165,6 +169,100 @@ export class FinancePostingService {
   ) {}
 
   // ── Public event API ────────────────────────────────────────────────────
+
+  async postReceivableWriteOff(
+    ctx: FinanceRequestContext,
+    invoice: FinanceInvoice,
+    loss: FinanceReceivableWriteOff,
+    m: EntityManager,
+  ): Promise<FinanceJournalEntry> {
+    const expense = await this.findAccountById(m, ctx, loss.expenseAccountId);
+    if (
+      !expense ||
+      !this.accountIsActive(expense) ||
+      expense.type !== FinanceAccountType.Expense
+    ) {
+      throw new BadRequestException(
+        'Selecione uma conta ativa de despesa para perdas com recebíveis.',
+      );
+    }
+    const receivableId = await this.resolveSystemAccountId(
+      m,
+      ctx,
+      SYSTEM_ACCOUNT_ANCHORS.receivable,
+      false,
+    );
+    const journalId = await this.resolveJournalId(
+      m,
+      ctx,
+      FinanceJournalType.Miscellaneous,
+    );
+    const amount = toMoney(loss.amount);
+    return this.createPostedEntry(m, ctx, {
+      entryDate: loss.writeOffDate,
+      description: `Perda com recebível ${invoice.invoiceNumber}`,
+      journalId,
+      sourceType: 'receivable_write_off',
+      sourceId: loss.id,
+      eventType: 'receivable_written_off',
+      metadata: {
+        invoiceId: invoice.id,
+        sourceNumber: invoice.invoiceNumber,
+        currency: loss.currency,
+        reason: loss.reason,
+      },
+      lines: [
+        {
+          lineType: FinanceJournalEntryLineType.Debit,
+          accountId: expense.id,
+          contactId: invoice.customerId,
+          amount,
+          description: loss.reason,
+        },
+        {
+          lineType: FinanceJournalEntryLineType.Credit,
+          accountId: receivableId,
+          contactId: invoice.customerId,
+          amount,
+          description: `Baixa por incobrabilidade ${invoice.invoiceNumber}`,
+        },
+      ],
+    });
+  }
+
+  async reverseReceivableWriteOff(
+    ctx: FinanceRequestContext,
+    loss: FinanceReceivableWriteOff,
+    date: string,
+    m: EntityManager,
+  ): Promise<FinanceJournalEntry> {
+    const original = await m.getRepository(FinanceJournalEntry).findOne({
+      where: {
+        id: loss.journalEntryId ?? '',
+        tenantId: ctx.tenantId,
+        workspaceId: ctx.workspaceId,
+        sourceModule: 'receivable_write_off',
+        sourceId: loss.id,
+        status: FinanceJournalEntryStatus.Posted,
+      },
+    });
+    if (!original)
+      throw new BadRequestException(
+        'Lançamento contábil da perda não encontrado.',
+      );
+    const entry = await this.createReversalEntry(
+      m,
+      ctx,
+      original,
+      'receivable_write_off_reversed',
+      date,
+    );
+    if (!entry)
+      throw new BadRequestException(
+        'Lançamento contábil da perda sem itens para estorno.',
+      );
+    return entry;
+  }
 
   /** Confirmed invoice → DEBIT receivable / CREDIT revenue per item-account. */
   async postInvoiceConfirmed(
@@ -684,6 +782,7 @@ export class FinancePostingService {
     ctx: FinanceRequestContext,
     original: FinanceJournalEntry,
     reversalEvent: EventType,
+    entryDate = todayIso(),
   ): Promise<FinanceJournalEntry | null> {
     const originalLines = await m.getRepository(FinanceJournalEntryLine).find({
       where: {
@@ -709,7 +808,7 @@ export class FinancePostingService {
     }));
 
     const reversal = await this.createPostedEntry(m, ctx, {
-      entryDate: todayIso(),
+      entryDate,
       description: `Estorno de ${original.entryNumber}`,
       journalId: original.journalId,
       sourceType: original.sourceModule ?? 'unknown',
@@ -775,6 +874,7 @@ export class FinancePostingService {
     m: EntityManager,
     ctx: FinanceRequestContext,
     anchor: SystemAccountAnchor,
+    allowFallback = true,
   ): Promise<string> {
     const accounts = this.sortAccounts(
       await m.getRepository(FinanceAccount).find({
@@ -806,7 +906,7 @@ export class FinancePostingService {
     if (byKeywords) return byKeywords.id;
 
     const fallback = accounts[0];
-    if (fallback) return fallback.id;
+    if (fallback && allowFallback) return fallback.id;
 
     throw new BadRequestException(
       `Conta contábil ativa para "${anchor.label}" não encontrada em /finance/master-data. ` +

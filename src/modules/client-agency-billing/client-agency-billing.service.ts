@@ -48,6 +48,7 @@ export const invoiceView = (row: FinanceInvoice) => ({
   discountAmount: row.discountAmount,
   totalAmount: row.totalAmount,
   paidAmount: row.paidAmount,
+  writtenOffAmount: row.writtenOffAmount ?? '0.00',
   balanceDue: row.balanceDue,
   issuedAt: row.issuedAt,
   paidAt: row.paidAt,

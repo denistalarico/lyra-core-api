@@ -1,3 +1,4 @@
+import { applyInvoiceSettlement } from './finance-invoice-settlement';
 import { contractToday, contractObject } from '../../contracts/contract-term';
 import { FinanceDocumentRecurrenceService } from './finance-document-recurrence.service';
 import {
@@ -17,7 +18,7 @@ import {
   Optional,
 } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
-import { DataSource, In, Raw, Repository } from 'typeorm';
+import { DataSource, EntityManager, In, Raw, Repository } from 'typeorm';
 import {
   BillRecurrenceConfigDto,
   CreateFinanceBillDto,
@@ -38,6 +39,7 @@ import {
   FinanceBillLine,
   FinanceBillRecurrence,
   FinanceInvoice,
+  FinanceReceivableWriteOff,
   FinanceInvoiceLine,
   FinancePayment,
   FinancePaymentAllocation,
@@ -284,8 +286,49 @@ export class FinanceBillingService {
     });
 
     if (!invoice) throw new NotFoundException('Finance invoice not found');
+    if (
+      Number(invoice.writtenOffAmount || 0) > 0 &&
+      Object.keys(dto).some(
+        (key) => !['metadata', 'notes', 'terms', 'dueDate'].includes(key),
+      )
+    ) {
+      throw new BadRequestException(
+        'Estorne as perdas antes de alterar a operação original da fatura.',
+      );
+    }
 
     const previousStatus = invoice.status;
+
+    // A descriptive edit must never save the settlement columns from a stale
+    // entity over a payment or write-off that committed in the meantime.
+    if (dto.status === undefined) {
+      const { metadata, ...fields } = dto;
+      const query = this.invoicesRepo
+        .createQueryBuilder()
+        .update(FinanceInvoice)
+        .set({
+          ...fields,
+          ...(metadata !== undefined
+            ? {
+                metadata: () =>
+                  "coalesce(metadata, '{}'::jsonb) || CAST(:invoiceMetadata AS jsonb)",
+              }
+            : {}),
+        })
+        .where(
+          'id = :id AND tenant_id = :tenantId AND workspace_id = :workspaceId',
+          {
+            id,
+            tenantId: ctx.tenantId,
+            workspaceId: ctx.workspaceId,
+          },
+        );
+      if (metadata !== undefined)
+        query.setParameter('invoiceMetadata', JSON.stringify(metadata));
+      if (Object.keys(fields).length || metadata !== undefined)
+        await query.execute();
+      return this.getInvoice(ctx, id);
+    }
 
     const shouldSettleFromStatusPatch =
       dto.status === FinanceInvoiceStatus.Paid &&
@@ -435,6 +478,11 @@ export class FinanceBillingService {
       },
     });
     if (!invoice) throw new NotFoundException('Finance invoice not found');
+    if (Number(invoice.writtenOffAmount || 0) > 0) {
+      throw new BadRequestException(
+        'Estorne as perdas antes de alterar a operação original da fatura.',
+      );
+    }
 
     const qty = toMoney(dto.quantity ?? '1');
     const price = toMoney(dto.unitPrice ?? '0');
@@ -470,6 +518,21 @@ export class FinanceBillingService {
     dto: import('../dto').UpdateFinanceInvoiceLineDto,
   ) {
     validateId(invoiceId, 'invoice id');
+    const sourceInvoice = await this.invoicesRepo.findOne({
+      where: {
+        id: invoiceId,
+        tenantId: ctx.tenantId,
+        workspaceId: ctx.workspaceId,
+      },
+    });
+    if (!sourceInvoice)
+      throw new NotFoundException('Finance invoice not found');
+    if (Number(sourceInvoice.writtenOffAmount || 0) > 0) {
+      throw new BadRequestException(
+        'Estorne as perdas antes de editar os itens da fatura.',
+      );
+    }
+
     validateId(lineId, 'line id');
     const line = await this.invoiceLinesRepo.findOne({
       where: {
@@ -513,6 +576,21 @@ export class FinanceBillingService {
     lineId: string,
   ) {
     validateId(invoiceId, 'invoice id');
+    const sourceInvoice = await this.invoicesRepo.findOne({
+      where: {
+        id: invoiceId,
+        tenantId: ctx.tenantId,
+        workspaceId: ctx.workspaceId,
+      },
+    });
+    if (!sourceInvoice)
+      throw new NotFoundException('Finance invoice not found');
+    if (Number(sourceInvoice.writtenOffAmount || 0) > 0) {
+      throw new BadRequestException(
+        'Estorne as perdas antes de editar os itens da fatura.',
+      );
+    }
+
     validateId(lineId, 'line id');
     const line = await this.invoiceLinesRepo.findOne({
       where: {
@@ -535,6 +613,24 @@ export class FinanceBillingService {
       where: { id, tenantId: ctx.tenantId, workspaceId: ctx.workspaceId },
     });
     if (!invoice) throw new NotFoundException('Finance invoice not found');
+    if (Number(invoice.writtenOffAmount || 0) > 0) {
+      throw new BadRequestException(
+        'Estorne as perdas antes de alterar a operação original da fatura.',
+      );
+    }
+    const history = await this.dataSource
+      .getRepository(FinanceReceivableWriteOff)
+      .count({
+        where: {
+          tenantId: ctx.tenantId,
+          workspaceId: ctx.workspaceId,
+          invoiceId: id,
+        },
+      });
+    if (history)
+      throw new BadRequestException(
+        'Faturas com histórico de perdas não podem ser excluídas.',
+      );
     await this.invoiceLinesRepo.delete({
       invoiceId: id,
       tenantId: ctx.tenantId,
@@ -550,6 +646,11 @@ export class FinanceBillingService {
       where: { id, tenantId: ctx.tenantId, workspaceId: ctx.workspaceId },
     });
     if (!invoice) throw new NotFoundException('Finance invoice not found');
+    if (Number(invoice.writtenOffAmount || 0) > 0) {
+      throw new BadRequestException(
+        'Estorne as perdas antes de alterar a operação original da fatura.',
+      );
+    }
     invoice.status = FinanceInvoiceStatus.Draft;
     await this.invoicesRepo.save(invoice);
     return this.getInvoice(ctx, id);
@@ -562,6 +663,11 @@ export class FinanceBillingService {
     });
 
     if (!invoice) throw new NotFoundException('Finance invoice not found');
+    if (Number(invoice.writtenOffAmount || 0) > 0) {
+      throw new BadRequestException(
+        'Estorne as perdas antes de alterar a operação original da fatura.',
+      );
+    }
 
     const previousStatus = invoice.status;
     const wasIssued = previousStatus === FinanceInvoiceStatus.Issued;
@@ -616,6 +722,11 @@ export class FinanceBillingService {
     });
 
     if (!invoice) throw new NotFoundException('Finance invoice not found');
+    if (Number(invoice.writtenOffAmount || 0) > 0) {
+      throw new BadRequestException(
+        'Estorne as perdas antes de alterar a operação original da fatura.',
+      );
+    }
 
     const wasCancelled = invoice.status === FinanceInvoiceStatus.Cancelled;
 
@@ -2102,7 +2213,13 @@ export class FinanceBillingService {
   private async settleCompletedScheduledPayment(
     ctx: FinanceRequestContext,
     payment: FinancePayment,
+    manager?: EntityManager,
   ) {
+    const invoicesRepo =
+      manager?.getRepository(FinanceInvoice) ?? this.invoicesRepo;
+    const billsRepo = manager?.getRepository(FinanceBill) ?? this.billsRepo;
+    const paymentsRepo =
+      manager?.getRepository(FinancePayment) ?? this.paymentsRepo;
     if (payment.status !== FinancePaymentStatus.Completed) return payment;
     const target = this.readScheduledTarget(payment.metadata);
     if (!target) return payment;
@@ -2112,7 +2229,7 @@ export class FinanceBillingService {
 
     let targetBalance = 0;
     if (target.targetType === FinanceAllocationTargetType.Invoice) {
-      const invoice = await this.invoicesRepo.findOne({
+      const invoice = await invoicesRepo.findOne({
         where: {
           id: target.targetId,
           tenantId: ctx.tenantId,
@@ -2121,7 +2238,7 @@ export class FinanceBillingService {
       });
       targetBalance = toMoney(invoice?.balanceDue);
     } else {
-      const bill = await this.billsRepo.findOne({
+      const bill = await billsRepo.findOne({
         where: {
           id: target.targetId,
           tenantId: ctx.tenantId,
@@ -2133,13 +2250,18 @@ export class FinanceBillingService {
 
     const amount = Math.min(remaining, targetBalance);
     if (amount <= 0) return payment;
-    await this.allocatePayment(ctx, payment.id, {
-      targetType: target.targetType,
-      targetId: target.targetId,
-      amount: money(amount),
-    });
+    await this.allocatePayment(
+      ctx,
+      payment.id,
+      {
+        targetType: target.targetType,
+        targetId: target.targetId,
+        amount: money(amount),
+      },
+      manager,
+    );
     return (
-      (await this.paymentsRepo.findOne({
+      (await paymentsRepo.findOne({
         where: {
           id: payment.id,
           tenantId: ctx.tenantId,
@@ -2152,6 +2274,7 @@ export class FinanceBillingService {
   private async recalculateTargetsForAllocations(
     ctx: FinanceRequestContext,
     allocations: FinancePaymentAllocation[],
+    manager?: EntityManager,
   ) {
     const invoiceIds = new Set<string>();
     const billIds = new Set<string>();
@@ -2164,39 +2287,48 @@ export class FinanceBillingService {
       }
     }
     for (const invoiceId of invoiceIds) {
-      await this.recalculateInvoicePaymentState(ctx, invoiceId);
+      await this.recalculateInvoicePaymentState(ctx, invoiceId, manager);
     }
     for (const billId of billIds) {
-      await this.recalculateBillPaymentState(ctx, billId);
+      await this.recalculateBillPaymentState(ctx, billId, manager);
     }
-    await this.reconcileTeamPaymentsForBills(ctx, billIds);
+    if (!manager) await this.reconcileTeamPaymentsForBills(ctx, billIds);
   }
 
   private async recalculateInvoicePaymentState(
     ctx: FinanceRequestContext,
     invoiceId: string,
-  ) {
-    const invoice = await this.invoicesRepo.findOne({
+    manager?: EntityManager,
+  ): Promise<void> {
+    if (!manager)
+      return this.dataSource.transaction((m) =>
+        this.recalculateInvoicePaymentState(ctx, invoiceId, m),
+      );
+    const invoicesRepo = manager.getRepository(FinanceInvoice);
+    const invoice = await invoicesRepo.findOne({
       where: {
         id: invoiceId,
         tenantId: ctx.tenantId,
         workspaceId: ctx.workspaceId,
       },
+      lock: { mode: 'pessimistic_write' },
     });
     if (!invoice) return;
-    const allocations = await this.paymentAllocationsRepo.find({
-      where: {
-        tenantId: ctx.tenantId,
-        workspaceId: ctx.workspaceId,
-        targetType: FinanceAllocationTargetType.Invoice,
-        targetId: invoiceId,
-      },
-    });
+    const allocations = await manager
+      .getRepository(FinancePaymentAllocation)
+      .find({
+        where: {
+          tenantId: ctx.tenantId,
+          workspaceId: ctx.workspaceId,
+          targetType: FinanceAllocationTargetType.Invoice,
+          targetId: invoiceId,
+        },
+      });
     const paymentIds = [
       ...new Set(allocations.map((allocation) => allocation.paymentId)),
     ];
     const payments = paymentIds.length
-      ? await this.paymentsRepo.find({
+      ? await manager.getRepository(FinancePayment).find({
           where: {
             tenantId: ctx.tenantId,
             workspaceId: ctx.workspaceId,
@@ -2204,45 +2336,30 @@ export class FinanceBillingService {
           },
         })
       : [];
-    const completedPaymentIds = new Set(
+    const completed = new Set(
       payments
-        .filter((payment) => payment.status === FinancePaymentStatus.Completed)
-        .map((payment) => payment.id),
+        .filter((p) => p.status === FinancePaymentStatus.Completed)
+        .map((p) => p.id),
     );
     const paid = allocations
-      .filter((allocation) => completedPaymentIds.has(allocation.paymentId))
-      .reduce((sum, allocation) => sum + toMoney(allocation.amount), 0);
-    const total = toMoney(invoice.totalAmount);
-    invoice.paidAmount = money(paid);
-    invoice.balanceDue = money(Math.max(0, total - paid));
-    if (
-      ![FinanceInvoiceStatus.Cancelled, FinanceInvoiceStatus.Void].includes(
-        invoice.status,
-      )
-    ) {
-      if (paid <= 0) {
-        invoice.status =
-          invoice.issuedAt || invoice.issueDate
-            ? FinanceInvoiceStatus.Issued
-            : FinanceInvoiceStatus.Draft;
-        invoice.paidAt = null;
-      } else if (paid >= total) {
-        invoice.status = FinanceInvoiceStatus.Paid;
-        invoice.balanceDue = '0.00';
-        invoice.paidAt = invoice.paidAt ?? new Date();
-      } else {
-        invoice.status = FinanceInvoiceStatus.PartiallyPaid;
-        invoice.paidAt = null;
-      }
-    }
-    await this.invoicesRepo.save(invoice);
+      .filter((a) => completed.has(a.paymentId))
+      .reduce((sum, a) => sum + toMoney(a.amount), 0);
+    applyInvoiceSettlement(invoice, paid);
+    await invoicesRepo.save(invoice);
   }
 
   private async recalculateBillPaymentState(
     ctx: FinanceRequestContext,
     billId: string,
+    manager?: EntityManager,
   ) {
-    const bill = await this.billsRepo.findOne({
+    const billsRepo = manager?.getRepository(FinanceBill) ?? this.billsRepo;
+    const allocationsRepo =
+      manager?.getRepository(FinancePaymentAllocation) ??
+      this.paymentAllocationsRepo;
+    const paymentsRepo =
+      manager?.getRepository(FinancePayment) ?? this.paymentsRepo;
+    const bill = await billsRepo.findOne({
       where: {
         id: billId,
         tenantId: ctx.tenantId,
@@ -2250,7 +2367,7 @@ export class FinanceBillingService {
       },
     });
     if (!bill) return;
-    const allocations = await this.paymentAllocationsRepo.find({
+    const allocations = await allocationsRepo.find({
       where: {
         tenantId: ctx.tenantId,
         workspaceId: ctx.workspaceId,
@@ -2262,7 +2379,7 @@ export class FinanceBillingService {
       ...new Set(allocations.map((allocation) => allocation.paymentId)),
     ];
     const payments = paymentIds.length
-      ? await this.paymentsRepo.find({
+      ? await paymentsRepo.find({
           where: {
             tenantId: ctx.tenantId,
             workspaceId: ctx.workspaceId,
@@ -2294,7 +2411,7 @@ export class FinanceBillingService {
         bill.paidAt = null;
       }
     }
-    await this.billsRepo.save(bill);
+    await billsRepo.save(bill);
   }
 
   async updatePayment(
@@ -2302,18 +2419,81 @@ export class FinanceBillingService {
     id: string,
     dto: import('../dto').UpdateFinancePaymentDto,
   ) {
+    const before = await this.paymentAllocationsRepo.find({
+      where: {
+        tenantId: ctx.tenantId,
+        workspaceId: ctx.workspaceId,
+        paymentId: id,
+      },
+    });
+    const result = await this.dataSource.transaction((manager) =>
+      this.updatePaymentInTransaction(ctx, id, dto, manager),
+    );
+    const after = await this.paymentAllocationsRepo.find({
+      where: {
+        tenantId: ctx.tenantId,
+        workspaceId: ctx.workspaceId,
+        paymentId: id,
+      },
+    });
+    await this.reconcileTeamPaymentsForBills(
+      ctx,
+      [...before, ...after]
+        .filter(
+          (allocation) =>
+            allocation.targetType === FinanceAllocationTargetType.Bill,
+        )
+        .map((allocation) => allocation.targetId),
+    );
+    return result;
+  }
+
+  private async updatePaymentInTransaction(
+    ctx: FinanceRequestContext,
+    id: string,
+    dto: import('../dto').UpdateFinancePaymentDto,
+    manager: EntityManager,
+  ) {
+    const paymentsRepo = manager.getRepository(FinancePayment);
+    const allocationsRepo = manager.getRepository(FinancePaymentAllocation);
     validateId(id, 'payment id');
-    const payment = await this.paymentsRepo.findOne({
+    const payment = await paymentsRepo.findOne({
       where: { id, tenantId: ctx.tenantId, workspaceId: ctx.workspaceId },
+      lock: { mode: 'pessimistic_write' },
     });
     if (!payment) throw new NotFoundException('Finance payment not found');
     const previousStatus = payment.status;
+    if (
+      toMoney(payment.allocatedAmount) > 0 &&
+      ((dto.amount !== undefined &&
+        toMoney(dto.amount) < toMoney(payment.allocatedAmount)) ||
+        (dto.currency !== undefined && dto.currency !== payment.currency))
+    )
+      throw new BadRequestException(
+        'Um pagamento alocado deve preservar a moeda, direção e o valor já alocado.',
+      );
+    if (
+      previousStatus !== FinancePaymentStatus.Completed &&
+      dto.status === FinancePaymentStatus.Completed
+    ) {
+      const existing = await allocationsRepo.find({
+        where: {
+          tenantId: ctx.tenantId,
+          workspaceId: ctx.workspaceId,
+          paymentId: id,
+        },
+      });
+      if (existing.length)
+        throw new BadRequestException(
+          'Este pagamento cancelado tem alocações históricas. Registre um novo recebimento após estornar a perda, quando necessário.',
+        );
+    }
     if (dto.metadata !== undefined) {
       payment.metadata = { ...payment.metadata, ...dto.metadata };
     }
     const { metadata: _meta, ...rest } = dto;
     Object.assign(payment, rest);
-    let saved = await this.paymentsRepo.save(payment);
+    let saved = await paymentsRepo.save(payment);
 
     // Leaving "completed" always removes the financial effect of the payment.
     // For an editable/provisional status, the old allocations are removed and
@@ -2326,14 +2506,14 @@ export class FinanceBillingService {
       previousStatus === FinancePaymentStatus.Completed &&
       saved.status !== FinancePaymentStatus.Completed
     ) {
-      const allocations = await this.paymentAllocationsRepo.find({
+      const allocations = await allocationsRepo.find({
         where: {
           tenantId: ctx.tenantId,
           workspaceId: ctx.workspaceId,
           paymentId: saved.id,
         },
       });
-      await this.postingService.reversePayment(ctx, saved);
+      await this.postingService.reversePayment(ctx, saved, manager);
 
       if (!becameVoid && allocations.length > 0) {
         const firstTarget = allocations[0];
@@ -2351,23 +2531,23 @@ export class FinanceBillingService {
             }),
           };
         }
-        await this.paymentAllocationsRepo.delete({
+        await allocationsRepo.delete({
           tenantId: ctx.tenantId,
           workspaceId: ctx.workspaceId,
           paymentId: saved.id,
         });
         saved.allocatedAmount = '0.00';
-        saved = await this.paymentsRepo.save(saved);
+        saved = await paymentsRepo.save(saved);
       }
 
-      await this.recalculateTargetsForAllocations(ctx, allocations);
+      await this.recalculateTargetsForAllocations(ctx, allocations, manager);
     }
 
     if (
       previousStatus !== FinancePaymentStatus.Completed &&
       saved.status === FinancePaymentStatus.Completed
     ) {
-      saved = await this.settleCompletedScheduledPayment(ctx, saved);
+      saved = await this.settleCompletedScheduledPayment(ctx, saved, manager);
     }
 
     // No tenant-validated recipient source exists yet (only the actor, who
@@ -2483,45 +2663,48 @@ export class FinanceBillingService {
     ctx: FinanceRequestContext,
     paymentId: string,
     dto: AllocateFinancePaymentDto,
+    transactionManager?: EntityManager,
   ) {
-    const payment = await this.paymentsRepo.findOne({
-      where: {
-        id: paymentId,
-        tenantId: ctx.tenantId,
-        workspaceId: ctx.workspaceId,
-      },
-    });
-
-    if (!payment) {
-      throw new NotFoundException('Finance payment not found');
-    }
-
-    if (payment.status !== FinancePaymentStatus.Completed) {
-      throw new BadRequestException('Only completed payments can be allocated');
-    }
-
-    const amount = toMoney(dto.amount);
-
-    if (amount <= 0) {
-      throw new BadRequestException(
-        'Allocation amount must be greater than zero',
-      );
-    }
-
-    const paymentAmount = toMoney(payment.amount);
-    const allocatedAmount = toMoney(payment.allocatedAmount);
-    const remainingPaymentAmount = paymentAmount - allocatedAmount;
-
-    if (amount > remainingPaymentAmount) {
-      throw new BadRequestException(
-        'Allocation amount exceeds remaining payment amount',
-      );
-    }
-
     let paidInvoice: FinanceInvoice | null = null;
     let paidBill: FinanceBill | null = null;
+    const allocate = async (manager: EntityManager) => {
+      const payment = await manager.getRepository(FinancePayment).findOne({
+        where: {
+          id: paymentId,
+          tenantId: ctx.tenantId,
+          workspaceId: ctx.workspaceId,
+        },
+        lock: { mode: 'pessimistic_write' },
+      });
 
-    const result = await this.dataSource.transaction(async (manager) => {
+      if (!payment) {
+        throw new NotFoundException('Finance payment not found');
+      }
+
+      if (payment.status !== FinancePaymentStatus.Completed) {
+        throw new BadRequestException(
+          'Only completed payments can be allocated',
+        );
+      }
+
+      const amount = toMoney(dto.amount);
+
+      if (amount <= 0) {
+        throw new BadRequestException(
+          'Allocation amount must be greater than zero',
+        );
+      }
+
+      const paymentAmount = toMoney(payment.amount);
+      const allocatedAmount = toMoney(payment.allocatedAmount);
+      const remainingPaymentAmount = paymentAmount - allocatedAmount;
+
+      if (amount > remainingPaymentAmount) {
+        throw new BadRequestException(
+          'Allocation amount exceeds remaining payment amount',
+        );
+      }
+
       if (dto.targetType === FinanceAllocationTargetType.Invoice) {
         if (payment.direction !== FinancePaymentDirection.Customer) {
           throw new BadRequestException(
@@ -2535,10 +2718,17 @@ export class FinanceBillingService {
             tenantId: ctx.tenantId,
             workspaceId: ctx.workspaceId,
           },
+          lock: { mode: 'pessimistic_write' },
         });
 
         if (!invoice) {
           throw new NotFoundException('Finance invoice not found');
+        }
+
+        if (invoice.currency !== payment.currency) {
+          throw new BadRequestException(
+            'O recebimento e a fatura devem usar a mesma moeda.',
+          );
         }
 
         const invoiceBalance = toMoney(invoice.balanceDue);
@@ -2549,17 +2739,19 @@ export class FinanceBillingService {
           );
         }
 
-        invoice.paidAmount = money(toMoney(invoice.paidAmount) + amount);
-        invoice.balanceDue = money(invoiceBalance - amount);
-
-        if (toMoney(invoice.balanceDue) <= 0) {
-          invoice.status = FinanceInvoiceStatus.Paid;
-          invoice.paidAt = new Date();
-          invoice.balanceDue = '0.00';
-          paidInvoice = invoice;
-        } else {
-          invoice.status = FinanceInvoiceStatus.PartiallyPaid;
+        if (
+          [
+            FinanceInvoiceStatus.Cancelled,
+            FinanceInvoiceStatus.Void,
+            FinanceInvoiceStatus.Draft,
+          ].includes(invoice.status)
+        ) {
+          throw new BadRequestException(
+            'Só é possível receber uma fatura emitida.',
+          );
         }
+        applyInvoiceSettlement(invoice, toMoney(invoice.paidAmount) + amount);
+        if (invoice.status === FinanceInvoiceStatus.Paid) paidInvoice = invoice;
 
         await manager.getRepository(FinanceInvoice).save(invoice);
       }
@@ -2644,7 +2836,10 @@ export class FinanceBillingService {
           ),
         },
       };
-    });
+    };
+    const result = transactionManager
+      ? await allocate(transactionManager)
+      : await this.dataSource.transaction(allocate);
 
     const invoiceToNotify = paidInvoice as FinanceInvoice | null;
     const billToNotify = paidBill as FinanceBill | null;
@@ -2666,7 +2861,10 @@ export class FinanceBillingService {
       });
     }
 
-    if (dto.targetType === FinanceAllocationTargetType.Bill) {
+    if (
+      !transactionManager &&
+      dto.targetType === FinanceAllocationTargetType.Bill
+    ) {
       await this.reconcileTeamPaymentsForBills(ctx, [dto.targetId]);
     }
     return result;

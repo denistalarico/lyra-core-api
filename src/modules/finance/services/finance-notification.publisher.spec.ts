@@ -174,6 +174,7 @@ function makeInvoice(overrides: Partial<FinanceInvoice> = {}): FinanceInvoice {
     discountAmount: '0.00',
     totalAmount: '100.00',
     paidAmount: '0.00',
+    writtenOffAmount: '0.00',
     balanceDue: '100.00',
     terms: null,
     notes: null,

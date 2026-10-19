@@ -83,6 +83,9 @@ import {
   UpdateFinanceBillRecurrenceDto,
   AllocateFinancePaymentDto,
   CreateFinanceBankTransferDto,
+  CreateFinanceReceivableWriteOffDto,
+  ReverseFinanceReceivableWriteOffDto,
+  FinanceReceivableWriteOffQueryDto,
 } from '../dto';
 import { FinanceService } from '../services/finance.service';
 import { FinanceDefaultsService } from '../services/finance-defaults.service';
@@ -94,6 +97,7 @@ import { FinanceFiscalService } from '../services/finance-fiscal.service';
 import { FinancePaymentProviderService } from '../services/finance-payment-provider.service';
 import { FinanceJournalEntryService } from '../services/finance-journal-entry.service';
 import { FinanceBankTransferService } from '../services/finance-bank-transfer.service';
+import { FinanceReceivableWriteOffService } from '../services/finance-receivable-write-off.service';
 import { getFinanceContext } from '../services/finance-context';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import {
@@ -172,6 +176,7 @@ export class FinanceController {
     private readonly financePaymentProviderService: FinancePaymentProviderService,
     private readonly financeJournalEntryService: FinanceJournalEntryService,
     private readonly financeBankTransferService: FinanceBankTransferService,
+    private readonly receivableWriteOffService: FinanceReceivableWriteOffService,
     private readonly documentLayoutsService: DocumentLayoutsService,
     private readonly documentRecurrences: FinanceDocumentRecurrenceService,
     private readonly documentPdfRenderer: DocumentPdfRendererService,
@@ -1196,6 +1201,52 @@ export class FinanceController {
   @RequireFinancePermission('agency.finance.transactions.view.finance_or_owner')
   getInvoice(@Req() req: Request, @Param('id') id: string) {
     return this.financeBillingService.getInvoice(getFinanceContext(req), id);
+  }
+
+  @Get('invoices/:id/write-offs')
+  @RequireFinancePermission('agency.finance.transactions.view.finance_or_owner')
+  listReceivableWriteOffs(@Req() req: Request, @Param('id') id: string) {
+    return this.receivableWriteOffService.list(getFinanceContext(req), id);
+  }
+
+  @Get('receivable-write-offs')
+  @RequireFinancePermission('agency.finance.transactions.view.finance_or_owner')
+  searchReceivableWriteOffs(
+    @Req() req: Request,
+    @Query() query: FinanceReceivableWriteOffQueryDto,
+  ) {
+    return this.receivableWriteOffService.search(getFinanceContext(req), query);
+  }
+
+  @Post('invoices/:id/write-offs')
+  @RequireFinancePermission('agency.finance.billing.manage.owner_only')
+  createReceivableWriteOff(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Body() dto: CreateFinanceReceivableWriteOffDto,
+  ) {
+    return this.receivableWriteOffService.create(
+      getFinanceContext(req),
+      id,
+      dto,
+    );
+  }
+
+  @Post('invoices/:id/write-offs/:writeOffId/reverse')
+  @DangerousAction()
+  @RequireFinancePermission('agency.finance.billing.manage.owner_only')
+  reverseReceivableWriteOff(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Param('writeOffId') writeOffId: string,
+    @Body() dto: ReverseFinanceReceivableWriteOffDto,
+  ) {
+    return this.receivableWriteOffService.reverse(
+      getFinanceContext(req),
+      id,
+      writeOffId,
+      dto,
+    );
   }
 
   @Patch('invoices/:id')

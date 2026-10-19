@@ -1,3 +1,4 @@
+import { FinanceReceivableWriteOffService } from './services/finance-receivable-write-off.service';
 import { ClientInvoiceOwnershipResolver } from './services/client-invoice-ownership.resolver';
 import { FinanceDocumentRecurrenceService } from './services/finance-document-recurrence.service';
 import { FinanceRecurrenceScheduler } from './services/finance-recurrence.scheduler';
@@ -29,6 +30,7 @@ import {
   FinancePayment,
   FinanceInvoiceLine,
   FinanceInvoice,
+  FinanceReceivableWriteOff,
   FinanceBillLine,
   FinanceBill,
   FinanceBillRecurrence,
@@ -98,6 +100,7 @@ import { ContactMethodEntity } from '../contacts/entities/contact-method.entity'
         FinanceSetting,
         FinanceTag,
         FinanceInvoice,
+        FinanceReceivableWriteOff,
         FinanceInvoiceLine,
         FinanceBill,
         FinanceBillLine,
@@ -141,6 +144,7 @@ import { ContactMethodEntity } from '../contacts/entities/contact-method.entity'
     FinanceNotificationPublisher,
     FinanceTeamPaymentReconciliationService,
     FinanceBankTransferService,
+    FinanceReceivableWriteOffService,
     SettingsCryptoService,
   ],
   exports: [
@@ -157,6 +161,7 @@ import { ContactMethodEntity } from '../contacts/entities/contact-method.entity'
     FinanceJournalEntryService,
     FinanceTeamPaymentReconciliationService,
     FinanceBankTransferService,
+    FinanceReceivableWriteOffService,
   ],
 })
 export class FinanceModule {}

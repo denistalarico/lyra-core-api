@@ -909,6 +909,17 @@ function makeService(
   };
   let currentAllocations = [...(options.allocations ?? [])];
   const paymentAllocationsRepo = {
+    create: jest.fn((value: Partial<FinancePaymentAllocation>) => value),
+    save: jest.fn(async (item: FinancePaymentAllocation) => {
+      const saved = { ...item, id: item.id ?? 'allocation-new' };
+      currentAllocations = [
+        ...currentAllocations.filter(
+          (allocation) => allocation.id !== saved.id,
+        ),
+        saved,
+      ];
+      return saved;
+    }),
     find: jest.fn(async () => currentAllocations),
     delete: jest.fn(async () => {
       currentAllocations = [];
@@ -953,6 +964,9 @@ function makeService(
           });
           const base = manager.getRepository;
           manager.getRepository = jest.fn((entity) => {
+            if (entity === FinancePayment) return paymentsRepo;
+            if (entity === FinancePaymentAllocation)
+              return paymentAllocationsRepo;
             if (entity === FinanceBillRecurrence) return billRecurrencesRepo;
             if (entity === FinanceRecurringProfile)
               return recurringProfilesRepo;
@@ -1144,6 +1158,7 @@ function makeInvoice(overrides: Partial<FinanceInvoice> = {}): FinanceInvoice {
     discountAmount: '0.00',
     totalAmount: '100.00',
     paidAmount: '0.00',
+    writtenOffAmount: '0.00',
     balanceDue: '100.00',
     terms: null,
     notes: null,

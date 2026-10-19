@@ -13,6 +13,7 @@ import {
   FinanceJournalEntryLine,
   FinancePayment,
   FinancePaymentAllocation,
+  FinanceReceivableWriteOff,
 } from '../entities';
 import {
   FinanceAccountStatus,
@@ -226,6 +227,133 @@ function assertBalanced(store: InMemoryStore, entryId: string) {
 }
 
 describe('FinancePostingService', () => {
+  it('posts a receivable loss once, debiting expense and crediting receivable without cash or revenue', async () => {
+    const { service, store, manager } = makeService();
+    seedChartOfAccounts(store);
+    const invoice = addInvoice(store, {
+      totalAmount: '1000.00',
+      currency: 'BRL',
+    });
+    const loss = makeReceivableLoss(invoice.id, accountId(store, '5.1.01'));
+    const entry = await service.postReceivableWriteOff(
+      ctx(),
+      invoice as FinanceInvoice,
+      loss,
+      manager,
+    );
+    const again = await service.postReceivableWriteOff(
+      ctx(),
+      invoice as FinanceInvoice,
+      loss,
+      manager,
+    );
+    expect(again.id).toBe(entry.id);
+    expect(entriesOf(store)).toHaveLength(1);
+    expect(entry.entryDate).toBe('2026-10-19');
+    const lines = linesOf(store, entry.id);
+    expect(lines).toHaveLength(2);
+    expect(
+      lines.find((line) => line.lineType === FinanceJournalEntryLineType.Debit),
+    ).toMatchObject({
+      accountId: accountId(store, '5.1.01'),
+      amount: '700.00',
+    });
+    expect(
+      lines.find(
+        (line) => line.lineType === FinanceJournalEntryLineType.Credit,
+      ),
+    ).toMatchObject({
+      accountId: accountId(store, '1.1.02'),
+      amount: '700.00',
+    });
+    expect(
+      lines.some((line) =>
+        [accountId(store, '1.1.01'), accountId(store, '3.1.01')].includes(
+          line.accountId,
+        ),
+      ),
+    ).toBe(false);
+    assertBalanced(store, entry.id);
+  });
+
+  it.each(['revenue', 'inactive', 'foreign-workspace'])(
+    'rejects a %s account for loss expense before posting',
+    async (invalid) => {
+      const { service, store, manager } = makeService();
+      seedChartOfAccounts(store);
+      const invoice = addInvoice(store, {
+        totalAmount: '1000.00',
+        currency: 'BRL',
+      });
+      const account = store
+        .table(FinanceAccount)
+        .find((row) => row.id === accountId(store, '5.1.01'));
+      if (invalid === 'revenue') account.type = FinanceAccountType.Revenue;
+      if (invalid === 'inactive')
+        account.status = FinanceAccountStatus.Inactive;
+      if (invalid === 'foreign-workspace') account.workspaceId = 'workspace-2';
+      const loss = makeReceivableLoss(invoice.id, account.id);
+      await expect(
+        service.postReceivableWriteOff(
+          ctx(),
+          invoice as FinanceInvoice,
+          loss,
+          manager,
+        ),
+      ).rejects.toThrow();
+      expect(entriesOf(store)).toHaveLength(0);
+    },
+  );
+
+  it('reverses loss expense on the supplied date with the original linkage and swapped lines once', async () => {
+    const { service, store, manager } = makeService();
+    seedChartOfAccounts(store);
+    const invoice = addInvoice(store, {
+      totalAmount: '1000.00',
+      currency: 'BRL',
+    });
+    const loss = makeReceivableLoss(invoice.id, accountId(store, '5.1.01'));
+    const original = await service.postReceivableWriteOff(
+      ctx(),
+      invoice as FinanceInvoice,
+      loss,
+      manager,
+    );
+    loss.journalEntryId = original.id;
+    const reversed = await service.reverseReceivableWriteOff(
+      ctx(),
+      loss,
+      '2026-10-20',
+      manager,
+    );
+    const repeated = await service.reverseReceivableWriteOff(
+      ctx(),
+      loss,
+      '2026-10-20',
+      manager,
+    );
+    expect(repeated.id).toBe(reversed.id);
+    expect(entriesOf(store)).toHaveLength(2);
+    expect(reversed.entryDate).toBe('2026-10-20');
+    expect(reversed.reversesEntryId).toBe(original.id);
+    const lines = linesOf(store, reversed.id);
+    expect(
+      lines.find((line) => line.lineType === FinanceJournalEntryLineType.Debit),
+    ).toMatchObject({
+      accountId: accountId(store, '1.1.02'),
+      amount: '700.00',
+    });
+    expect(
+      lines.find(
+        (line) => line.lineType === FinanceJournalEntryLineType.Credit,
+      ),
+    ).toMatchObject({
+      accountId: accountId(store, '5.1.01'),
+      amount: '700.00',
+    });
+    assertBalanced(store, reversed.id);
+  });
+
   it('1. confirms an invoice with a single line (DEBIT receivable / CREDIT revenue)', async () => {
     const { service, store, manager } = makeService();
     seedChartOfAccounts(store);
@@ -582,6 +710,27 @@ function makePayment(overrides: Partial<FinancePayment> = {}): FinancePayment {
     updatedAt: new Date(),
     ...overrides,
   } as FinancePayment;
+}
+
+function makeReceivableLoss(
+  invoiceId: string,
+  expenseAccountId: string,
+): FinanceReceivableWriteOff {
+  return {
+    id: 'write-off-1',
+    tenantId: TENANT,
+    workspaceId: WORKSPACE,
+    invoiceId,
+    expenseAccountId,
+    amount: '700.00',
+    currency: 'BRL',
+    writeOffDate: '2026-10-19',
+    reason: 'Incobrabilidade comprovada',
+    status: 'active',
+    journalEntryId: null,
+    idempotencyKey: 'loss-key-1',
+    createdById: 'user-actor',
+  } as FinanceReceivableWriteOff;
 }
 
 let allocationSeq = 0;
